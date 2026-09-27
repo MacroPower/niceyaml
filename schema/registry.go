@@ -732,9 +732,12 @@ func (r *Registry) keepRefDoc(uri string, data []byte) bool {
 // from one fetched without it.
 //
 // When ref names a subschema by a fragment, doc is the document the
-// registry loaded for ref, parsed, and docURL is base without its
-// fragment. A reference to docURL then resolves to doc without a second
-// load, and a relative $ref in doc resolves against docURL. A nil doc
+// registry loaded for ref, parsed, and its URL is base without the
+// fragment. A reference to that URL resolves to doc without a second
+// load, and a relative $ref in doc resolves against it. The compiler
+// hands a resolver each URI in its RFC 3986 normal form, so the registry
+// compares the two in that form. A key that spells the URL another way,
+// such as with an upper-case host, then still resolves to doc. A nil doc
 // means ref names a whole document. An option from [WithCompileOptions]
 // comes later and wins.
 func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsonschema.Schema) []CompileOption {
@@ -804,10 +807,10 @@ func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsons
 	// equal to the document's URL would point its $ref at itself. The
 	// document takes its URL as its base, as a whole document does.
 	if doc != nil {
-		docURL, _, _ := strings.Cut(base, "#")
+		docURL := canonicalURL(base)
 
 		preload := jsonschema.RefResolverFunc(func(_ context.Context, uri string) (*jsonschema.Schema, error) {
-			if target, _, _ := strings.Cut(uri, "#"); target == docURL {
+			if canonicalURL(uri) == docURL {
 				return doc, nil
 			}
 
@@ -1000,4 +1003,108 @@ func (k keyUserinfo) apply(uri string) string {
 	u.User = k.user
 
 	return u.String()
+}
+
+// canonicalURL returns rawURL without its fragment in the normal form of
+// RFC 3986 section 6.2.2, which the compiler gives each URI it hands a
+// resolver. That form spells the scheme and host in lower case and each
+// percent-encoded octet decoded where it encodes an unreserved character
+// and in upper-case hex otherwise, and its path holds no dot segments. A
+// URL that does not parse comes back without its fragment and otherwise
+// as written.
+func canonicalURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		base, _, _ := strings.Cut(rawURL, "#")
+
+		return base
+	}
+
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	u.RawQuery = canonicalEscapes(u.RawQuery)
+	u.Fragment, u.RawFragment = "", ""
+
+	if u.Opaque != "" {
+		u.Opaque = canonicalEscapes(u.Opaque)
+
+		return u.String()
+	}
+
+	escaped := canonicalEscapes(u.EscapedPath())
+
+	path, err := url.PathUnescape(escaped)
+	if err != nil {
+		return u.String()
+	}
+
+	u.Path, u.RawPath = path, escaped
+
+	// RFC 3986 removes the dot segments from the path of an absolute
+	// reference as it resolves one, and an absolute reference ignores its
+	// base, so resolving u against itself removes them.
+	if u.IsAbs() {
+		u = u.ResolveReference(u)
+	}
+
+	return u.String()
+}
+
+// canonicalEscapes returns s with each percent-encoded octet decoded where
+// it encodes an RFC 3986 unreserved character and spelled in upper-case
+// hex otherwise. A malformed escape stays as it is.
+func canonicalEscapes(s string) string {
+	if !strings.Contains(s, "%") {
+		return s
+	}
+
+	var b strings.Builder
+
+	b.Grow(len(s))
+
+	for i := 0; i < len(s); i++ {
+		if s[i] != '%' || i+2 >= len(s) || !isHexDigit(s[i+1]) || !isHexDigit(s[i+2]) {
+			b.WriteByte(s[i])
+
+			continue
+		}
+
+		octet := hexValue(s[i+1])<<4 | hexValue(s[i+2])
+		if isUnreserved(octet) {
+			b.WriteByte(octet)
+		} else {
+			b.WriteString(strings.ToUpper(s[i : i+3]))
+		}
+
+		i += 2
+	}
+
+	return b.String()
+}
+
+// isUnreserved reports whether c is an RFC 3986 unreserved character.
+func isUnreserved(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	default:
+		return c == '-' || c == '.' || c == '_' || c == '~'
+	}
+}
+
+// isHexDigit reports whether c is a hexadecimal digit in either case.
+func isHexDigit(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
+// hexValue returns the value of the hexadecimal digit c.
+func hexValue(c byte) byte {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0'
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10
+	default:
+		return c - 'A' + 10
+	}
 }

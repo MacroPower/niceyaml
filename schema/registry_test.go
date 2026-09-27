@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1891,7 +1892,9 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 	}`)
 
 	// Each subtest starts a server of its own, which serves defs.json and
-	// counts every request it receives, whatever the path.
+	// counts every request it receives, whatever the path. The server
+	// also answers a spelling of the path with dot segments, as a server
+	// that removes them does.
 	serve := func(t *testing.T) (string, *atomic.Int32) {
 		t.Helper()
 
@@ -1900,7 +1903,7 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requests.Add(1)
 
-			if r.URL.Path != "/defs.json" {
+			if r.URL.Path != "/defs.json" && r.URL.Path != "/x/../defs.json" {
 				http.NotFound(w, r)
 
 				return
@@ -1940,6 +1943,38 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			want:     `missing required property "name"`,
 			requests: 1,
 		},
+		"url pointer with an escaped unreserved character": {
+			ref: func(_ *testing.T, serverURL string) schema.Ref {
+				return schema.URL(serverURL + "/%64efs.json#/$defs/Foo")
+			},
+			valid:    "name: x\n",
+			invalid:  "other: 1\n",
+			want:     `missing required property "name"`,
+			requests: 1,
+		},
+		"url pointer with a dot segment": {
+			ref: func(_ *testing.T, serverURL string) schema.Ref {
+				return schema.URL(serverURL + "/x/../defs.json#/$defs/Foo")
+			},
+			valid:    "name: x\n",
+			invalid:  "other: 1\n",
+			want:     `missing required property "name"`,
+			requests: 1,
+		},
+		"url pointer with an upper-case host": {
+			ref: func(t *testing.T, serverURL string) schema.Ref {
+				t.Helper()
+
+				_, port, err := net.SplitHostPort(strings.TrimPrefix(serverURL, "http://"))
+				require.NoError(t, err)
+
+				return schema.URL("http://Schemas.Example.com:" + port + "/defs.json#/$defs/Foo")
+			},
+			valid:    "name: x\n",
+			invalid:  "other: 1\n",
+			want:     `missing required property "name"`,
+			requests: 1,
+		},
 		"url anchor": {
 			ref: func(_ *testing.T, serverURL string) schema.Ref {
 				return schema.URL(serverURL + "/defs.json#named")
@@ -1970,12 +2005,31 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		},
 	}
 
+	// The client dials the server whatever host a URL names, so a case can
+	// spell the host in upper case.
+	dialServer := func(t *testing.T, serverURL string) *http.Client {
+		t.Helper()
+
+		addr := strings.TrimPrefix(serverURL, "http://")
+		transport := &http.Transport{
+			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				return (&net.Dialer{}).DialContext(ctx, network, addr)
+			},
+		}
+		t.Cleanup(transport.CloseIdleConnections)
+
+		return &http.Client{Transport: transport}
+	}
+
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
 			serverURL, requests := serve(t)
-			reg := schema.NewRegistry(schema.WithResolvers(tc.ref(t, serverURL)))
+			reg := schema.NewRegistry(
+				schema.WithHTTPClient(dialServer(t, serverURL)),
+				schema.WithResolvers(tc.ref(t, serverURL)),
+			)
 
 			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, tc.valid)))
 
@@ -2020,6 +2074,64 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		_, err := schema.NewRegistry().Schema(t.Context(), schema.URL(serverURL+"/defs.json#/$defs/Missing"))
 		require.ErrorIs(t, err, schema.ErrCompile)
 	})
+}
+
+func TestCanonicalURL(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		url  string
+		want string
+	}{
+		"canonical url": {
+			url:  "https://example.com/defs.json",
+			want: "https://example.com/defs.json",
+		},
+		"fragment": {
+			url:  "https://example.com/defs.json#/$defs/Foo",
+			want: "https://example.com/defs.json",
+		},
+		"upper-case scheme and host": {
+			url:  "HTTPS://Example.COM/Defs.json",
+			want: "https://example.com/Defs.json",
+		},
+		"escaped unreserved characters": {
+			url:  "https://example.com/%64efs%2Ejson?v=%7E1",
+			want: "https://example.com/defs.json?v=~1",
+		},
+		"escaped reserved characters keep upper-case hex": {
+			url:  "https://example.com/a%2fb%3a.json?q=%2f",
+			want: "https://example.com/a%2Fb%3A.json?q=%2F",
+		},
+		"dot segments": {
+			url:  "https://example.com/a/./b/../defs.json",
+			want: "https://example.com/a/defs.json",
+		},
+		"trailing slash": {
+			url:  "https://example.com/a/",
+			want: "https://example.com/a/",
+		},
+		"port": {
+			url:  "http://Example.com:8080/defs.json",
+			want: "http://example.com:8080/defs.json",
+		},
+		"file url": {
+			url:  "file:///srv/My%20Schemas/defs.json#/$defs/Foo",
+			want: "file:///srv/My%20Schemas/defs.json",
+		},
+		"url that does not parse": {
+			url:  "https://example.com:port/defs.json#x",
+			want: "https://example.com:port/defs.json",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, schema.CanonicalURL(tc.url))
+		})
+	}
 }
 
 func TestRegistry_FragmentRefsDraft07(t *testing.T) {

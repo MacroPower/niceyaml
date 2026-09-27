@@ -24,6 +24,9 @@ var (
 
 	// NormalizeJSON exposes normalizeJSON to the external test package.
 	NormalizeJSON = normalizeJSON
+
+	// CanonicalURL exposes canonicalURL to the external test package.
+	CanonicalURL = canonicalURL
 )
 
 // HTTPClient returns the client r fetches schemas with.
