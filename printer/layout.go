@@ -192,6 +192,12 @@ func (p *Printer) layoutAnnotation(
 // at a break.
 const nbsp = '\u00a0'
 
+// isBreakSpace reports whether r is a space the wrapper drops at a break:
+// any Unicode space but [nbsp].
+func isBreakSpace(r rune) bool {
+	return unicode.IsSpace(r) && r != nbsp
+}
+
 // rowStarts returns the rune offset in text at which each piece of its
 // wrapped form begins. It matches the runes of each piece against text
 // in order. The wrapper drops every Unicode space but [nbsp] at a break
@@ -228,7 +234,7 @@ func rowStarts(text string, pieces []string) []int {
 // skipDropped returns the index of the first rune of runes at or after
 // next that is r or is no space the wrapper drops.
 func skipDropped(runes []rune, next int, r rune) int {
-	for next < len(runes) && runes[next] != r && unicode.IsSpace(runes[next]) && runes[next] != nbsp {
+	for next < len(runes) && runes[next] != r && isBreakSpace(runes[next]) {
 		next++
 	}
 

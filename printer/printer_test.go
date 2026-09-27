@@ -1458,6 +1458,78 @@ func TestPrinter_WordWrap_BreakpointPastWidth(t *testing.T) {
 	}
 }
 
+func TestPrinter_WordWrap_BreakSpaceBeforeBreakpoint(t *testing.T) {
+	t.Parallel()
+
+	// A row that fills the width and then meets a space and a breakpoint
+	// drops the space at the break, as it drops the space at any other
+	// break, rather than showing it on a row of its own.
+	tcs := map[string]struct {
+		gutter printer.Gutter
+		rows   map[int]int // Column to row.
+		input  string
+		want   string
+		width  int
+	}{
+		"hyphen after a full row": {
+			gutter: printer.DefaultGutter,
+			input:  "key: value -x",
+			width:  16,
+			want:   stringtest.JoinLF("   1  key: value", "   -  -x"),
+			rows:   map[int]int{9: 0, 10: 0, 11: 1, 12: 1},
+		},
+		"slash after a full row": {
+			gutter: printer.NoGutter,
+			input:  "key: value /x",
+			width:  10,
+			want:   stringtest.JoinLF("key: value", "/x"),
+			rows:   map[int]int{9: 0, 10: 0, 11: 1, 12: 1},
+		},
+		"two spaces before a hyphen": {
+			gutter: printer.NoGutter,
+			input:  "key: value  -x",
+			width:  10,
+			want:   stringtest.JoinLF("key: value", "-x"),
+			rows:   map[int]int{10: 0, 11: 0, 12: 1},
+		},
+		"flags and a path": {
+			gutter: printer.NoGutter,
+			input:  "cmd: run --verbose --output /tmp/x",
+			width:  8,
+			want:   stringtest.JoinLF("cmd: run", "--verbos", "e --", "output /", "tmp/x"),
+			rows:   map[int]int{7: 0, 8: 0, 9: 1},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString(tc.input).View()
+			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrap(tc.width))
+
+			got := p.Print(view)
+			assert.Equal(t, tc.want, got)
+
+			l := p.Layout(view)
+			assert.Equal(t, strings.Count(got, "\n")+1, l.Rows())
+
+			for col, want := range tc.rows {
+				assert.Equal(t, want, l.RowOf(position.New(0, col)), "column %d", col)
+			}
+		})
+	}
+
+	t.Run("error message", func(t *testing.T) {
+		t.Parallel()
+
+		p := testPrinter().With(printer.WithWrap(10))
+
+		got := p.PrintError(errors.New("key: value -x"))
+		assert.Equal(t, stringtest.JoinLF("key: value", "-x"), got)
+	})
+}
+
 func TestPrinter_WordWrap_BreakpointPastWidth_KeepsStyle(t *testing.T) {
 	t.Parallel()
 

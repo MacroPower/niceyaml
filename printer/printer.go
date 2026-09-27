@@ -1239,16 +1239,26 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 func wrapLine(text string, cw int) []string {
 	rows := strings.Split(lipgloss.Wrap(text, cw, wrapOnCharacters), "\n")
 
-	// The wrap leaves a row wider than cw when a breakpoint falls just
-	// past the width, so a hard wrap cuts such a row down to size, and
-	// every row fits the width the caller asked for. The hard wrap does
-	// not reopen a style on the rows it cuts off, and a second pass of
-	// the wrap, which does, restores it.
+	// The wrap leaves a row wider than cw in two cases. When a full row
+	// meets a space and then a breakpoint, the row keeps the space, and
+	// dropping it, as the wrap drops the space at any other break, fits
+	// the row. When a breakpoint falls just past the width, a hard wrap
+	// cuts the row down to size. Either way, every row fits the width the
+	// caller asked for. The hard wrap does not reopen a style on the rows
+	// it cuts off, and a second pass of the wrap, which does, restores it.
 	out := make([]string, 0, len(rows))
 
 	for _, row := range rows {
 		if lipgloss.Width(row) <= cw {
 			out = append(out, row)
+
+			continue
+		}
+
+		// The cut keeps the escape sequences after the dropped spaces, so
+		// a style the row opens still closes.
+		if w := lipgloss.Width(strings.TrimRightFunc(ansi.Strip(row), isBreakSpace)); w <= cw {
+			out = append(out, ansi.Truncate(row, w, ""))
 
 			continue
 		}
