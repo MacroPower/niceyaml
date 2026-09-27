@@ -645,25 +645,16 @@ func isBlockScalarContent(tk *token.Token) bool {
 	return false
 }
 
-// isPureNewline reports whether s is exactly a line ending (LF, CRLF, or a
-// bare CR).
+// isPureNewline reports whether s is exactly one line ending, as
+// [tokens.TrimLineEnding] recognizes them.
 func isPureNewline(s string) bool {
-	return s == "\n" || s == "\r\n" || s == "\r"
+	return s != "" && tokens.TrimLineEnding(s) == ""
 }
 
-// lineEnding returns the line ending that closes s ("\r\n", "\n", or "\r"),
-// or "" when s ends with none.
+// lineEnding returns the line ending that closes s, as
+// [tokens.TrimLineEnding] recognizes them, or "" when s ends with none.
 func lineEnding(s string) string {
-	switch {
-	case strings.HasSuffix(s, "\r\n"):
-		return "\r\n"
-	case strings.HasSuffix(s, "\n"):
-		return "\n"
-	case strings.HasSuffix(s, "\r"):
-		return "\r"
-	}
-
-	return ""
+	return s[len(tokens.TrimLineEnding(s)):]
 }
 
 // lineEndingOverlap returns the length of the longest suffix of prev that

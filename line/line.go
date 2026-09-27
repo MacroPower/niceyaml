@@ -204,10 +204,10 @@ func (l *Line) Runes() iter.Seq2[int, rune] {
 	}
 }
 
-// hasLineEnding reports whether origin ends with "\n", "\r\n", or a bare
-// "\r".
+// hasLineEnding reports whether origin ends with a line ending, as
+// [tokens.TrimLineEnding] recognizes them.
 func hasLineEnding(origin string) bool {
-	return strings.HasSuffix(origin, "\n") || strings.HasSuffix(origin, "\r")
+	return tokens.TrimLineEnding(origin) != origin
 }
 
 // String returns the line number and content, as "   1 | key: value",
