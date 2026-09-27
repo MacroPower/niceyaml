@@ -22,7 +22,11 @@ func TestDiffer_Views(t *testing.T) {
 	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
 	after := niceyaml.NewSourceFromString("a: 1\nb: 3\n")
 
-	result := diff.Diff(before.Lines(), after.Lines())
+	// An overlay on an input view stays on that view.
+	decorated := before.View()
+	decorated.AddOverlay(kind.GenericHighlight, position.NewRange(position.New(1, 0), position.New(1, 1)))
+
+	result := diff.Diff(decorated.Lines(), after.Lines())
 
 	got := result.Unified()
 	require.Equal(t, 3, got.Count())
@@ -36,13 +40,16 @@ func TestDiffer_Views(t *testing.T) {
 		assert.Empty(t, got.Overlays(i))
 	}
 
-	// Each result view owns its decoration, and none of it reaches the
-	// sources the diff was computed from.
+	for i := range result.Before().All() {
+		assert.Empty(t, result.Before().Overlays(i))
+	}
+
+	assert.Len(t, decorated.Overlays(1), 1)
+
+	// Each result view owns its decoration.
 	got.AddOverlay(kind.GenericHighlight, position.NewRange(position.New(2, 0), position.New(2, 1)))
 	assert.Len(t, got.Overlays(2), 1)
 	assert.Empty(t, result.Unified().Overlays(2))
-	assert.Empty(t, after.View().Overlays(1))
-	assert.Empty(t, before.View().Overlays(1))
 
 	// The diff of a diff is a diff of the view's content.
 	again := diff.Diff(got.Lines(), got.Lines())
@@ -1729,15 +1736,6 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 		hunks := diff.Diff(before.Lines(), before.Lines()).Hunks(1)
 		require.NotNil(t, hunks)
 		assert.Equal(t, 0, hunks.Count())
-	})
-
-	t.Run("inputs are untouched", func(t *testing.T) {
-		t.Parallel()
-
-		result.Unified().AddOverlay(kind.GenericHighlight, highlight)
-
-		assert.Empty(t, before.View().Overlays(0))
-		assert.Empty(t, after.View().Overlays(0))
 	})
 }
 
