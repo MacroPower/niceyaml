@@ -177,7 +177,12 @@ func (f ValidatorFunc) Validate(ctx context.Context, n *Node) error {
 // would if that validator ran alone. No failure is no error. A context
 // that ends stops the run, and the error is then the one the context
 // reports, or the one the validator that saw it end returned.
+//
+// MultiValidator copies the validators it gets, so a caller that edits
+// the slice it passed changes nothing in the Validator.
 func MultiValidator(validators ...Validator) Validator {
+	validators = slices.Clone(validators)
+
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
 		var errs []error
 

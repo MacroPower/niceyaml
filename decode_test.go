@@ -5133,6 +5133,17 @@ func TestMultiValidator(t *testing.T) {
 		assert.Equal(t, []string{"after"}, order)
 	})
 
+	t.Run("keeps its validators when the caller edits the slice", func(t *testing.T) {
+		t.Parallel()
+
+		vs := []niceyaml.Validator{badB}
+		multi := niceyaml.MultiValidator(vs...)
+		vs[0] = passing
+
+		err := dd.Validate(t.Context(), multi)
+		require.ErrorIs(t, err, errB)
+	})
+
 	t.Run("a Decoder carries it to every decode", func(t *testing.T) {
 		t.Parallel()
 
