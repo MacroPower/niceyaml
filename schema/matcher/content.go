@@ -2,11 +2,14 @@ package matcher
 
 import (
 	"context"
+	"encoding"
 	"errors"
 	"math"
 	"reflect"
+	"slices"
 	"strconv"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -26,9 +29,11 @@ type contentMatcher[T comparable] struct {
 // [niceyaml.Node.Decode] as a T and compares the result to want, so
 // the type of want decides how Match reads the YAML. A string matches
 // the text of a scalar as the document spells it, so "1.10" matches
-// version: 1.10 and "1.1" does not. A number matches its numeric value
-// however the document spells it, though an integer want never matches a
-// value with a fraction. A null matches only a nil want, such as
+// version: 1.10 and "1.1" does not. A string type that decodes itself,
+// through an UnmarshalYAML or UnmarshalText method, matches the value its
+// own decode gives. A number matches its numeric value however the
+// document spells it, though an integer want never matches a value with
+// a fraction. A null matches only a nil want, such as
 // Content[any](path, nil). When T is an interface, two numbers compare
 // by value whatever their Go types, so Content[any](path, 1) matches an
 // integer the decoder reads as a uint64. A document without the path, or
@@ -136,10 +141,29 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	return got == m.want, nil
 }
 
-// isPlainString reports whether t is a string type with no methods, whose
-// decode no UnmarshalYAML or UnmarshalText of its own can change.
+// unmarshalerTypes are the interfaces go-yaml decodes a value through
+// when its pointer implements one. The decoder reads an UnmarshalJSON
+// method only under [yaml.UseJSONUnmarshaler], which a match never sets.
+var unmarshalerTypes = []reflect.Type{
+	reflect.TypeFor[yaml.BytesUnmarshaler](),
+	reflect.TypeFor[yaml.BytesUnmarshalerContext](),
+	reflect.TypeFor[yaml.InterfaceUnmarshaler](),
+	reflect.TypeFor[yaml.InterfaceUnmarshalerContext](),
+	reflect.TypeFor[yaml.NodeUnmarshaler](),
+	reflect.TypeFor[yaml.NodeUnmarshalerContext](),
+	reflect.TypeFor[encoding.TextUnmarshaler](),
+}
+
+// isPlainString reports whether t is a string type whose pointer
+// implements no unmarshaler the decoder honors, so the decoder reads it
+// as it reads a string. Methods that play no part in decoding, such as a
+// String method, leave a type plain.
 func isPlainString(t reflect.Type) bool {
-	return t.Kind() == reflect.String && reflect.PointerTo(t).NumMethod() == 0
+	if t.Kind() != reflect.String {
+		return false
+	}
+
+	return !slices.ContainsFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
 }
 
 // scalarText returns the text of the scalar node holds as the document

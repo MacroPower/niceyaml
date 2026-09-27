@@ -3,6 +3,7 @@ package matcher_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -106,6 +107,31 @@ func TestContent(t *testing.T) {
 		"string does not match respelled bool": {
 			matcher: matcher.Content(versionPath, "true"),
 			input:   stringtest.Input(`version: True`),
+			want:    false,
+		},
+		"named string with a method matches float text as written": {
+			matcher: matcher.Content(versionPath, methodString("1.10")),
+			input:   stringtest.Input(`version: 1.10`),
+			want:    true,
+		},
+		"named string with a method does not match respelled float": {
+			matcher: matcher.Content(versionPath, methodString("1.1")),
+			input:   stringtest.Input(`version: 1.10`),
+			want:    false,
+		},
+		"named string with a method matches hex text as written": {
+			matcher: matcher.Content(versionPath, methodString("0x10")),
+			input:   stringtest.Input(`version: 0x10`),
+			want:    true,
+		},
+		"self-decoding string matches its own decode": {
+			matcher: matcher.Content(versionPath, prefixedString("v1.1")),
+			input:   stringtest.Input(`version: 1.10`),
+			want:    true,
+		},
+		"self-decoding string does not match text as written": {
+			matcher: matcher.Content(versionPath, prefixedString("v1.10")),
+			input:   stringtest.Input(`version: 1.10`),
 			want:    false,
 		},
 		"uncomparable dynamic type does not match": {
@@ -356,6 +382,26 @@ func TestContent_ContextEnded(t *testing.T) {
 	ok, err := matcher.Content(kindPath, "Deployment").Match(ctx, doc)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.False(t, ok)
+}
+
+// methodString is a string type with a method that plays no part in
+// decoding, so it decodes as a plain string does.
+type methodString string
+
+func (m methodString) Major() string {
+	major, _, _ := strings.Cut(string(m), ".")
+
+	return major
+}
+
+// prefixedString decodes itself from the text the decoder hands it, and
+// puts a "v" in front of that text.
+type prefixedString string
+
+func (p *prefixedString) UnmarshalText(text []byte) error {
+	*p = prefixedString("v" + string(text))
+
+	return nil
 }
 
 // The error rejecting reports from its own decode.
