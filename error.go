@@ -466,31 +466,6 @@ func (e *Error) locus() locus {
 	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath}
 }
 
-// located returns the location of e: its own when it has one, otherwise
-// that of the nearest located Error along its cause chain, looking
-// through foreign wrapping, with the base of every Error from [Rebase] on
-// the way joined in front of a path. An Error from Rebase with no located
-// Error below it is located at its base. The walk stops at a
-// [*SourceError], as binding does, and reports the location that binding
-// resolved from, with no base from above the binding in front, so an
-// Error and its binding agree on the location. Reports false when the
-// chain holds no location.
-func (e *Error) located() (locus, bool) {
-	a := anchorOf(e)
-
-	switch x := a.err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
-	case *Error:
-		return a.locus, true
-
-	case *SourceError:
-		l := boundLocus(x)
-
-		return l, l.hasPath || l.loc != nil
-	}
-
-	return locus{}, false
-}
-
 // hasLocation reports whether e carries a location of its own: a path, a
 // position, or a range.
 func (e *Error) hasLocation() bool {
@@ -538,18 +513,22 @@ func (e *Error) Errors() []error {
 // position from [AtPosition], a range from [AtRange], or a path beside a
 // position or a range. It looks through wrapping to the nearest Error
 // that carries one, with the base of every [Rebase] on the way joined in
-// front of a path. A [*SourceError] on the way ends the walk and reports
-// the location it resolved from, with no base from above the binding. An
-// Error from Rebase with nothing located below it is located at its
+// front of a path. A [*SourceError] on the way ends the walk, as binding
+// does, and reports the location it resolved from, with no base from
+// above the binding, so an Error and its binding agree on the location.
+// An Error from Rebase with nothing located below it is located at its
 // base. A nil Error and an Error with no location return the zero locus.
 func (e *Error) location() locus {
 	if e == nil {
 		return locus{}
 	}
 
-	l, _ := e.located()
+	a := anchorOf(e)
+	if x, ok := a.err.(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
+		return boundLocus(x)
+	}
 
-	return l
+	return a.locus
 }
 
 // Path returns the [paths.Path] the [Error] is about and true, or the
