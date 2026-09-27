@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/lucasb-eyer/go-colorful"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -324,6 +325,35 @@ func TestPalette_DiffAndErrorKindsStandOut(t *testing.T) {
 	}
 }
 
+func TestPalette_ErrorAndDiffBadgesReadable(t *testing.T) {
+	t.Parallel()
+
+	// The error mark replaces the style of the token it covers, and the
+	// printer paints whole deleted lines, so the text on each colored
+	// surface must stay readable.
+	tests := map[string]struct {
+		theme string
+		kind  kind.Kind
+	}{
+		"gruvbox-light error mark": {theme: "gruvbox-light", kind: kind.GenericError},
+		"gruvbox-light deleted":    {theme: "gruvbox-light", kind: kind.GenericDeleted},
+		"evergarden error mark":    {theme: "evergarden", kind: kind.GenericError},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			th, ok := theme.Builtin().Get(tc.theme)
+			require.True(t, ok)
+
+			st := th.Style(tc.kind)
+			assert.GreaterOrEqual(t, contrast(st.GetForeground(), st.GetBackground()), 4.5,
+				"%s draws %s", tc.kind, style.Encode(st))
+		})
+	}
+}
+
 func TestPalette_TokensLayerOverAncestors(t *testing.T) {
 	t.Parallel()
 
@@ -595,6 +625,25 @@ func TestBuiltin_ChromeIgnoresCommentOverride(t *testing.T) {
 			assert.False(t, got.Style(kind.UILineNumber).GetItalic())
 		})
 	}
+}
+
+// contrast returns the WCAG contrast ratio between a and b, from 1 for
+// equal colors to 21 for black on white.
+func contrast(a, b color.Color) float64 {
+	la, lb := luminance(a), luminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+
+	return (la + 0.05) / (lb + 0.05)
+}
+
+// luminance returns the WCAG relative luminance of c.
+func luminance(c color.Color) float64 {
+	cf, _ := colorful.MakeColor(c)
+	r, g, b := cf.LinearRgb()
+
+	return 0.2126*r + 0.7152*g + 0.0722*b
 }
 
 // countOf returns how many times name appears in names.
