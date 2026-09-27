@@ -4,8 +4,10 @@ import (
 	"image/color"
 	"testing"
 
+	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/fangs"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -118,4 +120,40 @@ func TestColorSchemeFunc(t *testing.T) {
 
 	// The returned function ignores the LightDarkFunc parameter.
 	assert.Equal(t, fangs.ColorScheme(styles), csFunc(nil))
+}
+
+func TestLightDarkColorSchemeFunc(t *testing.T) {
+	t.Parallel()
+
+	light, ok := theme.Builtin().Get("github")
+	require.True(t, ok)
+
+	dark := theme.Charm
+
+	// Equal schemes would let a function that ignores the background pass.
+	require.NotEqual(t, fangs.ColorScheme(light), fangs.ColorScheme(dark))
+
+	csFunc := fangs.LightDarkColorSchemeFunc(light, dark)
+
+	tcs := map[string]struct {
+		isDark bool
+		want   fang.ColorScheme
+	}{
+		"light terminal": {
+			isDark: false,
+			want:   fangs.ColorScheme(light),
+		},
+		"dark terminal": {
+			isDark: true,
+			want:   fangs.ColorScheme(dark),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, csFunc(lipgloss.LightDark(tc.isDark)))
+		})
+	}
 }

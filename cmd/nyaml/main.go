@@ -12,7 +12,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/fangs"
 	"go.jacobcolvin.com/niceyaml/printer"
-	"go.jacobcolvin.com/niceyaml/style"
+	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 func main() {
@@ -24,7 +24,7 @@ func main() {
 
 	err := fang.Execute(context.Background(), rootCmd,
 		fang.WithErrorHandler(fangs.NewErrorHandler(fangs.WithPrinter(errPrinter))),
-		fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(style.Default())),
+		fang.WithColorSchemeFunc(helpColorScheme()),
 	)
 
 	code := 0
@@ -44,6 +44,21 @@ func main() {
 	if code != 0 {
 		os.Exit(code)
 	}
+}
+
+// lightHelpTheme names the built-in theme for help output on a light
+// terminal. Every color it gives the help output keeps a high contrast
+// against a white background.
+const lightHelpTheme = "modus-operandi"
+
+// helpColorScheme colors help output with the default charm theme on a dark
+// terminal and with [lightHelpTheme] on a light one. Help text sits on the
+// terminal's own background, where the pale text of a dark theme is hard to
+// read on white.
+func helpColorScheme() fang.ColorSchemeFunc {
+	light, _ := theme.Builtin().Get(lightHelpTheme)
+
+	return fangs.LightDarkColorSchemeFunc(light, theme.Charm)
 }
 
 // newRootCmd builds the nyaml root command and the function that stops

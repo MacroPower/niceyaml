@@ -8,8 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/fang/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.jacobcolvin.com/niceyaml/fangs"
+	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
 // The profiler configures process-wide runtime settings, so these tests do
@@ -162,6 +167,38 @@ func TestRootCmdStopWithoutStart(t *testing.T) {
 	_, stopProfiler := newRootCmd()
 
 	require.NoError(t, stopProfiler())
+}
+
+func TestHelpColorScheme(t *testing.T) {
+	t.Parallel()
+
+	light, ok := theme.Builtin().Get(lightHelpTheme)
+	require.True(t, ok)
+	require.Equal(t, theme.Light, light.Mode)
+
+	csFunc := helpColorScheme()
+
+	tcs := map[string]struct {
+		isDark bool
+		want   fang.ColorScheme
+	}{
+		"light terminal": {
+			isDark: false,
+			want:   fangs.ColorScheme(light),
+		},
+		"dark terminal": {
+			isDark: true,
+			want:   fangs.ColorScheme(theme.Charm),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, csFunc(lipgloss.LightDark(tc.isDark)))
+		})
+	}
 }
 
 func TestViewCmdLineNumbersFlag(t *testing.T) {

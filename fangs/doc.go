@@ -26,4 +26,15 @@
 //	err := fang.Execute(ctx, rootCmd,
 //	    fang.WithColorSchemeFunc(fangs.ColorSchemeFunc(theme.Charm)),
 //	)
+//
+// Help output draws most of its text on the terminal's own background, and
+// each theme targets one background, so a dark theme's pale text is hard to
+// read on a light terminal. [LightDarkColorSchemeFunc] takes one theme for
+// each background and picks the one that matches the background fang
+// detects:
+//
+//	light, _ := theme.Builtin().Get("github")
+//	err := fang.Execute(ctx, rootCmd,
+//	    fang.WithColorSchemeFunc(fangs.LightDarkColorSchemeFunc(light, theme.Charm)),
+//	)
 package fangs
