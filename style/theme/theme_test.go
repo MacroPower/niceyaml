@@ -296,6 +296,25 @@ func TestPalette_SubtleTextDiffersFromText(t *testing.T) {
 	}
 }
 
+func TestPalette_AccentDimDiffersFromAccent(t *testing.T) {
+	t.Parallel()
+
+	// A program sets the dimmed accent beside the accent, so every
+	// built-in theme must tell the two apart, even one whose accent is
+	// pure black or white.
+	for _, th := range theme.Builtin().All() {
+		t.Run(th.Name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := th.Styles()
+			accent := styles.Style(kind.TextAccent).GetForeground()
+			dim := styles.Style(kind.TextAccentDim).GetForeground()
+
+			assert.NotEqual(t, hexOf(accent), hexOf(dim), "TextAccentDim matches TextAccent")
+		})
+	}
+}
+
 func TestPalette_DiffAndErrorKindsStandOut(t *testing.T) {
 	t.Parallel()
 
@@ -667,6 +686,14 @@ func TestBuiltin_ChromeIgnoresCommentOverride(t *testing.T) {
 			assert.False(t, got.Style(kind.UILineNumber).GetItalic())
 		})
 	}
+}
+
+// hexOf returns c as a hex string, so colors of different types compare
+// by value.
+func hexOf(c color.Color) string {
+	cf, _ := colorful.MakeColor(c)
+
+	return cf.Hex()
 }
 
 // contrast returns the WCAG contrast ratio between a and b, from 1 for

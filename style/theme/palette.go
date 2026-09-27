@@ -42,12 +42,13 @@ type palette struct {
 	// Tokens leaves out, draws its text in Fg or Bg, whichever contrasts
 	// more with the color behind it.
 	Accent, OK, Warn, Error string
-	// Mode is the background the theme is designed for. It also picks the
+	// Mode is the background the theme targets. It also picks the
 	// direction of the derived shifts. [kind.TextSubtle] and
 	// [kind.TextSubtleDim] move toward the background, while highlights,
 	// accent headings, and [kind.TextAccentDim] move away from it, so the
 	// dimmed accent reads brighter than the accent on a [Dark] theme and
-	// darker on a [Light] one.
+	// darker on a [Light] one. An accent that cannot move further from the
+	// background, such as black on a [Light] theme, dims toward it instead.
 	Mode Mode
 }
 
@@ -88,6 +89,11 @@ func (p palette) styles() style.Styles {
 		return lipgloss.NewStyle().Foreground(textOn(c)).Background(c).Bold(true)
 	}
 
+	dimAccent := towardFg(accent, dimShift)
+	if sameColor(dimAccent, accent) {
+		dimAccent = towardBg(accent, dimShift)
+	}
+
 	// The derived kinds resolve first, so a Tokens entry naming one of them
 	// layers over the derived value rather than the other way around.
 	derived := []style.Option{
@@ -102,7 +108,7 @@ func (p palette) styles() style.Styles {
 		style.Set(kind.GenericHighlight, lipgloss.NewStyle().Background(towardFg(bg, surfaceShift))),
 		style.Set(kind.GenericHighlightDim, lipgloss.NewStyle().Background(towardFg(bg, dimShift))),
 		style.Set(kind.TextAccent, base.Foreground(accent)),
-		style.Set(kind.TextAccentDim, base.Foreground(towardFg(accent, dimShift))),
+		style.Set(kind.TextAccentDim, base.Foreground(dimAccent)),
 		style.Set(kind.TextSubtle, base.Foreground(towardBg(fg, dimShift))),
 		style.Set(kind.TextSubtleDim, base.Foreground(towardBg(fg, surfaceShift))),
 		style.Set(kind.TextOK, base.Foreground(ok)),
@@ -211,6 +217,14 @@ func (p palette) surface() (color.Color, color.Color) {
 	}
 
 	return lipgloss.Color(fg), lipgloss.Color(bg)
+}
+
+// sameColor reports whether a and b hold the same channel values.
+func sameColor(a, b color.Color) bool {
+	ar, ag, ab, aa := a.RGBA()
+	br, bg, bb, ba := b.RGBA()
+
+	return ar == br && ag == bg && ab == bb && aa == ba
 }
 
 // contrast returns the WCAG contrast ratio between a and b, from 1 for
