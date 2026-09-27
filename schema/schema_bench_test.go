@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -62,6 +63,34 @@ func BenchmarkSchema_Validate(b *testing.B) {
 				err := s.Validate(b.Context(), doc)
 				if err != nil {
 					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkSchema_Validate_ManyViolations(b *testing.B) {
+	// Every member breaks the schema, so each violation's path steps
+	// through the same mapping.
+	v := schema.MustCompile([]byte(`{"additionalProperties": {"type": "integer"}}`))
+
+	for _, members := range []int{1000, 4000} {
+		var sb strings.Builder
+
+		for i := range members {
+			fmt.Fprintf(&sb, "k%d: x\n", i)
+		}
+
+		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()
+		require.NoError(b, err)
+
+		b.Run(fmt.Sprintf("members_%d", members), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				err := doc.Validate(b.Context(), v)
+				if err == nil {
+					b.Fatal("want violations")
 				}
 			}
 		})

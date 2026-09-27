@@ -1,6 +1,13 @@
 package schema
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/goccy/go-yaml/ast"
+	"go.jacobcolvin.com/x/jsonschema"
+
+	"go.jacobcolvin.com/niceyaml/paths"
+)
 
 // Hooks into the package internals, so the Windows drive-letter handling
 // can run on every platform and a test can hand the error path walk a
@@ -12,9 +19,6 @@ var (
 	// HasDriveLetter exposes hasDriveLetter to the external test package.
 	HasDriveLetter = hasDriveLetter
 
-	// SourcePath exposes sourcePath to the external test package.
-	SourcePath = sourcePath
-
 	// ReadFile exposes readFile to the external test package.
 	ReadFile = readFile
 
@@ -25,4 +29,10 @@ var (
 // HTTPClient returns the client r fetches schemas with.
 func HTTPClient(r *Registry) *http.Client {
 	return r.client
+}
+
+// SourcePath exposes sourcePath to the external test package, with a
+// member index of its own that follows aliases through r.
+func SourcePath(root ast.Node, r *paths.Resolver, segments []jsonschema.Segment) paths.Path {
+	return sourcePath(root, newMemberIndex(r), segments)
 }

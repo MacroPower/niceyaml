@@ -2259,6 +2259,46 @@ func TestSchema_SourcePath(t *testing.T) {
 	}
 }
 
+func TestSchema_SourcePath_SeveralViolations(t *testing.T) {
+	t.Parallel()
+
+	// Several violations lie under one mapping, and each path spells the
+	// key of the member the decode keeps: the later of two keys that
+	// decode to 1, an explicit key written before a merge key, and an
+	// alias key by the content of its anchor.
+	v := compileSchema(t, []byte(`{"additionalProperties": {"type": "integer"}}`))
+
+	dd := yamltest.FirstDocument(t, stringtest.Input(`
+		base: &b {m: 1}
+		0x10: a
+		<<: *b
+		1.0: b
+		1: c
+		a: &k name
+		*k : d
+	`))
+
+	err := dd.Validate(t.Context(), v)
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, err, &bound)
+
+	var got []string
+
+	for _, child := range bound.Errors() {
+		path, ok := child.Path()
+		require.True(t, ok, "violation carries no path")
+
+		_, err := dd.At(path)
+		require.NoError(t, err, "path %s does not resolve", path)
+
+		got = append(got, path.String())
+	}
+
+	assert.ElementsMatch(t, []string{"$.base", "$.0x10", "$.1", "$.a", "$.name"}, got)
+}
+
 func TestSchema_RefToRejectingSchema(t *testing.T) {
 	t.Parallel()
 
