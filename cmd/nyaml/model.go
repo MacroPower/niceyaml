@@ -14,6 +14,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
+	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -528,8 +529,10 @@ func (m *model) textLine() string {
 		styleKey kind.Kind
 	}
 
+	// A file name comes from the file system, so escape it the way the
+	// error handler and the validate command render one.
 	swatches := []swatch{
-		{m.viewport.RevisionName(), kind.TextAccentDim},
+		{escape.Control(m.viewport.RevisionName()), kind.TextAccentDim},
 		{searchLabel, kind.TextAccent},
 		{m.diffModeLabel(), kind.TextOK},
 		{m.viewModeLabel(), kind.TextWarn},

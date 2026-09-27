@@ -581,6 +581,48 @@ func TestStatusBarWidth(t *testing.T) {
 	}
 }
 
+func TestTextLineEscapesRevisionName(t *testing.T) {
+	t.Parallel()
+
+	// A glob match takes its name from the file system, so a control
+	// character in it reaches the status bar as a visible picture rather
+	// than as a byte the terminal acts on.
+	tcs := map[string]struct {
+		name string
+		want string
+	}{
+		"sgr conceal": {
+			name: "\x1b[8mhidden.yaml",
+			want: "␛[8mhidden.yaml",
+		},
+		"bel": {
+			name: "x\ay.yaml",
+			want: "x␇y.yaml",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newModel(&modelOptions{
+				sources: []*niceyaml.Source{
+					niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName(tc.name)),
+				},
+			})
+
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+
+			got, ok := updated.(model)
+			require.True(t, ok)
+
+			line := got.textLine()
+			assert.Contains(t, line, tc.want)
+			assert.NotContains(t, line, tc.name)
+		})
+	}
+}
+
 func TestUpdateCtrlCQuits(t *testing.T) {
 	t.Parallel()
 
