@@ -362,6 +362,50 @@ func TestPalette_TokensLayerOverAncestors(t *testing.T) {
 	}
 }
 
+func TestPalette_NameKindsKeepSourceAttributes(t *testing.T) {
+	t.Parallel()
+
+	// Algol and algol-nu set their builtin names in bold italic, and the
+	// keys and tags below Name must not pick up that italic, since their
+	// source entries draw them upright.
+	tests := map[string]struct {
+		theme string
+		kind  kind.Kind
+		want  string
+	}{
+		"algol keys": {
+			theme: "algol",
+			kind:  kind.NameTag,
+			want:  "bold underline #000000 bg:#ffffff",
+		},
+		"algol tags": {
+			theme: "algol",
+			kind:  kind.NameDecorator,
+			want:  "bold #888888 bg:#ffffff",
+		},
+		"algol-nu keys": {
+			theme: "algol-nu",
+			kind:  kind.NameTag,
+			want:  "bold #000000 bg:#ffffff",
+		},
+		"algol-nu tags": {
+			theme: "algol-nu",
+			kind:  kind.NameDecorator,
+			want:  "bold #888888 bg:#ffffff",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			th, ok := theme.Builtin().Get(tc.theme)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, style.Encode(th.Style(tc.kind)))
+		})
+	}
+}
+
 func TestPalette_DiffAndErrorKindsUpright(t *testing.T) {
 	t.Parallel()
 
