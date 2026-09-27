@@ -514,6 +514,13 @@ func (s *Store) fetch(ctx context.Context) ([]CatalogEntry, error) {
 		return nil, fmt.Errorf("parse catalog from %s: %w", httpfetch.Redacted(s.catalogURL), err)
 	}
 
+	// A body with no schemas array, such as null or an error object,
+	// decodes without error, so fetch rejects it here. The store then keeps
+	// the previous catalog rather than replacing it with an empty one.
+	if catalog.Schemas == nil {
+		return nil, fmt.Errorf("parse catalog from %s: no schemas array", httpfetch.Redacted(s.catalogURL))
+	}
+
 	// Prefilter entries to those with supported patterns that pass the filter.
 	return s.filterAndNormalizeEntries(catalog.Schemas), nil
 }

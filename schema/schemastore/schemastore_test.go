@@ -1092,6 +1092,89 @@ func TestSchemaStore_RefetchFails(t *testing.T) {
 	assert.Equal(t, int32(2), requestCount.Load())
 }
 
+func TestSchemaStore_CatalogWithoutSchemas(t *testing.T) {
+	t.Parallel()
+
+	// A JSON body with no schemas array is not a catalog, so the store
+	// treats it as a failed fetch rather than as a catalog with no entries.
+	tcs := map[string]struct {
+		body string
+	}{
+		"null": {
+			body: `null`,
+		},
+		"empty object": {
+			body: `{}`,
+		},
+		"null schemas": {
+			body: `{"schemas": null}`,
+		},
+		"error object": {
+			body: `{"message": "rate limited"}`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			t.Run("without a cached catalog", func(t *testing.T) {
+				t.Parallel()
+
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					//nolint:errcheck // Test helper.
+					w.Write([]byte(tc.body))
+				}))
+				t.Cleanup(server.Close)
+
+				store := schemastore.New(schemastore.WithCatalogURL(server.URL))
+
+				_, err := store.FindMatch(t.Context(), "config.yaml")
+				require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+				require.NotErrorIs(t, err, schema.ErrNoMatch)
+			})
+
+			t.Run("with a cached catalog", func(t *testing.T) {
+				t.Parallel()
+
+				catalog, err := json.Marshal(testCatalog)
+				require.NoError(t, err)
+
+				var requestCount atomic.Int32
+
+				// The server serves the catalog first and the body after.
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					data := catalog
+					if requestCount.Add(1) > 1 {
+						data = []byte(tc.body)
+					}
+
+					//nolint:errcheck // Test helper.
+					w.Write(data)
+				}))
+				t.Cleanup(server.Close)
+
+				store := schemastore.New(
+					schemastore.WithCatalogURL(server.URL),
+					schemastore.WithCacheTTL(10*time.Millisecond),
+				)
+
+				_, err = store.FindMatch(t.Context(), "config.yaml")
+				require.NoError(t, err)
+
+				// Wait for cache to expire.
+				time.Sleep(20 * time.Millisecond)
+
+				// The refresh fails, so the store keeps the cached catalog.
+				entry, err := store.FindMatch(t.Context(), "config.yaml")
+				require.NoError(t, err)
+				assert.Equal(t, "Test", entry.Name)
+				assert.Equal(t, int32(2), requestCount.Load())
+			})
+		})
+	}
+}
+
 func TestSchemaStore_SkipsEntriesWithoutURL(t *testing.T) {
 	t.Parallel()
 
