@@ -180,6 +180,11 @@ type directiveResolver struct{}
 // file and resolves either way. A document without a directive reports
 // [ErrNoDirective].
 //
+// A fragment selects a subschema on a path as it does on a URL, so
+// "$schema=./schema.json#/definitions/Foo" names the Foo definition in
+// schema.json, as it does in yaml-language-server. A '#' that opens the
+// reference is part of the file name.
+//
 // A directive of "$schema=none", in any letter case, turns validation off
 // for the document, as it does in yaml-language-server. Resolve names a
 // schema that passes every document without decoding it, so the lookup
@@ -234,7 +239,18 @@ func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Node) (Ref, er
 		baseDir = filepath.Dir(filePath)
 	}
 
-	ref, err := FileOrURL(baseDir, directive.Schema)
+	// Like yaml-language-server, read a '#' after the first character of a
+	// path as the start of a fragment that names a subschema, rather than
+	// as part of the file name. [FileOrURL] splits the fragment off a URL
+	// itself.
+	path, fragment := directive.Schema, ""
+	if !isHTTPURL(path) && !isFileURL(path) {
+		if i := strings.Index(path, "#"); i > 0 {
+			path, fragment = path[:i], path[i+1:]
+		}
+	}
+
+	ref, err := FileOrURL(baseDir, path)
 	if errors.Is(err, ErrNoBaseDir) {
 		return Ref{}, fmt.Errorf("%w: %w", ErrNoFilePath, err)
 	}
@@ -242,6 +258,10 @@ func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Node) (Ref, er
 	if err != nil {
 		//nolint:wrapcheck // The reference error already names the reference.
 		return Ref{}, err
+	}
+
+	if fragment != "" {
+		ref.key += "#" + fragment
 	}
 
 	return ref, nil

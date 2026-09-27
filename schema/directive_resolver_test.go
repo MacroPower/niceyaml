@@ -248,6 +248,70 @@ func TestDirective_Resolve(t *testing.T) {
 		require.ErrorContains(t, err, `missing required property "name"`)
 	})
 
+	t.Run("validates against the subschema a path fragment names", func(t *testing.T) {
+		t.Parallel()
+
+		tmpDir := t.TempDir()
+		schemaPath := filepath.Join(tmpDir, "schema.json")
+		// The root takes any document, and Foo requires a name.
+		schemaData := []byte(`{"definitions": {"Foo": {"type": "object", "required": ["name"]}}}`)
+		err := os.WriteFile(schemaPath, schemaData, 0o600)
+		require.NoError(t, err)
+
+		yamlPath := filepath.Join(tmpDir, "config.yaml")
+
+		tests := map[string]struct {
+			ref string
+		}{
+			"relative path": {ref: "./schema.json#/definitions/Foo"},
+			"absolute path": {ref: schemaPath + "#/definitions/Foo"},
+		}
+
+		for name, tt := range tests {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				directive := "# yaml-language-server: $schema=" + tt.ref + "\n"
+
+				// The key keeps the fragment, and the load reads the whole
+				// file.
+				doc := yamltest.FirstDocumentWithPath(t, directive+"name: x\n", yamlPath)
+				url, data := resolveAndLoad(t, schema.Directive(), doc)
+				assert.Equal(t, fileURL(t, schemaPath)+"#/definitions/Foo", url)
+				assert.Equal(t, schemaData, data)
+
+				reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+
+				err := reg.Validate(t.Context(), doc)
+				require.NoError(t, err)
+
+				doc = yamltest.FirstDocumentWithPath(t, directive+"kind: Deployment\n", yamlPath)
+				err = reg.Validate(t.Context(), doc)
+				require.ErrorContains(t, err, `missing required property "name"`)
+			})
+		}
+	})
+
+	t.Run("keeps a leading '#' in a path", func(t *testing.T) {
+		t.Parallel()
+
+		// A path splits only at a '#' after its first character, as in
+		// yaml-language-server, so "#schema.json" names a file.
+		tmpDir := t.TempDir()
+		schemaPath := filepath.Join(tmpDir, "#schema.json")
+		schemaData := []byte(`{"type": "object"}`)
+		err := os.WriteFile(schemaPath, schemaData, 0o600)
+		require.NoError(t, err)
+
+		doc := yamltest.FirstDocumentWithPath(t,
+			"# yaml-language-server: $schema=#schema.json\nkind: Deployment\n",
+			filepath.Join(tmpDir, "config.yaml"),
+		)
+		url, data := resolveAndLoad(t, schema.Directive(), doc)
+		assert.Equal(t, fileURL(t, schemaPath), url)
+		assert.Equal(t, schemaData, data)
+	})
+
 	t.Run("returns ErrNoDirective when no directive present", func(t *testing.T) {
 		t.Parallel()
 

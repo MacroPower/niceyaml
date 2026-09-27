@@ -25,6 +25,8 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // reference as a relative file path, which then fails to resolve or read.
 // A fragment on an HTTP/HTTPS or file:// URL selects a subschema, as the
 // note on [URL] says, and a '#' in a plain path is part of the file name.
+// [Directive] splits a fragment off a plain path before it calls
+// FileOrURL, as yaml-language-server does.
 // A relative file path joins baseDir; the path a file:// URL names, an
 // absolute path, and an HTTP/HTTPS URL ignore baseDir. When baseDir is
 // empty and the path is relative, the error wraps [ErrNoBaseDir], and an
