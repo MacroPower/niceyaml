@@ -113,33 +113,21 @@ func expandPaths(args ...string) ([]string, error) {
 	}
 
 	for _, arg := range args {
-		if !containsGlobChars(arg) {
-			// A directory is no file to read, as the glob path excludes
-			// one; a name that does not exist passes through to the read,
-			// which reports it.
-			info, err := os.Stat(arg)
-			if err == nil && info.IsDir() {
-				return nil, fmt.Errorf("%w: %q", errIsDirectory, arg)
-			}
-
-			add(arg)
-
-			continue
+		// A directory is no file to read, as the glob path excludes one, so
+		// a name that names a directory is an error, with or without a
+		// metacharacter, rather than a pattern that could select an
+		// unrelated file. A name that names an existing file is that file,
+		// even when it also matches others as a pattern, so the file the
+		// user named is never shadowed. That holds for a name that is no
+		// valid pattern too, such as one with a stray bracket. A name
+		// without metacharacters that names nothing passes through to the
+		// read, which reports it. Any other name expands as a pattern.
+		info, err := os.Stat(arg)
+		if err == nil && info.IsDir() {
+			return nil, fmt.Errorf("%w: %q", errIsDirectory, arg)
 		}
 
-		// A name that holds a metacharacter and names a file that exists
-		// is that file, even when it also matches others as a pattern, so
-		// the file the user named is never shadowed. A name that is no
-		// valid pattern, such as one with a stray bracket, names a file
-		// the same way. A name that names a directory is an error, as
-		// without a metacharacter, rather than a pattern that could
-		// select an unrelated file.
-		info, statErr := os.Stat(arg)
-		if statErr == nil {
-			if info.IsDir() {
-				return nil, fmt.Errorf("%w: %q", errIsDirectory, arg)
-			}
-
+		if err == nil || !containsGlobChars(arg) {
 			add(arg)
 
 			continue
