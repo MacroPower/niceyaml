@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"charm.land/fang/v2"
@@ -115,13 +116,19 @@ func TestRootCmdProfileRates(t *testing.T) {
 			// blocking events.
 			before := blockEvents()
 
-			done := make(chan struct{})
-			go func() {
-				time.Sleep(10 * time.Millisecond)
-				close(done)
-			}()
+			// The runtime counts the wait only if the receive parks. In a
+			// synctest bubble the sleep ends only once every goroutine in
+			// the bubble has durably blocked, so done closes only after the
+			// receive has parked on it.
+			synctest.Test(t, func(*testing.T) {
+				done := make(chan struct{})
+				go func() {
+					time.Sleep(10 * time.Millisecond)
+					close(done)
+				}()
 
-			<-done
+				<-done
+			})
 
 			gotBlock := blockEvents() > before
 
