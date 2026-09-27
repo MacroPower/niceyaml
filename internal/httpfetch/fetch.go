@@ -16,11 +16,12 @@ const MaxSize = 10 * 1024 * 1024 // 10 MB.
 // Get performs an HTTP GET for rawURL with client and returns the body. It
 // rejects any status other than 200 OK and any body over [MaxSize] bytes.
 //
-// Errors name the URL with any password in its userinfo redacted, so a
-// credential embedded in a schema URL does not reach logs. Errors omit a
-// URL that does not parse, since Get cannot redact its userinfo. When
-// [Redacted] would hide a password in such a URL, errors omit the reason
-// too, since the reason can quote part of the password.
+// Errors name the URL as [Redacted] spells it, with any password in its
+// userinfo redacted, so a credential embedded in a schema URL does not
+// reach logs. Errors omit a URL that does not parse, since Get cannot
+// redact its userinfo. When [Redacted] would hide a password in such a
+// URL, errors omit the reason too, since the reason can quote part of the
+// password.
 //
 // A password that starts with "/", "?" or "#" parses, but as a host with
 // an empty port and then a path, query or fragment. Get refuses a URL
@@ -46,7 +47,7 @@ func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error
 		)
 	}
 
-	name := u.Redacted()
+	name := Redacted(rawURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), http.NoBody)
 	if err != nil {

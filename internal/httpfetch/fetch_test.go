@@ -108,6 +108,41 @@ func TestGet_RedactsPasswordOnStatus(t *testing.T) {
 	assert.Contains(t, err.Error(), "xxxxx")
 }
 
+func TestGet_NamesURLAsRedacted(t *testing.T) {
+	t.Parallel()
+
+	// Callers name the URL with Redacted, so Get spells it the same way in
+	// its errors rather than re-encoding it.
+	server := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(server.Close)
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	u.User = url.UserPassword("user", "secret")
+
+	tcs := map[string]struct {
+		url string
+	}{
+		"space in the path": {
+			url: server.URL + "/my schema.json",
+		},
+		"password and a space in the path": {
+			url: u.String() + "/my schema.json",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := httpfetch.Get(t.Context(), server.Client(), tc.url)
+			require.ErrorContains(t, err, "fetch "+httpfetch.Redacted(tc.url)+": status 404")
+			assert.NotContains(t, err.Error(), "secret")
+		})
+	}
+}
+
 func TestRedacted(t *testing.T) {
 	t.Parallel()
 
