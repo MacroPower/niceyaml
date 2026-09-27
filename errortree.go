@@ -145,9 +145,10 @@ func isJoinMessage(msg string, branches []error) bool {
 // in, since only the children of a binding carry the source and position
 // [trees] sorts by.
 func children(err error) []ErrorTree {
-	var kids []positioned
-
-	base := paths.Root()
+	var (
+		kids []positioned
+		base childBase
+	)
 
 	for cur := err; !isNothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -156,12 +157,10 @@ func children(err error) []ErrorTree {
 			cur = nil
 
 		case *Error:
-			if x.rebased {
-				base = base.Join(x.base)
-			}
+			base = base.cross(x)
 
 			for _, n := range x.Errors() {
-				kids = append(kids, positioned{tree: NewErrorTree(rebaseChild(n, base))})
+				kids = append(kids, positioned{tree: NewErrorTree(base.rebase(n))})
 			}
 
 			cur = x.Cause()
@@ -175,7 +174,7 @@ func children(err error) []ErrorTree {
 			// chain.
 			for _, branch := range x.Unwrap() {
 				if !isNothing(branch) {
-					kids = append(kids, positioned{tree: NewErrorTree(rebaseChild(branch, base))})
+					kids = append(kids, positioned{tree: NewErrorTree(base.rebase(branch))})
 				}
 			}
 
@@ -189,14 +188,35 @@ func children(err error) []ErrorTree {
 	return trees(kids)
 }
 
-// rebaseChild returns n rebased under base, or n as it is when base is
-// the root, which moves no path.
-func rebaseChild(n error, base paths.Path) error {
-	if base.IsRoot() {
+// childBase is the base the children along a cause chain rebase under:
+// the base of every Error from [Rebase] above them, joined, and whether
+// the walk met such an Error. A Rebase at the root still locates a child
+// with no location at the root, so the children rebase whenever the walk
+// met one, and only a chain that holds none leaves them as they are.
+type childBase struct {
+	path    paths.Path
+	rebased bool
+}
+
+// cross returns the base below x: c joined with the base of x when x is
+// an Error from [Rebase], and c as it is otherwise.
+func (c childBase) cross(x *Error) childBase {
+	if x.rebased {
+		c.path = c.path.Join(x.base)
+		c.rebased = true
+	}
+
+	return c
+}
+
+// rebase returns n rebased under the base, or n as it is when the walk met
+// no Error from [Rebase].
+func (c childBase) rebase(n error) error {
+	if !c.rebased {
 		return n
 	}
 
-	return Rebase(n, base)
+	return Rebase(n, c.path)
 }
 
 // trees returns the nodes of kids in position order within the source

@@ -4855,6 +4855,35 @@ func TestRebase(t *testing.T) {
 		assert.Equal(t, "3:3: $.hours: bad hours", bound.Errors()[0].Error())
 	})
 
+	t.Run("an unlocated nested error under a root base points at the root", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		report := niceyaml.NewError("invalid", niceyaml.WithErrors(errors.New("bad child")))
+		rebased := niceyaml.Rebase(report, paths.Root())
+
+		err := dd.Bind(rebased)
+		require.EqualError(t, err, "1:1: $: invalid")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		require.Len(t, bound.Errors(), 1)
+
+		child := bound.Errors()[0]
+		assert.Equal(t, "1:1: $: bad child", child.Error())
+
+		p, ok := child.Path()
+		require.True(t, ok)
+		assert.Equal(t, paths.Root(), p)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"$: invalid",
+			"`-- $: bad child",
+		), fmt.Sprintf("%+v", rebased))
+	})
+
 	t.Run("rebases compose", func(t *testing.T) {
 		t.Parallel()
 

@@ -1025,7 +1025,7 @@ func newSourceError(err error, b binder) *SourceError {
 // rather than a violation of its own, so its children join the children
 // of e.
 func (e *SourceError) collect(err error, b binder) {
-	base := paths.Root()
+	var base childBase
 
 	for cur := err; !isNothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -1035,9 +1035,7 @@ func (e *SourceError) collect(err error, b binder) {
 			return
 
 		case *Error:
-			if x.rebased {
-				base = base.Join(x.base)
-			}
+			base = base.cross(x)
 
 			for _, n := range x.errors {
 				e.addChild(n, b, base)
@@ -1064,14 +1062,14 @@ func (e *SourceError) collect(err error, b binder) {
 // addChild binds n as a child of e. A binding is the child as it is, and
 // any other error binds where e binds, or takes over the binding it
 // wraps. The base is the base of every Error from [Rebase] above n, and
-// a child under a base other than the root binds as a rebased Error at
-// that base, so its own message and [SourceError.Path] carry the joined
-// path as the message of the root does. A nil n, or a nil pointer, adds
-// nothing.
-func (e *SourceError) addChild(n error, b binder, base paths.Path) {
+// a child under an Error from Rebase binds as a rebased Error at that
+// base, the root included, so its own message and [SourceError.Path]
+// carry the joined path as the message of the root does. A nil n, or a
+// nil pointer, adds nothing.
+func (e *SourceError) addChild(n error, b binder, base childBase) {
 	// Rebase returns a binding as it is, so the child is a binding exactly
 	// when n is.
-	child := rebaseChild(n, base)
+	child := base.rebase(n)
 	if isNothing(child) {
 		return
 	}
