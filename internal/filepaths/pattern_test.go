@@ -146,6 +146,31 @@ func TestPattern_Match(t *testing.T) {
 			path:    "x.yaml",
 			want:    false,
 		},
+		"dot alternative in braces": {
+			pattern: "{.,configs}/*.yaml",
+			path:    "values.yaml",
+			want:    true,
+		},
+		"directory alternative beside a dot alternative": {
+			pattern: "{.,configs}/*.yaml",
+			path:    "configs/values.yaml",
+			want:    true,
+		},
+		"dot element inside braces": {
+			pattern: "{./a,b}.yaml",
+			path:    "a.yaml",
+			want:    true,
+		},
+		"repeated separators inside braces": {
+			pattern: "{configs//x,y}.yaml",
+			path:    "configs/x.yaml",
+			want:    true,
+		},
+		"class holding separator and dot": {
+			pattern: "a[/./]b",
+			path:    "a.b",
+			want:    true,
+		},
 		"pattern with dot slash prefix keeps its depth": {
 			pattern: "./*.yaml",
 			path:    "configs/a.yaml",
@@ -335,6 +360,21 @@ func TestMatchAny(t *testing.T) {
 			path:     "repo/k8s/x.yaml",
 			patterns: []string{"k8s/./x.yaml"},
 			want:     true,
+		},
+		"dot alternative in braces matches at any depth": {
+			path:     "repo/values.yaml",
+			patterns: []string{"{.,configs}/*.yaml"},
+			want:     true,
+		},
+		"class holding separator and dot matches at any depth": {
+			path:     "repo/a.b",
+			patterns: []string{"a[/./]b"},
+			want:     true,
+		},
+		"negation with a dot alternative in braces": {
+			path:     "repo/values.yaml",
+			patterns: []string{"*.yaml", "!{.,configs}/values.yaml"},
+			want:     false,
 		},
 		"double star prefix is kept": {
 			path:     "repo/.github/workflows/ci.yml",

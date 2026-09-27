@@ -14,7 +14,8 @@ var ErrInvalidPattern = errors.New("invalid glob pattern")
 // Pattern represents a validated glob pattern for file path matching.
 // Create instances with [NewPattern].
 type Pattern struct {
-	glob string
+	// The normalized patterns ExpandBraces yields for the pattern.
+	globs []string
 }
 
 // NewPattern creates a [Pattern] from the given glob pattern string.
@@ -23,13 +24,16 @@ type Pattern struct {
 // NewPattern drops "." elements such as a leading "./", repeated
 // separators, and a trailing separator from the pattern, as
 // [Pattern.Match] does for the path, so those spellings do not change
-// what the pattern matches.
+// what the pattern matches. It normalizes each pattern [ExpandBraces]
+// yields, so "{.,configs}/*.yaml" matches "values.yaml" as "./*.yaml"
+// does. A "/" or "." inside a character class, as in "a[/.]b", stays
+// part of the class.
 func NewPattern(pattern string) (Pattern, error) {
 	if !doublestar.ValidatePattern(pattern) {
 		return Pattern{}, ErrInvalidPattern
 	}
 
-	return Pattern{glob: normalizePattern(pattern)}, nil
+	return Pattern{globs: expandPattern(pattern, normalizePattern)}, nil
 }
 
 // Match reports whether the path matches the pattern.
@@ -38,17 +42,11 @@ func NewPattern(pattern string) (Pattern, error) {
 // before matching, so "./config.yaml" and "config.yaml" both match the
 // root-only pattern "*.yaml".
 func (p Pattern) Match(path string) bool {
-	if p.glob == "" || path == "" {
+	if path == "" {
 		return false
 	}
 
-	// A pattern error is path dependent, since doublestar.ValidatePattern
-	// accepts some patterns that Match rejects for a multi-segment path,
-	// such as a "{" inside a character class. A pattern Match cannot
-	// interpret matches nothing, which is what a false result says already.
-	matched, _ := doublestar.Match(p.glob, CleanPath(path)) //nolint:errcheck // A pattern error means no match.
-
-	return matched
+	return matchAnyGlob(p.globs, CleanPath(path))
 }
 
 // CleanPath returns path cleaned, with forward slashes as separators,
@@ -59,21 +57,34 @@ func CleanPath(path string) string {
 	return filepath.ToSlash(filepath.Clean(path))
 }
 
+// expandPattern returns the patterns [ExpandBraces] yields for pattern,
+// each passed through rewrite.
+func expandPattern(pattern string, rewrite func(string) string) []string {
+	globs := ExpandBraces(pattern)
+	for i, glob := range globs {
+		globs[i] = rewrite(glob)
+	}
+
+	return globs
+}
+
 // normalizePattern returns pattern without "." elements, repeated
 // separators, or a trailing separator. A cleaned path carries none of
 // them, so a pattern that kept them would match no path. A pattern left
 // with no other element reads as "." or "/", as [filepath.Clean] reads
 // it. It leaves ".." elements alone, since a glob element before a ".."
 // could stand for any number of directories.
+//
+// It reads a brace group as plain text, so a caller expands the braces
+// first.
 func normalizePattern(pattern string) string {
 	if pattern == "" {
 		return ""
 	}
 
-	elems := strings.Split(pattern, "/")
-	kept := elems[:0]
+	var kept []string
 
-	for _, elem := range elems {
+	for _, elem := range splitElements(pattern) {
 		if elem != "" && elem != "." {
 			kept = append(kept, elem)
 		}
@@ -89,6 +100,33 @@ func normalizePattern(pattern string) string {
 	default:
 		return glob
 	}
+}
+
+// splitElements splits pattern on its separators. An escaped "/" and a
+// "/" inside a character class belong to the element around them.
+func splitElements(pattern string) []string {
+	var (
+		elems []string
+		start int
+	)
+
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			i++ // Skip the escaped character.
+
+		case '[':
+			if end := classEnd(pattern, i); end >= 0 {
+				i = end
+			}
+
+		case '/':
+			elems = append(elems, pattern[start:i])
+			start = i + 1
+		}
+	}
+
+	return append(elems, pattern[start:])
 }
 
 // MatchAny reports whether path matches any of the glob patterns, with
@@ -145,9 +183,9 @@ func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
 		exclude, ok := strings.CutPrefix(pattern, "!")
 		switch {
 		case !ok:
-			p.globs = append(p.globs, anyDepth(pattern))
+			p.globs = append(p.globs, expandPattern(pattern, anyDepth)...)
 		case exclude != "":
-			p.excludes = append(p.excludes, anyDepth(exclude))
+			p.excludes = append(p.excludes, expandPattern(exclude, anyDepth)...)
 		}
 	}
 
@@ -165,8 +203,10 @@ func (p AnyDepthPatterns) MatchClean(path string) bool {
 // matchAnyGlob reports whether path matches any of globs.
 func matchAnyGlob(globs []string, path string) bool {
 	for _, glob := range globs {
-		// Whether Match reports a pattern error depends on the path, so
-		// an error skips the pattern for this path alone.
+		// Whether Match reports a pattern error depends on the path, since
+		// doublestar.ValidatePattern accepts some patterns that Match
+		// rejects for a multi-segment path, such as a "{" inside a
+		// character class. An error skips the pattern for this path alone.
 		matched, err := doublestar.Match(glob, path)
 		if err == nil && matched {
 			return true
@@ -177,9 +217,9 @@ func matchAnyGlob(globs []string, path string) bool {
 }
 
 // anyDepth returns pattern with the "**/" prefix that lets it match at any
-// depth of the tree. It normalizes the pattern as [NewPattern] does and
-// drops a leading "/". A pattern that then starts with "**/" gets no
-// second prefix.
+// depth of the tree. It normalizes the pattern and drops a leading "/". A
+// pattern that then starts with "**/" gets no second prefix. As with
+// [normalizePattern], a caller expands the braces first.
 func anyDepth(pattern string) string {
 	pattern = strings.TrimPrefix(normalizePattern(pattern), "/")
 
