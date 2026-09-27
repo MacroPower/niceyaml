@@ -107,9 +107,11 @@ type Settings struct {
 	Theme string `json:"theme,omitempty" jsonschema:"title=Theme,enum=light|dark|auto,default=auto"`
 }
 
-// Duration is a [time.Duration] that marshals as its Go string form, such as
-// "15m". A bare [time.Duration] has no encoding/json/v2 representation, so the
-// schema generator refuses it; the text form keeps the field a string.
+// Duration is a [time.Duration] encoded as text. It parses any
+// [time.ParseDuration] form, such as "15m", and marshals with
+// [time.Duration.String], so 15 minutes becomes "15m0s". A bare
+// [time.Duration] has no encoding/json/v2 representation, so the schema
+// generator refuses it; the text form keeps the field a string.
 type Duration time.Duration
 
 // MarshalText formats the duration with [time.Duration.String].
