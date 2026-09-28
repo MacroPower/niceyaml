@@ -14,19 +14,29 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
+// The JavaScript \s, which yaml-language-server reads a directive with,
+// matches \v and the Unicode spaces, such as U+00A0 and U+3000, where the
+// RE2 \s matches only ASCII. The patterns below spell that set out.
+const (
+	// The characters the JavaScript \s matches, other than \r and \n.
+	jsBlank = `\t\v\f \p{Z}\x{FEFF}`
+	// The characters the JavaScript \s matches.
+	jsSpace = `\r\n` + jsBlank
+)
+
 var (
 	// Pattern of the marker that opens a schema directive after optional
 	// whitespace. The marker is "yaml-language-server:", with optional
 	// whitespace before the colon, or the IntelliJ "$schema:" short form.
 	// A comment that mentions a marker mid-sentence is not a directive.
-	modelineRE = regexp.MustCompile(`^\s*(?:yaml-language-server\s*:|\$schema:)`)
+	modelineRE = regexp.MustCompile(`^[` + jsSpace + `]*(?:yaml-language-server[` + jsSpace + `]*:|\$schema:)`)
 
 	// Pattern of the schema reference in a directive, after "$schema=" or
 	// "$schema:". Like yaml-language-server, ParseDirective searches the
 	// whole comment for it, so other settings may come before it. The
 	// reference runs to the first whitespace, so a remark after the
 	// reference is not part of it.
-	schemaValueRE = regexp.MustCompile(`\$schema(?:=|:[ \t]*)(\S+)`)
+	schemaValueRE = regexp.MustCompile(`\$schema(?:=|:[` + jsBlank + `]*)([^` + jsSpace + `]+)`)
 
 	// ErrNoDirective indicates a document has no schema directive.
 	// It wraps [ErrNoMatch], so [Registry] moves on to the next resolver.
@@ -68,9 +78,9 @@ type ParsedDirective struct {
 // marker after other text is not a directive. The reference follows
 // "$schema=" or "$schema:" anywhere in the comment, so other settings may
 // precede it. It runs to the first whitespace, as yaml-language-server
-// reads it, so a remark after the reference on the same line is not part
-// of it, and a path cannot contain spaces. A directive that names no
-// reference yields nil.
+// reads it, and that includes a Unicode space such as U+00A0. A remark
+// after the reference on the same line is not part of it, and a path
+// cannot contain spaces. A directive that names no reference yields nil.
 func ParseDirective(comment string) *ParsedDirective {
 	if !modelineRE.MatchString(comment) {
 		return nil
@@ -81,13 +91,8 @@ func ParseDirective(comment string) *ParsedDirective {
 		return nil
 	}
 
-	ref := strings.TrimSpace(matches[1])
-	if ref == "" {
-		return nil
-	}
-
 	return &ParsedDirective{
-		Schema: ref,
+		Schema: matches[1],
 	}
 }
 

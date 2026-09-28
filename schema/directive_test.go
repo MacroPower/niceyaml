@@ -102,6 +102,36 @@ func TestParseDirective(t *testing.T) {
 			input: " yaml-language-server: $schema=   ",
 			want:  nil,
 		},
+		// The JavaScript \s, which yaml-language-server reads a directive
+		// with, matches \v and the Unicode spaces too.
+		"no-break space before a remark": {
+			input: " yaml-language-server: $schema=./a.json\u00a0# managed",
+			want:  &schema.ParsedDirective{Schema: "./a.json"},
+		},
+		"vertical tab before a remark": {
+			input: " yaml-language-server: $schema=./a.json\v#",
+			want:  &schema.ParsedDirective{Schema: "./a.json"},
+		},
+		"ideographic space before a remark": {
+			input: " yaml-language-server: $schema=./a.json\u3000#",
+			want:  &schema.ParsedDirective{Schema: "./a.json"},
+		},
+		"byte order mark before a remark": {
+			input: " yaml-language-server: $schema=./a.json\ufeff#",
+			want:  &schema.ParsedDirective{Schema: "./a.json"},
+		},
+		"no-break space after the colon value form": {
+			input: " yaml-language-server: $schema:\u00a0./a.json",
+			want:  &schema.ParsedDirective{Schema: "./a.json"},
+		},
+		"no-break space after equals": {
+			input: " yaml-language-server: $schema=\u00a0./a.json",
+			want:  nil,
+		},
+		"no-break space before the marker": {
+			input: "\u00a0yaml-language-server: $schema=./a.json",
+			want:  &schema.ParsedDirective{Schema: "./a.json"},
+		},
 		"empty string": {
 			input: "",
 			want:  nil,
