@@ -610,6 +610,84 @@ func TestResolver_Deref(t *testing.T) {
 	})
 }
 
+func TestResolver_Anchor(t *testing.T) {
+	t.Parallel()
+
+	// Each case looks up the anchor of the value of the entry v.
+	tcs := map[string]struct {
+		input string
+		want  string
+		line  int
+		err   error
+	}{
+		"alias": {
+			input: "a: &a {k: x}\nv: *a\n",
+			want:  "&a {k: x}",
+			line:  1,
+		},
+		"last anchor of its name": {
+			input: "a: &a one\nb: &a two\nv: *a\n",
+			want:  "&a two",
+			line:  2,
+		},
+		"anchor a merge brings in again": {
+			input: "base: &b\n  k: &x one\nother: &x two\nm:\n  <<: *b\nv: *x\n",
+			want:  "&x one",
+			line:  2,
+		},
+		"anchor that holds an alias": {
+			// Deref goes on to the content of b, while Anchor stops at a.
+			input: "b: &b one\na: &a\n  *b\nv: *a\n",
+			want:  "&a *b",
+			line:  2,
+		},
+		"alias with no anchor before it": {
+			input: "v: *a\na: &a x\n",
+			err:   paths.ErrAlias,
+		},
+		"not an alias": {
+			input: "v: &a x\n",
+			err:   paths.ErrAlias,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input).File()
+			require.NoError(t, err)
+
+			mapping, ok := file.Docs[0].Body.(*ast.MappingNode)
+			require.True(t, ok, "body is a %T", file.Docs[0].Body)
+
+			var value ast.Node
+
+			for _, entry := range mapping.Values {
+				if entry.Key.GetToken().Value == "v" {
+					value = entry.Value
+				}
+			}
+
+			require.NotNil(t, value, "no entry v")
+
+			got, err := paths.NewResolver(file.Docs[0]).Anchor(value)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			anchor, ok := got.(*ast.AnchorNode)
+			require.True(t, ok, "got a %T", got)
+			assert.Equal(t, tc.want, anchor.String())
+			assert.Equal(t, tc.line, anchor.GetToken().Position.Line)
+		})
+	}
+}
+
 func TestResolver_MergeSources(t *testing.T) {
 	t.Parallel()
 

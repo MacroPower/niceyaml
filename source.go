@@ -72,11 +72,17 @@ type Source struct {
 	// instead.
 	fileTokens map[*token.Token]struct{}
 	fileErr    error
-	docs       []*Node
-	parserOpts []parser.Option
-	decodeOpts []yaml.DecodeOption
-	fileOnce   sync.Once
-	docsOnce   sync.Once
+	// A second parse of the tokens, which decodeParse makes the first time
+	// a document renames its anchors for the decoder, and the set of
+	// copies of the tokens that parse hands the parser.
+	decodeFile       *ast.File
+	decodeFileTokens map[*token.Token]struct{}
+	docs             []*Node
+	parserOpts       []parser.Option
+	decodeOpts       []yaml.DecodeOption
+	fileOnce         sync.Once
+	docsOnce         sync.Once
+	decodeFileOnce   sync.Once
 	// Accepts a mapping with the same key twice when parsing and decoding.
 	allowDuplicateKeys bool
 }
@@ -506,7 +512,10 @@ func (s *Source) parse() (*ast.File, map[*token.Token]struct{}, error) {
 		// The documents come from the file this parse returns, so the error
 		// binds to the source alone rather than routing to one of them.
 		if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
-			return nil, nil, bindTree(WrapError(yamlMessageError{yamlErr}, atToken(yamlErr.GetToken())), binder{src: s})
+			return nil, nil, bindTree(
+				WrapError(yamlMessageError{err: yamlErr}, atToken(yamlErr.GetToken())),
+				binder{src: s},
+			)
 		}
 
 		//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].
@@ -514,6 +523,26 @@ func (s *Source) parse() (*ast.File, map[*token.Token]struct{}, error) {
 	}
 
 	return file, set, nil
+}
+
+// decodeParse returns a second parse of the tokens of the Source, with the
+// set of copies of the tokens that parse hands the parser, and makes it on
+// the first call. Nothing but the decoder reads its tree, so a document
+// renames the anchors of its own part of that tree, and the tree
+// [Source.File] returns stays as the parser built it. The parse holds its
+// own copies of the tokens, so the go-yaml formatter, which reads the text
+// of each token through the links between them, finds a renamed anchor
+// with the text of the Source. It returns nil when the parse fails, which
+// it does only when the first parse failed.
+func (s *Source) decodeParse() (*ast.File, map[*token.Token]struct{}) {
+	s.decodeFileOnce.Do(func() {
+		file, set, err := s.parse()
+		if err == nil {
+			s.decodeFile, s.decodeFileTokens = file, set
+		}
+	})
+
+	return s.decodeFile, s.decodeFileTokens
 }
 
 // bareLeadingLines returns origin with each blank line in front of its

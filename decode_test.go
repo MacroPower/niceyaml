@@ -2570,6 +2570,283 @@ func TestDocument_At(t *testing.T) {
 	})
 }
 
+// rawText is a value that decodes itself from the text go-yaml hands it.
+type rawText struct {
+	text string
+}
+
+func (r *rawText) UnmarshalYAML(data []byte) error {
+	r.text = string(data)
+
+	return nil
+}
+
+func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
+	t.Parallel()
+
+	t.Run("alias reads the anchor it refers to", func(t *testing.T) {
+		t.Parallel()
+
+		// Each alias reads the anchor of its name defined last before it,
+		// as a path through the alias resolves, even when the node defines
+		// the name again after the alias.
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+			want  any
+		}{
+			"sequence redefines the name after the alias": {
+				input: "x0: &x 1\nl:\n  - *x\n  - &x 2\n",
+				path:  paths.Root().Child("l"),
+				want:  []any{uint64(1), uint64(2)},
+			},
+			"mapping redefines the name after the alias": {
+				input: "b: &x 2\nd:\n  e: *x\n  f: &x 3\n",
+				path:  paths.Root().Child("d"),
+				want:  map[string]any{"e": uint64(2), "f": uint64(3)},
+			},
+			"aliases before and after the redefinition": {
+				input: "a: &x 1\nb:\n  c: *x\n  d: &x 2\n  e: *x\n",
+				path:  paths.Root().Child("b"),
+				want:  map[string]any{"c": uint64(1), "d": uint64(2), "e": uint64(2)},
+			},
+			"sequence aliases before and after the redefinition": {
+				input: "a: &x 1\nb:\n  - *x\n  - &x 2\n  - *x\n",
+				path:  paths.Root().Child("b"),
+				want:  []any{uint64(1), uint64(2), uint64(2)},
+			},
+			"each element reads the anchor before it": {
+				input: "items:\n  - &x {a: 1}\n  - {b: *x}\n  - &x {a: 2}\n  - {b: *x}\n",
+				path:  paths.Root().Child("items").Index(1),
+				want:  map[string]any{"b": map[string]any{"a": uint64(1)}},
+			},
+			"merge key that records an anchor again": {
+				input: "m: &m {k: &b 1}\nb: &b 2\nq: {<<: *m}\nnode:\n  p: *b\n  r: *b\n",
+				path:  paths.Root().Child("node"),
+				want:  map[string]any{"p": uint64(1), "r": uint64(1)},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				got, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+
+				var scoped any
+
+				err = niceyaml.NewDecoder().DecodeInto(t.Context(), yamltest.At(t, dd, tc.path), &scoped)
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, scoped)
+			})
+		}
+	})
+
+	t.Run("typed decode reads the anchor the alias refers to", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "x0: &x 1\nl:\n  - *x\n  - &x 2\n")
+
+		list, err := yamltest.At(t, dd, paths.Root().Child("l")).Decode[[]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, []int{1, 2}, list)
+
+		type inner struct {
+			E int `yaml:"e"`
+			F int `yaml:"f"`
+		}
+
+		type outer struct {
+			D inner `yaml:"d"`
+		}
+
+		// The struct has no field for b, so the decode reads the anchor of
+		// b only for the alias under d.
+		dd = yamltest.FirstDocument(t, "b: &x 2\nd:\n  e: *x\n  f: &x 3\n")
+
+		got, err := dd.Decode[outer](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, outer{D: inner{E: 2, F: 3}}, got)
+	})
+
+	t.Run("typed decode of an anchor reads the anchors of its definition", func(t *testing.T) {
+		t.Parallel()
+
+		type base struct {
+			Image string `yaml:"image"`
+		}
+
+		type svc struct {
+			Web     base   `yaml:"web"`
+			Sidecar string `yaml:"sidecar"`
+		}
+
+		// The alias inside base reads the first img, while the sidecar
+		// reads the second.
+		dd := yamltest.FirstDocument(t, stringtest.Input(`
+			image: &img nginx:1.0
+			base: &base
+			  image: *img
+			image2: &img nginx:2.0
+			svc:
+			  web: *base
+			  sidecar: *img
+		`))
+
+		got, err := yamltest.At(t, dd, paths.Root().Child("svc")).Decode[svc](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, svc{Web: base{Image: "nginx:1.0"}, Sidecar: "nginx:2.0"}, got)
+	})
+
+	t.Run("failure in an anchor the node reads fails the decode", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			err   string
+		}{
+			"anchor the node reads": {
+				input: "a: &x 1\nb: &x !!bool nope\nc:\n  d: *x\n",
+				err:   `2:14: cannot convert "nope" to boolean`,
+			},
+			"anchor another anchor reads": {
+				input: "a: &x 1\nm: &m {k: *x}\nb: &x !!bool nope\nc:\n  d: *x\n  e: *m\n",
+				err:   `3:14: cannot convert "nope" to boolean`,
+			},
+			"anchor read before a later redefinition": {
+				input: "a: &x 1\nb: &x !!bool nope\nm: &m {k: *x}\nz: &x 2\nc:\n  e: *m\n  f: *x\n",
+				err:   `2:14: cannot convert "nope" to boolean`,
+			},
+			"anchor inside a failing anchor": {
+				input: "q: &i 0\no: &o {bad: !!bool nope, i: &i 1}\nc:\n  d: *i\n",
+				err:   `2:20: cannot convert "nope" to boolean`,
+			},
+			"anchor with an alias to nothing": {
+				input: "a: &x 1\nb: &x [*nope]\nc:\n  d: *x\n",
+				err:   `2:9: could not find alias "nope"`,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				_, err := dd.Decode[any](t.Context())
+				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+				_, err = yamltest.At(t, dd, paths.Root().Child("c")).Decode[any](t.Context())
+				require.EqualError(t, err, tc.err)
+				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+			})
+		}
+	})
+
+	t.Run("failure in an anchor a later one hides decodes", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "a: &x !!bool nope\nb: &x 1\nc:\n  d: *x\n")
+
+		got, err := yamltest.At(t, dd, paths.Root().Child("c")).Decode[any](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"d": uint64(1)}, got)
+	})
+
+	t.Run("unmarshaler text spells the anchors of the document", func(t *testing.T) {
+		t.Parallel()
+
+		type wrapper struct {
+			T rawText `yaml:"t"`
+		}
+
+		input := "a: &x 1\nt:\n  p: &x 2\n  q: *x\n"
+
+		var want wrapper
+
+		require.NoError(t, yaml.Unmarshal([]byte(input), &want))
+
+		got, err := yamltest.FirstDocument(t, input).Decode[wrapper](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, want.T.text, got.T.text)
+		assert.Contains(t, got.T.text, "&x 2")
+	})
+
+	t.Run("documents of one source decode at once", func(t *testing.T) {
+		t.Parallel()
+
+		type wrapper struct {
+			T rawText `yaml:"t"`
+			R int     `yaml:"r"`
+		}
+
+		var sb strings.Builder
+
+		for i := range 8 {
+			fmt.Fprintf(&sb, "---\na: &x %d\nt:\n  p: &x 2\n  q: *x\nr: *x\n", i)
+		}
+
+		docs, err := niceyaml.NewSourceFromString(sb.String()).Documents()
+		require.NoError(t, err)
+
+		var wg sync.WaitGroup
+
+		for range 4 {
+			for _, doc := range docs {
+				scope := yamltest.At(t, doc, paths.Root().Child("t"))
+
+				wg.Go(func() {
+					got, err := doc.Decode[wrapper](t.Context())
+					if assert.NoError(t, err) {
+						assert.Equal(t, 2, got.R)
+						assert.Contains(t, got.T.text, "&x 2")
+					}
+
+					scoped, err := scope.Decode[any](t.Context())
+					if assert.NoError(t, err) {
+						assert.Equal(t, map[string]any{"p": uint64(2), "q": uint64(2)}, scoped)
+					}
+				})
+			}
+		}
+
+		wg.Wait()
+	})
+
+	t.Run("error names an anchor as the document does", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "a: &x 1\nb: &x {<<: *x}\n")
+
+		_, err := dd.Decode[any](t.Context())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "alias name x")
+		assert.NotContains(t, err.Error(), "[")
+	})
+
+	t.Run("error binds at the source", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "a: &x 1\nb: &x 2\nc: {k: !!bool nope}\n")
+
+		_, err := yamltest.At(t, dd, paths.Root().Child("c")).Decode[any](t.Context())
+		require.EqualError(t, err, `3:15: cannot convert "nope" to boolean`)
+		require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		rng, ok := bound.Range()
+		require.True(t, ok)
+		assert.Equal(t, 2, rng.Start.Line)
+	})
+}
+
 func TestDocument_DecodeInto(t *testing.T) {
 	t.Parallel()
 

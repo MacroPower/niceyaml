@@ -111,6 +111,38 @@ func (r *Resolver) Deref(node ast.Node) (ast.Node, error) {
 	return content, nil
 }
 
+// Anchor returns the anchor, an [*ast.AnchorNode], that node refers to
+// when node is an alias. That is the anchor whose content
+// [Resolver.Deref] reaches first when it follows the alias. Where the
+// anchor holds another alias, Anchor stops at the anchor, while Deref
+// goes on to the content of the anchor the second alias refers to.
+//
+// Returns an error wrapping [ErrAlias] when node is not an alias, and for
+// an alias that has no name or names no anchor before it.
+func (r *Resolver) Anchor(node ast.Node) (ast.Node, error) {
+	alias, ok := node.(*ast.AliasNode)
+	if !ok || alias == nil {
+		return nil, fmt.Errorf("anchor: %w: not an alias", ErrAlias)
+	}
+
+	tk := nodeToken(alias.Value)
+	if tk == nil {
+		return nil, fmt.Errorf("anchor: %w: alias has no name", ErrAlias)
+	}
+
+	target, ok := r.resolver.targets[alias]
+	if !ok {
+		return nil, fmt.Errorf("anchor: %w: *%s has no anchor before it", ErrAlias, tk.Value)
+	}
+
+	anchor, ok := r.resolver.owners[target]
+	if !ok {
+		return nil, fmt.Errorf("anchor: %w: *%s has no anchor before it", ErrAlias, tk.Value)
+	}
+
+	return anchor, nil
+}
+
 // MergeSources returns the mappings the `<<` merge keys of the mapping at
 // node bring in, in the order the decoder applies them. The merge keys go
 // in document order and the sources of one merge key in sequence order,

@@ -537,10 +537,9 @@ type document struct {
 	// parser makes for a value the document leaves out, such as the null
 	// of a key without a value, which no lexer token stands for.
 	nodeTokens map[*token.Token]struct{}
-	// The nodes of root that register anchors, which indexAnchors
-	// collects for the first decode of a node below the body, so each
-	// decode primes the anchors it needs without walking the document.
-	anchors *anchorIndex
+	// The tree the go-yaml decoder reads for the document, which
+	// decodeTree builds for the first decode.
+	tree *decodeTree
 	// The tokens of the whole document.
 	tokens token.Tokens
 	// The tokens that carry a position, in the order of their offsets,
@@ -553,8 +552,8 @@ type document struct {
 	resolverOnce sync.Once
 	// Collects nodeTokens once.
 	nodeTokensOnce sync.Once
-	// Creates anchors once, for the first decode of a node below the body.
-	anchorsOnce sync.Once
+	// Builds tree once, for the first decode.
+	treeOnce sync.Once
 }
 
 // pathResolver returns the [paths.Resolver] for the document, and creates
@@ -1448,6 +1447,14 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // An alias inside the node resolves against the anchors of the whole
 // document, to the anchor of its name defined last before the alias,
 // inside the node or outside it, as a path through the alias resolves.
+// That holds whatever order the decoder reads the anchors in, including
+// the order of the fields of a struct. A failure in an anchor outside the
+// node that the node reads, directly or through another anchor, fails
+// the decode, as it fails a decode of the whole document. When two
+// anchors of the document share a name, the decoder reads a copy of the
+// document in which each of them, and each alias to one of them, carries
+// a name of its own, so an [ast.Node] the decode fills, or one an
+// UnmarshalYAML method takes, spells such an alias with that name.
 //
 // [Decoder.DecodeInto] decodes with options stated once, for every node
 // a [Decoder] decodes.
@@ -1562,26 +1569,32 @@ func (n *Node) yamlOptions(yamlOpts []yaml.DecodeOption) []yaml.DecodeOption {
 // as a "!!seq" tag over no value, also leaves v as it is, since the
 // go-yaml decoder reads it as no value. A panic in the decoder comes back
 // as an error that matches [ErrDecodeRejected], bound at the first token
-// of node that is not a comment.
+// of node that is not a comment. The decoder reads node in the
+// [decodeTree] of the document, and for a node below the body, a failure
+// in an anchor outside node that node reads comes back as its error.
 func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
 	if !hasContent(node) || isTaggedNull(node) {
 		return nil
 	}
 
 	dec := yaml.NewDecoder(bytes.NewReader(nil), yamlOpts...)
+	view := n.doc.decodeTree().view(node)
 
 	// The decoder registers the anchors of the node it decodes, so an alias
 	// in a node below the body finds an anchor defined elsewhere in the
 	// document only after the decoder has seen that anchor.
 	if node != n.doc.root.Body {
-		n.doc.primeAnchors(ctx, dec, node)
+		err := n.doc.primeAnchors(ctx, dec, view)
+		if err != nil {
+			return n.bindDecodeError(err)
+		}
 	}
 
 	// The go-yaml decoder panics on some values it cannot read, such as a
 	// tagged null under a mapping key decoded into a slice. The recover
 	// also catches a panic in a value's own UnmarshalYAML, which then
 	// comes back as a rejection too.
-	return n.bindDecodeError(decodeWithRecover(ctx, dec, decodeView(node), decodeTarget(v, node)))
+	return n.bindDecodeError(decodeWithRecover(ctx, dec, view, decodeTarget(v, node)))
 }
 
 // decodeView returns node as the go-yaml decoder reads it: the same tree,
@@ -1746,25 +1759,31 @@ func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 // comes back as that unmarshaler's error, with the text and sentinels of
 // its wrapper. An UnmarshalYAML that parses the bytes it gets returns a
 // [yaml.Error] of its own, whose token comes from that parse rather than
-// the source, so it stays the value's own error. Returns nil for a nil
-// err.
+// the source, so it stays the value's own error. A message that names an
+// anchor the [decodeTree] renamed names it as the document does. Returns
+// nil for a nil err.
 func (n *Node) bindDecodeError(err error) error {
 	if err == nil {
 		return nil
 	}
 
+	tree := n.doc.decodeTree()
+
 	yamlErr, ok := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 	if !ok || !n.holdsToken(yamlErr.GetToken()) {
-		return n.Bind(err)
+		return n.Bind(tree.restoreError(err))
 	}
 
-	return n.Bind(WrapError(decodeRejectedError{yamlMessageError{yamlErr}}, atToken(yamlErr.GetToken())))
+	msg := tree.restoreNames(yamlErr.GetMessage())
+
+	return n.Bind(WrapError(decodeRejectedError{yamlMessageError{err: yamlErr, msg: msg}}, atToken(yamlErr.GetToken())))
 }
 
 // holdsToken reports whether tk is a token of the source's parse. That is
 // one of the tokens the parser built its tree from, or one it made for a
-// node of the document, such as the null of a key without a value. It
-// compares pointers, so a token from another parse, such as the one an
+// node of the document, such as the null of a key without a value, or a
+// token of the second parse the [decodeTree] of the document comes from.
+// It compares pointers, so a token from another parse, such as the one an
 // UnmarshalYAML runs on its bytes, never matches, however closely it
 // resembles a token of the source.
 func (n *Node) holdsToken(tk *token.Token) bool {
@@ -1773,6 +1792,10 @@ func (n *Node) holdsToken(tk *token.Token) bool {
 	}
 
 	if _, ok := n.source.fileTokens[tk]; ok {
+		return true
+	}
+
+	if _, ok := n.doc.decodeTree().tokens[tk]; ok {
 		return true
 	}
 
@@ -1794,12 +1817,18 @@ func (e decodeRejectedError) Is(target error) bool {
 // yamlMessageError is a [yaml.Error] reduced to its message. The go-yaml text
 // carries its own position and excerpt, which the [SourceError] binding
 // the error renders itself, so the message alone goes in the chain, and
-// the original error stays reachable through [errors.As].
+// the original error stays reachable through [errors.As]. A msg that is
+// not empty stands in for the message of err.
 type yamlMessageError struct {
 	err yaml.Error
+	msg string
 }
 
 func (e yamlMessageError) Error() string {
+	if e.msg != "" {
+		return e.msg
+	}
+
 	return e.err.GetMessage()
 }
 

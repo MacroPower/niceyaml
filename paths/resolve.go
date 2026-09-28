@@ -65,7 +65,8 @@ func (m match) key() match {
 }
 
 // resolver walks a document for the selectors of a [Path]. Its targets map
-// holds the content of the anchor each alias refers to.
+// holds the content of the anchor each alias refers to, and its owners map
+// holds the anchor of each such content.
 //
 // The keys map holds the [*mappingKeys] of each mapping a lookup has read,
 // so a later lookup in that mapping finds a key without reading its
@@ -75,6 +76,7 @@ func (m match) key() match {
 // Create instances with [newResolver].
 type resolver struct {
 	targets map[*ast.AliasNode]ast.Node
+	owners  map[ast.Node]*ast.AnchorNode
 	keys    sync.Map
 }
 
@@ -131,13 +133,14 @@ func newResolver(doc *ast.DocumentNode) *resolver {
 	b := &aliasBinder{
 		anchors: newAnchorSet(),
 		targets: map[*ast.AliasNode]ast.Node{},
+		owners:  map[ast.Node]*ast.AnchorNode{},
 		merged:  map[*ast.MappingNode]anchorSet{},
 		open:    map[*ast.MappingNode]bool{},
 	}
 
 	ast.Walk(b, doc.Body)
 
-	return &resolver{targets: b.targets}
+	return &resolver{targets: b.targets, owners: b.owners}
 }
 
 // anchorSet holds the anchors the decoder has recorded so far, in the two
@@ -194,13 +197,13 @@ func (s anchorSet) add(other anchorSet) {
 }
 
 // aliasBinder binds aliases to anchors while [ast.Walk] visits a document in
-// order. The anchors set holds the anchors visited so far, and the targets
-// map holds the content each visited alias refers to. Walk visits an
-// anchor before its content, so an alias inside that content refers to
-// the anchor around it. The binder records the anchor again once it has
-// walked the content, as the decoder does, so an alias after the content
-// refers to the anchor around it rather than to one of the same name
-// inside it.
+// order. The anchors set holds the anchors visited so far, the targets map
+// holds the content each visited alias refers to, and the owners map holds
+// the anchor of each content an anchor names. Walk visits an anchor before
+// its content, so an alias inside that content refers to the anchor around
+// it. The binder records the anchor again once it has walked the content,
+// as the decoder does, so an alias after the content refers to the anchor
+// around it rather than to one of the same name inside it.
 //
 // The merged map holds, for each mapping a merge key has brought in through
 // an alias, the anchors that merging it records, from
@@ -210,6 +213,7 @@ func (s anchorSet) add(other anchorSet) {
 type aliasBinder struct {
 	anchors anchorSet
 	targets map[*ast.AliasNode]ast.Node
+	owners  map[ast.Node]*ast.AnchorNode
 	merged  map[*ast.MappingNode]anchorSet
 	open    map[*ast.MappingNode]bool
 }
@@ -228,6 +232,7 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 	switch n := node.(type) {
 	case *ast.AnchorNode:
 		name := nodeToken(n.Name)
+		b.owners[n.Value] = n
 		b.anchors.record(name, n.Value)
 
 		if mapping := anchoredMapping(n.Value); mapping != nil {
@@ -312,6 +317,8 @@ func (b *aliasBinder) findSources(value ast.Node, nodes map[string]ast.Node, bin
 		for !isNilNode(node) {
 			switch n := node.(type) {
 			case *ast.AnchorNode:
+				b.owners[n.Value] = n
+
 				if name := nodeToken(n.Name); name != nil {
 					nodes[name.Value] = n.Value
 				}

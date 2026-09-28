@@ -2,57 +2,400 @@ package niceyaml
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"sort"
+	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 )
 
-// anchorIndex lists the nodes of a document that register anchors when
-// the go-yaml decoder reads them, so a decode of a node below the body
-// primes the anchors its aliases need without reading the whole body.
+// decodeTree is the tree the go-yaml decoder reads for one document.
+//
+// The decoder keeps the anchors it has read in maps keyed by name, so an
+// anchor it reads later hides an earlier one of the same name from every
+// alias it reads after that. It reads a node in two passes, and a decode
+// of a node below the body reads the anchors outside the node before it,
+// so neither order matches the document. The tree therefore gives each
+// anchor whose name another anchor of the document shares a name of its
+// own, and gives each alias the name of the anchor the document's
+// [paths.Resolver] binds it to, so every alias reads that anchor whatever
+// order the decoder reads the anchors in.
+//
+// Renaming changes tokens, which the tree the [Source] shares must not
+// see, so a document that renames an anchor reads a second parse of the
+// Source from [Source.decodeParse]. A renamed anchor keeps the text of the
+// Source, so the text the decoder hands an UnmarshalYAML method holds the
+// names the document spells. A document whose anchor names differ reads
+// the tree of the Source through [decodeView], which copies only the
+// aliases, and the nodes above them, to drop the comments on their names.
+//
+// Create instances with [newDecodeTree].
+type decodeTree struct {
+	// The body of the document as the Source parsed it.
+	source ast.Node
+	// The body of the document as the decoder reads it.
+	body ast.Node
+	// The node of body that stands for each node of source outside its
+	// comments, which scoped fills for the first decode of a node below
+	// the body when the tree renames no anchor.
+	nodes map[ast.Node]ast.Node
+	// The tokens of the second parse the tree comes from, if any, which
+	// the errors of the decoder may name.
+	tokens map[*token.Token]struct{}
+	// Spells each name the tree gives an anchor as the document does,
+	// for the messages the decoder reports, or nil when no anchor has a
+	// name of its own.
+	names *strings.Replacer
+	// The anchors of body, which scoped lists for the first decode of a
+	// node below the body.
+	anchors *anchorIndex
+	// Fills nodes and anchors once.
+	scopedOnce sync.Once
+}
+
+// decodeTree returns the [*decodeTree] of the document, and builds it on
+// the first call.
+func (d *document) decodeTree() *decodeTree {
+	d.treeOnce.Do(func() {
+		d.tree = d.newDecodeTree()
+	})
+
+	return d.tree
+}
+
+// newDecodeTree creates a new [*decodeTree] for the document.
+func (d *document) newDecodeTree() *decodeTree {
+	body := d.root.Body
+
+	if shared := sharedAnchorNames(body); len(shared) > 0 {
+		if tree, ok := d.renamedTree(shared); ok {
+			return tree
+		}
+	}
+
+	return &decodeTree{source: body, body: decodeView(body)}
+}
+
+// renamedTree returns the [*decodeTree] of the document from a second
+// parse of the Source, with a name of its own for each anchor whose name
+// is in shared. It reports false when the second parse does not give the
+// document the same nodes, which a parse of the same tokens always does.
+func (d *document) renamedTree(shared map[string]bool) (*decodeTree, bool) {
+	src := d.node.source
+
+	file, fileTokens := src.decodeParse()
+	if file == nil {
+		return nil, false
+	}
+
+	i := slices.Index(src.file.Docs, d.root)
+	if i < 0 || i >= len(file.Docs) {
+		return nil, false
+	}
+
+	body := file.Docs[i].Body
+
+	nodes, ok := pairNodes(d.root.Body, body)
+	if !ok {
+		return nil, false
+	}
+
+	tokens := tokenCollector{}
+	ast.Walk(tokens, body)
+
+	for tk := range fileTokens {
+		tokens[tk] = struct{}{}
+	}
+
+	// Each anchor with a shared name gets the name followed by the count
+	// of anchors of that name so far. A name never holds a space, so the
+	// new name is no other anchor's.
+	renamed := map[ast.Node]string{}
+	count := map[string]int{}
+
+	var pairs []string
+
+	for _, n := range sourceNodes(d.root.Body) {
+		anchor, ok := n.(*ast.AnchorNode)
+		if !ok {
+			continue
+		}
+
+		name, ok := nodeName(anchor.Name)
+		if !ok || !shared[name] {
+			continue
+		}
+
+		count[name]++
+		unique := name + " [" + strconv.Itoa(count[name]) + "]"
+		renamed[anchor] = unique
+		pairs = append(pairs, unique, name)
+
+		// The decoder names an anchor by the value of the token of its
+		// name, while the go-yaml formatter writes the token's text.
+		if view, ok := nodes[anchor].(*ast.AnchorNode); ok {
+			if tk := nodeToken(view.Name); tk != nil {
+				tk.Value = unique
+			}
+		}
+	}
+
+	resolver := d.pathResolver()
+
+	for n, v := range nodes {
+		alias, ok := n.(*ast.AliasNode)
+		if !ok {
+			continue
+		}
+
+		view, ok := v.(*ast.AliasNode)
+		if !ok {
+			continue
+		}
+
+		// An alias that names no anchor before it keeps its name, so the
+		// decoder reports it as the document spells it.
+		name := ""
+
+		anchor, err := resolver.Anchor(alias)
+		if err == nil {
+			name = renamed[anchor]
+		}
+
+		renameAlias(view, name)
+	}
+
+	return &decodeTree{
+		source: d.root.Body,
+		body:   body,
+		nodes:  nodes,
+		tokens: tokens,
+		names:  strings.NewReplacer(pairs...),
+	}, true
+}
+
+// renameAlias gives alias, a node of a second parse, a name free of
+// comments, as [decodeView] does, and changes that name to name when name
+// is not empty. The decoder looks an alias up by the value of the token
+// of its name, and by the text of the node of its name.
+func renameAlias(alias *ast.AliasNode, name string) {
+	tk := nodeToken(alias.Value)
+	if tk == nil {
+		return
+	}
+
+	if name != "" {
+		tk.Value = name
+	}
+
+	alias.Value = ast.String(tk)
+}
+
+// view returns the node of the tree that stands for node, a node of the
+// document outside its comments. A node the tree does not hold, which no
+// node of the document is, comes back as [decodeView] reads it.
+func (t *decodeTree) view(node ast.Node) ast.Node {
+	if node == t.source {
+		return t.body
+	}
+
+	t.scoped()
+
+	if v, ok := t.nodes[node]; ok {
+		return v
+	}
+
+	return decodeView(node)
+}
+
+// index returns the [*anchorIndex] of the tree.
+func (t *decodeTree) index() *anchorIndex {
+	t.scoped()
+
+	return t.anchors
+}
+
+// scoped fills the parts of the tree that only a decode of a node below
+// the body reads, on the first call.
+func (t *decodeTree) scoped() {
+	t.scopedOnce.Do(func() {
+		if t.nodes == nil {
+			t.nodes, _ = pairNodes(t.source, t.body)
+		}
+
+		t.anchors = newAnchorIndex(t.body)
+	})
+}
+
+// restoreNames returns msg with each name the tree gave an anchor spelled
+// as the document does.
+func (t *decodeTree) restoreNames(msg string) string {
+	if t.names == nil {
+		return msg
+	}
+
+	return t.names.Replace(msg)
+}
+
+// restoreError returns err with a message that spells each name the tree
+// gave an anchor as the document does. It returns err itself when the
+// message names no such anchor, and when err holds an [*Error] or a
+// [*SourceError], whose message the binding writes from its parts.
+func (t *decodeTree) restoreError(err error) error {
+	if t.names == nil {
+		return err
+	}
+
+	var (
+		located *Error
+		bound   *SourceError
+	)
+
+	if errors.As(err, &located) || errors.As(err, &bound) {
+		return err
+	}
+
+	msg := err.Error()
+
+	restored := t.names.Replace(msg)
+	if restored == msg {
+		return err
+	}
+
+	return restoredError{err: err, msg: restored}
+}
+
+// restoredError is an error from the decoder with a message that spells
+// the names of anchors as the document does. It unwraps to the error the
+// decoder returned.
+type restoredError struct {
+	err error
+	msg string
+}
+
+func (e restoredError) Error() string {
+	return e.msg
+}
+
+func (e restoredError) Unwrap() error {
+	return e.err
+}
+
+// sharedAnchorNames returns the names that more than one anchor under
+// body has.
+func sharedAnchorNames(body ast.Node) map[string]bool {
+	seen := map[string]bool{}
+	shared := map[string]bool{}
+
+	for _, n := range sourceNodes(body) {
+		anchor, ok := n.(*ast.AnchorNode)
+		if !ok {
+			continue
+		}
+
+		name, ok := nodeName(anchor.Name)
+		if !ok {
+			continue
+		}
+
+		if seen[name] {
+			shared[name] = true
+		}
+
+		seen[name] = true
+	}
+
+	return shared
+}
+
+// pairNodes maps each node under a, outside its comments, to the node in
+// the same place under b. It reports false when the two trees differ in
+// shape.
+func pairNodes(a, b ast.Node) (map[ast.Node]ast.Node, bool) {
+	from, to := sourceNodes(a), sourceNodes(b)
+	if len(from) != len(to) {
+		return nil, false
+	}
+
+	pairs := make(map[ast.Node]ast.Node, len(from))
+
+	for i, n := range from {
+		if n.Type() != to[i].Type() {
+			return nil, false
+		}
+
+		pairs[n] = to[i]
+	}
+
+	return pairs, true
+}
+
+// sourceNodes returns the nodes under node outside its comments, in the
+// order [ast.Walk] visits them.
+func sourceNodes(node ast.Node) []ast.Node {
+	var nodes nodeCollector
+
+	ast.Walk(&nodes, node)
+
+	return nodes
+}
+
+// nodeCollector is an [ast.Visitor] that collects the nodes it visits,
+// and leaves out comments.
+type nodeCollector []ast.Node
+
+// Visit implements [ast.Visitor].
+func (c *nodeCollector) Visit(node ast.Node) ast.Visitor {
+	if isNilNode(node) || node.Type() == ast.CommentType {
+		return nil
+	}
+
+	*c = append(*c, node)
+
+	return c
+}
+
+// anchorIndex lists the anchors of a [decodeTree], so a decode of a node
+// below the body primes the anchors its aliases need without reading the
+// whole body.
 //
 // Create instances with [newAnchorIndex].
 type anchorIndex struct {
-	// The definitions of each anchor name, in document order.
-	defs map[string][]*ast.AnchorNode
-	// The nodes that register at least one anchor, in document order.
+	// The anchors, in document order.
 	entries []anchorEntry
 }
 
-// anchorEntry is a node that registers anchors when the decoder reads it:
-// an anchor, or a mapping entry with a `<<` merge key, which records
-// again the anchors of the mappings it merges.
+// anchorEntry is an anchor, which registers its name and the names of the
+// anchors inside it when the decoder reads it.
 type anchorEntry struct {
 	node ast.Node
 	// The names of the anchors a decode of node registers, and the names
-	// its aliases read, which include the names read inside each mapping
-	// a merge key brings in. Each holds at least the names the decoder
-	// uses, and may hold more.
+	// its aliases read.
 	registers, reads []string
 	// The offsets of the first and the last token under node.
 	start, end int
 }
 
-// newAnchorIndex creates a new [*anchorIndex] for the document body.
+// newAnchorIndex creates a new [*anchorIndex] for body.
 func newAnchorIndex(body ast.Node) *anchorIndex {
-	var found registrars
+	idx := &anchorIndex{}
 
-	ast.Walk(&found, body)
+	for _, node := range sourceNodes(body) {
+		if _, ok := node.(*ast.AnchorNode); !ok {
+			continue
+		}
 
-	idx := &anchorIndex{defs: found.defs}
-
-	for _, node := range found.nodes {
 		first, last := tokenBounds(node)
 		if len(first) == 0 {
 			continue
 		}
 
-		names := idx.namesOf(node)
-		if len(names.registers) == 0 {
-			continue
-		}
+		names := namesOf(node)
 
 		idx.entries = append(idx.entries, anchorEntry{
 			node:      node,
@@ -72,48 +415,35 @@ func newAnchorIndex(body ast.Node) *anchorIndex {
 	return idx
 }
 
-// indexAnchors returns the [*anchorIndex] of the document, and creates it
-// on the first call.
-func (d *document) indexAnchors() *anchorIndex {
-	d.anchorsOnce.Do(func() {
-		d.anchors = newAnchorIndex(d.root.Body)
-	})
-
-	return d.anchors
-}
-
 // primeAnchors registers with dec the anchors that the aliases in node,
-// a node below the body of the document, refer to. Each alias refers to
-// the last anchor of its name the decoder registers before it. The pass
-// decodes the nodes that register anchors and end before node, in
-// document order and each on its own. Those are the anchors, and the `<<`
-// merge keys, which record again the anchors of the mappings they merge.
-// It decodes only the ones that register a name node reads, or a name
-// read by one it decodes after them, so its cost follows the anchors node
-// needs rather than the size of the document. An anchor or merge key that
-// holds node counts for the anchors inside it that end before node. An
-// anchor that holds node registers its name as null, as it is while the
-// decoder reads the value of the anchor.
+// a node of the [decodeTree] below its body, refer to. The pass decodes
+// the anchors that end before node, in document order and each on its
+// own. It decodes only the ones that register a name node reads, or a
+// name read by one it decodes after them, so its cost follows the anchors
+// node needs rather than the size of the document. An anchor that holds
+// node counts for the anchors inside it that end before node, and
+// registers its own name as null, as it is while the decoder reads the
+// value of the anchor.
 //
-// The pass only primes anchors, so a failure in it, which concerns a
-// value the caller did not ask for, is not the caller's error, and it
-// stops none of the decodes after it. An alias the pass could not resolve
-// fails again in the decode of the node itself. A context that ends stops
-// the pass.
-func (d *document) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast.Node) {
-	idx := d.indexAnchors()
+// Every anchor of the tree has a name of its own, so the pass decodes
+// only anchors that node, or an anchor node reads, refers to. A failure
+// in one of them would leave an alias with nothing to read, so the pass
+// stops and returns it, as a decode of the whole document fails there
+// too. A context that ends stops the pass, and the pass then returns nil.
+func (d *document) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast.Node) error {
+	idx := d.decodeTree().index()
 	if len(idx.entries) == 0 {
-		return
+		return nil
 	}
 
-	needed := idx.namesOf(node).reads
+	needed := namesOf(node).reads
 	if len(needed) == 0 {
-		return
+		return nil
 	}
 
 	first, _ := tokenBounds(node)
 	if len(first) == 0 {
-		return
+		return nil
 	}
 
 	start := first[0].Position.Offset
@@ -166,15 +496,22 @@ func (d *document) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast
 			continue
 		}
 
-		if ctx.Err() != nil {
-			return
+		// A context that ends stops the pass.
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
 		}
 
 		var sink any
 
-		//nolint:errcheck // The pass only primes anchors.
-		_ = decodeWithRecover(ctx, dec, decodeView(e.node), &sink)
+		err := decodeWithRecover(ctx, dec, e.node, &sink)
+		if err != nil {
+			return err
+		}
 	}
+
+	return nil
 }
 
 // pendingEntry returns the entry for an anchor with the name of anchor
@@ -218,12 +555,10 @@ func readsAny(needed map[string]struct{}, names []string) bool {
 
 // namesOf returns the names of the anchors a decode of node registers,
 // and the names its aliases read.
-func (idx *anchorIndex) namesOf(node ast.Node) *anchorNames {
+func namesOf(node ast.Node) *anchorNames {
 	names := &anchorNames{
-		defs:      idx.defs,
 		registers: map[string]struct{}{},
 		reads:     map[string]struct{}{},
-		followed:  map[string]bool{},
 	}
 
 	ast.Walk(names, node)
@@ -232,16 +567,10 @@ func (idx *anchorIndex) namesOf(node ast.Node) *anchorNames {
 }
 
 // anchorNames is an [ast.Visitor] that collects the names of the anchors
-// the nodes it visits define and the names of the aliases they hold. At a
-// `<<` merge key, it also visits the content of each anchor that an alias
-// in the merged value may name, since the decoder reads the mapping it
-// merges again there. It follows each name once, through every anchor
-// of that name, so the names hold at least the ones the decoder uses.
+// the nodes it visits define and the names of the aliases they hold.
 type anchorNames struct {
-	defs      map[string][]*ast.AnchorNode
 	registers map[string]struct{}
 	reads     map[string]struct{}
-	followed  map[string]bool
 }
 
 // Visit implements [ast.Visitor].
@@ -260,107 +589,30 @@ func (a *anchorNames) Visit(node ast.Node) ast.Visitor {
 		if name, ok := nodeName(n.Value); ok {
 			a.reads[name] = struct{}{}
 		}
-
-	case *ast.MappingValueNode:
-		if isMergeEntry(n) {
-			a.follow(n.Value)
-		}
 	}
 
 	return a
-}
-
-// follow visits the content of each anchor an alias in value may name.
-func (a *anchorNames) follow(value ast.Node) {
-	aliases := aliasNames{}
-
-	ast.Walk(aliases, value)
-
-	for name := range aliases {
-		if a.followed[name] {
-			continue
-		}
-
-		a.followed[name] = true
-
-		for _, def := range a.defs[name] {
-			ast.Walk(a, def.Value)
-		}
-	}
-}
-
-// aliasNames is an [ast.Visitor] that collects the names of the aliases
-// it visits.
-type aliasNames map[string]struct{}
-
-// Visit implements [ast.Visitor].
-func (a aliasNames) Visit(node ast.Node) ast.Visitor {
-	if isNilNode(node) {
-		return nil
-	}
-
-	if alias, ok := node.(*ast.AliasNode); ok {
-		if name, ok := nodeName(alias.Value); ok {
-			a[name] = struct{}{}
-		}
-	}
-
-	return a
-}
-
-// registrars is an [ast.Visitor] that collects, in document order, every
-// node that registers anchors when the decoder reads it, at any depth,
-// and the definitions of each anchor name.
-type registrars struct {
-	defs  map[string][]*ast.AnchorNode
-	nodes []ast.Node
-}
-
-// Visit implements [ast.Visitor].
-func (r *registrars) Visit(node ast.Node) ast.Visitor {
-	if isNilNode(node) {
-		return nil
-	}
-
-	switch n := node.(type) {
-	case *ast.AnchorNode:
-		r.nodes = append(r.nodes, n)
-
-		if name, ok := nodeName(n.Name); ok {
-			if r.defs == nil {
-				r.defs = map[string][]*ast.AnchorNode{}
-			}
-
-			r.defs[name] = append(r.defs[name], n)
-		}
-
-	case *ast.MappingValueNode:
-		if isMergeEntry(n) {
-			r.nodes = append(r.nodes, n)
-		}
-	}
-
-	return r
-}
-
-// isMergeEntry reports whether entry has a `<<` merge key.
-func isMergeEntry(entry *ast.MappingValueNode) bool {
-	return entry != nil && entry.Key != nil && entry.Key.IsMergeKey()
 }
 
 // nodeName returns the value of the token of node, the name the decoder
 // gives an anchor or looks an alias up by.
 func nodeName(node ast.Node) (string, bool) {
-	if isNilNode(node) {
-		return "", false
-	}
-
-	tk := node.GetToken()
+	tk := nodeToken(node)
 	if tk == nil {
 		return "", false
 	}
 
 	return tk.Value, true
+}
+
+// nodeToken returns the token of node, or nil for a nil node, including
+// a typed nil a hand-built tree may hold.
+func nodeToken(node ast.Node) *token.Token {
+	if isNilNode(node) {
+		return nil
+	}
+
+	return node.GetToken()
 }
 
 // setKeys returns the keys of set.
