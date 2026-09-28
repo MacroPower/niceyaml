@@ -97,8 +97,10 @@ func (r Row) Width(col int) int {
 }
 
 // TrimLastCluster returns s without its last grapheme cluster, the
-// character a user sees. It splits s at the cluster boundaries [NewRow]
-// uses.
+// character a user sees. It splits s at the grapheme cluster boundaries of
+// the raw text. These match the boundaries [NewRow] uses except around
+// control characters, which NewRow segments as their pictures, so a CR LF
+// pair is one cluster here but two in a [Row].
 func TrimLastCluster(s string) string {
 	var cluster string
 
