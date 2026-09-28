@@ -22,9 +22,9 @@
 //   - Text -> TextOK, TextWarn, TextError: Base text styles
 //   - Comment -> CommentPreproc: Comments and directives
 //   - Literal -> LiteralString, LiteralNumber, LiteralBoolean, LiteralNull: Values
-//   - Name -> NameTag, NameAnchor, NameAlias: Identifiers
-//   - Punctuation -> PunctuationMapping, PunctuationSequence, PunctuationBlock:
-//     Syntax
+//   - Name -> NameTag, NameAnchor, NameAlias, NameDecorator: Identifiers
+//   - Punctuation -> PunctuationMapping, PunctuationSequence, PunctuationBlock,
+//     PunctuationCollectEntry, PunctuationHeading: Syntax
 //   - Generic -> GenericDeleted, GenericInserted, GenericError: Diff and error
 //     markers
 //   - Generic -> GenericHighlight -> GenericHighlightDim: Search and selection
