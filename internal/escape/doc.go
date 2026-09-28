@@ -2,8 +2,8 @@
 //
 // # Control Characters
 //
-// When displaying raw content that may contain ANSI escape sequences or other
-// control characters, terminals interpret these bytes rather than showing them.
+// A terminal interprets the ANSI escape sequences and other control
+// characters in raw content rather than showing them.
 //
 // The [Control] function replaces control characters with visible Unicode
 // representations. Printing the result leaves terminal state unchanged.

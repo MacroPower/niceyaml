@@ -29,10 +29,10 @@ const (
 )
 
 // Control replaces control characters with visible representations:
-//   - C0 controls ([NUL]-[US]) -> Unicode Control Pictures
-//     ([NULPicture]-[USPicture])
-//   - C1 controls ([PAD]-[APC]) -> [ReplacementCharacter]
-//   - [DEL] -> [DELPicture]
+//   - C0 controls ([NUL]-[US]) become Unicode Control Pictures
+//     ([NULPicture]-[USPicture]).
+//   - C1 controls ([PAD]-[APC]) become [ReplacementCharacter].
+//   - [DEL] becomes [DELPicture].
 //
 // For example, an ANSI escape sequence like "\x1b[31m" becomes "␛[31m".
 func Control(s string) string {
