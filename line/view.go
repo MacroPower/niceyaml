@@ -468,7 +468,9 @@ func (v *View) decorated(i int) bool {
 // a caret at the column of the annotations below the line, and their
 // contents after the last caret. String does not render flags. The number
 // column is at least four wide and grows to fit the largest number in the
-// view, so every row lines up.
+// view, so every row lines up. Annotations whose column lies more than
+// [MaxColPastEnd] columns past the end of the content start at that
+// bound, as the printer starts them.
 //
 // Control characters render as their pictures, and a rune that takes two
 // cells in a terminal gets two carets, so the carets stay under the runes
@@ -495,7 +497,8 @@ func (v *View) String() string {
 		// as the content row renders it, so it lines up on a line holding
 		// wide or control characters.
 		if kept := anns.Filter(Above).WithContent(); len(kept) > 0 {
-			padding := strings.Repeat(" ", colWidth(ln, kept.Col()))
+			col := annotationCol(kept.Col(), ln.Width())
+			padding := strings.Repeat(" ", colWidth(ln, col))
 			rows = append(rows, blank+padding+escape.Control(strings.Join(kept.Contents(), "; ")))
 		}
 
@@ -534,14 +537,15 @@ func colWidth(ln *Line, col int) int {
 // line, a caret at the column of the annotations, and their contents after
 // the last caret. The carets take the cells the content row gives each
 // grapheme cluster, so they stay under the runes they mark on a line
-// holding wide, combining, or control characters. Returns "" when the line
-// has neither.
+// holding wide, combining, or control characters. The caret of the
+// annotations sits no further than [MaxColPastEnd] columns past the end of
+// the content. Returns "" when the line has neither.
 func markerRow(ln *Line, overlays Overlays, below Annotations) string {
 	marks := overlayMarks(overlays, ln.Width())
 
 	kept := below.WithContent()
 	if len(kept) > 0 {
-		col := max(0, kept.Col())
+		col := annotationCol(kept.Col(), ln.Width())
 		if col >= len(marks) {
 			marks = append(marks, make([]bool, col+1-len(marks))...)
 		}

@@ -1,6 +1,7 @@
 package line_test
 
 import (
+	"math"
 	"runtime"
 	"strings"
 	"testing"
@@ -1576,6 +1577,77 @@ func TestView_String_PlaceholderLine(t *testing.T) {
 	view := line.NewView(line.Collect(&line.Line{}))
 
 	assert.Equal(t, "     | ", view.String())
+}
+
+func TestView_String_FarAnnotationColumn(t *testing.T) {
+	t.Parallel()
+
+	// A column more than 1024 columns past the end of the content starts
+	// 1024 columns past it, after every cell of the content, as the
+	// printer starts it.
+	tcs := map[string]struct {
+		input     string
+		want      string
+		col       int
+		placement line.Placement
+	}{
+		"below at the max column": {
+			input:     "a: 1",
+			col:       math.MaxInt,
+			placement: line.Below,
+			want:      stringtest.JoinLF("   1 | a: 1", "     | "+strings.Repeat(" ", 4+1024)+"^ msg"),
+		},
+		"above at the max column": {
+			input:     "a: 1",
+			col:       math.MaxInt,
+			placement: line.Above,
+			want:      stringtest.JoinLF("     | "+strings.Repeat(" ", 4+1024)+"msg", "   1 | a: 1"),
+		},
+		"below past the bound": {
+			input:     "a: 1",
+			col:       1 << 32,
+			placement: line.Below,
+			want:      stringtest.JoinLF("   1 | a: 1", "     | "+strings.Repeat(" ", 4+1024)+"^ msg"),
+		},
+		"above past the bound": {
+			input:     "a: 1",
+			col:       1 << 32,
+			placement: line.Above,
+			want:      stringtest.JoinLF("     | "+strings.Repeat(" ", 4+1024)+"msg", "   1 | a: 1"),
+		},
+		"below at the bound": {
+			input:     "a: 1",
+			col:       4 + 1024,
+			placement: line.Below,
+			want:      stringtest.JoinLF("   1 | a: 1", "     | "+strings.Repeat(" ", 4+1024)+"^ msg"),
+		},
+		"below at the max column after wide runes": {
+			input:     "k: 日本語",
+			col:       math.MaxInt,
+			placement: line.Below,
+			want:      stringtest.JoinLF("   1 | k: 日本語", "     | "+strings.Repeat(" ", 9+1024)+"^ msg"),
+		},
+		"above at the max column after wide runes": {
+			input:     "k: 日本語",
+			col:       math.MaxInt,
+			placement: line.Above,
+			want:      stringtest.JoinLF("     | "+strings.Repeat(" ", 9+1024)+"msg", "   1 | k: 日本語"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := newTestView(t, tc.input+"\n", 1)
+			view.Annotate(0, line.Annotation{Content: "msg", Placement: tc.placement, Col: tc.col})
+
+			var got string
+
+			require.NotPanics(t, func() { got = view.String() })
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestOverlays_MarkerRow(t *testing.T) {

@@ -326,8 +326,8 @@ type AnnotationRow struct {
 
 	// Col is the column of the content the row starts under, in runes of
 	// [AnnotationContext.Content]. A negative Col starts at column zero,
-	// and a Col more than 1024 columns past the end of the content starts
-	// 1024 columns past it.
+	// and a Col more than [line.MaxColPastEnd] columns past the end of the
+	// content starts that many columns past it.
 	Col int
 }
 
@@ -1019,11 +1019,6 @@ func rowsAt(blocks [][]string, j int) []string {
 // for them.
 const minAnnotationWidth = 20
 
-// maxColPastEnd is the furthest an annotation row starts past the end of
-// the content, in columns, so a far column pads the row by at most this
-// many cells past the content.
-const maxColPastEnd = 1024
-
 // annotationRows renders the annotations of line idx of view, which is
 // ln, at the given placement as terminal rows without the gutter. Starts
 // holds the column of the content at which each wrapped row of the line
@@ -1046,7 +1041,7 @@ func (p *Printer) annotationRows(
 	}
 
 	cr := cells.NewRow(ln.Content())
-	lastCol := utf8.RuneCountInString(ln.Content()) + maxColPastEnd
+	lastCol := utf8.RuneCountInString(ln.Content()) + line.MaxColPastEnd
 	out := make([][]string, max(1, len(starts)))
 
 	for _, group := range anns.ByKind() {

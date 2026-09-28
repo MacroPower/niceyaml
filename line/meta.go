@@ -30,6 +30,19 @@ const (
 	FlagDeleted
 )
 
+// MaxColPastEnd is the furthest past the end of the content of a line, in
+// columns, that a renderer starts an [Annotation]. [View.String] and the
+// printer start an annotation whose [Annotation.Col] lies further out at
+// this bound, so a stray column such as [math.MaxInt] pads a bounded row.
+const MaxColPastEnd = 1024
+
+// annotationCol returns the column a renderer starts an annotation at when
+// its column is col and the content is width columns wide. The result lies
+// between zero and [MaxColPastEnd] columns past the end of the content.
+func annotationCol(col, width int) int {
+	return min(max(0, col), width+MaxColPastEnd)
+}
+
 // Annotation represents extra content added around a [Line].
 //
 // An annotation adds comments or notes to the rendered output and is not
