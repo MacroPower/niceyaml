@@ -29,8 +29,8 @@
 //	r := position.NewRange(start, end)
 //
 // A range is a pair of coordinates and knows nothing of the text it lies
-// on, so splitting a multi-line range into one range per line, each ending
-// where its line does, is a method of the lines that hold the text:
+// on. To split a multi-line range into one range per line, each ending
+// where its line does, call a method of the lines that hold the text,
 // [go.jacobcolvin.com/niceyaml/line.Lines.SliceLines].
 //
 // [Ranges] collects multiple ranges and provides methods like
@@ -47,10 +47,10 @@
 //	spans := position.GroupIndices([]int{0, 2, 10, 12}, 2) // Group with context.
 //	spans = spans.Expand(3).Clamp(0, 100)                  // Expand then clamp.
 //
-// [GroupIndices] is useful for creating context windows around matched
-// lines, merging adjacent matches when their context would overlap.
-// [ContextSpans] runs that chain in one call, grouping the indices, expanding
-// each span by the context, and clamping the result to the document:
+// [GroupIndices] builds context windows around matched lines and merges
+// adjacent matches when their context would overlap. [ContextSpans] runs
+// that chain in one call. It groups the indices, expands each span by the
+// context, and clamps the result to the document:
 //
 //	hunks := position.ContextSpans(errorLines, 2, lines.Len())
 package position

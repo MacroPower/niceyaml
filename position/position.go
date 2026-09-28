@@ -25,9 +25,9 @@ func New(line, col int) Position {
 	return Position{Line: line, Col: col}
 }
 
-// NewFromToken creates a new [Position] from a [*token.Token], converting from
-// the 1-indexed coordinates used by [token.Position] to the 0-indexed
-// coordinates used by this package.
+// NewFromToken creates a new [Position] from a [*token.Token]. It converts
+// the 1-indexed coordinates of [token.Position] to the 0-indexed
+// coordinates this package uses.
 //
 // The token comes from [go.jacobcolvin.com/niceyaml/tokens.Tokenize] or
 // from a parse over such tokens, whose Line and Column name the rune where
@@ -162,7 +162,8 @@ type Spans []Span
 // It decreases Start by amount and increases End by amount, and each value
 // saturates at the int limits rather than wrapping around. A negative amount
 // shrinks the spans, which can invert one.
-// Note: This does not clamp values; use [Spans.Clamp] afterward if needed.
+// Expand clamps nothing, so call [Spans.Clamp] afterward to keep the spans
+// within bounds.
 func (s Spans) Expand(amount int) Spans {
 	if len(s) == 0 {
 		return nil
@@ -176,11 +177,11 @@ func (s Spans) Expand(amount int) Spans {
 	return result
 }
 
-// Clamp returns new spans with all values clamped to [lower, upper), dropping
-// every span that holds nothing there: one that lies outside the bounds, one
-// that is empty, and one whose Start is past its End. Every span it returns
-// has a positive [Span.Len] and lies within the bounds. Returns nil when no
-// span remains.
+// Clamp returns new spans with all values clamped to [lower, upper). It
+// drops every span that holds nothing there: one that lies outside the
+// bounds, one that is empty, and one whose Start is past its End. Every
+// span it returns has a positive [Span.Len] and lies within the bounds.
+// Returns nil when no span remains.
 func (s Spans) Clamp(lower, upper int) Spans {
 	var result Spans
 
@@ -236,8 +237,8 @@ func subSat(a, b int) int {
 // Ranges represents a slice of [Range] values.
 type Ranges []Range
 
-// UniqueValues returns all unique [Range] values in the collection,
-// preserving insertion order.
+// UniqueValues returns all unique [Range] values in the collection, in
+// insertion order.
 func (rs Ranges) UniqueValues() Ranges {
 	if len(rs) == 0 {
 		return nil
@@ -312,10 +313,10 @@ func (rs Ranges) String() string {
 }
 
 // GroupIndices groups indices into [Span] values. Indices within context
-// distance of each other share a span. The indices need not be sorted, and
-// a negative context counts as 0.
+// distance of each other share a span. The indices may come in any order,
+// and a negative context counts as 0.
 //
-// Uses threshold = 2*context + 1 which ensures indices merge when their context
+// The threshold is 2*context + 1, so indices merge when their context
 // windows would overlap or be adjacent. The threshold saturates at
 // [math.MaxInt], so a huge context merges every index into one span.
 //
