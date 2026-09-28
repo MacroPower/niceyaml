@@ -235,6 +235,40 @@ func TestValidateCmdSchemaError(t *testing.T) {
 	}
 }
 
+func TestValidateCmdCanceled(t *testing.T) {
+	t.Parallel()
+
+	// A canceled run stops before the next file and reports the
+	// cancellation once, however many files are left.
+	dir := t.TempDir()
+
+	var args []string
+
+	for _, name := range []string{"a.yaml", "b.yaml", "c.yaml"} {
+		path := filepath.Join(dir, name)
+		require.NoError(t, os.WriteFile(path, []byte("name: a\n"), 0o600))
+
+		args = append(args, path)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	out := &bytes.Buffer{}
+
+	cmd := validateCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs(args)
+
+	err := cmd.ExecuteContext(ctx)
+	require.ErrorIs(t, err, context.Canceled)
+	assert.Equal(t, 1, strings.Count(err.Error(), context.Canceled.Error()), err.Error())
+	assert.Empty(t, out.String())
+}
+
 func TestValidateCmdOutput(t *testing.T) {
 	t.Parallel()
 

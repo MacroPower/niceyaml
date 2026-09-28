@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"charm.land/fang/v2"
 	"github.com/charmbracelet/x/term"
@@ -22,10 +24,14 @@ func main() {
 	// excerpts wrap to it.
 	errPrinter := printer.New(printer.WithWrap(terminalWidth()))
 
-	err := fang.Execute(context.Background(), rootCmd,
+	ctx, stop := notifyContext(context.Background())
+
+	err := fang.Execute(ctx, rootCmd,
 		fang.WithErrorHandler(fangs.NewErrorHandler(fangs.WithPrinter(errPrinter))),
 		fang.WithColorSchemeFunc(helpColorScheme()),
 	)
+
+	stop()
 
 	code := 0
 	if err != nil {
@@ -44,6 +50,22 @@ func main() {
 	if code != 0 {
 		os.Exit(code)
 	}
+}
+
+// notifyContext returns a copy of parent that the first SIGINT or SIGTERM
+// cancels, so a run stops its work and main still stops the profiler,
+// which writes the profiles. The signal then gets its default action
+// back, so a second one kills a run stuck in work that ignores the
+// context. Call the returned function once the command returns.
+func notifyContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
+	return ctx, stop
 }
 
 // lightHelpTheme names the built-in theme for help output on a light

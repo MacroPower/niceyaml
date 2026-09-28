@@ -39,6 +39,15 @@ func validateCmd() *cobra.Command {
 			var errs []error
 
 			for _, yamlPath := range yamlPaths {
+				// A canceled run reports the cancellation once, rather
+				// than once for each file left.
+				ctxErr := cmd.Context().Err()
+				if ctxErr != nil {
+					errs = append(errs, ctxErr)
+
+					break
+				}
+
 				err := validateFile(cmd.Context(), yamlPath, reg)
 				if err != nil {
 					errs = append(errs, err)
