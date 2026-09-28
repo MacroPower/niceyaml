@@ -1,10 +1,13 @@
 package line_test
 
 import (
+	"math"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -33,13 +36,23 @@ func TestAnnotation_String(t *testing.T) {
 			ann:  line.Annotation{Content: "x", Col: 10},
 			want: "          x",
 		},
+		"max column pads to the bound": {
+			ann:  line.Annotation{Content: "x", Col: math.MaxInt},
+			want: strings.Repeat(" ", 1024) + "x",
+		},
+		"column past the bound pads to the bound": {
+			ann:  line.Annotation{Content: "x", Col: 1 << 32},
+			want: strings.Repeat(" ", 1024) + "x",
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.ann.String()
+			var got string
+
+			require.NotPanics(t, func() { got = tc.ann.String() })
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -363,13 +376,23 @@ func TestAnnotations_String(t *testing.T) {
 			},
 			want: "x; y",
 		},
+		"max column pads to the bound": {
+			anns: line.Annotations{{Content: "x", Col: math.MaxInt}},
+			want: strings.Repeat(" ", 1024) + "x",
+		},
+		"column past the bound pads to the bound": {
+			anns: line.Annotations{{Content: "x", Col: 1 << 32}},
+			want: strings.Repeat(" ", 1024) + "x",
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.anns.String()
+			var got string
+
+			require.NotPanics(t, func() { got = tc.anns.String() })
 			assert.Equal(t, tc.want, got)
 		})
 	}

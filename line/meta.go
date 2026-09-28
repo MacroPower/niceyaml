@@ -34,6 +34,8 @@ const (
 // columns, that a renderer starts an [Annotation]. [View.String] and the
 // printer start an annotation whose [Annotation.Col] lies further out at
 // this bound, so a stray column such as [math.MaxInt] pads a bounded row.
+// [Annotation.String] and [Annotations.String] have no line content, so
+// they pad by at most this many spaces.
 const MaxColPastEnd = 1024
 
 // annotationCol returns the column a renderer starts an annotation at when
@@ -60,15 +62,16 @@ type Annotation struct {
 	Col       int // Optional, 0-indexed column position for the annotation.
 }
 
-// String returns the annotation content padded to [Annotation.Col]. An
-// annotation without content renders nothing, so the result is the empty
-// string.
+// String returns the annotation content padded to [Annotation.Col]. It has
+// no line content to measure, so the padding stops at [MaxColPastEnd]
+// spaces. An annotation without content renders nothing, so the result is
+// the empty string.
 func (a Annotation) String() string {
 	if a.Content == "" {
 		return ""
 	}
 
-	padding := strings.Repeat(" ", max(0, a.Col))
+	padding := strings.Repeat(" ", annotationCol(a.Col, 0))
 
 	return padding + a.Content
 }
@@ -165,7 +168,8 @@ func (a Annotations) Contents() []string {
 
 // String returns the combined annotation content for debugging.
 // It joins same-position annotations with "; " at the minimum column
-// position among the annotations that have content. Annotations without
+// position among the annotations that have content, padded by at most
+// [MaxColPastEnd] spaces, as [Annotation.String] pads. Annotations without
 // content add nothing, so a set with no content at all is the empty string,
 // as a single such annotation is.
 func (a Annotations) String() string {
@@ -174,7 +178,7 @@ func (a Annotations) String() string {
 		return ""
 	}
 
-	padding := strings.Repeat(" ", max(0, kept.Col()))
+	padding := strings.Repeat(" ", annotationCol(kept.Col(), 0))
 
 	return padding + strings.Join(kept.Contents(), "; ")
 }
