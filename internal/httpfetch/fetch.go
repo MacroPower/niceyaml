@@ -16,10 +16,10 @@ const MaxSize = 10 * 1024 * 1024 // 10 MB.
 // Get performs an HTTP GET for rawURL with client and returns the body. It
 // rejects any status other than 200 OK and any body over [MaxSize] bytes.
 //
-// Errors name the URL as [Redacted] spells it, with any password in its
-// userinfo redacted, so a credential embedded in a schema URL does not
-// reach logs. Errors omit a URL that does not parse, since Get cannot
-// redact its userinfo. When [Redacted] would hide a password in such a
+// Errors name the URL as [Redacted] spells it, which replaces any password
+// in its userinfo, so a credential in a schema URL does not reach logs.
+// Errors omit a URL that does not parse, since Get cannot redact its
+// userinfo. When [Redacted] would hide a password in such a
 // URL, errors omit the reason too, since the reason can quote part of the
 // password.
 //
@@ -65,7 +65,7 @@ func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error
 	}
 
 	// Read one byte past the limit so an over-size response reads as
-	// MaxSize+1 bytes; anything at or under the limit is the whole body.
+	// MaxSize+1 bytes. Anything at or under the limit is the whole body.
 	data, err := io.ReadAll(io.LimitReader(resp.Body, MaxSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("read response from %s: %w", name, err)
