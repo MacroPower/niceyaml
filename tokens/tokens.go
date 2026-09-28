@@ -1115,6 +1115,13 @@ func TrimLineEnding(s string) string {
 // positions ahead of the whitespace rather than inside it, keeps the
 // positions it has.
 //
+// A stream cut before the end of a longer one, whose last token still
+// links to a token after it, can end with tokens without text, such as the
+// empty content of a block scalar that the next document's header closes.
+// No text of the clones follows them, so they move to the end of the last
+// line of the joined Origins, before its final line ending, where
+// [Tokenize] places them, rather than by the common shift.
+//
 // The clones link to each other through Next and Prev and to nothing outside
 // the result, so the stream stands alone. Tokens with nil positions come
 // back as clones with nil positions, and ResetPositions drops nil tokens.
@@ -1195,6 +1202,13 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 		result.Add(clone)
 	}
 
+	// The last clone still links to a token after it when tks was cut
+	// before the end of its stream, so no text of the stream follows the
+	// tokens without text that end it.
+	if len(result) > 0 && result[len(result)-1].Next != nil {
+		endTrailing(result)
+	}
+
 	// Clone copies Next and Prev, and Add rewires only the links between
 	// clones, so the first and last clone still point at the un-cloned
 	// tokens of the neighboring documents. Sever those links so the
@@ -1205,6 +1219,42 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 	}
 
 	return result
+}
+
+// endTrailing moves each token of tks that has a position and follows the
+// last token holding text to the end of the last line of the joined
+// Origins, before its final line ending, where [Tokenize] places a token
+// without text that no text follows. The positions of tks count from line
+// 1, column 1, offset 1 at the start of the joined Origins. A stream
+// without a token holding text keeps its positions.
+func endTrailing(tks token.Tokens) {
+	last := -1
+
+	for i, tk := range tks {
+		if tk.Position != nil && strings.Trim(tk.Origin, " \t\r\n") != "" {
+			last = i
+		}
+	}
+
+	if last < 0 || last == len(tks)-1 {
+		return
+	}
+
+	var sb strings.Builder
+
+	for _, tk := range tks {
+		sb.WriteString(tk.Origin)
+	}
+
+	text := TrimLineEnding(sb.String())
+	line, col := advance(1, 1, text)
+	offset := utf8.RuneCountInString(text) + 1
+
+	for _, tk := range tks[last+1:] {
+		if tk.Position != nil {
+			tk.Position.Line, tk.Position.Column, tk.Position.Offset = line, col, offset
+		}
+	}
 }
 
 // SplitDocuments splits a token stream into multiple token streams, one for

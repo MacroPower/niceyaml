@@ -1522,6 +1522,59 @@ func TestResetPositions_Text(t *testing.T) {
 		}
 	})
 
+	t.Run("ends a cut document where its text does", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer emits the content of a block scalar that the next
+		// document's header closes before that header, so the content
+		// ends the first document. No text follows it there, so it sits
+		// at the end of the document's last line, as a fresh tokenize of
+		// the document's text places it.
+		tcs := map[string]struct {
+			input string
+			want  string
+		}{
+			"empty literal":                     {input: "a: |\n---\nb: 1\n", want: "1:5:5"},
+			"empty stripped literal":            {input: "a: |-\n---\nb: 1\n", want: "1:6:6"},
+			"nested empty literal":              {input: "x:\n  a: |\n---\nb: 1\n", want: "2:7:10"},
+			"blank line":                        {input: "k: |\n\n---\nb: 1\n", want: "2:1:6"},
+			"blank line with a tab":             {input: "a: |\n\t\n---\nb: 1\n", want: "2:2:7"},
+			"empty literal in a sequence entry": {input: "- |\n---\n- b\n", want: "1:4:4"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				docs := collectReset(tokens.SplitDocuments(tokens.Tokenize(tc.input)))
+				require.Len(t, docs, 2)
+
+				doc := docs[0]
+				last := doc[len(doc)-1]
+				require.Empty(t, strings.Trim(last.Origin, " \t\r\n"))
+
+				assert.Equal(t, tc.want, positionsOf(token.Tokens{last})[0])
+
+				// The tokens with text keep the common shift.
+				text := len(doc) - 1
+				fresh := tokens.Tokenize(yamltest.DumpTokenOrigins(doc))
+				require.GreaterOrEqual(t, len(fresh), text)
+				assert.Equal(t, positionsOf(fresh)[:text], positionsOf(doc)[:text])
+			})
+		}
+	})
+
+	t.Run("keeps a trailing token of a whole stream in place", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer drops the "!", but the line holding it exists, and the
+		// empty content of the block scalar stays on it.
+		got := tokens.ResetPositions(tokens.Tokenize("k: |+\n!"))
+		require.NotEmpty(t, got)
+
+		assert.Equal(t, "2:1:7", positionsOf(got)[len(got)-1])
+	})
+
 	t.Run("anchors past an empty token", func(t *testing.T) {
 		t.Parallel()
 
