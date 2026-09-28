@@ -22,11 +22,12 @@ jobs:
       matrix:
         # Each entry is a function on the `ci` toolchain. lint, test, and
         # test-integration run the matching Taskfile target inside the devbox
-        # environment (dagger -> devbox -> task); the rest compose a toolchain
-        # or Node container directly: security (Trivy via the security
-        # toolchain), lint-actions (zizmor via the zizmor toolchain), and
-        # lint-renovate (renovate-config-validator in a Node container). Mirrors
-        # the gates developers run via `task check:all`.
+        # environment (dagger -> devbox -> task). The rest compose a toolchain
+        # or a Node container directly. security runs Trivy through the
+        # security toolchain, lint-actions runs zizmor through the zizmor
+        # toolchain, and lint-renovate runs renovate-config-validator in a
+        # Node container. The matrix covers the gates that `task check:all`
+        # runs.
         task:
           - lint
           - test
