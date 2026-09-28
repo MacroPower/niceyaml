@@ -28,8 +28,11 @@ type palette struct {
 	// Tokens sets token kinds in the style-string form [style.Parse]
 	// reads. Each spec layers over the style its kind inherits, so a spec
 	// naming only attributes keeps the colors of the closest kind above
-	// it. Kinds left out inherit from their parent, except the inserted,
-	// deleted, and error marks, which take their colors from OK and Error.
+	// it. Kinds left out inherit from their parent, with two exceptions.
+	// The inserted, deleted, and error marks take their colors from OK and
+	// Error. [kind.LiteralNull] takes the [kind.LiteralBoolean] spec, since
+	// the source themes color null, true, and false as one keyword
+	// constant.
 	Tokens map[kind.Kind]string
 	// Fg and Bg are the base text colors as hex strings. An empty value
 	// leaves the terminal default in place; the derived kinds then
@@ -136,6 +139,14 @@ func (p palette) styles() style.Styles {
 		kind.GenericDeleted:  style.Encode(lipgloss.NewStyle().Foreground(errColor)),
 		kind.GenericError:    style.Encode(lipgloss.NewStyle().Foreground(textOn(errColor)).Background(errColor)),
 	}
+	// Null and the booleans share one keyword-constant token in the source
+	// themes, so a palette that leaves null out draws it with the boolean
+	// spec. The two kinds are siblings under Literal, so the spec resolves
+	// to the same style for both.
+	if spec, ok := tokens[kind.LiteralBoolean]; ok {
+		defaults[kind.LiteralNull] = spec
+	}
+
 	for st, spec := range defaults {
 		if _, ok := tokens[st]; !ok {
 			tokens[st] = spec

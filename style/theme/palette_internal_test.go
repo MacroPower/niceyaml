@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 
+	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
@@ -95,6 +96,53 @@ func TestPalette_DiffAndErrorKindsDefaultFromStatusColors(t *testing.T) {
 			assert.Equal(t, tc.wantFg, got.GetForeground())
 			assert.Equal(t, tc.wantBg, got.GetBackground())
 			assert.Equal(t, tc.wantItalic, got.GetItalic())
+		})
+	}
+}
+
+func TestPalette_NullDefaultsToBooleanSpec(t *testing.T) {
+	t.Parallel()
+
+	// The source themes color null, true, and false as one keyword
+	// constant, so a palette that leaves null out draws it like the
+	// booleans.
+	tcs := map[string]struct {
+		tokens map[kind.Kind]string
+		want   string
+	}{
+		"null takes the boolean spec": {
+			tokens: map[kind.Kind]string{kind.LiteralBoolean: "bold #66d9ef"},
+			want:   "bold #66d9ef bg:#000000",
+		},
+		"null token wins": {
+			tokens: map[kind.Kind]string{
+				kind.LiteralBoolean: "#66d9ef",
+				kind.LiteralNull:    "#123456",
+			},
+			want: "#123456 bg:#000000",
+		},
+		"no boolean spec leaves null to Literal": {
+			tokens: map[kind.Kind]string{kind.Literal: "#abcdef"},
+			want:   "#abcdef bg:#000000",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := palette{
+				Mode:   Dark,
+				Fg:     "#ffffff",
+				Bg:     "#000000",
+				Accent: "#ff00ff",
+				OK:     "#00ff00",
+				Warn:   "#ffff00",
+				Error:  "#ff0000",
+				Tokens: tc.tokens,
+			}
+
+			assert.Equal(t, tc.want, style.Encode(p.styles().Style(kind.LiteralNull)))
 		})
 	}
 }

@@ -507,13 +507,44 @@ func TestPalette_LiteralsTakeSourceColors(t *testing.T) {
 	t.Parallel()
 
 	// These source themes color numbers through their Literal entry, and
-	// solarized-light colors booleans through Keyword, so each literal
-	// must keep that color rather than fall back to the body text.
+	// color true, false, and null through KeywordConstant or Keyword, so
+	// each literal must keep that color rather than fall back to the body
+	// text.
 	tests := map[string]struct {
 		theme string
 		kind  kind.Kind
 		want  string
 	}{
+		"dracula booleans": {
+			theme: "dracula",
+			kind:  kind.LiteralBoolean,
+			want:  "#ff79c6 bg:#282a36",
+		},
+		"dracula null": {
+			theme: "dracula",
+			kind:  kind.LiteralNull,
+			want:  "#ff79c6 bg:#282a36",
+		},
+		"monokai booleans": {
+			theme: "monokai",
+			kind:  kind.LiteralBoolean,
+			want:  "#66d9ef bg:#272822",
+		},
+		"monokai null": {
+			theme: "monokai",
+			kind:  kind.LiteralNull,
+			want:  "#66d9ef bg:#272822",
+		},
+		"native null": {
+			theme: "native",
+			kind:  kind.LiteralNull,
+			want:  "bold #6ab825 bg:#202020",
+		},
+		"kanagawa-dragon booleans": {
+			theme: "kanagawa-dragon",
+			kind:  kind.LiteralBoolean,
+			want:  "#b6927b bg:#181616",
+		},
 		"solarized-light numbers": {
 			theme: "solarized-light",
 			kind:  kind.LiteralNumberInteger,
@@ -553,6 +584,23 @@ func TestPalette_LiteralsTakeSourceColors(t *testing.T) {
 			th, ok := theme.Builtin().Get(tc.theme)
 			require.True(t, ok)
 			assert.Equal(t, tc.want, style.Encode(th.Style(tc.kind)))
+		})
+	}
+}
+
+func TestPalette_NullMatchesBooleans(t *testing.T) {
+	t.Parallel()
+
+	// Every source theme colors null, true, and false as one keyword
+	// constant, so every built-in theme draws null like the booleans.
+	for _, th := range theme.Builtin().All() {
+		t.Run(th.Name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t,
+				style.Encode(th.Style(kind.LiteralBoolean)),
+				style.Encode(th.Style(kind.LiteralNull)),
+			)
 		})
 	}
 }
