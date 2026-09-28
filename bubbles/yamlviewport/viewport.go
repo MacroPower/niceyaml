@@ -1696,7 +1696,10 @@ func (m *Model) ScrollDown(n int) {
 		return
 	}
 
-	m.SetYOffset(m.YOffset() + n)
+	// Clamping the step to the rows on either side keeps y+n from
+	// overflowing for a huge n.
+	y := m.YOffset()
+	m.SetYOffset(y + clamp(n, -y, m.maxYOffset()-y))
 }
 
 // ScrollUp moves the view up by n rows.
@@ -1705,7 +1708,8 @@ func (m *Model) ScrollUp(n int) {
 		return
 	}
 
-	m.SetYOffset(m.YOffset() - n)
+	y := m.YOffset()
+	m.SetYOffset(y - clamp(n, y-m.maxYOffset(), y))
 }
 
 // PageDown moves the view down by one page.
@@ -1736,12 +1740,14 @@ func (m *Model) HalfPageUp() {
 
 // ScrollLeft moves the viewport left by n columns.
 func (m *Model) ScrollLeft(n int) {
-	m.SetXOffset(m.XOffset() - n)
+	x := m.XOffset()
+	m.SetXOffset(x - clamp(n, x-m.maxXOffset(), x))
 }
 
 // ScrollRight moves the viewport right by n columns.
 func (m *Model) ScrollRight(n int) {
-	m.SetXOffset(m.XOffset() + n)
+	x := m.XOffset()
+	m.SetXOffset(x + clamp(n, -x, m.maxXOffset()-x))
 }
 
 // SetHorizontalStep sets the horizontal scroll step size.

@@ -2,6 +2,7 @@ package yamlviewport_test
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"slices"
 	"strings"
@@ -4667,6 +4668,111 @@ func TestViewport_ScrollEdgeCases(t *testing.T) {
 		m.HalfPageUp()
 		assert.Equal(t, 0, m.YOffset())
 	})
+}
+
+func TestViewport_ScrollByExtremeSteps(t *testing.T) {
+	t.Parallel()
+
+	// A step past either end stops at that end, however large the step is.
+	tcs := map[string]struct {
+		scroll   func(m *yamlviewport.Model)
+		vertical bool
+		wantEnd  bool
+	}{
+		"down by MaxInt": {
+			scroll:   func(m *yamlviewport.Model) { m.ScrollDown(math.MaxInt) },
+			vertical: true,
+			wantEnd:  true,
+		},
+		"up by MinInt": {
+			scroll:   func(m *yamlviewport.Model) { m.ScrollUp(math.MinInt) },
+			vertical: true,
+			wantEnd:  true,
+		},
+		"up by MaxInt": {
+			scroll:   func(m *yamlviewport.Model) { m.ScrollUp(math.MaxInt) },
+			vertical: true,
+		},
+		"down by MinInt": {
+			scroll:   func(m *yamlviewport.Model) { m.ScrollDown(math.MinInt) },
+			vertical: true,
+		},
+		"wheel down by MaxInt": {
+			scroll: func(m *yamlviewport.Model) {
+				m.MouseWheelDelta = math.MaxInt
+				*m, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+			},
+			vertical: true,
+			wantEnd:  true,
+		},
+		"right by MaxInt": {
+			scroll:  func(m *yamlviewport.Model) { m.ScrollRight(math.MaxInt) },
+			wantEnd: true,
+		},
+		"left by MinInt": {
+			scroll:  func(m *yamlviewport.Model) { m.ScrollLeft(math.MinInt) },
+			wantEnd: true,
+		},
+		"left by MaxInt": {
+			scroll: func(m *yamlviewport.Model) { m.ScrollLeft(math.MaxInt) },
+		},
+		"right by MinInt": {
+			scroll: func(m *yamlviewport.Model) { m.ScrollRight(math.MinInt) },
+		},
+		"wheel right by MaxInt": {
+			scroll: func(m *yamlviewport.Model) {
+				m.SetHorizontalStep(math.MaxInt)
+
+				*m, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelRight})
+			},
+			wantEnd: true,
+		},
+	}
+
+	var src strings.Builder
+
+	src.WriteString("long: " + strings.Repeat("x", 200) + "\n")
+
+	for i := range 50 {
+		fmt.Fprintf(&src, "k%d: v\n", i)
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			m.SetWidth(40)
+			m.SetHeight(5)
+			m.SetWordWrap(false)
+			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
+			m.SetYOffset(10)
+			m.SetXOffset(10)
+
+			offset := func(m *yamlviewport.Model) int {
+				if tc.vertical {
+					return m.YOffset()
+				}
+
+				return m.XOffset()
+			}
+
+			// A copy finds the far end without scrolling m.
+			far := m
+			far.SetYOffset(math.MaxInt)
+			far.SetXOffset(math.MaxInt)
+			require.Greater(t, offset(&far), offset(&m))
+
+			want := 0
+			if tc.wantEnd {
+				want = offset(&far)
+			}
+
+			tc.scroll(&m)
+
+			assert.Equal(t, want, offset(&m))
+		})
+	}
 }
 
 func TestViewport_RevisionStateEdgeCases(t *testing.T) {
