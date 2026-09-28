@@ -227,6 +227,25 @@ func TestErrorTree_New(t *testing.T) {
 				},
 			},
 		},
+		"child wrapping a binding in Errors alone reads as the binding": {
+			err: yamltest.Bind(t, source, niceyaml.NewError("summary", niceyaml.WithErrors(
+				niceyaml.WrapError(yamltest.Bind(t, source, badA())),
+				niceyaml.WrapError(yamltest.Bind(t, source, badB()), niceyaml.WithErrors(niceyaml.NewError("x"))),
+				niceyaml.WrapError(yamltest.Bind(t, source, errors.New("plain"))),
+				niceyaml.WrapError(yamltest.Bind(t, source,
+					niceyaml.WrapError(yamltest.Bind(t, source, badA()), niceyaml.WithErrors(niceyaml.NewError("y"))),
+				)),
+			))),
+			want: niceyaml.ErrorTree{
+				Text: "f.yaml: summary",
+				Children: []niceyaml.ErrorTree{
+					{Text: "1:4: $.a: bad a"},
+					{Text: "1:4: $.a: bad a", Children: []niceyaml.ErrorTree{{Text: "y"}}},
+					{Text: "2:4: $.b: bad b", Children: []niceyaml.ErrorTree{{Text: "x"}}},
+					{Text: "plain"},
+				},
+			},
+		},
 		"root with a position keeps it": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer",
 				niceyaml.AtPath(paths.Root().Child("a")),

@@ -261,8 +261,10 @@ func trees(kids []positioned) []ErrorTree {
 // with no text of its own. Otherwise a child bound to the same source
 // carries the "line:col:" its location resolved to in front of its
 // message, without the name the parent gives already. A child that wraps
-// a binding took that binding over, so its message names the position
-// already and comes through as it is. A child that binds a join has no
+// a binding through Errors alone, which add no text, reads as that
+// binding does. A child behind a wrapper that adds text of its own, such
+// as [fmt.Errorf], carries the position inside that text, so it comes
+// through as it is, name included. A child that binds a join has no
 // text and gives its place to its branches, which keep the name of their
 // source when named is set or when the join is bound to another source.
 func boundChildren(bound *SourceError, named bool) []positioned {
@@ -292,11 +294,15 @@ func boundChildren(bound *SourceError, named bool) []positioned {
 		// The binding put the position in front of the message it wraps,
 		// so stripping it back to that message leaves the position to
 		// put back without the name. A child that took a binding over
-		// carries its position inside the message instead, and adds no
+		// through Errors alone shows the text of that binding, so the
+		// strip applies there. One behind a wrapper with text of its own
+		// carries its position inside that text instead, and adds no
 		// prefix of its own, so there is nothing to strip or put back.
-		text := child.Error()
-		if !named && child.Source() == bound.Source() {
-			if inner := child.Unwrap().Error(); inner != text {
+		src := textBinding(child)
+
+		text := src.Error()
+		if !named && src.Source() == bound.Source() {
+			if inner := src.Unwrap().Error(); inner != text {
 				text = inner
 				if kid.located {
 					text = prefix(editorPosition(kid.pos)+":", text)
@@ -309,6 +315,27 @@ func boundChildren(bound *SourceError, named bool) []positioned {
 	}
 
 	return kids
+}
+
+// textBinding returns the binding whose text e shows: the binding an
+// adopted e reaches through the causes of Errors alone, which add no
+// text of their own, or e itself.
+func textBinding(e *SourceError) *SourceError {
+	for e.adopted {
+		x, ok := e.err.(*Error) //nolint:errorlint // The node itself, not a chain search.
+		if !ok {
+			break
+		}
+
+		inner := boundCause(x)
+		if inner == nil {
+			break
+		}
+
+		e = inner
+	}
+
+	return e
 }
 
 // positioned is a child of a node, the source it is bound to, and the

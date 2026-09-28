@@ -1351,20 +1351,16 @@ func isNothing(err error) bool {
 // message of an [*Error] without the location it puts in front, since the
 // caret marks it, or the message of any other error as it is. An Error
 // that wraps a binding e adopted annotates with the text of that binding,
-// since the caret marks the location of the binding.
+// the one [textBinding] finds, since the caret marks the location of the
+// binding.
 func (e *SourceError) text() string {
 	if e == nil {
 		return ""
 	}
 
-	if x, ok := e.err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
-		if e.adopted {
-			inner := boundCause(x)
-			if inner != nil {
-				return inner.text()
-			}
-		}
+	e = textBinding(e)
 
+	if x, ok := e.err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
 		return x.message()
 	}
 
