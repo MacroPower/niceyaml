@@ -532,17 +532,24 @@ func TestRegistry_Caching(t *testing.T) {
 	t.Run("scheme case does not split the cache", func(t *testing.T) {
 		t.Parallel()
 
+		// The client serves the schema from memory and counts every request
+		// it sends. No server listens on a port, so a connection that
+		// another process opens cannot add to the count. Names under .test
+		// never resolve, so a fetch that bypasses the client fails rather
+		// than going uncounted.
 		var fetches atomic.Int32
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			fetches.Add(1)
+		client := &http.Client{
+			Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+				fetches.Add(1)
 
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{"type": "object"}`))
-		}))
-		t.Cleanup(server.Close)
+				rec := httptest.NewRecorder()
+				//nolint:errcheck // Test helper.
+				rec.WriteString(`{"type": "object"}`)
 
-		host := strings.TrimPrefix(server.URL, "http://")
+				return rec.Result(), nil
+			}),
+		}
 
 		resolve := schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 			// Each document names the same schema with a different scheme
@@ -552,10 +559,10 @@ func TestRegistry_Caching(t *testing.T) {
 				scheme = "HTTP"
 			}
 
-			return schema.URL(scheme + "://" + host + "/schema.json"), nil
+			return schema.URL(scheme + "://schemas.test/schema.json"), nil
 		})
 
-		reg := schema.NewRegistry(schema.WithResolvers(resolve))
+		reg := schema.NewRegistry(schema.WithHTTPClient(client), schema.WithResolvers(resolve))
 
 		source := niceyaml.NewSourceFromString(stringtest.Input(`
 			a: 1
