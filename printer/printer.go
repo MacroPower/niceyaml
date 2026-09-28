@@ -17,6 +17,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
@@ -243,8 +244,8 @@ func (f GutterFunc) Render(ctx GutterContext) string {
 // [line.Annotation.Kind] or [kind.UIAnnotation] for the zero Kind. Each
 // annotation keeps its Kind as given, so a context for [kind.UIAnnotation]
 // can hold annotations of the zero Kind alongside ones of that kind. The
-// func returns one [AnnotationRow] for them, and the printer pads,
-// escapes, wraps, and styles it.
+// func returns the [AnnotationRow]s for them, and the printer pads,
+// escapes, wraps, and styles each one.
 type AnnotationContext struct {
 	// Content is the text of the annotated line, without its line ending.
 	// Annotation columns count runes of this text, and their display
@@ -256,6 +257,13 @@ type AnnotationContext struct {
 	// they cover. Each context holds a copy, so the func may change it
 	// without changing the view.
 	Overlays line.Overlays
+
+	// RowStarts holds the column of Content at which each row of the line
+	// begins once the printer wraps it, in order, so a func that marks
+	// columns can return a row for each wrapped row it marks. It holds
+	// the single column 0 when the line does not wrap, and nil counts
+	// the same. Each context holds a copy.
+	RowStarts []int
 
 	Annotations line.Annotations
 	Placement   line.Placement
@@ -282,7 +290,7 @@ func ColWidth(content string, col int) int {
 	return cells.NewRow(content).Width(col)
 }
 
-// AnnotationRow is what an [AnnotationFunc] renders for the annotations
+// AnnotationRow is a row an [AnnotationFunc] renders for the annotations
 // of one line and placement that render in one kind, their
 // [line.Annotation.Kind] or [kind.UIAnnotation] for the zero Kind, so one
 // [kind.UIAnnotation] row can hold annotations of the zero Kind alongside
@@ -322,30 +330,34 @@ type AnnotationRow struct {
 }
 
 // AnnotationFunc renders the annotations an [AnnotationContext] holds as
-// one [AnnotationRow], and reports false to leave them out, so the
-// printer drops the rows they would take.
+// [AnnotationRow]s, in the order the printer writes them, and returns none
+// to leave them out, so the printer drops the rows they would take. A
+// func that describes the annotations returns one row. One that marks
+// columns of a wrapped line returns a row for each wrapped row it marks,
+// as [DefaultAnnotation] does, since the padding of a row starts under
+// one wrapped row.
 //
 // The printer does the padding, escaping, wrapping, and styling, so a
-// func returns the text of the row and the column it starts under:
+// func returns the text of each row and the column it starts under:
 //
-//	func(ctx printer.AnnotationContext) (printer.AnnotationRow, bool) {
+//	func(ctx printer.AnnotationContext) []printer.AnnotationRow {
 //		kept := ctx.Annotations.WithContent()
 //		if len(kept) == 0 {
-//			return printer.AnnotationRow{}, false
+//			return nil
 //		}
 //
-//		return printer.AnnotationRow{
+//		return []printer.AnnotationRow{{
 //			Col:    kept.Col(),
 //			Marker: "-> ",
 //			Text:   strings.Join(kept.Contents(), " | "),
-//		}, true
+//		}}
 //	}
-type AnnotationFunc func(AnnotationContext) (AnnotationRow, bool)
+type AnnotationFunc func(AnnotationContext) []AnnotationRow
 
 // NoAnnotation is an [AnnotationFunc] that renders nothing, so the printer
 // leaves out the rows annotations would take.
-func NoAnnotation(AnnotationContext) (AnnotationRow, bool) {
-	return AnnotationRow{}, false
+func NoAnnotation(AnnotationContext) []AnnotationRow {
+	return nil
 }
 
 // DefaultAnnotation is the [AnnotationFunc] [New] uses. It joins the
@@ -355,31 +367,23 @@ func NoAnnotation(AnnotationContext) (AnnotationRow, bool) {
 // still marks it. The row is then a caret under every column the line's
 // overlays cover, as [line.View.String] and [line.Overlays.MarkerRow]
 // draw them, so a marked range shows its extent without color, or
-// nothing when the overlays cover no column. An annotation above the
-// line with no content renders nothing, as [line.Annotation.String]
-// does. A newline in an annotation renders as its picture rather than
-// starting a row, as every other control character does.
-func DefaultAnnotation(ctx AnnotationContext) (AnnotationRow, bool) {
+// nothing when the overlays cover no column. When the line wraps, each
+// wrapped row that holds a covered column gets a caret row of its own,
+// which marks the covered columns of that row, and a space the wrap
+// drops at a break gets no caret. An annotation above the line with no
+// content renders nothing, as [line.Annotation.String] does. A newline
+// in an annotation renders as its picture rather than starting a row, as
+// every other control character does.
+func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 	// Filter the annotations rather than their contents, so the column
 	// comes from the ones that remain.
 	kept := ctx.Annotations.WithContent()
 	if len(kept) == 0 {
 		if ctx.Placement != line.Below {
-			return AnnotationRow{}, false
+			return nil
 		}
 
-		col, ok := markerCol(ctx.Overlays, ctx.Content)
-		if !ok {
-			return AnnotationRow{}, false
-		}
-
-		// MarkerRow pads the carets to their column itself, and the
-		// printer pads the row to Col, so the carets go without the
-		// padding.
-		return AnnotationRow{
-			Col:  col,
-			Text: strings.TrimLeft(ctx.Overlays.MarkerRow(ctx.Content), " "),
-		}, true
+		return markerRows(ctx)
 	}
 
 	row := AnnotationRow{
@@ -391,7 +395,67 @@ func DefaultAnnotation(ctx AnnotationContext) (AnnotationRow, bool) {
 		row.Marker = "^ "
 	}
 
-	return row, true
+	return []AnnotationRow{row}
+}
+
+// markerRows returns a caret row for each wrapped row of ctx.Content that
+// holds a column the overlays of ctx cover, in order, each under the
+// covered columns of its row. A row ends before the spaces the wrap drops
+// at its break, so those spaces get no caret. The content is escaped
+// first, as the printer shows it, so a tab counts as its picture rather
+// than a space.
+func markerRows(ctx AnnotationContext) []AnnotationRow {
+	starts := ctx.RowStarts
+	if len(starts) == 0 {
+		starts = []int{0}
+	}
+
+	shown := []rune(escape.Control(ctx.Content))
+
+	var rows []AnnotationRow
+
+	for r, lo := range starts {
+		hi := len(shown)
+		if r+1 < len(starts) {
+			hi = min(max(0, starts[r+1]), hi)
+
+			for hi > lo && isBreakSpace(shown[hi-1]) {
+				hi--
+			}
+		}
+
+		overlays := clipOverlays(ctx.Overlays, lo, hi)
+
+		col, ok := markerCol(overlays, ctx.Content)
+		if !ok {
+			continue
+		}
+
+		// MarkerRow pads the carets to their column itself, and the
+		// printer pads the row to Col, so the carets go without the
+		// padding.
+		rows = append(rows, AnnotationRow{
+			Col:  col,
+			Text: strings.TrimLeft(overlays.MarkerRow(ctx.Content), " "),
+		})
+	}
+
+	return rows
+}
+
+// clipOverlays returns the overlays cut to the columns [lo, hi), without
+// the ones that cover none of them.
+func clipOverlays(overlays line.Overlays, lo, hi int) line.Overlays {
+	clipped := make(line.Overlays, 0, len(overlays))
+
+	for _, ov := range overlays {
+		ov.Cols = position.NewSpan(max(lo, ov.Cols.Start), min(hi, ov.Cols.End))
+		if ov.Cols.Start < ov.Cols.End {
+			clipped = append(clipped, ov)
+		}
+	}
+
+	return clipped
 }
 
 // markerCol returns the first column of content that an overlay covers,
@@ -968,12 +1032,12 @@ const minAnnotationWidth = 20
 const maxColPastEnd = 1024
 
 // annotationGroups renders the annotations of line idx of view, which is
-// ln, at the given placement: one group per kind, as
-// [line.Annotations.ByKind] groups and orders them, each rendered by the
-// [AnnotationFunc], wrapped to the printer width, and styled in the style
-// of its kind. Starts holds the column of the content at which each
-// wrapped row of the line begins. It leaves out a group the func leaves
-// out.
+// ln, at the given placement: the kinds as [line.Annotations.ByKind]
+// groups and orders them, and within each kind one group for each
+// [AnnotationRow] the [AnnotationFunc] returns, in order, wrapped to the
+// printer width and styled in the style of its kind. Starts holds the
+// column of the content at which each wrapped row of the line begins. A
+// kind the func returns no rows for takes no group.
 func (p *Printer) annotationGroups(
 	view *line.View,
 	ln *line.Line,
@@ -992,94 +1056,110 @@ func (p *Printer) annotationGroups(
 	var groups []annotationGroup
 
 	for _, group := range anns.ByKind() {
-		row, ok := p.annotationFunc(AnnotationContext{
+		rows := p.annotationFunc(AnnotationContext{
 			Annotations: group,
 			Placement:   placement,
 			Content:     ln.Content(),
 			Overlays:    slices.Clone(view.Overlays(idx)),
+			RowStarts:   slices.Clone(starts),
 		})
-		if !ok {
-			continue
-		}
 
-		// The padding runs from the start of the wrapped row that holds
-		// the column, so the marker lands in the cell the column takes on
-		// that row. The column stops at lastCol, so a stray column such as
-		// math.MaxInt pads a bounded row.
-		col := min(max(0, row.Col), lastCol)
-
-		from := 0
-		if len(starts) > 0 {
-			from = starts[rowIndex(starts, col)]
-		}
-
-		// The printer escapes the text, so a control character in a
-		// message shows as its picture and the wrap measures the cells
-		// the terminal shows. The escape keeps each newline, and the wrap
-		// starts a new row at each one.
-		marker := escape.Control(row.Marker)
-		mark := strings.TrimRight(marker, " ")
-		padding := strings.Repeat(" ", max(0, cr.Width(col)-cr.Width(from)))
-		indent := padding + marker
-		indentWidth := lipgloss.Width(indent)
-		text := escape.Rows(row.Text)
-		widest := widestWord(text)
-
-		k := row.Kind
-		if k == "" {
-			k = annotationKind(group[0].Kind)
-		}
-
-		kindStyle := p.styles.Style(k)
-
-		// The style of the kind may lay a row out over several terminal
-		// rows, through a width, vertical padding, a margin, or a border.
-		// The group keeps each terminal row apart, so Print puts the
-		// gutter on each one and Layout counts each one.
-		var rows []string
-
-		add := func(s string) {
-			rows = append(rows, strings.Split(kindStyle.Render(s), "\n")...)
-		}
-
-		// The indent is the padding to the column plus the marker, and
-		// the wrap leaves it out. The first row keeps it as rendered, and
-		// continuation rows get the same width in spaces, so every row of
-		// the text starts under the start of the text.
-		//
-		// When the column leaves the text less room than its widest word,
-		// the marker keeps its column on a row of its own, without its
-		// trailing spaces, and the text moves to the rows below under a
-		// smaller indent. That indent leaves the text minAnnotationWidth
-		// cells, or its widest word when that is wider, and shrinks to
-		// nothing when the width has less room. A row without a marker
-		// keeps its text at the column, since only the marker holds the
-		// column once the text moves. A column past the end of the
-		// content keeps its cell even when that cell lies past the width,
-		// and the rows indented to it then run wider.
-		if p.wrap > 0 && mark != "" && widest > p.contentWidth(gutterWidth+indentWidth) {
-			hang := max(0, p.contentWidth(gutterWidth)-max(minAnnotationWidth, widest))
-
-			add(padding + mark)
-
-			for _, wrapped := range p.wrapContent(text, gutterWidth+hang) {
-				add(strings.Repeat(" ", hang) + wrapped)
+		for _, row := range rows {
+			k := row.Kind
+			if k == "" {
+				k = annotationKind(group[0].Kind)
 			}
-		} else {
-			for j, wrapped := range p.wrapContent(text, gutterWidth+indentWidth) {
-				prefix := indent
-				if j > 0 {
-					prefix = strings.Repeat(" ", indentWidth)
-				}
 
-				add(prefix + wrapped)
-			}
+			groups = append(groups, annotationGroup{
+				rows: p.annotationRow(row, p.styles.Style(k), cr, lastCol, gutterWidth, starts),
+			})
 		}
-
-		groups = append(groups, annotationGroup{rows: rows})
 	}
 
 	return groups
+}
+
+// annotationRow lays out row, an [AnnotationRow] of a line whose content
+// cells cr measures, as the terminal rows it takes once the printer
+// wraps it and styles it with kindStyle, without the gutter. Its column
+// stops at lastCol, and starts holds the column of the content at which
+// each wrapped row of the line begins.
+//
+//nolint:gocritic // hugeParam: value semantics match lipgloss.
+func (p *Printer) annotationRow(
+	row AnnotationRow,
+	kindStyle lipgloss.Style,
+	cr cells.Row,
+	lastCol, gutterWidth int,
+	starts []int,
+) []string {
+	// The padding runs from the start of the wrapped row that holds the
+	// column, so the marker lands in the cell the column takes on that
+	// row. The column stops at lastCol, so a stray column such as
+	// math.MaxInt pads a bounded row.
+	col := min(max(0, row.Col), lastCol)
+
+	from := 0
+	if len(starts) > 0 {
+		from = starts[rowIndex(starts, col)]
+	}
+
+	// The printer escapes the text, so a control character in a message
+	// shows as its picture and the wrap measures the cells the terminal
+	// shows. The escape keeps each newline, and the wrap starts a new row
+	// at each one.
+	marker := escape.Control(row.Marker)
+	mark := strings.TrimRight(marker, " ")
+	padding := strings.Repeat(" ", max(0, cr.Width(col)-cr.Width(from)))
+	indent := padding + marker
+	indentWidth := lipgloss.Width(indent)
+	text := escape.Rows(row.Text)
+	widest := widestWord(text)
+
+	// The style of the kind may lay a row out over several terminal rows,
+	// through a width, vertical padding, a margin, or a border. The rows
+	// keep each terminal row apart, so Print puts the gutter on each one
+	// and Layout counts each one.
+	var rows []string
+
+	add := func(s string) {
+		rows = append(rows, strings.Split(kindStyle.Render(s), "\n")...)
+	}
+
+	// The indent is the padding to the column plus the marker, and the
+	// wrap leaves it out. The first row keeps it as rendered, and
+	// continuation rows get the same width in spaces, so every row of the
+	// text starts under the start of the text.
+	//
+	// When the column leaves the text less room than its widest word, the
+	// marker keeps its column on a row of its own, without its trailing
+	// spaces, and the text moves to the rows below under a smaller indent.
+	// That indent leaves the text minAnnotationWidth cells, or its widest
+	// word when that is wider, and shrinks to nothing when the width has
+	// less room. A row without a marker keeps its text at the column,
+	// since only the marker holds the column once the text moves. A column
+	// past the end of the content keeps its cell even when that cell lies
+	// past the width, and the rows indented to it then run wider.
+	if p.wrap > 0 && mark != "" && widest > p.contentWidth(gutterWidth+indentWidth) {
+		hang := max(0, p.contentWidth(gutterWidth)-max(minAnnotationWidth, widest))
+
+		add(padding + mark)
+
+		for _, wrapped := range p.wrapContent(text, gutterWidth+hang) {
+			add(strings.Repeat(" ", hang) + wrapped)
+		}
+	} else {
+		for j, wrapped := range p.wrapContent(text, gutterWidth+indentWidth) {
+			prefix := indent
+			if j > 0 {
+				prefix = strings.Repeat(" ", indentWidth)
+			}
+
+			add(prefix + wrapped)
+		}
+	}
+
+	return rows
 }
 
 // annotationKind returns the style an annotation of k renders in:
