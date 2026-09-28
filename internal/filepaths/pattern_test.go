@@ -107,7 +107,7 @@ func TestPattern_Match(t *testing.T) {
 		},
 		"brace in a class matches no multi-segment path": {
 			// The pattern validates, but doublestar cannot interpret it
-			// against a path with a separator, and that reads as no match.
+			// against a path with a separator, so it matches no such path.
 			pattern: "[^a{]b",
 			path:    "a/b",
 			want:    false,
@@ -469,7 +469,7 @@ func TestExpandBraces_Budget(t *testing.T) {
 	t.Parallel()
 
 	// Ten binary groups stand for 1024 patterns, the most ExpandBraces
-	// produces; one more group would double that, so the pattern comes
+	// produces. One more group would double that, so the pattern comes
 	// back as it is.
 	group := "{a,b}"
 	within := strings.Repeat(group, 10)
@@ -482,8 +482,9 @@ func TestExpandBraces_Budget(t *testing.T) {
 func TestExpandBraces_Work(t *testing.T) {
 	t.Parallel()
 
-	// Each pattern expands to few patterns, but only after rebuilding a
-	// long pattern once per brace group, so it comes back as it is.
+	// Each pattern expands to few patterns, but ExpandBraces would rebuild
+	// a long pattern once per brace group to get there, so the pattern
+	// comes back as it is.
 	tcs := map[string]struct {
 		pattern string
 	}{

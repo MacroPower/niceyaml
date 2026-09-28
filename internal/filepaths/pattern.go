@@ -13,16 +13,18 @@ import (
 var ErrInvalidPattern = errors.New("invalid glob pattern")
 
 // Pattern represents a validated glob pattern for file path matching.
+//
 // Create instances with [NewPattern].
 type Pattern struct {
 	// The normalized patterns ExpandBraces yields for the pattern.
 	globs []string
 }
 
-// NewPattern creates a [Pattern] from the given glob pattern string.
-// Returns [ErrInvalidPattern] if the pattern syntax is invalid, or if its
-// braces would expand to more than [MaxBraceExpansions] patterns or take
-// too much work to expand, which [ExpandBraces] would give up on.
+// NewPattern creates a new [Pattern] from a glob pattern string. It
+// returns [ErrInvalidPattern] when the pattern syntax is invalid. It also
+// returns [ErrInvalidPattern] when the braces would expand to more than
+// [MaxBraceExpansions] patterns or take too much work to expand, the two
+// limits at which [ExpandBraces] gives up.
 //
 // NewPattern drops "." elements such as a leading "./", repeated
 // separators, and a trailing separator from the pattern, as
@@ -65,9 +67,10 @@ func CleanPath(path string) string {
 	return filepath.ToSlash(filepath.Clean(path))
 }
 
-// expandPattern returns the patterns [ExpandBraces] yields for pattern,
-// each passed through rewrite. It reports false when the braces expand
-// past the budget, where [ExpandBraces] would yield the pattern itself.
+// expandPattern expands the braces of pattern as [ExpandBraces] does and
+// applies rewrite to each pattern it yields. It reports false when the
+// braces expand past the budget, where [ExpandBraces] would yield the
+// pattern itself.
 // Doublestar would then expand the braces again on every match, by
 // backtracking, at a cost that can double with each brace group.
 func expandPattern(pattern string, rewrite func(string) string) ([]string, bool) {
@@ -148,12 +151,13 @@ func splitElements(pattern string) []string {
 
 // AnyDepthPatterns holds glob patterns prepared for matching at any depth
 // of the tree, with the semantics VS Code and yaml-language-server give a
-// schema fileMatch pattern. Create instances with [NewAnyDepthPatterns].
+// schema fileMatch pattern.
 //
 // A pattern applies at any depth, so "*.yaml" matches
 // "some/dir/config.yaml" and ".github/workflows/*.yml" matches
-// "/repo/.github/workflows/ci.yml". Every pattern gets an implicit "**/"
-// prefix unless it already has one, and drops a leading "/" first.
+// "/repo/.github/workflows/ci.yml". [NewAnyDepthPatterns] drops a leading
+// "/" from each pattern and then adds an implicit "**/" prefix unless the
+// pattern already has one.
 //
 // A pattern with a leading "!" excludes the paths the rest of it matches,
 // wherever it sits in the list, as yaml-language-server reads it. So
@@ -162,6 +166,8 @@ func splitElements(pattern string) []string {
 // nothing.
 //
 // The zero value holds no patterns and matches no path.
+//
+// Create instances with [NewAnyDepthPatterns].
 type AnyDepthPatterns struct {
 	globs    []string
 	excludes []string
@@ -216,7 +222,8 @@ func matchAnyGlob(globs []string, path string) bool {
 		// Whether Match reports a pattern error depends on the path, since
 		// doublestar.ValidatePattern accepts some patterns that Match
 		// rejects for a multi-segment path, such as a "{" inside a
-		// character class. An error skips the pattern for this path alone.
+		// character class. The loop skips a pattern that errors for this
+		// path alone.
 		matched, err := doublestar.Match(glob, path)
 		if err == nil && matched {
 			return true
@@ -344,8 +351,8 @@ func braceGroup(pattern string) (int, int) {
 }
 
 // splitAlternatives splits the body of a brace group on the commas at its
-// top level, leaving commas inside nested groups, character classes, and
-// escaped commas in place.
+// top level. A comma inside a nested group or a character class, and an
+// escaped comma, stays in its alternative.
 func splitAlternatives(body string) []string {
 	var (
 		alts  []string
