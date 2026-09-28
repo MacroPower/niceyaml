@@ -36,6 +36,7 @@ func TestGet_RedactsPassword(t *testing.T) {
 		"password starting with a slash":         {url: "https://user:/secret@example.com/x"},
 		"password starting with a question mark": {url: "https://user:?secret@example.com/x"},
 		"password starting with a hash":          {url: "https://user:#secret@example.com/x"},
+		"username with an at sign":               {url: "https://jane@corp.com:/secret@example.com/x"},
 	}
 
 	for name, tc := range tcs {
@@ -201,6 +202,14 @@ func TestRedacted(t *testing.T) {
 		"password starting with a hash": {
 			url:  "https://user:#s3cret@example.com/x",
 			want: "https://user:xxxxx@example.com/x",
+		},
+		"username with an at sign and a password starting with a slash": {
+			url:  "https://jane@corp.com:/s3cret@example.com/x",
+			want: "https://jane@corp.com:xxxxx@example.com/x",
+		},
+		"user without password and an empty port keeps its spelling": {
+			url:  "https://jane@corp.com:/x",
+			want: "https://jane@corp.com:/x",
 		},
 		"at sign in the path of a url that parses keeps its spelling": {
 			url:  "https://example.com:8443/pkg@1.0/s.json",

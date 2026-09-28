@@ -122,12 +122,14 @@ func Redacted(rawURL string) string {
 // hidesPassword reports whether u, parsed from rawURL, can hide a password
 // the parser did not read as one. The parser reads "user:/pass@host" as the
 // host "user:" with an empty port and then the path "/pass@host", and it
-// reads a leading "?" or "#" in the password the same way. So a URL with no
+// reads a leading "?" or "#" in the password the same way. A username can
+// hold an unencoded "@", so "jane@corp.com:/pass@host" reads as the user
+// "jane" and the host "corp.com:". So a URL with no password in its
 // userinfo, a host that ends in a colon, and an "@" after "://" can hold a
 // password. An authority seldom ends in an empty port, so the check seldom
 // flags a URL that holds no password.
 func hidesPassword(u *url.URL, rawURL string) bool {
-	if u.User != nil || !strings.HasSuffix(u.Host, ":") {
+	if _, ok := u.User.Password(); ok || !strings.HasSuffix(u.Host, ":") {
 		return false
 	}
 
