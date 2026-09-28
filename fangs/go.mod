@@ -8,7 +8,7 @@ require (
 	charm.land/fang/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/stretchr/testify v1.12.1
-	go.jacobcolvin.com/niceyaml v0.0.0-00010101000000-000000000000
+	go.jacobcolvin.com/niceyaml v0.0.0-20260928025007-fd1be398483f
 	go.jacobcolvin.com/x/stringtest v0.2.0
 )
 

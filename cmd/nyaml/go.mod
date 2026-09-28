@@ -17,7 +17,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	go.jacobcolvin.com/niceyaml v0.0.0-00010101000000-000000000000
+	go.jacobcolvin.com/niceyaml v0.0.0-20260928025007-fd1be398483f
 	go.jacobcolvin.com/niceyaml/bubbles v0.0.0-00010101000000-000000000000
 	go.jacobcolvin.com/niceyaml/fangs v0.0.0-00010101000000-000000000000
 	go.jacobcolvin.com/x/cobras v0.1.0
