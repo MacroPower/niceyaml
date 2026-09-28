@@ -149,7 +149,8 @@ func file(path string) (Ref, error) {
 // The root of fsys stands for wd, the working directory [File] made the
 // path absolute against, so an absolute name reads relative to wd, and
 // one outside wd, or a drive-letter path off Windows, names no file in
-// fsys.
+// fsys. A rooted name without a drive, such as \proj\x.json, counts as
+// absolute on the drive of wd.
 func readFile(fsys fs.FS, name, abs, wd string) ([]byte, error) {
 	if fsys != nil {
 		return readFS(fsys, name, wd)
@@ -185,29 +186,14 @@ func readFile(fsys fs.FS, name, abs, wd string) ([]byte, error) {
 
 // readFS returns the bytes of name in fsys, whose root stands for wd. A
 // relative name reads from the root as it is, and an absolute one reads
-// relative to wd. An empty wd stands for the working directory at the
-// time of the read. A name outside wd, or a drive-letter path off
-// Windows, is [fs.ErrInvalid].
+// relative to wd. A rooted name without a drive, such as \proj\x.json,
+// counts as absolute, as it does for [FileOrURL]. An empty wd stands for
+// the working directory at the time of the read. A name outside wd, or a
+// drive-letter path off Windows, is [fs.ErrInvalid].
 func readFS(fsys fs.FS, name, wd string) ([]byte, error) {
-	rel := name
-
-	if filepath.IsAbs(name) || hasDriveLetter(name) {
-		var err error
-
-		if wd == "" {
-			wd, err = os.Getwd()
-			if err != nil {
-				return nil, fmt.Errorf("resolve %s: %w", name, err)
-			}
-		}
-
-		rel, err = filepath.Rel(wd, name)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return nil, fmt.Errorf(
-				"read %s: %w: not under the working directory the registry's file system stands for",
-				name, fs.ErrInvalid,
-			)
-		}
+	rel, err := fsRelative(name, wd)
+	if err != nil {
+		return nil, err
 	}
 
 	fsPath := slashpath.Clean(filepath.ToSlash(rel))
@@ -233,6 +219,45 @@ func readFS(fsys fs.FS, name, wd string) ([]byte, error) {
 	defer f.Close() //nolint:errcheck // Best-effort close.
 
 	return readBounded(f, name)
+}
+
+// fsRelative returns name as a path relative to wd, the directory the
+// root of the registry's file system stands for, for [readFS]. A relative
+// name comes back as it is.
+func fsRelative(name, wd string) (string, error) {
+	// Windows reads a rooted name without a volume as relative, though
+	// File made it absolute on the drive of the working directory.
+	rooted := name != "" && os.IsPathSeparator(name[0]) && filepath.VolumeName(name) == ""
+
+	if !filepath.IsAbs(name) && !hasDriveLetter(name) && !rooted {
+		return name, nil
+	}
+
+	if wd == "" {
+		var err error
+
+		wd, err = os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("resolve %s: %w", name, err)
+		}
+	}
+
+	// Off Windows, a rooted name is absolute already. On Windows, it takes
+	// the drive of wd, the directory File made it absolute against.
+	target := name
+	if rooted && !filepath.IsAbs(name) {
+		target = filepath.VolumeName(wd) + name
+	}
+
+	rel, err := filepath.Rel(wd, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf(
+			"read %s: %w: not under the working directory the registry's file system stands for",
+			name, fs.ErrInvalid,
+		)
+	}
+
+	return rel, nil
 }
 
 // readBounded returns the bytes of f, the file at name. It checks again
