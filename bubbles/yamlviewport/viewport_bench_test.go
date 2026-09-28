@@ -47,6 +47,44 @@ func BenchmarkViewport_SearchNext(b *testing.B) {
 	}
 }
 
+func BenchmarkViewport_SetSearchTerm(b *testing.B) {
+	// Typing a word that one line at the end holds, so each term restyles
+	// that line alone.
+	terms := []string{"z", "ze", "zeb", "zebr", "zebra"}
+
+	for _, n := range []int{1_000, 20_000} {
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			var src strings.Builder
+
+			for i := range n {
+				fmt.Fprintf(&src, "key%d: value %d\n", i, i)
+			}
+
+			src.WriteString("zebra: here\n")
+
+			m := yamlviewport.New(
+				yamlviewport.WithPrinter(printer.New(printer.WithStyles(theme.Charm.Styles()))),
+			)
+			m.SetWidth(120)
+			m.SetHeight(40)
+			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
+
+			_ = m.View()
+
+			b.ReportAllocs()
+
+			i := 0
+			for b.Loop() {
+				m.SetSearchTerm(terms[i%len(terms)])
+
+				_ = m.View()
+
+				i++
+			}
+		})
+	}
+}
+
 func BenchmarkViewport_SideBySideView(b *testing.B) {
 	for _, n := range []int{1_000, 100_000} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {

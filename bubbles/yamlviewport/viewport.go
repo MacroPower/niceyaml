@@ -399,11 +399,18 @@ func (m *Model) relayout() {
 // counts of every other line. Like relayout, it leaves any copy that
 // shares the old cache untouched and records the top line for ensureRows
 // to restore. An empty cache has no counts to carry over, so remeasure
-// drops it as relayout does.
+// drops it as relayout does. Without ranges no line changed, so the cache
+// stays as it is.
 func (m *Model) remeasure(ranges ...position.Range) {
 	if m.rows == nil || m.rows.sums == nil {
 		m.relayout()
 
+		return
+	}
+
+	// A slice of a view by no span holds every line, so the loop below
+	// would measure the whole view.
+	if len(ranges) == 0 {
 		return
 	}
 
@@ -864,6 +871,11 @@ func (m *Model) rebuildViews() {
 // refreshSearch recomputes search matches and overlays for the current base
 // views without rebuilding them. A zero Model, one not created with [New],
 // has no searcher, so it finds no match for any term.
+//
+// The caller brings the row counts up to date with the new decoration, as
+// for decorate. The decoration changes only on the lines of the old and the
+// new matches, so a caller that changes the term measures only those lines
+// again.
 func (m *Model) refreshSearch() {
 	if m.baseLeft == nil {
 		m.left = nil
@@ -895,11 +907,16 @@ func (m *Model) refreshSearch() {
 	}
 
 	m.decorate()
+}
 
-	// A highlight style may change the width of the text it styles, and a
-	// new term or new content moves highlights on any line, so the row
-	// counts of the old decoration no longer hold.
-	m.relayout()
+// matchRanges returns the range of each search match.
+func (m *Model) matchRanges() []position.Range {
+	ranges := make([]position.Range, 0, len(m.searchMatches))
+	for _, match := range m.searchMatches {
+		ranges = append(ranges, match.rng)
+	}
+
+	return ranges
 }
 
 // clearMatches drops the matches of both panes and the selected match.
@@ -1836,11 +1853,16 @@ func (m *Model) SetSearchTerm(term string) {
 		return
 	}
 
+	// Only the lines of the old matches and of the new ones change style,
+	// so only they need new row counts.
+	changed := m.matchRanges()
+
 	// The match index of another term points at an arbitrary match of this
 	// one.
 	m.searchIndex = -1
 	m.searchTerm = term
 	m.refreshSearch()
+	m.remeasure(append(changed, m.matchRanges()...)...)
 	m.scrollToCurrentMatch()
 }
 
@@ -1856,8 +1878,12 @@ func (m *Model) ClearSearch() {
 		return
 	}
 
+	// Only the lines of the old matches lose their highlights.
+	changed := m.matchRanges()
+
 	m.searchTerm = ""
 	m.refreshSearch()
+	m.remeasure(changed...)
 }
 
 // SearchNext navigates to the next search match.

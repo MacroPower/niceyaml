@@ -188,6 +188,114 @@ func TestViewport_SearchNextRefreshesRowCounts(t *testing.T) {
 	}
 }
 
+func TestViewport_SearchTermRefreshesRowCounts(t *testing.T) {
+	t.Parallel()
+
+	// Both highlight styles widen the text they style, so a new term changes
+	// the rows and the width of the lines its matches leave and of the lines
+	// they reach. The row counts, the horizontal scroll bound, and the
+	// render follow every change of term.
+	widen := lipgloss.NewStyle().Transform(func(s string) string {
+		return "<<" + s + ">>"
+	})
+	styles := style.New(lipgloss.NewStyle(),
+		style.Set(kind.GenericHighlight, widen),
+		style.Set(kind.GenericHighlightDim, widen),
+	)
+	p := printer.New(
+		printer.WithStyles(styles),
+		printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1)),
+		printer.WithGutter(printer.NoGutter),
+	)
+
+	lines := make([]string, 0, 12)
+	for i := range 12 {
+		lines = append(lines, fmt.Sprintf("k%d: %s term", i, strings.Repeat("a", i)))
+	}
+
+	before := strings.Join(lines, "\n") + "\n"
+	lines[3] = "k3: changed term"
+	after := strings.Join(lines, "\n") + "\n"
+
+	// Terms that match on every line, on a few, across a line break, and
+	// on none.
+	terms := []string{"term", "aaaa", "k1", "term\nk", "zzz", "a", "changed"}
+
+	tcs := map[string]struct {
+		viewMode yamlviewport.ViewMode
+		width    int
+		wrap     bool
+	}{
+		"unified wrapped": {
+			viewMode: yamlviewport.ViewModeFull,
+			width:    24,
+			wrap:     true,
+		},
+		"unified unwrapped": {
+			viewMode: yamlviewport.ViewModeFull,
+			width:    16,
+		},
+		"hunks wrapped": {
+			viewMode: yamlviewport.ViewModeHunks,
+			width:    24,
+			wrap:     true,
+		},
+		"side by side wrapped": {
+			viewMode: yamlviewport.ViewModeSideBySide,
+			width:    51, // Two panes of 24 columns.
+			wrap:     true,
+		},
+		"side by side unwrapped": {
+			viewMode: yamlviewport.ViewModeSideBySide,
+			width:    35, // Two panes of 16 columns.
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(tc.width)
+			m.SetHeight(5)
+			m.SetWordWrap(tc.wrap)
+			m.AddRevision(niceyaml.NewSourceFromString(before, niceyaml.WithName("v1")))
+			m.AddRevision(niceyaml.NewSourceFromString(after, niceyaml.WithName("v2")))
+			m.SetViewMode(tc.viewMode)
+
+			_ = m.View()
+
+			maxXOffset := func(m yamlviewport.Model) int {
+				m.SetXOffset(1 << 30)
+
+				return m.XOffset()
+			}
+
+			check := func(step string) {
+				t.Helper()
+
+				// A width round trip on a copy drops every cached count, so
+				// the copy measures every line with the current decoration.
+				fresh := m
+				fresh.SetWidth(tc.width + 1)
+				fresh.SetWidth(tc.width)
+
+				assert.Equal(t, fresh.TotalRowCount(), m.TotalRowCount(), step)
+				assert.Equal(t, maxXOffset(fresh), maxXOffset(m), step)
+				assert.Equal(t, fresh.View(), m.View(), step)
+			}
+
+			for _, term := range terms {
+				m.SetSearchTerm(term)
+				check(fmt.Sprintf("term %q", term))
+			}
+
+			m.ClearSearch()
+			check("clear")
+		})
+	}
+}
+
 // testPrinter returns a printer without styles or line numbers for predictable golden output.
 func testPrinter() *printer.Printer {
 	return printer.New(
