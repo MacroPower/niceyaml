@@ -1919,7 +1919,7 @@ refs: [*r, *r]
 			path: paths.Root().Child("alias").Recursive("name"),
 			want: []string{"e"},
 		},
-		"recursive skips merge sources": {
+		"recursive skips alias merge sources": {
 			path: paths.Root().Child("merged").Recursive("name"),
 			want: []string{},
 		},
@@ -2164,6 +2164,61 @@ func TestPath_Matches_RepeatedMergeKey(t *testing.T) {
 	node, err := paths.MustParse("$.t.a").Node(doc)
 	require.NoError(t, err)
 	assert.Equal(t, "1", node.String())
+}
+
+func TestPath_Matches_InlineMergeSource(t *testing.T) {
+	t.Parallel()
+
+	// A `..name` selector walks a mapping written under `<<` as any other
+	// value and skips an alias there, even when the decoder takes the
+	// entry from a later source or from the mapping's own key.
+	tcs := map[string]struct {
+		input string
+		want  []string
+		value string
+	}{
+		"later alias source overrides": {
+			input: "base: &b {name: y}\nm:\n  <<: [{name: x}, *b]\n",
+			want:  []string{"$.m.<<[0].name"},
+			value: "y",
+		},
+		"own key overrides": {
+			input: "m:\n  <<: {name: x}\n  name: z\n",
+			want:  []string{"$.m.<<.name", "$.m.name"},
+			value: "z",
+		},
+		"alias source alone": {
+			input: "base: &b {name: y}\nm:\n  <<: *b\n",
+			want:  nil,
+			value: "y",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input).File()
+			require.NoError(t, err)
+
+			doc := file.Docs[0]
+
+			matches, err := paths.MustParse("$.m..name").Matches(doc)
+			require.NoError(t, err)
+
+			var got []string
+
+			for _, m := range matches {
+				got = append(got, m.Path.String())
+			}
+
+			assert.Equal(t, tc.want, got)
+
+			node, err := paths.MustParse("$.m.name").Node(doc)
+			require.NoError(t, err)
+			assert.Equal(t, tc.value, node.String())
+		})
+	}
 }
 
 func TestPath_Node_LaterDuplicateKeyWins(t *testing.T) {

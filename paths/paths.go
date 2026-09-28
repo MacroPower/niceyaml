@@ -441,8 +441,12 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 // their anchor and see the entries a `<<` merge key brings into a mapping.
 // The `..name` selector looks through an alias or tag on the node it
 // starts from, as the other selectors do. Below that node it visits each
-// entry once, where the source defines it, so it neither follows aliases
-// nor looks into merge sources, and it skips an entry that a later entry
+// entry once, where the source defines it, so it does not follow aliases,
+// including one a `<<` merge key names, and it does not list the entries a
+// merge key brings into a mapping under that mapping. It walks a mapping
+// written inline under a `<<` key as it walks any other value, and lists
+// its entries under the `<<` selector even when a later source or a key of
+// the mapping itself overrides them. It skips an entry that a later entry
 // with the same key in its mapping shadows.
 //
 // Wraps [ErrNoDocument], together with [ErrNotFound], when the document has
