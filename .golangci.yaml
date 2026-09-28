@@ -1,5 +1,3 @@
-# This file contains all available configuration options
-# with their default values.
 version: "2"
 run:
   # Timeout for analysis, e.g. 30s, 5m.
@@ -250,5 +248,5 @@ linters:
       - path: style/theme/
         linters:
           - dupl
-          # The catalog repeats hex colors across palettes by design.
+          # The theme catalog repeats hex colors across palettes.
           - goconst
