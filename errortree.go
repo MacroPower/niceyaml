@@ -135,57 +135,73 @@ func isJoinMessage(msg string, branches []error) bool {
 	return msg == sb.String()
 }
 
-// children returns the nodes of the errors nested along the cause chain of
-// err. A binding met along the chain contributes its bound children, each
-// with the position it resolved to, and the chain ends there, since the
-// binding bound everything below it. An unbound Error contributes its
-// nested errors, rebased under the base of every Error from [Rebase]
-// above them, as binding rebases them. The nested errors of an unbound
-// Error and the branches of a join keep the order their parent lists them
-// in, since only the children of a binding carry the source and position
-// [trees] sorts by.
+// children returns the nodes of the children [walkChildren] finds along
+// the cause chain of err. A binding that ends the chain contributes its
+// bound children, each with the position it resolved to, since the
+// binding bound everything below it. Every other child is the tree of
+// the error rebased under its base, as binding rebases it. The nested
+// errors of an unbound Error and the branches of a join keep the order
+// their parent lists them in, since only the children of a binding carry
+// the source and position [trees] sorts by.
 func children(err error) []ErrorTree {
-	var (
-		kids []positioned
-		base childBase
+	var kids []positioned
+
+	walkChildren(err,
+		func(x *SourceError) { kids = append(kids, boundChildren(x, false)...) },
+		func(n error, base childBase) {
+			kids = append(kids, positioned{tree: NewErrorTree(base.rebase(n))})
+		},
 	)
+
+	return trees(kids)
+}
+
+// walkChildren walks the cause chain of err and reports the children
+// along it, the ones binding and [NewErrorTree] both place under err. The
+// chain follows each wrapper to the one error it wraps and each [*Error]
+// to its cause. Every error nested with [WithErrors] in an Error on the
+// way is a child, reported to onChild with the base of every Error from
+// [Rebase] above it, the Error that nests it included. The chain ends at
+// an error that unwraps to several, such as one from [errors.Join] or a
+// wrapper with several %w verbs, and each of its branches but the nil
+// ones is a child under the same base. It also ends at a [*SourceError],
+// which bound everything below it already, so onBinding receives it in
+// place of its children.
+func walkChildren(err error, onBinding func(*SourceError), onChild func(n error, base childBase)) {
+	var base childBase
 
 	for cur := err; !isNothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
 		case *SourceError:
-			kids = append(kids, boundChildren(x, false)...)
-			cur = nil
+			onBinding(x)
+
+			return
 
 		case *Error:
 			base = base.cross(x)
 
-			for _, n := range x.Errors() {
-				kids = append(kids, positioned{tree: NewErrorTree(base.rebase(n))})
+			for _, n := range x.nested() {
+				onChild(n, base)
 			}
 
-			cur = x.Cause()
+			cur = x.err
 
 		case interface{ Unwrap() error }:
 			cur = x.Unwrap()
 
 		case interface{ Unwrap() []error }:
-			// A wrapper with several %w verbs, or a join met along the
-			// chain, contributes its branches as children and ends the
-			// chain.
 			for _, branch := range x.Unwrap() {
 				if !isNothing(branch) {
-					kids = append(kids, positioned{tree: NewErrorTree(base.rebase(branch))})
+					onChild(branch, base)
 				}
 			}
 
-			cur = nil
+			return
 
 		default:
-			cur = nil
+			return
 		}
 	}
-
-	return trees(kids)
 }
 
 // childBase is the base the children along a cause chain rebase under:

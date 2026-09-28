@@ -1073,46 +1073,16 @@ func newSourceError(err error, b binder) *SourceError {
 	return e
 }
 
-// collect binds the children of the error e binds: every error nested with
-// [WithErrors] in an [*Error] along its cause chain, and every branch of
-// the error that ends the chain by unwrapping to several, with the base of
-// every Error from [Rebase] on the way in front of their paths. The chain
-// also ends at a [*SourceError], which is the cause of the error above it
-// rather than a violation of its own, so its children join the children
-// of e.
+// collect binds the children of the error e binds, the ones [walkChildren]
+// finds along its cause chain. A [*SourceError] that ends the chain is
+// the cause of the error above it rather than a violation of its own, so
+// its children join the children of e, and every other child binds
+// through [SourceError.addChild].
 func (e *SourceError) collect(err error, b binder) {
-	var base childBase
-
-	for cur := err; !isNothing(cur); {
-		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
-		case *SourceError:
-			e.errors = append(e.errors, x.errors...)
-
-			return
-
-		case *Error:
-			base = base.cross(x)
-
-			for _, n := range x.errors {
-				e.addChild(n, b, base)
-			}
-
-			cur = x.err
-
-		case interface{ Unwrap() error }:
-			cur = x.Unwrap()
-
-		case interface{ Unwrap() []error }:
-			for _, branch := range x.Unwrap() {
-				e.addChild(branch, b, base)
-			}
-
-			return
-
-		default:
-			return
-		}
-	}
+	walkChildren(err,
+		func(x *SourceError) { e.errors = append(e.errors, x.errors...) },
+		func(n error, base childBase) { e.addChild(n, b, base) },
+	)
 }
 
 // addChild binds n as a child of e. A binding is the child as it is, and
