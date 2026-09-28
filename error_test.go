@@ -4811,6 +4811,19 @@ func TestSourceError_Document(t *testing.T) {
 			err:  docs[1].Bind(fmt.Errorf("context: %w", docs[0].Bind(niceyaml.NewError("bad")))),
 			want: docs[0],
 		},
+		"nesting errors around a binding keeps its document": {
+			err: docs[1].Bind(niceyaml.WrapError(
+				docs[0].Bind(niceyaml.NewError("bad")),
+				niceyaml.WithErrors(niceyaml.NewError("b", niceyaml.AtPath(paths.Root().Child("b")))),
+			)),
+			want: docs[0],
+		},
+		"nesting errors around a binding to no document keeps none": {
+			err: docs[1].Bind(niceyaml.WrapError(
+				source.Bind(niceyaml.NewError("bad")),
+				niceyaml.WithErrors(niceyaml.NewError("b", niceyaml.AtPath(paths.Root().Child("b")))),
+			)),
+		},
 	}
 
 	for name, tc := range tcs {

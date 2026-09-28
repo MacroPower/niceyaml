@@ -1125,8 +1125,12 @@ func (e *SourceError) Source() *Source {
 // [Source.Bind], the root of the document its location falls in. An
 // error bound through Source.Bind without a location, or with one that
 // resolves in no document, and one a [Source] that does not parse
-// produced itself are bound to none, while Node.Bind keeps its node on
-// every error it binds. A nil SourceError is bound to none.
+// produced itself are bound to none. Node.Bind keeps its node on every
+// error it binds anew, except an error that wraps a binding. Such an
+// error keeps the node of the binding it wraps, whether Node.Bind
+// returns it as it is or binds it anew around the binding with the
+// errors it nests, so its node can be nil or belong to another document
+// or source. A nil SourceError is bound to none.
 func (e *SourceError) Node() *Node {
 	if e == nil {
 		return nil
