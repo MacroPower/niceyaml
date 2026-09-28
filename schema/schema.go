@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -17,6 +16,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -34,7 +34,9 @@ var (
 	// share them. It also indicates a document whose aliases would make
 	// the decoder itself read that much. [Schema.Validate] and
 	// [Schema.ValidateValue] return it wrapped together with [ErrValidate].
-	ErrExcessiveAliasing = errors.New("excessive aliasing")
+	// A [matcher.Content] guard refuses such a document with it too, and
+	// [Registry.Lookup] then returns it wrapped together with [ErrResolve].
+	ErrExcessiveAliasing = aliasing.ErrExcessiveAliasing
 
 	// ErrCompile indicates a schema document that does not compile.
 	// [Compile] and [Registry.Lookup] return it.
@@ -234,9 +236,9 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 		return nil
 	}
 
-	err := checkDecodeExpansion(n)
+	err := aliasing.CheckDecode(n)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrValidate, err)
 	}
 
 	// A decode into any yields only the YAML built-in types, none of which
@@ -994,27 +996,6 @@ func mapItemKey(key any) string {
 	}
 }
 
-// The limits on shared values follow the rule gopkg.in/yaml.v3 applies
-// to the aliases in a document it decodes.
-const (
-	// A value's aliases count as excessive only once the value passes
-	// both of these node counts, for aliased nodes and for all nodes.
-	minAliased  = 100
-	minExpanded = 1000
-
-	// Aliases may make up the larger share of the nodes in a value of up
-	// to the lower count, and the smaller share in a value of the higher
-	// count or more. The share falls in a straight line between them.
-	maxAliasRatio       = 0.99
-	minAliasRatio       = 0.10
-	aliasRatioRangeLow  = 400_000
-	aliasRatioRangeHigh = 4_000_000
-
-	// A node count stops growing at this cap, far past every limit
-	// above, so a chain of nested aliases cannot overflow it.
-	countCap = math.MaxInt32
-)
-
 // checkExpansion returns an error wrapping [ErrValidate] when a map or
 // slice in data contains itself. It returns one wrapping both
 // [ErrValidate] and [ErrExcessiveAliasing] when aliases make up too much
@@ -1027,254 +1008,11 @@ func checkExpansion(data any) error {
 		return err
 	}
 
-	if excessiveAliasing(w.distinct, w.aliased) {
+	if aliasing.Excessive(w.distinct, w.aliased) {
 		return fmt.Errorf("%w: %w", ErrValidate, ErrExcessiveAliasing)
 	}
 
 	return nil
-}
-
-// excessiveAliasing reports whether aliased nodes make up too large a
-// share of a value that holds distinct nodes and repeats aliased more
-// through its aliases.
-func excessiveAliasing(distinct, aliased int) bool {
-	expanded := addCapped(distinct, aliased)
-
-	return aliased > minAliased && expanded > minExpanded &&
-		float64(aliased)/float64(expanded) > allowedAliasRatio(expanded)
-}
-
-// checkDecodeExpansion returns an error wrapping both [ErrValidate] and
-// [ErrExcessiveAliasing] when n holds an alias and aliases make up too
-// much of what a decode of its document reads. A decode of a node that
-// holds an alias reads the whole document to find its anchors, so the
-// count covers the whole document. A node without an alias decodes on
-// its own and reads nothing twice.
-//
-// The count depends on the document alone, so the document keeps it,
-// and a check of each item of a list counts the document once.
-func checkDecodeExpansion(n *niceyaml.Node) error {
-	if !holdsAlias(rootOf(n)) {
-		return nil
-	}
-
-	state := docstate.Of(n)
-	doc := n.DocumentAST()
-
-	excessive := state.ExcessiveAliasing(func() bool {
-		c := treeCounter{
-			resolver: state.Resolver(),
-			sizes:    map[ast.Node]int{},
-			open:     map[ast.Node]bool{},
-		}
-
-		c.count(doc.Body, true)
-
-		return excessiveAliasing(c.distinct, c.aliased)
-	})
-	if excessive {
-		return fmt.Errorf("%w: %w", ErrValidate, ErrExcessiveAliasing)
-	}
-
-	return nil
-}
-
-// holdsAlias reports whether node or any node below it is an alias.
-func holdsAlias(node ast.Node) bool {
-	if isNilNode(node) {
-		return false
-	}
-
-	var found aliasFinder
-
-	ast.Walk(&found, node)
-
-	return bool(found)
-}
-
-// aliasFinder is an [ast.Visitor] that records whether it visited an
-// alias and stops the walk once it has.
-type aliasFinder bool
-
-// Visit implements [ast.Visitor].
-func (f *aliasFinder) Visit(node ast.Node) ast.Visitor {
-	if bool(*f) || isNilNode(node) {
-		return nil
-	}
-
-	if _, ok := node.(*ast.AliasNode); ok {
-		*f = true
-
-		return nil
-	}
-
-	return f
-}
-
-// treeCounter counts the nodes a decode of a document tree reads, the way
-// gopkg.in/yaml.v3 counts them for its alias limit, where each alias
-// reads the content it refers to in full. That covers an alias the
-// decoder writes out as text, such as a key, and a mapping a merge key
-// brings in, which the decoder reads again at every merge. The resolver
-// binds each alias to its content. An alias to a scalar counts as one
-// unaliased node, as it does for [checkExpansion], and so does an alias
-// that does not resolve and one inside its own content, which the
-// decoder reads as null.
-//
-// The distinct field counts the nodes of the tree once each, and the
-// aliased field counts the nodes the aliases in the tree repeat. The
-// sizes map holds the size of each alias's content once the counter has
-// read it, so a chain of nested aliases costs one read per anchor, and
-// the open map holds the content the counter is reading.
-type treeCounter struct {
-	resolver *paths.Resolver
-	sizes    map[ast.Node]int
-	open     map[ast.Node]bool
-	distinct int
-	aliased  int
-}
-
-// count returns the number of nodes a decode of node reads: one for a
-// scalar, and one for a mapping or sequence plus the count of each key,
-// value, or element in it. An anchor, a tag, or the `?` of an explicit
-// key counts what it wraps. With top set, node lies outside the content
-// of every alias, and count adds its nodes to distinct and the nodes its
-// aliases repeat to aliased.
-func (c *treeCounter) count(node ast.Node, top bool) int {
-	if isNilNode(node) {
-		return 0
-	}
-
-	switch n := node.(type) {
-	case *ast.AliasNode:
-		return c.alias(n, top)
-	case *ast.AnchorNode:
-		return c.anchor(n, top)
-	case *ast.TagNode:
-		return c.count(n.Value, top)
-	case *ast.MappingKeyNode:
-		return c.count(n.Value, top)
-	case *ast.CommentGroupNode:
-		return 0
-	}
-
-	if top {
-		c.distinct = addCapped(c.distinct, 1)
-	}
-
-	size := 1
-
-	switch n := node.(type) {
-	case *ast.MappingNode:
-		for _, entry := range n.Values {
-			size = addCapped(size, c.entry(entry, top))
-		}
-
-	case *ast.MappingValueNode:
-		size = addCapped(size, c.entry(n, top))
-
-	case *ast.SequenceNode:
-		for _, elem := range n.Values {
-			size = addCapped(size, c.count(elem, top))
-		}
-	}
-
-	return size
-}
-
-// entry returns the number of nodes a decode of the key and the value of
-// a mapping entry reads, as [treeCounter.count] counts them.
-func (c *treeCounter) entry(entry *ast.MappingValueNode, top bool) int {
-	if entry == nil {
-		return 0
-	}
-
-	return addCapped(c.count(entry.Key, top), c.count(entry.Value, top))
-}
-
-// anchor returns the number of nodes a decode of the content of the
-// anchor reads, as [treeCounter.count] counts them. The decoder reads an
-// alias inside the content of its own anchor as null, so anchor marks
-// the content open while it counts it, under the node [treeCounter.alias]
-// looks the content up by, and such an alias counts as one node.
-func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool) int {
-	content, err := c.resolver.Deref(anchor)
-	if err != nil || c.open[content] {
-		return c.count(anchor.Value, top)
-	}
-
-	c.open[content] = true
-	size := c.count(anchor.Value, top)
-	delete(c.open, content)
-
-	return size
-}
-
-// alias returns the number of nodes a decode of the alias reads, which is
-// the size of the mapping or sequence it refers to, or one for any other
-// alias. With top set, the alias lies outside the content of every other
-// alias, and alias adds that size to aliased, or the one node to
-// distinct.
-func (c *treeCounter) alias(alias *ast.AliasNode, top bool) int {
-	target, err := c.resolver.Deref(alias)
-	if err != nil || c.open[target] || !isCollection(target) {
-		if top {
-			c.distinct = addCapped(c.distinct, 1)
-		}
-
-		return 1
-	}
-
-	size, ok := c.sizes[target]
-	if !ok {
-		c.open[target] = true
-		size = c.count(target, false)
-		delete(c.open, target)
-
-		c.sizes[target] = size
-	}
-
-	if top {
-		c.aliased = addCapped(c.aliased, size)
-	}
-
-	return size
-}
-
-// isCollection reports whether node holds a mapping or a sequence under
-// its anchors and tags.
-func isCollection(node ast.Node) bool {
-	switch n := contentNode(node).(type) {
-	case *ast.MappingNode:
-		return n != nil
-	case *ast.MappingValueNode:
-		return n != nil
-	case *ast.SequenceNode:
-		return n != nil
-	default:
-		return false
-	}
-}
-
-// isNilNode reports whether node is nil, including a typed nil a tree
-// built by hand may hold behind a non-nil interface.
-func isNilNode(node ast.Node) bool {
-	return node == nil || reflect.ValueOf(node).IsNil()
-}
-
-// allowedAliasRatio returns the share of the expanded nodes that aliases
-// may make up in a value of expanded nodes.
-func allowedAliasRatio(expanded int) float64 {
-	switch {
-	case expanded <= aliasRatioRangeLow:
-		return maxAliasRatio
-	case expanded >= aliasRatioRangeHigh:
-		return minAliasRatio
-	default:
-		progress := float64(expanded-aliasRatioRangeLow) / float64(aliasRatioRangeHigh-aliasRatioRangeLow)
-
-		return maxAliasRatio - (maxAliasRatio-minAliasRatio)*progress
-	}
 }
 
 // expansionWalker counts the nodes of a decoded value the way the
@@ -1344,7 +1082,7 @@ func sharedKeyOf(data any) (sharedKey, bool) {
 // size of each key and value in it. A map or slice that the walk reaches
 // from inside itself returns an error wrapping [ErrValidate].
 func (w *expansionWalker) walk(data any) (int, error) {
-	w.distinct = addCapped(w.distinct, 1)
+	w.distinct = aliasing.AddCapped(w.distinct, 1)
 
 	key, ok := sharedKeyOf(data)
 	if !ok {
@@ -1356,7 +1094,7 @@ func (w *expansionWalker) walk(data any) (int, error) {
 	}
 
 	if size, seen := w.sizes[key]; seen {
-		w.aliased = addCapped(w.aliased, size)
+		w.aliased = aliasing.AddCapped(w.aliased, size)
 
 		return size, nil
 	}
@@ -1370,20 +1108,20 @@ func (w *expansionWalker) walk(data any) (int, error) {
 	case []byte:
 		// The walk counted the first character of the base64 text on
 		// entry.
-		size = min(base64.StdEncoding.EncodedLen(len(v)), countCap)
-		w.distinct = addCapped(w.distinct, size-1)
+		size = min(base64.StdEncoding.EncodedLen(len(v)), aliasing.CountCap)
+		w.distinct = aliasing.AddCapped(w.distinct, size-1)
 
 	case map[string]any:
 		for _, elem := range v {
 			// The key is a node of its own.
-			w.distinct = addCapped(w.distinct, 1)
+			w.distinct = aliasing.AddCapped(w.distinct, 1)
 
 			n, err := w.walk(elem)
 			if err != nil {
 				return 0, err
 			}
 
-			size = addCapped(size, addCapped(1, n))
+			size = aliasing.AddCapped(size, aliasing.AddCapped(1, n))
 		}
 
 	case yaml.MapSlice:
@@ -1401,7 +1139,7 @@ func (w *expansionWalker) walk(data any) (int, error) {
 				return 0, err
 			}
 
-			size = addCapped(size, addCapped(kn, n))
+			size = aliasing.AddCapped(size, aliasing.AddCapped(kn, n))
 		}
 
 	case []any:
@@ -1411,21 +1149,11 @@ func (w *expansionWalker) walk(data any) (int, error) {
 				return 0, err
 			}
 
-			size = addCapped(size, n)
+			size = aliasing.AddCapped(size, n)
 		}
 	}
 
 	w.sizes[key] = size
 
 	return size, nil
-}
-
-// addCapped returns a+b, or countCap when the sum would pass it. Both a
-// and b fall between zero and countCap.
-func addCapped(a, b int) int {
-	if a > countCap-b {
-		return countCap
-	}
-
-	return a + b
 }

@@ -3,6 +3,7 @@ package matcher_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
@@ -330,6 +332,31 @@ func TestContent(t *testing.T) {
 
 		_, err := m.Match(t.Context(), doc)
 		require.ErrorIs(t, err, paths.ErrWildcard)
+	})
+
+	t.Run("alias bomb is an error", func(t *testing.T) {
+		t.Parallel()
+
+		// Each level lists the level below ten times, so a decode of the
+		// alias key reads 10^7 scalars. Match refuses the document before
+		// it decodes anything, as the schema validator does.
+		var sb strings.Builder
+
+		sb.WriteString("a:\n  - &l0 [x]\n")
+
+		for level := 1; level <= 7; level++ {
+			aliases := strings.Repeat(fmt.Sprintf("*l%d, ", level-1), 10)
+			fmt.Fprintf(&sb, "  - &l%d [%s]\n", level, strings.TrimSuffix(aliases, ", "))
+		}
+
+		sb.WriteString("kind:\n  ? *l7\n  : v\n")
+
+		m := matcher.Content(kindPath, "Deployment")
+		doc := yamltest.FirstDocument(t, sb.String())
+
+		ok, err := m.Match(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
+		assert.False(t, ok)
 	})
 }
 

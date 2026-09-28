@@ -13,6 +13,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -41,7 +42,11 @@ type contentMatcher[T comparable] struct {
 // from the read, such as an alias on the path that names no anchor, a
 // path with a wildcard selector, or a context that ended, comes back as
 // the error, so a registry stops at the document rather than routing it
-// elsewhere:
+// elsewhere. So does a document whose aliases would make the read cost
+// far more than the document holds, which Match refuses before it
+// decodes anything, with an error matching
+// [go.jacobcolvin.com/niceyaml/schema.ErrExcessiveAliasing], as the
+// schema validator refuses it:
 //
 //	// Matches kind: Deployment.
 //	matcher.Content(paths.Root().Child("kind"), "Deployment")
@@ -76,6 +81,16 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	if err != nil {
 		//nolint:wrapcheck // The Document binds the error already.
 		return false, err
+	}
+
+	// A decode of a node that holds an alias reads the whole document to
+	// find its anchors. A few hundred bytes of nested aliases can make
+	// that read take minutes, so the document must pass the alias limit
+	// of the schema validator before anything decodes it.
+	err = aliasing.CheckDecode(node)
+	if err != nil {
+		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
+		return false, doc.Bind(err)
 	}
 
 	// Read the value as the YAML types name it first, because a decode
