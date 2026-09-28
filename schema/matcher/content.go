@@ -39,14 +39,14 @@ type contentMatcher[T comparable] struct {
 // by value whatever their Go types, so Content[any](path, 1) matches an
 // integer the decoder reads as a uint64. A document without the path, or
 // whose value does not decode into T, does not match. Any other error
-// from the read, such as an alias on the path that names no anchor, a
-// path with a wildcard selector, or a context that ended, comes back as
-// the error, so a registry stops at the document rather than routing it
-// elsewhere. So does a document whose aliases would make the read cost
-// far more than the document holds, which Match refuses before it
-// decodes anything, with an error matching
-// [go.jacobcolvin.com/niceyaml/schema.ErrExcessiveAliasing], as the
-// schema validator refuses it:
+// from the read comes back as the error, so a registry stops at the
+// document rather than routing it elsewhere. Such errors include an alias
+// on the path that names no anchor, a path with a wildcard selector, and
+// a context that ended. Match also refuses a document whose aliases would
+// make the read cost far more than the document holds. It refuses such a
+// document before it decodes anything, as the schema validator does, with
+// an error matching
+// [go.jacobcolvin.com/niceyaml/schema.ErrExcessiveAliasing]:
 //
 //	// Matches kind: Deployment.
 //	matcher.Content(paths.Root().Child("kind"), "Deployment")
@@ -111,7 +111,7 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 		return wantsNil(m.want), nil
 	}
 
-	// The decoder rejecting the value is the value not reading as T, which
+	// A rejection from the decoder means the value does not read as T, which
 	// is a no rather than a failure. An error the value's own UnmarshalYAML
 	// returns is not a rejection, so it comes back as the error.
 	got, err := node.Decode[T](ctx)
@@ -139,7 +139,7 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	}
 
 	// T may be an interface such as any, whose dynamic type decides whether
-	// == is defined. A value that == cannot compare, such as a map,
+	// == applies. A value that == cannot compare, such as a map,
 	// matches nothing rather than panicking. Two numbers behind an
 	// interface compare by value, since the decoder picks the Go type of a
 	// number and the caller picks the type of want.
@@ -205,9 +205,9 @@ func scalarText(node *niceyaml.Node) (string, bool) {
 }
 
 // numericEqual reports whether a and b are numbers, of any integer or
-// float kind, holding the same value. A named type such as
-// [time.Duration] counts by its kind. The second result is false when either is not a
-// number, so the caller falls back to ==.
+// float kind, that hold the same value. A named type such as
+// [time.Duration] counts by its kind. The second result is false when
+// either is not a number, so the caller falls back to ==.
 func numericEqual(a, b any) (bool, bool) {
 	av, bv := reflect.ValueOf(a), reflect.ValueOf(b)
 	if !isNumber(av) || !isNumber(bv) {

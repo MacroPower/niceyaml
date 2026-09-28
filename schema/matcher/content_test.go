@@ -141,7 +141,7 @@ func TestContent(t *testing.T) {
 		},
 		"uncomparable dynamic type does not match": {
 			// T is any, so the compared values may hold a map, which ==
-			// cannot compare; the matcher declines rather than panics.
+			// cannot compare. The matcher declines rather than panics.
 			matcher: matcher.Content[any](kindPath, map[string]any{"a": uint64(1)}),
 			input:   stringtest.Input("kind:\n  a: 1"),
 			want:    false,

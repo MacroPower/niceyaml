@@ -8,14 +8,14 @@
 // [go.jacobcolvin.com/niceyaml/schema.Registry] moves on to its
 // next resolver. A matcher that cannot decide, because its context ended
 // or the document holds an alias its path cannot follow, returns an
-// error, and the registry stops at that document rather than routing it
+// error. The registry then stops at that document rather than routing it
 // to a resolver further down.
 //
 // # Matching Strategies
 //
-// Match documents based on their content using [Content], which decodes
-// the value at a YAML path as the type of the value it is given and
-// compares the two, so a string matches the text of a field such as kind
+// Match documents based on their content using [Content]. It decodes the
+// value at a YAML path as the type of the value the caller passes and
+// compares the two. A string matches the text of a field such as kind,
 // and a number matches a version number however the document spells it.
 //
 // Use [Exists] to match documents that hold a node at a path, whatever its

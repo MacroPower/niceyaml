@@ -19,7 +19,7 @@ import (
 type Matcher interface {
 	// Match reports whether the document satisfies the matcher. The error
 	// is for a matcher that cannot decide, such as one whose context ended
-	// or whose path an alias in the document leaves unresolved; a document
+	// or whose path an alias in the document leaves unresolved. A document
 	// that reads as a plain no is false with no error.
 	Match(ctx context.Context, doc *niceyaml.Node) (bool, error)
 }
