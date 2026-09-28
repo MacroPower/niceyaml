@@ -2305,7 +2305,8 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				// At index 2 (latest), showing diff with default mode.
+				// Index 2 is the latest, so the view shows a diff in the
+				// default mode.
 				assert.True(t, m.ShowingDiff())
 				assert.Equal(t, "rev3", m.RevisionName())
 
@@ -2560,7 +2561,7 @@ func TestViewport_DiffMode(t *testing.T) {
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-				// At latest with index > 0, showing diff.
+				// The latest revision has index > 0, so the view shows a diff.
 				assert.True(t, m.ShowingDiff())
 				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
 			},
@@ -2857,7 +2858,7 @@ func TestViewport_SetFile(t *testing.T) {
 				t.Helper()
 				assert.Equal(t, 2, m.RevisionCount())
 				assert.Equal(t, 1, m.RevisionIndex()) // At latest (0-indexed).
-				assert.True(t, m.ShowingDiff())       // At index > 0, showing diff.
+				assert.True(t, m.ShowingDiff())       // Index > 0 shows a diff.
 				assert.Equal(t, "after", m.RevisionName())
 				assert.Positive(t, m.TotalLineCount())
 
@@ -3386,7 +3387,7 @@ func TestViewport_RevisionDeduplication(t *testing.T) {
 				// At latest (index 2).
 				assert.True(t, m.AtLatestRevision())
 				assert.Equal(t, "different", m.RevisionName())
-				assert.True(t, m.ShowingDiff()) // At index > 0, showing diff.
+				assert.True(t, m.ShowingDiff()) // Index > 0 shows a diff.
 			},
 		},
 		"AppendDuplicate/Works": {
@@ -3889,8 +3890,8 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			height: 24,
 		},
 		"SideBySideSearchBothSidesFirstSelected": {
-			// Search term appears on both deleted and inserted lines.
-			// First match (deleted/before) is selected.
+			// The search term appears on both deleted and inserted lines.
+			// The selection sits on the first match, in the before pane.
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
@@ -3899,7 +3900,8 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 				m.SetViewMode(yamlviewport.ViewModeSideBySide)
 				m.SetSearchTerm("name") // Appears on both deleted and inserted lines.
 
-				// First match is selected by default (before/deleted line).
+				// The search selects the first match by default, on the
+				// deleted line in the before pane.
 			},
 			width:  190,
 			height: 24,
@@ -3926,8 +3928,8 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			height: 8,
 		},
 		"SideBySideSearchBothSidesSecondSelected": {
-			// Search term appears on both deleted and inserted lines.
-			// Second match (inserted/after) is selected.
+			// The search term appears on both deleted and inserted lines.
+			// The selection sits on the second match, in the after pane.
 			setupFunc: func(m *yamlviewport.Model) {
 				m.SetPrinter(testPrinterWithSearch())
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("v1")))
@@ -6334,10 +6336,10 @@ func TestViewport_ClipsRowsWiderThanContent(t *testing.T) {
 	t.Parallel()
 
 	// The gutter alone fills a viewport of a few columns, so every printed
-	// row is wider than the content. Such a row is cut to the width rather
-	// than wrapped onto a second screen row, which the scroll math does
-	// not count, so the view keeps one screen row per printed row and the
-	// last rows stay reachable.
+	// row is wider than the content. The view cuts such a row to the width
+	// rather than wrapping it onto a second screen row, which the scroll
+	// math does not count. The view keeps one screen row per printed row,
+	// so the last rows stay reachable.
 	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithLineNumbers()))
 	m.SetWidth(6)
 	m.SetHeight(4)

@@ -476,10 +476,10 @@ func (m *Model) anchorTop() {
 	m.anchored = true
 }
 
-// renderPrinter returns the printer to render with: the configured printer
-// specialized to the viewport's word wrap setting and the given content
-// width less the horizontal frame of the printer's container style, so a
-// wrapped line and the frame around it together fit the content area.
+// renderPrinter returns the printer to render with. It specializes the
+// configured printer to the viewport's word wrap setting and to the given
+// content width less the horizontal frame of the printer's container style,
+// so a wrapped line and the frame around it together fit the content area.
 //
 // Pinning the printer's container to the given width makes the box it draws
 // cover the same columns for every window. Without the pin it would shrink
@@ -819,12 +819,12 @@ func (m *Model) SetContainerStyle(s lipgloss.Style) {
 	m.relayout()
 }
 
-// NextRevision moves to the next revision in history.
-// If already at the latest, does nothing.
+// NextRevision moves to the next revision in history. At the latest
+// revision it does nothing.
 func (m *Model) NextRevision() { m.GotoRevision(m.revIndex + 1) }
 
-// PreviousRevision moves to the previous revision in history.
-// If already at the first (index 0), does nothing.
+// PreviousRevision moves to the previous revision in history. At the first
+// revision, index 0, it does nothing.
 func (m *Model) PreviousRevision() { m.GotoRevision(m.revIndex - 1) }
 
 // rebuildViews rebuilds the displayed views from the revision, diff mode, and
@@ -1062,7 +1062,7 @@ func (m *Model) updateSideBySideSearchState() {
 		}
 	}
 
-	// Add matches from the right pane, skipping duplicates on equal lines.
+	// Add matches from the right pane and skip duplicates on equal lines.
 	for _, match := range m.rightMatches {
 		if equalLinePositions[match.Start] {
 			continue
@@ -1498,11 +1498,11 @@ func (m *Model) maxYOffset() int {
 }
 
 // rowOffsetLimit returns the last row the view can start at, from a filled
-// cache: the row that brings the last row of the view to the bottom of the
-// content area, or the last row of the view when the content area is shorter
-// than the view is. A content area with no height, which a height of 0 or a
-// container frame as tall as the height gives, would otherwise put the
-// offset one row past the end of the view.
+// cache. That is the row that brings the last row of the view to the bottom
+// of the content area. When the content area is shorter than the view, it is
+// the last row of the view instead. A content area with no height, which a
+// height of 0 or a container frame as tall as the height gives, would
+// otherwise put the offset one row past the end of the view.
 func (m *Model) rowOffsetLimit() int {
 	total := m.rows.total()
 
@@ -1687,10 +1687,10 @@ func (m *Model) cutRow(row string, offset, width int) string {
 		content = m.printer.Style(kind.Text).Render(strings.Repeat(" ", start-offset)) + content
 	}
 
-	// A pane of the side-by-side view is padded to its own widest row,
-	// while the offset runs to the widest row of either pane, so the
-	// window can reach past the content of this row. Filling the window
-	// keeps the right frame in its column.
+	// The side-by-side view pads a pane to its own widest row, while the
+	// offset runs to the widest row of either pane, so the window can
+	// reach past the content of this row. Filling the window keeps the
+	// right frame in its column.
 	if padding := visible - ansi.StringWidth(content); padding > 0 {
 		content += m.printer.Style(kind.Text).Render(strings.Repeat(" ", padding))
 	}
@@ -1967,9 +1967,9 @@ func (m *Model) scrollToCurrentMatch() {
 
 	row := m.rows.sums[k] + matchRow
 
-	// Use (maxHeight-1)/2 to ensure the match appears at the visual center.
-	// For height 22: (22-1)/2 = 10, placing the match at position 10 (middle).
-	// For height 21: (21-1)/2 = 10, placing the match at position 10 (middle).
+	// (maxHeight-1)/2 puts the match on the visual center row. A height of
+	// 22 gives (22-1)/2 = 10, and a height of 21 gives (21-1)/2 = 10, so
+	// the match lands on row 10 in both cases.
 	m.SetYOffset(row - (m.maxHeight()-1)/2)
 
 	// Wrapped content fits the width, so the match sits in the first
@@ -1983,9 +1983,9 @@ func (m *Model) scrollToCurrentMatch() {
 
 	// With wrap off every line is one row that starts at the gutter, so
 	// the cell of the match is the gutter plus the width of the content
-	// before its column, and the offset centers that cell the way the Y
-	// offset centers its row. SetXOffset clamps, so a match inside the
-	// first screen keeps the offset at 0.
+	// before its column. The offset centers that cell the way the Y offset
+	// centers its row. SetXOffset clamps, so a match inside the first
+	// screen keeps the offset at 0.
 	content := view.Lines().Line(i).Content()
 	x := layout.GutterWidth() + printer.ColWidth(content, match.rng.Start.Col)
 
@@ -2074,10 +2074,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// getViewDimensions returns (width, height, ok). If ok is false, the content
-// area has no room for rows, because a dimension is zero or negative, the
-// frame of the container style takes all of it, or the separator of the
-// side-by-side view leaves its panes no column, and View renders "".
+// getViewDimensions returns (width, height, ok). A false ok means the content
+// area has no room for rows, and View renders "". That happens when a
+// dimension is zero or negative, when the frame of the container style takes
+// all of it, or when the separator of the side-by-side view leaves its panes
+// no column.
 func (m *Model) getViewDimensions() (int, int, bool) {
 	if !m.canRender() {
 		return 0, 0, false
@@ -2189,14 +2190,14 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 
 	var li, ri int
 
-	// Join the next count rows of the panes, taking at most leftCount rows
-	// from the left pane and rightCount from the right, with their content
-	// columns scrolled to offset.
+	// Join the next count rows of the panes. Take at most leftCount rows
+	// from the left pane and rightCount from the right, and scroll their
+	// content columns to offset.
 	appendRows := func(count, leftCount, rightCount, offset int) {
 		for i := range count {
 			// A pane out of rows shows the blank row, which carries the
 			// container's frame. Horizontal scrolling cuts the content
-			// columns of a rendered row; the blank row has none, and its
+			// columns of a rendered row. The blank row has none, and its
 			// frame already sits where it belongs.
 			left, right := blank, blank
 
@@ -2210,10 +2211,10 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 				ri++
 			}
 
-			// Pad left pane to consistent width for alignment. Both panes
-			// are cut to the pane width, which the gutter of a pane row
-			// can exceed on its own, so the joined row fits the content
-			// width.
+			// Pad the left pane to a consistent width for alignment. The
+			// view cuts both panes to the pane width, which the gutter of
+			// a pane row can exceed on its own, so the joined row fits the
+			// content width.
 			leftPadded := ansi.Truncate(left, paneWidth, "")
 			if padding := paneWidth - ansi.StringWidth(leftPadded); padding > 0 {
 				leftPadded += textStyle.Render(strings.Repeat(" ", padding))

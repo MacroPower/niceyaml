@@ -4,9 +4,8 @@ import "charm.land/bubbles/v2/key"
 
 // KeyMap defines the keybindings for the viewport.
 //
-// You don't need to use keybindings; you can control the viewport
-// programmatically with methods like [Model.ScrollDown] and
-// [Model.ScrollUp].
+// Keybindings are optional. Methods such as [Model.ScrollDown] and
+// [Model.ScrollUp] control the viewport from code.
 //
 // Use [DefaultKeyMap] to get a set of default keybindings.
 type KeyMap struct {
