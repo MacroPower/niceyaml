@@ -84,6 +84,10 @@ type buffers struct {
 	// the shared start and end hold an ID.
 	beforeIDs, afterIDs []int
 
+	// ID of each line while intern runs. The map is empty between calls,
+	// so the pool holds no reference to the caller's lines.
+	ids map[string]int
+
 	// Changed lines of each input, which compact slides into place.
 	changedBefore, changedAfter []bool
 
@@ -115,7 +119,15 @@ func (b *buffers) reset(beforeLen, afterLen, rowLen int) {
 // intern gives each line of before[start:bEnd] and after[start:aEnd] an
 // ID, the same one for equal lines, in b.beforeIDs and b.afterIDs.
 func (b *buffers) intern(before, after []string, start, bEnd, aEnd int) {
-	ids := make(map[string]int, bEnd-start)
+	if b.ids == nil {
+		b.ids = make(map[string]int, bEnd-start)
+	}
+
+	ids := b.ids
+
+	// Emptying the map after use keeps the pool from holding on to the
+	// caller's lines between calls.
+	defer clear(ids)
 
 	id := func(line string) int {
 		n, ok := ids[line]
