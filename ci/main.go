@@ -25,8 +25,8 @@ const (
 
 	// renovateImage is the Docker Official Node image. The module pulls it
 	// from Docker's verified publisher space on ECR Public to avoid Docker
-	// Hub pull rate limits. renovateVersion pins the Renovate release that
-	// provides renovate-config-validator.
+	// Hub pull rate limits. The renovateVersion constant pins the Renovate
+	// release that provides renovate-config-validator.
 	renovateImage   = "public.ecr.aws/docker/library/node:24-slim" // renovate: datasource=docker depName=public.ecr.aws/docker/library/node
 	renovateVersion = "44.83.0"                                    // renovate: datasource=npm depName=renovate
 
