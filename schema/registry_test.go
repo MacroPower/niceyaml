@@ -1342,9 +1342,22 @@ func TestRegistry_ErrorCases(t *testing.T) {
 	t.Run("a nil resolver panics", func(t *testing.T) {
 		t.Parallel()
 
-		assert.PanicsWithValue(t, "schema.WithResolvers: resolver is nil", func() {
-			schema.WithResolvers(schema.Directive(), nil)
-		})
+		tcs := map[string]struct {
+			resolver schema.Resolver
+		}{
+			"nil interface":    {resolver: nil},
+			"nil ResolverFunc": {resolver: schema.ResolverFunc(nil)},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.PanicsWithValue(t, "schema.WithResolvers: resolver is nil", func() {
+					schema.WithResolvers(schema.Directive(), tc.resolver)
+				})
+			})
+		}
 	})
 }
 
