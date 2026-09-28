@@ -60,9 +60,10 @@ func TestTokenize_NumericEscape(t *testing.T) {
 	// double-quoted scalar's Origin, and Tokenize restores the Origin from
 	// the source, so the joined Origins equal the input. An escape that
 	// reads the closing quote as a hex digit leaves the scalar open, and the
-	// lexer makes an invalid token of the rest of the source, which Tokenize
-	// restores the same way, as it does the invalid token of a scalar the
-	// lexer cuts at a "---" or "..." line or at an escape it rejects. When
+	// lexer makes an invalid token of the rest of the source. Tokenize
+	// restores that token the same way. It does the same for the invalid
+	// token of a scalar the lexer cuts at a "---" or "..." line or at an
+	// escape it rejects. When
 	// the lexer gives up on a "\u" or "\U" escape, it reads the backslash
 	// into two tokens, and Tokenize leaves it in the second alone.
 	tcs := map[string]struct {
@@ -1794,7 +1795,7 @@ func TestResetPositions_Text(t *testing.T) {
 		// First token still has nil position.
 		assert.Nil(t, got[0].Position)
 
-		// Second token should be reset to line 1.
+		// ResetPositions moves the second token to line 1.
 		assert.Equal(t, 1, got[1].Position.Line)
 		assert.Equal(t, 1, got[1].Position.Column)
 		assert.Equal(t, 1, got[1].Position.Offset)
@@ -1831,10 +1832,11 @@ func positionsOf(tks token.Tokens) []string {
 func TestTokenize_Positions(t *testing.T) {
 	t.Parallel()
 
-	// Every token sits on the rune where its text starts, where the lexer
-	// alone counts trailing spaces it drops from a value, runs one rune
-	// short after a comment or a tag, places a multi-line block scalar on
-	// its last line, and counts a CRLF it cuts between two tokens twice.
+	// Every token sits on the rune where its text starts. The lexer alone
+	// would count the trailing spaces it drops from a value. It would also
+	// run one rune short after a comment or a tag, place a multi-line block
+	// scalar on its last line, and count a CRLF it cuts between two tokens
+	// twice.
 	tcs := map[string]struct {
 		input string
 		want  []string
@@ -1907,9 +1909,9 @@ func TestTokenize_Positions(t *testing.T) {
 			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:9", "2:2:10", "2:4:12"},
 		},
 		"key after a truncated escape": {
-			// The lexer cuts "x41" out of the Origin, so the scalar's text
-			// is not in the source and the key after it must not be found
-			// inside the scalar, where "c" also appears.
+			// The lexer cuts "x41" out of the Origin, so the source does
+			// not hold the scalar's text. Tokenize must not place the key
+			// after it inside the scalar, where "c" also appears.
 			input: "a: \"x\\x41 b c\"\nc: 2\n",
 			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:16", "2:2:17", "2:4:19"},
 		},

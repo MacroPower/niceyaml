@@ -18,12 +18,13 @@ import (
 // the module works with comes through here. The lexer drops some text from
 // the Origins, and Tokenize gives it back from the source. It restores the
 // letter and hex digits of a "\x", "\u", or "\U" escape in a double-quoted
-// scalar, also in the invalid token the lexer makes of a scalar that no
-// quote closes, as when an escape reads the closing quote as a hex digit,
-// and of a scalar it cuts at a "---" or "..." line or at an escape it
-// rejects. It restores the spaces and tabs that end a line or fill a
-// blank line, the space in front of a ":" after a quoted or alias key, and
-// the space between a "-" and a "?". It restores the line breaks and
+// scalar. It restores them in the invalid token the lexer makes of such a
+// scalar too. The lexer makes one of a scalar that no quote closes, as when
+// an escape reads the closing quote as a hex digit, and of a scalar it cuts
+// at a "---" or "..." line or at an escape it rejects. It restores the
+// spaces and tabs that end a line or fill a blank line, the space in front
+// of a ":" after a quoted or alias key, and the space between a "-" and a
+// "?". It restores the line breaks and
 // indentation in front of some tokens, such as a "?" or ":" indicator that
 // follows a flow collection, a quoted scalar, or a comment. When the lexer
 // gives up on a "\u" or "\U" escape, such as one the source ends too soon
@@ -547,13 +548,13 @@ type positioner struct {
 // source holds whitespace alone past the cursor. When the text follows the
 // cursor past whitespace alone, place gives tk the line breaks the lexer
 // dropped from that whitespace. A double-quoted scalar found in the source
-// moves the cursor past its closing quote instead, past the last text of
-// the source when no quote closes it, or past its last text before the
-// next token when the lexer cut it short, and takes its Origin from the
-// source when the lexer shortened it. The invalid token of a scalar the
-// lexer cut at the backslash of an escape gives that backslash up to the
-// token after it. It returns the runes of the source the text of tk
-// covers.
+// moves the cursor past its closing quote instead. When no quote closes
+// it, the cursor moves past the last text of the source. When the lexer
+// cut it short, the cursor moves past its last text before the next token.
+// Such a scalar takes its Origin from the source when the lexer shortened
+// it. The invalid token of a scalar the lexer cut at the backslash of an
+// escape gives that backslash up to the token after it. It returns the
+// runes of the source the text of tk covers.
 func (p *positioner) place(tk *token.Token) span {
 	var (
 		placed, found bool

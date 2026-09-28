@@ -19,8 +19,8 @@
 // # Multi-Document YAML
 //
 // [SplitDocuments] splits a token stream at document headers ("---") and
-// document end markers ("..."), returning an iterator over separate token
-// streams for each YAML document. The tokens keep the positions they have in
+// document end markers ("..."). It returns an iterator over the token
+// stream of each YAML document. The tokens keep the positions they have in
 // the whole stream, and [ResetPositions] clones a document's tokens with
 // positions that count from line 1, as a fresh tokenize of its text would:
 //
