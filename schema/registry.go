@@ -198,8 +198,15 @@ func WithHTTPClient(client *http.Client) RegistryOption {
 // Given more than once, each call appends after the resolvers of the one
 // before it.
 //
+// The option keeps its own copy of res, so writing to the caller's slice
+// afterwards changes nothing.
+//
 // Panics if any resolver is nil.
 func WithResolvers(res ...Resolver) RegistryOption {
+	// The check covers the copy, which holds the resolvers the registry
+	// tries.
+	res = slices.Clone(res)
+
 	for _, resolver := range res {
 		if resolver == nil {
 			panic("schema.WithResolvers: resolver is nil")
@@ -245,10 +252,12 @@ func WithRequireSchema(require bool) RegistryOption {
 //	    schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)),
 //	))
 //
-// The registry keeps its own copy of opts, so writing to the caller's slice
-// afterwards changes nothing. Given more than once, each call appends after
-// the options of the one before it.
+// The option keeps its own copy of opts, so writing to the caller's slice
+// afterwards changes nothing, even for a registry built later. Given more
+// than once, each call appends after the options of the one before it.
 func WithCompileOptions(opts ...CompileOption) RegistryOption {
+	opts = slices.Clone(opts)
+
 	return func(r *Registry) {
 		r.compileOpts = append(r.compileOpts, opts...)
 	}

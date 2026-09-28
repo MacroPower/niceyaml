@@ -1197,21 +1197,59 @@ func TestRegistry_CompileOptionsNotAliased(t *testing.T) {
 
 	// The registry compiles each schema on its first lookup, so aliasing
 	// the caller's slice would let a later write change how the next
-	// schema compiles. Asserting formats is what makes the difference
-	// observable here.
-	opts := []schema.CompileOption{schema.WithJSONSchemaOptions(jsonschema.WithFormats(true))}
+	// schema compiles. The option copies the slice when it is built, so
+	// a write between WithCompileOptions and NewRegistry changes nothing
+	// either. Asserting formats makes the difference observable here.
+	tcs := map[string]struct {
+		writeFirst bool
+	}{
+		"write after NewRegistry":  {},
+		"write before NewRegistry": {writeFirst: true},
+	}
 
-	reg := schema.NewRegistry(
-		schema.WithCompileOptions(opts...),
-		schema.WithResolvers(schema.Embedded([]byte(`{"type": "string", "format": "ipv4"}`))),
-	)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	opts[0] = schema.WithJSONSchemaOptions(jsonschema.WithFormats(false))
+			opts := []schema.CompileOption{schema.WithJSONSchemaOptions(jsonschema.WithFormats(true))}
+			opt := schema.WithCompileOptions(opts...)
 
-	doc := yamltest.FirstDocument(t, stringtest.Input(`not-an-ip`))
+			if tc.writeFirst {
+				opts[0] = schema.WithJSONSchemaOptions(jsonschema.WithFormats(false))
+			}
+
+			reg := schema.NewRegistry(
+				opt,
+				schema.WithResolvers(schema.Embedded([]byte(`{"type": "string", "format": "ipv4"}`))),
+			)
+
+			opts[0] = schema.WithJSONSchemaOptions(jsonschema.WithFormats(false))
+
+			doc := yamltest.FirstDocument(t, stringtest.Input(`not-an-ip`))
+			err := reg.Validate(t.Context(), doc)
+			require.Error(t, err)
+			require.NotErrorIs(t, err, schema.ErrNoMatch)
+		})
+	}
+}
+
+func TestRegistry_ResolversNotAliased(t *testing.T) {
+	t.Parallel()
+
+	// The option copies the resolvers when it is built, so a nil written
+	// to the caller's slice afterwards neither slips past the nil check
+	// nor reaches Lookup.
+	res := []schema.Resolver{schema.Embedded([]byte(`{"type": "string"}`))}
+	opt := schema.WithResolvers(res...)
+	res[0] = nil
+
+	reg := schema.NewRegistry(opt)
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 	err := reg.Validate(t.Context(), doc)
 	require.Error(t, err)
 	require.NotErrorIs(t, err, schema.ErrNoMatch)
+	assert.Contains(t, err.Error(), "string")
 }
 
 func TestRegistry_JSONSchemaOptionsNotAliased(t *testing.T) {
