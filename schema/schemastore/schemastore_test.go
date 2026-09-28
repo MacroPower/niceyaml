@@ -1452,8 +1452,8 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
 
-		// The path matches, so Resolve names the schema; only loading it fails,
-		// which is not a no-match.
+		// The path matches, so Resolve names the schema. Only the load fails,
+		// and a failed load is not a no-match.
 		ref, err := store.Resolve(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Equal(t, schemaURL, ref.Key())
@@ -1742,12 +1742,12 @@ func marshalCatalog(tb testing.TB, catalog schemastore.Catalog) []byte {
 }
 
 // newHeldCatalogClient returns a client whose transport answers every URL
-// with a one-entry catalog whose pattern matches every YAML file and names
-// its entry for the request count, starting with "Catalog 1". It answers
-// the first immediate requests at once and holds each later one until the
-// caller calls release or the request's context ends. The returned counter
-// reports the requests the transport has received. Cleanup releases held
-// requests.
+// with a one-entry catalog whose pattern matches every YAML file. The entry
+// takes its name from the request count, so the first reads "Catalog 1".
+// The transport answers the first immediate requests at once and holds
+// each later one until the caller calls release or the request's context
+// ends. The returned counter reports the requests the transport has
+// received. Cleanup releases held requests.
 //
 // The transport stands in for a test server so the client works inside a
 // synctest bubble, where a goroutine waiting on a socket does not count as

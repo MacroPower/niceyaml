@@ -20,9 +20,9 @@
 // extension, such as *.toml, and keeps a name without an extension, such
 // as .clang-format.
 //
-// New performs no I/O. The first lookup fetches the catalog; later lookups
-// reuse it until the cache TTL expires, and a refresh that fails keeps the
-// previous catalog in use. When a fetch fails and no earlier one succeeded,
-// a lookup reports [ErrFetchCatalog], and the store waits the retry interval
-// before contacting SchemaStore.org again.
+// New performs no I/O. The first lookup fetches the catalog, and later
+// lookups reuse it until the cache TTL expires. A refresh that fails keeps
+// the previous catalog in use. When a fetch fails and no earlier one
+// succeeded, a lookup reports [ErrFetchCatalog], and the store waits the
+// retry interval before contacting SchemaStore.org again.
 package schemastore

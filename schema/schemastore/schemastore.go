@@ -51,8 +51,8 @@ var (
 	extglobRE = regexp.MustCompile(`[?*+@!]\(`)
 )
 
-// Catalog represents the SchemaStore.org catalog structure returned by
-// the catalog API.
+// Catalog represents the SchemaStore.org catalog structure that the
+// catalog API returns.
 type Catalog struct {
 	Schemas []CatalogEntry `json:"schemas"`
 }
@@ -86,7 +86,7 @@ type CatalogEntry struct {
 // The store's own client and refresh timeout apply to the catalog alone.
 //
 // The store fetches the catalog on the first lookup and caches it for the
-// configured TTL. Once the cache expires, the next lookup refreshes it; a
+// configured TTL. Once the cache expires, the next lookup refreshes it. A
 // refresh that fails leaves the previous catalog in use, and a fetch that
 // fails before any catalog has loaded reports [ErrFetchCatalog]. After a
 // failed fetch the store waits the retry interval before contacting the
@@ -194,8 +194,9 @@ func WithCacheTTL(ttl time.Duration) Option {
 // catalog when one exists, so a temporarily unreachable SchemaStore.org
 // degrades to stale matches rather than errors. The fetch does not inherit
 // the cancellation or deadline of the lookup that started it, so this
-// timeout alone bounds how long it runs. A fetch of a matched schema is
-// the registry's, bounded by its client and the context of the lookup.
+// timeout alone bounds how long it runs. The registry fetches a matched
+// schema itself, and its client and the context of the lookup bound that
+// fetch.
 //
 // Defaults to 10 seconds. A timeout of zero or less keeps the default,
 // since a fetch under an expired deadline could never succeed.
@@ -227,8 +228,9 @@ func WithRetryAfter(interval time.Duration) Option {
 // WithFilter is an [Option] that sets a filter function for catalog entries.
 //
 // The store matches only the entries for which the filter returns true.
-// It calls the filter during catalog refresh; avoid expensive or stateful
-// operations. A panic or a call to [runtime.Goexit] in the filter happens
+// It calls the filter during catalog refresh, so the filter should avoid
+// expensive or stateful operations. A panic or a call to [runtime.Goexit]
+// in the filter happens
 // again in each lookup that waits for the refresh.
 //
 // Example:
@@ -245,7 +247,7 @@ func WithFilter(fn func(CatalogEntry) bool) Option {
 
 // New creates a new [*Store].
 //
-// New performs no I/O; the store fetches the catalog on the first lookup
+// New performs no I/O. The store fetches the catalog on the first lookup
 // and caches it for the configured TTL. Configure with options to
 // customize behavior:
 //
@@ -273,7 +275,7 @@ func New(opts ...Option) *Store {
 // Resolve names the schema for the catalog entry matching the document's
 // file path. The returned [schema.Ref] names the entry's URL, which the
 // registry fetches with its own client. A document that matches no entry
-// reports [ErrNoCatalogMatch]; a catalog that has never loaded reports
+// reports [ErrNoCatalogMatch], and a catalog that has never loaded reports
 // [ErrFetchCatalog].
 //
 // Implements [schema.Resolver].
@@ -342,7 +344,7 @@ func (s *Store) FindMatch(ctx context.Context, filePath string) (CatalogEntry, e
 	return CatalogEntry{}, fmt.Errorf("%w: %q", ErrNoCatalogMatch, filePath)
 }
 
-// catalog returns the catalog entries, fetching or refreshing them first
+// catalog returns the catalog entries. It fetches or refreshes them first
 // when the cache is empty or expired.
 //
 // A lookup that waits for a fetch stops waiting when ctx ends. When the
@@ -425,8 +427,8 @@ func (s *Store) join(ctx context.Context) (*fetchCall, []CatalogEntry, error) {
 // refresh fetches the catalog for call, records the outcome, and closes
 // call.done. The fetch drops the cancellation and deadline of ctx, which
 // belongs to the lookup that started it, so a lookup that stops waiting
-// does not cancel a fetch that other lookups share; the refresh timeout
-// bounds it instead.
+// does not cancel a fetch that other lookups share. The refresh timeout
+// bounds the fetch instead.
 //
 // A fetch that calls [runtime.Goexit] ends the refresh goroutine without
 // returning, so refresh records the outcome from a deferred call, which
@@ -501,7 +503,7 @@ func (s *Store) staleLocked(cause error) ([]CatalogEntry, error) {
 // filtered entries. It holds no lock, so a slow catalog server blocks only
 // the lookups waiting on this fetch.
 //
-// The HTTP GET and its size limit are the ones [schema.URL] uses; only the
+// The HTTP GET and its size limit are the ones [schema.URL] uses. Only the
 // catalog JSON parsing is specific to SchemaStore.
 func (s *Store) fetch(ctx context.Context) ([]CatalogEntry, error) {
 	data, err := httpfetch.Get(ctx, s.client, s.catalogURL)
