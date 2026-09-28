@@ -61,9 +61,10 @@ func TestTokenize_NumericEscape(t *testing.T) {
 	// the source, so the joined Origins equal the input. An escape that
 	// reads the closing quote as a hex digit leaves the scalar open, and the
 	// lexer makes an invalid token of the rest of the source, which Tokenize
-	// restores the same way. When the lexer gives up on a "\u" or "\U"
-	// escape, it reads the backslash into two tokens, and Tokenize leaves it
-	// in the second alone.
+	// restores the same way, as it does the invalid token of a scalar the
+	// lexer cuts at a "---" or "..." line or at an escape it rejects. When
+	// the lexer gives up on a "\u" or "\U" escape, it reads the backslash
+	// into two tokens, and Tokenize leaves it in the second alone.
 	tcs := map[string]struct {
 		input string
 	}{
@@ -138,6 +139,33 @@ func TestTokenize_NumericEscape(t *testing.T) {
 		},
 		"escape cut short after an escaped backslash": {
 			input: `a: "\\\u"`,
+		},
+		"open scalar cut at a header": {
+			input: `a: "caf\u00e9` + "\n---\nb: 1\n",
+		},
+		"open scalar cut at a document end": {
+			input: `a: "x\x41` + "\n...\nb: 1\n",
+		},
+		"open scalar cut at a header in a CRLF file": {
+			input: `a: "caf\u00e9` + "\r\n---\r\nb: 1\r\n",
+		},
+		"open scalar cut at a header after a tag": {
+			input: `a: !!str "caf\u00e9` + "\n---\nb: 1\n",
+		},
+		"open scalar cut at a header after trailing spaces": {
+			input: `a: "caf\u00e9   ` + "\n---\nb: 1\n",
+		},
+		"unknown escape after an escape": {
+			input: `a: "caf\u00e9 \d"` + "\n",
+		},
+		"unknown escape on a later line": {
+			input: `name: "caf\u00e9` + "\n" + `  x \d"` + "\nnext: 1\n",
+		},
+		"unknown escape after a comment": {
+			input: "a: # c\n" + `  "caf\u00e9 \d"` + "\nb: 1\n",
+		},
+		"escape cut short after an escape": {
+			input: `a: "caf\u00e9 \u1"` + "\n",
 		},
 	}
 
@@ -1864,6 +1892,16 @@ func TestTokenize_Positions(t *testing.T) {
 			input: "\"\\U: \\U",
 			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:6:6"},
 		},
+		"open scalar cut at a header": {
+			// The lexer drops "u00e9" and places the scalar at the header,
+			// so the tokens after it must not land inside the escape.
+			input: "a: \"caf\\u00e9\n---\nb: 1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:15", "3:1:19", "3:2:20", "3:4:22"},
+		},
+		"unknown escape on a later line": {
+			input: "name: \"caf\\u00e9\n  x \\d\"\nnext: 1\n",
+			want:  []string{"1:1:1", "1:5:5", "1:7:7", "2:6:23", "3:1:26", "3:5:30", "3:7:32"},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1913,6 +1951,9 @@ var positionCorpus = map[string]string{
 	"long escape cut short by the end":               "\"\\U: \\U",
 	"high surrogate without a low one":               "a: \"\\uD83Dxx\"\nb: 1\n",
 	"escape cut short on a later line":               "a: \"x\n  \\u1\"\n",
+	"open scalar cut at a header":                    "a: \"caf\\u00e9\n---\nb: 1\n",
+	"open scalar cut at a document end":              "a: \"x\\x41\n...\nb: 1\n",
+	"unknown escape after an escape":                 "name: \"caf\\u00e9\n  x \\d\"\nnext: 1\n",
 	"plain multi-line":                               "a: plain\n  multi\nb: 2\n",
 	"flow collections":                               "{a: 1, b: [1, 2]}\n",
 	"flow sequence over lines":                       "a: [\n  1,\n  2\n]\n",

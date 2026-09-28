@@ -19,16 +19,17 @@ import (
 // the Origins, and Tokenize gives it back from the source. It restores the
 // letter and hex digits of a "\x", "\u", or "\U" escape in a double-quoted
 // scalar, also in the invalid token the lexer makes of a scalar that no
-// quote closes, as when an escape reads the closing quote as a hex digit.
-// It restores the spaces and tabs that end a line or fill a blank line,
-// the space in front of a ":" after a quoted or alias key, and the space
-// between a "-" and a "?". It restores the line breaks and indentation in
-// front of some tokens, such as a "?" or ":" indicator that follows a flow
-// collection, a quoted scalar, or a comment. When the lexer gives up on a
-// "\u" or "\U" escape, such as one the source ends too soon for, it reads
-// the escape's backslash into two tokens, and Tokenize leaves it in the
-// second alone. [SplitDocuments] cuts the stream into one stream per
-// document.
+// quote closes, as when an escape reads the closing quote as a hex digit,
+// and of a scalar it cuts at a "---" or "..." line or at an escape it
+// rejects. It restores the spaces and tabs that end a line or fill a
+// blank line, the space in front of a ":" after a quoted or alias key, and
+// the space between a "-" and a "?". It restores the line breaks and
+// indentation in front of some tokens, such as a "?" or ":" indicator that
+// follows a flow collection, a quoted scalar, or a comment. When the lexer
+// gives up on a "\u" or "\U" escape, such as one the source ends too soon
+// for, it reads the escape's backslash into two tokens, and Tokenize
+// leaves it in the second alone. [SplitDocuments] cuts the stream into one
+// stream per document.
 //
 // Tokenize drops a UTF-8 byte order mark where YAML allows one: at the
 // start of a line before the content of a document, and in front of a
@@ -511,7 +512,10 @@ func withoutWhitespace(s string) string {
 // the first backslash. The cursor then moves past the scalar's closing
 // quote in the source rather than past the shortened text, where the next
 // token would land inside the scalar. A scalar that no quote closes runs
-// to the end of the source, and the cursor moves past its last text.
+// to the end of the source, and the cursor moves past its last text. A
+// scalar the lexer cut at a "---" or "..." line or at an escape it rejects
+// runs to where the source holds the text of the next token, and the
+// cursor moves past its last text before that.
 //
 // When the lexer gives up on a "\u" or "\U" escape, it ends the invalid
 // token of the scalar with the escape's backslash and opens the next
@@ -543,11 +547,13 @@ type positioner struct {
 // source holds whitespace alone past the cursor. When the text follows the
 // cursor past whitespace alone, place gives tk the line breaks the lexer
 // dropped from that whitespace. A double-quoted scalar found in the source
-// moves the cursor past its closing quote instead, or past the last text of
-// the source when no quote closes it, and takes its Origin from the source
-// when the lexer shortened it. The invalid token of a scalar the lexer cut
-// at the backslash of an escape gives that backslash up to the token after
-// it. It returns the runes of the source the text of tk covers.
+// moves the cursor past its closing quote instead, past the last text of
+// the source when no quote closes it, or past its last text before the
+// next token when the lexer cut it short, and takes its Origin from the
+// source when the lexer shortened it. The invalid token of a scalar the
+// lexer cut at the backslash of an escape gives that backslash up to the
+// token after it. It returns the runes of the source the text of tk
+// covers.
 func (p *positioner) place(tk *token.Token) span {
 	var (
 		placed, found bool
@@ -624,11 +630,23 @@ func (p *positioner) place(tk *token.Token) span {
 
 	// A double-quoted scalar takes its text from the source, so it matches
 	// whatever the lexer made of it.
-	if found && doubleQuoted(tk) && p.src[start] == '"' && p.restoreQuoted(tk, start) {
-		matched = true
+	restored := false
+
+	if found && p.src[start] == '"' {
+		switch {
+		case doubleQuoted(tk):
+			if p.restoreQuoted(tk, start) {
+				matched = true
+			}
+
+		case cutQuoted(tk):
+			if p.restoreCut(tk, start) {
+				matched, restored = true, true
+			}
+		}
 	}
 
-	if matched && cutAtEscape(tk) {
+	if matched && !restored && cutAtEscape(tk) {
 		p.dropBackslash(tk, start)
 	}
 
@@ -640,10 +658,8 @@ func (p *positioner) place(tk *token.Token) span {
 // doubleQuoted reports whether tk holds a double-quoted scalar: a token the
 // lexer read through its closing quote, or the invalid token it makes of a
 // scalar no quote closes. The lexer reads such a scalar to the end of the
-// source, so that invalid token ends the stream. An invalid token that
-// opens with a quote and has tokens after it holds the part of a scalar
-// the lexer read before some other fault, such as an unknown escape, and
-// the tokens after it hold the rest.
+// source, so that invalid token ends the stream. See [cutQuoted] for the
+// invalid token of a scalar that has tokens after it.
 func doubleQuoted(tk *token.Token) bool {
 	switch tk.Type {
 	case token.DoubleQuoteType:
@@ -653,6 +669,17 @@ func doubleQuoted(tk *token.Token) bool {
 	default:
 		return false
 	}
+}
+
+// cutQuoted reports whether tk is the invalid token the lexer makes of the
+// start of a double-quoted scalar it cut before the closing quote, and the
+// tokens after tk hold the rest of the source. The lexer cuts a scalar at
+// a "---" or "..." line that follows it, and at an escape it rejects, such
+// as an unknown one or a "\u" escape it gives up on.
+func cutQuoted(tk *token.Token) bool {
+	return tk.Type == token.InvalidType &&
+		tk.Next != nil && tk.Next.Position != nil &&
+		strings.HasPrefix(strings.TrimLeft(tk.Origin, " \t\r\n"), `"`)
 }
 
 // cutAtEscape reports whether tk is the invalid token the lexer makes of a
@@ -714,6 +741,86 @@ func (p *positioner) restoreQuoted(tk *token.Token, start int) bool {
 		trail := len(strings.TrimRight(tk.Origin, " \t\r\n"))
 
 		tk.Origin = tk.Origin[:lead] + quoted + tk.Origin[trail:]
+	}
+
+	return true
+}
+
+// restoreCut moves the cursor past the text of tk, the invalid token of a
+// double-quoted scalar the lexer cut before its closing quote, as
+// [cutQuoted] reports. The opening quote sits at rune index start. The
+// lexer drops the code of a "\x", "\u", or "\U" escape from the Origin, so
+// the source holds the text of the Origin in order with those codes and
+// whitespace between its runes. The scalar ends where the source first
+// holds the text of the token after tk past the text of the Origin, with
+// only escape codes and whitespace in between. The Origin takes the
+// source's runes up to there in place of its text and keeps the
+// whitespace around it. When the token after tk opens with the backslash
+// that ends tk, as [cutAtEscape] reports, tk gives that backslash up and
+// ends with the whitespace in front of it, as [positioner.dropBackslash]
+// leaves it.
+//
+// The lexer puts the Offset of tk at the fault, where the token after tk
+// starts, so restoreCut takes delta from the token after tk. It reports
+// whether it restored tk, and it leaves the positioner and the Origin as
+// they are when the source does not hold the text of the Origin, or when
+// something other than an escape code or whitespace comes before the
+// text of the token after tk.
+func (p *positioner) restoreCut(tk *token.Token, start int) bool {
+	next := strings.TrimLeft(tk.Next.Origin, " \t\r\n")
+	if i := strings.IndexAny(next, "\r\n"); i >= 0 {
+		next = next[:i]
+	}
+
+	after := []rune(strings.TrimRight(next, " \t"))
+	if len(after) == 0 {
+		return false
+	}
+
+	lead := len(tk.Origin) - len(strings.TrimLeft(tk.Origin, " \t\r\n"))
+	trail := len(strings.TrimRight(tk.Origin, " \t\r\n"))
+
+	text := tk.Origin[lead:trail]
+	if cutAtEscape(tk) {
+		text = strings.TrimSuffix(text, `\`)
+	}
+
+	// Find the earliest end of the text, then step over the escape codes
+	// and whitespace the Origin lacks to where the next token starts.
+	bound := start
+	for _, r := range withoutWhitespace(text) {
+		for bound < len(p.src) && p.src[bound] != r {
+			bound++
+		}
+
+		if bound == len(p.src) {
+			return false
+		}
+
+		bound++
+	}
+
+	for !p.hasText(bound, after) {
+		if bound == len(p.src) || !strings.ContainsRune(" \t\r\n0123456789abcdefABCDEFxuU", p.src[bound]) {
+			return false
+		}
+
+		bound++
+	}
+
+	src := string(p.src[start:bound])
+	quoted := strings.TrimRight(src, " \t\r\n")
+
+	body := quoted
+	if cutAtEscape(tk) {
+		body = src
+	}
+
+	tk.Origin = tk.Origin[:lead] + body + tk.Origin[trail:]
+	p.cursor, p.reliable = start+utf8.RuneCountInString(quoted), true
+
+	if tk.Next.Position.Offset > 0 {
+		p.delta = bound - (tk.Next.Position.Offset - 1)
 	}
 
 	return true
@@ -869,7 +976,7 @@ func (p *positioner) locate(tk *token.Token, text []rune) (int, bool) {
 		return at, true
 	}
 
-	if doubleQuoted(tk) {
+	if doubleQuoted(tk) || cutQuoted(tk) {
 		if i := slices.Index(text, '\\'); i >= 0 {
 			if at, ok := p.pick(tk, text[:i+1]); ok {
 				return at, true
