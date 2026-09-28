@@ -986,8 +986,9 @@ func TrimLineEnding(s string) string {
 // a stream cut from a longer one, such as the tokens of one document from
 // [SplitDocuments], counts its lines from 1 as [Tokenize] does. Every token
 // moves by the same number of lines and the same offset distance, and
-// tokens on the first line also move by the same number of columns. Tokens
-// that start at line 1 already come back as clones with the same positions.
+// tokens on the first line also move by the same number of columns. A
+// stream whose text starts at line 1, column 1, offset 1, such as a whole
+// stream from [Tokenize], comes back as clones with the same positions.
 // The clones keep the invariant of [Tokenize], so Line, Column, and Offset
 // name the rune where the token's text starts, and the Origin may open with
 // whitespace and line endings before it.
