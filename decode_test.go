@@ -3643,6 +3643,59 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		assert.Equal(t, 42, result.Value)
 	})
 
+	t.Run("decodes the node with the go-yaml options of the decode", func(t *testing.T) {
+		t.Parallel()
+
+		// The alias names an anchor of the reference document, and the
+		// ordered map option changes the type of the decoded mapping.
+		dd := yamltest.FirstDocument(t, "b:\n  c: *x\n")
+		opts := []niceyaml.DecodeOption{
+			niceyaml.WithReferences([]byte("base: &x 1\n")),
+			niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()),
+		}
+
+		var seen []any
+
+		record := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			for _, node := range []*niceyaml.Node{n, n.Document()} {
+				data, err := node.Decode[any](ctx)
+				if err != nil {
+					return err
+				}
+
+				seen = append(seen, data)
+			}
+
+			b, err := n.At(paths.Root().Child("b"))
+			if err != nil {
+				return fmt.Errorf("scope b: %w", err)
+			}
+
+			data, err := b.Decode[any](ctx)
+			if err != nil {
+				return err
+			}
+
+			seen = append(seen, data)
+
+			return nil
+		})
+
+		inner := yaml.MapSlice{{Key: "c", Value: uint64(1)}}
+		want := yaml.MapSlice{{Key: "b", Value: inner}}
+
+		got, err := dd.Decode[any](t.Context(), append(opts, niceyaml.WithValidator(record))...)
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+		assert.Equal(t, []any{want, want, inner}, seen)
+
+		seen = nil
+
+		err = niceyaml.NewDecoder(append(opts, niceyaml.WithValidator(record))...).Validate(t.Context(), dd)
+		require.NoError(t, err)
+		assert.Equal(t, []any{want, want, inner}, seen)
+	})
+
 	t.Run("runs in order and stops at the first failure", func(t *testing.T) {
 		t.Parallel()
 

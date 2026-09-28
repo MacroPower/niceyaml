@@ -77,7 +77,7 @@ func (d *Decoder) With(opts ...DecodeOption) *Decoder {
 // [Decoder.Decode] on its own, for a caller that checks a document
 // without decoding it. A Decoder without validators returns nil.
 func (d *Decoder) Validate(ctx context.Context, n *Node) error {
-	return n.validate(ctx, d.cfg.validators)
+	return n.forValidators(d.cfg.yamlOpts).validate(ctx, d.cfg.validators)
 }
 
 // DecodeInto validates and decodes n into v with the options of the

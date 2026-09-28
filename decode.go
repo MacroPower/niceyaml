@@ -105,11 +105,14 @@ type SelfValidator interface {
 // document around it, so a caller validates once at the root and decodes
 // the nodes below it without that validator.
 //
-// A validator that checks the decoded data
-// reads the node with [Node.Decode], which runs the validators the
-// caller passes and no other, so a validator never runs itself again. The
-// context carries cancellation and deadlines to validators doing
-// cancellable work, such as remote schema reference resolution:
+// A validator that checks the decoded data reads the node with
+// [Node.Decode], which runs the validators the caller passes and no
+// other, so a validator never runs itself again. That decode applies the
+// go-yaml options of the decode that runs the validator, the ones
+// [WithYAMLDecodeOptions] and [WithReferences] give, to the Node and to
+// the Nodes it leads to, so the validator reads the data the decode
+// reads. The context carries cancellation and deadlines to validators
+// doing cancellable work, such as remote schema reference resolution:
 //
 //	func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 //		data, err := n.Decode[any](ctx)
@@ -661,6 +664,10 @@ type Node struct {
 	// The scope: the path from the document root to the node, which is
 	// the root for a whole document.
 	base paths.Path
+	// The go-yaml options of the decodes whose validators the Node is
+	// handed to, which a decode of the Node applies after the options of
+	// the Source.
+	decodeOpts []yaml.DecodeOption
 	// The lines of the source that the node covers.
 	span position.Span
 }
@@ -679,14 +686,23 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 // Document returns the root [*Node] of the document the Node belongs to,
 // so a Node from [Node.At] reaches the whole document, as a validator
 // that picks a schema from the file path or the content of the document
-// does. The root Node of a document returns itself. A nil Node belongs
-// to none.
+// does. The root Node of a document returns itself. A Node a [Validator]
+// gets from a decode decodes with the go-yaml options of that decode, and
+// the root it returns is a copy that decodes with them too. A nil Node
+// belongs to none.
 func (n *Node) Document() *Node {
 	if n == nil {
 		return nil
 	}
 
-	return n.doc.node
+	if len(n.decodeOpts) == 0 {
+		return n.doc.node
+	}
+
+	c := *n.doc.node
+	c.decodeOpts = n.decodeOpts
+
+	return &c
 }
 
 // AST returns the [ast.Node] the Node selects, the one [Node.Decode]
@@ -1417,7 +1433,7 @@ func WithDisallowUnknownFields(disallow bool) DecodeOption {
 // every decode. Each WithYAMLDecodeOptions appends to the values given
 // before it, so the go-yaml decoder receives them in the order given. It
 // is the escape hatch for decoder settings that have no option of their
-// own.
+// own. A [Validator] the decode runs decodes its Node with them too.
 //
 // Each decode, and the key decoding of self-validation, applies the
 // options to a new go-yaml decoder. An option that holds state therefore
@@ -1512,7 +1528,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 		return n.Bind(err)
 	}
 
-	err = n.validate(ctx, cfg.validators)
+	err = n.forValidators(cfg.yamlOpts).validate(ctx, cfg.validators)
 	if err != nil {
 		return err
 	}
@@ -1595,12 +1611,25 @@ func decodeTarget(v any, node ast.Node) any {
 }
 
 // yamlOptions returns the go-yaml options for a decode: the source's
-// decode options followed by yamlOpts.
+// decode options, then the ones the Node carries from the decode whose
+// validator it was handed to, then yamlOpts.
 func (n *Node) yamlOptions(yamlOpts []yaml.DecodeOption) []yaml.DecodeOption {
-	opts := make([]yaml.DecodeOption, 0, len(n.source.decodeOpts)+len(yamlOpts))
-	opts = append(opts, n.source.decodeOpts...)
+	return slices.Concat(n.source.decodeOpts, n.decodeOpts, yamlOpts)
+}
 
-	return append(opts, yamlOpts...)
+// forValidators returns the Node the validators of a decode with the
+// go-yaml options yamlOpts see: a copy of n that decodes with those
+// options after its own, so a validator that decodes the Node reads it as
+// the decode does. It returns n when yamlOpts is empty.
+func (n *Node) forValidators(yamlOpts []yaml.DecodeOption) *Node {
+	if len(yamlOpts) == 0 {
+		return n
+	}
+
+	c := *n
+	c.decodeOpts = slices.Concat(n.decodeOpts, yamlOpts)
+
+	return &c
 }
 
 // decodeNode decodes node to v with yamlOpts, and binds the error to the
