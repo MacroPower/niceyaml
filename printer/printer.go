@@ -1173,13 +1173,14 @@ func annotationKind(k kind.Kind) kind.Kind {
 }
 
 // widestWord returns the width in cells of the widest word of text, where
-// words run between newlines, spaces, and [breakpoints]. A word includes
-// the '/' or '-' that ends it, since the wrap keeps that character with
-// the word before it.
+// words run between newlines, the spaces the wrap breaks at, which
+// [isBreakSpace] reports, and [breakpoints]. A word includes the '/' or
+// '-' that ends it, since the wrap keeps that character with the word
+// before it.
 func widestWord(text string) int {
 	widest := 0
 
-	for field := range strings.FieldsFuncSeq(text, func(r rune) bool { return r == '\n' || r == ' ' }) {
+	for field := range strings.FieldsFuncSeq(text, isBreakSpace) {
 		for field != "" {
 			word := field
 			if i := strings.IndexAny(field, breakpoints); i >= 0 {

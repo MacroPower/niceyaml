@@ -4448,6 +4448,54 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 				"abc/def",
 			),
 		},
+		"words split at ideographic spaces fit beside the marker": {
+			// The wrap breaks at every Unicode space but the no-break
+			// space, so each word fits the room beside the marker.
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  16,
+			annotation: line.Annotation{
+				Content:   "aaaa　bbbb　cccc",
+				Placement: line.Below,
+				Col:       5,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				strings.Repeat(" ", 5)+"^ aaaa",
+				strings.Repeat(" ", 7)+"bbbb",
+				strings.Repeat(" ", 7)+"cccc",
+			),
+		},
+		"words split at em spaces fit beside the marker": {
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  16,
+			annotation: line.Annotation{
+				Content:   "aaaa bbbb cccc",
+				Placement: line.Below,
+				Col:       5,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				strings.Repeat(" ", 5)+"^ aaaa bbbb",
+				strings.Repeat(" ", 7)+"cccc",
+			),
+		},
+		"words joined by a no-break space wider than the room hang": {
+			input:  "key: value",
+			gutter: printer.NoGutter,
+			width:  15,
+			annotation: line.Annotation{
+				Content:   "aaaa bbbb",
+				Placement: line.Below,
+				Col:       5,
+			},
+			want: stringtest.JoinLF(
+				"key: value",
+				strings.Repeat(" ", 5)+"^",
+				"aaaa bbbb",
+			),
+		},
 		"column near the edge hangs the text under a narrower indent": {
 			input:  "key: value",
 			gutter: printer.NoGutter,
