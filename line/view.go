@@ -362,6 +362,10 @@ func (v *View) Clone() *View {
 // document, such as the hunks around an error, and a range or an index
 // that applies to the receiver applies to it. Slicing an already sliced
 // view narrows it further.
+//
+// With no span, Slice holds every line the receiver holds, as [View.All]
+// yields every line when given no span. Pass an empty [position.Span] for
+// a view that holds none.
 func (v *View) Slice(spans ...position.Span) *View {
 	out := &View{lines: v.Lines()}
 	if v == nil {
