@@ -50,9 +50,9 @@ func viewCmd() *cobra.Command {
 		},
 	}
 
-	// A shorthand on a flag that defaults to true can only repeat the
-	// default when passed bare, so the long flag stands alone and
-	// --line-numbers=false leaves the gutter showing diff markers only.
+	// A bare shorthand on a flag that defaults to true can only repeat the
+	// default, so the long flag stands alone. With --line-numbers=false,
+	// the gutter shows diff markers only.
 	cmd.Flags().BoolVar(&lineNumbers, "line-numbers", true, "show line numbers")
 	cmd.Flags().StringVarP(&search, "search", "s", "", "initial search term")
 

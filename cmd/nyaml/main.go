@@ -39,7 +39,7 @@ func main() {
 	}
 
 	// The error handler of fang.Execute renders only the errors it returns,
-	// so a profile that fails to write this late prints itself.
+	// so main prints the error of a profile that fails to write this late.
 	stopErr := stopProfiler()
 	if stopErr != nil {
 		fmt.Fprintln(os.Stderr, "stop profiler:", stopErr)
@@ -53,10 +53,10 @@ func main() {
 }
 
 // notifyContext returns a copy of parent that the first SIGINT or SIGTERM
-// cancels, so a run stops its work and main still stops the profiler,
-// which writes the profiles. The signal then gets its default action
-// back, so a second one kills a run stuck in work that ignores the
-// context. Call the returned function once the command returns.
+// cancels. The run then stops its work, and main still stops the
+// profiler, which writes the profiles. The signal then gets its default
+// action back, so a second one kills a run stuck in work that ignores
+// the context. Call the returned function once the command returns.
 func notifyContext(parent context.Context) (context.Context, context.CancelFunc) {
 	ctx, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 
@@ -130,7 +130,7 @@ func newRootCmd() (*cobra.Command, func() error) {
 			return nil
 		}
 
-		return p.Stop() //nolint:wrapcheck // Reported as it is, from main.
+		return p.Stop() //nolint:wrapcheck // main reports it as it is.
 	}
 }
 

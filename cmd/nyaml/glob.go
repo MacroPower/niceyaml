@@ -22,11 +22,11 @@ var (
 // and symlinks to directories from the matches.
 //
 // Wildcards do not follow symlinked directories, so a symlink loop cannot
-// repeat a file or make a recursive pattern walk forever. A symlink in the
-// literal part of the pattern, before any metacharacter, is still
-// followed.
+// repeat a file or make a recursive pattern walk forever. The function
+// still follows a symlink in the literal part of the pattern, before any
+// metacharacter.
 //
-// Unlike [path/filepath.Glob], this supports ** for recursive directory
+// Unlike [path/filepath.Glob], glob supports ** for recursive directory
 // matching. The pattern syntax follows doublestar conventions:
 //   - `*` matches any sequence of non-separator characters.
 //   - `**` matches any sequence including separators (recursive).
@@ -35,7 +35,7 @@ var (
 //   - `[a-z]` matches any character in the range.
 //   - `{a,b}` matches any of the comma-separated alternatives.
 //
-// Returns an error if the pattern syntax is invalid.
+// glob returns an error when the pattern syntax is invalid.
 func glob(pattern string) ([]string, error) {
 	matches, err := doublestar.FilepathGlob(
 		pattern,
@@ -70,19 +70,19 @@ func containsGlobChars(s string) bool {
 }
 
 // expandPaths expands arguments containing glob patterns into a list of
-// file paths. The list keeps the order of the arguments, with each pattern's
-// matches sorted in its place, and names each file once, so the order of
-// two explicit files decides which revision a diff treats as older. An
-// argument without glob metacharacters joins the list as-is, and one that
-// names a directory is an error wrapping [errIsDirectory].
+// file paths. The list keeps the order of the arguments, with the matches
+// of each pattern sorted in its place. It names each file once. The order
+// of two explicit files then decides which revision a diff treats as
+// older.
 //
-// An argument with glob metacharacters that names an existing file is that
-// file, even when it also matches other files as a pattern, so a file such
-// as "cfg[1].yaml" or "report[2024.txt" is still reachable. One that names
-// an existing directory is an error wrapping [errIsDirectory]. Any other
-// argument with metacharacters expands as a pattern. A pattern that matches
-// no file is an error wrapping [errNoMatch], and an invalid pattern is its
-// own error.
+// An argument that names a directory is an error wrapping
+// [errIsDirectory], with or without glob metacharacters. An argument
+// without metacharacters joins the list as-is. An argument with
+// metacharacters that names an existing file is that file, even when it
+// also matches other files as a pattern, so a file such as "cfg[1].yaml"
+// or "report[2024.txt" stays reachable. Any other argument with
+// metacharacters expands as a pattern. A pattern that matches no file is
+// an error wrapping [errNoMatch], and an invalid pattern is its own error.
 func expandPaths(args ...string) ([]string, error) {
 	var (
 		result    []string
@@ -125,15 +125,16 @@ func expandPaths(args ...string) ([]string, error) {
 	}
 
 	for _, arg := range args {
-		// A directory is no file to read, as the glob path excludes one, so
-		// a name that names a directory is an error, with or without a
-		// metacharacter, rather than a pattern that could select an
-		// unrelated file. A name that names an existing file is that file,
-		// even when it also matches others as a pattern, so the file the
-		// user named is never shadowed. That holds for a name that is no
-		// valid pattern too, such as one with a stray bracket. A name
-		// without metacharacters that names nothing passes through to the
-		// read, which reports it. Any other name expands as a pattern.
+		// A directory is no file to read, and the glob path excludes one
+		// too. So a name that names a directory is an error, with or
+		// without a metacharacter, rather than a pattern that could select
+		// an unrelated file. A name that names an existing file is that
+		// file, even when it also matches others as a pattern, so no
+		// pattern match shadows the file the user named. That holds for a
+		// name that is no valid pattern too, such as one with a stray
+		// bracket. A name without metacharacters that names nothing passes
+		// through to the read, which reports it. Any other name expands as
+		// a pattern.
 		info, err := os.Stat(arg)
 		if err == nil && info.IsDir() {
 			return nil, fmt.Errorf("%w: %q", errIsDirectory, arg)

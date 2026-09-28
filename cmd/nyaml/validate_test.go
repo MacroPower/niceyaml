@@ -198,7 +198,7 @@ func TestPhysicalAbs(t *testing.T) {
 	rel, err := filepath.Rel(wd, dir)
 	require.NoError(t, err)
 
-	// Each path is built as text, since filepath.Join would clean it.
+	// The test builds each path as text, since filepath.Join would clean it.
 	tcs := map[string]struct {
 		path string
 		want string

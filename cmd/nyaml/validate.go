@@ -31,7 +31,7 @@ func validateCmd() *cobra.Command {
 				return err
 			}
 
-			// Build registry once for all files to enable cross-file schema caching.
+			// Build the registry once, so every file shares its schema cache.
 			reg, err := buildRegistry(cmd.Context(), schemaRef)
 			if err != nil {
 				return err
@@ -75,15 +75,19 @@ func validateCmd() *cobra.Command {
 
 // validateFile validates every document of the file at yamlPath against the
 // registry and joins what every document reports, so one run names each
-// invalid document. Errors come back bound to the source, whose name is
-// yamlPath as the user typed it, so each message opens with
-// "path:line:col:" and the error handler in main renders the excerpt with
-// the terminal width. The source's file path is the [physicalAbs] form
-// of yamlPath, so SchemaStore patterns that name parent directories, such
-// as "**/.github/workflows/*.yml", match whatever the working directory
-// is, and schema directives resolve against the directory of the file
-// the read opens. When the read fails, the read error already names the
-// file, so validateFile returns it as is.
+// invalid document.
+//
+// Each error it returns is bound to the source, and the source takes
+// yamlPath as the user typed it for its name. Each message then opens
+// with "path:line:col:", and the error handler in main renders the
+// excerpt with the terminal width.
+//
+// The file path of the source is the [physicalAbs] form of yamlPath.
+// SchemaStore patterns that name parent directories, such as
+// "**/.github/workflows/*.yml", then match whatever the working directory
+// is. Schema directives resolve against the directory of the file the read
+// opens. When the read fails, the read error already names the file, so
+// validateFile returns it as is.
 func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) error {
 	absPath := physicalAbs(yamlPath)
 
@@ -117,7 +121,7 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 
 // physicalAbs returns an absolute form of path that names the file the
 // OS opens for it. [filepath.Abs] drops a ".." element together with the
-// element before it, as text, but on Unix the OS steps up from the
+// element before it, as text. On Unix, the OS instead steps up from the
 // directory a symlink leads to, which can be a different directory. So
 // physicalAbs resolves the symlinks in path up to its last ".." element,
 // including those in the working directory a relative path starts from.
@@ -186,12 +190,12 @@ func lastDotDotEnd(path string) int {
 
 // buildRegistry creates a schema registry based on CLI flags.
 //
-// When schemaRef is set, buildRegistry loads and compiles that schema once,
-// before the command reads any file, and the compiled schema is the only
-// resolver, so every document validates against it. A schema that cannot
-// load or compile fails the command with one "--schema:" error. The schema
-// ref resolves relative to the current working directory, and a $ref inside
-// the schema resolves relative to the schema's own file or URL.
+// When schemaRef is not empty, buildRegistry loads and compiles that schema
+// once, before the command reads any file. The compiled schema is then the
+// only resolver, so every document validates against it. A schema that
+// cannot load or compile fails the command with one "--schema:" error. The
+// schema ref resolves relative to the current working directory, and a
+// $ref inside the schema resolves relative to the schema's own file or URL.
 //
 // Otherwise the registry matches on schema directives first, and a
 // directive's reference resolves relative to its own YAML file. A document

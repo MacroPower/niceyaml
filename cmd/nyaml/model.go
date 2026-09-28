@@ -34,14 +34,15 @@ type modelOptions struct {
 
 type model struct {
 	searchInput string
-	// The term of the --search flag, held until the first
+	// The term of the --search flag. The model holds it until the first
 	// [tea.WindowSizeMsg] gives the viewport its size.
 	pendingSearch string
 	currentTheme  string
 	previousTheme string
 	themeList     []string
-	// Styles of the current theme, built once per theme switch and shared by
-	// the printer, the status bar, and the theme picker.
+	// Styles of the current theme. The model builds them once per theme
+	// switch, and the printer, the status bar, and the theme picker share
+	// them.
 	styles       style.Styles
 	viewport     yamlviewport.Model
 	width        int
@@ -117,8 +118,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.viewport.SetWidth(msg.Width)
-		// Reserve 2 lines for the status bar; a terminal shorter than that
-		// leaves the viewport no rows rather than a negative height.
+		// Reserve rows for the status bar. A terminal shorter than the
+		// status bar leaves the viewport no rows rather than a negative
+		// height.
 		m.viewport.SetHeight(max(0, msg.Height-statusBarHeight))
 
 		if m.pendingSearch != "" {
@@ -310,11 +312,11 @@ func (m model) View() tea.View {
 // baseView renders the viewport above the status bar, in the rows the
 // terminal has. The viewport and the status bar each render rows as wide
 // as the terminal, so a newline between them stacks them without padding.
-// A terminal of two rows leaves the viewport none, and a viewport with no
-// rows renders an empty string that the newline would still turn into a
-// row, so the viewport drops out of the render instead. A terminal of one
-// row shows the title line alone, and one with no rows, as before the
-// first window size arrives, renders nothing.
+// A terminal of two rows leaves the viewport none. A viewport with no rows
+// renders an empty string that the newline would still turn into a row,
+// so baseView leaves the viewport out instead. A terminal of one row shows
+// the title line alone. A terminal with no rows, as before the first
+// window size arrives, renders nothing.
 func (m *model) baseView() string {
 	switch {
 	case m.height <= 0:
@@ -383,7 +385,7 @@ func (m *model) titleLine() string {
 		titleSegment{titleText, kind.GenericHeadingAccent},
 	)
 
-	// Width used by the fixed segments, each followed by a separator, plus
+	// Width the fixed segments take, each with a separator after it, plus
 	// the trailing separator after the subtitle.
 	usedWidth := 1
 	for _, seg := range segments {
@@ -435,10 +437,10 @@ func (m *model) titleLine() string {
 	return m.clampWidth(sb.String())
 }
 
-// clampWidth truncates a status bar row to the terminal width, so a row
-// whose fixed segments outgrow a narrow terminal ends at that width rather
-// than wrapping onto a second row that pushes the rows below it off the
-// screen.
+// clampWidth truncates a status bar row to the terminal width. A row whose
+// fixed segments outgrow a narrow terminal then ends at that width. Without
+// the clamp, the row would wrap onto a second row and push the rows below
+// it off the screen.
 func (m *model) clampWidth(row string) string {
 	return lipgloss.NewStyle().MaxWidth(m.width).Render(row)
 }

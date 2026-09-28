@@ -554,8 +554,9 @@ func TestStatusBarWidth(t *testing.T) {
 	t.Parallel()
 
 	// Both status bar rows fill the terminal exactly. One cell over and a
-	// row wraps onto another row, pushing the rows below it out of the alt
-	// screen, so a terminal narrower than the fixed segments truncates them.
+	// row wraps onto another row, which pushes the rows below it out of the
+	// alt screen. So a terminal narrower than the fixed segments truncates
+	// them.
 	tcs := map[string]struct {
 		width int
 	}{
