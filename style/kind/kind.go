@@ -1,11 +1,12 @@
 // Package kind names the kinds of text a rendering styles.
 //
-// A [Kind] is the name of one kind of text: a kind of YAML token, such as a
-// mapping key or a number, a diff or error mark, a heading in a status
-// bar, or a piece of the chrome a renderer draws around content, such as a
-// line number. The constants follow Pygments token naming conventions where they
-// apply. A [go.jacobcolvin.com/niceyaml/style.Styles] value maps each Kind
-// to the style it renders with, and a [go.jacobcolvin.com/niceyaml/line.Overlay]
+// A [Kind] is the name of one kind of text. It may name a kind of YAML
+// token, such as a mapping key or a number, or a diff or error mark. It may
+// also name a heading in a status bar, or a piece of the chrome a renderer
+// draws around content, such as a line number. The constants follow
+// Pygments token naming conventions where they apply. A
+// [go.jacobcolvin.com/niceyaml/style.Styles] value maps each Kind to the
+// style it renders with, and a [go.jacobcolvin.com/niceyaml/line.Overlay]
 // names the Kind of its highlight.
 //
 // The package holds names alone, with no styles behind them, so the packages
@@ -16,33 +17,36 @@
 //
 // Kinds form a tree, and [Parent] returns the parent of each predefined
 // Kind. A theme that sets a parent styles every child below it that it does
-// not set itself, so [LiteralNumberFloat] inherits from [LiteralNumber],
-// which inherits from [Literal], which inherits from [Text], the root:
+// not set itself. [LiteralNumberFloat] inherits from [LiteralNumber],
+// which inherits from [Literal], which inherits from [Text], the root.
+// The main branches of the tree hold these kinds:
 //
-//   - Text -> TextOK, TextWarn, TextError: Base text styles
-//   - Comment -> CommentPreproc: Comments and directives
-//   - Literal -> LiteralString, LiteralNumber, LiteralBoolean, LiteralNull: Values
-//   - Name -> NameTag, NameAnchor, NameAlias, NameDecorator: Identifiers
-//   - Punctuation -> PunctuationMapping, PunctuationSequence, PunctuationBlock,
-//     PunctuationCollectEntry, PunctuationHeading: Syntax
-//   - Generic -> GenericDeleted, GenericInserted, GenericError: Diff and error
-//     markers
-//   - Generic -> GenericHighlight -> GenericHighlightDim: Search and selection
-//     highlights
-//   - Generic -> GenericHeading -> GenericHeadingAccent, GenericHeadingSubtle,
-//     GenericHeadingOK, GenericHeadingWarn, GenericHeadingError: Headings
-//   - TextAccent -> TextAccentDim: Emphasized text
-//   - TextSubtle -> TextSubtleDim: De-emphasized text
-//   - Comment -> UI -> UILineNumber, UIAnnotation -> UIHunkHeader,
-//     UISeparator: The chrome a renderer draws around content
+//   - Base text styles: Text -> TextOK, TextWarn, TextError.
+//   - Comments and directives: Comment -> CommentPreproc.
+//   - Values: Literal -> LiteralString, LiteralNumber, LiteralBoolean,
+//     LiteralNull.
+//   - Identifiers: Name -> NameTag, NameAnchor, NameAlias, NameDecorator.
+//   - Syntax: Punctuation -> PunctuationMapping, PunctuationSequence,
+//     PunctuationBlock, PunctuationCollectEntry, PunctuationHeading.
+//   - Diff and error markers: Generic -> GenericDeleted, GenericInserted,
+//     GenericError.
+//   - Search and selection highlights: Generic -> GenericHighlight ->
+//     GenericHighlightDim.
+//   - Headings: Generic -> GenericHeading -> GenericHeadingAccent,
+//     GenericHeadingSubtle, GenericHeadingOK, GenericHeadingWarn,
+//     GenericHeadingError.
+//   - Emphasized text: TextAccent -> TextAccentDim.
+//   - De-emphasized text: TextSubtle -> TextSubtleDim.
+//   - The chrome a renderer draws around content: Comment -> UI ->
+//     UILineNumber, UIAnnotation -> UIHunkHeader, UISeparator.
 //
 // The highlight and heading kinds inherit from [Generic] rather than from
 // [Text], so a theme that sets Generic and leaves them unset draws
 // highlights and headings in its Generic style.
 //
-// The UI kinds inherit from [Comment] rather than from [Text], so a theme
+// The UI kinds inherit from [Comment] rather than from [Text]. A theme
 // that sets none of them draws gutters, annotations, and hunk headers in
-// its comment color, and one that sets [UI] restyles all of the chrome at
+// its comment color. A theme that sets [UI] restyles all the chrome at
 // once without touching the comments.
 //
 // A rendering names its own kinds, such as one for search matches, as
@@ -69,7 +73,7 @@ type Kind string
 // Kinds of YAML tokens and rendered text. Names follow Pygments token
 // naming conventions where they apply.
 const (
-	// Text is a default/fallback style.
+	// Text is the default style and the root every other kind falls back to.
 	Text Kind = "text"
 	// TextAccent styles accented text.
 	TextAccent Kind = "textAccent"
