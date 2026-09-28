@@ -821,6 +821,79 @@ func TestTokenize_RestoresDroppedWhitespace(t *testing.T) {
 	}
 }
 
+func TestForParser(t *testing.T) {
+	t.Parallel()
+
+	// ForParser cuts the blank lines in front of the first text down to
+	// their line breaks, and every other Origin and every position stays.
+	// The tokens passed in keep their Origins.
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"blank line of a tab": {
+			input: "\t\nb: 1\n",
+			want:  "\nb: 1\n",
+		},
+		"indented key after a blank line with a tab": {
+			input: " \t \n  b: 1\n",
+			want:  "\n  b: 1\n",
+		},
+		"crlf blank lines": {
+			input: "\t\r\n \r\nb: 1\r\n",
+			want:  "\r\n\r\nb: 1\r\n",
+		},
+		"comment after a blank line of a tab": {
+			input: "\t\n# c\nb: 1\n",
+			want:  "\n# c\nb: 1\n",
+		},
+		"blank line of spaces after the first key": {
+			input: "a: 1\n  \nb: 2\n",
+			want:  "a: 1\n  \nb: 2\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			got := tokens.ForParser(tks)
+
+			assert.Equal(t, tc.want, yamltest.DumpTokenOrigins(got))
+			assert.Equal(t, tc.input, yamltest.DumpTokenOrigins(tks))
+
+			require.Len(t, got, len(tks))
+
+			for i := range got {
+				assert.NotSame(t, tks[i], got[i], "token %d", i)
+				assert.Equal(t, *tks[i].Position, *got[i].Position, "token %d", i)
+			}
+		})
+	}
+}
+
+func TestForParser_Links(t *testing.T) {
+	t.Parallel()
+
+	// The clones of a document cut from a longer stream link to nothing
+	// outside the result, and ForParser drops nil tokens.
+	docs := collectDocs(tokens.SplitDocuments(tokens.Tokenize("a: 1\n---\nb: 2\n")))
+	require.Len(t, docs, 2)
+	require.NotNil(t, docs[1][0].Prev)
+
+	got := tokens.ForParser(append(token.Tokens{nil}, docs[1]...))
+	require.Len(t, got, len(docs[1]))
+
+	assert.Nil(t, got[0].Prev)
+	assert.Nil(t, got[len(got)-1].Next)
+
+	for i := 1; i < len(got); i++ {
+		assert.Same(t, got[i-1], got[i].Prev, "token %d", i)
+		assert.Same(t, got[i], got[i-1].Next, "token %d", i-1)
+	}
+}
+
 func TestSplitDocuments(t *testing.T) {
 	t.Parallel()
 
@@ -1839,6 +1912,10 @@ var positionCorpus = map[string]string{
 	"colon after trailing spaces crlf":               "'q' \r\n: 1\r\n",
 	"nested colon after trailing spaces":             "- \"q\" \n  : 1\n",
 	"colon after trailing spaces on a later key":     "a: 1\n'q'  \n: 2\n",
+	"blank line of a tab before the first key":       "\t\nb: 1\n",
+	"blank line with a tab before the first key":     " \t\nb: 1\n",
+	"blank line of a tab before a quoted first key":  "\t\n\"b\": 1\n",
+	"crlf blank line of a tab before the first key":  "\t\r\nb: 1\r\n",
 }
 
 func TestTokenize_PositionsLocateText(t *testing.T) {
@@ -1916,13 +1993,14 @@ func TestTokenize_ParsesAsTheLexerDoes(t *testing.T) {
 
 	// The go-yaml parser reads Column and Line to decide which map or
 	// sequence a token belongs to and where a comment attaches, so moving
-	// tokens must not change the tree it builds.
+	// tokens must not change the tree it builds from the stream ForParser
+	// shapes.
 	for name, input := range positionCorpus {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
 			want, wantErr := parser.Parse(lexer.Tokenize(input), parser.ParseComments)
-			got, gotErr := parser.Parse(tokens.Tokenize(input), parser.ParseComments)
+			got, gotErr := parser.Parse(tokens.ForParser(tokens.Tokenize(input)), parser.ParseComments)
 
 			if wantErr != nil {
 				require.Error(t, gotErr)

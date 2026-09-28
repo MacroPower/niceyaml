@@ -60,6 +60,11 @@ import (
 // a comment or a tag, and on the last line of a multi-line block scalar.
 // Tokenize moves each such token to where the source holds its text, and
 // the Origins hold the spaces the lexer dropped.
+//
+// The first token that holds text opens with all the whitespace ahead of
+// it, blank lines included. The go-yaml parser rejects a key whose Origin
+// holds a blank line with a tab in front of its text, so hand the parser
+// the stream [ForParser] returns.
 func Tokenize(src string) token.Tokens {
 	src = dropByteOrderMarks(src)
 
@@ -219,6 +224,74 @@ func IsPlaceholder(tk *token.Token) bool {
 	}
 
 	return len(lexer.Tokenize(tk.Origin)) == 0
+}
+
+// ForParser returns clones of tks for the go-yaml parser to read.
+//
+// [Tokenize] gives the first token that holds text all the whitespace
+// ahead of that text, blank lines included, where the lexer keeps only the
+// line breaks of the blank lines and the indentation of the last line. The
+// parser trims spaces and line breaks from the start of a key's Origin and
+// rejects the key when a line break is left, so a blank line that holds a
+// tab in front of the first key would make it reject valid YAML. In the
+// clone of that token, each blank line in front of the text keeps only
+// its line break, and the indentation of the line the text starts on
+// stays. Every other clone keeps the Origin of its token, and every clone
+// keeps its position.
+//
+// The parser relinks Next and Prev as it moves comment tokens, and the
+// clones take that change in place of tks. The clones link to each other
+// and to nothing outside the result. ForParser drops nil tokens.
+func ForParser(tks token.Tokens) token.Tokens {
+	result := make(token.Tokens, 0, len(tks))
+
+	shaped := false
+
+	for _, tk := range tks {
+		clone := tk.Clone()
+		if clone == nil {
+			continue
+		}
+
+		if !shaped && strings.Trim(clone.Origin, " \t\r\n") != "" {
+			clone.Origin = bareLeadingLines(clone.Origin)
+			shaped = true
+		}
+
+		result.Add(clone)
+	}
+
+	// Clone copies Next and Prev, and Add rewires only the links between
+	// clones, so sever the links the ends keep to tokens outside tks.
+	if len(result) > 0 {
+		result[0].Prev = nil
+		result[len(result)-1].Next = nil
+	}
+
+	return result
+}
+
+// bareLeadingLines returns origin with each blank line in front of its
+// text cut down to its line break. The indentation of the line the text
+// starts on stays. An Origin that holds no text comes back as it is.
+func bareLeadingLines(origin string) string {
+	text := strings.TrimLeft(origin, " \t\r\n")
+	if text == "" {
+		return origin
+	}
+
+	lead := origin[:len(origin)-len(text)]
+	cut := strings.LastIndexAny(lead, "\r\n") + 1
+
+	breaks := strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' {
+			return r
+		}
+
+		return -1
+	}, lead[:cut])
+
+	return breaks + lead[cut:] + text
 }
 
 // repairPositions moves every token of tks to the rune of src where its
