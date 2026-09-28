@@ -4450,6 +4450,39 @@ func TestDecoder(t *testing.T) {
 		}
 	})
 
+	t.Run("reference documents serve every decode", func(t *testing.T) {
+		t.Parallel()
+
+		refs := []byte("base: &x 1\n")
+		dec := niceyaml.NewDecoder(niceyaml.WithReferences(refs))
+
+		// The option holds a copy, so an edit to the slice reaches nothing.
+		refs[len(refs)-2] = '2'
+
+		docs, err := niceyaml.NewSourceFromString("b: *x\n---\nc: *x\n").Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		var wg sync.WaitGroup
+
+		for range 4 {
+			for i, dd := range docs {
+				wg.Go(func() {
+					got, err := dec.Decode[map[string]int](t.Context(), dd)
+					if assert.NoError(t, err) {
+						assert.Equal(t, map[string]int{[]string{"b", "c"}[i]: 1}, got)
+					}
+				})
+			}
+		}
+
+		wg.Wait()
+
+		got, err := docs[0].Decode[map[string]int](t.Context(), niceyaml.WithReferences([]byte("base: &x 3\n")))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"b": 3}, got)
+	})
+
 	t.Run("without options decodes as Node.Decode does", func(t *testing.T) {
 		t.Parallel()
 

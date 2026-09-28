@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"slices"
 	"sort"
@@ -1329,6 +1330,7 @@ func (n *Node) Bind(err error) error {
 //   - [WithValidator]
 //   - [WithSelfValidation]
 //   - [WithDisallowUnknownFields]
+//   - [WithReferences]
 //   - [WithYAMLDecodeOptions]
 type DecodeOption func(*decodeConfig)
 
@@ -1416,9 +1418,50 @@ func WithDisallowUnknownFields(disallow bool) DecodeOption {
 // before it, so the go-yaml decoder receives them in the order given. It
 // is the escape hatch for decoder settings that have no option of their
 // own.
+//
+// Each decode, and the key decoding of self-validation, applies the
+// options to a new go-yaml decoder. An option that holds state therefore
+// serves one decode, and a [Decoder] that carries one is not safe to
+// share between goroutines. [yaml.ReferenceReaders] is such an option:
+// the first decode reads its readers to the end, and later decodes find
+// no anchors there. [WithReferences] reads the documents again for each
+// decode, and [yaml.ReferenceFiles] and [yaml.ReferenceDirs] read their
+// files again for each decode.
 func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 	return func(c *decodeConfig) {
 		c.yamlOpts = append(c.yamlOpts, opts...)
+	}
+}
+
+// WithReferences is a [DecodeOption] that lets an alias of the decoded
+// node refer to an anchor of the YAML documents in data, as
+// [yaml.ReferenceReaders] lets it refer to an anchor of the documents its
+// readers hold. Each decode reads the documents anew, so a [Decoder] that
+// carries the option resolves them for every node it decodes, from any
+// number of goroutines:
+//
+//	dec := niceyaml.NewDecoder(niceyaml.WithReferences(defaults))
+//
+// WithReferences copies data, so a caller that edits the slices changes
+// nothing in the option. The documents go to the go-yaml decoder in the
+// order of the options, among the values [WithYAMLDecodeOptions] gives.
+func WithReferences(data ...[]byte) DecodeOption {
+	docs := make([][]byte, len(data))
+	for i, doc := range data {
+		docs[i] = bytes.Clone(doc)
+	}
+
+	opt := func(d *yaml.Decoder) error {
+		readers := make([]io.Reader, len(docs))
+		for i, doc := range docs {
+			readers[i] = bytes.NewReader(doc)
+		}
+
+		return yaml.ReferenceReaders(readers...)(d)
+	}
+
+	return func(c *decodeConfig) {
+		c.yamlOpts = append(c.yamlOpts, opt)
 	}
 }
 

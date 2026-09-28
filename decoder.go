@@ -35,9 +35,10 @@ import (
 // options of a call held for reuse.
 //
 // A Decoder never changes after [NewDecoder], so it is safe for
-// concurrent use. [Decoder.With] returns a new Decoder with more options
-// applied. The zero Decoder decodes as one from NewDecoder without
-// options does.
+// concurrent use as long as the go-yaml options it carries hold no state,
+// which [WithYAMLDecodeOptions] describes. [Decoder.With] returns a new
+// Decoder with more options applied. The zero Decoder decodes as one from
+// NewDecoder without options does.
 //
 // Create instances with [NewDecoder].
 type Decoder struct {
