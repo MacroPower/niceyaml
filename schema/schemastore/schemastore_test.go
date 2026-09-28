@@ -1175,13 +1175,10 @@ func TestSchemaStore_CatalogWithoutSchemas(t *testing.T) {
 			t.Run("without a cached catalog", func(t *testing.T) {
 				t.Parallel()
 
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-					//nolint:errcheck // Test helper.
-					w.Write([]byte(tc.body))
-				}))
-				t.Cleanup(server.Close)
-
-				store := schemastore.New(schemastore.WithCatalogURL(server.URL))
+				store := schemastore.New(
+					schemastore.WithCatalogURL("https://example.com/catalog.json"),
+					schemastore.WithHTTPClient(newClient(http.StatusOK, []byte(tc.body))),
+				)
 
 				_, err := store.FindMatch(t.Context(), "config.yaml")
 				require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
@@ -1191,39 +1188,49 @@ func TestSchemaStore_CatalogWithoutSchemas(t *testing.T) {
 			t.Run("with a cached catalog", func(t *testing.T) {
 				t.Parallel()
 
-				catalog, err := json.Marshal(testCatalog)
-				require.NoError(t, err)
+				// Inside the bubble, the sleep below moves the fake clock
+				// past the cache TTL without waiting in real time.
+				synctest.Test(t, func(t *testing.T) {
+					catalog := marshalCatalog(t, testCatalog)
 
-				var requestCount atomic.Int32
+					var requestCount atomic.Int32
 
-				// The server serves the catalog first and the body after.
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-					data := catalog
-					if requestCount.Add(1) > 1 {
-						data = []byte(tc.body)
+					// The transport serves the catalog first and the body
+					// after. It opens no socket, so it counts only the
+					// store's own requests.
+					client := &http.Client{
+						Transport: &roundTripperFunc{fn: func(r *http.Request) (*http.Response, error) {
+							data := catalog
+							if requestCount.Add(1) > 1 {
+								data = []byte(tc.body)
+							}
+
+							return &http.Response{
+								StatusCode: http.StatusOK,
+								Body:       io.NopCloser(bytes.NewReader(data)),
+								Request:    r,
+							}, nil
+						}},
 					}
 
-					//nolint:errcheck // Test helper.
-					w.Write(data)
-				}))
-				t.Cleanup(server.Close)
+					store := schemastore.New(
+						schemastore.WithCatalogURL("https://example.com/catalog.json"),
+						schemastore.WithHTTPClient(client),
+						schemastore.WithCacheTTL(10*time.Millisecond),
+					)
 
-				store := schemastore.New(
-					schemastore.WithCatalogURL(server.URL),
-					schemastore.WithCacheTTL(10*time.Millisecond),
-				)
+					_, err := store.FindMatch(t.Context(), "config.yaml")
+					require.NoError(t, err)
 
-				_, err = store.FindMatch(t.Context(), "config.yaml")
-				require.NoError(t, err)
+					// Wait for cache to expire.
+					time.Sleep(20 * time.Millisecond)
 
-				// Wait for cache to expire.
-				time.Sleep(20 * time.Millisecond)
-
-				// The refresh fails, so the store keeps the cached catalog.
-				entry, err := store.FindMatch(t.Context(), "config.yaml")
-				require.NoError(t, err)
-				assert.Equal(t, "Test", entry.Name)
-				assert.Equal(t, int32(2), requestCount.Load())
+					// The refresh fails, so the store keeps the cached catalog.
+					entry, err := store.FindMatch(t.Context(), "config.yaml")
+					require.NoError(t, err)
+					assert.Equal(t, "Test", entry.Name)
+					assert.Equal(t, int32(2), requestCount.Load())
+				})
 			})
 		})
 	}
