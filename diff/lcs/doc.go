@@ -1,18 +1,14 @@
 // Package lcs computes minimal edit sequences between string slices.
 //
-// When rendering YAML diffs, the system needs to determine which lines were
-// added, removed, or unchanged between two versions.
+// A YAML diff shows which lines one version adds, removes, or keeps from
+// the other. An [Algorithm] computes that edit sequence, and callers can
+// plug in an Algorithm of their own. [Hirschberg] is the default, and it
+// reuses its memory across repeated comparisons.
 //
-// This package provides the [Algorithm] interface and a default implementation
-// using Hirschberg's algorithm for computing differences while minimizing memory
-// allocations during repeated comparisons.
+// # Complexity
 //
-// # Algorithm Interface
-//
-// The [Algorithm] interface allows pluggable diff algorithms. [Hirschberg] is
-// the default implementation, using a space-efficient LCS algorithm.
-//
-// The standard dynamic programming approach needs O(m*n) space for its table.
+// [Hirschberg] finds a longest common subsequence (LCS) of the two inputs. The
+// standard dynamic programming approach needs O(m*n) space for its table.
 // Hirschberg's divide-and-conquer strategy instead works in two rows of O(n)
 // space, where n is the length of the after sequence, and keeps O(m*n) time.
 // [Hirschberg] first pairs up the lines both inputs share at the start and at

@@ -102,7 +102,7 @@ func shiftBoundaries(lines []string, changed, other []bool) {
 			runLength := i - start
 
 			// Move the run up while the line above it matches its last
-			// line, merging it with any run above.
+			// line, and merge it with any run above.
 			for start > 0 && lines[start-1] == lines[i-1] {
 				start--
 				changed[start] = true
@@ -127,7 +127,7 @@ func shiftBoundaries(lines []string, changed, other []bool) {
 			}
 
 			// Move the run down while its first line matches the line
-			// below it, merging it with any run below.
+			// below it, and merge it with any run below.
 			for i < n && lines[start] == lines[i] {
 				changed[start] = false
 				start++
@@ -167,8 +167,8 @@ func shiftBoundaries(lines []string, changed, other []bool) {
 	}
 }
 
-// cleared returns s resized to n elements, all false, reusing its backing
-// array when it is large enough.
+// cleared returns s resized to n elements, all false. It reuses the
+// backing array of s when that array is large enough.
 func cleared(s []bool, n int) []bool {
 	if cap(s) < n {
 		return make([]bool, n)

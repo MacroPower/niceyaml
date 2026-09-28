@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-// Hirschberg implements [Algorithm] using a space-efficient LCS algorithm.
+// Hirschberg implements [Algorithm] with a space-efficient LCS algorithm.
 //
 // Diff first pairs up the lines that before and after share at the start
 // and at the end. The search over the rest takes O(m*n) time, where m and
@@ -40,7 +40,7 @@ func NewHirschberg() *Hirschberg {
 	return &Hirschberg{}
 }
 
-// Diff returns operations transforming before into after. The returned slice
+// Diff returns operations that transform before into after. The returned slice
 // is a copy, so it stays valid across later calls.
 func (h *Hirschberg) Diff(before, after []string) []Op {
 	b, ok := h.pool.Get().(*buffers)
@@ -165,9 +165,9 @@ func commonEnds(before, after []string) (int, int) {
 	return prefix, suffix
 }
 
-// recurse finds the LCS using divide-and-conquer.
-// Operates on before[bStart:bEnd] and after[aStart:aEnd], which hold the
-// line IDs from intern.
+// recurse finds the LCS by divide-and-conquer. It operates on
+// before[bStart:bEnd] and after[aStart:aEnd], which hold the line IDs from
+// intern.
 func (b *buffers) recurse(before, after []int, bStart, bEnd, aStart, aEnd int) {
 	m := bEnd - bStart
 	n := aEnd - aStart
@@ -224,7 +224,7 @@ func (b *buffers) recurse(before, after []int, bStart, bEnd, aStart, aEnd int) {
 }
 
 // singleBeforeLine handles the base case where there's exactly one before line.
-// Maintains "deletions before insertions" convention.
+// It keeps deletions ahead of insertions.
 func (b *buffers) singleBeforeLine(before, after []int, bStart, aStart, aEnd int) {
 	// Find first match in after sequence.
 	matchIdx := -1
