@@ -1818,6 +1818,16 @@ func (failingValidator) Validate() error {
 	return niceyaml.NewError("rejected", niceyaml.AtPath(paths.Root().Child("name")))
 }
 
+// fieldValidator is a [niceyaml.Validator] that returns the error its
+// field holds, so a nil pointer to one panics when it runs.
+type fieldValidator struct {
+	err error
+}
+
+func (v *fieldValidator) Validate(context.Context, *niceyaml.Node) error {
+	return v.err
+}
+
 func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 	t.Parallel()
 
@@ -3736,11 +3746,27 @@ func TestDocument_Decode_Validator(t *testing.T) {
 	t.Run("skips a nil validator", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
+		tcs := map[string]struct {
+			validator niceyaml.Validator
+		}{
+			"nil interface": {validator: nil},
+			"nil pointer":   {validator: (*fieldValidator)(nil)},
+			"nil func":      {validator: niceyaml.ValidatorFunc(nil)},
+		}
 
-		result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(nil))
-		require.NoError(t, err)
-		assert.Equal(t, plainConfig{Name: "test", Value: 42}, result)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
+
+				result, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(tc.validator))
+				require.NoError(t, err)
+				assert.Equal(t, plainConfig{Name: "test", Value: 42}, result)
+
+				require.NoError(t, niceyaml.NewDecoder(niceyaml.WithValidator(tc.validator)).Validate(t.Context(), dd))
+			})
+		}
 	})
 
 	t.Run("a failing validator ends the decode", func(t *testing.T) {
@@ -4866,7 +4892,13 @@ func TestNode_Validate(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "name: test\n")
 
-		err := dd.Validate(t.Context(), record(&order, "first"), nil, record(&order, "second"))
+		err := dd.Validate(t.Context(),
+			record(&order, "first"),
+			nil,
+			(*fieldValidator)(nil),
+			niceyaml.ValidatorFunc(nil),
+			record(&order, "second"),
+		)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"first", "second"}, order)
 	})
@@ -5541,7 +5573,13 @@ func TestMultiValidator(t *testing.T) {
 
 		var order []string
 
-		err := dd.Validate(t.Context(), niceyaml.MultiValidator(badB, nil, record(&order, "after")))
+		err := dd.Validate(t.Context(), niceyaml.MultiValidator(
+			badB,
+			nil,
+			(*fieldValidator)(nil),
+			niceyaml.ValidatorFunc(nil),
+			record(&order, "after"),
+		))
 		require.ErrorIs(t, err, errB)
 		assert.Equal(t, []string{"after"}, order)
 	})
