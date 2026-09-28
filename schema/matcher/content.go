@@ -204,12 +204,13 @@ func scalarText(node *niceyaml.Node) (string, bool) {
 	}
 }
 
-// numericEqual reports whether a and b are numbers of predeclared Go
-// types holding the same value. The second result is false when either
-// is not such a number, so the caller falls back to ==.
+// numericEqual reports whether a and b are numbers, of any integer or
+// float kind, holding the same value. A named type such as
+// [time.Duration] counts by its kind. The second result is false when either is not a
+// number, so the caller falls back to ==.
 func numericEqual(a, b any) (bool, bool) {
 	av, bv := reflect.ValueOf(a), reflect.ValueOf(b)
-	if !isPredeclaredNumber(av) || !isPredeclaredNumber(bv) {
+	if !isNumber(av) || !isNumber(bv) {
 		return false, false
 	}
 
@@ -284,8 +285,9 @@ func wantsNil[T comparable](want T) bool {
 	}
 }
 
-func isPredeclaredNumber(v reflect.Value) bool {
-	if !v.IsValid() || v.Type().PkgPath() != "" {
+// isNumber reports whether v holds an integer or a float of any Go type.
+func isNumber(v reflect.Value) bool {
+	if !v.IsValid() {
 		return false
 	}
 

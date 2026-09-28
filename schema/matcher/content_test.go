@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -241,6 +242,26 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 18446744073709551615`),
 			want:    false,
 		},
+		"any named int matches integer": {
+			matcher: matcher.Content[any](versionPath, namedInt(1)),
+			input:   stringtest.Input(`version: 1`),
+			want:    true,
+		},
+		"any named int does not match other integer": {
+			matcher: matcher.Content[any](versionPath, namedInt(1)),
+			input:   stringtest.Input(`version: 2`),
+			want:    false,
+		},
+		"any named float matches float": {
+			matcher: matcher.Content[any](versionPath, namedFloat(1.5)),
+			input:   stringtest.Input(`version: 1.5`),
+			want:    true,
+		},
+		"any duration matches integer": {
+			matcher: matcher.Content[any](versionPath, time.Duration(80)),
+			input:   stringtest.Input(`version: 80`),
+			want:    true,
+		},
 		"any string does not match number": {
 			matcher: matcher.Content[any](versionPath, "1"),
 			input:   stringtest.Input(`version: 1`),
@@ -462,6 +483,13 @@ func (p *prefixedString) UnmarshalText(text []byte) error {
 
 	return nil
 }
+
+// namedInt and namedFloat are numeric types a caller names, which compare
+// by value behind an interface as the predeclared types do.
+type (
+	namedInt   int
+	namedFloat float64
+)
 
 // millis decodes itself from a number of seconds, which it holds as
 // milliseconds.
