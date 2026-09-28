@@ -443,21 +443,13 @@ func (b *builder) processPart(ctx *partContext) {
 	}
 
 	// Create token for this part.
-	newTk := &token.Token{
-		Type:          tokenType,
-		CharacterType: ctx.tk.CharacterType,
-		Indicator:     ctx.tk.Indicator,
-		Origin:        ctx.part,
-		Value:         val,
-		Error:         ctx.tk.Error,
-		Position: &token.Position{
-			Line:        b.currentLine,
-			Column:      col,
-			Offset:      offset,
-			IndentNum:   b.currentIndentNum,
-			IndentLevel: b.currentIndentLevel,
-		},
-	}
+	newTk := newPart(ctx.tk, tokenType, ctx.part, val, token.Position{
+		Line:        b.currentLine,
+		Column:      col,
+		Offset:      offset,
+		IndentNum:   b.currentIndentNum,
+		IndentLevel: b.currentIndentLevel,
+	})
 
 	linkParts(b.lastPart, newTk)
 
@@ -488,6 +480,22 @@ func (b *builder) processPart(ctx *partContext) {
 	}
 }
 
+// newPart creates the token for one part of tk, which holds origin at pos.
+// The caller picks its type and value, and the part copies the rest of its
+// fields from tk, so every part of a token carries the same CharacterType,
+// Indicator, and Error.
+func newPart(tk *token.Token, typ token.Type, origin, value string, pos token.Position) *token.Token {
+	return &token.Token{
+		Type:          typ,
+		CharacterType: tk.CharacterType,
+		Indicator:     tk.Indicator,
+		Origin:        origin,
+		Value:         value,
+		Error:         tk.Error,
+		Position:      &pos,
+	}
+}
+
 // textPosition returns the column and offset of the rune where the text of
 // tk starts, as its Position carries them. For each one the Position leaves
 // at zero, or for both when tk has none, it returns col or offset, the
@@ -515,19 +523,13 @@ func textPosition(tk *token.Token, col, offset int) (int, int) {
 // it adds beyond that line ending advance the offset.
 func (b *builder) appendToPreviousLine(ctx *partContext) {
 	lastLine := &b.lines[len(b.lines)-1]
-	newTk := &token.Token{
-		Type:          ctx.tk.Type,
-		CharacterType: ctx.tk.CharacterType,
-		Indicator:     ctx.tk.Indicator,
-		Origin:        ctx.part,
-		Position: &token.Position{
-			Line:        b.currentLine - 1, // Goes on previous line.
-			Column:      max(b.prevLineEndColumn, 1),
-			Offset:      b.currentOffset - lineEndingOverlap(b.prevLineEnding, ctx.part),
-			IndentNum:   b.prevLineIndentNum,
-			IndentLevel: b.currentIndentLevel,
-		},
-	}
+	newTk := newPart(ctx.tk, ctx.tk.Type, ctx.part, "", token.Position{
+		Line:        lastLine.Number,
+		Column:      max(b.prevLineEndColumn, 1),
+		Offset:      b.currentOffset - lineEndingOverlap(b.prevLineEnding, ctx.part),
+		IndentNum:   b.prevLineIndentNum,
+		IndentLevel: b.currentIndentLevel,
+	})
 	if n := len(lastLine.Segments); n > 0 {
 		linkParts(lastLine.Segments[n-1].Part(), newTk)
 	}

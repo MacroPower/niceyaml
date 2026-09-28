@@ -756,6 +756,44 @@ func TestSplit_ResetDocument(t *testing.T) {
 	}
 }
 
+func TestSplit_PartsKeepTokenFields(t *testing.T) {
+	t.Parallel()
+
+	// Every part of a token carries the token's CharacterType, Indicator,
+	// and Error, including a line ending Split moves onto the line finished
+	// last. The lexer gives an Error to the invalid token it makes of a tab
+	// that opens a line.
+	tcs := map[string]string{
+		"tab after a comment cut from its crlf": "a: 1 # c\r\n\tb: 1\r\n",
+		"tab line after a tag":                  "a: !!map\n\t\n  b: 1\n",
+		"tab that opens a line":                 "a: 1\n\tb: 2\n",
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var withError int
+
+			for _, l := range segment.Split(tokens.Tokenize(input)) {
+				for _, seg := range l.Segments {
+					src, p := seg.Source(), seg.Part()
+
+					assert.Equal(t, src.CharacterType, p.CharacterType, "part %q CharacterType", p.Origin)
+					assert.Equal(t, src.Indicator, p.Indicator, "part %q Indicator", p.Origin)
+					assert.Equal(t, src.Error, p.Error, "part %q Error", p.Origin)
+
+					if p.Error != "" {
+						withError++
+					}
+				}
+			}
+
+			assert.Positive(t, withError, "no part carries an Error")
+		})
+	}
+}
+
 func TestSplit_PartsTakeLineIndent(t *testing.T) {
 	t.Parallel()
 
