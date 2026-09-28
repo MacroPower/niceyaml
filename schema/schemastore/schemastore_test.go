@@ -1872,3 +1872,83 @@ func TestStore_FindMatch_WildcardExtension(t *testing.T) {
 	_, err = store.FindMatch(t.Context(), "ci/azure.toml")
 	require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
 }
+
+func TestStore_FindMatch_NoExtension(t *testing.T) {
+	t.Parallel()
+
+	// A file name without an extension can belong to a YAML file, as
+	// .clang-format and .yamllint do, so the store keeps such a pattern
+	// beside the patterns with a YAML extension. It still drops a pattern
+	// with an extension it does not support.
+	catalog := schemastore.Catalog{Schemas: []schemastore.CatalogEntry{
+		{
+			Name:      "clang-format",
+			URL:       "https://example.com/clang-format.json",
+			FileMatch: []string{".clang-format"},
+		},
+		{
+			Name:      "yamllint",
+			URL:       "https://example.com/yamllint.json",
+			FileMatch: []string{"**/.yamllint", "**/.yamllint.yaml", "**/.yamllint.yml", "**/.yamllint.toml"},
+		},
+		{
+			Name:      "BOSH job spec",
+			URL:       "https://example.com/bosh.json",
+			FileMatch: []string{"**/jobs/*/spec"},
+		},
+	}}
+
+	store := schemastore.New(
+		schemastore.WithCatalogURL("https://example.com/catalog.json"),
+		schemastore.WithHTTPClient(newCatalogClient(t, catalog)),
+	)
+
+	tcs := map[string]struct {
+		file      string
+		name      string
+		fileMatch []string
+		err       error
+	}{
+		"hidden file without an extension": {
+			file:      "/repo/.clang-format",
+			name:      "clang-format",
+			fileMatch: []string{".clang-format"},
+		},
+		"extensionless pattern beside YAML patterns": {
+			file:      "/repo/.yamllint",
+			name:      "yamllint",
+			fileMatch: []string{"**/.yamllint", "**/.yamllint.yaml", "**/.yamllint.yml"},
+		},
+		"YAML pattern of the same entry": {
+			file:      "/repo/.yamllint.yml",
+			name:      "yamllint",
+			fileMatch: []string{"**/.yamllint", "**/.yamllint.yaml", "**/.yamllint.yml"},
+		},
+		"plain name without an extension": {
+			file:      "/repo/jobs/web/spec",
+			name:      "BOSH job spec",
+			fileMatch: []string{"**/jobs/*/spec"},
+		},
+		"unsupported extension": {
+			file: "/repo/.yamllint.toml",
+			err:  schemastore.ErrNoCatalogMatch,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			entry, err := store.FindMatch(t.Context(), tc.file)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.name, entry.Name)
+			assert.Equal(t, tc.fileMatch, entry.FileMatch)
+		})
+	}
+}

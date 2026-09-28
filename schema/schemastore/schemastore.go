@@ -67,8 +67,9 @@ type CatalogEntry struct {
 	URL string `json:"url"`
 	// FileMatch contains the glob patterns for the files this schema
 	// applies to. When the store loads the catalog, it drops the patterns
-	// that cannot match a YAML or JSON file, so the slice may be shorter
-	// than the catalog's.
+	// that cannot match a YAML or JSON file, which are those whose file
+	// name carries another extension, such as *.toml, so the slice may be
+	// shorter than the catalog's.
 	FileMatch []string `json:"fileMatch"`
 
 	// The store prepares FileMatch for matching once per catalog load, so
@@ -562,11 +563,12 @@ func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry
 	return entries
 }
 
-// filterSupportedPatterns returns the patterns that can match a
-// YAML-compatible file, meaning one with a .yaml, .yml, or .json extension,
-// since JSON is a valid subset of YAML. A pattern with brace alternatives,
-// such as "*.{yml,yaml}", counts when any of its alternatives has a
-// supported extension.
+// filterSupportedPatterns returns the patterns that can match a YAML or
+// JSON file, since JSON is a valid subset of YAML. It drops a pattern
+// whose last segment carries an explicit extension, free of wildcards,
+// other than .yaml, .yml, or .json, such as "*.toml" or ".eslintrc.jsonc".
+// A pattern with brace alternatives, such as "*.{yml,yaml}", counts when
+// any of its alternatives can match such a file.
 //
 // An extglob group makes filterSupportedPatterns drop the pattern, since
 // the matcher reads the group literally and the pattern could only match a
@@ -580,7 +582,7 @@ func filterSupportedPatterns(patterns []string) []string {
 			continue
 		}
 
-		if slices.ContainsFunc(filepaths.ExpandBraces(pattern), hasSupportedExtension) {
+		if slices.ContainsFunc(filepaths.ExpandBraces(pattern), canMatchYAML) {
 			result = append(result, pattern)
 		}
 	}
@@ -588,11 +590,14 @@ func filterSupportedPatterns(patterns []string) []string {
 	return result
 }
 
-// hasSupportedExtension reports whether pattern can match a file whose
-// name ends in .yaml, .yml, or .json, in any letter case. A pattern
-// qualifies when it ends in one of them, or when the extension of its
-// last segment holds a wildcard, as "azure-pipelines*.y*ml" does.
-func hasSupportedExtension(pattern string) bool {
+// canMatchYAML reports whether pattern can match a YAML or JSON file, in
+// any letter case. A pattern qualifies when it ends in .yaml, .yml, or
+// .json, when the extension of its last segment holds a wildcard, as
+// "azure-pipelines*.y*ml" does, or when its last segment has no
+// extension. A name without an extension, such as ".clang-format",
+// "user-data", or "**/jobs/*/spec", can belong to a YAML file, and the
+// catalog lists such names for YAML configuration files.
+func canMatchYAML(pattern string) bool {
 	lower := strings.ToLower(pattern)
 
 	if strings.HasSuffix(lower, ".yaml") ||
@@ -602,7 +607,12 @@ func hasSupportedExtension(pattern string) bool {
 	}
 
 	base := lower[strings.LastIndex(lower, "/")+1:]
-	ext := base[strings.LastIndex(base, ".")+1:]
 
-	return strings.ContainsAny(ext, "*?[")
+	// A dot that starts the name marks a hidden file, not an extension.
+	dot := strings.LastIndex(base, ".")
+	if dot <= 0 {
+		return true
+	}
+
+	return strings.ContainsAny(base[dot+1:], "*?[")
 }
