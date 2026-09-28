@@ -204,13 +204,25 @@ func TestURL(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		t.Parallel()
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusNotFound)
-		}))
-		defer server.Close()
+		// The transport serves the 404 from memory. The default transport
+		// pools the connection of a response with no body before it hands
+		// the response over, and a sibling that closes its httptest server
+		// closes the idle connections of the default transport. A close at
+		// that moment would turn a 404 from a server into a broken
+		// connection.
+		client := &http.Client{
+			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusNotFound,
+					Body:       http.NoBody,
+					Request:    r,
+				}, nil
+			}),
+		}
 
-		_, _, err := load(t, schema.URL(server.URL+"/schema.json"))
-		require.ErrorContains(t, err, "fetch "+server.URL+"/schema.json: status 404")
+		err := lookup(t, client, schema.URL("http://example.com/schema.json"))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorContains(t, err, "fetch http://example.com/schema.json: status 404")
 	})
 
 	t.Run("registry fetches with its client", func(t *testing.T) {
