@@ -4474,27 +4474,44 @@ func TestViewport_WithSearcher(t *testing.T) {
 }
 
 // nilSearcher is a [yamlviewport.Searcher] whose Load returns a nil Index.
-type nilSearcher struct{}
+// It counts its Load calls.
+type nilSearcher struct {
+	loads int
+}
 
-func (nilSearcher) Load(line.Lines) yamlviewport.Index { return nil }
+func (s *nilSearcher) Load(line.Lines) yamlviewport.Index {
+	s.loads++
+
+	return nil
+}
 
 func TestViewport_NilIndexFindsNothing(t *testing.T) {
 	t.Parallel()
 
+	// A nil Index still counts as loaded, so typing a term loads each pane
+	// once rather than on every keystroke.
 	tcs := map[string]struct {
-		viewMode yamlviewport.ViewMode
+		viewMode  yamlviewport.ViewMode
+		wantLoads int
 	}{
-		"unified":      {viewMode: yamlviewport.ViewModeFull},
-		"side by side": {viewMode: yamlviewport.ViewModeSideBySide},
+		"unified": {
+			viewMode:  yamlviewport.ViewModeFull,
+			wantLoads: 1,
+		},
+		"side by side": {
+			viewMode:  yamlviewport.ViewModeSideBySide,
+			wantLoads: 2,
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
+			searcher := &nilSearcher{}
 			m := yamlviewport.New(
 				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithSearcher(nilSearcher{}),
+				yamlviewport.WithSearcher(searcher),
 			)
 			m.SetWidth(80)
 			m.SetHeight(10)
@@ -4505,6 +4522,12 @@ func TestViewport_NilIndexFindsNothing(t *testing.T) {
 			assert.NotPanics(t, func() { m.SetSearchTerm("a") })
 			assert.Equal(t, 0, m.SearchCount())
 			assert.Equal(t, -1, m.SearchIndex())
+
+			for _, term := range []string{"ab", "abc", "abcd"} {
+				m.SetSearchTerm(term)
+			}
+
+			assert.Equal(t, tc.wantLoads, searcher.loads)
 		})
 	}
 }

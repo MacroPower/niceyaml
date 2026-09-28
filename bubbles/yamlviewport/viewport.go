@@ -954,8 +954,8 @@ type searchMatch struct {
 func (m *Model) updateSideBySideSearchState() {
 	// Load both panes once per change of content, as the unified path
 	// does, so typing a term does not rebuild the indexes on every
-	// keystroke.
-	if m.searcherStale || m.index == nil || m.indexRight == nil {
+	// keystroke. A nil Index counts as loaded.
+	if m.searcherStale {
 		m.index = m.searcher.Load(m.baseLeft.Lines())
 		m.indexRight = m.searcher.Load(m.baseRight.Lines())
 
@@ -1075,9 +1075,10 @@ func (m *Model) applySideBySidePaneOverlays(
 // refreshSearch.
 //
 // It reloads the searcher only when the lines changed since the last load, so
-// typing a search term does not rebuild the index on every keystroke.
+// typing a search term does not rebuild the index on every keystroke. A nil
+// Index counts as loaded.
 func (m *Model) updateSearchState(lines *line.View) {
-	if m.searcherStale || m.index == nil {
+	if m.searcherStale {
 		m.index = m.searcher.Load(lines.Lines())
 
 		m.searcherStale = false
