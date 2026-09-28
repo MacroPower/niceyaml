@@ -1850,6 +1850,53 @@ func TestViewport_ViewFitsHeight(t *testing.T) {
 	}
 }
 
+func TestViewport_ViewFillsContentArea(t *testing.T) {
+	t.Parallel()
+
+	// Every view fills the content area, whether it shows no line, fewer
+	// lines than the height, or more.
+	var long strings.Builder
+
+	for i := range 20 {
+		fmt.Fprintf(&long, "k%d: %s\n", i, strings.Repeat("word ", i))
+	}
+
+	tcs := map[string]struct {
+		yaml string
+		mode yamlviewport.ViewMode
+	}{
+		"empty":                    {},
+		"fewer lines than height":  {yaml: "a: 1\n"},
+		"more lines than height":   {yaml: long.String()},
+		"side by side empty":       {mode: yamlviewport.ViewModeSideBySide},
+		"side by side fewer lines": {yaml: "a: 1\n", mode: yamlviewport.ViewModeSideBySide},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			const width, height = 40, 6
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithColors()))
+			m.SetWidth(width)
+			m.SetHeight(height)
+			m.SetViewMode(tc.mode)
+
+			if tc.yaml != "" {
+				m.SetRevision(niceyaml.NewSourceFromString(tc.yaml))
+			}
+
+			rows := strings.Split(m.View(), "\n")
+			require.Len(t, rows, height)
+
+			for i, row := range rows {
+				assert.Equal(t, width, lipgloss.Width(row), "row %d", i)
+			}
+		})
+	}
+}
+
 func TestViewport_ViewFitsWidth(t *testing.T) {
 	t.Parallel()
 

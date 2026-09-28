@@ -2086,22 +2086,30 @@ func (m *Model) getViewDimensions() (int, int, bool) {
 	return m.maxWidth(), m.maxHeight(), true
 }
 
-// renderContent applies styling and renders lines into final output. It clips
-// a row wider than contentW, a width the printer's gutter can force on a
-// viewport of only a few columns, before the style sees it, since the style
-// would wrap such a row onto a second screen row that the scroll math does
-// not count.
+// renderContent applies styling and renders lines into final output. It cuts
+// each row to contentW, a width the printer's gutter can force a row past on
+// a viewport of only a few columns, and pads it out to contentW, so the style
+// only fills the rows below them. A style with a width would word-wrap every
+// row on each render, and wrap a row wider than contentW onto a second
+// screen row that the scroll math does not count.
 func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 	textStyle := m.printer.Style(kind.Text)
 
+	// The style pads the rows it adds to the width of the widest row, so an
+	// empty window renders one empty row to carry the width.
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+
 	for i := range lines {
 		lines[i] = ansi.Truncate(lines[i], contentW, "")
+		if pad := contentW - ansi.StringWidth(lines[i]); pad > 0 {
+			lines[i] += textStyle.Render(strings.Repeat(" ", pad))
+		}
 	}
 
 	contents := textStyle.
-		Width(contentW).
 		Height(contentH).
-		MaxWidth(contentW).
 		MaxHeight(contentH).
 		Render(strings.Join(lines, "\n"))
 
