@@ -11,7 +11,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// Differ computes line differences using a configurable algorithm.
+// Differ computes line differences with a configurable algorithm.
 //
 // A Differ is safe for concurrent use when its [lcs.Algorithm] is, and the
 // default [lcs.Hirschberg] is. The returned [*Result] is safe for concurrent
@@ -141,8 +141,8 @@ type Result struct {
 	before      line.Lines // The before revision, which names hunk header lines.
 	after       line.Lines // The after revision, which names hunk header lines.
 	ops         []lineOp
-	alignedRows []alignedRow // Lazily computed for side-by-side rendering.
-	alignedOnce sync.Once    // Ensures thread-safe lazy initialization.
+	alignedRows []alignedRow // Side-by-side rows, which getAlignedRows builds on first use.
+	alignedOnce sync.Once    // Guards the first build of alignedRows.
 }
 
 // alignedRow holds a pair of lines for side-by-side diff rendering, each
@@ -160,7 +160,7 @@ type alignedRow struct {
 // the after revision. Each run of changes holds deleted lines from the
 // before revision and inserted lines from the after revision, in the order
 // the [lcs.Algorithm] lists them, and [lcs.Hirschberg] lists the deleted
-// lines first. Each line carries a [line.Flag] marking it as deleted,
+// lines first. Each line carries a [line.Flag] that marks it as deleted,
 // inserted, or unchanged.
 //
 // Each call returns a new view with its own decoration, so overlays added
@@ -273,7 +273,7 @@ func (r *Result) Stats() Stats {
 		case lcs.OpDelete:
 			s.Removed++
 		case lcs.OpEqual:
-			// No-op: equal lines don't contribute to stats counts.
+			// Equal lines add to neither count.
 		}
 	}
 
@@ -364,8 +364,8 @@ func (r *Result) getAlignedRows() []alignedRow {
 // When there are more insertions than deletions, empty placeholder lines
 // (zero value) fill the remaining rows on this side.
 //
-// Line flags: [line.FlagDeleted] for deleted lines, [line.FlagDefault] for
-// equal lines and empty placeholders.
+// Deleted lines carry [line.FlagDeleted], and equal lines and empty
+// placeholders carry [line.FlagDefault].
 //
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another or the paired [Result.After] view.
@@ -384,8 +384,8 @@ func (r *Result) Before() *line.View {
 // When there are more deletions than insertions, empty placeholder lines
 // (zero value) fill the remaining rows on this side.
 //
-// Line flags: [line.FlagInserted] for inserted lines, [line.FlagDefault] for
-// equal lines and empty placeholders.
+// Inserted lines carry [line.FlagInserted], and equal lines and empty
+// placeholders carry [line.FlagDefault].
 //
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another or the paired [Result.Before] view.
