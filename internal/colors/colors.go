@@ -115,8 +115,8 @@ func BlendStyles(base, overlay lipgloss.Style) lipgloss.Style {
 
 	case overlayTransform != nil:
 		style = style.Transform(overlayTransform)
-		// Base transform is nil here. When the overlay has no transform,
-		// the result keeps base's, already in style.
+		// The base transform is nil here. When the overlay has no
+		// transform, style already holds the base's transform.
 	}
 
 	return style

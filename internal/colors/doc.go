@@ -1,16 +1,13 @@
 // Package colors provides style combination utilities for layered styling.
 //
-// When rendering styled text, multiple style layers may apply to the same region.
-//
-// For example, a YAML key might have syntax highlighting while also being part
-// of an error highlight.
-//
-// This package combines these overlapping styles into a single
+// A printer can apply several style layers to one region of text. For
+// example, a YAML key can carry syntax highlighting and an error highlight
+// at once. This package combines those overlapping styles into a single
 // [lipgloss.Style].
 //
 // # Combination Strategies
 //
-// Two strategies are available for combining a base style with an overlay:
+// The package combines a base style with an overlay in one of two ways.
 //
 // Blending mixes colors in LAB color space for perceptually uniform results.
 //
