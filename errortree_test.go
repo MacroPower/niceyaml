@@ -458,6 +458,20 @@ func TestErrorTree_New(t *testing.T) {
 			},
 			multiLine: true,
 		},
+		"bound join that leads with another source names the root": {
+			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", errors.Join(
+				yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("c")))),
+				badB(),
+			))),
+			want: niceyaml.ErrorTree{
+				Text: "f.yaml: ctx: g.yaml:1:4: $.c: bad c\n$.b: bad b",
+				Children: []niceyaml.ErrorTree{
+					{Text: "g.yaml:1:4: $.c: bad c"},
+					{Text: "2:4: $.b: bad b"},
+				},
+			},
+			multiLine: true,
+		},
 		"join of one error is that error": {
 			err:  errors.Join(errors.Join(errors.New("boom"))),
 			want: niceyaml.ErrorTree{Text: "boom"},

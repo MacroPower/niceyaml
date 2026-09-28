@@ -4232,6 +4232,19 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		))
 		assert.Equal(t, "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b", err.Error())
 
+		// A binding of another source names that source alone, so a join
+		// that leads with one still names its own when a later branch
+		// belongs to it. A branch that joins bindings of other sources
+		// holds no text of its own, so it adds no name.
+		err = yamltest.Bind(t, named("c.yaml"), errors.Join(yamltest.Bind(t, named("a.yaml"), badA), badB))
+		assert.Equal(t, "c.yaml: a.yaml:1:4: $.a: bad a\n$.b: bad b", err.Error())
+
+		err = yamltest.Bind(t, named("c.yaml"), errors.Join(
+			errors.Join(yamltest.Bind(t, named("a.yaml"), badA), yamltest.Bind(t, named("b.yaml"), badB)),
+			yamltest.Bind(t, named("b.yaml"), badB),
+		))
+		assert.Equal(t, "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b\nb.yaml:2:4: $.b: bad b", err.Error())
+
 		// Only the first line can take the name, so a join that leads
 		// with a binding, even one nested in another join, puts no name
 		// in front, and a join that leads with an unbound branch does.
