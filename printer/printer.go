@@ -154,10 +154,11 @@ type Option func(*Printer)
 // gutters leave the line number and diff marker out of it. Soft marks a
 // row that continues the one above it. On a content row, Soft marks a
 // wrapped continuation of the line. On an annotation row, Soft marks
-// every row after the first of the line's annotations at one placement,
-// which covers the first row of a later [AnnotationRow] and a row that
-// starts at a newline in its Text. A gutter that draws a wrap marker
-// only beside wrapped content checks Annotation before Soft.
+// every row after the first of the line's annotations at one placement
+// beside one wrapped row of its content, which covers the first row of
+// a later [AnnotationRow] and a row that starts at a newline in its
+// Text. A gutter that draws a wrap marker only beside wrapped content
+// checks Annotation before Soft.
 type GutterContext struct {
 	Styles     style.Styler
 	Index      int
@@ -298,9 +299,10 @@ func ColWidth(content string, col int) int {
 // [AnnotationContext.ColWidth] measures it, writes Marker, then Text, and
 // styles the row in the kind the annotations render in, so the func
 // decides what the row says and where it starts and the printer decides
-// how it looks. When the content wraps, the printer measures the padding
-// from the start of the wrapped row that holds Col, so the row starts in
-// the cell Col takes on that row.
+// how it looks. When the content wraps, the printer writes the row
+// beside the wrapped row that holds Col, above it for [line.Above] and
+// below it for [line.Below], and measures the padding from the start of
+// that wrapped row, so the row starts in the cell Col takes on it.
 type AnnotationRow struct {
 	// Marker is the text between the padding and Text on the first row,
 	// such as the "^ " [DefaultAnnotation] puts before a [line.Below]
@@ -334,7 +336,7 @@ type AnnotationRow struct {
 // to leave them out, so the printer drops the rows they would take. A
 // func that describes the annotations returns one row. One that marks
 // columns of a wrapped line returns a row for each wrapped row it marks,
-// as [DefaultAnnotation] does, since the padding of a row starts under
+// as [DefaultAnnotation] does, since the printer writes each row beside
 // one wrapped row.
 //
 // The printer does the padding, escaping, wrapping, and styling, so a
@@ -368,12 +370,12 @@ func NoAnnotation(AnnotationContext) []AnnotationRow {
 // overlays cover, as [line.View.String] and [line.Overlays.MarkerRow]
 // draw them, so a marked range shows its extent without color, or
 // nothing when the overlays cover no column. When the line wraps, each
-// wrapped row that holds a covered column gets a caret row of its own,
-// which marks the covered columns of that row, and a space the wrap
-// drops at a break gets no caret. An annotation above the line with no
-// content renders nothing, as [line.Annotation.String] does. A newline
-// in an annotation renders as its picture rather than starting a row, as
-// every other control character does.
+// wrapped row that holds a covered column gets a caret row of its own
+// below it, which marks the covered columns of that row, and a space the
+// wrap drops at a break gets no caret. An annotation above the line with
+// no content renders nothing, as [line.Annotation.String] does. A
+// newline in an annotation renders as its picture rather than starting a
+// row, as every other control character does.
 func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 	// Filter the annotations rather than their contents, so the column
 	// comes from the ones that remain.
@@ -866,15 +868,13 @@ func (p *Printer) renderRows(view *line.View) []string {
 	return rows
 }
 
-// renderLine renders line idx of view, which is ln, as rows: its
-// annotations above, its content wrapped to the printer width, and its
-// annotations below.
+// renderLine renders line idx of view, which is ln, as rows: its content
+// wrapped to the printer width, each row with its gutter, and each of its
+// annotation rows above or below the wrapped row that holds its column.
 func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber, gutterWidth int) []string {
-	var rows []string
-
 	pieces, starts := p.wrapLine(view, idx, ln, gutterWidth)
-
-	rows = append(rows, p.renderAnnotation(view, ln, idx, maxNumber, line.Above, gutterWidth, starts)...)
+	above := p.annotationRows(view, ln, idx, gutterWidth, line.Above, starts)
+	below := p.annotationRows(view, ln, idx, gutterWidth, line.Below, starts)
 
 	gutterCtx := GutterContext{
 		Index:     idx,
@@ -884,9 +884,17 @@ func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber,
 		Styles:    p.styles,
 	}
 
-	rows = append(rows, p.contentRows(pieces, gutterCtx, gutterWidth)...)
+	rows := make([]string, 0, len(pieces))
 
-	rows = append(rows, p.renderAnnotation(view, ln, idx, maxNumber, line.Below, gutterWidth, starts)...)
+	for j, piece := range pieces {
+		rows = append(rows, p.annotationGutters(rowsAt(above, j), gutterCtx, gutterWidth)...)
+
+		ctx := gutterCtx
+		ctx.Soft = j > 0
+
+		rows = append(rows, p.renderGutter(ctx, gutterWidth)+piece)
+		rows = append(rows, p.annotationGutters(rowsAt(below, j), gutterCtx, gutterWidth)...)
+	}
 
 	return rows
 }
@@ -978,38 +986,32 @@ func (p *Printer) renderRuns(view *line.View, idx int) (string, []runSpan) {
 	return sb.String(), spans
 }
 
-// renderAnnotation renders the annotations of line idx of view, which is
-// ln, at the given placement as rows, each with its gutter. Starts holds
-// the column of the content at which each wrapped row of the line begins.
-// It returns nil when the line has none there or the [AnnotationFunc]
-// leaves them out.
-func (p *Printer) renderAnnotation(
-	view *line.View,
-	ln *line.Line,
-	idx, maxNumber int,
-	placement line.Placement,
-	gutterWidth int,
-	starts []int,
-) []string {
-	var rows []string
+// annotationGutters puts an annotation gutter for the line gutterCtx
+// describes in front of each of rows, the annotation rows at one
+// placement beside one wrapped row of the line's content. Every row after
+// the first is a continuation, whatever kind it renders in.
+func (p *Printer) annotationGutters(rows []string, gutterCtx GutterContext, gutterWidth int) []string {
+	out := make([]string, 0, len(rows))
 
-	for _, row := range p.annotationRows(view, ln, idx, gutterWidth, placement, starts) {
-		// Every row after the first of the line's annotation block is a
-		// continuation, whatever kind it renders in.
-		gutter := p.renderGutter(GutterContext{
-			Index:      idx,
-			Number:     ln.Number(),
-			MaxNumber:  maxNumber,
-			Soft:       len(rows) > 0,
-			Flag:       view.Flag(idx),
-			Annotation: true,
-			Styles:     p.styles,
-		}, gutterWidth)
+	for i, row := range rows {
+		ctx := gutterCtx
+		ctx.Annotation = true
+		ctx.Soft = i > 0
 
-		rows = append(rows, gutter+row)
+		out = append(out, p.renderGutter(ctx, gutterWidth)+row)
 	}
 
-	return rows
+	return out
+}
+
+// rowsAt returns the rows blocks holds for wrapped row j of a line, or
+// nil when it holds none.
+func rowsAt(blocks [][]string, j int) []string {
+	if j < len(blocks) {
+		return blocks[j]
+	}
+
+	return nil
 }
 
 // minAnnotationWidth is the fewest cells the text of an annotation wraps
@@ -1023,19 +1025,21 @@ const minAnnotationWidth = 20
 const maxColPastEnd = 1024
 
 // annotationRows renders the annotations of line idx of view, which is
-// ln, at the given placement as terminal rows without the gutter. The
-// kinds come in [line.Annotations.ByKind] order, and within each kind
-// the [AnnotationRow]s the [AnnotationFunc] returns come in order, each
-// wrapped to the printer width and styled in the style of its kind.
-// Starts holds the column of the content at which each wrapped row of
-// the line begins. A kind the func returns no rows for takes none.
+// ln, at the given placement as terminal rows without the gutter. Starts
+// holds the column of the content at which each wrapped row of the line
+// begins, and the result holds a block of rows for each wrapped row:
+// the rows of each [AnnotationRow] whose column that wrapped row holds.
+// Within a block, the kinds come in [line.Annotations.ByKind] order, and
+// within each kind the rows the [AnnotationFunc] returns come in order,
+// each wrapped to the printer width and styled in the style of its kind.
+// It returns nil when the line has no annotations at the placement.
 func (p *Printer) annotationRows(
 	view *line.View,
 	ln *line.Line,
 	idx, gutterWidth int,
 	placement line.Placement,
 	starts []int,
-) []string {
+) [][]string {
 	anns := view.Annotations(idx).Filter(placement)
 	if len(anns) == 0 {
 		return nil
@@ -1043,8 +1047,7 @@ func (p *Printer) annotationRows(
 
 	cr := cells.NewRow(ln.Content())
 	lastCol := utf8.RuneCountInString(ln.Content()) + maxColPastEnd
-
-	var out []string
+	out := make([][]string, max(1, len(starts)))
 
 	for _, group := range anns.ByKind() {
 		rows := p.annotationFunc(AnnotationContext{
@@ -1061,45 +1064,40 @@ func (p *Printer) annotationRows(
 				k = annotationKind(group[0].Kind)
 			}
 
-			out = append(out, p.renderAnnotationRow(row, p.styles.Style(k), cr, lastCol, gutterWidth, starts)...)
+			// The row sits beside the wrapped row that holds its column,
+			// and its padding runs from the start of that wrapped row, so
+			// the marker lands in the cell the column takes on it. The
+			// column stops at lastCol, so a stray column such as
+			// math.MaxInt pads a bounded row.
+			col := min(max(0, row.Col), lastCol)
+
+			j, from := 0, 0
+			if len(starts) > 0 {
+				j = rowIndex(starts, col)
+				from = starts[j]
+			}
+
+			pad := max(0, cr.Width(col)-cr.Width(from))
+			out[j] = append(out[j], p.renderAnnotationRow(row, p.styles.Style(k), pad, gutterWidth)...)
 		}
 	}
 
 	return out
 }
 
-// renderAnnotationRow lays out row, an [AnnotationRow] of a line whose
-// content cells cr measures, as the terminal rows it takes once the
-// printer wraps it and styles it with kindStyle, without the gutter. Its
-// column stops at lastCol, and starts holds the column of the content at
-// which each wrapped row of the line begins.
+// renderAnnotationRow lays out row, an [AnnotationRow], as the terminal
+// rows it takes once the printer pads it by pad cells, wraps it, and
+// styles it with kindStyle, without the gutter.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
-func (p *Printer) renderAnnotationRow(
-	row AnnotationRow,
-	kindStyle lipgloss.Style,
-	cr cells.Row,
-	lastCol, gutterWidth int,
-	starts []int,
-) []string {
-	// The padding runs from the start of the wrapped row that holds the
-	// column, so the marker lands in the cell the column takes on that
-	// row. The column stops at lastCol, so a stray column such as
-	// math.MaxInt pads a bounded row.
-	col := min(max(0, row.Col), lastCol)
-
-	from := 0
-	if len(starts) > 0 {
-		from = starts[rowIndex(starts, col)]
-	}
-
+func (p *Printer) renderAnnotationRow(row AnnotationRow, kindStyle lipgloss.Style, pad, gutterWidth int) []string {
 	// The printer escapes the text, so a control character in a message
 	// shows as its picture and the wrap measures the cells the terminal
 	// shows. The escape keeps each newline, and the wrap starts a new row
 	// at each one.
 	marker := escape.Control(row.Marker)
 	mark := strings.TrimRight(marker, " ")
-	padding := strings.Repeat(" ", max(0, cr.Width(col)-cr.Width(from)))
+	padding := strings.Repeat(" ", pad)
 	indent := padding + marker
 	indentWidth := lipgloss.Width(indent)
 	text := escape.Rows(row.Text)
@@ -1182,26 +1180,6 @@ func widestWord(text string) int {
 	}
 
 	return widest
-}
-
-// contentRows returns the wrapped pieces of a line's rendered content as
-// rows, each with the gutter generated from gutterCtx.
-//
-// Callers style and escape the whole line before they wrap it, overlays
-// included, so the wrap measures the text the terminal shows and each
-// overlay covers the columns it names in the source line.
-func (p *Printer) contentRows(subLines []string, gutterCtx GutterContext, gutterWidth int) []string {
-	rows := make([]string, 0, len(subLines))
-
-	for j, subLine := range subLines {
-		// Generate gutter at write-time with correct Soft flag.
-		ctx := gutterCtx
-		ctx.Soft = j > 0
-
-		rows = append(rows, p.renderGutter(ctx, gutterWidth)+subLine)
-	}
-
-	return rows
 }
 
 // blendKey returns the cache key of the effective style of seg: its kind

@@ -45,14 +45,15 @@ type Layout struct {
 	gutterWidth int
 }
 
-// lineLayout is the row structure of one line: the annotation rows above
-// its content, the content column each content row starts at, the
-// annotation rows below, and the width of the widest of those rows.
+// lineLayout is the row structure of one line: the column of the content
+// at which each wrapped content row begins, the row each content row takes
+// among the line's rows, the number of rows the line takes, annotation
+// rows included, and the width of the widest of them.
 type lineLayout struct {
-	rows  []int
-	above int
-	below int
-	width int
+	cols    []int
+	offsets []int
+	rows    int
+	width   int
 }
 
 // Layout computes the [Layout] of view as [Printer.Print] would render it.
@@ -72,24 +73,36 @@ func (p *Printer) Layout(view *line.View) Layout {
 		l.width = max(l.width, ll.width)
 		l.lines = append(l.lines, ll)
 		l.indices = append(l.indices, idx)
-		l.starts = append(l.starts, l.starts[len(l.starts)-1]+ll.above+len(ll.rows)+ll.below)
+		l.starts = append(l.starts, l.starts[len(l.starts)-1]+ll.rows)
 	}
 
 	return l
 }
 
-// layoutLine computes the row structure of line idx of view, which is ln.
+// layoutLine computes the row structure of line idx of view, which is ln,
+// as [Printer.renderLine] writes its rows.
 func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidth int) lineLayout {
-	var ll lineLayout
-
 	pieces, starts := p.wrapLine(view, idx, ln, gutterWidth)
-	for _, piece := range pieces {
+	above := p.annotationRows(view, ln, idx, gutterWidth, line.Above, starts)
+	below := p.annotationRows(view, ln, idx, gutterWidth, line.Below, starts)
+
+	ll := lineLayout{
+		cols:    starts,
+		offsets: make([]int, len(pieces)),
+	}
+
+	for j, piece := range pieces {
+		ll.rows += len(rowsAt(above, j))
+		ll.offsets[j] = ll.rows
+		ll.rows += 1 + len(rowsAt(below, j))
 		ll.width = max(ll.width, gutterWidth+lipgloss.Width(piece))
 	}
 
-	ll.rows = starts
-	ll.above = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Above, starts, &ll.width)
-	ll.below = p.layoutAnnotation(view, ln, idx, gutterWidth, line.Below, starts, &ll.width)
+	for _, block := range slices.Concat(above, below) {
+		for _, row := range block {
+			ll.width = max(ll.width, gutterWidth+lipgloss.Width(row))
+		}
+	}
 
 	return ll
 }
@@ -164,26 +177,6 @@ func sourceCol(runs []runSpan, shown []rune, offset, contentLen int) int {
 	}
 
 	return run.col + min(next, run.cols)
-}
-
-// layoutAnnotation returns the number of rows the styled annotations of
-// line idx at placement take, as [Printer.renderAnnotation] writes them,
-// and raises *width to the widest of them. Starts holds the column of the
-// content at which each wrapped row of the line begins.
-func (p *Printer) layoutAnnotation(
-	view *line.View,
-	ln *line.Line,
-	idx, gutterWidth int,
-	placement line.Placement,
-	starts []int,
-	width *int,
-) int {
-	rows := p.annotationRows(view, ln, idx, gutterWidth, placement, starts)
-	for _, row := range rows {
-		*width = max(*width, gutterWidth+lipgloss.Width(row))
-	}
-
-	return len(rows)
 }
 
 // nbsp is the non-breaking space, the one Unicode space the wrapper keeps
@@ -320,9 +313,7 @@ func (l Layout) LineRows(i int) int {
 		return 0
 	}
 
-	ll := l.lines[k]
-
-	return ll.above + len(ll.rows) + ll.below
+	return l.lines[k].rows
 }
 
 // LineStart returns the first row of line i of the content, or -1 when
@@ -353,11 +344,12 @@ func (l Layout) LineAt(row int) int {
 }
 
 // RowOf returns the row that holds column pos.Col of line pos.Line of the
-// content: the content row the column wraps onto, below any annotation
-// rows above the line. A column in the spaces the wrapper dropped at a
-// break belongs to the row before the break, and one past the end of the
-// content to the last row. Returns -1 when the layout does not hold the
-// line.
+// content: the content row the column wraps onto. The line's annotation
+// rows sit beside the wrapped rows that hold their columns, so the rows
+// before it include those of the earlier wrapped rows and those above
+// it. A column in the spaces the wrapper dropped at a break belongs to
+// the row before the break, and one past the end of the content to the
+// last row. Returns -1 when the layout does not hold the line.
 func (l Layout) RowOf(pos position.Position) int {
 	k, ok := l.position(pos.Line)
 	if !ok {
@@ -366,7 +358,7 @@ func (l Layout) RowOf(pos position.Position) int {
 
 	ll := l.lines[k]
 
-	return l.starts[k] + ll.above + rowIndex(ll.rows, pos.Col)
+	return l.starts[k] + ll.offsets[rowIndex(ll.cols, pos.Col)]
 }
 
 // Width returns the width in cells of the widest row, gutter included,

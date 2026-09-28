@@ -34,8 +34,10 @@
 // [line.Annotation.Kind], or [kind.UIAnnotation] for those with none. An
 // [AnnotationFunc] renders the annotations of each such kind as
 // [AnnotationRow]s, each the text and the column it starts under, and the
-// printer pads, escapes, wraps, and styles each row. [New] starts with
-// [DefaultAnnotation], and [WithAnnotation] sets another.
+// printer pads, escapes, wraps, and styles each row. When the line wraps,
+// each row sits above or below the wrapped row that holds its column.
+// [New] starts with [DefaultAnnotation], and [WithAnnotation] sets
+// another.
 //
 // # Word Wrapping
 //
