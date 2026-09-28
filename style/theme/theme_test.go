@@ -405,6 +405,7 @@ func TestPalette_ErrorAndDiffBadgesReadable(t *testing.T) {
 		"gruvbox-light error mark": {theme: "gruvbox-light", kind: kind.GenericError},
 		"gruvbox-light deleted":    {theme: "gruvbox-light", kind: kind.GenericDeleted},
 		"evergarden error mark":    {theme: "evergarden", kind: kind.GenericError},
+		"gruvbox error mark":       {theme: "gruvbox", kind: kind.GenericError},
 	}
 
 	for name, tc := range tests {

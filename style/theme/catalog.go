@@ -608,7 +608,7 @@ var palettes = map[string]palette{
 			kind.Comment:         "italic #928374",
 			kind.Generic:         "#ebdbb2",
 			kind.GenericDeleted:  "#282828 bg:#fb4934",
-			kind.GenericError:    "bold bg:#fb4934",
+			kind.GenericError:    "bold #1d2021 bg:#fb4934",
 			kind.GenericInserted: "#282828 bg:#b8bb26",
 			kind.LiteralBoolean:  "#fe8019",
 			kind.LiteralNumber:   "#d3869b",
