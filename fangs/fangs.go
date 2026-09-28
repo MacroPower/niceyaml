@@ -53,7 +53,7 @@ func newConfig(opts []Option) config {
 
 // WithPrinter is an [Option] that sets the [*printer.Printer] that renders
 // errors through [printer.Printer.PrintError]. The printer's width, set
-// with [printer.WithWrap], controls word wrapping, its styles color the
+// with [printer.WithWrap], controls word wrapping. Its styles color the
 // highlighted locations, and [printer.WithContextLines] sets the context
 // lines around each one.
 //
@@ -80,14 +80,15 @@ func WithPrinter(p *printer.Printer) Option {
 //	)
 //
 // The handler writes the error header, then what
-// [printer.Printer.PrintError] renders for err: the message as a tree,
-// with the context its wrappers added in front and a connector before
-// each nested error, then the excerpt of each
-// [*go.jacobcolvin.com/niceyaml.SourceError] in the error's tree, so a
-// joined error annotates each failure it holds.
+// [printer.Printer.PrintError] renders for err. That output starts with the
+// message as a tree, with the context its wrappers added in front and a
+// connector before each nested error. The excerpt of each
+// [*go.jacobcolvin.com/niceyaml.SourceError] in the error's tree follows,
+// so a joined error annotates each failure it holds.
+//
 // Unlike [fang.DefaultErrorHandler], which wraps errors in a lipgloss style
-// that can break multi-line output, this handler applies styling only to
-// the error header and leaves the rendered lines intact.
+// that can break multi-line output, this handler styles only the error
+// header and leaves the rendered lines intact.
 func NewErrorHandler(opts ...Option) fang.ErrorHandler {
 	cfg := newConfig(opts)
 
@@ -125,7 +126,7 @@ func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 // cannot reach the writer has nowhere to report that.
 func ignoreN(_ int, _ error) {}
 
-// isUsageError returns true if err appears to be a Cobra usage error. The
+// isUsageError reports whether err looks like a Cobra usage error. The
 // prefixes cover Cobra's flag parser, its command lookup, its argument-count
 // validators, its required-flag check, and its flag groups.
 // This is a workaround until Cobra exposes a proper usage error type.

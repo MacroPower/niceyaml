@@ -4,13 +4,11 @@
 // # Error Handling
 //
 // [fang]'s default error handler wraps the entire error message in a lipgloss
-// style, which breaks multi-line output.
+// style, which breaks multi-line output such as the source excerpt and
+// annotations of a niceyaml error.
 //
-// This breaks niceyaml errors that include source context and annotations
-// spanning multiple lines.
-//
-// [ErrorHandler] solves this by styling only the error header while preserving
-// the error message formatting. Pass it to [fang.Execute]:
+// [ErrorHandler] styles only the error header and leaves the lines of the
+// message as they are. Pass it to [fang.Execute]:
 //
 //	err := fang.Execute(ctx, rootCmd,
 //	    fang.WithErrorHandler(fangs.ErrorHandler),

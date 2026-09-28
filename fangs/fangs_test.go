@@ -28,8 +28,8 @@ type silentError struct{ err error }
 func (s silentError) Error() string { return "" }
 func (s silentError) Unwrap() error { return s.err }
 
-// unwritableWriter is the writer an error handler gets when the stream it
-// reports on is closed.
+// unwritableWriter is the writer an error handler gets after the stream it
+// reports on closes.
 type unwritableWriter struct{}
 
 func (unwritableWriter) Write([]byte) (int, error) { return 0, errors.New("closed") }

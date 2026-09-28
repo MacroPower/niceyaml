@@ -104,7 +104,8 @@ func TestColorScheme(t *testing.T) {
 			t.Parallel()
 
 			// A kind without a color resolves to NoColor on both sides, which
-			// would let a wrong mapping pass, so every expected color must be set.
+			// would let a wrong mapping pass, so the test requires every
+			// expected color to have a value.
 			assert.NotEqual(t, lipgloss.NoColor{}, tc.want)
 			assert.Equal(t, tc.want, tc.got)
 		})
