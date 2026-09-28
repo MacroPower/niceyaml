@@ -92,7 +92,7 @@ func (r *Resolver) Matches(p Path) ([]Match, error) {
 	return matches, nil
 }
 
-// Deref returns the content under node: it looks through the anchors on
+// Deref returns the content under node. It looks through the anchors on
 // node and follows an alias to the content of the anchor it refers to, as
 // [Resolver.Node] does. A tag on that content stays, so the result reads
 // as the decoder reads the alias. A caller that walks the document itself

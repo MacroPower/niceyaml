@@ -25,18 +25,18 @@ var (
 // An expression starts with `$` for the document root, followed by any number
 // of selectors:
 //
-//	.name     a mapping entry by key
-//	.'name'   a key containing reserved characters, in which `\` escapes
-//	          the next character, so `\'` is a quote, `\\` is a backslash,
-//	          and `\t` is a plain `t`
-//	.''       the empty key
-//	..name    every mapping entry with that key, at any depth
-//	..'name'  the same for a key containing reserved characters
-//	[n]       a sequence element by 0-based index, written in decimal
-//	          with no sign and no leading zero
-//	[*]       every sequence element
-//	~         the key of the mapping entry the selector before it picked,
-//	          as [Path.Key] appends it
+//   - `.name` selects a mapping entry by key.
+//   - `.'name'` selects an entry whose key contains reserved characters.
+//   - Empty quotes after `.` select the entry with the empty key.
+//   - `..name` selects every mapping entry with that key, at any depth.
+//   - `..'name'` does the same for a key containing reserved characters.
+//   - `[n]` selects a sequence element by 0-based index.
+//   - `[*]` selects every sequence element.
+//   - `~` selects the key of the entry the selector before it picked.
+//
+// Inside quotes, `\` escapes the next character, so `\'` is a quote, `\\`
+// is a backslash, and `\t` is a plain `t`. An index is a decimal with no
+// sign and no leading zero. [Path.Key] appends the `~` selector.
 //
 // Returns an error wrapping [ErrInvalidPath] for a malformed expression.
 func Parse(expr string) (Path, error) {
@@ -187,7 +187,7 @@ func parseIndex(rest string) (segment, string, error) {
 
 	// An index is a canonical decimal: digits only, with no sign and no
 	// leading zero, so every index has one spelling and a parsed path prints
-	// as it was written.
+	// as the caller wrote it.
 	if !isCanonicalIndex(body) {
 		return segment{}, "", fmt.Errorf("index %q: %w", body, errInvalidIndex)
 	}

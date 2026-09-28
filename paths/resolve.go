@@ -46,10 +46,11 @@ func (m match) with(node ast.Node, entry *ast.MappingValueNode, seg segment, ord
 	return match{node: node, entry: entry, segs: segs, order: order}
 }
 
-// key returns the match for the `~` selector applied to m: the key of the
-// entry m holds, or m itself when m holds no entry or its entry has no key,
-// so a `~` on a sequence element or the root selects what the path before
-// it does. The `~` joins the selectors either way, as the path wrote it.
+// key returns the match for the `~` selector applied to m. That is the key
+// of the entry m holds, or m itself when m holds no entry or its entry has
+// no key. A `~` on a sequence element or the root thus selects what the
+// path before it does. The `~` joins the selectors either way, as the path
+// wrote it.
 func (m match) key() match {
 	seg := segment{kind: segmentKey}
 
@@ -298,7 +299,7 @@ type mergeSource struct {
 // findSources returns the mappings a `<<` merge key with value brings in,
 // in the order the decoder reads them. As the decoder does before it
 // reads any of them, findSources looks through the anchors, tags, and
-// aliases on value and on each element of a sequence of them, and records
+// aliases on value and on each element of a sequence of them. It records
 // each anchor on the way into nodes, the nodes map of an [anchorSet]. It
 // follows an alias to the anchor it is bound to, and stops at an alias it
 // has already followed.
@@ -843,8 +844,9 @@ func (r *resolver) recurse(matches []match, name string) ([]match, error) {
 // covers reports whether a walk that reaches a node at order a finds each
 // entry below the node no later than a walk that reaches it at order b
 // does. That holds when the orders are equal, or when they first differ
-// at a place both hold and a is lower there. When one order extends the other, the
-// entry decides which walk finds it first, so covers reports false.
+// at a place both hold and a is lower there. When one order extends the
+// other, the entry decides which walk finds it first, so covers reports
+// false.
 func covers(a, b []int) bool {
 	for i := range min(len(a), len(b)) {
 		if a[i] != b[i] {
@@ -864,10 +866,10 @@ func covers(a, b []int) bool {
 // earlier walk covers.
 //
 // The segs and order stacks hold the selectors and the order down to the
-// node the walk has reached. Each entry the walk finds holds the stacks as they
-// stand, and the held fields record how much of each stack the entries
-// hold, so a push that would overwrite a held place copies the stack
-// first. Entries along one branch thus share their selectors and their
+// node the walk has reached. Each entry the walk finds holds the stacks as
+// they stand, and the held fields record how much of each stack the
+// entries hold, so a push that would overwrite a held place copies the
+// stack first. Entries along one branch thus share their selectors and their
 // order rather than holding a copy each.
 type recursiveWalk struct {
 	resolver  *resolver
@@ -1101,7 +1103,7 @@ func nodeToken(node ast.Node) *token.Token {
 // firstToken returns the token that starts node's content: the first key of
 // a mapping, the first element of a sequence, or the scalar itself. It looks
 // through anchors and tags, and through the `?` indicator, anchors and tags
-// of a mapping's first key; an alias is its own token. An entry with no key
+// of a mapping's first key. An alias is its own token. An entry with no key
 // starts at its own token. A nil node, including a typed nil a hand-built
 // tree may hold, has no token.
 func firstToken(node ast.Node) *token.Token {

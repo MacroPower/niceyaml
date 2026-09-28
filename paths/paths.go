@@ -83,9 +83,9 @@ func (s segment) String() string {
 const reservedNameChars = ".*[]$'~"
 
 // quoteName returns name in the form [Parse] accepts as a child or
-// recursive selector, wrapping it in single quotes when it contains reserved
-// characters or is empty, since an unquoted empty name would leave a bare
-// `.` that Parse rejects.
+// recursive selector. It wraps the name in single quotes when it contains
+// reserved characters or is empty, since an unquoted empty name would leave
+// a bare `.` that Parse rejects.
 func quoteName(name string) string {
 	if name != "" && !strings.ContainsAny(name, reservedNameChars) {
 		return name
@@ -244,8 +244,8 @@ func (p Path) String() string {
 // that holds `.` or `*`.
 //
 // The String of the result is the goccy/go-yaml form, which differs from
-// [Path.String] for names with reserved characters and is not always
-// re-parseable. The goccy/go-yaml syntax has no quoting for recursive
+// [Path.String] for names with reserved characters, and [yaml.PathString]
+// does not always read it back. The goccy/go-yaml syntax has no quoting for recursive
 // selectors, so Recursive("a.b") prints as `$..a.b`, which
 // [yaml.PathString] reads as two selectors. Use [Path.String] for a form
 // that [Parse] reads back.
@@ -429,9 +429,9 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 }
 
 // Nodes resolves every node the path selects in doc, in document order. A
-// path without `[*]` or `..` selectors yields at most one node; an empty
-// result means nothing exists at the path. Nodes lists one node for each
-// path that selects it, as [Path.Matches] does, so a node that several
+// path without `[*]` or `..` selectors yields at most one node, and an
+// empty result means nothing exists at the path. Nodes lists one node for
+// each path that selects it, as [Path.Matches] does. A node that several
 // aliases or `<<` merge keys lead to appears once for each, in the place
 // of that alias or merge key. A `..name` selector lists each entry once,
 // even when chained `..` selectors reach it more than once.
@@ -441,9 +441,9 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 // their anchor and see the entries a `<<` merge key brings into a mapping.
 // The `..name` selector looks through an alias or tag on the node it
 // starts from, as the other selectors do. Below that node it visits each
-// entry once, where the source defines it, so it does not follow aliases,
-// including one a `<<` merge key names, and it does not list the entries a
-// merge key brings into a mapping under that mapping. It walks a mapping
+// entry once, where the source defines it. It does not follow aliases
+// there, including one a `<<` merge key names, and it does not list the
+// entries a merge key brings into a mapping under that mapping. It walks a mapping
 // written inline under a `<<` key as it walks any other value, and lists
 // its entries under the `<<` selector even when a later source or a key of
 // the mapping itself overrides them. It skips an entry that a later entry
@@ -468,10 +468,10 @@ func (p Path) Nodes(doc *ast.DocumentNode) ([]ast.Node, error) {
 }
 
 // Match is one node a [Path] selects in a document, together with the
-// path that selects that node alone: the path as given, with each `[*]`
-// selector replaced by the index of the element and each `..name`
-// selector by the selectors from the node it applied to down to the
-// entry it found, so the path names the node wherever it lies.
+// path that selects that node alone. That path is the path as given, with
+// each `[*]` selector replaced by the index of the element. Each `..name`
+// selector gives way to the selectors from the node it applied to down to
+// the entry it found, so the path names the node wherever it lies.
 //
 // Receive instances from [Path.Matches].
 type Match struct {
@@ -503,10 +503,10 @@ func (p Path) Matches(doc *ast.DocumentNode) ([]Match, error) {
 // path names. The `.name` and `[n]` selectors follow aliases to their anchor
 // and see the entries a `<<` merge key brings into a mapping.
 //
-// Returns [ErrWildcard] for a path with a `[*]` or `..` selector (use
-// [Path.Nodes] for those), and wraps [ErrNotFound] when nothing exists at
-// the path, together with [ErrNoDocument] when the document has no content
-// to resolve in, and [ErrAlias] when an alias on the path does not resolve.
+// Returns [ErrWildcard] for a path with a `[*]` or `..` selector, which
+// needs [Path.Nodes]. Wraps [ErrNotFound] when nothing exists at the path,
+// together with [ErrNoDocument] when the document has no content to
+// resolve in. Wraps [ErrAlias] when an alias on the path does not resolve.
 func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 	return NewResolver(doc).Node(p)
 }

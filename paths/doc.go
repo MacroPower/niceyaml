@@ -27,27 +27,28 @@
 //
 // # Resolution
 //
-// Selectors apply to the content of a node, so an anchor (`&name`) or tag
-// (`!!map`) on a value is transparent, an alias (`*name`) resolves to the
-// anchor it names, and a mapping key lookup sees the entries a `<<` merge
+// Selectors apply to the content of a node. An anchor (`&name`) or tag
+// (`!!map`) on a value is transparent, and an alias (`*name`) resolves to
+// the anchor it names. A mapping key lookup sees the entries a `<<` merge
 // key brings in. A key the mapping defines itself wins over a merged one.
 // A child selector matches an alias used as a key as it would the content
 // of its anchor, so `*k` after `&k name` matches `.name`, and it matches a
-// block scalar key (`|` or `>`) by its content. When the parser allows a
-// mapping to define one key twice, as
-// [go.jacobcolvin.com/niceyaml.WithAllowDuplicateKeys] makes it do, a path
-// selects the later entry, whose value the decoder keeps, and a `..name`
-// selector lists only that entry. A mapping may hold several `<<` keys the
-// same way. The decoder merges all of them and a key lookup sees the
-// entries of each, but `..name` visits only the inline mapping of the last
-// one. When `<<` lists several sources the later source wins, which is the
-// source the goccy/go-yaml decoder takes; YAML 1.1 gives the earlier source
+// block scalar key (`|` or `>`) by its content.
+//
+// [go.jacobcolvin.com/niceyaml.WithAllowDuplicateKeys] lets the parser
+// accept a mapping that defines one key twice. A path then selects the
+// later entry, whose value the decoder keeps, and a `..name` selector
+// lists only that entry. A mapping may hold several `<<` keys the same
+// way. The decoder merges all of them and a key lookup sees the entries of
+// each, but `..name` visits only the inline mapping of the last one. When
+// `<<` lists several sources the later source wins, which is the source
+// the goccy/go-yaml decoder takes. YAML 1.1 gives the earlier source
 // precedence instead. A token found through an alias or merge key sits
 // where the anchor defines it, which is where the offending text is.
 //
-// The decoder parts ways over an own key in one shape. A `<<` written after
-// a key of the same name overwrites that key when the decoder fills a map,
-// and it reports a duplicate key when the decoder fills a struct. A path
+// The decoder handles one shape of own key in two ways. When a `<<` comes
+// after a key of the same name, the decoder overwrites that key as it
+// fills a map and reports a duplicate key as it fills a struct. A path
 // keeps the mapping's own key either way.
 //
 // When several anchors share a name, an alias refers to the last one before
@@ -65,7 +66,7 @@
 // through it returns an error wrapping [ErrAlias].
 //
 // The wildcard selectors `[*]` and `..name` select any number of nodes, so
-// [Path.Token] and [Path.Node] reject them with [ErrWildcard]; use
+// [Path.Token] and [Path.Node] reject them with [ErrWildcard]. Use
 // [Path.Nodes] to list every match. [ErrNotFound] means nothing exists at
 // the path, and [ErrAlias] means an alias on the path names no anchor or
 // forms a cycle. When the document has no content to resolve in, the error
@@ -91,7 +92,7 @@
 //
 //	p, err := paths.Parse("$.metadata.name")
 //
-// [MustParse] panics on invalid input, useful for package-level variables:
+// [MustParse] panics on invalid input, so it suits package-level variables:
 //
 //	var namePath = paths.MustParse("$.items[0].name")
 //
