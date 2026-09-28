@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -340,6 +341,53 @@ func TestPalette_DiffAndErrorKindsStandOut(t *testing.T) {
 				style.Encode(styles.Style(kind.GenericInserted)),
 				"GenericDeleted matches GenericInserted",
 			)
+		})
+	}
+}
+
+func TestPalette_ErrorMarkShowsOnEveryToken(t *testing.T) {
+	t.Parallel()
+
+	// The printer marks an error by drawing the GenericError style over the
+	// token's own style, so every built-in theme must draw a marked token
+	// apart from the same token unmarked. A foreground a shade away from
+	// the token's own color does not count.
+	tokens := []kind.Kind{
+		kind.Text,
+		kind.Comment,
+		kind.CommentPreproc,
+		kind.LiteralBoolean,
+		kind.LiteralNull,
+		kind.LiteralNumberInteger,
+		kind.LiteralNumberFloat,
+		kind.LiteralString,
+		kind.LiteralStringDouble,
+		kind.LiteralStringSingle,
+		kind.NameAlias,
+		kind.NameAnchor,
+		kind.NameDecorator,
+		kind.NameTag,
+		kind.PunctuationCollectEntry,
+		kind.PunctuationHeading,
+		kind.PunctuationBlockLiteral,
+		kind.PunctuationMappingValue,
+		kind.PunctuationSequenceEntry,
+	}
+
+	for _, th := range theme.Builtin().All() {
+		t.Run(th.Name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := th.Styles()
+			mark := styles.Style(kind.GenericError)
+
+			for _, k := range tokens {
+				token := styles.Style(k)
+				marked := colors.OverrideStyles(token, mark)
+
+				assert.True(t, standsOut(token, marked),
+					"an error mark on %s draws %s over %s", k, style.Encode(marked), style.Encode(token))
+			}
 		})
 	}
 }
@@ -694,6 +742,36 @@ func hexOf(c color.Color) string {
 	cf, _ := colorful.MakeColor(c)
 
 	return cf.Hex()
+}
+
+// minMarkDistance is the smallest CIEDE2000 distance, on go-colorful's
+// scale of 0 to about 1, at which a reader tells a marked foreground from
+// the token's own.
+const minMarkDistance = 0.05
+
+// standsOut reports whether marked draws apart from token, through a
+// background or attribute of its own or through a foreground far enough
+// from the token's to see.
+//
+//nolint:gocritic // hugeParam: value semantics match lipgloss.
+func standsOut(token, marked lipgloss.Style) bool {
+	if style.Encode(marked.Foreground(token.GetForeground())) != style.Encode(token) {
+		return true
+	}
+
+	a, b := token.GetForeground(), marked.GetForeground()
+
+	_, aUnset := a.(lipgloss.NoColor)
+	_, bUnset := b.(lipgloss.NoColor)
+
+	if aUnset || bUnset {
+		return aUnset != bUnset
+	}
+
+	ca, _ := colorful.MakeColor(a)
+	cb, _ := colorful.MakeColor(b)
+
+	return ca.DistanceCIEDE2000(cb) >= minMarkDistance
 }
 
 // contrast returns the WCAG contrast ratio between a and b, from 1 for

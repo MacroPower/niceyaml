@@ -191,7 +191,6 @@ var palettes = map[string]palette{
 			kind.Comment:            "#757575",
 			kind.Generic:            "#757575",
 			kind.GenericDeleted:     "#ec0000",
-			kind.GenericError:       "#ec0000",
 			kind.GenericInserted:    "bold #757575",
 			kind.LiteralBoolean:     "#ec0000",
 			kind.LiteralNumber:      "#008900",
@@ -754,7 +753,6 @@ var palettes = map[string]palette{
 		Tokens: map[kind.Kind]string{
 			kind.Comment:            "italic #888888",
 			kind.GenericDeleted:     "#c02828",
-			kind.GenericError:       "#c02828",
 			kind.GenericInserted:    "#388038",
 			kind.LiteralBoolean:     "italic #444444",
 			kind.LiteralNumber:      "#444444",
