@@ -63,7 +63,8 @@ type CatalogEntry struct {
 	Name string `json:"name"`
 	// Description provides details about the schema's purpose.
 	Description string `json:"description"`
-	// URL is the HTTP URL to fetch the schema from.
+	// URL is the HTTP or HTTPS URL to fetch the schema from. When the
+	// store loads the catalog, it drops an entry with any other URL.
 	URL string `json:"url"`
 	// FileMatch contains the glob patterns for the files this schema
 	// applies to. When the store loads the catalog, it drops the patterns
@@ -282,7 +283,8 @@ func (s *Store) Resolve(ctx context.Context, doc *niceyaml.Node) (schema.Ref, er
 		return schema.Ref{}, err
 	}
 
-	// The catalog keeps only entries with a URL, so the Ref names one.
+	// The catalog keeps only entries with an HTTP or HTTPS URL, so the Ref
+	// names one the registry can fetch.
 	return schema.URL(entry.URL), nil
 }
 
@@ -533,8 +535,10 @@ func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry
 	entries := make([]CatalogEntry, 0, len(schemas))
 
 	for _, entry := range schemas {
-		// Skip entries without a URL.
-		if entry.URL == "" {
+		// Skip entries without an HTTP or HTTPS URL, which the registry
+		// cannot fetch. A file:// URL would name a schema the registry
+		// serves only when a File Ref cached it first.
+		if !isHTTPURL(entry.URL) {
 			continue
 		}
 
@@ -615,4 +619,16 @@ func canMatchYAML(pattern string) bool {
 	}
 
 	return strings.ContainsAny(base[dot+1:], "*?[")
+}
+
+// isHTTPURL reports whether rawURL starts with http:// or https://, in any
+// letter case, as a URL the registry fetches does.
+func isHTTPURL(rawURL string) bool {
+	for _, prefix := range []string{"http://", "https://"} {
+		if len(rawURL) >= len(prefix) && strings.EqualFold(rawURL[:len(prefix)], prefix) {
+			return true
+		}
+	}
+
+	return false
 }

@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -303,8 +305,59 @@ func TestURL(t *testing.T) {
 	t.Run("invalid url", func(t *testing.T) {
 		t.Parallel()
 
-		_, _, err := load(t, schema.URL("\x00")) // Control char makes URL invalid.
+		_, _, err := load(t, schema.URL("http://\x00")) // Control char makes URL invalid.
 		require.ErrorContains(t, err, "parse URL")
+	})
+
+	t.Run("url that is not http or https", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			ref string
+		}{
+			"control character":     {ref: "\x00"},
+			"no scheme":             {ref: "example.com/schema.json"},
+			"s3 scheme":             {ref: "s3://bucket/schema.json"},
+			"file scheme":           {ref: "file:///schemas/schema.json"},
+			"uppercase file scheme": {ref: "FILE:///schemas/schema.json"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, _, err := load(t, schema.URL(tc.ref))
+				require.ErrorIs(t, err, schema.ErrLoad)
+				require.ErrorContains(t, err, "not an HTTP or HTTPS URL")
+
+				_, err = schema.NewRegistry().Schema(t.Context(), schema.URL(tc.ref))
+				require.ErrorIs(t, err, schema.ErrLoad)
+				require.ErrorContains(t, err, "not an HTTP or HTTPS URL")
+			})
+		}
+	})
+
+	t.Run("file url after a File ref cached its key", func(t *testing.T) {
+		t.Parallel()
+
+		// A File Ref caches its schema under a file:// URL. A URL Ref with
+		// the same key loads nothing, whatever the registry has cached, so
+		// a warm registry reports what a cold one does.
+		path := filepath.Join(t.TempDir(), "s.json")
+		require.NoError(t, os.WriteFile(path, []byte(`{"type": "object"}`), 0o600))
+
+		reg := schema.NewRegistry()
+
+		file := schema.File(path)
+		_, err := reg.Schema(t.Context(), file)
+		require.NoError(t, err)
+
+		ref := schema.URL(file.Key())
+		require.Equal(t, file.Key(), ref.Key())
+
+		_, err = reg.Schema(t.Context(), ref)
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorContains(t, err, "not an HTTP or HTTPS URL")
 	})
 
 	t.Run("client error", func(t *testing.T) {

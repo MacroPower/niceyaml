@@ -19,6 +19,11 @@ import (
 // [Resolver] returns, so a resolver that builds the URL from the document
 // hands it back beside a nil error.
 //
+// A registry fetches only an HTTP or HTTPS URL. For a URL with any other
+// scheme, such as a file:// URL, [Registry.Schema] and [Registry.Load]
+// return an error wrapping [ErrLoad], whatever the registry has cached
+// under the same key. A local file goes through [File].
+//
 // A fragment, such as the JSON pointer #/$defs/tasks or an anchor name,
 // selects that subschema of the document the URL names, as a $ref with
 // the same fragment would. The registry caches each fragment apart, so

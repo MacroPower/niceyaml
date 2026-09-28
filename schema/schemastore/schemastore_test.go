@@ -90,6 +90,16 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 				URL:       "https://json.schemastore.org/compose-overrides.json",
 				FileMatch: []string{"**/compose/*.yml", "!docker-compose.yml"},
 			},
+			{
+				Name:      "Local File",
+				URL:       "file:///schemas/local.json", // The registry fetches only HTTP.
+				FileMatch: []string{"**/local/*.yaml"},
+			},
+			{
+				Name:      "Uppercase Scheme",
+				URL:       "HTTPS://json.schemastore.org/upper.json",
+				FileMatch: []string{"**/upper/*.yaml"},
+			},
 		},
 	}
 
@@ -98,6 +108,14 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 		wantName string
 		err      error
 	}{
+		"no match for an entry with a file URL": {
+			filePath: "repo/local/config.yaml",
+			err:      schemastore.ErrNoCatalogMatch,
+		},
+		"matches an entry with an uppercase HTTPS scheme": {
+			filePath: "repo/upper/config.yaml",
+			wantName: "Uppercase Scheme",
+		},
 		"matches brace alternative yml": {
 			filePath: ".circleci/config.yml",
 			wantName: "CircleCI",

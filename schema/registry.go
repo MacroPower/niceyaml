@@ -45,6 +45,10 @@ var (
 	// the same way.
 	errGoexit = errors.New("load called runtime.Goexit")
 
+	// The reason a [URL] Ref loads nothing when its scheme is neither http
+	// nor https.
+	errNotHTTPURL = errors.New("not an HTTP or HTTPS URL")
+
 	// The client every registry that [WithHTTPClient] gave no client
 	// fetches schemas with. An [http.Client] is safe for concurrent use,
 	// so one serves them all.
@@ -506,6 +510,14 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 		return nil, fmt.Errorf("%w: ref names no schema", ErrResolve)
 	}
 
+	// A URL Ref shares its key space with a File Ref, whose key is a
+	// file:// URL, so the check runs before the cache. Otherwise such a
+	// URL Ref would return what a File Ref cached and fail on a registry
+	// that holds nothing for its key.
+	if ref.url && !isHTTPURL(ref.key) {
+		return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.name(), errNotHTTPURL)
+	}
+
 	if v, ok := r.cached(ref.Key()); ok {
 		return v, nil
 	}
@@ -601,6 +613,10 @@ func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 	switch {
 	case ref.url:
+		if !isHTTPURL(ref.key) {
+			return nil, errNotHTTPURL
+		}
+
 		//nolint:wrapcheck // The fetch error names the URL already.
 		return httpfetch.Get(ctx, r.client, ref.key)
 
