@@ -127,8 +127,8 @@ func (r *resolver) mappingKeys(mapping *ast.MappingNode) *mappingKeys {
 // in again at the merge key, and so does newResolver, so the anchors of
 // that mapping count again there. An anchor on the value of a `<<` merge
 // key, or on an element of a sequence there, counts for the aliases other
-// merge keys name, and for an alias in a value only when no other anchor
-// of its name comes before that alias, as [anchorSet] describes.
+// merge keys name. It counts for an alias in a value only when no other
+// anchor of its name comes before that alias, as [anchorSet] describes.
 func newResolver(doc *ast.DocumentNode) *resolver {
 	b := &aliasBinder{
 		anchors: newAnchorSet(),

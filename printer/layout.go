@@ -45,10 +45,11 @@ type Layout struct {
 	gutterWidth int
 }
 
-// lineLayout is the row structure of one line: the column of the content
-// at which each wrapped content row begins, the row each content row takes
-// among the line's rows, the number of rows the line takes, annotation
-// rows included, and the width of the widest of them.
+// lineLayout is the row structure of one line. It holds the column of the
+// content at which each wrapped content row begins and the row each
+// content row takes among the line's rows. It also holds the number of
+// rows the line takes, annotation rows included, and the width of the
+// widest of them.
 type lineLayout struct {
 	cols    []int
 	offsets []int

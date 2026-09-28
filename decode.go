@@ -1537,7 +1537,7 @@ func WithReferences(data ...[]byte) DecodeOption {
 // the decode, as it fails a decode of the whole document. When two
 // anchors of the document share a name, the decoder reads a copy of the
 // document in which each of them, and each alias to one of them, carries
-// a name of its own, so an [ast.Node] the decode fills, or one an
+// a name of its own. An [ast.Node] the decode fills, or one an
 // UnmarshalYAML method takes, spells such an alias with that name.
 //
 // [Decoder.DecodeInto] decodes with options stated once, for every node
@@ -1636,15 +1636,15 @@ func decodeTarget(v any, node ast.Node) any {
 }
 
 // yamlOptions returns the go-yaml options for a decode: the source's
-// decode options, then the ones the Node carries from the decode whose
-// validator it was handed to, then yamlOpts.
+// decode options, then the ones the Node carries from the decode that
+// handed it to a validator, then yamlOpts.
 func (n *Node) yamlOptions(yamlOpts []yaml.DecodeOption) []yaml.DecodeOption {
 	return slices.Concat(n.source.decodeOpts, n.decodeOpts, yamlOpts)
 }
 
-// forValidators returns the Node the validators of a decode with the
-// go-yaml options yamlOpts see: a copy of n that decodes with those
-// options after its own, so a validator that decodes the Node reads it as
+// forValidators returns the Node that the validators of a decode with the
+// go-yaml options yamlOpts see. That Node is a copy of n that decodes with
+// those options after its own, so a validator that decodes it reads it as
 // the decode does. It returns n when yamlOpts is empty.
 func (n *Node) forValidators(yamlOpts []yaml.DecodeOption) *Node {
 	if len(yamlOpts) == 0 {

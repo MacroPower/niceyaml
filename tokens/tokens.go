@@ -233,9 +233,9 @@ func IsPlaceholder(tk *token.Token) bool {
 // ahead of that text, blank lines included, where the lexer keeps only the
 // line breaks of the blank lines and the indentation of the last line. The
 // parser trims spaces and line breaks from the start of a key's Origin and
-// rejects the key when a line break is left, so a blank line that holds a
-// tab in front of the first key would make it reject valid YAML. In the
-// clone of that token, each blank line in front of the text keeps only
+// rejects the key when a line break remains. A blank line that holds a tab
+// in front of the first key would therefore make it reject valid YAML. In
+// the clone of that token, each blank line in front of the text keeps only
 // its line break, and the indentation of the line the text starts on
 // stays. Every other clone keeps the Origin of its token, and every clone
 // keeps its position.
@@ -762,10 +762,10 @@ func (p *positioner) restoreQuoted(tk *token.Token, start int) bool {
 //
 // The lexer puts the Offset of tk at the fault, where the token after tk
 // starts, so restoreCut takes delta from the token after tk. It reports
-// whether it restored tk, and it leaves the positioner and the Origin as
-// they are when the source does not hold the text of the Origin, or when
-// something other than an escape code or whitespace comes before the
-// text of the token after tk.
+// whether it restored tk. It leaves the positioner and the Origin as they
+// are when the source does not hold the text of the Origin. It also leaves
+// them when something other than an escape code or whitespace comes
+// before the text of the token after tk.
 func (p *positioner) restoreCut(tk *token.Token, start int) bool {
 	next := strings.TrimLeft(tk.Next.Origin, " \t\r\n")
 	if i := strings.IndexAny(next, "\r\n"); i >= 0 {
@@ -1115,12 +1115,12 @@ func TrimLineEnding(s string) string {
 // positions ahead of the whitespace rather than inside it, keeps the
 // positions it has.
 //
-// A stream cut before the end of a longer one, whose last token still
-// links to a token after it, can end with tokens without text, such as the
-// empty content of a block scalar that the next document's header closes.
-// No text of the clones follows them, so they move to the end of the last
-// line of the joined Origins, before its final line ending, where
-// [Tokenize] places them, rather than by the common shift.
+// A stream cut before the end of a longer one can end with tokens without
+// text, such as the empty content of a block scalar that the next
+// document's header closes. The last token of such a stream still links to
+// a token after it. No text of the clones follows them, so they move to
+// the end of the last line of the joined Origins, before its final line
+// ending, where [Tokenize] places them, rather than by the common shift.
 //
 // The clones link to each other through Next and Prev and to nothing outside
 // the result, so the stream stands alone. Tokens with nil positions come
@@ -1202,9 +1202,9 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 		result.Add(clone)
 	}
 
-	// The last clone still links to a token after it when tks was cut
-	// before the end of its stream, so no text of the stream follows the
-	// tokens without text that end it.
+	// The last clone still links to a token after it when the caller cut
+	// tks before the end of its stream, so no text of the stream follows
+	// the tokens without text that end it.
 	if len(result) > 0 && result[len(result)-1].Next != nil {
 		endTrailing(result)
 	}
@@ -1223,9 +1223,9 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 
 // endTrailing moves each token of tks that has a position and follows the
 // last token holding text to the end of the last line of the joined
-// Origins, before its final line ending, where [Tokenize] places a token
-// without text that no text follows. The positions of tks count from line
-// 1, column 1, offset 1 at the start of the joined Origins. A stream
+// Origins, before its final line ending. That is where [Tokenize] places a
+// token without text that no text follows. The positions of tks count from
+// line 1, column 1, offset 1 at the start of the joined Origins. A stream
 // without a token holding text keeps its positions.
 func endTrailing(tks token.Tokens) {
 	last := -1

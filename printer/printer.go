@@ -371,8 +371,8 @@ func NoAnnotation(AnnotationContext) []AnnotationRow {
 // draw them, so a marked range shows its extent without color, or
 // nothing when the overlays cover no column. When the line wraps, each
 // wrapped row that holds a covered column gets a caret row of its own
-// below it, which marks the covered columns of that row, and a space the
-// wrap drops at a break gets no caret. An annotation above the line with
+// below it, which marks the covered columns of that row. A space the wrap
+// drops at a break gets no caret. An annotation above the line with
 // no content renders nothing, as [line.Annotation.String] does. A
 // newline in an annotation renders as its picture rather than starting a
 // row, as every other control character does.
@@ -403,7 +403,7 @@ func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 // markerRows returns a caret row for each wrapped row of ctx.Content that
 // holds a column the overlays of ctx cover, in order, each under the
 // covered columns of its row. A row ends before the spaces the wrap drops
-// at its break, so those spaces get no caret. The content is escaped
+// at its break, so those spaces get no caret. It escapes the content
 // first, as the printer shows it, so a tab counts as its picture rather
 // than a space.
 func markerRows(ctx AnnotationContext) []AnnotationRow {

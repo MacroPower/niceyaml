@@ -941,9 +941,9 @@ func matchLines(matches position.Ranges, n int) map[int][]int {
 }
 
 // highlighted returns a slice of the base view of the left pane, or of the
-// right one when right is true, that holds its lines within spans, or
-// every line without spans, and adds the search highlights of the matches
-// that cover those lines. The base view keeps no highlight, so a move of
+// right one when right is true, with the search highlights of the matches
+// that cover its lines. The slice holds the lines within spans, or every
+// line when spans is empty. The base view keeps no highlight, so a move of
 // the selection costs the lines a caller lays out or renders rather than
 // every match of the document.
 //
