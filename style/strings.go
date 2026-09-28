@@ -12,12 +12,13 @@ import (
 )
 
 var (
-	// ErrInvalidColor is returned when a color value is not a valid hex color.
-	// A token carrying a bg: prefix or a leading # names a color, so a
-	// malformed one returns this rather than [ErrUnknownKeyword].
+	// ErrInvalidColor reports a color value that is not a valid hex color.
+	// A token carrying a bg: prefix or a leading # names a color, so
+	// [Parse] reports a malformed one with this rather than
+	// [ErrUnknownKeyword].
 	ErrInvalidColor = errors.New("invalid color")
-	// ErrUnknownKeyword is returned when a token is not a recognized keyword
-	// and names no color.
+	// ErrUnknownKeyword reports a token that is neither a known keyword nor
+	// a color.
 	ErrUnknownKeyword = errors.New("unknown keyword")
 )
 
@@ -47,9 +48,10 @@ func Parse(s string) (lipgloss.Style, error) {
 	return style, nil
 }
 
-// MustParse parses a Pygments-style string, panicking on error.
+// MustParse parses a Pygments-style string and panics when [Parse] returns
+// an error.
 //
-// Use this for package-level variables where the format is known to be valid.
+// Use it for package-level variables set from a constant string.
 func MustParse(s string) lipgloss.Style {
 	style, err := Parse(s)
 	if err != nil {

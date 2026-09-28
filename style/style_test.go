@@ -19,7 +19,7 @@ func TestStyles_Style_EmptyStyles(t *testing.T) {
 	styles := style.Styles{}
 	got := styles.Style(kind.LiteralNumberInteger)
 
-	// Should return an empty style when nothing is defined.
+	// The zero value returns an empty style for every kind.
 	assert.Equal(t, lipgloss.Style{}, got)
 }
 

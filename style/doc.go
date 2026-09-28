@@ -5,7 +5,7 @@
 // [kind.Kind] to the [lipgloss.Style] it
 // renders with. The kind package declares the kinds and their hierarchy and
 // depends on no terminal library, so the packages that mark content, such
-// as line and diff, name kinds without depending on lipgloss; this package
+// as line and diff, name kinds without depending on lipgloss. This package
 // puts the styles behind them.
 //
 // Rather than requiring themes to define every possible kind, a Styles value
@@ -52,11 +52,11 @@
 //
 // # Style Strings
 //
-// This package provides encoding and decoding of Pygments-style strings to and
-// from [lipgloss.Style] objects via [Parse], [MustParse], and [Encode].
+// [Parse] and [MustParse] decode Pygments-style strings into
+// [lipgloss.Style] values, and [Encode] turns a style back into one.
 //
-// Pygments-style strings are a format for specifying text styling. They are
-// commonly used in syntax highlighting configurations and theme files.
+// Pygments-style strings specify text styling. Syntax highlighting
+// configurations and theme files commonly use them.
 //
 // A Pygments-style string holds space-separated tokens, and [Parse] applies
 // them left to right. A later color replaces an earlier one of the same kind,
@@ -65,20 +65,18 @@
 //
 // Colors use hex format:
 //
-//	#rrggbb     - Foreground color (e.g., #ff0000 for red)
-//	#rgb        - Short foreground color (e.g., #f00 for red)
-//	bg:#rrggbb  - Background color
+//   - #rrggbb sets the foreground color, such as #ff0000 for red.
+//   - #rgb sets the foreground color in short form, such as #f00 for red.
+//   - bg:#rrggbb sets the background color.
 //
 // Modifiers toggle text attributes:
 //
-//	bold / nobold           - Bold text
-//	italic / noitalic       - Italic text
-//	underline / nounderline - Underlined text
+//   - bold and nobold turn bold text on and off.
+//   - italic and noitalic turn italic text on and off.
+//   - underline and nounderline turn underlined text on and off.
 //
-// Special tokens (ignored for Pygments compatibility):
-//
-//	noinherit
-//	border:#rrggbb
+// For Pygments compatibility, [Parse] accepts and ignores the noinherit and
+// border:#rrggbb tokens.
 //
 // Example usage:
 //
