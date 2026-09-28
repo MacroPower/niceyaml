@@ -429,7 +429,8 @@ func newAnchorIndex(body ast.Node) *anchorIndex {
 // only anchors that node, or an anchor node reads, refers to. A failure
 // in one of them would leave an alias with nothing to read, so the pass
 // stops and returns it, as a decode of the whole document fails there
-// too. A context that ends stops the pass, and the pass then returns nil.
+// too. A context that ends stops the pass, which then returns the error
+// of the context.
 func (d *document) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast.Node) error {
 	idx := d.decodeTree().index()
 	if len(idx.entries) == 0 {
@@ -496,16 +497,16 @@ func (d *document) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast
 			continue
 		}
 
-		// A context that ends stops the pass.
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
+		// Without an anchor it needs, the decode of the node would fail
+		// in its stead.
+		err := ctx.Err()
+		if err != nil {
+			return err //nolint:wrapcheck // The context names the reason, and the Node binds it.
 		}
 
 		var sink any
 
-		err := decodeWithRecover(ctx, dec, e.node, &sink)
+		err = decodeWithRecover(ctx, dec, e.node, &sink)
 		if err != nil {
 			return err
 		}

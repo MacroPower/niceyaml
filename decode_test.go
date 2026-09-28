@@ -5344,6 +5344,34 @@ func TestErrDecodeRejected(t *testing.T) {
 		require.ErrorIs(t, err, context.Canceled)
 		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
 	})
+
+	t.Run("canceled context stops a decode that reads an anchor", func(t *testing.T) {
+		t.Parallel()
+
+		// The alias under b needs the anchor under a, which the decode
+		// would otherwise skip and report as missing.
+		dd := yamltest.FirstDocument(t, "a: &x 1\nb:\n  c: *x\n")
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		tcs := map[string]struct {
+			node *niceyaml.Node
+		}{
+			"scoped": {node: yamltest.At(t, dd, paths.Root().Child("b"))},
+			"root":   {node: dd},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := tc.node.Decode[map[string]any](ctx)
+				require.ErrorIs(t, err, context.Canceled)
+				require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+			})
+		}
+	})
 }
 
 func TestMultiValidator(t *testing.T) {

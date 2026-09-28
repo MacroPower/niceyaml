@@ -1572,7 +1572,17 @@ func (n *Node) yamlOptions(yamlOpts []yaml.DecodeOption) []yaml.DecodeOption {
 // of node that is not a comment. The decoder reads node in the
 // [decodeTree] of the document, and for a node below the body, a failure
 // in an anchor outside node that node reads comes back as its error.
+//
+// The go-yaml decoder never checks the context, so a context that has
+// ended before the decode starts, or while it registers the anchors node
+// needs, stops the decode, and its error comes back as it is, whatever
+// node holds.
 func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
+	err := ctx.Err()
+	if err != nil {
+		return n.Bind(err)
+	}
+
 	if !hasContent(node) || isTaggedNull(node) {
 		return nil
 	}
@@ -1584,7 +1594,7 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 	// in a node below the body finds an anchor defined elsewhere in the
 	// document only after the decoder has seen that anchor.
 	if node != n.doc.root.Body {
-		err := n.doc.primeAnchors(ctx, dec, view)
+		err = n.doc.primeAnchors(ctx, dec, view)
 		if err != nil {
 			return n.bindDecodeError(err)
 		}
