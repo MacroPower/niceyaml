@@ -396,11 +396,12 @@ func (v *View) Slice(spans ...position.Span) *View {
 // so a caller that marks a document shows the marked parts alone. A
 // decorated line carries a [Flag] other than [FlagDefault], an [Overlay],
 // or an [Annotation]. Decorated lines whose context windows overlap or
-// touch share a hunk, distant ones become separate hunks, and the first
-// line of each hunk after the first carries a "..." annotation of kind
-// [kind.UISeparator] above it. A negative context shows the decorated
-// lines alone, as 0 does, and a View with no decorated line yields a
-// View that holds no line.
+// touch share a hunk, and distant ones become separate hunks. Every line
+// of the result that follows a line the result skips carries a "..."
+// annotation of kind [kind.UISeparator] above it, so the separator marks
+// the gap between two hunks and any gap the View itself skips inside
+// one. A negative context shows the decorated lines alone, as 0 does,
+// and a View with no decorated line yields a View that holds no line.
 //
 // The result is a [View.Slice], so the lines keep their indices, a
 // range from the content applies to it, and decoration added after
@@ -433,28 +434,30 @@ func (v *View) Hunks(context int) *View {
 
 	hunks := v.Slice(spans...)
 
-	// The separator goes above the first line the hunk holds, which is
-	// the start of its span unless the View skips that line. It sits
-	// ahead of the annotations the line already carries, since the
-	// printer renders them in the order their kinds first appear and the
-	// separator marks the top of the hunk.
+	// The separator goes above every line the hunks hold that follows a
+	// line they skip. That is the first line of each hunk after the
+	// first, and the first line after a gap the View itself skips inside
+	// a hunk. It sits ahead of the annotations the line already carries,
+	// since the printer renders them in the order their kinds first
+	// appear and the separator marks the top of what follows the gap.
 	separator := Annotation{
 		Content:   "...",
 		Kind:      kind.UISeparator,
 		Placement: Above,
 	}
 
-	for _, span := range spans[1:] {
-		for i := range hunks.All(span) {
-			hunks.Annotate(i, separator)
-
-			anns := hunks.annotations[i]
-			copy(anns[1:], anns[:len(anns)-1])
-
-			anns[0] = separator
-
-			break
+	for j := 1; j < len(hunks.held); j++ {
+		i := hunks.held[j]
+		if i == hunks.held[j-1]+1 {
+			continue
 		}
+
+		hunks.Annotate(i, separator)
+
+		anns := hunks.annotations[i]
+		copy(anns[1:], anns[:len(anns)-1])
+
+		anns[0] = separator
 	}
 
 	return hunks

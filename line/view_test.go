@@ -1826,6 +1826,48 @@ func TestView_Hunks(t *testing.T) {
 		assert.Equal(t, []int{4}, separators(got))
 	})
 
+	t.Run("a gap the view skips inside a hunk gets a separator", func(t *testing.T) {
+		t.Parallel()
+
+		// The windows of lines c and e overlap across line d, which the
+		// view skips, so they share a hunk that jumps from c to e.
+		view := newTestView(t, input, 8).Slice(position.NewSpan(0, 3), position.NewSpan(4, 8))
+		view.Annotate(2, line.Annotation{Content: "one", Placement: line.Below})
+		view.Annotate(4, line.Annotation{Content: "two", Placement: line.Below})
+
+		got := view.Hunks(1)
+
+		assert.Equal(t, []string{"b: 2", "c: 3", "e: 5", "f: 6"}, contents(got))
+		assert.Equal(t, []int{4}, separators(got))
+		assert.Equal(t, stringtest.JoinLF(
+			"   2 | b: 2",
+			"   3 | c: 3",
+			"     | ^ one",
+			"     | ...",
+			"   5 | e: 5",
+			"     | ^ two",
+			"   6 | f: 6",
+		), got.String())
+	})
+
+	t.Run("the same lines get the same separators at any context", func(t *testing.T) {
+		t.Parallel()
+
+		// The view skips lines c through f, so both contexts hold lines a,
+		// b, g, and h. A context of 1 keeps two hunks, and a context of 3
+		// merges them into one across the gap.
+		view := newTestView(t, input, 8).Slice(position.NewSpan(0, 2), position.NewSpan(6, 8))
+		view.Annotate(1, line.Annotation{Content: "one", Placement: line.Below})
+		view.Annotate(6, line.Annotation{Content: "two", Placement: line.Below})
+
+		for _, context := range []int{1, 3} {
+			got := view.Hunks(context)
+
+			assert.Equal(t, []string{"a: 1", "b: 2", "g: 7", "h: 8"}, contents(got), "context %d", context)
+			assert.Equal(t, []int{6}, separators(got), "context %d", context)
+		}
+	})
+
 	t.Run("renders as an excerpt", func(t *testing.T) {
 		t.Parallel()
 
