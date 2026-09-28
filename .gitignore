@@ -26,6 +26,7 @@ dist/
 
 # Worktrees
 .worktrees/
+.claude/worktrees/
 
 # Temp files
 .tmp/
