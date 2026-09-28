@@ -979,6 +979,129 @@ func TestViewport_LayoutChangesKeepTopLine(t *testing.T) {
 	}
 }
 
+func TestViewport_LayoutChangesKeepFrameRow(t *testing.T) {
+	t.Parallel()
+
+	framed := func(s lipgloss.Style) *printer.Printer {
+		return testPrinter().With(printer.WithContainerStyle(s))
+	}
+
+	border := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+	padding := lipgloss.NewStyle().PaddingTop(2).PaddingBottom(2)
+	tall := border.Padding(1, 1)
+
+	// A view at the top stays at the top, so a frame that appears or grows
+	// shows its outer row. A view whose top row lies in the frame stays on
+	// the same row of that frame, or on its last row when the frame shrinks.
+	tcs := map[string]struct {
+		container lipgloss.Style
+		change    func(m *yamlviewport.Model)
+		wantTop   string
+		lines     int
+		height    int
+		offset    int
+		want      int
+		bottom    bool
+	}{
+		"top gains a border": {
+			container: lipgloss.NewStyle(),
+			lines:     50,
+			height:    5,
+			change:    func(m *yamlviewport.Model) { m.SetPrinter(framed(border)) },
+			want:      0,
+			wantTop:   "─",
+		},
+		"top frame grows": {
+			container: border,
+			lines:     50,
+			height:    5,
+			change:    func(m *yamlviewport.Model) { m.SetPrinter(framed(tall)) },
+			want:      0,
+			wantTop:   "─",
+		},
+		"top frame shrinks under its last row": {
+			container: padding,
+			lines:     50,
+			height:    5,
+			offset:    1,
+			change:    func(m *yamlviewport.Model) { m.SetPrinter(framed(border)) },
+			want:      0,
+			wantTop:   "─",
+		},
+		"bottom padding with the same layout": {
+			container: padding,
+			lines:     5,
+			height:    1,
+			bottom:    true,
+			change:    func(m *yamlviewport.Model) { m.SetPrinter(framed(padding)) },
+			want:      8,
+		},
+		"bottom frame taller than height with the same layout": {
+			container: tall,
+			lines:     10,
+			height:    2,
+			bottom:    true,
+			change:    func(m *yamlviewport.Model) { m.SetPrinter(framed(tall)) },
+			want:      12,
+		},
+		"bottom frame taller than height at a new width": {
+			container: tall,
+			lines:     10,
+			height:    2,
+			bottom:    true,
+			change:    func(m *yamlviewport.Model) { m.SetWidth(41) },
+			want:      12,
+		},
+		"bottom frame taller than height with wrap off": {
+			container: tall,
+			lines:     10,
+			height:    2,
+			bottom:    true,
+			change:    func(m *yamlviewport.Model) { m.SetWordWrap(false) },
+			want:      12,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var src strings.Builder
+
+			for i := range tc.lines {
+				fmt.Fprintf(&src, "k%d: v\n", i)
+			}
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(framed(tc.container)))
+			m.SetWidth(40)
+			m.SetHeight(tc.height)
+			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
+
+			if tc.bottom {
+				m.GotoBottom()
+			} else {
+				m.SetYOffset(tc.offset)
+			}
+
+			// A program renders the view before the layout changes.
+			_ = m.View()
+
+			tc.change(&m)
+
+			assert.Equal(t, tc.want, m.YOffset())
+
+			if tc.bottom {
+				assert.True(t, m.AtBottom())
+			}
+
+			if tc.wantTop != "" {
+				top, _, _ := strings.Cut(m.View(), "\n")
+				assert.Contains(t, top, tc.wantTop)
+			}
+		})
+	}
+}
+
 func TestViewport_ContainerStyleKeepsTopLine(t *testing.T) {
 	t.Parallel()
 

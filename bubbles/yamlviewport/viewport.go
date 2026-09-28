@@ -238,8 +238,11 @@ func New(opts ...Option) Model {
 // A layout change, such as a new width, style, printer, or wrap setting,
 // keeps the same line at the top of the view. The top row stays at the same
 // row of that line, or at its last row if the line no longer has that many.
-// A change of content, such as a new revision, diff mode, or view mode,
-// scrolls to the top, or to the first search match when the term has one.
+// A top row in the container frame stays at the same row of that frame in
+// the same way, and a view at the top stays at the top, so a frame that
+// appears or grows shows its outer row. A change of content, such as a new
+// revision, diff mode, or view mode, scrolls to the top, or to the first
+// search match when the term has one.
 type Model struct {
 	// The container style applied to the viewport frame.
 	style    lipgloss.Style
@@ -298,8 +301,10 @@ type Model struct {
 	viewMode        ViewMode
 	hunkContext     int
 	// The line at the top of the view and the row within it when a layout
-	// change dropped the row counts. A negative row lies in the container
-	// frame above the first line.
+	// change dropped the row counts. A line of -1 stands for the top of the
+	// view or the container frame above the first line, and a line one past
+	// the last stands for the frame below the last line. The row then counts
+	// from the first row of that frame.
 	anchorLine int
 	anchorRow  int
 	// Reports that the base views changed since the searcher last loaded
@@ -430,15 +435,33 @@ func (m *Model) remeasure(ranges ...position.Range) {
 // ensureRows to restore after the rows reflow. An anchor that ensureRows has
 // not restored yet stays, so several changes in a row keep the original top
 // line.
+//
+// No line owns a frame row, so a top row in the container frame anchors to
+// the frame instead. The first row of the view anchors to the top frame even
+// when the layout has none, so a view at the top stays there when a frame
+// appears.
 func (m *Model) anchorTop() {
 	if m.anchored || m.rows == nil || len(m.rows.left) == 0 {
 		return
 	}
 
 	first, _ := m.rowWindow()
+	n := len(m.rows.left)
 
-	m.anchorLine = min(first, len(m.rows.left)-1)
-	m.anchorRow = m.yOffset - m.rows.sums[m.anchorLine]
+	switch {
+	case m.yOffset < max(1, m.rows.sums[0]):
+		m.anchorLine = -1
+		m.anchorRow = m.yOffset
+
+	case m.yOffset >= m.rows.sums[n]:
+		m.anchorLine = n
+		m.anchorRow = m.yOffset - m.rows.sums[n]
+
+	default:
+		m.anchorLine = first
+		m.anchorRow = m.yOffset - m.rows.sums[first]
+	}
+
 	m.anchored = true
 }
 
@@ -1268,11 +1291,18 @@ func (m *Model) ensureRows() {
 	if m.anchored {
 		m.anchored = false
 
-		// The anchored row keeps its place in the line, up to the line's new
-		// last row.
+		// The anchored row keeps its place in the line or frame, up to the
+		// new last row of that line or frame. A frame that is gone leaves the
+		// row at the edge of the lines it stood beside.
 		if n := len(m.rows.left); n > 0 {
-			k := min(m.anchorLine, n-1)
-			m.yOffset = m.rows.sums[k] + min(m.anchorRow, max(0, m.lineRows(k)-1))
+			switch k := m.anchorLine; {
+			case k < 0:
+				m.yOffset = min(m.anchorRow, max(0, m.rows.sums[0]-1))
+			case k >= n:
+				m.yOffset = m.rows.sums[n] + min(m.anchorRow, max(0, m.rows.bottom-1))
+			default:
+				m.yOffset = m.rows.sums[k] + min(m.anchorRow, max(0, m.lineRows(k)-1))
+			}
 		}
 	}
 
