@@ -309,30 +309,19 @@ func (ls Lines) All(spans ...position.Span) iter.Seq2[int, *Line] {
 // [Line.Width].
 func (ls Lines) Runes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
 	return func(yield func(position.Position, rune) bool) {
-		if len(ranges) == 0 {
-			for i := range ls.lines {
-				if !ls.yieldRunes(i, nil, yield) {
-					return
-				}
-			}
-
-			return
-		}
-
 		// A range holds runes only on the lines from its start line through
-		// its end line, so merging those line spans visits each line that
-		// any range touches once, in content order. Capping the end line
-		// first keeps the span end from overflowing.
+		// its end line, so [Lines.All] over those line spans visits each
+		// line that any range touches once, in content order. Without
+		// ranges there are no spans, and All visits every line. Capping the
+		// end line first keeps the span end from overflowing.
 		spans := make([]position.Span, len(ranges))
 		for j, rng := range ranges {
 			spans[j] = position.NewSpan(rng.Start.Line, min(rng.End.Line, len(ls.lines)-1)+1)
 		}
 
-		for _, s := range mergeSpans(spans, len(ls.lines)) {
-			for i := s.Start; i < s.End; i++ {
-				if !ls.yieldRunes(i, ranges, yield) {
-					return
-				}
+		for i := range ls.All(spans...) {
+			if !ls.yieldRunes(i, ranges, yield) {
+				return
 			}
 		}
 	}
