@@ -65,16 +65,16 @@ func (s finderSearcher) Load(lines line.Lines) Index {
 //	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
 //
 // The viewport reads the view of a revision it shows without a diff when
-// the revision, the diff mode, or the view mode changes, and never
-// decorates it. It computes the diff between two revisions from their views
-// and keeps it until it compares another pair or the history changes, so a
-// change of view mode or hunk context reuses the diff without reading the
-// views again. Search highlights go on a clone, so the marks a caller adds
-// stay, and the caller's view stays as the caller left it. Marks added
-// after the viewport read the view show once the revision is set again. A
-// diff between two revisions interleaves their lines in a view of its own,
-// so decoration shows only while the viewport displays a revision without
-// a diff.
+// the revision or the view mode changes, or when [Model.SetDiffMode] turns
+// the diff off, and never decorates it. It computes the diff between two
+// revisions from their views and keeps it until it compares another pair
+// or the history changes, so a change of view mode or hunk context reuses
+// the diff without reading the views again. Search highlights go on a
+// clone, so the marks a caller adds stay, and the caller's view stays as
+// the caller left it. Marks added after the viewport read the view show
+// once the revision is set again. A diff between two revisions interleaves
+// their lines in a view of its own, so decoration shows only while the
+// viewport displays a revision without a diff.
 //
 // The viewport renders the lines the view holds in the order
 // [line.View.All] yields them, which is content order, and windows them
