@@ -14,12 +14,12 @@ import (
 
 // Line holds the tokens on one line of source. It is content alone. The
 // flag, overlays, and annotations that rendering attaches to a line live
-// on a [View], so one Line renders many ways without being copied.
+// on a [View], so views render one Line many ways without copying it.
 //
 // A Line never changes after [NewLines] creates it, so it is safe to share
 // between views and goroutines. Every token a Line hands out, from
-// [Line.Tokens], [Line.Token], [Line.TokenAt], or [Line.SourceTokens], is
-// shared with the line. Treat them as read-only and call
+// [Line.Tokens], [Line.Token], [Line.TokenAt], or [Line.SourceTokens],
+// belongs to the line. Treat them as read-only and call
 // [token.Token.Clone] before modifying one.
 //
 // The zero value is an empty line with no number, which a side-by-side
@@ -30,7 +30,7 @@ import (
 type Line struct {
 	segments segment.Segments
 
-	// The 1-indexed line number used for display.
+	// The 1-indexed line number a renderer displays.
 	number int
 }
 
@@ -58,14 +58,14 @@ func (l *Line) Content() string {
 // positions. Each token links to its neighbors on the line through Next and
 // Prev, and the chain stops at the line boundary.
 //
-// The slice is new, but the tokens are shared with the line. Treat them as
+// The slice is new, but the tokens belong to the line. Treat them as
 // read-only.
 func (l *Line) Tokens() token.Tokens {
 	return l.segments.PartTokens()
 }
 
-// Token returns the [*token.Token] at the given index. The token is shared
-// with the line, so treat it as read-only.
+// Token returns the [*token.Token] at the given index. The token belongs
+// to the line, so treat it as read-only.
 // Panics if idx is out of range.
 func (l *Line) Token(idx int) *token.Token {
 	return l.segments[idx].Part()
@@ -144,7 +144,7 @@ func (l *Line) span(tk *token.Token, span func(segment.Segment) position.Span) (
 	return position.Span{}, false
 }
 
-// IsEmpty returns true if there are no tokens on this [Line].
+// IsEmpty reports whether this [Line] holds no tokens.
 func (l *Line) IsEmpty() bool {
 	return len(l.segments) == 0
 }
@@ -187,8 +187,8 @@ func (l *Line) Runes() iter.Seq2[int, rune] {
 
 		// The splitter joins a token that holds no text and sits past the
 		// end of the source onto the last line, after the segment that
-		// ends it, so the ending is on the last segment that holds any of
-		// the source.
+		// ends it. The ending is therefore on the last segment that holds
+		// any of the source.
 		for _, seg := range slices.Backward(l.segments) {
 			origin := seg.Part().Origin
 			if origin == "" {

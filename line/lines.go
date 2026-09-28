@@ -20,7 +20,7 @@ import (
 // documents, parsing, or files, so a Lines value may describe content that
 // is not a YAML document at all, such as a diff that interleaves lines from
 // two revisions. The lines never change after creation, and nothing outside
-// this package can add to, remove from, or reorder a Lines value, so it is
+// this package can add to, remove from, or reorder a Lines value. It is
 // safe to share between views and goroutines, and a view over it shares
 // the lines instead of copying them.
 //
@@ -44,8 +44,8 @@ type Lines struct {
 // strings, into one part per line. Each part is a token whose Position
 // describes its own line. The first part that holds the token's text keeps
 // the token's Column and Offset, every later part names the rune where it
-// starts, and every part keeps a reference to the original token it was
-// cut from. [Lines.Tokens] recombines the parts into the original tokens.
+// starts, and every part keeps a reference to the original token NewLines
+// cut it from. [Lines.Tokens] recombines the parts into the original tokens.
 // Returns the zero Lines when tks is empty.
 func NewLines(tks token.Tokens) Lines {
 	split := segment.Split(tks)
@@ -62,8 +62,8 @@ func NewLines(tks token.Tokens) Lines {
 }
 
 // Collect creates new [Lines] holding ls in the order given, such as the
-// lines of two revisions a diff interleaves. The lines are shared with the
-// Lines values they came from, so a [View] over the result finds them by
+// lines of two revisions a diff interleaves. The result shares the lines
+// with the Lines values they came from, so a [View] over it finds them by
 // identity as it finds them in the originals. Panics when a line is nil.
 func Collect(ls ...*Line) Lines {
 	for i, l := range ls {
@@ -380,9 +380,10 @@ func (ls Lines) Tokens() token.Tokens {
 }
 
 // SliceLines splits r into one [position.Range] per line of the [Lines]
-// it covers, each holding the columns of r on that line: from the start
-// column on the first line and from column 0 on every later one, to the
-// end column on the last line and to [Line.Width] on every earlier one.
+// it covers, each holding the columns of r on that line. A range starts
+// at the start column of r on the first line and at column 0 on every
+// later one. It ends at the end column of r on the last line and at
+// [Line.Width] on every earlier one.
 // The result is what [View.AddOverlay] marks for r, so a caller that
 // inspects or compares the per-line ranges sees the columns the lines
 // hold.
@@ -436,11 +437,11 @@ func (ls Lines) TokenAt(pos position.Position) *token.Token {
 // visible runes. A line where tk holds only a line ending, such as a blank
 // line kept by a block scalar, contributes no range.
 //
-// The token may be a lexer token, as returned by [Lines.TokenAt] or
-// [Lines.Tokens], one of the per-line parts from [Line.Tokens], or a copy
-// of either, such as a token taken from the AST a parser built from the
-// same stream. A token matches by its type, value, origin, and position
-// rather than by pointer. Returns nil if tk is nil or not found.
+// The token may be a lexer token, such as one [Lines.TokenAt] or
+// [Lines.Tokens] returns, one of the per-line parts from [Line.Tokens], or
+// a copy of either, such as a token taken from the AST a parser built from
+// the same stream. A token matches by its type, value, origin, and
+// position rather than by pointer. Returns nil if tk is nil or not found.
 func (ls Lines) TokenRanges(tk *token.Token) position.Ranges {
 	return ls.ranges(tk, (*Line).TokenSpan)
 }

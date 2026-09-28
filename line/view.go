@@ -21,8 +21,8 @@ import (
 // a bound error, hands one out.
 //
 // A View shares its lines with every other View over the same content and
-// owns its decoration alone, so creating one costs an index of the lines
-// it holds and no copy of their content, and decorating one reaches no
+// owns its decoration alone. Creating one costs an index of the lines it
+// holds and no copy of their content, and decorating one reaches no
 // other. Two renderings of one document, such as search
 // highlights and error marks, are two Views over the same [Lines].
 //
@@ -30,10 +30,10 @@ import (
 // coordinates of its content, the [Lines] that [View.Lines] returns, where
 // line i is [Lines.Line] i. A View holds each line of its content at most
 // once, in content order. A View from [View.Slice] holds some of those
-// lines and keeps their indices, so a range from a search of the content
-// or from the path of a document applies to a slice of the content as it
-// applies to the whole, and slicing before or after decorating renders the
-// same. [View.All] yields the lines the View holds with their indices,
+// lines and keeps their indices. A range from a search of the content or
+// from the path of a document applies to a slice as it applies to the
+// whole, and slicing before or after decorating renders the same.
+// [View.All] yields the lines the View holds with their indices,
 // [View.Contains] reports whether it holds a line, [View.Index] finds the
 // index of a line it holds, and [View.Count] is the number it holds.
 //
@@ -60,7 +60,7 @@ type View struct {
 // NewView creates a new [*View] over lines with no decoration. Without
 // spans it holds every line in order. With spans it holds the lines
 // within any of them, in content order and each once, as [Lines.All]
-// yields them, so it holds what [View.Slice] of a new View over every
+// yields them. It then holds what [View.Slice] of a new View over every
 // line holds, and the index it builds grows with those lines alone.
 func NewView(lines Lines, spans ...position.Span) *View {
 	v := &View{lines: lines}
@@ -91,9 +91,9 @@ func (v *View) Lines() Lines {
 }
 
 // Held returns the lines the [View] holds as new [Lines], in the order
-// [View.All] yields them, shared by pointer with the content as
-// [Collect] shares them. It is the input for a diff of the lines a slice
-// holds, such as one document of a file that holds several, where
+// [View.All] yields them. The result shares the lines by pointer with the
+// content, as [Collect] does. It is the input for a diff of the lines a
+// slice holds, such as one document of a file that holds several, where
 // [View.Lines] would diff every line of the file:
 //
 //	result := diff.Diff(before.View().Held(), after.View().Held())
@@ -141,10 +141,10 @@ func (v *View) Contains(i int) bool {
 }
 
 // Index returns the index of the line the [View] holds that is l and
-// true. Every View over the same content shares its lines by pointer, so
-// a decorator that knows a line of a [Lines] value finds it in a slice of
+// true. Every View over the same content shares its lines by pointer. A
+// decorator that knows a line of a [Lines] value finds it in a slice of
 // that content, or in a diff that interleaves it with another revision,
-// without knowing how the view was built. A line the view does not hold,
+// without knowing what built the view. A line the view does not hold,
 // such as one from other content, reports false.
 func (v *View) Index(l *Line) (int, bool) {
 	if v == nil || l == nil {
@@ -166,12 +166,12 @@ func (v *View) Index(l *Line) (int, bool) {
 }
 
 // All returns an iterator over the lines the [View] holds within any of
-// the given spans, or over every line it holds when no span is given, in
-// content order and each once whatever order the spans come in and however
-// they overlap. Each iteration yields the index of the line in the content
-// and the [*Line], and the index reaches the line's decoration through
-// [View.Flag], [View.Overlays], and [View.Annotations]. A span reaching
-// outside the content selects the lines it does hold.
+// the given spans, in content order and each once whatever order the
+// spans come in and however they overlap. Without spans, All yields every
+// line the View holds. Each iteration yields the index of the line in the
+// content and the [*Line], and the index reaches the line's decoration
+// through [View.Flag], [View.Overlays], and [View.Annotations]. A span
+// reaching outside the content selects the lines it does hold.
 func (v *View) All(spans ...position.Span) iter.Seq2[int, *Line] {
 	return func(yield func(int, *Line) bool) {
 		if v == nil {
@@ -205,8 +205,8 @@ func (v *View) All(spans ...position.Span) iter.Seq2[int, *Line] {
 	}
 }
 
-// mergeSpans returns spans clamped to [0, n), sorted by start, with each
-// group of spans that overlap or touch merged into one. Every index of
+// mergeSpans clamps spans to [0, n), sorts them by start, and merges each
+// group of spans that overlap or touch into one. Every index of
 // [0, n) that some span contains lies in exactly one span of the result.
 func mergeSpans(spans []position.Span, n int) position.Spans {
 	clamped := position.Spans(spans).Clamp(0, n)
@@ -253,9 +253,9 @@ func (v *View) SetFlag(i int, f Flag) {
 	v.flags[i] = f
 }
 
-// Annotations returns the [Annotation] values on line i, in the order they
-// were added. The slice is shared with the view, so treat it as read-only
-// and add to it with [View.Annotate].
+// Annotations returns the [Annotation] values on line i, in the order the
+// caller added them. The slice belongs to the view, so treat it as
+// read-only and add to it with [View.Annotate].
 func (v *View) Annotations(i int) Annotations {
 	_ = v.lines.lines[i]
 
@@ -273,8 +273,8 @@ func (v *View) Annotate(i int, ann ...Annotation) {
 	v.annotations[i] = append(v.annotations[i], ann...)
 }
 
-// Overlays returns the [Overlay] values on line i, in the order they were
-// added. The slice is shared with the view, so treat it as read-only and
+// Overlays returns the [Overlay] values on line i, in the order the caller
+// added them. The slice belongs to the view, so treat it as read-only and
 // add to it with [View.AddOverlay], [View.BlendOverlay], or
 // [View.AddLineOverlay].
 func (v *View) Overlays(i int) Overlays {
@@ -298,7 +298,7 @@ func (v *View) AddLineOverlay(i int, o ...Overlay) {
 
 // AddOverlay adds an overlay with the given style to the specified ranges,
 // in the coordinates of the content. The overlay replaces the style
-// underneath it; use [View.BlendOverlay] to mix with it instead.
+// underneath it. Use [View.BlendOverlay] to mix with it instead.
 //
 // It splits each range into one overlay per line with [Lines.SliceLines],
 // which clamps the columns to the width of the line and skips lines
@@ -333,7 +333,7 @@ func (v *View) addOverlayRange(s kind.Kind, blend bool, r position.Range) {
 }
 
 // Clone returns a copy of the [View] with its own decoration. The copy
-// shares the lines with the original and holds the same ones, so it costs
+// shares the lines with the original and holds the same ones. It costs
 // one copy of the index of the lines it holds and of the flags, overlays,
 // and annotations, and decorating either reaches nothing in the other.
 func (v *View) Clone() *View {
@@ -359,8 +359,8 @@ func (v *View) Clone() *View {
 // each once, as [View.All] yields them, each with its index and its
 // decoration. The result owns its decoration and carries that of the
 // lines it holds, so it is the view a caller renders to show part of a
-// document, such as the hunks around an error, and a range or an index
-// that applies to the receiver applies to it. Slicing an already sliced
+// document, such as the hunks around an error. A range or an index that
+// applies to the receiver applies to it. Slicing an already sliced
 // view narrows it further.
 //
 // With no span, Slice holds every line the receiver holds, as [View.All]
@@ -471,13 +471,13 @@ func (v *View) decorated(i int) bool {
 
 // String renders the [View] as plain text: each line behind its number,
 // the annotations above it on rows of their own, and a row below it that
-// marks its decoration, with a caret under every column an overlay covers,
-// a caret at the column of the annotations below the line, and their
-// contents after the last caret. String does not render flags. The number
-// column is at least four wide and grows to fit the largest number in the
-// view, so every row lines up. Annotations whose column lies more than
-// [MaxColPastEnd] columns past the end of the content start at that
-// bound, as the printer starts them.
+// marks its decoration. That row holds a caret under every column an
+// overlay covers, a caret at the column of the annotations below the line,
+// and their contents after the last caret. String does not render flags.
+// The number column is at least four wide and grows to fit the largest
+// number in the view, so every row lines up. Annotations whose column lies
+// more than [MaxColPastEnd] columns past the end of the content start at
+// that bound, as the printer starts them.
 //
 // Control characters render as their pictures, and a rune that takes two
 // cells in a terminal gets two carets, so the carets stay under the runes
@@ -603,10 +603,11 @@ func overlayMarks(overlays Overlays, width int) []bool {
 
 // renderMarks renders marks as a row under content: a caret under every
 // marked column and a space under every other. The content row renders
-// each grapheme cluster at its display width, so the first column of a
-// cluster is as many cells wide as the cluster renders, every other column
-// of it takes none, and a column past the end of the content takes one
-// cell. A mark on any column of a cluster lands under the whole cluster.
+// each grapheme cluster at its display width. The first column of a
+// cluster is therefore as many cells wide as the cluster renders, every
+// other column of it takes none, and a column past the end of the content
+// takes one cell. A mark on any column of a cluster lands under the whole
+// cluster.
 func renderMarks(content string, marks []bool) string {
 	var sb strings.Builder
 

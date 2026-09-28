@@ -12,9 +12,9 @@ import (
 type Placement int
 
 const (
-	// Above indicates content should appear above the line.
+	// Above places an annotation above its line.
 	Above Placement = iota
-	// Below indicates content should appear below the line.
+	// Below places an annotation below its line.
 	Below
 )
 
@@ -24,9 +24,11 @@ type Flag int
 const (
 	// FlagDefault is the default category for normal lines.
 	FlagDefault Flag = iota
-	// FlagInserted marks lines as inserted in a diff (rendered with "+").
+	// FlagInserted marks a line a diff inserted. It renders with a "+"
+	// prefix.
 	FlagInserted
-	// FlagDeleted marks lines as deleted in a diff (rendered with "-").
+	// FlagDeleted marks a line a diff deleted. It renders with a "-"
+	// prefix.
 	FlagDeleted
 )
 
@@ -47,9 +49,9 @@ func annotationCol(col, width int) int {
 
 // Annotation represents extra content added around a [Line].
 //
-// An annotation adds comments or notes to the rendered output and is not
-// part of the main token stream. Kind names the style the printer renders
-// the annotation with, as [Overlay.Kind] does for an overlay, so an error
+// An annotation adds comments or notes to the rendered output, outside
+// the token stream. Kind names the style the printer renders the
+// annotation with, as [Overlay.Kind] does for an overlay, so an error
 // message below a line renders in [kind.TextError] and a hunk header
 // above one in [kind.UIHunkHeader]. The zero Kind renders as
 // [kind.UIAnnotation].
@@ -93,9 +95,9 @@ func (a Annotations) Filter(p Placement) Annotations {
 }
 
 // ByKind groups the annotations by the kind each renders in, its
-// [Annotation.Kind] or [kind.UIAnnotation] for the zero Kind, one group per
-// kind in the order each kind first appears, with the annotations of a
-// group in their original order. Each annotation keeps its Kind as given,
+// [Annotation.Kind] or [kind.UIAnnotation] for the zero Kind. The groups
+// come in the order each kind first appears, and the annotations of a
+// group keep their original order. Each annotation keeps its Kind as given,
 // so the [kind.UIAnnotation] group can mix annotations of the zero Kind
 // with ones of that kind. The printer renders each group as rows of its
 // own in the style of its kind.
@@ -141,8 +143,8 @@ func (a Annotations) Col() int {
 
 // WithContent returns a new [Annotations] holding the annotations that have
 // content, in their original order. An annotation without content renders
-// nothing, so its column must not pull [Annotations.Col] left; callers that
-// pad to a column filter with WithContent first.
+// nothing, so its column must not pull [Annotations.Col] left. Callers
+// that pad to a column filter with WithContent first.
 func (a Annotations) WithContent() Annotations {
 	var result Annotations
 
@@ -203,9 +205,10 @@ type Overlay struct {
 type Overlays []Overlay
 
 // MarkerRow returns the row that marks the overlays below content, the
-// text of the line without its line ending: a caret under every column
-// an overlay covers within the content and a space under every other
-// column before the last caret, as [View.String] draws under a line. A
+// text of the line without its line ending. The row holds a caret under
+// every column an overlay covers within the content and a space under
+// every other column before the last caret, as [View.String] draws under
+// a line. A
 // column is as many carets wide as the rune on it renders, so the carets
 // stay under the runes they mark on a line holding wide or control
 // characters. Returns "" when the overlays cover no column of the

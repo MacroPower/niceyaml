@@ -315,7 +315,7 @@ func TestNewLines_PerLine(t *testing.T) {
 			},
 		},
 		"single key-value": {
-			// Note: lexer doesn't preserve trailing newline on final simple values.
+			// The lexer drops the trailing newline on final simple values.
 			input: "key: value\n",
 			want: []string{
 				"   1 | key: value",
@@ -464,7 +464,7 @@ func TestNewLines_NonStandardLineNumbers(t *testing.T) {
 				assert.Equal(t, wantNum, lines.Line(i).Number(), "line %d has wrong number", i)
 			}
 
-			// Verify the round-trip. Dumping tokens should preserve content.
+			// The round-trip preserves the content of the dumped tokens.
 			gotTokens := lines.Tokens()
 			assert.Equal(
 				t,
@@ -632,11 +632,11 @@ func TestNewLines_GappedLineNumbers(t *testing.T) {
 				assert.Equal(t, wantNum, lines.Line(i).Number(), "line %d has wrong number", i)
 			}
 
-			// Verify Prev/Next linking works correctly across gaps.
+			// Prev and Next link the tokens across gaps.
 			gotTokens := lines.Tokens()
 			require.NotEmpty(t, gotTokens, "expected non-empty tokens")
 
-			// Verify forward traversal works.
+			// Forward traversal reaches every token.
 			forwardCount := 0
 
 			for tk := gotTokens[0]; tk != nil; tk = tk.Next {
@@ -645,7 +645,7 @@ func TestNewLines_GappedLineNumbers(t *testing.T) {
 
 			assert.Equal(t, len(gotTokens), forwardCount, "forward traversal count mismatch")
 
-			// Verify backward traversal works.
+			// Backward traversal reaches every token.
 			lastTk := gotTokens[len(gotTokens)-1]
 
 			backwardCount := 0
@@ -868,10 +868,10 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 			tks := tokens.Tokenize(tc.input)
 			lines := line.NewLines(tks)
 
-			// Verify line numbers are strictly increasing.
+			// The line numbers increase strictly.
 			require.NoError(t, yamltest.ValidateLines(lines), "tokens should be valid")
 
-			// Verify expected line numbers.
+			// Each line carries its expected number.
 			require.Equal(t, len(tc.want), lines.Len(), "wrong number of lines")
 
 			for i, wantNum := range tc.want {
@@ -998,8 +998,8 @@ func TestNewLines_OffsetRuneCount(t *testing.T) {
 	input := "日: value\n"
 	lines := requireRoundtrip(t, input)
 
-	// Verify specific offset values that prove rune-based counting.
-	// The ":" (MappingValue) part should be at offset 2, not 4.
+	// The ":" (MappingValue) part sits at offset 2, not 4, which proves
+	// rune-based counting.
 	require.Equal(t, 1, lines.Len())
 
 	parts := lines.Line(0).Tokens()
@@ -1015,7 +1015,7 @@ func TestNewLines_OffsetRuneCount(t *testing.T) {
 	// Part 2: "value" at offset 4 (after "日: " which is 3 runes).
 	assert.Equal(t, 4, parts[2].Position.Offset, "value part offset should be 4")
 
-	// Also verify total bytes match for Origin content preservation.
+	// The total bytes match, so the Origin content survives the split.
 	var origTotalBytes, resultTotalBytes int
 
 	for _, tk := range tokens.Tokenize(input) {
@@ -1195,8 +1195,8 @@ func TestNewLines_BlockScalars(t *testing.T) {
 	t.Run("empty content edge cases", func(t *testing.T) {
 		t.Parallel()
 
-		// Test edge case: block scalar header with no content.
-		// This can happen with "key: |\n" followed by another key or end of document.
+		// A block scalar header can have no content, as in "key: |\n"
+		// followed by another key or the end of the document.
 
 		tcs := map[string]string{
 			"literal empty followed by key": stringtest.Input(`
@@ -1504,7 +1504,7 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 		`)
 		lines := requireRoundtrip(t, input)
 
-		// Verify we have the expected number of lines.
+		// The input holds three lines.
 		require.Equal(t, 3, lines.Len())
 
 		// The token sits where "line1" starts, past two spaces of
@@ -1528,7 +1528,7 @@ func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
 		`)
 		lines := requireRoundtrip(t, input)
 
-		// Verify we have the expected number of lines.
+		// The input holds two lines.
 		require.Equal(t, 2, lines.Len())
 
 		// The scalar's first part follows "key: " and keeps the token's
@@ -1691,8 +1691,8 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 
 		lines := requireRoundtrip(t, input)
 
-		// Verify the blank line is in the value token's Origin.
-		// The value token should have Origin " value\n\n" (two newlines).
+		// The value token's Origin holds the blank line, so it is
+		// " value\n\n" with two newlines.
 		var valueToken *token.Token
 
 		for _, tk := range lines.Tokens() {
@@ -1732,16 +1732,16 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 	t.Run("line numbers jump across blank lines", func(t *testing.T) {
 		t.Parallel()
 
-		// Verify that Lines correctly track line numbers across gaps.
+		// Lines tracks line numbers across gaps.
 		input := "key: value\n\nnext: data\n"
 
 		original := tokens.Tokenize(input)
 		lines := line.NewLines(original)
 
-		// Should have lines at positions 1, 2 (blank absorbed), and 3.
+		// The lines sit at positions 1, 2 (blank absorbed), and 3.
 		require.Equal(t, 3, lines.Len(), "expected 3 lines including blank")
 
-		// Line numbers should be 1, 2, 3.
+		// The line numbers are 1, 2, 3.
 		assert.Equal(t, 1, lines.Line(0).Number(), "first line should be 1")
 		assert.Equal(t, 2, lines.Line(1).Number(), "second line (blank) should be 2")
 		assert.Equal(t, 3, lines.Line(2).Number(), "third line should be 3")
@@ -2140,8 +2140,8 @@ func TestLines_TokenRanges(t *testing.T) {
 		tks := tokens.Tokenize(input)
 		lines := line.NewLines(tks)
 
-		// A parser hands out copies of the tokens it was given, and a copy
-		// finds the same ranges as the original.
+		// A parser hands out copies of the tokens the caller gave it, and a
+		// copy finds the same ranges as the original.
 		var tk *token.Token
 
 		for _, lexTk := range tks {
@@ -2286,7 +2286,7 @@ func TestLines_String(t *testing.T) {
 
 		result := lines.String()
 		assert.Contains(t, result, "key: value")
-		// Should include line number prefix.
+		// The row carries a line number prefix.
 		assert.Contains(t, result, "1 |")
 	})
 
@@ -2347,7 +2347,7 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 		lines := line.NewLines(tks)
 
 		require.Equal(t, 1, lines.Len())
-		// Line number should be 1 (1-indexed from lexer).
+		// The line number is 1, since the lexer counts lines from 1.
 		assert.Equal(t, 1, lines.Line(0).Number())
 	})
 
@@ -2415,7 +2415,7 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 		lines := line.NewLines(tks)
 		require.Equal(t, 1, lines.Len())
 
-		// The line should use the position from the token.
+		// The line takes its number from the position of the token.
 		assert.Equal(t, 42, lines.Line(0).Number())
 	})
 
@@ -2445,7 +2445,7 @@ func TestLine_Number_Fallbacks(t *testing.T) {
 		lines := line.NewLines(tks)
 		require.Equal(t, 2, lines.Len())
 
-		// Both lines should preserve their original line numbers.
+		// Both lines keep their original line numbers.
 		assert.Equal(t, 100, lines.Line(0).Number())
 		assert.Equal(t, 200, lines.Line(1).Number())
 	})
@@ -2513,7 +2513,7 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 		tks := tokens.Tokenize(input)
 		lines := line.NewLines(tks)
 
-		// Verify all pure horizontal whitespace parts are SpaceType.
+		// Every pure horizontal whitespace part is SpaceType.
 		checked := 0
 		for i, ln := range lines.All() {
 			for _, tk := range ln.Tokens() {

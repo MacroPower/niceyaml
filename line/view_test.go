@@ -658,7 +658,7 @@ func TestView_AddOverlay(t *testing.T) {
 
 		view := line.NewView(line.Lines{})
 
-		// Should not panic on an empty view.
+		// AddOverlay on an empty view does not panic.
 		view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
 
 		assert.Equal(t, 0, view.Count())
@@ -744,16 +744,16 @@ func TestView_Clone(t *testing.T) {
 
 		clone := view.Clone()
 
-		// Verify annotations were copied.
+		// The clone holds the annotations of the original.
 		require.Len(t, clone.Annotations(0), 1)
 		require.Len(t, view.Annotations(0), len(clone.Annotations(0)))
 		assert.Equal(t, view.Annotations(0)[0].Content, clone.Annotations(0)[0].Content)
 		assert.Len(t, clone.Annotations(0).Filter(line.Below), 1)
 
-		// Modify clone annotations.
+		// Annotate the clone.
 		clone.Annotate(0, line.Annotation{Content: "modified", Placement: line.Above})
 
-		// Verify original is unchanged.
+		// The original keeps its own decoration.
 		require.Len(t, view.Annotations(0), 1)
 		assert.Equal(t, "original note", view.Annotations(0)[0].Content)
 		assert.Len(t, view.Annotations(0).Filter(line.Below), 1)
@@ -767,15 +767,15 @@ func TestView_Clone(t *testing.T) {
 
 		clone := view.Clone()
 
-		// Verify overlays were copied.
+		// The clone holds the overlays of the original.
 		require.Len(t, clone.Overlays(0), 1)
 		assert.Equal(t, view.Overlays(0)[0].Cols, clone.Overlays(0)[0].Cols)
 		assert.Equal(t, view.Overlays(0)[0].Kind, clone.Overlays(0)[0].Kind)
 
-		// Modify clone overlays.
+		// Add an overlay to the clone.
 		clone.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"})
 
-		// Verify original is unchanged.
+		// The original keeps its own decoration.
 		require.Len(t, view.Overlays(0), 1)
 	})
 

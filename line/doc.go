@@ -17,7 +17,7 @@
 //	│  world                    │
 //	└───────────────────────────┘
 //
-// The go-yaml lexer produces a normal [token.Tokens] stream where the block
+// The go-yaml lexer produces a normal [token.Tokens] stream. The block
 // scalar content is a single token spanning multiple lines:
 //
 //	┌──────┬────────────┬───────┐
@@ -27,8 +27,8 @@
 //	│                           │
 //	└───────────────────────────┘
 //
-// [NewLines] cuts the tokens at line boundaries while every part keeps a
-// reference to its source token:
+// [NewLines] cuts the tokens at line boundaries, and every part keeps a
+// reference to its source token.
 //
 //	┌──────┬────────────┬───────┐
 //	│String│MappingValue│Literal│
@@ -42,9 +42,9 @@
 //
 // [Lines] is the ordered collection of [Line] values a niceyaml Source
 // holds. It carries the tokens split per line and nothing about YAML
-// documents, parsing, or files, so a Lines value may describe content
-// that is not a YAML document, such as a diff that interleaves lines from
-// two revisions:
+// documents, parsing, or files. A Lines value may therefore describe
+// content that is not a YAML document, such as a diff that interleaves
+// lines from two revisions:
 //
 //	tks := tokens.Tokenize(input)
 //	lines := line.NewLines(tks)
@@ -59,12 +59,12 @@
 //	ranges := lines.TokenRanges(tk)          // Every line with runes of the token.
 //	content := lines.ContentRanges(tk)       // The same without surrounding spaces.
 //
-// [Lines.Tokens] reverses the split. Tokens that were cut across lines
-// collapse back to one, and the result holds the lexer's original tokens in
-// their original order.
+// [Lines.Tokens] reverses the split. A token the split cut across lines
+// collapses back to one, and the result holds the lexer's original tokens
+// in their original order.
 //
 // The lines never change after [NewLines] creates them, and nothing outside
-// this package can add to, remove from, or reorder a Lines value, so the
+// this package can add to, remove from, or reorder a Lines value. The
 // finder and diff packages read one as it is, and any number of views share
 // it. [Collect] builds a Lines value from lines taken from others, as a
 // diff does to interleave two revisions, and the result shares the lines
@@ -81,12 +81,13 @@
 // as a single '\n' whether the source used LF or CRLF, so the columns it
 // reports match [Line.Width].
 //
-// [Line.Kind] returns the [kind.Kind] the text of each token renders with,
-// read from its type and its neighbors, so a string before a colon is a
-// mapping key and the name after an anchor takes the kind of the anchor.
+// [Line.Kind] returns the [kind.Kind] the text of each token renders with.
+// It reads the kind from the token's type and its neighbors, so a string
+// before a colon is a mapping key and the name after an anchor takes the
+// kind of the anchor.
 // [TokenKind] reads the same from a token of a whole stream.
 //
-// Every token the package hands out is shared with the line. Treat them as
+// Every token the package hands out belongs to the line. Treat them as
 // read-only and call [token.Token.Clone] before modifying one.
 //
 // # Views
@@ -102,7 +103,7 @@
 // [Annotations] add extra content above or below a line, which is useful for
 // error messages, hints, or context. An [Annotation] takes a [Placement] of
 // [Above] or [Below], and its Kind names the style it renders in, as the Kind
-// of an [Overlay] does; without one it renders in [kind.UIAnnotation]:
+// of an [Overlay] does. Without a Kind it renders in [kind.UIAnnotation]:
 //
 //	view.Annotate(i, line.Annotation{
 //	    Content:   "missing required field",
@@ -121,9 +122,9 @@
 //	view.BlendOverlay(kind.GenericHighlight, matches...)
 //
 // [View.Segments] cuts a line into the runs that one kind and one set of
-// overlays style, each with its text, so a renderer of any kind, such as
-// one that writes HTML, styles the line as the printer does without
-// reading the tokens or the overlays itself:
+// overlays style, each with its text. A renderer that writes HTML, or any
+// other format, styles the line from the segments alone, as the printer
+// does:
 //
 //	for seg := range view.Segments(i) {
 //		fmt.Fprintf(w, `<span class=%q>%s</span>`, seg.Kind, html.EscapeString(seg.Text))
@@ -138,8 +139,8 @@
 // To render the same content two different ways, take two views of it.
 // [View.Clone] copies the decoration of one, [View.Slice] picks the
 // lines of a few spans, decoration included, and [View.Hunks] picks the
-// decorated lines with context around each, which is what an error
-// excerpt shows.
+// decorated lines with context around each. An error excerpt shows those
+// hunks.
 //
 // [View.String] renders a view as plain text: each line behind its number,
 // the annotations above it on rows of their own, carets under the columns

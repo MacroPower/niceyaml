@@ -33,9 +33,9 @@ type Segment struct {
 // Segments returns an iterator over the segments of line i, in column
 // order, covering its content once: one per run of text that one kind
 // and one set of overlays style. Each token on the line is one segment
-// for its text, in the kind [Line.Kind] gives it, with the spaces and
-// tabs it carries before and after that text, such as the indentation
-// before a value or the gap before a comment, as segments of their own
+// for its text, in the kind [Line.Kind] gives it. The spaces and tabs a
+// token carries before and after that text, such as the indentation
+// before a value or the gap before a comment, are segments of their own
 // in [kind.Text]. A segment splits where an overlay of the view starts
 // or ends inside it, and [Segment.Overlays] holds the overlays that cover
 // each piece. Adjacent segments that style the same are separate, so a
