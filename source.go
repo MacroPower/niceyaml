@@ -437,8 +437,9 @@ func (d *document) anchorToken() *token.Token {
 //
 // The first call parses the file with [parser.Parse] and the options
 // [WithYAMLParserOptions] provides. Subsequent calls return the cached
-// result. A "---" header that directly follows another starts a document
-// of its own, where [parser.Parse] alone drops the rest of the stream.
+// result. A "---" header that directly follows another header or a "..."
+// end marker starts a document of its own, where [parser.Parse] alone
+// drops the rest of the stream or rejects it.
 //
 // The tokens of the file are copies of the Source's own, since the parser
 // relinks the tokens it is given. A copy matches the original by its type,
@@ -501,7 +502,7 @@ func (s *Source) parse() (*ast.File, map[*token.Token]struct{}, error) {
 
 	file := &ast.File{Docs: []*ast.DocumentNode{}}
 
-	for _, run := range splitConsecutiveHeaders(tks) {
+	for _, run := range splitDocumentRuns(tks) {
 		f, err := parser.Parse(run, parser.ParseComments, s.parserOpts...)
 		if err == nil {
 			file.Docs = append(file.Docs, f.Docs...)
@@ -568,19 +569,23 @@ func bareLeadingLines(origin string) string {
 	return breaks + lead[cut:] + text
 }
 
-// splitConsecutiveHeaders cuts tks before each "---" header that directly
-// follows another, so each run it returns parses on its own. Each header
-// starts a document, but the go-yaml parser stops at a header that directly
-// follows another and drops every token after it (v1.19.2,
-// parser/token.go:637). The look-back skips comments. The parser folds a
-// comment on a header's line into that header, so the two headers still
-// meet, and a comment on a line of its own parses to the same documents
+// splitDocumentRuns cuts tks before each "---" header that directly
+// follows another header or a "..." end marker, so each run it returns
+// parses on its own. Each header starts a document, but the go-yaml
+// parser mishandles both sequences (v1.19.2). It stops at a header that
+// directly follows another and drops every token after it
+// (parser/token.go:637). It merges a header that a "..." marker directly
+// follows into the next document, which then holds two headers and fails
+// with "unexpected scalar value type" (parser/token.go:655). The
+// look-back skips comments. The parser folds a comment on a header's
+// line into that header, so the header and the token after it still
+// meet. A comment on a line of its own parses to the same documents
 // whether or not a run ends there.
-func splitConsecutiveHeaders(tks token.Tokens) []token.Tokens {
+func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 	var (
-		runs        []token.Tokens
-		start       int
-		afterHeader bool
+		runs      []token.Tokens
+		start     int
+		afterMark bool
 	)
 
 	for i, tk := range tks {
@@ -588,12 +593,12 @@ func splitConsecutiveHeaders(tks token.Tokens) []token.Tokens {
 			continue
 		}
 
-		if tk.Type == token.DocumentHeaderType && afterHeader {
+		if tk.Type == token.DocumentHeaderType && afterMark {
 			runs = append(runs, tks[start:i])
 			start = i
 		}
 
-		afterHeader = tk.Type == token.DocumentHeaderType
+		afterMark = tk.Type == token.DocumentHeaderType || tk.Type == token.DocumentEndType
 	}
 
 	return append(runs, tks[start:])

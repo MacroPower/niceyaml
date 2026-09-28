@@ -1225,6 +1225,69 @@ func TestSource_Parse(t *testing.T) {
 		}
 	})
 
+	t.Run("an end marker between headers ends a document", func(t *testing.T) {
+		t.Parallel()
+
+		// The parser merges a header that an end marker closes into the
+		// next document, which then holds two headers.
+		tcs := map[string]struct {
+			input string
+			want  int
+		}{
+			"end marker between headers": {
+				input: stringtest.Input(`
+					---
+					...
+					---
+					a: 1
+				`),
+				want: 2,
+			},
+			"end marker between headers with a comment": {
+				input: stringtest.Input(`
+					--- # c
+					...
+					---
+				`),
+				want: 2,
+			},
+			"end marker between headers after a document": {
+				input: stringtest.Input(`
+					a: 0
+					---
+					...
+					---
+					a: 1
+				`),
+				want: 3,
+			},
+			"consecutive headers before an end marker": {
+				input: stringtest.Input(`
+					---
+					---
+					...
+					---
+				`),
+				want: 3,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(tc.input)
+				file, err := source.File()
+				require.NoError(t, err)
+				assert.Len(t, file.Docs, tc.want)
+
+				docs, err := source.Documents()
+				require.NoError(t, err)
+				assert.Len(t, docs, tc.want)
+			})
+		}
+	})
+
 	t.Run("empty source", func(t *testing.T) {
 		t.Parallel()
 
