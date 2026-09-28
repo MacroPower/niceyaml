@@ -2,6 +2,7 @@ package filepaths
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -19,7 +20,9 @@ type Pattern struct {
 }
 
 // NewPattern creates a [Pattern] from the given glob pattern string.
-// Returns [ErrInvalidPattern] if the pattern syntax is invalid.
+// Returns [ErrInvalidPattern] if the pattern syntax is invalid, or if its
+// braces would expand to more than [MaxBraceExpansions] patterns or take
+// too much work to expand, which [ExpandBraces] would give up on.
 //
 // NewPattern drops "." elements such as a leading "./", repeated
 // separators, and a trailing separator from the pattern, as
@@ -33,7 +36,12 @@ func NewPattern(pattern string) (Pattern, error) {
 		return Pattern{}, ErrInvalidPattern
 	}
 
-	return Pattern{globs: expandPattern(pattern, normalizePattern)}, nil
+	globs, ok := expandPattern(pattern, normalizePattern)
+	if !ok {
+		return Pattern{}, fmt.Errorf("%w: braces expand past the limit", ErrInvalidPattern)
+	}
+
+	return Pattern{globs: globs}, nil
 }
 
 // Match reports whether the path matches the pattern.
@@ -58,14 +66,23 @@ func CleanPath(path string) string {
 }
 
 // expandPattern returns the patterns [ExpandBraces] yields for pattern,
-// each passed through rewrite.
-func expandPattern(pattern string, rewrite func(string) string) []string {
-	globs := ExpandBraces(pattern)
+// each passed through rewrite. It reports false when the braces expand
+// past the budget, where [ExpandBraces] would yield the pattern itself.
+// Doublestar would then expand the braces again on every match, by
+// backtracking, at a cost that can double with each brace group.
+func expandPattern(pattern string, rewrite func(string) string) ([]string, bool) {
+	work := maxBraceWork
+
+	globs, ok := expandBraces(pattern, MaxBraceExpansions, &work)
+	if !ok {
+		return nil, false
+	}
+
 	for i, glob := range globs {
 		globs[i] = rewrite(glob)
 	}
 
-	return globs
+	return globs, true
 }
 
 // normalizePattern returns pattern without "." elements, repeated
@@ -155,6 +172,11 @@ type AnyDepthPatterns struct {
 // so matching many paths against the patterns repeats none of that
 // work. It drops a "!" that has nothing after it.
 //
+// It also drops a pattern whose braces [NewPattern] would reject for
+// expanding past the limit, so that pattern matches nothing and an
+// exclusion excludes nothing. Matching it could otherwise take time
+// that doubles with each of its brace groups, for every path.
+//
 // NewAnyDepthPatterns keeps every other pattern, the invalid ones
 // included, and [AnyDepthPatterns.MatchClean] skips a pattern it cannot
 // interpret, so a typo in a SchemaStore catalog entry does not break
@@ -163,12 +185,17 @@ func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
 	var p AnyDepthPatterns
 
 	for _, pattern := range patterns {
-		exclude, ok := strings.CutPrefix(pattern, "!")
+		exclude, isExclude := strings.CutPrefix(pattern, "!")
 		switch {
-		case !ok:
-			p.globs = append(p.globs, expandPattern(pattern, anyDepth)...)
+		case !isExclude:
+			if globs, ok := expandPattern(pattern, anyDepth); ok {
+				p.globs = append(p.globs, globs...)
+			}
+
 		case exclude != "":
-			p.excludes = append(p.excludes, expandPattern(exclude, anyDepth)...)
+			if excludes, ok := expandPattern(exclude, anyDepth); ok {
+				p.excludes = append(p.excludes, excludes...)
+			}
 		}
 	}
 

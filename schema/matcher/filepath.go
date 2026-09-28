@@ -9,7 +9,8 @@ import (
 )
 
 // ErrInvalidPattern reports a glob pattern [FilePath] cannot use, which is
-// an empty pattern or one whose syntax does not parse.
+// an empty pattern, one whose syntax does not parse, or one whose braces
+// expand to more patterns than matching can afford.
 var ErrInvalidPattern = filepaths.ErrInvalidPattern
 
 // filePathMatcher matches documents by file path glob pattern.

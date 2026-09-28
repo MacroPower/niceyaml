@@ -43,6 +43,17 @@ func TestNewPattern(t *testing.T) {
 			pattern: "[abc",
 			err:     filepaths.ErrInvalidPattern,
 		},
+		"braces within the expansion limit": {
+			pattern: strings.Repeat("{a,b}", 10) + ".yaml",
+		},
+		"braces past the expansion limit": {
+			pattern: strings.Repeat("{,}", 30) + "x.yaml",
+			err:     filepaths.ErrInvalidPattern,
+		},
+		"braces past the work limit": {
+			pattern: strings.Repeat("{a}", 20000) + ".yaml",
+			err:     filepaths.ErrInvalidPattern,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -424,6 +435,21 @@ func TestAnyDepthPatterns_MatchClean(t *testing.T) {
 		"bare negation is skipped": {
 			path:     "/x/app.yml",
 			patterns: []string{"*.yml", "!"},
+			want:     true,
+		},
+		"braces past the expansion limit match nothing": {
+			path:     "a.yaml",
+			patterns: []string{strings.Repeat("{,}", 30) + "*.yaml"},
+			want:     false,
+		},
+		"braces past the expansion limit exclude nothing": {
+			path:     "a.yaml",
+			patterns: []string{"*.yaml", "!" + strings.Repeat("{,}", 30) + "a.yaml"},
+			want:     true,
+		},
+		"braces past the expansion limit leave other patterns": {
+			path:     "a.yaml",
+			patterns: []string{strings.Repeat("{,}", 30) + "*.yaml", "a.yaml"},
 			want:     true,
 		},
 	}
