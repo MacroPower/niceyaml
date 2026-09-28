@@ -124,7 +124,8 @@ type builder struct {
 
 	lines               []Line
 	currentLineSegments Segments
-	currentLine         int // Current line number being built.
+	currentLine         int        // Current line number being built.
+	prevType            token.Type // Type of the last token added other than a comment.
 
 	// Position tracking.
 	currentOffset      int  // Cumulative rune offset (1-indexed like lexer).
@@ -219,8 +220,11 @@ func startAnchor(tks token.Tokens) (*token.Token, string) {
 // before the next rune of text, as [breaksAhead] counts them.
 func (b *builder) AddToken(tk *token.Token, ahead int) {
 	// Detect if this token is block scalar content by checking if it follows a
-	// Literal/Folded header in the token chain.
-	isBlockScalarContent := isBlockScalarContent(tk)
+	// Literal/Folded header in the stream.
+	isBlockScalarContent := isBlockScalarContent(tk, b.prevType)
+	if tk.Type != token.CommentType {
+		b.prevType = tk.Type
+	}
 
 	origin := tk.Origin
 
@@ -667,28 +671,16 @@ func updateIndentLevel(prevIndentNum, currentIndentNum, currentLevel int) int {
 // StringType token, or as an InvalidType token when a header with an
 // indentation indicator, such as "|2", finds only blank lines below it.
 //
-// Comments can appear between the header and content, so we traverse the Prev
-// chain.
-func isBlockScalarContent(tk *token.Token) bool {
+// Comments can appear between the header and content, so prevType is the
+// type of the last token before tk in the stream that is not a comment. It
+// comes from the stream order rather than the Prev links, which a stream
+// built by hand may lack.
+func isBlockScalarContent(tk *token.Token, prevType token.Type) bool {
 	if tk.Type != token.StringType && tk.Type != token.InvalidType {
 		return false
 	}
 
-	// Walk backwards through Prev chain, skipping comments.
-	for prev := tk.Prev; prev != nil; prev = prev.Prev {
-		switch prev.Type {
-		case token.LiteralType, token.FoldedType:
-			return true
-		case token.CommentType:
-			// Comments can appear between header and content, continue.
-			continue
-		default:
-			// Any other token type means this is not block scalar content.
-			return false
-		}
-	}
-
-	return false
+	return prevType == token.LiteralType || prevType == token.FoldedType
 }
 
 // isPureNewline reports whether s is exactly one line ending, as

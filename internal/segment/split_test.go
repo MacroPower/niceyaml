@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/segment"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -918,6 +919,11 @@ func TestSplit_HandBuiltStream(t *testing.T) {
 			wantContent: []string{"a"},
 			wantNumbers: []int{-5},
 		},
+		"unlinked empty block scalar with indentation indicator": {
+			input:       unlinked(tokens.Tokenize("a: |2\n\n\n")),
+			wantContent: []string{"a: |2", "", ""},
+			wantNumbers: []int{1, 2, 3},
+		},
 		"line number at the int limit": {
 			input: token.Tokens{
 				{
@@ -948,4 +954,58 @@ func TestSplit_HandBuiltStream(t *testing.T) {
 			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
 		})
 	}
+}
+
+func TestSplit_UnlinkedStream(t *testing.T) {
+	t.Parallel()
+
+	// A stream built by hand may lack the Prev and Next links the lexer
+	// sets, so Split finds block scalar content from the stream order and
+	// gives such a stream the same parts as the linked one.
+	tcs := map[string]string{
+		"empty literal scalar with indentation indicator": "a: |2\n\n\n",
+		"literal scalar at the end":                       "a: |\n  x\n  y\n",
+		"literal scalar with blank line":                  "a: |\n  x\n\n  y\nb: 1\n",
+		"folded scalar with less indented line":           "a: >\n   x\n  y\n",
+		"comment after header":                            "a: | # c\n  x\n  y\nb: 1\n",
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			want := segment.Split(tokens.Tokenize(input))
+			got := segment.Split(unlinked(tokens.Tokenize(input)))
+
+			assert.Equal(t, lineNumbers(want), lineNumbers(got))
+			yamltest.RequireTokensEqual(t, lineParts(want), lineParts(got))
+		})
+	}
+}
+
+// unlinked returns clones of tks with no Prev or Next links, as a
+// [token.Tokens] literal builds them.
+func unlinked(tks token.Tokens) token.Tokens {
+	out := make(token.Tokens, 0, len(tks))
+
+	for _, tk := range tks {
+		c := tk.Clone()
+		c.Prev, c.Next = nil, nil
+		out = append(out, c)
+	}
+
+	return out
+}
+
+// lineParts returns the part of every segment on every line, in order.
+func lineParts(lines []segment.Line) token.Tokens {
+	var result token.Tokens
+
+	for _, l := range lines {
+		for _, seg := range l.Segments {
+			result = append(result, seg.Part())
+		}
+	}
+
+	return result
 }
