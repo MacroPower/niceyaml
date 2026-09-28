@@ -35,7 +35,7 @@ var (
 //   - `[a-z]` matches any character in the range.
 //   - `{a,b}` matches any of the comma-separated alternatives.
 //
-// glob returns an error when the pattern syntax is invalid.
+// The function returns an error when the pattern syntax is invalid.
 func glob(pattern string) ([]string, error) {
 	matches, err := doublestar.FilepathGlob(
 		pattern,
