@@ -79,9 +79,10 @@ var policies = []dependencyPolicy{
 }
 
 // TestExportedAPI_DependencyPolicy walks every exported declaration in the
-// repository's public packages and checks that any third-party type it names
-// is on the allowlist of its library's policy, and that the pass-through
-// options only appear in identifiers with the library's prefix.
+// repository's public packages. It checks that any third-party type a
+// declaration names is on the allowlist of its library's policy, and that
+// the pass-through options only appear in identifiers with the library's
+// prefix.
 func TestExportedAPI_DependencyPolicy(t *testing.T) {
 	t.Parallel()
 

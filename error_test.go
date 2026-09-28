@@ -899,7 +899,7 @@ func TestError_Unwrap(t *testing.T) {
 
 		require.Len(t, got, 3)
 		assert.Equal(t, underlying, got[0])
-		// A call to errors.Is finds each nested error.
+		// The error matches each nested error under require.ErrorIs.
 		require.ErrorIs(t, err, nested1)
 		require.ErrorIs(t, err, nested2)
 	})
@@ -950,7 +950,7 @@ func TestError_MultiError(t *testing.T) {
 
 		got := trimLines(render(err))
 
-		// Should highlight main error token and include annotation for nested error.
+		// The output highlights the main token and annotates the nested error.
 		assert.Contains(t, got, "<genericError>name</genericError>")
 		assert.Contains(t, got, "<genericError>123</genericError>")
 		assert.Contains(t, got, "^ invalid type")
@@ -982,7 +982,7 @@ func TestError_MultiError(t *testing.T) {
 
 		got := trimLines(render(err))
 
-		// Should include both annotations.
+		// The output holds both annotations.
 		assert.Contains(t, got, "^ invalid type")
 		assert.Contains(t, got, "^ missing field")
 	})
@@ -1051,7 +1051,7 @@ func TestError_MultiError(t *testing.T) {
 
 		got := trimLines(render(err))
 
-		// Should highlight both tokens.
+		// The output highlights both tokens.
 		assert.Contains(t, got, "<genericError>key</genericError>")
 		assert.Contains(t, got, "<genericError>foo</genericError>")
 		assert.Contains(t, got, "^ nested with token")
@@ -1154,7 +1154,7 @@ func TestError_MultiError(t *testing.T) {
 			),
 		)
 
-		// The errors.As should find the custom error through the nested errors.
+		// The errors.As function finds the custom error through the nested errors.
 		var target *customTestError
 
 		require.ErrorAs(t, err, &target)
@@ -1169,7 +1169,7 @@ func TestError_MultiError(t *testing.T) {
 			value: 123
 		`)
 
-		// Create error with NO main path, but nested error with path.
+		// The error has no path of its own, and its nested error has one.
 		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation failed at 1 location",
 			niceyaml.WithErrors(
@@ -1182,21 +1182,21 @@ func TestError_MultiError(t *testing.T) {
 
 		got := trimLines(render(err))
 
-		// Should contain the main message.
+		// The output holds the main message.
 		assert.Contains(t, got, "validation failed at 1 location")
-		// Should contain nested error annotation.
+		// The output holds the annotation of the nested error.
 		assert.Contains(t, got, "got number, want string")
-		// Should contain YAML content (not just bullet points).
+		// The output holds the YAML content as well as the tree.
 		assert.Contains(t, got, "value")
 		assert.Contains(t, got, "123")
-		// Should highlight the nested error value.
+		// The output highlights the value of the nested error.
 		assert.Contains(t, got, "<genericError>123</genericError>")
 	})
 
 	t.Run("nested-only error without source falls back to plain", func(t *testing.T) {
 		t.Parallel()
 
-		// Create error with NO main path, no source, but nested error with path.
+		// The error has no path and no source, and its nested error has a path.
 		err := niceyaml.NewError(
 			"validation failed",
 			niceyaml.WithErrors(
@@ -1222,7 +1222,7 @@ func TestError_MultiError(t *testing.T) {
 			other: data
 		`)
 
-		// Create error with nested errors on different lines.
+		// The nested errors sit on different lines.
 		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation failed at 2 locations",
 			niceyaml.WithErrors(
@@ -1239,10 +1239,10 @@ func TestError_MultiError(t *testing.T) {
 
 		got := trimLines(render(err))
 
-		// Should contain both annotations.
+		// The output holds both annotations.
 		assert.Contains(t, got, "type error on value")
 		assert.Contains(t, got, "unexpected property")
-		// Should highlight both error locations.
+		// The output highlights both locations.
 		assert.Contains(t, got, "<genericError>123</genericError>")
 		assert.Contains(t, got, "<genericError>other</genericError>")
 	})
@@ -1255,7 +1255,7 @@ func TestError_MultiError(t *testing.T) {
 			value: 123
 		`)
 
-		// Create error with some nested errors that resolve and some that don't.
+		// Some nested errors resolve and some do not.
 		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation failed",
 			niceyaml.WithErrors(
@@ -1881,7 +1881,7 @@ func TestError_NestedErrorExcerpt(t *testing.T) {
 
 		got := trimLines(renderContext(err, 1))
 
-		// Should show context around line3.
+		// The excerpt shows context around line3.
 		assert.Contains(t, got, "line2")
 		assert.Contains(t, got, "line3")
 		assert.Contains(t, got, "line4")
@@ -1953,7 +1953,7 @@ func TestError_NestedErrorExcerpt(t *testing.T) {
 
 		got := trimLines(renderContext(err, 0))
 
-		// Should show line2 with combined errors.
+		// The excerpt shows line2 with both errors.
 		assert.Contains(t, got, "line2")
 		assert.Contains(t, got, "error 1; error 2")
 	})
@@ -1965,7 +1965,7 @@ func TestError_HunkDisplay(t *testing.T) {
 	t.Run("distant errors show separate hunks with separator", func(t *testing.T) {
 		t.Parallel()
 
-		// Create a source with many lines.
+		// The source has many lines.
 		source := stringtest.Input(`
 			line1: a
 			line2: b
@@ -1979,7 +1979,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			line10: j
 		`)
 
-		// Errors at line1 and line10 with contextLines=1 should create separate hunks.
+		// Errors at line1 and line10 with contextLines=1 fall in separate hunks.
 		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation error",
 			niceyaml.WithErrors(
@@ -1996,17 +1996,17 @@ func TestError_HunkDisplay(t *testing.T) {
 
 		got := trimLines(renderContext(err, 1))
 
-		// Should show both errors.
+		// The excerpt shows both errors.
 		assert.Contains(t, got, "error at start")
 		assert.Contains(t, got, "error at end")
-		// Should have "..." separator between hunks.
+		// A "..." separator sits between the hunks.
 		assert.Contains(t, got, "...")
-		// Should show context lines around errors.
+		// The excerpt shows context lines around the errors.
 		assert.Contains(t, got, "line1")
 		assert.Contains(t, got, "line2")
 		assert.Contains(t, got, "line9")
 		assert.Contains(t, got, "line10")
-		// Should NOT show middle lines (lines 3-8).
+		// The excerpt leaves out lines 3-8.
 		assert.NotContains(t, got, "line5")
 	})
 
@@ -2122,8 +2122,8 @@ func TestError_HunkDisplay(t *testing.T) {
 			line5: e
 		`)
 
-		// Errors at line1 and line3 with contextLines=1 should merge into one hunk
-		// since they're within 2*contextLines of each other.
+		// Errors at line1 and line3 with contextLines=1 merge into one hunk,
+		// since they lie within 2*contextLines of each other.
 		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation error",
 			niceyaml.WithErrors(
@@ -2169,7 +2169,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			line10: j
 		`)
 
-		// No main path, but nested errors at distant locations.
+		// The error has no path of its own, and its nested errors lie far apart.
 		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation failed at 2 locations",
 			niceyaml.WithErrors(
@@ -2186,10 +2186,10 @@ func TestError_HunkDisplay(t *testing.T) {
 
 		got := trimLines(renderContext(err, 1))
 
-		// Should show both errors.
+		// The excerpt shows both errors.
 		assert.Contains(t, got, "first location error")
 		assert.Contains(t, got, "second location error")
-		// Should have "..." separator.
+		// A "..." separator sits between the hunks.
 		assert.Contains(t, got, "...")
 	})
 
@@ -2206,7 +2206,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			last: value
 		`)
 
-		// Errors at first and last lines.
+		// The errors sit on the first and last lines.
 		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation error",
 			niceyaml.WithErrors(
@@ -2254,7 +2254,7 @@ func TestError_HunkDisplay(t *testing.T) {
 			line10: j
 		`)
 
-		// Main error at line1, nested error at line10.
+		// The main error sits at line1 and the nested error at line10.
 		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"main error",
 			niceyaml.AtPath(paths.Root().Child("line1").Key()),
@@ -2268,12 +2268,12 @@ func TestError_HunkDisplay(t *testing.T) {
 
 		got := trimLines(renderContext(err, 1))
 
-		// Should show both error locations.
+		// The excerpt shows both locations.
 		assert.Contains(t, got, "<genericError>line1</genericError>")
 		assert.Contains(t, got, "<genericError>line10</genericError>")
-		// Should show nested error annotation.
+		// The excerpt shows the annotation of the nested error.
 		assert.Contains(t, got, "nested error")
-		// Should have "..." separator.
+		// A "..." separator sits between the hunks.
 		assert.Contains(t, got, "...")
 	})
 
@@ -2286,8 +2286,8 @@ func TestError_HunkDisplay(t *testing.T) {
 			line3: c
 		`)
 
-		// With contextLines=0, errors at line1 and line2 should merge because
-		// they're within threshold (2*0+1=1) of each other.
+		// With contextLines=0, errors at line1 and line2 merge because they
+		// lie within the threshold (2*0+1=1) of each other.
 		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
 			"validation error",
 			niceyaml.WithErrors(
@@ -2319,7 +2319,7 @@ func TestError_HunkDisplay(t *testing.T) {
 func TestError_Width(t *testing.T) {
 	t.Parallel()
 
-	// Create YAML with a long value that will need wrapping.
+	// The YAML holds a value long enough to wrap.
 	source := stringtest.Input(`
 		key: this is a very long value that should wrap when width is limited to a small number
 	`)
@@ -2370,10 +2370,10 @@ func TestError_Width(t *testing.T) {
 			}
 
 			if tc.wantWrapped {
-				// When wrapped, the content should span multiple lines.
+				// With wrapping, the content spans several lines.
 				assert.Greater(t, contentLines, 1, "expected content to wrap into multiple lines")
 			} else {
-				// When not wrapped, the YAML content should be on a single line.
+				// Without wrapping, the YAML content stays on one line.
 				assert.Equal(t, 1, contentLines, "expected content on single line")
 			}
 		})
@@ -2406,7 +2406,7 @@ func TestError_Width_WithCustomPrinter(t *testing.T) {
 	output := renderWith(err, errPrinter, 2)
 	lines := strings.Split(output, "\n")
 
-	// Should have multiple content lines due to wrapping.
+	// Wrapping splits the content over several lines.
 	contentLines := 0
 	for _, line := range lines {
 		if strings.Contains(line, "key") || strings.Contains(line, "this is") ||
@@ -2440,7 +2440,7 @@ func TestError_Width_DefaultPrinter(t *testing.T) {
 	output := renderWith(err, errPrinter, 2)
 	lines := strings.Split(output, "\n")
 
-	// Should have multiple content lines due to wrapping. Each check is a
+	// Wrapping splits the content over several lines. Each check is a
 	// single word, which stays whole on one row wherever the rows break.
 	contentLines := 0
 	for _, line := range lines {
@@ -2552,7 +2552,7 @@ func TestError_Width_MultipleAnnotationsWrapping(t *testing.T) {
 		other: data
 	`)
 
-	// Test multiple nested errors with long messages.
+	// Several nested errors carry long messages.
 	errPrinter := printer.New(
 		printer.WithStyles(&style.Styles{}),
 		printer.WithGutter(printer.NoGutter),
@@ -2759,7 +2759,7 @@ func TestError_With(t *testing.T) {
 	base := niceyaml.NewError("bad key")
 	located := base.With(niceyaml.AtPath(paths.Root().Child("key").Key()))
 
-	// The copy carries the new option and the receiver keeps its own.
+	// The copy carries the option and the receiver keeps its own.
 	_, ok := base.Path()
 	assert.False(t, ok)
 
@@ -4167,7 +4167,7 @@ func TestSourceError_Annotate(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				// The location resolved; the view holds none of its lines.
+				// The location resolved, and the view holds none of its lines.
 				require.False(t, bound.Annotate(tc.view))
 				require.NoError(t, bound.Unresolved())
 				unmarked(t, tc.view)
@@ -4220,7 +4220,7 @@ func TestSourceError_Annotate(t *testing.T) {
 func TestSourceError_TreeBranches(t *testing.T) {
 	t.Parallel()
 
-	// Every located Error in the tree is marked, however it got there.
+	// The excerpt marks every located Error in the tree, however it got there.
 
 	source := xmlSource("a: 1\nb: 2\nc: 3\n")
 	badA := niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a")))

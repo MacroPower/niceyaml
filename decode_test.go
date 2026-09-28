@@ -2568,8 +2568,8 @@ func TestDocument_At(t *testing.T) {
 			  x: 1
 		`))
 
-		// The anchor is defined after the alias, so the value's own decode
-		// reports the alias error, bound to the source.
+		// The document defines the anchor after the alias, so the value's
+		// own decode reports the alias error, bound to the source.
 		_, err := yamltest.At(t, dd, paths.Root().Child("item")).Decode[map[string]any](t.Context())
 		require.Error(t, err)
 
@@ -4345,8 +4345,8 @@ func TestDocument_At_ErrorBoundToReceiver(t *testing.T) {
 	_, err := scoped.At(paths.Root().Child("missing"))
 	require.ErrorIs(t, err, paths.ErrNotFound)
 
-	// At binds the error to the Node it was called on, not to a copy
-	// scoped to the path that did not resolve.
+	// At binds the error to its receiver, not to a copy scoped to the
+	// path that did not resolve.
 	var bound *niceyaml.SourceError
 
 	require.ErrorAs(t, err, &bound)

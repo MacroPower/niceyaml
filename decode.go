@@ -24,7 +24,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
-// SelfValidator is implemented by types that validate themselves.
+// SelfValidator is a type that validates itself after a decode.
 //
 // [Node.Decode] and [Node.DecodeInto] call Validate after decoding on
 // every value in the decoded value that implements it: the value
@@ -35,15 +35,16 @@ import (
 // [Node.Bind] binds its result to the document the value came from. A
 // check that must run inside the decode, so a [Decoder] carries it to
 // every node and its failures report beside the others, is a
-// [Validator] that decodes the node itself with [Node.Decode] and checks
-// the value it gets, as the Validator example shows.
+// [Validator]. Such a Validator decodes the node itself with
+// [Node.Decode] and checks the value it gets, as the Validator example
+// shows.
 //
 // An [*Error] the value returns writes its path from the value's own
-// root, and the decode puts it under the path of the value in the
-// document: the name go-yaml decoded the field under, from its yaml
-// tag, its json tag, or its lowercased name, the index of an element,
-// or the key of a map entry, so a type checks its own invariants once
-// and reports the right lines wherever a document holds it:
+// root. The decode puts it under the path of the value in the document.
+// That path names a field by the name go-yaml decoded it under, from its
+// yaml tag, its json tag, or its lowercased name. It names an element by
+// its index and a map entry by its key. A type thus checks its
+// invariants once and reports the right lines in any document:
 //
 //	type Config struct {
 //		Hours Hours  `yaml:"hours"`
@@ -61,9 +62,9 @@ import (
 // A decode of Config reports $.hours.close from Hours and $.items[2].price
 // from an Item, with Config declaring no Validate of its own. The values
 // below a value validate first, and the value validates only when every
-// one of them passed, so a parent that checks a relation between its
-// fields sees fields that hold together, and a decode reports every
-// value that failed. A field an inline tag flattens keeps the path of
+// one of them passed. A parent that checks a relation between its fields
+// thus sees fields that hold together, and a decode reports every value
+// that failed. A field an inline tag flattens keeps the path of
 // the struct that holds it. A value whose type decodes itself, through
 // an UnmarshalYAML or UnmarshalText method, validates itself and
 // nothing below it, since its fields need not mirror the document, and
@@ -71,15 +72,15 @@ import (
 // decode cannot see a type that go-yaml decodes whole through a
 // [yaml.CustomUnmarshaler] option or an UnmarshalJSON method under
 // [yaml.UseJSONUnmarshaler], so the values below such a type walk as if
-// its fields mirrored the document; a decode of one runs its checks
+// its fields mirrored the document. A decode of one runs its checks
 // with [WithSelfValidation] off. A parent need not call the Validate
 // of its fields, and [Rebase] is for a check run on a value after
 // Decode returns.
 //
 // Any value with a Validate method takes part, including one from a
 // package that names its own check that way, such as a generated
-// message type, so a decode runs those checks too and reports their
-// errors at the value that owns the method. A check that reads state
+// message type. A decode runs those checks too and reports their errors
+// at the value that owns the method. A check that reads state
 // the caller fills in after the decode runs on a value with that state
 // set already through [Node.DecodeInto], which keeps the fields the
 // document does not name, and [WithSelfValidation] false switches the
@@ -90,9 +91,9 @@ type SelfValidator interface {
 	Validate() error
 }
 
-// Validator is implemented by types that validate a [*Node] before it
-// decodes, such as a JSON schema or a schema registry that picks the
-// schema from the document's content or file path.
+// Validator validates a [*Node] before it decodes, as a JSON schema does,
+// or a schema registry that picks the schema from the document's content
+// or file path.
 //
 // Pass one to [Node.Decode] with [WithValidator], give one to
 // [NewDecoder] for a [Decoder] that checks every node it decodes, or run
@@ -264,8 +265,8 @@ func newDocuments(src *Source, file *ast.File) []*Node {
 // or %TAG directives above a "---" header, and from the comments after a
 // "..." marker. Such a node joins the next document as its preamble,
 // whichever of the two it holds, or the last document when no document
-// follows it. A file that holds such nodes and nothing else, such as a
-// file of comments, keeps the first as its one document, which decodes to
+// follows it. A file that holds only such nodes, such as a file of
+// comments, keeps the first as its one document, which decodes to
 // nothing as an empty file does.
 func foldPreambles(nodes []*ast.DocumentNode, groups []token.Tokens) []*document {
 	var (
@@ -407,10 +408,10 @@ func preambleLen(tks token.Tokens) int {
 
 // documentSpans returns the lines of a view of total lines that each token
 // group covers. The groups partition the file in order, so a group runs
-// from the line its first token starts on to the line the next group starts
-// on, the first group runs from the top of the view, and the last group runs
-// to the end of it. A group after the first with no tokens covers no lines
-// and sits where the next group starts.
+// from the line its first token starts on to the line the next group
+// starts on. The first group runs from the top of the view, and the last
+// group runs to the end of it. A group after the first with no tokens
+// covers no lines and sits where the next group starts.
 func documentSpans(groups []token.Tokens, total int) []position.Span {
 	spans := make([]position.Span, len(groups))
 
@@ -426,8 +427,8 @@ func documentSpans(groups []token.Tokens, total int) []position.Span {
 	}
 
 	// The lines above the first group's first token, such as blank lines or
-	// a comment the lexer hangs off a later token, belong to no later group,
-	// so the first group takes them the way the last group takes the lines
+	// a comment the lexer hangs off a later token, belong to no later group.
+	// The first group takes them the way the last group takes the lines
 	// below its last token. A first group with no tokens takes them too,
 	// which keeps the spans covering every line of the view.
 	if len(groups) > 0 {
@@ -438,14 +439,14 @@ func documentSpans(groups []token.Tokens, total int) []position.Span {
 }
 
 // alignDocumentTokens pairs every document in file with the token group it
-// starts in, returning one entry per document in file order.
+// starts in, and returns one entry per document in file order.
 //
 // The groups come from [tokens.SplitDocuments]. Each document anchors at
 // the offset of its header token, or of its body's first token when it has
-// no header, and takes the groups from the first one no earlier document
-// claimed up to the one the next document anchors in, so a group that starts
-// ahead of the first anchor, such as a leading "..." marker, joins the
-// document below it. Matching by offset rather than by index keeps a
+// no header. It takes the groups from the first one no earlier document
+// claimed up to the one the next document anchors in. A group that starts
+// ahead of the first anchor, such as a leading "..." marker, thus joins
+// the document below it. Matching by offset rather than by index keeps a
 // document paired with its own tokens when the parser and the splitter
 // disagree on boundaries, as they do for such a marker. A document with no
 // anchor gets nil tokens.
@@ -474,7 +475,7 @@ func alignDocumentTokens(file *ast.File, tks token.Tokens) []token.Tokens {
 	result := make([]token.Tokens, len(file.Docs))
 
 	// The first group no document has claimed, so a group that no anchor
-	// reaches back to still joins a document instead of being dropped.
+	// reaches back to still joins a document rather than falling out.
 	next := 0
 
 	for i := range file.Docs {
@@ -639,8 +640,8 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // A Node from [Node.At] or [Node.Nodes] is scoped to the node a path
 // selects. Decode decodes that node alone, which reads one value without
 // decoding the whole document, such as a discriminator field that routes
-// the document, and Bind resolves the paths in an error from the node, so
-// a check written for the type of that value reports the right lines. Any
+// the document. Bind resolves the paths in an error from the node, so a
+// check written for the type of that value reports the right lines. Any
 // Node reaches the root of its document through [Node.Document], and
 // [Node.Path] is [paths.Root] for the root and the path from it for a
 // scoped Node.
@@ -684,7 +685,7 @@ type Node struct {
 // [Node.AST] returns the go-yaml node the Node selects, and [Node.Path]
 // is the path from the document root to it. The node is part of the
 // tree [Source.File] returns, which every Node of the Source shares and
-// resolves against, so it is read-only.
+// resolves against, so a caller must not modify it.
 func (n *Node) DocumentAST() *ast.DocumentNode {
 	return n.doc.root
 }
@@ -728,7 +729,7 @@ func (n *Node) Document() *Node {
 // comment group for one holding only comments. AST returns either as it
 // is, as such a document decodes to nothing. The node is part of the tree
 // [Source.File] returns, which every Node of the Source shares and
-// resolves against, so it is read-only.
+// resolves against, so a caller must not modify it.
 func (n *Node) AST() ast.Node {
 	if n.base.IsRoot() {
 		return n.doc.root.Body
@@ -742,8 +743,8 @@ func (n *Node) AST() ast.Node {
 // document with the receiver, and reaches the document through
 // [Node.Document]. A validator given to a scoped decode checks the node,
 // and a path in an error it or the decoded value reports resolves from
-// the node, so a check written for a type reports the same lines whether
-// the type is the whole document or a value inside one:
+// the node. A check written for a type thus reports the same lines
+// whether the type is the whole document or a value inside one:
 //
 //	hours, err := doc.At(paths.Root().Child("spec", "hours"))
 //	if err != nil {
@@ -1083,8 +1084,8 @@ func (n *Node) DocumentIndex() int {
 // with neither a header nor a body. For a Node from [Node.At] they run
 // from the first token under the node through the last, comments between
 // them included, and are nil when the scope selects nothing. The slice
-// is a copy, so reordering it reaches nothing, while the tokens
-// themselves are shared and read-only.
+// is a copy, so reordering it reaches nothing. Every Node shares the
+// tokens themselves, so a caller must not modify them.
 func (n *Node) Tokens() token.Tokens {
 	return slices.Clone(n.content)
 }
@@ -1092,13 +1093,13 @@ func (n *Node) Tokens() token.Tokens {
 // Preamble returns the tokens of the document the Node belongs to before
 // its content: the comments and %YAML or %TAG directives above its "---"
 // header, the header itself, and the comments between the header and the
-// first token of the content. The parser cuts the tokens above the header off as a node of
-// their own, and [Source.Documents] folds them back into the document the
-// YAML spec attaches them to, so a schema directive written above the
-// header is in the preamble of the document it describes. A document
-// without content, such as one holding comments alone, is all preamble.
-// The slice is a copy, and the tokens are shared and read-only, as for
-// [Node.Tokens].
+// first token of the content. The parser cuts the tokens above the header
+// off as a node of their own, and [Source.Documents] folds them back into
+// the document the YAML spec attaches them to. A schema directive written
+// above the header is thus in the preamble of the document it describes.
+// A document without content, such as one holding comments alone, is all
+// preamble. The slice is a copy of shared tokens that a caller must not
+// modify, as for [Node.Tokens].
 func (n *Node) Preamble() token.Tokens {
 	return slices.Clone(n.doc.tokens[:n.doc.preamble])
 }
@@ -1321,8 +1322,8 @@ func isNilValidator(dv Validator) bool {
 //
 // An error without a location, such as one from
 // [go.jacobcolvin.com/niceyaml/paths], binds all the same, and the bound
-// error names the source in front of the message, as "name: msg", so an
-// error from one file of many still says which file. The message of err
+// error names the source in front of the message, as "name: msg". An
+// error from one file of many thus still says which file. The message of err
 // stays as it is, and the position goes in front of it, so bind such an
 // error before adding context with [fmt.Errorf] to keep the position
 // beside the message:
@@ -1348,16 +1349,17 @@ func isNilValidator(dv Validator) bool {
 // them.
 //
 // If err is nil, Bind returns nil. A nil [*Error] or [*SourceError]
-// pointer as err carries nothing to bind and also returns a nil error, so
-// a validator that accumulates into a typed pointer and returns it on
-// success reports no error, and one inside the chain binds nothing, so
-// Bind looks past it. An error that is or wraps a [*SourceError] along its
-// cause chain, with no [*Error] above it that carries a location or nests
-// errors, is bound already, to this source or another, and comes back as
-// it is, so binding is idempotent. A located Error above a binding binds
-// anew at its own location, with the position the inner binding resolved
-// kept in its message. An Error above a binding that nests errors binds
-// anew around it, with those errors as children. Bind never modifies err.
+// pointer as err carries nothing to bind, so Bind returns a nil error for
+// it too. A validator that accumulates into a typed pointer and returns
+// it on success thus reports no error. Such a pointer inside the chain
+// binds nothing, so Bind looks past it. An error that is or wraps a
+// [*SourceError] along its cause chain, with no [*Error] above it that
+// carries a location or nests errors, is bound already, to this source
+// or another, and comes back as it is. Binding is thus idempotent. A
+// located Error above a binding binds anew at its own location, and its
+// message keeps the position the inner binding resolved. An Error above
+// a binding that nests errors binds anew around it, with those errors as
+// children. Bind never modifies err.
 func (n *Node) Bind(err error) error {
 	return bindTree(err, binder{src: n.source, node: n})
 }
@@ -1418,8 +1420,8 @@ func (c decodeConfig) decodeOptions() []yaml.DecodeOption {
 
 // WithValidator is a [DecodeOption] that validates the document with dv
 // before decoding it, and a validation error ends the decode before any
-// typed decoding. Several validators run in the order given, stopping
-// at the first that fails, and [MultiValidator] runs several and
+// typed decoding. Several validators run in the order given and stop at
+// the first that fails, and [MultiValidator] runs several and
 // reports every failure. Validation skips a nil dv, and one that holds a
 // nil pointer or func, such as a schema a program loads only on some
 // paths. A [go.jacobcolvin.com/niceyaml/schema.Schema] checks the
@@ -1446,7 +1448,7 @@ func WithSelfValidation(enabled bool) DecodeOption {
 
 // WithDisallowUnknownFields is a [DecodeOption] that sets whether a mapping
 // key with no field in the target struct is an error. The default is false,
-// and unknown keys are then ignored.
+// and the decode then skips unknown keys.
 func WithDisallowUnknownFields(disallow bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.disallowUnknownFields = disallow
@@ -1516,8 +1518,8 @@ func WithReferences(data ...[]byte) DecodeOption {
 // none. After decoding succeeds, every value in v that implements
 // [SelfValidator] validates itself, with the paths it reports put under
 // the path of the value, unless [WithSelfValidation] switches that off.
-// Fields absent from the document keep their existing values, so v may
-// be pre-populated with defaults. When v points to a pointer, a nil
+// Fields absent from the document keep their existing values, so a
+// caller may fill v with defaults first. When v points to a pointer, a nil
 // pointer gets a new value, and the node decodes into the value the
 // pointer points to. An untagged null sets the pointer to nil. A node
 // without content, or a tagged null such as "!!null", leaves the
@@ -1896,12 +1898,13 @@ func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 	return views, true
 }
 
-// bindDecodeError binds an error from the decoder to the source: a
-// [yaml.Error] at a token of the source as an [*Error] at that token, so
-// the excerpt marks it and the error matches [ErrDecodeRejected], and any
-// other error, such as a canceled context or one a value's own
-// UnmarshalYAML returns, as it is. Only a [yaml.Error] the decoder returns
-// itself converts, so a [yaml.Error] that a value's UnmarshalYAML wraps
+// bindDecodeError binds an error from the decoder to the source. A
+// [yaml.Error] at a token of the source binds as an [*Error] at that
+// token, so the excerpt marks it and the error matches
+// [ErrDecodeRejected]. Any other error, such as a canceled context or one
+// a value's own UnmarshalYAML returns, binds as it is. Only a
+// [yaml.Error] the decoder returns itself converts, so a [yaml.Error]
+// that a value's UnmarshalYAML wraps
 // comes back as that unmarshaler's error, with the text and sentinels of
 // its wrapper. An UnmarshalYAML that parses the bytes it gets returns a
 // [yaml.Error] of its own, whose token comes from that parse rather than
@@ -1927,8 +1930,9 @@ func (n *Node) bindDecodeError(err error) error {
 
 // holdsToken reports whether tk is a token of the source's parse. That is
 // one of the tokens the parser built its tree from, or one it made for a
-// node of the document, such as the null of a key without a value, or a
-// token of the second parse the [decodeTree] of the document comes from.
+// node of the document, such as the null of a key without a value. A
+// token of the second parse the [decodeTree] of the document comes from
+// counts too.
 // It compares pointers, so a token from another parse, such as the one an
 // UnmarshalYAML runs on its bytes, never matches, however closely it
 // resembles a token of the source.
@@ -2072,8 +2076,8 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 // [ErrDecodeRejected]. On error, the returned T is the zero value.
 //
 // A scoped Decode reads one typed value without decoding the whole
-// document, such as a version number or a list of tags, and a scalar
-// decodes into a string whatever its type, so a Decode[string] reads a
+// document, such as a version number or a list of tags. A scalar decodes
+// into a string whatever its type, so a Decode[string] reads a
 // discriminator field such as kind. A number decodes into a string in its
 // canonical spelling, so 1.10 reads as "1.1" and 0x10 as "16":
 //
