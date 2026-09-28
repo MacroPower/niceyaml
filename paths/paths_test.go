@@ -503,6 +503,10 @@ func TestParse_ErrorMessage(t *testing.T) {
 			expr: "$.'a'\xff",
 			want: `parse path "$.'a'\xff": invalid path: unexpected "\xff" at 5`,
 		},
+		"index with a leading zero": {
+			expr: "$[01]",
+			want: `parse path "$[01]": invalid path: index "01": not a canonical non-negative integer`,
+		},
 		"index overflows int": {
 			expr: "$[99999999999999999999]",
 			want: `parse path "$[99999999999999999999]": invalid path: ` +

@@ -14,7 +14,7 @@ var (
 
 	// An index selector that is not a canonical non-negative decimal
 	// integer produces errInvalidIndex.
-	errInvalidIndex = errors.New("not a non-negative integer")
+	errInvalidIndex = errors.New("not a canonical non-negative integer")
 
 	// An index selector too large for an int produces errIndexOutOfRange.
 	errIndexOutOfRange = errors.New("out of range")
