@@ -1000,9 +1000,12 @@ func TrimLineEnding(s string) string {
 // Origin can open with the rest, such as the line break that ends a
 // preceding "..." line. The anchor lands at line 1, column 1, offset 1,
 // where the lexer places the first token of a fresh stream, only when no
-// whitespace comes before its text. A stream carrying whitespace alone,
-// whose token [Tokenize] positions ahead of the whitespace rather than
-// inside it, keeps the positions it has.
+// whitespace comes before its text. A token whose Origin is empty, such as
+// the empty content of a block scalar, shares the position of the text
+// after it, so it anchors the shift only when no token of the stream holds
+// text. A stream carrying whitespace alone, whose token [Tokenize]
+// positions ahead of the whitespace rather than inside it, keeps the
+// positions it has.
 //
 // The clones link to each other through Next and Prev and to nothing outside
 // the result, so the stream stands alone. Tokens with nil positions come
@@ -1016,10 +1019,25 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 	// A stream without one starts where the lexer starts a fresh stream.
 	startLine, startCol, startOffset := 1, 1, 1
 
-	var ws strings.Builder
+	var (
+		ws     strings.Builder
+		anchor *token.Token
+		lead   string
+	)
 
 	for _, tk := range tks {
 		if tk == nil || tk.Position == nil {
+			continue
+		}
+
+		// An empty token shares the position of the text after it, so the
+		// whitespace that opens that text's Origin still lies ahead of it.
+		// It anchors only when no token holds text.
+		if tk.Origin == "" {
+			if anchor == nil {
+				anchor, lead = tk, ws.String()
+			}
+
 			continue
 		}
 
@@ -1028,7 +1046,7 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 		// whitespace alone has no such split, so it anchors nothing, but its
 		// whitespace still comes before the anchor's text.
 		trimmed := strings.TrimLeft(tk.Origin, " \t\r\n")
-		if trimmed == "" && tk.Origin != "" {
+		if trimmed == "" {
 			ws.WriteString(tk.Origin)
 
 			continue
@@ -1036,14 +1054,17 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 
 		// Join the whitespace before counting it, so a "\r" that ends one
 		// Origin and a "\n" that opens the next count as one CRLF break.
-		lead := ws.String() + tk.Origin[:len(tk.Origin)-len(trimmed)]
-		lastLine := lead[strings.LastIndexAny(lead, "\r\n")+1:]
-
-		startLine = tk.Position.Line - lineend.CountBreaks(lead)
-		startCol = tk.Position.Column - len(lastLine)
-		startOffset = tk.Position.Offset - len(lead)
+		anchor, lead = tk, ws.String()+tk.Origin[:len(tk.Origin)-len(trimmed)]
 
 		break
+	}
+
+	if anchor != nil {
+		lastLine := lead[strings.LastIndexAny(lead, "\r\n")+1:]
+
+		startLine = anchor.Position.Line - lineend.CountBreaks(lead)
+		startCol = anchor.Position.Column - len(lastLine)
+		startOffset = anchor.Position.Offset - len(lead)
 	}
 
 	result := make(token.Tokens, 0, len(tks))

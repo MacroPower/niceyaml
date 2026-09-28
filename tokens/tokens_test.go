@@ -1494,6 +1494,49 @@ func TestResetPositions_Text(t *testing.T) {
 		}
 	})
 
+	t.Run("anchors past an empty token", func(t *testing.T) {
+		t.Parallel()
+
+		// The empty content of a block scalar shares the position of the
+		// text after it, but not the whitespace that opens that text's
+		// Origin, so a stream cut at it anchors on the text.
+		tcs := map[string]struct {
+			input string
+		}{
+			"empty literal":          {input: "a: |\n\nb: 1\n"},
+			"empty stripped literal": {input: "a: |-\n\nb: 1\n"},
+			"empty folded":           {input: "a: >\n\n\nb: 1\n"},
+			"indented key after it":  {input: "a:\n  k: |\n\n  b: 1\n"},
+		}
+
+		// ResetPositions leaves IndentNum and IndentLevel as they are, so
+		// compare the line, column, and offset alone.
+		lco := func(tk *token.Token) [3]int {
+			return [3]int{tk.Position.Line, tk.Position.Column, tk.Position.Offset}
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				tks := tokens.Tokenize(tc.input)
+				cut := slices.IndexFunc(tks, func(tk *token.Token) bool { return tk.Origin == "" })
+				require.GreaterOrEqual(t, cut, 0)
+
+				got := tokens.ResetPositions(tks[cut:])
+				fresh := tokens.Tokenize(yamltest.DumpTokenOrigins(got))
+				require.Len(t, got, len(fresh)+1)
+
+				// The empty token shares the position of the token after it.
+				assert.Equal(t, lco(got[1]), lco(got[0]))
+
+				for j, want := range fresh {
+					assert.Equal(t, lco(want), lco(got[j+1]), "token %d %q", j+1, got[j+1].Origin)
+				}
+			})
+		}
+	})
+
 	t.Run("severs links to neighboring documents", func(t *testing.T) {
 		t.Parallel()
 
