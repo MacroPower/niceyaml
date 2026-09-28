@@ -250,20 +250,42 @@ func TestURL(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
 		t.Parallel()
 
-		server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-			// Block forever.
-			select {}
+		// The handler never blocks. Close waits for every active handler
+		// to return, so a stray request that another process sends to a
+		// reused port gets an answer, and Close never waits on a client
+		// the test does not control. The handler counts only requests for
+		// a path that holds a random nonce, and a stray request gets 404
+		// and leaves the count alone. A Load that ignores its context
+		// fetches a valid schema and returns no error, so the checks
+		// below fail at once rather than hang.
+		path := "/" + rand.Text() + "/schema.json"
+
+		var requests atomic.Int32
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != path {
+				w.WriteHeader(http.StatusNotFound)
+
+				return
+			}
+
+			requests.Add(1)
+
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{"type": "object"}`))
 		}))
 		defer server.Close()
 
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // Cancel immediately.
 
-		ref, err := schema.URL(server.URL+"/schema.json").Resolve(ctx, document(t))
+		ref, err := schema.URL(server.URL+path).Resolve(ctx, document(t))
 		require.NoError(t, err)
 
 		_, err = schema.NewRegistry().Load(ctx, ref)
-		require.Error(t, err)
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Equal(t, int32(0), requests.Load(), "a canceled Load should not fetch")
 	})
 
 	t.Run("invalid url", func(t *testing.T) {
