@@ -3,13 +3,13 @@ version: "3"
 set: [errexit, nounset, pipefail]
 shopt: [globstar]
 
-# Recursive `sources` globs reach into hidden and build directories, so
-# fingerprints exclude whatever .gitignore excludes (.claude/worktrees/,
+# Recursive `sources` globs reach into hidden and build directories, so Task
+# drops whatever .gitignore excludes from the fingerprints (.claude/worktrees/,
 # .devbox/, .task/, .test/, .tmp/, .worktrees/, dist/).
 use_gitignore: true
 
-# The .taskfiles/ segmentation is intentional, even where a namespace holds
-# only thin Dagger wrappers — do not flatten it into this file.
+# Keep each namespace in its own file under .taskfiles/, even a namespace that
+# holds only thin Dagger wrappers.
 includes:
   dagger: ./.taskfiles/dagger/Taskfile.yaml
   dev: ./.taskfiles/dev/Taskfile.yaml
@@ -43,11 +43,11 @@ tasks:
     desc: Runs all docs targets
     deps: [go:docs]
 
-  # check is the fast local gate: lint and test invoke their tools straight off
-  # the devbox PATH, so it needs no Dagger engine. check:ci adds the gates whose
-  # tools (Trivy, zizmor, renovate-config-validator) are not on the devbox PATH
-  # and so run through Dagger. check:all is the union -- the full set CI runs,
-  # mirrored by the validate.yaml matrix.
+  # check is the fast local gate. lint and test invoke their tools straight off
+  # the devbox PATH, so check needs no Dagger engine. check:ci adds the gates
+  # that run through Dagger because their tools (Trivy, zizmor,
+  # renovate-config-validator) are not on the devbox PATH. check:all is the
+  # union of both and matches the gates in the validate.yaml matrix.
   check:
     desc: Runs the local checks using devbox
     deps: [lint, test]

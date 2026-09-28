@@ -14,8 +14,8 @@ tasks:
       Updates every Dagger version pin in lockstep: the engineVersion in
       each dagger.json, the CLI version passed to dagger-for-github in
       workflows, and the github:dagger/nix flake commit in devbox.json.
-      Then reinstalls the devbox environment and reruns dagger develop in
-      every module so generated code matches the new engine.
+      It then reinstalls the devbox environment and reruns dagger develop in
+      every module so the generated code matches the new engine.
 
       Run `task check` afterwards to verify the upgrade.
 

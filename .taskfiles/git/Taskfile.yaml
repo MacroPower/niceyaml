@@ -8,7 +8,7 @@ tasks:
     desc: Installs git hooks
     preconditions:
       - sh: command -v lefthook
-        msg: "lefthook is not installed. Run 'task install' first."
+        msg: "lefthook is not on PATH. Run 'task install' first."
     cmds:
       - lefthook install
 
@@ -23,8 +23,8 @@ tasks:
     requires:
       vars: [BRANCH]
     vars:
-      # Branch names may contain slashes; flatten them so each worktree
-      # is a single directory under .worktrees/.
+      # Branch names may contain slashes, so DIR replaces them with dashes
+      # to keep each worktree a single directory under .worktrees/.
       DIR: '{{.BRANCH | replace "/" "-"}}'
     cmds:
       - mkdir -p .worktrees

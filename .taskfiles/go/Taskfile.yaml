@@ -3,8 +3,8 @@ version: "3"
 set: [errexit, nounset, pipefail]
 shopt: [globstar]
 
-# Go tasks call the local toolchain (go, golangci-lint) directly; devbox
-# provides both on PATH. The repo is a Go workspace (go.work) holding the
+# Go tasks call the local toolchain (go, golangci-lint) directly, and devbox
+# provides both on PATH. The repo is a Go workspace (go.work). It holds the
 # library module at the root, the bubbles and fangs adapter modules under
 # bubbles and fangs, and the nyaml CLI module under cmd/nyaml. The ./...
 # pattern stops at a nested module, so GO_PKGS names every tree. go mod tidy
@@ -14,14 +14,14 @@ vars:
   GO_PKGS: ./... ./bubbles/... ./fangs/... ./cmd/nyaml/...
   GO_MODULES: [".", "bubbles", "fangs", "cmd/nyaml"]
   TEST_TIMEOUT: 30m
-  # Test names matching this regex are integration tests: test skips them,
-  # test:integration selects them.
+  # Tests whose names match this regex are integration tests. test skips them,
+  # and test:integration selects them.
   INTEGRATION_PATTERN: Integration
   DEADCODE_VERSION: v0.50.0 # renovate: datasource=go depName=golang.org/x/tools
 
 tasks:
-  # lint, format, tidy, and tidy:check are fingerprinted with `sources` so a
-  # no-op `task check` skips them. lint and format additionally read
+  # lint, format, tidy, and tidy:check declare `sources`, so Task skips them on
+  # a no-op `task check`. lint and format additionally read
   # .golangci.yaml and depend on the golangci-lint binary, so devbox.lock is a
   # source (a Go or golangci-lint version bump invalidates their cache). tidy
   # reads neither, so its sources stop at the module files.
@@ -54,20 +54,20 @@ tasks:
   tidy:check:
     desc: Verifies go.mod and go.sum are tidy
     summary: |
-      Runs `go mod tidy -diff`, which reports the changes tidy would make and
-      exits non-zero if any are needed, without modifying the files. Being
-      read-only, it is safe to run alongside go:lint and go:test and needs no
-      .git (the check runs inside the devbox container in CI). Runs once per
-      module in GO_MODULES.
+      Runs `go mod tidy -diff` once per module in GO_MODULES. The command
+      reports the changes tidy would make and exits non-zero if a module needs
+      any, without modifying the files. Because it writes nothing, it can run
+      alongside go:lint and go:test. It also needs no .git, since CI runs the
+      check inside the devbox container.
     sources: *go-tidy-sources
     cmds:
       - for: { var: GO_MODULES }
         cmd: go -C {{.ITEM}} mod tidy -diff
 
-  # test, test:integration, and test:cover are deliberately not fingerprinted
-  # with `sources`. Go's build/test cache is content-addressed and re-runs
-  # exactly the packages that changed; a file-glob fingerprint here would be
-  # coarser and could skip a stale test.
+  # test, test:integration, and test:cover deliberately declare no `sources`.
+  # Go's build and test cache is content-addressed and re-runs the packages
+  # that changed. A file-glob fingerprint would be coarser and could skip a
+  # stale test.
   test:
     desc: Runs Go unit tests (skips integration tests) with the race detector
     summary: |
@@ -104,16 +104,15 @@ tasks:
     cmds:
       - go generate {{.GO_PKGS}}
 
-  # deadcode, bench, and docs are advisory tasks whose whole purpose is the
-  # report they print to stdout. They are deliberately not fingerprinted: a
-  # `sources` cache hit would skip the command and suppress that output. Run
-  # them on demand.
+  # deadcode, bench, and docs are advisory tasks that exist to print a report
+  # to stdout. They deliberately declare no `sources`, because a cache hit
+  # would skip the command and suppress the report. Run them on demand.
   deadcode:
     desc: Reports unreachable Go functions (advisory)
     label: "go:deadcode {{.PKG}}"
     summary: |
-      Reports unreachable functions via the golang.org/x/tools deadcode
-      analyzer. Advisory only; not part of the standard gate.
+      Reports unreachable functions with the golang.org/x/tools deadcode
+      analyzer. The report is advisory, and the standard gate does not run it.
 
       Args:
         PKG: Go package(s) to analyze (default: ./...)
