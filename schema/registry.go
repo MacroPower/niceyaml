@@ -61,10 +61,10 @@ const defaultHTTPTimeout = 30 * time.Second
 
 // Registry maps YAML documents to schemas using pluggable resolvers.
 //
-// Lookup tries the resolvers [WithResolvers] gave it in order; the first
-// [Resolver] that does not report [ErrNoMatch] wins. The registry caches
-// the schemas it compiles by [Ref.Key] and consults that cache before
-// loading, so it loads and compiles each schema once however many
+// Lookup tries the resolvers [WithResolvers] gave it in order, and the
+// first [Resolver] that does not report [ErrNoMatch] wins. The registry
+// caches the schemas it compiles by [Ref.Key] and consults that cache
+// before loading, so it loads and compiles each schema once however many
 // documents name it. The cache never evicts, so the registry keeps every
 // schema it compiles for its whole lifetime, and each distinct Key adds
 // an entry, a URL that differs from another only in its query string or
@@ -251,8 +251,8 @@ func WithRequireSchema(require bool) RegistryOption {
 // They apply when the registry compiles a schema, which happens once per
 // [Ref.Key], so an option such as a format validator takes effect for
 // every document validated against that schema. A [*Schema] compiled
-// elsewhere goes into the registry as it is, with the options it was
-// compiled with:
+// elsewhere goes into the registry as it is, with the options of its own
+// compile:
 //
 //	reg := schema.NewRegistry(schema.WithCompileOptions(
 //	    schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)),
@@ -287,8 +287,8 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // Lookup finds the validator for a document.
 //
 // Returns [ErrNoMatch] if no resolver applies to the document, with the
-// reason each resolver gave nested in it, so [errors.Is] finds a reason
-// such as [ErrNoDirective] and a rendering of the error, such as
+// reason each resolver gave nested in it. [errors.Is] finds a reason such
+// as [ErrNoDirective], and a rendering of the error, such as
 // [niceyaml.FormatError] or
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], lists the
 // reasons below the message:
@@ -312,11 +312,11 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 //
 // The resolvers pick a schema for a whole document, from its file path,
 // its preamble, or its content, so n must be the root [niceyaml.Node] of
-// a document, and a Node from [niceyaml.Node.At] fails with
-// [ErrScopedDocument], since the schema Lookup would return is the
-// document's and a caller who applied it to the node would check the
-// node against the wrong schema. Validate one node against a schema of
-// its own with a [Schema].
+// a document. A Node from [niceyaml.Node.At] fails with
+// [ErrScopedDocument]. The schema Lookup would return is the document's,
+// and a caller who applied it to the node would check the node against
+// the wrong schema. Validate one node against a schema of its own with a
+// [Schema].
 //
 // Every error comes back bound to the document through
 // [niceyaml.Node.Bind], so its message names the file the document
@@ -374,11 +374,12 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, err
 	return nil, noMatch(reasons)
 }
 
-// noMatch returns the error a lookup reports when every resolver declined:
-// [ErrNoMatch] alone when no resolver said more than that, and otherwise
-// ErrNoMatch with the reason of each resolver that did nested in it, in
-// lookup order, so [errors.Is] finds a reason such as [ErrNoDirective]
-// and a rendering of the error lists the reasons below the message.
+// noMatch returns the error a lookup reports when every resolver declined.
+// That is [ErrNoMatch] alone when no resolver said more than that, and
+// otherwise ErrNoMatch with the reason of each resolver that did nested
+// in it, in lookup order. [errors.Is] then finds a reason such as
+// [ErrNoDirective], and a rendering of the error lists the reasons below
+// the message.
 func noMatch(reasons []error) error {
 	var nested []error
 
@@ -467,17 +468,19 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 		return err
 	}
 
-	//nolint:wrapcheck // Validation errors should be returned directly.
+	//nolint:wrapcheck // Validation errors pass through unchanged.
 	return n.Validate(ctx, v)
 }
 
-// Schema returns the compiled schema ref names: the one a Ref from
-// [Schema.Ref] carries, as it is, or the bytes [Registry.Load] loads for
-// it, compiled with the options [WithCompileOptions] gave the registry on
-// the first request for its [Ref.Key] and served from the cache after
-// that. [Registry.Lookup] takes the schema it validates with from here,
-// so a caller that holds a Ref of its own, such as one that checks a Go
-// value with [Schema.ValidateValue], shares the same load and compile:
+// Schema returns the compiled schema ref names. For a Ref from
+// [Schema.Ref], that is the schema the Ref carries, as it is. For any
+// other Ref, Schema compiles the bytes [Registry.Load] loads for it on
+// the first request for its [Ref.Key], with the options
+// [WithCompileOptions] gave the registry, and serves the result from the
+// cache after that. [Registry.Lookup] takes the schema it validates with
+// from here, so a caller that holds a Ref of its own, such as one that
+// checks a Go value with [Schema.ValidateValue], shares the same load and
+// compile:
 //
 //	s, err := reg.Schema(ctx, schema.URL(schemaURL))
 //	if err != nil {
@@ -492,9 +495,9 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 // error without waiting for the load to finish.
 //
 // Concurrent requests for one Key share a single load and compile, and
-// each caller waits for it only while its own context is live. The shared
+// each caller waits for it only until its own context ends. The shared
 // load runs under the context of the caller that started it and reports
-// whether that context had ended when the load failed. In that case a
+// whether that context ended before the load failed. In that case a
 // caller with a live context loads again, and a caller whose context has
 // ended returns [ErrLoad] wrapping its own context's error. Any other
 // failure reaches every caller that shared the load, including a timeout
@@ -526,7 +529,7 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 		ch := r.group.DoChan(ref.Key(), func() (any, error) {
 			s, err := r.compileRecovering(ctx, ref)
 
-			// Report whether this caller's context had ended when the load
+			// Report whether this caller's context ended before the load
 			// failed, so a joiner can tell that cancellation apart from a
 			// failure of the load itself.
 			return flight{schema: s, starterEnded: err != nil && ctx.Err() != nil}, err
@@ -585,16 +588,16 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 	}
 }
 
-// Load returns the bytes of the schema ref names: the file a Ref from
-// [File] names, read from the file system [WithFS] gave the registry or
-// from the working directory; the URL a Ref from [URL] names, fetched
-// with the client [WithHTTPClient] gave it; or the bytes the load of a Ref
-// from [Loadable] returns. Load reads the bytes on every call and caches
-// nothing. [Registry.Schema] loads the same bytes once and compiles them,
-// so Load is for a caller that wants the bytes themselves, such as one
-// that prints a schema. For a file or URL whose fragment selects a
-// subschema, Load returns the bytes of the whole document. An error wraps
-// [ErrLoad].
+// Load returns the bytes of the schema ref names. For a Ref from [File],
+// Load reads the file from the file system [WithFS] gave the registry or
+// from the working directory. For a Ref from [URL], it fetches the URL
+// with the client [WithHTTPClient] gave the registry. For a Ref from
+// [Loadable], it returns the bytes the Ref's load returns. Load reads the
+// bytes on every call and caches nothing. [Registry.Schema] loads the
+// same bytes once and compiles them, so Load is for a caller that wants
+// the bytes themselves, such as one that prints a schema. For a file or
+// URL whose fragment selects a subschema, Load returns the bytes of the
+// whole document. An error wraps [ErrLoad].
 //
 // The zero Ref names no bytes, and a Ref from [Schema.Ref] carries a
 // compiled schema rather than bytes, which [Ref.Schema] returns, so Load
@@ -886,8 +889,8 @@ func (r *Registry) cached(key string) (*Schema, bool) {
 }
 
 // A panicError carries a panic out of a shared load as an error, so it
-// can cross the singleflight group and be raised again by every caller
-// that joined the load.
+// crosses the singleflight group and every caller that joined the load
+// raises it again.
 type panicError struct {
 	value any
 }
@@ -899,7 +902,7 @@ func (p *panicError) Error() string {
 
 // A flight carries the result of a shared load to every caller that
 // joined it. It holds the schema the load compiled and whether the
-// context of the caller that started the load had ended when the load
+// context of the caller that started the load ended before the load
 // failed.
 type flight struct {
 	schema       *Schema

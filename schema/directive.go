@@ -61,7 +61,7 @@ type ParsedDirective struct {
 	Schema string
 
 	// Position is the 0-indexed position of the comment holding the
-	// directive. [ParseDocumentDirective] fills it from the comment token;
+	// directive. [ParseDocumentDirective] fills it from the comment token.
 	// [ParseDirective] reads a bare string and leaves it at the zero value.
 	Position position.Position
 }
@@ -74,7 +74,7 @@ type ParsedDirective struct {
 //
 // The marker is "yaml-language-server:", with optional whitespace before
 // the colon, or the IntelliJ "$schema:" short form. The marker must open
-// the comment, after any leading whitespace; a comment that mentions the
+// the comment, after any leading whitespace. A comment that mentions the
 // marker after other text is not a directive. The reference follows
 // "$schema=" or "$schema:" anywhere in the comment, so other settings may
 // precede it. It runs to the first whitespace, as yaml-language-server
@@ -100,9 +100,10 @@ func ParseDirective(comment string) *ParsedDirective {
 // tokens, such as those [go.jacobcolvin.com/niceyaml.Node.Tokens]
 // returns.
 //
-// The directive must appear before any non-comment content in the document;
-// a document header (---) and a %YAML or %TAG directive line may precede
-// it, and such a line may carry the directive as its trailing comment. The
+// The directive must appear before any non-comment content in the
+// document. A document header (---) and a %YAML or %TAG directive line may
+// precede it, and such a line may carry the directive as its trailing
+// comment. The
 // first directive wins. Returns nil when no directive appears before
 // content.
 func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
@@ -181,7 +182,7 @@ type directiveResolver struct{}
 // [niceyaml.Node.Preamble] and names the schema it references through
 // [FileOrURL]. It resolves a relative path against the directory of the
 // document's file, so a document without a file path reports
-// [ErrNoFilePath] for a relative path; a URL or an absolute path needs no
+// [ErrNoFilePath] for a relative path. A URL or an absolute path needs no
 // file and resolves either way. A document without a directive reports
 // [ErrNoDirective].
 //

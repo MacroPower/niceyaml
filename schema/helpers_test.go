@@ -19,9 +19,9 @@ func document(t *testing.T) *niceyaml.Node {
 	return yamltest.FirstDocument(t, "key: value\n")
 }
 
-// load resolves r and loads the schema it names, returning the ref's Key
-// alongside the loaded bytes. Resolve itself must succeed; load returns only
-// the Load error.
+// load resolves r and loads the schema it names. It returns the ref's Key
+// alongside the loaded bytes. Resolve itself must succeed, and load
+// returns only the Load error.
 func load(t *testing.T, r schema.Resolver) (string, []byte, error) {
 	t.Helper()
 

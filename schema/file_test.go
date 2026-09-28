@@ -35,7 +35,7 @@ func TestFile(t *testing.T) {
 	t.Run("missing file", func(t *testing.T) {
 		t.Parallel()
 
-		// Resolve names the file without touching it; only Load reads it.
+		// Resolve names the file without touching it, and only Load reads it.
 		url, _, err := load(t, schema.File("/nonexistent/path/schema.json"))
 		assert.Equal(t, "file:///nonexistent/path/schema.json", url)
 		require.ErrorIs(t, err, os.ErrNotExist)
@@ -181,8 +181,8 @@ func TestReadFile_ReadsTheAbsolutePath(t *testing.T) {
 
 	// A read from the working directory uses the path File made absolute
 	// to build the key, not the relative path made absolute again at read
-	// time, so the bytes under a key do not depend on the working
-	// directory at the time of the read.
+	// time. The bytes under a key then stay the same whatever the working
+	// directory is at the time of the read.
 	dir := t.TempDir()
 	abs := filepath.Join(dir, "s.json")
 	require.NoError(t, os.WriteFile(abs, []byte(`{"type": "object"}`), 0o600))

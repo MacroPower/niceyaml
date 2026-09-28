@@ -144,15 +144,15 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // as [*niceyaml.Error] values that carry the YAML path to each failing
 // location for [go.jacobcolvin.com/niceyaml/printer.Printer] to display.
 // [Schema.Validate] checks a node, which is the whole document for the
-// root [niceyaml.Node] of a document and one value inside it
-// for a Node from [niceyaml.Node.At], and [Schema.ValidateValue] checks
-// decoded data, such as one value taken from a document with a scoped
+// root [niceyaml.Node] of a document and one value inside it for a Node
+// from [niceyaml.Node.At]. [Schema.ValidateValue] checks decoded data,
+// such as one value taken from a document with a scoped
 // [niceyaml.Node.Decode] into any.
 //
 // A Schema is the validator for a program that holds one schema and
 // compiles it itself. It is also a [Resolver] that names itself for every
 // document, so one goes into a [Registry] as it is, on its own or behind
-// a [When] guard, and the registry validates with it without loading or
+// a [When] guard. The registry then validates with it without loading or
 // compiling anything:
 //
 //	var Config = schema.MustCompile(schemaJSON)
@@ -198,7 +198,7 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 
 // Validate implements [niceyaml.Validator]. It reads n as any through
 // [niceyaml.Node.Decode] and checks the result as [Schema.ValidateValue]
-// does, so [niceyaml.WithValidator] runs the schema before a decode, a
+// does. [niceyaml.WithValidator] runs the schema before a decode, a
 // [niceyaml.Decoder] runs it on every node it decodes, and
 // [niceyaml.Node.Validate] runs it on its own. A Node from
 // [niceyaml.Node.At] decodes to the node it selects, so the schema checks
@@ -221,16 +221,16 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // timestamp. Such a key may set a member of the same name.
 //
 // The decoder writes out the whole content of an alias it spells as
-// text, such as an alias used as a key, and it reads a mapping a merge
-// key brings in again at every merge, so a small document can cost far
-// more to decode than the decoded value shows. Before it decodes a node
-// that holds an alias, Validate therefore counts the nodes a decode of
-// the whole document reads, with each alias reading its content in full,
-// since the decoder reads the whole document to find the anchors of the
-// node. It applies the alias limit of [Schema.ValidateValue] to that
-// count, where an alias to a scalar counts as one unaliased node, and a
-// document past the limit returns an error wrapping both [ErrValidate]
-// and [ErrExcessiveAliasing] without decoding.
+// text, such as an alias used as a key. It also reads a mapping a merge
+// key brings in again at every merge. A small document can therefore cost
+// far more to decode than the decoded value shows. Before Validate
+// decodes a node that holds an alias, it counts the nodes a decode of the
+// whole document reads, with each alias reading its content in full. The
+// count covers the whole document because the decoder reads all of it to
+// find the anchors of the node. Validate applies the alias limit of
+// [Schema.ValidateValue] to that count, where an alias to a scalar counts
+// as one unaliased node. A document past the limit returns an error
+// wrapping both [ErrValidate] and [ErrExcessiveAliasing] without decoding.
 func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 	if s.acceptAll {
 		return nil
@@ -282,8 +282,8 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // gopkg.in/yaml.v3 applies to the share of aliased nodes in a document,
 // and a []byte counts as one node per character of its base64 text.
 // Where yaml.v3 applies the rule node by node as it decodes,
-// ValidateValue applies it once to the whole value and counts each use
-// of an aliased scalar other than a !!binary as an unaliased node, so it
+// ValidateValue applies it once to the whole value. It counts each use of
+// an aliased scalar other than a !!binary as an unaliased node, so it
 // accepts some documents yaml.v3 rejects. A map or slice that contains
 // itself returns an error wrapping [ErrValidate].
 //
@@ -297,11 +297,11 @@ func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 	return s.validate(ctx, data, nil)
 }
 
-// validate is [Schema.ValidateValue] with the node data was decoded from,
-// which [Schema.Validate] has and a caller of ValidateValue does not. A
-// violation at a key the decoder respells, such as the hexadecimal 0x10,
-// needs the node to spell the key in its path as the source does, and a
-// !!timestamp needs it to show whether the source wrote only a date.
+// validate is [Schema.ValidateValue] with the node a decode read data
+// from, which [Schema.Validate] has and a caller of ValidateValue does
+// not. A violation at a key the decoder respells, such as the hexadecimal
+// 0x10, needs the node to spell the key in its path as the source does,
+// and a !!timestamp needs it to show whether the source wrote only a date.
 func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error {
 	// Both normalizeJSON and the validator read a shared value again at
 	// every use, so the check runs before either of them.
@@ -315,8 +315,9 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 		return nil
 	}
 
-	// A structured validation failure carries per-location paths; convert it to
-	// a niceyaml.Error. Anything else is an unexpected internal failure.
+	// A structured validation failure carries per-location paths, so it
+	// converts to a niceyaml.Error. Anything else is an unexpected internal
+	// failure.
 	ve, ok := errors.AsType[*jsonschema.ValidationError](err)
 	if !ok {
 		return fmt.Errorf("%w: %w", ErrValidate, err)
@@ -333,7 +334,7 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 }
 
 // unresolvedRefs returns the failures in the tree of ve that report a $ref
-// or $dynamicRef the validator could not resolve, whether a resolver
+// or $dynamicRef the validator could not resolve. Either a resolver
 // returned an error, which wraps [jsonschema.ErrRefResolve], or no
 // resolver served the reference, which the message names. A reference
 // keyword that is itself a leaf for any other reason names a target that
@@ -359,10 +360,10 @@ func unresolvedRefs(ve *jsonschema.ValidationError) []error {
 //
 // The conversion flattens the error tree to its concrete failures with
 // [jsonschema.ValidationError.Leaves]. A single failure becomes the main
-// error, carrying its own path so the printer highlights that location and
-// [niceyaml.Error.Path] reports it. Several failures become a count summary
-// with no path of its own; each nested error carries the path to one
-// failing location.
+// error and carries its own path, so the printer highlights that location
+// and [niceyaml.Error.Path] reports it. Several failures become a count
+// summary with no path of its own, and each nested error carries the path
+// to one failing location.
 func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node) *niceyaml.Error {
 	leaves := ve.Leaves()
 
@@ -471,7 +472,7 @@ func sourcePath(root ast.Node, idx *memberIndex, segments []jsonschema.Segment) 
 	return path
 }
 
-// deref returns the content under node: it looks through what
+// deref returns the content under node. It looks through what
 // [contentNode] looks through and follows each alias through r. It
 // returns nil for an alias that does not resolve, and for an alias it
 // reaches again, which leads back to itself through a tag.
@@ -770,10 +771,10 @@ func contentNode(node ast.Node) ast.Node {
 // normalizeJSON converts the YAML-native values a decode produces that the
 // JSON Schema validator does not accept into the JSON spellings of the
 // same data. A !!binary becomes its base64 text. A !!timestamp becomes an
-// RFC 3339 full-date, such as 2001-12-14, when the scalar in root it was
-// decoded from holds only a date, and an RFC 3339 date-time otherwise.
-// Root is the node data was decoded from, and without it every timestamp
-// becomes a date-time. A [yaml.MapSlice], which a decode with
+// RFC 3339 full-date, such as 2001-12-14, when the scalar in root that a
+// decode read it from holds only a date, and an RFC 3339 date-time
+// otherwise. Root is the node a decode read data from, and without it
+// every timestamp becomes a date-time. A [yaml.MapSlice], which a decode with
 // [yaml.UseOrderedMap] yields for each mapping, becomes a map with the
 // same members, and a later item replaces an earlier one with the same
 // key, as a decode into a map does. It walks maps, slices, and ordered
@@ -898,7 +899,7 @@ func (w *normalizer) child(seg jsonschema.Segment, elem any) (any, bool) {
 	return norm, changed
 }
 
-// node returns the node in root that the visited value was decoded from.
+// node returns the node in root that a decode read the visited value from.
 // It returns nil when root is nil and when no node in root holds the
 // value, as under an alias, whose content sits under its anchor, and at a
 // member name [keptMembers] leaves out.
@@ -982,9 +983,9 @@ func stringText(node ast.Node) (string, bool) {
 
 // mapItemKey returns the member name a decode into a map gives a key it
 // reads as the Go value key, such as the key of a [yaml.MapItem] or the
-// value [decodedKey] reads from a key node: the text of a string key, the
-// printed Go value of any other key, and null for a nil key, which would
-// print as <nil>.
+// value [decodedKey] reads from a key node. A string key gives its text,
+// and any other key gives its printed Go value. A nil key gives null
+// rather than the <nil> it would print as.
 func mapItemKey(key any) string {
 	switch k := key.(type) {
 	case nil:

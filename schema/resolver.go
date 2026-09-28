@@ -14,12 +14,12 @@ import (
 // applies.
 var ErrNoMatch = errors.New("no matching schema")
 
-// Ref is the schema a [Resolver] names for a document: a key and a
-// function that loads the bytes to compile, from [Loadable], which
-// [Embedded] builds, a file the registry reads, from [File], an HTTP URL
-// the registry fetches, from [URL], or a [*Schema] compiled already, from
-// [Schema.Ref]. [FileOrURL] builds a file or a URL Ref from a reference
-// as written.
+// Ref is the schema a [Resolver] names for a document. A Ref from
+// [Loadable], which [Embedded] builds, holds a key and a function that
+// loads the bytes to compile. A Ref from [File] names a file the registry
+// reads, and one from [URL] names an HTTP URL the registry fetches. A Ref
+// from [Schema.Ref] carries a [*Schema] compiled already. [FileOrURL]
+// builds a file or a URL Ref from a reference as written.
 //
 // A Ref is itself a [Resolver] that names its schema for every document,
 // so one goes into [WithResolvers] or [When] as it is, and a resolver that
@@ -86,9 +86,9 @@ type Ref struct {
 // bytes with load on demand.
 //
 // The key must identify the schema uniquely, since two Refs with the same
-// key are one schema to every registry that caches on it. It is a name,
-// not necessarily a fetchable address: [URL] uses the URL, [File] the
-// file URL of the absolute path, and [Embedded] a digest of the bytes.
+// key are one schema to every registry that caches on it. The key is a
+// name, not necessarily a fetchable address. [URL] uses the URL, [File]
+// the file URL of the absolute path, and [Embedded] a digest of the bytes.
 // The load may be expensive and may fail, and must return the same bytes
 // each time it runs for one key.
 //
@@ -137,10 +137,10 @@ func (r Ref) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 //
 // Resolve returns a [Ref] naming the schema for doc, such as one from
 // [Loadable], or an error wrapping [ErrNoMatch] when the resolver does not
-// apply to the document. A registry
-// tries its resolvers in the order given and moves past each one that
-// reports ErrNoMatch, so a resolver decides whether it applies and names the
-// schema in the same call. Any other error stops the lookup.
+// apply to the document. A registry tries its resolvers in the order given
+// and moves past each one that reports ErrNoMatch, so a resolver decides
+// whether it applies and names the schema in the same call. Any other
+// error stops the lookup.
 //
 // A resolver may inspect the document's content, file path, or tokens, or
 // ignore the document and always name the same schema. The document is

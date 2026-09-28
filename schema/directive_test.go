@@ -190,7 +190,8 @@ func TestParseDocumentDirective(t *testing.T) {
 	t.Parallel()
 
 	// Each case is a token stream that tokens.SplitDocuments divides into
-	// documents; want maps a document index to the schema its directive names.
+	// documents, and want maps a document index to the schema its directive
+	// names.
 	tcs := map[string]struct {
 		input string
 		want  map[int]string

@@ -25,10 +25,10 @@ var ErrEmptyPath = errors.New("schema file path is empty")
 const onWindows = runtime.GOOS == "windows"
 
 // File creates a [Ref] that names a schema file. The Ref is a [Resolver]
-// that names the file for every document, and the registry reads the
-// file with [Registry.Load]: from the working directory, with path made
-// absolute against it, or from the file system [WithFS] gave the
-// registry, with path as a slash-separated path relative to its root, so
+// that names the file for every document. The registry reads the file
+// with [Registry.Load] from the working directory, with path made
+// absolute against it. Given [WithFS], the registry reads path from that
+// file system instead, as a slash-separated path relative to its root, so
 // a schema shipped in an [embed.FS] loads without touching the disk.
 //
 // File names the schema by the file:// URL of the path made absolute

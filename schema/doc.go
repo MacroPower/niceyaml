@@ -21,7 +21,7 @@
 //
 // Generate JSON schemas from Go types with
 // [go.jacobcolvin.com/x/jsonschema] directly, or at build time with its
-// `cmd/gen` go:generate tool; a type customizes its generated schema by
+// `cmd/gen` go:generate tool. A type customizes its generated schema by
 // implementing a JSONSchemaExtend method that the library calls:
 //
 //	func (t MyType) JSONSchemaExtend(_ context.Context, _ jsonschema.TypeContext, ts *jsonschema.TypeSchema) error {
@@ -35,9 +35,9 @@
 // # Validation
 //
 // [Compile] turns a JSON schema document into a [*Schema], a
-// [go.jacobcolvin.com/niceyaml.Validator] that reports failures as errors
-// carrying the YAML path to each failing location, and [MustCompile] does
-// the same at package scope for an embedded schema:
+// [go.jacobcolvin.com/niceyaml.Validator] whose errors carry the YAML path
+// to each failing location. [MustCompile] does the same at package scope
+// for an embedded schema:
 //
 //	//go:embed config.schema.json
 //	var schemaBytes []byte
@@ -54,10 +54,10 @@
 // [go.jacobcolvin.com/x/jsonschema] itself, such as one built from a Go
 // type, goes through [FromJSONSchema].
 //
-// Settings of the JSON Schema library pass through [WithJSONSchemaOptions],
-// which carries the JSONSchema prefix so the dependency shows at the call
-// site, as the options of the root package that pass go-yaml values through
-// carry a YAML prefix.
+// Settings of the JSON Schema library pass through [WithJSONSchemaOptions].
+// Its JSONSchema prefix shows the dependency at the call site, as the YAML
+// prefix does on the options of the root package that pass go-yaml values
+// through.
 //
 // # Resolution
 //
@@ -113,9 +113,9 @@
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaBytes)))
 //
-// A [*Schema] is a resolver of the same kind, so one compiled at package
+// A [*Schema] is a resolver of the same kind. One compiled at package
 // scope with [MustCompile], or built from a Go type with
-// [FromJSONSchema], goes into a registry as it is, and the registry
+// [FromJSONSchema], goes into a registry as it is. The registry then
 // validates with it without loading or compiling anything:
 //
 //	var Config = schema.MustCompile(configJSON)
@@ -126,14 +126,14 @@
 //	))
 //
 // [WithCompileOptions] reaches the schemas the registry compiles from
-// bytes, and a Schema compiled elsewhere keeps the options it was
-// compiled with.
+// bytes. A Schema compiled elsewhere keeps the options of its own compile.
 //
 // The loaders return a [Ref] whose key identifies the schema and whose
-// bytes the registry loads through [Registry.Load]: the copy [Embedded]
-// holds, a file from the working directory or from the file system
-// [WithFS] gave the registry, and a URL with the client [WithHTTPClient]
-// gave it. [Registry.Schema] checks its cache by key before it loads and
+// bytes the registry loads through [Registry.Load]. [Embedded] holds a
+// copy of the bytes. The registry reads a file from the working directory
+// or from the file system [WithFS] gave it, and it fetches a URL with the
+// client [WithHTTPClient] gave it. [Registry.Schema] checks its cache by
+// key before it loads and
 // compiles those bytes, so the registry loads and compiles each schema
 // once, however many documents name it. A caller that holds a Ref of its
 // own takes the compiled schema from the same cache. A resolver that picks
@@ -189,13 +189,13 @@
 //
 // # Resolver Order
 //
-// The registry tries the resolvers of [WithResolvers] in the order given;
-// the first that does not report [ErrNoMatch] wins. [When] guards any
+// The registry tries the resolvers of [WithResolvers] in the order given,
+// and the first that does not report [ErrNoMatch] wins. [When] guards any
 // resolver with a [go.jacobcolvin.com/niceyaml/schema/matcher.Matcher], so
-// the schema applies only to documents the matcher accepts, and
-// [Directive] reads the schema a document names for itself in a
-// yaml-language-server comment. A common order puts explicit user intent
-// first, then content-based matching, then file path conventions:
+// the schema applies only to documents the matcher accepts. [Directive]
+// reads the schema a document names for itself in a yaml-language-server
+// comment. A common order puts explicit user intent first, then
+// content-based matching, then file path conventions:
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(
 //	    schema.Directive(),                                          // Explicit user intent.

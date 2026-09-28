@@ -1722,8 +1722,8 @@ func TestSchema_BooleanSchema(t *testing.T) {
 func TestSchema_SubErrorAnnotations(t *testing.T) {
 	t.Parallel()
 
-	// A single violation is the main error itself; several violations render
-	// as annotations with their own paths.
+	// A single violation is the main error itself, and several violations
+	// render as annotations with their own paths.
 	tcs := map[string]struct {
 		schema           string
 		input            string
@@ -1821,7 +1821,7 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 func TestSchema_ErrorMessages(t *testing.T) {
 	t.Parallel()
 
-	// A single failure uses the concrete message once; several use a summary.
+	// A single failure uses the concrete message once, and several use a summary.
 
 	t.Run("single validation error uses concrete message once", func(t *testing.T) {
 		t.Parallel()
@@ -2353,9 +2353,9 @@ func TestSchema_SourcePath_SeveralViolations(t *testing.T) {
 	t.Parallel()
 
 	// Several violations lie under one mapping, and each path spells the
-	// key of the member the decode keeps: the later of two keys that
-	// decode to 1, an explicit key written before a merge key, and an
-	// alias key by the content of its anchor.
+	// key of the member the decode keeps. The cases cover the later of two
+	// keys that decode to 1, an explicit key written before a merge key, and
+	// an alias key, which the path spells by the content of its anchor.
 	v := compileSchema(t, []byte(`{"additionalProperties": {"type": "integer"}}`))
 
 	dd := yamltest.FirstDocument(t, stringtest.Input(`

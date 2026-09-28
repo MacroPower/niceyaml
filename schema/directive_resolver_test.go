@@ -19,8 +19,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
-// resolveAndLoad resolves doc through res and loads the schema it names,
-// returning the ref's Key alongside the loaded bytes. Both steps must
+// resolveAndLoad resolves doc through res and loads the schema it names.
+// It returns the ref's Key alongside the loaded bytes. Both steps must
 // succeed.
 func resolveAndLoad(t *testing.T, res schema.Resolver, doc *niceyaml.Node) (string, []byte) {
 	t.Helper()

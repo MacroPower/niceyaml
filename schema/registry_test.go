@@ -33,7 +33,7 @@ import (
 // Path helpers for tests.
 var kindPath = paths.Root().Child("kind")
 
-// countingLoader returns a resolver that names key and serves data, counting
+// countingLoader returns a resolver that names key, serves data, and counts
 // how many times its Load runs.
 func countingLoader(key string, data []byte) (schema.Resolver, *atomic.Int32) {
 	var loads atomic.Int32
@@ -405,7 +405,7 @@ func TestRegistry_Validate(t *testing.T) {
 			schema.Embedded(schemaData),
 		)))
 
-		// Service doesn't match, returns ErrNoMatch.
+		// Service matches no resolver, so Validate returns ErrNoMatch.
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
 		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
@@ -1197,9 +1197,10 @@ func TestRegistry_CompileOptionsNotAliased(t *testing.T) {
 
 	// The registry compiles each schema on its first lookup, so aliasing
 	// the caller's slice would let a later write change how the next
-	// schema compiles. The option copies the slice when it is built, so
-	// a write between WithCompileOptions and NewRegistry changes nothing
-	// either. Asserting formats makes the difference observable here.
+	// schema compiles. The option copies the slice when the caller builds
+	// it, so a write between WithCompileOptions and NewRegistry changes
+	// nothing either. Asserting formats makes the difference observable
+	// here.
 	tcs := map[string]struct {
 		writeFirst bool
 	}{
@@ -1236,9 +1237,9 @@ func TestRegistry_CompileOptionsNotAliased(t *testing.T) {
 func TestRegistry_ResolversNotAliased(t *testing.T) {
 	t.Parallel()
 
-	// The option copies the resolvers when it is built, so a nil written
-	// to the caller's slice afterwards neither slips past the nil check
-	// nor reaches Lookup.
+	// The option copies the resolvers when the caller builds it, so a nil
+	// written to the caller's slice afterwards neither slips past the nil
+	// check nor reaches Lookup.
 	res := []schema.Resolver{schema.Embedded([]byte(`{"type": "string"}`))}
 	opt := schema.WithResolvers(res...)
 	res[0] = nil
@@ -1256,9 +1257,9 @@ func TestRegistry_JSONSchemaOptionsNotAliased(t *testing.T) {
 	t.Parallel()
 
 	// The registry runs a CompileOption only when it first compiles a
-	// schema, so WithJSONSchemaOptions must copy its slice when the option
-	// is built. Otherwise a write after NewRegistry would turn format
-	// assertions off.
+	// schema, so WithJSONSchemaOptions must copy its slice when the caller
+	// builds the option. Otherwise a write after NewRegistry would turn
+	// format assertions off.
 	jopts := []jsonschema.ValidateOption{jsonschema.WithFormats(true)}
 
 	reg := schema.NewRegistry(
@@ -1399,7 +1400,7 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 
 			validated[kind] = true
 		} else {
-			// ConfigMap has no matching schema, returns ErrNoMatch.
+			// ConfigMap has no matching schema, so Validate returns ErrNoMatch.
 			require.ErrorIs(t, err, schema.ErrNoMatch)
 		}
 	}
@@ -2104,7 +2105,8 @@ func TestRegistry_Schema_PanicReachesCaller(t *testing.T) {
 	t.Parallel()
 
 	// The group runs the load on a goroutine of its own, so a panic in the
-	// load must come back to the caller's goroutine to be recoverable.
+	// load must come back to the caller's goroutine, where the caller can
+	// recover it.
 	reg := schema.NewRegistry()
 	ref := schema.Loadable("boom.json", func(_ context.Context) ([]byte, error) {
 		panic("boom")
