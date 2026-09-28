@@ -993,32 +993,23 @@ func (p *Printer) renderAnnotation(
 ) []string {
 	var rows []string
 
-	for _, group := range p.annotationGroups(view, ln, idx, gutterWidth, placement, starts) {
-		for _, row := range group.rows {
-			// Every row after the first of the line's annotation block is
-			// a continuation, whichever kind group it belongs to.
-			gutter := p.renderGutter(GutterContext{
-				Index:      idx,
-				Number:     ln.Number(),
-				MaxNumber:  maxNumber,
-				Soft:       len(rows) > 0,
-				Flag:       view.Flag(idx),
-				Annotation: true,
-				Styles:     p.styles,
-			}, gutterWidth)
+	for _, row := range p.annotationRows(view, ln, idx, gutterWidth, placement, starts) {
+		// Every row after the first of the line's annotation block is a
+		// continuation, whatever kind it renders in.
+		gutter := p.renderGutter(GutterContext{
+			Index:      idx,
+			Number:     ln.Number(),
+			MaxNumber:  maxNumber,
+			Soft:       len(rows) > 0,
+			Flag:       view.Flag(idx),
+			Annotation: true,
+			Styles:     p.styles,
+		}, gutterWidth)
 
-			rows = append(rows, gutter+row)
-		}
+		rows = append(rows, gutter+row)
 	}
 
 	return rows
-}
-
-// annotationGroup holds the annotations on a line that render in one kind
-// as the rows they take once the printer wraps and styles them. Each row
-// is one terminal row, without the gutter.
-type annotationGroup struct {
-	rows []string
 }
 
 // minAnnotationWidth is the fewest cells the text of an annotation wraps
@@ -1031,20 +1022,20 @@ const minAnnotationWidth = 20
 // many cells past the content.
 const maxColPastEnd = 1024
 
-// annotationGroups renders the annotations of line idx of view, which is
-// ln, at the given placement: the kinds as [line.Annotations.ByKind]
-// groups and orders them, and within each kind one group for each
-// [AnnotationRow] the [AnnotationFunc] returns, in order, wrapped to the
-// printer width and styled in the style of its kind. Starts holds the
-// column of the content at which each wrapped row of the line begins. A
-// kind the func returns no rows for takes no group.
-func (p *Printer) annotationGroups(
+// annotationRows renders the annotations of line idx of view, which is
+// ln, at the given placement as terminal rows without the gutter. The
+// kinds come in [line.Annotations.ByKind] order, and within each kind
+// the [AnnotationRow]s the [AnnotationFunc] returns come in order, each
+// wrapped to the printer width and styled in the style of its kind.
+// Starts holds the column of the content at which each wrapped row of
+// the line begins. A kind the func returns no rows for takes none.
+func (p *Printer) annotationRows(
 	view *line.View,
 	ln *line.Line,
 	idx, gutterWidth int,
 	placement line.Placement,
 	starts []int,
-) []annotationGroup {
+) []string {
 	anns := view.Annotations(idx).Filter(placement)
 	if len(anns) == 0 {
 		return nil
@@ -1053,7 +1044,7 @@ func (p *Printer) annotationGroups(
 	cr := cells.NewRow(ln.Content())
 	lastCol := utf8.RuneCountInString(ln.Content()) + maxColPastEnd
 
-	var groups []annotationGroup
+	var out []string
 
 	for _, group := range anns.ByKind() {
 		rows := p.annotationFunc(AnnotationContext{
@@ -1070,23 +1061,21 @@ func (p *Printer) annotationGroups(
 				k = annotationKind(group[0].Kind)
 			}
 
-			groups = append(groups, annotationGroup{
-				rows: p.annotationRow(row, p.styles.Style(k), cr, lastCol, gutterWidth, starts),
-			})
+			out = append(out, p.renderAnnotationRow(row, p.styles.Style(k), cr, lastCol, gutterWidth, starts)...)
 		}
 	}
 
-	return groups
+	return out
 }
 
-// annotationRow lays out row, an [AnnotationRow] of a line whose content
-// cells cr measures, as the terminal rows it takes once the printer
-// wraps it and styles it with kindStyle, without the gutter. Its column
-// stops at lastCol, and starts holds the column of the content at which
-// each wrapped row of the line begins.
+// renderAnnotationRow lays out row, an [AnnotationRow] of a line whose
+// content cells cr measures, as the terminal rows it takes once the
+// printer wraps it and styles it with kindStyle, without the gutter. Its
+// column stops at lastCol, and starts holds the column of the content at
+// which each wrapped row of the line begins.
 //
 //nolint:gocritic // hugeParam: value semantics match lipgloss.
-func (p *Printer) annotationRow(
+func (p *Printer) renderAnnotationRow(
 	row AnnotationRow,
 	kindStyle lipgloss.Style,
 	cr cells.Row,

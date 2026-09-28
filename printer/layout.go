@@ -178,17 +178,12 @@ func (p *Printer) layoutAnnotation(
 	starts []int,
 	width *int,
 ) int {
-	var rows int
-
-	for _, group := range p.annotationGroups(view, ln, idx, gutterWidth, placement, starts) {
-		for _, row := range group.rows {
-			*width = max(*width, gutterWidth+lipgloss.Width(row))
-		}
-
-		rows += len(group.rows)
+	rows := p.annotationRows(view, ln, idx, gutterWidth, placement, starts)
+	for _, row := range rows {
+		*width = max(*width, gutterWidth+lipgloss.Width(row))
 	}
 
-	return rows
+	return len(rows)
 }
 
 // nbsp is the non-breaking space, the one Unicode space the wrapper keeps
