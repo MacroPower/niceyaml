@@ -41,7 +41,7 @@ func TestNewView(t *testing.T) {
 		assert.Equal(t, 2, view.Lines().Len())
 	})
 
-	t.Run("over nil lines", func(t *testing.T) {
+	t.Run("over zero lines", func(t *testing.T) {
 		t.Parallel()
 
 		view := line.NewView(line.Lines{})
@@ -58,11 +58,26 @@ func TestNewView(t *testing.T) {
 	t.Run("over empty lines", func(t *testing.T) {
 		t.Parallel()
 
-		view := line.NewView(line.Lines{})
+		// Each constructor returns the zero Lines for empty input, which
+		// assert.Empty checks through the view.
+		tcs := map[string]struct {
+			lines line.Lines
+		}{
+			"NewLines of no tokens": {lines: line.NewLines(tokens.Tokenize(""))},
+			"Collect of no lines":   {lines: line.Collect()},
+		}
 
-		assert.Equal(t, 0, view.Count())
-		assert.Empty(t, view.Lines())
-		assert.Empty(t, view.String())
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				view := line.NewView(tc.lines)
+
+				assert.Equal(t, 0, view.Count())
+				assert.Empty(t, view.Lines())
+				assert.Empty(t, view.String())
+			})
+		}
 	})
 
 	t.Run("zero value", func(t *testing.T) {
