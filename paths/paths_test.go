@@ -1717,6 +1717,54 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 		}
 	})
 
+	t.Run("anchor of the same name inside the content", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder records an anchor again when it has read the content,
+		// so an alias after it refers to the outer anchor.
+		tcs := map[string]struct {
+			input string
+			key   string
+			want  string
+		}{
+			"mapping": {
+				input: "a: &y {b: &y 3}\nk: *y\n",
+				key:   "k",
+				want:  "{b: &y 3}",
+			},
+			"sequence": {
+				input: "a: &y [1, &y 2]\nk: *y\n",
+				key:   "k",
+				want:  "[1, &y 2]",
+			},
+			"merge of an aliased mapping": {
+				input: "base: &b {k: &x {j: &x 1}}\nm: {<<: *b}\nv: *x\n",
+				key:   "v",
+				want:  "{j: &x 1}",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				node, err := paths.Root().Child(tc.key).Node(dd.DocumentAST())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, node.String())
+
+				var decoded map[string]any
+
+				require.NoError(t, yaml.Unmarshal([]byte(tc.input), &decoded))
+
+				got, err := yamltest.At(t, dd, paths.Root().Child(tc.key)).Decode[any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, decoded[tc.key], got)
+			})
+		}
+	})
+
 	t.Run("alias before any anchor of its name", func(t *testing.T) {
 		t.Parallel()
 

@@ -119,9 +119,11 @@ func (r *resolver) mappingKeys(mapping *ast.MappingNode) *mappingKeys {
 //
 // It binds each alias to the last anchor of its name before it in doc, which
 // is the anchor the goccy/go-yaml decoder uses for that alias when it fills
-// a map. The decoder reads a mapping a `<<` merge key brings in again at the
-// merge key, and so does newResolver, so the anchors of that mapping count
-// again there.
+// a map. An anchor counts from where it starts and again where its content
+// ends, so it wins over an anchor of the same name inside that content for
+// the aliases after it. The decoder reads a mapping a `<<` merge key brings
+// in again at the merge key, and so does newResolver, so the anchors of
+// that mapping count again there.
 func newResolver(doc *ast.DocumentNode) *resolver {
 	b := &aliasBinder{
 		anchors: map[string]ast.Node{},
@@ -139,7 +141,10 @@ func newResolver(doc *ast.DocumentNode) *resolver {
 // order. The anchors map holds the content of the last anchor of each name
 // visited so far, and the targets map holds the content each visited alias
 // refers to. Walk visits an anchor before its content, so an alias inside
-// that content refers to the anchor around it.
+// that content refers to the anchor around it. The binder records the
+// anchor again once it has walked the content, as the decoder does, so
+// an alias after the content refers to the anchor around it rather than
+// to one of the same name inside it.
 //
 // The merged map holds, for each mapping a merge key has brought in through
 // an alias, the anchors that merging it records, from
@@ -166,7 +171,8 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 
 	switch n := node.(type) {
 	case *ast.AnchorNode:
-		if name := nodeToken(n.Name); name != nil {
+		name := nodeToken(n.Name)
+		if name != nil {
 			b.anchors[name.Value] = n.Value
 		}
 
@@ -174,6 +180,12 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 			b.walkOpen(mapping)
 		} else {
 			ast.Walk(b, n.Value)
+		}
+
+		// The decoder records an anchor again once it has read the
+		// content, over any anchor of the same name inside it.
+		if name != nil {
+			b.anchors[name.Value] = n.Value
 		}
 
 		return nil
@@ -342,7 +354,9 @@ type anchorReader struct {
 
 // Visit records an anchor, or at a `<<` merge key records the anchors of
 // the mappings it merges, then returns r so [ast.Walk] continues into the
-// children of node. It returns nil for a nil node, including a typed nil a
+// children of node. It walks the content of an anchor itself and records
+// the anchor again after it, as [aliasBinder.Visit] does, and returns nil
+// for it. It returns nil for a nil node, including a typed nil a
 // hand-built tree may hold, and for an alias, whose content the merge
 // records nothing from.
 func (r *anchorReader) Visit(node ast.Node) ast.Visitor {
@@ -352,9 +366,18 @@ func (r *anchorReader) Visit(node ast.Node) ast.Visitor {
 
 	switch n := node.(type) {
 	case *ast.AnchorNode:
-		if name := nodeToken(n.Name); name != nil {
+		name := nodeToken(n.Name)
+		if name != nil {
 			r.anchors[name.Value] = n.Value
 		}
+
+		ast.Walk(r, n.Value)
+
+		if name != nil {
+			r.anchors[name.Value] = n.Value
+		}
+
+		return nil
 
 	case *ast.AliasNode:
 		return nil
