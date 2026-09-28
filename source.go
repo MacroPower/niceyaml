@@ -29,7 +29,7 @@ import (
 // Source separates two concerns. Parsing lives on Source itself, where [Source.File]
 // lazily parses the AST and [Source.Documents] builds the documents. Every error they
 // and their Nodes produce comes back bound to the Source as a [SourceError].
-// [Node.Bind] binds errors built elsewhere to the document they were checked
+// [Node.Bind] binds errors built elsewhere to the document the caller checked them
 // against, and [Source.Bind] binds one to the document its location falls in. Rendering
 // lives in a [line.View], which carries the overlays, annotations, and flags that a
 // [go.jacobcolvin.com/niceyaml/printer.Printer] renders over the [line.Lines] the
@@ -95,8 +95,8 @@ type Source struct {
 //   - [WithYAMLParserOptions]
 //
 // Settings that only affect decoding, such as [WithDisallowUnknownFields],
-// are [DecodeOption] values passed to [Node.Decode], or to [NewDecoder]
-// for a [Decoder] that decodes every document with them.
+// are [DecodeOption] values. A caller passes them to [Node.Decode], or to
+// [NewDecoder] for a [Decoder] that decodes every document with them.
 type SourceOption func(*Source)
 
 // WithName is a [SourceOption] that sets the name for the [Source], which
@@ -133,8 +133,8 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 
 // WithYAMLParserOptions is a [SourceOption] that passes [parser.Option]
 // values to the go-yaml parser when [Source.File] parses the document. It is
-// the escape hatch for parser settings that have no option of their own;
-// the parser always parses comments.
+// the escape hatch for parser settings that have no option of their own.
+// The parser always parses comments.
 func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 	return func(s *Source) {
 		s.parserOpts = append(s.parserOpts, opts...)
@@ -147,7 +147,7 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 // schema routing, and [Source.Name] returns it unless [WithName] sets a
 // name. [NewSourceFromFS] reads a file from an [fs.FS] the same way.
 //
-// Returns an error if the file cannot be read.
+// Returns an error when it cannot read the file.
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // User-provided file paths are intentional.
 	if err != nil {
@@ -170,7 +170,7 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 //
 //	source, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
 //
-// Returns an error if the file cannot be read.
+// Returns an error when it cannot read the file.
 func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, error) {
 	data, err := fs.ReadFile(fsys, path)
 	if err != nil {
@@ -187,7 +187,7 @@ func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, er
 //
 //	source, err := niceyaml.NewSourceFromReader(os.Stdin, niceyaml.WithName("<stdin>"))
 //
-// Returns an error if r cannot be read.
+// Returns an error when it cannot read r.
 func NewSourceFromReader(r io.Reader, opts ...SourceOption) (*Source, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -214,14 +214,14 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 // NewSourceFromTokens creates a new [*Source] from [token.Tokens].
 // See [line.NewLines] for details on token splitting behavior.
 //
-// The Source holds clones of the tokens with their positions reset through
-// [tokens.ResetPositions], so the text it holds counts its lines from 1 as
-// [tokens.Tokenize] does, and line i of [Source.Lines] is line i+1 of the
-// text. Tokens that count from 1 already, as a whole stream
-// does, keep their positions. Tokens cut from a longer stream, as
-// [Node.Tokens] hands out, are renumbered from the first one; to render
-// one document of a file with the file's line numbers, print the file's
-// view with [Node.Span] instead.
+// The Source holds clones of the tokens, and [tokens.ResetPositions]
+// resets their positions, so the text it holds counts its lines from 1 as
+// [tokens.Tokenize] does. Line i of [Source.Lines] holds line i+1 of the
+// text. Tokens that count from 1 already, as a whole stream does, keep
+// their positions. It renumbers tokens cut from a longer
+// stream, as [Node.Tokens] hands out, from the first one. To render one
+// document of a file with the file's line numbers, print the file's view
+// with [Node.Span] instead.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	t := &Source{}
 	for _, opt := range opts {
@@ -238,9 +238,8 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	return t
 }
 
-// Name returns the name of the [Source]: the one [WithName] set, or the
-// file path when none was set. Returns an empty string when the Source has
-// neither.
+// Name returns the name of the [Source]: the one [WithName] set, or else
+// the file path. Returns an empty string when the Source has neither.
 func (s *Source) Name() string {
 	if s.name == "" {
 		return s.filePath
@@ -262,7 +261,7 @@ func (s *Source) FilePath() string {
 // comes back whole.
 //
 // The tokens are the clones [NewSourceFromTokens] made through
-// [tokens.ResetPositions], not the tokens passed to it. The Source keeps
+// [tokens.ResetPositions], not the tokens the caller passed. The Source keeps
 // using them, so treat them as read-only. When the input came from
 // [tokens.Tokenize], as it does for every constructor that reads text, the
 // Line and Column of each token name the rune where its text starts.
@@ -326,18 +325,18 @@ func (s *Source) documents() ([]*Node, error) {
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(validator))
 //
 // The comments above the first "---" are the preamble of the document
-// below them rather than a document of their own, so a file that opens
-// with a license header holds a single document, and a file of comments
+// below them rather than a document of their own. A file that opens with
+// a license header therefore holds a single document. A file of comments
 // alone holds one that decodes to the zero value as an empty file does.
 //
 // When the file holds more than one document, it returns an error wrapping
-// [ErrMultipleDocuments], bound to the Source and pointing at the header of
-// the second document, or at the first token of its content when a "..."
-// marker rather than a header opens it. When the file holds no document at
-// all, which happens for text that is only a "..." marker, it returns an
-// error wrapping [ErrNoDocuments], bound to the Source. A file that does
-// not parse returns the error [Source.File] returns. Use [Source.Documents]
-// for a file that may hold several.
+// [ErrMultipleDocuments], bound to the Source. The error points at the
+// header of the second document, or at the first token of its content
+// when a "..." marker rather than a header opens it. When the file holds
+// no document at all, which happens for text that is only a "..." marker,
+// it returns an error wrapping [ErrNoDocuments], bound to the Source. A
+// file that does not parse returns the error [Source.File] returns. Use
+// [Source.Documents] for a file that may hold several.
 func (s *Source) Document() (*Node, error) {
 	doc, err := s.single()
 	if err != nil {
@@ -441,12 +440,12 @@ func (d *document) anchorToken() *token.Token {
 // drops the rest of the stream or rejects it.
 //
 // The tokens of the file are copies of the Source's own, since the parser
-// relinks the tokens it is given. A copy matches the original by its type,
+// relinks the tokens it receives. A copy matches the original by its type,
 // value, origin, and position, so a token taken from a node finds its
 // lines through [line.Lines.TokenRanges] and [line.Lines.ContentRanges] as
 // the original does.
 //
-// The tree is shared with every [Node] of the Source, and [Node.At],
+// Every [Node] of the Source shares the tree, and [Node.At],
 // [Node.Ranges], and every error binding resolve against it, so it is
 // read-only. A caller that modifies it corrupts the positions those
 // resolve to and races with any concurrent use of the Source. A caller
@@ -598,8 +597,8 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 // [SourceError.Unresolved] returns [ErrPathNeedsDocument] wrapping the
 // reason [Source.Document] gives, and [FormatError] names it in place of
 // the excerpt. Bind such an error through [Node.Bind] with the document
-// it was checked against, which also resolves a path from the scope of a
-// Document from [Node.At].
+// the caller checked it against, which also resolves a path from the
+// scope of a Document from [Node.At].
 //
 // In every other way Bind is [Node.Bind], which describes what comes
 // back. [SourceError.Document] returns the document each location fell
@@ -608,8 +607,8 @@ func (s *Source) Bind(err error) error {
 	return bindTree(err, binder{src: s, route: true})
 }
 
-// Lines returns the [line.Lines] of the [Source], its tokens split into
-// one line per line of text. Line i is line i+1 of the text, so
+// Lines returns the [line.Lines] of the [Source], which hold its tokens
+// in one line per line of text. Line i holds line i+1 of the text, so
 // [position.NewFromToken] converts any token of the Source to a position
 // in the lines.
 //

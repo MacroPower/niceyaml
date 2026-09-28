@@ -27,8 +27,8 @@
 //	file, err := source.File()
 //	if err != nil {
 //		// FormatError prints the message and a plain-text excerpt of
-//		// the YAML with the problematic location marked, with two lines
-//		// of context; err.Error() is the message and position alone.
+//		// the YAML with the problematic location marked and two lines
+//		// of context. err.Error() is the message and position alone.
 //		log.Print(niceyaml.FormatError(err, 2))
 //	}
 //
@@ -49,13 +49,13 @@
 // decoration of the rendering. Annotations hold error messages and diff headers, flags
 // mark inserted and deleted lines, and overlays apply style spans for highlighting. A
 // Source hands out its lines from [Source.Lines] and a fresh view over them from
-// [Source.View], so the decoration added to one view reaches neither the Source nor
-// another view, and taking a view copies no content. [Node.View] is the same view
+// [Source.View]. The decoration a caller adds to one view reaches neither the Source
+// nor another view, and taking a view copies no content. [Node.View] is the same view
 // sliced to the lines of one document, with the line numbers they have in the file.
 // Every index and range a view takes is in the coordinates of its lines, and a slice
-// keeps them, so the ranges a [go.jacobcolvin.com/niceyaml/finder.Finder] or
-// [Node.Ranges] returns apply to a view of the whole source and to a slice of it
-// alike.
+// keeps them. The ranges a [go.jacobcolvin.com/niceyaml/finder.Finder] or
+// [Node.Ranges] returns therefore apply to a view of the whole source and to a slice
+// of it alike.
 //
 // A view need not be a YAML document. Diffs, for example, interleave lines
 // from two revisions and are plain [line.View] values.
@@ -76,31 +76,31 @@
 //
 // [SourceError] binds an error to its [Source] and to the document its
 // path resolves in. Every error a Source or one of its Nodes produces is
-// one, [Node.Bind] binds an error built elsewhere to that
-// document, and [Source.Bind] binds one to the document its location
-// falls in: a position or a range to the document whose span holds it,
-// and a path to the one document of a source that holds one.
+// one. [Node.Bind] binds an error built elsewhere to that document, and
+// [Source.Bind] binds one to the document its location falls in. A
+// position or a range falls in the document whose span holds it, and a
+// path in the one document of a source that holds one.
 // [SourceError.Error] puts the resolved position in front of the
 // message, or the name of the source alone when the error carries no
 // location, and runs over several lines when the message does.
 // [SourceError.Excerpt] returns the surrounding lines with the location
 // highlighted.
-// Nested errors from [WithErrors] are structure on the Error, and binding
-// binds each of them too. [SourceError.Errors] returns one SourceError per
-// nested error, with its own children, if any, and its own location when
-// the nested error carries one, so a validator's report of several
-// violations is a tree of bound errors.
+// The nested errors [WithErrors] adds are part of the Error, and binding
+// binds each of them too. [SourceError.Errors] returns one SourceError
+// per nested error, with its own children, if any, and its own location
+// when the nested error carries one. A validator's report of several
+// violations is therefore a tree of bound errors.
 // [FormatError] prints the message as a tree with a branch per nested
 // error behind its position, then the excerpt, so a log names every
 // violation and where it is. The excerpt marks every location
 // in the tree, with each nested error as an annotation below its own line
 // and distant errors in separate hunks. An error that unwraps to several,
 // such as one from [errors.Join], binds as one SourceError with a child
-// per branch, and [Bindings] finds every binding in an error joined
-// from bound errors, such as one per document of a file, for a caller
-// that renders them all. A SourceError never rewrites the
-// message it binds, so an error built by hand goes through Bind before
-// [fmt.Errorf] adds context, which keeps the position beside the message.
+// per branch. [Bindings] finds every binding in an error joined from
+// bound errors, such as one per document of a file, for a caller that
+// renders them all. A SourceError never rewrites the message it binds, so
+// an error built by hand goes through Bind before [fmt.Errorf] adds
+// context, which keeps the position beside the message.
 //
 // # Lines
 //
@@ -117,8 +117,8 @@
 //	view.BlendOverlay(kind.GenericHighlight, matches...)
 //	fmt.Println(p.Print(view))
 //
-// Every token the module hands out, from [Source.Tokens], [line.Lines.TokenAt],
-// [line.Line.Tokens], or [line.Line.Token], is shared with the lines. Treat
+// The lines hold every token the module hands out, from [Source.Tokens],
+// [line.Lines.TokenAt], [line.Line.Tokens], or [line.Line.Token]. Treat
 // them as read-only and call [token.Token.Clone] before modifying one. A
 // copy of a token, such as one from the [*ast.File] that [Source.File]
 // parses, matches the original by its type, value, origin, and position,
@@ -127,15 +127,16 @@
 //
 // # Error Presentation
 //
-// [FormatError] prints an error as plain text: the message as a tree,
-// with a connector in front of each nested error, then the excerpt
-// around the locations with the context lines the caller asks for and
-// carets under the offending columns. It looks through the wrappers and
-// joins around a [SourceError], so it renders an error however a program
-// wrapped it, and it renders the excerpt of every SourceError in the
-// error's tree. The excerpt is [line.View.String], so a view a caller
-// decorates, such as one with search matches, renders the same way. The
-// output holds no escape sequences, so it goes into a log as it is:
+// [FormatError] prints an error as plain text. The message comes first,
+// as a tree with a connector in front of each nested error. The excerpt
+// around the locations follows, with the context lines the caller asks
+// for and carets under the offending columns. FormatError looks through
+// the wrappers and joins around a [SourceError], so it renders an error
+// however a program wrapped it, and it renders the excerpt of every
+// SourceError in the error's tree. The excerpt is [line.View.String], so
+// a view a caller decorates, such as one with search matches, renders the
+// same way. The output holds no escape sequences, so it goes into a log
+// as it is:
 //
 //	log.Print(niceyaml.FormatError(err, 2))
 //
@@ -153,7 +154,7 @@
 //	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
 //	fmt.Println(p.PrintError(err))
 //
-// This package knows nothing of the printer. The marks of an error are decoration on a
+// This package knows nothing of the printer. The marks of an error decorate a
 // [line.View], so a caller renders them with any renderer and composes them with
 // anything else it renders. [SourceError.Excerpt] returns the hunks around the
 // locations as a view, as [go.jacobcolvin.com/niceyaml/diff.Result.Hunks] does for a
@@ -167,10 +168,10 @@
 //	fmt.Println(p.Print(view))
 //
 // Annotate finds each line by identity, since every view over a source
-// shares its lines, so the view may be a slice of the source, such as one
-// document of a file from [Node.Span], or a diff against another
-// revision, where the marks of each error land on the lines of the
-// source it is bound to.
+// shares its lines. The view may therefore be a slice of the source, such
+// as one document of a file from [Node.Span], or a diff against another
+// revision, where the marks of each error land on the lines of its own
+// source.
 // [line.View.Hunks] then keeps the marked lines with context around
 // each, so a viewer shows the excerpt of every error at once, with
 // search matches or any other decoration in it:
@@ -183,8 +184,8 @@
 //
 // This separates error production (validators, decoders) from error
 // presentation (source context, formatting). Each layer provides what it
-// knows: a validator the path, a source the document, and the caller that
-// prints the terminal width and theme.
+// knows. A validator provides the path, a source the document, and the
+// caller that prints the terminal width and theme.
 //
 // # Validation Pipeline
 //
@@ -232,10 +233,10 @@
 // the validators the caller passes and no other, so a validator never runs
 // itself again.
 //
-// A [SelfValidator] writes its paths from its own root, and the decode
-// calls Validate on every value in the result that implements it, with
-// the paths each one reports put under the path of that value in the
-// document, so a type checks its own invariants once and a document
+// A [SelfValidator] writes its paths from its own root. The decode calls
+// Validate on every value in the result that implements it, and puts the
+// paths each one reports under the path of that value in the document.
+// A type therefore checks its own invariants once, and a document
 // reports the lines of the field, element, or entry that holds it:
 //
 //	func (h Hours) Validate() error {
@@ -255,11 +256,11 @@
 //
 // [Node.At] returns a Node scoped to the node a path selects, and the
 // same pipeline then runs on that node. Decode reads one value without
-// decoding the whole document, a validator given to it checks the node,
-// and the paths in every error it returns or binds resolve from the node,
-// so a check written for a type reports the same lines whether the type is
-// the whole document or a value inside one. The Node reaches the document
-// it belongs to through [Node.Document]:
+// decoding the whole document, and a validator given to it checks the
+// node. The paths in every error it returns or binds resolve from the
+// node, so a check written for a type reports the same lines whether the
+// type is the whole document or a value inside one. The Node reaches the
+// document it belongs to through [Node.Document]:
 //
 //	hours, err := doc.At(paths.Root().Child("spec", "hours"))
 //	if err != nil {

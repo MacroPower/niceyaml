@@ -22,9 +22,9 @@ import (
 // anchor it reads later hides an earlier one of the same name from every
 // alias it reads after that. It reads a node in two passes, and a decode
 // of a node below the body reads the anchors outside the node before it,
-// so neither order matches the document. The tree therefore gives each
-// anchor whose name another anchor of the document shares a name of its
-// own, and gives each alias the name of the anchor the document's
+// so neither order matches the document. The tree therefore gives a name
+// of its own to each anchor whose name another anchor of the document
+// shares. It gives each alias the name of the anchor the document's
 // [paths.Resolver] binds it to, so every alias reads that anchor whatever
 // order the decoder reads the anchors in.
 //

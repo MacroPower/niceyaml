@@ -134,7 +134,7 @@ func TestSource_Runes(t *testing.T) {
 		want  []runePosition
 	}{
 		"simple key-value": {
-			// Note: lexer strips trailing newline from final simple value.
+			// The lexer strips the trailing newline from the final simple value.
 			input: "a: b\n",
 			want: []runePosition{
 				{R: 'a', Pos: position.New(0, 0)},
@@ -144,7 +144,7 @@ func TestSource_Runes(t *testing.T) {
 			},
 		},
 		"multi-line": {
-			// Note: lexer strips trailing newline from final value on each line.
+			// The lexer strips the trailing newline from the final value on each line.
 			input: "a: 1\nb: 2\n",
 			want: []runePosition{
 				{R: 'a', Pos: position.New(0, 0)},

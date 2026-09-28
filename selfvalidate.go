@@ -19,20 +19,21 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// selfValidate runs Validate on every value in the tree of v, a non-nil
-// pointer to the value n decoded to with opts, that implements
-// [SelfValidator], and returns what they report with the paths in each
-// error rebased under the path of the value in the document: the field
-// name go-yaml decoded it under, the index of a slice or array element,
-// or the key of a map entry as the document spells it. The values below
-// a value validate before it does, and a value validates only when every
-// value below it passed, so a parent that checks a relation between its
-// fields sees fields that hold together. A value whose type decodes
-// itself, through an unmarshaler method, validates itself and nothing
-// below it, since its fields need not mirror the document and the paths
-// under it would point nowhere. So does a node of the syntax tree, which
-// go-yaml sets whole. Several errors come back joined, one per value
-// that failed. Returns nil when nothing failed.
+// selfValidate runs Validate on every value in the tree of v that
+// implements [SelfValidator], where v is a non-nil pointer to the value n
+// decoded to with opts. It returns what they report with the paths in
+// each error rebased under the path of the value in the document. That
+// path is the field name go-yaml decoded it under, the index of a slice
+// or array element, or the key of a map entry as the document spells it.
+// The values below a value validate before it does, and a value
+// validates only when every value below it passed, so a parent that
+// checks a relation between its fields sees fields that hold together. A
+// value whose type decodes itself, through an unmarshaler method,
+// validates itself and nothing below it, since its fields need not
+// mirror the document and the paths under it would point nowhere. So
+// does a node of the syntax tree, which go-yaml sets whole. Several
+// errors come back joined, one per value that failed. Returns nil when
+// nothing failed.
 func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
 	w := selfWalker{node: n, opts: opts, walking: map[visit]bool{}, done: map[visit]bool{}}
 	w.walk(reflect.ValueOf(v), paths.Root())
@@ -48,18 +49,18 @@ func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
 }
 
 // selfWalker collects the errors of the [SelfValidator] values in a
-// decoded value, the pointers, maps, and slices on the path it is
-// walking down, so a value that refers back to one above it stops
-// there, and the result of each it has walked, so a value two paths
-// share, as an alias makes one, walks once and reports its errors under
-// the first path, while a parent on the second path still learns that
-// the value failed. It reads the keys of a map from the node the value
-// decoded from, with the options it decoded with, and finds that node
-// through the [paths.Resolver] of the document, so the walk binds the
-// aliases of the document, and reads the keys of each mapping on the way
-// to a map, once however many maps it meets. One go-yaml decoder decodes
-// every key, so the walk applies the options, and reads any reference
-// files they name, once too.
+// decoded value. It records the pointers, maps, and slices on the path it
+// is walking down, so a value that refers back to one above it stops
+// there. It records the result of each it has walked, so a value two
+// paths share, as an alias makes one, walks once and reports its errors
+// under the first path. A parent on the second path still learns that the
+// value failed. It reads the keys of a map from the node the
+// value decoded from, with the options it decoded with, and finds that
+// node through the [paths.Resolver] of the document. The walk therefore
+// binds the aliases of the document, and reads the keys of each mapping
+// on the way to a map once, however many maps it meets. One go-yaml
+// decoder decodes every key, so the walk applies the options, and reads
+// any reference files they name, once too.
 type selfWalker struct {
 	node    *Node
 	decoder *yaml.Decoder
@@ -69,10 +70,10 @@ type selfWalker struct {
 	errs    []error
 }
 
-// visit names a pointer, map, or slice the walker is inside of, by type
-// and address together, since a struct and its first field share an
-// address, and by length for a slice, since two slices can start at one
-// element. The fields serve as the map key.
+// visit names a pointer, map, or slice the walker is inside of. It names
+// the value by type and address together, since a struct and its first
+// field share an address, and by length for a slice, since two slices
+// can start at one element. The fields together form the map key.
 //
 //nolint:unused // The fields tell the keys of the walking map apart.
 type visit struct {
@@ -175,7 +176,7 @@ func (w *selfWalker) enter(v reflect.Value) bool {
 	return true
 }
 
-// leave records that the walk is inside v no longer.
+// leave records that the walk has left v.
 func (w *selfWalker) leave(v reflect.Value) {
 	delete(w.walking, visitOf(v))
 }
@@ -227,11 +228,11 @@ var (
 
 // decodesItself reports whether go-yaml decodes a value of type t whole,
 // so the fields, elements, or entries of the value need not mirror the
-// document: through an unmarshaler method of its own, or as an
-// [ast.Node], which the decoder sets to the node it decodes rather than
-// decoding field by field. The tokens of a node also link to every other
-// token of the file. The method set of the pointer holds the methods of
-// both receivers, as the decoder checks it.
+// document. A type decodes itself through an unmarshaler method of its
+// own, or as an [ast.Node], which the decoder sets to the node it
+// decodes rather than decoding field by field. The tokens of a node also
+// link to every other token of the file. The method set of the pointer
+// holds the methods of both receivers, as the decoder checks it.
 func decodesItself(t reflect.Type) bool {
 	pt := reflect.PointerTo(t)
 
@@ -240,9 +241,10 @@ func decodesItself(t reflect.Type) bool {
 
 // mayHoldValidator reports whether a value of type t can implement
 // [SelfValidator], or can hold a value the walk reaches below it that
-// does: through an interface, which can hold a value of any type, or
-// through a field, element, map value, or pointee whose type may. The
-// walk passes a value whose type may not without a look below it.
+// does. A type holds one through an interface, which can hold a value of
+// any type, or through a field, element, map value, or pointee whose
+// type may. The walk passes a value whose type may not without a look
+// below it.
 func mayHoldValidator(t reflect.Type) bool {
 	if cached, ok := holdsValidator.Load(t); ok {
 		if held, ok := cached.(bool); ok {
@@ -408,11 +410,11 @@ func (w *selfWalker) validate(v reflect.Value, base paths.Path) bool {
 }
 
 // fieldName returns the name go-yaml decodes field under, whether the
-// field is inlined so its own fields sit beside its siblings, and
-// whether go-yaml skips the field: an unexported field that is not
-// embedded, or one whose tag is "-". The name comes from the yaml tag,
-// or the json tag when the field has no yaml tag, and is the lowercased
-// field name when neither names it, as go-yaml spells it.
+// field is inline so its own fields sit beside its siblings, and whether
+// go-yaml skips the field. It skips an unexported field that is not
+// embedded, and one whose tag is "-". The name comes from the yaml tag,
+// or the json tag when the field has no yaml tag. It is the lowercased
+// field name when neither tag names it, as go-yaml spells it.
 func fieldName(field reflect.StructField) (string, bool, bool) {
 	if field.PkgPath != "" && !field.Anonymous {
 		return "", false, true
