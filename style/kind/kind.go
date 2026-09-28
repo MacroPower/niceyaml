@@ -283,13 +283,6 @@ func Parent(k Kind) Kind {
 	return Text
 }
 
-// IsPredefined reports whether k is one of the kinds this package declares.
-func IsPredefined(k Kind) bool {
-	_, ok := parent[k]
-
-	return ok || k == Text
-}
-
 // All returns an iterator over every predefined Kind, [Text] included, in
 // no particular order.
 func All() iter.Seq[Kind] {
