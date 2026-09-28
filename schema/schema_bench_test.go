@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -63,6 +64,45 @@ func BenchmarkSchema_Validate(b *testing.B) {
 				err := s.Validate(b.Context(), doc)
 				if err != nil {
 					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// BenchmarkSchema_Validate_AliasedItems decodes each item of a list with
+// the schema as its validator, where every item holds an alias. The
+// alias count covers the whole document, so each item should reuse the
+// count of the first instead of walking the document again.
+func BenchmarkSchema_Validate_AliasedItems(b *testing.B) {
+	s := schema.MustCompile([]byte(`{"type": "object", "properties": {"name": {"type": "string"}}}`))
+
+	for _, items := range []int{1000, 4000} {
+		var sb strings.Builder
+
+		sb.WriteString("tags: &t [a, b]\nitems:\n")
+
+		for i := range items {
+			fmt.Fprintf(&sb, "  - {name: n%d, tags: *t}\n", i)
+		}
+
+		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()
+		require.NoError(b, err)
+
+		nodes, err := doc.Nodes(paths.Root().Child("items").IndexAll())
+		require.NoError(b, err)
+
+		dec := niceyaml.NewDecoder(niceyaml.WithValidator(s))
+
+		b.Run(fmt.Sprintf("items_%d", items), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				for _, node := range nodes {
+					_, err := dec.Decode[any](b.Context(), node)
+					if err != nil {
+						b.Fatal(err)
+					}
 				}
 			}
 		})

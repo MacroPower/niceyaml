@@ -16,6 +16,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -250,6 +251,7 @@ func newDocuments(src *Source, file *ast.File) []*Node {
 			return tk == nil || tk.Position == nil
 		})
 		doc.node = &Node{source: src, doc: doc, content: doc.tokens, span: spans[i]}
+		doc.state = docstate.New(doc.pathResolver)
 		nodes[i] = doc.node
 	}
 
@@ -545,6 +547,9 @@ type document struct {
 	// The tree the go-yaml decoder reads for the document, which
 	// decodeTree builds for the first decode.
 	tree *decodeTree
+	// The state that the packages of the module reach through
+	// docstate.Of, which shares resolver with them.
+	state *docstate.State
 	// The tokens of the whole document.
 	tokens token.Tokens
 	// The tokens that carry a position, in the order of their offsets,

@@ -17,6 +17,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -363,17 +364,18 @@ func unresolvedRefs(ve *jsonschema.ValidationError) []error {
 func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node) *niceyaml.Error {
 	leaves := ve.Leaves()
 
-	// Bind aliases across the whole document, so an alias inside a
-	// scoped node reaches an anchor outside it.
-	var doc *ast.DocumentNode
-
+	// The resolver binds aliases across the whole document, so an alias
+	// inside a scoped node reaches an anchor outside it. The document
+	// keeps one for every Node of it, so a failing check of each item of
+	// a list binds the document once.
+	resolver := paths.NewResolver(nil)
 	if n != nil {
-		doc = n.DocumentAST()
+		resolver = docstate.Of(n).Resolver()
 	}
 
 	// Every leaf shares one index, so each key decodes once however many
 	// violations lie under its mapping.
-	idx := newMemberIndex(paths.NewResolver(doc))
+	idx := newMemberIndex(resolver)
 
 	switch len(leaves) {
 	case 0:
@@ -1048,22 +1050,29 @@ func excessiveAliasing(distinct, aliased int) bool {
 // holds an alias reads the whole document to find its anchors, so the
 // count covers the whole document. A node without an alias decodes on
 // its own and reads nothing twice.
+//
+// The count depends on the document alone, so the document keeps it,
+// and a check of each item of a list counts the document once.
 func checkDecodeExpansion(n *niceyaml.Node) error {
 	if !holdsAlias(rootOf(n)) {
 		return nil
 	}
 
+	state := docstate.Of(n)
 	doc := n.DocumentAST()
 
-	c := treeCounter{
-		resolver: paths.NewResolver(doc),
-		sizes:    map[ast.Node]int{},
-		open:     map[ast.Node]bool{},
-	}
+	excessive := state.ExcessiveAliasing(func() bool {
+		c := treeCounter{
+			resolver: state.Resolver(),
+			sizes:    map[ast.Node]int{},
+			open:     map[ast.Node]bool{},
+		}
 
-	c.count(doc.Body, true)
+		c.count(doc.Body, true)
 
-	if excessiveAliasing(c.distinct, c.aliased) {
+		return excessiveAliasing(c.distinct, c.aliased)
+	})
+	if excessive {
 		return fmt.Errorf("%w: %w", ErrValidate, ErrExcessiveAliasing)
 	}
 

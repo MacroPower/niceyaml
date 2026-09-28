@@ -1529,6 +1529,54 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				}
 			})
 		}
+
+		// The document keeps its count for every Node of it, so each
+		// Node that holds an alias gets the verdict of the whole document,
+		// even when several check at once, and a Node without an alias
+		// decodes on its own.
+		t.Run("nodes of one document", func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, lists.String()+"b:\n  ? *l7\n  : v\nc: [*k]\nd: [*k]\ne: [x]\n")
+
+			tcs := map[string]struct {
+				path paths.Path
+				errs []error
+			}{
+				"first node holding an alias": {
+					path: paths.Root().Child("c"),
+					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				},
+				"second node holding an alias": {
+					path: paths.Root().Child("d"),
+					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				},
+				"node without an alias": {
+					path: paths.Root().Child("e"),
+				},
+			}
+
+			for name, tc := range tcs {
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+
+					node := yamltest.At(t, doc, tc.path)
+
+					for range 2 {
+						err := node.Validate(t.Context(), v)
+						if tc.errs == nil {
+							require.NoError(t, err)
+
+							continue
+						}
+
+						for _, want := range tc.errs {
+							require.ErrorIs(t, err, want)
+						}
+					}
+				})
+			}
+		})
 	})
 
 	t.Run("values", func(t *testing.T) {
