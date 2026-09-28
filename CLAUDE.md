@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Build & Test Commands
+## Commands
 
 ```bash
 task format    # Format and tidy code, run generators
@@ -18,7 +18,7 @@ CI runs these same tasks inside the devbox environment via the `ci` Dagger
 toolchain (`dagger call ci <task>`), so local and CI execute identical commands.
 The `ci` module composes the shared toolchains from github.com/MacroPower/x
 (devbox, security, zizmor), pinned in `ci/dagger.json` and the root
-`dagger.json`; the `dagger` CLI must be on PATH and match the pinned
+`dagger.json`. The `dagger` CLI must be on PATH and match the pinned
 `engineVersion`.
 
 ## Architecture
@@ -41,10 +41,10 @@ task docs # Print all package docs
 
 ### Code Patterns
 
-- Functional options pattern used throughout (e.g., `printer.Option`, `SourceOption`, `ErrorOption`).
+- The codebase uses the functional options pattern throughout (e.g., `printer.Option`, `SourceOption`, `ErrorOption`).
 - 0-indexed positioning convention for `position.Position` (line and column start at 0).
 - Half-open ranges `[Start, End)` for `position.Range`.
-- Prefer consistency over performance, avoid "fast paths" that could lead to unpredictable behavior.
+- Prefer consistency over performance. Avoid "fast paths" that could lead to unpredictable behavior.
 
 ### Documentation
 
@@ -55,11 +55,11 @@ task docs # Print all package docs
 - Interfaces should have sensible names: `type Builder interface { Build() Thing } // Builder builds [Thing]s.`
 - Functional option types should have a list linking to all functions of that type.
 - Functional options should always have a link to their type.
-- Package docs should explain concepts and usage patterns; **do not enumerate exports**.
+- Package docs should explain concepts and usage patterns. **Do not enumerate exports.**
 
 **IMPORTANT:** Clear, accurate, natural, and readable language is far more important
-than achieving perfect compliance with the above. As an example, you would not say
-`NewThings creates a new [Thing]s.`, instead say `NewThings creates new [Thing]s.`
+than achieving perfect compliance with the above. As an example, do not say
+`NewThings creates a new [Thing]s.` Say `NewThings creates new [Thing]s.` instead.
 
 ### Testing
 

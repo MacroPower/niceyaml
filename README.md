@@ -27,7 +27,7 @@ It enables **friendly and predictable handling of YAML-compatible documents** in
 
 We use a **parse-once**, **style-once** approach. This means your users get a snappy UI, and you get a simple API. There's no need to employ multiple lexers, or perform any ANSI manipulation!
 
-We also provide a consistent **positioning system** used throughout `niceyaml`. It enables each cell to be individually addressed, without any complexity being introduced by the specific display mode (e.g. diffs, slices).
+Every part of `niceyaml` shares one consistent **positioning system**. It addresses each cell on its own, and the display mode, such as a diff or a slice, adds no complexity.
 
 ## Features
 
@@ -63,13 +63,13 @@ go get go.jacobcolvin.com/niceyaml@latest
 Module `niceyaml` adds a few abstractions on top of [go-yaml][goccy/go-yaml]:
 
 - [`line.Line`][niceyaml/line] - Tokens for a single line of YAML content
-- [`line.Lines`][niceyaml/line] - A collection of `Line`s, which never changes once built
-- [`line.View`][niceyaml/line] - One rendering of a `Lines` value, carrying the overlays, annotations, and flags the printer draws
+- [`line.Lines`][niceyaml/line] - A collection of `Line`s, which never changes after creation
+- [`line.View`][niceyaml/line] - One rendering of a `Lines` value, which carries the overlays, annotations, and flags the printer draws
 - [`niceyaml.Source`][niceyaml.Source] - A YAML file, which parses into one `Node` per document, decodes, wraps errors, exposes its `Lines`, and returns fresh `View`s over them
 
 Most use cases will only need to interact with `Source`. Its `Lines` method returns the `line.Lines` that the [`finder`][niceyaml/finder] and [`diff`][niceyaml/diff] packages read, and its `View` method returns a fresh `line.View` over them for the [`printer`][niceyaml/printer]. Diffs return plain views, since interleaved lines from two revisions are not a YAML document.
 
-These abstractions enable straightforward iteration over arbitrary lines of tokens from one or more YAML documents, while maintaining the original token details from the lexer. It cleanly solves common problems introduced by multi-line and/or overlapping tokens in diffs, partial rendering, and/or search.
+These abstractions let you iterate over arbitrary lines of tokens from one or more YAML documents, and they keep the original token details from the lexer. Multi-line and overlapping tokens cause common problems in diffs, partial rendering, and search, and these abstractions solve them.
 
 ```mermaid
 flowchart LR
@@ -82,25 +82,25 @@ flowchart LR
     D --> E["Struct"]
 ```
 
-### Printing YAML with Lipgloss Styles
+### Printer
 
 - [examples/printer](examples/printer)
 
-### Printing Diffs Between YAML Revisions
+### Diffs
 
 - [examples/diffs](examples/diffs)
 
-### Searching YAML Content
+### Finder
 
 - [examples/finder](examples/finder)
 
-### Schema Generation and Validation
+### Schemas
 
 - [examples/schemas/cafe](examples/schemas/cafe)
 
-Types declare their constraints with `jsonschema` struct tags; the `gen` tool from [go.jacobcolvin.com/x/jsonschema](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema) turns them into [cafe.v1.json](examples/schemas/cafe/cafe.v1.json). Run `go run ./examples/schemas/cafe/demo` to validate a config against that schema and render any failures as source-annotated errors.
+Types declare their constraints with `jsonschema` struct tags. The `gen` tool from [go.jacobcolvin.com/x/jsonschema](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema) turns them into [cafe.v1.json](examples/schemas/cafe/cafe.v1.json). Run `go run ./examples/schemas/cafe/demo` to validate a config against that schema and render any failures as source-annotated errors.
 
-### Full YAML Viewport Example
+### Viewport
 
 See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pages, searches, diffs, and validates YAML documents.
 
