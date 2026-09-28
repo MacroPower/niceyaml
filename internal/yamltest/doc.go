@@ -34,11 +34,12 @@
 // [CompareTokens] and [CompareTokenSlices] assume non-nil tokens and
 // positions, so the test calls [ValidateTokens] first. Each diff value reports
 // whether its inputs match through Equal and formats itself through String,
-// so a test can hand one to t.Errorf. [CompareContent] returns the same kind
-// of value for whole text, and it normalizes line endings before comparing:
+// so a test can hand one to t.Error. [CompareContent] returns the same kind
+// of value for whole text. Before comparing, it converts CRLF to LF and
+// trims leading and trailing newlines:
 //
 //	if diff := yamltest.CompareContent(want, got); !diff.Equal() {
-//		t.Errorf("content mismatch: %s", diff)
+//		t.Error(diff)
 //	}
 //
 // Tests of code that builds a [line.Lines] collection check its integrity
