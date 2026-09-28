@@ -70,15 +70,47 @@ func Split(tks token.Tokens) []Line {
 		return nil
 	}
 
-	for _, tk := range tks {
+	ahead := breaksAhead(tks)
+
+	for i, tk := range tks {
 		if tk == nil {
 			continue
 		}
 
-		b.AddToken(tk)
+		b.AddToken(tk, ahead[i])
 	}
 
 	return b.Build()
+}
+
+// breaksAhead returns, for each token of tks, the number of line breaks
+// the tokens after it hold before the next rune of text. That counts every
+// line break of a later token whose Origin holds whitespace alone, and the
+// line breaks in the whitespace that opens the next Origin that holds text.
+// It skips nil tokens.
+func breaksAhead(tks token.Tokens) []int {
+	ahead := make([]int, len(tks))
+	n := 0
+
+	for i := len(tks) - 1; i >= 0; i-- {
+		ahead[i] = n
+
+		tk := tks[i]
+		if tk == nil {
+			continue
+		}
+
+		text := strings.TrimLeft(tk.Origin, " \t\r\n")
+		lead := lineend.CountBreaks(tk.Origin[:len(tk.Origin)-len(text)])
+
+		if text == "" {
+			n += lead
+		} else {
+			n = lead
+		}
+	}
+
+	return ahead
 }
 
 // builder constructs [Line] values from [token.Tokens].
@@ -182,8 +214,10 @@ func startAnchor(tks token.Tokens) (*token.Token, string) {
 	return first, first.Origin
 }
 
-// AddToken adds a single token, splitting it into per-line parts.
-func (b *builder) AddToken(tk *token.Token) {
+// AddToken adds a single token, splitting it into per-line parts. The
+// ahead argument is the number of line breaks the tokens after tk hold
+// before the next rune of text, as [breaksAhead] counts them.
+func (b *builder) AddToken(tk *token.Token, ahead int) {
 	// Detect if this token is block scalar content by checking if it follows a
 	// Literal/Folded header in the token chain.
 	isBlockScalarContent := isBlockScalarContent(tk)
@@ -198,6 +232,7 @@ func (b *builder) AddToken(tk *token.Token) {
 
 	ctx := &partContext{
 		tk:                   tk,
+		breaksAhead:          ahead,
 		leadingNewlines:      countLeadingNewlineParts(parts),
 		isBlockScalarContent: isBlockScalarContent,
 		lastContentPartIdx:   findLastContentPartIndex(parts),
@@ -312,6 +347,7 @@ type partContext struct {
 	tk                   *token.Token
 	part                 string
 	partIndex            int
+	breaksAhead          int // Line breaks the later tokens hold before the next text.
 	leadingNewlines      int // Number of pure-newline parts at the start of parts.
 	lastContentPartIdx   int
 	isBlockScalarContent bool
@@ -517,6 +553,11 @@ func (b *builder) appendToPreviousLine(ctx *partContext) {
 //     currentLine == Position.Line also catches a repeat that real blank
 //     lines follow.
 //
+// A token whose Origin holds whitespace alone, such as the invalid token
+// the lexer makes of a line that holds a tab alone, shares the Position of
+// the next text. Its Position.Line then also counts the line breaks that
+// the tokens between it and that text hold, so the count leaves those out.
+//
 // Block scalar content never reaches the count, because handleGap leaves
 // currentLine on the content line for it. No line is left to advance, so the
 // count would read the lone newline of an empty scalar as a repeat and drop
@@ -530,11 +571,16 @@ func (b *builder) continuesPreviousLine(ctx *partContext) bool {
 		return true
 	}
 
-	if ctx.isBlockScalarContent {
+	if ctx.isBlockScalarContent || ctx.tk.Position == nil {
 		return false
 	}
 
-	return ctx.tk.Position != nil && ctx.leadingNewlines > ctx.tk.Position.Line-b.currentLine
+	advance := ctx.tk.Position.Line - b.currentLine
+	if strings.Trim(ctx.tk.Origin, " \t\r\n") == "" {
+		advance -= ctx.breaksAhead
+	}
+
+	return ctx.leadingNewlines > advance
 }
 
 // handleGap detects and handles line number gaps for simple tokens.

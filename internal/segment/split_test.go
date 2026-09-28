@@ -59,8 +59,10 @@ func TestSplit_DuplicateNewline(t *testing.T) {
 	// The lexer repeats the newline that ends a tag at the start of the next
 	// token. Split must attach the repeat to the finished line and still keep
 	// one line per source line, including real blank lines that follow it.
-	// The lone newline an empty block scalar holds is no such repeat, so it
-	// opens a line of its own.
+	// A line that holds a tab alone becomes a token that shares the position
+	// of the text after it, and the repeat can open that token too. The lone
+	// newline an empty block scalar holds is no such repeat, so it opens a
+	// line of its own.
 	tcs := map[string]struct {
 		input       string
 		wantContent []string
@@ -89,6 +91,46 @@ func TestSplit_DuplicateNewline(t *testing.T) {
 		"two blank lines after tag": {
 			input:       "a: !t\n\n\n  b: 1\n",
 			wantContent: []string{"a: !t", "", "", "  b: 1"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+		"tab line after tag": {
+			input:       "a: !!map\n\t\n  b: 1\n",
+			wantContent: []string{"a: !!map", "\t", "  b: 1"},
+			wantNumbers: []int{1, 2, 3},
+		},
+		"tab line after tag with crlf": {
+			input:       "a: !!map\r\n\t\r\n  b: 1\r\n",
+			wantContent: []string{"a: !!map", "\t", "  b: 1"},
+			wantNumbers: []int{1, 2, 3},
+		},
+		"tab line after tag with bare cr": {
+			input:       "a: !!map\r\t\r  b: 1\r",
+			wantContent: []string{"a: !!map", "\t", "  b: 1"},
+			wantNumbers: []int{1, 2, 3},
+		},
+		"tab line after tag in sequence": {
+			input:       "- !t\n\t\n- b\n",
+			wantContent: []string{"- !t", "\t", "- b"},
+			wantNumbers: []int{1, 2, 3},
+		},
+		"two tab lines after tag": {
+			input:       "a: !!map\n\t\n\t\n  b: 1\n",
+			wantContent: []string{"a: !!map", "\t", "\t", "  b: 1"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+		"tab lines around blank line after tag": {
+			input:       "a: !!map\n\t\n\n\t\n  b: 1\n",
+			wantContent: []string{"a: !!map", "\t", "", "\t", "  b: 1"},
+			wantNumbers: []int{1, 2, 3, 4, 5},
+		},
+		"tab line after invalid block scalar header": {
+			input:       "a: |x\n\t\n  b\n",
+			wantContent: []string{"a: |x", "\t", "  b"},
+			wantNumbers: []int{1, 2, 3},
+		},
+		"tab line and blank lines at end after tag": {
+			input:       "a: !t\n\n\t\n\n",
+			wantContent: []string{"a: !t", "", "\t", ""},
 			wantNumbers: []int{1, 2, 3, 4},
 		},
 		"folded scalar with content after it": {
