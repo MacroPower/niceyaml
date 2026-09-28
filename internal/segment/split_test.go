@@ -373,13 +373,14 @@ func TestSplit_CRLFSplitOffset(t *testing.T) {
 	t.Parallel()
 
 	// The lexer closes a comment with "\r" and opens the next token with
-	// "\n". That "\n" is a new rune, so it advances the offset by one, while
-	// the "\r" a tag repeats before "\r\n" does not.
+	// "\n". That "\n" is a new rune, so it advances the column and the
+	// offset by one, while the "\r" a tag repeats before "\r\n" does not.
 	lines := segment.Split(tokens.Tokenize("# c\r\nk: v\r\n"))
 	require.Len(t, lines, 2)
 
 	nl := part(t, lines, 0, 1)
 	assert.Equal(t, "\n", nl.Origin)
+	assert.Equal(t, 5, nl.Position.Column)
 	assert.Equal(t, 5, nl.Position.Offset)
 
 	lines = segment.Split(tokens.Tokenize("a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n"))
@@ -387,6 +388,7 @@ func TestSplit_CRLFSplitOffset(t *testing.T) {
 
 	dup := part(t, lines, 0, 3)
 	assert.Equal(t, "\r\n", dup.Origin)
+	assert.Equal(t, 6, dup.Position.Column, "the repeat shares the tag's \\r column")
 	assert.Equal(t, 6, dup.Position.Offset, "the repeat shares the tag's \\r offset")
 
 	// "a: !t\r\n" (7) + "  b: 1\r\n" (8) + "c: 'x\r\n" (7) puts the
@@ -480,46 +482,60 @@ func TestSplit_MovedPartOffset(t *testing.T) {
 	// previous token already counted that rune. The parts after it keep
 	// the offsets the source gives them.
 	tcs := map[string]struct {
-		input  string
-		origin string // Origin of the part.
-		line   int    // 0-indexed line holding the part.
-		idx    int    // Segment index of the part on that line.
-		want   int
+		input      string
+		origin     string // Origin of the part.
+		line       int    // 0-indexed line holding the part.
+		idx        int    // Segment index of the part on that line.
+		wantColumn int
+		wantOffset int
 	}{
 		"newline repeated after a tag": {
-			input:  "a: !t\n\n\n  b: 1\n",
-			origin: "\n",
-			line:   0,
-			idx:    3,
-			want:   6,
+			input:      "a: !t\n\n\n  b: 1\n",
+			origin:     "\n",
+			line:       0,
+			idx:        3,
+			wantColumn: 6,
+			wantOffset: 6,
 		},
 		"blank line after a repeated newline": {
-			input:  "a: !t\n\n\n  b: 1\n",
-			origin: "\n",
-			line:   1,
-			idx:    0,
-			want:   7,
+			input:      "a: !t\n\n\n  b: 1\n",
+			origin:     "\n",
+			line:       1,
+			idx:        0,
+			wantColumn: 1,
+			wantOffset: 7,
 		},
 		"crlf repeated after a tag": {
-			input:  "a: !t\r\n  b: 1\r\n",
-			origin: "\r\n",
-			line:   0,
-			idx:    3,
-			want:   6,
+			input:      "a: !t\r\n  b: 1\r\n",
+			origin:     "\r\n",
+			line:       0,
+			idx:        3,
+			wantColumn: 6,
+			wantOffset: 6,
 		},
 		"empty content of a keep block scalar": {
-			input:  "a: |+\n",
-			origin: "",
-			line:   0,
-			idx:    3,
-			want:   6,
+			input:      "a: |+\n",
+			origin:     "",
+			line:       0,
+			idx:        3,
+			wantColumn: 6,
+			wantOffset: 6,
 		},
 		"newline of a crlf cut after a comment": {
-			input:  "# c\r\nk: v\r\n",
-			origin: "\n",
-			line:   0,
-			idx:    1,
-			want:   5,
+			input:      "# c\r\nk: v\r\n",
+			origin:     "\n",
+			line:       0,
+			idx:        1,
+			wantColumn: 5,
+			wantOffset: 5,
+		},
+		"newline of a crlf cut between comments": {
+			input:      "# a\r\n# b\r\nc: 1\r\n",
+			origin:     "\n",
+			line:       1,
+			idx:        1,
+			wantColumn: 5,
+			wantOffset: 10,
 		},
 	}
 
@@ -531,7 +547,8 @@ func TestSplit_MovedPartOffset(t *testing.T) {
 			p := part(t, lines, tc.line, tc.idx)
 
 			require.Equal(t, tc.origin, p.Origin)
-			assert.Equal(t, tc.want, p.Position.Offset)
+			assert.Equal(t, tc.wantColumn, p.Position.Column)
+			assert.Equal(t, tc.wantOffset, p.Position.Offset)
 			assert.LessOrEqual(t, p.Position.Offset, utf8.RuneCountInString(tc.input))
 		})
 	}
@@ -623,8 +640,8 @@ func TestSplit_OffsetsIncrease(t *testing.T) {
 				for _, seg := range l.Segments {
 					p := seg.Part()
 
-					// The newline a tag repeats and the "\n" of a cut CRLF
-					// hold no new rune, so they may share an offset.
+					// The newline a tag repeats holds no new rune, so it may
+					// share an offset.
 					if isPureNewline(p.Origin) {
 						assert.GreaterOrEqual(t, p.Position.Offset, prev, "part %q on line %d", p.Origin, l.Number)
 					} else {

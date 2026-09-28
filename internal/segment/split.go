@@ -517,16 +517,23 @@ func textPosition(tk *token.Token, col, offset int) (int, int) {
 }
 
 // appendToPreviousLine attaches the pure-newline part that opens the token
-// to the line finished last, which the part closes. The part sits just
-// past the parts of that line, and its Offset names the rune it starts
-// with, which the previous token may already have counted. Only the runes
-// it adds beyond that line ending advance the offset.
+// to the line finished last, which the part closes. A repeated line ending
+// starts on the rune where the ending that closed that line starts, and the
+// "\n" of a CRLF the lexer cut starts one rune past its "\r". The part's
+// Line, Column, and Offset name that rune, which the previous token may
+// already have counted, so only the runes the part adds beyond that line
+// ending advance the offset.
 func (b *builder) appendToPreviousLine(ctx *partContext) {
 	lastLine := &b.lines[len(b.lines)-1]
+
+	// The part starts past the runes of the previous line ending it does
+	// not share. Line endings are ASCII, so byte and rune counts agree.
+	delta := len(b.prevLineEnding) - lineEndingOverlap(b.prevLineEnding, ctx.part)
+
 	newTk := newPart(ctx.tk, ctx.tk.Type, ctx.part, "", token.Position{
 		Line:        lastLine.Number,
-		Column:      max(b.prevLineEndColumn, 1),
-		Offset:      b.currentOffset - lineEndingOverlap(b.prevLineEnding, ctx.part),
+		Column:      max(b.prevLineEndColumn, 1) + delta,
+		Offset:      b.prevLineEndOffset + delta,
 		IndentNum:   b.prevLineIndentNum,
 		IndentLevel: b.currentIndentLevel,
 	})
