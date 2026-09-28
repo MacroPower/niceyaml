@@ -14,7 +14,8 @@ Hide
   Sleep 500ms
 Show
 
-# Can't loop over control+key commands :(
+# VHS takes no repeat count for modifier key combinations, so each
+# Shift+Tab gets its own line.
 Shift+Tab Sleep 25ms
 Shift+Tab Sleep 25ms
 Shift+Tab Sleep 25ms
