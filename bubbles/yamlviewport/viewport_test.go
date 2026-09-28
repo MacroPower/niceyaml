@@ -3847,6 +3847,36 @@ func TestViewMode_Behavior(t *testing.T) {
 				assert.Contains(t, m.View(), " enabled: true")
 			},
 		},
+		"SetViewModeOutOfRange": {
+			width:  80,
+			height: 5,
+			setup: func(m *yamlviewport.Model) {
+				var src strings.Builder
+
+				for i := range 50 {
+					fmt.Fprintf(&src, "k%d: v\n", i)
+				}
+
+				m.SetRevision(niceyaml.NewSourceFromString(src.String()))
+				m.SetViewMode(yamlviewport.ViewMode(7))
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				// An undefined mode falls back to the default.
+				assert.Equal(t, yamlviewport.ViewModeFull, m.ViewMode())
+
+				// The mode already set, or an undefined one that falls back
+				// to it, leaves the view where it is.
+				m.SetYOffset(10)
+				m.SetViewMode(yamlviewport.ViewModeFull)
+				assert.Equal(t, 10, m.YOffset())
+
+				m.SetViewMode(yamlviewport.ViewMode(-1))
+				assert.Equal(t, yamlviewport.ViewModeFull, m.ViewMode())
+				assert.Equal(t, 10, m.YOffset())
+			},
+		},
 		"ToggleCyclesThroughHunks": {
 			width:  80,
 			height: 24,

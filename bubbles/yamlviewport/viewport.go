@@ -711,8 +711,13 @@ func (m *Model) ViewMode() ViewMode {
 }
 
 // SetViewMode sets the view mode and rebuilds the view. The mode already
-// set leaves the view where it is.
+// set leaves the view where it is. An undefined mode falls back to
+// [ViewModeFull], the default.
 func (m *Model) SetViewMode(mode ViewMode) {
+	if mode < ViewModeFull || mode > ViewModeSideBySide {
+		mode = ViewModeFull
+	}
+
 	if mode == m.viewMode {
 		return
 	}
