@@ -4,8 +4,8 @@
 // Themes translate popular editor and terminal color schemes (Monokai, Dracula,
 // Catppuccin, etc.) into [style.Styles] configurations.
 //
-// This allows applications to offer familiar color palettes without
-// manually defining token colors.
+// Applications offer familiar color palettes through them without defining
+// token colors by hand.
 //
 // # Usage
 //
@@ -56,7 +56,7 @@
 //	})
 //	catalog := theme.Builtin().With(custom)
 //
-// A Catalog never changes after it is built, so a program builds one at
+// A Catalog never changes after construction, so a program builds one at
 // startup and shares it with every picker that needs it.
 //
 // # Theme Structure
@@ -65,9 +65,9 @@
 // ([kind.LiteralString]), numbers ([kind.LiteralNumber]), comments
 // ([kind.Comment]), and so on.
 //
-// The [style] package's inheritance system means themes only need to specify
-// the kinds they want to customize; undefined kinds fall back to
-// their parent style.
+// Through the inheritance of the [style] package, a theme specifies only
+// the kinds it customizes, and every other kind falls back to the style of
+// its parent.
 //
 // Most built-in themes come from a small palette: a base foreground and
 // background, an accent color, OK, warning, and error colors, and the token

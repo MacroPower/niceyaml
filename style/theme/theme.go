@@ -12,14 +12,14 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
-// Mode is the background a theme is designed for.
+// Mode is the background a theme targets.
 type Mode int
 
 // Background modes.
 const (
-	// Light marks themes designed for light backgrounds.
+	// Light marks themes that target light backgrounds.
 	Light Mode = iota
-	// Dark marks themes designed for dark backgrounds.
+	// Dark marks themes that target dark backgrounds.
 	Dark
 )
 
@@ -38,8 +38,7 @@ type Theme struct {
 	// Name is the kebab-case identifier for the theme (e.g., "monokai",
 	// "dracula").
 	Name string
-	// Mode indicates whether the theme is designed for light or dark
-	// backgrounds.
+	// Mode is the background the theme targets, light or dark.
 	Mode Mode
 }
 
@@ -98,7 +97,7 @@ var (
 
 // Catalog is an ordered set of [Theme] values, one per name.
 //
-// A Catalog never changes after it is built. [Catalog.With] returns a new
+// A Catalog never changes after construction. [Catalog.With] returns a new
 // Catalog holding more themes, and the receiver stays as it was, so a
 // program builds one at startup and shares it with every picker and
 // printer that needs it. The zero Catalog holds no themes.
@@ -164,7 +163,7 @@ func (c Catalog) All() []Theme {
 	return slices.Clone(c.themes)
 }
 
-// Mode returns the [Catalog] of the themes designed for mode, in the order
+// Mode returns the [Catalog] of the themes that target mode, in the order
 // the receiver holds them, so a picker lists the themes for one
 // background:
 //

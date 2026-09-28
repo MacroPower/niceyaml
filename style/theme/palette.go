@@ -20,10 +20,9 @@ const dimShift = 0.15
 // surfaceShift lifts highlight and accent heading backgrounds off the base.
 const surfaceShift = 0.30
 
-// palette holds the colors a catalog theme is built from. Every built-in
-// theme except charm is one palette in [palettes], and [palette.styles]
-// derives the full [style.Styles] from it, so a theme lists its colors
-// rather than every kind.
+// palette holds the colors [palette.styles] builds the full [style.Styles]
+// of a catalog theme from. Every built-in theme except charm is one palette
+// in [palettes], so a theme lists its colors rather than every kind.
 type palette struct {
 	// Tokens sets token kinds in the style-string form [style.Parse]
 	// reads. Each spec layers over the style its kind inherits, so a spec
@@ -210,9 +209,9 @@ func depth(st kind.Kind) int {
 	return n
 }
 
-// surface returns the foreground and background the derived kinds are
-// computed from: the palette's own colors, or black and white arranged for
-// the mode when the palette leaves one unset.
+// surface returns the foreground and background that [palette.styles]
+// derives the other kinds from. These are the palette's own colors, or
+// black and white arranged for the mode when the palette leaves one unset.
 func (p palette) surface() (color.Color, color.Color) {
 	fg, bg := "#000000", "#ffffff"
 	if p.Mode == Dark {
