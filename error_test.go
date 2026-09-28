@@ -1457,6 +1457,59 @@ func TestSourceError_UnresolvedNestedInTree(t *testing.T) {
 	}
 }
 
+func TestSourceError_Format(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\n")
+	err := yamltest.Bind(t, source, niceyaml.NewError("x", niceyaml.AtPath(paths.Root().Child("a"))))
+
+	tcs := map[string]struct {
+		format string
+		want   string
+	}{
+		"v prints the message": {
+			format: "%v",
+			want:   "1:4: $.a: x",
+		},
+		"s prints the message": {
+			format: "%s",
+			want:   "1:4: $.a: x",
+		},
+		"q quotes the message": {
+			format: "%q",
+			want:   `"1:4: $.a: x"`,
+		},
+		"width pads the message on the left": {
+			format: "%13s",
+			want:   "  1:4: $.a: x",
+		},
+		"minus flag pads the message on the right": {
+			format: "%-13v",
+			want:   "1:4: $.a: x  ",
+		},
+		"precision cuts the message": {
+			format: "%.3s",
+			want:   "1:4",
+		},
+		"sharp q quotes with backquotes": {
+			format: "%#q",
+			want:   "`1:4: $.a: x`",
+		},
+		"x prints the message in hex": {
+			format: "%x",
+			want:   "313a343a20242e613a2078",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, fmt.Sprintf(tc.format, err))
+		})
+	}
+}
+
 func TestSourceError_Format_Plain(t *testing.T) {
 	t.Parallel()
 
@@ -5725,6 +5778,26 @@ func TestError_Format(t *testing.T) {
 		"plus v prints the tree": {
 			format: "%+v",
 			want:   "2 violations\n|-- $.a: bad a\n`-- $.b: bad b",
+		},
+		"width pads the message on the left": {
+			format: "%16s",
+			want:   "    2 violations",
+		},
+		"minus flag pads the message on the right": {
+			format: "%-16v",
+			want:   "2 violations    ",
+		},
+		"precision cuts the message": {
+			format: "%.5s",
+			want:   "2 vio",
+		},
+		"sharp q quotes with backquotes": {
+			format: "%#q",
+			want:   "`2 violations`",
+		},
+		"x prints the message in hex": {
+			format: "%x",
+			want:   "322076696f6c6174696f6e73",
 		},
 	}
 

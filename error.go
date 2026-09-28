@@ -405,17 +405,16 @@ func (e *Error) Error() string {
 // [FormatError] renders for the error: its message as a tree with the
 // nested errors from [WithErrors] under it, so a log or a failing test
 // that prints an unbound Error that way shows every nested error, as it
-// does for a [*SourceError]. The %q verb quotes [Error.Error].
+// does for a [*SourceError]. Every other verb formats [Error.Error] as it
+// formats a string, with the width, precision, and flags given, so %q
+// quotes the message and %-20v pads it.
 func (e *Error) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
 		writeString(f, FormatError(e, DefaultContextLines))
 
-	case verb == 'q':
-		writeString(f, strconv.Quote(e.Error()))
-
 	default:
-		writeString(f, e.Error())
+		_, _ = fmt.Fprintf(f, fmt.FormatString(f, verb), e.Error()) //nolint:errcheck // Formatter has no error channel.
 	}
 }
 
@@ -1537,18 +1536,16 @@ func AllBindings(err error) iter.Seq[*SourceError] {
 // what [FormatError] renders for the error with [DefaultContextLines]
 // lines of context, for a log that prints its errors that way. A wrapper
 // such as [fmt.Errorf] around a SourceError formats as its own message,
-// so a program that holds any error calls FormatError. The %q verb quotes
-// [SourceError.Error].
+// so a program that holds any error calls FormatError. Every other verb
+// formats [SourceError.Error] as it formats a string, with the width,
+// precision, and flags given, so %q quotes the message and %-20v pads it.
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
 		writeString(f, FormatError(e, DefaultContextLines))
 
-	case verb == 'q':
-		writeString(f, strconv.Quote(e.Error()))
-
 	default:
-		writeString(f, e.Error())
+		_, _ = fmt.Fprintf(f, fmt.FormatString(f, verb), e.Error()) //nolint:errcheck // Formatter has no error channel.
 	}
 }
 
