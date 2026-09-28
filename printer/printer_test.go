@@ -2617,10 +2617,12 @@ func TestPrinter_AnnotationFarColumn(t *testing.T) {
 			want:  strings.Repeat(" ", 9+1024) + "^ x",
 		},
 		"max column when wrapping": {
+			// The column leaves the text no room within the width, so the
+			// text moves below the marker.
 			input: "k: v",
 			col:   math.MaxInt,
 			width: 10,
-			want:  strings.Repeat(" ", 4+1024) + "^ x",
+			want:  stringtest.JoinLF(strings.Repeat(" ", 4+1024)+"^", "x"),
 		},
 		"column past the bound": {
 			input: "k: v",
@@ -2651,8 +2653,16 @@ func TestPrinter_AnnotationFarColumn(t *testing.T) {
 			var l printer.Layout
 
 			require.NotPanics(t, func() { l = p.Layout(view) })
-			assert.Equal(t, 2, l.Rows())
-			assert.Equal(t, lipgloss.Width(tc.want), l.Width())
+
+			rows := strings.Split(got, "\n")
+			widest := 0
+
+			for _, row := range rows {
+				widest = max(widest, lipgloss.Width(row))
+			}
+
+			assert.Len(t, rows, l.Rows())
+			assert.Equal(t, widest, l.Width())
 		})
 	}
 }
@@ -4353,7 +4363,66 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			},
 			want: stringtest.JoinLF(
 				"key: value",
-				strings.Repeat(" ", 30)+"^ x",
+				strings.Repeat(" ", 30)+"^",
+				strings.Repeat(" ", 5)+"x",
+			),
+		},
+		"one-cell word at the last column hangs": {
+			input:  "key: aaaaaaaaaaaaaaa",
+			gutter: printer.NoGutter,
+			width:  20,
+			annotation: line.Annotation{
+				Content:   "x",
+				Placement: line.Below,
+				Col:       19,
+			},
+			want: stringtest.JoinLF(
+				"key: aaaaaaaaaaaaaaa",
+				strings.Repeat(" ", 19)+"^",
+				"x",
+			),
+		},
+		"one-cell words with no room beside the marker hang": {
+			input:  "key: aaaaaaaaaaaaaaa",
+			gutter: printer.NoGutter,
+			width:  20,
+			annotation: line.Annotation{
+				Content:   "a b c",
+				Placement: line.Below,
+				Col:       18,
+			},
+			want: stringtest.JoinLF(
+				"key: aaaaaaaaaaaaaaa",
+				strings.Repeat(" ", 18)+"^",
+				"a b c",
+			),
+		},
+		"marker with empty text at the last column keeps one row": {
+			input:   "key: aaaaaaaaaaaaaaa",
+			gutter:  printer.NoGutter,
+			width:   20,
+			annFunc: arrow,
+			annotation: line.Annotation{
+				Placement: line.Below,
+				Col:       19,
+			},
+			want: stringtest.JoinLF(
+				"key: aaaaaaaaaaaaaaa",
+				strings.Repeat(" ", 19)+"-> ",
+			),
+		},
+		"one-cell word with one cell of room stays beside the marker": {
+			input:  "key: aaaaaaaaaaaaaaa",
+			gutter: printer.NoGutter,
+			width:  20,
+			annotation: line.Annotation{
+				Content:   "x",
+				Placement: line.Below,
+				Col:       17,
+			},
+			want: stringtest.JoinLF(
+				"key: aaaaaaaaaaaaaaa",
+				strings.Repeat(" ", 17)+"^ x",
 			),
 		},
 		"below column on the last wrapped row pads from that row's start": {

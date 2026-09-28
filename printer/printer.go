@@ -1121,13 +1121,16 @@ func (p *Printer) renderAnnotationRow(row AnnotationRow, kindStyle lipgloss.Styl
 	// When the column leaves the text less room than its widest word, the
 	// marker keeps its column on a row of its own, without its trailing
 	// spaces, and the text moves to the rows below under a smaller indent.
-	// That indent leaves the text minAnnotationWidth cells, or its widest
-	// word when that is wider, and shrinks to nothing when the width has
-	// less room. A row without a marker keeps its text at the column,
-	// since only the marker holds the column once the text moves. A column
-	// past the end of the content keeps its cell even when that cell lies
-	// past the width, and the rows indented to it then run wider.
-	if p.wrap > 0 && mark != "" && widest > p.contentWidth(gutterWidth+indentWidth) {
+	// The room is the width less the gutter and the indent, and none once
+	// the indent fills the width. A one-cell word then moves too, while
+	// text with no word stays on the marker row. The smaller indent leaves
+	// the text minAnnotationWidth cells, or its widest word when that is
+	// wider, and shrinks to nothing when the width has less room. A row
+	// without a marker keeps its text at the column, since only the marker
+	// holds the column once the text moves. A column past the end of the
+	// content keeps its cell even when that cell lies past the width, and
+	// the rows indented to it then run wider.
+	if p.wrap > 0 && mark != "" && widest > max(0, p.wrap-gutterWidth-indentWidth) {
 		hang := max(0, p.contentWidth(gutterWidth)-max(minAnnotationWidth, widest))
 
 		add(padding + mark)
