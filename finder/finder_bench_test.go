@@ -164,7 +164,7 @@ func BenchmarkFinderFind_UnicodeContent(b *testing.B) {
 	})
 
 	b.Run("with_normalizer", func(b *testing.B) {
-		// The normalizer converts "Héllo" -> "hello".
+		// The normalizer converts "Héllo" to "hello".
 		f := finder.New(
 			finder.WithNormalizer(normalizer.New()),
 		)

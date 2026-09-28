@@ -130,8 +130,9 @@ func WithNormalizer(n Normalizer) Option {
 	}
 }
 
-// Load reads the given [line.Lines] and returns an [Index] over it, built
-// from the loaded text and a map from its positions back to the lines.
+// Load reads the given [line.Lines] and returns an [Index] over them. The
+// Index holds the loaded text and a map from its positions back to the
+// lines.
 //
 // Each call builds a new Index and leaves the Finder as it was, so load once
 // per distinct content and call [Index.Find] as many times as needed. The
@@ -264,9 +265,9 @@ func normalizeRune(n Normalizer, r rune) string {
 // ending of its own gets a "\n" at column [line.Line.Width], where an
 // ending would sit, so no match joins the text of two lines.
 //
-// When a normalizer is set, it normalizes the returned text, and the position
-// map records where each source rune begins in the normalized text so
-// lookups in normalized text resolve to the right place.
+// When the Finder has a normalizer, the normalizer transforms the returned
+// text, and the position map records where each source rune begins in the
+// normalized text so lookups in normalized text resolve to the right place.
 func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap) {
 	var sb strings.Builder
 

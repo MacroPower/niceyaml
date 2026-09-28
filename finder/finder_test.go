@@ -647,8 +647,8 @@ func TestFinder_Find_NilLines(t *testing.T) {
 func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 	t.Parallel()
 
-	// When searching Lines built from a diff, matches land at the visual line
-	// positions rather than the original source Position.Line.
+	// When a search runs over Lines built from a diff, matches land at the
+	// visual line positions rather than the original source Position.Line.
 	//
 	// Diff produces:
 	// Line 0 (idx=0): "key: old" (deleted, Position.Line=1)
