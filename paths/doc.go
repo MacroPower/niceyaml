@@ -52,7 +52,10 @@
 //
 // When several anchors share a name, an alias refers to the last one before
 // it, which is the anchor the goccy/go-yaml decoder uses when it fills a
-// map. The decoder reads each mapping a `<<` merge key brings in again at
+// map. The decoder records an anchor on the value of a `<<` merge key only
+// for the aliases other merge keys name, so an alias elsewhere refers to
+// such an anchor only when no other anchor of its name comes before the
+// alias. The decoder reads each mapping a `<<` merge key brings in again at
 // the merge key, so the anchors inside that mapping count again there. It
 // also looks up the aliases inside that mapping again, while a path keeps
 // the anchor each alias refers to where the mapping defines it. When the

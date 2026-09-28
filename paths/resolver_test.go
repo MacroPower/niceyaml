@@ -73,6 +73,43 @@ func TestResolver_Node(t *testing.T) {
 			path:  "$.m.v",
 			want:  "three",
 		},
+		"earlier anchor over the anchor of an inline merge source": {
+			// The decoder records an anchor on a merge value only for the
+			// aliases other merge keys name, so *m reads the value &m.
+			input: "a: &m 1\nb: {<<: &m {k: 2}}\nc: *m\n",
+			path:  "$.c",
+			want:  "1",
+		},
+		"earlier anchor over the anchor of an inline merge source in a sequence": {
+			input: "a: &m 1\nb: {<<: [&m {k: 2}]}\nc: *m\n",
+			path:  "$.c",
+			want:  "1",
+		},
+		"earlier anchor over the anchor of a block merge source": {
+			input: "a: &m 1\nb:\n  <<: &m\n    k: 2\nc: *m\n",
+			path:  "$.c",
+			want:  "1",
+		},
+		"earlier anchor over the anchor of a merge source a merge brings in again": {
+			input: "base: &b {x: {<<: &m {k: 2}}}\na: &m 1\nd: {<<: *b}\nc: *m\n",
+			path:  "$.c",
+			want:  "1",
+		},
+		"anchor of an inline merge source with no earlier anchor": {
+			input: "b: {<<: &m {k: 2}}\nc: *m\n",
+			path:  "$.c.k",
+			want:  "2",
+		},
+		"value alias beside an anchor of an inline merge source": {
+			input: "a: &m {k: 1}\nb: {<<: &m {k: 2}}\nd: {<<: *m}\nc: *m\n",
+			path:  "$.c.k",
+			want:  "1",
+		},
+		"merge alias to the anchor of an inline merge source": {
+			input: "a: &m {k: 1}\nb: {<<: &m {k: 2}}\nd: {<<: *m}\nc: *m\n",
+			path:  "$.d.k",
+			want:  "2",
+		},
 		"anchor of a merge source that merges itself": {
 			// The decoder rejects the merge of a mapping into itself. The
 			// binding stops at the cycle and still counts &x one again.
