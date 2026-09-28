@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -259,6 +261,36 @@ func TestContent(t *testing.T) {
 			input:   "enabled: !!bool\n",
 			want:    false,
 		},
+		"lowest int64 does not match negative infinity": {
+			matcher: matcher.Content(versionPath, int64(math.MinInt64)),
+			input:   stringtest.Input(`version: -.inf`),
+			want:    false,
+		},
+		"highest int64 does not match a larger plain exponent": {
+			matcher: matcher.Content(versionPath, int64(math.MaxInt64)),
+			input:   stringtest.Input(`version: 1e19`),
+			want:    false,
+		},
+		"lowest int64 does not match a smaller float": {
+			matcher: matcher.Content(versionPath, int64(math.MinInt64)),
+			input:   stringtest.Input(`version: -1.0e+19`),
+			want:    false,
+		},
+		"highest uint64 does not match 2^64": {
+			matcher: matcher.Content(versionPath, uint64(math.MaxUint64)),
+			input:   stringtest.Input(`version: 18446744073709551616.0`),
+			want:    false,
+		},
+		"self-decoding integer reads a float its own way": {
+			matcher: matcher.Content(versionPath, millis(2000)),
+			input:   stringtest.Input(`version: 2.0`),
+			want:    true,
+		},
+		"self-decoding integer never matches a fraction": {
+			matcher: matcher.Content(versionPath, millis(2500)),
+			input:   stringtest.Input(`version: 2.5`),
+			want:    false,
+		},
 		"value that does not decode": {
 			matcher: matcher.Content(versionPath, 1),
 			input:   stringtest.Input(`version: abc`),
@@ -427,6 +459,21 @@ type prefixedString string
 
 func (p *prefixedString) UnmarshalText(text []byte) error {
 	*p = prefixedString("v" + string(text))
+
+	return nil
+}
+
+// millis decodes itself from a number of seconds, which it holds as
+// milliseconds.
+type millis int64
+
+func (m *millis) UnmarshalYAML(data []byte) error {
+	seconds, err := strconv.ParseFloat(strings.TrimSpace(string(data)), 64)
+	if err != nil {
+		return fmt.Errorf("read seconds: %w", err)
+	}
+
+	*m = millis(seconds * 1000)
 
 	return nil
 }

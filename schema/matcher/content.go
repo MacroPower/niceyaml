@@ -134,7 +134,7 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 		}
 	}
 
-	if isInteger(gv.Kind()) && hasFraction(raw) {
+	if isInteger(gv.Kind()) && !floatHoldsInteger(raw, gv) {
 		return false, nil
 	}
 
@@ -169,15 +169,16 @@ var unmarshalerTypes = []reflect.Type{
 	reflect.TypeFor[encoding.TextUnmarshaler](),
 }
 
-// isPlainString reports whether t is a string type whose pointer
-// implements no unmarshaler the decoder honors, so the decoder reads it
-// as it reads a string. Methods that play no part in decoding, such as a
-// String method, leave a type plain.
+// isPlainString reports whether t is a string type that [isPlain]
+// reports, so the decoder reads it as it reads a string.
 func isPlainString(t reflect.Type) bool {
-	if t.Kind() != reflect.String {
-		return false
-	}
+	return t.Kind() == reflect.String && isPlain(t)
+}
 
+// isPlain reports whether the pointer of t implements no unmarshaler the
+// decoder honors, so the decoder reads t by its kind. Methods that play
+// no part in decoding, such as a String method, leave a type plain.
+func isPlain(t reflect.Type) bool {
 	return !slices.ContainsFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
 }
 
@@ -293,21 +294,43 @@ func isPredeclaredNumber(v reflect.Value) bool {
 	return isInteger(k) || isFloat(k)
 }
 
-// hasFraction reports whether raw, the value as the YAML types name it,
-// is a number with a fraction. The decoder reads some plain floats, such
-// as 25e-1, as strings and truncates them when it decodes them into an
-// integer, so a string counts when it parses as a float.
-func hasFraction(raw any) bool {
+// floatHoldsInteger reports whether raw, the value as the YAML types name
+// it, can match v, the integer a decode of it gave, and reports true for
+// a raw value that holds no float. An integer never matches a float with
+// a fraction. The decoder converts a float to an integer type of its own
+// without a range check, which turns -.inf or 1e19 into the lowest or
+// highest int64 on some platforms, so the float must also hold the value
+// of v. A type that decodes itself reads the float its own way, so only
+// the fraction counts for it.
+func floatHoldsInteger(raw any, v reflect.Value) bool {
+	f, ok := rawFloat(raw)
+	if !ok {
+		return true
+	}
+
+	if f != math.Trunc(f) {
+		return false
+	}
+
+	return !isPlain(v.Type()) || floatEqualsInteger(f, v)
+}
+
+// rawFloat returns the float that raw, the value as the YAML types name
+// it, holds, and reports whether it holds one. The decoder reads some
+// plain floats, such as 25e-1 and 1e19, as strings and converts them when
+// it decodes them into an integer, so a string counts when it parses as
+// a float.
+func rawFloat(raw any) (float64, bool) {
 	switch v := raw.(type) {
 	case float64:
-		return v != math.Trunc(v)
+		return v, true
 	case string:
 		f, err := strconv.ParseFloat(v, 64)
 
-		return err == nil && f != math.Trunc(f)
+		return f, err == nil
 
 	default:
-		return false
+		return 0, false
 	}
 }
 
