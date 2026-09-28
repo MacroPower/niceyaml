@@ -94,6 +94,62 @@ func TestNewView(t *testing.T) {
 	})
 }
 
+func TestNewView_Spans(t *testing.T) {
+	t.Parallel()
+
+	lines := line.NewLines(tokens.Tokenize("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"))
+
+	tcs := map[string]struct {
+		spans []position.Span
+		want  []int
+	}{
+		"no spans": {
+			want: []int{0, 1, 2, 3, 4},
+		},
+		"one span": {
+			spans: []position.Span{position.NewSpan(1, 3)},
+			want:  []int{1, 2},
+		},
+		"spans out of order and overlapping": {
+			spans: []position.Span{position.NewSpan(3, 5), position.NewSpan(0, 1), position.NewSpan(3, 4)},
+			want:  []int{0, 3, 4},
+		},
+		"span past the end": {
+			spans: []position.Span{position.NewSpan(4, 9)},
+			want:  []int{4},
+		},
+		"empty span": {
+			spans: []position.Span{position.NewSpan(2, 2)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := line.NewView(lines, tc.spans...)
+
+			var got []int
+
+			for i := range view.All() {
+				got = append(got, i)
+			}
+
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, lines, view.Lines())
+
+			// The view holds what a slice of a view over every line holds.
+			var sliced []int
+
+			for i := range line.NewView(lines).Slice(tc.spans...).All() {
+				sliced = append(sliced, i)
+			}
+
+			assert.Equal(t, sliced, got)
+		})
+	}
+}
+
 func TestView_Contains(t *testing.T) {
 	t.Parallel()
 

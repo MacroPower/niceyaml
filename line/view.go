@@ -57,15 +57,23 @@ type View struct {
 	held []int
 }
 
-// NewView creates a new [*View] over lines with no decoration, holding
-// every line in order.
-func NewView(lines Lines) *View {
-	held := make([]int, lines.Len())
-	for i := range held {
-		held[i] = i
+// NewView creates a new [*View] over lines with no decoration. Without
+// spans it holds every line in order. With spans it holds the lines
+// within any of them, in content order and each once, as [Lines.All]
+// yields them, so it holds what [View.Slice] of a new View over every
+// line holds, and the index it builds grows with those lines alone.
+func NewView(lines Lines, spans ...position.Span) *View {
+	v := &View{lines: lines}
+
+	if len(spans) == 0 {
+		v.held = make([]int, 0, lines.Len())
 	}
 
-	return &View{lines: lines, held: held}
+	for i := range lines.All(spans...) {
+		v.held = append(v.held, i)
+	}
+
+	return v
 }
 
 // Lines returns the content of the [View], every line of the [Lines] it is

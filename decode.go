@@ -1149,7 +1149,7 @@ func (n *Node) Span() position.Span {
 // of a scope whose path ends at an alias on a line below the content of
 // the anchor, marks nothing on the view.
 func (n *Node) View() *line.View {
-	return n.source.View().Slice(n.span)
+	return line.NewView(n.source.lines, n.span)
 }
 
 // Lines returns the lines of [Source.Lines] that the node covers,
