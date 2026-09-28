@@ -336,7 +336,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		`))
 
 		_, err = dd.Decode[ordered](t.Context())
-		require.EqualError(t, err, "parent ran last")
+		require.EqualError(t, err, "1:1: $: parent ran last")
 	})
 
 	t.Run("every value that fails is reported", func(t *testing.T) {
@@ -500,7 +500,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		dd = yamltest.FirstDocument(t, "null\n")
 
 		_, err = dd.Decode[rules](t.Context())
-		require.EqualError(t, err, "no rules")
+		require.EqualError(t, err, "1:1: $: no rules")
 	})
 
 	t.Run("a value that refers back through a map walks once", func(t *testing.T) {
@@ -783,6 +783,26 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err := dd.Decode[withPort](t.Context())
 		require.EqualError(t, err, "1:13: $.ports[1]: port out of range")
+	})
+
+	t.Run("an unlocated error points at the value that owns it", func(t *testing.T) {
+		t.Parallel()
+
+		// The decode root is a value like any other, so its Validate
+		// reports at its own node as a field does.
+		type withPort struct {
+			Port port `yaml:"port"`
+		}
+
+		dd := yamltest.FirstDocument(t, "port: 70000\n")
+
+		_, err := dd.Decode[withPort](t.Context())
+		require.EqualError(t, err, "1:7: $.port: port out of range")
+
+		scoped := yamltest.At(t, dd, paths.Root().Child("port"))
+
+		_, err = scoped.Decode[port](t.Context())
+		require.EqualError(t, err, "1:7: $: port out of range")
 	})
 
 	t.Run("a byte-sized leaf type validates itself", func(t *testing.T) {
