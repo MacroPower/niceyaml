@@ -1612,9 +1612,23 @@ func TestSchema_AliasExpansion(t *testing.T) {
 
 		bin := []byte("hi")
 
+		// Each level lists the level below ten times, so the last level
+		// expands to 10^6 scalars.
+		var shared any = []any{"x"}
+
+		for range 6 {
+			level := make([]any, 10)
+			for i := range level {
+				level[i] = shared
+			}
+
+			shared = level
+		}
+
 		tcs := map[string]struct {
-			data any
-			err  error
+			data      any
+			err       error
+			excessive bool
 		}{
 			"map containing itself": {
 				data: selfMap,
@@ -1631,6 +1645,17 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			"bytes under two keys": {
 				data: map[string]any{"a": bin, "b": bin},
 			},
+			// A key that is no string prints in full as the member name,
+			// so it counts as a value does.
+			"ordered mapping key containing itself": {
+				data: yaml.MapSlice{{Key: selfSlice, Value: 1}},
+				err:  schema.ErrValidate,
+			},
+			"ordered mapping key sharing a slice": {
+				data:      yaml.MapSlice{{Key: shared, Value: 1}},
+				err:       schema.ErrValidate,
+				excessive: true,
+			},
 		}
 
 		for name, tc := range tcs {
@@ -1645,7 +1670,12 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				}
 
 				require.ErrorIs(t, err, tc.err)
-				assert.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
+
+				if tc.excessive {
+					require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
+				} else {
+					assert.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
+				}
 			})
 		}
 	})

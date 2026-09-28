@@ -1388,15 +1388,20 @@ func (w *expansionWalker) walk(data any) (int, error) {
 
 	case yaml.MapSlice:
 		for _, item := range v {
-			// The key is a node of its own.
-			w.distinct = addCapped(w.distinct, 1)
+			// The key is a node of its own, and mapItemKey prints a key
+			// that is no string in full, so the walk reads the key as it
+			// reads a value.
+			kn, err := w.walk(item.Key)
+			if err != nil {
+				return 0, err
+			}
 
 			n, err := w.walk(item.Value)
 			if err != nil {
 				return 0, err
 			}
 
-			size = addCapped(size, addCapped(1, n))
+			size = addCapped(size, addCapped(kn, n))
 		}
 
 	case []any:
