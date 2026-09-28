@@ -1149,7 +1149,7 @@ func (c *treeCounter) count(node ast.Node, top bool) int {
 	case *ast.AliasNode:
 		return c.alias(n, top)
 	case *ast.AnchorNode:
-		return c.count(n.Value, top)
+		return c.anchor(n, top)
 	case *ast.TagNode:
 		return c.count(n.Value, top)
 	case *ast.MappingKeyNode:
@@ -1190,6 +1190,24 @@ func (c *treeCounter) entry(entry *ast.MappingValueNode, top bool) int {
 	}
 
 	return addCapped(c.count(entry.Key, top), c.count(entry.Value, top))
+}
+
+// anchor returns the number of nodes a decode of the content of the
+// anchor reads, as [treeCounter.count] counts them. The decoder reads an
+// alias inside the content of its own anchor as null, so anchor marks
+// the content open while it counts it, under the node [treeCounter.alias]
+// looks the content up by, and such an alias counts as one node.
+func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool) int {
+	content, err := c.resolver.Deref(anchor)
+	if err != nil || c.open[content] {
+		return c.count(anchor.Value, top)
+	}
+
+	c.open[content] = true
+	size := c.count(anchor.Value, top)
+	delete(c.open, content)
+
+	return size
 }
 
 // alias returns the number of nodes a decode of the alias reads, which is

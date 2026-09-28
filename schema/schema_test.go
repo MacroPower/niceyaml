@@ -1506,6 +1506,18 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			"alias to a small sequence as mapping key": {
 				input: "s: &s [a, b]\n*s : v\n",
 			},
+			// The decoder reads an alias inside the content of its own
+			// anchor as null, so each such alias reads one node.
+			"aliases inside their own anchor": {
+				input: "x: &x [" + strings.Repeat("a, ", 10) + strings.Repeat("*x, ", 299) + "*x]\n",
+			},
+			"aliases to the anchor of a mapping inside it": {
+				input: "tree: &t\n  name: root\n  children:\n" +
+					strings.Repeat("    - {name: c, parent: *t}\n", 120),
+			},
+			"aliases to an enclosing anchor inside a nested one": {
+				input: "a: &A {inner: &B [" + strings.Repeat("*A, ", 299) + "*A]}\n",
+			},
 		}
 
 		for name, tc := range tcs {
