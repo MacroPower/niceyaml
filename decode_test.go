@@ -5331,6 +5331,87 @@ func TestErrDecodeRejected(t *testing.T) {
 		})
 	}
 
+	t.Run("rejection the decoder reports without a token", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder reports these with no token of the source, so the
+		// decode binds them where the document causes them.
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+			line  int
+			msg   string
+		}{
+			"merge of the mapping that holds it": {
+				input: "a: &x\n  <<: *x\n  b: 1\n",
+				path:  paths.Root(),
+				line:  1,
+				msg:   "cannot find anchor by alias name x",
+			},
+			"merge alias with no anchor": {
+				input: "a:\n  <<: *nope\n  b: 1\n",
+				path:  paths.Root(),
+				line:  1,
+				msg:   "cannot find anchor by alias name nope",
+			},
+			"merge alias before its anchor": {
+				input: "a:\n  <<: *y\n  b: 1\nc: &y\n  d: 1\n",
+				path:  paths.Root(),
+				line:  1,
+				msg:   "cannot find anchor by alias name y",
+			},
+			"merge alias in a list of sources": {
+				input: "a: {<<: [{b: 1}, *nope]}\n",
+				path:  paths.Root(),
+				line:  0,
+				msg:   "cannot find anchor by alias name nope",
+			},
+			"merge alias with no anchor in a scoped decode": {
+				input: "a:\n  <<: *nope\n  b: 1\n",
+				path:  paths.Root().Child("a"),
+				line:  1,
+				msg:   "cannot find anchor by alias name nope",
+			},
+			"merge alias in an anchor the node merges": {
+				input: "b: &b {<<: *nope}\nc: {<<: *b}\n",
+				path:  paths.Root().Child("c"),
+				line:  0,
+				msg:   "cannot find anchor by alias name nope",
+			},
+			"merge of an anchor that holds the node": {
+				input: "a: &x\n  m:\n    <<: *x\n",
+				path:  paths.Root().Child("a", "m"),
+				line:  2,
+			},
+			"depth limit": {
+				input: "a: " + strings.Repeat("[", 10005) + strings.Repeat("]", 10005) + "\n",
+				path:  paths.Root(),
+				line:  0,
+				msg:   "exceeded max depth",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				_, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context())
+				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+				assert.Contains(t, err.Error(), tc.msg)
+
+				var srcErr *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &srcErr)
+
+				rng, ok := srcErr.Range()
+				require.True(t, ok, "the rejection carries no location")
+				assert.Equal(t, tc.line, rng.Start.Line)
+			})
+		}
+	})
+
 	t.Run("unmarshaler error does not match", func(t *testing.T) {
 		t.Parallel()
 

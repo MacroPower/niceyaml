@@ -1686,7 +1686,7 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 	// in a node below the body finds an anchor defined elsewhere in the
 	// document only after the decoder has seen that anchor.
 	if node != n.doc.root.Body {
-		err = n.doc.primeAnchors(ctx, dec, view)
+		err = n.primeAnchors(ctx, dec, view)
 		if err != nil {
 			return n.bindDecodeError(err)
 		}
@@ -1696,7 +1696,46 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 	// tagged null under a mapping key decoded into a slice. The recover
 	// also catches a panic in a value's own UnmarshalYAML, which then
 	// comes back as a rejection too.
-	return n.bindDecodeError(decodeWithRecover(ctx, dec, view, decodeTarget(v, node)))
+	err = decodeWithRecover(ctx, dec, view, decodeTarget(v, node))
+
+	return n.bindDecodeError(n.rejection(err, view))
+}
+
+// rejection returns err, which the go-yaml decoder returned for scope, a
+// node of the [decodeTree], as an [*Error] that matches
+// [ErrDecodeRejected] when the decoder reported the rejection without a
+// token of the source. That is the depth limit of the decoder, bound at
+// the first token of scope that is not a comment, and a `<<` merge key
+// whose alias names no mapping the decoder can find, bound at the alias.
+// The decoder reads every merge key of scope before it hands anything to
+// a value's own UnmarshalYAML, so an error that comes back from a scope
+// with such an alias is the decoder's own. Any other error, and a nil
+// scope, return err as it is.
+func (n *Node) rejection(err error, scope ast.Node) error {
+	if err == nil || isNilNode(scope) {
+		return err
+	}
+
+	yamlErr, ok := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
+	if ok && n.holdsToken(yamlErr.GetToken()) {
+		return err
+	}
+
+	tree := n.doc.decodeTree()
+
+	var at *token.Token
+
+	if errors.Is(err, yaml.ErrExceededMaxDepth) {
+		at = contentStart(scope)
+	} else {
+		at = tree.unresolvedMerge(n.doc.pathResolver(), scope)
+	}
+
+	if at == nil {
+		return err
+	}
+
+	return WrapError(fmt.Errorf("%w: %w", ErrDecodeRejected, tree.restoreError(err)), atToken(at))
 }
 
 // decodeView returns node as the go-yaml decoder reads it: the same tree,

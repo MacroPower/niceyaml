@@ -58,7 +58,11 @@ var (
 	// A value the go-yaml decoder cannot handle and panics on, such as a
 	// "!!str" tag decoded into a slice, also matches, bound at the first
 	// token of the node that is not a comment, with no go-yaml error in
-	// the chain.
+	// the chain. So does a value nested deeper than the decoder allows,
+	// bound the same way, and a `<<` merge key whose alias names no
+	// anchor before it, or an anchor that holds the merge key, bound at
+	// the alias. The decoder reports those two without a location, and
+	// the chain holds its error.
 	ErrDecodeRejected = errors.New("decoder rejected the value")
 
 	// ErrOutOfRange indicates the error's location lies outside the source.

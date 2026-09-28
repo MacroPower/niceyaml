@@ -12,6 +12,8 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
+
+	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 // decodeTree is the tree the go-yaml decoder reads for one document.
@@ -54,8 +56,14 @@ type decodeTree struct {
 	// The anchors of body, which scoped lists for the first decode of a
 	// node below the body.
 	anchors *anchorIndex
+	// The aliases under `<<` merge keys that the decoder finds no mapping
+	// for, which unresolvedMerge lists for the first decode that needs
+	// them.
+	merges []*token.Token
 	// Fills nodes and anchors once.
 	scopedOnce sync.Once
+	// Fills merges once.
+	mergesOnce sync.Once
 }
 
 // decodeTree returns the [*decodeTree] of the document, and builds it on
@@ -230,6 +238,91 @@ func (t *decodeTree) scoped() {
 
 		t.anchors = newAnchorIndex(t.body)
 	})
+}
+
+// unresolvedMerge returns the token of the first alias under a `<<` merge
+// key inside scope, a node of the tree, that the decoder finds no mapping
+// for, or nil when scope holds none. That is an alias that names no
+// anchor before it as resolver binds it, or one inside the anchor it
+// names, which the decoder has not finished reading when it merges.
+func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node) *token.Token {
+	t.mergesOnce.Do(func() {
+		t.merges = unresolvedMerges(resolver, t.source)
+	})
+
+	first, last := tokenBounds(scope)
+	if len(first) == 0 {
+		return nil
+	}
+
+	lo, hi := first[0].Position.Offset, last[0].Position.Offset
+
+	for _, tk := range t.merges {
+		if off := tk.Position.Offset; off >= lo && off <= hi {
+			return tk
+		}
+	}
+
+	return nil
+}
+
+// unresolvedMerges returns the tokens of the aliases under the `<<` merge
+// keys of body that the decoder finds no mapping for, as
+// [decodeTree.unresolvedMerge] describes, in document order.
+func unresolvedMerges(resolver *paths.Resolver, body ast.Node) []*token.Token {
+	var found []*token.Token
+
+	check := func(node ast.Node) {
+		alias, ok := unwrapNode(node).(*ast.AliasNode)
+		if !ok || alias.Start == nil || alias.Start.Position == nil {
+			return
+		}
+
+		anchor, err := resolver.Anchor(alias)
+		if err == nil && !encloses(anchor, alias.Start) {
+			return
+		}
+
+		found = append(found, alias.Start)
+	}
+
+	for _, n := range sourceNodes(body) {
+		entry, ok := n.(*ast.MappingValueNode)
+		if !ok || entry.Key == nil || !entry.Key.IsMergeKey() {
+			continue
+		}
+
+		value := unwrapNode(entry.Value)
+
+		seq, ok := value.(*ast.SequenceNode)
+		if !ok {
+			check(value)
+
+			continue
+		}
+
+		for _, elem := range seq.Values {
+			check(elem)
+		}
+	}
+
+	sort.SliceStable(found, func(i, j int) bool {
+		return found[i].Position.Offset < found[j].Position.Offset
+	})
+
+	return found
+}
+
+// encloses reports whether tk lies among the tokens under node.
+func encloses(node ast.Node, tk *token.Token) bool {
+	first, last := tokenBounds(node)
+	if len(first) == 0 {
+		return false
+	}
+
+	off := tk.Position.Offset
+
+	return off >= first[0].Position.Offset && off <= last[0].Position.Offset
 }
 
 // restoreNames returns msg with each name the tree gave an anchor spelled
@@ -429,10 +522,10 @@ func newAnchorIndex(body ast.Node) *anchorIndex {
 // only anchors that node, or an anchor node reads, refers to. A failure
 // in one of them would leave an alias with nothing to read, so the pass
 // stops and returns it, as a decode of the whole document fails there
-// too. A context that ends stops the pass, which then returns the error
-// of the context.
-func (d *document) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast.Node) error {
-	idx := d.decodeTree().index()
+// too, as [Node.rejection] reads it for that anchor. A context that ends
+// stops the pass, which then returns the error of the context.
+func (n *Node) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast.Node) error {
+	idx := n.doc.decodeTree().index()
 	if len(idx.entries) == 0 {
 		return nil
 	}
@@ -508,7 +601,7 @@ func (d *document) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast
 
 		err = decodeWithRecover(ctx, dec, e.node, &sink)
 		if err != nil {
-			return err
+			return n.rejection(err, e.node)
 		}
 	}
 
