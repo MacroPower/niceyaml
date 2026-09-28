@@ -50,7 +50,7 @@ func TestLines_Validate(t *testing.T) {
 				tks := tokens.Tokenize(tc.input)
 				lines := line.NewLines(tks)
 
-				// Tokens created through NewLines should always be valid.
+				// Every token NewLines creates is valid.
 				assert.NoError(t, yamltest.ValidateLines(lines))
 			})
 		}
@@ -59,8 +59,8 @@ func TestLines_Validate(t *testing.T) {
 	t.Run("line numbers normalized - same input", func(t *testing.T) {
 		t.Parallel()
 
-		// Create tokens with same line number but separated by newlines.
-		// NewLines normalizes them to be monotonically increasing.
+		// Create tokens with the same line number and a newline between
+		// them. NewLines normalizes the numbers so they strictly increase.
 		tks := token.Tokens{}
 		tks.Add(strTkb.Clone().Origin("first\n").Value("first").PositionLine(5).PositionColumn(1).Build())
 		tks.Add(
@@ -80,7 +80,7 @@ func TestLines_Validate(t *testing.T) {
 		t.Parallel()
 
 		// Create tokens with decreasing line numbers.
-		// NewLines normalizes them to be monotonically increasing.
+		// NewLines normalizes the numbers so they strictly increase.
 		tks := token.Tokens{}
 		tks.Add(strTkb.Clone().Origin("first\n").Value("first").PositionLine(10).PositionColumn(1).Build())
 		tks.Add(
@@ -196,7 +196,7 @@ func TestLines_Validate(t *testing.T) {
 			Type:     token.StringType,
 			Origin:   "first",
 			Value:    "first",
-			Position: nil, // Nil position - intentionally not using TokenBuilder.
+			Position: nil, // TokenBuilder always sets a Position, so build by hand.
 		})
 		tks.Add(strTkb.Clone().Origin("second\n").Value("second").PositionLine(1).PositionColumn(10).Build())
 

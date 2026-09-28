@@ -1,9 +1,9 @@
 // Package yamltest provides test utilities for code that works with go-yaml
 // tokens and niceyaml styled output.
 //
-// Testing YAML tooling presents two challenges: constructing token fixtures
-// is verbose, and styled output cluttered with ANSI escape codes is difficult
-// to read. This package addresses both.
+// A token fixture takes many fields to build by hand, and ANSI escape codes
+// make styled output hard to read. The helpers here shorten fixtures and
+// render styles as readable tags.
 //
 // # Token Fixtures
 //

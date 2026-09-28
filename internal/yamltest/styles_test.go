@@ -152,7 +152,7 @@ func TestXMLStyles_XMLStyleInclude(t *testing.T) {
 	require.NotNil(t, selectedStyle)
 	assert.Equal(t, "<genericHighlight>test</genericHighlight>", selectedStyle.Render("test"))
 
-	// Non-included styles return empty (no transformation).
+	// Style returns an empty style for every other kind.
 	commentStyle := getter.Style(kind.Comment)
 	require.NotNil(t, commentStyle)
 	assert.Equal(t, "test", commentStyle.Render("test"))

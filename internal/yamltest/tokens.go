@@ -52,7 +52,7 @@ type TokenDiff struct {
 	Fields []string     // Field names that differ (see [DiffTokenFields]).
 }
 
-// Equal returns true if the tokens are equal.
+// Equal reports whether the tokens are equal.
 func (d TokenDiff) Equal() bool {
 	return len(d.Fields) == 0
 }
@@ -72,7 +72,7 @@ func (d TokenDiff) String() string {
 //
 // Use [CompareTokenSlices] to create a TokensDiff.
 type TokensDiff struct {
-	Diffs     []TokenDiff // Per-token [TokenDiff] values (only populated if counts match).
+	Diffs     []TokenDiff // Per-token [TokenDiff] values, empty when the counts differ.
 	WantCount int         // Length of want slice.
 	GotCount  int         // Length of got slice.
 }
@@ -82,7 +82,7 @@ func (d TokensDiff) CountMismatch() bool {
 	return d.WantCount != d.GotCount
 }
 
-// Equal returns true if all tokens are equal.
+// Equal reports whether all tokens are equal.
 func (d TokensDiff) Equal() bool {
 	if d.CountMismatch() {
 		return false
@@ -132,7 +132,7 @@ type ContentDiff struct {
 	Got  string // Actual content after normalization.
 }
 
-// Equal returns true if the content is equal after normalization.
+// Equal reports whether the content is equal after normalization.
 func (d ContentDiff) Equal() bool {
 	return d.Want == d.Got
 }
@@ -147,10 +147,10 @@ func (d ContentDiff) String() string {
 }
 
 // ValidateTokens checks that all tokens and their positions are non-nil.
-// Returns nil if all tokens are valid, or the first [*TokenValidationError]
-// found. If the slice lengths differ, returns an error wrapping
-// [ErrTokenCountMismatch] that reports both counts and lists both slices (not a
-// [*TokenValidationError]).
+// It returns the first [*TokenValidationError] it finds, or nil when every
+// token is valid. When the slice lengths differ, it instead returns an
+// error that wraps [ErrTokenCountMismatch], reports both counts, and lists
+// both slices.
 func ValidateTokens(want, got token.Tokens) error {
 	if len(want) != len(got) {
 		return fmt.Errorf("%w: want %d, got %d\nwant tokens:\n%s\ngot tokens:\n%s",
@@ -179,8 +179,8 @@ func ValidateTokens(want, got token.Tokens) error {
 }
 
 // CompareTokens compares all fields of two tokens and returns a [TokenDiff].
-// Assumes both tokens are valid (non-nil with non-nil positions);
-// [ValidateTokens] checks this for token slices.
+// It assumes both tokens are non-nil and carry positions. [ValidateTokens]
+// checks this for token slices.
 func CompareTokens(want, got *token.Token) TokenDiff {
 	return TokenDiff{
 		Fields: DiffTokenFields(want, got),
@@ -190,8 +190,8 @@ func CompareTokens(want, got *token.Token) TokenDiff {
 }
 
 // CompareTokenSlices compares all fields of two token slices and returns a
-// [TokensDiff]. Assumes all tokens are valid (non-nil with non-nil positions);
-// use [ValidateTokens] first to check validity.
+// [TokensDiff]. It assumes every token is non-nil and carries a position,
+// so call [ValidateTokens] first.
 func CompareTokenSlices(want, got token.Tokens) TokensDiff {
 	if len(want) != len(got) {
 		return TokensDiff{
@@ -235,8 +235,8 @@ func CompareContent(want, got string) ContentDiff {
 	}
 }
 
-// DiffTokenFields returns a list of field names that differ between two tokens.
-// Assumes both tokens are valid (non-nil with non-nil positions);
+// DiffTokenFields returns the names of the fields that differ between two
+// tokens. It assumes both tokens are non-nil and carry positions.
 // [ValidateTokens] checks this for token slices.
 func DiffTokenFields(want, got *token.Token) []string {
 	var diffs []string
@@ -288,7 +288,7 @@ func DiffTokenFields(want, got *token.Token) []string {
 	return diffs
 }
 
-// TokenBuilder is a helper for constructing test tokens.
+// TokenBuilder builds test tokens.
 //
 // Chain methods to set fields, then call [TokenBuilder.Build] to get the final
 // token. The builder is mutable. Each setter modifies the internal state and

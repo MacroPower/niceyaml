@@ -9,7 +9,8 @@ import (
 // XMLStyles implements [go.jacobcolvin.com/niceyaml/style.Styler] using XML
 // tags instead of ANSI escape codes.
 //
-// Each [kind.Kind] category wraps content in descriptive tags.
+// XMLStyles wraps the content of each [kind.Kind] in a tag named after the
+// kind.
 //
 // For example, a comment renders as `<comment># text</comment>`.
 //
@@ -31,7 +32,7 @@ type XMLStyles struct {
 type XMLStylesOption func(*XMLStyles)
 
 // XMLStyleInclude is an [XMLStylesOption] that limits XML tags to the given
-// styles. All other styles return an empty (no-op) style.
+// styles. For every other style, [XMLStyles.Style] returns an empty style.
 func XMLStyleInclude(styles ...kind.Kind) XMLStylesOption {
 	return func(x *XMLStyles) {
 		if x.only == nil {
@@ -55,12 +56,13 @@ func NewXMLStyles(opts ...XMLStylesOption) *XMLStyles {
 	return x
 }
 
-// Style returns a [lipgloss.Style] that wraps content in XML tags based on
-// the [kind.Kind] category.
+// Style returns a [lipgloss.Style] that wraps content in an XML tag named
+// after s.
 //
-// Returns an empty style when [XMLStyleInclude] limits tags to other styles.
+// It returns an empty style when [XMLStyleInclude] limits tags to other
+// styles.
 func (x *XMLStyles) Style(s kind.Kind) lipgloss.Style {
-	// Check if only specific styles are allowed.
+	// Leave a style outside the include list untagged.
 	if x.only != nil && !x.only[s] {
 		return lipgloss.NewStyle()
 	}

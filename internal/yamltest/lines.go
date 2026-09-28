@@ -21,24 +21,22 @@ var (
 	ErrEmptyLineNumbered = errors.New("line with no tokens has a number")
 )
 
-// ValidateLines checks the integrity of ls.
-//
-// It checks that:
-//   - Line numbers are strictly increasing
-//   - Every token on a given line is non-nil and carries a Position
-//   - Every token on a given line carries the line's [line.Line.Number] in
-//     its Position
-//   - Every token on a given line has columns that are strictly increasing,
-//     ignoring tokens with an empty Origin
+// ValidateLines checks the integrity of ls against these rules:
+//   - Line numbers strictly increase.
+//   - Every token on a line is non-nil and carries a Position.
+//   - Every token on a line carries the line's [line.Line.Number] in its
+//     Position.
+//   - The columns of the tokens on a line strictly increase. The check
+//     skips tokens with an empty Origin.
 //
 // A line with no tokens must be a numberless placeholder, such as the blank
 // row a side-by-side diff inserts. ValidateLines rejects such a line when it
 // has a number and otherwise leaves it out of the numbering check.
 //
-// Returns an error wrapping [ErrEmptyLineNumbered],
+// It returns an error that wraps [ErrEmptyLineNumbered],
 // [ErrLineNumberNotIncreasing], [ErrLineNumberMismatch], or
 // [ErrColumnNotIncreasing] for the first check that fails. A nil token or a
-// token without a Position yields an error wrapping a
+// token without a Position yields an error that wraps a
 // [*TokenValidationError], whose Reason is [ErrNilToken] or
 // [ErrNilPosition].
 func ValidateLines(ls line.Lines) error {
