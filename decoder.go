@@ -71,11 +71,13 @@ func (d *Decoder) With(opts ...DecodeOption) *Decoder {
 	return &Decoder{cfg: cfg}
 }
 
-// Validate runs the validators of the [Decoder] on n in the order
-// [NewDecoder] took them and stops at the first that fails, as [Node.Validate] runs
-// the validators the caller passes. It is the validation step of
-// [Decoder.Decode] on its own, for a caller that checks a document
-// without decoding it. A Decoder without validators returns nil.
+// Validate runs the validators of the [Decoder] on n in the order its
+// options gave them, those of [NewDecoder] first and then those each
+// [Decoder.With] appended, and stops at the first that fails, as
+// [Node.Validate] runs the validators the caller passes. It is the
+// validation step of [Decoder.Decode] on its own, for a caller that
+// checks a document without decoding it. A Decoder without validators
+// returns nil.
 func (d *Decoder) Validate(ctx context.Context, n *Node) error {
 	return n.forValidators(d.cfg.yamlOpts).validate(ctx, d.cfg.validators)
 }

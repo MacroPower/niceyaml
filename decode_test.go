@@ -4718,6 +4718,11 @@ func TestDecoder(t *testing.T) {
 
 		order = nil
 
+		require.NoError(t, derived.Validate(t.Context(), dd))
+		assert.Equal(t, []string{"base", "derived"}, order)
+
+		order = nil
+
 		_, err = base.Decode[strictConfig](t.Context(), dd)
 		require.Error(t, err, "the receiver keeps its strictness")
 		assert.Equal(t, []string{"base"}, order, "the receiver keeps its validators")
