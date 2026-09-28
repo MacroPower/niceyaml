@@ -130,6 +130,14 @@ func TestNormalize(t *testing.T) {
 	}
 }
 
+func TestNormalize_NilNormalizer(t *testing.T) {
+	t.Parallel()
+
+	var n *normalizer.Normalizer
+
+	assert.Equal(t, "Café", n.Normalize("Café"))
+}
+
 func TestNormalize_Concurrent(t *testing.T) {
 	t.Parallel()
 

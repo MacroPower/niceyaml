@@ -141,8 +141,13 @@ func WithWidthFold(enabled bool) Option {
 }
 
 // Normalize applies the configured transformations to the input string.
-// If the transformation fails, Normalize returns the input string unchanged.
+// A nil Normalizer returns the input string unchanged, and so does a
+// transformation that fails.
 func (n *Normalizer) Normalize(in string) string {
+	if n == nil {
+		return in
+	}
+
 	t, ok := n.pool.Get().(transform.Transformer)
 	if !ok {
 		return in

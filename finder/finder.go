@@ -102,6 +102,16 @@ type Option func(*Finder)
 //
 //	exact := finder.New(finder.WithNormalizer(nil))
 //
+// A nil [*normalizer.Normalizer] works the same way, so a normalizer
+// built only on some condition can pass through as it is:
+//
+//	var n *normalizer.Normalizer
+//	if fold {
+//		n = normalizer.New()
+//	}
+//
+//	f := finder.New(finder.WithNormalizer(n))
+//
 // Even then, invalid bytes read as U+FFFD and line endings read as "\n",
 // as [Index.Find] describes.
 //

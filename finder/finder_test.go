@@ -136,6 +136,23 @@ func TestFinder_Find(t *testing.T) {
 			exact:  true,
 			want:   nil,
 		},
+		"nil normalizer pointer - no match": {
+			input:      "key: VALUE",
+			search:     "value",
+			normalizer: (*normalizer.Normalizer)(nil),
+			want:       nil,
+		},
+		"nil normalizer pointer - exact match": {
+			input:      "key: VALUE",
+			search:     "VALUE",
+			normalizer: (*normalizer.Normalizer)(nil),
+			want: position.Ranges{
+				position.NewRange(
+					position.New(0, 5),
+					position.New(0, 10),
+				),
+			},
+		},
 		"case insensitive with normalizer": {
 			input:      "key: VALUE",
 			search:     "value",
