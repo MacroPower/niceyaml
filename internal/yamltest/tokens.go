@@ -413,12 +413,16 @@ func (b *TokenBuilder) Build() *token.Token {
 
 // DumpTokenOrigins joins the Origin fields of tks into one string.
 //
-// The result matches the source only where the lexer kept each rune exactly
-// once. The lexer drops trailing spaces, so a whitespace-only line loses its
-// spaces. It repeats the line ending after a tag that ends its line, and it
-// can lose text after a tab used as indentation or after a "\x", "\u", or
-// "\U" escape. [go.jacobcolvin.com/niceyaml/tokens.Tokenize] also drops byte
-// order marks.
+// For a stream from [go.jacobcolvin.com/niceyaml/tokens.Tokenize], the
+// result matches the source except where Tokenize leaves the lexer's text,
+// as its doc describes. The result lacks byte order marks and a lone "!"
+// that ends the file. It repeats the line ending after a tag that ends its
+// line and after text that follows a block scalar header, and a blank line
+// between the two loses its spaces. The text around a tab used as
+// indentation keeps the lexer's shape, which can drop a ":" indicator. A
+// raw stream from [github.com/goccy/go-yaml/lexer.Tokenize] also loses the
+// final line ending, trailing spaces, the spaces of whitespace-only lines,
+// and the letter and hex digits of a "\x", "\u", or "\U" escape.
 //
 // A nil token contributes nothing rather than a placeholder such as "<nil>",
 // so the output holds only source text.
