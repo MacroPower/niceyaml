@@ -277,14 +277,18 @@ type span struct {
 // none. The line breaks and the lines they close go to the end of the
 // earlier Origin, where the lexer puts the line ending that closes a line
 // of text. The indentation of the line the later token starts on goes to
-// the start of the later one. The first token that holds text opens with
-// all the whitespace ahead of its text, blank lines included. The Origins
-// stay as they are on both sides of a token of whitespace alone and of a
-// token whose [span] is not ok. They also stay as they are where the
-// lexer repeats a line ending, such as after a tag, because the repeat
-// adds a rune the source lacks. A blank line there loses its spaces and
-// tabs. The repair of the final line ending in [Tokenize] handles the
-// whitespace after the last token that holds text.
+// the start of the later one. A ":" whose Origin opens with a line break
+// keeps the line breaks in front of it, because the earlier Origin is a
+// key, and the parser rejects a key whose Origin ends with a line break.
+// That key takes only the spaces and tabs that end its own line. The first
+// token that holds text opens with all the whitespace ahead of its text,
+// blank lines included. The Origins stay as they are on both sides of a
+// token of whitespace alone and of a token whose [span] is not ok. They
+// also stay as they are where the lexer repeats a line ending, such as
+// after a tag, because the repeat adds a rune the source lacks. A blank
+// line there loses its spaces and tabs. The repair of the final line
+// ending in [Tokenize] handles the whitespace after the last token that
+// holds text.
 func restoreWhitespace(src []rune, tks token.Tokens, spans []span) {
 	var (
 		prev     *token.Token
@@ -336,9 +340,12 @@ func restoreText(src []rune, tk *token.Token, sp span) {
 // restoreBetween gives prev and cur the whitespace of src between the
 // text of the two, when the whitespace the Origins hold between them is
 // part of it. The line breaks and the lines they close go to the end of
-// the Origin of prev, and the rest to the start of the Origin of cur. A
-// nil prev stands for the start of the source, and cur then opens with
-// all the whitespace ahead of its text.
+// the Origin of prev, and the rest to the start of the Origin of cur. When
+// cur is a ":" whose Origin opens with a line break and prev holds none
+// after its text, prev is a key, so prev takes only the spaces and tabs
+// that end its line, and cur takes the rest. A nil prev stands for the
+// start of the source, and cur then opens with all the whitespace ahead
+// of its text.
 //
 // A gap that holds anything but whitespace holds text the lexer dropped,
 // and a gap the Origins hold more whitespace for than the source has
@@ -379,6 +386,12 @@ func restoreBetween(src []rune, prev *token.Token, prevSpan span, cur *token.Tok
 	}
 
 	cut := strings.LastIndexAny(gap, "\r\n") + 1
+	if cur.Type == token.MappingValueType && strings.ContainsAny(lead, "\r\n") && !strings.ContainsAny(trail, "\r\n") {
+		// The parser rejects a key whose Origin holds a line break, so the
+		// breaks in front of a ":" stay with it, and the key keeps only the
+		// spaces and tabs that end its own line.
+		cut = strings.IndexAny(gap, "\r\n")
+	}
 
 	prev.Origin = strings.TrimRight(prev.Origin, " \t\r\n") + gap[:cut]
 	cur.Origin = gap[cut:] + text
@@ -677,14 +690,17 @@ func (p *positioner) escapeWidth(i int) int {
 // double-quoted scalar that holds a tab it drops one line of a run of
 // blank lines. The line breaks the stream lacks go at the start of the
 // Origin as bare line endings, the way the lexer keeps the blank lines it
-// does not drop. Bare line endings keep tabs out of the Origin, and the
-// parser rejects a key whose Origin holds a tab in front of a line break.
-// [restoreWhitespace] later moves them to the end of the Origin before,
-// together with the spaces and tabs of the source, when the two Origins
-// hold nothing else of the gap. When the lexer dropped every line break
-// in front of tk, the indentation of the line tk starts on goes with
-// them. An Origin stays as it is when the stream already holds every line
-// break of the source.
+// does not drop. Bare line endings keep tabs out of the Origin. The parser
+// trims spaces and line breaks from the start of a key's Origin and
+// rejects the key when a line break is left, so a tab in front of a line
+// break would make it reject the key. [restoreWhitespace] later moves the
+// line breaks to the end of the Origin before, together with the spaces
+// and tabs of the source, when the two Origins hold nothing else of the
+// gap. In front of a ":" they stay where they are, since the Origin
+// before belongs to a key. When the lexer dropped every line break in
+// front of tk, the indentation of the line tk starts on goes with them.
+// An Origin stays as it is when the stream already holds every line break
+// of the source.
 func (p *positioner) restoreGap(tk *token.Token, at int) {
 	gap := string(p.src[p.cursor:at])
 	lead := tk.Origin[:len(tk.Origin)-len(strings.TrimLeft(tk.Origin, " \t\r\n"))]

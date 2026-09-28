@@ -1833,6 +1833,12 @@ var positionCorpus = map[string]string{
 	"blank line of spaces":                           "a: 1\n   \nb: 2\n",
 	"blank line of spaces after a document end":      "a: 1\n...\n  \nb: 2\n",
 	"blank line of spaces in a plain scalar":         "a: plain\n   \n  multi\nb: 2\n",
+	"colon after trailing spaces on a quoted key":    "\"q\" \n: 1\n",
+	"colon after a trailing tab on a quoted key":     "\"q\"\t\n: 1\n",
+	"colon after a blank line of spaces":             "\"q\"\n  \n: 1\n",
+	"colon after trailing spaces crlf":               "'q' \r\n: 1\r\n",
+	"nested colon after trailing spaces":             "- \"q\" \n  : 1\n",
+	"colon after trailing spaces on a later key":     "a: 1\n'q'  \n: 2\n",
 }
 
 func TestTokenize_PositionsLocateText(t *testing.T) {
