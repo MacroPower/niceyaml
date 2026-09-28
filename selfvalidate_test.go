@@ -772,6 +772,27 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		assert.LessOrEqual(t, decoders, 2)
 	})
 
+	t.Run("a map whose values hold no validator reads no keys", func(t *testing.T) {
+		t.Parallel()
+
+		// The map validates itself, but no entry below it can fail, so no
+		// error needs the key of an entry.
+		dd := yamltest.FirstDocument(t, "a: x\nb: y\n")
+
+		decoders := 0
+		count := yaml.DecodeOption(func(*yaml.Decoder) error {
+			decoders++
+
+			return nil
+		})
+
+		_, err := dd.Decode[labels](t.Context(), niceyaml.WithYAMLDecodeOptions(count))
+		require.NoError(t, err)
+
+		// One decoder decodes the value, and none reads its keys.
+		assert.Equal(t, 1, decoders)
+	})
+
 	t.Run("a leaf type validates itself", func(t *testing.T) {
 		t.Parallel()
 

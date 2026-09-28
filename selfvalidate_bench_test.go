@@ -14,8 +14,10 @@ import (
 // with and without self-validation, which reads the keys of every map in
 // the decoded value from the document: a list of small mappings and a
 // mapping that holds as many small mappings, both as any, and a mapping
-// of strings and a list of ints, whose types hold no validator. The time
-// per item should stay flat as each grows.
+// of strings and a list of ints, whose types hold no validator. A
+// mapping of strings whose type validates itself holds no validator
+// below it, so the walk reads none of its keys. The time per item should
+// stay flat as each grows.
 func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 	decodeAny := func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
 		_, err := doc.Decode[any](ctx, opts...)
@@ -45,6 +47,15 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 			item: func(i int) string { return fmt.Sprintf("k%d: v%d\n", i, i) },
 			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
 				_, err := doc.Decode[map[string]string](ctx, opts...)
+
+				return err
+			},
+		},
+		{
+			name: "validated_string_map",
+			item: func(i int) string { return fmt.Sprintf("k%d: v%d\n", i, i) },
+			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
+				_, err := doc.Decode[labels](ctx, opts...)
 
 				return err
 			},

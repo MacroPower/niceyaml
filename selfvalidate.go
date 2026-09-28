@@ -296,6 +296,18 @@ func reachesValidator(t reflect.Type, seen map[reflect.Type]bool) bool {
 // children walks the values below v, and reports whether every one of
 // them passed.
 func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
+	switch v.Kind() {
+	case reflect.Slice, reflect.Array, reflect.Map:
+		// An element or map value whose type holds no validator passes
+		// the walk at once, so none needs a look, nor do the keys of a
+		// map, which only name the entries in errors.
+		if !mayHoldValidator(v.Type().Elem()) {
+			return true
+		}
+
+	default:
+	}
+
 	ok := true
 
 	switch v.Kind() {
@@ -319,13 +331,6 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 		}
 
 	case reflect.Slice, reflect.Array:
-		// The bytes of a []byte hold nothing to validate, unless their
-		// type validates itself through its value or its pointer.
-		if elem := v.Type().Elem(); elem.Kind() == reflect.Uint8 &&
-			!reflect.PointerTo(elem).Implements(reflect.TypeFor[SelfValidator]()) {
-			return true
-		}
-
 		for i := range v.Len() {
 			if !w.walk(v.Index(i), base.Index(i)) {
 				ok = false
