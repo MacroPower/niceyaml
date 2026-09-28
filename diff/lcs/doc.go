@@ -16,9 +16,11 @@
 // Hirschberg's divide-and-conquer strategy instead works in two rows of O(n)
 // space, where n is the length of the after sequence, and keeps O(m*n) time.
 // [Hirschberg] first pairs up the lines both inputs share at the start and at
-// the end and searches only the middle that remains, so a diff of two nearly
-// identical revisions takes close to linear time. The result itself holds one
-// operation per line, so it takes O(m+n) space regardless of the algorithm.
+// the end and searches only the middle that remains, so identical inputs and
+// inputs with one short changed region diff in close to linear time. Changes
+// far apart leave most of both inputs in the middle, and the search over it
+// still takes O(m*n) time. The result itself holds one operation per line, so
+// it takes O(m+n) space regardless of the algorithm.
 //
 // # Usage
 //

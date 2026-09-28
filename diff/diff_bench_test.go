@@ -212,7 +212,8 @@ func BenchmarkFullDiffSource_WorstCase(b *testing.B) {
 
 func BenchmarkFullDiffSource_NearIdentical(b *testing.B) {
 	// A watched file that changes one line at a time diffs two
-	// near-identical revisions.
+	// near-identical revisions. Two edits far apart leave almost the whole
+	// file between them for the quadratic search.
 	const size = 20000
 
 	yamlA := yamltest.GenerateYAML(size)
@@ -221,6 +222,10 @@ func BenchmarkFullDiffSource_NearIdentical(b *testing.B) {
 	changes := map[string]string{
 		"identical":        yamlA,
 		"one_line_changed": strings.Replace(yamlA, "key_10000: value_10000\n", "key_10000: changed\n", 1),
+		"two_far_edits": strings.Replace(
+			strings.Replace(yamlA, "key_1: value_1\n", "key_1: changed\n", 1),
+			"key_19998: value_19998\n", "key_19998: changed\n", 1,
+		),
 	}
 
 	for name, yamlB := range changes {
