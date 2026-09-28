@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -130,6 +131,111 @@ func TestValidateFileRoutesOnAbsolutePath(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, path, got)
 	assert.Contains(t, err.Error(), rel+":1:1: ")
+}
+
+func TestValidateFileDotDotAfterSymlink(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	// With ldir linking to sub/deep, the OS reads ldir/../x.yaml as
+	// sub/x.yaml, so the directive's ./s.json names sub/s.json.
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(sub, "deep"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "s.json"), nameSchema, 0o600))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(sub, "x.yaml"),
+		[]byte("# yaml-language-server: $schema=./s.json\nname: a\n"),
+		0o600,
+	))
+
+	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, "ldir"))
+	if err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	// Joining the name with filepath.Join would clean it to x.yaml.
+	path := dir + "/ldir/../x.yaml"
+
+	reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+
+	require.NoError(t, validateFile(t.Context(), path, reg))
+}
+
+func TestPhysicalAbs(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	// Create a directory structure with a symlink:
+	// dir/
+	//   sub/
+	//     deep/
+	//   ldir -> sub/deep
+	dir := t.TempDir()
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "sub", "deep"), 0o755))
+
+	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, "ldir"))
+	if err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	// Resolving the part up to a ".." also resolves any symlink in the
+	// temporary directory itself.
+	realDir, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	rel, err := filepath.Rel(wd, dir)
+	require.NoError(t, err)
+
+	// Each path is built as text, since filepath.Join would clean it.
+	tcs := map[string]struct {
+		path string
+		want string
+	}{
+		"no dot-dot keeps a symlinked name": {
+			path: dir + "/ldir/x.yaml",
+			want: filepath.Join(dir, "ldir", "x.yaml"),
+		},
+		"dot-dot after a symlinked directory": {
+			path: dir + "/ldir/../x.yaml",
+			want: filepath.Join(realDir, "sub", "x.yaml"),
+		},
+		"dot-dot after a plain directory": {
+			path: dir + "/sub/../x.yaml",
+			want: filepath.Join(realDir, "x.yaml"),
+		},
+		"symlinked name after the last dot-dot": {
+			path: dir + "/sub/../ldir/x.yaml",
+			want: filepath.Join(realDir, "ldir", "x.yaml"),
+		},
+		"relative dot-dot after a symlinked directory": {
+			path: rel + "/ldir/../x.yaml",
+			want: filepath.Join(realDir, "sub", "x.yaml"),
+		},
+		"dot-dot after a missing directory": {
+			path: dir + "/missing/../x.yaml",
+			want: filepath.Join(dir, "x.yaml"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, physicalAbs(tc.path))
+		})
+	}
 }
 
 func TestValidateFileUnreadable(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/spf13/cobra"
 
@@ -77,17 +78,14 @@ func validateCmd() *cobra.Command {
 // invalid document. Errors come back bound to the source, whose name is
 // yamlPath as the user typed it, so each message opens with
 // "path:line:col:" and the error handler in main renders the excerpt with
-// the terminal width. The source's file path is absolute, so SchemaStore
-// patterns that name parent directories, such as
-// "**/.github/workflows/*.yml", match whatever the working directory is.
-// When the read fails, the read error already names the file, so
-// validateFile returns it as is.
+// the terminal width. The source's file path is the [physicalAbs] form
+// of yamlPath, so SchemaStore patterns that name parent directories, such
+// as "**/.github/workflows/*.yml", match whatever the working directory
+// is, and schema directives resolve against the directory of the file
+// the read opens. When the read fails, the read error already names the
+// file, so validateFile returns it as is.
 func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) error {
-	absPath, err := filepath.Abs(yamlPath)
-	if err != nil {
-		// Abs fails only when the working directory is unreadable.
-		absPath = yamlPath
-	}
+	absPath := physicalAbs(yamlPath)
 
 	// Resolvers route on the absolute path, and WithName keeps messages
 	// naming the file as the user typed it. The read uses the typed path,
@@ -115,6 +113,75 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 	}
 
 	return errors.Join(errs...)
+}
+
+// physicalAbs returns an absolute form of path that names the file the
+// OS opens for it. [filepath.Abs] drops a ".." element together with the
+// element before it, as text, but on Unix the OS steps up from the
+// directory a symlink leads to, which can be a different directory. So
+// physicalAbs resolves the symlinks in path up to its last ".." element,
+// including those in the working directory a relative path starts from.
+// It leaves the symlinks after that point alone, so a symlinked name
+// such as ".github" stays visible to patterns.
+//
+// A path with no ".." element, or one whose part up to the last ".."
+// does not resolve, comes back as [filepath.Abs] returns it. So does
+// every path on Windows, which drops ".." elements as text before it
+// follows a symlink.
+func physicalAbs(path string) string {
+	lexical, err := filepath.Abs(path)
+	if err != nil {
+		// Abs fails only when the working directory is unreadable.
+		return path
+	}
+
+	if runtime.GOOS == "windows" {
+		return lexical
+	}
+
+	// Build the absolute path as text, since cleaning it would drop the
+	// ".." elements this function resolves.
+	abs := path
+	if !filepath.IsAbs(abs) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return lexical
+		}
+
+		abs = wd + string(filepath.Separator) + path
+	}
+
+	end := lastDotDotEnd(abs)
+	if end < 0 {
+		return lexical
+	}
+
+	resolved, err := filepath.EvalSymlinks(abs[:end])
+	if err != nil {
+		return lexical
+	}
+
+	return filepath.Join(resolved, abs[end:])
+}
+
+// lastDotDotEnd returns the index just past the last ".." element of
+// path, or -1 when path has none.
+func lastDotDotEnd(path string) int {
+	end, start := -1, 0
+
+	for i := 0; i <= len(path); i++ {
+		if i < len(path) && !os.IsPathSeparator(path[i]) {
+			continue
+		}
+
+		if path[start:i] == ".." {
+			end = i
+		}
+
+		start = i + 1
+	}
+
+	return end
 }
 
 // buildRegistry creates a schema registry based on CLI flags.
