@@ -1,10 +1,10 @@
 // Package normalizer provides composable Unicode normalization for text search.
 //
 // A search for "cafe" should find "Café", and "uber" should match "ÜBER".
-// Three Unicode properties defeat a byte comparison: diacritics are combining
-// marks that survive it, case folding differs from lowercasing for many
-// scripts, and fullwidth characters occupy different code points than their
-// ASCII counterparts.
+// Three Unicode properties defeat a byte comparison. Diacritics are
+// combining marks that stay in the text, case folding differs from
+// lowercasing for many scripts, and fullwidth characters occupy different
+// code points than their ASCII counterparts.
 //
 // A [Normalizer] solves this by chaining Unicode transformations into a
 // pipeline that [New] defines once at construction time. Transformations run
