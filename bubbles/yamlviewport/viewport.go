@@ -267,14 +267,16 @@ type Model struct {
 	// left and nil on the right.
 	//
 	// A base is the model's own copy of the view the Revision hands out, or
-	// the view of the diff. Decorate adds the search highlights to a fresh
-	// clone of it, so each term or selection starts without the highlights
-	// of the last.
+	// the view of the diff, and it never carries search highlights. A
+	// layout or a render slices the lines it needs from a base and adds the
+	// highlights of those lines to the slice, so each term or selection
+	// starts without the highlights of the last.
 	baseLeft, baseRight *line.View
-	// The base views with the search highlights added: fresh clones of
-	// baseLeft and baseRight that decorate takes on every change of the term
-	// or the selected match. Right is nil when baseRight is.
-	left, right *line.View
+	// The indexes in leftMatches and rightMatches of the matches that cover
+	// each line, keyed by the index of the line in the content, in
+	// ascending order. A slice of a pane finds the highlights of its lines
+	// here.
+	leftLines, rightLines map[int][]int
 	// Rendered row counts of the view. Copies of the Model share one cache
 	// until a layout change gives a copy its own, so the counts that the
 	// value-receiver View fills in stay filled for the Model it copied.
@@ -282,8 +284,10 @@ type Model struct {
 	// Current search query.
 	searchTerm string
 	// KeyMap contains the keybindings for viewport navigation.
-	KeyMap         KeyMap
-	searchMatches  []searchMatch
+	KeyMap        KeyMap
+	searchMatches []searchMatch
+	// The matches in each pane, or in the content of the unified view on
+	// the left, in the order the search found them.
 	leftMatches    position.Ranges
 	rightMatches   position.Ranges
 	horizontalStep int
@@ -408,7 +412,7 @@ func (m *Model) remeasure(ranges ...position.Range) {
 		return
 	}
 
-	// A slice of a view by no span holds every line, so the loop below
+	// A slice of a view by no span holds every line, so the slices below
 	// would measure the whole view.
 	if len(ranges) == 0 {
 		return
@@ -424,11 +428,11 @@ func (m *Model) remeasure(ranges ...position.Range) {
 	p := m.renderPrinter(m.paneWidth())
 	c := m.rows.clone()
 
-	left := m.left.Slice(spans...)
+	left := m.highlighted(false, spans...)
 	c.measure(p.Layout(left), left, c.left, c.leftWidths)
 
-	if c.right != nil && m.right != nil {
-		right := m.right.Slice(spans...)
+	if c.right != nil && m.baseRight != nil {
+		right := m.highlighted(true, spans...)
 		c.measure(p.Layout(right), right, c.right, c.rightWidths)
 	}
 
@@ -868,25 +872,17 @@ func (m *Model) rebuildViews() {
 	m.scrollToCurrentMatch()
 }
 
-// refreshSearch recomputes search matches and overlays for the current base
-// views without rebuilding them. A zero Model, one not created with [New],
-// has no searcher, so it finds no match for any term.
+// refreshSearch recomputes the search matches of the current base views and
+// the lines each match covers, without rebuilding the views. A zero Model,
+// one not created with [New], has no searcher, so it finds no match for any
+// term.
 //
-// The caller brings the row counts up to date with the new decoration, as
-// for decorate. The decoration changes only on the lines of the old and the
-// new matches, so a caller that changes the term measures only those lines
-// again.
+// The caller brings the row counts up to date with the new highlights. They
+// change only on the lines of the old and the new matches, so a caller that
+// changes the term measures only those lines again.
 func (m *Model) refreshSearch() {
-	if m.baseLeft == nil {
-		m.left = nil
-		m.right = nil
-		m.clearMatches()
-
-		return
-	}
-
 	switch {
-	case m.searcher == nil, m.searchTerm == "":
+	case m.baseLeft == nil, m.searcher == nil, m.searchTerm == "":
 		m.clearMatches()
 
 	case m.viewMode == ViewModeSideBySide && m.baseRight != nil:
@@ -906,7 +902,8 @@ func (m *Model) refreshSearch() {
 		m.searchIndex = 0
 	}
 
-	m.decorate()
+	m.leftLines = matchLines(m.leftMatches, m.baseLeft.Lines().Len())
+	m.rightLines = matchLines(m.rightMatches, m.baseRight.Lines().Len())
 }
 
 // matchRanges returns the range of each search match.
@@ -927,37 +924,96 @@ func (m *Model) clearMatches() {
 	m.searchIndex = -1
 }
 
-// decorate takes a fresh clone of each base view and adds the search
-// highlights of the current matches and selection to it. A fresh clone
-// carries no highlight of the last term or the last selection.
-//
-// The caller brings the row counts up to date with the new decoration,
-// through relayout or remeasure.
-func (m *Model) decorate() {
-	m.left = m.baseLeft.Clone()
-	m.right = m.baseRight.Clone()
+// matchLines returns the indexes in matches of the matches that cover each
+// line of content n lines long, keyed by the index of the line, in
+// ascending order. A match that runs across a line break covers each line
+// it touches.
+func matchLines(matches position.Ranges, n int) map[int][]int {
+	lines := make(map[int][]int, len(matches))
 
-	if m.left == nil {
-		return
-	}
-
-	if m.viewMode == ViewModeSideBySide && m.right != nil {
-		m.applySideBySideOverlays()
-	} else {
-		m.applySearchOverlays(m.left)
-	}
-}
-
-// applySearchOverlays adds overlay highlights for all search matches to
-// lines, which holds none yet.
-func (m *Model) applySearchOverlays(lines *line.View) {
-	for i, match := range m.searchMatches {
-		if i == m.searchIndex {
-			lines.BlendOverlay(kind.GenericHighlight, match.rng)
-		} else {
-			lines.BlendOverlay(kind.GenericHighlightDim, match.rng)
+	for k, r := range matches {
+		for l := max(0, r.Start.Line); l <= min(r.End.Line, n-1); l++ {
+			lines[l] = append(lines[l], k)
 		}
 	}
+
+	return lines
+}
+
+// highlighted returns a slice of the base view of the left pane, or of the
+// right one when right is true, that holds its lines within spans, or
+// every line without spans, and adds the search highlights of the matches
+// that cover those lines. The base view keeps no highlight, so a move of
+// the selection costs the lines a caller lays out or renders rather than
+// every match of the document.
+//
+// It blends the matches in the order of the match list, so each line gets
+// its overlays in the same order however the caller slices the view.
+func (m *Model) highlighted(right bool, spans ...position.Span) *line.View {
+	base, matches, lines := m.baseLeft, m.leftMatches, m.leftLines
+	if right {
+		base, matches, lines = m.baseRight, m.rightMatches, m.rightLines
+	}
+
+	view := base.Slice(spans...)
+
+	// A match that runs across a line break covers several lines of the
+	// slice, so its index repeats.
+	var hits []int
+
+	for i := range view.All() {
+		hits = append(hits, lines[i]...)
+	}
+
+	slices.Sort(hits)
+
+	selected := m.selectedMatch(right)
+
+	for _, k := range slices.Compact(hits) {
+		if selected(k) {
+			view.BlendOverlay(kind.GenericHighlight, matches[k])
+		} else {
+			view.BlendOverlay(kind.GenericHighlightDim, matches[k])
+		}
+	}
+
+	return view
+}
+
+// selectedMatch returns a function that reports whether the left pane, or
+// the right one when right is true, shows its k-th match as the selected
+// match. In side-by-side mode a match on an equal line shows as selected
+// in both panes, since the search counts it once.
+func (m *Model) selectedMatch(right bool) func(k int) bool {
+	if m.searchIndex < 0 || m.searchIndex >= len(m.searchMatches) {
+		return func(int) bool { return false }
+	}
+
+	if m.viewMode != ViewModeSideBySide || m.baseRight == nil {
+		index := m.searchIndex
+
+		return func(k int) bool { return k == index }
+	}
+
+	selected := m.searchMatches[m.searchIndex]
+	pos := selected.rng.Start
+
+	// A line is equal when both panes hold it unchanged. The padding a diff
+	// puts opposite an inserted or deleted line is empty and carries the
+	// default flag too, so one pane alone cannot tell the two apart.
+	equal := false
+	if l := pos.Line; m.baseLeft.Contains(l) && m.baseRight.Contains(l) {
+		equal = m.baseLeft.Flag(l) == line.FlagDefault && m.baseRight.Flag(l) == line.FlagDefault
+	}
+
+	show := equal || selected.inLeft != right
+
+	matches := m.leftMatches
+	if right {
+		matches = m.rightMatches
+	}
+
+	return func(k int) bool { return show && matches[k].Start == pos }
 }
 
 // searchMatch pairs a match range with its source.
@@ -1040,58 +1096,6 @@ func (m *Model) updateSideBySideSearchState() {
 	m.searchMatches = combined
 }
 
-// applySideBySideOverlays adds search highlights to both panes, which hold
-// none yet.
-func (m *Model) applySideBySideOverlays() {
-	// Determine the selected match position and whether it's on an equal line.
-	var (
-		selectedPos                     position.Position
-		selectedInLeft, selectedIsEqual bool
-	)
-
-	if m.searchIndex >= 0 && m.searchIndex < len(m.searchMatches) {
-		selected := m.searchMatches[m.searchIndex]
-		selectedPos = selected.rng.Start
-		selectedInLeft = selected.inLeft
-
-		// A line is equal when both panes hold it unchanged. The padding
-		// a diff puts opposite an inserted or deleted line is empty and
-		// carries the default flag too, so one pane alone cannot tell the
-		// two apart.
-		if l := selectedPos.Line; m.left.Contains(l) && m.right.Contains(l) {
-			selectedIsEqual = m.left.Flag(l) == line.FlagDefault &&
-				m.right.Flag(l) == line.FlagDefault
-		}
-	}
-
-	// Apply overlays to both panes using cached matches.
-	m.applySideBySidePaneOverlays(m.left, m.leftMatches, selectedPos, selectedInLeft || selectedIsEqual)
-	m.applySideBySidePaneOverlays(m.right, m.rightMatches, selectedPos, !selectedInLeft || selectedIsEqual)
-}
-
-// applySideBySidePaneOverlays adds search highlights to a single pane,
-// which holds none yet. It uses cached matches and showSelected to
-// determine the selected style.
-func (m *Model) applySideBySidePaneOverlays(
-	view *line.View,
-	matches position.Ranges,
-	selectedPos position.Position,
-	showSelected bool,
-) {
-	if view == nil {
-		return
-	}
-
-	for _, match := range matches {
-		isSelected := match.Start == selectedPos && showSelected
-		if isSelected {
-			view.BlendOverlay(kind.GenericHighlight, match)
-		} else {
-			view.BlendOverlay(kind.GenericHighlightDim, match)
-		}
-	}
-}
-
 // updateSearchState gathers the matches of a non-empty search term in the
 // given lines. It needs a searcher, and it leaves the match index to
 // refreshSearch.
@@ -1106,12 +1110,13 @@ func (m *Model) updateSearchState(lines *line.View) {
 		m.searcherStale = false
 	}
 
-	// Convert ranges to searchMatch structs (the unified path does not
-	// use inLeft).
-	ranges := heldMatches(lines, find(m.index, m.searchTerm))
-	m.searchMatches = make([]searchMatch, 0, len(ranges))
+	// The unified view shows every match on the left, and its matches do
+	// not use inLeft.
+	m.leftMatches = heldMatches(lines, find(m.index, m.searchTerm))
+	m.rightMatches = nil
+	m.searchMatches = make([]searchMatch, 0, len(m.leftMatches))
 
-	for _, rng := range ranges {
+	for _, rng := range m.leftMatches {
 		m.searchMatches = append(m.searchMatches, searchMatch{rng: rng})
 	}
 }
@@ -1340,18 +1345,20 @@ func (m *Model) fillRows() {
 	c.top, c.bottom = 0, 0
 	c.maxNumber = 0
 
-	if m.left != nil && m.printer != nil {
-		c.maxNumber = m.printer.MaxNumber(m.left)
-		if m.viewMode == ViewModeSideBySide && m.right != nil {
-			c.maxNumber = max(c.maxNumber, m.printer.MaxNumber(m.right))
+	if m.baseLeft != nil && m.printer != nil {
+		c.maxNumber = m.printer.MaxNumber(m.baseLeft)
+		if m.viewMode == ViewModeSideBySide && m.baseRight != nil {
+			c.maxNumber = max(c.maxNumber, m.printer.MaxNumber(m.baseRight))
 		}
 
 		p := m.renderPrinter(m.paneWidth())
 
-		c.indices, c.left, c.leftWidths = layoutRows(p.Layout(m.left), m.left)
+		left := m.highlighted(false)
+		c.indices, c.left, c.leftWidths = layoutRows(p.Layout(left), left)
 
-		if m.viewMode == ViewModeSideBySide && m.right != nil {
-			_, c.right, c.rightWidths = layoutRows(p.Layout(m.right), m.right)
+		if m.viewMode == ViewModeSideBySide && m.baseRight != nil {
+			right := m.highlighted(true)
+			_, c.right, c.rightWidths = layoutRows(p.Layout(right), right)
 		}
 
 		// A layout counts the rows before the container style applies. Print
@@ -1453,7 +1460,7 @@ func (m *Model) AtBottom() bool {
 
 // ScrollPercent returns the vertical scroll position as a float between 0 and 1.
 func (m *Model) ScrollPercent() float64 {
-	if m.left == nil {
+	if m.baseLeft == nil {
 		return 1.0
 	}
 
@@ -1465,7 +1472,7 @@ func (m *Model) ScrollPercent() float64 {
 // wrapped rows do unless an annotation column past the end of its line lies
 // past the wrap width or a style transform widens a row.
 func (m *Model) HorizontalScrollPercent() float64 {
-	if m.left == nil || m.printer == nil {
+	if m.baseLeft == nil || m.printer == nil {
 		return 1.0
 	}
 
@@ -1504,7 +1511,7 @@ func (m *Model) rowOffsetLimit() int {
 
 // lineCount returns the number of lines the view renders.
 func (m *Model) lineCount() int {
-	return m.left.Count()
+	return m.baseLeft.Count()
 }
 
 // maxXOffset returns the maximum X offset, which brings the last column of
@@ -1512,7 +1519,7 @@ func (m *Model) lineCount() int {
 // width, which wrapped rows do unless an annotation column past the end of
 // its line lies past the wrap width or a style transform widens a row.
 func (m *Model) maxXOffset() int {
-	if m.left == nil || m.printer == nil {
+	if m.baseLeft == nil || m.printer == nil {
 		return 0
 	}
 
@@ -1620,7 +1627,7 @@ func (m *Model) visibleRows() []string {
 	}
 
 	p := m.renderPrinter(m.maxWidth())
-	rows := splitLines(p.Print(m.left.Slice(m.window(first, last))))
+	rows := splitLines(p.Print(m.highlighted(false, m.window(first, last))))
 	rows = m.trimWindow(m.trimFrame(rows, first, last), first)
 
 	// Rows may run past the content width, with wrap off or when the
@@ -1908,7 +1915,6 @@ func (m *Model) navigateSearch(delta int) {
 	// Only the match that lost the selection and the one that gained it
 	// change style, so only their lines need new row counts. Rendering
 	// happens lazily in View.
-	m.decorate()
 	m.remeasure(prev.rng, m.searchMatches[m.searchIndex].rng)
 
 	m.scrollToCurrentMatch()
@@ -1935,9 +1941,11 @@ func (m *Model) scrollToCurrentMatch() {
 	match := m.searchMatches[m.searchIndex]
 	m.ensureRows()
 
-	view := m.left
-	if m.right != nil && !match.inLeft {
-		view = m.right
+	right := m.baseRight != nil && !match.inLeft
+
+	view := m.baseLeft
+	if right {
+		view = m.baseRight
 	}
 
 	i := match.rng.Start.Line
@@ -1950,7 +1958,7 @@ func (m *Model) scrollToCurrentMatch() {
 	// The row of the match within its line comes from a layout of the line
 	// alone in the pane it is in, and the line's first row from the sums
 	// that place the taller of the two panes.
-	layout := m.renderPrinter(m.paneWidth()).Layout(view.Slice(position.NewSpan(i, i+1)))
+	layout := m.renderPrinter(m.paneWidth()).Layout(m.highlighted(right, position.NewSpan(i, i+1)))
 
 	matchRow := layout.RowOf(match.rng.Start)
 	if matchRow < 0 {
@@ -2150,13 +2158,13 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 	window := m.window(first, last)
 	p := m.renderPrinter(paneWidth)
 
-	leftRows := m.trimFrame(splitLines(p.Print(m.left.Slice(window))), first, last)
+	leftRows := m.trimFrame(splitLines(p.Print(m.highlighted(false, window))), first, last)
 
 	// Without a diff, both panes show the left content, so the right pane
 	// reuses the rows the left pane rendered.
 	rightRows := leftRows
-	if m.right != nil {
-		rightRows = m.trimFrame(splitLines(p.Print(m.right.Slice(window))), first, last)
+	if m.baseRight != nil {
+		rightRows = m.trimFrame(splitLines(p.Print(m.highlighted(true, window))), first, last)
 	}
 
 	blank := m.blankPaneRow(p)

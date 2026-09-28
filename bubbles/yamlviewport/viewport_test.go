@@ -296,6 +296,76 @@ func TestViewport_SearchTermRefreshesRowCounts(t *testing.T) {
 	}
 }
 
+func TestViewport_SearchHighlightsMatchAcrossLines(t *testing.T) {
+	t.Parallel()
+
+	// A match that runs across a line break highlights its part of each
+	// line, including when the window starts on the second of them. The
+	// last line differs between the revisions, so every other line sits at
+	// the same index in each view mode.
+	var before strings.Builder
+
+	for i := range 30 {
+		fmt.Fprintf(&before, "k%d: v%d\n", i, i)
+	}
+
+	after := strings.Replace(before.String(), "k29: v29", "k29: changed", 1)
+
+	tcs := map[string]struct {
+		want     string
+		viewMode yamlviewport.ViewMode
+		offset   int
+		panes    int
+	}{
+		"window starts on the first line": {
+			viewMode: yamlviewport.ViewModeFull,
+			offset:   10,
+			want:     "<genericHighlight>v10</genericHighlight>",
+			panes:    1,
+		},
+		"window starts on the second line": {
+			viewMode: yamlviewport.ViewModeFull,
+			offset:   11,
+			want:     "<genericHighlight>k11</genericHighlight>",
+			panes:    1,
+		},
+		"side by side window starts on the second line": {
+			viewMode: yamlviewport.ViewModeSideBySide,
+			offset:   11,
+			want:     "<genericHighlight>k11</genericHighlight>",
+			panes:    2,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithSearch()))
+			m.SetWidth(160)
+			m.SetHeight(5)
+			m.AddRevision(niceyaml.NewSourceFromString(before.String(), niceyaml.WithName("v1")))
+			m.AddRevision(niceyaml.NewSourceFromString(after, niceyaml.WithName("v2")))
+			m.SetViewMode(tc.viewMode)
+			m.SetSearchTerm("v10\nk11")
+			require.Equal(t, 1, m.SearchCount())
+
+			m.SetYOffset(tc.offset)
+
+			top, _, _ := strings.Cut(m.View(), "\n")
+			assert.Equal(t, tc.panes, strings.Count(top, tc.want), top)
+
+			// A width round trip on a copy drops every cached count, so the
+			// copy measures every line with the current decoration.
+			fresh := m
+			fresh.SetWidth(161)
+			fresh.SetWidth(160)
+			assert.Equal(t, fresh.TotalRowCount(), m.TotalRowCount())
+			assert.Equal(t, fresh.View(), m.View())
+		})
+	}
+}
+
 // testPrinter returns a printer without styles or line numbers for predictable golden output.
 func testPrinter() *printer.Printer {
 	return printer.New(
