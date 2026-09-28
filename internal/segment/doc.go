@@ -3,10 +3,10 @@
 // A YAML token can span several lines, as block scalars and multiline
 // strings do, while rendering, diffing, and searching work one line at a
 // time. [Split] cuts a [token.Tokens] stream into one [Line] per source
-// line, and each [Segment] on a line pairs the part that sits on that line
-// with the original token it was cut from.
+// line. Each [Segment] on a line pairs the part that sits on that line with
+// the original token Split cut it from.
 //
-// Consider this YAML input with a block scalar:
+// Consider this YAML input with a block scalar.
 //
 //	┌───────────────────────────┐
 //	│foo: |-                    │
@@ -14,8 +14,8 @@
 //	│  world                    │
 //	└───────────────────────────┘
 //
-// The go-yaml lexer produces a [token.Tokens] stream where the block scalar
-// content is a single token spanning multiple lines:
+// The go-yaml lexer emits the block scalar content as one token that spans
+// several lines.
 //
 //	┌──────┬────────────┬───────┐
 //	│String│MappingValue│Literal│
@@ -24,8 +24,8 @@
 //	│                           │
 //	└───────────────────────────┘
 //
-// [Split] cuts the tokens at line boundaries while every part keeps a
-// reference to its source token:
+// [Split] cuts the tokens at line boundaries, and every part keeps a
+// reference to its source token.
 //
 //	┌──────┬────────────┬───────┐
 //	│String│MappingValue│Literal│

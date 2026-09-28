@@ -19,11 +19,12 @@ import (
 //
 // Create instances with [New].
 type Segment struct {
-	// The original token from the lexer, shared by every segment cut from it.
+	// The original token from the lexer. Every segment cut from it holds
+	// the same pointer.
 	source *token.Token
 
-	// The portion of source on this line, with its position adjusted. For a
-	// single-line token it holds the same content as source.
+	// The part of source that sits on this line, with a Position of its
+	// own. For a single-line token it holds the same content as source.
 	part *token.Token
 
 	// The rune count of part.Origin without its line ending.
@@ -118,8 +119,8 @@ func (s Segment) ContentSpan() position.Span {
 // Segments is one line's worth of [Segment] values in column order.
 type Segments []Segment
 
-// PartTokens returns every part token in order. The slice is new, but the
-// tokens are shared.
+// PartTokens returns every part token in order. The slice is new, but it
+// holds the same token pointers the segments hold.
 func (s Segments) PartTokens() token.Tokens {
 	if len(s) == 0 {
 		return nil
