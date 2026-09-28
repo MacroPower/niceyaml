@@ -21,7 +21,7 @@ import (
 // width of the widest row.
 //
 // A Layout styles and wraps each line as [Printer.Print] does, since a
-// style may transform the text it styles and change its width, but it
+// style may transform the text it styles and change its width. It
 // assembles no output, so one Layout replaces a render for every question
 // about rows. It stays valid until the view or the printer changes.
 //
@@ -29,7 +29,7 @@ import (
 // [Layout.LineWidth], [Layout.LineStart], and [Layout.LineAt] take and
 // return the index of a line in the content of the view, the one every
 // [line.View] method takes, so a viewer that finds the line at a row
-// reaches its decoration through the view with the same index, and
+// reaches its decoration through the view with the same index.
 // [Layout.RowOf] takes a position in the content, as a search yields one.
 // A line the view does not hold takes no rows and starts nowhere. Rows
 // count from 0 at the first row of the first line and leave the container

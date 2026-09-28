@@ -23,7 +23,7 @@ import (
 )
 
 // breakpoints are the characters other than a space that the wrap breaks
-// after, keeping each with the word before it.
+// after. The wrap keeps each with the word before it.
 const breakpoints = "/-"
 
 // wrapOnCharacters are the characters the wrap breaks on.
@@ -155,8 +155,8 @@ type Option func(*Printer)
 // row that continues the one above it. On a content row, Soft marks a
 // wrapped continuation of the line. On an annotation row, Soft marks
 // every row after the first of the line's annotations at one placement
-// beside one wrapped row of its content, which covers the first row of
-// a later [AnnotationRow] and a row that starts at a newline in its
+// beside one wrapped row of its content. Those rows include the first row
+// of a later [AnnotationRow] and a row that starts at a newline in its
 // Text. A gutter that draws a wrap marker only beside wrapped content
 // checks Annotation before Soft.
 type GutterContext struct {
@@ -181,10 +181,10 @@ func (c GutterContext) styler() style.Styler {
 }
 
 // Gutter renders the left edge of each row. The printer asks it once per
-// view for the width of the gutter, budgets word wrapping and
-// [Layout.GutterWidth] from that, and renders every row's gutter at that
-// width: text that falls short is padded with spaces in [kind.Text], and
-// text that runs over is cut, so the content of every row starts in the
+// view for the width of the gutter and budgets word wrapping and
+// [Layout.GutterWidth] from that. The printer renders every row's gutter
+// at that width. It pads text that falls short with spaces in [kind.Text]
+// and cuts text that runs over, so the content of every row starts in the
 // same column whatever the gutter renders for the row.
 //
 // A gutter that shows a marker on some rows and nothing on others
@@ -220,10 +220,10 @@ type Gutter interface {
 
 // GutterFunc adapts a function to the [Gutter] interface. Its width is
 // the width of what the function renders for the context [Gutter.Width]
-// receives, so a function whose width depends on the line number alone,
-// as the built-in gutters do, measures as it renders, and one that varies
-// its width on the flag or the row is padded or cut to what it renders
-// for that context:
+// receives. A function whose width depends on the line number alone, as
+// the built-in gutters do, measures as it renders. For a function that
+// varies its width on the flag or the row, the printer pads or cuts every
+// row to what the function renders for that context:
 //
 //	p := printer.New(printer.WithGutter(printer.GutterFunc(func(ctx printer.GutterContext) string {
 //		return fmt.Sprintf("%3d ", ctx.Number)
@@ -281,10 +281,11 @@ func (ctx AnnotationContext) ColWidth(col int) int {
 // ColWidth returns the display width of the first col runes of content, the
 // text of a line without its line ending, plus one cell for every column
 // past the end of the content. The width is that of the row the printer
-// renders, in which a control character shows as a one-cell picture and a
-// grapheme cluster, such as a letter with a combining mark or an emoji ZWJ
-// sequence, takes its display width once. A column inside a cluster has no
-// cell of its own, so it measures up to the start of its cluster. A viewer
+// renders. In that row a control character shows as a one-cell picture,
+// and a grapheme cluster, such as a letter with a combining mark or an
+// emoji ZWJ sequence, takes its display width once. A column inside a
+// cluster has no cell of its own, so it measures up to the start of its
+// cluster. A viewer
 // that scrolls horizontally adds the result to [Layout.GutterWidth] to
 // find the cell a column of the line occupies.
 func ColWidth(content string, col int) int {
@@ -627,9 +628,9 @@ func WithContainerStyle(s lipgloss.Style) Option {
 // frame sits in the same columns whatever the widest row of the view is. A
 // width of 0, the default, lets the container shrink to the widest row.
 //
-// Pad a row, never cut one. A row can still run past n, since an
-// annotation column may push the layout wider than [WithWrap] and a style
-// transform may widen a row after it wraps. A viewer that scrolls
+// The printer pads a row and never cuts one. A row can still run past n,
+// since an annotation column may push the layout wider than [WithWrap] and
+// a style transform may widen a row after it wraps. A viewer that scrolls
 // horizontally cuts the rows itself.
 //
 // Use it for a viewer that renders one window of a document at a time, where
@@ -717,8 +718,8 @@ func WithContextLines(n int) Option {
 	}
 }
 
-// Wrap returns the width used for word wrapping, or 0 when wrapping is
-// disabled.
+// Wrap returns the width the printer wraps words at, or 0 when the
+// printer does not wrap.
 func (p *Printer) Wrap() int {
 	return p.wrap
 }
@@ -1265,7 +1266,7 @@ func (c *blendCache) put(key string, st lipgloss.Style) lipgloss.Style {
 // gutter width. A positive printer width always wraps, so the result is at
 // least one column even when the gutter alone fills the width.
 //
-// Returns 0 if wrapping is disabled.
+// Returns 0 when the printer does not wrap.
 func (p *Printer) contentWidth(gutterWidth int) int {
 	if p.wrap <= 0 {
 		return 0
@@ -1274,7 +1275,7 @@ func (p *Printer) contentWidth(gutterWidth int) int {
 	return max(1, p.wrap-gutterWidth)
 }
 
-// wrapContent splits content for word wrapping if enabled.
+// wrapContent splits content into rows when the printer wraps.
 func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 	cw := p.contentWidth(gutterWidth)
 	if cw <= 0 {

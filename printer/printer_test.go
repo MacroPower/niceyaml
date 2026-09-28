@@ -728,10 +728,10 @@ func TestPrinter_Fprint(t *testing.T) {
 	})
 }
 
-// errWriteFailed is the sentinel returned by failingWriter.
+// errWriteFailed is the sentinel failingWriter returns.
 var errWriteFailed = errors.New("write failed")
 
-// failingWriter always fails, for exercising Fprint error paths.
+// failingWriter always fails, so tests can reach the error paths of Fprint.
 type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) {
@@ -777,7 +777,8 @@ func TestNewPrinter(t *testing.T) {
 		"empty styles": {
 			input: "key: value",
 			want:  "   1  key: value ",
-			// Default gutter adds line numbers, default style adds trailing padding.
+			// The default gutter adds line numbers, and the default style
+			// adds trailing padding.
 			opts: []printer.Option{printer.WithStyles(style.Styles{})},
 		},
 	}
@@ -2065,8 +2066,8 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 	t.Parallel()
 
-	// Helper to create a gutter with custom prefixes, declared as wide as
-	// the widest of them, so the printer pads the narrower ones.
+	// The helper creates a gutter with custom prefixes that declares the
+	// width of the widest of them, so the printer pads the narrower ones.
 	makeGutter := func(inserted, deleted, equal string) printer.Gutter {
 		return prefixGutter{inserted: inserted, deleted: deleted, equal: equal}
 	}
@@ -6146,7 +6147,7 @@ func TestPrinter_AnnotationGutterSoftPerWrappedRow(t *testing.T) {
 func TestColWidth(t *testing.T) {
 	t.Parallel()
 
-	// The width is that of the rendered row: a control character shows as
+	// The width is that of the rendered row. A control character shows as
 	// a one-cell picture, a wide rune takes two cells, and every rune of a
 	// grapheme cluster after its first renders within the first.
 	tcs := map[string]struct {

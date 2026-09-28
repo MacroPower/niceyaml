@@ -24,9 +24,9 @@ const errorConnectorWidth = 4
 // joined from one bound error per document therefore prints an excerpt for
 // each document. A location with no message beside it in the excerpt,
 // such as the root of a bound error, gets a caret run under its range on
-// the row below, as [niceyaml.FormatError] draws one, since
+// the row below, as [niceyaml.FormatError] draws one.
 // [niceyaml.SourceError.Excerpt] marks such a line with an annotation
-// without content and [DefaultAnnotation] draws that as the caret run, so
+// without content, and [DefaultAnnotation] draws that as the caret run, so
 // the range shows its extent without color. Blank lines separate the
 // parts. A SourceError whose location does not resolve prints a line
 // starting "no excerpt:" that names the reason in place of its excerpt,
