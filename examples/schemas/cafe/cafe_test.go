@@ -23,8 +23,9 @@ func cafeConfig(ctx context.Context, in string) (*cafe.Config, error) {
 	return &c, nil
 }
 
-// violationPaths returns the path of each violation in err, which must be
-// bound to its source. A lone violation is the bound error itself.
+// violationPaths returns the path of each violation in err, which must wrap
+// a [*niceyaml.SourceError]. When err holds a single violation, that
+// SourceError is the violation.
 func violationPaths(t *testing.T, err error) []string {
 	t.Helper()
 
@@ -69,9 +70,10 @@ func TestCafeBrokenConfig(t *testing.T) {
 	_, err := cafeConfig(t.Context(), cafe.BrokenYAML)
 	require.EqualError(t, err, "3 schema violations", "broken config should fail schema validation")
 
-	// Both values also fail the plain decode, so the paths confirm that
-	// the schema rejected each one. The SLA schema admits a string or
-	// null, and the bad string fails both, so the SLA reports twice.
+	// Both bad values also fail the plain decode, so the paths confirm
+	// that the schema rejected each one. The SLA schema admits a string
+	// or null, and the bad string fails both, so the schema reports the
+	// SLA twice.
 	assert.ElementsMatch(t,
 		[]string{"$.spec.sla", "$.spec.sla", "$.spec.hours.days"},
 		violationPaths(t, err),
@@ -163,7 +165,7 @@ func TestCafeHours(t *testing.T) {
 			}
 
 			// The schema admits both times, so the failure comes from
-			// Hours.Validate, which the decode reports under the hours.
+			// Hours.Validate, and the decode reports it under the hours.
 			require.ErrorContains(t, err, "open must be before close")
 			assert.Equal(t, []string{"$.spec.hours.open"}, violationPaths(t, err))
 		})

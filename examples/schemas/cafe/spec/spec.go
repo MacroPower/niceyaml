@@ -12,7 +12,7 @@ import (
 // Spec is the cafe specification.
 type Spec struct {
 	// SLA is the service level agreement duration for order fulfillment.
-	// Defaults to 15 minutes.
+	// It defaults to 15 minutes.
 	SLA *Duration `json:"sla,omitempty" jsonschema:"title=SLA,pattern=^([0-9]+(\\.[0-9]+)?(ns|[uµμ]s|ms|s|m|h))+$,default=900000000000,examples=900000000000|3600000000000|90000000000"`
 	// Settings contains optional cafe settings.
 	Settings *Settings `json:"settings,omitempty" jsonschema:"title=Settings"`
@@ -64,9 +64,9 @@ type Hours struct {
 	Days []string `json:"days" jsonschema:"title=Days,enum=monday|tuesday|wednesday|thursday|friday|saturday|sunday"`
 }
 
-// Validate runs after decoding, wherever a document holds the hours. It
-// checks that both times parse and that open is before close, and
-// writes each path from the hours themselves, so a decode reports it
+// Validate checks that both times parse and that open is before close.
+// A decode calls it wherever a document holds the hours. Validate writes
+// each error path relative to the hours, so the decode reports a failure
 // under the field that holds them, such as $.spec.hours.open.
 func (h Hours) Validate() error {
 	openTime, err := time.Parse("15:04", h.Open)
@@ -111,7 +111,7 @@ type Settings struct {
 // [time.ParseDuration] form, such as "15m", and marshals with
 // [time.Duration.String], so 15 minutes becomes "15m0s". A bare
 // [time.Duration] has no encoding/json/v2 representation, so the schema
-// generator refuses it; the text form keeps the field a string.
+// generator refuses it. The text form keeps the field a string.
 type Duration time.Duration
 
 // MarshalText formats the duration with [time.Duration.String].

@@ -222,7 +222,7 @@
       "properties": {
         "sla": {
           "title": "SLA",
-          "description": "SLA is the service level agreement duration for order fulfillment.\nDefaults to 15 minutes.",
+          "description": "SLA is the service level agreement duration for order fulfillment.\nIt defaults to 15 minutes.",
           "default": "15m0s",
           "examples": [
             "15m0s",
@@ -232,7 +232,7 @@
           "anyOf": [
             {
               "type": "string",
-              "description": "Duration is a [time.Duration] encoded as text. It parses any\n[time.ParseDuration] form, such as \"15m\", and marshals with\n[time.Duration.String], so 15 minutes becomes \"15m0s\". A bare\n[time.Duration] has no encoding/json/v2 representation, so the schema\ngenerator refuses it; the text form keeps the field a string.",
+              "description": "Duration is a [time.Duration] encoded as text. It parses any\n[time.ParseDuration] form, such as \"15m\", and marshals with\n[time.Duration.String], so 15 minutes becomes \"15m0s\". A bare\n[time.Duration] has no encoding/json/v2 representation, so the schema\ngenerator refuses it. The text form keeps the field a string.",
               "pattern": "^([0-9]+(\\.[0-9]+)?(ns|[uµμ]s|ms|s|m|h))+$"
             },
             {
