@@ -15,9 +15,10 @@ import (
 	"strings"
 )
 
-// Lines yields the lines of s, each cut after its line ending: "\n",
-// "\r\n", or a bare "\r". Each line keeps its line ending, and the last
-// line has none when s does not end with one. An empty s yields nothing.
+// Lines yields the lines of s. It cuts each line after its line ending,
+// which is "\n", "\r\n", or a bare "\r". Each line keeps its line ending,
+// and the last line has none when s does not end with one. An empty s
+// yields nothing.
 func Lines(s string) iter.Seq[string] {
 	return func(yield func(string) bool) {
 		start := 0
@@ -47,8 +48,8 @@ func Lines(s string) iter.Seq[string] {
 	}
 }
 
-// CountBreaks returns the number of line breaks in s, counting "\r\n",
-// "\n", and a bare "\r" as one each.
+// CountBreaks returns the number of line breaks in s. It counts "\r\n",
+// "\n", and a bare "\r" as one break each.
 func CountBreaks(s string) int {
 	return strings.Count(s, "\n") + strings.Count(s, "\r") - strings.Count(s, "\r\n")
 }
