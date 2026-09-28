@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -85,29 +84,42 @@ func containsGlobChars(s string) bool {
 // no file is an error wrapping [errNoMatch], and an invalid pattern is its
 // own error.
 func expandPaths(args ...string) ([]string, error) {
-	var result []string
+	var (
+		result    []string
+		seenFiles []os.FileInfo
+		seenNames = make(map[string]bool)
+	)
 
-	seen := make(map[string]bool)
 	add := func(path string) {
 		// One file named two ways, such as by a relative and an absolute
-		// path, or by a symlink and its target, is one file. A name that
-		// does not resolve, such as one with no file behind it, keeps its
-		// lexical key, and the read reports it.
-		key, err := filepath.Abs(path)
-		if err != nil {
-			key = filepath.Clean(path)
-		}
-
-		resolved, err := filepath.EvalSymlinks(key)
+		// path, or by a symlink and its target, is one file, so add
+		// compares the files the names reach rather than their text.
+		// Cleaning a name as text would drop a ".." together with a
+		// symlinked directory before it, while the OS steps up from the
+		// directory the link leads to, so two different files could look
+		// like one.
+		info, err := os.Stat(path)
 		if err == nil {
-			key = resolved
-		}
+			seen := slices.ContainsFunc(seenFiles, func(other os.FileInfo) bool {
+				return os.SameFile(other, info)
+			})
+			if seen {
+				return
+			}
 
-		if seen[key] {
+			seenFiles = append(seenFiles, info)
+			result = append(result, path)
+
 			return
 		}
 
-		seen[key] = true
+		// A name with no file behind it counts once as typed, and the read
+		// reports it.
+		if seenNames[path] {
+			return
+		}
+
+		seenNames[path] = true
 
 		result = append(result, path)
 	}

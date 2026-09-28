@@ -219,17 +219,27 @@ func TestExpandPathsSymlinks(t *testing.T) {
 	// Create a directory structure with symlinks:
 	// tmpDir/
 	//   sub/
+	//     deep/
 	//     x.yaml
+	//   x.yaml
 	//   link.yaml -> sub/x.yaml
 	//   ldir -> sub
+	//   deeplink -> sub/deep
 	tmpDir := t.TempDir()
 	subdir := filepath.Join(tmpDir, "sub")
 	target := filepath.Join(subdir, "x.yaml")
+	top := filepath.Join(tmpDir, "x.yaml")
 	link := filepath.Join(tmpDir, "link.yaml")
 	throughDir := filepath.Join(tmpDir, "ldir", "x.yaml")
 
-	require.NoError(t, os.MkdirAll(subdir, 0o755))
+	// The OS steps up from the directory deeplink leads to, so this name
+	// reaches sub/x.yaml. Joining it with filepath.Join would clean it to
+	// x.yaml.
+	dotDot := tmpDir + "/deeplink/../x.yaml"
+
+	require.NoError(t, os.MkdirAll(filepath.Join(subdir, "deep"), 0o755))
 	require.NoError(t, os.WriteFile(target, []byte("x"), 0o644))
+	require.NoError(t, os.WriteFile(top, []byte("top"), 0o644))
 
 	err := os.Symlink(filepath.Join("sub", "x.yaml"), link)
 	if err != nil {
@@ -237,6 +247,7 @@ func TestExpandPathsSymlinks(t *testing.T) {
 	}
 
 	require.NoError(t, os.Symlink("sub", filepath.Join(tmpDir, "ldir")))
+	require.NoError(t, os.Symlink(filepath.Join("sub", "deep"), filepath.Join(tmpDir, "deeplink")))
 
 	tcs := map[string]struct {
 		args []string
@@ -244,7 +255,7 @@ func TestExpandPathsSymlinks(t *testing.T) {
 	}{
 		"recursive glob with symlinked file": {
 			args: []string{tmpDir + "/**/*.yaml"},
-			want: []string{link},
+			want: []string{link, top},
 		},
 		"symlink and target named explicitly": {
 			args: []string{link, target},
@@ -257,6 +268,14 @@ func TestExpandPathsSymlinks(t *testing.T) {
 		"file through symlinked directory and directly": {
 			args: []string{throughDir, target},
 			want: []string{throughDir},
+		},
+		"dot-dot after a symlinked directory and another file": {
+			args: []string{dotDot, top},
+			want: []string{dotDot, top},
+		},
+		"dot-dot after a symlinked directory and the file it reaches": {
+			args: []string{dotDot, target},
+			want: []string{dotDot},
 		},
 	}
 
