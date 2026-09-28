@@ -479,22 +479,18 @@ func (m *Model) anchorTop() {
 // the largest line number of the whole view rather than of the window, and
 // every window lines up with the layout. In side-by-side mode both panes
 // get the gutter of the longer revision, so the one horizontal offset lands
-// on the same content column in both.
+// on the same content column in both. The row cache holds that number,
+// which fillRows computes whenever the lines, the printer, or the panes
+// change, so the caller fills the cache first.
 func (m *Model) renderPrinter(width int) *printer.Printer {
 	wrapWidth := 0
 	if m.wrapEnabled {
 		wrapWidth = max(0, width-m.printer.ContainerStyle().GetHorizontalFrameSize())
 	}
 
-	maxNumber := m.printer.MaxNumber(m.left)
-
-	if m.viewMode == ViewModeSideBySide && m.right != nil {
-		maxNumber = max(maxNumber, m.printer.MaxNumber(m.right))
-	}
-
 	return m.printer.With(
 		printer.WithWrap(wrapWidth),
-		printer.WithMaxNumber(maxNumber),
+		printer.WithMaxNumber(m.rows.maxNumber),
 		printer.WithContainerWidth(width),
 	)
 }
@@ -1220,6 +1216,8 @@ type rowCache struct {
 	sums []int
 	// Width in cells of the widest row of either pane.
 	width int
+	// Largest line number of either pane, which sizes the gutter.
+	maxNumber int
 	// Rows of the printer's container frame above the first line and below
 	// the last. A view without lines has no frame rows.
 	top, bottom int
@@ -1317,8 +1315,14 @@ func (m *Model) fillRows() {
 	c.left, c.right = nil, nil
 	c.leftWidths, c.rightWidths = nil, nil
 	c.top, c.bottom = 0, 0
+	c.maxNumber = 0
 
 	if m.left != nil && m.printer != nil {
+		c.maxNumber = m.printer.MaxNumber(m.left)
+		if m.viewMode == ViewModeSideBySide && m.right != nil {
+			c.maxNumber = max(c.maxNumber, m.printer.MaxNumber(m.right))
+		}
+
 		p := m.renderPrinter(m.paneWidth())
 
 		c.indices, c.left, c.leftWidths = layoutRows(p.Layout(m.left), m.left)
