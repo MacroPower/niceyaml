@@ -10,7 +10,6 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -20,6 +19,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/capture"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
 )
@@ -40,11 +40,6 @@ var (
 	// which pick a schema for a whole document. Validate the document
 	// once at its root, then decode its nodes without the registry.
 	ErrScopedDocument = errors.New("registry needs a whole document")
-
-	// The error that carries a call to [runtime.Goexit] out of a shared
-	// load, so every caller that joined the load can end its own goroutine
-	// the same way.
-	errGoexit = errors.New("load called runtime.Goexit")
 
 	// The reason a [URL] Ref loads nothing when its scheme is neither http
 	// nor https.
@@ -577,18 +572,9 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 		case res = <-ch:
 		}
 
-		// The singleflight group raises a panic from the load on a
-		// goroutine of its own, where no caller can recover it, so the load
-		// hands the panic back as an error and each caller that shared it
-		// raises it here. The load hands back a call to runtime.Goexit the
-		// same way, and each caller calls runtime.Goexit in turn.
-		if pe, ok := errors.AsType[*panicError](res.Err); ok {
-			panic(pe.value)
-		}
-
-		if errors.Is(res.Err, errGoexit) {
-			runtime.Goexit()
-		}
+		// The load hands back a panic or a call to runtime.Goexit as an
+		// error, and each caller that shared it raises it again here.
+		capture.Reraise(res.Err)
 
 		f, _ := res.Val.(flight) //nolint:errcheck // The DoChan function always returns a flight.
 		if res.Err == nil {
@@ -922,18 +908,6 @@ func (r *Registry) cached(key string) (*Schema, bool) {
 	return v, ok
 }
 
-// A panicError carries a panic out of a shared load as an error, so it
-// crosses the singleflight group and every caller that joined the load
-// raises it again.
-type panicError struct {
-	value any
-}
-
-// Error implements error.
-func (p *panicError) Error() string {
-	return fmt.Sprintf("load panicked: %v", p.value)
-}
-
 // A flight carries the result of a shared load to every caller that
 // joined it. It holds the schema the load compiled and whether the
 // context of the caller that started the load ended before the load
@@ -944,42 +918,23 @@ type flight struct {
 }
 
 // compileRecovering runs compile and turns a panic in the load or the
-// compiler into a [*panicError] and a call to [runtime.Goexit] into
-// errGoexit. The singleflight group's DoChan never answers a flight whose
-// function ends its goroutine that way, so compileRecovering runs compile
-// on a goroutine of its own and waits for it.
+// compiler into a [*capture.PanicError] and a call to [runtime.Goexit]
+// into [capture.ErrGoexit]. A panic on the singleflight group's goroutine
+// would end the process, and DoChan never answers a flight whose function
+// calls [runtime.Goexit], so compileRecovering keeps both off that
+// goroutine.
 func (r *Registry) compileRecovering(ctx context.Context, ref Ref) (*Schema, error) {
-	var (
-		s        *Schema
-		err      error
-		returned bool
-	)
+	var s *Schema
 
-	done := make(chan struct{})
-
-	go func() {
-		defer close(done)
-
-		defer func() {
-			if p := recover(); p != nil {
-				err = &panicError{value: p}
-				returned = true
-			}
-		}()
+	err := capture.Run(func() error {
+		var err error
 
 		s, err = r.compile(ctx, ref)
-		returned = true
-	}()
 
-	<-done
+		return err
+	})
 
-	// The deferred recover returns nil while runtime.Goexit unwinds the
-	// goroutine, so returned stays false only when compile called
-	// runtime.Goexit.
-	if !returned {
-		return nil, errGoexit
-	}
-
+	//nolint:wrapcheck // Reraise matches only the error Run returned, and compile wraps its own.
 	return s, err
 }
 

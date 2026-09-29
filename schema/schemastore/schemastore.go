@@ -8,13 +8,13 @@ import (
 	"net/http"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/capture"
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/schema"
@@ -39,11 +39,6 @@ var (
 	// [go.jacobcolvin.com/niceyaml/schema.Registry] moves on to the
 	// next resolver.
 	ErrNoCatalogMatch = fmt.Errorf("%w: no catalog entry matches", schema.ErrNoMatch)
-
-	// The error that carries a call to [runtime.Goexit] out of the refresh
-	// goroutine, so each lookup that waited for the fetch can end its own
-	// goroutine the same way.
-	errGoexit = errors.New("catalog fetch called runtime.Goexit")
 
 	// An extglob group, such as the "!(config)" in
 	// "**/.github/ISSUE_TEMPLATE/!(config).yml". The matcher implements no
@@ -142,17 +137,6 @@ type fetchCall struct {
 	done    chan struct{}
 	err     error
 	entries []CatalogEntry
-}
-
-// A panicError carries a panic out of the refresh goroutine as an error,
-// so the lookup that waits for the fetch can raise it again.
-type panicError struct {
-	value any
-}
-
-// Error implements error.
-func (p *panicError) Error() string {
-	return fmt.Sprintf("catalog fetch panicked: %v", p.value)
 }
 
 // Option configures [Store] creation.
@@ -397,18 +381,9 @@ func (s *Store) catalog(ctx context.Context) ([]CatalogEntry, error) {
 		}
 	}
 
-	// The fetch runs on a goroutine of its own, where no caller can recover
-	// a panic, so the fetch hands the panic back as an error and each
-	// lookup that waited for it raises it here. The fetch hands back a call
-	// to runtime.Goexit the same way, and each lookup that waited for it
-	// calls runtime.Goexit in turn.
-	if pe, ok := errors.AsType[*panicError](call.err); ok {
-		panic(pe.value)
-	}
-
-	if errors.Is(call.err, errGoexit) {
-		runtime.Goexit()
-	}
+	// The fetch hands back a panic or a call to runtime.Goexit as an error,
+	// and each lookup that waited for it raises it again here.
+	capture.Reraise(call.err)
 
 	if call.err != nil {
 		return s.stale(call.err)
@@ -465,55 +440,37 @@ func (s *Store) join(ctx context.Context) (*fetchCall, []CatalogEntry, error) {
 // does not cancel a fetch that other lookups share. The refresh timeout
 // bounds the fetch instead.
 //
-// A fetch that calls [runtime.Goexit] ends the refresh goroutine without
-// returning, so refresh records the outcome from a deferred call, which
-// reports errGoexit when the fetch never returned.
+// No lookup can recover a panic on the refresh goroutine, so refresh
+// records a panic or a call to [runtime.Goexit] in the filter, the HTTP
+// transport, or the catalog parsing as the fetch's error.
 func (s *Store) refresh(ctx context.Context, call *fetchCall) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.refreshTimeout)
 	defer cancel()
 
 	var entries []CatalogEntry
 
-	err := errGoexit
-
-	defer func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-
-		s.inflight = nil
-		s.lastAttempt = time.Now()
-		s.lastErr = err
-
-		if err == nil {
-			s.entries = entries
-			s.lastFetch = s.lastAttempt
-		}
-
-		call.entries, call.err = entries, err
-		close(call.done)
-	}()
-
-	entries, err = s.fetchRecovering(ctx)
-}
-
-// fetchRecovering runs fetch and turns a panic in the filter, the HTTP
-// transport, or the catalog parsing into a [*panicError].
-func (s *Store) fetchRecovering(ctx context.Context) ([]CatalogEntry, error) {
-	var entries []CatalogEntry
-
-	err := func() (err error) {
-		defer func() {
-			if p := recover(); p != nil {
-				err = &panicError{value: p}
-			}
-		}()
+	err := capture.Run(func() error {
+		var err error
 
 		entries, err = s.fetch(ctx)
 
 		return err
-	}()
+	})
 
-	return entries, err
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.inflight = nil
+	s.lastAttempt = time.Now()
+	s.lastErr = err
+
+	if err == nil {
+		s.entries = entries
+		s.lastFetch = s.lastAttempt
+	}
+
+	call.entries, call.err = entries, err
+	close(call.done)
 }
 
 // stale returns the previous entries when a fetch has ever succeeded and

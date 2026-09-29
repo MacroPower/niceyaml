@@ -887,6 +887,92 @@ func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
 	}
 }
 
+func TestSchemaStore_RecordedFetchPanicLoadsAsError(t *testing.T) {
+	t.Parallel()
+
+	// After a fetch panics or calls runtime.Goexit, lookups within the
+	// retry interval report ErrFetchCatalog. A registry load that returns
+	// that error must fail with it rather than raise the fetch's panic or
+	// Goexit again in a caller that never waited on the fetch.
+	tcs := map[string]struct {
+		fn func(*http.Request) (*http.Response, error)
+	}{
+		"panic": {
+			fn: func(*http.Request) (*http.Response, error) {
+				panic("transport bug")
+			},
+		},
+		"goexit": {
+			fn: func(*http.Request) (*http.Response, error) {
+				runtime.Goexit()
+
+				panic("unreachable")
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := schemastore.New(
+				schemastore.WithCatalogURL("http://example.com/catalog.json"),
+				schemastore.WithHTTPClient(&http.Client{Transport: &roundTripperFunc{fn: tc.fn}}),
+			)
+
+			// The first lookup waits on the fetch and raises its panic or
+			// Goexit, so it runs on a goroutine of its own.
+			first := make(chan struct{})
+
+			go func() {
+				defer close(first)
+				//nolint:errcheck // The panic only signals the end of the fetch.
+				defer func() { _ = recover() }()
+
+				//nolint:errcheck // The call panics or exits through runtime.Goexit.
+				_, _ = store.FindMatch(t.Context(), "config.yaml")
+			}()
+
+			receive(t, first)
+
+			reg := schema.NewRegistry()
+			ref := schema.Loadable("catalog.json", func(ctx context.Context) ([]byte, error) {
+				_, err := store.FindMatch(ctx, "config.yaml")
+
+				return nil, fmt.Errorf("find catalog match: %w", err)
+			})
+
+			// A Schema that raises the failure again must not take the test
+			// goroutine with it, so it runs on a goroutine of its own too.
+			type outcome struct {
+				err       error
+				recovered any
+				returned  bool
+			}
+
+			results := make(chan outcome, 1)
+
+			go func() {
+				var out outcome
+
+				defer func() {
+					out.recovered = recover()
+					results <- out
+				}()
+
+				_, out.err = reg.Schema(t.Context(), ref)
+				out.returned = true
+			}()
+
+			out := receive(t, results)
+			require.Nil(t, out.recovered)
+			require.True(t, out.returned, "Schema exited through runtime.Goexit")
+			require.ErrorIs(t, out.err, schema.ErrLoad)
+			require.ErrorIs(t, out.err, schemastore.ErrFetchCatalog)
+		})
+	}
+}
+
 func TestSchemaStore_ContextEndsAfterFetch(t *testing.T) {
 	t.Parallel()
 
