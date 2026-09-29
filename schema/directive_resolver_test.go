@@ -593,6 +593,10 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 			input: "# yaml-language-server: $schema=./schema.json\n%YAML 1.2\n---\nb: 2\n",
 			want:  []string{valid},
 		},
+		"directive below a YAML directive": {
+			input: "%YAML 1.2\n# yaml-language-server: $schema=./schema.json\n---\nc: 3\n",
+			want:  []string{invalid},
+		},
 		"directive does not reach past its document": {
 			input: "# yaml-language-server: $schema=./schema.json\n---\nb: 2\n---\nc: 3\n",
 			want:  []string{valid, valid},

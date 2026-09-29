@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/goccy/go-yaml"
@@ -15,6 +16,7 @@ import (
 	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
@@ -449,6 +451,14 @@ func (d *document) anchorToken() *token.Token {
 // and it can reject what follows a marker or join it to the document the
 // marker ends.
 //
+// The tree leaves out a comment on a line of its own below a document
+// whose root is a scalar or a flow collection, and one between a %YAML
+// or %TAG directive and its "---" header, since [parser.Parse] rejects
+// valid YAML that holds a comment in either place. The tokens of the
+// Source and of each [Node] still hold such a comment. Below an anchor
+// with no value, the comment stays in the tree as the value of the
+// anchor, since the parser rejects the anchor without it.
+//
 // The tokens of the file are copies of the Source's own, since the parser
 // relinks the tokens it receives. A copy matches the original by its type,
 // value, origin, and position, so a token taken from a node finds its
@@ -505,7 +515,7 @@ func (s *Source) parse() (*ast.File, map[*token.Token]struct{}, error) {
 	file := &ast.File{Docs: []*ast.DocumentNode{}}
 
 	for _, run := range splitDocumentRuns(tks) {
-		f, err := s.parseRun(run)
+		f, err := s.parseRun(dropStrandedComments(run))
 		if err == nil {
 			file.Docs = append(file.Docs, f.Docs...)
 
@@ -685,6 +695,133 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 	}
 
 	return append(runs, tks[start:])
+}
+
+// dropStrandedComments returns the tokens of run without the comments on
+// lines of their own that the go-yaml parser rejects when it keeps
+// comments, or run itself when it holds none.
+//
+// The parser (v1.19.3-0.20260407131736-edee2f91616c) attaches such a
+// comment below the content of a document only when the root of the
+// document is a block mapping or a block sequence. Below a scalar or a
+// flow collection, it leaves the comment unread and fails with "value is
+// not allowed in this context" (parser/parser.go:171). It also requires
+// the header to follow the line of a %YAML or %TAG directive at once, and
+// fails with "document not started" when a comment sits between them
+// (parser/token.go:598). The go-yaml decoder parses without comments and
+// accepts both. The comments stay among the tokens of the Source, where
+// [tokens.SplitDocuments] still hands them to their documents.
+//
+// Below a scalar or a flow collection, only the comments that close the
+// document drop: those that the end of run, a "---" header, or a "..."
+// marker follows. The parser rejects any other token after them, with or
+// without the comments. The comments below an anchor with no value stay,
+// since the parser takes them as the value of the anchor and rejects an
+// anchor that no token follows past its name (parser/token.go:311).
+func dropStrandedComments(run token.Tokens) token.Tokens {
+	var (
+		kept token.Tokens
+		// What the document the scan is in has shown so far: a token of
+		// its content, an indicator of a block mapping or a block sequence
+		// at its top level, and a directive that awaits its header.
+		content, block, directive bool
+		// The depth of flow collections at the scan.
+		depth int
+		// The last two tokens other than comments that hold text.
+		last, beforeLast *token.Token
+	)
+
+	for i := 0; i < len(run); {
+		tk := run[i]
+
+		if tk.Type != token.CommentType {
+			switch tk.Type {
+			case token.DocumentHeaderType, token.DocumentEndType:
+				content, block, directive, depth = false, false, false, 0
+
+			case token.DirectiveType:
+				directive = true
+
+			case token.SequenceStartType, token.MappingStartType:
+				content = true
+				depth++
+
+			case token.SequenceEndType, token.MappingEndType:
+				depth--
+
+			case token.MappingKeyType, token.MappingValueType, token.SequenceEntryType:
+				content = true
+				block = block || depth == 0
+
+			default:
+				content = true
+			}
+
+			if strings.Trim(tk.Origin, " \t\r\n") != "" {
+				beforeLast, last = last, tk
+			}
+
+			if kept != nil {
+				kept = append(kept, tk)
+			}
+
+			i++
+
+			continue
+		}
+
+		next := i
+		for next < len(run) && run[next].Type == token.CommentType {
+			next++
+		}
+
+		// An anchor, or the name of one, ends the content when the anchor
+		// has no value.
+		anchored := last != nil && last.Type == token.AnchorType ||
+			beforeLast != nil && beforeLast.Type == token.AnchorType
+
+		stranded := directive
+		if content && !block && depth == 0 && !anchored {
+			stranded = stranded || next == len(run) ||
+				run[next].Type == token.DocumentHeaderType || run[next].Type == token.DocumentEndType
+		}
+
+		for j := i; j < next; j++ {
+			if stranded && belowText(run[j], last) {
+				if kept == nil {
+					kept = slices.Clone(run[:j])
+				}
+
+				continue
+			}
+
+			if kept != nil {
+				kept = append(kept, run[j])
+			}
+		}
+
+		i = next
+	}
+
+	if kept == nil {
+		return run
+	}
+
+	return kept
+}
+
+// belowText reports whether tk starts on a line below the line where the
+// text of last ends. That text ends on the line where it starts plus the
+// line breaks within it, without the spaces, tabs, and line breaks around
+// it. It reports false when last is nil or either token has no position.
+func belowText(tk, last *token.Token) bool {
+	if last == nil || tk.Position == nil || last.Position == nil {
+		return false
+	}
+
+	end := last.Position.Line + lineend.CountBreaks(strings.Trim(last.Origin, " \t\r\n"))
+
+	return tk.Position.Line > end
 }
 
 // startsBelow reports whether tk starts on a line below the line mark

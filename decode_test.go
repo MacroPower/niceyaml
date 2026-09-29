@@ -482,6 +482,108 @@ func TestDocument_Decode(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("comment on a line of its own after the content", func(t *testing.T) {
+		t.Parallel()
+
+		// The go-yaml parser rejects such a comment below a root that is
+		// not a block mapping or a block sequence, and between a directive
+		// and its header, when it keeps comments. Each case lists the
+		// value of every document.
+		tcs := map[string]struct {
+			input string
+			want  []any
+		}{
+			"plain scalar": {
+				input: "x\n# c\n",
+				want:  []any{"x"},
+			},
+			"quoted scalar on two lines": {
+				input: "\"a\n b\"\n# c\n",
+				want:  []any{"a b"},
+			},
+			"anchored scalar": {
+				input: "&a x\n# c\n",
+				want:  []any{"x"},
+			},
+			"tagged scalar": {
+				input: "!!str 1\n# c\n",
+				want:  []any{"1"},
+			},
+			"indented comment": {
+				input: "x\n  # c\n",
+				want:  []any{"x"},
+			},
+			"comment on the line and below it": {
+				input: "x # same\n# c\n",
+				want:  []any{"x"},
+			},
+			"flow sequence": {
+				input: "[1, 2]\n# c\n",
+				want:  []any{[]any{uint64(1), uint64(2)}},
+			},
+			"flow mapping": {
+				input: "{a: 1}\n# c\n",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"block scalar": {
+				input: "--- |\n  lit\n# c\n",
+				want:  []any{"lit\n"},
+			},
+			"scalar above an end marker": {
+				input: "x\n# c\n...\n--- y\n",
+				want:  []any{"x", "y"},
+			},
+			"flow sequence above a header": {
+				input: "--- [1, 2]\n# c\n# d\n--- [3]\n",
+				want:  []any{[]any{uint64(1), uint64(2)}, []any{uint64(3)}},
+			},
+			"scalar after a directive": {
+				input: "%YAML 1.2\n---\nx\n# c\n",
+				want:  []any{"x"},
+			},
+			"comment between a directive and its header": {
+				input: "%YAML 1.2\n# c\n---\na: 1\n",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"comment between a tag directive and its header": {
+				input: "%TAG !e! tag:example.com,2000:\n# c\n\n# d\n---\n!e!x y\n",
+				want:  []any{"y"},
+			},
+			// The parser takes the comment below an anchor with no value
+			// as the value of the anchor, and rejects the anchor without
+			// it.
+			"anchor with no value": {
+				input: "&a\n# c\n",
+				want:  []any{nil},
+			},
+			"anchor with no value above an end marker": {
+				input: "--- &a\n# c\n...\n",
+				want:  []any{nil},
+			},
+			"anchor with no value above a header": {
+				input: "&a\n# c\n---\nb\n",
+				want:  []any{nil, "b"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				docs, err := niceyaml.NewSourceFromString(tc.input).Documents()
+				require.NoError(t, err)
+
+				got := make([]any, len(docs))
+				for i, d := range docs {
+					got[i], err = d.Decode[any](t.Context())
+					require.NoError(t, err)
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
 }
 
 func TestDocument_Decode_TypeMismatch(t *testing.T) {
@@ -866,6 +968,25 @@ func TestDocument_Preamble(t *testing.T) {
 				{content: "a: 1\n"},
 				{preamble: "# note\n---\n"},
 			},
+		},
+		"comment after a scalar": {
+			input: "x\n# note\n",
+			want:  []doc{{content: "x\n# note\n"}},
+		},
+		"comment after a flow sequence": {
+			input: "[1, 2]\n# note\n",
+			want:  []doc{{content: "[1, 2]\n# note\n"}},
+		},
+		"comment after a flow sequence above a later header": {
+			input: "[1, 2]\n# note\n---\n[3]\n",
+			want: []doc{
+				{content: "[1, 2]\n"},
+				{preamble: "# note\n---\n", content: "[3]\n"},
+			},
+		},
+		"comment between a directive and its header": {
+			input: "%YAML 1.2\n# note\n---\na: 1\n",
+			want:  []doc{{preamble: "%YAML 1.2\n# note\n---\n", content: "a: 1\n"}},
 		},
 	}
 
