@@ -113,6 +113,75 @@ func TestErrorTree_New_LeftDeepJoin(t *testing.T) {
 	}
 }
 
+func TestErrorTree_New_DeepMultiWrap(t *testing.T) {
+	t.Parallel()
+
+	const n = 20
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+
+	tcs := map[string]struct {
+		build func(calls *atomic.Int64) error
+		want  niceyaml.ErrorTree
+	}{
+		"left-deep wrappers over plain errors": {
+			build: func(calls *atomic.Int64) error {
+				var err error = countingError{calls: calls, msg: "e0"}
+
+				for i := 1; i < n; i++ {
+					err = fmt.Errorf("%w; %w", err, countingError{calls: calls, msg: fmt.Sprintf("e%d", i)})
+				}
+
+				return err
+			},
+			want: niceyaml.ErrorTree{Text: "e0; e1; e2; e3; e4; e5; e6; e7; e8; e9; " +
+				"e10; e11; e12; e13; e14; e15; e16; e17; e18; e19"},
+		},
+		"sentinel wrappers over a located error": {
+			build: func(calls *atomic.Int64) error {
+				sentinel := countingError{calls: calls, msg: "invalid"}
+
+				var err error = niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("a")))
+
+				for i := 1; i < n; i++ {
+					err = fmt.Errorf("%w: %w", sentinel, err)
+				}
+
+				return err
+			},
+			want: niceyaml.ErrorTree{Text: strings.Repeat("invalid: ", n-1) + "$.a: bad"},
+		},
+	}
+
+	ops := map[string]func(error){
+		"tree":   func(err error) { niceyaml.NewErrorTree(err) },
+		"bind":   func(err error) { _ = source.Bind(err).Error() },
+		"rebase": func(err error) { _ = niceyaml.Rebase(err, paths.Root()).Error() },
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var calls atomic.Int64
+
+			err := tc.build(&calls)
+
+			assert.Equal(t, tc.want, niceyaml.NewErrorTree(err))
+
+			for op, run := range ops {
+				calls.Store(0)
+				run(err)
+
+				// Deciding whether each wrapper keeps a branch by walking
+				// the chain below it twice per level reads the messages
+				// 2^n times.
+				assert.LessOrEqual(t, calls.Load(), int64(2*n*n), op)
+			}
+		})
+	}
+}
+
 func TestErrorTree_New_MultiWrap(t *testing.T) {
 	t.Parallel()
 

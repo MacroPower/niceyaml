@@ -261,20 +261,44 @@ func followBranches(err error, branches []error) ([]error, error) {
 
 // isLeaf reports whether err carries no location along its cause chain
 // and has no children there, so it adds nothing to the tree beyond its
-// text.
+// text. It reads the chain as [anchorOf] and [walkChildren] do, in a
+// single walk that ends at the first error that unwraps to several. Both
+// of those walks call followBranches, and so isLeaf, at such an error.
+// Running both, or walking on past a branch followBranches judged
+// already, would judge the errors below twice per level, and the work
+// would double with each level of nesting.
 func isLeaf(err error) bool {
-	if anchorOf(err).err != nil {
-		return false
+	for cur := err; !isNothing(cur); {
+		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *SourceError:
+			return false
+
+		case *Error:
+			// An Error from Rebase anchors the chain at its base when
+			// nothing below it carries a location.
+			if x.hasLocation() || x.rebased || len(x.errors) > 0 {
+				return false
+			}
+
+			cur = x.err
+
+		case interface{ Unwrap() error }:
+			cur = x.Unwrap()
+
+		case interface{ Unwrap() []error }:
+			// A branch followBranches keeps is a child, or the one branch
+			// of a wrapper that is no leaf, so the error is a leaf exactly
+			// when it keeps none.
+			branches, next := followBranches(cur, x.Unwrap())
+
+			return next == nil && len(branches) == 0
+
+		default:
+			return true
+		}
 	}
 
-	leaf := true
-
-	walkChildren(err,
-		func(*SourceError) { leaf = false },
-		func(error, childBase) { leaf = false },
-	)
-
-	return leaf
+	return true
 }
 
 // childBase is the base the children along a cause chain rebase under:
