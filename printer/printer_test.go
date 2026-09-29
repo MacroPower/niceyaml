@@ -6364,6 +6364,74 @@ func TestPrinter_Layout(t *testing.T) {
 		}
 	})
 
+	t.Run("a transform that adds runes of the text keeps columns aligned", func(t *testing.T) {
+		t.Parallel()
+
+		// The runes a transform adds may equal runes of the text it
+		// styles, as the "v" and "a" of a "val=" prefix do for "value".
+		// They still count as added runes, so every column of the text
+		// maps to the rune it shows.
+		tcs := map[string]struct {
+			transform func(string) string
+			content   string
+			want      string
+			rows      map[int]int // Column to row.
+			cells     map[int]int // Column to cell.
+			wrap      int
+		}{
+			"prefix that wraps": {
+				transform: func(s string) string { return "val=" + s },
+				content:   "k: value",
+				wrap:      5,
+				want:      stringtest.JoinLF("k:", "val=v", "alue"),
+				rows:      map[int]int{0: 0, 3: 1, 4: 2, 7: 2},
+				cells:     map[int]int{3: 0, 4: 0, 5: 1},
+			},
+			"prefix": {
+				transform: func(s string) string { return "val=" + s },
+				content:   "k: value",
+				want:      "k: val=value",
+				cells:     map[int]int{3: 3, 4: 8, 5: 9, 7: 11, 8: 12},
+			},
+			"quotes around a quoted string": {
+				transform: func(s string) string { return `"` + s + `"` },
+				content:   `k: "abc"`,
+				want:      `k: ""abc""`,
+				cells:     map[int]int{3: 3, 4: 5, 5: 6, 7: 8, 8: 10},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				view := niceyaml.NewSourceFromString(tc.content).View()
+
+				p := printer.New(
+					printer.WithGutter(printer.NoGutter),
+					printer.WithContainerStyle(lipgloss.NewStyle()),
+					printer.WithWrap(tc.wrap),
+					printer.WithStyles(style.New(
+						lipgloss.NewStyle(),
+						style.Set(kind.LiteralString, lipgloss.NewStyle().Transform(tc.transform)),
+					)),
+				)
+
+				require.Equal(t, tc.want, p.Print(view))
+
+				l := p.Layout(view)
+
+				for col, row := range tc.rows {
+					assert.Equal(t, row, l.RowOf(position.New(0, col)), "row of column %d", col)
+				}
+
+				for col, cell := range tc.cells {
+					assert.Equal(t, cell, l.CellOf(position.New(0, col)), "cell of column %d", col)
+				}
+			})
+		}
+	})
+
 	t.Run("width and gutter width match the rendered rows", func(t *testing.T) {
 		t.Parallel()
 

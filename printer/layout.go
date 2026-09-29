@@ -4,6 +4,7 @@ import (
 	"math"
 	"slices"
 	"sort"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -184,10 +185,13 @@ func (p *Printer) wrapLine(view *line.View, idx int, ln *line.Line, gutterWidth 
 // content maps to the end of shown.
 //
 // In a run that shows as many runes as it covers, the offset moves rune
-// for rune. In any other run, the shown runes match against the text of
-// the run as sourceCol matches them, so a rune a transform adds before
-// the text of the run, such as an opening bracket, comes before the
-// offset of the first column of the run.
+// for rune. The first column of any other run begins where the run
+// begins, so it takes the runes a transform adds before the text of the
+// run, such as an opening bracket. A later column of a run that shows
+// its text verbatim begins at its rune within that text, as
+// [textStart] finds it. In a run whose transform rewrites the text, the
+// shown runes match against the text of the run as sourceCol matches
+// them.
 func shownOffset(runs []runSpan, shown []rune, col, contentLen int) int {
 	switch {
 	case col <= 0 || len(runs) == 0:
@@ -204,8 +208,16 @@ func shownOffset(runs []runSpan, shown []rune, col, contentLen int) int {
 		return run.shown + col - run.col
 	}
 
-	text := []rune(run.text)
 	want := col - run.col
+	if want == 0 {
+		return run.shown
+	}
+
+	if start, ok := textStart(run, shown); ok {
+		return run.shown + start + want
+	}
+
+	text := []rune(run.text)
 	next := 0
 
 	for i, r := range shown[run.shown : run.shown+run.shownLen] {
@@ -227,11 +239,15 @@ func shownOffset(runs []runSpan, shown []rune, col, contentLen int) int {
 // in, and contentLen is the number of columns of the content. Offset 0 is
 // column 0, and an offset at or past the end of shown is contentLen.
 //
-// The run that shows the rune at offset decides the column. A run that
-// shows as many runes as it covers maps rune for rune, as a style that
-// only colors its text or changes its case does. In any other run, the
-// shown runes before offset match against the text of the run as
-// [rowBounds] matches pieces, and the column stays within the run.
+// The run that shows the rune at offset decides the column, and the
+// column stays within the run. A run that shows as many runes as it
+// covers maps rune for rune, as a style that only colors its text or
+// changes its case does. A run that shows its text verbatim among runes
+// a transform adds maps rune for rune from where [textStart] finds the
+// text. An added rune before the text takes the first column of the run,
+// and one after it takes the column past the run. In a run whose
+// transform rewrites the text, the shown runes before offset match
+// against the text of the run as [rowBounds] matches pieces.
 func sourceCol(runs []runSpan, shown []rune, offset, contentLen int) int {
 	switch {
 	case offset <= 0:
@@ -248,6 +264,10 @@ func sourceCol(runs []runSpan, shown []rune, offset, contentLen int) int {
 		return run.col + offset - run.shown
 	}
 
+	if start, ok := textStart(run, shown); ok {
+		return run.col + min(max(offset-run.shown-start, 0), run.cols)
+	}
+
 	text := []rune(run.text)
 	next := 0
 
@@ -261,6 +281,25 @@ func sourceCol(runs []runSpan, shown []rune, offset, contentLen int) int {
 	}
 
 	return run.col + min(next, run.cols)
+}
+
+// textStart returns the offset, counted from the start of run in shown,
+// at which the shown runes of run hold its text verbatim, and reports
+// whether they hold it. A transform that adds runes around the text,
+// such as brackets or a prefix, keeps it verbatim, and one that rewrites
+// the text itself does not. Matching the text as a whole keeps an added
+// rune that equals a rune of the text from counting as that rune. When
+// the added runes hold the text too, as "a"+s does for "a", the first
+// occurrence counts.
+func textStart(run runSpan, shown []rune) (int, bool) {
+	runShown := string(shown[run.shown : run.shown+run.shownLen])
+
+	i := strings.Index(runShown, run.text)
+	if i < 0 {
+		return 0, false
+	}
+
+	return utf8.RuneCountInString(runShown[:i]), true
 }
 
 // nbsp is the non-breaking space, the one Unicode space the wrapper keeps
