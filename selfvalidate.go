@@ -524,9 +524,9 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 	case reflect.Map:
 		// The entries walk in the order of their keys, so the errors come
 		// back in one order however the map iterates. Two keys of one
-		// text, such as 1 and "1", order by the types they hold. Entries
-		// that tie on both, such as several NaN keys or several time keys
-		// of one instant and zone, walk as one group, as
+		// text, such as 1 and "1", share a path and order by the types
+		// they hold. Entries that tie on both, such as several NaN keys or
+		// several time keys of one instant and zone, walk as one group, as
 		// [selfWalker.walkEntries] describes, along with the one case
 		// where the order can vary. Each value comes from the iteration
 		// rather than a lookup by its key, since a NaN key equals no key,
@@ -567,13 +567,28 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 
 		slices.SortFunc(entries, compareKeys)
 
+		// A path names a key by its text alone, so keys of different
+		// types that share a segment, such as 1 and "1" in a map[any]T,
+		// share a path, which resolves to the document entry of one of
+		// them. A `<<` merge can bring in such a key beside one the
+		// mapping spells, even where the parser rejects duplicate keys.
+		// The errors under such a path bind with no position.
+		ambiguous := map[string]bool{}
+
+		for i := 1; i < len(entries); i++ {
+			if entries[i].seg == entries[i-1].seg && entries[i].typeName != entries[i-1].typeName {
+				ambiguous[entries[i].seg] = true
+			}
+		}
+
 		for len(entries) > 0 {
 			n := 1
 			for n < len(entries) && compareKeys(entries[0], entries[n]) == 0 {
 				n++
 			}
 
-			if !w.walkEntries(base.Child(entries[0].seg), entries[:n]) {
+			seg := entries[0].seg
+			if !w.walkEntries(base.Child(seg), entries[:n], ambiguous[seg]) {
 				ok = false
 			}
 
@@ -605,7 +620,11 @@ type mapEntry struct {
 // pointer, map, or slice, which only a value filled before the decode
 // can do. That value walks once, so its errors join the group of
 // whichever entry walks first, and the map iteration decides which.
-func (w *selfWalker) walkEntries(path paths.Path, entries []mapEntry) bool {
+//
+// When ambiguous is true, path also names the entries of keys of other
+// types, so the errors of entries bind with no position, for the reason
+// [ErrAmbiguousPath].
+func (w *selfWalker) walkEntries(path paths.Path, entries []mapEntry, ambiguous bool) bool {
 	ok := true
 	start := len(w.errs)
 	groups := make([][]error, 0, len(entries))
@@ -619,7 +638,14 @@ func (w *selfWalker) walkEntries(path paths.Path, entries []mapEntry) bool {
 			ok = false
 		}
 
-		groups = append(groups, slices.Clone(w.errs[start:]))
+		errs := w.errs[start:]
+		if ambiguous {
+			for i, err := range errs {
+				errs[i] = bindTree(err, binder{src: w.node.source, node: w.node, ambiguous: true})
+			}
+		}
+
+		groups = append(groups, slices.Clone(errs))
 		w.errs = w.errs[:start]
 	}
 

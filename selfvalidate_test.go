@@ -1058,6 +1058,71 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
+	t.Run("keys of one text report no position", func(t *testing.T) {
+		t.Parallel()
+
+		// The path of either key resolves to the entry the mapping
+		// spells, so no error takes the line of that entry.
+		type merged struct {
+			M    map[any]signed `yaml:"m"`
+			Base map[string]any `yaml:"base"`
+		}
+
+		tcs := map[string]struct {
+			input string
+			opts  []niceyaml.SourceOption
+			want  []string
+		}{
+			"merged int beside a string that passes": {
+				input: "base: &b\n  1: {n: -1}\nm:\n  <<: *b\n  \"1\": {n: 5}\n",
+				want:  []string{"$.m.1.n: negative -1"},
+			},
+			"merged int beside a string": {
+				input: "base: &b\n  1: {n: -1}\nm:\n  <<: *b\n  \"1\": {n: -2}\n",
+				want:  []string{"$.m.1.n: negative -2", "$.m.1.n: negative -1"},
+			},
+			"merged null beside a string": {
+				input: "base: &b\n  null: {n: -1}\nm:\n  <<: *b\n  \"null\": {n: -2}\n",
+				want:  []string{"$.m.null.n: negative -1", "$.m.null.n: negative -2"},
+			},
+			"merged bool beside a string": {
+				input: "base: &b\n  true: {n: -1}\nm:\n  <<: *b\n  \"true\": {n: -2}\n",
+				want:  []string{"$.m.true.n: negative -1", "$.m.true.n: negative -2"},
+			},
+			"duplicate keys": {
+				input: "m:\n  1: {n: -1}\n  \"1\": {n: -2}\n",
+				opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+				want:  []string{"$.m.1.n: negative -2", "$.m.1.n: negative -1"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).Document()
+				require.NoError(t, err)
+
+				_, err = dd.Decode[merged](t.Context())
+				require.Error(t, err)
+
+				var got []string
+
+				for bound := range niceyaml.AllBindings(err) {
+					if _, ok := bound.Path(); !ok {
+						continue
+					}
+
+					require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrAmbiguousPath)
+
+					got = append(got, bound.Error())
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
 	t.Run("a map key reports the text the document spells it with", func(t *testing.T) {
 		t.Parallel()
 

@@ -113,6 +113,15 @@ var (
 	// against.
 	ErrPathNeedsDocument = errors.New("path needs a document to resolve in")
 
+	// ErrAmbiguousPath indicates a path that names the entries of more
+	// than one key of a decoded map. Keys of different types that the
+	// document spells with one text, such as 1 and "1" in a map[any]T,
+	// share one path, and the path resolves to the document entry of one
+	// of them. A decode binds the errors a [SelfValidator] reports under
+	// such a path with no position, so none points at the line of another
+	// entry. [SourceError.Unresolved] reports it.
+	ErrAmbiguousPath = errors.New("path names the entries of several keys")
+
 	// The reason of a [SourceError] whose error carries no location at
 	// all, which is not a failure to resolve one, so
 	// [SourceError.Unresolved] reports nil for it.
@@ -652,8 +661,9 @@ type location struct {
 // message and is not resolved, so a range locates the error whether or
 // not the document holds the path. The node is the one b binds with, or,
 // when b routes, the root of the document [binder.route] picks for the
-// location. An empty l is errUnlocated, and a path bound where no
-// document resolves it is [ErrPathNeedsDocument].
+// location. An empty l is errUnlocated, a path bound where no document
+// resolves it is [ErrPathNeedsDocument], and a path bound through a
+// binder that marks its paths ambiguous is [ErrAmbiguousPath].
 func locate(b binder, l locus) (location, *Node, error) {
 	switch loc := l.loc.(type) {
 	case position.Range:
@@ -664,6 +674,10 @@ func locate(b binder, l locus) (location, *Node, error) {
 	}
 
 	if l.hasPath {
+		if b.ambiguous {
+			return location{}, b.node, fmt.Errorf("%w: %s", ErrAmbiguousPath, l.path)
+		}
+
 		return locatePath(b, l.path)
 	}
 
@@ -820,11 +834,15 @@ const DefaultContextLines = 2
 // itself. A binder that routes picks the document for each location it
 // resolves, as [Source.Bind] does; one that does not, as the parser's
 // binder must not, since the documents are not built until the parse
-// ends, binds to the source alone.
+// ends, binds to the source alone. A binder that marks its paths
+// ambiguous binds errors whose paths may name another value, so it
+// resolves no path, for the reason [ErrAmbiguousPath]. It still locates
+// a position or a range.
 type binder struct {
-	src   *Source
-	node  *Node
-	route bool
+	src       *Source
+	node      *Node
+	route     bool
+	ambiguous bool
 }
 
 // nodeAt returns the node an error on line idx binds to: the one b binds
@@ -1801,8 +1819,10 @@ func (e *SourceError) Range() (position.Range, bool) {
 // [ErrPathNeedsDocument] for a path bound through [Source.Bind] in a
 // source with no single document, the resolution error from
 // [go.jacobcolvin.com/niceyaml/paths] for a path the document does not
-// hold, or [ErrNoLocation] for a path whose token carries no position. A
-// renderer names it in place of the excerpt:
+// hold, or [ErrNoLocation] for a path whose token carries no position.
+// For a path that names the entries of several keys of a decoded map, it
+// is [ErrAmbiguousPath]. A renderer names the reason in place of the
+// excerpt:
 //
 //	if excerpt, ok := bound.Excerpt(2); ok {
 //		fmt.Println(excerpt)
