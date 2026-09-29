@@ -1322,6 +1322,17 @@ func TestView_String(t *testing.T) {
 				want: `   1 | key: value
      |   ^`,
 			},
+			"annotations above of each kind get a row of their own": {
+				annotations: []line.Annotation{
+					{Content: "@@ hunk header @@", Kind: kind.UIHunkHeader, Placement: line.Above},
+					{Content: "first", Placement: line.Above, Col: 5},
+					{Content: "", Kind: kind.UISeparator, Placement: line.Above},
+					{Content: "second", Kind: kind.UIAnnotation, Placement: line.Above, Col: 2},
+				},
+				want: `     | @@ hunk header @@
+     |   first; second
+   1 | key: value`,
+			},
 			"annotations above and below": {
 				annotations: []line.Annotation{
 					{Content: "@@ hunk header @@", Placement: line.Above},
@@ -1992,7 +2003,25 @@ func TestView_Hunks(t *testing.T) {
 		want := stringtest.JoinLF(
 			"   2 | b: 2",
 			"     | ^ one",
-			"     | ...; two",
+			"     | ...",
+			"     | two",
+			"   7 | g: 7",
+		)
+		assert.Equal(t, want, view.Hunks(0).String())
+	})
+
+	t.Run("separator keeps the column of an annotation above", func(t *testing.T) {
+		t.Parallel()
+
+		view := newTestView(t, input, 8)
+		view.Annotate(1, line.Annotation{Content: "one", Placement: line.Below})
+		view.Annotate(6, line.Annotation{Content: "hint", Placement: line.Above, Col: 3})
+
+		want := stringtest.JoinLF(
+			"   2 | b: 2",
+			"     | ^ one",
+			"     | ...",
+			"     |    hint",
 			"   7 | g: 7",
 		)
 		assert.Equal(t, want, view.Hunks(0).String())

@@ -496,8 +496,9 @@ func isSeparator(a Annotation) bool {
 }
 
 // String renders the [View] as plain text: each line behind its number,
-// the annotations above it on rows of their own, and a row below it that
-// marks its decoration. That row holds a caret under every column an
+// the annotations above it on rows of their own, one row per kind as
+// [Annotations.ByKind] groups them, and a row below it that marks its
+// decoration. That row holds a caret under every column an
 // overlay covers, a caret at the column of the annotations below the line,
 // and their contents after the last caret. Annotations below the line
 // without content still get their caret when no overlay covers a column
@@ -528,11 +529,18 @@ func (v *View) String() string {
 	for i, ln := range v.All() {
 		anns := v.Annotations(i)
 
-		// An annotation above the line without content adds no row. The
-		// row starts at the column of the annotations as the content row
-		// renders it, so it lines up on a line holding wide or control
-		// characters.
-		if kept := anns.Filter(Above).WithContent(); len(kept) > 0 {
+		// Each kind of annotation above the line gets a row of its own,
+		// in the order the kinds first appear, as the printer renders
+		// them. An annotation without content adds nothing to its row,
+		// and a kind with no content adds no row. The row starts at the
+		// column of its annotations as the content row renders it, so it
+		// lines up on a line holding wide or control characters.
+		for _, group := range anns.Filter(Above).ByKind() {
+			kept := group.WithContent()
+			if len(kept) == 0 {
+				continue
+			}
+
 			col := annotationCol(kept.Col(), ln.Width())
 			padding := strings.Repeat(" ", colWidth(ln, col))
 			rows = append(rows, blank+padding+escape.Control(strings.Join(kept.Contents(), "; ")))
