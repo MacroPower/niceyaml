@@ -1610,9 +1610,10 @@ func (m *Model) scrollWidth() int {
 }
 
 // outerSize returns the width and height of the viewport frame: the set
-// dimensions, capped by any fixed size on the container style. As in
-// lipgloss, that fixed size excludes the style's margins, so the cap adds
-// them back.
+// dimensions, capped by any fixed or maximum size on the container style.
+// As in lipgloss, a fixed size excludes the style's margins, so that cap
+// adds them back. Lipgloss cuts to MaxWidth and MaxHeight after it adds
+// the margins, so those caps apply as they are.
 func (m *Model) outerSize() (int, int) {
 	w, h := m.Width(), m.Height()
 	if sw := m.style.GetWidth(); sw != 0 {
@@ -1621,6 +1622,14 @@ func (m *Model) outerSize() (int, int) {
 
 	if sh := m.style.GetHeight(); sh != 0 {
 		h = min(h, sh+m.style.GetVerticalMargins())
+	}
+
+	if mw := m.style.GetMaxWidth(); mw > 0 {
+		w = min(w, mw)
+	}
+
+	if mh := m.style.GetMaxHeight(); mh > 0 {
+		h = min(h, mh)
 	}
 
 	return w, h

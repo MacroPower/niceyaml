@@ -1971,6 +1971,70 @@ func TestViewport_FixedSizeContainerStyle(t *testing.T) {
 	}
 }
 
+func TestViewport_MaxSizeContainerStyle(t *testing.T) {
+	t.Parallel()
+
+	box := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+
+	// A MaxWidth or MaxHeight on the container style caps the box, margins
+	// included, so the whole border shows and a page moves by the rows on
+	// screen.
+	tcs := map[string]struct {
+		style      lipgloss.Style
+		wantWidth  int
+		wantHeight int
+		wantRows   int
+	}{
+		"max size": {
+			style:      box.MaxWidth(12).MaxHeight(6),
+			wantWidth:  12,
+			wantHeight: 6,
+			wantRows:   4,
+		},
+		"max size with margins": {
+			style:      box.Margin(1, 2).MaxWidth(16).MaxHeight(8),
+			wantWidth:  16,
+			wantHeight: 8,
+			wantRows:   4,
+		},
+		"max size above fixed size": {
+			style:      box.Width(12).Height(6).MaxWidth(14).MaxHeight(8),
+			wantWidth:  12,
+			wantHeight: 6,
+			wantRows:   4,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var src strings.Builder
+
+			for i := range 50 {
+				fmt.Fprintf(&src, "k%d: v\n", i)
+			}
+
+			m := yamlviewport.New(
+				yamlviewport.WithPrinter(testPrinter()),
+				yamlviewport.WithContainerStyle(tc.style),
+			)
+			m.SetWidth(20)
+			m.SetHeight(12)
+			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
+
+			view := m.View()
+			assert.Equal(t, tc.wantWidth, lipgloss.Width(view))
+			assert.Equal(t, tc.wantHeight, lipgloss.Height(view))
+			assert.Contains(t, view, "┘")
+			assert.Equal(t, tc.wantRows, m.VisibleRowCount())
+
+			m.PageDown()
+			assert.Equal(t, tc.wantRows, m.YOffset())
+		})
+	}
+}
+
 func TestViewport_PrinterContainerSizeIgnored(t *testing.T) {
 	t.Parallel()
 
