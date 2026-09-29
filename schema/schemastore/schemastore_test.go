@@ -330,9 +330,97 @@ func TestSchemaStore_FindMatchDoesNotAliasCatalog(t *testing.T) {
 	assert.Equal(t, []string{"*.yaml"}, entry.FileMatch)
 }
 
+func TestSchemaStore_FindMatchRepeatedPath(t *testing.T) {
+	t.Parallel()
+
+	// A registry looks up a file's path once per document, so each lookup
+	// must give what a first lookup of its path gives, whatever lookups
+	// came before it.
+	catalog := schemastore.Catalog{
+		Schemas: []schemastore.CatalogEntry{
+			{Name: "Generic", URL: "https://example.com/generic.json", FileMatch: []string{"*.yaml"}},
+			{Name: "Specific", URL: "https://example.com/specific.json", FileMatch: []string{"myapp.yaml"}},
+		},
+	}
+
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	tcs := map[string]struct {
+		paths []string
+		want  []string // Name of the matching entry, or "" for no match.
+	}{
+		"same path": {
+			paths: []string{"/x/myapp.yaml", "/x/myapp.yaml", "/x/myapp.yaml"},
+			want:  []string{"Specific", "Specific", "Specific"},
+		},
+		"alternating paths": {
+			paths: []string{"/x/myapp.yaml", "/x/other.yaml", "/x/myapp.yaml", "/x/other.yaml"},
+			want:  []string{"Specific", "Generic", "Specific", "Generic"},
+		},
+		"unmatched path": {
+			paths: []string{"/x/other.json", "/x/other.json", "/x/myapp.yaml"},
+			want:  []string{"", "", "Specific"},
+		},
+		"relative and absolute spellings of one path": {
+			// Each error names the path as its caller spelled it.
+			paths: []string{"other.json", filepath.Join(wd, "other.json"), "other.json"},
+			want:  []string{"", "", ""},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			store := schemastore.New(
+				schemastore.WithCatalogURL("https://example.com/catalog.json"),
+				schemastore.WithHTTPClient(newCatalogClient(t, catalog)),
+			)
+
+			for i, path := range tc.paths {
+				entry, err := store.FindMatch(t.Context(), path)
+
+				if tc.want[i] == "" {
+					require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch, "lookup %d", i)
+					require.ErrorContains(t, err, fmt.Sprintf("%q", path), "lookup %d", i)
+
+					continue
+				}
+
+				require.NoError(t, err, "lookup %d", i)
+				assert.Equal(t, tc.want[i], entry.Name, "lookup %d", i)
+			}
+		})
+	}
+}
+
+func TestSchemaStore_FindMatchAfterRefresh(t *testing.T) {
+	t.Parallel()
+
+	// With caching off, each lookup fetches a new catalog whose entry takes
+	// its name from the request count. A lookup matches against the catalog
+	// it fetched, not the one an earlier lookup of the same path read.
+	client, requests, _ := newHeldCatalogClient(t, 3)
+
+	store := schemastore.New(
+		schemastore.WithCatalogURL("https://example.com/catalog.json"),
+		schemastore.WithHTTPClient(client),
+		schemastore.WithCacheTTL(0),
+	)
+
+	for _, want := range []string{"Catalog 1", "Catalog 2", "Catalog 3"} {
+		entry, err := store.FindMatch(t.Context(), "/x/config.yaml")
+		require.NoError(t, err)
+		assert.Equal(t, want, entry.Name)
+	}
+
+	assert.Equal(t, int32(3), requests.Load())
+}
+
 func BenchmarkStore_FindMatch(b *testing.B) {
-	// A path no entry matches makes each lookup try every pattern, as a
-	// document outside the catalog does.
+	// A path no entry matches makes a scan try every pattern, as a document
+	// outside the catalog does.
 	catalog := schemastore.Catalog{}
 	for i := range 1000 {
 		catalog.Schemas = append(catalog.Schemas, schemastore.CatalogEntry{
@@ -353,13 +441,35 @@ func BenchmarkStore_FindMatch(b *testing.B) {
 	_, err := store.FindMatch(b.Context(), "/repo/unmatched.yaml")
 	require.ErrorIs(b, err, schemastore.ErrNoCatalogMatch)
 
-	b.ReportAllocs()
-
-	for b.Loop() {
-		_, err = store.FindMatch(b.Context(), "/repo/unmatched.yaml")
+	bms := map[string]struct {
+		paths []string
+	}{
+		// Each lookup names a different path from the one before, so each
+		// one scans the catalog.
+		"new path": {
+			paths: []string{"/repo/unmatched.yaml", "/repo/other.yaml"},
+		},
+		// Every lookup names the same path, as the documents of one file
+		// do, so each one reuses the last scan.
+		"repeated path": {
+			paths: []string{"/repo/unmatched.yaml"},
+		},
 	}
 
-	require.ErrorIs(b, err, schemastore.ErrNoCatalogMatch)
+	for name, bm := range bms {
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			var i int
+
+			for b.Loop() {
+				_, err = store.FindMatch(b.Context(), bm.paths[i%len(bm.paths)])
+				i++
+			}
+
+			require.ErrorIs(b, err, schemastore.ErrNoCatalogMatch)
+		})
+	}
 }
 
 func TestSchemaStore_LazyLoading(t *testing.T) {

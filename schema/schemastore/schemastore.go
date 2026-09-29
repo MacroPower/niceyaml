@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -124,6 +125,7 @@ type Store struct {
 	inflight       *fetchCall // Fetch in progress, or nil when none is running.
 	lastErr        error      // Error from the last fetch, or nil when it succeeded.
 	catalogURL     string
+	lastMatch      atomic.Pointer[matchMemo] // Outcome of the last scan in FindMatch.
 	entries        []CatalogEntry
 	cacheTTL       time.Duration
 	refreshTimeout time.Duration
@@ -329,17 +331,20 @@ func (s *Store) FindMatch(ctx context.Context, filePath string) (CatalogEntry, e
 
 	cleanPath := filepaths.CleanPath(matchPath)
 
+	// A registry resolves each document of a multi-document file on its
+	// own, and every one of those lookups brings the same path. The scan
+	// depends only on the catalog load and the path, so FindMatch reuses
+	// the last scan's outcome when both are unchanged.
 	var (
-		best      CatalogEntry
-		bestScore int
-		found     bool
+		best  CatalogEntry
+		found bool
 	)
 
-	for _, entry := range entries {
-		score, ok := entry.globs.SpecificityClean(cleanPath)
-		if ok && (!found || score > bestScore) {
-			best, bestScore, found = entry, score, true
-		}
+	if memo := s.lastMatch.Load(); memo.answers(entries, cleanPath) {
+		best, found = memo.best, memo.found
+	} else {
+		best, found = bestMatch(entries, cleanPath)
+		s.lastMatch.Store(&matchMemo{entries: entries, path: cleanPath, best: best, found: found})
 	}
 
 	if !found {
@@ -353,6 +358,43 @@ func (s *Store) FindMatch(ctx context.Context, filePath string) (CatalogEntry, e
 	best.globs = filepaths.AnyDepthPatterns{}
 
 	return best, nil
+}
+
+// bestMatch returns the entry whose pattern matches cleanPath most
+// specifically, and the first such entry on a tie. It reports false when
+// no entry matches.
+func bestMatch(entries []CatalogEntry, cleanPath string) (CatalogEntry, bool) {
+	var (
+		best      CatalogEntry
+		bestScore int
+		found     bool
+	)
+
+	for _, entry := range entries {
+		score, ok := entry.globs.SpecificityClean(cleanPath)
+		if ok && (!found || score > bestScore) {
+			best, bestScore, found = entry, score, true
+		}
+	}
+
+	return best, found
+}
+
+// matchMemo records the outcome of one catalog scan in [Store.FindMatch].
+type matchMemo struct {
+	entries []CatalogEntry // Catalog load the scan read.
+	path    string         // Cleaned path the scan matched.
+	best    CatalogEntry   // Matching entry, shared with entries.
+	found   bool
+}
+
+// answers reports whether m holds the scan of path against entries. Each
+// catalog load builds a new slice, and m keeps its own slice alive, so a
+// later load cannot reuse its address. An empty catalog matches nothing,
+// so any two empty loads give the same outcome.
+func (m *matchMemo) answers(entries []CatalogEntry, path string) bool {
+	return m != nil && m.path == path && len(m.entries) == len(entries) &&
+		(len(entries) == 0 || &m.entries[0] == &entries[0])
 }
 
 // catalog returns the catalog entries. It fetches or refreshes them first
