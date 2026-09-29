@@ -807,6 +807,29 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 				"^",
 			),
 		},
+		// The wrap drops the space before the accent, so the row after
+		// the break starts with the accent alone, which takes no cell,
+		// and the carets start under the first "b".
+		"combining accent after a space at a break": {
+			content: "k: aaaa ́bbbb",
+			cols:    []position.Span{position.NewSpan(9, 13)},
+			width:   8,
+			want: stringtest.JoinLF(
+				"k: aaaa",
+				"́bbbb",
+				"^^^^",
+			),
+		},
+		"spacing mark after a space at a break": {
+			content: "k: aaaa िbbbb",
+			cols:    []position.Span{position.NewSpan(9, 13)},
+			width:   8,
+			want: stringtest.JoinLF(
+				"k: aaaa",
+				"िbbbb",
+				" ^^^^",
+			),
+		},
 		"runs on different rows": {
 			content: "key: aaaa bbbb cccc dddd",
 			cols:    []position.Span{position.NewSpan(5, 9), position.NewSpan(17, 19)},
@@ -5096,6 +5119,39 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 				"key: aaaa",
 				"bbbb cccc",
 				"     ^ x",
+			),
+		},
+		// The wrap drops the space before the accent, so the next row
+		// starts with the accent alone, which takes no cell.
+		"below column on a row that starts with a combining accent": {
+			input:  "k: aaaa ́bbbb",
+			gutter: printer.NoGutter,
+			width:  8,
+			annotation: line.Annotation{
+				Content:   "here",
+				Placement: line.Below,
+				Col:       9,
+			},
+			want: stringtest.JoinLF(
+				"k: aaaa",
+				"́bbbb",
+				"^ here",
+			),
+		},
+		// A spacing mark takes a cell on its own at the start of the row.
+		"below column on a row that starts with a spacing mark": {
+			input:  "k: aaaa िbbbb",
+			gutter: printer.NoGutter,
+			width:  8,
+			annotation: line.Annotation{
+				Content:   "here",
+				Placement: line.Below,
+				Col:       9,
+			},
+			want: stringtest.JoinLF(
+				"k: aaaa",
+				"िbbbb",
+				" ^ here",
 			),
 		},
 		"above column on a wrapped row sits above that row": {

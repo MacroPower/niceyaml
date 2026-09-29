@@ -1172,9 +1172,14 @@ func (p *Printer) annotationRows(
 
 	starts := w.starts
 
-	offsets := newCellOffsets(ln.Content())
-	lastCol := utf8.RuneCountInString(ln.Content()) + line.MaxColPastEnd
+	content := []rune(ln.Content())
+	lastCol := len(content) + line.MaxColPastEnd
 	out := make([][]string, max(1, len(starts)))
+
+	// Each wrapped row gets the cell offsets of its own text the first
+	// time a row of annotations sits beside it, so the work stays linear
+	// in the length of the line.
+	rowOffsets := make([]*cellOffsets, len(out))
 
 	for _, group := range anns.ByKind() {
 		rows := p.annotationFunc(AnnotationContext{
@@ -1199,13 +1204,27 @@ func (p *Printer) annotationRows(
 			// math.MaxInt pads a bounded row.
 			col := min(max(0, row.Col), lastCol)
 
-			j, from := 0, 0
+			j, from, to := 0, 0, len(content)
 			if len(starts) > 0 {
 				j = rowIndex(starts, col)
-				from = starts[j]
+				from = min(max(0, starts[j]), len(content))
+
+				if j+1 < len(starts) {
+					to = min(max(from, starts[j+1]), len(content))
+				}
 			}
 
-			pad := max(0, offsets.width(col)-offsets.width(from))
+			// The padding measures the text of the wrapped row on its own,
+			// as the terminal draws it. When the wrap drops the space that
+			// begins a grapheme cluster, the rest of the cluster starts the
+			// next row, and the padding counts the cells that rest takes
+			// alone, such as none for a combining accent.
+			if rowOffsets[j] == nil {
+				offsets := newCellOffsets(string(content[from:to]))
+				rowOffsets[j] = &offsets
+			}
+
+			pad := rowOffsets[j].width(col - from)
 			out[j] = append(out[j], p.renderAnnotationRow(row, p.styles.Style(k), pad, gutterWidth)...)
 		}
 	}
