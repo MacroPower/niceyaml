@@ -87,7 +87,8 @@ func Set(s kind.Kind, ls lipgloss.Style) Option {
 //
 // A [Set] on child wins over the inherited style, whichever comes first.
 // A later Inherit on the same child replaces the parent. A chain of
-// parents that returns to child resolves to the base style.
+// parents that loops before it reaches a set kind resolves to the base
+// style.
 func Inherit(child, parent kind.Kind) Option {
 	return func(st *Styles) {
 		switch {

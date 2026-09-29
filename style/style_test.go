@@ -387,6 +387,33 @@ func TestInherit(t *testing.T) {
 		assert.Equal(t, styles.Style(kind.Text), styles.Style(focus))
 	})
 
+	t.Run("cycle through a set kind resolves to that kind", func(t *testing.T) {
+		t.Parallel()
+
+		styles := style.New(base,
+			style.Inherit(match, focus),
+			style.Inherit(focus, match),
+			style.Set(focus, red),
+		)
+
+		assert.Equal(t, lipgloss.Color("#ff0000"), styles.Style(match).GetForeground())
+		assert.Equal(t, lipgloss.Color("#ff0000"), styles.Style(focus).GetForeground())
+	})
+
+	t.Run("cycle above the child resolves to the base style", func(t *testing.T) {
+		t.Parallel()
+
+		const other kind.Kind = "customOther"
+
+		styles := style.New(base,
+			style.Inherit(match, focus),
+			style.Inherit(focus, other),
+			style.Inherit(other, focus),
+		)
+
+		assert.Equal(t, styles.Style(kind.Text), styles.Style(match))
+	})
+
 	t.Run("With re-resolves through the inherited parent", func(t *testing.T) {
 		t.Parallel()
 
