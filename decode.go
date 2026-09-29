@@ -69,10 +69,13 @@ import (
 // one of them passed. A parent that checks a relation between its fields
 // thus sees fields that hold together, and a decode reports every value
 // that failed. A field an inline tag flattens keeps the path of
-// the struct that holds it. A value whose type decodes itself, through
-// an UnmarshalYAML or UnmarshalText method, validates itself and
-// nothing below it, since its fields need not mirror the document, and
-// so does an [ast.Node], which go-yaml sets to the node it decodes. The
+// the struct that holds it. A flattened field whose name a field of
+// that struct also uses does not validate, since go-yaml sets it to its
+// zero value and decodes the document into the other field. A value
+// whose type decodes itself, through an UnmarshalYAML or UnmarshalText
+// method, validates itself and nothing below it, since its fields need
+// not mirror the document, and so does an [ast.Node], which go-yaml sets
+// to the node it decodes. The
 // decode cannot see a type that go-yaml decodes whole through a
 // [yaml.CustomUnmarshaler] option or an UnmarshalJSON method under
 // [yaml.UseJSONUnmarshaler], so the values below such a type walk as if

@@ -46,7 +46,7 @@ func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
 		scanning: map[visit]bool{},
 		scanned:  map[visit]bool{},
 	}
-	w.walk(reflect.ValueOf(v), paths.Root())
+	w.walk(reflect.ValueOf(v), paths.Root(), nil)
 
 	switch len(w.errs) {
 	case 0:
@@ -105,8 +105,11 @@ type visit struct {
 }
 
 // walk validates v and everything below it, with base as the path of v
-// in the document, and reports whether nothing under v failed.
-func (w *selfWalker) walk(v reflect.Value, base paths.Path) bool {
+// in the document, and reports whether nothing under v failed. When v is
+// an inline struct, or a pointer to one, shadowed holds the names of the
+// fields of its parent that are not inline, as [selfWalker.children]
+// describes.
+func (w *selfWalker) walk(v reflect.Value, base paths.Path, shadowed map[string]bool) bool {
 	if !v.IsValid() || !v.CanInterface() {
 		return true
 	}
@@ -123,7 +126,7 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path) bool {
 			return true
 		}
 
-		return w.walk(v.Elem(), base)
+		return w.walk(v.Elem(), base, nil)
 
 	case reflect.Pointer, reflect.Map, reflect.Slice:
 		// A nil pointer holds no value to validate. A nil map or slice is
@@ -140,10 +143,10 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path) bool {
 
 		if !ownsAddress(v) {
 			if v.Kind() == reflect.Pointer {
-				return w.walk(v.Elem(), base)
+				return w.walk(v.Elem(), base, shadowed)
 			}
 
-			return w.walkValue(v, base)
+			return w.walkValue(v, base, shadowed)
 		}
 
 		if ok, seen := w.done[visitOf(v)]; seen {
@@ -157,21 +160,22 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path) bool {
 		defer w.leave(v)
 
 		if v.Kind() == reflect.Pointer {
-			return w.finish(v, w.walk(v.Elem(), base))
+			return w.finish(v, w.walk(v.Elem(), base, shadowed))
 		}
 
-		return w.finish(v, w.walkValue(v, base))
+		return w.finish(v, w.walkValue(v, base, shadowed))
 
 	default:
 	}
 
-	return w.walkValue(v, base)
+	return w.walkValue(v, base, shadowed)
 }
 
 // walkValue validates v, a value that is no pointer or interface, and
-// everything below it, and reports whether nothing under v failed.
-func (w *selfWalker) walkValue(v reflect.Value, base paths.Path) bool {
-	if !decodesItself(v.Type()) && !w.children(v, base) {
+// everything below it, and reports whether nothing under v failed. The
+// shadowed names are those [selfWalker.walk] takes.
+func (w *selfWalker) walkValue(v reflect.Value, base paths.Path, shadowed map[string]bool) bool {
+	if !decodesItself(v.Type()) && !w.children(v, base, shadowed) {
 		return false
 	}
 
@@ -326,7 +330,13 @@ func reachesValidator(t reflect.Type, seen map[reflect.Type]bool) bool {
 
 // children walks the values below v, and reports whether every one of
 // them passed.
-func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
+//
+// The fields of an inline struct sit beside the fields of its parent,
+// and go-yaml zeroes each one whose name a field of the parent that is
+// not inline also uses. The document sets such a field only for the
+// parent, so the walk passes over it. When v is an inline struct,
+// shadowed holds the names of those fields of the parent.
+func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[string]bool) bool {
 	switch v.Kind() {
 	case reflect.Slice, reflect.Array, reflect.Map:
 		// An element, map key, or map value whose type holds no validator
@@ -343,27 +353,35 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 
 	switch v.Kind() {
 	case reflect.Struct:
+		var own map[string]bool
+
 		for i := range v.NumField() {
 			field := v.Type().Field(i)
 
 			name, inline, skip := fieldName(field)
-			if skip {
+			if skip || shadowed[name] {
 				continue
 			}
 
-			child := base
-			if !inline {
+			child, fieldShadowed := base, map[string]bool(nil)
+			if inline {
+				if own == nil {
+					own = ownFieldNames(v.Type())
+				}
+
+				fieldShadowed = own
+			} else {
 				child = base.Child(name)
 			}
 
-			if !w.walk(v.Field(i), child) {
+			if !w.walk(v.Field(i), child, fieldShadowed) {
 				ok = false
 			}
 		}
 
 	case reflect.Slice, reflect.Array:
 		for i := range v.Len() {
-			if !w.walk(v.Index(i), base.Index(i)) {
+			if !w.walk(v.Index(i), base.Index(i), nil) {
 				ok = false
 			}
 		}
@@ -402,11 +420,11 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 		for _, e := range entries {
 			path := base.Child(e.seg)
 
-			if !w.walk(e.key, path.Key()) {
+			if !w.walk(e.key, path.Key(), nil) {
 				ok = false
 			}
 
-			if !w.walk(e.value, path) {
+			if !w.walk(e.value, path, nil) {
 				ok = false
 			}
 		}
@@ -415,6 +433,21 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 	}
 
 	return ok
+}
+
+// ownFieldNames returns the names go-yaml decodes the fields of t, a
+// struct type, under, leaving out the fields it skips and those that are
+// inline.
+func ownFieldNames(t reflect.Type) map[string]bool {
+	names := map[string]bool{}
+
+	for field := range t.Fields() {
+		if name, inline, skip := fieldName(field); !skip && !inline {
+			names[name] = true
+		}
+	}
+
+	return names
 }
 
 // entriesMayHoldValidator reports whether an element of a value of type t,
@@ -547,6 +580,9 @@ func (w *selfWalker) scanSelf(v reflect.Value) (bool, bool) {
 
 // scanChildren scans the fields of a struct, the elements of a slice or
 // array, or the keys and values of a map, as [selfWalker.scanValue] describes.
+// It reads the fields of an inline struct that its parent shadows too,
+// which the walk passes over, so it can report a validator the walk does
+// not reach. The walk then validates nothing more than it would anyway.
 func (w *selfWalker) scanChildren(v reflect.Value) (bool, bool) {
 	complete := true
 

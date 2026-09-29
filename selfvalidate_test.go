@@ -318,6 +318,91 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.EqualError(t, err, "3:8: $.close: closes before it opens")
 	})
 
+	t.Run("an inline field its parent shadows does not validate", func(t *testing.T) {
+		t.Parallel()
+
+		type base struct {
+			Port positive `yaml:"port"`
+			Host string   `yaml:"host"`
+		}
+
+		type mid struct {
+			Base base   `yaml:",inline"`
+			Host string `yaml:"host"`
+		}
+
+		type server struct {
+			Base base     `yaml:",inline"`
+			Port positive `yaml:"port"`
+		}
+
+		type pointer struct {
+			Base *base    `yaml:",inline"`
+			Port positive `yaml:"port"`
+		}
+
+		type deep struct {
+			Mid  mid      `yaml:",inline"`
+			Port positive `yaml:"port"`
+		}
+
+		tcs := map[string]struct {
+			decode func(*niceyaml.Node) error
+			input  string
+			err    string
+		}{
+			"struct": {
+				input: "host: a\nport: 8080\n",
+				decode: func(n *niceyaml.Node) error {
+					_, err := n.Decode[server](t.Context())
+
+					return err
+				},
+			},
+			"pointer": {
+				input: "host: a\nport: 8080\n",
+				decode: func(n *niceyaml.Node) error {
+					_, err := n.Decode[pointer](t.Context())
+
+					return err
+				},
+			},
+			"parent field still validates": {
+				input: "host: a\nport: 0\n",
+				err:   "2:7: $.port: must be positive",
+				decode: func(n *niceyaml.Node) error {
+					_, err := n.Decode[server](t.Context())
+
+					return err
+				},
+			},
+			"a field below a deeper inline struct validates": {
+				input: "host: a\nport: 0\n",
+				err:   "$.port: must be positive\n$.port: must be positive",
+				decode: func(n *niceyaml.Node) error {
+					_, err := n.Decode[deep](t.Context())
+
+					return err
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := tc.decode(yamltest.FirstDocument(t, tc.input))
+				if tc.err != "" {
+					require.EqualError(t, err, tc.err)
+
+					return
+				}
+
+				require.NoError(t, err)
+			})
+		}
+	})
+
 	t.Run("an embedded struct without inline decodes under its name", func(t *testing.T) {
 		t.Parallel()
 
@@ -1541,6 +1626,17 @@ type port int
 func (p port) Validate() error {
 	if p < 0 || p > 65535 {
 		return fmt.Errorf("port out of range")
+	}
+
+	return nil
+}
+
+// positive is a scalar that requires a value above zero.
+type positive int
+
+func (p positive) Validate() error {
+	if p <= 0 {
+		return errors.New("must be positive")
 	}
 
 	return nil
