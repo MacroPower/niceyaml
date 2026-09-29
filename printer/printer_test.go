@@ -549,6 +549,66 @@ func TestPrinter_PrintError_MarksWrappedRange(t *testing.T) {
 	assert.Equal(t, want, p.PrintError(bound))
 }
 
+func TestPrinter_PrintError_MarksLongWrappedValue(t *testing.T) {
+	t.Parallel()
+
+	// A long base64 value wraps into many rows, and each gets a caret row
+	// below it as wide as the part of the value it shows.
+	tcs := map[string]struct {
+		value string
+		width int
+	}{
+		"ascii": {
+			value: strings.Repeat("QUJD", 2000),
+			width: 80,
+		},
+		"wide runes": {
+			value: strings.Repeat("日本", 500),
+			width: 41,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString("data: " + tc.value + "\n")
+			err := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("data"))))
+
+			p := printer.New(
+				printer.WithStyles(style.Styles{}),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithGutter(printer.NoGutter),
+				printer.WithWrap(tc.width),
+			)
+
+			rows := strings.Split(p.PrintError(err), "\n")[2:]
+			carets := 0
+
+			// A caret row follows every row that shows part of the value,
+			// under all of that part. The key is not part of the range, so
+			// its row gets no carets when the value wraps off it.
+			for i, row := range rows {
+				value := strings.TrimPrefix(row, "data:")
+				if strings.Trim(value, " ") == "" || strings.Trim(row, " ^") == "" {
+					continue
+				}
+
+				require.Less(t, i+1, len(rows), "row %d has no caret row", i)
+
+				mark := rows[i+1]
+				assert.Equal(t, strings.Repeat("^", lipgloss.Width(strings.TrimLeft(value, " "))),
+					strings.TrimLeft(mark, " "), "row %d", i)
+				assert.Equal(t, lipgloss.Width(row), lipgloss.Width(mark), "row %d", i)
+
+				carets += strings.Count(mark, "^")
+			}
+
+			assert.Equal(t, lipgloss.Width(tc.value), carets)
+		})
+	}
+}
+
 func TestPrinter_WrappedMarkerRows(t *testing.T) {
 	t.Parallel()
 
@@ -4186,6 +4246,17 @@ func TestDefaultAnnotation(t *testing.T) {
 			want: []printer.AnnotationRow{
 				{Col: 3, Text: "^^^^^^"},
 				{Col: 7, Text: "^^^^^^"},
+			},
+		},
+		"wrapped content marks combining marks on each row": {
+			content:     "k: e\u0301x e\u0301y",
+			annotations: line.Annotations{{Placement: line.Below}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(4, 10)}},
+			rowStarts:   []int{0, 7},
+			position:    line.Below,
+			want: []printer.AnnotationRow{
+				{Col: 3, Text: "^^"},
+				{Col: 7, Text: "^^"},
 			},
 		},
 		"wrapped content leaves out a row without covered columns": {

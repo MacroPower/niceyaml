@@ -3,7 +3,9 @@ package printer
 import (
 	"fmt"
 	"io"
+	"math"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -426,6 +428,12 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 	}
 
 	shown := []rune(escape.Control(ctx.Content))
+	offsets := newCellOffsets(ctx.Content)
+
+	// The caret row of the whole line comes from MarkerRow once, and each
+	// wrapped row takes the cells of its own columns from it. The row
+	// holds one byte per cell, a caret or a space.
+	marks := ctx.Overlays.MarkerRow(ctx.Content)
 
 	var rows []AnnotationRow
 
@@ -444,19 +452,27 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 			}
 		}
 
-		overlays := clipOverlays(ctx.Overlays, lo, hi)
+		lo = min(max(0, lo), hi)
 
-		col, ok := markerCol(overlays, ctx.Content)
-		if !ok {
+		// A mark the last row holds can land past the end of the content,
+		// so that row runs to the end of the caret row.
+		from, to := offsets.before[lo], offsets.before[hi]
+		if hi == len(shown) {
+			to = len(marks)
+		}
+
+		cut := marks[min(from, len(marks)):min(to, len(marks))]
+
+		i := strings.IndexByte(cut, '^')
+		if i < 0 {
 			continue
 		}
 
-		// MarkerRow pads the carets to their column itself, and the
-		// printer pads the row to Col, so the carets go without the
-		// padding.
+		// The printer pads the row to Col, so the carets go without the
+		// padding before them.
 		rows = append(rows, AnnotationRow{
-			Col:  col,
-			Text: strings.TrimLeft(overlays.MarkerRow(ctx.Content), " "),
+			Col:  offsets.col(lo, from+i),
+			Text: strings.TrimRight(cut[i:], " "),
 		})
 	}
 
@@ -465,6 +481,54 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 	}
 
 	return rows
+}
+
+// cellOffsets holds the cells the content of a line takes before each of
+// its columns, so a caller that measures many columns of one line does
+// the work once. Its before slice holds, for each column up to the end of
+// the content, the sum of [cells.Row.Cells] over the columns before it,
+// which counts a whole grapheme cluster at its first rune.
+type cellOffsets struct {
+	row    cells.Row
+	before []int
+}
+
+// newCellOffsets creates a new [cellOffsets] for content, the text of a
+// line without its line ending.
+func newCellOffsets(content string) cellOffsets {
+	row := cells.NewRow(content)
+	n := utf8.RuneCountInString(content)
+	before := make([]int, n+1)
+
+	for c := range n {
+		before[c+1] = before[c] + row.Cells(c)
+	}
+
+	return cellOffsets{row: row, before: before}
+}
+
+// width returns what [cells.Row.Width] returns for col.
+func (o cellOffsets) width(col int) int {
+	col = o.row.Start(col)
+
+	n := len(o.before) - 1
+	if col <= n {
+		return o.before[col]
+	}
+
+	return o.before[n] + min(col-n, math.MaxInt-o.before[n])
+}
+
+// col returns the first column at or after lo that starts at or past
+// cell. A cell past the end of the content maps to a column past it, one
+// column per cell.
+func (o cellOffsets) col(lo, cell int) int {
+	n := len(o.before) - 1
+	if cell > o.before[n] {
+		return n + cell - o.before[n]
+	}
+
+	return lo + sort.SearchInts(o.before[lo:], cell)
 }
 
 // caretRow returns a row that marks col of content with a caret as wide
@@ -481,46 +545,6 @@ func caretRow(content string, col int) AnnotationRow {
 	}
 
 	return AnnotationRow{Col: col, Text: text}
-}
-
-// clipOverlays returns the overlays cut to the columns [lo, hi), without
-// the ones that cover none of them.
-func clipOverlays(overlays line.Overlays, lo, hi int) line.Overlays {
-	clipped := make(line.Overlays, 0, len(overlays))
-
-	for _, ov := range overlays {
-		ov.Cols = position.NewSpan(max(lo, ov.Cols.Start), min(hi, ov.Cols.End))
-		if ov.Cols.Start < ov.Cols.End {
-			clipped = append(clipped, ov)
-		}
-	}
-
-	return clipped
-}
-
-// markerCol returns the first column of content that an overlay covers,
-// the one [line.Overlays.MarkerRow] puts its first caret under, and false
-// when no overlay covers a column of the content.
-func markerCol(overlays line.Overlays, content string) (int, bool) {
-	var (
-		col   int
-		found bool
-	)
-
-	end := utf8.RuneCountInString(content)
-
-	for _, ov := range overlays {
-		start := max(0, ov.Cols.Start)
-		if start >= min(ov.Cols.End, end) {
-			continue
-		}
-
-		if !found || start < col {
-			col, found = start, true
-		}
-	}
-
-	return col, found
 }
 
 // renderLineNumber renders the line number portion of a gutter. The number
@@ -1080,7 +1104,7 @@ func (p *Printer) annotationRows(
 
 	starts := w.starts
 
-	cr := cells.NewRow(ln.Content())
+	offsets := newCellOffsets(ln.Content())
 	lastCol := utf8.RuneCountInString(ln.Content()) + line.MaxColPastEnd
 	out := make([][]string, max(1, len(starts)))
 
@@ -1113,7 +1137,7 @@ func (p *Printer) annotationRows(
 				from = starts[j]
 			}
 
-			pad := max(0, cr.Width(col)-cr.Width(from))
+			pad := max(0, offsets.width(col)-offsets.width(from))
 			out[j] = append(out[j], p.renderAnnotationRow(row, p.styles.Style(k), pad, gutterWidth)...)
 		}
 	}
