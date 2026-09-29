@@ -24,8 +24,8 @@
 // Use it when the overlay should replace the base rather than mix with it:
 //
 //	result := OverrideStyles(baseStyle, overlayStyle)
-//	// The result.Foreground is overlay's foreground.
-//	// The result.Transform is overlay's transform only.
+//	// The result.Foreground is overlay's foreground when it sets one.
+//	// The result.Transform is overlay's transform when it sets one, not a composition.
 //
 // Both strategies fall back to whichever color is visible when the other is
 // nil, invisible, or [lipgloss.NoColor].
