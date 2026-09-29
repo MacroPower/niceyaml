@@ -1018,12 +1018,14 @@ func (e *SourceError) leadNamesSource() bool {
 }
 
 // holdsSource reports whether a child of e is bound to src. A child that
-// binds a join has no text of its own, so the walk looks through it to
-// its branches, as [boundChildren] does.
+// reads as the binding of a join, as [joinBinding] finds one, has no text
+// of its own, so the walk looks through it to the branches of that
+// binding, as [boundChildren] does.
 func holdsSource(e *SourceError, src *Source) bool {
 	for _, c := range e.errors {
-		if _, joined := joinBranches(c.Unwrap()); joined {
-			if holdsSource(c, src) {
+		joined := joinBinding(c)
+		if joined != nil {
+			if holdsSource(joined, src) {
 				return true
 			}
 

@@ -4528,6 +4528,16 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		))
 		assert.Equal(t, "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b\nb.yaml:2:4: $.b: bad b", err.Error())
 
+		// So does an Error that only wraps a binding of such a join.
+		joinSrc := named("c.yaml")
+		err = yamltest.Bind(t, joinSrc, errors.Join(
+			yamltest.Bind(t, named("a.yaml"), badA),
+			niceyaml.WrapError(yamltest.Bind(t, joinSrc, errors.Join(
+				yamltest.Bind(t, named("b.yaml"), badB),
+			))),
+		))
+		assert.Equal(t, "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b", err.Error())
+
 		// Only the first line can take the name, so a join that leads
 		// with a binding, even one nested in another join, puts no name
 		// in front, and a join that leads with an unbound branch does.

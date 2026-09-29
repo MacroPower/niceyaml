@@ -57,8 +57,9 @@ type ErrorTree struct {
 // location and no errors nested with [WithErrors], is the same node. A
 // binding of such an error is the same node, with each child carrying
 // its whole [SourceError.Error], since no root names the source for it.
-// A node with no text adds nothing. Its children take its place in the
-// tree above it, and one with a single child is that child.
+// So is an Error that only wraps such a binding. A node with no text
+// adds nothing. Its children take its place in the tree above it, and
+// one with a single child is that child.
 //
 // Any other error that unwraps to several keeps its text and has a child
 // per branch. A wrapper that [fmt.Errorf] builds with several %w verbs
@@ -86,13 +87,49 @@ func NewErrorTree(err error) ErrorTree {
 		return newTree("", children)
 	}
 
-	if bound, ok := err.(*SourceError); ok { //nolint:errorlint // The node itself, not a chain search.
-		if _, joined := joinBranches(bound.Unwrap()); joined {
-			return newTree("", trees(boundChildren(bound, true)))
-		}
+	bound := joinBinding(err)
+	if bound != nil {
+		return newTree("", trees(boundChildren(bound, true)))
 	}
 
 	return newTree(err.Error(), children(err))
+}
+
+// joinBinding returns the binding of a join that err reads as, or nil
+// when err reads as none. A [*SourceError] whose bound error is a join,
+// as [joinBranches] finds one, is such a binding. An Error that adds
+// nothing, as [Error.addsNothing] reports, reads as the error it wraps,
+// and so does a binding that adopted such an Error, since neither adds
+// text or children to the binding below it.
+func joinBinding(err error) *SourceError {
+	for {
+		switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *Error:
+			if !x.addsNothing() {
+				return nil
+			}
+
+			err = x.err
+
+		case *SourceError:
+			if x == nil {
+				return nil
+			}
+
+			if _, joined := joinBranches(x.err); joined {
+				return x
+			}
+
+			if !x.adopted {
+				return nil
+			}
+
+			err = x.err
+
+		default:
+			return nil
+		}
+	}
 }
 
 // joinBranches returns the errors err unwraps to when err is a join of
@@ -395,8 +432,9 @@ func trees(kids []positioned) []ErrorTree {
 // a binding through Errors alone, which add no text, reads as that
 // binding does. A child behind a wrapper that adds text of its own, such
 // as [fmt.Errorf], carries the position inside that text, so it comes
-// through as it is, name included. A child that binds a join has no
-// text and gives its place to its branches, which keep the name of their
+// through as it is, name included. A child that binds a join, or wraps
+// such a binding through Errors that add nothing, has no text and gives
+// its place to the branches of the join, which keep the name of their
 // source when named is set or when the join is bound to another source.
 func boundChildren(bound *SourceError, named bool) []positioned {
 	var kids []positioned
@@ -404,8 +442,9 @@ func boundChildren(bound *SourceError, named bool) []positioned {
 	for _, child := range bound.Errors() {
 		// The branches sit beside the other children, so they sort by
 		// position among them rather than under a node of their own.
-		if _, joined := joinBranches(child.Unwrap()); joined {
-			kids = append(kids, boundChildren(child, named || child.Source() != bound.Source())...)
+		joined := joinBinding(child)
+		if joined != nil {
+			kids = append(kids, boundChildren(joined, named || joined.Source() != bound.Source())...)
 
 			continue
 		}
