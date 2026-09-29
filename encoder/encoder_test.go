@@ -105,6 +105,17 @@ func (failWriter) Write([]byte) (int, error) {
 	return 0, errWrite
 }
 
+// countingMarshaler counts the calls to its MarshalYAML method.
+type countingMarshaler struct {
+	calls *int
+}
+
+func (m countingMarshaler) MarshalYAML() (any, error) {
+	*m.calls++
+
+	return "x", nil
+}
+
 func TestEncoder_Encode_writeError(t *testing.T) {
 	t.Parallel()
 
@@ -115,6 +126,14 @@ func TestEncoder_Encode_writeError(t *testing.T) {
 
 	err = enc.Encode(map[string]int{"b": 2})
 	require.ErrorIs(t, err, errWrite, "a later Encode reports the same error")
+
+	err = enc.Encode(make(chan int))
+	require.ErrorIs(t, err, errWrite, "a value go-yaml cannot encode reports the write error")
+
+	calls := 0
+	err = enc.Encode(countingMarshaler{calls: &calls})
+	require.ErrorIs(t, err, errWrite)
+	assert.Zero(t, calls, "Encode runs no marshaler after a refused write")
 
 	err = enc.Close()
 	require.ErrorIs(t, err, errWrite, "Close reports the write error")

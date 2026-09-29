@@ -111,9 +111,17 @@ func New(w io.Writer, opts ...Option) *Encoder {
 
 // Encode encodes v as YAML and writes it to the underlying writer. A write
 // the writer refuses is an error, and every later call returns that same
-// error without writing.
+// error without encoding v.
 func (e *Encoder) Encode(v any) error {
-	err := e.e.Encode(v)
+	// After a refused write, v never reaches the go-yaml encoder, so its
+	// marshalers do not run and an encoding error cannot hide the write
+	// error.
+	err := e.writeErr()
+	if err != nil {
+		return err
+	}
+
+	err = e.e.Encode(v)
 	if err != nil {
 		return err //nolint:wrapcheck // Return the original error.
 	}
