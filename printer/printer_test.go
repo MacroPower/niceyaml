@@ -1939,6 +1939,22 @@ func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 			styled: true,
 			want:   []string{"k:", "abcdefge\u0301", "xyz"},
 		},
+		"combining accent after a space at a break": {
+			input: "k: aaaa \u0301bbbb",
+			width: 6,
+			want:  []string{"k:", "aaaa", "\u0301bbbb"},
+		},
+		"combining accent after a space at a break styled": {
+			input:  "k: aaaa \u0301bbbb",
+			width:  6,
+			styled: true,
+			want:   []string{"k:", "aaaa", "\u0301bbbb"},
+		},
+		"keycap mark after a space at a break": {
+			input: "k: aaaa \u20e3bbbb",
+			width: 6,
+			want:  []string{"k:", "aaaa", "\u20e3bbbb"},
+		},
 		"decomposed accent before a run of breakpoints": {
 			input: "k: abbaé//----/x",
 			width: 5,
