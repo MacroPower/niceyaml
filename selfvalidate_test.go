@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -864,8 +865,9 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		// An alias key reports the content of its anchor, and a block
 		// scalar key reports its content rather than its indicator.
 		type named struct {
-			M map[string]item  `yaml:"m"`
-			F map[float64]item `yaml:"f"`
+			M map[string]item    `yaml:"m"`
+			F map[float64]item   `yaml:"f"`
+			T map[time.Time]item `yaml:"t"`
 		}
 
 		namedTcs := map[string]struct {
@@ -891,6 +893,14 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"block scalar": {
 				input: "m:\n  ? |-\n    n\n  : {price: -1}\n",
 				want:  "4:13: $.m.n.price: negative price",
+			},
+			"time with an offset of whole hours": {
+				input: "t:\n  2024-01-01T00:00:00+05:00: {price: -1}\n",
+				want:  "2:38: $.t.'2024-01-01T00:00:00+05:00'.price: negative price",
+			},
+			"time with an offset of part of an hour": {
+				input: "t:\n  2024-01-01T00:00:00+05:30: {price: -1}\n",
+				want:  "2:38: $.t.'2024-01-01T00:00:00+05:30'.price: negative price",
 			},
 		}
 
@@ -1145,6 +1155,34 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				}
 			})
 		}
+	})
+
+	t.Run("time keys of one instant and zone report no position", func(t *testing.T) {
+		t.Parallel()
+
+		// Each key decodes to its own location, so the map holds both,
+		// and no name tells them apart.
+		dd := yamltest.FirstDocument(t, stringtest.Input(`
+			2024-01-01T00:00:00+05:30: {price: -1}
+			2024-01-01T00:00:00.0+05:30: {price: -2}
+		`))
+
+		_, err := dd.Decode[map[time.Time]item](t.Context())
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		var got []string
+
+		for _, child := range bound.Errors() {
+			got = append(got, child.Error())
+		}
+
+		assert.Equal(t, []string{
+			"$.'2024-01-01 00:00:00 +0530 +0530'.price: negative price",
+			"$.'2024-01-01 00:00:00 +0530 +0530'.price: negative price",
+		}, got)
 	})
 
 	t.Run("a key below a wide map reports the text the document spells it with", func(t *testing.T) {

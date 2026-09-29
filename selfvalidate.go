@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/goccy/go-yaml"
@@ -411,22 +412,25 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 		}
 
 		entries := make([]entry, 0, v.Len())
-		nans := 0
+		shared := map[any]int{}
 
 		for iter := v.MapRange(); iter.Next(); {
 			key := iter.Key()
-			if k, _ := nameKey(key); k == (nanKey{}) {
-				nans++
+			if k, ok := nameKey(key); ok {
+				shared[k]++
 			}
 
 			entries = append(entries, entry{key: key, value: iter.Value()})
 		}
 
-		// The names cannot tell several NaN keys apart, so none of them
-		// takes the text of a document key. Their paths then resolve to
-		// no node, and no error points at the line of another entry.
-		if nans > 1 {
-			delete(names, nanKey{})
+		// The names cannot tell apart several keys that [nameKey] gives
+		// one value, such as several NaN keys, so none of them takes the
+		// text of a document key. Their paths then resolve to no node,
+		// and no error points at the line of another entry.
+		for k, n := range shared {
+			if n > 1 {
+				delete(names, k)
+			}
 		}
 
 		for i := range entries {
@@ -909,9 +913,24 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 // itself included, and so finds no entry under its own value.
 type nanKey struct{}
 
+// timeKey stands in names for a [time.Time] key. A [time.Time] holds a
+// pointer to its location, and a decode of an offset such as +05:30
+// makes a new location each time, so the key in the map equals no key
+// that decodes from the same text. The fields together form the key in
+// names.
+//
+//nolint:unused // The fields tell the keys of names apart.
+type timeKey struct {
+	zone   string
+	sec    int64
+	nsec   int
+	offset int
+}
+
 // nameKey returns the value names holds the text of key under: [nanKey]
-// for a float NaN, alone or behind an interface, or else the value of
-// key itself. The bool result is false for a key that cannot key a map.
+// for a float NaN and [timeKey] for a [time.Time], alone or behind an
+// interface, or else the value of key itself. The bool result is false
+// for a key that cannot key a map.
 func nameKey(key reflect.Value) (any, bool) {
 	if !key.Comparable() {
 		return nil, false
@@ -924,6 +943,12 @@ func nameKey(key reflect.Value) (any, bool) {
 
 	if v.CanFloat() && math.IsNaN(v.Float()) {
 		return nanKey{}, true
+	}
+
+	if tm, ok := reflect.TypeAssert[time.Time](v); ok {
+		zone, offset := tm.Zone()
+
+		return timeKey{zone: zone, sec: tm.Unix(), nsec: tm.Nanosecond(), offset: offset}, true
 	}
 
 	return key.Interface(), true
