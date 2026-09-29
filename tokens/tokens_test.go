@@ -53,6 +53,38 @@ func TestTokenize_TabIndentation(t *testing.T) {
 	assert.True(t, strings.HasSuffix(tks[len(tks)-1].Origin, "\n"), "last origin %q", tks[len(tks)-1].Origin)
 }
 
+func TestTokenize_TabSwallowsEnd(t *testing.T) {
+	t.Parallel()
+
+	// When a tab used as indentation opens the file, the lexer's invalid
+	// token can swallow the rest of the text. The token keeps the
+	// whitespace the lexer gave it, and the whitespace after the swallowed
+	// text follows it.
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"sequence entry":       {input: "\t-", want: "\t"},
+		"mapping value":        {input: "\t:", want: "\t"},
+		"line ending":          {input: "\t-\n", want: "\t\n"},
+		"blank line":           {input: "\t-\n\n", want: "\t\n\n"},
+		"trailing space":       {input: "\t- ", want: "\t "},
+		"space before the tab": {input: " \t-", want: " \t"},
+		"crlf after two tabs":  {input: "\t\t-\r\n", want: "\t\t\r\n"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			require.Len(t, tks, 1)
+			assert.Equal(t, token.InvalidType, tks[0].Type)
+			assert.Equal(t, tc.want, tks[0].Origin)
+		})
+	}
+}
+
 func TestTokenize_NumericEscape(t *testing.T) {
 	t.Parallel()
 

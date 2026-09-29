@@ -111,13 +111,18 @@ func Tokenize(src string) token.Tokens {
 	// the part the tokens before it do not already hold. A token that ends
 	// in more line breaks than the source does sits in front of text the
 	// lexer dropped, such as a lone "!" that ends the file, and it keeps
-	// the Origin it came with.
+	// the Origin it came with. So does the invalid tab token that opens a
+	// source and swallows the rest of its text, such as a "-" or ":" that
+	// ends the file, and the whitespace after that text follows it.
 	last := tks[len(tks)-1]
 
 	text := strings.TrimRight(last.Origin, " \t\r\n")
 	tail := src[len(strings.TrimRight(src, " \t\r\n")):]
 
-	var held string
+	var (
+		held      string
+		swallowed bool
+	)
 
 	if text == "" {
 		var before strings.Builder
@@ -127,11 +132,17 @@ func Tokenize(src string) token.Tokens {
 		}
 
 		joined := before.String()
-		held = joined[len(strings.TrimRight(joined, " \t\r\n")):]
+		covered := strings.TrimRight(joined, " \t\r\n")
+		held = joined[len(covered):]
+		swallowed = covered == "" && len(tail) < len(src)
 	}
 
 	rest, ok := strings.CutPrefix(tail, held)
-	if ok && lineend.CountBreaks(rest) >= lineend.CountBreaks(last.Origin[len(text):]) {
+
+	switch {
+	case swallowed:
+		last.Origin += tail
+	case ok && lineend.CountBreaks(rest) >= lineend.CountBreaks(last.Origin[len(text):]):
 		last.Origin = text + rest
 	}
 
