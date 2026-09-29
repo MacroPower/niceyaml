@@ -13,6 +13,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -357,7 +358,7 @@ func (p Path) wildcard() bool {
 // placeholder scalar [tokens.Tokenize] makes for a source of whitespace
 // alone.
 func hasContent(body ast.Node) bool {
-	if isNilNode(body) {
+	if astnode.IsNil(body) {
 		return false
 	}
 

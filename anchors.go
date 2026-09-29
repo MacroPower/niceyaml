@@ -12,6 +12,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -277,7 +278,7 @@ type nodeReplacer map[ast.Node]ast.Node
 
 // Visit implements [ast.Visitor].
 func (r nodeReplacer) Visit(node ast.Node) ast.Visitor {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return nil
 	}
 
@@ -631,7 +632,7 @@ type nodeCollector []ast.Node
 
 // Visit implements [ast.Visitor].
 func (c *nodeCollector) Visit(node ast.Node) ast.Visitor {
-	if isNilNode(node) || node.Type() == ast.CommentType {
+	if astnode.IsNil(node) || node.Type() == ast.CommentType {
 		return nil
 	}
 
@@ -856,7 +857,7 @@ type anchorNames struct {
 
 // Visit implements [ast.Visitor].
 func (a *anchorNames) Visit(node ast.Node) ast.Visitor {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return nil
 	}
 
@@ -889,7 +890,7 @@ func nodeName(node ast.Node) (string, bool) {
 // nodeToken returns the token of node, or nil for a nil node, including
 // a typed nil a hand-built tree may hold.
 func nodeToken(node ast.Node) *token.Token {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return nil
 	}
 

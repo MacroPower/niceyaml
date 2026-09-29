@@ -1,12 +1,11 @@
 package aliasing
 
 import (
-	"reflect"
-
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -73,7 +72,7 @@ func excessiveRead(n *niceyaml.Node, mode readMode) bool {
 
 // holdsAlias reports whether node or any node below it is an alias.
 func holdsAlias(node ast.Node) bool {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return false
 	}
 
@@ -90,7 +89,7 @@ type aliasFinder bool
 
 // Visit implements [ast.Visitor].
 func (f *aliasFinder) Visit(node ast.Node) ast.Visitor {
-	if bool(*f) || isNilNode(node) {
+	if bool(*f) || astnode.IsNil(node) {
 		return nil
 	}
 
@@ -159,7 +158,7 @@ type treeCounter struct {
 // count adds its nodes to distinct and the nodes its aliases repeat to
 // aliased.
 func (c *treeCounter) count(node ast.Node, top bool, mode readMode) int {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return 0
 	}
 
@@ -223,7 +222,7 @@ func (c *treeCounter) entry(entry *ast.MappingValueNode, top bool, mode readMode
 // so for a key that decodes to neither a string nor a number, which is a
 // mapping or a sequence, or an alias to one or to a !!binary scalar.
 func (c *treeCounter) keyAsText(key ast.Node) bool {
-	if isNilNode(key) {
+	if astnode.IsNil(key) {
 		return false
 	}
 
@@ -231,7 +230,7 @@ func (c *treeCounter) keyAsText(key ast.Node) bool {
 		return true
 	}
 
-	alias, ok := contentNode(key).(*ast.AliasNode)
+	alias, ok := astnode.Content(key).(*ast.AliasNode)
 	if !ok {
 		return false
 	}
@@ -276,7 +275,7 @@ func tagMode(tag *ast.TagNode, mode readMode) readMode {
 // that alias in full. The content of an anchor on a scalar counts as
 // text, since an alias to it may copy that text.
 func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool, mode readMode) int {
-	if _, ok := contentNode(anchor.Value).(*ast.AliasNode); ok {
+	if _, ok := astnode.Content(anchor.Value).(*ast.AliasNode); ok {
 		return c.count(anchor.Value, top, mode)
 	}
 
@@ -333,7 +332,7 @@ func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 func textSize(node ast.Node) int {
 	size := 0
 
-	switch n := contentNode(node).(type) {
+	switch n := astnode.Content(node).(type) {
 	case *ast.StringNode:
 		size = len(n.Value)
 
@@ -354,40 +353,10 @@ func textSize(node ast.Node) int {
 // isCollection reports whether node holds a mapping or a sequence under
 // its anchors and tags.
 func isCollection(node ast.Node) bool {
-	switch contentNode(node).(type) {
+	switch astnode.Content(node).(type) {
 	case *ast.MappingNode, *ast.MappingValueNode, *ast.SequenceNode:
 		return true
 	default:
 		return false
 	}
-}
-
-// contentNode looks through the nodes that wrap a value, so the counter
-// sees the mapping or sequence behind a document, an anchor, a tag, or
-// the `?` of an explicit key. It returns nil for a nil node, including a
-// typed nil a tree built by hand may hold where the parser always puts a
-// node.
-func contentNode(node ast.Node) ast.Node {
-	for !isNilNode(node) {
-		switch n := node.(type) {
-		case *ast.DocumentNode:
-			node = n.Body
-		case *ast.AnchorNode:
-			node = n.Value
-		case *ast.TagNode:
-			node = n.Value
-		case *ast.MappingKeyNode:
-			node = n.Value
-		default:
-			return node
-		}
-	}
-
-	return nil
-}
-
-// isNilNode reports whether node is nil, including a typed nil a tree
-// built by hand may hold behind a non-nil interface.
-func isNilNode(node ast.Node) bool {
-	return node == nil || reflect.ValueOf(node).IsNil()
 }

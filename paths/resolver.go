@@ -5,6 +5,8 @@ import (
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
+
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
 )
 
 // Resolver resolves paths in one document. [NewResolver] binds each alias
@@ -46,7 +48,7 @@ func (r *Resolver) Node(p Path) (ast.Node, error) {
 
 	// A tree built by hand may hold a nil where the parser always puts a
 	// node, and a path that reaches one selects nothing.
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return nil, fmt.Errorf("resolve %s: %w", p, ErrNotFound)
 	}
 
@@ -82,7 +84,7 @@ func (r *Resolver) Matches(p Path) ([]Match, error) {
 
 		// A tree built by hand may hold a nil where the parser always
 		// puts a node, and a nil is nothing to list.
-		if isNilNode(node) {
+		if astnode.IsNil(node) {
 			continue
 		}
 

@@ -17,6 +17,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -476,14 +477,14 @@ func sourcePath(root ast.Node, idx *memberIndex, segments []jsonschema.Segment) 
 }
 
 // deref returns the content under node. It looks through what
-// [contentNode] looks through and follows each alias through r. It
+// [astnode.Content] looks through and follows each alias through r. It
 // returns nil for an alias that does not resolve, and for an alias it
 // reaches again, which leads back to itself through a tag.
 func deref(r *paths.Resolver, node ast.Node) ast.Node {
 	var followed []*ast.AliasNode
 
 	for {
-		node = contentNode(node)
+		node = astnode.Content(node)
 
 		alias, ok := node.(*ast.AliasNode)
 		if !ok || alias == nil {
@@ -510,7 +511,7 @@ func deref(r *paths.Resolver, node ast.Node) ast.Node {
 // tree built by hand may hold a typed nil where the parser always puts a
 // node, which holds no element either.
 func elementNode(node ast.Node, index int) ast.Node {
-	seq, ok := contentNode(node).(*ast.SequenceNode)
+	seq, ok := astnode.Content(node).(*ast.SequenceNode)
 	if !ok || seq == nil || index < 0 || index >= len(seq.Values) {
 		return nil
 	}
@@ -582,7 +583,7 @@ type memberNode struct {
 // leaves out every member before it rather than hold one the alias may
 // have replaced.
 func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
-	node = contentNode(node)
+	node = astnode.Content(node)
 
 	if table, ok := idx.members[node]; ok {
 		return table
@@ -622,7 +623,7 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 			ok   bool
 		)
 
-		if _, isAlias := contentNode(member.Key).(*ast.AliasNode); isAlias {
+		if _, isAlias := astnode.Content(member.Key).(*ast.AliasNode); isAlias {
 			key, name, ok = aliasKeyName(idx.resolver, member.Key)
 			if !ok {
 				table.complete = false
@@ -698,7 +699,7 @@ func (idx *memberIndex) spellings(members []*ast.MappingValueNode) map[string]bo
 
 		var key ast.Node = member.Key
 
-		if _, isAlias := contentNode(key).(*ast.AliasNode); isAlias {
+		if _, isAlias := astnode.Content(key).(*ast.AliasNode); isAlias {
 			key, _, _ = aliasKeyName(idx.resolver, member.Key)
 		}
 
@@ -778,7 +779,7 @@ func keptMembers(node ast.Node) map[string]ast.Node {
 // for any other node. A tree built by hand may hold a typed nil where the
 // parser always puts a node, which holds no member either.
 func mappingMembers(node ast.Node) []*ast.MappingValueNode {
-	switch n := contentNode(node).(type) {
+	switch n := astnode.Content(node).(type) {
 	case *ast.MappingNode:
 		if n != nil {
 			return n.Values
@@ -804,7 +805,7 @@ func mappingMembers(node ast.Node) []*ast.MappingValueNode {
 // a key the decoder cannot read on its own, such as an alias. A nil key,
 // including a typed nil a tree built by hand may hold, has no name.
 func decodedKey(key ast.MapKeyNode) (string, bool) {
-	if _, ok := contentNode(key).(ast.ScalarNode); !ok || isMergeKey(key) {
+	if _, ok := astnode.Content(key).(ast.ScalarNode); !ok || isMergeKey(key) {
 		return "", false
 	}
 
@@ -826,7 +827,7 @@ func decodedKey(key ast.MapKeyNode) (string, bool) {
 // spelling. A key with no content, with no token, or with empty token
 // text has no spelling.
 func sourceKey(key ast.Node) (string, bool) {
-	switch k := contentNode(key).(type) {
+	switch k := astnode.Content(key).(type) {
 	case nil:
 		return "", false
 	case *ast.StringNode:
@@ -848,41 +849,11 @@ func sourceKey(key ast.Node) (string, bool) {
 	}
 }
 
-// contentNode looks through the nodes that wrap a value, so the walk sees
-// the mapping or sequence behind a document, an anchor, or a tag. A tree
-// built by hand may hold a typed nil where the parser always puts a node.
-// Such a node holds no content, so contentNode returns nil for it,
-// whether it wraps a value or is one.
-func contentNode(node ast.Node) ast.Node {
-	for !isNilNode(node) {
-		switch n := node.(type) {
-		case *ast.DocumentNode:
-			node = n.Body
-		case *ast.AnchorNode:
-			node = n.Value
-		case *ast.TagNode:
-			node = n.Value
-		case *ast.MappingKeyNode:
-			node = n.Value
-		default:
-			return node
-		}
-	}
-
-	return nil
-}
-
-// isNilNode reports whether node is nil, including a typed nil behind a
-// non-nil interface.
-func isNilNode(node ast.Node) bool {
-	return node == nil || reflect.ValueOf(node).IsNil()
-}
-
 // isMergeKey reports whether key is a `<<` merge key, looking through the
 // `?` indicator, anchors, and tags. A nil key, including a typed nil, is
 // not a merge key.
 func isMergeKey(key ast.Node) bool {
-	_, ok := contentNode(key).(*ast.MergeKeyNode)
+	_, ok := astnode.Content(key).(*ast.MergeKeyNode)
 
 	return ok
 }
@@ -1044,7 +1015,7 @@ func (w *normalizer) node() ast.Node {
 // member returns the value node that [keptMembers] finds for name in the
 // mapping node holds, or nil when it finds none.
 func (w *normalizer) member(node ast.Node, name string) ast.Node {
-	node = contentNode(node)
+	node = astnode.Content(node)
 
 	members, ok := w.members[node]
 	if !ok {
@@ -1085,7 +1056,7 @@ func timestampText(t time.Time, node ast.Node) string {
 // hand may hold a typed nil where the parser always puts a node, which
 // holds no text.
 func stringText(node ast.Node) (string, bool) {
-	switch n := contentNode(node).(type) {
+	switch n := astnode.Content(node).(type) {
 	case *ast.StringNode:
 		if n != nil {
 			return n.Value, true

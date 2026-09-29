@@ -16,6 +16,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/internal/segment"
@@ -656,7 +657,7 @@ type tokenCollector map[*token.Token]struct{}
 
 // Visit implements [ast.Visitor].
 func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return nil
 	}
 
@@ -992,17 +993,11 @@ func (n *Node) lastContentLine(tk *token.Token) (int, bool) {
 	return last, found
 }
 
-// isNilNode reports whether node is nil, including a typed nil a
-// hand-built tree may hold behind a non-nil interface.
-func isNilNode(node ast.Node) bool {
-	return node == nil || reflect.ValueOf(node).IsNil()
-}
-
 // tokenBounds returns the tokens under node with the lowest and the
 // highest offset, comments included, each in walk order, or nil when no
 // token under node carries a position.
 func tokenBounds(node ast.Node) (token.Tokens, token.Tokens) {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return nil, nil
 	}
 
@@ -1016,7 +1011,7 @@ func tokenBounds(node ast.Node) (token.Tokens, token.Tokens) {
 // contentStart returns the token with the lowest offset under node that
 // is not a comment, or nil when no such token carries a position.
 func contentStart(node ast.Node) *token.Token {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return nil
 	}
 
@@ -1042,7 +1037,7 @@ type boundsFinder struct {
 
 // Visit implements [ast.Visitor].
 func (b *boundsFinder) Visit(node ast.Node) ast.Visitor {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return nil
 	}
 
@@ -1666,7 +1661,7 @@ func decodeTarget(v any, node ast.Node) any {
 		node = anchor.Value
 	}
 
-	if isNilNode(node) || node.Type() == ast.NullType {
+	if astnode.IsNil(node) || node.Type() == ast.NullType {
 		return v
 	}
 
@@ -1772,7 +1767,7 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 // value's own UnmarshalYAML, an ended context, or a rejection
 // [decodeWithRecover] already bound. So does any error for a nil scope.
 func (n *Node) rejection(err error, scope ast.Node) error {
-	if err == nil || isNilNode(scope) || errors.Is(err, ErrDecodeRejected) ||
+	if err == nil || astnode.IsNil(scope) || errors.Is(err, ErrDecodeRejected) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
@@ -1816,13 +1811,13 @@ func decodeView(node ast.Node) ast.Node {
 // viewOf returns the [decodeView] of node, and whether it differs from
 // node.
 func viewOf(node ast.Node) (ast.Node, bool) {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return node, false
 	}
 
 	switch n := node.(type) {
 	case *ast.AliasNode:
-		if isNilNode(n.Value) || n.Value.GetToken() == nil {
+		if astnode.IsNil(n.Value) || n.Value.GetToken() == nil {
 			return n, false
 		}
 
@@ -2098,7 +2093,7 @@ func isTaggedNull(node ast.Node) bool {
 		return false
 
 	default:
-		return isNilNode(tag.Value) || tag.Value.Type() == ast.NullType
+		return astnode.IsNil(tag.Value) || tag.Value.Type() == ast.NullType
 	}
 }
 

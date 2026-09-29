@@ -3,12 +3,13 @@ package paths
 import (
 	"fmt"
 	"maps"
-	"reflect"
 	"slices"
 	"sync"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
+
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
 )
 
 // match is one node a path resolved to. The entry field holds the mapping
@@ -245,7 +246,7 @@ type aliasBinder struct {
 // It returns nil for a nil node, including a typed nil a hand-built tree may
 // hold, so Walk stops rather than reading the fields behind it.
 func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return nil
 	}
 
@@ -341,7 +342,7 @@ func (b *aliasBinder) findSources(
 	find = func(node ast.Node, inline, top bool) {
 		var followed []*ast.AliasNode
 
-		for !isNilNode(node) {
+		for !astnode.IsNil(node) {
 			switch n := node.(type) {
 			case *ast.AnchorNode:
 				b.owners[n.Value] = n
@@ -525,7 +526,7 @@ type anchorReader struct {
 // hand-built tree may hold, and for an alias, whose content the merge
 // records nothing from.
 func (r *anchorReader) Visit(node ast.Node) ast.Visitor {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return nil
 	}
 
@@ -587,7 +588,7 @@ func (b *aliasBinder) walkOpen(mapping *ast.MappingNode) {
 // anchoredMapping returns the mapping an anchor's content holds, looking
 // through tags, or nil when the content is not a mapping.
 func anchoredMapping(content ast.Node) *ast.MappingNode {
-	for !isNilNode(content) {
+	for !astnode.IsNil(content) {
 		switch n := content.(type) {
 		case *ast.TagNode:
 			content = n.Value
@@ -627,7 +628,7 @@ func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
 		}
 
 		tag, ok := content.(*ast.TagNode)
-		if !ok || isNilNode(content) {
+		if !ok || astnode.IsNil(content) {
 			return content, nil
 		}
 
@@ -642,7 +643,7 @@ func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
 // tree may hold, and returns it.
 func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.Node, error) {
 	for {
-		if isNilNode(node) {
+		if astnode.IsNil(node) {
 			return node, nil
 		}
 
@@ -758,7 +759,7 @@ func uniqueMatches(matches []match) []match {
 // select.
 func (r *resolver) apply(seg segment, m match) ([]match, error) {
 	content, err := r.unwrap(m.node)
-	if err != nil || isNilNode(content) {
+	if err != nil || astnode.IsNil(content) {
 		return nil, err
 	}
 
@@ -856,7 +857,7 @@ func (r *resolver) lookup(
 // skips a nil node, including a typed nil.
 func (r *resolver) mergeSources(value ast.Node) ([]*ast.MappingNode, error) {
 	content, err := r.unwrap(value)
-	if err != nil || isNilNode(content) {
+	if err != nil || astnode.IsNil(content) {
 		return nil, err
 	}
 
@@ -917,13 +918,13 @@ func (r *resolver) recurse(matches []match, name string) ([]match, error) {
 
 		contents[i] = content
 
-		if !isNilNode(content) {
+		if !astnode.IsNil(content) {
 			w.starts[content] = append(w.starts[content], i)
 		}
 	}
 
 	for i, m := range matches {
-		if w.skip[i] || isNilNode(contents[i]) {
+		if w.skip[i] || astnode.IsNil(contents[i]) {
 			continue
 		}
 
@@ -1002,7 +1003,7 @@ type recursiveWalk struct {
 // all. A merge key repeats only another merge key, so a real key whose
 // text is `<<` and a merge key in one mapping each keep their entries.
 func (w *recursiveWalk) descend(node ast.Node) {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return
 	}
 
@@ -1114,7 +1115,7 @@ func keyContent(key ast.MapKeyNode) ast.Node {
 	var node ast.Node = key
 
 	for {
-		if isNilNode(node) {
+		if astnode.IsNil(node) {
 			return nil
 		}
 
@@ -1152,7 +1153,7 @@ func (r *resolver) keyName(key ast.MapKeyNode) string {
 
 	if alias, ok := content.(*ast.AliasNode); ok {
 		target, err := r.unwrap(alias)
-		if err != nil || isNilNode(target) {
+		if err != nil || astnode.IsNil(target) {
 			return ""
 		}
 
@@ -1184,16 +1185,10 @@ func (r *resolver) keyName(key ast.MapKeyNode) string {
 	}
 }
 
-// isNilNode reports whether node is nil, including a typed nil a
-// hand-built tree may hold behind a non-nil interface.
-func isNilNode(node ast.Node) bool {
-	return node == nil || reflect.ValueOf(node).IsNil()
-}
-
 // nodeToken returns the token of node, or nil when node has none. A nil
 // node, including a typed nil a hand-built tree may hold, has no token.
 func nodeToken(node ast.Node) *token.Token {
-	if isNilNode(node) {
+	if astnode.IsNil(node) {
 		return nil
 	}
 
@@ -1208,7 +1203,7 @@ func nodeToken(node ast.Node) *token.Token {
 // tree may hold, has no token.
 func firstToken(node ast.Node) *token.Token {
 	for {
-		if isNilNode(node) {
+		if astnode.IsNil(node) {
 			return nil
 		}
 
