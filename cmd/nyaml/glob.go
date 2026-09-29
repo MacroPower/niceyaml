@@ -167,12 +167,48 @@ func containsGlobChars(s string) bool {
 	return strings.ContainsAny(s, "*?[{")
 }
 
-// fileKey groups the files [expandPaths] has seen by what one file shows
-// through any of its names. Two files with one key can still differ, so
-// the key only narrows the files [os.SameFile] compares.
-type fileKey struct {
-	Size    int64
-	ModTime int64
+// fileID identifies a file by its device and inode numbers, in that
+// order. One file shows the same numbers through every name, even while
+// a writer changes its content.
+type fileID [2]uint64
+
+// fileSet holds the files [expandPaths] has added. The zero value is an
+// empty set.
+type fileSet struct {
+	ids   map[fileID]bool
+	infos []os.FileInfo
+}
+
+// add adds the file that info describes and reports whether the set
+// lacked it.
+func (s *fileSet) add(info os.FileInfo) bool {
+	id, ok := fileIdentity(info)
+	if !ok {
+		// Without the numbers, add compares the file with every file the
+		// set holds.
+		seen := slices.ContainsFunc(s.infos, func(other os.FileInfo) bool {
+			return os.SameFile(other, info)
+		})
+		if seen {
+			return false
+		}
+
+		s.infos = append(s.infos, info)
+
+		return true
+	}
+
+	if s.ids[id] {
+		return false
+	}
+
+	if s.ids == nil {
+		s.ids = make(map[fileID]bool)
+	}
+
+	s.ids[id] = true
+
+	return true
 }
 
 // expandPaths expands arguments containing glob patterns into a list of
@@ -192,7 +228,7 @@ type fileKey struct {
 func expandPaths(args ...string) ([]string, error) {
 	var (
 		result    []string
-		seenFiles = make(map[fileKey][]os.FileInfo)
+		seenFiles fileSet
 		seenNames = make(map[string]bool)
 	)
 
@@ -204,24 +240,11 @@ func expandPaths(args ...string) ([]string, error) {
 		// symlinked directory before it, while the OS steps up from the
 		// directory the link leads to, so two different files could look
 		// like one.
-		//
-		// One file shows the same size and modification time through
-		// every name, so add compares a file only with the files that
-		// share both. That keeps a large glob from comparing each match
-		// with every match before it.
 		info, err := os.Stat(path)
 		if err == nil {
-			key := fileKey{Size: info.Size(), ModTime: info.ModTime().UnixNano()}
-
-			seen := slices.ContainsFunc(seenFiles[key], func(other os.FileInfo) bool {
-				return os.SameFile(other, info)
-			})
-			if seen {
-				return
+			if seenFiles.add(info) {
+				result = append(result, path)
 			}
-
-			seenFiles[key] = append(seenFiles[key], info)
-			result = append(result, path)
 
 			return
 		}

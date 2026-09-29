@@ -300,6 +300,76 @@ func TestExpandPathsSymlinks(t *testing.T) {
 	}
 }
 
+func TestFileSet(t *testing.T) {
+	t.Parallel()
+
+	mtime := time.Date(2024, 1, 2, 3, 4, 5, 6, time.UTC)
+
+	tcs := map[string]struct {
+		// The second func changes the file at first, or creates another
+		// file, and returns the name to add next.
+		second func(t *testing.T, first string) string
+		want   bool
+	}{
+		"same file": {
+			second: func(_ *testing.T, first string) string {
+				return first
+			},
+			want: false,
+		},
+		"same file changed between stats": {
+			second: func(t *testing.T, first string) string {
+				t.Helper()
+
+				f, err := os.OpenFile(first, os.O_APPEND|os.O_WRONLY, 0)
+				require.NoError(t, err)
+
+				_, err = f.WriteString("b: 2\n")
+				require.NoError(t, err)
+				require.NoError(t, f.Close())
+
+				later := mtime.Add(time.Hour)
+				require.NoError(t, os.Chtimes(first, later, later))
+
+				return first
+			},
+			want: false,
+		},
+		"other file with the same size and modification time": {
+			second: func(t *testing.T, first string) string {
+				t.Helper()
+
+				other := filepath.Join(filepath.Dir(first), "b.yaml")
+				require.NoError(t, os.WriteFile(other, []byte("a: 1\n"), 0o644))
+				require.NoError(t, os.Chtimes(other, mtime, mtime))
+
+				return other
+			},
+			want: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			first := filepath.Join(t.TempDir(), "a.yaml")
+			require.NoError(t, os.WriteFile(first, []byte("a: 1\n"), 0o644))
+			require.NoError(t, os.Chtimes(first, mtime, mtime))
+
+			var set fileSet
+
+			info, err := os.Stat(first)
+			require.NoError(t, err)
+			require.True(t, set.add(info))
+
+			info, err = os.Stat(tc.second(t, first))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, set.add(info))
+		})
+	}
+}
+
 func TestGlob(t *testing.T) {
 	t.Parallel()
 
