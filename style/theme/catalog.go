@@ -1504,6 +1504,7 @@ var palettes = map[string]palette{
 			kind.Name:            "#cd00cd",
 			kind.NameTag:         "#cdcd00",
 			kind.Punctuation:     "#3399cc",
+			kind.UI:              "#7f7f7f",
 		},
 	},
 	"vs": {

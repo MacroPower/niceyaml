@@ -775,6 +775,32 @@ func TestPalette_HeadingsReadable(t *testing.T) {
 	}
 }
 
+func TestPalette_ChromeReadable(t *testing.T) {
+	t.Parallel()
+
+	// Several themes dim their line numbers on purpose, so the floor sits
+	// far below the WCAG minimum and only rejects chrome that vanishes
+	// into the background, such as navy on black.
+	const floor = 1.4
+
+	for _, th := range theme.Builtin().All() {
+		t.Run(th.Name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := th.Styles()
+
+			bg := styles.Style(kind.Text).GetBackground()
+			if _, unset := bg.(lipgloss.NoColor); unset {
+				t.Skip("theme leaves the background to the terminal")
+			}
+
+			fg := styles.Style(kind.UI).GetForeground()
+			assert.GreaterOrEqual(t, contrast(fg, bg), floor,
+				"chrome draws %s on %s", hexOf(fg), hexOf(bg))
+		})
+	}
+}
+
 func TestBuiltin_ChromeIgnoresCommentOverride(t *testing.T) {
 	t.Parallel()
 
