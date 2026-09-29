@@ -1120,6 +1120,10 @@ func TestSource_Content(t *testing.T) {
 				": value",
 			),
 		},
+		"text after a block scalar header at the end": {
+			input: "key: |abc",
+			want:  "key: |abc",
+		},
 	}
 
 	for name, tc := range tcs {

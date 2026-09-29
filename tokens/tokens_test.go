@@ -903,6 +903,17 @@ func TestTokenize_RestoresDroppedWhitespace(t *testing.T) {
 			input: "- |ab\n- |ab",
 			want:  "- |ab\n\n- |ab",
 		},
+		"text after a block scalar header at the end": {
+			// The lexer reads the last rune of the text a second time,
+			// and Tokenize drops the token it makes of it.
+			input: "key: |abc",
+		},
+		"text after a folded scalar header at the end": {
+			input: "a: >x y",
+		},
+		"alias after a block scalar header at the end": {
+			input: "|*x",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2179,6 +2190,8 @@ var positionCorpus = map[string]string{
 	"bad block header at the end":                    "key: >foo",
 	"bad block header and comment at the end":        "k: |ab # c",
 	"bad block header in a later entry":              "- |ab\n- |ab",
+	"text after a block scalar header at the end":    "key: |abc",
+	"text after a block scalar header in a sequence": "- |ab\n- |cd",
 }
 
 func TestTokenize_PositionsLocateText(t *testing.T) {
