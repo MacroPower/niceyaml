@@ -2186,6 +2186,7 @@ func TestSource_Bind_RoutesDocuments(t *testing.T) {
 		"middle of several headers":          {input: headers, line: 1, want: 1},
 		"last of several headers":            {input: headers, line: 2, want: 2},
 		"line of an empty source":            {input: "", line: 0, want: -1},
+		"commented end marker of a document": {input: "a: 1\n... # e\nk: v\n", line: 1, want: 0},
 	}
 
 	for name, tc := range tcs {

@@ -630,6 +630,20 @@ func TestDocument_Preamble(t *testing.T) {
 			input: "...\n---\na: 1\n",
 			want:  []doc{{preamble: "...\n---\n", content: "a: 1\n"}},
 		},
+		"comment on the line of an end marker": {
+			input: "a: 1\n... # e\nk: v\n",
+			want: []doc{
+				{content: "a: 1\n... # e\n"},
+				{content: "k: v\n"},
+			},
+		},
+		"comment on the line of an end marker above a header": {
+			input: "a: 1\n... # e\n---\nk: v\n",
+			want: []doc{
+				{content: "a: 1\n... # e\n"},
+				{preamble: "---\n", content: "k: v\n"},
+			},
+		},
 		"comment between documents": {
 			input: "a: 1\n...\n# note\n---\nb: 2\n",
 			want: []doc{
@@ -860,6 +874,13 @@ func TestDocument_Span(t *testing.T) {
 		"comment preamble": {
 			input: "# license\n---\na: 1\n",
 			want:  []position.Span{position.NewSpan(0, 3)},
+		},
+		"comment on the line of an end marker": {
+			input: "a: 1\n... # e\nk: v\n",
+			want: []position.Span{
+				position.NewSpan(0, 2),
+				position.NewSpan(2, 3),
+			},
 		},
 		"comment between documents": {
 			input: "a: 1\n...\n# note\n---\nb: 2\n",

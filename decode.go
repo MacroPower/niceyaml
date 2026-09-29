@@ -235,6 +235,7 @@ func MultiValidator(validators ...Validator) Validator {
 func newDocuments(src *Source, file *ast.File) []*Node {
 	docs := foldPreambles(file.Docs, alignDocumentTokens(file, src.Tokens()))
 	liftHeaderComments(docs)
+	returnSameLineComments(docs)
 
 	groups := make([]token.Tokens, len(docs))
 	for i, doc := range docs {
@@ -321,6 +322,56 @@ func liftHeaderComments(docs []*document) {
 
 		docs[i].tokens = slices.Concat(prev.tokens[cut:], docs[i].tokens)
 		prev.tokens = prev.tokens[:cut]
+	}
+}
+
+// returnSameLineComments moves the comments that open the tokens of each
+// document back to the document above when they sit on the line of its
+// last token. A comment on the line of a "..." marker starts the token
+// group after the marker. A document below without a "---" header would
+// take that comment, and the line of the marker with it, while a document
+// with a header leaves the comment with the marker. The function runs
+// after liftHeaderComments, which moves only comments on lines of their
+// own.
+func returnSameLineComments(docs []*document) {
+	for i := 1; i < len(docs); i++ {
+		prev, cur := docs[i-1], docs[i]
+
+		// The lexer gives an empty block scalar a token with no text at the
+		// position of the token after it, so the last token that holds
+		// text sets the line.
+		var last *token.Token
+
+		for _, tk := range slices.Backward(prev.tokens) {
+			if tk != nil && tk.Position != nil && strings.Trim(tk.Origin, " \t\r\n") != "" {
+				last = tk
+
+				break
+			}
+		}
+
+		if last == nil {
+			continue
+		}
+
+		end := last.Position.Line + lineend.CountBreaks(strings.Trim(last.Origin, " \t\r\n"))
+
+		cut := 0
+		for cut < len(cur.tokens) {
+			tk := cur.tokens[cut]
+			if tk == nil || tk.Type != token.CommentType || tk.Position == nil || tk.Position.Line != end {
+				break
+			}
+
+			cut++
+		}
+
+		if cut == 0 {
+			continue
+		}
+
+		prev.tokens = slices.Concat(prev.tokens, cur.tokens[:cut])
+		cur.tokens = cur.tokens[cut:]
 	}
 }
 
