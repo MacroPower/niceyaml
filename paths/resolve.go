@@ -59,7 +59,7 @@ func (m match) key() match {
 		return m.with(m.node, nil, seg)
 	}
 
-	if key := keyContent(m.entry.Key); key != nil {
+	if key := astnode.Content(m.entry.Key); key != nil {
 		return m.with(key, nil, seg, -1)
 	}
 
@@ -1294,36 +1294,11 @@ func (w *recursiveWalk) hold() ([]segment, []int) {
 	return slices.Clip(w.segs), slices.Clip(w.order)
 }
 
-// keyContent looks through the `?` indicator of an explicit key and the
-// anchors and tags on a key to the node that carries the key itself. It
-// returns nil for a nil key, including a typed nil a hand-built tree may
-// hold at any step.
-func keyContent(key ast.Node) ast.Node {
-	node := key
-
-	for {
-		if astnode.IsNil(node) {
-			return nil
-		}
-
-		switch n := node.(type) {
-		case *ast.MappingKeyNode:
-			node = n.Value
-		case *ast.AnchorNode:
-			node = n.Value
-		case *ast.TagNode:
-			node = n.Value
-		default:
-			return node
-		}
-	}
-}
-
 // isMergeKey reports whether key is a `<<` merge key, looking through the `?`
 // indicator, anchors, and tags. A nil key, including a typed nil a hand-built
 // tree may hold at any step, is not a merge key.
 func isMergeKey(key ast.MapKeyNode) bool {
-	_, ok := keyContent(key).(*ast.MergeKeyNode)
+	_, ok := astnode.Content(key).(*ast.MergeKeyNode)
 
 	return ok
 }
@@ -1337,7 +1312,7 @@ func isMergeKey(key ast.MapKeyNode) bool {
 // and for an alias key with no anchor before it or one that leads back to
 // itself. Such a key has the empty name.
 func (r *resolver) keyName(key ast.Node) (string, bool) {
-	content := keyContent(key)
+	content := astnode.Content(key)
 
 	if alias, ok := content.(*ast.AliasNode); ok {
 		target, err := r.unwrap(alias)
@@ -1405,7 +1380,7 @@ func firstToken(node ast.Node) *token.Token {
 				return n.GetToken()
 			}
 
-			key := keyContent(n.Values[0].Key)
+			key := astnode.Content(n.Values[0].Key)
 			if key == nil {
 				return n.Values[0].GetToken()
 			}
