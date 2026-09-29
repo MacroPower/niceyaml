@@ -1926,6 +1926,41 @@ func TestView_Hunks(t *testing.T) {
 		}
 	})
 
+	t.Run("hunks of hunks match hunks of the view", func(t *testing.T) {
+		t.Parallel()
+
+		// The hunks at context 2 hold a separator above line g, a context
+		// line, which must not count as decoration when narrowed.
+		ten := stringtest.Input(`
+			a: 1
+			b: 2
+			c: 3
+			d: 4
+			e: 5
+			f: 6
+			g: 7
+			h: 8
+			i: 9
+			j: 10
+		`)
+		view := newTestView(t, ten, 10)
+		view.Annotate(1, line.Annotation{Content: "x", Placement: line.Below})
+		view.Annotate(8, line.Annotation{Content: "y", Placement: line.Below})
+
+		hunks := view.Hunks(2)
+		require.Equal(t, []int{6}, separators(hunks))
+
+		for _, context := range []int{0, 1, 2} {
+			want := view.Hunks(context)
+			got := hunks.Hunks(context)
+
+			assert.Equal(t, want.String(), got.String(), "context %d", context)
+			assert.Equal(t, separators(want), separators(got), "context %d", context)
+		}
+
+		assert.Equal(t, []int{6}, separators(hunks), "narrowing leaves the hunks as they were")
+	})
+
 	t.Run("renders as an excerpt", func(t *testing.T) {
 		t.Parallel()
 

@@ -395,13 +395,17 @@ func (v *View) Slice(spans ...position.Span) *View {
 // with context lines of unchanged content on either side of each one,
 // so a caller that marks a document shows the marked parts alone. A
 // decorated line carries a [Flag] other than [FlagDefault], an [Overlay],
-// or an [Annotation]. Decorated lines whose context windows overlap or
-// touch share a hunk, and distant ones become separate hunks. Every line
-// of the result that follows a line the result skips carries a "..."
-// annotation of kind [kind.UISeparator] above it, so the separator marks
-// the gap between two hunks and any gap the View itself skips inside
-// one. A negative context shows the decorated lines alone, as 0 does,
-// and a View with no decorated line yields a View that holds no line.
+// or an [Annotation] of a kind other than [kind.UISeparator]. Decorated
+// lines whose context windows overlap or touch share a hunk, and distant
+// ones become separate hunks. Every line of the result that follows a
+// line the result skips carries a "..." annotation of kind
+// [kind.UISeparator] above it, so the separator marks the gap between
+// two hunks and any gap the View itself skips inside one. The result
+// drops every separator the View carries before adding its own, so the
+// hunks of hunks match the hunks of the original View at the same or a
+// smaller context. A negative context shows the decorated lines alone,
+// as 0 does, and a View with no decorated line yields a View that holds
+// no line.
 //
 // The result is a [View.Slice], so the lines keep their indices, a
 // range from the content applies to it, and decoration added after
@@ -434,6 +438,21 @@ func (v *View) Hunks(context int) *View {
 
 	hunks := v.Slice(spans...)
 
+	// A View that is itself hunks carries the separators of its own gaps,
+	// which need not match the gaps of the result, so the result drops
+	// them and adds its own. The slice owns its annotations, so the
+	// deletion reaches nothing in the View.
+	for i, anns := range hunks.annotations {
+		kept := slices.DeleteFunc(anns, isSeparator)
+		if len(kept) == 0 {
+			delete(hunks.annotations, i)
+
+			continue
+		}
+
+		hunks.annotations[i] = kept
+	}
+
 	// The separator goes above every line the hunks hold that follows a
 	// line they skip. That is the first line of each hunk after the
 	// first, and the first line after a gap the View itself skips inside
@@ -464,9 +483,16 @@ func (v *View) Hunks(context int) *View {
 }
 
 // decorated reports whether line i carries a flag, an overlay, or an
-// annotation.
+// annotation other than a separator [View.Hunks] adds.
 func (v *View) decorated(i int) bool {
-	return v.Flag(i) != FlagDefault || len(v.Overlays(i)) > 0 || len(v.Annotations(i)) > 0
+	return v.Flag(i) != FlagDefault || len(v.Overlays(i)) > 0 ||
+		slices.ContainsFunc(v.Annotations(i), func(a Annotation) bool { return !isSeparator(a) })
+}
+
+// isSeparator reports whether a is an annotation of kind
+// [kind.UISeparator], such as the one [View.Hunks] adds above a gap.
+func isSeparator(a Annotation) bool {
+	return a.Kind == kind.UISeparator
 }
 
 // String renders the [View] as plain text: each line behind its number,
