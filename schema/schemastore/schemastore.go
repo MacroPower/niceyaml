@@ -566,7 +566,8 @@ func (s *Store) fetch(ctx context.Context) ([]CatalogEntry, error) {
 
 // filterAndNormalizeEntries filters catalog entries to only those with
 // supported patterns that pass the configured filter. It also normalizes each
-// entry's FileMatch to contain only supported patterns (YAML and JSON files).
+// entry's FileMatch to drop the patterns that can match only a format known
+// not to be YAML, as [filterSupportedPatterns] decides.
 func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry {
 	entries := make([]CatalogEntry, 0, len(schemas))
 
@@ -590,7 +591,7 @@ func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry
 			continue
 		}
 
-		// Only consider YAML and JSON patterns.
+		// Drop patterns that can match only a format known not to be YAML.
 		supportedPatterns := filterSupportedPatterns(entry.FileMatch)
 		if len(supportedPatterns) == 0 {
 			continue
