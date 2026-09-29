@@ -179,6 +179,15 @@ func TestTokenize_NumericEscape(t *testing.T) {
 		"open scalar cut at a document end": {
 			input: `a: "x\x41` + "\n...\nb: 1\n",
 		},
+		"open scalar cut at a header after an escape code that holds its next rune": {
+			input: `a: "caf\u00e9e` + "\n---\nb: 1\n",
+		},
+		"open scalar cut at a header after a hex escape that holds its next rune": {
+			input: `a: "x\x4ee` + "\n---\nb: 1\n",
+		},
+		"open scalar cut at a header after a surrogate pair": {
+			input: `a: "\uD83D\uDE00D` + "\n---\nb: 1\n",
+		},
 		"open scalar cut at a header in a CRLF file": {
 			input: `a: "caf\u00e9` + "\r\n---\r\nb: 1\r\n",
 		},
@@ -2151,6 +2160,7 @@ var positionCorpus = map[string]string{
 	"escape cut short on a later line":               "a: \"x\n  \\u1\"\n",
 	"open scalar cut at a header":                    "a: \"caf\\u00e9\n---\nb: 1\n",
 	"open scalar cut at a document end":              "a: \"x\\x41\n...\nb: 1\n",
+	"open scalar cut after a code holding a rune":    "a: \"caf\\u00e9e\n---\nb: 1\n",
 	"unknown escape after an escape":                 "name: \"caf\\u00e9\n  x \\d\"\nnext: 1\n",
 	"header after a cut escape":                      "a: \"\\x1\"\n---\nb: 1\n",
 	"comment after a shortened header":               "\"\t1\n---\n# c\n",

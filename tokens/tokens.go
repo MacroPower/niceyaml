@@ -847,16 +847,17 @@ func (p *positioner) restoreQuoted(tk *token.Token, start int) bool {
 // [cutQuoted] reports. The opening quote sits at rune index start. The
 // lexer drops the code of a "\x", "\u", or "\U" escape from the Origin, so
 // the source holds the text of the Origin in order with those codes and
-// whitespace between its runes. The scalar ends where the source first
-// holds the text of the token after tk past the text of the Origin, with
-// only escape codes and whitespace in between. An escape takes the runes
-// [positioner.escapeWidth] counts whatever they are, so its code may hold
-// the closing quote or other runes that are not hex digits. The Origin
-// takes the source's runes up to there in place of its text and keeps the
-// whitespace around it. When the token after tk opens with the backslash
-// that ends tk, as [cutAtEscape] reports, tk gives that backslash up and
-// ends with the whitespace in front of it, as [positioner.dropBackslash]
-// leaves it.
+// whitespace between its runes. It steps over each such code, so a rune of
+// the Origin never matches a rune inside one. The scalar ends where the
+// source first holds the text of the token after tk past the text of the
+// Origin, with only escape codes and whitespace in between. An escape
+// takes the runes [positioner.escapeWidth] counts whatever they are, so
+// its code may hold the closing quote or other runes that are not hex
+// digits. The Origin takes the source's runes up to there in place of its
+// text and keeps the whitespace around it. When the token after tk opens
+// with the backslash that ends tk, as [cutAtEscape] reports, tk gives that
+// backslash up and ends with the whitespace in front of it, as
+// [positioner.dropBackslash] leaves it.
 //
 // The lexer puts the Offset of tk at the fault, where the token after tk
 // starts, so restoreCut takes delta from the token after tk. It reports
@@ -893,6 +894,10 @@ func (p *positioner) restoreCut(tk *token.Token, start int) bool {
 
 		if bound == len(p.src) {
 			return false
+		}
+
+		if r == '\\' {
+			bound = min(bound+p.droppedWidth(bound), len(p.src)-1)
 		}
 
 		bound++
@@ -956,13 +961,17 @@ func (p *positioner) closingQuote(start int) (int, bool) {
 // the lexer reads as part of the escape. A "\x" escape takes the letter
 // and two hex digits when the source holds them, "\u" takes the letter and
 // four, "\U" the letter and eight, and any other escape takes the one rune
-// after the backslash.
+// after the backslash. A "\u" escape of a high surrogate that a "\u"
+// escape of a low surrogate follows takes both, as the lexer reads the
+// pair as one escape.
 func (p *positioner) escapeWidth(i int) int {
 	switch {
 	case i+1 >= len(p.src):
 		return 0
 	case p.src[i+1] == 'x' && i+3 < len(p.src):
 		return 3
+	case p.src[i+1] == 'u' && p.surrogatePair(i):
+		return 11
 	case p.src[i+1] == 'u':
 		return 5
 	case p.src[i+1] == 'U':
@@ -970,6 +979,54 @@ func (p *positioner) escapeWidth(i int) int {
 	default:
 		return 1
 	}
+}
+
+// droppedWidth returns how many runes after the backslash at rune index i
+// the lexer drops from the Origin. It drops the code of a "\x", "\u", or
+// "\U" escape, the letter included, and keeps the rune after the backslash
+// of any other escape. A "\x" escape the source ends too soon for keeps
+// its letter too.
+func (p *positioner) droppedWidth(i int) int {
+	w := p.escapeWidth(i)
+	if w > 1 && strings.ContainsRune("xuU", p.src[i+1]) {
+		return w
+	}
+
+	return 0
+}
+
+// surrogatePair reports whether the "\u" escape at rune index i holds a
+// high surrogate and a "\u" escape of a low surrogate follows it. It reads
+// the hex digits the way the lexer does.
+func (p *positioner) surrogatePair(i int) bool {
+	if i+11 >= len(p.src) || p.src[i+6] != '\\' || p.src[i+7] != 'u' {
+		return false
+	}
+
+	high := hexValue(p.src[i+2 : i+6])
+	low := hexValue(p.src[i+8 : i+12])
+
+	return high >= 0xD800 && high <= 0xDBFF && low >= 0xDC00 && low <= 0xDFFF
+}
+
+// hexValue returns the number the hex digits rs spell. Like the lexer, it
+// reads a rune that is not a hex digit by its distance from '0'.
+func hexValue(rs []rune) int {
+	n := 0
+	for _, r := range rs {
+		d := int(r - '0')
+
+		switch {
+		case r >= 'A' && r <= 'F':
+			d = int(r-'A') + 10
+		case r >= 'a' && r <= 'f':
+			d = int(r-'a') + 10
+		}
+
+		n = n<<4 + d
+	}
+
+	return n
 }
 
 // restoreGap gives tk the line breaks and indentation the lexer dropped
