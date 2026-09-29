@@ -406,6 +406,15 @@ func TestPalette_ErrorAndDiffBadgesReadable(t *testing.T) {
 		"gruvbox-light deleted":    {theme: "gruvbox-light", kind: kind.GenericDeleted},
 		"evergarden error mark":    {theme: "evergarden", kind: kind.GenericError},
 		"gruvbox error mark":       {theme: "gruvbox", kind: kind.GenericError},
+		"monokai error mark":       {theme: "monokai", kind: kind.GenericError},
+		"monokailight error mark":  {theme: "monokailight", kind: kind.GenericError},
+		"rpgle error mark":         {theme: "rpgle", kind: kind.GenericError},
+		"solarized-dark256 error mark": {
+			theme: "solarized-dark256",
+			kind:  kind.GenericError,
+		},
+		"witchhazel error mark": {theme: "witchhazel", kind: kind.GenericError},
+		"xcode-dark error mark": {theme: "xcode-dark", kind: kind.GenericError},
 	}
 
 	for name, tc := range tests {

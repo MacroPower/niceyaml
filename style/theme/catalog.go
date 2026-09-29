@@ -853,7 +853,7 @@ var palettes = map[string]palette{
 		Tokens: map[kind.Kind]string{
 			kind.Comment:         "#75715e",
 			kind.GenericDeleted:  "#f92672",
-			kind.GenericError:    "#960050 bg:#1e0010",
+			kind.GenericError:    "#1e0010 bg:#f92672",
 			kind.GenericInserted: "#a6e22e",
 			kind.LiteralBoolean:  "#66d9ef",
 			kind.LiteralNumber:   "#ae81ff",
@@ -874,7 +874,6 @@ var palettes = map[string]palette{
 		Error:  "#cb2431",
 		Tokens: map[kind.Kind]string{
 			kind.Comment:        "#75715e",
-			kind.GenericError:   "#960050 bg:#1e0010",
 			kind.LiteralBoolean: "#00a8c8",
 			kind.LiteralNumber:  "#ae81ff",
 			kind.LiteralString:  "#d88200",
@@ -1228,7 +1227,6 @@ var palettes = map[string]palette{
 		Error:  "#cb2431",
 		Tokens: map[kind.Kind]string{
 			kind.Comment:        "#75715e",
-			kind.GenericError:   "#960050 bg:#1e0010",
 			kind.LiteralBoolean: "#00a8c8",
 			kind.LiteralNumber:  "#ae81ff",
 			kind.LiteralString:  "#d88200",
@@ -1291,7 +1289,7 @@ var palettes = map[string]palette{
 		Tokens: map[kind.Kind]string{
 			kind.Comment:         "#4e4e4e",
 			kind.GenericDeleted:  "#af0000",
-			kind.GenericError:    "bold #af0000",
+			kind.GenericError:    "bold #ffffd7 bg:#af0000",
 			kind.GenericInserted: "#5f8700",
 			kind.LiteralBoolean:  "#d75f00",
 			kind.LiteralNumber:   "#00afaf",
@@ -1564,7 +1562,7 @@ var palettes = map[string]palette{
 		Tokens: map[kind.Kind]string{
 			kind.Comment:         "#b0bec5",
 			kind.GenericDeleted:  "#f92672",
-			kind.GenericError:    "#960050 bg:#1e0010",
+			kind.GenericError:    "#1e0010 bg:#f92672",
 			kind.GenericInserted: "#a6e22e",
 			kind.LiteralBoolean:  "#c2ffdf",
 			kind.LiteralNumber:   "#c5a3ff",
@@ -1604,7 +1602,7 @@ var palettes = map[string]palette{
 		Error:  "#ff0000",
 		Tokens: map[kind.Kind]string{
 			kind.Comment:        "#6c7986",
-			kind.GenericError:   "#960050",
+			kind.GenericError:   "#000000 bg:#ff0000",
 			kind.LiteralBoolean: "#fc5fa3",
 			kind.LiteralNumber:  "#d0bf69",
 			kind.LiteralString:  "#fc6a5d",
