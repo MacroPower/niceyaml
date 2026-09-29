@@ -776,6 +776,35 @@ func TestSourcePath_TypedNilNode(t *testing.T) {
 			segments: []jsonschema.Segment{{Key: "16"}},
 			want:     "$.16",
 		},
+		"nil member": {
+			root:     &ast.MappingNode{Values: []*ast.MappingValueNode{nil}},
+			segments: []jsonschema.Segment{{Key: "a"}},
+			want:     "$.a",
+		},
+		"typed-nil string key": {
+			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
+				Key:   (*ast.StringNode)(nil),
+				Value: &ast.StringNode{Value: "x"},
+			}}},
+			segments: []jsonschema.Segment{{Key: "a"}},
+			want:     "$.a",
+		},
+		"typed-nil integer key": {
+			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
+				Key:   (*ast.IntegerNode)(nil),
+				Value: &ast.StringNode{Value: "x"},
+			}}},
+			segments: []jsonschema.Segment{{Key: "a"}},
+			want:     "$.a",
+		},
+		"typed-nil key behind a tag": {
+			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
+				Key:   &ast.TagNode{Value: (*ast.StringNode)(nil)},
+				Value: &ast.StringNode{Value: "x"},
+			}}},
+			segments: []jsonschema.Segment{{Key: "a"}},
+			want:     "$.a",
+		},
 		"no tree": {
 			root:     nil,
 			segments: []jsonschema.Segment{{Key: "items"}, {Index: 1, IsIndex: true}, {Key: "16"}},
@@ -1233,6 +1262,47 @@ func TestNormalizeJSON(t *testing.T) {
 			require.Equal(t, tc.want, got)
 			assert.Equal(t, tc.input(), input)
 			assertCopiedOnChange(t, input, got)
+		})
+	}
+}
+
+func TestNormalizeJSON_TypedNilNode(t *testing.T) {
+	t.Parallel()
+
+	// The lookup of the scalar a timestamp came from reads a tree built by
+	// hand that holds a nil member or a typed-nil key without panicking.
+	// A nil member sets nothing. A typed-nil key has no name, so it may
+	// set a member of any name, and a timestamp under a member before it
+	// becomes a date-time.
+	date := &ast.TagNode{Value: &ast.StringNode{Value: "2001-12-14"}}
+	stamp := time.Date(2001, 12, 14, 0, 0, 0, 0, time.UTC)
+
+	tcs := map[string]struct {
+		root *ast.MappingNode
+		want string
+	}{
+		"nil member": {
+			root: &ast.MappingNode{Values: []*ast.MappingValueNode{
+				{Key: &ast.StringNode{Value: "a"}, Value: date},
+				nil,
+			}},
+			want: "2001-12-14",
+		},
+		"typed-nil key": {
+			root: &ast.MappingNode{Values: []*ast.MappingValueNode{
+				{Key: &ast.StringNode{Value: "a"}, Value: date},
+				{Key: (*ast.StringNode)(nil), Value: date},
+			}},
+			want: "2001-12-14T00:00:00Z",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := schema.NormalizeJSON(map[string]any{"a": stamp}, tc.root)
+			assert.Equal(t, map[string]any{"a": tc.want}, got)
 		})
 	}
 }

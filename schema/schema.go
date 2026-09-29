@@ -594,7 +594,12 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 	var spelled map[string]bool
 
 	for _, member := range slices.Backward(members) {
-		if member.Key != nil && member.Key.IsMergeKey() {
+		// A tree built by hand may hold a nil member, which sets nothing.
+		if member == nil {
+			continue
+		}
+
+		if isMergeKey(member.Key) {
 			if spelled == nil {
 				spelled = idx.spellings(members)
 			}
@@ -684,6 +689,10 @@ func (idx *memberIndex) spellings(members []*ast.MappingValueNode) map[string]bo
 	spelled := map[string]bool{}
 
 	for _, member := range members {
+		if member == nil {
+			continue
+		}
+
 		var key ast.Node = member.Key
 
 		if _, isAlias := contentNode(key).(*ast.AliasNode); isAlias {
@@ -744,6 +753,11 @@ func keptMembers(node ast.Node) map[string]ast.Node {
 	kept := map[string]ast.Node{}
 
 	for _, member := range slices.Backward(mappingMembers(node)) {
+		// A tree built by hand may hold a nil member, which sets nothing.
+		if member == nil {
+			continue
+		}
+
 		name, ok := decodedKey(member.Key)
 		if !ok {
 			break
@@ -784,9 +798,10 @@ func mappingMembers(node ast.Node) []*ast.MappingValueNode {
 // value. A null key reads as null in every spelling. A merge key has no
 // name, because the decoder folds its value into the mapping. A key that
 // is no scalar, such as a sequence, has no name either, and neither does
-// a key the decoder cannot read on its own, such as an alias.
+// a key the decoder cannot read on its own, such as an alias. A nil key,
+// including a typed nil a tree built by hand may hold, has no name.
 func decodedKey(key ast.MapKeyNode) (string, bool) {
-	if _, ok := contentNode(key).(ast.ScalarNode); !ok || key.IsMergeKey() {
+	if _, ok := contentNode(key).(ast.ScalarNode); !ok || isMergeKey(key) {
 		return "", false
 	}
 
@@ -831,44 +846,42 @@ func sourceKey(key ast.Node) (string, bool) {
 }
 
 // contentNode looks through the nodes that wrap a value, so the walk sees
-// the mapping or sequence behind a document, an anchor, or a tag.
+// the mapping or sequence behind a document, an anchor, or a tag. A tree
+// built by hand may hold a typed nil where the parser always puts a node.
+// Such a node holds no content, so contentNode returns nil for it,
+// whether it wraps a value or is one.
 func contentNode(node ast.Node) ast.Node {
-	// A tree built by hand may hold a typed nil where the parser always
-	// puts a node; such a wrapper holds no content and comes back as it is.
-	for {
+	for !isNilNode(node) {
 		switch n := node.(type) {
 		case *ast.DocumentNode:
-			if n == nil {
-				return nil
-			}
-
 			node = n.Body
-
 		case *ast.AnchorNode:
-			if n == nil {
-				return nil
-			}
-
 			node = n.Value
-
 		case *ast.TagNode:
-			if n == nil {
-				return nil
-			}
-
 			node = n.Value
-
 		case *ast.MappingKeyNode:
-			if n == nil {
-				return nil
-			}
-
 			node = n.Value
-
 		default:
 			return node
 		}
 	}
+
+	return nil
+}
+
+// isNilNode reports whether node is nil, including a typed nil behind a
+// non-nil interface.
+func isNilNode(node ast.Node) bool {
+	return node == nil || reflect.ValueOf(node).IsNil()
+}
+
+// isMergeKey reports whether key is a `<<` merge key, looking through the
+// `?` indicator, anchors, and tags. A nil key, including a typed nil, is
+// not a merge key.
+func isMergeKey(key ast.Node) bool {
+	_, ok := contentNode(key).(*ast.MergeKeyNode)
+
+	return ok
 }
 
 // normalizeJSON converts the YAML-native values a decode produces that the
