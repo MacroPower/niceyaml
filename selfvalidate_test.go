@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -120,6 +121,53 @@ type Counted struct {
 
 func (c *Counted) Validate() error {
 	c.runs++
+
+	return nil
+}
+
+// Positive decodes itself from an integer and rejects a negative one,
+// for embedding.
+type Positive int
+
+func (p *Positive) UnmarshalYAML(b []byte) error {
+	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		return fmt.Errorf("positive: %w", err)
+	}
+
+	*p = Positive(n)
+
+	return nil
+}
+
+func (p Positive) Validate() error {
+	if p < 0 {
+		return niceyaml.NewError("negative")
+	}
+
+	return nil
+}
+
+// PositiveWrapper decodes itself through the Positive it embeds.
+type PositiveWrapper struct {
+	Positive
+}
+
+// PositivePointer decodes itself through the Positive it points to, so
+// it holds no Positive until a document sets it.
+type PositivePointer struct {
+	*Positive
+}
+
+// declaredDecode gets Validate from the Positive it embeds, but decodes
+// itself through an UnmarshalYAML of its own that leaves Positive
+// negative.
+type declaredDecode struct {
+	Positive
+}
+
+func (d *declaredDecode) UnmarshalYAML([]byte) error {
+	d.Positive = -1
 
 	return nil
 }
@@ -510,6 +558,56 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err = dd.Decode[named](t.Context())
 		require.EqualError(t, err, "1:15: $.named.name: name required")
+	})
+
+	t.Run("an embedded field that decodes its struct validates at the struct", func(t *testing.T) {
+		t.Parallel()
+
+		type wrapped struct {
+			Positive
+		}
+
+		type parent struct {
+			Wrapped  wrapped         `yaml:"wrapped"`
+			Twice    PositiveWrapper `yaml:"twice"`
+			Pointer  PositivePointer `yaml:"pointer"`
+			Declared declaredDecode  `yaml:"declared"`
+		}
+
+		tcs := map[string]struct {
+			input string
+			err   string
+		}{
+			"embedded value": {
+				input: "wrapped: -1\n",
+				err:   "1:10: $.wrapped: negative",
+			},
+			"embedded through another embedded struct": {
+				input: "twice: -1\n",
+				err:   "1:8: $.twice: negative",
+			},
+			"nil embedded pointer": {
+				input: "wrapped: 1\n",
+			},
+			"struct that declares its own unmarshaler": {
+				input: "declared: -1\n",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := yamltest.FirstDocument(t, tc.input).Decode[parent](t.Context())
+				if tc.err == "" {
+					require.NoError(t, err)
+
+					return
+				}
+
+				require.EqualError(t, err, tc.err)
+			})
+		}
 	})
 
 	t.Run("an ignored field does not validate", func(t *testing.T) {

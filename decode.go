@@ -92,6 +92,9 @@ import (
 // at the value that owns the method. A struct does not own a Validate it
 // gets from an embedded field, so the method runs once, on that field at
 // the field's own path, and not at all when the field is nil or ignored.
+// A struct that decodes itself through an UnmarshalYAML or UnmarshalText
+// method it gets from an embedded field decodes the document into that
+// field, so the field validates at the path of the struct.
 // A check that reads state the caller fills in after the decode runs on
 // a value with that state set already through [Node.DecodeInto], which
 // keeps the fields the document does not name, and [WithSelfValidation]

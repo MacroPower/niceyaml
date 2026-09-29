@@ -36,8 +36,10 @@ import (
 // through an unmarshaler method, validates itself and nothing below it,
 // since its fields need not mirror the document and the paths under it
 // would point nowhere. So does a node of the syntax tree, which go-yaml
-// sets whole. Several errors come back joined, one per value that failed.
-// Returns nil when nothing failed.
+// sets whole. A struct that decodes itself through a method it gets from
+// an embedded field decodes the document into that field, so the field
+// validates first, at the path of the struct. Several errors come back
+// joined, one per value that failed. Returns nil when nothing failed.
 func selfValidate(ctx context.Context, v any, n *Node, opts []yaml.DecodeOption) error {
 	w := selfWalker{
 		ctx:      ctx,
@@ -180,7 +182,11 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path, shadowed map[string]
 // everything below it, and reports whether nothing under v failed. The
 // shadowed names are those [selfWalker.walk] takes.
 func (w *selfWalker) walkValue(v reflect.Value, base paths.Path, shadowed map[string]bool) bool {
-	if !decodesItself(v.Type()) && !w.children(v, base, shadowed) {
+	if !decodesItself(v.Type()) {
+		if !w.children(v, base, shadowed) {
+			return false
+		}
+	} else if i, ok := decoderField(v.Type()); ok && !w.walk(v.Field(i), base, nil) {
 		return false
 	}
 
@@ -259,6 +265,10 @@ var (
 	// The result of [implementsSelfValidator] for each type it has read,
 	// shared the same way.
 	ownsValidator sync.Map
+
+	// The result of [decoderField] for each type it has read, shared the
+	// same way, with -1 for a type that has no such field.
+	decoderFields sync.Map
 )
 
 // decodesItself reports whether go-yaml decodes a value of type t whole,
@@ -272,6 +282,69 @@ func decodesItself(t reflect.Type) bool {
 	pt := reflect.PointerTo(t)
 
 	return pt.Implements(reflect.TypeFor[ast.Node]()) || slices.ContainsFunc(unmarshalerTypes, pt.Implements)
+}
+
+// decoderField returns the index of the embedded field of t that decodes
+// t, when t is a struct that decodes itself only through an unmarshaler
+// method it gets from that field. Go-yaml then calls the method of the
+// field, which decodes the document into the field, so the field stands
+// at the path of the struct. The bool result is false when t declares
+// an unmarshaler method of its own, or when no embedded field, or more
+// than one, has an unmarshaler method.
+func decoderField(t reflect.Type) (int, bool) {
+	if cached, ok := decoderFields.Load(t); ok {
+		if i, ok := cached.(int); ok {
+			return i, i >= 0
+		}
+	}
+
+	i := findDecoderField(t)
+	decoderFields.Store(t, i)
+
+	return i, i >= 0
+}
+
+// findDecoderField returns the index [decoderField] returns, or -1 when
+// t has no such field.
+func findDecoderField(t reflect.Type) int {
+	if t.Kind() != reflect.Struct || !hasEmbedded(t) {
+		return -1
+	}
+
+	pt := reflect.PointerTo(t)
+	for _, name := range []string{"UnmarshalYAML", "UnmarshalText"} {
+		if _, ok := pt.MethodByName(name); ok && !promotesMethod(t, name) {
+			return -1
+		}
+	}
+
+	found := -1
+
+	for i := range t.NumField() {
+		field := t.Field(i)
+		if !field.Anonymous {
+			continue
+		}
+
+		// The method set of the pointer to t holds the methods of the
+		// pointer to a field that is no pointer or interface.
+		methods := field.Type
+		if methods.Kind() != reflect.Pointer && methods.Kind() != reflect.Interface {
+			methods = reflect.PointerTo(methods)
+		}
+
+		if !slices.ContainsFunc(unmarshalerTypes, methods.Implements) {
+			continue
+		}
+
+		if found >= 0 {
+			return -1
+		}
+
+		found = i
+	}
+
+	return found
 }
 
 // mayHoldValidator reports whether a value of type t can implement
@@ -308,9 +381,12 @@ func reachesValidator(t reflect.Type, seen map[reflect.Type]bool) bool {
 		return true
 	}
 
-	// The walk validates a value that decodes itself and nothing below it.
+	// The walk validates a value that decodes itself and nothing below it
+	// but the embedded field that decodes it.
 	if decodesItself(t) {
-		return false
+		i, ok := decoderField(t)
+
+		return ok && reachesValidator(t.Field(i).Type, seen)
 	}
 
 	switch t.Kind() {
@@ -531,10 +607,12 @@ func (w *selfWalker) holdsBelow(v reflect.Value) bool {
 // scanValue reports whether v, or a value below it, implements
 // [SelfValidator] where the walk would validate it. It follows the walk
 // down: through interfaces and pointers, into fields, elements, and map
-// keys and values, and not below a value that decodes itself or whose type may
-// hold no validator. The second result is false when the scan stopped at
-// a value it had already reached, whose first read decides the answer, so
-// a false first result then holds only for that scan.
+// keys and values, and not below a value whose type may hold no
+// validator. Below a value that decodes itself, it follows only the
+// embedded field that decodes it, as [decoderField] finds it. The second
+// result is false when the scan stopped at a value it had already
+// reached, whose first read decides the answer, so a false first result
+// then holds only for that scan.
 func (w *selfWalker) scanValue(v reflect.Value) (bool, bool) {
 	if !v.IsValid() || !v.CanInterface() || !mayHoldValidator(v.Type()) {
 		return false, true
@@ -609,6 +687,10 @@ func (w *selfWalker) scanSelf(v reflect.Value) (bool, bool) {
 	}
 
 	if decodesItself(v.Type()) {
+		if i, ok := decoderField(v.Type()); ok {
+			return w.scanValue(v.Field(i))
+		}
+
 		return false, true
 	}
 
@@ -667,8 +749,10 @@ func (w *selfWalker) scanChildren(v reflect.Value) (bool, bool) {
 // [SelfValidator] through a Validate of its own, on its value or its
 // pointer, as [selfWalker.validate] checks it. A struct that gets
 // Validate from an embedded field does not own it. The walk validates
-// that field at its own path, and never reaches it when the field is nil
-// or go-yaml skips it, so the struct passes the check to the field.
+// that field at its own path, or at the path of the struct when the
+// field decodes the struct, as [decoderField] finds it. The walk never
+// reaches the field when it is nil or go-yaml skips it, so the struct
+// passes the check to the field.
 func implementsSelfValidator(t reflect.Type) bool {
 	if cached, ok := ownsValidator.Load(t); ok {
 		if owns, ok := cached.(bool); ok {
@@ -676,27 +760,27 @@ func implementsSelfValidator(t reflect.Type) bool {
 		}
 	}
 
-	owns := reflect.PointerTo(t).Implements(reflect.TypeFor[SelfValidator]()) && !promotesValidate(t)
+	owns := reflect.PointerTo(t).Implements(reflect.TypeFor[SelfValidator]()) && !promotesMethod(t, "Validate")
 	ownsValidator.Store(t, owns)
 
 	return owns
 }
 
-// promotesValidate reports whether the Validate in the method set of the
-// pointer to t comes from an embedded field of t rather than from t
-// itself. Only a struct with an embedded field can promote a method. The
-// compiler gives t a wrapper for a promoted method, and marks its source
-// file as "<autogenerated>". The method set of the value comes first,
-// since the pointer holds a wrapper for a method declared on the value
-// too.
-func promotesValidate(t reflect.Type) bool {
+// promotesMethod reports whether the method of the given name in the
+// method set of the pointer to t comes from an embedded field of t
+// rather than from t itself. Only a struct with an embedded field can
+// promote a method. The compiler gives t a wrapper for a promoted
+// method, and marks its source file as "<autogenerated>". The method set
+// of the value comes first, since the pointer holds a wrapper for a
+// method declared on the value too.
+func promotesMethod(t reflect.Type, name string) bool {
 	if t.Kind() != reflect.Struct || !hasEmbedded(t) {
 		return false
 	}
 
-	method, ok := t.MethodByName("Validate")
+	method, ok := t.MethodByName(name)
 	if !ok {
-		method, ok = reflect.PointerTo(t).MethodByName("Validate")
+		method, ok = reflect.PointerTo(t).MethodByName(name)
 		if !ok {
 			return false
 		}
