@@ -64,8 +64,10 @@ const defaultHTTPTimeout = 30 * time.Second
 // Lookup tries the resolvers [WithResolvers] gave it in order, and the
 // first [Resolver] that does not report [ErrNoMatch] wins. The registry
 // caches the schemas it compiles by [Ref.Key] and consults that cache
-// before loading, so it loads and compiles each schema once however many
-// documents name it. The cache never evicts, so the registry keeps every
+// before loading, so once a schema compiles, the registry serves it to
+// every later document that names it without loading it again. A failed
+// load or compile stays out of the cache, so the next document that names
+// the Key loads it again. The cache never evicts, so the registry keeps every
 // schema it compiles for its whole lifetime, and each distinct Key adds
 // an entry, a URL that differs from another only in its query string or
 // fragment included. The registry compiles every schema with the options
@@ -498,7 +500,8 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 //	return s.ValidateValue(ctx, value)
 //
 // The zero Ref names no schema, so it is [ErrResolve]. A load that fails
-// is [ErrLoad], and a compile that fails is [ErrCompile]. When ctx ends
+// is [ErrLoad], and a compile that fails is [ErrCompile]. Schema caches
+// neither, so the next request for the Key loads again. When ctx ends
 // before the schema loads, Schema returns [ErrLoad] wrapping the context's
 // error without waiting for the load to finish.
 //

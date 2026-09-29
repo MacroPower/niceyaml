@@ -133,11 +133,13 @@
 // copy of the bytes. The registry reads a file from the working directory
 // or from the file system [WithFS] gave it, and it fetches a URL with the
 // client [WithHTTPClient] gave it. [Registry.Schema] checks its cache by
-// key before it loads and
-// compiles those bytes, so the registry loads and compiles each schema
-// once, however many documents name it. A caller that holds a Ref of its
-// own takes the compiled schema from the same cache. A resolver that picks
-// the schema from the document returns the same Refs:
+// key before it loads and compiles those bytes, so once a schema
+// compiles, the registry serves it to every later document that names it
+// without loading it again. A failed load or compile stays out of the
+// cache, so the next document that names the key loads it again. A
+// caller that holds a Ref of its own takes the compiled schema from the
+// same cache. A resolver that picks the schema from the document returns
+// the same Refs:
 //
 //	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 //	    node, err := doc.At(kindPath)
