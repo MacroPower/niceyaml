@@ -238,8 +238,15 @@ func IsPlaceholder(tk *token.Token) bool {
 // in front of the first key would therefore make it reject valid YAML. In
 // the clone of that token, each blank line in front of the text keeps only
 // its line break, and the indentation of the line the text starts on
-// stays. Every other clone keeps the Origin of its token, and every clone
-// keeps its position.
+// stays. Every other clone keeps the Origin of its token.
+//
+// Tokenize puts the content of a block scalar that holds whitespace alone
+// where the next text starts. When that text is a comment, the parser
+// would read the comment as sharing a line with the scalar and attach it
+// there. The clone of that content moves to where the token before it
+// ends, on the line after the header, as the lexer places it. An empty
+// content, such as that of a header with no lines after it, keeps its
+// position, as does every other clone.
 //
 // The parser relinks Next and Prev as it moves comment tokens, and the
 // clones take that change in place of tks. The clones link to each other
@@ -248,6 +255,11 @@ func ForParser(tks token.Tokens) token.Tokens {
 	result := make(token.Tokens, 0, len(tks))
 
 	shaped := false
+
+	// The last clone that is not a comment. A clone of whitespace alone
+	// that follows a block scalar header, with only comments between
+	// them, is the content of that scalar.
+	var lastBody *token.Token
 
 	for _, tk := range tks {
 		clone := tk.Clone()
@@ -258,6 +270,14 @@ func ForParser(tks token.Tokens) token.Tokens {
 		if !shaped && strings.Trim(clone.Origin, " \t\r\n") != "" {
 			clone.Origin = bareLeadingLines(clone.Origin)
 			shaped = true
+		}
+
+		if blockHeader(lastBody) && clone.Origin != "" && strings.Trim(clone.Origin, " \t\r\n") == "" {
+			placeAfter(clone, result[len(result)-1])
+		}
+
+		if clone.Type != token.CommentType {
+			lastBody = clone
 		}
 
 		result.Add(clone)
@@ -271,6 +291,25 @@ func ForParser(tks token.Tokens) token.Tokens {
 	}
 
 	return result
+}
+
+// blockHeader reports whether tk is the header of a literal or folded
+// block scalar.
+func blockHeader(tk *token.Token) bool {
+	return tk != nil && (tk.Type == token.LiteralType || tk.Type == token.FoldedType)
+}
+
+// placeAfter moves tk to the rune that follows the text of prev, counting
+// from the rune prev's position names.
+func placeAfter(tk, prev *token.Token) {
+	if tk.Position == nil || prev.Position == nil {
+		return
+	}
+
+	rest := strings.TrimLeft(prev.Origin, " \t\r\n")
+
+	tk.Position.Line, tk.Position.Column = advance(prev.Position.Line, prev.Position.Column, rest)
+	tk.Position.Offset = prev.Position.Offset + utf8.RuneCountInString(rest)
 }
 
 // bareLeadingLines returns origin with each blank line in front of its
