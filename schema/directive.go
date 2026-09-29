@@ -11,6 +11,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -250,7 +251,7 @@ func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Node) (Ref, er
 	// as part of the file name. [FileOrURL] splits the fragment off a URL
 	// itself.
 	path, fragment := directive.Schema, ""
-	if !isHTTPURL(path) && !isFileURL(path) {
+	if !httpfetch.IsHTTPURL(path) && !isFileURL(path) {
 		if i := strings.Index(path, "#"); i > 0 {
 			path, fragment = path[:i], path[i+1:]
 		}

@@ -528,7 +528,7 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 	// file:// URL, so the check runs before the cache. Otherwise such a
 	// URL Ref would return what a File Ref cached and fail on a registry
 	// that holds nothing for its key.
-	if ref.url && !isHTTPURL(ref.key) {
+	if ref.url && !httpfetch.IsHTTPURL(ref.key) {
 		return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.name(), errNotHTTPURL)
 	}
 
@@ -627,7 +627,7 @@ func (r *Registry) Load(ctx context.Context, ref Ref) ([]byte, error) {
 func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 	switch {
 	case ref.url:
-		if !isHTTPURL(ref.key) {
+		if !httpfetch.IsHTTPURL(ref.key) {
 			return nil, errNotHTTPURL
 		}
 
@@ -743,7 +743,7 @@ func (r *Registry) refDocument(uri string, load func() ([]byte, error)) (refDoc,
 	}
 
 	doc := refDoc{schema: s}
-	if isHTTPURL(uri) {
+	if httpfetch.IsHTTPURL(uri) {
 		doc.fileURL, doc.fileURLErr = localFileURL(data)
 	}
 
@@ -830,7 +830,7 @@ func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsons
 		var load func() ([]byte, error)
 
 		switch {
-		case isHTTPURL(uri):
+		case httpfetch.IsHTTPURL(uri):
 			uri = user.apply(uri)
 			load = func() ([]byte, error) {
 				//nolint:wrapcheck // The fetch error names the URL already.

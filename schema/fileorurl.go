@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
 
 // ErrNoBaseDir reports a relative file path given to [FileOrURL] with an
@@ -72,7 +74,7 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 func FileOrURL(baseDir, ref string) (Ref, error) {
 	// Check for an HTTP/HTTPS URL by string prefix, so a malformed URL that
 	// fails to parse does not fall through as a file path.
-	if isHTTPURL(ref) {
+	if httpfetch.IsHTTPURL(ref) {
 		return URL(ref), nil
 	}
 
@@ -121,23 +123,11 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 	return file(filepath.Join(baseDir, path))
 }
 
-// isHTTPURL reports whether ref starts with http:// or https://, in any
-// letter case.
-func isHTTPURL(ref string) bool {
-	return hasScheme(ref, "http") || hasScheme(ref, "https")
-}
-
 // isFileURL reports whether ref is a file URL, in any letter case. RFC 8089
 // allows the form without an authority, file:/path, alongside file:///path,
 // so the check is for "file:/" rather than "file://".
 func isFileURL(ref string) bool {
 	return hasPrefixFold(ref, "file:/")
-}
-
-// hasScheme reports whether ref starts with scheme followed by "://",
-// compared case-insensitively.
-func hasScheme(ref, scheme string) bool {
-	return hasPrefixFold(ref, scheme+"://")
 }
 
 // hasPrefixFold reports whether s starts with prefix, compared

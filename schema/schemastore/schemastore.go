@@ -540,7 +540,7 @@ func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry
 		// Skip entries without an HTTP or HTTPS URL, which the registry
 		// cannot fetch. A file:// URL would name a schema the registry
 		// serves only when a File Ref cached it first.
-		if !isHTTPURL(entry.URL) {
+		if !httpfetch.IsHTTPURL(entry.URL) {
 			continue
 		}
 
@@ -621,16 +621,4 @@ func canMatchYAML(pattern string) bool {
 	}
 
 	return strings.ContainsAny(base[dot+1:], "*?[")
-}
-
-// isHTTPURL reports whether rawURL starts with http:// or https://, in any
-// letter case, as a URL the registry fetches does.
-func isHTTPURL(rawURL string) bool {
-	for _, prefix := range []string{"http://", "https://"} {
-		if len(rawURL) >= len(prefix) && strings.EqualFold(rawURL[:len(prefix)], prefix) {
-			return true
-		}
-	}
-
-	return false
 }

@@ -225,3 +225,31 @@ func TestRedacted(t *testing.T) {
 		})
 	}
 }
+
+func TestIsHTTPURL(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		url  string
+		want bool
+	}{
+		"http":                 {url: "http://example.com/s.json", want: true},
+		"https":                {url: "https://example.com/s.json", want: true},
+		"upper-case scheme":    {url: "HTTPS://example.com/s.json", want: true},
+		"mixed-case scheme":    {url: "hTtP://example.com/s.json", want: true},
+		"scheme alone":         {url: "https://", want: true},
+		"file url":             {url: "file:///srv/s.json", want: false},
+		"scheme without slash": {url: "https:example.com", want: false},
+		"shorter than scheme":  {url: "http:/", want: false},
+		"relative path":        {url: "schemas/s.json", want: false},
+		"empty":                {url: "", want: false},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, httpfetch.IsHTTPURL(tc.url))
+		})
+	}
+}

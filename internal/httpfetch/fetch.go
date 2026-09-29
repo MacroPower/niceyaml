@@ -89,6 +89,20 @@ func reason(err error) error {
 	return err
 }
 
+// IsHTTPURL reports whether rawURL starts with http:// or https://, in
+// any letter case. The schema loaders fetch only such a URL, and the
+// SchemaStore catalog keeps only entries whose URL passes, so the catalog
+// hands out no URL the loaders refuse.
+func IsHTTPURL(rawURL string) bool {
+	for _, prefix := range []string{"http://", "https://"} {
+		if len(rawURL) >= len(prefix) && strings.EqualFold(rawURL[:len(prefix)], prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // Redacted returns rawURL with any password in its userinfo replaced by
 // "xxxxx", for use in messages. A string that carries no password comes
 // back unchanged, so a name that is not a URL keeps its spelling. For a
