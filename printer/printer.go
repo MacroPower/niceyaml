@@ -3,9 +3,7 @@ package printer
 import (
 	"fmt"
 	"io"
-	"math"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -438,7 +436,7 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 	}
 
 	shown := []rune(escape.Control(ctx.Content))
-	offsets := newCellOffsets(ctx.Content)
+	cellRow := cells.NewRow(ctx.Content)
 
 	// The caret row of the whole line comes from MarkerRow once, and each
 	// wrapped row takes the cells of its own columns from it. The row
@@ -470,9 +468,14 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 
 		lo = min(lo, hi)
 
-		// A mark the last row holds can land past the end of the content,
-		// so that row runs to the end of the caret row.
-		from, to := offsets.before[lo], offsets.before[hi]
+		// A row can start inside a grapheme cluster when the wrap drops
+		// the space that begins the cluster and keeps the rest, such as a
+		// combining accent. The caret row draws the whole cluster at the
+		// space, so the row takes its cells from the first cluster that
+		// starts on it. A mark the last row holds can land past the end of
+		// the content, so that row runs to the end of the caret row.
+		lo = cellRow.Next(lo)
+		from, to := cellRow.Width(lo), cellRow.Width(cellRow.Next(hi))
 		if hi == len(shown) {
 			to = len(marks)
 		}
@@ -489,7 +492,7 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 		// keeps whole on one row, so a caret that lands one cell past a
 		// row that fills the width stays beside the others.
 		rows = append(rows, AnnotationRow{
-			Col:    offsets.col(lo, from+i),
+			Col:    cellRow.Col(lo, from+i),
 			Marker: strings.TrimRight(cut[i:], " "),
 		})
 	}
@@ -499,61 +502,6 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 	}
 
 	return rows
-}
-
-// cellOffsets holds the cells the content of a line takes before each of
-// its columns, so a caller that measures many columns of one line does
-// the work once. Its before slice holds, for each column up to the end of
-// the content, the sum of [cells.Row.Cells] over the columns before it,
-// which counts a whole grapheme cluster at its first rune.
-type cellOffsets struct {
-	row    cells.Row
-	before []int
-}
-
-// newCellOffsets creates a new [cellOffsets] for content, the text of a
-// line without its line ending.
-func newCellOffsets(content string) cellOffsets {
-	row := cells.NewRow(content)
-	n := utf8.RuneCountInString(content)
-	before := make([]int, n+1)
-
-	for c := range n {
-		before[c+1] = before[c] + row.Cells(c)
-	}
-
-	return cellOffsets{row: row, before: before}
-}
-
-// width returns what [cells.Row.Width] returns for col.
-func (o cellOffsets) width(col int) int {
-	col = o.row.Start(col)
-
-	n := len(o.before) - 1
-	if col <= n {
-		return o.before[col]
-	}
-
-	return o.before[n] + min(col-n, math.MaxInt-o.before[n])
-}
-
-// col returns the first column at or after lo that starts a grapheme
-// cluster at or past cell. A cell past the end of the content maps to a
-// column past it, one column per cell.
-func (o cellOffsets) col(lo, cell int) int {
-	n := len(o.before) - 1
-	if cell > o.before[n] {
-		return n + cell - o.before[n]
-	}
-
-	// The later runes of a cluster share the offset of the next cluster,
-	// so the search can land on one of them.
-	c := lo + sort.SearchInts(o.before[lo:], cell)
-	for c < n && o.row.Start(c) != c {
-		c++
-	}
-
-	return c
 }
 
 // caretRow returns a row that marks col of content with a caret as wide
@@ -1204,10 +1152,10 @@ func (p *Printer) annotationRows(
 	lastCol := len(content) + line.MaxColPastEnd
 	out := make([][]string, max(1, len(starts)))
 
-	// Each wrapped row gets the cell offsets of its own text the first
-	// time a row of annotations sits beside it, so the work stays linear
-	// in the length of the line.
-	rowOffsets := make([]*cellOffsets, len(out))
+	// Each wrapped row gets a [cells.Row] of its own text the first time
+	// a row of annotations sits beside it, so the work stays linear in
+	// the length of the line.
+	rowCells := make([]*cells.Row, len(out))
 
 	for _, group := range anns.ByKind() {
 		rows := p.annotationFunc(AnnotationContext{
@@ -1247,12 +1195,12 @@ func (p *Printer) annotationRows(
 			// begins a grapheme cluster, the rest of the cluster starts the
 			// next row, and the padding counts the cells that rest takes
 			// alone, such as none for a combining accent.
-			if rowOffsets[j] == nil {
-				offsets := newCellOffsets(string(content[from:to]))
-				rowOffsets[j] = &offsets
+			if rowCells[j] == nil {
+				measured := cells.NewRow(string(content[from:to]))
+				rowCells[j] = &measured
 			}
 
-			pad := rowOffsets[j].width(col - from)
+			pad := rowCells[j].Width(col - from)
 			out[j] = append(out[j], p.renderAnnotationRow(row, p.styles.Style(k), pad, gutterWidth)...)
 		}
 	}

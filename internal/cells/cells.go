@@ -15,6 +15,7 @@ package cells
 
 import (
 	"math"
+	"sort"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
@@ -22,33 +23,37 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 )
 
-// Row holds the cells each rune column of one line of content takes. Its
-// methods treat a negative column as column 0.
+// Row holds the cells each rune column of one line of content takes, and
+// the cells before each column, so it measures any column in constant
+// time. Its methods treat a negative column as column 0.
 //
 // Create instances with [NewRow].
 type Row struct {
-	widths []int
+	// For each column up to the end of the content, before holds the
+	// cells the columns before it take.
+	before []int
 	starts []int
 }
 
 // NewRow creates a new [Row] for content, the text of a line without its
 // line ending.
 func NewRow(content string) Row {
-	var r Row
+	r := Row{before: []int{0}}
 
 	rest := escape.Control(content)
 
 	for rest != "" {
 		cluster, width := ansi.FirstGraphemeCluster(rest, ansi.GraphemeWidth)
-		start := len(r.widths)
+		start := len(r.starts)
 
 		for i := range utf8.RuneCountInString(cluster) {
-			r.widths = append(r.widths, 0)
-			r.starts = append(r.starts, start)
-
+			w := 0
 			if i == 0 {
-				r.widths[start] = width
+				w = width
 			}
+
+			r.before = append(r.before, r.total()+w)
+			r.starts = append(r.starts, start)
 		}
 
 		rest = rest[len(cluster):]
@@ -73,8 +78,8 @@ func (r Row) Start(col int) int {
 // of the content.
 func (r Row) Cells(col int) int {
 	col = max(0, col)
-	if col < len(r.widths) {
-		return r.widths[col]
+	if col < len(r.starts) {
+		return r.before[col+1] - r.before[col]
 	}
 
 	return 1
@@ -86,14 +91,55 @@ func (r Row) Cells(col int) int {
 // [math.MaxInt].
 func (r Row) Width(col int) int {
 	col = r.Start(col)
-
-	var width int
-
-	for _, w := range r.widths[:min(col, len(r.widths))] {
-		width += w
+	if col < len(r.before) {
+		return r.before[col]
 	}
 
-	return width + min(max(0, col-len(r.widths)), math.MaxInt-width)
+	total := r.total()
+
+	return total + min(col-len(r.starts), math.MaxInt-total)
+}
+
+// Col returns the first column at or after the cluster holding lo that
+// starts a grapheme cluster at or past cell. A cell past the end of the
+// content maps to a column past it, one column per cell. The column
+// saturates at [math.MaxInt].
+func (r Row) Col(lo, cell int) int {
+	lo = r.Start(lo)
+	n := len(r.starts)
+
+	total := r.total()
+	if cell > total {
+		return max(lo, n+min(cell-total, math.MaxInt-n))
+	}
+
+	if lo > n {
+		return lo
+	}
+
+	// The later runes of a cluster share the offset of the next cluster,
+	// so the search can land on one of them.
+	return r.Next(lo + sort.SearchInts(r.before[lo:], cell))
+}
+
+// Next returns the first column at or after col that starts a grapheme
+// cluster. A column past the end of the content starts its own cluster.
+func (r Row) Next(col int) int {
+	col = max(0, col)
+	for col < len(r.starts) && r.starts[col] != col {
+		col++
+	}
+
+	return col
+}
+
+// total returns the cells the whole content takes.
+func (r Row) total() int {
+	if len(r.before) == 0 {
+		return 0
+	}
+
+	return r.before[len(r.before)-1]
 }
 
 // TrimLastCluster returns s without its last grapheme cluster, the

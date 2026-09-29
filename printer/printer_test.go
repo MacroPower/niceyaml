@@ -826,6 +826,29 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 				"^^^^",
 			),
 		},
+		// The caret row draws the dropped space and the accent as one
+		// cluster at the space, which no row shows, so a range over
+		// either still starts its carets under the first "b".
+		"combining accent after a space at a break under a range over the space": {
+			content: "k: aaaa ́bbbb",
+			cols:    []position.Span{position.NewSpan(7, 13)},
+			width:   8,
+			want: stringtest.JoinLF(
+				"k: aaaa",
+				"́bbbb",
+				"^^^^",
+			),
+		},
+		"combining accent after a space at a break under a range over the accent": {
+			content: "k: aaaa ́bbbb",
+			cols:    []position.Span{position.NewSpan(8, 13)},
+			width:   8,
+			want: stringtest.JoinLF(
+				"k: aaaa",
+				"́bbbb",
+				"^^^^",
+			),
+		},
 		"spacing mark after a space at a break": {
 			content: "k: aaaa िbbbb",
 			cols:    []position.Span{position.NewSpan(9, 13)},
