@@ -422,7 +422,9 @@ func (b *TokenBuilder) Build() *token.Token {
 // indentation keeps the lexer's shape, which can drop a ":" indicator. A
 // raw stream from [github.com/goccy/go-yaml/lexer.Tokenize] also loses the
 // final line ending, trailing spaces, the spaces of whitespace-only lines,
-// and the letter and hex digits of a "\x", "\u", or "\U" escape.
+// and the letter and hex digits of a "\x", "\u", or "\U" escape. It
+// repeats the last rune of text that follows a block scalar header when
+// that text ends the file.
 //
 // A nil token contributes nothing rather than a placeholder such as "<nil>",
 // so the output holds only source text.
