@@ -46,6 +46,9 @@ var (
 //   - `{a,b}` matches any of the comma-separated alternatives. An
 //     alternative may hold "." and ".." elements, as in
 //     "app/{../shared,.}/*.yaml".
+//   - `\` escapes the character after it, so `\*` matches a literal `*`
+//     and `{a\,b,c}` matches "a,b" or "c". On Windows, `\` is a
+//     separator instead.
 //
 // The function returns an error when the pattern syntax is invalid.
 func glob(pattern string) ([]string, error) {
@@ -89,25 +92,49 @@ func glob(pattern string) ([]string, error) {
 // slash separators and no brace group left to expand. It may include
 // directories.
 //
-// The literal part of the pattern, before the first metacharacter, stays
-// as typed, both where the walk starts and in each match. Cleaning it as
-// text, as [doublestar.FilepathGlob] does, would drop a ".." together with
-// a symlinked directory before it, while the OS steps up from the
-// directory the link leads to.
+// The literal part of the pattern, before the first metacharacter, loses
+// its escapes and otherwise stays as typed, both where the walk starts
+// and in each match. Cleaning it as text, as [doublestar.FilepathGlob]
+// does, would drop a ".." together with a symlinked directory before it,
+// while the OS steps up from the directory the link leads to.
 func globAlternative(pattern string) ([]string, error) {
-	base, rest := doublestar.SplitPattern(pattern)
+	base, rest, literal := splitLiteral(pattern)
 
-	// The rest starts at the element holding the first metacharacter, or
-	// is the last element when the pattern holds none. A ".." as that
-	// last element names a directory, which matches no file.
-	if rest == ".." {
+	// A bare volume name such as "C:" names the current directory of that
+	// volume, while the pattern named its root.
+	if vol := filepath.VolumeName(base); vol != "" && vol == base {
+		base += "/"
+	}
+
+	prefix := base
+	switch {
+	case base == ".":
+		prefix = ""
+	case !strings.HasSuffix(base, "/"):
+		prefix = base + "/"
+	}
+
+	// Doublestar removes only the escapes of metacharacters from a
+	// pattern without one, so it would look for "a\,b.yaml" rather than
+	// "a,b.yaml". Such a pattern names one path, so the function removes
+	// every escape and looks that path up itself.
+	if literal {
+		path := filepath.FromSlash(prefix + unescape(rest))
+
+		_, err := os.Stat(path)
+		if err == nil {
+			return []string{path}, nil
+		}
+
+		// Doublestar reads a path it cannot look up as no match too.
 		return nil, nil
 	}
 
-	// The walk matches the rest through io/fs, which rejects empty, "."
-	// and ".." elements. An empty or "." element inside the rest names
-	// the directory before it, so it can go. The walk has no way to step
-	// up out of a directory a wildcard matched, so a ".." is an error.
+	// The rest starts at the element holding the first metacharacter. The
+	// walk matches it through io/fs, which rejects empty, "." and ".."
+	// elements. An empty or "." element inside the rest names the
+	// directory before it, so it can go. The walk has no way to step up
+	// out of a directory a wildcard matched, so a ".." is an error.
 	elems := strings.Split(rest, "/")
 	last := elems[len(elems)-1]
 	kept := elems[:0]
@@ -131,12 +158,6 @@ func globAlternative(pattern string) ([]string, error) {
 
 	rest = strings.Join(kept, "/")
 
-	// A bare volume name such as "C:" names the current directory of that
-	// volume, while the pattern named its root.
-	if vol := filepath.VolumeName(base); vol != "" && vol == base {
-		base += "/"
-	}
-
 	matches, err := doublestar.Glob(
 		os.DirFS(filepath.FromSlash(base)),
 		rest,
@@ -147,19 +168,61 @@ func globAlternative(pattern string) ([]string, error) {
 		return nil, err
 	}
 
-	prefix := base
-	switch {
-	case base == ".":
-		prefix = ""
-	case !strings.HasSuffix(base, "/"):
-		prefix = base + "/"
-	}
-
 	for i, match := range matches {
 		matches[i] = filepath.FromSlash(prefix + match)
 	}
 
 	return matches, nil
+}
+
+// splitLiteral splits pattern at the last "/" before its first unescaped
+// metacharacter, as [doublestar.SplitPattern] does, and reports whether
+// pattern holds no metacharacter. It returns the part before that "/"
+// with every escape removed, which is "." when no "/" comes first and "/"
+// for a lone leading one. It returns the part after that "/" as typed.
+//
+// [doublestar.SplitPattern] removes only the escapes of metacharacters,
+// so it keeps the backslash of an escaped comma, which
+// [filepaths.ExpandBraces] leaves in a brace alternative.
+func splitLiteral(pattern string) (string, string, bool) {
+	split := -1
+	literal := true
+
+	for i := 0; i < len(pattern) && literal; i++ {
+		switch pattern[i] {
+		case '\\':
+			i++ // Skip the escaped character.
+		case '/':
+			split = i
+		case '*', '?', '[', '{':
+			literal = false
+		}
+	}
+
+	switch split {
+	case -1:
+		return ".", pattern, literal
+	case 0:
+		return "/", pattern[1:], literal
+	}
+
+	return unescape(pattern[:split]), pattern[split+1:], literal
+}
+
+// unescape returns s with each backslash escape replaced by the
+// character it escapes. A trailing backslash stays.
+func unescape(s string) string {
+	var b strings.Builder
+
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			i++
+		}
+
+		b.WriteByte(s[i])
+	}
+
+	return b.String()
 }
 
 // containsGlobChars reports whether s contains glob metacharacters.

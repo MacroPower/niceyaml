@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -532,6 +533,84 @@ func TestGlob(t *testing.T) {
 			assert.ElementsMatch(t, tc.wantFiles, matches)
 		})
 	}
+}
+
+func TestGlobEscapes(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("a backslash is a separator on Windows")
+	}
+
+	// Create a directory structure with names that need escapes:
+	// tmpDir/
+	//   a,b.yaml
+	//   c.yaml
+	//   d,e/
+	//     x.yaml
+	//   b\s/
+	//     y.yaml
+	tmpDir := t.TempDir()
+	commaDir := filepath.Join(tmpDir, "d,e")
+	backslashDir := tmpDir + `/b\s`
+
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "a,b.yaml"), []byte("a"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "c.yaml"), []byte("c"), 0o644))
+	require.NoError(t, os.MkdirAll(commaDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(commaDir, "x.yaml"), []byte("x"), 0o644))
+	require.NoError(t, os.MkdirAll(backslashDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(backslashDir, "y.yaml"), []byte("y"), 0o644))
+
+	tcs := map[string]struct {
+		pattern   string
+		wantFiles []string
+	}{
+		"escaped comma in a brace alternative": {
+			pattern: tmpDir + `/{a\,b,c}.yaml`,
+			wantFiles: []string{
+				filepath.Join(tmpDir, "a,b.yaml"),
+				filepath.Join(tmpDir, "c.yaml"),
+			},
+		},
+		"escaped comma before a wildcard": {
+			pattern:   tmpDir + `/d\,e/*.yaml`,
+			wantFiles: []string{filepath.Join(commaDir, "x.yaml")},
+		},
+		"escaped comma in a brace alternative before a wildcard": {
+			pattern:   tmpDir + `/{d\,e,zz}/*.yaml`,
+			wantFiles: []string{filepath.Join(commaDir, "x.yaml")},
+		},
+		"escaped backslash before a wildcard": {
+			pattern:   tmpDir + `/b\\s/*.yaml`,
+			wantFiles: []string{filepath.Join(backslashDir, "y.yaml")},
+		},
+		"escaped comma in a wildcard element": {
+			pattern:   tmpDir + `/a\,b*.yaml`,
+			wantFiles: []string{filepath.Join(tmpDir, "a,b.yaml")},
+		},
+		"escaped metacharacter names no file": {
+			pattern:   tmpDir + `/\*.yaml`,
+			wantFiles: []string{},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			matches, err := glob(tc.pattern)
+			require.NoError(t, err)
+			assert.ElementsMatch(t, tc.wantFiles, matches)
+		})
+	}
+
+	t.Run("expand paths", func(t *testing.T) {
+		t.Parallel()
+
+		paths, err := expandPaths(tmpDir + `/d\,e/*.yaml`)
+		require.NoError(t, err)
+		assert.Equal(t, []string{filepath.Join(commaDir, "x.yaml")}, paths)
+	})
 }
 
 func TestGlobSymlinks(t *testing.T) {
