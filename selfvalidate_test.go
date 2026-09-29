@@ -694,12 +694,18 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			positives //nolint:unused // Only reflect reads the field.
 		}
 
+		type opened struct {
+			hours
+		}
+
 		type parent struct {
 			hours
 
 			Wrapped wrapped            `yaml:"wrapped"`
 			ByName  map[string]wrapped `yaml:"by_name"`
 			Bags    []bag              `yaml:"bags"`
+			// Any holds a value the walk cannot take the address of.
+			Any any `yaml:"any"`
 		}
 
 		tcs := map[string]struct {
@@ -724,6 +730,21 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				input: "wrapped: 1\n",
 				start: parent{Bags: []bag{{positives: positives{"a": -1}}}},
 				err:   "$.bags[0].positives.a: negative",
+			},
+			"field of a struct in an interface": {
+				input: "wrapped: 1\n",
+				start: parent{Any: opened{hours: hours{Open: "09:00", Close: "08:00"}}},
+				err:   "$.any.hours.close: closes before it opens",
+			},
+			"field that decodes a struct in an interface": {
+				input: "wrapped: 1\n",
+				start: parent{Any: wrapped{innerPositive: -1}},
+				err:   "$.any: negative",
+			},
+			"field that decodes a struct in an array in an interface": {
+				input: "wrapped: 1\n",
+				start: parent{Any: [1]wrapped{{innerPositive: -1}}},
+				err:   "$.any[0]: negative",
 			},
 			"valid fields": {
 				input: "wrapped: 1\nby_name: {a: 1}\n",

@@ -122,10 +122,7 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path, shadowed map[string]
 		return true
 	}
 
-	v, ok := exposed(v)
-	if !ok {
-		return true
-	}
+	v = exposed(v)
 
 	// A value whose type holds no validator, itself included, passes
 	// without a look at the values below it.
@@ -205,23 +202,20 @@ func (w *selfWalker) walkValue(v reflect.Value, base paths.Path, shadowed map[st
 	return w.validate(v, base)
 }
 
-// exposed returns v, or a view of it that the walk can read when v is,
-// or lies below, an unexported embedded field. Go-yaml decodes into such
-// a field through an unmarshaler it promotes, and otherwise leaves the
-// value set before the decode, so the walk validates it like any other
-// field. The view shares the memory of v, so a Validate with a pointer
-// receiver runs on v itself. The bool result is false when v is
-// read-only and has no address.
-func exposed(v reflect.Value) (reflect.Value, bool) {
+// exposed returns v, or a view of it that the walk can read when v is an
+// unexported embedded field. Go-yaml decodes into such a field through
+// an unmarshaler it promotes, and otherwise leaves the value set before
+// the decode, so the walk validates it like any other field. The view
+// shares the memory of v, so a Validate with a pointer receiver runs on
+// v itself, and the walk can read every value below the view. Such a
+// field always has an address, since [selfWalker.walkValue] copies a
+// struct it cannot address before it reads the fields of the struct.
+func exposed(v reflect.Value) reflect.Value {
 	if v.CanInterface() {
-		return v, true
+		return v
 	}
 
-	if !v.CanAddr() {
-		return v, false
-	}
-
-	return reflect.NewAt(v.Type(), v.Addr().UnsafePointer()).Elem(), true
+	return reflect.NewAt(v.Type(), v.Addr().UnsafePointer()).Elem()
 }
 
 // addressable returns v when the walk can take its address, or else an
