@@ -418,18 +418,19 @@ func (b *TokenBuilder) Build() *token.Token {
 //
 // For a stream from [go.jacobcolvin.com/niceyaml/tokens.Tokenize], the
 // result matches the source except where Tokenize leaves the lexer's text,
-// as its doc describes. The result lacks byte order marks. When a lone "!"
-// ends a file that holds other text, the result also lacks the "!" and the
-// spaces and tabs in front of it. A file of a lone "!" comes back whole.
-// The result repeats the line ending after a tag that ends its line and
-// after text that follows a block scalar header, and a blank line between
-// the two loses its spaces. The text around a tab used as
-// indentation keeps the lexer's shape, which can drop a ":" indicator. A
-// raw stream from [github.com/goccy/go-yaml/lexer.Tokenize] also loses the
-// final line ending, trailing spaces, the spaces of whitespace-only lines,
-// and the letter and hex digits of a "\x", "\u", or "\U" escape. It
-// repeats the last rune of text that follows a block scalar header when
-// that text ends the file.
+// as its doc describes. The result lacks the byte order marks that
+// Tokenize drops and keeps any other mark, such as one inside a scalar.
+// When a lone "!" ends a file that holds other text, the result also lacks
+// the "!" and the spaces and tabs in front of it. A file of a lone "!"
+// comes back whole. The result repeats the line ending after a tag that
+// ends its line and after text that follows a block scalar header, and a
+// blank line between the two loses its spaces. The text around a tab used
+// as indentation keeps the lexer's shape, which can drop a ":" indicator.
+// A raw stream from [github.com/goccy/go-yaml/lexer.Tokenize] keeps every
+// byte order mark, but it also loses the final line ending, trailing
+// spaces, the spaces of whitespace-only lines, and the letter and hex
+// digits of a "\x", "\u", or "\U" escape. It repeats the last rune of
+// text that follows a block scalar header when that text ends the file.
 //
 // A nil token contributes nothing rather than a placeholder such as "<nil>",
 // so the output holds only source text.
