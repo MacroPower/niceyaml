@@ -135,6 +135,11 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 // values to the go-yaml parser when [Source.File] parses the document. It is
 // the escape hatch for parser settings that have no option of their own.
 // The parser always parses comments.
+//
+// These options reach the parser only, never the decoder that [Node]
+// decodes with. Allow duplicate keys through [WithAllowDuplicateKeys],
+// which sets both. [parser.AllowDuplicateMapKey] passed here lets
+// [Source.File] accept a duplicate key that every decode then rejects.
 func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 	return func(s *Source) {
 		s.parserOpts = append(s.parserOpts, opts...)
