@@ -4348,14 +4348,14 @@ func TestDefaultAnnotation(t *testing.T) {
 			annotations: line.Annotations{{Placement: line.Below}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(2, 3)}},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 2, Text: "^"}},
+			want:        []printer.AnnotationRow{{Col: 2, Marker: "^"}},
 		},
 		"empty content marks a flag after a flag": {
 			content:     "flags: 🇺🇸🇫🇷",
 			annotations: line.Annotations{{Placement: line.Below}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(9, 11)}},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 9, Text: "^^"}},
+			want:        []printer.AnnotationRow{{Col: 9, Marker: "^^"}},
 		},
 		"empty content marks control characters as one cell": {
 			content:     "a: \x07b",
@@ -4393,7 +4393,7 @@ func TestDefaultAnnotation(t *testing.T) {
 				{Cols: position.NewSpan(0, 4), Blend: true},
 			},
 			position: line.Below,
-			want:     []printer.AnnotationRow{{Col: 6, Text: "^^^^^^^^^^^"}},
+			want:     []printer.AnnotationRow{{Col: 6, Marker: "^^^^^^^^^^^"}},
 		},
 		"empty content with an overlay of no width ignores a blend overlay": {
 			content:     "b:",
@@ -4403,7 +4403,7 @@ func TestDefaultAnnotation(t *testing.T) {
 				{Cols: position.NewSpan(0, 1), Blend: true},
 			},
 			position: line.Below,
-			want:     []printer.AnnotationRow{{Col: 2, Text: "^"}},
+			want:     []printer.AnnotationRow{{Col: 2, Marker: "^"}},
 		},
 		"empty content with an overlay of no width marks a wide rune": {
 			content:     "a: 日本",
@@ -4602,7 +4602,7 @@ func TestDefaultAnnotation(t *testing.T) {
 			rowStarts:   []int{-2},
 			rowEnds:     []int{-1},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 0, Text: "^"}},
+			want:        []printer.AnnotationRow{{Col: 0, Marker: "^"}},
 		},
 		"wrapped content clamps negative row starts without ends": {
 			content:     "abc",
@@ -4610,7 +4610,7 @@ func TestDefaultAnnotation(t *testing.T) {
 			overlays:    line.Overlays{{Cols: position.NewSpan(0, 3)}},
 			rowStarts:   []int{-5, -2},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 0, Text: "^^^"}},
+			want:        []printer.AnnotationRow{{Col: 0, Marker: "^^^"}},
 		},
 	}
 
