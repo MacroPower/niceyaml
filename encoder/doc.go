@@ -5,7 +5,7 @@
 // [Encoder.Encode] for each value:
 //
 //	enc := encoder.New(os.Stdout, encoder.Pretty()...)
-//	if err := enc.Encode(cfg); err != nil {
+//	if err := enc.Encode(ctx, cfg); err != nil {
 //		return err
 //	}
 //

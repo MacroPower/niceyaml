@@ -2,6 +2,7 @@ package encoder_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 
@@ -76,13 +77,40 @@ func TestEncoder_Encode(t *testing.T) {
 
 			enc := encoder.New(&buf)
 
-			err := enc.Encode(tc.input)
+			err := enc.Encode(t.Context(), tc.input)
 			require.NoError(t, err)
 
 			got := buf.String()
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+// policyKey is the context key that [policyMarshaler] reads.
+type policyKey struct{}
+
+// policyMarshaler encodes as the policy its context holds, or as "none".
+type policyMarshaler struct{}
+
+func (policyMarshaler) MarshalYAML(ctx context.Context) (any, error) {
+	policy, ok := ctx.Value(policyKey{}).(string)
+	if !ok {
+		policy = "none"
+	}
+
+	return policy, nil
+}
+
+func TestEncoder_Encode_context(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	enc := encoder.New(&buf)
+	ctx := context.WithValue(t.Context(), policyKey{}, "redact")
+
+	require.NoError(t, enc.Encode(ctx, map[string]policyMarshaler{"policy": {}}))
+	assert.Equal(t, "policy: redact\n", buf.String())
 }
 
 func TestEncoder_Close(t *testing.T) {
@@ -121,17 +149,17 @@ func TestEncoder_Encode_writeError(t *testing.T) {
 
 	enc := encoder.New(failWriter{})
 
-	err := enc.Encode(map[string]int{"a": 1})
+	err := enc.Encode(t.Context(), map[string]int{"a": 1})
 	require.ErrorIs(t, err, errWrite)
 
-	err = enc.Encode(map[string]int{"b": 2})
+	err = enc.Encode(t.Context(), map[string]int{"b": 2})
 	require.ErrorIs(t, err, errWrite, "a later Encode reports the same error")
 
-	err = enc.Encode(make(chan int))
+	err = enc.Encode(t.Context(), make(chan int))
 	require.ErrorIs(t, err, errWrite, "a value go-yaml cannot encode reports the write error")
 
 	calls := 0
-	err = enc.Encode(countingMarshaler{calls: &calls})
+	err = enc.Encode(t.Context(), countingMarshaler{calls: &calls})
 	require.ErrorIs(t, err, errWrite)
 	assert.Zero(t, calls, "Encode runs no marshaler after a refused write")
 
@@ -162,7 +190,7 @@ func TestPretty(t *testing.T) {
 
 	enc := encoder.New(&buf, encoder.Pretty()...)
 
-	err := enc.Encode(input)
+	err := enc.Encode(t.Context(), input)
 	require.NoError(t, err)
 
 	got := buf.String()
@@ -181,6 +209,6 @@ func TestWithYAMLOptions(t *testing.T) {
 
 	enc := encoder.New(&buf, encoder.WithYAMLOptions(yaml.Flow(true)))
 
-	require.NoError(t, enc.Encode(config{Items: []string{"one", "two"}}))
+	require.NoError(t, enc.Encode(t.Context(), config{Items: []string{"one", "two"}}))
 	assert.Equal(t, "{items: [one, two]}\n", buf.String())
 }

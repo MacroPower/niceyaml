@@ -1,6 +1,7 @@
 package encoder
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -109,10 +110,12 @@ func New(w io.Writer, opts ...Option) *Encoder {
 	}
 }
 
-// Encode encodes v as YAML and writes it to the underlying writer. A write
-// the writer refuses is an error, and every later call returns that same
-// error without encoding v.
-func (e *Encoder) Encode(v any) error {
+// Encode encodes v as YAML and writes it to the underlying writer. The
+// encoder passes ctx to every marshaler that accepts one, such as a
+// [yaml.InterfaceMarshalerContext] or a marshaler registered with
+// [yaml.RegisterCustomMarshalerContext]. A write the writer refuses is an
+// error, and every later call returns that same error without encoding v.
+func (e *Encoder) Encode(ctx context.Context, v any) error {
 	// After a refused write, v never reaches the go-yaml encoder, so its
 	// marshalers do not run and an encoding error cannot hide the write
 	// error.
@@ -121,7 +124,7 @@ func (e *Encoder) Encode(v any) error {
 		return err
 	}
 
-	err = e.e.Encode(v)
+	err = e.e.EncodeContext(ctx, v)
 	if err != nil {
 		return err //nolint:wrapcheck // Return the original error.
 	}
