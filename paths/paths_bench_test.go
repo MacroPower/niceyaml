@@ -128,3 +128,34 @@ func BenchmarkResolver_Node_WideMapping(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkNewResolver_NestedOpenMerges binds the aliases of a chain of
+// merges inside an open anchored mapping, where each bN merges the two
+// mappings before it. The time per link should stay flat as the chain
+// grows.
+func BenchmarkNewResolver_NestedOpenMerges(b *testing.B) {
+	for _, links := range []int{1000, 2000, 4000, 8000} {
+		var sb strings.Builder
+
+		sb.WriteString("a: &a\n  b0: &b0 {<<: *a, k: &x one}\n  b1: &b1 {<<: [*b0, *a]}\n")
+
+		for i := 2; i < links; i++ {
+			fmt.Fprintf(&sb, "  b%d: &b%d {<<: [*b%d, *b%d]}\n", i, i, i-1, i-2)
+		}
+
+		file, err := niceyaml.NewSourceFromString(sb.String()).File()
+		require.NoError(b, err)
+
+		doc := file.Docs[0]
+
+		b.Run(fmt.Sprintf("links_%d", links), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				paths.NewResolver(doc)
+			}
+
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*links), "ns/link")
+		})
+	}
+}
