@@ -67,16 +67,16 @@ func (s finderSearcher) Load(lines line.Lines) Index {
 //	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
 //
 // The viewport reads the view of a revision it shows without a diff when
-// the revision or the view mode changes, or when [Model.SetDiffMode] turns
-// the diff off, and never decorates it. It computes the diff between two
-// revisions from their views and keeps it until it compares another pair
-// or the history changes, so a change of view mode or hunk context reuses
-// the diff without reading the views again. Search highlights go on a
-// clone, so the marks a caller adds stay, and the caller's view stays as
-// the caller left it. Marks added after the viewport read the view show
-// once the revision is set again. A diff between two revisions interleaves
-// their lines in a view of its own, so decoration shows only while the
-// viewport displays a revision without a diff.
+// the revision changes, or when [Model.SetDiffMode] turns the diff off, and
+// never decorates it. It computes the diff between two revisions from their
+// views and keeps it until it compares another pair or the history changes,
+// so a change of view mode or hunk context reuses the diff without reading
+// the views again. Search highlights go on a clone, so the marks a caller
+// adds stay, and the caller's view stays as the caller left it. Marks added
+// after the viewport read the view show once the revision is set again. A
+// diff between two revisions interleaves their lines in a view of its own,
+// so decoration shows only while the viewport displays a revision without a
+// diff.
 //
 // The viewport renders the lines the view holds in the order
 // [line.View.All] yields them, which is content order, and windows them
@@ -245,9 +245,12 @@ func New(opts ...Option) Model {
 // row of that line, or at its last row if the line no longer has that many.
 // A top row in the container frame stays at the same row of that frame in
 // the same way, and a view at the top stays at the top, so a frame that
-// appears or grows shows its outer row. A change of content, such as a new
-// revision, diff mode, or view mode, scrolls to the top, or to the first
-// search match when the term has one.
+// appears or grows shows its outer row. A change of view mode without a diff
+// is a layout change too, since every mode shows the same lines.
+//
+// A change of content scrolls to the top, or to the first search match when
+// the term has one. A new revision changes the content, as does a diff mode
+// that changes the diff on display or a view mode while a diff shows.
 type Model struct {
 	// The container style applied to the viewport frame.
 	style    lipgloss.Style
@@ -738,7 +741,9 @@ func (m *Model) ViewMode() ViewMode {
 	return m.viewMode
 }
 
-// SetViewMode sets the view mode and rebuilds the view. The mode already
+// SetViewMode sets the view mode and rebuilds the view when the viewport
+// shows a diff. Without a diff every mode shows the same lines, so the
+// change counts as a layout change and keeps the top line. The mode already
 // set leaves the view where it is. An undefined mode falls back to
 // [ViewModeFull], the default.
 func (m *Model) SetViewMode(mode ViewMode) {
@@ -750,23 +755,32 @@ func (m *Model) SetViewMode(mode ViewMode) {
 		return
 	}
 
+	if !m.ShowingDiff() {
+		// Side-by-side mode halves the width lines wrap to, so the rows
+		// reflow as they do for a new width.
+		m.relayout()
+
+		m.viewMode = mode
+
+		return
+	}
+
 	m.viewMode = mode
 	m.rebuildViews()
 }
 
 // ToggleViewMode cycles through the view modes in the order [ViewModeFull],
-// [ViewModeHunks], [ViewModeSideBySide].
+// [ViewModeHunks], [ViewModeSideBySide]. The view rebuilds as for
+// [Model.SetViewMode].
 func (m *Model) ToggleViewMode() {
 	switch m.viewMode {
 	case ViewModeFull:
-		m.viewMode = ViewModeHunks
+		m.SetViewMode(ViewModeHunks)
 	case ViewModeHunks:
-		m.viewMode = ViewModeSideBySide
+		m.SetViewMode(ViewModeSideBySide)
 	default:
-		m.viewMode = ViewModeFull
+		m.SetViewMode(ViewModeFull)
 	}
-
-	m.rebuildViews()
 }
 
 // HunkContext returns the number of context lines shown around diff hunks.
@@ -1871,10 +1885,10 @@ func (m *Model) VisibleRowCount() int {
 // SetSearchTerm sets the search term and updates highlights.
 // If the term is empty, clears all search highlights.
 //
-// The term stays set across content changes. A new revision, diff mode, or
-// view mode starts the search over at the first match in the new content and
-// scrolls to it. A new term likewise starts at its first match, while
-// setting the same term again keeps the current match.
+// The term stays set across content changes. A change of content, as the
+// [Model] doc defines it, starts the search over at the first match in the
+// new content and scrolls to it. A new term likewise starts at its first
+// match, while setting the same term again keeps the current match.
 func (m *Model) SetSearchTerm(term string) {
 	if term == "" {
 		m.ClearSearch()

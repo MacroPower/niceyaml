@@ -2846,6 +2846,125 @@ func TestViewport_SameDiffBaseKeepsPosition(t *testing.T) {
 	assert.Equal(t, 0, m.YOffset(), "adjacent to origin at index 2")
 }
 
+func TestViewport_ViewModeWithoutDiffKeepsPosition(t *testing.T) {
+	t.Parallel()
+
+	// Without a diff every view mode shows the same lines, so a change of
+	// view mode keeps the top line and the selected match. With a diff the
+	// modes show other content, so the view starts over at the first match.
+	tcs := map[string]struct {
+		from   yamlviewport.ViewMode
+		to     yamlviewport.ViewMode
+		diff   bool
+		toggle bool
+		keep   bool
+	}{
+		"set full to hunks": {
+			from: yamlviewport.ViewModeFull,
+			to:   yamlviewport.ViewModeHunks,
+			keep: true,
+		},
+		"set full to side-by-side": {
+			from: yamlviewport.ViewModeFull,
+			to:   yamlviewport.ViewModeSideBySide,
+			keep: true,
+		},
+		"set side-by-side to full": {
+			from: yamlviewport.ViewModeSideBySide,
+			to:   yamlviewport.ViewModeFull,
+			keep: true,
+		},
+		"toggle full to hunks": {
+			from:   yamlviewport.ViewModeFull,
+			to:     yamlviewport.ViewModeHunks,
+			toggle: true,
+			keep:   true,
+		},
+		"toggle hunks to side-by-side": {
+			from:   yamlviewport.ViewModeHunks,
+			to:     yamlviewport.ViewModeSideBySide,
+			toggle: true,
+			keep:   true,
+		},
+		"toggle side-by-side to full": {
+			from:   yamlviewport.ViewModeSideBySide,
+			to:     yamlviewport.ViewModeFull,
+			toggle: true,
+			keep:   true,
+		},
+		"set full to hunks with diff": {
+			from: yamlviewport.ViewModeFull,
+			to:   yamlviewport.ViewModeHunks,
+			diff: true,
+		},
+		"toggle full to hunks with diff": {
+			from:   yamlviewport.ViewModeFull,
+			to:     yamlviewport.ViewModeHunks,
+			diff:   true,
+			toggle: true,
+		},
+	}
+
+	doc := func(changed int) string {
+		var sb strings.Builder
+
+		for i := range 50 {
+			value := "v"
+			if i == changed {
+				value = "w"
+			}
+
+			fmt.Fprintf(&sb, "k%d: %s\n", i, value)
+		}
+
+		return sb.String()
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+			m.SetWidth(40)
+			m.SetHeight(10)
+			m.SetViewMode(tc.from)
+			m.AddRevision(niceyaml.NewSourceFromString(doc(-1), niceyaml.WithName("v1")))
+
+			if tc.diff {
+				m.AddRevision(niceyaml.NewSourceFromString(doc(45), niceyaml.WithName("v2")))
+			}
+
+			m.SetSearchTerm("v")
+
+			for range 20 {
+				m.SearchNext()
+			}
+
+			require.Equal(t, tc.diff, m.ShowingDiff())
+			require.Equal(t, 20, m.SearchIndex())
+
+			topLine := m.TopLine()
+			require.Positive(t, topLine)
+
+			if tc.toggle {
+				m.ToggleViewMode()
+			} else {
+				m.SetViewMode(tc.to)
+			}
+
+			require.Equal(t, tc.to, m.ViewMode())
+
+			if tc.keep {
+				assert.Equal(t, 20, m.SearchIndex())
+				assert.Equal(t, topLine, m.TopLine())
+			} else {
+				assert.Equal(t, 0, m.SearchIndex())
+				assert.Equal(t, 0, m.TopLine())
+			}
+		})
+	}
+}
+
 func TestViewport_State(t *testing.T) {
 	t.Parallel()
 
@@ -6757,16 +6876,11 @@ func TestViewport_UnchangedModeKeepsPosition(t *testing.T) {
 	assert.Equal(t, 3, m.SearchIndex(), "same hunk context")
 	assert.Equal(t, 30, m.YOffset(), "same hunk context")
 
-	// Switching to hunks mode rebuilds the view, but without a diff the
-	// hunk context shapes nothing on screen.
+	// Without a diff, hunks mode shows the same lines and the hunk context
+	// shapes nothing on screen.
 	m.SetViewMode(yamlviewport.ViewModeHunks)
-	m.SearchNext()
-	m.SearchNext()
-	m.SearchNext()
-	m.SetYOffset(30)
-
-	require.Equal(t, 3, m.SearchIndex())
-	require.Equal(t, 30, m.YOffset())
+	assert.Equal(t, 3, m.SearchIndex(), "hunks mode without diff")
+	assert.Equal(t, 30, m.YOffset(), "hunks mode without diff")
 
 	m.SetHunkContext(m.HunkContext() + 2)
 	assert.Equal(t, 3, m.SearchIndex(), "hunk context without diff")
