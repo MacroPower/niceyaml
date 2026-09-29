@@ -6,7 +6,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
@@ -2085,7 +2084,7 @@ func (m *Model) scrollToCurrentMatch() {
 	// that ends on a later line runs to the end of this one.
 	end := match.rng.End
 	if end.Line != i {
-		end = position.New(i, utf8.RuneCountInString(view.Lines().Line(i).Content()))
+		end = position.New(i, view.Lines().Line(i).Width())
 	}
 
 	x := layout.GutterWidth() + layout.CellOf(match.rng.Start)

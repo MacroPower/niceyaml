@@ -159,7 +159,7 @@ func mapRows(ln *line.Line, rendered string, runs []runSpan, pieces []string) wr
 
 	shownText := ansi.Strip(rendered)
 	shown := []rune(shownText)
-	contentLen := utf8.RuneCountInString(ln.Content())
+	contentLen := ln.Width()
 
 	offsets, endOffsets := rowBounds(shownText, plain)
 	starts := make([]int, len(offsets))
