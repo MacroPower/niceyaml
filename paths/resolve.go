@@ -136,6 +136,7 @@ func newResolver(doc *ast.DocumentNode) *resolver {
 		targets: map[*ast.AliasNode]ast.Node{},
 		owners:  map[ast.Node]*ast.AnchorNode{},
 		merged:  map[*ast.MappingNode]anchorSet{},
+		pending: map[*ast.MappingNode]mergedRead{},
 		open:    map[*ast.MappingNode]bool{},
 	}
 
@@ -208,14 +209,17 @@ func (s anchorSet) add(other anchorSet) {
 //
 // The merged map holds, for each mapping a merge key has brought in through
 // an alias, the anchors that merging it records, from
-// [aliasBinder.mergedAnchors]. The open map holds the anchored and merged
-// mappings the walk is inside of, and the ones mergedAnchors is reading, so
-// a mapping that merges itself stops there.
+// [aliasBinder.mergedAnchors], when that result holds for every later
+// merge. The pending map holds the other results mergedAnchors has read,
+// each with the state it depends on. The open map holds the anchored and
+// merged mappings the walk is inside of, and the ones mergedAnchors is
+// reading, so a mapping that merges itself stops there.
 type aliasBinder struct {
 	anchors anchorSet
 	targets map[*ast.AliasNode]ast.Node
 	owners  map[ast.Node]*ast.AnchorNode
 	merged  map[*ast.MappingNode]anchorSet
+	pending map[*ast.MappingNode]mergedRead
 	open    map[*ast.MappingNode]bool
 }
 
@@ -276,15 +280,16 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 // inline mapping, and records again the anchors of each mapping an alias
 // brings in.
 func (b *aliasBinder) merge(value ast.Node) {
-	for _, src := range b.findSources(value, b.anchors.nodes, true) {
+	sources, _ := b.findSources(value, b.anchors.nodes, true)
+
+	for _, src := range sources {
 		if src.inline {
 			b.walkOpen(src.mapping)
 
 			continue
 		}
 
-		anchors, _ := b.mergedAnchors(src.mapping)
-		b.anchors.add(anchors)
+		b.anchors.add(b.mergedAnchors(src.mapping).anchors)
 	}
 }
 
@@ -302,13 +307,19 @@ type mergeSource struct {
 // aliases on value and on each element of a sequence of them. It records
 // each anchor on the way into nodes, the nodes map of an [anchorSet]. It
 // follows an alias to the anchor it is bound to, and stops at an alias it
-// has already followed.
+// has already followed. It also returns each alias it stops at because the
+// alias is not bound.
 //
 // With bind set, findSources binds each alias of value itself to the
 // anchor of its name in nodes, and walks any other node of value where the
 // decoder expects a mapping, so the aliases inside that node bind too.
-func (b *aliasBinder) findSources(value ast.Node, nodes map[string]ast.Node, bind bool) []mergeSource {
-	var sources []mergeSource
+func (b *aliasBinder) findSources(
+	value ast.Node, nodes map[string]ast.Node, bind bool,
+) ([]mergeSource, []*ast.AliasNode) {
+	var (
+		sources []mergeSource
+		unbound []*ast.AliasNode
+	)
 
 	var find func(node ast.Node, inline, top bool)
 
@@ -339,7 +350,14 @@ func (b *aliasBinder) findSources(value ast.Node, nodes map[string]ast.Node, bin
 					b.bindMergeAlias(n, nodes)
 				}
 
-				node, inline = b.targets[n], false
+				target, ok := b.targets[n]
+				if !ok {
+					unbound = append(unbound, n)
+
+					return
+				}
+
+				node, inline = target, false
 
 			case *ast.MappingNode:
 				sources = append(sources, mergeSource{mapping: n, inline: inline})
@@ -369,7 +387,7 @@ func (b *aliasBinder) findSources(value ast.Node, nodes map[string]ast.Node, bin
 
 	find(value, true, true)
 
-	return sources
+	return sources, unbound
 }
 
 // bindMergeAlias binds alias, which a `<<` merge key names, to the anchor
@@ -385,44 +403,102 @@ func (b *aliasBinder) bindMergeAlias(alias *ast.AliasNode, nodes map[string]ast.
 	}
 }
 
+// mergedRead is the result of [aliasBinder.mergedAnchors]. The anchors
+// set holds the anchors merging a mapping records, and the final field
+// reports whether they hold for every later merge of the mapping.
+//
+// A result that is not final holds while the state it read stays the
+// same. The deps map holds each mapping the read reached and whether it
+// was open, and the unbound set holds each alias of a merge key the read
+// could not follow. The result holds while each of those mappings stays
+// open or closed as deps records and has no final result yet, and while
+// each of those aliases stays unbound.
+type mergedRead struct {
+	anchors anchorSet
+	deps    map[*ast.MappingNode]bool
+	unbound map[*ast.AliasNode]bool
+	final   bool
+}
+
 // mergedAnchors returns the anchors the decoder records when a `<<` merge
 // key brings mapping in. Those are the last anchor of each name in mapping,
 // in document order, where a `<<` merge key inside mapping counts the
 // anchors of the mappings it merges. It finds the mappings those merge keys
-// bring in through the aliases as Visit bound them, and reads each mapping
-// once however many merge keys bring it in. The bool result reports
-// whether the result holds for every later merge of mapping. It does not
-// when mapping, or a mapping it merges, is open, since those merge nothing
-// until the walk leaves them.
-func (b *aliasBinder) mergedAnchors(mapping *ast.MappingNode) (anchorSet, bool) {
+// bring in through the aliases as Visit bound them. The result is not
+// final when mapping, or a mapping it merges, is open, since those merge
+// nothing until the walk leaves them.
+//
+// It keeps a final result in the merged map, and any other result in the
+// pending map, which it reuses while the result holds. It thus reads each
+// mapping once however many merge keys bring it in, even while a mapping
+// that merges itself is open.
+func (b *aliasBinder) mergedAnchors(mapping *ast.MappingNode) mergedRead {
 	if anchors, ok := b.merged[mapping]; ok {
-		return anchors, true
+		return mergedRead{anchors: anchors, final: true}
 	}
 
 	if b.open[mapping] {
-		return anchorSet{}, false
+		return mergedRead{anchors: anchorSet{}, deps: map[*ast.MappingNode]bool{mapping: true}}
+	}
+
+	if read, ok := b.pending[mapping]; ok && b.holds(read) {
+		return read
 	}
 
 	b.open[mapping] = true
 	defer delete(b.open, mapping)
 
-	r := &anchorReader{binder: b, anchors: newAnchorSet(), final: true}
+	r := &anchorReader{
+		binder:  b,
+		anchors: newAnchorSet(),
+		deps:    map[*ast.MappingNode]bool{},
+		unbound: map[*ast.AliasNode]bool{},
+		final:   true,
+	}
 	ast.Walk(r, mapping)
 
-	if r.final {
-		b.merged[mapping] = r.anchors
+	// This read held mapping open, so the result depends on mapping being
+	// closed, whatever the reads inside it found.
+	r.deps[mapping] = false
+
+	read := mergedRead{anchors: r.anchors, deps: r.deps, unbound: r.unbound, final: r.final}
+	if read.final {
+		b.merged[mapping] = read.anchors
+	} else {
+		b.pending[mapping] = read
 	}
 
-	return r.anchors, r.final
+	return read
+}
+
+// holds reports whether read, a result of [aliasBinder.mergedAnchors]
+// that is not final, still holds, as [mergedRead] describes.
+func (b *aliasBinder) holds(read mergedRead) bool {
+	for mapping, open := range read.deps {
+		if _, ok := b.merged[mapping]; ok || b.open[mapping] != open {
+			return false
+		}
+	}
+
+	for alias := range read.unbound {
+		if _, ok := b.targets[alias]; ok {
+			return false
+		}
+	}
+
+	return true
 }
 
 // anchorReader collects the anchors [aliasBinder.mergedAnchors] returns
 // while [ast.Walk] visits a mapping. The anchors set holds the anchors
 // recorded so far, and final reports whether the result holds for every
-// merge.
+// merge. The deps map and the unbound set hold the state the result
+// depends on, as [mergedRead] describes.
 type anchorReader struct {
 	binder  *aliasBinder
 	anchors anchorSet
+	deps    map[*ast.MappingNode]bool
+	unbound map[*ast.AliasNode]bool
 	final   bool
 }
 
@@ -466,11 +542,19 @@ func (r *anchorReader) Visit(node ast.Node) ast.Visitor {
 // merge records the anchors a `<<` merge key with value brings in, in the
 // order [aliasBinder.merge] records them.
 func (r *anchorReader) merge(value ast.Node) {
-	for _, src := range r.binder.findSources(value, r.anchors.nodes, false) {
-		anchors, final := r.binder.mergedAnchors(src.mapping)
-		r.anchors.add(anchors)
+	sources, unbound := r.binder.findSources(value, r.anchors.nodes, false)
 
-		r.final = r.final && final
+	for _, alias := range unbound {
+		r.unbound[alias] = true
+	}
+
+	for _, src := range sources {
+		read := r.binder.mergedAnchors(src.mapping)
+		r.anchors.add(read.anchors)
+		maps.Copy(r.deps, read.deps)
+		maps.Copy(r.unbound, read.unbound)
+
+		r.final = r.final && read.final
 	}
 }
 

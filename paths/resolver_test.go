@@ -517,6 +517,44 @@ func TestResolver_NestedMerges(t *testing.T) {
 	}
 }
 
+func TestResolver_NestedOpenMerges(t *testing.T) {
+	t.Parallel()
+
+	// Each bN merges the two mappings before it, and b0 merges a. No merge
+	// of a bN is final while the walk is inside a. Reading every merge
+	// again would take about 1.6^60 reads.
+	var sb strings.Builder
+
+	sb.WriteString("a: &a\n  b0: &b0 {<<: *a, k: &x one}\n  b1: &b1 {<<: [*b0, *a]}\n")
+
+	for i := 2; i < 60; i++ {
+		fmt.Fprintf(&sb, "  b%d: &b%d {<<: [*b%d, *b%d]}\n", i, i, i-1, i-2)
+	}
+
+	sb.WriteString("  v: *x\n")
+
+	file, err := niceyaml.NewSourceFromString(sb.String()).File()
+	require.NoError(t, err)
+
+	nodes := make(chan ast.Node, 1)
+
+	go func() {
+		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Root().Child("a", "v"))
+		assert.NoError(t, err)
+
+		nodes <- node
+	}()
+
+	select {
+	case node := <-nodes:
+		require.NotNil(t, node)
+		assert.Equal(t, "one", node.String())
+
+	case <-time.After(10 * time.Second):
+		require.FailNow(t, "binding the aliases did not return within 10s")
+	}
+}
+
 func TestResolver_Deref(t *testing.T) {
 	t.Parallel()
 
