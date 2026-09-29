@@ -48,11 +48,10 @@ func TestDirective(t *testing.T) {
 		}))
 		defer server.Close()
 
-		tmpDir := t.TempDir()
-		yamlPath := filepath.Join(tmpDir, "config.yaml")
-		yamlData := []byte("# yaml-language-server: $schema=" + server.URL + "/schema.json\nkind: Deployment\n")
-		err := os.WriteFile(yamlPath, yamlData, 0o600)
-		require.NoError(t, err)
+		doc := yamltest.FirstDocumentWithPath(t,
+			"# yaml-language-server: $schema="+server.URL+"/schema.json\nkind: Deployment\n",
+			filepath.Join(t.TempDir(), "config.yaml"),
+		)
 
 		var requests atomic.Int32
 
@@ -61,7 +60,7 @@ func TestDirective(t *testing.T) {
 			schema.WithResolvers(schema.Directive()),
 		)
 
-		err = reg.Validate(t.Context(), firstDocumentFromFile(t, yamlPath))
+		err := reg.Validate(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Equal(t, int32(1), requests.Load())
 	})
@@ -73,64 +72,24 @@ func TestDirective_Resolve_Match(t *testing.T) {
 	// A resolver "matches" when it reports anything other than ErrNoMatch.
 	// Loading the named schema may still fail, which is a match.
 	tests := map[string]struct {
-		setup func(t *testing.T) *niceyaml.Node
+		input string
 		want  bool
 	}{
 		"returns true when document has valid schema directive": {
-			setup: func(t *testing.T) *niceyaml.Node {
-				t.Helper()
-
-				tmpDir := t.TempDir()
-				yamlPath := filepath.Join(tmpDir, "config.yaml")
-				yamlData := []byte("# yaml-language-server: $schema=./schema.json\nkind: Deployment\n")
-				err := os.WriteFile(yamlPath, yamlData, 0o600)
-				require.NoError(t, err)
-
-				return firstDocumentFromFile(t, yamlPath)
-			},
-			want: true,
+			input: "# yaml-language-server: $schema=./schema.json\nkind: Deployment\n",
+			want:  true,
 		},
 		"returns false when document has no directive": {
-			setup: func(t *testing.T) *niceyaml.Node {
-				t.Helper()
-
-				tmpDir := t.TempDir()
-				yamlPath := filepath.Join(tmpDir, "config.yaml")
-				yamlData := []byte("kind: Deployment\n")
-				err := os.WriteFile(yamlPath, yamlData, 0o600)
-				require.NoError(t, err)
-
-				return firstDocumentFromFile(t, yamlPath)
-			},
-			want: false,
+			input: "kind: Deployment\n",
+			want:  false,
 		},
 		"returns false when directive appears after content": {
-			setup: func(t *testing.T) *niceyaml.Node {
-				t.Helper()
-
-				tmpDir := t.TempDir()
-				yamlPath := filepath.Join(tmpDir, "config.yaml")
-				yamlData := []byte("kind: Deployment\n# yaml-language-server: $schema=./schema.json\n")
-				err := os.WriteFile(yamlPath, yamlData, 0o600)
-				require.NoError(t, err)
-
-				return firstDocumentFromFile(t, yamlPath)
-			},
-			want: false,
+			input: "kind: Deployment\n# yaml-language-server: $schema=./schema.json\n",
+			want:  false,
 		},
 		"returns true when directive follows document header": {
-			setup: func(t *testing.T) *niceyaml.Node {
-				t.Helper()
-
-				tmpDir := t.TempDir()
-				yamlPath := filepath.Join(tmpDir, "config.yaml")
-				yamlData := []byte("---\n# yaml-language-server: $schema=./schema.json\nkind: Deployment\n")
-				err := os.WriteFile(yamlPath, yamlData, 0o600)
-				require.NoError(t, err)
-
-				return firstDocumentFromFile(t, yamlPath)
-			},
-			want: true,
+			input: "---\n# yaml-language-server: $schema=./schema.json\nkind: Deployment\n",
+			want:  true,
 		},
 	}
 
@@ -138,7 +97,7 @@ func TestDirective_Resolve_Match(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := tt.setup(t)
+			doc := yamltest.FirstDocumentWithPath(t, tt.input, filepath.Join(t.TempDir(), "config.yaml"))
 			res := schema.Directive()
 			_, err := res.Resolve(t.Context(), doc)
 
@@ -163,12 +122,10 @@ func TestDirective_Resolve(t *testing.T) {
 		err := os.WriteFile(filepath.Join(tmpDir, "schema.json"), schemaData, 0o600)
 		require.NoError(t, err)
 
-		yamlPath := filepath.Join(tmpDir, "config.yaml")
-		yamlData := []byte("# yaml-language-server: $schema=schema.json\nkind: Deployment\n")
-		err = os.WriteFile(yamlPath, yamlData, 0o600)
-		require.NoError(t, err)
-
-		doc := firstDocumentFromFile(t, yamlPath)
+		doc := yamltest.FirstDocumentWithPath(t,
+			"# yaml-language-server: $schema=schema.json\nkind: Deployment\n",
+			filepath.Join(tmpDir, "config.yaml"),
+		)
 		url, data := resolveAndLoad(t, schema.Directive(), doc)
 		assert.Equal(t, schemaData, data)
 		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "schema.json")), url)
@@ -182,12 +139,10 @@ func TestDirective_Resolve(t *testing.T) {
 		err := os.WriteFile(filepath.Join(tmpDir, "schema.json"), schemaData, 0o600)
 		require.NoError(t, err)
 
-		yamlPath := filepath.Join(tmpDir, "config.yaml")
-		yamlData := []byte("# yaml-language-server: $schema=./schema.json   \nkind: Deployment\n")
-		err = os.WriteFile(yamlPath, yamlData, 0o600)
-		require.NoError(t, err)
-
-		doc := firstDocumentFromFile(t, yamlPath)
+		doc := yamltest.FirstDocumentWithPath(t,
+			"# yaml-language-server: $schema=./schema.json   \nkind: Deployment\n",
+			filepath.Join(tmpDir, "config.yaml"),
+		)
 		url, data := resolveAndLoad(t, schema.Directive(), doc)
 		assert.Equal(t, schemaData, data)
 		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "schema.json")), url)
@@ -204,13 +159,10 @@ func TestDirective_Resolve(t *testing.T) {
 		}))
 		defer server.Close()
 
-		tmpDir := t.TempDir()
-		yamlPath := filepath.Join(tmpDir, "config.yaml")
-		yamlData := []byte("# yaml-language-server: $schema=" + server.URL + "/schema.json\nkind: Deployment\n")
-		err := os.WriteFile(yamlPath, yamlData, 0o600)
-		require.NoError(t, err)
-
-		doc := firstDocumentFromFile(t, yamlPath)
+		doc := yamltest.FirstDocumentWithPath(t,
+			"# yaml-language-server: $schema="+server.URL+"/schema.json\nkind: Deployment\n",
+			filepath.Join(t.TempDir(), "config.yaml"),
+		)
 		url, data := resolveAndLoad(t, schema.Directive(), doc)
 		assert.Equal(t, []byte(schemaData), data)
 		assert.Equal(t, server.URL+"/schema.json", url)
@@ -308,15 +260,9 @@ func TestDirective_Resolve(t *testing.T) {
 	t.Run("returns ErrNoDirective when no directive present", func(t *testing.T) {
 		t.Parallel()
 
-		tmpDir := t.TempDir()
-		yamlPath := filepath.Join(tmpDir, "config.yaml")
-		yamlData := []byte("kind: Deployment\n")
-		err := os.WriteFile(yamlPath, yamlData, 0o600)
-		require.NoError(t, err)
-
-		doc := firstDocumentFromFile(t, yamlPath)
+		doc := yamltest.FirstDocumentWithPath(t, "kind: Deployment\n", filepath.Join(t.TempDir(), "config.yaml"))
 		res := schema.Directive()
-		_, err = res.Resolve(t.Context(), doc)
+		_, err := res.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoDirective)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
@@ -431,12 +377,10 @@ func TestDirective_Resolve(t *testing.T) {
 		err := os.WriteFile(filepath.Join(tmpDir, "none"), schemaData, 0o600)
 		require.NoError(t, err)
 
-		yamlPath := filepath.Join(tmpDir, "config.yaml")
-		yamlData := []byte("# yaml-language-server: $schema=./none\nkind: Deployment\n")
-		err = os.WriteFile(yamlPath, yamlData, 0o600)
-		require.NoError(t, err)
-
-		doc := firstDocumentFromFile(t, yamlPath)
+		doc := yamltest.FirstDocumentWithPath(t,
+			"# yaml-language-server: $schema=./none\nkind: Deployment\n",
+			filepath.Join(tmpDir, "config.yaml"),
+		)
 		url, data := resolveAndLoad(t, schema.Directive(), doc)
 		assert.Equal(t, schemaData, data)
 		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "none")), url)
@@ -445,27 +389,20 @@ func TestDirective_Resolve(t *testing.T) {
 	t.Run("resolves relative paths against document directory", func(t *testing.T) {
 		t.Parallel()
 
-		// Create nested directory structure.
 		tmpDir := t.TempDir()
-		configDir := filepath.Join(tmpDir, "configs")
 		schemaDir := filepath.Join(tmpDir, "schemas")
-		err := os.MkdirAll(configDir, 0o755)
-		require.NoError(t, err)
-
-		err = os.MkdirAll(schemaDir, 0o755)
+		err := os.MkdirAll(schemaDir, 0o755)
 		require.NoError(t, err)
 
 		schemaData := []byte(`{"type": "object"}`)
 		err = os.WriteFile(filepath.Join(schemaDir, "schema.json"), schemaData, 0o600)
 		require.NoError(t, err)
 
-		yamlPath := filepath.Join(configDir, "config.yaml")
-		// Relative path from configs/ to schemas/.
-		yamlData := []byte("# yaml-language-server: $schema=../schemas/schema.json\nkind: Deployment\n")
-		err = os.WriteFile(yamlPath, yamlData, 0o600)
-		require.NoError(t, err)
-
-		doc := firstDocumentFromFile(t, yamlPath)
+		// The directive climbs from configs/ to its sibling schemas/.
+		doc := yamltest.FirstDocumentWithPath(t,
+			"# yaml-language-server: $schema=../schemas/schema.json\nkind: Deployment\n",
+			filepath.Join(tmpDir, "configs", "config.yaml"),
+		)
 		_, data := resolveAndLoad(t, schema.Directive(), doc)
 		assert.Equal(t, schemaData, data)
 	})
@@ -474,12 +411,10 @@ func TestDirective_Resolve(t *testing.T) {
 		t.Parallel()
 
 		tmpDir := t.TempDir()
-		yamlPath := filepath.Join(tmpDir, "config.yaml")
-		yamlData := []byte("# yaml-language-server: $schema=nonexistent.json\nkind: Deployment\n")
-		err := os.WriteFile(yamlPath, yamlData, 0o600)
-		require.NoError(t, err)
-
-		doc := firstDocumentFromFile(t, yamlPath)
+		doc := yamltest.FirstDocumentWithPath(t,
+			"# yaml-language-server: $schema=nonexistent.json\nkind: Deployment\n",
+			filepath.Join(tmpDir, "config.yaml"),
+		)
 		res := schema.Directive()
 		ref, err := res.Resolve(t.Context(), doc)
 		require.NoError(t, err)
@@ -540,25 +475,6 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 			}
 		})
 	}
-}
-
-// firstDocumentFromFile creates a Document from a YAML file path.
-func firstDocumentFromFile(t *testing.T, path string) *niceyaml.Node {
-	t.Helper()
-
-	source, err := niceyaml.NewSourceFromFile(path)
-	require.NoError(t, err)
-
-	docs, err := source.Documents()
-	require.NoError(t, err)
-
-	for _, doc := range docs {
-		return doc
-	}
-
-	t.Fatal("no documents found")
-
-	return nil
 }
 
 func TestDirective_LeadingCommentDocument(t *testing.T) {
