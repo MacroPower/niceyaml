@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/fangs"
+	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
@@ -121,6 +122,44 @@ func TestColorSchemeFunc(t *testing.T) {
 
 	// The returned function ignores the LightDarkFunc parameter.
 	assert.Equal(t, fangs.ColorScheme(styles), csFunc(nil))
+}
+
+func TestColorScheme_NilStyler(t *testing.T) {
+	t.Parallel()
+
+	want := fangs.ColorScheme(style.Default())
+
+	tcs := map[string]struct {
+		scheme func() fang.ColorScheme
+	}{
+		"ColorScheme": {
+			scheme: func() fang.ColorScheme { return fangs.ColorScheme(nil) },
+		},
+		"ColorSchemeFunc": {
+			scheme: func() fang.ColorScheme { return fangs.ColorSchemeFunc(nil)(nil) },
+		},
+		"LightDarkColorSchemeFunc on a light terminal": {
+			scheme: func() fang.ColorScheme {
+				return fangs.LightDarkColorSchemeFunc(nil, nil)(lipgloss.LightDark(false))
+			},
+		},
+		"LightDarkColorSchemeFunc on a dark terminal": {
+			scheme: func() fang.ColorScheme {
+				return fangs.LightDarkColorSchemeFunc(nil, nil)(lipgloss.LightDark(true))
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var got fang.ColorScheme
+
+			require.NotPanics(t, func() { got = tc.scheme() })
+			assert.Equal(t, want, got)
+		})
+	}
 }
 
 func TestLightDarkColorSchemeFunc(t *testing.T) {

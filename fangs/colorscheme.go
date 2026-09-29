@@ -16,8 +16,13 @@ import (
 // [go.jacobcolvin.com/niceyaml/style.Styles] value.
 //
 // This derives CLI styling from the existing theme system, so the YAML
-// viewer and CLI help output use the same colors.
+// viewer and CLI help output use the same colors. A nil styles selects
+// [style.Default].
 func ColorScheme(styles style.Styler) fang.ColorScheme {
+	if styles == nil {
+		styles = style.Default()
+	}
+
 	text := styles.Style(kind.Text)
 	comment := styles.Style(kind.Comment)
 	genericError := styles.Style(kind.GenericError)
@@ -48,7 +53,8 @@ func ColorScheme(styles style.Styler) fang.ColorScheme {
 //
 // This wraps [ColorScheme] for use with [fang.WithColorSchemeFunc].
 // Each theme targets a specific light/dark mode, so the returned function
-// ignores its [lipgloss.LightDarkFunc] parameter.
+// ignores its [lipgloss.LightDarkFunc] parameter. A nil styles selects
+// [style.Default].
 func ColorSchemeFunc(styles style.Styler) fang.ColorSchemeFunc {
 	return func(_ lipgloss.LightDarkFunc) fang.ColorScheme {
 		return ColorScheme(styles)
@@ -62,7 +68,8 @@ func ColorSchemeFunc(styles style.Styler) fang.ColorSchemeFunc {
 // This wraps [ColorScheme] for use with [fang.WithColorSchemeFunc]. Help
 // output draws most of its text on the terminal's own background, so a
 // theme made for one background can be hard to read on the other. Use
-// [ColorSchemeFunc] to apply one theme on both.
+// [ColorSchemeFunc] to apply one theme on both. A nil light or dark selects
+// [style.Default] for that background.
 func LightDarkColorSchemeFunc(light, dark style.Styler) fang.ColorSchemeFunc {
 	return func(ld lipgloss.LightDarkFunc) fang.ColorScheme {
 		// On a dark background, ld returns its second color, so two
