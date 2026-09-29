@@ -237,6 +237,9 @@ func TestExpandPathsSymlinks(t *testing.T) {
 	//   dangling.yaml -> missing.yaml
 	//   ldir -> sub
 	//   deeplink -> sub/deep
+	//   cfg1.txt
+	//   cfg[1].txt -> missing.txt
+	//   only[1].txt -> missing.txt
 	tmpDir := t.TempDir()
 	subdir := filepath.Join(tmpDir, "sub")
 	target := filepath.Join(subdir, "x.yaml")
@@ -244,6 +247,11 @@ func TestExpandPathsSymlinks(t *testing.T) {
 	link := filepath.Join(tmpDir, "link.yaml")
 	dangling := filepath.Join(tmpDir, "dangling.yaml")
 	throughDir := filepath.Join(tmpDir, "ldir", "x.yaml")
+
+	// Each name reads as a pattern too, and only cfg[1].txt matches
+	// another file that way.
+	danglingMeta := filepath.Join(tmpDir, "cfg[1].txt")
+	danglingMetaAlone := filepath.Join(tmpDir, "only[1].txt")
 
 	// The OS steps up from the directory deeplink leads to, so this name
 	// reaches sub/x.yaml. Joining it with filepath.Join would clean it to
@@ -262,11 +270,26 @@ func TestExpandPathsSymlinks(t *testing.T) {
 	require.NoError(t, os.Symlink("missing.yaml", dangling))
 	require.NoError(t, os.Symlink("sub", filepath.Join(tmpDir, "ldir")))
 	require.NoError(t, os.Symlink(filepath.Join("sub", "deep"), filepath.Join(tmpDir, "deeplink")))
+	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "cfg1.txt"), []byte("cfg"), 0o644))
+	require.NoError(t, os.Symlink("missing.txt", danglingMeta))
+	require.NoError(t, os.Symlink("missing.txt", danglingMetaAlone))
 
 	tcs := map[string]struct {
 		args []string
 		want []string
 	}{
+		"dangling symlink with metacharacter beside a pattern match": {
+			args: []string{danglingMeta},
+			want: []string{danglingMeta},
+		},
+		"dangling symlink with metacharacter and no pattern match": {
+			args: []string{danglingMetaAlone},
+			want: []string{danglingMetaAlone},
+		},
+		"dangling symlink in a brace alternative": {
+			args: []string{tmpDir + "/{dangling,none}.yaml"},
+			want: []string{dangling},
+		},
 		"recursive glob with symlinked file": {
 			args: []string{tmpDir + "/**/*.yaml"},
 			want: []string{dangling, link, top},

@@ -123,7 +123,9 @@ func globAlternative(pattern string) ([]string, error) {
 	if literal {
 		path := filepath.FromSlash(prefix + unescape(rest))
 
-		_, err := os.Stat(path)
+		// A wildcard matches a dangling symlink, so Lstat keeps one here
+		// too. The caller drops a symlink to a directory.
+		_, err := os.Lstat(path)
 		if err == nil {
 			return []string{path}, nil
 		}
@@ -285,11 +287,12 @@ func (s *fileSet) add(info os.FileInfo) bool {
 // An argument that names a directory is an error wrapping
 // [errIsDirectory], with or without glob metacharacters. An argument
 // without metacharacters joins the list as-is. An argument with
-// metacharacters that names an existing file is that file, even when it
-// also matches other files as a pattern, so a file such as "cfg[1].yaml"
-// or "report[2024.txt" stays reachable. Any other argument with
-// metacharacters expands as a pattern. A pattern that matches no file is
-// an error wrapping [errNoMatch], and an invalid pattern is its own error.
+// metacharacters that names an existing file or a dangling symlink joins
+// the list as-is too, even when it also matches other files as a
+// pattern, so a file such as "cfg[1].yaml" or "report[2024.txt" stays
+// reachable. Any other argument with metacharacters expands as a
+// pattern. A pattern that matches no file is an error wrapping
+// [errNoMatch], and an invalid pattern is its own error.
 func expandPaths(args ...string) ([]string, error) {
 	var (
 		result    []string
@@ -338,12 +341,17 @@ func expandPaths(args ...string) ([]string, error) {
 		// file, even when it also matches others as a pattern, so no
 		// pattern match shadows the file the user named. That holds for a
 		// name that is no valid pattern too, such as one with a stray
-		// bracket. A name without metacharacters that names nothing passes
-		// through to the read, which reports it. Any other name expands as
-		// a pattern.
+		// bracket, and for a dangling symlink, which add counts as a file.
+		// A name without metacharacters that names nothing passes through
+		// to the read, which reports it. Any other name expands as a
+		// pattern.
 		info, err := os.Stat(arg)
 		if err == nil && info.IsDir() {
 			return nil, fmt.Errorf("%w: %q", errIsDirectory, arg)
+		}
+
+		if err != nil {
+			_, err = os.Lstat(arg)
 		}
 
 		if err == nil || !containsGlobChars(arg) {
