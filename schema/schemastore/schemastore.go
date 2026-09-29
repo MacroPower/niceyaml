@@ -373,9 +373,10 @@ func (s *Store) FindMatch(ctx context.Context, filePath string) (CatalogEntry, e
 // catalog returns the catalog entries. It fetches or refreshes them first
 // when the cache is empty or expired.
 //
-// A lookup that waits for a fetch stops waiting when ctx ends. When the
-// fetch fails or the wait ends early, the lookup falls back to the previous
-// entries, or reports ErrFetchCatalog when none exist.
+// A lookup that waits for a fetch stops waiting when ctx ends, unless the
+// fetch has finished by then. When the fetch fails or the wait ends early,
+// the lookup falls back to the previous entries, or reports ErrFetchCatalog
+// when none exist.
 func (s *Store) catalog(ctx context.Context) ([]CatalogEntry, error) {
 	call, entries, err := s.join(ctx)
 	if call == nil {
@@ -384,28 +385,35 @@ func (s *Store) catalog(ctx context.Context) ([]CatalogEntry, error) {
 
 	select {
 	case <-call.done:
-		// The fetch runs on a goroutine of its own, where no caller can
-		// recover a panic, so the fetch hands the panic back as an error
-		// and each lookup that waited for it raises it here. The fetch
-		// hands back a call to runtime.Goexit the same way, and each lookup
-		// that waited for it calls runtime.Goexit in turn.
-		if pe, ok := errors.AsType[*panicError](call.err); ok {
-			panic(pe.value)
-		}
-
-		if errors.Is(call.err, errGoexit) {
-			runtime.Goexit()
-		}
-
-		if call.err != nil {
-			return s.stale(call.err)
-		}
-
-		return call.entries, nil
-
 	case <-ctx.Done():
-		return s.stale(ctx.Err())
+		// The fetch may have finished in the same instant the context
+		// ended. Its outcome counts when it is ready, so the result does
+		// not depend on which case the select picks.
+		select {
+		case <-call.done:
+		default:
+			return s.stale(ctx.Err())
+		}
 	}
+
+	// The fetch runs on a goroutine of its own, where no caller can recover
+	// a panic, so the fetch hands the panic back as an error and each
+	// lookup that waited for it raises it here. The fetch hands back a call
+	// to runtime.Goexit the same way, and each lookup that waited for it
+	// calls runtime.Goexit in turn.
+	if pe, ok := errors.AsType[*panicError](call.err); ok {
+		panic(pe.value)
+	}
+
+	if errors.Is(call.err, errGoexit) {
+		runtime.Goexit()
+	}
+
+	if call.err != nil {
+		return s.stale(call.err)
+	}
+
+	return call.entries, nil
 }
 
 // join decides under the lock whether a lookup can answer without waiting

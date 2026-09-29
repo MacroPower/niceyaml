@@ -887,6 +887,117 @@ func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
 	}
 }
 
+func TestSchemaStore_ContextEndsAfterFetch(t *testing.T) {
+	t.Parallel()
+
+	// The lookup's context ends only after the fetch has finished, so both
+	// cases of the lookup's wait are ready at once. The fetch's outcome must
+	// count every time.
+	tcs := map[string]struct {
+		opts      []schemastore.Option
+		wantPanic any
+		wantErr   bool
+	}{
+		"fetch succeeds": {
+			opts: []schemastore.Option{
+				schemastore.WithHTTPClient(newCatalogClient(t, testCatalog)),
+			},
+		},
+		"fetch fails": {
+			opts: []schemastore.Option{
+				schemastore.WithHTTPClient(newClient(http.StatusInternalServerError, nil)),
+			},
+			wantErr: true,
+		},
+		"filter panics": {
+			opts: []schemastore.Option{
+				schemastore.WithHTTPClient(newCatalogClient(t, testCatalog)),
+				schemastore.WithFilter(func(schemastore.CatalogEntry) bool {
+					panic("filter bug")
+				}),
+			},
+			wantPanic: "filter bug",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// Go picks among ready select cases at random, so repeat the
+			// lookup to catch an outcome that depends on the pick.
+			for range 32 {
+				opts := append([]schemastore.Option{
+					schemastore.WithCatalogURL("https://example.com/catalog.json"),
+				}, tc.opts...)
+				store := schemastore.New(opts...)
+
+				ctx := &endsAfterFetchContext{
+					Context: t.Context(),
+					wait: func() {
+						// A second lookup waits on the same fetch, so the fetch
+						// has finished once the lookup returns or panics.
+						//nolint:errcheck // The panic only signals the end of the fetch.
+						defer func() { _ = recover() }()
+
+						//nolint:errcheck // Only the wait matters here.
+						_, _ = store.FindMatch(t.Context(), "config.yaml")
+					},
+				}
+
+				if tc.wantPanic != nil {
+					assert.PanicsWithValue(t, tc.wantPanic, func() {
+						//nolint:errcheck // The call panics.
+						_, _ = store.FindMatch(ctx, "config.yaml")
+					})
+
+					continue
+				}
+
+				entry, err := store.FindMatch(ctx, "config.yaml")
+				if tc.wantErr {
+					require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+					require.NotErrorIs(t, err, context.Canceled)
+
+					continue
+				}
+
+				require.NoError(t, err)
+				assert.Equal(t, "Test", entry.Name)
+			}
+		})
+	}
+}
+
+// endsAfterFetchContext is a context that ends once a lookup waits on it.
+// Err reports nil until then, so the lookup starts a fetch. Done calls wait,
+// which returns once that fetch has finished, and then reports the context
+// as canceled.
+type endsAfterFetchContext struct {
+	context.Context
+
+	wait  func()
+	ended atomic.Bool
+}
+
+func (c *endsAfterFetchContext) Done() <-chan struct{} {
+	c.wait()
+	c.ended.Store(true)
+
+	done := make(chan struct{})
+	close(done)
+
+	return done
+}
+
+func (c *endsAfterFetchContext) Err() error {
+	if c.ended.Load() {
+		return context.Canceled
+	}
+
+	return nil
+}
+
 func TestSchemaStore_HTTPClient(t *testing.T) {
 	t.Parallel()
 
