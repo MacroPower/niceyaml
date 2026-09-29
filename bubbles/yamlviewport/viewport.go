@@ -35,7 +35,8 @@ type Searcher interface {
 }
 
 // Index finds each [position.Range] that matches a search string in the lines
-// it was built from.
+// it was built from. Find may return the ranges in any order, because the
+// viewport sorts them into document order.
 //
 // See [finder.Index] for an implementation.
 type Index interface {
@@ -1112,8 +1113,17 @@ func (m *Model) updateSearchState(lines *line.View) {
 	}
 
 	// The unified view shows every match on the left, and its matches do
-	// not use inLeft.
+	// not use inLeft. An Index may return matches in any order, so sort
+	// them into document order as the side-by-side path does.
 	m.leftMatches = heldMatches(lines, find(m.index, m.searchTerm))
+	slices.SortStableFunc(m.leftMatches, func(a, b position.Range) int {
+		if a.Start.Line != b.Start.Line {
+			return cmp.Compare(a.Start.Line, b.Start.Line)
+		}
+
+		return cmp.Compare(a.Start.Col, b.Start.Col)
+	})
+
 	m.rightMatches = nil
 	m.searchMatches = make([]searchMatch, 0, len(m.leftMatches))
 

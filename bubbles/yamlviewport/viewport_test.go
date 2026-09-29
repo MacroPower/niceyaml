@@ -4835,6 +4835,76 @@ func TestViewport_WithSearcher(t *testing.T) {
 	})
 }
 
+// reverseSearcher wraps a [finder.Finder] in an Index that returns its
+// matches in reverse document order.
+type reverseSearcher struct {
+	finder *finder.Finder
+}
+
+func (r reverseSearcher) Load(lines line.Lines) yamlviewport.Index {
+	return reverseIndex{index: r.finder.Load(lines)}
+}
+
+type reverseIndex struct {
+	index *finder.Index
+}
+
+func (r reverseIndex) Find(search string) position.Ranges {
+	matches := slices.Clone(r.index.Find(search))
+	slices.Reverse(matches)
+
+	return matches
+}
+
+func TestViewport_SearchOrdersIndexMatches(t *testing.T) {
+	t.Parallel()
+
+	var before, after strings.Builder
+
+	for i := range 40 {
+		v := "x"
+		if i == 0 || i == 39 {
+			v = "needle"
+		}
+
+		fmt.Fprintf(&before, "k%d: %s\n", i, v)
+
+		if i == 20 {
+			v = "y"
+		}
+
+		fmt.Fprintf(&after, "k%d: %s\n", i, v)
+	}
+
+	// An Index may return matches in any order, and every view mode steps
+	// through them from the top of the document.
+	tcs := map[string]yamlviewport.ViewMode{
+		"full":         yamlviewport.ViewModeFull,
+		"side by side": yamlviewport.ViewModeSideBySide,
+	}
+
+	for name, mode := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(
+				yamlviewport.WithPrinter(testPrinter()),
+				yamlviewport.WithSearcher(reverseSearcher{finder: finder.New()}),
+			)
+			m.SetWidth(80)
+			m.SetHeight(5)
+			m.AddRevision(niceyaml.NewSourceFromString(before.String(), niceyaml.WithName("v1")))
+			m.AddRevision(niceyaml.NewSourceFromString(after.String(), niceyaml.WithName("v2")))
+			m.SetViewMode(mode)
+
+			m.SetSearchTerm("needle")
+			require.Equal(t, 2, m.SearchCount())
+			assert.Equal(t, 0, m.SearchIndex())
+			assert.Equal(t, 0, m.YOffset())
+		})
+	}
+}
+
 // nilSearcher is a [yamlviewport.Searcher] whose Load returns a nil Index.
 // It counts its Load calls.
 type nilSearcher struct {
