@@ -5579,6 +5579,69 @@ func TestError_TokenAfterTrailingSpaces(t *testing.T) {
 	assert.Contains(t, got, "<genericError>1</genericError>")
 }
 
+func TestSourceError_MessageAtHighlightStart(t *testing.T) {
+	t.Parallel()
+
+	// A message starts where the highlight of its position starts on the
+	// line, as the caret run of a root starts, so a position on the
+	// spaces around a token or inside it puts the message under the token.
+
+	tcs := map[string]struct {
+		at      position.Position
+		input   string
+		want    string // The marker row that FormatError and View.String draw.
+		wantXML string // The annotation row that the printer draws.
+	}{
+		"position in the indentation": {
+			input:   "parent:\n  child: x\n  other: 1\n",
+			at:      position.New(2, 0),
+			want:    "     |   ^^^^^ bad",
+			wantXML: "<textError>  ^ bad</textError>",
+		},
+		"position on the spaces after a value": {
+			input:   "a: 1   \n",
+			at:      position.New(0, 5),
+			want:    "     |    ^ bad",
+			wantXML: "<textError>   ^ bad</textError>",
+		},
+		"position inside a token": {
+			input:   "key: value\n",
+			at:      position.New(0, 7),
+			want:    "     |      ^^^^^ bad",
+			wantXML: "<textError>     ^ bad</textError>",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			nested := yamltest.Bind(t, source, niceyaml.NewError(
+				"summary",
+				niceyaml.WithErrors(niceyaml.NewError("bad", niceyaml.AtPosition(tc.at))),
+			))
+			assert.Contains(t, niceyaml.FormatError(nested, 0), "\n"+tc.want)
+			assert.Contains(t, trimLines(renderContext(nested, 0)), "\n"+tc.wantXML)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError(
+				"bad", niceyaml.AtPosition(tc.at),
+			)), &bound)
+
+			view := source.View()
+			require.True(t, bound.Annotate(view))
+			assert.Contains(t, view.String(), "\n"+tc.want)
+
+			// The error still reports the column as given.
+			wantPrefix := fmt.Sprintf("%d:%d: ", tc.at.Line+1, tc.at.Col+1)
+			assert.True(t, strings.HasPrefix(bound.Error(), wantPrefix), bound.Error())
+		})
+	}
+}
+
 func TestFormat(t *testing.T) {
 	t.Parallel()
 

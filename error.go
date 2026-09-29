@@ -1846,14 +1846,16 @@ func rangeOf(ranges position.Ranges, at position.Position) position.Range {
 // error with no message marks its line with an annotation below it with
 // no content. A renderer that draws marks from annotations, as the
 // printer does, draws that annotation as a caret run under the
-// highlight, so the range shows its extent without color. A location
-// with no token under it, such as a position past the end of a line or a
-// path to an empty value, gets an overlay of no width at its column. The
-// overlay renders nothing and still counts as decoration, so
-// [line.View.Hunks] keeps the line. Annotate moves a column past the end
-// of its line to the column after its last rune, for the overlay and the
-// message alike, so a renderer spends at most one cell past the line on
-// the mark.
+// highlight, so the range shows its extent without color. The annotation
+// starts at the first column the highlight covers on its line, so a
+// position on the spaces around a token puts the message under the
+// token. A location with no token under it, such as a position past the
+// end of a line or a path to an empty value, gets an overlay of no width
+// at its column. The overlay renders nothing and still counts as
+// decoration, so [line.View.Hunks] keeps the line. Annotate moves a
+// column past the end of its line to the column after its last rune, for
+// the overlay and the message alike, so a renderer spends at most one
+// cell past the line on the mark.
 // [SourceError.Error] still reports the column as given.
 //
 // Annotate finds each line by identity rather than by index, since every
@@ -2071,6 +2073,10 @@ func (e *SourceError) annotate(view *line.View) []int {
 // its lines, has nothing to highlight, so its line gets an overlay of no
 // width at its column. The overlay renders nothing and still marks the
 // line as decorated, so the line joins the hunks [line.View.Hunks] keeps.
+// The annotation below a line starts at the first column the highlight of
+// its position covers on that line, where [markUnannotated] starts a caret
+// run, so a position on the spaces around a token puts its message under
+// the token. A position with no highlight on its line keeps its column.
 // A column past the end of its line moves to the column after its last
 // rune, in the overlay and in the annotation below the line. A far column then
 // costs a renderer no more cells than a column at the end.
@@ -2083,12 +2089,18 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 
 	var marked []int
 
+	notes := make([]errorPosition, 0, len(positions))
+
 	for _, pos := range positions {
 		var segments []position.Range
 
 		for _, r := range pos.ranges {
 			segments = append(segments, src.lines.SliceLines(r)...)
 		}
+
+		note := pos
+		note.pos.Col = highlightStart(pos.pos, segments)
+		notes = append(notes, note)
 
 		if i, ok := index(pos.pos.Line); ok {
 			marked = append(marked, i)
@@ -2115,7 +2127,7 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 		return nil
 	}
 
-	for lineIdx, annotation := range prepareLineAnnotations(positions) {
+	for lineIdx, annotation := range prepareLineAnnotations(notes) {
 		if i, ok := index(lineIdx); ok {
 			annotation.Col = min(annotation.Col, src.lines.Line(lineIdx).Width())
 			view.Annotate(i, annotation)
@@ -2123,6 +2135,20 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 	}
 
 	return marked
+}
+
+// highlightStart returns the first column that segments cover on the
+// line of at, or the column of at when no segment lies on that line.
+func highlightStart(at position.Position, segments []position.Range) int {
+	col, found := at.Col, false
+
+	for _, lr := range segments {
+		if lr.Start.Line == at.Line && (!found || lr.Start.Col < col) {
+			col, found = lr.Start.Col, true
+		}
+	}
+
+	return col
 }
 
 // sources returns the source of the binding, then the source of each
