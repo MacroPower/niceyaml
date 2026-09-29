@@ -58,7 +58,7 @@ import (
 // which copies only the aliases, and the nodes above them, to drop the
 // comments on their names.
 //
-// Create instances with [newDecodeTree].
+// Create instances with [document.newDecodeTree].
 type decodeTree struct {
 	// The body of the document as the Source parsed it.
 	source ast.Node
