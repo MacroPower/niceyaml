@@ -97,6 +97,9 @@ func TestAny(t *testing.T) {
 		assert.PanicsWithValue(t, "matcher.Any: matcher at index 0 is nil", func() {
 			matcher.Any(nil, matcher.Content(kindPath, "Test"))
 		})
+		assert.PanicsWithValue(t, "matcher.Any: matcher at index 0 is nil", func() {
+			matcher.Any((*pointerMatcher)(nil), matcher.Exists(kindPath))
+		})
 	})
 
 	t.Run("writing to the caller's slice changes nothing", func(t *testing.T) {

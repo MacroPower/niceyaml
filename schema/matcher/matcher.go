@@ -57,15 +57,3 @@ type Func func(ctx context.Context, doc *niceyaml.Node) (bool, error)
 func (f Func) Match(ctx context.Context, doc *niceyaml.Node) (bool, error) {
 	return f(ctx, doc)
 }
-
-// isNil reports whether m is nil, including a nil [Func], which is a
-// non-nil interface value that panics when called.
-func isNil(m Matcher) bool {
-	if m == nil {
-		return true
-	}
-
-	f, ok := m.(Func)
-
-	return ok && f == nil
-}

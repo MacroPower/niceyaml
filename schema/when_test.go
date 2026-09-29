@@ -17,6 +17,14 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
+// pointerMatcher is a [matcher.Matcher] with a pointer receiver, so a nil
+// *pointerMatcher is a non-nil interface value holding a nil pointer.
+type pointerMatcher struct{}
+
+func (*pointerMatcher) Match(context.Context, *niceyaml.Node) (bool, error) {
+	return true, nil
+}
+
 func TestWhen(t *testing.T) {
 	t.Parallel()
 
@@ -177,6 +185,22 @@ func TestWhen(t *testing.T) {
 
 		assert.PanicsWithValue(t, "schema.When: resolver is nil", func() {
 			schema.When(matcher.Content(kindPath, "x"), schema.ResolverFunc(nil))
+		})
+	})
+
+	t.Run("nil pointer matcher panics", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t, "schema.When: matcher is nil", func() {
+			schema.When((*pointerMatcher)(nil), schema.Embedded(schemaData))
+		})
+	})
+
+	t.Run("nil pointer resolver panics", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t, "schema.When: resolver is nil", func() {
+			schema.When(matcher.Content(kindPath, "x"), (*schema.Schema)(nil))
 		})
 	})
 }

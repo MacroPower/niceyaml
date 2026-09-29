@@ -27,6 +27,14 @@ var (
 	timeoutPath    = paths.Root().Child("timeout")
 )
 
+// pointerMatcher is a [matcher.Matcher] with a pointer receiver, so a nil
+// *pointerMatcher is a non-nil interface value holding a nil pointer.
+type pointerMatcher struct{}
+
+func (*pointerMatcher) Match(context.Context, *niceyaml.Node) (bool, error) {
+	return true, nil
+}
+
 // match runs m on doc and fails the test when the matcher cannot decide.
 func match(t *testing.T, m matcher.Matcher, doc *niceyaml.Node) bool {
 	t.Helper()

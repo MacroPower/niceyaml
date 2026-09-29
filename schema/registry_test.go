@@ -1365,6 +1365,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 		}{
 			"nil interface":    {resolver: nil},
 			"nil ResolverFunc": {resolver: schema.ResolverFunc(nil)},
+			"nil pointer":      {resolver: (*schema.Schema)(nil)},
 		}
 
 		for name, tc := range tcs {

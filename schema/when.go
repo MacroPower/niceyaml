@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
@@ -30,16 +31,14 @@ type guarded struct {
 // A resolver that decides and names the schema from the same parse, such as
 // [Directive], implements [Resolver] directly and needs no guard.
 //
-// Panics if m or r is nil, including a nil [matcher.Func] or
-// [ResolverFunc].
+// Panics if m or r is nil, including a nil pointer, a nil [matcher.Func],
+// or a nil [ResolverFunc].
 func When(m matcher.Matcher, r Resolver) Resolver {
-	// A nil function type is a non-nil interface value that panics when
-	// called, so it counts as nil too.
-	if f, ok := m.(matcher.Func); m == nil || (ok && f == nil) {
+	if nilness.IsNil(m) {
 		panic("schema.When: matcher is nil")
 	}
 
-	if f, ok := r.(ResolverFunc); r == nil || (ok && f == nil) {
+	if nilness.IsNil(r) {
 		panic("schema.When: resolver is nil")
 	}
 

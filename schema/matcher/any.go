@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/nilness"
 )
 
 // anyMatcher matches if any sub-matcher matches (OR logic).
@@ -19,8 +20,9 @@ type anyMatcher struct {
 //
 // Returns false when the caller passes no matchers.
 //
-// Panics if any matcher is nil. The matcher keeps its own copy of
-// matchers, so writing to the caller's slice afterwards changes nothing.
+// Panics if any matcher is nil, including a nil pointer or a nil [Func].
+// The matcher keeps its own copy of matchers, so writing to the caller's
+// slice afterwards changes nothing.
 //
 // Use Any to match several document types with the same schema:
 //
@@ -32,7 +34,7 @@ type anyMatcher struct {
 //	)
 func Any(matchers ...Matcher) Matcher {
 	for i, m := range matchers {
-		if isNil(m) {
+		if nilness.IsNil(m) {
 			panic(fmt.Sprintf("matcher.Any: matcher at index %d is nil", i))
 		}
 	}

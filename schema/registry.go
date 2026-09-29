@@ -21,6 +21,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
+	"go.jacobcolvin.com/niceyaml/internal/nilness"
 )
 
 var (
@@ -207,16 +208,15 @@ func WithHTTPClient(client *http.Client) RegistryOption {
 // The option keeps its own copy of res, so writing to the caller's slice
 // afterwards changes nothing.
 //
-// Panics if any resolver is nil, including a nil [ResolverFunc].
+// Panics if any resolver is nil, including a nil pointer or a nil
+// [ResolverFunc].
 func WithResolvers(res ...Resolver) RegistryOption {
 	// The check covers the copy, which holds the resolvers the registry
 	// tries.
 	res = slices.Clone(res)
 
 	for _, resolver := range res {
-		// A nil function type is a non-nil interface value that panics
-		// when called, so it counts as nil too.
-		if f, ok := resolver.(ResolverFunc); resolver == nil || (ok && f == nil) {
+		if nilness.IsNil(resolver) {
 			panic("schema.WithResolvers: resolver is nil")
 		}
 	}
