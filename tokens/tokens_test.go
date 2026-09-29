@@ -215,6 +215,12 @@ func TestTokenize_NumericEscape(t *testing.T) {
 		"escaped backslash before a header": {
 			input: `a: "\\` + "\n---\nb: 1\n",
 		},
+		"escaped backslashes on two lines before a header": {
+			input: `{a: "\\` + "\n\t" + `\\` + "\n---\n",
+		},
+		"escape cut short after a unicode escape": {
+			input: `a: "\u00e9\u"`,
+		},
 		"unknown escape after an escape": {
 			input: `a: "caf\u00e9 \d"` + "\n",
 		},

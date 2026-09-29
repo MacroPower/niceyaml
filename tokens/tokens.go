@@ -742,7 +742,7 @@ func (p *positioner) place(tk *token.Token) span {
 		}
 	}
 
-	if matched && !restored && cutAtEscape(tk) {
+	if matched && !restored && p.cutAtEscape(tk, start) {
 		p.dropBackslash(tk, start)
 	}
 
@@ -782,8 +782,15 @@ func cutQuoted(tk *token.Token) bool {
 // double-quoted scalar when it gives up on a "\u" or "\U" escape, such as
 // one the source ends too soon for. The lexer ends that token with the
 // escape's backslash and reads on from the backslash, so the token after
-// tk opens with it too.
-func cutAtEscape(tk *token.Token) bool {
+// tk opens with it too. The text of tk starts at rune index start. An
+// escaped backslash also ends the text of tk, and the token after tk may
+// open with a backslash of its own, so cutAtEscape reads the source. The
+// backslash the lexer gives up on opens an escape there, and an escaped
+// one ends the escape the backslash in front of it opens. It steps over
+// the code the lexer drops for each "\x", "\u", and "\U" escape, as
+// [positioner.restoreCut] does. It reports false when the source does not
+// hold the text of tk.
+func (p *positioner) cutAtEscape(tk *token.Token, start int) bool {
 	if tk.Type != token.InvalidType || tk.Next == nil {
 		return false
 	}
@@ -791,7 +798,46 @@ func cutAtEscape(tk *token.Token) bool {
 	text := strings.Trim(tk.Origin, " \t\r\n")
 	next := strings.TrimLeft(tk.Next.Origin, " \t\r\n")
 
-	return len(text) > 1 && strings.HasPrefix(text, `"`) && strings.HasSuffix(text, `\`) && strings.HasPrefix(next, `\`)
+	if len(text) < 2 || !strings.HasPrefix(text, `"`) || !strings.HasSuffix(text, `\`) ||
+		!strings.HasPrefix(next, `\`) {
+		return false
+	}
+
+	// Whether the rune of the text matched last opens an escape, and
+	// whether the escape keeps the rune after its backslash in the text.
+	opens, escaped := false, false
+
+	i := start
+	for _, r := range text {
+		if strings.ContainsRune(" \t\r\n", r) {
+			// The lexer drops some whitespace from the text, so whitespace
+			// needs no match. A space or line break an escape takes ends
+			// the escape.
+			escaped = false
+			continue
+		}
+
+		for i < len(p.src) && p.src[i] != r {
+			i++
+		}
+
+		if i >= len(p.src) {
+			return false
+		}
+
+		opens = !escaped && r == '\\'
+		escaped = false
+
+		if opens {
+			w := p.droppedWidth(i)
+			escaped = w == 0
+			i += w
+		}
+
+		i++
+	}
+
+	return opens
 }
 
 // dropBackslash takes the backslash that ends the text of tk off its
@@ -855,9 +901,9 @@ func (p *positioner) restoreQuoted(tk *token.Token, start int) bool {
 // its code may hold the closing quote or other runes that are not hex
 // digits. The Origin takes the source's runes up to there in place of its
 // text and keeps the whitespace around it. When the token after tk opens
-// with the backslash that ends tk, as [cutAtEscape] reports, tk gives that
-// backslash up and ends with the whitespace in front of it, as
-// [positioner.dropBackslash] leaves it.
+// with the backslash that ends tk, as [positioner.cutAtEscape] reports,
+// tk gives that backslash up and ends with the whitespace in front of it,
+// as [positioner.dropBackslash] leaves it.
 //
 // The lexer puts the Offset of tk at the fault, where the token after tk
 // starts, so restoreCut takes delta from the token after tk. It reports
@@ -879,8 +925,10 @@ func (p *positioner) restoreCut(tk *token.Token, start int) bool {
 	lead := len(tk.Origin) - len(strings.TrimLeft(tk.Origin, " \t\r\n"))
 	trail := len(strings.TrimRight(tk.Origin, " \t\r\n"))
 
+	cut := p.cutAtEscape(tk, start)
+
 	text := tk.Origin[lead:trail]
-	if cutAtEscape(tk) {
+	if cut {
 		text = strings.TrimSuffix(text, `\`)
 	}
 
@@ -926,7 +974,7 @@ func (p *positioner) restoreCut(tk *token.Token, start int) bool {
 	quoted := strings.TrimRight(src, " \t\r\n")
 
 	body := quoted
-	if cutAtEscape(tk) {
+	if cut {
 		body = src
 	}
 
