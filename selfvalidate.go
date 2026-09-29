@@ -548,8 +548,7 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 		// The names cannot tell apart several keys that [nameKey] gives
 		// one value, such as several NaN keys or several time keys of one
 		// instant and zone, so none of them takes the text of a document
-		// key. Their paths then resolve to no node, and no error points at
-		// the line of another entry.
+		// key. They then share one path, as below.
 		for k, n := range shared {
 			if n > 1 {
 				delete(names, k)
@@ -567,16 +566,19 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 
 		slices.SortFunc(entries, compareKeys)
 
-		// A path names a key by its text alone, so keys of different
-		// types that share a segment, such as 1 and "1" in a map[any]T,
-		// share a path, which resolves to the document entry of one of
-		// them. A `<<` merge can bring in such a key beside one the
-		// mapping spells, even where the parser rejects duplicate keys.
-		// The errors under such a path bind with no position.
+		// A path names a key by its text alone, so keys that share a
+		// segment share a path, which resolves to the document entry of
+		// one of them at most. Keys of different types can share one,
+		// such as 1 and "1" in a map[any]T, and so can the keys above
+		// that no name tells apart, such as several NaN keys beside one
+		// the document spells NaN. A `<<` merge can bring in such a key
+		// beside one the mapping spells, even where the parser rejects
+		// duplicate keys. The errors under such a path bind with no
+		// position.
 		ambiguous := map[string]bool{}
 
 		for i := 1; i < len(entries); i++ {
-			if entries[i].seg == entries[i-1].seg && entries[i].typeName != entries[i-1].typeName {
+			if entries[i].seg == entries[i-1].seg {
 				ambiguous[entries[i].seg] = true
 			}
 		}
@@ -621,8 +623,8 @@ type mapEntry struct {
 // can do. That value walks once, so its errors join the group of
 // whichever entry walks first, and the map iteration decides which.
 //
-// When ambiguous is true, path also names the entries of keys of other
-// types, so the errors of entries bind with no position, for the reason
+// When ambiguous is true, path names the entries of several keys, so the
+// errors of entries bind with no position, for the reason
 // [ErrAmbiguousPath].
 func (w *selfWalker) walkEntries(path paths.Path, entries []mapEntry, ambiguous bool) bool {
 	ok := true

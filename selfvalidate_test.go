@@ -1474,6 +1474,34 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
+	t.Run("several NaN keys report no position beside a key spelled NaN", func(t *testing.T) {
+		t.Parallel()
+
+		// Every NaN key takes the path segment NaN, which the first key
+		// spells, so that path resolves to the first entry alone.
+		dd := yamltest.FirstDocument(t, "NaN: {n: -1}\n.nan: {n: -2}\n")
+
+		_, err := dd.Decode[map[float64]signed](t.Context())
+		require.Error(t, err)
+
+		var got []string
+
+		for bound := range niceyaml.AllBindings(err) {
+			if _, ok := bound.Path(); !ok {
+				continue
+			}
+
+			require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrAmbiguousPath)
+
+			got = append(got, bound.Error())
+		}
+
+		assert.Equal(t, []string{
+			"$.NaN.n: negative -1",
+			"$.NaN.n: negative -2",
+		}, got)
+	})
+
 	t.Run("several NaN keys order a value that refers to itself", func(t *testing.T) {
 		t.Parallel()
 

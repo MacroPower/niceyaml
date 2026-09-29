@@ -116,10 +116,11 @@ var (
 	// ErrAmbiguousPath indicates a path that names the entries of more
 	// than one key of a decoded map. Keys of different types that the
 	// document spells with one text, such as 1 and "1" in a map[any]T,
-	// share one path, and the path resolves to the document entry of one
-	// of them. A decode binds the errors a [SelfValidator] reports under
-	// such a path with no position, so none points at the line of another
-	// entry. [SourceError.Unresolved] reports it.
+	// share one path, and so do several NaN keys. Such a path resolves to
+	// the document entry of one of them at most. A decode binds the
+	// errors a [SelfValidator] reports under such a path with no
+	// position, so none points at the line of another entry.
+	// [SourceError.Unresolved] reports it.
 	ErrAmbiguousPath = errors.New("path names the entries of several keys")
 
 	// The reason of a [SourceError] whose error carries no location at
