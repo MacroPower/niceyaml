@@ -594,6 +594,54 @@ func TestStatusBarWidth(t *testing.T) {
 	}
 }
 
+func TestTitleLinePosition(t *testing.T) {
+	t.Parallel()
+
+	// Each line wraps onto several rows, and the bracket shows the line at
+	// the top of the view, in the same unit as the line count beside it.
+	long := strings.Repeat("word ", 60)
+	src := "a: " + long + "\nb: " + long + "\nc: " + long + "\n"
+
+	tcs := map[string]struct {
+		keys []tea.KeyPressMsg
+		want string
+	}{
+		"top": {
+			want: " [1] ",
+		},
+		"bottom": {
+			keys: []tea.KeyPressMsg{{Code: 'G', Text: "G"}},
+			want: " [3] ",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newModel(&modelOptions{
+				sources: []*niceyaml.Source{
+					niceyaml.NewSourceFromString(src, niceyaml.WithName("x.yaml")),
+				},
+			})
+
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 8})
+
+			for _, key := range tc.keys {
+				updated, _ = updated.Update(key)
+			}
+
+			got, ok := updated.(model)
+			require.True(t, ok)
+			require.Equal(t, 3, got.viewport.TotalLineCount())
+
+			title := got.titleLine()
+			assert.Contains(t, title, " 3 lines ")
+			assert.Contains(t, title, tc.want)
+		})
+	}
+}
+
 func TestTextLineEscapesRevisionName(t *testing.T) {
 	t.Parallel()
 

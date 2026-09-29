@@ -366,12 +366,16 @@ func (m *model) titleLine() string {
 
 	revisionInfo := m.revisionLabel()
 
+	// Show the top line rather than the top row, so the position counts
+	// lines as the line count beside it does.
+	topLine := m.viewport.TopLine() + 1
+
 	var titleText string
 
 	if revisionInfo != "" {
-		titleText = fmt.Sprintf(" %s [%d] ", revisionInfo, m.viewport.YOffset()+1)
+		titleText = fmt.Sprintf(" %s [%d] ", revisionInfo, topLine)
 	} else {
-		titleText = fmt.Sprintf(" [%d] ", m.viewport.YOffset()+1)
+		titleText = fmt.Sprintf(" [%d] ", topLine)
 	}
 
 	linesText := fmt.Sprintf(" %d lines ", m.viewport.TotalLineCount())
