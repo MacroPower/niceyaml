@@ -1575,7 +1575,10 @@ func WithReferences(data ...[]byte) DecodeOption {
 // bound to the source as [SourceError] values, with a path in them
 // resolving from the scope. A decoding error the go-yaml decoder
 // reports, such as a value that does not read as the target type,
-// matches [ErrDecodeRejected].
+// matches [ErrDecodeRejected]. A [time.Duration] that
+// [time.ParseDuration] rejects is the exception. The decoder returns the
+// error of that function alone, so it comes back as it is, with no
+// location, and does not match.
 //
 // An alias inside the node resolves against the anchors of the whole
 // document, to the anchor of its name defined last before the alias,
@@ -1981,8 +1984,10 @@ func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 // bindDecodeError binds an error from the decoder to the source. A
 // [yaml.Error] at a token of the source binds as an [*Error] at that
 // token, so the excerpt marks it and the error matches
-// [ErrDecodeRejected]. Any other error, such as a canceled context or one
-// a value's own UnmarshalYAML returns, binds as it is. Only a
+// [ErrDecodeRejected]. Any other error binds as it is, such as a
+// canceled context, one a value's own UnmarshalYAML returns, or the
+// error of [time.ParseDuration] the decoder returns for a
+// [time.Duration] it cannot read. Only a
 // [yaml.Error] the decoder returns itself converts, so a [yaml.Error]
 // that a value's UnmarshalYAML wraps comes back as that unmarshaler's
 // error, with the text and sentinels of its wrapper. An UnmarshalYAML
@@ -2160,7 +2165,9 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 // receivers participate. YAML decoding errors, and [Error] values from
 // the validators, come back bound to the source as [SourceError]
 // values, and a value the go-yaml decoder rejects matches
-// [ErrDecodeRejected]. On error, the returned T is the zero value.
+// [ErrDecodeRejected], except the [time.Duration] that
+// [Node.DecodeInto] describes. On error, the returned T is the zero
+// value.
 //
 // A scoped Decode reads one typed value without decoding the whole
 // document, such as a version number or a list of tags. A scalar decodes

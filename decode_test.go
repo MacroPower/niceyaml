@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml"
@@ -5917,6 +5918,28 @@ func TestErrDecodeRejected(t *testing.T) {
 
 		_, ok := srcErr.Range()
 		assert.False(t, ok, "the error took a location from the value's own parse")
+	})
+
+	t.Run("unparsable duration does not match", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder returns the error of time.ParseDuration alone, with
+		// no token to bind it to. A go-yaml release that reports it as a
+		// yaml.Error flips this case into a rejection at 2:10.
+		dd := yamltest.FirstDocument(t, "name: api\ntimeout: 5 minutes\n")
+
+		_, err := dd.Decode[struct {
+			Timeout time.Duration `yaml:"timeout"`
+		}](t.Context())
+		require.ErrorContains(t, err, "unknown unit")
+		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+		var srcErr *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &srcErr)
+
+		_, ok := srcErr.Range()
+		assert.False(t, ok, "the error took a location")
 	})
 
 	t.Run("decode target does not match", func(t *testing.T) {

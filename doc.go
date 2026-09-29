@@ -339,8 +339,8 @@
 // resolving a [paths.Path]. Positions, ranges, lines, errors, and styles are
 // niceyaml's own types, and [paths.Path.YAMLPath] converts to go-yaml's
 // path type when a caller needs it. A decode the go-yaml decoder rejects
-// matches [ErrDecodeRejected], so a caller tells that case apart without
-// naming go-yaml's error types.
+// matches [ErrDecodeRejected], with the exceptions its doc names, so a
+// caller tells that case apart without naming go-yaml's error types.
 //
 // The go-yaml settings niceyaml supports have named options, such as
 // [WithAllowDuplicateKeys] or [go.jacobcolvin.com/niceyaml/encoder.WithIndent].

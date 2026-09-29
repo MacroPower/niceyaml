@@ -42,7 +42,10 @@ type contentMatcher[T comparable] struct {
 // numbers compare by value whatever their Go types, so
 // Content[any](path, 1) matches an integer the decoder reads as a
 // uint64. A document without the path, or
-// whose value does not decode into T, does not match. Any other error
+// whose value does not decode into T, does not match. A [time.Duration]
+// T is the exception, since the decoder reports a duration it cannot
+// read without [niceyaml.ErrDecodeRejected], so Match returns that
+// error. Any other error
 // from the read comes back as the error, so a registry stops at the
 // document rather than routing it elsewhere. Such errors include an alias
 // on the path that names no anchor, a path with a wildcard selector, and

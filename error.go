@@ -56,6 +56,9 @@ var (
 	// there, which an error at the path of the value binds to as well.
 	// An error a value's own UnmarshalYAML returns, and the error
 	// of a context that ended, come back as they are and do not match.
+	// Neither does a [time.Duration] that [time.ParseDuration] rejects,
+	// since the decoder returns the error of that function alone, and it
+	// comes back with no location.
 	// A panic in the go-yaml decoder or in a value's own UnmarshalYAML
 	// does match, bound at the first token of the node that is not a
 	// comment, with no go-yaml error in the chain. So does a value nested

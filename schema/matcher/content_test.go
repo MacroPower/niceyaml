@@ -672,3 +672,18 @@ func TestContent_UnmarshalerError(t *testing.T) {
 	require.ErrorIs(t, err, errRejecting)
 	assert.False(t, ok)
 }
+
+func TestContent_UnparsableDuration(t *testing.T) {
+	t.Parallel()
+
+	// The decoder reports a duration it cannot read without
+	// niceyaml.ErrDecodeRejected, so the matcher returns the error rather
+	// than a no.
+	m := matcher.Content(paths.Root().Child("timeout"), time.Minute)
+	doc := yamltest.FirstDocument(t, stringtest.Input(`timeout: 5 minutes`))
+
+	ok, err := m.Match(t.Context(), doc)
+	require.ErrorContains(t, err, "unknown unit")
+	require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+	assert.False(t, ok)
+}
