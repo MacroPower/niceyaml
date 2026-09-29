@@ -656,8 +656,27 @@ func TestContent(t *testing.T) {
 				m:   matcher.Content(kindPath, millis(1000)),
 				err: schema.ErrExcessiveAliasing,
 			},
+			"struct field text unmarshaler": {
+				m:   matcher.Content(kindPath, textField{}),
+				err: schema.ErrExcessiveAliasing,
+			},
+			"array element text unmarshaler": {
+				m:   matcher.Content(kindPath, [2]prefixedString{}),
+				err: schema.ErrExcessiveAliasing,
+			},
+			"slice element behind a pointer": {
+				m:   matcher.Content(kindPath, new(textSlice)),
+				err: schema.ErrExcessiveAliasing,
+			},
+			"recursive type with a text field": {
+				m:   matcher.Content(kindPath, textChain{}),
+				err: schema.ErrExcessiveAliasing,
+			},
 			"plain string": {
 				m: matcher.Content(kindPath, "x"),
+			},
+			"struct of plain fields": {
+				m: matcher.Content(kindPath, plainField{}),
 			},
 		}
 
@@ -749,6 +768,27 @@ func (p *prefixedString) UnmarshalText(text []byte) error {
 	*p = prefixedString("v" + string(text))
 
 	return nil
+}
+
+// textField, textSlice, and textChain reach a [prefixedString] through a
+// field or an element, so a decode into them reads text too.
+type (
+	textField struct {
+		K prefixedString
+	}
+	textSlice struct {
+		S []prefixedString
+	}
+	textChain struct {
+		Next *textChain
+		K    prefixedString
+	}
+)
+
+// plainField holds only fields that decode as plain values do.
+type plainField struct {
+	K string
+	N *int
 }
 
 // namedInt and namedFloat are numeric types a caller names, which compare

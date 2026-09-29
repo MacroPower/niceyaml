@@ -105,7 +105,8 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 
 	// A decode into a type that decodes itself from text writes the node
 	// out with a copy of the text of each alias, which the count above
-	// leaves out.
+	// leaves out. A struct field or an element of such a type gets the
+	// same treatment.
 	if decodesText(reflect.TypeFor[T]()) {
 		err = aliasing.CheckDecodeText(node)
 		if err != nil {
@@ -265,14 +266,45 @@ var (
 	}
 )
 
-// decodesText reports whether the decoder reads t, or what t points to,
-// through one of [textUnmarshalerTypes].
+// decodesText reports whether a decode into t may read some value
+// through one of [textUnmarshalerTypes]: t itself, or a type the decoder
+// reaches from t through a pointer, a struct field, an array or slice
+// element, or a map key or element.
 func decodesText(t reflect.Type) bool {
-	if t.Kind() == reflect.Pointer {
-		t = t.Elem()
+	return reachesText(t, map[reflect.Type]bool{})
+}
+
+// reachesText reports what [decodesText] reports for t, skipping the
+// types in seen, which it has checked already, so a recursive type ends
+// the walk.
+func reachesText(t reflect.Type, seen map[reflect.Type]bool) bool {
+	if seen[t] {
+		return false
 	}
 
-	return slices.ContainsFunc(textUnmarshalerTypes, reflect.PointerTo(t).Implements)
+	seen[t] = true
+
+	if slices.ContainsFunc(textUnmarshalerTypes, reflect.PointerTo(t).Implements) {
+		return true
+	}
+
+	switch t.Kind() {
+	case reflect.Pointer, reflect.Array, reflect.Slice:
+		return reachesText(t.Elem(), seen)
+	case reflect.Map:
+		return reachesText(t.Key(), seen) || reachesText(t.Elem(), seen)
+	case reflect.Struct:
+		for field := range t.Fields() {
+			if reachesText(field.Type, seen) {
+				return true
+			}
+		}
+
+		return false
+
+	default:
+		return false
+	}
 }
 
 // isPlainString reports whether t is a string type that [isPlain]
