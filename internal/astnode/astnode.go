@@ -19,10 +19,9 @@
 package astnode
 
 import (
-	"reflect"
-
 	"github.com/goccy/go-yaml/ast"
 
+	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -51,9 +50,10 @@ func Content(node ast.Node) ast.Node {
 }
 
 // IsNil reports whether node is nil, including a typed nil behind a
-// non-nil interface.
+// non-nil interface. A node that is not a pointer, such as a struct that
+// embeds one, is never nil.
 func IsNil(node ast.Node) bool {
-	return node == nil || reflect.ValueOf(node).IsNil()
+	return nilness.IsNil(node)
 }
 
 // HasContent reports whether node holds a YAML value. It returns false

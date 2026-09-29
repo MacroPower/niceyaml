@@ -10,6 +10,13 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
+// embeddedNode is a struct value that satisfies [ast.Node] through an
+// embedded node pointer.
+type embeddedNode struct{ *ast.StringNode }
+
+// decoratedNode wraps an [ast.Node] the way a decorator does.
+type decoratedNode struct{ ast.Node }
+
 func TestContent(t *testing.T) {
 	t.Parallel()
 
@@ -99,6 +106,14 @@ func TestIsNil(t *testing.T) {
 		},
 		"node": {
 			node: &ast.StringNode{},
+			want: false,
+		},
+		"struct embedding a node": {
+			node: embeddedNode{&ast.StringNode{}},
+			want: false,
+		},
+		"decorator": {
+			node: decoratedNode{&ast.StringNode{}},
 			want: false,
 		},
 	}
