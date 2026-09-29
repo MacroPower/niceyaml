@@ -476,7 +476,7 @@ func (e *Error) Format(f fmt.State, verb rune) {
 // does, keeps the excerpt out of the attribute. A program that wants
 // the excerpt in a log logs [FormatError] as a string.
 func (e *Error) LogValue() slog.Value {
-	return slog.StringValue(renderErrorTree(NewErrorTree(e)))
+	return slog.StringValue(logTree(e))
 }
 
 // locus is the location an [Error] carries: a path when hasPath, a
@@ -1647,7 +1647,7 @@ func (e *SourceError) Format(f fmt.State, verb rune) {
 // SourceError logs as its own message, so a program that holds any
 // error, or wants the excerpt in a log, logs [FormatError] as a string.
 func (e *SourceError) LogValue() slog.Value {
-	return slog.StringValue(renderErrorTree(NewErrorTree(e)))
+	return slog.StringValue(logTree(e))
 }
 
 // FormatError renders err as plain text for a log or a terminal without
@@ -1731,6 +1731,18 @@ func renderErrorTree(t ErrorTree) string {
 	writeErrorBranches(&sb, t.Children, "", t.Text != "")
 
 	return sb.String()
+}
+
+// logTree renders the tree of err as [renderErrorTree] lays it out. When
+// that tree renders nothing, such as for a bound join of typed-nil
+// errors, it renders the tree of one node that holds the message of err,
+// as [FormatError] does when it has no excerpt either.
+func logTree(err error) string {
+	if out := renderErrorTree(NewErrorTree(err)); out != "" {
+		return out
+	}
+
+	return renderErrorTree(ErrorTree{Text: err.Error()})
 }
 
 // writeErrorBranches writes children behind their connectors, indented

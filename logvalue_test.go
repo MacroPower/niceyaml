@@ -3,6 +3,7 @@ package niceyaml_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"testing"
@@ -63,6 +64,17 @@ func TestError_LogValue(t *testing.T) {
 		assert.Equal(t, "$.x: bad x", logged(t, err))
 	})
 
+	t.Run("a join of typed-nil errors logs its message", func(t *testing.T) {
+		t.Parallel()
+
+		var nilErr *niceyaml.Error
+
+		err := niceyaml.WrapError(errors.Join(nilErr, nilErr))
+
+		assert.Equal(t, "\n", err.LogValue().String())
+		assert.Equal(t, niceyaml.FormatError(err, 2), err.LogValue().String())
+	})
+
 	t.Run("a nil error logs nothing", func(t *testing.T) {
 		t.Parallel()
 
@@ -109,6 +121,24 @@ func TestSourceError_LogValue(t *testing.T) {
 		wrapped := fmt.Errorf("load config: %w", err)
 
 		assert.Equal(t, "load config: cfg.yaml:1:4: $.x: bad x", logged(t, wrapped))
+	})
+
+	t.Run("a bound join of typed-nil errors logs its message", func(t *testing.T) {
+		t.Parallel()
+
+		var nilErr *niceyaml.Error
+
+		err := source.Bind(errors.Join(nilErr, nilErr))
+		require.Error(t, err)
+
+		assert.Equal(t, "cfg.yaml: \n", logged(t, err))
+		assert.Equal(t, niceyaml.FormatError(err, 2), logged(t, err))
+
+		var buf bytes.Buffer
+
+		slog.New(slog.NewTextHandler(&buf, nil)).Error("load", slog.Any("err", err))
+
+		assert.Contains(t, buf.String(), `err="cfg.yaml: \n"`)
 	})
 
 	t.Run("a nil error logs nothing", func(t *testing.T) {
