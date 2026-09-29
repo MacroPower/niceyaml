@@ -900,9 +900,10 @@ func isBound(err error) bool {
 // [Rebase], or one that carries a position or a range alone, writes the
 // text of [Error.textCause] otherwise, so the walk continues there, and
 // any other Error writes the text of its cause. At an error that unwraps
-// to several, the walk continues with its first branch that is not nil,
-// since that branch supplies the first line of the text of an
-// [errors.Join].
+// to several, the walk continues with its first branch that is not a nil
+// interface, since [errors.Join] keeps every other branch and that one
+// supplies the first line. A nil [*Error] or [*SourceError] there
+// supplies an empty first line, so no binding leads.
 func leadingBinding(err error) *SourceError {
 	for cur := err; ; {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -938,7 +939,7 @@ func leadingBinding(err error) *SourceError {
 			cur = nil
 
 			for _, branch := range x.Unwrap() {
-				if !isNothing(branch) {
+				if branch != nil {
 					cur = branch
 
 					break

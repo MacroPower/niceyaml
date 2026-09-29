@@ -303,6 +303,53 @@ func TestSourceError_Error_Name(t *testing.T) {
 	}
 }
 
+func TestSourceError_Error_JoinLead(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
+	bound := yamltest.Bind(t, source, niceyaml.NewError(
+		"bad a",
+		niceyaml.AtPath(paths.Root().Child("a")),
+	))
+
+	// A binding that supplies the first line of a join names the source
+	// there, so the name goes in front only when the first line comes
+	// from no binding. A nil branch supplies an empty first line.
+	tcs := map[string]struct {
+		// The branches in front of the binding.
+		lead []error
+		want string
+	}{
+		"binding leads": {
+			want: "f.yaml:1:4: $.a: bad a\nplain",
+		},
+		"empty message leads": {
+			lead: []error{errors.New("")},
+			want: "f.yaml: \nf.yaml:1:4: $.a: bad a\nplain",
+		},
+		"nil Error leads": {
+			lead: []error{(*niceyaml.Error)(nil)},
+			want: "f.yaml: \nf.yaml:1:4: $.a: bad a\nplain",
+		},
+		"nil SourceError leads": {
+			lead: []error{(*niceyaml.SourceError)(nil)},
+			want: "f.yaml: \nf.yaml:1:4: $.a: bad a\nplain",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			branches := append(slices.Clone(tc.lead), bound, errors.New("plain"))
+			err := source.Bind(errors.Join(branches...))
+
+			require.Error(t, err)
+			assert.Equal(t, tc.want, err.Error())
+		})
+	}
+}
+
 func TestDocument_BindRender(t *testing.T) {
 	t.Parallel()
 
