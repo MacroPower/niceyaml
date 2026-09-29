@@ -1363,13 +1363,15 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 func wrapLine(text string, cw int) []string {
 	rows := wrapRows(text, cw, wrapOnCharacters)
 
-	// The wrap leaves a row wider than cw in two cases. When a full row
+	// The wrap leaves a row wider than cw in three cases. When a full row
 	// meets a space and then a breakpoint, the row keeps the space, and
 	// dropping it, as the wrap drops the space at any other break, fits
-	// the row. When a breakpoint falls just past the width, a hard wrap
-	// cuts the row down to size. Either way, every row fits the width the
-	// caller asked for. The hard wrap does not reopen a style on the rows
-	// it cuts off, and a second pass of the wrap, which does, restores it.
+	// the row. When a breakpoint falls just past the width, or a cluster
+	// that starts with an ASCII byte, such as a keycap, spans more cells
+	// than the wrap counts for it, a hard wrap cuts the row down to size.
+	// Either way, every row fits the width the caller asked for. The hard
+	// wrap does not reopen a style on the rows it cuts off, and a second
+	// pass of the wrap, which does, restores it.
 	out := make([]string, 0, len(rows))
 
 	for _, row := range rows {
@@ -1387,7 +1389,7 @@ func wrapLine(text string, cw int) []string {
 			continue
 		}
 
-		out = append(out, wrapRows(ansi.Hardwrap(row, cw, true), cw, "")...)
+		out = append(out, wrapRows(hardwrap(row, cw), cw, "")...)
 	}
 
 	// The wrap can leave rows with no text on them, so those rows go. It
@@ -1429,6 +1431,43 @@ func wrapLine(text string, cw int) []string {
 	slices.Reverse(kept)
 
 	return kept
+}
+
+// hardwrap breaks row before each grapheme cluster that would take it past
+// cw cells, and returns the rows joined by newlines. It measures each
+// cluster as [lipgloss.Width] does, so a keycap counts its two cells,
+// where [ansi.Hardwrap] counts one for its ASCII base. A cluster wider
+// than cw stays whole on a row of its own. The escape sequences stay
+// where they are, so a row the cut ends may leave a style open.
+func hardwrap(row string, cw int) string {
+	var b strings.Builder
+
+	width := 0
+
+	for i := 0; i < len(row); {
+		if row[i] == ansi.ESC {
+			seq, _, size, _ := ansi.DecodeSequence(row[i:], ansi.NormalState, nil)
+			b.WriteString(seq)
+
+			i += size
+
+			continue
+		}
+
+		cluster, w := ansi.FirstGraphemeCluster(row[i:], ansi.GraphemeWidth)
+		if width > 0 && width+w > cw {
+			b.WriteByte('\n')
+
+			width = 0
+		}
+
+		b.WriteString(cluster)
+
+		width += w
+		i += len(cluster)
+	}
+
+	return b.String()
 }
 
 // wrapRows wraps text to rows of at most cw cells with [lipgloss.Wrap],

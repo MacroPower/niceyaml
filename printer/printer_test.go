@@ -1929,6 +1929,28 @@ func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 			styled: true,
 			want:   []string{"1\ufe0f\u20e3", ":", "b", "b"},
 		},
+		"keycaps fill a row": {
+			input: "k: " + strings.Repeat("1\ufe0f\u20e3", 6),
+			width: 8,
+			want:  []string{"k:", strings.Repeat("1\ufe0f\u20e3", 4), strings.Repeat("1\ufe0f\u20e3", 2)},
+		},
+		"keycaps fill a row styled": {
+			input:  "k: " + strings.Repeat("1\ufe0f\u20e3", 6),
+			width:  8,
+			styled: true,
+			want:   []string{"k:", strings.Repeat("1\ufe0f\u20e3", 4), strings.Repeat("1\ufe0f\u20e3", 2)},
+		},
+		"keycap mid row": {
+			input: "k: cccxx1\ufe0f\u20e3dddd",
+			width: 9,
+			want:  []string{"k:", "cccxx1\ufe0f\u20e3dd", "d", "d"},
+		},
+		"keycap mid row styled": {
+			input:  "k: cccxx1\ufe0f\u20e3dddd",
+			width:  9,
+			styled: true,
+			want:   []string{"k:", "cccxx1\ufe0f\u20e3dd", "d", "d"},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1961,6 +1983,14 @@ func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 
 			assert.Equal(t, tc.want, plain)
 			assert.Len(t, rows, p.Layout(view).Rows())
+
+			// A row runs past the width only when it holds a lone cluster
+			// wider than the width.
+			for i, row := range plain {
+				if cluster, _ := ansi.FirstGraphemeCluster(row, ansi.GraphemeWidth); cluster != row {
+					assert.LessOrEqual(t, lipgloss.Width(row), tc.width, "row %d: %q", i, row)
+				}
+			}
 
 			if tc.styled {
 				// Every row opens the style and closes it again, so no row
