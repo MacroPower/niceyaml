@@ -27,7 +27,9 @@ type Pattern struct {
 // returns [ErrInvalidPattern] when the pattern syntax is invalid. It also
 // returns [ErrInvalidPattern] when the braces would expand to more than
 // [MaxBraceExpansions] patterns or take too much work to expand, the two
-// limits at which [ExpandBraces] gives up.
+// limits at which [ExpandBraces] gives up. A cleaned path is never empty,
+// so NewPattern returns [ErrInvalidPattern] for an empty pattern, and for
+// a pattern such as "{,}" whose braces expand only to empty patterns.
 //
 // NewPattern drops "." elements such as a leading "./", repeated
 // separators, and a trailing separator from the pattern, as
@@ -57,6 +59,10 @@ func NewPattern(pattern string) (Pattern, error) {
 	globs, ok := expandPattern(pattern, normalizePattern)
 	if !ok {
 		return Pattern{}, fmt.Errorf("%w: braces expand past the limit", ErrInvalidPattern)
+	}
+
+	if !slices.ContainsFunc(globs, func(glob string) bool { return glob != "" }) {
+		return Pattern{}, fmt.Errorf("%w: an empty pattern matches no path", ErrInvalidPattern)
 	}
 
 	for _, glob := range globs {

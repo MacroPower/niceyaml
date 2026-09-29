@@ -120,6 +120,15 @@ func TestFilePath_InvalidPattern(t *testing.T) {
 		"parent after star": {
 			pattern: "configs/*/../x.yaml",
 		},
+		"empty": {
+			pattern: "",
+		},
+		"empty brace group": {
+			pattern: "{}",
+		},
+		"empty alternatives": {
+			pattern: "{,}",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -134,17 +143,4 @@ func TestFilePath_InvalidPattern(t *testing.T) {
 			})
 		})
 	}
-}
-
-func TestFilePath_EmptyPattern(t *testing.T) {
-	t.Parallel()
-
-	// An empty pattern matches nothing, so FilePath rejects it rather
-	// than silently disabling the matcher.
-	_, err := matcher.FilePath("")
-	require.ErrorIs(t, err, matcher.ErrInvalidPattern)
-
-	assert.Panics(t, func() {
-		matcher.MustFilePath("")
-	})
 }

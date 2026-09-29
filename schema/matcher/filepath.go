@@ -8,9 +8,10 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 )
 
-// ErrInvalidPattern reports a glob pattern [FilePath] cannot use, which is
-// an empty pattern, one whose syntax does not parse, one whose braces
-// expand to more patterns than matching can afford, or one that keeps a
+// ErrInvalidPattern reports a glob pattern [FilePath] cannot use. That is
+// an empty pattern or one whose braces expand only to empty patterns, one
+// whose syntax does not parse, or one whose braces expand to more
+// patterns than matching can afford. It is also a pattern that keeps a
 // ".." after a glob element such as "*", which no cleaned path can match.
 var ErrInvalidPattern = filepaths.ErrInvalidPattern
 
@@ -37,18 +38,16 @@ type filePathMatcher struct {
 //	m, err := matcher.FilePath("*.yaml")
 //
 // An empty pattern is [ErrInvalidPattern] too, since it would match nothing
-// and silently disable the [Matcher]. So is a pattern that keeps a ".."
-// after a glob element, as in "configs/*/../x.yaml", because a cleaned path
-// holds a ".." only at its start. A ".." after "**" stays valid when only
-// ".." and "**" elements come before it in a relative pattern, since "**"
-// can match no directory at all, so "**/../x.yaml" matches "../x.yaml". A
-// rooted pattern such as "/**/../x.yaml", or one with a name before the
-// "**" such as "a/**/../x.yaml", is [ErrInvalidPattern].
+// and silently disable the [Matcher], and so is a pattern such as "{,}"
+// whose braces expand only to empty patterns. So is a pattern that keeps
+// a ".." after a glob element, as in "configs/*/../x.yaml", because a
+// cleaned path holds a ".." only at its start. A ".." after "**" stays
+// valid when only ".." and "**" elements come before it in a relative
+// pattern, since "**" can match no directory at all, so "**/../x.yaml"
+// matches "../x.yaml". A rooted pattern such as "/**/../x.yaml", or one
+// with a name before the "**" such as "a/**/../x.yaml", is
+// [ErrInvalidPattern].
 func FilePath(pattern string) (Matcher, error) {
-	if pattern == "" {
-		return nil, fmt.Errorf("%w: %q", ErrInvalidPattern, pattern)
-	}
-
 	p, err := filepaths.NewPattern(pattern)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %q", err, pattern)

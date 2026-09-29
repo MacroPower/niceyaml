@@ -35,6 +35,22 @@ func TestNewPattern(t *testing.T) {
 		},
 		"empty pattern": {
 			pattern: "",
+			err:     filepaths.ErrInvalidPattern,
+		},
+		"empty brace group": {
+			pattern: "{}",
+			err:     filepaths.ErrInvalidPattern,
+		},
+		"empty alternatives": {
+			pattern: "{,}",
+			err:     filepaths.ErrInvalidPattern,
+		},
+		"nested empty alternatives": {
+			pattern: "{,{}}",
+			err:     filepaths.ErrInvalidPattern,
+		},
+		"one empty alternative": {
+			pattern: "{,a.yaml}",
 		},
 		"invalid bracket": {
 			pattern: "[",
@@ -411,10 +427,10 @@ func TestPattern_Match(t *testing.T) {
 			path:    "",
 			want:    false,
 		},
-		"empty pattern": {
-			pattern: "",
-			path:    "config.yaml",
-			want:    false,
+		"one empty alternative": {
+			pattern: "{,a.yaml}",
+			path:    "a.yaml",
+			want:    true,
 		},
 	}
 
