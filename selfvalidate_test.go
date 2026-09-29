@@ -1102,6 +1102,51 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
+	t.Run("several NaN keys report no position and come back in one order", func(t *testing.T) {
+		t.Parallel()
+
+		// A map holds every NaN key the document spells, and no name
+		// tells them apart, so no error takes the line of one key.
+		tcs := map[string]struct {
+			target func() any
+		}{
+			"float key": {
+				target: func() any { return &map[float64]signed{} },
+			},
+			"key behind an interface": {
+				target: func() any { return &map[any]signed{} },
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, ".nan: {n: -2}\n.NaN: {n: -1}\n")
+
+				// The map iterates in a new order on each decode.
+				for range 20 {
+					err := dd.DecodeInto(t.Context(), tc.target())
+
+					var bound *niceyaml.SourceError
+
+					require.ErrorAs(t, err, &bound)
+
+					var got []string
+
+					for _, child := range bound.Errors() {
+						got = append(got, child.Error())
+					}
+
+					assert.Equal(t, []string{
+						"$.NaN.n: negative -1",
+						"$.NaN.n: negative -2",
+					}, got)
+				}
+			})
+		}
+	})
+
 	t.Run("a key below a wide map reports the text the document spells it with", func(t *testing.T) {
 		t.Parallel()
 

@@ -398,10 +398,11 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 	case reflect.Map:
 		// The entries walk in the order of their keys, so the errors come
 		// back in one order however the map iterates. Two keys of one
-		// text, such as 1 and "1", order by the types they hold. Each
-		// value comes from the iteration rather than a lookup by its key,
-		// since a NaN key equals no key, itself included. The key of an
-		// entry walks before its value, at the key of the entry's path.
+		// text, such as 1 and "1", order by the types they hold, and
+		// several NaN keys order by their values. Each value comes from
+		// the iteration rather than a lookup by its key, since a NaN key
+		// equals no key, itself included. The key of an entry walks before
+		// its value, at the key of the entry's path.
 		names := w.keyNames(base, v.Type().Key())
 
 		type entry struct {
@@ -410,20 +411,36 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 		}
 
 		entries := make([]entry, 0, v.Len())
+		nans := 0
 
 		for iter := v.MapRange(); iter.Next(); {
 			key := iter.Key()
+			if k, _ := nameKey(key); k == (nanKey{}) {
+				nans++
+			}
 
-			entries = append(entries, entry{
-				key:      key,
-				value:    iter.Value(),
-				seg:      mapKey(key, names),
-				typeName: keyTypeName(key),
-			})
+			entries = append(entries, entry{key: key, value: iter.Value()})
+		}
+
+		// The names cannot tell several NaN keys apart, so none of them
+		// takes the text of a document key. Their paths then resolve to
+		// no node, and no error points at the line of another entry.
+		if nans > 1 {
+			delete(names, nanKey{})
+		}
+
+		for i := range entries {
+			entries[i].seg = mapKey(entries[i].key, names)
+			entries[i].typeName = keyTypeName(entries[i].key)
 		}
 
 		slices.SortStableFunc(entries, func(a, b entry) int {
-			return cmp.Or(strings.Compare(a.seg, b.seg), strings.Compare(a.typeName, b.typeName))
+			c := cmp.Or(strings.Compare(a.seg, b.seg), strings.Compare(a.typeName, b.typeName))
+			if c != 0 {
+				return c
+			}
+
+			return strings.Compare(fmt.Sprint(a.value), fmt.Sprint(b.value))
 		})
 
 		for _, e := range entries {
