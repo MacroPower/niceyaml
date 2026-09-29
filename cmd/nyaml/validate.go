@@ -50,6 +50,24 @@ func validateCmd() *cobra.Command {
 				}
 
 				err := validateFile(cmd.Context(), yamlPath, reg)
+
+				// A run canceled during the file stops there. The error of
+				// the document the cancellation hit already reports it, with
+				// an excerpt, so the bare cancellation joins only when no
+				// error of the file wraps it.
+				ctxErr = cmd.Context().Err()
+				if ctxErr != nil {
+					if err != nil {
+						errs = append(errs, err)
+					}
+
+					if !errors.Is(err, ctxErr) {
+						errs = append(errs, ctxErr)
+					}
+
+					break
+				}
+
 				if err != nil {
 					errs = append(errs, err)
 
@@ -75,7 +93,8 @@ func validateCmd() *cobra.Command {
 
 // validateFile validates every document of the file at yamlPath against the
 // registry and joins what every document reports, so one run names each
-// invalid document.
+// invalid document. Once ctx is canceled, validateFile validates no
+// further document, since each would report the cancellation again.
 //
 // Each error it returns is bound to the source, and the source takes
 // yamlPath as the user typed it for its name. Each message then opens
@@ -110,6 +129,10 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 	var errs []error
 
 	for _, doc := range docs {
+		if ctx.Err() != nil {
+			break
+		}
+
 		err = doc.Validate(ctx, reg)
 		if err != nil {
 			errs = append(errs, err)

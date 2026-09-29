@@ -344,35 +344,63 @@ func TestValidateCmdSchemaError(t *testing.T) {
 func TestValidateCmdCanceled(t *testing.T) {
 	t.Parallel()
 
-	// A canceled run stops before the next file and reports the
-	// cancellation once, however many files are left.
-	dir := t.TempDir()
-
-	var args []string
-
-	for _, name := range []string{"a.yaml", "b.yaml", "c.yaml"} {
-		path := filepath.Join(dir, name)
-		require.NoError(t, os.WriteFile(path, []byte("name: a\n"), 0o600))
-
-		args = append(args, path)
+	// A canceled run stops and reports the cancellation once, however
+	// many files and documents are left.
+	tcs := map[string]struct {
+		// When set, the run is canceled while the first document fetches
+		// its schema. Otherwise it is canceled before it starts.
+		midRun bool
+	}{
+		"before the first file": {},
+		"during a schema fetch": {midRun: true},
 	}
 
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	out := &bytes.Buffer{}
+			ctx, cancel := context.WithCancel(t.Context())
 
-	cmd := validateCmd()
-	cmd.SilenceErrors = true
-	cmd.SilenceUsage = true
-	cmd.SetOut(out)
-	cmd.SetErr(out)
-	cmd.SetArgs(args)
+			doc := "name: a\n"
+			if tc.midRun {
+				srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+					cancel()
+					<-r.Context().Done()
+				}))
+				t.Cleanup(srv.Close)
 
-	err := cmd.ExecuteContext(ctx)
-	require.ErrorIs(t, err, context.Canceled)
-	assert.Equal(t, 1, strings.Count(err.Error(), context.Canceled.Error()), err.Error())
-	assert.Empty(t, out.String())
+				doc = "# yaml-language-server: $schema=" + srv.URL + "/s.json\n" + doc
+			} else {
+				cancel()
+			}
+
+			body := strings.Join([]string{doc, doc, doc}, "---\n")
+			dir := t.TempDir()
+
+			var args []string
+
+			for _, name := range []string{"a.yaml", "b.yaml", "c.yaml"} {
+				path := filepath.Join(dir, name)
+				require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
+
+				args = append(args, path)
+			}
+
+			out := &bytes.Buffer{}
+
+			cmd := validateCmd()
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetOut(out)
+			cmd.SetErr(out)
+			cmd.SetArgs(args)
+
+			err := cmd.ExecuteContext(ctx)
+			require.ErrorIs(t, err, context.Canceled)
+			assert.Equal(t, 1, strings.Count(err.Error(), context.Canceled.Error()), err.Error())
+			assert.Empty(t, out.String())
+		})
+	}
 }
 
 func TestValidateCmdOutput(t *testing.T) {
