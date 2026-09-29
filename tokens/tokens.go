@@ -47,7 +47,9 @@ import (
 // opens the next with it again, as after a tag that ends its line and
 // after the invalid token it makes of text that follows a block scalar
 // header. Tokenize keeps the repeat, and a blank line between the two
-// tokens loses its spaces and tabs.
+// tokens loses its spaces and tabs. When that invalid token ends the file
+// with no line ending, the lexer repeats the last rune of its text as a
+// token of its own instead, and Tokenize drops that token.
 //
 // Every token's Line, Column, and Offset name the rune where its text
 // starts, counting lines, columns, and offsets from 1 and offsets in runes.
@@ -70,7 +72,7 @@ import (
 func Tokenize(src string) token.Tokens {
 	src = dropByteOrderMarks(src)
 
-	tks := lexer.Tokenize(src)
+	tks := dropHeaderRepeat(src, lexer.Tokenize(src))
 	if len(tks) == 0 {
 		if src == "" {
 			return tks
@@ -138,6 +140,40 @@ func Tokenize(src string) token.Tokens {
 	restoreWhitespace(runes, tks, repairPositions(runes, tks))
 
 	return tks
+}
+
+// dropHeaderRepeat returns tks without the token the lexer adds when the
+// invalid token it makes of text after a block scalar header ends the
+// source. The lexer repeats the end of that invalid token's text as a
+// token of its own, which sits inside the invalid token and holds text
+// the source does not have.
+func dropHeaderRepeat(src string, tks token.Tokens) token.Tokens {
+	if len(tks) < 2 {
+		return tks
+	}
+
+	last, prev := tks[len(tks)-1], tks[len(tks)-2]
+	if prev.Type != token.InvalidType || last.Type == token.InvalidType ||
+		last.Position == nil || prev.Position == nil {
+		return tks
+	}
+
+	text := strings.Trim(prev.Origin, " \t\r\n")
+	if text == "" || last.Origin == "" ||
+		!strings.HasSuffix(strings.TrimRight(src, " \t\r\n"), text) ||
+		!strings.HasSuffix(text, last.Origin) {
+		return tks
+	}
+
+	// The repeat starts inside the invalid token, by the lexer's own count.
+	offset := last.Position.Offset - prev.Position.Offset
+	if offset < 0 || offset >= utf8.RuneCountInString(prev.Origin) {
+		return tks
+	}
+
+	prev.Next = nil
+
+	return tks[:len(tks)-1]
 }
 
 // byteOrderMark is the UTF-8 byte order mark.

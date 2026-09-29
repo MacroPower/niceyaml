@@ -852,6 +852,19 @@ func TestTokenize_RestoresDroppedWhitespace(t *testing.T) {
 			input: "a: | x\n  b\n",
 			want:  "a: | x\n\n  b\n",
 		},
+		"bad block header at the end": {
+			// The lexer repeats the header's last rune as a token of its
+			// own when no line ending follows, and Tokenize drops it.
+			input: "key: >foo",
+		},
+		"bad block header and comment at the end": {
+			input: "k: |ab # c",
+		},
+		"bad block header in a later entry": {
+			// The line ending after the first header repeats as well.
+			input: "- |ab\n- |ab",
+			want:  "- |ab\n\n- |ab",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2125,6 +2138,9 @@ var positionCorpus = map[string]string{
 	"blank line with a tab before the first key":     " \t\nb: 1\n",
 	"blank line of a tab before a quoted first key":  "\t\n\"b\": 1\n",
 	"crlf blank line of a tab before the first key":  "\t\r\nb: 1\r\n",
+	"bad block header at the end":                    "key: >foo",
+	"bad block header and comment at the end":        "k: |ab # c",
+	"bad block header in a later entry":              "- |ab\n- |ab",
 }
 
 func TestTokenize_PositionsLocateText(t *testing.T) {
