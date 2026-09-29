@@ -84,6 +84,11 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: !!float 1.10`),
 			want:    true,
 		},
+		"string matches anchored tagged hex text": {
+			matcher: matcher.Content(versionPath, "0x10"),
+			input:   stringtest.Input(`version: &v !!int 0x10`),
+			want:    true,
+		},
 		"string matches quoted text": {
 			matcher: matcher.Content(versionPath, "1.10"),
 			input:   stringtest.Input(`version: "1.10"`),

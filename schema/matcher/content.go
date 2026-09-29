@@ -17,6 +17,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -309,19 +310,11 @@ func isPlain(t reflect.Type) bool {
 // The second result is false when node holds anything else, which
 // includes an alias, whose own text names the anchor.
 func scalarText(node *niceyaml.Node) (string, bool) {
-	n := node.AST()
-
-	for {
-		switch v := n.(type) {
-		case *ast.AnchorNode:
-			n = v.Value
-		case *ast.TagNode:
-			n = v.Value
-		case *ast.IntegerNode, *ast.FloatNode, *ast.InfinityNode, *ast.NanNode, *ast.BoolNode:
-			return v.GetToken().Value, true
-		default:
-			return "", false
-		}
+	switch v := astnode.Content(node.AST()).(type) {
+	case *ast.IntegerNode, *ast.FloatNode, *ast.InfinityNode, *ast.NanNode, *ast.BoolNode:
+		return v.GetToken().Value, true
+	default:
+		return "", false
 	}
 }
 
