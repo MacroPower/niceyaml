@@ -87,10 +87,9 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 		return false, err
 	}
 
-	// A decode of a node that holds an alias reads the whole document to
-	// find its anchors. A few hundred bytes of nested aliases can make
-	// that read take minutes, so the document must pass the alias limit
-	// of the schema validator before anything decodes it.
+	// A few hundred bytes of nested aliases can make a decode take
+	// minutes, so a node that holds an alias decodes only when its whole
+	// document passes the alias limit of the schema validator.
 	err = aliasing.CheckDecode(node)
 	if err != nil {
 		//nolint:wrapcheck // Binding names the document; the error keeps its own context.

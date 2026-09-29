@@ -11,11 +11,13 @@ import (
 )
 
 // CheckDecode returns [ErrExcessiveAliasing] when n holds an alias and
-// aliases make up too much of what a decode of its document reads. A
-// decode of a node that holds an alias reads the whole document to find
-// its anchors, so the count covers the whole document, with each alias
-// reading its content in full. A node without an alias decodes on its own
-// and reads nothing twice, so it passes, as does a nil Node.
+// aliases make up too much of what a decode of its document reads. The
+// count covers the whole document, with each alias reading its content in
+// full. A decode of a node below the root reads only the anchors the node
+// needs, but CheckDecode applies one limit per document, so every node
+// that holds an alias gets the verdict of its document. A node without an
+// alias decodes on its own and reads nothing twice, so it passes, as does
+// a nil Node.
 //
 // The count depends on the document alone, so the document keeps it, and
 // a check of each item of a list counts the document once.

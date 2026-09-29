@@ -85,8 +85,8 @@ func TestCheckDecode(t *testing.T) {
 			err:   aliasing.ErrExcessiveAliasing,
 		},
 		"node holding an alias with a bomb outside it": {
-			// A decode of a node that holds an alias reads the whole
-			// document to find the anchor.
+			// The limit applies to the whole document, even where a
+			// decode of the node would read only the anchor it needs.
 			input: "k: &k a\n" + aliasLevels() + "b:\n  ? *l7\n  : v\nc: [*k]\n",
 			path:  paths.Root().Child("c"),
 			err:   aliasing.ErrExcessiveAliasing,
