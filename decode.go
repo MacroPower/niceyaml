@@ -1598,8 +1598,12 @@ func WithReferences(data ...[]byte) DecodeOption {
 // that gives a name of its own to an anchor whose name another anchor
 // shares, and to an anchor that follows an alias of its name with no
 // anchor before it. Each alias to such an anchor carries the new name
-// too. An [ast.Node] the decode fills, or one an UnmarshalYAML method
-// takes, spells such an alias with that name.
+// too.
+//
+// An [ast.Node] the decode fills, or one an UnmarshalYAML method takes,
+// spells a renamed alias with the new name of its anchor. The node is
+// part of the tree [Node.DocumentAST] returns, or of the copy of it that
+// every decode of the document reads, so a caller must not modify it.
 //
 // [Decoder.DecodeInto] decodes with options stated once, for every node
 // a [Decoder] decodes.
@@ -2166,8 +2170,9 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 // the validators, come back bound to the source as [SourceError]
 // values, and a value the go-yaml decoder rejects matches
 // [ErrDecodeRejected], except the [time.Duration] that
-// [Node.DecodeInto] describes. On error, the returned T is the zero
-// value.
+// [Node.DecodeInto] describes. An [ast.Node] in the result is part of a
+// tree the document shares, as [Node.DecodeInto] describes, so a caller
+// must not modify it. On error, the returned T is the zero value.
 //
 // A scoped Decode reads one typed value without decoding the whole
 // document, such as a version number or a list of tags. A scalar decodes
