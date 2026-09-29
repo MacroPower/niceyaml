@@ -20,6 +20,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
+	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/internal/segment"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -208,7 +209,7 @@ func MultiValidator(validators ...Validator) Validator {
 		var errs []error
 
 		for _, dv := range validators {
-			if isNilValidator(dv) {
+			if nilness.IsNil(dv) {
 				continue
 			}
 
@@ -1300,7 +1301,7 @@ func (n *Node) Validate(ctx context.Context, validators ...Validator) error {
 // error.
 func (n *Node) validate(ctx context.Context, validators []Validator) error {
 	for _, dv := range validators {
-		if isNilValidator(dv) {
+		if nilness.IsNil(dv) {
 			continue
 		}
 
@@ -1314,24 +1315,6 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 	}
 
 	return nil
-}
-
-// isNilValidator reports whether dv is nil or holds a nil pointer or
-// func, which would panic when it runs. A nil map or slice may have a
-// Validate method that reads it, so it counts as a validator.
-func isNilValidator(dv Validator) bool {
-	if dv == nil {
-		return true
-	}
-
-	v := reflect.ValueOf(dv)
-
-	switch v.Kind() {
-	case reflect.Pointer, reflect.Func:
-		return v.IsNil()
-	default:
-		return false
-	}
 }
 
 // Bind binds err to the document's source, with the paths in err

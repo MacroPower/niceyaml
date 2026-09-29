@@ -1,10 +1,11 @@
 // Package nilness reports whether an interface value holds nothing a
-// constructor can call.
+// caller can call.
 //
 // An interface holding a nil pointer or nil func compares unequal to nil,
 // yet calling a method through it panics or returns nonsense. Constructors
 // that promise to panic on a nil argument call [IsNil] so that promise
-// covers these values too.
+// covers these values too, and code that skips nil entries in a list
+// calls it so that it skips these values as well.
 package nilness
 
 import "reflect"
