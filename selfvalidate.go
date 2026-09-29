@@ -81,8 +81,8 @@ type selfWalker struct {
 	opts    []yaml.DecodeOption
 	walking map[visit]bool
 	done    map[visit]bool
-	// The pointers, maps, and slices the scan is inside of, as walking
-	// records them for the walk.
+	// The pointers, maps, and slices the current scan has reached, so the
+	// scan reads each once however many paths lead to it.
 	scanning map[visit]bool
 	// The result of the scan of each pointer, map, and slice, so each
 	// value scans once however many values above it the walk meets.
@@ -410,7 +410,12 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 // the walk is inside of, implements [SelfValidator] where the walk
 // would validate it. When it reports false, the walk of the values below
 // v validates nothing, so the walk passes v's children at once.
+//
+// The scan reads each pointer, map, and slice it reaches once, however
+// many paths lead there.
 func (w *selfWalker) holdsBelow(v reflect.Value) bool {
+	defer clear(w.scanning)
+
 	if v.Kind() != reflect.Array && ownsAddress(v) {
 		key := visitOf(v)
 		if held, ok := w.scanned[key]; ok {
@@ -418,12 +423,22 @@ func (w *selfWalker) holdsBelow(v reflect.Value) bool {
 		}
 
 		w.scanning[key] = true
-		defer delete(w.scanning, key)
 	}
 
 	// The scan stops only at v itself on the way back up, which the walk
 	// is inside of and would stop at too, so the result holds either way.
 	held, _ := w.scanChildren(v)
+
+	// A false result means the scan read everything below v. When v holds
+	// no validator of its own either, no value the scan reached holds one,
+	// since everything below such a value is below v too. When v does hold
+	// one, a value that leads back to v holds it below, so the scan records
+	// nothing more.
+	if !held && !implementsSelfValidator(v.Type()) {
+		for key := range w.scanning {
+			w.scanned[key] = false
+		}
+	}
 
 	return held
 }
@@ -433,7 +448,7 @@ func (w *selfWalker) holdsBelow(v reflect.Value) bool {
 // down: through interfaces and pointers, into fields, elements, and map
 // values, and not below a value that decodes itself or whose type may
 // hold no validator. The second result is false when the scan stopped at
-// a value it was already inside of, whose own scan decides the answer, so
+// a value it had already reached, whose first read decides the answer, so
 // a false first result then holds only for that scan.
 func (w *selfWalker) scanValue(v reflect.Value) (bool, bool) {
 	if !v.IsValid() || !v.CanInterface() || !mayHoldValidator(v.Type()) {
@@ -471,7 +486,6 @@ func (w *selfWalker) scanValue(v reflect.Value) (bool, bool) {
 		}
 
 		w.scanning[key] = true
-		defer delete(w.scanning, key)
 
 		held, complete := w.scanOwned(v)
 		if held || complete {

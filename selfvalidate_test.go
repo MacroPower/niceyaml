@@ -89,6 +89,8 @@ var (
 	errOrder = errors.New("children ran after the parent")
 	// The error every Validate of a ring reports.
 	errRing = errors.New("ring")
+	// The error every Validate of a loop reports.
+	errLoop = errors.New("loop")
 )
 
 // Hours is hours under an exported name, for embedding without a tag.
@@ -635,6 +637,76 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		dd := yamltest.FirstDocument(t, "name: x\n")
 
 		require.NoError(t, dd.DecodeInto(t.Context(), &got))
+	})
+
+	t.Run("a cycle through shared values scans in linear time", func(t *testing.T) {
+		t.Parallel()
+
+		// Every mesh links to the next one twice, and the last links back
+		// to the first, so a scan that reads a shared value again on every
+		// path takes 2^40 steps.
+		type withMesh struct {
+			Name string `yaml:"name"`
+			Mesh *mesh  `yaml:"mesh"`
+		}
+
+		tcs := map[string]struct {
+			port int
+			err  string
+		}{
+			"no port is set": {
+				port: -1,
+			},
+			"a port at the far end fails": {
+				port: 40,
+				err: "$.mesh" + strings.Repeat(".next[0]", 40) +
+					".port: port out of range",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				nodes := meshChain(40)
+				if tc.port >= 0 {
+					bad := port(-1)
+					nodes[tc.port].Port = &bad
+				}
+
+				dd := yamltest.FirstDocument(t, "name: x\n")
+
+				err := dd.DecodeInto(t.Context(), &withMesh{Mesh: nodes[0]})
+				if tc.err == "" {
+					require.NoError(t, err)
+
+					return
+				}
+
+				require.EqualError(t, err, tc.err)
+			})
+		}
+	})
+
+	t.Run("a value that leads back to a failed validator fails", func(t *testing.T) {
+		t.Parallel()
+
+		// The loop holds no validator below it but itself, so its scan
+		// stops. The stop below it still leads back to the loop, which
+		// failed, so the stops that hold it do not run.
+		type withLoop struct {
+			Loop  loop  `yaml:"loop"`
+			Stops stops `yaml:"stops"`
+		}
+
+		s := &stop{}
+		s.Back = loop{s}
+
+		dd := yamltest.FirstDocument(t, "name: x\n")
+
+		err := dd.DecodeInto(t.Context(), &withLoop{Loop: s.Back, Stops: stops{s}})
+		require.ErrorIs(t, err, errLoop)
+		assert.NotContains(t, err.Error(), "stops ran")
 	})
 
 	t.Run("map entries report in key order", func(t *testing.T) {
@@ -1331,6 +1403,48 @@ type ring struct {
 
 func (r *ring) Validate() error {
 	return errRing
+}
+
+// mesh links to other meshes, and holds a port.
+type mesh struct {
+	Next []*mesh `yaml:"next"`
+	Port *port   `yaml:"port"`
+}
+
+// meshChain returns the meshes n0 to nk, where each mesh links to the
+// next one twice, and nk links back to n0.
+func meshChain(k int) []*mesh {
+	nodes := make([]*mesh, k+1)
+	for i := range nodes {
+		nodes[i] = &mesh{}
+	}
+
+	for i := range k {
+		nodes[i].Next = []*mesh{nodes[i+1], nodes[i+1]}
+	}
+
+	nodes[k].Next = []*mesh{nodes[0]}
+
+	return nodes
+}
+
+// loop is a list of stops that fails.
+type loop []*stop
+
+func (loop) Validate() error {
+	return errLoop
+}
+
+// stop leads back to a loop.
+type stop struct {
+	Back loop `yaml:"back"`
+}
+
+// stops is a list of stops that reports that it ran.
+type stops []*stop
+
+func (stops) Validate() error {
+	return errors.New("stops ran")
 }
 
 // port is a scalar that validates itself.
