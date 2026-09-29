@@ -1543,9 +1543,10 @@ func WithReferences(data ...[]byte) DecodeOption {
 // Fields absent from the document keep their existing values, so a
 // caller may fill v with defaults first. When v points to a pointer, a nil
 // pointer gets a new value, and the node decodes into the value the
-// pointer points to. An untagged null sets the pointer to nil. A node
-// without content, or a tagged null such as "!!null", leaves the
-// pointer as it is.
+// pointer points to. An untagged null sets the pointer to nil. So does a
+// document whose body is an alias to a null in a reference document,
+// with a tag or without. A node without content, or a tagged null such
+// as "!!null", leaves the pointer as it is.
 // YAML decoding errors, and [Error] values from the validators, come back
 // bound to the source as [SourceError] values, with a path in them
 // resolving from the scope. A decoding error the go-yaml decoder
@@ -1733,11 +1734,13 @@ func (n *Node) forValidators(yamlOpts []yaml.DecodeOption) *Node {
 // in v survive, as [Node.DecodeInto] promises. [yaml.Unmarshal] instead
 // zeroes its target for input that holds no value. A tagged null, such
 // as a "!!seq" tag over no value, also leaves v as it is, since the
-// go-yaml decoder reads it as no value. A panic in the decoder comes back
-// as an error that matches [ErrDecodeRejected], bound at the first token
-// of node that is not a comment. The decoder reads node in the
-// [decodeTree] of the document, and for a node below the body, a failure
-// in an anchor outside node that node reads comes back as its error.
+// go-yaml decoder reads it as no value. When v points to a pointer, an
+// alias that reads as null sets that pointer to nil, as a null does. A
+// panic in the decoder comes back as an error that matches
+// [ErrDecodeRejected], bound at the first token of node that is not a
+// comment. The decoder reads node in the [decodeTree] of the document,
+// and for a node below the body, a failure in an anchor outside node
+// that node reads comes back as its error.
 //
 // The go-yaml decoder never checks the context, so a context that has
 // ended before the decode starts, or while it registers the anchors node
@@ -1766,11 +1769,44 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 		}
 	}
 
+	// The decoder tests an alias for null, rather than the anchor it
+	// names, so it gives a pointer target a value for an alias to a null.
+	target := reflect.ValueOf(v).Elem()
+	if target.Kind() == reflect.Pointer && isNullAlias(ctx, dec, node, view) {
+		target.SetZero()
+
+		return nil
+	}
+
 	// The recover turns a panic in the go-yaml decoder, or in a value's
 	// own UnmarshalYAML, into a rejection.
 	err = decodeWithRecover(ctx, dec, view, decodeTarget(v, node))
 
 	return n.bindDecodeError(n.rejection(err, view))
+}
+
+// isNullAlias reports whether node is an alias, or an anchor on one,
+// that dec reads as null. [Node.At] and [Node.Nodes] resolve every alias
+// on a path to its anchor, so only the body of a document reaches a
+// decode as an alias. Such an alias names an anchor of a reference
+// document, which only dec can read. The check reads view, the
+// [decodeView] of node, with dec itself, so an option that reads its
+// references once, such as [yaml.ReferenceReaders], still has them for
+// the decode that follows.
+func isNullAlias(ctx context.Context, dec *yaml.Decoder, node, view ast.Node) bool {
+	if anchor, ok := node.(*ast.AnchorNode); ok {
+		node = anchor.Value
+	}
+
+	if _, ok := node.(*ast.AliasNode); !ok {
+		return false
+	}
+
+	var value any
+
+	err := decodeWithRecover(ctx, dec, view, &value)
+
+	return err == nil && value == nil
 }
 
 // rejection returns err, which the go-yaml decoder returned for scope, a

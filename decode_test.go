@@ -3524,6 +3524,55 @@ func TestDocument_DecodeInto(t *testing.T) {
 				},
 				want: (*validatorConfig)(nil),
 			},
+			"alias to a null of a reference document": {
+				input: "*x\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return dd.Decode[*validatorConfig](t.Context(), niceyaml.WithReferences([]byte("a: &x ~\n")))
+				},
+				want: (*validatorConfig)(nil),
+			},
+			"DecodeInto sets a non-nil pointer to nil for an alias to a null": {
+				input: "*x\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					got := &plainConfig{Value: 7}
+
+					err := dd.DecodeInto(t.Context(), &got, niceyaml.WithReferences([]byte("a: &x ~\n")))
+
+					return got, err //nolint:wrapcheck // The test inspects the error of the decode.
+				},
+				want: (*plainConfig)(nil),
+			},
+			"anchored alias to a null of a reference document": {
+				input: "&y\n*x\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return dd.Decode[*validatorConfig](t.Context(), niceyaml.WithReferences([]byte("a: &x ~\n")))
+				},
+				want: (*validatorConfig)(nil),
+			},
+			"alias to a tagged null of a reference document": {
+				input: "*x\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return dd.Decode[*string](t.Context(), niceyaml.WithReferences([]byte("a: &x !!null\n")))
+				},
+				want: (*string)(nil),
+			},
+			"alias to a scalar of a reference document": {
+				input: "*x\n",
+				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
+					t.Helper()
+
+					return dd.Decode[*int](t.Context(), niceyaml.WithReferences([]byte("a: &x 7\n")))
+				},
+				want: new(7),
+			},
 			"comment only": {
 				input: "# comment\n",
 				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
