@@ -301,11 +301,11 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 //
 // Returns [ErrResolve] if a resolver applied but could not name the schema, and
 // [ErrLoad] or [ErrCompile] if loading or compiling the schema fails. When
-// ctx has ended before a resolver runs, or before Lookup finds that no
+// ctx ends before a resolver names a schema, or before Lookup finds that no
 // resolver applies, Lookup returns [ErrResolve] wrapping the context's
-// error, even when the resolvers ignore their context. When ctx ends before
-// the named schema finishes loading, Lookup returns [ErrLoad] wrapping the
-// context's error without waiting for the load. Either way [errors.Is]
+// error, even when the resolvers ignore their context. When ctx ends after
+// that, before the named schema finishes loading, Lookup returns [ErrLoad]
+// wrapping the context's error without waiting for the load. Either way [errors.Is]
 // finds the context's error, such as [context.Canceled] or
 // [context.DeadlineExceeded].
 //
@@ -345,36 +345,36 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 		return nil, false, fmt.Errorf("%w: node is scoped to %s", ErrScopedDocument, doc.Path())
 	}
 
+	// A resolver that ignores its context, as a Ref does, would name a
+	// schema for a canceled lookup, and a cached schema needs no context
+	// to load. Check the context before the first resolver and after each
+	// one, so a lookup whose context ends before a resolver names a schema
+	// reports that whatever the resolver returns.
+	if ctx.Err() != nil {
+		return nil, false, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
+	}
+
 	var reasons []error
 
 	for _, res := range r.resolvers {
-		// A resolver that ignores its context, as a Ref does, would name
-		// a schema for a canceled lookup. Check the context here, so a
-		// canceled lookup reports that whatever the resolver does.
+		ref, err := res.Resolve(ctx, doc)
+		if err != nil && !errors.Is(err, ErrNoMatch) {
+			return nil, false, fmt.Errorf("%w: %w", ErrResolve, err)
+		}
+
 		if ctx.Err() != nil {
 			return nil, false, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
 		}
 
-		ref, err := res.Resolve(ctx, doc)
-		if errors.Is(err, ErrNoMatch) {
+		if err != nil {
 			reasons = append(reasons, err)
 
 			continue
 		}
 
-		if err != nil {
-			return nil, false, fmt.Errorf("%w: %w", ErrResolve, err)
-		}
-
 		v, err := r.Schema(ctx, ref)
 
 		return v, false, err
-	}
-
-	// The loop-top check does not see a context the last resolver ended, so
-	// a resolver that cancels and then declines would report no match.
-	if ctx.Err() != nil {
-		return nil, false, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
 	}
 
 	return nil, true, noMatch(reasons)

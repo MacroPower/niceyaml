@@ -333,6 +333,67 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 		require.ErrorIs(t, reg.Validate(ctx, doc), context.Canceled)
 	})
 
+	t.Run("resolver cancels and names a schema", func(t *testing.T) {
+		t.Parallel()
+
+		load := func(context.Context) ([]byte, error) {
+			return []byte(`{"type":"object"}`), nil
+		}
+
+		tcs := map[string]struct {
+			ref  schema.Ref
+			warm bool
+		}{
+			"loadable": {
+				ref: schema.Loadable("cancel.json", load),
+			},
+			"cached loadable": {
+				ref:  schema.Loadable("cancel.json", load),
+				warm: true,
+			},
+			"embedded": {
+				ref: schema.Embedded([]byte(`{"type":"object"}`)),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+
+				var cancelOnResolve atomic.Bool
+
+				reg := schema.NewRegistry(schema.WithResolvers(schema.ResolverFunc(
+					func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
+						if cancelOnResolve.Load() {
+							cancel()
+						}
+
+						return tc.ref, nil
+					},
+				)))
+
+				doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+
+				if tc.warm {
+					_, err := reg.Lookup(ctx, doc)
+					require.NoError(t, err)
+				}
+
+				cancelOnResolve.Store(true)
+
+				// The outcome does not depend on whether the registry
+				// already holds the schema.
+				_, err := reg.Lookup(ctx, doc)
+				require.ErrorIs(t, err, context.Canceled)
+				require.ErrorIs(t, err, schema.ErrResolve)
+				require.NotErrorIs(t, err, schema.ErrLoad)
+			})
+		}
+	})
+
 	t.Run("ends while the schema loads", func(t *testing.T) {
 		t.Parallel()
 
