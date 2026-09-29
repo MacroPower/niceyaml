@@ -496,14 +496,15 @@ func isSeparator(a Annotation) bool {
 }
 
 // String renders the [View] as plain text: each line behind its number,
-// the annotations above it on rows of their own, one row per kind as
-// [Annotations.ByKind] groups them, and a row below it that marks its
-// decoration. That row holds a caret under every column an
-// overlay covers, a caret at the column of the annotations below the line,
-// and their contents after the last caret. Annotations below the line
-// without content still get their caret when no overlay covers a column
-// of the line, so an overlay of no width, such as one at the end of the
-// line, shows where it sits. String does not render flags.
+// and the annotations above and below it on rows of their own, one row per
+// kind as [Annotations.ByKind] groups them. Each row below the line holds
+// a caret at the column of its annotations and their contents after the
+// caret. The first row below the line also holds a caret under every
+// column an overlay covers, and a line with overlays but no annotation
+// below it gets that row alone. Annotations of a kind without content
+// still get their caret when their row holds no overlay caret, so an
+// overlay of no width, such as one at the end of the line, shows where
+// it sits. String does not render flags.
 // The number column is at least four wide and grows to fit the largest
 // number in the view, so every row lines up. Annotations whose column lies
 // more than [MaxColPastEnd] columns past the end of the content start at
@@ -548,8 +549,22 @@ func (v *View) String() string {
 
 		rows = append(rows, contentRow(ln, width))
 
-		if marker := markerRow(ln, v.Overlays(i), anns.Filter(Below)); marker != "" {
-			rows = append(rows, blank+marker)
+		// Each kind of annotation below the line gets a row of its own as
+		// well, in the order the kinds first appear. The overlays mark the
+		// first row, so a line with overlays but no annotation below it
+		// still gets that row.
+		groups := anns.Filter(Below).ByKind()
+		if len(groups) == 0 {
+			groups = []Annotations{nil}
+		}
+
+		overlays := v.Overlays(i)
+		for _, group := range groups {
+			if marker := markerRow(ln, overlays, group); marker != "" {
+				rows = append(rows, blank+marker)
+			}
+
+			overlays = nil
 		}
 	}
 

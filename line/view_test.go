@@ -1358,6 +1358,24 @@ func TestView_String(t *testing.T) {
 				want: `   1 | key: value
      |      ^ boom`,
 			},
+			"annotations below of each kind get a row of their own": {
+				annotations: []line.Annotation{
+					{Content: "hint", Placement: line.Below, Col: 0},
+					{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Col: 5},
+				},
+				want: `   1 | key: value
+     | ^ hint
+     |      ^ bad value`,
+			},
+			"a kind below without content keeps its caret beside another kind": {
+				annotations: []line.Annotation{
+					{Content: "", Placement: line.Below, Col: 2},
+					{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Col: 5},
+				},
+				want: `   1 | key: value
+     |   ^
+     |      ^ bad value`,
+			},
 			"negative column is not padded": {
 				annotations: []line.Annotation{{Content: "note", Placement: line.Below, Col: -3}},
 				want: `   1 | key: value
