@@ -790,10 +790,11 @@ func fieldName(field reflect.StructField) (string, bool, bool) {
 // at base with, by the value the key decodes to as type t, so a key such
 // as 0x10 or 1.50 keeps the text a path resolves. A key any `<<` merge
 // key brings in counts, whether the merge names one mapping or a list of
-// them, directly or through an alias. A later merge source wins over an
-// earlier one, and a key of the mapping itself wins over both, as in the
-// decode. The map holds no key a path cannot resolve to, and is empty
-// when no mapping is at base, as for a value the document did not set.
+// them, directly or through an alias. Where the mapping and its merges
+// define one key more than once, the later entry in document order wins,
+// with the sources of one merge in sequence order, as in the decode. The
+// map holds no key a path cannot resolve to, and is empty when no mapping
+// is at base, as for a value the document did not set.
 func (w *selfWalker) keyNames(base paths.Path, t reflect.Type) map[any]string {
 	names := map[any]string{}
 
@@ -818,23 +819,38 @@ func (w *selfWalker) collectKeyNames(
 
 	seen[mapping] = true
 
-	// A later merge source wins over an earlier one, and the mapping's
-	// own keys win over both, so the sources go in first, in order. An
-	// alias in any merge that does not resolve leaves out the keys of
-	// every merge.
-	sources, err := w.pathResolver().MergeSources(mapping)
-	if err == nil {
-		for _, src := range sources {
-			w.collectKeyNames(src, t, names, seen)
-		}
-	}
+	// The decoder sets each entry in document order, and a merge sets
+	// the keys of its sources where it stands, so a later entry wins
+	// whether it is a key of the mapping or a merge. An alias in any
+	// merge that does not resolve leaves out the keys of every merge.
+	_, err := w.pathResolver().MergeSources(mapping)
+	merges := err == nil
 
 	for _, entry := range mapping.Values {
-		if entry == nil || entry.Key == nil || entry.Key.IsMergeKey() {
+		if entry == nil || entry.Key == nil {
 			continue
 		}
 
-		w.addKeyName(entry.Key, t, names)
+		if !entry.Key.IsMergeKey() {
+			w.addKeyName(entry.Key, t, names)
+
+			continue
+		}
+
+		if !merges {
+			continue
+		}
+
+		sources, err := w.pathResolver().MergeSources(&ast.MappingNode{
+			Values: []*ast.MappingValueNode{entry},
+		})
+		if err != nil {
+			continue
+		}
+
+		for _, src := range sources {
+			w.collectKeyNames(src, t, names, seen)
+		}
 	}
 }
 

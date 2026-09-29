@@ -980,6 +980,34 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				}, got)
 			})
 		}
+
+		// Where a key of the mapping and a merged key decode to the same
+		// value, the later entry holds the value the decode keeps, and
+		// the error reports its text.
+		precedenceTcs := map[string]struct {
+			input string
+			want  string
+		}{
+			"merge after a key of the mapping": {
+				input: "b: &b {0x10: {price: -1}}\nm: {16: {price: 1}, <<: *b}\n",
+				want:  "1:22: $.m.0x10.price: negative price",
+			},
+			"key of the mapping after a merge": {
+				input: "b: &b {0x10: {price: 1}}\nm: {<<: *b, 16: {price: -1}}\n",
+				want:  "2:25: $.m.16.price: negative price",
+			},
+		}
+
+		for name, tc := range precedenceTcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				_, err := dd.Decode[merged](t.Context())
+				require.EqualError(t, err, tc.want)
+			})
+		}
 	})
 
 	t.Run("a map key validates at the key", func(t *testing.T) {
