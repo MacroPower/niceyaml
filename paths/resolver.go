@@ -152,12 +152,7 @@ func (r *Resolver) Anchor(node ast.Node) (ast.Node, error) {
 		return nil, fmt.Errorf("anchor: %w: alias has no name", ErrAlias)
 	}
 
-	target, ok := r.resolver.targets[alias]
-	if !ok {
-		return nil, fmt.Errorf("anchor: %w: *%s has no anchor before it", ErrAlias, tk.Value)
-	}
-
-	anchor, ok := r.resolver.owners[target]
+	anchor, ok := r.resolver.targets[alias]
 	if !ok {
 		return nil, fmt.Errorf("anchor: %w: *%s has no anchor before it", ErrAlias, tk.Value)
 	}

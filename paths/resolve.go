@@ -67,8 +67,7 @@ func (m match) key() match {
 }
 
 // resolver walks a document for the selectors of a [Path]. Its targets map
-// holds the content of the anchor each alias refers to, and its owners map
-// holds the anchor of each such content. The enclosed set holds each alias
+// holds the anchor each alias refers to. The enclosed set holds each alias
 // that lies inside the content of the anchor it refers to, other than one
 // a `<<` merge key names. The decoder reads such an alias as null, so it
 // has no content.
@@ -80,8 +79,7 @@ func (m match) key() match {
 //
 // Create instances with [newResolver].
 type resolver struct {
-	targets  map[*ast.AliasNode]ast.Node
-	owners   map[ast.Node]*ast.AnchorNode
+	targets  map[*ast.AliasNode]*ast.AnchorNode
 	enclosed map[*ast.AliasNode]bool
 	keys     sync.Map
 }
@@ -162,8 +160,7 @@ func (k *mappingKeys) mergeAfter(i int) bool {
 func newResolver(doc *ast.DocumentNode) *resolver {
 	b := &aliasBinder{
 		anchors: newAnchorSet(),
-		targets: map[*ast.AliasNode]ast.Node{},
-		owners:  map[ast.Node]*ast.AnchorNode{},
+		targets: map[*ast.AliasNode]*ast.AnchorNode{},
 		merged:  map[*ast.MappingNode]anchorSet{},
 		pending: map[*ast.MappingNode]*mergedRead{},
 		open:    map[*ast.MappingNode]bool{},
@@ -183,17 +180,17 @@ func newResolver(doc *ast.DocumentNode) *resolver {
 
 	ast.Walk(f, doc.Body)
 
-	return &resolver{targets: b.targets, owners: b.owners, enclosed: f.enclosed}
+	return &resolver{targets: b.targets, enclosed: f.enclosed}
 }
 
 // enclosureFinder finds the aliases that lie inside the content of the
 // anchor they refer to while [ast.Walk] visits a document. The targets
-// map holds the content each alias refers to, and the merges set holds
+// map holds the anchor each alias refers to, and the merges set holds
 // the aliases `<<` merge keys name, which the finder leaves out. The open
 // set holds the content of each anchor the walk is inside of, and the
 // enclosed set holds the aliases found so far.
 type enclosureFinder struct {
-	targets  map[*ast.AliasNode]ast.Node
+	targets  map[*ast.AliasNode]*ast.AnchorNode
 	merges   map[*ast.AliasNode]bool
 	open     map[ast.Node]bool
 	enclosed map[*ast.AliasNode]bool
@@ -219,7 +216,7 @@ func (f *enclosureFinder) Visit(node ast.Node) ast.Visitor {
 		return nil
 
 	case *ast.AliasNode:
-		if target, ok := f.targets[n]; ok && f.open[target] && !f.merges[n] {
+		if target, ok := f.targets[n]; ok && f.open[target.Value] && !f.merges[n] {
 			f.enclosed[n] = true
 		}
 	}
@@ -228,12 +225,11 @@ func (f *enclosureFinder) Visit(node ast.Node) ast.Visitor {
 }
 
 // anchorSet holds the anchors the decoder has recorded so far, in the two
-// maps the decoder keeps. The nodes map holds the content of the last
-// anchor of each name, and the values map holds the content of the last
-// anchor of each name on a value the decoder reads. An anchor on the value
-// of a `<<` merge key, or on an element of a sequence there, goes into the
-// nodes map alone, since the decoder reads such a value only for the
-// mappings it merges.
+// maps the decoder keeps. The nodes map holds the last anchor of each
+// name, and the values map holds the last anchor of each name on a value
+// the decoder reads. An anchor on the value of a `<<` merge key, or on an
+// element of a sequence there, goes into the nodes map alone, since the
+// decoder reads such a value only for the mappings it merges.
 //
 // An alias in a value refers to the anchor in the values map, and to the
 // one in the nodes map when the values map holds none of its name. An
@@ -241,29 +237,29 @@ func (f *enclosureFinder) Visit(node ast.Node) ast.Visitor {
 //
 // Create instances with [newAnchorSet].
 type anchorSet struct {
-	nodes  map[string]ast.Node
-	values map[string]ast.Node
+	nodes  map[string]*ast.AnchorNode
+	values map[string]*ast.AnchorNode
 }
 
 // newAnchorSet creates a new empty [anchorSet].
 func newAnchorSet() anchorSet {
-	return anchorSet{nodes: map[string]ast.Node{}, values: map[string]ast.Node{}}
+	return anchorSet{nodes: map[string]*ast.AnchorNode{}, values: map[string]*ast.AnchorNode{}}
 }
 
-// record records the anchor that name names, over content, in both maps.
-// A nil name records nothing.
-func (s anchorSet) record(name *token.Token, content ast.Node) {
+// record records anchor under name in both maps. A nil name records
+// nothing.
+func (s anchorSet) record(name *token.Token, anchor *ast.AnchorNode) {
 	if name == nil {
 		return
 	}
 
-	s.nodes[name.Value] = content
-	s.values[name.Value] = content
+	s.nodes[name.Value] = anchor
+	s.values[name.Value] = anchor
 }
 
-// valueTarget returns the content that an alias in a value refers to when
+// valueTarget returns the anchor that an alias in a value refers to when
 // it names name, and whether it refers to any.
-func (s anchorSet) valueTarget(name string) (ast.Node, bool) {
+func (s anchorSet) valueTarget(name string) (*ast.AnchorNode, bool) {
 	if target, ok := s.values[name]; ok {
 		return target, true
 	}
@@ -281,11 +277,10 @@ func (s anchorSet) add(other anchorSet) {
 }
 
 // aliasBinder binds aliases to anchors while [ast.Walk] visits a document in
-// order. The anchors set holds the anchors visited so far, the targets map
-// holds the content each visited alias refers to, and the owners map holds
-// the anchor of each content an anchor names. Walk visits an anchor before
-// its content, so an alias inside that content refers to the anchor around
-// it. The binder records the anchor again once it has walked the content,
+// order. The anchors set holds the anchors visited so far, and the targets
+// map holds the anchor each visited alias refers to. Walk visits an anchor
+// before its content, so an alias inside that content refers to the anchor
+// around it. The binder records the anchor again once it has walked the content,
 // as the decoder does, so an alias after the content refers to the anchor
 // around it rather than to one of the same name inside it.
 //
@@ -306,8 +301,7 @@ func (s anchorSet) add(other anchorSet) {
 // has bound.
 type aliasBinder struct {
 	anchors anchorSet
-	targets map[*ast.AliasNode]ast.Node
-	owners  map[ast.Node]*ast.AnchorNode
+	targets map[*ast.AliasNode]*ast.AnchorNode
 	merged  map[*ast.MappingNode]anchorSet
 	pending map[*ast.MappingNode]*mergedRead
 	open    map[*ast.MappingNode]bool
@@ -330,8 +324,7 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 	switch n := node.(type) {
 	case *ast.AnchorNode:
 		name := nodeToken(n.Name)
-		b.owners[n.Value] = n
-		b.anchors.record(name, n.Value)
+		b.anchors.record(name, n)
 
 		if mapping := anchoredMapping(n.Value); mapping != nil {
 			b.walkOpen(mapping)
@@ -341,7 +334,7 @@ func (b *aliasBinder) Visit(node ast.Node) ast.Visitor {
 
 		// The decoder records an anchor again once it has read the
 		// content, over any anchor of the same name inside it.
-		b.anchors.record(name, n.Value)
+		b.anchors.record(name, n)
 
 		return nil
 
@@ -407,7 +400,7 @@ type mergeSource struct {
 // anchor of its name in nodes, and walks any other node of value where the
 // decoder expects a mapping, so the aliases inside that node bind too.
 func (b *aliasBinder) findSources(
-	value ast.Node, nodes map[string]ast.Node, bind bool,
+	value ast.Node, nodes map[string]*ast.AnchorNode, bind bool,
 ) ([]mergeSource, []*ast.AliasNode) {
 	var (
 		sources []mergeSource
@@ -422,10 +415,8 @@ func (b *aliasBinder) findSources(
 		for !astnode.IsNil(node) {
 			switch n := node.(type) {
 			case *ast.AnchorNode:
-				b.owners[n.Value] = n
-
 				if name := nodeToken(n.Name); name != nil {
-					nodes[name.Value] = n.Value
+					nodes[name.Value] = n
 				}
 
 				node = n.Value
@@ -450,7 +441,7 @@ func (b *aliasBinder) findSources(
 					return
 				}
 
-				node, inline = target, false
+				node, inline = target.Value, false
 
 			case *ast.MappingNode:
 				sources = append(sources, mergeSource{mapping: n, inline: inline})
@@ -486,7 +477,7 @@ func (b *aliasBinder) findSources(
 // bindMergeAlias binds alias, which a `<<` merge key names, to the anchor
 // of its name in nodes, the nodes map of an [anchorSet], and adds it to the
 // merges set.
-func (b *aliasBinder) bindMergeAlias(alias *ast.AliasNode, nodes map[string]ast.Node) {
+func (b *aliasBinder) bindMergeAlias(alias *ast.AliasNode, nodes map[string]*ast.AnchorNode) {
 	name := nodeToken(alias.Value)
 	if name == nil {
 		return
@@ -499,7 +490,7 @@ func (b *aliasBinder) bindMergeAlias(alias *ast.AliasNode, nodes map[string]ast.
 }
 
 // bind binds alias to target.
-func (b *aliasBinder) bind(alias *ast.AliasNode, target ast.Node) {
+func (b *aliasBinder) bind(alias *ast.AliasNode, target *ast.AnchorNode) {
 	b.targets[alias] = target
 	b.touch(alias)
 }
@@ -683,11 +674,11 @@ func (r *anchorReader) Visit(node ast.Node) ast.Visitor {
 	switch n := node.(type) {
 	case *ast.AnchorNode:
 		name := nodeToken(n.Name)
-		r.anchors.record(name, n.Value)
+		r.anchors.record(name, n)
 
 		ast.Walk(r, n.Value)
 
-		r.anchors.record(name, n.Value)
+		r.anchors.record(name, n)
 
 		return nil
 
@@ -824,7 +815,7 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 				return nil, fmt.Errorf("%w: *%s has no anchor before it", ErrAlias, name)
 			}
 
-			node = target
+			node = target.Value
 
 		default:
 			return node, nil

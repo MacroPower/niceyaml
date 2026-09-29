@@ -856,6 +856,31 @@ func TestResolver_Anchor(t *testing.T) {
 			assert.Equal(t, tc.line, anchor.GetToken().Position.Line)
 		})
 	}
+
+	t.Run("anchors that share their content", func(t *testing.T) {
+		t.Parallel()
+
+		// The parser gives each anchor its own content, but a tree built by
+		// hand may give two anchors one content node.
+		file, err := niceyaml.NewSourceFromString("a: &x 1\nb: &y 2\nv: *x\n").File()
+		require.NoError(t, err)
+
+		mapping, ok := file.Docs[0].Body.(*ast.MappingNode)
+		require.True(t, ok, "body is a %T", file.Docs[0].Body)
+		require.Len(t, mapping.Values, 3)
+
+		x, ok := mapping.Values[0].Value.(*ast.AnchorNode)
+		require.True(t, ok, "a holds a %T", mapping.Values[0].Value)
+
+		y, ok := mapping.Values[1].Value.(*ast.AnchorNode)
+		require.True(t, ok, "b holds a %T", mapping.Values[1].Value)
+
+		y.Value = x.Value
+
+		got, err := paths.NewResolver(file.Docs[0]).Anchor(mapping.Values[2].Value)
+		require.NoError(t, err)
+		assert.Same(t, x, got)
+	})
 }
 
 func TestResolver_MergeSources(t *testing.T) {
