@@ -271,6 +271,92 @@ func TestBuildRegistrySchemaDotDotAfterSymlink(t *testing.T) {
 	}
 }
 
+// A relative ref needs a colon in its first element to test this, so the
+// test changes the working directory and does not run in parallel.
+//
+//nolint:paralleltest // See above.
+func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	// Both links lead to sub/deep, so the OS reads each ref as
+	// sub/schema.json, which accepts a string. Cleaning a ref as text
+	// would name a schema.json beside the link, which rejects one or
+	// does not exist.
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(sub, "deep"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "cfg:v2"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "schema.json"), []byte(`{"type": "string"}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "schema.json"), []byte(`{"type": "integer"}`), 0o600))
+
+	yamlPath := filepath.Join(dir, "x.yaml")
+	require.NoError(t, os.WriteFile(yamlPath, []byte("hello\n"), 0o600))
+
+	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, "v1:ldir"))
+	if err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	require.NoError(t, os.Symlink(filepath.Join("..", "sub", "deep"), filepath.Join(dir, "cfg:v2", "ldir")))
+
+	t.Chdir(dir)
+
+	tcs := map[string]struct {
+		ref string
+	}{
+		"colon in the symlink name": {
+			ref: "v1:ldir/../schema.json",
+		},
+		"colon in a directory before the symlink": {
+			ref: "cfg:v2/ldir/../schema.json",
+		},
+	}
+
+	for name, tc := range tcs {
+		//nolint:paralleltest // See above.
+		t.Run(name, func(t *testing.T) {
+			reg, err := buildRegistry(t.Context(), tc.ref)
+			require.NoError(t, err)
+
+			require.NoError(t, validateFile(t.Context(), yamlPath, reg))
+		})
+	}
+}
+
+func TestURLOrDrive(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		ref  string
+		want bool
+	}{
+		"https URL":                  {ref: "https://example.com/schema.json", want: true},
+		"upper-case http URL":        {ref: "HTTP://example.com/schema.json", want: true},
+		"file URL":                   {ref: "file:///tmp/schema.json", want: true},
+		"upper-case file URL":        {ref: "FILE:/tmp/schema.json", want: true},
+		"drive with a slash":         {ref: "C:/schemas/schema.json", want: true},
+		"drive with a backslash":     {ref: `c:\schemas\schema.json`, want: true},
+		"bare drive":                 {ref: "D:", want: true},
+		"relative path":              {ref: "schemas/schema.json"},
+		"colon in the first element": {ref: "v1:dir/schema.json"},
+		"single letter and colon":    {ref: "C:schema.json"},
+		"digit and colon":            {ref: "1:/schema.json"},
+		"other scheme":               {ref: "urn:schema"},
+		"empty":                      {ref: ""},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, urlOrDrive(tc.ref))
+		})
+	}
+}
+
 func TestPhysicalAbs(t *testing.T) {
 	t.Parallel()
 

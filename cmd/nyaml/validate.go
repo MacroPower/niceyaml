@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/schemastore"
 )
@@ -209,9 +210,27 @@ func physicalAbs(path string) string {
 	return filepath.Join(resolved, abs[end:])
 }
 
-// schemePrefix matches a ref that opens with a URL scheme, such as
-// "https:" or "file:". It also matches a drive letter such as "C:".
-var schemePrefix = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:`)
+// urlOrDrive reports whether [schema.FileOrURL] reads ref as an HTTP/HTTPS
+// URL, a file URL, or a path that opens with a drive letter such as "C:/".
+// A relative path whose first element holds a colon, such as
+// "v1:dir/schema.json", is none of these.
+func urlOrDrive(ref string) bool {
+	const fileScheme = "file:/"
+
+	if httpfetch.IsHTTPURL(ref) ||
+		len(ref) >= len(fileScheme) && strings.EqualFold(ref[:len(fileScheme)], fileScheme) {
+		return true
+	}
+
+	// A drive is one ASCII letter and a colon, then a separator or nothing.
+	if len(ref) < 2 || ref[1] != ':' || len(ref) > 2 && ref[2] != '/' && ref[2] != '\\' {
+		return false
+	}
+
+	letter := ref[0]
+
+	return (letter >= 'a' && letter <= 'z') || (letter >= 'A' && letter <= 'Z')
+}
 
 // lastDotDotEnd returns the index just past the last ".." element of
 // path, or -1 when path has none.
@@ -254,8 +273,8 @@ func buildRegistry(ctx context.Context, schemaRef string) (*schema.Registry, err
 	if schemaRef != "" {
 		// FileOrURL cleans a path as text, which drops a ".." together
 		// with a symlinked directory before it. A URL or drive-letter
-		// path opens with a scheme and goes to FileOrURL as written.
-		if !schemePrefix.MatchString(schemaRef) {
+		// path goes to FileOrURL as written.
+		if !urlOrDrive(schemaRef) {
 			schemaRef = physicalAbs(schemaRef)
 		}
 
