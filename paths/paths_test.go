@@ -2310,19 +2310,17 @@ func TestPath_MergeKeyAndLiteralMergeName(t *testing.T) {
 
 	// An alias key whose anchor holds the text `<<` is a real key, which
 	// the decoder keeps apart from a merge key in the same mapping. A path
-	// through `<<` selects the real key in either order, and `..k` lists
-	// the entries under both.
+	// through `<<` selects the real key in either order, so `..k` lists
+	// only the entry under the real key, and the path of each match
+	// selects that match's node.
 	tcs := map[string]struct {
 		input string
-		want  []string
 	}{
 		"alias key first": {
 			input: "a: {? &x \"<<\" : 1}\nm:\n  *x : {k: 1}\n  <<: {k: 2}\n",
-			want:  []string{"1", "2"},
 		},
 		"merge key first": {
 			input: "a: {? &x \"<<\" : 1}\nm:\n  <<: {k: 2}\n  *x : {k: 1}\n",
-			want:  []string{"2", "1"},
 		},
 	}
 
@@ -2343,16 +2341,15 @@ func TestPath_MergeKeyAndLiteralMergeName(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, "2", node.String())
 
-			nodes, err := paths.MustParse("$.m..k").Nodes(doc)
+			matches, err := paths.MustParse("$.m..k").Matches(doc)
 			require.NoError(t, err)
+			require.Len(t, matches, 1)
+			assert.Equal(t, "1", matches[0].Node.String())
+			assert.Equal(t, "$.m.<<.k", matches[0].Path.String())
 
-			var got []string
-
-			for _, n := range nodes {
-				got = append(got, n.String())
-			}
-
-			assert.Equal(t, tc.want, got)
+			node, err = matches[0].Path.Node(doc)
+			require.NoError(t, err)
+			assert.Same(t, matches[0].Node, node)
 		})
 	}
 }

@@ -996,12 +996,12 @@ type recursiveWalk struct {
 // the place of that step onto the stacks. Before it returns, descend cuts
 // both stacks back to the length they had when it began.
 //
-// It skips an entry whose key a later entry in its mapping repeats, and
-// everything below it, because a path through that key selects the later
-// entry. When a mapping holds several `<<` keys, descend thus visits only
-// the inline mapping of the last one, even though the decoder merges them
-// all. A merge key repeats only another merge key, so a real key whose
-// text is `<<` and a merge key in one mapping each keep their entries.
+// It visits only the entry that a path through its key selects, and skips
+// every other entry of that key and everything below it. When a mapping
+// holds several `<<` keys, descend thus visits only the inline mapping of
+// the last one, even though the decoder merges them all. When a mapping
+// holds a real key whose text is `<<` next to a merge key, a path through
+// `<<` selects the real key, so descend skips the merge key.
 func (w *recursiveWalk) descend(node ast.Node) {
 	if astnode.IsNil(node) {
 		return
@@ -1017,18 +1017,13 @@ func (w *recursiveWalk) descend(node ast.Node) {
 
 		keys := w.resolver.mappingKeys(n)
 
-		lastMerge := -1
-		if len(keys.merges) > 0 {
-			lastMerge = keys.merges[len(keys.merges)-1]
-		}
-
 		for i, entry := range n.Values {
 			if entry == nil {
 				continue
 			}
 
 			key := w.resolver.keyName(entry.Key)
-			if keys.names[key] != i && i != lastMerge {
+			if keys.names[key] != i {
 				continue
 			}
 
