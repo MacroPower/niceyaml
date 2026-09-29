@@ -69,7 +69,10 @@ func TestContent(t *testing.T) {
 
 			got := astnode.Content(tc.node)
 			if tc.want == nil {
-				assert.Nil(t, got)
+				// Callers assert a pointer type on the result, and a typed
+				// nil passes that assertion, so Content returns an untyped
+				// nil.
+				assert.Equal(t, ast.Node(nil), got)
 
 				return
 			}
