@@ -91,6 +91,18 @@ func TestNewPattern(t *testing.T) {
 			pattern: "{a,*}/../x.yaml",
 			err:     filepaths.ErrInvalidPattern,
 		},
+		"parent after a wildcard and an escaped separator": {
+			pattern: `*\/../x.yaml`,
+			err:     filepaths.ErrInvalidPattern,
+		},
+		"parent after a double star and an escaped separator": {
+			pattern: `a/**\/../x.yaml`,
+			err:     filepaths.ErrInvalidPattern,
+		},
+		"escaped parent after a wildcard element": {
+			pattern: `*/\.\./x.yaml`,
+			err:     filepaths.ErrInvalidPattern,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -257,6 +269,66 @@ func TestPattern_Match(t *testing.T) {
 		"parent above the root": {
 			pattern: "/../x.yaml",
 			path:    "/x.yaml",
+			want:    true,
+		},
+		"escaped separator before a parent": {
+			pattern: `a\/b/../*.yaml`,
+			path:    "a/x.yaml",
+			want:    true,
+		},
+		"escaped separator before a parent keeps its depth": {
+			pattern: `a\/b/../*.yaml`,
+			path:    "x.yaml",
+			want:    false,
+		},
+		"escaped leading separator is rooted": {
+			pattern: `\/a/../b`,
+			path:    "/b",
+			want:    true,
+		},
+		"escaped leading separator matches no relative path": {
+			pattern: `\/a/../b`,
+			path:    "b",
+			want:    false,
+		},
+		"escaped dot element": {
+			pattern: `\./*.yaml`,
+			path:    "x.yaml",
+			want:    true,
+		},
+		"escaped inner dot element": {
+			pattern: `k8s/\./*.yaml`,
+			path:    "k8s/x.yaml",
+			want:    true,
+		},
+		"escaped parent element": {
+			pattern: `a/\.\./x.yaml`,
+			path:    "x.yaml",
+			want:    true,
+		},
+		"escaped backslash before a separator": {
+			pattern: `a\\/../x.yaml`,
+			path:    "x.yaml",
+			want:    true,
+		},
+		"escaped separator before a trailing double star": {
+			pattern: `a\/**`,
+			path:    "a",
+			want:    true,
+		},
+		"double star before an escaped separator matches one directory": {
+			pattern: `a/**\/x.yaml`,
+			path:    "a/q/x.yaml",
+			want:    true,
+		},
+		"double star before an escaped separator is a single star": {
+			pattern: `a/**\/x.yaml`,
+			path:    "a/q/r/x.yaml",
+			want:    false,
+		},
+		"double star after an escaped separator": {
+			pattern: `a\/**/x.yaml`,
+			path:    "a/q/r/x.yaml",
 			want:    true,
 		},
 		"leading parent elements stay": {
@@ -457,6 +529,11 @@ func TestAnyDepthPatterns_MatchClean(t *testing.T) {
 		"dot elements in a pattern are dropped": {
 			path:     "repo/k8s/x.yaml",
 			patterns: []string{"k8s/./x.yaml"},
+			want:     true,
+		},
+		"escaped dot elements in a pattern are dropped": {
+			path:     "repo/k8s/x.yaml",
+			patterns: []string{`k8s/\./*.yaml`},
 			want:     true,
 		},
 		"dot alternative in braces matches at any depth": {

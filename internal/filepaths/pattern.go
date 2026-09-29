@@ -37,7 +37,9 @@ type Pattern struct {
 // as "*.yaml" does. It normalizes each pattern [ExpandBraces] yields, so
 // "{.,configs}/*.yaml" matches "values.yaml" as "./*.yaml" does. A "/"
 // or "." inside a character class, as in "a[/.]b", stays part of the
-// class.
+// class. An escaped "/" or "." outside a class reads as the bare
+// character, so "a\/b/../*.yaml" matches "a/x.yaml" as "a/b/../*.yaml"
+// does, and "a\/**" matches "a" as "a/**" does.
 //
 // A cleaned path holds a ".." only at its start, so NewPattern returns
 // [ErrInvalidPattern] for a pattern that keeps a ".." after a glob
@@ -147,6 +149,10 @@ func expandPattern(pattern string, rewrite func(string) string) ([]string, bool)
 // name the one directory the ".." leaves, and doublestar matches a ".."
 // only against a literal ".." in the path.
 //
+// It first writes each escaped "/" and "." bare, as
+// [unescapeSeparatorsAndDots] does, so these rules see the separators
+// and elements doublestar matches.
+//
 // It reads a brace group as plain text, so a caller expands the braces
 // first.
 func normalizePattern(pattern string) string {
@@ -154,6 +160,7 @@ func normalizePattern(pattern string) string {
 		return ""
 	}
 
+	pattern = unescapeSeparatorsAndDots(pattern)
 	rooted := strings.HasPrefix(pattern, "/")
 
 	var kept []string
@@ -184,6 +191,68 @@ func normalizePattern(pattern string) string {
 	default:
 		return glob
 	}
+}
+
+// unescapeSeparatorsAndDots returns pattern with each escaped "/" and
+// "." outside a character class written bare, and keeps every other
+// escape. Doublestar matches an escaped "/" as a separator and an
+// escaped "." as a dot, so the bare spelling matches the same paths
+// except at the end of the pattern. There doublestar lets a bare "/**"
+// or "**/" match nothing, so "a/**" matches "a" where "a\/**" does not.
+//
+// Doublestar reads a "**" element as a single "*" when an escaped "/"
+// ends it, so unescapeSeparatorsAndDots writes that element as "*"
+// before the bare "/", which would otherwise make it match any number
+// of directories.
+func unescapeSeparatorsAndDots(pattern string) string {
+	var (
+		out      = make([]byte, 0, len(pattern))
+		elem     int // Where the current element starts in out.
+		unclosed bool
+	)
+
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '\\':
+			if i+1 == len(pattern) {
+				out = append(out, '\\') // Nothing follows to escape.
+
+				break
+			}
+
+			i++
+
+			switch pattern[i] {
+			case '.':
+				out = append(out, '.')
+
+			case '/':
+				if string(out[elem:]) == "**" {
+					out = out[:len(out)-1]
+				}
+
+				out = append(out, '/')
+				elem = len(out)
+
+			default:
+				out = append(out, '\\', pattern[i])
+			}
+
+		case '[':
+			end := skipClass(pattern, i, &unclosed)
+			out = append(out, pattern[i:end+1]...)
+			i = end
+
+		case '/':
+			out = append(out, '/')
+			elem = len(out)
+
+		default:
+			out = append(out, pattern[i])
+		}
+	}
+
+	return string(out)
 }
 
 // isPlainName reports whether elem names one directory, as a path
