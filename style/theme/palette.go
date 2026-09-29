@@ -27,11 +27,14 @@ type palette struct {
 	// Tokens sets token kinds in the style-string form [style.Parse]
 	// reads. Each spec layers over the style its kind inherits, so a spec
 	// naming only attributes keeps the colors of the closest kind above
-	// it. Kinds left out inherit from their parent, with two exceptions.
+	// it. Kinds left out inherit from their parent, with three exceptions.
 	// The inserted, deleted, and error marks take their colors from OK and
 	// Error. [kind.LiteralNull] takes the [kind.LiteralBoolean] spec, since
 	// the source themes color null, true, and false as one keyword
-	// constant.
+	// constant. [kind.UI] takes only the foreground of the finished
+	// [kind.Comment] style, so the chrome does not pick up the italics or
+	// bold of the comments. A UI spec layers over that color, and the UI
+	// children inherit from UI as usual.
 	Tokens map[kind.Kind]string
 	// Fg and Bg are the base text colors as hex strings. An empty value
 	// leaves the terminal default in place; the derived kinds then
