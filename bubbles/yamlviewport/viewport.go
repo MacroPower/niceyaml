@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
@@ -1982,13 +1983,29 @@ func (m *Model) scrollToCurrentMatch() {
 	}
 
 	// With wrap off every line is one row that starts at the gutter, so
-	// the cell of the match is the gutter plus the width of the content
-	// before its column. The offset centers that cell the way the Y offset
-	// centers its row. SetXOffset clamps, so a match inside the first
-	// screen keeps the offset at 0.
+	// the cells of the match are the gutter plus the width of the content
+	// before each of its columns. A match that ends on a later line runs
+	// to the end of this one.
 	content := view.Lines().Line(i).Content()
-	x := layout.GutterWidth() + printer.ColWidth(content, match.rng.Start.Col)
+	end := utf8.RuneCountInString(content)
 
+	if match.rng.End.Line == i {
+		end = match.rng.End.Col
+	}
+
+	x := layout.GutterWidth() + printer.ColWidth(content, match.rng.Start.Col)
+	xEnd := layout.GutterWidth() + printer.ColWidth(content, end)
+
+	// A match that fits the first screen shows without scrolling, so the
+	// view keeps the gutter and the start of the line in sight.
+	if xEnd <= m.scrollWidth() {
+		m.SetXOffset(0)
+
+		return
+	}
+
+	// Any other match takes the offset that centers its first cell, the
+	// way the Y offset centers its row.
 	m.SetXOffset(x - (m.scrollWidth()-1)/2)
 }
 

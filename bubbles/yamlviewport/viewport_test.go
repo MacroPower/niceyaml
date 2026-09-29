@@ -6240,8 +6240,9 @@ func TestViewport_SearchScrollsToHorizontalMatch(t *testing.T) {
 
 	// With wrap off, a match past the right edge of the frame scrolls the
 	// view horizontally so the match is on screen, centered as the Y
-	// offset centers its row. A match inside the first screen leaves the
-	// offset at 0, and so does wrap, which has no horizontal scroll.
+	// offset centers its row. A match whose cells all fit the first
+	// screen leaves the offset at 0, even right of center, and so does
+	// wrap, which has no horizontal scroll.
 	tcs := map[string]struct {
 		revisions  []string
 		mode       yamlviewport.ViewMode
@@ -6266,6 +6267,23 @@ func TestViewport_SearchScrollsToHorizontalMatch(t *testing.T) {
 			revisions:  []string{"k: NEEDLE " + strings.Repeat("-", 60) + "\nz: 1\n"},
 			width:      30,
 			wantScroll: false,
+		},
+		"match right of center inside the first screen": {
+			revisions:  []string{"key: " + strings.Repeat("-", 20) + "NEEDLE" + strings.Repeat("-", 40) + "\nz: 1\n"},
+			width:      40,
+			wantScroll: false,
+		},
+		"match that ends at the edge of the first screen": {
+			// The one-cell gutter, "key: ", and the dashes take 34 cells,
+			// so the needle ends on the last of the 40.
+			revisions:  []string{"key: " + strings.Repeat("-", 28) + "NEEDLE" + strings.Repeat("-", 40) + "\nz: 1\n"},
+			width:      40,
+			wantScroll: false,
+		},
+		"match that ends one cell past the first screen": {
+			revisions:  []string{"key: " + strings.Repeat("-", 29) + "NEEDLE" + strings.Repeat("-", 40) + "\nz: 1\n"},
+			width:      40,
+			wantScroll: true,
 		},
 		"match in the right pane": {
 			revisions: []string{
