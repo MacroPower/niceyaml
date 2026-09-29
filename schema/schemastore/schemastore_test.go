@@ -739,6 +739,34 @@ func TestSchemaStore_SlowFetch(t *testing.T) {
 			assert.Equal(t, int32(1), requests.Load())
 		})
 	})
+
+	t.Run("ends a held fetch at the refresh timeout", func(t *testing.T) {
+		t.Parallel()
+
+		synctest.Test(t, func(t *testing.T) {
+			client, requests, _ := newHeldCatalogClient(t, 0)
+
+			// The timeout stays below the five seconds receive waits, which
+			// the default would exceed.
+			const timeout = 50 * time.Millisecond
+
+			store := schemastore.New(
+				schemastore.WithCatalogURL("https://example.com/catalog.json"),
+				schemastore.WithHTTPClient(client),
+				schemastore.WithRefreshTimeout(timeout),
+			)
+
+			start := time.Now()
+
+			// The lookup context has no deadline, so only the refresh timeout
+			// can end the fetch the transport holds.
+			result := receive(t, findMatchAsync(t.Context(), store))
+			require.ErrorIs(t, result.err, schemastore.ErrFetchCatalog)
+			require.ErrorIs(t, result.err, context.DeadlineExceeded)
+			assert.Equal(t, timeout, time.Since(start), "fetch should end at the refresh timeout")
+			assert.Equal(t, int32(1), requests.Load())
+		})
+	})
 }
 
 func TestSchemaStore_ConcurrentAccess(t *testing.T) {
