@@ -2305,6 +2305,58 @@ func TestPath_Matches_InlineMergeSource(t *testing.T) {
 	}
 }
 
+func TestPath_MergeKeyAndLiteralMergeName(t *testing.T) {
+	t.Parallel()
+
+	// An alias key whose anchor holds the text `<<` is a real key, which
+	// the decoder keeps apart from a merge key in the same mapping. A path
+	// through `<<` selects the real key in either order, and `..k` lists
+	// the entries under both.
+	tcs := map[string]struct {
+		input string
+		want  []string
+	}{
+		"alias key first": {
+			input: "a: {? &x \"<<\" : 1}\nm:\n  *x : {k: 1}\n  <<: {k: 2}\n",
+			want:  []string{"1", "2"},
+		},
+		"merge key first": {
+			input: "a: {? &x \"<<\" : 1}\nm:\n  <<: {k: 2}\n  *x : {k: 1}\n",
+			want:  []string{"2", "1"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input).File()
+			require.NoError(t, err)
+
+			doc := file.Docs[0]
+
+			node, err := paths.MustParse("$.m.'<<'.k").Node(doc)
+			require.NoError(t, err)
+			assert.Equal(t, "1", node.String())
+
+			node, err = paths.MustParse("$.m.k").Node(doc)
+			require.NoError(t, err)
+			assert.Equal(t, "2", node.String())
+
+			nodes, err := paths.MustParse("$.m..k").Nodes(doc)
+			require.NoError(t, err)
+
+			var got []string
+
+			for _, n := range nodes {
+				got = append(got, n.String())
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestPath_Node_LaterDuplicateKeyWins(t *testing.T) {
 	t.Parallel()
 

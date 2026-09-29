@@ -84,6 +84,9 @@ type resolver struct {
 // mappingKeys indexes the entries of one mapping for [resolver.lookup].
 // The names map holds the index of the last entry with each key name, and
 // the merges slice holds the index of each `<<` entry, in document order.
+// A merge key and a real key whose text is `<<`, such as an alias key, are
+// separate keys to the decoder, so names holds the last merge key under
+// `<<` only when no real key has that name.
 type mappingKeys struct {
 	names  map[string]int
 	merges []int
@@ -106,10 +109,21 @@ func (r *resolver) mappingKeys(mapping *ast.MappingNode) *mappingKeys {
 			continue
 		}
 
-		keys.names[r.keyName(entry.Key)] = i
-
 		if isMergeKey(entry.Key) {
 			keys.merges = append(keys.merges, i)
+
+			continue
+		}
+
+		keys.names[r.keyName(entry.Key)] = i
+	}
+
+	if n := len(keys.merges); n > 0 {
+		last := keys.merges[n-1]
+		name := r.keyName(mapping.Values[last].Key)
+
+		if _, ok := keys.names[name]; !ok {
+			keys.names[name] = last
 		}
 	}
 
@@ -984,7 +998,8 @@ type recursiveWalk struct {
 // everything below it, because a path through that key selects the later
 // entry. When a mapping holds several `<<` keys, descend thus visits only
 // the inline mapping of the last one, even though the decoder merges them
-// all.
+// all. A merge key repeats only another merge key, so a real key whose
+// text is `<<` and a merge key in one mapping each keep their entries.
 func (w *recursiveWalk) descend(node ast.Node) {
 	if isNilNode(node) {
 		return
@@ -1000,8 +1015,14 @@ func (w *recursiveWalk) descend(node ast.Node) {
 
 		last := make(map[string]*ast.MappingValueNode, len(n.Values))
 
+		var lastMerge *ast.MappingValueNode
+
 		for _, entry := range n.Values {
-			if entry != nil {
+			switch {
+			case entry == nil:
+			case isMergeKey(entry.Key):
+				lastMerge = entry
+			default:
 				last[w.resolver.keyName(entry.Key)] = entry
 			}
 		}
@@ -1012,7 +1033,7 @@ func (w *recursiveWalk) descend(node ast.Node) {
 			}
 
 			key := w.resolver.keyName(entry.Key)
-			if last[key] != entry {
+			if entry != last[key] && entry != lastMerge {
 				continue
 			}
 

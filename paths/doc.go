@@ -51,6 +51,13 @@
 // fills a map and reports a duplicate key as it fills a struct. A path
 // keeps the mapping's own key either way.
 //
+// A mapping may also hold a merge key next to a real key with the text
+// `<<`, such as an alias key whose anchor holds that text. The decoder
+// keeps them apart, and so does a path. The `.'<<'` selector names the
+// real key, and `..name` lists the entries under both. The path it gives
+// an entry of the merge key's inline mapping still reads `<<`, so that
+// path resolves through the real key.
+//
 // When several anchors share a name, an alias refers to the last one before
 // it, which is the anchor the goccy/go-yaml decoder uses when it fills a
 // map. The decoder records an anchor on the value of a `<<` merge key only
