@@ -2053,7 +2053,8 @@ func (e *SourceError) sources() []*Source {
 }
 
 // markUnannotated adds an annotation without content, in [kind.TextError]
-// and at the first column its overlays cover, below every line of view at
+// and at the first column its overlays without Blend set cover, so a
+// search highlight on the line moves no caret, below every line of view at
 // an index in marked that carries no annotation below it yet. A line
 // several locations mark, or that an earlier error marked, thus gets one.
 // [line.View.String] draws the marks of a line from its overlays. A
@@ -2063,7 +2064,9 @@ func (e *SourceError) sources() []*Source {
 // error, then shows its extent without color.
 func markUnannotated(view *line.View, marked []int) {
 	for _, i := range marked {
-		overlays := view.Overlays(i)
+		overlays := slices.DeleteFunc(slices.Clone(view.Overlays(i)), func(o line.Overlay) bool {
+			return o.Blend
+		})
 		if len(overlays) == 0 || len(view.Annotations(i).Filter(line.Below)) > 0 {
 			continue
 		}

@@ -526,6 +526,100 @@ func TestPrinter_PrintError_MarksRangeWithoutStyles(t *testing.T) {
 	}
 }
 
+func TestPrinter_MarksRangeUnderHighlight(t *testing.T) {
+	t.Parallel()
+
+	// A search highlight blends onto a line that a bound error marks. The
+	// carets below the line still mark the range of the error alone, in
+	// whichever order the view gets the two.
+	tcs := map[string]struct {
+		source         string
+		key            string
+		highlight      position.Range
+		highlightFirst bool
+		want           string
+	}{
+		"highlight on the key": {
+			source:    "key: value\nname: other value\n",
+			key:       "name",
+			highlight: position.NewRange(position.New(1, 0), position.New(1, 4)),
+			want: stringtest.JoinLF(
+				"key: value",
+				"name: other value",
+				"      ^^^^^^^^^^^",
+			),
+		},
+		"highlight before the annotation": {
+			source:         "key: value\nname: other value\n",
+			key:            "name",
+			highlight:      position.NewRange(position.New(1, 0), position.New(1, 4)),
+			highlightFirst: true,
+			want: stringtest.JoinLF(
+				"key: value",
+				"name: other value",
+				"      ^^^^^^^^^^^",
+			),
+		},
+		"empty value": {
+			source:    "a: 1\nb:\nc: 2\n",
+			key:       "b",
+			highlight: position.NewRange(position.New(1, 0), position.New(1, 1)),
+			want: stringtest.JoinLF(
+				"a: 1",
+				"b:",
+				"  ^",
+				"c: 2",
+			),
+		},
+		"empty value highlighted before the annotation": {
+			source:         "a: 1\nb:\nc: 2\n",
+			key:            "b",
+			highlight:      position.NewRange(position.New(1, 0), position.New(1, 1)),
+			highlightFirst: true,
+			want: stringtest.JoinLF(
+				"a: 1",
+				"b:",
+				"  ^",
+				"c: 2",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.source)
+			bound := yamltest.Bind(t, source, niceyaml.WrapError(nil,
+				niceyaml.AtPath(paths.Root().Child(tc.key)),
+			))
+
+			var se *niceyaml.SourceError
+
+			require.ErrorAs(t, bound, &se)
+
+			view := source.View()
+			if tc.highlightFirst {
+				view.BlendOverlay(kind.GenericHighlight, tc.highlight)
+			}
+
+			se.Annotate(view)
+
+			if !tc.highlightFirst {
+				view.BlendOverlay(kind.GenericHighlight, tc.highlight)
+			}
+
+			p := printer.New(
+				printer.WithStyles(style.Styles{}),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithGutter(printer.NoGutter),
+			)
+
+			assert.Equal(t, tc.want, p.Print(view))
+		})
+	}
+}
+
 func TestPrinter_PrintError_MarksWrappedRange(t *testing.T) {
 	t.Parallel()
 
@@ -4290,6 +4384,26 @@ func TestDefaultAnnotation(t *testing.T) {
 			overlays:    line.Overlays{{Cols: position.NewSpan(4, 4)}},
 			position:    line.Below,
 			want:        []printer.AnnotationRow{{Col: 4, Marker: "^"}},
+		},
+		"empty content leaves blend overlays without carets": {
+			content:     "name: other value",
+			annotations: line.Annotations{{Placement: line.Below, Col: 6}},
+			overlays: line.Overlays{
+				{Cols: position.NewSpan(6, 17)},
+				{Cols: position.NewSpan(0, 4), Blend: true},
+			},
+			position: line.Below,
+			want:     []printer.AnnotationRow{{Col: 6, Text: "^^^^^^^^^^^"}},
+		},
+		"empty content with an overlay of no width ignores a blend overlay": {
+			content:     "b:",
+			annotations: line.Annotations{{Placement: line.Below, Col: 2}},
+			overlays: line.Overlays{
+				{Cols: position.NewSpan(2, 2)},
+				{Cols: position.NewSpan(0, 1), Blend: true},
+			},
+			position: line.Below,
+			want:     []printer.AnnotationRow{{Col: 2, Text: "^"}},
 		},
 		"empty content with an overlay of no width marks a wide rune": {
 			content:     "a: 日本",

@@ -382,11 +382,13 @@ func NoAnnotation(AnnotationContext) []AnnotationRow {
 // marks [line.Below] annotations with "^ ". It leaves out annotations
 // with empty content. When none remain, an annotation below the line
 // still marks it. The row is then a caret under every column the line's
-// overlays cover, as [line.View.String] and [line.Overlays.MarkerRow]
-// draw them, so a marked range shows its extent without color. When the
-// overlays cover no column, as an overlay of no width covers none, the
-// row is a single caret at the column of the annotations, so the spot
-// still shows. When the line wraps, each wrapped row that holds a
+// overlays cover, as [line.Overlays.MarkerRow] draws them, so a marked
+// range shows its extent without color. Overlays with
+// [line.Overlay.Blend] set, such as search highlights, get no carets,
+// since they mark a match rather than the range the annotation belongs
+// to. When the other overlays cover no column, as an overlay of no width
+// covers none, the row is a single caret at the column of the
+// annotations, so the spot still shows. When the line wraps, each wrapped row that holds a
 // covered column gets a caret row of its own below it, which marks the
 // covered columns of that row. A space the wrap drops, at a break or at
 // the end of the line, gets no caret. An annotation above the line with
@@ -418,8 +420,8 @@ func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 }
 
 // markerRows returns a caret row for each wrapped row of ctx.Content that
-// holds a column the overlays of ctx cover, in order, each under the
-// covered columns of its row. A row ends at its entry of RowEnds, before
+// holds a column the overlays of ctx without Blend set cover, in order,
+// each under the covered columns of its row. A row ends at its entry of RowEnds, before
 // the spaces the wrap drops, so those spaces get no caret. It escapes the
 // content first, as the printer shows it, so a tab counts as its picture
 // rather than a space. When the overlays cover no column, it returns one
@@ -435,8 +437,13 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 
 	// The caret row of the whole line comes from MarkerRow once, and each
 	// wrapped row takes the cells of its own columns from it. The row
-	// holds one byte per cell, a caret or a space.
-	marks := ctx.Overlays.MarkerRow(ctx.Content)
+	// holds one byte per cell, a caret or a space. A blend overlay, such
+	// as a search highlight, marks nothing the annotation belongs to, so
+	// it gets no caret.
+	marked := slices.DeleteFunc(slices.Clone(ctx.Overlays), func(o line.Overlay) bool {
+		return o.Blend
+	})
+	marks := marked.MarkerRow(ctx.Content)
 
 	var rows []AnnotationRow
 
