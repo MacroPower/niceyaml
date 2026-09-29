@@ -663,7 +663,7 @@ func mergeSources(entry *ast.MappingValueNode) []ast.Node {
 		return nil
 	}
 
-	value := unwrapNode(entry.Value)
+	value := astnode.Content(entry.Value)
 
 	seq, ok := value.(*ast.SequenceNode)
 	if !ok {
@@ -672,7 +672,7 @@ func mergeSources(entry *ast.MappingValueNode) []ast.Node {
 
 	sources := make([]ast.Node, 0, len(seq.Values))
 	for _, elem := range seq.Values {
-		sources = append(sources, unwrapNode(elem))
+		sources = append(sources, astnode.Content(elem))
 	}
 
 	return sources

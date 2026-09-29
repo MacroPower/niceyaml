@@ -19,6 +19,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -1131,7 +1132,7 @@ func (w *selfWalker) keyNames(base paths.Path, t reflect.Type) map[any]string {
 func (w *selfWalker) collectKeyNames(
 	node ast.Node, t reflect.Type, names map[any]string, seen map[*ast.MappingNode]bool,
 ) {
-	mapping, ok := unwrapNode(node).(*ast.MappingNode)
+	mapping, ok := astnode.Content(node).(*ast.MappingNode)
 	if !ok || seen[mapping] {
 		return
 	}
@@ -1222,7 +1223,7 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 
 	var name string
 
-	switch n := unwrapNode(node).(type) {
+	switch n := astnode.Content(node).(type) {
 	case *ast.StringNode:
 		name = n.Value
 	case *ast.LiteralNode:
@@ -1330,21 +1331,6 @@ func keyValueNode(key ast.MapKeyNode) ast.Node {
 		case *ast.MappingKeyNode:
 			node = n.Value
 		case *ast.AnchorNode:
-			node = n.Value
-		default:
-			return node
-		}
-	}
-}
-
-// unwrapNode looks through the anchors and tags on node to the node that
-// carries its content.
-func unwrapNode(node ast.Node) ast.Node {
-	for {
-		switch n := node.(type) {
-		case *ast.AnchorNode:
-			node = n.Value
-		case *ast.TagNode:
 			node = n.Value
 		default:
 			return node
