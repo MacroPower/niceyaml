@@ -5101,6 +5101,24 @@ func TestDecoder(t *testing.T) {
 		assert.Equal(t, marker("base"), got.Tag, "the receiver keeps its options")
 	})
 
+	t.Run("With adds reference documents after the receiver's", func(t *testing.T) {
+		t.Parallel()
+
+		base := niceyaml.NewDecoder(niceyaml.WithReferences([]byte("old: &old 1\nx: &x 1\n")))
+		derived := base.With(niceyaml.WithReferences([]byte("x: &x 2\n")))
+
+		dd := yamltest.FirstDocument(t, "a: *old\nb: *x\n")
+
+		got, err := derived.Decode[map[string]int](t.Context(), dd)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"a": 1, "b": 2}, got,
+			"the receiver's anchors still resolve, and the derived ones win")
+
+		got, err = base.Decode[map[string]int](t.Context(), dd)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"a": 1, "b": 1}, got, "the receiver keeps its references")
+	})
+
 	t.Run("a scoped node decodes with the same options", func(t *testing.T) {
 		t.Parallel()
 

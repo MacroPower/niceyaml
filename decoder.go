@@ -54,8 +54,12 @@ func NewDecoder(opts ...DecodeOption) *Decoder {
 }
 
 // With returns a new [*Decoder] with opts applied over the options of
-// the receiver, in order. [WithValidator] and [WithYAMLDecodeOptions]
-// append to the validators and go-yaml options the receiver holds, and
+// the receiver, in order. [WithValidator] appends to the validators the
+// receiver holds, and [WithYAMLDecodeOptions] and [WithReferences]
+// append to its go-yaml options. The reference documents of opts
+// therefore join those of the receiver, and an anchor they define wins
+// over one of the same name in the documents of the receiver's
+// [WithReferences], as [WithReferences] describes.
 // [WithSelfValidation], [WithAliasLimit], and [WithDisallowUnknownFields]
 // replace the setting the receiver holds. The receiver is unchanged, so a
 // Decoder shared between callers can be specialized per use:
