@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"index/suffixarray"
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -962,7 +964,7 @@ func newAnchorIndex(body ast.Node) *anchorIndex {
 
 		idx.entries = append(idx.entries, anchorEntry{
 			node:  anchor,
-			reads: setKeys(namesOf(anchor).reads),
+			reads: slices.Collect(maps.Keys(aliasNames(anchor))),
 			start: first[0].Position.Offset,
 			end:   last[0].Position.Offset,
 		})
@@ -1048,7 +1050,7 @@ func (n *Node) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast.Nod
 		return nil
 	}
 
-	reads := namesOf(node).reads
+	reads := aliasNames(node)
 	if len(reads) == 0 {
 		return nil
 	}
@@ -1153,41 +1155,27 @@ func pendingAnchor(anchor *ast.AnchorNode) *ast.AnchorNode {
 	}
 }
 
-// namesOf returns the names of the anchors a decode of node registers,
-// and the names its aliases read.
-func namesOf(node ast.Node) *anchorNames {
-	names := &anchorNames{
-		registers: map[string]struct{}{},
-		reads:     map[string]struct{}{},
-	}
-
+// aliasNames returns the names the aliases under node read.
+func aliasNames(node ast.Node) map[string]struct{} {
+	names := aliasVisitor{}
 	ast.Walk(names, node)
 
 	return names
 }
 
-// anchorNames is an [ast.Visitor] that collects the names of the anchors
-// the nodes it visits define and the names of the aliases they hold.
-type anchorNames struct {
-	registers map[string]struct{}
-	reads     map[string]struct{}
-}
+// aliasVisitor is an [ast.Visitor] that collects the names of the aliases
+// the nodes it visits hold.
+type aliasVisitor map[string]struct{}
 
 // Visit implements [ast.Visitor].
-func (a *anchorNames) Visit(node ast.Node) ast.Visitor {
+func (a aliasVisitor) Visit(node ast.Node) ast.Visitor {
 	if astnode.IsNil(node) {
 		return nil
 	}
 
-	switch n := node.(type) {
-	case *ast.AnchorNode:
-		if name, ok := nodeName(n.Name); ok {
-			a.registers[name] = struct{}{}
-		}
-
-	case *ast.AliasNode:
+	if n, ok := node.(*ast.AliasNode); ok {
 		if name, ok := nodeName(n.Value); ok {
-			a.reads[name] = struct{}{}
+			a[name] = struct{}{}
 		}
 	}
 
@@ -1213,14 +1201,4 @@ func nodeToken(node ast.Node) *token.Token {
 	}
 
 	return node.GetToken()
-}
-
-// setKeys returns the keys of set.
-func setKeys(set map[string]struct{}) []string {
-	keys := make([]string, 0, len(set))
-	for key := range set {
-		keys = append(keys, key)
-	}
-
-	return keys
 }
