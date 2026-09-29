@@ -5337,6 +5337,111 @@ func TestViewport_SearchOrdersIndexMatches(t *testing.T) {
 	}
 }
 
+// fixedSearcher is a [yamlviewport.Searcher] whose Index finds the same
+// ranges for every term.
+type fixedSearcher struct {
+	matches position.Ranges
+}
+
+func (s fixedSearcher) Load(line.Lines) yamlviewport.Index {
+	return s
+}
+
+func (s fixedSearcher) Find(string) position.Ranges {
+	return s.matches
+}
+
+func TestViewport_SearchLaysOutOnlyHighlightedLines(t *testing.T) {
+	t.Parallel()
+
+	rng := func(startLine, startCol, endLine, endCol int) position.Range {
+		return position.NewRange(position.New(startLine, startCol), position.New(endLine, endCol))
+	}
+
+	// A match that ends at column 0 of a later line highlights nothing on
+	// that line. A move of the highlights lays out the same lines, and
+	// renders the same view, as for the match that ends at the width of
+	// the line before.
+	tcs := map[string]struct {
+		matches position.Ranges
+		want    position.Ranges
+	}{
+		"ends at column 0 of the next line": {
+			matches: position.Ranges{rng(0, 0, 1, 0), rng(2, 0, 3, 0)},
+			want:    position.Ranges{rng(0, 0, 0, 4), rng(2, 0, 2, 4)},
+		},
+		"runs across a line break": {
+			matches: position.Ranges{rng(0, 3, 2, 0), rng(2, 3, 3, 0)},
+			want:    position.Ranges{rng(0, 3, 1, 4), rng(2, 3, 2, 4)},
+		},
+	}
+
+	// The run closure makes each change of the highlights in turn. It
+	// returns how often the base style ran as each change laid out the
+	// rows, and the view after each change. The highlight styles keep the
+	// base transform and add an attribute of their own, so the view shows
+	// which cells each highlight marks.
+	run := func(matches position.Ranges) ([]int, []string) {
+		renders := 0
+		base := lipgloss.NewStyle().Transform(func(s string) string {
+			renders++
+
+			return s
+		})
+		p := printer.New(
+			printer.WithStyles(style.New(base,
+				style.Set(kind.GenericHighlight, base.Underline(true)),
+				style.Set(kind.GenericHighlightDim, base.Italic(true)),
+			)),
+			printer.WithContainerStyle(lipgloss.NewStyle()),
+			printer.WithGutter(printer.NoGutter),
+		)
+
+		m := yamlviewport.New(
+			yamlviewport.WithPrinter(p),
+			yamlviewport.WithSearcher(fixedSearcher{matches: matches}),
+		)
+		m.SetWidth(40)
+		m.SetHeight(10)
+		m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\n"))
+		m.TotalRowCount()
+
+		steps := []func(){
+			func() { m.SetSearchTerm("x") },
+			m.SearchNext,
+			m.ClearSearch,
+		}
+
+		var counts []int
+
+		var views []string
+
+		for _, step := range steps {
+			renders = 0
+
+			step()
+			m.TotalRowCount()
+
+			counts = append(counts, renders)
+			views = append(views, m.View())
+		}
+
+		return counts, views
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			gotCounts, gotViews := run(tc.matches)
+			wantCounts, wantViews := run(tc.want)
+
+			assert.Equal(t, wantCounts, gotCounts)
+			assert.Equal(t, wantViews, gotViews)
+		})
+	}
+}
+
 // nilSearcher is a [yamlviewport.Searcher] whose Load returns a nil Index.
 // It counts its Load calls.
 type nilSearcher struct {

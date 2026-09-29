@@ -451,7 +451,7 @@ func (m *Model) remeasure(ranges ...position.Range) {
 
 	spans := make([]position.Span, 0, len(ranges))
 	for _, r := range ranges {
-		spans = append(spans, position.NewSpan(r.Start.Line, r.End.Line+1))
+		spans = append(spans, position.NewSpan(r.Start.Line, r.LastLine()+1))
 	}
 
 	p := m.renderPrinter(m.paneWidth())
@@ -997,13 +997,14 @@ func (m *Model) clearMatches() {
 
 // matchLines returns the indexes in matches of the matches that cover each
 // line of content n lines long, keyed by the index of the line, in
-// ascending order. A match that runs across a line break covers each line
-// it touches.
+// ascending order. A match covers each line from its start line through
+// [position.Range.LastLine], the lines its highlight marks, so a match
+// that ends at column 0 of a later line does not cover that line.
 func matchLines(matches position.Ranges, n int) map[int][]int {
 	lines := make(map[int][]int, len(matches))
 
 	for k, r := range matches {
-		for l := max(0, r.Start.Line); l <= min(r.End.Line, n-1); l++ {
+		for l := max(0, r.Start.Line); l <= min(r.LastLine(), n-1); l++ {
 			lines[l] = append(lines[l], k)
 		}
 	}
