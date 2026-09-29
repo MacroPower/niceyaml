@@ -81,7 +81,7 @@ func TestAbsentOverlay(t *testing.T) {
 
 	// Override and Blend share one rule for an absent color, so both hand
 	// back the base color, clamped into the gamut, for each of these
-	// overlays.
+	// overlays, and nil when the base is absent too.
 	tcs := map[string]struct {
 		base    color.Color
 		overlay color.Color
@@ -106,6 +106,16 @@ func TestAbsentOverlay(t *testing.T) {
 			base:    colorful.Color{R: -0.2, G: 1.4, B: 0.5},
 			overlay: nil,
 			want:    colorful.Color{R: 0, G: 1, B: 0.5},
+		},
+		"nil with base NoColor": {
+			base:    lipgloss.NoColor{},
+			overlay: nil,
+			want:    nil,
+		},
+		"NoColor with base invisible": {
+			base:    color.RGBA{A: 0},
+			overlay: lipgloss.NoColor{},
+			want:    nil,
 		},
 	}
 
@@ -519,6 +529,53 @@ func TestStyles_Attributes(t *testing.T) {
 				assert.Equal(t, tc.want.GetBlink(), got.GetBlink(), "blink")
 				assert.Equal(t, tc.want.GetReverse(), got.GetReverse(), "reverse")
 				assert.Equal(t, tc.want.Render("x"), got.Render("x"))
+			})
+		}
+	}
+}
+
+func TestStyles_UnsetColors(t *testing.T) {
+	t.Parallel()
+
+	layer := map[string]func(base, overlay lipgloss.Style) lipgloss.Style{
+		"blend":    colors.BlendStyles,
+		"override": colors.OverrideStyles,
+	}
+
+	red := lipgloss.Color("#FF0000")
+	green := lipgloss.Color("#00FF00")
+	blue := lipgloss.Color("#0000FF")
+	parent := lipgloss.NewStyle().Foreground(red).Background(green).UnderlineColor(blue)
+
+	tcs := map[string]struct {
+		base    lipgloss.Style
+		overlay lipgloss.Style
+		want    lipgloss.Style
+	}{
+		"both styles empty": {
+			base:    lipgloss.NewStyle(),
+			overlay: lipgloss.NewStyle(),
+			want:    lipgloss.NewStyle(),
+		},
+		"attributes without colors": {
+			base:    lipgloss.NewStyle().Bold(true),
+			overlay: lipgloss.NewStyle().Italic(true),
+			want:    lipgloss.NewStyle().Bold(true).Italic(true),
+		},
+	}
+
+	for layerName, fn := range layer {
+		for name, tc := range tcs {
+			t.Run(layerName+"/"+name, func(t *testing.T) {
+				t.Parallel()
+
+				got := fn(tc.base, tc.overlay)
+				assert.Equal(t, tc.want, got)
+
+				inherited := got.Inherit(parent)
+				assert.Equal(t, red, inherited.GetForeground(), "foreground")
+				assert.Equal(t, green, inherited.GetBackground(), "background")
+				assert.Equal(t, blue, inherited.GetUnderlineColor(), "underline color")
 			})
 		}
 	}

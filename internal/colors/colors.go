@@ -9,7 +9,8 @@ import (
 
 // Override returns the overlay color, or the base color when the overlay
 // is absent. An overlay is absent when it is nil, [lipgloss.NoColor], or
-// invisible, the same rule [Blend] applies. Override clamps the color it
+// invisible, the same rule [Blend] applies. When both colors are absent,
+// Override returns nil, as [Blend] does. Override clamps the color it
 // returns into the sRGB gamut, as [Blend] clamps, so the result renders as
 // a valid SGR sequence.
 func Override(base, overlay color.Color) color.Color {
@@ -17,7 +18,11 @@ func Override(base, overlay color.Color) color.Color {
 		return Clamped(overlay)
 	}
 
-	return Clamped(base)
+	if _, ok := visible(base); ok {
+		return Clamped(base)
+	}
+
+	return nil
 }
 
 // Blend blends two colors using LAB color space (50/50 mix) and clamps the
@@ -135,17 +140,16 @@ func BlendStyles(base, overlay lipgloss.Style) lipgloss.Style {
 func OverrideStyles(base, overlay lipgloss.Style) lipgloss.Style {
 	style := layerAttributes(base, overlay)
 
-	// Override foreground if overlay has one.
+	// Replace each color. A color that neither style sets stays unset, so
+	// the result can still inherit it.
 	if fg := Override(style.GetForeground(), overlay.GetForeground()); fg != nil {
 		style = style.Foreground(fg)
 	}
 
-	// Override background if overlay has one.
 	if bg := Override(style.GetBackground(), overlay.GetBackground()); bg != nil {
 		style = style.Background(bg)
 	}
 
-	// Override underline color if overlay has one.
 	if ul := Override(style.GetUnderlineColor(), overlay.GetUnderlineColor()); ul != nil {
 		style = style.UnderlineColor(ul)
 	}
