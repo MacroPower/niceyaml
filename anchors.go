@@ -150,14 +150,15 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 	ast.Walk(tokens, body)
 
 	source := sourceNodes(d.root.Body)
-	spelled := bracketedNames(source)
+	spelled := spelledNames(names, d.tokens)
 
 	// Each anchor with a name in names gets the name followed by a count in
 	// brackets, higher than the count of the last anchor of that name, so
-	// no two new names match. A quoted name can hold brackets, so the
-	// count skips a new name that an anchor or alias of the document
-	// spells, even in part. Such a name would read the wrong anchor, and
-	// restoreNames would rewrite it in a message.
+	// no two new names match. A key, a value, a comment, or a quoted anchor
+	// name can hold the same text, so the count skips a new name that the
+	// document spells anywhere, even in part. An alias that spells such a
+	// name would read the wrong anchor, and restoreNames would rewrite the
+	// text in any message that quotes it.
 	renamed := map[ast.Node]string{}
 	count := map[string]int{}
 
@@ -180,7 +181,7 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 			count[name]++
 			unique = name + " [" + strconv.Itoa(count[name]) + "]"
 
-			if !spelledIn(spelled, unique) {
+			if !spelled[unique] {
 				break
 			}
 		}
@@ -757,45 +758,61 @@ func renamedAnchorNames(resolver *paths.Resolver, body ast.Node) map[string]bool
 	return names
 }
 
-// bracketedNames returns the names of the anchors and aliases among nodes
-// that hold " [", the start of a name that [document.parsedTree] gives
-// an anchor.
-func bracketedNames(nodes []ast.Node) []string {
-	var names []string
+// spelledNames returns the new names that tks spell, even in part, among
+// those [document.parsedTree] can give an anchor with a name in names,
+// the name followed by a count in brackets. It reads the text of tks,
+// which holds a spelling that runs across tokens, such as a tag before a
+// flow sequence. It also reads the value of each token, which differs
+// from its text where a quoted scalar holds an escape or a scalar folds
+// a line break.
+func spelledNames(names map[string]bool, tks token.Tokens) map[string]bool {
+	var (
+		text   strings.Builder
+		values []string
+	)
 
-	seen := map[string]bool{}
-
-	for _, n := range nodes {
-		var name string
-
-		switch n := n.(type) {
-		case *ast.AnchorNode:
-			name, _ = nodeName(n.Name)
-
-		case *ast.AliasNode:
-			name, _ = nodeName(n.Value)
-		}
-
-		if !strings.Contains(name, " [") || seen[name] {
+	for _, tk := range tks {
+		if tk == nil {
 			continue
 		}
 
-		seen[name] = true
-		names = append(names, name)
-	}
+		text.WriteString(tk.Origin)
 
-	return names
-}
-
-// spelledIn reports whether any of names holds name.
-func spelledIn(names []string, name string) bool {
-	for _, n := range names {
-		if strings.Contains(n, name) {
-			return true
+		if strings.Contains(tk.Value, " [") {
+			values = append(values, tk.Value)
 		}
 	}
 
-	return false
+	spelled := map[string]bool{}
+
+	for _, s := range append(values, text.String()) {
+		for off := 0; ; {
+			i := strings.Index(s[off:], " [")
+			if i < 0 {
+				break
+			}
+
+			at := off + i
+			off = at + 1
+
+			end := at + len(" [")
+			for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+				end++
+			}
+
+			if end == at+len(" [") || end == len(s) || s[end] != ']' {
+				continue
+			}
+
+			for name := range names {
+				if strings.HasSuffix(s[:at], name) {
+					spelled[name+s[at:end+1]] = true
+				}
+			}
+		}
+	}
+
+	return spelled
 }
 
 // pairNodes maps each node under a, outside its comments, to the node in

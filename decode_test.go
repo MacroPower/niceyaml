@@ -2677,6 +2677,14 @@ func (r *rawText) UnmarshalYAML(data []byte) error {
 	return nil
 }
 
+// echoingUnmarshaler reports errUnmarshal with the text go-yaml hands it,
+// so the message of the decode quotes that text.
+type echoingUnmarshaler struct{}
+
+func (*echoingUnmarshaler) UnmarshalYAML(data []byte) error {
+	return fmt.Errorf("%w: %q", errUnmarshal, data)
+}
+
 func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 	t.Parallel()
 
@@ -2906,6 +2914,70 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 				assert.Equal(t, tc.want, got)
 			})
 		}
+	})
+
+	t.Run("text spelled like a renamed anchor", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			C echoingUnmarshaler `yaml:"c"`
+			A int                `yaml:"a"`
+			B int                `yaml:"b"`
+			D time.Duration      `yaml:"d"`
+		}
+
+		// The two anchors named x get new names, and each message quotes
+		// the text as the document spells it.
+		tcs := map[string]struct {
+			input string
+			err   string
+		}{
+			"unknown key": {
+				input: "a: &x 1\nb: &x 2\n\"x [1]\": 3\n",
+				err:   `3:1: unknown field "x [1]"`,
+			},
+			"invalid duration": {
+				input: "a: &x 1\nb: &x 2\nd: x [2]\n",
+				err:   `time: invalid duration "x [2]"`,
+			},
+			"escaped value": {
+				input: "a: &x 1\nb: &x 2\nd: \"x\\x20[1]\"\n",
+				err:   `time: invalid duration "x [1]"`,
+			},
+			"folded value": {
+				input: "a: &x 1\nb: &x 2\nd: x\n  [1]\n",
+				err:   `time: invalid duration "x [1]"`,
+			},
+			"unmarshaler text": {
+				input: "a: &x 1\nb: &x 2\nc: x [1]\n",
+				err:   `unmarshaler rejected the value: "x [1]\n"`,
+			},
+			"unmarshaler text across tokens": {
+				input: "a: &x 1\nb: &x 2\nc: !x [1]\n",
+				err:   `unmarshaler rejected the value: "!x [1]\n"`,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				_, err := dd.Decode[config](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+				require.EqualError(t, err, tc.err)
+			})
+		}
+	})
+
+	t.Run("alias beside text spelled like a renamed anchor", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "a: &x 1\nb: &x 2\nc: x [1]\nd: *x\n")
+
+		got, err := dd.Decode[any](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"a": uint64(1), "b": uint64(2), "c": "x [1]", "d": uint64(2)}, got)
 	})
 
 	t.Run("later document after a folded node", func(t *testing.T) {
