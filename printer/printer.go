@@ -1475,20 +1475,26 @@ func hardwrap(row string, cw int) string {
 // wrap takes each ASCII byte as a cluster of its own, so it can start a
 // row with the runes that continue the cluster the row before ends with,
 // such as the combining accent of an "e" or the rest of a keycap. Those
-// runes move back onto the row before, which keeps the cluster whole, and
-// a row they empty goes.
+// runes move back onto the last row with text on it, which keeps the
+// cluster whole even when the wrap puts empty rows between them, and a
+// row they empty goes.
 func wrapRows(text string, cw int, breaks string) []string {
 	rows := strings.Split(lipgloss.Wrap(text, cw, breaks), "\n")
 	out := rows[:0]
+	last := -1
 
 	for _, row := range rows {
-		if n := len(out); n > 0 {
+		if last >= 0 {
 			var moved bool
 
-			out[n-1], row, moved = rejoinCluster(out[n-1], row)
+			out[last], row, moved = rejoinCluster(out[last], row)
 			if moved && ansi.Strip(row) == "" {
 				continue
 			}
+		}
+
+		if ansi.Strip(row) != "" {
+			last = len(out)
 		}
 
 		out = append(out, row)

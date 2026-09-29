@@ -1918,6 +1918,22 @@ func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 			styled: true,
 			want:   []string{"k:", "abcdefge\u0301", "xyz"},
 		},
+		"decomposed accent before a run of breakpoints": {
+			input: "k: abbaé//----/x",
+			width: 5,
+			want:  []string{"k:", "abbaé", "//---", "-/x"},
+		},
+		"decomposed accent before a run of breakpoints styled": {
+			input:  "k: abbaé//----/x",
+			width:  5,
+			styled: true,
+			want:   []string{"k:", "abbaé", "//---", "-/x"},
+		},
+		"keycap before a run of breakpoints": {
+			input: "k: \U0001F44D\U0001F3FD日1️⃣-----x",
+			width: 5,
+			want:  []string{"k:", "\U0001F44D\U0001F3FD日", "1️⃣", "-----", "x"},
+		},
 		"keycap wider than the width": {
 			input: "1\ufe0f\u20e3: bb",
 			width: 1,
