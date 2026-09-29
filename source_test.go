@@ -30,6 +30,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 func TestTokens_String_Annotation(t *testing.T) {
@@ -935,6 +936,51 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 		require.ErrorIs(t, err, niceyaml.ErrOutOfRange)
 		assert.Equal(t, "location outside source: line 5 not in lines 1-4", err.Error())
 	})
+}
+
+func TestNewSourceFromTokens_WhitespaceDocument(t *testing.T) {
+	t.Parallel()
+
+	// A document of whitespace alone cut after "..." counts its lines from
+	// 1, as a document with text does.
+	tcs := map[string]struct {
+		input string
+		want  []int
+	}{
+		"between document end and header": {
+			input: "a: 1\n...\n\t\n---\nb: 2\n",
+			want:  []int{1, 2},
+		},
+		"after document end at the end": {
+			input: "a: 1\n...\n\t\n",
+			want:  []int{1, 2},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var doc token.Tokens
+
+			for i, d := range tokens.SplitDocuments(tokens.Tokenize(tc.input)) {
+				if i == 1 {
+					doc = d
+				}
+			}
+
+			require.NotEmpty(t, doc)
+
+			lines := niceyaml.NewSourceFromTokens(doc).Lines()
+
+			got := make([]int, 0, lines.Len())
+			for _, l := range lines.All() {
+				got = append(got, l.Number())
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestNewSourceFromBytes(t *testing.T) {

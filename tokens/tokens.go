@@ -1112,9 +1112,9 @@ func TrimLineEnding(s string) string {
 // whitespace comes before its text. A token whose Origin is empty, such as
 // the empty content of a block scalar, shares the position of the text
 // after it, so it anchors the shift only when no token of the stream holds
-// text. A stream carrying whitespace alone, whose token [Tokenize]
-// positions ahead of the whitespace rather than inside it, keeps the
-// positions it has.
+// text. The tokens of a stream carrying whitespace alone move to line 1,
+// column 1, offset 1, where [Tokenize] places the token it makes of such
+// text, ahead of the whitespace rather than inside it.
 //
 // A stream cut before the end of a longer one can end with tokens without
 // text, such as the empty content of a block scalar that the next
@@ -1191,7 +1191,11 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 			continue
 		}
 
-		if clone.Position != nil {
+		switch {
+		case clone.Position == nil:
+		case anchor == nil:
+			clone.Position.Line, clone.Position.Column, clone.Position.Offset = 1, 1, 1
+		default:
 			clone.Position.Line = clone.Position.Line - startLine + 1
 			if clone.Position.Line == 1 {
 				clone.Position.Column = clone.Position.Column - startCol + 1
@@ -1227,7 +1231,8 @@ func ResetPositions(tks token.Tokens) token.Tokens {
 // Origins, before its final line ending. That is where [Tokenize] places a
 // token without text that no text follows. The positions of tks count from
 // line 1, column 1, offset 1 at the start of the joined Origins. A stream
-// without a token holding text keeps its positions.
+// without a token holding text keeps its positions, which [ResetPositions]
+// has already moved to line 1, column 1, offset 1.
 func endTrailing(tks token.Tokens) {
 	last := -1
 

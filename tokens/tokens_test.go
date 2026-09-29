@@ -1675,28 +1675,56 @@ func TestResetPositions_Text(t *testing.T) {
 		assert.Equal(t, 6, got[2].Position.Offset) // Offset 105 relative to start 100, plus the 1-based origin.
 	})
 
-	t.Run("keeps the positions of a stream holding whitespace alone", func(t *testing.T) {
+	t.Run("moves a stream holding whitespace alone to the start", func(t *testing.T) {
 		t.Parallel()
 
+		// A whitespace-only document cut after "..." lands at 1:1:1, where
+		// [tokens.Tokenize] places the token it makes of the same text.
 		tcs := map[string]struct {
 			input string
+			doc   int
+			want  int
 		}{
-			"line break":          {input: "\n"},
-			"two line breaks":     {input: "\n\n"},
-			"spaces":              {input: "  "},
-			"spaces then a break": {input: "   \n"},
+			"line break":          {input: "\n", want: 1},
+			"two line breaks":     {input: "\n\n", want: 1},
+			"spaces":              {input: "  ", want: 1},
+			"spaces then a break": {input: "   \n", want: 1},
+			"tab line between document end and header": {
+				input: "a: 1\n...\n\t\n---\nb: 2\n",
+				doc:   1,
+				want:  1,
+			},
+			"tab line after document end at the end": {
+				input: "a: 1\n...\n\t\n",
+				doc:   1,
+				want:  1,
+			},
+			"two tab lines between document end and header": {
+				input: "a: 1\n...\n\t\n\t\n---\nb: 2\n",
+				doc:   1,
+				want:  2,
+			},
 		}
 
 		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				got := resetOne(tokens.Tokenize(tc.input))
+				var got token.Tokens
 
-				require.Len(t, got, 1)
-				assert.Equal(t, 1, got[0].Position.Line)
-				assert.Equal(t, 1, got[0].Position.Column)
-				assert.Equal(t, 1, got[0].Position.Offset)
+				for i, doc := range tokens.SplitDocuments(tokens.Tokenize(tc.input)) {
+					if i == tc.doc {
+						got = resetOne(doc)
+					}
+				}
+
+				require.Len(t, got, tc.want)
+
+				for _, tk := range got {
+					assert.Equal(t, 1, tk.Position.Line)
+					assert.Equal(t, 1, tk.Position.Column)
+					assert.Equal(t, 1, tk.Position.Offset)
+				}
 			})
 		}
 	})
