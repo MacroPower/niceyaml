@@ -511,6 +511,65 @@ func TestBaseViewFillsTerminal(t *testing.T) {
 	}
 }
 
+func TestBaseViewNoColumns(t *testing.T) {
+	t.Parallel()
+
+	// A viewport with rows but no columns renders nothing, and the status
+	// bar still sits on the bottom rows of the terminal.
+	tcs := map[string]struct {
+		mode  yamlviewport.ViewMode
+		width int
+	}{
+		"full width 0": {
+			mode:  yamlviewport.ViewModeFull,
+			width: 0,
+		},
+		"side-by-side width 0": {
+			mode:  yamlviewport.ViewModeSideBySide,
+			width: 0,
+		},
+		"side-by-side width 3": {
+			mode:  yamlviewport.ViewModeSideBySide,
+			width: 3,
+		},
+		"side-by-side width 4": {
+			mode:  yamlviewport.ViewModeSideBySide,
+			width: 4,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			const height = 10
+
+			m := newModel(&modelOptions{
+				sources: []*niceyaml.Source{
+					niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml")),
+					niceyaml.NewSourceFromString("a: 2\n", niceyaml.WithName("b.yaml")),
+				},
+			})
+			m.viewport.SetViewMode(tc.mode)
+
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: tc.width, Height: height})
+
+			got, ok := updated.(model)
+			require.True(t, ok)
+
+			rows := strings.Split(got.baseView(), "\n")
+			require.Len(t, rows, height)
+
+			bar := strings.Split(got.statusBar(), "\n")
+			assert.Equal(t, bar, rows[height-statusBarHeight:])
+
+			for i, row := range rows[:height-statusBarHeight] {
+				assert.Equal(t, tc.width, lipgloss.Width(row), "row %d", i)
+			}
+		})
+	}
+}
+
 func TestOverlayOffset(t *testing.T) {
 	t.Parallel()
 

@@ -342,7 +342,10 @@ func (m model) View() tea.View {
 // as the terminal, so a newline between them stacks them without padding.
 // A terminal of two rows leaves the viewport none. A viewport with no rows
 // renders an empty string that the newline would still turn into a row,
-// so baseView leaves the viewport out instead. A terminal of one row shows
+// so baseView leaves the viewport out instead. A viewport with rows but no
+// columns, as in a terminal too narrow for a side-by-side pane, also
+// renders an empty string, so baseView fills its rows with blank ones and
+// the status bar stays on the bottom rows. A terminal of one row shows
 // the title line alone. A terminal with no rows, as before the first
 // window size arrives, renders nothing.
 func (m *model) baseView() string {
@@ -357,7 +360,13 @@ func (m *model) baseView() string {
 		return m.statusBar()
 
 	default:
-		return m.viewport.View() + "\n" + m.statusBar()
+		content := m.viewport.View()
+		if content == "" {
+			blank := strings.Repeat(" ", max(0, m.width))
+			content = strings.Join(slices.Repeat([]string{blank}, m.height-statusBarHeight), "\n")
+		}
+
+		return content + "\n" + m.statusBar()
 	}
 }
 
