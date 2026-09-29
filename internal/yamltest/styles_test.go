@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -104,8 +103,6 @@ func TestXMLStyles_Style(t *testing.T) {
 			getter := yamltest.NewXMLStyles()
 			st := getter.Style(tc.input)
 
-			require.NotNil(t, st)
-
 			got := st.Render("test")
 			assert.Equal(t, tc.want, got)
 		})
@@ -118,8 +115,6 @@ func TestXMLStyles_Style_UnknownStyle(t *testing.T) {
 	getter := yamltest.NewXMLStyles()
 	st := getter.Style(kind.Kind("unknownStyle"))
 
-	require.NotNil(t, st)
-
 	got := st.Render("test")
 	assert.Equal(t, "<unknownStyle>test</unknownStyle>", got)
 }
@@ -129,8 +124,6 @@ func TestXMLStyles_Style_EmptyContent(t *testing.T) {
 
 	getter := yamltest.NewXMLStyles()
 	st := getter.Style(kind.NameTag)
-
-	require.NotNil(t, st)
 
 	got := st.Render("")
 	assert.Equal(t, "<nameTag></nameTag>", got)
@@ -145,15 +138,12 @@ func TestXMLStyles_XMLStyleInclude(t *testing.T) {
 
 	// Included styles get XML tags.
 	searchStyle := getter.Style(kind.GenericHighlightDim)
-	require.NotNil(t, searchStyle)
 	assert.Equal(t, "<genericHighlightDim>test</genericHighlightDim>", searchStyle.Render("test"))
 
 	selectedStyle := getter.Style(kind.GenericHighlight)
-	require.NotNil(t, selectedStyle)
 	assert.Equal(t, "<genericHighlight>test</genericHighlight>", selectedStyle.Render("test"))
 
 	// Style returns an empty style for every other kind.
 	commentStyle := getter.Style(kind.Comment)
-	require.NotNil(t, commentStyle)
 	assert.Equal(t, "test", commentStyle.Render("test"))
 }
