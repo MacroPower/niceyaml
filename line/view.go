@@ -516,8 +516,11 @@ func isSeparator(a Annotation) bool {
 // they mark in a fixed-width font. The output holds no escape sequences,
 // so it goes into a log or a golden file as it is, and
 // [go.jacobcolvin.com/niceyaml.FormatError] prints the excerpt of a
-// bound error this way. A printer renders the same
-// view with styles. An empty view renders as "".
+// bound error this way. A printer renders the same view with styles, and
+// color marks the overlays there, so its rows below a line can differ
+// from these. [go.jacobcolvin.com/niceyaml/printer.DefaultAnnotation]
+// draws overlay carets only on the row of a kind without content and
+// gives a row with content a single caret. An empty view renders as "".
 func (v *View) String() string {
 	width := 4
 	for _, ln := range v.All() {
