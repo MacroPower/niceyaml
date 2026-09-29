@@ -58,7 +58,7 @@ func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error
 		)
 	}
 
-	name := Redacted(rawURL)
+	name := redacted(u, nil, rawURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), http.NoBody)
 	if err != nil {
@@ -152,13 +152,15 @@ func IsHTTPURL(rawURL string) bool {
 // returns it unchanged.
 func Redacted(rawURL string) string {
 	u, err := url.Parse(rawURL)
-	if err != nil || hidesPassword(u, rawURL) {
-		name, _ := redactUnparsed(rawURL)
 
-		return name
-	}
+	return redacted(u, err, rawURL)
+}
 
-	if splitsPassword(u, rawURL) {
+// redacted is [Redacted] for rawURL, given the u and err that
+// [url.Parse] returns for it, so [Get] can name the URL it already
+// parsed.
+func redacted(u *url.URL, err error, rawURL string) string {
+	if err != nil || hidesPassword(u, rawURL) || splitsPassword(u, rawURL) {
 		name, _ := redactUnparsed(rawURL)
 
 		return name
