@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -1342,6 +1343,26 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				}
 			})
 		}
+	})
+
+	t.Run("several NaN keys order a value that refers to itself", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "{}\n")
+
+		cyc := map[string]any{}
+		cyc["self"] = cyc
+
+		// The document leaves the map as the caller filled it.
+		target := struct {
+			M map[float64]any `yaml:"m"`
+		}{M: map[float64]any{
+			math.NaN(): cyc,
+			math.NaN(): signed{N: -1},
+		}}
+
+		err := dd.DecodeInto(t.Context(), &target)
+		require.EqualError(t, err, "$.m.NaN.n: negative -1")
 	})
 
 	t.Run("time keys of one instant and zone report no position", func(t *testing.T) {

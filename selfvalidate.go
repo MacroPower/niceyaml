@@ -518,19 +518,14 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 	case reflect.Map:
 		// The entries walk in the order of their keys, so the errors come
 		// back in one order however the map iterates. Two keys of one
-		// text, such as 1 and "1", order by the types they hold, and
-		// several NaN keys order by their values. Each value comes from
-		// the iteration rather than a lookup by its key, since a NaN key
-		// equals no key, itself included. The key of an entry walks before
-		// its value, at the key of the entry's path.
+		// text, such as 1 and "1", order by the types they hold. Entries
+		// that tie on both, such as several NaN keys, walk as one group,
+		// as [selfWalker.walkEntries] describes. Each value comes from the
+		// iteration rather than a lookup by its key, since a NaN key
+		// equals no key, itself included.
 		names := w.keyNames(base, v.Type().Key())
 
-		type entry struct {
-			key, value    reflect.Value
-			seg, typeName string
-		}
-
-		entries := make([]entry, 0, v.Len())
+		entries := make([]mapEntry, 0, v.Len())
 		shared := map[any]int{}
 
 		for iter := v.MapRange(); iter.Next(); {
@@ -539,7 +534,7 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 				shared[k]++
 			}
 
-			entries = append(entries, entry{key: key, value: iter.Value()})
+			entries = append(entries, mapEntry{key: key, value: iter.Value()})
 		}
 
 		// The names cannot tell apart several keys that [nameKey] gives
@@ -557,28 +552,71 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 			entries[i].typeName = keyTypeName(entries[i].key)
 		}
 
-		slices.SortStableFunc(entries, func(a, b entry) int {
-			c := cmp.Or(strings.Compare(a.seg, b.seg), strings.Compare(a.typeName, b.typeName))
-			if c != 0 {
-				return c
+		compareKeys := func(a, b mapEntry) int {
+			return cmp.Or(strings.Compare(a.seg, b.seg), strings.Compare(a.typeName, b.typeName))
+		}
+
+		slices.SortFunc(entries, compareKeys)
+
+		for len(entries) > 0 {
+			n := 1
+			for n < len(entries) && compareKeys(entries[0], entries[n]) == 0 {
+				n++
 			}
 
-			return strings.Compare(fmt.Sprint(a.value), fmt.Sprint(b.value))
-		})
-
-		for _, e := range entries {
-			path := base.Child(e.seg)
-
-			if !w.walk(e.key, path.Key(), nil) {
+			if !w.walkEntries(base.Child(entries[0].seg), entries[:n]) {
 				ok = false
 			}
 
-			if !w.walk(e.value, path, nil) {
-				ok = false
-			}
+			entries = entries[n:]
 		}
 
 	default:
+	}
+
+	return ok
+}
+
+// mapEntry holds one entry of a map the walk is inside of, with the path
+// segment and the type name its key orders by.
+type mapEntry struct {
+	key, value    reflect.Value
+	seg, typeName string
+}
+
+// walkEntries walks entries, the entries of a map that share path, and
+// reports whether nothing under them failed. The key of an entry walks
+// before its value, at the key of path. Since the entries share a path,
+// nothing in the map orders them, so the errors of each entry stay
+// together and the groups order by their text. The order then holds
+// however the map iterates, and no value needs formatting, which a
+// value that refers back to itself would never finish.
+func (w *selfWalker) walkEntries(path paths.Path, entries []mapEntry) bool {
+	ok := true
+	start := len(w.errs)
+	groups := make([][]error, 0, len(entries))
+
+	for _, e := range entries {
+		if !w.walk(e.key, path.Key(), nil) {
+			ok = false
+		}
+
+		if !w.walk(e.value, path, nil) {
+			ok = false
+		}
+
+		groups = append(groups, slices.Clone(w.errs[start:]))
+		w.errs = w.errs[:start]
+	}
+
+	slices.SortStableFunc(groups, func(a, b []error) int {
+		return slices.CompareFunc(a, b, func(x, y error) int {
+			return strings.Compare(x.Error(), y.Error())
+		})
+	})
+
+	for _, group := range groups {
+		w.errs = append(w.errs, group...)
 	}
 
 	return ok
