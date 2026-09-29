@@ -16,7 +16,8 @@
 // Match documents based on their content using [Content]. It decodes the
 // value at a YAML path as the type of the value the caller passes and
 // compares the two. A string matches the text of a field such as kind,
-// and a number matches a version number however the document spells it.
+// and a number matches a version number the document writes as a number,
+// whatever its spelling.
 //
 // Use [Exists] to match documents that hold a node at a path, whatever its
 // value, when the presence of a field matters more than its content.

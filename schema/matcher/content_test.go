@@ -182,6 +182,59 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: "2.5"`),
 			want:    false,
 		},
+		"int does not match a double-quoted integer": {
+			matcher: matcher.Content(versionPath, 2),
+			input:   stringtest.Input(`version: "2"`),
+			want:    false,
+		},
+		"int does not match a single-quoted integer": {
+			matcher: matcher.Content(versionPath, 2),
+			input:   stringtest.Input(`version: '2'`),
+			want:    false,
+		},
+		"int does not match a str-tagged integer": {
+			matcher: matcher.Content(versionPath, 2),
+			input:   stringtest.Input(`version: !!str 2`),
+			want:    false,
+		},
+		"int does not match an anchored str-tagged integer": {
+			matcher: matcher.Content(versionPath, 2),
+			input:   stringtest.Input(`version: &v !!str 2`),
+			want:    false,
+		},
+		"int does not match a verbatim str-tagged integer": {
+			matcher: matcher.Content(versionPath, 2),
+			input:   stringtest.Input(`version: !<tag:yaml.org,2002:str> 2`),
+			want:    false,
+		},
+		"int does not match a block scalar": {
+			matcher: matcher.Content(versionPath, 2),
+			input: stringtest.Input(`
+				version: |-
+				  2
+			`),
+			want: false,
+		},
+		"int does not match a quoted exponent": {
+			matcher: matcher.Content(versionPath, 1000),
+			input:   stringtest.Input(`version: "1e3"`),
+			want:    false,
+		},
+		"float does not match a quoted integer": {
+			matcher: matcher.Content(versionPath, 2.0),
+			input:   stringtest.Input(`version: '2'`),
+			want:    false,
+		},
+		"float does not match a str-tagged integer": {
+			matcher: matcher.Content(versionPath, 2.0),
+			input:   stringtest.Input(`version: !!str 2`),
+			want:    false,
+		},
+		"float matches a float-tagged quoted integer": {
+			matcher: matcher.Content(versionPath, 2.0),
+			input:   stringtest.Input(`version: !!float '2'`),
+			want:    true,
+		},
 		"int matches a plain exponent spelling": {
 			matcher: matcher.Content(versionPath, 1000),
 			input:   stringtest.Input(`version: 1e3`),

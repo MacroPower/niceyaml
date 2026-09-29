@@ -11,6 +11,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
@@ -32,9 +33,10 @@ type contentMatcher[T comparable] struct {
 // the text of a scalar as the document spells it, so "1.10" matches
 // version: 1.10 and "1.1" does not. A string type that decodes itself,
 // through an UnmarshalYAML or UnmarshalText method, matches the value its
-// own decode gives. A number matches its numeric value however the
-// document spells it, though an integer want never matches a value with
-// a fraction. A null matches only a nil want, such as
+// own decode gives. A number matches a scalar the document writes as a
+// number, whatever its spelling, though an integer want never matches a
+// value with a fraction. A quoted, block, or !!str scalar is a string,
+// so version: "2" does not match 2. A null matches only a nil want, such as
 // Content[any](path, nil). When T is an interface, two numbers compare
 // by value whatever their Go types, so Content[any](path, 1) matches an
 // integer the decoder reads as a uint64. A document without the path, or
@@ -134,6 +136,13 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 		}
 	}
 
+	// The decoder converts a string that reads as a number into a number
+	// type, so "2" would match 2. A scalar the document writes as a
+	// string does not match a number want.
+	if isNumber(gv) && isPlain(gv.Type()) && isExplicitString(node, raw) {
+		return false, nil
+	}
+
 	if isInteger(gv.Kind()) && !floatHoldsInteger(raw, gv) {
 		return false, nil
 	}
@@ -203,6 +212,47 @@ func scalarText(node *niceyaml.Node) (string, bool) {
 		}
 	}
 }
+
+// isExplicitString reports whether node holds a scalar the document
+// writes as a string: a quoted scalar, a block scalar, or a scalar with
+// a !!str tag, looking through an anchor or a tag on it. The value raw
+// holds, as the YAML types name it, must be a string, so a tag such as
+// !!int on a quoted scalar decides the type.
+func isExplicitString(node *niceyaml.Node, raw any) bool {
+	if _, ok := raw.(string); !ok {
+		return false
+	}
+
+	n := node.AST()
+
+	for {
+		switch v := n.(type) {
+		case *ast.AnchorNode:
+			n = v.Value
+		case *ast.TagNode:
+			switch v.Start.Value {
+			case string(token.StringTag), "!<" + strTagURI + ">":
+				return true
+			}
+
+			n = v.Value
+
+		case *ast.LiteralNode:
+			return true
+		case *ast.StringNode:
+			t := v.GetToken().Type
+
+			return t == token.SingleQuoteType || t == token.DoubleQuoteType
+
+		default:
+			return false
+		}
+	}
+}
+
+// strTagURI is the full name of the !!str tag, which a verbatim tag
+// spells out.
+const strTagURI = "tag:yaml.org,2002:str"
 
 // numericEqual reports whether a and b are numbers, of any integer or
 // float kind, that hold the same value. A named type such as
