@@ -37,7 +37,10 @@ const MaxSize = 10 * 1024 * 1024 // 10 MB.
 // of those delimiters parses as a shorter password and a host named after
 // the text between them. Get cannot tell it from a URL with a password
 // and an "@" in its path, so it sends the request to that host, and its
-// errors name the URL as [Redacted] spells it.
+// errors name the URL as [Redacted] spells it. When that request fails,
+// the error omits the reason, since the reason can name the host, as a
+// failed DNS lookup does. When ctx has ended, the error wraps the
+// context's error in place of the reason.
 func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -64,6 +67,15 @@ func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if splitsPassword(u, rawURL) {
+			ctxErr := ctx.Err()
+			if ctxErr != nil {
+				return nil, fmt.Errorf("fetch %s: %w", name, ctxErr)
+			}
+
+			return nil, fmt.Errorf("fetch %s: reason withheld because it can quote the password", name)
+		}
+
 		return nil, fmt.Errorf("fetch %s: %w", name, reason(err))
 	}
 	defer resp.Body.Close() //nolint:errcheck // Best-effort close.
@@ -146,21 +158,29 @@ func Redacted(rawURL string) string {
 		return name
 	}
 
-	if _, ok := u.User.Password(); !ok {
-		return rawURL
-	}
-
-	// The parser splits userinfo at the last "@" before the first "/", "?"
-	// or "#", so a password with an "@" and then one of those delimiters
-	// parses as a shorter password, and its tail lands in the host and
-	// path. A later "@" marks that case.
-	if atAfterAuthority(rawURL) {
+	if splitsPassword(u, rawURL) {
 		name, _ := redactUnparsed(rawURL)
 
 		return name
 	}
 
+	if _, ok := u.User.Password(); !ok {
+		return rawURL
+	}
+
 	return u.Redacted()
+}
+
+// splitsPassword reports whether u, parsed from rawURL, can hold part of
+// a password in its host and path. The parser splits userinfo at the
+// last "@" before the first "/", "?" or "#", so a password with an "@"
+// and then one of those delimiters parses as a shorter password, and its
+// tail lands in the host and path. A password and a later "@" mark that
+// case.
+func splitsPassword(u *url.URL, rawURL string) bool {
+	_, ok := u.User.Password()
+
+	return ok && atAfterAuthority(rawURL)
 }
 
 // atAfterAuthority reports whether rawURL holds an "@" after its
@@ -195,12 +215,11 @@ func hidesPassword(u *url.URL, rawURL string) bool {
 	return ok
 }
 
-// redactUnparsed is [Redacted] for a URL that does not parse, that
-// [hidesPassword] flags, or that holds a password and an "@" after its
-// authority. It replaces everything from the first colon
-// after "://" to the last "@", and it reports whether it found such a
-// span. The span does not stop at the first "/", "?" or "#", because a
-// password can hold one of them.
+// redactUnparsed is [Redacted] for a URL that does not parse or that
+// [hidesPassword] or [splitsPassword] flags. It replaces everything from
+// the first colon after "://" to the last "@", and it reports whether it
+// found such a span. The span does not stop at the first "/", "?" or
+// "#", because a password can hold one of them.
 func redactUnparsed(rawURL string) (string, bool) {
 	const sep = "://"
 

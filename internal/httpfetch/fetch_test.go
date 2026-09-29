@@ -3,6 +3,7 @@ package httpfetch_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -70,29 +71,46 @@ func TestGet_RedactsPasswordWithAtSign(t *testing.T) {
 
 	// A password with an "@" and then "/", "?" or "#" parses as a shorter
 	// password and a host named after the text between them. Get sends
-	// the request as parsed, and its error hides the rest of the password.
+	// the request as parsed. The transport error names that host, as a
+	// dialer or a DNS lookup does, so Get leaves the error out.
 	tcs := map[string]struct {
 		url string
 	}{
-		"slash":         {url: "https://user:p@ss/word@example.com/s.json"},
-		"question mark": {url: "https://user:p@ss?word@example.com/s.json"},
-		"hash":          {url: "https://user:p@ss#word@example.com/s.json"},
+		"slash":         {url: "https://user:p@host.invalid/tail@example.com/s.json"},
+		"question mark": {url: "https://user:p@host.invalid?tail@example.com/s.json"},
+		"hash":          {url: "https://user:p@host.invalid#tail@example.com/s.json"},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-				return nil, errors.New("refused")
+			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				return nil, errors.New("lookup " + r.URL.Host + ": no such host")
 			})}
 
 			_, err := httpfetch.Get(t.Context(), client, tc.url)
-			require.ErrorContains(t, err, "refused")
-			assert.NotContains(t, err.Error(), "word")
-			assert.Contains(t, err.Error(), "xxxxx")
+			require.ErrorContains(t, err, "fetch "+httpfetch.Redacted(tc.url)+": reason withheld")
+			assert.NotContains(t, err.Error(), "host.invalid")
+			assert.NotContains(t, err.Error(), "tail")
 		})
 	}
+}
+
+func TestGet_PasswordWithAtSignKeepsContextError(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return nil, fmt.Errorf("lookup %s: %w", r.URL.Host, r.Context().Err())
+	})}
+
+	_, err := httpfetch.Get(ctx, client, "https://user:p@host.invalid/tail@example.com/s.json")
+	require.ErrorIs(t, err, context.Canceled)
+	assert.NotContains(t, err.Error(), "host.invalid")
+	assert.NotContains(t, err.Error(), "tail")
 }
 
 func TestGet_ParseReason(t *testing.T) {
