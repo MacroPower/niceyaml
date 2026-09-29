@@ -2665,6 +2665,40 @@ func TestPath_Matches_RecursiveReachedTwice(t *testing.T) {
 			path:  "$..x.k..name",
 			want:  []string{"$.x.k.x.k.name"},
 		},
+		"later walk stops at an earlier match": {
+			// The walk from $.b.k stops at the mapping that the walk
+			// from $.a.k covers. Without the stop, the walk would find
+			// the entry again, and resolve would keep only the copy that
+			// sorts first, so the output alone does not show that the
+			// walk stopped.
+			input: "a: &x\n  k:\n    name: 1\nb:\n  k: *x\n",
+			path:  "$..k..name",
+			want:  []string{"$.a.k.name"},
+		},
+		"later walk stops at an earlier match in a sequence": {
+			input: "a: &x\n  k:\n    - name: 1\nb:\n  k: *x\n",
+			path:  "$..k..name",
+			want:  []string{"$.a.k[0].name"},
+		},
+		"walk that extends an earlier match keeps its own path": {
+			// The merged $.a.k.v takes the place of the `<<` key, so
+			// the walk from $.a.k.<<.k.v reaches the anchor at an order
+			// that extends the order of $.a.k.v. The entry it finds
+			// there sorts first, so the walk must not stop.
+			input: "s: &V {x: 0, name: 1}\na:\n  k:\n    <<: {k: {v: *V}, v: *V}\n",
+			path:  "$..k.v..name",
+			want:  []string{"$.a.k.<<.k.v.name"},
+		},
+		"tagged mapping is walked": {
+			input: "a: !!map {name: 1}\n",
+			path:  "$..name",
+			want:  []string{"$.a.name"},
+		},
+		"tagged sequence is walked": {
+			input: "a: !!seq [{name: 1}]\n",
+			path:  "$..name",
+			want:  []string{"$.a[0].name"},
+		},
 	}
 
 	for name, tc := range tcs {
