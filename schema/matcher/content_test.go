@@ -355,6 +355,41 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 80`),
 			want:    true,
 		},
+		"duration matches plain": {
+			matcher: matcher.Content(timeoutPath, 5*time.Second),
+			input:   stringtest.Input(`timeout: 5s`),
+			want:    true,
+		},
+		"duration matches double-quoted": {
+			matcher: matcher.Content(timeoutPath, 5*time.Second),
+			input:   stringtest.Input(`timeout: "5s"`),
+			want:    true,
+		},
+		"duration matches single-quoted": {
+			matcher: matcher.Content(timeoutPath, 5*time.Second),
+			input:   stringtest.Input(`timeout: '5s'`),
+			want:    true,
+		},
+		"duration matches block scalar": {
+			matcher: matcher.Content(timeoutPath, 5*time.Second),
+			input:   "timeout: |-\n  5s\n",
+			want:    true,
+		},
+		"duration matches str tag": {
+			matcher: matcher.Content(timeoutPath, 5*time.Second),
+			input:   stringtest.Input(`timeout: !!str 5s`),
+			want:    true,
+		},
+		"duration does not match other duration": {
+			matcher: matcher.Content(timeoutPath, 5*time.Second),
+			input:   stringtest.Input(`timeout: "6s"`),
+			want:    false,
+		},
+		"pointer duration matches quoted": {
+			matcher: matcher.Content(timeoutPath, new(5*time.Second)),
+			input:   stringtest.Input(`timeout: "5s"`),
+			want:    true,
+		},
 		"any string does not match number": {
 			matcher: matcher.Content[any](versionPath, "1"),
 			input:   stringtest.Input(`version: 1`),

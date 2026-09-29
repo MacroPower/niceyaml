@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -36,8 +37,10 @@ type contentMatcher[T comparable] struct {
 // own decode gives. A number matches a scalar the document writes as a
 // number, whatever its spelling, though an integer want never matches a
 // value with a fraction. A quoted, block, or !!str scalar is a string,
-// so version: "2" does not match 2. A pointer want matches the value it
-// points to. A null matches only a nil want, such as
+// so version: "2" does not match 2. A [time.Duration] reads from the
+// text of a scalar, so timeout: "5s" and timeout: 5s both match
+// 5*time.Second. A pointer want matches the value it points to. A null
+// matches only a nil want, such as
 // Content[any](path, nil) or a nil pointer. When T is an interface, two
 // numbers compare by value whatever their Go types, so
 // Content[any](path, 1) matches an integer the decoder reads as a
@@ -223,6 +226,15 @@ var (
 		reflect.TypeFor[yaml.BytesUnmarshalerContext](),
 		reflect.TypeFor[encoding.TextUnmarshaler](),
 	}
+
+	// The types go-yaml decodes by rules of its own, as it decodes a type
+	// with an unmarshaler. It parses a [time.Duration] and a [time.Time]
+	// from the text of a scalar. A type defined on one of them gets no
+	// such rule.
+	decoderTypes = []reflect.Type{
+		reflect.TypeFor[time.Duration](),
+		reflect.TypeFor[time.Time](),
+	}
 )
 
 // decodesText reports whether the decoder reads t, or what t points to,
@@ -241,11 +253,13 @@ func isPlainString(t reflect.Type) bool {
 	return t.Kind() == reflect.String && isPlain(t)
 }
 
-// isPlain reports whether the pointer of t implements no unmarshaler the
-// decoder honors, so the decoder reads t by its kind. Methods that play
-// no part in decoding, such as a String method, leave a type plain.
+// isPlain reports whether the decoder reads t by its kind, which holds
+// when t is none of the decoderTypes and its pointer implements no
+// unmarshaler the decoder honors. Methods that play no part in
+// decoding, such as a String method, leave a type plain.
 func isPlain(t reflect.Type) bool {
-	return !slices.ContainsFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
+	return !slices.Contains(decoderTypes, t) &&
+		!slices.ContainsFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
 }
 
 // scalarText returns the text of the scalar node holds as the document

@@ -24,6 +24,7 @@ var (
 	missingPath    = paths.Root().Child("missing")
 	versionPath    = paths.Root().Child("version")
 	enabledPath    = paths.Root().Child("enabled")
+	timeoutPath    = paths.Root().Child("timeout")
 )
 
 // match runs m on doc and fails the test when the matcher cannot decide.
