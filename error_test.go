@@ -1673,6 +1673,51 @@ func TestSourceError_Format_Plain(t *testing.T) {
 			"     |    ^^^^^^",
 		), fmt.Sprintf("%+v", err))
 	})
+
+	t.Run("a location with no token under it gets a caret", func(t *testing.T) {
+		t.Parallel()
+
+		// The root carries no message in the excerpt, so the caret alone
+		// marks where a location with nothing to highlight sits.
+		tcs := map[string]struct {
+			input string
+			opt   niceyaml.ErrorOption
+			want  string
+		}{
+			"path to an empty value": {
+				input: "a:\nb: 2\n",
+				opt:   niceyaml.AtPath(paths.Root().Child("a")),
+				want: stringtest.JoinLF(
+					"1:3: $.a: bad",
+					"",
+					"   1 | a:",
+					"     |   ^",
+					"   2 | b: 2",
+				),
+			},
+			"position past the end of its line": {
+				input: "a: 1\n",
+				opt:   niceyaml.AtPosition(position.New(0, 500)),
+				want: stringtest.JoinLF(
+					"1:501: bad",
+					"",
+					"   1 | a: 1",
+					"     |     ^",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				src := niceyaml.NewSourceFromString(tc.input)
+				err := yamltest.Bind(t, src, niceyaml.NewError("bad", tc.opt))
+
+				assert.Equal(t, tc.want, fmt.Sprintf("%+v", err))
+			})
+		}
+	})
 }
 
 func TestError_NilReceiver(t *testing.T) {
@@ -3760,7 +3805,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 			"root position": {
 				err:     niceyaml.NewError("far", niceyaml.AtPosition(far)),
 				want:    line.Annotations{{Kind: kind.TextError, Placement: line.Below, Col: 4}},
-				row:     "   1 | a: 1",
+				row:     "     |     ^",
 				printed: "<literalNumberInteger>1</literalNumberInteger>",
 			},
 		}

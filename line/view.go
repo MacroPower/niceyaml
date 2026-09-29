@@ -473,7 +473,10 @@ func (v *View) decorated(i int) bool {
 // the annotations above it on rows of their own, and a row below it that
 // marks its decoration. That row holds a caret under every column an
 // overlay covers, a caret at the column of the annotations below the line,
-// and their contents after the last caret. String does not render flags.
+// and their contents after the last caret. Annotations below the line
+// without content still get their caret when no overlay covers a column
+// of the line, so an overlay of no width, such as one at the end of the
+// line, shows where it sits. String does not render flags.
 // The number column is at least four wide and grows to fit the largest
 // number in the view, so every row lines up. Annotations whose column lies
 // more than [MaxColPastEnd] columns past the end of the content start at
@@ -499,10 +502,10 @@ func (v *View) String() string {
 	for i, ln := range v.All() {
 		anns := v.Annotations(i)
 
-		// An annotation without content adds no row, as it adds none to
-		// the marker row. The row starts at the column of the annotations
-		// as the content row renders it, so it lines up on a line holding
-		// wide or control characters.
+		// An annotation above the line without content adds no row. The
+		// row starts at the column of the annotations as the content row
+		// renders it, so it lines up on a line holding wide or control
+		// characters.
 		if kept := anns.Filter(Above).WithContent(); len(kept) > 0 {
 			col := annotationCol(kept.Col(), ln.Width())
 			padding := strings.Repeat(" ", colWidth(ln, col))
@@ -542,22 +545,34 @@ func colWidth(ln *Line, col int) int {
 // markerRow returns the row below ln that marks its overlays and carries
 // its annotations: a caret under every column an overlay covers within the
 // line, a caret at the column of the annotations, and their contents after
-// the last caret. The carets take the cells the content row gives each
-// grapheme cluster, so they stay under the runes they mark on a line
-// holding wide, combining, or control characters. The caret of the
-// annotations sits no further than [MaxColPastEnd] columns past the end of
-// the content. Returns "" when the line has neither.
+// the last caret. Annotations without content set no column while one with
+// content remains. When none has content and the overlays cover no column,
+// such as an overlay of no width at the end of the line, the annotations
+// still get one caret at their column, so the row marks the spot. The
+// carets take the cells the content row gives each grapheme cluster, so
+// they stay under the runes they mark on a line holding wide, combining,
+// or control characters. The caret of the annotations sits no further
+// than [MaxColPastEnd] columns past the end of the content. Returns ""
+// when the line has neither.
 func markerRow(ln *Line, overlays Overlays, below Annotations) string {
 	marks := overlayMarks(overlays, ln.Width())
 
-	kept := below.WithContent()
-	if len(kept) > 0 {
-		col := annotationCol(kept.Col(), ln.Width())
+	mark := func(col int) {
+		col = annotationCol(col, ln.Width())
 		if col >= len(marks) {
 			marks = append(marks, make([]bool, col+1-len(marks))...)
 		}
 
 		marks[col] = true
+	}
+
+	kept := below.WithContent()
+
+	switch {
+	case len(kept) > 0:
+		mark(kept.Col())
+	case len(below) > 0 && len(marks) == 0:
+		mark(below.Col())
 	}
 
 	if len(marks) == 0 {

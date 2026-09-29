@@ -1310,12 +1310,17 @@ func TestView_String(t *testing.T) {
 				want: `     | @@ hunk header @@
    1 | key: value`,
 			},
-			"annotations without content add no row": {
+			"annotation above without content adds no row": {
+				annotations: []line.Annotation{{Content: "", Placement: line.Above, Col: 2}},
+				want:        "   1 | key: value",
+			},
+			"annotations below without content get one caret": {
 				annotations: []line.Annotation{
-					{Content: "", Placement: line.Above},
+					{Content: "", Placement: line.Below, Col: 4},
 					{Content: "", Placement: line.Below, Col: 2},
 				},
-				want: "   1 | key: value",
+				want: `   1 | key: value
+     |   ^`,
 			},
 			"annotations above and below": {
 				annotations: []line.Annotation{
@@ -1411,6 +1416,44 @@ func TestView_String(t *testing.T) {
 		view.Annotate(0, line.Annotation{Content: "bad value", Placement: line.Below, Col: 5})
 
 		assert.Equal(t, "   1 | key: value\n     |      ^^^^^ bad value", view.String())
+	})
+
+	t.Run("annotation without content marks an overlay of no width", func(t *testing.T) {
+		t.Parallel()
+
+		// An overlay that covers no column, such as the one a bound error
+		// puts at the end of a line with no token under its location,
+		// renders no caret itself, so the annotation below the line marks
+		// the spot. An overlay that covers a column marks the row alone.
+		tcs := map[string]struct {
+			overlay line.Overlay
+			want    string
+		}{
+			"empty span at the end of the line": {
+				overlay: line.Overlay{Kind: "test1", Cols: position.NewSpan(10, 10)},
+				want:    "   1 | key: value\n     |           ^",
+			},
+			"span past the content": {
+				overlay: line.Overlay{Kind: "test1", Cols: position.NewSpan(12, 14)},
+				want:    "   1 | key: value\n     |           ^",
+			},
+			"span that covers a column": {
+				overlay: line.Overlay{Kind: "test1", Cols: position.NewSpan(5, 7)},
+				want:    "   1 | key: value\n     |      ^^",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				view := newTestView(t, "key: value\n", 1)
+				view.AddLineOverlay(0, tc.overlay)
+				view.Annotate(0, line.Annotation{Placement: line.Below, Col: 10})
+
+				assert.Equal(t, tc.want, view.String())
+			})
+		}
 	})
 
 	t.Run("overlay past the width stops at the content", func(t *testing.T) {
