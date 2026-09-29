@@ -25,12 +25,16 @@ const MaxSize = 10 * 1024 * 1024 // 10 MB.
 //
 // A password that starts with "/", "?" or "#" parses, but as a host with
 // an empty port and then a path, query or fragment. Get refuses a URL
-// whose host ends in a colon when an "@" follows the host, and it sends
-// no request, since the request would carry that password to a host
-// named after the user. A password that starts with digits and then one
-// of those delimiters parses as a host with a valid port, so Get cannot
-// tell it from a URL with an "@" in its path and names the URL as
-// written.
+// with no password whose host ends in a colon when an "@" follows the
+// host, and it sends no request, since the request would carry that
+// password to a host named after the user. A password that starts with
+// digits and then one of those delimiters parses as a host with a valid
+// port, so Get cannot tell it from a URL with an "@" in its path and
+// names the URL as written. A password that holds an "@" and later one
+// of those delimiters parses as a shorter password and a host named after
+// the text between them. Get cannot tell it from a URL with a password
+// and an "@" in its path, so it sends the request to that host, and its
+// errors name the URL as [Redacted] spells it.
 func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -106,14 +110,16 @@ func IsHTTPURL(rawURL string) bool {
 // Redacted returns rawURL with any password in its userinfo replaced by
 // "xxxxx", for use in messages. A string that carries no password comes
 // back unchanged, so a name that is not a URL keeps its spelling. For a
-// URL that does not parse, and for one whose host ends in a colon when an
-// "@" follows the host, Redacted replaces everything from the first colon
-// after "://" to the last "@". That span covers a password that holds a
-// "/", "?" or "#", at its start or later, and it can also cover text that
-// is not a password, such as a port before an "@" in the path. A password
-// that starts with digits and then one of those delimiters parses as a
-// host with a valid port, so Redacted cannot tell it from a URL with an
-// "@" in its path and returns it unchanged.
+// URL that does not parse, for one whose host ends in a colon when an "@"
+// follows the host, and for one with a password and an "@" after its
+// authority, Redacted replaces everything from the first colon after
+// "://" to the last "@". That span covers a password that holds a "/",
+// "?" or "#", at its start or later, even after an "@" in the password.
+// It can also cover text that is not a password, such as a port or a
+// host and path before an "@" in the path. A password that starts with
+// digits and then one of those delimiters parses as a host with a valid
+// port, so Redacted cannot tell it from a URL with an "@" in its path and
+// returns it unchanged.
 func Redacted(rawURL string) string {
 	u, err := url.Parse(rawURL)
 	if err != nil || hidesPassword(u, rawURL) {
@@ -122,15 +128,34 @@ func Redacted(rawURL string) string {
 		return name
 	}
 
-	if u.User == nil {
-		return rawURL
-	}
-
 	if _, ok := u.User.Password(); !ok {
 		return rawURL
 	}
 
+	// The parser splits userinfo at the last "@" before the first "/", "?"
+	// or "#", so a password with an "@" and then one of those delimiters
+	// parses as a shorter password, and its tail lands in the host and
+	// path. A later "@" marks that case.
+	if atAfterAuthority(rawURL) {
+		name, _ := redactUnparsed(rawURL)
+
+		return name
+	}
+
 	return u.Redacted()
+}
+
+// atAfterAuthority reports whether rawURL holds an "@" after its
+// authority, which ends at the first "/", "?" or "#" after "://".
+func atAfterAuthority(rawURL string) bool {
+	_, rest, ok := strings.Cut(rawURL, "://")
+	if !ok {
+		return false
+	}
+
+	end := strings.IndexAny(rest, "/?#")
+
+	return end >= 0 && strings.Contains(rest[end:], "@")
 }
 
 // hidesPassword reports whether u, parsed from rawURL, can hide a password
@@ -152,8 +177,9 @@ func hidesPassword(u *url.URL, rawURL string) bool {
 	return ok
 }
 
-// redactUnparsed is [Redacted] for a URL that does not parse or that
-// [hidesPassword] flags. It replaces everything from the first colon
+// redactUnparsed is [Redacted] for a URL that does not parse, that
+// [hidesPassword] flags, or that holds a password and an "@" after its
+// authority. It replaces everything from the first colon
 // after "://" to the last "@", and it reports whether it found such a
 // span. The span does not stop at the first "/", "?" or "#", because a
 // password can hold one of them.

@@ -64,6 +64,36 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
 }
 
+func TestGet_RedactsPasswordWithAtSign(t *testing.T) {
+	t.Parallel()
+
+	// A password with an "@" and then "/", "?" or "#" parses as a shorter
+	// password and a host named after the text between them. Get sends
+	// the request as parsed, and its error hides the rest of the password.
+	tcs := map[string]struct {
+		url string
+	}{
+		"slash":         {url: "https://user:p@ss/word@example.com/s.json"},
+		"question mark": {url: "https://user:p@ss?word@example.com/s.json"},
+		"hash":          {url: "https://user:p@ss#word@example.com/s.json"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return nil, errors.New("refused")
+			})}
+
+			_, err := httpfetch.Get(t.Context(), client, tc.url)
+			require.ErrorContains(t, err, "refused")
+			assert.NotContains(t, err.Error(), "word")
+			assert.Contains(t, err.Error(), "xxxxx")
+		})
+	}
+}
+
 func TestGet_ParseReason(t *testing.T) {
 	t.Parallel()
 
@@ -210,6 +240,22 @@ func TestRedacted(t *testing.T) {
 		"user without password and an empty port keeps its spelling": {
 			url:  "https://jane@corp.com:/x",
 			want: "https://jane@corp.com:/x",
+		},
+		"password with an at sign and then a slash": {
+			url:  "https://user:p@ss/word@example.com/x",
+			want: "https://user:xxxxx@example.com/x",
+		},
+		"password with an at sign and then a question mark": {
+			url:  "https://user:p@ss?word@example.com/x",
+			want: "https://user:xxxxx@example.com/x",
+		},
+		"password with an at sign and then a hash": {
+			url:  "https://user:p@ss#word@example.com/x",
+			want: "https://user:xxxxx@example.com/x",
+		},
+		"password and an at sign in the path redacts through the path": {
+			url:  "https://user:pw@example.com/pkg@1.0/x",
+			want: "https://user:xxxxx@1.0/x",
 		},
 		"at sign in the path of a url that parses keeps its spelling": {
 			url:  "https://example.com:8443/pkg@1.0/s.json",
