@@ -141,15 +141,21 @@ func (d *document) parsedTree(shared map[string]bool, enclosed map[ast.Node]bool
 	tokens := tokenCollector{}
 	ast.Walk(tokens, body)
 
-	// Each anchor with a shared name gets the name followed by the count
-	// of anchors of that name so far. A name never holds a space, so the
-	// new name is no other anchor's.
+	source := sourceNodes(d.root.Body)
+	spelled := bracketedNames(source)
+
+	// Each anchor with a shared name gets the name followed by a count in
+	// brackets, higher than the count of the last anchor of that name, so
+	// no two new names match. A quoted name can hold brackets, so the
+	// count skips a new name that an anchor or alias of the document
+	// spells, even in part. Such a name would read the wrong anchor, and
+	// restoreNames would rewrite it in a message.
 	renamed := map[ast.Node]string{}
 	count := map[string]int{}
 
 	var pairs []string
 
-	for _, n := range sourceNodes(d.root.Body) {
+	for _, n := range source {
 		anchor, ok := n.(*ast.AnchorNode)
 		if !ok {
 			continue
@@ -160,8 +166,17 @@ func (d *document) parsedTree(shared map[string]bool, enclosed map[ast.Node]bool
 			continue
 		}
 
-		count[name]++
-		unique := name + " [" + strconv.Itoa(count[name]) + "]"
+		var unique string
+
+		for {
+			count[name]++
+			unique = name + " [" + strconv.Itoa(count[name]) + "]"
+
+			if !spelledIn(spelled, unique) {
+				break
+			}
+		}
+
 		renamed[anchor] = unique
 		pairs = append(pairs, unique, name)
 
@@ -604,6 +619,47 @@ func sharedAnchorNames(body ast.Node) map[string]bool {
 	}
 
 	return shared
+}
+
+// bracketedNames returns the names of the anchors and aliases among nodes
+// that hold " [", the start of a name that [document.renamedTree] gives
+// an anchor.
+func bracketedNames(nodes []ast.Node) []string {
+	var names []string
+
+	seen := map[string]bool{}
+
+	for _, n := range nodes {
+		var name string
+
+		switch n := n.(type) {
+		case *ast.AnchorNode:
+			name, _ = nodeName(n.Name)
+
+		case *ast.AliasNode:
+			name, _ = nodeName(n.Value)
+		}
+
+		if !strings.Contains(name, " [") || seen[name] {
+			continue
+		}
+
+		seen[name] = true
+		names = append(names, name)
+	}
+
+	return names
+}
+
+// spelledIn reports whether any of names holds name.
+func spelledIn(names []string, name string) bool {
+	for _, n := range names {
+		if strings.Contains(n, name) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // pairNodes maps each node under a, outside its comments, to the node in

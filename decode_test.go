@@ -2846,6 +2846,48 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		}
 	})
 
+	t.Run("quoted name spelled like a renamed anchor", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			want  any
+			err   string
+		}{
+			"alias reads the anchor it refers to": {
+				input: "b: &x {q: 2}\na: &\"x [1]\" {p: 1}\ne: *x\nc: &x {q: 3}\n",
+				want: map[string]any{
+					"a": map[string]any{"p": uint64(1)},
+					"b": map[string]any{"q": uint64(2)},
+					"c": map[string]any{"q": uint64(3)},
+					"e": map[string]any{"q": uint64(2)},
+				},
+			},
+			"error keeps the name the alias spells": {
+				input: "a: &\"x [1]\" 1\nb: &x 2\nc: &x 3\nd: *\"x [1]\"\n",
+				err:   `4:5: could not find alias "\"x [1]\""`,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				got, err := dd.Decode[any](t.Context())
+				if tc.err != "" {
+					require.EqualError(t, err, tc.err)
+
+					return
+				}
+
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
 	t.Run("later document after a folded node", func(t *testing.T) {
 		t.Parallel()
 
