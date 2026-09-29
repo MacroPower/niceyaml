@@ -1897,15 +1897,11 @@ func (e *SourceError) Annotate(view *line.View) bool {
 		return false
 	}
 
-	marked := annotateSource(view, e.source, []errorPosition{{
+	return annotate(view, e.source, []errorPosition{{
 		pos:     e.loc.pos,
 		ranges:  e.ranges,
 		message: e.text(),
 	}})
-
-	markUnannotated(view, marked)
-
-	return len(marked) > 0
 }
 
 // Excerpt returns a [line.View] of the source the error is bound to
@@ -1940,9 +1936,10 @@ func (e *SourceError) Excerpt(context int) (*line.View, bool) {
 		return nil, false
 	}
 
+	_, positions := e.positions()
 	view := e.source.View()
 
-	if len(e.annotate(view)) == 0 {
+	if !annotate(view, e.source, positions[e.source]) {
 		return nil, false
 	}
 
@@ -1971,10 +1968,12 @@ func (e *SourceError) Excerpt(context int) (*line.View, bool) {
 // yields nothing.
 func (e *SourceError) Excerpts(context int) iter.Seq2[*Source, *line.View] {
 	return func(yield func(*Source, *line.View) bool) {
-		for _, src := range e.sources() {
+		sources, positions := e.positions()
+
+		for _, src := range sources {
 			view := src.View()
 
-			if len(e.annotate(view)) == 0 {
+			if !annotate(view, src, positions[src]) {
 				continue
 			}
 
@@ -2035,52 +2034,17 @@ type errorPosition struct {
 	pos     position.Position
 }
 
-// annotate marks the whole tree of e on view, as [SourceError.Excerpt]
-// and [SourceError.Excerpts] show it: the location of every node
-// highlighted, the message of each node below the root as an annotation
-// below its line, and the root's own location with a caret run alone.
-// It returns the indices of the lines of view it marked, with repeats,
-// which are none when no location resolved or the view holds none of
-// their lines.
-//
-// The locations of the tree group by the source each node is bound to,
-// in the order [SourceError.sources] gives. The method thus finds a line
-// by the identity it has in its own source, and a line index of one
-// source never stands for a line of another.
-func (e *SourceError) annotate(view *line.View) []int {
-	if e == nil {
-		return nil
-	}
-
-	positions := make(map[*Source][]errorPosition)
-
-	if e.locErr == nil {
-		positions[e.source] = append(positions[e.source], errorPosition{pos: e.loc.pos, ranges: e.ranges})
-	}
-
-	e.walk(func(n *SourceError) {
-		if n.locErr == nil {
-			positions[n.source] = append(positions[n.source], errorPosition{
-				pos:     n.loc.pos,
-				ranges:  n.ranges,
-				message: n.text(),
-			})
-		}
-	})
-
-	var marked []int
-
-	for _, src := range e.sources() {
-		marked = append(marked, annotateSource(view, src, positions[src])...)
-	}
-
-	if len(marked) == 0 {
-		return nil
-	}
+// annotate marks positions, the resolved locations of the nodes bound to
+// src, on view with [annotateSource]. [markUnannotated] then adds an
+// annotation without content below each line it marked that has none.
+// It reports whether it marked any line, which it does not when
+// positions is empty or the view holds none of their lines.
+func annotate(view *line.View, src *Source, positions []errorPosition) bool {
+	marked := annotateSource(view, src, positions)
 
 	markUnannotated(view, marked)
 
-	return marked
+	return len(marked) > 0
 }
 
 // annotateSource marks positions, the resolved locations of the nodes
@@ -2169,26 +2133,44 @@ func highlightStart(at position.Position, segments []position.Range) int {
 	return col
 }
 
-// sources returns the source of the binding, then the source of each
-// node below it that no node before it in depth-first order is bound
-// to. An excerpt per source thus comes out in the order the tree reaches
-// them.
-func (e *SourceError) sources() []*Source {
+// positions returns the sources the tree of e touches, with the resolved
+// locations of the nodes bound to each, from one walk of the tree. The
+// sources start with the source of the binding, then list the source of
+// each node below it that no node before it in depth-first order is
+// bound to. An excerpt per source thus comes out in the order the tree
+// reaches them. The locations of each source come in the same order, and
+// a node whose location did not resolve adds none. The root's own
+// location carries no message, so an excerpt gives it a caret run alone.
+// A nil e touches no source.
+func (e *SourceError) positions() ([]*Source, map[*Source][]errorPosition) {
 	if e == nil {
-		return nil
+		return nil, nil
 	}
 
-	out := []*Source{e.source}
+	sources := []*Source{e.source}
 	seen := map[*Source]bool{e.source: true}
+	positions := make(map[*Source][]errorPosition)
+
+	if e.locErr == nil {
+		positions[e.source] = append(positions[e.source], errorPosition{pos: e.loc.pos, ranges: e.ranges})
+	}
 
 	e.walk(func(n *SourceError) {
 		if !seen[n.source] {
 			seen[n.source] = true
-			out = append(out, n.source)
+			sources = append(sources, n.source)
+		}
+
+		if n.locErr == nil {
+			positions[n.source] = append(positions[n.source], errorPosition{
+				pos:     n.loc.pos,
+				ranges:  n.ranges,
+				message: n.text(),
+			})
 		}
 	})
 
-	return out
+	return sources, positions
 }
 
 // markUnannotated adds an annotation without content, in [kind.TextError]

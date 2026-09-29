@@ -4891,6 +4891,70 @@ func TestSourceError_Excerpts(t *testing.T) {
 		), got)
 	})
 
+	t.Run("children that alternate between sources mark their own", func(t *testing.T) {
+		t.Parallel()
+
+		srcs := []*niceyaml.Source{
+			niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("s0.yaml")),
+			niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("s1.yaml")),
+			niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("s2.yaml")),
+		}
+
+		// Each source gets two children on line 1 and one on line 2, in
+		// turn, so the tree leaves every source and comes back to it.
+		var children []error
+
+		for _, spec := range []struct{ key, msg string }{
+			{"a", "first"}, {"a", "second"}, {"b", "third"},
+		} {
+			for i, src := range srcs {
+				children = append(children, yamltest.Bind(t, src, niceyaml.NewError(
+					fmt.Sprintf("%s %d", spec.msg, i),
+					niceyaml.AtPath(paths.Root().Child(spec.key)),
+				)))
+			}
+		}
+
+		var mixed *niceyaml.SourceError
+
+		require.ErrorAs(t, yamltest.Bind(t, srcs[1], niceyaml.NewError(
+			"root",
+			niceyaml.AtPath(paths.Root().Child("b")),
+			niceyaml.WithErrors(children...),
+		)), &mixed)
+
+		got := map[string]string{}
+
+		var names []string
+
+		for src, excerpt := range mixed.Excerpts(0) {
+			names = append(names, src.Name())
+			got[src.Name()] = excerpt.String()
+		}
+
+		assert.Equal(t, []string{"s1.yaml", "s0.yaml", "s2.yaml"}, names)
+		assert.Equal(t, map[string]string{
+			"s0.yaml": stringtest.JoinLF(
+				"   1 | a: 1",
+				"     |    ^ first 0; second 0",
+				"   2 | b: 2",
+				"     |    ^ third 0",
+			),
+			"s1.yaml": stringtest.JoinLF(
+				"   1 | a: 1",
+				"     |    ^ first 1; second 1",
+				"   2 | b: 2",
+				"     |    ^ third 1",
+			),
+			"s2.yaml": stringtest.JoinLF(
+				"   1 | a: 1",
+				"     |    ^ first 2; second 2",
+				"   2 | b: 2",
+				"     |    ^ third 2",
+			),
+		}, got)
+	})
+
 	t.Run("a tree in one source yields one excerpt", func(t *testing.T) {
 		t.Parallel()
 
