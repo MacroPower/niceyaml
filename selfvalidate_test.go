@@ -1,6 +1,7 @@
 package niceyaml_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -775,22 +776,61 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("a map whose values hold no validator reads no keys", func(t *testing.T) {
 		t.Parallel()
 
-		// The map validates itself, but no entry below it can fail, so no
-		// error needs the key of an entry.
-		dd := yamltest.FirstDocument(t, "a: x\nb: y\n")
+		// No entry below the map can fail, so no error needs the key of an
+		// entry.
+		tcs := map[string]struct {
+			decode func(ctx context.Context, dd *niceyaml.Node, opts ...niceyaml.DecodeOption) error
+			input  string
+		}{
+			// The map validates itself, and its type holds no validator
+			// below it.
+			"map that validates itself": {
+				input: "a: x\nb: y\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
+					_, err := dd.Decode[labels](ctx, opts...)
 
-		decoders := 0
-		count := yaml.DecodeOption(func(*yaml.Decoder) error {
-			decoders++
+					return err
+				},
+			},
+			// The type of the values may hold a validator, but the values
+			// go-yaml decodes into an interface hold none.
+			"map of any": {
+				input: "a: {b: 1}\nc: [{d: 1}]\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
+					_, err := dd.Decode[map[string]any](ctx, opts...)
 
-			return nil
-		})
+					return err
+				},
+			},
+			"any": {
+				input: "- {a: 1}\n- {b: {c: 1}}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
+					_, err := dd.Decode[any](ctx, opts...)
 
-		_, err := dd.Decode[labels](t.Context(), niceyaml.WithYAMLDecodeOptions(count))
-		require.NoError(t, err)
+					return err
+				},
+			},
+		}
 
-		// One decoder decodes the value, and none reads its keys.
-		assert.Equal(t, 1, decoders)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				decoders := 0
+				count := yaml.DecodeOption(func(*yaml.Decoder) error {
+					decoders++
+
+					return nil
+				})
+
+				require.NoError(t, tc.decode(t.Context(), dd, niceyaml.WithYAMLDecodeOptions(count)))
+
+				// One decoder decodes the value, and none reads its keys.
+				assert.Equal(t, 1, decoders)
+			})
+		}
 	})
 
 	t.Run("a leaf type validates itself", func(t *testing.T) {
@@ -888,6 +928,9 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			Extra map[string]any `yaml:"extra"`
 		}
 
+		loop := map[string]any{"v": signed{N: -1}}
+		loop["self"] = map[string]any{"back": loop}
+
 		tcs := map[string]struct {
 			target any
 			input  string
@@ -907,6 +950,19 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				target: &withExtra{Extra: map[string]any{"l": labels{"b": ""}}},
 				input:  "name: x\n",
 				want:   "$.extra.l.b: empty label",
+			},
+			"validator deep in a map of any the caller filled": {
+				target: &withExtra{Extra: map[string]any{
+					"list": []any{map[string]any{"a": 1}, map[string]any{"s": signed{N: -1}}},
+					"z":    map[string]any{"b": map[string]any{"c": 2}},
+				}},
+				input: "name: x\n",
+				want:  "$.extra.list[1].s.n: negative -1",
+			},
+			"validator beside a map of any that holds itself": {
+				target: &withExtra{Extra: loop},
+				input:  "name: x\n",
+				want:   "$.extra.v.n: negative -1",
 			},
 			"type that holds itself": {
 				target: &tree{},

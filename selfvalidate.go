@@ -35,7 +35,14 @@ import (
 // errors come back joined, one per value that failed. Returns nil when
 // nothing failed.
 func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
-	w := selfWalker{node: n, opts: opts, walking: map[visit]bool{}, done: map[visit]bool{}}
+	w := selfWalker{
+		node:     n,
+		opts:     opts,
+		walking:  map[visit]bool{},
+		done:     map[visit]bool{},
+		scanning: map[visit]bool{},
+		scanned:  map[visit]bool{},
+	}
 	w.walk(reflect.ValueOf(v), paths.Root())
 
 	switch len(w.errs) {
@@ -61,12 +68,24 @@ func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
 // on the way to a map once, however many maps it meets. One go-yaml
 // decoder decodes every key, so the walk applies the options, and reads
 // any reference files they name, once too.
+//
+// Before it reads the keys of a map, or walks the elements of a slice or
+// array, the walker scans the values below for one that implements
+// [SelfValidator], and passes the value at once when none does. The
+// values go-yaml decodes into an interface never implement it, so a
+// value decoded as any walks no further than the scan.
 type selfWalker struct {
 	node    *Node
 	decoder *yaml.Decoder
 	opts    []yaml.DecodeOption
 	walking map[visit]bool
 	done    map[visit]bool
+	// The pointers, maps, and slices the scan is inside of, as walking
+	// records them for the walk.
+	scanning map[visit]bool
+	// The result of the scan of each pointer, map, and slice, so each
+	// value scans once however many values above it the walk meets.
+	scanned map[visit]bool
 	errs    []error
 }
 
@@ -302,8 +321,10 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 	case reflect.Slice, reflect.Array, reflect.Map:
 		// An element or map value whose type holds no validator passes
 		// the walk at once, so none needs a look, nor do the keys of a
-		// map, which only name the entries in errors.
-		if !mayHoldValidator(v.Type().Elem()) {
+		// map, which only name the entries in errors. The same goes for
+		// elements and map values whose types may hold one, but that
+		// hold none.
+		if !mayHoldValidator(v.Type().Elem()) || !w.holdsBelow(v) {
 			return true
 		}
 
@@ -378,6 +399,156 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 	}
 
 	return ok
+}
+
+// holdsBelow reports whether a value below v, a slice, array, or map
+// the walk is inside of, implements [SelfValidator] where the walk
+// would validate it. When it reports false, the walk of the values below
+// v validates nothing, so the walk passes v's children at once.
+func (w *selfWalker) holdsBelow(v reflect.Value) bool {
+	if v.Kind() != reflect.Array && ownsAddress(v) {
+		key := visitOf(v)
+		if held, ok := w.scanned[key]; ok {
+			return held
+		}
+
+		w.scanning[key] = true
+		defer delete(w.scanning, key)
+	}
+
+	// The scan stops only at v itself on the way back up, which the walk
+	// is inside of and would stop at too, so the result holds either way.
+	held, _ := w.scanChildren(v)
+
+	return held
+}
+
+// scanValue reports whether v, or a value below it, implements
+// [SelfValidator] where the walk would validate it. It follows the walk
+// down: through interfaces and pointers, into fields, elements, and map
+// values, and not below a value that decodes itself or whose type may
+// hold no validator. The second result is false when the scan stopped at
+// a value it was already inside of, whose own scan decides the answer, so
+// a false first result then holds only for that scan.
+func (w *selfWalker) scanValue(v reflect.Value) (bool, bool) {
+	if !v.IsValid() || !v.CanInterface() || !mayHoldValidator(v.Type()) {
+		return false, true
+	}
+
+	switch v.Kind() {
+	case reflect.Interface:
+		if v.IsNil() {
+			return false, true
+		}
+
+		return w.scanValue(v.Elem())
+
+	case reflect.Pointer, reflect.Map, reflect.Slice:
+		if v.IsNil() {
+			if v.Kind() == reflect.Pointer {
+				return false, true
+			}
+
+			return implementsSelfValidator(v.Type()), true
+		}
+
+		if !ownsAddress(v) {
+			return w.scanOwned(v)
+		}
+
+		key := visitOf(v)
+		if held, ok := w.scanned[key]; ok {
+			return held, true
+		}
+
+		if w.scanning[key] {
+			return false, false
+		}
+
+		w.scanning[key] = true
+		defer delete(w.scanning, key)
+
+		held, complete := w.scanOwned(v)
+		if held || complete {
+			w.scanned[key] = held
+		}
+
+		return held, complete
+
+	default:
+		return w.scanSelf(v)
+	}
+}
+
+// scanOwned scans v, a non-nil pointer, map, or slice, as
+// [selfWalker.scanValue] describes.
+func (w *selfWalker) scanOwned(v reflect.Value) (bool, bool) {
+	if v.Kind() == reflect.Pointer {
+		return w.scanValue(v.Elem())
+	}
+
+	return w.scanSelf(v)
+}
+
+// scanSelf scans v, a value that is no pointer or interface, as
+// [selfWalker.scanValue] describes.
+func (w *selfWalker) scanSelf(v reflect.Value) (bool, bool) {
+	if implementsSelfValidator(v.Type()) {
+		return true, true
+	}
+
+	if decodesItself(v.Type()) {
+		return false, true
+	}
+
+	return w.scanChildren(v)
+}
+
+// scanChildren scans the fields of a struct, the elements of a slice or
+// array, or the values of a map, as [selfWalker.scanValue] describes.
+func (w *selfWalker) scanChildren(v reflect.Value) (bool, bool) {
+	complete := true
+
+	scan := func(child reflect.Value) bool {
+		held, done := w.scanValue(child)
+		complete = complete && done
+
+		return held
+	}
+
+	switch v.Kind() {
+	case reflect.Struct:
+		for i := range v.NumField() {
+			if _, _, skip := fieldName(v.Type().Field(i)); !skip && scan(v.Field(i)) {
+				return true, true
+			}
+		}
+
+	case reflect.Slice, reflect.Array:
+		for i := range v.Len() {
+			if scan(v.Index(i)) {
+				return true, true
+			}
+		}
+
+	case reflect.Map:
+		for iter := v.MapRange(); iter.Next(); {
+			if scan(iter.Value()) {
+				return true, true
+			}
+		}
+
+	default:
+	}
+
+	return false, complete
+}
+
+// implementsSelfValidator reports whether a value of type t implements
+// [SelfValidator] through its value or its pointer, as
+// [selfWalker.validate] checks it.
+func implementsSelfValidator(t reflect.Type) bool {
+	return reflect.PointerTo(t).Implements(reflect.TypeFor[SelfValidator]())
 }
 
 // validate runs Validate on v when v implements [SelfValidator] through

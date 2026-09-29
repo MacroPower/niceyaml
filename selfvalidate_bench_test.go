@@ -11,13 +11,15 @@ import (
 )
 
 // BenchmarkNode_Decode_SelfValidation decodes several shapes of document
-// with and without self-validation, which reads the keys of every map in
-// the decoded value from the document. The shapes are a list of small
-// mappings and a mapping that holds as many small mappings, both as any,
-// and a mapping of strings and a list of ints, whose types hold no
-// validator. A mapping of strings whose type validates itself holds no
-// validator below it, so the walk reads none of its keys. The time per
-// item should stay flat as each grows.
+// with and without self-validation, which scans the decoded value for
+// validators and reads the keys of each map that holds one from the
+// document. The values go-yaml decodes into any hold none, so the walk
+// reads no keys for them. The shapes are a list of small mappings and a
+// mapping that holds as many small mappings, both as any, and a mapping
+// of strings and a list of ints, whose types hold no validator. A
+// mapping of strings whose type validates itself holds no validator
+// below it, so the walk reads none of its keys. The time per item should
+// stay flat as each grows.
 func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 	decodeAny := func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
 		_, err := doc.Decode[any](ctx, opts...)
