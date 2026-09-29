@@ -356,7 +356,12 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 		var own map[string]bool
 
 		for i := range v.NumField() {
+			// A field whose type holds no validator passes the walk at
+			// once, so it needs no name or path.
 			field := v.Type().Field(i)
+			if !mayHoldValidator(field.Type) {
+				continue
+			}
 
 			name, inline, skip := fieldName(field)
 			if skip || shadowed[name] {
@@ -596,7 +601,12 @@ func (w *selfWalker) scanChildren(v reflect.Value) (bool, bool) {
 	switch v.Kind() {
 	case reflect.Struct:
 		for i := range v.NumField() {
-			if _, _, skip := fieldName(v.Type().Field(i)); !skip && scan(v.Field(i)) {
+			field := v.Type().Field(i)
+			if !mayHoldValidator(field.Type) {
+				continue
+			}
+
+			if _, _, skip := fieldName(field); !skip && scan(v.Field(i)) {
 				return true, true
 			}
 		}

@@ -18,8 +18,10 @@ import (
 // mapping that holds as many small mappings, both as any, and a mapping
 // of strings and a list of ints, whose types hold no validator. A
 // mapping of strings whose type validates itself holds no validator
-// below it, so the walk reads none of its keys. The time per item should
-// stay flat as each grows.
+// below it, so the walk reads none of its keys. A list of rows, each a
+// struct of many scalar fields and one field that validates itself,
+// shows what the walk spends on fields whose types hold no validator.
+// The time per item should stay flat as each grows.
 func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 	decodeAny := func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
 		_, err := doc.Decode[any](ctx, opts...)
@@ -58,6 +60,20 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 			item: func(i int) string { return fmt.Sprintf("k%d: v%d\n", i, i) },
 			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
 				_, err := doc.Decode[labels](ctx, opts...)
+
+				return err
+			},
+		},
+		{
+			name: "wide_rows",
+			item: func(i int) string {
+				return fmt.Sprintf(
+					"- {a: a%d, b: b, c: c, d: d, e: e, f: 1, g: 2, h: 3, i: true, j: 1.5, port: 80}\n",
+					i,
+				)
+			},
+			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
+				_, err := doc.Decode[[]wideRow](ctx, opts...)
 
 				return err
 			},
@@ -112,4 +128,20 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 			}
 		}
 	}
+}
+
+// wideRow is a struct of many scalar fields and one field that validates
+// itself.
+type wideRow struct {
+	A    string  `yaml:"a"`
+	B    string  `yaml:"b"`
+	C    string  `yaml:"c"`
+	D    string  `yaml:"d"`
+	E    string  `yaml:"e"`
+	F    int     `yaml:"f"`
+	G    int     `yaml:"g"`
+	H    int     `yaml:"h"`
+	I    bool    `yaml:"i"`
+	J    float64 `yaml:"j"`
+	Port port    `yaml:"port"`
 }
