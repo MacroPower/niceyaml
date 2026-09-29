@@ -94,6 +94,32 @@ var (
 // Hours is hours under an exported name, for embedding without a tag.
 type Hours = hours
 
+// Named requires a name, for embedding.
+type Named struct {
+	Name string `yaml:"name"`
+}
+
+func (n Named) Validate() error {
+	if n.Name == "" {
+		return niceyaml.NewError("name required", niceyaml.AtPath(paths.Root().Child("name")))
+	}
+
+	return nil
+}
+
+// Counted counts the runs of its Validate, for embedding.
+type Counted struct {
+	Name string `yaml:"name"`
+
+	runs int
+}
+
+func (c *Counted) Validate() error {
+	c.runs++
+
+	return nil
+}
+
 // nested holds SelfValidator values at every depth and shape.
 type nested struct {
 	Hours    hours            `yaml:"hours"`
@@ -305,6 +331,96 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err := dd.Decode[embedded](t.Context())
 		require.EqualError(t, err, "2:31: $.hours.close: closes before it opens")
+	})
+
+	t.Run("a nil embedded pointer does not validate", func(t *testing.T) {
+		t.Parallel()
+
+		type inline struct {
+			*Named `yaml:",inline"`
+
+			Spec string `yaml:"spec"`
+		}
+
+		type named struct {
+			*Named
+
+			Spec string `yaml:"spec"`
+		}
+
+		tcs := map[string]struct {
+			decode func(*niceyaml.Node) error
+			input  string
+		}{
+			"inline": {
+				input: "# empty\n",
+				decode: func(n *niceyaml.Node) error {
+					_, err := n.Decode[inline](t.Context())
+
+					return err
+				},
+			},
+			"named": {
+				input: "spec: x\n",
+				decode: func(n *niceyaml.Node) error {
+					_, err := n.Decode[named](t.Context())
+
+					return err
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				require.NoError(t, tc.decode(yamltest.FirstDocument(t, tc.input)))
+			})
+		}
+	})
+
+	t.Run("an ignored embedded field does not validate", func(t *testing.T) {
+		t.Parallel()
+
+		type ignored struct {
+			Named `yaml:"-"`
+
+			Title string `yaml:"name"`
+		}
+
+		dd := yamltest.FirstDocument(t, stringtest.Input(`
+			name: hello
+		`))
+
+		_, err := dd.Decode[ignored](t.Context())
+		require.NoError(t, err)
+	})
+
+	t.Run("an embedded validator runs once, at its own path", func(t *testing.T) {
+		t.Parallel()
+
+		type inline struct {
+			Counted `yaml:",inline"`
+		}
+
+		type named struct {
+			Named
+		}
+
+		dd := yamltest.FirstDocument(t, stringtest.Input(`
+			name: x
+		`))
+
+		got, err := dd.Decode[inline](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, 1, got.runs)
+
+		dd = yamltest.FirstDocument(t, stringtest.Input(`
+			named: {name: ""}
+		`))
+
+		_, err = dd.Decode[named](t.Context())
+		require.EqualError(t, err, "1:15: $.named.name: name required")
 	})
 
 	t.Run("an ignored field does not validate", func(t *testing.T) {

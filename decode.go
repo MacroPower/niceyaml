@@ -82,11 +82,13 @@ import (
 // Any value with a Validate method takes part, including one from a
 // package that names its own check that way, such as a generated
 // message type. A decode runs those checks too and reports their errors
-// at the value that owns the method. A check that reads state
-// the caller fills in after the decode runs on a value with that state
-// set already through [Node.DecodeInto], which keeps the fields the
-// document does not name, and [WithSelfValidation] false switches the
-// walk off for every value. A Validate that rewrites its value, or that
+// at the value that owns the method. A struct does not own a Validate it
+// gets from an embedded field, so the method runs once, on that field at
+// the field's own path, and not at all when the field is nil or ignored.
+// A check that reads state the caller fills in after the decode runs on
+// a value with that state set already through [Node.DecodeInto], which
+// keeps the fields the document does not name, and [WithSelfValidation]
+// false switches the walk off for every value. A Validate that rewrites its value, or that
 // the value's own UnmarshalYAML already ran, runs again inside the
 // decode, so it should be idempotent.
 type SelfValidator interface {
