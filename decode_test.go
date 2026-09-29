@@ -3022,6 +3022,82 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 	})
 }
 
+func TestDocument_Decode_ForwardAlias(t *testing.T) {
+	t.Parallel()
+
+	// An alias before every anchor of its name in the document reads the
+	// anchor of a reference document, however many anchors of the name
+	// follow the alias.
+	refs := niceyaml.WithReferences([]byte("defaults: &defaults {port: 80}\nx: &x 1\n"))
+
+	tcs := map[string]struct {
+		input  string
+		path   paths.Path
+		want   any
+		scoped any
+		err    string
+	}{
+		"merge key before the anchor": {
+			input: "service:\n  <<: *defaults\ndefaults: &defaults\n  port: 8080\n",
+			path:  paths.Root().Child("service"),
+			want: map[string]any{
+				"service":  map[string]any{"port": uint64(80)},
+				"defaults": map[string]any{"port": uint64(8080)},
+			},
+			scoped: map[string]any{"port": uint64(80)},
+			err:    "2:7: decoder rejected the value: cannot find anchor by alias name defaults",
+		},
+		"merge key before two anchors": {
+			input: "service:\n  <<: *defaults\ndefaults: &defaults\n  port: 8080\nother: &defaults\n  port: 9090\n",
+			path:  paths.Root().Child("service"),
+			want: map[string]any{
+				"service":  map[string]any{"port": uint64(80)},
+				"defaults": map[string]any{"port": uint64(8080)},
+				"other":    map[string]any{"port": uint64(9090)},
+			},
+			scoped: map[string]any{"port": uint64(80)},
+			err:    "2:7: decoder rejected the value: cannot find anchor by alias name defaults",
+		},
+		"sequence alias before the anchor": {
+			input:  "p: [*x, &x 2]\n",
+			path:   paths.Root().Child("p"),
+			want:   map[string]any{"p": []any{uint64(1), uint64(2)}},
+			scoped: []any{uint64(1), uint64(2)},
+			err:    `1:6: could not find alias "x"`,
+		},
+		"mapping alias before the anchor": {
+			input:  "p:\n  a: *x\n  b: &x 2\n",
+			path:   paths.Root().Child("p"),
+			want:   map[string]any{"p": map[string]any{"a": uint64(1), "b": uint64(2)}},
+			scoped: map[string]any{"a": uint64(1), "b": uint64(2)},
+			err:    `2:7: could not find alias "x"`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, tc.input)
+
+			got, err := dd.Decode[any](t.Context(), refs)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+
+			scoped, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context(), refs)
+			require.NoError(t, err)
+			assert.Equal(t, tc.scoped, scoped)
+
+			// Without the reference document, the alias finds no anchor.
+			_, err = dd.Decode[any](t.Context())
+			require.EqualError(t, err, tc.err)
+
+			_, err = yamltest.At(t, dd, tc.path).Decode[any](t.Context())
+			require.EqualError(t, err, tc.err)
+		})
+	}
+}
+
 func TestDocument_DecodeInto(t *testing.T) {
 	t.Parallel()
 

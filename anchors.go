@@ -24,9 +24,12 @@ import (
 // of a node below the body reads the anchors outside the node before it,
 // so neither order matches the document. The tree therefore gives a name
 // of its own to each anchor whose name another anchor of the document
-// shares. It gives each alias the name of the anchor the document's
-// [paths.Resolver] binds it to, so every alias reads that anchor whatever
-// order the decoder reads the anchors in.
+// shares, and to each anchor that follows an alias of its name with no
+// anchor of that name before it. It gives each alias the name of the
+// anchor the document's [paths.Resolver] binds it to, so every alias
+// reads that anchor whatever order the decoder reads the anchors in. An
+// alias the resolver binds to no anchor keeps its name, so it reads an
+// anchor of a reference document or none.
 //
 // The decoder reads an alias inside the anchor it refers to as null,
 // since it has not finished reading the anchor. For a type with an
@@ -101,11 +104,11 @@ func (d *document) decodeTree() *decodeTree {
 func (d *document) newDecodeTree() *decodeTree {
 	body := d.root.Body
 
-	shared := sharedAnchorNames(body)
+	names := renamedAnchorNames(d.pathResolver(), body)
 	enclosed := d.enclosedAliases()
 
-	if len(shared) > 0 || len(enclosed) > 0 {
-		if tree, ok := d.parsedTree(shared, enclosed); ok {
+	if len(names) > 0 || len(enclosed) > 0 {
+		if tree, ok := d.parsedTree(names, enclosed); ok {
 			return tree
 		}
 	}
@@ -115,10 +118,10 @@ func (d *document) newDecodeTree() *decodeTree {
 
 // parsedTree returns the [*decodeTree] of the document from a second
 // parse of the Source, with a name of its own for each anchor whose name
-// is in shared, and a null in place of each alias in enclosed. It
+// is in names, and a null in place of each alias in enclosed. It
 // reports false when the second parse does not give the document the
 // same nodes, which a parse of the same tokens always does.
-func (d *document) parsedTree(shared map[string]bool, enclosed map[ast.Node]bool) (*decodeTree, bool) {
+func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool) (*decodeTree, bool) {
 	src := d.node.source
 
 	file, fileTokens := src.decodeParse()
@@ -144,7 +147,7 @@ func (d *document) parsedTree(shared map[string]bool, enclosed map[ast.Node]bool
 	source := sourceNodes(d.root.Body)
 	spelled := bracketedNames(source)
 
-	// Each anchor with a shared name gets the name followed by a count in
+	// Each anchor with a name in names gets the name followed by a count in
 	// brackets, higher than the count of the last anchor of that name, so
 	// no two new names match. A quoted name can hold brackets, so the
 	// count skips a new name that an anchor or alias of the document
@@ -162,7 +165,7 @@ func (d *document) parsedTree(shared map[string]bool, enclosed map[ast.Node]bool
 		}
 
 		name, ok := nodeName(anchor.Name)
-		if !ok || !shared[name] {
+		if !ok || !names[name] {
 			continue
 		}
 
@@ -237,10 +240,10 @@ func (d *document) parsedTree(shared map[string]bool, enclosed map[ast.Node]bool
 
 	ast.Walk(nulls, body)
 
-	var names *strings.Replacer
+	var replacer *strings.Replacer
 
 	if len(pairs) > 0 {
-		names = strings.NewReplacer(pairs...)
+		replacer = strings.NewReplacer(pairs...)
 	}
 
 	return &decodeTree{
@@ -249,7 +252,7 @@ func (d *document) parsedTree(shared map[string]bool, enclosed map[ast.Node]bool
 		nodes:       nodes,
 		tokens:      tokens,
 		parseTokens: fileTokens,
-		names:       names,
+		names:       replacer,
 	}, true
 }
 
@@ -594,35 +597,48 @@ func (e restoredError) Unwrap() error {
 	return e.err
 }
 
-// sharedAnchorNames returns the names that more than one anchor under
-// body has.
-func sharedAnchorNames(body ast.Node) map[string]bool {
-	seen := map[string]bool{}
-	shared := map[string]bool{}
+// renamedAnchorNames returns the names of the anchors under body that
+// the tree gives a name of their own. Those are the names more than one
+// anchor has, and the names of anchors that follow an alias of their name
+// that resolver binds to no anchor. The decoder would read such an alias
+// as the later anchor, although it names no anchor of the document before
+// it and reads a reference document's anchor, if any.
+func renamedAnchorNames(resolver *paths.Resolver, body ast.Node) map[string]bool {
+	anchors := map[string]int{}
+	unbound := map[string]bool{}
 
 	for _, n := range sourceNodes(body) {
-		anchor, ok := n.(*ast.AnchorNode)
-		if !ok {
-			continue
-		}
+		switch n := n.(type) {
+		case *ast.AnchorNode:
+			if name, ok := nodeName(n.Name); ok {
+				anchors[name]++
+			}
 
-		name, ok := nodeName(anchor.Name)
-		if !ok {
-			continue
-		}
+		case *ast.AliasNode:
+			_, err := resolver.Anchor(n)
+			if err == nil {
+				continue
+			}
 
-		if seen[name] {
-			shared[name] = true
+			if name, ok := nodeName(n.Value); ok {
+				unbound[name] = true
+			}
 		}
-
-		seen[name] = true
 	}
 
-	return shared
+	names := map[string]bool{}
+
+	for name, count := range anchors {
+		if count > 1 || unbound[name] {
+			names[name] = true
+		}
+	}
+
+	return names
 }
 
 // bracketedNames returns the names of the anchors and aliases among nodes
-// that hold " [", the start of a name that [document.renamedTree] gives
+// that hold " [", the start of a name that [document.parsedTree] gives
 // an anchor.
 func bracketedNames(nodes []ast.Node) []string {
 	var names []string
