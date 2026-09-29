@@ -136,6 +136,28 @@ func TestFinder_Find(t *testing.T) {
 			normalizer: normalizer.New(),
 			want:       nil,
 		},
+		"with normalizer - cherokee uppercase search": {
+			input:      "name: \uab70",
+			search:     "\u13a0",
+			normalizer: normalizer.New(),
+			want: position.Ranges{
+				position.NewRange(
+					position.New(0, 6),
+					position.New(0, 7),
+				),
+			},
+		},
+		"with normalizer - cherokee lowercase search": {
+			input:      "name: \u13a0",
+			search:     "\uab70",
+			normalizer: normalizer.New(),
+			want: position.Ranges{
+				position.NewRange(
+					position.New(0, 6),
+					position.New(0, 7),
+				),
+			},
+		},
 		"exact matching - no match": {
 			input:  "key: VALUE",
 			search: "value",

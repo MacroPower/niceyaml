@@ -4,6 +4,7 @@ import (
 	"sync"
 	"testing"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/text/runes"
@@ -64,6 +65,14 @@ func TestNormalize(t *testing.T) {
 		"case fold eszett": {
 			in:   "Straße",
 			want: "strasse",
+		},
+		"case fold cherokee uppercase": {
+			in:   "\u13a0\u13f0",
+			want: "\uab70\u13f8",
+		},
+		"case fold cherokee lowercase": {
+			in:   "\uab70\u13f8",
+			want: "\uab70\u13f8",
 		},
 		"diacritics disabled preserves diacritics": {
 			opts: []normalizer.Option{normalizer.WithDiacriticFold(false)},
@@ -151,6 +160,23 @@ func TestNormalize(t *testing.T) {
 			got := n.Normalize(tc.in)
 			assert.Equal(t, tc.want, got)
 		})
+	}
+}
+
+func TestNormalize_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	n := normalizer.New()
+
+	for r := range rune(0x30000) {
+		if !utf8.ValidRune(r) {
+			continue
+		}
+
+		once := n.Normalize(string(r))
+		if twice := n.Normalize(once); twice != once {
+			assert.Failf(t, "not idempotent", "%U: %q then %q", r, once, twice)
+		}
 	}
 }
 

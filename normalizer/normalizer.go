@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"
@@ -99,7 +100,14 @@ func (c *config) build() transform.Transformer {
 	}
 
 	if c.caseFold {
-		transformers = append(transformers, cases.Fold())
+		// The x/text Fold swaps upper- and lowercase Cherokee instead of
+		// mapping both to one form, so Lower follows it to collapse each
+		// pair. Fold returns lowercase for every other rune, which Lower
+		// keeps as is.
+		transformers = append(transformers,
+			cases.Fold(),
+			cases.Lower(language.Und),
+		)
 	}
 
 	for _, newTransformer := range c.transformers {
