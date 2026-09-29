@@ -113,7 +113,7 @@ func (r Ref) Key() string {
 }
 
 // name returns the key of r for a message, with any password in a URL
-// key redacted, so an error does not print a credential that the fetch
+// key redacted, so an error does not print a password that the fetch
 // itself redacts.
 func (r Ref) name() string {
 	return httpfetch.Redacted(r.key)

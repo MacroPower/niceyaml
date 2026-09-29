@@ -17,7 +17,9 @@ const MaxSize = 10 * 1024 * 1024 // 10 MB.
 // rejects any status other than 200 OK and any body over [MaxSize] bytes.
 //
 // Errors name the URL as [Redacted] spells it, which replaces any password
-// in its userinfo, so a credential in a schema URL does not reach logs.
+// in its userinfo, so a password in a schema URL does not reach logs.
+// [Redacted] keeps a username as written, so a token given as the
+// username does reach logs.
 // An error about a URL that does not parse quotes it only when it starts
 // with http:// or https://, since [Redacted] can miss a password in other
 // text that does not parse. When [Redacted] would hide a password in such
