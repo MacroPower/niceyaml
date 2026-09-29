@@ -1059,6 +1059,22 @@ func TestViewport_RowScrolling(t *testing.T) {
 		assert.Equal(t, 10, m.TotalRowCount())
 	})
 
+	t.Run("top line counts lines", func(t *testing.T) {
+		t.Parallel()
+
+		m := newModel(t)
+		assert.Equal(t, 0, m.TopLine())
+
+		// Row 5 is the second row of line5, which wraps.
+		m.SetYOffset(5)
+		assert.Equal(t, 4, m.TopLine())
+
+		// The last five rows hold line6 through line10.
+		m.GotoBottom()
+		assert.Greater(t, m.YOffset(), 5)
+		assert.Equal(t, 5, m.TopLine())
+	})
+
 	t.Run("bottom shows the last line", func(t *testing.T) {
 		t.Parallel()
 
@@ -2824,6 +2840,7 @@ line3: c`
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Equal(t, 0, m.TotalLineCount())
+				assert.Equal(t, 0, m.TopLine())
 			},
 		},
 		"Init/ReturnsNil": {
