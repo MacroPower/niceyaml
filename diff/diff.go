@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"go.jacobcolvin.com/niceyaml/diff/lcs"
+	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -28,9 +29,11 @@ type Differ struct {
 //   - [WithAlgorithm]
 type Option func(*Differ)
 
-// WithAlgorithm is an [Option] that sets the diff algorithm. A [Differ]
-// shared between goroutines needs an algorithm that is safe for concurrent
-// use.
+// WithAlgorithm is an [Option] that sets the diff algorithm. A nil
+// algorithm keeps the default, and so does a nil pointer such as a nil
+// [*lcs.Hirschberg], so an algorithm built only on some condition can pass
+// through as it is. A [Differ] shared between goroutines needs an
+// algorithm that is safe for concurrent use.
 //
 // Default is [lcs.Hirschberg].
 func WithAlgorithm(algo lcs.Algorithm) Option {
@@ -48,7 +51,7 @@ func New(opts ...Option) *Differ {
 		opt(d)
 	}
 
-	if d.algo == nil {
+	if nilness.IsNil(d.algo) {
 		d.algo = lcs.NewHirschberg()
 	}
 

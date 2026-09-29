@@ -1170,6 +1170,46 @@ func TestDiffer_WithAlgorithm(t *testing.T) {
 	}
 }
 
+func TestDiffer_WithNilAlgorithm(t *testing.T) {
+	t.Parallel()
+
+	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n").Lines()
+	after := niceyaml.NewSourceFromString("a: 1\nc: 3\n").Lines()
+	want := diff.New().Diff(before, after).Unified()
+
+	tcs := map[string]struct {
+		algo lcs.Algorithm
+	}{
+		"untyped nil": {
+			algo: nil,
+		},
+		"nil *lcs.Hirschberg": {
+			algo: (*lcs.Hirschberg)(nil),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			d := diff.New(diff.WithAlgorithm(tc.algo))
+
+			var got *line.View
+
+			require.NotPanics(t, func() {
+				got = d.Diff(before, after).Unified()
+			})
+
+			assert.Equal(t, want.String(), got.String())
+			require.Equal(t, want.Count(), got.Count())
+
+			for i := range want.Count() {
+				assert.Equal(t, want.Flag(i), got.Flag(i), "flag mismatch at line %d", i)
+			}
+		})
+	}
+}
+
 func TestDiff_Concurrent(t *testing.T) {
 	t.Parallel()
 
