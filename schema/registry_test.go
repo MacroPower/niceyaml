@@ -468,6 +468,23 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 		require.ErrorIs(t, err, cannotDecide)
 	})
 
+	t.Run("still reports a load error that wraps ErrNoMatch", func(t *testing.T) {
+		t.Parallel()
+
+		// The resolver applies, so the failed load is no unmatched
+		// document, whatever the load error wraps.
+		reg := schema.NewRegistry(
+			schema.WithResolvers(schema.Loadable("k", func(_ context.Context) ([]byte, error) {
+				return nil, fmt.Errorf("upstream lookup: %w", schema.ErrNoMatch)
+			})),
+			schema.WithRequireSchema(false),
+		)
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
+		err := reg.Validate(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrLoad)
+	})
+
 	t.Run("Lookup still reports ErrNoMatch", func(t *testing.T) {
 		t.Parallel()
 

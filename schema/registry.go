@@ -326,7 +326,7 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // and validation. Use Lookup when you need the validator for custom
 // processing.
 func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (*Schema, error) {
-	v, err := r.lookup(ctx, n)
+	v, _, err := r.lookup(ctx, n)
 	if err != nil {
 		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
 		return nil, n.Bind(err)
@@ -336,9 +336,11 @@ func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (*Schema, error
 }
 
 // lookup is [Registry.Lookup] before binding the error to the document.
-func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, error) {
+// It reports true when every resolver declined the document. The error
+// alone cannot tell, since a load error may wrap [ErrNoMatch] too.
+func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, bool, error) {
 	if !doc.Path().IsRoot() {
-		return nil, fmt.Errorf("%w: node is scoped to %s", ErrScopedDocument, doc.Path())
+		return nil, false, fmt.Errorf("%w: node is scoped to %s", ErrScopedDocument, doc.Path())
 	}
 
 	var reasons []error
@@ -348,7 +350,7 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, err
 		// a schema for a canceled lookup. Check the context here, so a
 		// canceled lookup reports that whatever the resolver does.
 		if ctx.Err() != nil {
-			return nil, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
+			return nil, false, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
 		}
 
 		ref, err := res.Resolve(ctx, doc)
@@ -359,19 +361,21 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, err
 		}
 
 		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrResolve, err)
+			return nil, false, fmt.Errorf("%w: %w", ErrResolve, err)
 		}
 
-		return r.Schema(ctx, ref)
+		v, err := r.Schema(ctx, ref)
+
+		return v, false, err
 	}
 
 	// The loop-top check does not see a context the last resolver ended, so
 	// a resolver that cancels and then declines would report no match.
 	if ctx.Err() != nil {
-		return nil, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
+		return nil, false, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
 	}
 
-	return nil, noMatch(reasons)
+	return nil, true, noMatch(reasons)
 }
 
 // noMatch returns the error a lookup reports when every resolver declined.
@@ -445,11 +449,14 @@ func (e reasonError) Unwrap() error {
 //
 // Returns [ErrNoMatch] if no resolver applies to the document, unless
 // [WithRequireSchema] set false, in which case such a document passes.
-// Callers of a registry that requires a schema can check for the error to
-// allow unmatched documents at one call site:
+// A document a resolver applies to never passes that way, even when the
+// load error of its schema wraps ErrNoMatch. Callers of a registry that
+// requires a schema can check for the error to allow unmatched documents
+// at one call site. Such a load error matches both [ErrLoad] and
+// ErrNoMatch, so the check tests for ErrLoad first:
 //
 //	err := doc.Validate(ctx, reg)
-//	if err != nil && !errors.Is(err, ErrNoMatch) {
+//	if err != nil && (errors.Is(err, ErrLoad) || !errors.Is(err, ErrNoMatch)) {
 //	    return err
 //	}
 //
@@ -459,13 +466,14 @@ func (e reasonError) Unwrap() error {
 // error [Registry.Lookup] returns for it, even with [WithRequireSchema] set
 // false.
 func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
-	v, err := r.Lookup(ctx, n)
+	v, unmatched, err := r.lookup(ctx, n)
 	if err != nil {
-		if !r.requireSchema && errors.Is(err, ErrNoMatch) {
+		if !r.requireSchema && unmatched {
 			return nil
 		}
 
-		return err
+		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
+		return n.Bind(err)
 	}
 
 	//nolint:wrapcheck // Validation errors pass through unchanged.
