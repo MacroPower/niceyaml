@@ -447,7 +447,7 @@ func TestPattern_Match(t *testing.T) {
 	}
 }
 
-func TestAnyDepthPatterns_MatchClean(t *testing.T) {
+func TestAnyDepthPatterns_Matching(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
@@ -649,7 +649,7 @@ func TestAnyDepthPatterns_MatchClean(t *testing.T) {
 			t.Parallel()
 
 			p := filepaths.NewAnyDepthPatterns(tc.patterns)
-			got := p.MatchClean(filepaths.CleanPath(tc.path))
+			_, got := p.SpecificityClean(filepaths.CleanPath(tc.path))
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -814,7 +814,8 @@ func TestUnclosedClasses(t *testing.T) {
 			assert.Equal(t, tc.want, filepaths.ExpandBraces(tc.pattern))
 
 			p := filepaths.NewAnyDepthPatterns([]string{tc.pattern})
-			assert.False(t, p.MatchClean("x.yaml"))
+			_, ok := p.SpecificityClean("x.yaml")
+			assert.False(t, ok)
 
 			assert.Less(t, time.Since(start), 2*time.Second)
 		})

@@ -348,9 +348,10 @@ type anyDepthGlob struct {
 // that doubles with each of its brace groups, for every path.
 //
 // NewAnyDepthPatterns keeps every other pattern, the invalid ones
-// included, and [AnyDepthPatterns.MatchClean] skips a pattern it cannot
-// interpret, so a typo in a SchemaStore catalog entry does not break
-// validation. To validate a pattern upfront, use [NewPattern] instead.
+// included, and [AnyDepthPatterns.SpecificityClean] skips a pattern it
+// cannot interpret, so a typo in a SchemaStore catalog entry does not
+// break validation. To validate a pattern upfront, use [NewPattern]
+// instead.
 func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
 	var p AnyDepthPatterns
 
@@ -383,24 +384,17 @@ func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
 	return p
 }
 
-// MatchClean reports whether path matches any of the patterns and none
-// of the exclusions. The path must already be in the form [CleanPath]
-// returns, so a caller matching one path against many pattern sets
-// cleans it once.
-func (p AnyDepthPatterns) MatchClean(path string) bool {
-	_, ok := p.SpecificityClean(path)
-
-	return ok
-}
-
-// SpecificityClean reports whether path matches, as
-// [AnyDepthPatterns.MatchClean] does, and returns the specificity of the
-// most specific pattern that matches it. The specificity counts the
-// characters a pattern requires literally in the names of a path, which
-// is every character but a separator, a "*", a "?", or a character
-// class. So "**/.moon/tasks/**/*.yml" matches ".moon/tasks/node.yml"
-// with a specificity of 14, and "**/tasks/*.yml" matches it with 9. Each
-// brace alternative counts on its own.
+// SpecificityClean reports whether path matches any of the patterns and
+// none of the exclusions, and returns the specificity of the most
+// specific pattern that matches it. The path must already be in the form
+// [CleanPath] returns, so a caller matching one path against many
+// pattern sets cleans it once.
+//
+// The specificity counts the characters a pattern requires literally in
+// the names of a path, which is every character but a separator, a "*",
+// a "?", or a character class. So "**/.moon/tasks/**/*.yml" matches
+// ".moon/tasks/node.yml" with a specificity of 14, and "**/tasks/*.yml"
+// matches it with 9. Each brace alternative counts on its own.
 func (p AnyDepthPatterns) SpecificityClean(path string) (int, bool) {
 	for _, g := range p.globs {
 		if matchGlob(g.glob, path) {
