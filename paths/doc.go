@@ -71,7 +71,10 @@
 // decoder fills a struct it resolves aliases in the order of the struct's
 // fields, which a path does not follow. An alias with no anchor of its name
 // before it, or one that leads back to itself, has no content, so resolving
-// through it returns an error wrapping [ErrAlias].
+// through it returns an error wrapping [ErrAlias]. Unless a `<<` merge key
+// names it, an alias inside the content of the anchor it refers to leads
+// back to itself, so the decoder reads it as null. [Path.Token] still finds
+// the token of such an alias.
 //
 // The wildcard selectors `[*]` and `..name` select any number of nodes, so
 // [Path.Token] and [Path.Node] reject them with [ErrWildcard]. Use

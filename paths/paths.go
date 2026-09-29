@@ -532,11 +532,13 @@ func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 // anchor's content, since that is where the path points in the source.
 //
 // The path resolves against the document body only, so the same path
-// resolves to different tokens in different documents of one file. Returns
-// the same errors as [Path.Node], except that Token does not look through
-// the node the last selector reaches, so an alias there that names no
-// anchor yields the alias's own token rather than [ErrAlias]. Token still
-// returns [ErrAlias] for an alias an earlier selector resolves through.
+// resolves to different tokens in different documents of one file. Token
+// returns the same errors as [Path.Node], except that it does not look
+// through the node the last selector reaches. An alias there that does
+// not resolve, such as one that names no anchor or one inside the content
+// of its own anchor, yields the alias's own token rather than [ErrAlias].
+// Token still returns [ErrAlias] for an alias an earlier selector
+// resolves through.
 func (p Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
 	return NewResolver(doc).Token(p)
 }

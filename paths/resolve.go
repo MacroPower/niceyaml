@@ -68,7 +68,10 @@ func (m match) key() match {
 
 // resolver walks a document for the selectors of a [Path]. Its targets map
 // holds the content of the anchor each alias refers to, and its owners map
-// holds the anchor of each such content.
+// holds the anchor of each such content. The enclosed set holds each alias
+// that lies inside the content of the anchor it refers to, other than one
+// a `<<` merge key names. The decoder reads such an alias as null, so it
+// has no content.
 //
 // The keys map holds the [*mappingKeys] of each mapping a lookup or a
 // recursive walk has read, so a later lookup or walk in that mapping finds
@@ -77,9 +80,10 @@ func (m match) key() match {
 //
 // Create instances with [newResolver].
 type resolver struct {
-	targets map[*ast.AliasNode]ast.Node
-	owners  map[ast.Node]*ast.AnchorNode
-	keys    sync.Map
+	targets  map[*ast.AliasNode]ast.Node
+	owners   map[ast.Node]*ast.AnchorNode
+	enclosed map[*ast.AliasNode]bool
+	keys     sync.Map
 }
 
 // mappingKeys indexes the entries of one mapping for [resolver.lookup] and
@@ -147,6 +151,8 @@ func (r *resolver) mappingKeys(mapping *ast.MappingNode) *mappingKeys {
 // key, or on an element of a sequence there, counts for the aliases other
 // merge keys name. It counts for an alias in a value only when no other
 // anchor of its name comes before that alias, as [anchorSet] describes.
+// Once every alias is bound, an [enclosureFinder] finds the aliases that
+// lie inside the content of the anchor they refer to.
 func newResolver(doc *ast.DocumentNode) *resolver {
 	b := &aliasBinder{
 		anchors: newAnchorSet(),
@@ -156,12 +162,63 @@ func newResolver(doc *ast.DocumentNode) *resolver {
 		pending: map[*ast.MappingNode]*mergedRead{},
 		open:    map[*ast.MappingNode]bool{},
 		watched: map[ast.Node]bool{},
+		merges:  map[*ast.AliasNode]bool{},
 		version: 1,
 	}
 
 	ast.Walk(b, doc.Body)
 
-	return &resolver{targets: b.targets, owners: b.owners}
+	f := &enclosureFinder{
+		targets:  b.targets,
+		merges:   b.merges,
+		open:     map[ast.Node]bool{},
+		enclosed: map[*ast.AliasNode]bool{},
+	}
+
+	ast.Walk(f, doc.Body)
+
+	return &resolver{targets: b.targets, owners: b.owners, enclosed: f.enclosed}
+}
+
+// enclosureFinder finds the aliases that lie inside the content of the
+// anchor they refer to while [ast.Walk] visits a document. The targets
+// map holds the content each alias refers to, and the merges set holds
+// the aliases `<<` merge keys name, which the finder leaves out. The open
+// set holds the content of each anchor the walk is inside of, and the
+// enclosed set holds the aliases found so far.
+type enclosureFinder struct {
+	targets  map[*ast.AliasNode]ast.Node
+	merges   map[*ast.AliasNode]bool
+	open     map[ast.Node]bool
+	enclosed map[*ast.AliasNode]bool
+}
+
+// Visit adds node to the enclosed set when it is an alias inside the
+// content of the anchor it refers to, then returns f so [ast.Walk]
+// continues into the children of node. It walks the content of an anchor
+// itself, holding that content open meanwhile, and returns nil for it. It
+// returns nil for a nil node, including a typed nil a hand-built tree may
+// hold.
+func (f *enclosureFinder) Visit(node ast.Node) ast.Visitor {
+	if astnode.IsNil(node) {
+		return nil
+	}
+
+	switch n := node.(type) {
+	case *ast.AnchorNode:
+		f.open[n.Value] = true
+		ast.Walk(f, n.Value)
+		delete(f.open, n.Value)
+
+		return nil
+
+	case *ast.AliasNode:
+		if target, ok := f.targets[n]; ok && f.open[target] && !f.merges[n] {
+			f.enclosed[n] = true
+		}
+	}
+
+	return f
 }
 
 // anchorSet holds the anchors the decoder has recorded so far, in the two
@@ -238,6 +295,9 @@ func (s anchorSet) add(other anchorSet) {
 // pending map depends on. The version field counts the changes to the
 // state of a watched node, so a result that held at one version holds
 // until the next, as [aliasBinder.holds] describes.
+//
+// The merges set holds each alias a `<<` merge key names that the binder
+// has bound.
 type aliasBinder struct {
 	anchors anchorSet
 	targets map[*ast.AliasNode]ast.Node
@@ -246,6 +306,7 @@ type aliasBinder struct {
 	pending map[*ast.MappingNode]*mergedRead
 	open    map[*ast.MappingNode]bool
 	watched map[ast.Node]bool
+	merges  map[*ast.AliasNode]bool
 	version int
 }
 
@@ -417,7 +478,8 @@ func (b *aliasBinder) findSources(
 }
 
 // bindMergeAlias binds alias, which a `<<` merge key names, to the anchor
-// of its name in nodes, the nodes map of an [anchorSet].
+// of its name in nodes, the nodes map of an [anchorSet], and adds it to the
+// merges set.
 func (b *aliasBinder) bindMergeAlias(alias *ast.AliasNode, nodes map[string]ast.Node) {
 	name := nodeToken(alias.Value)
 	if name == nil {
@@ -425,6 +487,7 @@ func (b *aliasBinder) bindMergeAlias(alias *ast.AliasNode, nodes map[string]ast.
 	}
 
 	if target, ok := nodes[name.Value]; ok {
+		b.merges[alias] = true
 		b.bind(alias, target)
 	}
 }
@@ -686,7 +749,8 @@ func anchoredMapping(content ast.Node) *ast.MappingNode {
 // deref looks through anchors and aliases to the content node they carry.
 //
 // Returns an error wrapping [ErrAlias] for an alias with no anchor of its
-// name before it, or for an alias that leads back to itself.
+// name before it, or for an alias that leads back to itself, as
+// [resolver.follow] describes.
 func (r *resolver) deref(node ast.Node) (ast.Node, error) {
 	return r.follow(node, map[*ast.AliasNode]bool{})
 }
@@ -719,9 +783,11 @@ func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
 
 // follow looks through anchors and aliases from node and adds each alias it
 // follows to followed. It returns an error wrapping [ErrAlias] when it
-// reaches an alias already in followed, an alias with no anchor, or an alias
-// with no name. It stops at a nil node, including a typed nil a hand-built
-// tree may hold, and returns it.
+// reaches an alias that leads back to itself, an alias with no anchor, or
+// an alias with no name. An alias leads back to itself when it is already
+// in followed, or when it lies inside the content of the anchor it refers
+// to and no `<<` merge key names it. It stops at a nil node, including a
+// typed nil a hand-built tree may hold, and returns it.
 func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.Node, error) {
 	for {
 		if astnode.IsNil(node) {
@@ -739,7 +805,7 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 
 			name := tk.Value
 
-			if followed[n] {
+			if followed[n] || r.enclosed[n] {
 				return nil, fmt.Errorf("%w: *%s forms a cycle", ErrAlias, name)
 			}
 

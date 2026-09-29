@@ -103,7 +103,8 @@ func (r *Resolver) Matches(p Path) ([]Match, error) {
 // node gives nil.
 //
 // Returns an error wrapping [ErrAlias] for an alias that names no anchor
-// or that leads back to itself.
+// or that leads back to itself, such as one inside the content of the
+// anchor it refers to.
 func (r *Resolver) Deref(node ast.Node) (ast.Node, error) {
 	content, err := r.resolver.deref(node)
 	if err != nil {
@@ -135,6 +136,8 @@ func (r *Resolver) KeyName(key ast.Node) (string, bool) {
 // [Resolver.Deref] reaches first when it follows the alias. Where the
 // anchor holds another alias, Anchor stops at the anchor, while Deref
 // goes on to the content of the anchor the second alias refers to.
+// Anchor also returns the anchor of an alias that leads back to itself,
+// such as one inside the content of that anchor, which Deref rejects.
 //
 // Returns an error wrapping [ErrAlias] when node is not an alias, and for
 // an alias that has no name or names no anchor before it.

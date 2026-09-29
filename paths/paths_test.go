@@ -1413,6 +1413,21 @@ func TestPath_AliasCycle(t *testing.T) {
 			path:  paths.Root().Child("b", "c"),
 			want:  "*y has no anchor before it",
 		},
+		"alias inside its own mapping anchor": {
+			input: "b: &x {s: *x, t: 1}\n",
+			path:  paths.Root().Child("b", "s", "t"),
+			want:  "*x forms a cycle",
+		},
+		"alias inside its own sequence anchor": {
+			input: "a: &a [1, *a]\n",
+			path:  paths.Root().Child("a").Index(1).Index(0),
+			want:  "*a forms a cycle",
+		},
+		"alias inside its own anchor on a merge value": {
+			input: "x: {<<: &m {k: *m, j: 1}}\n",
+			path:  paths.Root().Child("x", "k", "j"),
+			want:  "*m forms a cycle",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1451,6 +1466,81 @@ func TestPath_AliasCycle(t *testing.T) {
 					require.FailNow(t, "path resolution did not return within 10s")
 				}
 			}
+		})
+	}
+}
+
+func TestPath_AliasInsideOwnAnchor(t *testing.T) {
+	t.Parallel()
+
+	// The decoder reads an alias inside the content of the anchor it refers
+	// to as null. A path to such an alias selects no node, while its token
+	// still marks the alias.
+	tcs := map[string]struct {
+		err   error
+		input string
+		want  string
+		path  paths.Path
+	}{
+		"mapping": {
+			input: "b: &x {s: *x, t: 1}\n",
+			path:  paths.Root().Child("b", "s"),
+			err:   paths.ErrAlias,
+		},
+		"sequence": {
+			input: "a: &a [1, *a]\n",
+			path:  paths.Root().Child("a").Index(1),
+			err:   paths.ErrAlias,
+		},
+		"anchor on a merge value": {
+			input: "x: {<<: &m {k: *m, j: 1}}\n",
+			path:  paths.Root().Child("x", "k"),
+			err:   paths.ErrAlias,
+		},
+		"alias a merge key names inside its own anchor": {
+			// The decode leaves an alias that a `<<` merge key names as it
+			// is, so a path through the merge key reaches the content of
+			// the anchor.
+			input: "a: &a {k: 1, i: {<<: *a}}\n",
+			path:  paths.Root().Child("a", "i", "<<"),
+			want:  "{k: 1, i: {<<: *a}}",
+		},
+		"alias after an anchor of the same name inside the content": {
+			// The inner &x is the last anchor of its name before *x, and *x
+			// lies outside the content of that anchor.
+			input: "b: &x {a: &x 1, s: *x}\n",
+			path:  paths.Root().Child("b", "s"),
+			want:  "1",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, tc.input)
+			doc := dd.DocumentAST()
+
+			tk, err := tc.path.Token(doc)
+			require.NoError(t, err)
+			assert.Equal(t, "*", tk.Value)
+
+			node, err := tc.path.Node(doc)
+			_, nodesErr := tc.path.Nodes(doc)
+			_, atErr := dd.At(tc.path)
+
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				require.ErrorIs(t, nodesErr, tc.err)
+				require.ErrorIs(t, atErr, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			require.NoError(t, nodesErr)
+			require.NoError(t, atErr)
+			assert.Equal(t, tc.want, node.String())
 		})
 	}
 }
