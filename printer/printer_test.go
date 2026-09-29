@@ -217,6 +217,7 @@ func TestPrinter_PrintError(t *testing.T) {
 	other := niceyaml.NewSourceFromString("c: 3\n")
 	nested := niceyaml.NewSourceFromString("a:\n  b: 2\n")
 	empty := niceyaml.NewSourceFromString("a:\nb: 2\n")
+	flags := niceyaml.NewSourceFromString("flags: 🇺🇸🇫🇷\n")
 
 	// The root has no message beside its range, so a caret run under the
 	// range shows its extent without color.
@@ -296,6 +297,18 @@ func TestPrinter_PrintError(t *testing.T) {
 				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>1</literalNumberInteger>",
 				"<textError>    ^</textError>",
 				"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>2</literalNumberInteger>",
+			),
+		},
+		// The caret run starts under the second flag, not under the
+		// second rune of the first flag.
+		"bound error after a multi-rune cluster": {
+			err: yamltest.Bind(t, flags, niceyaml.NewError("", niceyaml.AtRange(
+				position.NewRange(position.New(0, 9), position.New(0, 11)),
+			))),
+			want: "1:10:\n\n" + stringtest.JoinLF(
+				"<nameTag>flags</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text>"+
+					"<literalString>🇺🇸</literalString><genericError>🇫🇷</genericError>",
+				"<textError>         ^^</textError>",
 			),
 		},
 		"bound error with an empty message": {
@@ -4235,6 +4248,20 @@ func TestDefaultAnnotation(t *testing.T) {
 			overlays:    line.Overlays{{Cols: position.NewSpan(0, 3)}},
 			position:    line.Below,
 			want:        []printer.AnnotationRow{{Col: 0, Marker: "^^^^^^"}},
+		},
+		"empty content marks a column after a combining mark": {
+			content:     "e\u0301x",
+			annotations: line.Annotations{{Placement: line.Below}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(2, 3)}},
+			position:    line.Below,
+			want:        []printer.AnnotationRow{{Col: 2, Text: "^"}},
+		},
+		"empty content marks a flag after a flag": {
+			content:     "flags: 🇺🇸🇫🇷",
+			annotations: line.Annotations{{Placement: line.Below}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(9, 11)}},
+			position:    line.Below,
+			want:        []printer.AnnotationRow{{Col: 9, Text: "^^"}},
 		},
 		"empty content marks control characters as one cell": {
 			content:     "a: \x07b",

@@ -524,16 +524,23 @@ func (o cellOffsets) width(col int) int {
 	return o.before[n] + min(col-n, math.MaxInt-o.before[n])
 }
 
-// col returns the first column at or after lo that starts at or past
-// cell. A cell past the end of the content maps to a column past it, one
-// column per cell.
+// col returns the first column at or after lo that starts a grapheme
+// cluster at or past cell. A cell past the end of the content maps to a
+// column past it, one column per cell.
 func (o cellOffsets) col(lo, cell int) int {
 	n := len(o.before) - 1
 	if cell > o.before[n] {
 		return n + cell - o.before[n]
 	}
 
-	return lo + sort.SearchInts(o.before[lo:], cell)
+	// The later runes of a cluster share the offset of the next cluster,
+	// so the search can land on one of them.
+	c := lo + sort.SearchInts(o.before[lo:], cell)
+	for c < n && o.row.Start(c) != c {
+		c++
+	}
+
+	return c
 }
 
 // caretRow returns a row that marks col of content with a caret as wide
