@@ -2,6 +2,7 @@ package fangs
 
 import (
 	"image/color"
+	"reflect"
 
 	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
@@ -16,10 +17,11 @@ import (
 // [go.jacobcolvin.com/niceyaml/style.Styles] value.
 //
 // This derives CLI styling from the existing theme system, so the YAML
-// viewer and CLI help output use the same colors. A nil styles selects
+// viewer and CLI help output use the same colors. A nil styles, or one
+// holding a nil pointer such as a nil [*style.Styles], selects
 // [style.Default].
 func ColorScheme(styles style.Styler) fang.ColorScheme {
-	if styles == nil {
+	if isNil(styles) {
 		styles = style.Default()
 	}
 
@@ -53,8 +55,8 @@ func ColorScheme(styles style.Styler) fang.ColorScheme {
 //
 // This wraps [ColorScheme] for use with [fang.WithColorSchemeFunc].
 // Each theme targets a specific light/dark mode, so the returned function
-// ignores its [lipgloss.LightDarkFunc] parameter. A nil styles selects
-// [style.Default].
+// ignores its [lipgloss.LightDarkFunc] parameter. A nil styles, or one
+// holding a nil pointer, selects [style.Default].
 func ColorSchemeFunc(styles style.Styler) fang.ColorSchemeFunc {
 	return func(_ lipgloss.LightDarkFunc) fang.ColorScheme {
 		return ColorScheme(styles)
@@ -68,8 +70,8 @@ func ColorSchemeFunc(styles style.Styler) fang.ColorSchemeFunc {
 // This wraps [ColorScheme] for use with [fang.WithColorSchemeFunc]. Help
 // output draws most of its text on the terminal's own background, so a
 // theme made for one background can be hard to read on the other. Use
-// [ColorSchemeFunc] to apply one theme on both. A nil light or dark selects
-// [style.Default] for that background.
+// [ColorSchemeFunc] to apply one theme on both. A nil light or dark, or
+// one holding a nil pointer, selects [style.Default] for that background.
 func LightDarkColorSchemeFunc(light, dark style.Styler) fang.ColorSchemeFunc {
 	return func(ld lipgloss.LightDarkFunc) fang.ColorScheme {
 		// On a dark background, ld returns its second color, so two
@@ -79,5 +81,27 @@ func LightDarkColorSchemeFunc(light, dark style.Styler) fang.ColorSchemeFunc {
 		}
 
 		return ColorScheme(light)
+	}
+}
+
+// isNil reports whether styles is nil or holds a nil pointer or nil func.
+// A nil [*style.Styles] satisfies [style.Styler] through its value method,
+// and a call to that method panics.
+//
+// This mirrors go.jacobcolvin.com/niceyaml/internal/nilness. The niceyaml
+// version that fangs requires predates that package, so fangs keeps its
+// own copy.
+func isNil(styles style.Styler) bool {
+	if styles == nil {
+		return true
+	}
+
+	v := reflect.ValueOf(styles)
+
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Func:
+		return v.IsNil()
+	default:
+		return false
 	}
 }

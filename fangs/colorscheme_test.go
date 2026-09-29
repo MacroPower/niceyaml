@@ -124,41 +124,62 @@ func TestColorSchemeFunc(t *testing.T) {
 	assert.Equal(t, fangs.ColorScheme(styles), csFunc(nil))
 }
 
+// stylerFunc adapts a func to [style.Styler].
+type stylerFunc func(kind.Kind) lipgloss.Style
+
+func (f stylerFunc) Style(k kind.Kind) lipgloss.Style {
+	return f(k)
+}
+
 func TestColorScheme_NilStyler(t *testing.T) {
 	t.Parallel()
 
 	want := fangs.ColorScheme(style.Default())
 
+	// A nil pointer to a type with a value Style method still satisfies
+	// style.Styler, and calling Style through it panics. So does a nil
+	// func with a Style method.
+	nils := map[string]style.Styler{
+		"nil":               nil,
+		"nil *style.Styles": (*style.Styles)(nil),
+		"nil *theme.Theme":  (*theme.Theme)(nil),
+		"nil func":          stylerFunc(nil),
+	}
+
 	tcs := map[string]struct {
-		scheme func() fang.ColorScheme
+		scheme func(styles style.Styler) fang.ColorScheme
 	}{
 		"ColorScheme": {
-			scheme: func() fang.ColorScheme { return fangs.ColorScheme(nil) },
+			scheme: fangs.ColorScheme,
 		},
 		"ColorSchemeFunc": {
-			scheme: func() fang.ColorScheme { return fangs.ColorSchemeFunc(nil)(nil) },
+			scheme: func(styles style.Styler) fang.ColorScheme {
+				return fangs.ColorSchemeFunc(styles)(nil)
+			},
 		},
 		"LightDarkColorSchemeFunc on a light terminal": {
-			scheme: func() fang.ColorScheme {
-				return fangs.LightDarkColorSchemeFunc(nil, nil)(lipgloss.LightDark(false))
+			scheme: func(styles style.Styler) fang.ColorScheme {
+				return fangs.LightDarkColorSchemeFunc(styles, styles)(lipgloss.LightDark(false))
 			},
 		},
 		"LightDarkColorSchemeFunc on a dark terminal": {
-			scheme: func() fang.ColorScheme {
-				return fangs.LightDarkColorSchemeFunc(nil, nil)(lipgloss.LightDark(true))
+			scheme: func(styles style.Styler) fang.ColorScheme {
+				return fangs.LightDarkColorSchemeFunc(styles, styles)(lipgloss.LightDark(true))
 			},
 		},
 	}
 
 	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+		for nilName, styles := range nils {
+			t.Run(name+" with "+nilName, func(t *testing.T) {
+				t.Parallel()
 
-			var got fang.ColorScheme
+				var got fang.ColorScheme
 
-			require.NotPanics(t, func() { got = tc.scheme() })
-			assert.Equal(t, want, got)
-		})
+				require.NotPanics(t, func() { got = tc.scheme(styles) })
+				assert.Equal(t, want, got)
+			})
+		}
 	}
 }
 
