@@ -12,11 +12,15 @@ import (
 // divide-and-conquer algorithm does. It finds that point with the
 // linear-space search from Myers' "An O(ND) Difference Algorithm", which
 // walks from both ends of the inputs at once and stops where the two walks
-// meet. The search takes O((m+n)*d) time, where m and n are the lengths of
-// before and after and d is the number of lines the shortest edit script
-// deletes or inserts. A diff of large inputs that differ in a few lines
-// therefore runs in close to linear time, wherever those lines sit. The
-// search keeps two arrays of O(m+n) integers. The result holds one [Op]
+// meet. Before the search, Diff marks each line that the other input
+// never holds as changed and leaves it out, since no common subsequence
+// can hold it. The search takes O((m+n)*d) time, where m and n are the
+// lengths of before and after and d is the number of lines the shortest
+// edit script deletes or inserts among the lines both inputs hold. A diff
+// of large inputs that differ in a few lines therefore runs in close to
+// linear time, wherever those lines sit, and so does a diff of inputs
+// whose changed lines each appear in only one of them. The search keeps
+// two arrays of O(m+n) integers. The result holds one [Op]
 // per line of either input, so the accumulated ops take space linear in
 // the length of both inputs as well. The pool keeps buffers of that
 // capacity for later calls until the garbage collector clears it.
@@ -62,8 +66,10 @@ func (h *Hirschberg) Diff(before, after []string) []Op {
 	bEnd, aEnd := len(before)-suffix, len(after)-suffix
 
 	b.reset(len(before), len(after), bEnd-prefix, aEnd-prefix)
-	b.intern(before, after, prefix, bEnd, aEnd)
-	b.recurse(prefix, bEnd, prefix, aEnd)
+
+	numIDs := b.intern(before[prefix:bEnd], after[prefix:aEnd])
+	b.discard(prefix, numIDs)
+	b.recurse(0, len(b.beforeIDs), 0, len(b.afterIDs))
 	b.compact(before, after)
 
 	if len(b.ops) == 0 {
@@ -80,10 +86,17 @@ type buffers struct {
 	// diagonal.
 	fwdDiag, bwdDiag []int
 
-	// Line IDs of each input, which name equal lines by one number so
-	// the search compares ints instead of strings. Only the lines between
-	// the shared start and end hold an ID.
+	// Line IDs of the lines the search covers, in input order. An ID
+	// names equal lines by one number, so the search compares ints
+	// instead of strings.
 	beforeIDs, afterIDs []int
+
+	// Index in its input of the line behind each entry of beforeIDs and
+	// afterIDs.
+	beforeIdx, afterIdx []int
+
+	// Whether each input holds a line with a given ID, indexed by ID.
+	inBefore, inAfter []bool
 
 	// ID of each line while intern runs. The map is empty between calls,
 	// so the pool holds no reference to the caller's lines.
@@ -114,18 +127,21 @@ func (b *buffers) reset(beforeLen, afterLen, bLen, aLen int) {
 		b.ops = make([]Op, 0, worst)
 	}
 
-	b.beforeIDs = slices.Grow(b.beforeIDs[:0], beforeLen)[:beforeLen]
-	b.afterIDs = slices.Grow(b.afterIDs[:0], afterLen)[:afterLen]
+	b.beforeIDs = slices.Grow(b.beforeIDs[:0], bLen)[:bLen]
+	b.afterIDs = slices.Grow(b.afterIDs[:0], aLen)[:aLen]
+	b.beforeIdx = slices.Grow(b.beforeIdx[:0], bLen)
+	b.afterIdx = slices.Grow(b.afterIdx[:0], aLen)
 
 	b.changedBefore = cleared(b.changedBefore, beforeLen)
 	b.changedAfter = cleared(b.changedAfter, afterLen)
 }
 
-// intern gives each line of before[start:bEnd] and after[start:aEnd] an
-// ID, the same one for equal lines, in b.beforeIDs and b.afterIDs.
-func (b *buffers) intern(before, after []string, start, bEnd, aEnd int) {
+// intern gives each line of before and after an ID, the same one for
+// equal lines, in b.beforeIDs and b.afterIDs. It returns the number of
+// distinct lines, and every ID is less than that number.
+func (b *buffers) intern(before, after []string) int {
 	if b.ids == nil {
-		b.ids = make(map[string]int, bEnd-start)
+		b.ids = make(map[string]int, len(before))
 	}
 
 	ids := b.ids
@@ -144,13 +160,63 @@ func (b *buffers) intern(before, after []string, start, bEnd, aEnd int) {
 		return n
 	}
 
-	for i := start; i < bEnd; i++ {
-		b.beforeIDs[i] = id(before[i])
+	for i, line := range before {
+		b.beforeIDs[i] = id(line)
 	}
 
-	for j := start; j < aEnd; j++ {
-		b.afterIDs[j] = id(after[j])
+	for j, line := range after {
+		b.afterIDs[j] = id(line)
 	}
+
+	return len(ids)
+}
+
+// discard marks each line of b.beforeIDs and b.afterIDs whose ID the other
+// input never holds as changed, since no common subsequence can hold it,
+// and drops it from the search. Every line the other input never holds
+// adds to the number of edits the search walks through, so inputs that
+// share few lines would otherwise take time close to the square of their
+// length. The lines left keep their order at the front of b.beforeIDs and
+// b.afterIDs, and b.beforeIdx and b.afterIdx record the index of each in
+// its input. The first entry of b.beforeIDs and of b.afterIDs is the line
+// at index offset of its input.
+func (b *buffers) discard(offset, numIDs int) {
+	b.inBefore = cleared(b.inBefore, numIDs)
+	b.inAfter = cleared(b.inAfter, numIDs)
+
+	for _, id := range b.beforeIDs {
+		b.inBefore[id] = true
+	}
+
+	for _, id := range b.afterIDs {
+		b.inAfter[id] = true
+	}
+
+	b.beforeIDs, b.beforeIdx = keepShared(b.beforeIDs, b.beforeIdx, b.inAfter, b.changedBefore, offset)
+	b.afterIDs, b.afterIdx = keepShared(b.afterIDs, b.afterIdx, b.inBefore, b.changedAfter, offset)
+}
+
+// keepShared moves each entry of ids whose ID inOther holds to the front
+// of ids, in order, and records the index of its line in idx, which it
+// empties first. The entry at position i of ids names the input line at
+// index offset+i. It marks each line it drops in changed, and returns
+// the kept IDs and their indices.
+func keepShared(ids, idx []int, inOther, changed []bool, offset int) ([]int, []int) {
+	kept := ids[:0]
+	idx = idx[:0]
+
+	for i, id := range ids {
+		if !inOther[id] {
+			changed[offset+i] = true
+
+			continue
+		}
+
+		kept = append(kept, id)
+		idx = append(idx, offset+i)
+	}
+
+	return kept, idx
 }
 
 // commonEnds returns the number of lines that before and after share at
@@ -170,10 +236,10 @@ func commonEnds(before, after []string) (int, int) {
 	return prefix, suffix
 }
 
-// recurse marks the lines that a shortest edit script of
-// b.beforeIDs[bStart:bEnd] and b.afterIDs[aStart:aEnd] deletes or inserts.
-// It splits both ranges at the point that midpoint finds and solves each
-// half the same way.
+// recurse marks the input lines behind b.beforeIDs[bStart:bEnd] and
+// b.afterIDs[aStart:aEnd] that a shortest edit script of those ranges
+// deletes or inserts. It splits both ranges at the point that midpoint
+// finds and solves each half the same way.
 func (b *buffers) recurse(bStart, bEnd, aStart, aEnd int) {
 	before, after := b.beforeIDs, b.afterIDs
 
@@ -193,12 +259,12 @@ func (b *buffers) recurse(bStart, bEnd, aStart, aEnd int) {
 	switch {
 	case bStart == bEnd:
 		for j := aStart; j < aEnd; j++ {
-			b.changedAfter[j] = true
+			b.changedAfter[b.afterIdx[j]] = true
 		}
 
 	case aStart == aEnd:
 		for i := bStart; i < bEnd; i++ {
-			b.changedBefore[i] = true
+			b.changedBefore[b.beforeIdx[i]] = true
 		}
 
 	default:

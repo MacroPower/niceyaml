@@ -267,6 +267,20 @@ func TestHirschberg_Diff(t *testing.T) {
 				{Kind: lcs.OpEqual, Before: 4, After: 5},
 			},
 		},
+		"unique_lines_between_shared_lines": {
+			before: []string{"x", "a", "y", "b", "z"},
+			after:  []string{"p", "a", "q", "b", "r"},
+			want: []lcs.Op{
+				{Kind: lcs.OpDelete, Before: 0, After: -1},
+				{Kind: lcs.OpInsert, Before: -1, After: 0},
+				{Kind: lcs.OpEqual, Before: 1, After: 1},
+				{Kind: lcs.OpDelete, Before: 2, After: -1},
+				{Kind: lcs.OpInsert, Before: -1, After: 2},
+				{Kind: lcs.OpEqual, Before: 3, After: 3},
+				{Kind: lcs.OpDelete, Before: 4, After: -1},
+				{Kind: lcs.OpInsert, Before: -1, After: 4},
+			},
+		},
 		"replace_before_repeated_line": {
 			before: []string{"x", "x"},
 			after:  []string{"y", "x"},
@@ -509,6 +523,71 @@ func TestHirschberg_DiffFarEdits(t *testing.T) {
 	assert.Less(t, elapsed, time.Second)
 }
 
+func TestHirschberg_DiffUniqueLines(t *testing.T) {
+	t.Parallel()
+
+	// A line that only one input holds is always a change. When most
+	// lines are such changes, a search that walks through each of them
+	// needs seconds here, while one that leaves them out needs
+	// milliseconds.
+	const n = 60000
+
+	before := make([]string, n)
+	for i := range before {
+		before[i] = fmt.Sprintf("key%d: value%d", i, i)
+	}
+
+	tests := map[string]struct {
+		after     func(i int) string
+		wantEqual int
+	}{
+		"no_shared_lines": {
+			after: func(i int) string {
+				return fmt.Sprintf("other%d", i)
+			},
+			wantEqual: 0,
+		},
+		"every_other_line_shared": {
+			after: func(i int) string {
+				if i%2 == 0 {
+					return before[i]
+				}
+
+				return fmt.Sprintf("other%d", i)
+			},
+			wantEqual: n / 2,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			after := make([]string, n)
+			for i := range after {
+				after[i] = tc.after(i)
+			}
+
+			start := time.Now()
+			got := lcs.NewHirschberg().Diff(before, after)
+			elapsed := time.Since(start)
+
+			requireValidOps(t, before, after, got)
+
+			equal := 0
+
+			for _, op := range got {
+				if op.Kind == lcs.OpEqual {
+					equal++
+				}
+			}
+
+			assert.Equal(t, tc.wantEqual, equal)
+			assert.Less(t, elapsed, time.Second)
+		})
+	}
+}
+
 // requireValidOps checks that ops transform before into after. Each index
 // of either input appears once and in order, each [lcs.OpEqual] pairs lines
 // with the same content, and within each run of changes every
@@ -611,12 +690,19 @@ func BenchmarkHirschberg_Diff(b *testing.B) {
 			spread[i] = fmt.Sprintf("changed%d", i)
 		}
 
+		// No line of before appears in unrelated.
+		unrelated := make([]string, n)
+		for i := range unrelated {
+			unrelated[i] = fmt.Sprintf("other%d", i)
+		}
+
 		cases := []struct {
 			name  string
 			after []string
 		}{
 			{"far_edits", farEdits},
 			{"spread", spread},
+			{"unrelated", unrelated},
 		}
 
 		for _, tc := range cases {

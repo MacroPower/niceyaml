@@ -14,8 +14,11 @@
 // each half the same way. It finds each split point with Myers' O(ND) search,
 // which spends time in proportion to the input lengths times the number of
 // changed lines. A diff of large inputs that differ in a few lines therefore
-// runs in close to linear time, however far apart those lines sit. Inputs that
-// share few lines still take time close to the square of their length. The
+// runs in close to linear time, however far apart those lines sit. A line that
+// only one input holds is always a change, so [Hirschberg] marks it before the
+// search and leaves it out, and such lines add no search time. Inputs that
+// share many lines in a different order still take time close to the square of
+// their length. The
 // search keeps O(m+n) working memory, and the result holds one operation per
 // line, so it takes O(m+n) space as well.
 //
