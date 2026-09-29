@@ -493,7 +493,7 @@ func deref(r *paths.Resolver, node ast.Node) ast.Node {
 		node = astnode.Content(node)
 
 		alias, ok := node.(*ast.AliasNode)
-		if !ok || alias == nil {
+		if !ok {
 			return node
 		}
 
@@ -513,12 +513,11 @@ func deref(r *paths.Resolver, node ast.Node) ast.Node {
 }
 
 // elementNode returns the element at index of the sequence node holds, or
-// nil for any other node and for an index the sequence does not hold. A
-// tree built by hand may hold a typed nil where the parser always puts a
-// node, which holds no element either.
+// nil for any other node, including a typed nil, and for an index the
+// sequence does not hold.
 func elementNode(node ast.Node, index int) ast.Node {
 	seq, ok := astnode.Content(node).(*ast.SequenceNode)
-	if !ok || seq == nil || index < 0 || index >= len(seq.Values) {
+	if !ok || index < 0 || index >= len(seq.Values) {
 		return nil
 	}
 
@@ -731,19 +730,13 @@ func aliasKeyName(r *paths.Resolver, key ast.MapKeyNode) (ast.Node, string, bool
 }
 
 // mappingMembers returns the members of the mapping node holds, or nil
-// for any other node. A tree built by hand may hold a typed nil where the
-// parser always puts a node, which holds no member either.
+// for any other node, including a typed nil.
 func mappingMembers(node ast.Node) []*ast.MappingValueNode {
 	switch n := astnode.Content(node).(type) {
 	case *ast.MappingNode:
-		if n != nil {
-			return n.Values
-		}
-
+		return n.Values
 	case *ast.MappingValueNode:
-		if n != nil {
-			return []*ast.MappingValueNode{n}
-		}
+		return []*ast.MappingValueNode{n}
 	}
 
 	return nil
@@ -993,18 +986,14 @@ func timestampText(t time.Time, node ast.Node) string {
 
 // stringText returns the text of the string scalar under the anchors and
 // tags of node, and reports whether node holds one. A block scalar gives
-// its content without the header, as a decode reads it. A tree built by
-// hand may hold a typed nil where the parser always puts a node, which
-// holds no text.
+// its content without the header, as a decode reads it. A typed nil holds
+// no text.
 func stringText(node ast.Node) (string, bool) {
 	switch n := astnode.Content(node).(type) {
 	case *ast.StringNode:
-		if n != nil {
-			return n.Value, true
-		}
-
+		return n.Value, true
 	case *ast.LiteralNode:
-		if n != nil && n.Value != nil {
+		if n.Value != nil {
 			return n.Value.Value, true
 		}
 	}
