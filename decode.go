@@ -113,8 +113,11 @@ type SelfValidator interface {
 // go-yaml options of the decode that runs the validator, the ones
 // [WithYAMLDecodeOptions] and [WithReferences] give, to the Node and to
 // the Nodes it leads to, so the validator reads the data the decode
-// reads. The context carries cancellation and deadlines to validators
-// doing cancellable work, such as remote schema reference resolution:
+// reads. That decode is one of its own, so an option that holds state,
+// as [WithYAMLDecodeOptions] describes, serves the validator and leaves
+// nothing for the decode after it. The context carries cancellation and
+// deadlines to validators doing cancellable work, such as remote schema
+// reference resolution:
 //
 //	func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 //		data, err := n.Decode[any](ctx)
@@ -1513,14 +1516,17 @@ func WithDisallowUnknownFields(disallow bool) DecodeOption {
 // is the escape hatch for decoder settings that have no option of their
 // own. A [Validator] the decode runs decodes its Node with them too.
 //
-// Each decode, and the key decoding of self-validation, applies the
-// options to a new go-yaml decoder. An option that holds state therefore
-// serves one decode, and a [Decoder] that carries one is not safe to
-// share between goroutines. [yaml.ReferenceReaders] is such an option:
-// the first decode reads its readers to the end, and later decodes find
-// no anchors there. [WithReferences] reads the documents again for each
+// Each decode, each decode a [Validator] runs on its Node, and the key
+// decoding of self-validation apply the options to a new go-yaml
+// decoder. An option that holds state therefore serves only the first of
+// these decodes, even within one [Node.Decode] call that runs a
+// validator, and a [Decoder] that carries one is not safe to share
+// between goroutines. [yaml.ReferenceReaders] is such an option. The
+// first decode reads its readers to the end, and later decodes find no
+// anchors there. [WithReferences] reads the documents again for each
 // decode, and [yaml.ReferenceFiles] and [yaml.ReferenceDirs] read their
-// files again for each decode.
+// files again for each decode, so use one of those for reference
+// documents.
 func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 	return func(c *decodeConfig) {
 		c.yamlOpts = append(c.yamlOpts, opts...)
