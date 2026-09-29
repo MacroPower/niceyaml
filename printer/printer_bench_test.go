@@ -142,7 +142,15 @@ func BenchmarkPrinterPrint_OverlaysDensity(b *testing.B) {
 		{"dense_20_per_line", 100, 20},
 	}
 
-	yaml := yamltest.GenerateYAML(200)
+	// AddOverlay drops a range that starts past the end of its line, so
+	// every line must be wide enough to hold 20 overlays at a stride of 5.
+	var sb strings.Builder
+
+	for i := range 200 {
+		fmt.Fprintf(&sb, "key_%d: %s\n", i, strings.Repeat("v", 100))
+	}
+
+	yaml := sb.String()
 	highlightStyle := lipgloss.NewStyle().Background(lipgloss.Color("3"))
 	overlayStyler := style.New(lipgloss.NewStyle(), style.Set(benchmarkOverlayKind, highlightStyle))
 
@@ -161,6 +169,15 @@ func BenchmarkPrinterPrint_OverlaysDensity(b *testing.B) {
 					}
 					source.AddOverlay(benchmarkOverlayKind, rng)
 				}
+			}
+
+			kept := 0
+			for lineNum := range d.lines {
+				kept += len(source.Overlays(lineNum))
+			}
+
+			if want := d.lines * d.overlaysLine; kept != want {
+				b.Fatalf("kept %d overlays, want %d", kept, want)
 			}
 
 			b.ReportAllocs()
