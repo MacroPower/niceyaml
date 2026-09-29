@@ -39,8 +39,11 @@ type filePathMatcher struct {
 // An empty pattern is [ErrInvalidPattern] too, since it would match nothing
 // and silently disable the [Matcher]. So is a pattern that keeps a ".."
 // after a glob element, as in "configs/*/../x.yaml", because a cleaned path
-// holds a ".." only at its start. A ".." after "**" stays valid, since "**"
-// can match no directory at all, so "**/../x.yaml" matches "../x.yaml".
+// holds a ".." only at its start. A ".." after "**" stays valid when only
+// ".." and "**" elements come before it in a relative pattern, since "**"
+// can match no directory at all, so "**/../x.yaml" matches "../x.yaml". A
+// rooted pattern such as "/**/../x.yaml", or one with a name before the
+// "**" such as "a/**/../x.yaml", is [ErrInvalidPattern].
 func FilePath(pattern string) (Matcher, error) {
 	if pattern == "" {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidPattern, pattern)
