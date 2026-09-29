@@ -108,6 +108,8 @@ func TestErrorTree_New_LeftDeepJoin(t *testing.T) {
 
 	const n = 200
 
+	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
+
 	tcs := map[string]struct {
 		build  func(error) error
 		prefix string
@@ -118,6 +120,10 @@ func TestErrorTree_New_LeftDeepJoin(t *testing.T) {
 		"rebased join": {
 			build:  func(err error) error { return niceyaml.Rebase(err, paths.Root()) },
 			prefix: "$: ",
+		},
+		"bound join": {
+			build:  func(err error) error { return source.Bind(err) },
+			prefix: "f.yaml: ",
 		},
 	}
 
