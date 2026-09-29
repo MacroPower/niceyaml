@@ -22,31 +22,12 @@ func Pretty() []Option {
 //
 // Create instances with [New].
 type Encoder struct {
-	e *yaml.Encoder
-	w *errWriter
-}
-
-// errWriter keeps the first error the writer it wraps returns, since the
-// go-yaml encoder discards the result of every write it makes. Once a write
-// has failed, every later write returns that error without reaching the
-// writer, so a document never lands partly written after a failure.
-type errWriter struct {
-	w   io.Writer
-	err error
-}
-
-// Write implements [io.Writer].
-func (w *errWriter) Write(p []byte) (int, error) {
-	if w.err != nil {
-		return 0, w.err
-	}
-
-	n, err := w.w.Write(p)
-	if err != nil {
-		w.err = err
-	}
-
-	return n, err //nolint:wrapcheck // Return the original error.
+	w io.Writer
+	// Holds the first error w returned.
+	err  error
+	opts []yaml.EncodeOption
+	// Reports whether a document has reached w.
+	written bool
 }
 
 // Option configures an [Encoder].
@@ -86,8 +67,8 @@ func WithIndentSequence(indent bool) Option {
 }
 
 // WithYAMLOptions is an [Option] that passes [yaml.EncodeOption]
-// values straight to the underlying [*yaml.Encoder]. It is the escape hatch
-// for encoder settings that have no option of their own.
+// values straight to go-yaml. It is the escape hatch for encoder settings
+// that have no option of their own.
 func WithYAMLOptions(opts ...yaml.EncodeOption) Option {
 	return func(c *config) {
 		c.opts = append(c.opts, opts...)
@@ -102,53 +83,63 @@ func New(w io.Writer, opts ...Option) *Encoder {
 		opt(&c)
 	}
 
-	ew := &errWriter{w: w}
-
 	return &Encoder{
-		e: yaml.NewEncoder(ew, c.opts...),
-		w: ew,
+		w:    w,
+		opts: c.opts,
 	}
 }
 
-// Encode encodes v as YAML and writes it to the underlying writer. The
-// encoder passes ctx to every marshaler that accepts one, such as a
-// [yaml.InterfaceMarshalerContext] or a marshaler registered with
-// [yaml.RegisterCustomMarshalerContext]. A write the writer refuses is an
-// error, and every later call returns that same error without encoding v.
+// Encode encodes v as YAML and writes it to the underlying writer as one
+// document. Every document after the first starts with a "---" separator.
+// Each document defines its own anchors, so a later document never aliases
+// an anchor from an earlier one. The encoder passes ctx to every marshaler
+// that accepts one, such as a [yaml.InterfaceMarshalerContext] or a
+// marshaler registered with [yaml.RegisterCustomMarshalerContext]. A write
+// the writer refuses is an error, and every later call returns that same
+// error without encoding v.
 func (e *Encoder) Encode(ctx context.Context, v any) error {
-	// After a refused write, v never reaches the go-yaml encoder, so its
-	// marshalers do not run and an encoding error cannot hide the write
-	// error.
+	// After a refused write, v never reaches go-yaml, so its marshalers do
+	// not run and an encoding error cannot hide the write error.
 	err := e.writeErr()
 	if err != nil {
 		return err
 	}
 
-	err = e.e.EncodeContext(ctx, v)
+	// A go-yaml encoder keeps every anchor it has seen, even from a call
+	// that failed, so each call marshals with a fresh one.
+	b, err := yaml.MarshalContext(ctx, v, e.opts...)
 	if err != nil {
 		return err //nolint:wrapcheck // Return the original error.
 	}
 
-	return e.writeErr()
+	if e.written {
+		b = append([]byte("---\n"), b...)
+	}
+
+	_, err = e.w.Write(b)
+	if err != nil {
+		e.err = err
+
+		return e.writeErr()
+	}
+
+	e.written = true
+
+	return nil
 }
 
-// Close releases the encoder's resources and reports the write error, if
-// any, from an earlier [Encoder.Encode]. It does not flush the writer,
-// so a caller holding a buffered writer flushes it after Close.
+// Close reports the write error, if any, from an earlier [Encoder.Encode].
+// It does not flush the writer, so a caller holding a buffered writer
+// flushes it after Close.
 func (e *Encoder) Close() error {
-	err := e.e.Close()
-	if err != nil {
-		return err //nolint:wrapcheck // Return the original error.
-	}
-
 	return e.writeErr()
 }
 
 // writeErr returns the first error the writer returned, wrapped with the
 // "write YAML" prefix, or nil when every write succeeded.
 func (e *Encoder) writeErr() error {
-	if e.w.err != nil {
-		return fmt.Errorf("write YAML: %w", e.w.err)
+	if e.err != nil {
+		return fmt.Errorf("write YAML: %w", e.err)
 	}
 
 	return nil
