@@ -37,6 +37,7 @@ var (
 	// [Schema.ValidateValue] return it wrapped together with [ErrValidate].
 	// A [matcher.Content] guard refuses such a document with it too, and
 	// [Registry.Lookup] then returns it wrapped together with [ErrResolve].
+	// It is the same error value as [niceyaml.ErrExcessiveAliasing].
 	ErrExcessiveAliasing = aliasing.ErrExcessiveAliasing
 
 	// ErrCompile indicates a schema document that does not compile.

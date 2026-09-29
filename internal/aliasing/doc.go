@@ -10,9 +10,10 @@
 // document past the limit before anything decodes a node in it that holds
 // an alias. Where the decoder writes a node out as text, each alias to a
 // scalar copies the text of the scalar, so the count weighs such a copy
-// by its length in bytes. The schema validator and the content matcher
-// both run it, so a registry that routes a document by its content
-// refuses the same documents its schemas do.
+// by its length in bytes. Every decode of a niceyaml Node runs
+// [CheckDecode], and the schema validator and the content matcher run it
+// before they decode too, so a registry that routes a document by its
+// content refuses the same documents its schemas do.
 //
 // [Excessive] is the limit itself, which the schema validator also
 // applies to a decoded value whose maps and slices a decode shares

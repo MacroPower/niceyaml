@@ -4,11 +4,19 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
+
+// Node is a node of a YAML document, such as a *niceyaml.Node, whose
+// document state [docstate.Of] returns.
+type Node interface {
+	// AST returns the go-yaml node the Node selects.
+	AST() ast.Node
+	// DocumentAST returns the document the node belongs to.
+	DocumentAST() *ast.DocumentNode
+}
 
 // CheckDecode returns [ErrExcessiveAliasing] when n holds an alias and
 // aliases make up too much of what a decode of its document reads. The
@@ -21,13 +29,14 @@ import (
 //
 // The count depends on the document alone, so the document keeps it, and
 // a check of each item of a list counts the document once.
-func CheckDecode(n *niceyaml.Node) error {
-	if n == nil || !holdsAlias(n.AST()) {
+func CheckDecode(n Node) error {
+	state := stateOf(n)
+	if state == nil || !holdsAlias(n.AST()) {
 		return nil
 	}
 
-	excessive := docstate.Of(n).ExcessiveAliasing(func() bool {
-		return excessiveRead(n, readValue)
+	excessive := state.ExcessiveAliasing(func() bool {
+		return excessiveRead(n, state, readValue)
 	})
 	if excessive {
 		return ErrExcessiveAliasing
@@ -46,23 +55,34 @@ func CheckDecode(n *niceyaml.Node) error {
 //
 // A caller that decodes n into such a type runs CheckDecodeText as well
 // as CheckDecode.
-func CheckDecodeText(n *niceyaml.Node) error {
-	if n == nil || !holdsAlias(n.AST()) {
+func CheckDecodeText(n Node) error {
+	state := stateOf(n)
+	if state == nil || !holdsAlias(n.AST()) {
 		return nil
 	}
 
-	if excessiveRead(n, readText) {
+	if excessiveRead(n, state, readText) {
 		return ErrExcessiveAliasing
 	}
 
 	return nil
 }
 
+// stateOf returns the state of the document of n, or nil for a nil Node.
+func stateOf(n Node) *docstate.State {
+	if n == nil {
+		return nil
+	}
+
+	return docstate.Of(n)
+}
+
 // excessiveRead reports whether aliases make up too much of what a
-// decode of the document of n reads, with the document read as mode.
-func excessiveRead(n *niceyaml.Node, mode readMode) bool {
+// decode of the document of n, whose state is state, reads, with the
+// document read as mode.
+func excessiveRead(n Node, state *docstate.State, mode readMode) bool {
 	c := treeCounter{
-		resolver: docstate.Of(n).Resolver(),
+		resolver: state.Resolver(),
 		sizes:    [readModes]map[ast.Node]int{{}, {}},
 		open:     map[ast.Node]bool{},
 	}

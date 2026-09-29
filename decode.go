@@ -16,6 +16,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
@@ -1418,6 +1419,7 @@ func (n *Node) Bind(err error) error {
 // Available options:
 //   - [WithValidator]
 //   - [WithSelfValidation]
+//   - [WithAliasLimit]
 //   - [WithDisallowUnknownFields]
 //   - [WithReferences]
 //   - [WithYAMLDecodeOptions]
@@ -1430,6 +1432,7 @@ type decodeConfig struct {
 	validators            []Validator
 	yamlOpts              []yaml.DecodeOption
 	skipSelfValidation    bool
+	skipAliasLimit        bool
 	disallowUnknownFields bool
 }
 
@@ -1490,6 +1493,19 @@ func WithValidator(dv Validator) DecodeOption {
 func WithSelfValidation(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.skipSelfValidation = !enabled
+	}
+}
+
+// WithAliasLimit is a [DecodeOption] that sets whether a decode refuses
+// a node that holds an alias when the aliases of its document go past
+// the limit [Node.DecodeInto] describes. The default is true. Turn it off
+// only for trusted input, since the go-yaml decoder can take minutes on a
+// few hundred bytes of nested aliases and never checks the context. A
+// [go.jacobcolvin.com/niceyaml/schema.Schema] given with [WithValidator]
+// applies its own limit either way.
+func WithAliasLimit(enabled bool) DecodeOption {
+	return func(c *decodeConfig) {
+		c.skipAliasLimit = !enabled
 	}
 }
 
@@ -1587,6 +1603,16 @@ func WithReferences(data ...[]byte) DecodeOption {
 // error of that function alone, so it comes back as it is, with no
 // location, and does not match.
 //
+// A few hundred bytes of nested aliases can take the go-yaml decoder
+// minutes to decode, and the decoder never checks ctx. When the node
+// holds an alias, DecodeInto counts what a decode of the whole document
+// reads, with each alias reading its content in full, after the
+// validators run. When aliases make up too much of that count, under the
+// rule gopkg.in/yaml.v3 applies, it returns an error matching
+// [ErrExcessiveAliasing] without decoding. Every node of such a document
+// that holds an alias gets the same error. [WithAliasLimit] turns the
+// check off.
+//
 // An alias inside the node resolves against the anchors of the whole
 // document, to the anchor of its name defined last before the alias,
 // inside the node or outside it, as a path through the alias resolves.
@@ -1628,6 +1654,13 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 	err = n.forValidators(cfg.yamlOpts).validate(ctx, cfg.validators)
 	if err != nil {
 		return err
+	}
+
+	if !cfg.skipAliasLimit {
+		err = aliasing.CheckDecode(n)
+		if err != nil {
+			return n.Bind(WrapError(err, atToken(contentStart(n.AST()))))
+		}
 	}
 
 	yamlOpts := n.yamlOptions(cfg.decodeOptions())
@@ -2177,6 +2210,8 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 // the validators, come back bound to the source as [SourceError]
 // values, and a value the go-yaml decoder rejects matches
 // [ErrDecodeRejected], except the [time.Duration] that
+// [Node.DecodeInto] describes. A node whose document holds too many
+// nested aliases returns an error matching [ErrExcessiveAliasing], as
 // [Node.DecodeInto] describes. An [ast.Node] in the result is part of a
 // tree the document shares, as [Node.DecodeInto] describes, so a caller
 // must not modify it. On error, the returned T is the zero value.

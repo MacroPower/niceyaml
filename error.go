@@ -15,6 +15,7 @@ import (
 
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -72,6 +73,20 @@ var (
 	// unwrapped go-yaml error an UnmarshalYAML returns from a parse of its
 	// own in such a node, since the decoder reports both alike.
 	ErrDecodeRejected = errors.New("decoder rejected the value")
+
+	// ErrExcessiveAliasing indicates a node whose document holds so many
+	// nested aliases that a decode would read far more than the document
+	// holds. A merge key reads the mapping it brings in again at every
+	// merge, so a few hundred bytes of nested aliases can take the go-yaml
+	// decoder minutes to decode, and the decoder never checks the context.
+	// [Node.Decode], [Node.DecodeInto], and [Decoder.DecodeInto] refuse
+	// to decode a node that holds an alias when the aliases of its
+	// document go past the limit gopkg.in/yaml.v3 applies, unless
+	// [WithAliasLimit] turns the check off. The error comes back bound
+	// as a [SourceError] at the first token of the node that is not a
+	// comment, and it does not match [ErrDecodeRejected]. The schema
+	// package exports the same error value.
+	ErrExcessiveAliasing = aliasing.ErrExcessiveAliasing
 
 	// ErrParseRejected indicates the go-yaml parser panicked on the tokens
 	// of a [Source], such as a token with no position that

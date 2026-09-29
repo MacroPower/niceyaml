@@ -6214,3 +6214,96 @@ func TestMultiValidator(t *testing.T) {
 		assert.Equal(t, 1, calls, "an ended context runs no validator")
 	})
 }
+
+// mergeLevels returns a document whose levels each merge the level below
+// ten times, so a decode reads the first level 10^7 times.
+func mergeLevels() string {
+	var sb strings.Builder
+
+	sb.WriteString("m0: &m0 {a: x}\n")
+
+	for level := 1; level <= 7; level++ {
+		aliases := strings.Repeat(fmt.Sprintf("*m%d, ", level-1), 10)
+		fmt.Fprintf(&sb, "m%d: &m%d\n  <<: [%s]\n", level, level, strings.TrimSuffix(aliases, ", "))
+	}
+
+	return sb.String()
+}
+
+// listLevels returns a document whose levels each list the level below
+// ten times, so the last level expands to 10^7 scalars. The decoder
+// shares each list between its aliases, so it decodes the document
+// quickly.
+func listLevels() string {
+	var sb strings.Builder
+
+	sb.WriteString("l0: &l0 [x]\n")
+
+	for level := 1; level <= 7; level++ {
+		aliases := strings.Repeat(fmt.Sprintf("*l%d, ", level-1), 10)
+		fmt.Fprintf(&sb, "l%d: &l%d [%s]\n", level, level, strings.TrimSuffix(aliases, ", "))
+	}
+
+	return sb.String()
+}
+
+func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err   error
+		input string
+		path  paths.Path
+		opts  []niceyaml.DecodeOption
+	}{
+		"nested merge keys": {
+			input: mergeLevels(),
+			err:   niceyaml.ErrExcessiveAliasing,
+		},
+		"node with an alias in a document past the limit": {
+			input: mergeLevels(),
+			path:  paths.Root().Child("m7"),
+			err:   niceyaml.ErrExcessiveAliasing,
+		},
+		"node without an alias in a document past the limit": {
+			input: mergeLevels(),
+			path:  paths.Root().Child("m0"),
+		},
+		"nested lists": {
+			input: listLevels(),
+			err:   niceyaml.ErrExcessiveAliasing,
+		},
+		"nested lists with the limit off": {
+			input: listLevels(),
+			opts:  []niceyaml.DecodeOption{niceyaml.WithAliasLimit(false)},
+		},
+		"a few aliases": {
+			input: "base: &b {a: 1, b: 2}\nx:\n  <<: *b\ny: [*b, *b]\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+			if !tc.path.IsRoot() {
+				doc = yamltest.At(t, doc, tc.path)
+			}
+
+			var got map[string]any
+
+			err := doc.DecodeInto(t.Context(), &got, tc.opts...)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+				assert.Nil(t, got)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.NotEmpty(t, got)
+		})
+	}
+}

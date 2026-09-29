@@ -1,8 +1,8 @@
 // Package docstate hands the other packages of the module the state that
 // package niceyaml keeps for each document behind a Node.
 //
-// A check that reads the whole document, such as the alias count a schema
-// takes before it decodes a node, gives the same result for every Node of
+// A check that reads the whole document, such as the alias count taken
+// before a decode of a node, gives the same result for every Node of
 // one document, since no Node edits the tree. Keeping that result on the
 // document lets a caller that checks each item of a list pay for the
 // document once rather than once per item. Package niceyaml imports this

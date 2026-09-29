@@ -6,8 +6,8 @@ import (
 )
 
 // ErrExcessiveAliasing indicates a document or a value whose aliases make
-// up too large a share of what a reader of it reads. The schema package
-// exports the same error value.
+// up too large a share of what a reader of it reads. The niceyaml and
+// schema packages export the same error value.
 var ErrExcessiveAliasing = errors.New("excessive aliasing")
 
 // The limits on shared values follow the rule gopkg.in/yaml.v3 applies

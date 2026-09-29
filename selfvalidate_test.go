@@ -634,7 +634,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		t.Parallel()
 
 		// Every node holds the node before it twice, so a walk that
-		// revisits a shared value under every path takes 2^40 steps.
+		// revisits a shared value under every path takes 2^40 steps. The
+		// decode turns the alias limit off, which refuses such a document.
 		var sb strings.Builder
 
 		sb.WriteString("n0: &n0 {}\n")
@@ -645,7 +646,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, sb.String())
 
-		_, err := dd.Decode[map[string]*chain](t.Context())
+		_, err := dd.Decode[map[string]*chain](t.Context(), niceyaml.WithAliasLimit(false))
 		require.NoError(t, err)
 	})
 

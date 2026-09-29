@@ -1162,7 +1162,10 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 			v := compileSchema(t, []byte(tc.schema))
 			doc := yamltest.FirstDocument(t, tc.input)
 
-			data, err := doc.Decode[any](t.Context(), niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()))
+			data, err := doc.Decode[any](t.Context(),
+				niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()),
+				niceyaml.WithAliasLimit(false),
+			)
 			require.NoError(t, err)
 
 			err = v.ValidateValue(t.Context(), data)
@@ -1493,7 +1496,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				v := compileSchema(t, []byte(tc.schema))
 				doc := yamltest.FirstDocument(t, tc.input)
 
-				data, err := doc.Decode[any](t.Context())
+				data, err := doc.Decode[any](t.Context(), niceyaml.WithAliasLimit(false))
 				require.NoError(t, err)
 
 				for _, err := range []error{doc.Validate(t.Context(), v), v.ValidateValue(t.Context(), data)} {
