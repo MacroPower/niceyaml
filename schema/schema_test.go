@@ -700,6 +700,7 @@ func TestSourcePath_TypedNilNode(t *testing.T) {
 	// not resolve, or one that leads back to itself, keeps the decoded
 	// name as well.
 	name := &ast.StringNode{Token: &token.Token{Value: "a"}, Value: "a"}
+	hexKey := &ast.IntegerNode{Token: &token.Token{Value: "0x10"}, Value: uint64(16)}
 
 	tcs := map[string]struct {
 		root     ast.Node
@@ -780,6 +781,33 @@ func TestSourcePath_TypedNilNode(t *testing.T) {
 			root:     &ast.MappingNode{Values: []*ast.MappingValueNode{nil}},
 			segments: []jsonschema.Segment{{Key: "a"}},
 			want:     "$.a",
+		},
+		"nil member beside a merge key": {
+			root: &ast.MappingNode{Values: []*ast.MappingValueNode{
+				nil,
+				{
+					Key: &ast.MergeKeyNode{},
+					Value: &ast.MappingNode{Values: []*ast.MappingValueNode{{
+						Key:   hexKey,
+						Value: &ast.StringNode{Value: "x"},
+					}}},
+				},
+			}},
+			segments: []jsonschema.Segment{{Key: "16"}},
+			want:     "$.0x10",
+		},
+		"merge key whose alias does not resolve": {
+			// The merge may set a member of any name, so the key 0x10
+			// before it cannot name the member 16.
+			root: &ast.MappingNode{Values: []*ast.MappingValueNode{
+				{Key: hexKey, Value: &ast.StringNode{Value: "x"}},
+				{
+					Key:   &ast.MergeKeyNode{},
+					Value: &ast.AliasNode{Value: &ast.StringNode{Value: "nope"}},
+				},
+			}},
+			segments: []jsonschema.Segment{{Key: "16"}},
+			want:     "$.16",
 		},
 		"typed-nil string key": {
 			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
@@ -2216,11 +2244,15 @@ func TestSchema_SourcePath(t *testing.T) {
 	// A violation's path spells each key as the source does, so a key the
 	// decoder respells, such as 0x10 for the member name 16, still names
 	// the member. The path prints in the error and resolves with Node.At.
+	// Where the walk cannot tell which key in the source names the member,
+	// the path keeps the decoded name, which Node.At does not resolve, and
+	// the error carries no position. Such a case sets unresolved.
 	tcs := map[string]struct {
-		schema   string
-		input    string
-		wantPath string
-		want     string
+		schema     string
+		input      string
+		wantPath   string
+		want       string
+		unresolved bool
 	}{
 		"hexadecimal key": {
 			schema: `{
@@ -2294,6 +2326,75 @@ func TestSchema_SourcePath(t *testing.T) {
 			input:    "user:\n  <<: {0x10: x}\n",
 			wantPath: "$.user.0x10",
 			want:     "2:14: $.user.0x10: expected \"integer\", got \"string\"",
+		},
+		"later key shadows a merged member": {
+			// The decoder sets 0x10: x after the merge, so the member 16
+			// holds x rather than the 5 the merge brings in.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"m": {"additionalProperties": {"type": "integer"}}
+				}
+			}`,
+			input:    "b: &b {16: 5}\nm: {<<: *b, 0x10: x}\n",
+			wantPath: "$.m.0x10",
+			want:     "2:19: $.m.0x10: expected \"integer\", got \"string\"",
+		},
+		"merged member hidden by a same-spelled key": {
+			// The merge brings in 0x10: x as the member 16. The quoted key
+			// "0x10" of m names a separate member with the same spelling,
+			// and a path selector matches that key, so the path keeps the
+			// name 16.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"m": {"additionalProperties": {"type": "integer"}}
+				}
+			}`,
+			input:      "m: {<<: {0x10: x}, \"0x10\": 5}\n",
+			wantPath:   "$.m.16",
+			want:       "$.m.16: expected \"integer\", got \"string\"",
+			unresolved: true,
+		},
+		"tagged alias key replaces an earlier key": {
+			// The tag may change the name the alias key decodes to, so the
+			// key 0x10 before it cannot name the member 16.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"m": {"additionalProperties": {"type": "integer"}}
+				}
+			}`,
+			input:    "a: &k 16\nm: {0x10: 5, ? !!str *k : x}\n",
+			wantPath: "$.m.16",
+			want:     "2:27: $.m.16: expected \"integer\", got \"string\"",
+		},
+		"merge source with a tagged alias key": {
+			// A key of the merge source may decode to any name, so the
+			// key 0x10 before the merge cannot name the member 16.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"m": {"additionalProperties": {"type": "integer"}}
+				}
+			}`,
+			input:    "a: &k 16\nb: &b {? !!str *k : x}\nm: {0x10: 5, <<: *b}\n",
+			wantPath: "$.m.16",
+			want:     "2:21: $.m.16: expected \"integer\", got \"string\"",
+		},
+		"unnameable alias key hides earlier keys": {
+			// The alias key refers to a sequence, which the walk cannot
+			// name, so the key 0x10 before it cannot name the member 16.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"m": {"additionalProperties": {"type": "integer"}}
+				}
+			}`,
+			input:      "s: &s [a]\nm: {0x10: x, ? *s : 1}\n",
+			wantPath:   "$.m.16",
+			want:       "$.m.16: expected \"integer\", got \"string\"",
+			unresolved: true,
 		},
 		"spelled-out null key": {
 			schema: `{
@@ -2553,6 +2654,12 @@ func TestSchema_SourcePath(t *testing.T) {
 			assert.Equal(t, tc.want, bound.Error())
 
 			_, err = dd.At(gotPath)
+			if tc.unresolved {
+				require.Error(t, err, "path from the error resolves")
+
+				return
+			}
+
 			require.NoError(t, err, "path from the error does not resolve")
 		})
 	}
