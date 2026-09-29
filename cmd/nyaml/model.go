@@ -139,6 +139,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return m, nil
 
+	case tea.MouseWheelMsg:
+		// The theme picker takes the wheel, so the document under it stays
+		// where it is and the wheel moves the selection instead.
+		if m.themePicking {
+			m.updateThemeWheel(msg)
+
+			return m, nil
+		}
+
 	case tea.KeyPressMsg:
 		// Quit on ctrl+c from every state, including the theme picker and the
 		// search prompt, which otherwise consume every key.
@@ -255,19 +264,38 @@ func (m *model) updateThemeInput(msg tea.KeyPressMsg) {
 		m.themeIndex = max(0, slices.Index(m.themeList, m.previousTheme))
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("j", "down"))):
-		// Move selection down with live preview.
-		if m.themeIndex < len(m.themeList)-1 {
-			m.themeIndex++
-			m.applyTheme(m.themeList[m.themeIndex])
-		}
+		m.moveThemeSelection(1)
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("k", "up"))):
-		// Move selection up with live preview.
-		if m.themeIndex > 0 {
-			m.themeIndex--
-			m.applyTheme(m.themeList[m.themeIndex])
-		}
+		m.moveThemeSelection(-1)
 	}
+}
+
+func (m *model) updateThemeWheel(msg tea.MouseWheelMsg) {
+	switch msg.Button {
+	case tea.MouseWheelDown:
+		m.moveThemeSelection(1)
+
+	case tea.MouseWheelUp:
+		m.moveThemeSelection(-1)
+
+	default:
+		// The picker lists themes in one column, so it has no use for
+		// horizontal scrolling.
+	}
+}
+
+// moveThemeSelection moves the picker's selection by delta entries and
+// previews the theme it lands on. The selection stops at either end of
+// the list.
+func (m *model) moveThemeSelection(delta int) {
+	i := min(max(m.themeIndex+delta, 0), len(m.themeList)-1)
+	if i < 0 || i == m.themeIndex {
+		return
+	}
+
+	m.themeIndex = i
+	m.applyTheme(m.themeList[i])
 }
 
 // applySearch searches for term and scrolls to its first match. The viewport

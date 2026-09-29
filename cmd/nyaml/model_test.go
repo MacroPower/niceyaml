@@ -715,3 +715,62 @@ func TestUpdateCtrlCQuits(t *testing.T) {
 		})
 	}
 }
+
+func TestThemePickerMouseWheel(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		button tea.MouseButton
+		want   int
+	}{
+		"wheel down": {
+			button: tea.MouseWheelDown,
+			want:   1,
+		},
+		"wheel up": {
+			button: tea.MouseWheelUp,
+			want:   -1,
+		},
+		"wheel right": {
+			button: tea.MouseWheelRight,
+			want:   0,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := &strings.Builder{}
+			for i := 1; i <= 100; i++ {
+				fmt.Fprintf(lines, "k%d: v\n", i)
+			}
+
+			var m tea.Model = newModel(&modelOptions{
+				sources: []*niceyaml.Source{
+					niceyaml.NewSourceFromString(lines.String(), niceyaml.WithName("a.yaml")),
+				},
+			})
+
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+			m, _ = m.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
+
+			before, ok := m.(model)
+			require.True(t, ok)
+			require.True(t, before.themePicking)
+			require.Positive(t, before.themeIndex)
+			require.Less(t, before.themeIndex, len(before.themeList)-1)
+
+			m, _ = m.Update(tea.MouseWheelMsg{Button: tc.button})
+
+			got, ok := m.(model)
+			require.True(t, ok)
+
+			assert.True(t, got.themePicking)
+			assert.Zero(t, got.viewport.YOffset())
+			assert.Zero(t, got.viewport.XOffset())
+			assert.Equal(t, before.themeIndex+tc.want, got.themeIndex)
+			assert.Equal(t, got.themeList[got.themeIndex], got.currentTheme)
+		})
+	}
+}
