@@ -85,15 +85,80 @@ func stateOf(n Node) *docstate.State {
 // decode of the document of n, whose state is state, reads, with the
 // document read as mode.
 func excessiveRead(n Node, state *docstate.State, mode readMode) bool {
+	resolver := state.Resolver()
+	body := n.DocumentAST().Body
+
+	nulls := nullFinder{
+		resolver: resolver,
+		open:     map[ast.Node]bool{},
+		anchors:  map[ast.Node]bool{},
+		aliases:  map[*ast.AliasNode]bool{},
+	}
+
+	ast.Walk(&nulls, body)
+
 	c := treeCounter{
-		resolver: state.Resolver(),
+		resolver: resolver,
+		nulls:    nulls.aliases,
 		sizes:    [readModes]map[ast.Node]int{{}, {}},
 		open:     map[ast.Node]bool{},
 	}
 
-	c.count(n.DocumentAST().Body, true, mode)
+	c.count(body, true, mode)
 
 	return Excessive(c.distinct, c.aliased)
+}
+
+// nullFinder is an [ast.Visitor] that finds the aliases of a document the
+// decoder reads as null. The decoder puts a null in place of an alias
+// inside the content of the anchor it refers to. An anchor on such an
+// alias then holds the null, so an alias to that anchor reads null too.
+// The finder also takes in an alias that a `<<` merge key names inside
+// its own anchor, since the decoder rejects such a merge and reads
+// nothing there.
+//
+// The resolver binds each alias to its anchor. The open set holds the
+// anchors the walk is inside, the anchors set holds each anchor on an
+// alias the decoder reads as null, and the aliases set holds the aliases
+// the decoder reads as null.
+type nullFinder struct {
+	resolver *paths.Resolver
+	open     map[ast.Node]bool
+	anchors  map[ast.Node]bool
+	aliases  map[*ast.AliasNode]bool
+}
+
+// Visit implements [ast.Visitor]. It walks the content of an anchor itself
+// and returns nil for it, so it knows which anchors each alias lies in.
+// An alias refers to an anchor before it, so the walk has read that
+// anchor by the time it reaches an alias outside it.
+func (f *nullFinder) Visit(node ast.Node) ast.Visitor {
+	if astnode.IsNil(node) {
+		return nil
+	}
+
+	switch n := node.(type) {
+	case *ast.AnchorNode:
+		f.open[n] = true
+		ast.Walk(f, n.Value)
+		delete(f.open, n)
+
+		if alias, ok := n.Value.(*ast.AliasNode); ok && f.aliases[alias] {
+			f.anchors[n] = true
+		}
+
+		return nil
+
+	case *ast.AliasNode:
+		anchor, err := f.resolver.Anchor(n)
+		if err == nil && (f.open[anchor] || f.anchors[anchor]) {
+			f.aliases[n] = true
+		}
+
+		return nil
+	}
+
+	return f
 }
 
 // holdsAlias reports whether node or any node below it is an alias.
@@ -148,8 +213,10 @@ const (
 // reads the content it refers to in full. That covers a mapping a merge
 // key brings in, which the decoder reads again at every merge. The
 // resolver binds each alias to its content. An alias that does not
-// resolve counts as one unaliased node, as does one inside its own
-// content, which the decoder reads as null.
+// resolve counts as one unaliased node, as does one in the nulls set,
+// which [nullFinder] fills with the aliases the decoder reads as null.
+// Such an alias counts as one node wherever the counter reads it, so the
+// count does not depend on the order of the aliases.
 //
 // Where the decoder reads a node into a value, an alias to a scalar
 // counts as one unaliased node, as a shared scalar does in a decoded
@@ -166,10 +233,12 @@ const (
 // aliased field counts the nodes the aliases in the tree repeat. The
 // sizes maps hold the size of each alias's content once the counter has
 // read it, one map for each read mode, so a chain of nested aliases costs
-// one read per anchor. The open map holds the content the counter is
-// reading.
+// one read per anchor. The open map holds the content of each alias the
+// counter is reading, so an alias that leads back into that content
+// counts as one node and the count ends.
 type treeCounter struct {
 	resolver *paths.Resolver
+	nulls    map[*ast.AliasNode]bool
 	sizes    [readModes]map[ast.Node]int
 	open     map[ast.Node]bool
 	distinct int
@@ -292,44 +361,29 @@ func tagMode(tag *ast.TagNode, mode readMode) readMode {
 }
 
 // anchor returns the number of nodes a decode of the content of the
-// anchor reads, as [treeCounter.count] counts them. The decoder reads an
-// alias inside the content of its own anchor as null, so anchor marks
-// the content open while it counts it, under the node [treeCounter.alias]
-// looks the content up by, and such an alias counts as one node. The
-// anchor marks open only content it defines itself. An anchor on an
-// alias defines no content of its own, so [treeCounter.alias] counts
-// that alias in full. The content of an anchor on a scalar counts as
-// text, since an alias to it may copy that text.
+// anchor reads, as [treeCounter.count] counts them. The content of an
+// anchor on a scalar counts as text, since an alias to it may copy that
+// text. An anchor on an alias defines no content of its own, so its
+// alias counts as it would without the anchor.
 func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool, mode readMode) int {
-	if _, ok := astnode.Content(anchor.Value).(*ast.AliasNode); ok {
-		return c.count(anchor.Value, top, mode)
-	}
-
-	if !isCollection(anchor.Value) {
+	_, onAlias := astnode.Content(anchor.Value).(*ast.AliasNode)
+	if !onAlias && !isCollection(anchor.Value) {
 		mode = readText
 	}
 
-	content, err := c.resolver.Deref(anchor)
-	if err != nil || c.open[content] {
-		return c.count(anchor.Value, top, mode)
-	}
-
-	c.open[content] = true
-	size := c.count(anchor.Value, top, mode)
-	delete(c.open, content)
-
-	return size
+	return c.count(anchor.Value, top, mode)
 }
 
 // alias returns the number of nodes a decode of the alias reads as mode.
-// That is the size of the mapping or sequence it refers to, the length
-// of the text of a scalar it refers to when read as text, or one for any
-// other alias. With top set, the alias lies outside the content of every
-// other alias, and alias adds that size to aliased, or the one node to
+// That is one for an alias the decoder reads as null. Otherwise it is the
+// size of the mapping or sequence the alias refers to, the length of the
+// text of a scalar it refers to when read as text, or one for any other
+// alias. With top set, the alias lies outside the content of every other
+// alias, and alias adds that size to aliased, or the one node to
 // distinct.
 func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 	target, err := c.resolver.Deref(alias)
-	if err != nil || c.open[target] || (mode == readValue && !isCollection(target)) {
+	if err != nil || c.nulls[alias] || c.open[target] || (mode == readValue && !isCollection(target)) {
 		if top {
 			c.distinct = AddCapped(c.distinct, 1)
 		}

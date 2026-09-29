@@ -62,6 +62,18 @@ func flowList(item string, count int) string {
 	return "[" + strings.TrimSuffix(strings.Repeat(item+", ", count), ", ") + "]"
 }
 
+// blockEntries returns 1000 entries of a block mapping, each indented
+// under a key.
+func blockEntries() string {
+	var sb strings.Builder
+
+	for i := range 1000 {
+		fmt.Fprintf(&sb, "  k%d: v\n", i)
+	}
+
+	return sb.String()
+}
+
 func TestCheckDecode(t *testing.T) {
 	t.Parallel()
 
@@ -101,6 +113,19 @@ func TestCheckDecode(t *testing.T) {
 		},
 		"aliases inside their own anchor": {
 			input: "x: &x [" + strings.Repeat("a, ", 10) + strings.Repeat("*x, ", 299) + "*x]\n",
+		},
+		"aliases to an anchor holding an alias to the anchor around it": {
+			// The decoder reads *A inside A as null, so each *B reads
+			// {c: null}.
+			input: "a: &A\n  b: &B {c: *A}\n" + blockEntries() + "d: " + flowList("*B", 300) + "\n",
+		},
+		"same aliases after one inside the anchor around it": {
+			// The count does not depend on which alias to B comes first.
+			input: "a: &A\n  b: &B {c: *A}\n" + blockEntries() + "  e: *B\nd: " + flowList("*B", 300) + "\n",
+		},
+		"aliases to an anchor on an alias to the anchor around it": {
+			// P reads null, so each *Q reads [null].
+			input: "a: &A\n  p: &P\n    *A\n  q: &Q [*P]\n" + blockEntries() + "d: " + flowList("*Q", 300) + "\n",
 		},
 		"scalar aliases written out in a key": {
 			// The decoder spells the key as text, with a copy of the
