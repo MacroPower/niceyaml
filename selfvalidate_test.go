@@ -1153,6 +1153,16 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 					return err
 				},
 			},
+			// Each map validates itself, and the values go-yaml decodes into
+			// its interface values hold no validator.
+			"list of maps that validate themselves": {
+				input: "- {a: 1}\n- {b: {c: 1}}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
+					_, err := dd.Decode[[]anyLabels](ctx, opts...)
+
+					return err
+				},
+			},
 			// The type of the values may hold a validator, but the values
 			// go-yaml decodes into an interface hold none.
 			"map of any": {
@@ -1677,6 +1687,12 @@ func (n names) Validate() error {
 
 // labels is a map of strings with no empty value, which holds no
 // validator below it.
+type anyLabels map[string]any
+
+func (anyLabels) Validate() error {
+	return nil
+}
+
 type labels map[string]string
 
 func (l labels) Validate() error {

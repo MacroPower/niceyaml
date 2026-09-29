@@ -87,7 +87,9 @@ type selfWalker struct {
 	// scan reads each once however many paths lead to it.
 	scanning map[visit]bool
 	// The result of the scan of each pointer, map, and slice, so each
-	// value scans once however many values above it the walk meets.
+	// value scans once however many values above it the walk meets. The
+	// result for a pointer covers the value it points to, and the result
+	// for a map or slice covers only the values below it.
 	scanned map[visit]bool
 	errs    []error
 }
@@ -543,6 +545,13 @@ func (w *selfWalker) scanValue(v reflect.Value) (bool, bool) {
 
 		if w.scanning[key] {
 			return false, false
+		}
+
+		// The record of a map or slice covers only the values below it, as
+		// holdsBelow reads it, so a map or slice that validates itself
+		// reports a validator here and records nothing.
+		if v.Kind() != reflect.Pointer && implementsSelfValidator(v.Type()) {
+			return true, true
 		}
 
 		w.scanning[key] = true
