@@ -9,8 +9,9 @@ import (
 )
 
 // ErrInvalidPattern reports a glob pattern [FilePath] cannot use, which is
-// an empty pattern, one whose syntax does not parse, or one whose braces
-// expand to more patterns than matching can afford.
+// an empty pattern, one whose syntax does not parse, one whose braces
+// expand to more patterns than matching can afford, or one that keeps a
+// ".." after a glob element such as "*", which no cleaned path can match.
 var ErrInvalidPattern = filepaths.ErrInvalidPattern
 
 // filePathMatcher matches documents by file path glob pattern.
@@ -36,7 +37,10 @@ type filePathMatcher struct {
 //	m, err := matcher.FilePath("*.yaml")
 //
 // An empty pattern is [ErrInvalidPattern] too, since it would match nothing
-// and silently disable the [Matcher].
+// and silently disable the [Matcher]. So is a pattern that keeps a ".."
+// after a glob element, as in "configs/*/../x.yaml", because a cleaned path
+// holds a ".." only at its start. A ".." after "**" stays valid, since "**"
+// can match no directory at all, so "**/../x.yaml" matches "../x.yaml".
 func FilePath(pattern string) (Matcher, error) {
 	if pattern == "" {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidPattern, pattern)

@@ -78,6 +78,11 @@ func TestFilePath(t *testing.T) {
 			filePath: "file.yaml",
 			want:     true,
 		},
+		"parent after double star": {
+			pattern:  "**/../x.yaml",
+			filePath: "../x.yaml",
+			want:     true,
+		},
 		"empty file path": {
 			pattern:  "**/*.yaml",
 			filePath: "",
@@ -101,12 +106,29 @@ func TestFilePath(t *testing.T) {
 func TestFilePath_InvalidPattern(t *testing.T) {
 	t.Parallel()
 
-	_, err := matcher.FilePath("[")
-	require.ErrorIs(t, err, matcher.ErrInvalidPattern)
+	tcs := map[string]struct {
+		pattern string
+	}{
+		"bad syntax": {
+			pattern: "[",
+		},
+		"parent after star": {
+			pattern: "configs/*/../x.yaml",
+		},
+	}
 
-	assert.Panics(t, func() {
-		matcher.MustFilePath("[")
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := matcher.FilePath(tc.pattern)
+			require.ErrorIs(t, err, matcher.ErrInvalidPattern)
+
+			assert.Panics(t, func() {
+				matcher.MustFilePath(tc.pattern)
+			})
+		})
+	}
 }
 
 func TestFilePath_EmptyPattern(t *testing.T) {
