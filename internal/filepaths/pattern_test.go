@@ -68,6 +68,21 @@ func TestNewPattern(t *testing.T) {
 			pattern: "*/../x.yaml",
 			err:     filepaths.ErrInvalidPattern,
 		},
+		"parent after a double star after a name": {
+			pattern: "a/**/../x.yaml",
+			err:     filepaths.ErrInvalidPattern,
+		},
+		"parent after a double star after the root": {
+			pattern: "/**/../x.yaml",
+			err:     filepaths.ErrInvalidPattern,
+		},
+		"parent after a double star after a name after a double star": {
+			pattern: "**/a/**/../x.yaml",
+			err:     filepaths.ErrInvalidPattern,
+		},
+		"parent after a double star after leading parents": {
+			pattern: "../**/../x.yaml",
+		},
 		"parent after a class element": {
 			pattern: "a/[bc]/../x.yaml",
 			err:     filepaths.ErrInvalidPattern,
@@ -257,6 +272,11 @@ func TestPattern_Match(t *testing.T) {
 		"parent after a double star matching no directory": {
 			pattern: "**/../x.yaml",
 			path:    "../x.yaml",
+			want:    true,
+		},
+		"parent after a double star after leading parents": {
+			pattern: "../**/../x.yaml",
+			path:    "../../x.yaml",
 			want:    true,
 		},
 		"repeated separators are collapsed": {

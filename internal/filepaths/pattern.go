@@ -39,8 +39,11 @@ type Pattern struct {
 // A cleaned path holds a ".." only at its start, so NewPattern returns
 // [ErrInvalidPattern] for a pattern that keeps a ".." after a glob
 // element such as "*", which could match no path. A ".." after "**"
-// stays valid, since "**" can match no directory at all, so
-// "**/../x.yaml" matches "../x.yaml".
+// stays valid when only ".." and "**" elements come before it in a
+// relative pattern, since "**" can match no directory at all, so
+// "**/../x.yaml" matches "../x.yaml". A rooted pattern such as
+// "/**/../x.yaml", or one with a name before the "**" such as
+// "a/**/../x.yaml", returns [ErrInvalidPattern].
 func NewPattern(pattern string) (Pattern, error) {
 	if !doublestar.ValidatePattern(pattern) {
 		return Pattern{}, ErrInvalidPattern
@@ -61,22 +64,26 @@ func NewPattern(pattern string) (Pattern, error) {
 	return Pattern{globs: globs}, nil
 }
 
-// parentsMatchable reports whether every ".." element of glob follows
-// another "..", a "**", or nothing, the only places a ".." of a cleaned
-// path can line up with.
+// parentsMatchable reports whether every ".." element of glob sits in
+// a leading run of ".." and "**" elements of a relative pattern, the
+// only place a ".." of a cleaned path can line up with. A "**" in that
+// run can match no directory, which leaves the ".." at the start of the
+// path.
 func parentsMatchable(glob string) bool {
-	prev := ""
+	leading := !strings.HasPrefix(glob, "/")
 
 	for _, elem := range splitElements(glob) {
-		if elem == "" {
+		switch elem {
+		case "", "**":
 			continue
-		}
+		case "..":
+			if !leading {
+				return false
+			}
 
-		if elem == ".." && prev != "" && prev != ".." && prev != "**" {
-			return false
+		default:
+			leading = false
 		}
-
-		prev = elem
 	}
 
 	return true
