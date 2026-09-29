@@ -1,6 +1,7 @@
 package aliasing_test
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"testing"
@@ -49,6 +50,14 @@ func anchoredAliasLevels() string {
 	return sb.String()
 }
 
+// longScalar anchors a scalar of 2000 bytes as a.
+var longScalar = "a: &a " + strings.Repeat("x", 2000) + "\n"
+
+// flowList returns a flow sequence that lists item count times.
+func flowList(item string, count int) string {
+	return "[" + strings.TrimSuffix(strings.Repeat(item+", ", count), ", ") + "]"
+}
+
 func TestCheckDecode(t *testing.T) {
 	t.Parallel()
 
@@ -89,6 +98,30 @@ func TestCheckDecode(t *testing.T) {
 		"aliases inside their own anchor": {
 			input: "x: &x [" + strings.Repeat("a, ", 10) + strings.Repeat("*x, ", 299) + "*x]\n",
 		},
+		"scalar aliases written out in a key": {
+			// The decoder spells the key as text, with a copy of the
+			// scalar for each alias.
+			input: longScalar + "k: &k " + flowList("*a", 500) + "\nm: {? *k : 1}\n",
+			err:   aliasing.ErrExcessiveAliasing,
+		},
+		"scalar aliases in a value": {
+			input: longScalar + "k: &k " + flowList("*a", 500) + "\nm: {n: *k}\n",
+		},
+		"scalar aliases under a string tag": {
+			input: longScalar + "k: &k " + flowList("*a", 500) + "\nm: !!str *k\n",
+			err:   aliasing.ErrExcessiveAliasing,
+		},
+		"alias keys to a binary scalar": {
+			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+				"l: " + flowList("{? *b : 1}", 500) + "\n",
+			err: aliasing.ErrExcessiveAliasing,
+		},
+		"alias keys to a plain scalar": {
+			input: longScalar + "l: " + flowList("{? *a : 1}", 500) + "\n",
+		},
+		"one scalar alias written out in a key": {
+			input: longScalar + "k: &k [*a]\nm: {? *k : 1}\n",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -115,6 +148,49 @@ func TestCheckDecode(t *testing.T) {
 		t.Parallel()
 
 		require.NoError(t, aliasing.CheckDecode((*niceyaml.Node)(nil)))
+	})
+}
+
+func TestCheckDecodeText(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err   error
+		input string
+	}{
+		"no alias": {
+			input: longScalar + "kind: x\n",
+		},
+		"many aliases to a long scalar": {
+			input: longScalar + "kind: " + flowList("*a", 500) + "\n",
+			err:   aliasing.ErrExcessiveAliasing,
+		},
+		"a few aliases to a long scalar": {
+			input: longScalar + "kind: " + flowList("*a", 2) + "\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.At(t, yamltest.FirstDocument(t, tc.input), paths.Root().Child("kind"))
+
+			err := aliasing.CheckDecodeText(doc)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
+
+	t.Run("nil node", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, aliasing.CheckDecodeText((*niceyaml.Node)(nil)))
 	})
 }
 

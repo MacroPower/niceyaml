@@ -97,6 +97,17 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 		return false, doc.Bind(err)
 	}
 
+	// A decode into a type that decodes itself from text writes the node
+	// out with a copy of the text of each alias, which the count above
+	// leaves out.
+	if decodesText(reflect.TypeFor[T]()) {
+		err = aliasing.CheckDecodeText(node)
+		if err != nil {
+			//nolint:wrapcheck // Binding names the document; the error keeps its own context.
+			return false, doc.Bind(err)
+		}
+	}
+
 	// Read the value as the YAML types name it first, because a decode
 	// into T loses what tells a null from an empty string or a false,
 	// and a fraction from the integer it truncates to. A decode into any
@@ -189,17 +200,37 @@ func pointees(got, want reflect.Value) (reflect.Value, reflect.Value, bool) {
 	return got.Elem(), want.Elem(), true
 }
 
-// unmarshalerTypes are the interfaces go-yaml decodes a value through
-// when its pointer implements one. The decoder reads an UnmarshalJSON
-// method only under [yaml.UseJSONUnmarshaler], which a match never sets.
-var unmarshalerTypes = []reflect.Type{
-	reflect.TypeFor[yaml.BytesUnmarshaler](),
-	reflect.TypeFor[yaml.BytesUnmarshalerContext](),
-	reflect.TypeFor[yaml.InterfaceUnmarshaler](),
-	reflect.TypeFor[yaml.InterfaceUnmarshalerContext](),
-	reflect.TypeFor[yaml.NodeUnmarshaler](),
-	reflect.TypeFor[yaml.NodeUnmarshalerContext](),
-	reflect.TypeFor[encoding.TextUnmarshaler](),
+var (
+	// The interfaces go-yaml decodes a value through when its pointer
+	// implements one. The decoder reads an UnmarshalJSON method only under
+	// [yaml.UseJSONUnmarshaler], which a match never sets.
+	unmarshalerTypes = []reflect.Type{
+		reflect.TypeFor[yaml.BytesUnmarshaler](),
+		reflect.TypeFor[yaml.BytesUnmarshalerContext](),
+		reflect.TypeFor[yaml.InterfaceUnmarshaler](),
+		reflect.TypeFor[yaml.InterfaceUnmarshalerContext](),
+		reflect.TypeFor[yaml.NodeUnmarshaler](),
+		reflect.TypeFor[yaml.NodeUnmarshalerContext](),
+		reflect.TypeFor[encoding.TextUnmarshaler](),
+	}
+
+	// The interfaces through which go-yaml hands a value the text of its
+	// node, with each alias in the node written out in full.
+	textUnmarshalerTypes = []reflect.Type{
+		reflect.TypeFor[yaml.BytesUnmarshaler](),
+		reflect.TypeFor[yaml.BytesUnmarshalerContext](),
+		reflect.TypeFor[encoding.TextUnmarshaler](),
+	}
+)
+
+// decodesText reports whether the decoder reads t, or what t points to,
+// through one of [textUnmarshalerTypes].
+func decodesText(t reflect.Type) bool {
+	if t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	return slices.ContainsFunc(textUnmarshalerTypes, reflect.PointerTo(t).Implements)
 }
 
 // isPlainString reports whether t is a string type that [isPlain]

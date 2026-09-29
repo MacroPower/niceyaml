@@ -228,9 +228,12 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // whole document reads, with each alias reading its content in full. The
 // count covers the whole document because the decoder reads all of it to
 // find the anchors of the node. Validate applies the alias limit of
-// [Schema.ValidateValue] to that count, where an alias to a scalar counts
-// as one unaliased node. A document past the limit returns an error
-// wrapping both [ErrValidate] and [ErrExcessiveAliasing] without decoding.
+// [Schema.ValidateValue] to that count. An alias to a scalar counts as
+// one unaliased node, except where the decoder writes it out as text,
+// such as in a key that holds a sequence. There each copy of the scalar
+// counts one node per byte of its text. A document past the limit
+// returns an error wrapping both [ErrValidate] and [ErrExcessiveAliasing]
+// without decoding.
 func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 	if s.acceptAll {
 		return nil

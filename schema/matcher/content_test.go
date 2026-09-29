@@ -504,6 +504,55 @@ func TestContent(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
 		assert.False(t, ok)
 	})
+
+	t.Run("scalar aliases written out as text", func(t *testing.T) {
+		t.Parallel()
+
+		// A type that decodes itself from text or from YAML bytes gets
+		// the node written out, with a copy of the long scalar for each
+		// alias. A plain string reads the list as a value, which shares
+		// the scalar, so it does not match.
+		input := "a: &a " + strings.Repeat("x", 2000) + "\n" +
+			"kind: [" + strings.TrimSuffix(strings.Repeat("*a, ", 500), ", ") + "]\n"
+
+		tcs := map[string]struct {
+			m   matcher.Matcher
+			err error
+		}{
+			"text unmarshaler": {
+				m:   matcher.Content(kindPath, prefixedString("vx")),
+				err: schema.ErrExcessiveAliasing,
+			},
+			"pointer to a text unmarshaler": {
+				m:   matcher.Content(kindPath, new(prefixedString)),
+				err: schema.ErrExcessiveAliasing,
+			},
+			"bytes unmarshaler": {
+				m:   matcher.Content(kindPath, millis(1000)),
+				err: schema.ErrExcessiveAliasing,
+			},
+			"plain string": {
+				m: matcher.Content(kindPath, "x"),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, input)
+
+				ok, err := tc.m.Match(t.Context(), doc)
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err)
+				} else {
+					require.NoError(t, err)
+				}
+
+				assert.False(t, ok)
+			})
+		}
+	})
 }
 
 func TestContent_WithAll(t *testing.T) {

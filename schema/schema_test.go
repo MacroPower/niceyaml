@@ -1551,6 +1551,10 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			fmt.Fprintf(&merges, "m%d: &m%d\n  <<: [%s]\n", level, level, strings.TrimSuffix(aliases, ", "))
 		}
 
+		// The sequence k lists 500 aliases to a scalar of 2000 bytes.
+		scalarAliases := "a: &a " + strings.Repeat("x", 2000) + "\n" +
+			"k: &k [" + strings.TrimSuffix(strings.Repeat("*a, ", 500), ", ") + "]\n"
+
 		v := compileSchema(t, []byte(`{"maxProperties": 5}`))
 
 		tcs := map[string]struct {
@@ -1583,6 +1587,14 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			},
 			"alias to a small sequence as mapping key": {
 				input: "s: &s [a, b]\n*s : v\n",
+			},
+			// The key holds a copy of the long scalar for each alias.
+			"scalar aliases written out in a key": {
+				input: scalarAliases + "m: {? *k : v}\n",
+				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			},
+			"scalar aliases in a value": {
+				input: scalarAliases + "m: {n: *k}\n",
 			},
 			// The decoder reads an alias inside the content of its own
 			// anchor as null, so each such alias reads one node.
