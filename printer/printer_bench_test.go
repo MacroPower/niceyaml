@@ -38,7 +38,6 @@ func BenchmarkPrinterPrint(b *testing.B) {
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = p.Print(source.View())
@@ -80,7 +79,6 @@ func BenchmarkPrinterPrint_WithOverlays(b *testing.B) {
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = p.Print(source)
@@ -182,7 +180,6 @@ func BenchmarkPrinterPrint_OverlaysDensity(b *testing.B) {
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = p.Print(source)
@@ -213,7 +210,6 @@ func BenchmarkPrinterPrintSlice(b *testing.B) {
 
 			b.ReportAllocs()
 			b.SetBytes(sliceBytes)
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = p.Print(source.View().Slice(sl.span))
@@ -242,7 +238,6 @@ func BenchmarkPrinterWithGutter(b *testing.B) {
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = p.Print(source.View())
@@ -278,7 +273,6 @@ func BenchmarkPrinterWithWrapping(b *testing.B) {
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = p.Print(source.View())
@@ -291,7 +285,6 @@ func BenchmarkLinesAddOverlay(b *testing.B) {
 	yaml := yamltest.GenerateYAML(100)
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
 	for b.Loop() {
 		source := niceyaml.NewSourceFromString(yaml).View()
@@ -340,7 +333,6 @@ func BenchmarkPrinterPrintError_LongWrappedValue(b *testing.B) {
 			p := printer.New(printer.WithWrap(80))
 
 			b.ReportAllocs()
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = p.PrintError(err)

@@ -137,7 +137,6 @@ func BenchmarkNode_DecodeScoped(b *testing.B) {
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
-			b.ResetTimer()
 
 			for b.Loop() {
 				for _, it := range items {
@@ -172,7 +171,6 @@ func BenchmarkNode_DecodeRejectedStream(b *testing.B) {
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
-			b.ResetTimer()
 
 			for b.Loop() {
 				for _, doc := range docs {
@@ -409,7 +407,6 @@ func BenchmarkNode_Nodes(b *testing.B) {
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
-			b.ResetTimer()
 
 			for b.Loop() {
 				items, err := doc.Nodes(path)
@@ -479,7 +476,6 @@ func BenchmarkSourceRunes(b *testing.B) {
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				count := 0
@@ -510,7 +506,6 @@ func BenchmarkSourceLines(b *testing.B) {
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				count := 0
@@ -529,7 +524,6 @@ func BenchmarkSourceLen(b *testing.B) {
 	lines := niceyaml.NewSourceFromString(yaml).Lines()
 
 	b.ReportAllocs()
-	b.ResetTimer()
 
 	for b.Loop() {
 		_ = lines.Len()
@@ -553,7 +547,6 @@ func BenchmarkSourceContent(b *testing.B) {
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = source.Lines().Content()

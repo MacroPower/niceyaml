@@ -32,7 +32,6 @@ func BenchmarkFinderFind(b *testing.B) {
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				// Search for something that appears rarely.
@@ -47,7 +46,6 @@ func BenchmarkFinderFind(b *testing.B) {
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				// Search for something that appears on every line.
@@ -62,7 +60,6 @@ func BenchmarkFinderFind(b *testing.B) {
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				// Search for something that doesn't exist.
@@ -92,7 +89,6 @@ func BenchmarkFinderFind_WithNormalizer(b *testing.B) {
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = idx.Find("value_")
@@ -107,7 +103,6 @@ func BenchmarkFinderFind_WithNormalizer(b *testing.B) {
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = idx.Find("value_")
@@ -130,7 +125,6 @@ func BenchmarkFinderFind_SearchLength(b *testing.B) {
 		b.Run(fmt.Sprintf("length_%d", length), func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = idx.Find(search)
@@ -156,7 +150,6 @@ func BenchmarkFinderFind_UnicodeContent(b *testing.B) {
 
 		b.ReportAllocs()
 		b.SetBytes(int64(len(yaml)))
-		b.ResetTimer()
 
 		for b.Loop() {
 			_ = idx.Find("Héllo")
@@ -172,7 +165,6 @@ func BenchmarkFinderFind_UnicodeContent(b *testing.B) {
 
 		b.ReportAllocs()
 		b.SetBytes(int64(len(yaml)))
-		b.ResetTimer()
 
 		for b.Loop() {
 			_ = idx.Find("hello")
@@ -236,7 +228,6 @@ func BenchmarkFinderFind_MatchDensity(b *testing.B) {
 		b.Run(d.name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = idx.Find("FINDME")

@@ -31,7 +31,6 @@ func BenchmarkFullDiffSource(b *testing.B) {
 			sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
 
 			b.ReportAllocs()
-			b.ResetTimer()
 
 			linesA, linesB := sourceA.Lines(), sourceB.Lines()
 
@@ -52,7 +51,6 @@ func BenchmarkFullDiffSource(b *testing.B) {
 			sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
 
 			b.ReportAllocs()
-			b.ResetTimer()
 
 			linesA, linesB := sourceA.Lines(), sourceB.Lines()
 
@@ -77,7 +75,6 @@ func BenchmarkFullDiffSource(b *testing.B) {
 			sourceB := niceyaml.NewSourceFromString(yamlB, niceyaml.WithName("b"))
 
 			b.ReportAllocs()
-			b.ResetTimer()
 
 			linesA, linesB := sourceA.Lines(), sourceB.Lines()
 

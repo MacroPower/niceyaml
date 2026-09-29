@@ -19,7 +19,6 @@ func BenchmarkView_Segments(b *testing.B) {
 			view := flowMappingView(bc.entries, bc.highlight)
 
 			b.ReportAllocs()
-			b.ResetTimer()
 
 			for b.Loop() {
 				for range view.Segments(0) {
