@@ -2186,6 +2186,111 @@ func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 	}
 }
 
+func TestPrinter_Overlay_KeepsClusters(t *testing.T) {
+	t.Parallel()
+
+	// A grapheme cluster that an overlay covers only in part renders whole
+	// in the style of the rune that starts it, so no escape sequence
+	// splits the cluster. The rows and their widths then match those of
+	// the same line without the overlay. An empty styled means the overlay
+	// styles no rune.
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	family := "\U0001F468\u200d\U0001F469\u200d\U0001F467"
+
+	tcs := map[string]struct {
+		input   string
+		overlay position.Span
+		want    []string
+		styled  string
+		width   int
+	}{
+		"keycap digit overlaid": {
+			input:   "k: 1\ufe0f\u20e32\ufe0f\u20e33\ufe0f\u20e3",
+			overlay: position.NewSpan(3, 4),
+			width:   8,
+			want:    []string{"k: 1\ufe0f\u20e32\ufe0f\u20e3", "3\ufe0f\u20e3"},
+			styled:  "\x1b[31m1\ufe0f\u20e3\x1b[m",
+		},
+		"keycap mark overlaid": {
+			input:   "k: 1\ufe0f\u20e32\ufe0f\u20e33\ufe0f\u20e3",
+			overlay: position.NewSpan(5, 6),
+			width:   8,
+			want:    []string{"k: 1\ufe0f\u20e32\ufe0f\u20e3", "3\ufe0f\u20e3"},
+		},
+		"family member overlaid": {
+			input:   "k: x" + family + " y",
+			overlay: position.NewSpan(6, 7),
+			width:   6,
+			want:    []string{"k: x" + family, "y"},
+		},
+		"family member through the next letter overlaid": {
+			input:   "k: x" + family + "yz",
+			overlay: position.NewSpan(6, 10),
+			width:   6,
+			want:    []string{"k:", "x" + family + "yz"},
+			styled:  family + "\x1b[31my\x1b[m",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := printer.New(
+				printer.WithStyles(style.New(lipgloss.NewStyle(), style.Set(kind.GenericHighlight, red))),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithGutter(printer.NoGutter),
+				printer.WithWrap(tc.width),
+			)
+
+			plainView := niceyaml.NewSourceFromString(tc.input).View()
+			view := niceyaml.NewSourceFromString(tc.input).View()
+			view.AddOverlay(kind.GenericHighlight, position.NewRange(
+				position.New(0, tc.overlay.Start),
+				position.New(0, tc.overlay.End),
+			))
+
+			got := p.Print(view)
+			rows := strings.Split(got, "\n")
+
+			plain := make([]string, len(rows))
+			for i, row := range rows {
+				plain[i] = ansi.Strip(row)
+			}
+
+			assert.Equal(t, tc.want, plain)
+			assert.Equal(t, ansi.Strip(p.Print(plainView)), ansi.Strip(got))
+			assert.Equal(t, p.Layout(plainView).Width(), p.Layout(view).Width())
+
+			if tc.styled == "" {
+				assert.Equal(t, ansi.Strip(got), got)
+			} else {
+				assert.Contains(t, got, tc.styled)
+			}
+
+			// A row runs past the width only when it holds a lone cluster
+			// wider than the width.
+			for i, row := range plain {
+				if cluster, _ := ansi.FirstGraphemeCluster(row, ansi.GraphemeWidth); cluster != row {
+					assert.LessOrEqual(t, lipgloss.Width(row), tc.width, "row %d: %q", i, row)
+				}
+			}
+
+			// The container pads each row by its whole clusters, so every
+			// row of the frame takes the same cells.
+			framed := p.With(
+				printer.WithWrap(0),
+				printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
+				printer.WithContainerWidth(20),
+			).Print(view)
+
+			for i, row := range strings.Split(framed, "\n") {
+				assert.Equal(t, 20, lipgloss.Width(ansi.Strip(row)), "row %d: %q", i, row)
+			}
+		})
+	}
+}
+
 func TestPrinter_WordWrap_NoEmptyRows(t *testing.T) {
 	t.Parallel()
 

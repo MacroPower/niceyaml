@@ -25,7 +25,10 @@
 // styles a column span. [line.View.AddOverlay] adds one that replaces the
 // style underneath, and [line.View.BlendOverlay] adds one that mixes with
 // it. Error positions use the first and search highlights the second, so a
-// match keeps the token or diff color it covers.
+// match keeps the token or diff color it covers. The printer draws each
+// grapheme cluster, such as an emoji ZWJ sequence, whole in the style of
+// its first rune. An overlay that covers part of a cluster therefore
+// styles all of it when it covers that rune and none of it otherwise.
 //
 // # Annotations
 //

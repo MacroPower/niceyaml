@@ -1007,8 +1007,11 @@ type runSpan struct {
 // one styled run per run of segments from [line.View.Segments] that
 // style the same. A deleted or inserted line takes the diff style for its
 // flag, and any other line takes the kind of each segment, with the
-// overlays that cover the segment applied over that. It returns the
-// rendered content and a [runSpan] for each run, in order.
+// overlays that cover the segment applied over that. A run never ends
+// inside a grapheme cluster, so no escape sequence splits one. A cluster
+// that segments of different styles share renders in the style of the
+// segment holding its first rune, the one [cells.Row] measures it by. It
+// returns the rendered content and a [runSpan] for each run, in order.
 func (p *Printer) renderRuns(view *line.View, idx int) (string, []runSpan) {
 	var base kind.Kind
 
@@ -1059,9 +1062,43 @@ func (p *Printer) renderRuns(view *line.View, idx int) (string, []runSpan) {
 		shown += span.shownLen
 	}
 
-	for seg := range view.Segments(idx) {
+	segs := slices.Collect(view.Segments(idx))
+
+	var content strings.Builder
+
+	for _, seg := range segs {
+		content.WriteString(seg.Text)
+	}
+
+	row := cells.NewRow(content.String())
+	at := 0 // The column of the content the next rune takes.
+
+	for _, seg := range segs {
 		if base != "" {
 			seg.Kind = base
+		}
+
+		// The runes at the start of the segment that continue the last
+		// cluster of the run stay in that run, whatever their style.
+		cut := len(seg.Text)
+
+		for i := range seg.Text {
+			if row.Start(at) == at {
+				cut = i
+
+				break
+			}
+
+			at++
+		}
+
+		run.WriteString(seg.Text[:cut])
+
+		text := seg.Text[cut:]
+		at += utf8.RuneCountInString(text)
+
+		if text == "" {
+			continue
 		}
 
 		key := blendKey(seg)
@@ -1071,7 +1108,7 @@ func (p *Printer) renderRuns(view *line.View, idx int) (string, []runSpan) {
 			runKey, runSeg, started = key, seg, true
 		}
 
-		run.WriteString(seg.Text)
+		run.WriteString(text)
 	}
 
 	flush()
