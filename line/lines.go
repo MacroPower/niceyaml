@@ -1,8 +1,10 @@
 package line
 
 import (
+	"cmp"
 	"fmt"
 	"iter"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -309,38 +311,104 @@ func (ls Lines) All(spans ...position.Span) iter.Seq2[int, *Line] {
 // [Line.Width].
 func (ls Lines) Runes(ranges ...position.Range) iter.Seq2[position.Position, rune] {
 	return func(yield func(position.Position, rune) bool) {
+		if len(ranges) == 0 {
+			every := position.Spans{position.NewSpan(0, math.MaxInt)}
+
+			for i := range ls.lines {
+				if !ls.yieldRunes(i, every, yield) {
+					return
+				}
+			}
+
+			return
+		}
+
 		// A range holds runes only on the lines from its start line through
 		// its end line, so [Lines.All] over those line spans visits each
-		// line that any range touches once, in content order. Without
-		// ranges there are no spans, and All visits every line. Capping the
+		// line that any range touches once, in content order. Capping the
 		// end line first keeps the span end from overflowing.
 		spans := make([]position.Span, len(ranges))
 		for j, rng := range ranges {
 			spans[j] = position.NewSpan(rng.Start.Line, min(rng.End.Line, len(ls.lines)-1)+1)
 		}
 
+		// The lines come in ascending order, so a sweep over the ranges
+		// sorted by start line keeps the ranges on the current line
+		// active. Each line then walks its runes once against the merged
+		// columns of those ranges, whatever the number of ranges.
+		sorted := slices.Clone(ranges)
+		slices.SortFunc(sorted, func(a, b position.Range) int {
+			return cmp.Compare(a.Start.Line, b.Start.Line)
+		})
+
+		var (
+			active []position.Range
+			cols   []position.Span
+			next   int
+		)
+
 		for i := range ls.All(spans...) {
-			if !ls.yieldRunes(i, ranges, yield) {
+			for ; next < len(sorted) && sorted[next].Start.Line <= i; next++ {
+				active = append(active, sorted[next])
+			}
+
+			active = slices.DeleteFunc(active, func(rng position.Range) bool {
+				return rng.End.Line < i
+			})
+
+			cols = cols[:0]
+			for _, rng := range active {
+				cols = append(cols, lineCols(rng, i))
+			}
+
+			if !ls.yieldRunes(i, mergeSpans(cols, math.MaxInt), yield) {
 				return
 			}
 		}
 	}
 }
 
-// yieldRunes yields every rune of the line at index lineIdx as a position.
-// When ranges is not empty, it yields only the runes inside one of them.
-// Returns false when yield stops the iteration.
-func (ls Lines) yieldRunes(lineIdx int, ranges []position.Range, yield func(position.Position, rune) bool) bool {
-	for col, r := range ls.lines[lineIdx].Runes() {
-		pos := position.New(lineIdx, col)
+// lineCols returns the columns of line i that r contains, as
+// [position.Range.Contains] tests them. A range that goes on past line i
+// contains every column after its start, the line ending included.
+func lineCols(r position.Range, i int) position.Span {
+	start, end := 0, math.MaxInt
 
-		if len(ranges) > 0 && !slices.ContainsFunc(ranges, func(rng position.Range) bool {
-			return rng.Contains(pos)
-		}) {
+	if i == r.Start.Line {
+		start = r.Start.Col
+	}
+
+	if i == r.End.Line {
+		end = r.End.Col
+	}
+
+	return position.NewSpan(start, end)
+}
+
+// yieldRunes yields the runes of the line at index lineIdx that lie
+// within one of cols, which must be sorted and disjoint, as positions.
+// Returns false when yield stops the iteration.
+func (ls Lines) yieldRunes(lineIdx int, cols position.Spans, yield func(position.Position, rune) bool) bool {
+	if len(cols) == 0 {
+		return true
+	}
+
+	k := 0
+
+	for col, r := range ls.lines[lineIdx].Runes() {
+		for k < len(cols) && cols[k].End <= col {
+			k++
+		}
+
+		if k == len(cols) {
+			return true
+		}
+
+		if col < cols[k].Start {
 			continue
 		}
 
-		if !yield(pos, r) {
+		if !yield(position.New(lineIdx, col), r) {
 			return false
 		}
 	}

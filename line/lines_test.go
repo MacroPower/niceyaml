@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -2774,6 +2775,47 @@ func TestLines_View(t *testing.T) {
 					position.New(1, 0), position.New(1, 1), position.New(1, 3), position.New(1, 4),
 				},
 			},
+			"across lines with the line ending": {
+				ranges: []position.Range{
+					position.NewRange(position.New(0, 8), position.New(1, 2)),
+				},
+				want: []position.Position{
+					position.New(0, 8), position.New(0, 9), position.New(0, 10),
+					position.New(1, 0), position.New(1, 1),
+				},
+			},
+			"ending at the start of the next line": {
+				ranges: []position.Range{
+					position.NewRange(position.New(0, 9), position.New(1, 0)),
+				},
+				want: []position.Position{position.New(0, 9), position.New(0, 10)},
+			},
+			"a wide range and a narrow one that starts later": {
+				ranges: []position.Range{
+					position.NewRange(position.New(0, 0), position.New(2, 1)),
+					position.NewRange(position.New(1, 4), position.New(2, 3)),
+				},
+				want: []position.Position{
+					position.New(0, 0), position.New(0, 1), position.New(0, 2), position.New(0, 3),
+					position.New(0, 4), position.New(0, 5), position.New(0, 6), position.New(0, 7),
+					position.New(0, 8), position.New(0, 9), position.New(0, 10),
+					position.New(1, 0), position.New(1, 1), position.New(1, 2), position.New(1, 3),
+					position.New(1, 4), position.New(1, 5),
+					position.New(2, 0), position.New(2, 1), position.New(2, 2),
+				},
+			},
+			"negative start column": {
+				ranges: []position.Range{
+					position.NewRange(position.New(1, -2), position.New(1, 1)),
+				},
+				want: []position.Position{position.New(1, 0)},
+			},
+			"inverted": {
+				ranges: []position.Range{
+					position.NewRange(position.New(1, 3), position.New(0, 0)),
+					position.NewRange(position.New(2, 3), position.New(2, 1)),
+				},
+			},
 		}
 
 		for name, tc := range tcs {
@@ -2791,6 +2833,57 @@ func TestLines_View(t *testing.T) {
 				assert.Equal(t, tc.want, got)
 			})
 		}
+	})
+
+	t.Run("Runes with ranges yields the runes they contain", func(t *testing.T) {
+		t.Parallel()
+
+		lines := line.NewLines(tokens.Tokenize(input))
+
+		// Every range of the content, from every start to every end in
+		// both orders, one at a time and all together.
+		var ranges []position.Range
+
+		for startLine := range 3 {
+			for endLine := range 3 {
+				for startCol := -1; startCol < 12; startCol += 3 {
+					for endCol := 0; endCol < 12; endCol += 4 {
+						ranges = append(ranges, position.NewRange(
+							position.New(startLine, startCol),
+							position.New(endLine, endCol),
+						))
+					}
+				}
+			}
+		}
+
+		contained := func(rs ...position.Range) []position.Position {
+			var out []position.Position
+
+			for pos := range lines.Runes() {
+				if slices.ContainsFunc(rs, func(r position.Range) bool { return r.Contains(pos) }) {
+					out = append(out, pos)
+				}
+			}
+
+			return out
+		}
+
+		collect := func(rs ...position.Range) []position.Position {
+			var out []position.Position
+
+			for pos := range lines.Runes(rs...) {
+				out = append(out, pos)
+			}
+
+			return out
+		}
+
+		for _, r := range ranges {
+			assert.Equal(t, contained(r), collect(r), "range %s", r)
+		}
+
+		assert.Equal(t, contained(ranges...), collect(ranges...), "all ranges")
 	})
 
 	t.Run("CRLF endings do not count toward width or runes", func(t *testing.T) {
