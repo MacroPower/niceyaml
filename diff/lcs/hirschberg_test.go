@@ -326,7 +326,8 @@ func TestHirschberg_Reuse(t *testing.T) {
 		{Kind: lcs.OpEqual, Before: 2, After: 1},
 	}, ops2)
 
-	// The first result is a copy, so the second call left it intact.
+	// Each call returns a fresh slice, so the second call left the first
+	// result intact.
 	assert.Equal(t, []lcs.Op{
 		{Kind: lcs.OpEqual, Before: 0, After: 0},
 		{Kind: lcs.OpDelete, Before: 1, After: -1},

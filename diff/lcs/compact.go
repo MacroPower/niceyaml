@@ -1,18 +1,31 @@
 package lcs
 
 // compact slides each run of changes that recurse marked with
-// [shiftBoundaries], then builds b.ops from the marks. A slide swaps a
-// changed line with an equal line beside its run, so the set of lines
-// the two inputs pair up stays the same and only the place of each run
-// among them changes. The result therefore no longer depends on where
-// recurse put a run among equal lines. When the inputs share several
-// longest common subsequences, the split points that midpoint finds
-// still choose which one the result keeps.
-func (b *buffers) compact(before, after []string) {
+// [shiftBoundaries], then returns the ops that the marks describe. A
+// slide swaps a changed line with an equal line beside its run, so the
+// set of lines the two inputs pair up stays the same and only the place
+// of each run among them changes. The result therefore no longer depends
+// on where recurse put a run among equal lines. When the inputs share
+// several longest common subsequences, the split points that midpoint
+// finds still choose which one the result keeps.
+func (b *buffers) compact(before, after []string) []Op {
 	shiftBoundaries(before, b.changedBefore, b.changedAfter)
 	shiftBoundaries(after, b.changedAfter, b.changedBefore)
 
-	b.ops = b.ops[:0]
+	// Every line of after is an insertion or pairs with a line of before,
+	// so the result holds one op per line of after and per deletion.
+	n := len(after)
+	for _, changed := range b.changedBefore {
+		if changed {
+			n++
+		}
+	}
+
+	if n == 0 {
+		return nil
+	}
+
+	ops := make([]Op, 0, n)
 
 	i, j := 0, 0
 	for i < len(before) || j < len(after) {
@@ -21,19 +34,21 @@ func (b *buffers) compact(before, after []string) {
 		// ahead of the insertions of the same run.
 		switch {
 		case i < len(before) && b.changedBefore[i]:
-			b.ops = append(b.ops, Op{Kind: OpDelete, Before: i, After: -1})
+			ops = append(ops, Op{Kind: OpDelete, Before: i, After: -1})
 			i++
 
 		case j < len(after) && b.changedAfter[j]:
-			b.ops = append(b.ops, Op{Kind: OpInsert, Before: -1, After: j})
+			ops = append(ops, Op{Kind: OpInsert, Before: -1, After: j})
 			j++
 
 		default:
-			b.ops = append(b.ops, Op{Kind: OpEqual, Before: i, After: j})
+			ops = append(ops, Op{Kind: OpEqual, Before: i, After: j})
 			i++
 			j++
 		}
 	}
+
+	return ops
 }
 
 // shiftBoundaries slides each run of changed lines in one input to a

@@ -20,10 +20,10 @@ import (
 // of large inputs that differ in a few lines therefore runs in close to
 // linear time, wherever those lines sit, and so does a diff of inputs
 // whose changed lines each appear in only one of them. The search keeps
-// two arrays of O(m+n) integers. The result holds one [Op]
-// per line of either input, so the accumulated ops take space linear in
-// the length of both inputs as well. The pool keeps buffers of that
-// capacity for later calls until the garbage collector clears it.
+// two arrays of O(m+n) integers. The result holds one [Op] per line of
+// either input, so it takes space linear in the length of both inputs as
+// well. The pool keeps the working buffers for later calls until the
+// garbage collector clears it.
 //
 // Repeated lines often allow several shortest edit scripts. When the
 // inputs hold the same lines in a different order, several longest
@@ -51,8 +51,8 @@ func NewHirschberg() *Hirschberg {
 	return &Hirschberg{}
 }
 
-// Diff returns operations that transform before into after. The returned slice
-// is a copy, so it stays valid across later calls.
+// Diff returns operations that transform before into after. Each call
+// returns a fresh slice, so it stays valid across later calls.
 func (h *Hirschberg) Diff(before, after []string) []Op {
 	b, ok := h.pool.Get().(*buffers)
 	if !ok {
@@ -73,13 +73,8 @@ func (h *Hirschberg) Diff(before, after []string) []Op {
 	numIDs := b.intern(before[prefix:bEnd], after[prefix:aEnd])
 	b.discard(prefix, numIDs)
 	b.recurse(0, len(b.beforeIDs), 0, len(b.afterIDs))
-	b.compact(before, after)
 
-	if len(b.ops) == 0 {
-		return nil
-	}
-
-	return slices.Clone(b.ops)
+	return b.compact(before, after)
 }
 
 // buffers is the working memory of one [Hirschberg.Diff] call.
@@ -110,29 +105,20 @@ type buffers struct {
 	// slides them into place.
 	changedBefore, changedAfter []bool
 
-	// Accumulated diff operations.
-	ops []Op
-
 	// Most entries ids has room for. It starts at the number of entries
 	// intern made the map for and grows with the most the map has held.
 	idsPeak int
 }
 
-// reset empties the operations, clears the change marks, and sizes the
-// buffers for inputs of the given lengths, whose search covers bLen before
-// lines and aLen after lines.
+// reset clears the change marks and sizes the buffers for inputs of the
+// given lengths, whose search covers bLen before lines and aLen after
+// lines.
 func (b *buffers) reset(beforeLen, afterLen, bLen, aLen int) {
-	b.ops = b.ops[:0]
-
 	// The walks of midpoint touch the diagonals from -aLen-1 through
 	// bLen+1.
 	if needed := bLen + aLen + 3; cap(b.fwdDiag) < needed {
 		b.fwdDiag = make([]int, needed)
 		b.bwdDiag = make([]int, needed)
-	}
-
-	if worst := beforeLen + afterLen; cap(b.ops) < worst {
-		b.ops = make([]Op, 0, worst)
 	}
 
 	b.beforeIDs = slices.Grow(b.beforeIDs[:0], bLen)[:bLen]
