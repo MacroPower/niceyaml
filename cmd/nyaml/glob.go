@@ -19,6 +19,10 @@ var (
 
 	// The error for an argument that names a directory.
 	errIsDirectory = errors.New("is a directory")
+
+	// The error for a glob pattern with a ".." element after a
+	// metacharacter.
+	errDotDotAfterMeta = errors.New(`".." element after a metacharacter`)
 )
 
 // glob returns the file paths matching pattern. It excludes directories
@@ -27,7 +31,10 @@ var (
 // Wildcards do not follow symlinked directories, so a symlink loop cannot
 // repeat a file or make a recursive pattern walk forever. The function
 // still follows a symlink in the literal part of the pattern, before any
-// metacharacter.
+// metacharacter. The OS resolves a ".." there, so "link/../*.yaml" steps
+// up from the directory the link leads to, as the shell does. A ".."
+// element after a metacharacter is an error wrapping
+// [errDotDotAfterMeta].
 //
 // Unlike [path/filepath.Glob], glob supports ** for recursive directory
 // matching. The pattern syntax follows doublestar conventions:
@@ -44,17 +51,14 @@ var (
 func glob(pattern string) ([]string, error) {
 	// Doublestar matches a brace group through io/fs, which rejects "."
 	// and ".." elements, so an alternative holding one would match
-	// nothing. Globbing each alternative on its own lets the literal part
-	// of each keep such elements. Braces expand after the separators turn
-	// into slashes, so a Windows separator does not read as an escape.
+	// nothing. Globbing each alternative on its own puts such elements in
+	// its literal part, where the OS resolves them. Braces expand after
+	// the separators turn into slashes, so a Windows separator does not
+	// read as an escape.
 	var matches []string
 
 	for _, alt := range filepaths.ExpandBraces(filepath.ToSlash(pattern)) {
-		altMatches, err := doublestar.FilepathGlob(
-			alt,
-			doublestar.WithFilesOnly(),
-			doublestar.WithNoFollow(),
-		)
+		altMatches, err := globAlternative(alt)
 		if err != nil {
 			return nil, fmt.Errorf("glob %q: %w", pattern, err)
 		}
@@ -79,6 +83,79 @@ func glob(pattern string) ([]string, error) {
 	slices.Sort(files)
 
 	return slices.Compact(files), nil
+}
+
+// globAlternative returns the paths matching pattern, a pattern with
+// slash separators and no brace group left to expand. It may include
+// directories.
+//
+// The literal part of the pattern, before the first metacharacter, stays
+// as typed, both where the walk starts and in each match. Cleaning it as
+// text, as [doublestar.FilepathGlob] does, would drop a ".." together with
+// a symlinked directory before it, while the OS steps up from the
+// directory the link leads to.
+func globAlternative(pattern string) ([]string, error) {
+	base, rest := doublestar.SplitPattern(pattern)
+
+	// The rest starts at the element holding the first metacharacter, or
+	// is the last element when the pattern holds none. A "." or ".." as
+	// that last element names a directory, which matches no file.
+	if rest == "." || rest == ".." {
+		return nil, nil
+	}
+
+	// The walk matches the rest through io/fs, which rejects empty, "."
+	// and ".." elements. An empty or "." element names the directory
+	// before it, so it can go. The walk has no way to step up out of a
+	// directory a wildcard matched, so a ".." is an error.
+	elems := strings.Split(rest, "/")
+	kept := elems[:0]
+
+	for _, elem := range elems {
+		switch elem {
+		case "", ".":
+			continue
+		case "..":
+			return nil, errDotDotAfterMeta
+		}
+
+		kept = append(kept, elem)
+	}
+
+	rest = strings.Join(kept, "/")
+	if rest == "" {
+		return nil, nil
+	}
+
+	// A bare volume name such as "C:" names the current directory of that
+	// volume, while the pattern named its root.
+	if vol := filepath.VolumeName(base); vol != "" && vol == base {
+		base += "/"
+	}
+
+	matches, err := doublestar.Glob(
+		os.DirFS(filepath.FromSlash(base)),
+		rest,
+		doublestar.WithFilesOnly(),
+		doublestar.WithNoFollow(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	prefix := base
+	switch {
+	case base == ".":
+		prefix = ""
+	case !strings.HasSuffix(base, "/"):
+		prefix = base + "/"
+	}
+
+	for i, match := range matches {
+		matches[i] = filepath.FromSlash(prefix + match)
+	}
+
+	return matches, nil
 }
 
 // containsGlobChars reports whether s contains glob metacharacters.

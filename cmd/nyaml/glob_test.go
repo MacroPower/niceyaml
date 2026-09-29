@@ -383,16 +383,28 @@ func TestGlob(t *testing.T) {
 		"brace alternatives with dot-dot and dot": {
 			pattern: subdir + "/{../k8s,.}/*.yaml",
 			wantFiles: []string{
-				filepath.Join(k8sDir, "deploy.yaml"),
-				filepath.Join(subdir, "c.yaml"),
+				subdir + "/../k8s/deploy.yaml",
+				subdir + "/./c.yaml",
 			},
 		},
 		"brace alternative with a leading dot": {
 			pattern: tmpDir + "/{./a,k8s/deploy}.yaml",
 			wantFiles: []string{
-				filepath.Join(tmpDir, "a.yaml"),
+				tmpDir + "/./a.yaml",
 				filepath.Join(k8sDir, "deploy.yaml"),
 			},
+		},
+		"separator before the wildcard is not doubled": {
+			pattern:   tmpDir + "//*.yaml",
+			wantFiles: []string{filepath.Join(tmpDir, "a.yaml")},
+		},
+		"dot and empty elements after a wildcard": {
+			pattern:   tmpDir + "/*//./c.yaml",
+			wantFiles: []string{filepath.Join(subdir, "c.yaml")},
+		},
+		"dot-dot after a wildcard": {
+			pattern: tmpDir + "/sub*/../a.yaml",
+			err:     errDotDotAfterMeta.Error(),
 		},
 		"brace alternatives matching one file": {
 			pattern:   tmpDir + "/{a,[a]}.yaml",
@@ -428,15 +440,17 @@ func TestGlobSymlinks(t *testing.T) {
 	// Create a directory structure with symlinks:
 	// tmpDir/
 	//   sub/
+	//     deep/
 	//     x.yaml
 	//     up -> ..
 	//     up2 -> ..
+	//   deeplink -> sub/deep
 	//   dir.yaml -> sub
 	//   file.yaml -> sub/x.yaml
 	tmpDir := t.TempDir()
 	subdir := filepath.Join(tmpDir, "sub")
 
-	require.NoError(t, os.MkdirAll(subdir, 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(subdir, "deep"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(subdir, "x.yaml"), []byte("x"), 0o644))
 
 	err := os.Symlink("..", filepath.Join(subdir, "up"))
@@ -447,6 +461,7 @@ func TestGlobSymlinks(t *testing.T) {
 	require.NoError(t, os.Symlink("..", filepath.Join(subdir, "up2")))
 	require.NoError(t, os.Symlink("sub", filepath.Join(tmpDir, "dir.yaml")))
 	require.NoError(t, os.Symlink(filepath.Join("sub", "x.yaml"), filepath.Join(tmpDir, "file.yaml")))
+	require.NoError(t, os.Symlink(filepath.Join("sub", "deep"), filepath.Join(tmpDir, "deeplink")))
 
 	tcs := map[string]struct {
 		pattern   string
@@ -462,6 +477,12 @@ func TestGlobSymlinks(t *testing.T) {
 		"wildcard skips symlinked directories": {
 			pattern:   filepath.Join(tmpDir, "*.yaml"),
 			wantFiles: []string{filepath.Join(tmpDir, "file.yaml")},
+		},
+		"dot-dot after a symlinked directory": {
+			// The OS steps up from the directory deeplink leads to, so the
+			// pattern matches sub/x.yaml rather than file.yaml.
+			pattern:   tmpDir + "/deeplink/../*.yaml",
+			wantFiles: []string{tmpDir + "/deeplink/../x.yaml"},
 		},
 	}
 
