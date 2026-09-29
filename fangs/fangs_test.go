@@ -270,6 +270,33 @@ func TestErrorHandler(t *testing.T) {
 				"",
 			),
 		},
+		"non-usage error opening with accepts": {
+			err: errors.New("accepts only .yaml files"),
+			want: stringtest.JoinLF(
+				"Error",
+				"  accepts only .yaml files",
+				"",
+				"",
+			),
+		},
+		"non-usage error opening with invalid argument": {
+			err: errors.New("invalid argument: path must be absolute"),
+			want: stringtest.JoinLF(
+				"Error",
+				"  invalid argument: path must be absolute",
+				"",
+				"",
+			),
+		},
+		"non-usage error opening with requires at least": {
+			err: errors.New("requires at least one schema"),
+			want: stringtest.JoinLF(
+				"Error",
+				"  requires at least one schema",
+				"",
+				"",
+			),
+		},
 		"non-usage error with flag word": {
 			err: errors.New("flagged as incorrect"),
 			want: stringtest.JoinLF(

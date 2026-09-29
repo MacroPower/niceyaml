@@ -3,6 +3,7 @@ package fangs
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"charm.land/fang/v2"
@@ -126,9 +127,17 @@ func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 // cannot reach the writer has nowhere to report that.
 func ignoreN(_ int, _ error) {}
 
+// argCountError matches the messages of Cobra's argument-count validators,
+// such as "accepts at most 2 arg(s), received 3".
+var argCountError = regexp.MustCompile(
+	`^(accepts (at most \d+|between \d+ and \d+|\d+)|requires at least \d+) arg\(s\)`,
+)
+
 // isUsageError reports whether err looks like a Cobra usage error. The
-// prefixes cover Cobra's flag parser, its command lookup, its argument-count
-// validators, its required-flag check, and its flag groups.
+// patterns cover Cobra's flag parser, its command lookup, its argument
+// validators, its required-flag check, and its flag groups. They follow
+// Cobra's exact wording, so an application error that opens with a word
+// such as "accepts" gets no usage hint.
 // This is a workaround until Cobra exposes a proper usage error type.
 // See: https://github.com/spf13/cobra/pull/2266
 func isUsageError(err error) bool {
@@ -137,15 +146,17 @@ func isUsageError(err error) bool {
 	}
 
 	s := err.Error()
+	if argCountError.MatchString(s) {
+		return true
+	}
+
 	for _, prefix := range []string{
 		"flag needs an argument:",
 		"unknown flag:",
 		"unknown shorthand flag:",
 		"bad flag syntax:",
 		"unknown command",
-		"invalid argument",
-		"requires at least",
-		"accepts ",
+		`invalid argument "`,
 		"required flag(s)",
 		"if any flags in the group",
 		"at least one of the flags in the group",
