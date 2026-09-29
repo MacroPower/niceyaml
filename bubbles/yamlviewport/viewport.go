@@ -1880,8 +1880,9 @@ func (m *Model) TotalLineCount() int {
 // TopLine returns the index of the line that owns the top row of the view.
 // It counts lines as [Model.TotalLineCount] does, not rows, so a line that
 // wraps to several rows counts once. When the top row belongs to the frame
-// of the container style, TopLine returns the first line below that frame.
-// It returns 0 when the view has no lines.
+// of the container style, TopLine returns the nearest line: the first line
+// for a row in the top frame, and the last line for a row in the bottom
+// frame. It returns 0 when the view has no lines.
 func (m *Model) TopLine() int {
 	first, _ := m.rowWindow()
 

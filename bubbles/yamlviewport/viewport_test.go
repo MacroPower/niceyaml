@@ -1478,6 +1478,9 @@ func TestViewport_ContainerFrame(t *testing.T) {
 			for offset := range total - tc.height + 1 {
 				m.SetYOffset(offset)
 
+				// A top row in the frame reports the nearest line.
+				assert.Equal(t, min(max(offset-tc.top, 0), lines-1), m.TopLine(), "offset %d", offset)
+
 				rows := strings.Split(m.View(), "\n")
 				require.Len(t, rows, tc.height)
 
