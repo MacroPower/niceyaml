@@ -56,6 +56,20 @@ func (e sparseJoinError) Unwrap() []error {
 	return e.errs
 }
 
+// violationsError is a multi-error of its own type, as a validator might
+// build one. Its message counts its branches rather than listing them.
+type violationsError []error
+
+// Error returns the number of branches.
+func (e violationsError) Error() string {
+	return fmt.Sprintf("%d violations", len(e))
+}
+
+// Unwrap returns the branches.
+func (e violationsError) Unwrap() []error {
+	return e
+}
+
 // countingError is an error that counts the calls to its Error method.
 type countingError struct {
 	calls *atomic.Int64
@@ -213,6 +227,27 @@ func TestErrorTree_New_MultiWrap(t *testing.T) {
 				Children: []niceyaml.ErrorTree{
 					{Text: "x", Children: []niceyaml.ErrorTree{{Text: "first"}}},
 					{Text: "y", Children: []niceyaml.ErrorTree{{Text: "second"}}},
+				},
+			},
+		},
+		"multi-error of its own type keeps each branch": {
+			err: violationsError{errA, errB},
+			want: niceyaml.ErrorTree{
+				Text: "2 violations",
+				Children: []niceyaml.ErrorTree{
+					{Text: "first"},
+					{Text: "second"},
+				},
+			},
+		},
+		"bound multi-error of its own type keeps each branch": {
+			err: yamltest.Bind(t, niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml")),
+				violationsError{errA, errB}),
+			want: niceyaml.ErrorTree{
+				Text: "f.yaml: 2 violations",
+				Children: []niceyaml.ErrorTree{
+					{Text: "first"},
+					{Text: "second"},
 				},
 			},
 		},

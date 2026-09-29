@@ -2,6 +2,7 @@ package niceyaml
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -124,8 +125,13 @@ func joinBranches(err error) ([]error, bool) {
 	return branches, true
 }
 
-// joinType is the type of the errors [errors.Join] builds.
-var joinType = reflect.TypeOf(errors.Join(errors.New("")))
+var (
+	// The type of the errors [errors.Join] builds.
+	joinType = reflect.TypeOf(errors.Join(errors.New("")))
+
+	// The type of the errors [fmt.Errorf] builds with several %w verbs.
+	wrapErrorsType = reflect.TypeOf(fmt.Errorf("%w%w", errors.New(""), errors.New("")))
+)
 
 // isJoinMessage reports whether msg is the messages of branches one per
 // line, which is how [errors.Join] writes the message of the error it
@@ -229,30 +235,33 @@ func walkChildren(err error, onBinding func(*SourceError), onChild func(n error,
 }
 
 // followBranches returns the branches of err, an error that unwraps to
-// branches, that stand below it in the tree. A join, as [joinBranches]
-// finds one, keeps each branch but the nil ones. A wrapper with several
-// %w verbs, such as one [fmt.Errorf] builds from a sentinel and a cause,
+// branches, that stand below it in the tree. A wrapper that [fmt.Errorf]
+// builds with several %w verbs, such as one from a sentinel and a cause,
 // is one error that classifies another, so it keeps only the branches
 // that carry a location or add errors below them. A branch with neither,
 // such as the sentinel, adds nothing its text in the message of the
 // wrapper does not show already. When the wrapper keeps a single branch,
 // the second result is that branch, and the cause chain goes on through
 // it as it does through a wrapper with one %w verb, so the wrapper binds
-// where the branch does.
+// where the branch does. Any other error that unwraps to several, such
+// as a join or a multi-error of its own type, reports several errors, so
+// it keeps each branch but the nil ones. So does a wrapper whose message
+// reads as a join, as [joinBranches] finds one.
 func followBranches(err error, branches []error) ([]error, error) {
 	_, joined := joinBranches(err)
+	wrapper := !joined && reflect.TypeOf(err) == wrapErrorsType
 
 	var kept []error
 
 	for _, branch := range branches {
-		if isNothing(branch) || (!joined && isLeaf(branch)) {
+		if isNothing(branch) || (wrapper && isLeaf(branch)) {
 			continue
 		}
 
 		kept = append(kept, branch)
 	}
 
-	if !joined && len(kept) == 1 {
+	if wrapper && len(kept) == 1 {
 		return nil, kept[0]
 	}
 
