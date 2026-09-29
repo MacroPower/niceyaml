@@ -268,8 +268,8 @@ func TestNewModelDefaultTheme(t *testing.T) {
 				lineNumbers: tc.lineNumbers,
 			})
 
-			assert.Equal(t, theme.Charm.Name, m.currentTheme)
-			assert.Equal(t, theme.Charm.Name, m.themeList[m.themeIndex])
+			assert.Equal(t, theme.Charm.Name, m.themeList[m.themeIndex].Name)
+			assert.Equal(t, theme.Charm.Styles(), m.styles)
 
 			// The first frame renders as the theme picker would after
 			// switching to the default theme.
@@ -279,19 +279,26 @@ func TestNewModelDefaultTheme(t *testing.T) {
 			require.True(t, ok)
 
 			want := got
-			want.applyTheme(theme.Charm.Name)
+			want.selectTheme(want.themeIndex)
 
 			assert.Equal(t, want.baseView(), got.baseView())
 		})
 	}
 }
 
-func TestDarkThemeNames(t *testing.T) {
+func TestThemeListOrder(t *testing.T) {
 	t.Parallel()
 
-	// The theme picker lists the names in the order this returns them.
-	names := darkThemeNames()
+	m := newModel(&modelOptions{})
 
+	names := make([]string, 0, len(m.themeList))
+	for _, th := range m.themeList {
+		assert.Equal(t, theme.Dark, th.Mode, th.Name)
+
+		names = append(names, th.Name)
+	}
+
+	// The theme picker lists the themes in name order.
 	assert.NotEmpty(t, names)
 	assert.True(t, slices.IsSorted(names), "names out of order: %v", names)
 }
@@ -874,7 +881,55 @@ func TestThemePickerMouseWheel(t *testing.T) {
 			assert.Zero(t, got.viewport.YOffset())
 			assert.Zero(t, got.viewport.XOffset())
 			assert.Equal(t, before.themeIndex+tc.want, got.themeIndex)
-			assert.Equal(t, got.themeList[got.themeIndex], got.currentTheme)
+			assert.Equal(t, got.themeList[got.themeIndex].Styles(), got.styles)
+		})
+	}
+}
+
+func TestThemePickerClose(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		key  tea.KeyPressMsg
+		want int
+	}{
+		"esc restores the theme the picker opened with": {
+			key:  tea.KeyPressMsg{Code: tea.KeyEscape},
+			want: 0,
+		},
+		"enter keeps the selected theme": {
+			key:  tea.KeyPressMsg{Code: tea.KeyEnter},
+			want: 2,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var m tea.Model = newModel(&modelOptions{
+				sources: []*niceyaml.Source{
+					niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml")),
+				},
+			})
+
+			m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+			before, ok := m.(model)
+			require.True(t, ok)
+			require.Less(t, before.themeIndex, len(before.themeList)-2)
+
+			m, _ = m.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+			m, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+			m, _ = m.Update(tc.key)
+
+			got, ok := m.(model)
+			require.True(t, ok)
+
+			assert.False(t, got.themePicking)
+			assert.Equal(t, before.themeIndex+tc.want, got.themeIndex)
+			assert.Equal(t, got.themeList[got.themeIndex].Styles(), got.styles)
 		})
 	}
 }

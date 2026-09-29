@@ -37,33 +37,36 @@ type model struct {
 	// The term of the --search flag. The model holds it until the first
 	// [tea.WindowSizeMsg] gives the viewport its size.
 	pendingSearch string
-	currentTheme  string
-	previousTheme string
-	themeList     []string
+	// The themes the picker lists, in the order it lists them.
+	themeList []theme.Theme
 	// Styles of the current theme. The model builds them once per theme
 	// switch, and the printer, the status bar, and the theme picker share
 	// them.
-	styles       style.Styles
-	viewport     yamlviewport.Model
-	width        int
-	height       int
-	themeIndex   int
-	lineNumbers  bool
-	searching    bool
-	themePicking bool
+	styles   style.Styles
+	viewport yamlviewport.Model
+	width    int
+	height   int
+	// Index into themeList of the current theme.
+	themeIndex int
+	// The themeIndex the picker opened with, which esc returns to.
+	previousIndex int
+	lineNumbers   bool
+	searching     bool
+	themePicking  bool
 }
 
 func newModel(opts *modelOptions) model {
-	themeList := darkThemeNames()
+	themes := theme.Builtin().Mode(theme.Dark).All()
 
 	m := model{
 		viewport:    yamlviewport.New(),
-		themeList:   themeList,
-		themeIndex:  max(0, slices.Index(themeList, theme.Charm.Name)),
+		themeList:   themes,
 		lineNumbers: opts.lineNumbers,
 	}
 
-	m.applyTheme(theme.Charm.Name)
+	m.selectTheme(slices.IndexFunc(themes, func(t theme.Theme) bool {
+		return t.Name == theme.Charm.Name
+	}))
 
 	revisions := make([]yamlviewport.Revision, len(opts.sources))
 	for i, source := range opts.sources {
@@ -174,7 +177,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("t"))):
 			m.themePicking = true
-			m.previousTheme = m.currentTheme
+			m.previousIndex = m.themeIndex
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("/"))):
 			m.searching = true
@@ -257,11 +260,7 @@ func (m *model) updateThemeInput(msg tea.KeyPressMsg) {
 	case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
 		// Revert to previous theme and close.
 		m.themePicking = false
-		m.applyTheme(m.previousTheme)
-
-		// A theme outside the picker's list has no index, so the selection
-		// falls back to the first entry.
-		m.themeIndex = max(0, slices.Index(m.themeList, m.previousTheme))
+		m.selectTheme(m.previousIndex)
 
 	case key.Matches(msg, key.NewBinding(key.WithKeys("j", "down"))):
 		m.moveThemeSelection(1)
@@ -294,8 +293,7 @@ func (m *model) moveThemeSelection(delta int) {
 		return
 	}
 
-	m.themeIndex = i
-	m.applyTheme(m.themeList[i])
+	m.selectTheme(i)
 }
 
 // applySearch searches for term and scrolls to its first match. The viewport
@@ -437,7 +435,7 @@ func (m *model) titleLine() string {
 		usedWidth += lipgloss.Width(seg.text) + 1 // +1 for separator.
 	}
 
-	subtitleLeft := fmt.Sprintf(" %s ", m.currentTheme)
+	subtitleLeft := fmt.Sprintf(" %s ", m.themeList[m.themeIndex].Name)
 
 	var subtitleRight string
 
@@ -621,34 +619,13 @@ func buildPrinterOpts(lineNumbers bool, styles style.Styles) []printer.Option {
 	return opts
 }
 
-// darkThemeNames returns the names of every built-in dark theme.
-func darkThemeNames() []string {
-	dark := theme.Builtin().Mode(theme.Dark).All()
-
-	names := make([]string, 0, len(dark))
-	for _, t := range dark {
-		names = append(names, t.Name)
-	}
-
-	return names
-}
-
-// themeStyles returns the styles of the named built-in theme, or the
-// default styles when no theme has that name.
-func themeStyles(name string) style.Styles {
-	if t, ok := theme.Builtin().Get(name); ok {
-		return t.Styles()
-	}
-
-	return style.Default()
-}
-
-// applyTheme switches the model to the named theme. It is the one place
-// that builds a theme's styles and printer, for the first frame and for
-// the theme picker alike.
-func (m *model) applyTheme(name string) {
-	m.currentTheme = name
-	m.styles = themeStyles(name)
+// selectTheme switches the model to the theme at index i of themeList. It
+// is the one place that moves the picker's selection and builds a theme's
+// styles and printer, for the first frame and for the theme picker alike,
+// so the selection and the styles always name the same theme.
+func (m *model) selectTheme(i int) {
+	m.themeIndex = i
+	m.styles = m.themeList[i].Styles()
 	p := printer.New(buildPrinterOpts(m.lineNumbers, m.styles)...)
 	m.viewport.SetPrinter(p)
 }
@@ -679,7 +656,7 @@ func (m *model) renderThemeOverlay() string {
 	var items []string
 
 	for i := scrollOffset; i < len(m.themeList) && len(items) < visibleItems; i++ {
-		name := m.themeList[i]
+		name := m.themeList[i].Name
 		prefix := "  "
 		if i == m.themeIndex {
 			prefix = "> "
