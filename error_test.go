@@ -5066,6 +5066,35 @@ func TestRebase(t *testing.T) {
 		}, got)
 	})
 
+	t.Run("an error that only wraps a join rebases as the join", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		open := niceyaml.NewError("bad open", niceyaml.AtPath(paths.Root().Child("open")))
+		closeErr := niceyaml.NewError("bad close", niceyaml.AtPath(closePath))
+
+		err := niceyaml.Rebase(niceyaml.WrapError(errors.Join(open, closeErr)), hours)
+		require.EqualError(t, err, "$.hours.open: bad open\n$.hours.close: bad close")
+		require.ErrorIs(t, err, open)
+		require.ErrorIs(t, err, closeErr)
+
+		var e *niceyaml.Error
+
+		require.ErrorAs(t, err, &e)
+
+		got := []string{}
+		for se := range niceyaml.AllBindings(dd.Bind(err)) {
+			got = append(got, se.Error())
+		}
+
+		assert.Equal(t, []string{
+			"$.hours.open: bad open\n$.hours.close: bad close",
+			"3:9: $.hours.open: bad open",
+			"4:10: $.hours.close: bad close",
+		}, got)
+	})
+
 	t.Run("a nested error without a location points at the base", func(t *testing.T) {
 		t.Parallel()
 

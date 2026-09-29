@@ -214,9 +214,11 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 //
 // An error joined from several, as [errors.Join] builds one, rebases
 // branch by branch into a new join, so each line of its message carries
-// the path of its own branch. A join whose every branch is a nil
-// [*Error] or [*SourceError] pointer is still an error, and it points at
-// base as an error with no location does.
+// the path of its own branch. An [*Error] that only wraps a join, with
+// no location and no errors nested with [WithErrors], rebases the way
+// the join does, and the result stays an [*Error]. A join whose every
+// branch is a nil [*Error] or [*SourceError] pointer is still an error,
+// and it points at base as an error with no location does.
 //
 // The result wraps err, or each branch of a join, so [errors.Is] and
 // [errors.As] see through it, and the text a wrapper such as [fmt.Errorf]
@@ -236,6 +238,14 @@ func Rebase(err error, base paths.Path) error {
 
 	if isBound(err) {
 		return err
+	}
+
+	// An Error that adds nothing to the join it wraps rebases as the join.
+	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
+	if ok && !x.rebased && !x.hasLocation() && len(x.nested()) == 0 {
+		if _, joined := joinBranches(x.err); joined {
+			return WrapError(Rebase(x.err, base))
+		}
 	}
 
 	if branches, ok := joinBranches(err); ok {
