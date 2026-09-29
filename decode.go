@@ -45,7 +45,9 @@ import (
 // root. The decode puts it under the path of the value in the document.
 // That path names a field by the name go-yaml decoded it under, from its
 // yaml tag, its json tag, or its lowercased name. It names an element by
-// its index and a map entry by its key. A type thus checks its
+// its index and a map entry by its key. A map key validates too, under
+// the path of its entry with a `~` after it, so its errors point at the
+// key rather than the value. A type thus checks its
 // invariants once and reports the right lines in any document:
 //
 //	type Config struct {

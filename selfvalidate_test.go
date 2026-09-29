@@ -873,6 +873,94 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
+	t.Run("a map key validates at the key", func(t *testing.T) {
+		t.Parallel()
+
+		type byPort struct {
+			M map[port]string `yaml:"m"`
+		}
+
+		type portsByPort struct {
+			M map[port]port `yaml:"m"`
+		}
+
+		tcs := map[string]struct {
+			decode func(ctx context.Context, dd *niceyaml.Node) error
+			input  string
+			want   []string
+		}{
+			"top-level map": {
+				input: "70000: x\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[map[port]string](ctx)
+
+					return err
+				},
+				want: []string{"1:1: $.70000~: port out of range"},
+			},
+			"map in a field": {
+				input: "m:\n  70000: x\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[byPort](ctx)
+
+					return err
+				},
+				want: []string{"2:3: $.m.70000~: port out of range"},
+			},
+			"key and value both fail": {
+				input: "m:\n  70001: 70002\n  70000: 1\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[portsByPort](ctx)
+
+					return err
+				},
+				want: []string{
+					"3:3: $.m.70000~: port out of range",
+					"2:3: $.m.70001~: port out of range",
+					"2:10: $.m.70001: port out of range",
+				},
+			},
+			"valid key": {
+				input: "80: x\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[map[port]string](ctx)
+
+					return err
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				err := tc.decode(t.Context(), dd)
+				if tc.want == nil {
+					require.NoError(t, err)
+
+					return
+				}
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+
+				got := []string{err.Error()}
+				if children := bound.Errors(); len(children) > 0 {
+					got = got[:0]
+
+					for _, child := range children {
+						got = append(got, child.Error())
+					}
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
 	t.Run("an entry under a NaN key validates", func(t *testing.T) {
 		t.Parallel()
 

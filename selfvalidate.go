@@ -26,6 +26,8 @@ import (
 // each error rebased under the path of the value in the document. That
 // path is the field name go-yaml decoded it under, the index of a slice
 // or array element, or the key of a map entry as the document spells it.
+// A map key validates at the path of its entry with a `~` after it, so
+// its errors point at the key rather than the value.
 // The values below a value validate before it does, and a value
 // validates only when every value below it passed, so a parent that
 // checks a relation between its fields sees fields that hold together. A
@@ -266,8 +268,8 @@ func decodesItself(t reflect.Type) bool {
 // mayHoldValidator reports whether a value of type t can implement
 // [SelfValidator], or can hold a value the walk reaches below it that
 // does. A type holds one through an interface, which can hold a value of
-// any type, or through a field, element, map value, or pointee whose
-// type may. The walk passes a value whose type may not without a look
+// any type, or through a field, element, map key, map value, or pointee
+// whose type may. The walk passes a value whose type may not without a look
 // below it.
 func mayHoldValidator(t reflect.Type) bool {
 	if cached, ok := holdsValidator.Load(t); ok {
@@ -303,7 +305,10 @@ func reachesValidator(t reflect.Type, seen map[reflect.Type]bool) bool {
 	}
 
 	switch t.Kind() {
-	case reflect.Pointer, reflect.Slice, reflect.Array, reflect.Map:
+	case reflect.Map:
+		return reachesValidator(t.Key(), seen) || reachesValidator(t.Elem(), seen)
+
+	case reflect.Pointer, reflect.Slice, reflect.Array:
 		return reachesValidator(t.Elem(), seen)
 
 	case reflect.Struct:
@@ -324,12 +329,10 @@ func reachesValidator(t reflect.Type, seen map[reflect.Type]bool) bool {
 func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 	switch v.Kind() {
 	case reflect.Slice, reflect.Array, reflect.Map:
-		// An element or map value whose type holds no validator passes
-		// the walk at once, so none needs a look, nor do the keys of a
-		// map, which only name the entries in errors. The same goes for
-		// elements and map values whose types may hold one, but that
-		// hold none.
-		if !mayHoldValidator(v.Type().Elem()) || !w.holdsBelow(v) {
+		// An element, map key, or map value whose type holds no validator
+		// passes the walk at once, so none needs a look. The same goes for
+		// those whose types may hold one, but that hold none.
+		if !entriesMayHoldValidator(v.Type()) || !w.holdsBelow(v) {
 			return true
 		}
 
@@ -370,11 +373,12 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 		// back in one order however the map iterates. Two keys of one
 		// text, such as 1 and "1", order by the types they hold. Each
 		// value comes from the iteration rather than a lookup by its key,
-		// since a NaN key equals no key, itself included.
+		// since a NaN key equals no key, itself included. The key of an
+		// entry walks before its value, at the key of the entry's path.
 		names := w.keyNames(base, v.Type().Key())
 
 		type entry struct {
-			value         reflect.Value
+			key, value    reflect.Value
 			seg, typeName string
 		}
 
@@ -384,6 +388,7 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 			key := iter.Key()
 
 			entries = append(entries, entry{
+				key:      key,
 				value:    iter.Value(),
 				seg:      mapKey(key, names),
 				typeName: keyTypeName(key),
@@ -395,7 +400,13 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 		})
 
 		for _, e := range entries {
-			if !w.walk(e.value, base.Child(e.seg)) {
+			path := base.Child(e.seg)
+
+			if !w.walk(e.key, path.Key()) {
+				ok = false
+			}
+
+			if !w.walk(e.value, path) {
 				ok = false
 			}
 		}
@@ -404,6 +415,17 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path) bool {
 	}
 
 	return ok
+}
+
+// entriesMayHoldValidator reports whether an element of a value of type t,
+// a slice, array, or map, or a key or value of a map, may hold a
+// [SelfValidator], as [mayHoldValidator] reads it.
+func entriesMayHoldValidator(t reflect.Type) bool {
+	if t.Kind() == reflect.Map && mayHoldValidator(t.Key()) {
+		return true
+	}
+
+	return mayHoldValidator(t.Elem())
 }
 
 // holdsBelow reports whether a value below v, a slice, array, or map
@@ -446,7 +468,7 @@ func (w *selfWalker) holdsBelow(v reflect.Value) bool {
 // scanValue reports whether v, or a value below it, implements
 // [SelfValidator] where the walk would validate it. It follows the walk
 // down: through interfaces and pointers, into fields, elements, and map
-// values, and not below a value that decodes itself or whose type may
+// keys and values, and not below a value that decodes itself or whose type may
 // hold no validator. The second result is false when the scan stopped at
 // a value it had already reached, whose first read decides the answer, so
 // a false first result then holds only for that scan.
@@ -524,7 +546,7 @@ func (w *selfWalker) scanSelf(v reflect.Value) (bool, bool) {
 }
 
 // scanChildren scans the fields of a struct, the elements of a slice or
-// array, or the values of a map, as [selfWalker.scanValue] describes.
+// array, or the keys and values of a map, as [selfWalker.scanValue] describes.
 func (w *selfWalker) scanChildren(v reflect.Value) (bool, bool) {
 	complete := true
 
@@ -552,7 +574,7 @@ func (w *selfWalker) scanChildren(v reflect.Value) (bool, bool) {
 
 	case reflect.Map:
 		for iter := v.MapRange(); iter.Next(); {
-			if scan(iter.Value()) {
+			if scan(iter.Key()) || scan(iter.Value()) {
 				return true, true
 			}
 		}
