@@ -16,8 +16,12 @@
 // This one resolver handles all SchemaStore schemas. It matches file
 // paths against the catalog patterns for tools like GitHub Actions and
 // Docker Compose. The store drops the patterns for formats known not to
-// be YAML, such as *.toml and *.jsonc, and keeps every other pattern, so
-// YAML formats with an extension of their own, such as CITATION.cff, and
+// be YAML, such as *.toml and *.jsonc. It also drops the patterns that
+// hold an extglob group, such as "!(config).yml", because its matcher
+// does not implement extglob. An entry left with no pattern matches no
+// file, so the entry for GitHub issue forms, which lists only extglob
+// patterns, never applies. The store keeps every other pattern, so YAML
+// formats with an extension of their own, such as CITATION.cff, and
 // names without an extension, such as .clang-format, still match. When
 // several entries match a path, the store picks the one with the most
 // specific pattern, so a pattern for a tool's own directory wins over a

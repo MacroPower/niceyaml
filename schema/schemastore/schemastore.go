@@ -78,7 +78,8 @@ type CatalogEntry struct {
 	URL string `json:"url"`
 	// FileMatch contains the glob patterns for the files this schema
 	// applies to. When the store loads the catalog, it drops the patterns
-	// for formats known not to be YAML, such as *.toml and *.jsonc, so
+	// for formats known not to be YAML, such as *.toml and *.jsonc, and
+	// the patterns that hold an extglob group, such as "!(config).yml", so
 	// the slice may be shorter than the catalog's.
 	FileMatch []string `json:"fileMatch"`
 
@@ -566,8 +567,7 @@ func (s *Store) fetch(ctx context.Context) ([]CatalogEntry, error) {
 
 // filterAndNormalizeEntries filters catalog entries to only those with
 // supported patterns that pass the configured filter. It also normalizes each
-// entry's FileMatch to drop the patterns that can match only a format known
-// not to be YAML, as [filterSupportedPatterns] decides.
+// entry's FileMatch to the patterns [filterSupportedPatterns] keeps.
 func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry {
 	entries := make([]CatalogEntry, 0, len(schemas))
 
@@ -591,7 +591,7 @@ func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry
 			continue
 		}
 
-		// Drop patterns that can match only a format known not to be YAML.
+		// Drop the patterns for non-YAML formats and extglob groups.
 		supportedPatterns := filterSupportedPatterns(entry.FileMatch)
 		if len(supportedPatterns) == 0 {
 			continue
@@ -608,16 +608,16 @@ func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry
 
 // filterSupportedPatterns returns the patterns that can match a YAML or
 // JSON file, since JSON is a valid subset of YAML. It drops a pattern
-// whose last segment carries the literal extension of a format known not
-// to be YAML, such as "*.toml" or ".eslintrc.jsonc", and keeps every
-// other pattern. A pattern with brace alternatives, such as
-// "*.{toml,yaml}", counts when any of its alternatives can match a YAML
-// file.
+// that holds an extglob group, and a pattern whose last segment carries
+// the literal extension of a format known not to be YAML, such as
+// "*.toml" or ".eslintrc.jsonc". It keeps every other pattern. A pattern
+// with brace alternatives, such as "*.{toml,yaml}", counts when any of
+// its alternatives can match a YAML file.
 //
-// An extglob group makes filterSupportedPatterns drop the pattern, since
-// the matcher reads the group literally and the pattern could only match a
-// file named after the text of the group. The entry count then reflects
-// the entries that can match a file someone would write.
+// The matcher reads an extglob group literally, so a pattern with one
+// could only match a file named after the text of the group. With those
+// patterns gone, the entry count reflects only the entries that can match
+// a file someone would write.
 func filterSupportedPatterns(patterns []string) []string {
 	var result []string
 
