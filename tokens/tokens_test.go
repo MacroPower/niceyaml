@@ -1545,6 +1545,53 @@ func TestResetPositions(t *testing.T) {
 		assert.Equal(t, 4, got[0].Position.Offset)
 	})
 
+	t.Run("counts from the joined Origins after a swallowed indicator", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer swallows a "-" or ":" after a tab that indents the
+		// first line. Tokenize counts the swallowed rune in its positions,
+		// but the joined Origins lack it, so the clones of a whole stream
+		// move to where the Origins hold their text.
+		tcs := map[string]struct {
+			input   string
+			origins string
+			want    []token.Position
+		}{
+			"sequence entry before a key": {
+				input:   "\t- a\nb: 1\n",
+				origins: "\t a\nb: 1\n",
+				want: []token.Position{
+					{Line: 1, Column: 1, Offset: 1},
+					{Line: 1, Column: 3, Offset: 3},
+					{Line: 2, Column: 2, Offset: 6},
+					{Line: 2, Column: 4, Offset: 8},
+				},
+			},
+			"mapping value alone": {
+				input:   "\t:\n",
+				origins: "\t\n",
+				want:    []token.Position{{Line: 1, Column: 1, Offset: 1}},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got := tokens.ResetPositions(tokens.Tokenize(tc.input))
+
+				assert.Equal(t, tc.origins, yamltest.DumpTokenOrigins(got))
+				require.Len(t, got, len(tc.want))
+
+				for i, want := range tc.want {
+					p := got[i].Position
+					pos := token.Position{Line: p.Line, Column: p.Column, Offset: p.Offset}
+					assert.Equal(t, want, pos, "token %d", i)
+				}
+			})
+		}
+	})
+
 	t.Run("handles nil position", func(t *testing.T) {
 		t.Parallel()
 

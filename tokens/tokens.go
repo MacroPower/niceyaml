@@ -1367,9 +1367,13 @@ func TrimLineEnding(s string) string {
 // tokens on the first line also move by the same number of columns. A
 // stream whose text starts at line 1, column 1, offset 1, such as a whole
 // stream from [Tokenize], comes back as clones with the same positions.
-// The clones keep the invariant of [Tokenize], so Line, Column, and Offset
-// name the rune where the token's text starts, and the Origin may open with
-// whitespace and line endings before it.
+// The exception is a stream whose first text the lexer swallowed, such as
+// a "-" or ":" after a tab that indents the first line (see [Tokenize]).
+// ResetPositions counts from the joined Origins, which lack that text, so
+// the clones of such a stream can move. The clones keep the invariant of
+// [Tokenize], so Line, Column, and Offset name the rune where the token's
+// text starts, and the Origin may open with whitespace and line endings
+// before it.
 //
 // The first token that has a non-nil position and holds something other
 // than whitespace anchors the shift, and a fresh tokenize places it after

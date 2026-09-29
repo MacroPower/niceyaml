@@ -231,7 +231,8 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 // resets their positions, so the text it holds counts its lines from 1 as
 // [tokens.Tokenize] does. Line i of [Source.Lines] holds line i+1 of the
 // text. Tokens that count from 1 already, as a whole stream does, keep
-// their positions. It renumbers tokens cut from a longer
+// their positions unless the lexer swallowed the first text, as
+// [tokens.ResetPositions] describes. It renumbers tokens cut from a longer
 // stream, as [Node.Tokens] hands out, from the first one. To render one
 // document of a file with the file's line numbers, print the file's view
 // with [Node.Span] instead.
