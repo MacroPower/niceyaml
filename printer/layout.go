@@ -502,11 +502,13 @@ func (l Layout) RowOf(pos position.Position) int {
 // start of that row with the gutter left out. A viewer that scrolls
 // horizontally adds [Layout.GutterWidth] to find the cell of a column.
 // The cell comes from the shown text, so it counts the cells a style's
-// transform adds or removes before the column. A column inside a
-// grapheme cluster takes the cell where its cluster starts. A column past
-// the end of the content takes one cell for every column past it, as
-// [ColWidth] counts them. Returns -1 when the layout does not hold the
-// line.
+// transform adds or removes before the column. The first column of a
+// run takes the cell where the run begins, so it covers any rune a
+// transform adds before the text of the run, such as an opening
+// bracket. A column inside a grapheme cluster takes the cell where its
+// cluster starts. A column past the end of the content takes one cell
+// for every column past it, as [ColWidth] counts them. Returns -1 when
+// the layout does not hold the line.
 func (l Layout) CellOf(pos position.Position) int {
 	k, ok := l.position(pos.Line)
 	if !ok {
