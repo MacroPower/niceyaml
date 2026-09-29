@@ -511,6 +511,18 @@ func TestGlob(t *testing.T) {
 			pattern:   tmpDir + "/{a,[a]}.yaml",
 			wantFiles: []string{filepath.Join(tmpDir, "a.yaml")},
 		},
+		"relative pattern without a literal part": {
+			pattern:   "mai[n].go",
+			wantFiles: []string{"main.go"},
+		},
+		"leading dot element before a wildcard": {
+			pattern:   "./mai[n].go",
+			wantFiles: []string{filepath.FromSlash("./main.go")},
+		},
+		"leading dot element before a literal name": {
+			pattern:   "./{main,zz}.go",
+			wantFiles: []string{filepath.FromSlash("./main.go")},
+		},
 		"invalid pattern": {
 			pattern: "[",
 			err:     "glob",

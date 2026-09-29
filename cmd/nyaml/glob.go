@@ -106,9 +106,11 @@ func globAlternative(pattern string) ([]string, error) {
 		base += "/"
 	}
 
+	// A pattern without a literal part walks from ".", and its matches get
+	// no prefix. A typed "./" stays in each match, as the shell keeps it.
 	prefix := base
 	switch {
-	case base == ".":
+	case rest == pattern:
 		prefix = ""
 	case !strings.HasSuffix(base, "/"):
 		prefix = base + "/"
