@@ -1172,24 +1172,43 @@ func (p *positioner) restoreGap(tk *token.Token, at int) {
 		breaks += indent
 	}
 
+	// A "\r" that ends breaks and a "\n" that opens the Origin would join
+	// into one CRLF, one line break fewer than the source holds, so a
+	// space keeps the two apart, as in [cutLineBreaks].
+	if strings.HasSuffix(breaks, "\r") && strings.HasPrefix(tk.Origin, "\n") {
+		breaks += " "
+	}
+
 	tk.Origin = breaks + tk.Origin
 }
 
 // cutLineBreaks returns the first n line breaks of s joined together,
 // dropping the spaces and tabs between them, and the rest of s after the
-// last of them. A CRLF counts as one line break.
+// last of them. A CRLF counts as one line break. A bare "\r" and a "\n"
+// that follows it on the next line keep one space between them, since
+// together they would make one CRLF.
 func cutLineBreaks(s string, n int) (string, string) {
 	var sb strings.Builder
 
 	i := 0
+	prev := ""
 
 	for ln := range lineend.Lines(s) {
 		if n == 0 {
 			break
 		}
 
-		sb.WriteString(ln[len(strings.TrimRight(ln, "\r\n")):])
+		end := ln[len(strings.TrimRight(ln, "\r\n")):]
+		if prev == "\r" && strings.HasPrefix(end, "\n") {
+			// Only spaces or tabs part the two, as Lines never cuts a
+			// CRLF. A space keeps them apart, and unlike a tab, the parser
+			// trims it from the start of a key's Origin.
+			sb.WriteByte(' ')
+		}
 
+		sb.WriteString(end)
+
+		prev = end
 		i += len(ln)
 		n--
 	}

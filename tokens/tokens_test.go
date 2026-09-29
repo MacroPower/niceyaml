@@ -648,6 +648,21 @@ func TestTokenize_RestoresDroppedLineBreaks(t *testing.T) {
 			input: "x:\r\n  a: \"t\tb\"\r\n \t\r\n  \r\n? b\r\n",
 			want:  "x:\r\n  a: \"t\tb\"\n \t\r\n\r\n? b\r\n",
 		},
+		"key after blank lines of spaces after bare crs": {
+			input: "k: \"\t\"\r \n\r \nc: 1\n",
+		},
+		"document header after a cut scalar and bare crs": {
+			input: "- \"\\u\\q\r\r \n---\n",
+		},
+		"key after a blank line and blank lines of spaces after bare crs": {
+			// The lexer reads each "\r", space, and "\n" as one CRLF, so
+			// the breaks Tokenize puts back end with a bare "\r" in front
+			// of the "\n" that opens the Origin.
+			input: "\n\r \n\r \nkey: 1\n",
+		},
+		"document end after blank lines of spaces after bare crs": {
+			input: "k:\n\r \n\r \n...\n",
+		},
 		"key after a blank line with a tab": {
 			// The blank line goes to the end of the scalar's Origin. A
 			// tab in front of a line break in the key's Origin would
