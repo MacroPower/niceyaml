@@ -49,7 +49,7 @@ var (
 
 	// Schema that a "$schema=none" directive names. It passes every
 	// document without decoding it, so the directive turns validation off.
-	noneSchema = &Schema{compiled: MustCompile([]byte("true")).compiled, acceptAll: true}
+	noneSchema = &Schema{acceptAll: true}
 )
 
 // ParsedDirective is a yaml-language-server schema directive read from a
