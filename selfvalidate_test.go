@@ -177,6 +177,16 @@ func (d *declaredDecode) UnmarshalYAML([]byte) error {
 	return nil
 }
 
+// textDecode declares an UnmarshalText, but go-yaml decodes it through
+// the UnmarshalYAML of the Positive it embeds, which it checks first.
+type textDecode struct {
+	Positive
+}
+
+func (*textDecode) UnmarshalText([]byte) error {
+	return errors.New("text ran")
+}
+
 // declaredValidate embeds Named and declares a Validate of its own on
 // its value.
 type declaredValidate struct {
@@ -609,11 +619,20 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			Positive
 		}
 
+		// Go-yaml calls the UnmarshalYAML of Positive ahead of the
+		// UnmarshalText of time.Time.
+		type both struct {
+			Positive
+			time.Time
+		}
+
 		type parent struct {
 			Wrapped  wrapped         `yaml:"wrapped"`
 			Twice    PositiveWrapper `yaml:"twice"`
 			Pointer  PositivePointer `yaml:"pointer"`
 			Declared declaredDecode  `yaml:"declared"`
+			Text     textDecode      `yaml:"text"`
+			Both     both            `yaml:"both"`
 		}
 
 		tcs := map[string]struct {
@@ -633,6 +652,14 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			},
 			"struct that declares its own unmarshaler": {
 				input: "declared: -1\n",
+			},
+			"struct that declares an unmarshaler go-yaml checks later": {
+				input: "text: -1\n",
+				err:   "1:7: $.text: negative",
+			},
+			"embedded field beside one with a later unmarshaler": {
+				input: "both: -1\n",
+				err:   "1:7: $.both: negative",
 			},
 		}
 

@@ -290,12 +290,13 @@ func visitOf(v reflect.Value) visit {
 
 var (
 	// The interfaces go-yaml decodes a value through when its pointer
-	// implements one, in place of decoding field by field.
+	// implements one, in place of decoding field by field. Go-yaml checks
+	// them in this order and calls the first one the pointer implements.
 	unmarshalerTypes = []reflect.Type{
-		reflect.TypeFor[yaml.BytesUnmarshaler](),
 		reflect.TypeFor[yaml.BytesUnmarshalerContext](),
-		reflect.TypeFor[yaml.InterfaceUnmarshaler](),
+		reflect.TypeFor[yaml.BytesUnmarshaler](),
 		reflect.TypeFor[yaml.InterfaceUnmarshalerContext](),
+		reflect.TypeFor[yaml.InterfaceUnmarshaler](),
 		reflect.TypeFor[yaml.NodeUnmarshaler](),
 		reflect.TypeFor[yaml.NodeUnmarshalerContext](),
 		reflect.TypeFor[encoding.TextUnmarshaler](),
@@ -328,12 +329,14 @@ func decodesItself(t reflect.Type) bool {
 }
 
 // decoderField returns the index of the embedded field of t that decodes
-// t, when t is a struct that decodes itself only through an unmarshaler
-// method it gets from that field. Go-yaml then calls the method of the
-// field, which decodes the document into the field, so the field stands
-// at the path of the struct. The bool result is false when t declares
-// an unmarshaler method of its own, or when no embedded field, or more
-// than one, has an unmarshaler method.
+// t, when t is a struct that gets its unmarshaler method from that field.
+// Go-yaml checks the unmarshaler interfaces in a fixed order and calls
+// the first method the pointer to t has, so an UnmarshalYAML that t gets
+// from a field wins over an UnmarshalText that t declares. The method of
+// the field decodes the document into the field, so the field stands at
+// the path of the struct. The bool result is false when t declares the
+// method go-yaml calls, or when no embedded field, or more than one, has
+// that method.
 func decoderField(t reflect.Type) (int, bool) {
 	if cached, ok := decoderFields.Load(t); ok {
 		if i, ok := cached.(int); ok {
@@ -354,11 +357,14 @@ func findDecoderField(t reflect.Type) int {
 		return -1
 	}
 
-	pt := reflect.PointerTo(t)
-	for _, name := range []string{"UnmarshalYAML", "UnmarshalText"} {
-		if _, ok := pt.MethodByName(name); ok && !promotesMethod(t, name) {
-			return -1
-		}
+	k := slices.IndexFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
+	if k < 0 {
+		return -1
+	}
+
+	unmarshaler := unmarshalerTypes[k]
+	if !promotesMethod(t, unmarshaler.Method(0).Name) {
+		return -1
 	}
 
 	found := -1
@@ -376,7 +382,7 @@ func findDecoderField(t reflect.Type) int {
 			methods = reflect.PointerTo(methods)
 		}
 
-		if !slices.ContainsFunc(unmarshalerTypes, methods.Implements) {
+		if !methods.Implements(unmarshaler) {
 			continue
 		}
 
