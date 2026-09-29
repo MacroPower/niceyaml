@@ -2096,9 +2096,14 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 			}
 		}
 
+		// [line.Lines.SliceLines] already clamped each segment to its
+		// line, which the view holds at index i.
 		for _, lr := range segments {
 			if i, ok := index(lr.Start.Line); ok {
-				view.AddOverlay(kind.GenericError, viewRange(lr, i))
+				view.AddLineOverlay(i, line.Overlay{
+					Cols: position.NewSpan(lr.Start.Col, lr.End.Col),
+					Kind: kind.GenericError,
+				})
 
 				marked = append(marked, i)
 			}
@@ -2221,11 +2226,6 @@ func (s *Source) lineIndex(view *line.View) func(int) (int, bool) {
 
 		return view.Index(lines.Line(srcIdx))
 	}
-}
-
-// viewRange moves the single-line range r to line i of a view.
-func viewRange(r position.Range, i int) position.Range {
-	return position.NewRange(position.New(i, r.Start.Col), position.New(i, r.End.Col))
 }
 
 // checkInRange reports [ErrOutOfRange] when loc starts on a line lines
