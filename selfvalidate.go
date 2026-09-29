@@ -521,9 +521,10 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 		// text, such as 1 and "1", order by the types they hold. Entries
 		// that tie on both, such as several NaN keys or several time keys
 		// of one instant and zone, walk as one group, as
-		// [selfWalker.walkEntries] describes. Each value comes from the
-		// iteration rather than a lookup by its key, since a NaN key
-		// equals no key, itself included.
+		// [selfWalker.walkEntries] describes, along with the one case
+		// where the order can vary. Each value comes from the iteration
+		// rather than a lookup by its key, since a NaN key equals no key,
+		// itself included.
 		names := w.keyNames(base, v.Type().Key())
 
 		entries := make([]mapEntry, 0, v.Len())
@@ -593,6 +594,11 @@ type mapEntry struct {
 // together and the groups order by their text. The order then holds
 // however the map iterates, and no value needs formatting, which a
 // value that refers back to itself would never finish.
+//
+// The order can still vary when several of the entries hold one
+// pointer, map, or slice, which only a value filled before the decode
+// can do. That value walks once, so its errors join the group of
+// whichever entry walks first, and the map iteration decides which.
 func (w *selfWalker) walkEntries(path paths.Path, entries []mapEntry) bool {
 	ok := true
 	start := len(w.errs)
