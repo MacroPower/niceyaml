@@ -260,6 +260,46 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`enabled: null`),
 			want:    true,
 		},
+		"nil pointer does not match a value": {
+			matcher: matcher.Content[*string](kindPath, nil),
+			input:   stringtest.Input(`kind: Deployment`),
+			want:    false,
+		},
+		"string pointer matches its pointee": {
+			matcher: matcher.Content(kindPath, new("Deployment")),
+			input:   stringtest.Input(`kind: Deployment`),
+			want:    true,
+		},
+		"string pointer does not match other string": {
+			matcher: matcher.Content(kindPath, new("Deployment")),
+			input:   stringtest.Input(`kind: Service`),
+			want:    false,
+		},
+		"string pointer does not match null": {
+			matcher: matcher.Content(kindPath, new("")),
+			input:   stringtest.Input(`kind: null`),
+			want:    false,
+		},
+		"string pointer matches float text as written": {
+			matcher: matcher.Content(versionPath, new("1.10")),
+			input:   stringtest.Input(`version: 1.10`),
+			want:    true,
+		},
+		"bool pointer matches its pointee": {
+			matcher: matcher.Content(enabledPath, new(true)),
+			input:   stringtest.Input(`enabled: true`),
+			want:    true,
+		},
+		"int pointer does not match a fraction": {
+			matcher: matcher.Content(versionPath, new(1)),
+			input:   stringtest.Input(`version: 1.5`),
+			want:    false,
+		},
+		"int pointer does not match a quoted integer": {
+			matcher: matcher.Content(versionPath, new(2)),
+			input:   stringtest.Input(`version: "2"`),
+			want:    false,
+		},
 		"any large int does not match a rounded float": {
 			matcher: matcher.Content[any](versionPath, int64(9007199254740993)),
 			input:   stringtest.Input(`version: 9007199254740992.0`),

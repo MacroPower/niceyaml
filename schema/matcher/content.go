@@ -36,10 +36,12 @@ type contentMatcher[T comparable] struct {
 // own decode gives. A number matches a scalar the document writes as a
 // number, whatever its spelling, though an integer want never matches a
 // value with a fraction. A quoted, block, or !!str scalar is a string,
-// so version: "2" does not match 2. A null matches only a nil want, such as
-// Content[any](path, nil). When T is an interface, two numbers compare
-// by value whatever their Go types, so Content[any](path, 1) matches an
-// integer the decoder reads as a uint64. A document without the path, or
+// so version: "2" does not match 2. A pointer want matches the value it
+// points to. A null matches only a nil want, such as
+// Content[any](path, nil) or a nil pointer. When T is an interface, two
+// numbers compare by value whatever their Go types, so
+// Content[any](path, 1) matches an integer the decoder reads as a
+// uint64. A document without the path, or
 // whose value does not decode into T, does not match. Any other error
 // from the read comes back as the error, so a registry stops at the
 // document rather than routing it elsewhere. Such errors include an alias
@@ -125,7 +127,13 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 		return false, err
 	}
 
-	gv := reflect.ValueOf(&got).Elem()
+	// A pointer want matches the value it points to, since every decode
+	// allocates a fresh pointer. A nil pointer want matched null above,
+	// so it matches nothing here.
+	gv, wv, ok := pointees(reflect.ValueOf(&got).Elem(), reflect.ValueOf(&m.want).Elem())
+	if !ok {
+		return false, nil
+	}
 
 	// The decoder respells a number or a bool it reads into a string, so
 	// 1.10 becomes "1.1", 0x10 becomes "16", and True becomes "true". A
@@ -157,12 +165,28 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	}
 
 	if gv.Kind() == reflect.Interface {
-		if eq, ok := numericEqual(got, m.want); ok {
+		if eq, ok := numericEqual(gv.Interface(), wv.Interface()); ok {
 			return eq, nil
 		}
 	}
 
-	return got == m.want, nil
+	return gv.Interface() == wv.Interface(), nil
+}
+
+// pointees returns the values that got, the decoded value, and want
+// point to when both are pointers, and returns them unchanged otherwise.
+// It follows one pointer only. The third result is false when either
+// pointer is nil.
+func pointees(got, want reflect.Value) (reflect.Value, reflect.Value, bool) {
+	if got.Kind() != reflect.Pointer {
+		return got, want, true
+	}
+
+	if got.IsNil() || want.IsNil() {
+		return got, want, false
+	}
+
+	return got.Elem(), want.Elem(), true
 }
 
 // unmarshalerTypes are the interfaces go-yaml decodes a value through
