@@ -318,8 +318,11 @@ func ColWidth(content string, col int) int {
 type AnnotationRow struct {
 	// Marker is the text between the padding and Text on the first row,
 	// such as the "^ " [DefaultAnnotation] puts before a [line.Below]
-	// annotation. When Text wraps, its continuation rows indent past the
-	// Marker, so they align under the start of Text. When the column
+	// annotation. The printer keeps the Marker whole on one row, even
+	// when it runs past the width, so a func that marks columns puts the
+	// marks in the Marker and leaves Text empty, as the caret rows of
+	// [DefaultAnnotation] do. When Text wraps, its continuation rows
+	// indent past the Marker, so they align under the start of Text. When the column
 	// leaves Text less room than its widest word, the Marker keeps its
 	// column on a row of its own, and Text moves to the rows below under
 	// a smaller indent. That indent leaves Text 20 cells, or its widest
@@ -469,10 +472,12 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 		}
 
 		// The printer pads the row to Col, so the carets go without the
-		// padding before them.
+		// padding before them. They go in the Marker, which the printer
+		// keeps whole on one row, so a caret that lands one cell past a
+		// row that fills the width stays beside the others.
 		rows = append(rows, AnnotationRow{
-			Col:  offsets.col(lo, from+i),
-			Text: strings.TrimRight(cut[i:], " "),
+			Col:    offsets.col(lo, from+i),
+			Marker: strings.TrimRight(cut[i:], " "),
 		})
 	}
 
@@ -544,7 +549,7 @@ func caretRow(content string, col int) AnnotationRow {
 		text = "^"
 	}
 
-	return AnnotationRow{Col: col, Text: text}
+	return AnnotationRow{Col: col, Marker: text}
 }
 
 // renderLineNumber renders the line number portion of a gutter. The number

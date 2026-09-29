@@ -735,6 +735,27 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 				"^^^^^^",
 			),
 		},
+		// A zero-width rune at the end of a row that fills the width gets
+		// its caret one cell past the width, and the carets stay on one
+		// row rather than wrapping under the wide rune.
+		"zero-width rune at the end of a full row": {
+			content: "k: 本語x\u200b",
+			cols:    []position.Span{position.NewSpan(4, 7)},
+			width:   8,
+			want: stringtest.JoinLF(
+				"k: 本語x\u200b",
+				"     ^^^^",
+			),
+		},
+		"zero-width rune at the end of a full row under a whole-line range": {
+			content: "ccca日ccca\u200b",
+			cols:    []position.Span{position.NewSpan(0, 10)},
+			width:   10,
+			want: stringtest.JoinLF(
+				"ccca日ccca\u200b",
+				"^^^^^^^^^^^",
+			),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -4180,7 +4201,7 @@ func TestDefaultAnnotation(t *testing.T) {
 			annotations: line.Annotations{{Placement: line.Below, Col: 7}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(7, 9)}},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 7, Text: "^^"}},
+			want:        []printer.AnnotationRow{{Col: 7, Marker: "^^"}},
 		},
 		"empty content marks every overlay": {
 			content:     "a: 1, b: 2",
@@ -4190,62 +4211,62 @@ func TestDefaultAnnotation(t *testing.T) {
 				{Cols: position.NewSpan(3, 4)},
 			},
 			position: line.Below,
-			want:     []printer.AnnotationRow{{Col: 3, Text: "^     ^"}},
+			want:     []printer.AnnotationRow{{Col: 3, Marker: "^     ^"}},
 		},
 		"empty content marks wide runes with two carets": {
 			content:     "日本語: 値",
 			annotations: line.Annotations{{Placement: line.Below}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(0, 3)}},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 0, Text: "^^^^^^"}},
+			want:        []printer.AnnotationRow{{Col: 0, Marker: "^^^^^^"}},
 		},
 		"empty content marks control characters as one cell": {
 			content:     "a: \x07b",
 			annotations: line.Annotations{{Placement: line.Below}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(3, 5)}},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 3, Text: "^^"}},
+			want:        []printer.AnnotationRow{{Col: 3, Marker: "^^"}},
 		},
 		"empty content clamps the overlays to the content": {
 			content:     "a: 1",
 			annotations: line.Annotations{{Placement: line.Below}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(3, 9)}},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 3, Text: "^"}},
+			want:        []printer.AnnotationRow{{Col: 3, Marker: "^"}},
 		},
 		"empty content starts a negative overlay at column zero": {
 			content:     "a: 1",
 			annotations: line.Annotations{{Placement: line.Below}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(-2, 2)}},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 0, Text: "^^"}},
+			want:        []printer.AnnotationRow{{Col: 0, Marker: "^^"}},
 		},
 		"empty content with an overlay of no width marks its column": {
 			content:     "a: 1",
 			annotations: line.Annotations{{Placement: line.Below, Col: 4}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(4, 4)}},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 4, Text: "^"}},
+			want:        []printer.AnnotationRow{{Col: 4, Marker: "^"}},
 		},
 		"empty content with an overlay of no width marks a wide rune": {
 			content:     "a: 日本",
 			annotations: line.Annotations{{Placement: line.Below, Col: 3}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(3, 3)}},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 3, Text: "^^"}},
+			want:        []printer.AnnotationRow{{Col: 3, Marker: "^^"}},
 		},
 		"empty content with an overlay past the content marks the column": {
 			content:     "a: 1",
 			annotations: line.Annotations{{Placement: line.Below, Col: 4}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(4, 6)}},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 4, Text: "^"}},
+			want:        []printer.AnnotationRow{{Col: 4, Marker: "^"}},
 		},
 		"empty content with a negative column marks column zero": {
 			content:     "a: 1",
 			annotations: line.Annotations{{Placement: line.Below, Col: -3}},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 0, Text: "^"}},
+			want:        []printer.AnnotationRow{{Col: 0, Marker: "^"}},
 		},
 		"empty content above the line renders nothing": {
 			content:     "a: 1",
@@ -4315,7 +4336,7 @@ func TestDefaultAnnotation(t *testing.T) {
 		"empty content without overlays marks its column": {
 			annotations: line.Annotations{{Placement: line.Below, Col: 2}},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 2, Text: "^"}},
+			want:        []printer.AnnotationRow{{Col: 2, Marker: "^"}},
 		},
 		"empty content is left out of the join": {
 			annotations: line.Annotations{
@@ -4341,8 +4362,8 @@ func TestDefaultAnnotation(t *testing.T) {
 			rowStarts: []int{0, 10, 20},
 			position:  line.Below,
 			want: []printer.AnnotationRow{
-				{Col: 5, Text: "^^^^"},
-				{Col: 17, Text: "^^"},
+				{Col: 5, Marker: "^^^^"},
+				{Col: 17, Marker: "^^"},
 			},
 		},
 		"wrapped content leaves the space dropped at a break unmarked": {
@@ -4352,8 +4373,8 @@ func TestDefaultAnnotation(t *testing.T) {
 			rowStarts:   []int{0, 10},
 			position:    line.Below,
 			want: []printer.AnnotationRow{
-				{Col: 5, Text: "^^^^"},
-				{Col: 10, Text: "^^^^"},
+				{Col: 5, Marker: "^^^^"},
+				{Col: 10, Marker: "^^^^"},
 			},
 		},
 		"wrapped content leaves the spaces dropped at the end unmarked": {
@@ -4364,8 +4385,8 @@ func TestDefaultAnnotation(t *testing.T) {
 			rowEnds:     []int{9, 12},
 			position:    line.Below,
 			want: []printer.AnnotationRow{
-				{Col: 5, Text: "^^^^"},
-				{Col: 10, Text: "^^"},
+				{Col: 5, Marker: "^^^^"},
+				{Col: 10, Marker: "^^"},
 			},
 		},
 		"wrapped content marks a tab at a break as its picture": {
@@ -4375,8 +4396,8 @@ func TestDefaultAnnotation(t *testing.T) {
 			rowStarts:   []int{0, 6},
 			position:    line.Below,
 			want: []printer.AnnotationRow{
-				{Col: 3, Text: "^^^"},
-				{Col: 6, Text: "^^"},
+				{Col: 3, Marker: "^^^"},
+				{Col: 6, Marker: "^^"},
 			},
 		},
 		"wrapped content marks wide runes on each row": {
@@ -4386,8 +4407,8 @@ func TestDefaultAnnotation(t *testing.T) {
 			rowStarts:   []int{0, 7},
 			position:    line.Below,
 			want: []printer.AnnotationRow{
-				{Col: 3, Text: "^^^^^^"},
-				{Col: 7, Text: "^^^^^^"},
+				{Col: 3, Marker: "^^^^^^"},
+				{Col: 7, Marker: "^^^^^^"},
 			},
 		},
 		"wrapped content marks combining marks on each row": {
@@ -4397,8 +4418,8 @@ func TestDefaultAnnotation(t *testing.T) {
 			rowStarts:   []int{0, 7},
 			position:    line.Below,
 			want: []printer.AnnotationRow{
-				{Col: 3, Text: "^^"},
-				{Col: 7, Text: "^^"},
+				{Col: 3, Marker: "^^"},
+				{Col: 7, Marker: "^^"},
 			},
 		},
 		"wrapped content leaves out a row without covered columns": {
@@ -4407,7 +4428,7 @@ func TestDefaultAnnotation(t *testing.T) {
 			overlays:    line.Overlays{{Cols: position.NewSpan(20, 22)}},
 			rowStarts:   []int{0, 10, 20},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 20, Text: "^^"}},
+			want:        []printer.AnnotationRow{{Col: 20, Marker: "^^"}},
 		},
 		"wrapped content keeps content annotations on one row": {
 			content:     "key: aaaa bbbb",
