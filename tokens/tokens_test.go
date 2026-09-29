@@ -221,6 +221,18 @@ func TestTokenize_NumericEscape(t *testing.T) {
 		"escape cut short after a unicode escape": {
 			input: `a: "\u00e9\u"`,
 		},
+		"long escape cut short after a hex escape and a tab": {
+			input: `k: "\x41` + "\t" + `\U12"` + "\n",
+		},
+		"escape cut short after an escaped backslash before hex digits": {
+			input: `k: "\x41\\x41\u"` + "\n",
+		},
+		"high surrogate without a low one after a tab": {
+			input: `- ":` + "\t\t" + `\N\uD83D\u` + "\t" + `"` + "\nb: 1\n",
+		},
+		"long escape that takes a header before a second header": {
+			input: `k: "\U12\"` + "\n---\n\n---\n\nb: 1\n",
+		},
 		"unknown escape after an escape": {
 			input: `a: "caf\u00e9 \d"` + "\n",
 		},

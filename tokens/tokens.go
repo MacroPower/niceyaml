@@ -894,9 +894,12 @@ func (p *positioner) restoreQuoted(tk *token.Token, start int) bool {
 // lexer drops the code of a "\x", "\u", or "\U" escape from the Origin, so
 // the source holds the text of the Origin in order with those codes and
 // whitespace between its runes. It steps over each such code, so a rune of
-// the Origin never matches a rune inside one. The scalar ends where the
-// source first holds the text of the token after tk past the text of the
-// Origin, with only escape codes and whitespace in between. An escape
+// the Origin never matches a rune inside one. The second backslash of a
+// "\\" escape opens no escape, and an escape the lexer gives up on, as
+// [positioner.givesUp] reports, keeps its code in the source for the token
+// after tk. The scalar ends where the source first holds the text of the
+// token after tk past the text of the Origin, with only escape codes and
+// whitespace in between. An escape
 // takes the runes [positioner.escapeWidth] counts whatever they are, so
 // its code may hold the closing quote or other runes that are not hex
 // digits. The Origin takes the source's runes up to there in place of its
@@ -933,9 +936,18 @@ func (p *positioner) restoreCut(tk *token.Token, start int) bool {
 	}
 
 	// Find the earliest end of the text, then step over the escape codes
-	// and whitespace the Origin lacks to where the next token starts.
+	// and whitespace the Origin lacks to where the next token starts. Like
+	// cutAtEscape, the loop tracks whether the escape a backslash opens
+	// keeps the rune after it, so an escaped backslash opens nothing.
+	escaped := false
+
 	bound := start
-	for _, r := range withoutWhitespace(text) {
+	for _, r := range text {
+		if strings.ContainsRune(" \t\r\n", r) {
+			escaped = false
+			continue
+		}
+
 		for bound < len(p.src) && p.src[bound] != r {
 			bound++
 		}
@@ -944,8 +956,16 @@ func (p *positioner) restoreCut(tk *token.Token, start int) bool {
 			return false
 		}
 
-		if r == '\\' {
-			bound = min(bound+p.droppedWidth(bound), len(p.src)-1)
+		opens := !escaped && r == '\\'
+		escaped = false
+
+		// The lexer cuts tk at an escape it gives up on and drops nothing
+		// of it, so its code follows in the source and the token after tk
+		// reads it.
+		if opens && !p.givesUp(bound) {
+			w := p.droppedWidth(bound)
+			escaped = w == 0
+			bound = min(bound+w, len(p.src)-1)
 		}
 
 		bound++
@@ -1041,6 +1061,31 @@ func (p *positioner) droppedWidth(i int) int {
 	}
 
 	return 0
+}
+
+// givesUp reports whether the lexer gives up on the escape at rune index
+// i, whose backslash then ends the invalid token it makes of the scalar.
+// It gives up on a "\u" or "\U" escape the source ends too soon for, and on
+// a "\u" escape of a high surrogate that no "\u" escape of a low surrogate
+// follows.
+func (p *positioner) givesUp(i int) bool {
+	switch {
+	case i+1 >= len(p.src):
+		return false
+	case p.src[i+1] == 'u':
+		if i+5 >= len(p.src) {
+			return true
+		}
+
+		high := hexValue(p.src[i+2 : i+6])
+
+		return high >= 0xD800 && high <= 0xDBFF && !p.surrogatePair(i)
+
+	case p.src[i+1] == 'U':
+		return i+9 >= len(p.src)
+	default:
+		return false
+	}
 }
 
 // surrogatePair reports whether the "\u" escape at rune index i holds a
