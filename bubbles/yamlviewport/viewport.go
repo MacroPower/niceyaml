@@ -25,9 +25,16 @@ import (
 
 const defaultHorizontalStep = 6
 
-// Searcher builds an [Index] over the lines on display. The viewport loads
-// the lines once per change of content and runs every search term through
-// the Index it gets back. A nil Index finds no match for any term.
+// Searcher builds an [Index] over the content of a view. The viewport calls
+// Load the first time it searches for a term after its content changes, and
+// runs every term through the Index it gets back until the content changes
+// again. In side-by-side mode it calls Load once for each pane.
+//
+// Load receives the whole content of the view, the [line.View.Lines] of it,
+// which can include lines the view does not hold, such as the lines between
+// the hunks in hunks mode. The ranges the Index finds are in the coordinates
+// of those lines, and the viewport keeps the matches that start on a line the
+// view holds. A nil Index finds no match for any term.
 //
 // [WithFinder] adapts a [finder.Finder] to this interface.
 type Searcher interface {
