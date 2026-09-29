@@ -13,7 +13,9 @@
 // by its length in bytes. Every decode of a niceyaml Node runs
 // [CheckDecode], and the schema validator and the content matcher run it
 // before they decode too, so a registry that routes a document by its
-// content refuses the same documents its schemas do.
+// content refuses the same documents its schemas do. A decode into a
+// type that [DecodesText] reports, by a Node or by the content matcher,
+// runs [CheckDecodeText] as well.
 //
 // [Excessive] is the limit itself, which the schema validator also
 // applies to a decoded value whose maps and slices a decode shares

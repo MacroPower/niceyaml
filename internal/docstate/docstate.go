@@ -26,9 +26,11 @@ var Of func(n any) *State
 //
 // Create instances with [New].
 type State struct {
-	resolver  func() *paths.Resolver
-	aliasOnce sync.Once
-	excessive bool
+	resolver      func() *paths.Resolver
+	aliasOnce     sync.Once
+	textOnce      sync.Once
+	excessive     bool
+	excessiveText bool
 }
 
 // New creates a new [*State] whose [State.Resolver] returns the resolver
@@ -52,4 +54,15 @@ func (s *State) ExcessiveAliasing(count func() bool) bool {
 	})
 
 	return s.excessive
+}
+
+// ExcessiveTextAliasing is [State.ExcessiveAliasing] for the count of
+// the document read as text, which the State keeps apart from the
+// count [State.ExcessiveAliasing] keeps.
+func (s *State) ExcessiveTextAliasing(count func() bool) bool {
+	s.textOnce.Do(func() {
+		s.excessiveText = count()
+	})
+
+	return s.excessiveText
 }

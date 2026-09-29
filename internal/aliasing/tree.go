@@ -52,16 +52,20 @@ func CheckDecode(n Node) error {
 // alias in full. The count covers the whole document as [CheckDecode]
 // does. It reads every node as text, so each scalar counts one node per
 // byte of its text. A node without an alias passes, as does a nil Node.
+// The document keeps the count, as it keeps the count of CheckDecode.
 //
-// A caller that decodes n into such a type runs CheckDecodeText as well
-// as CheckDecode.
+// A caller that decodes n into such a type, which [DecodesText] reports,
+// runs CheckDecodeText as well as CheckDecode.
 func CheckDecodeText(n Node) error {
 	state := stateOf(n)
 	if state == nil || !holdsAlias(n.AST()) {
 		return nil
 	}
 
-	if excessiveRead(n, state, readText) {
+	excessive := state.ExcessiveTextAliasing(func() bool {
+		return excessiveRead(n, state, readText)
+	})
+	if excessive {
 		return ErrExcessiveAliasing
 	}
 

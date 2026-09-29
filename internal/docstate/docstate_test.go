@@ -62,3 +62,38 @@ func TestState_ExcessiveAliasing(t *testing.T) {
 		})
 	}
 }
+
+func TestState_ExcessiveTextAliasing(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		value bool
+		text  bool
+	}{
+		"text count excessive":  {text: true},
+		"value count excessive": {value: true},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s := docstate.New(func() *paths.Resolver { return paths.NewResolver(nil) })
+
+			calls := 0
+			count := func() bool {
+				calls++
+
+				return tc.text
+			}
+
+			// The State keeps the text verdict apart from the value
+			// verdict, so each count runs once.
+			assert.Equal(t, tc.value, s.ExcessiveAliasing(func() bool { return tc.value }))
+			assert.Equal(t, tc.text, s.ExcessiveTextAliasing(count))
+			assert.Equal(t, tc.text, s.ExcessiveTextAliasing(count))
+			assert.Equal(t, 1, calls)
+			assert.Equal(t, tc.value, s.ExcessiveAliasing(func() bool { return !tc.value }))
+		})
+	}
+}

@@ -1,10 +1,14 @@
 package aliasing_test
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
+	"net/netip"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -192,6 +196,119 @@ func TestCheckDecodeText(t *testing.T) {
 
 		require.NoError(t, aliasing.CheckDecodeText((*niceyaml.Node)(nil)))
 	})
+}
+
+// textValue reads the text of its node.
+type textValue struct{}
+
+func (*textValue) UnmarshalText([]byte) error { return nil }
+
+// bytesValue reads the YAML bytes of its node.
+type bytesValue struct{}
+
+func (*bytesValue) UnmarshalYAML([]byte) error { return nil }
+
+// bytesContextValue reads the YAML bytes of its node with a context.
+type bytesContextValue struct{}
+
+func (*bytesContextValue) UnmarshalYAML(context.Context, []byte) error { return nil }
+
+// textChain refers to itself and holds a text field below the cycle.
+type textChain struct {
+	Next *textChain
+	Text []textValue
+}
+
+// plainChain refers to itself and holds no text field.
+type plainChain struct {
+	Next *plainChain
+	Name string
+}
+
+// embeddedTime gets UnmarshalText from the time it embeds.
+type embeddedTime struct {
+	time.Time
+}
+
+func TestDecodesText(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		typ  reflect.Type
+		want bool
+	}{
+		"text unmarshaler": {
+			typ:  reflect.TypeFor[textValue](),
+			want: true,
+		},
+		"bytes unmarshaler": {
+			typ:  reflect.TypeFor[bytesValue](),
+			want: true,
+		},
+		"bytes unmarshaler with a context": {
+			typ:  reflect.TypeFor[bytesContextValue](),
+			want: true,
+		},
+		"pointer": {
+			typ:  reflect.TypeFor[*textValue](),
+			want: true,
+		},
+		"struct field": {
+			typ: reflect.TypeFor[struct {
+				Name string
+				Addr netip.Prefix
+			}](),
+			want: true,
+		},
+		"array element": {
+			typ:  reflect.TypeFor[[2]bytesValue](),
+			want: true,
+		},
+		"map key": {
+			typ:  reflect.TypeFor[map[textValue]int](),
+			want: true,
+		},
+		"map value": {
+			typ:  reflect.TypeFor[map[string][]textValue](),
+			want: true,
+		},
+		"recursive type with a text field": {
+			typ:  reflect.TypeFor[textChain](),
+			want: true,
+		},
+		"embedded time": {
+			typ:  reflect.TypeFor[embeddedTime](),
+			want: true,
+		},
+		"time": {
+			typ: reflect.TypeFor[time.Time](),
+		},
+		"struct with time fields": {
+			typ: reflect.TypeFor[struct {
+				At      time.Time
+				Expires *time.Time
+				Timeout time.Duration
+			}](),
+		},
+		"recursive type without a text field": {
+			typ: reflect.TypeFor[plainChain](),
+		},
+		"plain types": {
+			typ: reflect.TypeFor[map[string][]string](),
+		},
+		"interface": {
+			typ: reflect.TypeFor[any](),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, aliasing.DecodesText(tc.typ))
+			assert.Equal(t, tc.want, aliasing.DecodesText(tc.typ), "a second call gives the same answer")
+		})
+	}
 }
 
 // mergeLevels returns a document whose levels each merge the level below

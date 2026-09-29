@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"sync"
 	"testing"
@@ -6345,5 +6346,132 @@ func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 			require.NoError(t, err)
 			assert.NotEmpty(t, got)
 		})
+	}
+}
+
+// aliasText is a value that decodes itself from the text of its node.
+type aliasText string
+
+func (a *aliasText) UnmarshalText(text []byte) error {
+	*a = aliasText(text)
+
+	return nil
+}
+
+func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
+	t.Parallel()
+
+	// To decode a type that reads text, the decoder writes the node out
+	// with a copy of the long scalar at each alias. A plain string shares
+	// the scalar between the aliases, so it decodes.
+	manyAliases := "a: &a " + strings.Repeat("x", 2000) + "\n" +
+		"kind: [" + strings.TrimSuffix(strings.Repeat("*a, ", 500), ", ") + "]\n"
+	kind := paths.Root().Child("kind")
+
+	tcs := map[string]struct {
+		err    error
+		target func() any
+		input  string
+		path   paths.Path
+		opts   []niceyaml.DecodeOption
+	}{
+		"text unmarshaler elements": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new([]aliasText) },
+			err:    niceyaml.ErrExcessiveAliasing,
+		},
+		"bytes unmarshaler": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new(rawText) },
+			err:    niceyaml.ErrExcessiveAliasing,
+		},
+		"pointer to a bytes unmarshaler": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new(*rawText) },
+			err:    niceyaml.ErrExcessiveAliasing,
+		},
+		"struct field text unmarshaler": {
+			input: manyAliases,
+			target: func() any {
+				return new(struct {
+					Kind aliasText `yaml:"kind"`
+				})
+			},
+			err: niceyaml.ErrExcessiveAliasing,
+		},
+		"struct field of a standard library text type": {
+			input: manyAliases,
+			target: func() any {
+				return new(struct {
+					Kind netip.Prefix `yaml:"kind"`
+				})
+			},
+			err: niceyaml.ErrExcessiveAliasing,
+		},
+		"map value bytes unmarshaler": {
+			input:  manyAliases,
+			target: func() any { return new(map[string]rawText) },
+			err:    niceyaml.ErrExcessiveAliasing,
+		},
+		"string elements": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new([]string) },
+		},
+		"struct with a time field": {
+			input: manyAliases,
+			target: func() any {
+				return new(struct {
+					At   time.Time `yaml:"at"`
+					Kind []string  `yaml:"kind"`
+				})
+			},
+		},
+		"a few aliases": {
+			input:  "a: &a hello\nkind: [*a, *a, *a]\n",
+			path:   kind,
+			target: func() any { return new([]aliasText) },
+		},
+		"text unmarshaler elements with the limit off": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new([]aliasText) },
+			opts:   []niceyaml.DecodeOption{niceyaml.WithAliasLimit(false)},
+		},
+	}
+
+	decoders := map[string]func(ctx context.Context, n *niceyaml.Node, v any, opts ...niceyaml.DecodeOption) error{
+		"node": func(ctx context.Context, n *niceyaml.Node, v any, opts ...niceyaml.DecodeOption) error {
+			return n.DecodeInto(ctx, v, opts...)
+		},
+		"decoder": func(ctx context.Context, n *niceyaml.Node, v any, opts ...niceyaml.DecodeOption) error {
+			return niceyaml.NewDecoder(opts...).DecodeInto(ctx, n, v)
+		},
+	}
+
+	for name, tc := range tcs {
+		for via, decode := range decoders {
+			t.Run(name+"/"+via, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+				if !tc.path.IsRoot() {
+					doc = yamltest.At(t, doc, tc.path)
+				}
+
+				err := decode(t.Context(), doc, tc.target(), tc.opts...)
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err)
+					require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+					return
+				}
+
+				require.NoError(t, err)
+			})
+		}
 	}
 }

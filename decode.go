@@ -1597,8 +1597,16 @@ func WithReferences(data ...[]byte) DecodeOption {
 // validators run. When aliases make up too much of that count, under the
 // rule gopkg.in/yaml.v3 applies, it returns an error matching
 // [ErrExcessiveAliasing] without decoding. Every node of such a document
-// that holds an alias gets the same error. [WithAliasLimit] turns the
-// check off.
+// that holds an alias gets the same error. To decode a type with an
+// UnmarshalText method or an UnmarshalYAML method that takes bytes, the
+// decoder writes the node out as text, with a copy of the content of
+// each alias. When the type of v, or a type the decoder reaches from it,
+// is such a type, DecodeInto counts the document as text too, where each
+// copy of a scalar weighs its length in bytes. The decoder reads a
+// [time.Time] from its value, so it adds no such count. The count sees
+// only the types in v, so it misses text that a go-yaml option hands to
+// other code, such as [yaml.CustomUnmarshaler] or
+// [yaml.UseJSONUnmarshaler]. [WithAliasLimit] turns both counts off.
 //
 // An alias inside the node resolves against the anchors of the whole
 // document, to the anchor of its name defined last before the alias,
@@ -1645,6 +1653,10 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 
 	if !cfg.skipAliasLimit {
 		err = aliasing.CheckDecode(n)
+		if err == nil && aliasing.DecodesText(reflect.TypeOf(v).Elem()) {
+			err = aliasing.CheckDecodeText(n)
+		}
+
 		if err != nil {
 			return n.Bind(WrapError(err, atToken(contentStart(n.AST()))))
 		}

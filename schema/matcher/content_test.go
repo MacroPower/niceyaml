@@ -733,6 +733,9 @@ func TestContent(t *testing.T) {
 			"struct of plain fields": {
 				m: matcher.Content(kindPath, plainField{}),
 			},
+			"time": {
+				m: matcher.Content(kindPath, time.Time{}),
+			},
 		}
 
 		for name, tc := range tcs {
