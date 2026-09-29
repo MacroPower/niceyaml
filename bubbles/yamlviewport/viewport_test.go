@@ -4794,17 +4794,34 @@ func TestViewport_LayoutChangesKeepSearchIndex(t *testing.T) {
 func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
 	t.Parallel()
 
-	// A program may pass the current width on every window size message.
-	// Setting a value the Model already holds keeps the row counts, so the
+	// A program may pass the current width on every window size message,
+	// or restyle the frame on every focus change. A change that leaves the
+	// printer and the pane width as they are keeps the row counts, so the
 	// next read lays out nothing.
+	frame := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Width(30)
+
 	tcs := map[string]struct {
-		change func(*yamlviewport.Model)
+		change func(*yamlviewport.Model, *printer.Printer)
 	}{
 		"same width": {
-			change: func(m *yamlviewport.Model) { m.SetWidth(m.Width()) },
+			change: func(m *yamlviewport.Model, _ *printer.Printer) { m.SetWidth(m.Width()) },
+		},
+		"width capped by style": {
+			change: func(m *yamlviewport.Model, _ *printer.Printer) { m.SetWidth(50) },
 		},
 		"same word wrap": {
-			change: func(m *yamlviewport.Model) { m.SetWordWrap(m.WordWrap()) },
+			change: func(m *yamlviewport.Model, _ *printer.Printer) { m.SetWordWrap(m.WordWrap()) },
+		},
+		"same container style": {
+			change: func(m *yamlviewport.Model, _ *printer.Printer) { m.SetContainerStyle(m.ContainerStyle()) },
+		},
+		"border color only": {
+			change: func(m *yamlviewport.Model, _ *printer.Printer) {
+				m.SetContainerStyle(frame.BorderForeground(lipgloss.Color("#ff0000")))
+			},
+		},
+		"same printer": {
+			change: func(m *yamlviewport.Model, p *printer.Printer) { m.SetPrinter(p) },
 		},
 	}
 
@@ -4830,7 +4847,10 @@ func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
 				fmt.Fprintf(&src, "line%d: v\n", i)
 			}
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m := yamlviewport.New(
+				yamlviewport.WithPrinter(p),
+				yamlviewport.WithContainerStyle(frame),
+			)
 			m.SetWidth(40)
 			m.SetHeight(10)
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
@@ -4839,7 +4859,7 @@ func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
 
 			renders = 0
 
-			tc.change(&m)
+			tc.change(&m, p)
 			m.TotalRowCount()
 
 			assert.Zero(t, renders, "the row counts should come from the cache")

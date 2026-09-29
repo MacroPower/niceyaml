@@ -380,14 +380,18 @@ func (m *Model) Width() int {
 }
 
 // SetWidth sets the width of the viewport and clamps the scroll offsets to
-// the new bounds. The width already set leaves the view where it is.
+// the new bounds. A width that leaves the content width as it is, such as
+// the width already set or one the container style caps, leaves the view
+// where it is.
 func (m *Model) SetWidth(w int) {
-	if w == m.width {
-		return
-	}
+	old := m.paneWidth()
 
 	m.width = w
-	m.relayout()
+
+	// Row counts depend on the width only through the pane width.
+	if m.paneWidth() != old {
+		m.relayout()
+	}
 }
 
 // relayout responds to a layout change, such as a new printer, style, wrap
@@ -535,6 +539,12 @@ func (m *Model) renderPrinter(width int) *printer.Printer {
 func (m *Model) SetPrinter(p *printer.Printer) {
 	if p == nil {
 		p = printer.New()
+	}
+
+	// A printer never changes once built, so the printer already set keeps
+	// the row counts.
+	if p == m.printer {
+		return
 	}
 
 	m.printer = p
@@ -838,12 +848,25 @@ func (m *Model) ContainerStyle() lipgloss.Style {
 
 // SetContainerStyle sets the container style applied to the viewport frame.
 // The frame size changes the content area, so the scroll offsets clamp to
-// it.
+// it. A style that leaves the content width as it is, such as one that
+// changes only a border color, leaves the view where it is.
 //
 //nolint:gocritic // hugeParam: Copying.
 func (m *Model) SetContainerStyle(s lipgloss.Style) {
+	prev := m.style
+	old := m.paneWidth()
+
+	m.style = s
+
+	// Row counts depend on the style only through the pane width, so an
+	// unchanged pane width keeps the cache, as SetHeight does.
+	if m.paneWidth() == old {
+		return
+	}
+
 	// The style sets the content height that bounds the offset, so anchorTop
-	// reads the top line before the new style applies.
+	// reads the top line under the old style.
+	m.style = prev
 	m.anchorTop()
 
 	m.style = s
