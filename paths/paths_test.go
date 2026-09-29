@@ -2321,19 +2321,38 @@ func TestPath_Token_HandBuiltMapping(t *testing.T) {
 	t.Parallel()
 
 	// A tree built by hand may hold a typed nil or a nil entry where the
-	// parser always puts a node; Token returns a not-found error for such a
-	// mapping rather than panicking.
-	tcs := map[string]ast.Node{
-		"key holding a typed nil": mapNode(mapEntry((*ast.StringNode)(nil), &ast.StringNode{Value: "1"})),
-		"nil entry":               &ast.MappingNode{Values: []*ast.MappingValueNode{nil}},
+	// parser always puts a node. Token returns a not-found error for such a
+	// mapping rather than panicking, and names the path as other resolution
+	// errors do.
+	tcs := map[string]struct {
+		body ast.Node
+		path paths.Path
+		want string
+	}{
+		"key holding a typed nil": {
+			body: mapNode(mapEntry((*ast.StringNode)(nil), &ast.StringNode{Value: "1"})),
+			path: paths.Root(),
+			want: "resolve $: not found: node has no token",
+		},
+		"nil entry": {
+			body: &ast.MappingNode{Values: []*ast.MappingValueNode{nil}},
+			path: paths.Root(),
+			want: "resolve $: not found: node has no token",
+		},
+		"value holding a typed nil": {
+			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.StringNode)(nil))),
+			path: paths.Root().Child("a"),
+			want: "resolve $.a: not found: node has no token",
+		},
 	}
 
-	for name, body := range tcs {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := paths.Root().Token(&ast.DocumentNode{Body: body})
+			_, err := tc.path.Token(&ast.DocumentNode{Body: tc.body})
 			require.ErrorIs(t, err, paths.ErrNotFound)
+			require.EqualError(t, err, tc.want)
 		})
 	}
 }

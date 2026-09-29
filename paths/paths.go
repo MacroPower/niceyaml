@@ -565,7 +565,7 @@ func (p Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
 func (p Path) tokenOf(node ast.Node) (*token.Token, error) {
 	tk := firstToken(node)
 	if tk == nil {
-		return nil, fmt.Errorf("%w: %s has no token", ErrNotFound, p)
+		return nil, fmt.Errorf("resolve %s: %w: node has no token", p, ErrNotFound)
 	}
 
 	return tk, nil
