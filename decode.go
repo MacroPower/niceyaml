@@ -286,7 +286,7 @@ func foldPreambles(nodes []*ast.DocumentNode, groups []token.Tokens) []*document
 			continue
 		}
 
-		docs = append(docs, &document{root: node, tokens: slices.Concat(pending, groups[i])})
+		docs = append(docs, &document{root: node, fileIndex: i, tokens: slices.Concat(pending, groups[i])})
 		pending = nil
 	}
 
@@ -296,7 +296,7 @@ func foldPreambles(nodes []*ast.DocumentNode, groups []token.Tokens) []*document
 		last.tokens = append(last.tokens, pending...)
 
 	case len(docs) == 0 && len(nodes) > 0:
-		docs = append(docs, &document{root: nodes[0], tokens: pending})
+		docs = append(docs, &document{root: nodes[0], fileIndex: 0, tokens: pending})
 	}
 
 	return docs
@@ -612,6 +612,9 @@ type document struct {
 	// which the extent of a Node searches.
 	positioned token.Tokens
 	index      int
+	// The index of root in the Docs of the file the Source parsed, which
+	// can differ from index, since preamble nodes fold into documents.
+	fileIndex int
 	// The number of tokens at the start of tokens before the content.
 	preamble int
 	// Creates resolver once, for the first path any Node resolves.
@@ -1993,7 +1996,13 @@ func (n *Node) holdsToken(tk *token.Token) bool {
 		return true
 	}
 
-	if _, ok := n.doc.decodeTree().tokens[tk]; ok {
+	tree := n.doc.decodeTree()
+
+	if _, ok := tree.tokens[tk]; ok {
+		return true
+	}
+
+	if _, ok := tree.parseTokens[tk]; ok {
 		return true
 	}
 

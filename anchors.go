@@ -3,7 +3,6 @@ package niceyaml
 import (
 	"context"
 	"errors"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,9 +45,14 @@ type decodeTree struct {
 	// comments, which scoped fills for the first decode of a node below
 	// the body when the tree renames no anchor.
 	nodes map[ast.Node]ast.Node
-	// The tokens of the second parse the tree comes from, if any, which
-	// the errors of the decoder may name.
+	// The tokens the nodes of body hold, when body comes from a second
+	// parse, including the ones the parser made for values the document
+	// leaves out. The errors of the decoder may name them.
 	tokens map[*token.Token]struct{}
+	// The tokens of the second parse body comes from, if any, which the
+	// errors of the decoder may name. The Source shares the set between
+	// the trees of all its documents, and no tree writes to it.
+	parseTokens map[*token.Token]struct{}
 	// Spells each name the tree gives an anchor as the document does,
 	// for the messages the decoder reports, or nil when no anchor has a
 	// name of its own.
@@ -101,7 +105,7 @@ func (d *document) renamedTree(shared map[string]bool) (*decodeTree, bool) {
 		return nil, false
 	}
 
-	i := slices.Index(src.file.Docs, d.root)
+	i := d.fileIndex
 	if i < 0 || i >= len(file.Docs) {
 		return nil, false
 	}
@@ -115,10 +119,6 @@ func (d *document) renamedTree(shared map[string]bool) (*decodeTree, bool) {
 
 	tokens := tokenCollector{}
 	ast.Walk(tokens, body)
-
-	for tk := range fileTokens {
-		tokens[tk] = struct{}{}
-	}
 
 	// Each anchor with a shared name gets the name followed by the count
 	// of anchors of that name so far. A name never holds a space, so the
@@ -179,11 +179,12 @@ func (d *document) renamedTree(shared map[string]bool) (*decodeTree, bool) {
 	}
 
 	return &decodeTree{
-		source: d.root.Body,
-		body:   body,
-		nodes:  nodes,
-		tokens: tokens,
-		names:  strings.NewReplacer(pairs...),
+		source:      d.root.Body,
+		body:        body,
+		nodes:       nodes,
+		tokens:      tokens,
+		parseTokens: fileTokens,
+		names:       strings.NewReplacer(pairs...),
 	}, true
 }
 

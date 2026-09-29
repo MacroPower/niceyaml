@@ -184,6 +184,46 @@ func BenchmarkNode_DecodeRejectedStream(b *testing.B) {
 	}
 }
 
+// BenchmarkNode_DecodeReusedAnchorStream decodes every document of a
+// stream whose documents each reuse an anchor name, so each document
+// decodes from a tree with renamed anchors. The time per document stays
+// flat as the stream grows.
+func BenchmarkNode_DecodeReusedAnchorStream(b *testing.B) {
+	sizes := []struct {
+		name string
+		docs int
+	}{
+		{"docs_500", 500},
+		{"docs_2000", 2000},
+	}
+
+	for _, sz := range sizes {
+		input := strings.Repeat("---\na: &x 1\nb: &x 2\nc: *x\n", sz.docs)
+
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				// Each document builds its decode tree once, so each
+				// iteration parses the stream anew.
+				docs, err := niceyaml.NewSourceFromString(input).Documents()
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				for _, doc := range docs {
+					_, err := doc.Decode[map[string]int](b.Context())
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*sz.docs), "ns/doc")
+		})
+	}
+}
+
 func BenchmarkNode_Nodes(b *testing.B) {
 	sizes := []struct {
 		name  string

@@ -2801,6 +2801,22 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		}
 	})
 
+	t.Run("later document after a folded node", func(t *testing.T) {
+		t.Parallel()
+
+		// The comment after the "..." marker parses to a node of its own,
+		// so the second document is the third node of the file.
+		input := "a: 1\n...\n# note\n---\na: &x 1\nb:\n  - *x\n  - &x 2\n  - *x\n"
+
+		docs, err := niceyaml.NewSourceFromString(input).Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		got, err := yamltest.At(t, docs[1], paths.Root().Child("b")).Decode[[]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, []int{1, 2, 2}, got)
+	})
+
 	t.Run("failure in an anchor a later one hides decodes", func(t *testing.T) {
 		t.Parallel()
 
