@@ -535,6 +535,31 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`timeout: "5s"`),
 			want:    true,
 		},
+		"time matches UTC timestamp": {
+			matcher: matcher.Content(createdPath, time.Date(2001, 12, 15, 2, 59, 43, 0, time.UTC)),
+			input:   stringtest.Input(`created: 2001-12-15T02:59:43Z`),
+			want:    true,
+		},
+		"time matches offset timestamp in same offset": {
+			matcher: matcher.Content(createdPath, time.Date(2001, 12, 14, 21, 59, 43, 0, time.FixedZone("", -5*3600))),
+			input:   stringtest.Input(`created: 2001-12-14T21:59:43-05:00`),
+			want:    true,
+		},
+		"time matches offset timestamp in UTC": {
+			matcher: matcher.Content(createdPath, time.Date(2001, 12, 15, 2, 59, 43, 0, time.UTC)),
+			input:   stringtest.Input(`created: 2001-12-14T21:59:43-05:00`),
+			want:    true,
+		},
+		"time does not match other instant": {
+			matcher: matcher.Content(createdPath, time.Date(2001, 12, 15, 3, 0, 0, 0, time.UTC)),
+			input:   stringtest.Input(`created: 2001-12-14T21:59:43-05:00`),
+			want:    false,
+		},
+		"pointer time matches offset timestamp": {
+			matcher: matcher.Content(createdPath, new(time.Date(2001, 12, 15, 2, 59, 43, 0, time.UTC))),
+			input:   stringtest.Input(`created: 2001-12-14T21:59:43-05:00`),
+			want:    true,
+		},
 		"any string does not match number": {
 			matcher: matcher.Content[any](versionPath, "1"),
 			input:   stringtest.Input(`version: 1`),

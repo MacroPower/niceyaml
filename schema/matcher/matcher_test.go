@@ -25,6 +25,7 @@ var (
 	versionPath    = paths.Root().Child("version")
 	enabledPath    = paths.Root().Child("enabled")
 	timeoutPath    = paths.Root().Child("timeout")
+	createdPath    = paths.Root().Child("created")
 )
 
 // pointerMatcher is a [matcher.Matcher] with a pointer receiver, so a nil

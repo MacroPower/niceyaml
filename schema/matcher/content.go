@@ -43,10 +43,12 @@ type contentMatcher[T comparable] struct {
 // scalar that YAML reads as a string, such as inf or 0x1p-2, matches no
 // number either, though Go parses it as one. A
 // [time.Duration] reads from the text of a scalar, so timeout: "5s" and
-// timeout: 5s both match 5*time.Second. A pointer want matches the value
-// it points to. A null matches only a nil want, such as
-// Content[any](path, nil) or a nil pointer. When T is an interface, two
-// numbers compare by value whatever their Go types, so
+// timeout: 5s both match 5*time.Second. A [time.Time] matches a timestamp
+// that names the same instant, whatever its offset, so
+// 2001-12-14T21:59:43-05:00 matches the same moment in UTC. A pointer
+// want matches the value it points to. A null matches only a nil want,
+// such as Content[any](path, nil) or a nil pointer. When T is an
+// interface, two numbers compare by value whatever their Go types, so
 // Content[any](path, 1) matches an integer the decoder reads as a
 // uint64. A document without the path, or
 // whose value does not decode into T, does not match, so a
@@ -204,6 +206,15 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 
 	if isFloat(gv.Kind()) {
 		return floatEqual(gv.Float(), wv.Float()), nil
+	}
+
+	// == on a time.Time also compares its *time.Location, and the decoder
+	// builds a fresh one for each offset it parses, so times compare by
+	// instant.
+	if gt, ok := reflect.TypeAssert[time.Time](gv); ok {
+		if wt, ok := reflect.TypeAssert[time.Time](wv); ok {
+			return gt.Equal(wt), nil
+		}
 	}
 
 	return gv.Interface() == wv.Interface(), nil
