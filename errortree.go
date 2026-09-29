@@ -143,27 +143,35 @@ var (
 // line, which is how [errors.Join] writes the message of the error it
 // builds. A nil branch carries no message and no line of its own, so it
 // takes no separator either.
+//
+// It matches msg against the branches in place and stops at the first
+// mismatch. [followBranches] runs this check at every level of a chain
+// of wrappers, and building the joined text at each level would copy
+// the message below it once per level.
 func isJoinMessage(msg string, branches []error) bool {
-	var (
-		sb    strings.Builder
-		first = true
-	)
+	first := true
 
 	for _, branch := range branches {
 		if branch == nil {
 			continue
 		}
 
+		var ok bool
+
 		if !first {
-			sb.WriteByte('\n')
+			if msg, ok = strings.CutPrefix(msg, "\n"); !ok {
+				return false
+			}
 		}
 
 		first = false
 
-		sb.WriteString(branch.Error())
+		if msg, ok = strings.CutPrefix(msg, branch.Error()); !ok {
+			return false
+		}
 	}
 
-	return msg == sb.String()
+	return msg == ""
 }
 
 // children returns the nodes of the children [walkChildren] finds along
