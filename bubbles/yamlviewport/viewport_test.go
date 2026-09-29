@@ -23,6 +23,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
+	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -1811,6 +1812,132 @@ func TestViewport_HorizontalScrollKeepsFrameAtWideRune(t *testing.T) {
 			assert.True(t, strings.HasPrefix(rows[2], "│ b"), "%q", rows[2])
 		})
 	}
+}
+
+func TestViewport_HorizontalScrollKeepsFrameAtKeycap(t *testing.T) {
+	t.Parallel()
+
+	// A keycap takes two cells, where ansi.Cut counts one for its ASCII
+	// base. The cut once took an extra cell at an offset before the
+	// keycap, which pushed the right border out of the view, and showed a
+	// blank row at an offset past it. The gutter and "k: ab" take six
+	// columns, so the keycap takes columns 6 and 7.
+	tcs := map[string]struct {
+		mode  yamlviewport.ViewMode
+		width int
+	}{
+		"full": {
+			mode:  yamlviewport.ViewModeFull,
+			width: 20,
+		},
+		"side by side": {
+			mode:  yamlviewport.ViewModeSideBySide,
+			width: 41,
+		},
+	}
+
+	wants := map[int]string{
+		0: "│ k: ab1\ufe0f\u20e3bbb",
+		7: "│ bbb",
+		8: "│bbb",
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := testPrinter().With(printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())))
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(tc.width)
+			m.SetHeight(4)
+			m.SetViewMode(tc.mode)
+			m.SetWordWrap(false)
+			m.SetRevision(niceyaml.NewSourceFromString(
+				"a: " + strings.Repeat("a", 34) + "\nk: ab1\ufe0f\u20e3" + strings.Repeat("b", 36) + "\n",
+			))
+
+			for offset, want := range wants {
+				m.SetXOffset(offset)
+				require.Equal(t, offset, m.XOffset())
+
+				rows := strings.Split(ansi.Strip(m.View()), "\n")
+				require.Len(t, rows, 4)
+
+				top := rows[0]
+				for i, row := range rows[1 : len(rows)-1] {
+					require.Equal(t, ansi.StringWidth(top), ansi.StringWidth(row),
+						"offset %d, row %d: %q", offset, i, row)
+
+					for col, r := range []rune(top) {
+						if r == '┌' || r == '┐' {
+							assert.Equal(t, "│", cells.Cut(row, col, col+1),
+								"offset %d, row %d, col %d: %q", offset, i, col, row)
+						}
+					}
+				}
+
+				assert.True(t, strings.HasPrefix(rows[2], want), "offset %d: %q", offset, rows[2])
+			}
+		})
+	}
+}
+
+func TestViewport_KeycapRowsFitWidth(t *testing.T) {
+	t.Parallel()
+
+	// With wrap off, a row of keycaps runs past the width, and the view
+	// cuts it to the width by the two cells each keycap takes.
+	keycaps := strings.Repeat("1\ufe0f\u20e3", 10)
+
+	tcs := map[string]struct {
+		mode  yamlviewport.ViewMode
+		width int
+	}{
+		"full": {
+			mode:  yamlviewport.ViewModeFull,
+			width: 30,
+		},
+		"side by side": {
+			mode:  yamlviewport.ViewModeSideBySide,
+			width: 61,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New()
+			m.SetWidth(tc.width)
+			m.SetHeight(2)
+			m.SetViewMode(tc.mode)
+			m.SetWordWrap(false)
+			m.SetRevision(niceyaml.NewSourceFromString("k: " + keycaps + "abcdefghij\nother: plain\n"))
+
+			for i, row := range strings.Split(m.View(), "\n") {
+				assert.Equal(t, tc.width, ansi.StringWidth(row), "row %d: %q", i, ansi.Strip(row))
+			}
+		})
+	}
+}
+
+func TestViewport_SearchScrollsPastKeycap(t *testing.T) {
+	t.Parallel()
+
+	// The search scrolls the match into view past a keycap, which the cut
+	// once measured as one cell short and rendered as a blank row.
+	m := yamlviewport.New()
+	m.SetWidth(40)
+	m.SetHeight(2)
+	m.SetWordWrap(false)
+	m.SetRevision(niceyaml.NewSourceFromString(
+		"step: 1\ufe0f\u20e3 " + strings.Repeat("x", 60) + " needle\nother: plain\n",
+	))
+
+	m.SetSearchTerm("needle")
+	require.Positive(t, m.XOffset())
+
+	assert.Contains(t, ansi.Strip(m.View()), "needle")
 }
 
 func TestViewport_SideBySideWithoutPaneColumns(t *testing.T) {

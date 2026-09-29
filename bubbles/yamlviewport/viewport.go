@@ -16,6 +16,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
+	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
@@ -1756,23 +1757,22 @@ func (m *Model) cutRow(row string, offset, width int) string {
 
 	inner := ansi.StringWidth(row) - left - right
 	if inner < 0 {
-		return ansi.Cut(row, 0, width)
+		return cells.Cut(row, 0, width)
 	}
 
 	visible := max(0, width-left-right)
-	body := ansi.Cut(row, left, left+inner)
+	body := cells.Cut(row, left, left+inner)
 
-	// A cut keeps the whole of a wide cluster that begins before offset,
-	// so the content would run wider than the window. Truncating at a
-	// column inside a cluster comes up short of that column, so start
+	// The cut drops a wide cluster that straddles offset. A cut that ends
+	// at a column inside a cluster comes up short of that column, so start
 	// moves to the next cluster boundary, and blank cells fill the columns
 	// of the dropped cluster.
 	start := offset
-	for start < min(inner, offset+visible) && ansi.StringWidth(ansi.Truncate(body, start, "")) != start {
+	for start < min(inner, offset+visible) && ansi.StringWidth(cells.Cut(body, 0, start)) != start {
 		start++
 	}
 
-	content := ansi.Cut(body, start, offset+visible)
+	content := cells.Cut(body, start, offset+visible)
 	if start > offset {
 		content = m.printer.Style(kind.Text).Render(strings.Repeat(" ", start-offset)) + content
 	}
@@ -1785,7 +1785,7 @@ func (m *Model) cutRow(row string, offset, width int) string {
 		content += m.printer.Style(kind.Text).Render(strings.Repeat(" ", padding))
 	}
 
-	return ansi.Cut(row, 0, left) + content + ansi.Cut(row, left+inner, left+inner+right)
+	return cells.Cut(row, 0, left) + content + cells.Cut(row, left+inner, left+inner+right)
 }
 
 // SetYOffset sets the vertical offset, in rows, clamped to the scrollable
@@ -2214,7 +2214,7 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 	}
 
 	for i := range lines {
-		lines[i] = ansi.Truncate(lines[i], contentW, "")
+		lines[i] = cells.Cut(lines[i], 0, contentW)
 		if pad := contentW - ansi.StringWidth(lines[i]); pad > 0 {
 			lines[i] += textStyle.Render(strings.Repeat(" ", pad))
 		}
@@ -2326,12 +2326,12 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 			// view cuts both panes to the pane width, which the gutter of
 			// a pane row can exceed on its own, so the joined row fits the
 			// content width.
-			leftPadded := ansi.Truncate(left, paneWidth, "")
+			leftPadded := cells.Cut(left, 0, paneWidth)
 			if padding := paneWidth - ansi.StringWidth(leftPadded); padding > 0 {
 				leftPadded += textStyle.Render(strings.Repeat(" ", padding))
 			}
 
-			combined = append(combined, leftPadded+separator+ansi.Truncate(right, paneWidth, ""))
+			combined = append(combined, leftPadded+separator+cells.Cut(right, 0, paneWidth))
 		}
 	}
 

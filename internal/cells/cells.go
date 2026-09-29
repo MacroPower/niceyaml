@@ -11,14 +11,20 @@
 //
 //	row := cells.NewRow("a: 1️⃣ x")
 //	row.Width(7) // 6, the cells before x
+//
+// A rendered row also carries the escape sequences of its styles. [Cut]
+// cuts such a row to a range of cells, measuring each cluster the same
+// way, so the width of what it returns agrees with [ansi.StringWidth].
 package cells
 
 import (
 	"math"
 	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/ansi/parser"
 
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 )
@@ -140,6 +146,48 @@ func (r Row) total() int {
 	}
 
 	return r.before[len(r.before)-1]
+}
+
+// Cut returns the grapheme clusters of s that start at or after column
+// left and end by column right, or "" when right is not past left. It
+// measures each cluster as [ansi.StringWidth] does, so a keycap takes its
+// two cells, where [ansi.Cut] counts one for its ASCII base. A cluster
+// that straddles either edge drops out whole, so the result can come up
+// short of right-left cells. A cluster of no width at column right falls
+// outside. Every byte outside a cluster, such as an escape sequence,
+// stays, so a style s opens still closes.
+func Cut(s string, left, right int) string {
+	if right <= left {
+		return ""
+	}
+
+	var b strings.Builder
+
+	state := parser.GroundState
+	col := 0
+
+	for i := 0; i < len(s); {
+		next, action := parser.Table.Transition(state, s[i])
+		if action != parser.PrintAction && next != parser.Utf8State {
+			b.WriteByte(s[i])
+
+			state = next
+			i++
+
+			continue
+		}
+
+		cluster, width := ansi.FirstGraphemeCluster(s[i:], ansi.GraphemeWidth)
+		if col >= left && col < right && col+width <= right {
+			b.WriteString(cluster)
+		}
+
+		state = parser.GroundState
+		col += width
+		i += len(cluster)
+	}
+
+	return b.String()
 }
 
 // TrimLastCluster returns s without its last grapheme cluster, the

@@ -159,6 +159,47 @@ func TestRowZeroValue(t *testing.T) {
 	}
 }
 
+func TestCut(t *testing.T) {
+	t.Parallel()
+
+	keycap := "ab1\ufe0f\u20e3cd"
+	zwj := "a\U0001F468\u200d\U0001F469b"
+
+	tcs := map[string]struct {
+		input string
+		left  int
+		right int
+		want  string
+	}{
+		"ascii":                    {input: "abcdef", left: 1, right: 4, want: "bcd"},
+		"empty range":              {input: "\x1b[31mabcdef\x1b[0m", left: 2, right: 2, want: ""},
+		"range past the end":       {input: "ab", left: 1, right: 9, want: "b"},
+		"keycap whole":             {input: keycap, left: 0, right: 4, want: "ab1\ufe0f\u20e3"},
+		"right edge inside keycap": {input: keycap, left: 0, right: 3, want: "ab"},
+		"left edge inside keycap":  {input: keycap, left: 3, right: 6, want: "cd"},
+		"past a keycap":            {input: keycap, left: 4, right: 6, want: "cd"},
+		"wide rune":                {input: "a日b", left: 1, right: 3, want: "日"},
+		"edges inside a wide rune": {input: "a日b", left: 2, right: 4, want: "b"},
+		"zwj sequence":             {input: zwj, left: 1, right: 3, want: "\U0001F468\u200d\U0001F469"},
+		"edge inside zwj sequence": {input: zwj, left: 0, right: 2, want: "a"},
+		"combining mark":           {input: "cafe\u0301!", left: 3, right: 4, want: "e\u0301"},
+		"styled keeps escapes": {
+			input: "\x1b[31m" + keycap + "\x1b[0m",
+			left:  1,
+			right: 3,
+			want:  "\x1b[31mb\x1b[0m",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, cells.Cut(tc.input, tc.left, tc.right))
+		})
+	}
+}
+
 func TestTrimLastCluster(t *testing.T) {
 	t.Parallel()
 
