@@ -6241,6 +6241,85 @@ func TestPrinter_Layout_StyledAnnotationRows(t *testing.T) {
 	}
 }
 
+func TestPrinter_Layout_TallGutter(t *testing.T) {
+	t.Parallel()
+
+	// A gutter kind in a style with a margin, vertical padding, a border,
+	// or a width narrower than its text, or a gutter that renders a
+	// newline, renders over more than one row. The printer keeps only the
+	// first row of the gutter, so Print writes the rows the layout counts.
+	tcs := map[string]struct {
+		gutter printer.Gutter
+		kind   kind.Kind
+		style  lipgloss.Style
+	}{
+		"line number margin": {
+			kind:  kind.UILineNumber,
+			style: lipgloss.NewStyle().MarginBottom(1),
+		},
+		"line number width": {
+			kind:  kind.UILineNumber,
+			style: lipgloss.NewStyle().Width(2),
+		},
+		"line number border": {
+			kind:  kind.UILineNumber,
+			style: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
+		},
+		"diff marker margin": {
+			gutter: printer.DiffGutter,
+			kind:   kind.GenericInserted,
+			style:  lipgloss.NewStyle().MarginBottom(1),
+		},
+		"text padding": {
+			kind:  kind.Text,
+			style: lipgloss.NewStyle().PaddingTop(1),
+		},
+		"gutter func": {
+			gutter: printer.GutterFunc(func(printer.GutterContext) string {
+				return "x\ny "
+			}),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString("a: 1\nb: 2\n").View()
+			view.SetFlag(0, line.FlagInserted)
+			view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below})
+
+			opts := []printer.Option{printer.WithContainerStyle(lipgloss.NewStyle())}
+			if tc.gutter != nil {
+				opts = append(opts, printer.WithGutter(tc.gutter))
+			}
+
+			if tc.kind != "" {
+				opts = append(opts, printer.WithStyles(style.New(
+					lipgloss.NewStyle(),
+					style.Set(tc.kind, tc.style),
+				)))
+			}
+
+			p := printer.New(opts...)
+			printed := strings.Split(p.Print(view), "\n")
+			l := p.Layout(view)
+
+			require.Len(t, printed, l.Rows(), "printed: %q", printed)
+
+			// Without a gutter, the view prints the same content rows, so
+			// each printed row holds one of them from the gutter width on.
+			bare := strings.Split(p.With(printer.WithGutter(printer.NoGutter)).Print(view), "\n")
+			require.Len(t, bare, len(printed))
+
+			for i, row := range printed {
+				content := ansi.Cut(row, l.GutterWidth(), lipgloss.Width(row))
+				assert.Equal(t, ansi.Strip(bare[i]), ansi.Strip(content), "row %d: %q", i, row)
+			}
+		})
+	}
+}
+
 func TestPrinter_WithGutter_Nil(t *testing.T) {
 	t.Parallel()
 

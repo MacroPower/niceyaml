@@ -187,7 +187,9 @@ func (c GutterContext) styler() style.Styler {
 // [Layout.GutterWidth] from that. The printer renders every row's gutter
 // at that width. It pads text that falls short with spaces in [kind.Text]
 // and cuts text that runs over, so the content of every row starts in the
-// same column whatever the gutter renders for the row.
+// same column whatever the gutter renders for the row. The gutter takes
+// one row, so the printer keeps only the first row of text that holds a
+// newline, such as text in a style with a margin or a border.
 //
 // A gutter that shows a marker on some rows and nothing on others
 // therefore declares the width of the marker and renders what it likes:
@@ -217,8 +219,8 @@ type Gutter interface {
 	// [WithMaxNumber] sets. It holds no other fields, since the width
 	// may not depend on the row.
 	Width(ctx GutterContext) int
-	// Render returns the gutter text for a row. The printer pads or cuts
-	// it to Width.
+	// Render returns the gutter text for a row. The printer keeps its
+	// first row and pads or cuts that to Width.
 	Render(ctx GutterContext) string
 }
 
@@ -913,12 +915,15 @@ func (p *Printer) gutterWidth(maxNumber int) int {
 	}))
 }
 
-// renderGutter renders the gutter for ctx at width cells: the text the
-// [Gutter] renders, padded with spaces in [kind.Text] to width or cut to
-// it, so every row of a view starts its content in the same column
-// whatever the gutter renders for the row.
+// renderGutter renders the gutter for ctx at width cells: the first row of
+// the text the [Gutter] renders, padded with spaces in [kind.Text] to width
+// or cut to it, so every row of a view starts its content in the same
+// column whatever the gutter renders for the row. A style with a margin,
+// vertical padding, a border, or a width can lay the text or the pad out
+// over several rows. Only the first row of each stays, so the gutter never
+// adds a row that [Printer.Layout] does not count.
 func (p *Printer) renderGutter(ctx GutterContext, width int) string {
-	text := p.gutter.Render(ctx)
+	text := firstRow(p.gutter.Render(ctx))
 
 	if lipgloss.Width(text) > width {
 		text = ansi.Truncate(text, width, "")
@@ -927,10 +932,21 @@ func (p *Printer) renderGutter(ctx GutterContext, width int) string {
 	// The cut drops a wide rune that straddles the width whole, so a cut
 	// row can fall short of the width and gets padded like any other.
 	if w := lipgloss.Width(text); w < width {
-		text += p.styles.Style(kind.Text).Render(strings.Repeat(" ", width-w))
+		text += firstRow(p.styles.Style(kind.Text).Render(strings.Repeat(" ", width-w)))
 	}
 
 	return text
+}
+
+// firstRow returns the first row of text. The escape sequences of the rows
+// it drops stay, so a style that spans the newline still closes.
+func firstRow(text string) string {
+	first, rest, ok := strings.Cut(text, "\n")
+	if !ok {
+		return text
+	}
+
+	return first + cutText(rest, 0)
 }
 
 // renderRows renders the lines of view as rows, with the gutter sized for
