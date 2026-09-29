@@ -316,6 +316,7 @@ func (d *document) enclosedAliases() map[ast.Node]bool {
 	}
 
 	resolver := d.pathResolver()
+	bounds := anchorBounds{}
 	enclosed := map[ast.Node]bool{}
 
 	for _, alias := range aliases {
@@ -324,7 +325,7 @@ func (d *document) enclosedAliases() map[ast.Node]bool {
 		}
 
 		anchor, err := resolver.Anchor(alias)
-		if err == nil && encloses(anchor, alias.Start) {
+		if err == nil && bounds.encloses(anchor, alias.Start) {
 			enclosed[alias] = true
 		}
 	}
@@ -493,6 +494,8 @@ func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node, e
 // null, so the walk does not follow it.
 func (t *decodeTree) referenceAliases(resolver *paths.Resolver, scope ast.Node) []*token.Token {
 	t.aliasesOnce.Do(func() {
+		bounds := anchorBounds{}
+
 		for _, n := range sourceNodes(t.source) {
 			alias, ok := n.(*ast.AliasNode)
 			if !ok || alias.Start == nil || alias.Start.Position == nil {
@@ -504,7 +507,11 @@ func (t *decodeTree) referenceAliases(resolver *paths.Resolver, scope ast.Node) 
 				anchor = nil
 			}
 
-			t.aliases = append(t.aliases, aliasRead{token: alias.Start, anchor: anchor})
+			t.aliases = append(t.aliases, aliasRead{
+				token:    alias.Start,
+				anchor:   anchor,
+				enclosed: anchor != nil && bounds.encloses(anchor, alias.Start),
+			})
 		}
 
 		sort.SliceStable(t.aliases, func(i, j int) bool {
@@ -544,7 +551,7 @@ func (t *decodeTree) referenceAliases(resolver *paths.Resolver, scope ast.Node) 
 					refs = append(refs, a.token)
 				}
 
-			case !visited[a.anchor] && !encloses(a.anchor, a.token):
+			case !visited[a.anchor] && !a.enclosed:
 				visited[a.anchor] = true
 				work = append(work, a.anchor)
 			}
@@ -565,6 +572,8 @@ type aliasRead struct {
 	// The anchor the document's resolver binds the alias to, or nil when
 	// it binds the alias to no anchor.
 	anchor ast.Node
+	// Whether the alias lies inside anchor.
+	enclosed bool
 }
 
 // mergeAlias is an alias under a `<<` merge key that the decoder finds no
@@ -590,6 +599,8 @@ func (m mergeAlias) message() string {
 func unresolvedMerges(resolver *paths.Resolver, body ast.Node) []mergeAlias {
 	var found []mergeAlias
 
+	bounds := anchorBounds{}
+
 	check := func(node ast.Node) {
 		alias, ok := node.(*ast.AliasNode)
 		if !ok || alias.Start == nil || alias.Start.Position == nil {
@@ -600,7 +611,7 @@ func unresolvedMerges(resolver *paths.Resolver, body ast.Node) []mergeAlias {
 
 		anchor, err := resolver.Anchor(alias)
 		if err == nil {
-			if !encloses(anchor, alias.Start) {
+			if !bounds.encloses(anchor, alias.Start) {
 				return
 			}
 
@@ -652,16 +663,36 @@ func mergeSources(entry *ast.MappingValueNode) []ast.Node {
 	return sources
 }
 
+// anchorBounds keeps the offsets of the first and the last token under
+// each node it checks a token against, so a check of many aliases
+// against one anchor walks the anchor once. A node without tokens maps
+// to nil.
+type anchorBounds map[ast.Node]*tokenSpan
+
+// tokenSpan is the offsets of the first and the last token under a node.
+type tokenSpan struct {
+	start, end int
+}
+
 // encloses reports whether tk lies among the tokens under node.
-func encloses(node ast.Node, tk *token.Token) bool {
-	first, last := tokenBounds(node)
-	if len(first) == 0 {
+func (b anchorBounds) encloses(node ast.Node, tk *token.Token) bool {
+	span, ok := b[node]
+	if !ok {
+		first, last := tokenBounds(node)
+		if len(first) > 0 {
+			span = &tokenSpan{start: first[0].Position.Offset, end: last[0].Position.Offset}
+		}
+
+		b[node] = span
+	}
+
+	if span == nil {
 		return false
 	}
 
 	off := tk.Position.Offset
 
-	return off >= first[0].Position.Offset && off <= last[0].Position.Offset
+	return off >= span.start && off <= span.end
 }
 
 // restoreNames returns msg with each name the tree gave an anchor spelled

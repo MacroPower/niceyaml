@@ -288,6 +288,44 @@ func BenchmarkNode_DecodeReferenceAliases(b *testing.B) {
 	}
 }
 
+// BenchmarkNode_DecodeSelfAliases decodes a document whose one anchor
+// holds many aliases to itself, which the decoder reads as null. The
+// decode walks the anchor once rather than once per alias, so the time
+// per alias stays flat as the aliases grow.
+func BenchmarkNode_DecodeSelfAliases(b *testing.B) {
+	sizes := []struct {
+		name    string
+		aliases int
+	}{
+		{"aliases_2000", 2000},
+		{"aliases_8000", 8000},
+	}
+
+	for _, sz := range sizes {
+		input := "a: &a\n" + strings.Repeat("  - *a\n", sz.aliases)
+
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				// A document builds its decode tree once, so each iteration
+				// parses the input anew.
+				doc, err := niceyaml.NewSourceFromString(input).Document()
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				_, err = doc.Decode[map[string]any](b.Context())
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*sz.aliases), "ns/alias")
+		})
+	}
+}
+
 func BenchmarkNode_Nodes(b *testing.B) {
 	sizes := []struct {
 		name  string
