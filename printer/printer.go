@@ -324,12 +324,12 @@ type AnnotationRow struct {
 	// when it runs past the width, so a func that marks columns puts the
 	// marks in the Marker and leaves Text empty, as the caret rows of
 	// [DefaultAnnotation] do. When Text wraps, its continuation rows
-	// indent past the Marker, so they align under the start of Text. When the column
-	// leaves Text less room than its widest word, the Marker keeps its
-	// column on a row of its own, and Text moves to the rows below under
-	// a smaller indent. That indent leaves Text 20 cells, or its widest
-	// word when that is wider, and shrinks to nothing when the printer
-	// width has less room.
+	// indent past the Marker, so they align under the start of Text. When
+	// the column leaves Text less room than its widest word, the Marker
+	// keeps its column on a row of its own, and Text moves to the rows
+	// below under a smaller indent. That indent leaves Text 20 cells, or
+	// its widest word when that is wider, and shrinks to nothing when the
+	// printer width has less room.
 	Marker string
 
 	// Text is the body of the row. A newline in it starts a new row, and
