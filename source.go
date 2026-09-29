@@ -139,7 +139,9 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 // These options reach the parser only, never the decoder that [Node]
 // decodes with. Allow duplicate keys through [WithAllowDuplicateKeys],
 // which sets both. [parser.AllowDuplicateMapKey] passed here lets
-// [Source.File] accept a duplicate key that every decode then rejects.
+// [Source.File] accept a duplicate key that a decode into a struct or a
+// typed map then rejects. A mapping that decodes into an any value, at
+// the top level or in a field, keeps the last value instead.
 func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 	return func(s *Source) {
 		s.parserOpts = append(s.parserOpts, opts...)
