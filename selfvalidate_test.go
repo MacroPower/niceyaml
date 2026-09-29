@@ -686,11 +686,20 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			innerPositive
 		}
 
+		type positives map[string]Positive
+
+		// The scan reads the map in a bag through an unexported field, so
+		// reflect refuses to set its entries into another value.
+		type bag struct {
+			positives //nolint:unused // Only reflect reads the field.
+		}
+
 		type parent struct {
 			hours
 
 			Wrapped wrapped            `yaml:"wrapped"`
 			ByName  map[string]wrapped `yaml:"by_name"`
+			Bags    []bag              `yaml:"bags"`
 		}
 
 		tcs := map[string]struct {
@@ -710,6 +719,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"field that decodes a map value": {
 				input: "by_name: {a: -1}\n",
 				err:   "1:14: $.by_name.a: negative",
+			},
+			"map field under a slice go-yaml leaves as it was": {
+				input: "wrapped: 1\n",
+				start: parent{Bags: []bag{{positives: positives{"a": -1}}}},
+				err:   "$.bags[0].positives.a: negative",
 			},
 			"valid fields": {
 				input: "wrapped: 1\nby_name: {a: 1}\n",
@@ -1885,6 +1899,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			Extra map[string]any `yaml:"extra"`
 		}
 
+		type withAnyKeys struct {
+			Name  string      `yaml:"name"`
+			Extra map[any]any `yaml:"extra"`
+		}
+
 		loop := map[string]any{"v": signed{N: -1}}
 		loop["self"] = map[string]any{"back": loop}
 
@@ -1915,6 +1934,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				}},
 				input: "name: x\n",
 				want:  "$.extra.list[1].s.n: negative -1",
+			},
+			"validator key in a map of any the caller filled": {
+				target: &withAnyKeys{Extra: map[any]any{"a": 1, port(70000): 2}},
+				input:  "name: x\n",
+				want:   "$.extra.70000~: port out of range",
 			},
 			"validator beside a map of any that holds itself": {
 				target: &withExtra{Extra: loop},

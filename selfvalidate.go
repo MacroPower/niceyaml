@@ -864,8 +864,27 @@ func (w *selfWalker) scanChildren(v reflect.Value) (bool, bool) {
 		}
 
 	case reflect.Map:
+		t := v.Type()
+		scanKeys, scanValues := mayHoldValidator(t.Key()), mayHoldValidator(t.Elem())
+
+		// The scan reuses one holder for the keys and one for the values,
+		// since iter.Key and iter.Value copy each entry. SetIterKey and
+		// SetIterValue panic on a map read through an unexported field,
+		// so the scan reads copies from such a map.
+		var key, value reflect.Value
+
+		if v.Len() != 0 && v.CanInterface() {
+			if scanKeys {
+				key = reflect.New(t.Key()).Elem()
+			}
+
+			if scanValues {
+				value = reflect.New(t.Elem()).Elem()
+			}
+		}
+
 		for iter := v.MapRange(); iter.Next(); {
-			if scan(iter.Key()) || scan(iter.Value()) {
+			if scanKeys && scan(iterKey(iter, key)) || scanValues && scan(iterValue(iter, value)) {
 				return true, true
 			}
 		}
@@ -874,6 +893,30 @@ func (w *selfWalker) scanChildren(v reflect.Value) (bool, bool) {
 	}
 
 	return false, complete
+}
+
+// iterKey returns the key at iter, set into holder when holder is valid,
+// or a copy when it is not.
+func iterKey(iter *reflect.MapIter, holder reflect.Value) reflect.Value {
+	if !holder.IsValid() {
+		return iter.Key()
+	}
+
+	holder.SetIterKey(iter)
+
+	return holder
+}
+
+// iterValue returns the value at iter, set into holder when holder is
+// valid, or a copy when it is not.
+func iterValue(iter *reflect.MapIter, holder reflect.Value) reflect.Value {
+	if !holder.IsValid() {
+		return iter.Value()
+	}
+
+	holder.SetIterValue(iter)
+
+	return holder
 }
 
 // implementsSelfValidator reports whether a value of type t implements
