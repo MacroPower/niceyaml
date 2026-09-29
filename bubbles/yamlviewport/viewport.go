@@ -1725,24 +1725,16 @@ func (m *Model) XOffset() int {
 	return m.xOffset
 }
 
-// ScrollDown moves the view down by n rows.
+// ScrollDown moves the view down by n rows. A negative n moves it up.
 func (m *Model) ScrollDown(n int) {
-	if m.AtBottom() || n == 0 {
-		return
-	}
-
 	// Clamping the step to the rows on either side keeps y+n from
 	// overflowing for a huge n.
 	y := m.YOffset()
 	m.SetYOffset(y + clamp(n, -y, m.maxYOffset()-y))
 }
 
-// ScrollUp moves the view up by n rows.
+// ScrollUp moves the view up by n rows. A negative n moves it down.
 func (m *Model) ScrollUp(n int) {
-	if m.AtTop() || n == 0 {
-		return
-	}
-
 	y := m.YOffset()
 	m.SetYOffset(y - clamp(n, y-m.maxYOffset(), y))
 }

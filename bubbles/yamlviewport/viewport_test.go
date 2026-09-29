@@ -822,6 +822,58 @@ func TestViewport_Scrolling(t *testing.T) {
 				assert.Equal(t, 0, m.YOffset())
 			},
 		},
+		"Vertical/ScrollDownNegativeAtBottom": {
+			yaml:   verticalYAML,
+			width:  80,
+			height: 5,
+			setup: func(m *yamlviewport.Model) {
+				m.GotoBottom()
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				m.ScrollDown(-3)
+				assert.Equal(t, 2, m.YOffset())
+			},
+		},
+		"Vertical/ScrollUpNegativeAtTop": {
+			yaml:   verticalYAML,
+			width:  80,
+			height: 5,
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				m.ScrollUp(-3)
+				assert.Equal(t, 3, m.YOffset())
+			},
+		},
+		"Vertical/InvertedWheelAtTop": {
+			yaml:   verticalYAML,
+			width:  80,
+			height: 5,
+			setup: func(m *yamlviewport.Model) {
+				m.MouseWheelDelta = -3
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				*m, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+				assert.Equal(t, 3, m.YOffset())
+			},
+		},
+		"Vertical/InvertedWheelAtBottom": {
+			yaml:   verticalYAML,
+			width:  80,
+			height: 5,
+			setup: func(m *yamlviewport.Model) {
+				m.MouseWheelDelta = -3
+				m.GotoBottom()
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				*m, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+				assert.Equal(t, 2, m.YOffset())
+			},
+		},
 		"Vertical/HalfPageDown": {
 			yaml:   verticalYAML,
 			width:  80,
