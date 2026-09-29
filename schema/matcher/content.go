@@ -181,7 +181,17 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	}
 
 	if gv.Kind() == reflect.Interface {
-		if eq, ok := numericEqual(gv.Interface(), wv.Interface()); ok {
+		got := gv.Interface()
+
+		// The decoder reads some plain floats, such as 1e3, as strings, so
+		// a number want reads the float from the text, as a float T does.
+		if isNumber(wv.Elem()) && !isExplicitString(node, raw) {
+			if f, ok := rawFloat(raw); ok {
+				got = f
+			}
+		}
+
+		if eq, ok := numericEqual(got, wv.Interface()); ok {
 			return eq, nil
 		}
 	}

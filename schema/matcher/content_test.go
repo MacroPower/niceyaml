@@ -335,6 +335,41 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 18446744073709551615`),
 			want:    false,
 		},
+		"any float matches a plain exponent": {
+			matcher: matcher.Content[any](versionPath, 1000.0),
+			input:   stringtest.Input(`version: 1e3`),
+			want:    true,
+		},
+		"any int matches a plain exponent": {
+			matcher: matcher.Content[any](versionPath, 1000),
+			input:   stringtest.Input(`version: 1e3`),
+			want:    true,
+		},
+		"any float matches a plain exponent fraction": {
+			matcher: matcher.Content[any](versionPath, 2.5),
+			input:   stringtest.Input(`version: 25e-1`),
+			want:    true,
+		},
+		"any float matches a large plain exponent": {
+			matcher: matcher.Content[any](versionPath, 1e19),
+			input:   stringtest.Input(`version: 1e19`),
+			want:    true,
+		},
+		"any int does not match a plain exponent fraction": {
+			matcher: matcher.Content[any](versionPath, 2),
+			input:   stringtest.Input(`version: 25e-1`),
+			want:    false,
+		},
+		"any float does not match a quoted exponent": {
+			matcher: matcher.Content[any](versionPath, 1000.0),
+			input:   stringtest.Input(`version: "1e3"`),
+			want:    false,
+		},
+		"any string matches a plain exponent": {
+			matcher: matcher.Content[any](versionPath, "1e3"),
+			input:   stringtest.Input(`version: 1e3`),
+			want:    true,
+		},
 		"any named int matches integer": {
 			matcher: matcher.Content[any](versionPath, namedInt(1)),
 			input:   stringtest.Input(`version: 1`),
