@@ -866,6 +866,12 @@ func TestTokenize_RestoresDroppedWhitespace(t *testing.T) {
 		"blank line with a tab before the first key": {
 			input: " \t\na: 1\n",
 		},
+		"blank line of spaces after a bare cr": {
+			input: "\r \na: 1\n",
+		},
+		"blank lines of spaces after a bare cr in a mapping": {
+			input: "a:\r  \r \n  b: 2\n",
+		},
 		"line ending the lexer repeats after a tag": {
 			// The source holds one line break where the Origins hold two,
 			// so Tokenize keeps the Origins the lexer made.

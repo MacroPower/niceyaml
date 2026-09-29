@@ -435,18 +435,19 @@ type span struct {
 // rune to its last when the two differ in whitespace alone. Between two
 // tokens that hold text, the Origins take the whitespace of the source
 // when the whitespace they hold there lacks some of its runes and adds
-// none. The line breaks and the lines they close go to the end of the
-// earlier Origin, where the lexer puts the line ending that closes a line
-// of text. The indentation of the line the later token starts on goes to
-// the start of the later one. A ":" whose Origin opens with a line break
-// keeps the line breaks in front of it, because the earlier Origin is a
-// key, and the parser rejects a key whose Origin ends with a line break.
-// That key takes only the spaces and tabs that end its own line. The first
-// token that holds text opens with all the whitespace ahead of its text,
-// blank lines included. The Origins stay as they are on both sides of a
-// token of whitespace alone and of a token whose [span] is not ok. They
-// also stay as they are where the lexer repeats a line ending, such as
-// after a tag, because the repeat adds a rune the source lacks. A blank
+// none, or when it holds as many line breaks. The line breaks and the
+// lines they close go to the end of the earlier Origin, where the lexer
+// puts the line ending that closes a line of text. The indentation of
+// the line the later token starts on goes to the start of the later one.
+// A ":" whose Origin opens with a line break keeps the line breaks in
+// front of it, because the earlier Origin is a key, and the parser
+// rejects a key whose Origin ends with a line break. That key takes
+// only the spaces and tabs that end its own line. The first token that
+// holds text opens with all the whitespace ahead of its text, blank
+// lines included. The Origins stay as they are on both sides of a token
+// of whitespace alone and of a token whose [span] is not ok. They also
+// stay as they are where the lexer repeats a line ending, such as after
+// a tag, because the repeat adds a line break the source lacks. A blank
 // line there loses its spaces and tabs. The repair of the final line
 // ending in [Tokenize] handles the whitespace after the last token that
 // holds text.
@@ -500,18 +501,23 @@ func restoreText(src []rune, tk *token.Token, sp span) {
 
 // restoreBetween gives prev and cur the whitespace of src between the
 // text of the two, when the whitespace the Origins hold between them is
-// part of it. The line breaks and the lines they close go to the end of
-// the Origin of prev, and the rest to the start of the Origin of cur. When
-// cur is a ":" whose Origin opens with a line break and prev holds none
-// after its text, prev is a key, so prev takes only the spaces and tabs
-// that end its line, and cur takes the rest. A nil prev stands for the
-// start of the source, and cur then opens with all the whitespace ahead
-// of its text.
+// part of it or holds as many line breaks. The line breaks and the lines
+// they close go to the end of the Origin of prev, and the rest to the
+// start of the Origin of cur. When cur is a ":" whose Origin opens with a
+// line break and prev holds none after its text, prev is a key, so prev
+// takes only the spaces and tabs that end its line, and cur takes the
+// rest. A nil prev stands for the start of the source, and cur then opens
+// with all the whitespace ahead of its text.
+//
+// The count of line breaks covers a bare "\r" followed by a blank line of
+// spaces. The lexer reads the "\r", the spaces, and the "\n" as one CRLF,
+// and [positioner.restoreGap] puts the line break it seems to drop back as
+// a bare "\r", so the Origins hold a "\r" where the source holds spaces.
 //
 // A gap that holds anything but whitespace holds text the lexer dropped,
-// and a gap the Origins hold more whitespace for than the source has
-// holds a line ending the lexer repeats, such as the one after a tag.
-// Both keep the Origins as they are.
+// so the Origins stay as they are. They also stay as they are when they
+// hold a rune the gap lacks and a different count of line breaks, such
+// as where the lexer repeats the line ending after a tag.
 func restoreBetween(src []rune, prev *token.Token, prevSpan span, cur *token.Token, curSpan span) {
 	from := 0
 	if prev != nil {
@@ -536,7 +542,8 @@ func restoreBetween(src []rune, prev *token.Token, prevSpan span, cur *token.Tok
 	text := strings.TrimLeft(cur.Origin, " \t\r\n")
 	lead := cur.Origin[:len(cur.Origin)-len(text)]
 
-	if trail+lead == gap || !isSubsequence(trail+lead, gap) {
+	ws := trail + lead
+	if ws == gap || !isSubsequence(ws, gap) && lineend.CountBreaks(ws) != lineend.CountBreaks(gap) {
 		return
 	}
 
