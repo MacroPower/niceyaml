@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -20,10 +21,10 @@ import (
 func TestGet_RedactsPassword(t *testing.T) {
 	t.Parallel()
 
-	// Get cannot redact a URL that does not parse, so it keeps the URL out
-	// of the error and sends no request. A password that starts with "/",
-	// "?" or "#" parses, but as an empty port and then a path, query or
-	// fragment, so Get refuses it too.
+	// Get sends no request for a URL that does not parse, and its error
+	// names the URL as Redacted spells it. A password that starts with
+	// "/", "?" or "#" parses, but as an empty port and then a path, query
+	// or fragment, so Get refuses it too.
 	tcs := map[string]struct {
 		url string
 	}{
@@ -50,7 +51,7 @@ func TestGet_RedactsPassword(t *testing.T) {
 			})}
 
 			_, err := httpfetch.Get(t.Context(), client, tc.url)
-			require.Error(t, err)
+			require.ErrorContains(t, err, "parse URL "+strconv.Quote(httpfetch.Redacted(tc.url))+": ")
 			assert.NotContains(t, err.Error(), "secret")
 		})
 	}
@@ -97,9 +98,35 @@ func TestGet_RedactsPasswordWithAtSign(t *testing.T) {
 func TestGet_ParseReason(t *testing.T) {
 	t.Parallel()
 
-	// A URL with no password keeps the reason url.Parse gives.
-	_, err := httpfetch.Get(t.Context(), http.DefaultClient, "https://example.com:port/x")
-	require.ErrorContains(t, err, `parse URL: invalid port ":port" after host`)
+	tcs := map[string]struct {
+		url  string
+		want string
+	}{
+		"url with no password keeps the reason": {
+			url:  "https://example.com:port/x",
+			want: `parse URL "https://example.com:port/x": invalid port ":port" after host`,
+		},
+		"control character is quoted": {
+			url:  "https://example.com/\x7f",
+			want: `parse URL "https://example.com/\x7f": `,
+		},
+		// Redacted finds a password only after a scheme and "://", so Get
+		// leaves any other text out of the error.
+		"scheme-relative url is not named": {
+			url:  "//user:secret@example.com/%zz",
+			want: `parse URL: invalid URL escape "%zz"`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := httpfetch.Get(t.Context(), http.DefaultClient, tc.url)
+			require.ErrorContains(t, err, tc.want)
+			assert.NotContains(t, err.Error(), "secret")
+		})
+	}
 }
 
 func TestGet_RedactsPasswordOnTransport(t *testing.T) {

@@ -18,10 +18,11 @@ const MaxSize = 10 * 1024 * 1024 // 10 MB.
 //
 // Errors name the URL as [Redacted] spells it, which replaces any password
 // in its userinfo, so a credential in a schema URL does not reach logs.
-// Errors omit a URL that does not parse, since Get cannot redact its
-// userinfo. When [Redacted] would hide a password in such a
-// URL, errors omit the reason too, since the reason can quote part of the
-// password.
+// An error about a URL that does not parse quotes it only when it starts
+// with http:// or https://, since [Redacted] can miss a password in other
+// text that does not parse. When [Redacted] would hide a password in such
+// a URL, errors omit the reason too, since the reason can quote part of
+// the password.
 //
 // A password that starts with "/", "?" or "#" parses, but as a host with
 // an empty port and then a path, query or fragment. Get refuses a URL
@@ -39,15 +40,16 @@ func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		if _, ok := redactUnparsed(rawURL); ok {
-			return nil, errors.New("parse URL: reason withheld because it can quote the password")
+			return nil, fmt.Errorf("%s: reason withheld because it can quote the password", parsePrefix(rawURL))
 		}
 
-		return nil, fmt.Errorf("parse URL: %w", reason(err))
+		return nil, fmt.Errorf("%s: %w", parsePrefix(rawURL), reason(err))
 	}
 
 	if hidesPassword(u, rawURL) {
-		return nil, errors.New(
-			`parse URL: empty port and a later "@" suggest a password with an unencoded "/", "?" or "#"`,
+		return nil, fmt.Errorf(
+			`%s: empty port and a later "@" suggest a password with an unencoded "/", "?" or "#"`,
+			parsePrefix(rawURL),
 		)
 	}
 
@@ -80,6 +82,18 @@ func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error
 	}
 
 	return data, nil
+}
+
+// parsePrefix returns the start of an error about a URL that [Get] refuses
+// before it sends a request. It quotes rawURL as [Redacted] spells it when
+// rawURL starts with http:// or https://, since then the first "://" ends
+// the scheme and [Redacted] finds any password after it.
+func parsePrefix(rawURL string) string {
+	if !IsHTTPURL(rawURL) {
+		return "parse URL"
+	}
+
+	return fmt.Sprintf("parse URL %q", Redacted(rawURL))
 }
 
 // reason returns the reason err reports without the URL a [*url.Error]
