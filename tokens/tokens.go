@@ -1317,18 +1317,14 @@ func (p *positioner) anchor(tk *token.Token, at int) {
 
 // setPosition writes the line, column, and offset of the rune at index at
 // into tk, counting the runes between the last position written and it.
-// When at sits before the last position written, the count starts again
-// from the start of the source. Index at never names the "\n" of a CRLF,
-// so the runes counted never split one.
+// Each token starts at or past the start of the token before it, and at
+// never passes the end of the source, so the count only moves forward.
+// Index at never names the "\n" of a CRLF, so the runes counted never
+// split one.
 func (p *positioner) setPosition(tk *token.Token, at int) {
-	end := min(at, len(p.src))
-	if end < p.idx {
-		p.idx, p.line, p.col = 0, 1, 1
-	}
-
-	if p.idx < end {
-		p.line, p.col = advance(p.line, p.col, string(p.src[p.idx:end]))
-		p.idx = end
+	if p.idx < at {
+		p.line, p.col = advance(p.line, p.col, string(p.src[p.idx:at]))
+		p.idx = at
 	}
 
 	tk.Position.Line = p.line
