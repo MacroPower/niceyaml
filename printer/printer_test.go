@@ -686,6 +686,20 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 				"^^^^^^^^^^",
 			),
 		},
+		// The wrap would start a row with the accent of a decomposed "é",
+		// and the accent stays with its "e" instead, so the caret under
+		// the "x" after it lands under the "x".
+		"decomposed accent at a wrap boundary": {
+			content: "k: abcdefge\u0301xyz",
+			cols:    []position.Span{position.NewSpan(12, 13)},
+			width:   8,
+			want: stringtest.JoinLF(
+				"k:",
+				"abcdefge\u0301",
+				"xyz",
+				"^",
+			),
+		},
 		"runs on different rows": {
 			content: "key: aaaa bbbb cccc dddd",
 			cols:    []position.Span{position.NewSpan(5, 9), position.NewSpan(17, 19)},
@@ -1876,6 +1890,88 @@ func TestPrinter_WordWrap_BreakSpaceBeforeBreakpoint(t *testing.T) {
 		got := p.PrintError(errors.New("key: value -x"))
 		assert.Equal(t, stringtest.JoinLF("key: value", "-x"), got)
 	})
+}
+
+func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
+	t.Parallel()
+
+	// The wrap takes each ASCII byte alone, so it would start a row with
+	// the runes that continue a cluster begun by an ASCII character. They
+	// stay with the start of their cluster, and a styled row keeps its
+	// style on both sides of the move.
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+
+	tcs := map[string]struct {
+		input  string
+		want   []string
+		width  int
+		styled bool
+	}{
+		"decomposed accent": {
+			input: "k: abcdefge\u0301xyz",
+			width: 8,
+			want:  []string{"k:", "abcdefge\u0301", "xyz"},
+		},
+		"decomposed accent styled": {
+			input:  "k: abcdefge\u0301xyz",
+			width:  8,
+			styled: true,
+			want:   []string{"k:", "abcdefge\u0301", "xyz"},
+		},
+		"keycap wider than the width": {
+			input: "1\ufe0f\u20e3: bb",
+			width: 1,
+			want:  []string{"1\ufe0f\u20e3", ":", "b", "b"},
+		},
+		"keycap styled": {
+			input:  "1\ufe0f\u20e3: bb",
+			width:  1,
+			styled: true,
+			want:   []string{"1\ufe0f\u20e3", ":", "b", "b"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var opts []style.Option
+
+			if tc.styled {
+				for _, k := range []kind.Kind{kind.Text, kind.NameTag, kind.LiteralString, kind.PunctuationMappingValue} {
+					opts = append(opts, style.Set(k, red))
+				}
+			}
+
+			p := printer.New(
+				printer.WithStyles(style.New(lipgloss.NewStyle(), opts...)),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithGutter(printer.NoGutter),
+				printer.WithWrap(tc.width),
+			)
+
+			view := niceyaml.NewSourceFromString(tc.input).View()
+			got := p.Print(view)
+			rows := strings.Split(got, "\n")
+
+			plain := make([]string, len(rows))
+			for i, row := range rows {
+				plain[i] = ansi.Strip(row)
+			}
+
+			assert.Equal(t, tc.want, plain)
+			assert.Len(t, rows, p.Layout(view).Rows())
+
+			if tc.styled {
+				// Every row opens the style and closes it again, so no row
+				// leaves it open for the next.
+				for i, row := range rows {
+					assert.Contains(t, row, "\x1b[31m", "row %d", i)
+					assert.True(t, strings.HasSuffix(row, "\x1b[m"), "row %d: %q", i, row)
+				}
+			}
+		})
+	}
 }
 
 func TestPrinter_WordWrap_NoEmptyRows(t *testing.T) {
@@ -5484,6 +5580,7 @@ func TestPrinter_Layout_Width(t *testing.T) {
 		view   *line.View
 		gutter printer.Gutter
 		spans  []position.Span
+		wrap   int
 		want   int
 	}{
 		"widest line": {
@@ -5500,6 +5597,14 @@ func TestPrinter_Layout_Width(t *testing.T) {
 			view:   wide,
 			gutter: printer.NoGutter,
 			want:   9,
+		},
+		// The wrap would split the keycap after its ASCII digit, and the
+		// rest of the cluster stays with the digit instead.
+		"keycap at a wrap boundary": {
+			view:   niceyaml.NewSourceFromString("1\ufe0f\u20e3: bb").View(),
+			gutter: printer.DefaultGutter,
+			wrap:   7,
+			want:   8,
 		},
 		"annotation row wider than the lines": {
 			view:   annotated,
@@ -5523,7 +5628,7 @@ func TestPrinter_Layout_Width(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(tc.gutter)
+			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrap(tc.wrap))
 			view := tc.view.Slice(tc.spans...)
 			got := p.Layout(view).Width()
 

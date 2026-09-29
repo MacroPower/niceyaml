@@ -1358,10 +1358,10 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 }
 
 // wrapLine wraps text, which holds no newline, to rows of at most cw
-// cells. A grapheme cluster wider than cw takes a row of its own and runs
-// past the width.
+// cells. It keeps every grapheme cluster whole on one row, and a cluster
+// wider than cw takes a row of its own and runs past the width.
 func wrapLine(text string, cw int) []string {
-	rows := strings.Split(lipgloss.Wrap(text, cw, wrapOnCharacters), "\n")
+	rows := wrapRows(text, cw, wrapOnCharacters)
 
 	// The wrap leaves a row wider than cw in two cases. When a full row
 	// meets a space and then a breakpoint, the row keeps the space, and
@@ -1387,8 +1387,7 @@ func wrapLine(text string, cw int) []string {
 			continue
 		}
 
-		cut := lipgloss.Wrap(ansi.Hardwrap(row, cw, true), cw, "")
-		out = append(out, strings.Split(cut, "\n")...)
+		out = append(out, wrapRows(ansi.Hardwrap(row, cw, true), cw, "")...)
 	}
 
 	// The wrap can leave rows with no text on them, so those rows go. It
@@ -1430,4 +1429,76 @@ func wrapLine(text string, cw int) []string {
 	slices.Reverse(kept)
 
 	return kept
+}
+
+// wrapRows wraps text to rows of at most cw cells with [lipgloss.Wrap],
+// which breaks at the characters in breaks, and returns the rows. The
+// wrap takes each ASCII byte as a cluster of its own, so it can start a
+// row with the runes that continue the cluster the row before ends with,
+// such as the combining accent of an "e" or the rest of a keycap. Those
+// runes move back onto the row before, which keeps the cluster whole, and
+// a row they empty goes.
+func wrapRows(text string, cw int, breaks string) []string {
+	rows := strings.Split(lipgloss.Wrap(text, cw, breaks), "\n")
+	out := rows[:0]
+
+	for _, row := range rows {
+		if n := len(out); n > 0 {
+			var moved bool
+
+			out[n-1], row, moved = rejoinCluster(out[n-1], row)
+			if moved && ansi.Strip(row) == "" {
+				continue
+			}
+		}
+
+		out = append(out, row)
+	}
+
+	return out
+}
+
+// rejoinCluster moves the runes at the start of row that continue the
+// last grapheme cluster of prev onto the end of prev, and reports whether
+// it moved any. The escape sequences among those runes go with them and
+// stay at the start of row too, so the style they open still covers both
+// rows, and prev closes that style after the runes it gains.
+func rejoinCluster(prev, row string) (string, string, bool) {
+	plainPrev, plainRow := ansi.Strip(prev), ansi.Strip(row)
+	if plainPrev == "" || plainRow == "" {
+		return prev, row, false
+	}
+
+	last := plainPrev[len(cells.TrimLastCluster(plainPrev)):]
+	joined, _ := ansi.FirstGraphemeCluster(last+plainRow, ansi.GraphemeWidth)
+
+	n := len(joined) - len(last)
+	if n <= 0 {
+		return prev, row, false
+	}
+
+	var escapes strings.Builder
+
+	i := 0
+	for plain := 0; i < len(row) && plain < n; {
+		if row[i] == ansi.ESC {
+			seq, _, size, _ := ansi.DecodeSequence(row[i:], ansi.NormalState, nil)
+			escapes.WriteString(seq)
+
+			i += size
+
+			continue
+		}
+
+		_, size := utf8.DecodeRuneInString(row[i:])
+		plain += size
+		i += size
+	}
+
+	prev += row[:i]
+	if escapes.Len() > 0 {
+		prev += ansi.ResetStyle
+	}
+
+	return prev, escapes.String() + row[i:], true
 }
