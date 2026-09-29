@@ -29,8 +29,8 @@ var (
 	ErrNoLocation = errors.New("no location provided")
 
 	// ErrNoDocuments indicates a [Source] that holds no YAML document where
-	// one was expected, such as a file holding only a "..." marker.
-	// [Source.Document] returns it.
+	// one was expected, such as a file holding only a "..." marker and any
+	// comment on its line. [Source.Document] returns it.
 	ErrNoDocuments = errors.New("no documents in source")
 
 	// ErrMultipleDocuments indicates a [Source] that holds more than one YAML

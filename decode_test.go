@@ -257,22 +257,40 @@ func TestSource_Document(t *testing.T) {
 	t.Run("rejects a source with no documents", func(t *testing.T) {
 		t.Parallel()
 
-		// A lone "..." marker parses to zero documents.
-		source := niceyaml.NewSourceFromString("...\n")
+		// A lone "..." marker parses to zero documents, and the parser
+		// drops a comment on the marker's line.
+		tcs := map[string]struct {
+			input string
+		}{
+			"lone marker": {
+				input: "...\n",
+			},
+			"marker with comment": {
+				input: "... # license\n",
+			},
+		}
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
-		require.Empty(t, docs)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		_, err = source.Document()
-		require.ErrorIs(t, err, niceyaml.ErrNoDocuments)
-		require.NotErrorIs(t, err, niceyaml.ErrMultipleDocuments)
-		assert.Equal(t, "no documents in source", err.Error())
+				source := niceyaml.NewSourceFromString(tc.input)
 
-		var bound *niceyaml.SourceError
+				docs, err := source.Documents()
+				require.NoError(t, err)
+				require.Empty(t, docs)
 
-		require.ErrorAs(t, err, &bound)
-		assert.Same(t, source, bound.Source())
+				_, err = source.Document()
+				require.ErrorIs(t, err, niceyaml.ErrNoDocuments)
+				require.NotErrorIs(t, err, niceyaml.ErrMultipleDocuments)
+				assert.Equal(t, "no documents in source", err.Error())
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+				assert.Same(t, source, bound.Source())
+			})
+		}
 	})
 
 	t.Run("returns the parse error", func(t *testing.T) {

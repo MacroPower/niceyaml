@@ -338,10 +338,11 @@ func (s *Source) documents() ([]*Node, error) {
 // [ErrMultipleDocuments], bound to the Source. The error points at the
 // header of the second document, or at the first token of its content
 // when a "..." marker rather than a header opens it. When the file holds
-// no document at all, which happens for text that is only a "..." marker,
-// it returns an error wrapping [ErrNoDocuments], bound to the Source. A
-// file that does not parse returns the error [Source.File] returns. Use
-// [Source.Documents] for a file that may hold several.
+// no document at all, which happens for text that is only a "..." marker
+// with or without a comment on its line, it returns an error wrapping
+// [ErrNoDocuments], bound to the Source. A file that does not parse
+// returns the error [Source.File] returns. Use [Source.Documents] for a
+// file that may hold several.
 func (s *Source) Document() (*Node, error) {
 	doc, err := s.single()
 	if err != nil {
