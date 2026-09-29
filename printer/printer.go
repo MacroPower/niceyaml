@@ -595,31 +595,27 @@ func renderLineNumber(ctx GutterContext) string {
 }
 
 // renderDiffMarker renders the diff marker portion of a gutter. An
-// annotation row carries no marker.
+// annotation row carries no marker and renders in [kind.Text] whatever
+// its flag. A soft-wrapped continuation row keeps the color of its line
+// but not the marker.
 func renderDiffMarker(ctx GutterContext) string {
-	if ctx.Annotation {
-		return ctx.styler().Style(kind.Text).Render(" ")
-	}
+	k, marker := kind.Text, " "
 
-	if ctx.Soft {
+	if !ctx.Annotation {
 		switch ctx.Flag {
 		case line.FlagInserted:
-			return ctx.styler().Style(kind.GenericInserted).Render(" ")
+			k, marker = kind.GenericInserted, "+"
 		case line.FlagDeleted:
-			return ctx.styler().Style(kind.GenericDeleted).Render(" ")
-		default:
-			return ctx.styler().Style(kind.Text).Render(" ")
+			k, marker = kind.GenericDeleted, "-"
+		case line.FlagDefault:
+		}
+
+		if ctx.Soft {
+			marker = " "
 		}
 	}
 
-	switch ctx.Flag {
-	case line.FlagInserted:
-		return ctx.styler().Style(kind.GenericInserted).Render("+")
-	case line.FlagDeleted:
-		return ctx.styler().Style(kind.GenericDeleted).Render("-")
-	default:
-		return ctx.styler().Style(kind.Text).Render(" ")
-	}
+	return ctx.styler().Style(k).Render(marker)
 }
 
 // numberWidth returns the width of the line number column for a view

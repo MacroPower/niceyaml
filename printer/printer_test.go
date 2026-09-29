@@ -3034,6 +3034,70 @@ func TestGutterFunctions(t *testing.T) {
 	}
 }
 
+func TestDiffGutter_Styles(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want string
+		ctx  printer.GutterContext
+	}{
+		"default": {
+			ctx:  printer.GutterContext{Flag: line.FlagDefault},
+			want: "<text> </text>",
+		},
+		"inserted": {
+			ctx:  printer.GutterContext{Flag: line.FlagInserted},
+			want: "<genericInserted>+</genericInserted>",
+		},
+		"deleted": {
+			ctx:  printer.GutterContext{Flag: line.FlagDeleted},
+			want: "<genericDeleted>-</genericDeleted>",
+		},
+		"soft wrap default": {
+			ctx:  printer.GutterContext{Flag: line.FlagDefault, Soft: true},
+			want: "<text> </text>",
+		},
+		"soft wrap inserted keeps the flag style": {
+			ctx:  printer.GutterContext{Flag: line.FlagInserted, Soft: true},
+			want: "<genericInserted> </genericInserted>",
+		},
+		"soft wrap deleted keeps the flag style": {
+			ctx:  printer.GutterContext{Flag: line.FlagDeleted, Soft: true},
+			want: "<genericDeleted> </genericDeleted>",
+		},
+		"annotation default": {
+			ctx:  printer.GutterContext{Flag: line.FlagDefault, Annotation: true},
+			want: "<text> </text>",
+		},
+		"annotation inserted renders as text": {
+			ctx:  printer.GutterContext{Flag: line.FlagInserted, Annotation: true},
+			want: "<text> </text>",
+		},
+		"annotation deleted renders as text": {
+			ctx:  printer.GutterContext{Flag: line.FlagDeleted, Annotation: true},
+			want: "<text> </text>",
+		},
+		"soft wrap annotation inserted renders as text": {
+			ctx:  printer.GutterContext{Flag: line.FlagInserted, Soft: true, Annotation: true},
+			want: "<text> </text>",
+		},
+		"soft wrap annotation deleted renders as text": {
+			ctx:  printer.GutterContext{Flag: line.FlagDeleted, Soft: true, Annotation: true},
+			want: "<text> </text>",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tc.ctx.Styles = yamltest.NewXMLStyles()
+
+			assert.Equal(t, tc.want, printer.DiffGutter.Render(tc.ctx))
+		})
+	}
+}
+
 func TestPrinter_NoAnnotation(t *testing.T) {
 	t.Parallel()
 
