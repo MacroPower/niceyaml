@@ -571,8 +571,9 @@ type memberNode struct {
 // A merge key sets each member its sources define, and the table holds
 // the key and value nodes the sources give that name, which a path
 // selector reaches through the merge. Where a key of the mapping itself
-// has the same spelling, a path selector matches that key instead, so the
-// table holds no nodes for the name, and the path keeps the decoded name.
+// after the merge key has the same spelling, a path selector matches that
+// key instead, so the table holds no nodes for the name, and the path
+// keeps the decoded name.
 // A merge key whose sources do not resolve, or that lead back to the
 // mapping, may set a member of any name, so the table leaves out every
 // member before it.
@@ -596,7 +597,9 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 	table := memberTable{members: map[string]memberNode{}, complete: true}
 	members := mappingMembers(node)
 
-	var spelled map[string]bool
+	// The loop reads the members from the last one back, so spelled holds
+	// the spelling of each key of the mapping after the current member.
+	spelled := map[string]bool{}
 
 	for _, member := range slices.Backward(members) {
 		// A tree built by hand may hold a nil member, which sets nothing.
@@ -605,10 +608,6 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 		}
 
 		if isMergeKey(member.Key) {
-			if spelled == nil {
-				spelled = idx.spellings(members)
-			}
-
 			if !idx.addMerged(table.members, member, spelled) {
 				table.complete = false
 
@@ -633,9 +632,14 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 			}
 		} else {
 			name, ok = decodedKey(member.Key)
-			if !ok {
-				continue
-			}
+		}
+
+		if spelling, has := sourceKey(key); has {
+			spelled[spelling] = true
+		}
+
+		if !ok {
+			continue
 		}
 
 		if _, seen := table.members[name]; !seen {
@@ -685,31 +689,6 @@ func (idx *memberIndex) addMerged(
 	}
 
 	return true
-}
-
-// spellings returns the source spelling of each key in members, as
-// [sourceKey] gives it, which is the name a path selector matches the key
-// by. An alias key has the spelling of the content of its anchor.
-func (idx *memberIndex) spellings(members []*ast.MappingValueNode) map[string]bool {
-	spelled := map[string]bool{}
-
-	for _, member := range members {
-		if member == nil {
-			continue
-		}
-
-		var key ast.Node = member.Key
-
-		if _, isAlias := astnode.Content(key).(*ast.AliasNode); isAlias {
-			key, _, _ = aliasKeyName(idx.resolver, member.Key)
-		}
-
-		if spelling, ok := sourceKey(key); ok {
-			spelled[spelling] = true
-		}
-	}
-
-	return spelled
 }
 
 // aliasKeyName returns the content of the anchor an alias key refers to,

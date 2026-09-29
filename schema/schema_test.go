@@ -2203,6 +2203,19 @@ func TestSchema_SourcePath(t *testing.T) {
 			wantPath: "$.user.16",
 			want:     "3:12: $.user.16: expected \"integer\", got \"string\"",
 		},
+		"merge key overrides an earlier key of the same spelling": {
+			// A path through 0x10 selects the later entry, which the
+			// merge brings in.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"user": {"additionalProperties": {"type": "integer"}}
+				}
+			}`,
+			input:    "user:\n  0x10: 1\n  <<: {0x10: x}\n",
+			wantPath: "$.user.0x10",
+			want:     "3:14: $.user.0x10: expected \"integer\", got \"string\"",
+		},
 		"respelled key a merge key brings in": {
 			schema: `{
 				"type": "object",
@@ -2475,6 +2488,28 @@ func TestSchema_SourcePath(t *testing.T) {
 			require.NoError(t, err, "path from the error does not resolve")
 		})
 	}
+}
+
+func TestSchema_SourcePath_HiddenMergedKey(t *testing.T) {
+	t.Parallel()
+
+	// The quoted key decodes to 0x10 rather than 16, and a path through
+	// 0x10 selects it rather than the merged key, so the path of the
+	// merged member keeps its decoded name and points nowhere.
+	v := compileSchema(t, []byte(`{
+		"type": "object",
+		"properties": {
+			"user": {"additionalProperties": {"type": "integer"}}
+		}
+	}`))
+	dd := yamltest.FirstDocument(t, "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n")
+
+	err := dd.Validate(t.Context(), v)
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, err, &bound)
+	assert.Equal(t, "$.user.16: expected \"integer\", got \"string\"", bound.Error())
 }
 
 func TestSchema_SourcePath_SeveralViolations(t *testing.T) {
