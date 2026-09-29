@@ -41,8 +41,9 @@ import (
 //
 // The joined Origins match that text, except in a few places Tokenize
 // leaves as the lexer made them. The lexer drops some text outright, such
-// as a lone "!" that ends the file. A tab used as indentation makes the
-// lexer read an invalid token that can swallow the characters after it,
+// as a lone "!" that ends a file after other text, along with the spaces
+// and tabs in front of it. A tab used as indentation makes the lexer
+// read an invalid token that can swallow the characters after it,
 // such as a ":" indicator, and the text around such a token keeps the
 // lexer's shape. The lexer also ends one token with a line ending and
 // opens the next with it again, as after a tag that ends its line and

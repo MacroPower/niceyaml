@@ -911,6 +911,19 @@ func TestTokenize_RestoresDroppedWhitespace(t *testing.T) {
 		"text after a folded scalar header at the end": {
 			input: "a: >x y",
 		},
+		"lone tag marker at the end": {
+			// The lexer drops the "!" and the spaces in front of it.
+			input: "a: !",
+			want:  "a:",
+		},
+		"lone tag marker on the last line": {
+			input: "a: b\n!",
+			want:  "a: b\n",
+		},
+		"lone tag marker alone": {
+			// The placeholder token holds the whole source.
+			input: "!",
+		},
 		"alias after a block scalar header at the end": {
 			input: "|*x",
 		},
