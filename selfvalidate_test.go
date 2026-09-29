@@ -177,6 +177,26 @@ func (d *declaredDecode) UnmarshalYAML([]byte) error {
 	return nil
 }
 
+// declaredValidate embeds Named and declares a Validate of its own on
+// its value.
+type declaredValidate struct {
+	Named
+}
+
+func (declaredValidate) Validate() error {
+	return errors.New("parent ran")
+}
+
+// declaredPointerValidate embeds Named and declares a Validate of its
+// own on its pointer.
+type declaredPointerValidate struct {
+	Named
+}
+
+func (*declaredPointerValidate) Validate() error {
+	return errors.New("parent ran")
+}
+
 // nested holds SelfValidator values at every depth and shape.
 type nested struct {
 	Hours    hours            `yaml:"hours"`
@@ -563,6 +583,23 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err = dd.Decode[named](t.Context())
 		require.EqualError(t, err, "1:15: $.named.name: name required")
+	})
+
+	t.Run("a struct that embeds a validator runs its own Validate", func(t *testing.T) {
+		t.Parallel()
+
+		type parent struct {
+			Value   declaredValidate        `yaml:"value"`
+			Pointer declaredPointerValidate `yaml:"pointer"`
+		}
+
+		dd := yamltest.FirstDocument(t, stringtest.Input(`
+			value: {named: {name: x}}
+			pointer: {named: {name: x}}
+		`))
+
+		_, err := dd.Decode[parent](t.Context())
+		require.EqualError(t, err, "$.value: parent ran\n$.pointer: parent ran")
 	})
 
 	t.Run("an embedded field that decodes its struct validates at the struct", func(t *testing.T) {

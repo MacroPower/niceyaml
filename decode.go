@@ -77,14 +77,13 @@ import (
 // whose type decodes itself, through an UnmarshalYAML or UnmarshalText
 // method, validates itself and nothing below it, since its fields need
 // not mirror the document, and so does an [ast.Node], which go-yaml sets
-// to the node it decodes. The
-// decode cannot see a type that go-yaml decodes whole through a
-// [yaml.CustomUnmarshaler] option or an UnmarshalJSON method under
-// [yaml.UseJSONUnmarshaler], so the values below such a type walk as if
-// its fields mirrored the document. A decode of one runs its checks
-// with [WithSelfValidation] off. A parent need not call the Validate
-// of its fields, and [Rebase] is for a check run on a value after
-// Decode returns.
+// to the node it decodes. The decode cannot see a type that go-yaml
+// decodes whole through a [yaml.CustomUnmarshaler] option or an
+// UnmarshalJSON method under [yaml.UseJSONUnmarshaler], so the values
+// below such a type walk as if its fields mirrored the document. A
+// decode of one runs its checks with [WithSelfValidation] off. A parent
+// need not call the Validate of its fields, and [Rebase] is for a check
+// run on a value after Decode returns.
 //
 // Any value with a Validate method takes part, including one from a
 // package that names its own check that way, such as a generated
@@ -98,9 +97,9 @@ import (
 // A check that reads state the caller fills in after the decode runs on
 // a value with that state set already through [Node.DecodeInto], which
 // keeps the fields the document does not name, and [WithSelfValidation]
-// false switches the walk off for every value. A Validate that rewrites its value, or that
-// the value's own UnmarshalYAML already ran, runs again inside the
-// decode, so it should be idempotent.
+// false switches the walk off for every value. A Validate that rewrites
+// its value, or that the value's own UnmarshalYAML already ran, runs
+// again inside the decode, so it should be idempotent.
 type SelfValidator interface {
 	Validate() error
 }
