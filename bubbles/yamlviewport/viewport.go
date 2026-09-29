@@ -308,7 +308,9 @@ type Model struct {
 	KeyMap        KeyMap
 	searchMatches []searchMatch
 	// The matches in each pane, or in the content of the unified view on
-	// the left, in the order the search found them.
+	// the left. The unified view sorts its matches into document order, so
+	// the index of a match here is its index in searchMatches. Each
+	// side-by-side pane keeps the order its Index returned.
 	leftMatches    position.Ranges
 	rightMatches   position.Ranges
 	horizontalStep int
