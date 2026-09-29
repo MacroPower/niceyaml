@@ -84,16 +84,15 @@ type decodeTree struct {
 	// for, which unresolvedMerge lists for the first decode that needs
 	// them.
 	merges []mergeAlias
-	// The tokens of the aliases of source that name no anchor before
-	// them, which referenceAlias lists for the first decode that needs
-	// them.
-	refs []*token.Token
+	// The aliases of source, which referenceAliases lists for the first
+	// decode that needs them.
+	aliases []aliasRead
 	// Fills nodes and anchors once.
 	scopedOnce sync.Once
 	// Fills merges once.
 	mergesOnce sync.Once
-	// Fills refs once.
-	refsOnce sync.Once
+	// Fills aliases once.
+	aliasesOnce sync.Once
 }
 
 // decodeTree returns the [*decodeTree] of the document, and builds it on
@@ -482,44 +481,82 @@ func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node, e
 	return nil
 }
 
-// referenceAlias returns the token of the first alias inside scope, a
-// node of the tree, that names no anchor before it as resolver binds it.
-// The decoder reads such an alias from a reference document, from
-// [WithReferences] or the yaml.Reference options, when one defines the
-// name. It returns nil when scope holds no such alias.
-func (t *decodeTree) referenceAlias(resolver *paths.Resolver, scope ast.Node) *token.Token {
-	t.refsOnce.Do(func() {
+// referenceAliases returns the tokens of the aliases that a decode of
+// scope, a node of the tree, reads from a reference document, from
+// [WithReferences] or the yaml.Reference options, in document order.
+// Those are the aliases that name no anchor before them as resolver
+// binds them, inside scope or inside an anchor of the document that an
+// alias the decode reads refers to. A decode of a node below the body
+// reads the anchors outside the node that way too. An alias inside the
+// anchor it refers to reads null, so the walk does not follow it.
+func (t *decodeTree) referenceAliases(resolver *paths.Resolver, scope ast.Node) []*token.Token {
+	t.aliasesOnce.Do(func() {
 		for _, n := range sourceNodes(t.source) {
 			alias, ok := n.(*ast.AliasNode)
 			if !ok || alias.Start == nil || alias.Start.Position == nil {
 				continue
 			}
 
-			_, err := resolver.Anchor(alias)
+			anchor, err := resolver.Anchor(alias)
 			if err != nil {
-				t.refs = append(t.refs, alias.Start)
+				anchor = nil
 			}
-		}
 
-		sort.SliceStable(t.refs, func(i, j int) bool {
-			return t.refs[i].Position.Offset < t.refs[j].Position.Offset
-		})
+			t.aliases = append(t.aliases, aliasRead{token: alias.Start, anchor: anchor})
+		}
 	})
 
-	first, last := tokenBounds(scope)
-	if len(first) == 0 {
-		return nil
-	}
+	var refs []*token.Token
 
-	lo, hi := first[0].Position.Offset, last[0].Position.Offset
+	seen := map[*token.Token]bool{}
+	visited := map[ast.Node]bool{}
+	work := []ast.Node{scope}
 
-	for _, tk := range t.refs {
-		if off := tk.Position.Offset; off >= lo && off <= hi {
-			return tk
+	for len(work) > 0 {
+		node := work[len(work)-1]
+		work = work[:len(work)-1]
+
+		first, last := tokenBounds(node)
+		if len(first) == 0 {
+			continue
+		}
+
+		lo, hi := first[0].Position.Offset, last[0].Position.Offset
+
+		for _, a := range t.aliases {
+			off := a.token.Position.Offset
+			if off < lo || off > hi {
+				continue
+			}
+
+			switch {
+			case a.anchor == nil:
+				if !seen[a.token] {
+					seen[a.token] = true
+					refs = append(refs, a.token)
+				}
+
+			case !visited[a.anchor] && !encloses(a.anchor, a.token):
+				visited[a.anchor] = true
+				work = append(work, a.anchor)
+			}
 		}
 	}
 
-	return nil
+	sort.SliceStable(refs, func(i, j int) bool {
+		return refs[i].Position.Offset < refs[j].Position.Offset
+	})
+
+	return refs
+}
+
+// aliasRead is an alias of the document and the anchor it reads.
+type aliasRead struct {
+	// The token of the alias.
+	token *token.Token
+	// The anchor the document's resolver binds the alias to, or nil when
+	// it binds the alias to no anchor.
+	anchor ast.Node
 }
 
 // mergeAlias is an alias under a `<<` merge key that the decoder finds no

@@ -5739,8 +5739,9 @@ func TestErrDecodeRejected(t *testing.T) {
 			Item struct{ X int } `yaml:"item"`
 		}
 
-		ref := niceyaml.WithReferences([]byte("base: &base {x: notint}\n"))
+		ref := niceyaml.WithReferences([]byte("base: &base {x: notint}\nother: &other 1\n"))
 
+		// A line of -1 means the rejection carries no location.
 		tcs := map[string]struct {
 			input  string
 			decode func(ctx context.Context, dd *niceyaml.Node) error
@@ -5778,6 +5779,33 @@ func TestErrDecodeRejected(t *testing.T) {
 				},
 				line: 2,
 			},
+			// The decode reads the reference through an anchor outside
+			// the node, so it binds at the alias in that anchor.
+			"alias to a reference through an anchor in a scoped decode": {
+				input: "m: &m {<<: *base}\nouter:\n  item: *m\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					node, err := dd.At(paths.Root().Child("outer"))
+					if err != nil {
+						return err //nolint:wrapcheck // The test inspects the error as it is.
+					}
+
+					_, err = node.Decode[cfg](ctx, ref)
+
+					return err
+				},
+				line: 0,
+			},
+			// The token of the rejection does not tell which of the two
+			// aliases read it.
+			"aliases to two references": {
+				input: "a: *other\nitem: *base\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[cfg](ctx, ref)
+
+					return err
+				},
+				line: -1,
+			},
 		}
 
 		for name, tc := range tcs {
@@ -5800,6 +5828,12 @@ func TestErrDecodeRejected(t *testing.T) {
 				require.ErrorAs(t, err, &srcErr)
 
 				rng, ok := srcErr.Range()
+				if tc.line < 0 {
+					assert.False(t, ok, "the rejection binds at an alias that may not have read it")
+
+					return
+				}
+
 				require.True(t, ok, "the rejection carries no location")
 				assert.Equal(t, tc.line, rng.Start.Line)
 			})
