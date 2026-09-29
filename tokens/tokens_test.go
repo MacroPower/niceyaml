@@ -156,6 +156,24 @@ func TestTokenize_NumericEscape(t *testing.T) {
 		"open scalar cut at a header after trailing spaces": {
 			input: `a: "caf\u00e9   ` + "\n---\nb: 1\n",
 		},
+		"hex escape swallows the quote before a header": {
+			input: `a: "\x1"` + "\n---\nb: 1\n",
+		},
+		"hex escape swallows the quote before a document end": {
+			input: `a: "\x1"` + "\n...\nb: 1\n",
+		},
+		"unicode escape swallows the quote and a cr before a header": {
+			input: `a: "\u12"` + "\r\n---\r\nb: 1\r\n",
+		},
+		"hex escape swallows the quote and a space before a header": {
+			input: `a: "\x" ` + "\n---\nb: 1\n",
+		},
+		"unicode escape swallows a sequence entry before a header": {
+			input: `"\u` + "\n- b\n---\n",
+		},
+		"escaped backslash before a header": {
+			input: `a: "\\` + "\n---\nb: 1\n",
+		},
 		"unknown escape after an escape": {
 			input: `a: "caf\u00e9 \d"` + "\n",
 		},

@@ -793,8 +793,10 @@ func (p *positioner) restoreQuoted(tk *token.Token, start int) bool {
 // the source holds the text of the Origin in order with those codes and
 // whitespace between its runes. The scalar ends where the source first
 // holds the text of the token after tk past the text of the Origin, with
-// only escape codes and whitespace in between. The Origin takes the
-// source's runes up to there in place of its text and keeps the
+// only escape codes and whitespace in between. An escape takes the runes
+// [positioner.escapeWidth] counts whatever they are, so its code may hold
+// the closing quote or other runes that are not hex digits. The Origin
+// takes the source's runes up to there in place of its text and keeps the
 // whitespace around it. When the token after tk opens with the backslash
 // that ends tk, as [cutAtEscape] reports, tk gives that backslash up and
 // ends with the whitespace in front of it, as [positioner.dropBackslash]
@@ -840,8 +842,19 @@ func (p *positioner) restoreCut(tk *token.Token, start int) bool {
 		bound++
 	}
 
+	// The last escape in front of the bound may take runes past it, such
+	// as the closing quote.
+	limit := bound
+	for i := start + 1; i < bound; i++ {
+		if p.src[i] == '\\' {
+			w := p.escapeWidth(i)
+			limit = max(limit, i+w+1)
+			i += w
+		}
+	}
+
 	for !p.hasText(bound, after) {
-		if bound == len(p.src) || !strings.ContainsRune(" \t\r\n0123456789abcdefABCDEFxuU", p.src[bound]) {
+		if bound == len(p.src) || bound >= limit && !strings.ContainsRune(" \t\r\n", p.src[bound]) {
 			return false
 		}
 
