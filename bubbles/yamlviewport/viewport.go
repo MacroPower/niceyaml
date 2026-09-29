@@ -29,8 +29,8 @@ const defaultHorizontalStep = 6
 // Load the first time it searches for a term after its content changes, and
 // runs every term through the Index it gets back until the content changes
 // again. A side-by-side diff has two panes, and the viewport calls Load
-// once for each of them. Side-by-side mode without a diff shows one pane,
-// so Load runs once.
+// once for each of them. Without a diff, side-by-side mode shows the same
+// revision in both panes, so Load runs once.
 //
 // Load receives the whole content of the view, the [line.View.Lines] of it,
 // which can include lines the view does not hold, such as the lines between
