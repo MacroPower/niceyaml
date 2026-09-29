@@ -88,9 +88,27 @@ func Split(tks token.Tokens) []Line {
 // line break of a later token whose Origin holds whitespace alone, and the
 // line breaks in the whitespace that opens the next Origin that holds text.
 // It skips nil tokens.
+//
+// When no text follows the tokens, and the last of them ends with a line
+// ending, the count leaves that final line ending out. [tokens.Tokenize]
+// and [tokens.ResetPositions] place a token that no text follows at the end
+// of the last line, before that line ending, so its Position.Line never
+// counts it. A stream cut from a longer
+// one keeps a Next on its last token, which names the text that follows,
+// so the count keeps the final line ending there.
 func breaksAhead(tks token.Tokens) []int {
 	ahead := make([]int, len(tks))
 	n := 0
+
+	for _, tk := range slices.Backward(tks) {
+		if tk != nil {
+			if tk.Next == nil && lineEnding(tk.Origin) != "" {
+				n = -1
+			}
+
+			break
+		}
+	}
 
 	for i := len(tks) - 1; i >= 0; i-- {
 		ahead[i] = n

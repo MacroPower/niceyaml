@@ -134,6 +134,21 @@ func TestSplit_DuplicateNewline(t *testing.T) {
 			wantContent: []string{"a: !t", "", "\t", ""},
 			wantNumbers: []int{1, 2, 3, 4},
 		},
+		"comment, blank line, tab lines at end": {
+			input:       "a: 1 # c\n\n\t\n\t\n",
+			wantContent: []string{"a: 1 # c", "", "\t", "\t"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
+		"comment line, blank line, tab lines at end": {
+			input:       "a: 1\n# c\n\n\t\n\t\n",
+			wantContent: []string{"a: 1", "# c", "", "\t", "\t"},
+			wantNumbers: []int{1, 2, 3, 4, 5},
+		},
+		"comment, blank line, tab lines at end with bare cr": {
+			input:       "a: 1 # c\r\r\t\r\t\r",
+			wantContent: []string{"a: 1 # c", "", "\t", "\t"},
+			wantNumbers: []int{1, 2, 3, 4},
+		},
 		"folded scalar with content after it": {
 			input:       "a: >-\n  long\n  folded\nb: 2\n",
 			wantContent: []string{"a: >-", "  long", "  folded", "b: 2"},
