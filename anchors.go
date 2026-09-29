@@ -821,11 +821,8 @@ func (idx *anchorIndex) candidate(i, start int) int {
 // node needs rather than the size of the document. An anchor that holds
 // node counts for the anchors inside it that end before node, and
 // registers its own name as null. A decode of the whole document reads an
-// alias inside an anchor to that anchor as null too, but only into an
-// interface such as any. Into a map, a slice, or a struct it reads the
-// content of the anchor. The go-yaml decoder offers no way to register
-// that content without its decoded value, so a typed decode of node reads
-// null there, as [Node.DecodeInto] notes.
+// alias inside an anchor to that anchor as null too, into every target,
+// since the [decodeTree] holds a null in its place.
 //
 // Every anchor of the tree has a name of its own, so the pass decodes
 // only anchors that node, or an anchor node reads, refers to. A failure

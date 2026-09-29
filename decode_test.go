@@ -2553,7 +2553,7 @@ func TestDocument_At(t *testing.T) {
 		t.Parallel()
 
 		// The decoder reads an alias inside the value of its own anchor as
-		// null, as a decode of the whole document into any does.
+		// null, as a decode of the whole document does.
 		tcs := map[string]struct {
 			input string
 			path  paths.Path

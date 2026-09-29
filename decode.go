@@ -1584,19 +1584,15 @@ func WithReferences(data ...[]byte) DecodeOption {
 // the order of the fields of a struct. A failure in an anchor outside the
 // node that the node reads, directly or through another anchor, fails
 // the decode, as it fails a decode of the whole document. An alias inside
-// the anchor it names, such as `*x` in `b: &x {s: *x}`, reads as null in
-// a decode of a node inside that anchor. A decode of the whole document
-// reads it as null only into an interface such as any, and reads the
-// content of the anchor into a map, a slice, or a struct. So a scoped
-// decode into such a type can accept an alias that a decode of the whole
-// document rejects, or leave empty a value that decode fills. When two
-// anchors of the document share a name, the decoder reads a copy of the
-// document in which each of them, and each alias to one of them, carries
-// a name of its own. An [ast.Node] the decode fills, or one an
-// UnmarshalYAML method takes, spells such an alias with that name. An
-// alias inside the anchor it refers to reads as null, and the text the
-// decoder hands an UnmarshalText or UnmarshalYAML method spells it as
-// null too.
+// the anchor it names, such as `*x` in `b: &x {s: *x}`, reads as null
+// into every target, in a decode of the node and of the whole document
+// alike. The text the decoder hands an UnmarshalText or UnmarshalYAML
+// method spells it as null too. A `<<` key that merges the anchor it sits
+// in fails the decode instead. When two anchors of the document share a
+// name, the decoder reads a copy of the document in which each of them,
+// and each alias to one of them, carries a name of its own. An [ast.Node]
+// the decode fills, or one an UnmarshalYAML method takes, spells such an
+// alias with that name.
 //
 // [Decoder.DecodeInto] decodes with options stated once, for every node
 // a [Decoder] decodes.
