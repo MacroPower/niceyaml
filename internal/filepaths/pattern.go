@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/bmatcuk/doublestar/v4"
 )
@@ -386,7 +387,10 @@ func specificity(glob string) int {
 			// Not required literally.
 
 		default:
-			n++
+			// A multibyte character counts once, at its first byte.
+			if utf8.RuneStart(glob[i]) {
+				n++
+			}
 		}
 	}
 

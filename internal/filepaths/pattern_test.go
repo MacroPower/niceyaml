@@ -613,6 +613,18 @@ func TestAnyDepthPatterns_SpecificityClean(t *testing.T) {
 			want:     7,
 			wantOK:   true,
 		},
+		"multibyte characters count once": {
+			path:     "/repo/日本/a.yml",
+			patterns: []string{"日本/*.yml"},
+			want:     6,
+			wantOK:   true,
+		},
+		"escaped multibyte character": {
+			path:     "/repo/é.yml",
+			patterns: []string{"\\é.yml"},
+			want:     5,
+			wantOK:   true,
+		},
 		"excluded path": {
 			path:     "/repo/docker-compose.yml",
 			patterns: []string{"*.yml", "!docker-compose.yml"},

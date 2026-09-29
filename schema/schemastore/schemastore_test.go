@@ -251,6 +251,14 @@ func TestSchemaStore_FindMatchPrefersSpecificPattern(t *testing.T) {
 			},
 			want: "Vespertide",
 		},
+		"non-ASCII pattern counts characters": {
+			path: "/repo/abcd/日本語/x.yml",
+			entries: []schemastore.CatalogEntry{
+				{Name: "Japanese", FileMatch: []string{"日本語/*.yml"}},
+				{Name: "ASCII", FileMatch: []string{"abcd/*/*.yml"}},
+			},
+			want: "ASCII",
+		},
 		"broad entry when the specific one does not match": {
 			path: "/repo/tasks/main.yml",
 			entries: []schemastore.CatalogEntry{
