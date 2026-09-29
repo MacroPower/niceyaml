@@ -148,6 +148,10 @@ func (p Positive) Validate() error {
 	return nil
 }
 
+// innerPositive is Positive under an unexported name, for embedding as
+// an unexported field.
+type innerPositive = Positive
+
 // PositiveWrapper decodes itself through the Positive it embeds.
 type PositiveWrapper struct {
 	Positive
@@ -599,6 +603,62 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				t.Parallel()
 
 				_, err := yamltest.FirstDocument(t, tc.input).Decode[parent](t.Context())
+				if tc.err == "" {
+					require.NoError(t, err)
+
+					return
+				}
+
+				require.EqualError(t, err, tc.err)
+			})
+		}
+	})
+
+	t.Run("an unexported embedded field validates", func(t *testing.T) {
+		t.Parallel()
+
+		type wrapped struct {
+			innerPositive
+		}
+
+		type parent struct {
+			hours
+
+			Wrapped wrapped            `yaml:"wrapped"`
+			ByName  map[string]wrapped `yaml:"by_name"`
+		}
+
+		tcs := map[string]struct {
+			input string
+			start parent
+			err   string
+		}{
+			"field go-yaml leaves as it was": {
+				input: "wrapped: 1\n",
+				start: parent{hours: hours{Open: "09:00", Close: "08:00"}},
+				err:   "$.hours.close: closes before it opens",
+			},
+			"field that decodes its struct": {
+				input: "wrapped: -1\n",
+				err:   "1:10: $.wrapped: negative",
+			},
+			"field that decodes a map value": {
+				input: "by_name: {a: -1}\n",
+				err:   "1:14: $.by_name.a: negative",
+			},
+			"valid fields": {
+				input: "wrapped: 1\nby_name: {a: 1}\n",
+				start: parent{hours: hours{Open: "09:00", Close: "17:00"}},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got := tc.start
+
+				err := yamltest.FirstDocument(t, tc.input).DecodeInto(t.Context(), &got)
 				if tc.err == "" {
 					require.NoError(t, err)
 

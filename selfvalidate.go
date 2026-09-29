@@ -117,7 +117,12 @@ type visit struct {
 // fields of its parent that are not inline, as [selfWalker.children]
 // describes.
 func (w *selfWalker) walk(v reflect.Value, base paths.Path, shadowed map[string]bool) bool {
-	if !v.IsValid() || !v.CanInterface() {
+	if !v.IsValid() {
+		return true
+	}
+
+	v, ok := exposed(v)
+	if !ok {
 		return true
 	}
 
@@ -180,8 +185,14 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path, shadowed map[string]
 
 // walkValue validates v, a value that is no pointer or interface, and
 // everything below it, and reports whether nothing under v failed. The
-// shadowed names are those [selfWalker.walk] takes.
+// shadowed names are those [selfWalker.walk] takes. A struct the walk
+// cannot take the address of, such as one held by a map, walks as a
+// copy, so [exposed] can read its unexported embedded fields.
 func (w *selfWalker) walkValue(v reflect.Value, base paths.Path, shadowed map[string]bool) bool {
+	if v.Kind() == reflect.Struct {
+		v = addressable(v)
+	}
+
 	if !decodesItself(v.Type()) {
 		if !w.children(v, base, shadowed) {
 			return false
@@ -191,6 +202,38 @@ func (w *selfWalker) walkValue(v reflect.Value, base paths.Path, shadowed map[st
 	}
 
 	return w.validate(v, base)
+}
+
+// exposed returns v, or a view of it that the walk can read when v is,
+// or lies below, an unexported embedded field. Go-yaml decodes into such
+// a field through an unmarshaler it promotes, and otherwise leaves the
+// value set before the decode, so the walk validates it like any other
+// field. The view shares the memory of v, so a Validate with a pointer
+// receiver runs on v itself. The bool result is false when v is
+// read-only and has no address.
+func exposed(v reflect.Value) (reflect.Value, bool) {
+	if v.CanInterface() {
+		return v, true
+	}
+
+	if !v.CanAddr() {
+		return v, false
+	}
+
+	return reflect.NewAt(v.Type(), v.Addr().UnsafePointer()).Elem(), true
+}
+
+// addressable returns v when the walk can take its address, or else an
+// addressable copy of it.
+func addressable(v reflect.Value) reflect.Value {
+	if v.CanAddr() {
+		return v
+	}
+
+	c := reflect.New(v.Type()).Elem()
+	c.Set(v)
+
+	return c
 }
 
 // finish records the result of the walk through v and returns it.
@@ -614,7 +657,7 @@ func (w *selfWalker) holdsBelow(v reflect.Value) bool {
 // reached, whose first read decides the answer, so a false first result
 // then holds only for that scan.
 func (w *selfWalker) scanValue(v reflect.Value) (bool, bool) {
-	if !v.IsValid() || !v.CanInterface() || !mayHoldValidator(v.Type()) {
+	if !v.IsValid() || !mayHoldValidator(v.Type()) {
 		return false, true
 	}
 
@@ -817,13 +860,7 @@ func (w *selfWalker) validate(v reflect.Value, base paths.Path) bool {
 		return true
 	}
 
-	if !v.CanAddr() {
-		addressable := reflect.New(v.Type()).Elem()
-
-		addressable.Set(v)
-
-		v = addressable
-	}
+	v = addressable(v)
 
 	validator, ok := reflect.TypeAssert[SelfValidator](v.Addr())
 	if !ok {
