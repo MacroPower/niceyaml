@@ -163,6 +163,14 @@ func containsGlobChars(s string) bool {
 	return strings.ContainsAny(s, "*?[{")
 }
 
+// fileKey groups the files [expandPaths] has seen by what one file shows
+// through any of its names. Two files with one key can still differ, so
+// the key only narrows the files [os.SameFile] compares.
+type fileKey struct {
+	Size    int64
+	ModTime int64
+}
+
 // expandPaths expands arguments containing glob patterns into a list of
 // file paths. The list keeps the order of the arguments, with the matches
 // of each pattern sorted in its place. It names each file once. The order
@@ -180,7 +188,7 @@ func containsGlobChars(s string) bool {
 func expandPaths(args ...string) ([]string, error) {
 	var (
 		result    []string
-		seenFiles []os.FileInfo
+		seenFiles = make(map[fileKey][]os.FileInfo)
 		seenNames = make(map[string]bool)
 	)
 
@@ -192,16 +200,23 @@ func expandPaths(args ...string) ([]string, error) {
 		// symlinked directory before it, while the OS steps up from the
 		// directory the link leads to, so two different files could look
 		// like one.
+		//
+		// One file shows the same size and modification time through
+		// every name, so add compares a file only with the files that
+		// share both. That keeps a large glob from comparing each match
+		// with every match before it.
 		info, err := os.Stat(path)
 		if err == nil {
-			seen := slices.ContainsFunc(seenFiles, func(other os.FileInfo) bool {
+			key := fileKey{Size: info.Size(), ModTime: info.ModTime().UnixNano()}
+
+			seen := slices.ContainsFunc(seenFiles[key], func(other os.FileInfo) bool {
 				return os.SameFile(other, info)
 			})
 			if seen {
 				return
 			}
 
-			seenFiles = append(seenFiles, info)
+			seenFiles[key] = append(seenFiles[key], info)
 			result = append(result, path)
 
 			return

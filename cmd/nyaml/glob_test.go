@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -67,10 +68,15 @@ func TestExpand(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create test files with predictable names for sorting.
+	// The files share one size and modification time, so telling them
+	// apart takes more than those two.
+	mtime := time.Date(2024, 1, 2, 3, 4, 5, 6, time.UTC)
+
 	files := []string{"002.yaml", "000.yaml", "001.yaml"}
 	for _, name := range files {
-		err := os.WriteFile(filepath.Join(tmpDir, name), []byte("test"), 0o644)
-		require.NoError(t, err)
+		path := filepath.Join(tmpDir, name)
+		require.NoError(t, os.WriteFile(path, []byte("test"), 0o644))
+		require.NoError(t, os.Chtimes(path, mtime, mtime))
 	}
 
 	// Create a subdirectory with a file for recursive glob testing, and
