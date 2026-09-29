@@ -178,6 +178,7 @@ func TestSegments_SourceTokenAt_Indentation(t *testing.T) {
 	indent := &token.Token{Origin: "  "}
 	key := &token.Token{Origin: "other"}
 	blank := &token.Token{Origin: "  \n"}
+	tabbed := &token.Token{Origin: " \t"}
 
 	tcs := map[string]struct {
 		segs segment.Segments
@@ -191,6 +192,11 @@ func TestSegments_SourceTokenAt_Indentation(t *testing.T) {
 		},
 		"last indentation column resolves to the next token": {
 			segs: segment.Segments{segment.New(prev, indent), segment.New(key, key)},
+			col:  1,
+			want: key,
+		},
+		"indentation with a tab resolves to the next token": {
+			segs: segment.Segments{segment.New(prev, tabbed), segment.New(key, key)},
 			col:  1,
 			want: key,
 		},

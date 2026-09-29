@@ -169,10 +169,5 @@ func (s Segments) SourceTokenAt(col int) *token.Token {
 // indentation reports whether the part holds only spaces or tabs and no
 // line ending, as the indentation at the start of a line does.
 func (s Segment) indentation() bool {
-	if s.part == nil || s.width == 0 {
-		return false
-	}
-
-	return s.ContentSpan().Len() == 0 &&
-		tokens.TrimLineEnding(s.part.Origin) == s.part.Origin
+	return s.part != nil && isPureHorizontalWhitespace(s.part.Origin)
 }
