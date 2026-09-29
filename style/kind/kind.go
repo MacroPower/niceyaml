@@ -46,8 +46,11 @@
 //
 // The UI kinds inherit from [Comment] rather than from [Text]. A theme
 // that sets none of them draws gutters, annotations, and hunk headers in
-// its comment color. A theme that sets [UI] restyles all the chrome at
-// once without touching the comments.
+// its whole comment style, which carries the italic, bold, or background
+// of the comments along with their color. A theme with such comments sets
+// [UI] through [go.jacobcolvin.com/niceyaml/style.Set], as the built-in
+// themes do, so the gutters do not read as comments. Setting [UI]
+// restyles all the chrome at once without touching the comments.
 //
 // A rendering names its own kinds, such as one for search matches, as
 // conversions of a string: kind.Kind("mine"). A custom Kind has no parent
@@ -193,8 +196,10 @@ const (
 	PunctuationSequenceStart Kind = "punctuationSequenceStart"
 	// UI is a parent style for the chrome a renderer draws around content:
 	// gutters, annotations, and the headers and separators between hunks.
-	// It inherits from [Comment], so a theme that sets nothing for it draws
-	// the chrome in the comment color.
+	// It inherits the whole [Comment] style, so a theme that sets nothing
+	// for it draws the chrome with the color of the comments and with
+	// their italic, bold, or background too. A theme with such comments
+	// sets UI to keep the chrome plain.
 	UI Kind = "ui"
 	// UILineNumber styles the line numbers of a gutter and the marker of a
 	// soft-wrapped continuation row.
