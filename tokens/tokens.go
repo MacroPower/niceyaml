@@ -789,10 +789,9 @@ func cutQuoted(tk *token.Token) bool {
 // escaped backslash also ends the text of tk, and the token after tk may
 // open with a backslash of its own, so cutAtEscape reads the source. The
 // backslash the lexer gives up on opens an escape there, and an escaped
-// one ends the escape the backslash in front of it opens. It steps over
-// the code the lexer drops for each "\x", "\u", and "\U" escape, as
-// [positioner.restoreCut] does. It reports false when the source does not
-// hold the text of tk.
+// one ends the escape the backslash in front of it opens. It finds the
+// text of tk in the source with [positioner.matchText], and it reports
+// false when the source does not hold the text of tk.
 func (p *positioner) cutAtEscape(tk *token.Token, start int) bool {
 	if tk.Type != token.InvalidType || tk.Next == nil {
 		return false
@@ -806,6 +805,21 @@ func (p *positioner) cutAtEscape(tk *token.Token, start int) bool {
 		return false
 	}
 
+	_, opens, ok := p.matchText(text, start)
+
+	return ok && opens
+}
+
+// matchText finds the runes of text in the source in order from rune index
+// start and skips the whitespace in text. It steps over the code the lexer
+// drops for each "\x", "\u", and "\U" escape, so a rune of text never
+// matches a rune inside one. An escape the lexer gives up on, as
+// [positioner.givesUp] reports, keeps its code in the source. The second
+// backslash of a "\\" escape opens no escape. It returns the rune index
+// past the last rune it matched and any code it stepped over after that
+// rune, whether that rune is a backslash that opens an escape, and whether
+// the source holds text.
+func (p *positioner) matchText(text string, start int) (int, bool, bool) {
 	// Whether the rune of the text matched last opens an escape, and
 	// whether the escape keeps the rune after its backslash in the text.
 	opens, escaped := false, false
@@ -824,23 +838,26 @@ func (p *positioner) cutAtEscape(tk *token.Token, start int) bool {
 			i++
 		}
 
-		if i >= len(p.src) {
-			return false
+		if i == len(p.src) {
+			return 0, false, false
 		}
 
 		opens = !escaped && r == '\\'
 		escaped = false
 
-		if opens {
+		// The lexer cuts its token at an escape it gives up on and drops
+		// nothing of it, so its code follows in the source and the next
+		// token reads it.
+		if opens && !p.givesUp(i) {
 			w := p.droppedWidth(i)
 			escaped = w == 0
-			i += w
+			i = min(i+w, len(p.src)-1)
 		}
 
 		i++
 	}
 
-	return opens
+	return i, opens, true
 }
 
 // dropBackslash takes the backslash that ends the text of tk off its
@@ -896,20 +913,20 @@ func (p *positioner) restoreQuoted(tk *token.Token, start int) bool {
 // [cutQuoted] reports. The opening quote sits at rune index start. The
 // lexer drops the code of a "\x", "\u", or "\U" escape from the Origin, so
 // the source holds the text of the Origin in order with those codes and
-// whitespace between its runes. It steps over each such code, so a rune of
-// the Origin never matches a rune inside one. The second backslash of a
-// "\\" escape opens no escape, and an escape the lexer gives up on, as
-// [positioner.givesUp] reports, keeps its code in the source for the token
-// after tk. The scalar ends where the source first holds the text of the
-// token after tk past the text of the Origin, with only escape codes and
-// whitespace in between. An escape
-// takes the runes [positioner.escapeWidth] counts whatever they are, so
-// its code may hold the closing quote or other runes that are not hex
-// digits. The Origin takes the source's runes up to there in place of its
-// text and keeps the whitespace around it. When the token after tk opens
-// with the backslash that ends tk, as [positioner.cutAtEscape] reports,
-// tk gives that backslash up and ends with the whitespace in front of it,
-// as [positioner.dropBackslash] leaves it.
+// whitespace between its runes. It finds the text of the Origin in the
+// source with [positioner.matchText], which steps over each such code, so
+// a rune of the Origin never matches a rune inside one. An escape the
+// lexer gives up on keeps its code in the source for the token after tk.
+// The scalar ends where the source first holds the text of the token after
+// tk past the text of the Origin, with only escape codes and whitespace in
+// between. An escape takes the runes [positioner.escapeWidth] counts
+// whatever they are, so its code may hold the closing quote or other runes
+// that are not hex digits. The Origin takes the source's runes up to there
+// in place of its text and keeps the whitespace around it. When the token
+// after tk opens with the backslash that ends tk, as
+// [positioner.cutAtEscape] reports, tk gives that backslash up and ends
+// with the whitespace in front of it, as [positioner.dropBackslash] leaves
+// it.
 //
 // The lexer puts the Offset of tk at the fault, where the token after tk
 // starts, so restoreCut takes delta from the token after tk. It reports
@@ -939,39 +956,10 @@ func (p *positioner) restoreCut(tk *token.Token, start int) bool {
 	}
 
 	// Find the earliest end of the text, then step over the escape codes
-	// and whitespace the Origin lacks to where the next token starts. Like
-	// cutAtEscape, the loop tracks whether the escape a backslash opens
-	// keeps the rune after it, so an escaped backslash opens nothing.
-	escaped := false
-
-	bound := start
-	for _, r := range text {
-		if strings.ContainsRune(" \t\r\n", r) {
-			escaped = false
-			continue
-		}
-
-		for bound < len(p.src) && p.src[bound] != r {
-			bound++
-		}
-
-		if bound == len(p.src) {
-			return false
-		}
-
-		opens := !escaped && r == '\\'
-		escaped = false
-
-		// The lexer cuts tk at an escape it gives up on and drops nothing
-		// of it, so its code follows in the source and the token after tk
-		// reads it.
-		if opens && !p.givesUp(bound) {
-			w := p.droppedWidth(bound)
-			escaped = w == 0
-			bound = min(bound+w, len(p.src)-1)
-		}
-
-		bound++
+	// and whitespace the Origin lacks to where the next token starts.
+	bound, _, ok := p.matchText(text, start)
+	if !ok {
+		return false
 	}
 
 	// The last escape in front of the bound may take runes past it, such
