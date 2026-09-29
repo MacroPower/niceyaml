@@ -397,10 +397,11 @@ func (v *View) Slice(spans ...position.Span) *View {
 // decorated line carries a [Flag] other than [FlagDefault], an [Overlay],
 // or an [Annotation] of a kind other than [kind.UISeparator]. Decorated
 // lines whose context windows overlap or touch share a hunk, and distant
-// ones become separate hunks. Every line of the result that follows a
-// line the result skips carries a "..." annotation of kind
-// [kind.UISeparator] above it, so the separator marks the gap between
-// two hunks and any gap the View itself skips inside one. The result
+// ones become separate hunks. A "..." annotation of kind
+// [kind.UISeparator] sits above the first line after each gap between
+// two lines the result holds, so the separator marks the gap between
+// two hunks and any gap the View itself skips inside one. No separator
+// marks the lines skipped before the first hunk. The result
 // drops every separator the View carries before adding its own, so the
 // hunks of hunks match the hunks of the original View at the same or a
 // smaller context. A negative context shows the decorated lines alone,
