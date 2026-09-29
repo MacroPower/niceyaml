@@ -1764,6 +1764,21 @@ func TestOverlays_MarkerRow(t *testing.T) {
 			overlays: line.Overlays{{Cols: position.NewSpan(1, 2)}},
 			want:     "  ^^",
 		},
+		"zero-width space marks the next column": {
+			content:  "k: a\u200bb",
+			overlays: line.Overlays{{Cols: position.NewSpan(4, 5)}},
+			want:     "    ^",
+		},
+		"zero-width space at the end marks the column past it": {
+			content:  "k: a\u200b",
+			overlays: line.Overlays{{Cols: position.NewSpan(4, 5)}},
+			want:     "    ^",
+		},
+		"lone combining mark marks the next column": {
+			content:  "\u0301x",
+			overlays: line.Overlays{{Cols: position.NewSpan(0, 1)}},
+			want:     "^",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1771,6 +1786,18 @@ func TestOverlays_MarkerRow(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, tc.overlays.MarkerRow(tc.content))
+
+			// View.String draws the same row under the line, or none
+			// when the row is empty.
+			view := newTestView(t, tc.content+"\n", 1)
+			view.AddLineOverlay(0, tc.overlays...)
+
+			want := "   1 | " + tc.content
+			if tc.want != "" {
+				want += "\n     | " + tc.want
+			}
+
+			assert.Equal(t, want, view.String())
 		})
 	}
 }

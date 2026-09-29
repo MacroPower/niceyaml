@@ -613,9 +613,16 @@ func markerRow(ln *Line, overlays Overlays, below Annotations) string {
 		return ""
 	}
 
+	// Every mark lands on a column that takes a cell, so the trim is a
+	// safety net that keeps a row without a caret from rendering.
+	carets := strings.TrimRight(renderMarks(ln.Content(), marks), " ")
+	if carets == "" && len(kept) == 0 {
+		return ""
+	}
+
 	var sb strings.Builder
 
-	sb.WriteString(renderMarks(ln.Content(), marks))
+	sb.WriteString(carets)
 
 	if len(kept) > 0 {
 		sb.WriteByte(' ')
@@ -656,7 +663,9 @@ func overlayMarks(overlays Overlays, width int) []bool {
 // cluster is therefore as many cells wide as the cluster renders, every
 // other column of it takes none, and a column past the end of the content
 // takes one cell. A mark on any column of a cluster lands under the whole
-// cluster.
+// cluster. A cluster that renders no cells, such as a zero-width space,
+// has nothing to put a caret under, so its mark moves to the next column
+// that takes a cell, where the content row shows what follows it.
 func renderMarks(content string, marks []bool) string {
 	var sb strings.Builder
 
@@ -667,6 +676,25 @@ func renderMarks(content string, marks []bool) string {
 		if marked {
 			marks[row.Start(col)] = true
 		}
+	}
+
+	// The loop reads the length of marks on every pass, so a mark it
+	// moves past the end is still rendered.
+	for col := 0; col < len(marks); col++ {
+		if !marks[col] || row.Start(col) != col || row.Cells(col) > 0 {
+			continue
+		}
+
+		next := col + 1
+		for row.Cells(next) == 0 {
+			next++
+		}
+
+		if next >= len(marks) {
+			marks = append(marks, make([]bool, next+1-len(marks))...)
+		}
+
+		marks[next] = true
 	}
 
 	for col, marked := range marks {

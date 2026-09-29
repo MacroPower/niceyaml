@@ -208,11 +208,11 @@ type Overlays []Overlay
 // text of the line without its line ending. The row holds a caret under
 // every column an overlay covers within the content and a space under
 // every other column before the last caret, as [View.String] draws under
-// a line. A
-// column is as many carets wide as the rune on it renders, so the carets
-// stay under the runes they mark on a line holding wide or control
-// characters. Returns "" when the overlays cover no column of the
-// content.
+// a line. A column is as many carets wide as the rune on it renders, so
+// the carets stay under the runes they mark on a line holding wide or
+// control characters. A rune that renders no cells, such as a zero-width
+// space, gets its caret under the next column that takes a cell. Returns
+// "" when the overlays cover no column of the content.
 func (o Overlays) MarkerRow(content string) string {
 	return strings.TrimRight(renderMarks(content, overlayMarks(o, utf8.RuneCountInString(content))), " ")
 }
