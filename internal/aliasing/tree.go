@@ -162,8 +162,15 @@ func (c *treeCounter) entry(entry *ast.MappingValueNode, top bool) int {
 // anchor reads, as [treeCounter.count] counts them. The decoder reads an
 // alias inside the content of its own anchor as null, so anchor marks
 // the content open while it counts it, under the node [treeCounter.alias]
-// looks the content up by, and such an alias counts as one node.
+// looks the content up by, and such an alias counts as one node. The
+// anchor marks open only content it defines itself. An anchor on an
+// alias defines no content of its own, so [treeCounter.alias] counts
+// that alias in full.
 func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool) int {
+	if _, ok := contentNode(anchor.Value).(*ast.AliasNode); ok {
+		return c.count(anchor.Value, top)
+	}
+
 	content, err := c.resolver.Deref(anchor)
 	if err != nil || c.open[content] {
 		return c.count(anchor.Value, top)

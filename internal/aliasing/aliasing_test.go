@@ -30,6 +30,25 @@ func aliasLevels() string {
 	return sb.String()
 }
 
+// anchoredAliasLevels returns the list [aliasLevels] returns, but with
+// each alias in a block item under an anchor of its own, such as
+// `&p1_0` above `*l0`.
+func anchoredAliasLevels() string {
+	var sb strings.Builder
+
+	sb.WriteString("a:\n  - &l0 [x]\n")
+
+	for level := 1; level <= 7; level++ {
+		fmt.Fprintf(&sb, "  - &l%d\n", level)
+
+		for i := range 10 {
+			fmt.Fprintf(&sb, "    - &p%d_%d\n      *l%d\n", level, i, level-1)
+		}
+	}
+
+	return sb.String()
+}
+
 func TestCheckDecode(t *testing.T) {
 	t.Parallel()
 
@@ -46,6 +65,10 @@ func TestCheckDecode(t *testing.T) {
 		},
 		"alias bomb as mapping key": {
 			input: aliasLevels() + "kind:\n  ? *l7\n  : v\n",
+			err:   aliasing.ErrExcessiveAliasing,
+		},
+		"anchored alias bomb as mapping key": {
+			input: anchoredAliasLevels() + "kind:\n  ? *l7\n  : v\n",
 			err:   aliasing.ErrExcessiveAliasing,
 		},
 		"merge key bomb": {
