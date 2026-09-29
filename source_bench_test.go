@@ -230,6 +230,64 @@ func BenchmarkNode_DecodeReusedAnchorStream(b *testing.B) {
 	}
 }
 
+// BenchmarkNode_DecodeReferenceAliases decodes a document whose value
+// the decoder rejects at a token of a reference document, while the
+// document holds many anchors that one sequence reads through aliases.
+// The rejection looks through the aliases of each anchor the decode
+// reads, so the time per alias stays flat as the anchors grow.
+func BenchmarkNode_DecodeReferenceAliases(b *testing.B) {
+	type config struct {
+		Item struct{ X int } `yaml:"item"`
+		Refs []any           `yaml:"refs"`
+	}
+
+	sizes := []struct {
+		name    string
+		anchors int
+	}{
+		{"anchors_2000", 2000},
+		{"anchors_8000", 8000},
+	}
+
+	ref := niceyaml.WithReferences([]byte("base: &base {x: notint}\n"))
+
+	for _, sz := range sizes {
+		var sb strings.Builder
+
+		for i := range sz.anchors {
+			fmt.Fprintf(&sb, "a%d: &a%d {v: %d}\n", i, i, i)
+		}
+
+		sb.WriteString("refs: [")
+
+		for i := range sz.anchors {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+
+			fmt.Fprintf(&sb, "*a%d", i)
+		}
+
+		sb.WriteString("]\nitem: *base\n")
+
+		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()
+		require.NoError(b, err)
+
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				_, err := doc.Decode[config](b.Context(), ref)
+				if !errors.Is(err, niceyaml.ErrDecodeRejected) {
+					b.Fatalf("got %v, want a rejection", err)
+				}
+			}
+
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*sz.anchors), "ns/alias")
+		})
+	}
+}
+
 func BenchmarkNode_Nodes(b *testing.B) {
 	sizes := []struct {
 		name  string

@@ -84,8 +84,8 @@ type decodeTree struct {
 	// for, which unresolvedMerge lists for the first decode that needs
 	// them.
 	merges []mergeAlias
-	// The aliases of source, which referenceAliases lists for the first
-	// decode that needs them.
+	// The aliases of source in document order, which referenceAliases
+	// lists for the first decode that needs them.
 	aliases []aliasRead
 	// Fills nodes and anchors once.
 	scopedOnce sync.Once
@@ -504,6 +504,10 @@ func (t *decodeTree) referenceAliases(resolver *paths.Resolver, scope ast.Node) 
 
 			t.aliases = append(t.aliases, aliasRead{token: alias.Start, anchor: anchor})
 		}
+
+		sort.SliceStable(t.aliases, func(i, j int) bool {
+			return t.aliases[i].token.Position.Offset < t.aliases[j].token.Position.Offset
+		})
 	})
 
 	var refs []*token.Token
@@ -522,11 +526,13 @@ func (t *decodeTree) referenceAliases(resolver *paths.Resolver, scope ast.Node) 
 		}
 
 		lo, hi := first[0].Position.Offset, last[0].Position.Offset
+		start := sort.Search(len(t.aliases), func(i int) bool {
+			return t.aliases[i].token.Position.Offset >= lo
+		})
 
-		for _, a := range t.aliases {
-			off := a.token.Position.Offset
-			if off < lo || off > hi {
-				continue
+		for _, a := range t.aliases[start:] {
+			if a.token.Position.Offset > hi {
+				break
 			}
 
 			switch {
