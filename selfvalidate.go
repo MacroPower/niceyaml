@@ -3,6 +3,7 @@ package niceyaml
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding"
 	"errors"
 	"fmt"
@@ -22,23 +23,23 @@ import (
 
 // selfValidate runs Validate on every value in the tree of v that
 // implements [SelfValidator], where v is a non-nil pointer to the value n
-// decoded to with opts. It returns what they report with the paths in
-// each error rebased under the path of the value in the document. That
-// path is the field name go-yaml decoded it under, the index of a slice
-// or array element, or the key of a map entry as the document spells it.
-// A map key validates at the path of its entry with a `~` after it, so
-// its errors point at the key rather than the value.
-// The values below a value validate before it does, and a value
-// validates only when every value below it passed, so a parent that
-// checks a relation between its fields sees fields that hold together. A
-// value whose type decodes itself, through an unmarshaler method,
-// validates itself and nothing below it, since its fields need not
-// mirror the document and the paths under it would point nowhere. So
-// does a node of the syntax tree, which go-yaml sets whole. Several
-// errors come back joined, one per value that failed. Returns nil when
-// nothing failed.
-func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
+// decoded to with ctx and opts. It returns what they report with the paths
+// in each error rebased under the path of the value in the document. That
+// path is the field name go-yaml decoded it under, the index of a slice or
+// array element, or the key of a map entry as the document spells it. A
+// map key validates at the path of its entry with a `~` after it, so its
+// errors point at the key rather than the value. The values below a value
+// validate before it does, and a value validates only when every value
+// below it passed, so a parent that checks a relation between its fields
+// sees fields that hold together. A value whose type decodes itself,
+// through an unmarshaler method, validates itself and nothing below it,
+// since its fields need not mirror the document and the paths under it
+// would point nowhere. So does a node of the syntax tree, which go-yaml
+// sets whole. Several errors come back joined, one per value that failed.
+// Returns nil when nothing failed.
+func selfValidate(ctx context.Context, v any, n *Node, opts []yaml.DecodeOption) error {
 	w := selfWalker{
+		ctx:      ctx,
 		node:     n,
 		opts:     opts,
 		walking:  map[visit]bool{},
@@ -61,16 +62,16 @@ func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
 // selfWalker collects the errors of the [SelfValidator] values in a
 // decoded value. It records the pointers, maps, and slices on the path it
 // is walking down, so a value that refers back to one above it stops
-// there. It records the result of each it has walked, so a value two
-// paths share, as an alias makes one, walks once and reports its errors
-// under the first path. A parent on the second path still learns that the
-// value failed. It reads the keys of a map from the node the
-// value decoded from, with the options it decoded with, and finds that
-// node through the [paths.Resolver] of the document. The walk therefore
-// binds the aliases of the document, and reads the keys of each mapping
-// on the way to a map once, however many maps it meets. One go-yaml
-// decoder decodes every key, so the walk applies the options, and reads
-// any reference files they name, once too.
+// there. It records the result of each it has walked, so a value two paths
+// share, as an alias makes one, walks once and reports its errors under
+// the first path. A parent on the second path still learns that the value
+// failed. It reads the keys of a map from the node the value decoded from,
+// with the context and options it decoded with, and finds that node
+// through the [paths.Resolver] of the document. The walk therefore binds
+// the aliases of the document, and reads the keys of each mapping on the
+// way to a map once, however many maps it meets. One go-yaml decoder
+// decodes every key, so the walk applies the options, and reads any
+// reference files they name, once too.
 //
 // Before it reads the keys of a map, or walks the elements of a slice or
 // array, the walker scans the values below for one that implements
@@ -78,6 +79,7 @@ func selfValidate(v any, n *Node, opts []yaml.DecodeOption) error {
 // values go-yaml decodes into an interface never implement it, so a
 // value decoded as any walks no further than the scan.
 type selfWalker struct {
+	ctx     context.Context
 	node    *Node
 	decoder *yaml.Decoder
 	opts    []yaml.DecodeOption
@@ -833,10 +835,10 @@ func (w *selfWalker) keyDecoder() *yaml.Decoder {
 
 // addKeyName decodes key as type t and adds its text to names under the
 // value it decodes to, as [nameKey] keys it. The text of a block scalar
-// key is its content rather than its `|` or `>` indicator. A key that
-// does not decode, or whose value cannot key a map, adds nothing, and
-// neither does an alias key, which decodes only beside the anchor it
-// names.
+// key is its content rather than its `|` or `>` indicator. A key that does
+// not decode, whose decode panics, or whose value cannot key a map, adds
+// nothing, and neither does an alias key, which decodes only beside the
+// anchor it names.
 func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[any]string) {
 	node := keyValueNode(key)
 
@@ -869,7 +871,7 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 
 	decoded := reflect.New(t)
 
-	err := w.keyDecoder().DecodeFromNode(node, decoded.Interface())
+	err := decodeWithRecover(w.ctx, w.keyDecoder(), node, decoded.Interface())
 	if err != nil {
 		return
 	}

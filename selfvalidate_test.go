@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/goccy/go-yaml"
@@ -1134,6 +1135,60 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		assert.LessOrEqual(t, decoders, 2)
 	})
 
+	t.Run("a key decodes with the context of the decode", func(t *testing.T) {
+		t.Parallel()
+
+		type spaced struct {
+			M map[spacedKey]item `yaml:"m"`
+		}
+
+		ctx := context.WithValue(t.Context(), spaceCtxKey{}, "prod")
+
+		tcs := map[string]struct {
+			input string
+			want  map[spacedKey]item
+			err   string
+		}{
+			"passes": {
+				input: "m:\n  web: {price: 1}\n",
+				want:  map[spacedKey]item{"prod/web": {Price: 1}},
+			},
+			"fails": {
+				input: "m:\n  web: {price: 1}\n  db: {price: -1}\n",
+				err:   "3:15: $.m.db.price: negative price",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				got, err := dd.Decode[spaced](ctx)
+				if tc.err != "" {
+					require.EqualError(t, err, tc.err)
+
+					return
+				}
+
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got.M)
+			})
+		}
+	})
+
+	t.Run("a key whose second decode panics reports the entry", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "db: {price: -1}\n")
+
+		ctx := context.WithValue(t.Context(), onceCtxKey{}, new(atomic.Int32))
+
+		_, err := dd.Decode[map[onceKey]item](ctx)
+		require.EqualError(t, err, "1:13: $.db.price: negative price")
+	})
+
 	t.Run("a map whose values hold no validator reads no keys", func(t *testing.T) {
 		t.Parallel()
 
@@ -1716,4 +1771,40 @@ type flag struct{}
 
 func (flag) Validate() error {
 	return niceyaml.NewError("flag set")
+}
+
+// spaceCtxKey keys the namespace a [spacedKey] reads from the context.
+type spaceCtxKey struct{}
+
+// spacedKey prefixes its text with the namespace the context of the
+// decode holds, and panics when the context holds none.
+type spacedKey string
+
+func (k *spacedKey) UnmarshalYAML(ctx context.Context, b []byte) error {
+	ns, ok := ctx.Value(spaceCtxKey{}).(string)
+	if !ok {
+		panic("no namespace in the context")
+	}
+
+	*k = spacedKey(ns + "/" + strings.TrimSpace(string(b)))
+
+	return nil
+}
+
+// onceCtxKey keys the counter an [onceKey] reads from the context.
+type onceCtxKey struct{}
+
+// onceKey decodes its text once per counter in the context, and panics
+// when it decodes again.
+type onceKey string
+
+func (k *onceKey) UnmarshalYAML(ctx context.Context, b []byte) error {
+	calls, ok := ctx.Value(onceCtxKey{}).(*atomic.Int32)
+	if !ok || calls.Add(1) > 1 {
+		panic("decoded twice")
+	}
+
+	*k = onceKey(strings.TrimSpace(string(b)))
+
+	return nil
 }

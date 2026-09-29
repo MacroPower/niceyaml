@@ -1638,7 +1638,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 	}
 
 	if !cfg.skipSelfValidation {
-		return n.Bind(selfValidate(v, n, yamlOpts))
+		return n.Bind(selfValidate(ctx, v, n, yamlOpts))
 	}
 
 	return nil
