@@ -1653,6 +1653,63 @@ func TestPath_Nodes_HandBuiltTreeRecursive(t *testing.T) {
 	assert.Empty(t, nodes)
 }
 
+func TestPath_Matches_HandBuiltTreeRecursive(t *testing.T) {
+	t.Parallel()
+
+	shared := &ast.StringNode{Value: "1"}
+
+	tcs := map[string]struct {
+		body ast.Node
+		path string
+		want []string
+	}{
+		"keys of entries without a value": {
+			body: mapNode(
+				mapEntry(&ast.StringNode{Value: "a"}, nil),
+				mapEntry(&ast.StringNode{Value: "b"}, mapNode(
+					mapEntry(&ast.StringNode{Value: "a"}, nil),
+				)),
+			),
+			path: "$..a~",
+			want: []string{"$.a~", "$.b.a~"},
+		},
+		"entries sharing a value node": {
+			body: mapNode(
+				mapEntry(&ast.StringNode{Value: "c"}, mapNode(mapEntry(&ast.StringNode{Value: "x"}, shared))),
+				mapEntry(&ast.StringNode{Value: "d"}, mapNode(mapEntry(&ast.StringNode{Value: "x"}, shared))),
+			),
+			path: "$..x",
+			want: []string{"$.c.x", "$.d.x"},
+		},
+		"keys of entries sharing a value node": {
+			body: mapNode(
+				mapEntry(&ast.StringNode{Value: "c"}, mapNode(mapEntry(&ast.StringNode{Value: "x"}, shared))),
+				mapEntry(&ast.StringNode{Value: "d"}, mapNode(mapEntry(&ast.StringNode{Value: "x"}, shared))),
+			),
+			path: "$..x~",
+			want: []string{"$.c.x~", "$.d.x~"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := &ast.DocumentNode{Body: tc.body}
+
+			matches, err := paths.MustParse(tc.path).Matches(doc)
+			require.NoError(t, err)
+
+			got := make([]string, 0, len(matches))
+			for _, m := range matches {
+				got = append(got, m.Path.String())
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestPath_Nodes_HandBuiltTreeTypedNil(t *testing.T) {
 	t.Parallel()
 

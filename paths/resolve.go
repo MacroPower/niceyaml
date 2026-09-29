@@ -717,19 +717,20 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 	return matches, nil
 }
 
-// uniqueMatches returns the first match of each node, in the order matches
-// holds them. It compares the nodes as the source writes them, before it
-// follows aliases, so two aliases to one anchor count as two nodes.
+// uniqueMatches returns the first match of each entry, in the order
+// matches holds them. It compares the entries rather than their values,
+// so two entries of a hand-built tree that share one value node, or that
+// both hold nil, count as two matches.
 func uniqueMatches(matches []match) []match {
-	seen := make(map[ast.Node]bool, len(matches))
+	seen := make(map[*ast.MappingValueNode]bool, len(matches))
 	unique := make([]match, 0, len(matches))
 
 	for _, m := range matches {
-		if seen[m.node] {
+		if seen[m.entry] {
 			continue
 		}
 
-		seen[m.node] = true
+		seen[m.entry] = true
 		unique = append(unique, m)
 	}
 
