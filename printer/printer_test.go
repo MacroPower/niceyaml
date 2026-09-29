@@ -2845,6 +2845,16 @@ func TestGutter(t *testing.T) {
 		assert.Equal(t, 1, p.Layout(view).GutterWidth())
 	})
 
+	t.Run("cuts a keycap by the two cells it takes", func(t *testing.T) {
+		t.Parallel()
+
+		// Two keycaps take four cells, so a cut to three keeps the first
+		// and pads the row back to the width.
+		p := testPrinterWithGutter(fixedGutter{width: 3, text: strings.Repeat("1\ufe0f\u20e3", 2)})
+
+		assert.Equal(t, "1\ufe0f\u20e3 a: 1\n1\ufe0f\u20e3 b: 2", p.Print(view))
+	})
+
 	t.Run("a negative width counts as none", func(t *testing.T) {
 		t.Parallel()
 

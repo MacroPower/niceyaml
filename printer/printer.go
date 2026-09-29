@@ -871,7 +871,7 @@ func (p *Printer) renderGutter(ctx GutterContext, width int) string {
 	text := firstRow(p.gutter.Render(ctx))
 
 	if lipgloss.Width(text) > width {
-		text = ansi.Truncate(text, width, "")
+		text = cells.Cut(text, 0, width)
 	}
 
 	// The cut drops a wide rune that straddles the width whole, so a cut
