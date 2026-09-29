@@ -348,8 +348,10 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 	// A resolver that ignores its context, as a Ref does, would name a
 	// schema for a canceled lookup, and a cached schema needs no context
 	// to load. Check the context before the first resolver and after each
-	// one, so a lookup whose context ends before a resolver names a schema
-	// reports that whatever the resolver returns.
+	// one, before the lookup uses what the resolver returned. A lookup
+	// whose context ends before a resolver names a schema then reports the
+	// context's error whether the resolver named a schema, declined, or
+	// failed.
 	if ctx.Err() != nil {
 		return nil, false, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
 	}
@@ -358,12 +360,23 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 
 	for _, res := range r.resolvers {
 		ref, err := res.Resolve(ctx, doc)
-		if err != nil && !errors.Is(err, ErrNoMatch) {
+
+		ctxErr := ctx.Err()
+		if ctxErr != nil {
+			// A resolver that honors its context may fail with the
+			// context's error and detail of its own, and the lookup keeps
+			// that error. The context's error replaces anything else,
+			// even a decline that wraps it, since a canceled lookup never
+			// matches ErrNoMatch.
+			if err == nil || errors.Is(err, ErrNoMatch) || !errors.Is(err, ctxErr) {
+				err = ctxErr
+			}
+
 			return nil, false, fmt.Errorf("%w: %w", ErrResolve, err)
 		}
 
-		if ctx.Err() != nil {
-			return nil, false, fmt.Errorf("%w: %w", ErrResolve, ctx.Err())
+		if err != nil && !errors.Is(err, ErrNoMatch) {
+			return nil, false, fmt.Errorf("%w: %w", ErrResolve, err)
 		}
 
 		if err != nil {

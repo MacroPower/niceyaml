@@ -333,6 +333,68 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 		require.ErrorIs(t, reg.Validate(ctx, doc), context.Canceled)
 	})
 
+	t.Run("resolver cancels and fails", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			fail func(ctx context.Context) error
+			want string
+		}{
+			"unrelated error": {
+				fail: func(context.Context) error {
+					return errors.New("bad directive")
+				},
+				want: "resolve schema: context canceled",
+			},
+			"error wraps the context's error": {
+				fail: func(ctx context.Context) error {
+					return fmt.Errorf("fetch catalog: %w", ctx.Err())
+				},
+				want: "resolve schema: fetch catalog: context canceled",
+			},
+			"decline wraps the context's error": {
+				fail: func(ctx context.Context) error {
+					return fmt.Errorf("%w: %w", schema.ErrNoMatch, ctx.Err())
+				},
+				want: "resolve schema: context canceled",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+
+				newRegistry := func(cancel context.CancelFunc) *schema.Registry {
+					return schema.NewRegistry(schema.WithResolvers(schema.ResolverFunc(
+						func(ctx context.Context, _ *niceyaml.Node) (schema.Ref, error) {
+							cancel()
+
+							return schema.Ref{}, tc.fail(ctx)
+						},
+					)))
+				}
+
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+
+				_, err := newRegistry(cancel).Lookup(ctx, doc)
+				require.ErrorIs(t, err, context.Canceled)
+				require.ErrorIs(t, err, schema.ErrResolve)
+				require.NotErrorIs(t, err, schema.ErrNoMatch)
+				require.EqualError(t, err, tc.want)
+
+				ctx, cancel = context.WithCancel(t.Context())
+				defer cancel()
+
+				err = newRegistry(cancel).Validate(ctx, doc)
+				require.ErrorIs(t, err, context.Canceled)
+				require.ErrorIs(t, err, schema.ErrResolve)
+			})
+		}
+	})
+
 	t.Run("resolver cancels and names a schema", func(t *testing.T) {
 		t.Parallel()
 
