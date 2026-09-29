@@ -461,7 +461,7 @@ func sourcePath(root ast.Node, idx *memberIndex, segments []jsonschema.Segment) 
 		name := seg.Key
 
 		keyNode, valueNode := idx.lookup(node, seg.Key)
-		if spelled := sourceKey(keyNode); spelled != "" {
+		if spelled, ok := sourceKey(keyNode); ok {
 			name = spelled
 		}
 
@@ -666,7 +666,7 @@ func (idx *memberIndex) addMerged(
 				continue
 			}
 
-			if spelling := sourceKey(m.key); spelling != "" && spelled[spelling] {
+			if spelling, ok := sourceKey(m.key); ok && spelled[spelling] {
 				m = memberNode{}
 			}
 
@@ -690,7 +690,7 @@ func (idx *memberIndex) spellings(members []*ast.MappingValueNode) map[string]bo
 			key, _, _ = aliasKeyName(idx.resolver, member.Key)
 		}
 
-		if spelling := sourceKey(key); spelling != "" {
+		if spelling, ok := sourceKey(key); ok {
 			spelled[spelling] = true
 		}
 	}
@@ -801,30 +801,32 @@ func decodedKey(key ast.MapKeyNode) (string, bool) {
 }
 
 // sourceKey returns the name a path selector matches the key node by,
-// which is the source spelling of the key. A string key gives its
-// unquoted text, a block scalar key gives its content, and any other key
-// gives its token text, so the hexadecimal key 0x10 reads as 0x10. A key
-// with no content, or with no token, has no name.
-func sourceKey(key ast.Node) string {
+// which is the source spelling of the key, and reports whether the key
+// has one. A string key gives its unquoted text, a block scalar key gives
+// its content, and any other key gives its token text, so the
+// hexadecimal key 0x10 reads as 0x10. A quoted empty key has the empty
+// spelling. A key with no content, with no token, or with empty token
+// text has no spelling.
+func sourceKey(key ast.Node) (string, bool) {
 	switch k := contentNode(key).(type) {
 	case nil:
-		return ""
+		return "", false
 	case *ast.StringNode:
-		return k.Value
+		return k.Value, true
 	case *ast.LiteralNode:
 		if k.Value == nil {
-			return ""
+			return "", false
 		}
 
-		return k.Value.Value
+		return k.Value.Value, true
 
 	default:
 		tk := k.GetToken()
-		if tk == nil {
-			return ""
+		if tk == nil || tk.Value == "" {
+			return "", false
 		}
 
-		return tk.Value
+		return tk.Value, true
 	}
 }
 

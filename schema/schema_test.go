@@ -2166,6 +2166,17 @@ func TestSchema_SourcePath(t *testing.T) {
 			wantPath: "$.x",
 			want:     "1:11: $.x: expected \"string\", got \"integer\"",
 		},
+		"null-tagged empty key": {
+			// The key decodes to null, and the path spells it as the
+			// empty key the source writes.
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "string"}
+			}`,
+			input:    "!!null \"\": 5\n",
+			wantPath: "$.''",
+			want:     "1:12: $.'': expected \"string\", got \"integer\"",
+		},
 		"int-tagged quoted key": {
 			schema: `{
 				"type": "object",
