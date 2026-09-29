@@ -1021,7 +1021,7 @@ func (r *Registry) compile(ctx context.Context, ref Ref) (*Schema, error) {
 	if (ref.url || ref.file != "") && fragment != "" {
 		doc, err = jsonschema.ParseSchema(data)
 		if err != nil {
-			return nil, fmt.Errorf("%q: %w: %w", ref.name(), ErrCompile, err)
+			return nil, fmt.Errorf("%w: %q: %w", ErrCompile, ref.name(), err)
 		}
 
 		wrapper := map[string]string{"$ref": base}
@@ -1031,13 +1031,13 @@ func (r *Registry) compile(ctx context.Context, ref Ref) (*Schema, error) {
 
 		data, err = json.Marshal(wrapper)
 		if err != nil {
-			return nil, fmt.Errorf("%q: %w: %w", ref.name(), ErrCompile, err)
+			return nil, fmt.Errorf("%w: %q: %w", ErrCompile, ref.name(), err)
 		}
 	}
 
-	compiled, err := Compile(ctx, data, r.refOptions(ref, base, user, doc)...)
+	compiled, err := compileJSON(ctx, data, r.refOptions(ref, base, user, doc))
 	if err != nil {
-		return nil, fmt.Errorf("%q: %w", ref.name(), err)
+		return nil, fmt.Errorf("%w: %q: %w", ErrCompile, ref.name(), err)
 	}
 
 	r.mu.Lock()

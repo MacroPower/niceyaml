@@ -103,11 +103,22 @@ func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 // same way, with the options [WithCompileOptions] gives it, and takes a
 // compiled Schema as it is.
 func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Schema, error) {
+	compiled, err := compileJSON(ctx, data, opts)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrCompile, err)
+	}
+
+	return compiled, nil
+}
+
+// compileJSON is [Compile] before wrapping the error with [ErrCompile].
+func compileJSON(ctx context.Context, data []byte, opts []CompileOption) (*Schema, error) {
 	cfg := newCompileConfig(opts)
 
 	compiled, err := jsonschema.CompileJSON(ctx, data, cfg.jsonOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrCompile, err)
+		//nolint:wrapcheck // Callers wrap the error with ErrCompile.
+		return nil, err
 	}
 
 	return FromJSONSchema(compiled), nil

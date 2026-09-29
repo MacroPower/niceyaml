@@ -2149,6 +2149,7 @@ func TestRegistry_Schema(t *testing.T) {
 
 		_, err := schema.NewRegistry().Schema(t.Context(), ref)
 		require.ErrorIs(t, err, schema.ErrLoad)
+		assert.True(t, strings.HasPrefix(err.Error(), `load schema: "k": `), err.Error())
 	})
 
 	t.Run("bytes that do not compile are ErrCompile", func(t *testing.T) {
@@ -2160,6 +2161,7 @@ func TestRegistry_Schema(t *testing.T) {
 
 		_, err := schema.NewRegistry().Schema(t.Context(), ref)
 		require.ErrorIs(t, err, schema.ErrCompile)
+		assert.True(t, strings.HasPrefix(err.Error(), `compile schema: "k": `), err.Error())
 	})
 }
 
@@ -2941,6 +2943,10 @@ func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 			//nolint:errcheck // Test helper.
 			w.Write([]byte(`{"$defs": {"Foo": {}}}`))
 
+		case "/garbled.json":
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`not json`))
+
 		case "/d/root.json":
 			//nolint:errcheck // Test helper.
 			w.Write([]byte(`{"properties": {"a": {"$ref": "../anchor.json"}}}`))
@@ -2973,6 +2979,10 @@ func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 			url: withPassword + "/defs.json#/$defs/Missing",
 			err: schema.ErrCompile,
 		},
+		"a fragment of a document that does not parse": {
+			url: withPassword + "/garbled.json#/$defs/Foo",
+			err: schema.ErrCompile,
+		},
 		"a relative $ref to a document with an invalid anchor": {
 			url: withPassword + "/d/root.json",
 			err: schema.ErrCompile,
@@ -3000,7 +3010,7 @@ func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 			_, err := reg.Schema(t.Context(), schema.URL(tc.url))
 			require.ErrorIs(t, err, tc.err)
 			assert.NotContains(t, err.Error(), "secret")
-			assert.Contains(t, err.Error(), "user:xxxxx@")
+			assert.True(t, strings.HasPrefix(err.Error(), tc.err.Error()+`: "http://user:xxxxx@`), err.Error())
 		})
 	}
 }
