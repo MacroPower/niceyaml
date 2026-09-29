@@ -585,25 +585,46 @@ func (s *Source) decodeParse() (*ast.File, map[*token.Token]struct{}) {
 	return s.decodeFile, s.decodeFileTokens
 }
 
-// splitDocumentRuns cuts tks before each "---" header that directly
-// follows another header, and after each "..." end marker that a token on
-// a later line follows, so each run it returns parses on its own. The
-// go-yaml parser (v1.19.2) mishandles both sequences. It stops at a header
-// that directly follows another and drops every token after it
-// (parser/token.go:637). It drops a "..." marker that directly follows a
-// header and merges the header into what comes after the marker
-// (parser/token.go:661). A second header there gives the merged document
-// two headers, which fails with "unexpected scalar value type". A %YAML
-// or %TAG directive or a document without a header there joins the empty
-// document rather than starting the next one, and a %YAML directive there
-// fails when another opens the empty document. The parser also rejects a
-// scalar document below any marker (parser/token.go:682).
+// splitDocumentRuns cuts tks into runs that each parse on its own. It cuts
+// before each "---" header that follows a token other than a comment, and
+// after each "..." end marker that a token on a later line follows.
+//
+// The go-yaml parser (v1.19.3-0.20260407131736-edee2f91616c) groups the
+// documents of a stream in a recursion that copies the rest of the list
+// at each header (parser/token.go:662), so one run of many documents takes
+// time quadratic in their number. It also mishandles some sequences of
+// headers and markers. It stops at a header that directly follows another
+// and drops every token after it (parser/token.go:637). It drops a "..."
+// marker that directly follows a header and merges the header into what
+// comes after the marker (parser/token.go:661). A second header there
+// gives the merged document two headers, which fails with "unexpected
+// scalar value type". A %YAML or %TAG directive or a document without a
+// header there joins the empty document rather than starting the next
+// one, and a %YAML directive there fails when another opens the empty
+// document. The parser also rejects a scalar document below any marker
+// (parser/token.go:682).
+//
+// A header stays in the run above it in two cases. A header that a
+// directive precedes stays in the run of the directive, since the parser
+// rejects a run that ends in a directive. YAML allows a directive only
+// before the first document or after a marker, where a run starts anyway,
+// and the parser rejects one anywhere else only while the document above
+// it shares its run. A header that follows an anchor with no value stays in
+// the run of the anchor. The parser takes the two tokens after the "&" as
+// the name and the value of the anchor, and rejects a run that ends before
+// them (parser/token.go:311).
+//
+// Each run parses with a parser of its own, so a %TAG or %YAML directive
+// holds for the documents of its run. That is the one document the
+// directive heads, as YAML defines, unless that document ends in an
+// anchor with no value. The parser alone carries a %TAG directive for
+// "!!" into every later document of its input.
 //
 // The look-back skips comments. The parser folds a comment on the line of
 // a header or a marker into that token, so such a comment stays in the
-// run of its token. A comment on a line of its own between two headers
-// parses to the same documents whether or not a run ends there. One below
-// a marker starts the next run, as it starts a token group of
+// run of its token. A comment on a line of its own above a header parses
+// to the same documents whether or not a run ends there. One below a
+// marker starts the next run, as it starts a token group of
 // [tokens.SplitDocuments]. Left in the run above, it would parse to a node
 // that shares that group with the node below, and both would take the
 // tokens of the group. A token on the line of a marker stays in its run,
@@ -613,10 +634,12 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 	var (
 		runs  []token.Tokens
 		start int
+		// Whether a directive follows the last header.
+		directive bool
 	)
 
-	// The index of the last token that is not a comment.
-	prev := -1
+	// The indexes of the last two tokens that are not comments.
+	prev, prevprev := -1, -1
 
 	for i, tk := range tks {
 		if tk.Type == token.CommentType {
@@ -624,11 +647,9 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 		}
 
 		if prev >= 0 {
-			switch last := tks[prev]; {
-			case last.Type == token.DocumentHeaderType && tk.Type == token.DocumentHeaderType:
-				runs = append(runs, tks[start:i])
-				start = i
+			last := tks[prev]
 
+			switch {
 			case last.Type == token.DocumentEndType && startsBelow(tk, last):
 				// The comments on lines below the marker open the next run.
 				cut := i
@@ -638,10 +659,29 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 
 				runs = append(runs, tks[start:cut])
 				start = cut
+
+			case tk.Type == token.DocumentHeaderType && last.Type != token.DocumentEndType:
+				anchored := last.Type == token.AnchorType ||
+					prevprev >= 0 && tks[prevprev].Type == token.AnchorType
+
+				if last.Type == token.DocumentHeaderType || !directive && !anchored {
+					runs = append(runs, tks[start:i])
+					start = i
+				}
 			}
 		}
 
-		prev = i
+		switch tk.Type {
+		case token.DirectiveType:
+			directive = true
+
+		case token.DocumentHeaderType:
+			directive = false
+
+		default:
+		}
+
+		prevprev, prev = prev, i
 	}
 
 	return append(runs, tks[start:])

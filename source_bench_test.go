@@ -598,3 +598,43 @@ func BenchmarkSourceBind_ManyDocuments(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkSource_File_ManyDocuments(b *testing.B) {
+	sizes := []struct {
+		name string
+		docs int
+	}{
+		{"docs_1000", 1000},
+		{"docs_8000", 8000},
+	}
+
+	for _, sz := range sizes {
+		var sb strings.Builder
+
+		for i := range sz.docs {
+			fmt.Fprintf(&sb, "---\nk%d: v%d\n", i, i)
+		}
+
+		input := sb.String()
+
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(input)))
+
+			for b.Loop() {
+				// File parses once per Source, so each iteration lexes a
+				// new one outside the timer.
+				b.StopTimer()
+
+				source := niceyaml.NewSourceFromString(input)
+				source.Tokens()
+
+				b.StartTimer()
+
+				file, err := source.File()
+				require.NoError(b, err)
+				require.Len(b, file.Docs, sz.docs)
+			}
+		})
+	}
+}

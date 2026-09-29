@@ -1251,6 +1251,29 @@ func TestSource_Parse(t *testing.T) {
 				`),
 				want: 3,
 			},
+			"anchor with no value before a header": {
+				input: stringtest.Input(`
+					a: &x
+					---
+					b: 1
+				`),
+				want: 2,
+			},
+			"anchored entry with no value before a header": {
+				input: stringtest.Input(`
+					- &x
+					---
+				`),
+				want: 2,
+			},
+			"tag directive for the secondary handle": {
+				// The directive holds for the first document alone. Carried
+				// into the second, it made the parser panic on the !!str
+				// tag with no value. The parser puts the directive in a
+				// node of its own.
+				input: "%TAG !! tag:example.com,2000:app/\n---\n!!int 1 - 3\n---\n- !!str\n",
+				want:  3,
+			},
 			"list": {
 				input: stringtest.Input(`
 					items:
