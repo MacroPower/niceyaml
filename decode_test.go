@@ -2974,14 +2974,18 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		t.Parallel()
 
 		type wrapper struct {
-			T rawText `yaml:"t"`
-			R int     `yaml:"r"`
+			T rawText        `yaml:"t"`
+			R int            `yaml:"r"`
+			S map[string]any `yaml:"s"`
 		}
 
+		// The alias inside its own anchor makes each document write a null
+		// into the tokens of the second parse, which the go-yaml formatter
+		// reads for rawText in every other document.
 		var sb strings.Builder
 
 		for i := range 8 {
-			fmt.Fprintf(&sb, "---\na: &x %d\nt:\n  p: &x 2\n  q: *x\nr: *x\n", i)
+			fmt.Fprintf(&sb, "---\na: &x %d\nt:\n  p: &x 2\n  q: *x\nr: *x\ns: &s {s: *s}\n", i)
 		}
 
 		docs, err := niceyaml.NewSourceFromString(sb.String()).Documents()
@@ -2998,6 +3002,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 					if assert.NoError(t, err) {
 						assert.Equal(t, 2, got.R)
 						assert.Contains(t, got.T.text, "&x 2")
+						assert.Equal(t, map[string]any{"s": nil}, got.S)
 					}
 
 					scoped, err := scope.Decode[any](t.Context())

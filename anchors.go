@@ -231,16 +231,8 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 			continue
 		}
 
-		// The null takes over the token of the `*`, so an error at the null
-		// names the alias. The go-yaml formatter writes the text of each
-		// token as the chain of tokens holds it, so the token keeps its
-		// place in the chain and reads null there.
-		tk := view.Start
-		null := token.New("null", strings.TrimSuffix(tk.Origin, "*")+"null", tk.Position)
-		null.Prev, null.Next = tk.Prev, tk.Next
-		*tk = *null
-
-		nulls[view] = ast.Null(tk)
+		// Source.decodeParse has written a null into the token of the `*`.
+		nulls[view] = ast.Null(view.Start)
 		nodes[alias] = nulls[view]
 	}
 
@@ -260,6 +252,44 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 		parseTokens: fileTokens,
 		names:       replacer,
 	}, true
+}
+
+// nullEnclosedAliases writes a null into the token of the `*` of each
+// alias of docs that lies inside the anchor it refers to, as
+// [document.enclosedAliases] finds them, in file, the second parse of
+// their [Source]. The null takes over the token, so an error at the null
+// names the alias. The go-yaml formatter writes the text of each token as
+// the chain of tokens holds it, so the token keeps its place in the chain
+// and reads null there. The formatter walks the whole chain, which runs
+// through every document of the Source, so [Source.decodeParse] writes
+// the nulls of all documents before a decode of any of them reads the
+// chain.
+func nullEnclosedAliases(docs []*Node, file *ast.File) {
+	for _, root := range docs {
+		d := root.doc
+
+		enclosed := d.enclosedAliases()
+		if len(enclosed) == 0 || d.fileIndex < 0 || d.fileIndex >= len(file.Docs) {
+			continue
+		}
+
+		nodes, ok := pairNodes(d.root.Body, file.Docs[d.fileIndex].Body)
+		if !ok {
+			continue
+		}
+
+		for alias := range enclosed {
+			view, ok := nodes[alias].(*ast.AliasNode)
+			if !ok || view.Start == nil {
+				continue
+			}
+
+			tk := view.Start
+			null := token.New("null", strings.TrimSuffix(tk.Origin, "*")+"null", tk.Position)
+			null.Prev, null.Next = tk.Prev, tk.Next
+			*tk = *null
+		}
+	}
 }
 
 // enclosedAliases returns the aliases of the document that lie inside the

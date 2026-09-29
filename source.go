@@ -565,12 +565,17 @@ func (s *Source) parseRun(run token.Tokens) (*ast.File, error) {
 // [Source.File] returns stays as the parser built it. The parse holds its
 // own copies of the tokens, so the go-yaml formatter, which reads the text
 // of each token through the links between them, finds a renamed anchor
-// with the text of the Source. It returns nil when the parse fails, which
-// it does only when the first parse failed.
+// with the text of the Source. The formatter reads the tokens of every
+// document, so the first call writes the nulls of all the documents into
+// the tokens, as [nullEnclosedAliases] describes, before it returns the
+// parse to any of them. It returns nil when the parse fails, which it
+// does only when the first parse failed.
 func (s *Source) decodeParse() (*ast.File, map[*token.Token]struct{}) {
 	s.decodeFileOnce.Do(func() {
 		file, set, err := s.parse()
 		if err == nil {
+			nullEnclosedAliases(s.docs, file)
+
 			s.decodeFile, s.decodeFileTokens = file, set
 		}
 	})
