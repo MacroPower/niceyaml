@@ -59,6 +59,11 @@ func TestOverride(t *testing.T) {
 			overlay: colorful.Color{R: -0.2, G: 1.4, B: 0.5},
 			want:    colorful.Color{R: 0, G: 1, B: 0.5},
 		},
+		"base outside the gamut with overlay nil is clamped": {
+			base:    colorful.Color{R: -0.2, G: 1.4, B: 0.5},
+			overlay: nil,
+			want:    colorful.Color{R: 0, G: 1, B: 0.5},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -75,23 +80,41 @@ func TestAbsentOverlay(t *testing.T) {
 	t.Parallel()
 
 	// Override and Blend share one rule for an absent color, so both hand
-	// back the base color for each of these overlays.
-	base := lipgloss.Color("#FF0000")
-
+	// back the base color, clamped into the gamut, for each of these
+	// overlays.
 	tcs := map[string]struct {
+		base    color.Color
 		overlay color.Color
+		want    color.Color
 	}{
-		"nil":       {overlay: nil},
-		"NoColor":   {overlay: lipgloss.NoColor{}},
-		"invisible": {overlay: color.RGBA{A: 0}},
+		"nil": {
+			base:    lipgloss.Color("#FF0000"),
+			overlay: nil,
+			want:    lipgloss.Color("#FF0000"),
+		},
+		"NoColor": {
+			base:    lipgloss.Color("#FF0000"),
+			overlay: lipgloss.NoColor{},
+			want:    lipgloss.Color("#FF0000"),
+		},
+		"invisible": {
+			base:    lipgloss.Color("#FF0000"),
+			overlay: color.RGBA{A: 0},
+			want:    lipgloss.Color("#FF0000"),
+		},
+		"nil with base outside the gamut": {
+			base:    colorful.Color{R: -0.2, G: 1.4, B: 0.5},
+			overlay: nil,
+			want:    colorful.Color{R: 0, G: 1, B: 0.5},
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, base, colors.Override(base, tc.overlay))
-			assert.Equal(t, base, colors.Blend(base, tc.overlay))
+			assert.Equal(t, tc.want, colors.Override(tc.base, tc.overlay))
+			assert.Equal(t, tc.want, colors.Blend(tc.base, tc.overlay))
 		})
 	}
 }
