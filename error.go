@@ -1,6 +1,7 @@
 package niceyaml
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -2137,7 +2138,9 @@ func clampRange(lines line.Lines, r position.Range) position.Range {
 }
 
 // prepareLineAnnotations prepares annotations grouped by line index. It
-// includes only positions with messages.
+// includes only positions with messages. Each line joins its messages in
+// column order, so they read in the order of the carets, and messages at
+// the same column keep the order they arrived in.
 func prepareLineAnnotations(positions []errorPosition) map[int]line.Annotation {
 	linePositions := make(map[int][]errorPosition)
 
@@ -2150,19 +2153,20 @@ func prepareLineAnnotations(positions []errorPosition) map[int]line.Annotation {
 	result := make(map[int]line.Annotation)
 
 	for lineIdx, lineErrs := range linePositions {
-		messages := make([]string, 0, len(lineErrs))
-		minCol := lineErrs[0].pos.Col
+		slices.SortStableFunc(lineErrs, func(a, b errorPosition) int {
+			return cmp.Compare(a.pos.Col, b.pos.Col)
+		})
 
+		messages := make([]string, 0, len(lineErrs))
 		for _, r := range lineErrs {
 			messages = append(messages, r.message)
-			minCol = min(minCol, r.pos.Col)
 		}
 
 		result[lineIdx] = line.Annotation{
 			Content:   strings.Join(messages, "; "),
 			Kind:      kind.TextError,
 			Placement: line.Below,
-			Col:       minCol,
+			Col:       lineErrs[0].pos.Col,
 		}
 	}
 

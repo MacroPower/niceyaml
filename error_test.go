@@ -1017,6 +1017,34 @@ func TestError_MultiError(t *testing.T) {
 		assert.Contains(t, got, "error1; error2")
 	})
 
+	t.Run("nested errors on same line out of column order", func(t *testing.T) {
+		t.Parallel()
+
+		source := stringtest.Input(`
+			key: [alpha, beta]
+		`)
+
+		// The children arrive in reverse column order.
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
+			"2 problems",
+			niceyaml.WithErrors(
+				niceyaml.NewError(
+					"bad beta",
+					niceyaml.AtPath(paths.Root().Child("key").Index(1)),
+				),
+				niceyaml.NewError(
+					"bad alpha",
+					niceyaml.AtPath(paths.Root().Child("key").Index(0)),
+				),
+			),
+		))
+
+		got := trimLines(render(err))
+
+		// The joined messages follow the column order of the carets.
+		assert.Contains(t, got, "^ bad alpha; bad beta")
+	})
+
 	t.Run("nested error with direct token", func(t *testing.T) {
 		t.Parallel()
 
