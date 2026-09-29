@@ -3,7 +3,10 @@ package niceyaml_test
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -21,6 +24,36 @@ func BenchmarkError_Unwrap(b *testing.B) {
 
 	for b.Loop() {
 		_ = err.Unwrap()
+	}
+}
+
+func BenchmarkSourceError_ExcerptOneLine(b *testing.B) {
+	for _, n := range []int{500, 4000} {
+		// A flow sequence on one line, with a violation at each item, puts
+		// every location of the tree on line 0.
+		items := strings.TrimSuffix(strings.Repeat("0,", n), ",")
+		source := niceyaml.NewSourceFromString("[" + items + "]\n")
+
+		doc, err := source.Document()
+		require.NoError(b, err)
+
+		errs := make([]error, 0, n)
+		for i := range n {
+			errs = append(errs, niceyaml.NewError(fmt.Sprintf("v%d", i),
+				niceyaml.AtPath(paths.Root().Index(i))))
+		}
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(b, doc.Bind(niceyaml.NewError("schema violations", niceyaml.WithErrors(errs...))), &bound)
+
+		b.Run(fmt.Sprintf("errors_%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				_, _ = bound.Excerpt(2)
+			}
+		})
 	}
 }
 

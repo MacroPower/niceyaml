@@ -2191,19 +2191,26 @@ func (e *SourceError) sources() []*Source {
 // error, then shows its extent without color.
 func markUnannotated(view *line.View, marked []int) {
 	for _, i := range marked {
-		overlays := slices.DeleteFunc(slices.Clone(view.Overlays(i)), func(o line.Overlay) bool {
-			return o.Blend
-		})
-		if len(overlays) == 0 || len(view.Annotations(i).Filter(line.Below)) > 0 {
+		// A line repeats in marked once per location on it, so the check
+		// for an annotation below it comes before the scan of its overlays.
+		// Each repeat after the first then skips the scan.
+		if slices.ContainsFunc(view.Annotations(i), func(a line.Annotation) bool {
+			return a.Placement == line.Below
+		}) {
 			continue
 		}
 
-		col := overlays[0].Cols.Start
-		for _, o := range overlays[1:] {
-			col = min(col, o.Cols.Start)
+		col, found := 0, false
+
+		for _, o := range view.Overlays(i) {
+			if !o.Blend && (!found || o.Cols.Start < col) {
+				col, found = o.Cols.Start, true
+			}
 		}
 
-		view.Annotate(i, line.Annotation{Kind: kind.TextError, Placement: line.Below, Col: col})
+		if found {
+			view.Annotate(i, line.Annotation{Kind: kind.TextError, Placement: line.Below, Col: col})
+		}
 	}
 }
 
