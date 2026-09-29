@@ -460,7 +460,8 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 // written inline under a `<<` key as it walks any other value, and lists
 // its entries under the `<<` selector even when a later source or a key of
 // the mapping itself overrides them. It skips an entry that a later entry
-// with the same key in its mapping shadows.
+// with the same key shadows, whether that entry belongs to its mapping or
+// comes from a later `<<` merge key.
 //
 // Wraps [ErrNoDocument], together with [ErrNotFound], when the document has
 // no content to resolve in, and [ErrAlias] when an alias on the path does

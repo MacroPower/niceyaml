@@ -1180,6 +1180,10 @@ m: &m
   d: 4
 chain:
   <<: *m
+late:
+  b: 30
+  c: 31
+  <<: *b
 `
 
 	source := niceyaml.NewSourceFromString(input)
@@ -1250,10 +1254,26 @@ chain:
 			wantValue: "a",
 			wantLine:  3,
 		},
-		"own key wins over merged key": {
+		"own key after merge wins": {
 			path:      paths.Root().Child("merged", "b"),
 			wantValue: "20",
 			wantLine:  14,
+		},
+		"merge after own key wins": {
+			path:      paths.Root().Child("late", "b"),
+			wantValue: "2",
+			wantLine:  4,
+		},
+		"merge after own key wins at the key": {
+			path:      paths.Root().Child("late", "b"),
+			key:       true,
+			wantValue: "b",
+			wantLine:  4,
+		},
+		"own key before merge without that key": {
+			path:      paths.Root().Child("late", "c"),
+			wantValue: "31",
+			wantLine:  25,
 		},
 		"own key next to merge": {
 			path:      paths.Root().Child("merged", "c"),
@@ -2310,6 +2330,63 @@ func TestPath_Node_LaterMergeKeyWins(t *testing.T) {
 	assert.Equal(t, "Q", node.String())
 }
 
+func TestPath_OwnKeyBetweenMergeKeys(t *testing.T) {
+	t.Parallel()
+
+	// The decoder sets each entry in document order, so a key of the
+	// mapping between two merge keys wins over the earlier merge key and
+	// loses to the later one when that one brings in the same key.
+	tcs := map[string]struct {
+		input string
+		want  string
+		found []string
+	}{
+		"own key wins over an earlier merge key": {
+			input: "p: &p {k: P}\nq: &q {j: Q}\nt:\n  <<: *p\n  k: own\n  <<: *q\n",
+			want:  "own",
+			found: []string{"$.t.k"},
+		},
+		"later merge key wins over the own key": {
+			input: "p: &p {k: P}\nq: &q {k: Q}\nt:\n  <<: *p\n  k: own\n  <<: *q\n",
+			want:  "Q",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			f, err := parser.ParseBytes([]byte(tc.input), 0, parser.AllowDuplicateMapKey())
+			require.NoError(t, err)
+
+			doc := f.Docs[0]
+
+			var decoded struct {
+				T map[string]string `yaml:"t"`
+			}
+
+			err = yaml.UnmarshalWithOptions([]byte(tc.input), &decoded, yaml.AllowDuplicateMapKey())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, decoded.T["k"])
+
+			node, err := paths.MustParse("$.t.k").Node(doc)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, node.String())
+
+			matches, err := paths.MustParse("$.t..k").Matches(doc)
+			require.NoError(t, err)
+
+			var found []string
+
+			for _, m := range matches {
+				found = append(found, m.Path.String())
+			}
+
+			assert.Equal(t, tc.found, found)
+		})
+	}
+}
+
 func TestPath_Matches_RepeatedMergeKey(t *testing.T) {
 	t.Parallel()
 
@@ -2345,7 +2422,9 @@ func TestPath_Matches_InlineMergeSource(t *testing.T) {
 
 	// A `..name` selector walks a mapping written under `<<` as any other
 	// value and skips an alias there, even when the decoder takes the
-	// entry from a later source or from the mapping's own key.
+	// entry from a later source or from the mapping's own key. It skips a
+	// key of the mapping that a later merge brings in again, and the path
+	// of each match selects that match's node.
 	tcs := map[string]struct {
 		input string
 		want  []string
@@ -2360,6 +2439,16 @@ func TestPath_Matches_InlineMergeSource(t *testing.T) {
 			input: "m:\n  <<: {name: x}\n  name: z\n",
 			want:  []string{"$.m.<<.name", "$.m.name"},
 			value: "z",
+		},
+		"later merge overrides an own key": {
+			input: "m:\n  name: z\n  <<: {name: x}\n",
+			want:  []string{"$.m.<<.name"},
+			value: "x",
+		},
+		"later alias merge overrides an own key": {
+			input: "base: &b {name: y}\nm:\n  name: z\n  <<: *b\n",
+			want:  nil,
+			value: "y",
 		},
 		"alias source alone": {
 			input: "base: &b {name: y}\nm:\n  <<: *b\n",
@@ -2384,6 +2473,10 @@ func TestPath_Matches_InlineMergeSource(t *testing.T) {
 
 			for _, m := range matches {
 				got = append(got, m.Path.String())
+
+				node, err := m.Path.Node(doc)
+				require.NoError(t, err)
+				assert.Same(t, m.Node, node)
 			}
 
 			assert.Equal(t, tc.want, got)
@@ -2411,6 +2504,9 @@ func TestPath_MergeKeyAndLiteralMergeName(t *testing.T) {
 		},
 		"merge key first": {
 			input: "a: {? &x \"<<\" : 1}\nm:\n  <<: {k: 2}\n  *x : {k: 1}\n",
+		},
+		"alias key before a source with a merge key": {
+			input: "a: {? &x \"<<\" : 1}\nb: &b {j: 3}\nm:\n  *x : {k: 1}\n  <<: {<<: *b, k: 2}\n",
 		},
 	}
 

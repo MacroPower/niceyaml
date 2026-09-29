@@ -1328,6 +1328,14 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				input: "b: &b {0x10: {price: 1}}\nm: {<<: *b, 16: {price: -1}}\n",
 				want:  "2:25: $.m.16.price: negative price",
 			},
+			"merge after a key of the mapping with the same spelling": {
+				input: "b: &b {16: {price: -1}}\nm: {16: {price: 1}, <<: *b}\n",
+				want:  "1:20: $.m.16.price: negative price",
+			},
+			"key of the mapping with the same spelling after a merge": {
+				input: "b: &b {16: {price: 1}}\nm: {<<: *b, 16: {price: -1}}\n",
+				want:  "2:25: $.m.16.price: negative price",
+			},
 		}
 
 		for name, tc := range precedenceTcs {

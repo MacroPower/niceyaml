@@ -30,7 +30,8 @@
 // Selectors apply to the content of a node. An anchor (`&name`) or tag
 // (`!!map`) on a value is transparent, and an alias (`*name`) resolves to
 // the anchor it names. A mapping key lookup sees the entries a `<<` merge
-// key brings in. A key the mapping defines itself wins over a merged one.
+// key brings in. Where the mapping and a merge both define a key, the later
+// entry in document order wins, as it does when the decoder fills a map.
 // A child selector matches an alias used as a key as it would the content
 // of its anchor, so `*k` after `&k name` matches `.name`, and it matches a
 // block scalar key (`|` or `>`) by its content. [Resolver.KeyName] gives
@@ -48,10 +49,12 @@
 // precedence instead. A token found through an alias or merge key sits
 // where the anchor defines it, which is where the offending text is.
 //
-// The decoder handles one shape of own key in two ways. When a `<<` comes
-// after a key of the same name, the decoder overwrites that key as it
-// fills a map and reports a duplicate key as it fills a struct. A path
-// keeps the mapping's own key either way.
+// When the decoder fills a struct, it reports a key that both the mapping
+// and a merge define as a duplicate, unless
+// [go.jacobcolvin.com/niceyaml.WithAllowDuplicateKeys] allows it. It then
+// keeps the later entry, as it does for a map. A `..name` selector skips an
+// entry of the mapping when a `<<` after it brings in the same key, since a
+// path through that key selects the merged entry.
 //
 // A mapping may also hold a merge key next to a real key with the text
 // `<<`, such as an alias key whose anchor holds that text. The decoder
