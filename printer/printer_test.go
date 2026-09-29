@@ -2954,6 +2954,17 @@ func TestGutterFunctions(t *testing.T) {
 			ctx:        printer.GutterContext{},
 			want:       "     ",
 		},
+		// A context holding a nil pointer renders like a zero context.
+		"nil pointer styles/default": {
+			gutterFunc: printer.DefaultGutter,
+			ctx:        printer.GutterContext{Styles: (*style.Styles)(nil)},
+			want:       "     " + " ",
+		},
+		"nil pointer styles/diff": {
+			gutterFunc: printer.DiffGutter,
+			ctx:        printer.GutterContext{Styles: (*theme.Theme)(nil)},
+			want:       " ",
+		},
 		// DiffGutter tests.
 		"diff/default flag": {
 			gutterFunc: printer.DiffGutter,
@@ -6439,10 +6450,36 @@ func TestPrinter_WithStyles_Nil(t *testing.T) {
 	t.Parallel()
 
 	view := niceyaml.NewSourceFromString("key: value").View()
+	want := printer.New().Print(view)
 
-	// A nil Styler selects the default styles rather than panicking
-	// in New.
-	assert.Equal(t, printer.New().Print(view), printer.New(printer.WithStyles(nil)).Print(view))
+	// A nil Styler, or one holding a nil pointer, selects the default
+	// styles rather than panicking in New.
+	tcs := map[string]struct {
+		styles style.Styler
+	}{
+		"nil": {
+			styles: nil,
+		},
+		"nil *style.Styles": {
+			styles: (*style.Styles)(nil),
+		},
+		"nil *theme.Theme": {
+			styles: (*theme.Theme)(nil),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var got string
+
+			require.NotPanics(t, func() {
+				got = printer.New(printer.WithStyles(tc.styles)).Print(view)
+			})
+			assert.Equal(t, want, got)
+		})
+	}
 }
 
 func TestPrinter_WithAnnotation_Nil(t *testing.T) {

@@ -16,6 +16,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -170,10 +171,10 @@ type GutterContext struct {
 }
 
 // styler returns the styles a gutter renders with: the ones the context
-// carries, or the default styles when it carries none, so a gutter called
-// with a zero context renders rather than panics.
+// carries, or the default styles when it carries none or a nil pointer,
+// so a gutter called with a zero context renders rather than panics.
 func (c GutterContext) styler() style.Styler {
-	if c.Styles == nil {
+	if nilness.IsNil(c.Styles) {
 		return style.Default()
 	}
 
@@ -674,12 +675,13 @@ func WithContainerWidth(n int) Option {
 
 // WithStyles is an [Option] that sets the [style.Styler], typically a
 // theme from [go.jacobcolvin.com/niceyaml/style/theme], that styles tokens,
-// gutters, and annotations. A nil s selects [style.Default].
+// gutters, and annotations. A nil s, or one holding a nil pointer such as
+// a nil [*style.Styles], selects [style.Default].
 //
 // To style the frame around the output, use [WithContainerStyle].
 func WithStyles(s style.Styler) Option {
 	return func(p *Printer) {
-		if s == nil {
+		if nilness.IsNil(s) {
 			s = style.Default()
 		}
 
