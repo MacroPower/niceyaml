@@ -404,8 +404,12 @@ func (m *model) titleLine() string {
 	revisionInfo := m.revisionLabel()
 
 	// Show the top line rather than the top row, so the position counts
-	// lines as the line count beside it does.
-	topLine := m.viewport.TopLine() + 1
+	// lines as the line count beside it does. A view with no lines has no
+	// top line, so it shows 0.
+	topLine := 0
+	if m.viewport.TotalLineCount() > 0 {
+		topLine = m.viewport.TopLine() + 1
+	}
 
 	var titleText string
 

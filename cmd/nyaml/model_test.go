@@ -701,6 +701,51 @@ func TestTitleLinePosition(t *testing.T) {
 	}
 }
 
+func TestTitleLinePositionEmpty(t *testing.T) {
+	t.Parallel()
+
+	// A view with no lines has no top line, so the bracket shows 0 to match
+	// the line count beside it.
+	tcs := map[string]struct {
+		srcs []string
+		mode yamlviewport.ViewMode
+	}{
+		"empty file": {
+			srcs: []string{""},
+			mode: yamlviewport.ViewModeFull,
+		},
+		"hunks of identical revisions": {
+			srcs: []string{"a: 1\n", "a: 1\n"},
+			mode: yamlviewport.ViewModeHunks,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			sources := make([]*niceyaml.Source, 0, len(tc.srcs))
+			for i, src := range tc.srcs {
+				sources = append(sources, niceyaml.NewSourceFromString(src,
+					niceyaml.WithName(fmt.Sprintf("%d.yaml", i))))
+			}
+
+			m := newModel(&modelOptions{sources: sources})
+			m.viewport.SetViewMode(tc.mode)
+
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 10})
+
+			got, ok := updated.(model)
+			require.True(t, ok)
+			require.Equal(t, 0, got.viewport.TotalLineCount())
+
+			title := got.titleLine()
+			assert.Contains(t, title, " 0 lines ")
+			assert.Contains(t, title, " [0] ")
+		})
+	}
+}
+
 func TestTextLineEscapesRevisionName(t *testing.T) {
 	t.Parallel()
 
