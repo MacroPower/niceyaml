@@ -4,7 +4,10 @@ package schema_test
 
 import (
 	"io/fs"
+	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -36,5 +39,55 @@ func TestFile_FIFO(t *testing.T) {
 
 	case <-time.After(5 * time.Second):
 		t.Fatal("Load blocked on a FIFO")
+	}
+}
+
+func TestFile_FIFOSwappedAfterStat(t *testing.T) {
+	t.Parallel()
+
+	// A FIFO that replaces the file between the loader's Stat and its open
+	// must not block the open either. One goroutine swaps a regular file
+	// and a FIFO at the path while the loop loads it.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "schema.json")
+	regular := filepath.Join(dir, "regular.json")
+	fifo := filepath.Join(dir, "fifo")
+
+	require.NoError(t, os.WriteFile(path, []byte(`{"type":"object"}`), 0o600))
+
+	var (
+		stop atomic.Bool
+		wg   sync.WaitGroup
+	)
+
+	wg.Go(func() {
+		//nolint:errcheck // A failed step only skips one swap.
+		for !stop.Load() {
+			os.WriteFile(regular, []byte(`{"type":"object"}`), 0o600)
+			os.Rename(regular, path)
+			syscall.Mkfifo(fifo, 0o600)
+			os.Rename(fifo, path)
+		}
+	})
+
+	t.Cleanup(func() {
+		stop.Store(true)
+		wg.Wait()
+	})
+
+	for i := range 5000 {
+		done := make(chan struct{})
+
+		go func() {
+			//nolint:errcheck // Either outcome is fine; only a block fails.
+			schema.NewRegistry().Load(t.Context(), schema.File(path))
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("iteration %d: Load blocked on a FIFO swapped in after the Stat", i)
+		}
 	}
 }

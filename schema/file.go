@@ -52,7 +52,9 @@ const onWindows = runtime.GOOS == "windows"
 //
 // The registry reads only a regular file of at most 10 MB, the limit it
 // sets on a response from a [URL], so a path that names a directory, a
-// device, or a named pipe fails to load.
+// device, or a named pipe fails to load. Given [WithFS], a named pipe that
+// replaces the file while the registry reads it can still block the read,
+// since an [fs.FS] opens a file with no flags.
 //
 // File is for a path written in the program, so it panics on an empty
 // path, as [Loadable] panics on an empty key, and when it cannot get the
@@ -165,7 +167,9 @@ func readFile(fsys fs.FS, name, abs, wd string) ([]byte, error) {
 	}
 
 	// Stat before the open, since opening a FIFO blocks until a writer
-	// opens the other end.
+	// opens the other end. A FIFO can replace the file after the Stat,
+	// so openFile also opens without waiting where the platform allows
+	// it, and readBounded checks the opened file again.
 	info, err := os.Stat(abs)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", abs, err)
@@ -175,7 +179,7 @@ func readFile(fsys fs.FS, name, abs, wd string) ([]byte, error) {
 		return nil, notRegular(abs)
 	}
 
-	f, err := os.Open(abs) //nolint:gosec // User-provided file paths are intentional.
+	f, err := openFile(abs)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", abs, err)
 	}
@@ -203,6 +207,9 @@ func readFS(fsys fs.FS, name, wd string) ([]byte, error) {
 
 	// Stat before the open, as readFile does. The Stat of [os.DirFS]
 	// follows a symbolic link, so a link to a device is not regular.
+	// Unlike readFile, the open takes no flags, since [fs.FS] has none
+	// to pass. A FIFO that replaces the file after the Stat therefore
+	// blocks the open until a writer opens the other end.
 	info, err := fs.Stat(fsys, fsPath)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", name, err)
