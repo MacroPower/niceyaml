@@ -853,10 +853,11 @@ func (p *Printer) Fprint(w io.Writer, view *line.View) (int, error) {
 	return n, nil
 }
 
-// Print renders every line of view, one row per line plus a row for each
-// wrapped piece and each annotation, and wraps the result in the container
-// style. To print part of a document, pass the view [line.View.Slice]
-// returns. An empty view renders as the container around one empty row.
+// Print renders each line of view as one row for each wrapped piece of its
+// content and one for each row its styled annotations take, and wraps the
+// result in the container style. [Printer.Layout] counts the same rows. To
+// print part of a document, pass the view [line.View.Slice] returns. An
+// empty view renders as the container around one empty row.
 //
 // The container shrinks to the widest row unless [WithContainerWidth] pins
 // its width.
