@@ -212,8 +212,10 @@ func (c GutterContext) styler() style.Styler {
 type Gutter interface {
 	// Width returns the width in cells of the gutter on every row of a
 	// view. The context holds the styles the gutter renders with and, in
-	// both Number and MaxNumber, the largest line number of the view, and
-	// nothing else, since the width may not depend on the row.
+	// both Number and MaxNumber, the number the gutter sizes for: the
+	// larger of the view's largest line number and the one
+	// [WithMaxNumber] sets. It holds no other fields, since the width
+	// may not depend on the row.
 	Width(ctx GutterContext) int
 	// Render returns the gutter text for a row. The printer pads or cuts
 	// it to Width.
@@ -899,9 +901,9 @@ func maxNumber(view *line.View) int {
 	return n
 }
 
-// gutterWidth returns the width of the gutter for a view whose largest line
-// number is maxNumber, which the [Gutter] declares for a context holding
-// that number and the printer's styles.
+// gutterWidth returns the width the [Gutter] declares for a context
+// holding the printer's styles and maxNumber, the number
+// [Printer.MaxNumber] returns for the view.
 func (p *Printer) gutterWidth(maxNumber int) int {
 	return max(0, p.gutter.Width(GutterContext{
 		Styles:    p.styles,
