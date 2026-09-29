@@ -18,6 +18,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
+	"go.jacobcolvin.com/niceyaml/internal/segment"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -925,9 +926,9 @@ func (n *Node) extent(node ast.Node) (position.Span, token.Tokens) {
 	outside := func(tk *token.Token) bool {
 		switch tk.Position.Offset {
 		case lo:
-			return !slices.ContainsFunc(first, func(b *token.Token) bool { return sameToken(tk, b) })
+			return !slices.ContainsFunc(first, func(b *token.Token) bool { return segment.SameToken(tk, b) })
 		case hi:
-			return !slices.ContainsFunc(last, func(b *token.Token) bool { return sameToken(tk, b) })
+			return !slices.ContainsFunc(last, func(b *token.Token) bool { return segment.SameToken(tk, b) })
 		default:
 			return false
 		}
@@ -986,19 +987,6 @@ func (n *Node) lastContentLine(tk *token.Token) (int, bool) {
 	}
 
 	return last, found
-}
-
-// sameToken reports whether a and b are one token or copies of one, with
-// the same type, value, origin, and position. The parser builds the AST
-// from clones of the tokens of the document, so a token from a node
-// matches its original by these fields rather than by pointer.
-func sameToken(a, b *token.Token) bool {
-	return a.Type == b.Type &&
-		a.Value == b.Value &&
-		a.Origin == b.Origin &&
-		a.Position.Line == b.Position.Line &&
-		a.Position.Column == b.Position.Column &&
-		a.Position.Offset == b.Position.Offset
 }
 
 // isNilNode reports whether node is nil, including a typed nil a

@@ -66,12 +66,14 @@ func (s Segment) Contains(tk *token.Token) bool {
 		return false
 	}
 
-	return sameToken(tk, s.source) || sameToken(tk, s.part)
+	return SameToken(tk, s.source) || SameToken(tk, s.part)
 }
 
-// sameToken reports whether a and b are one token or copies of one: the
-// same pointer, or the same type, value, origin, and position.
-func sameToken(a, b *token.Token) bool {
+// SameToken reports whether a and b are one token or copies of one: the
+// same pointer, or the same type, value, origin, and position. The parser
+// builds the AST from clones of the tokens of a document, so a token from
+// a node matches its original by these fields rather than by pointer.
+func SameToken(a, b *token.Token) bool {
 	if a == b {
 		return true
 	}
