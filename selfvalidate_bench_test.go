@@ -21,7 +21,9 @@ import (
 // below it, so the walk reads none of its keys. A list of rows, each a
 // struct of many scalar fields and one field that validates itself,
 // shows what the walk spends on fields whose types hold no validator.
-// A list of rows that validate themselves and have a getter per field,
+// A list of rows that each hold an inline struct with a field that
+// validates itself shows what the walk spends on inline fields. A list
+// of rows that validate themselves and have a getter per field,
 // like generated message types, shows what the walk spends on types
 // with many methods. The time per item should stay flat as each grows.
 func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
@@ -76,6 +78,15 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 			},
 			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
 				_, err := doc.Decode[[]wideRow](ctx, opts...)
+
+				return err
+			},
+		},
+		{
+			name: "inline_rows",
+			item: func(i int) string { return fmt.Sprintf("- {name: n%d, port: 80}\n", i) },
+			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
+				_, err := doc.Decode[[]inlineRow](ctx, opts...)
 
 				return err
 			},
@@ -157,6 +168,18 @@ type wideRow struct {
 	I    bool    `yaml:"i"`
 	J    float64 `yaml:"j"`
 	Port port    `yaml:"port"`
+}
+
+// inlineRow is a struct of a scalar field and an inline struct that holds
+// a field that validates itself.
+type inlineRow struct {
+	Name  string         `yaml:"name"`
+	Inner inlineRowInner `yaml:",inline"`
+}
+
+// inlineRowInner is the inline struct of an [inlineRow].
+type inlineRowInner struct {
+	Port port `yaml:"port"`
 }
 
 // methodRow is a struct that validates itself and has a getter for each

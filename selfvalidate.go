@@ -321,6 +321,10 @@ var (
 	// The result of [decodesItself] for each type it has read, shared the
 	// same way.
 	decodesWhole sync.Map
+
+	// The result of [fieldsOf] for each struct type it has read, shared
+	// the same way.
+	walkedFields sync.Map
 )
 
 // decodesItself reports whether go-yaml decodes a value of type t whole,
@@ -502,33 +506,21 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 
 	switch v.Kind() {
 	case reflect.Struct:
-		var own map[string]bool
+		fields := fieldsOf(v.Type())
 
-		for i := range v.NumField() {
-			// A field whose type holds no validator passes the walk at
-			// once, so it needs no name or path.
-			field := v.Type().Field(i)
-			if !mayHoldValidator(field.Type) {
-				continue
-			}
-
-			name, inline, skip := fieldName(field)
-			if skip || shadowed[name] {
+		for _, field := range fields.held {
+			if shadowed[field.name] {
 				continue
 			}
 
 			child, fieldShadowed := base, map[string]bool(nil)
-			if inline {
-				if own == nil {
-					own = ownFieldNames(v.Type())
-				}
-
-				fieldShadowed = own
+			if field.inline {
+				fieldShadowed = fields.own
 			} else {
-				child = base.Child(name)
+				child = base.Child(field.name)
 			}
 
-			if !w.walk(v.Field(i), child, fieldShadowed) {
+			if !w.walk(v.Field(field.index), child, fieldShadowed) {
 				ok = false
 			}
 		}
@@ -682,6 +674,68 @@ func (w *selfWalker) walkEntries(path paths.Path, entries []mapEntry, ambiguous 
 	}
 
 	return ok
+}
+
+// structFields holds the fields of a struct type that the walk reads, as
+// [fieldsOf] returns them.
+type structFields struct {
+	// The names of the fields of the struct that are not inline, as
+	// [ownFieldNames] returns them, or nil when no field in held is
+	// inline.
+	own map[string]bool
+
+	// The fields that go-yaml decodes and whose types may hold a
+	// [SelfValidator], in the order the struct declares them.
+	held []heldField
+}
+
+// heldField is a field of a struct whose type may hold a [SelfValidator].
+type heldField struct {
+	// The name go-yaml decodes the field under, as [fieldName] returns it.
+	name string
+
+	// The index of the field in its struct.
+	index int
+
+	// Whether the field is inline, so its own fields sit beside its
+	// siblings.
+	inline bool
+}
+
+// fieldsOf returns the fields of t, a struct type, that the walk reads.
+// A field whose type holds no validator passes the walk at once, so the
+// result leaves it out, along with each field go-yaml skips. Every walk
+// shares the result, so a caller must not change it.
+func fieldsOf(t reflect.Type) *structFields {
+	if cached, ok := walkedFields.Load(t); ok {
+		if fields, ok := cached.(*structFields); ok {
+			return fields
+		}
+	}
+
+	fields := &structFields{}
+
+	for i := range t.NumField() {
+		field := t.Field(i)
+		if !mayHoldValidator(field.Type) {
+			continue
+		}
+
+		name, inline, skip := fieldName(field)
+		if skip {
+			continue
+		}
+
+		if inline && fields.own == nil {
+			fields.own = ownFieldNames(t)
+		}
+
+		fields.held = append(fields.held, heldField{name: name, index: i, inline: inline})
+	}
+
+	walkedFields.Store(t, fields)
+
+	return fields
 }
 
 // ownFieldNames returns the names go-yaml decodes the fields of t, a
@@ -857,13 +911,8 @@ func (w *selfWalker) scanChildren(v reflect.Value) (bool, bool) {
 
 	switch v.Kind() {
 	case reflect.Struct:
-		for i := range v.NumField() {
-			field := v.Type().Field(i)
-			if !mayHoldValidator(field.Type) {
-				continue
-			}
-
-			if _, _, skip := fieldName(field); !skip && scan(v.Field(i)) {
+		for _, field := range fieldsOf(v.Type()).held {
+			if scan(v.Field(field.index)) {
 				return true, true
 			}
 		}
