@@ -40,11 +40,17 @@ import (
 // Renaming and nulls change the tree, which the tree the [Source] shares
 // must not see, so a document that renames an anchor or holds such an
 // alias reads a second parse of the Source from [Source.decodeParse]. A
-// renamed anchor keeps the text of the Source, so the text the decoder
-// hands an UnmarshalYAML method holds the names the document spells. Any
-// other document reads the tree of the Source through [decodeView], which
-// copies only the aliases, and the nodes above them, to drop the comments
-// on their names.
+// renamed anchor keeps the text of the Source, so the bytes the decoder
+// hands an UnmarshalYAML method hold the names the document spells. The
+// decoder looks an alias up by the text of its name, so an alias carries
+// the new name in its text as well. An [ast.Node] the decoder fills, or
+// one it hands an UnmarshalYAML method, thus spells an alias to a renamed
+// anchor with the new name, such as `*x [2]`, and each anchor as the
+// document does.
+//
+// Any other document reads the tree of the Source through [decodeView],
+// which copies only the aliases, and the nodes above them, to drop the
+// comments on their names.
 //
 // Create instances with [newDecodeTree].
 type decodeTree struct {

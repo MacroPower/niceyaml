@@ -2891,6 +2891,24 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		assert.Contains(t, got.T.text, "&x 2")
 	})
 
+	t.Run("node spells an alias to a renamed anchor with its new name", func(t *testing.T) {
+		t.Parallel()
+
+		type wrapper struct {
+			C ast.Node `yaml:"c"`
+			D ast.Node `yaml:"d"`
+		}
+
+		dd := yamltest.FirstDocument(t, "a: &x 1\nb: &x 2\nc: [*x, 3]\nd: {p: &x 4, q: *x}\n")
+
+		got, err := dd.Decode[wrapper](t.Context())
+		require.NoError(t, err)
+		require.NotNil(t, got.C)
+		require.NotNil(t, got.D)
+		assert.Equal(t, "[*x [2], 3]", got.C.String())
+		assert.Equal(t, "{p: &x 4, q: *x [3]}", got.D.String())
+	})
+
 	t.Run("documents of one source decode at once", func(t *testing.T) {
 		t.Parallel()
 
