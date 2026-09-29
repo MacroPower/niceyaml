@@ -1468,10 +1468,15 @@ func wrapLine(text string, cw int) []string {
 			continue
 		}
 
-		// The cut keeps the escape sequences after the dropped spaces, so
-		// a style the row opens still closes.
-		if text := strings.TrimRightFunc(ansi.Strip(row), isBreakSpace); lipgloss.Width(text) <= cw {
-			out = append(out, cutText(row, len(text)))
+		// The row drops its trailing break spaces before the hard wrap as
+		// well, so the hard wrap cannot put one on a row of its own. The
+		// cut keeps the escape sequences after the dropped spaces, so a
+		// style the row opens still closes.
+		text := strings.TrimRightFunc(ansi.Strip(row), isBreakSpace)
+		row = cutText(row, len(text))
+
+		if lipgloss.Width(text) <= cw {
+			out = append(out, row)
 
 			continue
 		}

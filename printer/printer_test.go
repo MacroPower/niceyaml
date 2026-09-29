@@ -2012,6 +2012,20 @@ func TestPrinter_WordWrap_BreakSpaceBeforeBreakpoint(t *testing.T) {
 			want:   stringtest.JoinLF("cmd: run", "--verbos", "e --", "output /", "tmp/x"),
 			rows:   map[int]int{7: 0, 8: 0, 9: 1},
 		},
+		"space before a breakpoint past a hard wrap": {
+			gutter: printer.DefaultGutter,
+			input:  "k: aa/-/- /b",
+			width:  9,
+			want:   stringtest.JoinLF("   1  k:", "   -  aa/", "   -  -/-", "   -  /b"),
+			rows:   map[int]int{8: 2, 9: 2, 10: 3, 11: 3},
+		},
+		"space before a breakpoint past a wide cluster": {
+			gutter: printer.NoGutter,
+			input:  "k: 中b-   // /c",
+			width:  6,
+			want:   stringtest.JoinLF("k: 中b", "-   //", "/c"),
+			rows:   map[int]int{10: 1, 11: 1, 12: 2, 13: 2},
+		},
 	}
 
 	for name, tc := range tcs {
