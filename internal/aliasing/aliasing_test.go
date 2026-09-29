@@ -19,25 +19,9 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// aliasLevels returns a list whose last level expands to 10^7 scalars,
-// since each level lists the level below ten times, with anchors l0
-// through l7.
-func aliasLevels() string {
-	var sb strings.Builder
-
-	sb.WriteString("a:\n  - &l0 [x]\n")
-
-	for level := 1; level <= 7; level++ {
-		aliases := strings.Repeat(fmt.Sprintf("*l%d, ", level-1), 10)
-		fmt.Fprintf(&sb, "  - &l%d [%s]\n", level, strings.TrimSuffix(aliases, ", "))
-	}
-
-	return sb.String()
-}
-
-// anchoredAliasLevels returns the list [aliasLevels] returns, but with
-// each alias in a block item under an anchor of its own, such as
-// `&p1_0` above `*l0`.
+// anchoredAliasLevels returns the list [yamltest.AliasLevels] returns for
+// seven levels, but with each alias in a block item under an anchor of
+// its own, such as `&p1_0` above `*l0`.
 func anchoredAliasLevels() string {
 	var sb strings.Builder
 
@@ -89,7 +73,7 @@ func TestCheckDecode(t *testing.T) {
 			input: "s: &s [a, b]\nt: *s\n",
 		},
 		"alias bomb as mapping key": {
-			input: aliasLevels() + "kind:\n  ? *l7\n  : v\n",
+			input: yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n",
 			err:   aliasing.ErrExcessiveAliasing,
 		},
 		"anchored alias bomb as mapping key": {
@@ -97,18 +81,18 @@ func TestCheckDecode(t *testing.T) {
 			err:   aliasing.ErrExcessiveAliasing,
 		},
 		"merge key bomb": {
-			input: mergeLevels(),
+			input: yamltest.MergeLevels(7),
 			err:   aliasing.ErrExcessiveAliasing,
 		},
 		"node holding an alias with a bomb outside it": {
 			// The limit applies to the whole document, even where a
 			// decode of the node would read only the anchor it needs.
-			input: "k: &k a\n" + aliasLevels() + "b:\n  ? *l7\n  : v\nc: [*k]\n",
+			input: "k: &k a\n" + yamltest.AliasLevels(7) + "b:\n  ? *l7\n  : v\nc: [*k]\n",
 			path:  paths.Root().Child("c"),
 			err:   aliasing.ErrExcessiveAliasing,
 		},
 		"node without an alias beside a bomb": {
-			input: aliasLevels() + "b:\n  ? *l7\n  : v\nc: [x]\n",
+			input: yamltest.AliasLevels(7) + "b:\n  ? *l7\n  : v\nc: [x]\n",
 			path:  paths.Root().Child("c"),
 		},
 		"aliases inside their own anchor": {
@@ -334,21 +318,6 @@ func TestDecodesText(t *testing.T) {
 			assert.Equal(t, tc.want, aliasing.DecodesText(tc.typ), "a second call gives the same answer")
 		})
 	}
-}
-
-// mergeLevels returns a document whose levels each merge the level below
-// ten times, so a decode reads the first level 10^7 times.
-func mergeLevels() string {
-	var sb strings.Builder
-
-	sb.WriteString("m0: &m0 {a: x}\n")
-
-	for level := 1; level <= 7; level++ {
-		aliases := strings.Repeat(fmt.Sprintf("*m%d, ", level-1), 10)
-		fmt.Fprintf(&sb, "m%d: &m%d\n  <<: [%s]\n", level, level, strings.TrimSuffix(aliases, ", "))
-	}
-
-	return sb.String()
 }
 
 func TestExcessive(t *testing.T) {

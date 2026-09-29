@@ -3,8 +3,6 @@ package schema_test
 import (
 	"context"
 	"errors"
-	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -115,23 +113,14 @@ func TestWhen(t *testing.T) {
 		// The matcher runs before any schema, so it refuses a document
 		// whose aliases would make its decode read 10^7 scalars, and the
 		// registry stops at the document.
-		var sb strings.Builder
-
-		sb.WriteString("a:\n  - &l0 [x]\n")
-
-		for level := 1; level <= 7; level++ {
-			aliases := strings.Repeat(fmt.Sprintf("*l%d, ", level-1), 10)
-			fmt.Fprintf(&sb, "  - &l%d [%s]\n", level, strings.TrimSuffix(aliases, ", "))
-		}
-
-		sb.WriteString("kind:\n  ? *l7\n  : v\n")
+		input := yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n"
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.When(
 			matcher.Content(kindPath, "Deployment"),
 			schema.Embedded(schemaData),
 		)))
 
-		doc := yamltest.FirstDocument(t, sb.String())
+		doc := yamltest.FirstDocument(t, input)
 		err := reg.Validate(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrResolve)
 		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)

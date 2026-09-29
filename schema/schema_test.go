@@ -1496,17 +1496,6 @@ func TestSchema_AliasExpansion(t *testing.T) {
 	t.Run("documents", func(t *testing.T) {
 		t.Parallel()
 
-		// Each level lists the level below ten times, so the last level
-		// expands to 10^8 scalars.
-		var bomb strings.Builder
-
-		bomb.WriteString("l0: &l0 [x]\n")
-
-		for level := 1; level <= 8; level++ {
-			aliases := strings.Repeat(fmt.Sprintf("*l%d, ", level-1), 10)
-			fmt.Fprintf(&bomb, "l%d: &l%d [%s]\n", level, level, strings.TrimSuffix(aliases, ", "))
-		}
-
 		// Each document from binaryAliases anchors size bytes as a
 		// !!binary and lists count aliases of it.
 		binaryAliases := func(size, count int) string {
@@ -1524,7 +1513,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		}{
 			"alias bomb": {
 				schema: `{"type": "object"}`,
-				input:  bomb.String(),
+				input:  yamltest.AliasLevels(8),
 				errs:   []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 			},
 			"binary aliased many times": {
@@ -1625,30 +1614,9 @@ func TestSchema_AliasExpansion(t *testing.T) {
 	t.Run("decoded aliases", func(t *testing.T) {
 		t.Parallel()
 
-		// Each level lists the level below ten times, so the last level
-		// expands to 10^7 scalars. The alias key replaces the member that
-		// holds the levels, so the decoded value drops them.
-		var lists strings.Builder
-
-		lists.WriteString("k: &k a\na:\n  - &l0 [x]\n")
-
-		for level := 1; level <= 7; level++ {
-			aliases := strings.Repeat(fmt.Sprintf("*l%d, ", level-1), 10)
-			fmt.Fprintf(&lists, "  - &l%d [%s]\n", level, strings.TrimSuffix(aliases, ", "))
-		}
-
-		lists.WriteString("*k : small\n")
-
-		// Each level merges the level below ten times, so a decode reads
-		// the first level 10^7 times.
-		var merges strings.Builder
-
-		merges.WriteString("m0: &m0 {a: x}\n")
-
-		for level := 1; level <= 7; level++ {
-			aliases := strings.Repeat(fmt.Sprintf("*m%d, ", level-1), 10)
-			fmt.Fprintf(&merges, "m%d: &m%d\n  <<: [%s]\n", level, level, strings.TrimSuffix(aliases, ", "))
-		}
+		// The alias key *k spells a, so it replaces the member that holds
+		// the levels, and the decoded value drops them.
+		lists := "k: &k a\n" + yamltest.AliasLevels(7) + "*k : small\n"
 
 		// The sequence k lists 500 aliases to a scalar of 2000 bytes.
 		scalarAliases := "a: &a " + strings.Repeat("x", 2000) + "\n" +
@@ -1662,26 +1630,26 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			errs  []error
 		}{
 			"alias bomb as mapping key": {
-				input: lists.String() + "b:\n  ? *l7\n  : v\n",
+				input: lists + "b:\n  ? *l7\n  : v\n",
 				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 			},
 			"alias bomb as flow mapping key": {
-				input: lists.String() + "b: {*l7 : v}\n",
+				input: lists + "b: {*l7 : v}\n",
 				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 			},
 			"alias bomb under a string tag": {
-				input: lists.String() + "b: !!str *l7\n",
+				input: lists + "b: !!str *l7\n",
 				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 			},
 			"merge key bomb": {
-				input: merges.String(),
+				input: yamltest.MergeLevels(7),
 				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 			},
 			"node holding an alias with a bomb outside it": {
 				// A decode of a node that holds an alias reads the whole
 				// document to find the anchor.
 				path:  paths.Root().Child("c"),
-				input: lists.String() + "b:\n  ? *l7\n  : v\nc: [*k]\n",
+				input: lists + "b:\n  ? *l7\n  : v\nc: [*k]\n",
 				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 			},
 			"alias to a small sequence as mapping key": {
@@ -1738,7 +1706,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		t.Run("nodes of one document", func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, lists.String()+"b:\n  ? *l7\n  : v\nc: [*k]\nd: [*k]\ne: [x]\n")
+			doc := yamltest.FirstDocument(t, lists+"b:\n  ? *l7\n  : v\nc: [*k]\nd: [*k]\ne: [x]\n")
 
 			tcs := map[string]struct {
 				path paths.Path

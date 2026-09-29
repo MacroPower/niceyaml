@@ -696,19 +696,10 @@ func TestContent(t *testing.T) {
 		// Each level lists the level below ten times, so a decode of the
 		// alias key reads 10^7 scalars. Match refuses the document before
 		// it decodes anything, as the schema validator does.
-		var sb strings.Builder
-
-		sb.WriteString("a:\n  - &l0 [x]\n")
-
-		for level := 1; level <= 7; level++ {
-			aliases := strings.Repeat(fmt.Sprintf("*l%d, ", level-1), 10)
-			fmt.Fprintf(&sb, "  - &l%d [%s]\n", level, strings.TrimSuffix(aliases, ", "))
-		}
-
-		sb.WriteString("kind:\n  ? *l7\n  : v\n")
+		input := yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n"
 
 		m := matcher.Content(kindPath, "Deployment")
-		doc := yamltest.FirstDocument(t, sb.String())
+		doc := yamltest.FirstDocument(t, input)
 
 		ok, err := m.Match(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)

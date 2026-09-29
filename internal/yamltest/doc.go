@@ -71,6 +71,15 @@
 //	path := paths.Root().Child("spec", "replicas")
 //	err := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(path)))
 //
+// Tests of alias limits build their documents with [AliasLevels] and
+// [MergeLevels]. Each level refers to the level before it ten times, so a
+// few levels make a small document that holds millions of nodes once its
+// aliases expand. A decode expands merge keys every time. It expands an
+// alias to a list only where it writes the list out, as in a mapping
+// key, so a test appends such a key:
+//
+//	input := yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n"
+//
 // # Mocks
 //
 // [NormalizerFunc] adapts a function so it can stand in for a normalizer
