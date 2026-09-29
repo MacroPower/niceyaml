@@ -215,12 +215,16 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // The node also shows which !!timestamp values the source wrote as a bare
 // date. Validate hands the schema each of those as an RFC 3339 full-date,
 // so !!timestamp 2001-12-14 matches format "date" as the untagged
-// 2001-12-14 does. Where Validate cannot tell which scalar a timestamp
-// came from, the timestamp keeps the date-time spelling that
-// [Schema.ValidateValue] gives it. That holds behind an alias. It also
-// holds under a mapping, at any depth, with a merge key, an alias key, or
-// a key that is no scalar at or after the member leading to the
-// timestamp. Such a key may set a member of the same name.
+// 2001-12-14 does. Validate finds that scalar behind an alias or a merge
+// key as it finds the key it spells in a violation's path. Where Validate
+// cannot tell which scalar a timestamp came from, the timestamp keeps the
+// date-time spelling that [Schema.ValidateValue] gives it. That holds
+// behind an alias that does not resolve. It also holds under a mapping,
+// at any depth, with a key whose member name Validate cannot tell at or
+// after the member leading to the timestamp, since such a key may set a
+// member of the same name. A merge key whose sources do not resolve is
+// one such key. It holds as well for a member a merge key sets where the
+// mapping also has a key of the same spelling.
 //
 // The decoder writes out the whole content of an alias it spells as
 // text, such as an alias used as a key. It also reads a mapping a merge
@@ -315,7 +319,20 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 		return err
 	}
 
-	err = s.compiled.Validate(ctx, normalizeJSON(data, rootOf(n)))
+	// The resolver binds aliases across the whole document, so an alias
+	// inside a scoped node reaches an anchor outside it. The document
+	// keeps one for every Node of it, so a check of each item of a list
+	// binds the document once.
+	resolver := paths.NewResolver(nil)
+	if n != nil {
+		resolver = docstate.Of(n).Resolver()
+	}
+
+	// The timestamp lookups and every violation share one index, so each
+	// key decodes once however many of them lie under its mapping.
+	idx := newMemberIndex(resolver)
+
+	err = s.compiled.Validate(ctx, normalizeJSON(data, rootOf(n), idx))
 	if err == nil {
 		return nil
 	}
@@ -335,7 +352,7 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 		return fmt.Errorf("%w: %w", ErrValidate, errors.Join(refErrs...))
 	}
 
-	return newValidationError(ve, n)
+	return newValidationError(ve, n, idx)
 }
 
 // unresolvedRefs returns the failures in the tree of ve that report a $ref
@@ -368,22 +385,10 @@ func unresolvedRefs(ve *jsonschema.ValidationError) []error {
 // error and carries its own path, so the printer highlights that location
 // and [niceyaml.Error.Path] reports it. Several failures become a count
 // summary with no path of its own, and each nested error carries the path
-// to one failing location.
-func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node) *niceyaml.Error {
+// to one failing location. The index idx finds the members of the
+// mappings in the document of n.
+func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node, idx *memberIndex) *niceyaml.Error {
 	leaves := ve.Leaves()
-
-	// The resolver binds aliases across the whole document, so an alias
-	// inside a scoped node reaches an anchor outside it. The document
-	// keeps one for every Node of it, so a failing check of each item of
-	// a list binds the document once.
-	resolver := paths.NewResolver(nil)
-	if n != nil {
-		resolver = docstate.Of(n).Resolver()
-	}
-
-	// Every leaf shares one index, so each key decodes once however many
-	// violations lie under its mapping.
-	idx := newMemberIndex(resolver)
 
 	switch len(leaves) {
 	case 0:
@@ -520,11 +525,12 @@ func elementNode(node ast.Node, index int) ast.Node {
 	return seq.Values[index]
 }
 
-// memberIndex finds the members of the mappings a violation path steps
-// through for [sourcePath]. It holds the member table of each mapping it
-// has read, so each key decodes once however many violations lie under
-// its mapping or merge it in. The resolver binds the aliases of the
-// document.
+// memberIndex finds the members of the mappings that [sourcePath] steps
+// through to spell a violation's path, and that [normalizeJSON] steps
+// through to find the scalar a timestamp came from. It holds the member
+// table of each mapping it has read, so each key decodes once however
+// many lookups pass through its mapping or merge it in. The resolver
+// binds the aliases of the document.
 //
 // Create instances with [newMemberIndex].
 type memberIndex struct {
@@ -580,10 +586,11 @@ type memberNode struct {
 //
 // An alias key decodes to the name the content of its anchor gives, and
 // the table holds that content as the key node, since a path selector
-// matches the key by the spelling of that content. An alias key that
-// [aliasKeyName] cannot name may set a member of any name, so the table
-// leaves out every member before it rather than hold one the alias may
-// have replaced.
+// matches the key by the spelling of that content. A key with no name,
+// such as an alias key [aliasKeyName] cannot name or a typed-nil key a
+// tree built by hand may hold, may set a member of any name. The table
+// leaves out every member before such a key rather than hold one the key
+// may have replaced.
 func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 	node = astnode.Content(node)
 
@@ -625,11 +632,6 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 
 		if _, isAlias := astnode.Content(member.Key).(*ast.AliasNode); isAlias {
 			key, name, ok = aliasKeyName(idx.resolver, member.Key)
-			if !ok {
-				table.complete = false
-
-				break
-			}
 		} else {
 			name, ok = decodedKey(member.Key)
 		}
@@ -639,7 +641,9 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 		}
 
 		if !ok {
-			continue
+			table.complete = false
+
+			break
 		}
 
 		if _, seen := table.members[name]; !seen {
@@ -724,35 +728,6 @@ func aliasKeyName(r *paths.Resolver, key ast.MapKeyNode) (ast.Node, string, bool
 	}
 
 	return target, name, true
-}
-
-// keptMembers returns the value node of each member of the mapping node
-// holds, by the name [decodedKey] gives its key, or an empty map for any
-// other node. A decode sets the members in order, so where two members
-// share a name, the map holds the value of the later one, which the decode
-// keeps. A key with no name, such as a merge key or an alias, may set a
-// member of any name, so the map leaves out every member before the last
-// such key.
-func keptMembers(node ast.Node) map[string]ast.Node {
-	kept := map[string]ast.Node{}
-
-	for _, member := range slices.Backward(mappingMembers(node)) {
-		// A tree built by hand may hold a nil member, which sets nothing.
-		if member == nil {
-			continue
-		}
-
-		name, ok := decodedKey(member.Key)
-		if !ok {
-			break
-		}
-
-		if _, found := kept[name]; !found {
-			kept[name] = member.Value
-		}
-	}
-
-	return kept
 }
 
 // mappingMembers returns the members of the mapping node holds, or nil
@@ -844,7 +819,9 @@ func isMergeKey(key ast.Node) bool {
 // RFC 3339 full-date, such as 2001-12-14, when the scalar in root that a
 // decode read it from holds only a date, and an RFC 3339 date-time
 // otherwise. Root is the node a decode read data from, and without it
-// every timestamp becomes a date-time. A [yaml.MapSlice], which a decode with
+// every timestamp becomes a date-time. The index idx finds the members of
+// the mappings in the document of root, and its resolver follows the
+// aliases there. A [yaml.MapSlice], which a decode with
 // [yaml.UseOrderedMap] yields for each mapping, becomes a map with the
 // same members, and a later item replaces an earlier one with the same
 // key, as a decode into a map does. It walks maps, slices, and ordered
@@ -858,10 +835,10 @@ func isMergeKey(key ast.Node) bool {
 // into the caller's data. Handing the validator the caller's own
 // containers is safe because [jsonschema.Validator.Validate] only reads
 // its instance and keeps no reference to it.
-func normalizeJSON(data any, root ast.Node) any {
+func normalizeJSON(data any, root ast.Node, idx *memberIndex) any {
 	w := normalizer{
-		members: map[ast.Node]map[string]ast.Node{},
-		nodes:   []ast.Node{root},
+		idx:   idx,
+		nodes: []ast.Node{deref(idx.resolver, root)},
 	}
 
 	out, _ := w.normalize(data)
@@ -872,15 +849,13 @@ func normalizeJSON(data any, root ast.Node) any {
 // normalizer walks a value for [normalizeJSON]. It records the path from
 // the top of the value down to the value it visits, and looks up the node
 // in root that the path leads to only when it reaches a timestamp. It
-// keeps each node it finds while the walk stays under that node, and it
-// keeps the named members of each mapping it reads. So the lookups step
-// down root at most once for each value the walk visits, and read each
-// mapping at most once.
+// keeps each node it finds while the walk stays under that node, so the
+// lookups step down root at most once for each value the walk visits. The
+// index reads each mapping at most once.
 type normalizer struct {
-	// The result of [keptMembers] for each mapping node the lookups have
-	// stepped through.
-	members map[ast.Node]map[string]ast.Node
-	path    []jsonschema.Segment
+	// Finds the members of each mapping the lookups step through.
+	idx  *memberIndex
+	path []jsonschema.Segment
 	// The node each prefix of path leads to in root, as far down path as
 	// the lookups have gone. The first is root, and nodes[i] is the node
 	// path[:i] leads to.
@@ -969,10 +944,10 @@ func (w *normalizer) child(seg jsonschema.Segment, elem any) (any, bool) {
 	return norm, changed
 }
 
-// node returns the node in root that a decode read the visited value from.
-// It returns nil when root is nil and when no node in root holds the
-// value, as under an alias, whose content sits under its anchor, and at a
-// member name [keptMembers] leaves out.
+// node returns the content of the node that a decode read the visited
+// value from, following each alias on the way through the resolver of
+// the index. It returns nil when root is nil, behind an alias that does
+// not resolve, and at a member name the index finds no value node for.
 func (w *normalizer) node() ast.Node {
 	for len(w.nodes) <= len(w.path) {
 		parent := w.nodes[len(w.nodes)-1]
@@ -983,27 +958,13 @@ func (w *normalizer) node() ast.Node {
 		if seg.IsIndex {
 			next = elementNode(parent, seg.Index)
 		} else {
-			next = w.member(parent, seg.Key)
+			_, next = w.idx.lookup(parent, seg.Key)
 		}
 
-		w.nodes = append(w.nodes, next)
+		w.nodes = append(w.nodes, deref(w.idx.resolver, next))
 	}
 
 	return w.nodes[len(w.path)]
-}
-
-// member returns the value node that [keptMembers] finds for name in the
-// mapping node holds, or nil when it finds none.
-func (w *normalizer) member(node ast.Node, name string) ast.Node {
-	node = astnode.Content(node)
-
-	members, ok := w.members[node]
-	if !ok {
-		members = keptMembers(node)
-		w.members[node] = members
-	}
-
-	return members[name]
 }
 
 // dateOnlyLayout is the layout go-yaml uses to parse a !!timestamp that

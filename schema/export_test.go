@@ -22,9 +22,6 @@ var (
 	// ReadFile exposes readFile to the external test package.
 	ReadFile = readFile
 
-	// NormalizeJSON exposes normalizeJSON to the external test package.
-	NormalizeJSON = normalizeJSON
-
 	// CanonicalURL exposes canonicalURL to the external test package.
 	CanonicalURL = canonicalURL
 )
@@ -32,6 +29,12 @@ var (
 // HTTPClient returns the client r fetches schemas with.
 func HTTPClient(r *Registry) *http.Client {
 	return r.client
+}
+
+// NormalizeJSON exposes normalizeJSON to the external test package, with
+// a member index of its own that follows no alias.
+func NormalizeJSON(data any, root ast.Node) any {
+	return normalizeJSON(data, root, newMemberIndex(paths.NewResolver(nil)))
 }
 
 // SourcePath exposes sourcePath to the external test package, with a

@@ -857,9 +857,10 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 	// converts them to their JSON spellings, so a tagged scalar does not
 	// suppress every other constraint in the document. A !!timestamp the
 	// source wrote as a bare date becomes a full-date, the spelling the same
-	// date has without the tag. Where the source does not show which scalar
-	// a timestamp came from, as behind an alias or a merge key, the
-	// timestamp becomes a date-time.
+	// date has without the tag, also behind an alias or a merge key. Where
+	// Validate cannot tell which scalar a timestamp came from, as for a
+	// member a merge key brings in when the mapping has a key of its own
+	// with the same spelling, the timestamp becomes a date-time.
 	tcs := map[string]struct {
 		schema string
 		input  string
@@ -994,17 +995,84 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 				<<: *base
 			`),
 		},
-		"date-only timestamp behind an alias is a date-time": {
+		"date-only timestamp behind an alias matches format date": {
 			schema: `{
 				"type": "object",
 				"properties": {
 					"a": {"type": "string", "format": "date"},
-					"d": {"type": "string", "format": "date-time"}
+					"d": {"type": "string", "format": "date"}
 				}
 			}`,
 			input: stringtest.Input(`
 				a: &x !!timestamp 2001-12-14
 				d: *x
+			`),
+		},
+		"date-only timestamp in an aliased mapping matches format date": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"m": {
+						"type": "object",
+						"properties": {"d": {"type": "string", "format": "date"}}
+					}
+				}
+			}`,
+			input: stringtest.Input(`
+				base: &b {d: !!timestamp 2001-12-14}
+				m: *b
+			`),
+		},
+		"merged date-only timestamp matches format date": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"m": {
+						"type": "object",
+						"properties": {"d": {"type": "string", "format": "date"}}
+					}
+				}
+			}`,
+			input: stringtest.Input(`
+				base: &b {d: !!timestamp 2001-12-14}
+				m: {<<: *b}
+			`),
+		},
+		"merge sequence keeps the later source's date": {
+			// A later merge source sets d over an earlier one.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"m": {
+						"type": "object",
+						"properties": {"d": {"type": "string", "format": "date"}}
+					}
+				}
+			}`,
+			input: stringtest.Input(`
+				b1: &b1
+				  d: !!timestamp 2001-12-14T00:00:00Z
+				b2: &b2
+				  d: !!timestamp 2001-12-14
+				m: {<<: [*b1, *b2]}
+			`),
+		},
+		"merge sequence keeps the later source's midnight date-time": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"m": {
+						"type": "object",
+						"properties": {"d": {"type": "string", "format": "date-time"}}
+					}
+				}
+			}`,
+			input: stringtest.Input(`
+				b1: &b1
+				  d: !!timestamp 2001-12-14
+				b2: &b2
+				  d: !!timestamp 2001-12-14T00:00:00Z
+				m: {<<: [*b1, *b2]}
 			`),
 		},
 		"date under a second tag keeps the date-time": {
