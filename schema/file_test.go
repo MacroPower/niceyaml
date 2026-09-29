@@ -100,6 +100,8 @@ func TestFile_DriveLetter(t *testing.T) {
 	assert.Equal(t, "file:///C:/schemas/config.json", key)
 	assert.Nil(t, data)
 	require.ErrorContains(t, err, "read C:/schemas/config.json")
+	require.ErrorIs(t, err, schema.ErrLoad)
+	require.ErrorIs(t, err, fs.ErrInvalid)
 	require.NotErrorIs(t, err, os.ErrNotExist)
 }
 

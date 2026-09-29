@@ -152,7 +152,8 @@ func file(path string) (Ref, error) {
 // path absolute against, so an absolute name reads relative to wd, and
 // one outside wd, or a drive-letter path off Windows, names no file in
 // fsys. A rooted name without a drive, such as \proj\x.json, counts as
-// absolute on the drive of wd.
+// absolute on the drive of wd. Off Windows, readFile refuses a
+// drive-letter path with [fs.ErrInvalid] whether fsys is nil or not.
 func readFile(fsys fs.FS, name, abs, wd string) ([]byte, error) {
 	if fsys != nil {
 		return readFS(fsys, name, wd)
@@ -163,7 +164,7 @@ func readFile(fsys fs.FS, name, abs, wd string) ([]byte, error) {
 	// while the key stays the cwd-independent drive URL. One key would
 	// then name different bytes per directory, so refuse the read.
 	if hasDriveLetter(abs) && !onWindows {
-		return nil, fmt.Errorf("read %s: a drive letter names no file on %s", abs, runtime.GOOS)
+		return nil, fmt.Errorf("read %s: %w: a drive letter names no file on %s", abs, fs.ErrInvalid, runtime.GOOS)
 	}
 
 	// Stat before the open, since opening a FIFO blocks until a writer
