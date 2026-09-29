@@ -2579,6 +2579,46 @@ func TestDocument_At(t *testing.T) {
 		}
 	})
 
+	t.Run("alias inside its own anchor writes out as null", func(t *testing.T) {
+		t.Parallel()
+
+		// A value that decodes itself from YAML bytes gets the anchor
+		// written out, with null for the alias inside it.
+		tcs := map[string]struct {
+			input string
+			want  string
+		}{
+			"flow mapping": {
+				input: "a: &a {k: *a}\nkind: {x: *a}\n",
+				want:  "{k: null}",
+			},
+			"flow sequence": {
+				input: "a: &a [1, *a]\nkind: {x: *a}\n",
+				want:  "[1, null]",
+			},
+			"block sequence": {
+				input: "a: &a\n  - 1\n  - *a\nkind: {x: *a}\n",
+				want:  "- 1\n- null",
+			},
+			"anchor name used again later": {
+				input: "a: &a {k: *a}\nkind: {x: *a}\nb: &a 1\n",
+				want:  "{k: null}",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				got, err := yamltest.At(t, dd, paths.Root().Child("kind")).Decode[map[string]rawText](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got["x"].text)
+			})
+		}
+	})
+
 	t.Run("alias to a later anchor stays an error", func(t *testing.T) {
 		t.Parallel()
 

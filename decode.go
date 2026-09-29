@@ -1592,7 +1592,10 @@ func WithReferences(data ...[]byte) DecodeOption {
 // anchors of the document share a name, the decoder reads a copy of the
 // document in which each of them, and each alias to one of them, carries
 // a name of its own. An [ast.Node] the decode fills, or one an
-// UnmarshalYAML method takes, spells such an alias with that name.
+// UnmarshalYAML method takes, spells such an alias with that name. An
+// alias inside the anchor it refers to reads as null, and the text the
+// decoder hands an UnmarshalText or UnmarshalYAML method spells it as
+// null too.
 //
 // [Decoder.DecodeInto] decodes with options stated once, for every node
 // a [Decoder] decodes.
