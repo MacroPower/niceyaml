@@ -98,17 +98,17 @@ func (p *Printer) Layout(view *line.View) Layout {
 // layoutLine computes the row structure of line idx of view, which is ln,
 // as [Printer.renderLine] writes its rows.
 func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidth int) lineLayout {
-	pieces, starts, shown := p.wrapLine(view, idx, ln, gutterWidth)
-	above := p.annotationRows(view, ln, idx, gutterWidth, line.Above, starts)
-	below := p.annotationRows(view, ln, idx, gutterWidth, line.Below, starts)
+	w := p.wrapLine(view, idx, ln, gutterWidth)
+	above := p.annotationRows(view, ln, idx, gutterWidth, line.Above, w)
+	below := p.annotationRows(view, ln, idx, gutterWidth, line.Below, w)
 
 	ll := lineLayout{
-		shown:   shown,
-		cols:    starts,
-		offsets: make([]int, len(pieces)),
+		shown:   w.shown,
+		cols:    w.starts,
+		offsets: make([]int, len(w.pieces)),
 	}
 
-	for j, piece := range pieces {
+	for j, piece := range w.pieces {
 		ll.rows += len(rowsAt(above, j))
 		ll.offsets[j] = ll.rows
 		ll.rows += 1 + len(rowsAt(below, j))
@@ -124,10 +124,18 @@ func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidt
 	return ll
 }
 
+// wrappedLine is the content of one line wrapped to the printer width.
+type wrappedLine struct {
+	pieces []string  // The wrapped rows of the rendered content.
+	starts []int     // The column of the content at which each piece begins.
+	ends   []int     // The column of the content just past the last rune each piece shows.
+	shown  shownLine // The shown text of the line.
+}
+
 // wrapLine renders the content of line idx of view, which is ln, wraps it
-// to the printer width, and returns the pieces with the column of the
-// content at which each piece begins, and the shown text of the line.
-func (p *Printer) wrapLine(view *line.View, idx int, ln *line.Line, gutterWidth int) ([]string, []int, shownLine) {
+// to the printer width, and returns the pieces with the columns of the
+// content each one shows.
+func (p *Printer) wrapLine(view *line.View, idx int, ln *line.Line, gutterWidth int) wrappedLine {
 	// The content wraps as the rendered line does, styles included, since
 	// a style's transform may change the shown text. The wrap is
 	// ANSI-aware and measures the shown cells.
@@ -147,18 +155,25 @@ func (p *Printer) wrapLine(view *line.View, idx int, ln *line.Line, gutterWidth 
 	shown := []rune(shownText)
 	contentLen := utf8.RuneCountInString(ln.Content())
 
-	offsets := rowStarts(shownText, plain)
+	offsets, endOffsets := rowBounds(shownText, plain)
 	starts := make([]int, len(offsets))
+	ends := make([]int, len(endOffsets))
 
 	for i, offset := range offsets {
 		starts[i] = sourceCol(runs, shown, offset, contentLen)
+		ends[i] = sourceCol(runs, shown, endOffsets[i], contentLen)
 	}
 
-	return pieces, starts, shownLine{
-		text:       shownText,
-		runs:       runs,
-		starts:     offsets,
-		contentLen: contentLen,
+	return wrappedLine{
+		pieces: pieces,
+		starts: starts,
+		ends:   ends,
+		shown: shownLine{
+			text:       shownText,
+			runs:       runs,
+			starts:     offsets,
+			contentLen: contentLen,
+		},
 	}
 }
 
@@ -216,7 +231,7 @@ func shownOffset(runs []runSpan, shown []rune, col, contentLen int) int {
 // shows as many runes as it covers maps rune for rune, as a style that
 // only colors its text or changes its case does. In any other run, the
 // shown runes before offset match against the text of the run as
-// [rowStarts] matches pieces, and the column stays within the run.
+// [rowBounds] matches pieces, and the column stays within the run.
 func sourceCol(runs []runSpan, shown []rune, offset, contentLen int) int {
 	switch {
 	case offset <= 0:
@@ -258,8 +273,9 @@ func isBreakSpace(r rune) bool {
 	return unicode.IsSpace(r) && r != nbsp
 }
 
-// rowStarts returns the rune offset in text at which each piece of its
-// wrapped form begins. It matches the runes of each piece against text
+// rowBounds returns the rune offset in text at which each piece of its
+// wrapped form begins, and the offset just past the last rune of text
+// each piece shows. It matches the runes of each piece against text
 // in order, and skips the runes of text the wrapper drops. The wrapper
 // drops every Unicode space but [nbsp] at a break and at the end of the
 // text. From a grapheme cluster that starts with such a space outside
@@ -268,10 +284,11 @@ func isBreakSpace(r rune) bool {
 // spaces the wrapper drops, which it does when the first word does not
 // fit beside them. The caller escapes the text, so a tab shows as its
 // control picture and never counts as a space.
-func rowStarts(text string, pieces []string) []int {
+func rowBounds(text string, pieces []string) ([]int, []int) {
 	runes := []rune(text)
 	tails := spaceTails(text, len(runes))
 	starts := make([]int, len(pieces))
+	ends := make([]int, len(pieces))
 	next := 0
 
 	for i, piece := range pieces {
@@ -290,9 +307,13 @@ func rowStarts(text string, pieces []string) []int {
 		if piece == "" {
 			starts[i] = next
 		}
+
+		// The spaces the wrapper drops after the piece come after next,
+		// so the piece ends before them.
+		ends[i] = next
 	}
 
-	return starts
+	return starts, ends
 }
 
 // spaceTails marks the runes of text, which holds n runes, that follow the

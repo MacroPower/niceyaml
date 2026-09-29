@@ -603,6 +603,29 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 				"0tLS0tCk1JSUMr",
 			),
 		},
+		// The wrap drops the spaces at the end of the line when they run
+		// past the width, so they get no caret either.
+		"trailing spaces dropped on the last row": {
+			content: "a: |\n  some text          \n  more",
+			cols:    []position.Span{position.NewSpan(2, 21)},
+			line:    1,
+			width:   20,
+			want: stringtest.JoinLF(
+				"a: |",
+				"  some text",
+				"  ^^^^^^^^^",
+				"  more",
+			),
+		},
+		"trailing spaces dropped on the only row": {
+			content: "key: value          ",
+			cols:    []position.Span{position.NewSpan(0, 20)},
+			width:   16,
+			want: stringtest.JoinLF(
+				"key: value",
+				"^^^^^^^^^^",
+			),
+		},
 		"runs on different rows": {
 			content: "key: aaaa bbbb cccc dddd",
 			cols:    []position.Span{position.NewSpan(5, 9), position.NewSpan(17, 19)},
@@ -3942,6 +3965,7 @@ func TestDefaultAnnotation(t *testing.T) {
 		annotations line.Annotations
 		overlays    line.Overlays
 		rowStarts   []int
+		rowEnds     []int
 		position    line.Placement
 		want        []printer.AnnotationRow
 	}{
@@ -4130,6 +4154,18 @@ func TestDefaultAnnotation(t *testing.T) {
 				{Col: 10, Text: "^^^^"},
 			},
 		},
+		"wrapped content leaves the spaces dropped at the end unmarked": {
+			content:     "key: aaaa bb  ",
+			annotations: line.Annotations{{Placement: line.Below}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(5, 14)}},
+			rowStarts:   []int{0, 10},
+			rowEnds:     []int{9, 12},
+			position:    line.Below,
+			want: []printer.AnnotationRow{
+				{Col: 5, Text: "^^^^"},
+				{Col: 10, Text: "^^"},
+			},
+		},
 		"wrapped content marks a tab at a break as its picture": {
 			content:     "k: ab\tcd",
 			annotations: line.Annotations{{Placement: line.Below}},
@@ -4179,6 +4215,7 @@ func TestDefaultAnnotation(t *testing.T) {
 				Annotations: tc.annotations,
 				Overlays:    tc.overlays,
 				RowStarts:   tc.rowStarts,
+				RowEnds:     tc.rowEnds,
 				Placement:   tc.position,
 			})
 			assert.Equal(t, tc.want, got)

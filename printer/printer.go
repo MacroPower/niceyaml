@@ -267,6 +267,14 @@ type AnnotationContext struct {
 	// row as it is, and nil counts the same. Each context holds a copy.
 	RowStarts []int
 
+	// RowEnds holds the column of Content just past the last rune each
+	// row of the line shows once the printer wraps it, one for each entry
+	// of RowStarts, so a row ends before the spaces the wrap drops at its
+	// break or at the end of the line. When it is nil, each row ends
+	// where the next begins, less the spaces before that, and the last
+	// row ends at the end of Content. Each context holds a copy.
+	RowEnds []int
+
 	Annotations line.Annotations
 	Placement   line.Placement
 }
@@ -373,10 +381,10 @@ func NoAnnotation(AnnotationContext) []AnnotationRow {
 // draw them, so a marked range shows its extent without color. When the
 // overlays cover no column, as an overlay of no width covers none, the
 // row is a single caret at the column of the annotations, so the spot
-// still shows. When the line wraps, each
-// wrapped row that holds a covered column gets a caret row of its own
-// below it, which marks the covered columns of that row. A space the wrap
-// drops at a break gets no caret. An annotation above the line with
+// still shows. When the line wraps, each wrapped row that holds a
+// covered column gets a caret row of its own below it, which marks the
+// covered columns of that row. A space the wrap drops, at a break or at
+// the end of the line, gets no caret. An annotation above the line with
 // no content renders nothing, as [line.Annotation.String] does. A
 // newline in an annotation renders as its picture rather than starting a
 // row, as every other control character does.
@@ -406,11 +414,11 @@ func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 
 // markerRows returns a caret row for each wrapped row of ctx.Content that
 // holds a column the overlays of ctx cover, in order, each under the
-// covered columns of its row. A row ends before the spaces the wrap drops
-// at its break, so those spaces get no caret. It escapes the content
-// first, as the printer shows it, so a tab counts as its picture rather
-// than a space. When the overlays cover no column, it returns one row
-// with a single caret at the column of the annotations.
+// covered columns of its row. A row ends at its entry of RowEnds, before
+// the spaces the wrap drops, so those spaces get no caret. It escapes the
+// content first, as the printer shows it, so a tab counts as its picture
+// rather than a space. When the overlays cover no column, it returns one
+// row with a single caret at the column of the annotations.
 func markerRows(ctx AnnotationContext) []AnnotationRow {
 	starts := ctx.RowStarts
 	if len(starts) == 0 {
@@ -423,7 +431,12 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 
 	for r, lo := range starts {
 		hi := len(shown)
-		if r+1 < len(starts) {
+
+		switch {
+		case r < len(ctx.RowEnds):
+			hi = min(max(lo, ctx.RowEnds[r]), hi)
+
+		case r+1 < len(starts):
 			hi = min(max(0, starts[r+1]), hi)
 
 			for hi > lo && isBreakSpace(shown[hi-1]) {
@@ -897,9 +910,9 @@ func (p *Printer) renderRows(view *line.View) []string {
 // wrapped to the printer width, each row with its gutter, and each of its
 // annotation rows above or below the wrapped row that holds its column.
 func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber, gutterWidth int) []string {
-	pieces, starts, _ := p.wrapLine(view, idx, ln, gutterWidth)
-	above := p.annotationRows(view, ln, idx, gutterWidth, line.Above, starts)
-	below := p.annotationRows(view, ln, idx, gutterWidth, line.Below, starts)
+	w := p.wrapLine(view, idx, ln, gutterWidth)
+	above := p.annotationRows(view, ln, idx, gutterWidth, line.Above, w)
+	below := p.annotationRows(view, ln, idx, gutterWidth, line.Below, w)
 
 	gutterCtx := GutterContext{
 		Index:     idx,
@@ -909,9 +922,9 @@ func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber,
 		Styles:    p.styles,
 	}
 
-	rows := make([]string, 0, len(pieces))
+	rows := make([]string, 0, len(w.pieces))
 
-	for j, piece := range pieces {
+	for j, piece := range w.pieces {
 		rows = append(rows, p.annotationGutters(rowsAt(above, j), gutterCtx, gutterWidth)...)
 
 		ctx := gutterCtx
@@ -1045,9 +1058,9 @@ func rowsAt(blocks [][]string, j int) []string {
 const minAnnotationWidth = 20
 
 // annotationRows renders the annotations of line idx of view, which is
-// ln, at the given placement as terminal rows without the gutter. Starts
-// holds the column of the content at which each wrapped row of the line
-// begins, and the result holds a block of rows for each wrapped row:
+// ln, at the given placement as terminal rows without the gutter. W holds
+// the columns of the content each wrapped row of the line shows, and the
+// result holds a block of rows for each wrapped row:
 // the rows of each [AnnotationRow] whose column that wrapped row holds.
 // Within a block, the kinds come in [line.Annotations.ByKind] order, and
 // within each kind the rows the [AnnotationFunc] returns come in order,
@@ -1058,12 +1071,14 @@ func (p *Printer) annotationRows(
 	ln *line.Line,
 	idx, gutterWidth int,
 	placement line.Placement,
-	starts []int,
+	w wrappedLine,
 ) [][]string {
 	anns := view.Annotations(idx).Filter(placement)
 	if len(anns) == 0 {
 		return nil
 	}
+
+	starts := w.starts
 
 	cr := cells.NewRow(ln.Content())
 	lastCol := utf8.RuneCountInString(ln.Content()) + line.MaxColPastEnd
@@ -1076,6 +1091,7 @@ func (p *Printer) annotationRows(
 			Content:     ln.Content(),
 			Overlays:    slices.Clone(view.Overlays(idx)),
 			RowStarts:   slices.Clone(starts),
+			RowEnds:     slices.Clone(w.ends),
 		})
 
 		for _, row := range rows {
