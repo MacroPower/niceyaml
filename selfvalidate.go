@@ -1190,13 +1190,13 @@ func (w *selfWalker) keyDecoder() *yaml.Decoder {
 	return w.decoder
 }
 
-// addKeyName decodes key as type t and adds its text to names under the
-// value it decodes to, as [nameKey] keys it. The text of a block scalar
-// key is its content rather than its `|` or `>` indicator. A key that does
-// not decode, whose decode panics, or whose value cannot key a map, adds
-// nothing. An alias key takes its text and value from the content of its
-// anchor, as [paths] names it, and adds nothing when that anchor does not
-// resolve.
+// addKeyName decodes key as type t and adds to names the text
+// [paths.Resolver.KeyName] gives the key, under the value the key decodes
+// to, as [nameKey] keys it. A child selector matches a key by that text,
+// so a path built from names resolves to the entry. A key KeyName cannot
+// name, one that does not decode, whose decode panics, or whose value
+// cannot key a map, adds nothing. The key decodes from the node
+// [selfWalker.keyValueNode] gives it.
 //
 // As go-yaml does, addKeyName decodes a key of a pointer type t as the
 // type t points to, and leaves a null key, or an alias to a null, a nil
@@ -1204,45 +1204,21 @@ func (w *selfWalker) keyDecoder() *yaml.Decoder {
 // go-yaml looks through a `?`, an anchor, or a tag, so go-yaml points a
 // key such as `&a ~` at a zero value instead.
 func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[any]string) {
-	node := keyValueNode(key)
-	null := key.Type() == ast.NullType
-
-	if _, ok := node.(*ast.AliasNode); ok {
-		content, err := w.pathResolver().Deref(node)
-		if err != nil || content == nil {
-			return
-		}
-
-		node = content
-		null = key.Type() == ast.AliasType && content.Type() == ast.NullType
+	name, ok := w.pathResolver().KeyName(key)
+	if !ok {
+		return
 	}
+
+	node := w.keyValueNode(key)
+	if node == nil {
+		return
+	}
+
+	null := key.Type() == ast.NullType ||
+		key.Type() == ast.AliasType && node.Type() == ast.NullType
 
 	if t.Kind() == reflect.Pointer && !null {
 		t = t.Elem()
-	}
-
-	var name string
-
-	switch n := astnode.Content(node).(type) {
-	case *ast.StringNode:
-		name = n.Value
-	case *ast.LiteralNode:
-		if n.Value == nil {
-			return
-		}
-
-		name = n.Value.Value
-
-	case ast.ScalarNode:
-		tk := n.GetToken()
-		if tk == nil {
-			return
-		}
-
-		name = tk.Value
-
-	default:
-		return
 	}
 
 	decoded := reflect.New(t)
@@ -1255,6 +1231,61 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 	if k, ok := nameKey(decoded.Elem()); ok {
 		names[k] = name
 	}
+}
+
+// keyValueNode returns the node key decodes from. It looks through the
+// `?` of an explicit key and the anchors on key, which carry no part of
+// its value, and follows each alias to the content of its anchor, as
+// [paths.Resolver.Deref] does. The key decoder of the walk knows none of
+// the anchors of the document, so an alias left in the node would not
+// decode. Each tag on the way stays around the content it holds, since a
+// tag decides how the key decodes, whether it sits on the key or on the
+// content of an anchor. It returns nil for a key that holds no node, and
+// for one with an alias that does not resolve or that leads back to
+// itself.
+func (w *selfWalker) keyValueNode(key ast.MapKeyNode) ast.Node {
+	var (
+		node     ast.Node = key
+		tags     []*ast.TagNode
+		followed = map[*ast.AliasNode]bool{}
+	)
+
+	for !astnode.IsNil(node) {
+		switch n := node.(type) {
+		case *ast.MappingKeyNode:
+			node = n.Value
+		case *ast.AnchorNode:
+			node = n.Value
+		case *ast.TagNode:
+			tags = append(tags, n)
+			node = n.Value
+
+		case *ast.AliasNode:
+			if followed[n] {
+				return nil
+			}
+
+			followed[n] = true
+
+			content, err := w.pathResolver().Deref(n)
+			if err != nil {
+				return nil
+			}
+
+			node = content
+
+		default:
+			for _, tag := range slices.Backward(tags) {
+				tagged := *tag
+				tagged.Value = node
+				node = &tagged
+			}
+
+			return node
+		}
+	}
+
+	return nil
 }
 
 // nanKey stands in names for a NaN key, since a NaN equals no value,
@@ -1318,24 +1349,6 @@ func pointee(key reflect.Value) reflect.Value {
 	}
 
 	return key
-}
-
-// keyValueNode looks through the `?` of an explicit key and the anchors
-// on key, which carry no part of its value, to the node the key decodes
-// from. A tag stays, since it decides how the key decodes.
-func keyValueNode(key ast.MapKeyNode) ast.Node {
-	var node ast.Node = key
-
-	for {
-		switch n := node.(type) {
-		case *ast.MappingKeyNode:
-			node = n.Value
-		case *ast.AnchorNode:
-			node = n.Value
-		default:
-			return node
-		}
-	}
 }
 
 // mapKey returns the path segment for a map key: its text in names, as

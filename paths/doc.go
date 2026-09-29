@@ -33,7 +33,9 @@
 // key brings in. A key the mapping defines itself wins over a merged one.
 // A child selector matches an alias used as a key as it would the content
 // of its anchor, so `*k` after `&k name` matches `.name`, and it matches a
-// block scalar key (`|` or `>`) by its content.
+// block scalar key (`|` or `>`) by its content. [Resolver.KeyName] gives
+// the text a child selector matches a key node by, for a caller that
+// builds a path from the keys it walks.
 //
 // [go.jacobcolvin.com/niceyaml.WithAllowDuplicateKeys] lets the parser
 // accept a mapping that defines one key twice. A path then selects the

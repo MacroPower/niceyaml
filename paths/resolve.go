@@ -117,12 +117,13 @@ func (r *resolver) mappingKeys(mapping *ast.MappingNode) *mappingKeys {
 			continue
 		}
 
-		keys.names[r.keyName(entry.Key)] = i
+		name, _ := r.keyName(entry.Key)
+		keys.names[name] = i
 	}
 
 	if n := len(keys.merges); n > 0 {
 		last := keys.merges[n-1]
-		name := r.keyName(mapping.Values[last].Key)
+		name, _ := r.keyName(mapping.Values[last].Key)
 
 		if _, ok := keys.names[name]; !ok {
 			keys.names[name] = last
@@ -1102,7 +1103,7 @@ func (w *recursiveWalk) descend(node ast.Node) {
 				continue
 			}
 
-			key := w.resolver.keyName(entry.Key)
+			key, _ := w.resolver.keyName(entry.Key)
 			if keys.names[key] != i {
 				continue
 			}
@@ -1186,8 +1187,8 @@ func (w *recursiveWalk) hold() ([]segment, []int) {
 // anchors and tags on a key to the node that carries the key itself. It
 // returns nil for a nil key, including a typed nil a hand-built tree may
 // hold at any step.
-func keyContent(key ast.MapKeyNode) ast.Node {
-	var node ast.Node = key
+func keyContent(key ast.Node) ast.Node {
+	node := key
 
 	for {
 		if astnode.IsNil(node) {
@@ -1219,17 +1220,18 @@ func isMergeKey(key ast.MapKeyNode) bool {
 // keyName returns the key text a child selector compares against. A
 // string key gives its unquoted text, a literal or folded block scalar key
 // gives its content, as the decoder reads it, and any other key gives its
-// source text. An alias key gives the name the content of its anchor
-// would give as a key. A key with no content, or with content a selector
-// cannot name, such as a sequence, has the empty name, and so does an
-// alias key with no anchor before it or one that leads back to itself.
-func (r *resolver) keyName(key ast.MapKeyNode) string {
+// source text. An alias key, tagged or not, gives the name the content of
+// its anchor would give as a key. The bool result is false for a key with
+// no content, or with content a selector cannot name, such as a sequence,
+// and for an alias key with no anchor before it or one that leads back to
+// itself. Such a key has the empty name.
+func (r *resolver) keyName(key ast.Node) (string, bool) {
 	content := keyContent(key)
 
 	if alias, ok := content.(*ast.AliasNode); ok {
 		target, err := r.unwrap(alias)
 		if err != nil || astnode.IsNil(target) {
-			return ""
+			return "", false
 		}
 
 		content = target
@@ -1237,26 +1239,26 @@ func (r *resolver) keyName(key ast.MapKeyNode) string {
 
 	switch k := content.(type) {
 	case nil:
-		return ""
+		return "", false
 	case *ast.StringNode:
-		return k.Value
+		return k.Value, true
 	case *ast.LiteralNode:
 		if k.Value == nil {
-			return ""
+			return "", false
 		}
 
-		return k.Value.Value
+		return k.Value.Value, true
 
 	case ast.MapKeyNode:
 		tk := nodeToken(k)
 		if tk == nil {
-			return ""
+			return "", false
 		}
 
-		return tk.Value
+		return tk.Value, true
 
 	default:
-		return ""
+		return "", false
 	}
 }
 

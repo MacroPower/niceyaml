@@ -655,6 +655,124 @@ func TestResolver_Deref(t *testing.T) {
 	})
 }
 
+func TestResolver_KeyName(t *testing.T) {
+	t.Parallel()
+
+	// Each case names the key of the only entry of the mapping at $.m.
+	tcs := map[string]struct {
+		input string
+		want  string
+		ok    bool
+	}{
+		"plain": {
+			input: "m: {k: v}\n",
+			want:  "k",
+			ok:    true,
+		},
+		"hexadecimal int": {
+			input: "m: {0x10: v}\n",
+			want:  "0x10",
+			ok:    true,
+		},
+		"quoted empty": {
+			input: "m: {\"\": v}\n",
+			want:  "",
+			ok:    true,
+		},
+		"block scalar": {
+			input: "m:\n  ? |-\n    k\n  : v\n",
+			want:  "k",
+			ok:    true,
+		},
+		"anchor and tag": {
+			input: "m:\n  &a !!str k: v\n",
+			want:  "k",
+			ok:    true,
+		},
+		"alias": {
+			input: "base: &k n\nm:\n  *k : v\n",
+			want:  "n",
+			ok:    true,
+		},
+		"tagged alias": {
+			input: "base: &k 0x10\nm:\n  !!int *k : v\n",
+			want:  "0x10",
+			ok:    true,
+		},
+		"alias to a tagged alias": {
+			input: "base: &k 0x10\nb: &j !!int *k\nm:\n  *j : v\n",
+			want:  "0x10",
+			ok:    true,
+		},
+		"alias with no anchor before it": {
+			input: "m:\n  *k : v\nbase: &k n\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input).File()
+			require.NoError(t, err)
+
+			r := paths.NewResolver(file.Docs[0])
+			m := paths.Root().Child("m")
+
+			node, err := r.Node(m)
+			require.NoError(t, err)
+
+			mapping, ok := node.(*ast.MappingNode)
+			require.True(t, ok, "m is a %T", node)
+			require.Len(t, mapping.Values, 1)
+
+			got, ok := r.KeyName(mapping.Values[0].Key)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+
+			if !tc.ok {
+				return
+			}
+
+			// A child selector with the name selects the value of the
+			// entry.
+			value, err := r.Node(m.Child(got))
+			require.NoError(t, err)
+			assert.Equal(t, "v", value.String())
+		})
+	}
+
+	// The parser rejects a sequence or mapping key, but a tree built by
+	// hand may hold one.
+	handBuilt := map[string]struct {
+		key ast.Node
+	}{
+		"nil": {},
+		"typed nil": {
+			key: (*ast.StringNode)(nil),
+		},
+		"sequence": {
+			key: &ast.SequenceNode{BaseNode: &ast.BaseNode{}},
+		},
+		"explicit sequence": {
+			key: &ast.MappingKeyNode{Value: &ast.SequenceNode{BaseNode: &ast.BaseNode{}}},
+		},
+		"mapping": {
+			key: &ast.MappingNode{BaseNode: &ast.BaseNode{}},
+		},
+	}
+
+	for name, tc := range handBuilt {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := paths.NewResolver(nil).KeyName(tc.key)
+			assert.False(t, ok)
+			assert.Empty(t, got)
+		})
+	}
+}
+
 func TestResolver_Anchor(t *testing.T) {
 	t.Parallel()
 
