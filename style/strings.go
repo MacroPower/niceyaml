@@ -36,13 +36,35 @@ func Parse(s string) (lipgloss.Style, error) {
 		return style, nil
 	}
 
+	// Lipgloss cannot clear underline once it is set, because
+	// UnsetUnderline sets it to none. Parse tracks the keywords here and
+	// sets underline once at the end, so nounderline leaves the attribute
+	// unset, the same as nobold and noitalic.
+	underline := false
+
 	for token := range strings.FieldsSeq(s) {
+		switch strings.ToLower(token) {
+		case "underline":
+			underline = true
+
+			continue
+
+		case "nounderline":
+			underline = false
+
+			continue
+		}
+
 		var err error
 
 		style, err = applyToken(style, token)
 		if err != nil {
 			return lipgloss.Style{}, err
 		}
+	}
+
+	if underline {
+		style = style.Underline(true)
 	}
 
 	return style, nil
@@ -96,7 +118,8 @@ func Encode(style lipgloss.Style) string {
 	return strings.Join(parts, " ")
 }
 
-// applyToken applies a single token to the style.
+// applyToken applies a single token to the style. [Parse] handles the
+// underline keywords itself.
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func applyToken(style lipgloss.Style, token string) (lipgloss.Style, error) {
@@ -130,10 +153,6 @@ func applyToken(style lipgloss.Style, token string) (lipgloss.Style, error) {
 		return style.Italic(true), nil
 	case "noitalic":
 		return style.UnsetItalic(), nil
-	case "underline":
-		return style.Underline(true), nil
-	case "nounderline":
-		return style.UnsetUnderline(), nil
 	case "noinherit":
 		// Pygments compatibility, ignored.
 		return style, nil

@@ -205,6 +205,59 @@ func TestParse(t *testing.T) {
 	}
 }
 
+func TestParse_NoKeywordsLeaveAttributeUnset(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		input  string
+		parent lipgloss.Style
+		get    func(lipgloss.Style) bool
+	}{
+		"nobold": {
+			input:  "nobold",
+			parent: lipgloss.NewStyle().Bold(true),
+			get:    lipgloss.Style.GetBold,
+		},
+		"bold nobold": {
+			input:  "bold nobold",
+			parent: lipgloss.NewStyle().Bold(true),
+			get:    lipgloss.Style.GetBold,
+		},
+		"noitalic": {
+			input:  "noitalic",
+			parent: lipgloss.NewStyle().Italic(true),
+			get:    lipgloss.Style.GetItalic,
+		},
+		"nounderline": {
+			input:  "nounderline",
+			parent: lipgloss.NewStyle().Underline(true),
+			get:    lipgloss.Style.GetUnderline,
+		},
+		"underline nounderline": {
+			input:  "underline nounderline",
+			parent: lipgloss.NewStyle().Underline(true),
+			get:    lipgloss.Style.GetUnderline,
+		},
+		"mixed case nounderline": {
+			input:  "UNDERLINE NoUnderline",
+			parent: lipgloss.NewStyle().Underline(true),
+			get:    lipgloss.Style.GetUnderline,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := style.Parse(tt.input)
+			require.NoError(t, err)
+
+			// An unset attribute lets Inherit take the parent's value.
+			assert.True(t, tt.get(s.Inherit(tt.parent)))
+		})
+	}
+}
+
 func TestMustParse(t *testing.T) {
 	t.Parallel()
 
