@@ -1770,7 +1770,8 @@ func rangeOf(ranges position.Ranges, at position.Position) position.Range {
 //	}
 //
 // A line several errors mark carries an annotation for each, which
-// [line.View.String] and the printer draw on one row joined by "; ". An
+// [line.View.String] and the printer draw on one row joined by "; " in
+// column order, whatever order the bindings come in. An
 // error with no message marks its line with an annotation below it with
 // no content. A renderer that draws marks from annotations, as the
 // printer does, draws that annotation as a caret run under the

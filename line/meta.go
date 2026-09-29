@@ -1,6 +1,8 @@
 package line
 
 import (
+	"cmp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -142,9 +144,11 @@ func (a Annotations) Col() int {
 }
 
 // WithContent returns a new [Annotations] holding the annotations that have
-// content, in their original order. An annotation without content renders
-// nothing, so its column must not pull [Annotations.Col] left. Callers
-// that pad to a column filter with WithContent first.
+// content, sorted by column. Annotations at the same column keep their
+// original order. An annotation without content renders nothing, so its
+// column must not pull [Annotations.Col] left. Callers that pad to a
+// column or join contents filter with WithContent first, so the joined
+// messages read in the order of the columns they mark.
 func (a Annotations) WithContent() Annotations {
 	var result Annotations
 
@@ -153,6 +157,10 @@ func (a Annotations) WithContent() Annotations {
 			result = append(result, ann)
 		}
 	}
+
+	slices.SortStableFunc(result, func(x, y Annotation) int {
+		return cmp.Compare(x.Col, y.Col)
+	})
 
 	return result
 }
@@ -169,7 +177,8 @@ func (a Annotations) Contents() []string {
 }
 
 // String returns the combined annotation content for debugging.
-// It joins same-position annotations with "; " at the minimum column
+// It joins the annotations with "; " in column order, as
+// [Annotations.WithContent] sorts them, at the minimum column
 // position among the annotations that have content, padded by at most
 // [MaxColPastEnd] spaces, as [Annotation.String] pads. Annotations without
 // content add nothing, so a set with no content at all is the empty string,

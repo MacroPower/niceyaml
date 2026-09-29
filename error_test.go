@@ -4015,6 +4015,26 @@ func TestSourceError_Annotate(t *testing.T) {
 		assert.Equal(t, view.Annotations(7), excerpt.Annotations(7).Filter(line.Below))
 	})
 
+	t.Run("messages on one line join in column order", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		err := yamltest.Bind(t, source, errors.Join(
+			niceyaml.NewError("about value", niceyaml.AtPosition(position.New(0, 5))),
+			niceyaml.NewError("about key", niceyaml.AtPosition(position.New(0, 0))),
+		))
+
+		// The join binds with no location of its own, so only its
+		// children mark the view.
+		view := source.View()
+		for b := range niceyaml.AllBindings(err) {
+			b.Annotate(view)
+		}
+
+		assert.Contains(t, view.String(), "^^^  ^^^^^ about key; about value")
+		assert.Contains(t, niceyaml.FormatError(err, 0), "^^^  ^^^^^ about key; about value")
+	})
+
 	t.Run("a binding the tree reaches twice marks its line once", func(t *testing.T) {
 		t.Parallel()
 

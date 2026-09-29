@@ -166,6 +166,10 @@ func TestAnnotations_WithContent(t *testing.T) {
 			anns: line.Annotations{{Content: "a", Col: 1}, {Content: "b", Col: 2}},
 			want: line.Annotations{{Content: "a", Col: 1}, {Content: "b", Col: 2}},
 		},
+		"sorts by column and keeps the order at one column": {
+			anns: line.Annotations{{Content: "c", Col: 4}, {Content: "a", Col: 1}, {Content: "d", Col: 4}},
+			want: line.Annotations{{Content: "a", Col: 1}, {Content: "c", Col: 4}, {Content: "d", Col: 4}},
+		},
 		"drops the empty content": {
 			anns: line.Annotations{{Content: "", Col: 0}, {Content: "b", Col: 2}},
 			want: line.Annotations{{Content: "b", Col: 2}},
@@ -340,6 +344,14 @@ func TestAnnotations_String(t *testing.T) {
 			},
 			want: "     first; second",
 		},
+		"joined in column order": {
+			anns: line.Annotations{
+				{Content: "second", Col: 10},
+				{Content: "first", Col: 5},
+				{Content: "third", Col: 10},
+			},
+			want: "     first; second; third",
+		},
 		"annotations without content add nothing": {
 			anns: line.Annotations{
 				{Content: "", Col: 5},
@@ -367,7 +379,7 @@ func TestAnnotations_String(t *testing.T) {
 				{Content: "b", Col: 2},
 				{Content: "c", Col: 5},
 			},
-			want: "  a; b; c",
+			want: "  b; c; a",
 		},
 		"zero column no padding": {
 			anns: line.Annotations{

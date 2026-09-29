@@ -1330,7 +1330,7 @@ func TestView_String(t *testing.T) {
 					{Content: "second", Kind: kind.UIAnnotation, Placement: line.Above, Col: 2},
 				},
 				want: `     | @@ hunk header @@
-     |   first; second
+     |   second; first
    1 | key: value`,
 			},
 			"annotations above and below": {
@@ -1342,13 +1342,13 @@ func TestView_String(t *testing.T) {
    1 | key: value
      |   ^ note`,
 			},
-			"multiple annotations below join at the minimum column": {
+			"multiple annotations below join in column order at the minimum column": {
 				annotations: []line.Annotation{
 					{Content: "first", Placement: line.Below, Col: 5},
 					{Content: "second", Placement: line.Below, Col: 2},
 				},
 				want: `   1 | key: value
-     |   ^ first; second`,
+     |   ^ second; first`,
 			},
 			"an annotation without content does not set the column": {
 				annotations: []line.Annotation{

@@ -380,7 +380,8 @@ func NoAnnotation(AnnotationContext) []AnnotationRow {
 }
 
 // DefaultAnnotation is the [AnnotationFunc] [New] uses. It joins the
-// annotations with "; " at their column, [line.Annotations.Col], and
+// annotations with "; " in column order, as [line.Annotations.WithContent]
+// sorts them, at their column, [line.Annotations.Col], and
 // marks [line.Below] annotations with "^ ". It leaves out annotations
 // with empty content. When none remain, an annotation below the line
 // still marks it. The row is then a caret under every column the line's

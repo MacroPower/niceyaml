@@ -500,12 +500,12 @@ func isSeparator(a Annotation) bool {
 // and the annotations above and below it on rows of their own, one row per
 // kind as [Annotations.ByKind] groups them. Each row below the line holds
 // a caret at the column of its annotations and their contents after the
-// caret. The first row below the line also holds a caret under every
-// column an overlay covers, and a line with overlays but no annotation
-// below it gets that row alone. Annotations of a kind without content
-// still get their caret when their row holds no overlay caret, so an
-// overlay of no width, such as one at the end of the line, shows where
-// it sits. String does not render flags.
+// caret, joined with "; " in column order. The first row below the line
+// also holds a caret under every column an overlay covers, and a line with
+// overlays but no annotation below it gets that row alone. Annotations of
+// a kind without content still get their caret when their row holds no
+// overlay caret, so an overlay of no width, such as one at the end of the
+// line, shows where it sits. String does not render flags.
 // The number column is at least four wide and grows to fit the largest
 // number in the view, so every row lines up. Annotations whose column lies
 // more than [MaxColPastEnd] columns past the end of the content start at

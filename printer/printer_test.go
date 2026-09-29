@@ -4474,13 +4474,13 @@ func TestDefaultAnnotation(t *testing.T) {
 			position: line.Below,
 			want:     []printer.AnnotationRow{{Col: 0, Marker: "^ ", Text: "first; second"}},
 		},
-		"multiple below annotations uses min col": {
+		"multiple below annotations join in column order at min col": {
 			annotations: line.Annotations{
 				{Content: "first", Placement: line.Below, Col: 5},
 				{Content: "second", Placement: line.Below, Col: 2},
 			},
 			position: line.Below,
-			want:     []printer.AnnotationRow{{Col: 2, Marker: "^ ", Text: "first; second"}},
+			want:     []printer.AnnotationRow{{Col: 2, Marker: "^ ", Text: "second; first"}},
 		},
 		"multiple above annotations": {
 			annotations: line.Annotations{
