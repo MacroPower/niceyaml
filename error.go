@@ -421,27 +421,17 @@ func (e *Error) Error() string {
 		return ""
 	}
 
-	var msg string
-
-	switch {
-	case e.rebased:
-		msg = e.message()
-
-		if a := anchorOf(e); a.hasPath {
-			msg = prefix(a.path.String()+":", msg)
+	if !e.rebased && !e.hasLocation() {
+		if e.err == nil {
+			return ""
 		}
 
-		return msg
-
-	case e.hasLocation():
-		msg = e.message()
-
-	case e.err != nil:
-		msg = e.err.Error()
+		return e.err.Error()
 	}
 
-	if e.hasPath {
-		msg = prefix(e.path.String()+":", msg)
+	msg := e.message()
+	if a := anchorOf(e); a.hasPath {
+		msg = prefix(a.path.String()+":", msg)
 	}
 
 	return msg
@@ -947,17 +937,11 @@ func leadingBinding(err error) *SourceError {
 			case x == nil:
 				return nil
 
-			case x.rebased:
+			case x.rebased || x.hasLocation():
 				if anchorOf(x).hasPath {
 					return nil
 				}
 
-				cur = x.textCause()
-
-			case x.hasPath:
-				return nil
-
-			case x.hasLocation():
 				cur = x.textCause()
 
 			default:
