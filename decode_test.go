@@ -5796,7 +5796,8 @@ func TestErrDecodeRejected(t *testing.T) {
 				line: 0,
 			},
 			// The token of the rejection does not tell which of the two
-			// aliases read it.
+			// aliases led to it, so the rejection carries no location even
+			// though cfg reads only *base.
 			"aliases to two references": {
 				input: "a: *other\nitem: *base\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {

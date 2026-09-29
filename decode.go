@@ -1805,15 +1805,16 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 // the decoder's failure for that alias, as [decodeTree.unresolvedMerge]
 // describes, with the message a decode of the whole document gives that
 // alias. Any other [yaml.Error] at a token outside the source matches
-// [ErrDecodeRejected] when the decode of scope reads an alias from a
-// reference document, as [decodeTree.referenceAliases] finds them, with
-// go-yaml's position and excerpt of that document left out. It binds at
-// the alias when the decode reads one such alias, and carries no
-// location when it reads several, since the token does not say which of
-// them led to it. The decoder gives no way to tell such an error from
-// an unwrapped [yaml.Error] of the parse an UnmarshalYAML runs on its
-// bytes, so that error comes back the same way. Any
-// other error comes back as it is, such as one from a value's own
+// [ErrDecodeRejected] when scope holds an alias to a reference document,
+// as [decodeTree.referenceAliases] finds them, with go-yaml's position
+// and excerpt of that document left out. It binds at the alias when
+// scope holds one such alias, and carries no location when it holds
+// several, since the token does not say which of them led to it. The
+// count ignores the target type, so a type that reads only one of
+// several such aliases gets no location either. The decoder gives no
+// way to tell such an error from an unwrapped [yaml.Error] of the parse
+// an UnmarshalYAML runs on its bytes, so that error comes back the same
+// way. Any other error comes back as it is, such as one from a value's own
 // UnmarshalYAML, an ended context, or a rejection [decodeWithRecover]
 // already bound. So does any error for a nil scope.
 func (n *Node) rejection(err error, scope ast.Node) error {

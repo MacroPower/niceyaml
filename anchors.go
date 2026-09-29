@@ -481,14 +481,15 @@ func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node, e
 	return nil
 }
 
-// referenceAliases returns the tokens of the aliases that a decode of
-// scope, a node of the tree, reads from a reference document, from
-// [WithReferences] or the yaml.Reference options, in document order.
-// Those are the aliases that name no anchor before them as resolver
-// binds them, inside scope or inside an anchor of the document that an
-// alias the decode reads refers to. A decode of a node below the body
-// reads the anchors outside the node that way too. An alias inside the
-// anchor it refers to reads null, so the walk does not follow it.
+// referenceAliases returns the tokens of the aliases to a reference
+// document, from [WithReferences] or the yaml.Reference options, that
+// scope, a node of the tree, holds, in document order. Those are the
+// aliases that name no anchor before them as resolver binds them,
+// inside scope or inside an anchor of the document that an alias the
+// walk reaches refers to, including anchors outside scope. The walk
+// ignores the target type of the decode, so it returns aliases the
+// type never reads. An alias inside the anchor it refers to reads
+// null, so the walk does not follow it.
 func (t *decodeTree) referenceAliases(resolver *paths.Resolver, scope ast.Node) []*token.Token {
 	t.aliasesOnce.Do(func() {
 		for _, n := range sourceNodes(t.source) {

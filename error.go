@@ -68,12 +68,13 @@ var (
 	// holds the merge key, bound at the alias. The decoder reports those
 	// two without a location, and the chain holds its error. A rejection
 	// of a value that an alias reads from a reference document, from
-	// [WithReferences] or the yaml.Reference options, matches too. It
-	// binds at that alias when the decode reads one such alias, directly
-	// or through an anchor of the document, and carries no location when
-	// it reads several. So does an unwrapped go-yaml error an
-	// UnmarshalYAML returns from a parse of its own in such a node, since
-	// the decoder reports both alike.
+	// [WithReferences] or the yaml.Reference options, matches too, and
+	// so does an unwrapped go-yaml error an UnmarshalYAML returns from a
+	// parse of its own in such a node, since the decoder reports both
+	// alike. Either one binds at the alias when the node holds one alias
+	// to a reference document, directly or inside an anchor its aliases
+	// reach. When the node holds several, the error carries no location,
+	// even if the target type reads only one of them.
 	ErrDecodeRejected = errors.New("decoder rejected the value")
 
 	// ErrExcessiveAliasing indicates a node whose document holds so many
