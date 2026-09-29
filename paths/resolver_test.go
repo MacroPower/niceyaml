@@ -117,6 +117,13 @@ func TestResolver_Node(t *testing.T) {
 			path:  "$.m.v",
 			want:  "one",
 		},
+		"anchor of a merge source after a merge alias in it binds": {
+			// The first merge of *B reads &B before the walk binds its *C,
+			// so a later merge of *B must read &B again to count &N cval.
+			input: "c: &C {x: &N cval}\nm:\n  <<:\n    - <<: *B\n    - &B\n      <<: *C\nn: &N other\nv:\n  <<: *B\n  w: *N\n",
+			path:  "$.v.w",
+			want:  "cval",
+		},
 		"unknown alias": {
 			input: "a: *nope\n",
 			path:  "$.a",

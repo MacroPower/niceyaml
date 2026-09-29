@@ -528,7 +528,8 @@ func (b *aliasBinder) touch(node ast.Node) {
 // empty result of a mapping mergedAnchors found open. The unbound set
 // holds each alias of a merge key the read could not follow, and the
 // reads slice holds the results that are not final of the mappings the
-// read merged. The result holds while its mapping stays open or closed
+// read merged. A result that holds any such alias or result is not
+// final. The result holds while its mapping stays open or closed
 // as the open field records and has no final result yet, while each of
 // its unbound aliases stays unbound, and while each of its reads holds.
 //
@@ -551,7 +552,9 @@ type mergedRead struct {
 // anchors of the mappings it merges. It finds the mappings those merge keys
 // bring in through the aliases as Visit bound them. The result is not
 // final when mapping, or a mapping it merges, is open, since those merge
-// nothing until the walk leaves them.
+// nothing until the walk leaves them. It is also not final when one of
+// those merge keys names an alias Visit has not bound yet, since the
+// alias can bring in a mapping once it binds.
 //
 // It keeps a final result in the merged map, and any other result in the
 // pending map, which it reuses while the result holds. A result that is
@@ -703,15 +706,14 @@ func (r *anchorReader) merge(value ast.Node) {
 
 	for _, alias := range unbound {
 		r.unbound[alias] = true
+		r.final = false
 	}
 
 	for _, src := range sources {
 		read := r.binder.mergedAnchors(src.mapping)
 		r.anchors.add(read.anchors)
 
-		if read.final {
-			maps.Copy(r.unbound, read.unbound)
-		} else {
+		if !read.final {
 			r.reads = append(r.reads, read)
 			r.final = false
 		}
