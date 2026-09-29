@@ -1902,6 +1902,59 @@ func TestViewport_ViewFitsHeight(t *testing.T) {
 	}
 }
 
+func TestViewport_FixedSizeContainerStyle(t *testing.T) {
+	t.Parallel()
+
+	box := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+
+	// A fixed Width or Height on the container style caps the box as
+	// lipgloss draws it, and margins add to that size.
+	tcs := map[string]struct {
+		style      lipgloss.Style
+		wantWidth  int
+		wantHeight int
+	}{
+		"fixed size": {
+			style:      box.Width(30).Height(8),
+			wantWidth:  30,
+			wantHeight: 8,
+		},
+		"fixed size with margins": {
+			style:      box.Margin(1, 3).Width(30).Height(8),
+			wantWidth:  36,
+			wantHeight: 10,
+		},
+		"fixed width with margins": {
+			style:      box.Margin(1, 3).Width(30),
+			wantWidth:  36,
+			wantHeight: 40,
+		},
+		"fixed height with margins": {
+			style:      box.Margin(1, 3).Height(8),
+			wantWidth:  60,
+			wantHeight: 10,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(
+				yamlviewport.WithPrinter(testPrinter()),
+				yamlviewport.WithContainerStyle(tc.style),
+			)
+			m.SetWidth(60)
+			m.SetHeight(40)
+			m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\n"))
+
+			view := m.View()
+			assert.Equal(t, tc.wantWidth, lipgloss.Width(view))
+			assert.Equal(t, tc.wantHeight, lipgloss.Height(view))
+		})
+	}
+}
+
 func TestViewport_ViewFillsContentArea(t *testing.T) {
 	t.Parallel()
 
