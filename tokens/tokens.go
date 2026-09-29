@@ -41,17 +41,17 @@ import (
 //
 // The joined Origins match that text, except in a few places Tokenize
 // leaves as the lexer made them. The lexer drops some text outright, such
-// as a lone "!" that ends a file after other text, along with the spaces
-// and tabs in front of it. A tab used as indentation makes the lexer
-// read an invalid token that can swallow the characters after it,
-// such as a ":" indicator, and the text around such a token keeps the
-// lexer's shape. The lexer also ends one token with a line ending and
-// opens the next with it again, as after a tag that ends its line and
-// after the invalid token it makes of text that follows a block scalar
-// header. Tokenize keeps the repeat, and a blank line between the two
-// tokens loses its spaces and tabs. When that invalid token ends the file
-// with no line ending, the lexer repeats the last rune of its text as a
-// token of its own instead, and Tokenize drops that token.
+// as a lone "!" that ends a file after other text, along with whitespace
+// in front of it, which can include the line breaks. A tab used as
+// indentation makes the lexer read an invalid token that can swallow the
+// characters after it, such as a ":" indicator, and the text around such
+// a token keeps the lexer's shape. The lexer also ends one token with a
+// line ending and opens the next with it again, as after a tag that ends
+// its line and after the invalid token it makes of text that follows a
+// block scalar header. Tokenize keeps the repeat, and a blank line between
+// the two tokens loses its spaces and tabs. When that invalid token ends
+// the file with no line ending, the lexer repeats the last rune of its
+// text as a token of its own instead, and Tokenize drops that token.
 //
 // Every token's Line, Column, and Offset name the rune where its text
 // starts, counting lines, columns, and offsets from 1 and offsets in runes.
