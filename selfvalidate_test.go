@@ -2032,6 +2032,53 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		require.NoError(t, dd.DecodeInto(t.Context(), &built))
 	})
+
+	t.Run("a struct embedding an ast.Node validates its fields", func(t *testing.T) {
+		t.Parallel()
+
+		// Each struct gets the methods of an ast.Node from its embedded
+		// field, but go-yaml decodes it field by field, so the walk reaches
+		// the fields.
+		type embedsNode struct {
+			ast.Node `yaml:"-"`
+
+			Hours hours `yaml:"hours"`
+		}
+
+		type embedsStringNode struct {
+			*ast.StringNode `yaml:"-"`
+
+			Hours hours `yaml:"hours"`
+		}
+
+		type parent struct {
+			Node       embedsNode       `yaml:"node"`
+			StringNode embedsStringNode `yaml:"string"`
+		}
+
+		tcs := map[string]struct {
+			input string
+			err   string
+		}{
+			"embedded ast.Node": {
+				input: "node: {hours: {open: \"17:00\", close: \"09:00\"}}\n",
+				err:   "1:38: $.node.hours.close: closes before it opens",
+			},
+			"embedded *ast.StringNode": {
+				input: "string: {hours: {open: \"17:00\", close: \"09:00\"}}\n",
+				err:   "1:40: $.string.hours.close: closes before it opens",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := yamltest.FirstDocument(t, tc.input).Decode[parent](t.Context())
+				require.EqualError(t, err, tc.err)
+			})
+		}
+	})
 }
 
 // selfDecodingBytes decodes itself from the YAML bytes, so its fields

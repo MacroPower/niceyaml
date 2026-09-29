@@ -302,6 +302,10 @@ var (
 		reflect.TypeFor[encoding.TextUnmarshaler](),
 	}
 
+	// The import path of the go-yaml ast package, which declares the node
+	// types go-yaml sets whole.
+	astPackage = reflect.TypeFor[ast.StringNode]().PkgPath()
+
 	// The result of [mayHoldValidator] for each type it has read. A type
 	// never changes, so every walk shares the results.
 	holdsValidator sync.Map
@@ -318,14 +322,17 @@ var (
 // decodesItself reports whether go-yaml decodes a value of type t whole,
 // so the fields, elements, or entries of the value need not mirror the
 // document. A type decodes itself through an unmarshaler method of its
-// own, or as an [ast.Node], which the decoder sets to the node it
-// decodes rather than decoding field by field. The tokens of a node also
-// link to every other token of the file. The method set of the pointer
-// holds the methods of both receivers, as the decoder checks it.
+// own, or as an [ast.Node] the ast package declares, which the decoder
+// sets to the node it decodes rather than decoding field by field. The
+// tokens of a node also link to every other token of the file. A struct
+// that gets the methods of an [ast.Node] from an embedded field decodes
+// field by field. The method set of the pointer holds the methods of
+// both receivers, as the decoder checks it.
 func decodesItself(t reflect.Type) bool {
 	pt := reflect.PointerTo(t)
+	isNode := t.PkgPath() == astPackage && pt.Implements(reflect.TypeFor[ast.Node]())
 
-	return pt.Implements(reflect.TypeFor[ast.Node]()) || slices.ContainsFunc(unmarshalerTypes, pt.Implements)
+	return isNode || slices.ContainsFunc(unmarshalerTypes, pt.Implements)
 }
 
 // decoderField returns the index of the embedded field of t that decodes

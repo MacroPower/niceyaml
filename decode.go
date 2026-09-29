@@ -77,14 +77,16 @@ import (
 // zero value and decodes the document into the other field. A value
 // whose type decodes itself, through an UnmarshalYAML or UnmarshalText
 // method, validates itself and nothing below it, since its fields need
-// not mirror the document, and so does an [ast.Node], which go-yaml sets
-// to the node it decodes. The decode cannot see a type that go-yaml
-// decodes whole through a [yaml.CustomUnmarshaler] option or an
-// UnmarshalJSON method under [yaml.UseJSONUnmarshaler], so the values
-// below such a type walk as if its fields mirrored the document. A
-// decode of one runs its checks with [WithSelfValidation] off. A parent
-// need not call the Validate of its fields, and [Rebase] is for a check
-// run on a value after Decode returns.
+// not mirror the document. So does a node type of the go-yaml ast
+// package, which go-yaml sets to the node it decodes. A struct that
+// embeds a node decodes field by field, so its fields validate. The
+// decode cannot see a type that go-yaml decodes whole through a
+// [yaml.CustomUnmarshaler] option or an UnmarshalJSON method under
+// [yaml.UseJSONUnmarshaler], so the values below such a type walk as if
+// its fields mirrored the document. A decode of one runs its checks with
+// [WithSelfValidation] off. A parent need not call the Validate of its
+// fields, and [Rebase] is for a check run on a value after Decode
+// returns.
 //
 // Any value with a Validate method takes part, including one from a
 // package that names its own check that way, such as a generated
