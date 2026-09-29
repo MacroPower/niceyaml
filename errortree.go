@@ -50,15 +50,21 @@ type ErrorTree struct {
 // [FormatError] do. A nested error with nested errors of its own is a
 // subtree.
 //
-// An error that unwraps to several, such as one from [errors.Join], is a
-// node with no text and one child per error, so a run over several files
-// reads as one tree with a branch per file. An [Error] that only wraps
-// such an error, with no location and no errors nested with
-// [WithErrors], is the same node. A binding of such an error is
-// the same node, with each child carrying its whole
-// [SourceError.Error], since no root names the source for it. A
-// node with no text adds nothing. Its children take its place in the tree
-// above it, and one with a single child is that child.
+// An error that unwraps to several and whose message is theirs one per
+// line, such as one from [errors.Join], is a node with no text and one
+// child per error, so a run over several files reads as one tree with a
+// branch per file. An [Error] that only wraps such an error, with no
+// location and no errors nested with [WithErrors], is the same node. A
+// binding of such an error is the same node, with each child carrying
+// its whole [SourceError.Error], since no root names the source for it.
+// A node with no text adds nothing. Its children take its place in the
+// tree above it, and one with a single child is that child.
+//
+// Any other error that unwraps to several keeps its text and has a child
+// per branch. A wrapper that [fmt.Errorf] builds with several %w verbs
+// keeps only its branches that carry a location or errors nested below
+// them, since its text shows the rest already. With one such branch, its
+// children are the ones along the cause chain of that branch.
 //
 // The children come from the errors rather than from the text of the
 // message, so a wrapper that rewrites the message it wraps keeps its

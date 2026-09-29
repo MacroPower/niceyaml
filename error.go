@@ -739,7 +739,12 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 // such as one from [errors.Join], which carries no location of its own.
 // Binding binds every error nested with [WithErrors] in an Error along
 // that chain, and every branch of the error that ends it, the same way
-// to the same document, and each becomes a child. [SourceError.Errors]
+// to the same document, and each becomes a child. A wrapper that
+// [fmt.Errorf] builds with several %w verbs, such as one from a sentinel
+// and a cause, keeps only its branches that carry a location or errors
+// nested below them, since its message shows the text of the rest
+// already. When one branch remains, the chain goes on through it as it
+// does through a wrapper with one %w verb. [SourceError.Errors]
 // returns the children, each a SourceError with its own children, if any,
 // and its own location when its error carries one. A validator's report
 // of several violations therefore binds to one SourceError per violation
@@ -800,8 +805,8 @@ type SourceError struct {
 	// does not hold.
 	locErr error
 	// The bound children: the errors nested with WithErrors along the cause
-	// chain and every branch of the error that ends it by unwrapping to
-	// several, located or not.
+	// chain and every branch followBranches keeps of the error that ends
+	// it by unwrapping to several, located or not.
 	errors []*SourceError
 	// The ranges the excerpt highlights, the location, resolved when the
 	// error was bound, and the range it covers in the source.
@@ -1275,10 +1280,12 @@ func (e *SourceError) Unwrap() error {
 // becomes a child, and so does each branch of the error that ends the
 // chain by unwrapping to several, such as one from [errors.Join]. A
 // validator's report of several violations therefore unwraps to one
-// child per violation, in the order the validator gave them. Each child
-// carries its own children, if any, and a location when its error carries
-// one, so a caller checks [SourceError.Range] before it uses the
-// position:
+// child per violation, in the order the validator gave them. A wrapper
+// that [fmt.Errorf] builds with several %w verbs keeps only its
+// branches that carry a location or errors nested below them, and when
+// one remains, the chain goes on through it. Each child carries its own
+// children, if any, and a location when its error carries one, so a
+// caller checks [SourceError.Range] before it uses the position:
 //
 //	for _, violation := range bound.Errors() {
 //		if rng, ok := violation.Range(); ok {

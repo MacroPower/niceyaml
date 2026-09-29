@@ -1390,11 +1390,13 @@ func isNilValidator(dv Validator) bool {
 // [WithErrors] along the way becomes a child, which [SourceError.Errors]
 // returns. An error that unwraps to several, such as one from
 // [errors.Join], binds the same way whatever wraps it. The SourceError
-// carries no location of its own, and each branch is a child. Each child
-// binds at the location its own error carries, if any, so a validator
-// that joins its violations reports each one with its position. To keep
-// several errors as separate bindings, bind each one before joining
-// them.
+// carries no location of its own, and each branch is a child. A wrapper
+// that [fmt.Errorf] builds with several %w verbs keeps only its branches
+// that carry a location or errors nested below them, and when one
+// remains, it binds where that branch does. Each child binds at the
+// location its own error carries, if any, so a validator that joins its
+// violations reports each one with its position. To keep several errors
+// as separate bindings, bind each one before joining them.
 //
 // If err is nil, Bind returns nil. A nil [*Error] or [*SourceError]
 // pointer as err carries nothing to bind, so Bind returns a nil error for
