@@ -98,17 +98,18 @@ func globAlternative(pattern string) ([]string, error) {
 	base, rest := doublestar.SplitPattern(pattern)
 
 	// The rest starts at the element holding the first metacharacter, or
-	// is the last element when the pattern holds none. A "." or ".." as
-	// that last element names a directory, which matches no file.
-	if rest == "." || rest == ".." {
+	// is the last element when the pattern holds none. A ".." as that
+	// last element names a directory, which matches no file.
+	if rest == ".." {
 		return nil, nil
 	}
 
 	// The walk matches the rest through io/fs, which rejects empty, "."
-	// and ".." elements. An empty or "." element names the directory
-	// before it, so it can go. The walk has no way to step up out of a
-	// directory a wildcard matched, so a ".." is an error.
+	// and ".." elements. An empty or "." element inside the rest names
+	// the directory before it, so it can go. The walk has no way to step
+	// up out of a directory a wildcard matched, so a ".." is an error.
 	elems := strings.Split(rest, "/")
+	last := elems[len(elems)-1]
 	kept := elems[:0]
 
 	for _, elem := range elems {
@@ -122,10 +123,13 @@ func globAlternative(pattern string) ([]string, error) {
 		kept = append(kept, elem)
 	}
 
-	rest = strings.Join(kept, "/")
-	if rest == "" {
+	// An empty or "." last element, as in "dir/*/", limits the pattern
+	// to directories, which match no file.
+	if last == "" || last == "." {
 		return nil, nil
 	}
+
+	rest = strings.Join(kept, "/")
 
 	// A bare volume name such as "C:" names the current directory of that
 	// volume, while the pattern named its root.

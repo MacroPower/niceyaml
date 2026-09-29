@@ -185,6 +185,10 @@ func TestExpand(t *testing.T) {
 			args: []string{filepath.Join(tmpDir, "sub*")},
 			err:  errNoMatch,
 		},
+		"trailing separator after a wildcard": {
+			args: []string{tmpDir + "/*/"},
+			err:  errNoMatch,
+		},
 		"literal directory with metacharacter": {
 			args: []string{bracketDir},
 			err:  errIsDirectory,
@@ -407,6 +411,26 @@ func TestGlob(t *testing.T) {
 		"dot and empty elements after a wildcard": {
 			pattern:   tmpDir + "/*//./c.yaml",
 			wantFiles: []string{filepath.Join(subdir, "c.yaml")},
+		},
+		"trailing separator after a wildcard": {
+			pattern:   tmpDir + "/*/",
+			wantFiles: []string{},
+		},
+		"trailing separator after a recursive wildcard": {
+			pattern:   tmpDir + "/**/",
+			wantFiles: []string{},
+		},
+		"trailing dot after a wildcard": {
+			pattern:   tmpDir + "/*/.",
+			wantFiles: []string{},
+		},
+		"trailing separator after a file pattern": {
+			pattern:   tmpDir + "/*.yaml/",
+			wantFiles: []string{},
+		},
+		"trailing separator after a brace alternative": {
+			pattern:   tmpDir + "/{a.yaml,k8s}/",
+			wantFiles: []string{},
 		},
 		"dot-dot after a wildcard": {
 			pattern: tmpDir + "/sub*/../a.yaml",
