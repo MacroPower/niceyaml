@@ -138,16 +138,41 @@ func (s Segments) PartTokens() token.Tokens {
 
 // SourceTokenAt returns the source token covering the given 0-indexed
 // column, or nil when no token does.
+//
+// The lexer bundles a line's indentation into the token that ends on the
+// line before, so a column in that indentation resolves to the token that
+// follows it on this line instead. It is nil when no token follows.
 func (s Segments) SourceTokenAt(col int) *token.Token {
 	c := 0
 
-	for _, seg := range s {
+	for i, seg := range s {
 		if col >= c && col < c+seg.width {
-			return seg.source
+			if !seg.indentation() {
+				return seg.source
+			}
+
+			for _, next := range s[i+1:] {
+				if !next.indentation() {
+					return next.source
+				}
+			}
+
+			return nil
 		}
 
 		c += seg.width
 	}
 
 	return nil
+}
+
+// indentation reports whether the part holds only spaces or tabs and no
+// line ending, as the indentation at the start of a line does.
+func (s Segment) indentation() bool {
+	if s.part == nil || s.width == 0 {
+		return false
+	}
+
+	return s.ContentSpan().Len() == 0 &&
+		tokens.TrimLineEnding(s.part.Origin) == s.part.Origin
 }

@@ -169,6 +169,52 @@ func TestSegments_SourceTokenAt(t *testing.T) {
 	assert.Nil(t, segment.Segments(nil).SourceTokenAt(0))
 }
 
+func TestSegments_SourceTokenAt_Indentation(t *testing.T) {
+	t.Parallel()
+
+	// The lexer bundles the indentation of the next line into the end of a
+	// plain scalar, so " x\n  " spans two lines and leaves "  " on the second.
+	prev := &token.Token{Origin: " x\n  "}
+	indent := &token.Token{Origin: "  "}
+	key := &token.Token{Origin: "other"}
+	blank := &token.Token{Origin: "  \n"}
+
+	tcs := map[string]struct {
+		segs segment.Segments
+		want *token.Token
+		col  int
+	}{
+		"indentation resolves to the next token": {
+			segs: segment.Segments{segment.New(prev, indent), segment.New(key, key)},
+			col:  0,
+			want: key,
+		},
+		"last indentation column resolves to the next token": {
+			segs: segment.Segments{segment.New(prev, indent), segment.New(key, key)},
+			col:  1,
+			want: key,
+		},
+		"indentation with nothing after it": {
+			segs: segment.Segments{segment.New(prev, indent)},
+			col:  0,
+			want: nil,
+		},
+		"whitespace with a line ending keeps its own token": {
+			segs: segment.Segments{segment.New(blank, blank)},
+			col:  0,
+			want: blank,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Same(t, tc.want, tc.segs.SourceTokenAt(tc.col))
+		})
+	}
+}
+
 func TestSegments_PartTokens(t *testing.T) {
 	t.Parallel()
 

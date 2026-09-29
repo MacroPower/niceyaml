@@ -97,7 +97,9 @@ func (l *Line) SourceTokens() token.Tokens {
 }
 
 // TokenAt returns the original lexer token covering the given 0-indexed
-// column, or nil when no token does. Treat it as read-only.
+// column, or nil when no token does. A column in the indentation resolves
+// to the token that follows it, as [Lines.TokenAt] describes. Treat it as
+// read-only.
 func (l *Line) TokenAt(col int) *token.Token {
 	return l.segments.SourceTokenAt(col)
 }

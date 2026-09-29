@@ -3529,6 +3529,29 @@ func TestSourceError_Range(t *testing.T) {
 	}
 }
 
+func TestSourceError_Range_Indentation(t *testing.T) {
+	t.Parallel()
+
+	source := xmlSource(stringtest.Input(`
+		parent:
+		  child: x
+		  other: 1
+	`))
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError("bad",
+		niceyaml.AtPosition(position.New(2, 0)),
+	)), &bound)
+
+	got, ok := bound.Range()
+	require.True(t, ok)
+
+	// The lexer bundles the indentation of the third line into the plain
+	// scalar "x" above it, yet the range covers the key on the third line.
+	assert.Equal(t, position.NewRange(position.New(2, 2), position.New(2, 7)), got)
+}
+
 func TestSourceError_Range_MultiLineToken(t *testing.T) {
 	t.Parallel()
 

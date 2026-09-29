@@ -2002,6 +2002,49 @@ func TestLines_TokenAt(t *testing.T) {
 		assert.Same(t, tk1, tk2)
 	})
 
+	t.Run("indentation returns the token after it", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			line  int
+		}{
+			"after plain value": {
+				input: "parent:\n  child: x\n  other: 1\n",
+				line:  2,
+			},
+			"after quoted value": {
+				input: "parent:\n  child: \"x\"\n  other: 1\n",
+				line:  2,
+			},
+			"after bool value": {
+				input: "parent:\n  child: true\n  other: 1\n",
+				line:  2,
+			},
+			"after block scalar": {
+				input: "parent:\n  child: |\n    a\n  other: 1\n",
+				line:  3,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				lines := line.NewLines(tokens.Tokenize(tc.input))
+
+				for col := range 2 {
+					tk := lines.TokenAt(position.New(tc.line, col))
+					require.NotNil(t, tk)
+					assert.Equal(t, "other", tk.Value)
+					assert.Equal(t,
+						position.Ranges{position.NewRange(position.New(tc.line, 2), position.New(tc.line, 7))},
+						lines.ContentRanges(tk))
+				}
+			})
+		}
+	})
+
 	t.Run("out of bounds line returns nil", func(t *testing.T) {
 		t.Parallel()
 

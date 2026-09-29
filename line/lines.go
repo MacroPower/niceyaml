@@ -492,6 +492,10 @@ func (ls Lines) SliceLines(r position.Range) position.Ranges {
 // to [Lines.TokenRanges] or [Lines.ContentRanges] to find every range it
 // occupies. Treat it as read-only.
 //
+// The lexer bundles the indentation of a line into the token that ends on
+// the line before, so a position in the indentation resolves to the token
+// that follows it on the same line instead.
+//
 // Returns nil if the position is out of bounds or no token exists there.
 func (ls Lines) TokenAt(pos position.Position) *token.Token {
 	if pos.Line < 0 || pos.Line >= len(ls.lines) {
@@ -502,8 +506,11 @@ func (ls Lines) TokenAt(pos position.Position) *token.Token {
 }
 
 // TokenRanges returns the ranges tk occupies, one per line where it holds
-// visible runes. A line where tk holds only a line ending, such as a blank
-// line kept by a block scalar, contributes no range.
+// runes besides a line ending. A line where tk holds only a line ending,
+// such as a blank line kept by a block scalar, contributes no range. The
+// lexer bundles the indentation of a line into the token that ends on the
+// line before, so that token's range on the indented line covers the
+// indentation alone.
 //
 // The token may be a lexer token, such as one [Lines.TokenAt] or
 // [Lines.Tokens] returns, one of the per-line parts from [Line.Tokens], or
