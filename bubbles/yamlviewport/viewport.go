@@ -162,7 +162,10 @@ type Option func(*Model)
 //
 // The viewport never modifies the printer. Each render derives a copy with
 // [printer.Printer.With] and the viewport's wrap width, so other renderers
-// can share the same printer.
+// can share the same printer. The viewport sizes that copy's container to
+// the content area, so it ignores any Width, Height, MaxWidth, or MaxHeight
+// on the printer's container style. To fix the size of the viewport, set
+// them on [WithContainerStyle] instead.
 func WithPrinter(p *printer.Printer) Option {
 	return func(m *Model) {
 		m.printer = p
@@ -488,6 +491,11 @@ func (m *Model) anchorTop() {
 // to the widest row of the window, and a window of short lines would carry
 // its border in from the edge of the content area.
 //
+// The viewport sizes the printer's container itself, so renderPrinter drops
+// any Width, Height, MaxWidth, or MaxHeight from its style. Those would make
+// Print wrap, pad, or cut the rows after the layout has counted them, and the
+// scroll bounds would no longer match the rows on screen.
+//
 // A render prints a slice of the view, so renderPrinter sizes the gutter for
 // the largest line number of the whole view rather than of the window, and
 // every window lines up with the layout. In side-by-side mode both panes
@@ -501,10 +509,17 @@ func (m *Model) renderPrinter(width int) *printer.Printer {
 		wrapWidth = max(0, width-m.printer.ContainerStyle().GetHorizontalFrameSize())
 	}
 
+	container := m.printer.ContainerStyle().
+		UnsetWidth().
+		UnsetHeight().
+		UnsetMaxWidth().
+		UnsetMaxHeight()
+
 	return m.printer.With(
 		printer.WithWrap(wrapWidth),
 		printer.WithMaxNumber(m.rows.maxNumber),
 		printer.WithContainerWidth(width),
+		printer.WithContainerStyle(container),
 	)
 }
 

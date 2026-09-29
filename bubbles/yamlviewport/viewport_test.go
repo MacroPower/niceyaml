@@ -1971,6 +1971,88 @@ func TestViewport_FixedSizeContainerStyle(t *testing.T) {
 	}
 }
 
+func TestViewport_PrinterContainerSizeIgnored(t *testing.T) {
+	t.Parallel()
+
+	// The viewport sizes the printer's container to the content area. A
+	// fixed size on that container would wrap, pad, or cut the rows after
+	// the viewport counted them, so the viewport drops it, and the last
+	// row stays reachable.
+	tcs := map[string]struct {
+		container lipgloss.Style
+		line      string
+		lines     int
+		width     int
+		height    int
+		wantTotal int
+		wantLast  string
+	}{
+		"width": {
+			container: lipgloss.NewStyle().Width(30),
+			line:      "k%d: aaaa bbbb cccc dddd eeee ffff gggg hhhh",
+			lines:     20,
+			width:     50,
+			height:    6,
+			wantTotal: 20,
+			wantLast:  "k20:",
+		},
+		"max width": {
+			container: lipgloss.NewStyle().MaxWidth(30),
+			line:      "k%d: aaaa bbbb cccc dddd eeee ffff gggg hhhh",
+			lines:     20,
+			width:     50,
+			height:    6,
+			wantTotal: 20,
+			wantLast:  "hhhh",
+		},
+		"height": {
+			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Height(8),
+			line:      "k%d: v",
+			lines:     10,
+			width:     20,
+			height:    4,
+			wantTotal: 12,
+			wantLast:  "└",
+		},
+		"max height": {
+			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()).MaxHeight(4),
+			line:      "k%d: v",
+			lines:     10,
+			width:     20,
+			height:    4,
+			wantTotal: 12,
+			wantLast:  "└",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var src strings.Builder
+
+			for i := 1; i <= tc.lines; i++ {
+				fmt.Fprintf(&src, tc.line+"\n", i)
+			}
+
+			p := testPrinter().With(printer.WithContainerStyle(tc.container))
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(tc.width)
+			m.SetHeight(tc.height)
+			m.SetWordWrap(true)
+			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
+
+			assert.Equal(t, tc.wantTotal, m.TotalRowCount())
+
+			m.GotoBottom()
+
+			rows := strings.Split(m.View(), "\n")
+			require.Len(t, rows, tc.height)
+			assert.Contains(t, rows[len(rows)-1], tc.wantLast)
+		})
+	}
+}
+
 func TestViewport_ViewFillsContentArea(t *testing.T) {
 	t.Parallel()
 
