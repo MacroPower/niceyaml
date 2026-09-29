@@ -28,7 +28,9 @@ const defaultHorizontalStep = 6
 // Searcher builds an [Index] over the content of a view. The viewport calls
 // Load the first time it searches for a term after its content changes, and
 // runs every term through the Index it gets back until the content changes
-// again. In side-by-side mode it calls Load once for each pane.
+// again. A side-by-side diff has two panes, and the viewport calls Load
+// once for each of them. Side-by-side mode without a diff shows one pane,
+// so Load runs once.
 //
 // Load receives the whole content of the view, the [line.View.Lines] of it,
 // which can include lines the view does not hold, such as the lines between
