@@ -1769,7 +1769,8 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 // token of scope that is not a comment. A `<<` merge key whose alias
 // names no mapping the decoder can find binds at the alias, when err is
 // the decoder's failure for that alias, as [decodeTree.unresolvedMerge]
-// describes. Any other error comes back as it is, such as one from a
+// describes, with the message a decode of the whole document gives that
+// alias. Any other error comes back as it is, such as one from a
 // value's own UnmarshalYAML, an ended context, or a rejection
 // [decodeWithRecover] already bound. So does any error for a nil scope.
 func (n *Node) rejection(err error, scope ast.Node) error {
@@ -1785,19 +1786,25 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 
 	tree := n.doc.decodeTree()
 
-	var at *token.Token
+	var (
+		at    *token.Token
+		cause error
+	)
 
 	if errors.Is(err, yaml.ErrExceededMaxDepth) {
-		at = contentStart(scope)
-	} else {
-		at = tree.unresolvedMerge(n.doc.pathResolver(), scope, err)
+		at, cause = contentStart(scope), tree.restoreError(err)
+	} else if m := tree.unresolvedMerge(n.doc.pathResolver(), scope, err); m != nil {
+		// The decoder's failure for an alias inside its own anchor names
+		// the null it merges in its place, which the source does not hold,
+		// so the message is the one a decode of the whole document gives.
+		at, cause = m.token, restoredError{err: err, msg: m.message()}
 	}
 
 	if at == nil {
 		return err
 	}
 
-	return WrapError(fmt.Errorf("%w: %w", ErrDecodeRejected, tree.restoreError(err)), atToken(at))
+	return WrapError(fmt.Errorf("%w: %w", ErrDecodeRejected, cause), atToken(at))
 }
 
 // decodeView returns node as the go-yaml decoder reads it: the same tree,

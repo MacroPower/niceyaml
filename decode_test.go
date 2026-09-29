@@ -5549,6 +5549,13 @@ func TestErrDecodeRejected(t *testing.T) {
 				input: "a: &x\n  m:\n    <<: *x\n",
 				path:  paths.Root().Child("a", "m"),
 				line:  2,
+				msg:   "cannot find anchor by alias name x",
+			},
+			"merge of an anchor that holds the node after one of the same name": {
+				input: "a: &x {k: 1}\nb: &x\n  j: 2\n  <<: *x\n",
+				path:  paths.Root().Child("b"),
+				line:  3,
+				msg:   "cannot find anchor by alias name x",
 			},
 			"depth limit": {
 				input: "a: " + strings.Repeat("[", 10005) + strings.Repeat("]", 10005) + "\n",
@@ -5567,6 +5574,7 @@ func TestErrDecodeRejected(t *testing.T) {
 				_, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context(), tc.opts...)
 				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
 				assert.Contains(t, err.Error(), tc.msg)
+				assert.NotContains(t, err.Error(), "\n", "the go-yaml excerpt leaked into the message")
 
 				var srcErr *niceyaml.SourceError
 

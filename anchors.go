@@ -384,13 +384,13 @@ func (t *decodeTree) scoped() {
 	})
 }
 
-// unresolvedMerge returns the token of the first alias under a `<<` merge
-// key inside scope, a node of the tree, that the decoder finds no mapping
-// for and that err, which the decoder returned for scope, reports. It
-// returns nil when scope holds no such alias. The decoder finds no
-// mapping for an alias that names no anchor before it as resolver binds
-// it, or for one inside the anchor it names, which the decoder has not
-// finished reading when it merges.
+// unresolvedMerge returns the first alias under a `<<` merge key inside
+// scope, a node of the tree, that the decoder finds no mapping for and
+// that err, which the decoder returned for scope, reports. It returns nil
+// when scope holds no such alias. The decoder finds no mapping for an
+// alias that names no anchor before it as resolver binds it, or for one
+// inside the anchor it names, which the decoder has not finished reading
+// when it merges.
 //
 // The document's resolver knows nothing of the reference documents a
 // decode may carry, from [WithReferences] or the yaml.Reference options,
@@ -400,7 +400,7 @@ func (t *decodeTree) scoped() {
 // anchor for, and, for an alias inside the anchor it names, any
 // [yaml.Error] whose token is not one of the tree's, such as the null the
 // decoder merges in its place.
-func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node, err error) *token.Token {
+func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node, err error) *mergeAlias {
 	t.mergesOnce.Do(func() {
 		t.merges = unresolvedMerges(resolver, t.source)
 	})
@@ -414,14 +414,14 @@ func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node, e
 	msg := t.restoreNames(err.Error())
 	_, yamlErr := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 
-	for _, m := range t.merges {
+	for i, m := range t.merges {
 		off := m.token.Position.Offset
 		if off < lo || off > hi {
 			continue
 		}
 
-		if msg == "cannot find anchor by alias name "+m.name || m.enclosed && yamlErr {
-			return m.token
+		if msg == m.message() || m.enclosed && yamlErr {
+			return &t.merges[i]
 		}
 	}
 
@@ -437,6 +437,12 @@ type mergeAlias struct {
 	name string
 	// Whether the alias lies inside the anchor it names.
 	enclosed bool
+}
+
+// message returns the message the decoder gives the alias when a decode
+// of the whole document finds no anchor for it.
+func (m mergeAlias) message() string {
+	return "cannot find anchor by alias name " + m.name
 }
 
 // unresolvedMerges returns the aliases under the `<<` merge keys of body
