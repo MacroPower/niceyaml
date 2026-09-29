@@ -650,7 +650,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"nil embedded pointer": {
 				input: "wrapped: 1\n",
 			},
-			"struct that declares its own unmarshaler": {
+			"struct that declares its own unmarshaler skips the field": {
 				input: "declared: -1\n",
 			},
 			"struct that declares an unmarshaler go-yaml checks later": {

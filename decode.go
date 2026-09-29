@@ -91,7 +91,11 @@ import (
 // message type. A decode runs those checks too and reports their errors
 // at the value that owns the method. A struct does not own a Validate it
 // gets from an embedded field, so the method runs once, on that field at
-// the field's own path, and not at all when the field is nil or ignored.
+// the field's own path. The method does not run when the field is nil or
+// ignored, or when the struct decodes itself through an UnmarshalYAML or
+// UnmarshalText method it declares, since the decode validates nothing
+// below such a struct. To keep the check, a struct like that declares a
+// Validate of its own that calls the field's.
 // A struct that decodes itself through an UnmarshalYAML or UnmarshalText
 // method it gets from an embedded field decodes the document into that
 // field, so the field validates at the path of the struct.

@@ -869,11 +869,14 @@ func (w *selfWalker) scanChildren(v reflect.Value) (bool, bool) {
 // implementsSelfValidator reports whether a value of type t implements
 // [SelfValidator] through a Validate of its own, on its value or its
 // pointer, as [selfWalker.validate] checks it. A struct that gets
-// Validate from an embedded field does not own it. The walk validates
-// that field at its own path, or at the path of the struct when the
-// field decodes the struct, as [decoderField] finds it. The walk never
-// reaches the field when it is nil or go-yaml skips it, so the struct
-// passes the check to the field.
+// Validate from an embedded field does not own it, so the struct passes
+// the check to the field. The walk validates that field at its own path,
+// or at the path of the struct when the field decodes the struct, as
+// [decoderField] finds it. The method does not run when the field is nil
+// or go-yaml skips it, since the walk never reaches such a field. Nor
+// does it run when the struct declares the unmarshaler method go-yaml
+// calls, since the walk validates nothing below a struct that decodes
+// itself.
 func implementsSelfValidator(t reflect.Type) bool {
 	if cached, ok := ownsValidator.Load(t); ok {
 		if owns, ok := cached.(bool); ok {
