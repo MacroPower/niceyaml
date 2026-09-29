@@ -55,6 +55,27 @@ func TestNewPattern(t *testing.T) {
 			pattern: strings.Repeat("{a}", 20000) + ".yaml",
 			err:     filepaths.ErrInvalidPattern,
 		},
+		"parent after a literal element": {
+			pattern: "configs/../*.yaml",
+		},
+		"leading parent elements": {
+			pattern: "../../*.yaml",
+		},
+		"parent after a double star": {
+			pattern: "**/../x.yaml",
+		},
+		"parent after a wildcard element": {
+			pattern: "*/../x.yaml",
+			err:     filepaths.ErrInvalidPattern,
+		},
+		"parent after a class element": {
+			pattern: "a/[bc]/../x.yaml",
+			err:     filepaths.ErrInvalidPattern,
+		},
+		"parent after a wildcard in one alternative": {
+			pattern: "{a,*}/../x.yaml",
+			err:     filepaths.ErrInvalidPattern,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -191,6 +212,51 @@ func TestPattern_Match(t *testing.T) {
 		"wildcard in root after parent traversal": {
 			pattern: "*.yaml",
 			path:    "sub/../config.yaml",
+			want:    true,
+		},
+		"parent after a literal matches the cleaned path": {
+			pattern: "configs/../*.yaml",
+			path:    "x.yaml",
+			want:    true,
+		},
+		"parent after a literal matches a path spelled the same": {
+			pattern: "configs/../*.yaml",
+			path:    "./configs/../x.yaml",
+			want:    true,
+		},
+		"parent after a literal keeps its depth": {
+			pattern: "configs/../*.yaml",
+			path:    "configs/x.yaml",
+			want:    false,
+		},
+		"nested parents after literals": {
+			pattern: "a/b/../../c/*.yaml",
+			path:    "c/x.yaml",
+			want:    true,
+		},
+		"parent after an escaped wildcard literal": {
+			pattern: `a\*/../x.yaml`,
+			path:    "x.yaml",
+			want:    true,
+		},
+		"parent above the root": {
+			pattern: "/../x.yaml",
+			path:    "/x.yaml",
+			want:    true,
+		},
+		"leading parent elements stay": {
+			pattern: "../*.yaml",
+			path:    "../x.yaml",
+			want:    true,
+		},
+		"parent after a literal after leading parents": {
+			pattern: "../a/../*.yaml",
+			path:    "../x.yaml",
+			want:    true,
+		},
+		"parent after a double star matching no directory": {
+			pattern: "**/../x.yaml",
+			path:    "../x.yaml",
 			want:    true,
 		},
 		"repeated separators are collapsed": {
@@ -431,6 +497,16 @@ func TestAnyDepthPatterns_MatchClean(t *testing.T) {
 		"negation with a leading slash": {
 			path:     "/r/.github/workflows/ci.yml",
 			patterns: []string{"*.yml", "!/.github/workflows/*.yml"},
+			want:     false,
+		},
+		"parent after a literal at depth": {
+			path:     "/r/x.yaml",
+			patterns: []string{"configs/../*.yaml"},
+			want:     true,
+		},
+		"parent after a wildcard is kept and matches nothing": {
+			path:     "/r/a/x.yaml",
+			patterns: []string{"*/../x.yaml"},
 			want:     false,
 		},
 		"bare negation is skipped": {

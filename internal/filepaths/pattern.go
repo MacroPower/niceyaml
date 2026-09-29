@@ -29,10 +29,18 @@ type Pattern struct {
 // NewPattern drops "." elements such as a leading "./", repeated
 // separators, and a trailing separator from the pattern, as
 // [Pattern.Match] does for the path, so those spellings do not change
-// what the pattern matches. It normalizes each pattern [ExpandBraces]
-// yields, so "{.,configs}/*.yaml" matches "values.yaml" as "./*.yaml"
-// does. A "/" or "." inside a character class, as in "a[/.]b", stays
-// part of the class.
+// what the pattern matches. It also resolves a ".." that follows an
+// element without glob syntax, so "configs/../*.yaml" matches "x.yaml"
+// as "*.yaml" does. It normalizes each pattern [ExpandBraces] yields, so
+// "{.,configs}/*.yaml" matches "values.yaml" as "./*.yaml" does. A "/"
+// or "." inside a character class, as in "a[/.]b", stays part of the
+// class.
+//
+// A cleaned path holds a ".." only at its start, so NewPattern returns
+// [ErrInvalidPattern] for a pattern that keeps a ".." after a glob
+// element such as "*", which could match no path. A ".." after "**"
+// stays valid, since "**" can match no directory at all, so
+// "**/../x.yaml" matches "../x.yaml".
 func NewPattern(pattern string) (Pattern, error) {
 	if !doublestar.ValidatePattern(pattern) {
 		return Pattern{}, ErrInvalidPattern
@@ -43,7 +51,35 @@ func NewPattern(pattern string) (Pattern, error) {
 		return Pattern{}, fmt.Errorf("%w: braces expand past the limit", ErrInvalidPattern)
 	}
 
+	for _, glob := range globs {
+		if !parentsMatchable(glob) {
+			return Pattern{}, fmt.Errorf("%w: '..' after a glob element never matches a cleaned path",
+				ErrInvalidPattern)
+		}
+	}
+
 	return Pattern{globs: globs}, nil
+}
+
+// parentsMatchable reports whether every ".." element of glob follows
+// another "..", a "**", or nothing, the only places a ".." of a cleaned
+// path can line up with.
+func parentsMatchable(glob string) bool {
+	prev := ""
+
+	for _, elem := range splitElements(glob) {
+		if elem == "" {
+			continue
+		}
+
+		if elem == ".." && prev != "" && prev != ".." && prev != "**" {
+			return false
+		}
+
+		prev = elem
+	}
+
+	return true
 }
 
 // Match reports whether the path matches the pattern.
@@ -92,8 +128,14 @@ func expandPattern(pattern string, rewrite func(string) string) ([]string, bool)
 // separators, or a trailing separator. A cleaned path carries none of
 // them, so a pattern that kept them would match no path. A pattern left
 // with no other element reads as "." or "/", as [filepath.Clean] reads
-// it. It leaves ".." elements alone, since a glob element before a ".."
-// could stand for any number of directories.
+// it.
+//
+// It also resolves ".." elements as [filepath.Clean] does for a path. It
+// drops a ".." and the element before it when that element is a plain
+// name, and it drops a ".." right after the root of a rooted pattern. It
+// keeps a leading ".." and a ".." after a glob element. A glob cannot
+// name the one directory the ".." leaves, and doublestar matches a ".."
+// only against a literal ".." in the path.
 //
 // It reads a brace group as plain text, so a caller expands the braces
 // first.
@@ -102,10 +144,22 @@ func normalizePattern(pattern string) string {
 		return ""
 	}
 
+	rooted := strings.HasPrefix(pattern, "/")
+
 	var kept []string
 
 	for _, elem := range splitElements(pattern) {
-		if elem != "" && elem != "." {
+		switch {
+		case elem == "" || elem == ".":
+			continue
+
+		case elem == ".." && len(kept) == 0 && rooted:
+			continue
+
+		case elem == ".." && len(kept) > 0 && isPlainName(kept[len(kept)-1]):
+			kept = kept[:len(kept)-1]
+
+		default:
 			kept = append(kept, elem)
 		}
 	}
@@ -113,13 +167,33 @@ func normalizePattern(pattern string) string {
 	glob := strings.Join(kept, "/")
 
 	switch {
-	case strings.HasPrefix(pattern, "/"):
+	case rooted:
 		return "/" + glob
 	case glob == "":
 		return "."
 	default:
 		return glob
 	}
+}
+
+// isPlainName reports whether elem names one directory, as a path
+// element other than ".." does. An element with an unescaped glob
+// character or brace can stand for many names, so it does not count.
+func isPlainName(elem string) bool {
+	if elem == ".." {
+		return false
+	}
+
+	for i := 0; i < len(elem); i++ {
+		switch elem[i] {
+		case '\\':
+			i++ // Skip the escaped character.
+		case '*', '?', '[', '{':
+			return false
+		}
+	}
+
+	return true
 }
 
 // splitElements splits pattern on its separators. An escaped "/" and a
