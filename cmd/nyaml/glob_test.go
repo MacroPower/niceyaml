@@ -380,6 +380,24 @@ func TestGlob(t *testing.T) {
 				filepath.Join(subdirDeep, "d.yaml"),
 			},
 		},
+		"brace alternatives with dot-dot and dot": {
+			pattern: subdir + "/{../k8s,.}/*.yaml",
+			wantFiles: []string{
+				filepath.Join(k8sDir, "deploy.yaml"),
+				filepath.Join(subdir, "c.yaml"),
+			},
+		},
+		"brace alternative with a leading dot": {
+			pattern: tmpDir + "/{./a,k8s/deploy}.yaml",
+			wantFiles: []string{
+				filepath.Join(tmpDir, "a.yaml"),
+				filepath.Join(k8sDir, "deploy.yaml"),
+			},
+		},
+		"brace alternatives matching one file": {
+			pattern:   tmpDir + "/{a,[a]}.yaml",
+			wantFiles: []string{filepath.Join(tmpDir, "a.yaml")},
+		},
 		"invalid pattern": {
 			pattern: "[",
 			err:     "glob",

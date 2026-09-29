@@ -4,10 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
+
+	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 )
 
 var (
@@ -33,17 +36,30 @@ var (
 //   - `?` matches any single non-separator character.
 //   - `[abc]` matches any character in the set.
 //   - `[a-z]` matches any character in the range.
-//   - `{a,b}` matches any of the comma-separated alternatives.
+//   - `{a,b}` matches any of the comma-separated alternatives. An
+//     alternative may hold "." and ".." elements, as in
+//     "app/{../shared,.}/*.yaml".
 //
 // The function returns an error when the pattern syntax is invalid.
 func glob(pattern string) ([]string, error) {
-	matches, err := doublestar.FilepathGlob(
-		pattern,
-		doublestar.WithFilesOnly(),
-		doublestar.WithNoFollow(),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("glob %q: %w", pattern, err)
+	// Doublestar matches a brace group through io/fs, which rejects "."
+	// and ".." elements, so an alternative holding one would match
+	// nothing. Globbing each alternative on its own lets the literal part
+	// of each keep such elements. Braces expand after the separators turn
+	// into slashes, so a Windows separator does not read as an escape.
+	var matches []string
+
+	for _, alt := range filepaths.ExpandBraces(filepath.ToSlash(pattern)) {
+		altMatches, err := doublestar.FilepathGlob(
+			alt,
+			doublestar.WithFilesOnly(),
+			doublestar.WithNoFollow(),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("glob %q: %w", pattern, err)
+		}
+
+		matches = append(matches, altMatches...)
 	}
 
 	// WithNoFollow reports a symlink to a directory as a file, so drop it.
@@ -59,9 +75,10 @@ func glob(pattern string) ([]string, error) {
 
 	// A recursive pattern reports its matches in directory walk order,
 	// which puts every file of a directory ahead of its subdirectories.
+	// Two alternatives can match one path, so the path appears once.
 	slices.Sort(files)
 
-	return files, nil
+	return slices.Compact(files), nil
 }
 
 // containsGlobChars reports whether s contains glob metacharacters.
