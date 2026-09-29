@@ -598,6 +598,42 @@ func TestPalette_LiteralsTakeSourceColors(t *testing.T) {
 	}
 }
 
+func TestPalette_DirectivesMatchSourceComments(t *testing.T) {
+	t.Parallel()
+
+	// These source themes draw CommentPreproc in plain italic, the same as
+	// their comments, and reserve bold for CommentPreprocFile, so YAML
+	// directives must render like comments.
+	tests := map[string]struct {
+		theme string
+	}{
+		"catppuccin-frappe":    {theme: "catppuccin-frappe"},
+		"catppuccin-latte":     {theme: "catppuccin-latte"},
+		"catppuccin-macchiato": {theme: "catppuccin-macchiato"},
+		"catppuccin-mocha":     {theme: "catppuccin-mocha"},
+		"tokyonight-day":       {theme: "tokyonight-day"},
+		"tokyonight-moon":      {theme: "tokyonight-moon"},
+		"tokyonight-night":     {theme: "tokyonight-night"},
+		"tokyonight-storm":     {theme: "tokyonight-storm"},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			th, ok := theme.Builtin().Get(tc.theme)
+			require.True(t, ok)
+
+			got := th.Style(kind.CommentPreproc)
+			assert.False(t, got.GetBold(), "CommentPreproc is bold")
+			assert.Equal(t,
+				style.Encode(th.Style(kind.Comment)),
+				style.Encode(got),
+			)
+		})
+	}
+}
+
 func TestPalette_NullMatchesBooleans(t *testing.T) {
 	t.Parallel()
 

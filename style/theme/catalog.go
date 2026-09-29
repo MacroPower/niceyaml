@@ -279,7 +279,7 @@ var palettes = map[string]palette{
 		Error:  "#e78284",
 		Tokens: map[kind.Kind]string{
 			kind.Comment:            "italic #737994",
-			kind.CommentPreproc:     "bold #737994",
+			kind.CommentPreproc:     "italic #737994",
 			kind.Generic:            "#c6d0f5",
 			kind.GenericDeleted:     "#e78284 bg:#414559",
 			kind.GenericError:       "#e78284",
@@ -304,7 +304,7 @@ var palettes = map[string]palette{
 		Error:  "#d20f39",
 		Tokens: map[kind.Kind]string{
 			kind.Comment:            "italic #9ca0b0",
-			kind.CommentPreproc:     "bold #9ca0b0",
+			kind.CommentPreproc:     "italic #9ca0b0",
 			kind.Generic:            "#4c4f69",
 			kind.GenericDeleted:     "#d20f39 bg:#ccd0da",
 			kind.GenericError:       "#d20f39",
@@ -329,7 +329,7 @@ var palettes = map[string]palette{
 		Error:  "#ed8796",
 		Tokens: map[kind.Kind]string{
 			kind.Comment:            "italic #6e738d",
-			kind.CommentPreproc:     "bold #6e738d",
+			kind.CommentPreproc:     "italic #6e738d",
 			kind.Generic:            "#cad3f5",
 			kind.GenericDeleted:     "#ed8796 bg:#363a4f",
 			kind.GenericError:       "#ed8796",
@@ -354,7 +354,7 @@ var palettes = map[string]palette{
 		Error:  "#f38ba8",
 		Tokens: map[kind.Kind]string{
 			kind.Comment:            "italic #6c7086",
-			kind.CommentPreproc:     "bold #6c7086",
+			kind.CommentPreproc:     "italic #6c7086",
 			kind.Generic:            "#cdd6f4",
 			kind.GenericDeleted:     "#f38ba8 bg:#313244",
 			kind.GenericError:       "#f38ba8",
@@ -1372,7 +1372,7 @@ var palettes = map[string]palette{
 		Error:  "#c64343",
 		Tokens: map[kind.Kind]string{
 			kind.Comment:            "italic #a1a6c5",
-			kind.CommentPreproc:     "bold #a1a6c5",
+			kind.CommentPreproc:     "italic #a1a6c5",
 			kind.Generic:            "#3760bf",
 			kind.GenericDeleted:     "#c64343 bg:#e9e9ed",
 			kind.GenericError:       "#c64343",
@@ -1397,7 +1397,7 @@ var palettes = map[string]palette{
 		Error:  "#c53b53",
 		Tokens: map[kind.Kind]string{
 			kind.Comment:            "italic #444a73",
-			kind.CommentPreproc:     "bold #444a73",
+			kind.CommentPreproc:     "italic #444a73",
 			kind.Generic:            "#c8d3f5",
 			kind.GenericDeleted:     "#c53b53 bg:#1b1d2b",
 			kind.GenericError:       "#c53b53",
@@ -1422,7 +1422,7 @@ var palettes = map[string]palette{
 		Error:  "#db4b4b",
 		Tokens: map[kind.Kind]string{
 			kind.Comment:            "italic #414868",
-			kind.CommentPreproc:     "bold #414868",
+			kind.CommentPreproc:     "italic #414868",
 			kind.Generic:            "#c0caf5",
 			kind.GenericDeleted:     "#db4b4b bg:#15161e",
 			kind.GenericError:       "#db4b4b",
@@ -1447,7 +1447,7 @@ var palettes = map[string]palette{
 		Error:  "#db4b4b",
 		Tokens: map[kind.Kind]string{
 			kind.Comment:            "italic #414868",
-			kind.CommentPreproc:     "bold #414868",
+			kind.CommentPreproc:     "italic #414868",
 			kind.Generic:            "#c0caf5",
 			kind.GenericDeleted:     "#db4b4b bg:#1f2335",
 			kind.GenericError:       "#db4b4b",
