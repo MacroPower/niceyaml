@@ -1299,6 +1299,76 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
+	t.Run("a pointer map key reports the text the document spells it with", func(t *testing.T) {
+		t.Parallel()
+
+		type pointers struct {
+			S map[*string]signed  `yaml:"s"`
+			I map[*int]signed     `yaml:"i"`
+			F map[*float64]signed `yaml:"f"`
+		}
+
+		tcs := map[string]struct {
+			input string
+			want  []string
+		}{
+			"strings in key order": {
+				input: "s:\n  b: {n: -2}\n  a: {n: -1}\n",
+				want: []string{
+					"3:10: $.s.a.n: negative -1",
+					"2:10: $.s.b.n: negative -2",
+				},
+			},
+			"hexadecimal int": {
+				input: "i:\n  0x10: {n: -1}\n",
+				want:  []string{"2:13: $.i.0x10.n: negative -1"},
+			},
+			"NaN": {
+				input: "f:\n  .nan: {n: -1}\n",
+				want:  []string{"2:13: $.f.'.nan'.n: negative -1"},
+			},
+			"null beside a string": {
+				input: "s:\n  ~: {n: -1}\n  b: {n: -2}\n",
+				want: []string{
+					"3:10: $.s.b.n: negative -2",
+					"2:10: $.s.'~'.n: negative -1",
+				},
+			},
+			"anchored null": {
+				input: "s:\n  &k ~: {n: -1}\n",
+				want:  []string{"2:13: $.s.'~'.n: negative -1"},
+			},
+			"keys of one value": {
+				input: "i:\n  0x10: {n: -1}\n  16: {n: -2}\n",
+				want: []string{
+					"$.i.16.n: negative -1",
+					"$.i.16.n: negative -2",
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				_, err := dd.Decode[pointers](t.Context())
+				require.Error(t, err)
+
+				var got []string
+
+				for bound := range niceyaml.AllBindings(err) {
+					if _, ok := bound.Path(); ok {
+						got = append(got, bound.Error())
+					}
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
 	t.Run("a map key validates at the key", func(t *testing.T) {
 		t.Parallel()
 

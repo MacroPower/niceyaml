@@ -546,9 +546,10 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 		}
 
 		// The names cannot tell apart several keys that [nameKey] gives
-		// one value, such as several NaN keys or several time keys of one
-		// instant and zone, so none of them takes the text of a document
-		// key. They then share one path, as below.
+		// one value, so none of them takes the text of a document key.
+		// Several NaN keys give one value, and so do several time keys of
+		// one instant and zone, or several pointer keys to equal values.
+		// Such keys then share one path, as below.
 		for k, n := range shared {
 			if n > 1 {
 				delete(names, k)
@@ -1084,8 +1085,15 @@ func (w *selfWalker) keyDecoder() *yaml.Decoder {
 // nothing. An alias key takes its text and value from the content of its
 // anchor, as [paths] names it, and adds nothing when that anchor does not
 // resolve.
+//
+// As go-yaml does, addKeyName decodes a key of a pointer type t as the
+// type t points to, and leaves a null key, or an alias to a null, a nil
+// pointer. A null counts only where the key itself is one, before
+// go-yaml looks through a `?`, an anchor, or a tag, so go-yaml points a
+// key such as `&a ~` at a zero value instead.
 func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[any]string) {
 	node := keyValueNode(key)
+	null := key.Type() == ast.NullType
 
 	if _, ok := node.(*ast.AliasNode); ok {
 		content, err := w.pathResolver().Deref(node)
@@ -1094,6 +1102,11 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 		}
 
 		node = content
+		null = key.Type() == ast.AliasType && content.Type() == ast.NullType
+	}
+
+	if t.Kind() == reflect.Pointer && !null {
+		t = t.Elem()
 	}
 
 	var name string
@@ -1152,9 +1165,11 @@ type timeKey struct {
 
 // nameKey returns the value names holds the text of key under: [nanKey]
 // for a float NaN and [timeKey] for a [time.Time], alone or behind an
-// interface, or else the value of key itself. The bool result is false
-// for a key that cannot key a map.
+// interface, or else the value of key itself. A pointer key stands for
+// the value it points to, as [pointee] gives it. The bool result is
+// false for a key that cannot key a map.
 func nameKey(key reflect.Value) (any, bool) {
+	key = pointee(key)
 	if !key.Comparable() {
 		return nil, false
 	}
@@ -1175,6 +1190,22 @@ func nameKey(key reflect.Value) (any, bool) {
 	}
 
 	return key.Interface(), true
+}
+
+// pointee returns the value key points to when key is a non-nil pointer
+// to a value that can key a map, and key itself otherwise. Since go-yaml
+// decodes a pointer key as the value it points to, that value, rather
+// than the address, names the key. The value a pointer points to may
+// hold a slice or map that refers back to itself, which no formatting
+// finishes, so a pointer to a value that cannot key a map stays as it
+// is. A pointer held in an interface stays too, since go-yaml decodes
+// no key of an interface type to one.
+func pointee(key reflect.Value) reflect.Value {
+	if key.Kind() == reflect.Pointer && !key.IsNil() && key.Elem().Comparable() {
+		return key.Elem()
+	}
+
+	return key
 }
 
 // keyValueNode looks through the `?` of an explicit key and the anchors
@@ -1212,7 +1243,8 @@ func unwrapNode(node ast.Node) ast.Node {
 
 // mapKey returns the path segment for a map key: its text in names, as
 // the document spells it, under the value [nameKey] gives, or else the
-// string itself, or the formatted value of any other key.
+// string itself, or the formatted value of any other key. A pointer key
+// stands for the value it points to, as [pointee] gives it.
 func mapKey(key reflect.Value, names map[any]string) string {
 	if k, ok := nameKey(key); ok {
 		if name, ok := names[k]; ok {
@@ -1220,6 +1252,7 @@ func mapKey(key reflect.Value, names map[any]string) string {
 		}
 	}
 
+	key = pointee(key)
 	if key.Kind() == reflect.String {
 		return key.String()
 	}
