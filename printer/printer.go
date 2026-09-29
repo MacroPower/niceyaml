@@ -247,12 +247,12 @@ func (f GutterFunc) Render(ctx GutterContext) string {
 }
 
 // AnnotationContext is what the printer hands an [AnnotationFunc] for the
-// annotations of one line and placement that render in one kind, their
-// [line.Annotation.Kind] or [kind.UIAnnotation] for the zero Kind. Each
-// annotation keeps its Kind as given, so a context for [kind.UIAnnotation]
-// can hold annotations of the zero Kind alongside ones of that kind. The
-// func returns the [AnnotationRow]s for them, and the printer pads,
-// escapes, wraps, and styles each one.
+// annotations of one line and placement that render in one kind, as
+// [line.Annotation.RenderKind] reports it. Each annotation keeps its Kind
+// as given, so a context for [kind.UIAnnotation] can hold annotations of
+// the zero Kind alongside ones of that kind. The func returns the
+// [AnnotationRow]s for them, and the printer pads, escapes, wraps, and
+// styles each one.
 type AnnotationContext struct {
 	// Content is the text of the annotated line, without its line ending.
 	// Annotation columns count runes of this text, and their display
@@ -308,17 +308,17 @@ func ColWidth(content string, col int) int {
 }
 
 // AnnotationRow is a row an [AnnotationFunc] renders for the annotations
-// of one line and placement that render in one kind, their
-// [line.Annotation.Kind] or [kind.UIAnnotation] for the zero Kind, so one
-// [kind.UIAnnotation] row can hold annotations of the zero Kind alongside
-// ones of that kind. The printer pads the row to Col as
-// [AnnotationContext.ColWidth] measures it, writes Marker, then Text, and
-// styles the row in the kind the annotations render in, so the func
-// decides what the row says and where it starts and the printer decides
-// how it looks. When the content wraps, the printer writes the row
-// beside the wrapped row that holds Col, above it for [line.Above] and
-// below it for [line.Below], and measures the padding from the start of
-// that wrapped row, so the row starts in the cell Col takes on it.
+// of one line and placement that render in one kind, as
+// [line.Annotation.RenderKind] reports it, so one [kind.UIAnnotation] row
+// can hold annotations of the zero Kind alongside ones of that kind. The
+// printer pads the row to Col as [AnnotationContext.ColWidth] measures it,
+// writes Marker, then Text, and styles the row in the kind the annotations
+// render in, so the func decides what the row says and where it starts
+// and the printer decides how it looks. When the content wraps, the
+// printer writes the row beside the wrapped row that holds Col, above it
+// for [line.Above] and below it for [line.Below], and measures the padding
+// from the start of that wrapped row, so the row starts in the cell Col
+// takes on it.
 type AnnotationRow struct {
 	// Marker is the text between the padding and Text on the first row,
 	// such as the "^ " [DefaultAnnotation] puts before a [line.Below]
@@ -1222,7 +1222,7 @@ func (p *Printer) annotationRows(
 		for _, row := range rows {
 			k := row.Kind
 			if k == "" {
-				k = annotationKind(group[0].Kind)
+				k = group[0].RenderKind()
 			}
 
 			// The row sits beside the wrapped row that holds its column,
@@ -1325,16 +1325,6 @@ func (p *Printer) renderAnnotationRow(row AnnotationRow, kindStyle lipgloss.Styl
 	}
 
 	return rows
-}
-
-// annotationKind returns the style an annotation of k renders in:
-// [kind.UIAnnotation] for the zero Kind, and k itself otherwise.
-func annotationKind(k kind.Kind) kind.Kind {
-	if k == "" {
-		return kind.UIAnnotation
-	}
-
-	return k
 }
 
 // widestWord returns the width in cells of the widest word of text, where

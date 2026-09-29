@@ -58,6 +58,37 @@ func TestAnnotation_String(t *testing.T) {
 	}
 }
 
+func TestAnnotation_RenderKind(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		kind kind.Kind
+		want kind.Kind
+	}{
+		"zero kind renders as annotation": {
+			kind: "",
+			want: kind.UIAnnotation,
+		},
+		"annotation kind": {
+			kind: kind.UIAnnotation,
+			want: kind.UIAnnotation,
+		},
+		"own kind": {
+			kind: kind.TextError,
+			want: kind.TextError,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ann := line.Annotation{Content: "note", Kind: tc.kind}
+			assert.Equal(t, tc.want, ann.RenderKind())
+		})
+	}
+}
+
 func TestAnnotations_Col(t *testing.T) {
 	t.Parallel()
 

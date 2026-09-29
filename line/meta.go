@@ -80,6 +80,16 @@ func (a Annotation) String() string {
 	return padding + a.Content
 }
 
+// RenderKind returns the kind the annotation renders in: its
+// [Annotation.Kind], or [kind.UIAnnotation] for the zero Kind.
+func (a Annotation) RenderKind() kind.Kind {
+	if a.Kind == "" {
+		return kind.UIAnnotation
+	}
+
+	return a.Kind
+}
+
 // Annotations is a slice of [Annotation] values with helper methods.
 type Annotations []Annotation
 
@@ -96,13 +106,13 @@ func (a Annotations) Filter(p Placement) Annotations {
 	return result
 }
 
-// ByKind groups the annotations by the kind each renders in, its
-// [Annotation.Kind] or [kind.UIAnnotation] for the zero Kind. The groups
-// come in the order each kind first appears, and the annotations of a
-// group keep their original order. Each annotation keeps its Kind as given,
-// so the [kind.UIAnnotation] group can mix annotations of the zero Kind
-// with ones of that kind. The printer renders each group as rows of its
-// own in the style of its kind.
+// ByKind groups the annotations by the kind each renders in, as
+// [Annotation.RenderKind] reports it. The groups come in the order each
+// kind first appears, and the annotations of a group keep their original
+// order. Each annotation keeps its Kind as given, so the
+// [kind.UIAnnotation] group can mix annotations of the zero Kind with ones
+// of that kind. The printer renders each group as rows of its own in the
+// style of its kind.
 func (a Annotations) ByKind() []Annotations {
 	var (
 		groups []Annotations
@@ -110,10 +120,7 @@ func (a Annotations) ByKind() []Annotations {
 	)
 
 	for _, ann := range a {
-		k := ann.Kind
-		if k == "" {
-			k = kind.UIAnnotation
-		}
+		k := ann.RenderKind()
 
 		i, ok := index[k]
 		if !ok {
