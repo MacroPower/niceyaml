@@ -492,9 +492,11 @@ func (s *Source) File() (*ast.File, error) {
 //
 // ForParser cuts the blank lines in front of the first text down to their
 // line breaks, so a blank line that holds a tab does not make the parser
-// reject the first key. Each copy gets the Origin of its own token back
-// once the parser returns, so it matches the Source's token as
-// [Source.File] promises.
+// reject the first key. It also moves the blank content of a block scalar
+// to the line after the header, so the parser attaches a comment below
+// that content to the next node. Each copy gets the Origin and position
+// of its own token back once the parser returns, so it matches the
+// Source's token as [Source.File] promises.
 func (s *Source) parse() (*ast.File, map[*token.Token]struct{}, error) {
 	shared := s.Tokens()
 	tks := tokens.ForParser(shared)
@@ -509,6 +511,12 @@ func (s *Source) parse() (*ast.File, map[*token.Token]struct{}, error) {
 	defer func() {
 		for i, tk := range tks {
 			tk.Origin = shared[i].Origin
+
+			// Clone gives each copy a Position of its own, so the write
+			// leaves the Source's token alone.
+			if tk.Position != nil && shared[i].Position != nil {
+				*tk.Position = *shared[i].Position
+			}
 		}
 	}()
 

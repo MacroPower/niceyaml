@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -765,6 +766,80 @@ func TestSource_File_BlankLineBeforeFirstKey(t *testing.T) {
 			require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
 		})
 	}
+}
+
+func TestSource_File_BlankBlockScalarContent(t *testing.T) {
+	t.Parallel()
+
+	// The parser reads the blank content of a block scalar on the line
+	// after the header, so a comment below the content goes to the next
+	// key. The tree still holds each copy at the position of the Source's
+	// own token, and the scalar's node holds its content.
+	tcs := map[string]struct {
+		input       string
+		wantComment string
+	}{
+		"comment below the content": {input: "a: |+\n  \n# c\nb: 1\n", wantComment: "# c"},
+		"key below the content":     {input: "a: |+\n  \nb: 1\n"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			file, err := source.File()
+			require.NoError(t, err)
+
+			var copies token.Tokens
+
+			for _, doc := range file.Docs {
+				ast.Walk(tokenCollector(func(tk *token.Token) { copies = append(copies, tk) }), doc)
+			}
+
+			require.NotEmpty(t, copies)
+
+			for _, tk := range copies {
+				matches := slices.ContainsFunc(source.Tokens(), func(original *token.Token) bool {
+					return len(yamltest.DiffTokenFields(original, tk)) == 0
+				})
+				assert.True(t, matches, "copy %s matches no token of the Source", yamltest.FormatToken(tk))
+			}
+
+			doc, err := source.Document()
+			require.NoError(t, err)
+
+			yamltest.RequireTokensEqual(t,
+				source.Tokens()[2:4],
+				yamltest.At(t, doc, paths.Root().Child("a")).Tokens(),
+			)
+
+			mapping, ok := file.Docs[0].Body.(*ast.MappingNode)
+			require.True(t, ok)
+			require.Len(t, mapping.Values, 2)
+
+			var comment string
+
+			if group := mapping.Values[1].GetComment(); group != nil {
+				comment = group.String()
+			}
+
+			assert.Equal(t, tc.wantComment, comment)
+		})
+	}
+}
+
+// tokenCollector is an [ast.Visitor] that passes the token of each node it
+// visits to its function.
+type tokenCollector func(tk *token.Token)
+
+func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
+	if tk := node.GetToken(); tk != nil {
+		c(tk)
+	}
+
+	return c
 }
 
 func TestSource_Document_EscapeAfterTag(t *testing.T) {
