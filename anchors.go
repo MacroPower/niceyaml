@@ -3,6 +3,7 @@ package niceyaml
 import (
 	"context"
 	"errors"
+	"index/suffixarray"
 	"sort"
 	"strconv"
 	"strings"
@@ -797,6 +798,12 @@ func renamedAnchorNames(resolver *paths.Resolver, body ast.Node) map[string]bool
 // from its text where a quoted scalar holds an escape or a scalar folds
 // a line break.
 func spelledNames(names map[string]bool, tks token.Tokens) map[string]bool {
+	spelled := map[string]bool{}
+
+	if len(names) == 0 {
+		return spelled
+	}
+
 	var (
 		text   strings.Builder
 		values []string
@@ -814,9 +821,20 @@ func spelledNames(names map[string]bool, tks token.Tokens) map[string]bool {
 		}
 	}
 
-	spelled := map[string]bool{}
+	// A bracket is a count in brackets in data, such as " [2]". The string
+	// that holds it starts at start, and the bracket ends before end.
+	type bracket struct{ start, end int }
+
+	// The data joins the strings, so that one index finds each name in all
+	// of them, and brackets holds each bracket by the offset of its " [".
+	var data []byte
+
+	brackets := map[int]bracket{}
 
 	for _, s := range append(values, text.String()) {
+		start := len(data)
+		data = append(data, s...)
+
 		for off := 0; ; {
 			i := strings.Index(s[off:], " [")
 			if i < 0 {
@@ -835,10 +853,20 @@ func spelledNames(names map[string]bool, tks token.Tokens) map[string]bool {
 				continue
 			}
 
-			for name := range names {
-				if strings.HasSuffix(s[:at], name) {
-					spelled[name+s[at:end+1]] = true
-				}
+			brackets[start+at] = bracket{start: start, end: start + end + 1}
+		}
+	}
+
+	// The index finds each place a name precedes " [", so the time grows
+	// with those places rather than with the names times the brackets. A
+	// place where the name starts in an earlier string spells nothing.
+	index := suffixarray.New(data)
+
+	for name := range names {
+		for _, at := range index.Lookup([]byte(name+" ["), -1) {
+			b, ok := brackets[at+len(name)]
+			if ok && at >= b.start {
+				spelled[name+string(data[at+len(name):b.end])] = true
 			}
 		}
 	}

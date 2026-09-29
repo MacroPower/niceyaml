@@ -3043,6 +3043,43 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		assert.Equal(t, "{p: &x 4, q: *x [3]}", got.D.String())
 	})
 
+	t.Run("new names skip the counts the document spells", func(t *testing.T) {
+		t.Parallel()
+
+		type wrapper struct {
+			C ast.Node `yaml:"c"`
+		}
+
+		tcs := map[string]struct {
+			input string
+			want  string
+		}{
+			"nothing spelled": {
+				input: "a: &x 1\nb: &x 2\nc: [*x]\n",
+				want:  "[*x [2]]",
+			},
+			"several counts spelled": {
+				input: "a: &\"x [1]\" 1\nb: &x 2 # x [2]\nd: a x [3] b\ne: &x 4\nc: [*x]\n",
+				want:  "[*x [5]]",
+			},
+			"name and count in separate values": {
+				input: "a: &x 1\nb: &x 2\nd: \"z [x\"\ne: \" [2] z\"\nc: [*x]\n",
+				want:  "[*x [2]]",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got, err := yamltest.FirstDocument(t, tc.input).Decode[wrapper](t.Context())
+				require.NoError(t, err)
+				require.NotNil(t, got.C)
+				assert.Equal(t, tc.want, got.C.String())
+			})
+		}
+	})
+
 	t.Run("documents of one source decode at once", func(t *testing.T) {
 		t.Parallel()
 

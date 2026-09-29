@@ -326,6 +326,64 @@ func BenchmarkNode_DecodeSelfAliases(b *testing.B) {
 	}
 }
 
+// BenchmarkNode_DecodeBracketedAnchorNames decodes sequences whose quoted
+// anchor names hold a count in brackets, like the new names the decode
+// tree gives reused anchors. The tries sequences spell "x [1]" through
+// "x [N]", so the two anchors named x skip N counts. The wide sequences
+// reuse N such names, each twice. The decode finds where the document
+// spells each name in one lookup rather than checking every name against
+// every count, so the time per name grows little with N.
+func BenchmarkNode_DecodeBracketedAnchorNames(b *testing.B) {
+	sizes := []struct {
+		name  string
+		kind  string
+		names int
+	}{
+		{"tries_2000", "tries", 2000},
+		{"tries_8000", "tries", 8000},
+		{"wide_2000", "wide", 2000},
+		{"wide_8000", "wide", 8000},
+	}
+
+	for _, sz := range sizes {
+		var sb strings.Builder
+
+		for i := range sz.names {
+			if sz.kind == "tries" {
+				fmt.Fprintf(&sb, "- &\"x [%d]\" %d\n", i+1, i)
+			} else {
+				fmt.Fprintf(&sb, "- &\"n%d [1]\" 1\n- &\"n%d [1]\" 2\n", i, i)
+			}
+		}
+
+		if sz.kind == "tries" {
+			sb.WriteString("- &x 1\n- &x 2\n")
+		}
+
+		input := sb.String()
+
+		b.Run(sz.name, func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				// A document builds its decode tree once, so each iteration
+				// parses the input anew.
+				doc, err := niceyaml.NewSourceFromString(input).Document()
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				_, err = doc.Decode[[]any](b.Context())
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*sz.names), "ns/name")
+		})
+	}
+}
+
 func BenchmarkNode_Nodes(b *testing.B) {
 	sizes := []struct {
 		name  string
