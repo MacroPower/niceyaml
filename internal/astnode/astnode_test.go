@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 func TestContent(t *testing.T) {
@@ -104,6 +105,56 @@ func TestIsNil(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, astnode.IsNil(tc.node))
+		})
+	}
+}
+
+func TestHasContent(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		node ast.Node
+		want bool
+	}{
+		"nil": {
+			node: nil,
+			want: false,
+		},
+		"typed nil mapping": {
+			node: (*ast.MappingNode)(nil),
+			want: false,
+		},
+		"typed nil scalar": {
+			node: (*ast.StringNode)(nil),
+			want: false,
+		},
+		"comment group": {
+			node: &ast.CommentGroupNode{},
+			want: false,
+		},
+		"directive": {
+			node: &ast.DirectiveNode{},
+			want: false,
+		},
+		"placeholder scalar": {
+			node: &ast.StringNode{Token: tokens.Tokenize("  \n")[0]},
+			want: false,
+		},
+		"scalar": {
+			node: &ast.StringNode{Token: tokens.Tokenize("a")[0], Value: "a"},
+			want: true,
+		},
+		"mapping": {
+			node: &ast.MappingNode{},
+			want: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, astnode.HasContent(tc.node))
 		})
 	}
 }

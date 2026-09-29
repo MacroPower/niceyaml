@@ -14,7 +14,6 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 var (
@@ -368,27 +367,6 @@ func (p Path) wildcard() bool {
 	return false
 }
 
-// hasContent reports whether body holds a value to resolve in. A nil body,
-// a directive, and a comment group are not content. Neither is the
-// placeholder scalar [tokens.Tokenize] makes for a source of whitespace
-// alone.
-func hasContent(body ast.Node) bool {
-	if astnode.IsNil(body) {
-		return false
-	}
-
-	if scalar, ok := body.(*ast.StringNode); ok && tokens.IsPlaceholder(scalar.Token) {
-		return false
-	}
-
-	switch body.Type() {
-	case ast.DirectiveType, ast.CommentType:
-		return false
-	default:
-		return true
-	}
-}
-
 // matches resolves the path in doc with r, a resolver for doc, and
 // returns every match.
 //
@@ -402,14 +380,14 @@ func hasContent(body ast.Node) bool {
 // Returns an error wrapping [ErrNotFound] and [ErrNoDocument] when doc is
 // nil, when a document without a header holds no content, or when a path
 // with segments meets a document without content. A file of whitespace
-// alone parses to a document without a header whose body is the
-// placeholder scalar from [tokens.Tokenize], which holds no content.
+// alone parses to a document without a header whose body is a
+// placeholder scalar, and [astnode.HasContent] finds no content in it.
 func (p Path) matches(r *resolver, doc *ast.DocumentNode) ([]match, error) {
-	if doc != nil && doc.Start != nil && !hasContent(doc.Body) && p.selectsRoot() {
+	if doc != nil && doc.Start != nil && !astnode.HasContent(doc.Body) && p.selectsRoot() {
 		return []match{{node: ast.Null(doc.Start), segs: slices.Clone(p.segments)}}, nil
 	}
 
-	if doc == nil || !hasContent(doc.Body) {
+	if doc == nil || !astnode.HasContent(doc.Body) {
 		return nil, fmt.Errorf("resolve %s: %w: %w", p, ErrNotFound, ErrNoDocument)
 	}
 

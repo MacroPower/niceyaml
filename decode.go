@@ -447,7 +447,7 @@ func textEndLine(tk *token.Token) int {
 // value. A node with a header and a body of comments is an explicit empty
 // document and stays one.
 func isPreambleNode(node *ast.DocumentNode) bool {
-	return node.Start == nil && !hasContent(node.Body)
+	return node.Start == nil && !astnode.HasContent(node.Body)
 }
 
 // documentSpans returns the lines of a view of total lines that each token
@@ -1770,7 +1770,7 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 		return n.Bind(err)
 	}
 
-	if !hasContent(node) || isTaggedNull(node) {
+	if !astnode.HasContent(node) || isTaggedNull(node) {
 		return nil
 	}
 
@@ -2150,32 +2150,6 @@ func (e yamlMessageError) Error() string {
 
 func (e yamlMessageError) Unwrap() error {
 	return e.err
-}
-
-// hasContent reports whether node holds a YAML value. A nil node, a comment
-// group, and a directive are the bodies of documents that hold none: an
-// empty document, one holding only comments, and one holding only a %YAML
-// directive. So is a scalar holding the placeholder token [tokens.Tokenize]
-// makes for text the lexer emits nothing for, such as a file of
-// whitespace alone. The parser gives such documents no value to decode,
-// so a decode leaves its target as it is and keeps any defaults in it,
-// where [yaml.Unmarshal] would zero the target.
-func hasContent(node ast.Node) bool {
-	if node == nil {
-		return false
-	}
-
-	if scalar, ok := node.(*ast.StringNode); ok && tokens.IsPlaceholder(scalar.Token) {
-		return false
-	}
-
-	switch node.Type() {
-	case ast.CommentType, ast.DirectiveType:
-		return false
-
-	default:
-		return true
-	}
 }
 
 // isTaggedNull reports whether node, or the value an anchor on node
