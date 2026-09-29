@@ -1,9 +1,11 @@
 package filepaths
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -249,8 +251,14 @@ func splitElements(pattern string) []string {
 //
 // Create instances with [NewAnyDepthPatterns].
 type AnyDepthPatterns struct {
-	globs    []string
+	globs    []anyDepthGlob // Most specific first.
 	excludes []string
+}
+
+// anyDepthGlob is a pattern ready for doublestar, with its specificity.
+type anyDepthGlob struct {
+	glob        string
+	specificity int
 }
 
 // NewAnyDepthPatterns creates a new [AnyDepthPatterns] from the given
@@ -274,8 +282,13 @@ func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
 		exclude, isExclude := strings.CutPrefix(pattern, "!")
 		switch {
 		case !isExclude:
-			if globs, ok := expandPattern(pattern, anyDepth); ok {
-				p.globs = append(p.globs, globs...)
+			globs, ok := expandPattern(pattern, anyDepth)
+			if !ok {
+				continue
+			}
+
+			for _, glob := range globs {
+				p.globs = append(p.globs, anyDepthGlob{glob: glob, specificity: specificity(glob)})
 			}
 
 		case exclude != "":
@@ -285,6 +298,12 @@ func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
 		}
 	}
 
+	// With the most specific glob first, the first glob that matches a
+	// path is also the most specific one that does.
+	slices.SortStableFunc(p.globs, func(a, b anyDepthGlob) int {
+		return cmp.Compare(b.specificity, a.specificity)
+	})
+
 	return p
 }
 
@@ -293,24 +312,85 @@ func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
 // returns, so a caller matching one path against many pattern sets
 // cleans it once.
 func (p AnyDepthPatterns) MatchClean(path string) bool {
-	return matchAnyGlob(p.globs, path) && !matchAnyGlob(p.excludes, path)
+	_, ok := p.SpecificityClean(path)
+
+	return ok
+}
+
+// SpecificityClean reports whether path matches, as
+// [AnyDepthPatterns.MatchClean] does, and returns the specificity of the
+// most specific pattern that matches it. The specificity counts the
+// characters a pattern requires literally in the names of a path, which
+// is every character but a separator, a "*", a "?", or a character
+// class. So "**/.moon/tasks/**/*.yml" matches ".moon/tasks/node.yml"
+// with a specificity of 14, and "**/tasks/*.yml" matches it with 9. Each
+// brace alternative counts on its own.
+func (p AnyDepthPatterns) SpecificityClean(path string) (int, bool) {
+	for _, g := range p.globs {
+		if matchGlob(g.glob, path) {
+			if matchAnyGlob(p.excludes, path) {
+				return 0, false
+			}
+
+			return g.specificity, true
+		}
+	}
+
+	return 0, false
 }
 
 // matchAnyGlob reports whether path matches any of globs.
 func matchAnyGlob(globs []string, path string) bool {
-	for _, glob := range globs {
-		// Whether Match reports a pattern error depends on the path, since
-		// doublestar.ValidatePattern accepts some patterns that Match
-		// rejects for a multi-segment path, such as a "{" inside a
-		// character class. The loop skips a pattern that errors for this
-		// path alone.
-		matched, err := doublestar.Match(glob, path)
-		if err == nil && matched {
-			return true
+	return slices.ContainsFunc(globs, func(glob string) bool {
+		return matchGlob(glob, path)
+	})
+}
+
+// matchGlob reports whether path matches glob.
+func matchGlob(glob, path string) bool {
+	// Whether Match reports a pattern error depends on the path, since
+	// doublestar.ValidatePattern accepts some patterns that Match rejects
+	// for a multi-segment path, such as a "{" inside a character class.
+	// A pattern that errors for this path matches nothing.
+	matched, err := doublestar.Match(glob, path)
+
+	return err == nil && matched
+}
+
+// specificity returns the number of characters glob requires literally
+// in the names of a path. It counts every character but a separator, a
+// "*", a "?", or a character class, and it counts an escaped character
+// once. A "[" that nothing closes is a literal and counts. As with
+// [normalizePattern], a caller expands the braces first.
+func specificity(glob string) int {
+	var (
+		n        int
+		unclosed bool
+	)
+
+	for i := 0; i < len(glob); i++ {
+		switch glob[i] {
+		case '\\':
+			i++ // Count the escaped character.
+			n++
+
+		case '[':
+			end := skipClass(glob, i, &unclosed)
+			if end == i {
+				n++
+			}
+
+			i = end
+
+		case '/', '*', '?':
+			// Not required literally.
+
+		default:
+			n++
 		}
 	}
 
-	return false
+	return n
 }
 
 // anyDepth returns pattern with the "**/" prefix that lets it match at any

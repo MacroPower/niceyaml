@@ -300,6 +300,12 @@ func (s *Store) Resolve(ctx context.Context, doc *niceyaml.Node) (schema.Ref, er
 // match. For a path from [niceyaml.NewSourceFromFS], the root of the file
 // system stands for the working directory.
 //
+// When several entries match, FindMatch returns the one whose matching
+// pattern requires the most characters of the path's names literally,
+// ignoring separators and wildcards. So "**/.moon/tasks/**/*.yml" wins
+// over "**/tasks/*.yml" for ".moon/tasks/node.yml". Among entries that
+// tie, the one listed first in the catalog wins.
+//
 // The returned entry owns its FileMatch patterns, so writing to them
 // leaves the cached catalog alone.
 //
@@ -329,19 +335,30 @@ func (s *Store) FindMatch(ctx context.Context, filePath string) (CatalogEntry, e
 
 	cleanPath := filepaths.CleanPath(matchPath)
 
-	for _, entry := range entries {
-		if entry.globs.MatchClean(cleanPath) {
-			// The cached entry shares its pattern slice with s.entries, so
-			// hand the caller a copy it can write to. The prepared globs
-			// serve lookups alone, so the caller gets none.
-			entry.FileMatch = slices.Clone(entry.FileMatch)
-			entry.globs = filepaths.AnyDepthPatterns{}
+	var (
+		best      CatalogEntry
+		bestScore int
+		found     bool
+	)
 
-			return entry, nil
+	for _, entry := range entries {
+		score, ok := entry.globs.SpecificityClean(cleanPath)
+		if ok && (!found || score > bestScore) {
+			best, bestScore, found = entry, score, true
 		}
 	}
 
-	return CatalogEntry{}, fmt.Errorf("%w: %q", ErrNoCatalogMatch, filePath)
+	if !found {
+		return CatalogEntry{}, fmt.Errorf("%w: %q", ErrNoCatalogMatch, filePath)
+	}
+
+	// The cached entry shares its pattern slice with s.entries, so hand
+	// the caller a copy it can write to. The prepared globs serve lookups
+	// alone, so the caller gets none.
+	best.FileMatch = slices.Clone(best.FileMatch)
+	best.globs = filepaths.AnyDepthPatterns{}
+
+	return best, nil
 }
 
 // catalog returns the catalog entries. It fetches or refreshes them first

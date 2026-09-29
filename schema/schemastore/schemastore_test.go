@@ -209,6 +209,88 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 	}
 }
 
+func TestSchemaStore_FindMatchPrefersSpecificPattern(t *testing.T) {
+	t.Parallel()
+
+	// Each case lists a broad entry before a specific one that matches the
+	// same path, as the SchemaStore catalog does.
+	tcs := map[string]struct {
+		path    string
+		entries []schemastore.CatalogEntry
+		want    string
+	}{
+		"winget installer manifest": {
+			path: "/repo/manifests/m/Microsoft/Foo/1.0/Microsoft.Foo.installer.yaml",
+			entries: []schemastore.CatalogEntry{
+				{Name: "Singleton", FileMatch: []string{"**/manifests/?/*/*/*/*.*.yaml"}},
+				{Name: "Installer", FileMatch: []string{"**/manifests/?/*/*/*/*.*.installer.yaml"}},
+			},
+			want: "Installer",
+		},
+		"moon tasks": {
+			path: "/repo/.moon/tasks/node.yml",
+			entries: []schemastore.CatalogEntry{
+				{Name: "Ansible", FileMatch: []string{"**/tasks/*.yml", "**/handlers/*.yml"}},
+				{Name: "moon", FileMatch: []string{"**/.moon/tasks/**/*.yml"}},
+			},
+			want: "moon",
+		},
+		"mason package": {
+			path: "/repo/packages/foo/package.yaml",
+			entries: []schemastore.CatalogEntry{
+				{Name: "hpack", FileMatch: []string{"package.yaml"}},
+				{Name: "Mason", FileMatch: []string{"**/packages/*/package.yaml"}},
+			},
+			want: "Mason",
+		},
+		"vespertide migration": {
+			path: "/repo/migrations/x.vespertide.yml",
+			entries: []schemastore.CatalogEntry{
+				{Name: "Drupal", FileMatch: []string{"*.migration.*.yml", "**/migrations/*.yml"}},
+				{Name: "Vespertide", FileMatch: []string{"**/migrations/**/*.vespertide.yml"}},
+			},
+			want: "Vespertide",
+		},
+		"broad entry when the specific one does not match": {
+			path: "/repo/tasks/main.yml",
+			entries: []schemastore.CatalogEntry{
+				{Name: "Ansible", FileMatch: []string{"**/tasks/*.yml"}},
+				{Name: "moon", FileMatch: []string{"**/.moon/tasks/**/*.yml"}},
+			},
+			want: "Ansible",
+		},
+		"catalog order breaks a tie": {
+			path: "/repo/config.yaml",
+			entries: []schemastore.CatalogEntry{
+				{Name: "First", FileMatch: []string{"*.yaml"}},
+				{Name: "Second", FileMatch: []string{"**/*.yaml"}},
+			},
+			want: "First",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			catalog := schemastore.Catalog{}
+			for i, entry := range tc.entries {
+				entry.URL = fmt.Sprintf("https://example.com/schema-%d.json", i)
+				catalog.Schemas = append(catalog.Schemas, entry)
+			}
+
+			store := schemastore.New(
+				schemastore.WithCatalogURL("https://example.com/catalog.json"),
+				schemastore.WithHTTPClient(newCatalogClient(t, catalog)),
+			)
+
+			entry, err := store.FindMatch(t.Context(), tc.path)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, entry.Name)
+		})
+	}
+}
+
 func TestSchemaStore_FindMatchDoesNotAliasCatalog(t *testing.T) {
 	t.Parallel()
 
@@ -234,7 +316,7 @@ func TestSchemaStore_FindMatchDoesNotAliasCatalog(t *testing.T) {
 		schemastore.WithHTTPClient(newCatalogClient(t, catalog)),
 	)
 
-	entry, err := store.FindMatch(t.Context(), "/x/myapp.yaml")
+	entry, err := store.FindMatch(t.Context(), "/x/other.yaml")
 	require.NoError(t, err)
 	// The entry equals the catalog's, so no state the store keeps for
 	// matching reaches the caller.
@@ -242,7 +324,7 @@ func TestSchemaStore_FindMatchDoesNotAliasCatalog(t *testing.T) {
 
 	entry.FileMatch[0] = "*.json"
 
-	entry, err = store.FindMatch(t.Context(), "/x/myapp.yaml")
+	entry, err = store.FindMatch(t.Context(), "/x/other.yaml")
 	require.NoError(t, err)
 	assert.Equal(t, "Generic", entry.Name)
 	assert.Equal(t, []string{"*.yaml"}, entry.FileMatch)

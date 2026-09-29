@@ -562,6 +562,79 @@ func TestAnyDepthPatterns_MatchClean(t *testing.T) {
 	}
 }
 
+func TestAnyDepthPatterns_SpecificityClean(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		path     string
+		patterns []string
+		want     int
+		wantOK   bool
+	}{
+		"counts literal characters of names": {
+			path:     "/repo/.moon/tasks/node.yml",
+			patterns: []string{"**/.moon/tasks/**/*.yml"},
+			want:     14,
+			wantOK:   true,
+		},
+		"broad pattern": {
+			path:     "/repo/.moon/tasks/node.yml",
+			patterns: []string{"**/tasks/*.yml"},
+			want:     9,
+			wantOK:   true,
+		},
+		"most specific matching pattern": {
+			path:     "/repo/packages/foo/package.yaml",
+			patterns: []string{"package.yaml", "**/packages/*/package.yaml"},
+			want:     20,
+			wantOK:   true,
+		},
+		"most specific brace alternative that matches": {
+			path:     "/repo/migrations/x.vespertide.yml",
+			patterns: []string{"**/migrations/{*.yml,**/*.vespertide.yml}"},
+			want:     25,
+			wantOK:   true,
+		},
+		"pattern that does not match is ignored": {
+			path:     "/repo/config.yaml",
+			patterns: []string{"*.yaml", "**/other/config.yaml"},
+			want:     5,
+			wantOK:   true,
+		},
+		"question mark and class": {
+			path:     "/repo/a1.yaml",
+			patterns: []string{"?[0-9].yaml"},
+			want:     5,
+			wantOK:   true,
+		},
+		"escaped character": {
+			path:     "/repo/a*.yaml",
+			patterns: []string{"a\\*.yaml"},
+			want:     7,
+			wantOK:   true,
+		},
+		"excluded path": {
+			path:     "/repo/docker-compose.yml",
+			patterns: []string{"*.yml", "!docker-compose.yml"},
+		},
+		"no match": {
+			path:     "/repo/config.json",
+			patterns: []string{"*.yaml"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := filepaths.NewAnyDepthPatterns(tc.patterns)
+			got, ok := p.SpecificityClean(filepaths.CleanPath(tc.path))
+			assert.Equal(t, tc.wantOK, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestExpandBraces_Budget(t *testing.T) {
 	t.Parallel()
 
