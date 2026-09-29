@@ -304,8 +304,13 @@ func expandPaths(args ...string) ([]string, error) {
 		// Cleaning a name as text would drop a ".." together with a
 		// symlinked directory before it, while the OS steps up from the
 		// directory the link leads to, so two different files could look
-		// like one.
+		// like one. A dangling symlink reaches no file, so the link itself
+		// stands in for one, and two names of one link count once.
 		info, err := os.Stat(path)
+		if err != nil {
+			info, err = os.Lstat(path)
+		}
+
 		if err == nil {
 			if seenFiles.add(info) {
 				result = append(result, path)

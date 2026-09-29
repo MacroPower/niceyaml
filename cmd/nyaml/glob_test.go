@@ -234,6 +234,7 @@ func TestExpandPathsSymlinks(t *testing.T) {
 	//     x.yaml
 	//   x.yaml
 	//   link.yaml -> sub/x.yaml
+	//   dangling.yaml -> missing.yaml
 	//   ldir -> sub
 	//   deeplink -> sub/deep
 	tmpDir := t.TempDir()
@@ -241,6 +242,7 @@ func TestExpandPathsSymlinks(t *testing.T) {
 	target := filepath.Join(subdir, "x.yaml")
 	top := filepath.Join(tmpDir, "x.yaml")
 	link := filepath.Join(tmpDir, "link.yaml")
+	dangling := filepath.Join(tmpDir, "dangling.yaml")
 	throughDir := filepath.Join(tmpDir, "ldir", "x.yaml")
 
 	// The OS steps up from the directory deeplink leads to, so this name
@@ -257,6 +259,7 @@ func TestExpandPathsSymlinks(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
+	require.NoError(t, os.Symlink("missing.yaml", dangling))
 	require.NoError(t, os.Symlink("sub", filepath.Join(tmpDir, "ldir")))
 	require.NoError(t, os.Symlink(filepath.Join("sub", "deep"), filepath.Join(tmpDir, "deeplink")))
 
@@ -266,7 +269,15 @@ func TestExpandPathsSymlinks(t *testing.T) {
 	}{
 		"recursive glob with symlinked file": {
 			args: []string{tmpDir + "/**/*.yaml"},
-			want: []string{link, top},
+			want: []string{dangling, link, top},
+		},
+		"dangling symlink matched by two spellings": {
+			args: []string{tmpDir + "/./dangling*", tmpDir + "/dangling*"},
+			want: []string{tmpDir + "/./dangling.yaml"},
+		},
+		"dangling symlink through symlinked directory and directly": {
+			args: []string{tmpDir + "/ldir/../dangling.yaml", dangling},
+			want: []string{tmpDir + "/ldir/../dangling.yaml"},
 		},
 		"symlink and target named explicitly": {
 			args: []string{link, target},
