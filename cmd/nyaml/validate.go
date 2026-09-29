@@ -94,8 +94,10 @@ func validateCmd() *cobra.Command {
 
 // validateFile validates every document of the file at yamlPath against the
 // registry and joins what every document reports, so one run names each
-// invalid document. Once ctx is canceled, validateFile validates no
-// further document, since each would report the cancellation again.
+// invalid document. A file that holds no document, such as one that is
+// only a "..." marker, validates as an empty file does. Once ctx is
+// canceled, validateFile validates no further document, since each would
+// report the cancellation again.
 //
 // Each error it returns is bound to the source, and the source takes
 // yamlPath as the user typed it for its name. Each message then opens
@@ -114,10 +116,12 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 	// Resolvers route on the absolute path, and WithName keeps messages
 	// naming the file as the user typed it. The read uses the typed path,
 	// so a read error names the file that way too.
-	source, err := niceyaml.NewSourceFromFile(yamlPath,
+	opts := []niceyaml.SourceOption{
 		niceyaml.WithName(yamlPath),
 		niceyaml.WithFilePath(absPath),
-	)
+	}
+
+	source, err := niceyaml.NewSourceFromFile(yamlPath, opts...)
 	if err != nil {
 		return err
 	}
@@ -125,6 +129,17 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 	docs, err := source.Documents()
 	if err != nil {
 		return err
+	}
+
+	// Text that is only a "..." marker holds no document, while an empty
+	// file holds one null document. Validating the null document of an
+	// empty source instead keeps such a file from passing a schema that
+	// an empty file fails.
+	if len(docs) == 0 {
+		docs, err = niceyaml.NewSourceFromString("", opts...).Documents()
+		if err != nil {
+			return err
+		}
 	}
 
 	var errs []error

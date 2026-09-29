@@ -101,6 +101,56 @@ func TestValidateFile(t *testing.T) {
 	}
 }
 
+func TestValidateFileNoDocuments(t *testing.T) {
+	t.Parallel()
+
+	// A file of text that is only a "..." marker holds no document. It
+	// validates as an empty file does, which holds one null document.
+	tcs := map[string]struct {
+		reg     *schema.Registry
+		content string
+		// Message after the file path, or empty when the file is valid.
+		want string
+	}{
+		"empty file against a schema": {
+			reg:     schema.NewRegistry(schema.WithResolvers(schema.Embedded(nameSchema))),
+			content: "",
+			want:    `: $: expected "object", got "null"`,
+		},
+		"document end marker against a schema": {
+			reg:     schema.NewRegistry(schema.WithResolvers(schema.Embedded(nameSchema))),
+			content: "...\n",
+			want:    `: $: expected "object", got "null"`,
+		},
+		"document end marker with no schema": {
+			reg: schema.NewRegistry(
+				schema.WithResolvers(schema.Directive()),
+				schema.WithRequireSchema(false),
+			),
+			content: "...\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(tc.content), 0o600))
+
+			err := validateFile(t.Context(), path, tc.reg)
+			if tc.want == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.Error(t, err)
+			assert.Equal(t, path+tc.want, err.Error())
+		})
+	}
+}
+
 func TestValidateFileRoutesOnAbsolutePath(t *testing.T) {
 	t.Parallel()
 
