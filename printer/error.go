@@ -27,7 +27,9 @@ const errorConnectorWidth = 4
 // the row below, as [niceyaml.FormatError] draws one.
 // [niceyaml.SourceError.Excerpt] marks such a line with an annotation
 // without content, and [DefaultAnnotation] draws that as the caret run, so
-// the range shows its extent without color. Blank lines separate the
+// the range shows its extent without color. A location that covers no
+// column, such as a path to an empty value, gets a single caret at its
+// column. Blank lines separate the
 // parts. A SourceError whose location does not resolve prints a line
 // starting "no excerpt:" that names the reason in place of its excerpt,
 // unless it carries no location at all.

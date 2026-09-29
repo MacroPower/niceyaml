@@ -216,6 +216,7 @@ func TestPrinter_PrintError(t *testing.T) {
 	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
 	other := niceyaml.NewSourceFromString("c: 3\n")
 	nested := niceyaml.NewSourceFromString("a:\n  b: 2\n")
+	empty := niceyaml.NewSourceFromString("a:\nb: 2\n")
 
 	// The root has no message beside its range, so a caret run under the
 	// range shows its extent without color.
@@ -278,6 +279,24 @@ func TestPrinter_PrintError(t *testing.T) {
 		"bound error without a location": {
 			err:  yamltest.Bind(t, source, niceyaml.NewError("bad")),
 			want: "bad",
+		},
+		// A location with no token under it covers no column, so a lone
+		// caret marks its spot.
+		"bound error at an empty value": {
+			err: yamltest.Bind(t, empty, niceyaml.NewError("required", niceyaml.AtPath(paths.Root().Child("a")))),
+			want: "1:3: $.a: required\n\n" + stringtest.JoinLF(
+				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
+				"<textError>  ^</textError>",
+				"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>2</literalNumberInteger>",
+			),
+		},
+		"bound error past the end of a line": {
+			err: yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 500)))),
+			want: "1:501: bad\n\n" + stringtest.JoinLF(
+				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>1</literalNumberInteger>",
+				"<textError>    ^</textError>",
+				"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>2</literalNumberInteger>",
+			),
 		},
 		"bound error with an empty message": {
 			err:  yamltest.Bind(t, source, niceyaml.WrapError(nil, niceyaml.AtPath(paths.Root().Child("b")))),
@@ -2570,14 +2589,17 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 				"second: 2",
 			),
 		},
-		"below annotation with empty content renders no row": {
+		"below annotation with empty content marks its column": {
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
 				Placement: line.Below,
 				Col:       2,
 			},
-			want: "key: value",
+			want: stringtest.JoinLF(
+				"key: value",
+				"  ^",
+			),
 		},
 	}
 
@@ -3925,17 +3947,32 @@ func TestDefaultAnnotation(t *testing.T) {
 			position:    line.Below,
 			want:        []printer.AnnotationRow{{Col: 0, Text: "^^"}},
 		},
-		"empty content with an overlay of no width renders nothing": {
+		"empty content with an overlay of no width marks its column": {
 			content:     "a: 1",
 			annotations: line.Annotations{{Placement: line.Below, Col: 4}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(4, 4)}},
 			position:    line.Below,
+			want:        []printer.AnnotationRow{{Col: 4, Text: "^"}},
 		},
-		"empty content with an overlay past the content renders nothing": {
+		"empty content with an overlay of no width marks a wide rune": {
+			content:     "a: 日本",
+			annotations: line.Annotations{{Placement: line.Below, Col: 3}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(3, 3)}},
+			position:    line.Below,
+			want:        []printer.AnnotationRow{{Col: 3, Text: "^^"}},
+		},
+		"empty content with an overlay past the content marks the column": {
 			content:     "a: 1",
-			annotations: line.Annotations{{Placement: line.Below}},
+			annotations: line.Annotations{{Placement: line.Below, Col: 4}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(4, 6)}},
 			position:    line.Below,
+			want:        []printer.AnnotationRow{{Col: 4, Text: "^"}},
+		},
+		"empty content with a negative column marks column zero": {
+			content:     "a: 1",
+			annotations: line.Annotations{{Placement: line.Below, Col: -3}},
+			position:    line.Below,
+			want:        []printer.AnnotationRow{{Col: 0, Text: "^"}},
 		},
 		"empty content above the line renders nothing": {
 			content:     "a: 1",
@@ -4002,9 +4039,10 @@ func TestDefaultAnnotation(t *testing.T) {
 			position: line.Above,
 			want:     []printer.AnnotationRow{{Col: 0, Text: "header1; header2"}},
 		},
-		"empty content renders nothing": {
+		"empty content without overlays marks its column": {
 			annotations: line.Annotations{{Placement: line.Below, Col: 2}},
 			position:    line.Below,
+			want:        []printer.AnnotationRow{{Col: 2, Text: "^"}},
 		},
 		"empty content is left out of the join": {
 			annotations: line.Annotations{

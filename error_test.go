@@ -3806,7 +3806,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 				err:     niceyaml.NewError("far", niceyaml.AtPosition(far)),
 				want:    line.Annotations{{Kind: kind.TextError, Placement: line.Below, Col: 4}},
 				row:     "     |     ^",
-				printed: "<literalNumberInteger>1</literalNumberInteger>",
+				printed: "<textError>    ^</textError>",
 			},
 		}
 

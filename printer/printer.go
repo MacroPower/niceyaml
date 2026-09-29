@@ -369,8 +369,10 @@ func NoAnnotation(AnnotationContext) []AnnotationRow {
 // with empty content. When none remain, an annotation below the line
 // still marks it. The row is then a caret under every column the line's
 // overlays cover, as [line.View.String] and [line.Overlays.MarkerRow]
-// draw them, so a marked range shows its extent without color, or
-// nothing when the overlays cover no column. When the line wraps, each
+// draw them, so a marked range shows its extent without color. When the
+// overlays cover no column, as an overlay of no width covers none, the
+// row is a single caret at the column of the annotations, so the spot
+// still shows. When the line wraps, each
 // wrapped row that holds a covered column gets a caret row of its own
 // below it, which marks the covered columns of that row. A space the wrap
 // drops at a break gets no caret. An annotation above the line with
@@ -406,7 +408,8 @@ func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 // covered columns of its row. A row ends before the spaces the wrap drops
 // at its break, so those spaces get no caret. It escapes the content
 // first, as the printer shows it, so a tab counts as its picture rather
-// than a space.
+// than a space. When the overlays cover no column, it returns one row
+// with a single caret at the column of the annotations.
 func markerRows(ctx AnnotationContext) []AnnotationRow {
 	starts := ctx.RowStarts
 	if len(starts) == 0 {
@@ -443,7 +446,27 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 		})
 	}
 
+	if len(rows) == 0 && len(ctx.Annotations) > 0 {
+		rows = append(rows, caretRow(ctx.Content, ctx.Annotations.Col()))
+	}
+
 	return rows
+}
+
+// caretRow returns a row that marks col of content with a caret as wide
+// as [line.Overlays.MarkerRow] draws the rune there. A column past the
+// end of the content gets a caret one cell wide.
+func caretRow(content string, col int) AnnotationRow {
+	col = max(0, col)
+
+	mark := line.Overlays{{Cols: position.NewSpan(col, col+1)}}
+	text := strings.TrimLeft(mark.MarkerRow(content), " ")
+
+	if text == "" {
+		text = "^"
+	}
+
+	return AnnotationRow{Col: col, Text: text}
 }
 
 // clipOverlays returns the overlays cut to the columns [lo, hi), without
