@@ -166,6 +166,61 @@ func TestValidateFileDotDotAfterSymlink(t *testing.T) {
 	require.NoError(t, validateFile(t.Context(), path, reg))
 }
 
+func TestBuildRegistrySchemaDotDotAfterSymlink(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows drops a .. element as text before it follows a symlink")
+	}
+
+	// With ldir linking to sub/deep, the OS reads ldir/../schema.json as
+	// sub/schema.json, which accepts a string. The schema.json beside
+	// ldir, which cleaning the path as text would name, rejects one.
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(sub, "deep"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(sub, "schema.json"), []byte(`{"type": "string"}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "schema.json"), []byte(`{"type": "integer"}`), 0o600))
+
+	yamlPath := filepath.Join(dir, "x.yaml")
+	require.NoError(t, os.WriteFile(yamlPath, []byte("hello\n"), 0o600))
+
+	err := os.Symlink(filepath.Join("sub", "deep"), filepath.Join(dir, "ldir"))
+	if err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	rel, err := filepath.Rel(wd, dir)
+	require.NoError(t, err)
+
+	// The test builds each ref as text, since filepath.Join would clean it.
+	tcs := map[string]struct {
+		ref string
+	}{
+		"absolute": {
+			ref: dir + "/ldir/../schema.json",
+		},
+		"relative": {
+			ref: rel + "/ldir/../schema.json",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg, err := buildRegistry(t.Context(), tc.ref)
+			require.NoError(t, err)
+
+			require.NoError(t, validateFile(t.Context(), yamlPath, reg))
+		})
+	}
+}
+
 func TestPhysicalAbs(t *testing.T) {
 	t.Parallel()
 

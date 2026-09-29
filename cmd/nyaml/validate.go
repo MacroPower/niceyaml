@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 
 	"github.com/spf13/cobra"
@@ -191,6 +192,10 @@ func physicalAbs(path string) string {
 	return filepath.Join(resolved, abs[end:])
 }
 
+// schemePrefix matches a ref that opens with a URL scheme, such as
+// "https:" or "file:". It also matches a drive letter such as "C:".
+var schemePrefix = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+.-]*:`)
+
 // lastDotDotEnd returns the index just past the last ".." element of
 // path, or -1 when path has none.
 func lastDotDotEnd(path string) int {
@@ -216,9 +221,10 @@ func lastDotDotEnd(path string) int {
 // When schemaRef is not empty, buildRegistry loads and compiles that schema
 // once, before the command reads any file. The compiled schema is then the
 // only resolver, so every document validates against it. A schema that
-// cannot load or compile fails the command with one "--schema:" error. The
-// schema ref resolves relative to the current working directory, and a
-// $ref inside the schema resolves relative to the schema's own file or URL.
+// cannot load or compile fails the command with one "--schema:" error. A
+// schema path resolves relative to the current working directory, through
+// [physicalAbs], so it names the file the OS opens for it. A $ref inside
+// the schema resolves relative to the schema's own file or URL.
 //
 // Otherwise the registry matches on schema directives first, and a
 // directive's reference resolves relative to its own YAML file. A document
@@ -228,8 +234,16 @@ func lastDotDotEnd(path string) int {
 // reports that in the file's error. Schema validation is optional here, so
 // a document that no resolver claims passes rather than failing the file.
 func buildRegistry(ctx context.Context, schemaRef string) (*schema.Registry, error) {
-	// Resolve relative to current working directory. If cwd fails, use ".".
 	if schemaRef != "" {
+		// FileOrURL cleans a path as text, which drops a ".." together
+		// with a symlinked directory before it. A URL or drive-letter
+		// path opens with a scheme and goes to FileOrURL as written.
+		if !schemePrefix.MatchString(schemaRef) {
+			schemaRef = physicalAbs(schemaRef)
+		}
+
+		// A relative ref that physicalAbs could not make absolute resolves
+		// relative to the working directory. If cwd fails, use ".".
 		cwd, err := os.Getwd()
 		if err != nil {
 			cwd = "."
