@@ -4,7 +4,6 @@ import (
 	"math"
 	"slices"
 	"sort"
-	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -194,10 +193,10 @@ func mapRows(ln *line.Line, rendered string, runs []runSpan, pieces []string) wr
 // for rune. The first column of any other run begins where the run
 // begins, so it takes the runes a transform adds before the text of the
 // run, such as an opening bracket. A later column of a run that shows
-// its text verbatim begins at its rune within that text, as
-// [textStart] finds it. In a run whose transform rewrites the text, the
-// shown runes match against the text of the run as sourceCol matches
-// them.
+// its text verbatim begins at its rune within that text, which starts
+// at the textAt field of [runSpan]. In a run whose transform rewrites
+// the text, the shown runes match against the text of the run as
+// sourceCol matches them.
 func shownOffset(runs []runSpan, shown []rune, col, contentLen int) int {
 	switch {
 	case col <= 0 || len(runs) == 0:
@@ -219,8 +218,8 @@ func shownOffset(runs []runSpan, shown []rune, col, contentLen int) int {
 		return run.shown
 	}
 
-	if start, ok := textStart(run, shown); ok {
-		return run.shown + start + want
+	if run.textAt >= 0 {
+		return run.shown + run.textAt + want
 	}
 
 	text := []rune(run.text)
@@ -249,11 +248,12 @@ func shownOffset(runs []runSpan, shown []rune, col, contentLen int) int {
 // column stays within the run. A run that shows as many runes as it
 // covers maps rune for rune, as a style that only colors its text or
 // changes its case does. A run that shows its text verbatim among runes
-// a transform adds maps rune for rune from where [textStart] finds the
-// text. An added rune before the text takes the first column of the run,
-// and one after it takes the column past the run. In a run whose
-// transform rewrites the text, the shown runes before offset match
-// against the text of the run as [rowBounds] matches pieces.
+// a transform adds maps rune for rune from the textAt field of
+// [runSpan], where the text starts. An added rune before the text takes
+// the first column of the run, and one after it takes the column past
+// the run. In a run whose transform rewrites the text, the shown runes
+// before offset match against the text of the run as [rowBounds]
+// matches pieces.
 func sourceCol(runs []runSpan, shown []rune, offset, contentLen int) int {
 	switch {
 	case offset <= 0:
@@ -270,8 +270,8 @@ func sourceCol(runs []runSpan, shown []rune, offset, contentLen int) int {
 		return run.col + offset - run.shown
 	}
 
-	if start, ok := textStart(run, shown); ok {
-		return run.col + min(max(offset-run.shown-start, 0), run.cols)
+	if run.textAt >= 0 {
+		return run.col + min(max(offset-run.shown-run.textAt, 0), run.cols)
 	}
 
 	text := []rune(run.text)
@@ -287,25 +287,6 @@ func sourceCol(runs []runSpan, shown []rune, offset, contentLen int) int {
 	}
 
 	return run.col + min(next, run.cols)
-}
-
-// textStart returns the offset, counted from the start of run in shown,
-// at which the shown runes of run hold its text verbatim, and reports
-// whether they hold it. A transform that adds runes around the text,
-// such as brackets or a prefix, keeps it verbatim, and one that rewrites
-// the text itself does not. Matching the text as a whole keeps an added
-// rune that equals a rune of the text from counting as that rune. When
-// the added runes hold the text too, as "a"+s does for "a", the first
-// occurrence counts.
-func textStart(run runSpan, shown []rune) (int, bool) {
-	runShown := string(shown[run.shown : run.shown+run.shownLen])
-
-	i := strings.Index(runShown, run.text)
-	if i < 0 {
-		return 0, false
-	}
-
-	return utf8.RuneCountInString(runShown[:i]), true
 }
 
 // nbsp is the non-breaking space, the one Unicode space the wrapper keeps

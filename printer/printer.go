@@ -1017,6 +1017,15 @@ type runSpan struct {
 	cols     int    // The number of columns of the content the run covers.
 	shown    int    // The offset in the shown text at which the run starts.
 	shownLen int    // The number of runes the run shows.
+
+	// The offset, counted from shown, at which the shown runes of the run
+	// hold its text verbatim, or -1 when they do not. A transform that
+	// adds runes around the text, such as brackets or a prefix, keeps it
+	// verbatim, and one that rewrites the text itself does not. Matching
+	// the text as a whole keeps an added rune that equals a rune of the
+	// text from counting as that rune. When the added runes hold the text
+	// too, as "a"+s does for "a", the first occurrence counts.
+	textAt int
 }
 
 // renderRuns renders the content of line idx of view with its overlays,
@@ -1062,12 +1071,18 @@ func (p *Printer) renderRuns(view *line.View, idx int) (string, []runSpan) {
 		// text counts the columns of the run.
 		text := escape.Control(run.String())
 		rendered := p.blended(runKey, runSeg).Render(text)
+		runShown := ansi.Strip(rendered)
 		span := runSpan{
 			text:     text,
 			col:      col,
 			cols:     utf8.RuneCountInString(text),
 			shown:    shown,
-			shownLen: utf8.RuneCountInString(ansi.Strip(rendered)),
+			shownLen: utf8.RuneCountInString(runShown),
+			textAt:   -1,
+		}
+
+		if before, _, ok := strings.Cut(runShown, text); ok {
+			span.textAt = utf8.RuneCountInString(before)
 		}
 
 		sb.WriteString(rendered)

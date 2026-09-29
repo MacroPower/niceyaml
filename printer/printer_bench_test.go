@@ -288,6 +288,29 @@ func BenchmarkLinesAddOverlay(b *testing.B) {
 	}
 }
 
+func BenchmarkPrinterLayout_LongTransformedValue(b *testing.B) {
+	// A transform that adds runes around a long value makes the shown text
+	// of its run longer than the content, and the value wraps into many
+	// rows that each map back to a column of the content.
+	brackets := lipgloss.NewStyle().Transform(func(s string) string { return "[" + s + "]" })
+	styles := style.New(lipgloss.NewStyle(), style.Set(kind.LiteralString, brackets))
+
+	for _, n := range []int{8000, 32000} {
+		view := niceyaml.NewSourceFromString("data: " + strings.Repeat("QUJD", n/4) + "\n").View()
+
+		b.Run(fmt.Sprintf("chars_%d", n), func(b *testing.B) {
+			p := printer.New(printer.WithWrap(80), printer.WithStyles(styles))
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				_ = p.Layout(view)
+			}
+		})
+	}
+}
+
 func BenchmarkPrinterPrintError_LongWrappedValue(b *testing.B) {
 	// A long base64 value, as a Kubernetes Secret holds, wraps into many
 	// rows, and the caret run under it takes a row below each one.
