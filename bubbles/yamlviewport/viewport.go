@@ -83,33 +83,39 @@ func (s finderSearcher) Load(lines line.Lines) Index {
 // by index. A search covers the content of the view, and the viewport
 // keeps the matches on lines the view holds.
 //
-// See [NewRevision] and [niceyaml.Source] for implementations.
+// See [ViewRevision] and [niceyaml.Source] for implementations.
 type Revision interface {
 	Name() string
 	View() *line.View
 }
 
-var _ Revision = (*niceyaml.Source)(nil)
+var (
+	_ Revision = (*niceyaml.Source)(nil)
+	_ Revision = ViewRevision{}
+)
 
-// NewRevision creates a new [Revision] from a name and a view of its
-// content.
-func NewRevision(name string, view *line.View) Revision {
-	return revision{name: name, view: view}
-}
-
-// revision is the [Revision] that [NewRevision] returns.
-type revision struct {
+// ViewRevision is a [Revision] that pairs a name with a view the caller
+// built, such as a view with decoration.
+//
+// Create instances with [NewRevision].
+type ViewRevision struct {
 	view *line.View
 	name string
 }
 
+// NewRevision creates a new [ViewRevision] from a name and a view of its
+// content.
+func NewRevision(name string, view *line.View) ViewRevision {
+	return ViewRevision{name: name, view: view}
+}
+
 // Name implements [Revision].
-func (r revision) Name() string {
+func (r ViewRevision) Name() string {
 	return r.name
 }
 
 // View implements [Revision].
-func (r revision) View() *line.View {
+func (r ViewRevision) View() *line.View {
 	return r.view
 }
 
