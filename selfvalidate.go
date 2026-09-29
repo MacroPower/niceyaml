@@ -837,10 +837,20 @@ func (w *selfWalker) keyDecoder() *yaml.Decoder {
 // value it decodes to, as [nameKey] keys it. The text of a block scalar
 // key is its content rather than its `|` or `>` indicator. A key that does
 // not decode, whose decode panics, or whose value cannot key a map, adds
-// nothing, and neither does an alias key, which decodes only beside the
-// anchor it names.
+// nothing. An alias key takes its text and value from the content of its
+// anchor, as [paths] names it, and adds nothing when that anchor does not
+// resolve.
 func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[any]string) {
 	node := keyValueNode(key)
+
+	if _, ok := node.(*ast.AliasNode); ok {
+		content, err := w.pathResolver().Deref(node)
+		if err != nil || content == nil {
+			return
+		}
+
+		node = content
+	}
 
 	var name string
 
@@ -853,9 +863,6 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 		}
 
 		name = n.Value.Value
-
-	case *ast.AliasNode:
-		return
 
 	case ast.ScalarNode:
 		tk := n.GetToken()

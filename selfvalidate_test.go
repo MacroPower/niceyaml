@@ -864,7 +864,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		// An alias key reports the content of its anchor, and a block
 		// scalar key reports its content rather than its indicator.
 		type named struct {
-			M map[string]item `yaml:"m"`
+			M map[string]item  `yaml:"m"`
+			F map[float64]item `yaml:"f"`
 		}
 
 		namedTcs := map[string]struct {
@@ -874,6 +875,18 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"alias": {
 				input: "base: &k n\nm:\n  *k : {price: -1}\n",
 				want:  "3:16: $.m.n.price: negative price",
+			},
+			"alias to a hexadecimal int": {
+				input: "base: &k 0x10\nf:\n  *k : {price: -1}\n",
+				want:  "3:16: $.f.0x10.price: negative price",
+			},
+			"alias to a float with a trailing zero": {
+				input: "base: &k 1.50\nf:\n  *k : {price: -1}\n",
+				want:  "3:16: $.f.'1.50'.price: negative price",
+			},
+			"string alias to a hexadecimal int": {
+				input: "base: &k 0x10\nm:\n  *k : {price: -1}\n",
+				want:  "3:16: $.m.0x10.price: negative price",
 			},
 			"block scalar": {
 				input: "m:\n  ? |-\n    n\n  : {price: -1}\n",
