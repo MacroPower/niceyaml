@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"math"
 	"slices"
 	"sort"
 	"unicode"
@@ -9,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -30,7 +32,8 @@ import (
 // return the index of a line in the content of the view, the one every
 // [line.View] method takes, so a viewer that finds the line at a row
 // reaches its decoration through the view with the same index.
-// [Layout.RowOf] takes a position in the content, as a search yields one.
+// [Layout.RowOf] and [Layout.CellOf] take a position in the content, as a
+// search yields one.
 // A line the view does not hold takes no rows and starts nowhere. Rows
 // count from 0 at the first row of the first line and leave the container
 // style out. An empty view has no rows, though [Printer.Print] draws one
@@ -49,12 +52,24 @@ type Layout struct {
 // content at which each wrapped content row begins and the row each
 // content row takes among the line's rows. It also holds the number of
 // rows the line takes, annotation rows included, and the width of the
-// widest of them.
+// widest of them. Its shown text maps a column of the content to the cell
+// it takes on its row.
 type lineLayout struct {
 	cols    []int
 	offsets []int
+	shown   shownLine
 	rows    int
 	width   int
+}
+
+// shownLine is the shown text of one line, the rendered line without its
+// escape sequences, with the runs it renders in and the offset in the
+// text at which each wrapped row begins.
+type shownLine struct {
+	text       string
+	runs       []runSpan
+	starts     []int
+	contentLen int
 }
 
 // Layout computes the [Layout] of view as [Printer.Print] would render it.
@@ -83,11 +98,12 @@ func (p *Printer) Layout(view *line.View) Layout {
 // layoutLine computes the row structure of line idx of view, which is ln,
 // as [Printer.renderLine] writes its rows.
 func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidth int) lineLayout {
-	pieces, starts := p.wrapLine(view, idx, ln, gutterWidth)
+	pieces, starts, shown := p.wrapLine(view, idx, ln, gutterWidth)
 	above := p.annotationRows(view, ln, idx, gutterWidth, line.Above, starts)
 	below := p.annotationRows(view, ln, idx, gutterWidth, line.Below, starts)
 
 	ll := lineLayout{
+		shown:   shown,
 		cols:    starts,
 		offsets: make([]int, len(pieces)),
 	}
@@ -110,8 +126,8 @@ func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidt
 
 // wrapLine renders the content of line idx of view, which is ln, wraps it
 // to the printer width, and returns the pieces with the column of the
-// content at which each piece begins.
-func (p *Printer) wrapLine(view *line.View, idx int, ln *line.Line, gutterWidth int) ([]string, []int) {
+// content at which each piece begins, and the shown text of the line.
+func (p *Printer) wrapLine(view *line.View, idx int, ln *line.Line, gutterWidth int) ([]string, []int, shownLine) {
 	// The content wraps as the rendered line does, styles included, since
 	// a style's transform may change the shown text. The wrap is
 	// ANSI-aware and measures the shown cells.
@@ -131,12 +147,64 @@ func (p *Printer) wrapLine(view *line.View, idx int, ln *line.Line, gutterWidth 
 	shown := []rune(shownText)
 	contentLen := utf8.RuneCountInString(ln.Content())
 
-	starts := rowStarts(shownText, plain)
-	for i, offset := range starts {
+	offsets := rowStarts(shownText, plain)
+	starts := make([]int, len(offsets))
+
+	for i, offset := range offsets {
 		starts[i] = sourceCol(runs, shown, offset, contentLen)
 	}
 
-	return pieces, starts
+	return pieces, starts, shownLine{
+		text:       shownText,
+		runs:       runs,
+		starts:     offsets,
+		contentLen: contentLen,
+	}
+}
+
+// shownOffset returns the offset in shown, the shown text of a line, at
+// which col, a column of the content, begins. It inverts [sourceCol] with
+// the same runs and contentLen, so it returns the first offset that
+// sourceCol maps to col or past it. A column at or past the end of the
+// content maps to the end of shown.
+//
+// In a run that shows as many runes as it covers, the offset moves rune
+// for rune. In any other run, the shown runes match against the text of
+// the run as sourceCol matches them, so a rune a transform adds before
+// the text of the run, such as an opening bracket, comes before the
+// offset of the first column of the run.
+func shownOffset(runs []runSpan, shown []rune, col, contentLen int) int {
+	switch {
+	case col <= 0 || len(runs) == 0:
+		return 0
+	case col >= contentLen:
+		return len(shown)
+	}
+
+	// The last run that starts at or before col, which covers it. Search
+	// finds the first run that starts past col, and the first run starts
+	// at column 0.
+	run := runs[sort.Search(len(runs), func(i int) bool { return runs[i].col > col })-1]
+	if run.shownLen == run.cols {
+		return run.shown + col - run.col
+	}
+
+	text := []rune(run.text)
+	want := col - run.col
+	next := 0
+
+	for i, r := range shown[run.shown : run.shown+run.shownLen] {
+		if next >= want {
+			return run.shown + i
+		}
+
+		next = skipDropped(text, nil, next, r)
+		if next < len(text) && text[next] == r {
+			next++
+		}
+	}
+
+	return run.shown + run.shownLen
 }
 
 // sourceCol returns the column of the content at which offset in shown,
@@ -360,6 +428,40 @@ func (l Layout) RowOf(pos position.Position) int {
 	ll := l.lines[k]
 
 	return l.starts[k] + ll.offsets[rowIndex(ll.cols, pos.Col)]
+}
+
+// CellOf returns the cell that column pos.Col of line pos.Line of the
+// content takes on the row [Layout.RowOf] puts it on, counted from the
+// start of that row with the gutter left out. A viewer that scrolls
+// horizontally adds [Layout.GutterWidth] to find the cell of a column.
+// The cell comes from the shown text, so it counts the cells a style's
+// transform adds or removes before the column. A column inside a
+// grapheme cluster takes the cell where its cluster starts. A column past
+// the end of the content takes one cell for every column past it, as
+// [ColWidth] counts them. Returns -1 when the layout does not hold the
+// line.
+func (l Layout) CellOf(pos position.Position) int {
+	k, ok := l.position(pos.Line)
+	if !ok {
+		return -1
+	}
+
+	ll := l.lines[k]
+	sl := ll.shown
+	shown := []rune(sl.text)
+	col := max(0, pos.Col)
+
+	offset := shownOffset(sl.runs, shown, col, sl.contentLen)
+
+	from := 0
+	if r := rowIndex(ll.cols, col); r < len(sl.starts) {
+		from = min(sl.starts[r], offset)
+	}
+
+	cell := cells.NewRow(string(shown[from:])).Width(offset - from)
+	past := max(0, col-sl.contentLen)
+
+	return cell + min(past, math.MaxInt-cell)
 }
 
 // Width returns the width in cells of the widest row, gutter included,

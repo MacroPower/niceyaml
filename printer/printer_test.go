@@ -5578,6 +5578,94 @@ func TestPrinter_WithAnnotation_Nil(t *testing.T) {
 	assert.Equal(t, "key: value\n     ^ note", p.Print(view))
 }
 
+func TestPrinter_Layout_CellOf(t *testing.T) {
+	t.Parallel()
+
+	// The overlay style wraps its text in brackets, so every cell after an
+	// overlay shifts by the two brackets it adds.
+	tcs := map[string]struct {
+		overlay *position.Span
+		content string
+		pos     position.Position
+		wrap    int
+		want    int
+	}{
+		"plain column": {
+			content: "key: value",
+			pos:     position.New(0, 5),
+			want:    5,
+		},
+		"wide runes before the column": {
+			content: "k: 日本x",
+			pos:     position.New(0, 5),
+			want:    7,
+		},
+		"column inside a cluster takes the cell of its start": {
+			content: "k: e\u0301x",
+			pos:     position.New(0, 4),
+			want:    3,
+		},
+		"transform before the column": {
+			content: "k: ab cd",
+			overlay: &position.Span{Start: 3, End: 5},
+			pos:     position.New(0, 6),
+			want:    8,
+		},
+		"first column of a transformed run": {
+			content: "k: ab cd",
+			overlay: &position.Span{Start: 3, End: 5},
+			pos:     position.New(0, 3),
+			want:    3,
+		},
+		"column inside a transformed run": {
+			content: "k: ab cd",
+			overlay: &position.Span{Start: 3, End: 5},
+			pos:     position.New(0, 4),
+			want:    5,
+		},
+		"end of a transformed run": {
+			content: "k: ab cd",
+			overlay: &position.Span{Start: 3, End: 5},
+			pos:     position.New(0, 5),
+			want:    7,
+		},
+		"columns past the end take a cell each": {
+			content: "a: 1",
+			pos:     position.New(0, 6),
+			want:    6,
+		},
+		"wrapped row counts from its own start": {
+			content: "key: aaaa bbbb cccc",
+			wrap:    10,
+			pos:     position.New(0, 12),
+			want:    2,
+		},
+		"line the layout does not hold": {
+			content: "a: 1",
+			pos:     position.New(5, 0),
+			want:    -1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString(tc.content).View()
+			if tc.overlay != nil {
+				view.AddOverlay(testOverlayHighlight, position.NewRange(
+					position.New(0, tc.overlay.Start),
+					position.New(0, tc.overlay.End),
+				))
+			}
+
+			p := testPrinter().With(printer.WithWrap(tc.wrap))
+
+			assert.Equal(t, tc.want, p.Layout(view).CellOf(tc.pos))
+		})
+	}
+}
+
 func TestPrinter_Layout(t *testing.T) {
 	t.Parallel()
 

@@ -285,9 +285,9 @@ func (ctx AnnotationContext) ColWidth(col int) int {
 // and a grapheme cluster, such as a letter with a combining mark or an
 // emoji ZWJ sequence, takes its display width once. A column inside a
 // cluster has no cell of its own, so it measures up to the start of its
-// cluster. A viewer
-// that scrolls horizontally adds the result to [Layout.GutterWidth] to
-// find the cell a column of the line occupies.
+// cluster. It measures the content alone, so a viewer that scrolls
+// horizontally asks [Layout.CellOf] for the cell of a column, which also
+// counts the cells a style's transform adds.
 func ColWidth(content string, col int) int {
 	return cells.NewRow(content).Width(col)
 }
@@ -896,7 +896,7 @@ func (p *Printer) renderRows(view *line.View) []string {
 // wrapped to the printer width, each row with its gutter, and each of its
 // annotation rows above or below the wrapped row that holds its column.
 func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber, gutterWidth int) []string {
-	pieces, starts := p.wrapLine(view, idx, ln, gutterWidth)
+	pieces, starts, _ := p.wrapLine(view, idx, ln, gutterWidth)
 	above := p.annotationRows(view, ln, idx, gutterWidth, line.Above, starts)
 	below := p.annotationRows(view, ln, idx, gutterWidth, line.Below, starts)
 

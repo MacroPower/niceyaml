@@ -1983,18 +1983,17 @@ func (m *Model) scrollToCurrentMatch() {
 	}
 
 	// With wrap off every line is one row that starts at the gutter, so
-	// the cells of the match are the gutter plus the width of the content
-	// before each of its columns. A match that ends on a later line runs
-	// to the end of this one.
-	content := view.Lines().Line(i).Content()
-	end := utf8.RuneCountInString(content)
-
-	if match.rng.End.Line == i {
-		end = match.rng.End.Col
+	// the cells of the match are the gutter plus the cells the layout
+	// gives each of its columns. The layout counts what a style's
+	// transform adds before them, as the rendered row shows it. A match
+	// that ends on a later line runs to the end of this one.
+	end := match.rng.End
+	if end.Line != i {
+		end = position.New(i, utf8.RuneCountInString(view.Lines().Line(i).Content()))
 	}
 
-	x := layout.GutterWidth() + printer.ColWidth(content, match.rng.Start.Col)
-	xEnd := layout.GutterWidth() + printer.ColWidth(content, end)
+	x := layout.GutterWidth() + layout.CellOf(match.rng.Start)
+	xEnd := layout.GutterWidth() + layout.CellOf(end)
 
 	// A match that fits the first screen shows without scrolling, so the
 	// view keeps the gutter and the start of the line in sight.

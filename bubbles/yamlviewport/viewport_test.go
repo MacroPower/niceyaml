@@ -6330,6 +6330,55 @@ func TestViewport_SearchScrollsToHorizontalMatch(t *testing.T) {
 	}
 }
 
+func TestViewport_SearchScrollsToTransformedMatch(t *testing.T) {
+	t.Parallel()
+
+	// The highlight styles add brackets around every match, so each match
+	// before the selected one pushes it two cells further right than its
+	// column in the content. The X offset counts those cells, so the
+	// selected match stays on screen with wrap off.
+	dim := lipgloss.NewStyle().Transform(func(s string) string { return "[" + s + "]" })
+	sel := lipgloss.NewStyle().Transform(func(s string) string { return "{" + s + "}" })
+	p := printer.New(
+		printer.WithStyles(style.New(lipgloss.NewStyle(),
+			style.Set(kind.GenericHighlight, sel),
+			style.Set(kind.GenericHighlightDim, dim),
+		)),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.NoGutter),
+	)
+
+	tcs := map[string]struct {
+		next int
+	}{
+		"first match":  {next: 0},
+		"middle match": {next: 12},
+		"far match":    {next: 24},
+		"last match":   {next: 29},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(p))
+			m.SetWidth(40)
+			m.SetHeight(3)
+			m.SetWordWrap(false)
+			m.SetRevision(niceyaml.NewSourceFromString("k: " + strings.Repeat("ab ", 30) + "\n"))
+
+			m.SetSearchTerm("ab")
+			require.Equal(t, 30, m.SearchCount())
+
+			for range tc.next {
+				m.SearchNext()
+			}
+
+			assert.Contains(t, ansi.Strip(m.View()), "{ab}")
+		})
+	}
+}
+
 func TestViewport_ContentChangeResetsHorizontalScroll(t *testing.T) {
 	t.Parallel()
 
