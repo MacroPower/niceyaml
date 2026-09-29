@@ -1414,8 +1414,8 @@ func wrapLine(text string, cw int) []string {
 
 		// The cut keeps the escape sequences after the dropped spaces, so
 		// a style the row opens still closes.
-		if w := lipgloss.Width(strings.TrimRightFunc(ansi.Strip(row), isBreakSpace)); w <= cw {
-			out = append(out, ansi.Truncate(row, w, ""))
+		if text := strings.TrimRightFunc(ansi.Strip(row), isBreakSpace); lipgloss.Width(text) <= cw {
+			out = append(out, cutText(row, len(text)))
 
 			continue
 		}
@@ -1462,6 +1462,35 @@ func wrapLine(text string, cw int) []string {
 	slices.Reverse(kept)
 
 	return kept
+}
+
+// cutText returns row with its text cut to the first n bytes. It counts
+// bytes of text, so a keycap, which [ansi.Truncate] counts as one cell
+// for its ASCII base, cannot move the cut. Every escape sequence stays,
+// so a style the row opens still closes.
+func cutText(row string, n int) string {
+	var b strings.Builder
+
+	for i := 0; i < len(row); {
+		if row[i] == ansi.ESC {
+			seq, _, size, _ := ansi.DecodeSequence(row[i:], ansi.NormalState, nil)
+			b.WriteString(seq)
+
+			i += size
+
+			continue
+		}
+
+		if n > 0 {
+			b.WriteByte(row[i])
+
+			n--
+		}
+
+		i++
+	}
+
+	return b.String()
 }
 
 // hardwrap breaks row before each grapheme cluster that would take it past
@@ -1549,10 +1578,12 @@ func wrapRows(text string, cw int, breaks string) []string {
 }
 
 // rejoinCluster moves the runes at the start of row that continue the
-// last grapheme cluster of prev onto the end of prev, and reports whether
-// it moved any. The escape sequences among those runes go with them and
-// stay at the start of row too, so the style they open still covers both
-// rows, and prev closes that style after the runes it gains.
+// last grapheme cluster of prev onto the end of that cluster, and reports
+// whether it moved any. The runes go ahead of any escape sequences that
+// close prev, so no escape sequence splits the cluster, and the cluster
+// measures as the terminal draws it. The escape sequences among those
+// runes stay at the start of row, so the style they open still covers
+// the rest of row.
 func rejoinCluster(prev, row string) (string, string, bool) {
 	plainPrev, plainRow := ansi.Strip(prev), ansi.Strip(row)
 	if plainPrev == "" || plainRow == "" {
@@ -1567,10 +1598,10 @@ func rejoinCluster(prev, row string) (string, string, bool) {
 		return prev, row, false
 	}
 
-	var escapes strings.Builder
+	var escapes, runes strings.Builder
 
 	i := 0
-	for plain := 0; i < len(row) && plain < n; {
+	for runes.Len() < n && i < len(row) {
 		if row[i] == ansi.ESC {
 			seq, _, size, _ := ansi.DecodeSequence(row[i:], ansi.NormalState, nil)
 			escapes.WriteString(seq)
@@ -1581,14 +1612,32 @@ func rejoinCluster(prev, row string) (string, string, bool) {
 		}
 
 		_, size := utf8.DecodeRuneInString(row[i:])
-		plain += size
+		runes.WriteString(row[i : i+size])
+
 		i += size
 	}
 
-	prev += row[:i]
-	if escapes.Len() > 0 {
-		prev += ansi.ResetStyle
+	end := textEnd(prev)
+
+	return prev[:end] + runes.String() + prev[end:], escapes.String() + row[i:], true
+}
+
+// textEnd returns the byte offset in row just past its last byte of text,
+// so that only escape sequences follow it.
+func textEnd(row string) int {
+	end := 0
+
+	for i := 0; i < len(row); {
+		if row[i] == ansi.ESC {
+			_, _, size, _ := ansi.DecodeSequence(row[i:], ansi.NormalState, nil)
+			i += size
+
+			continue
+		}
+
+		i++
+		end = i
 	}
 
-	return prev, escapes.String() + row[i:], true
+	return end
 }

@@ -2111,6 +2111,28 @@ func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 			styled: true,
 			want:   []string{"k:", "cccxx1\ufe0f\u20e3dd", "d", "d"},
 		},
+		"keycap before a space": {
+			input: "k: 1\ufe0f\u20e3cc --cx",
+			width: 4,
+			want:  []string{"k:", "1\ufe0f\u20e3cc", "--cx"},
+		},
+		"keycap before a space styled": {
+			input:  "k: 1\ufe0f\u20e3cc --cx",
+			width:  4,
+			styled: true,
+			want:   []string{"k:", "1\ufe0f\u20e3cc", "--cx"},
+		},
+		"keycap split by the wrap": {
+			input: "k: ac xb1\ufe0f\u20e3a",
+			width: 3,
+			want:  []string{"k:", "ac", "xb", "1\ufe0f\u20e3", "a"},
+		},
+		"keycap split by the wrap styled": {
+			input:  "k: ac xb1\ufe0f\u20e3a",
+			width:  3,
+			styled: true,
+			want:   []string{"k:", "ac", "xb", "1\ufe0f\u20e3", "a"},
+		},
 	}
 
 	for name, tc := range tcs {
