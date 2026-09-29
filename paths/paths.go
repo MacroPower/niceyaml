@@ -285,7 +285,7 @@ func (p Path) YAMLPath() *yaml.Path {
 	for _, seg := range p.segments {
 		switch seg.kind {
 		case segmentChild:
-			pb = pb.Child(seg.name)
+			pb = pb.Child(builderName(seg.name))
 		case segmentIndex:
 			pb = pb.Index(uint(seg.index)) //nolint:gosec // Index and Parse never store a negative.
 		case segmentIndexAll:
@@ -298,6 +298,21 @@ func (p Path) YAMLPath() *yaml.Path {
 	}
 
 	return pb.Build()
+}
+
+// builderName returns the text to pass [yaml.PathBuilder.Child] so that
+// [yaml.Path.FilterNode] compares keys with name. The builder puts single
+// quotes around a name with `.` or `*` and escapes the quotes inside it,
+// and FilterNode strips the outer quotes but keeps the escapes, so a'.b
+// would match no key. The builder keeps a name that starts and ends with a
+// single quote as it is, so builderName wraps the raw name itself.
+func builderName(name string) string {
+	enclosed := strings.HasPrefix(name, "'") && strings.HasSuffix(name, "'")
+	if enclosed || !strings.ContainsAny(name, ".*") {
+		return name
+	}
+
+	return "'" + name + "'"
 }
 
 // goccyString returns the path in the syntax [yaml.PathString] reads, with

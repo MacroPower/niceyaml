@@ -664,7 +664,10 @@ func TestMustParse(t *testing.T) {
 func TestPath_YAMLPath(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a:\n  'b.c': [x, y]\n  don't: 1\n  a\\.b: 2\n  a.b'c: 3\n")
+	source := niceyaml.NewSourceFromString(
+		"a:\n  'b.c': [x, y]\n  don't: 1\n  a\\.b: 2\n  a.b'c: 3\n" +
+			"'':\n  a'.b: 4\n  a'*b: 5\n  a.b: 6\n",
+	)
 	file, err := source.File()
 	require.NoError(t, err)
 
@@ -692,6 +695,21 @@ func TestPath_YAMLPath(t *testing.T) {
 			path:       paths.Root().Child("a", "a.b'c"),
 			wantString: `$.a.'a.b\'c'`,
 			want:       "3",
+		},
+		"dotted name with a quote via builder fallback": {
+			path:       paths.Root().Child("", "a'.b"),
+			wantString: "$..'a'.b'",
+			want:       "4",
+		},
+		"star name with a quote via builder fallback": {
+			path:       paths.Root().Child("", "a'*b"),
+			wantString: "$..'a'*b'",
+			want:       "5",
+		},
+		"dotted name via builder fallback": {
+			path:       paths.Root().Child("", "a.b"),
+			wantString: "$..'a.b'",
+			want:       "6",
 		},
 	}
 
@@ -738,6 +756,11 @@ func TestPath_YAMLPath_Replace(t *testing.T) {
 			src:  "\"\": v\n",
 			path: paths.Root().Child(""),
 			want: "\"\": 9\n",
+		},
+		"dotted name with a quote via builder fallback matches no key": {
+			src:  "\"\":\n  a'.b: v\n",
+			path: paths.Root().Child("", "a'.b"),
+			want: "\"\":\n  a'.b: v\n",
 		},
 		"name that is not valid UTF-8 matches no key": {
 			src:  string(utf8.RuneError) + ": v\n",
