@@ -1890,8 +1890,10 @@ func (m *Model) TopLine() int {
 }
 
 // VisibleLineCount returns the number of lines with at least one row on
-// screen. It reports at least 1 whenever the view has lines, since a window
-// that lies wholly inside the container frame still renders around a line.
+// screen. It returns 0 when the content area has no room for a row, such as
+// at a height of 0 or when the container frame fills the width. Otherwise it
+// reports at least 1 whenever the view has lines, since a window that lies
+// wholly inside the container frame still renders around a line.
 func (m *Model) VisibleLineCount() int {
 	if !m.canRender() || !m.hasContent() {
 		return 0
