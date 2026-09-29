@@ -442,10 +442,10 @@ func rootOf(n *niceyaml.Node) ast.Node {
 // the node a path through the same alias resolves to. A key under an
 // aliased mapping keeps its source spelling too, and an alias used as a
 // key takes the spelling of its anchor's content. A segment the walk
-// cannot follow keeps its decoded name, such as a member a merge key
-// brought in or one behind an alias that does not resolve. Every segment
-// keeps its decoded name when root is nil, as does a key the walk finds
-// but cannot spell.
+// cannot follow keeps its decoded name, such as a member behind an alias
+// that does not resolve. A member a merge key brings in takes the
+// spelling its source gives the key. Every segment keeps its decoded name
+// when root is nil, as does a key the walk finds but cannot spell.
 func sourcePath(root ast.Node, idx *memberIndex, segments []jsonschema.Segment) paths.Path {
 	path := paths.Root()
 	node := deref(idx.resolver, root)
@@ -516,34 +516,37 @@ func elementNode(node ast.Node, index int) ast.Node {
 }
 
 // memberIndex finds the members of the mappings a violation path steps
-// through for [sourcePath]. It holds the result of [memberNodes] for each
-// mapping it has read, so each key decodes once however many violations
-// lie under its mapping. The resolver binds the aliases of the document.
+// through for [sourcePath]. It holds the member table of each mapping it
+// has read, so each key decodes once however many violations lie under
+// its mapping or merge it in. The resolver binds the aliases of the
+// document.
 //
 // Create instances with [newMemberIndex].
 type memberIndex struct {
 	resolver *paths.Resolver
-	members  map[ast.Node]map[string]memberNode
+	members  map[ast.Node]memberTable
+}
+
+// memberTable holds the key and value nodes of the members of one
+// mapping, by the name a decode gives each key. It is complete when it
+// names every member the decode keeps, so a member of an earlier mapping
+// entry holds the value the decode keeps whenever the table leaves its
+// name out.
+type memberTable struct {
+	members  map[string]memberNode
+	complete bool
 }
 
 // newMemberIndex creates a new [*memberIndex] that follows aliases
 // through r.
 func newMemberIndex(r *paths.Resolver) *memberIndex {
-	return &memberIndex{resolver: r, members: map[ast.Node]map[string]memberNode{}}
+	return &memberIndex{resolver: r, members: map[ast.Node]memberTable{}}
 }
 
-// lookup returns the key and value nodes [memberNodes] finds for name in
-// the mapping node holds, or nil nodes when it finds none.
+// lookup returns the key and value nodes [memberIndex.memberNodes] finds
+// for name in the mapping node holds, or nil nodes when it finds none.
 func (idx *memberIndex) lookup(node ast.Node, name string) (ast.Node, ast.Node) {
-	node = contentNode(node)
-
-	members, ok := idx.members[node]
-	if !ok {
-		members = memberNodes(idx.resolver, node)
-		idx.members[node] = members
-	}
-
-	m := members[name]
+	m := idx.memberNodes(node).members[name]
 
 	return m.key, m.value
 }
@@ -555,22 +558,56 @@ type memberNode struct {
 }
 
 // memberNodes returns the key and value nodes of each member of the
-// mapping node holds, by the name a decode gives its key, or an empty map
-// for any other node. Where several members decode to one name, the map
-// holds the last, which is the member whose value the decode keeps. It
-// passes over a merge key, since a path selects a key the mapping defines
-// itself over a merged one.
+// mapping node holds, by the name a decode gives its key, or an empty
+// table for any other node. A decode sets the members in order, so where
+// several members decode to one name, the table holds the last, which is
+// the member whose value the decode keeps.
+//
+// A merge key sets each member its sources define, and the table holds
+// the key and value nodes the sources give that name, which a path
+// selector reaches through the merge. Where a key of the mapping itself
+// has the same spelling, a path selector matches that key instead, so the
+// table holds no nodes for the name, and the path keeps the decoded name.
+// A merge key whose sources do not resolve, or that lead back to the
+// mapping, may set a member of any name, so the table leaves out every
+// member before it.
 //
 // An alias key decodes to the name the content of its anchor gives, and
-// the map holds that content as the key node, since a path selector
+// the table holds that content as the key node, since a path selector
 // matches the key by the spelling of that content. An alias key that
-// [aliasKeyName] cannot name may set a member of any name, so the map
+// [aliasKeyName] cannot name may set a member of any name, so the table
 // leaves out every member before it rather than hold one the alias may
 // have replaced.
-func memberNodes(r *paths.Resolver, node ast.Node) map[string]memberNode {
-	found := map[string]memberNode{}
+func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
+	node = contentNode(node)
 
-	for _, member := range slices.Backward(mappingMembers(node)) {
+	if table, ok := idx.members[node]; ok {
+		return table
+	}
+
+	// A merge source that leads back to node reads this incomplete table.
+	idx.members[node] = memberTable{}
+
+	table := memberTable{members: map[string]memberNode{}, complete: true}
+	members := mappingMembers(node)
+
+	var spelled map[string]bool
+
+	for _, member := range slices.Backward(members) {
+		if member.Key != nil && member.Key.IsMergeKey() {
+			if spelled == nil {
+				spelled = idx.spellings(members)
+			}
+
+			if !idx.addMerged(table.members, member, spelled) {
+				table.complete = false
+
+				break
+			}
+
+			continue
+		}
+
 		var (
 			key  ast.Node = member.Key
 			name string
@@ -578,8 +615,10 @@ func memberNodes(r *paths.Resolver, node ast.Node) map[string]memberNode {
 		)
 
 		if _, isAlias := contentNode(member.Key).(*ast.AliasNode); isAlias {
-			key, name, ok = aliasKeyName(r, member.Key)
+			key, name, ok = aliasKeyName(idx.resolver, member.Key)
 			if !ok {
+				table.complete = false
+
 				break
 			}
 		} else {
@@ -589,12 +628,74 @@ func memberNodes(r *paths.Resolver, node ast.Node) map[string]memberNode {
 			}
 		}
 
-		if _, seen := found[name]; !seen {
-			found[name] = memberNode{key: key, value: member.Value}
+		if _, seen := table.members[name]; !seen {
+			table.members[name] = memberNode{key: key, value: member.Value}
 		}
 	}
 
-	return found
+	idx.members[node] = table
+
+	return table
+}
+
+// addMerged adds to found each member the sources of the merge key of
+// member define, for a name found does not hold yet. A later source wins
+// over an earlier one, as it does in a decode. A member whose key has a
+// spelling in spelled gets no nodes. It reports false when the sources do
+// not resolve, or when the table of one of them is not complete.
+func (idx *memberIndex) addMerged(
+	found map[string]memberNode,
+	member *ast.MappingValueNode,
+	spelled map[string]bool,
+) bool {
+	sources, err := idx.resolver.MergeSources(&ast.MappingNode{
+		Values: []*ast.MappingValueNode{member},
+	})
+	if err != nil {
+		return false
+	}
+
+	for _, src := range slices.Backward(sources) {
+		table := idx.memberNodes(src)
+		if !table.complete {
+			return false
+		}
+
+		for name, m := range table.members {
+			if _, seen := found[name]; seen {
+				continue
+			}
+
+			if spelling := sourceKey(m.key); spelling != "" && spelled[spelling] {
+				m = memberNode{}
+			}
+
+			found[name] = m
+		}
+	}
+
+	return true
+}
+
+// spellings returns the source spelling of each key in members, as
+// [sourceKey] gives it, which is the name a path selector matches the key
+// by. An alias key has the spelling of the content of its anchor.
+func (idx *memberIndex) spellings(members []*ast.MappingValueNode) map[string]bool {
+	spelled := map[string]bool{}
+
+	for _, member := range members {
+		var key ast.Node = member.Key
+
+		if _, isAlias := contentNode(key).(*ast.AliasNode); isAlias {
+			key, _, _ = aliasKeyName(idx.resolver, member.Key)
+		}
+
+		if spelling := sourceKey(key); spelling != "" {
+			spelled[spelling] = true
+		}
+	}
+
+	return spelled
 }
 
 // aliasKeyName returns the content of the anchor an alias key refers to,

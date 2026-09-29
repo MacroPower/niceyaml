@@ -2105,6 +2105,30 @@ func TestSchema_SourcePath(t *testing.T) {
 			wantPath: "$.''",
 			want:     "2:5: $.'': expected [\"string\", \"object\"], got \"integer\"",
 		},
+		"merge key overrides an earlier respelled key": {
+			// The decoder applies the merge after 0x10: 1, so the member
+			// 16 holds x, and the path names the key the merge brings in.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"user": {"additionalProperties": {"type": "integer"}}
+				}
+			}`,
+			input:    "user:\n  0x10: 1\n  <<: {16: x}\n",
+			wantPath: "$.user.16",
+			want:     "3:12: $.user.16: expected \"integer\", got \"string\"",
+		},
+		"respelled key a merge key brings in": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"user": {"additionalProperties": {"type": "integer"}}
+				}
+			}`,
+			input:    "user:\n  <<: {0x10: x}\n",
+			wantPath: "$.user.0x10",
+			want:     "2:14: $.user.0x10: expected \"integer\", got \"string\"",
+		},
 		"spelled-out null key": {
 			schema: `{
 				"type": "object",
