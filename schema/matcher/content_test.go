@@ -896,9 +896,9 @@ func TestContent_UnmarshalerError(t *testing.T) {
 func TestContent_UnparsableDuration(t *testing.T) {
 	t.Parallel()
 
-	// The decoder reports a duration it cannot read without
-	// niceyaml.ErrDecodeRejected, so the matcher returns the error rather
-	// than a no.
+	// The decoder reports a string that time.ParseDuration rejects
+	// without niceyaml.ErrDecodeRejected, so the matcher returns the
+	// error rather than a no.
 	m := matcher.Content(paths.Root().Child("timeout"), time.Minute)
 	doc := yamltest.FirstDocument(t, stringtest.Input(`timeout: 5 minutes`))
 

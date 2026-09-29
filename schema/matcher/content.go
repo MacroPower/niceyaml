@@ -49,11 +49,12 @@ type contentMatcher[T comparable] struct {
 // numbers compare by value whatever their Go types, so
 // Content[any](path, 1) matches an integer the decoder reads as a
 // uint64. A document without the path, or
-// whose value does not decode into T, does not match. A [time.Duration]
-// T is the exception, since the decoder reports a duration it cannot
-// read without [niceyaml.ErrDecodeRejected], so Match returns that
-// error. Any other error
-// from the read comes back as the error, so a registry stops at the
+// whose value does not decode into T, does not match, so a
+// [time.Duration] T matches no timeout: 5.5 or timeout: true. A string
+// that [time.ParseDuration] rejects, such as timeout: 5 minutes, is the
+// exception. The decoder reports it without
+// [niceyaml.ErrDecodeRejected], so Match returns that error. Any other
+// error from the read comes back as the error, so a registry stops at the
 // document rather than routing it elsewhere. Such errors include an alias
 // on the path that names no anchor, a path with a wildcard selector, and
 // a context that ended. Match also refuses a document whose aliases would
