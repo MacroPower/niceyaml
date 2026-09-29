@@ -65,6 +65,13 @@ var (
 	// two without a location, and the chain holds its error.
 	ErrDecodeRejected = errors.New("decoder rejected the value")
 
+	// ErrParseRejected indicates the go-yaml parser panicked on the tokens
+	// of a [Source], such as a token with no position that
+	// [NewSourceFromTokens] received. [Source.File] returns it on every
+	// call, bound as a [SourceError] at the first token with a position
+	// among the ones the parser was reading.
+	ErrParseRejected = errors.New("parser rejected the tokens")
+
 	// ErrOutOfRange indicates the error's location lies outside the source.
 	// The location starts on a line past the last or before the first,
 	// which happens when a position or range came from other text, or at a

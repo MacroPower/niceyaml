@@ -1390,6 +1390,35 @@ func TestSource_Parse(t *testing.T) {
 		assert.Same(t, bound, err)
 	})
 
+	t.Run("parser panic comes back as an error on every call", func(t *testing.T) {
+		t.Parallel()
+
+		// The go-yaml parser dereferences the position of this token.
+		tks := lexer.Tokenize("a: 1\nb: 2\n")
+		tks[2].Position = nil
+
+		source := niceyaml.NewSourceFromTokens(tks)
+
+		file, err := source.File()
+		require.ErrorIs(t, err, niceyaml.ErrParseRejected)
+		assert.Nil(t, file)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, source, bound.Source())
+
+		file, again := source.File()
+		assert.Nil(t, file)
+		assert.Same(t, err, again)
+
+		_, err = source.Documents()
+		require.ErrorIs(t, err, niceyaml.ErrParseRejected)
+
+		_, err = source.Document()
+		require.ErrorIs(t, err, niceyaml.ErrParseRejected)
+	})
+
 	t.Run("syntax error on a line the lexer dropped keeps its line", func(t *testing.T) {
 		t.Parallel()
 

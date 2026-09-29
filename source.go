@@ -453,7 +453,9 @@ func (d *document) anchorToken() *token.Token {
 // builds a new Source from the result.
 //
 // A YAML syntax error comes back as a [*SourceError] bound to this Source,
-// so [FormatError] renders it with the offending token marked.
+// so [FormatError] renders it with the offending token marked. A panic in
+// the parser comes back as a [*SourceError] that matches
+// [ErrParseRejected], and every later call returns the same error.
 func (s *Source) File() (*ast.File, error) {
 	s.fileOnce.Do(func() {
 		s.file, s.fileTokens, s.fileErr = s.parse()
@@ -493,7 +495,7 @@ func (s *Source) parse() (*ast.File, map[*token.Token]struct{}, error) {
 	file := &ast.File{Docs: []*ast.DocumentNode{}}
 
 	for _, run := range splitDocumentRuns(tks) {
-		f, err := parser.Parse(run, parser.ParseComments, s.parserOpts...)
+		f, err := s.parseRun(run)
 		if err == nil {
 			file.Docs = append(file.Docs, f.Docs...)
 
@@ -514,6 +516,38 @@ func (s *Source) parse() (*ast.File, map[*token.Token]struct{}, error) {
 	}
 
 	return file, set, nil
+}
+
+// parseRun parses run, one run of [splitDocumentRuns]. It turns a panic
+// in the parser into a [*SourceError] bound to the Source that matches
+// [ErrParseRejected], located at the first token of run that carries a
+// position.
+func (s *Source) parseRun(run token.Tokens) (*ast.File, error) {
+	var (
+		f   *ast.File
+		err error
+	)
+
+	func() {
+		defer func() {
+			p := recover()
+			if p == nil {
+				return
+			}
+
+			var at *token.Token
+
+			if i := slices.IndexFunc(run, func(tk *token.Token) bool { return tk.Position != nil }); i >= 0 {
+				at = run[i]
+			}
+
+			err = bindTree(WrapError(fmt.Errorf("%w: panic: %v", ErrParseRejected, p), atToken(at)), binder{src: s})
+		}()
+
+		f, err = parser.Parse(run, parser.ParseComments, s.parserOpts...)
+	}()
+
+	return f, err //nolint:wrapcheck // The caller binds the error.
 }
 
 // decodeParse returns a second parse of the tokens of the Source, with the
