@@ -111,8 +111,10 @@ func reason(err error) error {
 
 // IsHTTPURL reports whether rawURL starts with http:// or https://, in
 // any letter case. The schema loaders fetch only such a URL, and the
-// SchemaStore catalog keeps only entries whose URL passes, so the catalog
-// hands out no URL the loaders refuse.
+// SchemaStore catalog keeps only entries whose URL passes, so no catalog
+// URL fails the loaders' scheme check. IsHTTPURL does not parse rawURL,
+// so [Get] can still refuse a URL that passes, such as one that does not
+// parse.
 func IsHTTPURL(rawURL string) bool {
 	for _, prefix := range []string{"http://", "https://"} {
 		if len(rawURL) >= len(prefix) && strings.EqualFold(rawURL[:len(prefix)], prefix) {

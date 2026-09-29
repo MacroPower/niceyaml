@@ -571,9 +571,11 @@ func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry
 	entries := make([]CatalogEntry, 0, len(schemas))
 
 	for _, entry := range schemas {
-		// Skip entries without an HTTP or HTTPS URL, which the registry
-		// cannot fetch. A file:// URL would name a schema the registry
-		// serves only when a File Ref cached it first.
+		// Skip entries without an HTTP or HTTPS scheme, which the
+		// registry cannot fetch. A file:// URL would name a schema the
+		// registry serves only when a File Ref cached it first. An entry
+		// with an HTTP URL that does not parse stays, so its lookup fails
+		// with the parse error rather than falling through.
 		if !httpfetch.IsHTTPURL(entry.URL) {
 			continue
 		}
