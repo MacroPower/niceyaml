@@ -264,9 +264,10 @@ func isBreakSpace(r rune) bool {
 // drops every Unicode space but [nbsp] at a break and at the end of the
 // text. From a grapheme cluster that starts with such a space outside
 // ASCII, it keeps at most the space and drops the runes after it
-// wherever the cluster falls. The first piece begins at offset 0. The
-// caller escapes the text, so a tab shows as its control picture and
-// never counts as a space.
+// wherever the cluster falls. The first piece begins after any leading
+// spaces the wrapper drops, which it does when the first word does not
+// fit beside them. The caller escapes the text, so a tab shows as its
+// control picture and never counts as a space.
 func rowStarts(text string, pieces []string) []int {
 	runes := []rune(text)
 	tails := spaceTails(text, len(runes))
@@ -277,7 +278,7 @@ func rowStarts(text string, pieces []string) []int {
 		for j, r := range piece {
 			next = skipDropped(runes, tails, next, r)
 
-			if j == 0 && i > 0 {
+			if j == 0 {
 				starts[i] = next
 			}
 

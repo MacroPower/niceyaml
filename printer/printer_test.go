@@ -556,11 +556,53 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 	// they mark, padded from that row's start, so every caret sits under
 	// the column it marks.
 	tcs := map[string]struct {
-		content string
-		want    string
-		cols    []position.Span
-		width   int
+		annotation *line.Annotation
+		content    string
+		want       string
+		cols       []position.Span
+		line       int
+		width      int
 	}{
+		// The wrap drops the indent when the first word does not fit
+		// beside it, so the first row starts at the word, and so does the
+		// padding of the marks under it.
+		"indent dropped before a long word": {
+			content: "crt: |\n    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMr",
+			cols:    []position.Span{position.NewSpan(4, 8)},
+			line:    1,
+			width:   30,
+			want: stringtest.JoinLF(
+				"crt: |",
+				"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS",
+				"^^^^",
+				"0tLS0tCk1JSUMr",
+			),
+		},
+		"indent dropped before a long word under a whole-line range": {
+			content: "crt: |\n    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMr",
+			cols:    []position.Span{position.NewSpan(0, 48)},
+			line:    1,
+			width:   30,
+			want: stringtest.JoinLF(
+				"crt: |",
+				"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS",
+				strings.Repeat("^", 30),
+				"0tLS0tCk1JSUMr",
+				strings.Repeat("^", 14),
+			),
+		},
+		"indent dropped before a long word above the line": {
+			content:    "crt: |\n    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMr",
+			annotation: &line.Annotation{Placement: line.Above, Col: 4, Content: "here"},
+			line:       1,
+			width:      30,
+			want: stringtest.JoinLF(
+				"crt: |",
+				"here",
+				"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS",
+				"0tLS0tCk1JSUMr",
+			),
+		},
 		"runs on different rows": {
 			content: "key: aaaa bbbb cccc dddd",
 			cols:    []position.Span{position.NewSpan(5, 9), position.NewSpan(17, 19)},
@@ -605,12 +647,17 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 			view := niceyaml.NewSourceFromString(tc.content).View()
 			for _, cols := range tc.cols {
 				view.AddOverlay(kind.GenericError, position.NewRange(
-					position.New(0, cols.Start),
-					position.New(0, cols.End),
+					position.New(tc.line, cols.Start),
+					position.New(tc.line, cols.End),
 				))
 			}
 
-			view.Annotate(0, line.Annotation{Placement: line.Below})
+			ann := line.Annotation{Placement: line.Below}
+			if tc.annotation != nil {
+				ann = *tc.annotation
+			}
+
+			view.Annotate(tc.line, ann)
 
 			p := testPrinter().With(printer.WithWrap(tc.width))
 

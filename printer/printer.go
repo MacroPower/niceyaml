@@ -261,9 +261,10 @@ type AnnotationContext struct {
 
 	// RowStarts holds the column of Content at which each row of the line
 	// begins once the printer wraps it, in order, so a func that marks
-	// columns can return a row for each wrapped row it marks. It holds
-	// the single column 0 when the line does not wrap, and nil counts
-	// the same. Each context holds a copy.
+	// columns can return a row for each wrapped row it marks. The first
+	// row begins after any leading spaces the wrap drops, so it can begin
+	// past column 0. It holds the single column 0 when the line fits one
+	// row as it is, and nil counts the same. Each context holds a copy.
 	RowStarts []int
 
 	Annotations line.Annotations
