@@ -671,6 +671,48 @@ func TestDocument_Preamble(t *testing.T) {
 				{preamble: "# note\n---\n", content: "b: 2\n"},
 			},
 		},
+		"directive below an empty document": {
+			input: "---\n...\n# note\n%YAML 1.2\n---\na: 1\n",
+			want: []doc{
+				{preamble: "---\n...\n"},
+				{preamble: "# note\n%YAML 1.2\n---\n", content: "a: 1\n"},
+			},
+		},
+		"version directive on each side of an empty document": {
+			input: "%YAML 1.2\n---\n...\n%YAML 1.2\n---\na: 1\n",
+			want: []doc{
+				{preamble: "%YAML 1.2\n---\n...\n"},
+				{preamble: "%YAML 1.2\n---\n", content: "a: 1\n"},
+			},
+		},
+		"tag directive below an empty document": {
+			input: "%YAML 1.2\n---\n...\n%TAG ! tag:x,2000:\n---\n!a b\n",
+			want: []doc{
+				{preamble: "%YAML 1.2\n---\n...\n"},
+				{preamble: "%TAG ! tag:x,2000:\n---\n", content: "!a b\n"},
+			},
+		},
+		"comments on the markers of an empty document": {
+			input: "--- # c\n... # d\n# e\n%YAML 1.2\n--- # f\na: 1\n",
+			want: []doc{
+				{preamble: "--- # c\n... # d\n"},
+				{preamble: "# e\n%YAML 1.2\n--- # f\n", content: "a: 1\n"},
+			},
+		},
+		"document without a header below an empty document": {
+			input: "---\n...\n# note\nb: 1\n",
+			want: []doc{
+				{preamble: "---\n...\n"},
+				{preamble: "# note\n", content: "b: 1\n"},
+			},
+		},
+		"scalar document below an end marker": {
+			input: "a: 1\n...\nb\n",
+			want: []doc{
+				{content: "a: 1\n...\n"},
+				{content: "b\n"},
+			},
+		},
 		"headers": {
 			input: "a: 1\n---\nb: 2\n",
 			want: []doc{
@@ -914,6 +956,13 @@ func TestDocument_Span(t *testing.T) {
 			want: []position.Span{
 				position.NewSpan(0, 1),
 				position.NewSpan(1, 4),
+			},
+		},
+		"directive below an empty document": {
+			input: "---\n...\n# note\n%YAML 1.2\n---\na: 1\n",
+			want: []position.Span{
+				position.NewSpan(0, 2),
+				position.NewSpan(2, 6),
 			},
 		},
 		"trailing comment": {

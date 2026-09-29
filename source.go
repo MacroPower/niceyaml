@@ -443,9 +443,11 @@ func (d *document) anchorToken() *token.Token {
 //
 // The first call parses the file with [parser.Parse] and the options
 // [WithYAMLParserOptions] provides. Subsequent calls return the cached
-// result. A "---" header that directly follows another header or a "..."
-// end marker starts a document of its own, where [parser.Parse] alone
-// drops the rest of the stream or rejects it.
+// result. A "---" header that directly follows another header starts a
+// document of its own, and a "..." end marker ends its document.
+// [parser.Parse] alone drops the rest of the stream after such a header,
+// and it can reject what follows a marker or join it to the document the
+// marker ends.
 //
 // The tokens of the file are copies of the Source's own, since the parser
 // relinks the tokens it receives. A copy matches the original by its type,
@@ -584,38 +586,71 @@ func (s *Source) decodeParse() (*ast.File, map[*token.Token]struct{}) {
 }
 
 // splitDocumentRuns cuts tks before each "---" header that directly
-// follows another header or a "..." end marker, so each run it returns
-// parses on its own. Each header starts a document, but the go-yaml
-// parser mishandles both sequences (v1.19.2). It stops at a header that
-// directly follows another and drops every token after it
-// (parser/token.go:637). It merges a header that a "..." marker directly
-// follows into the next document, which then holds two headers and fails
-// with "unexpected scalar value type" (parser/token.go:655). The
-// look-back skips comments. The parser folds a comment on a header's
-// line into that header, so the header and the token after it still
-// meet. A comment on a line of its own parses to the same documents
-// whether or not a run ends there.
+// follows another header, and after each "..." end marker that a token on
+// a later line follows, so each run it returns parses on its own. The
+// go-yaml parser (v1.19.2) mishandles both sequences. It stops at a header
+// that directly follows another and drops every token after it
+// (parser/token.go:637). It drops a "..." marker that directly follows a
+// header and merges the header into what comes after the marker
+// (parser/token.go:661). A second header there gives the merged document
+// two headers, which fails with "unexpected scalar value type". A %YAML
+// or %TAG directive or a document without a header there joins the empty
+// document rather than starting the next one, and a %YAML directive there
+// fails when another opens the empty document. The parser also rejects a
+// scalar document below any marker (parser/token.go:682).
+//
+// The look-back skips comments. The parser folds a comment on the line of
+// a header or a marker into that token, so such a comment stays in the
+// run of its token. A comment on a line of its own between two headers
+// parses to the same documents whether or not a run ends there. One below
+// a marker starts the next run, as it starts a token group of
+// [tokens.SplitDocuments]. Left in the run above, it would parse to a node
+// that shares that group with the node below, and both would take the
+// tokens of the group. A token on the line of a marker stays in its run,
+// since YAML allows only a comment there and the parser rejects a scalar
+// there.
 func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 	var (
-		runs      []token.Tokens
-		start     int
-		afterMark bool
+		runs  []token.Tokens
+		start int
 	)
+
+	// The index of the last token that is not a comment.
+	prev := -1
 
 	for i, tk := range tks {
 		if tk.Type == token.CommentType {
 			continue
 		}
 
-		if tk.Type == token.DocumentHeaderType && afterMark {
-			runs = append(runs, tks[start:i])
-			start = i
+		if prev >= 0 {
+			switch last := tks[prev]; {
+			case last.Type == token.DocumentHeaderType && tk.Type == token.DocumentHeaderType:
+				runs = append(runs, tks[start:i])
+				start = i
+
+			case last.Type == token.DocumentEndType && startsBelow(tk, last):
+				// The comments on lines below the marker open the next run.
+				cut := i
+				for cut > prev+1 && startsBelow(tks[cut-1], last) {
+					cut--
+				}
+
+				runs = append(runs, tks[start:cut])
+				start = cut
+			}
 		}
 
-		afterMark = tk.Type == token.DocumentHeaderType || tk.Type == token.DocumentEndType
+		prev = i
 	}
 
 	return append(runs, tks[start:])
+}
+
+// startsBelow reports whether tk starts on a line below the line mark
+// starts on.
+func startsBelow(tk, mark *token.Token) bool {
+	return tk.Position != nil && mark.Position != nil && tk.Position.Line > mark.Position.Line
 }
 
 // Bind binds err to the [Source] and to the document each location in
