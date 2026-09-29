@@ -4,10 +4,12 @@ package lcs
 // [shiftBoundaries], then returns the ops that the marks describe. A
 // slide swaps a changed line with an equal line beside its run, so the
 // set of lines the two inputs pair up stays the same and only the place
-// of each run among them changes. The result therefore no longer depends
-// on where recurse put a run among equal lines. When the inputs share
-// several longest common subsequences, the split points that midpoint
-// finds still choose which one the result keeps.
+// of each run among them changes. Sliding does not fully undo where
+// recurse put a run among equal lines. The pass over before reads the
+// marks of after before they slide, as GNU diff does, so two placements
+// of a run in after can settle into different results. When the inputs
+// share several longest common subsequences, the split points that
+// midpoint finds still choose which one the result keeps.
 func (b *buffers) compact(before, after []string) []Op {
 	shiftBoundaries(before, b.changedBefore, b.changedAfter)
 	shiftBoundaries(after, b.changedAfter, b.changedBefore)
