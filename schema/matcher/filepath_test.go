@@ -88,6 +88,11 @@ func TestFilePath(t *testing.T) {
 			filePath: "",
 			want:     false,
 		},
+		"empty file path with dot pattern": {
+			pattern:  ".",
+			filePath: "",
+			want:     false,
+		},
 	}
 
 	for name, tc := range tcs {
