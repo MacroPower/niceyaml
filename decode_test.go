@@ -5391,9 +5391,24 @@ func TestErrDecodeRejected(t *testing.T) {
 		tcs := map[string]struct {
 			input string
 			path  paths.Path
+			opts  []niceyaml.DecodeOption
 			line  int
 			msg   string
 		}{
+			"merge alias the references leave unbound": {
+				input: "a:\n  <<: *nope\n  b: 1\n",
+				path:  paths.Root(),
+				opts:  []niceyaml.DecodeOption{niceyaml.WithReferences([]byte("base: &base {x: 1}\n"))},
+				line:  1,
+				msg:   "cannot find anchor by alias name nope",
+			},
+			"merge alias after one the references bind": {
+				input: "a:\n  <<: *base\n  b:\n    <<: *nope\n",
+				path:  paths.Root(),
+				opts:  []niceyaml.DecodeOption{niceyaml.WithReferences([]byte("base: &base {x: 1}\n"))},
+				line:  3,
+				msg:   "cannot find anchor by alias name nope",
+			},
 			"merge of the mapping that holds it": {
 				input: "a: &x\n  <<: *x\n  b: 1\n",
 				path:  paths.Root(),
@@ -5449,7 +5464,7 @@ func TestErrDecodeRejected(t *testing.T) {
 
 				dd := yamltest.FirstDocument(t, tc.input)
 
-				_, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context())
+				_, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context(), tc.opts...)
 				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
 				assert.Contains(t, err.Error(), tc.msg)
 
@@ -5467,11 +5482,47 @@ func TestErrDecodeRejected(t *testing.T) {
 	t.Run("unmarshaler error does not match", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "value: 1")
+		type item struct {
+			When rejectingUnmarshaler `yaml:"when"`
+			X    int                  `yaml:"x"`
+		}
 
-		_, err := dd.Decode[rejectingUnmarshaler](t.Context())
-		require.ErrorIs(t, err, errUnmarshal)
-		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+		tcs := map[string]struct {
+			input  string
+			decode func(ctx context.Context, dd *niceyaml.Node) error
+		}{
+			"top-level value": {
+				input: "value: 1",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[rejectingUnmarshaler](ctx)
+
+					return err
+				},
+			},
+			// The document's resolver binds no anchor for the alias, which
+			// the reference document defines for the decoder.
+			"merge the references resolve": {
+				input: "item:\n  <<: *base\n  when: x\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[map[string]item](ctx,
+						niceyaml.WithReferences([]byte("base: &base {x: 1}\n")))
+
+					return err
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				err := tc.decode(t.Context(), dd)
+				require.ErrorIs(t, err, errUnmarshal)
+				require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+			})
+		}
 	})
 
 	t.Run("wrapped unmarshaler error does not match", func(t *testing.T) {

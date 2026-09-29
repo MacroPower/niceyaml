@@ -59,7 +59,7 @@ type decodeTree struct {
 	// The aliases under `<<` merge keys that the decoder finds no mapping
 	// for, which unresolvedMerge lists for the first decode that needs
 	// them.
-	merges []*token.Token
+	merges []mergeAlias
 	// Fills nodes and anchors once.
 	scopedOnce sync.Once
 	// Fills merges once.
@@ -242,10 +242,21 @@ func (t *decodeTree) scoped() {
 
 // unresolvedMerge returns the token of the first alias under a `<<` merge
 // key inside scope, a node of the tree, that the decoder finds no mapping
-// for, or nil when scope holds none. That is an alias that names no
-// anchor before it as resolver binds it, or one inside the anchor it
-// names, which the decoder has not finished reading when it merges.
-func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node) *token.Token {
+// for and that err, which the decoder returned for scope, reports. It
+// returns nil when scope holds no such alias. The decoder finds no
+// mapping for an alias that names no anchor before it as resolver binds
+// it, or for one inside the anchor it names, which the decoder has not
+// finished reading when it merges.
+//
+// The document's resolver knows nothing of the reference documents a
+// decode may carry, from [WithReferences] or the yaml.Reference options,
+// and the decoder merges an alias that one of them defines. So err
+// reports an alias only when it is the decoder's own failure for that
+// alias. That is the message the decoder gives an alias it finds no
+// anchor for, and, for an alias inside the anchor it names, any
+// [yaml.Error] whose token is not one of the tree's, such as the null the
+// decoder merges in its place.
+func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node, err error) *token.Token {
 	t.mergesOnce.Do(func() {
 		t.merges = unresolvedMerges(resolver, t.source)
 	})
@@ -256,21 +267,39 @@ func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node) *
 	}
 
 	lo, hi := first[0].Position.Offset, last[0].Position.Offset
+	msg := t.restoreNames(err.Error())
+	_, yamlErr := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 
-	for _, tk := range t.merges {
-		if off := tk.Position.Offset; off >= lo && off <= hi {
-			return tk
+	for _, m := range t.merges {
+		off := m.token.Position.Offset
+		if off < lo || off > hi {
+			continue
+		}
+
+		if msg == "cannot find anchor by alias name "+m.name || m.enclosed && yamlErr {
+			return m.token
 		}
 	}
 
 	return nil
 }
 
-// unresolvedMerges returns the tokens of the aliases under the `<<` merge
-// keys of body that the decoder finds no mapping for, as
+// mergeAlias is an alias under a `<<` merge key that the decoder finds no
+// mapping for.
+type mergeAlias struct {
+	// The token of the alias.
+	token *token.Token
+	// The name of the alias as the document spells it.
+	name string
+	// Whether the alias lies inside the anchor it names.
+	enclosed bool
+}
+
+// unresolvedMerges returns the aliases under the `<<` merge keys of body
+// that the decoder finds no mapping for, as
 // [decodeTree.unresolvedMerge] describes, in document order.
-func unresolvedMerges(resolver *paths.Resolver, body ast.Node) []*token.Token {
-	var found []*token.Token
+func unresolvedMerges(resolver *paths.Resolver, body ast.Node) []mergeAlias {
+	var found []mergeAlias
 
 	check := func(node ast.Node) {
 		alias, ok := unwrapNode(node).(*ast.AliasNode)
@@ -278,12 +307,19 @@ func unresolvedMerges(resolver *paths.Resolver, body ast.Node) []*token.Token {
 			return
 		}
 
+		enclosed := false
+
 		anchor, err := resolver.Anchor(alias)
-		if err == nil && !encloses(anchor, alias.Start) {
-			return
+		if err == nil {
+			if !encloses(anchor, alias.Start) {
+				return
+			}
+
+			enclosed = true
 		}
 
-		found = append(found, alias.Start)
+		name, _ := nodeName(alias.Value)
+		found = append(found, mergeAlias{token: alias.Start, name: name, enclosed: enclosed})
 	}
 
 	for _, n := range sourceNodes(body) {
@@ -307,7 +343,7 @@ func unresolvedMerges(resolver *paths.Resolver, body ast.Node) []*token.Token {
 	}
 
 	sort.SliceStable(found, func(i, j int) bool {
-		return found[i].Position.Offset < found[j].Position.Offset
+		return found[i].token.Position.Offset < found[j].token.Position.Offset
 	})
 
 	return found

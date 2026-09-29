@@ -1709,15 +1709,16 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 // rejection returns err, which the go-yaml decoder returned for scope, a
 // node of the [decodeTree], as an [*Error] that matches
 // [ErrDecodeRejected] when the decoder reported the rejection without a
-// token of the source. That is the depth limit of the decoder, bound at
-// the first token of scope that is not a comment, and a `<<` merge key
-// whose alias names no mapping the decoder can find, bound at the alias.
-// The decoder reads every merge key of scope before it hands anything to
-// a value's own UnmarshalYAML, so an error that comes back from a scope
-// with such an alias is the decoder's own. Any other error, and a nil
-// scope, return err as it is.
+// token of the source. The depth limit of the decoder binds at the first
+// token of scope that is not a comment. A `<<` merge key whose alias
+// names no mapping the decoder can find binds at the alias, when err is
+// the decoder's failure for that alias, as [decodeTree.unresolvedMerge]
+// describes. Any other error comes back as it is, such as one from a
+// value's own UnmarshalYAML, an ended context, or a rejection
+// [decodeWithRecover] already bound. So does any error for a nil scope.
 func (n *Node) rejection(err error, scope ast.Node) error {
-	if err == nil || isNilNode(scope) {
+	if err == nil || isNilNode(scope) || errors.Is(err, ErrDecodeRejected) ||
+		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
 
@@ -1733,7 +1734,7 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 	if errors.Is(err, yaml.ErrExceededMaxDepth) {
 		at = contentStart(scope)
 	} else {
-		at = tree.unresolvedMerge(n.doc.pathResolver(), scope)
+		at = tree.unresolvedMerge(n.doc.pathResolver(), scope, err)
 	}
 
 	if at == nil {
