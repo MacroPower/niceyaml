@@ -361,6 +361,10 @@ func TestResolver_SeveralPaths(t *testing.T) {
 		mixed:
 		  <<: *base
 		  extra: 1
+		lit: {? &lt "<<" : 1}
+		both:
+		  *lt : {name: real}
+		  <<: {name: merged}
 		bad: *nope
 	`))
 	file, err := source.File()
@@ -375,6 +379,9 @@ func TestResolver_SeveralPaths(t *testing.T) {
 		"$.ref.name",
 		"$.mixed.name",
 		"$.mixed.extra",
+		"$.both.name",
+		"$.both..name",
+		"$.both.'<<'.name",
 		"$.bad",
 		"$.items[*]",
 		"$..name",

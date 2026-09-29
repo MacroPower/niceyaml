@@ -69,10 +69,10 @@ func (m match) key() match {
 // holds the content of the anchor each alias refers to, and its owners map
 // holds the anchor of each such content.
 //
-// The keys map holds the [*mappingKeys] of each mapping a lookup has read,
-// so a later lookup in that mapping finds a key without reading its
-// entries again. A [Resolver] may serve several goroutines, so the map is
-// a [sync.Map].
+// The keys map holds the [*mappingKeys] of each mapping a lookup or a
+// recursive walk has read, so a later lookup or walk in that mapping finds
+// a key without reading its entries again. A [Resolver] may serve several
+// goroutines, so the map is a [sync.Map].
 //
 // Create instances with [newResolver].
 type resolver struct {
@@ -81,9 +81,10 @@ type resolver struct {
 	keys    sync.Map
 }
 
-// mappingKeys indexes the entries of one mapping for [resolver.lookup].
-// The names map holds the index of the last entry with each key name, and
-// the merges slice holds the index of each `<<` entry, in document order.
+// mappingKeys indexes the entries of one mapping for [resolver.lookup] and
+// [recursiveWalk.descend]. The names map holds the index of the last entry
+// with each key name, and the merges slice holds the index of each `<<`
+// entry, in document order.
 // A merge key and a real key whose text is `<<`, such as an alias key, are
 // separate keys to the decoder, so names holds the last merge key under
 // `<<` only when no real key has that name.
@@ -93,8 +94,8 @@ type mappingKeys struct {
 }
 
 // mappingKeys returns the [*mappingKeys] of mapping, and reads its entries
-// the first time a lookup asks for them. Two goroutines that ask at once
-// may each read the entries, and each gets the same index.
+// the first time a lookup or walk asks for them. Two goroutines that ask
+// at once may each read the entries, and each gets the same index.
 func (r *resolver) mappingKeys(mapping *ast.MappingNode) *mappingKeys {
 	if cached, ok := r.keys.Load(mapping); ok {
 		if keys, ok := cached.(*mappingKeys); ok {
@@ -1013,18 +1014,11 @@ func (w *recursiveWalk) descend(node ast.Node) {
 			return
 		}
 
-		last := make(map[string]*ast.MappingValueNode, len(n.Values))
+		keys := w.resolver.mappingKeys(n)
 
-		var lastMerge *ast.MappingValueNode
-
-		for _, entry := range n.Values {
-			switch {
-			case entry == nil:
-			case isMergeKey(entry.Key):
-				lastMerge = entry
-			default:
-				last[w.resolver.keyName(entry.Key)] = entry
-			}
+		lastMerge := -1
+		if len(keys.merges) > 0 {
+			lastMerge = keys.merges[len(keys.merges)-1]
 		}
 
 		for i, entry := range n.Values {
@@ -1033,7 +1027,7 @@ func (w *recursiveWalk) descend(node ast.Node) {
 			}
 
 			key := w.resolver.keyName(entry.Key)
-			if entry != last[key] && entry != lastMerge {
+			if keys.names[key] != i && i != lastMerge {
 				continue
 			}
 
