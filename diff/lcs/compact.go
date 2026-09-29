@@ -1,9 +1,13 @@
 package lcs
 
-// compact slides the changed lines that recurse marked into a canonical
-// form among the edit scripts of the same length, then builds b.ops from
-// the marks. It slides each run of changes with [shiftBoundaries], so the
-// result no longer depends on where recurse split the inputs.
+// compact slides each run of changes that recurse marked with
+// [shiftBoundaries], then builds b.ops from the marks. A slide swaps a
+// changed line with an equal line beside its run, so the set of lines
+// the two inputs pair up stays the same and only the place of each run
+// among them changes. The result therefore no longer depends on where
+// recurse put a run among equal lines. When the inputs share several
+// longest common subsequences, the split points that midpoint finds
+// still choose which one the result keeps.
 func (b *buffers) compact(before, after []string) {
 	shiftBoundaries(before, b.changedBefore, b.changedAfter)
 	shiftBoundaries(after, b.changedAfter, b.changedBefore)

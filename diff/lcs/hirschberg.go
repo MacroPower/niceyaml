@@ -25,13 +25,16 @@ import (
 // the length of both inputs as well. The pool keeps buffers of that
 // capacity for later calls until the garbage collector clears it.
 //
-// Repeated lines often allow several shortest edit scripts. Hirschberg
-// picks one by sliding each run of changed lines as GNU diff does. A run
-// moves down as far as the content allows, then back up to where it lines
-// up with a run of changes in the other input. A removed or added copy of
-// a repeated block therefore shows as the later copy, and a replaced line
-// stays next to its replacement. Within each run of changes, the
-// deletions come before the insertions.
+// Repeated lines often allow several shortest edit scripts. When the
+// inputs hold the same lines in a different order, several longest
+// common subsequences can exist, and the split points of the search
+// decide which one the result keeps. Hirschberg then settles where each
+// run of changed lines sits among the kept lines by sliding it as GNU
+// diff does. A run moves down as far as the content allows, then back up
+// to where it lines up with a run of changes in the other input. A
+// removed or added copy of a repeated block therefore shows as the later
+// copy, and a replaced line stays next to its replacement. Within each
+// run of changes, the deletions come before the insertions.
 //
 // A Hirschberg is safe for concurrent use. Each call borrows a set of
 // working buffers from a pool, so concurrent calls never share one, and the
