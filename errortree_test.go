@@ -480,6 +480,37 @@ func TestErrorTree_New(t *testing.T) {
 				},
 			},
 		},
+		"error that only wraps a join is the join": {
+			err: niceyaml.WrapError(errors.Join(badA(), badB())),
+			want: niceyaml.ErrorTree{
+				Children: []niceyaml.ErrorTree{
+					{Text: "$.a: bad a"},
+					{Text: "$.b: bad b"},
+				},
+			},
+		},
+		"bound error that only wraps a join is a forest of named bindings": {
+			err: yamltest.Bind(t, source, niceyaml.WrapError(errors.Join(badB(), badA()))),
+			want: niceyaml.ErrorTree{
+				Children: []niceyaml.ErrorTree{
+					{Text: "f.yaml:1:4: $.a: bad a"},
+					{Text: "f.yaml:2:4: $.b: bad b"},
+				},
+			},
+			multiLine: true,
+		},
+		"nested error that only wraps a join gives its place to the branches": {
+			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
+				niceyaml.WrapError(errors.Join(badB(), badA())),
+			))),
+			want: niceyaml.ErrorTree{
+				Text: "f.yaml: outer",
+				Children: []niceyaml.ErrorTree{
+					{Text: "1:4: $.a: bad a"},
+					{Text: "2:4: $.b: bad b"},
+				},
+			},
+		},
 		"bound join below a wrapper keeps the wrapper as the root": {
 			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", errors.Join(badA(), badB()))),
 			want: niceyaml.ErrorTree{

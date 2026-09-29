@@ -5216,6 +5216,9 @@ func TestRebase(t *testing.T) {
 			"3:9: $.hours.open: bad open",
 			"4:10: $.hours.close: bad close",
 		}, got)
+
+		bare := dd.Bind(niceyaml.Rebase(errors.Join(open, closeErr), hours))
+		assert.Equal(t, niceyaml.FormatError(bare, -1), niceyaml.FormatError(dd.Bind(err), -1))
 	})
 
 	t.Run("a nested error without a location points at the base", func(t *testing.T) {

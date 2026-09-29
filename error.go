@@ -249,7 +249,7 @@ func Rebase(err error, base paths.Path) error {
 
 	// An Error that adds nothing to the join it wraps rebases as the join.
 	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
-	if ok && !x.rebased && !x.hasLocation() && len(x.nested()) == 0 {
+	if ok && x.addsNothing() {
 		if _, joined := joinBranches(x.err); joined {
 			return WrapError(Rebase(x.err, base))
 		}
@@ -485,6 +485,14 @@ func (l locus) rebase(base paths.Path) locus {
 // its cause chain or applying its base.
 func (e *Error) locus() locus {
 	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath}
+}
+
+// addsNothing reports whether e adds nothing to the error it wraps: e is
+// not nil, is not from [Rebase], carries no location of its own, and
+// nests no errors with [WithErrors]. Such an Error has the text and the
+// children of the error it wraps.
+func (e *Error) addsNothing() bool {
+	return e != nil && !e.rebased && !e.hasLocation() && len(e.nested()) == 0
 }
 
 // hasLocation reports whether e carries a location of its own: a path, a

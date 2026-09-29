@@ -49,7 +49,9 @@ type ErrorTree struct {
 //
 // An error that unwraps to several, such as one from [errors.Join], is a
 // node with no text and one child per error, so a run over several files
-// reads as one tree with a branch per file. A binding of such an error is
+// reads as one tree with a branch per file. An [Error] that only wraps
+// such an error, with no location and no errors nested with
+// [WithErrors], is the same node. A binding of such an error is
 // the same node, with each child carrying its whole
 // [SourceError.Error], since no root names the source for it. A
 // node with no text adds nothing. Its children take its place in the tree
@@ -87,13 +89,19 @@ func NewErrorTree(err error) ErrorTree {
 // joinBranches returns the errors err unwraps to when err is a join of
 // several, as [errors.Join] builds one, and false for any other error. An
 // Error unwraps to several too, but it is one node of the tree with its
-// nested errors as children, so it is not a join. Nor is an error built
-// with several %w verbs, whose message is its own rather than its
-// branches' messages one per line, so it keeps its text, and
-// [followBranches] picks the branches that stand below it.
+// nested errors as children, so it is not a join. The exception is an
+// Error that adds nothing to the error it wraps, as [Error.addsNothing]
+// reports, which is a join when the error it wraps is one. Nor is an
+// error built with several %w verbs a join, since its message is its own
+// rather than its branches' messages one per line, so it keeps its text,
+// and [followBranches] picks the branches that stand below it.
 func joinBranches(err error) ([]error, bool) {
-	if _, ok := err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
-		return nil, false
+	if x, ok := err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
+		if !x.addsNothing() {
+			return nil, false
+		}
+
+		return joinBranches(x.err)
 	}
 
 	joined, ok := err.(interface{ Unwrap() []error }) //nolint:errorlint // The node itself, not a chain search.
