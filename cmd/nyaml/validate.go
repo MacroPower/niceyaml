@@ -101,8 +101,10 @@ func validateCmd() *cobra.Command {
 //
 // Each error it returns is bound to the source, and the source takes
 // yamlPath as the user typed it for its name. Each message then opens
-// with "path:line:col:", and the error handler in main renders the
-// excerpt with the terminal width.
+// with "path:line:col:" when the error has a position in the file, and
+// the error handler in main renders the excerpt with the terminal width.
+// A document with no tokens, such as an empty or comment-only file, has
+// no position, so its messages open with "path:" alone.
 //
 // The file path of the source is the [physicalAbs] form of yamlPath.
 // SchemaStore patterns that name parent directories, such as
