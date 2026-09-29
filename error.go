@@ -1700,8 +1700,10 @@ func writeString(f fmt.State, s string) {
 // false when there is none: the error carries no location, as one from
 // [fmt.Errorf] does, or its location did not resolve, for the reason
 // [SourceError.Unresolved] returns. An error whose Range reports false
-// has no position in [SourceError.Error] and no excerpt. A nil
-// SourceError carries no location.
+// has no position in [SourceError.Error] and marks no location of its
+// own, so an excerpt [SourceError.Excerpt] builds for it shows the
+// locations of the nodes below it. A nil SourceError carries no
+// location.
 func (e *SourceError) Range() (position.Range, bool) {
 	if e == nil || e.locErr != nil {
 		return position.Range{}, false
@@ -1828,13 +1830,14 @@ func (e *SourceError) Annotate(view *line.View) bool {
 // takes the hunks of that view the same way.
 //
 // Excerpt reports false, with no view, when no location in the tree
-// resolves. [SourceError.Unresolved] then names why the location of the
-// error itself did not resolve, and returns nil for an error that
-// carries no location of its own, such as a join or a summary over
-// nested errors, whose children from [SourceError.Errors] each name
-// their own reason. Excerpt leaves out a node whose location does not
-// resolve. Its message is still part of the tree [FormatError] prints. A
-// nil SourceError carries no location.
+// resolves in the source the error is bound to, even when a node bound
+// to another source resolves in its own. [SourceError.Unresolved] names
+// why the location of the error itself did not resolve, and returns nil
+// for an error that carries no location of its own, such as a join or a
+// summary over nested errors, whose children from [SourceError.Errors]
+// each name their own reason. Excerpt leaves out a node whose location
+// does not resolve. Its message is still part of the tree [FormatError]
+// prints. A nil SourceError carries no location.
 func (e *SourceError) Excerpt(context int) (*line.View, bool) {
 	if e == nil {
 		return nil, false
