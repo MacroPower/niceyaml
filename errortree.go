@@ -124,7 +124,7 @@ func joinBranches(err error) ([]error, bool) {
 	}
 
 	branches := joined.Unwrap()
-	if reflect.TypeOf(err) != joinType && !isJoinMessage(err.Error(), branches) {
+	if !isJoinError(err) && !isJoinMessage(err.Error(), branches) {
 		return nil, false
 	}
 
@@ -138,6 +138,17 @@ var (
 	// The type of the errors [fmt.Errorf] builds with several %w verbs.
 	wrapErrorsType = reflect.TypeOf(fmt.Errorf("%w%w", errors.New(""), errors.New("")))
 )
+
+// isJoinError reports whether err is an error that [errors.Join] builds.
+func isJoinError(err error) bool {
+	return reflect.TypeOf(err) == joinType
+}
+
+// isWrapErrors reports whether err is a wrapper that [fmt.Errorf] builds
+// with several %w verbs.
+func isWrapErrors(err error) bool {
+	return reflect.TypeOf(err) == wrapErrorsType
+}
 
 // isJoinMessage reports whether msg is the messages of branches one per
 // line, which is how [errors.Join] writes the message of the error it
@@ -263,7 +274,7 @@ func walkChildren(err error, onBinding func(*SourceError), onChild func(n error,
 // reads as a join, as [joinBranches] finds one.
 func followBranches(err error, branches []error) ([]error, error) {
 	_, joined := joinBranches(err)
-	wrapper := !joined && reflect.TypeOf(err) == wrapErrorsType
+	wrapper := !joined && isWrapErrors(err)
 
 	var kept []error
 

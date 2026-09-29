@@ -350,6 +350,73 @@ func TestSourceError_Error_JoinLead(t *testing.T) {
 	}
 }
 
+func TestSourceError_Error_MultiErrorLead(t *testing.T) {
+	t.Parallel()
+
+	errSentinel := errors.New("sentinel")
+	plain := errors.New("plain")
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	boundA := yamltest.Bind(t, source, niceyaml.NewError(
+		"bad a",
+		niceyaml.AtPath(paths.Root().Child("a")),
+	))
+	boundB := yamltest.Bind(t, source, niceyaml.NewError(
+		"bad b",
+		niceyaml.AtPath(paths.Root().Child("b")),
+	))
+
+	// A wrapper with several %w verbs leads with the binding it keeps, as
+	// a wrapper with one %w verb does, so its first line names the source
+	// already. A multi-error of its own type leads with its first branch
+	// when its message starts with the message of that branch, as a list
+	// does. A count of the branches starts with no binding, so the name
+	// goes in front whichever branch holds the binding.
+	tcs := map[string]struct {
+		err  error
+		want string
+	}{
+		"wrapper with one verb": {
+			err:  errors.Join(fmt.Errorf("ctx: %w", boundA), plain),
+			want: "ctx: f.yaml:1:4: $.a: bad a\nplain",
+		},
+		"sentinel wrapper": {
+			err:  errors.Join(fmt.Errorf("%w: %w", errSentinel, boundA), plain),
+			want: "sentinel: f.yaml:1:4: $.a: bad a\nplain",
+		},
+		"wrapper of two bindings": {
+			err:  errors.Join(fmt.Errorf("%w and %w", boundA, boundB), plain),
+			want: "f.yaml:1:4: $.a: bad a and f.yaml:2:4: $.b: bad b\nplain",
+		},
+		"multi-error with the binding first": {
+			err:  violationsError{boundA, plain},
+			want: "f.yaml: 2 violations",
+		},
+		"multi-error with the binding last": {
+			err:  violationsError{plain, boundA},
+			want: "f.yaml: 2 violations",
+		},
+		"list with the binding first": {
+			err:  listError{boundA, plain},
+			want: "f.yaml:1:4: $.a: bad a; plain",
+		},
+		"list with the binding last": {
+			err:  listError{plain, boundA},
+			want: "f.yaml: plain; f.yaml:1:4: $.a: bad a",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := source.Bind(tc.err)
+
+			require.Error(t, err)
+			assert.Equal(t, tc.want, err.Error())
+		})
+	}
+}
+
 func TestDocument_BindRender(t *testing.T) {
 	t.Parallel()
 

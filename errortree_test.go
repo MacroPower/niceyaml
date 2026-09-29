@@ -70,6 +70,26 @@ func (e violationsError) Unwrap() []error {
 	return e
 }
 
+// listError is a multi-error of its own type that lists the messages of
+// its branches on one line, joined with "; ", as some multi-error
+// libraries write them.
+type listError []error
+
+// Error returns the messages of the branches joined with "; ".
+func (e listError) Error() string {
+	msgs := make([]string, 0, len(e))
+	for _, err := range e {
+		msgs = append(msgs, err.Error())
+	}
+
+	return strings.Join(msgs, "; ")
+}
+
+// Unwrap returns the branches.
+func (e listError) Unwrap() []error {
+	return e
+}
+
 // countingError is an error that counts the calls to its Error method.
 type countingError struct {
 	calls *atomic.Int64

@@ -6299,6 +6299,24 @@ func TestMultiValidator(t *testing.T) {
 		assert.Equal(t, "x.yaml:3:6: $.a.c: bad c\n$.a.b: bad b", err.Error())
 	})
 
+	t.Run("a sentinel around a binding names the source once", func(t *testing.T) {
+		t.Parallel()
+
+		src := niceyaml.NewSourceFromString("a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
+
+		doc, err := src.Document()
+		require.NoError(t, err)
+
+		errInvalid := errors.New("invalid")
+		classified := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			return fmt.Errorf("%w: %w", errInvalid, badC.Validate(ctx, n))
+		})
+
+		err = doc.Validate(t.Context(), niceyaml.MultiValidator(classified, badB))
+		require.ErrorIs(t, err, errInvalid)
+		assert.Equal(t, "invalid: x.yaml:3:6: $.a.c: bad c\n$.a.b: bad b", err.Error())
+	})
+
 	t.Run("a context that ends stops the run", func(t *testing.T) {
 		t.Parallel()
 

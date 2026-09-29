@@ -921,11 +921,21 @@ func isBound(err error) bool {
 // that writes a path in front leads with the path. An Error from
 // [Rebase], or one that carries a position or a range alone, writes the
 // text of [Error.textCause] otherwise, so the walk continues there, and
-// any other Error writes the text of its cause. At an error that unwraps
-// to several, the walk continues with its first branch that is not a nil
-// interface, since [errors.Join] keeps every other branch and that one
-// supplies the first line. A nil [*Error] or [*SourceError] there
-// supplies an empty first line, so no binding leads.
+// any other Error writes the text of its cause.
+//
+// At a join, as [joinBranches] finds one, the walk continues with its
+// first branch that is not a nil interface, since the join writes the
+// message of each such branch on a line of its own. A nil [*Error] or
+// [*SourceError] there writes an empty first line, so no binding leads.
+// At a wrapper that [fmt.Errorf] builds with several %w verbs, the walk
+// continues with the first branch [followBranches] keeps of it, as it
+// does through a wrapper with one %w verb. A sentinel in front of a
+// binding thus leaves the binding to lead. Any other error that unwraps
+// to several writes a message of its own. The walk continues with its
+// first branch that is not a nil interface when that message starts with
+// the message of the branch, as a list of the messages joined with "; "
+// does. A message that starts some other way, such as with a count of
+// the branches, comes from no binding.
 func leadingBinding(err error) *SourceError {
 	for cur := err; ; {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -958,20 +968,54 @@ func leadingBinding(err error) *SourceError {
 			cur = x.Unwrap()
 
 		case interface{ Unwrap() []error }:
-			cur = nil
+			branches := x.Unwrap()
 
-			for _, branch := range x.Unwrap() {
-				if branch != nil {
-					cur = branch
+			switch {
+			case isJoinError(cur):
+				cur = firstBranch(branches)
 
-					break
+			case isWrapErrors(cur):
+				if isJoinMessage(cur.Error(), branches) {
+					cur = firstBranch(branches)
+
+					continue
 				}
+
+				kept, next := followBranches(cur, branches)
+				if next == nil && len(kept) > 0 {
+					next = kept[0]
+				}
+
+				cur = next
+
+			default:
+				// A message that reads as a join starts with the message
+				// of its first branch too, so one read of the message
+				// covers both.
+				lead := firstBranch(branches)
+				if lead == nil || !strings.HasPrefix(cur.Error(), lead.Error()) {
+					return nil
+				}
+
+				cur = lead
 			}
 
 		default:
 			return nil
 		}
 	}
+}
+
+// firstBranch returns the first of branches that is not a nil interface,
+// or nil when every branch is one.
+func firstBranch(branches []error) error {
+	for _, branch := range branches {
+		if branch != nil {
+			return branch
+		}
+	}
+
+	return nil
 }
 
 // leadNamesSource reports whether the first line of the message of e
