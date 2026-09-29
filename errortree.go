@@ -189,7 +189,7 @@ func walkChildren(err error, onBinding func(*SourceError), onChild func(n error,
 		case *Error:
 			base = base.cross(x)
 
-			for _, n := range x.nested() {
+			for _, n := range x.errors {
 				onChild(n, base)
 			}
 

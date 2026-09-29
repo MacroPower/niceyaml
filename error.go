@@ -145,7 +145,8 @@ type Error struct {
 	err error
 	// The position or the range: a position.Position or a position.Range,
 	// or nil when neither is set.
-	loc    any
+	loc any
+	// The nested errors from WithErrors, which leaves out the nil ones.
 	errors []error
 	// The path, when hasPath, since the root is a path like any other.
 	path paths.Path
@@ -365,7 +366,11 @@ func AtRange(r position.Range) ErrorOption {
 // error.
 func WithErrors(errs ...error) ErrorOption {
 	return func(e *Error) {
-		e.errors = append(e.errors, errs...)
+		for _, n := range errs {
+			if !isNothing(n) {
+				e.errors = append(e.errors, n)
+			}
+		}
 	}
 }
 
@@ -448,20 +453,6 @@ func (e *Error) LogValue() slog.Value {
 	return slog.StringValue(renderErrorTree(NewErrorTree(e)))
 }
 
-// nested returns the nested errors of e that are not nothing, in the
-// order [WithErrors] received them.
-func (e *Error) nested() []error {
-	out := make([]error, 0, len(e.errors))
-
-	for _, n := range e.errors {
-		if !isNothing(n) {
-			out = append(out, n)
-		}
-	}
-
-	return out
-}
-
 // locus is the location an [Error] carries: a path when hasPath, a
 // [position.Position] or a [position.Range] in loc, or both. The zero
 // locus is no location.
@@ -492,7 +483,7 @@ func (e *Error) locus() locus {
 // nests no errors with [WithErrors]. Such an Error has the text and the
 // children of the error it wraps.
 func (e *Error) addsNothing() bool {
-	return e != nil && !e.rebased && !e.hasLocation() && len(e.nested()) == 0
+	return e != nil && !e.rebased && !e.hasLocation() && len(e.errors) == 0
 }
 
 // hasLocation reports whether e carries a location of its own: a path, a
@@ -513,7 +504,7 @@ func (e *Error) Unwrap() []error {
 		result = append(result, e.err)
 	}
 
-	return append(result, e.nested()...)
+	return append(result, e.errors...)
 }
 
 // Cause returns the error the [Error] wraps: the error given to
@@ -535,7 +526,7 @@ func (e *Error) Errors() []error {
 		return nil
 	}
 
-	return e.nested()
+	return slices.Clone(e.errors)
 }
 
 // location returns the locus of the [Error]: a path from [AtPath], a
@@ -873,7 +864,7 @@ func isBound(err error) bool {
 			return x != nil
 
 		case *Error:
-			if x == nil || x.hasLocation() || len(x.nested()) > 0 {
+			if x == nil || x.hasLocation() || len(x.errors) > 0 {
 				return false
 			}
 

@@ -4865,10 +4865,13 @@ func TestError_Accessors(t *testing.T) {
 	cause := errors.New("boom")
 	nested := niceyaml.NewError("nested", niceyaml.AtPath(paths.Root().Child("a")))
 
-	err := niceyaml.WrapError(cause, niceyaml.WithErrors(nil, nested))
+	var nilNested *niceyaml.Error
+
+	err := niceyaml.WrapError(cause, niceyaml.WithErrors(nil, nested, nilNested))
 
 	assert.Equal(t, cause, err.Cause())
 	assert.Equal(t, []error{nested}, err.Errors())
+	assert.Equal(t, []error{cause, nested}, err.Unwrap())
 
 	// The nested slice is a copy.
 	err.Errors()[0] = nil
