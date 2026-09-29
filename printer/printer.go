@@ -954,7 +954,15 @@ func (p *Printer) renderRows(view *line.View) []string {
 // wrapped to the printer width, each row with its gutter, and each of its
 // annotation rows above or below the wrapped row that holds its column.
 func (p *Printer) renderLine(view *line.View, idx int, ln *line.Line, maxNumber, gutterWidth int) []string {
-	w := p.wrapLine(view, idx, ln, gutterWidth)
+	rendered, runs := p.renderRuns(view, idx)
+	w := wrappedLine{pieces: p.wrapContent(rendered, gutterWidth)}
+
+	// Only annotations read the columns each row shows, so a line without
+	// annotations leaves its rows unmapped.
+	if len(view.Annotations(idx)) > 0 {
+		w = mapRows(ln, rendered, runs, w.pieces)
+	}
+
 	above := p.annotationRows(view, ln, idx, gutterWidth, line.Above, w)
 	below := p.annotationRows(view, ln, idx, gutterWidth, line.Below, w)
 

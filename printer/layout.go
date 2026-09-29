@@ -141,8 +141,14 @@ func (p *Printer) wrapLine(view *line.View, idx int, ln *line.Line, gutterWidth 
 	// a style's transform may change the shown text. The wrap is
 	// ANSI-aware and measures the shown cells.
 	rendered, runs := p.renderRuns(view, idx)
-	pieces := p.wrapContent(rendered, gutterWidth)
 
+	return mapRows(ln, rendered, runs, p.wrapContent(rendered, gutterWidth))
+}
+
+// mapRows returns pieces, the rows the wrap cut from rendered, the
+// rendered content of ln, with the columns of the content each piece
+// shows. Runs holds the runs that style rendered.
+func mapRows(ln *line.Line, rendered string, runs []runSpan, pieces []string) wrappedLine {
 	// The wrap cuts the pieces from the shown text of the line, so each
 	// piece matches the shown text at the offset where it begins. The
 	// runs then map each offset back to a column of the content, which
