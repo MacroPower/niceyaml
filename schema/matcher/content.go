@@ -139,16 +139,25 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 		return wantsNil(m.want), nil
 	}
 
-	// A rejection from the decoder means the value does not read as T, which
-	// is a no rather than a failure. An error the value's own UnmarshalYAML
-	// returns is not a rejection, so it comes back as the error.
-	got, err := node.Decode[T](ctx)
-	if errors.Is(err, niceyaml.ErrDecodeRejected) {
-		return false, nil
-	}
+	var got T
 
-	if err != nil {
-		return false, err
+	// When T is any, a decode into T gives the value raw already holds, so
+	// got takes raw rather than decoding the node again.
+	if p, ok := any(&got).(*any); ok {
+		*p = raw
+	} else {
+		// A rejection from the decoder means the value does not read as T,
+		// which is a no rather than a failure. An error the value's own
+		// UnmarshalYAML returns is not a rejection, so it comes back as the
+		// error.
+		got, err = node.Decode[T](ctx)
+		if errors.Is(err, niceyaml.ErrDecodeRejected) {
+			return false, nil
+		}
+
+		if err != nil {
+			return false, err
+		}
 	}
 
 	// A pointer want matches the value it points to, since every decode
