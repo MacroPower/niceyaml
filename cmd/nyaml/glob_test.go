@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -436,7 +437,7 @@ func TestGlob(t *testing.T) {
 	tcs := map[string]struct {
 		pattern   string
 		wantFiles []string
-		err       string
+		err       error
 	}{
 		"simple wildcard": {
 			pattern:   filepath.Join(tmpDir, "*.yaml"),
@@ -539,7 +540,7 @@ func TestGlob(t *testing.T) {
 		},
 		"dot-dot after a wildcard": {
 			pattern: tmpDir + "/sub*/../a.yaml",
-			err:     errDotDotAfterMeta.Error(),
+			err:     errDotDotAfterMeta,
 		},
 		"brace alternatives matching one file": {
 			pattern:   tmpDir + "/{a,[a]}.yaml",
@@ -559,7 +560,7 @@ func TestGlob(t *testing.T) {
 		},
 		"invalid pattern": {
 			pattern: "[",
-			err:     "glob",
+			err:     doublestar.ErrBadPattern,
 		},
 	}
 
@@ -568,9 +569,8 @@ func TestGlob(t *testing.T) {
 			t.Parallel()
 
 			matches, err := glob(tc.pattern)
-			if tc.err != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.err)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
 
 				return
 			}
