@@ -1386,6 +1386,14 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				`),
 				err: "4 schema violations",
 			},
+			"alias to a sibling in an anchor": {
+				schema: `{
+					"properties": {
+						"base": {"properties": {"health": {"type": "integer"}}}
+					}
+				}`,
+				input: "base: &b\n  port: &p 80\n  health: *p\n",
+			},
 			"merge keys": {
 				schema: `{
 					"type": "object",

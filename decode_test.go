@@ -2635,6 +2635,29 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 				path:  paths.Root().Child("node"),
 				want:  map[string]any{"p": uint64(1), "r": uint64(1)},
 			},
+			"whole document with an alias to a sibling in an anchor": {
+				input: "outer: &o\n  one: &y 1\n  two: &x {d: *y}\nuse:\n  v: *x\n",
+				path:  paths.Root(),
+				want: map[string]any{
+					"outer": map[string]any{
+						"one": uint64(1),
+						"two": map[string]any{"d": uint64(1)},
+					},
+					"use": map[string]any{"v": map[string]any{"d": uint64(1)}},
+				},
+			},
+			"node with an alias to a sibling in an anchor": {
+				input: "outer: &o\n  one: &y 1\n  two: &x {d: *y}\nuse:\n  v: *x\n",
+				path:  paths.Root().Child("use"),
+				want:  map[string]any{"v": map[string]any{"d": uint64(1)}},
+			},
+			"node with an alias to a redefined sibling in an anchor": {
+				input: "d: &x\n  &y b: &x {q: *x}\n  a: &x\n    d: *y\nc:\n  <<: *x\n  b: *x\na:\n  a: [*y, &y 5, *x]\n",
+				path:  paths.Root().Child("a"),
+				want: map[string]any{
+					"a": []any{"b", uint64(5), map[string]any{"d": "b"}},
+				},
+			},
 		}
 
 		for name, tc := range tcs {
@@ -2963,20 +2986,13 @@ func TestDocument_DecodeInto(t *testing.T) {
 			Items []string `yaml:"items"`
 		}
 
-		// The go-yaml decoder panics on each of these, as it reads a
-		// sequence out of a tagged value that holds none.
+		// The go-yaml decoder reads a sequence out of each tagged string
+		// and reports the tagged value.
 		tcs := map[string]struct {
 			input  string
 			decode func(ctx context.Context, dd *niceyaml.Node) error
+			err    string
 		}{
-			"seq tag without a value in a field": {
-				input: "name: x\nitems: !!seq\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[listConfig](ctx)
-
-					return err
-				},
-			},
 			"str tag in a field": {
 				input: "items: !!str foo\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
@@ -2984,6 +3000,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 					return err
 				},
+				err: "1:14: string was used where sequence is expected",
 			},
 			"str tag into a slice": {
 				input: "!!str foo\n",
@@ -2992,6 +3009,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 					return err
 				},
+				err: "1:7: string was used where sequence is expected",
 			},
 		}
 
@@ -3006,23 +3024,36 @@ func TestDocument_DecodeInto(t *testing.T) {
 				require.NotPanics(t, func() {
 					err = tc.decode(t.Context(), dd)
 				})
+				require.EqualError(t, err, tc.err)
 				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
 
 				var srcErr *niceyaml.SourceError
 
 				require.ErrorAs(t, err, &srcErr, "the rejection is not bound to the source")
-
-				_, ok := errors.AsType[yaml.Error](err)
-				assert.False(t, ok, "a go-yaml error is in the chain")
 			})
 		}
 	})
 
-	t.Run("locates a decoder panic at the value, not a head comment", func(t *testing.T) {
+	t.Run("decodes a seq tag without a value in a field as no value", func(t *testing.T) {
 		t.Parallel()
 
 		type listConfig struct {
+			Name  string   `yaml:"name"`
 			Items []string `yaml:"items"`
+		}
+
+		dd := yamltest.FirstDocument(t, "name: x\nitems: !!seq\n")
+
+		got, err := dd.Decode[listConfig](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, listConfig{Name: "x"}, got)
+	})
+
+	t.Run("locates a panic at the value, not a head comment", func(t *testing.T) {
+		t.Parallel()
+
+		type listConfig struct {
+			Items panickingUnmarshaler `yaml:"items"`
 		}
 
 		tcs := map[string]struct {
@@ -3031,12 +3062,12 @@ func TestDocument_DecodeInto(t *testing.T) {
 			want  position.Position
 		}{
 			"whole document": {
-				input: "# about the file\n\nname: x\nitems: !!seq\n",
+				input: "# about the file\n\nname: x\nitems: [a]\n",
 				path:  paths.Root(),
 				want:  position.New(2, 0),
 			},
 			"scoped node": {
-				input: "a: 1\nwrap:\n  # the list\n  items: !!seq\n",
+				input: "a: 1\nwrap:\n  # the list\n  items: [a]\n",
 				path:  paths.Root().Child("wrap"),
 				want:  position.New(3, 2),
 			},
@@ -3048,8 +3079,16 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 				dd := yamltest.FirstDocument(t, tc.input)
 
-				_, err := yamltest.At(t, dd, tc.path).Decode[listConfig](t.Context())
+				var err error
+
+				require.NotPanics(t, func() {
+					_, err = yamltest.At(t, dd, tc.path).Decode[listConfig](t.Context())
+				})
 				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+				require.ErrorContains(t, err, "panic: "+errUnmarshal.Error())
+
+				_, ok := errors.AsType[yaml.Error](err)
+				assert.False(t, ok, "a go-yaml error is in the chain")
 
 				var srcErr *niceyaml.SourceError
 
@@ -5113,6 +5152,14 @@ type rejectingUnmarshaler struct{}
 
 func (*rejectingUnmarshaler) UnmarshalYAML([]byte) error {
 	return errUnmarshal
+}
+
+// panickingUnmarshaler panics with errUnmarshal when it decodes itself,
+// so the decode meets a panic below the node it reads.
+type panickingUnmarshaler struct{}
+
+func (*panickingUnmarshaler) UnmarshalYAML([]byte) error {
+	panic(errUnmarshal)
 }
 
 // wrappingUnmarshaler decodes itself as an int through the decoder and

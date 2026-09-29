@@ -1699,10 +1699,8 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 		}
 	}
 
-	// The go-yaml decoder panics on some values it cannot read, such as a
-	// tagged null under a mapping key decoded into a slice. The recover
-	// also catches a panic in a value's own UnmarshalYAML, which then
-	// comes back as a rejection too.
+	// The recover turns a panic in the go-yaml decoder, or in a value's
+	// own UnmarshalYAML, into a rejection.
 	err = decodeWithRecover(ctx, dec, view, decodeTarget(v, node))
 
 	return n.bindDecodeError(n.rejection(err, view))
