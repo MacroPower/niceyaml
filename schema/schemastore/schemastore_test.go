@@ -1089,7 +1089,8 @@ func TestSchemaStore_FetchError(t *testing.T) {
 			setup: func(t *testing.T) []schemastore.Option {
 				t.Helper()
 
-				// URL with control character triggers http.NewRequestWithContext error.
+				// The control character makes url.Parse reject the URL, so the
+				// fetch sends no request.
 				return []schemastore.Option{schemastore.WithCatalogURL("http://\x00invalid")}
 			},
 		},
