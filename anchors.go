@@ -647,6 +647,8 @@ func (c *nodeCollector) Visit(node ast.Node) ast.Visitor {
 //
 // Create instances with [newAnchorIndex].
 type anchorIndex struct {
+	// The anchors of each name, as indexes into entries.
+	named map[string][]int
 	// The anchors, in document order.
 	entries []anchorEntry
 }
@@ -654,36 +656,35 @@ type anchorIndex struct {
 // anchorEntry is an anchor, which registers its name and the names of the
 // anchors inside it when the decoder reads it.
 type anchorEntry struct {
-	node ast.Node
-	// The names of the anchors a decode of node registers, and the names
-	// its aliases read.
-	registers, reads []string
+	node *ast.AnchorNode
+	// The names the aliases under node read.
+	reads []string
 	// The offsets of the first and the last token under node.
 	start, end int
+	// The index of the innermost entry that holds node, or -1.
+	parent int
 }
 
 // newAnchorIndex creates a new [*anchorIndex] for body.
 func newAnchorIndex(body ast.Node) *anchorIndex {
-	idx := &anchorIndex{}
+	idx := &anchorIndex{named: map[string][]int{}}
 
 	for _, node := range sourceNodes(body) {
-		if _, ok := node.(*ast.AnchorNode); !ok {
+		anchor, ok := node.(*ast.AnchorNode)
+		if !ok {
 			continue
 		}
 
-		first, last := tokenBounds(node)
+		first, last := tokenBounds(anchor)
 		if len(first) == 0 {
 			continue
 		}
 
-		names := namesOf(node)
-
 		idx.entries = append(idx.entries, anchorEntry{
-			node:      node,
-			registers: setKeys(names.registers),
-			reads:     setKeys(names.reads),
-			start:     first[0].Position.Offset,
-			end:       last[0].Position.Offset,
+			node:  anchor,
+			reads: setKeys(namesOf(anchor).reads),
+			start: first[0].Position.Offset,
+			end:   last[0].Position.Offset,
 		})
 	}
 
@@ -693,7 +694,55 @@ func newAnchorIndex(body ast.Node) *anchorIndex {
 		return idx.entries[i].start < idx.entries[j].start
 	})
 
+	// The entries that hold the current one, innermost last.
+	var holders []int
+
+	for i := range idx.entries {
+		e := &idx.entries[i]
+
+		for len(holders) > 0 && idx.entries[holders[len(holders)-1]].end < e.start {
+			holders = holders[:len(holders)-1]
+		}
+
+		e.parent = -1
+		if len(holders) > 0 {
+			e.parent = holders[len(holders)-1]
+		}
+
+		holders = append(holders, i)
+
+		if name, ok := nodeName(e.node.Name); ok {
+			idx.named[name] = append(idx.named[name], i)
+		}
+	}
+
 	return idx
+}
+
+// candidate returns the index of the entry whose decode registers the
+// anchor of entry i for a node that starts at offset start, or -1 when no
+// such decode precedes the node. That is the outermost entry that holds
+// the anchor and ends before the node, or the anchor itself when it holds
+// the node, which [pendingAnchor] then stands for.
+func (idx *anchorIndex) candidate(i, start int) int {
+	e := idx.entries[i]
+
+	switch {
+	case e.start >= start:
+		return -1
+
+	case e.end >= start:
+		return i
+	}
+
+	for {
+		p := idx.entries[i].parent
+		if p < 0 || idx.entries[p].end >= start {
+			return i
+		}
+
+		i = p
+	}
 }
 
 // primeAnchors registers with dec the anchors that the aliases in node,
@@ -718,8 +767,8 @@ func (n *Node) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast.Nod
 		return nil
 	}
 
-	needed := namesOf(node).reads
-	if len(needed) == 0 {
+	reads := namesOf(node).reads
+	if len(reads) == 0 {
 		return nil
 	}
 
@@ -730,54 +779,56 @@ func (n *Node) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast.Nod
 
 	start := first[0].Position.Offset
 
-	// The outermost entries that end before node. One that holds node is
-	// no candidate, and the entries inside it are.
-	var candidates []anchorEntry
+	// For each name something reads, the index of the last entry that
+	// reads it. Node reads after every entry.
+	readBy := make(map[string]int, len(reads))
+	work := make([]string, 0, len(reads))
 
-	covered := -1
+	for name := range reads {
+		readBy[name] = len(idx.entries)
+		work = append(work, name)
+	}
 
-	for _, e := range idx.entries {
-		if e.start >= start {
-			break
-		}
+	// Keep each entry that registers a name an entry after it, or node,
+	// reads, and add the names it reads itself.
+	kept := map[int]bool{}
 
-		switch {
-		case e.start <= covered:
-			continue
+	for len(work) > 0 {
+		name := work[len(work)-1]
+		work = work[:len(work)-1]
 
-		case e.end >= start:
-			if anchor, ok := e.node.(*ast.AnchorNode); ok {
-				candidates = append(candidates, pendingEntry(anchor))
+		for _, i := range idx.named[name] {
+			c := idx.candidate(i, start)
+			if c < 0 || c >= readBy[name] || kept[c] {
+				continue
 			}
 
-		default:
-			candidates = append(candidates, e)
-			covered = e.end
+			kept[c] = true
+
+			// An anchor that holds node reads nothing before node.
+			if idx.entries[c].end >= start {
+				continue
+			}
+
+			for _, read := range idx.entries[c].reads {
+				if last, ok := readBy[read]; ok && last >= c {
+					continue
+				}
+
+				readBy[read] = c
+				work = append(work, read)
+			}
 		}
 	}
 
-	// From the last candidate back, keep each one that registers a name
-	// something after it reads, and add the names it reads itself.
-	keep := make([]bool, len(candidates))
-
-	for i := len(candidates) - 1; i >= 0; i-- {
-		e := candidates[i]
-		if !readsAny(needed, e.registers) {
-			continue
-		}
-
-		keep[i] = true
-
-		for _, name := range e.reads {
-			needed[name] = struct{}{}
-		}
+	order := make([]int, 0, len(kept))
+	for i := range kept {
+		order = append(order, i)
 	}
 
-	for i, e := range candidates {
-		if !keep[i] {
-			continue
-		}
+	sort.Ints(order)
 
+	for _, i := range order {
 		// Without an anchor it needs, the decode of the node would fail
 		// in its stead.
 		err := ctx.Err()
@@ -785,54 +836,39 @@ func (n *Node) primeAnchors(ctx context.Context, dec *yaml.Decoder, node ast.Nod
 			return err //nolint:wrapcheck // The context names the reason, and the Node binds it.
 		}
 
+		anchor := idx.entries[i].node
+		if idx.entries[i].end >= start {
+			anchor = pendingAnchor(anchor)
+		}
+
 		var sink any
 
-		err = decodeWithRecover(ctx, dec, e.node, &sink)
+		err = decodeWithRecover(ctx, dec, anchor, &sink)
 		if err != nil {
-			return n.rejection(err, e.node)
+			return n.rejection(err, anchor)
 		}
 	}
 
 	return nil
 }
 
-// pendingEntry returns the entry for an anchor with the name of anchor
-// over a null. The decoder registers a name as null while it reads the
-// value of its anchor, so an alias inside that value reads as null, and
-// the entry registers the name that way for an alias in a node inside
-// anchor.
-func pendingEntry(anchor *ast.AnchorNode) anchorEntry {
+// pendingAnchor returns an anchor with the name of anchor over a null.
+// The decoder registers a name as null while it reads the value of its
+// anchor, so an alias inside that value reads as null. A decode of the
+// pending anchor registers the name that way for a node inside anchor.
+func pendingAnchor(anchor *ast.AnchorNode) *ast.AnchorNode {
 	var pos *token.Position
 
 	if anchor.Start != nil {
 		pos = anchor.Start.Position
 	}
 
-	pending := &ast.AnchorNode{
+	return &ast.AnchorNode{
 		BaseNode: &ast.BaseNode{},
 		Start:    anchor.Start,
 		Name:     anchor.Name,
 		Value:    ast.Null(token.New("null", "null", pos)),
 	}
-
-	var registers []string
-
-	if name, ok := nodeName(anchor.Name); ok {
-		registers = []string{name}
-	}
-
-	return anchorEntry{node: pending, registers: registers}
-}
-
-// readsAny reports whether needed holds any of names.
-func readsAny(needed map[string]struct{}, names []string) bool {
-	for _, name := range names {
-		if _, ok := needed[name]; ok {
-			return true
-		}
-	}
-
-	return false
 }
 
 // namesOf returns the names of the anchors a decode of node registers,

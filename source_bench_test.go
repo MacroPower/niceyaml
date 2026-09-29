@@ -94,17 +94,20 @@ func BenchmarkNode_DecodeScoped(b *testing.B) {
 	}
 
 	// Each entry of a merge layout takes its value from the defaults
-	// through a `<<` merge key.
+	// through a `<<` merge key. Each entry of an anchored layout also
+	// defines an anchor of its own.
 	sizes := []struct {
-		name  string
-		items int
-		merge bool
+		name     string
+		items    int
+		merge    bool
+		anchored bool
 	}{
-		{"items_100", 100, false},
-		{"items_1000", 1000, false},
-		{"merge_items_100", 100, true},
-		{"merge_items_1000", 1000, true},
-		{"merge_items_4000", 4000, true},
+		{"items_100", 100, false, false},
+		{"items_1000", 1000, false, false},
+		{"merge_items_100", 100, true, false},
+		{"merge_items_1000", 1000, true, false},
+		{"merge_items_4000", 4000, true, false},
+		{"anchored_items_4000", 4000, true, true},
 	}
 
 	for _, sz := range sizes {
@@ -117,9 +120,12 @@ func BenchmarkNode_DecodeScoped(b *testing.B) {
 		}
 
 		for i := range sz.items {
-			if sz.merge {
+			switch {
+			case sz.anchored:
+				fmt.Fprintf(&sb, "  - &a%d\n    <<: *d\n    name: item_%d\n", i, i)
+			case sz.merge:
 				fmt.Fprintf(&sb, "  - <<: *d\n    name: item_%d\n", i)
-			} else {
+			default:
 				fmt.Fprintf(&sb, "  - name: item_%d\n    value: %d\n", i, i)
 			}
 		}

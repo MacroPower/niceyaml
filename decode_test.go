@@ -2501,6 +2501,11 @@ func TestDocument_At(t *testing.T) {
 				path:  paths.Root().Child("sub"),
 				want:  map[string]any{"k": uint64(1)},
 			},
+			"anchor inside an anchor that holds the node": {
+				input: "outer: &o\n  inner: &i 1\n  sub: {k: *i, s: *o}\n",
+				path:  paths.Root().Child("outer", "sub"),
+				want:  map[string]any{"k": uint64(1), "s": nil},
+			},
 			"anchor that refers to another anchor": {
 				input: "a: &a 1\nb: &b [*a]\nsub: {k: *b}\n",
 				path:  paths.Root().Child("sub"),
