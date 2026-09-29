@@ -1,6 +1,8 @@
 package niceyaml
 
 import (
+	"errors"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -95,6 +97,11 @@ func NewErrorTree(err error) ErrorTree {
 // error built with several %w verbs a join, since its message is its own
 // rather than its branches' messages one per line, so it keeps its text,
 // and [followBranches] picks the branches that stand below it.
+//
+// An error [errors.Join] built is a join by its type alone, since its
+// message is always its branches' messages one per line. Any other error
+// that unwraps to several is a join only when its message is that text,
+// as [isJoinMessage] reports.
 func joinBranches(err error) ([]error, bool) {
 	if x, ok := err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
 		if !x.addsNothing() {
@@ -110,12 +117,15 @@ func joinBranches(err error) ([]error, bool) {
 	}
 
 	branches := joined.Unwrap()
-	if !isJoinMessage(err.Error(), branches) {
+	if reflect.TypeOf(err) != joinType && !isJoinMessage(err.Error(), branches) {
 		return nil, false
 	}
 
 	return branches, true
 }
+
+// joinType is the type of the errors [errors.Join] builds.
+var joinType = reflect.TypeOf(errors.Join(errors.New("")))
 
 // isJoinMessage reports whether msg is the messages of branches one per
 // line, which is how [errors.Join] writes the message of the error it

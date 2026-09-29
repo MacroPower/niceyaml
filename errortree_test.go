@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -53,6 +54,63 @@ func (e sparseJoinError) Error() string {
 // Unwrap returns the branches, nil ones included.
 func (e sparseJoinError) Unwrap() []error {
 	return e.errs
+}
+
+// countingError is an error that counts the calls to its Error method.
+type countingError struct {
+	calls *atomic.Int64
+	msg   string
+}
+
+// Error returns the message and counts the call.
+func (e countingError) Error() string {
+	e.calls.Add(1)
+
+	return e.msg
+}
+
+func TestErrorTree_New_LeftDeepJoin(t *testing.T) {
+	t.Parallel()
+
+	const n = 200
+
+	tcs := map[string]struct {
+		build  func(error) error
+		prefix string
+	}{
+		"join": {
+			build: func(err error) error { return err },
+		},
+		"rebased join": {
+			build:  func(err error) error { return niceyaml.Rebase(err, paths.Root()) },
+			prefix: "$: ",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var (
+				calls  atomic.Int64
+				joined error
+				want   niceyaml.ErrorTree
+			)
+
+			for i := range n {
+				msg := fmt.Sprintf("error %d", i)
+				joined = errors.Join(joined, countingError{calls: &calls, msg: msg})
+				want.Children = append(want.Children, niceyaml.ErrorTree{Text: tc.prefix + msg})
+			}
+
+			got := niceyaml.NewErrorTree(tc.build(joined))
+
+			assert.Equal(t, want, got)
+			// Finding each join by rebuilding its message would read every
+			// message once per join above it, n*n/2 times in all.
+			assert.LessOrEqual(t, calls.Load(), int64(2*n))
+		})
+	}
 }
 
 func TestErrorTree_New_MultiWrap(t *testing.T) {
