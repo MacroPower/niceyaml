@@ -102,7 +102,8 @@ type buffers struct {
 	inBefore, inAfter []bool
 
 	// ID of each line while intern runs. The map is empty between calls,
-	// so the pool holds no reference to the caller's lines.
+	// so the pool holds no reference to the caller's lines. Clearing a map
+	// keeps its capacity.
 	ids map[string]int
 
 	// Changed lines of each input. The search marks them, and compact
@@ -111,6 +112,10 @@ type buffers struct {
 
 	// Accumulated diff operations.
 	ops []Op
+
+	// Most entries ids has room for. It starts at the number of entries
+	// intern made the map for and grows with the most the map has held.
+	idsPeak int
 }
 
 // reset empties the operations, clears the change marks, and sizes the
@@ -143,15 +148,22 @@ func (b *buffers) reset(beforeLen, afterLen, bLen, aLen int) {
 // equal lines, in b.beforeIDs and b.afterIDs. It returns the number of
 // distinct lines, and every ID is less than that number.
 func (b *buffers) intern(before, after []string) int {
-	if b.ids == nil {
+	// Inserting into a map and clearing it take time that grows with its
+	// capacity. A map left from a much larger input would slow every later
+	// call, so intern replaces it with one sized for this input.
+	if lines := len(before) + len(after); b.ids == nil || b.idsPeak > 4*lines+64 {
 		b.ids = make(map[string]int, len(before))
+		b.idsPeak = len(before)
 	}
 
 	ids := b.ids
 
 	// Emptying the map after use keeps the pool from holding on to the
 	// caller's lines between calls.
-	defer clear(ids)
+	defer func() {
+		b.idsPeak = max(b.idsPeak, len(ids))
+		clear(ids)
+	}()
 
 	id := func(line string) int {
 		n, ok := ids[line]
