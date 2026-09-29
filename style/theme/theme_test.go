@@ -814,10 +814,11 @@ func TestPalette_HeadingsReadable(t *testing.T) {
 func TestPalette_ChromeReadable(t *testing.T) {
 	t.Parallel()
 
-	// Several themes dim their line numbers on purpose, so the floor sits
-	// far below the WCAG minimum and only rejects chrome that vanishes
-	// into the background, such as navy on black.
-	const floor = 1.4
+	// Several themes, such as tokyonight, dim their line numbers on
+	// purpose, so the floor sits far below the WCAG minimum and only
+	// rejects chrome that vanishes into the background, such as navy on
+	// black.
+	const floor = 1.6
 
 	for _, th := range theme.Builtin().All() {
 		t.Run(th.Name, func(t *testing.T) {

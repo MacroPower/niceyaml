@@ -1550,6 +1550,7 @@ var palettes = map[string]palette{
 			kind.NameTag:            "#bc74c4",
 			kind.Punctuation:        "#56b6c2",
 			kind.PunctuationHeading: "#c9c9c9",
+			kind.UI:                 "#7f848e",
 		},
 	},
 	"witchhazel": {
