@@ -332,10 +332,11 @@ func walkChildren(err error, onBinding func(*SourceError), onChild func(n error,
 // where the branch does. Any other error that unwraps to several, such
 // as a join or a multi-error of its own type, reports several errors, so
 // it keeps each branch but the nil ones. So does a wrapper whose message
-// reads as a join, as [joinBranches] finds one.
+// reads as a join, as [isJoinMessage] reports.
 func followBranches(err error, branches []error) ([]error, error) {
-	_, joined := joinBranches(err)
-	wrapper := !joined && isWrapErrors(err)
+	// The type check runs first, so an error of any other type never
+	// formats its message here, where the result would go unused.
+	wrapper := isWrapErrors(err) && !isJoinMessage(err.Error(), branches)
 
 	var kept []error
 

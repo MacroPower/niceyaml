@@ -103,6 +103,25 @@ func (e countingError) Error() string {
 	return e.msg
 }
 
+// countingViolationsError is a multi-error of its own type, as
+// [violationsError] is, that counts the calls to its Error method.
+type countingViolationsError struct {
+	calls *atomic.Int64
+	errs  []error
+}
+
+// Error returns the number of branches and counts the call.
+func (e countingViolationsError) Error() string {
+	e.calls.Add(1)
+
+	return fmt.Sprintf("%d violations", len(e.errs))
+}
+
+// Unwrap returns the branches.
+func (e countingViolationsError) Unwrap() []error {
+	return e.errs
+}
+
 func TestErrorTree_New_LeftDeepJoin(t *testing.T) {
 	t.Parallel()
 
@@ -218,6 +237,53 @@ func TestErrorTree_New_DeepMultiWrap(t *testing.T) {
 				// 2^n times.
 				assert.LessOrEqual(t, calls.Load(), int64(2*n*n), op)
 			}
+		})
+	}
+}
+
+func TestErrorTree_New_MultiErrorCalls(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
+	sentinel := errors.New("invalid")
+
+	// Only a wrapper with several %w verbs reads its message to pick its
+	// branches, so the walks that pick the branches of a multi-error of
+	// its own type never call its Error method. A bound message reads it
+	// once more to find the binding its first line comes from.
+	tcs := map[string]struct {
+		run  func(err error)
+		want int64
+	}{
+		"bind": {
+			run:  func(err error) { _ = source.Bind(err) }, //nolint:errcheck // Only the calls count.
+			want: 0,
+		},
+		"tree": {
+			// Once to check for a join, and once for the text of the node.
+			run:  func(err error) { niceyaml.NewErrorTree(err) },
+			want: 2,
+		},
+		"message of a bound sentinel wrapper": {
+			// Once as fmt.Errorf builds the wrapper, and once to check
+			// whether the message starts with that of the first branch.
+			run:  func(err error) { _ = source.Bind(fmt.Errorf("%w: %w", sentinel, err)).Error() },
+			want: 2,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var calls atomic.Int64
+
+			tc.run(countingViolationsError{calls: &calls, errs: []error{
+				niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a"))),
+				errors.New("plain"),
+			}})
+
+			assert.LessOrEqual(t, calls.Load(), tc.want)
 		})
 	}
 }
