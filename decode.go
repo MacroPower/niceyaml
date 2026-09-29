@@ -21,6 +21,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
+	"go.jacobcolvin.com/niceyaml/internal/preamble"
 	"go.jacobcolvin.com/niceyaml/internal/segment"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -264,7 +265,7 @@ func newDocuments(src *Source, file *ast.File) []*Node {
 
 	for i, doc := range docs {
 		doc.index = i
-		doc.preamble = preambleLen(doc.tokens)
+		doc.preamble = preamble.Len(doc.tokens)
 		doc.positioned = slices.DeleteFunc(slices.Clone(doc.tokens), func(tk *token.Token) bool {
 			return tk == nil || tk.Position == nil
 		})
@@ -435,42 +436,6 @@ func trailingCommentsStart(tks token.Tokens) int {
 // document and stays one.
 func isPreambleNode(node *ast.DocumentNode) bool {
 	return node.Start == nil && !hasContent(node.Body)
-}
-
-// preambleLen returns the number of tokens at the start of tks before the
-// document's content: comments, the tokens of each %YAML or %TAG directive
-// line, and the "---" and "..." markers. A stream without content is all
-// preamble.
-func preambleLen(tks token.Tokens) int {
-	inDirective, directiveLine := false, 0
-
-	for i, tk := range tks {
-		if tk.Type == token.DirectiveType {
-			// The lexer splits a directive line into a directive token and
-			// the tokens holding its value, which read as content unless
-			// the rest of the line goes with the directive.
-			inDirective = tk.Position != nil
-			if inDirective {
-				directiveLine = tk.Position.Line
-			}
-
-			continue
-		}
-
-		if inDirective && tk.Position != nil && tk.Position.Line == directiveLine {
-			continue
-		}
-
-		switch tk.Type {
-		case token.CommentType, token.DocumentHeaderType, token.DocumentEndType:
-			continue
-
-		default:
-			return i
-		}
-	}
-
-	return len(tks)
 }
 
 // documentSpans returns the lines of a view of total lines that each token

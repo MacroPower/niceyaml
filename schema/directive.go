@@ -12,6 +12,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
+	"go.jacobcolvin.com/niceyaml/internal/preamble"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -108,69 +109,20 @@ func ParseDirective(comment string) *ParsedDirective {
 // first directive wins. Returns nil when no directive appears before
 // content.
 func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
-	// The parser splits a %YAML or %TAG line into a directive token and the
-	// tokens holding its value, so the value reads as content unless the
-	// scan skips the rest of the directive line with it.
-	inDirective, directiveLine := false, 0
-
-	for _, tk := range tks {
-		if tk == nil {
+	for _, tk := range tks[:preamble.Len(tks)] {
+		if tk == nil || tk.Type != token.CommentType {
 			continue
 		}
 
-		line, hasLine := tokenLine(tk)
+		directive := ParseDirective(tk.Value)
+		if directive != nil {
+			directive.Position = position.NewFromToken(tk)
 
-		if tk.Type == token.DirectiveType {
-			inDirective, directiveLine = hasLine, line
-
-			continue
-		}
-
-		// A token the scan can place on a later line ends the directive
-		// line. A token without a position leaves the line open, and the
-		// scan reads it rather than skipping it.
-		if hasLine && line != directiveLine {
-			inDirective = false
-		}
-
-		// A comment on the directive line is no part of the directive's
-		// value, so the scan reads it as a comment rather than skipping it.
-		if inDirective && hasLine && tk.Type != token.CommentType {
-			continue
-		}
-
-		switch tk.Type {
-		case token.DocumentHeaderType, token.DocumentEndType:
-			// A document marker is part of the preamble rather than
-			// content, so the scan continues past it.
-			continue
-
-		case token.CommentType:
-			directive := ParseDirective(tk.Value)
-			if directive != nil {
-				directive.Position = position.NewFromToken(tk)
-
-				return directive
-			}
-
-		default:
-			// The scan found content before any directive, so this
-			// document has none.
-			return nil
+			return directive
 		}
 	}
 
 	return nil
-}
-
-// tokenLine returns the line tk sits on, and whether it carries a position
-// to read the line from.
-func tokenLine(tk *token.Token) (int, bool) {
-	if tk == nil || tk.Position == nil {
-		return 0, false
-	}
-
-	return tk.Position.Line, true
 }
 
 // directiveResolver resolves schemas from yaml-language-server directives.
