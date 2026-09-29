@@ -954,6 +954,45 @@ func TestTokenize_RestoresDroppedWhitespace(t *testing.T) {
 		"alias after a block scalar header at the end": {
 			input: "|*x",
 		},
+		"bad block header ending in a double quote": {
+			// The lexer makes an invalid token of the repeated quote.
+			input: "key: >\"quoted\"",
+		},
+		"bad block header ending in a single quote": {
+			input: "key: |'x'",
+		},
+		"bad block header ending in an at sign": {
+			input: "k: |a@",
+		},
+		"bad block header ending in a backtick": {
+			input: "k: |a`",
+		},
+		"bad header ending in a quote after a comment": {
+			input: "# c\nb: |ab'",
+		},
+		"bad block header holding a quoted word": {
+			input: "key: |a\"b\"",
+		},
+		"reserved indicators in a row at the end": {
+			// Two invalid tokens that follow no block scalar header both
+			// hold text of the source.
+			input: ": @@",
+		},
+		"reserved indicators in a row in a sequence entry": {
+			input: "- @@",
+		},
+		"backticks in a row at the end": {
+			input: "key: ``",
+		},
+		"bad tags in a row after a document end": {
+			input: "...!}!}",
+		},
+		"bad tags in a row after a document header": {
+			input: "--- !}!}",
+		},
+		"bad tags in a row after a flow sequence": {
+			input: "[{:[]!}!}",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2233,6 +2272,13 @@ var positionCorpus = map[string]string{
 	"bad block header in a later entry":              "- |ab\n- |ab",
 	"text after a block scalar header at the end":    "key: |abc",
 	"text after a block scalar header in a sequence": "- |ab\n- |cd",
+	"bad block header ending in a double quote":      "key: >\"quoted\"",
+	"bad block header ending in a single quote":      "key: |'x'",
+	"bad block header ending in an at sign":          "k: |a@",
+	"bad block header ending in a backtick":          "k: |a`",
+	"bad header ending in a quote after a comment":   "# c\nb: |ab'",
+	"reserved indicators in a row at the end":        ": @@",
+	"bad tags in a row after a document end":         "...!}!}",
 }
 
 func TestTokenize_PositionsLocateText(t *testing.T) {

@@ -157,30 +157,33 @@ func Tokenize(src string) token.Tokens {
 
 // dropHeaderRepeat returns tks without the token the lexer adds when the
 // invalid token it makes of text after a block scalar header ends the
-// source. The lexer repeats the end of that invalid token's text as a
-// token of its own, which sits inside the invalid token and holds text
-// the source does not have.
+// source. That invalid token's text opens with the "|" or ">" of the
+// header. The lexer repeats the end of the text as a token of its own,
+// which sits inside the invalid token and holds text the source does not
+// have. The repeat can be an invalid token too, as when the text ends
+// with a quote or a reserved indicator.
 func dropHeaderRepeat(src string, tks token.Tokens) token.Tokens {
 	if len(tks) < 2 {
 		return tks
 	}
 
 	last, prev := tks[len(tks)-1], tks[len(tks)-2]
-	if prev.Type != token.InvalidType || last.Type == token.InvalidType ||
-		last.Position == nil || prev.Position == nil {
+	if prev.Type != token.InvalidType || last.Position == nil || prev.Position == nil {
 		return tks
 	}
 
 	text := strings.Trim(prev.Origin, " \t\r\n")
-	if text == "" || last.Origin == "" ||
+	if (!strings.HasPrefix(text, "|") && !strings.HasPrefix(text, ">")) || last.Origin == "" ||
 		!strings.HasSuffix(strings.TrimRight(src, " \t\r\n"), text) ||
 		!strings.HasSuffix(text, last.Origin) {
 		return tks
 	}
 
-	// The repeat starts inside the invalid token, by the lexer's own count.
+	// The lexer places the invalid token at the header, where its text
+	// starts, and by the lexer's own count the repeat starts inside that
+	// text.
 	offset := last.Position.Offset - prev.Position.Offset
-	if offset < 0 || offset >= utf8.RuneCountInString(prev.Origin) {
+	if offset < 0 || offset >= utf8.RuneCountInString(text) {
 		return tks
 	}
 
