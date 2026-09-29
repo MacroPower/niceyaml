@@ -2052,3 +2052,87 @@ func TestStore_FindMatch_NoExtension(t *testing.T) {
 		})
 	}
 }
+
+func TestStore_FindMatch_OtherYAMLExtension(t *testing.T) {
+	t.Parallel()
+
+	// Many YAML formats use an extension of their own, so the store keeps
+	// their patterns. It drops only the patterns for formats known not to
+	// be YAML, such as TOML and JSON with comments.
+	catalog := schemastore.Catalog{Schemas: []schemastore.CatalogEntry{
+		{
+			Name:      "Citation File Format",
+			URL:       "https://example.com/cff.json",
+			FileMatch: []string{"CITATION.cff"},
+		},
+		{
+			Name:      "Helm Chart.lock",
+			URL:       "https://example.com/chart-lock.json",
+			FileMatch: []string{"Chart.lock"},
+		},
+		{
+			Name:      "Sublime Syntax",
+			URL:       "https://example.com/sublime-syntax.json",
+			FileMatch: []string{"*.sublime-syntax"},
+		},
+		{
+			Name:      "Biome",
+			URL:       "https://example.com/biome.json",
+			FileMatch: []string{"biome.json", "biome.jsonc"},
+		},
+	}}
+
+	store := schemastore.New(
+		schemastore.WithCatalogURL("https://example.com/catalog.json"),
+		schemastore.WithHTTPClient(newCatalogClient(t, catalog)),
+	)
+
+	tcs := map[string]struct {
+		file      string
+		name      string
+		fileMatch []string
+		err       error
+	}{
+		"cff extension": {
+			file:      "/repo/CITATION.cff",
+			name:      "Citation File Format",
+			fileMatch: []string{"CITATION.cff"},
+		},
+		"lock extension": {
+			file:      "/repo/charts/app/Chart.lock",
+			name:      "Helm Chart.lock",
+			fileMatch: []string{"Chart.lock"},
+		},
+		"hyphenated extension": {
+			file:      "/repo/x.sublime-syntax",
+			name:      "Sublime Syntax",
+			fileMatch: []string{"*.sublime-syntax"},
+		},
+		"JSON pattern beside a JSONC pattern": {
+			file:      "/repo/biome.json",
+			name:      "Biome",
+			fileMatch: []string{"biome.json"},
+		},
+		"jsonc extension": {
+			file: "/repo/biome.jsonc",
+			err:  schemastore.ErrNoCatalogMatch,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			entry, err := store.FindMatch(t.Context(), tc.file)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.name, entry.Name)
+			assert.Equal(t, tc.fileMatch, entry.FileMatch)
+		})
+	}
+}

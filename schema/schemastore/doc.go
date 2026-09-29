@@ -15,12 +15,13 @@
 //
 // This one resolver handles all SchemaStore schemas. It matches file
 // paths against the catalog patterns for tools like GitHub Actions and
-// Docker Compose. The store keeps only the patterns that can match a
-// YAML or JSON file. It drops a pattern whose file name carries another
-// extension, such as *.toml, and keeps a name without an extension, such
-// as .clang-format. When several entries match a path, the store picks
-// the one with the most specific pattern, so a pattern for a tool's own
-// directory wins over a broad one such as "**/tasks/*.yml".
+// Docker Compose. The store drops the patterns for formats known not to
+// be YAML, such as *.toml and *.jsonc, and keeps every other pattern, so
+// YAML formats with an extension of their own, such as CITATION.cff, and
+// names without an extension, such as .clang-format, still match. When
+// several entries match a path, the store picks the one with the most
+// specific pattern, so a pattern for a tool's own directory wins over a
+// broad one such as "**/tasks/*.yml".
 //
 // New performs no I/O. The first lookup fetches the catalog, and later
 // lookups reuse it until the cache TTL expires. A refresh that fails keeps

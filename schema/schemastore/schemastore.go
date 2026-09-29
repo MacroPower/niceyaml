@@ -49,6 +49,16 @@ var (
 	// "**/.github/ISSUE_TEMPLATE/!(config).yml". The matcher implements no
 	// extglob and reads such a group as literal text.
 	extglobRE = regexp.MustCompile(`[?*+@!]\(`)
+
+	// File extensions of formats that a YAML parser rejects, such as TOML
+	// and JSON with comments. The catalog lists many YAML and JSON formats
+	// under extensions of their own, such as CITATION.cff and
+	// *.sublime-syntax, so the store drops only these.
+	nonYAMLExtensions = map[string]bool{
+		"cjs": true, "cts": true, "ini": true, "js": true,
+		"json5": true, "jsonc": true, "mjs": true, "mts": true,
+		"patch": true, "toml": true, "ts": true, "xml": true,
+	}
 )
 
 // Catalog represents the SchemaStore.org catalog structure that the
@@ -68,9 +78,8 @@ type CatalogEntry struct {
 	URL string `json:"url"`
 	// FileMatch contains the glob patterns for the files this schema
 	// applies to. When the store loads the catalog, it drops the patterns
-	// that cannot match a YAML or JSON file, which are those whose file
-	// name carries another extension, such as *.toml, so the slice may be
-	// shorter than the catalog's.
+	// for formats known not to be YAML, such as *.toml and *.jsonc, so
+	// the slice may be shorter than the catalog's.
 	FileMatch []string `json:"fileMatch"`
 
 	// The store prepares FileMatch for matching once per catalog load, so
@@ -588,10 +597,11 @@ func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry
 
 // filterSupportedPatterns returns the patterns that can match a YAML or
 // JSON file, since JSON is a valid subset of YAML. It drops a pattern
-// whose last segment carries an explicit extension, free of wildcards,
-// other than .yaml, .yml, or .json, such as "*.toml" or ".eslintrc.jsonc".
-// A pattern with brace alternatives, such as "*.{yml,yaml}", counts when
-// any of its alternatives can match such a file.
+// whose last segment carries the literal extension of a format known not
+// to be YAML, such as "*.toml" or ".eslintrc.jsonc", and keeps every
+// other pattern. A pattern with brace alternatives, such as
+// "*.{toml,yaml}", counts when any of its alternatives can match a YAML
+// file.
 //
 // An extglob group makes filterSupportedPatterns drop the pattern, since
 // the matcher reads the group literally and the pattern could only match a
@@ -614,21 +624,13 @@ func filterSupportedPatterns(patterns []string) []string {
 }
 
 // canMatchYAML reports whether pattern can match a YAML or JSON file, in
-// any letter case. A pattern qualifies when it ends in .yaml, .yml, or
-// .json, when the extension of its last segment holds a wildcard, as
-// "azure-pipelines*.y*ml" does, or when its last segment has no
-// extension. A name without an extension, such as ".clang-format",
-// "user-data", or "**/jobs/*/spec", can belong to a YAML file, and the
-// catalog lists such names for YAML configuration files.
+// any letter case. It reports false only when the last segment ends in
+// the literal extension of a format known not to be YAML, such as
+// ".toml". A wildcard extension, as in "azure-pipelines*.y*ml", a name
+// without an extension, such as ".clang-format", and the extension of
+// another YAML format, such as "CITATION.cff", all pass.
 func canMatchYAML(pattern string) bool {
 	lower := strings.ToLower(pattern)
-
-	if strings.HasSuffix(lower, ".yaml") ||
-		strings.HasSuffix(lower, ".yml") ||
-		strings.HasSuffix(lower, ".json") {
-		return true
-	}
-
 	base := lower[strings.LastIndex(lower, "/")+1:]
 
 	// A dot that starts the name marks a hidden file, not an extension.
@@ -637,5 +639,5 @@ func canMatchYAML(pattern string) bool {
 		return true
 	}
 
-	return strings.ContainsAny(base[dot+1:], "*?[")
+	return !nonYAMLExtensions[base[dot+1:]]
 }
