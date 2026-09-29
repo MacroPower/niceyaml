@@ -317,6 +317,10 @@ var (
 	// The result of [decoderField] for each type it has read, shared the
 	// same way, with -1 for a type that has no such field.
 	decoderFields sync.Map
+
+	// The result of [decodesItself] for each type it has read, shared the
+	// same way.
+	decodesWhole sync.Map
 )
 
 // decodesItself reports whether go-yaml decodes a value of type t whole,
@@ -329,10 +333,18 @@ var (
 // field by field. The method set of the pointer holds the methods of
 // both receivers, as the decoder checks it.
 func decodesItself(t reflect.Type) bool {
+	if cached, ok := decodesWhole.Load(t); ok {
+		if decodes, ok := cached.(bool); ok {
+			return decodes
+		}
+	}
+
 	pt := reflect.PointerTo(t)
 	isNode := t.PkgPath() == astPackage && pt.Implements(reflect.TypeFor[ast.Node]())
+	decodes := isNode || slices.ContainsFunc(unmarshalerTypes, pt.Implements)
+	decodesWhole.Store(t, decodes)
 
-	return isNode || slices.ContainsFunc(unmarshalerTypes, pt.Implements)
+	return decodes
 }
 
 // decoderField returns the index of the embedded field of t that decodes

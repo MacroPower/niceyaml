@@ -21,7 +21,9 @@ import (
 // below it, so the walk reads none of its keys. A list of rows, each a
 // struct of many scalar fields and one field that validates itself,
 // shows what the walk spends on fields whose types hold no validator.
-// The time per item should stay flat as each grows.
+// A list of rows that validate themselves and have a getter per field,
+// like generated message types, shows what the walk spends on types
+// with many methods. The time per item should stay flat as each grows.
 func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 	decodeAny := func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
 		_, err := doc.Decode[any](ctx, opts...)
@@ -74,6 +76,17 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 			},
 			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
 				_, err := doc.Decode[[]wideRow](ctx, opts...)
+
+				return err
+			},
+		},
+		{
+			name: "method_rows",
+			item: func(i int) string {
+				return fmt.Sprintf("- {a: a%d, b: b, c: c, d: d, e: 1, f: 2, g: 3, h: true}\n", i)
+			},
+			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
+				_, err := doc.Decode[[]methodRow](ctx, opts...)
 
 				return err
 			},
@@ -145,3 +158,40 @@ type wideRow struct {
 	J    float64 `yaml:"j"`
 	Port port    `yaml:"port"`
 }
+
+// methodRow is a struct that validates itself and has a getter for each
+// field and the other methods of a generated message type.
+type methodRow struct {
+	A string `yaml:"a"`
+	B string `yaml:"b"`
+	C string `yaml:"c"`
+	D string `yaml:"d"`
+	E int    `yaml:"e"`
+	F int    `yaml:"f"`
+	G int    `yaml:"g"`
+	H bool   `yaml:"h"`
+}
+
+func (*methodRow) Validate() error { return nil }
+
+func (r *methodRow) GetA() string { return r.A }
+
+func (r *methodRow) GetB() string { return r.B }
+
+func (r *methodRow) GetC() string { return r.C }
+
+func (r *methodRow) GetD() string { return r.D }
+
+func (r *methodRow) GetE() int { return r.E }
+
+func (r *methodRow) GetF() int { return r.F }
+
+func (r *methodRow) GetG() int { return r.G }
+
+func (r *methodRow) GetH() bool { return r.H }
+
+func (r *methodRow) Reset() { *r = methodRow{} }
+
+func (r *methodRow) String() string { return fmt.Sprintf("%+v", *r) }
+
+func (*methodRow) ProtoMessage() {}
