@@ -18,9 +18,8 @@
 // only one input holds is always a change, so [Hirschberg] marks it before the
 // search and leaves it out, and such lines add no search time. Inputs that
 // share many lines in a different order still take time close to the square of
-// their length. The
-// search keeps O(m+n) working memory, and the result holds one operation per
-// line, so it takes O(m+n) space as well.
+// their length. The search keeps O(m+n) working memory, and the result holds
+// one operation per line, so it takes O(m+n) space as well.
 //
 // # Usage
 //
