@@ -2300,8 +2300,8 @@ func TestSchema_SourcePath(t *testing.T) {
 				"additionalProperties": {"type": "string"}
 			}`,
 			input:    "a b: 5\n",
-			wantPath: "$.a b",
-			want:     "1:6: $.a b: expected \"string\", got \"integer\"",
+			wantPath: "$.'a b'",
+			want:     "1:6: $.'a b': expected \"string\", got \"integer\"",
 		},
 		"nested respelled key": {
 			schema: `{

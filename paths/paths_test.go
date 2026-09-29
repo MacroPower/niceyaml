@@ -151,6 +151,26 @@ func TestPath_Build(t *testing.T) {
 			want:     "$.'a~b'",
 			wantYAML: "$.a~b",
 		},
+		"colon and space in a name are quoted": {
+			build:    func() paths.Path { return paths.Root().Child("x: y") },
+			want:     "$.'x: y'",
+			wantYAML: "$.x: y",
+		},
+		"trailing space in a name is quoted": {
+			build:    func() paths.Path { return paths.Root().Child("name ") },
+			want:     "$.'name '",
+			wantYAML: "$.name ",
+		},
+		"line break in a name is quoted": {
+			build:    func() paths.Path { return paths.Root().Child("a\nb") },
+			want:     "$.'a\nb'",
+			wantYAML: "$.a\nb",
+		},
+		"recursive name with a space is quoted": {
+			build:    func() paths.Path { return paths.Root().Recursive("a b") },
+			want:     "$..'a b'",
+			wantYAML: "$..a b",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -364,7 +384,7 @@ func TestParse(t *testing.T) {
 		},
 		"backslash before another character is dropped": {
 			expr: `$.'C:\temp'`,
-			want: `$.C:temp`,
+			want: `$.'C:temp'`,
 		},
 		"quoted key followed by index": {
 			expr: "$.'a.b'[1].c",
@@ -540,6 +560,9 @@ func TestParse_RoundTrip(t *testing.T) {
 		"star":             paths.Root().Child("*"),
 		"numeric name":     paths.Root().Child("1"),
 		"space in name":    paths.Root().Child("has space"),
+		"colon in name":    paths.Root().Child("x: y"),
+		"trailing space":   paths.Root().Child("name "),
+		"line break":       paths.Root().Child("a\nb"),
 		"only reserved":    paths.Root().Child("."),
 		"tilde in name":    paths.Root().Child("a~b"),
 		"goccy compatible": paths.Root().Child("a.b").Index(1).Child("c"),
@@ -2445,7 +2468,7 @@ func TestPath_Matches(t *testing.T) {
 		},
 		"recursive finds a block scalar key by its content": {
 			path: paths.Root().Recursive("folded text"),
-			want: []string{"$.keyed.folded text"},
+			want: []string{"$.keyed.'folded text'"},
 		},
 		"nothing": {
 			path: paths.Root().Child("missing").IndexAll(),

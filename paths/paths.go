@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
@@ -85,15 +86,25 @@ const reservedNameChars = ".*[]$'~"
 // quoteName returns name in the form [Parse] accepts as a child or
 // recursive selector. It wraps the name in single quotes when it contains
 // reserved characters or is empty, since an unquoted empty name would leave
-// a bare `.` that Parse rejects.
+// a bare `.` that Parse rejects. It also quotes a name that holds `:` or
+// whitespace, which Parse reads back unquoted too, so the name stays apart
+// from the ": " that follows a path in an error message, and a space at
+// either end of it stays visible.
 func quoteName(name string) string {
-	if name != "" && !strings.ContainsAny(name, reservedNameChars) {
+	if name != "" && !strings.ContainsAny(name, reservedNameChars) &&
+		!strings.ContainsFunc(name, isSeparatorRune) {
 		return name
 	}
 
 	escaped := nameEscaper.Replace(name)
 
 	return "'" + escaped + "'"
+}
+
+// isSeparatorRune reports whether r is `:` or whitespace, which read as
+// part of the text around a path rather than part of a name.
+func isSeparatorRune(r rune) bool {
+	return r == ':' || unicode.IsSpace(r)
 }
 
 // Path is a location in a YAML document, given as a sequence of selectors
@@ -212,7 +223,8 @@ func (p Path) IsRoot() bool {
 }
 
 // String returns the path expression, such as "$.metadata.name", which
-// [Parse] reads back.
+// [Parse] reads back. A name that holds a reserved character, `:`, or
+// whitespace comes back in single quotes, as in "$.'x: y'".
 func (p Path) String() string {
 	var sb strings.Builder
 
