@@ -265,6 +265,36 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: .nan`),
 			want:    false,
 		},
+		"float does not match plain inf": {
+			matcher: matcher.Content(versionPath, math.Inf(1)),
+			input:   stringtest.Input(`version: inf`),
+			want:    false,
+		},
+		"float does not match Infinity": {
+			matcher: matcher.Content(versionPath, math.Inf(1)),
+			input:   stringtest.Input(`version: Infinity`),
+			want:    false,
+		},
+		"float NaN does not match plain nan": {
+			matcher: matcher.Content(versionPath, math.NaN()),
+			input:   stringtest.Input(`version: nan`),
+			want:    false,
+		},
+		"float does not match a hex float": {
+			matcher: matcher.Content(versionPath, 0.25),
+			input:   stringtest.Input(`version: 0x1p-2`),
+			want:    false,
+		},
+		"int does not match a hex float": {
+			matcher: matcher.Content(versionPath, 1),
+			input:   stringtest.Input(`version: 0x1p0`),
+			want:    false,
+		},
+		"float matches a signed plain exponent": {
+			matcher: matcher.Content(versionPath, -1000.0),
+			input:   stringtest.Input(`version: -1e3`),
+			want:    true,
+		},
 		"empty string does not match null": {
 			matcher: matcher.Content(kindPath, ""),
 			input:   stringtest.Input(`kind:`),
@@ -419,6 +449,31 @@ func TestContent(t *testing.T) {
 			matcher: matcher.Content[any](versionPath, 1000.0),
 			input:   stringtest.Input(`version: "1e3"`),
 			want:    false,
+		},
+		"any float does not match plain inf": {
+			matcher: matcher.Content[any](versionPath, math.Inf(1)),
+			input:   stringtest.Input(`version: inf`),
+			want:    false,
+		},
+		"any float does not match Infinity": {
+			matcher: matcher.Content[any](versionPath, math.Inf(1)),
+			input:   stringtest.Input(`version: Infinity`),
+			want:    false,
+		},
+		"any NaN does not match plain NaN": {
+			matcher: matcher.Content[any](versionPath, math.NaN()),
+			input:   stringtest.Input(`version: NaN`),
+			want:    false,
+		},
+		"any float does not match a hex float": {
+			matcher: matcher.Content[any](versionPath, 0.25),
+			input:   stringtest.Input(`version: 0x1p-2`),
+			want:    false,
+		},
+		"any string matches plain inf": {
+			matcher: matcher.Content[any](versionPath, "inf"),
+			input:   stringtest.Input(`version: inf`),
+			want:    true,
 		},
 		"any string matches a plain exponent": {
 			matcher: matcher.Content[any](versionPath, "1e3"),

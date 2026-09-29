@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"time"
@@ -38,7 +39,9 @@ type contentMatcher[T comparable] struct {
 // number, whatever its spelling, though an integer want never matches a
 // value with a fraction. A NaN want matches .nan in any of its
 // spellings, though NaN never equals itself in Go. A quoted, block, or
-// !!str scalar is a string, so version: "2" does not match 2. A
+// !!str scalar is a string, so version: "2" does not match 2. A plain
+// scalar that YAML reads as a string, such as inf or 0x1p-2, matches no
+// number either, though Go parses it as one. A
 // [time.Duration] reads from the text of a scalar, so timeout: "5s" and
 // timeout: 5s both match 5*time.Second. A pointer want matches the value
 // it points to. A null matches only a nil want, such as
@@ -162,10 +165,10 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 		}
 	}
 
-	// The decoder converts a string that reads as a number into a number
-	// type, so "2" would match 2. A scalar the document writes as a
-	// string does not match a number want.
-	if isNumber(gv) && isPlain(gv.Type()) && isExplicitString(node, raw) {
+	// The decoder converts a string that Go parses as a number into a
+	// number type, so "2", inf, and 0x1p-2 would match numbers. A scalar
+	// that YAML reads as a string does not match a number want.
+	if isNumber(gv) && isPlain(gv.Type()) && isNonNumberString(node, raw) {
 		return false, nil
 	}
 
@@ -264,6 +267,12 @@ var (
 		reflect.TypeFor[time.Duration](),
 		reflect.TypeFor[time.Time](),
 	}
+
+	// The pattern of the decimal and exponent spellings of a float in the
+	// YAML 1.2 core schema. It leaves out the infinity and NaN spellings.
+	// The decoder reads most of them as floats, and it cannot convert the
+	// rest, such as +.inf, into a number type.
+	floatSyntax = regexp.MustCompile(`^[-+]?(\.\d+|\d+(\.\d*)?)([eE][-+]?\d+)?$`)
 )
 
 // decodesText reports whether a decode into t may read some value
@@ -379,6 +388,24 @@ func isExplicitString(node *niceyaml.Node, raw any) bool {
 			return false
 		}
 	}
+}
+
+// isNonNumberString reports whether raw, the value of node as the YAML
+// types name it, is a string that YAML does not read as a number: a
+// scalar the document writes as a string, or a plain scalar outside the
+// YAML float syntax, such as inf or 0x1p-2.
+func isNonNumberString(node *niceyaml.Node, raw any) bool {
+	if _, ok := raw.(string); !ok {
+		return false
+	}
+
+	if isExplicitString(node, raw) {
+		return true
+	}
+
+	_, ok := rawFloat(raw)
+
+	return !ok
 }
 
 // strTagURI is the full name of the !!str tag, which a verbatim tag
@@ -507,13 +534,18 @@ func floatHoldsInteger(raw any, v reflect.Value) bool {
 // rawFloat returns the float that raw, the value as the YAML types name
 // it, holds, and reports whether it holds one. The decoder reads some
 // plain floats, such as 25e-1 and 1e19, as strings and converts them when
-// it decodes them into an integer, so a string counts when it parses as
-// a float.
+// it decodes them into an integer, so a string counts when it has the
+// YAML float syntax. A string that Go alone parses as a float, such as
+// inf or 0x1p-2, does not count.
 func rawFloat(raw any) (float64, bool) {
 	switch v := raw.(type) {
 	case float64:
 		return v, true
 	case string:
+		if !floatSyntax.MatchString(v) {
+			return 0, false
+		}
+
 		f, err := strconv.ParseFloat(v, 64)
 
 		return f, err == nil
