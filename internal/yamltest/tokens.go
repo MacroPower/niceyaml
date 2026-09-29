@@ -178,9 +178,9 @@ func ValidateTokens(want, got token.Tokens) error {
 	return nil
 }
 
-// CompareTokens compares all fields of two tokens and returns a [TokenDiff].
-// It assumes both tokens are non-nil and carry positions. [ValidateTokens]
-// checks this for token slices.
+// CompareTokens compares two tokens with [DiffTokenFields] and returns a
+// [TokenDiff]. It assumes both tokens are non-nil and carry positions.
+// [ValidateTokens] checks this for token slices.
 func CompareTokens(want, got *token.Token) TokenDiff {
 	return TokenDiff{
 		Fields: DiffTokenFields(want, got),
@@ -189,9 +189,9 @@ func CompareTokens(want, got *token.Token) TokenDiff {
 	}
 }
 
-// CompareTokenSlices compares all fields of two token slices and returns a
-// [TokensDiff]. It assumes every token is non-nil and carries a position,
-// so call [ValidateTokens] first.
+// CompareTokenSlices compares two token slices index by index with
+// [CompareTokens] and returns a [TokensDiff]. It assumes every token is
+// non-nil and carries a position, so call [ValidateTokens] first.
 func CompareTokenSlices(want, got token.Tokens) TokensDiff {
 	if len(want) != len(got) {
 		return TokensDiff{
@@ -236,8 +236,11 @@ func CompareContent(want, got string) ContentDiff {
 }
 
 // DiffTokenFields returns the names of the fields that differ between two
-// tokens. It assumes both tokens are non-nil and carry positions.
-// [ValidateTokens] checks this for token slices.
+// tokens. It compares Type, Value, Origin, CharacterType, Indicator, Error,
+// and each Position field. It skips the Next and Prev links, since tokens
+// built apart never point at the same neighbors. It assumes both tokens
+// are non-nil and carry positions. [ValidateTokens] checks this for token
+// slices.
 func DiffTokenFields(want, got *token.Token) []string {
 	var diffs []string
 
