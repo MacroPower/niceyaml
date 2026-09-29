@@ -586,6 +586,10 @@ type document struct {
 	// The tree the go-yaml decoder reads for the document, which
 	// decodeTree builds for the first decode.
 	tree *decodeTree
+	// The aliases of root that lie inside the anchor they refer to, which
+	// enclosedAliases finds once for both newDecodeTree and
+	// Source.decodeParse.
+	enclosed map[ast.Node]bool
 	// The state that the packages of the module reach through
 	// docstate.Of, which shares resolver with them.
 	state *docstate.State
@@ -606,6 +610,8 @@ type document struct {
 	nodeTokensOnce sync.Once
 	// Builds tree once, for the first decode.
 	treeOnce sync.Once
+	// Finds enclosed once.
+	enclosedOnce sync.Once
 }
 
 // pathResolver returns the [paths.Resolver] for the document, and creates

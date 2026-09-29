@@ -296,8 +296,20 @@ func nullEnclosedAliases(docs []*Node, file *ast.File) {
 }
 
 // enclosedAliases returns the aliases of the document that lie inside the
-// anchor they refer to, other than the ones a `<<` merge key merges.
+// anchor they refer to, other than the ones a `<<` merge key merges, and
+// finds them on the first call. Every caller gets the same map, so no
+// caller may change it.
 func (d *document) enclosedAliases() map[ast.Node]bool {
+	d.enclosedOnce.Do(func() {
+		d.enclosed = d.findEnclosedAliases()
+	})
+
+	return d.enclosed
+}
+
+// findEnclosedAliases finds the aliases that [document.enclosedAliases]
+// returns.
+func (d *document) findEnclosedAliases() map[ast.Node]bool {
 	var aliases []*ast.AliasNode
 
 	merged := map[ast.Node]bool{}
