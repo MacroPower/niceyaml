@@ -371,7 +371,7 @@ func returnSameLineComments(docs []*document) {
 			continue
 		}
 
-		end := last.Position.Line + lineend.CountBreaks(strings.Trim(last.Origin, " \t\r\n"))
+		end := textEndLine(last)
 
 		cut := 0
 		for cut < len(cur.tokens) {
@@ -394,13 +394,9 @@ func returnSameLineComments(docs []*document) {
 
 // trailingCommentsStart returns the index of the first token in the run of
 // comments that closes tks, where each comment sits on a line below the
-// last token of any other type that holds text. That token ends on the
-// line where its text starts plus the line breaks within its text. The
-// spaces, tabs, and line breaks around the text do not count, because the
-// lexer can end a token with a line break and the indentation of the next
-// line. YAML reads other Unicode spaces, such as U+00A0, as text. Returns
-// len(tks) when no comment closes tks, or when the token before the run
-// is a "---" header, whose document the comments below it belong to.
+// last token of any other type that holds text. Returns len(tks) when no
+// comment closes tks, or when the token before the run is a "---" header,
+// whose document the comments below it belong to.
 func trailingCommentsStart(tks token.Tokens) int {
 	last := -1
 
@@ -416,7 +412,7 @@ func trailingCommentsStart(tks token.Tokens) int {
 		return len(tks)
 	}
 
-	end := tks[last].Position.Line + lineend.CountBreaks(strings.Trim(tks[last].Origin, " \t\r\n"))
+	end := textEndLine(tks[last])
 	start := len(tks)
 
 	for i := len(tks) - 1; i > last; i-- {
@@ -428,6 +424,16 @@ func trailingCommentsStart(tks token.Tokens) int {
 	}
 
 	return start
+}
+
+// textEndLine returns the line where the text of tk ends, which is the
+// line where its text starts plus the line breaks within its text. The
+// spaces, tabs, and line breaks around the text do not count, because the
+// lexer can end a token with a line break and the indentation of the next
+// line. YAML reads other Unicode spaces, such as U+00A0, as text. The
+// position of tk must not be nil.
+func textEndLine(tk *token.Token) int {
+	return tk.Position.Line + lineend.CountBreaks(strings.Trim(tk.Origin, " \t\r\n"))
 }
 
 // isPreambleNode reports whether node is one the parser cut off from the
