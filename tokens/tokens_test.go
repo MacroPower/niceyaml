@@ -2003,6 +2003,18 @@ func TestTokenize_Positions(t *testing.T) {
 			input: "name: \"caf\\u00e9\n  x \\d\"\nnext: 1\n",
 			want:  []string{"1:1:1", "1:5:5", "1:7:7", "2:6:23", "3:1:26", "3:5:30", "3:7:32"},
 		},
+		"header after a cut escape": {
+			// The lexer places the cut scalar at the fault, so its Offset
+			// says nothing about where the tokens after it start.
+			input: "a: \"\\x1\"\n---\nb: 1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:10", "3:1:14", "3:2:15", "3:4:17"},
+		},
+		"comment after a header the lexer shortened": {
+			// The lexer reads "---" as "--" one rune on, so the shift
+			// taken from it misses the comment by one rune.
+			input: "\"\t1\n---\n# c\n",
+			want:  []string{"1:1:1", "2:1:5", "3:1:9"},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2065,6 +2077,8 @@ var positionCorpus = map[string]string{
 	"open scalar cut at a header":                    "a: \"caf\\u00e9\n---\nb: 1\n",
 	"open scalar cut at a document end":              "a: \"x\\x41\n...\nb: 1\n",
 	"unknown escape after an escape":                 "name: \"caf\\u00e9\n  x \\d\"\nnext: 1\n",
+	"header after a cut escape":                      "a: \"\\x1\"\n---\nb: 1\n",
+	"comment after a shortened header":               "\"\t1\n---\n# c\n",
 	"plain multi-line":                               "a: plain\n  multi\nb: 2\n",
 	"flow collections":                               "{a: 1, b: [1, 2]}\n",
 	"flow sequence over lines":                       "a: [\n  1,\n  2\n]\n",

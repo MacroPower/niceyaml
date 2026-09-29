@@ -1053,16 +1053,20 @@ func (p *positioner) locate(tk *token.Token, text []rune) (int, bool) {
 }
 
 // pick returns the rune index where text, the first text line of tk or
-// the start of it, starts, and reports whether one of the two candidates
+// the start of it, starts, and reports whether one of the candidates
 // holds it. It prefers the first rune after the cursor that is not
 // whitespace while the cursor is reliable, and the lexer's Offset shifted
 // by delta otherwise, and takes whichever of the two holds the text when
-// only one does. When neither does, pick leaves the positioner as it is.
+// only one does. When neither does, delta may come from a token the lexer
+// misplaced, such as a scalar it cut at an invalid escape, so pick tries
+// the lexer's Offset as it stands. When no candidate holds the text, pick
+// leaves the positioner as it is.
 func (p *positioner) pick(tk *token.Token, text []rune) (int, bool) {
 	b := p.skipSpace()
 	foundB := p.hasText(b, text)
 
-	a := tk.Position.Offset - 1 + p.delta
+	lexed := tk.Position.Offset - 1
+	a := lexed + p.delta
 	foundA := tk.Position.Offset > 0 && a >= p.cursor && p.hasText(a, text)
 
 	var at int
@@ -1074,6 +1078,8 @@ func (p *positioner) pick(tk *token.Token, text []rune) (int, bool) {
 		at = b
 	case foundA:
 		at = a
+	case tk.Position.Offset > 0 && lexed >= p.cursor && p.hasText(lexed, text):
+		at = lexed
 	default:
 		return 0, false
 	}
