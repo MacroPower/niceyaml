@@ -1230,10 +1230,16 @@ func (e *SourceError) Source() *Source {
 // Node returns the [*Node] the error is bound to: the one whose methods
 // and validators produced it or whose [Node.Bind] bound it, from whose
 // scope a path in the error resolves, or, for an error bound through
-// [Source.Bind], the root of the document its location falls in. An
-// error bound through Source.Bind without a location, or with one that
-// resolves in no document, and one a [Source] that does not parse
-// produced itself are bound to none. Node.Bind keeps its node on every
+// [Source.Bind], the root of the document its location falls in. A
+// position or a range falls in the document whose [Node.Span] holds its
+// line, and a path falls in the one document of the source. The error
+// stays bound to that root when its location does not resolve there, as
+// with a path the document does not hold or a column before the first.
+// Source.Bind binds an error to none when it carries no location or the
+// source does not parse. It also binds to none a position or a range on
+// a line no document holds, and a path in a source that holds several
+// documents or none. An error a [Source] that does not parse produced
+// itself is bound to none as well. Node.Bind keeps its node on every
 // error it binds anew, except an error that wraps a binding. Such an
 // error keeps the node of the binding it wraps, whether Node.Bind
 // returns it as it is or binds it anew around the binding with the

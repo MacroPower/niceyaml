@@ -649,7 +649,8 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 //
 // In every other way Bind is [Node.Bind], which describes what comes
 // back. [SourceError.Document] returns the document each location fell
-// in, and nil for an error whose location resolves in none.
+// in, whether or not the location resolves there, and nil for an error
+// that fell in none, as [SourceError.Node] describes.
 func (s *Source) Bind(err error) error {
 	return bindTree(err, binder{src: s, route: true})
 }

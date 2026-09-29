@@ -1986,6 +1986,27 @@ func TestSource_Bind(t *testing.T) {
 		require.ErrorIs(t, rangeErr, niceyaml.ErrOutOfRange)
 	})
 
+	t.Run("column before the first binds to the document holding the line", func(t *testing.T) {
+		t.Parallel()
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+
+		err = source.Bind(niceyaml.NewError("far", niceyaml.AtPosition(position.New(2, -3))))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Equal(t, "two.yaml: far", err.Error())
+		assert.Same(t, docs[1], bound.Document())
+
+		rangeErr := bound.Unresolved()
+		require.ErrorIs(t, rangeErr, niceyaml.ErrOutOfRange)
+
+		_, ok := bound.Range()
+		assert.False(t, ok)
+	})
+
 	t.Run("position in a source that does not parse binds to none", func(t *testing.T) {
 		t.Parallel()
 
@@ -2028,6 +2049,28 @@ func TestSource_Bind(t *testing.T) {
 			"   3 | b: 22",
 			"     |    ^^",
 		), fmt.Sprintf("%+v", err))
+	})
+
+	t.Run("missing path binds to the one document", func(t *testing.T) {
+		t.Parallel()
+
+		one := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("one.yaml"))
+		doc, err := one.Document()
+		require.NoError(t, err)
+
+		err = one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("zz"))))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Equal(t, "one.yaml: $.zz: bad", err.Error())
+		assert.Same(t, doc, bound.Document())
+
+		rangeErr := bound.Unresolved()
+		require.ErrorIs(t, rangeErr, paths.ErrNotFound)
+
+		_, ok := bound.Range()
+		assert.False(t, ok)
 	})
 
 	t.Run("path error after a blank line before an explicit key", func(t *testing.T) {
