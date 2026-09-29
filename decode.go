@@ -1543,8 +1543,12 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 //	dec := niceyaml.NewDecoder(niceyaml.WithReferences(defaults))
 //
 // WithReferences copies data, so a caller that edits the slices changes
-// nothing in the option. The documents go to the go-yaml decoder in the
-// order of the options, among the values [WithYAMLDecodeOptions] gives.
+// nothing in the option. The documents join the [yaml.ReferenceReaders]
+// values in the order of the options, so an anchor of a later document
+// overrides an earlier one of the same name. The go-yaml decoder reads
+// the files of [yaml.ReferenceFiles] and [yaml.ReferenceDirs] after all
+// readers, whatever the order of the options, so an anchor from those
+// files wins over one of the same name in data.
 func WithReferences(data ...[]byte) DecodeOption {
 	docs := make([][]byte, len(data))
 	for i, doc := range data {
