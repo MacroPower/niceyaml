@@ -1769,20 +1769,25 @@ func (m *Model) cutRow(row string, offset, width int) string {
 	// moves to the next cluster boundary, and blank cells fill the columns
 	// of the dropped cluster.
 	start := offset
-	for start < min(inner, offset+visible) && ansi.StringWidth(cells.Cut(body, 0, start)) != start {
+	for start < min(inner, offset+visible) {
+		if _, w := cells.CutWidth(body, 0, start); w == start {
+			break
+		}
+
 		start++
 	}
 
-	content := cells.Cut(body, start, offset+visible)
+	content, contentWidth := cells.CutWidth(body, start, offset+visible)
 	if start > offset {
 		content = m.printer.Style(kind.Text).Render(strings.Repeat(" ", start-offset)) + content
+		contentWidth += start - offset
 	}
 
 	// The side-by-side view pads a pane to its own widest row, while the
 	// offset runs to the widest row of either pane, so the window can
 	// reach past the content of this row. Filling the window keeps the
 	// right frame in its column.
-	if padding := visible - ansi.StringWidth(content); padding > 0 {
+	if padding := visible - contentWidth; padding > 0 {
 		content += m.printer.Style(kind.Text).Render(strings.Repeat(" ", padding))
 	}
 
@@ -2214,11 +2219,13 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 		lines = []string{""}
 	}
 
-	for i := range lines {
-		lines[i] = cells.Cut(lines[i], 0, contentW)
-		if pad := contentW - ansi.StringWidth(lines[i]); pad > 0 {
-			lines[i] += textStyle.Render(strings.Repeat(" ", pad))
+	for i, row := range lines {
+		row, width := cells.CutWidth(row, 0, contentW)
+		if pad := contentW - width; pad > 0 {
+			row += textStyle.Render(strings.Repeat(" ", pad))
 		}
+
+		lines[i] = row
 	}
 
 	contents := textStyle.
@@ -2327,8 +2334,8 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 			// view cuts both panes to the pane width, which the gutter of
 			// a pane row can exceed on its own, so the joined row fits the
 			// content width.
-			leftPadded := cells.Cut(left, 0, paneWidth)
-			if padding := paneWidth - ansi.StringWidth(leftPadded); padding > 0 {
+			leftPadded, leftWidth := cells.CutWidth(left, 0, paneWidth)
+			if padding := paneWidth - leftWidth; padding > 0 {
 				leftPadded += textStyle.Render(strings.Repeat(" ", padding))
 			}
 

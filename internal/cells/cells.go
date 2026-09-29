@@ -157,37 +157,59 @@ func (r Row) total() int {
 // outside. Every byte outside a cluster, such as an escape sequence,
 // stays, so a style s opens still closes.
 func Cut(s string, left, right int) string {
+	cut, _ := CutWidth(s, left, right)
+
+	return cut
+}
+
+// CutWidth returns what [Cut] returns along with the cells the cut takes,
+// the width [ansi.StringWidth] measures for it. A caller that pads the cut
+// to a width needs no second pass to measure it.
+func CutWidth(s string, left, right int) (string, int) {
 	if right <= left {
-		return ""
+		return "", 0
 	}
 
 	var b strings.Builder
 
 	state := parser.GroundState
-	col := 0
+	col, width := 0, 0
+
+	// Each dropped cluster moves kept to the byte just past it. The bytes
+	// from kept up to the next dropped cluster all stay, so they go to b
+	// as one span, and a cut that drops nothing returns s itself.
+	kept := 0
 
 	for i := 0; i < len(s); {
 		next, action := parser.Table.Transition(state, s[i])
 		if action != parser.PrintAction && next != parser.Utf8State {
-			b.WriteByte(s[i])
-
 			state = next
 			i++
 
 			continue
 		}
 
-		cluster, width := ansi.FirstGraphemeCluster(s[i:], ansi.GraphemeWidth)
-		if col >= left && col < right && col+width <= right {
-			b.WriteString(cluster)
+		cluster, w := ansi.FirstGraphemeCluster(s[i:], ansi.GraphemeWidth)
+		if col >= left && col < right && col+w <= right {
+			width += w
+		} else {
+			b.WriteString(s[kept:i])
+
+			kept = i + len(cluster)
 		}
 
 		state = parser.GroundState
-		col += width
+		col += w
 		i += len(cluster)
 	}
 
-	return b.String()
+	if kept == 0 {
+		return s, width
+	}
+
+	b.WriteString(s[kept:])
+
+	return b.String(), width
 }
 
 // TrimLastCluster returns s without its last grapheme cluster, the
