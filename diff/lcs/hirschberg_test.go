@@ -673,19 +673,26 @@ func naiveLCSLen(before, after []string) int {
 }
 
 func BenchmarkHirschberg_Diff(b *testing.B) {
+	type benchCase struct {
+		name  string
+		after []string
+	}
+
 	for _, n := range []int{1000, 10000, 40000} {
 		before := make([]string, n)
 		for i := range before {
 			before[i] = fmt.Sprintf("key%d: value%d", i, i)
 		}
 
-		// Changing the first and last lines leaves no shared start or end
-		// to pair up, so the search covers both whole inputs.
-		farEdits := slices.Clone(before)
-		farEdits[0] = "changed first"
-		farEdits[n-1] = "changed last"
+		// Swapping the first and last lines leaves no shared start or end
+		// to pair up, and both lines stay in both inputs, so the search
+		// covers both whole inputs with only a few edits.
+		farSwap := slices.Clone(before)
+		farSwap[0], farSwap[n-1] = farSwap[n-1], farSwap[0]
 
 		// Every tenth line changes, so the edits spread over the inputs.
+		// Each changed line appears in only one input, so the search
+		// leaves it out.
 		spread := slices.Clone(before)
 		for i := 0; i < n; i += 10 {
 			spread[i] = fmt.Sprintf("changed%d", i)
@@ -697,13 +704,29 @@ func BenchmarkHirschberg_Diff(b *testing.B) {
 			unrelated[i] = fmt.Sprintf("other%d", i)
 		}
 
-		cases := []struct {
-			name  string
-			after []string
-		}{
-			{"far_edits", farEdits},
+		cases := []benchCase{
+			{"far_swap", farSwap},
 			{"spread", spread},
 			{"unrelated", unrelated},
+		}
+
+		// The same lines in a different order keep every line in the
+		// search and take time close to the square of n, so these cases
+		// skip the largest n.
+		if n <= 10000 {
+			reversed := slices.Clone(before)
+			slices.Reverse(reversed)
+
+			shuffled := slices.Clone(before)
+			rng := rand.New(rand.NewPCG(1, 2))
+			rng.Shuffle(n, func(i, j int) {
+				shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+			})
+
+			cases = append(cases,
+				benchCase{"reversed", reversed},
+				benchCase{"shuffled", shuffled},
+			)
 		}
 
 		for _, tc := range cases {
