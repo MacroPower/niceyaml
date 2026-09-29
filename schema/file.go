@@ -126,6 +126,15 @@ func file(path string) (Ref, error) {
 	abs := path
 
 	switch {
+	case !onWindows && wd != "" && !filepath.IsAbs(path) && !hasDriveLetter(path):
+		// Off Windows, filepath.Abs joins a relative path to a second read
+		// of the working directory, which can differ from wd if another
+		// goroutine changes directory in between. Join path to wd instead,
+		// so the key and wd name one directory. Windows keeps
+		// filepath.Abs, which resolves rooted and drive-relative paths
+		// that Join does not.
+		abs = filepath.Join(wd, path)
+
 	case !hasDriveLetter(path) || onWindows:
 		abs, err = filepath.Abs(path)
 		if err != nil {

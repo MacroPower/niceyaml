@@ -2003,6 +2003,72 @@ func TestRegistry_WithFS_AfterChdir(t *testing.T) {
 	}
 }
 
+// File reads the working directory once, so the key and the directory
+// the file system stands for agree even when another goroutine changes
+// directory while File runs. The test changes the process's working
+// directory, so it does not run in parallel.
+//
+//nolint:paralleltest // See above.
+func TestRegistry_WithFS_ChdirDuringFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("File on Windows reads the working directory again in filepath.Abs")
+	}
+
+	bundle := fstest.MapFS{
+		"schemas/config.json": &fstest.MapFile{
+			Data: []byte(`{"properties": {"a": {"$ref": "defs.json"}}}`),
+		},
+		"schemas/defs.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
+	}
+
+	a, b := t.TempDir(), t.TempDir()
+	t.Chdir(a)
+
+	var (
+		stop   atomic.Bool
+		passes atomic.Int64
+		wg     sync.WaitGroup
+	)
+
+	// Each pass ends in a, so the directory is a again once the loop stops.
+	// The goroutine calls os.Chdir, since t.Chdir would register a cleanup
+	// for every change.
+	wg.Go(func() {
+		for !stop.Load() {
+			assert.NoError(t, os.Chdir(b)) //nolint:usetesting // See above.
+			assert.NoError(t, os.Chdir(a)) //nolint:usetesting // See above.
+			passes.Add(1)
+		}
+	})
+
+	// Build the refs only once the goroutine changes directory, so the
+	// two overlap.
+	for passes.Load() == 0 {
+		runtime.Gosched()
+	}
+
+	// Most of the refs are equal, so keep one of each to validate, keyed
+	// by its fields. The loop then builds enough refs to catch a change
+	// of directory while File runs, and the test compiles only a few
+	// schemas.
+	refs := make(map[string]schema.Ref)
+
+	for range 5000 {
+		ref := schema.File("schemas/config.json")
+		refs[fmt.Sprintf("%#v", ref)] = ref
+	}
+
+	stop.Store(true)
+	wg.Wait()
+
+	doc := yamltest.FirstDocument(t, "a: x\n")
+
+	for _, ref := range refs {
+		reg := schema.NewRegistry(schema.WithFS(bundle), schema.WithResolvers(ref))
+		require.NoError(t, reg.Validate(t.Context(), doc))
+	}
+}
+
 func TestRegistry_Load(t *testing.T) {
 	t.Parallel()
 
