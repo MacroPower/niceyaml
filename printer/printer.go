@@ -448,6 +448,7 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 	var rows []AnnotationRow
 
 	for r, lo := range starts {
+		lo = min(max(0, lo), len(shown))
 		hi := len(shown)
 
 		switch {
@@ -462,7 +463,7 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 			}
 		}
 
-		lo = min(max(0, lo), hi)
+		lo = min(lo, hi)
 
 		// A mark the last row holds can land past the end of the content,
 		// so that row runs to the end of the caret row.

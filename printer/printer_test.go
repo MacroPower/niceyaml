@@ -4595,6 +4595,23 @@ func TestDefaultAnnotation(t *testing.T) {
 			position:    line.Below,
 			want:        []printer.AnnotationRow{{Col: 10, Marker: "^ ", Text: "bad"}},
 		},
+		"wrapped content clamps a negative row start and end": {
+			content:     "abc",
+			annotations: line.Annotations{{Placement: line.Below}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(0, 3)}},
+			rowStarts:   []int{-2},
+			rowEnds:     []int{-1},
+			position:    line.Below,
+			want:        []printer.AnnotationRow{{Col: 0, Text: "^"}},
+		},
+		"wrapped content clamps negative row starts without ends": {
+			content:     "abc",
+			annotations: line.Annotations{{Placement: line.Below}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(0, 3)}},
+			rowStarts:   []int{-5, -2},
+			position:    line.Below,
+			want:        []printer.AnnotationRow{{Col: 0, Text: "^^^"}},
+		},
 	}
 
 	for name, tc := range tcs {
