@@ -522,8 +522,8 @@ func (ls Lines) TokenRanges(tk *token.Token) position.Ranges {
 }
 
 // ContentRanges returns the ranges of tk's content, one per line it appears
-// on, excluding leading and trailing spaces. A line where tk holds only
-// spaces contributes no range.
+// on, excluding leading and trailing spaces and tabs. A line where tk holds
+// only spaces and tabs contributes no range.
 //
 // The token may be a lexer token, one of the per-line parts, or a copy of
 // either, as for [Lines.TokenRanges]. Returns nil if tk is nil or not

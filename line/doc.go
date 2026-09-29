@@ -57,7 +57,7 @@
 //
 //	tk := lines.TokenAt(position.New(2, 4))  // Line 2, column 4, both counted from 0.
 //	ranges := lines.TokenRanges(tk)          // Every line with runes of the token.
-//	content := lines.ContentRanges(tk)       // The same without surrounding spaces.
+//	content := lines.ContentRanges(tk)       // The same without surrounding spaces and tabs.
 //
 // [Lines.Tokens] reverses the split. A token the split cut across lines
 // collapses back to one, and the result holds the lexer's original tokens

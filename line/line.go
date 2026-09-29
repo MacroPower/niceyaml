@@ -116,10 +116,10 @@ func (l *Line) TokenSpan(tk *token.Token) (position.Span, bool) {
 }
 
 // ContentSpan returns the columns of tk's content on this [Line], excluding
-// leading and trailing spaces. The span is empty when tk holds only spaces
-// on this line. The token may be a lexer token or one of the per-line parts,
-// as for [Line.TokenSpan]. The second result is false when tk is nil or has
-// no part on this line.
+// leading and trailing spaces and tabs. The span is empty when tk holds only
+// spaces and tabs on this line. The token may be a lexer token or one of the
+// per-line parts, as for [Line.TokenSpan]. The second result is false when
+// tk is nil or has no part on this line.
 func (l *Line) ContentSpan(tk *token.Token) (position.Span, bool) {
 	return l.span(tk, segment.Segment.ContentSpan)
 }

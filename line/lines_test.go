@@ -2626,6 +2626,23 @@ func TestLines_ContentRanges(t *testing.T) {
 		}, lines.ContentRanges(tk))
 	})
 
+	t.Run("excludes leading and trailing tabs", func(t *testing.T) {
+		t.Parallel()
+
+		lines := line.NewLines(tokens.Tokenize("a:\tb\t# c\n"))
+
+		tk := lines.TokenAt(position.New(0, 3))
+		require.NotNil(t, tk)
+		require.Equal(t, "\tb\t", tk.Origin)
+
+		assert.Equal(t, position.Ranges{
+			position.NewRange(position.New(0, 2), position.New(0, 5)),
+		}, lines.TokenRanges(tk))
+		assert.Equal(t, position.Ranges{
+			position.NewRange(position.New(0, 3), position.New(0, 4)),
+		}, lines.ContentRanges(tk))
+	})
+
 	t.Run("space-only part contributes no range", func(t *testing.T) {
 		t.Parallel()
 
