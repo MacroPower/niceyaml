@@ -28,8 +28,12 @@ const onWindows = runtime.GOOS == "windows"
 // that names the file for every document. The registry reads the file
 // with [Registry.Load] from the working directory, with path made
 // absolute against it. Given [WithFS], the registry reads path from that
-// file system instead, as a slash-separated path relative to its root, so
-// a schema shipped in an [embed.FS] loads without touching the disk.
+// file system instead, whose root stands for the working directory, so a
+// schema shipped in an [embed.FS] loads without touching the disk. A
+// relative path reads relative to that root, in slash form. An absolute
+// path reads relative to the working directory File made it absolute
+// against, so an absolute path outside that directory names no file in
+// the file system. See [WithFS] for details.
 //
 // File names the schema by the file:// URL of the path made absolute
 // against the working directory, such as file:///srv/schemas/config.json,
