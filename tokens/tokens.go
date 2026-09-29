@@ -14,8 +14,9 @@ import (
 
 // Tokenize returns the token stream for the given YAML source.
 //
-// It is the one place niceyaml calls the go-yaml lexer, so every token stream
-// the module works with comes through here. The lexer drops some text from
+// It and [IsPlaceholder] are the only places niceyaml calls the go-yaml
+// lexer, and every token stream the module works with comes through
+// Tokenize. The lexer drops some text from
 // the Origins, and Tokenize gives it back from the source. It restores the
 // letter and hex digits of a "\x", "\u", or "\U" escape in a double-quoted
 // scalar. It restores them in the invalid token the lexer makes of such a

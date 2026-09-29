@@ -4,9 +4,9 @@
 //
 // # Tokenizing
 //
-// [Tokenize] returns the token stream for a YAML file. It is the one place
-// niceyaml calls the go-yaml lexer, so a future change of lexer touches this
-// package alone:
+// [Tokenize] returns the token stream for a YAML file. This package is the
+// one place niceyaml calls the go-yaml lexer, so a future change of lexer
+// touches this package alone:
 //
 //	tks := tokens.Tokenize("key: value")
 //
