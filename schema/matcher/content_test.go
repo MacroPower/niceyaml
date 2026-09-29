@@ -325,6 +325,36 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: "2"`),
 			want:    false,
 		},
+		"any string pointer matches its pointee": {
+			matcher: matcher.Content[any](kindPath, new("Deployment")),
+			input:   stringtest.Input(`kind: Deployment`),
+			want:    true,
+		},
+		"any string pointer does not match other string": {
+			matcher: matcher.Content[any](kindPath, new("Deployment")),
+			input:   stringtest.Input(`kind: Service`),
+			want:    false,
+		},
+		"any int pointer matches its pointee": {
+			matcher: matcher.Content[any](versionPath, new(2)),
+			input:   stringtest.Input(`version: 2`),
+			want:    true,
+		},
+		"any int pointer does not match a quoted integer": {
+			matcher: matcher.Content[any](versionPath, new(2)),
+			input:   stringtest.Input(`version: "2"`),
+			want:    false,
+		},
+		"any nil pointer matches null": {
+			matcher: matcher.Content[any](kindPath, (*string)(nil)),
+			input:   stringtest.Input(`kind: null`),
+			want:    true,
+		},
+		"any nil pointer does not match a value": {
+			matcher: matcher.Content[any](kindPath, (*string)(nil)),
+			input:   stringtest.Input(`kind: Deployment`),
+			want:    false,
+		},
 		"any large int does not match a rounded float": {
 			matcher: matcher.Content[any](versionPath, int64(9007199254740993)),
 			input:   stringtest.Input(`version: 9007199254740992.0`),

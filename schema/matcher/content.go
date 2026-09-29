@@ -206,9 +206,22 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 
 // pointees returns the values that got, the decoded value, and want
 // point to when both are pointers, and returns them unchanged otherwise.
-// It follows one pointer only. The third result is false when either
-// pointer is nil.
+// When T is an interface, the decoder never yields a pointer, so pointees
+// follows a pointer that want holds and returns its value in an interface.
+// It follows one pointer only. The third result is false when a pointer it
+// would follow is nil.
 func pointees(got, want reflect.Value) (reflect.Value, reflect.Value, bool) {
+	if got.Kind() == reflect.Interface && want.Elem().Kind() == reflect.Pointer {
+		ptr := want.Elem()
+		if ptr.IsNil() {
+			return got, want, false
+		}
+
+		pointee := ptr.Elem().Interface()
+
+		return got, reflect.ValueOf(&pointee).Elem(), true
+	}
+
 	if got.Kind() != reflect.Pointer {
 		return got, want, true
 	}
