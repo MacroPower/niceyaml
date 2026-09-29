@@ -64,7 +64,10 @@ type Source struct {
 	name     string
 	filePath string
 	lines    line.Lines
-	file     *ast.File
+	// Holds the stream that [Source.Tokens] rebuilds from lines on its
+	// first call.
+	stream token.Tokens
+	file   *ast.File
 	// Holds the set of copies of the tokens parse hands the parser. Every
 	// token the parser takes from the stream is one of these copies, and
 	// holdsToken looks a token up in the set by pointer. The implicit null
@@ -81,6 +84,7 @@ type Source struct {
 	docs             []*Node
 	parserOpts       []parser.Option
 	decodeOpts       []yaml.DecodeOption
+	streamOnce       sync.Once
 	fileOnce         sync.Once
 	docsOnce         sync.Once
 	decodeFileOnce   sync.Once
@@ -265,9 +269,10 @@ func (s *Source) FilePath() string {
 	return s.filePath
 }
 
-// Tokens reconstructs the full [token.Tokens] stream from every [line.Line]
-// of the [Source]. See [line.Lines.Tokens] for how a token cut across lines
-// comes back whole.
+// Tokens returns the full [token.Tokens] stream of the [Source]. The first
+// call rebuilds the stream from every [line.Line], and each call returns a
+// new slice that holds the same tokens. See [line.Lines.Tokens] for how a
+// token cut across lines comes back whole.
 //
 // The tokens are the clones [NewSourceFromTokens] made through
 // [tokens.ResetPositions], not the tokens the caller passed. The Source keeps
@@ -275,7 +280,11 @@ func (s *Source) FilePath() string {
 // [tokens.Tokenize], as it does for every constructor that reads text, the
 // Line and Column of each token name the rune where its text starts.
 func (s *Source) Tokens() token.Tokens {
-	return s.lines.Tokens()
+	s.streamOnce.Do(func() {
+		s.stream = s.lines.Tokens()
+	})
+
+	return slices.Clone(s.stream)
 }
 
 // Documents returns the root [*Node] of each YAML document of this

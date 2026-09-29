@@ -424,6 +424,57 @@ func TestSource_Lines(t *testing.T) {
 	assert.Equal(t, "foo: bar", lines.Line(1).Content())
 }
 
+func TestSource_Tokens(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+	}{
+		"mapping": {
+			input: "key: value\nfoo: bar\n",
+		},
+		"block scalar": {
+			input: "key: |\n  one\n  two\nfoo: bar\n",
+		},
+		"documents": {
+			input: "a: 1\n---\nb: 2\n",
+		},
+		"empty": {
+			input: "",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			src := niceyaml.NewSourceFromString(tc.input)
+
+			first := src.Tokens()
+			second := src.Tokens()
+
+			require.Len(t, second, len(first))
+
+			for i := range first {
+				assert.Same(t, first[i], second[i], "token %d", i)
+			}
+
+			if len(first) == 0 {
+				return
+			}
+
+			first[0] = nil
+
+			third := src.Tokens()
+			require.Len(t, third, len(second))
+
+			for i := range second {
+				assert.Same(t, second[i], third[i], "token %d", i)
+			}
+		})
+	}
+}
+
 func TestSource_Lines_Whitespace(t *testing.T) {
 	t.Parallel()
 
