@@ -35,8 +35,8 @@
 // positions, so the test calls [ValidateTokens] first. Each diff value reports
 // whether its inputs match through Equal and formats itself through String,
 // so a test can hand one to t.Error. [CompareContent] returns the same kind
-// of value for whole text. Before comparing, it converts CRLF to LF and
-// trims leading and trailing newlines:
+// of value for whole text. Before comparing, it converts CRLF and bare CR
+// line endings to LF and trims leading and trailing newlines:
 //
 //	if diff := yamltest.CompareContent(want, got); !diff.Equal() {
 //		t.Error(diff)

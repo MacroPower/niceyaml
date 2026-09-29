@@ -191,6 +191,13 @@ func TestCompareContent(t *testing.T) {
 		assert.True(t, diff.Equal())
 	})
 
+	t.Run("normalizes bare CR line endings", func(t *testing.T) {
+		t.Parallel()
+
+		diff := yamltest.CompareContent("line1\nline2\n\nline3", "line1\rline2\r\rline3\r")
+		assert.True(t, diff.Equal())
+	})
+
 	t.Run("trims surrounding newlines", func(t *testing.T) {
 		t.Parallel()
 

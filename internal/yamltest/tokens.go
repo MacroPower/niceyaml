@@ -123,8 +123,8 @@ func (d TokensDiff) String() string {
 }
 
 // ContentDiff represents the difference between two content strings after
-// normalization, which converts CRLF to LF and trims leading/trailing
-// newlines.
+// normalization, which converts CRLF and bare CR line endings to LF and
+// trims leading/trailing newlines.
 //
 // Use [CompareContent] to create a ContentDiff.
 type ContentDiff struct {
@@ -226,8 +226,8 @@ func RequireTokensEqual(tb testing.TB, want, got token.Tokens) {
 }
 
 // CompareContent compares two strings for equality and returns a [ContentDiff].
-// It converts CRLF to LF and trims leading/trailing newlines in both strings
-// before comparing.
+// It converts CRLF and bare CR line endings to LF and trims leading/trailing
+// newlines in both strings before comparing.
 func CompareContent(want, got string) ContentDiff {
 	return ContentDiff{
 		Want: normalizeContent(want),
@@ -489,5 +489,8 @@ func FormatTokens(tks token.Tokens) string {
 }
 
 func normalizeContent(s string) string {
-	return strings.Trim(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+
+	return strings.Trim(s, "\n")
 }

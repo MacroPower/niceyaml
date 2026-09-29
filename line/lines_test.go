@@ -210,6 +210,10 @@ func TestNewLines_Roundtrip(t *testing.T) {
 		"blank line between CRLF": "key: value\r\n\r\nnext: data\r\n",
 		"list of maps CRLF":       "items:\r\n  - name: a\r\n    val: 1\r\n",
 		"plain multiline string":  "key: this is\n  a multiline\n  plain string\n",
+		"multiple keys CR":        "a: 1\rb: 2\r",
+		"block scalar with CR":    "key: |\r  line1\r  line2\r",
+		"blank line between CR":   "a: 1\r\rb: 2\r",
+		"mixed CR and CRLF":       "a: 1\rb: 2\r\nc: 3\n",
 	}
 
 	for name, input := range tcs {
