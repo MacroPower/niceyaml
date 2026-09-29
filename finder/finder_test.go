@@ -130,6 +130,12 @@ func TestFinder_Find(t *testing.T) {
 				),
 			},
 		},
+		"with normalizer - kana voicing mark distinguishes": {
+			input:      "name: ガ",
+			search:     "カ",
+			normalizer: normalizer.New(),
+			want:       nil,
+		},
 		"exact matching - no match": {
 			input:  "key: VALUE",
 			search: "value",

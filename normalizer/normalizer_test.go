@@ -32,6 +32,30 @@ func TestNormalize(t *testing.T) {
 			in:   "ÜBER",
 			want: "uber",
 		},
+		"default keeps kana voicing mark": {
+			in:   "ガ",
+			want: "ガ",
+		},
+		"default keeps kana semi-voiced mark": {
+			in:   "パ",
+			want: "パ",
+		},
+		"default keeps Thai vowel sign": {
+			in:   "กิน",
+			want: "กิน",
+		},
+		"default keeps Devanagari vowel sign": {
+			in:   "कुम",
+			want: "कुम",
+		},
+		"default removes Vietnamese stacked diacritics": {
+			in:   "Việt",
+			want: "viet",
+		},
+		"default keeps keycap emoji": {
+			in:   "1\ufe0f\u20e3",
+			want: "1\ufe0f\u20e3",
+		},
 		"case fold disabled preserves case": {
 			opts: []normalizer.Option{normalizer.WithCaseFold(false)},
 			in:   "Café",

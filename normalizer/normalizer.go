@@ -33,6 +33,25 @@ type Normalizer struct {
 //   - [WithWidthFold]
 type Option func(*config)
 
+// diacriticBlocks holds the combining diacritical mark blocks. The
+// diacritic stage removes only the nonspacing marks in these blocks. Vowel
+// signs, viramas, and kana voicing marks are also nonspacing marks, but they
+// belong to the letter, so removing them would make distinct words equal.
+// Enclosing marks such as the keycap stay too.
+var diacriticBlocks = &unicode.RangeTable{
+	R16: []unicode.Range16{
+		{Lo: 0x0300, Hi: 0x036f, Stride: 1}, // Combining Diacritical Marks.
+		{Lo: 0x1ab0, Hi: 0x1aff, Stride: 1}, // Combining Diacritical Marks Extended.
+		{Lo: 0x1dc0, Hi: 0x1dff, Stride: 1}, // Combining Diacritical Marks Supplement.
+		{Lo: 0x20d0, Hi: 0x20ff, Stride: 1}, // Combining Diacritical Marks for Symbols.
+		{Lo: 0xfe20, Hi: 0xfe2f, Stride: 1}, // Combining Half Marks.
+	},
+}
+
+func isDiacritic(r rune) bool {
+	return unicode.Is(unicode.Mn, r) && unicode.Is(diacriticBlocks, r)
+}
+
 type config struct {
 	transformers []func() transform.Transformer
 	caseFold     bool
@@ -74,7 +93,7 @@ func (c *config) build() transform.Transformer {
 	if c.diacritics {
 		transformers = append(transformers,
 			norm.NFD,
-			runes.Remove(runes.In(unicode.Mn)),
+			runes.Remove(runes.Predicate(isDiacritic)),
 			norm.NFC,
 		)
 	}
@@ -107,8 +126,11 @@ func WithCaseFold(enabled bool) Option {
 }
 
 // WithDiacriticFold is an [Option] that toggles diacritics removal.
-// When true (the default), the pipeline removes diacritics. For example, "Ö"
-// becomes "O" (before any case folding).
+// When true (the default), the pipeline decomposes text and removes the
+// combining diacritical marks, such as accents, umlauts, and cedillas. For
+// example, "Ö" becomes "O" (before any case folding). Marks that form part of
+// a letter stay, so "ガ" keeps its voicing mark and Thai and Devanagari vowel
+// signs survive.
 func WithDiacriticFold(enabled bool) Option {
 	return func(c *config) {
 		c.diacritics = enabled
