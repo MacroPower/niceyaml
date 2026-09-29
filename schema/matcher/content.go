@@ -36,11 +36,12 @@ type contentMatcher[T comparable] struct {
 // through an UnmarshalYAML or UnmarshalText method, matches the value its
 // own decode gives. A number matches a scalar the document writes as a
 // number, whatever its spelling, though an integer want never matches a
-// value with a fraction. A quoted, block, or !!str scalar is a string,
-// so version: "2" does not match 2. A [time.Duration] reads from the
-// text of a scalar, so timeout: "5s" and timeout: 5s both match
-// 5*time.Second. A pointer want matches the value it points to. A null
-// matches only a nil want, such as
+// value with a fraction. A NaN want matches .nan in any of its
+// spellings, though NaN never equals itself in Go. A quoted, block, or
+// !!str scalar is a string, so version: "2" does not match 2. A
+// [time.Duration] reads from the text of a scalar, so timeout: "5s" and
+// timeout: 5s both match 5*time.Second. A pointer want matches the value
+// it points to. A null matches only a nil want, such as
 // Content[any](path, nil) or a nil pointer. When T is an interface, two
 // numbers compare by value whatever their Go types, so
 // Content[any](path, 1) matches an integer the decoder reads as a
@@ -196,6 +197,10 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 		}
 	}
 
+	if isFloat(gv.Kind()) {
+		return floatEqual(gv.Float(), wv.Float()), nil
+	}
+
 	return gv.Interface() == wv.Interface(), nil
 }
 
@@ -349,7 +354,7 @@ func numericEqual(a, b any) (bool, bool) {
 
 	switch {
 	case isFloat(ak) && isFloat(bk):
-		return av.Float() == bv.Float(), true
+		return floatEqual(av.Float(), bv.Float()), true
 	case isFloat(ak):
 		return floatEqualsInteger(av.Float(), bv), true
 	case isFloat(bk):
@@ -363,6 +368,12 @@ func numericEqual(a, b any) (bool, bool) {
 	default:
 		return av.Int() == bv.Int(), true
 	}
+}
+
+// floatEqual reports whether a and b hold the same value, counting two
+// NaNs as equal, so a NaN want matches a .nan in the document.
+func floatEqual(a, b float64) bool {
+	return a == b || (math.IsNaN(a) && math.IsNaN(b))
 }
 
 // floatEqualsInteger reports whether f holds exactly the value of the

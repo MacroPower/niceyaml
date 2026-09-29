@@ -240,6 +240,31 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 1e3`),
 			want:    true,
 		},
+		"float NaN matches nan": {
+			matcher: matcher.Content(versionPath, math.NaN()),
+			input:   stringtest.Input(`version: .nan`),
+			want:    true,
+		},
+		"any NaN matches NaN spelling": {
+			matcher: matcher.Content[any](versionPath, math.NaN()),
+			input:   stringtest.Input(`version: .NaN`),
+			want:    true,
+		},
+		"float NaN does not match number": {
+			matcher: matcher.Content(versionPath, math.NaN()),
+			input:   stringtest.Input(`version: 1.5`),
+			want:    false,
+		},
+		"float NaN does not match quoted nan": {
+			matcher: matcher.Content(versionPath, math.NaN()),
+			input:   stringtest.Input(`version: ".nan"`),
+			want:    false,
+		},
+		"float does not match nan": {
+			matcher: matcher.Content(versionPath, 1.5),
+			input:   stringtest.Input(`version: .nan`),
+			want:    false,
+		},
 		"empty string does not match null": {
 			matcher: matcher.Content(kindPath, ""),
 			input:   stringtest.Input(`kind:`),
