@@ -4467,6 +4467,61 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		}
 	})
 
+	t.Run("sentinel wrapper binds as the error it classifies", func(t *testing.T) {
+		t.Parallel()
+
+		errInvalid := errors.New("invalid")
+
+		// A wrapper with two %w verbs whose other branches carry no
+		// location and add no errors binds where its one located branch
+		// does, as a wrapper with one %w verb would.
+		tcs := map[string]struct {
+			err  error
+			want string
+		}{
+			"sentinel first": {
+				err:  fmt.Errorf("%w: %w", errInvalid, badB),
+				want: "2:4: invalid: $.b: bad b",
+			},
+			"sentinel last": {
+				err:  fmt.Errorf("%w: %w", badB, errInvalid),
+				want: "2:4: $.b: bad b: invalid",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := yamltest.Bind(t, source, tc.err)
+				require.ErrorIs(t, err, errInvalid)
+				assert.Equal(t, tc.want, report(err))
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+
+				rng, ok := bound.Range()
+				require.True(t, ok)
+				assert.Equal(t, 1, rng.Start.Line)
+				assert.Empty(t, bound.Errors())
+			})
+		}
+
+		t.Run("nested errors", func(t *testing.T) {
+			t.Parallel()
+
+			err := yamltest.Bind(t, source, fmt.Errorf("%w: %w",
+				errInvalid, niceyaml.NewError("summary", niceyaml.WithErrors(badA, badC))))
+
+			assert.Equal(t, stringtest.JoinLF(
+				"invalid: summary",
+				"|-- 1:4: $.a: bad a",
+				"`-- 3:4: $.c: bad c",
+			), report(err))
+		})
+	})
+
 	t.Run("branches below a wrapper are annotated", func(t *testing.T) {
 		t.Parallel()
 

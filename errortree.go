@@ -89,7 +89,8 @@ func NewErrorTree(err error) ErrorTree {
 // Error unwraps to several too, but it is one node of the tree with its
 // nested errors as children, so it is not a join. Nor is an error built
 // with several %w verbs, whose message is its own rather than its
-// branches' messages one per line, so its text stays in front of them.
+// branches' messages one per line, so it keeps its text, and
+// [followBranches] picks the branches that stand below it.
 func joinBranches(err error) ([]error, bool) {
 	if _, ok := err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
 		return nil, false
@@ -161,12 +162,12 @@ func children(err error) []ErrorTree {
 // chain follows each wrapper to the one error it wraps and each [*Error]
 // to its cause. Every error nested with [WithErrors] in an Error on the
 // way is a child, reported to onChild with the base of every Error from
-// [Rebase] above it, the Error that nests it included. The chain ends at
-// an error that unwraps to several, such as one from [errors.Join] or a
-// wrapper with several %w verbs, and each of its branches but the nil
-// ones is a child under the same base. It also ends at a [*SourceError],
-// which bound everything below it already, so onBinding receives it in
-// place of its children.
+// [Rebase] above it, the Error that nests it included. At an error that
+// unwraps to several, the chain goes on as [followBranches] says. It
+// follows the one branch that remains of a wrapper with several %w verbs
+// and otherwise ends there, with each branch that remains a child under
+// the same base. It also ends at a [*SourceError], which bound everything
+// below it already, so onBinding receives it in place of its children.
 func walkChildren(err error, onBinding func(*SourceError), onChild func(n error, base childBase)) {
 	var base childBase
 
@@ -190,10 +191,15 @@ func walkChildren(err error, onBinding func(*SourceError), onChild func(n error,
 			cur = x.Unwrap()
 
 		case interface{ Unwrap() []error }:
-			for _, branch := range x.Unwrap() {
-				if !isNothing(branch) {
-					onChild(branch, base)
-				}
+			branches, next := followBranches(cur, x.Unwrap())
+			if next != nil {
+				cur = next
+
+				continue
+			}
+
+			for _, branch := range branches {
+				onChild(branch, base)
 			}
 
 			return
@@ -202,6 +208,55 @@ func walkChildren(err error, onBinding func(*SourceError), onChild func(n error,
 			return
 		}
 	}
+}
+
+// followBranches returns the branches of err, an error that unwraps to
+// branches, that stand below it in the tree. A join, as [joinBranches]
+// finds one, keeps each branch but the nil ones. A wrapper with several
+// %w verbs, such as one [fmt.Errorf] builds from a sentinel and a cause,
+// is one error that classifies another, so it keeps only the branches
+// that carry a location or add errors below them. A branch with neither,
+// such as the sentinel, adds nothing its text in the message of the
+// wrapper does not show already. When the wrapper keeps a single branch,
+// the second result is that branch, and the cause chain goes on through
+// it as it does through a wrapper with one %w verb, so the wrapper binds
+// where the branch does.
+func followBranches(err error, branches []error) ([]error, error) {
+	_, joined := joinBranches(err)
+
+	var kept []error
+
+	for _, branch := range branches {
+		if isNothing(branch) || (!joined && isLeaf(branch)) {
+			continue
+		}
+
+		kept = append(kept, branch)
+	}
+
+	if !joined && len(kept) == 1 {
+		return nil, kept[0]
+	}
+
+	return kept, nil
+}
+
+// isLeaf reports whether err carries no location along its cause chain
+// and has no children there, so it adds nothing to the tree beyond its
+// text.
+func isLeaf(err error) bool {
+	if anchorOf(err).err != nil {
+		return false
+	}
+
+	leaf := true
+
+	walkChildren(err,
+		func(*SourceError) { leaf = false },
+		func(error, childBase) { leaf = false },
+	)
+
+	return leaf
 }
 
 // childBase is the base the children along a cause chain rebase under:

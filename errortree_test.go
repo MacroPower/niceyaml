@@ -65,13 +65,27 @@ func TestErrorTree_New_MultiWrap(t *testing.T) {
 		err  error
 		want niceyaml.ErrorTree
 	}{
-		"wrapper with two verbs keeps its own text": {
-			err: fmt.Errorf("parse path: %w: %w", errA, errB),
+		"wrapper with two verbs over plain errors is one node": {
+			err:  fmt.Errorf("parse path: %w: %w", errA, errB),
+			want: niceyaml.ErrorTree{Text: "parse path: first: second"},
+		},
+		"wrapper with two verbs goes on through its one branch with children": {
+			err: fmt.Errorf("%w: %w", errA, niceyaml.NewError("summary", niceyaml.WithErrors(errB))),
 			want: niceyaml.ErrorTree{
-				Text: "parse path: first: second",
+				Text:     "first: summary",
+				Children: []niceyaml.ErrorTree{{Text: "second"}},
+			},
+		},
+		"wrapper with two verbs keeps its own text": {
+			err: fmt.Errorf("parse path: %w; %w",
+				niceyaml.NewError("x", niceyaml.WithErrors(errA)),
+				niceyaml.NewError("y", niceyaml.WithErrors(errB)),
+			),
+			want: niceyaml.ErrorTree{
+				Text: "parse path: x; y",
 				Children: []niceyaml.ErrorTree{
-					{Text: "first"},
-					{Text: "second"},
+					{Text: "x", Children: []niceyaml.ErrorTree{{Text: "first"}}},
+					{Text: "y", Children: []niceyaml.ErrorTree{{Text: "second"}}},
 				},
 			},
 		},

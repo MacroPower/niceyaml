@@ -854,8 +854,10 @@ func bindTree(err error, b binder) error {
 
 // isBound reports whether err is a binding already: a [*SourceError], or
 // an error that wraps one along its cause chain with no [*Error] above it
-// that carries a location or nests errors with [WithErrors]. Such an Error
-// adds to the tree, so the error binds anew around the inner binding.
+// that carries a location or nests errors with [WithErrors]. The chain
+// follows a wrapper with several %w verbs to the one branch
+// [followBranches] keeps of it. Such an Error adds to the tree, so the
+// error binds anew around the inner binding.
 func isBound(err error) bool {
 	for cur := err; ; {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -871,6 +873,9 @@ func isBound(err error) bool {
 
 		case interface{ Unwrap() error }:
 			cur = x.Unwrap()
+
+		case interface{ Unwrap() []error }:
+			_, cur = followBranches(cur, x.Unwrap())
 
 		default:
 			return false
@@ -988,9 +993,10 @@ type anchor struct {
 // its cause chain, or the first [*SourceError]. An Error from [Rebase]
 // with no anchor below it is the anchor, located at its base. The chain
 // follows a wrapper to the one error it wraps and an Error to its cause.
-// An error that unwraps to several, such as one from [errors.Join], ends
-// the chain. Such an error carries no location of its own, and each of
-// its branches binds as a child.
+// It follows a wrapper with several %w verbs to the one branch
+// [followBranches] keeps of it. Any other error that unwraps to several,
+// such as one from [errors.Join], ends the chain. Such an error carries
+// no location of its own, and each of its branches binds as a child.
 func anchorOf(err error) anchor {
 	switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
 	case *SourceError:
@@ -1033,6 +1039,14 @@ func anchorOf(err error) anchor {
 
 	case interface{ Unwrap() error }:
 		return anchorOf(x.Unwrap())
+
+	case interface{ Unwrap() []error }:
+		_, next := followBranches(err, x.Unwrap())
+		if next == nil {
+			return anchor{}
+		}
+
+		return anchorOf(next)
 
 	default:
 		return anchor{}

@@ -5512,6 +5512,7 @@ func TestErrDecodeRejected(t *testing.T) {
 				rng, ok := srcErr.Range()
 				require.True(t, ok, "the rejection carries no location")
 				assert.Equal(t, tc.line, rng.Start.Line)
+				assert.Empty(t, srcErr.Errors(), "the rejection binds its own causes as children")
 			})
 		}
 	})
