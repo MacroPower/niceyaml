@@ -126,8 +126,9 @@ func normalizePattern(pattern string) string {
 // "/" inside a character class belong to the element around them.
 func splitElements(pattern string) []string {
 	var (
-		elems []string
-		start int
+		elems    []string
+		start    int
+		unclosed bool
 	)
 
 	for i := 0; i < len(pattern); i++ {
@@ -136,9 +137,7 @@ func splitElements(pattern string) []string {
 			i++ // Skip the escaped character.
 
 		case '[':
-			if end := classEnd(pattern, i); end >= 0 {
-				i = end
-			}
+			i = skipClass(pattern, i, &unclosed)
 
 		case '/':
 			elems = append(elems, pattern[start:i])
@@ -315,6 +314,8 @@ func expandBraces(pattern string, budget int, work *int) ([]string, bool) {
 // closed brace group. A brace inside a character class is part of the
 // class, as [Pattern.Match] reads it.
 func braceGroup(pattern string) (int, int) {
+	var unclosed bool
+
 	open, depth := -1, 0
 
 	for i := 0; i < len(pattern); i++ {
@@ -323,9 +324,7 @@ func braceGroup(pattern string) (int, int) {
 			i++ // Skip the escaped character.
 
 		case '[':
-			if end := classEnd(pattern, i); end >= 0 {
-				i = end
-			}
+			i = skipClass(pattern, i, &unclosed)
 
 		case '{':
 			if depth == 0 {
@@ -355,9 +354,10 @@ func braceGroup(pattern string) (int, int) {
 // escaped comma, stays in its alternative.
 func splitAlternatives(body string) []string {
 	var (
-		alts  []string
-		start int
-		depth int
+		alts     []string
+		start    int
+		depth    int
+		unclosed bool
 	)
 
 	for i := 0; i < len(body); i++ {
@@ -366,9 +366,7 @@ func splitAlternatives(body string) []string {
 			i++ // Skip the escaped character.
 
 		case '[':
-			if end := classEnd(body, i); end >= 0 {
-				i = end
-			}
+			i = skipClass(body, i, &unclosed)
 
 		case '{':
 			depth++
@@ -385,6 +383,29 @@ func splitAlternatives(body string) []string {
 	}
 
 	return append(alts, body[start:])
+}
+
+// skipClass returns the index of the "]" that closes the character class
+// opening at pattern[i], or i when nothing closes it, so a scan that
+// reads the "[" as a literal moves on by one byte. It sets unclosed once
+// a class has no "]" and then returns i for every later "[" without
+// looking for one. The scans that call it skip escapes as [classEnd]
+// does, so after one "[" that nothing closes, nothing closes a later "["
+// either, and a long run of them costs time linear in the pattern
+// length.
+func skipClass(pattern string, i int, unclosed *bool) int {
+	if *unclosed {
+		return i
+	}
+
+	end := classEnd(pattern, i)
+	if end < 0 {
+		*unclosed = true
+
+		return i
+	}
+
+	return end
 }
 
 // classEnd returns the index of the "]" that closes the character class

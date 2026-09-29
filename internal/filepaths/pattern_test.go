@@ -3,6 +3,7 @@ package filepaths_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -504,6 +505,44 @@ func TestExpandBraces_Work(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, []string{tc.pattern}, filepaths.ExpandBraces(tc.pattern))
+		})
+	}
+}
+
+func TestUnclosedClasses(t *testing.T) {
+	t.Parallel()
+
+	// Each "[" in a long run opens a class that nothing closes, so each
+	// reads as a literal. The scans must stay linear in the pattern
+	// length rather than look for a "]" again at every "[".
+	run := strings.Repeat("[", 200000)
+
+	tcs := map[string]struct {
+		pattern string
+		want    []string
+	}{
+		"run of unclosed classes": {
+			pattern: run + ".yaml",
+			want:    []string{run + ".yaml"},
+		},
+		"run of unclosed classes before braces": {
+			pattern: run + ".{a,b}",
+			want:    []string{run + ".a", run + ".b"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			start := time.Now()
+
+			assert.Equal(t, tc.want, filepaths.ExpandBraces(tc.pattern))
+
+			p := filepaths.NewAnyDepthPatterns([]string{tc.pattern})
+			assert.False(t, p.MatchClean("x.yaml"))
+
+			assert.Less(t, time.Since(start), 2*time.Second)
 		})
 	}
 }
