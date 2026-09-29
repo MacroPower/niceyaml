@@ -1,25 +1,10 @@
 package lcs
 
-// compact rewrites b.ops into a canonical form among the edit scripts of
-// the same length. It marks the changed lines of each input, slides each
-// run of changes with [shiftBoundaries], and rebuilds the ops from the
-// marks, so the result no longer depends on where recurse split the
-// inputs.
+// compact slides the changed lines that recurse marked into a canonical
+// form among the edit scripts of the same length, then builds b.ops from
+// the marks. It slides each run of changes with [shiftBoundaries], so the
+// result no longer depends on where recurse split the inputs.
 func (b *buffers) compact(before, after []string) {
-	b.changedBefore = cleared(b.changedBefore, len(before))
-	b.changedAfter = cleared(b.changedAfter, len(after))
-
-	for _, op := range b.ops {
-		switch op.Kind {
-		case OpDelete:
-			b.changedBefore[op.Before] = true
-		case OpInsert:
-			b.changedAfter[op.After] = true
-		case OpEqual:
-			// Equal lines stay unmarked.
-		}
-	}
-
 	shiftBoundaries(before, b.changedBefore, b.changedAfter)
 	shiftBoundaries(after, b.changedAfter, b.changedBefore)
 

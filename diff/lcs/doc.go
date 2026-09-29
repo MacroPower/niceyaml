@@ -8,15 +8,16 @@
 // # Complexity
 //
 // [Hirschberg] finds a longest common subsequence (LCS) of the two inputs. The
-// standard dynamic programming approach needs O(m*n) space for its table.
-// Hirschberg's divide-and-conquer strategy instead works in two rows of O(n)
-// space, where n is the length of the after sequence, and keeps O(m*n) time.
-// [Hirschberg] first pairs up the lines both inputs share at the start and at
-// the end and searches only the middle that remains, so identical inputs and
-// inputs with one short changed region diff in close to linear time. Changes
-// far apart leave most of both inputs in the middle, and the search over it
-// still takes O(m*n) time. The result itself holds one operation per line, so
-// it takes O(m+n) space regardless of the algorithm.
+// standard dynamic programming approach fills an m by n table, so it takes
+// O(m*n) time and space whatever the inputs hold. [Hirschberg] splits the
+// inputs at a point that some shortest edit script passes through and solves
+// each half the same way. It finds each split point with Myers' O(ND) search,
+// which spends time in proportion to the input lengths times the number of
+// changed lines. A diff of large inputs that differ in a few lines therefore
+// runs in close to linear time, however far apart those lines sit. Inputs that
+// share few lines still take time close to the square of their length. The
+// search keeps O(m+n) working memory, and the result holds one operation per
+// line, so it takes O(m+n) space as well.
 //
 // # Usage
 //

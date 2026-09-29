@@ -7,15 +7,19 @@ import (
 
 // Hirschberg implements [Algorithm] with a space-efficient LCS algorithm.
 //
-// Diff first pairs up the lines that before and after share at the start
-// and at the end. The search over the rest takes O(m*n) time, where m and
-// n are the lengths of what remains of before and after, so identical
-// inputs and inputs with one short changed region diff in linear time.
-// The dynamic programming rows take O(n) space, since the algorithm keeps
-// two rows over the after sequence instead of an m by n table. The result
-// holds one [Op] per line of either input, so the accumulated ops take
-// space linear in the length of both inputs. The pool keeps buffers of
-// that capacity for later calls until the garbage collector clears it.
+// Diff splits the inputs in two at a point that some shortest edit script
+// passes through, then solves each half the same way, as Hirschberg's
+// divide-and-conquer algorithm does. It finds that point with the
+// linear-space search from Myers' "An O(ND) Difference Algorithm", which
+// walks from both ends of the inputs at once and stops where the two walks
+// meet. The search takes O((m+n)*d) time, where m and n are the lengths of
+// before and after and d is the number of lines the shortest edit script
+// deletes or inserts. A diff of large inputs that differ in a few lines
+// therefore runs in close to linear time, wherever those lines sit. The
+// search keeps two arrays of O(m+n) integers. The result holds one [Op]
+// per line of either input, so the accumulated ops take space linear in
+// the length of both inputs as well. The pool keeps buffers of that
+// capacity for later calls until the garbage collector clears it.
 //
 // Repeated lines often allow several shortest edit scripts. Hirschberg
 // picks one by sliding each run of changed lines as GNU diff does. A run
@@ -51,15 +55,15 @@ func (h *Hirschberg) Diff(before, after []string) []Op {
 	defer h.pool.Put(b)
 
 	// The lines the inputs share at the start and at the end pair up in
-	// order, so only the middle needs the search. The ops of recurse then
-	// cover only the middle, and compact counts every line they leave out
-	// as unchanged.
+	// order, so only the middle needs the search. The search marks changed
+	// lines only, and compact counts every line it leaves unmarked as
+	// unchanged.
 	prefix, suffix := commonEnds(before, after)
 	bEnd, aEnd := len(before)-suffix, len(after)-suffix
 
-	b.reset(len(before), len(after), aEnd-prefix)
+	b.reset(len(before), len(after), bEnd-prefix, aEnd-prefix)
 	b.intern(before, after, prefix, bEnd, aEnd)
-	b.recurse(b.beforeIDs, b.afterIDs, prefix, bEnd, prefix, aEnd)
+	b.recurse(prefix, bEnd, prefix, aEnd)
 	b.compact(before, after)
 
 	if len(b.ops) == 0 {
@@ -71,13 +75,10 @@ func (h *Hirschberg) Diff(before, after []string) []Op {
 
 // buffers is the working memory of one [Hirschberg.Diff] call.
 type buffers struct {
-	// Working rows for 2-row LCS computation.
-	row0, row1 []int
-
-	// Reusable result buffers for forward/backward passes.
-	// These are safe to reuse since recurse consumes each result
-	// before recursion.
-	fwdResult, bwdResult []int
+	// Furthest points of the forward and backward walks of midpoint, by
+	// diagonal. Each walk stores the before index it reached on each
+	// diagonal.
+	fwdDiag, bwdDiag []int
 
 	// Line IDs of each input, which name equal lines by one number so
 	// the search compares ints instead of strings. Only the lines between
@@ -88,24 +89,25 @@ type buffers struct {
 	// so the pool holds no reference to the caller's lines.
 	ids map[string]int
 
-	// Changed lines of each input, which compact slides into place.
+	// Changed lines of each input. The search marks them, and compact
+	// slides them into place.
 	changedBefore, changedAfter []bool
 
 	// Accumulated diff operations.
 	ops []Op
 }
 
-// reset empties the operations and sizes the buffers for inputs of the
-// given lengths, whose search covers rowLen after lines.
-func (b *buffers) reset(beforeLen, afterLen, rowLen int) {
+// reset empties the operations, clears the change marks, and sizes the
+// buffers for inputs of the given lengths, whose search covers bLen before
+// lines and aLen after lines.
+func (b *buffers) reset(beforeLen, afterLen, bLen, aLen int) {
 	b.ops = b.ops[:0]
 
-	needed := rowLen + 1
-	if cap(b.row0) < needed {
-		b.row0 = make([]int, needed)
-		b.row1 = make([]int, needed)
-		b.fwdResult = make([]int, needed)
-		b.bwdResult = make([]int, needed)
+	// The walks of midpoint touch the diagonals from -aLen-1 through
+	// bLen+1.
+	if needed := bLen + aLen + 3; cap(b.fwdDiag) < needed {
+		b.fwdDiag = make([]int, needed)
+		b.bwdDiag = make([]int, needed)
 	}
 
 	if worst := beforeLen + afterLen; cap(b.ops) < worst {
@@ -114,6 +116,9 @@ func (b *buffers) reset(beforeLen, afterLen, rowLen int) {
 
 	b.beforeIDs = slices.Grow(b.beforeIDs[:0], beforeLen)[:beforeLen]
 	b.afterIDs = slices.Grow(b.afterIDs[:0], afterLen)[:afterLen]
+
+	b.changedBefore = cleared(b.changedBefore, beforeLen)
+	b.changedAfter = cleared(b.changedAfter, afterLen)
 }
 
 // intern gives each line of before[start:bEnd] and after[start:aEnd] an
@@ -165,158 +170,156 @@ func commonEnds(before, after []string) (int, int) {
 	return prefix, suffix
 }
 
-// recurse finds the LCS by divide-and-conquer. It operates on
-// before[bStart:bEnd] and after[aStart:aEnd], which hold the line IDs from
-// intern.
-func (b *buffers) recurse(before, after []int, bStart, bEnd, aStart, aEnd int) {
-	m := bEnd - bStart
-	n := aEnd - aStart
+// recurse marks the lines that a shortest edit script of
+// b.beforeIDs[bStart:bEnd] and b.afterIDs[aStart:aEnd] deletes or inserts.
+// It splits both ranges at the point that midpoint finds and solves each
+// half the same way.
+func (b *buffers) recurse(bStart, bEnd, aStart, aEnd int) {
+	before, after := b.beforeIDs, b.afterIDs
 
-	// Base case: no before lines, so all after lines are insertions.
-	if m == 0 {
-		for j := aStart; j < aEnd; j++ {
-			b.ops = append(b.ops, Op{Kind: OpInsert, Before: -1, After: j})
-		}
-
-		return
+	// Lines the ranges share at the start and at the end pair up in order.
+	// Trimming them also leaves midpoint two ranges that need at least two
+	// edits, so each half it returns holds fewer lines than both ranges.
+	for bStart < bEnd && aStart < aEnd && before[bStart] == after[aStart] {
+		bStart++
+		aStart++
 	}
 
-	// Base case: no after lines, so all before lines are deletions.
-	if n == 0 {
+	for bStart < bEnd && aStart < aEnd && before[bEnd-1] == after[aEnd-1] {
+		bEnd--
+		aEnd--
+	}
+
+	switch {
+	case bStart == bEnd:
+		for j := aStart; j < aEnd; j++ {
+			b.changedAfter[j] = true
+		}
+
+	case aStart == aEnd:
 		for i := bStart; i < bEnd; i++ {
-			b.ops = append(b.ops, Op{Kind: OpDelete, Before: i, After: -1})
+			b.changedBefore[i] = true
 		}
 
-		return
-	}
-
-	// Base case: single before line.
-	if m == 1 {
-		b.singleBeforeLine(before, after, bStart, aStart, aEnd)
-
-		return
-	}
-
-	// Recursive case: divide at bMid.
-	bMid := bStart + m/2
-
-	// Forward pass: compute LCS lengths from (bStart, aStart) to (bMid, *).
-	forward := b.forward(before, after, bStart, bMid, aStart, aEnd)
-
-	// Backward pass: compute LCS lengths from (bEnd, aEnd) to (bMid, *).
-	backward := b.backward(before, after, bMid, bEnd, aStart, aEnd)
-
-	// Find aMid that maximizes forward[j-aStart] + backward[aEnd-j].
-	aMid := aStart
-	best := -1
-
-	for j := aStart; j <= aEnd; j++ {
-		score := forward[j-aStart] + backward[aEnd-j]
-		if score > best {
-			best = score
-			aMid = j
-		}
-	}
-
-	// Recurse on both halves.
-	b.recurse(before, after, bStart, bMid, aStart, aMid)
-	b.recurse(before, after, bMid, bEnd, aMid, aEnd)
-}
-
-// singleBeforeLine handles the base case where there's exactly one before line.
-// It keeps deletions ahead of insertions.
-func (b *buffers) singleBeforeLine(before, after []int, bStart, aStart, aEnd int) {
-	// Find first match in after sequence.
-	matchIdx := -1
-
-	for j := aStart; j < aEnd; j++ {
-		if before[bStart] == after[j] {
-			matchIdx = j
-
-			break
-		}
-	}
-
-	if matchIdx < 0 {
-		// No match: delete before line, then insert all after lines.
-		b.ops = append(b.ops, Op{Kind: OpDelete, Before: bStart, After: -1})
-
-		for j := aStart; j < aEnd; j++ {
-			b.ops = append(b.ops, Op{Kind: OpInsert, Before: -1, After: j})
-		}
-	} else {
-		// Match found: insert lines before match, equal at match, insert lines after.
-		for j := aStart; j < matchIdx; j++ {
-			b.ops = append(b.ops, Op{Kind: OpInsert, Before: -1, After: j})
-		}
-
-		b.ops = append(b.ops, Op{Kind: OpEqual, Before: bStart, After: matchIdx})
-
-		for j := matchIdx + 1; j < aEnd; j++ {
-			b.ops = append(b.ops, Op{Kind: OpInsert, Before: -1, After: j})
-		}
+	default:
+		x, y := b.midpoint(before[bStart:bEnd], after[aStart:aEnd])
+		b.recurse(bStart, bStart+x, aStart, aStart+y)
+		b.recurse(bStart+x, bEnd, aStart+y, aEnd)
 	}
 }
 
-// forward computes LCS lengths going forward from bStart to bMid.
+// midpoint returns a point (x, y) that some shortest edit script of before
+// and after passes through, so that the script splits into one for
+// before[:x] and after[:y] and one for before[x:] and after[y:].
 //
-// Returns a slice where result[j-aStart] is the LCS length of
-// before[bStart:bMid] and after[aStart:aStart+j-aStart].
+// It follows diag in GNU diff without its heuristics, the linear-space
+// search from Myers' "An O(ND) Difference Algorithm". Point (x, y) lies on
+// diagonal x-y. A forward walk starts at (0, 0) and a backward walk at the
+// ends of both inputs. Each step, each walk reaches one edit further on
+// every diagonal it can, then follows equal lines as far as they go. The
+// search stops where the two walks meet on a diagonal. When a walk can
+// reach a diagonal by a deletion or by an insertion that go equally far,
+// it takes the deletion.
 //
-// The returned slice uses an internal buffer and is valid until the next call.
-func (b *buffers) forward(before, after []int, bStart, bMid, aStart, aEnd int) []int {
-	n := aEnd - aStart
-	seg := after[aStart:aEnd]
+// The caller must trim the lines both inputs share at the start and at the
+// end, so both are non-empty and need at least two edits.
+func (b *buffers) midpoint(before, after []int) (int, int) {
+	n, m := len(before), len(after)
 
-	// Both rows start at zero, since they trade places on each line.
-	prev, cur := b.row0[:n+1], b.row1[:n+1]
-	clear(prev)
-	clear(cur)
+	// Diagonal k is at index k+off of both walks, and the walks keep to
+	// the diagonals from -m through n.
+	off := m + 1
+	fwd, bwd := b.fwdDiag[:n+m+3], b.bwdDiag[:n+m+3]
 
-	for _, line := range before[bStart:bMid] {
-		prev, cur = cur, prev
-		cur[0] = 0
+	dmin, dmax := -m, n
+	fmid, bmid := 0, n-m
 
-		for j, other := range seg {
-			if line == other {
-				cur[j+1] = prev[j] + 1
-			} else {
-				cur[j+1] = max(cur[j], prev[j+1])
+	// The walks meet after the forward walk's step when the diagonals they
+	// start on differ in parity, and after the backward walk's otherwise.
+	odd := (fmid-bmid)&1 != 0
+
+	fwd[fmid+off] = 0
+	bwd[bmid+off] = n
+
+	fmin, fmax := fmid, fmid
+	bmin, bmax := bmid, bmid
+
+	for {
+		// Widen the forward walk by one diagonal on each side. A new
+		// diagonal gets a neighbor that no step can extend.
+		if fmin > dmin {
+			fmin--
+			fwd[fmin-1+off] = -1
+		} else {
+			fmin++
+		}
+
+		if fmax < dmax {
+			fmax++
+			fwd[fmax+1+off] = -1
+		} else {
+			fmax--
+		}
+
+		for k := fmax; k >= fmin; k -= 2 {
+			// A deletion moves right from diagonal k-1, and an insertion
+			// moves down from diagonal k+1.
+			lo, hi := fwd[k-1+off], fwd[k+1+off]
+
+			x := hi
+			if lo >= hi {
+				x = lo + 1
+			}
+
+			y := x - k
+			for x < n && y < m && before[x] == after[y] {
+				x++
+				y++
+			}
+
+			fwd[k+off] = x
+
+			if odd && bmin <= k && k <= bmax && bwd[k+off] <= x {
+				return x, y
+			}
+		}
+
+		// Widen the backward walk the same way.
+		if bmin > dmin {
+			bmin--
+			bwd[bmin-1+off] = n + 1
+		} else {
+			bmin++
+		}
+
+		if bmax < dmax {
+			bmax++
+			bwd[bmax+1+off] = n + 1
+		} else {
+			bmax--
+		}
+
+		for k := bmax; k >= bmin; k -= 2 {
+			// Walking backward, an insertion moves up from diagonal k-1,
+			// and a deletion moves left from diagonal k+1.
+			lo, hi := bwd[k-1+off], bwd[k+1+off]
+
+			x := hi - 1
+			if lo < hi {
+				x = lo
+			}
+
+			y := x - k
+			for x > 0 && y > 0 && before[x-1] == after[y-1] {
+				x--
+				y--
+			}
+
+			bwd[k+off] = x
+
+			if !odd && fmin <= k && k <= fmax && x <= fwd[k+off] {
+				return x, y
 			}
 		}
 	}
-
-	return b.fwdResult[:copy(b.fwdResult, cur)]
-}
-
-// backward computes LCS lengths going backward from bEnd to bMid.
-//
-// Returns a slice where result[aEnd-j] is the LCS length of before[bMid:bEnd]
-// and after[j:aEnd].
-//
-// The returned slice uses an internal buffer and is valid until the next call.
-func (b *buffers) backward(before, after []int, bMid, bEnd, aStart, aEnd int) []int {
-	n := aEnd - aStart
-	seg := after[aStart:aEnd]
-
-	// Both rows start at zero, since they trade places on each line.
-	prev, cur := b.row0[:n+1], b.row1[:n+1]
-	clear(prev)
-	clear(cur)
-
-	for i := bEnd - 1; i >= bMid; i-- {
-		prev, cur = cur, prev
-		cur[0] = 0
-
-		line := before[i]
-		for j := range n {
-			if line == seg[n-1-j] {
-				cur[j+1] = prev[j] + 1
-			} else {
-				cur[j+1] = max(cur[j], prev[j+1])
-			}
-		}
-	}
-
-	return b.bwdResult[:copy(b.bwdResult, cur)]
 }

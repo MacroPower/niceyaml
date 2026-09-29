@@ -1,9 +1,13 @@
 package lcs_test
 
 import (
+	"fmt"
 	"math/rand/v2"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -369,9 +373,13 @@ func TestHirschberg_Concurrent(t *testing.T) {
 func TestHirschberg_DiffIsMinimal(t *testing.T) {
 	t.Parallel()
 
+	// A case with edits builds after from before by that many random
+	// deletions and insertions, so the two inputs share most lines. The
+	// others draw both inputs at random.
 	tests := map[string]struct {
 		alphabet []string
 		maxLen   int
+		edits    int
 	}{
 		"two_symbols": {
 			alphabet: []string{"a", "b"},
@@ -385,26 +393,62 @@ func TestHirschberg_DiffIsMinimal(t *testing.T) {
 			alphabet: []string{"a", "b", "c", "d", "e", "f", "g", "h"},
 			maxLen:   24,
 		},
+		"four_symbols_few_edits": {
+			alphabet: []string{"a", "b", "c", "d"},
+			maxLen:   40,
+			edits:    3,
+		},
+		"sixteen_symbols_few_edits": {
+			alphabet: strings.Split("abcdefghijklmnop", ""),
+			maxLen:   60,
+			edits:    4,
+		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			rng := rand.New(rand.NewPCG(1, uint64(len(tc.alphabet))))
+			rng := rand.New(rand.NewPCG(uint64(tc.edits+1), uint64(len(tc.alphabet))))
 			h := lcs.NewHirschberg()
+
+			randomLine := func() string {
+				return tc.alphabet[rng.IntN(len(tc.alphabet))]
+			}
 
 			randomLines := func() []string {
 				lines := make([]string, rng.IntN(tc.maxLen+1))
 				for i := range lines {
-					lines[i] = tc.alphabet[rng.IntN(len(tc.alphabet))]
+					lines[i] = randomLine()
+				}
+
+				return lines
+			}
+
+			edited := func(lines []string) []string {
+				lines = slices.Clone(lines)
+				for range tc.edits {
+					if len(lines) > 0 && rng.IntN(2) == 0 {
+						i := rng.IntN(len(lines))
+						lines = slices.Delete(lines, i, i+1)
+					} else {
+						lines = slices.Insert(lines, rng.IntN(len(lines)+1), randomLine())
+					}
 				}
 
 				return lines
 			}
 
 			for range 2000 {
-				before, after := randomLines(), randomLines()
+				var after []string
+
+				before := randomLines()
+				if tc.edits > 0 {
+					after = edited(before)
+				} else {
+					after = randomLines()
+				}
+
 				got := h.Diff(before, after)
 
 				requireValidOps(t, before, after, got)
@@ -422,6 +466,47 @@ func TestHirschberg_DiffIsMinimal(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHirschberg_DiffFarEdits(t *testing.T) {
+	t.Parallel()
+
+	// Changing the first and last lines leaves no shared start or end to
+	// pair up. A search that takes time in proportion to the product of
+	// the input lengths needs seconds here, while one that scales with the
+	// number of changed lines needs milliseconds.
+	const n = 40000
+
+	before := make([]string, n)
+	for i := range before {
+		before[i] = fmt.Sprintf("key%d: value%d", i, i)
+	}
+
+	after := slices.Clone(before)
+	after[0] = "changed first"
+	after[n-1] = "changed last"
+
+	want := make([]lcs.Op, 0, n+2)
+	want = append(want,
+		lcs.Op{Kind: lcs.OpDelete, Before: 0, After: -1},
+		lcs.Op{Kind: lcs.OpInsert, Before: -1, After: 0},
+	)
+
+	for i := 1; i < n-1; i++ {
+		want = append(want, lcs.Op{Kind: lcs.OpEqual, Before: i, After: i})
+	}
+
+	want = append(want,
+		lcs.Op{Kind: lcs.OpDelete, Before: n - 1, After: -1},
+		lcs.Op{Kind: lcs.OpInsert, Before: -1, After: n - 1},
+	)
+
+	start := time.Now()
+	got := lcs.NewHirschberg().Diff(before, after)
+	elapsed := time.Since(start)
+
+	assert.Equal(t, want, got)
+	assert.Less(t, elapsed, time.Second)
 }
 
 // requireValidOps checks that ops transform before into after. Each index
@@ -505,4 +590,45 @@ func naiveLCSLen(before, after []string) int {
 	}
 
 	return table[len(before)][len(after)]
+}
+
+func BenchmarkHirschberg_Diff(b *testing.B) {
+	for _, n := range []int{1000, 10000, 40000} {
+		before := make([]string, n)
+		for i := range before {
+			before[i] = fmt.Sprintf("key%d: value%d", i, i)
+		}
+
+		// Changing the first and last lines leaves no shared start or end
+		// to pair up, so the search covers both whole inputs.
+		farEdits := slices.Clone(before)
+		farEdits[0] = "changed first"
+		farEdits[n-1] = "changed last"
+
+		// Every tenth line changes, so the edits spread over the inputs.
+		spread := slices.Clone(before)
+		for i := 0; i < n; i += 10 {
+			spread[i] = fmt.Sprintf("changed%d", i)
+		}
+
+		cases := []struct {
+			name  string
+			after []string
+		}{
+			{"far_edits", farEdits},
+			{"spread", spread},
+		}
+
+		for _, tc := range cases {
+			b.Run(fmt.Sprintf("%s_%d", tc.name, n), func(b *testing.B) {
+				h := lcs.NewHirschberg()
+
+				b.ReportAllocs()
+
+				for b.Loop() {
+					h.Diff(before, tc.after)
+				}
+			})
+		}
+	}
 }
