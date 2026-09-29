@@ -324,6 +324,12 @@ func TestPrinter_PrintError(t *testing.T) {
 			),
 			want: "├── first: 2:4: $.b: bad\n└── second: 1:4: $.c: bad\n\n" + excerpt + "\n\n" + otherExcerpt,
 		},
+		// A row drops its trailing spaces: the space after "b", and the
+		// blank indent in front of the blank line of the last branch.
+		"joined error with a blank line in a branch": {
+			err:  errors.Join(errors.New("a"), errors.New("b \n\nc")),
+			want: "├── a\n└── b\n\n    c",
+		},
 		"nested errors draw as branches in position order": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("2 problems", niceyaml.WithErrors(
 				niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b"))),

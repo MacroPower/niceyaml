@@ -1,6 +1,7 @@
 package printer_test
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -319,6 +320,25 @@ func BenchmarkPrinterPrintError_LongWrappedValue(b *testing.B) {
 		err := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("data"))))
 
 		b.Run(fmt.Sprintf("chars_%d", n), func(b *testing.B) {
+			p := printer.New(printer.WithWrap(80))
+
+			b.ReportAllocs()
+			b.ResetTimer()
+
+			for b.Loop() {
+				_ = p.PrintError(err)
+			}
+		})
+	}
+}
+
+func BenchmarkPrinterPrintError_LongNestedMessage(b *testing.B) {
+	// A branch whose message quotes a long value wraps into many rows
+	// behind its connector.
+	for _, n := range []int{1600, 12800} {
+		err := errors.Join(errors.New("first"), errors.New(strings.Repeat("word ", n)))
+
+		b.Run(fmt.Sprintf("words_%d", n), func(b *testing.B) {
 			p := printer.New(printer.WithWrap(80))
 
 			b.ReportAllocs()

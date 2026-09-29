@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/tree"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
@@ -13,8 +12,8 @@ import (
 
 // errorConnectorWidth is the width of the connector in front of each
 // nested error in the tree [Printer.PrintError] draws: the three cells of
-// the enumerator, "├──" or "└──", and the one cell of padding after it.
-// The indent below a connector, "│  " and its padding, is as wide.
+// "├──" or "└──", and the one cell of padding after them. The indent
+// below a connector, "│  " and its padding, is as wide.
 const errorConnectorWidth = 4
 
 // PrintError renders err for a reader: its message as a tree, then the
@@ -139,10 +138,19 @@ func (p *Printer) renderErrorTree(t niceyaml.ErrorTree) string {
 		Foreground(p.styles.Style(kind.UILineNumber).GetForeground()).
 		PaddingRight(1)
 
-	rows := strings.Split(p.errorTreeNode(t, &branch, 0).String(), "\n")
+	var rows []string
 
-	// The tree pads every row of a message to the widest one, which a
-	// message that wraps would otherwise carry to the end of each row.
+	// A root with nothing to show, such as a join, takes no row, so its
+	// children start the tree.
+	if root := p.errorText(t.Text, 0); strings.Join(root, "\n") != "" {
+		rows = root
+	}
+
+	rows = p.appendErrorBranches(rows, t.Children, "", 1, &branch)
+
+	// The padding after a connector is a space outside its color, so a row
+	// with no text after its connector would end in that space, and a
+	// message can end a row with spaces of its own.
 	for i, row := range rows {
 		rows[i] = strings.TrimRight(row, " ")
 	}
@@ -150,33 +158,47 @@ func (p *Printer) renderErrorTree(t niceyaml.ErrorTree) string {
 	return strings.Join(rows, "\n")
 }
 
-// errorTreeNode builds the [*tree.Tree] of t at depth connectors from the
-// left edge, with branch styling the connector and indent of every child.
-// A child without children is a leaf.
-func (p *Printer) errorTreeNode(t niceyaml.ErrorTree, branch *lipgloss.Style, depth int) *tree.Tree {
-	node := tree.Root(p.errorText(t.Text, depth)).
-		EnumeratorStyle(*branch).
-		IndenterStyle(*branch)
-
-	for _, child := range t.Children {
-		if len(child.Children) == 0 {
-			node.Child(p.errorText(child.Text, depth+1))
-		} else {
-			node.Child(p.errorTreeNode(child, branch, depth+1))
+// appendErrorBranches appends the rows of children, which sit depth
+// connectors from the left edge, to rows, each behind indent, the
+// connectors its ancestors draw. The first row of a child starts with
+// "├──", or "└──" for the last child. The child's later rows and its own
+// children sit under "│  ", or blank cells for the last child, so a line
+// runs down from each connector to its next sibling. Each connector
+// renders with branch.
+func (p *Printer) appendErrorBranches(
+	rows []string,
+	children []niceyaml.ErrorTree,
+	indent string,
+	depth int,
+	branch *lipgloss.Style,
+) []string {
+	for i, child := range children {
+		connector, below := "├──", "│  "
+		if i == len(children)-1 {
+			connector, below = "└──", "   "
 		}
+
+		first, rest := indent+branch.Render(connector), indent+branch.Render(below)
+
+		for j, row := range p.errorText(child.Text, depth) {
+			if j == 0 {
+				rows = append(rows, first+row)
+			} else {
+				rows = append(rows, rest+row)
+			}
+		}
+
+		rows = p.appendErrorBranches(rows, child.Children, rest, depth+1, branch)
 	}
 
-	return node
+	return rows
 }
 
-// errorText renders one message of the tree at depth connectors from the
-// left edge: control characters as their pictures, wrapped to the width
-// left of the connectors. A line break in the message stays a line break,
-// since a wrapper around a joined error keeps the breaks between its
-// branches in its own text. The tree indents every row of a message after
-// the first under the connector.
-func (p *Printer) errorText(text string, depth int) string {
-	rows := p.wrapContent(escape.Rows(text), depth*errorConnectorWidth)
-
-	return strings.Join(rows, "\n")
+// errorText returns the rows of one message of the tree at depth
+// connectors from the left edge: control characters as their pictures,
+// wrapped to the width left of the connectors. A line break in the
+// message stays a line break, since a wrapper around a joined error keeps
+// the breaks between its branches in its own text.
+func (p *Printer) errorText(text string, depth int) []string {
+	return p.wrapContent(escape.Rows(text), depth*errorConnectorWidth)
 }
