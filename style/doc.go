@@ -76,7 +76,8 @@
 //   - underline and nounderline turn underlined text on and off.
 //
 // For Pygments compatibility, [Parse] accepts and ignores the noinherit and
-// border:#rrggbb tokens.
+// border:#rrggbb tokens. A malformed border color still returns
+// [ErrInvalidColor].
 //
 // Example usage:
 //

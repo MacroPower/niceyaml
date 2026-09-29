@@ -13,8 +13,8 @@ import (
 
 var (
 	// ErrInvalidColor reports a color value that is not a valid hex color.
-	// A token carrying a bg: prefix or a leading # names a color, so
-	// [Parse] reports a malformed one with this rather than
+	// A token carrying a bg: or border: prefix or a leading # names a
+	// color, so [Parse] reports a malformed one with this rather than
 	// [ErrUnknownKeyword].
 	ErrInvalidColor = errors.New("invalid color")
 	// ErrUnknownKeyword reports a token that is neither a known keyword nor
@@ -136,7 +136,12 @@ func applyToken(style lipgloss.Style, token string) (lipgloss.Style, error) {
 		return style.Background(lipgloss.Color(colorStr)), nil
 
 	case strings.HasPrefix(lower, "border:"):
-		// Pygments compatibility, ignored.
+		// Pygments compatibility. Check the color, then ignore the border.
+		colorStr := token[7:]
+		if !isValidColor(colorStr) {
+			return style, fmt.Errorf("%w: %s", ErrInvalidColor, colorStr)
+		}
+
 		return style, nil
 	}
 

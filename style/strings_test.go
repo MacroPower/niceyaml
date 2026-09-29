@@ -179,6 +179,14 @@ func TestParse(t *testing.T) {
 			input: "bg:#invalid",
 			err:   style.ErrInvalidColor,
 		},
+		"invalid border color": {
+			input: "border:garbage",
+			err:   style.ErrInvalidColor,
+		},
+		"empty border color": {
+			input: "border:",
+			err:   style.ErrInvalidColor,
+		},
 		"unknown keyword": {
 			input: "unknown",
 			err:   style.ErrUnknownKeyword,
