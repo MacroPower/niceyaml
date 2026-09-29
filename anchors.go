@@ -84,10 +84,16 @@ type decodeTree struct {
 	// for, which unresolvedMerge lists for the first decode that needs
 	// them.
 	merges []mergeAlias
+	// The tokens of the aliases of source that name no anchor before
+	// them, which referenceAlias lists for the first decode that needs
+	// them.
+	refs []*token.Token
 	// Fills nodes and anchors once.
 	scopedOnce sync.Once
 	// Fills merges once.
 	mergesOnce sync.Once
+	// Fills refs once.
+	refsOnce sync.Once
 }
 
 // decodeTree returns the [*decodeTree] of the document, and builds it on
@@ -440,6 +446,46 @@ func (t *decodeTree) unresolvedMerge(resolver *paths.Resolver, scope ast.Node, e
 
 		if msg == m.message() || m.enclosed && yamlErr {
 			return &t.merges[i]
+		}
+	}
+
+	return nil
+}
+
+// referenceAlias returns the token of the first alias inside scope, a
+// node of the tree, that names no anchor before it as resolver binds it.
+// The decoder reads such an alias from a reference document, from
+// [WithReferences] or the yaml.Reference options, when one defines the
+// name. It returns nil when scope holds no such alias.
+func (t *decodeTree) referenceAlias(resolver *paths.Resolver, scope ast.Node) *token.Token {
+	t.refsOnce.Do(func() {
+		for _, n := range sourceNodes(t.source) {
+			alias, ok := n.(*ast.AliasNode)
+			if !ok || alias.Start == nil || alias.Start.Position == nil {
+				continue
+			}
+
+			_, err := resolver.Anchor(alias)
+			if err != nil {
+				t.refs = append(t.refs, alias.Start)
+			}
+		}
+
+		sort.SliceStable(t.refs, func(i, j int) bool {
+			return t.refs[i].Position.Offset < t.refs[j].Position.Offset
+		})
+	})
+
+	first, last := tokenBounds(scope)
+	if len(first) == 0 {
+		return nil
+	}
+
+	lo, hi := first[0].Position.Offset, last[0].Position.Offset
+
+	for _, tk := range t.refs {
+		if off := tk.Position.Offset; off >= lo && off <= hi {
+			return tk
 		}
 	}
 

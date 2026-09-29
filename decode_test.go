@@ -5706,6 +5706,82 @@ func TestErrDecodeRejected(t *testing.T) {
 		}
 	})
 
+	t.Run("rejection in a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder reports these at a token of the reference document,
+		// so the decode binds them at the alias that reads it.
+		type cfg struct {
+			Item struct{ X int } `yaml:"item"`
+		}
+
+		ref := niceyaml.WithReferences([]byte("base: &base {x: notint}\n"))
+
+		tcs := map[string]struct {
+			input  string
+			decode func(ctx context.Context, dd *niceyaml.Node) error
+			line   int
+		}{
+			"merge from a reference": {
+				input: "item:\n  <<: *base\ny: 1\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[cfg](ctx, ref)
+
+					return err
+				},
+				line: 1,
+			},
+			"alias to a reference": {
+				input: "a: 1\nitem: *base\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[cfg](ctx, ref)
+
+					return err
+				},
+				line: 1,
+			},
+			"alias to a reference in a scoped decode": {
+				input: "a: 1\nouter:\n  item: *base\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					node, err := dd.At(paths.Root().Child("outer"))
+					if err != nil {
+						return err //nolint:wrapcheck // The test inspects the error as it is.
+					}
+
+					_, err = node.Decode[cfg](ctx, ref)
+
+					return err
+				},
+				line: 2,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				err := tc.decode(t.Context(), dd)
+				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+				assert.Contains(t, err.Error(), "cannot unmarshal")
+				assert.NotContains(t, err.Error(), "[1:", "go-yaml's position leaked into the message")
+				assert.NotContains(t, err.Error(), "base: &base", "go-yaml's excerpt leaked into the message")
+
+				_, ok := errors.AsType[yaml.Error](err)
+				assert.True(t, ok, "the go-yaml error left the chain")
+
+				var srcErr *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &srcErr)
+
+				rng, ok := srcErr.Range()
+				require.True(t, ok, "the rejection carries no location")
+				assert.Equal(t, tc.line, rng.Start.Line)
+			})
+		}
+	})
+
 	t.Run("unmarshaler error does not match", func(t *testing.T) {
 		t.Parallel()
 

@@ -1770,9 +1770,15 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 // names no mapping the decoder can find binds at the alias, when err is
 // the decoder's failure for that alias, as [decodeTree.unresolvedMerge]
 // describes, with the message a decode of the whole document gives that
-// alias. Any other error comes back as it is, such as one from a
-// value's own UnmarshalYAML, an ended context, or a rejection
-// [decodeWithRecover] already bound. So does any error for a nil scope.
+// alias. Any other [yaml.Error] at a token outside the source binds at
+// the first alias in scope that reads a reference document, as
+// [decodeTree.referenceAlias] finds it, with go-yaml's position and
+// excerpt of that document left out. The decoder gives no way to tell
+// such an error from an unwrapped [yaml.Error] of the parse an
+// UnmarshalYAML runs on its bytes, so that error binds there too. Any
+// other error comes back as it is, such as one from a value's own
+// UnmarshalYAML, an ended context, or a rejection [decodeWithRecover]
+// already bound. So does any error for a nil scope.
 func (n *Node) rejection(err error, scope ast.Node) error {
 	if err == nil || astnode.IsNil(scope) || errors.Is(err, ErrDecodeRejected) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -1785,6 +1791,7 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 	}
 
 	tree := n.doc.decodeTree()
+	resolver := n.doc.pathResolver()
 
 	var (
 		at    *token.Token
@@ -1793,11 +1800,22 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 
 	if errors.Is(err, yaml.ErrExceededMaxDepth) {
 		at, cause = contentStart(scope), tree.restoreError(err)
-	} else if m := tree.unresolvedMerge(n.doc.pathResolver(), scope, err); m != nil {
+	} else if m := tree.unresolvedMerge(resolver, scope, err); m != nil {
 		// The decoder's failure for an alias inside its own anchor names
 		// the null it merges in its place, which the source does not hold,
 		// so the message is the one a decode of the whole document gives.
 		at, cause = m.token, restoredError{err: err, msg: m.message()}
+	}
+
+	if at == nil && ok {
+		ref := tree.referenceAlias(resolver, scope)
+		if ref == nil {
+			return err
+		}
+
+		msg := tree.restoreNames(yamlErr.GetMessage())
+
+		return WrapError(decodeRejectedError{yamlMessageError{err: yamlErr, msg: msg}}, atToken(ref))
 	}
 
 	if at == nil {
@@ -1966,13 +1984,14 @@ func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 // [ErrDecodeRejected]. Any other error, such as a canceled context or one
 // a value's own UnmarshalYAML returns, binds as it is. Only a
 // [yaml.Error] the decoder returns itself converts, so a [yaml.Error]
-// that a value's UnmarshalYAML wraps
-// comes back as that unmarshaler's error, with the text and sentinels of
-// its wrapper. An UnmarshalYAML that parses the bytes it gets returns a
-// [yaml.Error] of its own, whose token comes from that parse rather than
-// the source, so it stays the value's own error. A message that names an
-// anchor the [decodeTree] renamed names it as the document does. Returns
-// nil for a nil err.
+// that a value's UnmarshalYAML wraps comes back as that unmarshaler's
+// error, with the text and sentinels of its wrapper. An UnmarshalYAML
+// that parses the bytes it gets returns a [yaml.Error] of its own, whose
+// token comes from that parse rather than the source, so it stays the
+// value's own error, unless [Node.rejection] bound it at an alias that
+// reads a reference document. A message that names an anchor the
+// [decodeTree] renamed names it as the document does. Returns nil for a
+// nil err.
 func (n *Node) bindDecodeError(err error) error {
 	if err == nil {
 		return nil
