@@ -103,11 +103,10 @@ func ParseDirective(comment string) *ParsedDirective {
 // returns.
 //
 // The directive must appear before any non-comment content in the
-// document. A document header (---) and a %YAML or %TAG directive line may
-// precede it, and such a line may carry the directive as its trailing
-// comment. The
-// first directive wins. Returns nil when no directive appears before
-// content.
+// document. A document header (---), a document end marker (...), and a
+// %YAML or %TAG directive line may precede it, and any of those lines may
+// carry the directive as its trailing comment. The first directive wins.
+// Returns nil when no directive appears before content.
 func ParseDocumentDirective(tks token.Tokens) *ParsedDirective {
 	for _, tk := range tks[:preamble.Len(tks)] {
 		if tk == nil || tk.Type != token.CommentType {
