@@ -523,9 +523,14 @@ func bareLeadingLines(origin string) string {
 // token's text hold as many lines as the source does. It returns the runes
 // of src each token's text covers, one [span] for each token of tks.
 func repairPositions(src []rune, tks token.Tokens) []span {
+	// TrimLineEnding trims at most the last two runes of src, each a
+	// one-byte "\r" or "\n", so the bytes it trims from those two runes
+	// count the runes it would trim from all of src.
+	tail := string(src[len(src)-min(2, len(src)):])
+
 	p := &positioner{
 		src:      src,
-		end:      utf8.RuneCountInString(TrimLineEnding(string(src))),
+		end:      len(src) - (len(tail) - len(TrimLineEnding(tail))),
 		line:     1,
 		col:      1,
 		reliable: true,
