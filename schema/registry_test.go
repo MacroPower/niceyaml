@@ -1967,9 +1967,9 @@ func TestRegistry_WithFS_AfterChdir(t *testing.T) {
 		"schemas/defs.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
 	}
 
-	// The registry reads a relative root schema from the root of the file
-	// system as it is, and an absolute one against the directory File saw.
-	// The $ref resolves to an absolute path in both cases.
+	// In both cases the registry reads the path File made absolute,
+	// relative to the directory File saw, and the $ref resolves to an
+	// absolute path.
 	tcs := map[string]struct {
 		path func(wd string) string
 	}{
@@ -2066,6 +2066,100 @@ func TestRegistry_WithFS_ChdirDuringFile(t *testing.T) {
 	for _, ref := range refs {
 		reg := schema.NewRegistry(schema.WithFS(bundle), schema.WithResolvers(ref))
 		require.NoError(t, reg.Validate(t.Context(), doc))
+	}
+}
+
+// Under WithFS, each Ref reads relative to the working directory File
+// saw, so two Refs that share a Key, or a $ref URI, can name different
+// files. The registry keeps them apart whichever it compiles first. The
+// test changes the process's working directory, so it does not run in
+// parallel.
+//
+//nolint:paralleltest // See above.
+func TestRegistry_WithFS_ChdirBetweenFiles(t *testing.T) {
+	bundle := fstest.MapFS{
+		"x/s.json":    &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
+		"s.json":      &fstest.MapFile{Data: []byte(`{"type": "integer"}`)},
+		"x/main.json": &fstest.MapFile{Data: []byte(`{"$ref": "defs.json"}`)},
+		"x/defs.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
+		"other.json":  &fstest.MapFile{Data: []byte(`{"$ref": "defs.json"}`)},
+		"defs.json":   &fstest.MapFile{Data: []byte(`{"type": "integer"}`)},
+	}
+
+	rel := func(path string) func(string) string {
+		return func(string) string { return path }
+	}
+
+	abs := func(path string) func(string) string {
+		return func(base string) string { return filepath.Join(base, filepath.FromSlash(path)) }
+	}
+
+	// Each Ref is File(path) run from dir under a temporary base, and its
+	// schema accepts only values of the JSON type want.
+	type fileRef struct {
+		path func(base string) string
+		dir  string
+		want string
+	}
+
+	tcs := map[string]struct {
+		first  fileRef
+		second fileRef
+	}{
+		"one key from relative paths": {
+			first:  fileRef{dir: ".", path: rel("x/s.json"), want: "string"},
+			second: fileRef{dir: "x", path: rel("s.json"), want: "integer"},
+		},
+		"one key from an absolute path": {
+			first:  fileRef{dir: ".", path: abs("x/s.json"), want: "string"},
+			second: fileRef{dir: "x", path: abs("x/s.json"), want: "integer"},
+		},
+		"one $ref URI": {
+			first:  fileRef{dir: ".", path: rel("x/main.json"), want: "string"},
+			second: fileRef{dir: "x", path: rel("other.json"), want: "integer"},
+		},
+		"one key from a path through the parent": {
+			first:  fileRef{dir: "x", path: rel("../x/s.json"), want: "integer"},
+			second: fileRef{dir: "x", path: rel("s.json"), want: "integer"},
+		},
+	}
+
+	values := map[string]any{"string": "x", "integer": 5}
+
+	for name, tc := range tcs {
+		//nolint:paralleltest // See above.
+		t.Run(name, func(t *testing.T) {
+			base := t.TempDir()
+			require.NoError(t, os.Mkdir(filepath.Join(base, "x"), 0o700))
+
+			files := []fileRef{tc.first, tc.second}
+			refs := make([]schema.Ref, len(files))
+
+			for i, f := range files {
+				t.Chdir(filepath.Join(base, f.dir))
+
+				refs[i] = schema.File(f.path(base))
+			}
+
+			// Compile the two in both orders, each in a registry of its own.
+			for _, order := range [][]int{{0, 1}, {1, 0}} {
+				reg := schema.NewRegistry(schema.WithFS(bundle))
+
+				for _, i := range order {
+					s, err := reg.Schema(t.Context(), refs[i])
+					require.NoError(t, err)
+
+					for typ, v := range values {
+						err := s.ValidateValue(t.Context(), v)
+						if typ == files[i].want {
+							require.NoError(t, err, "ref %d, order %v", i, order)
+						} else {
+							require.Error(t, err, "ref %d, order %v", i, order)
+						}
+					}
+				}
+			}
+		})
 	}
 }
 

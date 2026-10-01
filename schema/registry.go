@@ -59,7 +59,8 @@ const defaultHTTPTimeout = 30 * time.Second
 //
 // Lookup tries the resolvers [WithResolvers] gave it in order, and the
 // first [Resolver] that does not report [ErrNoMatch] wins. The registry
-// caches the schemas it compiles by [Ref.Key] and consults that cache
+// caches the schemas it compiles by [Ref.Key], which [WithFS] pairs with
+// a working directory for a Ref from [File], and consults that cache
 // before loading, so once a schema compiles, the registry serves it to
 // every later document that names it without loading it again. A failed
 // load or compile stays out of the cache, so the next document that names
@@ -88,9 +89,9 @@ const defaultHTTPTimeout = 30 * time.Second
 // A Registry never changes after construction except for its cache, so it
 // is safe for concurrent use. Create instances with [NewRegistry].
 type Registry struct {
-	group       singleflight.Group // one load and compile in flight per Key
-	cache       map[string]*Schema // compiled schemas by Ref.Key
-	refDocs     map[string]refDoc  // the documents a $ref names, by URI without fragment
+	group       singleflight.Group // one load and compile in flight per cacheKey
+	cache       map[string]*Schema // compiled schemas by cacheKey
+	refDocs     map[string]refDoc  // the documents a $ref names, by URI without fragment, or fileKey for a file
 	client      *http.Client       // fetches the schemas URL refs name
 	fsys        fs.FS              // reads the schemas File refs name; nil reads the working directory
 	resolvers   []Resolver
@@ -147,6 +148,13 @@ type RegistryOption func(*Registry)
 //	    schema.WithFS(root.FS()),
 //	    schema.WithResolvers(schema.Directive()),
 //	)
+//
+// Each Ref reads relative to the working directory at the time [File]
+// built it, so the registry caches a schema from [File] by its [Ref.Key]
+// together with that directory, and keeps each file a $ref names the same
+// way. File("x/s.json") run from /a and File("s.json") run from /a/x
+// share a Key, yet each Ref loads its own file, x/s.json and s.json in
+// fsys.
 //
 // Without the option, the registry reads the working directory, with
 // each path made absolute against it, and a nil fsys keeps that.
@@ -246,10 +254,10 @@ func WithRequireSchema(require bool) RegistryOption {
 // WithCompileOptions is a [RegistryOption] that sets the [CompileOption]
 // values the registry compiles every schema with, as [Compile] takes them.
 // They apply when the registry compiles a schema, which happens once per
-// [Ref.Key], so an option such as a format validator takes effect for
-// every document validated against that schema. A [*Schema] compiled
-// elsewhere goes into the registry as it is, with the options of its own
-// compile:
+// cache key, as [Registry.Schema] describes, so an option such as a format
+// validator takes effect for every document validated against that
+// schema. A [*Schema] compiled elsewhere goes into the registry as it is,
+// with the options of its own compile:
 //
 //	reg := schema.NewRegistry(schema.WithCompileOptions(
 //	    schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)),
@@ -493,9 +501,11 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 // Schema returns the compiled schema ref names. For a Ref from
 // [Schema.Ref], that is the schema the Ref carries, as it is. For any
 // other Ref, Schema compiles the bytes [Registry.Load] loads for it on
-// the first request for its [Ref.Key], with the options
+// the first request for its cache key, with the options
 // [WithCompileOptions] gave the registry, and serves the result from the
-// cache after that. [Registry.Lookup] takes the schema it validates with
+// cache after that. The cache key is the [Ref.Key]. Under [WithFS], the
+// cache key of a Ref from [File] pairs its Key with the working directory
+// File recorded. [Registry.Lookup] takes the schema it validates with
 // from here, so a caller that holds a Ref of its own, such as one that
 // checks a Go value with [Schema.ValidateValue], shares the same load and
 // compile:
@@ -509,12 +519,12 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 //
 // The zero Ref names no schema, so it is [ErrResolve]. A load that fails
 // is [ErrLoad], and a compile that fails is [ErrCompile]. Schema caches
-// neither, so the next request for the Key loads again. When ctx ends
-// before the schema loads, Schema returns [ErrLoad] wrapping the context's
-// error without waiting for the load to finish.
+// neither, so the next request for the cache key loads again. When ctx
+// ends before the schema loads, Schema returns [ErrLoad] wrapping the
+// context's error without waiting for the load to finish.
 //
-// Concurrent requests for one Key share a single load and compile, and
-// each caller waits for it only until its own context ends. The shared
+// Concurrent requests for one cache key share a single load and compile,
+// and each caller waits for it only until its own context ends. The shared
 // load runs under the context of the caller that started it and reports
 // whether that context ended before the load failed. In that case a
 // caller with a live context loads again, and a caller whose context has
@@ -540,12 +550,14 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 		return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.name(), errNotHTTPURL)
 	}
 
-	if v, ok := r.cached(ref.Key()); ok {
+	key := r.cacheKey(ref)
+
+	if v, ok := r.cached(key); ok {
 		return v, nil
 	}
 
 	for {
-		ch := r.group.DoChan(ref.Key(), func() (any, error) {
+		ch := r.group.DoChan(key, func() (any, error) {
 			s, err := r.compileRecovering(ctx, ref)
 
 			// Report whether this caller's context ended before the load
@@ -720,14 +732,14 @@ type refDoc struct {
 }
 
 // refDocument returns the document a $ref names by uri, a URI without a
-// fragment. The first call whose load succeeds and whose bytes parse keeps
-// the document in the registry, and every later call returns the kept
-// document instead of calling load. A load that fails and bytes that do
-// not parse stay out of the registry, so the next call loads again. When
-// two calls load one document at once, both return the document the first
-// of them kept.
-func (r *Registry) refDocument(uri string, load func() ([]byte, error)) (refDoc, error) {
-	if doc, ok := r.keptRefDoc(uri); ok {
+// fragment, which the registry keeps under key. The first call whose load
+// succeeds and whose bytes parse keeps the document in the registry, and
+// every later call for key returns the kept document instead of calling
+// load. A load that fails and bytes that do not parse stay out of the
+// registry, so the next call loads again. When two calls load one
+// document at once, both return the document the first of them kept.
+func (r *Registry) refDocument(key, uri string, load func() ([]byte, error)) (refDoc, error) {
+	if doc, ok := r.keptRefDoc(key); ok {
 		return doc, nil
 	}
 
@@ -746,31 +758,31 @@ func (r *Registry) refDocument(uri string, load func() ([]byte, error)) (refDoc,
 		doc.fileURL, doc.fileURLErr = localFileURL(data)
 	}
 
-	return r.keepRefDoc(uri, doc), nil
+	return r.keepRefDoc(key, doc), nil
 }
 
-// keptRefDoc returns the document the registry keeps under uri, if any.
-func (r *Registry) keptRefDoc(uri string) (refDoc, bool) {
+// keptRefDoc returns the document the registry keeps under key, if any.
+func (r *Registry) keptRefDoc(key string) (refDoc, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	doc, ok := r.refDocs[uri]
+	doc, ok := r.refDocs[key]
 
 	return doc, ok
 }
 
-// keepRefDoc keeps doc under uri and returns it, unless the registry keeps
-// a document under uri already, in which case it returns that document.
-// So every schema sees one document per URI.
-func (r *Registry) keepRefDoc(uri string, doc refDoc) refDoc {
+// keepRefDoc keeps doc under key and returns it, unless the registry keeps
+// a document under key already, in which case it returns that document.
+// So every schema sees one document per key.
+func (r *Registry) keepRefDoc(key string, doc refDoc) refDoc {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if kept, ok := r.refDocs[uri]; ok {
+	if kept, ok := r.refDocs[key]; ok {
 		return kept
 	}
 
-	r.refDocs[uri] = doc
+	r.refDocs[key] = doc
 
 	return doc
 }
@@ -825,12 +837,17 @@ func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsons
 
 		// The scheme decides what a schema may reach before the registry
 		// looks for a kept document, so a schema from URL never receives a
-		// local file that a schema from File loaded.
-		var load func() ([]byte, error)
+		// local file that a schema from File loaded. The registry keeps the
+		// document under docKey.
+		var (
+			load   func() ([]byte, error)
+			docKey string
+		)
 
 		switch {
 		case httpfetch.IsHTTPURL(uri):
 			uri = user.apply(uri)
+			docKey = uri
 			load = func() ([]byte, error) {
 				//nolint:wrapcheck // The fetch error names the URL already.
 				return httpfetch.Get(ctx, r.client, uri)
@@ -842,6 +859,7 @@ func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsons
 				return nil, fmt.Errorf("%w: %q", jsonschema.ErrNotResolved, httpfetch.Redacted(uri))
 			}
 
+			docKey = r.fileKey(uri, ref.wd)
 			load = func() ([]byte, error) {
 				return readFile(r.fsys, path, path, ref.wd)
 			}
@@ -850,7 +868,7 @@ func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsons
 			return nil, fmt.Errorf("%w: %q", jsonschema.ErrNotResolved, httpfetch.Redacted(uri))
 		}
 
-		doc, err := r.refDocument(uri, load)
+		doc, err := r.refDocument(docKey, uri, load)
 		if err != nil {
 			return nil, err
 		}
@@ -898,6 +916,33 @@ func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsons
 	return append(opts, r.compileOpts...)
 }
 
+// cacheKey returns the key the registry caches the schema ref names
+// under. That is [Ref.Key], or for a [Ref] from [File], the
+// [Registry.fileKey] of its Key and the working directory File recorded.
+func (r *Registry) cacheKey(ref Ref) string {
+	if ref.file == "" {
+		return ref.Key()
+	}
+
+	return r.fileKey(ref.Key(), ref.wd)
+}
+
+// fileKey returns the key the registry keeps a file under, for the
+// schema of a [Ref] from [File] and for a document a $ref in it names.
+// The file URL uri names the file, and wd is the working directory the
+// Ref recorded. Without a file system, the registry reads the absolute
+// path uri names, so the key is uri. Under [WithFS], the root of the
+// file system stands for wd, so one uri names a different file for each
+// wd, and the key holds both. Neither a URL nor a path from [os.Getwd]
+// holds a NUL byte, so a NUL between them keeps every pair apart.
+func (r *Registry) fileKey(uri, wd string) string {
+	if r.fsys == nil {
+		return uri
+	}
+
+	return uri + "\x00" + wd
+}
+
 // cached returns the schema cached under key, if any.
 func (r *Registry) cached(key string) (*Schema, bool) {
 	r.mu.RLock()
@@ -939,16 +984,18 @@ func (r *Registry) compileRecovering(ctx context.Context, ref Ref) (*Schema, err
 }
 
 // compile loads and compiles the schema ref names, caches it under its
-// Key, and returns it. When an earlier flight cached a schema under that
-// Key, compile returns that schema. The group runs one compile per Key at
-// a time and each compile checks the cache first, so every caller sees
-// one schema per Key.
+// [Registry.cacheKey], and returns it. When an earlier flight cached a
+// schema under that key, compile returns that schema. The group runs one
+// compile per key at a time and each compile checks the cache first, so
+// every caller sees one schema per key.
 func (r *Registry) compile(ctx context.Context, ref Ref) (*Schema, error) {
-	key := ref.Key()
+	cacheKey := r.cacheKey(ref)
 
-	if v, ok := r.cached(key); ok {
+	if v, ok := r.cached(cacheKey); ok {
 		return v, nil
 	}
+
+	key := ref.Key()
 
 	data, err := r.Load(ctx, ref)
 	if err != nil {
@@ -998,7 +1045,7 @@ func (r *Registry) compile(ctx context.Context, ref Ref) (*Schema, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.cache[key] = compiled
+	r.cache[cacheKey] = compiled
 
 	return compiled, nil
 }
