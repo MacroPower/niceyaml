@@ -54,6 +54,11 @@ func (m match) with(node ast.Node, entry *ast.MappingValueNode, seg segment, ord
 // no key. A `~` on a sequence element or the root thus selects what the
 // path before it does. The `~` joins the selectors either way, as the path
 // wrote it.
+//
+// The match drops the `?` of an explicit key but keeps the anchors and
+// tags on the key, as a match of a value keeps those on the value. A tag
+// thus decides how the key decodes, as it does when the decoder reads the
+// mapping.
 func (m match) key() match {
 	seg := segment{kind: segmentKey}
 
@@ -61,11 +66,16 @@ func (m match) key() match {
 		return m.with(m.node, nil, seg)
 	}
 
-	if key := astnode.Content(m.entry.Key); key != nil {
-		return m.with(key, nil, seg, -1)
+	if astnode.Content(m.entry.Key) == nil {
+		return m.with(m.node, m.entry, seg)
 	}
 
-	return m.with(m.node, m.entry, seg)
+	key := ast.Node(m.entry.Key)
+	if explicit, ok := key.(*ast.MappingKeyNode); ok {
+		key = explicit.Value
+	}
+
+	return m.with(key, nil, seg, -1)
 }
 
 // resolver walks a document for the selectors of a [Path]. Its targets map

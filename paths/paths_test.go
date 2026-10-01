@@ -1391,6 +1391,66 @@ func TestPath_Node_Anchors(t *testing.T) {
 	})
 }
 
+func TestPath_Node_TaggedKey(t *testing.T) {
+	t.Parallel()
+
+	// A `~` keeps a tag on the key, as a path to a value keeps a tag on
+	// the value, while the token of the key is still the key text.
+	tcs := map[string]struct {
+		input     string
+		want      string
+		wantToken string
+	}{
+		"plain key": {
+			input:     "2: x\n",
+			want:      "2",
+			wantToken: "2",
+		},
+		"tagged key": {
+			input:     "!!str 2: x\n",
+			want:      "!!str 2",
+			wantToken: "2",
+		},
+		"explicit tagged key": {
+			input:     "? !!str 2\n: x\n",
+			want:      "!!str 2",
+			wantToken: "2",
+		},
+		"anchored tagged key": {
+			input:     "&k !!str 2: x\n",
+			want:      "!!str 2",
+			wantToken: "2",
+		},
+		"anchored key": {
+			input:     "&k 2: x\n",
+			want:      "2",
+			wantToken: "2",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
+			path := paths.Root().Child("2").Key()
+
+			node, err := path.Node(doc)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, node.String())
+
+			nodes, err := path.Nodes(doc)
+			require.NoError(t, err)
+			require.Len(t, nodes, 1)
+			assert.Same(t, node, nodes[0])
+
+			tk, err := path.Token(doc)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantToken, tk.Value)
+		})
+	}
+}
+
 func TestPath_UnknownAlias(t *testing.T) {
 	t.Parallel()
 

@@ -263,6 +263,49 @@ func TestContent(t *testing.T) {
 			`),
 			want: false,
 		},
+		"int matches a plain integer key": {
+			matcher: matcher.Content(twoKeyPath, 2),
+			input:   stringtest.Input(`2: x`),
+			want:    true,
+		},
+		"int does not match a quoted integer key": {
+			matcher: matcher.Content(twoKeyPath, 2),
+			input:   stringtest.Input(`"2": x`),
+			want:    false,
+		},
+		"int does not match a str-tagged integer key": {
+			matcher: matcher.Content(twoKeyPath, 2),
+			input:   stringtest.Input(`!!str 2: x`),
+			want:    false,
+		},
+		"int does not match an explicit str-tagged integer key": {
+			matcher: matcher.Content(twoKeyPath, 2),
+			input: stringtest.Input(`
+				? !!str 2
+				: x
+			`),
+			want: false,
+		},
+		"int does not match an anchored str-tagged integer key": {
+			matcher: matcher.Content(twoKeyPath, 2),
+			input:   stringtest.Input(`&k !!str 2: x`),
+			want:    false,
+		},
+		"any int does not match a str-tagged integer key": {
+			matcher: matcher.Content[any](twoKeyPath, 2),
+			input:   stringtest.Input(`!!str 2: x`),
+			want:    false,
+		},
+		"float does not match a str-tagged integer key": {
+			matcher: matcher.Content(twoKeyPath, 2.0),
+			input:   stringtest.Input(`!!str 2: x`),
+			want:    false,
+		},
+		"string matches a str-tagged integer key": {
+			matcher: matcher.Content(twoKeyPath, "2"),
+			input:   stringtest.Input(`!!str 2: x`),
+			want:    true,
+		},
 		"int does not match a verbatim str-tagged integer": {
 			matcher: matcher.Content(versionPath, 2),
 			input:   stringtest.Input(`version: !<tag:yaml.org,2002:str> 2`),

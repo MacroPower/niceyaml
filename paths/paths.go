@@ -216,10 +216,12 @@ func (p Path) IndexAll() Path {
 // Key returns a copy of the path with a `~` selector appended, which picks
 // the key of the mapping entry the selector before it picked rather than
 // its value. The selector looks through the `?` indicator of an explicit
-// key and any anchor or tag on the key. Where the path selects no entry,
-// such as a sequence element or the root, the `~` selects the node the
-// path already does, so an error at such a path highlights the same text
-// with or without it.
+// key. It keeps a tag on the key, as a path to a value keeps a tag on the
+// value, so the key decodes as it does when the decoder reads the
+// mapping, and [Path.Token] still gives the key text. Where the path
+// selects no entry, such as a sequence element or the root, the `~`
+// selects the node the path already does, so an error at such a path
+// highlights the same text with or without it.
 //
 //	name := paths.Root().Child("metadata", "name")
 //	value, err := name.Token(doc)       // the token that starts the value

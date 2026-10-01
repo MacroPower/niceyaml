@@ -23,6 +23,7 @@ var (
 	metadataName   = paths.Root().Child("metadata").Child("name")
 	missingPath    = paths.Root().Child("missing")
 	versionPath    = paths.Root().Child("version")
+	twoKeyPath     = paths.Root().Child("2").Key()
 	enabledPath    = paths.Root().Child("enabled")
 	timeoutPath    = paths.Root().Child("timeout")
 	createdPath    = paths.Root().Child("created")

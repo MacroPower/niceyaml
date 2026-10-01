@@ -2479,6 +2479,52 @@ func TestDocument_At(t *testing.T) {
 		assert.Equal(t, 2, got)
 	})
 
+	t.Run("key decodes as the mapping reads it", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			want  any
+			input string
+		}{
+			"plain key": {
+				input: "2: x\n",
+				want:  uint64(2),
+			},
+			"quoted key": {
+				input: "\"2\": x\n",
+				want:  "2",
+			},
+			"tagged key": {
+				input: "!!str 2: x\n",
+				want:  "2",
+			},
+			"explicit tagged key": {
+				input: "? !!str 2\n: x\n",
+				want:  "2",
+			},
+			"anchored tagged key": {
+				input: "&k !!str 2: x\n",
+				want:  "2",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				whole, err := dd.Decode[map[any]any](t.Context())
+				require.NoError(t, err)
+				require.Contains(t, whole, tc.want)
+
+				got, err := yamltest.At(t, dd, paths.Root().Child("2").Key()).Decode[any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
 	t.Run("bool", func(t *testing.T) {
 		t.Parallel()
 
