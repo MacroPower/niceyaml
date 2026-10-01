@@ -1633,24 +1633,6 @@ func (e *SourceError) text() string {
 	return e.err.Error()
 }
 
-// boundCause returns the [*SourceError] x reaches through the causes of
-// Errors alone, or nil when a wrapper of another kind or the end of the
-// chain comes first.
-func boundCause(x *Error) *SourceError {
-	for cur := x; cur != nil; {
-		switch next := cur.err.(type) { //nolint:errorlint // Identity of the direct child, not a chain search.
-		case *Error:
-			cur = next
-		case *SourceError:
-			return next
-		default:
-			return nil
-		}
-	}
-
-	return nil
-}
-
 // walk calls visit for every node below e in depth-first order, each
 // once however many times the tree reaches it, as [AllBindings] yields
 // them. A nil e has no nodes below it.

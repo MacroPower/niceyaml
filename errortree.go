@@ -517,10 +517,10 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 
 // textBinding returns the binding whose text e shows: the binding an
 // adopted e reaches through the causes of Errors alone, which add no
-// text of their own, or e itself. An adopted binding that puts the name
-// of its source in front of its message, rather than keeping the message
-// as [SourceError.keepsMessage] reports, adds that name as text of its
-// own, so the walk stops there.
+// text of their own, as [Error.textCause] walks them, or e itself. An
+// adopted binding that puts the name of its source in front of its
+// message, rather than keeping the message as [SourceError.keepsMessage]
+// reports, adds that name as text of its own, so the walk stops there.
 func textBinding(e *SourceError) *SourceError {
 	for e.adopted && e.keepsMessage() {
 		x, ok := e.err.(*Error) //nolint:errorlint // The node itself, not a chain search.
@@ -528,8 +528,8 @@ func textBinding(e *SourceError) *SourceError {
 			break
 		}
 
-		inner := boundCause(x)
-		if inner == nil {
+		inner, ok := x.textCause().(*SourceError) //nolint:errorlint // The node itself, not a chain search.
+		if !ok || inner == nil {
 			break
 		}
 
