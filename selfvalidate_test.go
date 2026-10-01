@@ -1352,6 +1352,48 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				require.EqualError(t, err, tc.want)
 			})
 		}
+
+		// A merge whose alias does not resolve in the document, as one to
+		// an anchor of WithReferences, may set any key. No entry before it
+		// names a key, so the error reports the decoded value instead.
+		unresolvedTcs := map[string]struct {
+			input      string
+			references string
+			want       string
+		}{
+			"key of the mapping before the merge": {
+				input:      "m: {0x10: {price: 1}, <<: *r}\n",
+				references: "r: &r {16: {price: -1}}\n",
+				want:       "$.m.16.price: negative price",
+			},
+			"key of the mapping after the merge": {
+				input:      "m: {<<: *r, 0x10: {price: -1}}\n",
+				references: "r: &r {16: {price: 1}}\n",
+				want:       "1:27: $.m.0x10.price: negative price",
+			},
+			"merge inside a source": {
+				input:      "s: &s {<<: *r}\nm: {0x10: {price: 1}, <<: *s}\n",
+				references: "r: &r {16: {price: -1}}\n",
+				want:       "$.m.16.price: negative price",
+			},
+			"resolvable merge after the merge": {
+				input:      "b: &b {0x10: {price: -1}}\nm: {<<: *r, <<: *b}\n",
+				references: "r: &r {16: {price: 1}}\n",
+				want:       "1:22: $.m.0x10.price: negative price",
+			},
+		}
+
+		for name, tc := range unresolvedTcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd, err := niceyaml.NewSourceFromString(tc.input, niceyaml.WithAllowDuplicateKeys(true)).Document()
+				require.NoError(t, err)
+
+				_, err = dd.Decode[merged](t.Context(), niceyaml.WithReferences([]byte(tc.references)))
+				require.EqualError(t, err, tc.want)
+			})
+		}
 	})
 
 	t.Run("a pointer map key reports the text the document spells it with", func(t *testing.T) {

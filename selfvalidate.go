@@ -1106,9 +1106,11 @@ func fieldName(field reflect.StructField) (string, bool, bool) {
 // key brings in counts, whether the merge names one mapping or a list of
 // them, directly or through an alias. Where the mapping and its merges
 // define one key more than once, the later entry in document order wins,
-// with the sources of one merge in sequence order, as in the decode. The
-// map holds no key a path cannot resolve to, and is empty when no mapping
-// is at base, as for a value the document did not set.
+// with the sources of one merge in sequence order, as in the decode. A
+// merge with an alias that does not resolve may set any key, so no entry
+// before it names a key. The map holds no key a path cannot resolve to,
+// and is empty when no mapping is at base, as for a value the document
+// did not set.
 func (w *selfWalker) keyNames(base paths.Path, t reflect.Type) map[any]string {
 	names := map[any]string{}
 
@@ -1121,7 +1123,9 @@ func (w *selfWalker) keyNames(base paths.Path, t reflect.Type) map[any]string {
 }
 
 // collectKeyNames adds the keys of the mapping node, and of the mappings
-// it merges, to names, as [selfWalker.keyNames] describes.
+// it merges, to names, as [selfWalker.keyNames] describes. It reports
+// false when the walk stopped at a merge with an alias that does not
+// resolve, so the caller stops too.
 //
 // The walk goes in reverse document order, so the first name it sets
 // for a value is the one the decode keeps. The first time the walk
@@ -1130,21 +1134,20 @@ func (w *selfWalker) keyNames(base paths.Path, t reflect.Type) map[any]string {
 // and it also stops merge cycles.
 func (w *selfWalker) collectKeyNames(
 	node ast.Node, t reflect.Type, names map[any]string, seen map[*ast.MappingNode]bool,
-) {
+) bool {
 	mapping, ok := astnode.Content(node).(*ast.MappingNode)
 	if !ok || seen[mapping] {
-		return
+		return true
 	}
 
 	seen[mapping] = true
 
 	// The decoder sets each entry in document order, and a merge sets
 	// the keys of its sources where it stands, so a later entry wins
-	// whether it is a key of the mapping or a merge. An alias in any
-	// merge that does not resolve leaves out the keys of every merge.
-	_, err := w.pathResolver().MergeSources(mapping)
-	merges := err == nil
-
+	// whether it is a key of the mapping or a merge. A merge with an
+	// alias that does not resolve may set any key, so the walk stops
+	// there and names no earlier entry, of this mapping or of a mapping
+	// that merges this one.
 	for _, entry := range slices.Backward(mapping.Values) {
 		if entry == nil || entry.Key == nil {
 			continue
@@ -1156,21 +1159,21 @@ func (w *selfWalker) collectKeyNames(
 			continue
 		}
 
-		if !merges {
-			continue
-		}
-
 		sources, err := w.pathResolver().MergeSources(&ast.MappingNode{
 			Values: []*ast.MappingValueNode{entry},
 		})
 		if err != nil {
-			continue
+			return false
 		}
 
 		for _, src := range slices.Backward(sources) {
-			w.collectKeyNames(src, t, names, seen)
+			if !w.collectKeyNames(src, t, names, seen) {
+				return false
+			}
 		}
 	}
+
+	return true
 }
 
 // pathResolver returns the [paths.Resolver] for the document of the
