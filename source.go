@@ -465,11 +465,12 @@ func (d *document) anchorToken() *token.Token {
 //
 // The tree leaves out a comment on a line of its own below a document whose
 // root is a scalar or a flow collection, and one between a %YAML or %TAG
-// directive and its "---" header. Inside a flow collection, it leaves out
-// such a comment before a key of a flow mapping or before a ",", ":", "]",
-// or "}". [parser.Parse] rejects valid YAML that holds a comment in any of
-// these places. The tokens of the Source and of each [Node] still hold such
-// a comment.
+// directive and its "---" header. It leaves out such a comment between the
+// "?" of an explicit key and the key, and between the key and its ":".
+// Inside a flow collection, it also leaves out such a comment before a key
+// of a flow mapping or before a ",", "]", or "}". [parser.Parse] rejects or
+// misreads valid YAML that holds a comment in any of these places. The
+// tokens of the Source and of each [Node] still hold such a comment.
 //
 // The tree also leaves out the comments on lines of their own between an
 // anchor and the node below them where they make the parser reject or
@@ -773,11 +774,16 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 // above a comment. Without the comments, it would name the anchor after the
 // token below them.
 //
-// Inside a flow collection, the parser reads the comments as the head
-// comment of the node that follows them. It fails when a ",", ":", "]",
-// or "}" follows them instead, and when they sit where it looks for a
-// key: after a "?" in any flow collection, and after a "{" or "," of a
-// flow mapping (parser/parser.go:326, parser/parser.go:349,
+// In block and flow style alike, the parser takes the token after a "?"
+// as the key the "?" introduces, and the token before a ":" as the key of
+// that ":" (parser/token.go:493, parser/token.go:513). With a comment in
+// either place, it misreads the mapping or fails with "unexpected scalar
+// value type" (parser/parser.go:326). Those comments drop.
+//
+// Inside a flow collection, the parser reads the other comments as the
+// head comment of the node that follows them. It fails when a ",", "]",
+// or "}" follows them instead, and when they sit after a "{" or "," of a
+// flow mapping, where it looks for a key (parser/parser.go:349,
 // parser/parser.go:407, parser/parser.go:1042). Those comments drop, and
 // the comments before any other node stay.
 func dropStrandedComments(run token.Tokens) token.Tokens {
@@ -858,12 +864,15 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 		closes := next == len(run) ||
 			run[next].Type == token.DocumentHeaderType || run[next].Type == token.DocumentEndType
 
-		stranded := directive
+		// The parser takes a comment after a "?" or before a ":" as a key.
+		stranded := directive || last != nil && last.Type == token.MappingKeyType ||
+			next < len(run) && run[next].Type == token.MappingValueType
 
 		switch {
 		case bare:
 			// Without the comments, the parser would take the token below
 			// them as the name of the anchor.
+			stranded = directive
 
 		case len(flows) > 0:
 			stranded = stranded || next < len(run) && endsFlowEntry(run[next]) ||
@@ -938,12 +947,11 @@ func nullEmptyAnchors(file *ast.File) {
 	}
 }
 
-// endsFlowEntry reports whether tk is a ",", ":", "]", or "}", which ends
-// a key, an entry, or a collection in flow style.
+// endsFlowEntry reports whether tk is a ",", "]", or "}", which ends an
+// entry or a collection in flow style.
 func endsFlowEntry(tk *token.Token) bool {
 	switch tk.Type {
-	case token.CollectEntryType, token.MappingValueType,
-		token.SequenceEndType, token.MappingEndType:
+	case token.CollectEntryType, token.SequenceEndType, token.MappingEndType:
 		return true
 
 	default:
@@ -951,26 +959,15 @@ func endsFlowEntry(tk *token.Token) bool {
 	}
 }
 
-// startsFlowKey reports whether a key follows tk inside a flow collection
-// that a token of type flow opens. A key follows a "{" or "," of a flow
-// mapping. It also follows a "?" in any flow collection, since a "?" in
-// a flow sequence starts a mapping of one pair. It reports false when tk
-// is nil.
+// startsFlowKey reports whether tk is the "{" or a "," of a flow mapping,
+// which a key follows. A token of type flow opens the innermost flow
+// collection around tk. It reports false when tk is nil.
 func startsFlowKey(tk *token.Token, flow token.Type) bool {
-	if tk == nil {
+	if tk == nil || flow != token.MappingStartType {
 		return false
 	}
 
-	switch tk.Type {
-	case token.MappingKeyType:
-		return true
-
-	case token.MappingStartType, token.CollectEntryType:
-		return flow == token.MappingStartType
-
-	default:
-		return false
-	}
+	return tk.Type == token.MappingStartType || tk.Type == token.CollectEntryType
 }
 
 // belowText reports whether tk starts on a line below the line where the

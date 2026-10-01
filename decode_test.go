@@ -1055,6 +1055,93 @@ func TestDocument_Decode(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("comment on a line of its own around an explicit key", func(t *testing.T) {
+		t.Parallel()
+
+		// When it keeps comments, the go-yaml parser takes such a comment
+		// after a "?" or before a ":" as a key, and rejects or misreads the
+		// mapping. Each case lists the value of every document and the
+		// comment the tree keeps, if any.
+		tcs := map[string]struct {
+			input string
+			kept  string
+			want  []any
+		}{
+			"comment between a key and its colon": {
+				input: "? a\n# c\n: 1\n",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"indented comment between a key and its colon": {
+				input: "? a\n  # c\n: 1\n",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"comments with a blank line between them": {
+				input: "? a\n# c\n\n# d\n: 1\n",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"comment before the colon of a later key": {
+				input: "? a\n: 1\n? b\n# c\n: 2\n",
+				want:  []any{map[string]any{"a": uint64(1), "b": uint64(2)}},
+			},
+			"comment in a nested mapping": {
+				input: "x:\n  ? a\n  # c\n  : 1\n",
+				want:  []any{map[string]any{"x": map[string]any{"a": uint64(1)}}},
+			},
+			"comment in a mapping in a sequence": {
+				input: "- ? a\n  # c\n  : 1\n",
+				want:  []any{[]any{map[string]any{"a": uint64(1)}}},
+			},
+			"comment below a block scalar key": {
+				input: "? |\n  lit\n# c\n: 1\n",
+				want:  []any{map[string]any{"lit\n": uint64(1)}},
+			},
+			"comment above a block sequence value": {
+				input: "? a\n# c\n: - 1\n",
+				want:  []any{map[string]any{"a": []any{uint64(1)}}},
+			},
+			"comment between an indicator and its key": {
+				input: "? \n  # c\n  a\n: 1\n",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"comment on the line of the key": {
+				input: "? a # k\n# c\n: 1\n",
+				kept:  "# k",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"comment between entries": {
+				input: "? a\n: 1\n# c\n? b\n: 2\n",
+				kept:  "# c",
+				want:  []any{map[string]any{"a": uint64(1), "b": uint64(2)}},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				src := niceyaml.NewSourceFromString(tc.input)
+
+				file, err := src.File()
+				require.NoError(t, err)
+
+				if tc.kept != "" {
+					assert.Contains(t, file.String(), tc.kept)
+				}
+
+				docs, err := src.Documents()
+				require.NoError(t, err)
+
+				got := make([]any, len(docs))
+				for i, d := range docs {
+					got[i], err = d.Decode[any](t.Context())
+					require.NoError(t, err)
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
 }
 
 func TestDocument_Decode_TypeMismatch(t *testing.T) {
