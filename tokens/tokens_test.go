@@ -663,6 +663,21 @@ func TestTokenize_RestoresDroppedLineBreaks(t *testing.T) {
 		"document end after blank lines of spaces after bare crs": {
 			input: "k:\n\r \n\r \n...\n",
 		},
+		"key after blank lines of spaces after a comment that ends with a bare cr": {
+			// The comment's Origin ends with a bare "\r", so a "\n" that
+			// opens the breaks Tokenize puts back would join it into one
+			// CRLF.
+			input: "a: 1 # c\r \n\r \nb: 2",
+		},
+		"scalar after blank lines of spaces after a bare cr comment": {
+			input: "#\r \n\r \n0",
+		},
+		"value after a comment that ends with a crlf the lexer cuts": {
+			input: "#\r\n:",
+		},
+		"value after a line of spaces after a bare cr comment": {
+			input: "#\r \n:",
+		},
 		"key after a blank line with a tab": {
 			// The blank line goes to the end of the scalar's Origin. A
 			// tab in front of a line break in the key's Origin would

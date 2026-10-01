@@ -1126,14 +1126,16 @@ func hexValue(rs []rune) int {
 // does not drop. Bare line endings keep tabs out of the Origin. The parser
 // trims spaces and line breaks from the start of a key's Origin and
 // rejects the key when a line break is left, so a tab in front of a line
-// break would make it reject the key. [restoreWhitespace] later moves the
-// line breaks to the end of the Origin before, together with the spaces
-// and tabs of the source, when the two Origins hold nothing else of the
-// gap. In front of a ":" they stay where they are, since the Origin
-// before belongs to a key. When the lexer dropped every line break in
-// front of tk, the indentation of the line tk starts on goes with them.
-// An Origin stays as it is when the stream already holds every line break
-// of the source.
+// break would make it reject the key. A space parts a bare "\r" from a
+// "\n" that would follow it, at either end of those line breaks or between
+// two of them, since together they would make one CRLF. [restoreWhitespace]
+// later moves the line breaks to the end of the Origin before, together
+// with the spaces and tabs of the source, when the two Origins hold
+// nothing else of the gap. In front of a ":" they stay where they are,
+// since the Origin before belongs to a key. When the lexer dropped every
+// line break in front of tk, the indentation of the line tk starts on goes
+// with them. An Origin stays as it is when the stream already holds every
+// line break of the source.
 func (p *positioner) restoreGap(tk *token.Token, at int) {
 	gap := string(p.src[p.cursor:at])
 	lead := tk.Origin[:len(tk.Origin)-len(strings.TrimLeft(tk.Origin, " \t\r\n"))]
@@ -1154,7 +1156,18 @@ func (p *positioner) restoreGap(tk *token.Token, at int) {
 		return
 	}
 
+	// A "\n" that opens rest after a "\r" in the gap closes a CRLF the
+	// lexer cut between two tokens, and the "\r" that ends the stream's
+	// whitespace is its other half. Any other "\r" there is bare, and a
+	// "\n" that opens breaks would join it into one CRLF, so a space keeps
+	// the two apart.
+	cutCRLF := strings.HasPrefix(rest, "\n") && strings.HasSuffix(gap[:len(gap)-len(rest)], "\r")
+	bareCR := strings.HasSuffix(p.tail, "\r") && !cutCRLF
+
 	breaks, rest := cutLineBreaks(rest, missing)
+	if bareCR && strings.HasPrefix(breaks, "\n") {
+		breaks = " " + breaks
+	}
 
 	// When the lexer dropped every line break, rest is the indentation of
 	// the line tk starts on, and the Origin opens with the part of it the
