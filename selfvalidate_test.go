@@ -1306,6 +1306,14 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				input: "base: &k 0x10\nb: &j !!int *k\nm:\n  *j : {price: -1}\n",
 				want:  "4:16: $.m.0x10.price: negative price",
 			},
+			"key of a mapping behind an alias": {
+				input: "base: &b {0x10: {price: -1}}\nf: *b\n",
+				want:  "1:25: $.f.0x10.price: negative price",
+			},
+			"key of a mapping behind a tagged alias": {
+				input: "base: &b {0x10: {price: -1}}\nf: !t *b\n",
+				want:  "1:25: $.f.0x10.price: negative price",
+			},
 			"block scalar": {
 				input: "m:\n  ? |-\n    n\n  : {price: -1}\n",
 				want:  "4:13: $.m.n.price: negative price",

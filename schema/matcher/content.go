@@ -306,11 +306,12 @@ func isPlain(t reflect.Type) bool {
 
 // scalarText returns the text of the scalar node holds as the document
 // spells it, for a scalar the decoder respells: an integer, a float, an
-// infinity, a NaN, or a bool, looking through an anchor or a tag on it.
-// The second result is false when node holds anything else, which
-// includes an alias, whose own text names the anchor.
+// infinity, a NaN, or a bool. It reaches the scalar as [valueNode] does.
+// The second result is false when node holds anything else.
 func scalarText(node *niceyaml.Node) (string, bool) {
-	switch v := astnode.Content(node.AST()).(type) {
+	n, _ := valueNode(node)
+
+	switch v := n.(type) {
 	case *ast.IntegerNode, *ast.FloatNode, *ast.InfinityNode, *ast.NanNode, *ast.BoolNode:
 		return v.GetToken().Value, true
 	default:
@@ -320,7 +321,7 @@ func scalarText(node *niceyaml.Node) (string, bool) {
 
 // isExplicitString reports whether node holds a scalar the document
 // writes as a string: a quoted scalar, a block scalar, or a scalar with
-// a !!str tag, looking through an anchor or a tag on it. The value raw
+// a !!str tag. It reaches the scalar as [valueNode] does. The value raw
 // holds, as the YAML types name it, must be a string, so a tag such as
 // !!int on a quoted scalar decides the type.
 func isExplicitString(node *niceyaml.Node, raw any) bool {
@@ -328,37 +329,81 @@ func isExplicitString(node *niceyaml.Node, raw any) bool {
 		return false
 	}
 
-	n := node.AST()
+	n, strTagged := valueNode(node)
+	if strTagged {
+		return true
+	}
 
-	for {
+	switch v := n.(type) {
+	case *ast.LiteralNode:
+		return true
+	case *ast.StringNode:
+		t := v.GetToken().Type
+
+		return t == token.SingleQuoteType || t == token.DoubleQuoteType
+
+	default:
+		return false
+	}
+}
+
+// valueNode returns the node that node selects with its anchors, tags,
+// and aliases looked through, and reports whether a !!str tag sits on the
+// way. It follows each alias to the content of its anchor, as the decoder
+// does. [niceyaml.Node.At] follows an alias at the end of a path but stops
+// at a tag on it, so the node of `version: !t *v` still holds the alias.
+// The first result is nil for an alias that does not resolve or that
+// leads back to itself.
+func valueNode(node *niceyaml.Node) (ast.Node, bool) {
+	var (
+		n         = node.AST()
+		strTagged bool
+		resolver  *paths.Resolver
+		followed  []*ast.AliasNode
+	)
+
+	for !astnode.IsNil(n) {
 		switch v := n.(type) {
 		case *ast.AnchorNode:
 			n = v.Value
 		case *ast.TagNode:
 			switch v.Start.Value {
 			case string(token.StringTag), "!<" + strTagURI + ">":
-				return true
+				strTagged = true
 			}
 
 			n = v.Value
 
-		case *ast.LiteralNode:
-			return true
-		case *ast.StringNode:
-			t := v.GetToken().Type
+		case *ast.AliasNode:
+			if slices.Contains(followed, v) {
+				return nil, strTagged
+			}
 
-			return t == token.SingleQuoteType || t == token.DoubleQuoteType
+			followed = append(followed, v)
+
+			if resolver == nil {
+				resolver = paths.NewResolver(node.DocumentAST())
+			}
+
+			target, err := resolver.Deref(v)
+			if err != nil {
+				return nil, strTagged
+			}
+
+			n = target
 
 		default:
-			return false
+			return n, strTagged
 		}
 	}
+
+	return nil, strTagged
 }
 
 // isNonNumberString reports whether raw, the value of node as the YAML
-// types name it, is a string that YAML does not read as a number: a
-// scalar the document writes as a string, or a plain scalar outside the
-// YAML float syntax, such as inf or 0x1p-2.
+// types name it, is a string that YAML does not read as a number. Such a
+// string is a scalar the document writes as a string, or a plain scalar
+// outside the YAML float syntax, such as inf or 0x1p-2.
 func isNonNumberString(node *niceyaml.Node, raw any) bool {
 	if _, ok := raw.(string); !ok {
 		return false

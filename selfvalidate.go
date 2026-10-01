@@ -1209,10 +1209,11 @@ func (w *selfWalker) keyNames(base paths.Path, t reflect.Type) map[any]string {
 	return names
 }
 
-// collectKeyNames adds the keys of the mapping node, and of the mappings
-// it merges, to names, as [selfWalker.keyNames] describes. It reports
-// false when the walk stopped at a merge with an alias that does not
-// resolve, so the caller stops too.
+// collectKeyNames adds the keys of the mapping node holds, and of the
+// mappings it merges, to names, as [selfWalker.keyNames] describes. It
+// reaches the mapping through the anchors, tags, and aliases on node, as
+// [selfWalker.valueNode] does. It reports false when the walk stopped at
+// a merge with an alias that does not resolve, so the caller stops too.
 //
 // The walk goes in reverse document order, so the first name it sets
 // for a value is the one the decode keeps. The first time the walk
@@ -1222,7 +1223,7 @@ func (w *selfWalker) keyNames(base paths.Path, t reflect.Type) map[any]string {
 func (w *selfWalker) collectKeyNames(
 	node ast.Node, t reflect.Type, names map[any]string, seen map[*ast.MappingNode]bool,
 ) bool {
-	mapping, ok := astnode.Content(node).(*ast.MappingNode)
+	mapping, ok := astnode.Content(w.valueNode(node)).(*ast.MappingNode)
 	if !ok || seen[mapping] {
 		return true
 	}
@@ -1286,7 +1287,7 @@ func (w *selfWalker) keyDecoder() *yaml.Decoder {
 // name, one that does not decode, whose decode panics, or whose value
 // cannot key a map, adds nothing, and neither does a key whose value
 // names already holds. The key decodes from the node
-// [selfWalker.keyValueNode] gives it.
+// [selfWalker.valueNode] gives it.
 //
 // As go-yaml does, addKeyName decodes a key of a pointer type t as the
 // type t points to, and leaves a null key, or an alias to a null, a nil
@@ -1299,7 +1300,7 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 		return
 	}
 
-	node := w.keyValueNode(key)
+	node := w.valueNode(key)
 	if node == nil {
 		return
 	}
@@ -1328,19 +1329,18 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 	}
 }
 
-// keyValueNode returns the node key decodes from. It looks through the
-// `?` of an explicit key and the anchors on key, which carry no part of
+// valueNode returns the node that node decodes from. It looks through the
+// `?` of an explicit key and the anchors on node, which carry no part of
 // its value, and follows each alias to the content of its anchor, as
 // [paths.Resolver.Deref] does. The key decoder of the walk knows none of
-// the anchors of the document, so an alias left in the node would not
+// the anchors of the document, so an alias left in a key would not
 // decode. Each tag on the way stays around the content it holds, since a
-// tag decides how the key decodes, whether it sits on the key or on the
-// content of an anchor. It returns nil for a key that holds no node, and
+// tag decides how the node decodes, whether it sits on node or on the
+// content of an anchor. It returns nil for a node that holds nothing, and
 // for one with an alias that does not resolve or that leads back to
 // itself.
-func (w *selfWalker) keyValueNode(key ast.MapKeyNode) ast.Node {
+func (w *selfWalker) valueNode(node ast.Node) ast.Node {
 	var (
-		node     ast.Node = key
 		tags     []*ast.TagNode
 		followed = map[*ast.AliasNode]bool{}
 	)

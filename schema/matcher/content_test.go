@@ -89,6 +89,30 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: &v !!int 0x10`),
 			want:    true,
 		},
+		"string matches aliased float text": {
+			matcher: matcher.Content(versionPath, "1.10"),
+			input: stringtest.Input(`
+				v: &v 1.10
+				version: *v
+			`),
+			want: true,
+		},
+		"string matches float text behind a tagged alias": {
+			matcher: matcher.Content(versionPath, "1.10"),
+			input: stringtest.Input(`
+				v: &v 1.10
+				version: !t *v
+			`),
+			want: true,
+		},
+		"string matches hex text behind a tagged alias": {
+			matcher: matcher.Content(versionPath, "0x10"),
+			input: stringtest.Input(`
+				v: &v 0x10
+				version: !t *v
+			`),
+			want: true,
+		},
 		"string matches quoted text": {
 			matcher: matcher.Content(versionPath, "1.10"),
 			input:   stringtest.Input(`version: "1.10"`),
@@ -206,6 +230,38 @@ func TestContent(t *testing.T) {
 			matcher: matcher.Content(versionPath, 2),
 			input:   stringtest.Input(`version: &v !!str 2`),
 			want:    false,
+		},
+		"int does not match an aliased quoted integer": {
+			matcher: matcher.Content(versionPath, 2),
+			input: stringtest.Input(`
+				v: &v "2"
+				version: *v
+			`),
+			want: false,
+		},
+		"int does not match a quoted integer behind a tagged alias": {
+			matcher: matcher.Content(versionPath, 2),
+			input: stringtest.Input(`
+				v: &v "2"
+				version: !t *v
+			`),
+			want: false,
+		},
+		"int does not match a str-tagged integer behind a tagged alias": {
+			matcher: matcher.Content(versionPath, 2),
+			input: stringtest.Input(`
+				v: &v !!str 2
+				version: !t *v
+			`),
+			want: false,
+		},
+		"any int does not match a quoted integer behind a tagged alias": {
+			matcher: matcher.Content[any](versionPath, 2),
+			input: stringtest.Input(`
+				v: &v "2"
+				version: !t *v
+			`),
+			want: false,
 		},
 		"int does not match a verbatim str-tagged integer": {
 			matcher: matcher.Content(versionPath, 2),
@@ -877,8 +933,7 @@ type (
 	namedFloat float64
 )
 
-// millis decodes itself from a number of seconds, which it holds as
-// milliseconds.
+// millis decodes itself from seconds, which it holds as milliseconds.
 type millis int64
 
 func (m *millis) UnmarshalYAML(data []byte) error {
