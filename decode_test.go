@@ -3574,6 +3574,157 @@ func TestDocument_DecodeInto(t *testing.T) {
 		assert.Nil(t, got)
 	})
 
+	t.Run("leaves the value as it is for a scoped null, as a field does", func(t *testing.T) {
+		t.Parallel()
+
+		type nullFields struct {
+			Map    map[string]int `yaml:"map"`
+			Config plainConfig    `yaml:"config"`
+			Items  []plainConfig  `yaml:"items"`
+			Int    int            `yaml:"int"`
+			Uint   uint           `yaml:"uint"`
+		}
+
+		defaults := func() nullFields {
+			return nullFields{
+				Map:    map[string]int{"k": 1},
+				Config: plainConfig{Name: "default", Value: 7},
+				Int:    1,
+				Uint:   2,
+			}
+		}
+
+		// The go-yaml decoder rejects each of these nulls at the top of a
+		// decode into an int, a uint, a map, or a struct.
+		tcs := map[string]struct {
+			input string
+		}{
+			"no value": {input: "int:\nuint:\nmap:\nconfig:\nitems:\n  -\n"},
+			"null":     {input: "int: null\nuint: null\nmap: null\nconfig: null\nitems:\n  - null\n"},
+			"tilde":    {input: "int: ~\nuint: ~\nmap: ~\nconfig: ~\nitems:\n  - ~\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				want := defaults()
+				want.Items = []plainConfig{{}}
+
+				whole := defaults()
+
+				err := dd.DecodeInto(t.Context(), &whole)
+				require.NoError(t, err)
+				assert.Equal(t, want, whole)
+
+				scoped := defaults()
+
+				err = yamltest.At(t, dd, paths.Root().Child("int")).DecodeInto(t.Context(), &scoped.Int)
+				require.NoError(t, err)
+
+				err = yamltest.At(t, dd, paths.Root().Child("uint")).DecodeInto(t.Context(), &scoped.Uint)
+				require.NoError(t, err)
+
+				err = yamltest.At(t, dd, paths.Root().Child("map")).DecodeInto(t.Context(), &scoped.Map)
+				require.NoError(t, err)
+
+				err = yamltest.At(t, dd, paths.Root().Child("config")).DecodeInto(t.Context(), &scoped.Config)
+				require.NoError(t, err)
+
+				items, err := dd.Nodes(paths.Root().Child("items").IndexAll())
+				require.NoError(t, err)
+
+				for _, item := range items {
+					got, err := item.Decode[plainConfig](t.Context())
+					require.NoError(t, err)
+
+					scoped.Items = append(scoped.Items, got)
+				}
+
+				assert.Equal(t, want, scoped)
+			})
+		}
+	})
+
+	t.Run("leaves the value as it is for a null document", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+		}{
+			"null":           {input: "null\n"},
+			"tilde":          {input: "~\n"},
+			"anchored null":  {input: "&a null\n"},
+			"anchored tilde": {input: "&a ~\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				config := plainConfig{Name: "default", Value: 7}
+
+				err := dd.DecodeInto(t.Context(), &config)
+				require.NoError(t, err)
+				assert.Equal(t, plainConfig{Name: "default", Value: 7}, config)
+
+				value := 1
+
+				err = dd.DecodeInto(t.Context(), &value)
+				require.NoError(t, err)
+				assert.Equal(t, 1, value)
+			})
+		}
+	})
+
+	t.Run("leaves the value as it is for a scoped anchored null", func(t *testing.T) {
+		t.Parallel()
+
+		type intField struct {
+			Int int `yaml:"int"`
+		}
+
+		// A path through an anchor reaches the null the anchor names, so a
+		// scoped decode reads it as a decode of an anchored null document
+		// reads it.
+		tcs := map[string]struct {
+			input string
+		}{
+			"null":  {input: "int: &i null\nconfig: &c null\n"},
+			"tilde": {input: "int: &i ~\nconfig: &c ~\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				value := 1
+
+				err := yamltest.At(t, dd, paths.Root().Child("int")).DecodeInto(t.Context(), &value)
+				require.NoError(t, err)
+				assert.Equal(t, 1, value)
+
+				config := plainConfig{Name: "default", Value: 7}
+
+				err = yamltest.At(t, dd, paths.Root().Child("config")).DecodeInto(t.Context(), &config)
+				require.NoError(t, err)
+				assert.Equal(t, plainConfig{Name: "default", Value: 7}, config)
+
+				// The go-yaml decoder rejects an anchored null in an int field.
+				whole := intField{Int: 1}
+
+				err = dd.DecodeInto(t.Context(), &whole)
+				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+			})
+		}
+	})
+
 	t.Run("rejects a tagged value the decoder cannot read", func(t *testing.T) {
 		t.Parallel()
 
@@ -6048,8 +6199,8 @@ func TestErrDecodeRejected(t *testing.T) {
 		},
 		// The parser makes a null token for each value the document leaves
 		// out, which the lexer never saw.
-		"missing mapping value": {
-			input: "a: null\nc:\n",
+		"mapping value with only a tag": {
+			input: "a: null\nc: !!int\n",
 			decode: func(ctx context.Context, dd *niceyaml.Node) error {
 				node, err := dd.At(paths.Root().Child("c"))
 				if err != nil {
@@ -6061,8 +6212,8 @@ func TestErrDecodeRejected(t *testing.T) {
 				return err
 			},
 		},
-		"bare sequence item": {
-			input: "items:\n  -\n  - x: 1\n",
+		"sequence item with only a tag": {
+			input: "items:\n  - !!int\n",
 			decode: func(ctx context.Context, dd *niceyaml.Node) error {
 				items, err := dd.Nodes(paths.Root().Child("items").IndexAll())
 				if err != nil {

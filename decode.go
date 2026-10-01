@@ -1568,12 +1568,16 @@ func WithReferences(data ...[]byte) DecodeOption {
 // [SelfValidator] validates itself, with the paths it reports put under
 // the path of the value, unless [WithSelfValidation] switches that off.
 // Fields absent from the document keep their existing values, so a
-// caller may fill v with defaults first. When v points to a pointer, a nil
-// pointer gets a new value, and the node decodes into the value the
-// pointer points to. An untagged null sets the pointer to nil. So does a
-// document whose body is an alias to a null in a reference document,
-// with a tag or without. A node without content, or a tagged null such
-// as "!!null", leaves the pointer as it is.
+// caller may fill v with defaults first. A null with no tag, anchored or
+// not, leaves v as it is, unless v points to a pointer or an interface.
+// A null with neither a tag nor an anchor leaves a struct field as it is
+// too. The go-yaml decoder rejects a tagged or anchored null in a field
+// of some kinds, such as an int or a struct. When v points to a pointer,
+// a nil pointer gets a new value, and the node decodes into the value
+// the pointer points to. An untagged null sets the pointer to nil.
+// So does a document whose body is an alias to a null in a reference
+// document, with a tag or without. A node without content, or a tagged
+// null such as "!!null", leaves the pointer as it is.
 // YAML decoding errors, and [Error] values from the validators, come back
 // bound to the source as [SourceError] values, with a path in them
 // resolving from the scope. A decoding error the go-yaml decoder
@@ -1761,9 +1765,11 @@ func (n *Node) forValidators(yamlOpts []yaml.DecodeOption) *Node {
 // in v survive, as [Node.DecodeInto] promises. [yaml.Unmarshal] instead
 // zeroes its target for input that holds no value. A tagged null, such
 // as a "!!seq" tag over no value, also leaves v as it is, since the
-// go-yaml decoder reads it as no value. When v points to a pointer, an
-// alias that reads as null sets that pointer to nil, as a null does. A
-// panic in the decoder comes back as an error that matches
+// go-yaml decoder reads it as no value. A null with no tag, anchored or
+// not, leaves v as it is too, unless v points to a pointer or an
+// interface, as [keepsNullTarget] describes. When v points to a pointer,
+// a null sets that pointer to nil, and so does an alias that reads as
+// null. A panic in the decoder comes back as an error that matches
 // [ErrDecodeRejected], bound at the first token of node that is not a
 // comment. The decoder reads node in the [decodeTree] of the document,
 // and for a node below the body, a failure in an anchor outside node
@@ -1779,7 +1785,7 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 		return n.Bind(err)
 	}
 
-	if !astnode.HasContent(node) || isTaggedNull(node) {
+	if !astnode.HasContent(node) || isTaggedNull(node) || keepsNullTarget(node, v) {
 		return nil
 	}
 
@@ -1810,6 +1816,35 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 	err = decodeWithRecover(ctx, dec, view, decodeTarget(v, node))
 
 	return n.bindDecodeError(n.rejection(err, view))
+}
+
+// keepsNullTarget reports whether node, or the value an anchor on node
+// names, is a null with no tag, and v points to a value that is neither
+// a pointer nor an interface. The go-yaml decoder keeps such a value for
+// a null with no tag or anchor in a struct field. For a null at the top
+// of a decode, it keeps some kinds, such as a string, and rejects
+// others, such as an int, a map, or a struct. [Node.decodeNode] skips
+// the decoder when this holds, so a null keeps the value of every such
+// kind, as it keeps the field. [Node.At] and [Node.Nodes] hand a decode
+// the value an anchor names, so keepsNullTarget looks through the anchor
+// to read an anchored null at the root as a scoped decode reads it. The
+// decoder still rejects an anchored null in a field, as it rejects a
+// tagged one.
+func keepsNullTarget(node ast.Node, v any) bool {
+	if anchor, ok := node.(*ast.AnchorNode); ok {
+		node = anchor.Value
+	}
+
+	if astnode.IsNil(node) || node.Type() != ast.NullType {
+		return false
+	}
+
+	switch reflect.TypeOf(v).Elem().Kind() {
+	case reflect.Pointer, reflect.Interface:
+		return false
+	default:
+		return true
+	}
 }
 
 // isNullAlias reports whether node is an alias, or an anchor on one,
