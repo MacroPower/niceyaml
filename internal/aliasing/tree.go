@@ -225,12 +225,19 @@ const (
 // counts as one unaliased node, as a shared scalar does in a decoded
 // value. The decoder writes some nodes out as text instead. It does so
 // for a key that is or refers to a mapping, a sequence, or a !!binary
-// scalar, and for the value under a !!str, !!int, !!bool, or !!binary
-// tag. Each copy of a scalar in that text costs its length, so there a
-// scalar counts one node per byte of its text, and an alias to one adds
-// that count to the aliased nodes. The content of an anchor on a scalar
-// counts its bytes too, so a scalar written out once weighs what its
-// anchor does.
+// scalar, and for the value under a text tag. A text tag is a !!str,
+// !!int, !!bool, or !!binary tag, or any tag after a %TAG directive that
+// redefines the "!!" handle. Each copy of a scalar in that text costs its
+// length, so there a scalar counts one node per byte of its text, and an
+// alias to one adds that count to the aliased nodes. The content of an
+// anchor on a scalar counts its bytes too, so a scalar written out once
+// weighs what its anchor does.
+//
+// An alias to a text tag, such as *s for `&s !!str x`, counts the text
+// under the tag even where the decoder reads the alias into a value.
+// Where the type an alias decodes into cannot take the value the decoder
+// converted for the anchor, such as a named string type, the decoder
+// converts the text under the tag again at each alias.
 //
 // An alias to a tag over another alias, such as *s for `&s !foo *k`,
 // refers to what *k refers to. A mapping under k then counts in full at
@@ -341,18 +348,34 @@ func (c *treeCounter) keyAsText(key ast.Node) bool {
 }
 
 // tagMode returns how the decoder reads the value under tag when it reads
-// the tagged node as mode. The decoder writes out the value under a
-// !!str, !!int, !!bool, or !!binary tag as text to convert it.
+// the tagged node as mode.
 func tagMode(tag *ast.TagNode, mode readMode) readMode {
-	if tag.Start == nil {
-		return mode
+	if isTextTag(tag) {
+		return readText
+	}
+
+	return mode
+}
+
+// isTextTag reports whether node is a text tag: a !!str, !!int, !!bool,
+// or !!binary tag, or any tag after a %TAG directive that redefines the
+// "!!" handle. The decoder writes out the value under such a tag as text
+// to convert it.
+func isTextTag(node ast.Node) bool {
+	tag, ok := node.(*ast.TagNode)
+	if !ok || tag.Start == nil {
+		return false
+	}
+
+	if tag.Directive != nil {
+		return true
 	}
 
 	switch token.ReservedTagKeyword(tag.Start.Value) {
 	case token.StringTag, token.IntegerTag, token.BooleanTag, token.BinaryTag:
-		return readText
+		return true
 	default:
-		return mode
+		return false
 	}
 }
 
@@ -372,15 +395,18 @@ func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool, mode readMode) in
 
 // alias returns the number of nodes a decode of the alias reads as mode.
 // That is one for an alias the decoder reads as null. Otherwise it is the
-// size of the mapping or sequence the alias refers to, the length of the
-// text of a scalar it refers to when read as text, or one for any other
-// alias. An alias to a tag over another alias, as in `&s !foo *k`, refers
-// to what that alias refers to. With top set, the alias lies outside the
-// content of every other alias, and alias adds that size to aliased, or
-// the one node to distinct.
+// size of the mapping or sequence the alias refers to, or the length of
+// the text of a scalar it refers to when read as text. An alias to a text
+// tag, such as a !!str tag or any tag after a %TAG directive that
+// redefines the "!!" handle, reads the text under the tag in either mode.
+// Any other alias counts one. An alias to a tag over another alias, as in
+// `&s !foo *k`, refers to what that alias refers to. With top set, the
+// alias lies outside the content of every other alias, and alias adds
+// that size to aliased, or the one node to distinct.
 func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 	target, err := c.resolver.Deref(alias)
-	if err != nil || c.nulls[alias] || c.open[target] || (mode == readValue && !c.holdsCollection(target)) {
+	if err != nil || c.nulls[alias] || c.open[target] ||
+		(mode == readValue && !isTextTag(target) && !c.holdsCollection(target)) {
 		if top {
 			c.distinct = aliaslimit.AddCapped(c.distinct, 1)
 		}

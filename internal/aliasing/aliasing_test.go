@@ -149,6 +149,37 @@ func TestCheckDecode(t *testing.T) {
 			input: longScalar + "k: &k " + flowList("*a", 500) + "\nm: !!str *k\n",
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
+		"aliases to a string-tagged scalar": {
+			// A decode into a named string type converts the scalar
+			// again at each *s, so each *s copies its text.
+			input: "s: &s !!str " + strings.Repeat("x", 2000) + "\nl: " + flowList("*s", 500) + "\n",
+			err:   aliaslimit.ErrExcessiveAliasing,
+		},
+		"aliases to an int-tagged scalar": {
+			input: "s: &s !!int " + strings.Repeat("1", 2000) + "\nl: " + flowList("*s", 500) + "\n",
+			err:   aliaslimit.ErrExcessiveAliasing,
+		},
+		"aliases to a string tag over an alias to a scalar": {
+			// The decoder converts a again at each *s, so each *s
+			// copies its text.
+			input: longScalar + "s: &s !!str *a\nl: " + flowList("*s", 500) + "\n",
+			err:   aliaslimit.ErrExcessiveAliasing,
+		},
+		"aliases to a custom tag under a secondary tag directive": {
+			// After a %TAG directive that redefines the "!!" handle, the
+			// decoder writes out the value under every tag as text, so
+			// each *s copies its text.
+			input: "%TAG !! tag:example.com,2000:\n---\ns: &s !foo " + strings.Repeat("x", 2000) +
+				"\nl: " + flowList("*s", 500) + "\n",
+			err: aliaslimit.ErrExcessiveAliasing,
+		},
+		"a few aliases to a string-tagged scalar": {
+			input: "s: &s !!str " + strings.Repeat("x", 2000) + "\nl: " + flowList("*s", 2) + "\n",
+		},
+		"aliases to a custom tag over a string-tagged scalar": {
+			// The decoder shares the value of s at each *t.
+			input: "s: &s !!str " + strings.Repeat("x", 2000) + "\nt: &t !foo *s\nl: " + flowList("*t", 500) + "\n",
+		},
 		"alias keys to a binary scalar": {
 			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
 				"l: " + flowList("{? *b : 1}", 500) + "\n",
