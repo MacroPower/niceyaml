@@ -202,7 +202,7 @@
 //	reg := schema.NewRegistry(schema.WithResolvers(
 //	    schema.Directive(),                                          // Explicit user intent.
 //	    schema.When(matcher.Content(...), schema.Embedded(...)),     // By content.
-//	    schema.When(matcher.MustFilePath(...), schema.File(...)),     // By path.
+//	    schema.When(matcher.MustFilePath(...), schema.File(...)),    // By path.
 //	))
 //
 // Implement [Resolver], or wrap a function in [ResolverFunc], for
