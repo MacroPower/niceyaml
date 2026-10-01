@@ -724,6 +724,179 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`created: 2001-12-14T21:59:43-05:00`),
 			want:    true,
 		},
+		"zero time matches zero date": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input:   stringtest.Input(`created: 0001-01-01`),
+			want:    true,
+		},
+		"zero time matches zero timestamp": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input:   stringtest.Input(`created: 0001-01-01T00:00:00Z`),
+			want:    true,
+		},
+		"zero time matches tagged zero date": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input:   stringtest.Input(`created: !!timestamp 0001-01-01`),
+			want:    true,
+		},
+		"zero time matches tagged block zero date": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input: stringtest.Input(`
+				created: !!timestamp |-
+				  0001-01-01
+			`),
+			want: true,
+		},
+		"zero time does not match word": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input:   stringtest.Input(`created: hello`),
+			want:    false,
+		},
+		"zero time does not match quoted string": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input:   stringtest.Input(`created: "x"`),
+			want:    false,
+		},
+		"zero time does not match empty string": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input:   stringtest.Input(`created: ""`),
+			want:    false,
+		},
+		"zero time does not match plain float": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input:   stringtest.Input(`created: 1e3`),
+			want:    false,
+		},
+		"zero time does not match tagged word": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input:   stringtest.Input(`created: !!timestamp hello`),
+			want:    false,
+		},
+		"zero time does not match tagged integer": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input:   stringtest.Input(`created: !!timestamp 5`),
+			want:    false,
+		},
+		"zero time does not match date under int tag": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input:   stringtest.Input(`created: !!timestamp !!int 2001-12-14`),
+			want:    false,
+		},
+		"zero time does not match date under float tag": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input:   stringtest.Input(`created: !!timestamp !!float 2001-12-14`),
+			want:    false,
+		},
+		"time matches date under str tag": {
+			matcher: matcher.Content(createdPath, time.Date(2001, 12, 14, 0, 0, 0, 0, time.UTC)),
+			input:   stringtest.Input(`created: !!timestamp !!str 2001-12-14`),
+			want:    true,
+		},
+		"zero time does not match aliased tagged word": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input: stringtest.Input(`
+				x: &a !!timestamp hello
+				created: *a
+			`),
+			want: false,
+		},
+		"time matches tagged alias to date": {
+			matcher: matcher.Content(createdPath, time.Date(2001, 12, 14, 0, 0, 0, 0, time.UTC)),
+			input: stringtest.Input(`
+				x: &a 2001-12-14
+				created: !!timestamp *a
+			`),
+			want: true,
+		},
+		"zero time does not match tagged alias to word": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input: stringtest.Input(`
+				x: &a hello
+				created: !!timestamp *a
+			`),
+			want: false,
+		},
+		"zero time matches tagged alias to zero date": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input: stringtest.Input(`
+				x: &a 0001-01-01
+				created: !!timestamp *a
+			`),
+			want: true,
+		},
+		"zero time matches tagged alias to the nearest anchor before it": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input: stringtest.Input(`
+				x: &a hello
+				y: &a 0001-01-01
+				created: !!timestamp *a
+			`),
+			want: true,
+		},
+		"zero time does not match tagged alias to a word before a later anchor": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input: stringtest.Input(`
+				x: &a hello
+				created: !!timestamp *a
+				y: &a 0001-01-01
+			`),
+			want: false,
+		},
+		"zero time matches tagged alias through a second tagged alias": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input: stringtest.Input(`
+				x: &a 0001-01-01
+				y: &b !!timestamp *a
+				created: !!timestamp *b
+			`),
+			want: true,
+		},
+		"zero time compares tagged alias through a second alias to word as the decode": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input: stringtest.Input(`
+				x: &a hello
+				y: &b !!timestamp *a
+				created: !!timestamp *b
+			`),
+			want: true,
+		},
+		"zero time does not match alias to tagged alias to word": {
+			matcher: matcher.Content(createdPath, time.Time{}),
+			input: stringtest.Input(`
+				x: &a hello
+				y: &b !!timestamp *a
+				created: *b
+			`),
+			want: false,
+		},
+		"pointer zero time does not match word": {
+			matcher: matcher.Content(createdPath, new(time.Time)),
+			input:   stringtest.Input(`created: hello`),
+			want:    false,
+		},
+		"any zero time does not match tagged word": {
+			matcher: matcher.Content[any](createdPath, time.Time{}),
+			input:   stringtest.Input(`created: !!timestamp hello`),
+			want:    false,
+		},
+		"any zero time does not match date under int tag": {
+			matcher: matcher.Content[any](createdPath, time.Time{}),
+			input:   stringtest.Input(`created: !!timestamp !!int 2001-12-14`),
+			want:    false,
+		},
+		"array zero time element does not match word": {
+			matcher: matcher.Content(createdPath, [1]time.Time{}),
+			input:   stringtest.Input(`created: [hello]`),
+			want:    false,
+		},
+		"array time element matches tagged alias to date": {
+			matcher: matcher.Content(createdPath, [1]time.Time{time.Date(2001, 12, 14, 0, 0, 0, 0, time.UTC)}),
+			input: stringtest.Input(`
+				x: &a 2001-12-14
+				created: [!!timestamp *a]
+			`),
+			want: true,
+		},
 		"any string does not match number": {
 			matcher: matcher.Content[any](versionPath, "1"),
 			input:   stringtest.Input(`version: 1`),
@@ -1107,6 +1280,9 @@ func TestContent(t *testing.T) {
 			n: &n null
 			k: &k i
 			o: &o {i: null}
+			d: &d 2001-12-14
+			z: &z 0001-01-01
+			w: &w hello
 		`)))
 
 		// Match cannot see an unmarshaler that an option gives a type, so
@@ -1128,10 +1304,27 @@ func TestContent(t *testing.T) {
 
 				return nil
 			}),
+			yaml.CustomUnmarshaler(func(v *time.Time, text []byte) error {
+				if string(text) == "never" {
+					return nil
+				}
+
+				t, err := time.Parse("01/02/2006", string(text))
+				if err != nil {
+					return fmt.Errorf("read date: %w", err)
+				}
+
+				*v = t
+
+				return nil
+			}),
 		)
+
+		date := time.Date(2001, 12, 14, 0, 0, 0, 0, time.UTC)
 
 		tcs := map[string]struct {
 			matcher matcher.Matcher
+			err     error
 			input   string
 			opts    []niceyaml.DecodeOption
 			want    bool
@@ -1238,6 +1431,59 @@ func TestContent(t *testing.T) {
 				opts:    []niceyaml.DecodeOption{custom},
 				want:    false,
 			},
+			"alias to a reference anchor is an error": {
+				matcher: matcher.Content(createdPath, date),
+				input:   `created: *d`,
+				opts:    []niceyaml.DecodeOption{refs},
+				err:     paths.ErrAlias,
+			},
+			"tagged alias to a reference anchor is an error": {
+				matcher: matcher.Content(createdPath, date),
+				input:   `created: !!timestamp *d`,
+				opts:    []niceyaml.DecodeOption{refs},
+				err:     paths.ErrAlias,
+			},
+			"alias that leads to a tagged alias to a reference anchor is an error": {
+				matcher: matcher.Content(createdPath, time.Time{}),
+				input: stringtest.Input(`
+					x: &x !!timestamp *z
+					created: *x
+				`),
+				opts: []niceyaml.DecodeOption{refs},
+				err:  paths.ErrAlias,
+			},
+			"array time element matches a tagged alias to a reference anchor": {
+				matcher: matcher.Content(createdPath, [1]time.Time{date}),
+				input:   `created: [!!timestamp *d]`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    true,
+			},
+			"struct time field matches a tagged alias to a reference anchor": {
+				matcher: matcher.Content(createdPath, struct {
+					A time.Time `yaml:"a"`
+				}{A: date}),
+				input: `created: {a: !!timestamp *d}`,
+				opts:  []niceyaml.DecodeOption{refs},
+				want:  true,
+			},
+			"array zero time element compares a tagged alias to a reference word as the decode": {
+				matcher: matcher.Content(createdPath, [1]time.Time{}),
+				input:   `created: [!!timestamp *w]`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    true,
+			},
+			"time an option reads from other text compares the decode": {
+				matcher: matcher.Content(createdPath, date),
+				input:   `created: 12/14/2001`,
+				opts:    []niceyaml.DecodeOption{custom},
+				want:    true,
+			},
+			"zero time an option reads from other text does not match": {
+				matcher: matcher.Content(createdPath, time.Time{}),
+				input:   `created: never`,
+				opts:    []niceyaml.DecodeOption{custom},
+				want:    false,
+			},
 		}
 
 		for name, tc := range tcs {
@@ -1246,20 +1492,51 @@ func TestContent(t *testing.T) {
 
 				doc := yamltest.FirstDocument(t, tc.input)
 
-				got := matchInDecode(t, tc.matcher, doc, tc.opts...)
+				got, err := matchInDecode(t, tc.matcher, doc, tc.opts...)
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err)
+				} else {
+					require.NoError(t, err)
+				}
+
 				assert.Equal(t, tc.want, got)
 			})
 		}
 	})
 
-	t.Run("alias without an anchor is an error", func(t *testing.T) {
+	t.Run("alias that does not resolve is an error", func(t *testing.T) {
 		t.Parallel()
 
-		m := matcher.Content(kindPath, "Deployment")
-		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: *missing`))
+		// A tag on the alias changes nothing.
+		tcs := map[string]struct {
+			matcher matcher.Matcher
+			input   string
+		}{
+			"alias without an anchor": {
+				matcher: matcher.Content(kindPath, "Deployment"),
+				input:   `kind: *missing`,
+			},
+			"tagged alias without an anchor": {
+				matcher: matcher.Content(createdPath, time.Time{}),
+				input:   `created: !!timestamp *missing`,
+			},
+			"tagged alias to itself": {
+				matcher: matcher.Content(createdPath, time.Time{}),
+				input:   `created: &a !!timestamp *a`,
+			},
+		}
 
-		_, err := m.Match(t.Context(), doc)
-		require.ErrorIs(t, err, paths.ErrAlias)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				ok, err := tc.matcher.Match(t.Context(), doc)
+				require.ErrorIs(t, err, paths.ErrAlias)
+				assert.False(t, ok)
+			})
+		}
 	})
 
 	t.Run("wildcard path is an error", func(t *testing.T) {
@@ -1412,8 +1689,10 @@ func TestContent_ContextEnded(t *testing.T) {
 }
 
 // matchInDecode runs m on the Node that a decode of doc with opts hands
-// its validator, and fails the test when the matcher cannot decide.
-func matchInDecode(t *testing.T, m matcher.Matcher, doc *niceyaml.Node, opts ...niceyaml.DecodeOption) bool {
+// its validator, and returns what m returns.
+func matchInDecode(
+	t *testing.T, m matcher.Matcher, doc *niceyaml.Node, opts ...niceyaml.DecodeOption,
+) (bool, error) {
 	t.Helper()
 
 	var (
@@ -1429,9 +1708,8 @@ func matchInDecode(t *testing.T, m matcher.Matcher, doc *niceyaml.Node, opts ...
 
 	_, err := doc.Decode[any](t.Context(), append(opts, niceyaml.WithValidator(validator))...)
 	require.NoError(t, err)
-	require.NoError(t, matchErr)
 
-	return got
+	return got, matchErr //nolint:wrapcheck // The test inspects the error of the match.
 }
 
 // methodString is a string type with a method that plays no part in

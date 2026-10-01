@@ -19,6 +19,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -50,9 +51,14 @@ type contentMatcher[T comparable] struct {
 // [time.Duration] reads from the text of a scalar, so timeout: "5s" and
 // timeout: 5s both match 5*time.Second. A [time.Time] matches a timestamp
 // that names the same instant, whatever its offset, so
-// 2001-12-14T21:59:43-05:00 matches the same moment in UTC. A pointer
-// want matches the value it points to. A null matches only a nil want,
-// such as Content[any](path, nil) or a nil pointer. When T is an
+// 2001-12-14T21:59:43-05:00 matches the same moment in UTC. The decoder
+// reads text that is no timestamp, such as created: hello, as the zero
+// time, and a zero [time.Time] does not match such text. A tagged
+// alias, as in !!timestamp *d, is the exception when its anchor holds
+// a tagged alias in turn. Match does not follow that second alias, so
+// it compares the time go-yaml decodes. A pointer want matches the
+// value it points to. A null matches only a nil want, such as
+// Content[any](path, nil) or a nil pointer. When T is an
 // interface, two numbers compare by value whatever their Go types, so
 // Content[any](path, 1) matches an integer the decoder reads as a
 // uint64. An array or struct want, other than a [time.Time], matches
@@ -96,12 +102,13 @@ type contentMatcher[T comparable] struct {
 // does the other errors [niceyaml.Node.DecodeInto] names, so Match
 // returns the error. Any other
 // error from the read comes back as the error, so a registry stops at the
-// document rather than routing it elsewhere. Such errors include an alias
-// on the path that names no anchor, a path with a wildcard selector, and
-// a context that ended. Match also refuses a document whose aliases would
-// make the read cost far more than the document holds. It refuses such a
-// document before it decodes anything, as the schema validator does, with
-// an error matching
+// document rather than routing it elsewhere. Such errors include a path
+// with a wildcard selector and a context that ended. They also include an
+// alias on the path, tagged or not, that names no anchor before it in the
+// document, even when a reference document holds an anchor of that name.
+// Match also refuses a document whose aliases would make the read cost
+// far more than the document holds. It refuses such a document before it
+// decodes anything, as the schema validator does, with an error matching
 // [go.jacobcolvin.com/niceyaml/schema.ErrExcessiveAliasing]:
 //
 //	// Matches kind: Deployment.
@@ -667,10 +674,13 @@ func matchScalar(node *niceyaml.Node, raw any, got, want reflect.Value) bool {
 
 	// == on a time.Time also compares its *time.Location, and the decoder
 	// builds a fresh one for each offset it parses, so times compare by
-	// instant.
+	// instant. The decoder also reads text that is no timestamp as the
+	// zero time, so a zero time matches only when node holds a timestamp.
+	// Any other time comes from text the decoder parsed, and it matches
+	// by its instant alone.
 	if gt, ok := reflect.TypeAssert[time.Time](got); ok {
 		if wt, ok := reflect.TypeAssert[time.Time](want); ok {
-			return gt.Equal(wt)
+			return gt.Equal(wt) && (!gt.IsZero() || isTimestamp(node, raw))
 		}
 	}
 
@@ -729,6 +739,16 @@ var (
 		reflect.TypeFor[time.Duration](),
 		reflect.TypeFor[time.Time](),
 		reflect.TypeFor[yaml.MapItem](),
+	}
+
+	// The layouts go-yaml parses a [time.Time] from, as its unexported
+	// allowedTimestampFormats lists them. The decoder yields the zero
+	// time, and reports nothing, for text that fits none of them.
+	timestampLayouts = []string{
+		"2006-1-2T15:4:5.999999999Z07:00",
+		"2006-1-2t15:4:5.999999999Z07:00",
+		"2006-1-2 15:4:5.999999999",
+		"2006-1-2",
 	}
 
 	// The pattern of the decimal and exponent spellings of a float in the
@@ -865,6 +885,77 @@ func isNonNumberString(node *niceyaml.Node, raw any) bool {
 	_, ok := rawFloat(raw)
 
 	return !ok
+}
+
+// isTimestamp reports whether node holds text that fits one of the
+// timestampLayouts, where raw holds the value of node as the YAML types
+// name it. A !!timestamp tag makes raw a [time.Time] whatever text it
+// holds, so isTimestamp then reads the text that [derefContent] finds
+// under the tag. A second tag, such as !!int, changes the value the
+// decoder parses, so that text must also name the instant in raw. When
+// derefContent finds no content, isTimestamp reports true.
+//
+// The timestampLayouts alone decide. For text that only an unmarshaler
+// registered with go-yaml for [time.Time] reads as a time, isTimestamp
+// reports false, so a zero time that unmarshaler reads from such text
+// matches no want.
+func isTimestamp(node *niceyaml.Node, raw any) bool {
+	rt, tagged := raw.(time.Time)
+	if tagged {
+		content, held := derefContent(node)
+		if !held {
+			return true
+		}
+
+		switch v := content.(type) {
+		case *ast.StringNode:
+			raw = v.Value
+		case *ast.LiteralNode:
+			raw = v.Value.Value
+		default:
+		}
+	}
+
+	s, ok := raw.(string)
+	if !ok {
+		return false
+	}
+
+	for _, layout := range timestampLayouts {
+		t, err := time.Parse(layout, s)
+		if err == nil {
+			return !tagged || t.Equal(rt)
+		}
+	}
+
+	return false
+}
+
+// derefContent returns the content under node, and reports whether it
+// found that content. It looks through what [astnode.Content] looks
+// through and follows one alias to its anchor. It finds no content for
+// an alias whose anchor holds an alias in turn. Following one alias
+// alone keeps the cost of a node the same however long a chain of
+// aliases it starts. The path that selects node has already followed an
+// alias with no tag on it, so the alias here sits under a tag. That
+// path resolves only when the alias under the tag has an anchor, so
+// the alias here has one.
+func derefContent(node *niceyaml.Node) (ast.Node, bool) {
+	content := astnode.Content(node.AST())
+
+	alias, ok := content.(*ast.AliasNode)
+	if !ok {
+		return content, true
+	}
+
+	anchor, _ := docstate.Of(node).Resolver().Anchor(alias) //nolint:errcheck // The path resolved the alias.
+
+	content = astnode.Content(anchor)
+	if _, ok := content.(*ast.AliasNode); ok {
+		return nil, false
+	}
+
+	return content, true
 }
 
 // strTagURI is the full name of the !!str tag, which a verbatim tag
