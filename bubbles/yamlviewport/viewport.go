@@ -986,7 +986,7 @@ func (m *Model) refreshSearch() {
 		m.updateSideBySideSearchState()
 
 	default:
-		m.updateSearchState(m.baseLeft)
+		m.updateSearchState()
 	}
 
 	// Every caller resets the index before a new term or new content, so
@@ -1173,12 +1173,8 @@ func (m *Model) updateSideBySideSearchState() {
 	// the inserted line that replaced it share a position, and the left
 	// pane's match comes first there.
 	slices.SortFunc(combined, func(a, b searchMatch) int {
-		if a.rng.Start.Line != b.rng.Start.Line {
-			return cmp.Compare(a.rng.Start.Line, b.rng.Start.Line)
-		}
-
-		if a.rng.Start.Col != b.rng.Start.Col {
-			return cmp.Compare(a.rng.Start.Col, b.rng.Start.Col)
+		if c := comparePos(a.rng.Start, b.rng.Start); c != 0 {
+			return c
 		}
 
 		switch {
@@ -1195,15 +1191,15 @@ func (m *Model) updateSideBySideSearchState() {
 }
 
 // updateSearchState gathers the matches of a non-empty search term in the
-// given lines. It needs a searcher, and it leaves the match index to
-// refreshSearch.
+// unified view, which shows every match in the left base view. It needs a
+// searcher, and it leaves the match index to refreshSearch.
 //
-// It reloads the searcher only when the lines changed since the last load, so
-// typing a search term does not rebuild the index on every keystroke. A nil
-// Index counts as loaded.
-func (m *Model) updateSearchState(lines *line.View) {
+// It reloads the searcher only when the content changed since the last load,
+// so typing a search term does not rebuild the index on every keystroke. A
+// nil Index counts as loaded.
+func (m *Model) updateSearchState() {
 	if m.searcherStale {
-		m.index = m.searcher.Load(lines.Lines())
+		m.index = m.searcher.Load(m.baseLeft.Lines())
 
 		m.searcherStale = false
 	}
@@ -1211,13 +1207,9 @@ func (m *Model) updateSearchState(lines *line.View) {
 	// The unified view shows every match on the left, and its matches do
 	// not use inLeft. An Index may return matches in any order, so sort
 	// them into document order as the side-by-side path does.
-	m.leftMatches = heldMatches(lines, find(m.index, m.searchTerm))
+	m.leftMatches = heldMatches(m.baseLeft, find(m.index, m.searchTerm))
 	slices.SortStableFunc(m.leftMatches, func(a, b position.Range) int {
-		if a.Start.Line != b.Start.Line {
-			return cmp.Compare(a.Start.Line, b.Start.Line)
-		}
-
-		return cmp.Compare(a.Start.Col, b.Start.Col)
+		return comparePos(a.Start, b.Start)
 	})
 
 	m.rightMatches = nil
@@ -1226,6 +1218,12 @@ func (m *Model) updateSearchState(lines *line.View) {
 	for _, rng := range m.leftMatches {
 		m.searchMatches = append(m.searchMatches, searchMatch{rng: rng})
 	}
+}
+
+// comparePos orders positions by line and then by column, the document
+// order that both search paths sort their matches into.
+func comparePos(a, b position.Position) int {
+	return cmp.Or(cmp.Compare(a.Line, b.Line), cmp.Compare(a.Col, b.Col))
 }
 
 // find returns the matches of search in idx. A [Searcher] may return a nil
