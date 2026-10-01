@@ -56,9 +56,15 @@ const onWindows = runtime.GOOS == "windows"
 //
 // The registry reads only a regular file of at most 10 MB, the limit it
 // sets on a response from a [URL], so a path that names a directory, a
-// device, or a named pipe fails to load. Given [WithFS], a named pipe that
-// replaces the file while the registry reads it can still block the read,
-// since an [fs.FS] opens a file with no flags.
+// device, or a named pipe fails to load. Given [WithFS], the registry
+// checks the path with [fs.Stat] before it opens the file, and an [fs.FS]
+// opens a file with no flags, so a named pipe can still block the read
+// until a writer opens it. A file system that implements [fs.StatFS],
+// such as [os.DirFS] or the one [os.Root.FS] returns, answers the check
+// without an open, so only a named pipe that replaces the file while the
+// registry reads it blocks. On any other file system, such as the one
+// [fs.Sub] wraps around [os.DirFS], [fs.Stat] opens the file to check it,
+// so a named pipe already at the path blocks the read as well.
 //
 // File is for a path written in the program, so it panics on an empty
 // path, as [Loadable] panics on an empty key, and when it cannot get the
@@ -224,7 +230,10 @@ func readFS(fsys fs.FS, name, abs, wd string) ([]byte, error) {
 	// follows a symbolic link, so a link to a device is not regular.
 	// Unlike readFile, the open takes no flags, since [fs.FS] has none
 	// to pass. A FIFO that replaces the file after the Stat therefore
-	// blocks the open until a writer opens the other end.
+	// blocks the open until a writer opens the other end. When fsys does
+	// not implement [fs.StatFS], as the [fs.Sub] wrapper of [os.DirFS]
+	// does not, fs.Stat opens the file to stat it, so a FIFO already at
+	// the path blocks the Stat itself.
 	info, err := fs.Stat(fsys, fsPath)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", name, err)
