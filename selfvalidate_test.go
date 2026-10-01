@@ -1689,6 +1689,98 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.EqualError(t, err, "$.m.NaN.n: negative -1")
 	})
 
+	t.Run("a pointer key that stays a pointer reports its type", func(t *testing.T) {
+		t.Parallel()
+
+		// Each call returns a pointer to a new slice that holds itself,
+		// which no formatting finishes.
+		cycle := func() *[]any {
+			s := []any{nil}
+			s[0] = s
+
+			return &s
+		}
+
+		type pointers struct {
+			M map[*[]any]signed `yaml:"m"`
+		}
+
+		type pointersToPointers struct {
+			M map[**[]any]signed `yaml:"m"`
+		}
+
+		type interfaces struct {
+			M map[any]signed `yaml:"m"`
+		}
+
+		type point struct{ X, Y int }
+
+		// The document leaves each map as the caller filled it.
+		tcs := map[string]struct {
+			target func() any
+			want   string
+		}{
+			"slice": {
+				target: func() any {
+					return &pointers{M: map[*[]any]signed{{1, 2}: {N: -1}}}
+				},
+				want: "$.m.'(*[]interface {})'.n: negative -1",
+			},
+			"slices of one type": {
+				target: func() any {
+					return &pointers{M: map[*[]any]signed{{2}: {N: -2}, {1}: {N: -1}}}
+				},
+				want: "$.m.'(*[]interface {})'.n: negative -1\n" +
+					"$.m.'(*[]interface {})'.n: negative -2",
+			},
+			"slice that holds itself": {
+				target: func() any {
+					return &pointers{M: map[*[]any]signed{cycle(): {N: -1}}}
+				},
+				want: "$.m.'(*[]interface {})'.n: negative -1",
+			},
+			"pointer to a slice that holds itself": {
+				target: func() any {
+					p := cycle()
+
+					return &pointersToPointers{M: map[**[]any]signed{&p: {N: -1}}}
+				},
+				want: "$.m.'(*[]interface {})'.n: negative -1",
+			},
+			"slice that holds itself behind an interface": {
+				target: func() any {
+					return &interfaces{M: map[any]signed{cycle(): {N: -1}}}
+				},
+				want: "$.m.'(*[]interface {})'.n: negative -1",
+			},
+			"struct behind an interface": {
+				target: func() any {
+					return &interfaces{M: map[any]signed{&point{X: 1, Y: 2}: {N: -1}}}
+				},
+				want: "$.m.'(*niceyaml_test.point)'.n: negative -1",
+			},
+			"int behind an interface": {
+				target: func() any {
+					n := 1
+
+					return &interfaces{M: map[any]signed{&n: {N: -1}}}
+				},
+				want: "$.m.'(*int)'.n: negative -1",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, "{}\n")
+
+				err := dd.DecodeInto(t.Context(), tc.target())
+				require.EqualError(t, err, tc.want)
+			})
+		}
+	})
+
 	t.Run("time keys of one instant and zone report no position", func(t *testing.T) {
 		t.Parallel()
 

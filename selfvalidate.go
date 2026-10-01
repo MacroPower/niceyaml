@@ -580,8 +580,9 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 		// that no name tells apart, such as several NaN keys beside one
 		// the document spells NaN. A `<<` merge can bring in such a key
 		// beside one the mapping spells, even where the parser rejects
-		// duplicate keys. The errors under such a path bind with no
-		// position.
+		// duplicate keys. Several pointer keys of one type share a
+		// segment too, when [mapKey] names them by that type. The errors
+		// under such a path bind with no position.
 		ambiguous := map[string]bool{}
 
 		for i := 1; i < len(entries); i++ {
@@ -1348,9 +1349,10 @@ func nameKey(key reflect.Value) (any, bool) {
 // decodes a pointer key as the value it points to, that value, rather
 // than the address, names the key. The value a pointer points to may
 // hold a slice or map that refers back to itself, which no formatting
-// finishes, so a pointer to a value that cannot key a map stays as it
-// is. A pointer held in an interface stays too, since go-yaml decodes
-// no key of an interface type to one.
+// finishes. So a pointer to a value that cannot key a map stays a
+// pointer, and [mapKey] names it by its type. A pointer held in an
+// interface stays too, since go-yaml decodes no key of an interface
+// type to one.
 func pointee(key reflect.Value) reflect.Value {
 	if key.Kind() == reflect.Pointer && !key.IsNil() && key.Elem().Comparable() {
 		return key.Elem()
@@ -1363,6 +1365,13 @@ func pointee(key reflect.Value) reflect.Value {
 // the document spells it, under the value [nameKey] gives, or else the
 // string itself, or the formatted value of any other key. A pointer key
 // stands for the value it points to, as [pointee] gives it.
+//
+// A non-nil pointer left after [pointee], alone or behind an interface,
+// gives its type in parentheses, such as (*[]interface {}). Formatting
+// it would print either the value it points to, which may refer back
+// to itself so that no formatting finishes, or its address, which
+// changes from run to run. Several such keys of one type then share a
+// path.
 func mapKey(key reflect.Value, names map[any]string) string {
 	if k, ok := nameKey(key); ok {
 		if name, ok := names[k]; ok {
@@ -1373,6 +1382,15 @@ func mapKey(key reflect.Value, names map[any]string) string {
 	key = pointee(key)
 	if key.Kind() == reflect.String {
 		return key.String()
+	}
+
+	v := key
+	if v.Kind() == reflect.Interface && !v.IsNil() {
+		v = v.Elem()
+	}
+
+	if v.Kind() == reflect.Pointer && !v.IsNil() {
+		return "(" + v.Type().String() + ")"
 	}
 
 	return fmt.Sprint(key.Interface())
