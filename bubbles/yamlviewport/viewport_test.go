@@ -4835,6 +4835,46 @@ func TestViewport_ZeroValue(t *testing.T) {
 	assert.Empty(t, m.View())
 }
 
+func TestViewport_ZeroValueSearchIndex(t *testing.T) {
+	t.Parallel()
+
+	// A zero Model reported index 0 with no matches until a revision or a
+	// new search term reset it.
+	tcs := map[string]struct {
+		setup func(m *yamlviewport.Model)
+	}{
+		"untouched": {
+			setup: func(*yamlviewport.Model) {},
+		},
+		"sized": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetHeight(3)
+				m.SetWidth(20)
+			},
+		},
+		"empty search term": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetSearchTerm("")
+				m.SearchNext()
+				m.SearchPrevious()
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var m yamlviewport.Model
+
+			tc.setup(&m)
+
+			assert.Equal(t, 0, m.SearchCount())
+			assert.Equal(t, -1, m.SearchIndex())
+		})
+	}
+}
+
 func TestViewport_NilPrinterSelectsDefault(t *testing.T) {
 	t.Parallel()
 

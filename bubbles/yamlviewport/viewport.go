@@ -2015,6 +2015,12 @@ func (m *Model) navigateSearch(delta int) {
 // SearchIndex returns the current search match index (0-based), or -1 if no
 // matches.
 func (m *Model) SearchIndex() int {
+	// The stored index of a zero Model stays 0 until a search runs, so the
+	// match count decides whether a current match exists.
+	if len(m.searchMatches) == 0 {
+		return -1
+	}
+
 	return m.searchIndex
 }
 
