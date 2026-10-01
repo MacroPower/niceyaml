@@ -51,9 +51,10 @@ func CheckDecode(n Node) error {
 // out for the node. To decode a type with an UnmarshalText method, or one
 // that reads YAML bytes, the decoder writes the node out as text with
 // each alias in full. The count covers the whole document as
-// [CheckDecode] does. It reads every node as text, so each scalar counts one node per
-// byte of its text. A node without an alias passes, as does a nil Node.
-// The document keeps the count, as it keeps the count of CheckDecode.
+// [CheckDecode] does. It reads every node as text, so each scalar counts
+// one node per byte of its text. A node without an alias passes, as does
+// a nil Node. The document keeps the count, as it keeps the count of
+// CheckDecode.
 //
 // A caller that decodes n into a type that [DecodesText] reports runs
 // CheckDecodeText as well as CheckDecode.
@@ -80,8 +81,8 @@ func CheckDecodeText(n Node) error {
 // [CheckDecode] and [CheckDecodeText] cannot see a reference document,
 // so they count the alias as one node whatever its anchor holds. A
 // caller that reads a decoded value again at every alias applies
-// [Excessive] to that value when the document holds a reference alias.
-// A nil Node holds none.
+// [aliaslimit.Excessive] to that value when the document holds a
+// reference alias. A nil Node holds none.
 //
 // The answer depends on the document alone, so the document keeps it, as
 // it keeps the count of CheckDecode.
