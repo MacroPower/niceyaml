@@ -172,6 +172,134 @@ func TestResolver_Node(t *testing.T) {
 	}
 }
 
+func TestResolver_NodeFrom(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err   error
+		input string
+		from  string
+		path  string
+		want  string
+	}{
+		"child": {
+			input: "a:\n  b:\n    c: x\n",
+			from:  "$.a",
+			path:  "$.b.c",
+			want:  "x",
+		},
+		"index": {
+			input: "a: [x, [y, z]]\n",
+			from:  "$.a",
+			path:  "$[1][0]",
+			want:  "y",
+		},
+		"root path selects the node itself": {
+			input: "a:\n  b: x\n",
+			from:  "$.a.b",
+			path:  "$",
+			want:  "x",
+		},
+		"from a node an alias leads to": {
+			input: "base: &b {k: {v: x}}\nref: *b\n",
+			from:  "$.ref",
+			path:  "$.k.v",
+			want:  "x",
+		},
+		"key a merge brings in": {
+			input: "base: &b {k: x}\nm:\n  <<: *b\n  own: 1\n",
+			from:  "$.m",
+			path:  "$.k",
+			want:  "x",
+		},
+		"from a tagged mapping": {
+			input: "a: !!map {b: x}\n",
+			from:  "$.a",
+			path:  "$.b",
+			want:  "x",
+		},
+		"key of an entry": {
+			input: "a:\n  b: x\n",
+			from:  "$.a",
+			path:  "$.b~",
+			want:  "b",
+		},
+		"leading key selects the node itself": {
+			input: "a:\n  b: x\n",
+			from:  "$.a.b",
+			path:  "$~",
+			want:  "x",
+		},
+		"unknown alias": {
+			input: "a:\n  b: *nope\n",
+			from:  "$.a",
+			path:  "$.b",
+			err:   paths.ErrAlias,
+		},
+		"wildcard": {
+			input: "a: [x, y]\n",
+			from:  "$.a",
+			path:  "$[*]",
+			err:   paths.ErrWildcard,
+		},
+		"missing path": {
+			input: "a:\n  b: x\n",
+			from:  "$.a",
+			path:  "$.c",
+			err:   paths.ErrNotFound,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input).File()
+			require.NoError(t, err)
+
+			r := paths.NewResolver(file.Docs[0])
+			from, path := paths.MustParse(tc.from), paths.MustParse(tc.path)
+
+			start, err := r.Node(from)
+			require.NoError(t, err)
+
+			node, err := r.NodeFrom(start, path)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, node.String())
+
+			// A `~` at the start of the path selects the start node, where
+			// the joined path selects the key of its entry.
+			if strings.HasPrefix(tc.path, "$~") {
+				return
+			}
+
+			joined, err := r.Node(from.Join(path))
+			require.NoError(t, err)
+			assert.Same(t, joined, node)
+		})
+	}
+
+	t.Run("nil node", func(t *testing.T) {
+		t.Parallel()
+
+		file, err := niceyaml.NewSourceFromString("a: x\n").File()
+		require.NoError(t, err)
+
+		r := paths.NewResolver(file.Docs[0])
+
+		for _, path := range []paths.Path{paths.Root(), paths.Root().Child("a"), paths.Root().Key()} {
+			_, err := r.NodeFrom(nil, path)
+			require.ErrorIs(t, err, paths.ErrNotFound, path.String())
+		}
+	})
+}
+
 func TestResolver_Token(t *testing.T) {
 	t.Parallel()
 

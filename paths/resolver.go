@@ -41,6 +41,38 @@ func (r *Resolver) Node(p Path) (ast.Node, error) {
 		return nil, err
 	}
 
+	return r.nodeOf(p, m)
+}
+
+// NodeFrom resolves the node at p from node, as [Resolver.Node] resolves
+// p from the root of the document. The node belongs to the document of
+// the Resolver, such as one that Node or NodeFrom returned. A caller that
+// walks down the document can resolve each step from the node above it,
+// rather than a longer path from the root each time:
+//
+//	spec, err := r.Node(paths.Root().Child("spec"))
+//	replicas, err := r.NodeFrom(spec, paths.Root().Child("replicas"))
+//
+// Where q is the path that resolves to node, NodeFrom gives the node
+// that q joined with p resolves to, unless p starts with the `~` selector
+// from [Path.Key]. A path starts at node as it would at the root, so a
+// `~` there selects node itself.
+//
+// Returns the errors [Resolver.Node] returns, other than
+// [ErrNoDocument]. A nil node holds nothing to resolve in, so NodeFrom
+// wraps [ErrNotFound] for it.
+func (r *Resolver) NodeFrom(node ast.Node, p Path) (ast.Node, error) {
+	m, err := p.singleFrom(r.resolver, node)
+	if err != nil {
+		return nil, err
+	}
+
+	return r.nodeOf(p, m)
+}
+
+// nodeOf returns the content of the node of m, a match of p, as
+// [Resolver.Node] gives it.
+func (r *Resolver) nodeOf(p Path, m match) (ast.Node, error) {
 	node, err := r.resolver.deref(m.node)
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s: %w", p, err)

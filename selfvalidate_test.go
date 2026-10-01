@@ -1998,6 +1998,145 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.EqualError(t, err, "2001:22: $.last.0x10.price: negative price")
 	})
 
+	t.Run("a nested map reports its keys as the document spells them", func(t *testing.T) {
+		t.Parallel()
+
+		// The walk resolves the node of each value from the node of the
+		// value above it, so these maps resolve from a parent node rather
+		// than from the root, whether a map, a struct, or a list holds
+		// them.
+		type link struct {
+			Next  map[string]link  `yaml:"next"`
+			Items map[float64]item `yaml:"items"`
+		}
+
+		type chain struct {
+			Next  *chain           `yaml:"next"`
+			Items map[float64]item `yaml:"items"`
+			Ports map[port]string  `yaml:"ports"`
+			List  []chain          `yaml:"list"`
+		}
+
+		const depth = 1000
+
+		deep := strings.Repeat("{next: {a: ", depth) + "{items: {0x10: {price: -1}}}" + strings.Repeat("}}", depth)
+		deepChain := strings.Repeat("{next: ", depth) + "{items: {0x10: {price: -1}}}" + strings.Repeat("}", depth)
+
+		tcs := map[string]struct {
+			decode func(ctx context.Context, dd *niceyaml.Node) error
+			input  string
+			at     paths.Path
+			want   []string
+		}{
+			"deep chain": {
+				input: deep,
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[link](ctx)
+
+					return err
+				},
+				want: []string{fmt.Sprintf(
+					"1:%d: $%s.items.0x10.price: negative price",
+					strings.Index(deep, "-1")+1, strings.Repeat(".next.a", depth),
+				)},
+			},
+			"deep struct chain": {
+				input: deepChain,
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[chain](ctx)
+
+					return err
+				},
+				want: []string{fmt.Sprintf(
+					"1:%d: $%s.items.0x10.price: negative price",
+					strings.Index(deepChain, "-1")+1, strings.Repeat(".next", depth),
+				)},
+			},
+			"maps at every link of a chain": {
+				input: "items: {0x10: {price: -1}}\n" +
+					"next:\n" +
+					"  items: {0x10: {price: -2}}\n" +
+					"  next:\n" +
+					"    items: {0x10: {price: -3}}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[chain](ctx)
+
+					return err
+				},
+				want: []string{
+					"5:27: $.next.next.items.0x10.price: negative price",
+					"3:25: $.next.items.0x10.price: negative price",
+					"1:23: $.items.0x10.price: negative price",
+				},
+			},
+			"key below list elements": {
+				input: "list:\n  - {}\n  - list:\n      - ports: {70000: x}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[chain](ctx)
+
+					return err
+				},
+				want: []string{"4:17: $.list[1].list[0].ports.70000~: port out of range"},
+			},
+			"key below two maps": {
+				input: "a:\n  b:\n    70000: x\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[map[string]map[string]map[port]string](ctx)
+
+					return err
+				},
+				want: []string{"3:5: $.a.b.70000~: port out of range"},
+			},
+			"merge below a map": {
+				input: "defs: {base: &b {0x10: {price: -1}}}\nm: {n: {<<: *b}}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[map[string]map[string]map[float64]item](ctx)
+
+					return err
+				},
+				want: []string{
+					"1:32: $.defs.base.0x10.price: negative price",
+					"1:32: $.m.n.0x10.price: negative price",
+				},
+			},
+			"maps below a node at a path": {
+				input: "spec:\n  a:\n    0x10: {price: -1}\n",
+				at:    paths.Root().Child("spec"),
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[map[string]map[float64]item](ctx)
+
+					return err
+				},
+				want: []string{"3:19: $.a.0x10.price: negative price"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.at)
+
+				err := tc.decode(t.Context(), dd)
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+
+				got := []string{err.Error()}
+				if children := bound.Errors(); len(children) > 0 {
+					got = got[:0]
+
+					for _, child := range children {
+						got = append(got, child.Error())
+					}
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
 	t.Run("the keys of every map decode with one go-yaml decoder", func(t *testing.T) {
 		t.Parallel()
 

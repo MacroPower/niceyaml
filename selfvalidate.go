@@ -52,7 +52,7 @@ func selfValidate(ctx context.Context, v any, n *Node, opts []yaml.DecodeOption)
 		scanning: map[visit]bool{},
 		scanned:  map[visit]bool{},
 	}
-	w.walk(reflect.ValueOf(v), paths.Root(), nil)
+	w.walk(reflect.ValueOf(v), place{}, nil)
 
 	switch len(w.errs) {
 	case 0:
@@ -76,11 +76,13 @@ func selfValidate(ctx context.Context, v any, n *Node, opts []yaml.DecodeOption)
 // the first path. A parent on the second path still learns that the value
 // failed, even when a cycle holds the value. It reads the keys of a map
 // from the node the value decoded from, with the context and options it
-// decoded with, and finds that node through the [paths.Resolver] of the
-// document. The walk therefore binds the aliases of the document, and
-// reads the keys of each mapping on the way to a map once, however many
-// maps it meets. One go-yaml decoder decodes every key, so the walk
-// applies the options, and reads any reference files they name, once too.
+// decoded with. It finds that node through the [paths.Resolver] of the
+// document, which binds the aliases of the document once. It resolves
+// that node one step at a time from the node of the value above, as
+// [step] describes. It keeps the node of each step, so it resolves each
+// step on the way to a map once, however many maps lie below the step.
+// One go-yaml decoder decodes every key, so the walk applies the
+// options, and reads any reference files they name, once too.
 //
 // Before it reads the keys of a map, or walks the elements of a slice or
 // array, the walker scans the values below for one that implements
@@ -107,6 +109,9 @@ type selfWalker struct {
 	// for a map or slice covers only the values below it.
 	scanned map[visit]bool
 	errs    []error
+	// The node of the value the walk starts at, held as a [step] holds the
+	// node of its own value, once [selfWalker.nodeOf] resolves it.
+	start step
 	// The number of pointers, maps, and slices the walk has entered, which
 	// numbers each one in turn.
 	entered int
@@ -140,12 +145,79 @@ type walkResult struct {
 	reach int
 }
 
-// walk validates v and everything below it, with base as the path of v
+// place is where a value of the walk lies, held as the last [step] on the
+// way down from the value the walk starts at. A [paths.Path] copies its
+// selectors each time it grows, so a place builds the path of the value
+// only for an error of the value to rebase under. A step thus costs the
+// same however deep the value lies.
+//
+// The zero value is the place of the value the walk starts at.
+type place struct {
+	last *step
+}
+
+// step is one selector on the way to a value of the walk, held as a path
+// of that selector alone. The prev field holds the step before it, or nil
+// for the first step below the value the walk starts at. The key field
+// reports whether the selector is the `~` of [paths.Path.Key], which
+// follows the step of a map entry.
+//
+// The walk reads the keys of a map from the node the map decoded from,
+// and [selfWalker.nodeOf] resolves the node of a step from the node of
+// the step before. The node field holds the node once the walk resolves
+// it, and the resolved field reports whether it has, since a value the
+// document did not set has a nil node. The walk thus resolves each step
+// once, however many maps below the step need its node.
+type step struct {
+	prev     *step
+	node     ast.Node
+	selector paths.Path
+	key      bool
+	resolved bool
+}
+
+// child returns the place of the field or map entry name of the value
+// at p.
+func (p place) child(name string) place {
+	return p.then(paths.Root().Child(name), false)
+}
+
+// index returns the place of element i of the value at p.
+func (p place) index(i int) place {
+	return p.then(paths.Root().Index(i), false)
+}
+
+// key returns the place of the key of the map entry at p.
+func (p place) key() place {
+	return p.then(paths.Root().Key(), true)
+}
+
+// then returns the place one step below p, through selector, which is a
+// `~` when key is true.
+func (p place) then(selector paths.Path, key bool) place {
+	return place{last: &step{prev: p.last, selector: selector, key: key}}
+}
+
+// path returns the path of the value at p under the [Node] the walk
+// validates.
+func (p place) path() paths.Path {
+	var selectors []paths.Path
+
+	for s := p.last; s != nil; s = s.prev {
+		selectors = append(selectors, s.selector)
+	}
+
+	slices.Reverse(selectors)
+
+	return paths.Root().Join(selectors...)
+}
+
+// walk validates v and everything below it, with at as the place of v
 // in the document, and reports whether nothing under v failed. When v is
 // an inline struct, or a pointer to one, shadowed holds the names of the
 // fields of its parent that are not inline, as [selfWalker.children]
 // describes.
-func (w *selfWalker) walk(v reflect.Value, base paths.Path, shadowed map[string]bool) bool {
+func (w *selfWalker) walk(v reflect.Value, at place, shadowed map[string]bool) bool {
 	if !v.IsValid() {
 		return true
 	}
@@ -164,7 +236,7 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path, shadowed map[string]
 			return true
 		}
 
-		return w.walk(v.Elem(), base, nil)
+		return w.walk(v.Elem(), at, nil)
 
 	case reflect.Pointer, reflect.Map, reflect.Slice:
 		// A nil pointer holds no value to validate. A nil map or slice is
@@ -176,23 +248,23 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path, shadowed map[string]
 				return true
 			}
 
-			return w.validate(v, base)
+			return w.validate(v, at)
 		}
 
 		if !ownsAddress(v) {
 			if v.Kind() == reflect.Pointer {
-				return w.walk(v.Elem(), base, shadowed)
+				return w.walk(v.Elem(), at, shadowed)
 			}
 
-			return w.walkValue(v, base, shadowed)
+			return w.walkValue(v, at, shadowed)
 		}
 
-		return w.walkOwned(v, base, shadowed)
+		return w.walkOwned(v, at, shadowed)
 
 	default:
 	}
 
-	return w.walkValue(v, base, shadowed)
+	return w.walkValue(v, at, shadowed)
 }
 
 // walkValue validates v, a value that is no pointer or interface, and
@@ -200,20 +272,20 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path, shadowed map[string]
 // shadowed names are those [selfWalker.walk] takes. A struct the walk
 // cannot take the address of, such as one held by a map, walks as a
 // copy, so [exposed] can read its unexported embedded fields.
-func (w *selfWalker) walkValue(v reflect.Value, base paths.Path, shadowed map[string]bool) bool {
+func (w *selfWalker) walkValue(v reflect.Value, at place, shadowed map[string]bool) bool {
 	if v.Kind() == reflect.Struct {
 		v = addressable(v)
 	}
 
 	if !decodesItself(v.Type()) {
-		if !w.children(v, base, shadowed) {
+		if !w.children(v, at, shadowed) {
 			return false
 		}
-	} else if i, ok := decoderField(v.Type()); ok && !w.walk(v.Field(i), base, nil) {
+	} else if i, ok := decoderField(v.Type()); ok && !w.walk(v.Field(i), at, nil) {
 		return false
 	}
 
-	return w.validate(v, base)
+	return w.validate(v, at)
 }
 
 // exposed returns v, or a view of it that the walk can read when v is an
@@ -255,7 +327,7 @@ func addressable(v reflect.Value) reflect.Value {
 // inside a cycle, so its result waits on pending until the first value of
 // the cycle finishes. That value then sets its own
 // result for every value of the cycle.
-func (w *selfWalker) walkOwned(v reflect.Value, base paths.Path, shadowed map[string]bool) bool {
+func (w *selfWalker) walkOwned(v reflect.Value, at place, shadowed map[string]bool) bool {
 	key := visitOf(v)
 	if r, seen := w.walked[key]; seen {
 		w.reach = min(w.reach, r.reach)
@@ -273,9 +345,9 @@ func (w *selfWalker) walkOwned(v reflect.Value, base paths.Path, shadowed map[st
 	var ok bool
 
 	if v.Kind() == reflect.Pointer {
-		ok = w.walk(v.Elem(), base, shadowed)
+		ok = w.walk(v.Elem(), at, shadowed)
 	} else {
-		ok = w.walkValue(v, base, shadowed)
+		ok = w.walkValue(v, at, shadowed)
 	}
 
 	reach := w.reach
@@ -580,7 +652,7 @@ func reachesValidator(t reflect.Type, seen map[reflect.Type]bool) bool {
 // not inline also uses. The document sets such a field only for the
 // parent, so the walk passes over it. When v is an inline struct,
 // shadowed holds the names of those fields of the parent.
-func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[string]bool) bool {
+func (w *selfWalker) children(v reflect.Value, at place, shadowed map[string]bool) bool {
 	switch v.Kind() {
 	case reflect.Slice, reflect.Array, reflect.Map:
 		// An element, map key, or map value whose type holds no validator
@@ -604,11 +676,11 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 				continue
 			}
 
-			child, fieldShadowed := base, map[string]bool(nil)
+			child, fieldShadowed := at, map[string]bool(nil)
 			if field.inline {
 				fieldShadowed = fields.own
 			} else {
-				child = base.Child(field.name)
+				child = at.child(field.name)
 			}
 
 			if !w.walk(v.Field(field.index), child, fieldShadowed) {
@@ -618,7 +690,7 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 
 	case reflect.Slice, reflect.Array:
 		for i := range v.Len() {
-			if !w.walk(v.Index(i), base.Index(i), nil) {
+			if !w.walk(v.Index(i), at.index(i), nil) {
 				ok = false
 			}
 		}
@@ -633,7 +705,7 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 		// where the order can vary. Each value comes from the iteration
 		// rather than a lookup by its key, since a NaN key equals no key,
 		// itself included.
-		names := w.keyNames(base, v.Type().Key())
+		names := w.keyNames(w.nodeOf(at.last), v.Type().Key())
 
 		entries := make([]mapEntry, 0, v.Len())
 		shared := map[any]int{}
@@ -694,7 +766,7 @@ func (w *selfWalker) children(v reflect.Value, base paths.Path, shadowed map[str
 			}
 
 			seg := entries[0].seg
-			if !w.walkEntries(base.Child(seg), entries[:n], ambiguous[seg]) {
+			if !w.walkEntries(at.child(seg), entries[:n], ambiguous[seg]) {
 				ok = false
 			}
 
@@ -714,13 +786,13 @@ type mapEntry struct {
 	seg, typeName string
 }
 
-// walkEntries walks entries, the entries of a map that share path, and
-// reports whether nothing under them failed. The key of an entry walks
-// before its value, at the key of path. Since the entries share a path,
-// nothing in the map orders them, so the errors of each entry stay
-// together and the groups order by their text. The order then holds
-// however the map iterates, and no value needs formatting, which a
-// value that refers back to itself would never finish.
+// walkEntries walks entries, the entries of a map that share the place
+// at, and reports whether nothing under them failed. The key of an entry
+// walks before its value, at the key of that place. Since the entries
+// share a path, nothing in the map orders them, so the errors of each
+// entry stay together and the groups order by their text. The order
+// then holds however the map iterates, and no value needs formatting,
+// which a value that refers back to itself would never finish.
 //
 // The order can still vary when several of the entries hold one
 // pointer, map, or slice. An alias in the document can make them share
@@ -728,20 +800,20 @@ type mapEntry struct {
 // shared value walks once, so its errors join the group of whichever
 // entry walks first, and the map iteration decides which.
 //
-// When ambiguous is true, path names the entries of several keys, so the
-// errors of entries bind with no position, for the reason
+// When ambiguous is true, the path of at names the entries of several
+// keys, so the errors of entries bind with no position, for the reason
 // [ErrAmbiguousPath].
-func (w *selfWalker) walkEntries(path paths.Path, entries []mapEntry, ambiguous bool) bool {
+func (w *selfWalker) walkEntries(at place, entries []mapEntry, ambiguous bool) bool {
 	ok := true
 	start := len(w.errs)
 	groups := make([][]error, 0, len(entries))
 
 	for _, e := range entries {
-		if !w.walk(e.key, path.Key(), nil) {
+		if !w.walk(e.key, at.key(), nil) {
 			ok = false
 		}
 
-		if !w.walk(e.value, path, nil) {
+		if !w.walk(e.value, at, nil) {
 			ok = false
 		}
 
@@ -1119,10 +1191,10 @@ func hasEmbedded(t reflect.Type) bool {
 
 // validate runs Validate on v when v implements [SelfValidator] through
 // a method of its own, on its value or its pointer, with the result
-// rebased under base, and reports whether v passed. A value the walk
-// cannot take the address of, such as one held by a map, validates
+// rebased under the path of at, and reports whether v passed. A value the
+// walk cannot take the address of, such as one held by a map, validates
 // through a copy, so a Validate with a pointer receiver runs on it too.
-func (w *selfWalker) validate(v reflect.Value, base paths.Path) bool {
+func (w *selfWalker) validate(v reflect.Value, at place) bool {
 	if !implementsSelfValidator(v.Type()) {
 		return true
 	}
@@ -1134,36 +1206,77 @@ func (w *selfWalker) validate(v reflect.Value, base paths.Path) bool {
 		return true
 	}
 
-	err := Rebase(validator.Validate(), base)
+	err := validator.Validate()
 	if isNothing(err) {
 		return true
 	}
 
-	w.errs = append(w.errs, err)
+	w.errs = append(w.errs, Rebase(err, at.path()))
 
 	return false
 }
 
 // keyNames returns the text the document spells each key of the mapping
-// at base with, by the value the key decodes to as type t, so a key such
-// as 0x10 or 1.50 keeps the text a path resolves. A key any `<<` merge
-// key brings in counts, whether the merge names one mapping or a list of
-// them, directly or through an alias. Where the mapping and its merges
-// define one key more than once, the later entry in document order wins,
-// with the sources of one merge in sequence order, as in the decode. A
-// merge with an alias that does not resolve may set any key, so no entry
-// before it names a key. The map holds no key a path cannot resolve to,
-// and is empty when no mapping is at base, as for a value the document
-// did not set.
-func (w *selfWalker) keyNames(base paths.Path, t reflect.Type) map[any]string {
+// node holds with, by the value the key decodes to as type t, so a key
+// such as 0x10 or 1.50 keeps the text a path resolves. A key any `<<`
+// merge key brings in counts, whether the merge names one mapping or a
+// list of them, directly or through an alias. Where the mapping and its
+// merges define one key more than once, the later entry in document
+// order wins, with the sources of one merge in sequence order, as in the
+// decode. A merge with an alias that does not resolve may set any key,
+// so no entry before it names a key. The map holds no key a path cannot
+// resolve to, and is empty when node holds no mapping, as for the nil
+// node of a value the document did not set.
+func (w *selfWalker) keyNames(node ast.Node, t reflect.Type) map[any]string {
 	names := map[any]string{}
-
-	node, err := w.pathResolver().Node(w.node.base.Join(base))
-	if err == nil {
-		w.collectKeyNames(node, t, names, map[*ast.MappingNode]bool{})
-	}
+	w.collectKeyNames(node, t, names, map[*ast.MappingNode]bool{})
 
 	return names
+}
+
+// nodeOf returns the node the value at the end of s decoded from, as
+// [paths.Resolver.Node] gives it, or nil when the document holds nothing
+// there, as for a value the document did not set. A nil s stands for the
+// value the walk starts at, whose node lies at the path of the [Node] the
+// walk validates. The node of any other step resolves from the node of
+// the step before, the first time the walk asks for it, and the step
+// keeps it, so no step resolves twice.
+func (w *selfWalker) nodeOf(s *step) ast.Node {
+	if s == nil {
+		s = &w.start
+	}
+
+	if s.resolved {
+		return s.node
+	}
+
+	var (
+		node ast.Node
+		err  error
+	)
+
+	switch {
+	case s == &w.start:
+		node, err = w.pathResolver().Node(w.node.base)
+
+	case s.key:
+		// A `~` selects the key of the entry the step before it selects,
+		// but the node of that step is the value of the entry, so the two
+		// selectors resolve together from the step above them.
+		entry := s.prev
+		node, err = w.pathResolver().NodeFrom(w.nodeOf(entry.prev), entry.selector.Join(s.selector))
+
+	default:
+		node, err = w.pathResolver().NodeFrom(w.nodeOf(s.prev), s.selector)
+	}
+
+	if err == nil {
+		s.node = node
+	}
+
+	s.resolved = true
+
+	return s.node
 }
 
 // collectKeyNames adds the keys of the mapping node holds, and of the

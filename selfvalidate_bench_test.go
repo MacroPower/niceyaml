@@ -115,14 +115,6 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 
 	sizes := []int{1000, 4000, 16000}
 
-	modes := []struct {
-		name string
-		opts []niceyaml.DecodeOption
-	}{
-		{"self_validation", nil},
-		{"no_self_validation", []niceyaml.DecodeOption{niceyaml.WithSelfValidation(false)}},
-	}
-
 	for _, shape := range shapes {
 		for _, items := range sizes {
 			var sb strings.Builder
@@ -137,7 +129,7 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 
 			doc := yamltest.FirstDocument(b, yaml)
 
-			for _, mode := range modes {
+			for _, mode := range selfValidationModes {
 				b.Run(fmt.Sprintf("%s_%d/%s", shape.name, items, mode.name), func(b *testing.B) {
 					b.ReportAllocs()
 					b.SetBytes(int64(len(yaml)))
@@ -205,6 +197,111 @@ func BenchmarkNode_Decode_FirstDecode(b *testing.B) {
 			}
 		})
 	}
+}
+
+// BenchmarkNode_Decode_SelfValidation_Nested decodes deep documents with
+// and without self-validation. Every level adds a map whose keys the walk
+// reads from the document. In the tree, each node validates itself and
+// holds its child in a map, so each map lies inside the map above it. In
+// the chains, each link holds a map of ports beside the next link, which
+// a struct field or a list element holds, so no map lies inside another.
+// The walk resolves the node of each value at most once, from the node
+// above it, so the time per level should stay close to flat as the
+// document deepens. The decoder rejects a tree of 3000 levels, so the
+// depths stop at 2000.
+func BenchmarkNode_Decode_SelfValidation_Nested(b *testing.B) {
+	shapes := []struct {
+		decode      func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error
+		name        string
+		open, close string
+	}{
+		{
+			name:  "map_tree",
+			open:  "{kids: {a: ",
+			close: "}}",
+			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
+				_, err := doc.Decode[branch](ctx, opts...)
+
+				return err
+			},
+		},
+		{
+			name:  "struct_chain",
+			open:  "{ports: {a: 80}, next: ",
+			close: "}",
+			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
+				_, err := doc.Decode[structLink](ctx, opts...)
+
+				return err
+			},
+		},
+		{
+			name:  "list_chain",
+			open:  "{ports: {a: 80}, next: [",
+			close: "]}",
+			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
+				_, err := doc.Decode[listLink](ctx, opts...)
+
+				return err
+			},
+		},
+	}
+
+	for _, shape := range shapes {
+		for _, depth := range []int{500, 1000, 2000} {
+			yaml := strings.Repeat(shape.open, depth) + "{}" + strings.Repeat(shape.close, depth)
+
+			doc := yamltest.FirstDocument(b, yaml)
+
+			for _, mode := range selfValidationModes {
+				b.Run(fmt.Sprintf("%s_%d/%s", shape.name, depth, mode.name), func(b *testing.B) {
+					b.ReportAllocs()
+					b.SetBytes(int64(len(yaml)))
+
+					for b.Loop() {
+						err := shape.decode(b.Context(), doc, mode.opts)
+						if err != nil {
+							b.Fatal(err)
+						}
+					}
+
+					b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*depth), "ns/level")
+				})
+			}
+		}
+	}
+}
+
+// selfValidationModes holds the options that decode with and without
+// self-validation.
+var selfValidationModes = []struct {
+	name string
+	opts []niceyaml.DecodeOption
+}{
+	{"self_validation", nil},
+	{"no_self_validation", []niceyaml.DecodeOption{niceyaml.WithSelfValidation(false)}},
+}
+
+// branch is a node of a tree that validates itself and holds its
+// children in a map.
+type branch struct {
+	Kids map[string]*branch `yaml:"kids"`
+}
+
+func (*branch) Validate() error { return nil }
+
+// structLink is a link of a chain that holds the next link in a struct
+// field, beside a map of values that validate themselves.
+type structLink struct {
+	Next  *structLink     `yaml:"next"`
+	Ports map[string]port `yaml:"ports"`
+}
+
+// listLink is a link of a chain that holds the next link in a list,
+// beside a map of values that validate themselves.
+type listLink struct {
+	Ports map[string]port `yaml:"ports"`
+	Next  []listLink      `yaml:"next"`
 }
 
 // wideRow is a struct of many scalar fields and one field that validates

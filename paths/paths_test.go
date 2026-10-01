@@ -267,33 +267,42 @@ func TestPath_Join(t *testing.T) {
 
 	tcs := map[string]struct {
 		p    paths.Path
-		q    paths.Path
 		want string
+		qs   []paths.Path
 	}{
 		"root to root": {
 			p:    paths.Root(),
-			q:    paths.Root(),
+			qs:   []paths.Path{paths.Root()},
 			want: "$",
 		},
 		"root to path": {
 			p:    paths.Root(),
-			q:    paths.Root().Child("open"),
+			qs:   []paths.Path{paths.Root().Child("open")},
 			want: "$.open",
 		},
 		"path to root": {
 			p:    paths.Root().Child("spec", "hours"),
-			q:    paths.Root(),
+			qs:   []paths.Path{paths.Root()},
 			want: "$.spec.hours",
 		},
 		"path to path": {
 			p:    paths.Root().Child("spec", "hours"),
-			q:    paths.Root().Child("open"),
+			qs:   []paths.Path{paths.Root().Child("open")},
 			want: "$.spec.hours.open",
 		},
 		"keeps every selector kind": {
 			p:    paths.Root().Child("items").Index(0),
-			q:    paths.Root().Recursive("name").IndexAll().Key(),
+			qs:   []paths.Path{paths.Root().Recursive("name").IndexAll().Key()},
 			want: "$.items[0]..name[*]~",
+		},
+		"nothing": {
+			p:    paths.Root().Child("spec"),
+			want: "$.spec",
+		},
+		"several paths in order": {
+			p:    paths.Root().Child("spec"),
+			qs:   []paths.Path{paths.Root().Child("hours"), paths.Root(), paths.Root().Index(1).Key()},
+			want: "$.spec.hours[1]~",
 		},
 	}
 
@@ -301,8 +310,8 @@ func TestPath_Join(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, tc.p.Join(tc.q).String())
-			assert.Equal(t, paths.MustParse(tc.want), tc.p.Join(tc.q))
+			assert.Equal(t, tc.want, tc.p.Join(tc.qs...).String())
+			assert.Equal(t, paths.MustParse(tc.want), tc.p.Join(tc.qs...))
 		})
 	}
 

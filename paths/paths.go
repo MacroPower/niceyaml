@@ -236,16 +236,35 @@ func (p Path) Recursive(selector string) Path {
 	return p.extend(segment{kind: segmentRecursive, name: selector})
 }
 
-// Join returns a copy of the path with the selectors of q appended, so a
-// path written from one node of a document resolves from the root:
+// Join returns a copy of the path with the selectors of each of qs
+// appended in order, so a path written from one node of a document
+// resolves from the root:
 //
 //	hours := paths.Root().Child("spec", "hours")
 //	open := paths.Root().Child("open")
 //	hours.Join(open) // $.spec.hours.open
 //
-// Joining the root changes nothing, and joining to the root yields q.
-func (p Path) Join(q Path) Path {
-	return p.extend(q.segments...)
+// Joining the root, or nothing, changes nothing, and joining one path to
+// the root yields that path. Join copies each selector once, so joining
+// many short paths in one call takes time linear in their total length.
+func (p Path) Join(qs ...Path) Path {
+	n := len(p.segments)
+	for _, q := range qs {
+		n += len(q.segments)
+	}
+
+	if n == len(p.segments) {
+		return p
+	}
+
+	merged := make([]segment, 0, n)
+	merged = append(merged, p.segments...)
+
+	for _, q := range qs {
+		merged = append(merged, q.segments...)
+	}
+
+	return Path{segments: merged}
 }
 
 // IsRoot reports whether the path holds no selectors, so it names the
@@ -464,6 +483,29 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 	found, err := p.matches(r, doc)
 	if err != nil {
 		return match{}, err
+	}
+
+	if len(found) == 0 {
+		return match{}, fmt.Errorf("resolve %s: %w", p, ErrNotFound)
+	}
+
+	return found[0], nil
+}
+
+// singleFrom resolves the path from node with r, a resolver for the
+// document node belongs to, to exactly one match, as [Path.single]
+// resolves it from the root of a document.
+//
+// Returns [ErrWildcard] for a path with a `[*]` or `..` selector and wraps
+// [ErrNotFound] when nothing exists at the path.
+func (p Path) singleFrom(r *resolver, node ast.Node) (match, error) {
+	if p.wildcard() {
+		return match{}, fmt.Errorf("resolve %s: %w", p, ErrWildcard)
+	}
+
+	found, err := r.resolve(node, p.segments)
+	if err != nil {
+		return match{}, fmt.Errorf("resolve %s: %w", p, err)
 	}
 
 	if len(found) == 0 {

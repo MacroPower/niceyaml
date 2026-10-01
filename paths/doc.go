@@ -25,6 +25,10 @@
 //		// ...
 //	}
 //
+// A caller that walks down a document resolves each step from the node
+// above it with [Resolver.NodeFrom], so the path it resolves stays short
+// however deep the walk goes.
+//
 // # Resolution
 //
 // Selectors apply to the content of a node. An anchor (`&name`) or tag
@@ -153,9 +157,9 @@
 //	replicas := spec.Child("replicas") // $.spec.replicas
 //	image := spec.Child("image")       // $.spec.image
 //
-// [Path.Join] appends one path to another, so a path written from a node
-// of the document, such as one a check on a decoded value reports,
-// resolves from the root:
+// [Path.Join] appends one or more paths to another, so a path written
+// from a node of the document, such as one a check on a decoded value
+// reports, resolves from the root:
 //
 //	spec.Join(paths.Root().Child("replicas")) // $.spec.replicas
 //
