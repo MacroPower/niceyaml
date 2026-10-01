@@ -2,7 +2,6 @@ package yamlviewport
 
 import (
 	"cmp"
-	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -586,7 +585,7 @@ func (m *Model) SetRevision(r Revision) {
 // The viewport displays the view r hands out, decoration included, and
 // adds its search highlights to a clone of it, so the view itself stays as
 // the caller left it. See [Revision]. A nil r, or an r that holds a nil
-// pointer such as a nil [*niceyaml.Source], adds nothing.
+// pointer or nil func, such as a nil [*niceyaml.Source], adds nothing.
 func (m *Model) AddRevision(r Revision) {
 	m.AddRevisions(r)
 }
@@ -595,13 +594,13 @@ func (m *Model) AddRevision(r Revision) {
 // one. It matches a call to [Model.AddRevision] for each revision, except
 // that the viewport builds only the view and diff of the last one, so
 // loading a history costs one diff rather than one per revision. A nil
-// revision, or one that holds a nil pointer, adds nothing.
+// revision, or one that holds a nil pointer or nil func, adds nothing.
 func (m *Model) AddRevisions(rs ...Revision) {
 	// Copies of a Model share the backing array of revisions, so the appends
 	// must not write into spare capacity that another copy can reach.
 	revisions := slices.Clip(m.revisions)
 	for _, r := range rs {
-		if !isNilRevision(r) {
+		if !nilness.IsNil(r) {
 			revisions = append(revisions, r)
 		}
 	}
@@ -614,19 +613,6 @@ func (m *Model) AddRevisions(rs ...Revision) {
 	m.revIndex = len(m.revisions) - 1
 
 	m.rebuildViews()
-}
-
-// isNilRevision reports whether r is nil or holds a nil pointer. A
-// [Revision] implemented on a pointer type, such as [*niceyaml.Source],
-// reads its fields in Name and View, so a nil one panics there.
-func isNilRevision(r Revision) bool {
-	if r == nil {
-		return true
-	}
-
-	v := reflect.ValueOf(r)
-
-	return v.Kind() == reflect.Pointer && v.IsNil()
 }
 
 // ClearRevisions removes all revisions from the history.

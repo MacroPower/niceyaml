@@ -2492,6 +2492,18 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Empty(t, m.RevisionNames())
 			},
 		},
+		"AddRevision/NilFunc": {
+			setup: func(m *yamlviewport.Model) {
+				m.AddRevision(funcRevision(nil))
+				m.SetRevision(funcRevision(nil))
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 0, m.RevisionCount())
+				assert.Empty(t, m.RevisionName())
+				assert.Empty(t, m.RevisionNames())
+			},
+		},
 		"AddRevision/Single": {
 			setup: func(m *yamlviewport.Model) {
 				m.AddRevision(niceyaml.NewSourceFromTokens(rev1Tokens, niceyaml.WithName("rev1")))
@@ -5041,6 +5053,14 @@ func (r *countingRevision) View() *line.View {
 
 	return r.Revision.View()
 }
+
+// funcRevision is a [yamlviewport.Revision] whose View calls the func, so
+// a nil one panics in View.
+type funcRevision func() *line.View
+
+func (funcRevision) Name() string { return "func" }
+
+func (r funcRevision) View() *line.View { return r() }
 
 func TestViewport_ViewModeReusesDiff(t *testing.T) {
 	t.Parallel()
