@@ -141,8 +141,10 @@ func (r *Resolver) KeyName(key ast.Node) (string, bool) {
 // later merge source.
 //
 // Returns an error wrapping [ErrNotFound] when node is not a mapping or
-// name selects no entry in it, and one wrapping [ErrAlias] when an alias
-// on the way does not resolve.
+// name selects no entry in it, one wrapping [ErrAlias] when an alias on
+// the way does not resolve, and one wrapping [ErrExcessiveMerging] when
+// the lookup reads far more nodes under `<<` merge keys than the document
+// holds.
 func (r *Resolver) Entry(node ast.Node, name string) (ast.Node, error) {
 	content, err := r.resolver.unwrap(node)
 	if err != nil {
@@ -154,7 +156,9 @@ func (r *Resolver) Entry(node ast.Node, name string) (ast.Node, error) {
 		return nil, fmt.Errorf("entry %q: %w: not a mapping", name, ErrNotFound)
 	}
 
-	entry, _, ok, err := r.resolver.lookup(mapping, name, nil)
+	var reads lookupReads
+
+	entry, _, ok, err := r.resolver.lookup(mapping, name, nil, &reads)
 	if err != nil {
 		return nil, fmt.Errorf("entry %q: %w", name, err)
 	}
@@ -222,7 +226,7 @@ func (r *Resolver) MergeSources(node ast.Node) ([]ast.Node, error) {
 			continue
 		}
 
-		found, err := r.resolver.mergeSources(entry.Value)
+		found, _, err := r.resolver.mergeSources(nil, entry.Value)
 		if err != nil {
 			return nil, fmt.Errorf("merge sources: %w", err)
 		}

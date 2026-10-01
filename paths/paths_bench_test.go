@@ -2,6 +2,7 @@ package paths_test
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -156,6 +157,97 @@ func BenchmarkNewResolver_NestedOpenMerges(b *testing.B) {
 			}
 
 			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*links), "ns/link")
+		})
+	}
+}
+
+// BenchmarkPath_Matches_MissingMergeFirst walks a mapping whose keys come
+// before a merge list that starts with an alias that does not resolve and
+// then lists as many aliases as the mapping has keys. The lookup of each
+// key stops at that alias, so the time per key should stay flat as the
+// mapping grows.
+func BenchmarkPath_Matches_MissingMergeFirst(b *testing.B) {
+	path := paths.Root().Recursive("nope")
+
+	for _, keys := range []int{8000, 16000, 32000, 64000} {
+		var sb strings.Builder
+
+		sb.WriteString("a: &a {z: 0}\nm:\n")
+
+		for i := range keys {
+			fmt.Fprintf(&sb, "  k%d: %d\n", i, i)
+		}
+
+		sb.WriteString("  <<: [*missing, " + strings.Join(slices.Repeat([]string{"*a"}, keys), ", ") + "]\n")
+
+		file, err := niceyaml.NewSourceFromString(sb.String()).File()
+		require.NoError(b, err)
+
+		doc := file.Docs[0]
+
+		b.Run(fmt.Sprintf("keys_%d", keys), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				_, err := path.Matches(doc)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*keys), "ns/key")
+		})
+	}
+}
+
+// BenchmarkResolver_Matches_MergedRecords walks a sequence of records that
+// each hold 20 keys and then merge a list of ten aliases. The lookup of
+// each key reads that list, so the walk reads the same multiple of the
+// nodes of the document however many records it holds. The time per
+// record should stay flat as the sequence grows.
+func BenchmarkResolver_Matches_MergedRecords(b *testing.B) {
+	path := paths.Root().Recursive("name")
+
+	for _, records := range []int{500, 1000, 2000, 4000} {
+		var (
+			sb      strings.Builder
+			sources []string
+		)
+
+		for i := range 10 {
+			fmt.Fprintf(&sb, "d%d: &d%d {p%d: 0}\n", i, i, i)
+
+			sources = append(sources, fmt.Sprintf("*d%d", i))
+		}
+
+		sb.WriteString("items:\n")
+
+		for i := range records {
+			fmt.Fprintf(&sb, "  - name: r%d\n", i)
+
+			for k := range 19 {
+				fmt.Fprintf(&sb, "    k%d: %d\n", k, k)
+			}
+
+			sb.WriteString("    <<: [" + strings.Join(sources, ", ") + "]\n")
+		}
+
+		file, err := niceyaml.NewSourceFromString(sb.String()).File()
+		require.NoError(b, err)
+
+		resolver := paths.NewResolver(file.Docs[0])
+
+		b.Run(fmt.Sprintf("records_%d", records), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				_, err := resolver.Matches(path)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*records), "ns/record")
 		})
 	}
 }

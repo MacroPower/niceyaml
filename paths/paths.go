@@ -48,6 +48,20 @@ var (
 	// [go.jacobcolvin.com/niceyaml.ErrExcessiveAliasing].
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
+	// ErrExcessiveMerging indicates a path whose key lookups read far more
+	// nodes under `<<` merge keys than the document holds. A key lookup
+	// reads the value of each merge key it reaches, and each element of
+	// that value when it is a sequence of sources. It goes on into the
+	// mappings those merge keys bring in until it finds the key, so a
+	// lookup on a chain of merges can read the whole chain. A lookup that
+	// reaches many mappings that merge one sequence through an alias reads
+	// that sequence once for each of them. A `..name` selector looks up
+	// each key that a later merge key may override, and a `.name` after a
+	// `[*]` looks up its key in each element, so one selector can read a
+	// chain many times. A selector may read 64 times as many of these
+	// nodes as the document holds, or 524,288 of them when that is more.
+	ErrExcessiveMerging = errors.New("excessive merging")
+
 	// Before quoteName or goccyString wraps a selector name in single
 	// quotes, nameEscaper escapes its backslashes and single quotes. A
 	// [strings.Replacer] is safe for concurrent use, so every call shares
@@ -471,8 +485,10 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 // Wraps [ErrNoDocument], together with [ErrNotFound], when the document has
 // no content to resolve in, and [ErrAlias] when an alias on the path does
 // not resolve. Wraps [ErrExcessiveAliasing] when aliases lead a selector
-// to far more nodes than the document holds. [Path.Matches] returns the
-// same nodes with the path that selects each one alone.
+// to far more nodes than the document holds, and [ErrExcessiveMerging]
+// when the key lookups of a selector read far more nodes under `<<` merge
+// keys than that. [Path.Matches] returns the same nodes with the path that
+// selects each one alone.
 func (p Path) Nodes(doc *ast.DocumentNode) ([]ast.Node, error) {
 	found, err := p.Matches(doc)
 	if err != nil {
@@ -526,7 +542,9 @@ func (p Path) Matches(doc *ast.DocumentNode) ([]Match, error) {
 // Returns [ErrWildcard] for a path with a `[*]` or `..` selector, which
 // needs [Path.Nodes]. Wraps [ErrNotFound] when nothing exists at the path,
 // together with [ErrNoDocument] when the document has no content to
-// resolve in. Wraps [ErrAlias] when an alias on the path does not resolve.
+// resolve in. Wraps [ErrAlias] when an alias on the path does not resolve,
+// and [ErrExcessiveMerging] when the key lookups of a selector read far
+// more nodes under `<<` merge keys than the document holds.
 func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 	return NewResolver(doc).Node(p)
 }

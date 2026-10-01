@@ -1,6 +1,9 @@
 package paths_test
 
 import (
+	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -2243,6 +2246,341 @@ func TestPath_Matches_AliasFanOut(t *testing.T) {
 
 			require.NoError(t, err)
 			assert.Len(t, matches, tc.want)
+		})
+	}
+}
+
+func TestPath_Matches_MergeLookups(t *testing.T) {
+	t.Parallel()
+
+	// The document of mergeChain holds the mappings b0 through b<n-1>.
+	// Each later mapping holds a key of its own and then merges the one
+	// before it, so a lookup of a key that none of them hold reads every
+	// mapping below the one it starts in.
+	mergeChain := func(n int) string {
+		var sb strings.Builder
+
+		sb.WriteString("b0: &b0 {x0: 0}\n")
+
+		for i := 1; i < n; i++ {
+			fmt.Fprintf(&sb, "b%d: &b%d {x%d: %d, <<: *b%d}\n", i, i, i, i, i-1)
+		}
+
+		return sb.String()
+	}
+
+	// The document of inlineChain holds no aliases. Its mapping m holds n
+	// keys and then a merge key whose value nests n merge keys inline.
+	inlineChain := func(n int) string {
+		var sb strings.Builder
+
+		sb.WriteString("m:\n")
+
+		for i := range n {
+			fmt.Fprintf(&sb, "  k%d: %d\n", i, i)
+		}
+
+		sb.WriteString("  <<: " + strings.Repeat("{<<: ", n) + "{z: 0}" + strings.Repeat("}", n) + "\n")
+
+		return sb.String()
+	}
+
+	// The flow sequence that list returns holds elem n times and then each
+	// element of tail.
+	list := func(elem string, n int, tail ...string) string {
+		return "[" + strings.Join(append(slices.Repeat([]string{elem}, n), tail...), ", ") + "]"
+	}
+
+	// The document of aliasChain adds to mergeChain the key l, which lists
+	// n aliases to the last mapping of the chain.
+	aliasChain := func(n int) string {
+		return mergeChain(n) + "l: " + list(fmt.Sprintf("*b%d", n-1), n) + "\n"
+	}
+
+	// The document of wideMerge holds the mapping a, and the mapping m with
+	// n keys and then a merge key whose value lists elem n times and then
+	// each element of tail. A lookup of each key of m reads that whole list.
+	wideMerge := func(n int, elem string, tail ...string) string {
+		var sb strings.Builder
+
+		sb.WriteString("a: &a {z: 0}\nm:\n")
+
+		for i := range n {
+			fmt.Fprintf(&sb, "  k%d: %d\n", i, i)
+		}
+
+		sb.WriteString("  <<: " + list(elem, n, tail...) + "\n")
+
+		return sb.String()
+	}
+
+	// The document of missingFirst is that of wideMerge(n, "*a"), except
+	// that its merge list starts with an alias that does not resolve. A
+	// lookup of each key of m stops at that alias.
+	missingFirst := func(n int) string {
+		return strings.Replace(wideMerge(n, "*a"), "<<: [", "<<: [*missing, ", 1)
+	}
+
+	// The document of aliasWideMerge holds the mapping x, which merges n
+	// aliases to the mapping a, and the key l, which lists n aliases to x.
+	aliasWideMerge := func(n int) string {
+		return "a: &a {z: 0}\nx: &x {<<: " + list("*a", n) + "}\nl: " + list("*x", n) + "\n"
+	}
+
+	// The document of sharedMerge holds the sequence s of n aliases to the
+	// mapping a, and the mapping d, which merges n inline mappings that
+	// each merge s. One lookup in d reads s once for each of them.
+	sharedMerge := func(n int) string {
+		return "a: &a {z: 0}\ns: &s " + list("*a", n) + "\nd: {<<: " + list("{<<: *s}", n) + "}\n"
+	}
+
+	// The document of records holds the mappings d0 through d99 and the
+	// sequence items of n mappings. Each of those holds the key name, then
+	// 100 more keys of its own, and then a merge key that lists an alias to
+	// each of d0 through d99. A lookup of each key of a record reads that
+	// list, so a `..name` walk reads the same multiple of the nodes of the
+	// document however large n is.
+	records := func(n int) string {
+		var (
+			sb      strings.Builder
+			sources []string
+		)
+
+		for i := range 100 {
+			fmt.Fprintf(&sb, "d%d: &d%d {p%d: 0}\n", i, i, i)
+
+			sources = append(sources, fmt.Sprintf("*d%d", i))
+		}
+
+		sb.WriteString("items:\n")
+
+		for i := range n {
+			fmt.Fprintf(&sb, "  - name: r%d\n", i)
+
+			for k := range 100 {
+				fmt.Fprintf(&sb, "    k%d: %d\n", k, k)
+			}
+
+			sb.WriteString("    <<: [" + strings.Join(sources, ", ") + "]\n")
+		}
+
+		return sb.String()
+	}
+
+	tcs := map[string]struct {
+		err   error
+		input string
+		path  paths.Path
+		want  int
+	}{
+		"recursive key over a merge chain": {
+			input: mergeChain(2000),
+			path:  paths.Root().Recursive("nope"),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"recursive key over an inline merge chain": {
+			input: inlineChain(2000),
+			path:  paths.Root().Recursive("nope"),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"child key of each alias to a merge chain": {
+			input: aliasChain(2000),
+			path:  paths.MustParse("$.l[*].nope"),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"recursive key over a merge of many aliases": {
+			input: wideMerge(2000, "*a"),
+			path:  paths.Root().Recursive("nope"),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"recursive key over a merge of many scalars": {
+			input: wideMerge(2000, "0"),
+			path:  paths.Root().Recursive("nope"),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"recursive key over a merge of many aliases and a missing one": {
+			input: wideMerge(2000, "*a", "*missing"),
+			path:  paths.Root().Recursive("nope"),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"recursive key over a merge of many aliases and a later anchor": {
+			input: wideMerge(2000, "*a", "*late") + "late: &late {y: 1}\n",
+			path:  paths.Root().Recursive("nope"),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"recursive key over a merge of many scalars and a missing alias": {
+			input: wideMerge(2000, "0", "*missing"),
+			path:  paths.Root().Recursive("nope"),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"child key of each alias to a wide merge": {
+			input: aliasWideMerge(2000),
+			path:  paths.MustParse("$.l[*].nope"),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"child key over many merges of one sequence": {
+			input: sharedMerge(1000),
+			path:  paths.MustParse("$.d.nope"),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"recursive key over a short merge chain": {
+			input: mergeChain(10),
+			path:  paths.Root().Recursive("x5"),
+			want:  1,
+		},
+		"child key of each alias to a short merge chain": {
+			input: aliasChain(10),
+			path:  paths.MustParse("$.l[*].x0"),
+			want:  10,
+		},
+		"recursive key over a merge of a few aliases": {
+			input: wideMerge(10, "*a"),
+			path:  paths.Root().Recursive("k5"),
+			want:  1,
+		},
+		"recursive key over a merge of a few aliases and a missing one": {
+			input: wideMerge(10, "*a", "*missing"),
+			path:  paths.Root().Recursive("k5"),
+			want:  0,
+		},
+		"recursive key over a merge that lists a missing alias first": {
+			input: missingFirst(10),
+			path:  paths.Root().Recursive("k5"),
+			want:  0,
+		},
+		"recursive key over a wide merge that lists a missing alias first": {
+			input: missingFirst(2000),
+			path:  paths.Root().Recursive("nope"),
+			want:  0,
+		},
+		"child key of each alias to a narrow merge": {
+			input: aliasWideMerge(10),
+			path:  paths.MustParse("$.l[*].z"),
+			want:  10,
+		},
+		"child key over a few merges of one sequence": {
+			input: sharedMerge(10),
+			path:  paths.MustParse("$.d.z"),
+			want:  1,
+		},
+		// The lookups of this walk read over 4 million nodes under merge
+		// keys, which is about 20 times the nodes of the document.
+		"recursive key over many records that merge one list": {
+			input: records(400),
+			path:  paths.Root().Recursive("name"),
+			want:  400,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
+
+			matches, err := tc.path.Matches(doc)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				_, err = tc.path.Nodes(doc)
+				require.ErrorIs(t, err, tc.err)
+
+				// Path.Node takes only a path without a wildcard.
+				_, err = tc.path.Node(doc)
+				if !errors.Is(err, paths.ErrWildcard) {
+					require.ErrorIs(t, err, tc.err)
+				}
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Len(t, matches, tc.want)
+		})
+	}
+}
+
+func TestPath_Node_NestedMergeLists(t *testing.T) {
+	t.Parallel()
+
+	// The mapping c merges a list of three sources. The middle one, b,
+	// merges a list of its own, and the last source of that list merges a
+	// longer list. A lookup in c searches each list from its last source
+	// back, so it searches the longest list before the earlier sources of
+	// the two shorter ones.
+	input := `
+a: &a {k: A}
+b: &b
+  <<:
+    - {j: J}
+    - {i: I}
+    - <<: [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a]
+c: &c
+  own: C
+  <<: [{h: H}, *b, {g: G}]
+l: [*c, *c, *c]
+`
+
+	doc := yamltest.FirstDocument(t, input).DocumentAST()
+
+	tcs := map[string]struct {
+		err  error
+		name string
+		want string
+	}{
+		"key of the last source": {
+			name: "g",
+			want: "G",
+		},
+		"key of the longest list": {
+			name: "k",
+			want: "A",
+		},
+		"key of a source before the longest list": {
+			name: "i",
+			want: "I",
+		},
+		"key of the first source of the middle list": {
+			name: "j",
+			want: "J",
+		},
+		"key of the first source": {
+			name: "h",
+			want: "H",
+		},
+		"key of the mapping itself": {
+			name: "own",
+			want: "C",
+		},
+		"key that no source holds": {
+			name: "nope",
+			err:  paths.ErrNotFound,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			node, err := paths.Root().Child("c", tc.name).Node(doc)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, node.String())
+
+			// The `[*]` selector shares one lookup state among the lookups
+			// in each element, and each of them finds the same entry.
+			nodes, err := paths.Root().Child("l").IndexAll().Child(tc.name).Nodes(doc)
+			require.NoError(t, err)
+			require.Len(t, nodes, 3)
+
+			for _, n := range nodes {
+				assert.Same(t, node, n)
+			}
 		})
 	}
 }

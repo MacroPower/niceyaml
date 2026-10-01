@@ -93,6 +93,16 @@
 // selector reaches, under the rule gopkg.in/yaml.v3 applies to the aliases
 // in a document it decodes.
 //
+// A key lookup reads the mappings that `<<` merge keys bring in until it
+// finds the key, so a lookup on a chain of merges can read the whole
+// chain. It reads a list of merge sources again for each mapping that
+// merges that list through an alias. A `..name` selector looks up each
+// key that a later merge key may override, and a `.name` after a `[*]`
+// looks up its key in each element, so one selector can read a chain many
+// times. A resolve stops with [ErrExcessiveMerging] once those reads come
+// to many times the nodes the document holds. One lookup alone can read
+// that many, so [Path.Node] and [Path.Token] return the error as well.
+//
 // # Error Highlighting
 //
 // Pass a [Path] to [go.jacobcolvin.com/niceyaml.AtPath], which highlights

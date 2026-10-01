@@ -817,9 +817,11 @@ func (n *Node) AST() ast.Node {
 // exists at the path, which also wraps [paths.ErrNoDocument] when the
 // document has no content at all, such as an empty document or one
 // holding only directives; [paths.ErrAlias] when an alias on the path
-// does not resolve; and [paths.ErrWildcard] for a path that could match
-// several nodes, which [Node.Nodes] scopes one by one. A caller that
-// falls back when a value is absent checks for [paths.ErrNotFound]:
+// does not resolve; [paths.ErrExcessiveMerging] when the key lookups of
+// the path read far more nodes under `<<` merge keys than the document
+// holds; and [paths.ErrWildcard] for a path that could match several
+// nodes, which [Node.Nodes] scopes one by one. A caller that falls back
+// when a value is absent checks for [paths.ErrNotFound]:
 //
 //	version := 1
 //
@@ -875,8 +877,10 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // [paths.Path.Nodes] does, and the errors it returns come back bound to
 // the source: an error wrapping [paths.ErrNoDocument] when the document
 // has no content, [paths.ErrAlias] when an alias on the path does not
-// resolve, and [ErrExcessiveAliasing] when aliases lead a selector of the
-// path to far more nodes than the document holds.
+// resolve, [ErrExcessiveAliasing] when aliases lead a selector of the
+// path to far more nodes than the document holds, and
+// [paths.ErrExcessiveMerging] when the key lookups of a selector read far
+// more nodes under `<<` merge keys than that.
 func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	found, err := n.doc.pathResolver().Matches(n.base.Join(path))
 	if err != nil {

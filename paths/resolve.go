@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -78,8 +79,10 @@ func (m match) key() match {
 // a key without reading its entries again. A [Resolver] may serve several
 // goroutines, so the map is a [sync.Map].
 //
-// The nodes field counts the nodes of the document, which
-// [resolver.excessive] weighs the matches of a selector against.
+// The nodes field counts the nodes of the document. [resolver.excessive]
+// weighs the matches of a selector against that count, and
+// [resolver.excessiveMerging] weighs the merge reads of a selector
+// against it.
 //
 // Create instances with [newResolver].
 type resolver struct {
@@ -864,12 +867,17 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 // Returns [ErrExcessiveAliasing] once the matches of one selector pass
 // the limit [resolver.excessive] applies. Resolve checks after each match
 // the selector applies to, so a `[*]` lists at most one sequence past the
-// limit before it stops.
+// limit before it stops. Returns [ErrExcessiveMerging] once the key
+// lookups of one selector read past the limit [resolver.excessiveMerging]
+// applies, as [resolver.lookup] describes.
 func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 	matches := []match{{node: root}}
 
 	for _, seg := range segs {
-		var next []match
+		var (
+			next  []match
+			reads lookupReads
+		)
 
 		switch seg.kind {
 		case segmentKey:
@@ -887,7 +895,7 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 
 		default:
 			for _, m := range matches {
-				found, err := r.apply(seg, m)
+				found, err := r.apply(seg, m, &reads)
 				if err != nil {
 					return nil, err
 				}
@@ -925,6 +933,44 @@ func (r *resolver) excessive(count int) bool {
 	return aliaslimit.Excessive(r.nodes, max(count-r.nodes, 0))
 }
 
+// lookupReads holds what the key lookups of one selector share. The count
+// field counts the nodes under `<<` merge keys that those lookups have
+// read, which [resolver.excessiveMerging] weighs. The sources field is a
+// stack of the merge sources that the lookups in progress have yet to
+// search. [resolver.lookup] pushes the sources of each merge key it reads
+// and pops them once it has searched them. The lookups of a selector thus
+// share one buffer, where each would otherwise allocate one for every
+// merge key it reads.
+type lookupReads struct {
+	sources []*ast.MappingNode
+	count   int
+}
+
+// The limits on the nodes under `<<` merge keys that the key lookups of
+// one selector may read.
+const (
+	// The lookups may read this many times the nodes of the document.
+	mergeReadFactor = 64
+
+	// The lookups may read this many nodes in any document, however few
+	// nodes it holds.
+	mergeReadFloor = 1 << 19
+)
+
+// excessiveMerging reports whether reads, the nodes under `<<` merge keys
+// that the key lookups of one selector have read, pass the limit for the
+// document. Each lookup reads the merge chain behind its mapping again, so
+// the lookups of one selector can read many times the nodes of the
+// document. While the mappings and merge chains of a document keep their
+// size as the document grows, reads stay a fixed multiple of its nodes.
+// The limit is a fixed multiple of those nodes too, so a document does not
+// pass it by growing that way. A document passes it when the chain that
+// each lookup reads grows with the document, since reads then grow with
+// the square of its nodes.
+func (r *resolver) excessiveMerging(reads int) bool {
+	return reads > max(mergeReadFloor, mergeReadFactor*r.nodes)
+}
+
 // uniqueMatches returns the first match of each entry, in the order
 // matches holds them. It compares the entries rather than their values,
 // so two entries of a hand-built tree that share one value node, or that
@@ -947,9 +993,10 @@ func uniqueMatches(matches []match) []match {
 
 // apply applies one `.name`, `[n]`, or `[*]` selector to the node of m,
 // and returns the matches with the selector that names each one appended
-// to the selectors of m. A nil node, including a typed nil, has nothing to
-// select.
-func (r *resolver) apply(seg segment, m match) ([]match, error) {
+// to the selectors m holds. A `.name` adds to the count of reads the nodes
+// its lookup reads under merge keys, as [resolver.lookup] describes. A nil
+// node, including a typed nil, has nothing to select.
+func (r *resolver) apply(seg segment, m match, reads *lookupReads) ([]match, error) {
 	content, err := r.unwrap(m.node)
 	if err != nil || astnode.IsNil(content) {
 		return nil, err
@@ -962,7 +1009,7 @@ func (r *resolver) apply(seg segment, m match) ([]match, error) {
 			return nil, nil
 		}
 
-		entry, i, ok, err := r.lookup(mapping, seg.name, nil)
+		entry, i, ok, err := r.lookup(mapping, seg.name, nil, reads)
 		if err != nil || !ok {
 			return nil, err
 		}
@@ -1003,12 +1050,24 @@ func (r *resolver) apply(seg segment, m match) ([]match, error) {
 // it sets the entries of a mapping in order and a merge sets the keys of its
 // sources where the merge key stands.
 //
-// The seen set guards against merge cycles through aliases. The int result
-// is the index in mapping of the entry lookup found, or, for an entry a
-// merge source holds, of the `<<` entry that brings it in. The bool result
-// reports whether lookup found an entry.
+// The seen set guards against merge cycles through aliases, so one lookup
+// reads each mapping at most once. It still reads the whole value of each
+// merge key it reaches, so a sequence of sources that many mappings merge
+// through an alias costs its length once for each of them. Lookup adds to
+// the count of reads the nodes it reads under merge keys, as
+// [resolver.mergeSources] counts them, and returns [ErrExcessiveMerging]
+// once that count passes the limit [resolver.excessiveMerging] applies. A
+// caller that shares reads among many lookups thus weighs them together
+// against that limit. Lookup adds those nodes even when it returns an
+// error for an alias that does not resolve, so a caller that ignores the
+// error still weighs them. Lookup leaves the sources stack of reads at the
+// length it found it.
+//
+// The int result is the index in mapping of the entry lookup found, or,
+// for an entry a merge source holds, of the `<<` entry that brings it in.
+// The bool result reports whether lookup found an entry.
 func (r *resolver) lookup(
-	mapping *ast.MappingNode, name string, seen map[*ast.MappingNode]bool,
+	mapping *ast.MappingNode, name string, seen map[*ast.MappingNode]bool, reads *lookupReads,
 ) (*ast.MappingValueNode, int, bool, error) {
 	keys := r.mappingKeys(mapping)
 
@@ -1035,25 +1094,18 @@ func (r *resolver) lookup(
 			break
 		}
 
-		sources, err := r.mergeSources(mapping.Values[i].Value)
+		top := len(reads.sources)
+
+		found, ok, err := r.lookupMerge(mapping.Values[i].Value, name, seen, reads)
+
+		reads.sources = reads.sources[:top]
+
 		if err != nil {
 			return nil, 0, false, err
 		}
 
-		for _, src := range slices.Backward(sources) {
-			if seen[src] {
-				continue
-			}
-
-			found, _, ok, err := r.lookup(src, name, seen)
-			if err != nil {
-				return nil, 0, false, err
-			}
-
-			// A merge key in a source is not a key the merge brings in.
-			if ok && !isMergeKey(found.Key) {
-				return found, i, true, nil
-			}
+		if ok {
+			return found, i, true, nil
 		}
 	}
 
@@ -1064,58 +1116,130 @@ func (r *resolver) lookup(
 	return nil, 0, false, nil
 }
 
+// lookupMerge finds the entry for name that the sources of one `<<` merge
+// key bring in, where value is the value of that key. It pushes the
+// sources onto the stack of reads and leaves them there for
+// [resolver.lookup] to pop. A later source wins over an earlier one, so
+// lookupMerge searches them from the last one back. It adds to the count
+// of reads, and returns [ErrExcessiveMerging], as lookup describes. The
+// bool result reports whether lookupMerge found an entry.
+func (r *resolver) lookupMerge(
+	value ast.Node, name string, seen map[*ast.MappingNode]bool, reads *lookupReads,
+) (*ast.MappingValueNode, bool, error) {
+	top := len(reads.sources)
+
+	sources, read, err := r.mergeSources(reads.sources, value)
+
+	reads.sources = sources
+	reads.count += read
+
+	if r.excessiveMerging(reads.count) {
+		return nil, false, ErrExcessiveMerging
+	}
+
+	if err != nil {
+		return nil, false, err
+	}
+
+	// A lookup in one source pushes its own sources and may move the stack
+	// to a larger array, so the loop reads each source from the stack of
+	// reads rather than from sources.
+	for i := len(sources) - 1; i >= top; i-- {
+		src := reads.sources[i]
+		if seen[src] {
+			continue
+		}
+
+		found, _, ok, err := r.lookup(src, name, seen, reads)
+		if err != nil {
+			return nil, false, err
+		}
+
+		// A merge key in a source is not a key the merge brings in.
+		if ok && !isMergeKey(found.Key) {
+			return found, true, nil
+		}
+	}
+
+	return nil, false, nil
+}
+
 // overridden reports whether a path through name in mapping selects an
 // entry other than the one at index i, the last entry of mapping with that
 // name. Only a `<<` key after that entry can win over it, as
 // [resolver.lookup] describes. It also reports true when those merge keys
-// do not resolve, since a path through name then selects nothing.
-func (r *resolver) overridden(mapping *ast.MappingNode, keys *mappingKeys, name string, i int) bool {
+// do not resolve, since a path through name then selects nothing. Its
+// lookup adds to the count of reads as [resolver.lookup] describes, and
+// overridden returns the [ErrExcessiveMerging] that lookup returns.
+func (r *resolver) overridden(
+	mapping *ast.MappingNode, keys *mappingKeys, name string, i int, reads *lookupReads,
+) (bool, error) {
 	if !keys.mergeAfter(i) {
-		return false
+		return false, nil
 	}
 
-	_, found, ok, err := r.lookup(mapping, name, nil)
+	_, found, ok, err := r.lookup(mapping, name, nil, reads)
+	if errors.Is(err, ErrExcessiveMerging) {
+		return false, err
+	}
 
-	return err != nil || !ok || found != i
+	selects := err == nil && ok && found == i
+
+	return !selects, nil
 }
 
-// mergeSources returns the mappings a `<<` value merges in: the value itself
-// when it is a mapping, or each mapping element when it is a sequence. It
-// skips a nil node, including a typed nil.
-func (r *resolver) mergeSources(value ast.Node) ([]*ast.MappingNode, error) {
+// mergeSources appends to buf the mappings a `<<` value merges in, and
+// returns the buffer. Those are the value itself when it is a mapping, or
+// each mapping element when it is a sequence. It skips a nil node,
+// including a typed nil. The int result counts the nodes mergeSources
+// reads: one for the value, and one more for each element when the value
+// is a sequence, whether or not that element is a mapping. When the value
+// or an element is an alias that does not resolve, the count ends with
+// that node, and the buffer holds the sources before it.
+func (r *resolver) mergeSources(buf []*ast.MappingNode, value ast.Node) ([]*ast.MappingNode, int, error) {
 	content, err := r.unwrap(value)
-	if err != nil || astnode.IsNil(content) {
-		return nil, err
+	if err != nil {
+		return buf, 1, err
+	}
+
+	if astnode.IsNil(content) {
+		return buf, 1, nil
 	}
 
 	switch n := content.(type) {
 	case *ast.MappingNode:
-		return []*ast.MappingNode{n}, nil
+		return append(buf, n), 1, nil
 	case *ast.SequenceNode:
-		sources := make([]*ast.MappingNode, 0, len(n.Values))
+		// Making room for the whole sequence costs its length, even when
+		// an early element does not resolve and stops the count there. The
+		// buffer keeps the room, so a caller that passes one buffer to
+		// every call pays that cost once, not once for each call.
+		buf = slices.Grow(buf, len(n.Values))
 
-		for _, v := range n.Values {
+		for i, v := range n.Values {
 			elem, err := r.unwrap(v)
 			if err != nil {
-				return nil, err
+				return buf, i + 2, err
 			}
 
 			if m, ok := elem.(*ast.MappingNode); ok && m != nil {
-				sources = append(sources, m)
+				buf = append(buf, m)
 			}
 		}
 
-		return sources, nil
+		return buf, 1 + len(n.Values), nil
 
 	default:
-		return nil, nil
+		return buf, 1, nil
 	}
 }
 
 // recurse applies the `..name` selector to each of matches, in order, and
 // returns every entry it finds below each, in the order it finds them.
 // It returns an error wrapping [ErrAlias] when the node of a match is an
-// alias that does not resolve.
+// alias that does not resolve, and [ErrExcessiveMerging] when the key
+// lookups of the walk read too many nodes under merge keys, as
+// [recursiveWalk.descend] describes.
 //
 // A walk from one match can reach the start of another, such as when one
 // match lies inside another. Take an earlier walk that reaches the start
@@ -1163,7 +1287,10 @@ func (r *resolver) recurse(matches []match, name string) ([]match, error) {
 		w.order = slices.Clip(m.order)
 		w.heldSegs, w.heldOrder = 0, 0
 
-		w.descend(contents[i])
+		err := w.descend(contents[i])
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return w.found, nil
@@ -1199,6 +1326,9 @@ func covers(a, b []int) bool {
 // entries hold, so a push that would overwrite a held place copies the
 // stack first. Entries along one branch thus share their selectors and their
 // order rather than holding a copy each.
+//
+// The reads field holds the [lookupReads] of the key lookups of the walk,
+// across the walks of every match.
 type recursiveWalk struct {
 	resolver  *resolver
 	starts    map[ast.Node][]int
@@ -1208,6 +1338,7 @@ type recursiveWalk struct {
 	found     []match
 	segs      []segment
 	order     []int
+	reads     lookupReads
 	cur       int
 	heldSegs  int
 	heldOrder int
@@ -1231,9 +1362,15 @@ type recursiveWalk struct {
 // `<<` selects the real key, so descend skips the merge key. When a later
 // `<<` key brings in the key of an entry, a path through that key selects
 // the merged entry, so descend skips the entry of the mapping itself.
-func (w *recursiveWalk) descend(node ast.Node) {
+//
+// To find those entries, descend looks up the key of each entry that has a
+// `<<` key after it, and each lookup reads the values of the later merge
+// keys and the mappings they bring in. Returns [ErrExcessiveMerging] once
+// the lookups of the walk read past the limit [resolver.excessiveMerging]
+// applies.
+func (w *recursiveWalk) descend(node ast.Node) error {
 	if astnode.IsNil(node) {
-		return
+		return nil
 	}
 
 	segsDepth, orderDepth := len(w.segs), len(w.order)
@@ -1241,7 +1378,7 @@ func (w *recursiveWalk) descend(node ast.Node) {
 	switch n := node.(type) {
 	case *ast.MappingNode:
 		if w.covered(n) {
-			return
+			return nil
 		}
 
 		keys := w.resolver.mappingKeys(n)
@@ -1252,7 +1389,16 @@ func (w *recursiveWalk) descend(node ast.Node) {
 			}
 
 			key, _ := w.resolver.keyName(entry.Key)
-			if keys.names[key] != i || w.resolver.overridden(n, keys, key, i) {
+			if keys.names[key] != i {
+				continue
+			}
+
+			overridden, err := w.resolver.overridden(n, keys, key, i, &w.reads)
+			if err != nil {
+				return err
+			}
+
+			if overridden {
 				continue
 			}
 
@@ -1263,27 +1409,36 @@ func (w *recursiveWalk) descend(node ast.Node) {
 				w.found = append(w.found, match{node: entry.Value, entry: entry, segs: segs, order: order})
 			}
 
-			w.descend(entry.Value)
+			err = w.descend(entry.Value)
+			if err != nil {
+				return err
+			}
 		}
 
 	case *ast.SequenceNode:
 		if w.covered(n) {
-			return
+			return nil
 		}
 
 		for i, v := range n.Values {
 			w.push(segsDepth, orderDepth, segment{kind: segmentIndex, index: i}, i)
-			w.descend(v)
+
+			err := w.descend(v)
+			if err != nil {
+				return err
+			}
 		}
 
 	case *ast.AnchorNode:
-		w.descend(n.Value)
+		return w.descend(n.Value)
 	case *ast.TagNode:
-		w.descend(n.Value)
+		return w.descend(n.Value)
 	}
 
 	w.segs = w.segs[:segsDepth]
 	w.order = w.order[:orderDepth]
+
+	return nil
 }
 
 // covered reports whether the walk of an earlier match covers node, so
