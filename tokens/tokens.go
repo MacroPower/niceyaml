@@ -143,6 +143,21 @@ func Tokenize(src string) token.Tokens {
 	}
 
 	rest, ok := strings.CutPrefix(tail, held)
+	if !ok {
+		// The tokens before the last one lack the spaces and tabs the
+		// lexer drops from the end of a line of text and from a blank
+		// line. Their whitespace then opens the source's final whitespace
+		// only when the match skips those spaces and tabs. A match that
+		// skips can also line the tokens up with a later part of the
+		// source, as after an invalid tab token that swallowed a "-" or
+		// after a line ending the lexer repeated. So it counts only when
+		// the whitespace of the last token follows it in the source the
+		// same way, and the token then keeps every rune it holds.
+		rest, ok = cutWhitespace(tail, held)
+		if ok {
+			_, ok = cutWhitespace(rest, last.Origin[len(text):])
+		}
+	}
 
 	switch {
 	case swallowed:

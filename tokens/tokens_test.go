@@ -263,10 +263,16 @@ func TestTokenize_FinalBlankLines(t *testing.T) {
 	// The stream keeps the blank lines that end the file, even when the
 	// lexer rewrote the last token, cut it short, or gave it whitespace
 	// alone. The whitespace comes back once, so a block scalar header that
-	// holds the start of it does not repeat it. A last token that sits in
-	// front of text the lexer dropped keeps the line ending it holds.
+	// holds the start of it does not repeat it. A line that ends in spaces
+	// the lexer dropped does not cost the file its final lines, and neither
+	// does a blank line of spaces. A last token that sits in front of text
+	// the lexer dropped keeps the line ending it holds.
 	tcs := map[string]struct {
 		input string
+		// The end of the input's final whitespace that the joined Origins
+		// hold, when the lexer drops spaces ahead of it. Empty means all
+		// of it.
+		tail string
 		// The joined Origins equal the input.
 		whole bool
 	}{
@@ -289,6 +295,22 @@ func TestTokenize_FinalBlankLines(t *testing.T) {
 		"invalid tab token after a header": {
 			input: "a: |\n\t\n\n",
 			whole: true,
+		},
+		"invalid tab token after a trailing space": {
+			input: "a:\n  b: 1 \n\t\t\n\n",
+			tail:  "\n\t\t\n\n",
+		},
+		"invalid tab token after a trailing space crlf": {
+			input: "  b: 2 \r\n\t\t\n",
+			tail:  "\r\n\t\t\n",
+		},
+		"invalid tab token after a blank line of spaces": {
+			input: "a:\n  b: 1\n  \n\t\t\n",
+			tail:  "\n\t\t\n",
+		},
+		"invalid tab token of a space and a tab after a trailing space": {
+			input: "a:\n  b: 1 \n\t \t\n",
+			tail:  "\n\t \t\n",
 		},
 		"truncated escape": {
 			input: `a: "\x41"` + "\n\n",
@@ -326,11 +348,52 @@ func TestTokenize_FinalBlankLines(t *testing.T) {
 			assert.Equal(t, countLineBreaks(tc.input), countLineBreaks(got), "joined origins %q", got)
 
 			tail := tc.input[len(strings.TrimRight(tc.input, " \t\r\n")):]
+			if tc.tail != "" {
+				require.True(t, strings.HasSuffix(tail, tc.tail), "input tail %q", tail)
+
+				tail = tc.tail
+			}
+
 			assert.True(t, strings.HasSuffix(got, tail), "joined origins %q", got)
 
 			if tc.whole {
 				assert.Equal(t, tc.input, got)
 			}
+		})
+	}
+}
+
+func TestTokenize_FinalTabTokenKeepsWhitespace(t *testing.T) {
+	t.Parallel()
+
+	// The whitespace of the tokens before a last token of whitespace alone
+	// can match a later part of the source's final whitespace once the
+	// match skips spaces and tabs. The last token's own whitespace does
+	// not follow there, so the token keeps the Origin the lexer gave it
+	// and the tab it holds.
+	tcs := map[string]struct {
+		input string
+		want  string // The Origin of the last token.
+	}{
+		"swallowed sequence entry before a space":         {input: "# c\n\t- \n", want: "\t"},
+		"swallowed mapping value before a space":          {input: "# c\n\t: \n", want: "\t"},
+		"swallowed sequence entry before a tab":           {input: "# c\n\t-\t\n", want: "\t"},
+		"swallowed sequence entry between bare crs":       {input: "# c\r\t- \r", want: "\t"},
+		"swallowed mapping values in a nested mapping":    {input: "a:\n  b: 1:\t:\t: \t", want: "\t"},
+		"line ending the lexer repeats after a tag":       {input: "a: !t\n\t\n\t\n", want: "\n\t"},
+		"line ending the lexer repeats after header text": {input: "a: |\"x\n\t\n\t\n", want: "\n\t"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			require.NotEmpty(t, tks)
+
+			last := tks[len(tks)-1]
+			assert.Equal(t, token.InvalidType, last.Type)
+			assert.Equal(t, tc.want, last.Origin)
 		})
 	}
 }
