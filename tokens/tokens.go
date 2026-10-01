@@ -48,13 +48,19 @@ import (
 // the lexer keep its text as an invalid token instead. A tab used as
 // indentation makes the lexer read an invalid token that can swallow the
 // characters after it, such as a ":" indicator, and the text around such
-// a token keeps the lexer's shape. The lexer also ends one token with a
-// line ending and opens the next with it again, as after a tag that ends
-// its line and after the invalid token it makes of text that follows a
-// block scalar header. Tokenize keeps the repeat, and a blank line between
-// the two tokens loses its spaces and tabs. When that invalid token ends
-// the file with no line ending, the lexer repeats the last rune of its
-// text as a token of its own instead, and Tokenize drops that token.
+// a token keeps the lexer's shape. When the tab indents a later line of a
+// quoted scalar, the lexer ends the scalar's invalid token with the tab
+// and reads the tab again as a token of its own. Tokenize drops that
+// repeat. A repeat that ends the stream stays without the tab and takes
+// any whitespace that ends the source. In a flow collection, the repeat
+// can take the place of the indicator after the tab, and Tokenize keeps
+// such a repeat. The lexer also ends one token with a line ending and
+// opens the next with it again, as after a tag that ends its line and
+// after the invalid token it makes of text that follows a block scalar
+// header. Tokenize keeps the repeat, and a blank line between the two
+// tokens loses its spaces and tabs. When that invalid token ends the file
+// with no line ending, the lexer repeats the last rune of its text as a
+// token of its own instead, and Tokenize drops that token.
 //
 // Every token's Line, Column, and Offset name the rune where its text
 // starts, counting lines, columns, and offsets from 1 and offsets in runes.
@@ -105,6 +111,10 @@ func Tokenize(src string) token.Tokens {
 
 		return tks
 	}
+
+	// The repeats hold a tab the source lacks, so the repairs below read
+	// them without it. They leave the stream once the positions are set.
+	repeats := emptyTabRepeats(tks)
 
 	// The lexer drops the source's final line ending and rewrites the
 	// whitespace ahead of it, so a file that ends in blank lines tokenizes
@@ -170,7 +180,7 @@ func Tokenize(src string) token.Tokens {
 
 	restoreWhitespace(runes, tks, repairPositions(runes, tks))
 
-	return tks
+	return dropTokens(tks, repeats)
 }
 
 // dropHeaderRepeat returns tks without the token the lexer adds when the
@@ -208,6 +218,105 @@ func dropHeaderRepeat(src string, tks token.Tokens) token.Tokens {
 	prev.Next = nil
 
 	return tks[:len(tks)-1]
+}
+
+// emptyTabRepeats empties the Origin of each token the lexer adds when a
+// tab indents a later line of a quoted scalar. The lexer ends the invalid
+// token it makes of the scalar with that tab, then reads the tab again as
+// an invalid token of its own, which holds text the source does not have.
+// It returns the repeats that have a token after them, in stream order,
+// and [Tokenize] drops those with [dropTokens] once it has repaired the
+// positions. The positioner tells where such a scalar ends from the token
+// after it, which is the repeat, so the repeat stays in the stream until
+// then. A repeat that ends the stream stays in it, so the scalar's invalid
+// token still has a token after it, as [cutQuoted] expects of a scalar the
+// lexer cut. The repair of the final line ending in [Tokenize] gives that
+// repeat any whitespace that ends the source.
+func emptyTabRepeats(tks token.Tokens) token.Tokens {
+	var repeats token.Tokens
+
+	for i := 1; i < len(tks); i++ {
+		if !tabRepeat(tks[i-1], tks[i]) {
+			continue
+		}
+
+		tks[i].Origin = ""
+
+		if i < len(tks)-1 {
+			repeats = append(repeats, tks[i])
+		}
+	}
+
+	return repeats
+}
+
+// dropTokens returns tks without the tokens of drop, and links the tokens
+// on both sides of each one to each other. The tokens of drop are tokens
+// of tks in stream order, and each one has a token of tks on both sides
+// that drop does not hold.
+func dropTokens(tks, drop token.Tokens) token.Tokens {
+	if len(drop) == 0 {
+		return tks
+	}
+
+	kept := tks[:0]
+
+	for i, tk := range tks {
+		if len(drop) == 0 || tk != drop[0] {
+			kept = append(kept, tk)
+
+			continue
+		}
+
+		drop = drop[1:]
+
+		prev, next := kept[len(kept)-1], tks[i+1]
+		prev.Next, next.Prev = next, prev
+	}
+
+	clear(tks[len(kept):])
+
+	return kept
+}
+
+// tabRepeat reports whether tk is the token the lexer repeats after prev,
+// the invalid token of a quoted scalar it cut at a tab that indents a
+// later line, as [cutAtTab] reports. The lexer reads the repeat from the
+// rune where it gave up, so both invalid tokens share the lexer's Offset.
+// The last line of the Origin of prev ends with the tabs tk holds.
+func tabRepeat(prev, tk *token.Token) bool {
+	if !cutAtTab(prev) || tk.Type != token.InvalidType ||
+		prev.Position == nil || tk.Position == nil || prev.Position.Offset != tk.Position.Offset {
+		return false
+	}
+
+	last := prev.Origin[strings.LastIndexAny(prev.Origin, "\r\n")+1:]
+
+	return tk.Origin != "" && strings.Trim(tk.Origin, "\t") == "" && strings.HasSuffix(last, tk.Origin)
+}
+
+// cutAtTab reports whether tk has the shape of the invalid token the lexer
+// makes of a single- or double-quoted scalar it cut at a tab that indents
+// a later line. The lexer ends that token with the tab, so the last line
+// of its Origin holds spaces and tabs alone and ends with a tab. Other
+// invalid tokens that open with a quote can have that shape too, such as
+// the one the lexer makes of text that follows a block scalar header when
+// a tab indents the line after it. So [tabRepeat] checks tk against the
+// token after it, and [restoreTabLine] checks it against the source.
+func cutAtTab(tk *token.Token) bool {
+	if tk.Type != token.InvalidType {
+		return false
+	}
+
+	text := strings.TrimLeft(tk.Origin, " \t\r\n")
+	if !strings.HasPrefix(text, `"`) && !strings.HasPrefix(text, "'") {
+		return false
+	}
+
+	cut := strings.LastIndexAny(tk.Origin, "\r\n")
+	last := tk.Origin[cut+1:]
+
+	return cut >= 0 && strings.HasSuffix(last, "\t") && strings.Trim(last, " \t") == ""
 }
 
 // byteOrderMark is the UTF-8 byte order mark.
@@ -471,14 +580,17 @@ type span struct {
 // of whitespace alone and of a token whose [span] is not ok. They also
 // stay as they are where the lexer repeats a line ending, such as after
 // a tag, because the repeat adds a line break the source lacks. A blank
-// line there loses its spaces and tabs. The repair of the final line
-// ending in [Tokenize] handles the whitespace after the last token that
-// holds text.
+// line there loses its spaces and tabs. The invalid token of a quoted
+// scalar the lexer cut at a tab that indents a later line still takes the
+// spaces and tabs the lexer drops after that tab when tokens of
+// whitespace alone follow it, as [restoreTabLine] describes. The repair
+// of the final line ending in [Tokenize] handles the whitespace after the
+// last token that holds text.
 func restoreWhitespace(src []rune, tks token.Tokens, spans []span) {
 	var (
 		prev     *token.Token
 		prevSpan span
-		blocked  bool // Whether a token of whitespace alone sits after prev.
+		between  strings.Builder // The Origins of the tokens of whitespace alone after prev.
 	)
 
 	for i, tk := range tks {
@@ -487,7 +599,7 @@ func restoreWhitespace(src []rune, tks token.Tokens, spans []span) {
 		}
 
 		if strings.Trim(tk.Origin, " \t\r\n") == "" {
-			blocked = blocked || tk.Origin != ""
+			between.WriteString(tk.Origin)
 
 			continue
 		}
@@ -496,12 +608,22 @@ func restoreWhitespace(src []rune, tks token.Tokens, spans []span) {
 		if sp.ok {
 			restoreText(src, tk, sp)
 
-			if !blocked && (prev == nil || prevSpan.ok) {
+			switch {
+			case between.Len() == 0 && (prev == nil || prevSpan.ok):
 				restoreBetween(src, prev, prevSpan, tk, sp)
+			case between.Len() > 0 && prevSpan.ok && cutAtTab(prev):
+				lead := tk.Origin[:len(tk.Origin)-len(strings.TrimLeft(tk.Origin, " \t\r\n"))]
+				restoreTabLine(src, prev, prevSpan, between.String()+lead, sp.start)
 			}
 		}
 
-		prev, prevSpan, blocked = tk, sp, false
+		prev, prevSpan = tk, sp
+
+		between.Reset()
+	}
+
+	if between.Len() > 0 && prevSpan.ok && cutAtTab(prev) {
+		restoreTabLine(src, prev, prevSpan, between.String(), len(src))
 	}
 }
 
@@ -520,6 +642,42 @@ func restoreText(src []rune, tk *token.Token, sp span) {
 	}
 
 	tk.Origin = tk.Origin[:lead] + want + tk.Origin[trail:]
+}
+
+// restoreTabLine gives prev, the invalid token of a quoted scalar the
+// lexer cut at a tab that indents a later line, the spaces and tabs the
+// lexer drops after that tab. Tokens of whitespace alone follow prev, such
+// as the one the lexer makes of a further line that opens with a tab. The
+// text of prev covers prevSpan, and the stream holds ws between the end of
+// the Origin of prev and rune index end, where the next text starts or the
+// source ends. The source must hold the whitespace that ends the Origin
+// right after its text. From there to end, it must hold a run of spaces
+// and tabs followed by ws. It can hold further spaces and tabs among the
+// runes of ws, because the lexer drops those from the later lines too.
+// Then prev takes the run. The Origins stay as they are otherwise.
+func restoreTabLine(src []rune, prev *token.Token, prevSpan span, ws string, end int) {
+	trail := prev.Origin[len(strings.TrimRight(prev.Origin, " \t\r\n")):]
+
+	from := prevSpan.end + utf8.RuneCountInString(trail)
+	if from > end || string(src[prevSpan.end:from]) != trail {
+		return
+	}
+
+	// The source opens the gap with the spaces and tabs after the tab, and
+	// ws opens with the last of them when the stream holds some.
+	gap := string(src[from:end])
+	run := len(gap) - len(strings.TrimLeft(gap, " \t"))
+	held := len(ws) - len(strings.TrimLeft(ws, " \t"))
+
+	if held > run {
+		return
+	}
+
+	if rest, ok := cutWhitespace(gap[run-held:], ws); !ok || rest != "" {
+		return
+	}
+
+	prev.Origin += gap[:run-held]
 }
 
 // restoreBetween gives prev and cur the whitespace of src between the
@@ -1136,9 +1294,11 @@ func hexValue(rs []rune) int {
 // index at. The lexer drops them in front of a "?" or ":" indicator that
 // follows a flow collection, a quoted scalar, or a comment, and after a
 // double-quoted scalar that holds a tab it drops one line of a run of
-// blank lines. The line breaks the stream lacks go at the start of the
-// Origin as bare line endings, the way the lexer keeps the blank lines it
-// does not drop. Bare line endings keep tabs out of the Origin. The parser
+// blank lines. It also reads a "\r" and a "\n" that only spaces part as
+// one CRLF, so the stream holds one line break where the source holds
+// two. The line breaks the stream lacks go at the start of the Origin as
+// bare line endings, the way the lexer keeps the blank lines it does not
+// drop. Bare line endings keep tabs out of the Origin. The parser
 // trims spaces and line breaks from the start of a key's Origin and
 // rejects the key when a line break is left, so a tab in front of a line
 // break would make it reject the key. A space parts a bare "\r" from a
@@ -1155,11 +1315,15 @@ func (p *positioner) restoreGap(tk *token.Token, at int) {
 	gap := string(p.src[p.cursor:at])
 	lead := tk.Origin[:len(tk.Origin)-len(strings.TrimLeft(tk.Origin, " \t\r\n"))]
 
+	// The stream's whitespace can match the start of the gap and still
+	// hold fewer line breaks than the part it matches, where the lexer
+	// read a "\r" and a "\n" that spaces part as one CRLF.
 	rest, ok := cutWhitespace(gap, p.tail)
-	if !ok {
+	if !ok || lineend.CountBreaks(gap[:len(gap)-len(rest)]) != lineend.CountBreaks(p.tail) {
 		// The lexer rewrote a line ending it kept, such as a CRLF it
-		// turned into "\n" in an invalid token, so the gap matches the
-		// stream by the count of line breaks alone.
+		// turned into "\n" in an invalid token, or it joined two line
+		// endings into one. The gap then matches the stream by the count
+		// of line breaks alone.
 		_, rest = cutLineBreaks(gap, lineend.CountBreaks(p.tail))
 	}
 
@@ -1240,7 +1404,10 @@ func cutLineBreaks(s string, n int) (string, string) {
 // the spaces and tabs that end a line of text and collapses a blank line
 // of spaces into a bare line ending, so ws may lack some spaces and tabs
 // of gap, but never a line break. A "\r" that ends ws leaves the "\n"
-// of a CRLF in gap, where the lexer cut the CRLF between two tokens.
+// of a CRLF in gap, where the lexer cut the CRLF between two tokens. A
+// CRLF in ws also matches a "\r" and a "\n" that spaces part in gap,
+// which the lexer reads as one CRLF. The part of gap it matches then
+// holds one line break more than ws.
 func cutWhitespace(gap, ws string) (string, bool) {
 	i := 0
 

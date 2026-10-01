@@ -17,6 +17,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -81,6 +82,127 @@ func TestTokenize_TabSwallowsEnd(t *testing.T) {
 			require.Len(t, tks, 1)
 			assert.Equal(t, token.InvalidType, tks[0].Type)
 			assert.Equal(t, tc.want, tks[0].Origin)
+		})
+	}
+}
+
+func TestTokenize_TabIndentsQuotedLine(t *testing.T) {
+	t.Parallel()
+
+	// When a tab indents a later line of a quoted scalar, the lexer ends
+	// the scalar's invalid token with the tab and reads the tab again as a
+	// token of its own. Tokenize drops that repeat and gives the scalar the
+	// whitespace the lexer drops after the tab, so the joined Origins equal
+	// the input, and each token on the tab's line starts past the one
+	// before it. The tokens on both sides of a repeat link to each other.
+	// A backslash that ends the scalar's text stays with it when the tab's
+	// line opens with one. The want field holds the joined Origins where
+	// they differ from the input. The lexer drops a lone "!". It also
+	// drops the code of a "\x" or "\u" escape, which Tokenize does not
+	// restore in a scalar the lexer cut at a tab.
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"double-quoted":         {input: "a: \"x\n\ty\"\n"},
+		"single-quoted":         {input: "a: 'x\n\ty'\n"},
+		"scalars in a row":      {input: "a: \"x\n\ty\"\nb: 'x\n\ty'\nc: \"x\n\ty\"\n"},
+		"sequence entry":        {input: "- \"x\n\ty\"\n"},
+		"nested sequence entry": {input: "a:\n  - \"x\n\ty\"\n"},
+		"two tabs":              {input: "a: \"x\n\t\ty\"\n"},
+		"space before the tab":  {input: "a:\n  b: \"x\n \ty\"\n"},
+		"after a blank line":    {input: "a: 'x\n\n\ty'\n"},
+		"crlf":                  {input: "a: \"x\r\n\ty\"\r\n"},
+		"no final line ending":  {input: "0:\n\"\n\t0"},
+		"escape code": {
+			input: "a: \"caf\\u00e9\n\t\n  more\"\nb: 1\n",
+			want:  "a: \"caf\\\n\t\n  more\"\nb: 1\n",
+		},
+		"escape code and two lines": {
+			input: "a: \"caf\\u00e9\n\t\n\t\n  more\"\nb: 1\n",
+			want:  "a: \"caf\\\n\t\n\t\n  more\"\nb: 1\n",
+		},
+		"tab line at the end":      {input: "a: \"x\n\t\n"},
+		"tab lines at the end":     {input: "a: \"x\n\t\n\t\n"},
+		"tab that ends the source": {input: "a: \"x\n\t"},
+		"dropped text on the tab line": {
+			input: "a: \"x\n\t!",
+			want:  "a: \"x\n\t",
+		},
+		"dropped text before a bare cr on the tab line": {
+			input: "a: \"\t\t\t]\n\t?\r\u00e9>\n\t",
+			want:  "a: \"\t\t\t]\n\t\u00e9>\n\t",
+		},
+		"two tabs on a tab line":                    {input: "a: \"x\n\t\t\n\ty\"\n"},
+		"two tabs on a single-quoted tab line":      {input: "- '\n\t\t\n\ta'\n"},
+		"space after the tab on a tab line":         {input: "a: \"x\n\t \n\ty\"\n"},
+		"two tabs on a crlf tab line":               {input: "a: \"x\r\n\t\t\r\n\ty\"\r\n"},
+		"three tabs in a nested map":                {input: "a:\n  b: \"x\n\t\t\ty\"\n"},
+		"tab lines of two tabs that end the source": {input: "a: \"x\n\t\t\n\t\n\t"},
+		"tab in the first line of a nested scalar":  {input: "a:\n  b: \"\tx\n\t\t\ty\"\n"},
+		"hex escape before a backslash": {
+			input: "a: \"c\\x41\n\t\\x42\"\n",
+			want:  "a: \"c\\\n\t\\x42\"\n",
+		},
+		"escaped line break before a backslash": {input: "a: \"x\\\n\t\\y\"\n"},
+		"escaped line break before two tabs":    {input: "b: \"\\\n\t\t\\"},
+		"hex escapes on tab lines of two tabs": {
+			input: ":: \"\n\\x4}\n\t\t\\x4|\n\t\t",
+			want:  ":: \"\n\\\n\t\t\\x4|\n\t\t",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			want := tc.want
+			if want == "" {
+				want = tc.input
+			}
+
+			tks := tokens.Tokenize(tc.input)
+			assert.Equal(t, want, yamltest.DumpTokenOrigins(tks))
+			require.NoError(t, yamltest.ValidateLines(line.NewLines(tks)))
+
+			require.NotEmpty(t, tks)
+			assert.Nil(t, tks[0].Prev)
+			assert.Nil(t, tks[len(tks)-1].Next)
+
+			for i := 1; i < len(tks); i++ {
+				assert.Same(t, tks[i-1], tks[i].Prev, "token %d", i)
+				assert.Same(t, tks[i], tks[i-1].Next, "token %d", i-1)
+			}
+		})
+	}
+}
+
+func TestTokenize_TabAfterBlockTextThatOpensWithQuote(t *testing.T) {
+	t.Parallel()
+
+	// When a tab indents the line after text that follows a block scalar
+	// header and opens with a quote, the lexer makes an invalid token of
+	// the text that looks like a quoted scalar it cut at a tab. The lexer
+	// repeats no tab after that token, so Tokenize drops no token. The
+	// joined Origins equal the input, and each token on a line starts past
+	// the one before it.
+	tcs := map[string]struct {
+		input string
+	}{
+		"unicode escape":            {input: "a: |\n  \"caf\\u00e9\n\tsome text \\u00e9\n"},
+		"hex escape":                {input: "a: |\n  \"\\x\n\tx"},
+		"unicode escape with space": {input: "|\n \"\\u\n\t \\u"},
+		"after a blank line":        {input: "- |\n\n\"\\x\n\tx"},
+		"folded":                    {input: "a: >\n  \"\\x41\n\t\tx41\n"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tks := tokens.Tokenize(tc.input)
+			assert.Equal(t, tc.input, yamltest.DumpTokenOrigins(tks))
+			require.NoError(t, yamltest.ValidateLines(line.NewLines(tks)))
 		})
 	}
 }
@@ -734,6 +856,21 @@ func TestTokenize_RestoresDroppedLineBreaks(t *testing.T) {
 		},
 		"scalar after blank lines of spaces after a bare cr comment": {
 			input: "#\r \n\r \n0",
+		},
+		"key after a bare cr and a line of spaces between tab lines of a quoted scalar": {
+			// The lexer reads the "\r", the space, and the "\n" as one
+			// CRLF in a token of whitespace alone, so the key's Origin
+			// takes the line break the stream lacks.
+			input: "a: \"x\n\t\r \n\t\n\nb: 1\n",
+			want:  "a: \"x\n\t\r\n\t\n\n\nb: 1\n",
+		},
+		"closing quote after a bare cr and a line of spaces between tab lines": {
+			input: "a: \"x\n\t\r \n\t\"\nb: 1\n",
+			want:  "a: \"x\n\t\r\n\t\n\t\"\nb: 1\n",
+		},
+		"key after a bare cr and a line of spaces between tab lines of plain text": {
+			input: "a: x\n\t\r \n\t\n\nb: 1\n",
+			want:  "a: x\n\t\r\n\t\n\n\nb: 1\n",
 		},
 		"value after a comment that ends with a crlf the lexer cuts": {
 			input: "#\r\n:",
@@ -2336,6 +2473,21 @@ func TestTokenize_Positions(t *testing.T) {
 			// taken from it misses the comment by one rune.
 			input: "\"\t1\n---\n# c\n",
 			want:  []string{"1:1:1", "2:1:5", "3:1:9"},
+		},
+		"escaped line break before a tab line that opens with a backslash": {
+			input: "b: \"\\\n\t\t\\",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9"},
+		},
+		"text on the line after a tab line that swallows its indicator": {
+			// The token the lexer makes of the second tab swallows the ":"
+			// that ends the line, and the tokens of whitespace alone sit on
+			// that ":". The text of the next token opens the line after it.
+			input: "a: \"x\n\t\t:\n\t,,\n\t",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "2:3:9", "3:2:12"},
+		},
+		"quote on the line after a tab line that swallows its indicator": {
+			input: "a: \"x\n\t\t-\n\t\"\r\n\t",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "2:3:9", "3:2:12", "4:2:16"},
 		},
 	}
 
