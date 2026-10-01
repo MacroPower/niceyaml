@@ -1793,18 +1793,21 @@ func (e *SourceError) LogValue() slog.Value {
 //	|-- 6:8: $.spec.sla: string does not match pattern
 //	`-- 22:11: $.spec.hours.days: expected "array", got "string"
 //
-// The excerpts follow, one per binding [Bindings] finds, each
-// rendered as [SourceError.Excerpt] with context lines of unchanged
-// content on either side of each marked line, as [line.View.String]
-// renders a view: each line behind its number, carets under the columns
-// of every location on the row below, and the message of each nested
-// error beside its caret. A negative context shows the marked lines
-// alone. Blank lines separate the parts. When no location in the tree of
-// a binding resolves, FormatError prints a line starting "no excerpt:" in
-// place of the excerpt, with the reason the location of the binding
+// The excerpts follow. For each binding [Bindings] finds, FormatError
+// prints one excerpt per source the tree of the binding touches, as
+// [SourceError.Excerpts] yields them, so a binding whose nested errors
+// point into another file shows an excerpt of that file too. Each
+// excerpt keeps context lines of unchanged content on either side of
+// each marked line and renders as [line.View.String] renders a view:
+// each line behind its number, carets under the columns of every
+// location on the row below, and the message of each nested error
+// beside its caret. A negative context shows the marked lines alone.
+// Blank lines separate the parts. When no location in the tree of a
+// binding resolves, FormatError prints a line starting "no excerpt:" in
+// place of the excerpts, with the reason the location of the binding
 // itself did not resolve. A binding that carries no location of its own
 // gets no such line. A binding whose own location does not resolve but
-// whose nested errors do gets their excerpt and no reason, and its
+// whose nested errors do gets their excerpts and no reason, and its
 // message stays in the tree without a position. The output holds no
 // escape sequences, so it reads in a log as it does in a terminal.
 //

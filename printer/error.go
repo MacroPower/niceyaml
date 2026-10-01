@@ -17,24 +17,27 @@ import (
 const errorConnectorWidth = 4
 
 // PrintError renders err for a reader: its message as a tree, then the
-// [niceyaml.SourceError.Excerpt] of every [*niceyaml.SourceError] in its
-// tree, as [niceyaml.Bindings] finds them, each with the context lines
-// [WithContextLines] sets on either side of each marked line. An error
-// joined from one bound error per document therefore prints an excerpt for
-// each document. A location with no message beside it in the excerpt,
-// such as the root of a bound error, gets a caret run under its range on
-// the row below, as [niceyaml.FormatError] draws one.
+// excerpts of each [*niceyaml.SourceError] that [niceyaml.Bindings] finds
+// in its tree, one per source the tree of the binding touches, as
+// [niceyaml.SourceError.Excerpts] yields them. Each excerpt keeps the
+// context lines [WithContextLines] sets on either side of each marked
+// line. An error joined from one bound error per document therefore
+// prints an excerpt for each document, and a binding whose nested errors
+// point into another file prints an excerpt of that file too. A location
+// with no message beside it in the excerpt, such as the root of a bound
+// error, gets a caret run under its range on the row below, as
+// [niceyaml.FormatError] draws one.
 // [niceyaml.SourceError.Excerpt] marks such a line with an annotation
 // without content, and [DefaultAnnotation] draws that as the caret run, so
 // the range shows its extent without color. A location that covers no
 // column, such as a path to an empty value, gets a single caret at its
 // column. Blank lines separate the parts. When no location in the tree
 // of a SourceError resolves, PrintError prints a line starting
-// "no excerpt:" in place of the excerpt, with the reason the location of
+// "no excerpt:" in place of the excerpts, with the reason the location of
 // the SourceError itself did not resolve. A SourceError that carries no
 // location of its own gets no such line. A SourceError whose own
 // location does not resolve but whose nested errors do gets their
-// excerpt and no reason, and its message stays in the tree without a
+// excerpts and no reason, and its message stays in the tree without a
 // position.
 //
 // PrintError draws the message as a tree with a connector in front of each
