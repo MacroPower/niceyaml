@@ -1097,6 +1097,97 @@ func TestResolver_Entry(t *testing.T) {
 	}
 }
 
+func TestEntryFinder_Entry(t *testing.T) {
+	t.Parallel()
+
+	// The mapping m of each document holds the keys k0 and up, then a merge
+	// key that lists as many aliases to one mapping, then the key last. A
+	// lookup of each of those keys reads the whole list, and a lookup of
+	// last reads no merge key.
+	tcs := map[string]struct {
+		err  error
+		keys int
+	}{
+		"few merge sources": {
+			keys: 10,
+		},
+		"many merge sources": {
+			keys: 2000,
+			err:  paths.ErrExcessiveMerging,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var sb strings.Builder
+
+			sb.WriteString("a: &a {z: 0}\nm:\n")
+
+			for i := range tc.keys {
+				fmt.Fprintf(&sb, "  k%d: %d\n", i, i)
+			}
+
+			sb.WriteString("  <<: [" + strings.Repeat("*a, ", tc.keys-1) + "*a]\n  last: x\n")
+
+			file, err := niceyaml.NewSourceFromString(sb.String()).File()
+			require.NoError(t, err)
+
+			r := paths.NewResolver(file.Docs[0])
+
+			m, err := r.Node(paths.MustParse("$.m"))
+			require.NoError(t, err)
+
+			finder := r.EntryFinder()
+
+			// The lookups share one limit, so no lookup of these keys
+			// finds its entry after the one that passes the limit.
+			found := 0
+
+			for i := range tc.keys {
+				entry, err := finder.Entry(m, fmt.Sprintf("k%d", i))
+				if err != nil {
+					require.ErrorIs(t, err, tc.err)
+					assert.Nil(t, entry)
+
+					continue
+				}
+
+				require.Equal(t, i, found, "lookup of k%d found its entry past the limit", i)
+
+				found++
+			}
+
+			if tc.err == nil {
+				assert.Equal(t, tc.keys, found)
+			} else {
+				assert.Positive(t, found)
+				assert.Less(t, found, tc.keys)
+			}
+
+			// A lookup that reads no merge key finds its entry past the
+			// limit.
+			got, err := finder.Entry(m, "last")
+			require.NoError(t, err)
+
+			entry, ok := got.(*ast.MappingValueNode)
+			require.True(t, ok, "entry is a %T", got)
+			assert.Equal(t, "x", entry.Value.String())
+
+			// A call on the resolver and a new finder each count their
+			// own reads.
+			key := fmt.Sprintf("k%d", tc.keys-1)
+
+			_, err = r.Entry(m, key)
+			require.NoError(t, err)
+
+			_, err = r.EntryFinder().Entry(m, key)
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestResolver_Anchor(t *testing.T) {
 	t.Parallel()
 

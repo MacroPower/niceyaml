@@ -87,8 +87,8 @@ func (m match) key() match {
 //
 // The nodes field counts the nodes of the document. [resolver.excessive]
 // weighs the matches of a selector against that count, and
-// [resolver.excessiveMerging] weighs the merge reads of a selector
-// against it.
+// [resolver.excessiveMerging] weighs the merge reads of a selector or of
+// an [EntryFinder] against it.
 //
 // Create instances with [newResolver].
 type resolver struct {
@@ -966,21 +966,21 @@ func (r *resolver) excessive(count int) bool {
 	return aliaslimit.Excessive(r.nodes, max(count-r.nodes, 0))
 }
 
-// lookupReads holds what the key lookups of one selector share. The count
-// field counts the nodes under `<<` merge keys that those lookups have
-// read, which [resolver.excessiveMerging] weighs. The sources field is a
-// stack of the merge sources that the lookups in progress have yet to
-// search. [resolver.lookup] pushes the sources of each merge key it reads
-// and pops them once it has searched them. The lookups of a selector thus
-// share one buffer, where each would otherwise allocate one for every
-// merge key it reads.
+// lookupReads holds what the key lookups of one selector, or of one
+// [EntryFinder], share. The count field counts the nodes under `<<` merge
+// keys that those lookups have read, which [resolver.excessiveMerging]
+// weighs. The sources field is a stack of the merge sources that the
+// lookups in progress have yet to search. [resolver.lookup] pushes the
+// sources of each merge key it reads and pops them once it has searched
+// them. Those lookups thus share one buffer, where each would otherwise
+// allocate one for every merge key it reads.
 type lookupReads struct {
 	sources []*ast.MappingNode
 	count   int
 }
 
 // The limits on the nodes under `<<` merge keys that the key lookups of
-// one selector may read.
+// one selector, or of one [EntryFinder], may read.
 const (
 	// The lookups may read this many times the nodes of the document.
 	mergeReadFactor = 64
@@ -991,15 +991,15 @@ const (
 )
 
 // excessiveMerging reports whether reads, the nodes under `<<` merge keys
-// that the key lookups of one selector have read, pass the limit for the
-// document. Each lookup reads the merge chain behind its mapping again, so
-// the lookups of one selector can read many times the nodes of the
-// document. While the mappings and merge chains of a document keep their
-// size as the document grows, reads stay a fixed multiple of its nodes.
-// The limit is a fixed multiple of those nodes too, so a document does not
-// pass it by growing that way. A document passes it when the chain that
-// each lookup reads grows with the document, since reads then grow with
-// the square of its nodes.
+// that the key lookups of one selector or of one [EntryFinder] have read,
+// pass the limit for the document. Each lookup reads the merge chain
+// behind its mapping again, so those lookups can read many times the
+// nodes of the document. While the mappings and merge chains of a
+// document keep their size as the document grows, reads stay a fixed
+// multiple of its nodes. The limit is a fixed multiple of those nodes
+// too, so a document does not pass it by growing that way. A document
+// passes it when the chain that each lookup reads grows with the
+// document, since reads then grow with the square of its nodes.
 func (r *resolver) excessiveMerging(reads int) bool {
 	return reads > max(mergeReadFloor, mergeReadFactor*r.nodes)
 }
@@ -1095,10 +1095,12 @@ func (r *resolver) apply(seg segment, m match, reads *lookupReads) ([]match, err
 // [resolver.mergeSources] counts them, and returns [ErrExcessiveMerging]
 // once that count passes the limit [resolver.excessiveMerging] applies. A
 // caller that shares reads among many lookups thus weighs them together
-// against that limit. Lookup adds those nodes even when it returns an
-// error for an alias that does not resolve, so a caller that ignores the
-// error still weighs them. Lookup leaves the sources stack of reads at the
-// length it found it.
+// against that limit. Where the count has already passed the limit,
+// lookup returns the error at the first merge key it reaches, before it
+// reads the value of that key. Lookup adds those nodes even when it
+// returns an error for an alias that does not resolve, so a caller that
+// ignores the error still weighs them. Lookup leaves the sources stack of
+// reads at the length it found it.
 //
 // The int result is the index in mapping of the entry lookup found, or,
 // for an entry a merge source holds, of the `<<` entry that brings it in.
@@ -1167,6 +1169,12 @@ func (r *resolver) lookup(
 func (r *resolver) lookupMerge(
 	value ast.Node, name string, seen map[*ast.MappingNode]bool, reads *lookupReads,
 ) (*ast.MappingValueNode, bool, error) {
+	// A caller that goes on after the error would otherwise read the
+	// whole value again on each lookup past the limit.
+	if r.excessiveMerging(reads.count) {
+		return nil, false, ErrExcessiveMerging
+	}
+
 	top := len(reads.sources)
 
 	sources, read, err := r.mergeSources(reads.sources, value)

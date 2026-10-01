@@ -180,9 +180,44 @@ func (r *Resolver) KeyName(key ast.Node) (string, bool) {
 // name selects no entry in it, and one wrapping [ErrAlias] when an alias on
 // the way does not resolve. Returns one wrapping [ErrExcessiveMerging] when
 // the lookup reads far more nodes under `<<` merge keys than the document
-// holds.
+// holds. Each call weighs its own reads against that limit, where the
+// calls of one [EntryFinder] weigh theirs together.
 func (r *Resolver) Entry(node ast.Node, name string) (ast.Node, error) {
-	content, err := r.resolver.unwrap(node)
+	return r.EntryFinder().Entry(node, name)
+}
+
+// EntryFinder finds entries in the mappings of one document, as
+// [Resolver.Entry] does, and weighs the reads of all its lookups together
+// against the limit behind [ErrExcessiveMerging]. A lookup of a key with
+// a `<<` merge key after it reads the sources of that merge key, so
+// looking up each key of such a mapping reads those sources once for
+// each key. A caller that looks up many entries uses one EntryFinder for
+// them, so those reads stop at the limit rather than grow with the
+// square of the document. An EntryFinder is not safe for concurrent use.
+//
+// Create instances with [Resolver.EntryFinder].
+type EntryFinder struct {
+	resolver *resolver
+	reads    lookupReads
+}
+
+// EntryFinder creates a new [*EntryFinder] for the document of the
+// Resolver.
+func (r *Resolver) EntryFinder() *EntryFinder {
+	return &EntryFinder{resolver: r.resolver}
+}
+
+// Entry returns the entry that [Path.Child] with name selects in the
+// mapping at node, as [Resolver.Entry] does, with the same results and
+// errors.
+//
+// It returns the error wrapping [ErrExcessiveMerging] for the lookup that
+// takes the reads of the EntryFinder past the limit, and for every later
+// lookup that reads a merge key. A later lookup that reads no merge key
+// still returns its entry, such as one of a key with no merge key after
+// it.
+func (f *EntryFinder) Entry(node ast.Node, name string) (ast.Node, error) {
+	content, err := f.resolver.unwrap(node)
 	if err != nil {
 		return nil, fmt.Errorf("entry %q: %w", name, err)
 	}
@@ -192,9 +227,7 @@ func (r *Resolver) Entry(node ast.Node, name string) (ast.Node, error) {
 		return nil, fmt.Errorf("entry %q: %w: not a mapping", name, ErrNotFound)
 	}
 
-	var reads lookupReads
-
-	entry, _, ok, err := r.resolver.lookup(mapping, name, nil, &reads)
+	entry, _, ok, err := f.resolver.lookup(mapping, name, nil, &f.reads)
 	if err != nil {
 		return nil, fmt.Errorf("entry %q: %w", name, err)
 	}

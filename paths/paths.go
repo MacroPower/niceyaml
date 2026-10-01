@@ -63,7 +63,9 @@ var (
 	// `.name` after a `[*]` looks up its key in each element. Each of these
 	// can make one selector read a chain many times. A selector may read
 	// 64 times as many of these nodes as the document holds, or 524,288 of
-	// them when that is more.
+	// them when that is more. A call of [Resolver.Entry] may read as many
+	// as one selector, and the calls of one [EntryFinder] may read that
+	// many between them.
 	ErrExcessiveMerging = errors.New("excessive merging")
 
 	// Before quoteName or goccyString wraps a selector name in single

@@ -234,6 +234,13 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // through that spelling selects the later key, so the path names the
 // member and each key below it as the decoder does.
 //
+// To tell which key a spelling selects, Validate reads the sources of
+// each `<<` merge key that brings the key in or stands after it. The
+// violations of one call may read as many nodes that way as
+// [paths.ErrExcessiveMerging] allows one path selector. Past that limit
+// Validate still reports every violation, and a path through such a key
+// names the member and each key below it as the decoder does.
+//
 // The node also shows which !!timestamp values the source wrote as a bare
 // date. Validate hands the schema each of those as an RFC 3339 full-date,
 // so !!timestamp 2001-12-14 matches format "date" as the untagged
@@ -510,7 +517,7 @@ func rootOf(n *niceyaml.Node) ast.Node {
 // when root is nil, as does a key the walk finds but cannot spell.
 //
 // The walk writes a spelling only where a path selector with that
-// spelling selects the entry that sets the member, as the resolver of idx
+// spelling selects the entry that sets the member, as the finder of idx
 // reports. A later entry with the same spelling can win the selector,
 // such as a later key of the mapping, a later merge key, or a later
 // source of one merge key. The segment then keeps its decoded name, which
@@ -518,6 +525,12 @@ func rootOf(n *niceyaml.Node) ast.Node {
 // does not select the entry of its member, every segment below keeps its
 // decoded name too, since a key spelled below would resolve under the
 // entry that name selects.
+//
+// The finder reads the sources of a merge key that brings a key in or
+// stands after it, and the walks that share idx share the limit of one
+// [paths.EntryFinder] on those reads. Past that limit the finder reports
+// no entry for such a key, so its segment and every segment below keep
+// their decoded names.
 func sourcePath(root ast.Node, idx *memberIndex, segments []jsonschema.Segment) paths.Path {
 	path := paths.Root()
 	node := deref(idx.resolver, root)
@@ -609,11 +622,14 @@ func elementNode(node ast.Node, index int) ast.Node {
 // through to find the scalar a timestamp came from. It holds the member
 // table of each mapping it has read, so each key decodes once however
 // many lookups pass through its mapping or merge it in. The resolver
-// binds the aliases of the document.
+// binds the aliases of the document. The finder tells which entry a
+// spelling selects, and weighs the merge reads of every walk together
+// against the limit behind [paths.ErrExcessiveMerging].
 //
 // Create instances with [newMemberIndex].
 type memberIndex struct {
 	resolver *paths.Resolver
+	finder   *paths.EntryFinder
 	members  map[ast.Node]memberTable
 }
 
@@ -629,7 +645,7 @@ type memberTable struct {
 // newMemberIndex creates a new [*memberIndex] that follows aliases
 // through r.
 func newMemberIndex(r *paths.Resolver) *memberIndex {
-	return &memberIndex{resolver: r, members: map[ast.Node]memberTable{}}
+	return &memberIndex{resolver: r, finder: r.EntryFinder(), members: map[ast.Node]memberTable{}}
 }
 
 // lookup returns the member [memberIndex.memberNodes] finds for name in
@@ -639,10 +655,12 @@ func (idx *memberIndex) lookup(node ast.Node, name string) memberNode {
 }
 
 // selects reports whether a path selector with name selects the entry
-// that sets member in the mapping node holds, as the resolver of idx
-// reports. It reports false for a member with no entry.
+// that sets member in the mapping node holds, as the finder of idx
+// reports. It reports false for a member with no entry, and where the
+// finder returns an error, such as [paths.ErrExcessiveMerging] once its
+// lookups pass that limit.
 func (idx *memberIndex) selects(node ast.Node, name string, member memberNode) bool {
-	entry, err := idx.resolver.Entry(node, name)
+	entry, err := idx.finder.Entry(node, name)
 
 	return err == nil && member.entry != nil && entry == member.entry
 }

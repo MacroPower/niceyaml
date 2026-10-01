@@ -136,3 +136,33 @@ func BenchmarkSchema_Validate_ManyViolations(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkSchema_Validate_WideMerge breaks the schema at every member
+// of a mapping that ends in a merge key with as many sources. The path
+// of each violation reads those sources to spell its key, until the
+// violations reach the limit on those reads, so the time should grow
+// with the document and not with its square.
+func BenchmarkSchema_Validate_WideMerge(b *testing.B) {
+	v := schema.MustCompile([]byte(`{
+		"type": "object",
+		"properties": {
+			"m": {"additionalProperties": {"type": "integer"}}
+		}
+	}`))
+
+	for _, members := range []int{1000, 4000} {
+		doc, err := niceyaml.NewSourceFromString(wideMerge(members)).Document()
+		require.NoError(b, err)
+
+		b.Run(fmt.Sprintf("members_%d", members), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				err := v.Validate(b.Context(), doc)
+				if err == nil {
+					b.Fatal("want violations")
+				}
+			}
+		})
+	}
+}

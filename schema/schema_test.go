@@ -2986,6 +2986,96 @@ func TestSchema_SourcePath_SeveralViolations(t *testing.T) {
 	assert.ElementsMatch(t, []string{"$.base", "$.0x10", "$.1", "$.a", "$.name"}, got)
 }
 
+// wideMerge returns a document whose mapping m holds members keys, each
+// spelled in hexadecimal over the value x, and then a merge key that
+// lists as many aliases to one mapping. To tell which entry the spelling
+// of one of those keys selects, a lookup reads that whole list.
+func wideMerge(members int) string {
+	var sb strings.Builder
+
+	sb.WriteString("a: &a {z: 0}\nm:\n")
+
+	for i := range members {
+		fmt.Fprintf(&sb, "  %#x: x\n", 0x1000+i)
+	}
+
+	sb.WriteString("  <<: [" + strings.Repeat("*a, ", members-1) + "*a]\n")
+
+	return sb.String()
+}
+
+func TestSchema_SourcePath_MergeReads(t *testing.T) {
+	t.Parallel()
+
+	// Every member of m breaks the schema, and the violations of one
+	// Validate share one limit on the nodes they read under the merge key.
+	// Validate reports each violation past that limit too, with a path
+	// that keeps the decoded name of its key, which selects no entry.
+	v := compileSchema(t, []byte(`{
+		"type": "object",
+		"properties": {
+			"m": {"additionalProperties": {"type": "integer"}}
+		}
+	}`))
+
+	tcs := map[string]struct {
+		members int
+		decoded bool
+	}{
+		"few merge sources": {
+			members: 10,
+		},
+		"many merge sources": {
+			members: 2000,
+			decoded: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, wideMerge(tc.members))
+
+			err := v.Validate(t.Context(), dd)
+
+			var ve *niceyaml.Error
+
+			require.ErrorAs(t, err, &ve)
+
+			violations := ve.Errors()
+			require.Len(t, violations, tc.members)
+
+			spelled := 0
+
+			for _, violation := range violations {
+				var child *niceyaml.Error
+
+				require.ErrorAs(t, violation, &child)
+
+				path, ok := child.Path()
+				require.True(t, ok, "violation carries no path")
+
+				if strings.HasPrefix(path.String(), "$.m.0x") {
+					_, err := dd.At(path)
+					require.NoError(t, err, "path %s does not resolve", path)
+
+					spelled++
+				}
+			}
+
+			if tc.decoded {
+				assert.Positive(t, spelled)
+				assert.Less(t, spelled, tc.members)
+
+				return
+			}
+
+			assert.Equal(t, tc.members, spelled)
+		})
+	}
+}
+
 func TestSchema_RefToRejectingSchema(t *testing.T) {
 	t.Parallel()
 
