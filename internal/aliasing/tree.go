@@ -99,10 +99,12 @@ func excessiveRead(n Node, state *docstate.State, mode readMode) bool {
 	ast.Walk(&nulls, body)
 
 	c := treeCounter{
-		resolver: resolver,
-		nulls:    nulls.aliases,
-		sizes:    [readModes]map[ast.Node]int{{}, {}},
-		open:     map[ast.Node]bool{},
+		resolver:    resolver,
+		nulls:       nulls.aliases,
+		sizes:       [readModes]map[ast.Node]int{{}, {}},
+		open:        map[ast.Node]bool{},
+		collections: map[*ast.AliasNode]bool{},
+		textKeys:    map[*ast.AliasNode]bool{},
 	}
 
 	c.count(body, true, mode)
@@ -221,14 +223,19 @@ const (
 //
 // Where the decoder reads a node into a value, an alias to a scalar
 // counts as one unaliased node, as a shared scalar does in a decoded
-// value. The decoder writes some nodes out as text instead: a key that
-// holds a mapping or a sequence, a key that is an alias to a !!binary
-// scalar, and the value under a !!str, !!int, !!bool, or !!binary tag.
-// Each copy of a scalar in that text costs its length, so there a scalar
-// counts one node per byte of its text, and an alias to one adds that
-// count to the aliased nodes. The content of an anchor on a scalar counts
-// its bytes too, so a scalar written out once weighs what its anchor
-// does.
+// value. The decoder writes some nodes out as text instead. It does so
+// for a key that is or refers to a mapping, a sequence, or a !!binary
+// scalar, and for the value under a !!str, !!int, !!bool, or !!binary
+// tag. Each copy of a scalar in that text costs its length, so there a
+// scalar counts one node per byte of its text, and an alias to one adds
+// that count to the aliased nodes. The content of an anchor on a scalar
+// counts its bytes too, so a scalar written out once weighs what its
+// anchor does.
+//
+// An alias to a tag over another alias, such as *s for `&s !foo *k`,
+// refers to what *k refers to. A mapping under k then counts in full at
+// each *s, and a key *s counts as text when *k refers to a !!binary
+// scalar.
 //
 // The distinct field counts the nodes of the tree once each, and the
 // aliased field counts the nodes the aliases in the tree repeat. The
@@ -236,14 +243,21 @@ const (
 // read it, one map for each read mode, so a chain of nested aliases costs
 // one read per anchor. The open map holds the content of each alias the
 // counter is reading, so an alias that leads back into that content
-// counts as one node and the count ends.
+// counts as one node and the count ends. For each alias
+// [treeCounter.reaches] has followed, the collections map holds whether
+// the alias refers to a mapping or a sequence, and the textKeys map holds
+// whether the decoder writes out a key that is the alias as text. A chain
+// of tagged aliases then costs one walk, however many aliases lead into
+// it.
 type treeCounter struct {
-	resolver *paths.Resolver
-	nulls    map[*ast.AliasNode]bool
-	sizes    [readModes]map[ast.Node]int
-	open     map[ast.Node]bool
-	distinct int
-	aliased  int
+	resolver    *paths.Resolver
+	nulls       map[*ast.AliasNode]bool
+	sizes       [readModes]map[ast.Node]int
+	open        map[ast.Node]bool
+	collections map[*ast.AliasNode]bool
+	textKeys    map[*ast.AliasNode]bool
+	distinct    int
+	aliased     int
 }
 
 // count returns the number of nodes a decode of node reads as mode. A
@@ -315,34 +329,15 @@ func (c *treeCounter) entry(entry *ast.MappingValueNode, top bool, mode readMode
 }
 
 // keyAsText reports whether the decoder writes key out as text. It does
-// so for a key that decodes to neither a string nor a number, which is a
-// mapping or a sequence, or an alias to one or to a !!binary scalar.
+// so for a key that decodes to neither a string nor a number. That is a
+// mapping, a sequence, or a !!binary scalar, or an alias that refers to
+// one through the aliases [treeCounter.reaches] follows.
 func (c *treeCounter) keyAsText(key ast.Node) bool {
 	if astnode.IsNil(key) {
 		return false
 	}
 
-	if isCollection(key) {
-		return true
-	}
-
-	alias, ok := astnode.Content(key).(*ast.AliasNode)
-	if !ok {
-		return false
-	}
-
-	target, err := c.resolver.Deref(alias)
-	if err != nil {
-		return false
-	}
-
-	if isCollection(target) {
-		return true
-	}
-
-	tag, ok := target.(*ast.TagNode)
-
-	return ok && tag.Start != nil && token.ReservedTagKeyword(tag.Start.Value) == token.BinaryTag
+	return c.reaches(key, isTextKey, c.textKeys)
 }
 
 // tagMode returns how the decoder reads the value under tag when it reads
@@ -379,12 +374,13 @@ func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool, mode readMode) in
 // That is one for an alias the decoder reads as null. Otherwise it is the
 // size of the mapping or sequence the alias refers to, the length of the
 // text of a scalar it refers to when read as text, or one for any other
-// alias. With top set, the alias lies outside the content of every other
-// alias, and alias adds that size to aliased, or the one node to
-// distinct.
+// alias. An alias to a tag over another alias, as in `&s !foo *k`, refers
+// to what that alias refers to. With top set, the alias lies outside the
+// content of every other alias, and alias adds that size to aliased, or
+// the one node to distinct.
 func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 	target, err := c.resolver.Deref(alias)
-	if err != nil || c.nulls[alias] || c.open[target] || (mode == readValue && !isCollection(target)) {
+	if err != nil || c.nulls[alias] || c.open[target] || (mode == readValue && !c.holdsCollection(target)) {
 		if top {
 			c.distinct = aliaslimit.AddCapped(c.distinct, 1)
 		}
@@ -429,6 +425,88 @@ func textSize(node ast.Node) int {
 	}
 
 	return max(size, 1)
+}
+
+// holdsCollection reports whether node holds a mapping or a sequence
+// under its anchors and tags, or refers to one through the aliases
+// [treeCounter.reaches] follows.
+func (c *treeCounter) holdsCollection(node ast.Node) bool {
+	return c.reaches(node, isCollection, c.collections)
+}
+
+// reaches reports whether match holds for node or for the content of an
+// alias that node leads to. It follows the alias under the anchors and
+// tags of node to the content of its anchor, and goes on from there in
+// the same way. [paths.Resolver.Deref] stops at a tag, so an alias to an
+// anchor such as `&s !foo *k` gives the tag over *k, and reaches goes on
+// to the content *k refers to. It stops at an alias that does not
+// resolve, at one the decoder reads as null, and at one it has followed
+// before.
+//
+// The results map holds, for each alias reaches has followed with match,
+// whether match holds for the content that alias leads to. That answer
+// does not depend on where the walk began, so reaches records it for
+// every alias on the way and stops at an alias it has recorded. It
+// records an alias as false before it follows it, so a walk that comes
+// back to that alias finds false.
+func (c *treeCounter) reaches(node ast.Node, match func(ast.Node) bool, results map[*ast.AliasNode]bool) bool {
+	if match(node) {
+		return true
+	}
+
+	var (
+		followed []*ast.AliasNode
+		found    bool
+	)
+
+	for {
+		alias, ok := astnode.Content(node).(*ast.AliasNode)
+		if !ok || c.nulls[alias] {
+			break
+		}
+
+		if known, ok := results[alias]; ok {
+			found = known
+
+			break
+		}
+
+		results[alias] = false
+		followed = append(followed, alias)
+
+		target, err := c.resolver.Deref(alias)
+		if err != nil {
+			break
+		}
+
+		if match(target) {
+			found = true
+
+			break
+		}
+
+		node = target
+	}
+
+	for _, alias := range followed {
+		results[alias] = found
+	}
+
+	return found
+}
+
+// isTextKey reports whether node holds a mapping or a sequence or is a
+// !!binary tag, either of which the decoder writes out as text in a key.
+func isTextKey(node ast.Node) bool {
+	return isCollection(node) || isBinary(node)
+}
+
+// isBinary reports whether node is a !!binary tag, whose value the
+// decoder reads as bytes.
+func isBinary(node ast.Node) bool {
+	tag, ok := node.(*ast.TagNode)
+
+	return ok && tag.Start != nil && token.ReservedTagKeyword(tag.Start.Value) == token.BinaryTag
 }
 
 // isCollection reports whether node holds a mapping or a sequence under
