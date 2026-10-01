@@ -25,7 +25,9 @@ func TestGet_RedactsPassword(t *testing.T) {
 	// Get sends no request for a URL that does not parse, and its error
 	// names the URL as Redacted spells it. A password that starts with
 	// "/", "?" or "#" parses, but as an empty port and then a path, query
-	// or fragment, so Get refuses it too.
+	// or fragment, so Get refuses it too. A third slash after the scheme
+	// empties the host and turns the userinfo into a path, so Get refuses
+	// that URL as well.
 	tcs := map[string]struct {
 		url string
 	}{
@@ -39,6 +41,9 @@ func TestGet_RedactsPassword(t *testing.T) {
 		"password starting with a question mark": {url: "https://user:?secret@example.com/x"},
 		"password starting with a hash":          {url: "https://user:#secret@example.com/x"},
 		"username with an at sign":               {url: "https://jane@corp.com:/secret@example.com/x"},
+		"empty authority":                        {url: "https:///user:secret@example.com/x"},
+		"upper-case scheme and empty authority":  {url: "HTTPS:////user:secret@example.com/x"},
+		"password and an empty host":             {url: "http://user:secret@/x"},
 	}
 
 	for name, tc := range tcs {
@@ -371,6 +376,18 @@ func TestRedacted(t *testing.T) {
 		"at sign in the path of a url that parses keeps its spelling": {
 			url:  "https://example.com:8443/pkg@1.0/s.json",
 			want: "https://example.com:8443/pkg@1.0/s.json",
+		},
+		"password after an empty authority": {
+			url:  "https:///user:secret@example.com/s.json",
+			want: "https:///user:xxxxx@example.com/s.json",
+		},
+		"empty authority with no at sign keeps its spelling": {
+			url:  "https:///s.json",
+			want: "https:///s.json",
+		},
+		"file url with an at sign in the path keeps its spelling": {
+			url:  "file:///srv/a:b@c.json",
+			want: "file:///srv/a:b@c.json",
 		},
 	}
 
