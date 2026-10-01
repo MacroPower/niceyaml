@@ -221,7 +221,10 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 //
 // Holding the node lets Validate spell each key in a violation's path as
 // the source does, so a key the decoder respells, such as the hexadecimal
-// 0x10 for the member name 16, still names its member.
+// 0x10 for the member name 16, still names its member. Where a later key
+// in the mapping or its merge sources has the same spelling, a path
+// through that spelling selects the later key, so the path names the
+// member and each key below it as the decoder does.
 //
 // The node also shows which !!timestamp values the source wrote as a bare
 // date. Validate hands the schema each of those as an RFC 3339 full-date,
@@ -234,8 +237,7 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // at any depth, with a key whose member name Validate cannot tell at or
 // after the member leading to the timestamp, since such a key may set a
 // member of the same name. A merge key whose sources do not resolve is
-// one such key. It holds as well for a member a merge key sets where the
-// mapping also has a key of the same spelling.
+// one such key.
 //
 // The decoder writes out the whole content of an alias it spells as
 // text, such as an alias used as a key. It also reads a mapping a merge
@@ -467,6 +469,16 @@ func rootOf(n *niceyaml.Node) ast.Node {
 // that does not resolve. A member a merge key brings in takes the
 // spelling its source gives the key. Every segment keeps its decoded name
 // when root is nil, as does a key the walk finds but cannot spell.
+//
+// The walk writes a spelling only where a path selector with that
+// spelling selects the entry that sets the member, as the resolver of idx
+// reports. A later entry with the same spelling can win the selector,
+// such as a later key of the mapping, a later merge key, or a later
+// source of one merge key. The segment then keeps its decoded name, which
+// may select no entry, or another entry. Where the name a segment writes
+// does not select the entry of its member, every segment below keeps its
+// decoded name too, since a key spelled below would resolve under the
+// entry that name selects.
 func sourcePath(root ast.Node, idx *memberIndex, segments []jsonschema.Segment) paths.Path {
 	path := paths.Root()
 	node := deref(idx.resolver, root)
@@ -480,14 +492,26 @@ func sourcePath(root ast.Node, idx *memberIndex, segments []jsonschema.Segment) 
 		}
 
 		name := seg.Key
+		member := idx.lookup(node, seg.Key)
 
-		keyNode, valueNode := idx.lookup(node, seg.Key)
-		if spelled, ok := sourceKey(keyNode); ok {
+		// The walk follows the value of the member only where the name it
+		// writes selects the entry of that member. Otherwise next stays
+		// nil, so every segment below keeps its decoded name.
+		var next ast.Node
+
+		spelled, ok := sourceKey(member.key)
+
+		switch {
+		case ok && idx.selects(node, spelled, member):
 			name = spelled
+			next = member.value
+
+		case idx.selects(node, name, member):
+			next = member.value
 		}
 
 		path = path.Child(name)
-		node = deref(idx.resolver, valueNode)
+		node = deref(idx.resolver, next)
 	}
 
 	return path
@@ -548,11 +572,10 @@ type memberIndex struct {
 	members  map[ast.Node]memberTable
 }
 
-// memberTable holds the key and value nodes of the members of one
-// mapping, by the name a decode gives each key. It is complete when it
-// names every member the decode keeps, so a member of an earlier mapping
-// entry holds the value the decode keeps whenever the table leaves its
-// name out.
+// memberTable holds the members of one mapping, by the name a decode
+// gives each key. It is complete when it names every member the decode
+// keeps, so a member of an earlier mapping entry holds the value the
+// decode keeps whenever the table leaves its name out.
 type memberTable struct {
 	members  map[string]memberNode
 	complete bool
@@ -564,35 +587,40 @@ func newMemberIndex(r *paths.Resolver) *memberIndex {
 	return &memberIndex{resolver: r, members: map[ast.Node]memberTable{}}
 }
 
-// lookup returns the key and value nodes [memberIndex.memberNodes] finds
-// for name in the mapping node holds, or nil nodes when it finds none.
-func (idx *memberIndex) lookup(node ast.Node, name string) (ast.Node, ast.Node) {
-	m := idx.memberNodes(node).members[name]
-
-	return m.key, m.value
+// lookup returns the member [memberIndex.memberNodes] finds for name in
+// the mapping node holds, or a member with nil nodes when it finds none.
+func (idx *memberIndex) lookup(node ast.Node, name string) memberNode {
+	return idx.memberNodes(node).members[name]
 }
 
-// memberNode holds the key and the value node of a mapping member.
+// selects reports whether a path selector with name selects the entry
+// that sets member in the mapping node holds, as the resolver of idx
+// reports. It reports false for a member with no entry.
+func (idx *memberIndex) selects(node ast.Node, name string, member memberNode) bool {
+	entry, err := idx.resolver.Entry(node, name)
+
+	return err == nil && member.entry != nil && entry == member.entry
+}
+
+// memberNode holds the entry that sets a mapping member, with the key and
+// value nodes of that entry. For an alias key, the key node is the
+// content of the anchor the alias refers to.
 type memberNode struct {
+	entry *ast.MappingValueNode
 	key   ast.Node
 	value ast.Node
 }
 
-// memberNodes returns the key and value nodes of each member of the
-// mapping node holds, by the name a decode gives its key, or an empty
-// table for any other node. A decode sets the members in order, so where
-// several members decode to one name, the table holds the last, which is
-// the member whose value the decode keeps.
+// memberNodes returns the members of the mapping node holds, by the name
+// a decode gives each key, or an empty table for any other node. A decode
+// sets the members in order, so where several members decode to one
+// name, the table holds the last, which is the member whose value the
+// decode keeps.
 //
 // A merge key sets each member its sources define, and the table holds
-// the key and value nodes the sources give that name, which a path
-// selector reaches through the merge. Where a key of the mapping itself
-// after the merge key has the same spelling, a path selector matches that
-// key instead, so the table holds no nodes for the name, and the path
-// keeps the decoded name.
-// A merge key whose sources do not resolve, or that lead back to the
-// mapping, may set a member of any name, so the table leaves out every
-// member before it.
+// the member a source gives that name. A merge key whose sources do not
+// resolve, or that lead back to the mapping, may set a member of any
+// name, so the table leaves out every member before it.
 //
 // An alias key decodes to the name the content of its anchor gives, and
 // the table holds that content as the key node, since a path selector
@@ -614,10 +642,6 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 	table := memberTable{members: map[string]memberNode{}, complete: true}
 	members := mappingMembers(node)
 
-	// The loop reads the members from the last one back, so spelled holds
-	// the spelling of each key of the mapping after the current member.
-	spelled := map[string]bool{}
-
 	for _, member := range slices.Backward(members) {
 		// A tree built by hand may hold a nil member, which sets nothing.
 		if member == nil {
@@ -625,7 +649,7 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 		}
 
 		if isMergeKey(member.Key) {
-			if !idx.addMerged(table.members, member, spelled) {
+			if !idx.addMerged(table.members, member) {
 				table.complete = false
 
 				break
@@ -646,10 +670,6 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 			name, ok = decodedKey(member.Key)
 		}
 
-		if spelling, has := sourceKey(key); has {
-			spelled[spelling] = true
-		}
-
 		if !ok {
 			table.complete = false
 
@@ -657,7 +677,7 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 		}
 
 		if _, seen := table.members[name]; !seen {
-			table.members[name] = memberNode{key: key, value: member.Value}
+			table.members[name] = memberNode{entry: member, key: key, value: member.Value}
 		}
 	}
 
@@ -668,14 +688,10 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 
 // addMerged adds to found each member the sources of the merge key of
 // member define, for a name found does not hold yet. A later source wins
-// over an earlier one, as it does in a decode. A member whose key has a
-// spelling in spelled gets no nodes. It reports false when the sources do
-// not resolve, or when the table of one of them is not complete.
-func (idx *memberIndex) addMerged(
-	found map[string]memberNode,
-	member *ast.MappingValueNode,
-	spelled map[string]bool,
-) bool {
+// over an earlier one, as it does in a decode. It reports false when the
+// sources do not resolve, or when the table of one of them is not
+// complete.
+func (idx *memberIndex) addMerged(found map[string]memberNode, member *ast.MappingValueNode) bool {
 	sources, err := idx.resolver.MergeSources(&ast.MappingNode{
 		Values: []*ast.MappingValueNode{member},
 	})
@@ -690,15 +706,9 @@ func (idx *memberIndex) addMerged(
 		}
 
 		for name, m := range table.members {
-			if _, seen := found[name]; seen {
-				continue
+			if _, seen := found[name]; !seen {
+				found[name] = m
 			}
-
-			if spelling, ok := sourceKey(m.key); ok && spelled[spelling] {
-				m = memberNode{}
-			}
-
-			found[name] = m
 		}
 	}
 
@@ -962,7 +972,7 @@ func (w *normalizer) node() ast.Node {
 		if seg.IsIndex {
 			next = elementNode(parent, seg.Index)
 		} else {
-			_, next = w.idx.lookup(parent, seg.Key)
+			next = w.idx.lookup(parent, seg.Key).value
 		}
 
 		w.nodes = append(w.nodes, deref(w.idx.resolver, next))

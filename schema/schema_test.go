@@ -885,10 +885,7 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 	// converts them to their JSON spellings, so a tagged scalar does not
 	// suppress every other constraint in the document. A !!timestamp the
 	// source wrote as a bare date becomes a full-date, the spelling the same
-	// date has without the tag, also behind an alias or a merge key. Where
-	// Validate cannot tell which scalar a timestamp came from, as for a
-	// member a merge key brings in when the mapping has a key of its own
-	// with the same spelling, the timestamp becomes a date-time.
+	// date has without the tag, also behind an alias or a merge key.
 	tcs := map[string]struct {
 		schema string
 		input  string
@@ -1064,6 +1061,22 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 			input: stringtest.Input(`
 				base: &b {d: !!timestamp 2001-12-14}
 				m: {<<: *b}
+			`),
+		},
+		"merged date hidden by a same-spelled key stays a date": {
+			// The quoted key decodes to the member 0x10, so the merge
+			// still sets the member 16.
+			schema: `{
+				"type": "object",
+				"properties": {
+					"m": {
+						"type": "object",
+						"properties": {"16": {"type": "string", "format": "date"}}
+					}
+				}
+			}`,
+			input: stringtest.Input(`
+				m: {<<: {0x10: !!timestamp 2001-12-14}, "0x10": 5}
 			`),
 		},
 		"merge sequence keeps the later source's date": {
@@ -2633,26 +2646,147 @@ func TestSchema_SourcePath(t *testing.T) {
 	}
 }
 
-func TestSchema_SourcePath_HiddenMergedKey(t *testing.T) {
+func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 	t.Parallel()
 
-	// The quoted key decodes to 0x10 rather than 16, and a path through
-	// 0x10 selects it rather than the merged key, so the path of the
-	// merged member keeps its decoded name and points nowhere.
+	// In each case the key 0x10 sets the member 16 to x. A later entry
+	// spells its key 0x10 too, and a path through 0x10 selects that entry.
+	// The path of the member keeps its decoded name and points nowhere
+	// rather than at the valid 1. The quoted "0x10" decodes to the member
+	// 0x10, as does an alias key whose anchor holds it.
 	v := compileSchema(t, []byte(`{
 		"type": "object",
 		"properties": {
 			"user": {"additionalProperties": {"type": "integer"}}
 		}
 	}`))
-	dd := yamltest.FirstDocument(t, "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n")
 
-	err := dd.Validate(t.Context(), v)
+	tcs := map[string]struct {
+		input string
+		opts  []niceyaml.SourceOption
+	}{
+		"own key after the merge key": {
+			input: "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n",
+		},
+		"merge key after the own key": {
+			input: "user:\n  0x10: x\n  <<: {\"0x10\": 1}\n",
+		},
+		"later source of one merge key": {
+			input: "user:\n  <<: [{0x10: x}, {\"0x10\": 1}]\n",
+		},
+		"later aliased source of one merge key": {
+			input: "a: &a {0x10: x}\nb: &b {\"0x10\": 1}\nuser:\n  <<: [*a, *b]\n",
+		},
+		"later merge key": {
+			input: "user:\n  <<: {0x10: x}\n  <<: {\"0x10\": 1}\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+		},
+		"later own key": {
+			input: "user:\n  0x10: x\n  \"0x10\": 1\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+		},
+		"later alias key": {
+			input: "k: &k \"0x10\"\nuser:\n  0x10: x\n  *k : 1\n",
+		},
+	}
 
-	var bound *niceyaml.SourceError
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	require.ErrorAs(t, err, &bound)
-	assert.Equal(t, "$.user.16: expected \"integer\", got \"string\"", bound.Error())
+			// FirstDocument takes no source options, and a repeated key
+			// needs one.
+			doc, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).Document()
+			require.NoError(t, err)
+
+			err = doc.Validate(t.Context(), v)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+			assert.Equal(t, "$.user.16: expected \"integer\", got \"string\"", bound.Error())
+
+			path, ok := bound.Path()
+			require.True(t, ok, "bound error carries no path")
+
+			_, err = doc.At(path)
+			require.Error(t, err, "path from the error resolves")
+		})
+	}
+}
+
+func TestSchema_SourcePath_BelowHiddenKey(t *testing.T) {
+	t.Parallel()
+
+	// In each case a later entry hides the key of the member that holds x,
+	// so the path writes the decoded name of that member. That name
+	// selects another entry, which holds a valid value under the spelling
+	// 0x11, so the keys below keep their decoded names too and the path
+	// points nowhere.
+	v := compileSchema(t, []byte(`{
+		"type": "object",
+		"properties": {
+			"user": {
+				"additionalProperties": {
+					"additionalProperties": {"type": "integer"}
+				}
+			}
+		}
+	}`))
+
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"own key after the merge key": {
+			input: "user: {16: {0x11: 2}, <<: {0x10: {0x11: x}}, \"0x10\": 1}\n",
+			want:  "$.user.16.17: expected \"integer\", got \"string\"",
+		},
+		"block own key after the merge key": {
+			input: stringtest.Input(`
+				user:
+				  16: {0x11: 2}
+				  <<: {0x10: {0x11: x}}
+				  "0x10": 1
+			`),
+			want: "$.user.16.17: expected \"integer\", got \"string\"",
+		},
+		"later source of one merge key": {
+			input: "user: {16: {0x11: 2}, <<: [{0x10: {0x11: x}}, {\"0x10\": 1}]}\n",
+			want:  "$.user.16.17: expected \"integer\", got \"string\"",
+		},
+		"merge key after the own key": {
+			input: "user: {16: {0x11: 2}, 0x10: {0x11: x}, <<: {\"0x10\": 1}}\n",
+			want:  "$.user.16.17: expected \"integer\", got \"string\"",
+		},
+		"own key spelled as its name before a merge key": {
+			// The own key decodes to 0x10, and the merged 0x10 sets the
+			// member 16, but a path through 0x10 selects the merged key.
+			input: "user: {\"0x10\": {0x11: x}, <<: {0x10: {0x11: 1}, 16: 2}}\n",
+			want:  "$.user.0x10.17: expected \"integer\", got \"string\"",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, tc.input)
+
+			err := dd.Validate(t.Context(), v)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+			assert.Equal(t, tc.want, bound.Error())
+
+			path, ok := bound.Path()
+			require.True(t, ok, "bound error carries no path")
+
+			_, err = dd.At(path)
+			require.Error(t, err, "path from the error resolves")
+		})
+	}
 }
 
 func TestSchema_SourcePath_SeveralViolations(t *testing.T) {
