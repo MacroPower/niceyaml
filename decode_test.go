@@ -6855,6 +6855,20 @@ func TestErrDecodeRejected(t *testing.T) {
 				},
 				line: -1,
 			},
+			// The decoder reports a key of an inline map with no token,
+			// which the decode cannot tell from a token of a reference
+			// document, so it binds the rejection at the alias too.
+			"key of an inline map beside an alias to a reference": {
+				input: "a: *other\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					var v struct {
+						M map[int]int `yaml:",inline"`
+					}
+
+					return dd.DecodeInto(ctx, &v, ref)
+				},
+				line: 0,
+			},
 		}
 
 		for name, tc := range tcs {
@@ -7026,26 +7040,138 @@ func TestErrDecodeRejected(t *testing.T) {
 		assert.False(t, ok, "the error took a location from the value's own parse")
 	})
 
-	t.Run("unparsable duration does not match", func(t *testing.T) {
+	t.Run("decoder error without a token does not match", func(t *testing.T) {
 		t.Parallel()
 
-		// The decoder returns the error of time.ParseDuration alone, with
-		// no token to bind it to. A go-yaml release that reports it as a
-		// yaml.Error flips this case into a rejection at 2:10.
-		dd := yamltest.FirstDocument(t, "name: api\ntimeout: 5 minutes\n")
+		type inner struct {
+			A int `yaml:"a"`
+		}
 
-		_, err := dd.Decode[struct {
-			Timeout time.Duration `yaml:"timeout"`
-		}](t.Context())
-		require.ErrorContains(t, err, "unknown unit")
-		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+		// The decoder reports these with no token to bind them to. A
+		// go-yaml release that gives one a token flips its case into a
+		// rejection with a location.
+		tcs := map[string]struct {
+			input  string
+			decode func(ctx context.Context, dd *niceyaml.Node) error
+			msg    string
+		}{
+			"unparsable duration": {
+				input: "name: api\ntimeout: 5 minutes\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Timeout time.Duration `yaml:"timeout"`
+					}](ctx)
+
+					return err
+				},
+				msg: "unknown unit",
+			},
+			"duplicated struct field name": {
+				input: "a: 1\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					var v struct {
+						A int `yaml:"a"`
+						B int `yaml:"a"`
+					}
+
+					return dd.DecodeInto(ctx, &v)
+				},
+				msg: "duplicated struct field name a",
+			},
+			"duplicated struct field name in a decoder": {
+				input: "a: 1\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					var v struct {
+						A int `yaml:"a"`
+						B int `yaml:"a"`
+					}
+
+					return niceyaml.NewDecoder().DecodeInto(ctx, dd, &v)
+				},
+				msg: "duplicated struct field name a",
+			},
+			"unexported inline embedded struct": {
+				input: "a: 1\nm: 2\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						*inner `yaml:",inline"`
+
+						M int `yaml:"m"`
+					}](ctx)
+
+					return err
+				},
+				msg: "cannot set embedded type as unexported field",
+			},
+			// The decoder builds the mapping of an inline field itself,
+			// so the mapping and its keys carry no token.
+			"key of an inline map": {
+				input: "a: 1\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					var v struct {
+						M map[int]int `yaml:",inline"`
+					}
+
+					return dd.DecodeInto(ctx, &v)
+				},
+				msg: "cannot unmarshal string into Go struct field .M of type int",
+			},
+			"inline field that cannot hold a mapping": {
+				input: "a: 1\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					var v struct {
+						N int `yaml:",inline"`
+					}
+
+					return dd.DecodeInto(ctx, &v)
+				},
+				msg: "cannot unmarshal map[string]interface {} into Go struct field .N of type int",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				err := tc.decode(t.Context(), dd)
+				require.ErrorContains(t, err, tc.msg)
+				require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+				var srcErr *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &srcErr)
+
+				_, ok := srcErr.Range()
+				assert.False(t, ok, "the error took a location")
+			})
+		}
+	})
+
+	t.Run("value of an inline map matches at its token", func(t *testing.T) {
+		t.Parallel()
+
+		// The mapping the decoder builds for an inline field holds the
+		// values of the source, so a value keeps its token though its
+		// key has none.
+		dd := yamltest.FirstDocument(t, "a: 1\nb: x\n")
+
+		var v struct {
+			M map[string]int `yaml:",inline"`
+		}
+
+		err := dd.DecodeInto(t.Context(), &v)
+		require.ErrorContains(t, err, "cannot unmarshal string into Go struct field .M of type int")
+		require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
 
 		var srcErr *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &srcErr)
 
-		_, ok := srcErr.Range()
-		assert.False(t, ok, "the error took a location")
+		rng, ok := srcErr.Range()
+		require.True(t, ok, "the rejection carries no location")
+		assert.Equal(t, position.New(1, 3), rng.Start)
 	})
 
 	t.Run("decode target does not match", func(t *testing.T) {

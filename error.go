@@ -59,9 +59,16 @@ var (
 	// there, which an error at the path of the value binds to as well.
 	// An error a value's own UnmarshalYAML returns, and the error
 	// of a context that ended, come back as they are and do not match.
-	// Neither does a [time.Duration] that [time.ParseDuration] rejects,
-	// since the decoder returns the error of that function alone, and it
-	// comes back with no location.
+	// Neither does an error the decoder reports without a token of the
+	// source, which comes back with no location. The error of
+	// [time.ParseDuration] for a [time.Duration] it rejects is one. So is
+	// an error for a target type whose definition the decoder refuses,
+	// such as a struct with two fields of one name or an inline embedded
+	// struct that is not exported. Another is an error for a key of a map
+	// tagged inline, such as the key `name` beside a map[int]int, or for
+	// a field tagged inline whose type cannot hold a mapping, such as an
+	// int. A value of an inline map keeps its token, so an error in that
+	// value matches as it would in any other field.
 	// A panic in the go-yaml decoder or in a value's own UnmarshalYAML
 	// does match, bound at the first token of the node that is not a
 	// comment, with no go-yaml error in the chain. So does a value nested
@@ -73,10 +80,15 @@ var (
 	// [WithReferences] or the yaml.Reference options, matches too, and
 	// so does an unwrapped go-yaml error an UnmarshalYAML returns from a
 	// parse of its own in such a node, since the decoder reports both
-	// alike. Either one binds at the alias when the node holds one alias
-	// to a reference document, directly or inside an anchor its aliases
-	// reach. When the node holds several, the error carries no location,
-	// even if the target type reads only one of them.
+	// alike. So does a go-yaml error the decoder reports without a token
+	// in such a node, such as the one for a key of an inline map[int]int.
+	// Each binds at the alias when the node holds one alias to a
+	// reference document, directly or inside an anchor its aliases reach.
+	// When the node holds several, the error carries no location, even
+	// if the target type reads only one of them. The duration and
+	// definition errors never match, even beside an alias to a reference
+	// document, since the decoder returns them as plain errors, not
+	// go-yaml errors.
 	ErrDecodeRejected = errors.New("decoder rejected the value")
 
 	// ErrExcessiveAliasing indicates a node whose document holds so many

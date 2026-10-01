@@ -54,9 +54,11 @@ type contentMatcher[T comparable] struct {
 // uint64. A document without the path, or
 // whose value does not decode into T, does not match, so a
 // [time.Duration] T matches no timeout: 5.5 or timeout: true. A string
-// that [time.ParseDuration] rejects, such as timeout: 5 minutes, is the
-// exception. The decoder reports it without
-// [niceyaml.ErrDecodeRejected], so Match returns that error. Any other
+// that [time.ParseDuration] rejects, such as timeout: 5 minutes, is an
+// exception, and so is a T whose definition the decoder refuses, such as
+// a struct with two fields of one name. The decoder reports these
+// without [niceyaml.ErrDecodeRejected], as it does the other errors
+// [niceyaml.Node.DecodeInto] names, so Match returns the error. Any other
 // error from the read comes back as the error, so a registry stops at the
 // document rather than routing it elsewhere. Such errors include an alias
 // on the path that names no anchor, a path with a wildcard selector, and

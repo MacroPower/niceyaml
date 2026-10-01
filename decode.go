@@ -1616,10 +1616,20 @@ func WithReferences(data ...[]byte) DecodeOption {
 // bound to the source as [SourceError] values, with a path in them
 // resolving from the scope. A decoding error the go-yaml decoder
 // reports, such as a value that does not read as the target type,
-// matches [ErrDecodeRejected]. A [time.Duration] that
-// [time.ParseDuration] rejects is the exception. The decoder returns the
-// error of that function alone, so it comes back as it is, with no
-// location, and does not match.
+// matches [ErrDecodeRejected]. An error the decoder reports without a
+// token of the source comes back as it is, with no location, and does
+// not match, apart from the few that [ErrDecodeRejected] names. Some
+// of these are plain errors that never match. The error of
+// [time.ParseDuration] for a [time.Duration] it rejects is one, and so
+// is an error for a target type whose definition the decoder refuses,
+// such as a struct with two fields of one name or an inline embedded
+// struct that is not exported. The decoder also reports a [yaml.Error]
+// without a token for a key of a map tagged inline, such as the key
+// `name` beside a map[int]int, and for a field tagged inline whose type
+// cannot hold a mapping, such as an int. That error matches when the
+// node holds an alias to a reference document, as [ErrDecodeRejected]
+// describes. A value of an inline map keeps its token, so an error in
+// that value matches as it would in any other field.
 //
 // A few hundred bytes of nested aliases can take the go-yaml decoder
 // minutes to decode, and the decoder never checks ctx. When the node
@@ -1919,7 +1929,7 @@ func isNullAlias(ctx context.Context, dec *yaml.Decoder, node, view ast.Node) bo
 // names no mapping the decoder can find binds at the alias, when err is
 // the decoder's failure for that alias, as [decodeTree.unresolvedMerge]
 // describes, with the message a decode of the whole document gives that
-// alias. Any other [yaml.Error] at a token outside the source matches
+// alias. Any other [yaml.Error] without a token of the source matches
 // [ErrDecodeRejected] when scope holds an alias to a reference document,
 // as [decodeTree.referenceAliases] finds them, with go-yaml's position
 // and excerpt of that document left out. It binds at the alias when
@@ -2143,9 +2153,17 @@ func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 // [yaml.Error] at a token of the source binds as an [*Error] at that
 // token, so the excerpt marks it and the error matches
 // [ErrDecodeRejected]. Any other error binds as it is, such as a
-// canceled context, one a value's own UnmarshalYAML returns, or the
-// error of [time.ParseDuration] the decoder returns for a
-// [time.Duration] it cannot read. Only a
+// canceled context, one a value's own UnmarshalYAML returns, or one the
+// decoder reports without a token of the source. The decoder returns
+// the error of [time.ParseDuration] for a [time.Duration] it cannot
+// read, and one for a target type whose definition it refuses, as plain
+// errors. It builds the mapping a field tagged inline decodes from,
+// with no token for the mapping or for its keys, around the values of
+// the source. So it returns a [yaml.Error] with no token for a key of
+// an inline map, such as the key `name` beside a map[int]int, and for
+// an inline field whose type cannot hold a mapping, such as an int. A
+// [yaml.Error] for a value of an inline map has the token of that
+// value, so it binds as it does for any other value. Only a
 // [yaml.Error] the decoder returns itself converts, so a [yaml.Error]
 // that a value's UnmarshalYAML wraps comes back as that unmarshaler's
 // error, with the text and sentinels of its wrapper. An UnmarshalYAML
@@ -2354,10 +2372,10 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 // receivers participate. YAML decoding errors, and [Error] values from
 // the validators, come back bound to the source as [SourceError]
 // values, and a value the go-yaml decoder rejects matches
-// [ErrDecodeRejected], except the [time.Duration] that
-// [Node.DecodeInto] describes. A node whose document holds too many
-// nested aliases returns an error matching [ErrExcessiveAliasing], as
-// [Node.DecodeInto] describes. An [ast.Node] in the result is part of a
+// [ErrDecodeRejected], except in the cases [Node.DecodeInto] names. A
+// node whose document holds too many nested aliases returns an error
+// matching [ErrExcessiveAliasing], as [Node.DecodeInto] describes. An
+// [ast.Node] in the result is part of a
 // tree the document shares, as [Node.DecodeInto] describes, so a caller
 // must not modify it. On error, the returned T is the zero value.
 //

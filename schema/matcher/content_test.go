@@ -1062,3 +1062,23 @@ func TestContent_UnparsableDuration(t *testing.T) {
 	require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
 	assert.False(t, ok)
 }
+
+func TestContent_RefusedTargetType(t *testing.T) {
+	t.Parallel()
+
+	// The decoder refuses a struct with two fields of one name and
+	// reports it without niceyaml.ErrDecodeRejected, so the matcher
+	// returns the error rather than a no.
+	type duplicated struct {
+		A int `yaml:"a"`
+		B int `yaml:"a"`
+	}
+
+	m := matcher.Content(paths.Root().Child("x"), duplicated{})
+	doc := yamltest.FirstDocument(t, stringtest.Input(`x: {a: 1}`))
+
+	ok, err := m.Match(t.Context(), doc)
+	require.ErrorContains(t, err, "duplicated struct field name")
+	require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+	assert.False(t, ok)
+}
