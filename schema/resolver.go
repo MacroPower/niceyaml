@@ -50,8 +50,10 @@ var ErrNoMatch = errors.New("no matching schema")
 //
 // A Ref is data, and the registry is where the bytes move. It checks its
 // cache by [Ref.Key] first, and loads and compiles the schema only on a
-// cache miss, so a load that succeeds runs once per key however many
-// documents name it. Under [WithFS], the registry caches a Ref from
+// cache miss, so once a schema compiles, the registry serves it to every
+// later document that names it without loading it again. A failed load
+// or compile stays out of the cache, so the next document that names the
+// Key loads it again. Under [WithFS], the registry caches a Ref from
 // [File] by its Key and the working directory File recorded, so two such
 // Refs with one Key load once each when their directories differ. The
 // registry compiles every schema with the options [WithCompileOptions]
