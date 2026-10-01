@@ -41,8 +41,11 @@ import (
 //
 // The joined Origins match that text, except in a few places Tokenize
 // leaves as the lexer made them. The lexer drops some text outright, such
-// as a lone "!" that ends a file after other text, along with whitespace
-// in front of it, which can include the line breaks. A tab used as
+// as a tag that ends a file after other text, and it can drop some or all
+// the whitespace in front of the tag, line breaks included. Only a space,
+// a line break, or a "," in a flow collection closes a tag, so from a file
+// of "[!t]" the lexer keeps only the "[". A "{" or "}" in the tag makes
+// the lexer keep its text as an invalid token instead. A tab used as
 // indentation makes the lexer read an invalid token that can swallow the
 // characters after it, such as a ":" indicator, and the text around such
 // a token keeps the lexer's shape. The lexer also ends one token with a
@@ -81,9 +84,9 @@ func Tokenize(src string) token.Tokens {
 		}
 
 		// The lexer emits nothing for a source of whitespace alone, and
-		// nothing for some text it rejects outright, such as a lone "!",
-		// so give the stream one token holding the whole text, and the
-		// file stays visible whatever the lexer made of it. The token
+		// nothing for some text it rejects outright, such as a tag alone.
+		// Give the stream one token holding the whole text, so the file
+		// stays visible whatever the lexer made of it. The token
 		// sits where its text starts, like any other token, and at 1:1:1
 		// when the source holds whitespace alone. [IsPlaceholder] tells
 		// that token apart from one the lexer made.
@@ -112,7 +115,7 @@ func Tokenize(src string) token.Tokens {
 	// content of a block scalar or the lexer's invalid tab token, gets only
 	// the part the tokens before it do not already hold. A token that ends
 	// in more line breaks than the source does sits in front of text the
-	// lexer dropped, such as a lone "!" that ends the file, and it keeps
+	// lexer dropped, such as a tag that ends the file, and it keeps
 	// the Origin it came with. So does the invalid tab token that opens a
 	// source and swallows the rest of its text, such as a "-" or ":" that
 	// ends the file, and the whitespace after that text follows it.

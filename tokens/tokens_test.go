@@ -966,6 +966,47 @@ func TestTokenize_RestoresDroppedWhitespace(t *testing.T) {
 			// The placeholder token holds the whole source.
 			input: "!",
 		},
+		"named tag at the end": {
+			input: "a: !t",
+			want:  "a:",
+		},
+		"secondary tag at the end": {
+			input: "a: !!str",
+			want:  "a:",
+		},
+		"named tag on the last line": {
+			// The line break in front of the tag goes with it.
+			input: "a:\n!t",
+			want:  "a:",
+		},
+		"named tag on the line after a plain scalar": {
+			// The scalar in front of the tag keeps the line break.
+			input: "a: b\n!t",
+			want:  "a: b\n",
+		},
+		"tag holding a flow end at the end": {
+			// Only a space, a line break, or a "," in a flow collection
+			// closes a tag.
+			input: "[!t]",
+			want:  "[",
+		},
+		"tag holding a comma at the end": {
+			input: "a: !t,",
+			want:  "a:",
+		},
+		"tag before a comma in a flow collection": {
+			input: "[!t,",
+		},
+		"tag holding a brace at the end": {
+			// The lexer keeps the tag's text as an invalid token.
+			input: "a: !t}",
+		},
+		"named tag before a trailing space": {
+			input: "a: !t ",
+		},
+		"named tag alone": {
+			input: "!t",
+		},
 		"alias after a block scalar header at the end": {
 			input: "|*x",
 		},

@@ -420,13 +420,17 @@ func (b *TokenBuilder) Build() *token.Token {
 // result matches the source except where Tokenize leaves the lexer's text,
 // as its doc describes. The result lacks the byte order marks that
 // Tokenize drops and keeps any other mark, such as one inside a scalar.
-// When a lone "!" ends a file that holds other text, the result also lacks
-// the "!" and whitespace in front of it, which can include the line
-// breaks. A file of a lone "!" comes back whole. The result repeats the
-// line ending after a tag that ends its line and after text that follows
-// a block scalar header, and a blank line between the two loses its
-// spaces. The text around a tab used as indentation keeps the lexer's
-// shape, which can drop a ":" indicator.
+// When a tag ends a file that holds other text, the result also lacks the
+// tag's text, and it can lack some or all the whitespace in front of the
+// tag, line breaks included, so "a:\n!t" comes back as "a:" but
+// "a: b\n!t" as "a: b\n". Only a space, a line break, or a "," in a flow
+// collection closes a tag, so the lost text can hold flow indicators,
+// such as the "]" of "[!t]". A "{" or "}" in the tag makes the lexer keep
+// its text as an invalid token instead, and a file of a tag alone comes
+// back whole. The result repeats the line ending after a tag that ends
+// its line and after text that follows a block scalar header, and a blank
+// line between the two loses its spaces. The text around a tab used as
+// indentation keeps the lexer's shape, which can drop a ":" indicator.
 // A raw stream from [github.com/goccy/go-yaml/lexer.Tokenize] keeps every
 // byte order mark, but it also loses the final line ending, trailing
 // spaces, the spaces of whitespace-only lines, and the letter and hex
