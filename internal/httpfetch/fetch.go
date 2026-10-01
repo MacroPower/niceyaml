@@ -142,14 +142,14 @@ func IsHTTPURL(rawURL string) bool {
 // back unchanged, so a name that is not a URL keeps its spelling. For a
 // URL that does not parse, for one whose host ends in a colon when an "@"
 // follows the host, and for one with a password and an "@" after its
-// authority, Redacted replaces everything from the first colon after
-// "://" to the last "@". That span covers a password that holds a "/",
-// "?" or "#", at its start or later, even after an "@" in the password.
-// It can also cover text that is not a password, such as a port or a
-// host and path before an "@" in the path. A password that starts with
-// digits and then one of those delimiters parses as a host with a valid
-// port, so Redacted cannot tell it from a URL with an "@" in its path and
-// returns it unchanged.
+// authority, Redacted replaces a wider span. The span runs from the first
+// colon after "://" or a leading "//" to the last "@". It covers a
+// password that holds a "/", "?" or "#", at its start or later, even
+// after an "@" in the password. It can also cover text that is not a
+// password, such as a port or a host and path before an "@" in the path.
+// A password that starts with digits and then one of those delimiters
+// parses as a host with a valid port, so Redacted cannot tell it from a
+// URL with an "@" in its path and returns it unchanged.
 func Redacted(rawURL string) string {
 	u, err := url.Parse(rawURL)
 
@@ -186,13 +186,15 @@ func splitsPassword(u *url.URL, rawURL string) bool {
 }
 
 // atAfterAuthority reports whether rawURL holds an "@" after its
-// authority, which ends at the first "/", "?" or "#" after "://".
+// authority, which ends at the first "/", "?" or "#" after "://" or a
+// leading "//".
 func atAfterAuthority(rawURL string) bool {
-	_, rest, ok := strings.Cut(rawURL, "://")
+	start, ok := authorityStart(rawURL)
 	if !ok {
 		return false
 	}
 
+	rest := rawURL[start:]
 	end := strings.IndexAny(rest, "/?#")
 
 	return end >= 0 && strings.Contains(rest[end:], "@")
@@ -204,9 +206,9 @@ func atAfterAuthority(rawURL string) bool {
 // reads a leading "?" or "#" in the password the same way. A username can
 // hold an unencoded "@", so "jane@corp.com:/pass@host" reads as the user
 // "jane" and the host "corp.com:". So a URL with no password in its
-// userinfo, a host that ends in a colon, and an "@" after "://" can hold a
-// password. An authority seldom ends in an empty port, so the check seldom
-// flags a URL that holds no password.
+// userinfo, a host that ends in a colon, and an "@" after "://" or a
+// leading "//" can hold a password. An authority seldom ends in an empty
+// port, so the check seldom flags a URL that holds no password.
 func hidesPassword(u *url.URL, rawURL string) bool {
 	if _, ok := u.User.Password(); ok || !strings.HasSuffix(u.Host, ":") {
 		return false
@@ -219,18 +221,15 @@ func hidesPassword(u *url.URL, rawURL string) bool {
 
 // redactUnparsed is [Redacted] for a URL that does not parse or that
 // [hidesPassword] or [splitsPassword] flags. It replaces everything from
-// the first colon after "://" to the last "@", and it reports whether it
-// found such a span. The span does not stop at the first "/", "?" or
-// "#", because a password can hold one of them.
+// the first colon after "://" or a leading "//" to the last "@", and it
+// reports whether it found such a span. The span does not stop at the
+// first "/", "?" or "#", because a password can hold one of them.
 func redactUnparsed(rawURL string) (string, bool) {
-	const sep = "://"
-
-	i := strings.Index(rawURL, sep)
-	if i < 0 {
+	start, ok := authorityStart(rawURL)
+	if !ok {
 		return rawURL, false
 	}
 
-	start := i + len(sep)
 	rest := rawURL[start:]
 
 	at := strings.LastIndex(rest, "@")
@@ -244,4 +243,24 @@ func redactUnparsed(rawURL string) (string, bool) {
 	}
 
 	return rawURL[:start+colon+1] + "xxxxx" + rest[at:], true
+}
+
+// authorityStart returns the index at which the authority of rawURL
+// starts, and it reports whether rawURL has one. [url.Parse] reads an
+// authority after a leading "//" in a URL with no scheme, and after a
+// scheme and "://" otherwise. A scheme holds no colon, so the first
+// "://" ends it.
+func authorityStart(rawURL string) (int, bool) {
+	if strings.HasPrefix(rawURL, "//") {
+		return len("//"), true
+	}
+
+	const sep = "://"
+
+	i := strings.Index(rawURL, sep)
+	if i < 0 {
+		return 0, false
+	}
+
+	return i + len(sep), true
 }

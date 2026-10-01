@@ -58,6 +58,48 @@ func TestGet_RedactsPassword(t *testing.T) {
 	}
 }
 
+func TestGet_RedactsSchemeRelativePassword(t *testing.T) {
+	t.Parallel()
+
+	// The parser reads an authority after a leading "//", so Get refuses
+	// a password in a scheme-relative URL wherever it refuses one after
+	// "://". Get names only an http or https URL in a parse error.
+	tcs := map[string]struct {
+		url  string
+		want string
+	}{
+		"password starting with a slash": {
+			url:  "//user:/secret@example.com/x",
+			want: `parse URL: empty port and a later "@" suggest`,
+		},
+		"password starting with a question mark": {
+			url:  "//user:?secret@example.com/x",
+			want: `parse URL: empty port and a later "@" suggest`,
+		},
+		"password with a slash": {
+			url:  "//user:s3/cret@example.com/x",
+			want: "parse URL: reason withheld",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				t.Errorf("Get sent a request to host %q", r.URL.Host)
+
+				return nil, errors.New("unexpected request")
+			})}
+
+			_, err := httpfetch.Get(t.Context(), client, tc.url)
+			require.ErrorContains(t, err, tc.want)
+			assert.NotContains(t, err.Error(), "s3")
+			assert.NotContains(t, err.Error(), "cret")
+		})
+	}
+}
+
 // roundTripFunc adapts a function to [http.RoundTripper].
 type roundTripFunc func(r *http.Request) (*http.Response, error)
 
@@ -79,6 +121,9 @@ func TestGet_RedactsPasswordWithAtSign(t *testing.T) {
 		"slash":         {url: "https://user:p@host.invalid/tail@example.com/s.json"},
 		"question mark": {url: "https://user:p@host.invalid?tail@example.com/s.json"},
 		"hash":          {url: "https://user:p@host.invalid#tail@example.com/s.json"},
+		"scheme-relative url": {
+			url: "//user:p@host.invalid/tail@example.com/s.json",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -128,11 +173,12 @@ func TestGet_ParseReason(t *testing.T) {
 			url:  "https://example.com/\x7f",
 			want: `parse URL "https://example.com/\x7f": `,
 		},
-		// Redacted finds a password only after a scheme and "://", so Get
-		// leaves any other text out of the error.
+		// Get names only an http or https URL in a parse error. Redacted
+		// finds a password after a leading "//" too, so Get withholds the
+		// reason, as it does for an https URL with a password.
 		"scheme-relative url is not named": {
 			url:  "//user:secret@example.com/%zz",
-			want: `parse URL: invalid URL escape "%zz"`,
+			want: "parse URL: reason withheld",
 		},
 	}
 
@@ -301,6 +347,26 @@ func TestRedacted(t *testing.T) {
 		"password and an at sign in the path redacts through the path": {
 			url:  "https://user:pw@example.com/pkg@1.0/x",
 			want: "https://user:xxxxx@1.0/x",
+		},
+		"password in a scheme-relative url": {
+			url:  "//user:secret@example.com/x",
+			want: "//user:xxxxx@example.com/x",
+		},
+		"password with a slash in a scheme-relative url": {
+			url:  "//user:s3/cret@example.com/x",
+			want: "//user:xxxxx@example.com/x",
+		},
+		"password starting with a slash in a scheme-relative url": {
+			url:  "//user:/s3cret@example.com/x",
+			want: "//user:xxxxx@example.com/x",
+		},
+		"password starting with a question mark in a scheme-relative url": {
+			url:  "//user:?s3cret@example.com/x",
+			want: "//user:xxxxx@example.com/x",
+		},
+		"password with an at sign and then a slash in a scheme-relative url": {
+			url:  "//user:p@ss/word@example.com/x",
+			want: "//user:xxxxx@example.com/x",
 		},
 		"at sign in the path of a url that parses keeps its spelling": {
 			url:  "https://example.com:8443/pkg@1.0/s.json",

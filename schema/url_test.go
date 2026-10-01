@@ -320,6 +320,9 @@ func TestURL(t *testing.T) {
 			"s3 scheme":             {ref: "s3://bucket/schema.json"},
 			"file scheme":           {ref: "file:///schemas/schema.json"},
 			"uppercase file scheme": {ref: "FILE:///schemas/schema.json"},
+			"scheme-relative url with a password starting with a slash": {
+				ref: "//user:/secret@example.com/schema.json",
+			},
 		}
 
 		for name, tc := range tcs {
@@ -329,10 +332,12 @@ func TestURL(t *testing.T) {
 				_, _, err := load(t, schema.URL(tc.ref))
 				require.ErrorIs(t, err, schema.ErrLoad)
 				require.ErrorContains(t, err, "not an HTTP or HTTPS URL")
+				assert.NotContains(t, err.Error(), "secret")
 
 				_, err = schema.NewRegistry().Schema(t.Context(), schema.URL(tc.ref))
 				require.ErrorIs(t, err, schema.ErrLoad)
 				require.ErrorContains(t, err, "not an HTTP or HTTPS URL")
+				assert.NotContains(t, err.Error(), "secret")
 			})
 		}
 	})
