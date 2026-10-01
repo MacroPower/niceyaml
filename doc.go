@@ -350,10 +350,12 @@
 // The rest pass through options that take go-yaml values, and these carry a
 // YAML prefix, as in [WithYAMLDecodeOptions], [WithYAMLParserOptions], and
 // [go.jacobcolvin.com/niceyaml/encoder.WithYAMLOptions], so a caller can tell
-// at the call site when the go-yaml dependency shows. A test in this package
-// checks every exported declaration. It fails when a declaration names a
-// go-yaml type outside the test's allowlist, or names a go-yaml option type
-// in an identifier without the YAML prefix.
+// at the call site when the go-yaml dependency shows.
+// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] takes go-yaml's
+// comment map under the same prefix. A test in this package checks every
+// exported declaration. It fails when a declaration names a go-yaml type
+// outside the test's allowlist, or names a go-yaml option type or the
+// comment map in an identifier without the YAML prefix.
 //
 // The [go.jacobcolvin.com/niceyaml/schema] package follows the same rule
 // for the JSON Schema library it builds on:

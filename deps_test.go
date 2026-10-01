@@ -28,8 +28,12 @@ type dependencyPolicy struct {
 	localNames map[string]string
 	// The identifiers the exported API may name, as "pkg.Name".
 	types []string
+	// The identifiers that pass the library's own values through, as
+	// "pkg.Name". The exported API may name one only in an identifier
+	// that carries the prefix.
+	passThrough []string
 	// The prefix an identifier must carry to pass one of the library's
-	// option types through.
+	// values through.
 	prefix string
 }
 
@@ -57,10 +61,18 @@ var policies = []dependencyPolicy{
 			"token.Position",
 			// Interop with go-yaml's own path API.
 			"yaml.Path",
-			// Escape hatches, only in identifiers with a YAML prefix.
+		},
+		// Add to this list too only with a matching change to the
+		// dependency policy in the package documentation.
+		passThrough: []string{
+			// Escape hatches.
 			"yaml.DecodeOption",
 			"yaml.EncodeOption",
 			"parser.Option",
+			// The comments encoder.WithYAMLComments adds. The encoder
+			// applies them itself, since go-yaml's own option for them
+			// works only when go-yaml writes the document.
+			"yaml.CommentMap",
 		},
 		prefix: "YAML",
 	},
@@ -71,17 +83,17 @@ var policies = []dependencyPolicy{
 			// A validator compiled elsewhere, which schema.FromJSONSchema
 			// wraps.
 			"jsonschema.Validator",
-			// Escape hatch, only in identifiers with a JSONSchema prefix.
-			"jsonschema.ValidateOption",
 		},
-		prefix: "JSONSchema",
+		// Escape hatch.
+		passThrough: []string{"jsonschema.ValidateOption"},
+		prefix:      "JSONSchema",
 	},
 }
 
 // TestExportedAPI_DependencyPolicy walks every exported declaration in the
 // repository's public packages. It checks that any third-party type a
 // declaration names is on the allowlist of its library's policy, and that
-// the pass-through options only appear in identifiers with the library's
+// the pass-through types only appear in identifiers with the library's
 // prefix.
 func TestExportedAPI_DependencyPolicy(t *testing.T) {
 	t.Parallel()
@@ -158,6 +170,13 @@ import (
 			src: `var Parse = func(src []byte) (*ast.File, error) {
 	return parser.ParseBytes(src, parser.ParseComments)
 }`,
+		},
+		"pass-through type without the prefix": {
+			src:  `func WithOptions(opts ...parser.Option) {}`,
+			want: []string{"WithOptions"},
+		},
+		"pass-through type with the prefix": {
+			src: `func WithYAMLOptions(opts ...parser.Option) {}`,
 		},
 		"method on receiver with type parameters": {
 			src: `type Map[K comparable, V any] struct{}
@@ -258,13 +277,16 @@ func checkFile(t *testing.T, path string) []string {
 			pos := fset.Position(sel.Pos())
 
 			switch {
+			case slices.Contains(policy.passThrough, ref):
+				if !strings.Contains(owner, policy.prefix) {
+					violations = append(
+						violations,
+						pos.String()+": "+owner+" passes "+ref+" through without a "+policy.prefix+" prefix",
+					)
+				}
+
 			case !slices.Contains(policy.types, ref):
 				violations = append(violations, pos.String()+": "+owner+" names "+policy.name+" type "+ref)
-			case strings.HasSuffix(ref, "Option") && !strings.Contains(owner, policy.prefix):
-				violations = append(
-					violations,
-					pos.String()+": "+owner+" passes "+ref+" through without a "+policy.prefix+" prefix",
-				)
 			}
 
 			return true

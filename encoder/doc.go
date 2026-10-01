@@ -12,5 +12,5 @@
 // [Pretty] returns the options for two-space indentation with indented
 // sequences, which is the layout prettier produces. [WithYAMLOptions]
 // passes go-yaml options through for settings that have no option of their
-// own.
+// own. [WithYAMLComments] adds comments to each document by YAML path.
 package encoder
