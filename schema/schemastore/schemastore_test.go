@@ -24,6 +24,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/schemastore"
@@ -2375,6 +2376,94 @@ func TestStore_FindMatch_NoExtension(t *testing.T) {
 		},
 		"unsupported extension": {
 			file: "/repo/.yamllint.toml",
+			err:  schemastore.ErrNoCatalogMatch,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			entry, err := store.FindMatch(t.Context(), tc.file)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.name, entry.Name)
+			assert.Equal(t, tc.fileMatch, entry.FileMatch)
+		})
+	}
+}
+
+func TestStore_FindMatch_BraceLimit(t *testing.T) {
+	t.Parallel()
+
+	// A pattern whose braces expand past the limit matches no file, so the
+	// store drops it from the entry, as it drops a pattern for a format
+	// that is not YAML. An entry left with no pattern matches nothing.
+	braces := strings.Repeat("{a,b}", 11) + ".yaml"
+
+	// Expanding this exclusion takes all the work the limit allows. The
+	// "!" would add a byte to each of the 512 patterns the expansion
+	// builds, so the store must check the exclusion without it, as
+	// matching does, to keep the exclusion.
+	excludeName := strings.Repeat("a", 512) + strings.Repeat("b", 1008) + ".yaml"
+	exclusion := "!**/exclude/" + strings.Repeat("{a}", 512) + strings.Repeat("b", 1008) + ".yaml"
+
+	_, err := filepaths.ExpandBraces(exclusion[1:])
+	require.NoError(t, err)
+
+	_, err = filepaths.ExpandBraces(exclusion)
+	require.ErrorIs(t, err, filepaths.ErrBraceLimit)
+
+	catalog := schemastore.Catalog{Schemas: []schemastore.CatalogEntry{
+		{
+			Name:      "Mixed",
+			URL:       "https://example.com/mixed.json",
+			FileMatch: []string{"**/mixed/*.yaml", "**/mixed/" + braces},
+		},
+		{
+			Name:      "Braces",
+			URL:       "https://example.com/braces.json",
+			FileMatch: []string{"**/braces/" + braces},
+		},
+		{
+			Name:      "Exclusion",
+			URL:       "https://example.com/exclusion.json",
+			FileMatch: []string{"**/exclude/*.yaml", exclusion},
+		},
+	}}
+
+	store := schemastore.New(
+		schemastore.WithCatalogURL("https://example.com/catalog.json"),
+		schemastore.WithHTTPClient(newCatalogClient(t, catalog)),
+	)
+
+	tcs := map[string]struct {
+		file      string
+		name      string
+		fileMatch []string
+		err       error
+	}{
+		"pattern beside one past the limit": {
+			file:      "/repo/mixed/x.yaml",
+			name:      "Mixed",
+			fileMatch: []string{"**/mixed/*.yaml"},
+		},
+		"pattern past the limit": {
+			file: "/repo/braces/" + strings.Repeat("a", 11) + ".yaml",
+			err:  schemastore.ErrNoCatalogMatch,
+		},
+		"pattern beside an exclusion at the limit": {
+			file:      "/repo/exclude/x.yaml",
+			name:      "Exclusion",
+			fileMatch: []string{"**/exclude/*.yaml", exclusion},
+		},
+		"file an exclusion at the limit excludes": {
+			file: "/repo/exclude/" + excludeName,
 			err:  schemastore.ErrNoCatalogMatch,
 		},
 	}

@@ -12,8 +12,15 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 )
 
-// ErrInvalidPattern indicates the pattern syntax is invalid.
-var ErrInvalidPattern = errors.New("invalid glob pattern")
+var (
+	// ErrInvalidPattern indicates the pattern syntax is invalid.
+	ErrInvalidPattern = errors.New("invalid glob pattern")
+
+	// ErrBraceLimit indicates the braces of a pattern would expand to
+	// more than [MaxBraceExpansions] patterns, or would take too much
+	// work to expand.
+	ErrBraceLimit = errors.New("braces expand past the limit")
+)
 
 // Pattern represents a validated glob pattern for file path matching.
 //
@@ -25,11 +32,11 @@ type Pattern struct {
 
 // NewPattern creates a new [Pattern] from a glob pattern string. It
 // returns [ErrInvalidPattern] when the pattern syntax is invalid. It also
-// returns [ErrInvalidPattern] when the braces would expand to more than
-// [MaxBraceExpansions] patterns or take too much work to expand, the two
-// limits at which [ExpandBraces] gives up. A cleaned path is never empty,
-// so NewPattern returns [ErrInvalidPattern] for an empty pattern, and for
-// a pattern such as "{,}" whose braces expand only to empty patterns.
+// returns [ErrInvalidPattern], wrapping [ErrBraceLimit], when
+// [ExpandBraces] reports that the braces expand past its limits. A
+// cleaned path is never empty, so NewPattern returns [ErrInvalidPattern]
+// for an empty pattern, and for a pattern such as "{,}" whose braces
+// expand only to empty patterns.
 //
 // NewPattern drops "." elements such as a leading "./", repeated
 // separators, and a trailing separator from the pattern, as
@@ -56,9 +63,9 @@ func NewPattern(pattern string) (Pattern, error) {
 		return Pattern{}, ErrInvalidPattern
 	}
 
-	globs, ok := expandPattern(pattern, normalizePattern)
-	if !ok {
-		return Pattern{}, fmt.Errorf("%w: braces expand past the limit", ErrInvalidPattern)
+	globs, err := expandPattern(pattern, normalizePattern)
+	if err != nil {
+		return Pattern{}, fmt.Errorf("%w: %w", ErrInvalidPattern, err)
 	}
 
 	if !slices.ContainsFunc(globs, func(glob string) bool { return glob != "" }) {
@@ -121,25 +128,19 @@ func CleanPath(path string) string {
 	return filepath.ToSlash(filepath.Clean(path))
 }
 
-// expandPattern expands the braces of pattern as [ExpandBraces] does and
-// applies rewrite to each pattern it yields. It reports false when the
-// braces expand past the budget, where [ExpandBraces] would yield the
-// pattern itself.
-// Doublestar would then expand the braces again on every match, by
-// backtracking, at a cost that can double with each brace group.
-func expandPattern(pattern string, rewrite func(string) string) ([]string, bool) {
-	work := maxBraceWork
-
-	globs, ok := expandBraces(pattern, MaxBraceExpansions, &work)
-	if !ok {
-		return nil, false
+// expandPattern returns the patterns [ExpandBraces] yields for pattern,
+// with rewrite applied to each.
+func expandPattern(pattern string, rewrite func(string) string) ([]string, error) {
+	globs, err := ExpandBraces(pattern)
+	if err != nil {
+		return nil, err
 	}
 
 	for i, glob := range globs {
 		globs[i] = rewrite(glob)
 	}
 
-	return globs, true
+	return globs, nil
 }
 
 // normalizePattern returns pattern without "." elements, repeated
@@ -342,10 +343,11 @@ type anyDepthGlob struct {
 // so matching many paths against the patterns repeats none of that
 // work. It drops a "!" that has nothing after it.
 //
-// It also drops a pattern whose braces [NewPattern] would reject for
-// expanding past the limit, so that pattern matches nothing and an
-// exclusion excludes nothing. Matching it could otherwise take time
-// that doubles with each of its brace groups, for every path.
+// It also drops a pattern for which [ExpandBraces] returns
+// [ErrBraceLimit], so that pattern matches nothing and an exclusion
+// excludes nothing. Matching it could otherwise take time that doubles
+// with each of its brace groups, for every path. For an exclusion, it
+// hands [ExpandBraces] the text after the leading "!".
 //
 // NewAnyDepthPatterns keeps every other pattern, the invalid ones
 // included, and [AnyDepthPatterns.SpecificityClean] skips a pattern it
@@ -359,8 +361,8 @@ func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
 		exclude, isExclude := strings.CutPrefix(pattern, "!")
 		switch {
 		case !isExclude:
-			globs, ok := expandPattern(pattern, anyDepth)
-			if !ok {
+			globs, err := expandPattern(pattern, anyDepth)
+			if err != nil {
 				continue
 			}
 
@@ -369,9 +371,12 @@ func NewAnyDepthPatterns(patterns []string) AnyDepthPatterns {
 			}
 
 		case exclude != "":
-			if excludes, ok := expandPattern(exclude, anyDepth); ok {
-				p.excludes = append(p.excludes, excludes...)
+			excludes, err := expandPattern(exclude, anyDepth)
+			if err != nil {
+				continue
 			}
+
+			p.excludes = append(p.excludes, excludes...)
 		}
 	}
 
@@ -494,20 +499,23 @@ const maxBraceWork = 1 << 20
 // ExpandBraces returns the patterns the brace alternatives of pattern
 // stand for, so "*.{yml,yaml}" yields "*.yml" and "*.yaml", and nested
 // groups multiply out. A backslash escapes the character after it. A
-// pattern with no brace group, or with an unclosed one, yields itself, and
-// so does a pattern that would expand to more than [MaxBraceExpansions]
-// patterns. A pattern also yields itself when expanding it would take too
-// much work, such as a very long pattern or one with very many brace
-// groups.
-func ExpandBraces(pattern string) []string {
+// pattern with no brace group, or with an unclosed one, yields itself.
+//
+// ExpandBraces returns [ErrBraceLimit] for a pattern that would expand to
+// more than [MaxBraceExpansions] patterns, or that would take too much
+// work to expand, such as a very long pattern or one with very many brace
+// groups. A caller should not hand such a pattern to doublestar either,
+// since doublestar expands the braces again on every match, by
+// backtracking, at a cost that can double with each brace group.
+func ExpandBraces(pattern string) ([]string, error) {
 	work := maxBraceWork
 
 	expanded, ok := expandBraces(pattern, MaxBraceExpansions, &work)
 	if !ok {
-		return []string{pattern}
+		return nil, ErrBraceLimit
 	}
 
-	return expanded
+	return expanded, nil
 }
 
 // expandBraces is [ExpandBraces] with a budget of patterns left to

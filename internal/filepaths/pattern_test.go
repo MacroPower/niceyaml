@@ -65,11 +65,11 @@ func TestNewPattern(t *testing.T) {
 		},
 		"braces past the expansion limit": {
 			pattern: strings.Repeat("{,}", 30) + "x.yaml",
-			err:     filepaths.ErrInvalidPattern,
+			err:     filepaths.ErrBraceLimit,
 		},
 		"braces past the work limit": {
 			pattern: strings.Repeat("{a}", 20000) + ".yaml",
-			err:     filepaths.ErrInvalidPattern,
+			err:     filepaths.ErrBraceLimit,
 		},
 		"parent after a literal element": {
 			pattern: "configs/../*.yaml",
@@ -127,6 +127,7 @@ func TestNewPattern(t *testing.T) {
 
 			_, err := filepaths.NewPattern(tc.pattern)
 			if tc.err != nil {
+				require.ErrorIs(t, err, filepaths.ErrInvalidPattern)
 				require.ErrorIs(t, err, tc.err)
 
 				return
@@ -744,22 +745,27 @@ func TestExpandBraces_Budget(t *testing.T) {
 	t.Parallel()
 
 	// Ten binary groups stand for 1024 patterns, the most ExpandBraces
-	// produces. One more group would double that, so the pattern comes
-	// back as it is.
+	// produces. One more group would double that, so ExpandBraces reports
+	// the limit.
 	group := "{a,b}"
 	within := strings.Repeat(group, 10)
 	over := strings.Repeat(group, 11)
 
-	assert.Len(t, filepaths.ExpandBraces(within), filepaths.MaxBraceExpansions)
-	assert.Equal(t, []string{over}, filepaths.ExpandBraces(over))
+	got, err := filepaths.ExpandBraces(within)
+	require.NoError(t, err)
+	assert.Len(t, got, filepaths.MaxBraceExpansions)
+
+	got, err = filepaths.ExpandBraces(over)
+	require.ErrorIs(t, err, filepaths.ErrBraceLimit)
+	assert.Nil(t, got)
 }
 
 func TestExpandBraces_Work(t *testing.T) {
 	t.Parallel()
 
 	// Each pattern expands to few patterns, but ExpandBraces would rebuild
-	// a long pattern once per brace group to get there, so the pattern
-	// comes back as it is.
+	// a long pattern once per brace group to get there, so it reports the
+	// limit.
 	tcs := map[string]struct {
 		pattern string
 	}{
@@ -778,7 +784,9 @@ func TestExpandBraces_Work(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, []string{tc.pattern}, filepaths.ExpandBraces(tc.pattern))
+			got, err := filepaths.ExpandBraces(tc.pattern)
+			require.ErrorIs(t, err, filepaths.ErrBraceLimit)
+			assert.Nil(t, got)
 		})
 	}
 }
@@ -811,7 +819,9 @@ func TestUnclosedClasses(t *testing.T) {
 
 			start := time.Now()
 
-			assert.Equal(t, tc.want, filepaths.ExpandBraces(tc.pattern))
+			got, err := filepaths.ExpandBraces(tc.pattern)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 
 			p := filepaths.NewAnyDepthPatterns([]string{tc.pattern})
 			_, ok := p.SpecificityClean("x.yaml")
@@ -899,7 +909,9 @@ func TestExpandBraces(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, filepaths.ExpandBraces(tc.pattern))
+			got, err := filepaths.ExpandBraces(tc.pattern)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }

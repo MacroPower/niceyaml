@@ -74,9 +74,11 @@ type CatalogEntry struct {
 	URL string `json:"url"`
 	// FileMatch contains the glob patterns for the files this schema
 	// applies to. When the store loads the catalog, it drops the patterns
-	// for formats known not to be YAML, such as *.toml and *.jsonc, and
-	// the patterns that hold an extglob group, such as "!(config).yml", so
-	// the slice may be shorter than the catalog's.
+	// for formats known not to be YAML, such as *.toml and *.jsonc, the
+	// patterns that hold an extglob group, such as "!(config).yml", and
+	// the patterns whose braces would expand to too many patterns or take
+	// too much work to expand, so the slice may be shorter than the
+	// catalog's.
 	FileMatch []string `json:"fileMatch"`
 
 	// The store prepares FileMatch for matching once per catalog load, so
@@ -590,7 +592,8 @@ func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry
 			continue
 		}
 
-		// Drop the patterns for non-YAML formats and extglob groups.
+		// Drop the patterns for non-YAML formats, extglob groups, and
+		// braces past the limit.
 		supportedPatterns := filterSupportedPatterns(entry.FileMatch)
 		if len(supportedPatterns) == 0 {
 			continue
@@ -609,9 +612,14 @@ func (s *Store) filterAndNormalizeEntries(schemas []CatalogEntry) []CatalogEntry
 // JSON file, since JSON is a valid subset of YAML. It drops a pattern
 // that holds an extglob group, and a pattern whose last segment carries
 // the literal extension of a format known not to be YAML, such as
-// "*.toml" or ".eslintrc.jsonc". It keeps every other pattern. A pattern
-// with brace alternatives, such as "*.{toml,yaml}", counts when any of
-// its alternatives can match a YAML file.
+// "*.toml" or ".eslintrc.jsonc". It also drops a pattern for which
+// [filepaths.ExpandBraces] returns [filepaths.ErrBraceLimit], since
+// [filepaths.NewAnyDepthPatterns] would drop it from matching anyway. It
+// keeps every other pattern. A pattern with brace alternatives, such as
+// "*.{toml,yaml}", counts when any of its alternatives can match a YAML
+// file. It reads an exclusion without its leading "!", as
+// [filepaths.NewAnyDepthPatterns] does, so the "!" cannot push the
+// braces of an exclusion past the limit.
 //
 // The matcher reads an extglob group literally, so a pattern with one
 // could only match a file named after the text of the group. With those
@@ -625,7 +633,12 @@ func filterSupportedPatterns(patterns []string) []string {
 			continue
 		}
 
-		if slices.ContainsFunc(filepaths.ExpandBraces(pattern), canMatchYAML) {
+		alts, err := filepaths.ExpandBraces(strings.TrimPrefix(pattern, "!"))
+		if err != nil {
+			continue
+		}
+
+		if slices.ContainsFunc(alts, canMatchYAML) {
 			result = append(result, pattern)
 		}
 	}

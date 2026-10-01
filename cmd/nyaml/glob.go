@@ -50,7 +50,9 @@ var (
 //     and `{a\,b,c}` matches "a,b" or "c". On Windows, `\` is a
 //     separator instead.
 //
-// The function returns an error when the pattern syntax is invalid.
+// The function returns an error when the pattern syntax is invalid. It
+// returns an error wrapping [filepaths.ErrBraceLimit] when the braces
+// expand past the limits of [filepaths.ExpandBraces].
 func glob(pattern string) ([]string, error) {
 	// Doublestar matches a brace group through io/fs, which rejects "."
 	// and ".." elements, so an alternative holding one would match
@@ -58,9 +60,14 @@ func glob(pattern string) ([]string, error) {
 	// its literal part, where the OS resolves them. Braces expand after
 	// the separators turn into slashes, so a Windows separator does not
 	// read as an escape.
+	alts, err := filepaths.ExpandBraces(filepath.ToSlash(pattern))
+	if err != nil {
+		return nil, fmt.Errorf("glob %q: %w", pattern, err)
+	}
+
 	var matches []string
 
-	for _, alt := range filepaths.ExpandBraces(filepath.ToSlash(pattern)) {
+	for _, alt := range alts {
 		altMatches, err := globAlternative(alt)
 		if err != nil {
 			return nil, fmt.Errorf("glob %q: %w", pattern, err)

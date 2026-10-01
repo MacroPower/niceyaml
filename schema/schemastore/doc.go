@@ -16,16 +16,17 @@
 // This one resolver handles all SchemaStore schemas. It matches file
 // paths against the catalog patterns for tools like GitHub Actions and
 // Docker Compose. The store drops the patterns for formats known not to
-// be YAML, such as *.toml and *.jsonc. It also drops the patterns that
-// hold an extglob group, such as "!(config).yml", because its matcher
-// does not implement extglob. An entry left with no pattern matches no
-// file, so the entry for GitHub issue forms, which lists only extglob
-// patterns, never applies. The store keeps every other pattern, so YAML
-// formats with an extension of their own, such as CITATION.cff, and
-// names without an extension, such as .clang-format, still match. When
-// several entries match a path, the store picks the one with the most
-// specific pattern, so a pattern for a tool's own directory wins over a
-// broad one such as "**/tasks/*.yml".
+// be YAML, such as *.toml and *.jsonc, and the patterns whose braces
+// would expand to too many patterns or take too much work to expand. It
+// also drops the patterns that hold an extglob group, such as
+// "!(config).yml", because its matcher does not implement extglob. An
+// entry left with no pattern matches no file, so the entry for GitHub
+// issue forms, which lists only extglob patterns, never applies. The
+// store keeps every other pattern, so YAML formats with an extension of
+// their own, such as CITATION.cff, and names without an extension, such
+// as .clang-format, still match. When several entries match a path, the
+// store picks the one with the most specific pattern, so a pattern for a
+// tool's own directory wins over a broad one such as "**/tasks/*.yml".
 //
 // New performs no I/O. The first lookup fetches the catalog, and later
 // lookups reuse it until the cache TTL expires. A refresh that fails keeps

@@ -4,12 +4,15 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.jacobcolvin.com/niceyaml/internal/filepaths"
 )
 
 func TestContainsGlobChars(t *testing.T) {
@@ -541,6 +544,12 @@ func TestGlob(t *testing.T) {
 		"dot-dot after a wildcard": {
 			pattern: tmpDir + "/sub*/../a.yaml",
 			err:     errDotDotAfterMeta,
+		},
+		"braces past the expansion limit": {
+			// Doublestar would expand the braces again and lose the ".."
+			// alternative, so glob rejects the pattern.
+			pattern: subdir + "/{../k8s,.}/" + strings.Repeat("{a,b,c,d}", 5) + ".yaml",
+			err:     filepaths.ErrBraceLimit,
 		},
 		"brace alternatives matching one file": {
 			pattern:   tmpDir + "/{a,[a]}.yaml",
