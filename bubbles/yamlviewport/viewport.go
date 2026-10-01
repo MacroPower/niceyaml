@@ -17,6 +17,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
 	"go.jacobcolvin.com/niceyaml/internal/cells"
+	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
@@ -36,7 +37,8 @@ const defaultHorizontalStep = 6
 // which can include lines the view does not hold, such as the lines between
 // the hunks in hunks mode. The ranges the Index finds are in the coordinates
 // of those lines, and the viewport keeps the matches that start on a line the
-// view holds. A nil Index finds no match for any term.
+// view holds. A nil Index, or one holding a nil pointer, finds no match for
+// any term.
 //
 // [WithFinder] adapts a [finder.Finder] to this interface.
 type Searcher interface {
@@ -201,7 +203,8 @@ func WithContainerStyle(s lipgloss.Style) Option {
 // WithSearcher is an [Option] that sets the [Searcher] that search terms run
 // through. Without it, and without [WithFinder], the viewport creates a
 // [finder.Finder] with [finder.New], which folds case and ignores
-// diacritics. A nil s selects that same default.
+// diacritics. A nil s, or one holding a nil pointer, selects that same
+// default.
 func WithSearcher(s Searcher) Option {
 	return func(m *Model) {
 		m.searcher = s
@@ -362,7 +365,7 @@ func (m *Model) setInitialValues() {
 		m.printer = printer.New()
 	}
 
-	if m.searcher == nil {
+	if nilness.IsNil(m.searcher) {
 		m.searcher = finderSearcher{finder: finder.New()}
 	}
 
@@ -1202,10 +1205,10 @@ func (m *Model) updateSearchState(lines *line.View) {
 	}
 }
 
-// find returns the matches of search in idx. A nil idx, which a [Searcher]
-// may return, finds nothing.
+// find returns the matches of search in idx. A [Searcher] may return a nil
+// idx or one holding a nil pointer, and either finds nothing.
 func find(idx Index, search string) position.Ranges {
-	if idx == nil {
+	if nilness.IsNil(idx) {
 		return nil
 	}
 

@@ -5243,10 +5243,12 @@ func TestViewport_WithSearcher(t *testing.T) {
 
 		// WithFinder wrapped a nil finder in an adapter, which is a non-nil
 		// Searcher, so the constructor kept it and the first search
-		// dereferenced the finder.
+		// dereferenced the finder. A Searcher holding a nil pointer also
+		// compares unequal to nil, and the first search called Load on it.
 		tcs := map[string]yamlviewport.Option{
-			"nil searcher": yamlviewport.WithSearcher(nil),
-			"nil finder":   yamlviewport.WithFinder(nil),
+			"nil searcher":         yamlviewport.WithSearcher(nil),
+			"nil finder":           yamlviewport.WithFinder(nil),
+			"nil pointer searcher": yamlviewport.WithSearcher((*countingSearcher)(nil)),
 		}
 
 		for name, opt := range tcs {
@@ -5442,32 +5444,55 @@ func TestViewport_SearchLaysOutOnlyHighlightedLines(t *testing.T) {
 	}
 }
 
-// nilSearcher is a [yamlviewport.Searcher] whose Load returns a nil Index.
-// It counts its Load calls.
+// nilSearcher is a [yamlviewport.Searcher] whose Load returns index, which
+// is nil or holds a nil pointer. It counts its Load calls.
 type nilSearcher struct {
+	index yamlviewport.Index
 	loads int
 }
 
 func (s *nilSearcher) Load(line.Lines) yamlviewport.Index {
 	s.loads++
 
-	return nil
+	return s.index
+}
+
+// ptrIndex is a [yamlviewport.Index] whose Find reads its receiver, so a
+// call through a nil *ptrIndex panics.
+type ptrIndex struct {
+	matches position.Ranges
+}
+
+func (i *ptrIndex) Find(string) position.Ranges {
+	return i.matches
 }
 
 func TestViewport_NilIndexFindsNothing(t *testing.T) {
 	t.Parallel()
 
 	// A nil Index still counts as loaded, so typing a term loads each pane
-	// once rather than on every keystroke.
+	// once rather than on every keystroke. An Index holding a nil pointer
+	// compares unequal to nil, and it finds nothing as a nil Index does.
 	tcs := map[string]struct {
+		index     yamlviewport.Index
 		viewMode  yamlviewport.ViewMode
 		wantLoads int
 	}{
-		"unified": {
+		"nil index/unified": {
 			viewMode:  yamlviewport.ViewModeFull,
 			wantLoads: 1,
 		},
-		"side by side": {
+		"nil index/side by side": {
+			viewMode:  yamlviewport.ViewModeSideBySide,
+			wantLoads: 2,
+		},
+		"nil pointer index/unified": {
+			index:     (*ptrIndex)(nil),
+			viewMode:  yamlviewport.ViewModeFull,
+			wantLoads: 1,
+		},
+		"nil pointer index/side by side": {
+			index:     (*ptrIndex)(nil),
 			viewMode:  yamlviewport.ViewModeSideBySide,
 			wantLoads: 2,
 		},
@@ -5477,7 +5502,7 @@ func TestViewport_NilIndexFindsNothing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			searcher := &nilSearcher{}
+			searcher := &nilSearcher{index: tc.index}
 			m := yamlviewport.New(
 				yamlviewport.WithPrinter(testPrinter()),
 				yamlviewport.WithSearcher(searcher),
