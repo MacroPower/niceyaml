@@ -130,8 +130,9 @@ func TestAbsentOverlay(t *testing.T) {
 }
 
 // labMidpoint returns the 50/50 LAB blend of c1 and c2, clamped to the
-// sRGB gamut. It mixes the colors with go-colorful directly, so a test that
-// compares against it catches a blend that drops either color.
+// sRGB gamut and truncated to 8 bits per channel. It mixes the colors with
+// go-colorful directly, so a test that compares against it catches a blend
+// that drops either color.
 func labMidpoint(t *testing.T, c1, c2 color.Color) color.Color {
 	t.Helper()
 
@@ -141,7 +142,7 @@ func labMidpoint(t *testing.T, c1, c2 color.Color) color.Color {
 	cf2, ok := colorful.MakeColor(c2)
 	require.True(t, ok, "c2 is visible")
 
-	return cf1.BlendLab(cf2, 0.5).Clamped()
+	return color.RGBAModel.Convert(cf1.BlendLab(cf2, 0.5).Clamped())
 }
 
 func TestBlend(t *testing.T) {
@@ -307,6 +308,34 @@ func TestBlend_InGamut(t *testing.T) {
 
 			rendered := lipgloss.NewStyle().Foreground(got).Render("x")
 			assert.Regexp(t, `^\x1b\[38;2;\d{1,3};\d{1,3};\d{1,3}mx`, rendered)
+		})
+	}
+}
+
+func TestBlend_NearBlack(t *testing.T) {
+	t.Parallel()
+
+	// A blend of black with a dark color holds channels below 1/256. The
+	// SGR writer prints a 16-bit channel that small as if it were 8-bit,
+	// so a 16-bit blend of black and #010120 would print as orange
+	// 230;120;20.
+	black := lipgloss.Color("#000000")
+
+	tcs := map[string]struct {
+		dark color.Color
+		want string
+	}{
+		"navy":   {dark: lipgloss.Color("#010120"), want: "48;2;0;0;20"},
+		"plum":   {dark: lipgloss.Color("#12011c"), want: "48;2;10;0;17"},
+		"indigo": {dark: lipgloss.Color("#13004d"), want: "48;2;21;0;41"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			rendered := lipgloss.NewStyle().Background(colors.Blend(black, tc.dark)).Render("x")
+			assert.Equal(t, "\x1b["+tc.want+"mx\x1b[m", rendered)
 		})
 	}
 }

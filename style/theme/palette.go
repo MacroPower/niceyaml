@@ -4,12 +4,14 @@ import (
 	"cmp"
 	"image/color"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/lucasb-eyer/go-colorful"
 
+	"go.jacobcolvin.com/niceyaml/internal/colors"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
@@ -17,8 +19,34 @@ import (
 // dimShift separates a dimmed variant from its source color.
 const dimShift = 0.15
 
-// surfaceShift lifts highlight and accent heading backgrounds off the base.
-const surfaceShift = 0.30
+// subtleDimShift moves [kind.TextSubtleDim] further toward the background
+// than dimShift moves [kind.TextSubtle].
+const subtleDimShift = 0.30
+
+// minTextContrast is the WCAG AA contrast ratio for body text. The body
+// text keeps at least this ratio on a highlight, unless its own ratio on
+// the base background is below maxContrastLoss times this one. The text
+// then keeps at least its own ratio divided by maxContrastLoss.
+const minTextContrast = 4.5
+
+// maxContrastLoss is the most that a highlight may divide the contrast of
+// the comments by. It bounds the body text the same way only where the
+// body's own contrast is below minTextContrast times maxContrastLoss,
+// since body text above that need only keep minTextContrast.
+const maxContrastLoss = 1.25
+
+// blendDistance and paintDistance are the CIEDE2000 distances, on
+// go-colorful's scale of 0 to about 1, that [highlightSurfaces] puts
+// between the base background and the dim highlight, and between the dim
+// highlight and the highlight. The first measures the highlights as the
+// printer blends them into the base background, and the second measures
+// them as it paints them over it. Both sit well above 0.05, about the
+// least distance at which a reader tells two colors apart, so the
+// highlights show at a glance in either overlay mode.
+const (
+	blendDistance = 0.08
+	paintDistance = 0.135
+)
 
 // palette holds the colors [palette.styles] builds the full [style.Styles]
 // of a catalog theme from. Every built-in theme except charm is one palette
@@ -41,24 +69,41 @@ type palette struct {
 	// assume black on white for a [Light] theme and white on black for a
 	// [Dark] one.
 	Fg, Bg string
-	// Accent colors headings and accented text. OK, Warn, and Error color
-	// the status kinds. OK and Error also color the inserted, deleted, and
-	// error marks when Tokens leaves them out. A heading, and an error mark
-	// Tokens leaves out, draws its text in Fg or Bg, whichever contrasts
-	// more with the color behind it.
+	// Accent colors headings and accented text, and highlights take its
+	// hue, or the nearest hue that lets them stand apart. OK, Warn, and
+	// Error color the status kinds. OK and Error also color the inserted,
+	// deleted, and error marks when Tokens leaves them out. A heading, and
+	// an error mark Tokens leaves out, draws its text in Fg or Bg,
+	// whichever contrasts more with the color behind it.
 	Accent, OK, Warn, Error string
 	// Mode is the background the theme targets. It also picks the
 	// direction of the derived shifts. [kind.TextSubtle] and
-	// [kind.TextSubtleDim] move toward the background, while highlights,
-	// accent headings, and [kind.TextAccentDim] move away from it, so the
-	// dimmed accent reads brighter than the accent on a [Dark] theme and
-	// darker on a [Light] one. An accent that cannot move further from the
-	// background, such as black on a [Light] theme, dims toward it instead.
+	// [kind.TextSubtleDim] move toward the background, while
+	// [kind.TextAccentDim] moves away from it, so the dimmed accent reads
+	// brighter than the accent on a [Dark] theme and darker on a [Light]
+	// one. An accent that cannot move further from the background, such as
+	// black on a [Light] theme, dims toward it instead. Highlights and the
+	// accent and subtle headings tint the background, and they step its
+	// luminance toward that of the text only where the tint needs room.
 	Mode Mode
 }
 
 // styles builds the [style.Styles] for the palette.
 func (p palette) styles() style.Styles {
+	fg, bg := p.surface()
+
+	// The search for the highlight surfaces holds the finished token
+	// styles to contrast floors, so a first build with bg in place of the
+	// surfaces supplies those styles.
+	dim, surface := highlightSurfaces(p.build(bg, bg), fg, bg, lipgloss.Color(p.Accent), p.Mode)
+
+	return p.build(dim, surface)
+}
+
+// build builds the [style.Styles] for the palette, with dimSurface and
+// surface as the backgrounds of the highlights and of the subtle and
+// accent headings.
+func (p palette) build(dimSurface, surface color.Color) style.Styles {
 	base := lipgloss.NewStyle()
 	if p.Fg != "" {
 		base = base.Foreground(lipgloss.Color(p.Fg))
@@ -103,19 +148,17 @@ func (p palette) styles() style.Styles {
 	// layers over the derived value rather than the other way around.
 	derived := []style.Option{
 		style.Set(kind.GenericHeading, heading(accent)),
-		style.Set(kind.GenericHeadingAccent,
-			base.Background(towardFg(bg, surfaceShift)).Foreground(towardFg(fg, dimShift)),
-		),
-		style.Set(kind.GenericHeadingSubtle, base.Background(towardFg(bg, dimShift)).Foreground(fg)),
+		style.Set(kind.GenericHeadingAccent, base.Background(surface).Foreground(towardFg(fg, dimShift))),
+		style.Set(kind.GenericHeadingSubtle, base.Background(dimSurface).Foreground(fg)),
 		style.Set(kind.GenericHeadingOK, heading(ok)),
 		style.Set(kind.GenericHeadingWarn, heading(warn)),
 		style.Set(kind.GenericHeadingError, heading(errColor)),
-		style.Set(kind.GenericHighlight, lipgloss.NewStyle().Background(towardFg(bg, surfaceShift))),
-		style.Set(kind.GenericHighlightDim, lipgloss.NewStyle().Background(towardFg(bg, dimShift))),
+		style.Set(kind.GenericHighlight, lipgloss.NewStyle().Background(surface)),
+		style.Set(kind.GenericHighlightDim, lipgloss.NewStyle().Background(dimSurface)),
 		style.Set(kind.TextAccent, base.Foreground(accent)),
 		style.Set(kind.TextAccentDim, base.Foreground(dimAccent)),
 		style.Set(kind.TextSubtle, base.Foreground(towardBg(fg, dimShift))),
-		style.Set(kind.TextSubtleDim, base.Foreground(towardBg(fg, surfaceShift))),
+		style.Set(kind.TextSubtleDim, base.Foreground(towardBg(fg, subtleDimShift))),
 		style.Set(kind.TextOK, base.Foreground(ok)),
 		style.Set(kind.TextWarn, base.Foreground(warn)),
 		style.Set(kind.TextError, base.Foreground(errColor)),
@@ -232,6 +275,330 @@ func (p palette) surface() (color.Color, color.Color) {
 	return lipgloss.Color(fg), lipgloss.Color(bg)
 }
 
+// highlightSurfaces returns the backgrounds of [kind.GenericHighlightDim]
+// and [kind.GenericHighlight] for a theme that draws fg on bg. The styles
+// s are the theme's own, built with bg in place of the highlights.
+//
+// The dim surface tints bg toward a hue, and the other surface tints the
+// dim one further. A surface at the luminance of bg keeps the contrast of
+// a color drawn on bg, so the surfaces keep that luminance where the gamut
+// leaves the tint room. Near black or white it leaves little, so the
+// surfaces also step toward the luminance of fg.
+//
+// Each surface takes the smallest step, and the least tint at that step,
+// that puts it blendDistance from the color beneath it once the printer
+// blends both into bg, and paintDistance from it once the printer paints
+// both. The search stops before fg drops below minTextContrast on a
+// surface, or below its own contrast with bg divided by maxContrastLoss
+// where that is lower, and before the comments drop below their own
+// contrast with bg divided by maxContrastLoss.
+//
+// The search tries the hues that [hues] returns for accent, in order, and
+// takes the first that reaches both distances within these floors. The
+// gamut holds less chroma for some hues than for others at a given
+// luminance, such as blue near white, so the hue of accent alone may fall
+// short. Where no hue reaches both distances, the surfaces take the first
+// hue. The highlight then takes the surface farthest from bg, and the dim
+// highlight takes the surface that splits the room most evenly.
+//
+// Text that the theme draws on a fill of its own, such as an inserted line
+// or an error mark, keeps less contrast. A highlight that the printer paints
+// replaces the fill with a surface near the luminance of bg, so text drawn
+// in the color of bg keeps a contrast of at most about maxContrastLoss
+// there. A highlight that the printer blends mixes the fill halfway toward
+// a surface near bg, so the text loses about as much as it would if the
+// printer blended bg itself into the fill. The search holds the text to
+// that contrast divided by maxContrastLoss.
+func highlightSurfaces(s style.Styles, fg, bg, accent color.Color, mode Mode) (color.Color, color.Color) {
+	comment := s.Style(kind.Comment).GetForeground()
+	if !isColorSet(comment) {
+		comment = fg
+	}
+
+	t := tint{
+		bg:           bg,
+		fg:           fg,
+		comment:      comment,
+		base:         toLinear(bg),
+		textFloor:    min(minTextContrast, contrast(fg, bg)/maxContrastLoss),
+		commentFloor: contrast(comment, bg) / maxContrastLoss,
+		lighter:      mode == Dark,
+	}
+
+	// The printer paints whole diff lines and error marks in these kinds,
+	// and a theme may draw each on a fill of its own.
+	for _, k := range []kind.Kind{kind.GenericInserted, kind.GenericDeleted, kind.GenericError} {
+		st := s.Style(k)
+
+		paint := st.GetBackground()
+		if !isColorSet(paint) || sameColor(paint, bg) {
+			continue
+		}
+
+		text := st.GetForeground()
+		if !isColorSet(text) {
+			text = fg
+		}
+
+		t.fills = append(t.fills, fill{
+			text:  text,
+			paint: paint,
+			floor: contrast(text, colors.Blend(paint, bg)) / maxContrastLoss,
+		})
+	}
+
+	plain := candidate{color: bg, blended: colors.Blend(bg, bg)}
+	ring := hues(accent)
+
+	for _, hue := range ring {
+		t.hue = hue
+		found := t.candidates()
+
+		if dim, ok := plain.next(found); ok {
+			if surface, ok := dim.next(found); ok {
+				return dim.color, surface.color
+			}
+		}
+	}
+
+	// No hue leaves room for both distances within the floors.
+	t.hue = ring[0]
+	found := t.candidates()
+
+	far, reach := plain, 0.0
+	for _, c := range found {
+		if d := c.apart(plain); d > reach {
+			far, reach = c, d
+		}
+	}
+
+	dim, gap := plain, 0.0
+	for _, c := range found {
+		if d := min(c.apart(plain), far.apart(c)); d > gap {
+			dim, gap = c, d
+		}
+	}
+
+	return dim.color, far.color
+}
+
+// liftStep is the contrast ratio with the base background that each
+// luminance step of [tint] adds.
+const liftStep = 0.005
+
+// tintSteps is the number of steps [tint] takes from an untinted surface
+// to the full hue.
+const tintSteps = 20
+
+// tint searches the surfaces of [highlightSurfaces]. Each candidate steps
+// the luminance of bg toward that of fg, by lightening bg on a [Dark]
+// theme and darkening it on a [Light] one. It then mixes that untinted
+// color part of the way toward the hue at the same luminance. Light mixes
+// linearly, so every tint at a step keeps the step's luminance.
+type tint struct {
+	bg, fg, comment         color.Color
+	fills                   []fill
+	base, hue               linear
+	textFloor, commentFloor float64
+	lighter                 bool
+}
+
+// fill is text that a theme draws on a fill of its own, with the contrast
+// that the text keeps when the printer blends a highlight into the fill.
+type fill struct {
+	text, paint color.Color
+	floor       float64
+}
+
+// at returns the candidate at luminance step i and tint step j, or false
+// when step i leaves the range of luminance.
+func (t tint) at(i, j int) (color.Color, bool) {
+	from := t.base.luminance() + 0.05
+	lift := 1 + float64(i)*liftStep
+
+	y, end := from/lift-0.05, linear{}
+	if t.lighter {
+		y, end = from*lift-0.05, linear{r: 1, g: 1, b: 1}
+	}
+
+	if y < 0 || y > 1 {
+		return nil, false
+	}
+
+	untinted := t.base.toward(end, y)
+
+	return untinted.mix(t.hue.shade(y), float64(j)/tintSteps).color(), true
+}
+
+// keeps reports whether fg and comment keep their floors on c, and whether
+// the text of each fill keeps its floor once the printer blends c into the
+// fill.
+func (t tint) keeps(c color.Color) bool {
+	if contrast(t.fg, c) < t.textFloor || contrast(t.comment, c) < t.commentFloor {
+		return false
+	}
+
+	for _, f := range t.fills {
+		if contrast(f.text, colors.Blend(f.paint, c)) < f.floor {
+			return false
+		}
+	}
+
+	return true
+}
+
+// candidates returns the candidates that keep the floors, in the order
+// that [highlightSurfaces] prefers them: the smallest luminance step
+// first, and the least tint first within a step. It stops at the first
+// luminance step where no tint keeps the floors.
+func (t tint) candidates() []candidate {
+	var found []candidate
+
+	for i := 0; ; i++ {
+		kept := false
+
+		for j := 0; j <= tintSteps; j++ {
+			c, ok := t.at(i, j)
+			if !ok {
+				return found
+			}
+
+			if t.keeps(c) {
+				kept = true
+
+				found = append(found, candidate{color: c, blended: colors.Blend(t.bg, c), lift: i, share: j})
+			}
+		}
+
+		if !kept {
+			return found
+		}
+	}
+}
+
+// candidate is a surface that [tint] tries, with the color it shows once
+// the printer blends it into the base background, and with its luminance
+// and tint steps.
+type candidate struct {
+	color, blended color.Color
+	lift, share    int
+}
+
+// apart returns the CIEDE2000 distance between c and below once the
+// printer blends both into the base background.
+func (c candidate) apart(below candidate) float64 {
+	return distance(c.blended, below.blended)
+}
+
+// next returns the first of found that sits blendDistance from c once the
+// printer blends both into the base background, and paintDistance from c
+// once it paints both, at the luminance and tint steps of c or past them,
+// or false when none does.
+func (c candidate) next(found []candidate) (candidate, bool) {
+	for _, n := range found {
+		if n.lift >= c.lift && n.share >= c.share &&
+			n.apart(c) >= blendDistance && distance(n.color, c.color) >= paintDistance {
+			return n, true
+		}
+	}
+
+	return candidate{}, false
+}
+
+// linear is a color as linear sRGB channels from 0 to 1. Light adds
+// linearly, so a mix of two colors has the same mix of their luminance.
+type linear struct{ r, g, b float64 }
+
+// toLinear returns c as [linear] channels.
+func toLinear(c color.Color) linear {
+	cf, _ := colorful.MakeColor(c)
+	r, g, b := cf.LinearRgb()
+
+	return linear{r: r, g: g, b: b}
+}
+
+// hueTurn is the angle, in degrees, between neighboring hues that [hues]
+// returns.
+const hueTurn = 30
+
+// blueHue is the angle, in degrees, of blue on the color wheel.
+const blueHue = 240
+
+// hues returns the hues that [highlightSurfaces] tries, in the order it
+// tries them, as from [hueAt]. The first is the hue of accent, and the
+// rest turn hueTurn further from it at each step, on alternate sides, out
+// to the opposite hue. A gray has no hue, so its hues start from blue.
+func hues(accent color.Color) []linear {
+	l := toLinear(accent)
+
+	start, saturation, _ := colorful.Color{R: l.r, G: l.g, B: l.b}.Hsv()
+	if saturation == 0 {
+		start = blueHue
+	}
+
+	ring := []linear{hueAt(start)}
+	for turn := float64(hueTurn); turn < 180; turn += hueTurn {
+		ring = append(ring, hueAt(start+turn), hueAt(start-turn))
+	}
+
+	return append(ring, hueAt(start+180))
+}
+
+// hueAt returns the most saturated color at the angle deg on the color
+// wheel of linear channels, with its brightest channel at 1 and its
+// dimmest at 0.
+func hueAt(deg float64) linear {
+	c := colorful.Hsv(math.Mod(deg+360, 360), 1, 1)
+
+	return linear{r: c.R, g: c.G, b: c.B}
+}
+
+// luminance returns the WCAG relative luminance of l.
+func (l linear) luminance() float64 {
+	return 0.2126*l.r + 0.7152*l.g + 0.0722*l.b
+}
+
+// mix returns the color a share t of the way from l to o.
+func (l linear) mix(o linear, t float64) linear {
+	return linear{r: l.r + (o.r-l.r)*t, g: l.g + (o.g-l.g)*t, b: l.b + (o.b-l.b)*t}
+}
+
+// toward returns the color on the line from l to o whose luminance is y,
+// or l when the two colors share a luminance.
+func (l linear) toward(o linear, y float64) linear {
+	from, to := l.luminance(), o.luminance()
+	if from == to {
+		return l
+	}
+
+	return l.mix(o, (y-from)/(to-from))
+}
+
+// shade returns the color on the line from black through l to white whose
+// luminance is y. For a color from [hueAt], that is the most saturated
+// color of its hue at that luminance.
+func (l linear) shade(y float64) linear {
+	if y <= l.luminance() {
+		return l.toward(linear{}, y)
+	}
+
+	return l.toward(linear{r: 1, g: 1, b: 1}, y)
+}
+
+// color returns l rounded to an 8-bit color.
+func (l linear) color() color.Color {
+	return lipgloss.Color(colorful.LinearRgb(l.r, l.g, l.b).Clamped().Hex())
+}
+
+// distance returns the CIEDE2000 distance between a and b, on
+// go-colorful's scale of 0 to about 1.
+func distance(a, b color.Color) float64 {
+	ca, _ := colorful.MakeColor(a)
+	cb, _ := colorful.MakeColor(b)
+
+	return ca.DistanceCIEDE2000(cb)
+}
+
 // sameColor reports whether a and b hold the same channel values.
 func sameColor(a, b color.Color) bool {
 	ar, ag, ab, aa := a.RGBA()
@@ -253,10 +620,7 @@ func contrast(a, b color.Color) float64 {
 
 // luminance returns the WCAG relative luminance of c.
 func luminance(c color.Color) float64 {
-	cf, _ := colorful.MakeColor(c)
-	r, g, b := cf.LinearRgb()
-
-	return 0.2126*r + 0.7152*g + 0.0722*b
+	return toLinear(c).luminance()
 }
 
 // layer returns base with the colors and attributes the spec sets applied

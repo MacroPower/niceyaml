@@ -811,6 +811,140 @@ func TestPalette_HeadingsReadable(t *testing.T) {
 	}
 }
 
+// maxContrastLoss is the most that a palette highlight may divide the
+// contrast of the comments by. It bounds the body text the same way only
+// where the body's own contrast is below 4.5 times maxContrastLoss, since
+// body text above that need only keep 4.5:1.
+const maxContrastLoss = 1.25
+
+func TestPalette_HighlightsReadable(t *testing.T) {
+	t.Parallel()
+
+	// The printer draws a highlight over a token by replacing the token's
+	// background or by blending into it. In either mode, the dim highlight
+	// stands apart from the background, and the highlight from the dim
+	// one, by at least apart, well above minMarkDistance.
+	modes := map[string]struct {
+		apply func(base, overlay lipgloss.Style) lipgloss.Style
+		apart float64
+	}{
+		"override": {apply: colors.OverrideStyles, apart: 0.135},
+		"blend":    {apply: colors.BlendStyles, apart: 0.08},
+	}
+
+	for _, th := range theme.Builtin().All() {
+		if th.Name == theme.Charm.Name {
+			// Charm sets its highlights by hand rather than from a palette,
+			// and TestDefault_HighlightsReadable covers them.
+			continue
+		}
+
+		t.Run(th.Name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := th.Styles()
+			text := styles.Style(kind.Text)
+
+			bg := text.GetBackground()
+			if _, unset := bg.(lipgloss.NoColor); unset {
+				t.Skip("theme leaves the background to the terminal")
+			}
+
+			// Body text keeps the WCAG AA 4.5:1 on every highlight, or its
+			// own contrast divided by maxContrastLoss where that is lower.
+			// Comments keep their own contrast divided by maxContrastLoss.
+			floors := map[kind.Kind]float64{
+				kind.Text:    min(4.5, contrast(text.GetForeground(), bg)/maxContrastLoss),
+				kind.Comment: contrast(styles.Style(kind.Comment).GetForeground(), bg) / maxContrastLoss,
+			}
+
+			// The printer paints diff lines and error marks in these kinds,
+			// and a theme may draw each on a fill of its own. A blended
+			// highlight mixes the fill halfway toward a surface near the
+			// background, so the text keeps about the contrast that blending
+			// the background itself into the fill leaves it, and at least
+			// that contrast divided by maxContrastLoss. A painted highlight
+			// replaces the fill, and text drawn in the background color
+			// keeps little contrast on a surface near the background, so
+			// the test asks only that the text differ from the surface.
+			fills := map[kind.Kind]float64{}
+
+			for _, k := range []kind.Kind{kind.GenericInserted, kind.GenericDeleted, kind.GenericError} {
+				st := styles.Style(k)
+				if hexOf(st.GetBackground()) != hexOf(bg) {
+					fills[k] = contrast(st.GetForeground(), colors.Blend(st.GetBackground(), bg)) / maxContrastLoss
+				}
+			}
+
+			for mode, m := range modes {
+				for _, hl := range []kind.Kind{kind.GenericHighlight, kind.GenericHighlightDim} {
+					for k, floor := range floors {
+						got := m.apply(styles.Style(k), styles.Style(hl))
+						assert.GreaterOrEqual(t, contrast(got.GetForeground(), got.GetBackground()), floor,
+							"%s over %s draws %s on %s in %s mode",
+							hl, k, hexOf(got.GetForeground()), hexOf(got.GetBackground()), mode)
+					}
+
+					for k, floor := range fills {
+						got := m.apply(styles.Style(k), styles.Style(hl))
+						if mode == "override" {
+							assert.NotEqual(t, hexOf(got.GetForeground()), hexOf(got.GetBackground()),
+								"%s over %s hides its text", hl, k)
+
+							continue
+						}
+
+						assert.GreaterOrEqual(t, contrast(got.GetForeground(), got.GetBackground()), floor,
+							"%s over %s draws %s on %s in %s mode",
+							hl, k, hexOf(got.GetForeground()), hexOf(got.GetBackground()), mode)
+					}
+				}
+
+				other := m.apply(text, styles.Style(kind.GenericHighlightDim)).GetBackground()
+				current := m.apply(text, styles.Style(kind.GenericHighlight)).GetBackground()
+
+				assert.GreaterOrEqual(t, distance(bg, other), m.apart,
+					"in %s mode, dim highlight %s sits close to the background %s", mode, hexOf(other), hexOf(bg))
+				assert.GreaterOrEqual(t, distance(other, current), m.apart,
+					"in %s mode, highlight %s sits close to the dim highlight %s", mode, hexOf(current), hexOf(other))
+			}
+		})
+	}
+}
+
+func TestPalette_SurfaceHeadingsReadable(t *testing.T) {
+	t.Parallel()
+
+	// The accent and subtle headings paint the highlight surfaces, so their
+	// text keeps the contrast that body text keeps on a highlight.
+	for _, th := range theme.Builtin().All() {
+		if th.Name == theme.Charm.Name {
+			// Charm sets its headings by hand rather than from a palette.
+			continue
+		}
+
+		t.Run(th.Name, func(t *testing.T) {
+			t.Parallel()
+
+			styles := th.Styles()
+			text := styles.Style(kind.Text)
+
+			bg := text.GetBackground()
+			if _, unset := bg.(lipgloss.NoColor); unset {
+				t.Skip("theme leaves the background to the terminal")
+			}
+
+			floor := min(4.5, contrast(text.GetForeground(), bg)/maxContrastLoss)
+
+			for _, k := range []kind.Kind{kind.GenericHeadingAccent, kind.GenericHeadingSubtle} {
+				st := styles.Style(k)
+				assert.GreaterOrEqual(t, contrast(st.GetForeground(), st.GetBackground()), floor,
+					"%s draws %s", k, style.Encode(st))
+			}
+		})
+	}
+}
+
 func TestPalette_ChromeReadable(t *testing.T) {
 	t.Parallel()
 
@@ -889,10 +1023,16 @@ func standsOut(token, marked lipgloss.Style) bool {
 		return aUnset != bUnset
 	}
 
+	return distance(a, b) >= minMarkDistance
+}
+
+// distance returns the CIEDE2000 distance between a and b, on
+// go-colorful's scale of 0 to about 1.
+func distance(a, b color.Color) float64 {
 	ca, _ := colorful.MakeColor(a)
 	cb, _ := colorful.MakeColor(b)
 
-	return ca.DistanceCIEDE2000(cb) >= minMarkDistance
+	return ca.DistanceCIEDE2000(cb)
 }
 
 // contrast returns the WCAG contrast ratio between a and b, from 1 for

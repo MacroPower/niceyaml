@@ -25,9 +25,13 @@ func Override(base, overlay color.Color) color.Color {
 	return nil
 }
 
-// Blend blends two colors using LAB color space (50/50 mix) and clamps the
-// result to the sRGB gamut, so every channel of the returned color lies in
-// [0, 1] and renders as a valid SGR sequence.
+// Blend blends two colors using LAB color space (50/50 mix), clamps the
+// result to the sRGB gamut, and returns it as an 8-bit [color.RGBA] that
+// renders as a valid SGR sequence. Blend keeps the high byte of each
+// channel, the byte that the SGR writer prints for a 16-bit channel above
+// 0xff. The writer prints a channel at or below 0xff as it is, so a blend
+// near black left at 16 bits would print a channel below 1/256 as a bright
+// one.
 // A color is absent when it is nil, [lipgloss.NoColor], or invisible. When
 // both colors are absent, Blend returns nil, and when one is, it returns
 // the other, clamped the same way when it lies outside the gamut.
@@ -46,7 +50,7 @@ func Blend(c1, c2 color.Color) color.Color {
 		return Clamped(c1)
 	}
 
-	return cf1.BlendLab(cf2, 0.5).Clamped()
+	return color.RGBAModel.Convert(cf1.BlendLab(cf2, 0.5).Clamped())
 }
 
 // visible converts c for blending and reports whether c is visible: not
