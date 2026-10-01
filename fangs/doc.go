@@ -7,8 +7,9 @@
 // style, which breaks multi-line output such as the source excerpt and
 // annotations of a niceyaml error.
 //
-// [ErrorHandler] styles only the error header and leaves the lines of the
-// message as they are. Pass it to [fang.Execute]:
+// [ErrorHandler] styles only the error header and prints the message as
+// [printer.Printer.PrintError] renders it, indented by [Indent] columns,
+// so each excerpt keeps its own layout. Pass it to [fang.Execute]:
 //
 //	err := fang.Execute(ctx, rootCmd,
 //	    fang.WithErrorHandler(fangs.ErrorHandler),

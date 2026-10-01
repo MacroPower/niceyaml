@@ -106,6 +106,14 @@ func TestErrorHandler(t *testing.T) {
 		),
 	))
 
+	// A source that ends with blank lines, which an excerpt of its last
+	// key shows as context below the caret.
+	spaced := niceyaml.NewSourceFromString("name: test\n\n\n")
+	spacedErr := yamltest.Bind(t, spaced, niceyaml.NewError(
+		"bad name",
+		niceyaml.AtPath(paths.Root().Child("name")),
+	))
+
 	tcs := map[string]struct {
 		err  error
 		want string
@@ -212,6 +220,47 @@ func TestErrorHandler(t *testing.T) {
 				`  unknown command "foo" for "nyaml"`,
 				"",
 				"Try --help for usage.",
+				"",
+				"",
+			),
+		},
+		// Cobra indents each suggestion with a tab and ends the list with a
+		// line break.
+		"usage error unknown command with a suggestion": {
+			err: errors.New("unknown command \"valdate\" for \"nyaml\"\n\nDid you mean this?\n\tvalidate\n"),
+			want: stringtest.JoinLF(
+				"Error",
+				`  unknown command "valdate" for "nyaml"`,
+				"  ",
+				"  Did you mean this?",
+				"      validate",
+				"",
+				"Try --help for usage.",
+				"",
+				"",
+			),
+		},
+		"message ending in line breaks": {
+			err: errors.New("something went wrong\n\n"),
+			want: stringtest.JoinLF(
+				"Error",
+				"  something went wrong",
+				"",
+				"",
+			),
+		},
+		// The blank lines belong to the document, so the handler prints
+		// them as it prints the rest of the excerpt.
+		"excerpt ending in blank lines keeps them": {
+			err: spacedErr,
+			want: stringtest.JoinLF(
+				"Error",
+				"  1:7: $.name: bad name",
+				"  ",
+				"  <nameTag>name</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>test</genericError>",
+				"  <textError>      ^^^^</textError>",
+				"  ",
+				"  ",
 				"",
 				"",
 			),

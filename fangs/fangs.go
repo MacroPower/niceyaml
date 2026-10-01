@@ -86,7 +86,11 @@ func WithPrinter(p *printer.Printer) Option {
 // message as a tree, with the context its wrappers added in front and a
 // connector before each nested error. The excerpt of each
 // [*go.jacobcolvin.com/niceyaml.SourceError] in the error's tree follows,
-// so a joined error annotates each failure it holds.
+// so a joined error annotates each failure it holds. The handler indents
+// each line by [Indent] columns and ends the output with a blank line. An
+// error with no SourceError in its tree renders as that tree alone, and
+// the handler drops the line breaks that end it, such as the one after
+// the suggestions Cobra lists for an unknown command.
 //
 // Unlike [fang.DefaultErrorHandler], which wraps errors in a lipgloss style
 // that can break multi-line output, this handler styles only the error
@@ -107,7 +111,18 @@ func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 
 	indent := strings.Repeat(" ", Indent)
 
-	for line := range strings.SplitSeq(cfg.printer.PrintError(err), "\n") {
+	msg := cfg.printer.PrintError(err)
+
+	// A blank line of the handler's own follows the message, so the line
+	// breaks that end a message, such as the one after the suggestions
+	// Cobra lists, would add only blank lines before it. The output for
+	// an error bound to a source may end with an excerpt, which keeps the
+	// blank lines of the document it shows.
+	if !isBound(err) {
+		msg = strings.TrimRight(msg, "\n")
+	}
+
+	for line := range strings.SplitSeq(msg, "\n") {
 		ignoreN(fmt.Fprintln(w, indent+line))
 	}
 
@@ -122,6 +137,17 @@ func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 		)))
 		ignoreN(fmt.Fprintln(w))
 	}
+}
+
+// isBound reports whether the tree of err holds an error bound to a
+// source, for which [printer.Printer.PrintError] renders an excerpt after
+// the tree.
+func isBound(err error) bool {
+	for range niceyaml.Bindings(err) {
+		return true
+	}
+
+	return false
 }
 
 // ignoreN discards the result of a write to the error writer. A handler that
