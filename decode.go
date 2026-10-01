@@ -791,7 +791,12 @@ func (n *Node) Document() *Node {
 //	fmt.Println(scoped.AST().String())
 //
 // The body is what the parser built: nil for an empty document, and a
-// comment group for one holding only comments. AST returns either as it
+// comment group for one holding only comments. When the whole file holds
+// whitespace alone, or text the lexer emits nothing for such as a lone
+// "!", the body of its one document is a scalar holding the placeholder
+// token [tokens.Tokenize] makes, and [tokens.IsPlaceholder] tells it
+// apart from a scalar the file holds. A document of whitespace below a
+// "---" header has a nil body. AST returns each of these bodies as it
 // is, as such a document decodes to nothing. The node is part of the tree
 // [Source.File] returns, which every Node of the Source shares and
 // resolves against, so a caller must not modify it.

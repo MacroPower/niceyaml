@@ -26,6 +26,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // Test sentinel errors for mock validators.
@@ -1669,6 +1670,29 @@ func TestDocument_Node(t *testing.T) {
 		dd := yamltest.FirstDocument(t, "# only a comment\n")
 
 		assert.IsType(t, &ast.CommentGroupNode{}, dd.AST())
+	})
+
+	t.Run("file of whitespace has the placeholder scalar", func(t *testing.T) {
+		t.Parallel()
+
+		for _, input := range []string{"\n", "  \n", "\n\n", "!"} {
+			dd := yamltest.FirstDocument(t, input)
+
+			scalar, ok := dd.AST().(*ast.StringNode)
+			require.True(t, ok, "%q: %T", input, dd.AST())
+			assert.True(t, tokens.IsPlaceholder(scalar.Token), "%q", input)
+		}
+	})
+
+	t.Run("document of whitespace below a header has no body", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Nil(t, yamltest.FirstDocument(t, "---\n  \n").AST())
+
+		docs, err := niceyaml.NewSourceFromString("a: 1\n---\n  \n").Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+		assert.Nil(t, docs[1].AST())
 	})
 
 	t.Run("a scoped node reaches the whole document", func(t *testing.T) {
