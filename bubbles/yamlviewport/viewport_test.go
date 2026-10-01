@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"charm.land/bubbles/v2/key"
@@ -4904,6 +4905,84 @@ func TestViewport_CopiesKeepTheirRevisions(t *testing.T) {
 
 	assert.Equal(t, []string{"a", "b", "c", "d"}, m.RevisionNames())
 	assert.Equal(t, []string{"a", "b", "c", "e"}, snap.RevisionNames())
+}
+
+func TestViewport_CopiesRenderConcurrently(t *testing.T) {
+	t.Parallel()
+
+	// A copy shares the row counts of the Model it copied until a layout
+	// change gives it its own. A new revision leaves those counts empty, so
+	// copies that read the layout at the same time all fill the same counts.
+	tcs := map[string]struct {
+		setup func(m *yamlviewport.Model)
+		read  func(m yamlviewport.Model) string
+	}{
+		"view": {
+			read: func(m yamlviewport.Model) string { return m.View() },
+		},
+		"view side by side": {
+			setup: func(m *yamlviewport.Model) { m.SetViewMode(yamlviewport.ViewModeSideBySide) },
+			read:  func(m yamlviewport.Model) string { return m.View() },
+		},
+		"scroll then view": {
+			read: func(m yamlviewport.Model) string {
+				m.SetYOffset(2)
+
+				return m.View()
+			},
+		},
+		"total row count": {
+			read: func(m yamlviewport.Model) string { return fmt.Sprint(m.TotalRowCount()) },
+		},
+		"horizontal scroll bound": {
+			setup: func(m *yamlviewport.Model) { m.SetWordWrap(false) },
+			read: func(m yamlviewport.Model) string {
+				m.SetXOffset(math.MaxInt)
+
+				return fmt.Sprint(m.XOffset())
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			newModel := func() yamlviewport.Model {
+				m := yamlviewport.New()
+				m.SetWidth(20)
+				m.SetHeight(3)
+				m.AddRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromString(
+					"a: aaaa bbbb cccc dddd eeee\nb: 3\nc: 4\n", niceyaml.WithName("v2"),
+				))
+
+				if tc.setup != nil {
+					tc.setup(&m)
+				}
+
+				return m
+			}
+
+			// A Model of its own reads the same layout alone.
+			want := tc.read(newModel())
+
+			m := newModel()
+			got := make([]string, 4)
+
+			var wg sync.WaitGroup
+
+			for i := range got {
+				wg.Go(func() { got[i] = tc.read(m) })
+			}
+
+			wg.Wait()
+
+			for _, g := range got {
+				assert.Equal(t, want, g)
+			}
+		})
+	}
 }
 
 func TestViewport_ZeroValue(t *testing.T) {

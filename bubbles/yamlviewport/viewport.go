@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
@@ -304,7 +305,8 @@ type Model struct {
 	leftLines, rightLines map[int][]int
 	// Rendered row counts of the view. Copies of the Model share one cache
 	// until a layout change gives a copy its own, so the counts that the
-	// value-receiver View fills in stay filled for the Model it copied.
+	// value-receiver View fills in stay filled for the Model it copied. The
+	// cache locks its fill, so copies can render on separate goroutines.
 	rows *rowCache
 	// Current search query.
 	searchTerm string
@@ -441,7 +443,7 @@ func (m *Model) relayout() {
 // drops it as relayout does. Without ranges no line changed, so the cache
 // stays as it is.
 func (m *Model) remeasure(ranges ...position.Range) {
-	if m.rows == nil || m.rows.sums == nil {
+	if m.rows == nil || !m.rows.filled() {
 		m.relayout()
 
 		return
@@ -487,7 +489,7 @@ func (m *Model) remeasure(ranges ...position.Range) {
 // when the layout has none, so a view at the top stays there when a frame
 // appears.
 func (m *Model) anchorTop() {
-	if m.anchored || m.rows == nil || len(m.rows.left) == 0 {
+	if m.anchored || m.rows == nil || !m.rows.filled() || len(m.rows.left) == 0 {
 		return
 	}
 
@@ -1311,6 +1313,10 @@ func (m *Model) paneWidth() int {
 // rowCache holds the layout of a view: the row count and width the
 // printer reports for each line of each pane, and the prefix sums that
 // place every line.
+//
+// The Models that share a cache can fill it from separate goroutines, so
+// fillRows and filled hold the lock while they write or test the counts. A
+// filled cache never changes, so a read after either call needs no lock.
 type rowCache struct {
 	// Row counts of each line the view renders, in content order, for the
 	// left and right panes. The right counts are nil outside side-by-side
@@ -1333,6 +1339,8 @@ type rowCache struct {
 	// Rows of the printer's container frame above the first line and below
 	// the last. A view without lines has no frame rows.
 	top, bottom int
+	// Guards the fill of an empty cache.
+	mu sync.Mutex
 }
 
 // total returns the number of rows in a filled cache.
@@ -1340,16 +1348,31 @@ func (c *rowCache) total() int {
 	return c.sums[len(c.sums)-1] + c.bottom
 }
 
-// clone returns a copy of the cache with row counts and widths of its own,
-// so a change to the copy leaves every Model that shares c as it was.
-func (c *rowCache) clone() *rowCache {
-	out := *c
-	out.left = slices.Clone(c.left)
-	out.right = slices.Clone(c.right)
-	out.leftWidths = slices.Clone(c.leftWidths)
-	out.rightWidths = slices.Clone(c.rightWidths)
+// filled reports whether the cache holds the counts of a view.
+func (c *rowCache) filled() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	return &out
+	return c.sums != nil
+}
+
+// clone returns a copy of a filled cache with row counts and widths of its
+// own, so a change to the copy leaves every Model that shares c as it was.
+// It copies each field rather than the whole struct, so the copy starts
+// with a lock of its own.
+func (c *rowCache) clone() *rowCache {
+	return &rowCache{
+		left:        slices.Clone(c.left),
+		right:       slices.Clone(c.right),
+		leftWidths:  slices.Clone(c.leftWidths),
+		rightWidths: slices.Clone(c.rightWidths),
+		indices:     c.indices,
+		sums:        c.sums,
+		width:       c.width,
+		maxNumber:   c.maxNumber,
+		top:         c.top,
+		bottom:      c.bottom,
+	}
 }
 
 // sum computes the prefix sums and the widest row from the row counts and
@@ -1390,13 +1413,7 @@ func (c *rowCache) measure(layout printer.Layout, view *line.View, rows, widths 
 // bounds. It checks on every call, because a copy of the Model can fill a
 // shared cache without restoring or clamping this Model's offsets.
 func (m *Model) ensureRows() {
-	if m.rows == nil {
-		m.rows = &rowCache{}
-	}
-
-	if m.rows.sums == nil {
-		m.fillRows()
-	}
+	m.fillRows()
 
 	if m.anchored {
 		m.anchored = false
@@ -1420,10 +1437,28 @@ func (m *Model) ensureRows() {
 	m.xOffset = clamp(m.xOffset, 0, m.maxXOffset())
 }
 
-// fillRows computes the row counts of the view into the cache. A Model
-// without a printer, such as a zero Model, has no rows.
+// fillRows computes the row counts of the view into the cache when it is
+// empty. A Model without a printer, such as a zero Model, has no rows.
+//
+// Copies of the Model that share the cache may fill it at the same time,
+// so fillRows holds the lock of the cache and leaves a filled cache as it
+// is. A layout change gives a Model a cache of its own, so every Model that
+// shares a cache has the same layout, and the first fill holds the counts
+// of them all.
 func (m *Model) fillRows() {
+	if m.rows == nil {
+		m.rows = &rowCache{}
+	}
+
 	c := m.rows
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.sums != nil {
+		return
+	}
+
 	c.left, c.right = nil, nil
 	c.leftWidths, c.rightWidths = nil, nil
 	c.top, c.bottom = 0, 0
@@ -1619,13 +1654,7 @@ func (m *Model) maxXOffset() int {
 func (m *Model) rowWidth() int {
 	// Fill the cache without ensureRows, which clamps the horizontal offset
 	// through this method.
-	if m.rows == nil {
-		m.rows = &rowCache{}
-	}
-
-	if m.rows.sums == nil {
-		m.fillRows()
-	}
+	m.fillRows()
 
 	return m.rows.width
 }
