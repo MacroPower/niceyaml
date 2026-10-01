@@ -792,7 +792,7 @@ func (r *resolver) deref(node ast.Node) (ast.Node, error) {
 // unwrap is [resolver.deref] followed by stripping tags, so the result is a
 // mapping, sequence, or scalar that selectors can apply to. It stops at a
 // nil node, including a typed nil a hand-built tree may hold, and returns
-// it.
+// an untyped nil for it, as [resolver.follow] does.
 //
 // It tracks the aliases it follows across every tag it strips, so an alias
 // that leads back to itself through a tag returns an error wrapping
@@ -807,7 +807,7 @@ func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
 		}
 
 		tag, ok := content.(*ast.TagNode)
-		if !ok || astnode.IsNil(content) {
+		if !ok {
 			return content, nil
 		}
 
@@ -821,11 +821,12 @@ func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
 // an alias with no name. An alias leads back to itself when it is already
 // in followed, or when it lies inside the content of the anchor it refers
 // to and no `<<` merge key names it. It stops at a nil node, including a
-// typed nil a hand-built tree may hold, and returns it.
+// typed nil a hand-built tree may hold, and returns an untyped nil for it,
+// so a type assertion on the result never yields a nil pointer.
 func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.Node, error) {
 	for {
 		if astnode.IsNil(node) {
-			return node, nil
+			return nil, nil //nolint:nilnil // Nil content is a valid result.
 		}
 
 		switch n := node.(type) {

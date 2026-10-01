@@ -99,8 +99,9 @@ func (r *Resolver) Matches(p Path) ([]Match, error) {
 // [Resolver.Node] does. A tag on that content stays, so the result reads
 // as the decoder reads the alias. A caller that walks the document itself
 // follows aliases with Deref to reach the node a path through the same
-// alias resolves to, and looks through a tag it reaches on the way. A nil
-// node gives nil.
+// alias resolves to, and looks through a tag it reaches on the way. Deref
+// gives an untyped nil for a nil node and for an anchor or alias whose
+// content is nil, including a typed nil a hand-built tree may hold.
 //
 // Returns an error wrapping [ErrAlias] for an alias that names no anchor
 // or that leads back to itself, such as one inside the content of the

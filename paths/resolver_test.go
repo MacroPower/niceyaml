@@ -653,12 +653,52 @@ func TestResolver_Deref(t *testing.T) {
 		require.ErrorIs(t, err, paths.ErrAlias)
 	})
 
-	t.Run("nil node", func(t *testing.T) {
+	t.Run("nil content", func(t *testing.T) {
 		t.Parallel()
 
-		got, err := paths.NewResolver(nil).Deref(nil)
-		require.NoError(t, err)
-		assert.Nil(t, got)
+		// A tree built by hand may hold a typed nil where the parser always
+		// puts a node. The alias here refers to an anchor over one.
+		anchorName := &ast.StringNode{Token: &token.Token{Value: "a"}, Value: "a"}
+		alias := &ast.AliasNode{Value: anchorName}
+		doc := &ast.DocumentNode{Body: &ast.SequenceNode{
+			BaseNode: &ast.BaseNode{},
+			Values: []ast.Node{
+				&ast.AnchorNode{Name: anchorName, Value: (*ast.MappingNode)(nil)},
+				alias,
+			},
+		}}
+
+		tcs := map[string]struct {
+			doc  *ast.DocumentNode
+			node ast.Node
+		}{
+			"nil node": {
+				node: nil,
+			},
+			"typed nil": {
+				node: (*ast.StringNode)(nil),
+			},
+			"anchor over a typed nil": {
+				node: &ast.AnchorNode{Value: (*ast.MappingNode)(nil)},
+			},
+			"alias to an anchor over a typed nil": {
+				doc:  doc,
+				node: alias,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got, err := paths.NewResolver(tc.doc).Deref(tc.node)
+				require.NoError(t, err)
+
+				// Compare against an untyped nil, since assert.Nil also
+				// accepts a typed nil.
+				assert.Equal(t, ast.Node(nil), got)
+			})
+		}
 	})
 }
 
