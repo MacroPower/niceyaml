@@ -166,6 +166,12 @@ type alignedRow struct {
 // lines first. Each line carries a [line.Flag] that marks it as deleted,
 // inserted, or unchanged.
 //
+// A decorator that finds lines by identity, such as [line.View.Index] or
+// [go.jacobcolvin.com/niceyaml.SourceError.Annotate], finds every line
+// of the after revision in the view but only the deleted lines of the
+// before revision. [Result.Before] holds every line of the before
+// revision.
+//
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another.
 func (r *Result) Unified() *line.View {

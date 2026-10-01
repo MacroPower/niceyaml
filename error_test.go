@@ -4417,6 +4417,80 @@ func TestSourceError_Annotate(t *testing.T) {
 		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(2))
 	})
 
+	t.Run("marks a diff on the deleted lines of the before revision", func(t *testing.T) {
+		t.Parallel()
+
+		// The unified view holds a from after, b from before as a deleted
+		// line, b from after as an inserted one, then c from after.
+		unified := func(r *diff.Result) *line.View { return r.Unified() }
+		hunks := func(r *diff.Result) *line.View { return r.Hunks(2) }
+		aligned := func(r *diff.Result) *line.View { return r.Before() }
+
+		tcs := map[string]struct {
+			view  func(r *diff.Result) *line.View
+			key   string
+			index int // The line the error marks when want is true.
+			want  bool
+		}{
+			"unchanged line in the unified view": {
+				view: unified,
+				key:  "a",
+			},
+			"unchanged line in the hunks": {
+				view: hunks,
+				key:  "a",
+			},
+			"unchanged line in the before view": {
+				view:  aligned,
+				key:   "a",
+				index: 0,
+				want:  true,
+			},
+			"deleted line in the unified view": {
+				view:  unified,
+				key:   "b",
+				index: 1,
+				want:  true,
+			},
+			"deleted line in the hunks": {
+				view:  hunks,
+				key:   "b",
+				index: 1,
+				want:  true,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				before := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n")
+				after := niceyaml.NewSourceFromString("a: 1\nb: 9\nc: 3\n")
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, yamltest.Bind(t, before, niceyaml.NewError(
+					"bad "+tc.key, niceyaml.AtPath(paths.Root().Child(tc.key)),
+				)), &bound)
+
+				view := tc.view(diff.Diff(before.Lines(), after.Lines()))
+				require.Equal(t, tc.want, bound.Annotate(view))
+
+				for i := range view.All() {
+					if tc.want && i == tc.index {
+						assert.Equal(t,
+							line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}},
+							view.Overlays(i))
+
+						continue
+					}
+
+					assert.Empty(t, view.Overlays(i), "line %d carries no overlay", i)
+				}
+			})
+		}
+	})
+
 	t.Run("marks nothing on a view without the marked lines", func(t *testing.T) {
 		t.Parallel()
 

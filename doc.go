@@ -174,7 +174,7 @@
 // shares its lines. The view may therefore be a slice of the source, such
 // as one document of a file from [Node.Span], or a diff against another
 // revision, where the marks of each error land on the lines of its own
-// source.
+// source that the diff holds.
 // [line.View.Hunks] then keeps the marked lines with context around
 // each, so a viewer shows the excerpt of every error at once, with
 // search matches or any other decoration in it:

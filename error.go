@@ -1887,10 +1887,15 @@ func rangeOf(ranges position.Ranges, at position.Position) position.Range {
 // view over a source shares its [*line.Line] values, so the view may be
 // the whole source from [Source.View], a slice of it from [line.View.Slice]
 // such as one document of a file, or a diff that interleaves the source
-// with another revision. An error bound to another source marks the
-// lines of that source the view holds, so a diff of two revisions shows
-// the errors of both, and a view of one source shows the errors bound to
-// it. Annotate skips a line the view does not hold.
+// with another revision. An error marks only the lines of its own source
+// that the view holds, and Annotate skips a line the view does not hold.
+// A unified diff from [go.jacobcolvin.com/niceyaml/diff.Result.Unified]
+// takes its unchanged lines from the after revision, so it holds every
+// line of that revision but only the deleted lines of the before
+// revision. An error bound to the before revision therefore marks
+// nothing on a line the diff left unchanged.
+// [go.jacobcolvin.com/niceyaml/diff.Result.Before] holds every line of
+// the before revision.
 //
 // Annotate reports whether it marked any line. It reports false when the
 // location did not resolve, for the reason [SourceError.Unresolved]
