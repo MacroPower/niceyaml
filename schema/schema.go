@@ -215,8 +215,11 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 }
 
 // Validate implements [niceyaml.Validator]. It reads n as any through
-// [niceyaml.Node.Decode] and checks the result as [Schema.ValidateValue]
-// does. [niceyaml.WithValidator] runs the schema before a decode, a
+// [niceyaml.Node.Decode] and checks the result against the schema as
+// [Schema.ValidateValue] does. Validate applies the alias limit to the
+// document of n before the decode. It applies the limit to the result as
+// well only where the document holds an alias to a reference document.
+// [niceyaml.WithValidator] runs the schema before a decode, a
 // [niceyaml.Decoder] runs it on every node it decodes, and
 // [niceyaml.Node.Validate] runs it on its own. A Node from
 // [niceyaml.Node.At] decodes to the node it selects, so the schema checks
@@ -252,12 +255,26 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // whole document reads, with each alias reading its content in full. The
 // count covers the whole document even for a node below the root, so
 // every node in a document that holds an alias gets the same verdict.
-// Validate applies the alias limit of [Schema.ValidateValue] to that
-// count. An alias to a scalar counts as one unaliased node, except where
-// the decoder writes it out as text, such as in a key that holds a
-// sequence. There each copy of the scalar counts one node per byte of its
-// text. A document past the limit returns an error wrapping both
-// [ErrValidate] and [ErrExcessiveAliasing] without decoding.
+// Validate applies the alias limit of [Schema.ValidateValue] to the
+// count. An alias to a text tag, such as !!binary or !!str, counts one
+// node per byte of the text under the tag. So does an alias that reaches
+// a !!binary scalar through another tagged alias, as *s does for
+// `&s !foo *b`. Each copy of a scalar the decoder writes out as text,
+// such as in a key that holds a sequence, counts the same way. Any other
+// alias to a scalar counts as one unaliased node. A document past the
+// limit returns an error wrapping both [ErrValidate] and
+// [ErrExcessiveAliasing] without decoding. Validate puts no limit of its
+// own on the result of the decode. A node below the root then passes the
+// limit wherever its document does, even when aliases make up a larger
+// share of the node than of the document.
+//
+// A document that holds an alias with no anchor of its name before it
+// is the exception. A decode resolves such an alias against a reference
+// document, such as one of [niceyaml.WithReferences]. The count cannot
+// see a reference document, so it takes the alias as one node. For such
+// a document Validate also applies the limit to the result of the
+// decode, as [Schema.ValidateValue] does. A node below the root can then
+// exceed the limit where its document passes.
 func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 	if s.acceptAll {
 		return nil
@@ -273,6 +290,20 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 	data, err := n.Decode[any](ctx, niceyaml.WithSelfValidation(false))
 	if err != nil {
 		return err
+	}
+
+	// The count above takes each alias as the validator reads the value
+	// a decode shares at it, which is a mapping or a sequence in full and
+	// a !!binary scalar by its text. An expansion check of data would
+	// repeat that count for the node alone, and could give a node below
+	// the root a verdict apart from its document's. The count cannot see
+	// a reference document, though, so data gets the check where the
+	// document holds an alias to one.
+	if aliasing.HoldsReferenceAlias(n) {
+		err = checkExpansion(data)
+		if err != nil {
+			return err
+		}
 	}
 
 	return s.validate(ctx, data, n)
@@ -321,15 +352,6 @@ func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 		return nil
 	}
 
-	return s.validate(ctx, data, nil)
-}
-
-// validate is [Schema.ValidateValue] with the node a decode read data
-// from, which [Schema.Validate] has and a caller of ValidateValue does
-// not. A violation at a key the decoder respells, such as the hexadecimal
-// 0x10, needs the node to spell the key in its path as the source does,
-// and a !!timestamp needs it to show whether the source wrote only a date.
-func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error {
 	// Both normalizeJSON and the validator read a shared value again at
 	// every use, so the check runs before either of them.
 	err := checkExpansion(data)
@@ -337,6 +359,17 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 		return err
 	}
 
+	return s.validate(ctx, data, nil)
+}
+
+// validate checks data against the schema as [Schema.ValidateValue] does
+// once data passes its expansion check. It takes the node a decode read
+// data from, which [Schema.Validate] has and a caller of ValidateValue
+// does not. A violation at a key the decoder respells, such as the
+// hexadecimal 0x10, needs the node to spell the key in its path as the
+// source does, and a !!timestamp needs it to show whether the source
+// wrote only a date.
+func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error {
 	// The resolver binds aliases across the whole document, so an alias
 	// inside a scoped node reaches an anchor outside it. The document
 	// keeps one for every Node of it, so a check of each item of a list
@@ -350,7 +383,7 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 	// key decodes once however many of them lie under its mapping.
 	idx := newMemberIndex(resolver)
 
-	err = s.compiled.Validate(ctx, normalizeJSON(data, rootOf(n), idx))
+	err := s.compiled.Validate(ctx, normalizeJSON(data, rootOf(n), idx))
 	if err == nil {
 		return nil
 	}

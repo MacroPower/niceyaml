@@ -26,11 +26,13 @@ var Of func(n any) *State
 //
 // Create instances with [New].
 type State struct {
-	resolver      func() *paths.Resolver
-	aliasOnce     sync.Once
-	textOnce      sync.Once
-	excessive     bool
-	excessiveText bool
+	resolver       func() *paths.Resolver
+	aliasOnce      sync.Once
+	textOnce       sync.Once
+	referenceOnce  sync.Once
+	excessive      bool
+	excessiveText  bool
+	referenceAlias bool
 }
 
 // New creates a new [*State] whose [State.Resolver] returns the resolver
@@ -65,4 +67,16 @@ func (s *State) ExcessiveTextAliasing(count func() bool) bool {
 	})
 
 	return s.excessiveText
+}
+
+// ReferenceAlias returns what find reports for the document, which is
+// whether the document holds an alias to a reference document. It calls
+// find on its first call alone and returns that result from then on, so
+// find must depend on the document alone.
+func (s *State) ReferenceAlias(find func() bool) bool {
+	s.referenceOnce.Do(func() {
+		s.referenceAlias = find()
+	})
+
+	return s.referenceAlias
 }

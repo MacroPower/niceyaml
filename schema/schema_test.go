@@ -1727,22 +1727,101 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		t.Run("nodes of one document", func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, lists+"b:\n  ? *l7\n  : v\nc: [*k]\nd: [*k]\ne: [x]\n")
+			bomb := yamltest.FirstDocument(t, lists+"b:\n  ? *l7\n  : v\nc: [*k]\nd: [*k]\ne: [x]\n")
+
+			// Each flow sequence from repeated lists item count times.
+			repeated := func(item string, count int) string {
+				return "[" + strings.TrimSuffix(strings.Repeat(item+", ", count), ", ") + "]"
+			}
+
+			// The 200 aliases in list repeat a sequence of 1000 numbers, so
+			// they make up more of list than the limit allows. The 2000
+			// numbers in filler keep their share of the document within it.
+			diluted := yamltest.FirstDocument(t,
+				"filler: "+repeated("0", 2000)+"\n"+
+					"big: &big "+repeated("0", 1000)+"\n"+
+					"list: "+repeated("*big", 200)+"\n",
+			)
+
+			// The 1000 aliases in list each repeat 22 KB of base64 text,
+			// and other holds one more.
+			binary := yamltest.FirstDocument(t,
+				"bin: &bin !!binary "+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, 16<<10))+"\n"+
+					"list: "+repeated("*bin", 1000)+"\n"+
+					"other: [*bin]\n",
+			)
+
+			// The aliases repeat the same text through the tagged alias
+			// under s.
+			chained := yamltest.FirstDocument(t,
+				"bin: &bin !!binary "+base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, 16<<10))+"\n"+
+					"s: &s !foo *bin\n"+
+					"list: "+repeated("*s", 1000)+"\n"+
+					"other: [*s]\n",
+			)
+
+			// The aliases repeat the same text, which lies under another
+			// tag and anchor of bin.
+			wrapped := yamltest.FirstDocument(t,
+				"bin: &bin !foo &raw !!binary "+
+					base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, 16<<10))+"\n"+
+					"list: "+repeated("*bin", 1000)+"\n"+
+					"other: [*bin]\n",
+			)
 
 			tcs := map[string]struct {
+				doc  *niceyaml.Node
 				path paths.Path
 				errs []error
 			}{
 				"first node holding an alias": {
+					doc:  bomb,
 					path: paths.Root().Child("c"),
 					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 				},
 				"second node holding an alias": {
+					doc:  bomb,
 					path: paths.Root().Child("d"),
 					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 				},
 				"node without an alias": {
+					doc:  bomb,
 					path: paths.Root().Child("e"),
+				},
+				"document diluting its aliases": {
+					doc: diluted,
+				},
+				"node of a document diluting its aliases": {
+					doc:  diluted,
+					path: paths.Root().Child("list"),
+				},
+				"node with one alias to a binary aliased many times": {
+					doc:  binary,
+					path: paths.Root().Child("other"),
+					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				},
+				"document with aliases to a tag over an alias to a binary": {
+					doc:  chained,
+					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				},
+				"node of aliases to a tag over an alias to a binary": {
+					doc:  chained,
+					path: paths.Root().Child("list"),
+					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				},
+				"node with one alias to a tag over an alias to a binary": {
+					doc:  chained,
+					path: paths.Root().Child("other"),
+					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				},
+				"document with aliases to a binary under another tag": {
+					doc:  wrapped,
+					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				},
+				"node with one alias to a binary under another tag": {
+					doc:  wrapped,
+					path: paths.Root().Child("other"),
+					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 				},
 			}
 
@@ -1750,7 +1829,10 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				t.Run(name, func(t *testing.T) {
 					t.Parallel()
 
-					node := yamltest.At(t, doc, tc.path)
+					node := tc.doc
+					if !tc.path.IsRoot() {
+						node = yamltest.At(t, node, tc.path)
+					}
 
 					for range 2 {
 						err := node.Validate(t.Context(), v)
@@ -1767,6 +1849,73 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				})
 			}
 		})
+	})
+
+	// The count of a document cannot see the anchors of a reference
+	// document, so it takes each alias to one as one node. Validate then
+	// applies the limit to the value the decode shares between them.
+	t.Run("reference aliases", func(t *testing.T) {
+		t.Parallel()
+
+		var entries strings.Builder
+
+		for i := range 1000 {
+			fmt.Fprintf(&entries, "  k%d: v\n", i)
+		}
+
+		refs := niceyaml.WithReferences([]byte("defaults: &defaults\n" + entries.String()))
+		v := compileSchema(t, []byte(`{"maxProperties": 5}`))
+
+		// Each flow sequence from repeated lists *defaults count times.
+		repeated := func(count int) string {
+			return "[" + strings.TrimSuffix(strings.Repeat("*defaults, ", count), ", ") + "]"
+		}
+
+		tcs := map[string]struct {
+			path  paths.Path
+			input string
+			errs  []error
+		}{
+			"aliases to a mapping of a reference document": {
+				input: "items: " + repeated(300) + "\n",
+				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			},
+			"node of aliases to a mapping of a reference document": {
+				path:  paths.Root().Child("items"),
+				input: "items: " + repeated(300) + "\n",
+				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			},
+			"aliases to an anchor on a tagged alias to a reference document": {
+				input: "local: &local !foo *defaults\nitems: " +
+					strings.ReplaceAll(repeated(300), "*defaults", "*local") + "\n",
+				errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			},
+			"a few aliases to a mapping of a reference document": {
+				input: "items: " + repeated(2) + "\n",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+				if !tc.path.IsRoot() {
+					doc = yamltest.At(t, doc, tc.path)
+				}
+
+				_, err := doc.Decode[any](t.Context(), refs, niceyaml.WithValidator(v))
+				if tc.errs == nil {
+					require.NoError(t, err)
+
+					return
+				}
+
+				for _, want := range tc.errs {
+					require.ErrorIs(t, err, want)
+				}
+			})
+		}
 	})
 
 	t.Run("values", func(t *testing.T) {

@@ -209,6 +209,34 @@ func TestCheckDecode(t *testing.T) {
 			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
 				"s: &s !foo *b\nl: " + flowList("{? *s : 1}", 2) + "\n",
 		},
+		"aliases to a tag over an alias to a binary scalar": {
+			// A decode shares the bytes under b between the aliases to
+			// s, and the schema validator spells them as text at each.
+			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+				"s: &s !foo *b\nl: " + flowList("*s", 500) + "\n",
+			err: aliaslimit.ErrExcessiveAliasing,
+		},
+		"aliases to chained tags over an alias to a binary scalar": {
+			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+				"s: &s !foo *b\nt: &t ! *s\nl: " + flowList("*t", 500) + "\n",
+			err: aliaslimit.ErrExcessiveAliasing,
+		},
+		"aliases to a binary scalar under another tag and anchor": {
+			input: "s: &s !foo &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+				"l: " + flowList("*s", 500) + "\n",
+			err: aliaslimit.ErrExcessiveAliasing,
+		},
+		"a few aliases to a tag over an alias to a binary scalar": {
+			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+				"s: &s !foo *b\nl: " + flowList("*s", 2) + "\n",
+		},
+		"alias keys to a binary scalar under another tag and anchor": {
+			// Each key decodes to the bytes under b, so the decoder
+			// spells it as text.
+			input: "s: &s !foo &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+				"l: " + flowList("{? *s : 1}", 500) + "\n",
+			err: aliaslimit.ErrExcessiveAliasing,
+		},
 		"alias keys to a plain scalar": {
 			input: longScalar + "l: " + flowList("{? *a : 1}", 500) + "\n",
 		},
@@ -257,6 +285,77 @@ func TestCheckDecode(t *testing.T) {
 		t.Parallel()
 
 		require.NoError(t, aliasing.CheckDecode((*niceyaml.Node)(nil)))
+	})
+}
+
+func TestHoldsReferenceAlias(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		path  paths.Path
+		want  bool
+	}{
+		"no alias": {
+			input: "a: [x, y]\n",
+		},
+		"alias to an anchor before it": {
+			input: "s: &s [a, b]\nt: *s\n",
+		},
+		"alias inside its own anchor": {
+			input: "x: &x [a, *x]\n",
+		},
+		"alias with no anchor": {
+			input: "t: *s\n",
+			want:  true,
+		},
+		"alias before the anchor of its name": {
+			input: "t: *s\ns: &s [a, b]\n",
+			want:  true,
+		},
+		"tagged alias with no anchor": {
+			input: "t: !foo *s\n",
+			want:  true,
+		},
+		"alias key with no anchor": {
+			input: "t: {? *s : 1}\n",
+			want:  true,
+		},
+		"merge key alias with no anchor": {
+			input: "t:\n  <<: *s\n",
+			want:  true,
+		},
+		"alias with no anchor inside an anchor": {
+			input: "a: &a [*s]\nt: *a\n",
+			want:  true,
+		},
+		"node without an alias beside an alias with no anchor": {
+			input: "a: [x]\nt: *s\n",
+			path:  paths.Root().Child("a"),
+			want:  true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+			if !tc.path.IsRoot() {
+				doc = yamltest.At(t, doc, tc.path)
+			}
+
+			// The document keeps the answer, so a second call returns
+			// the same one.
+			assert.Equal(t, tc.want, aliasing.HoldsReferenceAlias(doc))
+			assert.Equal(t, tc.want, aliasing.HoldsReferenceAlias(doc))
+		})
+	}
+
+	t.Run("nil node", func(t *testing.T) {
+		t.Parallel()
+
+		assert.False(t, aliasing.HoldsReferenceAlias((*niceyaml.Node)(nil)))
 	})
 }
 

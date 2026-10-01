@@ -16,4 +16,9 @@
 // documents its schemas do. A decode into a type that [DecodesText]
 // reports, by a Node or by the content matcher, runs [CheckDecodeText]
 // as well.
+//
+// Neither count can see a reference document of a decode, so an alias to
+// one of its anchors counts as one node. [HoldsReferenceAlias] reports a
+// document that holds such an alias, and a caller that reads the decoded
+// value again at every alias then limits that value itself.
 package aliasing

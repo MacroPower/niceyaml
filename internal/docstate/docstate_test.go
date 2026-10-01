@@ -63,6 +63,36 @@ func TestState_ExcessiveAliasing(t *testing.T) {
 	}
 }
 
+func TestState_ReferenceAlias(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		want bool
+	}{
+		"reference alias":    {want: true},
+		"no reference alias": {want: false},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s := docstate.New(func() *paths.Resolver { return paths.NewResolver(nil) })
+
+			calls := 0
+			find := func() bool {
+				calls++
+
+				return tc.want
+			}
+
+			assert.Equal(t, tc.want, s.ReferenceAlias(find))
+			assert.Equal(t, tc.want, s.ReferenceAlias(find))
+			assert.Equal(t, 1, calls)
+		})
+	}
+}
+
 func TestState_ExcessiveTextAliasing(t *testing.T) {
 	t.Parallel()
 

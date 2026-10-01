@@ -73,6 +73,33 @@ func CheckDecodeText(n Node) error {
 	return nil
 }
 
+// HoldsReferenceAlias reports whether the document of n holds a
+// reference alias, which is an alias with no anchor of its name before
+// it in the document. A decode resolves such an alias only against a
+// reference document, such as one of niceyaml.WithReferences.
+// [CheckDecode] and [CheckDecodeText] cannot see a reference document,
+// so they count the alias as one node whatever its anchor holds. A
+// caller that reads a decoded value again at every alias applies
+// [Excessive] to that value when the document holds a reference alias.
+// A nil Node holds none.
+//
+// The answer depends on the document alone, so the document keeps it, as
+// it keeps the count of CheckDecode.
+func HoldsReferenceAlias(n Node) bool {
+	state := stateOf(n)
+	if state == nil {
+		return false
+	}
+
+	return state.ReferenceAlias(func() bool {
+		found := referenceFinder{resolver: state.Resolver()}
+
+		ast.Walk(&found, n.DocumentAST().Body)
+
+		return found.found
+	})
+}
+
 // stateOf returns the state of the document of n, or nil for a nil Node.
 func stateOf(n Node) *docstate.State {
 	if n == nil {
@@ -105,6 +132,8 @@ func excessiveRead(n Node, state *docstate.State, mode readMode) bool {
 		open:        map[ast.Node]bool{},
 		collections: map[*ast.AliasNode]bool{},
 		textKeys:    map[*ast.AliasNode]bool{},
+		binaries:    map[*ast.AliasNode]bool{},
+		repeated:    map[ast.Node]bool{},
 	}
 
 	c.count(body, true, mode)
@@ -196,6 +225,30 @@ func (f *aliasFinder) Visit(node ast.Node) ast.Visitor {
 	return f
 }
 
+// referenceFinder is an [ast.Visitor] that records whether it visited an
+// alias the resolver binds to no anchor, and stops the walk once it has.
+type referenceFinder struct {
+	resolver *paths.Resolver
+	found    bool
+}
+
+// Visit implements [ast.Visitor].
+func (f *referenceFinder) Visit(node ast.Node) ast.Visitor {
+	if f.found || astnode.IsNil(node) {
+		return nil
+	}
+
+	alias, ok := node.(*ast.AliasNode)
+	if !ok {
+		return f
+	}
+
+	_, err := f.resolver.Anchor(alias)
+	f.found = err != nil
+
+	return nil
+}
+
 // readMode is how the decoder reads a node, which decides what a read of
 // an alias to a scalar costs.
 type readMode int
@@ -244,6 +297,13 @@ const (
 // each *s, and a key *s counts as text when *k refers to a !!binary
 // scalar.
 //
+// An alias that refers to a !!binary scalar counts the text of the
+// scalar even where the decoder reads the alias into a value. A decode
+// shares the bytes between such aliases, and the schema validator spells
+// them as text again at each one. The !!binary tag may lie under another
+// tag and anchor, as in `&s !foo &b !!binary x`, or behind a tagged
+// alias, as it does for *s with `&s !foo *b`.
+//
 // The distinct field counts the nodes of the tree once each, and the
 // aliased field counts the nodes the aliases in the tree repeat. The
 // sizes maps hold the size of each alias's content once the counter has
@@ -253,9 +313,11 @@ const (
 // counts as one node and the count ends. For each alias
 // [treeCounter.reaches] has followed, the collections map holds whether
 // the alias refers to a mapping or a sequence, and the textKeys map holds
-// whether the decoder writes out a key that is the alias as text. A chain
-// of tagged aliases then costs one walk, however many aliases lead into
-// it.
+// whether the decoder writes out a key that is the alias as text. The
+// binaries map holds whether such an alias refers to a !!binary scalar.
+// A chain of tagged aliases then costs one walk, however many aliases
+// lead into it. The repeated map holds what [treeCounter.repeats] has
+// found for the content of each alias.
 type treeCounter struct {
 	resolver    *paths.Resolver
 	nulls       map[*ast.AliasNode]bool
@@ -263,6 +325,8 @@ type treeCounter struct {
 	open        map[ast.Node]bool
 	collections map[*ast.AliasNode]bool
 	textKeys    map[*ast.AliasNode]bool
+	binaries    map[*ast.AliasNode]bool
+	repeated    map[ast.Node]bool
 	distinct    int
 	aliased     int
 }
@@ -403,14 +467,15 @@ func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool, mode readMode) in
 // the text of a scalar it refers to when read as text. An alias to a text
 // tag, such as a !!str tag or any tag after a %TAG directive that
 // redefines the "!!" handle, reads the text under the tag in either mode.
-// Any other alias counts one. An alias to a tag over another alias, as in
-// `&s !foo *k`, refers to what that alias refers to. With top set, the
-// alias lies outside the content of every other alias, and alias adds
-// that size to aliased, or the one node to distinct.
+// So does an alias that refers to a !!binary scalar under other tags and
+// anchors or through a tagged alias, as [treeCounter.holdsBinary] finds
+// it. Any other alias counts one. An alias to a tag over another alias,
+// as in `&s !foo *k`, refers to what that alias refers to. With top set,
+// the alias lies outside the content of every other alias, and alias
+// adds that size to aliased, or the one node to distinct.
 func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 	target, err := c.resolver.Deref(alias)
-	if err != nil || c.nulls[alias] || c.open[target] ||
-		(mode == readValue && !isTextTag(target) && !c.holdsCollection(target)) {
+	if err != nil || c.nulls[alias] || c.open[target] || (mode == readValue && !c.repeats(target)) {
 		if top {
 			c.distinct = aliaslimit.AddCapped(c.distinct, 1)
 		}
@@ -432,6 +497,22 @@ func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 	}
 
 	return size
+}
+
+// repeats reports whether each alias to target, the content of an
+// anchor, reads more than a shared scalar where the decoder reads the
+// alias into a value. It does for a text tag, for a !!binary scalar, and
+// for a mapping or a sequence. The answer depends on target alone, so
+// the counter keeps it, and it walks the anchors and tags of target once
+// however many aliases refer to the anchor.
+func (c *treeCounter) repeats(target ast.Node) bool {
+	repeated, ok := c.repeated[target]
+	if !ok {
+		repeated = isTextTag(target) || c.holdsBinary(target) || c.holdsCollection(target)
+		c.repeated[target] = repeated
+	}
+
+	return repeated
 }
 
 // textSize returns the length in bytes of the text of the scalar node
@@ -462,6 +543,13 @@ func textSize(node ast.Node) int {
 // [treeCounter.reaches] follows.
 func (c *treeCounter) holdsCollection(node ast.Node) bool {
 	return c.reaches(node, isCollection, c.collections)
+}
+
+// holdsBinary reports whether node holds a !!binary tag among its
+// anchors and tags, or refers to one through the aliases
+// [treeCounter.reaches] follows.
+func (c *treeCounter) holdsBinary(node ast.Node) bool {
+	return c.reaches(node, underBinary, c.binaries)
 }
 
 // reaches reports whether match holds for node or for the content of an
@@ -537,6 +625,30 @@ func isBinary(node ast.Node) bool {
 	tag, ok := node.(*ast.TagNode)
 
 	return ok && tag.Start != nil && token.ReservedTagKeyword(tag.Start.Value) == token.BinaryTag
+}
+
+// underBinary reports whether one of the tags around the content of node
+// is a !!binary tag. It looks through the anchors and tags of node, so
+// it finds the tag in `!foo &b !!binary x`.
+func underBinary(node ast.Node) bool {
+	for !astnode.IsNil(node) {
+		switch n := node.(type) {
+		case *ast.AnchorNode:
+			node = n.Value
+
+		case *ast.TagNode:
+			if isBinary(n) {
+				return true
+			}
+
+			node = n.Value
+
+		default:
+			return false
+		}
+	}
+
+	return false
 }
 
 // isCollection reports whether node holds a mapping or a sequence under
