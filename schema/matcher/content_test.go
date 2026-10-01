@@ -1175,6 +1175,20 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: &x {p: !t *x}`),
 			want:    true,
 		},
+		"struct string field does not match an anchored alias to the anchor it sits in": {
+			matcher: matcher.Content(versionPath, plainField{}),
+			input: stringtest.Input(`
+				version: &x
+				  k: &y
+				    *x
+			`),
+			want: false,
+		},
+		"struct string field does not match a null-tagged alias without an anchor": {
+			matcher: matcher.Content(versionPath, plainField{}),
+			input:   stringtest.Input(`version: {k: !!null *q}`),
+			want:    false,
+		},
 		"inline struct int field does not match a fraction": {
 			matcher: matcher.Content(versionPath, inlineIntText{Inline: intText{I: 2}, S: "x"}),
 			input:   stringtest.Input(`version: {i: 2.5, s: x}`),
@@ -1513,6 +1527,36 @@ func TestContent(t *testing.T) {
 				input:   `version: {p: !t *n}`,
 				opts:    []niceyaml.DecodeOption{refs},
 				want:    true,
+			},
+			"struct string field does not match an anchored alias to a reference null": {
+				matcher: matcher.Content(versionPath, plainField{}),
+				input: stringtest.Input(`
+					version:
+					  k: &y
+					    *n
+				`),
+				opts: []niceyaml.DecodeOption{refs},
+				want: false,
+			},
+			"struct nil pointer field matches an anchored alias to a reference null": {
+				matcher: matcher.Content(versionPath, pointerField{}),
+				input: stringtest.Input(`
+					version:
+					  p: &y
+					    *n
+				`),
+				opts: []niceyaml.DecodeOption{refs},
+				want: true,
+			},
+			"struct string field does not match an alias to an anchored alias to a reference null": {
+				matcher: matcher.Content(versionPath, plainField{}),
+				input: stringtest.Input(`
+					y: &y
+					  *n
+					version: {k: *y}
+				`),
+				opts: []niceyaml.DecodeOption{refs},
+				want: false,
 			},
 			"struct string field does not match an alias to a tagged alias to a reference null": {
 				matcher: matcher.Content(versionPath, plainField{}),

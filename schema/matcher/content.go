@@ -391,10 +391,10 @@ func matchStruct(
 		case !set || !found:
 			match = equal(got.Field(i), want.Field(i))
 
-		// The decoder hands the probe an alias under a tag, so the
-		// probe is not nil when that alias reads as a null. The case
-		// below tells such a null by the node at its path, and it finds
-		// no node for an alias that no path resolves.
+		// The decoder hands the probe an alias under a tag or an anchor,
+		// so the probe is not nil when that alias reads as a null. The
+		// case below tells such a null by the node at its path, and it
+		// finds no node for an alias that no path resolves.
 		case value == nil && probe.readsUnresolved(node, name):
 			match = wantsNil(want.Field(i))
 		default:
@@ -571,11 +571,13 @@ func (p *fieldProbe) reads(child *niceyaml.Node) bool {
 
 // readsUnresolved reports whether the decoder read the field from the
 // value of the entry that name selects in the mapping at node, where
-// that value leads to an alias no path resolves. Such an alias names an
-// anchor of a reference document or leads back to itself, and it
-// reaches the probe only under a tag. The decoder follows an alias
-// with no tag on it to its anchor, so readsUnresolved compares the
-// probe with that anchor when the value is such an alias.
+// that value leads to an alias no path resolves. Such an alias names no
+// anchor before it in the document, as one to an anchor of a reference
+// document does, or leads back to itself. The probe starts at it only
+// when a tag or an anchor sits on it. The decoder follows an alias with
+// neither on it to its anchor and hands the probe the content of that
+// anchor, so readsUnresolved compares the probe with that anchor when
+// the value is an alias with neither.
 func (p *fieldProbe) readsUnresolved(node *niceyaml.Node, name string) bool {
 	if p == nil {
 		return false
