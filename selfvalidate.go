@@ -1121,8 +1121,13 @@ func (w *selfWalker) keyNames(base paths.Path, t reflect.Type) map[any]string {
 }
 
 // collectKeyNames adds the keys of the mapping node, and of the mappings
-// it merges, to names, as [selfWalker.keyNames] describes. The seen set
-// guards against merge cycles.
+// it merges, to names, as [selfWalker.keyNames] describes.
+//
+// The walk goes in reverse document order, so the first name it sets
+// for a value is the one the decode keeps. The first time the walk
+// reaches a mapping is that mapping's last occurrence in document
+// order, so the seen set skips only occurrences whose names would lose,
+// and it also stops merge cycles.
 func (w *selfWalker) collectKeyNames(
 	node ast.Node, t reflect.Type, names map[any]string, seen map[*ast.MappingNode]bool,
 ) {
@@ -1140,7 +1145,7 @@ func (w *selfWalker) collectKeyNames(
 	_, err := w.pathResolver().MergeSources(mapping)
 	merges := err == nil
 
-	for _, entry := range mapping.Values {
+	for _, entry := range slices.Backward(mapping.Values) {
 		if entry == nil || entry.Key == nil {
 			continue
 		}
@@ -1162,7 +1167,7 @@ func (w *selfWalker) collectKeyNames(
 			continue
 		}
 
-		for _, src := range sources {
+		for _, src := range slices.Backward(sources) {
 			w.collectKeyNames(src, t, names, seen)
 		}
 	}
@@ -1189,7 +1194,8 @@ func (w *selfWalker) keyDecoder() *yaml.Decoder {
 // to, as [nameKey] keys it. A child selector matches a key by that text,
 // so a path built from names resolves to the entry. A key KeyName cannot
 // name, one that does not decode, whose decode panics, or whose value
-// cannot key a map, adds nothing. The key decodes from the node
+// cannot key a map, adds nothing, and neither does a key whose value
+// names already holds. The key decodes from the node
 // [selfWalker.keyValueNode] gives it.
 //
 // As go-yaml does, addKeyName decodes a key of a pointer type t as the
@@ -1222,7 +1228,12 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 		return
 	}
 
-	if k, ok := nameKey(decoded.Elem()); ok {
+	k, ok := nameKey(decoded.Elem())
+	if !ok {
+		return
+	}
+
+	if _, set := names[k]; !set {
 		names[k] = name
 	}
 }

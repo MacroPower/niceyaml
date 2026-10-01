@@ -1336,6 +1336,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				input: "b: &b {16: {price: 1}}\nm: {<<: *b, 16: {price: -1}}\n",
 				want:  "2:25: $.m.16.price: negative price",
 			},
+			"merge source repeated after a source that merges it": {
+				input: "a: &a {16: {price: -1}}\nb: &b {<<: *a, 0x10: {price: 1}}\nm: {<<: [*b, *a]}\n",
+				want:  "1:20: $.m.16.price: negative price",
+			},
 		}
 
 		for name, tc := range precedenceTcs {
