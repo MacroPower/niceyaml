@@ -284,9 +284,10 @@ func (b *buffers) recurse(bStart, bEnd, aStart, aEnd int) {
 // diagonal x-y. A forward walk starts at (0, 0) and a backward walk at the
 // ends of both inputs. Each step, each walk reaches one edit further on
 // every diagonal it can, then follows equal lines as far as they go. The
-// search stops where the two walks meet on a diagonal. When a walk can
-// reach a diagonal by a deletion or by an insertion that go equally far,
-// it takes the deletion.
+// search stops where the two walks meet on a diagonal. On each diagonal, a
+// walk takes whichever of the deletion and the insertion reaches further
+// along it. When both reach the same point, the walk records only that
+// point, so the choice has no effect.
 //
 // The caller must trim the lines both inputs share at the start and at the
 // end, so both are non-empty and need at least two edits.
