@@ -1379,6 +1379,148 @@ func TestViewport_ContainerStyleKeepsTopLine(t *testing.T) {
 	assert.Contains(t, top, "k20:")
 }
 
+func TestViewport_ResizeClampsOffsetAtOnce(t *testing.T) {
+	t.Parallel()
+
+	// Each resize clamps the offset to the content area it leaves, so a
+	// larger area between two resizes lowers the offset whether or not
+	// anything reads it in between.
+	var src strings.Builder
+
+	for i := range 30 {
+		fmt.Fprintf(&src, "k%d: v\n", i)
+	}
+
+	// A top padding of 90 rows leaves a content area 10 rows tall in a
+	// viewport 100 rows tall, and keeps the content width.
+	padded := lipgloss.NewStyle().PaddingTop(90)
+
+	// A border leaves a content area 10 rows tall in a viewport 12 rows
+	// tall, and narrows the content width.
+	bordered := lipgloss.NewStyle().Border(lipgloss.NormalBorder())
+
+	tcs := map[string]struct {
+		style  lipgloss.Style
+		resize func(m *yamlviewport.Model)
+		height int
+		want   int
+	}{
+		"taller": {
+			height: 10,
+			resize: func(m *yamlviewport.Model) {
+				m.SetHeight(100)
+				m.SetHeight(10)
+			},
+			want: 0,
+		},
+		"taller with a read between": {
+			height: 10,
+			resize: func(m *yamlviewport.Model) {
+				m.SetHeight(100)
+				m.AtTop()
+				m.SetHeight(10)
+			},
+			want: 0,
+		},
+		"taller with a view between": {
+			height: 10,
+			resize: func(m *yamlviewport.Model) {
+				m.SetHeight(100)
+
+				_ = m.View()
+
+				m.SetHeight(10)
+			},
+			want: 0,
+		},
+		"partly taller": {
+			height: 10,
+			resize: func(m *yamlviewport.Model) {
+				m.SetHeight(15)
+				m.SetHeight(10)
+			},
+			want: 15,
+		},
+		"taller at a new width": {
+			height: 10,
+			resize: func(m *yamlviewport.Model) {
+				m.SetWidth(70)
+				m.SetHeight(100)
+				m.SetHeight(10)
+			},
+			want: 0,
+		},
+		"taller at a new width with a read between": {
+			height: 10,
+			resize: func(m *yamlviewport.Model) {
+				m.SetWidth(70)
+				m.SetHeight(100)
+				m.AtTop()
+				m.SetHeight(10)
+			},
+			want: 0,
+		},
+		"container frame shrinks": {
+			style:  padded,
+			height: 100,
+			resize: func(m *yamlviewport.Model) {
+				m.SetContainerStyle(lipgloss.NewStyle())
+				m.SetContainerStyle(padded)
+			},
+			want: 0,
+		},
+		"container frame shrinks with a read between": {
+			style:  padded,
+			height: 100,
+			resize: func(m *yamlviewport.Model) {
+				m.SetContainerStyle(lipgloss.NewStyle())
+				m.AtTop()
+				m.SetContainerStyle(padded)
+			},
+			want: 0,
+		},
+		"container border removed and restored": {
+			style:  bordered,
+			height: 12,
+			resize: func(m *yamlviewport.Model) {
+				m.SetContainerStyle(lipgloss.NewStyle())
+				m.SetContainerStyle(bordered)
+			},
+			want: 18,
+		},
+		"container border removed and restored with a read between": {
+			style:  bordered,
+			height: 12,
+			resize: func(m *yamlviewport.Model) {
+				m.SetContainerStyle(lipgloss.NewStyle())
+				m.AtTop()
+				m.SetContainerStyle(bordered)
+			},
+			want: 18,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(
+				yamlviewport.WithPrinter(testPrinter()),
+				yamlviewport.WithContainerStyle(tc.style),
+			)
+			m.SetWidth(80)
+			m.SetHeight(tc.height)
+			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
+			m.SetYOffset(20)
+			require.Equal(t, 20, m.YOffset())
+
+			tc.resize(&m)
+
+			assert.Equal(t, tc.want, m.YOffset())
+		})
+	}
+}
+
 func TestViewport_SearchBeforeSize(t *testing.T) {
 	t.Parallel()
 

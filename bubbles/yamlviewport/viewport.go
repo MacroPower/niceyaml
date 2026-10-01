@@ -388,9 +388,13 @@ func (m *Model) Height() int {
 // SetHeight sets the height of the viewport and clamps the scroll offsets to
 // the new bounds.
 func (m *Model) SetHeight(h int) {
-	// Row counts do not depend on the height, so the cache stays, and
-	// ensureRows clamps the offsets on their next read.
 	m.height = h
+
+	// Row counts do not depend on the height, so the cache stays. The
+	// offsets clamp now rather than on their next read, since a read
+	// between two resizes would otherwise decide where the second one
+	// leaves the view.
+	m.ensureRows()
 }
 
 // Width returns the width of the viewport.
@@ -854,8 +858,10 @@ func (m *Model) ContainerStyle() lipgloss.Style {
 
 // SetContainerStyle sets the container style applied to the viewport frame.
 // The frame size changes the content area, so the scroll offsets clamp to
-// it. A style that leaves the content width as it is, such as one that
-// changes only a border color, leaves the view where it is.
+// it. A style that changes the content width keeps the same line at the
+// top, as far as that clamp allows. A style that leaves the content width as
+// it is, such as one that changes only a border color or the vertical
+// padding, moves the view only as far as that clamp does.
 //
 //nolint:gocritic // hugeParam: Copying.
 func (m *Model) SetContainerStyle(s lipgloss.Style) {
@@ -865,8 +871,11 @@ func (m *Model) SetContainerStyle(s lipgloss.Style) {
 	m.style = s
 
 	// Row counts depend on the style only through the pane width, so an
-	// unchanged pane width keeps the cache, as SetHeight does.
+	// unchanged pane width keeps the cache. The vertical frame still sets
+	// the content height, so the offsets clamp now, as SetHeight does.
 	if m.paneWidth() == old {
+		m.ensureRows()
+
 		return
 	}
 
@@ -877,6 +886,11 @@ func (m *Model) SetContainerStyle(s lipgloss.Style) {
 
 	m.style = s
 	m.relayout()
+
+	// Then ensureRows restores the top line in the new layout and clamps
+	// the offsets to the new content area right away, as the branch above
+	// does.
+	m.ensureRows()
 }
 
 // NextRevision moves to the next revision in history. At the latest
