@@ -12,11 +12,11 @@ import (
 
 var (
 	// The interfaces through which the go-yaml decoder hands a value the
-	// text of its node, with each alias in the node written out in full.
-	textUnmarshalerTypes = []reflect.Type{
-		reflect.TypeFor[yaml.BytesUnmarshaler](),
+	// YAML bytes of its node, with each alias in the node written out in
+	// full.
+	bytesUnmarshalerTypes = []reflect.Type{
 		reflect.TypeFor[yaml.BytesUnmarshalerContext](),
-		reflect.TypeFor[encoding.TextUnmarshaler](),
+		reflect.TypeFor[yaml.BytesUnmarshaler](),
 	}
 
 	// The interfaces through which the go-yaml decoder hands a value a
@@ -24,9 +24,20 @@ var (
 	// as one that reads text. A walk of the type cannot see that type, so
 	// a decode into one of these may read text too.
 	callbackUnmarshalerTypes = []reflect.Type{
-		reflect.TypeFor[yaml.InterfaceUnmarshaler](),
 		reflect.TypeFor[yaml.InterfaceUnmarshalerContext](),
+		reflect.TypeFor[yaml.InterfaceUnmarshaler](),
 	}
+
+	// The interfaces through which the go-yaml decoder hands a value its
+	// node, so the value reads no text.
+	nodeUnmarshalerTypes = []reflect.Type{
+		reflect.TypeFor[yaml.NodeUnmarshaler](),
+		reflect.TypeFor[yaml.NodeUnmarshalerContext](),
+	}
+
+	// The interface through which the go-yaml decoder hands a value the
+	// text of its node, with each alias in the node written out in full.
+	textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
 
 	// The go-yaml decoder parses a [time.Time] from the value of a scalar
 	// before it looks for an UnmarshalText method, so it reads no text. A
@@ -46,8 +57,12 @@ var (
 // UnmarshalYAML method that takes a decode function counts too, since it
 // can decode the node into any type, including one that reads text. A
 // decode into such a type runs [CheckDecodeText] as well as
-// [CheckDecode]. The decoder parses a [time.Time] from the value of its
-// scalar, so it reads no text, though its pointer has UnmarshalText.
+// [CheckDecode]. An UnmarshalYAML method that takes the node reads no
+// text, and the decoder calls it ahead of an UnmarshalText method. The
+// decoder reaches none of the fields or elements of a type with such a
+// method, so none of them counts. The decoder parses a [time.Time] from
+// the value of its scalar, so it reads no text, though its pointer has
+// UnmarshalText.
 func DecodesText(t reflect.Type) bool {
 	if cached, ok := decodesText.Load(t); ok {
 		if text, ok := cached.(bool); ok {
@@ -65,15 +80,24 @@ func DecodesText(t reflect.Type) bool {
 // types in seen, which it has checked already, so a recursive type ends
 // the walk.
 func reachesText(t reflect.Type, seen map[reflect.Type]bool) bool {
-	if seen[t] || t == timeType {
+	if seen[t] {
 		return false
 	}
 
 	seen[t] = true
 
 	ptr := reflect.PointerTo(t)
-	if slices.ContainsFunc(textUnmarshalerTypes, ptr.Implements) ||
-		slices.ContainsFunc(callbackUnmarshalerTypes, ptr.Implements) {
+
+	// The decoder looks for these methods in the order of the cases
+	// below, and decodes t through the first one it finds in place of
+	// the fields or elements of t.
+	switch {
+	case slices.ContainsFunc(bytesUnmarshalerTypes, ptr.Implements),
+		slices.ContainsFunc(callbackUnmarshalerTypes, ptr.Implements):
+		return true
+	case slices.ContainsFunc(nodeUnmarshalerTypes, ptr.Implements), t == timeType:
+		return false
+	case ptr.Implements(textUnmarshalerType):
 		return true
 	}
 

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -328,6 +329,30 @@ type funcContextValue struct{}
 
 func (*funcContextValue) UnmarshalYAML(context.Context, func(any) error) error { return nil }
 
+// nodeValue decodes itself from its node and holds a text field that
+// go-yaml never decodes into.
+type nodeValue struct {
+	Addr netip.Addr
+}
+
+func (*nodeValue) UnmarshalYAML(ast.Node) error { return nil }
+
+// nodeContextValue is [nodeValue] with an UnmarshalYAML that takes a
+// context.
+type nodeContextValue struct {
+	Addr netip.Addr
+}
+
+func (*nodeContextValue) UnmarshalYAML(context.Context, ast.Node) error { return nil }
+
+// nodeTextValue decodes itself from its node. Go-yaml calls its
+// UnmarshalYAML ahead of its UnmarshalText.
+type nodeTextValue struct{}
+
+func (*nodeTextValue) UnmarshalYAML(ast.Node) error { return nil }
+
+func (*nodeTextValue) UnmarshalText([]byte) error { return nil }
+
 // textChain refers to itself and holds a text field below the cycle.
 type textChain struct {
 	Next *textChain
@@ -415,6 +440,21 @@ func TestDecodesText(t *testing.T) {
 		},
 		"recursive type without a text field": {
 			typ: reflect.TypeFor[plainChain](),
+		},
+		"node unmarshaler with a text field": {
+			typ: reflect.TypeFor[nodeValue](),
+		},
+		"node unmarshaler with a context and a text field": {
+			typ: reflect.TypeFor[nodeContextValue](),
+		},
+		"node and text unmarshaler": {
+			typ: reflect.TypeFor[nodeTextValue](),
+		},
+		"struct field node unmarshaler": {
+			typ: reflect.TypeFor[struct {
+				Name string
+				Node *nodeTextValue
+			}](),
 		},
 		"plain types": {
 			typ: reflect.TypeFor[map[string][]string](),

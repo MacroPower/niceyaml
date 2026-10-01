@@ -8174,6 +8174,19 @@ func (f *forwardTextContext) UnmarshalYAML(_ context.Context, unmarshal func(any
 	return err
 }
 
+// nodeDecoded decodes itself from the node go-yaml hands its
+// UnmarshalYAML. Go-yaml calls that method ahead of its UnmarshalText
+// and decodes nothing into its text field.
+type nodeDecoded struct {
+	Addr netip.Addr
+}
+
+func (*nodeDecoded) UnmarshalYAML(ast.Node) error { return nil }
+
+func (*nodeDecoded) UnmarshalText([]byte) error {
+	return errors.New("unexpected UnmarshalText call")
+}
+
 func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 	t.Parallel()
 
@@ -8252,6 +8265,19 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 				})
 			},
 			err: niceyaml.ErrExcessiveAliasing,
+		},
+		"node unmarshaler": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new(nodeDecoded) },
+		},
+		"struct field node unmarshaler": {
+			input: manyAliases,
+			target: func() any {
+				return new(struct {
+					Kind nodeDecoded `yaml:"kind"`
+				})
+			},
 		},
 		"string elements": {
 			input:  manyAliases,

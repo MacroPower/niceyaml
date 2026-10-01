@@ -1651,11 +1651,14 @@ func WithReferences(data ...[]byte) DecodeOption {
 // copy of a scalar weighs its length in bytes. An UnmarshalYAML method
 // that takes a decode function can decode the node into any type it
 // picks, so DecodeInto counts the document as text for a type with such
-// a method too. The decoder reads a [time.Time] from its value, so it
-// adds no such count. The count sees only the types in v, so it misses
-// text that a go-yaml option hands to other code, such as
-// [yaml.CustomUnmarshaler] or [yaml.UseJSONUnmarshaler].
-// [WithAliasLimit] turns both counts off.
+// a method too. An UnmarshalYAML method that takes the node reads it as
+// it is, and the decoder calls it ahead of an UnmarshalText method. A
+// type with such a method adds no such count, and neither do the types
+// of its fields, which the decoder never reaches. The decoder reads a
+// [time.Time] from its value, so it adds no such count either. The count
+// sees only the types in v, so it misses text that a go-yaml option
+// hands to other code, such as [yaml.CustomUnmarshaler] or
+// [yaml.UseJSONUnmarshaler]. [WithAliasLimit] turns both counts off.
 //
 // An alias inside the node resolves against the anchors of the whole
 // document, to the anchor of its name defined last before the alias,
