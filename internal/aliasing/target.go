@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+
+	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 )
 
 var (
@@ -110,7 +112,7 @@ func reachesText(t reflect.Type, seen map[reflect.Type]bool) bool {
 		return reachesText(t.Key(), seen) || reachesText(t.Elem(), seen)
 	case reflect.Struct:
 		for field := range t.Fields() {
-			if !skippedField(field) && reachesText(field.Type, seen) {
+			if _, _, skip := yamlfield.Name(field); !skip && reachesText(field.Type, seen) {
 				return true
 			}
 		}
@@ -120,21 +122,4 @@ func reachesText(t reflect.Type, seen map[reflect.Type]bool) bool {
 	default:
 		return false
 	}
-}
-
-// skippedField reports whether the go-yaml decoder leaves field alone. It
-// skips an unexported field unless the struct embeds it, and it skips a
-// field whose whole yaml tag is "-", or whose whole json tag is "-" when
-// the field has no yaml tag.
-func skippedField(field reflect.StructField) bool {
-	if !field.IsExported() && !field.Anonymous {
-		return true
-	}
-
-	tag := field.Tag.Get("yaml")
-	if tag == "" {
-		tag = field.Tag.Get("json")
-	}
-
-	return tag == "-"
 }
