@@ -918,6 +918,143 @@ func TestDocument_Decode(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("comment on a line of its own inside a flow collection", func(t *testing.T) {
+		t.Parallel()
+
+		// The go-yaml parser rejects such a comment before a key of a flow
+		// mapping, and before a ",", ":", "]", or "}", when it keeps
+		// comments. It reads one before any other node as the head comment
+		// of that node, so the tree keeps it. Each case lists the value of
+		// every document and the comment the tree keeps, if any.
+		tcs := map[string]struct {
+			input string
+			kept  string
+			want  []any
+		}{
+			"comment at the start of a flow mapping": {
+				input: "config: {\n  # production\n  name: prod\n}\n",
+				want:  []any{map[string]any{"config": map[string]any{"name": "prod"}}},
+			},
+			"comment between flow mapping entries": {
+				input: "a: {\n  b: 1,\n  # c\n  c: 2\n}\n",
+				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1), "c": uint64(2)}}},
+			},
+			"comment before a comma in a flow mapping": {
+				input: "a: {\n  b: 1\n  # c\n  , c: 2\n}\n",
+				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1), "c": uint64(2)}}},
+			},
+			"comments before a closing brace": {
+				input: "a: {\n  b: 1\n  # c\n  # d\n}\n",
+				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
+			},
+			"comment after a trailing comma in a flow mapping": {
+				input: "a: {\n  b: 1,\n  # c\n}\n",
+				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
+			},
+			"comment in an empty flow mapping": {
+				input: "a: {\n  # c\n}\n",
+				want:  []any{map[string]any{"a": map[string]any{}}},
+			},
+			"comment between an explicit key and its colon": {
+				input: "a: {\n  ? b\n  # c\n  : 1\n}\n",
+				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
+			},
+			"comment after an explicit key indicator in a flow mapping": {
+				input: "a: {? \n  # c\n  b : 1, c: d}\n",
+				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1), "c": "d"}}},
+			},
+			"comment after an explicit key indicator in a flow sequence": {
+				input: "a: [? \n  # c\n  b : 1, c]\n",
+				want:  []any{map[string]any{"a": []any{map[string]any{"b": uint64(1)}, "c"}}},
+			},
+			"comments after an explicit key indicator in a root flow sequence": {
+				input: "[? \n  # c\n  # d\n  b : 1, c]\n",
+				want:  []any{[]any{map[string]any{"b": uint64(1)}, "c"}},
+			},
+			"comment before a closing bracket": {
+				input: "a: [\n  1\n  # c\n]\n",
+				want:  []any{map[string]any{"a": []any{uint64(1)}}},
+			},
+			"comment before a comma in a flow sequence": {
+				input: "a: [\n  1\n  # c\n  , 2\n]\n",
+				want:  []any{map[string]any{"a": []any{uint64(1), uint64(2)}}},
+			},
+			"comment after a trailing comma in a flow sequence": {
+				input: "a: [\n  1,\n  # c\n]\n",
+				want:  []any{map[string]any{"a": []any{uint64(1)}}},
+			},
+			"comment in an empty flow sequence": {
+				input: "a: [\n  # c\n]\n",
+				want:  []any{map[string]any{"a": []any{}}},
+			},
+			"comment below a comment on the line of an entry": {
+				input: "a: [\n  1 # c\n  # d\n]\n",
+				kept:  "# c",
+				want:  []any{map[string]any{"a": []any{uint64(1)}}},
+			},
+			"flow mapping in a flow sequence": {
+				input: "a: [1, {\n  # c\n  b: 2\n}]\n",
+				want:  []any{map[string]any{"a": []any{uint64(1), map[string]any{"b": uint64(2)}}}},
+			},
+			"flow mapping at the root": {
+				input: "{\n  # c\n  a: 1\n}\n",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"crlf line endings": {
+				input: "config: {\r\n  # production\r\n  name: prod\r\n}\r\n",
+				want:  []any{map[string]any{"config": map[string]any{"name": "prod"}}},
+			},
+			"second document": {
+				input: "a: {\n  # c\n  b: 1\n}\n---\nx: [\n  1\n  # d\n]\n",
+				want: []any{
+					map[string]any{"a": map[string]any{"b": uint64(1)}},
+					map[string]any{"x": []any{uint64(1)}},
+				},
+			},
+			"comment after an opening bracket": {
+				input: "a: [\n  # c\n  1\n]\n",
+				kept:  "# c",
+				want:  []any{map[string]any{"a": []any{uint64(1)}}},
+			},
+			"comment between flow sequence entries": {
+				input: "a: [\n  1,\n  # c\n  2\n]\n",
+				kept:  "# c",
+				want:  []any{map[string]any{"a": []any{uint64(1), uint64(2)}}},
+			},
+			"comment between a colon and its value": {
+				input: "a: {\n  b:\n  # c\n  1\n}\n",
+				kept:  "# c",
+				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				src := niceyaml.NewSourceFromString(tc.input)
+
+				file, err := src.File()
+				require.NoError(t, err)
+
+				if tc.kept != "" {
+					assert.Contains(t, file.String(), tc.kept)
+				}
+
+				docs, err := src.Documents()
+				require.NoError(t, err)
+
+				got := make([]any, len(docs))
+				for i, d := range docs {
+					got[i], err = d.Decode[any](t.Context())
+					require.NoError(t, err)
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
 }
 
 func TestDocument_Decode_TypeMismatch(t *testing.T) {
@@ -1321,6 +1458,10 @@ func TestDocument_Preamble(t *testing.T) {
 		"comment between a directive and its header": {
 			input: "%YAML 1.2\n# note\n---\na: 1\n",
 			want:  []doc{{preamble: "%YAML 1.2\n# note\n---\n", content: "a: 1\n"}},
+		},
+		"comment inside a flow mapping": {
+			input: "{\n  # note\n  a: 1\n}\n",
+			want:  []doc{{content: "{\n  # note\n  a: 1\n}\n"}},
 		},
 	}
 
