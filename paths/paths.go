@@ -277,15 +277,22 @@ func (p Path) String() string {
 // so a call that edits a tree, such as [yaml.Path.ReplaceWithNode], runs on
 // a tree of the caller's own.
 //
-// The result holds each child name as its raw text, so
-// [yaml.Path.FilterNode] and [yaml.Path.ReplaceWithNode] compare keys with
-// the same names as the Path, with two exceptions. FilterNode strips single
-// quotes from around a name and quotes from around the text of a key, so
-// Child("'id'") may select the key id. A path has no goccy/go-yaml string
-// form when it holds an empty name, a name that is not valid UTF-8, or a
-// recursive name with `.`, `[`, `]`, `$`, or `*`. YAMLPath builds such a
-// path with [yaml.PathBuilder], whose ReplaceWithNode skips any child name
-// that holds `.` or `*`.
+// The result holds each child name as its raw text. [yaml.Path.FilterNode]
+// and [yaml.Path.ReplaceWithNode] compare that name with the text of the
+// first token of each key, where [Path.Node] compares it with the name
+// [Resolver.KeyName] gives. A key with an anchor, a tag, an alias, an
+// explicit `?`, or a block scalar header matches the text of that
+// indicator, such as `&`, `!!str`, `*`, `?`, or `|-`, rather than its name.
+// Neither function sees the entries a `<<` merge key brings in. Among
+// duplicate keys, FilterNode selects the first and ReplaceWithNode
+// replaces them all, where [Path.Node] selects the last.
+//
+// FilterNode also strips single quotes from around a name and quotes from
+// around the text of a key, so Child("'id'") may select the key id. A path
+// has no goccy/go-yaml string form when it holds an empty name, a name that
+// is not valid UTF-8, or a recursive name with `.`, `[`, `]`, `$`, or `*`.
+// YAMLPath builds such a path with [yaml.PathBuilder], whose
+// ReplaceWithNode skips any child name that holds `.` or `*`.
 //
 // The String of the result is the goccy/go-yaml form, which differs from
 // [Path.String] for names with reserved characters, and [yaml.PathString]

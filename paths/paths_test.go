@@ -820,6 +820,115 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		_, err = path.Node(file.Docs[0])
 		require.ErrorIs(t, err, paths.ErrNotFound)
 	})
+
+	t.Run("goccy matches a decorated key by its indicator", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input     string
+			indicator string
+		}{
+			"anchored key": {
+				input:     "m:\n  &a k: v\n",
+				indicator: "&",
+			},
+			"tagged key": {
+				input:     "m:\n  !!str k: v\n",
+				indicator: "!!str",
+			},
+			"alias key": {
+				input:     "b: &k k\nm:\n  *k : v\n",
+				indicator: "*",
+			},
+			"explicit key": {
+				input:     "m:\n  ? k\n  : v\n",
+				indicator: "?",
+			},
+			"explicit block scalar key": {
+				input:     "m:\n  ? |-\n    k\n  : v\n",
+				indicator: "?",
+			},
+			"block scalar key without ?": {
+				input:     "m:\n  |-\n    k\n  : v\n",
+				indicator: "|-",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				file, err := parser.ParseBytes([]byte(tc.input), 0)
+				require.NoError(t, err)
+
+				doc := file.Docs[0]
+
+				byName := paths.Root().Child("m", "k")
+
+				node, err := byName.Node(doc)
+				require.NoError(t, err)
+				assert.Equal(t, "v", node.GetToken().Value)
+
+				node, err = byName.YAMLPath().FilterNode(doc.Body)
+				require.NoError(t, err)
+				assert.Nil(t, node)
+
+				byIndicator := paths.Root().Child("m", tc.indicator)
+
+				_, err = byIndicator.Node(doc)
+				require.ErrorIs(t, err, paths.ErrNotFound)
+
+				node, err = byIndicator.YAMLPath().FilterNode(doc.Body)
+				require.NoError(t, err)
+				require.NotNil(t, node, "node not found")
+				assert.Equal(t, "v", node.GetToken().Value)
+			})
+		}
+	})
+
+	t.Run("goccy skips merged entries", func(t *testing.T) {
+		t.Parallel()
+
+		file, err := parser.ParseBytes([]byte("base: &b\n  k: v\nm:\n  <<: *b\n"), 0)
+		require.NoError(t, err)
+
+		path := paths.Root().Child("m", "k")
+
+		node, err := path.Node(file.Docs[0])
+		require.NoError(t, err)
+		assert.Equal(t, "v", node.GetToken().Value)
+
+		node, err = path.YAMLPath().FilterNode(file.Docs[0].Body)
+		require.NoError(t, err)
+		assert.Nil(t, node)
+	})
+
+	t.Run("goccy selects the first duplicate and replaces all", func(t *testing.T) {
+		t.Parallel()
+
+		input := "m:\n  k: first\n  k: last\n"
+
+		file, err := parser.ParseBytes([]byte(input), 0, parser.AllowDuplicateMapKey())
+		require.NoError(t, err)
+
+		path := paths.Root().Child("m", "k")
+
+		node, err := path.Node(file.Docs[0])
+		require.NoError(t, err)
+		assert.Equal(t, "last", node.GetToken().Value)
+
+		node, err = path.YAMLPath().FilterNode(file.Docs[0].Body)
+		require.NoError(t, err)
+		require.NotNil(t, node, "node not found")
+		assert.Equal(t, "first", node.GetToken().Value)
+
+		replacement, err := parser.ParseBytes([]byte("new\n"), 0)
+		require.NoError(t, err)
+
+		err = path.YAMLPath().ReplaceWithNode(file, replacement.Docs[0].Body)
+		require.NoError(t, err)
+		assert.Equal(t, "m:\n  k: new\n  k: new\n", file.String())
+	})
 }
 
 func TestPath_Token(t *testing.T) {
