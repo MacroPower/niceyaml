@@ -553,8 +553,8 @@ func TestDocument_Decode(t *testing.T) {
 				want:  []any{"y"},
 			},
 			// The parser takes the comment below an anchor with no value
-			// as the value of the anchor, and rejects the anchor without
-			// it.
+			// that ends its document as the value of the anchor, and
+			// rejects the anchor without it.
 			"anchor with no value": {
 				input: "&a\n# c\n",
 				want:  []any{nil},
@@ -566,6 +566,106 @@ func TestDocument_Decode(t *testing.T) {
 			"anchor with no value above a header": {
 				input: "&a\n# c\n---\nb\n",
 				want:  []any{nil, "b"},
+			},
+			// With the comment, the parser would take the node below it
+			// as the value of the anchor.
+			"anchor with no value above a mapping key": {
+				input: "a: &x\n# c\nb: 1\n",
+				want:  []any{map[string]any{"a": nil, "b": uint64(1)}},
+			},
+			"anchor with no value above a sequence entry": {
+				input: "- &x\n# c\n- 1\n",
+				want:  []any{[]any{nil, uint64(1)}},
+			},
+			"anchor with no value in a nested mapping": {
+				input: "a:\n  k: &x\n  # c\n  l: 1\nm: 2\n",
+				want: []any{map[string]any{
+					"a": map[string]any{"k": nil, "l": uint64(1)},
+					"m": uint64(2),
+				}},
+			},
+			"anchor with no value above a dedent": {
+				input: "a:\n  b: &x\n  # c\nc: 1\n",
+				want: []any{map[string]any{
+					"a": map[string]any{"b": nil},
+					"c": uint64(1),
+				}},
+			},
+			"anchor with no value above blank lines and comments": {
+				input: "a: &x\n\n# c\n# d\n\nb: 1\n",
+				want:  []any{map[string]any{"a": nil, "b": uint64(1)}},
+			},
+			"anchor with no value in a mapping in a sequence": {
+				input: "- a: &x\n  # c\n  b: 1\n",
+				want:  []any{[]any{map[string]any{"a": nil, "b": uint64(1)}}},
+			},
+			"anchor with no value in a nested sequence": {
+				input: "- - &x\n  # c\n  - 1\n- 2\n",
+				want:  []any{[]any{[]any{nil, uint64(1)}, uint64(2)}},
+			},
+			// Below a comment left of its "-", the parser gives the anchor
+			// a null value. Without the comment, it takes the key in the
+			// column of that "-" as the value of the anchor.
+			"anchor with no value in a sequence in the column of its key": {
+				input: "p:\n  q:\n  - &x\n# c\n  n: 1\n",
+				want: []any{map[string]any{
+					"p": map[string]any{"q": []any{nil}, "n": uint64(1)},
+				}},
+			},
+			"anchor with no value in a sequence in the column of a key of an entry": {
+				input: "- p:\n  - &x\n# c\n  n: 1\n",
+				want:  []any{[]any{map[string]any{"p": []any{nil}, "n": uint64(1)}}},
+			},
+			// The anchor still takes the indented node below the comment.
+			"anchor above a comment and its nested value": {
+				input: "a: &x\n# c\n  b: 1\nc: *x\n",
+				want: []any{map[string]any{
+					"a": map[string]any{"b": uint64(1)},
+					"c": map[string]any{"b": uint64(1)},
+				}},
+			},
+			// Below a comment left of the key or "-" that the anchor
+			// directly follows on its line, the parser gives the anchor a
+			// null value and rejects the value of the anchor.
+			"comment left of the key above a sequence in its column": {
+				input: "a:\n  b: &x\n# c\n  - 1\n",
+				want:  []any{map[string]any{"a": map[string]any{"b": []any{uint64(1)}}}},
+			},
+			"comment left of the key above an indented value": {
+				input: "a:\n  b: &x\n# c\n    c: 1\n",
+				want: []any{map[string]any{
+					"a": map[string]any{"b": map[string]any{"c": uint64(1)}},
+				}},
+			},
+			"comment left of the entry above an indented value": {
+				input: "- - &x\n# c\n    - 1\n",
+				want:  []any{[]any{[]any{[]any{uint64(1)}}}},
+			},
+			"comment left of the key below a comment on its line": {
+				input: "a:\n  b: &x # c\n# d\n    c: 1\n",
+				want: []any{map[string]any{
+					"a": map[string]any{"b": map[string]any{"c": uint64(1)}},
+				}},
+			},
+			// The first comment on a line of its own decides for the
+			// comments below it.
+			"comment left of the key below a comment in its column": {
+				input: "a:\n  b: &x\n  # c\n# d\n    c: 1\n",
+				want: []any{map[string]any{
+					"a": map[string]any{"b": map[string]any{"c": uint64(1)}},
+				}},
+			},
+			"comment in the column of the key below a comment left of it": {
+				input: "a:\n  b: &x\n# c\n    # d\n    c: 1\n",
+				want: []any{map[string]any{
+					"a": map[string]any{"b": map[string]any{"c": uint64(1)}},
+				}},
+			},
+			// The parser accepts a comment left of the "?" of an explicit
+			// key above the value of the anchor.
+			"comment left of an explicit key above an indented value": {
+				input: "  ? a\n  : &x\n# c\n    b: 2\n",
+				want:  []any{map[string]any{"a": map[string]any{"b": uint64(2)}}},
 			},
 		}
 
@@ -2824,6 +2924,16 @@ func TestDocument_At(t *testing.T) {
 		got, err := yamltest.At(t, dd, paths.Root().Child("meta")).Decode[meta](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, meta{Name: "app"}, got)
+	})
+
+	t.Run("key below a comment under an anchor with no value", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "a: &x\n# c\nb: 1\n")
+
+		got, err := yamltest.At(t, dd, paths.Root().Child("b")).Decode[int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, 1, got)
 	})
 
 	t.Run("missing path returns ErrNotFound", func(t *testing.T) {
@@ -5359,6 +5469,101 @@ func TestDocument_At_Scope(t *testing.T) {
 				}
 
 				assert.Equal(t, tc.tokens, got)
+			})
+		}
+	})
+
+	t.Run("scope on an anchored value covers the comment above it", func(t *testing.T) {
+		t.Parallel()
+
+		// Where the parser reads the value below a comment between an
+		// anchor and that value, the tree keeps the comment, as it does
+		// without the anchor.
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+			span  position.Span
+		}{
+			"mapping value": {
+				input: "base: &base\n  # c\n  restart: always\n",
+				path:  paths.Root().Child("base"),
+				span:  position.NewSpan(1, 3),
+			},
+			"sequence value": {
+				input: "base: &base\n  # c\n  - 1\n",
+				path:  paths.Root().Child("base"),
+				span:  position.NewSpan(1, 3),
+			},
+			"sequence in the column of the key": {
+				input: "base: &base\n# c\n- 1\n",
+				path:  paths.Root().Child("base"),
+				span:  position.NewSpan(1, 3),
+			},
+			"value of an anchored key": {
+				input: "&k a: &x\n# c\n  b: 1\n",
+				path:  paths.Root().Child("a"),
+				span:  position.NewSpan(1, 3),
+			},
+			"value of an explicit key": {
+				input: "? a\n: &x\n# c\n  b: 2\n",
+				path:  paths.Root().Child("a"),
+				span:  position.NewSpan(2, 4),
+			},
+			"value in a flow mapping": {
+				input: "{a: &x\n# c\n b}\n",
+				path:  paths.Root().Child("a"),
+				span:  position.NewSpan(1, 3),
+			},
+			"sequence entry": {
+				input: "- &e\n  # c\n  name: x\n",
+				path:  paths.Root().Index(0),
+				span:  position.NewSpan(1, 3),
+			},
+			"root": {
+				input: "&x\n# c\nb: 1\n",
+				path:  paths.Root(),
+				span:  position.NewSpan(1, 3),
+			},
+			"anchor below the key and comment left of the key": {
+				input: "x:\n  a:\n    &x\n# c\n    b: 1\n",
+				path:  paths.Root().Child("x", "a"),
+				span:  position.NewSpan(3, 5),
+			},
+			"sequence below an anchor below the key": {
+				input: "x:\n  a:\n    &x\n# c\n  - 1\n",
+				path:  paths.Root().Child("x", "a"),
+				span:  position.NewSpan(3, 5),
+			},
+			"anchor below the key in a sequence entry": {
+				input: "- a:\n    &x\n# c\n    b: 1\n",
+				path:  paths.Root().Index(0).Child("a"),
+				span:  position.NewSpan(2, 4),
+			},
+			"anchor below the dash and comment left of the dash": {
+				input: "x:\n  -\n    &x\n# c\n    b: 1\n",
+				path:  paths.Root().Child("x").Index(0),
+				span:  position.NewSpan(3, 5),
+			},
+			"anchor after a tag and comment left of the key": {
+				input: "x:\n  a: !t &x\n# c\n    b: 1\n",
+				path:  paths.Root().Child("x", "a"),
+				span:  position.NewSpan(1, 4),
+			},
+			"anchor after a tag and comment left of the dash": {
+				input: "x:\n  - !t &x\n# c\n    b: 1\n",
+				path:  paths.Root().Child("x").Index(0),
+				span:  position.NewSpan(1, 4),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				assert.Equal(t, tc.span, yamltest.At(t, dd, tc.path).Span())
+				assert.Contains(t, dd.DocumentAST().String(), "# c")
 			})
 		}
 	})

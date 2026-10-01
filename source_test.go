@@ -881,6 +881,201 @@ func TestSource_File_BlankBlockScalarContent(t *testing.T) {
 	}
 }
 
+func TestSource_File_CommentBelowAnchor(t *testing.T) {
+	t.Parallel()
+
+	// Below an anchor that directly follows a "-", or a key and its ":", on
+	// its line, the go-yaml parser reads the first comment on a line of its
+	// own. Left of that "-" or key, the comment makes the parser give the
+	// anchor a null value. Anywhere else, it makes the parser give the
+	// anchor the node below it. The tree leaves the comment out where that
+	// is wrong and the parser reads the node correctly without it.
+	tcs := map[string]struct {
+		want  any
+		input string
+		kept  bool
+	}{
+		"comment left of the key above the next entry of an outer sequence": {
+			input: "- a: &x\n# c\n- 1\n",
+			want:  []any{map[string]any{"a": nil}, uint64(1)},
+			kept:  true,
+		},
+		"comment left of the key above the next key": {
+			input: "a:\n  b: &x\n# c\n  d: 1\n",
+			want:  map[string]any{"a": map[string]any{"b": nil, "d": uint64(1)}},
+			kept:  true,
+		},
+		"comment left of the entry above a key of an outer mapping": {
+			input: "a:\n  - &x\n# c\nb: 1\n",
+			want:  map[string]any{"a": []any{nil}, "b": uint64(1)},
+			kept:  true,
+		},
+		"comment left of the entry above a key in its column": {
+			input: "p:\n  q:\n  - &x\n# c\n  n: 1\n",
+			want:  map[string]any{"p": map[string]any{"q": []any{nil}, "n": uint64(1)}},
+			kept:  true,
+		},
+		"comment left of the key above the value": {
+			input: "a:\n  b: &x\n# c\n    d: 1\n",
+			want:  map[string]any{"a": map[string]any{"b": map[string]any{"d": uint64(1)}}},
+		},
+		"comment left of the key above a sequence in the column of the key": {
+			input: "a:\n  b: &x\n# c\n  - 1\n",
+			want:  map[string]any{"a": map[string]any{"b": []any{uint64(1)}}},
+		},
+		"comment left of the entry above the value": {
+			input: "- - &x\n# c\n    - 1\n",
+			want:  []any{[]any{[]any{uint64(1)}}},
+		},
+		"comment in the column of the key above the value": {
+			input: "a: &x\n# c\n  b: 1\n",
+			want:  map[string]any{"a": map[string]any{"b": uint64(1)}},
+			kept:  true,
+		},
+		"comment in the column of the key above a sequence in that column": {
+			input: "a: &x\n# c\n- 1\n",
+			want:  map[string]any{"a": []any{uint64(1)}},
+			kept:  true,
+		},
+		"comment right of the entry above the value": {
+			input: "- &x\n    # c\n  b: 1\n",
+			want:  []any{map[string]any{"b": uint64(1)}},
+			kept:  true,
+		},
+		"comment in the column of the key above the next key": {
+			input: "a: &x\n# c\nb: 1\n",
+			want:  map[string]any{"a": nil, "b": uint64(1)},
+		},
+		"comment in the column of the entry above the next entry": {
+			input: "- &x\n# c\n- 1\n",
+			want:  []any{nil, uint64(1)},
+		},
+		"comment right of the key above a key of an outer mapping": {
+			input: "a:\n  b: &x\n    # c\nd: 1\n",
+			want:  map[string]any{"a": map[string]any{"b": nil}, "d": uint64(1)},
+		},
+		"comment right of the entry above an entry of an outer sequence": {
+			input: "- - &x\n    # c\n- 1\n",
+			want:  []any{[]any{nil}, uint64(1)},
+		},
+		// An explicit key starts at its "?".
+		"comment in the column of the ? above the next key": {
+			input: "? a: &x\n# c\nb: 1\n",
+			want:  map[string]any{"a": nil, "b": uint64(1)},
+		},
+		"comment between the ? and its key above the next key": {
+			input: "p:\n  ? a: &x\n   # c\n  b: 1\n",
+			want:  map[string]any{"p": map[string]any{"a": nil, "b": uint64(1)}},
+		},
+		"comment in the column of the ? above the next key of a sequence entry": {
+			input: "- ? a: &x\n  # c\n  b: 1\n",
+			want:  []any{map[string]any{"a": nil, "b": uint64(1)}},
+		},
+		"comment in the column of the ? above the value": {
+			input: "? a: &x\n# c\n    b: 1\n",
+			want:  map[string]any{"a": map[string]any{"b": uint64(1)}},
+			kept:  true,
+		},
+		"comment right of the ? above a value left of its key": {
+			input: "p:\n  ? a: &x\n    # c\n   b: 1\n",
+			want:  map[string]any{"p": map[string]any{"a": map[string]any{"b": uint64(1)}}},
+			kept:  true,
+		},
+		"comment left of the ? above the value": {
+			input: "p:\n  ? a: &x\n# c\n   b: 1\n",
+			want:  map[string]any{"p": map[string]any{"a": map[string]any{"b": uint64(1)}}},
+		},
+		// The parser reads any other anchor the same way with the comment
+		// as without it.
+		"comment below an anchor after a key whose ? is on the line above": {
+			input: "? \n a: &x\n  # c\n b: 1\n",
+			want:  map[string]any{"a": map[string]any{"b": uint64(1)}},
+			kept:  true,
+		},
+		// The tree holds a null in place of a comment that closes the
+		// document below the anchor.
+		"closing comment below an anchor after a key whose ? is on the line above": {
+			input: "  ? \n    a: &x\n# c\n---\n",
+			want:  map[string]any{"a": nil},
+		},
+		"comment left of the key below an anchor after a tag": {
+			input: "a:\n  b: !t &x\n# c\n    d: 1\n",
+			want:  map[string]any{"a": map[string]any{"b": map[string]any{"d": uint64(1)}}},
+			kept:  true,
+		},
+		"comment left of the key below an anchor on a line of its own": {
+			input: "a:\n  b:\n    &x\n# c\n    d: 1\n",
+			want:  map[string]any{"a": map[string]any{"b": map[string]any{"d": uint64(1)}}},
+			kept:  true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, tc.input)
+
+			got, err := dd.Decode[any](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+
+			assert.Equal(t, tc.kept, strings.Contains(dd.DocumentAST().String(), "# c"))
+		})
+	}
+}
+
+func TestSource_File_CommentBelowAnchorWithNoName(t *testing.T) {
+	t.Parallel()
+
+	// The go-yaml parser takes the token after a "&" as the name of the
+	// anchor, so it rejects a "&" with no name above a comment. The Source
+	// keeps that comment in the parser input wherever it sits. Without the
+	// comment, the parser would name the anchor after the token below it.
+	tcs := map[string]struct {
+		input string
+		err   string
+	}{
+		"comment left of the key above a scalar": {
+			input: "p:\n  a: &\n# c\n   1\n",
+			err:   "3:1: unexpected scalar value type",
+		},
+		"comment left of the key above a scalar and the next key": {
+			input: "p:\n  a: &\n# c\n   1\nz: 2\n",
+			err:   "3:1: unexpected scalar value type",
+		},
+		"comment in the column of the key above a tagged scalar left of it": {
+			input: "p:\n   q: 1\n   a: &\n   # c\n!t 1\n",
+			err:   "4:4: unexpected scalar value type",
+		},
+		"comment left of the entry above a scalar and the next entry": {
+			input: "- - &\n# c\n    1\n- 2\n",
+			err:   "2:1: unexpected scalar value type",
+		},
+		"comment above the end of a flow sequence": {
+			input: "[&\n# c\n]\n",
+			err:   "2:1: unexpected scalar value type",
+		},
+		"comment above a colon": {
+			input: "a: &\n# c\n: 1\n",
+			err:   "1:4: mapping value is not allowed in this context",
+		},
+		"closing comment left of the root above a header": {
+			input: "  a: &\n# c\n---\n",
+			err:   "2:1: unexpected scalar value type",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := niceyaml.NewSourceFromString(tc.input).File()
+			require.EqualError(t, err, tc.err)
+		})
+	}
+}
+
 // tokenCollector is an [ast.Visitor] that passes the token of each node it
 // visits to its function.
 type tokenCollector func(tk *token.Token)

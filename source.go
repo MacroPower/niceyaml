@@ -466,10 +466,25 @@ func (d *document) anchorToken() *token.Token {
 // The tree leaves out a comment on a line of its own below a document
 // whose root is a scalar or a flow collection, and one between a %YAML
 // or %TAG directive and its "---" header, since [parser.Parse] rejects
-// valid YAML that holds a comment in either place. It also leaves out a
-// comment below an anchor with no value, and holds a null as the value of
-// that anchor, as it does when a header follows the anchor. The tokens of
-// the Source and of each [Node] still hold such a comment.
+// valid YAML that holds a comment in either place. The tokens of the
+// Source and of each [Node] still hold such a comment.
+//
+// The tree also leaves out the comments on lines of their own between an
+// anchor and the node below them where they make the parser reject or
+// misread that node. The anchor ends its line and directly follows a "-",
+// or a key and its ":", on that line. The key starts on that line too, at
+// its "?" when it has one. When the first of the comments starts left of
+// the "-" or key, the parser gives the anchor a null value. The tree then
+// leaves the comments out above a node that the parser takes as the value
+// of the anchor without them. That node starts right of the "-" or key,
+// or it is a "-" in the column of the key. When the first of the comments
+// starts in the column of the "-" or key or right of it, the parser gives
+// the anchor the node below them. The tree then leaves them out above a
+// node left of the "-" or key, above a key in the column of the key, and
+// above a "-" in the column of the "-". Below an anchor with no value
+// that ends its document, the tree leaves out the comment too, and holds
+// a null as the value of that anchor, as it does when a header follows
+// the anchor.
 //
 // The tokens of the file are copies of the Source's own, since the parser
 // relinks the tokens it receives. A copy matches the original by its type,
@@ -721,8 +736,9 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 }
 
 // dropStrandedComments returns the tokens of run without the comments on
-// lines of their own that the go-yaml parser rejects when it keeps
-// comments, or run itself when it holds none.
+// lines of their own in places where the go-yaml parser can reject or
+// misread valid YAML when it keeps comments, or run itself when it holds
+// none.
 //
 // The parser (v1.19.3-0.20260407131736-edee2f91616c) attaches such a
 // comment below the content of a document only when the root of the
@@ -738,10 +754,22 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 // Below a scalar or a flow collection, only the comments that close the
 // document drop: those that the end of run, a "---" header, or a "..."
 // marker follows. The parser rejects any other token after them, with or
-// without the comments. The comments below an anchor with no value stay,
-// since the parser takes them as the value of the anchor and rejects an
-// anchor that no token follows past its name (parser/token.go:311).
-// [nullEmptyAnchors] puts a null in their place once the parser returns.
+// without the comments. Below an anchor with no value, the comments that
+// close the document stay, since the parser takes them as the value of
+// the anchor and rejects an anchor that no token follows past its name
+// (parser/token.go:311). [nullEmptyAnchors] puts a null in their place
+// once the parser returns. Above a node, the comments drop when
+// [breaksAnchor] reports that they make the parser give the anchor the
+// wrong value. Inside a flow collection, they stay. In a flow sequence,
+// the parser still reads an anchor after the key of a pair by the column of
+// the first comment. When that comment starts left of the key, the parser
+// gives the anchor a null value and rejects the value below the comment.
+//
+// Below a "&" with no name, the comments stay wherever they sit, except
+// between a directive and its header. The parser takes the token after a
+// "&" as the name of the anchor (parser/token.go:314), so it rejects a "&"
+// above a comment. Without the comments, it would name the anchor after the
+// token below them.
 func dropStrandedComments(run token.Tokens) token.Tokens {
 	var (
 		kept token.Tokens
@@ -751,6 +779,8 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 		content, block, directive bool
 		// The depth of flow collections at the scan.
 		depth int
+		// The index of the last anchor in run.
+		anchor int
 		// The last two tokens other than comments that hold text.
 		last, beforeLast *token.Token
 	)
@@ -777,6 +807,10 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 				content = true
 				block = block || depth == 0
 
+			case token.AnchorType:
+				content = true
+				anchor = i
+
 			default:
 				content = true
 			}
@@ -799,15 +833,37 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 			next++
 		}
 
-		// An anchor, or the name of one, ends the content when the anchor
-		// has no value.
-		anchored := last != nil && last.Type == token.AnchorType ||
-			beforeLast != nil && beforeLast.Type == token.AnchorType
+		// A "&" with no name ends the content.
+		bare := last != nil && last.Type == token.AnchorType
+
+		// The name of an anchor ends the content when the anchor has no
+		// value.
+		anchored := beforeLast != nil && beforeLast.Type == token.AnchorType
+
+		// Whether the comments close the document.
+		closes := next == len(run) ||
+			run[next].Type == token.DocumentHeaderType || run[next].Type == token.DocumentEndType
 
 		stranded := directive
-		if content && !block && depth == 0 && !anchored {
-			stranded = stranded || next == len(run) ||
-				run[next].Type == token.DocumentHeaderType || run[next].Type == token.DocumentEndType
+
+		switch {
+		case bare:
+			// Without the comments, the parser would take the token below
+			// them as the name of the anchor.
+
+		case anchored && depth == 0:
+			// The first comment on a line of its own, past any comment on
+			// the line of the content.
+			below := i
+			for below < next && !belowText(run[below], last) {
+				below++
+			}
+
+			stranded = stranded ||
+				below < next && !closes && breaksAnchor(run, anchor, below, next)
+
+		case content && !block && depth == 0:
+			stranded = stranded || closes
 		}
 
 		for j := i; j < next; j++ {
@@ -876,6 +932,159 @@ func belowText(tk, last *token.Token) bool {
 	end := last.Position.Line + lineend.CountBreaks(strings.Trim(last.Origin, " \t\r\n"))
 
 	return tk.Position.Line > end
+}
+
+// breaksAnchor reports whether the comments between the anchor at run[at]
+// and the node at run[next] make the parser give the anchor the wrong
+// value where it gives the right one without them. The anchor has its
+// name, and the comment at run[below] is the first of the comments on a
+// line of its own.
+//
+// The comments change what the parser reads only below an anchor that
+// directly follows a "-", or a key and its ":", on its line. The key must
+// start on that line too, where [keyStart] finds it, and an explicit key
+// starts at its "?" (parser/parser.go:730). The parser gives that anchor a
+// null value when the first comment starts left of the "-" or key, and the
+// node otherwise (parser/parser.go:787, parser/parser.go:1186). It reads
+// any other anchor the same way with the comments as without them, so
+// breaksAnchor reports false for one.
+//
+// Without the comments, the parser takes the node as the value of the
+// anchor when the node starts right of the "-" or key, or is a "-" in the
+// column of the key, where a block sequence may start. Above such a node,
+// breaksAnchor reports whether the first comment starts left of the "-" or
+// key, which makes the parser give the anchor a null value.
+//
+// Above any other node, YAML gives the anchor a null value, so
+// breaksAnchor reports false when the first comment starts left of the "-"
+// or key. Otherwise it reports true above a node left of the "-" or key, a
+// key in the column of the key, and a "-" in the column of the "-". The
+// parser gives the anchor a null value there without the comments
+// (parser/parser.go:750, parser/parser.go:787, parser/parser.go:1149,
+// parser/parser.go:1186). It reports false above any other node. One such
+// node is a key in the column of the "-", which the parser takes as the
+// value without the comments too.
+//
+// When a token it compares has no position, breaksAnchor reports false.
+func breaksAnchor(run token.Tokens, at, below, next int) bool {
+	comment, tk := run[below], run[next]
+	if comment.Position == nil || tk.Position == nil {
+		return false
+	}
+
+	// The "-" or ":" that the anchor directly follows on its line.
+	i := at - 1
+	if i < 0 || !sameLine(run[i], run[at]) {
+		return false
+	}
+
+	// The index of the "-" or the start of the key.
+	holder := i
+	mapping := run[i].Type == token.MappingValueType
+
+	switch {
+	case mapping:
+		holder = keyStart(run, i)
+
+	case run[i].Type != token.SequenceEntryType:
+		return false
+	}
+
+	if holder < 0 || run[holder].Position == nil {
+		return false
+	}
+
+	var (
+		col   = run[holder].Position.Column
+		entry = tk.Type == token.SequenceEntryType
+		// Whether the parser gives the anchor a null value with the
+		// comments in the tree.
+		null = comment.Position.Column < col
+	)
+
+	switch {
+	case tk.Position.Column > col, mapping && entry && tk.Position.Column == col:
+		return null
+
+	case null:
+		return false
+
+	case tk.Position.Column < col:
+		return true
+
+	case mapping:
+		return startsKey(run, next)
+
+	default:
+		return entry
+	}
+}
+
+// startsKey reports whether a key of a block mapping starts at run[at],
+// the first token on its line. That token is a "?" or a ":", or a ":"
+// follows it on its line. A "[" or "{" before that ":" makes the line a
+// flow collection, which the parser does not read as a key, so startsKey
+// reports false for it.
+func startsKey(run token.Tokens, at int) bool {
+	if run[at].Type == token.MappingKeyType {
+		return true
+	}
+
+	for j := at; j < len(run) && sameLine(run[j], run[at]); j++ {
+		switch run[j].Type {
+		case token.MappingValueType:
+			return true
+
+		case token.SequenceStartType, token.MappingStartType:
+			return false
+
+		default:
+		}
+	}
+
+	return false
+}
+
+// keyStart returns the index of the token on the line of the ":" at
+// run[colon] where the key before that ":" starts. An explicit key starts
+// at its "?". Any other key starts past any "-" or ":" on the line, at its
+// anchor or tag when it has one. It returns -1 when no token of a key
+// precedes the ":" on its line, as with a ":" that starts its line, and
+// when the "?" of the key sits on a line above.
+func keyStart(run token.Tokens, colon int) int {
+	start := -1
+
+	k := colon - 1
+	for ; k >= 0 && sameLine(run[k], run[colon]); k-- {
+		switch run[k].Type {
+		case token.MappingKeyType:
+			return k
+
+		case token.SequenceEntryType, token.MappingValueType, token.DocumentHeaderType:
+			return start
+
+		default:
+		}
+
+		start = k
+	}
+
+	// The token before the line of the ":", past any comments.
+	for k >= 0 && run[k].Type == token.CommentType {
+		k--
+	}
+
+	if k >= 0 && run[k].Type == token.MappingKeyType {
+		return -1
+	}
+
+	return start
+}
+
+// sameLine reports whether a and b start on the same line. It reports
+// false when either token has no position.
+func sameLine(a, b *token.Token) bool {
+	return a.Position != nil && b.Position != nil && a.Position.Line == b.Position.Line
 }
 
 // startsBelow reports whether tk starts on a line below the line mark
