@@ -17,7 +17,7 @@ import (
 
 	"github.com/goccy/go-yaml/token"
 
-	"go.jacobcolvin.com/niceyaml/internal/aliasing"
+	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -91,7 +91,7 @@ var (
 	// as a [SourceError] at the first token of the node that is not a
 	// comment, and it does not match [ErrDecodeRejected]. The schema
 	// package exports the same error value.
-	ErrExcessiveAliasing = aliasing.ErrExcessiveAliasing
+	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// ErrParseRejected indicates the go-yaml parser panicked on the tokens
 	// of a [Source], such as a token with no position that

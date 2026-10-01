@@ -17,6 +17,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
+	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -38,7 +39,7 @@ var (
 	// A [matcher.Content] guard refuses such a document with it too, and
 	// [Registry.Lookup] then returns it wrapped together with [ErrResolve].
 	// It is the same error value as [niceyaml.ErrExcessiveAliasing].
-	ErrExcessiveAliasing = aliasing.ErrExcessiveAliasing
+	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// ErrCompile indicates a schema document that does not compile.
 	// [Compile] and [Registry.Lookup] return it.
@@ -1021,7 +1022,7 @@ func checkExpansion(data any) error {
 		return err
 	}
 
-	if aliasing.Excessive(w.distinct, w.aliased) {
+	if aliaslimit.Excessive(w.distinct, w.aliased) {
 		return fmt.Errorf("%w: %w", ErrValidate, ErrExcessiveAliasing)
 	}
 
@@ -1079,7 +1080,7 @@ func sharedKeyOf(data any) (sharedKey, bool) {
 // size of each key and value in it. A map or slice that the walk reaches
 // from inside itself returns an error wrapping [ErrValidate].
 func (w *expansionWalker) walk(data any) (int, error) {
-	w.distinct = aliasing.AddCapped(w.distinct, 1)
+	w.distinct = aliaslimit.AddCapped(w.distinct, 1)
 
 	key, ok := sharedKeyOf(data)
 	if !ok {
@@ -1091,7 +1092,7 @@ func (w *expansionWalker) walk(data any) (int, error) {
 	}
 
 	if size, seen := w.sizes[key]; seen {
-		w.aliased = aliasing.AddCapped(w.aliased, size)
+		w.aliased = aliaslimit.AddCapped(w.aliased, size)
 
 		return size, nil
 	}
@@ -1105,20 +1106,20 @@ func (w *expansionWalker) walk(data any) (int, error) {
 	case []byte:
 		// The walk counted the first character of the base64 text on
 		// entry.
-		size = min(base64.StdEncoding.EncodedLen(len(v)), aliasing.CountCap)
-		w.distinct = aliasing.AddCapped(w.distinct, size-1)
+		size = min(base64.StdEncoding.EncodedLen(len(v)), aliaslimit.CountCap)
+		w.distinct = aliaslimit.AddCapped(w.distinct, size-1)
 
 	case map[string]any:
 		for _, elem := range v {
 			// The key is a node of its own.
-			w.distinct = aliasing.AddCapped(w.distinct, 1)
+			w.distinct = aliaslimit.AddCapped(w.distinct, 1)
 
 			n, err := w.walk(elem)
 			if err != nil {
 				return 0, err
 			}
 
-			size = aliasing.AddCapped(size, aliasing.AddCapped(1, n))
+			size = aliaslimit.AddCapped(size, aliaslimit.AddCapped(1, n))
 		}
 
 	case yaml.MapSlice:
@@ -1136,7 +1137,7 @@ func (w *expansionWalker) walk(data any) (int, error) {
 				return 0, err
 			}
 
-			size = aliasing.AddCapped(size, aliasing.AddCapped(kn, n))
+			size = aliaslimit.AddCapped(size, aliaslimit.AddCapped(kn, n))
 		}
 
 	case []any:
@@ -1146,7 +1147,7 @@ func (w *expansionWalker) walk(data any) (int, error) {
 				return 0, err
 			}
 
-			size = aliasing.AddCapped(size, n)
+			size = aliaslimit.AddCapped(size, n)
 		}
 	}
 

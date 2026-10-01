@@ -4,6 +4,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -18,14 +19,14 @@ type Node interface {
 	DocumentAST() *ast.DocumentNode
 }
 
-// CheckDecode returns [ErrExcessiveAliasing] when n holds an alias and
-// aliases make up too much of what a decode of its document reads. The
-// count covers the whole document, with each alias reading its content in
-// full. A decode of a node below the root reads only the anchors the node
-// needs, but CheckDecode applies one limit per document, so every node
-// that holds an alias gets the verdict of its document. A node without an
-// alias decodes on its own and reads nothing twice, so it passes, as does
-// a nil Node.
+// CheckDecode returns [aliaslimit.ErrExcessiveAliasing] when n holds an
+// alias and aliases make up too much of what a decode of its document
+// reads. The count covers the whole document, with each alias reading
+// its content in full. A decode of a node below the root reads only the
+// anchors the node needs, but CheckDecode applies one limit per
+// document, so every node that holds an alias gets the verdict of its
+// document. A node without an alias decodes on its own and reads nothing
+// twice, so it passes, as does a nil Node.
 //
 // The count depends on the document alone, so the document keeps it, and
 // a check of each item of a list counts the document once.
@@ -39,18 +40,18 @@ func CheckDecode(n Node) error {
 		return excessiveRead(n, state, readValue)
 	})
 	if excessive {
-		return ErrExcessiveAliasing
+		return aliaslimit.ErrExcessiveAliasing
 	}
 
 	return nil
 }
 
-// CheckDecodeText returns [ErrExcessiveAliasing] when n holds an alias
-// and aliases make up too much of the text the decoder writes out for
-// the node. To decode a type with an UnmarshalText method, or one that
-// reads YAML bytes, the decoder writes the node out as text with each
-// alias in full. The count covers the whole document as [CheckDecode]
-// does. It reads every node as text, so each scalar counts one node per
+// CheckDecodeText returns [aliaslimit.ErrExcessiveAliasing] when n holds
+// an alias and aliases make up too much of the text the decoder writes
+// out for the node. To decode a type with an UnmarshalText method, or one
+// that reads YAML bytes, the decoder writes the node out as text with
+// each alias in full. The count covers the whole document as
+// [CheckDecode] does. It reads every node as text, so each scalar counts one node per
 // byte of its text. A node without an alias passes, as does a nil Node.
 // The document keeps the count, as it keeps the count of CheckDecode.
 //
@@ -66,7 +67,7 @@ func CheckDecodeText(n Node) error {
 		return excessiveRead(n, state, readText)
 	})
 	if excessive {
-		return ErrExcessiveAliasing
+		return aliaslimit.ErrExcessiveAliasing
 	}
 
 	return nil
@@ -106,7 +107,7 @@ func excessiveRead(n Node, state *docstate.State, mode readMode) bool {
 
 	c.count(body, true, mode)
 
-	return Excessive(c.distinct, c.aliased)
+	return aliaslimit.Excessive(c.distinct, c.aliased)
 }
 
 // nullFinder is an [ast.Visitor] that finds the aliases of a document the
@@ -276,21 +277,21 @@ func (c *treeCounter) count(node ast.Node, top bool, mode readMode) int {
 	}
 
 	if top {
-		c.distinct = AddCapped(c.distinct, size)
+		c.distinct = aliaslimit.AddCapped(c.distinct, size)
 	}
 
 	switch n := node.(type) {
 	case *ast.MappingNode:
 		for _, entry := range n.Values {
-			size = AddCapped(size, c.entry(entry, top, mode))
+			size = aliaslimit.AddCapped(size, c.entry(entry, top, mode))
 		}
 
 	case *ast.MappingValueNode:
-		size = AddCapped(size, c.entry(n, top, mode))
+		size = aliaslimit.AddCapped(size, c.entry(n, top, mode))
 
 	case *ast.SequenceNode:
 		for _, elem := range n.Values {
-			size = AddCapped(size, c.count(elem, top, mode))
+			size = aliaslimit.AddCapped(size, c.count(elem, top, mode))
 		}
 	}
 
@@ -310,7 +311,7 @@ func (c *treeCounter) entry(entry *ast.MappingValueNode, top bool, mode readMode
 		keyMode = readText
 	}
 
-	return AddCapped(c.count(entry.Key, top, keyMode), c.count(entry.Value, top, mode))
+	return aliaslimit.AddCapped(c.count(entry.Key, top, keyMode), c.count(entry.Value, top, mode))
 }
 
 // keyAsText reports whether the decoder writes key out as text. It does
@@ -385,7 +386,7 @@ func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 	target, err := c.resolver.Deref(alias)
 	if err != nil || c.nulls[alias] || c.open[target] || (mode == readValue && !isCollection(target)) {
 		if top {
-			c.distinct = AddCapped(c.distinct, 1)
+			c.distinct = aliaslimit.AddCapped(c.distinct, 1)
 		}
 
 		return 1
@@ -401,7 +402,7 @@ func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 	}
 
 	if top {
-		c.aliased = AddCapped(c.aliased, size)
+		c.aliased = aliaslimit.AddCapped(c.aliased, size)
 	}
 
 	return size

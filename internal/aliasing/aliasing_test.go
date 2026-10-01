@@ -15,6 +15,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
+	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -74,22 +75,22 @@ func TestCheckDecode(t *testing.T) {
 		},
 		"alias bomb as mapping key": {
 			input: yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n",
-			err:   aliasing.ErrExcessiveAliasing,
+			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"anchored alias bomb as mapping key": {
 			input: anchoredAliasLevels() + "kind:\n  ? *l7\n  : v\n",
-			err:   aliasing.ErrExcessiveAliasing,
+			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"merge key bomb": {
 			input: yamltest.MergeLevels(7),
-			err:   aliasing.ErrExcessiveAliasing,
+			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"node holding an alias with a bomb outside it": {
 			// The limit applies to the whole document, even where a
 			// decode of the node would read only the anchor it needs.
 			input: "k: &k a\n" + yamltest.AliasLevels(7) + "b:\n  ? *l7\n  : v\nc: [*k]\n",
 			path:  paths.Root().Child("c"),
-			err:   aliasing.ErrExcessiveAliasing,
+			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"node without an alias beside a bomb": {
 			input: yamltest.AliasLevels(7) + "b:\n  ? *l7\n  : v\nc: [x]\n",
@@ -115,19 +116,19 @@ func TestCheckDecode(t *testing.T) {
 			// The decoder spells the key as text, with a copy of the
 			// scalar for each alias.
 			input: longScalar + "k: &k " + flowList("*a", 500) + "\nm: {? *k : 1}\n",
-			err:   aliasing.ErrExcessiveAliasing,
+			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"scalar aliases in a value": {
 			input: longScalar + "k: &k " + flowList("*a", 500) + "\nm: {n: *k}\n",
 		},
 		"scalar aliases under a string tag": {
 			input: longScalar + "k: &k " + flowList("*a", 500) + "\nm: !!str *k\n",
-			err:   aliasing.ErrExcessiveAliasing,
+			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias keys to a binary scalar": {
 			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
 				"l: " + flowList("{? *b : 1}", 500) + "\n",
-			err: aliasing.ErrExcessiveAliasing,
+			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias keys to a plain scalar": {
 			input: longScalar + "l: " + flowList("{? *a : 1}", 500) + "\n",
@@ -176,7 +177,7 @@ func TestCheckDecodeText(t *testing.T) {
 		},
 		"many aliases to a long scalar": {
 			input: longScalar + "kind: " + flowList("*a", 500) + "\n",
-			err:   aliasing.ErrExcessiveAliasing,
+			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"a few aliases to a long scalar": {
 			input: longScalar + "kind: " + flowList("*a", 2) + "\n",
@@ -316,72 +317,6 @@ func TestDecodesText(t *testing.T) {
 
 			assert.Equal(t, tc.want, aliasing.DecodesText(tc.typ))
 			assert.Equal(t, tc.want, aliasing.DecodesText(tc.typ), "a second call gives the same answer")
-		})
-	}
-}
-
-func TestExcessive(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		distinct int
-		aliased  int
-		want     bool
-	}{
-		"few aliased nodes": {
-			distinct: 10,
-			aliased:  100,
-		},
-		"small document": {
-			distinct: 1,
-			aliased:  998,
-		},
-		"aliases under the larger share": {
-			distinct: 20,
-			aliased:  1000,
-		},
-		"aliases past the larger share": {
-			distinct: 5,
-			aliased:  1000,
-			want:     true,
-		},
-		"aliases past the smaller share": {
-			distinct: 1_000_000,
-			aliased:  4_000_000,
-			want:     true,
-		},
-		"aliases under the smaller share": {
-			distinct: 4_000_000,
-			aliased:  400_000,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, aliasing.Excessive(tc.distinct, tc.aliased))
-		})
-	}
-}
-
-func TestAddCapped(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		a, b int
-		want int
-	}{
-		"under the cap": {a: 1, b: 2, want: 3},
-		"at the cap":    {a: aliasing.CountCap - 1, b: 1, want: aliasing.CountCap},
-		"past the cap":  {a: aliasing.CountCap, b: aliasing.CountCap, want: aliasing.CountCap},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, aliasing.AddCapped(tc.a, tc.b))
 		})
 	}
 }

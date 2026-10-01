@@ -1,4 +1,14 @@
-package aliasing
+// Package aliaslimit holds the limit on how much YAML aliases may make a
+// reader read. A reader counts the nodes it reads once, as distinct, and
+// the nodes the aliases repeat, as aliased. [Excessive] reports whether
+// the aliased nodes make up too large a share, under the rule
+// gopkg.in/yaml.v3 applies to the aliases in a document it decodes.
+//
+// The decode check of the aliasing package applies the limit to what a
+// decode of a document reads. The schema validator applies it to a
+// decoded value whose maps and slices a decode shares between aliases.
+// Each refuses a count past the limit with [ErrExcessiveAliasing].
+package aliaslimit
 
 import (
 	"errors"
