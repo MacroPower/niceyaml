@@ -780,6 +780,117 @@ func TestResolver_KeyName(t *testing.T) {
 	}
 }
 
+func TestResolver_Entry(t *testing.T) {
+	t.Parallel()
+
+	// Each case reads the entry name selects in the mapping at $.m, and
+	// names the entry by the text of its value.
+	tcs := map[string]struct {
+		input string
+		name  string
+		opts  []niceyaml.SourceOption
+		want  string
+		err   error
+	}{
+		"own key": {
+			input: "m: {x: 1}\n",
+			name:  "x",
+			want:  "1",
+		},
+		"merged key": {
+			input: "a: &a {x: 1}\nm: {<<: *a}\n",
+			name:  "x",
+			want:  "1",
+		},
+		"own key after the merge key": {
+			input: "m: {<<: {x: 1}, x: 2}\n",
+			name:  "x",
+			want:  "2",
+		},
+		"merge key after the own key": {
+			input: "m: {x: 1, <<: {x: 2}}\n",
+			name:  "x",
+			want:  "2",
+		},
+		"later source of one merge key": {
+			input: "m: {<<: [{x: 1}, {x: 2}]}\n",
+			name:  "x",
+			want:  "2",
+		},
+		"later merge key": {
+			input: "m: {<<: {x: 1}, <<: {x: 2}}\n",
+			name:  "x",
+			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			want:  "2",
+		},
+		"alias key": {
+			input: "k: &k x\nm:\n  *k : 1\n",
+			name:  "x",
+			want:  "1",
+		},
+		"key text rather than member name": {
+			input: "m: {0x10: 1}\n",
+			name:  "0x10",
+			want:  "1",
+		},
+		"member name of a respelled key": {
+			input: "m: {0x10: 1}\n",
+			name:  "16",
+			err:   paths.ErrNotFound,
+		},
+		"missing name": {
+			input: "m: {x: 1}\n",
+			name:  "y",
+			err:   paths.ErrNotFound,
+		},
+		"not a mapping": {
+			input: "m: [x]\n",
+			name:  "x",
+			err:   paths.ErrNotFound,
+		},
+		"unknown alias in a merge key": {
+			input: "m: {<<: *nope}\n",
+			name:  "x",
+			err:   paths.ErrAlias,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).File()
+			require.NoError(t, err)
+
+			r := paths.NewResolver(file.Docs[0])
+			m := paths.MustParse("$.m")
+
+			node, err := r.Node(m)
+			require.NoError(t, err)
+
+			got, err := r.Entry(node, tc.name)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				assert.Nil(t, got)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			entry, ok := got.(*ast.MappingValueNode)
+			require.True(t, ok, "entry is a %T", got)
+			assert.Equal(t, tc.want, entry.Value.String())
+
+			// A child selector with the name selects the value of the
+			// entry.
+			value, err := r.Node(m.Child(tc.name))
+			require.NoError(t, err)
+			assert.Same(t, entry.Value, value)
+		})
+	}
+}
+
 func TestResolver_Anchor(t *testing.T) {
 	t.Parallel()
 

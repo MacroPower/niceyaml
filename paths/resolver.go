@@ -131,6 +131,41 @@ func (r *Resolver) KeyName(key ast.Node) (string, bool) {
 	return r.resolver.keyName(key)
 }
 
+// Entry returns the entry, an [*ast.MappingValueNode], that [Path.Child]
+// with name selects in the mapping at node. Where a `<<` merge key brings
+// that entry in, it belongs to the merge source. Entry looks through the
+// anchors, tags, and aliases on node. A caller that walks a mapping
+// itself compares the result with an entry it reached to learn whether a
+// path through name selects that entry. A later entry with the same key
+// text can win the selector, such as a later key of the mapping or of a
+// later merge source.
+//
+// Returns an error wrapping [ErrNotFound] when node is not a mapping or
+// name selects no entry in it, and one wrapping [ErrAlias] when an alias
+// on the way does not resolve.
+func (r *Resolver) Entry(node ast.Node, name string) (ast.Node, error) {
+	content, err := r.resolver.unwrap(node)
+	if err != nil {
+		return nil, fmt.Errorf("entry %q: %w", name, err)
+	}
+
+	mapping, ok := content.(*ast.MappingNode)
+	if !ok || mapping == nil {
+		return nil, fmt.Errorf("entry %q: %w: not a mapping", name, ErrNotFound)
+	}
+
+	entry, _, ok, err := r.resolver.lookup(mapping, name, nil)
+	if err != nil {
+		return nil, fmt.Errorf("entry %q: %w", name, err)
+	}
+
+	if !ok {
+		return nil, fmt.Errorf("entry %q: %w", name, ErrNotFound)
+	}
+
+	return entry, nil
+}
+
 // Anchor returns the anchor, an [*ast.AnchorNode], that node refers to
 // when node is an alias. That is the anchor whose content
 // [Resolver.Deref] reaches first when it follows the alias. Where the
