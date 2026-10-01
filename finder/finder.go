@@ -119,6 +119,9 @@ type Option func(*Finder)
 // same character always normalizes the same way wherever it appears. A
 // transformer whose output depends on surrounding characters, such as title
 // casing, sees none and behaves as it would on a one-character string.
+// Line endings reach the normalizer as "\n" too, so a normalizer that
+// drops "\n", such as one that removes all whitespace, lets a match run
+// from the end of one line into the next.
 //
 // The [Finder] and every [Index] it builds share n, so goroutines that use
 // any of them at once need a normalizer that is safe for concurrent use.
@@ -168,8 +171,10 @@ type Index struct {
 // Bytes that are not valid UTF-8 read as U+FFFD on both sides, and a CRLF
 // or bare CR line ending reads as "\n" on both sides. Every line but the
 // last reads as ending in "\n", even one with no line ending of its own,
-// such as the last line of a diff revision or a placeholder row, so a
-// match never joins two lines.
+// such as the last line of a diff revision or a placeholder row. That "\n"
+// keeps a match from joining two lines unless the normalizer drops it. A
+// normalizer that removes all whitespace drops it, so "1b" then matches
+// across the lines "a: 1" and "b: 2".
 //
 // Every match starts at a source character. When normalization expands one
 // character into several, as case folding turns "ß" into "ss", a needle
@@ -263,7 +268,8 @@ func normalizeRune(n Normalizer, r rune) string {
 // loaded text and builds a position map. [line.Line.Runes] yields every
 // line ending as a single "\n", and every line but the last without an
 // ending of its own gets a "\n" at column [line.Line.Width], where an
-// ending would sit, so no match joins the text of two lines.
+// ending would sit, so no match joins the text of two lines unless the
+// normalizer drops "\n".
 //
 // When the Finder has a normalizer, the normalizer transforms the returned
 // text, and the position map records where each source rune begins in the

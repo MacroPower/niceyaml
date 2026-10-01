@@ -4,10 +4,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"unicode"
 
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+	"golang.org/x/text/runes"
 	"golang.org/x/text/transform"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -189,6 +191,19 @@ func TestFinder_Find(t *testing.T) {
 				position.NewRange(
 					position.New(0, 5),
 					position.New(0, 10),
+				),
+			},
+		},
+		"normalizer dropping whitespace joins lines": {
+			input:  "a: 1\nb: 2\n",
+			search: "1b",
+			normalizer: normalizer.New(normalizer.WithTransformer(func() transform.Transformer {
+				return runes.Remove(runes.In(unicode.White_Space))
+			})),
+			want: position.Ranges{
+				position.NewRange(
+					position.New(0, 3),
+					position.New(1, 1),
 				),
 			},
 		},
