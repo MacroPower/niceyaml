@@ -42,6 +42,60 @@ func TestFile_FIFO(t *testing.T) {
 	}
 }
 
+func TestFile_FIFOWithFS(t *testing.T) {
+	t.Parallel()
+
+	// A file system that implements fs.StatFS stats the path without
+	// opening it, so the loader refuses a FIFO there before the open.
+	tcs := map[string]struct {
+		fsys func(t *testing.T, dir string) fs.FS
+	}{
+		"os.DirFS": {
+			fsys: func(_ *testing.T, dir string) fs.FS {
+				return os.DirFS(dir)
+			},
+		},
+		"os.Root.FS": {
+			fsys: func(t *testing.T, dir string) fs.FS {
+				t.Helper()
+
+				root, err := os.OpenRoot(dir)
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, root.Close()) })
+
+				return root.FS()
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			require.NoError(t, syscall.Mkfifo(filepath.Join(dir, "schema.json"), 0o600))
+
+			reg := schema.NewRegistry(schema.WithFS(tc.fsys(t, dir)))
+			errc := make(chan error, 1)
+
+			go func() {
+				_, err := reg.Load(t.Context(), schema.File("schema.json"))
+				errc <- err
+			}()
+
+			select {
+			case err := <-errc:
+				require.ErrorIs(t, err, schema.ErrLoad)
+				require.ErrorIs(t, err, fs.ErrInvalid)
+				require.ErrorContains(t, err, "not a regular file")
+
+			case <-time.After(5 * time.Second):
+				t.Fatal("Load blocked on a FIFO")
+			}
+		})
+	}
+}
+
 func TestFile_FIFOSwappedAfterStat(t *testing.T) {
 	t.Parallel()
 
