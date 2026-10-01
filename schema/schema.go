@@ -1060,32 +1060,16 @@ type sharedKey struct {
 // or byte slice. It returns false for any other value and for an empty
 // one, which holds nothing to share.
 func sharedKeyOf(data any) (sharedKey, bool) {
-	switch v := data.(type) {
-	case map[string]any:
-		if len(v) == 0 {
-			return sharedKey{}, false
-		}
-
-	case []any:
-		if len(v) == 0 {
-			return sharedKey{}, false
-		}
-
-	case yaml.MapSlice:
-		if len(v) == 0 {
-			return sharedKey{}, false
-		}
-
-	case []byte:
-		if len(v) == 0 {
-			return sharedKey{}, false
-		}
-
+	switch data.(type) {
+	case map[string]any, []any, yaml.MapSlice, []byte:
 	default:
 		return sharedKey{}, false
 	}
 
 	rv := reflect.ValueOf(data)
+	if rv.Len() == 0 {
+		return sharedKey{}, false
+	}
 
 	return sharedKey{typ: rv.Type(), ptr: rv.Pointer(), len: rv.Len()}, true
 }
