@@ -105,7 +105,7 @@ func (d *Differ) computeOps(before, after line.Lines) []lineOp {
 	// Compute diff using the configured algorithm.
 	diffOps := d.algo.Diff(beforeContent, afterContent)
 
-	// Convert to lineOps.
+	// Convert to lineOp values.
 	ops := make([]lineOp, 0, len(diffOps))
 
 	for i, op := range diffOps {
@@ -175,7 +175,9 @@ type alignedRow struct {
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another.
 func (r *Result) Unified() *line.View {
-	return lineOps(r.ops).toView()
+	return flaggedView(r.ops, func(op lineOp) (*line.Line, line.Flag) {
+		return op.line, opKindFlag(op.kind)
+	})
 }
 
 // Hunks returns a [line.View] of the summarized diff. The view holds the
@@ -582,17 +584,6 @@ func opKindFlag(k lcs.OpKind) line.Flag {
 	default:
 		return line.FlagDefault
 	}
-}
-
-// lineOps is a slice of [lineOp] values.
-type lineOps []lineOp
-
-// toView converts ops to a [line.View] with the flag of each op set on its
-// line.
-func (ops lineOps) toView() *line.View {
-	return flaggedView(ops, func(op lineOp) (*line.Line, line.Flag) {
-		return op.line, opKindFlag(op.kind)
-	})
 }
 
 // formatHunkHeader formats a unified diff hunk header like "@@ -1,3 +1,4 @@"
