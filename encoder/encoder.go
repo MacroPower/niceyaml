@@ -2,13 +2,18 @@ package encoder
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/printer"
 )
+
+// ErrNoNode indicates a value that go-yaml encodes to no YAML node, such
+// as a marshaler that returns no YAML document or an AST node that holds
+// only comments. [Encoder.Encode] returns it.
+var ErrNoNode = errors.New("value encodes to no YAML node")
 
 // Pretty returns the [Option] values that make [New] produce
 // prettier-friendly YAML with two-space indentation and indented sequences.
@@ -147,6 +152,12 @@ func New(w io.Writer, opts ...Option) *Encoder {
 // under [yaml.Flow], go-yaml writes it in block style, which YAML forbids
 // there, and Encode leaves it and the strings in it as go-yaml writes
 // them.
+//
+// Encode returns [ErrNoNode] when v, an entry of a sequence in v, or the
+// value of a map key in v encodes to no YAML node. Encode also returns an
+// error when go-yaml cannot print the node, as with a negative
+// [yaml.Indent] from [WithYAMLOptions]. In both cases, Encode writes
+// nothing.
 func (e *Encoder) Encode(ctx context.Context, v any) error {
 	// After a refused write, v never reaches go-yaml, so its marshalers do
 	// not run and an encoding error cannot hide the write error.
@@ -169,6 +180,17 @@ func (e *Encoder) Encode(ctx context.Context, v any) error {
 		return err //nolint:wrapcheck // Return the original error.
 	}
 
+	// The go-yaml encoder leaves a nil node where a value encodes to no
+	// node. Its printer writes a nil root as "<nil>" and drops a nil
+	// sequence entry, so Encode refuses the whole tree.
+	var holes holeFinder
+
+	ast.Walk(&holes, node)
+
+	if holes.found {
+		return ErrNoNode
+	}
+
 	// The go-yaml encoder leaves some strings unquoted in a form that
 	// reads back as a different value, so Encode quotes them before it
 	// prints the node.
@@ -180,9 +202,11 @@ func (e *Encoder) Encode(ctx context.Context, v any) error {
 		return err
 	}
 
-	var p printer.Printer
+	b, err := render(node)
+	if err != nil {
+		return err
+	}
 
-	b := p.PrintNode(node)
 	if e.written {
 		b = append([]byte("---\n"), b...)
 	}
@@ -204,6 +228,37 @@ func (e *Encoder) Encode(ctx context.Context, v any) error {
 // flushes it after Close.
 func (e *Encoder) Close() error {
 	return e.writeErr()
+}
+
+// render returns the YAML text of node, or an error when the go-yaml
+// printer panics on a node it cannot lay out, such as one with a negative
+// indent. The PrintNode method of that printer formats the node with fmt,
+// which writes the panic into the text instead.
+func render(node ast.Node) (_ []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("print YAML: %v", r)
+		}
+	}()
+
+	return []byte(node.String() + "\n"), nil
+}
+
+// holeFinder is an [ast.Visitor] that reports whether a tree holds a nil
+// node.
+type holeFinder struct {
+	found bool
+}
+
+// Visit implements [ast.Visitor].
+func (h *holeFinder) Visit(node ast.Node) ast.Visitor {
+	if node == nil {
+		h.found = true
+
+		return nil
+	}
+
+	return h
 }
 
 // writeErr returns the first error the writer returned, wrapped with the

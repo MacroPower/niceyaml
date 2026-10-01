@@ -538,6 +538,66 @@ func TestEncoder_Encode_context(t *testing.T) {
 	assert.Equal(t, "policy: redact\n", buf.String())
 }
 
+// emptyMarshaler marshals to no YAML.
+type emptyMarshaler struct{}
+
+func (emptyMarshaler) MarshalYAML() ([]byte, error) {
+	return nil, nil
+}
+
+// commentMarshaler marshals to YAML that holds only a comment.
+type commentMarshaler struct{}
+
+func (commentMarshaler) MarshalYAML() ([]byte, error) {
+	return []byte("# comment\n"), nil
+}
+
+func TestEncoder_Encode_noNode(t *testing.T) {
+	t.Parallel()
+
+	comments := yamltest.FirstDocument(t, "# comment\n").AST()
+
+	tcs := map[string]struct {
+		input any
+	}{
+		"empty marshaler": {
+			input: emptyMarshaler{},
+		},
+		"empty marshaler as a map value": {
+			input: map[string]any{"k": emptyMarshaler{}},
+		},
+		"empty marshaler as a sequence entry": {
+			input: []any{emptyMarshaler{}, 1},
+		},
+		"comment marshaler as a map value": {
+			input: map[string]any{"k": commentMarshaler{}},
+		},
+		"comment-only AST": {
+			input: comments,
+		},
+		"comment-only AST as a map value": {
+			input: map[string]any{"k": comments},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+
+			enc := encoder.New(&buf)
+
+			err := enc.Encode(t.Context(), tc.input)
+			require.ErrorIs(t, err, encoder.ErrNoNode)
+			assert.Empty(t, buf.String())
+
+			require.NoError(t, enc.Encode(t.Context(), "next"))
+			assert.Equal(t, "next\n", buf.String(), "a later document has no separator")
+		})
+	}
+}
+
 func TestEncoder_Close(t *testing.T) {
 	t.Parallel()
 
@@ -598,6 +658,18 @@ func TestWithIndent_panicsBelowOne(t *testing.T) {
 	for _, spaces := range []int{0, -1} {
 		assert.Panics(t, func() { encoder.WithIndent(spaces) }, "spaces=%d", spaces)
 	}
+}
+
+func TestWithYAMLOptions_negativeIndent(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	enc := encoder.New(&buf, encoder.WithYAMLOptions(yaml.Indent(-2)))
+
+	err := enc.Encode(t.Context(), map[string]map[string]int{"a": {"b": 1}})
+	require.Error(t, err)
+	assert.Empty(t, buf.String())
 }
 
 func TestPretty(t *testing.T) {
