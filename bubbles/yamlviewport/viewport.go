@@ -786,8 +786,10 @@ func (m *Model) ViewMode() ViewMode {
 
 // SetViewMode sets the view mode and rebuilds the view when the viewport
 // shows a diff. Without a diff every mode shows the same lines, so the
-// change counts as a layout change and keeps the top line. The mode already
-// set leaves the view where it is. An undefined mode falls back to
+// change counts as a layout change and keeps the top line. Only
+// [ViewModeSideBySide] changes the width lines wrap to, so without a diff a
+// switch between [ViewModeFull] and [ViewModeHunks] leaves the view where it
+// is, as does the mode already set. An undefined mode falls back to
 // [ViewModeFull], the default.
 func (m *Model) SetViewMode(mode ViewMode) {
 	if mode < ViewModeFull || mode > ViewModeSideBySide {
@@ -799,8 +801,22 @@ func (m *Model) SetViewMode(mode ViewMode) {
 	}
 
 	if !m.ShowingDiff() {
-		// Side-by-side mode halves the width lines wrap to, so the rows
-		// reflow as they do for a new width.
+		prev := m.viewMode
+		old := m.paneWidth()
+
+		m.viewMode = mode
+
+		// Row counts depend on the mode only through the pane width, which
+		// side-by-side mode halves, so an unchanged pane width keeps the
+		// cache, as in SetWidth.
+		if m.paneWidth() == old {
+			return
+		}
+
+		// The rows reflow as they do for a new width. The old mode set the
+		// width the old rows wrap to, so anchorTop reads the top line under
+		// the old mode.
+		m.viewMode = prev
 		m.relayout()
 
 		m.viewMode = mode

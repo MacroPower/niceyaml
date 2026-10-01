@@ -5283,7 +5283,8 @@ func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
 	// A program may pass the current width on every window size message,
 	// or restyle the frame on every focus change. A change that leaves the
 	// printer and the pane width as they are keeps the row counts, so the
-	// next read lays out nothing.
+	// next read lays out nothing. Without a diff, the full and hunks view
+	// modes show the same lines at the same pane width.
 	frame := lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Width(30)
 
 	tcs := map[string]struct {
@@ -5308,6 +5309,12 @@ func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
 		},
 		"same printer": {
 			change: func(m *yamlviewport.Model, p *printer.Printer) { m.SetPrinter(p) },
+		},
+		"hunks view mode without diff": {
+			change: func(m *yamlviewport.Model, _ *printer.Printer) { m.SetViewMode(yamlviewport.ViewModeHunks) },
+		},
+		"toggled view mode without diff": {
+			change: func(m *yamlviewport.Model, _ *printer.Printer) { m.ToggleViewMode() },
 		},
 	}
 
