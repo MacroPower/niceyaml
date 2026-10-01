@@ -1402,16 +1402,16 @@ func (p *Printer) wrapContent(content string, gutterWidth int) []string {
 	var out []string
 
 	for text := range strings.SplitSeq(content, "\n") {
-		out = append(out, wrapLine(text, cw)...)
+		out = append(out, wrapText(text, cw)...)
 	}
 
 	return out
 }
 
-// wrapLine wraps text, which holds no newline, to rows of at most cw
+// wrapText wraps text, which holds no newline, to rows of at most cw
 // cells. It keeps every grapheme cluster whole on one row, and a cluster
 // wider than cw takes a row of its own and runs past the width.
-func wrapLine(text string, cw int) []string {
+func wrapText(text string, cw int) []string {
 	rows := wrapRows(text, cw, wrapOnCharacters)
 
 	// The wrap leaves a row wider than cw in three cases. When a full row
