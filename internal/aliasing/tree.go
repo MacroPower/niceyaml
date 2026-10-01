@@ -55,8 +55,8 @@ func CheckDecode(n Node) error {
 // byte of its text. A node without an alias passes, as does a nil Node.
 // The document keeps the count, as it keeps the count of CheckDecode.
 //
-// A caller that decodes n into such a type, which [DecodesText] reports,
-// runs CheckDecodeText as well as CheckDecode.
+// A caller that decodes n into a type that [DecodesText] reports runs
+// CheckDecodeText as well as CheckDecode.
 func CheckDecodeText(n Node) error {
 	state := stateOf(n)
 	if state == nil || !holdsAlias(n.AST()) {

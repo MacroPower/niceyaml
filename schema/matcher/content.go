@@ -158,7 +158,8 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	// A decode into a type that decodes itself from text writes the node
 	// out with a copy of the text of each alias, which the count above
 	// leaves out. A struct field or an element of such a type gets the
-	// same treatment.
+	// same treatment, as does a type whose UnmarshalYAML takes a decode
+	// function, which may decode the node into such a type.
 	if aliasing.DecodesText(reflect.TypeFor[T]()) {
 		err = aliasing.CheckDecodeText(node)
 		if err != nil {

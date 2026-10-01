@@ -1710,6 +1710,10 @@ func TestContent(t *testing.T) {
 				m:   matcher.Content(kindPath, textChain{}),
 				err: schema.ErrExcessiveAliasing,
 			},
+			"unmarshaler that decodes into text unmarshalers": {
+				m:   matcher.Content(kindPath, forwardedText("vx")),
+				err: schema.ErrExcessiveAliasing,
+			},
 			"plain string": {
 				m: matcher.Content(kindPath, "x"),
 			},
@@ -1941,6 +1945,27 @@ type scalarKeys struct {
 // the field, since the path spells the key 16.
 type anyField struct {
 	F any `yaml:"16"`
+}
+
+// forwardedText decodes its node into a list of [prefixedString]
+// through the function go-yaml hands its UnmarshalYAML, and joins the
+// list. Its type reaches no text type, so only its method leads the
+// decoder to one.
+type forwardedText string
+
+func (f *forwardedText) UnmarshalYAML(unmarshal func(any) error) error {
+	var items []prefixedString
+
+	err := unmarshal(&items)
+	if err != nil {
+		return err
+	}
+
+	for _, item := range items {
+		*f += forwardedText(item)
+	}
+
+	return nil
 }
 
 // plainField holds only fields that decode as plain values do.

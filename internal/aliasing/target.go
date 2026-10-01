@@ -19,6 +19,15 @@ var (
 		reflect.TypeFor[encoding.TextUnmarshaler](),
 	}
 
+	// The interfaces through which the go-yaml decoder hands a value a
+	// function that decodes its node into any type the method picks, such
+	// as one that reads text. A walk of the type cannot see that type, so
+	// a decode into one of these may read text too.
+	callbackUnmarshalerTypes = []reflect.Type{
+		reflect.TypeFor[yaml.InterfaceUnmarshaler](),
+		reflect.TypeFor[yaml.InterfaceUnmarshalerContext](),
+	}
+
 	// The go-yaml decoder parses a [time.Time] from the value of a scalar
 	// before it looks for an UnmarshalText method, so it reads no text. A
 	// type that embeds one gets no such rule.
@@ -33,7 +42,9 @@ var (
 // text of its node, through an UnmarshalText method or an UnmarshalYAML
 // method that takes YAML bytes. That holds when t or a type the decoder
 // reaches from t, through a pointer, a struct field, an array or slice
-// element, or a map key or element, has such a method on its pointer. A
+// element, or a map key or element, has such a method on its pointer. An
+// UnmarshalYAML method that takes a decode function counts too, since it
+// can decode the node into any type, including one that reads text. A
 // decode into such a type runs [CheckDecodeText] as well as
 // [CheckDecode]. The decoder parses a [time.Time] from the value of its
 // scalar, so it reads no text, though its pointer has UnmarshalText.
@@ -60,7 +71,9 @@ func reachesText(t reflect.Type, seen map[reflect.Type]bool) bool {
 
 	seen[t] = true
 
-	if slices.ContainsFunc(textUnmarshalerTypes, reflect.PointerTo(t).Implements) {
+	ptr := reflect.PointerTo(t)
+	if slices.ContainsFunc(textUnmarshalerTypes, ptr.Implements) ||
+		slices.ContainsFunc(callbackUnmarshalerTypes, ptr.Implements) {
 		return true
 	}
 

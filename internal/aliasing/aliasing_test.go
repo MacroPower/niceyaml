@@ -317,6 +317,17 @@ type bytesContextValue struct{}
 
 func (*bytesContextValue) UnmarshalYAML(context.Context, []byte) error { return nil }
 
+// funcValue decodes its node through the function go-yaml hands it.
+type funcValue struct{}
+
+func (*funcValue) UnmarshalYAML(func(any) error) error { return nil }
+
+// funcContextValue decodes its node through the function go-yaml hands
+// it with a context.
+type funcContextValue struct{}
+
+func (*funcContextValue) UnmarshalYAML(context.Context, func(any) error) error { return nil }
+
 // textChain refers to itself and holds a text field below the cycle.
 type textChain struct {
 	Next *textChain
@@ -351,6 +362,14 @@ func TestDecodesText(t *testing.T) {
 		},
 		"bytes unmarshaler with a context": {
 			typ:  reflect.TypeFor[bytesContextValue](),
+			want: true,
+		},
+		"unmarshaler with a decode function": {
+			typ:  reflect.TypeFor[funcValue](),
+			want: true,
+		},
+		"unmarshaler with a decode function and a context": {
+			typ:  reflect.TypeFor[funcContextValue](),
 			want: true,
 		},
 		"pointer": {

@@ -8146,6 +8146,34 @@ func (a *aliasText) UnmarshalText(text []byte) error {
 	return nil
 }
 
+// forwardText decodes its node into a list of [aliasText] through the
+// function go-yaml hands its UnmarshalYAML, and holds the length of the
+// list. Its type reaches no text type, so only its method leads the
+// decoder to one.
+type forwardText int
+
+func (f *forwardText) UnmarshalYAML(unmarshal func(any) error) error {
+	var items []aliasText
+
+	err := unmarshal(&items)
+	*f = forwardText(len(items))
+
+	return err
+}
+
+// forwardTextContext is [forwardText] with an UnmarshalYAML that takes a
+// context.
+type forwardTextContext int
+
+func (f *forwardTextContext) UnmarshalYAML(_ context.Context, unmarshal func(any) error) error {
+	var items []aliasText
+
+	err := unmarshal(&items)
+	*f = forwardTextContext(len(items))
+
+	return err
+}
+
 func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 	t.Parallel()
 
@@ -8203,6 +8231,27 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 			input:  manyAliases,
 			target: func() any { return new(map[string]rawText) },
 			err:    niceyaml.ErrExcessiveAliasing,
+		},
+		"unmarshaler that decodes into text unmarshalers": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new(forwardText) },
+			err:    niceyaml.ErrExcessiveAliasing,
+		},
+		"unmarshaler with a context that decodes into text unmarshalers": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new(forwardTextContext) },
+			err:    niceyaml.ErrExcessiveAliasing,
+		},
+		"struct field unmarshaler that decodes into text unmarshalers": {
+			input: manyAliases,
+			target: func() any {
+				return new(struct {
+					Kind forwardText `yaml:"kind"`
+				})
+			},
+			err: niceyaml.ErrExcessiveAliasing,
 		},
 		"string elements": {
 			input:  manyAliases,
