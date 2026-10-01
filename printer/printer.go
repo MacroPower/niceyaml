@@ -692,10 +692,11 @@ func WithStyles(s style.Styler) Option {
 
 // WithGutter is an [Option] that sets the [Gutter] for rendering.
 // By default, [DefaultGutter] renders line numbers and diff markers. A nil
-// g selects [NoGutter].
+// g, or one holding a nil func or pointer such as a nil [GutterFunc],
+// selects [NoGutter].
 func WithGutter(g Gutter) Option {
 	return func(p *Printer) {
-		if g == nil {
+		if nilness.IsNil(g) {
 			g = NoGutter
 		}
 

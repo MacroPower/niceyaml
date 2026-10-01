@@ -6440,10 +6440,37 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 	view := niceyaml.NewSourceFromString("key: value").View()
 	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Col: 5})
 
-	p := testPrinterWithGutter(nil)
+	want := testPrinterWithGutter(printer.NoGutter).Print(view)
 
-	assert.Equal(t, testPrinterWithGutter(printer.NoGutter).Print(view), p.Print(view))
-	assert.Equal(t, "key: value\n     ^ note", p.Print(view))
+	// A nil Gutter, or one holding a nil func or pointer, selects NoGutter
+	// rather than panicking on the first Width or Render call.
+	tcs := map[string]struct {
+		gutter printer.Gutter
+	}{
+		"nil": {
+			gutter: nil,
+		},
+		"nil GutterFunc": {
+			gutter: printer.GutterFunc(nil),
+		},
+		"nil pointer": {
+			gutter: (*fixedGutter)(nil),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var got string
+
+			require.NotPanics(t, func() {
+				got = testPrinterWithGutter(tc.gutter).Print(view)
+			})
+			assert.Equal(t, want, got)
+			assert.Equal(t, "key: value\n     ^ note", got)
+		})
+	}
 }
 
 func TestPrinter_WithStyles_Nil(t *testing.T) {
