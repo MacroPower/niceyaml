@@ -204,3 +204,65 @@ func TestNormalize_Concurrent(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestWithTransformer_Nil(t *testing.T) {
+	t.Parallel()
+
+	nop := func() transform.Transformer {
+		return transform.Nop
+	}
+	returnsNil := func() transform.Transformer {
+		return nil
+	}
+	returnsNilPointer := func() transform.Transformer {
+		return (*runes.Transformer)(nil)
+	}
+
+	tcs := map[string]struct {
+		call func()
+		want string
+	}{
+		"nil constructor": {
+			call: func() {
+				normalizer.WithTransformer(nil)
+			},
+			want: "normalizer.WithTransformer: constructor at index 0 is nil",
+		},
+		"nil constructor after a valid one": {
+			call: func() {
+				normalizer.WithTransformer(nop, nil)
+			},
+			want: "normalizer.WithTransformer: constructor at index 1 is nil",
+		},
+		"constructor returns nil with default stages": {
+			call: func() {
+				normalizer.New(normalizer.WithTransformer(returnsNil))
+			},
+			want: "normalizer.WithTransformer: constructor returned nil",
+		},
+		"constructor returns nil as the only stage": {
+			call: func() {
+				normalizer.New(
+					normalizer.WithCaseFold(false),
+					normalizer.WithDiacriticFold(false),
+					normalizer.WithTransformer(returnsNil),
+				)
+			},
+			want: "normalizer.WithTransformer: constructor returned nil",
+		},
+		"constructor returns nil pointer": {
+			call: func() {
+				normalizer.New(normalizer.WithTransformer(returnsNilPointer))
+			},
+			want: "normalizer.WithTransformer: constructor returned nil",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.PanicsWithValue(t, tc.want, tc.call)
+		})
+	}
+}

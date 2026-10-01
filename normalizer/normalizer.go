@@ -1,7 +1,9 @@
 package normalizer
 
 import (
+	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"unicode"
 
@@ -11,6 +13,8 @@ import (
 	"golang.org/x/text/transform"
 	"golang.org/x/text/unicode/norm"
 	"golang.org/x/text/width"
+
+	"go.jacobcolvin.com/niceyaml/internal/nilness"
 )
 
 // Normalizer transforms strings by applying a configurable pipeline of Unicode
@@ -79,6 +83,10 @@ func New(opts ...Option) *Normalizer {
 		return cfg.build()
 	}
 
+	// Building the first pipeline now makes a constructor that returns nil
+	// panic here, next to the configuration, instead of in a later call.
+	n.pool.Put(cfg.build())
+
 	return n
 }
 
@@ -111,7 +119,12 @@ func (c *config) build() transform.Transformer {
 	}
 
 	for _, newTransformer := range c.transformers {
-		transformers = append(transformers, newTransformer())
+		t := newTransformer()
+		if nilness.IsNil(t) {
+			panic("normalizer.WithTransformer: constructor returned nil")
+		}
+
+		transformers = append(transformers, t)
 	}
 
 	switch len(transformers) {
@@ -155,7 +168,19 @@ func WithDiacriticFold(enabled bool) Option {
 //	normalizer.WithTransformer(func() transform.Transformer {
 //		return runes.Remove(runes.In(unicode.Zs))
 //	})
+//
+// Panics if any constructor is nil. [New] calls each constructor once and
+// panics if one returns nil or a nil pointer. [Normalizer.Normalize] can
+// call a constructor again, and it panics the same way.
 func WithTransformer(newTransformer ...func() transform.Transformer) Option {
+	for i, fn := range newTransformer {
+		if fn == nil {
+			panic(fmt.Sprintf("normalizer.WithTransformer: constructor at index %d is nil", i))
+		}
+	}
+
+	newTransformer = slices.Clone(newTransformer)
+
 	return func(c *config) {
 		c.transformers = append(c.transformers, newTransformer...)
 	}
