@@ -433,6 +433,32 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: -1e3`),
 			want:    true,
 		},
+		"float32 inf does not match an overflowing plain exponent": {
+			// The decoder reads 1e39 as a string and narrows it to +Inf.
+			matcher: matcher.Content(versionPath, float32(math.Inf(1))),
+			input:   stringtest.Input(`version: 1e39`),
+			want:    false,
+		},
+		"float32 inf does not match an overflowing float": {
+			matcher: matcher.Content(versionPath, float32(math.Inf(1))),
+			input:   stringtest.Input(`version: 4.0e+38`),
+			want:    false,
+		},
+		"float32 negative inf does not match an overflowing float": {
+			matcher: matcher.Content(versionPath, float32(math.Inf(-1))),
+			input:   stringtest.Input(`version: -1.0e+39`),
+			want:    false,
+		},
+		"float32 inf matches inf": {
+			matcher: matcher.Content(versionPath, float32(math.Inf(1))),
+			input:   stringtest.Input(`version: .inf`),
+			want:    true,
+		},
+		"float32 negative inf matches negative inf": {
+			matcher: matcher.Content(versionPath, float32(math.Inf(-1))),
+			input:   stringtest.Input(`version: -.inf`),
+			want:    true,
+		},
 		"empty string does not match null": {
 			matcher: matcher.Content(kindPath, ""),
 			input:   stringtest.Input(`kind:`),
@@ -781,6 +807,11 @@ func TestContent(t *testing.T) {
 		"array int64 element does not match an overflowing float": {
 			matcher: matcher.Content(versionPath, [1]int64{math.MaxInt64}),
 			input:   stringtest.Input(`version: [1e19]`),
+			want:    false,
+		},
+		"array float32 inf element does not match an overflowing float": {
+			matcher: matcher.Content(versionPath, [1]float32{float32(math.Inf(1))}),
+			input:   stringtest.Input(`version: [4.0e+38]`),
 			want:    false,
 		},
 		"array string element matches float text as written": {

@@ -40,7 +40,9 @@ type contentMatcher[T comparable] struct {
 // through an UnmarshalYAML or UnmarshalText method, matches the value its
 // own decode gives. A number matches a scalar the document writes as a
 // number, whatever its spelling, though an integer want never matches a
-// value with a fraction. A NaN want matches .nan in any of its
+// value with a fraction. An infinite want matches only an infinity, so a
+// float32 want of +Inf does not match 1e39, which a float32 cannot hold.
+// A NaN want matches .nan in any of its
 // spellings, though NaN never equals itself in Go. A quoted, block, or
 // !!str scalar is a string, so version: "2" does not match 2. A plain
 // scalar that YAML reads as a string, such as inf or 0x1p-2, matches no
@@ -630,6 +632,10 @@ func matchScalar(node *niceyaml.Node, raw any, got, want reflect.Value) bool {
 		return false
 	}
 
+	if got.Kind() == reflect.Float32 && !floatHoldsFloat32(raw, got) {
+		return false
+	}
+
 	// T may be an interface such as any, whose dynamic type decides whether
 	// == applies. A value that == cannot compare, such as a map,
 	// matches nothing rather than panicking. Two numbers behind an
@@ -981,6 +987,23 @@ func floatHoldsInteger(raw any, v reflect.Value) bool {
 	}
 
 	return !isPlain(v.Type()) || floatEqualsInteger(f, v)
+}
+
+// floatHoldsFloat32 reports whether raw, the value as the YAML types name
+// it, can match v, the float32 a decode of it gave, and reports true for
+// a raw value that holds no float. The decoder converts a float to a
+// float32 without a range check, which turns a finite value too large
+// for a float32, such as 1e39, into an infinity, so an infinite v
+// matches only an infinite float. A type that decodes itself reads the
+// float its own way, so floatHoldsFloat32 reports true for it.
+func floatHoldsFloat32(raw any, v reflect.Value) bool {
+	if !isPlain(v.Type()) || !math.IsInf(v.Float(), 0) {
+		return true
+	}
+
+	f, ok := rawFloat(raw)
+
+	return !ok || math.IsInf(f, 0)
 }
 
 // rawFloat returns the float that raw, the value as the YAML types name
