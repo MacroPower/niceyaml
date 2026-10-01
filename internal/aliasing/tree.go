@@ -230,8 +230,8 @@ const (
 // redefines the "!!" handle. Each copy of a scalar in that text costs its
 // length, so there a scalar counts one node per byte of its text, and an
 // alias to one adds that count to the aliased nodes. The content of an
-// anchor on a scalar counts its bytes too, so a scalar written out once
-// weighs what its anchor does.
+// anchor on a scalar counts its bytes too where the counter reads its
+// definition, so a scalar written out once weighs what its anchor does.
 //
 // An alias to a text tag, such as *s for `&s !!str x`, counts the text
 // under the tag even where the decoder reads the alias into a value.
@@ -380,13 +380,17 @@ func isTextTag(node ast.Node) bool {
 }
 
 // anchor returns the number of nodes a decode of the content of the
-// anchor reads, as [treeCounter.count] counts them. The content of an
-// anchor on a scalar counts as text, since an alias to it may copy that
-// text. An anchor on an alias defines no content of its own, so its
-// alias counts as it would without the anchor.
+// anchor reads, as [treeCounter.count] counts them. With top set, the
+// counter reads the definition of the anchor, and the content of an
+// anchor on a scalar counts as text there, since an alias to it may copy
+// that text. Elsewhere, such as in an alias to a mapping around the
+// anchor, the decoder reads the anchored scalar as it reads any other,
+// so the scalar counts as mode reads it. An anchor on an alias defines no
+// content of its own, so its alias counts as it would without the
+// anchor.
 func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool, mode readMode) int {
 	_, onAlias := astnode.Content(anchor.Value).(*ast.AliasNode)
-	if !onAlias && !isCollection(anchor.Value) {
+	if top && !onAlias && !isCollection(anchor.Value) {
 		mode = readText
 	}
 

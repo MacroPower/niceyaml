@@ -42,6 +42,12 @@ func anchoredAliasLevels() string {
 // longScalar anchors a scalar of 2000 bytes as a.
 var longScalar = "a: &a " + strings.Repeat("x", 2000) + "\n"
 
+// anchoredInMapping returns a mapping anchored as base that holds a
+// scalar of 2000 bytes under an anchor of its own.
+func anchoredInMapping() string {
+	return "base: &base\n  name: &n " + strings.Repeat("x", 2000) + "\n  x: 1\n"
+}
+
 // flowList returns a flow sequence that lists item count times.
 func flowList(item string, count int) string {
 	return "[" + strings.TrimSuffix(strings.Repeat(item+", ", count), ", ") + "]"
@@ -207,6 +213,22 @@ func TestCheckDecode(t *testing.T) {
 		},
 		"one scalar alias written out in a key": {
 			input: longScalar + "k: &k [*a]\nm: {? *k : 1}\n",
+		},
+		"aliases to a mapping holding an anchored scalar": {
+			// The decoder shares the scalar under n at each *base.
+			input: anchoredInMapping() + "items: " + flowList("*base", 300) + "\n",
+		},
+		"aliases to a mapping holding an anchored scalar under a string tag": {
+			// Each *base writes out the mapping as text, with a copy
+			// of the scalar under n.
+			input: anchoredInMapping() + "items: " + flowList("!!str *base", 300) + "\n",
+			err:   aliaslimit.ErrExcessiveAliasing,
+		},
+		"alias keys to a mapping holding an anchored scalar": {
+			// Each key decodes to a mapping, so the decoder spells it
+			// as text, with a copy of the scalar under n.
+			input: anchoredInMapping() + "items: " + flowList("{? *base : 1}", 300) + "\n",
+			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 	}
 
