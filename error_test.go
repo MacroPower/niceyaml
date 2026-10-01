@@ -4036,6 +4036,49 @@ func TestSourceError_Excerpt(t *testing.T) {
 		}
 	})
 
+	t.Run("the line a location names joins the excerpt when its highlight lies elsewhere", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			opt  niceyaml.ErrorOption
+			src  string
+			row  string
+			want []int
+		}{
+			"position on a line of only spaces in a block scalar": {
+				src:  "script: |\n  echo a\n  \n  echo b\n",
+				opt:  niceyaml.AtPosition(position.New(2, 0)),
+				want: []int{2, 3, 4},
+				row:  "   3 |   \n     | ^\n",
+			},
+			"range starting at the end of its first line": {
+				src:  "a: 1\nb: 2\n",
+				opt:  niceyaml.AtRange(position.NewRange(position.New(0, 4), position.New(1, 1))),
+				want: []int{1, 2},
+				row:  "   1 | a: 1\n     |     ^\n",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var bound *niceyaml.SourceError
+
+				src := niceyaml.NewSourceFromString(tc.src)
+				require.ErrorAs(t, yamltest.Bind(t, src, niceyaml.NewError("bad", tc.opt)), &bound)
+
+				excerpt, ok := bound.Excerpt(0)
+				require.True(t, ok)
+				assert.Equal(t, tc.want, lineNumbers(excerpt))
+
+				formatted := niceyaml.FormatError(bound, 0)
+				assert.Contains(t, formatted, tc.row)
+				assert.NotContains(t, formatted, "...")
+			})
+		}
+	})
+
 	t.Run("an annotation past the end of its line sits after the last rune", func(t *testing.T) {
 		t.Parallel()
 

@@ -1876,13 +1876,15 @@ func rangeOf(ranges position.Ranges, at position.Position) position.Range {
 // highlight, so the range shows its extent without color. The annotation
 // starts at the first column the highlight covers on its line, so a
 // position on the spaces around a token puts the message under the
-// token. A location with no token under it, such as a position past the
-// end of a line or a path to an empty value, gets an overlay of no width
-// at its column. The overlay renders nothing and still counts as
-// decoration, so [line.View.Hunks] keeps the line. Annotate moves a
-// column past the end of its line to the column after its last rune, for
-// the overlay and the message alike, so a renderer spends at most one
-// cell past the line on the mark.
+// token. A location whose highlight leaves out its own line gets an
+// overlay of no width at its column on that line. Such locations include
+// a position past the end of a line, a path to an empty value, a
+// position on a line of only spaces inside a block scalar, and a range
+// that starts at the end of its first line. The overlay renders nothing
+// and still counts as decoration, so [line.View.Hunks] keeps the line.
+// Annotate moves a column past the end of its line to the column after
+// its last rune, for the overlay and the message alike, so a renderer
+// spends at most one cell past the line on the mark.
 // [SourceError.Error] still reports the column as given.
 //
 // Annotate finds each line by identity rather than by index, since every
@@ -2065,10 +2067,13 @@ func annotate(view *line.View, src *Source, positions []errorPosition) bool {
 // bound to src, on view and returns the indices of the lines it marked,
 // with repeats. The view may hold the lines of src at any indices, as a
 // diff does, so every mark goes to the index that holds its line. A
-// position with no token under it, or a range that covers no column of
-// its lines, has nothing to highlight, so its line gets an overlay of no
-// width at its column. The overlay renders nothing and still marks the
-// line as decorated, so the line joins the hunks [line.View.Hunks] keeps.
+// position whose highlight leaves out its own line gets an overlay of no
+// width at its column on that line. Such positions include one with no
+// token under it, a range that covers no column of its lines, a
+// position on a line of only spaces inside a block scalar, and a range
+// that starts at the end of its first line. The overlay renders nothing
+// and still marks the line as decorated, so the line joins the hunks
+// [line.View.Hunks] keeps.
 // The annotation below a line starts at the first column the highlight of
 // its position covers on that line, where [markUnannotated] starts a caret
 // run, so a position on the spaces around a token puts its message under
@@ -2094,14 +2099,16 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 			segments = append(segments, src.lines.SliceLines(r)...)
 		}
 
+		start, onLine := highlightStart(pos.pos, segments)
+
 		note := pos
-		note.pos.Col = highlightStart(pos.pos, segments)
+		note.pos.Col = start
 		notes = append(notes, note)
 
 		if i, ok := index(pos.pos.Line); ok {
 			marked = append(marked, i)
 
-			if len(segments) == 0 {
+			if !onLine {
 				col := min(pos.pos.Col, src.lines.Line(pos.pos.Line).Width())
 				view.AddLineOverlay(i, line.Overlay{
 					Cols: position.NewSpan(col, col),
@@ -2139,8 +2146,9 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 }
 
 // highlightStart returns the first column that segments cover on the
-// line of at, or the column of at when no segment lies on that line.
-func highlightStart(at position.Position, segments []position.Range) int {
+// line of at, or the column of at when no segment lies on that line. It
+// also reports whether any segment lies on that line.
+func highlightStart(at position.Position, segments []position.Range) (int, bool) {
 	col, found := at.Col, false
 
 	for _, lr := range segments {
@@ -2149,7 +2157,7 @@ func highlightStart(at position.Position, segments []position.Range) int {
 		}
 	}
 
-	return col
+	return col, found
 }
 
 // positions returns the sources the tree of e touches, with the resolved
