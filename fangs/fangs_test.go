@@ -82,6 +82,18 @@ func TestErrorHandler(t *testing.T) {
 		niceyaml.AtPath(paths.Root().Child("value")),
 	))
 
+	// A source whose name opens with Cobra's wording for an unknown flag,
+	// so the message of an error bound to it does too.
+	flagLikeFile := niceyaml.NewSourceFromTokens(
+		tokens.Tokenize(source),
+		niceyaml.WithName("unknown flag: a.yaml"),
+	)
+
+	flagLikeNameErr := yamltest.Bind(t, flagLikeFile, niceyaml.NewError(
+		"bad name",
+		niceyaml.AtPath(paths.Root().Child("name").Key()),
+	))
+
 	emptyMessageErr := yamltest.Bind(t, src, niceyaml.WrapError(
 		silentError{niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name").Key()))},
 	))
@@ -297,6 +309,24 @@ func TestErrorHandler(t *testing.T) {
 				"",
 			),
 		},
+		"non-usage error opening with unknown commands": {
+			err: errors.New("unknown commands.yaml:1:4: bad"),
+			want: stringtest.JoinLF(
+				"Error",
+				"  unknown commands.yaml:1:4: bad",
+				"",
+				"",
+			),
+		},
+		"non-usage error opening with unknown command-line": {
+			err: errors.New("unknown command-line option in config"),
+			want: stringtest.JoinLF(
+				"Error",
+				"  unknown command-line option in config",
+				"",
+				"",
+			),
+		},
 		"non-usage error with flag word": {
 			err: errors.New("flagged as incorrect"),
 			want: stringtest.JoinLF(
@@ -311,6 +341,19 @@ func TestErrorHandler(t *testing.T) {
 			want: stringtest.JoinLF(
 				"Error",
 				"  1:1: $.name~: invalid name",
+				"  ",
+				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
+				"  <textError>^^^^</textError>",
+				"  <nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
+				"",
+				"",
+			),
+		},
+		"niceyaml error whose source name opens with a usage pattern": {
+			err: flagLikeNameErr,
+			want: stringtest.JoinLF(
+				"Error",
+				"  unknown flag: a.yaml:1:1: $.name~: bad name",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <textError>^^^^</textError>",

@@ -9,6 +9,7 @@ import (
 	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/printer"
 )
 
@@ -137,11 +138,17 @@ var argCountError = regexp.MustCompile(
 // patterns cover Cobra's flag parser, its command lookup, its argument
 // validators, its required-flag check, and its flag groups. They follow
 // Cobra's exact wording, so an application error that opens with a word
-// such as "accepts" gets no usage hint.
+// such as "accepts" gets no usage hint. Cobra never binds an error to a
+// source, so an error that holds a binding gets no usage hint either, even
+// when its message opens with a source name that matches a pattern.
 // This is a workaround until Cobra exposes a proper usage error type.
 // See: https://github.com/spf13/cobra/pull/2266
 func isUsageError(err error) bool {
 	if err == nil {
+		return false
+	}
+
+	for range niceyaml.Bindings(err) {
 		return false
 	}
 
@@ -155,7 +162,7 @@ func isUsageError(err error) bool {
 		"unknown flag:",
 		"unknown shorthand flag:",
 		"bad flag syntax:",
-		"unknown command",
+		`unknown command "`,
 		`invalid argument "`,
 		"required flag(s)",
 		"if any flags in the group",
