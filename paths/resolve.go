@@ -95,10 +95,11 @@ type resolver struct {
 // mappingKeys indexes the entries of one mapping for [resolver.lookup] and
 // [recursiveWalk.descend]. The names map holds the index of the last entry
 // with each key name, and the merges slice holds the index of each `<<`
-// entry, in document order.
-// A merge key and a real key whose text is `<<`, such as an alias key, are
-// separate keys to the decoder, so names holds the last merge key under
-// `<<` only when no real key has that name.
+// entry, in document order. The names map leaves out an entry whose key
+// has no name, as [resolver.keyName] reports it, so no lookup finds that
+// entry. A merge key and a real key whose text is `<<`, such as an alias
+// key, are separate keys to the decoder, so names holds the last merge key
+// under `<<` only when no real key has that name.
 type mappingKeys struct {
 	names  map[string]int
 	merges []int
@@ -127,15 +128,16 @@ func (r *resolver) mappingKeys(mapping *ast.MappingNode) *mappingKeys {
 			continue
 		}
 
-		name, _ := r.keyName(entry.Key)
-		keys.names[name] = i
+		if name, ok := r.keyName(entry.Key); ok {
+			keys.names[name] = i
+		}
 	}
 
 	if n := len(keys.merges); n > 0 {
 		last := keys.merges[n-1]
-		name, _ := r.keyName(mapping.Values[last].Key)
+		name, named := r.keyName(mapping.Values[last].Key)
 
-		if _, ok := keys.names[name]; !ok {
+		if _, ok := keys.names[name]; named && !ok {
 			keys.names[name] = last
 		}
 	}
@@ -1361,13 +1363,15 @@ type recursiveWalk struct {
 // holds a real key whose text is `<<` next to a merge key, a path through
 // `<<` selects the real key, so descend skips the merge key. When a later
 // `<<` key brings in the key of an entry, a path through that key selects
-// the merged entry, so descend skips the entry of the mapping itself.
+// the merged entry, so descend skips the entry of the mapping itself. No
+// path selects an entry whose key has no name, so descend skips that
+// entry and everything below it as well.
 //
-// To find those entries, descend looks up the key of each entry that has a
-// `<<` key after it, and each lookup reads the values of the later merge
-// keys and the mappings they bring in. Returns [ErrExcessiveMerging] once
-// the lookups of the walk read past the limit [resolver.excessiveMerging]
-// applies.
+// To find the entries that a later `<<` key overrides, descend looks up
+// the key of each entry that has a `<<` key after it, and each lookup
+// reads the values of the later merge keys and the mappings they bring
+// in. Returns [ErrExcessiveMerging] once the lookups of the walk read past
+// the limit [resolver.excessiveMerging] applies.
 func (w *recursiveWalk) descend(node ast.Node) error {
 	if astnode.IsNil(node) {
 		return nil
@@ -1389,7 +1393,7 @@ func (w *recursiveWalk) descend(node ast.Node) error {
 			}
 
 			key, _ := w.resolver.keyName(entry.Key)
-			if keys.names[key] != i {
+			if idx, ok := keys.names[key]; !ok || idx != i {
 				continue
 			}
 
@@ -1502,7 +1506,8 @@ func isMergeKey(key ast.MapKeyNode) bool {
 // its anchor would give as a key. The bool result is false for a key with
 // no content, or with content a selector cannot name, such as a sequence,
 // and for an alias key with no anchor before it or one that leads back to
-// itself. Such a key has the empty name.
+// itself. Such a key has no name, so keyName gives the empty string for
+// it, and no child selector matches it.
 func (r *resolver) keyName(key ast.Node) (string, bool) {
 	content := astnode.Content(key)
 

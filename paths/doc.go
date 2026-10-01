@@ -36,7 +36,9 @@
 // of its anchor, so `*k` after `&k name` matches `.name`, and it matches a
 // block scalar key (`|` or `>`) by its content. [Resolver.KeyName] gives
 // the text a child selector matches a key node by, for a caller that
-// builds a path from the keys it walks.
+// builds a path from the keys it walks. A key with no name, such as an
+// alias key with no anchor before it, matches no child selector, so a
+// `..name` selector skips its entry and everything below that entry.
 //
 // [go.jacobcolvin.com/niceyaml.WithAllowDuplicateKeys] lets the parser
 // accept a mapping that defines one key twice. A path then selects the

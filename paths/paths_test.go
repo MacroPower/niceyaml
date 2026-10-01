@@ -1434,6 +1434,96 @@ func TestPath_UnknownAliasKey(t *testing.T) {
 	}
 }
 
+func TestPath_UnnamedKey(t *testing.T) {
+	t.Parallel()
+
+	// A key with no name has no text a selector can match, so neither a
+	// `.''` nor a `..name` selector reaches its entry, and the entry never
+	// hides a real empty key. The decoder never reads such a key as the
+	// empty key.
+	tcs := map[string]struct {
+		err       error
+		input     string
+		path      string
+		want      string
+		recursive string
+		matches   []string
+		opts      []niceyaml.SourceOption
+	}{
+		"alias key with no anchor": {
+			input:     "b: 2\n*nope : 1\n",
+			path:      "$.''",
+			err:       paths.ErrNotFound,
+			recursive: "$..''",
+		},
+		"alias key inside its own anchor": {
+			input:     "x: &x\n  *x : v\n",
+			path:      "$.x.''",
+			err:       paths.ErrNotFound,
+			recursive: "$..''",
+		},
+		"alias key to a mapping": {
+			input:     "a: &m {k: 1}\n*m : v\n",
+			path:      "$.''",
+			err:       paths.ErrNotFound,
+			recursive: "$..''",
+		},
+		"alias key to a sequence": {
+			input:     "a: &m [1]\n*m : v\n",
+			path:      "$.''",
+			err:       paths.ErrNotFound,
+			recursive: "$..''",
+		},
+		"entry below an alias key with no anchor": {
+			input:     "*nope : {name: 1}\nb: {name: 2}\n",
+			path:      "$.''.name",
+			err:       paths.ErrNotFound,
+			recursive: "$..name",
+			matches:   []string{"$.b.name=2"},
+		},
+		"real empty key before an alias key with no name": {
+			// The decoder keeps both entries, and reads the alias key
+			// as null.
+			opts:      []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			input:     "x: &x\n  \"\": {name: 1}\n  *x : {name: 2}\n",
+			path:      "$.x.''",
+			want:      "{name: 1}",
+			recursive: "$..name",
+			matches:   []string{"$.x.''.name=1"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).File()
+			require.NoError(t, err)
+
+			doc := file.Docs[0]
+
+			node, err := paths.MustParse(tc.path).Node(doc)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, node.String())
+			}
+
+			matches, err := paths.MustParse(tc.recursive).Matches(doc)
+			require.NoError(t, err)
+
+			var got []string
+
+			for _, m := range matches {
+				got = append(got, m.Path.String()+"="+m.Node.String())
+			}
+
+			assert.Equal(t, tc.matches, got)
+		})
+	}
+}
+
 func TestPath_AliasCycle(t *testing.T) {
 	t.Parallel()
 
@@ -1632,9 +1722,10 @@ func TestPath_HandBuiltAST(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, mapping.Values[0].GetToken(), tk)
 
-		tk, err = paths.Root().Child("").Key().Token(doc)
-		require.NoError(t, err)
-		assert.Equal(t, "1", tk.Value)
+		// An entry without a key has no name, so not even the empty
+		// name selects it.
+		_, err = paths.Root().Child("").Key().Token(doc)
+		require.ErrorIs(t, err, paths.ErrNotFound)
 	})
 }
 
