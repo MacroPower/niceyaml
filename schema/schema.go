@@ -458,8 +458,9 @@ func rootOf(n *niceyaml.Node) ast.Node {
 // A property name is the name the decoder produced, which the source may
 // spell another way, as it spells the member name 16 as 0x10. The walk
 // down root matches each mapping key by its decoded name and writes the
-// source spelling of that key into the path instead, which a path
-// selector matches.
+// source spelling of that key into the path instead. The spelling is the
+// text [paths.Resolver.KeyName] gives the key, which a path selector
+// matches.
 //
 // The walk follows each alias through the resolver of idx, so it reaches
 // the node a path through the same alias resolves to. A key under an
@@ -497,9 +498,15 @@ func sourcePath(root ast.Node, idx *memberIndex, segments []jsonschema.Segment) 
 		// The walk follows the value of the member only where the name it
 		// writes selects the entry of that member. Otherwise next stays
 		// nil, so every segment below keeps its decoded name.
-		var next ast.Node
+		var (
+			next    ast.Node
+			spelled string
+			ok      bool
+		)
 
-		spelled, ok := sourceKey(member.key)
+		if member.entry != nil {
+			spelled, ok = idx.resolver.KeyName(member.entry.Key)
+		}
 
 		switch {
 		case ok && idx.selects(node, spelled, member):
@@ -602,12 +609,10 @@ func (idx *memberIndex) selects(node ast.Node, name string, member memberNode) b
 	return err == nil && member.entry != nil && entry == member.entry
 }
 
-// memberNode holds the entry that sets a mapping member, with the key and
-// value nodes of that entry. For an alias key, the key node is the
-// content of the anchor the alias refers to.
+// memberNode holds the entry that sets a mapping member, with the value
+// node of that entry.
 type memberNode struct {
 	entry *ast.MappingValueNode
-	key   ast.Node
 	value ast.Node
 }
 
@@ -622,13 +627,11 @@ type memberNode struct {
 // resolve, or that lead back to the mapping, may set a member of any
 // name, so the table leaves out every member before it.
 //
-// An alias key decodes to the name the content of its anchor gives, and
-// the table holds that content as the key node, since a path selector
-// matches the key by the spelling of that content. A key with no name,
-// such as an alias key [aliasKeyName] cannot name or a typed-nil key a
-// tree built by hand may hold, may set a member of any name. The table
-// leaves out every member before such a key rather than hold one the key
-// may have replaced.
+// An alias key decodes to the name the content of its anchor gives. A
+// key with no name, such as an alias key [aliasKeyName] cannot name or a
+// typed-nil key a tree built by hand may hold, may set a member of any
+// name. The table leaves out every member before such a key rather than
+// hold one the key may have replaced.
 func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 	node = astnode.Content(node)
 
@@ -659,13 +662,12 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 		}
 
 		var (
-			key  ast.Node = member.Key
 			name string
 			ok   bool
 		)
 
 		if _, isAlias := astnode.Content(member.Key).(*ast.AliasNode); isAlias {
-			key, name, ok = aliasKeyName(idx.resolver, member.Key)
+			name, ok = aliasKeyName(idx.resolver, member.Key)
 		} else {
 			name, ok = decodedKey(member.Key)
 		}
@@ -677,7 +679,7 @@ func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
 		}
 
 		if _, seen := table.members[name]; !seen {
-			table.members[name] = memberNode{entry: member, key: key, value: member.Value}
+			table.members[name] = memberNode{entry: member, value: member.Value}
 		}
 	}
 
@@ -715,12 +717,12 @@ func (idx *memberIndex) addMerged(found map[string]memberNode, member *ast.Mappi
 	return true
 }
 
-// aliasKeyName returns the content of the anchor an alias key refers to,
-// through r, and the member name a decode gives the key, which is the
-// name [decodedKey] gives that content. It reports false for an alias
-// that does not resolve, for content with no name, and for an alias
-// under a tag or an anchor of the key's own, which may change the name.
-func aliasKeyName(r *paths.Resolver, key ast.MapKeyNode) (ast.Node, string, bool) {
+// aliasKeyName returns the member name a decode gives an alias key, which
+// is the name [decodedKey] gives the content of the anchor the alias
+// refers to, through r. It reports false for an alias that does not
+// resolve, for content with no name, and for an alias under a tag or an
+// anchor of the key's own, which may change the name.
+func aliasKeyName(r *paths.Resolver, key ast.MapKeyNode) (string, bool) {
 	var node ast.Node = key
 
 	if explicit, ok := node.(*ast.MappingKeyNode); ok && explicit != nil {
@@ -729,25 +731,20 @@ func aliasKeyName(r *paths.Resolver, key ast.MapKeyNode) (ast.Node, string, bool
 
 	alias, ok := node.(*ast.AliasNode)
 	if !ok || alias == nil {
-		return nil, "", false
+		return "", false
 	}
 
 	target, err := r.Deref(alias)
 	if err != nil {
-		return nil, "", false
+		return "", false
 	}
 
 	content, ok := target.(ast.MapKeyNode)
 	if !ok {
-		return nil, "", false
+		return "", false
 	}
 
-	name, ok := decodedKey(content)
-	if !ok {
-		return nil, "", false
-	}
-
-	return target, name, true
+	return decodedKey(content)
 }
 
 // mappingMembers returns the members of the mapping node holds, or nil
@@ -786,36 +783,6 @@ func decodedKey(key ast.MapKeyNode) (string, bool) {
 	}
 
 	return mapItemKey(v), true
-}
-
-// sourceKey returns the name a path selector matches the key node by,
-// which is the source spelling of the key, and reports whether the key
-// has one. A string key gives its unquoted text, a block scalar key gives
-// its content, and any other key gives its token text, so the
-// hexadecimal key 0x10 reads as 0x10. A quoted empty key has the empty
-// spelling. A key with no content, with no token, or with empty token
-// text has no spelling.
-func sourceKey(key ast.Node) (string, bool) {
-	switch k := astnode.Content(key).(type) {
-	case nil:
-		return "", false
-	case *ast.StringNode:
-		return k.Value, true
-	case *ast.LiteralNode:
-		if k.Value == nil {
-			return "", false
-		}
-
-		return k.Value.Value, true
-
-	default:
-		tk := k.GetToken()
-		if tk == nil || tk.Value == "" {
-			return "", false
-		}
-
-		return tk.Value, true
-	}
 }
 
 // isMergeKey reports whether key is a `<<` merge key, looking through the

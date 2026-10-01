@@ -777,6 +777,14 @@ func TestSourcePath_TypedNilNode(t *testing.T) {
 			segments: []jsonschema.Segment{{Key: "16"}},
 			want:     "$.16",
 		},
+		"key with empty token text spells the empty key": {
+			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
+				Key:   &ast.IntegerNode{Token: &token.Token{Value: ""}, Value: uint64(16)},
+				Value: &ast.StringNode{Value: "x"},
+			}}},
+			segments: []jsonschema.Segment{{Key: "16"}},
+			want:     "$.''",
+		},
 		"nil member": {
 			root:     &ast.MappingNode{Values: []*ast.MappingValueNode{nil}},
 			segments: []jsonschema.Segment{{Key: "a"}},
