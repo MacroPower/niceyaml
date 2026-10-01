@@ -151,7 +151,14 @@ type SelfValidator interface {
 // A validator that knows a location returns an unbound [*Error], and the
 // Node binds it to the source with itself as the scope its path resolves
 // from. A validator that binds an error itself does so through
-// [Node.Bind], since the Node leaves a bound error as it is.
+// [Node.Bind], since the Node leaves a bound error as it is. A decode
+// with go-yaml options hands its validators a copy of the Node that
+// carries them, and that copy binds errors to the Node the decode runs
+// on. [SourceError.Node] thus returns the Node the caller holds, whether
+// the decode binds the error or the validator binds it through the Node
+// it got. A Node the validator scopes from that copy with [Node.At] or
+// [Node.Nodes] binds errors to itself, so their paths resolve from its
+// scope.
 //
 // See [ValidatorFunc], [MultiValidator],
 // [go.jacobcolvin.com/niceyaml/schema.Schema], and
@@ -718,6 +725,10 @@ type Node struct {
 	source *Source
 	// The enclosing document.
 	doc *document
+	// For a copy that a decode hands its validators, or that Document
+	// returns as the root, the Node the copy stands for, which the caller
+	// holds. The copy binds errors to it. It is nil for any other Node.
+	origin *Node
 	// The tokens of the node: the tokens of the whole document for its
 	// root, and a sub-slice of them for a Node from At.
 	content token.Tokens
@@ -748,8 +759,8 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 // that picks a schema from the file path or the content of the document
 // does. The root Node of a document returns itself. A Node a [Validator]
 // gets from a decode decodes with the go-yaml options of that decode, and
-// the root it returns is a copy that decodes with them too. A nil Node
-// belongs to none.
+// the root it returns is a copy that decodes with them too and binds
+// errors to the root it copies. A nil Node belongs to none.
 func (n *Node) Document() *Node {
 	if n == nil {
 		return nil
@@ -761,6 +772,7 @@ func (n *Node) Document() *Node {
 
 	c := *n.doc.node
 	c.decodeOpts = n.decodeOpts
+	c.origin = n.doc.node
 
 	return &c
 }
@@ -839,6 +851,8 @@ func (n *Node) AST() ast.Node {
 func (n *Node) At(path paths.Path) (*Node, error) {
 	c := *n
 	c.base = n.base.Join(path)
+	// The copy has a scope of its own, so it binds errors to itself.
+	c.origin = nil
 
 	node, err := n.doc.pathResolver().Node(c.base)
 	if err != nil {
@@ -892,6 +906,7 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	for _, m := range found {
 		c := *n
 		c.base = m.Path
+		c.origin = nil
 		c.node = m.Node
 		c.span, c.content = n.extent(m.Node)
 		nodes = append(nodes, &c)
@@ -1288,19 +1303,24 @@ func (n *Node) pathLocation(path paths.Path) (location, error) {
 // [SourceError] through [Node.Bind], so an [*Error] renders its
 // location and any other error names the source.
 func (n *Node) Validate(ctx context.Context, validators ...Validator) error {
-	return n.validate(ctx, validators)
+	return n.validate(ctx, validators, nil)
 }
 
-// validate runs validators on the node in order and binds the first
-// error.
-func (n *Node) validate(ctx context.Context, validators []Validator) error {
+// validate runs validators in order on the Node that
+// [Node.forValidators] returns for yamlOpts, and binds the first error
+// with n. The Node the validators get binds errors where n does, so an
+// error a validator binds itself names the same Node as one validate
+// binds.
+func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []yaml.DecodeOption) error {
+	seen := n.forValidators(yamlOpts)
+
 	for _, dv := range validators {
 		if nilness.IsNil(dv) {
 			continue
 		}
 
 		// A typed nil pointer is no failure, as [Node.Bind] reads it.
-		err := dv.Validate(ctx, n)
+		err := dv.Validate(ctx, seen)
 		if isNothing(err) {
 			continue
 		}
@@ -1388,7 +1408,19 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 // a binding that nests errors binds anew around it, with those errors as
 // children. Bind never modifies err.
 func (n *Node) Bind(err error) error {
-	return bindTree(err, binder{src: n.source, node: n})
+	return bindTree(err, binder{src: n.source, node: n.bindTarget()})
+}
+
+// bindTarget returns the Node that errors bound through n bind to: the
+// Node n stands for when n is a copy a decode hands its validators or a
+// copy of the root, and n itself otherwise. The two share a scope, so a
+// path resolves the same from either.
+func (n *Node) bindTarget() *Node {
+	if n.origin != nil {
+		return n.origin
+	}
+
+	return n
 }
 
 // DecodeOption configures [Node.Decode] and [Node.DecodeInto], and
@@ -1649,7 +1681,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 		return n.Bind(err)
 	}
 
-	err = n.forValidators(cfg.yamlOpts).validate(ctx, cfg.validators)
+	err = n.validate(ctx, cfg.validators, cfg.yamlOpts)
 	if err != nil {
 		return err
 	}
@@ -1752,7 +1784,8 @@ func (n *Node) yamlOptions(yamlOpts []yaml.DecodeOption) []yaml.DecodeOption {
 // forValidators returns the Node that the validators of a decode with the
 // go-yaml options yamlOpts see. That Node is a copy of n that decodes with
 // those options after its own, so a validator that decodes it reads it as
-// the decode does. It returns n when yamlOpts is empty.
+// the decode does, and binds errors where n does. It returns n when
+// yamlOpts is empty.
 func (n *Node) forValidators(yamlOpts []yaml.DecodeOption) *Node {
 	if len(yamlOpts) == 0 {
 		return n
@@ -1760,6 +1793,7 @@ func (n *Node) forValidators(yamlOpts []yaml.DecodeOption) *Node {
 
 	c := *n
 	c.decodeOpts = slices.Concat(n.decodeOpts, yamlOpts)
+	c.origin = n.bindTarget()
 
 	return &c
 }

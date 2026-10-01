@@ -1383,7 +1383,9 @@ func (e *SourceError) Source() *Source {
 // error keeps the node of the binding it wraps, whether Node.Bind
 // returns it as it is or binds it anew around the binding with the
 // errors it nests, so its node can be nil or belong to another document
-// or source. A nil SourceError is bound to none.
+// or source. The copy of a Node that a decode hands a [Validator] binds
+// errors to that Node, as Validator describes. A nil SourceError is bound
+// to none.
 func (e *SourceError) Node() *Node {
 	if e == nil {
 		return nil
@@ -1395,14 +1397,17 @@ func (e *SourceError) Node() *Node {
 // Document returns the root [*Node] of the document the error is bound
 // to, the one the node [SourceError.Node] returns belongs to, so a caller
 // that sorts the errors of a file by document reads its
-// [Node.DocumentIndex]. An error bound to no node is bound to no
-// document. A nil SourceError is bound to none.
+// [Node.DocumentIndex]. The root is the one [Source.Documents] returns,
+// even for an error bound to a Node whose [Node.Document] returns a copy,
+// such as one a [Validator] scoped with [Node.At] from the Node a decode
+// handed it. An error bound to no node is bound to no document. A nil
+// SourceError is bound to none.
 func (e *SourceError) Document() *Node {
-	if e == nil {
+	if e == nil || e.node == nil {
 		return nil
 	}
 
-	return e.node.Document()
+	return e.node.doc.node
 }
 
 // Message returns the text of the bound error with no position or path

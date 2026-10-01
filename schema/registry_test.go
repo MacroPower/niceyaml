@@ -18,6 +18,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/jsonschema"
@@ -1610,6 +1611,66 @@ func TestRegistry_Validator(t *testing.T) {
 		_, err := doc.Decode[deployment](t.Context(), niceyaml.WithValidator(reg))
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
+}
+
+func TestRegistry_Validator_ErrorBoundToReceiver(t *testing.T) {
+	t.Parallel()
+
+	reg := schema.NewRegistry(schema.WithResolvers(schema.When(
+		matcher.Content(kindPath, "Deployment"),
+		schema.Embedded([]byte(`{"properties": {"replicas": {"type": "integer"}}}`)),
+	)))
+
+	// A decode with go-yaml options hands the registry a copy of the
+	// document, and the registry binds its errors through that copy.
+	tcs := map[string]struct {
+		input string
+		opt   niceyaml.DecodeOption
+		err   error
+	}{
+		"rejected with references": {
+			input: "kind: Deployment\nreplicas: many\n",
+			opt:   niceyaml.WithReferences([]byte("base: &x 1\n")),
+		},
+		"rejected with yaml options": {
+			input: "kind: Deployment\nreplicas: many\n",
+			opt:   niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()),
+		},
+		"unmatched with references": {
+			input: "kind: Service\n",
+			opt:   niceyaml.WithReferences([]byte("base: &x 1\n")),
+			err:   schema.ErrNoMatch,
+		},
+		"unmatched with yaml options": {
+			input: "kind: Service\n",
+			opt:   niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()),
+			err:   schema.ErrNoMatch,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+			dec := niceyaml.NewDecoder(tc.opt, niceyaml.WithValidator(reg))
+
+			_, decodeErr := dec.Decode[any](t.Context(), doc)
+			validateErr := dec.Validate(t.Context(), doc)
+
+			for _, err := range []error{decodeErr, validateErr} {
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err)
+				}
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+				assert.Same(t, doc, bound.Node())
+				assert.Same(t, doc, bound.Document())
+			}
+		})
+	}
 }
 
 func TestRegistry_Lookup_MatcherError(t *testing.T) {

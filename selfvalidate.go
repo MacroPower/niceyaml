@@ -747,7 +747,7 @@ func (w *selfWalker) walkEntries(path paths.Path, entries []mapEntry, ambiguous 
 		errs := w.errs[start:]
 		if ambiguous {
 			for i, err := range errs {
-				errs[i] = bindTree(err, binder{src: w.node.source, node: w.node, ambiguous: true})
+				errs[i] = bindTree(err, binder{src: w.node.source, node: w.node.bindTarget(), ambiguous: true})
 			}
 		}
 
