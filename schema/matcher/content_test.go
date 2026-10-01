@@ -195,6 +195,39 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 1.0`),
 			want:    true,
 		},
+		"int matches an int-tagged integer": {
+			matcher: matcher.Content(versionPath, 16),
+			input:   stringtest.Input(`version: !!int 16`),
+			want:    true,
+		},
+		"int does not match other int-tagged integer": {
+			matcher: matcher.Content(versionPath, 16),
+			input:   stringtest.Input(`version: !!int 17`),
+			want:    false,
+		},
+		"int64 matches an int-tagged hex integer": {
+			matcher: matcher.Content(versionPath, int64(16)),
+			input:   stringtest.Input(`version: !!int 0x10`),
+			want:    true,
+		},
+		"uint64 matches an int-tagged integer": {
+			matcher: matcher.Content(versionPath, uint64(16)),
+			input:   stringtest.Input(`version: !!int 16`),
+			want:    true,
+		},
+		"int matches an anchored int-tagged integer": {
+			matcher: matcher.Content(versionPath, 16),
+			input:   stringtest.Input(`version: &v !!int 0x10`),
+			want:    true,
+		},
+		"int matches an alias to an int-tagged integer": {
+			matcher: matcher.Content(versionPath, 16),
+			input: stringtest.Input(`
+				base: &k !!int 16
+				version: *k
+			`),
+			want: true,
+		},
 		"int does not match a fraction": {
 			matcher: matcher.Content(versionPath, 1),
 			input:   stringtest.Input(`version: 1.5`),

@@ -1270,11 +1270,81 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			})
 		}
 
+		// An integer key under a !!int tag decodes into an integer type as
+		// the integer alone does.
+		intTcs := map[string]struct {
+			input string
+			want  string
+		}{
+			"int-tagged hexadecimal int": {
+				input: "!!int 0x10: {price: -1}\n",
+				want:  "1:21: $.0x10.price: negative price",
+			},
+			"anchored int-tagged hexadecimal int": {
+				input: "&a !!int 0x10: {price: -1}\n",
+				want:  "1:24: $.0x10.price: negative price",
+			},
+			"int tag on an anchored hexadecimal int": {
+				input: "!!int &a 0x10: {price: -1}\n",
+				want:  "1:24: $.0x10.price: negative price",
+			},
+			"int-tagged hexadecimal int after another key": {
+				input: "1: {price: 1}\n!!int 0x10: {price: -1}\n",
+				want:  "2:21: $.0x10.price: negative price",
+			},
+		}
+
+		for name, tc := range intTcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				_, err := dd.Decode[map[int]item](t.Context())
+				require.EqualError(t, err, tc.want)
+
+				_, err = dd.Decode[map[uint64]item](t.Context())
+				require.EqualError(t, err, tc.want)
+			})
+		}
+
+		// A key type that reads YAML bytes or a node takes the !!int tag
+		// with the integer, as it does in the decode.
+		unmarshalTcs := map[string]struct {
+			input string
+			want  string
+		}{
+			"unmarshaled int-tagged hexadecimal int": {
+				input: "!!int 0x10: {price: -1}\n",
+				want:  "1:21: $.0x10.price: negative price",
+			},
+			"unmarshaled int tag with spaces after it": {
+				input: "!!int   0x10: {price: -1}\n",
+				want:  "1:23: $.0x10.price: negative price",
+			},
+		}
+
+		for name, tc := range unmarshalTcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				_, err := dd.Decode[map[bytesKey]item](t.Context())
+				require.EqualError(t, err, tc.want)
+
+				_, err = dd.Decode[map[nodeKey]item](t.Context())
+				require.EqualError(t, err, tc.want)
+			})
+		}
+
 		// An alias key reports the content of its anchor, and a block
 		// scalar key reports its content rather than its indicator.
 		type named struct {
 			M map[string]item    `yaml:"m"`
 			F map[float64]item   `yaml:"f"`
+			I map[int]item       `yaml:"i"`
+			B map[bytesKey]item  `yaml:"bytes"`
 			T map[time.Time]item `yaml:"t"`
 		}
 
@@ -1289,6 +1359,14 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"alias to a hexadecimal int": {
 				input: "base: &k 0x10\nf:\n  *k : {price: -1}\n",
 				want:  "3:16: $.f.0x10.price: negative price",
+			},
+			"alias to an int-tagged hexadecimal int": {
+				input: "base: &k !!int 0x10\ni:\n  *k : {price: -1}\n",
+				want:  "3:16: $.i.0x10.price: negative price",
+			},
+			"bytes alias to an int-tagged hexadecimal int": {
+				input: "base: &k !!int 0x10\nbytes:\n  *k : {price: -1}\n",
+				want:  "3:16: $.bytes.0x10.price: negative price",
 			},
 			"alias to a float with a trailing zero": {
 				input: "base: &k 1.50\nf:\n  *k : {price: -1}\n",
@@ -2677,6 +2755,24 @@ func (k *spacedKey) UnmarshalYAML(ctx context.Context, b []byte) error {
 	}
 
 	*k = spacedKey(ns + "/" + strings.TrimSpace(string(b)))
+
+	return nil
+}
+
+// bytesKey holds the YAML text go-yaml hands it.
+type bytesKey string
+
+func (k *bytesKey) UnmarshalYAML(b []byte) error {
+	*k = bytesKey(b)
+
+	return nil
+}
+
+// nodeKey holds the text of the node go-yaml hands it.
+type nodeKey string
+
+func (k *nodeKey) UnmarshalYAML(node ast.Node) error {
+	*k = nodeKey(node.String())
 
 	return nil
 }

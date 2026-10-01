@@ -154,6 +154,59 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 	}
 }
 
+// BenchmarkNode_Decode_FirstDecode decodes a new parse of a document in
+// each iteration, so it measures the work a document does once, on its
+// first decode, which the other benchmarks spread over many decodes. The
+// document holds a map and a list of small mappings, and its type
+// validates each of them, so self-validation reads the keys of the map.
+// The document holds no !!int tag, no reused anchor name, and no alias,
+// so its first decode should cost about as much with self-validation as
+// without it.
+func BenchmarkNode_Decode_FirstDecode(b *testing.B) {
+	type config struct {
+		M     map[string]item `yaml:"m"`
+		Items []item          `yaml:"items"`
+	}
+
+	var sb strings.Builder
+
+	sb.WriteString("m:\n  k: {name: a, price: 1}\nitems:\n")
+
+	for i := range 1000 {
+		fmt.Fprintf(&sb, "  - {name: n%d, price: %d}\n", i, i)
+	}
+
+	yaml := sb.String()
+
+	modes := []struct {
+		name string
+		opts []niceyaml.DecodeOption
+	}{
+		{"self_validation", nil},
+		{"no_self_validation", []niceyaml.DecodeOption{niceyaml.WithSelfValidation(false)}},
+	}
+
+	for _, mode := range modes {
+		b.Run(mode.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(yaml)))
+
+			for b.Loop() {
+				b.StopTimer()
+
+				doc := yamltest.FirstDocument(b, yaml)
+
+				b.StartTimer()
+
+				_, err := doc.Decode[config](b.Context(), mode.opts...)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 // wideRow is a struct of many scalar fields and one field that validates
 // itself.
 type wideRow struct {

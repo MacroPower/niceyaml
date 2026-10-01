@@ -1223,7 +1223,7 @@ func (w *selfWalker) keyNames(base paths.Path, t reflect.Type) map[any]string {
 func (w *selfWalker) collectKeyNames(
 	node ast.Node, t reflect.Type, names map[any]string, seen map[*ast.MappingNode]bool,
 ) bool {
-	mapping, ok := astnode.Content(w.valueNode(node)).(*ast.MappingNode)
+	mapping, ok := astnode.Content(w.valueNode(node, false)).(*ast.MappingNode)
 	if !ok || seen[mapping] {
 		return true
 	}
@@ -1301,7 +1301,7 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 		return
 	}
 
-	node := w.valueNode(key)
+	node := w.valueNode(key, true)
 	if node == nil {
 		return
 	}
@@ -1340,7 +1340,17 @@ func (w *selfWalker) addKeyName(key ast.MapKeyNode, t reflect.Type, names map[an
 // content of an anchor. It returns nil for a node that holds nothing, and
 // for one with an alias that does not resolve or that leads back to
 // itself.
-func (w *selfWalker) valueNode(node ast.Node) ast.Node {
+//
+// When parsed is true, the content and each tag come from the
+// [decodeTree] of the document, so an integer under a !!int tag decodes
+// into an integer type, as in the decode. For a key with no anchor, no
+// `?`, and no alias, an UnmarshalYAML method of the key type then takes
+// the same text or node as in the decode. The decode hands such a method
+// a key with an anchor or a `?` whole, and hands a method that reads a
+// node an alias as it stands. When parsed is false, the result holds
+// nodes of the document, which the [paths.Resolver] of the document
+// reads.
+func (w *selfWalker) valueNode(node ast.Node, parsed bool) ast.Node {
 	var (
 		tags     []*ast.TagNode
 		followed = map[*ast.AliasNode]bool{}
@@ -1371,8 +1381,20 @@ func (w *selfWalker) valueNode(node ast.Node) ast.Node {
 			node = content
 
 		default:
+			view := func(n ast.Node) ast.Node { return n }
+			if parsed {
+				view = w.node.doc.decodeTree().parsedView
+			}
+
+			node = view(node)
+
 			for _, tag := range slices.Backward(tags) {
-				tagged := *tag
+				tagView, ok := view(tag).(*ast.TagNode)
+				if !ok {
+					tagView = tag
+				}
+
+				tagged := *tagView
 				tagged.Value = node
 				node = &tagged
 			}

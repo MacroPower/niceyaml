@@ -679,6 +679,143 @@ func TestDocument_Decode(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("int-tagged integer", func(t *testing.T) {
+		t.Parallel()
+
+		// The go-yaml decoder reads an integer under a !!int tag as a Go
+		// int, which it rejects for every integer type.
+		type config struct {
+			Version int `yaml:"version"`
+		}
+
+		tcs := map[string]struct {
+			input   string
+			want    int64
+			wantAny any
+		}{
+			"integer": {
+				input:   "version: !!int 16\n",
+				want:    16,
+				wantAny: uint64(16),
+			},
+			"hex integer": {
+				input:   "version: !!int 0x10\n",
+				want:    16,
+				wantAny: uint64(16),
+			},
+			"negative integer": {
+				input:   "version: !!int -5\n",
+				want:    -5,
+				wantAny: int64(-5),
+			},
+			"anchor on the tag": {
+				input:   "version: &v !!int 0x10\n",
+				want:    16,
+				wantAny: uint64(16),
+			},
+			"tag on an anchor": {
+				input:   "version: !!int &v 0x10\n",
+				want:    16,
+				wantAny: uint64(16),
+			},
+			"alias to a tagged anchor": {
+				input:   "base: &k !!int 16\nversion: *k\n",
+				want:    16,
+				wantAny: uint64(16),
+			},
+			"after a reused anchor name": {
+				input:   "a: &x 1\nb: &x 2\nversion: !!int 16\n",
+				want:    16,
+				wantAny: uint64(16),
+			},
+			"alias to a tagged anchor of a reused name": {
+				input:   "a: &x 1\nb: &x !!int 16\nversion: *x\n",
+				want:    16,
+				wantAny: uint64(16),
+			},
+			"after nested collections": {
+				input:   "spec:\n  name: x\n  ports: [80, {n: !!str 1}]\nversion: !!int 0x10\n",
+				want:    16,
+				wantAny: uint64(16),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				got, err := dd.Decode[config](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, config{Version: int(tc.want)}, got)
+
+				node := yamltest.At(t, dd, paths.Root().Child("version"))
+
+				gotInt, err := node.Decode[int64](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, gotInt)
+
+				gotAny, err := node.Decode[any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.wantAny, gotAny)
+			})
+		}
+	})
+
+	t.Run("int-tagged integer in the text of an UnmarshalYAML method", func(t *testing.T) {
+		t.Parallel()
+
+		// The text spells the tag, and the space before it, as the
+		// document does, so it parses to the same mapping again.
+		type wrapper struct {
+			Spec rawText `yaml:"spec"`
+		}
+
+		tcs := map[string]struct {
+			input string
+			want  string
+		}{
+			"tag": {
+				input: "spec:\n  version: !!int 16\n",
+				want:  "version: !!int 16\n",
+			},
+			"tag on an anchor": {
+				input: "spec:\n  version: !!int &x 16\n",
+				want:  "version: !!int &x 16\n",
+			},
+			"anchors on both sides of the tag": {
+				input: "spec:\n  version: &x !!int &y 16\n",
+				want:  "version: &x !!int &y 16\n",
+			},
+			"after a reused anchor name": {
+				input: "a: &x 1\nb: &x 2\nspec:\n  version: !!int 16\n",
+				want:  "version: !!int 16\n",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				got, err := dd.Decode[wrapper](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got.Spec.text)
+
+				var spec map[string]any
+
+				require.NoError(t, yaml.Unmarshal([]byte(got.Spec.text), &spec))
+				assert.Equal(t, map[string]any{"version": 16}, spec)
+
+				whole, err := dd.Decode[rawText](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.input, whole.text)
+			})
+		}
+	})
 }
 
 func TestDocument_Decode_TypeMismatch(t *testing.T) {

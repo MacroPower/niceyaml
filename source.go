@@ -78,8 +78,9 @@ type Source struct {
 	fileTokens map[*token.Token]struct{}
 	fileErr    error
 	// A second parse of the tokens, which decodeParse makes the first time
-	// a document renames its anchors for the decoder, and the set of
-	// copies of the tokens that parse hands the parser.
+	// a document changes its tree for the decoder, as decodeTree
+	// describes, and the set of copies of the tokens that parse hands the
+	// parser.
 	decodeFile       *ast.File
 	decodeFileTokens map[*token.Token]struct{}
 	docs             []*Node
@@ -594,15 +595,16 @@ func (s *Source) parseRun(run token.Tokens) (*ast.File, error) {
 // decodeParse returns a second parse of the tokens of the Source, with the
 // set of copies of the tokens that parse hands the parser, and makes it on
 // the first call. Nothing but the decoder reads its tree, so a document
-// renames the anchors of its own part of that tree, and the tree
-// [Source.File] returns stays as the parser built it. The parse holds its
-// own copies of the tokens, so the go-yaml formatter, which reads the text
-// of each token through the links between them, finds a renamed anchor
-// with the text of the Source. The formatter reads the tokens of every
-// document, so the first call writes the nulls of all the documents into
-// the tokens, as [nullEnclosedAliases] describes, before it returns the
-// parse to any of them. It returns nil when the parse fails, which it
-// does only when the first parse failed.
+// changes its own part of that tree as [decodeTree] describes, and the
+// tree [Source.File] returns stays as the parser built it. The parse
+// holds its own copies of the tokens, so the go-yaml formatter, which
+// reads the text of each token through the links between them, finds a
+// renamed anchor or a verbatim !!int tag with the text of the Source.
+// The formatter reads the tokens of every document, so the first call
+// writes the nulls of all the documents into the tokens, as
+// [nullEnclosedAliases] describes, before it returns the parse to any of
+// them. It returns nil when the parse fails, which it does only when the
+// first parse failed.
 func (s *Source) decodeParse() (*ast.File, map[*token.Token]struct{}) {
 	s.decodeFileOnce.Do(func() {
 		file, set, err := s.parse()

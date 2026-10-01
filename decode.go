@@ -1577,7 +1577,9 @@ func WithReferences(data ...[]byte) DecodeOption {
 // the pointer points to. An untagged null sets the pointer to nil.
 // So does a document whose body is an alias to a null in a reference
 // document, with a tag or without. A node without content, or a tagged
-// null such as "!!null", leaves the pointer as it is.
+// null such as "!!null", leaves the pointer as it is. An integer with a
+// !!int tag, such as `!!int 0x10`, decodes into any integer type, as the
+// integer alone does.
 // YAML decoding errors, and [Error] values from the validators, come back
 // bound to the source as [SourceError] values, with a path in them
 // resolving from the scope. A decoding error the go-yaml decoder
@@ -1626,9 +1628,13 @@ func WithReferences(data ...[]byte) DecodeOption {
 // too.
 //
 // An [ast.Node] the decode fills, or one an UnmarshalYAML method takes,
-// spells a renamed alias with the new name of its anchor. The node is
-// part of the tree [Node.DocumentAST] returns, or of the copy of it that
-// every decode of the document reads, so a caller must not modify it.
+// spells a renamed alias with the new name of its anchor. It spells a
+// !!int tag on an integer in the verbatim form of the same tag,
+// `!<tag:yaml.org,2002:int>`, which the go-yaml decoder reads as it
+// reads the integer alone. The text an UnmarshalYAML method takes spells
+// the tag as the document does. The node is part of the tree
+// [Node.DocumentAST] returns, or of the copy of it that every decode of
+// the document reads, so a caller must not modify it.
 //
 // [Decoder.DecodeInto] decodes with options stated once, for every node
 // a [Decoder] decodes.
@@ -2194,6 +2200,63 @@ func (e yamlMessageError) Error() string {
 
 func (e yamlMessageError) Unwrap() error {
 	return e.err
+}
+
+// verbatimIntegerTag is the verbatim form of the !!int tag, which the
+// [decodeTree] gives the token of each tag [isIntegerTag] reports. The
+// go-yaml decoder reads an integer under the short form as a Go int,
+// which it then rejects for every integer type. It reserves only the
+// short forms of tags, so it reads an integer under the verbatim form as
+// it reads the integer alone.
+const verbatimIntegerTag = "!<tag:yaml.org,2002:int>"
+
+// isIntegerTag reports whether node is a !!int tag on an integer, or on
+// an anchor on one. A tag after a %TAG directive that redefines the "!!"
+// handle does not count, as the go-yaml decoder reads it as text.
+func isIntegerTag(node ast.Node) bool {
+	tag, ok := node.(*ast.TagNode)
+	if !ok || tag.Start == nil || tag.Directive != nil ||
+		token.ReservedTagKeyword(tag.Start.Value) != token.IntegerTag {
+		return false
+	}
+
+	value := tag.Value
+	if anchor, ok := value.(*ast.AnchorNode); ok {
+		value = anchor.Value
+	}
+
+	_, ok = value.(*ast.IntegerNode)
+
+	return ok
+}
+
+// holdsIntegerTag reports whether node or any node below it is a tag
+// [isIntegerTag] reports.
+func holdsIntegerTag(node ast.Node) bool {
+	var found integerTagFinder
+
+	ast.Walk(&found, node)
+
+	return bool(found)
+}
+
+// integerTagFinder is an [ast.Visitor] that records whether it visited a
+// tag [isIntegerTag] reports and stops the walk once it has.
+type integerTagFinder bool
+
+// Visit implements [ast.Visitor].
+func (f *integerTagFinder) Visit(node ast.Node) ast.Visitor {
+	if bool(*f) || astnode.IsNil(node) {
+		return nil
+	}
+
+	if isIntegerTag(node) {
+		*f = true
+
+		return nil
+	}
+
+	return f
 }
 
 // isTaggedNull reports whether node, or the value an anchor on node

@@ -43,16 +43,26 @@ import (
 // the anchor it refers to. An alias that a `<<` merge key merges stays,
 // since the decoder rejects it before it writes anything.
 //
-// Renaming and nulls change the tree, which the tree the [Source] shares
-// must not see, so a document that renames an anchor or holds such an
-// alias reads a second parse of the Source from [Source.decodeParse]. A
-// renamed anchor keeps the text of the Source, so the bytes the decoder
-// hands an UnmarshalYAML method hold the names the document spells. The
-// decoder looks an alias up by the text of its name, so an alias carries
-// the new name in its text as well. An [ast.Node] the decoder fills, or
-// one it hands an UnmarshalYAML method, thus spells an alias to a renamed
-// anchor with the new name, such as `*x [2]`, and each anchor as the
-// document does.
+// The decoder reads an integer under a !!int tag as a Go int, which it
+// then rejects for every integer type. The tree therefore gives the
+// token of each !!int tag on an integer the value [verbatimIntegerTag],
+// so the decoder reads the integer as it reads one with no tag. The
+// go-yaml formatter writes the text of each token, which still spells
+// the tag as the document does, so the bytes the decoder hands an
+// UnmarshalYAML method keep the tag. A tree without the tag node would
+// lose that text, along with the space before the value that the token
+// holds.
+//
+// Renaming, nulls, and verbatim tags change the tree, which the tree the
+// [Source] shares must not see. A document that renames an anchor, or
+// holds such an alias or such a tag, therefore reads a second parse of
+// the Source from [Source.decodeParse]. A renamed anchor keeps the text
+// of the Source, so the bytes the decoder hands an UnmarshalYAML method
+// hold the names the document spells. The decoder looks an alias up by
+// the text of its name, so an alias carries the new name in its text as
+// well. An [ast.Node] the decoder fills, or one it hands an UnmarshalYAML
+// method, thus spells an alias to a renamed anchor with the new name,
+// such as `*x [2]`, and each anchor as the document does.
 //
 // Any other document reads the tree of the Source through [decodeView],
 // which copies only the aliases, and the nodes above them, to drop the
@@ -115,7 +125,7 @@ func (d *document) newDecodeTree() *decodeTree {
 	names := renamedAnchorNames(d.pathResolver(), body)
 	enclosed := d.enclosedAliases()
 
-	if len(names) > 0 || len(enclosed) > 0 {
+	if len(names) > 0 || len(enclosed) > 0 || holdsIntegerTag(body) {
 		if tree, ok := d.parsedTree(names, enclosed); ok {
 			return tree
 		}
@@ -125,10 +135,11 @@ func (d *document) newDecodeTree() *decodeTree {
 }
 
 // parsedTree returns the [*decodeTree] of the document from a second
-// parse of the Source, with a name of its own for each anchor whose name
-// is in names, and a null in place of each alias in enclosed. It
-// reports false when the second parse does not give the document the
-// same nodes, which a parse of the same tokens always does.
+// parse of the Source. The tree gives a name of its own to each anchor
+// whose name is in names, holds a null in place of each alias in
+// enclosed, and spells each tag [isIntegerTag] reports in its verbatim
+// form. It reports false when the second parse does not give the
+// document the same nodes, which a parse of the same tokens always does.
 func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool) (*decodeTree, bool) {
 	src := d.node.source
 
@@ -224,6 +235,15 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 		}
 
 		renameAlias(view, name)
+	}
+
+	// The decoder reads a tag by the value of its token, while the go-yaml
+	// formatter writes the token's text.
+	for n, v := range nodes {
+		view, ok := v.(*ast.TagNode)
+		if ok && view.Start != nil && isIntegerTag(n) {
+			view.Start.Value = verbatimIntegerTag
+		}
 	}
 
 	nulls := nodeReplacer{}
@@ -433,6 +453,26 @@ func (t *decodeTree) view(node ast.Node) ast.Node {
 	}
 
 	return decodeView(node)
+}
+
+// parsedView returns the node of the tree that stands for node, a node
+// of the document outside its comments, when the tree comes from a
+// second parse, and node itself otherwise. A tree that reads the Source
+// through [decodeView] differs from it only in the names of its aliases,
+// so a decoder that knows none of the anchors of the document reads node
+// as it reads the tree. Unlike [decodeTree.view], parsedView never pairs
+// the nodes of such a tree, which takes a walk of the whole document.
+func (t *decodeTree) parsedView(node ast.Node) ast.Node {
+	// Only parsedTree sets tokens, and it fills nodes as well.
+	if t.tokens == nil {
+		return node
+	}
+
+	if v, ok := t.nodes[node]; ok {
+		return v
+	}
+
+	return node
 }
 
 // index returns the [*anchorIndex] of the tree.
