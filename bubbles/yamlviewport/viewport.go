@@ -436,12 +436,14 @@ func (m *Model) relayout() {
 // remeasure responds to a change of decoration confined to the lines that
 // ranges cover, such as a move of the selected search match. It lays out
 // those lines again, since a highlight style may change the width of the
-// text it styles, and gives the Model a new cache that carries over the
-// counts of every other line. Like relayout, it leaves any copy that
-// shares the old cache untouched and records the top line for ensureRows
-// to restore. An empty cache has no counts to carry over, so remeasure
-// drops it as relayout does. Without ranges no line changed, so the cache
-// stays as it is.
+// text it styles. When a row count or width differs from the cache,
+// remeasure gives the Model a new cache that carries over the counts of
+// every other line. Otherwise the Model keeps its cache, which already
+// holds those counts. Like relayout, it leaves any copy that shares the
+// old cache untouched and records the top line for ensureRows to restore.
+// An empty cache has no counts to carry over, so remeasure drops it as
+// relayout does. Without ranges no line changed, so the cache stays as it
+// is.
 func (m *Model) remeasure(ranges ...position.Range) {
 	if m.rows == nil || !m.rows.filled() {
 		m.relayout()
@@ -463,14 +465,33 @@ func (m *Model) remeasure(ranges ...position.Range) {
 	}
 
 	p := m.renderPrinter(m.paneWidth())
-	c := m.rows.clone()
 
 	left := m.highlighted(false, spans...)
-	c.measure(p.Layout(left), left, c.left, c.leftWidths)
+	leftLayout := p.Layout(left)
+	changed := m.rows.differs(leftLayout, left, m.rows.left, m.rows.leftWidths)
 
-	if c.right != nil && m.baseRight != nil {
-		right := m.highlighted(true, spans...)
-		c.measure(p.Layout(right), right, c.right, c.rightWidths)
+	var (
+		right       *line.View
+		rightLayout printer.Layout
+	)
+
+	if m.rows.right != nil && m.baseRight != nil {
+		right = m.highlighted(true, spans...)
+		rightLayout = p.Layout(right)
+		changed = changed || m.rows.differs(rightLayout, right, m.rows.right, m.rows.rightWidths)
+	}
+
+	// The cache already holds the counts of a decoration that keeps every
+	// row count and width, such as a highlight that changes only color.
+	if !changed {
+		return
+	}
+
+	c := m.rows.clone()
+	c.measure(leftLayout, left, c.left, c.leftWidths)
+
+	if right != nil {
+		c.measure(rightLayout, right, c.right, c.rightWidths)
 	}
 
 	c.sum()
@@ -1406,6 +1427,20 @@ func (c *rowCache) measure(layout printer.Layout, view *line.View, rows, widths 
 			widths[k] = layout.LineWidth(i)
 		}
 	}
+}
+
+// differs reports whether layout, the layout of view, gives any line of
+// view a row count or width other than the one in rows and widths, which
+// hold an entry for each rendered line of the cache.
+func (c *rowCache) differs(layout printer.Layout, view *line.View, rows, widths []int) bool {
+	for i := range view.All() {
+		k, ok := slices.BinarySearch(c.indices, i)
+		if ok && (rows[k] != layout.LineRows(i) || widths[k] != layout.LineWidth(i)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // ensureRows fills the row count cache when it is empty, scrolls back to the

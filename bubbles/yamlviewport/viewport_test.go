@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -186,6 +187,88 @@ func TestViewport_SearchNextRefreshesRowCounts(t *testing.T) {
 				m.SearchPrevious()
 				check(-step - 1)
 			}
+		})
+	}
+}
+
+func TestViewport_SearchNextCostIndependentOfContent(t *testing.T) {
+	t.Parallel()
+
+	const (
+		smallLen = 1000
+		largeLen = 20000
+		batches  = 20
+		runs     = 50
+	)
+
+	tcs := map[string]struct {
+		viewMode yamlviewport.ViewMode
+	}{
+		"unified": {
+			viewMode: yamlviewport.ViewModeFull,
+		},
+		"side by side": {
+			viewMode: yamlviewport.ViewModeSideBySide,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// The newModel closure returns a Model that shows the diff of two
+			// revisions of n lines that each hold a match of the term. The
+			// default highlight styles change only color, so no move of the
+			// selection changes a row count or width.
+			newModel := func(n int) *yamlviewport.Model {
+				src := yamltest.GenerateYAML(n)
+
+				m := yamlviewport.New()
+				m.SetWidth(120)
+				m.SetHeight(40)
+				m.AddRevision(niceyaml.NewSourceFromString(src, niceyaml.WithName("v1")))
+				m.AddRevision(niceyaml.NewSourceFromString(src+"extra: value\n", niceyaml.WithName("v2")))
+				m.SetViewMode(tc.viewMode)
+				m.SetSearchTerm("value")
+				require.Greater(t, m.SearchCount(), n)
+
+				m.TotalRowCount()
+
+				return &m
+			}
+
+			// The moveBytes closure returns the bytes one move of the
+			// selection allocates, averaged over a batch of moves.
+			moveBytes := func(m *yamlviewport.Model) uint64 {
+				var before, after runtime.MemStats
+
+				runtime.ReadMemStats(&before)
+
+				for range runs {
+					m.SearchNext()
+				}
+
+				runtime.ReadMemStats(&after)
+
+				return (after.TotalAlloc - before.TotalAlloc) / runs
+			}
+
+			// Tests running alongside add their own allocations to a batch,
+			// so each size keeps its lowest batch. The sizes take turns, so
+			// both run beside the same tests.
+			smallModel, largeModel := newModel(smallLen), newModel(largeLen)
+			small, large := uint64(math.MaxUint64), uint64(math.MaxUint64)
+
+			for range batches {
+				small = min(small, moveBytes(smallModel))
+				large = min(large, moveBytes(largeModel))
+			}
+
+			// A move that copied even one int per line would grow by 8 bytes
+			// for each line the larger content adds.
+			assert.Less(t, large, small+8*(largeLen-smallLen),
+				"move in %d lines allocates %d B, move in %d lines allocates %d B",
+				smallLen, small, largeLen, large)
 		})
 	}
 }
