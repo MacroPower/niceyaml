@@ -1068,6 +1068,70 @@ func TestDiffer_HunksOfHeldLines(t *testing.T) {
 	}
 }
 
+func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
+	t.Parallel()
+
+	// The before side holds lines 1-2 and 6-7 of a seven-line file.
+	before := "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\n"
+	beforeSpans := []position.Span{position.NewSpan(0, 2), position.NewSpan(5, 7)}
+
+	tcs := map[string]struct {
+		after      string
+		afterSpans []position.Span
+		context    int
+		want       []string
+	}{
+		"context stops at the gap": {
+			after:      "a: 1\nb: 9\nc: 3\nd: 4\ne: 5\nf: 6\ng: 8\n",
+			afterSpans: beforeSpans,
+			context:    1,
+			want:       []string{"@@ -1,2 +1,2 @@", "@@ -6,2 +6,2 @@"},
+		},
+		"no context past the gap": {
+			after:      "a: 1\nb: 9\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\n",
+			afterSpans: beforeSpans,
+			context:    1,
+			want:       []string{"@@ -1,2 +1,2 @@"},
+		},
+		"changes on both sides of the gap": {
+			// The run of changes deletes lines 2 and 6 before it
+			// inserts them, so it splits wherever a side skips lines.
+			after:      "a: 1\nb: 9\nc: 3\nd: 4\ne: 5\nf: 9\ng: 7\n",
+			afterSpans: beforeSpans,
+			context:    0,
+			want:       []string{"@@ -2 +1,0 @@", "@@ -6 +2 @@", "@@ -6,0 +6 @@"},
+		},
+		"insert after the gap": {
+			// Line 6 of the after side starts its part, so the insert
+			// comes before line 6 of the before side, not after line 2.
+			after:      "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nx: 0\nf: 6\ng: 7\n",
+			afterSpans: []position.Span{position.NewSpan(0, 2), position.NewSpan(5, 8)},
+			context:    0,
+			want:       []string{"@@ -5,0 +6 @@"},
+		},
+		"delete after the gap": {
+			// Line 6 of the before side starts its part, so the delete
+			// comes before line 6 of the after side, not after line 2.
+			after:      "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\ng: 7\n",
+			afterSpans: []position.Span{position.NewSpan(0, 2), position.NewSpan(5, 6)},
+			context:    0,
+			want:       []string{"@@ -6 +5,0 @@"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			beforeHeld := niceyaml.NewSourceFromString(before).View().Slice(beforeSpans...).Held()
+			afterHeld := niceyaml.NewSourceFromString(tc.after).View().Slice(tc.afterSpans...).Held()
+
+			got := diff.Diff(beforeHeld, afterHeld).Hunks(tc.context)
+			assert.Equal(t, tc.want, hunkHeaders(got))
+		})
+	}
+}
+
 func TestDiffer_HunksFallBackToPositions(t *testing.T) {
 	t.Parallel()
 

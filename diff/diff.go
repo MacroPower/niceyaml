@@ -193,20 +193,40 @@ func (r *Result) Unified() *line.View {
 // file. A line with no number counts by its 1-indexed position in its
 // input instead.
 //
+// An input can skip lines of the file, as the held lines of a slice over
+// several spans do. No hunk reaches across such a gap on either side.
+// Context lines stop at the gap, and a run of changes that crosses it
+// splits into several hunks, so each header names only lines its hunk
+// holds. A side where a hunk holds no lines places the change next to a
+// line on the same side of the gap.
+//
 // Each call returns a new view with its own decoration, so overlays added
 // to one do not affect another.
 func (r *Result) Hunks(context int) *line.View {
-	var changes []int
+	var (
+		spans position.Spans
+		parts []consecutivePart // The part that holds each span.
+	)
 
-	for i, op := range r.ops {
-		if op.kind != lcs.OpEqual {
-			changes = append(changes, i)
+	for _, part := range r.consecutiveParts() {
+		var changes []int
+
+		for i := part.ops.Start; i < part.ops.End; i++ {
+			if r.ops[i].kind != lcs.OpEqual {
+				changes = append(changes, i)
+			}
+		}
+
+		// Each change takes its context lines from its own part, so no
+		// hunk reaches across a gap in either side's numbering.
+		for _, span := range position.ContextSpans(changes, context, part.ops.End).Clamp(part.ops.Start, part.ops.End) {
+			spans = append(spans, span)
+			parts = append(parts, part)
 		}
 	}
 
 	unified := r.Unified()
 
-	spans := position.ContextSpans(changes, context, len(r.ops))
 	if len(spans) == 0 {
 		// Slice with no span holds every line, and an empty span holds
 		// none.
@@ -219,7 +239,7 @@ func (r *Result) Hunks(context int) *line.View {
 	// each side holds before each hunk and within it.
 	var beforeIdx, afterIdx, pos int
 
-	for _, span := range spans {
+	for i, span := range spans {
 		for ; pos < span.Start; pos++ {
 			b, a := opKindDeltas(r.ops[pos].kind)
 			beforeIdx += b
@@ -236,7 +256,7 @@ func (r *Result) Hunks(context int) *line.View {
 
 		// The hunk header goes above the first line of each hunk.
 		view.Annotate(span.Start, line.Annotation{
-			Content:   r.formatHunkHeader(beforeIdx, beforeCount, afterIdx, afterCount),
+			Content:   r.formatHunkHeader(parts[i], beforeIdx, beforeCount, afterIdx, afterCount),
 			Kind:      kind.UIHunkHeader,
 			Placement: line.Above,
 		})
@@ -246,6 +266,80 @@ func (r *Result) Hunks(context int) *line.View {
 	}
 
 	return view
+}
+
+// consecutivePart is a run of a diff's ops within which each side's lines
+// carry consecutive [line.Line.Number] values. The ops field spans the
+// positions of the run in the diff's ops, and the before and after fields
+// span the positions in each side of the lines the run holds.
+type consecutivePart struct {
+	ops, before, after position.Span
+}
+
+// consecutiveParts splits the ops into parts within which each side's
+// lines carry consecutive [line.Line.Number] values, so the header of a
+// hunk within one part, which gives its first number and its count on
+// each side, names the lines the hunk holds. A part ends before the op
+// whose line on either side does not follow that side's last line in the
+// part. A line with no number follows any line, as [hunkStart] counts it
+// by its position instead. When each side holds a run of consecutive
+// lines, such as a whole file or one document, the result is one part
+// over every op.
+func (r *Result) consecutiveParts() []consecutivePart {
+	var (
+		parts                 []consecutivePart
+		part                  consecutivePart // The current part, whose ends give the next op's positions.
+		lastBefore, lastAfter int             // The number of each side's last line in the part, or 0.
+	)
+
+	for _, op := range r.ops {
+		b, a := opKindDeltas(op.kind)
+		nextBefore := sideNumber(r.before, part.before.End, b)
+		nextAfter := sideNumber(r.after, part.after.End, a)
+
+		if skipsLines(lastBefore, nextBefore) || skipsLines(lastAfter, nextAfter) {
+			parts = append(parts, part)
+			part = consecutivePart{
+				ops:    position.NewSpan(part.ops.End, part.ops.End),
+				before: position.NewSpan(part.before.End, part.before.End),
+				after:  position.NewSpan(part.after.End, part.after.End),
+			}
+			lastBefore, lastAfter = 0, 0
+		}
+
+		if b > 0 {
+			lastBefore = nextBefore
+		}
+
+		if a > 0 {
+			lastAfter = nextAfter
+		}
+
+		part.ops.End++
+		part.before.End += b
+		part.after.End += a
+	}
+
+	return append(parts, part)
+}
+
+// sideNumber returns the [line.Line.Number] of the line at idx in side
+// when delta shows that an op holds a line of that side. It returns 0
+// when the op holds none, and for a position past the end of side, which
+// an [lcs.Algorithm] that repeats a line can produce.
+func sideNumber(side line.Lines, idx, delta int) int {
+	if delta == 0 || idx >= side.Len() {
+		return 0
+	}
+
+	return side.Line(idx).Number()
+}
+
+// skipsLines reports whether a line numbered next does not follow one
+// numbered last. Zero stands for no line, or for a line with no number,
+// which follows any line.
+func skipsLines(last, next int) bool {
+	return last > 0 && next > 0 && next != last+1
 }
 
 // Stats counts the lines a diff added and removed.
@@ -496,21 +590,22 @@ func (ops lineOps) toView() *line.View {
 }
 
 // formatHunkHeader formats a unified diff hunk header like "@@ -1,3 +1,4 @@"
-// in the range syntax that GNU diff -u prints. The Idx arguments give the
+// in the range syntax that GNU diff -u prints. The part argument gives the
+// [consecutivePart] that holds the hunk. The Idx arguments give the
 // position of the hunk's first line in each revision, and the Count
 // arguments give the number of lines the hunk covers there. Each side
 // names its lines by [line.Line.Number], as the gutter does, so a diff of
 // part of a file names the lines of the file.
-func (r *Result) formatHunkHeader(beforeIdx, beforeCount, afterIdx, afterCount int) string {
+func (r *Result) formatHunkHeader(part consecutivePart, beforeIdx, beforeCount, afterIdx, afterCount int) string {
 	var b strings.Builder
 
 	fmt.Fprint(&b, "@@ ")
 
-	writeHunkRange(&b, '-', hunkStart(r.before, beforeIdx, beforeCount), beforeCount)
+	writeHunkRange(&b, '-', hunkStart(r.before, part.before, beforeIdx, beforeCount), beforeCount)
 
 	fmt.Fprint(&b, " ")
 
-	writeHunkRange(&b, '+', hunkStart(r.after, afterIdx, afterCount), afterCount)
+	writeHunkRange(&b, '+', hunkStart(r.after, part.after, afterIdx, afterCount), afterCount)
 
 	fmt.Fprint(&b, " @@")
 
@@ -537,13 +632,17 @@ func writeHunkRange(b *strings.Builder, sign byte, start, count int) {
 // hunkStart returns the start that [writeHunkRange] takes for one side of
 // a hunk, where idx is the position in side of the hunk's first line on
 // that side and count is the number of lines the hunk covers there. The
-// start is the [line.Line.Number] of that first line. A hunk that covers
-// no lines on the side starts after the line before it, or at the side's
-// first line when none comes before, and an empty side starts at 1 so the
-// header reads "0,0". A line with no number, such as the zero value, gives
-// its 1-indexed position in side instead, and so does a position past the
-// end of side, which an [lcs.Algorithm] that repeats a line can produce.
-func hunkStart(side line.Lines, idx, count int) int {
+// part argument spans the positions in side of the lines that the hunk's
+// [consecutivePart] holds. The start is the [line.Line.Number] of that
+// first line. A hunk that covers no lines on the side starts after the
+// line before it, or at the side's first line when none comes before, and
+// an empty side starts at 1 so the header reads "0,0". When such a hunk
+// comes first in its part, the line before it belongs to an earlier part,
+// so the hunk starts at the line after it instead if the part holds that
+// line. A line with no number, such as the zero value, gives its
+// 1-indexed position in side instead, and so does a position past the end
+// of side, which an [lcs.Algorithm] that repeats a line can produce.
+func hunkStart(side line.Lines, part position.Span, idx, count int) int {
 	var (
 		pos    int // The position in side of the line that names the start.
 		offset int // The distance from that line to the start.
@@ -551,6 +650,8 @@ func hunkStart(side line.Lines, idx, count int) int {
 
 	switch {
 	case count > 0:
+		pos = idx
+	case idx == part.Start && part.Contains(idx):
 		pos = idx
 	case idx > 0:
 		pos, offset = idx-1, 1
