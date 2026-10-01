@@ -534,6 +534,17 @@ func TestValidateCmdSchemaError(t *testing.T) {
 	}
 }
 
+func TestValidateCmdHelp(t *testing.T) {
+	t.Parallel()
+
+	// The help names every source of a document's schema, so a reader
+	// learns that a run without --schema can still download one.
+	long := validateCmd().Long
+	for _, want := range []string{"--schema", "$schema=", "$schema=none", "SchemaStore"} {
+		assert.Contains(t, long, want)
+	}
+}
+
 func TestValidateCmdCanceled(t *testing.T) {
 	t.Parallel()
 

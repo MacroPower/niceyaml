@@ -25,8 +25,20 @@ func validateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "validate file.yaml [file.yaml...]",
 		Short: "Validate YAML files",
-		Long:  "Validate YAML files.\nOptionally validate against a JSON schema (local file or http/https URL).\nSupports glob patterns like *.yaml.",
-		Args:  cobra.MinimumNArgs(1),
+		Long: "Parse YAML files and validate each document against its JSON schema.\n\n" +
+			"With --schema, every document validates against that schema, " +
+			"a local file or an http/https URL.\n\n" +
+			"Without --schema, a document validates against the schema named by a " +
+			`"# yaml-language-server: $schema=" comment above its content, or else ` +
+			"against the SchemaStore schema that matches its file path. A $schema " +
+			"comment below a document's content has no effect on that document. " +
+			"A document with neither only has to parse. The SchemaStore lookup " +
+			"downloads the catalog from schemastore.org, so while that site is " +
+			"unreachable, every document without such a comment fails. A " +
+			"$schema=none comment in the same place turns validation off for its " +
+			"document and skips the lookup.\n\n" +
+			"Supports glob patterns like *.yaml.",
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Expand glob patterns.
 			yamlPaths, err := expandPaths(args...)
