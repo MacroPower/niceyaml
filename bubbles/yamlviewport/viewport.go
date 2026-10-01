@@ -1070,15 +1070,7 @@ func (m *Model) selectedMatch(right bool) func(k int) bool {
 	selected := m.searchMatches[m.searchIndex]
 	pos := selected.rng.Start
 
-	// A line is equal when both panes hold it unchanged. The padding a diff
-	// puts opposite an inserted or deleted line is empty and carries the
-	// default flag too, so one pane alone cannot tell the two apart.
-	equal := false
-	if l := pos.Line; m.baseLeft.Contains(l) && m.baseRight.Contains(l) {
-		equal = m.baseLeft.Flag(l) == line.FlagDefault && m.baseRight.Flag(l) == line.FlagDefault
-	}
-
-	show := equal || selected.inLeft != right
+	show := m.equalLine(pos.Line) || selected.inLeft != right
 
 	matches := m.leftMatches
 	if right {
@@ -1086,6 +1078,14 @@ func (m *Model) selectedMatch(right bool) func(k int) bool {
 	}
 
 	return func(k int) bool { return show && matches[k].Start == pos }
+}
+
+// equalLine reports whether both side-by-side panes hold line l unchanged.
+// The padding a diff puts opposite an inserted or deleted line is empty and
+// carries the default flag too, so one pane alone cannot tell the two apart.
+func (m *Model) equalLine(l int) bool {
+	return m.baseLeft.Contains(l) && m.baseRight.Contains(l) &&
+		m.baseLeft.Flag(l) == line.FlagDefault && m.baseRight.Flag(l) == line.FlagDefault
 }
 
 // searchMatch pairs a match range with its source.
@@ -1129,7 +1129,7 @@ func (m *Model) updateSideBySideSearchState() {
 		combined = append(combined, searchMatch{rng: match, inLeft: true})
 
 		// Track equal-line matches for deduplication.
-		if m.baseLeft.Contains(match.Start.Line) && m.baseLeft.Flag(match.Start.Line) == line.FlagDefault {
+		if m.equalLine(match.Start.Line) {
 			equalLinePositions[match.Start] = true
 		}
 	}

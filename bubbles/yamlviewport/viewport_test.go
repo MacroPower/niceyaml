@@ -5540,6 +5540,68 @@ func TestViewport_SideBySideSelectedMatchOnInsertedLine(t *testing.T) {
 	assert.Contains(t, right, highlight)
 }
 
+func TestViewport_SideBySideMatchStartingOnPadding(t *testing.T) {
+	t.Parallel()
+
+	// A term with a leading newline starts its match on the line before the
+	// text, so on a blank inserted or deleted line the match in the other
+	// pane starts on the padding opposite it. Both matches count, and each
+	// pane draws the selected highlight once as the search steps through
+	// them.
+	const (
+		withBlank = "a: 1\n\nb: 2\n"
+		without   = "a: 1\nb: 2\n"
+		highlight = "<genericHighlight>"
+	)
+
+	tcs := map[string]struct {
+		before string
+		after  string
+	}{
+		"inserted line": {before: without, after: withBlank},
+		"deleted line":  {before: withBlank, after: without},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinterWithSearch()))
+			m.SetWidth(100)
+			m.SetHeight(8)
+			m.AddRevision(niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("v1")))
+			m.AddRevision(niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("v2")))
+			m.SetViewMode(yamlviewport.ViewModeSideBySide)
+
+			m.SetSearchTerm("\nb")
+			require.Equal(t, 2, m.SearchCount())
+
+			var leftCount, rightCount int
+
+			for range m.SearchCount() {
+				view := m.View()
+				require.Equal(t, 1, strings.Count(view, highlight))
+
+				rows := strings.Split(view, "\n")
+
+				i := slices.IndexFunc(rows, func(row string) bool { return strings.Contains(row, highlight) })
+				require.NotEqual(t, -1, i)
+
+				left, right, ok := strings.Cut(rows[i], "│")
+				require.True(t, ok)
+
+				leftCount += strings.Count(left, highlight)
+				rightCount += strings.Count(right, highlight)
+
+				m.SearchNext()
+			}
+
+			assert.Equal(t, 1, leftCount)
+			assert.Equal(t, 1, rightCount)
+		})
+	}
+}
+
 func TestViewport_OffsetWithNoContentHeight(t *testing.T) {
 	t.Parallel()
 
