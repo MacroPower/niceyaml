@@ -130,6 +130,34 @@ func BenchmarkResolver_Node_WideMapping(b *testing.B) {
 	}
 }
 
+// BenchmarkResolver_Node_DeepPath resolves the innermost value of a chain
+// of nested mappings through one Resolver. The time per selector should
+// stay flat as the chain grows.
+func BenchmarkResolver_Node_DeepPath(b *testing.B) {
+	for _, depth := range []int{1000, 2000, 4000} {
+		src := strings.Repeat("{a: ", depth) + "1" + strings.Repeat("}", depth)
+
+		file, err := niceyaml.NewSourceFromString(src).File()
+		require.NoError(b, err)
+
+		r := paths.NewResolver(file.Docs[0])
+		path := paths.Root().Child(slices.Repeat([]string{"a"}, depth)...)
+
+		b.Run(fmt.Sprintf("depth_%d", depth), func(b *testing.B) {
+			b.ReportAllocs()
+
+			for b.Loop() {
+				_, err := r.Node(path)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*depth), "ns/selector")
+		})
+	}
+}
+
 // BenchmarkNewResolver_NestedOpenMerges binds the aliases of a chain of
 // merges inside an open anchored mapping, where each bN merges the two
 // mappings before it. The time per link should stay flat as the chain

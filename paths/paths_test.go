@@ -3454,6 +3454,9 @@ func TestPath_Matches(t *testing.T) {
 		      - id: 2
 		  b:
 		    id: 3
+		levels:
+		  one:
+		    two: [p, q]
 	`))
 	file, err := source.File()
 	require.NoError(t, err)
@@ -3467,6 +3470,10 @@ func TestPath_Matches(t *testing.T) {
 		"index all": {
 			path: paths.Root().Child("items").IndexAll(),
 			want: []string{"$.items[0]", "$.items[1]"},
+		},
+		"index all gives each element its own path below a long prefix": {
+			path: paths.Root().Child("levels", "one", "two").IndexAll(),
+			want: []string{"$.levels.one.two[0]", "$.levels.one.two[1]"},
 		},
 		"recursive": {
 			path: paths.Root().Recursive("name"),

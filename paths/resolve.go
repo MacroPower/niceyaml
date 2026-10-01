@@ -34,19 +34,15 @@ type match struct {
 	order []int
 }
 
-// with returns a copy of m at node, with seg appended to its selectors and
-// ord to its order. The copy owns its selectors and its order, so the
-// matches of one `[*]` do not share a backing array.
+// with returns the match at node that extends m, with seg appended to its
+// selectors and ord to its order. It appends in place, so a resolve of a
+// path of k selectors costs time in k rather than in k squared. The
+// result may thus share the spare capacity of m, so only one match may
+// extend it. A selector that reaches several nodes from m clips m first,
+// so each of its matches copies the selectors and the order of m rather
+// than writing past their end.
 func (m match) with(node ast.Node, entry *ast.MappingValueNode, seg segment, ord ...int) match {
-	segs := make([]segment, 0, len(m.segs)+1)
-	segs = append(segs, m.segs...)
-	segs = append(segs, seg)
-
-	order := make([]int, 0, len(m.order)+len(ord))
-	order = append(order, m.order...)
-	order = append(order, ord...)
-
-	return match{node: node, entry: entry, segs: segs, order: order}
+	return match{node: node, entry: entry, segs: append(m.segs, seg), order: append(m.order, ord...)}
 }
 
 // key returns the match for the `~` selector applied to m. That is the key
@@ -1066,6 +1062,10 @@ func (r *resolver) apply(seg segment, m match, reads *lookupReads) ([]match, err
 		if !ok {
 			return nil, nil
 		}
+
+		// Clipped, m has no spare capacity, so each element copies its
+		// selectors and its order rather than sharing one backing array.
+		m.segs, m.order = slices.Clip(m.segs), slices.Clip(m.order)
 
 		matches := make([]match, 0, len(seq.Values))
 		for i, v := range seq.Values {
