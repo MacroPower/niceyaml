@@ -1075,7 +1075,6 @@ func valueNode(node *niceyaml.Node) (ast.Node, bool) {
 	var (
 		n         = node.AST()
 		strTagged bool
-		resolver  *paths.Resolver
 		followed  []*ast.AliasNode
 	)
 
@@ -1098,11 +1097,7 @@ func valueNode(node *niceyaml.Node) (ast.Node, bool) {
 
 			followed = append(followed, v)
 
-			if resolver == nil {
-				resolver = paths.NewResolver(node.DocumentAST())
-			}
-
-			target, err := resolver.Deref(v)
+			target, err := docstate.Of(node).Resolver().Deref(v)
 			if err != nil {
 				return nil, strTagged
 			}
