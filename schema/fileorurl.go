@@ -210,8 +210,6 @@ func trimDriveSlash(u *url.URL) string {
 // relative path. Windows reads it as a path relative to the current
 // directory of drive A, which is no more absolute.
 func hasDriveLetter(p string) bool {
-	const driveLen = 2 // A letter and a colon.
-
 	if len(p) < driveLen || p[1] != ':' {
 		return false
 	}

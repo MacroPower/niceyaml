@@ -24,6 +24,9 @@ var ErrEmptyPath = errors.New("schema file path is empty")
 // where a drive letter names a drive.
 const onWindows = runtime.GOOS == "windows"
 
+// driveLen is the length of a Windows drive prefix: a letter and a colon.
+const driveLen = 2
+
 // File creates a [Ref] that names a schema file. The Ref is a [Resolver]
 // that names the file for every document. The registry reads the file
 // with [Registry.Load] from the working directory, with path made
@@ -117,8 +120,6 @@ func file(path string) (Ref, error) {
 	if path == "" {
 		return Ref{}, ErrEmptyPath
 	}
-
-	const driveLen = 2 // A letter and a colon.
 
 	// A registry with a file system reads an absolute path relative to
 	// this directory. When os.Getwd fails, wd stays empty and the registry
