@@ -8,6 +8,7 @@ import (
 	"iter"
 	"log/slog"
 	"math"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
@@ -259,11 +260,16 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 //
 // An error joined from several, as [errors.Join] builds one, rebases
 // branch by branch into a new join, so each line of its message carries
-// the path of its own branch. An [*Error] that only wraps a join, with
-// no location and no errors nested with [WithErrors], rebases the way
-// the join does, and the result stays an [*Error]. A join whose every
-// branch is a nil [*Error] or [*SourceError] pointer is still an error,
-// and it points at base as an error with no location does.
+// the path of its own branch. Any other error that unwraps to several,
+// and whose message is theirs one per line, rebases the same way. The
+// new join matches that error for [errors.Is] and [errors.As], and hands
+// both checks to any Is or As method the error has, so a caller that
+// checks for a multi-error type of its own still finds it. An [*Error]
+// that only wraps a join, with no location and no errors nested with
+// [WithErrors], rebases the way the join does, and the result stays an
+// [*Error]. A join whose every branch is a nil [*Error] or
+// [*SourceError] pointer is still an error, and it points at base as an
+// error with no location does.
 //
 // The result wraps err, or each branch of a join, so [errors.Is] and
 // [errors.As] see through it, and the text a wrapper such as [fmt.Errorf]
@@ -303,11 +309,72 @@ func Rebase(err error, base paths.Path) error {
 		}
 
 		if len(rebased) > 0 {
-			return errors.Join(rebased...)
+			if isJoinError(err) {
+				return errors.Join(rebased...)
+			}
+
+			return &rebasedJoinError{join: err, branches: rebased}
 		}
 	}
 
 	return &Error{err: err, base: base, rebased: true}
+}
+
+// rebasedJoinError is a join of a type other than the one [errors.Join]
+// builds, rebased branch by branch. Its message is the messages of the
+// rebased branches one per line, the shape the message of the join had,
+// and it unwraps to those branches. It matches the join for [errors.Is]
+// and [errors.As] rather than unwrapping to it, since the branches of
+// the join still write their paths from the old base.
+type rebasedJoinError struct {
+	// The join Rebase received.
+	join error
+	// The rebased branches, which leave out the nil ones.
+	branches []error
+}
+
+// Error returns the messages of the branches one per line.
+func (j *rebasedJoinError) Error() string {
+	msgs := make([]string, 0, len(j.branches))
+	for _, branch := range j.branches {
+		msgs = append(msgs, branch.Error())
+	}
+
+	return strings.Join(msgs, "\n")
+}
+
+// Unwrap returns the rebased branches.
+func (j *rebasedJoinError) Unwrap() []error {
+	return j.branches
+}
+
+// Is reports whether target is the join, or whether the Is method of the
+// join, if it has one, matches target. Like [errors.Is], it compares the
+// join with target only when the type of target is comparable.
+func (j *rebasedJoinError) Is(target error) bool {
+	if target != nil && reflect.TypeOf(target).Comparable() && j.join == target {
+		return true
+	}
+
+	x, ok := j.join.(interface{ Is(target error) bool }) //nolint:errorlint // The join itself, not a chain search.
+
+	return ok && x.Is(target)
+}
+
+// As sets target to the join when target points at a type the join is
+// assignable to, as [errors.As] does for an error in the chain. Otherwise
+// it reports what the As method of the join, if it has one, reports.
+func (j *rebasedJoinError) As(target any) bool {
+	val := reflect.ValueOf(target)
+	if val.Kind() == reflect.Pointer && !val.IsNil() && reflect.TypeOf(j.join).AssignableTo(val.Type().Elem()) {
+		val.Elem().Set(reflect.ValueOf(j.join))
+
+		return true
+	}
+
+	x, ok := j.join.(interface{ As(target any) bool }) //nolint:errorlint // The join itself, not a chain search.
+
+	return ok && x.As(target)
 }
 
 // ErrorOption configures an [Error]. [AtPath] sets its path, [AtPosition]

@@ -5539,6 +5539,49 @@ type rebasedConfig struct {
 	Hours rebasedHours `yaml:"hours"`
 }
 
+// joinedHours is a [niceyaml.SelfValidator] that reports its violations
+// as a join of its own type, with paths from its own root.
+type joinedHours struct {
+	Open  string `yaml:"open"`
+	Close string `yaml:"close"`
+}
+
+func (h joinedHours) Validate() error {
+	return sparseJoinError{errs: []error{
+		niceyaml.NewError("bad open", niceyaml.AtPath(paths.Root().Child("open"))),
+		niceyaml.NewError("bad close", niceyaml.AtPath(paths.Root().Child("close"))),
+	}}
+}
+
+// joinedConfig holds a [joinedHours] under a field.
+type joinedConfig struct {
+	Name  string      `yaml:"name"`
+	Hours joinedHours `yaml:"hours"`
+}
+
+// errInvalidHours is the sentinel [classifiedJoinError] matches.
+var errInvalidHours = errors.New("invalid hours")
+
+// classifiedJoinError is a join of its own type, as [sparseJoinError] is,
+// that matches [errInvalidHours] through an Is method and fills a
+// [*customTestError] through an As method.
+type classifiedJoinError struct {
+	sparseJoinError
+}
+
+func (e classifiedJoinError) Is(target error) bool {
+	return target == errInvalidHours
+}
+
+func (e classifiedJoinError) As(target any) bool {
+	custom, ok := target.(**customTestError)
+	if ok {
+		*custom = &customTestError{msg: "invalid hours"}
+	}
+
+	return ok
+}
+
 func TestRebase(t *testing.T) {
 	t.Parallel()
 
@@ -5743,6 +5786,88 @@ func TestRebase(t *testing.T) {
 
 		bare := dd.Bind(niceyaml.Rebase(errors.Join(open, closeErr), hours))
 		assert.Equal(t, niceyaml.FormatError(bare, -1), niceyaml.FormatError(dd.Bind(err), -1))
+	})
+
+	t.Run("a join of the caller's own type keeps its type", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		open := niceyaml.NewError("bad open", niceyaml.AtPath(paths.Root().Child("open")))
+		closeErr := niceyaml.NewError("bad close", niceyaml.AtPath(closePath))
+		joined := sparseJoinError{errs: []error{open, nil, closeErr}}
+
+		bindings := func(err error) []string {
+			got := []string{}
+			for se := range niceyaml.AllBindings(dd.Bind(err)) {
+				got = append(got, se.Error())
+			}
+
+			return got
+		}
+
+		bare := niceyaml.Rebase(errors.Join(open, closeErr), hours)
+
+		tcs := map[string]struct {
+			err error
+		}{
+			"join": {
+				err: joined,
+			},
+			"error that only wraps the join": {
+				err: niceyaml.WrapError(joined),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := niceyaml.Rebase(tc.err, hours)
+				require.EqualError(t, err, "$.hours.open: bad open\n$.hours.close: bad close")
+				require.ErrorIs(t, err, open)
+				require.ErrorIs(t, err, closeErr)
+
+				var got sparseJoinError
+
+				require.ErrorAs(t, err, &got)
+				assert.Equal(t, joined, got)
+
+				assert.Equal(t, bindings(bare), bindings(err))
+				assert.Equal(t, niceyaml.FormatError(dd.Bind(bare), -1), niceyaml.FormatError(dd.Bind(err), -1))
+			})
+		}
+	})
+
+	t.Run("a join of the caller's own type keeps its Is and As methods", func(t *testing.T) {
+		t.Parallel()
+
+		joined := classifiedJoinError{sparseJoinError{errs: []error{
+			niceyaml.NewError("bad open", niceyaml.AtPath(paths.Root().Child("open"))),
+			niceyaml.NewError("bad close", niceyaml.AtPath(closePath)),
+		}}}
+
+		err := niceyaml.Rebase(joined, hours)
+		require.EqualError(t, err, "$.hours.open: bad open\n$.hours.close: bad close")
+		require.ErrorIs(t, err, errInvalidHours)
+
+		var custom *customTestError
+
+		require.ErrorAs(t, err, &custom)
+		assert.Equal(t, "invalid hours", custom.Error())
+	})
+
+	t.Run("a decode keeps the type of a join a self validator returns", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, input)
+
+		_, err := dd.Decode[joinedConfig](t.Context())
+		require.EqualError(t, err, "$.hours.open: bad open\n$.hours.close: bad close")
+
+		var got sparseJoinError
+
+		require.ErrorAs(t, err, &got)
 	})
 
 	t.Run("a nested error without a location points at the base", func(t *testing.T) {
