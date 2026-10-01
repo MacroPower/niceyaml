@@ -725,9 +725,10 @@ type mapEntry struct {
 // value that refers back to itself would never finish.
 //
 // The order can still vary when several of the entries hold one
-// pointer, map, or slice, which only a value filled before the decode
-// can do. That value walks once, so its errors join the group of
-// whichever entry walks first, and the map iteration decides which.
+// pointer, map, or slice. An alias in the document can make them share
+// one, and so can a value the caller filled before the decode. The
+// shared value walks once, so its errors join the group of whichever
+// entry walks first, and the map iteration decides which.
 //
 // When ambiguous is true, path names the entries of several keys, so the
 // errors of entries bind with no position, for the reason
