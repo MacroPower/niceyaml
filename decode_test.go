@@ -584,6 +584,101 @@ func TestDocument_Decode(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("anchor with no value above a comment", func(t *testing.T) {
+		t.Parallel()
+
+		// The parser takes the comment as the value of the anchor. Each
+		// typed decode reads the anchored node as null, as it reads "&x ~".
+		type config struct {
+			A int `yaml:"a"`
+		}
+
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+		}{
+			"anchored null": {
+				input: "&x ~\n",
+				path:  paths.Root(),
+			},
+			"root": {
+				input: "&x\n# c\n",
+				path:  paths.Root(),
+			},
+			"root above a header": {
+				input: "--- &x\n# c\n---\nb: 1\n",
+				path:  paths.Root(),
+			},
+			"mapping value": {
+				input: "list: &d\n# end\n",
+				path:  paths.Root().Child("list"),
+			},
+			"mapping value after a reused anchor name": {
+				input: "x: &d 1\ny: *d\nlist: &d\n# end\n",
+				path:  paths.Root().Child("list"),
+			},
+			"sequence item": {
+				input: "- &d\n# end\n",
+				path:  paths.Root().Index(0),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				node := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.path)
+
+				cfg := &config{A: 7}
+				require.NoError(t, node.DecodeInto(t.Context(), &cfg))
+				assert.Nil(t, cfg)
+
+				list, err := node.Decode[[]int](t.Context())
+				require.NoError(t, err)
+				assert.Nil(t, list)
+
+				str := new("keep")
+				require.NoError(t, node.DecodeInto(t.Context(), &str))
+				assert.Nil(t, str)
+			})
+		}
+	})
+
+	t.Run("anchored field with no value above a comment", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			List []int `yaml:"list"`
+		}
+
+		tcs := map[string]struct {
+			input string
+		}{
+			"anchored null": {
+				input: "list: &d ~\n",
+			},
+			"field": {
+				input: "list: &d\n# end\n",
+			},
+			"field after a reused anchor name": {
+				input: "x: &d 1\ny: *d\nlist: &d\n# end\n",
+			},
+			"field above a header": {
+				input: "list: &d\n# end\n---\nb: 1\n",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got, err := yamltest.FirstDocument(t, tc.input).Decode[config](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, config{}, got)
+			})
+		}
+	})
 }
 
 func TestDocument_Decode_TypeMismatch(t *testing.T) {

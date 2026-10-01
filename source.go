@@ -16,6 +16,7 @@ import (
 	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/tokens"
@@ -464,10 +465,10 @@ func (d *document) anchorToken() *token.Token {
 // The tree leaves out a comment on a line of its own below a document
 // whose root is a scalar or a flow collection, and one between a %YAML
 // or %TAG directive and its "---" header, since [parser.Parse] rejects
-// valid YAML that holds a comment in either place. The tokens of the
-// Source and of each [Node] still hold such a comment. Below an anchor
-// with no value, the comment stays in the tree as the value of the
-// anchor, since the parser rejects the anchor without it.
+// valid YAML that holds a comment in either place. It also leaves out a
+// comment below an anchor with no value, and holds a null as the value of
+// that anchor, as it does when a header follows the anchor. The tokens of
+// the Source and of each [Node] still hold such a comment.
 //
 // The tokens of the file are copies of the Source's own, since the parser
 // relinks the tokens it receives. A copy matches the original by its type,
@@ -535,6 +536,8 @@ func (s *Source) parse() (*ast.File, map[*token.Token]struct{}, error) {
 	for _, run := range splitDocumentRuns(tks) {
 		f, err := s.parseRun(dropStrandedComments(run))
 		if err == nil {
+			nullEmptyAnchors(f)
+
 			file.Docs = append(file.Docs, f.Docs...)
 
 			continue
@@ -736,6 +739,7 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 // without the comments. The comments below an anchor with no value stay,
 // since the parser takes them as the value of the anchor and rejects an
 // anchor that no token follows past its name (parser/token.go:311).
+// [nullEmptyAnchors] puts a null in their place once the parser returns.
 func dropStrandedComments(run token.Tokens) token.Tokens {
 	var (
 		kept token.Tokens
@@ -826,6 +830,36 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 	}
 
 	return kept
+}
+
+// nullEmptyAnchors puts a null in place of each comment that the parser
+// took as the value of an anchor of file. When a header or another entry
+// follows an anchor with no value, the parser gives the anchor an
+// implicit null, and this null takes the token type and position of that
+// one. The go-yaml decoder reads the null as an empty node, where it
+// would reject the comment in a typed target and give a pointer a value
+// for it.
+func nullEmptyAnchors(file *ast.File) {
+	for _, doc := range file.Docs {
+		for _, node := range sourceNodes(doc) {
+			anchor, ok := node.(*ast.AnchorNode)
+			if !ok || astnode.HasContent(anchor.Value) {
+				continue
+			}
+
+			var pos *token.Position
+
+			if anchor.Start != nil && anchor.Start.Position != nil {
+				p := *anchor.Start.Position
+				p.Column++
+				pos = &p
+			}
+
+			tk := token.New("null", " null", pos)
+			tk.Type = token.ImplicitNullType
+			anchor.Value = ast.Null(tk)
+		}
+	}
 }
 
 // belowText reports whether tk starts on a line below the line where the
