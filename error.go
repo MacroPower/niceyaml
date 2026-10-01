@@ -89,8 +89,10 @@ var (
 	// document go past the limit gopkg.in/yaml.v3 applies, unless
 	// [WithAliasLimit] turns the check off. The error comes back bound
 	// as a [SourceError] at the first token of the node that is not a
-	// comment, and it does not match [ErrDecodeRejected]. The schema
-	// package exports the same error value.
+	// comment, and it does not match [ErrDecodeRejected]. [Node.Nodes]
+	// returns it too, bound to its receiver, when aliases lead a selector
+	// of the path to far more nodes than the document holds. The paths
+	// and schema packages export the same error value.
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// ErrParseRejected indicates the go-yaml parser panicked on the tokens

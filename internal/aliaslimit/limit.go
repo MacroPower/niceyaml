@@ -6,7 +6,8 @@
 //
 // The decode check of the aliasing package applies the limit to what a
 // decode of a document reads. The schema validator applies it to a
-// decoded value whose maps and slices a decode shares between aliases.
+// decoded value whose maps and slices a decode shares between aliases,
+// and the paths package to the nodes one selector of a path reaches.
 // Each refuses a count past the limit with [ErrExcessiveAliasing].
 package aliaslimit
 
@@ -16,8 +17,8 @@ import (
 )
 
 // ErrExcessiveAliasing indicates a document or a value whose aliases make
-// up too large a share of what a reader of it reads. The niceyaml and
-// schema packages export the same error value.
+// up too large a share of what a reader of it reads. The niceyaml,
+// paths, and schema packages export the same error value.
 var ErrExcessiveAliasing = errors.New("excessive aliasing")
 
 // The limits on shared values follow the rule gopkg.in/yaml.v3 applies

@@ -13,6 +13,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 )
 
@@ -35,6 +36,17 @@ var (
 	// ErrWildcard indicates a request for a single node or token from a path
 	// with a `[*]` or `..` selector. Use [Path.Nodes] for such paths.
 	ErrWildcard = errors.New("wildcard path matches any number of nodes")
+
+	// ErrExcessiveAliasing indicates a path whose selectors reach far more
+	// nodes than the document holds. A `[*]` selector lists the elements
+	// of a sequence once for each alias that leads to it, so a few
+	// hundred bytes of nested aliases can make a path select millions of
+	// nodes. A selector may reach each node of the document once, and the
+	// nodes it reaches past that count may make up only the share of them
+	// that gopkg.in/yaml.v3 allows the aliases in a document it decodes.
+	// It is the same error value as
+	// [go.jacobcolvin.com/niceyaml.ErrExcessiveAliasing].
+	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// Before quoteName or goccyString wraps a selector name in single
 	// quotes, nameEscaper escapes its backslashes and single quotes. A
@@ -458,8 +470,9 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 //
 // Wraps [ErrNoDocument], together with [ErrNotFound], when the document has
 // no content to resolve in, and [ErrAlias] when an alias on the path does
-// not resolve. [Path.Matches] returns the same nodes with the path that
-// selects each one alone.
+// not resolve. Wraps [ErrExcessiveAliasing] when aliases lead a selector
+// to far more nodes than the document holds. [Path.Matches] returns the
+// same nodes with the path that selects each one alone.
 func (p Path) Nodes(doc *ast.DocumentNode) ([]ast.Node, error) {
 	found, err := p.Matches(doc)
 	if err != nil {

@@ -86,6 +86,13 @@
 // forms a cycle. When the document has no content to resolve in, the error
 // wraps [ErrNoDocument] along with ErrNotFound.
 //
+// A `[*]` selector lists the elements of a sequence once for each alias
+// that leads to it, so nested aliases can make a path select many times
+// the nodes the document holds. A resolve stops with
+// [ErrExcessiveAliasing] once the aliases make up too much of what one
+// selector reaches, under the rule gopkg.in/yaml.v3 applies to the aliases
+// in a document it decodes.
+//
 // # Error Highlighting
 //
 // Pass a [Path] to [go.jacobcolvin.com/niceyaml.AtPath], which highlights

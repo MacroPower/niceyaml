@@ -5760,6 +5760,26 @@ func TestNode_Nodes(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, empty.Source(), bound.Source())
 	})
+
+	t.Run("a path that fans out through nested aliases is refused", func(t *testing.T) {
+		t.Parallel()
+
+		bomb := yamltest.FirstDocument(t, yamltest.AliasLevels(5))
+
+		// Each [*] lists ten aliases to the level below, so the path
+		// would select 10^5 nodes. A decode of the document is refused
+		// too.
+		_, err := bomb.Nodes(paths.MustParse("$.a[5][*][*][*][*][*]"))
+		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, bomb.Source(), bound.Source())
+
+		_, err = bomb.Decode[any](t.Context())
+		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+	})
 }
 
 // rejectingUnmarshaler decodes itself and reports errUnmarshal, so the

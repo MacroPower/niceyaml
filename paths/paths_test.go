@@ -2185,6 +2185,68 @@ refs: [*r, *r]
 	})
 }
 
+func TestPath_Matches_AliasFanOut(t *testing.T) {
+	t.Parallel()
+
+	// The document of aliasList holds n scalars under the key a and n
+	// aliases to a under the key b, so $.b[*][*] selects n*n nodes.
+	aliasList := func(n int) string {
+		elems := strings.TrimSuffix(strings.Repeat("x, ", n), ", ")
+		aliases := strings.TrimSuffix(strings.Repeat("*a, ", n), ", ")
+
+		return "a: &a [" + elems + "]\nb: [" + aliases + "]\n"
+	}
+
+	tcs := map[string]struct {
+		err   error
+		input string
+		path  paths.Path
+		want  int
+	}{
+		"nested alias levels": {
+			input: yamltest.AliasLevels(5),
+			path:  paths.MustParse("$.a[5][*][*][*][*][*]"),
+			err:   paths.ErrExcessiveAliasing,
+		},
+		"wide list of aliases": {
+			input: aliasList(500),
+			path:  paths.MustParse("$.b[*][*]"),
+			err:   paths.ErrExcessiveAliasing,
+		},
+		"few alias levels": {
+			input: yamltest.AliasLevels(2),
+			path:  paths.MustParse("$.a[2][*][*]"),
+			want:  100,
+		},
+		"short list of aliases": {
+			input: aliasList(10),
+			path:  paths.MustParse("$.b[*][*]"),
+			want:  100,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
+
+			matches, err := tc.path.Matches(doc)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				_, err = tc.path.Nodes(doc)
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Len(t, matches, tc.want)
+		})
+	}
+}
+
 func TestPath_Token_Keys(t *testing.T) {
 	t.Parallel()
 

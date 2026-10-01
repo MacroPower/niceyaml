@@ -9,6 +9,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 )
 
@@ -77,11 +78,15 @@ func (m match) key() match {
 // a key without reading its entries again. A [Resolver] may serve several
 // goroutines, so the map is a [sync.Map].
 //
+// The nodes field counts the nodes of the document, which
+// [resolver.excessive] weighs the matches of a selector against.
+//
 // Create instances with [newResolver].
 type resolver struct {
 	targets  map[*ast.AliasNode]*ast.AnchorNode
 	enclosed map[*ast.AliasNode]bool
 	keys     sync.Map
+	nodes    int
 }
 
 // mappingKeys indexes the entries of one mapping for [resolver.lookup] and
@@ -156,7 +161,8 @@ func (k *mappingKeys) mergeAfter(i int) bool {
 // merge keys name. It counts for an alias in a value only when no other
 // anchor of its name comes before that alias, as [anchorSet] describes.
 // Once every alias is bound, an [enclosureFinder] finds the aliases that
-// lie inside the content of the anchor they refer to.
+// lie inside the content of the anchor they refer to, and a [nodeCounter]
+// counts the nodes of doc.
 func newResolver(doc *ast.DocumentNode) *resolver {
 	b := &aliasBinder{
 		anchors: newAnchorSet(),
@@ -180,7 +186,29 @@ func newResolver(doc *ast.DocumentNode) *resolver {
 
 	ast.Walk(f, doc.Body)
 
-	return &resolver{targets: b.targets, enclosed: f.enclosed}
+	var nodes nodeCounter
+
+	ast.Walk(&nodes, doc.Body)
+
+	return &resolver{targets: b.targets, enclosed: f.enclosed, nodes: int(nodes)}
+}
+
+// nodeCounter is an [ast.Visitor] that counts the nodes it visits. The
+// count takes in the anchors, tags, entries, and comments of a document
+// as well as its values.
+type nodeCounter int
+
+// Visit adds node to the count, then returns c so [ast.Walk] continues
+// into the children of node. It returns nil for a nil node, including a
+// typed nil a hand-built tree may hold.
+func (c *nodeCounter) Visit(node ast.Node) ast.Visitor {
+	if astnode.IsNil(node) {
+		return nil
+	}
+
+	*c++
+
+	return c
 }
 
 // enclosureFinder finds the aliases that lie inside the content of the
@@ -832,6 +860,11 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 // yields each entry once. Only a recursive selector drops repeats, so a
 // later `.name`, `[n]`, or `[*]` selector can still reach one node through
 // several aliases.
+//
+// Returns [ErrExcessiveAliasing] once the matches of one selector pass
+// the limit [resolver.excessive] applies. Resolve checks after each match
+// the selector applies to, so a `[*]` lists at most one sequence past the
+// limit before it stops.
 func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 	matches := []match{{node: root}}
 
@@ -860,6 +893,10 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 				}
 
 				next = append(next, found...)
+
+				if r.excessive(len(next)) {
+					return nil, ErrExcessiveAliasing
+				}
 			}
 		}
 
@@ -877,6 +914,15 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 	}
 
 	return matches, nil
+}
+
+// excessive reports whether count matches of one selector pass the alias
+// limit of the document. Without aliases a selector reaches each node of
+// the document at most once, so only aliases can take count past the
+// nodes of the document. [aliaslimit.Excessive] weighs the matches past
+// that count as the nodes aliases repeat in a decode.
+func (r *resolver) excessive(count int) bool {
+	return aliaslimit.Excessive(r.nodes, max(count-r.nodes, 0))
 }
 
 // uniqueMatches returns the first match of each entry, in the order

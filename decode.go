@@ -874,8 +874,9 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // A path that selects nothing returns no Nodes and no error, as
 // [paths.Path.Nodes] does, and the errors it returns come back bound to
 // the source: an error wrapping [paths.ErrNoDocument] when the document
-// has no content, and [paths.ErrAlias] when an alias on the path does not
-// resolve.
+// has no content, [paths.ErrAlias] when an alias on the path does not
+// resolve, and [ErrExcessiveAliasing] when aliases lead a selector of the
+// path to far more nodes than the document holds.
 func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	found, err := n.doc.pathResolver().Matches(n.base.Join(path))
 	if err != nil {
