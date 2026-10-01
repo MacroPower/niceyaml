@@ -801,6 +801,32 @@ func TestResolver_KeyName(t *testing.T) {
 		})
 	}
 
+	t.Run("later merge key brings in the key", func(t *testing.T) {
+		t.Parallel()
+
+		file, err := niceyaml.NewSourceFromString("m:\n  k: own\n  <<: {k: merged}\n").File()
+		require.NoError(t, err)
+
+		r := paths.NewResolver(file.Docs[0])
+		m := paths.Root().Child("m")
+
+		node, err := r.Node(m)
+		require.NoError(t, err)
+
+		mapping, ok := node.(*ast.MappingNode)
+		require.True(t, ok, "m is a %T", node)
+
+		got, ok := r.KeyName(mapping.Values[0].Key)
+		require.True(t, ok)
+		assert.Equal(t, "k", got)
+
+		// The merge comes after the entry, so a child selector with the
+		// name selects the value the merge brings in.
+		value, err := r.Node(m.Child(got))
+		require.NoError(t, err)
+		assert.Equal(t, "merged", value.String())
+	})
+
 	// The parser rejects a sequence or mapping key, but a tree built by
 	// hand may hold one.
 	handBuilt := map[string]struct {

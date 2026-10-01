@@ -1283,10 +1283,11 @@ func (w *selfWalker) keyDecoder() *yaml.Decoder {
 // addKeyName decodes key as type t and adds to names the text
 // [paths.Resolver.KeyName] gives the key, under the value the key decodes
 // to, as [nameKey] keys it. A child selector matches a key by that text,
-// so a path built from names resolves to the entry. A key KeyName cannot
-// name, one that does not decode, whose decode panics, or whose value
-// cannot key a map, adds nothing, and neither does a key whose value
-// names already holds. The key decodes from the node
+// so a path built from names resolves to the entry, unless a later entry
+// repeats the key or a later `<<` merge key brings it in. A key KeyName
+// cannot name, one that does not decode, whose decode panics, or whose
+// value cannot key a map, adds nothing, and neither does a key whose
+// value names already holds. The key decodes from the node
 // [selfWalker.valueNode] gives it.
 //
 // As go-yaml does, addKeyName decodes a key of a pointer type t as the

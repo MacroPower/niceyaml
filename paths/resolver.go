@@ -120,11 +120,12 @@ func (r *Resolver) Deref(node ast.Node) (ast.Node, error) {
 // KeyName returns the text a child selector matches key by, where key is
 // the key node of a mapping entry. [Path.Child] with that text selects
 // the value of that entry, unless a later entry in the mapping repeats
-// the key. A string key gives its unquoted text, a block scalar key gives
-// its content, and any other scalar key gives its source text, such as
-// 0x10 for an int. An alias key, tagged or not, gives the text of the
-// content of its anchor. The `?` of an explicit key, and the anchors and
-// tags on key, add nothing to its text.
+// the key or a later `<<` merge key brings it in. A string key gives its
+// unquoted text, a block scalar key gives its content, and any other
+// scalar key gives its source text, such as 0x10 for an int. An alias
+// key, tagged or not, gives the text of the content of its anchor. The
+// `?` of an explicit key, and the anchors and tags on key, add nothing
+// to its text.
 //
 // The bool result is false for a key with no text a selector can match:
 // a nil key, a sequence or mapping key, and an alias key with no anchor
