@@ -76,6 +76,10 @@ func newCompileConfig(opts []CompileOption) compileConfig {
 //
 //	v, err := schema.Compile(ctx, data, schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)))
 //
+// A [Registry] resolves the $refs of a schema from [File] or [URL] with
+// a resolver of its own, and [WithCompileOptions] says when a
+// [jsonschema.WithRefResolver] given here replaces it.
+//
 // The option keeps its own copy of opts, so writing to the caller's slice
 // afterwards changes nothing, even for a [Registry] that compiles later.
 func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {

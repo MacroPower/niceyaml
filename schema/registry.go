@@ -266,6 +266,15 @@ func WithRequireSchema(require bool) RegistryOption {
 //	    schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)),
 //	))
 //
+// A [jsonschema.WithRefResolver] among these options replaces the
+// registry's own resolution of the $refs in a whole schema from [File] or
+// [URL]. A relative $ref there then resolves only if that resolver serves
+// it. A [Ref] that names a subschema by a fragment, such as
+// "https://example.com/defs.json#/$defs/a", always resolves its $refs
+// through the registry, because only the registry holds the document the
+// fragment points into. A resolver among these options does not apply to
+// it.
+//
 // The option keeps its own copy of opts, so writing to the caller's slice
 // afterwards changes nothing, even for a registry built later. Given more
 // than once, each call appends after the options of the one before it.
@@ -791,7 +800,7 @@ func (r *Registry) keepRefDoc(key string, doc refDoc) refDoc {
 }
 
 // refOptions returns the options the registry compiles the schema ref
-// names with: the options [WithCompileOptions] gave it, behind options
+// names with: the options [WithCompileOptions] gave it, and options
 // that let a $ref in a schema from [File] or [URL] name a document beside
 // it. Such a schema takes base, its key without any userinfo, as the base
 // URI of its references. The registry reads each document a reference
@@ -824,8 +833,11 @@ func (r *Registry) keepRefDoc(key string, doc refDoc) refDoc {
 // hands a resolver each URI in its RFC 3986 normal form, so the registry
 // compares the two in that form. A key that spells the URL another way,
 // such as with an upper-case host, then still resolves to doc. A nil doc
-// means ref names a whole document. An option from [WithCompileOptions]
-// comes later and wins.
+// means ref names a whole document.
+//
+// For a whole document, the options from [WithCompileOptions] come after
+// the registry's own, so they win. For a fragment, they come first, and
+// the registry's resolver wins, because only it can serve doc.
 func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsonschema.Schema) []CompileOption {
 	if !ref.url && ref.file == "" {
 		return r.compileOpts
@@ -914,6 +926,16 @@ func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsons
 	}
 
 	opts := make([]CompileOption, 0, len(r.compileOpts)+1)
+
+	// Only the registry holds the document the fragment names, so its
+	// resolver comes last there, where a resolver of the caller cannot
+	// replace it.
+	if doc != nil {
+		opts = append(opts, r.compileOpts...)
+
+		return append(opts, WithJSONSchemaOptions(refOpts...))
+	}
+
 	opts = append(opts, WithJSONSchemaOptions(refOpts...))
 
 	return append(opts, r.compileOpts...)

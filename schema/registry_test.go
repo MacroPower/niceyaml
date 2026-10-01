@@ -2551,11 +2551,19 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		return path
 	}
 
+	// A caller's resolver that serves an unrelated URN. The registry
+	// alone holds the document a fragment names, so this resolver must
+	// not replace the registry's.
+	urnResolver := schema.WithCompileOptions(schema.WithJSONSchemaOptions(
+		jsonschema.WithRefResolver(jsonschema.SchemaMap{"urn:x": {}}),
+	))
+
 	tcs := map[string]struct {
 		ref      func(t *testing.T) schema.Ref
 		valid    string
 		invalid  string
 		want     string
+		opts     []schema.RegistryOption
 		requests int32
 	}{
 		"url pointer": {
@@ -2622,6 +2630,27 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			want:     `expected "object", got "array"`,
 			requests: 1,
 		},
+		"url pointer with a caller's ref resolver": {
+			ref: func(_ *testing.T) schema.Ref {
+				return schema.URL(baseURL + "/defs.json#/$defs/Foo")
+			},
+			valid:    "name: x\n",
+			invalid:  "other: 1\n",
+			want:     `missing required property "name"`,
+			opts:     []schema.RegistryOption{urnResolver},
+			requests: 1,
+		},
+		"file url pointer with a caller's ref resolver": {
+			ref: func(t *testing.T) schema.Ref {
+				t.Helper()
+
+				return fileOrURL(t, "", "file://"+filepath.ToSlash(defsFile(t))+"#/$defs/Foo")
+			},
+			valid:   "name: x\n",
+			invalid: "other: 1\n",
+			want:    `missing required property "name"`,
+			opts:    []schema.RegistryOption{urnResolver},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2629,7 +2658,11 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			t.Parallel()
 
 			client, requests := serve()
-			reg := schema.NewRegistry(schema.WithHTTPClient(client), schema.WithResolvers(tc.ref(t)))
+			opts := append([]schema.RegistryOption{
+				schema.WithHTTPClient(client),
+				schema.WithResolvers(tc.ref(t)),
+			}, tc.opts...)
+			reg := schema.NewRegistry(opts...)
 
 			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, tc.valid)))
 
