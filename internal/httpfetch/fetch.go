@@ -49,7 +49,7 @@ const MaxSize = 10 * 1024 * 1024 // 10 MB.
 func Get(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		if _, ok := redactUnparsed(rawURL); ok {
+		if _, ok := redactSpan(rawURL); ok {
 			return nil, fmt.Errorf("%s: reason withheld because it can quote the password", parsePrefix(rawURL))
 		}
 
@@ -147,8 +147,10 @@ func IsHTTPURL(rawURL string) bool {
 }
 
 // Redacted returns rawURL with any password in its userinfo replaced by
-// "xxxxx", for use in messages. A string that carries no password comes
-// back unchanged, so a name that is not a URL keeps its spelling.
+// "xxxxx", for use in messages. It keeps every other byte as written,
+// unlike [url.URL.Redacted], which re-encodes the URL. A string that
+// carries no password comes back unchanged, so a name that is not a URL
+// keeps its spelling.
 // Redacted replaces a wider span in a URL that does not parse and in an
 // http or https URL with an empty host. It does the same in a URL whose
 // host ends in a colon when an "@" follows the host, and in a URL with a
@@ -170,17 +172,15 @@ func Redacted(rawURL string) string {
 // [url.Parse] returns for it, so [Get] can name the URL it already
 // parsed.
 func redacted(u *url.URL, err error, rawURL string) string {
-	if err != nil || namesNoHost(u, rawURL) || hidesPassword(u, rawURL) || splitsPassword(u, rawURL) {
-		name, _ := redactUnparsed(rawURL)
-
-		return name
+	if err == nil && !namesNoHost(u, rawURL) && !hidesPassword(u, rawURL) {
+		if _, ok := u.User.Password(); !ok {
+			return rawURL
+		}
 	}
 
-	if _, ok := u.User.Password(); !ok {
-		return rawURL
-	}
+	name, _ := redactSpan(rawURL)
 
-	return u.Redacted()
+	return name
 }
 
 // splitsPassword reports whether u, parsed from rawURL, can hold part of
@@ -233,18 +233,19 @@ func hidesPassword(u *url.URL, rawURL string) bool {
 		return false
 	}
 
-	_, ok := redactUnparsed(rawURL)
+	_, ok := redactSpan(rawURL)
 
 	return ok
 }
 
-// redactUnparsed is [Redacted] for a URL that does not parse or that
-// [namesNoHost], [hidesPassword] or [splitsPassword] flags. It replaces
-// everything from the first colon after "://" or a leading "//" to the
-// last "@", and it reports whether it found such a span. The span does
-// not stop at the first "/", "?" or "#", because a password can hold one
-// of them.
-func redactUnparsed(rawURL string) (string, bool) {
+// redactSpan returns rawURL with everything from the first colon after
+// "://" or a leading "//" to the last "@" replaced by "xxxxx", and it
+// reports whether it found such a span. The span does not stop at the
+// first "/", "?" or "#", because a password can hold one of them. In a
+// URL that parses with a password and holds no "@" after its authority,
+// the span is the password alone, since [url.Parse] also splits the
+// userinfo at the last "@" and the password at the first colon.
+func redactSpan(rawURL string) (string, bool) {
 	start, ok := authorityStart(rawURL)
 	if !ok {
 		return rawURL, false

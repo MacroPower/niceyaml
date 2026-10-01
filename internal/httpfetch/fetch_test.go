@@ -285,6 +285,30 @@ func TestRedacted(t *testing.T) {
 			url:  "https://user:secret@example.com/s.json",
 			want: "https://user:xxxxx@example.com/s.json",
 		},
+		"password keeps a space in the path": {
+			url:  "https://user:secret@example.com/my schema.json",
+			want: "https://user:xxxxx@example.com/my schema.json",
+		},
+		"password keeps non-ascii text in the path": {
+			url:  "https://user:secret@example.com/ünï.json",
+			want: "https://user:xxxxx@example.com/ünï.json",
+		},
+		"password keeps an at sign in the username": {
+			url:  "https://jane@corp.com:secret@example.com/s.json",
+			want: "https://jane@corp.com:xxxxx@example.com/s.json",
+		},
+		"password keeps the scheme case": {
+			url:  "HTTPS://user:secret@example.com/s.json",
+			want: "HTTPS://user:xxxxx@example.com/s.json",
+		},
+		"encoded password with a query and fragment": {
+			url:  "https://user:s%40cret@example.com/s.json?q=1#f",
+			want: "https://user:xxxxx@example.com/s.json?q=1#f",
+		},
+		"empty password": {
+			url:  "https://user:@example.com/s.json",
+			want: "https://user:xxxxx@example.com/s.json",
+		},
 		"user without password": {
 			url:  "https://user@example.com/s.json",
 			want: "https://user@example.com/s.json",
@@ -356,6 +380,10 @@ func TestRedacted(t *testing.T) {
 		"password in a scheme-relative url": {
 			url:  "//user:secret@example.com/x",
 			want: "//user:xxxxx@example.com/x",
+		},
+		"password keeps a space in the path of a scheme-relative url": {
+			url:  "//user:secret@example.com/my schema.json",
+			want: "//user:xxxxx@example.com/my schema.json",
 		},
 		"password with a slash in a scheme-relative url": {
 			url:  "//user:s3/cret@example.com/x",
