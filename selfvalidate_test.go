@@ -626,6 +626,20 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			time.Time
 		}
 
+		// Go promotes the UnmarshalYAML of the Positive that shallow
+		// embeds, which sits one field above the Positive in wrapped.
+		type shallow struct {
+			wrapped //nolint:unused // Only reflect reads the field.
+			Positive
+		}
+
+		// The embedded pointer to looped reaches a second Positive, one
+		// field deeper.
+		type looped struct {
+			*looped //nolint:unused // Only reflect reads the field.
+			Positive
+		}
+
 		type parent struct {
 			Wrapped  wrapped         `yaml:"wrapped"`
 			Twice    PositiveWrapper `yaml:"twice"`
@@ -633,6 +647,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			Declared declaredDecode  `yaml:"declared"`
 			Text     textDecode      `yaml:"text"`
 			Both     both            `yaml:"both"`
+			Shallow  shallow         `yaml:"shallow"`
+			Looped   looped          `yaml:"looped"`
 		}
 
 		tcs := map[string]struct {
@@ -660,6 +676,14 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"embedded field beside one with a later unmarshaler": {
 				input: "both: -1\n",
 				err:   "1:7: $.both: negative",
+			},
+			"embedded field above another with the same unmarshaler": {
+				input: "shallow: -1\n",
+				err:   "1:10: $.shallow: negative",
+			},
+			"embedded field beside a pointer to its own struct": {
+				input: "looped: -1\n",
+				err:   "1:9: $.looped: negative",
 			},
 		}
 

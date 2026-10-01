@@ -395,9 +395,10 @@ func decodesItself(t reflect.Type) bool {
 // the first method the pointer to t has, so an UnmarshalYAML that t gets
 // from a field wins over an UnmarshalText that t declares. The method of
 // the field decodes the document into the field, so the field stands at
-// the path of the struct. The bool result is false when t declares the
-// method go-yaml calls, or when no embedded field, or more than one, has
-// that method.
+// the path of the struct. When several embedded fields have the method,
+// Go promotes it from the field that has it at the shallowest depth. The
+// bool result is false when t declares the method go-yaml calls, or when
+// no embedded field has that method.
 func decoderField(t reflect.Type) (int, bool) {
 	if cached, ok := decoderFields.Load(t); ok {
 		if i, ok := cached.(int); ok {
@@ -424,11 +425,13 @@ func findDecoderField(t reflect.Type) int {
 	}
 
 	unmarshaler := unmarshalerTypes[k]
-	if !promotesMethod(t, unmarshaler.Method(0).Name) {
+
+	name := unmarshaler.Method(0).Name
+	if !promotesMethod(t, name) {
 		return -1
 	}
 
-	found := -1
+	found, depth := -1, math.MaxInt
 
 	for i := range t.NumField() {
 		field := t.Field(i)
@@ -447,14 +450,66 @@ func findDecoderField(t reflect.Type) int {
 			continue
 		}
 
-		if found >= 0 {
-			return -1
+		// Two fields that have the method at the same depth would leave
+		// it out of the method set of the pointer to t, so no other field
+		// has it at the shallowest depth.
+		if d := methodDepth(field.Type, name); d < depth {
+			found, depth = i, d
 		}
-
-		found = i
 	}
 
 	return found
+}
+
+// methodDepth returns how many embedded fields deep in t a type declares
+// the method of the given name. It returns 0 when t declares the method
+// itself, and [math.MaxInt] when the pointer to t has no such method. A
+// pointer type counts as the type it points to. The search reads one
+// depth at a time, so the first declaration it finds is the shallowest.
+// It reads each type once, so it ends for a type that embeds a pointer
+// to itself.
+func methodDepth(t reflect.Type, name string) int {
+	seen := map[reflect.Type]bool{}
+	level := []reflect.Type{t}
+
+	for depth := 0; len(level) > 0; depth++ {
+		var next []reflect.Type
+
+		for _, lt := range level {
+			if lt.Kind() == reflect.Pointer {
+				lt = lt.Elem()
+			}
+
+			if seen[lt] {
+				continue
+			}
+
+			seen[lt] = true
+
+			methods := lt
+			if methods.Kind() != reflect.Interface {
+				methods = reflect.PointerTo(methods)
+			}
+
+			if _, ok := methods.MethodByName(name); !ok {
+				continue
+			}
+
+			if !promotesMethod(lt, name) {
+				return depth
+			}
+
+			for field := range lt.Fields() {
+				if field.Anonymous {
+					next = append(next, field.Type)
+				}
+			}
+		}
+
+		level = next
+	}
+
+	return math.MaxInt
 }
 
 // mayHoldValidator reports whether a value of type t can implement
