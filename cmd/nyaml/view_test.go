@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go.jacobcolvin.com/niceyaml/internal/escape"
 )
 
 func TestLoadSources(t *testing.T) {
@@ -21,6 +23,8 @@ func TestLoadSources(t *testing.T) {
 		// when it writes every file.
 		missing string
 		err     error
+		// Makes the missing file a dangling symlink, as a glob can match.
+		dangling bool
 	}{
 		"distinct base names": {
 			files: []string{"a/one.yaml", "b/two.yaml"},
@@ -33,6 +37,12 @@ func TestLoadSources(t *testing.T) {
 			missing: "b/config.yaml",
 			err:     fs.ErrNotExist,
 		},
+		"dangling symlink with a newline in the name": {
+			files:    []string{"a/config.yaml", "b/evil\n└── other.yaml"},
+			missing:  "b/evil\n└── other.yaml",
+			dangling: true,
+			err:      fs.ErrNotExist,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -44,11 +54,19 @@ func TestLoadSources(t *testing.T) {
 			paths := make([]string, len(tc.files))
 			for i, file := range tc.files {
 				paths[i] = filepath.Join(dir, file)
+				require.NoError(t, os.MkdirAll(filepath.Dir(paths[i]), 0o750))
+
 				if file == tc.missing {
+					if tc.dangling {
+						err := os.Symlink(filepath.Join(dir, "nowhere.yaml"), paths[i])
+						if err != nil {
+							t.Skipf("symlink %q: %v", file, err)
+						}
+					}
+
 					continue
 				}
 
-				require.NoError(t, os.MkdirAll(filepath.Dir(paths[i]), 0o750))
 				require.NoError(t, os.WriteFile(paths[i], []byte("a: 1\n"), 0o600))
 			}
 
@@ -56,9 +74,10 @@ func TestLoadSources(t *testing.T) {
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 
-				// The read error names the path, and loadSources adds no
-				// second copy.
-				assert.Equal(t, 1, strings.Count(err.Error(), filepath.Join(dir, tc.missing)))
+				// The read error names the path with its control
+				// characters escaped, and loadSources adds no second copy.
+				missing := escape.Control(filepath.Join(dir, tc.missing))
+				assert.Equal(t, 1, strings.Count(err.Error(), missing), err.Error())
 
 				return
 			}

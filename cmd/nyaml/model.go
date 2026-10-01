@@ -576,8 +576,8 @@ func (m *model) textLine() string {
 		styleKey kind.Kind
 	}
 
-	// A file name comes from the file system, so escape it the way the
-	// error handler and the validate command render one.
+	// A file name comes from the file system, so escape it as the
+	// validate command does.
 	swatches := []swatch{
 		{escape.Control(m.viewport.RevisionName()), kind.TextAccentDim},
 		{searchLabel, kind.TextAccent},

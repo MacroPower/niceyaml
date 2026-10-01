@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -77,10 +78,12 @@ func validateCmd() *cobra.Command {
 				}
 
 				// A glob match takes its name from the file system, so
-				// escape it the way the error handler renders one.
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: valid\n", escape.Control(yamlPath))
+				// escape it here and in the error, as validateFile does.
+				name := escape.Control(yamlPath)
+
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s: valid\n", name)
 				if err != nil {
-					errs = append(errs, fmt.Errorf("write the result of %s: %w", yamlPath, err))
+					errs = append(errs, fmt.Errorf("write the result of %s: %w", name, err))
 				}
 			}
 
@@ -101,18 +104,21 @@ func validateCmd() *cobra.Command {
 // report the cancellation again.
 //
 // Each error it returns is bound to the source, and the source takes
-// yamlPath as the user typed it for its name. Each message then opens
-// with "path:line:col:" when the error has a position in the file, and
-// the error handler in main renders the excerpt with the terminal width.
-// A document with no tokens, such as an empty or comment-only file, has
-// no position, so its messages open with "path:" alone.
+// yamlPath as the user typed it for its name, with its control characters
+// escaped. Each message then opens with "path:line:col:" when the error
+// has a position in the file, and the error handler in main renders the
+// excerpt with the terminal width. A document with no tokens, such as an
+// empty or comment-only file, has no position, so its messages open with
+// "path:" alone. The error handler keeps each line break in a message as
+// a row break, so a glob match whose name holds a newline would otherwise
+// split its message into rows that look like other branches of the tree.
 //
 // The file path of the source is the [physicalAbs] form of yamlPath.
 // SchemaStore patterns that name parent directories, such as
 // "**/.github/workflows/*.yml", then match whatever the working directory
 // is. Schema directives resolve against the directory of the file the read
-// opens. When the read fails, the read error already names the file, so
-// validateFile returns it as is.
+// opens. When the read fails, the error from [readSource] already names
+// the file, so validateFile adds no name of its own.
 func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) error {
 	absPath := physicalAbs(yamlPath)
 
@@ -120,11 +126,11 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 	// naming the file as the user typed it. The read uses the typed path,
 	// so a read error names the file that way too.
 	opts := []niceyaml.SourceOption{
-		niceyaml.WithName(yamlPath),
+		niceyaml.WithName(escape.Control(yamlPath)),
 		niceyaml.WithFilePath(absPath),
 	}
 
-	source, err := niceyaml.NewSourceFromFile(yamlPath, opts...)
+	source, err := readSource(yamlPath, opts...)
 	if err != nil {
 		return err
 	}
@@ -159,6 +165,29 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 	}
 
 	return errors.Join(errs...)
+}
+
+// readSource reads the file at path into a [*niceyaml.Source] with opts,
+// as [niceyaml.NewSourceFromFile] does, except that a read error names
+// path with its control characters escaped. A glob match takes its name
+// from the file system, and the error handler in main keeps each line
+// break in a message as a row break, so a raw newline in the name would
+// start a row of its own.
+func readSource(path string, opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // User-provided file paths are intentional.
+	if err != nil {
+		// The read made this error, so no other caller holds it.
+		if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
+			pathErr.Path = escape.Control(pathErr.Path)
+		}
+
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	// The file path goes first, so opts can override it.
+	opts = append([]niceyaml.SourceOption{niceyaml.WithFilePath(path)}, opts...)
+
+	return niceyaml.NewSourceFromBytes(data, opts...), nil
 }
 
 // physicalAbs returns an absolute form of path that names the file the

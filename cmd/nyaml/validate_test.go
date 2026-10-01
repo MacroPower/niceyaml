@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -662,4 +664,91 @@ func TestValidateCmdOutput(t *testing.T) {
 			assert.NotContains(t, out.String(), "\x1b")
 		})
 	}
+}
+
+func TestValidateCmdErrorNames(t *testing.T) {
+	t.Parallel()
+
+	// Every error names a matched file with its control characters
+	// escaped. The error handler keeps each line break in a message as a
+	// row break, so a raw newline in this name would start a row that
+	// reads as a branch for a file named "other.yaml".
+	const file = "evil\n└── other.yaml"
+
+	tcs := map[string]struct {
+		err error
+		// Contents of the file. With none, the file is a dangling
+		// symlink, as a glob can match, so its read fails.
+		content string
+		// Makes every write of a result line fail.
+		failWrite bool
+	}{
+		"invalid document": {
+			content: "value: 1\n",
+		},
+		"unreadable file": {
+			err: fs.ErrNotExist,
+		},
+		"result line not written": {
+			content:   "name: a\n",
+			failWrite: true,
+			err:       io.ErrClosedPipe,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+
+			schemaPath := filepath.Join(dir, "schema.json")
+			require.NoError(t, os.WriteFile(schemaPath, nameSchema, 0o600))
+
+			path := filepath.Join(dir, file)
+
+			if tc.content == "" {
+				err := os.Symlink(filepath.Join(dir, "missing.yaml"), path)
+				if err != nil {
+					t.Skipf("symlink %q: %v", file, err)
+				}
+			} else {
+				err := os.WriteFile(path, []byte(tc.content), 0o600)
+				if err != nil {
+					// Some file systems, such as those on Windows, reject
+					// control characters in a name.
+					t.Skipf("write %q: %v", file, err)
+				}
+			}
+
+			out := io.Writer(&bytes.Buffer{})
+			if tc.failWrite {
+				out = closedWriter{}
+			}
+
+			cmd := validateCmd()
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetOut(out)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs([]string{"--schema", schemaPath, filepath.Join(dir, "evil*")})
+
+			err := cmd.Execute()
+			require.Error(t, err)
+
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+			}
+
+			assert.Equal(t, 1, strings.Count(err.Error(), escape.Control(path)), err.Error())
+		})
+	}
+}
+
+// closedWriter fails every write as a closed pipe does, so tests can
+// reach the error a command reports when it cannot write its output.
+type closedWriter struct{}
+
+func (closedWriter) Write([]byte) (int, error) {
+	return 0, io.ErrClosedPipe
 }
