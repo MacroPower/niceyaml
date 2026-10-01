@@ -451,12 +451,13 @@ func (b *builder) processPart(ctx *partContext) {
 	// Use SpaceType for pure horizontal whitespace parts.
 	//
 	// This handles cases where the lexer bundles trailing whitespace (like next
-	// line's indentation) with the previous token.
+	// line's indentation) with the previous token. Such a part holds no text,
+	// so it never receives the Value.
 	//
 	// Block scalar content keeps its original StringType, since whitespace
 	// there is content.
 	tokenType := ctx.tk.Type
-	if isPureHorizontalWhitespace(ctx.part) && val == "" && !ctx.isBlockScalarContent {
+	if isPureHorizontalWhitespace(ctx.part) && !ctx.isBlockScalarContent {
 		tokenType = token.SpaceType
 	}
 
