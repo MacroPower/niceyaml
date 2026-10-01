@@ -4,14 +4,17 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/creack/pty"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -110,4 +113,104 @@ func waitForLine(t *testing.T, lines *bufio.Scanner, want string) {
 	}
 
 	t.Fatalf("helper output ended before %q: %v", want, lines.Err())
+}
+
+// viewHelperEnv names the file that the test binary views with nyaml view
+// in place of running [TestViewSignal], so the signals the test sends
+// reach a child process rather than the test binary itself.
+const viewHelperEnv = "NYAML_VIEW_SIGNAL_HELPER"
+
+func TestViewSignal(t *testing.T) {
+	t.Parallel()
+
+	if path := os.Getenv(viewHelperEnv); path != "" {
+		os.Args = []string{"nyaml", "view", path}
+
+		main()
+
+		return
+	}
+
+	// Either signal cancels the context of the run, and the viewer ends
+	// with an error that reports the cancellation.
+	tcs := map[string]struct {
+		sig syscall.Signal
+	}{
+		"SIGINT": {
+			sig: syscall.SIGINT,
+		},
+		"SIGTERM": {
+			sig: syscall.SIGTERM,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			path := filepath.Join(t.TempDir(), "a.yaml")
+			require.NoError(t, os.WriteFile(path, []byte("a: 1\n"), 0o600))
+
+			cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestViewSignal$")
+
+			cmd.Env = append(os.Environ(), viewHelperEnv+"="+path, "TERM=xterm-256color")
+
+			// The viewer needs a terminal for its input and output. A pipe
+			// takes stderr, so the report carries no terminal styling.
+			var stderr bytes.Buffer
+
+			cmd.Stderr = &stderr
+
+			ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
+			require.NoError(t, err)
+
+			t.Cleanup(func() {
+				_ = ptmx.Close() //nolint:errcheck // Best effort.
+			})
+
+			// The viewer blocks once the terminal buffer fills, so the test
+			// reads everything it draws. The first output shows that the
+			// viewer has started.
+			drawn := make(chan struct{})
+
+			go func() {
+				buf := make([]byte, 4096)
+
+				n, err := ptmx.Read(buf)
+				if n > 0 {
+					close(drawn)
+				}
+
+				for err == nil {
+					_, err = ptmx.Read(buf)
+				}
+			}()
+
+			select {
+			case <-drawn:
+			case <-time.After(30 * time.Second):
+				t.Fatal("the viewer drew nothing")
+			}
+
+			require.NoError(t, cmd.Process.Signal(tc.sig))
+
+			done := make(chan error, 1)
+
+			go func() {
+				done <- cmd.Wait()
+			}()
+
+			select {
+			case err = <-done:
+			case <-time.After(30 * time.Second):
+				t.Fatalf("%s did not end the viewer", name)
+			}
+
+			var exitErr *exec.ExitError
+
+			require.ErrorAs(t, err, &exitErr, "the viewer exited with status 0")
+			assert.Equal(t, 1, exitErr.ExitCode())
+			assert.Contains(t, stderr.String(), context.Canceled.Error())
+		})
+	}
 }

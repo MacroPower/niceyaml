@@ -20,7 +20,7 @@ func viewCmd() *cobra.Command {
 		Use:   "view file.yaml [pattern...]",
 		Short: "View YAML files with syntax highlighting",
 		Args:  cobra.MinimumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			paths, err := expandPaths(args...)
 			if err != nil {
 				return err
@@ -39,7 +39,17 @@ func viewCmd() *cobra.Command {
 
 			m := newModel(&opts)
 
-			p := tea.NewProgram(m)
+			// The context that notifyContext in main cancels on SIGINT or
+			// SIGTERM ends the viewer the way it ends validate. Bubble
+			// Tea's own signal handler would turn SIGTERM into a clean
+			// quit, and when it lost the race for a signal to
+			// notifyContext, the viewer would hang on exit. Ctrl+C at the
+			// keyboard still reaches the model as a key press, since
+			// Bubble Tea puts the terminal in raw mode.
+			p := tea.NewProgram(m,
+				tea.WithContext(cmd.Context()),
+				tea.WithoutSignalHandler(),
+			)
 
 			_, err = p.Run()
 			if err != nil {
