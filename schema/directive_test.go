@@ -481,10 +481,12 @@ func TestParseDocumentDirective_AfterDocumentEnd(t *testing.T) {
 	t.Parallel()
 
 	// A "..." marker is part of the preamble, as a "---" header is, so a
-	// directive after it still names the schema of the document.
+	// directive after it, or in a comment that trails it, still names the
+	// schema of the document.
 	for _, input := range []string{
 		"...\n# yaml-language-server: $schema=./schema.json\nj: 2\n",
 		"---\n...\n# yaml-language-server: $schema=./schema.json\nj: 2\n",
+		"... # yaml-language-server: $schema=./schema.json\nj: 2\n",
 	} {
 		directive := schema.ParseDocumentDirective(tokens.Tokenize(input))
 		require.NotNil(t, directive, "input %q", input)
