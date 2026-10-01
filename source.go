@@ -464,8 +464,10 @@ func (d *document) anchorToken() *token.Token {
 // marker ends.
 //
 // The tree leaves out a comment on a line of its own below a document whose
-// root is a scalar or a flow collection, and one between a %YAML or %TAG
-// directive and its "---" header. It leaves out such a comment between the
+// root is a scalar or a flow collection. Below a block mapping or a block
+// sequence at the root, it leaves out such a comment that starts left of
+// the first key or "-" of the root. It leaves out such a comment between
+// a %YAML or %TAG directive and its "---" header, between the
 // "?" of an explicit key and the key, and between the key and its ":".
 // Inside a flow collection, it also leaves out such a comment before a key
 // of a flow mapping or before a ",", "]", or "}". [parser.Parse] rejects or
@@ -474,19 +476,19 @@ func (d *document) anchorToken() *token.Token {
 //
 // The tree also leaves out the comments on lines of their own between an
 // anchor and the node below them where they make the parser reject or
-// misread that node. The anchor ends its line and directly follows a "-", or
-// a key and its ":", on that line. The key starts on that line too, at its
-// "?" when it has one. When the first of the comments starts left of the "-"
-// or key, the parser gives the anchor a null value. The tree then leaves the
-// comments out above a node that the parser takes as the value of the anchor
-// without them. That node starts right of the "-" or key, or it is a "-" in
-// the column of the key. When the first of the comments starts in the column
-// of the "-" or key or right of it, the parser gives the anchor the node
-// below them. The tree then leaves them out above a node left of the "-" or
-// key, above a key in the column of the key, and above a "-" in the column of
-// the "-". Below an anchor with no value that ends its document, the tree
-// leaves out the comment too, and holds a null as the value of that anchor,
-// as it does when a header follows the anchor.
+// misread that node. The anchor ends its line and directly follows a "-",
+// or a key and its ":", on that line. The key starts on that line too, at
+// its "?" when it has one. When the first of the comments starts left of
+// the "-" or key, the parser gives the anchor a null value. The tree then
+// leaves the comments out above a node that the parser takes as the value
+// of the anchor without them. That node starts right of the "-" or key, or
+// it is a "-" in the column of the key. When the first of the comments
+// starts in the column of the "-" or key or right of it, the parser gives
+// the anchor the node below them. The tree then leaves them out above a
+// node left of the "-" or key, above a key in the column of the key, and
+// above a "-" in the column of the "-". Below an anchor with no value that
+// ends its document, the tree leaves out the comment too, and holds a null
+// as the value of that anchor, as it does when a header follows the anchor.
 //
 // The tokens of the file are copies of the Source's own, since the parser
 // relinks the tokens it receives. A copy matches the original by its type,
@@ -744,29 +746,44 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 //
 // The parser (v1.19.3-0.20260407131736-edee2f91616c) attaches such a
 // comment below the content of a document only when the root of the
-// document is a block mapping or a block sequence. Below a scalar or a
-// flow collection, it leaves the comment unread and fails with "value is
-// not allowed in this context" (parser/parser.go:171). It also requires
-// the header to follow the line of a %YAML or %TAG directive at once, and
-// fails with "document not started" when a comment sits between them
-// (parser/token.go:598). The go-yaml decoder parses without comments and
-// accepts both. The comments stay among the tokens of the Source, where
-// [tokens.SplitDocuments] still hands them to their documents.
+// document is a block mapping or a block sequence, and only when the
+// comment starts at or right of the column of the first key or "-" of
+// that root (parser/parser.go:525, parser/parser.go:1117). Below a scalar
+// or a flow collection, or left of that column, it leaves the comment
+// unread and fails with "value is not allowed in this context"
+// (parser/parser.go:171). It also requires the header to follow the line
+// of a %YAML or %TAG directive at once, and fails with "document not
+// started" when a comment sits between them (parser/token.go:598). The
+// go-yaml decoder parses without comments and accepts both. The comments
+// stay among the tokens of the Source, where [tokens.SplitDocuments]
+// still hands them to their documents.
 //
 // Below a scalar or a flow collection, only the comments that close the
 // document drop: those that the end of run, a "---" header, or a "..."
 // marker follows. The parser rejects any other token after them, with or
-// without the comments. Below an anchor with no value, the comments that
-// close the document stay, since the parser takes them as the value of the
-// anchor and rejects an anchor that no token follows past its name
-// (parser/token.go:311). [nullEmptyAnchors] puts a null in their place once
-// the parser returns. Above a node, the comments drop when [breaksAnchor]
-// reports that they make the parser give the anchor the wrong value. Inside a
-// flow collection, the anchor does not decide whether they drop. In a flow
-// sequence, the parser still reads an anchor after the key of a pair by the
-// column of the first comment. When that comment starts left of the key, the
-// parser gives the anchor a null value and rejects the value below the
-// comment.
+// without the comments. Below a block mapping or a block sequence, only
+// the comments that close the document and start left of its first key
+// or "-" drop. The key starts at its anchor or tag when it has one, as
+// [keyStart] finds it. A comment left of that column stays when more of
+// the root follows it, since the parser looks past it to the next key or
+// "-".
+//
+// Below an anchor with no value, the comments that close the document stay,
+// since the parser takes them as the value of the anchor and rejects an
+// anchor that no token follows past its name (parser/token.go:311).
+// [nullEmptyAnchors] puts a null in their place once the parser returns. In
+// a block mapping or a block sequence at the root, an anchor that directly
+// follows a "-", or a key and its ":", on its line is the exception when a
+// "---" header or a "..." marker follows the comments. The parser takes
+// that anchor without them, as [takesNull] reports, so those that start
+// left of the first key or "-" of the root drop, as they do below any other
+// node of such a root. Above a node, the comments drop when [breaksAnchor]
+// reports that they make the parser give the anchor the wrong value. Inside
+// a flow collection, the anchor does not decide whether they drop. In a
+// flow sequence, the parser still reads an anchor after the key of a pair
+// by the column of the first comment. When that comment starts left of the
+// key, the parser gives the anchor a null value and rejects the value below
+// the comment.
 //
 // Below a "&" with no name, the comments stay wherever they sit, except
 // between a directive and its header. The parser takes the token after a
@@ -793,6 +810,9 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 		// its content, an indicator of a block mapping or a block sequence
 		// at its top level, and a directive that awaits its header.
 		content, block, directive bool
+		// The column where the first key or "-" of the block mapping or
+		// block sequence at the root of the document starts, or -1.
+		rootCol = -1
 		// The types of the "[" and "{" tokens of the flow collections
 		// that hold the scan, the innermost last.
 		flows []token.Type
@@ -809,6 +829,7 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 			switch tk.Type {
 			case token.DocumentHeaderType, token.DocumentEndType:
 				content, block, directive, flows = false, false, false, flows[:0]
+				rootCol = -1
 
 			case token.DirectiveType:
 				directive = true
@@ -824,6 +845,10 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 				}
 
 			case token.MappingKeyType, token.MappingValueType, token.SequenceEntryType:
+				if !block && len(flows) == 0 {
+					rootCol = rootColumn(run, i)
+				}
+
 				content = true
 				block = block || len(flows) == 0
 
@@ -868,6 +893,9 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 		stranded := directive || last != nil && last.Type == token.MappingKeyType ||
 			next < len(run) && run[next].Type == token.MappingValueType
 
+		// Whether the comments that start left of rootCol drop.
+		leftDrops := false
+
 		switch {
 		case bare:
 			// Without the comments, the parser would take the token below
@@ -888,13 +916,19 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 
 			stranded = stranded ||
 				below < next && !closes && breaksAnchor(run, anchor, below, next)
+			leftDrops = closes && next < len(run) && rootCol >= 0 && takesNull(run, anchor)
 
 		case content && !block:
 			stranded = stranded || closes
+
+		case block:
+			leftDrops = closes && rootCol >= 0
 		}
 
 		for j := i; j < next; j++ {
-			if stranded && belowText(run[j], last) {
+			left := leftDrops && run[j].Position != nil && run[j].Position.Column < rootCol
+
+			if (stranded || left) && belowText(run[j], last) {
 				if kept == nil {
 					kept = slices.Clone(run[:j])
 				}
@@ -1093,6 +1127,50 @@ func startsKey(run token.Tokens, at int) bool {
 	}
 
 	return false
+}
+
+// takesNull reports whether the parser gives the anchor at run[at], which
+// has its name, a null value when a token left of its key or "-" follows
+// it. It does so for an anchor that directly follows a "-", or a key and
+// its ":", on its line (parser/parser.go:787, parser/parser.go:1186). The
+// parser rejects any other anchor that no node follows.
+func takesNull(run token.Tokens, at int) bool {
+	i := at - 1
+	if i < 0 || !sameLine(run[i], run[at]) {
+		return false
+	}
+
+	switch run[i].Type {
+	case token.SequenceEntryType:
+		return true
+
+	case token.MappingValueType:
+		return keyStart(run, i) >= 0
+
+	default:
+		return false
+	}
+}
+
+// rootColumn returns the column where the entry of the "-", "?", or ":"
+// at run[at] starts, or -1 when the token there has no position. An
+// entry starts at its "-" or "?". For a ":", it starts where [keyStart]
+// finds the start of the key, or at the ":" itself when no token of a
+// key precedes the ":" on its line.
+func rootColumn(run token.Tokens, at int) int {
+	tk := run[at]
+
+	if tk.Type == token.MappingValueType {
+		if k := keyStart(run, at); k >= 0 {
+			tk = run[k]
+		}
+	}
+
+	if tk.Position == nil {
+		return -1
+	}
+
+	return tk.Position.Column
 }
 
 // keyStart returns the index of the token on the line of the ":" at

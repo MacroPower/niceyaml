@@ -489,9 +489,10 @@ func TestDocument_Decode(t *testing.T) {
 		t.Parallel()
 
 		// The go-yaml parser rejects such a comment below a root that is
-		// not a block mapping or a block sequence, and between a directive
-		// and its header, when it keeps comments. Each case lists the
-		// value of every document.
+		// not a block mapping or a block sequence, left of the first key
+		// or "-" of such a root, and between a directive and its header,
+		// when it keeps comments. Each case lists the value of every
+		// document.
 		tcs := map[string]struct {
 			input string
 			want  []any
@@ -552,6 +553,54 @@ func TestDocument_Decode(t *testing.T) {
 				input: "%TAG !e! tag:example.com,2000:\n# c\n\n# d\n---\n!e!x y\n",
 				want:  []any{"y"},
 			},
+			"comment left of an indented mapping below a header": {
+				input: "---\n  apiVersion: v1\n  kind: Pod\n# end\n",
+				want:  []any{map[string]any{"apiVersion": "v1", "kind": "Pod"}},
+			},
+			"comment left of an indented sequence above an end marker": {
+				input: "  - a\n  - b\n# c\n...\n",
+				want:  []any{[]any{"a", "b"}},
+			},
+			"comment left of a tagged indented mapping": {
+				input: "!!map\n  a: 1\n# c\n",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"comment left of an indented mapping below a tagged header": {
+				input: "--- !!map\n  a: 1\n# c\n",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"comment left of an indented mapping above a header": {
+				input: "  a: 1\n# c\n---\nb: 2\n",
+				want:  []any{map[string]any{"a": uint64(1)}, map[string]any{"b": uint64(2)}},
+			},
+			"comment left of an indented explicit key": {
+				input: "  ? a\n  : 1\n# c\n",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"comment left of an indented anchored key": {
+				input: "  &x a: 1\n # c\n",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"comment left of an indented nested mapping": {
+				input: "  a:\n    b: 1\n  # c\n# d\n",
+				want:  []any{map[string]any{"a": map[string]any{"b": uint64(1)}}},
+			},
+			"comments in and left of the column of an indented mapping": {
+				input: "  a: 1\n  # c\n# d\n",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"comment left of an indented mapping above more keys": {
+				input: "  a: 1\n# c\n  b: 2\n",
+				want:  []any{map[string]any{"a": uint64(1), "b": uint64(2)}},
+			},
+			"comment in the column of an indented mapping": {
+				input: "  a: 1\n  # c\n",
+				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			"comment in the column of a sequence in a mapping": {
+				input: "a:\n- b\n# c\n",
+				want:  []any{map[string]any{"a": []any{"b"}}},
+			},
 			// The parser takes the comment below an anchor with no value
 			// that ends its document as the value of the anchor, and
 			// rejects the anchor without it.
@@ -566,6 +615,65 @@ func TestDocument_Decode(t *testing.T) {
 			"anchor with no value above a header": {
 				input: "&a\n# c\n---\nb\n",
 				want:  []any{nil, "b"},
+			},
+			// In an indented root, the parser takes an anchor that directly
+			// follows a "-", or a key and its ":", on its line without the
+			// comment when a header or an end marker follows the comment.
+			// It rejects a comment left of the first key or "-" of the
+			// root.
+			"anchor with no value in an indented mapping above an end marker": {
+				input: "  a: &x\n# c\n...\n",
+				want:  []any{map[string]any{"a": nil}},
+			},
+			"anchor with no value in an indented mapping above a header": {
+				input: "  a: &x\n# c\n---\nb: 1\n",
+				want:  []any{map[string]any{"a": nil}, map[string]any{"b": uint64(1)}},
+			},
+			"anchor with no value in an indented sequence above a header": {
+				input: "  - &x\n# c\n---\nb: 1\n",
+				want:  []any{[]any{nil}, map[string]any{"b": uint64(1)}},
+			},
+			"anchor with no value on a later key of an indented mapping": {
+				input: "  a: 1\n  b: &x\n # c\n---\nc: 1\n",
+				want: []any{
+					map[string]any{"a": uint64(1), "b": nil},
+					map[string]any{"c": uint64(1)},
+				},
+			},
+			"anchor with no value in an anchored indented mapping": {
+				input: "&r\n  a: &x\n# c\n...\n",
+				want:  []any{map[string]any{"a": nil}},
+			},
+			"anchor with no value above comments left of and in the column": {
+				input: "  a: &x\n# c\n  # d\n...\n",
+				want:  []any{map[string]any{"a": nil}},
+			},
+			// The parser rejects any other anchor without the comment, so
+			// the comment stays as its value even left of the first key
+			// or "-" of the root.
+			"anchor with no value after the colon of an explicit key": {
+				input: "  ? a\n  : &x\n# c\n...\n",
+				want:  []any{map[string]any{"a": nil}},
+			},
+			"anchor with no value after the colon of an explicit key above a header": {
+				input: "  ? a\n  : &x\n# c\n---\nb: 2\n",
+				want:  []any{map[string]any{"a": nil}, map[string]any{"b": uint64(2)}},
+			},
+			"anchor with no value on a line below its key": {
+				input: "  a:\n    &x\n# c\n...\n",
+				want:  []any{map[string]any{"a": nil}},
+			},
+			"anchor with no value on a line below its entry": {
+				input: "  -\n    &x\n# c\n---\nb: 2\n",
+				want:  []any{[]any{nil}, map[string]any{"b": uint64(2)}},
+			},
+			"anchor with no value after a tag": {
+				input: "  a: !!str &x\n# c\n...\n",
+				want:  []any{map[string]any{"a": ""}},
+			},
+			"anchor with no value after the colon of a nested explicit key": {
+				input: "  a:\n    ? b\n    : &x\n# c\n...\n",
+				want:  []any{map[string]any{"a": map[string]any{"b": nil}}},
 			},
 			// With the comment, the parser would take the node below it
 			// as the value of the anchor.
@@ -1540,6 +1648,17 @@ func TestDocument_Preamble(t *testing.T) {
 			want: []doc{
 				{content: "[1, 2]\n"},
 				{preamble: "# note\n---\n", content: "[3]\n"},
+			},
+		},
+		"comment left of an indented mapping": {
+			input: "---\n  a: 1\n# note\n",
+			want:  []doc{{preamble: "---\n", content: "a: 1\n# note\n"}},
+		},
+		"comment left of an indented mapping above a later header": {
+			input: "  a: 1\n# note\n---\nb: 2\n",
+			want: []doc{
+				{content: "a: 1\n"},
+				{preamble: "# note\n---\n", content: "b: 2\n"},
 			},
 		},
 		"comment between a directive and its header": {
