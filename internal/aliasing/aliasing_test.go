@@ -370,6 +370,12 @@ type embeddedTime struct {
 	time.Time
 }
 
+// prefixHolder holds a text field. Go-yaml decodes into its fields when
+// another struct embeds it, though its name is unexported.
+type prefixHolder struct {
+	Addr netip.Prefix
+}
+
 func TestDecodesText(t *testing.T) {
 	t.Parallel()
 
@@ -405,6 +411,24 @@ func TestDecodesText(t *testing.T) {
 			typ: reflect.TypeFor[struct {
 				Name string
 				Addr netip.Prefix
+			}](),
+			want: true,
+		},
+		"text field tagged -,": {
+			typ: reflect.TypeFor[struct {
+				Addr netip.Prefix `yaml:"-,"`
+			}](),
+			want: true,
+		},
+		"text field with a json - tag and a yaml tag": {
+			typ: reflect.TypeFor[struct {
+				Addr netip.Prefix `json:"-" yaml:"addr"`
+			}](),
+			want: true,
+		},
+		"embedded unexported struct with a text field": {
+			typ: reflect.TypeFor[struct {
+				prefixHolder
 			}](),
 			want: true,
 		},
@@ -454,6 +478,22 @@ func TestDecodesText(t *testing.T) {
 			typ: reflect.TypeFor[struct {
 				Name string
 				Node *nodeTextValue
+			}](),
+		},
+		"unexported text field": {
+			typ: reflect.TypeFor[struct {
+				Name string
+				addr netip.Prefix
+			}](),
+		},
+		"text field tagged -": {
+			typ: reflect.TypeFor[struct {
+				Addr netip.Prefix `yaml:"-"`
+			}](),
+		},
+		"text field with a json - tag": {
+			typ: reflect.TypeFor[struct {
+				Addr netip.Prefix `json:"-"`
 			}](),
 		},
 		"plain types": {

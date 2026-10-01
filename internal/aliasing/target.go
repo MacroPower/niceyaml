@@ -53,7 +53,9 @@ var (
 // text of its node, through an UnmarshalText method or an UnmarshalYAML
 // method that takes YAML bytes. That holds when t or a type the decoder
 // reaches from t, through a pointer, a struct field, an array or slice
-// element, or a map key or element, has such a method on its pointer. An
+// element, or a map key or element, has such a method on its pointer. The
+// decoder skips a struct field that is unexported and not embedded, or
+// that a yaml or json tag of "-" leaves out, so none of those counts. An
 // UnmarshalYAML method that takes a decode function counts too, since it
 // can decode the node into any type, including one that reads text. A
 // decode into such a type runs [CheckDecodeText] as well as
@@ -108,7 +110,7 @@ func reachesText(t reflect.Type, seen map[reflect.Type]bool) bool {
 		return reachesText(t.Key(), seen) || reachesText(t.Elem(), seen)
 	case reflect.Struct:
 		for field := range t.Fields() {
-			if reachesText(field.Type, seen) {
+			if !skippedField(field) && reachesText(field.Type, seen) {
 				return true
 			}
 		}
@@ -118,4 +120,21 @@ func reachesText(t reflect.Type, seen map[reflect.Type]bool) bool {
 	default:
 		return false
 	}
+}
+
+// skippedField reports whether the go-yaml decoder leaves field alone. It
+// skips an unexported field unless the struct embeds it, and it skips a
+// field whose whole yaml tag is "-", or whose whole json tag is "-" when
+// the field has no yaml tag.
+func skippedField(field reflect.StructField) bool {
+	if !field.IsExported() && !field.Anonymous {
+		return true
+	}
+
+	tag := field.Tag.Get("yaml")
+	if tag == "" {
+		tag = field.Tag.Get("json")
+	}
+
+	return tag == "-"
 }

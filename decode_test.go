@@ -8293,6 +8293,17 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 				})
 			},
 		},
+		"struct with text fields the decoder skips": {
+			input: manyAliases,
+			target: func() any {
+				return new(struct {
+					hidden netip.Prefix
+					Addr   netip.Prefix `yaml:"-"`
+					Prefix netip.Prefix `json:"-"`
+					Kind   []string     `yaml:"kind"`
+				})
+			},
+		},
 		"a few aliases": {
 			input:  "a: &a hello\nkind: [*a, *a, *a]\n",
 			path:   kind,
