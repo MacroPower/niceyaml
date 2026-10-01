@@ -157,7 +157,6 @@ func (s Styles) resolve() map[kind.Kind]*lipgloss.Style {
 	}
 
 	resolved := make(map[kind.Kind]*lipgloss.Style, len(s.overrides)+len(s.parents))
-	resolved[kind.Text] = lookup(kind.Text)
 
 	for st := range kind.All() {
 		resolved[st] = lookup(st)
