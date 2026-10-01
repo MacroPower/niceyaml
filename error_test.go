@@ -4781,6 +4781,76 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		))
 		assert.Equal(t, "a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b", err.Error())
 
+		// A binding of such a join to this source leaves its message as it
+		// is, so its first line names another source. A join that leads
+		// with that binding, or an Error that wraps it with errors of its
+		// own, still names this source when a child belongs to it.
+		joinOfOthers := yamltest.Bind(t, src, errors.Join(
+			yamltest.Bind(t, named("a.yaml"), badA),
+			yamltest.Bind(t, named("b.yaml"), badB),
+		))
+		leads := map[string]struct {
+			err  error
+			want string
+		}{
+			"join that leads with it": {
+				err:  errors.Join(joinOfOthers, badC),
+				want: "f.yaml: a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b\n$.c: bad c",
+			},
+			"errors nested around it": {
+				err:  niceyaml.WrapError(joinOfOthers, niceyaml.WithErrors(badC)),
+				want: "f.yaml: a.yaml:1:4: $.a: bad a\nb.yaml:2:4: $.b: bad b",
+			},
+		}
+
+		for name, tc := range leads {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := yamltest.Bind(t, src, tc.err)
+				assert.Equal(t, tc.want, err.Error())
+			})
+		}
+
+		// A binding of a source with no name leaves its message untouched
+		// too, even when a child belongs to that source. The first line of
+		// a join that leads with it comes from the binding below it, so a
+		// line that names this source already takes no second name.
+		unnamed := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n")
+		ownLead := yamltest.Bind(t, src, badA)
+		unnamedB := yamltest.Bind(t, unnamed, badB)
+		unnamedLeads := map[string]struct {
+			err  error
+			want string
+		}{
+			"join that leads with it": {
+				err: errors.Join(
+					yamltest.Bind(t, unnamed, errors.Join(ownLead, unnamedB)),
+					badC,
+				),
+				want: "f.yaml:1:4: $.a: bad a\n2:4: $.b: bad b\n$.c: bad c",
+			},
+			"errors nested around it": {
+				err: errors.Join(
+					yamltest.Bind(t, unnamed, niceyaml.WrapError(
+						yamltest.Bind(t, unnamed, errors.Join(ownLead)),
+						niceyaml.WithErrors(unnamedB),
+					)),
+					badC,
+				),
+				want: "f.yaml:1:4: $.a: bad a\n$.c: bad c",
+			},
+		}
+
+		for name, tc := range unnamedLeads {
+			t.Run("unnamed "+name, func(t *testing.T) {
+				t.Parallel()
+
+				err := yamltest.Bind(t, src, tc.err)
+				assert.Equal(t, tc.want, err.Error())
+			})
+		}
+
 		// Only the first line can take the name, so a join that leads
 		// with a binding, even one nested in another join, puts no name
 		// in front, and a join that leads with an unbound branch does.

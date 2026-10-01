@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/goccy/go-yaml/token"
 
@@ -814,6 +815,10 @@ type SourceError struct {
 	// that does not resolve, or ErrOutOfRange for a location the source
 	// does not hold.
 	locErr error
+	// The binding the first line of the message comes from when Error
+	// leaves the message as it is, or nil when Error puts a position or
+	// name in front, or when no binding wrote the first line.
+	lead *SourceError
 	// The bound children: the errors nested with WithErrors along the cause
 	// chain and every branch followBranches keeps of the error that ends
 	// it by unwrapping to several, located or not.
@@ -823,6 +828,8 @@ type SourceError struct {
 	ranges position.Ranges
 	loc    location
 	rng    position.Range
+	// Makes passedLead find lead once, the first time a message asks.
+	leadOnce sync.Once
 	// The error wraps a binding, whose location, source, and children this
 	// one took over, and whose position its message carries already.
 	adopted bool
@@ -928,11 +935,14 @@ func isBound(err error) bool {
 // comes from, which puts the name or position of its own source there, or
 // nil when the first line comes from no binding. The walk follows the
 // text [Error.Error] writes rather than the structure [isBound] reads,
-// since the nested errors of an [*Error] never reach its text. An Error
-// that writes a path in front leads with the path. An Error from
-// [Rebase], or one that carries a position or a range alone, writes the
-// text of [Error.textCause] otherwise, so the walk continues there, and
-// any other Error writes the text of its cause.
+// since the nested errors of an [*Error] never reach its text. A binding
+// that leaves its message untouched puts nothing in front of its first
+// line, so when [SourceError.passedLead] finds the binding below it that
+// wrote that line, the walk returns that one. An Error that writes a path
+// in front leads with the path. An Error from [Rebase], or one that
+// carries a position or a range alone, writes the text of
+// [Error.textCause] otherwise, so the walk continues there, and any other
+// Error writes the text of its cause.
 //
 // At a join, as [joinBranches] finds one, the walk continues with its
 // first branch that is not a nil interface, since the join writes the
@@ -951,6 +961,11 @@ func leadingBinding(err error) *SourceError {
 	for cur := err; ; {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
 		case *SourceError:
+			lead := x.passedLead()
+			if lead != nil {
+				return lead
+			}
+
 			return x
 
 		case *Error:
@@ -1023,19 +1038,63 @@ func firstBranch(branches []error) error {
 	return nil
 }
 
-// leadNamesSource reports whether the first line of the message of e
-// names the source of e already, so [SourceError.Error] puts no name in
-// front. A binding of the same source that supplies the first line names
-// it. One of another source names that source instead, which still
-// stands for e when no child of e is bound to the source of e, as in a
-// join whose every branch is a binding of another source.
-func (e *SourceError) leadNamesSource() bool {
+// passedLead returns the binding the first line of the message of e comes
+// from when [SourceError.Error] leaves the message of e as it is. A
+// binding of a source with no name has no name to put in front, so it
+// passes on any binding that leads. A binding of a named source passes on
+// one that names its source already. A binding of the same source that
+// supplies the first line names it. One of another source names that
+// source instead, which still stands for e when no child of e is bound to
+// the source of e, as in a join whose every branch is a binding of
+// another source. A binding that adopted another follows the same rules,
+// since it writes no position of its own. It returns nil for any other e,
+// which puts its own position or name in front, and when no binding wrote
+// the first line.
+//
+// The message of each binding holds the messages of the bindings below
+// it, and the walk for the first line passes through those that leave
+// theirs as it is. Finding the lead anew for every message would walk
+// the bindings below once per binding above them, so each binding finds
+// its lead once and keeps it.
+func (e *SourceError) passedLead() *SourceError {
+	if e == nil {
+		return nil
+	}
+
+	e.leadOnce.Do(func() { e.lead = e.findPassedLead() })
+
+	return e.lead
+}
+
+// findPassedLead finds the binding [SourceError.passedLead] returns.
+func (e *SourceError) findPassedLead() *SourceError {
+	if e.locErr == nil && !e.adopted {
+		return nil
+	}
+
 	lead := leadingBinding(e.err)
 	if lead == nil {
+		return nil
+	}
+
+	if e.source.Name() == "" || lead.Source() == e.source || !holdsSource(e, e.source) {
+		return lead
+	}
+
+	return nil
+}
+
+// keepsMessage reports whether [SourceError.Error] returns the message of
+// e as it is, with no position or name in front. A binding that resolved
+// a location of its own writes its position. Any other binding keeps the
+// message when its source has no name, or when the first line names the
+// source already, as [SourceError.passedLead] finds.
+func (e *SourceError) keepsMessage() bool {
+	if e.locErr == nil && !e.adopted {
 		return false
 	}
 
-	return lead.Source() == e.source || !holdsSource(e, e.source)
+	return e.source.Name() == "" || e.passedLead() != nil
 }
 
 // holdsSource reports whether a child of e is bound to src. A child that
@@ -1380,7 +1439,11 @@ func (e *SourceError) Errors() []*SourceError {
 // of another source names that source alone. The name then still goes in
 // front when a child of the error is bound to this source, and it stays
 // out when every child is bound to another, as in a join of bindings
-// from other files.
+// from other files. A binding inside the message that leaves its own
+// message untouched puts nothing in front of the first line, so when a
+// binding below it wrote that line, the line counts as coming from that
+// one. A SourceError that binds anew around a binding writes no position
+// of its own, so it puts the name in front by the same rule.
 //
 // The message is the text of the bound error, which runs over several
 // lines when that text does, as the text of an [errors.Join] and a
@@ -1402,17 +1465,14 @@ func (e *SourceError) Error() string {
 	name := e.source.Name()
 
 	switch {
-	case e.adopted:
-		return msg
-
-	case e.locErr == nil:
+	case e.locErr == nil && !e.adopted:
 		return prefix(formatPosition(name, e.loc.pos), msg)
 
-	case name != "" && !e.leadNamesSource():
-		return prefix(name+":", msg)
+	case e.keepsMessage():
+		return msg
 
 	default:
-		return msg
+		return prefix(name+":", msg)
 	}
 }
 

@@ -822,6 +822,83 @@ func TestErrorTree_New(t *testing.T) {
 			},
 			multiLine: true,
 		},
+		"bound join that leads with a same-source binding of another source names the root": {
+			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", errors.Join(
+				yamltest.Bind(t, source, errors.Join(
+					yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("c")))),
+				)),
+				badB(),
+			))),
+			want: niceyaml.ErrorTree{
+				Text: "f.yaml: ctx: g.yaml:1:4: $.c: bad c\n$.b: bad b",
+				Children: []niceyaml.ErrorTree{
+					{Text: "g.yaml:1:4: $.c: bad c"},
+					{Text: "2:4: $.b: bad b"},
+				},
+			},
+			multiLine: true,
+		},
+		"Error that nests errors around a same-source binding of another source names the root": {
+			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", niceyaml.WrapError(
+				yamltest.Bind(t, source, errors.Join(
+					yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("c")))),
+				)),
+				niceyaml.WithErrors(badB()),
+			))),
+			want: niceyaml.ErrorTree{
+				Text: "f.yaml: ctx: g.yaml:1:4: $.c: bad c",
+				Children: []niceyaml.ErrorTree{
+					{Text: "2:4: $.b: bad b"},
+					{Text: "g.yaml:1:4: $.c: bad c"},
+				},
+			},
+		},
+		"child that nests errors around a same-source binding of another source names its source": {
+			err: yamltest.Bind(t, other, niceyaml.NewError("root",
+				niceyaml.AtPath(paths.Root().Child("c")),
+				niceyaml.WithErrors(yamltest.Bind(t, source, niceyaml.WrapError(
+					yamltest.Bind(t, source, errors.Join(
+						yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("c")))),
+					)),
+					niceyaml.WithErrors(badB()),
+				))),
+			)),
+			want: niceyaml.ErrorTree{
+				Text: "g.yaml:1:4: $.c: root",
+				Children: []niceyaml.ErrorTree{
+					{
+						Text: "f.yaml: g.yaml:1:4: $.c: bad c",
+						Children: []niceyaml.ErrorTree{
+							{Text: "2:4: $.b: bad b"},
+							{Text: "g.yaml:1:4: $.c: bad c"},
+						},
+					},
+				},
+			},
+		},
+		"branch that nests errors around a same-source binding of another source names its source": {
+			err: yamltest.Bind(t, source, errors.Join(
+				yamltest.Bind(t, source, niceyaml.WrapError(
+					yamltest.Bind(t, source, errors.Join(
+						yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("c")))),
+					)),
+					niceyaml.WithErrors(badB()),
+				)),
+				badA(),
+			)),
+			want: niceyaml.ErrorTree{
+				Children: []niceyaml.ErrorTree{
+					{Text: "f.yaml:1:4: $.a: bad a"},
+					{
+						Text: "f.yaml: g.yaml:1:4: $.c: bad c",
+						Children: []niceyaml.ErrorTree{
+							{Text: "2:4: $.b: bad b"},
+							{Text: "g.yaml:1:4: $.c: bad c"},
+						},
+					},
+				},
+			},
+		},
 		"join of one error is that error": {
 			err:  errors.Join(errors.Join(errors.New("boom"))),
 			want: niceyaml.ErrorTree{Text: "boom"},

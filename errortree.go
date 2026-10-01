@@ -455,14 +455,16 @@ func trees(kids []positioned) []ErrorTree {
 // own. Otherwise a child bound to the same source carries the "line:col:"
 // its location resolved to in front of its message, without the name the
 // parent gives already. A child that wraps a binding through Errors
-// alone, which add no text, reads as that binding does. A child behind a
-// wrapper that adds text of its own, such as [fmt.Errorf], carries the
-// position inside that text, so it comes through as it is, name included.
-// A child that binds a join, or wraps such a binding through Errors that
-// add nothing, has no text and gives its place to the branches of the
-// join. Those branches keep the name of their source when named is set
-// or when the join is bound to another source. They go straight into
-// kids, as [appendTrees] appends the branches of a join.
+// alone, which add no text, reads as that binding does, unless the child
+// puts the name of its source in front, as [textBinding] describes. A
+// child behind a wrapper that adds text of its own, such as
+// [fmt.Errorf], carries the position inside that text, so it comes
+// through as it is, name included. A child that binds a join, or wraps
+// such a binding through Errors that add nothing, has no text and gives
+// its place to the branches of the join. Those branches keep the name of
+// their source when named is set or when the join is bound to another
+// source. They go straight into kids, as [appendTrees] appends the
+// branches of a join.
 func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []positioned {
 	for _, child := range bound.Errors() {
 		// The branches sit beside the other children, so they sort by
@@ -489,10 +491,11 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 		// The binding put the position in front of the message it wraps,
 		// so stripping it back to that message leaves the position to
 		// put back without the name. A child that took a binding over
-		// through Errors alone shows the text of that binding, so the
-		// strip applies there. One behind a wrapper with text of its own
-		// carries its position inside that text instead, and adds no
-		// prefix of its own, so there is nothing to strip or put back.
+		// through Errors alone shows the text of the binding [textBinding]
+		// finds, so the strip applies there. One behind a wrapper with
+		// text of its own carries its position inside that text instead,
+		// and adds no prefix of its own, so there is nothing to strip or
+		// put back.
 		src := textBinding(child)
 
 		text := src.Error()
@@ -514,9 +517,12 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 
 // textBinding returns the binding whose text e shows: the binding an
 // adopted e reaches through the causes of Errors alone, which add no
-// text of their own, or e itself.
+// text of their own, or e itself. An adopted binding that puts the name
+// of its source in front of its message, rather than keeping the message
+// as [SourceError.keepsMessage] reports, adds that name as text of its
+// own, so the walk stops there.
 func textBinding(e *SourceError) *SourceError {
-	for e.adopted {
+	for e.adopted && e.keepsMessage() {
 		x, ok := e.err.(*Error) //nolint:errorlint // The node itself, not a chain search.
 		if !ok {
 			break
