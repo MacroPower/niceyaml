@@ -344,26 +344,43 @@ var (
 	// types go-yaml sets whole.
 	astPackage = reflect.TypeFor[ast.StringNode]().PkgPath()
 
-	// The result of [mayHoldValidator] for each type it has read. A type
-	// never changes, so every walk shares the results.
-	holdsValidator sync.Map
+	// The result of [mayHoldValidator] for each type it has read.
+	holdsValidator typeCache[bool]
 
-	// The result of [implementsSelfValidator] for each type it has read,
-	// shared the same way.
-	ownsValidator sync.Map
+	// The result of [implementsSelfValidator] for each type it has read.
+	ownsValidator typeCache[bool]
 
-	// The result of [decoderField] for each type it has read, shared the
-	// same way, with -1 for a type that has no such field.
-	decoderFields sync.Map
+	// The result of [decoderField] for each type it has read, with -1 for
+	// a type that has no such field.
+	decoderFields typeCache[int]
 
-	// The result of [decodesItself] for each type it has read, shared the
-	// same way.
-	decodesWhole sync.Map
+	// The result of [decodesItself] for each type it has read.
+	decodesWhole typeCache[bool]
 
-	// The result of [fieldsOf] for each struct type it has read, shared
-	// the same way.
-	walkedFields sync.Map
+	// The result of [fieldsOf] for each struct type it has read.
+	walkedFields typeCache[*structFields]
 )
+
+// typeCache holds a value computed once for each type it reads. A type
+// never changes, so every walk shares the values.
+type typeCache[V any] struct {
+	values sync.Map
+}
+
+// get returns the value of t. The first call for t runs compute and
+// stores its result for the calls after it.
+func (c *typeCache[V]) get(t reflect.Type, compute func(reflect.Type) V) V {
+	if cached, ok := c.values.Load(t); ok {
+		if v, ok := cached.(V); ok {
+			return v
+		}
+	}
+
+	v := compute(t)
+	c.values.Store(t, v)
+
+	return v
+}
 
 // decodesItself reports whether go-yaml decodes a value of type t whole,
 // so the fields, elements, or entries of the value need not mirror the
@@ -375,18 +392,12 @@ var (
 // field by field. The method set of the pointer holds the methods of
 // both receivers, as the decoder checks it.
 func decodesItself(t reflect.Type) bool {
-	if cached, ok := decodesWhole.Load(t); ok {
-		if decodes, ok := cached.(bool); ok {
-			return decodes
-		}
-	}
+	return decodesWhole.get(t, func(t reflect.Type) bool {
+		pt := reflect.PointerTo(t)
+		isNode := t.PkgPath() == astPackage && pt.Implements(reflect.TypeFor[ast.Node]())
 
-	pt := reflect.PointerTo(t)
-	isNode := t.PkgPath() == astPackage && pt.Implements(reflect.TypeFor[ast.Node]())
-	decodes := isNode || slices.ContainsFunc(unmarshalerTypes, pt.Implements)
-	decodesWhole.Store(t, decodes)
-
-	return decodes
+		return isNode || slices.ContainsFunc(unmarshalerTypes, pt.Implements)
+	})
 }
 
 // decoderField returns the index of the embedded field of t that decodes
@@ -400,14 +411,7 @@ func decodesItself(t reflect.Type) bool {
 // bool result is false when t declares the method go-yaml calls, or when
 // no embedded field has that method.
 func decoderField(t reflect.Type) (int, bool) {
-	if cached, ok := decoderFields.Load(t); ok {
-		if i, ok := cached.(int); ok {
-			return i, i >= 0
-		}
-	}
-
-	i := findDecoderField(t)
-	decoderFields.Store(t, i)
+	i := decoderFields.get(t, findDecoderField)
 
 	return i, i >= 0
 }
@@ -519,16 +523,9 @@ func methodDepth(t reflect.Type, name string) int {
 // whose type may. The walk passes a value whose type may not without a look
 // below it.
 func mayHoldValidator(t reflect.Type) bool {
-	if cached, ok := holdsValidator.Load(t); ok {
-		if held, ok := cached.(bool); ok {
-			return held
-		}
-	}
-
-	held := reachesValidator(t, map[reflect.Type]bool{})
-	holdsValidator.Store(t, held)
-
-	return held
+	return holdsValidator.get(t, func(t reflect.Type) bool {
+		return reachesValidator(t, map[reflect.Type]bool{})
+	})
 }
 
 // reachesValidator reports whether t, or a type below it, can hold a
@@ -802,12 +799,11 @@ type heldField struct {
 // result leaves it out, along with each field go-yaml skips. Every walk
 // shares the result, so a caller must not change it.
 func fieldsOf(t reflect.Type) *structFields {
-	if cached, ok := walkedFields.Load(t); ok {
-		if fields, ok := cached.(*structFields); ok {
-			return fields
-		}
-	}
+	return walkedFields.get(t, readFields)
+}
 
+// readFields returns the fields [fieldsOf] returns for t.
+func readFields(t reflect.Type) *structFields {
 	fields := &structFields{}
 
 	for i := range t.NumField() {
@@ -827,8 +823,6 @@ func fieldsOf(t reflect.Type) *structFields {
 
 		fields.held = append(fields.held, heldField{name: name, index: i, inline: inline})
 	}
-
-	walkedFields.Store(t, fields)
 
 	return fields
 }
@@ -1087,16 +1081,9 @@ func iterValue(iter *reflect.MapIter, holder reflect.Value) reflect.Value {
 // calls, since the walk validates nothing below a struct that decodes
 // itself.
 func implementsSelfValidator(t reflect.Type) bool {
-	if cached, ok := ownsValidator.Load(t); ok {
-		if owns, ok := cached.(bool); ok {
-			return owns
-		}
-	}
-
-	owns := reflect.PointerTo(t).Implements(reflect.TypeFor[SelfValidator]()) && !promotesMethod(t, "Validate")
-	ownsValidator.Store(t, owns)
-
-	return owns
+	return ownsValidator.get(t, func(t reflect.Type) bool {
+		return reflect.PointerTo(t).Implements(reflect.TypeFor[SelfValidator]()) && !promotesMethod(t, "Validate")
+	})
 }
 
 // promotesMethod reports whether the method of the given name in the
