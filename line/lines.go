@@ -515,8 +515,11 @@ func (ls Lines) TokenAt(pos position.Position) *token.Token {
 // The token may be a lexer token, such as one [Lines.TokenAt] or
 // [Lines.Tokens] returns, one of the per-line parts from [Line.Tokens], or
 // a copy of either, such as a token taken from the AST a parser built from
-// the same stream. A token matches by its type, value, origin, and
-// position rather than by pointer. Returns nil if tk is nil or not found.
+// the same stream. When a line holds tk itself, only the lines that hold
+// it match, so a token from one revision of a diff skips the other
+// revision's token at the same position. When no line holds tk, it
+// matches every token with its type, value, origin, and position. Returns
+// nil if tk is nil or not found.
 func (ls Lines) TokenRanges(tk *token.Token) position.Ranges {
 	return ls.ranges(tk, (*Line).TokenSpan)
 }
@@ -534,7 +537,8 @@ func (ls Lines) ContentRanges(tk *token.Token) position.Ranges {
 
 // ranges collects one range per line that holds tk, using span to pick the
 // columns within the line. Lines where span is empty contribute no range.
-// It visits only the lines that hold a token at tk's position.
+// It visits only the lines that hold a token at tk's position, and only
+// the lines that hold tk itself when there are any.
 func (ls Lines) ranges(
 	tk *token.Token, span func(*Line, *token.Token) (position.Span, bool),
 ) position.Ranges {
@@ -542,9 +546,21 @@ func (ls Lines) ranges(
 		return nil
 	}
 
+	idxs := ls.linesAt(tk.Position)
+
+	// Another line's token with tk's fields is a different token, such as
+	// the other revision's in a diff, so it matches only a copy of tk.
+	held := slices.ContainsFunc(idxs, func(i int) bool {
+		return ls.lines[i].holds(tk)
+	})
+
 	var result position.Ranges
 
-	for _, i := range ls.linesAt(tk.Position) {
+	for _, i := range idxs {
+		if held && !ls.lines[i].holds(tk) {
+			continue
+		}
+
 		sp, ok := span(ls.lines[i], tk)
 		if !ok || sp.Len() <= 0 {
 			continue

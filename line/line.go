@@ -106,9 +106,10 @@ func (l *Line) TokenAt(col int) *token.Token {
 
 // TokenSpan returns the columns tk occupies on this [Line]. The token may be
 // a lexer token, one of the per-line parts from [Line.Tokens], or a copy of
-// either, which matches by its type, value, origin, and position, as
-// [Lines.TokenRanges] describes. The second result is false when tk is nil
-// or has no part on this line.
+// either. Any token on this line with tk's type, value, origin, and
+// position matches, even one from the other revision of a diff, which
+// [Lines.TokenRanges] skips. The second result is false when tk is nil or
+// has no part on this line.
 func (l *Line) TokenSpan(tk *token.Token) (position.Span, bool) {
 	return l.span(tk, func(seg segment.Segment) position.Span {
 		return position.NewSpan(0, seg.Width())
@@ -122,6 +123,14 @@ func (l *Line) TokenSpan(tk *token.Token) (position.Span, bool) {
 // tk is nil or has no part on this line.
 func (l *Line) ContentSpan(tk *token.Token) (position.Span, bool) {
 	return l.span(tk, segment.Segment.ContentSpan)
+}
+
+// holds reports whether a segment of this line has tk itself, not a copy,
+// as its source or part token.
+func (l *Line) holds(tk *token.Token) bool {
+	return slices.ContainsFunc(l.segments, func(seg segment.Segment) bool {
+		return seg.Source() == tk || seg.Part() == tk
+	})
 }
 
 // span finds the segment holding tk and returns the columns that span picks

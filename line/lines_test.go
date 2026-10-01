@@ -2203,8 +2203,8 @@ func TestLines_TokenRanges(t *testing.T) {
 		assert.Equal(t, lines.ContentRanges(tk), lines.ContentRanges(tk.Clone()))
 		assert.Equal(t, lines.TokenRanges(lines.Line(1).Token(0)), lines.TokenRanges(lines.Line(1).Token(0).Clone()))
 
-		// A token from another stream at the same position differs in its
-		// text, so it matches nothing.
+		// This token from another stream sits at the same position but
+		// differs in its text, so it matches nothing.
 		other := tokens.Tokenize("key: |\n  other\n  lines\n")
 		assert.Nil(t, lines.TokenRanges(other[len(other)-1]))
 	})
@@ -2235,6 +2235,12 @@ func TestLines_TokenRanges(t *testing.T) {
 		gapped := line.NewLines(gappedTks)
 		require.Equal(t, 5, gapped.Len())
 		require.Equal(t, 40, gapped.Line(2).Number())
+
+		// Two revisions interleaved as a diff shows them, where the deleted
+		// and inserted lines each hold a "b" key at the same position.
+		before := line.NewLines(tokens.Tokenize("a: 1\nb: 2\n"))
+		after := line.NewLines(tokens.Tokenize("a: 1\nb: 3\n"))
+		revisions := line.Collect(after.Line(0), before.Line(1), after.Line(1))
 
 		tcs := map[string]struct {
 			lines       line.Lines
@@ -2306,6 +2312,50 @@ func TestLines_TokenRanges(t *testing.T) {
 				},
 				wantContent: position.Ranges{
 					position.NewRange(position.New(1, 6), position.New(1, 12)),
+				},
+			},
+			"inserted revision token": {
+				lines: revisions,
+				tk:    revisions.TokenAt(position.New(2, 0)),
+				wantToken: position.Ranges{
+					position.NewRange(position.New(2, 0), position.New(2, 1)),
+				},
+				wantContent: position.Ranges{
+					position.NewRange(position.New(2, 0), position.New(2, 1)),
+				},
+			},
+			"deleted revision token": {
+				lines: revisions,
+				tk:    revisions.TokenAt(position.New(1, 0)),
+				wantToken: position.Ranges{
+					position.NewRange(position.New(1, 0), position.New(1, 1)),
+				},
+				wantContent: position.Ranges{
+					position.NewRange(position.New(1, 0), position.New(1, 1)),
+				},
+			},
+			"revision part token": {
+				lines: revisions,
+				tk:    revisions.Line(2).Token(0),
+				wantToken: position.Ranges{
+					position.NewRange(position.New(2, 0), position.New(2, 1)),
+				},
+				wantContent: position.Ranges{
+					position.NewRange(position.New(2, 0), position.New(2, 1)),
+				},
+			},
+			"copy of a revision token": {
+				// A copy holds no pointer to tell the revisions apart, so it
+				// matches the token of each.
+				lines: revisions,
+				tk:    revisions.TokenAt(position.New(2, 0)).Clone(),
+				wantToken: position.Ranges{
+					position.NewRange(position.New(1, 0), position.New(1, 1)),
+					position.NewRange(position.New(2, 0), position.New(2, 1)),
+				},
+				wantContent: position.Ranges{
+					position.NewRange(position.New(1, 0), position.New(1, 1)),
+					position.NewRange(position.New(2, 0), position.New(2, 1)),
 				},
 			},
 		}
