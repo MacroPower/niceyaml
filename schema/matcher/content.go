@@ -390,6 +390,13 @@ func matchStruct(
 			match = wantsNil(want.Field(i))
 		case !set || !found:
 			match = equal(got.Field(i), want.Field(i))
+
+		// The decoder hands the probe an alias under a tag, so the
+		// probe is not nil when that alias reads as a null. The case
+		// below tells such a null by the node at its path, and it finds
+		// no node for an alias that no path resolves.
+		case value == nil && probe.readsUnresolved(node, name):
+			match = wantsNil(want.Field(i))
 		default:
 			path := paths.Root().Child(name)
 			match, err = matchEntry(ctx, node, path, value, probe.reads, got.Field(i), want.Field(i))
@@ -559,7 +566,54 @@ func (p *fieldProbe) reads(child *niceyaml.Node) bool {
 		return ok
 	}
 
-	start := contentStart(child.AST())
+	return p.startsAt(child.AST())
+}
+
+// readsUnresolved reports whether the decoder read the field from the
+// value of the entry that name selects in the mapping at node, where
+// that value leads to an alias no path resolves. Such an alias names an
+// anchor of a reference document or leads back to itself, and it
+// reaches the probe only under a tag. The decoder follows an alias
+// with no tag on it to its anchor, so readsUnresolved compares the
+// probe with that anchor when the value is such an alias.
+func (p *fieldProbe) readsUnresolved(node *niceyaml.Node, name string) bool {
+	if p == nil {
+		return false
+	}
+
+	resolver := docstate.Of(node).Resolver()
+
+	entry, err := resolver.Entry(node.AST(), name)
+	if err != nil {
+		return false
+	}
+
+	mv, ok := entry.(*ast.MappingValueNode)
+	if !ok {
+		return false
+	}
+
+	_, err = resolver.Deref(mv.Value)
+	if !errors.Is(err, paths.ErrAlias) {
+		return false
+	}
+
+	value := mv.Value
+
+	if alias, ok := value.(*ast.AliasNode); ok {
+		value, err = resolver.Anchor(alias)
+		if err != nil {
+			return false
+		}
+	}
+
+	return p.startsAt(value)
+}
+
+// startsAt reports whether the node the decoder read the field from
+// starts where the content of node does.
+func (p *fieldProbe) startsAt(node ast.Node) bool {
+	start := contentStart(node)
 	if p.start == nil || start == nil {
 		return false
 	}

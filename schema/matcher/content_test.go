@@ -1165,6 +1165,16 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: {k: x, n: null}`),
 			want:    true,
 		},
+		"struct string field does not match a tagged alias to the anchor it sits in": {
+			matcher: matcher.Content(versionPath, plainField{}),
+			input:   stringtest.Input(`version: &x {k: !t *x}`),
+			want:    false,
+		},
+		"struct nil pointer field matches a tagged alias to the anchor it sits in": {
+			matcher: matcher.Content(versionPath, pointerField{}),
+			input:   stringtest.Input(`version: &x {p: !t *x}`),
+			want:    true,
+		},
 		"inline struct int field does not match a fraction": {
 			matcher: matcher.Content(versionPath, inlineIntText{Inline: intText{I: 2}, S: "x"}),
 			input:   stringtest.Input(`version: {i: 2.5, s: x}`),
@@ -1491,6 +1501,39 @@ func TestContent(t *testing.T) {
 				input:   `version: {i: *n}`,
 				opts:    []niceyaml.DecodeOption{refs},
 				want:    false,
+			},
+			"struct string field does not match a tagged alias to a reference null": {
+				matcher: matcher.Content(versionPath, plainField{}),
+				input:   `version: {k: !t *n}`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    false,
+			},
+			"struct nil pointer field matches a tagged alias to a reference null": {
+				matcher: matcher.Content(versionPath, pointerField{}),
+				input:   `version: {p: !t *n}`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    true,
+			},
+			"struct string field does not match an alias to a tagged alias to a reference null": {
+				matcher: matcher.Content(versionPath, plainField{}),
+				input: stringtest.Input(`
+					x: &x !t *n
+					version: {k: *x}
+				`),
+				opts: []niceyaml.DecodeOption{refs},
+				want: false,
+			},
+			"struct string field does not match a merged tagged alias to a reference null": {
+				matcher: matcher.Content(versionPath, plainField{}),
+				input:   `version: {<<: {k: !t *n}}`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    false,
+			},
+			"struct matches its own entry before a merged tagged alias to a reference null": {
+				matcher: matcher.Content(versionPath, plainField{K: "v"}),
+				input:   `version: {k: v, <<: {7: y, k: !t *n}}`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    true,
 			},
 			"struct field under an alias key to a reference anchor compares the decode": {
 				matcher: matcher.Content(versionPath, intText{I: 2}),
@@ -1972,6 +2015,12 @@ func (f *forwardedText) UnmarshalYAML(unmarshal func(any) error) error {
 type plainField struct {
 	K string
 	N *int
+}
+
+// pointerField is a struct want whose field reads the entry p as a
+// pointer to a string.
+type pointerField struct {
+	P *string
 }
 
 // namedInt and namedFloat are numeric types a caller names, which compare
