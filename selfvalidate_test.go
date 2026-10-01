@@ -894,22 +894,24 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("a value two paths share fails the parent on each", func(t *testing.T) {
 		t.Parallel()
 
-		// The alias makes B the same pointer as A. The value reports
-		// under the first path alone, and the parent of the second path
-		// still does not run, since its child failed.
+		// The alias makes the child of p2 the same pointer as the child
+		// of p1. The value reports under the first path alone, and the
+		// parent on the second path still does not run, since its child
+		// failed. DecodeInto keeps the decoded value on an error, so the
+		// test can compare the pointers.
 		type shared struct {
-			A *item `yaml:"a"`
-			B *item `yaml:"b"`
+			P1 sharedParent `yaml:"p1"`
+			P2 sharedParent `yaml:"p2"`
 		}
 
-		dd := yamltest.FirstDocument(t, "a: &x {name: n, price: -1}\nb: *x\n")
+		dd := yamltest.FirstDocument(t, "p1: {x: &x {name: n, price: -1}}\np2: {x: *x}\n")
 
-		got, err := dd.Decode[shared](t.Context())
-		require.Same(t, got.A, got.B)
-		require.EqualError(t, err, "1:24: $.a.price: negative price")
+		var got shared
 
-		_, err = dd.Decode[sharedParent](t.Context())
-		require.EqualError(t, err, "1:24: $.a.price: negative price")
+		err := dd.DecodeInto(t.Context(), &got)
+		require.EqualError(t, err, "1:29: $.p1.x.price: negative price")
+		require.NotNil(t, got.P1.X)
+		require.Same(t, got.P1.X, got.P2.X)
 	})
 
 	t.Run("chained aliases walk in linear time", func(t *testing.T) {
@@ -2474,11 +2476,11 @@ func (h *seenHours) Validate() error {
 	return h.Hours.Validate()
 }
 
-// sharedParent validates after its fields, which an alias makes one
-// pointer, and reports that it ran.
+// sharedParent validates after its field, which an alias can make the
+// same pointer as the field of another sharedParent, and reports that it
+// ran.
 type sharedParent struct {
-	A *item `yaml:"a"`
-	B *item `yaml:"b"`
+	X *item `yaml:"x"`
 }
 
 func (sharedParent) Validate() error {
