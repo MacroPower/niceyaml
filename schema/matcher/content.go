@@ -94,13 +94,13 @@ type contentMatcher[T comparable] struct {
 // element or a field that reads a null matches only a nil want, though
 // a null deeper inside such a value compares as go-yaml decodes it. A
 // document without the path, or whose value does not decode into T,
-// does not match, so a [time.Duration] T matches no timeout: 5.5 or
-// timeout: true. A string that [time.ParseDuration] rejects, such as
-// timeout: 5 minutes, is an exception, and so is a T whose definition
-// the decoder refuses, such as a struct with two fields of one name.
-// The decoder reports these without [niceyaml.ErrDecodeRejected], as it
-// does the other errors [niceyaml.Node.DecodeInto] names, so Match
-// returns the error. Any other
+// does not match, so a [time.Duration] T matches no timeout: 5.5,
+// timeout: 1e3, or timeout: true. A string that [time.ParseDuration]
+// rejects, such as timeout: 5 minutes, is an exception, and so is a T
+// whose definition the decoder refuses, such as a struct with two fields
+// of one name. The decoder reports these without
+// [niceyaml.ErrDecodeRejected], as it does the other errors
+// [niceyaml.Node.DecodeInto] names, so Match returns the error. Any other
 // error from the read comes back as the error, so a registry stops at the
 // document rather than routing it elsewhere. Such errors include a path
 // with a wildcard selector and a context that ended. They also include an
@@ -183,6 +183,16 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 
 	if raw == nil {
 		return wantsNil(reflect.ValueOf(&m.want).Elem()), nil
+	}
+
+	// The decoder reads some plain floats, such as 1e3, as strings and
+	// hands them to time.ParseDuration for a time.Duration, which returns
+	// its own error. A number never decodes into a time.Duration, so such
+	// a float does not match, as 1.5e3 does not. The same holds for an
+	// element or a field of T that matchValue checks on its own.
+	floats, err := readsDurationFloat(ctx, node, raw, reflect.TypeFor[T]())
+	if floats || err != nil {
+		return false, err
 	}
 
 	var got T
@@ -346,26 +356,15 @@ func matchStruct(
 
 	t := got.Type()
 
-	var (
-		decoded  map[string]*fieldProbe
-		shadowed map[string]bool
-	)
+	// A rejection means the mapping does not read as t, which is a no, as
+	// it is for the decode into T.
+	decoded, shadowed, err := fieldScope(ctx, node, t, parent)
+	if errors.Is(err, niceyaml.ErrDecodeRejected) {
+		return false, nil
+	}
 
-	if parent != nil {
-		decoded, shadowed = parent.decoded, parent.shadowed
-	} else {
-		var err error
-
-		// A rejection means the mapping does not read as t, which is a no,
-		// as it is for the decode into T.
-		decoded, err = decodedFields(ctx, node, t)
-		if errors.Is(err, niceyaml.ErrDecodeRejected) {
-			return false, nil
-		}
-
-		if err != nil {
-			return false, err
-		}
+	if err != nil {
+		return false, err
 	}
 
 	for i := range t.NumField() {
@@ -401,6 +400,23 @@ func matchStruct(
 	}
 
 	return true, nil
+}
+
+// fieldScope returns the probe of each name the decoder sets a field of
+// t, a struct type, under when it decodes the mapping at node, as
+// [decodedFields] returns them, and the names whose fields it leaves
+// zero. When t is an inline struct, parent describes the struct it sits
+// in, and fieldScope returns the names that parent holds.
+func fieldScope(
+	ctx context.Context, node *niceyaml.Node, t reflect.Type, parent *inlineScope,
+) (map[string]*fieldProbe, map[string]bool, error) {
+	if parent != nil {
+		return parent.decoded, parent.shadowed, nil
+	}
+
+	decoded, err := decodedFields(ctx, node, t)
+
+	return decoded, nil, err
 }
 
 // mappingEntries returns the entries of raw, a mapping as the YAML types
@@ -569,19 +585,10 @@ func contentStart(node ast.Node) *token.Position {
 
 // matchEntry reports whether got, the element or field the decoder read
 // below node, matches want. The value raw holds is that of the node at
-// path below node as the YAML types name it. For a field, reads reports
-// whether the decoder read got from the node at path. It is nil for an
-// element, which the decoder always reads from the node at its path.
-//
-// It checks got against the node at path only when the decoder read got
-// from that node, and otherwise got matches as == would. A field may
-// have a value but no node at path, such as one named 16 for the key
-// !!str 0x10, or one named i for the key *k when the anchor &k i sits in
-// a reference document. An alias at path may refer to an anchor of a
-// reference document, which the decoder reads and the document does not
-// hold. A field may have its own entry before a `<<` merge key that
-// brings in the same key from a mapping the decoder drops. The decoder
-// then reads the entry, while the node at path is the merged one.
+// path below node as the YAML types name it, and reads is the function
+// [entryNode] takes. It checks got against the node that [entryNode]
+// returns, and got matches as == would when the document holds no such
+// node.
 func matchEntry(
 	ctx context.Context,
 	node *niceyaml.Node,
@@ -590,21 +597,178 @@ func matchEntry(
 	reads func(child *niceyaml.Node) bool,
 	got, want reflect.Value,
 ) (bool, error) {
-	child, err := node.At(path)
-	if errors.Is(err, paths.ErrNotFound) || errors.Is(err, paths.ErrAlias) {
-		return equal(got, want), nil
-	}
-
+	child, ok, err := entryNode(node, path, reads)
 	if err != nil {
-		//nolint:wrapcheck // The Node binds the error already.
 		return false, err
 	}
 
-	if reads != nil && !reads(child) {
+	if !ok {
 		return equal(got, want), nil
 	}
 
 	return matchValue(ctx, child, raw, got, want, nil)
+}
+
+// entryNode returns the node at path below node that the decoder reads
+// an element or a field from, and reports whether the document holds
+// that node. For a field, reads reports whether the decoder read the
+// field from the node at path. It is nil for an element, which the
+// decoder always reads from the node at its path.
+//
+// A field may have a value but no node at path, such as one named 16 for
+// the key !!str 0x10, or one named i for the key *k when the anchor &k i
+// sits in a reference document. An alias at path may refer to an anchor
+// of a reference document, which the decoder reads and the document does
+// not hold. A field may have its own entry before a `<<` merge key that
+// brings in the same key from a mapping the decoder drops. The decoder
+// then reads the entry, while the node at path is the merged one.
+func entryNode(
+	node *niceyaml.Node, path paths.Path, reads func(child *niceyaml.Node) bool,
+) (*niceyaml.Node, bool, error) {
+	child, err := node.At(path)
+	if errors.Is(err, paths.ErrNotFound) || errors.Is(err, paths.ErrAlias) {
+		return nil, false, nil
+	}
+
+	if err != nil {
+		//nolint:wrapcheck // The Node binds the error already.
+		return nil, false, err
+	}
+
+	if reads != nil && !reads(child) {
+		return nil, false, nil
+	}
+
+	return child, true, nil
+}
+
+// readsDurationFloat reports whether a decode of node into t reads a
+// float into a [time.Duration], where raw holds the value of node as the
+// YAML types name it. A float is a scalar that [isFloatScalar] reports.
+// The decoder follows each pointer of t, so readsDurationFloat does too.
+// For an array or a struct that [readsEntries] reports, it checks each
+// element and field from the node that [entryNode] returns for it, as
+// [matchValue] does. It checks every element of a sequence, even one
+// past the end of the array, since the decoder reads each of them.
+func readsDurationFloat(ctx context.Context, node *niceyaml.Node, raw any, t reflect.Type) (bool, error) {
+	t = pointerBase(t)
+
+	if t == reflect.TypeFor[time.Duration]() {
+		return isFloatScalar(node, raw), nil
+	}
+
+	if !readsEntries(t) {
+		return false, nil
+	}
+
+	switch t.Kind() {
+	case reflect.Array:
+		elems, ok := raw.([]any)
+		if !ok {
+			return false, nil
+		}
+
+		for i, elem := range elems {
+			floats, err := entryReadsDurationFloat(ctx, node, paths.Root().Index(i), elem, nil, t.Elem())
+			if floats || err != nil {
+				return floats, err
+			}
+		}
+
+		return false, nil
+
+	case reflect.Struct:
+		return structReadsDurationFloat(ctx, node, raw, t, nil, map[reflect.Type]bool{})
+	default:
+		return false, nil
+	}
+}
+
+// structReadsDurationFloat reports whether a decode of the mapping at
+// node into t, a struct type, reads a float into a [time.Duration], as
+// [readsDurationFloat] describes. It checks the fields that [matchStruct]
+// checks, from the same nodes. When t is an inline struct, parent
+// describes the struct it sits in. The inlined set holds t and the
+// structs it sits in, so a struct that inlines itself through a pointer
+// ends the walk rather than repeating it.
+func structReadsDurationFloat(
+	ctx context.Context,
+	node *niceyaml.Node,
+	raw any,
+	t reflect.Type,
+	parent *inlineScope,
+	inlined map[reflect.Type]bool,
+) (bool, error) {
+	entries, ok := mappingEntries(raw)
+	if !ok || inlined[t] {
+		return false, nil
+	}
+
+	inlined[t] = true
+	defer delete(inlined, t)
+
+	// A rejection means the mapping does not read as t, which the decode
+	// into T reports as well.
+	decoded, shadowed, err := fieldScope(ctx, node, t, parent)
+	if errors.Is(err, niceyaml.ErrDecodeRejected) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	for field := range t.Fields() {
+		name, inline, skip := yamlfield.Name(field)
+		probe, set := decoded[name]
+		value, found := entries[name]
+		inner := pointerBase(field.Type)
+
+		var floats bool
+
+		// Only an inline struct that readsEntries reports reads its fields
+		// from the mapping at node, so an inline field of any other type
+		// reads no float.
+		switch {
+		case skip || !field.IsExported() || shadowed[name]:
+		case inline && inner.Kind() == reflect.Struct && readsEntries(inner):
+			scope := &inlineScope{decoded: decoded, shadowed: yamlfield.OwnNames(t)}
+			floats, err = structReadsDurationFloat(ctx, node, raw, inner, scope, inlined)
+
+		case inline || !set || !found:
+		default:
+			path := paths.Root().Child(name)
+			floats, err = entryReadsDurationFloat(ctx, node, path, value, probe.reads, field.Type)
+		}
+
+		if floats || err != nil {
+			return floats, err
+		}
+	}
+
+	return false, nil
+}
+
+// entryReadsDurationFloat reports whether a decode of the element or
+// field at path below node into t reads a float into a [time.Duration],
+// as [readsDurationFloat] describes. The value raw holds is that of the
+// node at path as the YAML types name it, and reads is the function
+// [entryNode] takes. It reports false when the document holds no node
+// that the decoder reads the entry from.
+func entryReadsDurationFloat(
+	ctx context.Context,
+	node *niceyaml.Node,
+	path paths.Path,
+	raw any,
+	reads func(child *niceyaml.Node) bool,
+	t reflect.Type,
+) (bool, error) {
+	child, ok, err := entryNode(node, path, reads)
+	if err != nil || !ok {
+		return false, err
+	}
+
+	return readsDurationFloat(ctx, child, raw, t)
 }
 
 // equal reports whether got and want hold the same value, as == would.
@@ -757,6 +921,35 @@ var (
 	// rest, such as +.inf, into a number type.
 	floatSyntax = regexp.MustCompile(`^[-+]?(\.\d+|\d+(\.\d*)?)([eE][-+]?\d+)?$`)
 )
+
+// pointerBase returns the type that t points to through any number of
+// pointers, or t itself when it is no pointer.
+func pointerBase(t reflect.Type) reflect.Type {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	return t
+}
+
+// isFloatScalar reports whether raw, the value of node as the YAML types
+// name it, holds a float or a string in the YAML float syntax. The syntax
+// alone decides, so 1e999, which overflows a float64, counts. A scalar
+// the document writes as a string does not count, so "1e3" does not.
+func isFloatScalar(node *niceyaml.Node, raw any) bool {
+	if isExplicitString(node, raw) {
+		return false
+	}
+
+	switch v := raw.(type) {
+	case float64:
+		return true
+	case string:
+		return floatSyntax.MatchString(v)
+	default:
+		return false
+	}
+}
 
 // isPlainString reports whether t is a string type that [isPlain]
 // reports, so the decoder reads it as it reads a string.

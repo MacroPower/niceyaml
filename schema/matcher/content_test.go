@@ -699,6 +699,109 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`timeout: "5s"`),
 			want:    true,
 		},
+		"duration does not match plain float": {
+			matcher: matcher.Content(timeoutPath, 5*time.Second),
+			input:   stringtest.Input(`timeout: 1.5e3`),
+			want:    false,
+		},
+		"duration does not match plain exponent": {
+			matcher: matcher.Content(timeoutPath, 5*time.Second),
+			input:   stringtest.Input(`timeout: 1e3`),
+			want:    false,
+		},
+		"duration does not match negative plain exponent": {
+			matcher: matcher.Content(timeoutPath, 5*time.Second),
+			input:   stringtest.Input(`timeout: -1e3`),
+			want:    false,
+		},
+		"duration does not match anchored plain exponent": {
+			matcher: matcher.Content(timeoutPath, 5*time.Second),
+			input:   stringtest.Input(`timeout: &a 2E+3`),
+			want:    false,
+		},
+		"duration does not match overflowing plain exponent": {
+			matcher: matcher.Content(timeoutPath, 5*time.Second),
+			input:   stringtest.Input(`timeout: 1e999`),
+			want:    false,
+		},
+		"duration does not match overflowing plain float": {
+			matcher: matcher.Content(timeoutPath, 5*time.Second),
+			input:   stringtest.Input(`timeout: 1.5e999`),
+			want:    false,
+		},
+		"pointer duration does not match plain exponent": {
+			matcher: matcher.Content(timeoutPath, new(5*time.Second)),
+			input:   stringtest.Input(`timeout: 1e3`),
+			want:    false,
+		},
+		"array duration element matches duration text": {
+			matcher: matcher.Content(timeoutPath, [1]time.Duration{5 * time.Second}),
+			input:   stringtest.Input(`timeout: [5s]`),
+			want:    true,
+		},
+		"array duration element does not match plain exponent": {
+			matcher: matcher.Content(timeoutPath, [1]time.Duration{5 * time.Second}),
+			input:   stringtest.Input(`timeout: [1e3]`),
+			want:    false,
+		},
+		"array duration elements do not match plain exponent before float": {
+			matcher: matcher.Content(timeoutPath, [2]time.Duration{5 * time.Second, 5 * time.Second}),
+			input:   stringtest.Input(`timeout: [1e3, 1.5e3]`),
+			want:    false,
+		},
+		"array duration elements do not match plain exponent after float": {
+			matcher: matcher.Content(timeoutPath, [2]time.Duration{5 * time.Second, 5 * time.Second}),
+			input:   stringtest.Input(`timeout: [1.5e3, 1e3]`),
+			want:    false,
+		},
+		"array duration does not match plain exponent past its end": {
+			matcher: matcher.Content(timeoutPath, [1]time.Duration{5 * time.Second}),
+			input:   stringtest.Input(`timeout: [5s, 1e3]`),
+			want:    false,
+		},
+		"array duration element does not match aliased plain exponent": {
+			matcher: matcher.Content(timeoutPath, [1]time.Duration{5 * time.Second}),
+			input: stringtest.Input(`
+				a: &a 1e3
+				timeout: [*a]
+			`),
+			want: false,
+		},
+		"struct duration field does not match plain exponent": {
+			matcher: matcher.Content(timeoutPath, durationField{5 * time.Second}),
+			input:   stringtest.Input(`timeout: {t: 1e3}`),
+			want:    false,
+		},
+		"struct duration field does not match merged plain exponent": {
+			matcher: matcher.Content(timeoutPath, durationField{5 * time.Second}),
+			input:   stringtest.Input(`timeout: {<<: {t: 1e3}}`),
+			want:    false,
+		},
+		"struct duration field matches its own entry before a dropped merge": {
+			matcher: matcher.Content(timeoutPath, durationField{5 * time.Second}),
+			input:   stringtest.Input(`timeout: {t: 5s, <<: {7: x, t: 1e3}}`),
+			want:    true,
+		},
+		"inline struct duration field does not match plain exponent": {
+			matcher: matcher.Content(timeoutPath, inlineDuration{durationField{5 * time.Second}}),
+			input:   stringtest.Input(`timeout: {t: 1e3}`),
+			want:    false,
+		},
+		"array struct pointer duration field does not match plain exponent": {
+			matcher: matcher.Content(timeoutPath, [1]*durationField{{5 * time.Second}}),
+			input:   stringtest.Input(`timeout: [{t: 1e3}]`),
+			want:    false,
+		},
+		"struct with an inline alias field ignores a plain exponent beside it": {
+			matcher: matcher.Content(timeoutPath, aliasInlineDuration{K: "x"}),
+			input:   stringtest.Input(`timeout: {t: 1e3, k: x}`),
+			want:    true,
+		},
+		"struct that inlines itself does not match": {
+			matcher: matcher.Content(timeoutPath, selfInline{T: 5 * time.Second}),
+			input:   stringtest.Input(`timeout: {t: 5s}`),
+			want:    false,
+		},
 		"time matches UTC timestamp": {
 			matcher: matcher.Content(createdPath, time.Date(2001, 12, 15, 2, 59, 43, 0, time.UTC)),
 			input:   stringtest.Input(`created: 2001-12-15T02:59:43Z`),
@@ -1753,6 +1856,32 @@ type intText struct {
 	S string
 }
 
+// durationField is a struct want whose field reads the entry t as a
+// [time.Duration].
+type durationField struct {
+	T time.Duration
+}
+
+// inlineDuration reads the entries of a [durationField] inline.
+type inlineDuration struct {
+	Inline durationField `yaml:",inline"`
+}
+
+// aliasInlineDuration holds a [durationField] in an inline field with an
+// alias option, which the decoder fills from an anchor and never from
+// the entry t.
+type aliasInlineDuration struct {
+	Inline durationField `yaml:",inline,alias"`
+	K      string
+}
+
+// selfInline inlines itself through a pointer, so the decoder reads the
+// same mapping into it until it reaches its depth limit and rejects it.
+type selfInline struct {
+	Next *selfInline `yaml:",inline"`
+	T    time.Duration
+}
+
 // inlineIntText reads the entries of an [intText] inline. Its own S
 // shadows the S of the inline struct, which the decoder leaves zero.
 type inlineIntText struct {
@@ -1871,14 +2000,57 @@ func TestContent_UnparsableDuration(t *testing.T) {
 
 	// The decoder reports a string that time.ParseDuration rejects
 	// without niceyaml.ErrDecodeRejected, so the matcher returns the
-	// error rather than a no.
-	m := matcher.Content(paths.Root().Child("timeout"), time.Minute)
-	doc := yamltest.FirstDocument(t, stringtest.Input(`timeout: 5 minutes`))
+	// error rather than a no. A quoted float is such a string, in an
+	// element or a field too.
+	tcs := map[string]struct {
+		matcher matcher.Matcher
+		input   string
+		err     string
+	}{
+		"plain words": {
+			matcher: matcher.Content(timeoutPath, time.Minute),
+			input:   stringtest.Input(`timeout: 5 minutes`),
+			err:     "unknown unit",
+		},
+		"quoted exponent": {
+			matcher: matcher.Content(timeoutPath, time.Minute),
+			input:   stringtest.Input(`timeout: "1e3"`),
+			err:     "unknown unit",
+		},
+		"str tagged exponent": {
+			matcher: matcher.Content(timeoutPath, time.Minute),
+			input:   stringtest.Input(`timeout: !!str 1e3`),
+			err:     "unknown unit",
+		},
+		"plain inf": {
+			matcher: matcher.Content(timeoutPath, time.Minute),
+			input:   stringtest.Input(`timeout: inf`),
+			err:     "invalid duration",
+		},
+		"array element quoted exponent": {
+			matcher: matcher.Content(timeoutPath, [1]time.Duration{time.Minute}),
+			input:   stringtest.Input(`timeout: ["1e3"]`),
+			err:     "unknown unit",
+		},
+		"struct field quoted exponent": {
+			matcher: matcher.Content(timeoutPath, durationField{time.Minute}),
+			input:   stringtest.Input(`timeout: {t: "1e3"}`),
+			err:     "unknown unit",
+		},
+	}
 
-	ok, err := m.Match(t.Context(), doc)
-	require.ErrorContains(t, err, "unknown unit")
-	require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
-	assert.False(t, ok)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			ok, err := tc.matcher.Match(t.Context(), doc)
+			require.ErrorContains(t, err, tc.err)
+			require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+			assert.False(t, ok)
+		})
+	}
 }
 
 func TestContent_RefusedTargetType(t *testing.T) {
