@@ -14,7 +14,8 @@ type embedded struct {
 	E int
 }
 
-// fields holds one field for each rule [yamlfield.Name] applies.
+// fields holds one field for each rule that [yamlfield.Name] and
+// [yamlfield.ReadsAnchor] apply.
 type fields struct {
 	embedded //nolint:unused // Only reflect reads the field.
 
@@ -26,6 +27,14 @@ type fields struct {
 	Dash    int `yaml:"-,"`
 	Options int `yaml:",omitempty"`
 	private int //nolint:unused // Only reflect reads the field.
+
+	Alias       embedded `yaml:",inline,alias"`
+	AliasFirst  embedded `yaml:",alias,omitempty,inline"`
+	AliasJSON   embedded `json:",inline,alias"` //nolint:staticcheck // go-yaml reads the options of a json tag.
+	AliasPrefix embedded `yaml:",inline,aliases"`
+	AliasNamed  embedded `yaml:",inline,alias=base"`
+	AliasOnly   embedded `yaml:",alias"`
+	AliasDash   embedded `yaml:"-"`
 }
 
 func TestName(t *testing.T) {
@@ -63,16 +72,48 @@ func TestName(t *testing.T) {
 	}
 }
 
+func TestReadsAnchor(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		field string
+		want  bool
+	}{
+		"inline with alias":             {field: "Alias", want: true},
+		"alias before inline":           {field: "AliasFirst", want: true},
+		"json tag":                      {field: "AliasJSON", want: true},
+		"option that starts with alias": {field: "AliasPrefix", want: true},
+		"alias that names an anchor":    {field: "AliasNamed"},
+		"alias without inline":          {field: "AliasOnly"},
+		"inline without alias":          {field: "Inner"},
+		"no options":                    {field: "Plain"},
+		"skipped":                       {field: "AliasDash"},
+		"unexported":                    {field: "private"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			field, ok := reflect.TypeFor[fields]().FieldByName(tc.field)
+			require.True(t, ok, "no field %s", tc.field)
+
+			assert.Equal(t, tc.want, yamlfield.ReadsAnchor(field))
+		})
+	}
+}
+
 func TestOwnNames(t *testing.T) {
 	t.Parallel()
 
 	want := map[string]bool{
-		"embedded": true,
-		"plain":    true,
-		"fromYAML": true,
-		"fromJSON": true,
-		"-":        true,
-		"options":  true,
+		"embedded":  true,
+		"plain":     true,
+		"fromYAML":  true,
+		"fromJSON":  true,
+		"-":         true,
+		"options":   true,
+		"aliasonly": true,
 	}
 
 	assert.Equal(t, want, yamlfield.OwnNames(reflect.TypeFor[fields]()))

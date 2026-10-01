@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding"
 	"errors"
+	"maps"
 	"math"
 	"reflect"
 	"regexp"
@@ -18,6 +19,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -51,14 +53,46 @@ type contentMatcher[T comparable] struct {
 // such as Content[any](path, nil) or a nil pointer. When T is an
 // interface, two numbers compare by value whatever their Go types, so
 // Content[any](path, 1) matches an integer the decoder reads as a
-// uint64. A document without the path, or
-// whose value does not decode into T, does not match, so a
-// [time.Duration] T matches no timeout: 5.5 or timeout: true. A string
-// that [time.ParseDuration] rejects, such as timeout: 5 minutes, is an
-// exception, and so is a T whose definition the decoder refuses, such as
-// a struct with two fields of one name. The decoder reports these
-// without [niceyaml.ErrDecodeRejected], as it does the other errors
-// [niceyaml.Node.DecodeInto] names, so Match returns the error. Any other
+// uint64. An array or struct want, other than a [time.Time], matches
+// when each of its elements or fields does by these rules, so
+// [1]int{2} does not match version: [2.5]. Three kinds of want are
+// the exception and match when they equal the value go-yaml decodes.
+// They are a type that decodes itself, a [yaml.MapItem], and a
+// struct with an inline field tagged with a bare alias option, which
+// go-yaml fills from an anchor in place of the mapping. Match takes
+// a type to decode itself by its methods alone. It cannot see a type
+// that go-yaml decodes whole through a [yaml.CustomUnmarshaler]
+// option, a [yaml.RegisterCustomUnmarshaler] call, or an
+// UnmarshalJSON method under [yaml.UseJSONUnmarshaler], so it holds
+// a value of such a type to the rules of its kind. For an array of
+// such a type read from anything but a sequence, or a struct read
+// from anything but a mapping, want matches when it equals the value
+// go-yaml decodes. A field or a trailing element the document leaves
+// out decodes to zero, so it matches only where want holds zero. So
+// does every field of a mapping with a key the decoder reads as
+// something other than a string, such as 7 or true, since the
+// decoder then sets no field from that mapping. A mapping that a
+// `<<` merge key brings in sets no field when it holds such a key.
+// Match compares an element or a field as go-yaml decodes it,
+// without these rules, when no node at its path holds the value the
+// decoder reads. That happens in three cases. The value may sit in a
+// reference document, behind an alias in its place or one under a `<<`
+// merge key. A key may read as the name of a field while no path can
+// name it. A tag makes !!str 0x10 read as 16, while a path spells that
+// key 0x10, and an alias such as *k reads as the text of its anchor in
+// a reference document. A field may have its own entry before a `<<`
+// merge key that brings in the same key from a mapping that sets no
+// field, and the path then leads to the merged entry. In all three, an
+// element or a field that reads a null matches only a nil want, though
+// a null deeper inside such a value compares as go-yaml decodes it. A
+// document without the path, or whose value does not decode into T,
+// does not match, so a [time.Duration] T matches no timeout: 5.5 or
+// timeout: true. A string that [time.ParseDuration] rejects, such as
+// timeout: 5 minutes, is an exception, and so is a T whose definition
+// the decoder refuses, such as a struct with two fields of one name.
+// The decoder reports these without [niceyaml.ErrDecodeRejected], as it
+// does the other errors [niceyaml.Node.DecodeInto] names, so Match
+// returns the error. Any other
 // error from the read comes back as the error, so a registry stops at the
 // document rather than routing it elsewhere. Such errors include an alias
 // on the path that names no anchor, a path with a wildcard selector, and
@@ -139,7 +173,7 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	}
 
 	if raw == nil {
-		return wantsNil(m.want), nil
+		return wantsNil(reflect.ValueOf(&m.want).Elem()), nil
 	}
 
 	var got T
@@ -163,32 +197,437 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 		}
 	}
 
+	return matchValue(ctx, node, raw, reflect.ValueOf(&got).Elem(), reflect.ValueOf(&m.want).Elem(), nil)
+}
+
+// matchValue reports whether got, the value that node decoded to,
+// matches want, where raw holds the value of node as the YAML types name
+// it. An array or a struct that [readsEntries] reports matches when each
+// of its elements or fields does, so the rules for a scalar hold inside
+// it too. Any other value matches whole, as [matchScalar] compares it.
+// When got is an inline struct, parent describes the struct it sits in.
+func matchValue(
+	ctx context.Context, node *niceyaml.Node, raw any, got, want reflect.Value, parent *inlineScope,
+) (bool, error) {
+	if raw == nil {
+		return wantsNil(want), nil
+	}
+
 	// A pointer want matches the value it points to, since every decode
 	// allocates a fresh pointer. A nil pointer want matched null above,
 	// so it matches nothing here.
-	gv, wv, ok := pointees(reflect.ValueOf(&got).Elem(), reflect.ValueOf(&m.want).Elem())
+	got, want, ok := pointees(got, want)
 	if !ok {
 		return false, nil
 	}
 
+	if !readsEntries(got.Type()) {
+		return matchScalar(node, raw, got, want), nil
+	}
+
+	if got.Kind() == reflect.Array {
+		return matchArray(ctx, node, raw, got, want)
+	}
+
+	return matchStruct(ctx, node, raw, got, want, parent)
+}
+
+// readsEntries reports whether t is an array that the decoder fills from
+// the items of a sequence, or a struct that it fills from the entries of
+// a mapping. The decoder does so for an array or a struct that it reads
+// by its kind, as [isPlain] reports. A struct with a field that
+// [yamlfield.ReadsAnchor] reports is the exception. The decoder fills
+// that field from an anchor, and when the field also carries omitempty
+// it reads no `<<` merge key into any other field of the struct.
+func readsEntries(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Array:
+		return isPlain(t)
+	case reflect.Struct:
+		return isPlain(t) && !readsAnchor(t)
+	default:
+		return false
+	}
+}
+
+// readsAnchor reports whether t, a struct type, has a field that
+// [yamlfield.ReadsAnchor] reports.
+func readsAnchor(t reflect.Type) bool {
+	for field := range t.Fields() {
+		if yamlfield.ReadsAnchor(field) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// matchArray reports whether got, the array that node decoded to,
+// matches want element by element, where raw holds the value of node as
+// the YAML types name it. An element that reads a null matches only a
+// nil want, even when no node at its path holds the value the decoder
+// reads. The decoder leaves zero an element past the end of the
+// sequence, which then matches as == would. An array the decoder read
+// from anything but a sequence matches whole, as [matchScalar] compares
+// it.
+func matchArray(ctx context.Context, node *niceyaml.Node, raw any, got, want reflect.Value) (bool, error) {
+	// Only an unmarshaler registered for the array type, which isPlain
+	// cannot see, reads an array from anything but a sequence.
+	elems, ok := raw.([]any)
+	if !ok {
+		return matchScalar(node, raw, got, want), nil
+	}
+
+	for i := range got.Len() {
+		var (
+			match bool
+			err   error
+		)
+
+		switch {
+		case i >= len(elems):
+			match = equal(got.Index(i), want.Index(i))
+		case elems[i] == nil:
+			match = wantsNil(want.Index(i))
+		default:
+			match, err = matchEntry(ctx, node, paths.Root().Index(i), elems[i], nil, got.Index(i), want.Index(i))
+		}
+
+		if err != nil || !match {
+			return false, err
+		}
+	}
+
+	return true, nil
+}
+
+// inlineScope describes the struct an inline struct sits in, whose
+// mapping the fields of the inline struct read.
+type inlineScope struct {
+	// The probe of each name the decoder sets a field under from the
+	// mapping, as [decodedFields] returns them.
+	decoded map[string]*fieldProbe
+
+	// The names of the fields of the parent that are not inline. The
+	// decoder leaves zero each field of the inline struct that uses one.
+	shadowed map[string]bool
+}
+
+// matchStruct reports whether got, the struct that node decoded to,
+// matches want field by field, where raw holds the value of node as the
+// YAML types name it. Each field reads the entry of the mapping that
+// [yamlfield.Name] names, and the fields of an inline struct read the
+// mapping of parent, the struct the inline struct sits in. A field the
+// decoder reads a null into matches only a nil want, even when no node
+// at its path holds the value the decoder reads. A field the decoder
+// does not set, or one raw holds no entry for, matches as == would. The
+// decoder never sets an unexported field, a field of an inline struct
+// that a field of parent shadows, or a field whose name [decodedFields]
+// leaves out. A struct the decoder read from anything but a mapping
+// matches whole, as [matchScalar] compares it.
+func matchStruct(
+	ctx context.Context, node *niceyaml.Node, raw any, got, want reflect.Value, parent *inlineScope,
+) (bool, error) {
+	// Only an unmarshaler registered for the struct type, which isPlain
+	// cannot see, reads a struct from anything but a mapping.
+	entries, ok := mappingEntries(raw)
+	if !ok {
+		return matchScalar(node, raw, got, want), nil
+	}
+
+	t := got.Type()
+
+	var (
+		decoded  map[string]*fieldProbe
+		shadowed map[string]bool
+	)
+
+	if parent != nil {
+		decoded, shadowed = parent.decoded, parent.shadowed
+	} else {
+		var err error
+
+		// A rejection means the mapping does not read as t, which is a no,
+		// as it is for the decode into T.
+		decoded, err = decodedFields(ctx, node, t)
+		if errors.Is(err, niceyaml.ErrDecodeRejected) {
+			return false, nil
+		}
+
+		if err != nil {
+			return false, err
+		}
+	}
+
+	for i := range t.NumField() {
+		field := t.Field(i)
+		name, inline, skip := yamlfield.Name(field)
+		probe, set := decoded[name]
+		value, found := entries[name]
+
+		var (
+			match bool
+			err   error
+		)
+
+		switch {
+		case skip || !field.IsExported() || shadowed[name]:
+			match = equal(got.Field(i), want.Field(i))
+		case inline:
+			inner := &inlineScope{decoded: decoded, shadowed: yamlfield.OwnNames(t)}
+			match, err = matchValue(ctx, node, raw, got.Field(i), want.Field(i), inner)
+
+		case set && probe == nil:
+			match = wantsNil(want.Field(i))
+		case !set || !found:
+			match = equal(got.Field(i), want.Field(i))
+		default:
+			path := paths.Root().Child(name)
+			match, err = matchEntry(ctx, node, path, value, probe.reads, got.Field(i), want.Field(i))
+		}
+
+		if err != nil || !match {
+			return false, err
+		}
+	}
+
+	return true, nil
+}
+
+// mappingEntries returns the entries of raw, a mapping as the YAML types
+// name it, by key, and reports whether raw is a mapping. A decode with
+// [yaml.UseOrderedMap] yields a [yaml.MapSlice] in place of a map, with
+// each key the decoder reads written as a string. A later item with the
+// key of an earlier one wins, as it does in the map.
+func mappingEntries(raw any) (map[string]any, bool) {
+	switch m := raw.(type) {
+	case map[string]any:
+		return m, true
+	case yaml.MapSlice:
+		entries := make(map[string]any, len(m))
+
+		for _, item := range m {
+			key, ok := item.Key.(string)
+			if ok {
+				entries[key] = item.Value
+			}
+		}
+
+		return entries, true
+
+	default:
+		return nil, false
+	}
+}
+
+// decodedFields returns a [*fieldProbe] for each name the decoder sets a
+// field under when it decodes the mapping at node into t, a struct type.
+// The probe records the node the decoder reads the field from, and is
+// nil for a null. The fields of an inline struct of t read the same
+// names. The decoder sets no field from a mapping with a key it reads as
+// something other than a string, such as 7, true, or null. It sets none
+// from a mapping that a `<<` merge key brings in and that holds such a
+// key either. A tag or an alias can change what a key reads as, so
+// decodedFields asks the decoder. It decodes node into a struct that
+// holds a probe under each name of t, then returns the probes the decode
+// set.
+func decodedFields(ctx context.Context, node *niceyaml.Node, t reflect.Type) (map[string]*fieldProbe, error) {
+	names := map[string]bool{}
+	addFieldNames(t, names, map[reflect.Type]bool{})
+
+	sorted := slices.Sorted(maps.Keys(names))
+	decoded := make(map[string]*fieldProbe, len(sorted))
+
+	if len(sorted) == 0 {
+		return decoded, nil
+	}
+
+	fields := make([]reflect.StructField, len(sorted))
+
+	for i, name := range sorted {
+		// The comma after the name keeps a field named - from reading as
+		// the tag that skips a field.
+		fields[i] = reflect.StructField{
+			Name: "F" + strconv.Itoa(i),
+			Type: reflect.TypeFor[*fieldProbe](),
+			Tag:  reflect.StructTag("yaml:" + strconv.Quote(name+",")),
+		}
+	}
+
+	probe := reflect.New(reflect.StructOf(fields))
+	for i := range sorted {
+		probe.Elem().Field(i).Set(reflect.ValueOf(&fieldProbe{}))
+	}
+
+	err := node.DecodeInto(ctx, probe.Interface(), niceyaml.WithSelfValidation(false))
+	if err != nil {
+		//nolint:wrapcheck // The Node binds the error already.
+		return nil, err
+	}
+
+	for i, name := range sorted {
+		// The decoder sets a probe pointer to nil for a null.
+		p, _ := reflect.TypeAssert[*fieldProbe](probe.Elem().Field(i))
+		if p == nil || p.set {
+			decoded[name] = p
+		}
+	}
+
+	return decoded, nil
+}
+
+// addFieldNames adds to names the name go-yaml decodes each field of t, a
+// struct type, under, leaving out the fields it skips. An inline struct
+// adds the names of its own fields, since they read the mapping of t. The
+// seen set guards against a struct that inlines itself.
+func addFieldNames(t reflect.Type, names map[string]bool, seen map[reflect.Type]bool) {
+	if seen[t] {
+		return
+	}
+
+	seen[t] = true
+
+	for field := range t.Fields() {
+		name, inline, skip := yamlfield.Name(field)
+
+		switch {
+		case skip:
+		case !inline:
+			names[name] = true
+		case field.Type.Kind() == reflect.Struct:
+			addFieldNames(field.Type, names, seen)
+		case field.Type.Kind() == reflect.Pointer && field.Type.Elem().Kind() == reflect.Struct:
+			addFieldNames(field.Type.Elem(), names, seen)
+		default:
+		}
+	}
+}
+
+// fieldProbe records that the decoder set a field of the struct
+// [decodedFields] decodes, and where the node it read the field from
+// starts, without reading the value of the field.
+type fieldProbe struct {
+	// The position of the token that starts the content of the node, as
+	// [contentStart] finds it.
+	start *token.Position
+	set   bool
+}
+
+// UnmarshalYAML implements [yaml.NodeUnmarshaler].
+func (p *fieldProbe) UnmarshalYAML(node ast.Node) error {
+	p.set = true
+	p.start = contentStart(node)
+
+	return nil
+}
+
+// reads reports whether the decoder read the field from child. The
+// decoder reads a tree of its own, whose nodes start where the nodes of
+// the document do, so reads compares where the two start. A nil probe
+// stands for a null, which the decoder reads without handing it to the
+// probe, so it reads child when child holds a null.
+func (p *fieldProbe) reads(child *niceyaml.Node) bool {
+	if p == nil {
+		_, ok := astnode.Content(child.AST()).(*ast.NullNode)
+
+		return ok
+	}
+
+	start := contentStart(child.AST())
+	if p.start == nil || start == nil {
+		return false
+	}
+
+	return p.start.Line == start.Line && p.start.Column == start.Column && p.start.Offset == start.Offset
+}
+
+// contentStart returns the position of the token that starts the
+// content of node, looking through an anchor or a tag on it. It returns
+// nil when node has no such token.
+func contentStart(node ast.Node) *token.Position {
+	content := astnode.Content(node)
+	if content == nil {
+		return nil
+	}
+
+	tk := content.GetToken()
+	if tk == nil {
+		return nil
+	}
+
+	return tk.Position
+}
+
+// matchEntry reports whether got, the element or field the decoder read
+// below node, matches want. The value raw holds is that of the node at
+// path below node as the YAML types name it. For a field, reads reports
+// whether the decoder read got from the node at path. It is nil for an
+// element, which the decoder always reads from the node at its path.
+//
+// It checks got against the node at path only when the decoder read got
+// from that node, and otherwise got matches as == would. A field may
+// have a value but no node at path, such as one named 16 for the key
+// !!str 0x10, or one named i for the key *k when the anchor &k i sits in
+// a reference document. An alias at path may refer to an anchor of a
+// reference document, which the decoder reads and the document does not
+// hold. A field may have its own entry before a `<<` merge key that
+// brings in the same key from a mapping the decoder drops. The decoder
+// then reads the entry, while the node at path is the merged one.
+func matchEntry(
+	ctx context.Context,
+	node *niceyaml.Node,
+	path paths.Path,
+	raw any,
+	reads func(child *niceyaml.Node) bool,
+	got, want reflect.Value,
+) (bool, error) {
+	child, err := node.At(path)
+	if errors.Is(err, paths.ErrNotFound) || errors.Is(err, paths.ErrAlias) {
+		return equal(got, want), nil
+	}
+
+	if err != nil {
+		//nolint:wrapcheck // The Node binds the error already.
+		return false, err
+	}
+
+	if reads != nil && !reads(child) {
+		return equal(got, want), nil
+	}
+
+	return matchValue(ctx, child, raw, got, want, nil)
+}
+
+// equal reports whether got and want hold the same value, as == would.
+// It reports false, rather than panicking, for a value that == cannot
+// compare, such as a map behind an interface.
+func equal(got, want reflect.Value) bool {
+	return got.Comparable() && want.Comparable() && got.Equal(want)
+}
+
+// matchScalar reports whether got, the value that node decoded to,
+// matches want, where raw holds the value of node as the YAML types name
+// it. It compares got whole, so [matchValue] hands it no array or struct
+// that the decoder filled element by element or field by field.
+func matchScalar(node *niceyaml.Node, raw any, got, want reflect.Value) bool {
 	// The decoder respells a number or a bool it reads into a string, so
 	// 1.10 becomes "1.1", 0x10 becomes "16", and True becomes "true". A
 	// string want matches the scalar's text as written instead.
-	if isPlainString(gv.Type()) {
+	if isPlainString(got.Type()) {
 		if text, ok := scalarText(node); ok {
-			gv.SetString(text)
+			got.SetString(text)
 		}
 	}
 
 	// The decoder converts a string that Go parses as a number into a
 	// number type, so "2", inf, and 0x1p-2 would match numbers. A scalar
 	// that YAML reads as a string does not match a number want.
-	if isNumber(gv) && isPlain(gv.Type()) && isNonNumberString(node, raw) {
-		return false, nil
+	if isNumber(got) && isPlain(got.Type()) && isNonNumberString(node, raw) {
+		return false
 	}
 
-	if isInteger(gv.Kind()) && !floatHoldsInteger(raw, gv) {
-		return false, nil
+	if isInteger(got.Kind()) && !floatHoldsInteger(raw, got) {
+		return false
 	}
 
 	// T may be an interface such as any, whose dynamic type decides whether
@@ -196,40 +635,40 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	// matches nothing rather than panicking. Two numbers behind an
 	// interface compare by value, since the decoder picks the Go type of a
 	// number and the caller picks the type of want.
-	if !gv.Comparable() {
-		return false, nil
+	if !got.Comparable() {
+		return false
 	}
 
-	if gv.Kind() == reflect.Interface {
-		got := gv.Interface()
+	if got.Kind() == reflect.Interface {
+		g := got.Interface()
 
 		// The decoder reads some plain floats, such as 1e3, as strings, so
 		// a number want reads the float from the text, as a float T does.
-		if isNumber(wv.Elem()) && !isExplicitString(node, raw) {
+		if isNumber(want.Elem()) && !isExplicitString(node, raw) {
 			if f, ok := rawFloat(raw); ok {
-				got = f
+				g = f
 			}
 		}
 
-		if eq, ok := numericEqual(got, wv.Interface()); ok {
-			return eq, nil
+		if eq, ok := numericEqual(g, want.Interface()); ok {
+			return eq
 		}
 	}
 
-	if isFloat(gv.Kind()) {
-		return floatEqual(gv.Float(), wv.Float()), nil
+	if isFloat(got.Kind()) {
+		return floatEqual(got.Float(), want.Float())
 	}
 
 	// == on a time.Time also compares its *time.Location, and the decoder
 	// builds a fresh one for each offset it parses, so times compare by
 	// instant.
-	if gt, ok := reflect.TypeAssert[time.Time](gv); ok {
-		if wt, ok := reflect.TypeAssert[time.Time](wv); ok {
-			return gt.Equal(wt), nil
+	if gt, ok := reflect.TypeAssert[time.Time](got); ok {
+		if wt, ok := reflect.TypeAssert[time.Time](want); ok {
+			return gt.Equal(wt)
 		}
 	}
 
-	return gv.Interface() == wv.Interface(), nil
+	return got.Interface() == want.Interface()
 }
 
 // pointees returns the values that got, the decoded value, and want
@@ -277,11 +716,13 @@ var (
 
 	// The types go-yaml decodes by rules of its own, as it decodes a type
 	// with an unmarshaler. It parses a [time.Duration] and a [time.Time]
-	// from the text of a scalar. A type defined on one of them gets no
-	// such rule.
+	// from the text of a scalar, and it reads the first entry of a
+	// mapping into the key and the value of a [yaml.MapItem]. A type
+	// defined on one of them gets no such rule.
 	decoderTypes = []reflect.Type{
 		reflect.TypeFor[time.Duration](),
 		reflect.TypeFor[time.Time](),
+		reflect.TypeFor[yaml.MapItem](),
 	}
 
 	// The pattern of the decimal and exponent spellings of a float in the
@@ -493,19 +934,18 @@ func unsignedEqualsSigned(u uint64, i int64) bool {
 
 // wantsNil reports whether want is nil: a nil interface, or a nil pointer,
 // map, slice, channel, or function held by one.
-func wantsNil[T comparable](want T) bool {
-	v := reflect.ValueOf(&want).Elem()
-	if v.Kind() == reflect.Interface {
-		if v.IsNil() {
+func wantsNil(want reflect.Value) bool {
+	if want.Kind() == reflect.Interface {
+		if want.IsNil() {
 			return true
 		}
 
-		v = v.Elem()
+		want = want.Elem()
 	}
 
-	switch v.Kind() {
+	switch want.Kind() {
 	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
-		return v.IsNil()
+		return want.IsNil()
 	default:
 		return false
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -747,6 +748,266 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 2.5`),
 			want:    false,
 		},
+		"array matches equal elements": {
+			matcher: matcher.Content(versionPath, [2]int{1, 2}),
+			input:   stringtest.Input(`version: [1, 2]`),
+			want:    true,
+		},
+		"array matches a shorter sequence with zero elements past its end": {
+			matcher: matcher.Content(versionPath, [2]int{1, 0}),
+			input:   stringtest.Input(`version: [1]`),
+			want:    true,
+		},
+		"array int element does not match a fraction": {
+			matcher: matcher.Content(versionPath, [1]int{2}),
+			input:   stringtest.Input(`version: [2.5]`),
+			want:    false,
+		},
+		"array int element does not match a quoted integer": {
+			matcher: matcher.Content(versionPath, [1]int{1}),
+			input:   stringtest.Input(`version: ["1"]`),
+			want:    false,
+		},
+		"array float element does not match a quoted number": {
+			matcher: matcher.Content(versionPath, [1]float64{2}),
+			input:   stringtest.Input(`version: ["2"]`),
+			want:    false,
+		},
+		"array float element does not match a Go-only float": {
+			matcher: matcher.Content(versionPath, [1]float64{0.25}),
+			input:   stringtest.Input(`version: [0x1p-2]`),
+			want:    false,
+		},
+		"array int64 element does not match an overflowing float": {
+			matcher: matcher.Content(versionPath, [1]int64{math.MaxInt64}),
+			input:   stringtest.Input(`version: [1e19]`),
+			want:    false,
+		},
+		"array string element matches float text as written": {
+			matcher: matcher.Content(versionPath, [1]string{"1.10"}),
+			input:   stringtest.Input(`version: [1.10]`),
+			want:    true,
+		},
+		"array string element does not match respelled float": {
+			matcher: matcher.Content(versionPath, [1]string{"1.1"}),
+			input:   stringtest.Input(`version: [1.10]`),
+			want:    false,
+		},
+		"array NaN element matches .nan": {
+			matcher: matcher.Content(versionPath, [1]float64{math.NaN()}),
+			input:   stringtest.Input(`version: [.nan]`),
+			want:    true,
+		},
+		"array int element does not match null": {
+			matcher: matcher.Content(versionPath, [1]int{0}),
+			input:   stringtest.Input(`version: [null]`),
+			want:    false,
+		},
+		"array nil pointer element matches null": {
+			matcher: matcher.Content(versionPath, [1]*int{nil}),
+			input:   stringtest.Input(`version: [null]`),
+			want:    true,
+		},
+		"array time element matches offset timestamp": {
+			matcher: matcher.Content(createdPath, [1]time.Time{time.Date(2001, 12, 15, 2, 59, 43, 0, time.UTC)}),
+			input:   stringtest.Input(`created: [2001-12-14T21:59:43-05:00]`),
+			want:    true,
+		},
+		"struct matches equal fields": {
+			matcher: matcher.Content(versionPath, intText{2, "x"}),
+			input:   stringtest.Input(`version: {i: 2, s: x}`),
+			want:    true,
+		},
+		"struct matches a missing field as zero": {
+			matcher: matcher.Content(versionPath, intText{2, ""}),
+			input:   stringtest.Input(`version: {i: 2}`),
+			want:    true,
+		},
+		"struct matches fields a merge key brings in": {
+			matcher: matcher.Content(versionPath, intText{2, "x"}),
+			input:   stringtest.Input(`version: {<<: {i: 2}, s: x}`),
+			want:    true,
+		},
+		"struct int field does not match a fraction": {
+			matcher: matcher.Content(versionPath, intText{2, "x"}),
+			input:   stringtest.Input(`version: {i: 2.5, s: x}`),
+			want:    false,
+		},
+		"struct int field does not match a quoted integer": {
+			matcher: matcher.Content(versionPath, intText{2, "x"}),
+			input:   stringtest.Input(`version: {i: "2", s: x}`),
+			want:    false,
+		},
+		"struct string field matches float text as written": {
+			matcher: matcher.Content(versionPath, intText{1, "1.10"}),
+			input:   stringtest.Input(`version: {i: 1, s: 1.10}`),
+			want:    true,
+		},
+		"nested struct int field does not match null": {
+			matcher: matcher.Content(versionPath, nestedIntText{}),
+			input:   stringtest.Input(`version: {a: {i: null}}`),
+			want:    false,
+		},
+		"struct pointer field matches its pointee": {
+			matcher: matcher.Content(versionPath, plainField{K: "x", N: new(2)}),
+			input:   stringtest.Input(`version: {k: x, n: 2}`),
+			want:    true,
+		},
+		"struct nil pointer field matches null": {
+			matcher: matcher.Content(versionPath, plainField{K: "x"}),
+			input:   stringtest.Input(`version: {k: x, n: null}`),
+			want:    true,
+		},
+		"inline struct int field does not match a fraction": {
+			matcher: matcher.Content(versionPath, inlineIntText{Inline: intText{I: 2}, S: "x"}),
+			input:   stringtest.Input(`version: {i: 2.5, s: x}`),
+			want:    false,
+		},
+		"inline struct matches with a shadowed field zero": {
+			matcher: matcher.Content(versionPath, inlineIntText{Inline: intText{I: 2}, S: "x"}),
+			input:   stringtest.Input(`version: {i: 2, s: x}`),
+			want:    true,
+		},
+		"inline struct shadowed field does not match the entry of its parent": {
+			matcher: matcher.Content(versionPath, inlineIntText{Inline: intText{I: 2, S: "x"}, S: "x"}),
+			input:   stringtest.Input(`version: {i: 2, s: x}`),
+			want:    false,
+		},
+		"struct field does not match a mapping with a number key": {
+			matcher: matcher.Content(versionPath, intText{S: "1.10"}),
+			input:   stringtest.Input(`version: {s: 1.10, 7: x}`),
+			want:    false,
+		},
+		"struct zero fields match a mapping with a number key": {
+			matcher: matcher.Content(versionPath, intText{}),
+			input:   stringtest.Input(`version: {i: 2.5, 7: x}`),
+			want:    true,
+		},
+		"struct field reads a mapping whose number key is quoted": {
+			matcher: matcher.Content(versionPath, intText{S: "1.10"}),
+			input:   stringtest.Input(`version: {s: 1.10, "7": x}`),
+			want:    true,
+		},
+		"struct field named for a number key does not match it": {
+			matcher: matcher.Content(versionPath, scalarKeys{One: "1.10"}),
+			input:   stringtest.Input(`version: {1: 1.10}`),
+			want:    false,
+		},
+		"struct field named for a bool key does not match it": {
+			matcher: matcher.Content(versionPath, scalarKeys{True: "2"}),
+			input:   stringtest.Input(`version: {true: 2}`),
+			want:    false,
+		},
+		"struct field named for a number key reads it under a str tag": {
+			matcher: matcher.Content(versionPath, scalarKeys{Sixteen: "x"}),
+			input:   stringtest.Input(`version: {!!str 0x10: x}`),
+			want:    true,
+		},
+		"struct field named for a number key does not read it untagged": {
+			matcher: matcher.Content(versionPath, scalarKeys{Sixteen: "x"}),
+			input:   stringtest.Input(`version: {0x10: x}`),
+			want:    false,
+		},
+		"struct field does not match a merged mapping with a number key": {
+			matcher: matcher.Content(versionPath, intText{S: "1.10"}),
+			input:   stringtest.Input(`version: {<<: {1: x, s: 1.10}}`),
+			want:    false,
+		},
+		"struct matches its own entries beside a merged mapping with a number key": {
+			matcher: matcher.Content(versionPath, intText{2, "x"}),
+			input:   stringtest.Input(`version: {<<: {1: x, i: 3}, i: 2, s: x}`),
+			want:    true,
+		},
+		"inline struct zero fields match a mapping with a number key": {
+			matcher: matcher.Content(versionPath, inlineIntText{}),
+			input:   stringtest.Input(`version: {i: 2.5, 7: x}`),
+			want:    true,
+		},
+		"struct matches its own entry before a merged mapping with a number key": {
+			matcher: matcher.Content(versionPath, intText{I: 2}),
+			input:   stringtest.Input(`version: {i: 2, <<: {7: x, i: 3.5}}`),
+			want:    true,
+		},
+		"struct int field does not match its own null before a merged mapping with a number key": {
+			matcher: matcher.Content(versionPath, intText{}),
+			input:   stringtest.Input(`version: {i: null, <<: {7: x, i: 3.5}}`),
+			want:    false,
+		},
+		"struct nil pointer field matches its own null before a merged mapping with a number key": {
+			matcher: matcher.Content(versionPath, plainField{K: "x"}),
+			input:   stringtest.Input(`version: {k: x, n: null, <<: {7: x, n: 3}}`),
+			want:    true,
+		},
+		"struct field before a dropped merged mapping compares the decode": {
+			matcher: matcher.Content(versionPath, intText{I: 2}),
+			input:   stringtest.Input(`version: {i: 2.5, <<: {7: x, i: 3}}`),
+			want:    true,
+		},
+		"struct string field does not match a null under a key a path cannot name": {
+			matcher: matcher.Content(versionPath, scalarKeys{}),
+			input:   stringtest.Input(`version: {!!str 0x10: null}`),
+			want:    false,
+		},
+		"struct field under a key a path cannot name compares the decode": {
+			matcher: matcher.Content(versionPath, scalarKeys{Sixteen: "1.1"}),
+			input:   stringtest.Input(`version: {!!str 0x10: 1.10}`),
+			want:    true,
+		},
+		"struct interface field holding a mapping matches nothing": {
+			matcher: matcher.Content(versionPath, anyField{F: map[string]any{"a": uint64(1)}}),
+			input:   stringtest.Input(`version: {!!str 0x10: {a: 1}}`),
+			want:    false,
+		},
+		"struct with an inline alias field compares the decode beside a fraction": {
+			matcher: matcher.Content(versionPath, aliasInline{K: "x"}),
+			input:   stringtest.Input(`version: {i: 2.5, k: x}`),
+			want:    true,
+		},
+		"struct with an inline alias field compares the decode beside float text": {
+			matcher: matcher.Content(versionPath, aliasInline{K: "x"}),
+			input:   stringtest.Input(`version: {s: 1.10, k: x}`),
+			want:    true,
+		},
+		"struct with an inline alias field compares its own field as the decode": {
+			matcher: matcher.Content(versionPath, aliasInline{K: "1.1"}),
+			input:   stringtest.Input(`version: {k: 1.10}`),
+			want:    true,
+		},
+		"struct with an inline alias field does not match a different decode": {
+			matcher: matcher.Content(versionPath, aliasInline{K: "y"}),
+			input:   stringtest.Input(`version: {i: 2, k: x}`),
+			want:    false,
+		},
+		"struct with an omitempty inline alias field ignores a merged entry": {
+			matcher: matcher.Content(versionPath, aliasInlineOmit{}),
+			input:   stringtest.Input(`version: {<<: {k: 1.10}}`),
+			want:    true,
+		},
+		"struct with an omitempty inline alias field ignores a merged fraction": {
+			matcher: matcher.Content(versionPath, aliasInlineOmit{K: "x"}),
+			input:   stringtest.Input(`version: {<<: {i: 2.5}, k: x}`),
+			want:    true,
+		},
+		"array of structs with an inline alias field compares the decode": {
+			matcher: matcher.Content(versionPath, [1]aliasInline{{K: "x"}}),
+			input:   stringtest.Input(`version: [{i: 2.5, k: x}]`),
+			want:    true,
+		},
+		"inline struct with an inline alias field compares the decode": {
+			matcher: matcher.Content(versionPath, aliasInlineParent{S: "1.10"}),
+			input:   stringtest.Input(`version: {i: 2.5, s: 1.10}`),
+			want:    true,
+		},
+		"map item matches the first entry of a mapping": {
+			matcher: matcher.Content(versionPath, yaml.MapItem{Key: "key", Value: "x"}),
+			input:   stringtest.Input(`version: {key: x, value: null}`),
+			want:    true,
+		},
+		"map item does not match a different first entry": {
+			matcher: matcher.Content(versionPath, yaml.MapItem{Key: "key", Value: "y"}),
+			input:   stringtest.Input(`version: {key: x, value: null}`),
+			want:    false,
+		},
 		"value that does not decode": {
 			matcher: matcher.Content(versionPath, 1),
 			input:   stringtest.Input(`version: abc`),
@@ -800,6 +1061,164 @@ func TestContent(t *testing.T) {
 
 		assert.True(t, match(t, matcher.Content(kindPath, "Service"), docs[0]))
 		assert.False(t, match(t, matcher.Content(kindPath, "Pod"), docs[0]))
+	})
+
+	t.Run("node a decode hands its validator", func(t *testing.T) {
+		t.Parallel()
+
+		// The Node a validator gets decodes with the go-yaml options of the
+		// decode that runs the validator, as a registry used as a validator
+		// sees it.
+		ordered := niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())
+		refs := niceyaml.WithReferences([]byte(stringtest.Input(`
+			r: &r 2
+			m: &m {i: 2}
+			n: &n null
+			k: &k i
+			o: &o {i: null}
+		`)))
+
+		// Match cannot see an unmarshaler that an option gives a type, so
+		// it takes these types to decode by their kind.
+		custom := niceyaml.WithYAMLDecodeOptions(
+			yaml.CustomUnmarshaler(func(v *majorMinor, text []byte) error {
+				_, err := fmt.Sscanf(string(text), "%d.%d", &v.Major, &v.Minor)
+				if err != nil {
+					return fmt.Errorf("read major.minor: %w", err)
+				}
+
+				return nil
+			}),
+			yaml.CustomUnmarshaler(func(v *intPair, text []byte) error {
+				_, err := fmt.Sscanf(string(text), "%dx%d", &v[0], &v[1])
+				if err != nil {
+					return fmt.Errorf("read pair: %w", err)
+				}
+
+				return nil
+			}),
+		)
+
+		tcs := map[string]struct {
+			matcher matcher.Matcher
+			input   string
+			opts    []niceyaml.DecodeOption
+			want    bool
+		}{
+			"struct matches an ordered mapping": {
+				matcher: matcher.Content(versionPath, intText{2, "x"}),
+				input:   `version: {i: 2, s: x}`,
+				opts:    []niceyaml.DecodeOption{ordered},
+				want:    true,
+			},
+			"struct int field in an ordered mapping does not match a fraction": {
+				matcher: matcher.Content(versionPath, intText{2, "x"}),
+				input:   `version: {i: 2.5, s: x}`,
+				opts:    []niceyaml.DecodeOption{ordered},
+				want:    false,
+			},
+			"array of structs matches ordered mappings": {
+				matcher: matcher.Content(versionPath, [1]intText{{2, "x"}}),
+				input:   `version: [{i: 2, s: x}]`,
+				opts:    []niceyaml.DecodeOption{ordered},
+				want:    true,
+			},
+			"array element matches an alias to a reference anchor": {
+				matcher: matcher.Content(versionPath, [1]int{2}),
+				input:   `version: [*r]`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    true,
+			},
+			"array element does not match a different reference value": {
+				matcher: matcher.Content(versionPath, [1]int{3}),
+				input:   `version: [*r]`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    false,
+			},
+			"struct field matches an alias to a reference anchor": {
+				matcher: matcher.Content(versionPath, intText{I: 2}),
+				input:   `version: {i: *r}`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    true,
+			},
+			"struct matches a merged reference mapping": {
+				matcher: matcher.Content(versionPath, intText{I: 2}),
+				input:   `version: {<<: *m}`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    true,
+			},
+			"array int element does not match an alias to a reference null": {
+				matcher: matcher.Content(versionPath, [1]int{0}),
+				input:   `version: [*n]`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    false,
+			},
+			"array nil pointer element matches an alias to a reference null": {
+				matcher: matcher.Content(versionPath, [1]*int{nil}),
+				input:   `version: [*n]`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    true,
+			},
+			"struct int field does not match an alias to a reference null": {
+				matcher: matcher.Content(versionPath, intText{}),
+				input:   `version: {i: *n}`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    false,
+			},
+			"struct field under an alias key to a reference anchor compares the decode": {
+				matcher: matcher.Content(versionPath, intText{I: 2}),
+				input:   `version: {*k : 2.5}`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    true,
+			},
+			"struct int field does not match a null under an alias key to a reference anchor": {
+				matcher: matcher.Content(versionPath, intText{}),
+				input:   `version: {*k : null}`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    false,
+			},
+			"struct field compares a null inside a reference value as the decode": {
+				matcher: matcher.Content(versionPath, nestedIntText{}),
+				input:   `version: {a: *o}`,
+				opts:    []niceyaml.DecodeOption{refs},
+				want:    true,
+			},
+			"struct an option reads from a scalar compares the decode": {
+				matcher: matcher.Content(versionPath, majorMinor{Major: 1, Minor: 10}),
+				input:   `version: 1.10`,
+				opts:    []niceyaml.DecodeOption{custom},
+				want:    true,
+			},
+			"struct an option reads from a scalar does not match a different decode": {
+				matcher: matcher.Content(versionPath, majorMinor{Major: 1, Minor: 1}),
+				input:   `version: 1.10`,
+				opts:    []niceyaml.DecodeOption{custom},
+				want:    false,
+			},
+			"array an option reads from a scalar compares the decode": {
+				matcher: matcher.Content(versionPath, intPair{2, 3}),
+				input:   `version: 2x3`,
+				opts:    []niceyaml.DecodeOption{custom},
+				want:    true,
+			},
+			"array an option reads from a scalar does not match a different decode": {
+				matcher: matcher.Content(versionPath, intPair{3, 2}),
+				input:   `version: 2x3`,
+				opts:    []niceyaml.DecodeOption{custom},
+				want:    false,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				got := matchInDecode(t, tc.matcher, doc, tc.opts...)
+				assert.Equal(t, tc.want, got)
+			})
+		}
 	})
 
 	t.Run("alias without an anchor is an error", func(t *testing.T) {
@@ -961,6 +1380,29 @@ func TestContent_ContextEnded(t *testing.T) {
 	assert.False(t, ok)
 }
 
+// matchInDecode runs m on the Node that a decode of doc with opts hands
+// its validator, and fails the test when the matcher cannot decide.
+func matchInDecode(t *testing.T, m matcher.Matcher, doc *niceyaml.Node, opts ...niceyaml.DecodeOption) bool {
+	t.Helper()
+
+	var (
+		got      bool
+		matchErr error
+	)
+
+	validator := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+		got, matchErr = m.Match(ctx, n)
+
+		return nil
+	})
+
+	_, err := doc.Decode[any](t.Context(), append(opts, niceyaml.WithValidator(validator))...)
+	require.NoError(t, err)
+	require.NoError(t, matchErr)
+
+	return got
+}
+
 // methodString is a string type with a method that plays no part in
 // decoding, so it decodes as a plain string does.
 type methodString string
@@ -995,6 +1437,73 @@ type (
 		K    prefixedString
 	}
 )
+
+// intText is a struct want whose fields read the entries i and s.
+type intText struct {
+	I int
+	S string
+}
+
+// inlineIntText reads the entries of an [intText] inline. Its own S
+// shadows the S of the inline struct, which the decoder leaves zero.
+type inlineIntText struct {
+	Inline intText `yaml:",inline"`
+	S      string
+}
+
+// nestedIntText is a struct want whose field reads the entry a as an
+// [intText].
+type nestedIntText struct {
+	A intText
+}
+
+// aliasInline holds an inline field with an alias option. The decoder
+// fills Base from the anchor that a `<<` key names with an alias, and
+// from no entry of the mapping, so Base stays zero without such a key.
+type aliasInline struct {
+	Base intText `yaml:",inline,alias"`
+	K    string
+}
+
+// aliasInlineOmit is an [aliasInline] whose inline field carries
+// omitempty too, which makes the decoder read no `<<` key into K either.
+type aliasInlineOmit struct {
+	Base intText `yaml:",omitempty,inline,alias"`
+	K    string
+}
+
+// aliasInlineParent reads the entries of an [aliasInline] inline, beside
+// a field of its own.
+type aliasInlineParent struct {
+	Inline aliasInline `yaml:",inline"`
+	S      string
+}
+
+// majorMinor is a struct and intPair an array with no method that
+// decodes them. A test gives each a [yaml.CustomUnmarshaler] that reads
+// it from a scalar.
+type (
+	majorMinor struct {
+		Major int
+		Minor int
+	}
+	intPair [2]int
+)
+
+// scalarKeys reads entries whose plain keys spell a number or a bool.
+// The decoder reads such a key as a string only under a !!str tag.
+type scalarKeys struct {
+	One     string `yaml:"1"`
+	True    string `yaml:"true"`
+	Sixteen string `yaml:"16"`
+}
+
+// anyField reads the key !!str 0x10 into an interface, which holds a map
+// when the value is a mapping. The document has no node at the path of
+// the field, since the path spells the key 16.
+type anyField struct {
+	F any `yaml:"16"`
+}
 
 // plainField holds only fields that decode as plain values do.
 type plainField struct {

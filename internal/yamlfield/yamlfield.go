@@ -8,6 +8,11 @@
 // of its parent, and go-yaml zeroes each one whose name a field of the
 // parent that is not inline also uses. [OwnNames] returns the names of
 // the parent that zero such a field.
+//
+// One kind of field reads no entry of the mapping. An inline field that
+// carries an alias option gets the value of the anchor a `<<` key names.
+// [ReadsAnchor] reports such a field, so the pairing code can leave its
+// struct alone.
 package yamlfield
 
 import (
@@ -23,16 +28,8 @@ import (
 // or the json tag when the field has no yaml tag. It is the lowercased
 // field name when neither tag names it, as go-yaml spells it.
 func Name(field reflect.StructField) (string, bool, bool) {
-	if field.PkgPath != "" && !field.Anonymous {
-		return "", false, true
-	}
-
-	tag := field.Tag.Get("yaml")
-	if tag == "" {
-		tag = field.Tag.Get("json")
-	}
-
-	if tag == "-" {
+	tag, skip := fieldTag(field)
+	if skip {
 		return "", false, true
 	}
 
@@ -44,6 +41,43 @@ func Name(field reflect.StructField) (string, bool, bool) {
 	}
 
 	return name, slices.Contains(options[1:], "inline"), false
+}
+
+// ReadsAnchor reports whether go-yaml fills field from an anchor in
+// place of the entries of the mapping it decodes. It does so for an
+// inline field whose tag carries an alias option that names no anchor,
+// such as `yaml:",inline,alias"`. The field gets the value of the anchor
+// that a `<<` key of the mapping names with an alias, and stays zero
+// when the mapping has no such key. Any option that starts with alias
+// and holds no = counts as that option, as it does in go-yaml.
+func ReadsAnchor(field reflect.StructField) bool {
+	// Few tags hold the word, so most fields return before the split.
+	tag, skip := fieldTag(field)
+	if skip || !strings.Contains(tag, "alias") {
+		return false
+	}
+
+	options := strings.Split(tag, ",")[1:]
+
+	return slices.Contains(options, "inline") && slices.ContainsFunc(options, func(option string) bool {
+		return strings.HasPrefix(option, "alias") && !strings.Contains(option, "=")
+	})
+}
+
+// fieldTag returns the tag go-yaml reads for field, which is the yaml
+// tag, or the json tag when the field has no yaml tag. The second result
+// reports whether go-yaml skips the field.
+func fieldTag(field reflect.StructField) (string, bool) {
+	if field.PkgPath != "" && !field.Anonymous {
+		return "", true
+	}
+
+	tag := field.Tag.Get("yaml")
+	if tag == "" {
+		tag = field.Tag.Get("json")
+	}
+
+	return tag, tag == "-"
 }
 
 // OwnNames returns the names go-yaml decodes the fields of t, a struct
