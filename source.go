@@ -17,7 +17,6 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
@@ -471,7 +470,10 @@ func (d *document) anchorToken() *token.Token {
 // "?" of an explicit key and the key, and between the key and its ":".
 // Inside a flow collection, it also leaves out such a comment before a key
 // of a flow mapping or before a ",", "]", or "}". [parser.Parse] rejects or
-// misreads valid YAML that holds a comment in any of these places. The
+// misreads valid YAML that holds a comment in any of these places. A
+// comment on the last line of a scalar that spans several lines counts as
+// one on a line of its own. The parser attaches a comment to the token
+// before it only when that token starts on the line of the comment. The
 // tokens of the Source and of each [Node] still hold such a comment.
 //
 // The tree also leaves out the comments on lines of their own between an
@@ -758,6 +760,12 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 // stay among the tokens of the Source, where [tokens.SplitDocuments]
 // still hands them to their documents.
 //
+// A comment sits on a line of its own when it starts on a line below the
+// line where the last token before it starts. The parser attaches a
+// comment to the token before it only when both start on one line
+// (parser/token.go:254), so it reads a comment on the last line of a
+// scalar that spans several lines as it reads one on a line of its own.
+//
 // Below a scalar or a flow collection, only the comments that close the
 // document drop: those that the end of run, a "---" header, or a "..."
 // marker follows. The parser rejects any other token after them, with or
@@ -908,9 +916,9 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 
 		case anchored:
 			// The first comment on a line of its own, past any comment on
-			// the line of the content.
+			// the line where the last token starts.
 			below := i
-			for below < next && !belowText(run[below], last) {
+			for below < next && !startsBelow(run[below], last) {
 				below++
 			}
 
@@ -928,7 +936,7 @@ func dropStrandedComments(run token.Tokens) token.Tokens {
 		for j := i; j < next; j++ {
 			left := leftDrops && run[j].Position != nil && run[j].Position.Column < rootCol
 
-			if (stranded || left) && belowText(run[j], last) {
+			if (stranded || left) && startsBelow(run[j], last) {
 				if kept == nil {
 					kept = slices.Clone(run[:j])
 				}
@@ -1002,20 +1010,6 @@ func startsFlowKey(tk *token.Token, flow token.Type) bool {
 	}
 
 	return tk.Type == token.MappingStartType || tk.Type == token.CollectEntryType
-}
-
-// belowText reports whether tk starts on a line below the line where the
-// text of last ends. That text ends on the line where it starts plus the
-// line breaks within it, without the spaces, tabs, and line breaks around
-// it. It reports false when last is nil or either token has no position.
-func belowText(tk, last *token.Token) bool {
-	if last == nil || tk.Position == nil || last.Position == nil {
-		return false
-	}
-
-	end := last.Position.Line + lineend.CountBreaks(strings.Trim(last.Origin, " \t\r\n"))
-
-	return tk.Position.Line > end
 }
 
 // breaksAnchor reports whether the comments between the anchor at run[at]
@@ -1216,9 +1210,11 @@ func sameLine(a, b *token.Token) bool {
 }
 
 // startsBelow reports whether tk starts on a line below the line mark
-// starts on.
+// starts on. It reports false when mark is nil or either token has no
+// position.
 func startsBelow(tk, mark *token.Token) bool {
-	return tk.Position != nil && mark.Position != nil && tk.Position.Line > mark.Position.Line
+	return mark != nil && tk.Position != nil && mark.Position != nil &&
+		tk.Position.Line > mark.Position.Line
 }
 
 // Bind binds err to the [Source] and to the document each location in

@@ -521,6 +521,37 @@ func TestDocument_Decode(t *testing.T) {
 				input: "x # same\n# c\n",
 				want:  []any{"x"},
 			},
+			// The parser attaches a comment only to a token that starts on
+			// its line, so it reads a comment on the last line of a scalar
+			// on several lines as one on a line of its own.
+			"comment on the last line of a plain scalar": {
+				input: "a\n b # c\n",
+				want:  []any{"a b"},
+			},
+			"comment on the last line of a single-quoted scalar": {
+				input: "'x\n y' # c\n",
+				want:  []any{"x y"},
+			},
+			"comment on the last line of a double-quoted scalar above a header": {
+				input: "\"multi\n line\" # c\n---\nx\n",
+				want:  []any{"multi line", "x"},
+			},
+			"comment on the last line of a tagged scalar": {
+				input: "!!str a\n b # c\n",
+				want:  []any{"a b"},
+			},
+			"comment on the last line of an anchored scalar": {
+				input: "&x a\n b # c\n",
+				want:  []any{"a b"},
+			},
+			"comment on the last line of a scalar above an end marker": {
+				input: "--- a\n b # c\n...\n",
+				want:  []any{"a b"},
+			},
+			"comments on and below the last line of a scalar": {
+				input: "a\n b # c\n# d\n",
+				want:  []any{"a b"},
+			},
 			"flow sequence": {
 				input: "[1, 2]\n# c\n",
 				want:  []any{[]any{uint64(1), uint64(2)}},
@@ -1101,6 +1132,20 @@ func TestDocument_Decode(t *testing.T) {
 				kept:  "# c",
 				want:  []any{map[string]any{"a": []any{uint64(1)}}},
 			},
+			// The parser reads a comment on the last line of a scalar on
+			// several lines as one on a line of its own.
+			"comment on the last line of an entry before a closing bracket": {
+				input: "[a\n b # c\n]\n",
+				want:  []any{[]any{"a b"}},
+			},
+			"comment on the last line of an entry before a comma": {
+				input: "[a\n b # c\n, d]\n",
+				want:  []any{[]any{"a b", "d"}},
+			},
+			"comment on the last line of a value before a closing brace": {
+				input: "{a: \"x\n y\" # c\n}\n",
+				want:  []any{map[string]any{"a": "x y"}},
+			},
 			"flow mapping in a flow sequence": {
 				input: "a: [1, {\n  # c\n  b: 2\n}]\n",
 				want:  []any{map[string]any{"a": []any{uint64(1), map[string]any{"b": uint64(2)}}}},
@@ -1216,6 +1261,12 @@ func TestDocument_Decode(t *testing.T) {
 				input: "? a # k\n# c\n: 1\n",
 				kept:  "# k",
 				want:  []any{map[string]any{"a": uint64(1)}},
+			},
+			// The parser reads a comment on the last line of a key on
+			// several lines as one on a line of its own.
+			"comment on the last line of a quoted key": {
+				input: "? \"a\n b\" # c\n: 1\n",
+				want:  []any{map[string]any{"a b": uint64(1)}},
 			},
 			"comment between entries": {
 				input: "? a\n: 1\n# c\n? b\n: 2\n",
