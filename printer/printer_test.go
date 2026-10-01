@@ -219,6 +219,8 @@ func TestPrinter_PrintError(t *testing.T) {
 	empty := niceyaml.NewSourceFromString("a:\nb: 2\n")
 	flags := niceyaml.NewSourceFromString("flags: 🇺🇸🇫🇷\n")
 
+	_, tabErr := niceyaml.NewSourceFromString("a:\n\tb: 1\n").File()
+
 	// The root has no message beside its range, so a caret run under the
 	// range shows its extent without color.
 	excerpt := stringtest.JoinLF(
@@ -359,6 +361,20 @@ func TestPrinter_PrintError(t *testing.T) {
 				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>1</genericError>",
 				"<textError>   ^ bad    a</textError>",
 				"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>2</literalNumberInteger>",
+			),
+		},
+		// The go-yaml scanner spells the tab it rejects as a raw tab. The
+		// message names it by its picture, as the excerpt shows it, rather
+		// than as the four spaces a tab in a message lays out as.
+		"syntax error names a rejected tab by its picture": {
+			err: tabErr,
+			want: stringtest.JoinLF(
+				"2:2: found character '\u2409' that cannot start any token",
+				"",
+				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue>",
+				"<text>\u2409</text><genericError>b</genericError><punctuationMappingValue>:</punctuationMappingValue>"+
+					"<text> </text><literalNumberInteger>1</literalNumberInteger>",
+				"<textError> ^</textError>",
 			),
 		},
 		"nested errors draw as branches in position order": {

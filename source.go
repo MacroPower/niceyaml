@@ -17,6 +17,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
@@ -506,8 +507,10 @@ func (d *document) anchorToken() *token.Token {
 // builds a new Source from the result.
 //
 // A YAML syntax error comes back as a [*SourceError] bound to this Source,
-// so [FormatError] renders it with the offending token marked. A panic in
-// the parser comes back as a [*SourceError] that matches
+// so [FormatError] renders it with the offending token marked. Its message
+// names each control character by its Unicode Control Picture, so a tab
+// the parser rejects reads as "␉" there as it does in the excerpt. A
+// panic in the parser comes back as a [*SourceError] that matches
 // [ErrParseRejected], and every later call returns the same error.
 func (s *Source) File() (*ast.File, error) {
 	s.fileOnce.Do(func() {
@@ -567,9 +570,14 @@ func (s *Source) parse() (*ast.File, map[*token.Token]struct{}, error) {
 
 		// The documents come from the file this parse returns, so the error
 		// binds to the source alone rather than routing to one of them.
+		// The go-yaml scanner spells the tab it rejects as a raw tab, which
+		// the renderers would lay out as four spaces, so the message names
+		// each control character by its picture.
 		if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
+			msg := escape.Control(yamlErr.GetMessage())
+
 			return nil, nil, bindTree(
-				WrapError(yamlMessageError{err: yamlErr}, atToken(yamlErr.GetToken())),
+				WrapError(yamlMessageError{err: yamlErr, msg: msg}, atToken(yamlErr.GetToken())),
 				binder{src: s},
 			)
 		}

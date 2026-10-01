@@ -1784,6 +1784,64 @@ func TestSource_Parse(t *testing.T) {
 		_, ok = bound.Excerpt(2)
 		assert.True(t, ok)
 	})
+
+	t.Run("syntax error names a rejected tab by its picture", func(t *testing.T) {
+		t.Parallel()
+
+		// The go-yaml scanner spells the tab as a raw tab, which a
+		// renderer lays out as four spaces. The message names the
+		// character the excerpt shows instead.
+		tcs := map[string]struct {
+			input string
+			err   string
+			want  string
+		}{
+			"tab indents a key": {
+				input: "a:\n\tb: 1\n",
+				err:   "t.yaml:2:2: found character '\u2409' that cannot start any token",
+				want: stringtest.JoinLF(
+					"t.yaml:2:2: found character '\u2409' that cannot start any token",
+					"",
+					"   1 | a:",
+					"   2 | \u2409b: 1",
+					"     |  ^",
+				),
+			},
+			"tab alone on a line": {
+				input: "a:\n\t\nb: 1\n",
+				err:   "t.yaml:3:1: found character '\u2409' that cannot start any token",
+				want: stringtest.JoinLF(
+					"t.yaml:3:1: found character '\u2409' that cannot start any token",
+					"",
+					"   2 | \u2409",
+					"   3 | b: 1",
+					"     | ^",
+				),
+			},
+			"tab indents a sequence entry": {
+				input: "a: 1\n\t- x\n",
+				err:   "t.yaml:1:4: found character '\u2409' that cannot start any token",
+				want: stringtest.JoinLF(
+					"t.yaml:1:4: found character '\u2409' that cannot start any token",
+					"",
+					"   1 | a: 1",
+					"     |    ^",
+					"   2 | \u2409- x",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("t.yaml")).File()
+				require.EqualError(t, err, tc.err)
+
+				assert.Equal(t, tc.want, niceyaml.FormatError(err, 1))
+			})
+		}
+	})
 }
 
 func TestSource_WithYAMLParserOptions(t *testing.T) {
