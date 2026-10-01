@@ -3937,6 +3937,30 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 		assert.Contains(t, got, "^ second")
 		assert.NotContains(t, got, "first")
 	})
+
+	t.Run("unresolved root with a resolved child prints no reason", func(t *testing.T) {
+		t.Parallel()
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError("bad",
+			niceyaml.AtPath(paths.Root().Child("missing")),
+			niceyaml.WithErrors(niceyaml.NewError("first", niceyaml.AtPath(paths.Root().Child("name")))),
+		)), &bound)
+
+		requireUnresolved(t, bound, paths.ErrNotFound)
+
+		_, ok := bound.Excerpt(0)
+		require.True(t, ok)
+
+		// The child resolves, so the excerpt marks it, and the root keeps
+		// its message in the tree without a position or a reason.
+		assert.Equal(t,
+			"$.missing: bad\n`-- 1:7: $.name: first\n\n   1 | name: test\n     |       ^^^^ first",
+			niceyaml.FormatError(bound, 0),
+		)
+		assert.NotContains(t, render(bound), "no excerpt:")
+	})
 }
 
 // excerptSource is a ten-line source whose second and eighth lines are far

@@ -28,10 +28,14 @@ const errorConnectorWidth = 4
 // without content, and [DefaultAnnotation] draws that as the caret run, so
 // the range shows its extent without color. A location that covers no
 // column, such as a path to an empty value, gets a single caret at its
-// column. Blank lines separate the
-// parts. A SourceError whose location does not resolve prints a line
-// starting "no excerpt:" that names the reason in place of its excerpt,
-// unless it carries no location at all.
+// column. Blank lines separate the parts. When no location in the tree
+// of a SourceError resolves, PrintError prints a line starting
+// "no excerpt:" in place of the excerpt, with the reason the location of
+// the SourceError itself did not resolve. A SourceError that carries no
+// location of its own gets no such line. A SourceError whose own
+// location does not resolve but whose nested errors do gets their
+// excerpt and no reason, and its message stays in the tree without a
+// position.
 //
 // PrintError draws the message as a tree with a connector in front of each
 // nested error, in the color of the gutter's line numbers, so a validator's
@@ -58,13 +62,14 @@ const errorConnectorWidth = 4
 //	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
 //	fmt.Println(p.PrintError(err))
 //
-// An error whose tree holds no SourceError, or whose excerpts are empty,
-// prints as its tree alone, which for an error with no nested errors is
-// its message, and a nil err prints as "". An error whose tree and
-// excerpts both render nothing, such as a bound join of typed-nil errors,
-// prints its message in their place, escaped and wrapped like any other.
-// [niceyaml.FormatError] prints the same tree and excerpts as plain
-// text.
+// An error whose tree holds no SourceError prints as its tree alone,
+// which for an error with no nested errors is its message. So does an
+// error whose SourceErrors yield no excerpt and carry no location of
+// their own that failed to resolve. A nil err prints as "". An error
+// whose tree and excerpts both render nothing, such as a bound join of
+// typed-nil errors, prints its message in their place, escaped and
+// wrapped like any other. [niceyaml.FormatError] prints the same tree
+// and excerpts as plain text.
 func (p *Printer) PrintError(err error) string {
 	if err == nil {
 		return ""

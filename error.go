@@ -1799,11 +1799,14 @@ func (e *SourceError) LogValue() slog.Value {
 // renders a view: each line behind its number, carets under the columns
 // of every location on the row below, and the message of each nested
 // error beside its caret. A negative context shows the marked lines
-// alone. Blank lines separate the parts. A binding whose location does
-// not resolve prints a line starting "no excerpt:" that names the reason
-// in place of its excerpt, unless it carries no location at all. The
-// output holds no escape sequences, so it reads in a log as it does in a
-// terminal.
+// alone. Blank lines separate the parts. When no location in the tree of
+// a binding resolves, FormatError prints a line starting "no excerpt:" in
+// place of the excerpt, with the reason the location of the binding
+// itself did not resolve. A binding that carries no location of its own
+// gets no such line. A binding whose own location does not resolve but
+// whose nested errors do gets their excerpt and no reason, and its
+// message stays in the tree without a position. The output holds no
+// escape sequences, so it reads in a log as it does in a terminal.
 //
 // FormatError looks through the wrappers and joins around a
 // [SourceError], so it renders the excerpt however the error was
