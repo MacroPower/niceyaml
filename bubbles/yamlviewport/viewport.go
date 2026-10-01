@@ -1529,12 +1529,13 @@ func (m *Model) AtBottom() bool {
 }
 
 // ScrollPercent returns the vertical scroll position as a float between 0 and 1.
+// It is 1 at the bottom, where [Model.AtBottom] reports true.
 func (m *Model) ScrollPercent() float64 {
 	if m.baseLeft == nil {
 		return 1.0
 	}
 
-	return scrollPercent(m.YOffset(), m.maxHeight(), m.TotalRowCount())
+	return scrollPercent(m.YOffset(), m.maxYOffset())
 }
 
 // HorizontalScrollPercent returns the horizontal scroll position as a float
@@ -1546,18 +1547,18 @@ func (m *Model) HorizontalScrollPercent() float64 {
 		return 1.0
 	}
 
-	return scrollPercent(m.XOffset(), m.scrollWidth(), m.rowWidth())
+	return scrollPercent(m.XOffset(), m.maxXOffset())
 }
 
-// scrollPercent calculates scroll position as a value between 0 and 1.
-func scrollPercent(offset, visible, total int) float64 {
-	if visible >= total {
+// scrollPercent returns offset as a fraction of limit, the largest offset
+// the view can reach, clamped between 0 and 1. It is 1 when limit leaves no
+// room to scroll.
+func scrollPercent(offset, limit int) float64 {
+	if limit <= 0 {
 		return 1.0
 	}
 
-	v := float64(offset) / float64(total-visible)
-
-	return clamp(v, 0, 1)
+	return clamp(float64(offset)/float64(limit), 0, 1)
 }
 
 // maxYOffset returns the maximum Y offset, in rows.

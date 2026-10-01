@@ -5652,24 +5652,39 @@ func TestViewport_OffsetWithNoContentHeight(t *testing.T) {
 
 	// The offset is the index of the row at the top of the view, and a
 	// content area with no height once let it reach the row count itself,
-	// one row past the last row of the view.
-	var src strings.Builder
-
-	for i := 1; i <= 20; i++ {
-		fmt.Fprintf(&src, "line%d: v\n", i)
-	}
-
+	// one row past the last row of the view. The scroll percentage must
+	// still reach 1 at the last row.
 	tcs := map[string]struct {
 		container lipgloss.Style
 		height    int
+		lines     int
 	}{
-		"no height":               {container: lipgloss.NewStyle(), height: 0},
-		"frame as tall as height": {container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()), height: 2},
+		"no height": {
+			container: lipgloss.NewStyle(),
+			height:    0,
+			lines:     20,
+		},
+		"frame as tall as height": {
+			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
+			height:    2,
+			lines:     20,
+		},
+		"no height single row": {
+			container: lipgloss.NewStyle(),
+			height:    0,
+			lines:     1,
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+
+			var src strings.Builder
+
+			for i := 1; i <= tc.lines; i++ {
+				fmt.Fprintf(&src, "line%d: v\n", i)
+			}
 
 			m := yamlviewport.New(
 				yamlviewport.WithPrinter(testPrinter()),
@@ -5679,11 +5694,12 @@ func TestViewport_OffsetWithNoContentHeight(t *testing.T) {
 			m.SetHeight(tc.height)
 			m.SetRevision(niceyaml.NewSourceFromString(src.String()))
 
-			require.Equal(t, 20, m.TotalRowCount())
+			require.Equal(t, tc.lines, m.TotalRowCount())
 
 			m.GotoBottom()
 			assert.Equal(t, m.TotalRowCount()-1, m.YOffset())
 			assert.True(t, m.AtBottom())
+			assert.InDelta(t, 1.0, m.ScrollPercent(), 0.01)
 
 			m.SetYOffset(1000)
 			assert.Equal(t, m.TotalRowCount()-1, m.YOffset())
