@@ -2323,6 +2323,27 @@ func TestRegistry_Schema(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrCompile)
 		assert.True(t, strings.HasPrefix(err.Error(), `compile schema: "k": `), err.Error())
 	})
+
+	t.Run("a load whose bytes do not compile runs again", func(t *testing.T) {
+		t.Parallel()
+
+		var loads atomic.Int32
+
+		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
+			loads.Add(1)
+
+			return []byte(`{"type": 42}`), nil
+		})
+
+		reg := schema.NewRegistry()
+
+		for range 3 {
+			_, err := reg.Schema(t.Context(), ref)
+			require.ErrorIs(t, err, schema.ErrCompile)
+		}
+
+		assert.Equal(t, int32(3), loads.Load())
+	})
 }
 
 func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
