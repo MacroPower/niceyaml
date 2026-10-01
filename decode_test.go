@@ -2372,6 +2372,33 @@ func TestDocument_Ranges(t *testing.T) {
 		assert.Equal(t, position.Ranges{position.NewRange(position.New(0, 20), position.New(0, 22))}, got)
 	})
 
+	t.Run("empty value", func(t *testing.T) {
+		t.Parallel()
+
+		// The parser makes a token for an empty value, which no line
+		// holds, so a comment or the spaces after the colon at its
+		// column are not its content.
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+		}{
+			"nothing after the colon": {input: "a:\nb: 1\n", path: paths.Root().Child("a")},
+			"comment after the colon": {input: "a: # c\nb: 1\n", path: paths.Root().Child("a")},
+			"spaces after the colon":  {input: "a:   \nb: 1\n", path: paths.Root().Child("a")},
+			"comment after the dash":  {input: "- # c\n- 1\n", path: paths.Root().Index(0)},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got, err := yamltest.FirstDocument(t, tc.input).Ranges(tc.path)
+				require.NoError(t, err)
+				assert.Nil(t, got)
+			})
+		}
+	})
+
 	t.Run("matches the ranges a bound error highlights", func(t *testing.T) {
 		t.Parallel()
 

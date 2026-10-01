@@ -647,9 +647,11 @@ func (e *Error) textCause() error {
 }
 
 // location is a resolved error location: the position the message reports,
-// and the range to highlight when the error carried one.
+// the range to highlight when the error carried one, and the token a path
+// resolved to when the error carried a path.
 type location struct {
 	rng *position.Range
+	tk  *token.Token
 	pos position.Position
 }
 
@@ -706,12 +708,12 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 		return location{}, nil, fmt.Errorf("%w: %s", ErrPathNeedsDocument, path)
 	}
 
-	pos, err := node.position(path)
+	loc, err := node.pathLocation(path)
 	if err != nil {
 		return location{}, node, err
 	}
 
-	return location{pos: pos}, node, nil
+	return loc, node, nil
 }
 
 // SourceError is an error bound to the [*Source] it occurred in.
@@ -2264,11 +2266,18 @@ func checkInRange(loc location, lines line.Lines) error {
 }
 
 // highlightRanges returns the ranges to highlight for loc: the range itself
-// when the error carried one, otherwise the content of the token at its
-// position.
+// when the error carried one, the content of the token a path resolved
+// to, and otherwise the content of the token at its position. The parser
+// makes a token for an empty value that no line holds, so a path to one
+// has no ranges, where the token at its position would be a comment or
+// the spaces after the colon.
 func highlightRanges(view line.Lines, loc location) position.Ranges {
 	if loc.rng != nil {
 		return position.Ranges{clampRange(view, *loc.rng)}
+	}
+
+	if loc.tk != nil {
+		return view.ContentRanges(loc.tk)
 	}
 
 	return view.ContentRanges(view.TokenAt(loc.pos))

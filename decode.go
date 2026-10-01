@@ -1233,30 +1233,31 @@ func (n *Node) Lines() line.Lines {
 // position returns an error wrapping [ErrNoLocation]. Returns nil when the
 // value holds no content on any line.
 func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
-	pos, err := n.position(path)
+	loc, err := n.pathLocation(path)
 	if err != nil {
 		return nil, n.Bind(err)
 	}
 
-	return highlightRanges(n.source.lines, location{pos: pos}), nil
+	return highlightRanges(n.source.lines, loc), nil
 }
 
-// position returns the position of the token that path resolves to in the
-// document, through [paths.Path.Token], with path resolving from the
-// scope. An error from it names the path already and comes back as it is,
-// and a token without a position is [ErrNoLocation].
-func (n *Node) position(path paths.Path) (position.Position, error) {
+// pathLocation returns the location of the token that path resolves to in
+// the document, through [paths.Path.Token], with path resolving from the
+// scope. The location holds the token and its position. An error from
+// [paths.Path.Token] names the path already and comes back as it is, and
+// a token without a position is [ErrNoLocation].
+func (n *Node) pathLocation(path paths.Path) (location, error) {
 	tk, err := n.doc.pathResolver().Token(n.base.Join(path))
 	if err != nil {
 		//nolint:wrapcheck // The paths error already names the path.
-		return position.Position{}, err
+		return location{}, err
 	}
 
 	if tk == nil || tk.Position == nil {
-		return position.Position{}, fmt.Errorf("%w: token at path has no position", ErrNoLocation)
+		return location{}, fmt.Errorf("%w: token at path has no position", ErrNoLocation)
 	}
 
-	return position.NewFromToken(tk), nil
+	return location{pos: position.NewFromToken(tk), tk: tk}, nil
 }
 
 // Validate runs each validator on the node in the order given and stops

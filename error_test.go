@@ -1809,6 +1809,39 @@ func TestSourceError_Format_Plain(t *testing.T) {
 					"   2 | b: 2",
 				),
 			},
+			"path to an empty value before a comment": {
+				input: "a: # c\nb: 2\n",
+				opt:   niceyaml.AtPath(paths.Root().Child("a")),
+				want: stringtest.JoinLF(
+					"1:3: $.a: bad",
+					"",
+					"   1 | a: # c",
+					"     |   ^",
+					"   2 | b: 2",
+				),
+			},
+			"path to an empty value before spaces": {
+				input: "a:   \nb: 2\n",
+				opt:   niceyaml.AtPath(paths.Root().Child("a")),
+				want: stringtest.JoinLF(
+					"1:3: $.a: bad",
+					"",
+					"   1 | a:   ",
+					"     |   ^",
+					"   2 | b: 2",
+				),
+			},
+			"path to an empty element before a comment": {
+				input: "- # c\n- 1\n",
+				opt:   niceyaml.AtPath(paths.Root().Index(0)),
+				want: stringtest.JoinLF(
+					"1:2: $[0]: bad",
+					"",
+					"   1 | - # c",
+					"     |  ^",
+					"   2 | - 1",
+				),
+			},
 			"position past the end of its line": {
 				input: "a: 1\n",
 				opt:   niceyaml.AtPosition(position.New(0, 500)),
@@ -3639,6 +3672,56 @@ func TestSourceError_Range(t *testing.T) {
 			got, ok := bound.Range()
 			require.True(t, ok)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestSourceError_Range_EmptyValue(t *testing.T) {
+	t.Parallel()
+
+	// A path to an empty value resolves to a token the parser makes for
+	// it, so the range is empty at the position the message reports, even
+	// when a comment or the spaces after the colon sit at that column.
+	tcs := map[string]struct {
+		input string
+		path  paths.Path
+		want  position.Position
+	}{
+		"nothing after the colon": {
+			input: "a:\nb: 1\n",
+			path:  paths.Root().Child("a"),
+			want:  position.New(0, 2),
+		},
+		"comment after the colon": {
+			input: "a: # c\nb: 1\n",
+			path:  paths.Root().Child("a"),
+			want:  position.New(0, 2),
+		},
+		"spaces after the colon": {
+			input: "a:   \nb: 1\n",
+			path:  paths.Root().Child("a"),
+			want:  position.New(0, 2),
+		},
+		"comment after the dash": {
+			input: "- # c\n- 1\n",
+			path:  paths.Root().Index(0),
+			want:  position.New(0, 1),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, yamltest.Bind(t, niceyaml.NewSourceFromString(tc.input),
+				niceyaml.NewError("bad", niceyaml.AtPath(tc.path)),
+			), &bound)
+
+			got, ok := bound.Range()
+			require.True(t, ok)
+			assert.Equal(t, position.NewRange(tc.want, tc.want), got)
 		})
 	}
 }
