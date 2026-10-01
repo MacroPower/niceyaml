@@ -46,8 +46,8 @@ func selfValidate(ctx context.Context, v any, n *Node, opts []yaml.DecodeOption)
 		ctx:      ctx,
 		node:     n,
 		opts:     opts,
-		walking:  map[visit]bool{},
-		done:     map[visit]bool{},
+		walked:   map[visit]walkResult{},
+		reach:    math.MaxInt,
 		scanning: map[visit]bool{},
 		scanned:  map[visit]bool{},
 	}
@@ -66,16 +66,20 @@ func selfValidate(ctx context.Context, v any, n *Node, opts []yaml.DecodeOption)
 // selfWalker collects the errors of the [SelfValidator] values in a
 // decoded value. It records the pointers, maps, and slices on the path it
 // is walking down, so a value that refers back to one above it stops
-// there. It records the result of each it has walked, so a value two paths
+// there, and counts that one as passing. The values of such a cycle lead
+// to each other, so each takes the result of the first value of the
+// cycle the walk entered, once that value finishes. A back edge thus
+// counts as passing only for the values inside the cycle. The walker
+// records the result of each value it has walked, so a value two paths
 // share, as an alias makes one, walks once and reports its errors under
 // the first path. A parent on the second path still learns that the value
-// failed. It reads the keys of a map from the node the value decoded from,
-// with the context and options it decoded with, and finds that node
-// through the [paths.Resolver] of the document. The walk therefore binds
-// the aliases of the document, and reads the keys of each mapping on the
-// way to a map once, however many maps it meets. One go-yaml decoder
-// decodes every key, so the walk applies the options, and reads any
-// reference files they name, once too.
+// failed, even when a cycle holds the value. It reads the keys of a map
+// from the node the value decoded from, with the context and options it
+// decoded with, and finds that node through the [paths.Resolver] of the
+// document. The walk therefore binds the aliases of the document, and
+// reads the keys of each mapping on the way to a map once, however many
+// maps it meets. One go-yaml decoder decodes every key, so the walk
+// applies the options, and reads any reference files they name, once too.
 //
 // Before it reads the keys of a map, or walks the elements of a slice or
 // array, the walker scans the values below for one that implements
@@ -87,8 +91,12 @@ type selfWalker struct {
 	node    *Node
 	decoder *yaml.Decoder
 	opts    []yaml.DecodeOption
-	walking map[visit]bool
-	done    map[visit]bool
+	// The result of the walk through each pointer, map, and slice the walk
+	// has entered, as [walkResult] describes.
+	walked map[visit]walkResult
+	// The values that finished inside a cycle whose first value the walk
+	// is still inside of, in the order they finished.
+	pending []visit
 	// The pointers, maps, and slices the current scan has reached, so the
 	// scan reads each once however many paths lead to it.
 	scanning map[visit]bool
@@ -98,6 +106,12 @@ type selfWalker struct {
 	// for a map or slice covers only the values below it.
 	scanned map[visit]bool
 	errs    []error
+	// The number of pointers, maps, and slices the walk has entered, which
+	// numbers each one in turn.
+	entered int
+	// The lowest number of a value the walk is inside of that the values
+	// below the current one lead back to, or math.MaxInt when none does.
+	reach int
 }
 
 // visit names a pointer, map, or slice the walker is inside of. It names
@@ -105,11 +119,24 @@ type selfWalker struct {
 // field share an address, and by length for a slice, since two slices
 // can start at one element. The fields together form the map key.
 //
-//nolint:unused // The fields tell the keys of the walking map apart.
+//nolint:unused // The fields tell the keys of the walker's maps apart.
 type visit struct {
 	typ reflect.Type
 	ptr unsafe.Pointer
 	len int
+}
+
+// walkResult is the result of the walk through a pointer, map, or slice.
+// While the walk is inside of the value, the result passes and holds the
+// number of the value as its reach, so a value below that leads back to
+// it passes there and joins its cycle.
+type walkResult struct {
+	// Whether nothing under the value failed.
+	ok bool
+
+	// The lowest number of a value the walk is inside of that the value
+	// leads back to, or math.MaxInt once the result is final.
+	reach int
 }
 
 // walk validates v and everything below it, with base as the path of v
@@ -141,8 +168,8 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path, shadowed map[string]
 	case reflect.Pointer, reflect.Map, reflect.Slice:
 		// A nil pointer holds no value to validate. A nil map or slice is
 		// an empty value with nothing below it, so it validates here rather
-		// than through done, where every nil value of its type would share
-		// one record.
+		// than through walked, where every nil value of its type would
+		// share one record.
 		if v.IsNil() {
 			if v.Kind() == reflect.Pointer {
 				return true
@@ -159,21 +186,7 @@ func (w *selfWalker) walk(v reflect.Value, base paths.Path, shadowed map[string]
 			return w.walkValue(v, base, shadowed)
 		}
 
-		if ok, seen := w.done[visitOf(v)]; seen {
-			return ok
-		}
-
-		if !w.enter(v) {
-			return true
-		}
-
-		defer w.leave(v)
-
-		if v.Kind() == reflect.Pointer {
-			return w.finish(v, w.walk(v.Elem(), base, shadowed))
-		}
-
-		return w.finish(v, w.walkValue(v, base, shadowed))
+		return w.walkOwned(v, base, shadowed)
 
 	default:
 	}
@@ -231,29 +244,59 @@ func addressable(v reflect.Value) reflect.Value {
 	return c
 }
 
-// finish records the result of the walk through v and returns it.
-func (w *selfWalker) finish(v reflect.Value, ok bool) bool {
-	w.done[visitOf(v)] = ok
-
-	return ok
-}
-
-// enter records that the walk is inside v, a pointer, map, or slice, and
-// reports false when it already was, so the walk stops there.
-func (w *selfWalker) enter(v reflect.Value) bool {
+// walkOwned walks v, a non-nil pointer, map, or slice that owns its
+// address, as [selfWalker.walk] does, and records the result. A value the
+// walk has entered before returns the result it recorded, so v walks
+// once.
+//
+// The walk finds the cycles the way Tarjan's algorithm finds strongly
+// connected components. A value that leads back to one above it finishes
+// inside a cycle, so its result waits on pending until the first value of
+// the cycle finishes. That value then sets its own
+// result for every value of the cycle.
+func (w *selfWalker) walkOwned(v reflect.Value, base paths.Path, shadowed map[string]bool) bool {
 	key := visitOf(v)
-	if w.walking[key] {
-		return false
+	if r, seen := w.walked[key]; seen {
+		w.reach = min(w.reach, r.reach)
+
+		return r.ok
 	}
 
-	w.walking[key] = true
+	w.entered++
+	n := w.entered
+	outer, mark := w.reach, len(w.pending)
 
-	return true
-}
+	w.walked[key] = walkResult{ok: true, reach: n}
+	w.reach = math.MaxInt
 
-// leave records that the walk has left v.
-func (w *selfWalker) leave(v reflect.Value) {
-	delete(w.walking, visitOf(v))
+	var ok bool
+
+	if v.Kind() == reflect.Pointer {
+		ok = w.walk(v.Elem(), base, shadowed)
+	} else {
+		ok = w.walkValue(v, base, shadowed)
+	}
+
+	reach := w.reach
+	if reach < n {
+		w.walked[key] = walkResult{ok: ok, reach: reach}
+		w.pending = append(w.pending, key)
+		w.reach = min(outer, reach)
+
+		return ok
+	}
+
+	// Every value of a cycle reaches every other, so each one takes the
+	// result of v.
+	for _, p := range w.pending[mark:] {
+		w.walked[p] = walkResult{ok: ok, reach: math.MaxInt}
+	}
+
+	w.pending = w.pending[:mark]
+	w.walked[key] = walkResult{ok: ok, reach: math.MaxInt}
+	w.reach = outer
+
+	return ok
 }
 
 // ownsAddress reports whether the address of v, a non-nil pointer, map,

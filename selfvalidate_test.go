@@ -1055,6 +1055,64 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		assert.NotContains(t, err.Error(), "stops ran")
 	})
 
+	t.Run("a value in a cycle takes the result of the cycle", func(t *testing.T) {
+		t.Parallel()
+
+		// The link leads back to the head, so the walk of the link stops
+		// there and passes before the port of the head fails. The parent
+		// that holds the link still runs only when the whole cycle
+		// passed, whichever field the walk enters first.
+		type headFirst struct {
+			Head   *cycleHead  `yaml:"head"`
+			Parent cycleParent `yaml:"parent"`
+		}
+
+		type parentFirst struct {
+			Parent cycleParent `yaml:"parent"`
+			Head   *cycleHead  `yaml:"head"`
+		}
+
+		tcs := map[string]struct {
+			port        port
+			parentFirst bool
+			err         string
+		}{
+			"the head walks first": {
+				port: -1,
+				err:  "$.head.port: port out of range",
+			},
+			"the parent walks first": {
+				port:        -1,
+				parentFirst: true,
+				err:         "$.parent.link.back.port: port out of range",
+			},
+			"a cycle that passes": {
+				port: 80,
+				err:  "$.parent: parent ran",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				head := &cycleHead{Port: tc.port}
+				head.Link = &cycleLink{Back: head}
+				parent := cycleParent{Link: head.Link}
+
+				var v any = &headFirst{Head: head, Parent: parent}
+
+				if tc.parentFirst {
+					v = &parentFirst{Parent: parent, Head: head}
+				}
+
+				dd := yamltest.FirstDocument(t, "{}\n")
+
+				require.EqualError(t, dd.DecodeInto(t.Context(), v), tc.err)
+			})
+		}
+	})
+
 	t.Run("map entries report in key order", func(t *testing.T) {
 		t.Parallel()
 
@@ -2460,6 +2518,27 @@ type stops []*stop
 
 func (stops) Validate() error {
 	return errors.New("stops ran")
+}
+
+// cycleHead leads through a link back to itself, and holds a port it
+// walks after the link.
+type cycleHead struct {
+	Link *cycleLink `yaml:"link"`
+	Port port       `yaml:"port"`
+}
+
+// cycleLink leads back to the head of its cycle.
+type cycleLink struct {
+	Back *cycleHead `yaml:"back"`
+}
+
+// cycleParent holds a link of a cycle and reports that it ran.
+type cycleParent struct {
+	Link *cycleLink `yaml:"link"`
+}
+
+func (cycleParent) Validate() error {
+	return errors.New("parent ran")
 }
 
 // port is a scalar that validates itself.
