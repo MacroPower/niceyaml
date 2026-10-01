@@ -63,8 +63,9 @@ var ErrNoMatch = errors.New("no matching schema")
 // resolvers name. A Ref that carries a compiled schema has nothing to
 // load, and the registry validates with the schema as it is.
 //
-// The zero Ref names no schema. Return it beside an error, as a resolver
-// does with [ErrNoMatch].
+// Create instances with [Loadable], [Embedded], [File], [URL],
+// [FileOrURL], or [Schema.Ref]. The zero Ref names no schema. Return it
+// beside an error, as a resolver does with [ErrNoMatch].
 type Ref struct {
 	load func(ctx context.Context) ([]byte, error)
 	// The compiled schema the Ref carries, from Schema.Ref, which the
