@@ -893,6 +893,7 @@ func TestSource_File_CommentBelowAnchor(t *testing.T) {
 	tcs := map[string]struct {
 		want  any
 		input string
+		err   string
 		kept  bool
 	}{
 		"comment left of the key above the next entry of an outer sequence": {
@@ -1008,11 +1009,36 @@ func TestSource_File_CommentBelowAnchor(t *testing.T) {
 			want:  map[string]any{"a": map[string]any{"b": map[string]any{"d": uint64(1)}}},
 			kept:  true,
 		},
+		// Above a comment left of its key that closes the document, the
+		// parser itself gives the anchor a null value. The comment stays in
+		// the tree at or right of the first key of the root. Left of that
+		// key, the tree leaves it out above a header, and the parser
+		// rejects it at the end of the source.
+		"closing comment left of the key": {
+			input: "a:\n  b: &x\n# c\n",
+			want:  map[string]any{"a": map[string]any{"b": nil}},
+			kept:  true,
+		},
+		"closing comment left of the root above a header": {
+			input: "  a: &x\n# c\n---\n",
+			want:  map[string]any{"a": nil},
+		},
+		"closing comment left of the root": {
+			input: "  a: &x\n# c\n",
+			err:   "2:1: value is not allowed in this context",
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+
+			if tc.err != "" {
+				_, err := niceyaml.NewSourceFromString(tc.input).File()
+				require.EqualError(t, err, tc.err)
+
+				return
+			}
 
 			dd := yamltest.FirstDocument(t, tc.input)
 

@@ -489,9 +489,19 @@ func (d *document) anchorToken() *token.Token {
 // starts in the column of the "-" or key or right of it, the parser gives
 // the anchor the node below them. The tree then leaves them out above a
 // node left of the "-" or key, above a key in the column of the key, and
-// above a "-" in the column of the "-". Below an anchor with no value that
-// ends its document, the tree leaves out the comment too, and holds a null
-// as the value of that anchor, as it does when a header follows the anchor.
+// above a "-" in the column of the "-".
+//
+// The parser takes the comments below an anchor with no value that ends its
+// document as the value of the anchor. The tree leaves them out and holds a
+// null as the value of that anchor. The exception is an anchor that
+// directly follows a "-", or a key and its ":", on its line as above, when
+// the first of the comments starts left of that "-" or key. The parser
+// itself gives that anchor a null value, so a comment that starts at or
+// right of the first key or "-" of the root stays in the tree. The tree
+// leaves out one that starts left of it when a "---" header or a "..."
+// marker follows the comments. At the end of the source, File returns the
+// parser's error for that comment instead, since the parser rejects the
+// anchor without the comments.
 //
 // The tokens of the file are copies of the Source's own, since the parser
 // relinks the tokens it receives. A copy matches the original by its type,
@@ -785,21 +795,25 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 // "-".
 //
 // Below an anchor with no value, the comments that close the document stay,
-// since the parser takes them as the value of the anchor and rejects an
-// anchor that no token follows past its name (parser/token.go:311).
-// [nullEmptyAnchors] puts a null in their place once the parser returns. In
-// a block mapping or a block sequence at the root, an anchor that directly
-// follows a "-", or a key and its ":", on its line is the exception when a
-// "---" header or a "..." marker follows the comments. The parser takes
-// that anchor without them, as [takesNull] reports, so those that start
-// left of the first key or "-" of the root drop, as they do below any other
-// node of such a root. Above a node, the comments drop when [breaksAnchor]
-// reports that they make the parser give the anchor the wrong value. Inside
-// a flow collection, the anchor does not decide whether they drop. In a
-// flow sequence, the parser still reads an anchor after the key of a pair
-// by the column of the first comment. When that comment starts left of the
-// key, the parser gives the anchor a null value and rejects the value below
-// the comment.
+// since the parser rejects an anchor that no token follows past its name
+// (parser/token.go:311). The parser takes them as the value of the anchor,
+// and [nullEmptyAnchors] puts a null in their place once the parser
+// returns. An anchor that directly follows a "-", or a key and its ":", on
+// its line differs in two ways. When the first of the comments starts left
+// of that "-" or key, the parser itself gives the anchor a null value and
+// reads the comments as it reads them below any other node. In a block
+// mapping or a block sequence at the root, when a "---" header or a "..."
+// marker follows the comments, the parser takes that anchor without them,
+// as [takesNull] reports. Those that start left of the first key or "-" of
+// the root then drop, as they do below any other node of such a root. At
+// the end of run they stay, and the parser rejects them unless it takes
+// them as the value of the anchor. Above a node, the comments drop when
+// [breaksAnchor] reports that they make the parser give the anchor the
+// wrong value. Inside a flow collection, the anchor does not decide whether
+// they drop. In a flow sequence, the parser still reads an anchor after the
+// key of a pair by the column of the first comment. When that comment
+// starts left of the key, the parser gives the anchor a null value and
+// rejects the value below the comment.
 //
 // Below a "&" with no name, the comments stay wherever they sit, except
 // between a directive and its header. The parser takes the token after a

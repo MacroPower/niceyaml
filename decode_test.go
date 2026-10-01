@@ -680,8 +680,9 @@ func TestDocument_Decode(t *testing.T) {
 				want:  []any{map[string]any{"a": nil}},
 			},
 			// The parser rejects any other anchor without the comment, so
-			// the comment stays as its value even left of the first key
-			// or "-" of the root.
+			// the comment stays in the parser input as its value even left
+			// of the first key or "-" of the root. The tree holds a null in
+			// its place.
 			"anchor with no value after the colon of an explicit key": {
 				input: "  ? a\n  : &x\n# c\n...\n",
 				want:  []any{map[string]any{"a": nil}},
