@@ -755,11 +755,11 @@ func (idx *memberIndex) addMerged(found map[string]memberNode, member *ast.Mappi
 	return true
 }
 
-// aliasKeyName returns the member name a decode gives an alias key, which
-// is the name [decodedKey] gives the content of the anchor the alias
-// refers to, through r. It reports false for an alias that does not
-// resolve, for content with no name, and for an alias under a tag or an
-// anchor of the key's own, which may change the name.
+// aliasKeyName returns the member name a decode gives an alias key. That is
+// the name [decodedKey] gives the content of the anchor the alias refers
+// to, which r resolves. It reports false for an alias that does not resolve
+// and for content with no name. It also reports false for an alias under a
+// tag or an anchor of the key's own, which may change the name.
 func aliasKeyName(r *paths.Resolver, key ast.MapKeyNode) (string, bool) {
 	var node ast.Node = key
 

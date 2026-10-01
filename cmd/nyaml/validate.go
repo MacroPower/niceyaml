@@ -177,12 +177,12 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 	return errors.Join(errs...)
 }
 
-// readSource reads the file at path into a [*niceyaml.Source] with opts,
-// as [niceyaml.NewSourceFromFile] does, except that a read error names
-// path with its control characters escaped. A glob match takes its name
-// from the file system, and the error handler in main keeps each line
-// break in a message as a row break, so a raw newline in the name would
-// start a row of its own.
+// readSource reads the file at path into a [*niceyaml.Source] with opts, as
+// [niceyaml.NewSourceFromFile] does, except that a read error names path
+// with its control characters escaped. A glob match takes its name from the
+// file system. The error handler in main keeps each line break in a message
+// as a row break, so a raw newline in the name would start a row of its
+// own.
 func readSource(path string, opts ...niceyaml.SourceOption) (*niceyaml.Source, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // User-provided file paths are intentional.
 	if err != nil {

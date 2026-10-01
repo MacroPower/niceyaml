@@ -748,17 +748,17 @@ func splitDocumentRuns(tks token.Tokens) []token.Tokens {
 //
 // The parser (v1.19.3-0.20260407131736-edee2f91616c) attaches such a
 // comment below the content of a document only when the root of the
-// document is a block mapping or a block sequence, and only when the
-// comment starts at or right of the column of the first key or "-" of
-// that root (parser/parser.go:525, parser/parser.go:1117). Below a scalar
-// or a flow collection, or left of that column, it leaves the comment
-// unread and fails with "value is not allowed in this context"
-// (parser/parser.go:171). It also requires the header to follow the line
-// of a %YAML or %TAG directive at once, and fails with "document not
-// started" when a comment sits between them (parser/token.go:598). The
-// go-yaml decoder parses without comments and accepts both. The comments
-// stay among the tokens of the Source, where [tokens.SplitDocuments]
-// still hands them to their documents.
+// document is a block mapping or a block sequence. The comment must also
+// start at or right of the column of the first key or "-" of that root
+// (parser/parser.go:525, parser/parser.go:1117). Below a scalar or a flow
+// collection, or left of that column, it leaves the comment unread and
+// fails with "value is not allowed in this context" (parser/parser.go:171).
+// It also requires the header to follow the line of a %YAML or %TAG
+// directive at once, and fails with "document not started" when a comment
+// sits between them (parser/token.go:598). The go-yaml decoder parses
+// without comments and accepts both. The comments stay among the tokens of
+// the Source, where [tokens.SplitDocuments] still hands them to their
+// documents.
 //
 // A comment sits on a line of its own when it starts on a line below the
 // line where the last token before it starts. The parser attaches a

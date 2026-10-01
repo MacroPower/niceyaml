@@ -2027,23 +2027,22 @@ func rangeOf(ranges position.Ranges, at position.Position) position.Range {
 //
 // A line several errors mark carries an annotation for each, which
 // [line.View.String] and the printer draw on one row joined by "; " in
-// column order, whatever order the bindings come in. An
-// error with no message marks its line with an annotation below it with
-// no content. A renderer that draws marks from annotations, as the
-// printer does, draws that annotation as a caret run under the
-// highlight, so the range shows its extent without color. The annotation
-// starts at the first column the highlight covers on its line, so a
-// position on the spaces around a token puts the message under the
-// token. A location whose highlight leaves out its own line gets an
-// overlay of no width at its column on that line. Such locations include
-// a position past the end of a line, a path to an empty value, a
-// position on a line of only spaces inside a block scalar, and a range
-// that starts at the end of its first line. The overlay renders nothing
-// and still counts as decoration, so [line.View.Hunks] keeps the line.
-// Annotate moves a column past the end of its line to the column after
-// its last rune, for the overlay and the message alike, so a renderer
-// spends at most one cell past the line on the mark.
-// [SourceError.Error] still reports the column as given.
+// column order, whatever order the bindings come in. An error with no
+// message marks its line with an annotation below it with no content. A
+// renderer that draws marks from annotations, as the printer does, draws
+// that annotation as a caret run under the highlight, so the range shows
+// its extent without color. The annotation starts at the first column the
+// highlight covers on its line, so a position on the spaces around a token
+// puts the message under the token. A location whose highlight leaves out
+// its own line gets an overlay of no width at its column on that line. Such
+// locations include a position past the end of a line and a path to an
+// empty value. They also include a position on a line of only spaces inside
+// a block scalar, and a range that starts at the end of its first line. The
+// overlay renders nothing and still counts as decoration, so
+// [line.View.Hunks] keeps the line. Annotate moves a column past the end of
+// its line to the column after its last rune, for the overlay and the
+// message alike, so a renderer spends at most one cell past the line on the
+// mark. [SourceError.Error] still reports the column as given.
 //
 // Annotate finds each line by identity rather than by index, since every
 // view over a source shares its [*line.Line] values, so the view may be
@@ -2224,24 +2223,24 @@ func annotate(view *line.View, src *Source, positions []errorPosition) bool {
 	return len(marked) > 0
 }
 
-// annotateSource marks positions, the resolved locations of the nodes
-// bound to src, on view and returns the indices of the lines it marked,
-// with repeats. The view may hold the lines of src at any indices, as a
-// diff does, so every mark goes to the index that holds its line. A
-// position whose highlight leaves out its own line gets an overlay of no
-// width at its column on that line. Such positions include one with no
-// token under it, a range that covers no column of its lines, a
-// position on a line of only spaces inside a block scalar, and a range
-// that starts at the end of its first line. The overlay renders nothing
-// and still marks the line as decorated, so the line joins the hunks
-// [line.View.Hunks] keeps.
-// The annotation below a line starts at the first column the highlight of
-// its position covers on that line, where [markUnannotated] starts a caret
-// run, so a position on the spaces around a token puts its message under
-// the token. A position with no highlight on its line keeps its column.
-// A column past the end of its line moves to the column after its last
-// rune, in the overlay and in the annotation below the line. A far column then
-// costs a renderer no more cells than a column at the end.
+// annotateSource marks positions, the resolved locations of the nodes bound
+// to src, on view and returns the indices of the lines it marked, with
+// repeats. The view may hold the lines of src at any indices, as a diff
+// does, so every mark goes to the index that holds its line. A position
+// whose highlight leaves out its own line gets an overlay of no width at
+// its column on that line. Such positions include one with no token under
+// it and a range that covers no column of its lines. They also include a
+// position on a line of only spaces inside a block scalar, and a range that
+// starts at the end of its first line. The overlay renders nothing and
+// still marks the line as decorated, so the line joins the hunks
+// [line.View.Hunks] keeps. The annotation below a line starts at the first
+// column the highlight of its position covers on that line, where
+// [markUnannotated] starts a caret run, so a position on the spaces around
+// a token puts its message under the token. A position with no highlight on
+// its line keeps its column. A column past the end of its line moves to the
+// column after its last rune, in the overlay and in the annotation below
+// the line. A far column then costs a renderer no more cells than a column
+// at the end.
 func annotateSource(view *line.View, src *Source, positions []errorPosition) []int {
 	if len(positions) == 0 {
 		return nil

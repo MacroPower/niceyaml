@@ -2048,10 +2048,10 @@ func TestLines_TokenAt(t *testing.T) {
 	t.Run("whitespace line before the line ending of the next token", func(t *testing.T) {
 		t.Parallel()
 
-		// The lexer bundles a tab on an otherwise empty line into the
-		// token before it, as it does with indentation, and the token
-		// after it starts with the line ending, so no token holds text
-		// on the whitespace line after the tab.
+		// The lexer bundles a tab on an otherwise empty line into the token
+		// before it, as it does with indentation. The token after it starts
+		// with the line ending, so no token holds text on the whitespace
+		// line after the tab.
 		tcs := map[string]struct {
 			input string
 			line  int

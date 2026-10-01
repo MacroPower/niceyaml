@@ -493,10 +493,10 @@ func (c candidate) apart(below candidate) float64 {
 	return distance(c.blended, below.blended)
 }
 
-// next returns the first of found that sits blendDistance from c once the
-// printer blends both into the base background, and paintDistance from c
-// once it paints both, at the luminance and tint steps of c or past them,
-// or false when none does.
+// next returns the first of found, at the luminance and tint steps of c or
+// past them, that sits far enough from c. It returns false when none does.
+// Far enough means blendDistance once the printer blends both into the base
+// background, and paintDistance once it paints both.
 func (c candidate) next(found []candidate) (candidate, bool) {
 	for _, n := range found {
 		if n.lift >= c.lift && n.share >= c.share &&

@@ -177,8 +177,8 @@ func (r *Resolver) KeyName(key ast.Node) (string, bool) {
 // later merge source.
 //
 // Returns an error wrapping [ErrNotFound] when node is not a mapping or
-// name selects no entry in it, one wrapping [ErrAlias] when an alias on
-// the way does not resolve, and one wrapping [ErrExcessiveMerging] when
+// name selects no entry in it, and one wrapping [ErrAlias] when an alias on
+// the way does not resolve. Returns one wrapping [ErrExcessiveMerging] when
 // the lookup reads far more nodes under `<<` merge keys than the document
 // holds.
 func (r *Resolver) Entry(node ast.Node, name string) (ast.Node, error) {

@@ -488,11 +488,11 @@ func TestDocument_Decode(t *testing.T) {
 	t.Run("comment on a line of its own after the content", func(t *testing.T) {
 		t.Parallel()
 
-		// The go-yaml parser rejects such a comment below a root that is
-		// not a block mapping or a block sequence, left of the first key
-		// or "-" of such a root, and between a directive and its header,
-		// when it keeps comments. Each case lists the value of every
-		// document.
+		// When it keeps comments, the go-yaml parser rejects such a comment
+		// in three places. One is below a root that is not a block mapping
+		// or a block sequence. One is left of the first key or "-" of such
+		// a root. One is between a directive and its header. Each case
+		// lists the value of every document.
 		tcs := map[string]struct {
 			input string
 			want  []any
@@ -7047,9 +7047,8 @@ func TestNode_Nodes(t *testing.T) {
 
 		bomb := yamltest.FirstDocument(t, yamltest.AliasLevels(5))
 
-		// Each [*] lists ten aliases to the level below, so the path
-		// would select 10^5 nodes. A decode of the document is refused
-		// too.
+		// Each [*] lists ten aliases to the level below, so the path would
+		// select 10^5 nodes. The decoder refuses the document too.
 		_, err := bomb.Nodes(paths.MustParse("$.a[5][*][*][*][*][*]"))
 		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
 
