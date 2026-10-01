@@ -31,11 +31,6 @@ var (
 func Parse(s string) (lipgloss.Style, error) {
 	style := lipgloss.NewStyle()
 
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return style, nil
-	}
-
 	// Lipgloss cannot clear underline once it is set, because
 	// UnsetUnderline sets it to none. Parse tracks the keywords here and
 	// sets underline once at the end, so nounderline leaves the attribute
