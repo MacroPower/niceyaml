@@ -330,6 +330,37 @@ func TestPrinter_PrintError(t *testing.T) {
 			err:  errors.Join(errors.New("a"), errors.New("b \n\nc")),
 			want: "├── a\n└── b\n\n    c",
 		},
+		// Each tab becomes four spaces, wherever it falls in its row.
+		"tabs in messages expand to spaces": {
+			err: errors.Join(
+				errors.New("a\tb"),
+				errors.New("Did you mean this?\n\tvalidate"),
+			),
+			want: stringtest.JoinLF(
+				"├── a    b",
+				"└── Did you mean this?",
+				"        validate",
+			),
+		},
+		"tab in a message with no nested errors": {
+			err:  errors.New("Did you mean this?\n\tvalidate"),
+			want: "Did you mean this?\n    validate",
+		},
+		// The excerpt spells the message beside the caret as the tree
+		// spells it.
+		"tab in a message beside a caret": {
+			err: yamltest.Bind(t, source, niceyaml.NewError("2 problems", niceyaml.WithErrors(
+				niceyaml.NewError("bad\ta", niceyaml.AtPath(paths.Root().Child("a"))),
+			))),
+			want: stringtest.JoinLF(
+				"2 problems",
+				"└── 1:4: $.a: bad    a",
+				"",
+				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>1</genericError>",
+				"<textError>   ^ bad    a</textError>",
+				"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>2</literalNumberInteger>",
+			),
+		},
 		"nested errors draw as branches in position order": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("2 problems", niceyaml.WithErrors(
 				niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b"))),
@@ -379,7 +410,7 @@ func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
 	assert.Equal(t, "bad \u241b[31mred\u2407 thing", p.PrintError(errors.New("bad \x1b[31mred\x07 thing")))
 
 	// The reason a location did not resolve names the path, which spells a
-	// key of the document, so it gets the same treatment.
+	// key of the document, so it gets the same treatment as the tree.
 	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
 	bound := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("mi\x1b[31mss"))))
 
@@ -387,6 +418,33 @@ func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
 	assert.NotContains(t, got, "\x1b")
 	assert.Contains(t, got, "no excerpt: ")
 	assert.Contains(t, got, "mi\u241b[31mss")
+
+	// A tab in the key becomes four spaces in the reason as it does in the
+	// tree. The prefix "cfg.yaml: " and the prefix "no excerpt: resolve "
+	// differ in width by other than a multiple of four, so the two lines
+	// spell the key the same way only if the width of a tab does not
+	// depend on its column.
+	named := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml"))
+	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("ab\tc"))))
+
+	got = p.PrintError(bound)
+	assert.NotContains(t, got, "\u2409")
+	assert.Equal(t, stringtest.JoinLF(
+		"cfg.yaml: $.'ab    c': bad",
+		"",
+		"no excerpt: resolve $.'ab    c': not found",
+	), got)
+
+	// The reason stays on one row, so a line feed in the key is a picture
+	// there while it starts a new row in the tree.
+	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("x\ny\tz"))))
+
+	assert.Equal(t, stringtest.JoinLF(
+		"cfg.yaml: $.'x",
+		"y    z': bad",
+		"",
+		"no excerpt: resolve $.'x\u240ay    z': not found",
+	), p.PrintError(bound))
 }
 
 func TestPrinter_PrintError_Wrap(t *testing.T) {

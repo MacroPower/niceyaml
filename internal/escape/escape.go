@@ -68,3 +68,26 @@ func Rows(s string) string {
 
 	return strings.Join(rows, "\n")
 }
+
+// TabWidth is the number of spaces [Tabs] puts in place of a tab.
+const TabWidth = 4
+
+// Tabs replaces each tab in s with [TabWidth] spaces, as a lipgloss
+// style does, and leaves every other rune of s as it is. A tab takes
+// that width wherever it falls, so a text reads the same after a prefix
+// of any width, such as the name of a source.
+//
+// For example, "ab\tc" becomes "ab    c".
+func Tabs(s string) string {
+	return strings.ReplaceAll(s, "\t", strings.Repeat(" ", TabWidth))
+}
+
+// Message is like [Rows], but it lays s out as the text of a message,
+// such as the message of an error. A tab in a message lays out the text
+// after it, so Message replaces each tab as [Tabs] does.
+//
+// For example, "did you mean this?\n\tvalidate" becomes
+// "did you mean this?\n    validate".
+func Message(s string) string {
+	return Rows(Tabs(s))
+}

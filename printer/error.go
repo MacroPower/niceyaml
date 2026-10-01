@@ -54,11 +54,14 @@ const errorConnectorWidth = 4
 // An error with no nested errors prints as a tree of one node that holds
 // its whole message, so the context a wrapper added stays in front of the
 // position. PrintError draws every message of the tree, the root's
-// included, with control characters as their pictures, as an excerpt
-// draws them, and wraps each message to the width [WithWrap] sets less the
-// connectors in front of it. Each excerpt wraps to that width less the
-// horizontal frame of the container style, so an excerpt and its frame
-// fit the width together.
+// included, and each "no excerpt:" line with control characters as their
+// pictures, as an excerpt draws them. A line feed in a message of the
+// tree starts a new row instead. A tab becomes four spaces wherever it
+// falls, in the tree, in a "no excerpt:" line, and in the message an
+// excerpt carries beside a caret. PrintError wraps each message to the
+// width [WithWrap] sets less the connectors in front of it. Each excerpt
+// wraps to that width less the horizontal frame of the container style,
+// so an excerpt and its frame fit the width together.
 //
 // A program configures one printer and prints its errors through it:
 //
@@ -125,11 +128,14 @@ func (p *Printer) details(bound *niceyaml.SourceError) []string {
 	}
 
 	// The reason names the path that did not resolve, which a key of the
-	// document spells, so it gets the same treatment as a message of the
-	// tree.
+	// document spells, so its control characters render as pictures like
+	// those of the tree. A tab in the key becomes four spaces, as it does
+	// in the tree.
 	reason := bound.Unresolved()
 	if reason != nil {
-		return []string{strings.Join(p.wrapContent(escape.Control("no excerpt: "+reason.Error()), 0), "\n")}
+		text := escape.Control(escape.Tabs("no excerpt: " + reason.Error()))
+
+		return []string{strings.Join(p.wrapContent(text, 0), "\n")}
 	}
 
 	return nil
@@ -138,9 +144,8 @@ func (p *Printer) details(bound *niceyaml.SourceError) []string {
 // renderErrorTree draws t with a connector in front of each child, in the
 // foreground of [kind.UILineNumber], so the connectors take the color of
 // the gutter's line numbers without the background of the gutter, which
-// the message text beside them does not have. Control characters in a
-// message render as their pictures, as they do in an excerpt, and each
-// message wraps to the printer's width less the connectors in front of it.
+// the message text beside them does not have. Each message lays out as
+// errorText returns it.
 func (p *Printer) renderErrorTree(t niceyaml.ErrorTree) string {
 	branch := lipgloss.NewStyle().
 		Foreground(p.styles.Style(kind.UILineNumber).GetForeground()).
@@ -203,10 +208,12 @@ func (p *Printer) appendErrorBranches(
 }
 
 // errorText returns the rows of one message of the tree at depth
-// connectors from the left edge: control characters as their pictures,
-// wrapped to the width left of the connectors. A line break in the
-// message stays a line break, since a wrapper around a joined error keeps
-// the breaks between its branches in its own text.
+// connectors from the left edge, wrapped to the width left of the
+// connectors. [escape.Message] lays the text out first. It replaces each
+// tab with four spaces, such as the tab in front of each suggestion Cobra
+// lists, and draws the other control characters as their pictures. A line
+// break in the message stays a line break, since a wrapper around a
+// joined error keeps the breaks between its branches in its own text.
 func (p *Printer) errorText(text string, depth int) []string {
-	return p.wrapContent(escape.Rows(text), depth*errorConnectorWidth)
+	return p.wrapContent(escape.Message(text), depth*errorConnectorWidth)
 }

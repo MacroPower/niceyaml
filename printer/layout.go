@@ -308,8 +308,9 @@ func isBreakSpace(r rune) bool {
 // ASCII, it keeps at most the space and drops the runes after it
 // wherever the cluster falls. The first piece begins after any leading
 // spaces the wrapper drops, which it does when the first word does not
-// fit beside them. The caller escapes the text, so a tab shows as its
-// control picture and never counts as a space.
+// fit beside them. The caller escapes the text, so no tab reaches it.
+// An excerpt shows a tab as its control picture, and the text of an
+// error shows it as four spaces.
 func rowBounds(text string, pieces []string) ([]int, []int) {
 	runes := []rune(text)
 	tails := spaceTails(text, len(runes))

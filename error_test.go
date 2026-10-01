@@ -4322,6 +4322,31 @@ func TestSourceError_Annotate(t *testing.T) {
 		assert.Equal(t, view.Annotations(7), excerpt.Annotations(7).Filter(line.Below))
 	})
 
+	t.Run("a tab in the message becomes four spaces", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\n")
+		err := yamltest.Bind(t, source, niceyaml.NewError(
+			"did you mean:\n\tb\x1b",
+			niceyaml.AtPath(paths.Root().Child("a")),
+		))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		view := source.View()
+
+		require.True(t, bound.Annotate(view))
+
+		// The annotation keeps the other control characters, which a
+		// renderer draws as their pictures.
+		assert.Equal(t, line.Annotations{
+			{Content: "did you mean:\n    b\x1b", Kind: kind.TextError, Placement: line.Below, Col: 3},
+		}, view.Annotations(0))
+		assert.Contains(t, view.String(), "^ did you mean:\u240a    b\u241b")
+	})
+
 	t.Run("messages on one line join in column order", func(t *testing.T) {
 		t.Parallel()
 
@@ -6263,6 +6288,84 @@ func TestFormat(t *testing.T) {
 		located := niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("a")))
 
 		assert.Equal(t, "$.a: bad", niceyaml.FormatError(located, 2))
+	})
+
+	t.Run("a tab in a message expands to spaces", func(t *testing.T) {
+		t.Parallel()
+
+		// Each tab becomes four spaces, wherever it falls in its row.
+		tcs := map[string]struct {
+			err  error
+			want string
+		}{
+			"message with no nested errors": {
+				err:  errors.New("Did you mean this?\n\tvalidate"),
+				want: "Did you mean this?\n    validate",
+			},
+			"branches of a join": {
+				err: errors.Join(errors.New("a\tb"), errors.New("Did you mean this?\n\tvalidate")),
+				want: stringtest.JoinLF(
+					"|-- a    b",
+					"`-- Did you mean this?",
+					"        validate",
+				),
+			},
+			// The tree and the reason a location did not resolve both spell
+			// the key. Their prefixes differ in width by other than a
+			// multiple of four, so the two lines match only if the width of
+			// a tab does not depend on its column.
+			"key of a path that does not resolve": {
+				err: yamltest.Bind(t,
+					niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml")),
+					niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("ab\tc"))),
+				),
+				want: stringtest.JoinLF(
+					"cfg.yaml: $.'ab    c': bad",
+					"",
+					"no excerpt: resolve $.'ab    c': not found",
+				),
+			},
+			// The reason stays on one row, so a line feed in the key is a
+			// picture there while it starts a new row in the tree.
+			"key with a line feed and a tab": {
+				err: yamltest.Bind(t,
+					niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml")),
+					niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("x\ny\tz"))),
+				),
+				want: stringtest.JoinLF(
+					"cfg.yaml: $.'x",
+					"y    z': bad",
+					"",
+					"no excerpt: resolve $.'x\u240ay    z': not found",
+				),
+			},
+			// The excerpt spells the message beside the caret as the tree
+			// spells it.
+			"message beside a caret": {
+				err: yamltest.Bind(t,
+					niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("cfg.yaml")),
+					niceyaml.NewError("2 problems", niceyaml.WithErrors(
+						niceyaml.NewError("bad\ta", niceyaml.AtPath(paths.Root().Child("a"))),
+					)),
+				),
+				want: stringtest.JoinLF(
+					"cfg.yaml: 2 problems",
+					"`-- 1:4: $.a: bad    a",
+					"",
+					"   1 | a: 1",
+					"     |    ^ bad    a",
+					"   2 | b: 2",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.Equal(t, tc.want, niceyaml.FormatError(tc.err, 2))
+			})
+		}
 	})
 
 	t.Run("nil renders as nothing", func(t *testing.T) {

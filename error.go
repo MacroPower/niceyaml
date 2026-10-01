@@ -1829,6 +1829,10 @@ func (e *SourceError) LogValue() slog.Value {
 // whose nested errors do gets their excerpts and no reason, and its
 // message stays in the tree without a position. The output holds no
 // escape sequences, so it reads in a log as it does in a terminal.
+// Each message of the tree, each message beside a caret, and each
+// "no excerpt:" line draws control characters as their pictures. The
+// exceptions are a tab, which becomes four spaces wherever it falls, and
+// a line feed in a message of the tree, which starts a new row.
 //
 // FormatError looks through the wrappers and joins around a
 // [SourceError], so it renders the excerpt however the error was
@@ -1875,14 +1879,16 @@ func FormatError(err error, context int) string {
 // several errors and adds no message of its own, has no row of its own,
 // so its children lead.
 //
-// Control characters in a text render as their pictures, so a key of the
-// document that holds an escape sequence cannot reach the terminal, and
-// the output holds no escape sequences as [FormatError] promises.
+// Each text lays out as [escape.Message] returns it. Control characters
+// render as their pictures, so a key of the document that holds an escape
+// sequence cannot reach the terminal, and the output holds no escape
+// sequences as [FormatError] promises. A tab becomes four spaces instead,
+// since it lays out the text after it.
 func renderErrorTree(t ErrorTree) string {
 	var sb strings.Builder
 
 	if t.Text != "" {
-		sb.WriteString(escape.Rows(t.Text))
+		sb.WriteString(escape.Message(t.Text))
 	}
 
 	writeErrorBranches(&sb, t.Children, "", t.Text != "")
@@ -1912,7 +1918,7 @@ func writeErrorBranches(sb *strings.Builder, children []ErrorTree, indent string
 			connector, below = "`-- ", "    "
 		}
 
-		for j, row := range strings.Split(child.Text, "\n") {
+		for j, row := range strings.Split(escape.Tabs(child.Text), "\n") {
 			if broken {
 				sb.WriteByte('\n')
 			}
@@ -2007,10 +2013,12 @@ func rangeOf(ranges position.Ranges, at position.Position) position.Range {
 // error is bound to. Annotate highlights the location of the error with
 // [kind.GenericError] and adds its message from [SourceError.Message] as
 // an annotation below its line in [kind.TextError], so the message reads
-// as error text without the highlight of the token it describes. Annotate
-// leaves the nodes below the error to their own Annotate, so a viewer
-// that shows a document with its errors in place marks its view with
-// every binding [AllBindings] yields and renders it as it is:
+// as error text without the highlight of the token it describes. The
+// annotation holds each tab of the message as four spaces, as the tree
+// [FormatError] prints spells it. Annotate leaves the nodes below the
+// error to their own Annotate, so a viewer that shows a document with
+// its errors in place marks its view with every binding [AllBindings]
+// yields and renders it as it is:
 //
 //	view := source.View()
 //	for bound := range niceyaml.AllBindings(err) {
@@ -2074,8 +2082,10 @@ func (e *SourceError) Annotate(view *line.View) bool {
 // around the locations of its tree, with each one highlighted. Excerpt
 // marks a fresh [Source.View] with the location of every node in the
 // tree and the message of each node below the root as an annotation
-// below its own line. The root's own location gets a caret run alone,
-// since the tree [FormatError] prints above the excerpt names the root.
+// below its own line, with each tab as four spaces, as
+// [SourceError.Annotate] adds it. The root's own location gets a caret
+// run alone, since the tree [FormatError] prints above the excerpt names
+// the root.
 // [line.View.Hunks] then keeps context lines of unchanged content on
 // either side of each marked line. Excerpt leaves out a node bound to
 // another source, and [SourceError.Excerpts] shows it in its own source.
@@ -2169,10 +2179,11 @@ func (e *SourceError) details(context int) []string {
 	}
 
 	// The reason names the path, which a key of the document spells, so
-	// its control characters render as pictures like those of the tree.
+	// its control characters render as pictures like those of the tree. A
+	// tab in the key becomes four spaces, as it does in the tree.
 	reason := e.Unresolved()
 	if reason != nil {
-		return []string{"no excerpt: " + escape.Control(reason.Error())}
+		return []string{"no excerpt: " + escape.Control(escape.Tabs(reason.Error()))}
 	}
 
 	return nil
@@ -2467,7 +2478,10 @@ func clampRange(lines line.Lines, r position.Range) position.Range {
 // prepareLineAnnotations prepares annotations grouped by line index. It
 // includes only positions with messages. Each line joins its messages in
 // column order, so they read in the order of the carets, and messages at
-// the same column keep the order they arrived in.
+// the same column keep the order they arrived in. Each tab in a message
+// becomes four spaces, as [escape.Tabs] returns it, so the annotation
+// spells the message as the tree of [FormatError] does. A renderer draws
+// the other control characters of an annotation as their pictures.
 func prepareLineAnnotations(positions []errorPosition) map[int]line.Annotation {
 	linePositions := make(map[int][]errorPosition)
 
@@ -2486,7 +2500,7 @@ func prepareLineAnnotations(positions []errorPosition) map[int]line.Annotation {
 
 		messages := make([]string, 0, len(lineErrs))
 		for _, r := range lineErrs {
-			messages = append(messages, r.message)
+			messages = append(messages, escape.Tabs(r.message))
 		}
 
 		result[lineIdx] = line.Annotation{

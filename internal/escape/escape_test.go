@@ -236,3 +236,109 @@ func TestRows(t *testing.T) {
 		})
 	}
 }
+
+func TestTabs(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		input string
+		want  string
+	}{
+		"empty string": {
+			input: "",
+			want:  "",
+		},
+		"text without tabs unchanged": {
+			input: "a b\nc",
+			want:  "a b\nc",
+		},
+		"leading tab expands to four spaces": {
+			input: "\tvalidate",
+			want:  "    validate",
+		},
+		"tab after three cells expands to four spaces": {
+			input: "abc\td",
+			want:  "abc    d",
+		},
+		"consecutive tabs expand to four spaces each": {
+			input: "a\t\tb",
+			want:  "a        b",
+		},
+		"other controls kept": {
+			input: "\x1b[31m\t\x07\r\n\tx",
+			want:  "\x1b[31m    \x07\r\n    x",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := escape.Tabs(tt.input)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestMessage(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		input string
+		want  string
+	}{
+		"empty string": {
+			input: "",
+			want:  "",
+		},
+		"normal text unchanged": {
+			input: "a\nb",
+			want:  "a\nb",
+		},
+		"leading tab expands to four spaces": {
+			input: "\tvalidate",
+			want:  "    validate",
+		},
+		"tab mid-row expands to four spaces": {
+			input: "ab\tc",
+			want:  "ab    c",
+		},
+		"tab after four cells expands to four spaces": {
+			input: "abcd\te",
+			want:  "abcd    e",
+		},
+		"consecutive tabs expand to four spaces each": {
+			input: "a\t\tb",
+			want:  "a        b",
+		},
+		"tabs expand in each row": {
+			input: "abc\n\tx",
+			want:  "abc\n    x",
+		},
+		"tab after a wide rune expands to four spaces": {
+			input: "名\tx",
+			want:  "名    x",
+		},
+		"tab after a picture expands to four spaces": {
+			input: "\x1b\tx",
+			want:  "␛    x",
+		},
+		"other controls replaced": {
+			input: "\x1b[31m\x07\r",
+			want:  "␛[31m␇␍",
+		},
+		"line feeds kept": {
+			input: "\nDid you mean this?\n\tvalidate\n",
+			want:  "\nDid you mean this?\n    validate\n",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := escape.Message(tt.input)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
