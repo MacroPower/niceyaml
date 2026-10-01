@@ -4805,6 +4805,44 @@ func TestDocument_At_Scope(t *testing.T) {
 		assert.Equal(t, "a\nb\n", text.Tokens()[1].Value)
 	})
 
+	t.Run("scope on an alias", func(t *testing.T) {
+		t.Parallel()
+
+		// The node of an alias is the content of its anchor, but the node
+		// of a tagged alias is the tag, which sits on the line of the alias.
+		tcs := map[string]struct {
+			input string
+			want  string
+			span  position.Span
+		}{
+			"alias": {
+				input: "x: &x {k: 1}\nmid: 2\nc: *x\n",
+				want:  "{k: 1}",
+				span:  position.NewSpan(0, 1),
+			},
+			"tagged alias": {
+				input: "x: &x {k: 1}\nmid: 2\nc: !t *x\n",
+				want:  "!t *x",
+				span:  position.NewSpan(2, 3),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				scoped := yamltest.At(t, yamltest.FirstDocument(t, tc.input), paths.Root().Child("c"))
+
+				assert.Equal(t, tc.span, scoped.Span())
+				assert.Equal(t, tc.want, scoped.AST().String())
+
+				got, err := scoped.Decode[map[string]int](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, map[string]int{"k": 1}, got)
+			})
+		}
+	})
+
 	t.Run("scope ends on the last line of content", func(t *testing.T) {
 		t.Parallel()
 

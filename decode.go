@@ -1166,7 +1166,10 @@ func (n *Node) FilePath() string {
 // and [Node.Tokens] read. [Node.Ranges] of the scope and an error bound at
 // its root resolve to the alias, where the path points. They lie outside
 // the span unless the alias shares a line with that content, as it can in
-// a flow collection. A scope that selects nothing covers no lines.
+// a flow collection. A tag on the alias keeps the node at the tag, as
+// [paths.Path.Node] describes, so the node of `$.c` in `c: !t *x` is the
+// tag with the alias under it, and the span covers the line of the alias
+// instead. A scope that selects nothing covers no lines.
 //
 // [Node.View] returns a view of the source sliced to the span, so a
 // caller that renders the node need not slice one itself. The span

@@ -781,37 +781,59 @@ func anchoredMapping(content ast.Node) *ast.MappingNode {
 }
 
 // deref looks through anchors and aliases to the content node they carry.
+// It returns the first tag it reaches as it is, since the tag applies to
+// the content under it, and the anchors and aliases under the tag stay in
+// the result.
 //
 // Returns an error wrapping [ErrAlias] for an alias with no anchor of its
 // name before it, or for an alias that leads back to itself, as
-// [resolver.follow] describes.
+// [resolver.follow] describes. It checks the aliases under the tag too, as
+// [resolver.unwrap] follows them, so an alias with a tag on it fails as
+// one without a tag does.
 func (r *resolver) deref(node ast.Node) (ast.Node, error) {
-	return r.follow(node, map[*ast.AliasNode]bool{})
+	tagged, _, err := r.content(node)
+
+	return tagged, err
 }
 
 // unwrap is [resolver.deref] followed by stripping tags, so the result is a
 // mapping, sequence, or scalar that selectors can apply to. It stops at a
 // nil node, including a typed nil a hand-built tree may hold, and returns
 // an untyped nil for it, as [resolver.follow] does.
-//
-// It tracks the aliases it follows across every tag it strips, so an alias
-// that leads back to itself through a tag returns an error wrapping
-// [ErrAlias].
 func (r *resolver) unwrap(node ast.Node) (ast.Node, error) {
+	_, content, err := r.content(node)
+
+	return content, err
+}
+
+// content looks through anchors, aliases, and tags from node. It returns
+// two nodes: the first tag it reaches, or the content when it reaches no
+// tag, and the content under every tag. [resolver.deref] gives the first
+// and [resolver.unwrap] the second.
+//
+// It tracks the aliases it follows across every tag it looks through, so
+// an alias that leads back to itself through a tag returns an error
+// wrapping [ErrAlias].
+func (r *resolver) content(node ast.Node) (ast.Node, ast.Node, error) {
 	followed := map[*ast.AliasNode]bool{}
 
-	for {
-		content, err := r.follow(node, followed)
-		if err != nil {
-			return nil, err
-		}
+	tagged, err := r.follow(node, followed)
+	if err != nil {
+		return nil, nil, err
+	}
 
+	content := tagged
+
+	for {
 		tag, ok := content.(*ast.TagNode)
 		if !ok {
-			return content, nil
+			return tagged, content, nil
 		}
 
-		node = tag.Value
+		content, err = r.follow(tag.Value, followed)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 }
 

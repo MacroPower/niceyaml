@@ -1407,6 +1407,66 @@ func TestPath_UnknownAlias(t *testing.T) {
 	require.ErrorIs(t, err, paths.ErrAlias)
 }
 
+func TestPath_TaggedAlias(t *testing.T) {
+	t.Parallel()
+
+	// A tag on an alias stays over the alias, and an alias under a tag
+	// that does not resolve fails as one without a tag does.
+	tcs := map[string]struct {
+		err   error
+		input string
+		want  string
+		path  paths.Path
+	}{
+		"alias to an anchor": {
+			input: "x: &x {k: 1}\nb: !t *x\n",
+			path:  paths.Root().Child("b"),
+			want:  "!t *x",
+		},
+		"alias with no anchor before it": {
+			input: "b: !t *nope\n",
+			path:  paths.Root().Child("b"),
+			err:   paths.ErrAlias,
+		},
+		"alias inside its own anchor": {
+			input: "a: &x [!t *x]\n",
+			path:  paths.Root().Child("a").Index(0),
+			err:   paths.ErrAlias,
+		},
+		"anchor over a tag on an alias to itself": {
+			input: "a: &x !t *x\n",
+			path:  paths.Root().Child("a"),
+			err:   paths.ErrAlias,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, tc.input)
+			doc := dd.DocumentAST()
+
+			node, err := tc.path.Node(doc)
+			_, nodesErr := tc.path.Nodes(doc)
+			_, atErr := dd.At(tc.path)
+
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				require.ErrorIs(t, nodesErr, tc.err)
+				require.ErrorIs(t, atErr, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			require.NoError(t, nodesErr)
+			require.NoError(t, atErr)
+			assert.Equal(t, tc.want, node.String())
+		})
+	}
+}
+
 func TestPath_UnknownAliasKey(t *testing.T) {
 	t.Parallel()
 

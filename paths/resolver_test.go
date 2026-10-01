@@ -602,8 +602,20 @@ func TestResolver_Deref(t *testing.T) {
 			input: "v: {k: x}\n",
 			want:  "{k: x}",
 		},
+		"tagged alias": {
+			input: "a: &a {k: x}\nv: !t *a\n",
+			want:  "!t *a",
+		},
 		"alias with no anchor before it": {
 			input: "v: *a\na: &a x\n",
+			err:   paths.ErrAlias,
+		},
+		"tagged alias with no anchor before it": {
+			input: "v: !t *a\na: &a x\n",
+			err:   paths.ErrAlias,
+		},
+		"alias to a tagged alias with no anchor before it": {
+			input: "a: &a !t *b\nv: *a\nb: &b x\n",
 			err:   paths.ErrAlias,
 		},
 	}
