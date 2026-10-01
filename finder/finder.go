@@ -23,6 +23,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"golang.org/x/text/unicode/norm"
+
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -117,6 +119,11 @@ type Option func(*Finder)
 //
 // The normalizer receives one character at a time, on both sides, so the
 // same character always normalizes the same way wherever it appears. A
+// character here is a unit that Unicode normalization composes as a whole:
+// a rune with the combining marks that follow it, or the conjoining jamo of
+// one Hangul syllable. A precomposed "ガ" and a "カ" followed by the voicing
+// mark U+3099 each reach the normalizer whole, so a normalizer that composes
+// them, as the default does, finds either spelling with the other. A
 // transformer whose output depends on surrounding characters, such as title
 // casing, sees none and behaves as it would on a one-character string.
 // Line endings reach the normalizer as "\n" too, so a normalizer that
@@ -167,7 +174,8 @@ type Index struct {
 // appear in the text.
 //
 // The search string goes through the same per-character normalization as
-// the loaded text, so Find finds any string that appears in the source.
+// the loaded text, so Find finds any run of whole characters that appears
+// in the source, as [WithNormalizer] defines a character.
 // Bytes that are not valid UTF-8 read as U+FFFD on both sides, and a CRLF
 // or bare CR line ending reads as "\n" on both sides. Every line but the
 // last reads as ending in "\n", even one with no line ending of its own,
@@ -176,13 +184,15 @@ type Index struct {
 // normalizer that removes all whitespace drops it, so "1b" then matches
 // across the lines "a: 1" and "b: 2".
 //
-// Every match starts at a source character. When normalization expands one
-// character into several, as case folding turns "ß" into "ss", a needle
-// that matches only the tail of the expansion is not a match, and a match
-// that ends inside an expansion covers the whole character. When it drops
-// a character, as stripping marks drops a combining accent, a match that
-// ends right before the dropped character covers it too, so the range
-// ends where the next character begins.
+// Every match starts at a source character, and every range covers whole
+// characters, so an exact search for "cafe" in a "café" that spells its
+// accent as a combining mark covers the accent too. When normalization
+// expands one character into several, as case folding turns "ß" into "ss",
+// a needle that matches only the tail of the expansion is not a match, and
+// a match that ends inside an expansion covers the whole character. When
+// it drops a character, as a normalizer that removes whitespace drops a
+// space, a match that ends right before the dropped character covers it
+// too, so the range ends where the next character begins.
 //
 // Returns nil if the search string is empty, or normalizes to empty, or the
 // Index is nil or holds no text.
@@ -211,8 +221,9 @@ func (i *Index) Find(search string) position.Ranges {
 		matchStart := offset + idx
 		matchEnd := matchStart + len(searchStr)
 
-		// A match inside the expansion of one source rune has no character
-		// of its own to start at, so skip past that rune.
+		// A match that starts inside the normalized form of one source
+		// character has no entry to start at, so skip one rune of the
+		// loaded text.
 		start, ok := i.posMap.at(matchStart)
 		if !ok {
 			_, size := utf8.DecodeRuneInString(i.text[matchStart:])
@@ -222,7 +233,7 @@ func (i *Index) Find(search string) position.Ranges {
 		}
 
 		// The last byte of the match sits at matchEnd-1, and end finds the
-		// source rune that holds it.
+		// source character that holds it.
 		startPos := i.posMap.positions[start]
 		endPos := i.posMap.end(matchEnd - 1)
 
@@ -234,34 +245,65 @@ func (i *Index) Find(search string) position.Ranges {
 }
 
 // normalizeText normalizes s the way [Finder.Load] normalizes the loaded
-// text, one rune at a time, so a search string and the text Find compares
-// it against pass through the normalizer identically. Line endings collapse
-// to "\n" first, since the loaded text reads every line ending that way.
+// text, one character at a time, so a search string and the text Find
+// compares it against pass through the normalizer identically. Line endings
+// collapse to "\n" first, since the loaded text reads every line ending that
+// way.
 func (i *Index) normalizeText(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
 
 	var sb strings.Builder
 
-	for _, r := range s {
-		// Write rune by rune, as the index does, so bytes that are not
-		// valid UTF-8 become U+FFFD on both sides.
-		for _, nr := range normalizeRune(i.normalizer, r) {
-			sb.WriteRune(nr)
-		}
-	}
+	// The conversion reads each byte that is not valid UTF-8 as U+FFFD, as
+	// the index reads the lines.
+	eachCharacter([]rune(s), func(char string, _, _ int) {
+		writeRunes(&sb, normalize(i.normalizer, char))
+	})
 
 	return sb.String()
 }
 
-// normalizeRune returns the text for one rune: the rune itself when n is
-// nil, and its normalized form otherwise.
-func normalizeRune(n Normalizer, r rune) string {
+// eachCharacter calls fn with each character of rs in order, along with the
+// half-open range [start, end) of the indexes its runes hold in rs. A
+// character is a unit that Unicode normalization composes as a whole: a rune
+// with the combining marks that follow it, or the conjoining jamo of one
+// Hangul syllable. A "\n" always ends a character, as it ends a line of the
+// loaded text, so a search string splits the same way the lines do.
+func eachCharacter(rs []rune, fn func(char string, start, end int)) {
+	s := string(rs)
+	start := 0
+
+	for s != "" {
+		n := norm.NFC.NextBoundaryInString(s, true)
+		if i := strings.IndexByte(s[:n], '\n'); i >= 0 {
+			n = i + 1
+		}
+
+		end := start + utf8.RuneCountInString(s[:n])
+		fn(s[:n], start, end)
+
+		s = s[n:]
+		start = end
+	}
+}
+
+// normalize returns the text for one character: the character itself when n
+// is nil, and its normalized form otherwise.
+func normalize(n Normalizer, char string) string {
 	if n == nil {
-		return string(r)
+		return char
 	}
 
-	return n.Normalize(string(r))
+	return n.Normalize(char)
+}
+
+// writeRunes writes s to sb rune by rune, so a byte that is not valid UTF-8,
+// which a normalizer can emit, becomes U+FFFD on both sides.
+func writeRunes(sb *strings.Builder, s string) {
+	for _, r := range s {
+		sb.WriteRune(r)
+	}
 }
 
 // buildTextAndPositionMap concatenates the runes of every line into the
@@ -272,8 +314,9 @@ func normalizeRune(n Normalizer, r rune) string {
 // normalizer drops "\n".
 //
 // When the Finder has a normalizer, the normalizer transforms the returned
-// text, and the position map records where each source rune begins in the
-// normalized text so lookups in normalized text resolve to the right place.
+// text one character at a time, as [eachCharacter] splits each line. The
+// position map records where each source character begins in the
+// normalized text, so lookups in normalized text resolve to the right place.
 func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap) {
 	var sb strings.Builder
 
@@ -283,46 +326,51 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 		return "", pm
 	}
 
-	// Cache normalized forms per unique rune to avoid repeated normalizer calls.
-	normalizedCache := make(map[rune]string)
+	// Cache normalized forms per unique character to avoid repeated
+	// normalizer calls.
+	normalizedCache := make(map[string]string)
 
-	emit := func(pos position.Position, r rune) {
-		normalized, ok := normalizedCache[r]
-		if !ok {
-			normalized = normalizeRune(f.normalizer, r)
-			normalizedCache[r] = normalized
-		}
-
-		// Record the byte offset where this source rune begins in the
-		// normalized text, so every byte of its expansion resolves to the
-		// same position. The offset comes from the builder because WriteRune
-		// writes a byte that is not valid UTF-8 as the 3-byte U+FFFD. A rune
-		// that normalizes to nothing, such as a combining mark, has no
-		// character of its own, so the rune before it on the line extends
-		// over it and a match ending there covers the whole character.
-		if normalized != "" {
-			pm.add(sb.Len(), pos)
-		} else {
-			pm.extend(pos)
-		}
-
-		for _, nr := range normalized {
-			sb.WriteRune(nr)
-		}
-	}
+	var rs []rune
 
 	last := lines.Len() - 1
 	for i, l := range lines.All() {
-		ended := false
-		for col, r := range l.Runes() {
-			emit(position.New(i, col), r)
-
-			ended = r == '\n'
+		// Runes yields the columns 0, 1, 2, and so on, so the index of a
+		// rune in rs is its column.
+		rs = rs[:0]
+		for _, r := range l.Runes() {
+			rs = append(rs, r)
 		}
 
-		if !ended && i < last {
-			emit(position.New(i, l.Width()), '\n')
+		if i < last && (len(rs) == 0 || rs[len(rs)-1] != '\n') {
+			rs = append(rs, '\n')
 		}
+
+		eachCharacter(rs, func(char string, start, end int) {
+			normalized, ok := normalizedCache[char]
+			if !ok {
+				normalized = normalize(f.normalizer, char)
+				normalizedCache[char] = normalized
+			}
+
+			// Record the byte offset where this source character begins in
+			// the normalized text, so every byte of its normalized form
+			// resolves to the same position. The offset comes from the
+			// builder because WriteRune writes a byte that is not valid
+			// UTF-8 as the 3-byte U+FFFD. The entry runs over the rest of
+			// the character's runes. A character that normalizes to
+			// nothing has no entry of its own, so the character before it
+			// on the line extends over it and a match ending there covers
+			// it too.
+			for col := start; col < end; col++ {
+				if col == start && normalized != "" {
+					pm.add(sb.Len(), position.New(i, col))
+				} else {
+					pm.extend(position.New(i, col))
+				}
+			}
+
+			writeRunes(&sb, normalized)
+		})
 	}
 
 	return sb.String(), pm
@@ -330,28 +378,31 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 
 // positionMap maps byte offsets in the loaded text to original
 // [position.Position] values in the loaded lines. It holds one entry per
-// source rune whose normalized form is non-empty, at the offset where that
-// form begins, in increasing order. A rune that normalizes to nothing has
-// no entry of its own and extends the entry before it on its line.
+// source character whose normalized form is non-empty, at the offset where
+// that form begins, in increasing order. A character that normalizes to
+// nothing has no entry of its own and extends the entry before it on its
+// line.
 type positionMap struct {
 	offsets   []int
 	positions []position.Position
-	// The column just past each entry's source rune and the runes after it
-	// on its line that normalize to nothing.
+	// The column just past each entry's source character and the
+	// characters after it on its line that normalize to nothing.
 	ends []int
 }
 
-// add records the byte offset at which a source rune begins and its
-// position.
+// add records the byte offset at which a source character begins and the
+// position of its first rune.
 func (m *positionMap) add(offset int, pos position.Position) {
 	m.offsets = append(m.offsets, offset)
 	m.positions = append(m.positions, pos)
 	m.ends = append(m.ends, pos.Col+1)
 }
 
-// extend records a source rune at pos that normalizes to nothing, so the
-// entry before it on the same line runs past it. A rune with no entry
-// before it on its line extends nothing, since no match starts at it.
+// extend records a source rune at pos that has no entry of its own, so the
+// entry before it on the same line runs past it. Such a rune is a later rune
+// of the character before it, or a rune of a character that normalizes to
+// nothing. A rune with no entry before it on its line extends nothing,
+// since no match starts at it.
 func (m *positionMap) extend(pos position.Position) {
 	last := len(m.positions) - 1
 	if last >= 0 && m.positions[last].Line == pos.Line {
@@ -359,16 +410,16 @@ func (m *positionMap) extend(pos position.Position) {
 	}
 }
 
-// end returns the position just past the source rune that holds the byte
-// at offset, past any runes after it on the line that normalize to
-// nothing. The offset must lie at or after the first entry.
+// end returns the position just past the source character that holds the
+// byte at offset, past any characters after it on the line that normalize
+// to nothing. The offset must lie at or after the first entry.
 func (m *positionMap) end(offset int) position.Position {
 	idx := m.floor(offset)
 
 	return position.New(m.positions[idx].Line, m.ends[idx])
 }
 
-// floor returns the entry of the source rune that holds the byte at
+// floor returns the entry of the source character that holds the byte at
 // offset, the last entry that begins at or before offset. It returns -1
 // when the map is empty.
 func (m *positionMap) floor(offset int) int {
@@ -379,8 +430,8 @@ func (m *positionMap) floor(offset int) int {
 	return idx - 1
 }
 
-// at returns the entry of the source rune whose normalized form begins at
-// offset, and false when no entry begins there.
+// at returns the entry of the source character whose normalized form begins
+// at offset, and false when no entry begins there.
 func (m *positionMap) at(offset int) (int, bool) {
 	idx := m.floor(offset)
 

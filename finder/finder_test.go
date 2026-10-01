@@ -138,6 +138,68 @@ func TestFinder_Find(t *testing.T) {
 			normalizer: normalizer.New(),
 			want:       nil,
 		},
+		"with normalizer - kana voicing mark distinguishes decomposed source": {
+			input:      "name: ガ",
+			search:     "カ",
+			normalizer: normalizer.New(),
+			want:       nil,
+		},
+		"with normalizer - katakana precomposed source, decomposed search": {
+			input:      "name: ガ",
+			search:     "ガ",
+			normalizer: normalizer.New(),
+			want: position.Ranges{
+				position.NewRange(position.New(0, 6), position.New(0, 7)),
+			},
+		},
+		"with normalizer - katakana decomposed source, precomposed search": {
+			input:      "name: ガ",
+			search:     "ガ",
+			normalizer: normalizer.New(),
+			want: position.Ranges{
+				position.NewRange(position.New(0, 6), position.New(0, 8)),
+			},
+		},
+		"with normalizer - hiragana decomposed source, precomposed search": {
+			input:      "name: が",
+			search:     "が",
+			normalizer: normalizer.New(),
+			want: position.Ranges{
+				position.NewRange(position.New(0, 6), position.New(0, 8)),
+			},
+		},
+		"with normalizer - hangul precomposed source, decomposed search": {
+			input:      "name: 한국",
+			search:     "한국",
+			normalizer: normalizer.New(),
+			want: position.Ranges{
+				position.NewRange(position.New(0, 6), position.New(0, 8)),
+			},
+		},
+		"with normalizer - hangul decomposed source, precomposed search": {
+			input:      "name: 한국",
+			search:     "한국",
+			normalizer: normalizer.New(),
+			want: position.Ranges{
+				position.NewRange(position.New(0, 6), position.New(0, 12)),
+			},
+		},
+		"with normalizer - width fold matches halfwidth voiced katakana": {
+			input:      "name: ガ",
+			search:     "ｶﾞ",
+			normalizer: normalizer.New(normalizer.WithWidthFold(true)),
+			want: position.Ranges{
+				position.NewRange(position.New(0, 6), position.New(0, 7)),
+			},
+		},
+		"with normalizer - width fold finds halfwidth voiced katakana": {
+			input:      "name: ｶﾞ",
+			search:     "ガ",
+			normalizer: normalizer.New(normalizer.WithWidthFold(true)),
+			want: position.Ranges{
+				position.NewRange(position.New(0, 6), position.New(0, 8)),
+			},
+		},
 		"with normalizer - cherokee uppercase search": {
 			input:      "name: \uab70",
 			search:     "\u13a0",
@@ -165,6 +227,14 @@ func TestFinder_Find(t *testing.T) {
 			search: "value",
 			exact:  true,
 			want:   nil,
+		},
+		"exact matching - match covers a trailing combining mark": {
+			input:  "name: café",
+			search: "cafe",
+			exact:  true,
+			want: position.Ranges{
+				position.NewRange(position.New(0, 6), position.New(0, 11)),
+			},
 		},
 		"nil normalizer pointer - no match": {
 			input:      "key: VALUE",
@@ -204,6 +274,19 @@ func TestFinder_Find(t *testing.T) {
 				position.NewRange(
 					position.New(0, 3),
 					position.New(1, 1),
+				),
+			},
+		},
+		"normalizer dropping whitespace covers the dropped space": {
+			input:  "k: ab cd",
+			search: "ab",
+			normalizer: normalizer.New(normalizer.WithTransformer(func() transform.Transformer {
+				return runes.Remove(runes.In(unicode.White_Space))
+			})),
+			want: position.Ranges{
+				position.NewRange(
+					position.New(0, 3),
+					position.New(0, 6),
 				),
 			},
 		},
@@ -903,10 +986,10 @@ func TestIndex_Find_Concurrent(t *testing.T) {
 func TestIndex_Find_CoversDroppedTrailingRune(t *testing.T) {
 	t.Parallel()
 
-	// The accent is a combining mark the normalizer drops, so it has no
-	// character of its own in the loaded text. A match ending right before
-	// it covers it, as a match ending inside an expansion covers the whole
-	// character, so the highlight ends where the next character begins.
+	// The accent is a combining mark that belongs to the "e" before it, and
+	// the normalizer drops it. A match ending at that "e" covers the accent,
+	// as a match ending inside an expansion covers the whole character, so
+	// the highlight ends where the next character begins.
 	source := niceyaml.NewSourceFromString("k: caféx\n")
 	idx := finder.New(finder.WithNormalizer(normalizer.New())).Load(source.Lines())
 
