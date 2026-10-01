@@ -1027,6 +1027,26 @@ func TestSource_File_CommentBelowAnchor(t *testing.T) {
 			input: "  a: &x\n# c\n",
 			err:   "2:1: value is not allowed in this context",
 		},
+		// Above a header, the tree first leaves out the comments left of
+		// the root, and the first comment that remains decides. Left of the
+		// key of the anchor, it stays in the tree. In the column of that
+		// key, the parser takes it as the value of the anchor, and the tree
+		// holds a null in its place.
+		"closing comment left of the key below one left of the root": {
+			input: "  - a: &x\n# d\n  # c\n---\n",
+			want:  []any{map[string]any{"a": nil}},
+			kept:  true,
+		},
+		"closing comment in the column of the key below one left of the root": {
+			input: "  a: &x\n# d\n  # c\n---\n",
+			want:  map[string]any{"a": nil},
+		},
+		// At the end of the source, the tree leaves none of the comments
+		// out first, so the parser rejects the one left of the root.
+		"closing comments in and left of the column of the root": {
+			input: "  a: &x\n# d\n  # c\n",
+			err:   "2:1: value is not allowed in this context",
+		},
 	}
 
 	for name, tc := range tcs {
