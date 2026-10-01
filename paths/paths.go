@@ -56,10 +56,14 @@ var (
 	// lookup on a chain of merges can read the whole chain. A lookup that
 	// reaches many mappings that merge one sequence through an alias reads
 	// that sequence once for each of them. A `..name` selector looks up
-	// each key that a later merge key may override, and a `.name` after a
-	// `[*]` looks up its key in each element, so one selector can read a
-	// chain many times. A selector may read 64 times as many of these
-	// nodes as the document holds, or 524,288 of them when that is more.
+	// each key that a later merge key may override. It also looks up `<<`
+	// at the last merge key of each mapping it walks, to learn whether a
+	// merge brings in a real `<<` key. That lookup reads the whole merge
+	// chain behind the mapping, whatever name the selector searches for. A
+	// `.name` after a `[*]` looks up its key in each element. Each of these
+	// can make one selector read a chain many times. A selector may read
+	// 64 times as many of these nodes as the document holds, or 524,288 of
+	// them when that is more.
 	ErrExcessiveMerging = errors.New("excessive merging")
 
 	// Before quoteName or goccyString wraps a selector name in single
@@ -475,15 +479,19 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 // starts from, as the other selectors do. Below that node it visits each
 // entry once, where the source defines it. It does not follow aliases
 // there, including one a `<<` merge key names, and it does not list the
-// entries a merge key brings into a mapping under that mapping. It walks a mapping
-// written inline under a `<<` key as it walks any other value, and lists
-// its entries under the `<<` selector even when a later source or a key of
-// the mapping itself overrides them. It skips an entry that a later entry
-// with the same key shadows, whether that entry belongs to its mapping or
-// comes from a later `<<` merge key. It also skips an entry whose key has
-// no name, as [Resolver.KeyName] reports it, and everything below that
-// entry, since no path names them. An alias key with no anchor before it
-// has no name, and so does one whose anchor holds a collection.
+// entries a merge key brings into a mapping under that mapping. It walks a
+// mapping written inline under a `<<` key as it walks any other value, and
+// lists its entries under the `<<` selector even when a later source or a
+// key of the mapping itself overrides them. When a path through `<<`
+// selects a real key with the text `<<`, whether the mapping holds it or a
+// merge brings it in, the `..name` selector skips the merge key and its
+// inline mapping, since no path through `<<` reaches them. It skips an
+// entry that a later entry with the same key shadows, whether that entry
+// belongs to its mapping or comes from a later `<<` merge key. It also
+// skips an entry whose key has no name, as [Resolver.KeyName] reports it,
+// and everything below that entry, since no path names them. An alias key
+// with no anchor before it has no name, and so does one whose anchor holds
+// a collection.
 //
 // Wraps [ErrNoDocument], together with [ErrNotFound], when the document has
 // no content to resolve in, and [ErrAlias] when an alias on the path does

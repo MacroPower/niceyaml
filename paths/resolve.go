@@ -99,7 +99,9 @@ type resolver struct {
 // has no name, as [resolver.keyName] reports it, so no lookup finds that
 // entry. A merge key and a real key whose text is `<<`, such as an alias
 // key, are separate keys to the decoder, so names holds the last merge key
-// under `<<` only when no real key has that name.
+// under `<<` only when no real key of the mapping has that name.
+// [resolver.lookup] selects that merge key only when no merge source holds
+// such a real key either.
 type mappingKeys struct {
 	names  map[string]int
 	merges []int
@@ -1073,11 +1075,15 @@ func (r *resolver) lookup(
 ) (*ast.MappingValueNode, int, bool, error) {
 	keys := r.mappingKeys(mapping)
 
-	// An entry of the mapping with no merge key after it wins outright.
-	// That takes in the last merge key itself, which the name `<<` selects
-	// when no real key has that text.
+	// The names index may hold the last merge key under `<<`. The name
+	// `<<` selects that merge key only when neither the mapping nor a
+	// merge source holds a real key with that text, so lookup searches
+	// every merge key before it settles on that one.
 	own, hasOwn := keys.names[name]
-	if hasOwn && !keys.mergeAfter(own) {
+	realKey := hasOwn && !isMergeKey(mapping.Values[own].Key)
+
+	// A real key of the mapping with no merge key after it wins outright.
+	if realKey && !keys.mergeAfter(own) {
 		return mapping.Values[own], own, true, nil
 	}
 
@@ -1089,10 +1095,10 @@ func (r *resolver) lookup(
 
 	// A later merge key wins over an earlier one, as a later source in one
 	// merge key does, so lookup reads the merge keys from the last one back.
-	// It stops at the entry of the mapping itself, which wins over every
-	// merge key before it.
+	// It stops at a real key of the mapping, which wins over every merge
+	// key before it.
 	for _, i := range slices.Backward(keys.merges) {
-		if hasOwn && i < own {
+		if realKey && i < own {
 			break
 		}
 
@@ -1168,24 +1174,29 @@ func (r *resolver) lookupMerge(
 
 // overridden reports whether a path through name in mapping selects an
 // entry other than the one at index i, the last entry of mapping with that
-// name. Only a `<<` key after that entry can win over it, as
-// [resolver.lookup] describes. It also reports true when those merge keys
-// do not resolve, since a path through name then selects nothing. Its
-// lookup adds to the count of reads as [resolver.lookup] describes, and
-// overridden returns the [ErrExcessiveMerging] that lookup returns.
+// name. A `<<` key after that entry can win over it, as [resolver.lookup]
+// describes. When the entry at i is the last merge key, a real `<<` key
+// that one of the merge sources holds wins over it too. It also reports
+// true when those merge keys do not resolve, since a path through name
+// then selects nothing. Its lookup adds to the count of reads as
+// [resolver.lookup] describes, and overridden returns the
+// [ErrExcessiveMerging] that lookup returns.
 func (r *resolver) overridden(
 	mapping *ast.MappingNode, keys *mappingKeys, name string, i int, reads *lookupReads,
 ) (bool, error) {
-	if !keys.mergeAfter(i) {
+	entry := mapping.Values[i]
+	if !keys.mergeAfter(i) && !isMergeKey(entry.Key) {
 		return false, nil
 	}
 
-	_, found, ok, err := r.lookup(mapping, name, nil, reads)
+	// Lookup gives the index of the merge key for an entry that a merge
+	// source holds, so overridden compares the entries.
+	found, _, ok, err := r.lookup(mapping, name, nil, reads)
 	if errors.Is(err, ErrExcessiveMerging) {
 		return false, err
 	}
 
-	selects := err == nil && ok && found == i
+	selects := err == nil && ok && found == entry
 
 	return !selects, nil
 }
@@ -1360,18 +1371,20 @@ type recursiveWalk struct {
 // every other entry of that key and everything below it. When a mapping
 // holds several `<<` keys, descend thus visits only the inline mapping of
 // the last one, even though the decoder merges them all. When a mapping
-// holds a real key whose text is `<<` next to a merge key, a path through
-// `<<` selects the real key, so descend skips the merge key. When a later
-// `<<` key brings in the key of an entry, a path through that key selects
-// the merged entry, so descend skips the entry of the mapping itself. No
-// path selects an entry whose key has no name, so descend skips that
-// entry and everything below it as well.
+// holds a real key whose text is `<<` next to a merge key, or a merge
+// source brings in such a key, a path through `<<` selects the real key,
+// so descend skips the merge key. When a later `<<` key brings in the key
+// of an entry, a path through that key selects the merged entry, so
+// descend skips the entry of the mapping itself. No path selects an entry
+// whose key has no name, so descend skips that entry and everything below
+// it as well.
 //
-// To find the entries that a later `<<` key overrides, descend looks up
-// the key of each entry that has a `<<` key after it, and each lookup
-// reads the values of the later merge keys and the mappings they bring
-// in. Returns [ErrExcessiveMerging] once the lookups of the walk read past
-// the limit [resolver.excessiveMerging] applies.
+// To find the entries that a `<<` key overrides, descend looks up the key
+// of each entry that has a `<<` key after it, and of the last merge key
+// itself. Each lookup reads the values of the merge keys it searches and
+// the mappings they bring in. Returns [ErrExcessiveMerging] once the
+// lookups of the walk read past the limit [resolver.excessiveMerging]
+// applies.
 func (w *recursiveWalk) descend(node ast.Node) error {
 	if astnode.IsNil(node) {
 		return nil

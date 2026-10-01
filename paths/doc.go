@@ -60,9 +60,10 @@
 //
 // A mapping may also hold a merge key next to a real key with the text
 // `<<`, such as an alias key whose anchor holds that text. The decoder
-// keeps them apart, and so does a path. The `.'<<'` selector names the
-// real key, so `..name` lists the entries under the real key and skips
-// the merge key's inline mapping, since no path through `<<` reaches it.
+// keeps them apart, and so does a path. A merge brings in such a real key
+// as it does any other. The `.'<<'` selector names the real key, whether
+// the mapping holds it or a merge brings it in, so `..name` skips the
+// merge key's inline mapping, since no path through `<<` reaches it.
 //
 // When several anchors share a name, an alias refers to the last one before
 // it, which is the anchor the goccy/go-yaml decoder uses when it fills a
@@ -99,11 +100,15 @@
 // finds the key, so a lookup on a chain of merges can read the whole
 // chain. It reads a list of merge sources again for each mapping that
 // merges that list through an alias. A `..name` selector looks up each
-// key that a later merge key may override, and a `.name` after a `[*]`
-// looks up its key in each element, so one selector can read a chain many
-// times. A resolve stops with [ErrExcessiveMerging] once those reads come
-// to many times the nodes the document holds. One lookup alone can read
-// that many, so [Path.Node] and [Path.Token] return the error as well.
+// key that a later merge key may override. It also looks up `<<` at the
+// last merge key of each mapping it walks, to learn whether a merge brings
+// in a real `<<` key. That lookup reads the whole merge chain behind the
+// mapping, whatever name the selector searches for. A `.name` after a
+// `[*]` looks up its key in each element. Each of these can make one
+// selector read a chain many times. A resolve stops with
+// [ErrExcessiveMerging] once those reads come to many times the nodes the
+// document holds. One lookup alone can read that many, so [Path.Node] and
+// [Path.Token] return the error as well.
 //
 // # Error Highlighting
 //

@@ -3073,6 +3073,77 @@ func TestPath_MergeKeyAndLiteralMergeName(t *testing.T) {
 	}
 }
 
+func TestPath_MergeBringsInLiteralMergeName(t *testing.T) {
+	t.Parallel()
+
+	// A merge source may hold a real key with the text `<<`, such as an
+	// alias key whose anchor holds that text. The decoder brings that key
+	// in as it does any other, so a path through `<<` selects it rather
+	// than the merge key, and `..'<<'` skips the merge key and its inline
+	// mapping. The path of each match selects that match's node.
+	tcs := map[string]struct {
+		input string
+		want  []string
+	}{
+		"block source": {
+			input: "k: &k \"<<\"\ninner: &inner\n  *k : real\ntop:\n  <<: *inner\n",
+			want:  []string{"$.inner.<<"},
+		},
+		"inline source": {
+			input: "k: &k \"<<\"\ntop:\n  <<: {*k : real}\n",
+		},
+		"sequence source": {
+			input: "k: &k \"<<\"\ninner: &inner\n  *k : real\ntop:\n  <<: [*inner]\n",
+			want:  []string{"$.inner.<<"},
+		},
+		"source that merges the key": {
+			input: "k: &k \"<<\"\nbase: &base {*k : real}\nmid: &mid {<<: *base}\ntop:\n  <<: *mid\n",
+			want:  []string{"$.base.<<"},
+		},
+		"earlier merge key": {
+			input: "k: &k \"<<\"\ntop:\n  <<: {*k : real}\n  <<: {a: 1}\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var decoded struct {
+				Top map[string]any `yaml:"top"`
+			}
+
+			err := yaml.UnmarshalWithOptions([]byte(tc.input), &decoded, yaml.AllowDuplicateMapKey())
+			require.NoError(t, err)
+			require.Equal(t, "real", decoded.Top["<<"])
+
+			f, err := parser.ParseBytes([]byte(tc.input), 0, parser.AllowDuplicateMapKey())
+			require.NoError(t, err)
+
+			doc := f.Docs[0]
+
+			node, err := paths.MustParse("$.top.'<<'").Node(doc)
+			require.NoError(t, err)
+			assert.Equal(t, "real", node.String())
+
+			matches, err := paths.MustParse("$..'<<'").Matches(doc)
+			require.NoError(t, err)
+
+			var found []string
+
+			for _, m := range matches {
+				found = append(found, m.Path.String())
+
+				single, err := m.Path.Node(doc)
+				require.NoError(t, err)
+				assert.Same(t, m.Node, single)
+			}
+
+			assert.Equal(t, tc.want, found)
+		})
+	}
+}
+
 func TestPath_Node_LaterDuplicateKeyWins(t *testing.T) {
 	t.Parallel()
 
