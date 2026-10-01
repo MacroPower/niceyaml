@@ -2913,6 +2913,17 @@ func TestGutter(t *testing.T) {
 		assert.Equal(t, "1\ufe0f\u20e3 a: 1\n1\ufe0f\u20e3 b: 2", p.Print(view))
 	})
 
+	t.Run("cuts a zero-width cluster at the edge from text that fits", func(t *testing.T) {
+		t.Parallel()
+
+		// The zero-width space starts at the gutter width, past the last
+		// column the gutter holds, so the cut drops it whether or not the
+		// text before it runs over.
+		p := testPrinterWithGutter(fixedGutter{width: 2, text: "ab\u200b"})
+
+		assert.Equal(t, "aba: 1\nabb: 2", p.Print(view))
+	})
+
 	t.Run("a negative width counts as none", func(t *testing.T) {
 		t.Parallel()
 

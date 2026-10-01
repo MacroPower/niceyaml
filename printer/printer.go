@@ -871,15 +871,10 @@ func (p *Printer) gutterWidth(maxNumber int) int {
 // over several rows. Only the first row of each stays, so the gutter never
 // adds a row that [Printer.Layout] does not count.
 func (p *Printer) renderGutter(ctx GutterContext, width int) string {
-	text := firstRow(p.gutter.Render(ctx))
-
-	if lipgloss.Width(text) > width {
-		text = cells.Cut(text, 0, width)
-	}
-
-	// The cut drops a wide rune that straddles the width whole, so a cut
-	// row can fall short of the width and gets padded like any other.
-	if w := lipgloss.Width(text); w < width {
+	// The cut drops a wide rune that straddles the width whole, so the
+	// printer pads a row that runs over as well as one that falls short.
+	text, w := cells.CutWidth(firstRow(p.gutter.Render(ctx)), 0, width)
+	if w < width {
 		text += firstRow(p.styles.Style(kind.Text).Render(strings.Repeat(" ", width-w)))
 	}
 
