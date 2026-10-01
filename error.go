@@ -890,6 +890,8 @@ type SourceError struct {
 	// chain and every branch followBranches keeps of the error that ends
 	// it by unwrapping to several, located or not.
 	errors []*SourceError
+	// The message Error returns, built the first time Error asks.
+	msg string
 	// The ranges the excerpt highlights, the location, resolved when the
 	// error was bound, and the range it covers in the source.
 	ranges position.Ranges
@@ -897,6 +899,8 @@ type SourceError struct {
 	rng    position.Range
 	// Makes passedLead find lead once, the first time a message asks.
 	leadOnce sync.Once
+	// Makes Error build msg once.
+	msgOnce sync.Once
 	// The error wraps a binding, whose location, source, and children this
 	// one took over, and whose position its message carries already.
 	adopted bool
@@ -1520,14 +1524,26 @@ func (e *SourceError) Errors() []*SourceError {
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draw them as
 // the branches of a tree. The result never includes source lines, so it
 // is safe to log or compare. [SourceError.Excerpt] and [FormatError]
-// return the annotated source excerpt. A nil SourceError, as [errors.As] can
-// yield from a chain that holds one, has an empty message, as a nil
-// [*Error] does.
+// return the annotated source excerpt. Error reads the text of the bound
+// error the first time it is called and returns the same message from
+// then on. A nil SourceError, as [errors.As] can yield from a chain that
+// holds one, has an empty message, as a nil [*Error] does.
 func (e *SourceError) Error() string {
 	if e == nil {
 		return ""
 	}
 
+	e.msgOnce.Do(func() { e.msg = e.buildError() })
+
+	return e.msg
+}
+
+// buildError builds the message [SourceError.Error] returns. The message
+// of each binding holds the messages of the bindings below it, and the
+// walk for the first line reads them again. A message built anew for
+// every call would rebuild the bindings below once per binding above
+// them, so Error builds it once and keeps it.
+func (e *SourceError) buildError() string {
 	msg := e.err.Error()
 	name := e.source.Name()
 

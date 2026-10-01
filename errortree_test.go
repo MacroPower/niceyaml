@@ -241,6 +241,80 @@ func TestErrorTree_New_DeepMultiWrap(t *testing.T) {
 	}
 }
 
+func TestErrorTree_New_DeepRebind(t *testing.T) {
+	t.Parallel()
+
+	const n = 20
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+
+	tcs := map[string]struct {
+		build func(calls *atomic.Int64) error
+		want  string
+	}{
+		"list multi-error bound at each level": {
+			build: func(calls *atomic.Int64) error {
+				var err error = countingError{calls: calls, msg: "e0"}
+
+				for i := 1; i < n; i++ {
+					next := countingError{calls: calls, msg: fmt.Sprintf("e%d", i)}
+					err = source.Bind(listError{err, next})
+				}
+
+				return err
+			},
+			want: "f.yaml: e0; e1; e2; e3; e4; e5; e6; e7; e8; e9; " +
+				"e10; e11; e12; e13; e14; e15; e16; e17; e18; e19",
+		},
+		"multi-wrap over a located error bound at each level": {
+			build: func(calls *atomic.Int64) error {
+				err := source.Bind(countingError{calls: calls, msg: "e0"})
+
+				for i := 1; i < n; i++ {
+					located := niceyaml.NewError(fmt.Sprintf("e%d", i), niceyaml.AtPath(paths.Root().Child("a")))
+					err = source.Bind(fmt.Errorf("%w; %w", err, located))
+				}
+
+				return err
+			},
+			want: "f.yaml: e0; $.a: e1; $.a: e2; $.a: e3; $.a: e4; $.a: e5; " +
+				"$.a: e6; $.a: e7; $.a: e8; $.a: e9; $.a: e10; $.a: e11; " +
+				"$.a: e12; $.a: e13; $.a: e14; $.a: e15; $.a: e16; $.a: e17; " +
+				"$.a: e18; $.a: e19",
+		},
+	}
+
+	ops := map[string]func(error){
+		"message": func(err error) { _ = err.Error() },
+		"tree":    func(err error) { niceyaml.NewErrorTree(err) },
+		"rebind": func(err error) {
+			located := niceyaml.NewError("last", niceyaml.AtPath(paths.Root().Child("b")))
+			_ = source.Bind(fmt.Errorf("%w; %w", err, located)).Error()
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var calls atomic.Int64
+
+			for op, run := range ops {
+				err := tc.build(&calls)
+
+				calls.Store(0)
+				run(err)
+
+				// Building the message of each binding anew for every read
+				// rebuilds the bindings below it once per binding above
+				// them, n*n times in all.
+				assert.LessOrEqual(t, calls.Load(), int64(8*n), op)
+				assert.Equal(t, tc.want, err.Error(), op)
+			}
+		})
+	}
+}
+
 func TestErrorTree_New_MultiErrorCalls(t *testing.T) {
 	t.Parallel()
 
