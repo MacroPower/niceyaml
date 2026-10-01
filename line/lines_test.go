@@ -2045,6 +2045,46 @@ func TestLines_TokenAt(t *testing.T) {
 		}
 	})
 
+	t.Run("whitespace line before the line ending of the next token", func(t *testing.T) {
+		t.Parallel()
+
+		// The lexer bundles a tab on an otherwise empty line into the
+		// token before it, as it does with indentation, and the token
+		// after it starts with the line ending, so no token holds text
+		// on the whitespace line after the tab.
+		tcs := map[string]struct {
+			input string
+			line  int
+		}{
+			"tab line in mapping": {
+				input: "a: 1\n\t\nb: 2\n",
+				line:  1,
+			},
+			"tab line in sequence": {
+				input: "- a\n\t\n- b\n",
+				line:  1,
+			},
+			"tab line in nested sequence": {
+				input: "a:\n  - 1\n\t\n  - 2\n",
+				line:  2,
+			},
+			"tab line with CRLF": {
+				input: "a: 1\r\n\t\r\nb: 2\r\n",
+				line:  1,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				lines := line.NewLines(tokens.Tokenize(tc.input))
+
+				assert.Nil(t, lines.TokenAt(position.New(tc.line, 0)))
+			})
+		}
+	})
+
 	t.Run("out of bounds line returns nil", func(t *testing.T) {
 		t.Parallel()
 

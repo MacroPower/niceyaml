@@ -179,6 +179,11 @@ func TestSegments_SourceTokenAt_Indentation(t *testing.T) {
 	key := &token.Token{Origin: "other"}
 	blank := &token.Token{Origin: "  \n"}
 	tabbed := &token.Token{Origin: " \t"}
+	// A token that starts with a line ending leaves only that line ending
+	// on the line before it.
+	next := &token.Token{Origin: "\nb"}
+	nl := &token.Token{Origin: "\n"}
+	empty := &token.Token{}
 
 	tcs := map[string]struct {
 		segs segment.Segments
@@ -204,6 +209,20 @@ func TestSegments_SourceTokenAt_Indentation(t *testing.T) {
 			segs: segment.Segments{segment.New(prev, indent)},
 			col:  0,
 			want: nil,
+		},
+		"indentation before only the line ending of the next token": {
+			segs: segment.Segments{segment.New(tabbed, tabbed), segment.New(next, nl)},
+			col:  0,
+			want: nil,
+		},
+		"indentation skips an empty token to reach the next one": {
+			segs: segment.Segments{
+				segment.New(prev, indent),
+				segment.New(empty, empty),
+				segment.New(key, key),
+			},
+			col:  0,
+			want: key,
 		},
 		"whitespace with a line ending keeps its own token": {
 			segs: segment.Segments{segment.New(blank, blank)},

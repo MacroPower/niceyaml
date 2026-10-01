@@ -3666,6 +3666,49 @@ func TestSourceError_Range_Indentation(t *testing.T) {
 	assert.Equal(t, position.NewRange(position.New(2, 2), position.New(2, 7)), got)
 }
 
+func TestSourceError_Range_TabLine(t *testing.T) {
+	t.Parallel()
+
+	// A line that holds only a tab precedes a token that starts with the
+	// line ending, so no token holds text after the tab. The range stays
+	// on the tab line rather than covering the token on the next line.
+	tcs := map[string]struct {
+		input string
+		pos   position.Position
+	}{
+		"tab line in mapping": {
+			input: "a: 1\n\t\nb: 2\n",
+			pos:   position.New(1, 0),
+		},
+		"tab line in sequence": {
+			input: "- a\n\t\n- b\n",
+			pos:   position.New(1, 0),
+		},
+		"tab line in nested sequence": {
+			input: "a:\n  - 1\n\t\n  - 2\n",
+			pos:   position.New(2, 0),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := xmlSource(tc.input)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, source.Bind(niceyaml.NewError("tab",
+				niceyaml.AtPosition(tc.pos),
+			)), &bound)
+
+			got, ok := bound.Range()
+			require.True(t, ok)
+			assert.Equal(t, position.NewRange(tc.pos, tc.pos), got)
+		})
+	}
+}
+
 func TestSourceError_Range_MultiLineToken(t *testing.T) {
 	t.Parallel()
 

@@ -140,8 +140,10 @@ func (s Segments) PartTokens() token.Tokens {
 // column, or nil when no token does.
 //
 // The lexer bundles a line's indentation into the token that ends on the
-// line before, so a column in that indentation resolves to the token that
-// follows it on this line instead. It is nil when no token follows.
+// line before, so a column in that indentation resolves to the token whose
+// text follows it on this line instead. It is nil when no such token
+// follows, as on a line that holds only whitespace before the line ending
+// of the next token.
 func (s Segments) SourceTokenAt(col int) *token.Token {
 	c := 0
 
@@ -152,7 +154,7 @@ func (s Segments) SourceTokenAt(col int) *token.Token {
 			}
 
 			for _, next := range s[i+1:] {
-				if !next.indentation() {
+				if next.width > 0 && !next.indentation() {
 					return next.source
 				}
 			}
