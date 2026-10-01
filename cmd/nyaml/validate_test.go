@@ -282,7 +282,7 @@ func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
 		t.Skip("Windows drops a .. element as text before it follows a symlink")
 	}
 
-	// Both links lead to sub/deep, so the OS reads each ref as
+	// Every link leads to sub/deep, so the OS reads each ref as
 	// sub/schema.json, which accepts a string. Cleaning a ref as text
 	// would name a schema.json beside the link, which rejects one or
 	// does not exist.
@@ -291,6 +291,7 @@ func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
 
 	require.NoError(t, os.MkdirAll(filepath.Join(sub, "deep"), 0o755))
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "cfg:v2"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "file:"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(sub, "schema.json"), []byte(`{"type": "string"}`), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "schema.json"), []byte(`{"type": "integer"}`), 0o600))
 
@@ -303,6 +304,7 @@ func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
 	}
 
 	require.NoError(t, os.Symlink(filepath.Join("..", "sub", "deep"), filepath.Join(dir, "cfg:v2", "ldir")))
+	require.NoError(t, os.Symlink(filepath.Join("..", "sub", "deep"), filepath.Join(dir, "file:", "ldir")))
 
 	t.Chdir(dir)
 
@@ -314,6 +316,11 @@ func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
 		},
 		"colon in a directory before the symlink": {
 			ref: "cfg:v2/ldir/../schema.json",
+		},
+		// FileOrURL reads a file URL whose host is not localhost as a
+		// relative path, here file:/ldir/../schema.json.
+		"file URL with a host": {
+			ref: "file://ldir/../schema.json",
 		},
 	}
 
@@ -328,33 +335,39 @@ func TestBuildRegistrySchemaColonDotDotAfterSymlink(t *testing.T) {
 	}
 }
 
-func TestURLOrDrive(t *testing.T) {
+func TestReadsAsPath(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
 		ref  string
 		want bool
 	}{
-		"https URL":                  {ref: "https://example.com/schema.json", want: true},
-		"upper-case http URL":        {ref: "HTTP://example.com/schema.json", want: true},
-		"file URL":                   {ref: "file:///tmp/schema.json", want: true},
-		"upper-case file URL":        {ref: "FILE:/tmp/schema.json", want: true},
-		"drive with a slash":         {ref: "C:/schemas/schema.json", want: true},
-		"drive with a backslash":     {ref: `c:\schemas\schema.json`, want: true},
-		"bare drive":                 {ref: "D:", want: true},
-		"relative path":              {ref: "schemas/schema.json"},
-		"colon in the first element": {ref: "v1:dir/schema.json"},
-		"single letter and colon":    {ref: "C:schema.json"},
-		"digit and colon":            {ref: "1:/schema.json"},
-		"other scheme":               {ref: "urn:schema"},
-		"empty":                      {ref: ""},
+		"https URL":                    {ref: "https://example.com/schema.json"},
+		"upper-case http URL":          {ref: "HTTP://example.com/schema.json"},
+		"file URL":                     {ref: "file:///tmp/schema.json"},
+		"upper-case file URL":          {ref: "FILE:/tmp/schema.json"},
+		"file URL with localhost":      {ref: "file://localhost/tmp/schema.json"},
+		"file URL with a host":         {ref: "file://example.com/dir/schema.json", want: true},
+		"file URL that does not parse": {ref: "file:/%zz/schema.json", want: true},
+		"drive with a slash":           {ref: "C:/schemas/schema.json"},
+		"drive with a backslash":       {ref: `c:\schemas\schema.json`},
+		"bare drive":                   {ref: "D:"},
+		"rooted path":                  {ref: "/schemas/schema.json", want: true},
+		"relative path":                {ref: "schemas/schema.json", want: true},
+		"colon in the first element":   {ref: "v1:dir/schema.json", want: true},
+		"single letter and colon":      {ref: "C:schema.json", want: true},
+		"other scheme":                 {ref: "urn:schema", want: true},
+		"empty":                        {ref: ""},
+		// Windows reads any character before a colon as a drive, so there
+		// the ref reads as absolute.
+		"digit and colon": {ref: "1:/schema.json", want: runtime.GOOS != "windows"},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, urlOrDrive(tc.ref))
+			assert.Equal(t, tc.want, readsAsPath(tc.ref))
 		})
 	}
 }

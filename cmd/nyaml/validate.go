@@ -8,13 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
-	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/schemastore"
 )
@@ -251,26 +249,22 @@ func physicalAbs(path string) string {
 	return filepath.Join(resolved, abs[end:])
 }
 
-// urlOrDrive reports whether [schema.FileOrURL] reads ref as an HTTP/HTTPS
-// URL, a file URL, or a path that opens with a drive letter such as "C:/".
-// A relative path whose first element holds a colon, such as
-// "v1:dir/schema.json", is none of these.
-func urlOrDrive(ref string) bool {
-	const fileScheme = "file:/"
-
-	if httpfetch.IsHTTPURL(ref) ||
-		len(ref) >= len(fileScheme) && strings.EqualFold(ref[:len(fileScheme)], fileScheme) {
+// readsAsPath reports whether [schema.FileOrURL] reads ref as a path that
+// starts with a separator or as a relative path, rather than as a URL or
+// a path that opens with a drive letter such as "C:/". It asks FileOrURL
+// with an empty base directory, which reports [schema.ErrNoBaseDir] for a
+// relative path, so the two agree on every ref. A relative path whose
+// first element holds a colon, such as "v1:dir/schema.json", reads as a
+// path, and so does a file URL that names no local path, such as one with
+// a host other than localhost.
+func readsAsPath(ref string) bool {
+	if ref != "" && os.IsPathSeparator(ref[0]) {
 		return true
 	}
 
-	// A drive is one ASCII letter and a colon, then a separator or nothing.
-	if len(ref) < 2 || ref[1] != ':' || len(ref) > 2 && ref[2] != '/' && ref[2] != '\\' {
-		return false
-	}
+	_, err := schema.FileOrURL("", ref)
 
-	letter := ref[0]
-
-	return (letter >= 'a' && letter <= 'z') || (letter >= 'A' && letter <= 'Z')
+	return errors.Is(err, schema.ErrNoBaseDir)
 }
 
 // lastDotDotEnd returns the index just past the last ".." element of
@@ -313,9 +307,9 @@ func lastDotDotEnd(path string) int {
 func buildRegistry(ctx context.Context, schemaRef string) (*schema.Registry, error) {
 	if schemaRef != "" {
 		// FileOrURL cleans a path as text, which drops a ".." together
-		// with a symlinked directory before it. A URL or drive-letter
-		// path goes to FileOrURL as written.
-		if !urlOrDrive(schemaRef) {
+		// with a symlinked directory before it. Any other ref, such as a
+		// URL or a drive-letter path, goes to FileOrURL as written.
+		if readsAsPath(schemaRef) {
 			schemaRef = physicalAbs(schemaRef)
 		}
 
