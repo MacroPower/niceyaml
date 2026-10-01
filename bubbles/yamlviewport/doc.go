@@ -48,11 +48,9 @@
 // whole history, pass it to [Model.AddRevisions] instead, which computes
 // only the diff of the last revision.
 //
-// Three diff modes control how the viewport compares revisions:
-//
-//   - [DiffModeAdjacent]: Compare with the previous revision (default).
-//   - [DiffModeOrigin]: Compare with the first revision.
-//   - [DiffModeNone]: Show current revision without diff markers.
+// A [DiffMode] picks the revision the viewport compares with. By default it
+// compares each revision with the one before it, and [Model.SetDiffMode]
+// can compare with the first revision instead or turn the diff off.
 //
 // Set [ViewModeHunks] via [Model.SetViewMode] to render a condensed diff
 // showing only changed lines with surrounding context, or

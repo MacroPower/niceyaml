@@ -32,13 +32,9 @@
 //	h := lcs.NewHirschberg()
 //	ops := h.Diff(before, after)
 //
-// Each [Op] in the result describes one diff operation with its index in each
-// input slice, or -1 on the side it does not touch. The [OpKind] indicates the
-// operation type:
-//
-//   - [OpEqual]: Line exists in both, with Before and After set.
-//   - [OpDelete]: Line only in before, with After set to -1.
-//   - [OpInsert]: Line only in after, with Before set to -1.
+// Each [Op] in the result keeps a line that both inputs share, deletes a
+// line from before, or inserts a line from after. It holds the line's index
+// in each input slice, or -1 for the input it does not touch.
 //
 // The package has no dependencies on the rest of niceyaml, so you can develop
 // and test an [Algorithm] on plain string slices. The diff package maps
