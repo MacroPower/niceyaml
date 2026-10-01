@@ -2069,9 +2069,7 @@ func viewOf(node ast.Node) (ast.Node, bool) {
 		return &c, true
 
 	case *ast.MappingValueNode:
-		value, changed := mappingValueView(n)
-
-		return value, changed
+		return mappingValueView(n)
 
 	case *ast.MappingNode:
 		values, changed := viewsOf(n.Values, mappingValueView)
