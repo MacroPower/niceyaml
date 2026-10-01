@@ -20,6 +20,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -560,7 +561,7 @@ func reachesValidator(t reflect.Type, seen map[reflect.Type]bool) bool {
 
 	case reflect.Struct:
 		for field := range t.Fields() {
-			if _, _, skip := fieldName(field); !skip && reachesValidator(field.Type, seen) {
+			if _, _, skip := yamlfield.Name(field); !skip && reachesValidator(field.Type, seen) {
 				return true
 			}
 		}
@@ -772,8 +773,8 @@ func (w *selfWalker) walkEntries(path paths.Path, entries []mapEntry, ambiguous 
 // [fieldsOf] returns them.
 type structFields struct {
 	// The names of the fields of the struct that are not inline, as
-	// [ownFieldNames] returns them, or nil when no field in held is
-	// inline.
+	// [yamlfield.OwnNames] returns them, or nil when no field in held
+	// is inline.
 	own map[string]bool
 
 	// The fields that go-yaml decodes and whose types may hold a
@@ -783,7 +784,8 @@ type structFields struct {
 
 // heldField is a field of a struct whose type may hold a [SelfValidator].
 type heldField struct {
-	// The name go-yaml decodes the field under, as [fieldName] returns it.
+	// The name go-yaml decodes the field under, as [yamlfield.Name]
+	// returns it.
 	name string
 
 	// The index of the field in its struct.
@@ -812,34 +814,19 @@ func readFields(t reflect.Type) *structFields {
 			continue
 		}
 
-		name, inline, skip := fieldName(field)
+		name, inline, skip := yamlfield.Name(field)
 		if skip {
 			continue
 		}
 
 		if inline && fields.own == nil {
-			fields.own = ownFieldNames(t)
+			fields.own = yamlfield.OwnNames(t)
 		}
 
 		fields.held = append(fields.held, heldField{name: name, index: i, inline: inline})
 	}
 
 	return fields
-}
-
-// ownFieldNames returns the names go-yaml decodes the fields of t, a
-// struct type, under, leaving out the fields it skips and those that are
-// inline.
-func ownFieldNames(t reflect.Type) map[string]bool {
-	names := map[string]bool{}
-
-	for field := range t.Fields() {
-		if name, inline, skip := fieldName(field); !skip && !inline {
-			names[name] = true
-		}
-	}
-
-	return names
 }
 
 // entriesMayHoldValidator reports whether an element of a value of type t,
@@ -1155,36 +1142,6 @@ func (w *selfWalker) validate(v reflect.Value, base paths.Path) bool {
 	w.errs = append(w.errs, err)
 
 	return false
-}
-
-// fieldName returns the name go-yaml decodes field under, whether the
-// field is inline so its own fields sit beside its siblings, and whether
-// go-yaml skips the field. It skips an unexported field that is not
-// embedded, and one whose tag is "-". The name comes from the yaml tag,
-// or the json tag when the field has no yaml tag. It is the lowercased
-// field name when neither tag names it, as go-yaml spells it.
-func fieldName(field reflect.StructField) (string, bool, bool) {
-	if field.PkgPath != "" && !field.Anonymous {
-		return "", false, true
-	}
-
-	tag := field.Tag.Get("yaml")
-	if tag == "" {
-		tag = field.Tag.Get("json")
-	}
-
-	if tag == "-" {
-		return "", false, true
-	}
-
-	name := strings.ToLower(field.Name)
-
-	options := strings.Split(tag, ",")
-	if options[0] != "" {
-		name = options[0]
-	}
-
-	return name, slices.Contains(options[1:], "inline"), false
 }
 
 // keyNames returns the text the document spells each key of the mapping
