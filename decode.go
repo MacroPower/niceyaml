@@ -1941,13 +1941,18 @@ func WithReferences(data ...[]byte) DecodeOption {
 // wrong kind reads "expected integer, got string". The kinds are mapping,
 // sequence, string, integer, float, boolean, null, timestamp, binary for
 // a value under a !!binary tag, and duration for a [time.Duration]
-// target. A number outside the range of an integer type reads "expected
-// integer from 0 to 65535, got 70000". A rejection of a key, such as an
-// unknown field or a key that does not read as the key type of a map,
-// carries the path of the key, which ends in `~`. The go-yaml error stays
-// in the chain, so [errors.As] reaches a [yaml.TypeError], a
-// [yaml.OverflowError], a [yaml.UnexpectedNodeTypeError], or a
-// [yaml.UnknownFieldError] for a caller that needs the Go types.
+// target. A target that takes no YAML value but a null, such as a
+// channel, reads "expected no value, got integer". A value the decoder
+// rejects for its Go type alone reads "expected mapping, got mapping of
+// another type", as the value of an anchor does when an inline field
+// with an alias option cannot hold it. A number outside the range of an
+// integer type reads "expected integer from 0 to 65535, got 70000". A
+// rejection of a key, such as an unknown field or a key that does not
+// read as the key type of a map, carries the path of the key, which ends
+// in `~`. The go-yaml error stays in the chain, so [errors.As] reaches a
+// [yaml.TypeError], a [yaml.OverflowError], a
+// [yaml.UnexpectedNodeTypeError], or a [yaml.UnknownFieldError] for a
+// caller that needs the Go types.
 //
 // The path names the place where the document writes the value. A value
 // that an alias or a `<<` merge key brings in reports the path where its

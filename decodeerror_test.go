@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/netip"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -454,6 +456,154 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 
 			_, ok = under.CutPrefix(path)
 			assert.True(t, ok, "position %s lies at %s", pos, under)
+		})
+	}
+}
+
+func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
+	t.Parallel()
+
+	// An inline field that takes the value of the anchor a `<<` key names.
+	// The decoder assigns the value as it decoded the anchor, and rejects
+	// one of any Go type but the type of the field.
+	type aliased struct {
+		*StrictBase `yaml:",inline,alias"`
+
+		B int `yaml:"b"`
+	}
+
+	type other struct {
+		A int `yaml:"a"`
+	}
+
+	merge := "defs: &d\n  a: 1\nv:\n  <<: *d\n  b: 1\n"
+
+	tcs := map[string]struct {
+		decode func(context.Context, *niceyaml.Node, ...niceyaml.DecodeOption) error
+		input  string
+		want   string
+	}{
+		"channel": {
+			decode: decodeInto[struct {
+				V chan int `yaml:"v"`
+			}](),
+			input: "v: 5\n",
+			want:  "1:4: $.v: expected no value, got integer",
+		},
+		"pointer to a channel": {
+			decode: decodeInto[struct {
+				V *chan int `yaml:"v"`
+			}](),
+			input: "v: {a: 1}\n",
+			want:  "1:5: $.v: expected no value, got mapping",
+		},
+		"function": {
+			decode: decodeInto[struct {
+				V func() `yaml:"v"`
+			}](),
+			input: "v: abc\n",
+			want:  "1:4: $.v: expected no value, got string",
+		},
+		"complex number": {
+			decode: decodeInto[struct {
+				V complex128 `yaml:"v"`
+			}](),
+			input: "v: 5\n",
+			want:  "1:4: $.v: expected no value, got integer",
+		},
+		"element of an array of complex numbers": {
+			decode: decodeInto[struct {
+				V [2]complex64 `yaml:"v"`
+			}](),
+			input: "v: [1.5]\n",
+			want:  "1:5: $.v[0]: expected no value, got float",
+		},
+		"value of a map of functions": {
+			decode: decodeInto[struct {
+				V map[string]func() `yaml:"v"`
+			}](),
+			input: "v: {a: true}\n",
+			want:  "1:8: $.v.a: expected no value, got boolean",
+		},
+		"unsafe pointer": {
+			decode: decodeInto[struct {
+				V unsafe.Pointer `yaml:"v"`
+			}](),
+			input: "v: 5\n",
+			want:  "1:4: $.v: expected no value, got integer",
+		},
+		// The decoder fills one pointer around a value and no more.
+		"pointer to a pointer": {
+			decode: decodeInto[struct {
+				V **int `yaml:"v"`
+			}](),
+			input: "v: 5\n",
+			want:  "1:4: $.v: expected integer, got integer of another type",
+		},
+		"anchor read into an interface": {
+			decode: decodeInto[struct {
+				Defs any     `yaml:"defs"`
+				V    aliased `yaml:"v"`
+			}](),
+			input: merge,
+			want:  "2:3: $.defs: expected mapping, got value of another type",
+		},
+		"anchor read into another struct": {
+			decode: decodeInto[struct {
+				Defs *other  `yaml:"defs"`
+				V    aliased `yaml:"v"`
+			}](),
+			input: merge,
+			want:  "2:3: $.defs: expected mapping, got mapping of another type",
+		},
+		"anchor read into a map": {
+			decode: decodeInto[struct {
+				Defs map[string]int `yaml:"defs"`
+				V    aliased        `yaml:"v"`
+			}](),
+			input: merge,
+			want:  "2:3: $.defs: expected mapping, got mapping of another type",
+		},
+		"anchor read into no field": {
+			decode: decodeInto[struct {
+				V aliased `yaml:"v"`
+			}](),
+			input: merge,
+			want:  "2:3: $.defs: expected mapping, got mapping of another type",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, tc.input)
+
+			err := tc.decode(t.Context(), dd)
+			require.EqualError(t, err, tc.want)
+			require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+			// The decoder reports the two Go types it compared, and the
+			// message spells neither of them.
+			var typeErr *yaml.TypeError
+
+			require.ErrorAs(t, err, &typeErr)
+
+			var srcErr *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &srcErr)
+
+			for _, typ := range []reflect.Type{typeErr.DstType, typeErr.SrcType} {
+				// The kinds integer, string, and boolean hold the names of
+				// the Go types int, string, and bool.
+				if spelled := typ.String(); !slices.Contains([]string{"int", "string", "bool"}, spelled) {
+					assert.NotContains(t, srcErr.Message(), spelled)
+				}
+			}
+
+			for _, word := range []string{"chan", "func", "complex", "unsafe", "interface", "struct", "map[", "*", "niceyaml"} {
+				assert.NotContains(t, srcErr.Message(), word)
+			}
 		})
 	}
 }

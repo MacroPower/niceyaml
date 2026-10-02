@@ -51,6 +51,14 @@ const (
 	kindFloat    = "float"
 	kindBoolean  = "boolean"
 	kindNull     = "null"
+
+	// The name of a value whose kind its type does not tell, as for a
+	// value an interface holds.
+	kindValue = "value"
+
+	// The name a target takes when no YAML value but a null decodes into
+	// it, as for a channel.
+	kindNone = "no value"
 )
 
 // rejectionMessage returns the message of err, a rejection the go-yaml
@@ -67,12 +75,25 @@ const (
 //     reads "expected integer from -128 to 127, got 300", with the range
 //     of the type.
 //
+// The decoder also rejects a value by its Go type alone, as when it hands
+// the value of an anchor to an inline field with an alias option, or
+// fills a pointer to a pointer. The two types can then hold one kind of
+// value, as two struct types do, and an anchor the decoder read into an
+// interface has a type that names no kind. Kinds alone would read
+// "expected mapping, got mapping", so the message reads "expected
+// mapping, got mapping of another type" and names neither type.
+//
 // Any other error keeps the message the decoder gave it, such as the one
 // for an unknown field, which names the field as the document does.
 func rejectionMessage(err yaml.Error) string {
 	switch e := err.(type) { //nolint:errorlint // The decoder returns these types unwrapped.
 	case *yaml.TypeError:
-		return fmt.Sprintf("expected %s, got %s", kindOfType(e.DstType), kindOfType(e.SrcType))
+		want, got := kindOfType(e.DstType), kindOfType(e.SrcType)
+		if want == got || got == kindValue {
+			return fmt.Sprintf("expected %s, got %s of another type", want, got)
+		}
+
+		return fmt.Sprintf("expected %s, got %s", want, got)
 
 	case *yaml.UnexpectedNodeTypeError:
 		return fmt.Sprintf("expected %s, got %s", kindOfNode(e.Expected), kindOfNode(e.Actual))
@@ -80,7 +101,7 @@ func rejectionMessage(err yaml.Error) string {
 	case *yaml.OverflowError:
 		lo, hi, ok := integerRange(e.DstType)
 		if !ok {
-			return err.GetMessage()
+			return fmt.Sprintf("expected %s, got %s", kindOfType(e.DstType), e.SrcNum)
 		}
 
 		return fmt.Sprintf("expected %s from %s to %s, got %s", kindInteger, lo, hi, e.SrcNum)
@@ -94,7 +115,12 @@ func rejectionMessage(err yaml.Error) string {
 // the message of a rejection. The type is the target of a decode, or the
 // type the go-yaml decoder read a value of the document as. A nil type
 // is the null the decoder reads as a nil value. A pointer names what it
-// points to. A type of a kind no YAML value decodes into names itself.
+// points to.
+//
+// The result never names a Go type. An interface holds a value of any
+// kind, so it reads [kindValue]. No YAML value but a null decodes into a
+// channel, a function, a complex number, or an unsafe pointer, so a
+// target of one of those kinds reads [kindNone].
 func kindOfType(t reflect.Type) string {
 	if t == nil {
 		return kindNull
@@ -127,8 +153,10 @@ func kindOfType(t reflect.Type) string {
 		return kindSequence
 	case reflect.Map, reflect.Struct:
 		return kindMapping
+	case reflect.Interface:
+		return kindValue
 	default:
-		return t.String()
+		return kindNone
 	}
 }
 
