@@ -7,13 +7,13 @@ replace go.jacobcolvin.com/niceyaml => ..
 require (
 	charm.land/fang/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
+	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/stretchr/testify v1.12.1
 	go.jacobcolvin.com/niceyaml v0.0.0-20260928025007-fd1be398483f
 	go.jacobcolvin.com/x/stringtest v0.2.0
 )
 
 require (
-	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260910203606-6c9e17dc7a16 // indirect
 	github.com/charmbracelet/x/ansi v0.11.8 // indirect
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20260913004009-c615ff2f7805 // indirect

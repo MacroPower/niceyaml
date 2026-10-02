@@ -8,6 +8,7 @@ import (
 
 	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/printer"
@@ -92,6 +93,14 @@ func WithPrinter(p *printer.Printer) Option {
 // the handler drops the line breaks that end it, such as the one after
 // the suggestions Cobra lists for an unknown command.
 //
+// Fang hands the handler a [*colorprofile.Writer] that holds the color
+// profile of the error stream. When that profile has no color, as in a
+// pipe, a file, or a terminal with NO_COLOR set, the handler writes what
+// [niceyaml.FormatError] renders in place of the PrintError output, with
+// the context lines of the printer. The carets of FormatError then mark
+// each range that color marks in a terminal, and its lines do not wrap.
+// A writer of any other type gets the PrintError output.
+//
 // Unlike [fang.DefaultErrorHandler], which wraps errors in a lipgloss style
 // that can break multi-line output, this handler styles only the error
 // header and leaves the rendered lines intact.
@@ -111,7 +120,7 @@ func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 
 	indent := strings.Repeat(" ", Indent)
 
-	msg := cfg.printer.PrintError(err)
+	msg := render(w, err, cfg.printer)
 
 	// A blank line of the handler's own follows the message, so the line
 	// breaks that end a message, such as the one after the suggestions
@@ -137,6 +146,18 @@ func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 		)))
 		ignoreN(fmt.Fprintln(w))
 	}
+}
+
+// render returns err as the handler writes it to w: what
+// [niceyaml.FormatError] renders when w is a [*colorprofile.Writer] whose
+// profile has no color, and what [printer.Printer.PrintError] renders
+// otherwise.
+func render(w io.Writer, err error, p *printer.Printer) string {
+	if cw, ok := w.(*colorprofile.Writer); ok && cw.Profile <= colorprofile.ASCII {
+		return niceyaml.FormatError(err, p.ContextLines())
+	}
+
+	return p.PrintError(err)
 }
 
 // isBound reports whether the tree of err holds an error bound to a

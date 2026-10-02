@@ -9,6 +9,7 @@ import (
 
 	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/stretchr/testify/assert"
 	"go.jacobcolvin.com/x/stringtest"
 
@@ -516,6 +517,89 @@ func TestNewErrorHandler_Width(t *testing.T) {
 			}
 
 			assert.Equal(t, tc.width, widest)
+		})
+	}
+}
+
+func TestErrorHandler_ColorProfile(t *testing.T) {
+	t.Parallel()
+
+	src := niceyaml.NewSourceFromTokens(tokens.Tokenize(stringtest.Input(`
+		name: test
+		value: 123
+	`)))
+
+	err := yamltest.Bind(t, src, niceyaml.NewError(
+		"two problems",
+		niceyaml.WithErrors(
+			niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name").Key())),
+			niceyaml.NewError("bad value", niceyaml.AtPath(paths.Root().Child("value"))),
+		),
+	))
+
+	p := printer.New(
+		printer.WithStyles(yamltest.NewXMLStyles()),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithContextLines(0),
+	)
+
+	// The handler writes the header, each line of the message behind the
+	// indent, and a blank line.
+	output := func(msg string) string {
+		rows := []string{"Error"}
+
+		for row := range strings.SplitSeq(msg, "\n") {
+			rows = append(rows, strings.Repeat(" ", fangs.Indent)+row)
+		}
+
+		return stringtest.JoinLF(append(rows, "", "")...)
+	}
+
+	styled := output(p.PrintError(err))
+	plain := output(niceyaml.FormatError(err, 0))
+
+	// The plain form holds no style and draws a caret run under each range.
+	assert.NotContains(t, plain, "<")
+	assert.Contains(t, plain, "^^^^ bad name")
+	assert.Contains(t, styled, "<genericError>name</genericError>")
+
+	tcs := map[string]struct {
+		want    string
+		profile colorprofile.Profile
+	}{
+		"true color": {
+			profile: colorprofile.TrueColor,
+			want:    styled,
+		},
+		"256 colors": {
+			profile: colorprofile.ANSI256,
+			want:    styled,
+		},
+		"16 colors": {
+			profile: colorprofile.ANSI,
+			want:    styled,
+		},
+		"terminal without color": {
+			profile: colorprofile.ASCII,
+			want:    plain,
+		},
+		"not a terminal": {
+			profile: colorprofile.NoTTY,
+			want:    plain,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+
+			w := &colorprofile.Writer{Forward: &buf, Profile: tc.profile}
+			fangs.NewErrorHandler(fangs.WithPrinter(p))(w, testStyles(), err)
+
+			assert.Equal(t, tc.want, buf.String())
 		})
 	}
 }

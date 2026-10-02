@@ -15,6 +15,10 @@
 //	    fang.WithErrorHandler(fangs.ErrorHandler),
 //	)
 //
+// When the error stream has no color, as in a pipe or under NO_COLOR, the
+// handler prints the plain text of [niceyaml.FormatError] instead, whose
+// carets mark each range.
+//
 // # Color Schemes
 //
 // [ColorScheme] and [ColorSchemeFunc] translate the styles of a
