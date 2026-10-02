@@ -1954,7 +1954,7 @@ func TestSchema_Validate_Scope(t *testing.T) {
 		rng, ok := bound.Range()
 		require.True(t, ok)
 		assert.Equal(t, position.New(2, 12), rng.Start)
-		assert.Equal(t, "3:13: $.replicas: expected \"integer\", got \"string\"", bound.Error())
+		assert.Equal(t, "3:13: $.spec.replicas: expected \"integer\", got \"string\"", bound.Error())
 
 		// The whole document conforms where the node does not.
 		require.NoError(t, dd.Validate(t.Context(), compileSchema(t, []byte(`{
@@ -1984,7 +1984,7 @@ func TestSchema_Validate_Scope(t *testing.T) {
 		rng, ok := bound.Range()
 		require.True(t, ok)
 		assert.Equal(t, position.New(2, 8), rng.Start)
-		assert.Equal(t, "3:9: $.0x10: expected \"integer\", got \"string\"", bound.Error())
+		assert.Equal(t, "3:9: $.spec.0x10: expected \"integer\", got \"string\"", bound.Error())
 	})
 
 	t.Run("decoded key behind an alias resolves from the node", func(t *testing.T) {
@@ -2014,7 +2014,7 @@ func TestSchema_Validate_Scope(t *testing.T) {
 		rng, ok := bound.Range()
 		require.True(t, ok)
 		assert.Equal(t, position.New(0, 13), rng.Start)
-		assert.Equal(t, "1:14: $.c.0x10: expected \"string\", got \"integer\"", bound.Error())
+		assert.Equal(t, "1:14: $.b.c.0x10: expected \"string\", got \"integer\"", bound.Error())
 	})
 
 	t.Run("additional property resolves from the node", func(t *testing.T) {

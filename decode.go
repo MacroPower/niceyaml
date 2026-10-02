@@ -701,7 +701,9 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // selects. Decode decodes that node alone, which reads one value without
 // decoding the whole document, such as a discriminator field that routes
 // the document. Bind resolves the paths in an error from the node, so a
-// check written for the type of that value reports the right lines. Any
+// check written for the type of that value reports the right lines. The
+// bound error carries each path from the root of the document, so it
+// names the value as a decode of the whole document does. Any
 // Node reaches the root of its document through [Node.Document], and
 // [Node.Path] is [paths.Root] for the root and the path from it for a
 // scoped Node.
@@ -1239,7 +1241,9 @@ func (n *Node) Lines() line.Lines {
 // token [paths.Path.Token] resolves, one per line the token spans, without
 // the spaces around its content. They are the ranges [SourceError.Excerpt]
 // highlights for an [Error] built with [AtPath] at that path, and the path
-// resolves from the scope of the Node, as it does in such an Error. A
+// resolves from the scope of the Node, as it does in such an Error. A path
+// from [SourceError.Path] reads from the root of the document, so the
+// Node from [SourceError.Document] resolves it. A
 // scalar covers every line of its text, a block scalar its indicator, a
 // mapping its first key, and a sequence its first element. A path from
 // [paths.Path.Key] covers the key of the entry rather than its value.
@@ -1362,9 +1366,19 @@ func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []
 //
 //	return item.Bind(check(value))
 //
-// The message of a bound [*Error] keeps the path as the error wrote it,
-// and the position in front of it is the one the path resolved to from
-// the scope. An Error that carries a position or a range beside its path,
+// The message of a bound [*Error] carries its path from the root of the
+// document, behind the position the path resolved to. A Node from
+// [Node.At] or [Node.Nodes] puts its own [Node.Path] in front of each
+// path in err, as [Rebase] does. A check that wrote `$.price` thus
+// reports `$.items[1].price` when the Node at `$.items[1]` binds it, in
+// the message and in [SourceError.Path], as a decode of the whole
+// document reports it. The paths of a join and of the errors nested with
+// [WithErrors] change the same way. An error that carries no path stays
+// as it is, so one with no location gains none. Text that a wrapper such
+// as [fmt.Errorf] added around a located Error keeps the path the
+// wrapper wrote, behind the joined one.
+//
+// An Error that carries a position or a range beside its path,
 // from [AtPosition] or [AtRange], binds at that position or range instead,
 // with the position or the start of the range in front of the message.
 // Bind does not resolve the path of such an Error, so a path the document

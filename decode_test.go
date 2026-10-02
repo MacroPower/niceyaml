@@ -2251,7 +2251,7 @@ func TestDocument_Bind_Check(t *testing.T) {
 		rng, ok := bound.Range()
 		require.True(t, ok)
 		assert.Equal(t, position.NewRange(position.New(4, 11), position.New(4, 18)), rng)
-		assert.Equal(t, "5:12: $.close: closes too early", err.Error())
+		assert.Equal(t, "5:12: $.spec.hours.close: closes too early", err.Error())
 	})
 
 	t.Run("a passing check binds to nothing", func(t *testing.T) {
@@ -2273,6 +2273,226 @@ func TestDocument_Bind_Check(t *testing.T) {
 type checkHours struct {
 	Open  string `yaml:"open"`
 	Close string `yaml:"close"`
+}
+
+func TestNode_Bind_Scope(t *testing.T) {
+	t.Parallel()
+
+	// The root holds a key close of its own, so a path the binding left
+	// as the check wrote it would name that key.
+	source := niceyaml.NewSourceFromString(stringtest.Input(`
+		close: top
+		shops:
+		  - hours:
+		      open: "17:00"
+		      close: "09:00"
+	`), niceyaml.WithName("cfg.yaml"))
+
+	doc, err := source.Document()
+	require.NoError(t, err)
+
+	hoursPath := paths.Root().Child("shops").Index(0).Child("hours")
+	hours := yamltest.At(t, doc, hoursPath)
+
+	openPath := paths.Root().Child("open")
+	closePath := paths.Root().Child("close")
+
+	tcs := map[string]struct {
+		err error
+		// The message of the binding, its path, when it carries one, and
+		// the message of each of its children.
+		want     string
+		path     string
+		children []string
+	}{
+		"a path joins the scope": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(closePath)),
+			want: "cfg.yaml:5:14: $.shops[0].hours.close: bad",
+			path: "$.shops[0].hours.close",
+		},
+		"the root path names the scope": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Root())),
+			want: "cfg.yaml:4:7: $.shops[0].hours: bad",
+			path: "$.shops[0].hours",
+		},
+		"a key path joins the scope": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(closePath.Key())),
+			want: "cfg.yaml:5:7: $.shops[0].hours.close~: bad",
+			path: "$.shops[0].hours.close~",
+		},
+		"a path that does not resolve joins the scope": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("nope"))),
+			want: "cfg.yaml: $.shops[0].hours.nope: bad",
+			path: "$.shops[0].hours.nope",
+		},
+		"a path beside a range joins the scope and binds at the range": {
+			err: niceyaml.NewError("bad",
+				niceyaml.AtPath(closePath),
+				niceyaml.AtRange(position.NewRange(position.New(4, 6), position.New(4, 11))),
+			),
+			want: "cfg.yaml:5:7: $.shops[0].hours.close: bad",
+			path: "$.shops[0].hours.close",
+		},
+		"a rebased error joins the scope in front of its base": {
+			err:  niceyaml.Rebase(errors.New("bad"), closePath),
+			want: "cfg.yaml:5:14: $.shops[0].hours.close: bad",
+			path: "$.shops[0].hours.close",
+		},
+		"an error with no location gains none": {
+			err:  errors.New("bad"),
+			want: "cfg.yaml: bad",
+		},
+		"a position alone stays as it is": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 7))),
+			want: "cfg.yaml:1:8: bad",
+		},
+		"text a wrapper wrote keeps the path it wrote": {
+			err:  fmt.Errorf("check: %w", niceyaml.NewError("bad", niceyaml.AtPath(closePath))),
+			want: "cfg.yaml:5:14: $.shops[0].hours.close: check: $.close: bad",
+			path: "$.shops[0].hours.close",
+		},
+		"each line of a join joins the scope": {
+			err: errors.Join(
+				niceyaml.NewError("early", niceyaml.AtPath(openPath)),
+				errors.New("plain"),
+				niceyaml.NewError("late", niceyaml.AtPath(closePath)),
+			),
+			want: "cfg.yaml: $.shops[0].hours.open: early\nplain\n$.shops[0].hours.close: late",
+			children: []string{
+				"cfg.yaml:4:13: $.shops[0].hours.open: early",
+				"cfg.yaml: plain",
+				"cfg.yaml:5:14: $.shops[0].hours.close: late",
+			},
+		},
+		"a join with no path stays as it is": {
+			err:  errors.Join(errors.New("one"), errors.New("two")),
+			want: "cfg.yaml: one\ntwo",
+			children: []string{
+				"cfg.yaml: one",
+				"cfg.yaml: two",
+			},
+		},
+		"each nested error joins the scope": {
+			err: niceyaml.NewError("2 problems", niceyaml.WithErrors(
+				niceyaml.NewError("early", niceyaml.AtPath(openPath)),
+				errors.New("plain"),
+			)),
+			want: "cfg.yaml: 2 problems",
+			children: []string{
+				"cfg.yaml:4:13: $.shops[0].hours.open: early",
+				"cfg.yaml: plain",
+			},
+		},
+		"a nested error with no location gains none under a located parent": {
+			err: niceyaml.NewError("bad",
+				niceyaml.AtPath(closePath),
+				niceyaml.WithErrors(errors.New("reason")),
+			),
+			want:     "cfg.yaml:5:14: $.shops[0].hours.close: bad",
+			path:     "$.shops[0].hours.close",
+			children: []string{"cfg.yaml: reason"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := hours.Bind(tc.err)
+			require.EqualError(t, err, tc.want)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+			assert.Same(t, hours, bound.Node())
+
+			path, ok := bound.Path()
+			assert.Equal(t, tc.path != "", ok)
+
+			if ok {
+				assert.Equal(t, tc.path, path.String())
+			}
+
+			var children []string
+
+			for _, child := range bound.Errors() {
+				children = append(children, child.Error())
+			}
+
+			assert.Equal(t, tc.children, children)
+		})
+	}
+
+	t.Run("the path resolves from the document and cuts back to the scope", func(t *testing.T) {
+		t.Parallel()
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, hours.Bind(niceyaml.NewError("bad", niceyaml.AtPath(closePath))), &bound)
+
+		path, ok := bound.Path()
+		require.True(t, ok)
+
+		rng, ok := bound.Range()
+		require.True(t, ok)
+
+		ranges, err := bound.Document().Ranges(path)
+		require.NoError(t, err)
+		assert.Equal(t, position.Ranges{rng}, ranges)
+
+		written, ok := path.CutPrefix(bound.Node().Path())
+		require.True(t, ok)
+		assert.Equal(t, closePath, written)
+	})
+
+	t.Run("a binding comes back as it is", func(t *testing.T) {
+		t.Parallel()
+
+		bound := hours.Bind(niceyaml.NewError("bad", niceyaml.AtPath(closePath)))
+
+		assert.Same(t, bound, hours.Bind(bound))
+		assert.Same(t, bound, doc.Bind(bound))
+		assert.Same(t, bound, yamltest.At(t, doc, paths.Root().Child("shops")).Bind(bound))
+	})
+
+	t.Run("the root of the document binds a path as written", func(t *testing.T) {
+		t.Parallel()
+
+		err := doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(closePath)))
+		require.EqualError(t, err, "cfg.yaml:1:8: $.close: bad")
+	})
+
+	t.Run("an error a scoped method returns names the scope once", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := hours.At(paths.Root().Child("nope"))
+		require.ErrorIs(t, err, paths.ErrNotFound)
+		assert.Equal(t, 1, strings.Count(err.Error(), "$.shops[0].hours.nope"))
+		assert.NotContains(t, err.Error(), "$.shops[0].hours.shops")
+	})
+
+	t.Run("a scoped validator and the same check at the root agree", func(t *testing.T) {
+		t.Parallel()
+
+		reject := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+			return niceyaml.NewError("bad", niceyaml.AtPath(n.Path().Join(closePath)))
+		})
+
+		// The validator writes an absolute path, which only the root of
+		// the document binds as written.
+		want := "cfg.yaml:5:14: $.shops[0].hours.close: bad"
+
+		require.EqualError(t, doc.Bind(reject.Validate(t.Context(), hours)), want)
+
+		scoped := niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
+			return niceyaml.NewError("bad", niceyaml.AtPath(closePath))
+		})
+
+		require.EqualError(t, hours.Validate(t.Context(), scoped), want)
+
+		_, err := hours.Decode[checkHours](t.Context(), niceyaml.WithValidator(scoped))
+		require.EqualError(t, err, want)
+	})
 }
 
 // accumulatingConfig is a [niceyaml.SelfValidator] whose Validate builds
@@ -5573,7 +5793,7 @@ func TestDocument_At_Scope(t *testing.T) {
 		rng, ok := bound.Range()
 		require.True(t, ok)
 		assert.Equal(t, openValue, rng.Start)
-		assert.Equal(t, "4:11: $.open: open must be before close", bound.Error())
+		assert.Equal(t, "4:11: $.spec.hours.open: open must be before close", bound.Error())
 	})
 
 	t.Run("Bind resolves a path from the node", func(t *testing.T) {
@@ -6192,7 +6412,7 @@ func TestDocument_Decode_ScopedValidatorErrorDocument(t *testing.T) {
 				opts := append(slices.Clone(tc.opts), niceyaml.WithValidator(scoping))
 
 				_, err := dd.Decode[any](t.Context(), opts...)
-				require.EqualError(t, err, "4:8: $.x: bad")
+				require.EqualError(t, err, "4:8: $.items[1].x: bad")
 
 				var bound *niceyaml.SourceError
 
@@ -6904,10 +7124,11 @@ func TestNode_Nodes(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, -1, got)
 
-		// The message keeps the path as the error wrote it, from the
-		// scope, and the position is the one it resolved to there.
+		// The error writes its path from the scope, and the message
+		// carries it from the root of the document, beside the position
+		// it resolved to.
 		err = items[1].Bind(niceyaml.NewError("negative price", niceyaml.AtPath(paths.Root().Child("price"))))
-		require.EqualError(t, err, "m.yaml:5:12: $.price: negative price")
+		require.EqualError(t, err, "m.yaml:5:12: $.items[1].price: negative price")
 	})
 
 	t.Run("scopes each entry a recursive selector finds", func(t *testing.T) {
@@ -7018,7 +7239,7 @@ func TestNode_Nodes(t *testing.T) {
 		// the document binds the same path, and the view of the scope
 		// holds no line to mark.
 		err := ref.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root())))
-		require.EqualError(t, err, "m.yaml:12:6: $: bad")
+		require.EqualError(t, err, "m.yaml:12:6: $.ref: bad")
 
 		var bound *niceyaml.SourceError
 

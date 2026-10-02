@@ -6554,7 +6554,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		assert.Equal(t, bPath, p)
 	})
 
-	t.Run("a path from a scoped document is the one the error wrote", func(t *testing.T) {
+	t.Run("a path from a scoped document reads from the document root", func(t *testing.T) {
 		t.Parallel()
 
 		doc, err := src.Document()
@@ -6567,9 +6567,13 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 
 		require.ErrorAs(t, scoped.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b")))), &bound)
 
+		assert.Equal(t, "x.yaml:2:6: $.a.b: bad", bound.Error())
+		assert.Equal(t, "bad", bound.Message())
+		assert.Same(t, scoped, bound.Node())
+
 		p, ok := bound.Path()
 		require.True(t, ok)
-		assert.Equal(t, paths.Root().Child("b"), p)
+		assert.Equal(t, bPath, p)
 
 		rng, ok := bound.Range()
 		require.True(t, ok)

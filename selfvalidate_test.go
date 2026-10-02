@@ -863,7 +863,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("a scoped decode writes paths from the scope", func(t *testing.T) {
+	t.Run("a scoped decode reports paths from the document root", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString(stringtest.Input(`
@@ -877,7 +877,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.NoError(t, err)
 
 		_, err = yamltest.At(t, doc, paths.Root().Child("spec")).Decode[nested](t.Context())
-		require.EqualError(t, err, "cafe.yaml:4:14: $.items[1].price: negative price")
+		require.EqualError(t, err, "cafe.yaml:4:14: $.spec.items[1].price: negative price")
 	})
 
 	t.Run("a value that refers back to itself walks once", func(t *testing.T) {
@@ -2107,7 +2107,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 					return err
 				},
-				want: []string{"3:19: $.a.0x10.price: negative price"},
+				want: []string{"3:19: $.spec.a.0x10.price: negative price"},
 			},
 		}
 
@@ -2318,7 +2318,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		scoped := yamltest.At(t, dd, paths.Root().Child("port"))
 
 		_, err = scoped.Decode[port](t.Context())
-		require.EqualError(t, err, "1:7: $: port out of range")
+		require.EqualError(t, err, "1:7: $.port: port out of range")
 	})
 
 	t.Run("a byte-sized leaf type validates itself", func(t *testing.T) {

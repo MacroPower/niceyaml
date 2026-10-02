@@ -270,7 +270,10 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // base itself, and a position or a range stays as it is, since the base
 // moves paths alone. A decode rebases the errors of every nested
 // [SelfValidator] itself, so a Validate need not rebase the Validate of
-// a field.
+// a field. A Node from [Node.At] or [Node.Nodes] puts its own path in
+// front of each path in an error it binds, so a check bound through the
+// Node of its value needs no Rebase. Such a Node leaves an error with no
+// location as it is.
 //
 // An error joined from several, as [errors.Join] builds one, rebases
 // branch by branch into a new join, so each line of its message carries
@@ -416,9 +419,12 @@ type ErrorOption func(e *Error)
 //
 // The path resolves from the scope of the [Node] that binds the Error,
 // so [paths.Root] names that node itself, and a check on a value from
-// [Node.At] writes its paths from the value. A path from [Node.Path] is
-// absolute, so it binds through the root of the document or through
-// [Source.Bind], and a scoped Node joins it under its own path again.
+// [Node.At] writes its paths from the value. The binding puts the path
+// of that Node in front, so its message and [SourceError.Path] carry
+// the path from the root of the document. A path from [Node.Path] or
+// from SourceError.Path starts at that root already, so it binds through
+// the root of the document or through [Source.Bind], and a scoped Node
+// joins it under its own path again.
 func AtPath(p paths.Path) ErrorOption {
 	return func(e *Error) {
 		e.path, e.hasPath = p, true
@@ -769,10 +775,12 @@ func locate(b binder, l locus) (location, *Node, error) {
 	return location{}, b.node, errUnlocated
 }
 
-// locatePath resolves path from the node b binds with, or from the root
-// of the one document of the source when b routes. A source that holds
-// none, holds several, or does not parse has no document to resolve the
-// path in, so the location is [ErrPathNeedsDocument] wrapping that
+// locatePath resolves path from the root of the document of the node b
+// binds with, or of the one document of the source when b routes.
+// [binder.scoped] put the scope of that node in front of the path
+// already, so the path reads from the root. A source that holds no
+// document, holds several, or does not parse has no document to resolve
+// the path in, so the location is [ErrPathNeedsDocument] wrapping that
 // reason.
 func locatePath(b binder, path paths.Path) (location, *Node, error) {
 	node := b.node
@@ -790,7 +798,7 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 		return location{}, nil, fmt.Errorf("%w: %s", ErrPathNeedsDocument, path)
 	}
 
-	loc, err := node.pathLocation(path)
+	loc, err := node.doc.node.pathLocation(path)
 	if err != nil {
 		return location{}, node, err
 	}
@@ -820,9 +828,13 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 //	}
 //
 // A path resolves from the [Node] that bound the error, which for
-// [Source.Bind] is the root of the one document of the source. A path
-// bound through Source.Bind in a source that holds none or several
-// resolves nowhere, and the reason is [ErrPathNeedsDocument].
+// [Source.Bind] is the root of the one document of the source. A Node
+// from [Node.At] or [Node.Nodes] puts its own path in front of each path
+// the error carries. The message and [SourceError.Path] thus read from
+// the root of the document whichever Node bound the error, as the
+// position beside them does. A path bound through Source.Bind in a
+// source that holds none or several resolves nowhere, and the reason is
+// [ErrPathNeedsDocument].
 //
 // The bound error is a tree, and binding binds every node of it. The
 // location of the SourceError is that of the first located [Error] along
@@ -861,11 +873,14 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 // [SourceError.Unresolved] returns the reason for the first case and nil
 // for the second.
 //
-// A SourceError never rewrites the message of the error it binds. The text
-// a wrapper such as [fmt.Errorf] produced stays as it was, and the position
-// goes in front of it. An error built by hand therefore goes through
+// A SourceError keeps the text of the error it binds. The text a wrapper
+// such as [fmt.Errorf] produced stays as it was, and the position goes
+// in front of it. The one part that changes is the path an [Error]
+// writes in front of its own message, which a scoped Node joins its
+// path in front of. An error built by hand therefore goes through
 // [Node.Bind] or [Source.Bind] first, and context around the
-// SourceError comes after, so the position stays beside the message.
+// SourceError comes after, so the position and the path stay beside the
+// message.
 //
 // An error marks a [line.View] with decoration, so the caller that
 // renders the error decides how it looks. [SourceError.Excerpt]
@@ -938,6 +953,83 @@ type binder struct {
 	node      *Node
 	route     bool
 	ambiguous bool
+}
+
+// scoped returns err as a binding of b holds it. An error bound through
+// a Node from [Node.At] or [Node.Nodes] writes its paths from that node,
+// so it comes back under the scope of the node, as [underScope] returns
+// it, and its paths read from the root of the document. An error bound
+// through the root of a document, or through no node, comes back as it
+// is.
+func (b binder) scoped(err error) error {
+	if b.node == nil || b.node.base.IsRoot() {
+		return err
+	}
+
+	scoped, _ := underScope(err, b.node.base)
+
+	return scoped
+}
+
+// underScope returns err with scope in front of each path its message
+// carries, and reports whether it changed anything. An error whose cause
+// chain reaches an [*Error] that carries a path comes back inside an
+// Error from [Rebase] at scope, so its message and [Error.Path] carry
+// the joined path. A join, as [joinBranches] finds one, comes back as a
+// new join of its branches under scope, as Rebase builds one, so each
+// line of its message carries the joined path of its own branch. Rebase
+// points an error with no location at its base, and underScope leaves
+// such an error as it is, so binding through a scoped Node gives no
+// error a location it did not carry. A binding resolved its location
+// already and comes back as it is.
+func underScope(err error, scope paths.Path) (error, bool) {
+	if isNothing(err) {
+		return err, false
+	}
+
+	// An Error that adds nothing to the join it wraps reads as the join.
+	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
+	if ok && x.addsNothing() {
+		if _, joined := joinBranches(x.err); joined {
+			inner, changed := underScope(x.err, scope)
+			if !changed {
+				return err, false
+			}
+
+			return WrapError(inner), true
+		}
+	}
+
+	if branches, ok := joinBranches(err); ok {
+		scoped := make([]error, 0, len(branches))
+		changed := false
+
+		for _, branch := range branches {
+			if branch == nil {
+				continue
+			}
+
+			s, c := underScope(branch, scope)
+			scoped = append(scoped, s)
+			changed = changed || c
+		}
+
+		switch {
+		case !changed:
+			return err, false
+		case isJoinError(err):
+			return errors.Join(scoped...), true
+		default:
+			return &rebasedJoinError{join: err, branches: scoped}, true
+		}
+	}
+
+	a := anchorOf(err)
+	if _, located := a.err.(*Error); located && a.hasPath { //nolint:errorlint // The anchor itself, found by the walk.
+		return &Error{err: err, base: scope, rebased: true}, true
+	}
+
+	return err, false
 }
 
 // nodeAt returns the node an error on line idx binds to: the one b binds
@@ -1294,11 +1386,17 @@ func boundLocus(e *SourceError) locus {
 }
 
 // newSourceError binds err to b and resolves its location, with a path
-// resolving in the document of b. The children of err bind the same way.
+// resolving in the document of b. The binding holds err as
+// [binder.scoped] returns it, so the path of an error bound through a
+// scoped Node reads from the root of the document. The children of err
+// bind the same way, each under the scope on its own, so a child that
+// carries no path stays as it is.
 func newSourceError(err error, b binder) *SourceError {
-	e := &SourceError{err: err, source: b.src, node: b.node, locErr: errUnlocated}
+	scoped := b.scoped(err)
 
-	found := anchorOf(err)
+	e := &SourceError{err: scoped, source: b.src, node: b.node, locErr: errUnlocated}
+
+	found := anchorOf(scoped)
 
 	switch a := found.err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
 	case *Error:
@@ -1381,7 +1479,9 @@ func (e *SourceError) Source() *Source {
 // Node returns the [*Node] the error is bound to: the one whose methods
 // and validators produced it or whose [Node.Bind] bound it, from whose
 // scope a path in the error resolves, or, for an error bound through
-// [Source.Bind], the root of the document its location falls in. A
+// [Source.Bind], the root of the document its location falls in. The
+// error wrote its path from that scope, and [SourceError.Path] reports
+// the path from the root of the document. A
 // position or a range falls in the document whose [Node.Span] holds its
 // line, and a path falls in the one document of the source. The error
 // stays bound to that root when its location does not resolve there, as
@@ -1456,14 +1556,21 @@ func (e *SourceError) Message() string {
 }
 
 // Path returns the [paths.Path] the bound error is about and true, or the
-// zero Path and false when it carries none. It is the path [Error.Path]
-// reports for the [*Error] that gave the binding its location, with the
-// base of every [Rebase] on the way joined in front. An error bound
-// through a scoped [Node] thus reports the path as the error wrote it,
-// from the scope. An error that carries a range or a position beside its path
-// binds at that location and reports the path as written, resolved or
-// not. A binding that wraps another reports the path of the one it
-// wraps. A nil SourceError has none.
+// zero Path and false when it carries none. The path reads from the root
+// of the document, whichever [Node] bound the error. It is the path
+// [Error.Path] reports for the [*Error] that gave the binding its
+// location, with the base of every [Rebase] on the way joined in front.
+// A Node from [Node.At] or [Node.Nodes] joins its own [Node.Path] in
+// front of that, so an error written as `$.price` and bound through the
+// Node at `$.items[1]` reports `$.items[1].price`. The root of the
+// document resolves the result, so it goes to the [Node.Ranges] or the
+// [Node.At] of [SourceError.Document]. [paths.Path.CutPrefix] with the
+// path of [SourceError.Node] gives back the path as the error wrote it.
+//
+// An error that carries a range or a position beside its path binds at
+// that location and reports the path the same way, resolved or not. A
+// binding that wraps another reports the path of the one it wraps. A nil
+// SourceError has none.
 func (e *SourceError) Path() (paths.Path, bool) {
 	if e == nil {
 		return paths.Path{}, false

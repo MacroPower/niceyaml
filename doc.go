@@ -261,9 +261,10 @@
 // same pipeline then runs on that node. Decode reads one value without
 // decoding the whole document, and a validator given to it checks the
 // node. The paths in every error it returns or binds resolve from the
-// node, so a check written for a type reports the same lines whether the
-// type is the whole document or a value inside one. The Node reaches the
-// document it belongs to through [Node.Document]:
+// node, and the bound error carries them from the root of the document.
+// A check written for a type thus reports the same lines and the same
+// paths whether the type is the whole document or a value inside one. The
+// Node reaches the document it belongs to through [Node.Document]:
 //
 //	hours, err := doc.At(paths.Root().Child("spec", "hours"))
 //	if err != nil {
