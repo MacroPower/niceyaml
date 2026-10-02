@@ -1163,6 +1163,29 @@ func TestError_MultiError(t *testing.T) {
 		assert.Contains(t, got, "^ bad alpha; bad beta")
 	})
 
+	t.Run("nested errors that repeat a message", func(t *testing.T) {
+		t.Parallel()
+
+		source := stringtest.Input(`
+			key: [alpha, beta]
+		`)
+
+		bad := func(message string, index int) error {
+			return niceyaml.NewError(message, niceyaml.AtPath(paths.Root().Child("key").Index(index)))
+		}
+
+		err := yamltest.Bind(t, xmlSource(source), niceyaml.NewError(
+			"4 problems",
+			niceyaml.WithErrors(bad("too long", 0), bad("too long", 1), bad("too long", 0), bad("no digit", 0)),
+		))
+
+		got := trimLines(render(err))
+
+		// The message reads once at the column it repeats at, and again
+		// at the other column.
+		assert.Contains(t, got, "^ too long; no digit; too long<")
+	})
+
 	t.Run("nested error with direct token", func(t *testing.T) {
 		t.Parallel()
 

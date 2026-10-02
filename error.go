@@ -2832,10 +2832,13 @@ func clampRange(lines line.Lines, r position.Range) position.Range {
 // prepareLineAnnotations prepares annotations grouped by line index. It
 // includes only positions with messages. Each line joins its messages in
 // column order, so they read in the order of the carets, and messages at
-// the same column keep the order they arrived in. Each tab in a message
-// becomes four spaces, as [escape.Tabs] returns it, so the annotation
-// spells the message as the tree of [FormatError] does. A renderer draws
-// the other control characters of an annotation as their pictures.
+// the same column keep the order they arrived in. A message that repeats
+// at one column reads once. Several errors say the same of one value when
+// a schema states a constraint twice, or when a value fails two branches
+// of an anyOf the same way. Each tab in a message becomes four spaces, as
+// [escape.Tabs] returns it, so the annotation spells the message as the
+// tree of [FormatError] does. A renderer draws the other control
+// characters of an annotation as their pictures.
 func prepareLineAnnotations(positions []errorPosition) map[int]line.Annotation {
 	linePositions := make(map[int][]errorPosition)
 
@@ -2853,8 +2856,14 @@ func prepareLineAnnotations(positions []errorPosition) map[int]line.Annotation {
 		})
 
 		messages := make([]string, 0, len(lineErrs))
-		for _, r := range lineErrs {
-			messages = append(messages, escape.Tabs(r.message))
+
+		for i, r := range lineErrs {
+			repeats := slices.ContainsFunc(lineErrs[:i], func(prev errorPosition) bool {
+				return prev.pos.Col == r.pos.Col && prev.message == r.message
+			})
+			if !repeats {
+				messages = append(messages, escape.Tabs(r.message))
+			}
 		}
 
 		result[lineIdx] = line.Annotation{
