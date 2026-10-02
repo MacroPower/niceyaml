@@ -207,12 +207,19 @@ func TestRegistry_Validate_ScopedNode(t *testing.T) {
 
 		err := reg.Validate(t.Context(), spec)
 		require.ErrorIs(t, err, schema.ErrScopedDocument)
-		assert.Contains(t, err.Error(), "$.spec")
+		require.EqualError(t, err, "registry needs a whole document: node is scoped to $.spec")
 
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, doc.Source(), bound.Source())
+
+		// The refusal is about the call, so it binds to the root of the
+		// document and points at no value.
+		assert.Same(t, doc, bound.Node())
+
+		_, ok := bound.Range()
+		assert.False(t, ok)
 
 		err = spec.Validate(t.Context(), reg)
 		require.ErrorIs(t, err, schema.ErrScopedDocument)
@@ -285,12 +292,16 @@ func TestRegistry_Validate_ScopedNode(t *testing.T) {
 
 		_, err := reg.Lookup(t.Context(), spec)
 		require.ErrorIs(t, err, schema.ErrScopedDocument)
-		assert.Contains(t, err.Error(), "$.spec")
+		require.EqualError(t, err, "registry needs a whole document: node is scoped to $.spec")
 
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, doc.Source(), bound.Source())
+		assert.Same(t, doc, bound.Node())
+
+		_, ok := bound.Range()
+		assert.False(t, ok)
 
 		// The whole document resolves, whichever Node of it reaches the
 		// root.

@@ -2127,6 +2127,17 @@ func TestSchema_Validate_Bound(t *testing.T) {
 				"menu.yaml:2:8: $.price: -1 is less than 0",
 			),
 		},
+		// The summary stands above violations that say where they point,
+		// so the scoped node gives it no location.
+		"several violations in a scoped node": {
+			input: "items:\n  - name: 1\n    price: -2\n",
+			path:  paths.Root().Child("items").Index(0),
+			want: stringtest.JoinLF(
+				"menu.yaml: 2 schema violations",
+				`menu.yaml:2:11: $.items[0].name: expected "string", got "integer"`,
+				"menu.yaml:3:12: $.items[0].price: -2 is less than 0",
+			),
+		},
 		"a decoding error": {
 			input: "price: *nope\n",
 			want:  "menu.yaml:1:8: $.price: could not find alias \"nope\"",
@@ -2134,6 +2145,13 @@ func TestSchema_Validate_Bound(t *testing.T) {
 		"a document past the alias limit": {
 			input: yamltest.AliasLevels(7),
 			want:  "menu.yaml: validate schema: excessive aliasing",
+			errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+		},
+		// The error carries no location, so the scoped node takes it.
+		"a scoped node past the alias limit": {
+			input: yamltest.AliasLevels(7),
+			path:  paths.Root().Child("a"),
+			want:  "menu.yaml:2:10: $.a: validate schema: excessive aliasing",
 			errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 		},
 	}

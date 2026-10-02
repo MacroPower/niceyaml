@@ -343,7 +343,8 @@
 //
 // A check the caller runs on the value, such as one that needs a registry
 // of known names, binds its result through [Node.Bind], so an [Error]
-// with a path resolves from the node the value came from.
+// with a path resolves from the node the value came from, and an error
+// with no location points at that node.
 //
 // All three return errors bound to the source, so a path that selects
 // nothing, a decoding failure, or a validator's [Error] renders its

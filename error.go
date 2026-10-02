@@ -276,8 +276,9 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // [SelfValidator] itself, so a Validate need not rebase the Validate of
 // a field. A Node from [Node.At] or [Node.Nodes] puts its own path in
 // front of each path in an error it binds, so a check bound through the
-// Node of its value needs no Rebase. Such a Node leaves an error with no
-// location as it is.
+// Node of its value needs no Rebase. Such a Node points an error with no
+// location at its own value, as Rebase points one at base, when no error
+// in its tree holds a location, as [Node.Bind] describes.
 //
 // An error joined from several, as [errors.Join] builds one, rebases
 // branch by branch into a new join, so each line of its message carries
@@ -1037,13 +1038,39 @@ type boundTexts struct {
 // resolves no path, for the reason [ErrAmbiguousPath]. It still locates
 // a position or a range. A binder that is rooted binds errors whose
 // paths read from the root of the document already, as the path of a
-// decode rejection does, so it puts no scope in front of them.
+// decode rejection does, so it puts no scope in front of them. A binder
+// that locates binds an error a caller or a validator gave a Node, so
+// [binder.located] points an error that holds no location at that Node.
 type binder struct {
 	src       *Source
 	node      *Node
 	route     bool
 	ambiguous bool
 	rooted    bool
+	locate    bool
+}
+
+// located returns err as b binds it at the top of its tree. A binder that
+// locates binds through a Node from [Node.At] or [Node.Nodes], and an
+// error that holds no location is then about the value of that Node. It
+// comes back from [Rebase] under the root of the scope, so it binds at
+// the Node as an [Error] with [AtPath] of [paths.Root] does, and
+// [binder.scoped] puts the scope in front. An error that
+// [holdsLocation] reports says where it points already, in itself or
+// below, and comes back as it is. So does the error of a context that
+// ended, which is about the call. So does every error for a binder that
+// does not locate, and for one whose node is the root of a document or
+// nil.
+func (b binder) located(err error) error {
+	if !b.locate || b.node == nil || b.node.base.IsRoot() {
+		return err
+	}
+
+	if holdsLocation(err) || contextEnded(err) {
+		return err
+	}
+
+	return Rebase(err, paths.Root())
 }
 
 // scoped returns err as a binding of b holds it. An error bound through
@@ -1070,9 +1097,10 @@ func (b binder) scoped(err error) error {
 // new join of its branches under scope, as Rebase builds one, so each
 // line of its message carries the joined path of its own branch. Rebase
 // points an error with no location at its base, and underScope leaves
-// such an error as it is, so binding through a scoped Node gives no
-// error a location it did not carry. A binding resolved its location
-// already and comes back as it is.
+// such an error as it is. [binder.located] decides for the whole tree
+// whether an error with no location takes the scope, so a branch or a
+// child with no location beside a located one gains none here. A binding
+// resolved its location already and comes back as it is.
 func underScope(err error, scope paths.Path) (error, bool) {
 	if isNothing(err) {
 		return err, false
@@ -1165,7 +1193,7 @@ func bindTree(err error, b binder) error {
 		return err
 	}
 
-	return newSourceError(err, b)
+	return newSourceError(b.located(err), b)
 }
 
 // isBound reports whether err is a binding already: a [*SourceError], or
@@ -2418,8 +2446,9 @@ func writeString(f fmt.State, s string) {
 // line 0 is line 1 of the text.
 //
 // Binding resolved the location, so Range reads the result, and reports
-// false when there is none: the error carries no location, as one from
-// [fmt.Errorf] does, or its location did not resolve, for the reason
+// false when there is none: the error carries no location and gained
+// none, as one from [fmt.Errorf] bound through the root of a document
+// does, or its location did not resolve, for the reason
 // [SourceError.Unresolved] returns. An error whose Range reports false
 // has no position in [SourceError.Error] and marks no location of its
 // own, so an excerpt [SourceError.Excerpt] builds for it shows the
@@ -2455,8 +2484,9 @@ func (e *SourceError) Position() (position.Position, bool) {
 
 // Unresolved returns why the location of the bound error did not
 // resolve, and nil when it did or when the error carries no location at
-// all, which is the ordinary case for an error from [fmt.Errorf] and
-// nothing to explain. The reason is [ErrOutOfRange] for a location on a
+// all, which is the ordinary case for an error from [fmt.Errorf] bound
+// through the root of a document and nothing to explain. The reason is
+// [ErrOutOfRange] for a location on a
 // line the source does not hold or at a column before the first,
 // [ErrPathNeedsDocument] for a path bound through [Source.Bind] in a
 // source with no single document, the resolution error from

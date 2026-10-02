@@ -337,9 +337,11 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // the wrong schema. Validate one node against a schema of its own with a
 // [Schema].
 //
-// Every error comes back bound to the document through
+// Every error comes back bound to the root of the document through
 // [niceyaml.Node.Bind], so its message names the file the document
-// came from.
+// came from. An error of the lookup is about the schema rather than a
+// value of the document, so it carries no position, even when n is a
+// Node from [niceyaml.Node.At].
 //
 // For most use cases, prefer [Registry.Validate] which combines lookup
 // and validation. Use Lookup when you need the validator for custom
@@ -353,8 +355,10 @@ func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (*Schema, error
 
 	v, _, err := r.lookup(ctx, n)
 	if err != nil {
+		// The root of the document gives the error no location, where a
+		// scoped Node would point it at its value.
 		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
-		return nil, n.Bind(err)
+		return nil, n.Document().Bind(err)
 	}
 
 	return v, nil
@@ -519,8 +523,10 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 			return nil
 		}
 
+		// The root of the document gives the error no location, as it
+		// does in [Registry.Lookup].
 		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
-		return n.Bind(err)
+		return n.Document().Bind(err)
 	}
 
 	//nolint:wrapcheck // Validation errors pass through unchanged.

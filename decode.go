@@ -181,6 +181,12 @@ type SelfValidator interface {
 // the document, binds through the Node of that scope, which
 // [Node.Document] returns for the root.
 //
+// A validator that runs on a Node from [Node.At] or [Node.Nodes] checks
+// one value, so an error with no location that it returns binds at that
+// value, as Node.Bind describes. A failure that is no fault of the value,
+// such as a schema that does not load, binds through the root
+// Node.Document returns, which gives it no location.
+//
 // A bound error keeps its text. Context that a validator adds around the
 // error of another therefore stands in front of the position, as in
 // "config schema: svc.yaml:2:7: $.port: 0 is less than 1". [Rebase]
@@ -1052,7 +1058,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 	if err != nil {
 		// Bind to the receiver, a Node that exists, rather than to the
 		// copy, whose scope moved to a path that resolves to no node.
-		return nil, n.Bind(err)
+		return nil, n.bindOwn(err)
 	}
 
 	c.node = node
@@ -1121,7 +1127,7 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 
 	found, err := n.doc.pathResolver().Matches(n.base.Join(path))
 	if err != nil {
-		return nil, n.Bind(err)
+		return nil, n.bindOwn(err)
 	}
 
 	nodes := make([]*Node, 0, len(found))
@@ -1488,7 +1494,7 @@ func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
 
 	loc, err := n.pathLocation(path)
 	if err != nil {
-		return nil, n.Bind(err)
+		return nil, n.bindOwn(err)
 	}
 
 	return highlightRanges(n.source.lines, loc), nil
@@ -1560,8 +1566,9 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 // Validate returns such an error as it is. An error a validator leaves
 // unbound comes back bound to the source as a [SourceError] through
 // [Node.Bind], so an [*Error] renders its location and any other error
-// names the source. Validate is thus the way to run a validator the
-// caller did not write.
+// names the source. A Node from [Node.At] or [Node.Nodes] also points an
+// error with no location at its own value, as Node.Bind describes.
+// Validate is thus the way to run a validator the caller did not write.
 //
 // A document that did not parse fails before any validator runs, with the
 // syntax error [Node.Err] returns, even when Validate gets no validators.
@@ -1634,10 +1641,28 @@ func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []
 // reports `$.items[1].price` when the Node at `$.items[1]` binds it, in
 // the message and in [SourceError.Path], as a decode of the whole
 // document reports it. The paths of a join and of the errors nested with
-// [WithErrors] change the same way. An error that carries no path stays
-// as it is, so one with no location gains none. Text that a wrapper such
-// as [fmt.Errorf] added around a located Error keeps the path the
-// wrapper wrote, behind the joined one.
+// [WithErrors] change the same way. Text that a wrapper such as
+// [fmt.Errorf] added around a located Error keeps the path the wrapper
+// wrote, behind the joined one.
+//
+// A Node from Node.At or Node.Nodes stands for one value, so an error
+// with no location that it binds is about that value. The Node binds
+// such an error at itself, as it binds an Error with [AtPath] of
+// [paths.Root]. A check that returns a plain error thus reports
+// `$.items[1]` and the position of that item. A join of such errors
+// binds each branch there, and an Error that nests such errors with
+// WithErrors binds there with each of them.
+//
+// The Node points an error at itself only when no error in the tree of
+// err holds a location. A summary above located errors therefore keeps
+// no location. So does an error with no location in a join with located
+// ones, or under an Error that nests it beside them. An error that matches
+// [context.Canceled] or [context.DeadlineExceeded] is about the call, so
+// it gains no location either. The root of a document gives no error a
+// location, since an error bound there can be about the document as a
+// whole, such as a schema that does not load. A caller that holds a
+// scoped Node binds such an error through the root [Node.Document]
+// returns.
 //
 // An Error that carries a position or a range beside its path,
 // from [AtPosition] or [AtRange], binds at that position or range instead,
@@ -1645,8 +1670,9 @@ func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []
 // Bind does not resolve the path of such an Error, so a path the document
 // does not hold gives no [SourceError.Unresolved] reason.
 //
-// An error without a location, such as one from
-// [go.jacobcolvin.com/niceyaml/paths], binds all the same, and the bound
+// An error that gains no location, such as one from
+// [go.jacobcolvin.com/niceyaml/paths] bound through the root of a
+// document, binds all the same, and the bound
 // error names the source in front of the message, as "name: msg". An
 // error from one file of many thus still says which file. The message of err
 // stays as it is, and the position goes in front of it, so bind such an
@@ -1694,7 +1720,22 @@ func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []
 // returns [ErrPathNeedsDocument] wrapping the syntax error [Node.Err]
 // returns. A position or a range binds there as it does in any document.
 func (n *Node) Bind(err error) error {
+	return bindTree(err, binder{src: n.source, node: n.bindTarget(), locate: true})
+}
+
+// bindOwn binds an error of an operation of n, as [Node.Bind] binds it,
+// with one difference. The error is about the call, such as a path that
+// resolves to no node or a decode target that is no pointer, so an error
+// that holds no location gains none, even when n is a Node from [Node.At]
+// or [Node.Nodes].
+func (n *Node) bindOwn(err error) error {
 	return bindTree(err, binder{src: n.source, node: n.bindTarget()})
+}
+
+// contextEnded reports whether err is, or wraps, the error of a context
+// that ended: [context.Canceled] or [context.DeadlineExceeded].
+func contextEnded(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // bindTarget returns the Node that errors bound through n bind to: the
@@ -2125,7 +2166,7 @@ func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) erro
 func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 	err := checkDecodeTarget(v)
 	if err != nil {
-		return n.Bind(err)
+		return n.bindOwn(err)
 	}
 
 	err = n.validate(ctx, cfg.validators, cfg.yamlOpts)
@@ -2642,7 +2683,7 @@ func (n *Node) bindDecodeError(err error) error {
 
 	yamlErr, ok := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 	if !ok || !n.holdsToken(yamlErr.GetToken()) {
-		return n.Bind(asDecodeError(tree.restoreError(err)))
+		return n.bindOwn(asDecodeError(tree.restoreError(err)))
 	}
 
 	rejected := decodeError{err: yamlMessageError{err: yamlErr, msg: tree.restoreNames(rejectionMessage(yamlErr))}}

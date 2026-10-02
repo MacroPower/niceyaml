@@ -2403,9 +2403,23 @@ func TestNode_Bind_Scope(t *testing.T) {
 			want: "cfg.yaml:5:14: $.shops[0].hours.close: bad",
 			path: "$.shops[0].hours.close",
 		},
-		"an error with no location gains none": {
+		"an error with no location binds at the scope": {
 			err:  errors.New("bad"),
-			want: "cfg.yaml: bad",
+			want: "cfg.yaml:4:7: $.shops[0].hours: bad",
+			path: "$.shops[0].hours",
+		},
+		"a wrapped error with no location binds at the scope": {
+			err:  fmt.Errorf("check: %w", errors.New("bad")),
+			want: "cfg.yaml:4:7: $.shops[0].hours: check: bad",
+			path: "$.shops[0].hours",
+		},
+		"the error of a context that ended gains no location": {
+			err:  context.Canceled,
+			want: "cfg.yaml: context canceled",
+		},
+		"an error that wraps the error of a context gains no location": {
+			err:  fmt.Errorf("fetch: %w", context.DeadlineExceeded),
+			want: "cfg.yaml: fetch: context deadline exceeded",
 		},
 		"a position alone stays as it is": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 7))),
@@ -2416,6 +2430,8 @@ func TestNode_Bind_Scope(t *testing.T) {
 			want: "cfg.yaml:5:14: $.shops[0].hours.close: check: $.close: bad",
 			path: "$.shops[0].hours.close",
 		},
+		// A branch says where it points, so the branch with no location is
+		// not about the scope as a whole.
 		"each line of a join joins the scope": {
 			err: errors.Join(
 				niceyaml.NewError("early", niceyaml.AtPath(openPath)),
@@ -2433,12 +2449,31 @@ func TestNode_Bind_Scope(t *testing.T) {
 				"cfg.yaml:5:14: $.shops[0].hours.close: late",
 			},
 		},
-		"a join with no path stays as it is": {
-			err:  errors.Join(errors.New("one"), errors.New("two")),
-			want: "cfg.yaml: one\ncfg.yaml: two",
+		"each branch of a join with no location binds at the scope": {
+			err: errors.Join(errors.New("one"), errors.New("two")),
+			want: stringtest.JoinLF(
+				"cfg.yaml:4:7: $.shops[0].hours: one",
+				"cfg.yaml:4:7: $.shops[0].hours: two",
+			),
 			children: []string{
-				"cfg.yaml: one",
-				"cfg.yaml: two",
+				"cfg.yaml:4:7: $.shops[0].hours: one",
+				"cfg.yaml:4:7: $.shops[0].hours: two",
+			},
+		},
+		"a summary and the errors below it bind at the scope when none has a location": {
+			err: niceyaml.NewError("2 problems", niceyaml.WithErrors(
+				errors.New("one"),
+				errors.New("two"),
+			)),
+			want: stringtest.JoinLF(
+				"cfg.yaml:4:7: $.shops[0].hours: 2 problems",
+				"cfg.yaml:4:7: $.shops[0].hours: one",
+				"cfg.yaml:4:7: $.shops[0].hours: two",
+			),
+			path: "$.shops[0].hours",
+			children: []string{
+				"cfg.yaml:4:7: $.shops[0].hours: one",
+				"cfg.yaml:4:7: $.shops[0].hours: two",
 			},
 		},
 		"each nested error joins the scope": {
@@ -2456,7 +2491,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 				"cfg.yaml: plain",
 			},
 		},
-		"a nested error with no location gains none under a located parent": {
+		"an error with no location under a located parent stays as it is": {
 			err: niceyaml.NewError("bad",
 				niceyaml.AtPath(closePath),
 				niceyaml.WithErrors(errors.New("reason")),
@@ -2533,6 +2568,157 @@ func TestNode_Bind_Scope(t *testing.T) {
 
 		err := doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(closePath)))
 		require.EqualError(t, err, "cfg.yaml:1:8: $.close: bad")
+	})
+
+	t.Run("the root of the document gives an error with no location none", func(t *testing.T) {
+		t.Parallel()
+
+		err := doc.Bind(errors.New("bad"))
+		require.EqualError(t, err, "cfg.yaml: bad")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, doc, bound.Node())
+
+		_, ok := bound.Range()
+		assert.False(t, ok)
+		require.NoError(t, bound.Unresolved())
+
+		// A Node scoped to the root path is the root of the document too.
+		err = yamltest.At(t, doc, paths.Root()).Bind(errors.New("bad"))
+		require.EqualError(t, err, "cfg.yaml: bad")
+	})
+
+	t.Run("an error with no location marks the value of the scope", func(t *testing.T) {
+		t.Parallel()
+
+		plain := errors.New("bad")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, hours.Bind(plain), &bound)
+		require.ErrorIs(t, bound, plain)
+		assert.Equal(t, "bad", bound.Message())
+
+		// The binding points where an Error at the root path of the scope
+		// does.
+		var located *niceyaml.SourceError
+
+		require.ErrorAs(t, hours.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root()))), &located)
+
+		rng, ok := bound.Range()
+		require.True(t, ok)
+
+		want, ok := located.Range()
+		require.True(t, ok)
+		assert.Equal(t, want, rng)
+	})
+
+	t.Run("a validator's error with no location binds at the scope", func(t *testing.T) {
+		t.Parallel()
+
+		plain := errors.New("bad")
+		want := "cfg.yaml:4:7: $.shops[0].hours: bad"
+
+		fn := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+			return plain
+		})
+
+		require.EqualError(t, fn.Validate(t.Context(), hours), want)
+		require.EqualError(t, hours.Validate(t.Context(), fn), want)
+
+		// Validate binds the error a validator leaves unbound.
+		require.EqualError(t, hours.Validate(t.Context(), &fieldValidator{err: plain}), want)
+
+		_, err := hours.Decode[checkHours](t.Context(), niceyaml.WithValidator(&fieldValidator{err: plain}))
+		require.EqualError(t, err, want)
+
+		multi := niceyaml.MultiValidator(&fieldValidator{err: plain}, &fieldValidator{err: errors.New("worse")})
+		require.EqualError(t, hours.Validate(t.Context(), multi), stringtest.JoinLF(
+			"cfg.yaml:4:7: $.shops[0].hours: bad",
+			"cfg.yaml:4:7: $.shops[0].hours: worse",
+		))
+
+		// The same validators on the root of the document name the source
+		// alone.
+		require.EqualError(t, doc.Validate(t.Context(), fn), "cfg.yaml: bad")
+		require.EqualError(t, doc.Validate(t.Context(), &fieldValidator{err: plain}), "cfg.yaml: bad")
+
+		// A context that ended is no fault of the value.
+		ended := &fieldValidator{err: context.DeadlineExceeded}
+		require.EqualError(t, hours.Validate(t.Context(), ended), "cfg.yaml: context deadline exceeded")
+	})
+
+	t.Run("an error of the Node's own operation gains no location", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			run  func(t *testing.T) error
+			is   error
+			want string
+		}{
+			"a decode target that is no pointer": {
+				run: func(t *testing.T) error {
+					t.Helper()
+
+					return hours.DecodeInto(t.Context(), nil)
+				},
+				is:   niceyaml.ErrDecodeTarget,
+				want: "cfg.yaml: decode target is not a non-nil pointer: got nil",
+			},
+			"a wildcard path given to At": {
+				run: func(t *testing.T) error {
+					t.Helper()
+
+					_, err := hours.At(paths.Root().ChildAll())
+
+					return err //nolint:wrapcheck // The test inspects the error of the call.
+				},
+				is:   paths.ErrWildcard,
+				want: "cfg.yaml: resolve $.shops[0].hours.*: wildcard path matches any number of nodes",
+			},
+			"a path that names an index of a mapping": {
+				run: func(t *testing.T) error {
+					t.Helper()
+
+					_, err := hours.At(paths.Root().Index(3))
+
+					return err //nolint:wrapcheck // The test inspects the error of the call.
+				},
+				is:   paths.ErrNotFound,
+				want: "cfg.yaml: resolve $.shops[0].hours[3]: not found",
+			},
+			"a wildcard path given to Ranges": {
+				run: func(t *testing.T) error {
+					t.Helper()
+
+					_, err := hours.Ranges(paths.Root().ChildAll())
+
+					return err //nolint:wrapcheck // The test inspects the error of the call.
+				},
+				is:   paths.ErrWildcard,
+				want: "cfg.yaml: resolve $.shops[0].hours.*: wildcard path matches any number of nodes",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := tc.run(t)
+				require.ErrorIs(t, err, tc.is)
+				require.EqualError(t, err, tc.want)
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+				assert.Same(t, hours, bound.Node())
+
+				_, ok := bound.Range()
+				assert.False(t, ok)
+			})
+		}
 	})
 
 	t.Run("an error a scoped method returns names the scope once", func(t *testing.T) {
