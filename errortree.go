@@ -46,9 +46,8 @@ type ErrorTree struct {
 // follow the rest in the order their parent lists them. An [Error] or
 // join outside any binding keeps its children in the order it lists them,
 // bindings included. So a join of one binding per document shows the
-// documents in the order [errors.Join] took them, as the excerpts of
-// [FormatError] do. A nested error with nested errors of its own is a
-// subtree.
+// documents in the order [errors.Join] took them. A nested error with
+// nested errors of its own is a subtree.
 //
 // An error that unwraps to several and whose message is theirs one per
 // line, such as one from [errors.Join], is a node with no text and one

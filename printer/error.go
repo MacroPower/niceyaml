@@ -16,25 +16,27 @@ import (
 // below a connector, "│  " and its padding, is as wide.
 const errorConnectorWidth = 4
 
-// PrintError renders err for a reader: its message as a tree, then the
-// excerpts of each [*niceyaml.SourceError] that [niceyaml.Bindings] finds
-// in its tree, one per source the tree of the binding touches, as
-// [niceyaml.SourceError.Excerpts] yields them. Each excerpt keeps the
-// context lines [WithContextLines] sets on either side of each marked
-// line. An error joined from one bound error per document therefore
-// prints an excerpt for each document, and a binding whose nested errors
-// point into another file prints an excerpt of that file too. A location
-// with no message beside it in the excerpt, such as the root of a bound
-// error, gets a caret run under its range on the row below, as
-// [niceyaml.FormatError] draws one.
+// PrintError renders err for a reader: its message as a tree, then one
+// excerpt per source the bindings in err touch, as [niceyaml.Excerpts]
+// yields them. Each excerpt keeps the context lines [WithContextLines]
+// sets on either side of each marked line. An error joined from one
+// bound error per document of a file therefore prints that file once,
+// with the errors of every document on it. A binding whose nested
+// errors point into another file prints an excerpt of that file too.
+// Among several bindings, the message of each sits beside its caret, and
+// when they touch more than one source, the name of its source leads
+// each excerpt on a row of its own. A location with no message beside it
+// in the excerpt, such as the root of a lone bound error, gets a caret
+// run under its range on the row below, as [niceyaml.FormatError] draws
+// one.
 // [niceyaml.SourceError.Excerpt] marks such a line with an annotation
 // without content, and [DefaultAnnotation] draws that as the caret run, so
 // the range shows its extent without color. A location that covers no
 // column, such as a path to an empty value, gets a single caret at its
-// column. Blank lines separate the parts. When no location in the tree
-// of a SourceError resolves, PrintError prints a line starting
-// "no excerpt:" in place of the excerpts, with the reason the location of
-// the SourceError itself did not resolve. A SourceError that carries no
+// column. Blank lines separate the parts. A line starting "no excerpt:"
+// follows the excerpts for each SourceError [niceyaml.Bindings] finds
+// whose tree resolves no location, with the reason the location of the
+// SourceError itself did not resolve. A SourceError that carries no
 // location of its own gets no such line. A SourceError whose own
 // location does not resolve but whose nested errors do gets their
 // excerpts and no reason, and its message stays in the tree without a
@@ -87,9 +89,7 @@ func (p *Printer) PrintError(err error) string {
 		parts = append(parts, msg)
 	}
 
-	for bound := range niceyaml.Bindings(err) {
-		parts = append(parts, p.details(bound)...)
-	}
+	parts = append(parts, p.details(err)...)
 
 	// A bound join whose branches all carry nothing renders as an empty
 	// tree, so the message stands in for it rather than nothing, drawn as
@@ -101,14 +101,17 @@ func (p *Printer) PrintError(err error) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// details renders each excerpt of bound from
-// [niceyaml.SourceError.Excerpts] with the printer's context lines, one
-// per source the tree of bound touches, or names the reason there is
-// none: a line starting "no excerpt:" with the reason
-// [niceyaml.SourceError.Unresolved] returns, and an error that carries no
-// location has nothing to explain. Returns nothing when there is nothing
-// to show, as [niceyaml.FormatError] does.
-func (p *Printer) details(bound *niceyaml.SourceError) []string {
+// details renders what the tree of err leaves out, as
+// [niceyaml.FormatError] lays it out. Each excerpt [niceyaml.Excerpts]
+// yields comes first, with the printer's context lines, one per source
+// the bindings of err touch. When those bindings touch more than one
+// source, the name of its source leads each excerpt on a row of its own.
+// A line starting "no excerpt:" follows for each binding
+// [niceyaml.Bindings] finds whose tree marks nothing, with the reason
+// [niceyaml.SourceError.Unresolved] returns, and a binding that carries
+// no location has nothing to explain. Returns nothing when there is
+// nothing to show.
+func (p *Printer) details(err error) []string {
 	// Print wraps the gutter and content to the printer's width and draws
 	// the container's frame outside it, so the excerpts wrap to the width
 	// less the frame.
@@ -117,28 +120,70 @@ func (p *Printer) details(bound *niceyaml.SourceError) []string {
 		ex = p.With(WithWrap(max(1, p.wrap-p.style.GetHorizontalFrameSize())))
 	}
 
+	named := severalSources(err)
+
 	var parts []string
 
-	for _, excerpt := range bound.Excerpts(p.contextLines) {
-		parts = append(parts, ex.Print(excerpt))
+	for src, excerpt := range niceyaml.Excerpts(err, p.contextLines) {
+		part := ex.Print(excerpt)
+
+		// The name is the caller's text, so its control characters render
+		// as pictures like those of the tree.
+		if named && src.Name() != "" {
+			name := p.wrapContent(escape.Control(escape.Tabs(src.Name())), 0)
+			part = strings.Join(name, "\n") + "\n" + part
+		}
+
+		parts = append(parts, part)
 	}
 
-	if len(parts) > 0 {
-		return parts
+	for bound := range niceyaml.Bindings(err) {
+		if marks(bound) {
+			continue
+		}
+
+		// The reason names the path that did not resolve, which a key of
+		// the document spells, so its control characters render as
+		// pictures like those of the tree. A tab in the key becomes four
+		// spaces, as it does in the tree.
+		reason := bound.Unresolved()
+		if reason != nil {
+			text := escape.Control(escape.Tabs("no excerpt: " + reason.Error()))
+
+			parts = append(parts, strings.Join(p.wrapContent(text, 0), "\n"))
+		}
 	}
 
-	// The reason names the path that did not resolve, which a key of the
-	// document spells, so its control characters render as pictures like
-	// those of the tree. A tab in the key becomes four spaces, as it does
-	// in the tree.
-	reason := bound.Unresolved()
-	if reason != nil {
-		text := escape.Control(escape.Tabs("no excerpt: " + reason.Error()))
+	return parts
+}
 
-		return []string{strings.Join(p.wrapContent(text, 0), "\n")}
+// severalSources reports whether the bindings in err, the ones
+// [niceyaml.AllBindings] yields, are bound to more than one source.
+func severalSources(err error) bool {
+	var first *niceyaml.Source
+
+	for bound := range niceyaml.AllBindings(err) {
+		switch {
+		case first == nil:
+			first = bound.Source()
+		case bound.Source() != first:
+			return true
+		}
 	}
 
-	return nil
+	return false
+}
+
+// marks reports whether the location of bound, or of a binding below it,
+// resolved, so an excerpt marks a line for the tree of bound.
+func marks(bound *niceyaml.SourceError) bool {
+	for b := range niceyaml.AllBindings(bound) {
+		if _, ok := b.Range(); ok {
+			return true
+		}
+	}
+
+	return false
 }
 
 // renderErrorTree draws t with a connector in front of each child, in the

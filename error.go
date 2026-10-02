@@ -1818,19 +1818,6 @@ func (e *SourceError) text() string {
 	return e.err.Error()
 }
 
-// walk calls visit for every node below e in depth-first order, each
-// once however many times the tree reaches it, as [AllBindings] yields
-// them. A nil e has no nodes below it.
-func (e *SourceError) walk(visit func(*SourceError)) {
-	e.all(map[*SourceError]bool{}, func(n *SourceError) bool {
-		if n != e {
-			visit(n)
-		}
-
-		return true
-	})
-}
-
 // all yields e and every binding below it in depth-first order, each
 // once however many times the tree reaches it, and reports whether the
 // caller wants more. A nil e yields nothing.
@@ -1858,20 +1845,18 @@ func (e *SourceError) all(seen map[*SourceError]bool, yield func(*SourceError) b
 // the wrappers and joins around err, in depth-first order, so the
 // outermost comes first and each branch of an [errors.Join] follows the
 // one before it. It does not look below a binding, so it shows each
-// binding as one unit. [FormatError] walks it to print one tree and one
-// set of excerpts per binding, as for an error joined from one binding
-// per document of a file:
+// binding as one unit. A caller that renders each binding on its own,
+// such as one section per document of a file, walks it:
 //
 //	for bound := range niceyaml.Bindings(err) {
-//		for src, excerpt := range bound.Excerpts(2) {
-//			fmt.Println(src.Name())
-//			fmt.Println(excerpt)
-//		}
+//		fmt.Println(niceyaml.FormatError(bound, 2))
 //	}
 //
-// A caller that marks a view with [SourceError.Annotate], or that wants
-// one entry per error, the nodes below each binding included, walks
-// [AllBindings] instead. A nil err has no bindings.
+// [FormatError] renders the whole error instead, as one tree and one
+// excerpt per source, as [Excerpts] yields them. A caller that marks a
+// view with [SourceError.Annotate], or that wants one entry per error,
+// the nodes below each binding included, walks [AllBindings]. A nil err
+// has no bindings.
 func Bindings(err error) iter.Seq[*SourceError] {
 	return func(yield func(*SourceError) bool) {
 		eachBinding(err, yield)
@@ -1978,22 +1963,28 @@ func (e *SourceError) LogValue() slog.Value {
 //	|-- 6:8: $.spec.sla: string does not match pattern
 //	`-- 22:11: $.spec.hours.days: expected "array", got "string"
 //
-// The excerpts follow. For each binding [Bindings] finds, FormatError
-// prints one excerpt per source the tree of the binding touches, as
-// [SourceError.Excerpts] yields them, so a binding whose nested errors
-// point into another file shows an excerpt of that file too. Each
-// excerpt keeps context lines of unchanged content on either side of
-// each marked line and renders as [line.View.String] renders a view:
-// each line behind its number, carets under the columns of every
-// location on the row below, and the message of each nested error
-// beside its caret. A negative context shows the marked lines alone.
-// Blank lines separate the parts. When no location in the tree of a
-// binding resolves, FormatError prints a line starting "no excerpt:" in
-// place of the excerpts, with the reason the location of the binding
-// itself did not resolve. A binding that carries no location of its own
-// gets no such line. A binding whose own location does not resolve but
-// whose nested errors do gets their excerpts and no reason, and its
-// message stays in the tree without a position. The output holds no
+// The excerpts follow, one per source the bindings in err touch, as
+// [Excerpts] yields them. An error joined from one binding per document
+// of a file thus shows that file once, with the errors of every document
+// on it. A binding whose nested errors point into another file shows an
+// excerpt of that file too. Each excerpt keeps context lines of
+// unchanged content on either side of each marked line and renders as
+// [line.View.String] renders a view. Each line sits behind its number,
+// with carets under the columns of every location on the row below and
+// the message of each nested error beside its caret. Among several
+// bindings, the message of each binding sits beside its own caret too.
+// When the bindings touch more than one source, the name of its source
+// leads each excerpt on a row of its own. A negative context shows the
+// marked lines alone. Blank lines separate the parts.
+//
+// A line starting "no excerpt:" follows the excerpts for each binding
+// [Bindings] finds whose tree resolves no location, with the reason the
+// location of the binding itself did not resolve. A binding that carries
+// no location of its own gets no such line. A binding whose own location
+// does not resolve but whose nested errors do gets their excerpts and no
+// reason, and its message stays in the tree without a position.
+//
+// The output holds no
 // escape sequences, so it reads in a log as it does in a terminal.
 // Each message of the tree, each message beside a caret, and each
 // "no excerpt:" line draws control characters as their pictures. The
@@ -2020,10 +2011,7 @@ func FormatError(err error, context int) string {
 	}
 
 	parts := []string{renderErrorTree(NewErrorTree(err))}
-
-	for bound := range Bindings(err) {
-		parts = append(parts, bound.details(context)...)
-	}
+	parts = append(parts, errorDetails(err, context)...)
 
 	out := joinParts(parts...)
 
@@ -2314,7 +2302,7 @@ func (e *SourceError) Excerpt(context int) (*line.View, bool) {
 		return nil, false
 	}
 
-	_, positions := e.positions()
+	_, positions := excerptPositions([]*SourceError{e})
 	view := e.source.View()
 
 	if !annotate(view, e.source, positions[e.source]) {
@@ -2340,55 +2328,141 @@ func (e *SourceError) Excerpt(context int) (*line.View, bool) {
 //		fmt.Println(excerpt)
 //	}
 //
-// [FormatError] and
-// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] render the
-// excerpts of each binding [Bindings] yields this way. A nil SourceError
-// yields nothing.
+// [Excerpts] yields the same excerpts for the binding alone, and one
+// excerpt per source for an error that holds several bindings. A nil
+// SourceError yields nothing.
 func (e *SourceError) Excerpts(context int) iter.Seq2[*Source, *line.View] {
 	return func(yield func(*Source, *line.View) bool) {
-		sources, positions := e.positions()
+		if e == nil {
+			return
+		}
 
-		for _, src := range sources {
-			view := src.View()
+		sources, positions := excerptPositions([]*SourceError{e})
 
-			if !annotate(view, src, positions[src]) {
-				continue
-			}
+		yieldExcerpts(sources, positions, context, yield)
+	}
+}
 
-			if !yield(src, view.Hunks(context)) {
-				return
-			}
+// Excerpts returns an iterator over one excerpt per source the bindings
+// in err touch: every [*SourceError] [Bindings] finds, and every binding
+// below each one. The sources come in the order the bindings reach them.
+// Each excerpt is a fresh [Source.View] with the location of every one of
+// those bindings marked on it, cut to the hunks around them, as
+// [SourceError.Excerpt] cuts one. An error joined from one binding per
+// document of a file thus yields one excerpt of that file with every
+// document's errors on it:
+//
+//	for _, doc := range docs {
+//		errs = append(errs, doc.Validate(ctx, schema))
+//	}
+//
+//	for src, excerpt := range niceyaml.Excerpts(errors.Join(errs...), 2) {
+//		fmt.Println(src.Name())
+//		fmt.Println(excerpt)
+//	}
+//
+// The message of each binding sits beside its caret, so a reader tells
+// the carets of one excerpt apart. An error that holds one binding leaves
+// the location of that binding with a caret run alone, since the tree
+// [FormatError] prints above the excerpt names it, and yields what
+// [SourceError.Excerpts] yields for that binding. Excerpts marks a
+// binding the error reaches twice once.
+//
+// A source none of whose locations resolve yields nothing. [FormatError]
+// and [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] render
+// these excerpts under the tree of the error. A caller that wants one
+// excerpt per binding, such as one section per document, takes
+// [SourceError.Excerpts] of each binding [Bindings] yields. An err with
+// no bindings, and a nil err, yield nothing.
+func Excerpts(err error, context int) iter.Seq2[*Source, *line.View] {
+	return func(yield func(*Source, *line.View) bool) {
+		sources, positions := excerptPositions(slices.Collect(Bindings(err)))
+
+		yieldExcerpts(sources, positions, context, yield)
+	}
+}
+
+// yieldExcerpts yields the excerpt of each of sources that positions marks
+// a line of, in order: a fresh view of the source with its positions
+// marked, cut to the hunks around them with context lines.
+func yieldExcerpts(
+	sources []*Source,
+	positions map[*Source][]errorPosition,
+	context int,
+	yield func(*Source, *line.View) bool,
+) {
+	for _, src := range sources {
+		view := src.View()
+
+		if !annotate(view, src, positions[src]) {
+			continue
+		}
+
+		if !yield(src, view.Hunks(context)) {
+			return
 		}
 	}
 }
 
-// details returns what [SourceError.Error] leaves out: each excerpt from
-// [SourceError.Excerpts] with context lines, which [line.View.String]
-// renders as plain text. When no location resolves, a line starting
-// "no excerpt:" names the reason [SourceError.Unresolved] returns in
-// place of the excerpts, and an error that carries no location has
-// nothing to explain. Returns nothing when there is nothing to show. The
-// printer renders the same parts with its styles.
-func (e *SourceError) details(context int) []string {
+// errorDetails returns what the tree of err leaves out: each excerpt
+// [Excerpts] yields with context lines, which [line.View.String] renders
+// as plain text, then a line starting "no excerpt:" for each binding
+// [Bindings] finds whose tree marks nothing, with the reason
+// [SourceError.Unresolved] returns. A binding that carries no location
+// has nothing to explain. When the bindings touch more than one source,
+// the name of its source leads each excerpt on a row of its own, so the
+// reader tells the excerpts apart. Returns nothing when there is nothing
+// to show. The printer renders the same parts with its styles.
+func errorDetails(err error, context int) []string {
+	bindings := slices.Collect(Bindings(err))
+	sources, positions := excerptPositions(bindings)
+
 	var parts []string
 
-	for _, excerpt := range e.Excerpts(context) {
-		parts = append(parts, excerpt.String())
+	yieldExcerpts(sources, positions, context, func(src *Source, excerpt *line.View) bool {
+		part := excerpt.String()
+
+		// The name is the caller's text, so its control characters render
+		// as pictures like those of the tree.
+		if len(sources) > 1 && src.Name() != "" {
+			part = escape.Control(escape.Tabs(src.Name())) + "\n" + part
+		}
+
+		parts = append(parts, part)
+
+		return true
+	})
+
+	for _, bound := range bindings {
+		if bound.marks() {
+			continue
+		}
+
+		// The reason names the path, which a key of the document spells,
+		// so its control characters render as pictures like those of the
+		// tree. A tab in the key becomes four spaces, as it does in the
+		// tree.
+		reason := bound.Unresolved()
+		if reason != nil {
+			parts = append(parts, "no excerpt: "+escape.Control(escape.Tabs(reason.Error())))
+		}
 	}
 
-	if len(parts) > 0 {
-		return parts
-	}
+	return parts
+}
 
-	// The reason names the path, which a key of the document spells, so
-	// its control characters render as pictures like those of the tree. A
-	// tab in the key becomes four spaces, as it does in the tree.
-	reason := e.Unresolved()
-	if reason != nil {
-		return []string{"no excerpt: " + escape.Control(escape.Tabs(reason.Error()))}
-	}
+// marks reports whether the location of e, or of a binding below it,
+// resolved, so an excerpt marks a line for the tree of e.
+func (e *SourceError) marks() bool {
+	found := false
 
-	return nil
+	e.all(map[*SourceError]bool{}, func(n *SourceError) bool {
+		found = n.locErr == nil
+
+		return !found
+	})
+
+	return found
 }
 
 // joinParts joins the parts that are not empty with a blank line between
@@ -2523,42 +2597,49 @@ func highlightStart(at position.Position, segments []position.Range) (int, bool)
 	return col, found
 }
 
-// positions returns the sources the tree of e touches, with the resolved
-// locations of the nodes bound to each, from one walk of the tree. The
-// sources start with the source of the binding, then list the source of
-// each node below it that no node before it in depth-first order is
-// bound to. An excerpt per source thus comes out in the order the tree
-// reaches them. The locations of each source come in the same order, and
-// a node whose location did not resolve adds none. The root's own
-// location carries no message, so an excerpt gives it a caret run alone.
-// A nil e touches no source.
-func (e *SourceError) positions() ([]*Source, map[*Source][]errorPosition) {
-	if e == nil {
-		return nil, nil
-	}
+// excerptPositions returns the sources the trees of bindings touch, with
+// the resolved locations of the nodes bound to each, from one walk of
+// each tree. The sources come in the order the walk reaches them: the
+// source of each binding, then the source of each node below it, in
+// depth-first order. An excerpt per source thus comes out in that order.
+// The locations of each source come in the same order, and a node whose
+// location did not resolve adds none. A node the trees reach twice adds
+// its location once.
+//
+// Every node below a binding carries its message. The own location of a
+// binding carries it only among several bindings, where the message tells
+// the carets of one excerpt apart. The location of a lone binding carries
+// none, so an excerpt gives it a caret run alone. A nil binding touches
+// no source.
+func excerptPositions(bindings []*SourceError) ([]*Source, map[*Source][]errorPosition) {
+	var sources []*Source
 
-	sources := []*Source{e.source}
-	seen := map[*Source]bool{e.source: true}
+	touched := make(map[*Source]bool)
 	positions := make(map[*Source][]errorPosition)
+	seen := make(map[*SourceError]bool)
+	labeled := len(bindings) > 1
 
-	if e.locErr == nil {
-		positions[e.source] = append(positions[e.source], errorPosition{pos: e.loc.pos, ranges: e.ranges})
+	for _, root := range bindings {
+		root.all(seen, func(n *SourceError) bool {
+			if !touched[n.source] {
+				touched[n.source] = true
+				sources = append(sources, n.source)
+			}
+
+			if n.locErr != nil {
+				return true
+			}
+
+			at := errorPosition{pos: n.loc.pos, ranges: n.ranges}
+			if labeled || n != root {
+				at.message = n.text()
+			}
+
+			positions[n.source] = append(positions[n.source], at)
+
+			return true
+		})
 	}
-
-	e.walk(func(n *SourceError) {
-		if !seen[n.source] {
-			seen[n.source] = true
-			sources = append(sources, n.source)
-		}
-
-		if n.locErr == nil {
-			positions[n.source] = append(positions[n.source], errorPosition{
-				pos:     n.loc.pos,
-				ranges:  n.ranges,
-				message: n.text(),
-			})
-		}
-	})
 
 	return sources, positions
 }

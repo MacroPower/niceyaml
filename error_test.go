@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"log/slog"
 	"maps"
 	"math"
@@ -5259,9 +5260,11 @@ func TestSourceError_Excerpts(t *testing.T) {
 			"|-- values.yaml:1:7: $.port: not a number",
 			"`-- values.yaml:2:7: $.host: not a name",
 			"",
+			"manifest.yaml",
 			"   2 | values: values.yaml",
 			"     |         ^^^^^^^^^^^",
 			"",
+			"values.yaml",
 			"   1 | port: many",
 			"     |       ^^^^ not a number",
 			"   2 | host: 7",
@@ -5365,6 +5368,130 @@ func TestSourceError_Excerpts(t *testing.T) {
 		for range nilErr.Excerpts(0) {
 			t.Fatal("no excerpt expected")
 		}
+	})
+}
+
+func TestExcerpts(t *testing.T) {
+	t.Parallel()
+
+	first := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("first.yaml"))
+	second := niceyaml.NewSourceFromString("c: 3\n", niceyaml.WithName("second.yaml"))
+
+	badA := yamltest.Bind(t, first, niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a"))))
+	badB := yamltest.Bind(t, first, niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b"))))
+	badC := yamltest.Bind(t, second, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Root().Child("c"))))
+	gone := yamltest.Bind(t, second, niceyaml.NewError("gone", niceyaml.AtExactPath(paths.Root().Child("x"))))
+
+	// Each excerpt reads as the name of its source on a row above it.
+	collect := func(excerpts iter.Seq2[*niceyaml.Source, *line.View]) []string {
+		var got []string
+
+		for src, view := range excerpts {
+			got = append(got, src.Name()+"\n"+view.String())
+		}
+
+		return got
+	}
+
+	tcs := map[string]struct {
+		err  error
+		want []string
+	}{
+		"bindings of one source share an excerpt": {
+			err: errors.Join(badA, badB),
+			want: []string{stringtest.JoinLF(
+				"first.yaml",
+				"   1 | a: 1",
+				"     |    ^ bad a",
+				"   2 | b: 2",
+				"     |    ^ bad b",
+			)},
+		},
+		"sources come in the order the bindings reach them": {
+			err: errors.Join(badC, badA, badB),
+			want: []string{
+				"second.yaml\n   1 | c: 3\n     |    ^ bad c",
+				stringtest.JoinLF(
+					"first.yaml",
+					"   1 | a: 1",
+					"     |    ^ bad a",
+					"   2 | b: 2",
+					"     |    ^ bad b",
+				),
+			},
+		},
+		"a lone binding keeps its caret bare": {
+			err:  fmt.Errorf("check: %w", badA),
+			want: []string{"first.yaml\n   1 | a: 1\n     |    ^"},
+		},
+		"a binding the error reaches twice marks its line once": {
+			err:  errors.Join(badA, fmt.Errorf("again: %w", badA)),
+			want: []string{"first.yaml\n   1 | a: 1\n     |    ^ bad a"},
+		},
+		"a nested binding joined beside its parent marks its line once": {
+			err: errors.Join(
+				yamltest.Bind(t, first, niceyaml.NewError("summary", niceyaml.WithErrors(badA))),
+				badA,
+			),
+			want: []string{"first.yaml\n   1 | a: 1\n     |    ^ bad a"},
+		},
+		"a source with nothing resolved yields nothing": {
+			err:  errors.Join(badA, gone),
+			want: []string{"first.yaml\n   1 | a: 1\n     |    ^ bad a"},
+		},
+		"an error bound to no source yields nothing": {
+			err: errors.New("plain"),
+		},
+		"nil yields nothing": {},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, collect(niceyaml.Excerpts(tc.err, 0)))
+		})
+	}
+
+	t.Run("a lone binding yields what its own Excerpts yields", func(t *testing.T) {
+		t.Parallel()
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, yamltest.Bind(t, first, niceyaml.NewError(
+			"bad a",
+			niceyaml.AtPath(paths.Root().Child("a")),
+			niceyaml.WithErrors(badC),
+		)), &bound)
+
+		want := collect(bound.Excerpts(0))
+
+		require.Len(t, want, 2)
+		assert.Equal(t, want, collect(niceyaml.Excerpts(bound, 0)))
+	})
+
+	t.Run("stops when the caller does", func(t *testing.T) {
+		t.Parallel()
+
+		count := 0
+
+		for range niceyaml.Excerpts(errors.Join(badA, badC), 0) {
+			count++
+
+			break
+		}
+
+		assert.Equal(t, 1, count)
+	})
+
+	t.Run("each excerpt is a view of its own", func(t *testing.T) {
+		t.Parallel()
+
+		views := maps.Collect(niceyaml.Excerpts(errors.Join(badA, badB), 0))
+		require.Len(t, views, 1)
+
+		// The source keeps no decoration from the excerpt.
+		assert.Equal(t, "   1 | a: 1\n   2 | b: 2", first.View().String())
 	})
 }
 
@@ -6263,7 +6390,7 @@ func TestFormat(t *testing.T) {
 		), niceyaml.FormatError(err, 2))
 	})
 
-	t.Run("renders one excerpt per binding of a join", func(t *testing.T) {
+	t.Run("renders one excerpt per source of a join under its name", func(t *testing.T) {
 		t.Parallel()
 
 		first := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml"))
@@ -6278,12 +6405,106 @@ func TestFormat(t *testing.T) {
 			"|-- a.yaml:1:4: $.a: bad a",
 			"`-- b.yaml:1:4: $.b: bad b",
 			"",
+			"a.yaml",
 			"   1 | a: 1",
-			"     |    ^",
+			"     |    ^ bad a",
 			"",
+			"b.yaml",
 			"   1 | b: 2",
-			"     |    ^",
+			"     |    ^ bad b",
 		), niceyaml.FormatError(err, 2))
+	})
+
+	t.Run("renders the documents of one file as one excerpt", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			a: x
+			---
+			a: y
+			---
+			a: 1
+			b: 2
+			---
+			c: 3
+		`), niceyaml.WithName("multi.yaml"))
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 4)
+
+		// One binding per document that fails, joined, as a caller that
+		// validates each document of a file builds one.
+		joined := errors.Join(
+			docs[0].Bind(niceyaml.NewError("not a number", niceyaml.AtPath(paths.Root().Child("a")))),
+			docs[1].Bind(niceyaml.NewError("not a number", niceyaml.AtPath(paths.Root().Child("a")))),
+			docs[2].Bind(niceyaml.NewError("2 problems", niceyaml.WithErrors(
+				niceyaml.NewError("not a string", niceyaml.AtPath(paths.Root().Child("b"))),
+			))),
+			docs[3].Bind(niceyaml.NewError("not allowed", niceyaml.AtPath(paths.Root().Child("c").Key()))),
+		)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"|-- multi.yaml:1:4: $.a: not a number",
+			"|-- multi.yaml:3:4: $.a: not a number",
+			"|-- multi.yaml: 2 problems",
+			"|   `-- 6:4: $.b: not a string",
+			"`-- multi.yaml:8:1: $.c~: not allowed",
+			"",
+			"   1 | a: x",
+			"     |    ^ not a number",
+			"   2 | ---",
+			"   3 | a: y",
+			"     |    ^ not a number",
+			"   4 | ---",
+			"   5 | a: 1",
+			"   6 | b: 2",
+			"     |    ^ not a string",
+			"   7 | ---",
+			"   8 | c: 3",
+			"     | ^ not allowed",
+		), niceyaml.FormatError(joined, 2))
+
+		// Each binding still renders on its own, for a caller that wants
+		// one section per document.
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("a")))), &bound)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"multi.yaml:3:4: $.a: bad",
+			"",
+			"   3 | a: y",
+			"     |    ^",
+		), niceyaml.FormatError(bound, 0))
+	})
+
+	t.Run("names why a binding of a join marks nothing after the excerpts", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n", niceyaml.WithName("f.yaml"))
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+
+		joined := errors.Join(
+			docs[0].Bind(niceyaml.NewError("gone", niceyaml.AtExactPath(paths.Root().Child("x")))),
+			docs[1].Bind(niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b")))),
+			docs[1].Bind(errors.New("plain")),
+		)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"|-- f.yaml: $.x: gone",
+			"|-- f.yaml:3:4: $.b: bad b",
+			"`-- f.yaml: plain",
+			"",
+			"   1 | a: 1",
+			"   2 | ---",
+			"   3 | b: 2",
+			"     |    ^ bad b",
+			"",
+			"no excerpt: resolve $.x: not found",
+		), niceyaml.FormatError(joined, 2))
 	})
 
 	t.Run("an error bound to no source renders as its message", func(t *testing.T) {

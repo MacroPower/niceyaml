@@ -229,10 +229,22 @@ func TestPrinter_PrintError(t *testing.T) {
 		"<textError>   ^</textError>",
 	)
 
-	otherExcerpt := stringtest.JoinLF(
-		"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>3</genericError>",
-		"<textError>   ^</textError>",
+	// Among several bindings, the message of each sits beside its caret.
+	labeled := stringtest.JoinLF(
+		"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>1</literalNumberInteger>",
+		"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>2</genericError>",
+		"<textError>   ^ bad</textError>",
 	)
+
+	otherLabeled := stringtest.JoinLF(
+		"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>3</genericError>",
+		"<textError>   ^ bad</textError>",
+	)
+
+	// Two sources with names, one of which holds a tab and a control
+	// character.
+	named := niceyaml.NewSourceFromString("c: 3\n", niceyaml.WithName("c.yaml"))
+	tabbed := niceyaml.NewSourceFromString("c: 3\n", niceyaml.WithName("t\t\x1b.yaml"))
 
 	// The style of the indent adds text in front of the second line, and
 	// the caret still lands under the value.
@@ -317,14 +329,36 @@ func TestPrinter_PrintError(t *testing.T) {
 			err:  yamltest.Bind(t, source, niceyaml.WrapError(nil, niceyaml.AtPath(paths.Root().Child("b")))),
 			want: "2:4: $.b:\n\n" + excerpt,
 		},
-		"joined bound errors print every excerpt": {
+		"joined bound errors print one excerpt per source": {
 			err: errors.Join(
 				fmt.Errorf("first: %w", bound),
 				fmt.Errorf("second: %w", yamltest.Bind(t, other,
 					niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("c"))),
 				)),
 			),
-			want: "├── first: 2:4: $.b: bad\n└── second: 1:4: $.c: bad\n\n" + excerpt + "\n\n" + otherExcerpt,
+			want: "├── first: 2:4: $.b: bad\n└── second: 1:4: $.c: bad\n\n" + labeled + "\n\n" + otherLabeled,
+		},
+		"joined bound errors of one source share an excerpt": {
+			err: errors.Join(
+				yamltest.Bind(t, source, niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a")))),
+				yamltest.Bind(t, source, niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b")))),
+			),
+			want: "├── 1:4: $.a: bad a\n└── 2:4: $.b: bad b\n\n" + annotated,
+		},
+		"joined bound errors of named sources print each name": {
+			err: errors.Join(
+				yamltest.Bind(t, named, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("c")))),
+				yamltest.Bind(t, tabbed, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("c")))),
+			),
+			want: "├── c.yaml:1:4: $.c: bad\n└── t    ␛.yaml:1:4: $.c: bad\n\n" +
+				"c.yaml\n" + otherLabeled + "\n\n" + "t    ␛.yaml\n" + otherLabeled,
+		},
+		"joined bound error that marks nothing names its reason last": {
+			err: errors.Join(
+				yamltest.Bind(t, source, niceyaml.NewError("gone", niceyaml.AtExactPath(paths.Root().Child("x")))),
+				bound,
+			),
+			want: "├── $.x: gone\n└── 2:4: $.b: bad\n\n" + labeled + "\n\nno excerpt: resolve $.x: not found",
 		},
 		// A row drops its trailing spaces: the space after "b", and the
 		// blank indent in front of the blank line of the last branch.
@@ -393,7 +427,7 @@ func TestPrinter_PrintError(t *testing.T) {
 				yamltest.Bind(t, other, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("c")))),
 			),
 			want: "├── 2 problems\n│   ├── 1:4: $.a: bad a\n│   └── 2:4: $.b: bad b\n└── 1:4: $.c: bad\n\n" +
-				annotated + "\n\n" + otherExcerpt,
+				annotated + "\n\n" + otherLabeled,
 		},
 	}
 

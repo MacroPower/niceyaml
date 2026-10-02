@@ -100,10 +100,11 @@
 // only the branches that carry a location or errors nested below them,
 // so a sentinel it wraps beside a cause shows only in its message.
 // [Bindings] finds every binding in an error joined from bound errors,
-// such as one per document of a file, for a caller that renders them
-// all. A SourceError never rewrites the message it binds, so an error
-// built by hand goes through Bind before [fmt.Errorf] adds context,
-// which keeps the position beside the message.
+// such as one per document of a file. FormatError prints the errors of
+// such a join on one excerpt per source, each with its message beside
+// its caret. A SourceError keeps the text it binds, so an error built by
+// hand goes through Bind before [fmt.Errorf] adds context, which keeps
+// the position beside the message.
 //
 // # Lines
 //
