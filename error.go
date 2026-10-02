@@ -2127,6 +2127,26 @@ func (e *SourceError) Range() (position.Range, bool) {
 	return e.rng, true
 }
 
+// Position returns the position [SourceError.Error] puts in front of the
+// message and true. It counts from 0 as [position.Position] does, so a
+// message that opens with "3:9:" has the position of line 2, column 8.
+// For a range or a path, it is the start of [SourceError.Range]. A
+// position from [AtPosition] comes back as the error gave it, where Range
+// starts at the content of the token the position falls in. A report
+// that names the place of an error as its message does reads Position,
+// and one that marks the text reads Range.
+//
+// Position reports false when Range does, for an error that carries no
+// location or whose location did not resolve. A nil SourceError has no
+// position.
+func (e *SourceError) Position() (position.Position, bool) {
+	if e == nil || e.locErr != nil {
+		return position.Position{}, false
+	}
+
+	return e.loc.pos, true
+}
+
 // Unresolved returns why the location of the bound error did not
 // resolve, and nil when it did or when the error carries no location at
 // all, which is the ordinary case for an error from [fmt.Errorf] and

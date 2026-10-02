@@ -3844,6 +3844,127 @@ func TestSourceError_Range_PositionInsideToken(t *testing.T) {
 	assert.Equal(t, "2:5: bad", bound.Error())
 }
 
+func TestSourceError_Position(t *testing.T) {
+	t.Parallel()
+
+	source := xmlSource("name: hello\nvalue: 123\n")
+
+	bind := func(t *testing.T, err error) *niceyaml.SourceError {
+		t.Helper()
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, yamltest.Bind(t, source, err), &bound)
+
+		return bound
+	}
+
+	tcs := map[string]struct {
+		build func(t *testing.T) *niceyaml.SourceError
+		// The start of the range the error resolves to, which differs from
+		// the position only for a position inside a token.
+		start position.Position
+		want  position.Position
+		ok    bool
+	}{
+		"path": {
+			build: func(t *testing.T) *niceyaml.SourceError {
+				t.Helper()
+
+				return bind(t, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("value"))))
+			},
+			want:  position.New(1, 7),
+			start: position.New(1, 7),
+			ok:    true,
+		},
+		"range": {
+			build: func(t *testing.T) *niceyaml.SourceError {
+				t.Helper()
+
+				return bind(t, niceyaml.NewError("bad", niceyaml.AtRange(
+					position.NewRange(position.New(0, 6), position.New(0, 9)),
+				)))
+			},
+			want:  position.New(0, 6),
+			start: position.New(0, 6),
+			ok:    true,
+		},
+		"position at the start of a token": {
+			build: func(t *testing.T) *niceyaml.SourceError {
+				t.Helper()
+
+				return bind(t, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(1, 7))))
+			},
+			want:  position.New(1, 7),
+			start: position.New(1, 7),
+			ok:    true,
+		},
+		"position inside a token": {
+			build: func(t *testing.T) *niceyaml.SourceError {
+				t.Helper()
+
+				return bind(t, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 8))))
+			},
+			want:  position.New(0, 8),
+			start: position.New(0, 6),
+			ok:    true,
+		},
+		"binding around a binding": {
+			build: func(t *testing.T) *niceyaml.SourceError {
+				t.Helper()
+
+				inner := bind(t, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 8))))
+
+				return bind(t, niceyaml.WrapError(inner, niceyaml.WithErrors(errors.New("see docs"))))
+			},
+			want:  position.New(0, 8),
+			start: position.New(0, 6),
+			ok:    true,
+		},
+		"no location": {
+			build: func(t *testing.T) *niceyaml.SourceError {
+				t.Helper()
+
+				return bind(t, niceyaml.NewError("bad"))
+			},
+		},
+		"position past the last line": {
+			build: func(t *testing.T) *niceyaml.SourceError {
+				t.Helper()
+
+				return bind(t, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(99, 0))))
+			},
+		},
+		"nil": {
+			build: func(*testing.T) *niceyaml.SourceError { return nil },
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			bound := tc.build(t)
+
+			got, ok := bound.Position()
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+
+			rng, rangeOK := bound.Range()
+			assert.Equal(t, tc.ok, rangeOK)
+			assert.Equal(t, tc.start, rng.Start)
+
+			if !ok {
+				return
+			}
+
+			// The message opens with the position counted from 1.
+			prefix := strconv.Itoa(got.Line+1) + ":" + strconv.Itoa(got.Col+1) + ":"
+			assert.True(t, strings.HasPrefix(bound.Error(), prefix), "%q does not open with %q", bound.Error(), prefix)
+		})
+	}
+}
+
 func TestSourceError_Excerpt_Errors(t *testing.T) {
 	t.Parallel()
 
