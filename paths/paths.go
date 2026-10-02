@@ -168,7 +168,10 @@ func isSeparatorRune(r rune) bool {
 // value from the Path alone.
 //
 // [Path.String] returns the selectors as a path expression, and [Parse]
-// reads it back as an equal Path.
+// reads it back as an equal Path. [Path.Equal] compares two paths, since
+// the `==` operator does not compile for a Path. A Path writes itself as
+// that expression through [Path.MarshalText] and reads it through
+// [Path.UnmarshalText], so it encodes as a string in JSON and YAML.
 //
 // Create instances with [Root], [Parse], or [MustParse].
 type Path struct {
@@ -322,10 +325,48 @@ func (p Path) CutPrefix(prefix Path) (Path, bool) {
 	return Path{segments: slices.Clone(p.segments[n:])}, true
 }
 
+// Parent returns the path without its last selector and true, or the root
+// and false for the root, which has no selector to drop:
+//
+//	name := paths.Root().Child("items").Index(0).Child("name")
+//	name.Parent() // $.items[0], true
+//
+// Parent drops one selector of any kind. The parent of a path that ends in
+// `~` is the path to the value of the same entry, and the parent of a path
+// that ends in `.*`, `[*]`, or `..name` is the path to the node that
+// selector reads.
+func (p Path) Parent() (Path, bool) {
+	n := len(p.segments)
+
+	switch n {
+	case 0:
+		return Root(), false
+	case 1:
+		return Root(), true
+	}
+
+	return Path{segments: slices.Clone(p.segments[:n-1])}, true
+}
+
 // IsRoot reports whether the path holds no selectors, so it names the
 // document root as [Root] does.
 func (p Path) IsRoot() bool {
 	return len(p.segments) == 0
+}
+
+// Equal reports whether the path holds the same selectors as q, in the
+// same order. A Path holds a slice, so the `==` operator does not compile
+// for it, and Equal compares two paths in its place.
+//
+// Two selectors are equal when they have the same kind and the same name
+// or index. A wildcard therefore equals the same wildcard and no selector
+// it stands for, so `$.items[*]` differs from `$.items[0]`, and `$.jobs.*`
+// from `$.jobs.build`. Equal compares the selectors and not the nodes they
+// select, so two paths that reach one node through an alias differ. Paths
+// that print the same [Path.String] are equal, and that string keys a map
+// of paths.
+func (p Path) Equal(q Path) bool {
+	return slices.Equal(p.segments, q.segments)
 }
 
 // String returns the path expression, such as "$.metadata.name", which
@@ -341,6 +382,30 @@ func (p Path) String() string {
 	}
 
 	return sb.String()
+}
+
+// MarshalText implements [encoding.TextMarshaler]. The text is the path
+// expression [Path.String] returns, so a Path in a report writes as a
+// string, such as "$.items[0].name" in JSON.
+func (p Path) MarshalText() ([]byte, error) {
+	return []byte(p.String()), nil
+}
+
+// UnmarshalText implements [encoding.TextUnmarshaler]. It reads a path
+// expression as [Parse] does, so a Path decodes from a string of JSON or
+// YAML, and from the text [Path.MarshalText] writes.
+//
+// Returns the error of Parse for a malformed expression, which wraps
+// [ErrInvalidPath], and leaves the path as it was.
+func (p *Path) UnmarshalText(text []byte) error {
+	parsed, err := Parse(string(text))
+	if err != nil {
+		return err
+	}
+
+	*p = parsed
+
+	return nil
 }
 
 // YAMLPath returns the equivalent [*yaml.Path] for use with the goccy/go-yaml

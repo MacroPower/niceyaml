@@ -176,6 +176,32 @@
 //
 //	spec.Join(paths.Root().Child("replicas")) // $.spec.replicas
 //
+// [Path.Parent] drops the last selector, so a caller walks from a path
+// up to the root, and [Path.CutPrefix] drops the leading ones:
+//
+//	replicas.Parent() // $.spec, true
+//
+// # Comparing and Encoding
+//
+// A Path holds its selectors in a slice, so the `==` operator does not
+// compile for it and it cannot key a map. [Path.Equal] compares two paths
+// selector by selector, and [Path.String] gives the key for a map:
+//
+//	if p.Equal(replicas) {
+//		// ...
+//	}
+//
+//	seen := map[string]bool{p.String(): true}
+//
+// A Path implements [encoding.TextMarshaler] and
+// [encoding.TextUnmarshaler] with the same expression, so a report in
+// JSON writes a path as a string, and a struct field of type Path decodes
+// from one:
+//
+//	type Rule struct {
+//		Path paths.Path `json:"path"`
+//	}
+//
 // For the goccy/go-yaml API, [Path.YAMLPath] converts the selectors to a
 // [*yaml.Path]. That syntax has no `.*` selector, so a path that holds one
 // does not convert, and YAMLPath returns an error wrapping [ErrNoYAMLPath].

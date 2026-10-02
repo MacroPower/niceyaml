@@ -1,6 +1,7 @@
 package paths_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -556,6 +557,450 @@ func TestPath_IsRoot(t *testing.T) {
 	assert.False(t, paths.Root().Key().IsRoot())
 	assert.False(t, paths.Root().Index(0).IsRoot())
 	assert.False(t, paths.Root().ChildAll().IsRoot())
+}
+
+func TestPath_Parent(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		p    paths.Path
+		want string
+		ok   bool
+	}{
+		"root": {
+			p:    paths.Root(),
+			want: "$",
+		},
+		"zero value": {
+			want: "$",
+		},
+		"one child": {
+			p:    paths.Root().Child("spec"),
+			want: "$",
+			ok:   true,
+		},
+		"child": {
+			p:    paths.Root().Child("spec", "hours"),
+			want: "$.spec",
+			ok:   true,
+		},
+		"index": {
+			p:    paths.Root().Child("items").Index(2),
+			want: "$.items",
+			ok:   true,
+		},
+		"key": {
+			p:    paths.Root().Child("spec").Key(),
+			want: "$.spec",
+			ok:   true,
+		},
+		"key at the root": {
+			p:    paths.Root().Key(),
+			want: "$",
+			ok:   true,
+		},
+		"sequence wildcard": {
+			p:    paths.Root().Child("items").IndexAll(),
+			want: "$.items",
+			ok:   true,
+		},
+		"mapping wildcard": {
+			p:    paths.Root().Child("jobs").ChildAll(),
+			want: "$.jobs",
+			ok:   true,
+		},
+		"key of a mapping wildcard": {
+			p:    paths.Root().Child("jobs").ChildAll().Key(),
+			want: "$.jobs.*",
+			ok:   true,
+		},
+		"recursive": {
+			p:    paths.Root().Child("spec").Recursive("name"),
+			want: "$.spec",
+			ok:   true,
+		},
+		"quoted name": {
+			p:    paths.Root().Child("a.b", "c d"),
+			want: "$.'a.b'",
+			ok:   true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := tc.p.Parent()
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got.String())
+			assert.Equal(t, paths.MustParse(tc.want), got)
+		})
+	}
+
+	t.Run("walks up to the root", func(t *testing.T) {
+		t.Parallel()
+
+		var got []string
+
+		p, ok := paths.MustParse("$.items[0].tags.*~"), true
+		for ok {
+			got = append(got, p.String())
+			p, ok = p.Parent()
+		}
+
+		assert.Equal(
+			t,
+			[]string{"$.items[0].tags.*~", "$.items[0].tags.*", "$.items[0].tags", "$.items[0]", "$.items", "$"},
+			got,
+		)
+	})
+
+	t.Run("leaves the path as it was", func(t *testing.T) {
+		t.Parallel()
+
+		p := paths.Root().Child("spec", "hours", "open")
+
+		parent, ok := p.Parent()
+		require.True(t, ok)
+
+		assert.Equal(t, "$.spec.hours.close", parent.Child("close").String())
+		assert.Equal(t, "$.spec.hours", parent.String())
+		assert.Equal(t, "$.spec.hours.open", p.String())
+	})
+}
+
+func TestPath_Equal(t *testing.T) {
+	t.Parallel()
+
+	var zero paths.Path
+
+	tcs := map[string]struct {
+		p    paths.Path
+		q    paths.Path
+		want bool
+	}{
+		"root and root": {
+			p:    paths.Root(),
+			q:    paths.Root(),
+			want: true,
+		},
+		"root and the zero value": {
+			p:    paths.Root(),
+			q:    zero,
+			want: true,
+		},
+		"root and a parsed root": {
+			p:    paths.Root(),
+			q:    paths.MustParse("$"),
+			want: true,
+		},
+		"root and the parent of a child": {
+			p:    paths.Root(),
+			q:    parentOf(t, paths.Root().Child("a")),
+			want: true,
+		},
+		"built and parsed": {
+			p:    paths.Root().Child("items").Index(0).Child("name"),
+			q:    paths.MustParse("$.items[0].name"),
+			want: true,
+		},
+		"quoted and unquoted spelling": {
+			p:    paths.MustParse("$.'name'"),
+			q:    paths.MustParse("$.name"),
+			want: true,
+		},
+		"every selector kind": {
+			p:    paths.Root().Child("a").ChildAll().Index(1).IndexAll().Recursive("b").Key(),
+			q:    paths.MustParse("$.a.*[1][*]..b~"),
+			want: true,
+		},
+		"negative index and zero": {
+			p:    paths.Root().Index(-1),
+			q:    paths.Root().Index(0),
+			want: true,
+		},
+		"joined and built": {
+			p:    paths.Root().Child("spec").Join(paths.Root().Child("hours")),
+			q:    paths.Root().Child("spec", "hours"),
+			want: true,
+		},
+		"another name": {
+			p: paths.Root().Child("a"),
+			q: paths.Root().Child("b"),
+		},
+		"another index": {
+			p: paths.Root().Index(0),
+			q: paths.Root().Index(1),
+		},
+		"prefix": {
+			p: paths.Root().Child("a"),
+			q: paths.Root().Child("a", "b"),
+		},
+		"root and a child": {
+			p: paths.Root(),
+			q: paths.Root().Child("a"),
+		},
+		"value and key": {
+			p: paths.Root().Child("a"),
+			q: paths.Root().Child("a").Key(),
+		},
+		"sequence wildcard and an index": {
+			p: paths.Root().Child("items").IndexAll(),
+			q: paths.Root().Child("items").Index(0),
+		},
+		"mapping wildcard and a name": {
+			p: paths.Root().Child("jobs").ChildAll(),
+			q: paths.Root().Child("jobs", "build"),
+		},
+		"mapping wildcard and the name star": {
+			p: paths.Root().ChildAll(),
+			q: paths.Root().Child("*"),
+		},
+		"mapping wildcard and sequence wildcard": {
+			p: paths.Root().ChildAll(),
+			q: paths.Root().IndexAll(),
+		},
+		"child and recursive of one name": {
+			p: paths.Root().Child("a"),
+			q: paths.Root().Recursive("a"),
+		},
+		"name and the index it spells": {
+			p: paths.Root().Child("0"),
+			q: paths.Root().Index(0),
+		},
+		"empty name and root": {
+			p: paths.Root().Child(""),
+			q: paths.Root(),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.p.Equal(tc.q))
+			assert.Equal(t, tc.want, tc.q.Equal(tc.p))
+			assert.Equal(t, tc.want, tc.p.String() == tc.q.String())
+		})
+	}
+}
+
+// parentOf returns the parent of p, which must have one.
+func parentOf(t *testing.T, p paths.Path) paths.Path {
+	t.Helper()
+
+	parent, ok := p.Parent()
+	require.True(t, ok)
+
+	return parent
+}
+
+func TestPath_MarshalText(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		p    paths.Path
+		want string
+	}{
+		"root": {
+			p:    paths.Root(),
+			want: "$",
+		},
+		"zero value": {
+			want: "$",
+		},
+		"children and an index": {
+			p:    paths.Root().Child("items").Index(0).Child("name"),
+			want: "$.items[0].name",
+		},
+		"key": {
+			p:    paths.Root().Child("spec").Key(),
+			want: "$.spec~",
+		},
+		"mapping wildcard": {
+			p:    paths.Root().Child("jobs").ChildAll().Child("steps"),
+			want: "$.jobs.*.steps",
+		},
+		"key of a mapping wildcard": {
+			p:    paths.Root().Child("jobs").ChildAll().Key(),
+			want: "$.jobs.*~",
+		},
+		"sequence wildcard": {
+			p:    paths.Root().Child("items").IndexAll(),
+			want: "$.items[*]",
+		},
+		"recursive": {
+			p:    paths.Root().Recursive("name"),
+			want: "$..name",
+		},
+		"quoted names": {
+			p:    paths.Root().Child("a.b", "it's", "", "*").Recursive("x y"),
+			want: `$.'a.b'.'it\'s'.''.'*'..'x y'`,
+		},
+		"name that is not valid UTF-8": {
+			p:    paths.Root().Child("\xff"),
+			want: "$.\xff",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			text, err := tc.p.MarshalText()
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(text))
+			assert.Equal(t, tc.p.String(), string(text))
+
+			var got paths.Path
+
+			require.NoError(t, got.UnmarshalText(text))
+			assert.True(t, tc.p.Equal(got), "got %s", got)
+		})
+	}
+
+	t.Run("writes a JSON string", func(t *testing.T) {
+		t.Parallel()
+
+		type report struct {
+			Path  paths.Path   `json:"path"`
+			Ptr   *paths.Path  `json:"ptr"`
+			Paths []paths.Path `json:"paths"`
+		}
+
+		key := paths.Root().Child("jobs").ChildAll().Key()
+
+		data, err := json.Marshal(report{
+			Path:  paths.Root().Child("items").Index(0),
+			Ptr:   &key,
+			Paths: []paths.Path{paths.Root(), paths.Root().Child("a b")},
+		})
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"path":"$.items[0]","ptr":"$.jobs.*~","paths":["$","$.'a b'"]}`, string(data))
+	})
+
+	t.Run("writes a YAML string", func(t *testing.T) {
+		t.Parallel()
+
+		type report struct {
+			Path paths.Path `yaml:"path"`
+		}
+
+		data, err := yaml.Marshal(report{Path: paths.Root().Child("items").Index(0).Key()})
+		require.NoError(t, err)
+		assert.Equal(t, "path: $.items[0]~\n", string(data))
+	})
+}
+
+func TestPath_UnmarshalText(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		text string
+		want paths.Path
+	}{
+		"root": {
+			text: "$",
+			want: paths.Root(),
+		},
+		"children and an index": {
+			text: "$.items[0].name",
+			want: paths.Root().Child("items").Index(0).Child("name"),
+		},
+		"key": {
+			text: "$.spec~",
+			want: paths.Root().Child("spec").Key(),
+		},
+		"mapping wildcard and its key": {
+			text: "$.jobs.*~",
+			want: paths.Root().Child("jobs").ChildAll().Key(),
+		},
+		"sequence wildcard": {
+			text: "$.items[*].name",
+			want: paths.Root().Child("items").IndexAll().Child("name"),
+		},
+		"recursive": {
+			text: "$..'a.b'",
+			want: paths.Root().Recursive("a.b"),
+		},
+		"quoted star": {
+			text: "$.'*'",
+			want: paths.Root().Child("*"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// A path set before the call must not show through.
+			got := paths.Root().Child("before")
+
+			require.NoError(t, got.UnmarshalText([]byte(tc.text)))
+			assert.True(t, tc.want.Equal(got), "got %s", got)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("malformed expression", func(t *testing.T) {
+		t.Parallel()
+
+		got := paths.Root().Child("before")
+
+		err := got.UnmarshalText([]byte("items[0]"))
+		require.ErrorIs(t, err, paths.ErrInvalidPath)
+		assert.Equal(t, "$.before", got.String())
+
+		_, parseErr := paths.Parse("items[0]")
+		require.Error(t, parseErr)
+		assert.Equal(t, parseErr.Error(), err.Error())
+	})
+
+	t.Run("empty text", func(t *testing.T) {
+		t.Parallel()
+
+		var got paths.Path
+
+		require.ErrorIs(t, got.UnmarshalText(nil), paths.ErrInvalidPath)
+	})
+
+	t.Run("reads a JSON string", func(t *testing.T) {
+		t.Parallel()
+
+		type rule struct {
+			Path  paths.Path   `json:"path"`
+			Ptr   *paths.Path  `json:"ptr"`
+			Paths []paths.Path `json:"paths"`
+		}
+
+		var got rule
+
+		require.NoError(
+			t,
+			json.Unmarshal([]byte(`{"path":"$.items[0]","ptr":"$.jobs.*~","paths":["$","$.'a b'"]}`), &got),
+		)
+		assert.Equal(t, "$.items[0]", got.Path.String())
+		require.NotNil(t, got.Ptr)
+		assert.Equal(t, "$.jobs.*~", got.Ptr.String())
+		require.Len(t, got.Paths, 2)
+		assert.Equal(t, "$", got.Paths[0].String())
+		assert.Equal(t, "$.'a b'", got.Paths[1].String())
+
+		err := json.Unmarshal([]byte(`{"path":"$.items["}`), &got)
+		require.ErrorIs(t, err, paths.ErrInvalidPath)
+	})
+
+	t.Run("reads a YAML string", func(t *testing.T) {
+		t.Parallel()
+
+		type rule struct {
+			Path paths.Path `yaml:"path"`
+		}
+
+		got, err := yamltest.FirstDocument(t, "path: $.items[0].name~\n").Decode[rule](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "$.items[0].name~", got.Path.String())
+	})
 }
 
 func TestParse(t *testing.T) {
