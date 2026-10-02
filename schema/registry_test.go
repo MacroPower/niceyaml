@@ -644,6 +644,59 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 	})
 }
 
+func TestRegistry_Validate_SyntaxError(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		reg   *schema.Registry
+		input string
+	}{
+		"registry that requires a schema": {
+			reg:   schema.NewRegistry(schema.WithResolvers(schema.Embedded([]byte(`{"type": "object"}`)))),
+			input: "kind: [\n",
+		},
+		"resolver that reads the content": {
+			reg: schema.NewRegistry(schema.WithResolvers(schema.When(
+				matcher.Content(kindPath, "Deployment"),
+				schema.Embedded([]byte(`{"type": "object"}`)),
+			))),
+			input: "kind: [\n",
+		},
+		"registry that accepts a document no resolver applies to": {
+			reg: schema.NewRegistry(
+				schema.WithResolvers(schema.Directive()),
+				schema.WithRequireSchema(false),
+			),
+			input: "kind: [\n",
+		},
+		"directive that turns validation off": {
+			reg:   schema.NewRegistry(schema.WithResolvers(schema.Directive())),
+			input: "# yaml-language-server: $schema=none\nkind: [\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			docs, err := niceyaml.NewSourceFromString(tc.input).Documents()
+			require.Error(t, err)
+			require.Len(t, docs, 1)
+
+			doc := docs[0]
+
+			// The document did not parse, so every route to the registry
+			// returns its syntax error.
+			assert.Same(t, doc.Err(), tc.reg.Validate(t.Context(), doc))
+			assert.Same(t, doc.Err(), doc.Validate(t.Context(), tc.reg))
+
+			found, err := tc.reg.Lookup(t.Context(), doc)
+			assert.Nil(t, found)
+			assert.Same(t, doc.Err(), err)
+		})
+	}
+}
+
 func TestRegistry_Caching(t *testing.T) {
 	t.Parallel()
 

@@ -233,6 +233,10 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // each violation on its own lines. [Schema.ValidateValue] returns unbound
 // errors for a caller that reports them somewhere else.
 //
+// A document that did not parse has no data to check, so Validate returns
+// the syntax error [niceyaml.Node.Err] returns for it, whatever the
+// schema accepts.
+//
 // Holding the node lets Validate spell each key in a violation's path as
 // the source does, so a key the decoder respells, such as the hexadecimal
 // 0x10 for the member name 16, still names its member. Where a later key
@@ -291,11 +295,17 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // decode, as [Schema.ValidateValue] does. A node below the root can then
 // exceed the limit where its document passes.
 func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
+	err := n.Err()
+	if err != nil {
+		//nolint:wrapcheck // The source bound the syntax error already.
+		return err
+	}
+
 	if s.acceptAll {
 		return nil
 	}
 
-	err := aliasing.CheckDecode(n)
+	err = aliasing.CheckDecode(n)
 	if err != nil {
 		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
 		return n.Bind(fmt.Errorf("%w: %w", ErrValidate, err))

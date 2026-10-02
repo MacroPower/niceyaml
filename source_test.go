@@ -1890,6 +1890,243 @@ func TestSource_Parse(t *testing.T) {
 	})
 }
 
+func TestSource_Documents_SyntaxError(t *testing.T) {
+	t.Parallel()
+
+	const unclosed = "sequence end token ']' not found"
+
+	tcs := map[string]struct {
+		input string
+		// The syntax error of each document in file order, empty for a
+		// document that parsed.
+		want []string
+		// The lines each document covers.
+		spans []position.Span
+	}{
+		"only document": {
+			input: "a: [\n",
+			want:  []string{"f.yaml:1:4: " + unclosed},
+			spans: []position.Span{position.NewSpan(0, 1)},
+		},
+		"first of two": {
+			input: "a: [\n---\nb: 1\n",
+			want:  []string{"f.yaml:1:4: " + unclosed, ""},
+			spans: []position.Span{position.NewSpan(0, 1), position.NewSpan(1, 3)},
+		},
+		"last of three": {
+			input: "a: 1\n---\nb: 2\n---\nc: [\n",
+			want:  []string{"", "", "f.yaml:5:4: " + unclosed},
+			spans: []position.Span{position.NewSpan(0, 1), position.NewSpan(1, 3), position.NewSpan(3, 5)},
+		},
+		"second and fourth of five": {
+			input: "a: 1\n---\nb: [\n---\nc: 3\n---\nd: @x\n---\ne: 5\n",
+			want: []string{
+				"",
+				"f.yaml:3:4: " + unclosed,
+				"",
+				"f.yaml:7:4: '@' is a reserved character",
+				"",
+			},
+			spans: []position.Span{
+				position.NewSpan(0, 1),
+				position.NewSpan(1, 3),
+				position.NewSpan(3, 5),
+				position.NewSpan(5, 7),
+				position.NewSpan(7, 9),
+			},
+		},
+		"unclosed quote ends at the next header": {
+			input: "a: \"x\n---\nb: 2\n",
+			want:  []string{"f.yaml:1:4: found unexpected document separator", ""},
+			spans: []position.Span{position.NewSpan(0, 1), position.NewSpan(1, 3)},
+		},
+		"document without a header after an end marker": {
+			input: "a: 1\n...\nb: [\n...\nc: 3\n",
+			want:  []string{"", "f.yaml:3:4: " + unclosed, ""},
+			spans: []position.Span{position.NewSpan(0, 2), position.NewSpan(2, 4), position.NewSpan(4, 5)},
+		},
+		"comment and directive above the header": {
+			input: "a: 1\n...\n# top\n%YAML 1.2\n---\nb: [\n---\nc: 3\n",
+			want:  []string{"", "f.yaml:6:4: " + unclosed, ""},
+			spans: []position.Span{position.NewSpan(0, 2), position.NewSpan(2, 6), position.NewSpan(6, 8)},
+		},
+		"directive that no document follows": {
+			input: "a: 1\n...\n%YAML 1.2\n",
+			want:  []string{"", "f.yaml:3:1: unexpected directive value. document not started"},
+			spans: []position.Span{position.NewSpan(0, 2), position.NewSpan(2, 3)},
+		},
+		// The header parses together with the document above it, so the
+		// error of either document fails both.
+		"header after an anchor with no value": {
+			input: "a: &x\n---\nb: [\n---\nc: 3\n",
+			want:  []string{"f.yaml:3:4: " + unclosed, "f.yaml:3:4: " + unclosed, ""},
+			spans: []position.Span{position.NewSpan(0, 1), position.NewSpan(1, 3), position.NewSpan(3, 5)},
+		},
+		"empty documents around the failure": {
+			input: "---\n---\na: [\n---\n---\n",
+			want:  []string{"", "f.yaml:3:4: " + unclosed, "", ""},
+			spans: []position.Span{
+				position.NewSpan(0, 1),
+				position.NewSpan(1, 3),
+				position.NewSpan(3, 4),
+				position.NewSpan(4, 5),
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("f.yaml"))
+
+			docs, err := source.Documents()
+			require.Error(t, err)
+			require.Len(t, docs, len(tc.want))
+
+			// The syntax errors in file order. The two documents of one
+			// run share its error.
+			var failed []error
+
+			for i, doc := range docs {
+				assert.Equal(t, i, doc.DocumentIndex())
+				assert.Equal(t, tc.spans[i], doc.Span())
+
+				if tc.want[i] == "" {
+					require.NoError(t, doc.Err())
+
+					_, decodeErr := doc.Decode[any](t.Context())
+					require.NoError(t, decodeErr)
+
+					continue
+				}
+
+				require.EqualError(t, doc.Err(), tc.want[i])
+
+				bound, ok := doc.Err().(*niceyaml.SourceError) //nolint:errorlint // The value itself is the bound error.
+				require.True(t, ok, "want *niceyaml.SourceError, got %T", doc.Err())
+				assert.Same(t, source, bound.Source())
+
+				if !slices.Contains(failed, doc.Err()) {
+					failed = append(failed, doc.Err())
+				}
+			}
+
+			// One syntax error comes back as it is, and several come back
+			// joined in file order.
+			if len(failed) == 1 {
+				assert.Same(t, failed[0], err)
+			} else {
+				joined, ok := err.(interface{ Unwrap() []error }) //nolint:errorlint // The value itself is the join.
+				require.True(t, ok, "want a join, got %T", err)
+				require.Len(t, joined.Unwrap(), len(failed))
+
+				for i, branch := range joined.Unwrap() {
+					assert.Same(t, failed[i], branch)
+				}
+			}
+
+			// The methods that need the whole file to parse return the
+			// same error and nothing beside it.
+			file, fileErr := source.File()
+			assert.Nil(t, file)
+			assert.Equal(t, err, fileErr)
+
+			doc, docErr := source.Document()
+			assert.Nil(t, doc)
+			assert.Equal(t, err, docErr)
+
+			_, decodeErr := source.Decode[any](t.Context())
+			assert.Equal(t, err, decodeErr)
+
+			again, againErr := source.Documents()
+			assert.Equal(t, err, againErr)
+			assert.Equal(t, docs, again)
+		})
+	}
+}
+
+func TestSource_Documents_SyntaxErrorTokens(t *testing.T) {
+	t.Parallel()
+
+	// A document that did not parse keeps the tokens a document in its
+	// place has when the file parses, and so do the documents around it.
+	tcs := map[string]struct {
+		input string
+		// The text of each document, as its lines hold it.
+		want []string
+		// The values of the tokens in the preamble of each document.
+		preambles [][]string
+	}{
+		"comment above the header": {
+			input: "a: 1\n# lifted\n---\nb: [\n---\nc: 3\n",
+			want:  []string{"a: 1", "# lifted\n---\nb: [", "---\nc: 3"},
+			preambles: [][]string{
+				nil,
+				{" lifted", "---"},
+				{"---"},
+			},
+		},
+		"comments around an end marker": {
+			input: "a: 1\n... # same\n# below\n---\nb: [\n...\n# after\n",
+			want:  []string{"a: 1\n... # same", "# below\n---\nb: [\n...\n# after"},
+			preambles: [][]string{
+				nil,
+				{" below", "---"},
+			},
+		},
+		"directive above the header": {
+			input: "%YAML 1.2\n---\na: [\n---\nb: 1\n",
+			want:  []string{"%YAML 1.2\n---\na: [", "---\nb: 1"},
+			preambles: [][]string{
+				{"%", "YAML", "1.2", "---"},
+				{"---"},
+			},
+		},
+		"comment-only document after the failure": {
+			input: "# top\n---\na: [\n---\n# mid\n---\nb: 1\n",
+			want:  []string{"# top\n---\na: [", "---\n# mid", "---\nb: 1"},
+			preambles: [][]string{
+				{" top", "---"},
+				{"---", " mid"},
+				{"---"},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			docs, err := source.Documents()
+			require.Error(t, err)
+			require.Len(t, docs, len(tc.want))
+
+			var all token.Tokens
+
+			for i, doc := range docs {
+				assert.Equal(t, tc.want[i], doc.Lines().Content())
+				assert.Equal(t, tc.want[i], doc.View().Held().Content())
+
+				var preamble []string
+
+				for _, tk := range doc.Preamble() {
+					preamble = append(preamble, tk.Value)
+				}
+
+				assert.Equal(t, tc.preambles[i], preamble)
+
+				all = append(all, doc.Tokens()...)
+			}
+
+			// The documents share out every token of the source, in order.
+			yamltest.RequireTokensEqual(t, source.Tokens(), all)
+		})
+	}
+}
+
 func TestSource_WithYAMLParserOptions(t *testing.T) {
 	t.Parallel()
 

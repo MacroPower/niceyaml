@@ -81,7 +81,9 @@ func (d *Decoder) With(opts ...DecodeOption) *Decoder {
 // [Node.Validate] runs the validators the caller passes. It is the
 // validation step of [Decoder.Decode] on its own, for a caller that
 // checks a document without decoding it. A Decoder without validators
-// returns nil.
+// returns nil for a document that parsed. A document that did not parse
+// returns the syntax error [Node.Err] returns, whatever validators the
+// Decoder holds.
 func (d *Decoder) Validate(ctx context.Context, n *Node) error {
 	return n.validate(ctx, d.cfg.validators, d.cfg.yamlOpts)
 }

@@ -144,9 +144,6 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 	src := d.node.source
 
 	file, fileTokens := src.decodeParse()
-	if file == nil {
-		return nil, false
-	}
 
 	i := d.fileIndex
 	if i < 0 || i >= len(file.Docs) {

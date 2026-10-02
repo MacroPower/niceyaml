@@ -24,6 +24,10 @@ func validateCmd() *cobra.Command {
 		Use:   "validate file.yaml [file.yaml...]",
 		Short: "Validate YAML files",
 		Long: "Parse YAML files and validate each document against its JSON schema.\n\n" +
+			"Each document parses on its own, so a syntax error fails the document " +
+			"that holds it, and the other documents of the file still validate. " +
+			"One run thus reports every syntax error and every schema violation " +
+			"of a file.\n\n" +
 			"With --schema, every document validates against that schema, " +
 			"a local file or an http/https URL.\n\n" +
 			"Without --schema, a document validates against the schema named by a " +
@@ -108,10 +112,12 @@ func validateCmd() *cobra.Command {
 
 // validateFile validates every document of the file at yamlPath against the
 // registry and joins what every document reports, so one run names each
-// invalid document. A file that holds no document, such as one that is
-// only a "..." marker, validates as an empty file does. Once ctx is
-// canceled, validateFile validates no further document, since each would
-// report the cancellation again.
+// invalid document. A document that does not parse reports its syntax
+// error, and the documents around it validate as they do in a file that
+// parses. A file that holds no document, such as one that is only a "..."
+// marker, validates as an empty file does. Once ctx is canceled,
+// validateFile validates no further document, since each would report
+// the cancellation again.
 //
 // Each error it returns is bound to the source, and the source takes
 // yamlPath as the user typed it for its name, with its control characters
@@ -145,23 +151,31 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 		return err
 	}
 
+	// Documents returns every document beside the syntax errors of the
+	// file. Each document that did not parse reports its own error in the
+	// loop below, so the errors of a file come out in document order.
 	docs, err := source.Documents()
-	if err != nil {
-		return err
-	}
 
 	// Text that is only a "..." marker holds no document, while an empty
 	// file holds one null document. Validating the null document of an
 	// empty source instead keeps such a file from passing a schema that
 	// an empty file fails.
-	if len(docs) == 0 {
+	if len(docs) == 0 && err == nil {
 		docs, err = niceyaml.NewSourceFromString("", opts...).Documents()
-		if err != nil {
-			return err
-		}
 	}
 
-	var errs []error
+	// The loop below reports through the documents, so an error that came
+	// with none goes out here.
+	if len(docs) == 0 {
+		return err
+	}
+
+	var (
+		errs []error
+		// The syntax errors reported so far. Two documents that parse
+		// together share one error, which the file reports once.
+		reported = map[error]bool{}
+	)
 
 	for _, doc := range docs {
 		if ctx.Err() != nil {
@@ -169,9 +183,19 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 		}
 
 		err = doc.Validate(ctx, reg)
-		if err != nil {
-			errs = append(errs, err)
+		if err == nil {
+			continue
 		}
+
+		if doc.Err() != nil {
+			if reported[doc.Err()] {
+				continue
+			}
+
+			reported[doc.Err()] = true
+		}
+
+		errs = append(errs, err)
 	}
 
 	return errors.Join(errs...)

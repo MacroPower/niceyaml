@@ -133,7 +133,9 @@ var (
 	// [ErrMultipleDocuments], [ErrNoDocuments], or the error the file
 	// fails to parse with. [SourceError.Unresolved] reports it. Bind such
 	// an error through [Node.Bind] with the document the check ran
-	// against.
+	// against. Node.Bind reports it too for a path bound through a
+	// document that did not parse, where it wraps the syntax error
+	// [Node.Err] returns.
 	ErrPathNeedsDocument = errors.New("path needs a document to resolve in")
 
 	// ErrAmbiguousPath indicates a path that names the entries of more
@@ -814,7 +816,9 @@ func locate(b binder, l locus) (location, *Node, error) {
 // document leaves out resolves to the key of the mapping that lacks it,
 // as [Node.nearestLocation] finds it. A source that holds no document,
 // holds several, or does not parse has no document to resolve the path
-// in, so the location is [ErrPathNeedsDocument] wrapping that reason.
+// in, so the location is [ErrPathNeedsDocument] wrapping that reason. A
+// document that did not parse has no tree to resolve the path in either,
+// so the location is ErrPathNeedsDocument wrapping its syntax error.
 func locatePath(b binder, path paths.Path) (location, *Node, error) {
 	node := b.node
 
@@ -832,6 +836,10 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 	}
 
 	root := node.doc.node
+
+	if root.doc.err != nil {
+		return location{}, node, fmt.Errorf("%w: %s: %w", ErrPathNeedsDocument, path, root.doc.err)
+	}
 
 	loc, err := root.pathLocation(path)
 	if err != nil {

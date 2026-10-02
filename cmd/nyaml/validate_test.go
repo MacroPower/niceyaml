@@ -66,6 +66,24 @@ func TestValidateFile(t *testing.T) {
 			content: "name: a\n---\n---\nvalue: 1\n",
 			want:    []string{"2:1:", "4:1:"},
 		},
+		"only document does not parse": {
+			content: "name: [\n",
+			want:    []string{"1:7:"},
+		},
+		"syntax errors beside violations": {
+			content: "name: a\n---\nname: [\n---\nvalue: 3\n---\nname: @x\n---\nvalue: 5\n",
+			want:    []string{"3:7:", "5:1:", "7:7:", "9:1:"},
+		},
+		"valid documents around one that does not parse": {
+			content: "name: a\n---\nname: [\n---\nname: c\n",
+			want:    []string{"3:7:"},
+		},
+		// The header parses together with the document above it, so both
+		// documents carry the one error, and the file reports it once.
+		"header after an anchor with no value": {
+			content: "name: &x\n---\nname: [\n---\nvalue: 5\n",
+			want:    []string{"3:7:", "5:1:"},
+		},
 	}
 
 	for name, tc := range tcs {

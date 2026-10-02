@@ -210,13 +210,27 @@
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(validator))
 //
-//	docs, _ := source.Documents()
+//	docs, err := source.Documents()
+//	if err != nil {
+//		return err
+//	}
+//
 //	for _, doc := range docs {
 //		config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(validator))
 //		if err != nil {
 //			return err
 //		}
 //	}
+//
+// Each document parses on its own, so a YAML syntax error fails the
+// document that holds it and no other. [Source.Documents] returns every
+// document beside the error, and the [Node] of a document that did not
+// parse returns its syntax error from [Node.Err], [Node.Decode], and
+// [Node.Validate]. A caller that reports on a whole file, as a linter
+// does, drops the error of Source.Documents and collects what each
+// document returns, so one pass names every syntax error and every
+// violation of the documents that parsed. [Source.File],
+// [Source.Document], and [Source.Decode] need the whole file to parse.
 //
 // The root Node decodes, validates, and binds the whole document, and
 // every function that takes a Node takes it as it is. [Node.Decode] runs

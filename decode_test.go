@@ -3021,6 +3021,262 @@ func (v *fieldValidator) Validate(context.Context, *niceyaml.Node) error {
 	return v.err
 }
 
+func TestDocument_Err(t *testing.T) {
+	t.Parallel()
+
+	// The second document does not parse, and the documents around it do.
+	// The first one reuses an anchor name and the third holds a !!int tag,
+	// so each decodes from the second parse of the source.
+	const input = "a: &x 1\nb: &x 2\nc: *x\n---\nd: [\n---\ne: !!int 0x10\n"
+
+	documents := func(t *testing.T) []*niceyaml.Node {
+		t.Helper()
+
+		docs, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml")).Documents()
+		require.EqualError(t, err, "f.yaml:5:4: sequence end token ']' not found")
+		require.Len(t, docs, 3)
+
+		return docs
+	}
+
+	t.Run("a document that parsed has none", func(t *testing.T) {
+		t.Parallel()
+
+		docs := documents(t)
+
+		require.NoError(t, docs[0].Err())
+		require.NoError(t, docs[2].Err())
+
+		first, err := docs[0].Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"a": 1, "b": 2, "c": 2}, first)
+
+		third, err := docs[2].Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"e": 16}, third)
+
+		require.NoError(t, docs[0].Validate(t.Context(), passingValidator()))
+
+		scoped, err := docs[2].At(paths.Root().Child("e"))
+		require.NoError(t, err)
+		assert.Equal(t, 2, scoped.DocumentIndex())
+		require.NoError(t, scoped.Err())
+	})
+
+	t.Run("the methods that read the tree return it", func(t *testing.T) {
+		t.Parallel()
+
+		// A validator that ran would replace the syntax error with its own.
+		ran := &fieldValidator{err: errDocumentRejected}
+
+		tcs := map[string]struct {
+			// Calls the method and returns its error.
+			call func(t *testing.T, doc *niceyaml.Node) error
+		}{
+			"Decode": {call: func(t *testing.T, doc *niceyaml.Node) error {
+				t.Helper()
+
+				got, err := doc.Decode[map[string]any](t.Context())
+				assert.Nil(t, got)
+
+				return err
+			}},
+			"Decode with a validator": {call: func(t *testing.T, doc *niceyaml.Node) error {
+				t.Helper()
+
+				_, err := doc.Decode[map[string]any](t.Context(), niceyaml.WithValidator(ran))
+
+				return err
+			}},
+			"DecodeInto": {call: func(t *testing.T, doc *niceyaml.Node) error {
+				t.Helper()
+
+				got := map[string]int{"kept": 1}
+				err := doc.DecodeInto(t.Context(), &got)
+				assert.Equal(t, map[string]int{"kept": 1}, got)
+
+				return err //nolint:wrapcheck // The test inspects the error of the call.
+			}},
+			"Validate without validators": {call: func(t *testing.T, doc *niceyaml.Node) error {
+				t.Helper()
+
+				return doc.Validate(t.Context())
+			}},
+			"Validate": {call: func(t *testing.T, doc *niceyaml.Node) error {
+				t.Helper()
+
+				return doc.Validate(t.Context(), ran)
+			}},
+			"At": {call: func(t *testing.T, doc *niceyaml.Node) error {
+				t.Helper()
+
+				scoped, err := doc.At(paths.Root().Child("d"))
+				assert.Nil(t, scoped)
+
+				return err //nolint:wrapcheck // The test inspects the error of the call.
+			}},
+			"At the root": {call: func(t *testing.T, doc *niceyaml.Node) error {
+				t.Helper()
+
+				_, err := doc.At(paths.Root())
+
+				return err //nolint:wrapcheck // The test inspects the error of the call.
+			}},
+			"Nodes": {call: func(t *testing.T, doc *niceyaml.Node) error {
+				t.Helper()
+
+				nodes, err := doc.Nodes(paths.Root().Child("d").IndexAll())
+				assert.Nil(t, nodes)
+
+				return err //nolint:wrapcheck // The test inspects the error of the call.
+			}},
+			"Ranges": {call: func(t *testing.T, doc *niceyaml.Node) error {
+				t.Helper()
+
+				ranges, err := doc.Ranges(paths.Root().Child("d"))
+				assert.Nil(t, ranges)
+
+				return err //nolint:wrapcheck // The test inspects the error of the call.
+			}},
+			"Decoder.Decode": {call: func(t *testing.T, doc *niceyaml.Node) error {
+				t.Helper()
+
+				_, err := niceyaml.NewDecoder(niceyaml.WithValidator(ran)).Decode[map[string]any](t.Context(), doc)
+
+				return err
+			}},
+			"Decoder.Validate": {call: func(t *testing.T, doc *niceyaml.Node) error {
+				t.Helper()
+
+				return niceyaml.NewDecoder(niceyaml.WithValidator(ran)).Validate(t.Context(), doc)
+			}},
+			"ValidatorFunc called directly": {call: func(t *testing.T, doc *niceyaml.Node) error {
+				t.Helper()
+
+				return niceyaml.ValidatorFunc(ran.Validate).Validate(t.Context(), doc)
+			}},
+			"MultiValidator called directly": {call: func(t *testing.T, doc *niceyaml.Node) error {
+				t.Helper()
+
+				return niceyaml.MultiValidator(ran, ran).Validate(t.Context(), doc)
+			}},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := documents(t)[1]
+
+				err := tc.call(t, doc)
+				require.Error(t, err)
+				assert.Same(t, doc.Err(), err)
+			})
+		}
+	})
+
+	t.Run("the document has no tree", func(t *testing.T) {
+		t.Parallel()
+
+		doc := documents(t)[1]
+
+		assert.Nil(t, doc.AST())
+		assert.Nil(t, doc.DocumentAST())
+		assert.Same(t, doc, doc.Document())
+		assert.True(t, doc.Path().IsRoot())
+	})
+
+	t.Run("the methods that read the tokens work", func(t *testing.T) {
+		t.Parallel()
+
+		doc := documents(t)[1]
+
+		assert.Equal(t, 1, doc.DocumentIndex())
+		assert.Equal(t, position.NewSpan(3, 5), doc.Span())
+		assert.Equal(t, "---\nd: [", doc.Lines().Content())
+		assert.Equal(t, 4, doc.Lines().Line(0).Number())
+		assert.Equal(t, "---\nd: [", doc.View().Held().Content())
+
+		var values []string
+
+		for _, tk := range doc.Tokens() {
+			values = append(values, tk.Value)
+		}
+
+		assert.Equal(t, []string{"---", "d", ":", "["}, values)
+		require.Len(t, doc.Preamble(), 1)
+		assert.Equal(t, token.DocumentHeaderType, doc.Preamble()[0].Type)
+	})
+
+	t.Run("diffs against a revision that parses", func(t *testing.T) {
+		t.Parallel()
+
+		before := documents(t)
+
+		after, err := niceyaml.NewSourceFromString(strings.Replace(input, "d: [", "d: []", 1)).Documents()
+		require.NoError(t, err)
+		require.Len(t, after, 3)
+
+		result := diff.Diff(before[1].Lines(), after[1].Lines())
+
+		assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, result.Stats())
+
+		unified := result.Unified().String()
+		assert.Contains(t, unified, "d: []")
+		assert.NotContains(t, unified, "a: &x 1", "the first document is not in the diff")
+	})
+
+	t.Run("the source produced the error before it built the document", func(t *testing.T) {
+		t.Parallel()
+
+		doc := documents(t)[1]
+
+		bound, ok := doc.Err().(*niceyaml.SourceError) //nolint:errorlint // The value itself is the bound error.
+		require.True(t, ok, "want *niceyaml.SourceError, got %T", doc.Err())
+		assert.Same(t, doc.Source(), bound.Source())
+		assert.Nil(t, bound.Document())
+
+		rng, ok := bound.Range()
+		require.True(t, ok)
+		assert.True(t, doc.Span().Contains(rng.Start.Line))
+	})
+
+	t.Run("a path bound through the document resolves nowhere", func(t *testing.T) {
+		t.Parallel()
+
+		doc := documents(t)[1]
+
+		err := doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("d"))))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, doc, bound.Document())
+		assert.Equal(t, "f.yaml: $.d: bad", err.Error())
+
+		_, ok := bound.Range()
+		assert.False(t, ok)
+
+		require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrPathNeedsDocument)
+		require.ErrorIs(t, bound.Unresolved(), doc.Err())
+	})
+
+	t.Run("a position bound through the document resolves", func(t *testing.T) {
+		t.Parallel()
+
+		doc := documents(t)[1]
+
+		err := doc.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(4, 0))))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, doc, bound.Document())
+		assert.Equal(t, "f.yaml:5:1: bad", err.Error())
+		require.NoError(t, bound.Unresolved())
+	})
+}
+
 func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 	t.Parallel()
 

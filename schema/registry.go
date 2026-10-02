@@ -325,7 +325,9 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // [context.DeadlineExceeded].
 //
 // An empty document, such as one that holds only comments, is the null
-// document, and a resolver sees it as it sees any other.
+// document, and a resolver sees it as it sees any other. A document that
+// did not parse has no content for a resolver to read, so Lookup returns
+// the syntax error [niceyaml.Node.Err] returns and asks no resolver.
 //
 // The resolvers pick a schema for a whole document, from its file path,
 // its preamble, or its content, so n must be the root [niceyaml.Node] of
@@ -343,6 +345,12 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // and validation. Use Lookup when you need the validator for custom
 // processing.
 func (r *Registry) Lookup(ctx context.Context, n *niceyaml.Node) (*Schema, error) {
+	err := n.Err()
+	if err != nil {
+		//nolint:wrapcheck // The source bound the syntax error already.
+		return nil, err
+	}
+
 	v, _, err := r.lookup(ctx, n)
 	if err != nil {
 		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
@@ -494,8 +502,17 @@ func (e reasonError) Unwrap() error {
 // Returns resolution, loading, or compilation errors if schema preparation
 // fails. When ctx ends before the lookup finishes, Validate returns the
 // error [Registry.Lookup] returns for it, even with [WithRequireSchema] set
-// false.
+// false. A document that did not parse returns the syntax error
+// [niceyaml.Node.Err] returns, even with [WithRequireSchema] set false, so
+// a loop that validates every document of a file reports each syntax
+// error beside the violations of the documents that parsed.
 func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
+	err := n.Err()
+	if err != nil {
+		//nolint:wrapcheck // The source bound the syntax error already.
+		return err
+	}
+
 	v, unmatched, err := r.lookup(ctx, n)
 	if err != nil {
 		if !r.requireSchema && unmatched {

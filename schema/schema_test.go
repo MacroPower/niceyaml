@@ -2038,6 +2038,49 @@ func TestSchema_Validate_Scope(t *testing.T) {
 	})
 }
 
+func TestSchema_Validate_SyntaxError(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		schema string
+		// The error of the document that parsed, empty when it passes.
+		err string
+	}{
+		"schema that would reject the data": {
+			schema: `{"type": "string"}`,
+			err:    `1:1: $: expected "string", got "object"`,
+		},
+		"schema that accepts all data": {
+			schema: `true`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v := compileSchema(t, []byte(tc.schema))
+
+			docs, err := niceyaml.NewSourceFromString("a: 1\n---\nb: [\n").Documents()
+			require.Error(t, err)
+			require.Len(t, docs, 2)
+
+			// The second document did not parse, so the schema has no data
+			// to check and returns the syntax error.
+			assert.Same(t, docs[1].Err(), v.Validate(t.Context(), docs[1]))
+			assert.Same(t, docs[1].Err(), docs[1].Validate(t.Context(), v))
+
+			// The first document parsed, so the schema checks it.
+			err = v.Validate(t.Context(), docs[0])
+			if tc.err == "" {
+				require.NoError(t, err)
+			} else {
+				require.EqualError(t, err, tc.err)
+			}
+		})
+	}
+}
+
 func TestSchema_Validate_Bound(t *testing.T) {
 	t.Parallel()
 

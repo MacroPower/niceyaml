@@ -18,6 +18,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/internal/preamble"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
@@ -68,7 +69,9 @@ type Source struct {
 	// Holds the stream that [Source.Tokens] rebuilds from lines on its
 	// first call.
 	stream token.Tokens
-	file   *ast.File
+	// Holds the documents of the runs that parsed, and the stand-ins parse
+	// makes for the runs that did not, in file order.
+	file *ast.File
 	// Holds the set of copies of the tokens parse hands the parser. Every
 	// token the parser takes from the stream is one of these copies, and
 	// holdsToken looks a token up in the set by pointer. The implicit null
@@ -76,7 +79,11 @@ type Source struct {
 	// holdsToken finds them among the tokens of the nodes of the document
 	// instead.
 	fileTokens map[*token.Token]struct{}
-	fileErr    error
+	// Holds each stand-in among the Docs of file.
+	standIns map[*ast.DocumentNode]standIn
+	// Holds the error of the one run that did not parse, or the join of
+	// the errors of several.
+	fileErr error
 	// A second parse of the tokens, which decodeParse makes the first time
 	// a document changes its tree for the decoder, as decodeTree
 	// describes, and the set of copies of the tokens that parse hands the
@@ -305,31 +312,52 @@ func (s *Source) Tokens() token.Tokens {
 // the same pointers. The slice itself is a copy, so reordering it reaches
 // nothing.
 //
-// A YAML syntax error comes back bound to the Source. It is the same error
-// [Source.File] returns.
+// Each document parses on its own, so a YAML syntax error fails the
+// document that holds it and no other. Documents then returns every
+// document together with the error [Source.File] returns, which names
+// each syntax error of the file. The Node of a document that did not parse
+// sits in the slice at the index of the document, and [Node.Err] returns
+// the syntax error. A caller that needs the whole file to parse checks
+// the error as usual:
+//
+//	docs, err := source.Documents()
+//	if err != nil {
+//		return err
+//	}
+//
+// A caller that reports on each document drops the error and reads the
+// documents one by one. The [Node] methods that read the tree, such as
+// [Node.Validate] and [Node.Decode], return the syntax error of a document
+// that did not parse, so one loop collects the syntax errors beside the
+// findings of the documents that parsed:
+//
+//	docs, _ := source.Documents()
+//	for _, doc := range docs {
+//		if err := doc.Validate(ctx, reg); err != nil {
+//			errs = append(errs, err)
+//		}
+//	}
+//
+// A "---" header that directly follows an anchor with no value parses
+// together with the document above it. A syntax error in either of those
+// two documents fails both, and both return that error.
 func (s *Source) Documents() ([]*Node, error) {
 	docs, err := s.documents()
-	if err != nil {
-		return nil, err
-	}
 
-	return slices.Clone(docs), nil
+	return slices.Clone(docs), err
 }
 
 // documents returns the root [*Node] of each YAML document, as
 // [Source.Documents] does, in the slice the Source keeps rather than a
 // copy, so a caller must not change it.
 func (s *Source) documents() ([]*Node, error) {
-	f, err := s.File()
-	if err != nil {
-		return nil, err
-	}
+	s.parseOnce()
 
 	s.docsOnce.Do(func() {
-		s.docs = newDocuments(s, f)
+		s.docs = newDocuments(s)
 	})
 
-	return s.docs, nil
+	return s.docs, s.fileErr
 }
 
 // Document returns the root [*Node] of a [Source] that holds a single
@@ -356,10 +384,18 @@ func (s *Source) documents() ([]*Node, error) {
 // when a "..." marker rather than a header opens it. When the file holds
 // no document at all, which happens for text that is only a "..." marker
 // with or without a comment on its line, it returns an error wrapping
-// [ErrNoDocuments], bound to the Source. A file that does not parse
-// returns the error [Source.File] returns. Use [Source.Documents] for a
-// file that may hold several.
+// [ErrNoDocuments], bound to the Source. A file with a document that does
+// not parse returns the error [Source.File] returns, however many of its
+// other documents parse. Use [Source.Documents] for a file that may hold
+// several.
 func (s *Source) Document() (*Node, error) {
+	// The parse bound each syntax error already, and binding the join of
+	// several anew would return another error than File does.
+	_, err := s.documents()
+	if err != nil {
+		return nil, err
+	}
+
 	doc, err := s.single()
 	if err != nil {
 		return nil, s.Bind(err)
@@ -519,18 +555,74 @@ func (d *document) anchorToken() *token.Token {
 // that edits a document parses a tree of its own, or edits the text and
 // builds a new Source from the result.
 //
-// A YAML syntax error comes back as a [*SourceError] bound to this Source,
-// so [FormatError] renders it with the offending token marked. Its message
-// names each control character by its Unicode Control Picture, so a tab
-// the parser rejects reads as "␉" there as it does in the excerpt. A
-// panic in the parser comes back as a [*SourceError] that matches
-// [ErrParseRejected], and every later call returns the same error.
+// A file with a YAML syntax error has no tree, so File returns nil and
+// the error. Each document parses on its own, so the error covers every
+// document that did not parse, not the first alone. One syntax error
+// comes back as a [*SourceError] bound to this Source, so [FormatError]
+// renders it with the offending token marked. Several come back joined,
+// each a SourceError of its own in file order, and FormatError marks them
+// all. [Bindings] iterates over them. [Source.Documents] still returns
+// the documents of such a file, for a caller that reads the ones that
+// parsed.
+//
+// The message of a syntax error names each control character by its
+// Unicode Control Picture, so a tab the parser rejects reads as "␉" there
+// as it does in the excerpt. A panic in the parser comes back as a
+// [*SourceError] that matches [ErrParseRejected]. Every later call
+// returns the same error.
 func (s *Source) File() (*ast.File, error) {
-	s.fileOnce.Do(func() {
-		s.file, s.fileTokens, s.fileErr = s.parse()
-	})
+	s.parseOnce()
 
-	return s.file, s.fileErr
+	if s.fileErr != nil {
+		return nil, s.fileErr
+	}
+
+	return s.file, nil
+}
+
+// parseOnce parses the tokens of the Source on the first call, and keeps
+// what [Source.parse] returns.
+func (s *Source) parseOnce() {
+	s.fileOnce.Do(func() {
+		p := s.parse()
+
+		s.file, s.fileTokens, s.standIns = p.file, p.tokens, p.standIns
+
+		switch len(p.errs) {
+		case 0:
+		case 1:
+			s.fileErr = p.errs[0]
+		default:
+			s.fileErr = errors.Join(p.errs...)
+		}
+	})
+}
+
+// parsed is what one parse of the tokens of a [Source] gives.
+type parsed struct {
+	// The documents of the runs that parsed, with the stand-ins of the
+	// runs that did not, in file order.
+	file *ast.File
+	// The set of copies of the tokens the parser read.
+	tokens map[*token.Token]struct{}
+	// Each stand-in among the Docs of file, which is nil when every run
+	// parsed.
+	standIns map[*ast.DocumentNode]standIn
+	// The error of each run that did not parse, in file order, bound to
+	// the Source.
+	errs []error
+}
+
+// standIn describes a node that [parsed.fail] puts in the file in place of
+// the nodes the parser would have made of a run it rejected.
+type standIn struct {
+	// The token that places the stand-in in the file, which is nil when
+	// its tokens carry no position.
+	anchor *token.Token
+	// The error of the run, for a stand-in that stands for a document. It
+	// is nil for one that stands for the comments and directives the
+	// parser cuts off above a header.
+	err error
 }
 
 // parse hands the parser the copies of the tokens that
@@ -539,6 +631,11 @@ func (s *Source) File() (*ast.File, error) {
 // the caller share, stay untouched. It returns the set of copies with the
 // file they parsed to.
 //
+// Each run of [splitDocumentRuns] parses on its own, so a run the parser
+// rejects costs the file only the documents of that run. The file holds
+// the stand-ins [parsed.fail] makes in their place, and the parse goes on
+// with the next run.
+//
 // ForParser cuts the blank lines in front of the first text down to their
 // line breaks, so a blank line that holds a tab does not make the parser
 // reject the first key. It also moves the blank content of a block scalar
@@ -546,7 +643,7 @@ func (s *Source) File() (*ast.File, error) {
 // that content to the next node. Each copy gets the Origin and position
 // of its own token back once the parser returns, so it matches the
 // Source's token as [Source.File] promises.
-func (s *Source) parse() (*ast.File, map[*token.Token]struct{}, error) {
+func (s *Source) parse() parsed {
 	shared := s.Tokens()
 	tks := tokens.ForParser(shared)
 
@@ -569,37 +666,99 @@ func (s *Source) parse() (*ast.File, map[*token.Token]struct{}, error) {
 		}
 	}()
 
-	file := &ast.File{Docs: []*ast.DocumentNode{}}
+	p := parsed{file: &ast.File{Docs: []*ast.DocumentNode{}}, tokens: set}
 
 	for _, run := range splitDocumentRuns(tks) {
 		f, err := s.parseRun(dropStrandedComments(run))
 		if err == nil {
 			nullEmptyAnchors(f)
 
-			file.Docs = append(file.Docs, f.Docs...)
+			p.file.Docs = append(p.file.Docs, f.Docs...)
 
 			continue
 		}
 
-		// The documents come from the file this parse returns, so the error
-		// binds to the source alone rather than routing to one of them.
 		// The go-yaml scanner spells the tab it rejects as a raw tab, which
 		// the renderers would lay out as four spaces, so the message names
 		// each control character by its picture.
 		if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
 			msg := escape.Control(yamlErr.GetMessage())
 
-			return nil, nil, bindTree(
-				WrapError(yamlMessageError{err: yamlErr, msg: msg}, atToken(yamlErr.GetToken())),
-				binder{src: s},
-			)
+			err = WrapError(yamlMessageError{err: yamlErr, msg: msg}, atToken(yamlErr.GetToken()))
 		}
 
-		//nolint:wrapcheck // Return the original error if it's not a [yaml.Error].
-		return nil, nil, err
+		// The documents come from the file this parse returns, so the error
+		// binds to the source alone rather than routing to one of them.
+		p.fail(run, bindTree(err, binder{src: s}))
 	}
 
-	return file, set, nil
+	return p
+}
+
+// fail records that the parser rejected run with err. It adds a stand-in
+// to the file for each token group [tokens.SplitDocuments] cuts run into,
+// so the documents of run keep their places among the documents of the
+// file and their tokens. A group with a "---" header or with content
+// stands for a document, and its stand-in carries err. Any other group
+// holds what the parser cuts off as a node of its own, the comments and
+// directives above a header or the comments after a "..." marker, and its
+// stand-in folds into a document as that node does. A run without a
+// document group, such as a directive that no document follows, takes its
+// first group as the document, so err always has a document to name it.
+func (p *parsed) fail(run token.Tokens, err error) {
+	p.errs = append(p.errs, err)
+
+	var groups []token.Tokens
+
+	for _, group := range tokens.SplitDocuments(run) {
+		groups = append(groups, group)
+	}
+
+	// A run without tokens still gets one stand-in to carry err.
+	if len(groups) == 0 {
+		groups = []token.Tokens{nil}
+	}
+
+	holdsDocument := slices.ContainsFunc(groups, isDocumentGroup)
+
+	if p.standIns == nil {
+		p.standIns = map[*ast.DocumentNode]standIn{}
+	}
+
+	for i, group := range groups {
+		var in standIn
+
+		if j := slices.IndexFunc(group, func(tk *token.Token) bool { return tk.Position != nil }); j >= 0 {
+			in.anchor = group[j]
+		}
+
+		node := ast.Document(nil, nil)
+
+		if isDocumentGroup(group) || !holdsDocument && i == 0 {
+			in.err = err
+
+			// SplitDocuments starts a group at each header, so a header
+			// is the first token of its group.
+			if len(group) > 0 && group[0].Type == token.DocumentHeaderType {
+				node.Start = group[0]
+			}
+		}
+
+		p.file.Docs = append(p.file.Docs, node)
+		p.standIns[node] = in
+	}
+}
+
+// isDocumentGroup reports whether group, a token group of
+// [tokens.SplitDocuments], holds a YAML document, which it does when it
+// opens with a "---" header or holds content. A group of comments,
+// directives, and "..." markers alone holds none.
+func isDocumentGroup(group token.Tokens) bool {
+	if len(group) > 0 && group[0].Type == token.DocumentHeaderType {
+		return true
+	}
+
+	return preamble.Len(group) < len(group)
 }
 
 // parseRun parses run, one run of [splitDocumentRuns]. It turns a panic
@@ -645,16 +804,16 @@ func (s *Source) parseRun(run token.Tokens) (*ast.File, error) {
 // The formatter reads the tokens of every document, so the first call
 // writes the nulls of all the documents into the tokens, as
 // [nullEnclosedAliases] describes, before it returns the parse to any of
-// them. It returns nil when the parse fails, which it does only when the
-// first parse failed.
+// them. A run the first parse rejected fails the second parse too, so the
+// file holds a stand-in at each index where the first file holds one, and
+// the documents that parsed sit at the same indexes in both.
 func (s *Source) decodeParse() (*ast.File, map[*token.Token]struct{}) {
 	s.decodeFileOnce.Do(func() {
-		file, set, err := s.parse()
-		if err == nil {
-			nullEnclosedAliases(s.docs, file)
+		p := s.parse()
 
-			s.decodeFile, s.decodeFileTokens = file, set
-		}
+		nullEnclosedAliases(s.docs, p.file)
+
+		s.decodeFile, s.decodeFileTokens = p.file, p.tokens
 	})
 
 	return s.decodeFile, s.decodeFileTokens

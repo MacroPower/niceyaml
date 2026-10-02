@@ -190,6 +190,16 @@ type SelfValidator interface {
 // those, as [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue]
 // does, and Rebase puts them under that path before a Node binds them.
 //
+// A document with a YAML syntax error has no tree to check. Node.Validate
+// and a decode return the syntax error [Node.Err] returns before any
+// validator runs, so a validator they run always gets a document that
+// parsed. A caller that calls Validate itself can hand it a Node whose
+// document did not parse. [Node.Decode], [Node.At], and [Node.Nodes]
+// return the syntax error for such a Node, and a validator passes that
+// error on. [ValidatorFunc], [MultiValidator], and the validators of
+// [go.jacobcolvin.com/niceyaml/schema] return it before they read the
+// Node.
+//
 // A decode with go-yaml options hands its validators a copy of the Node
 // that carries them, and that copy binds errors to the Node the decode
 // runs on. [SourceError.Node] thus returns the Node the caller holds. A
@@ -232,8 +242,13 @@ type ValidatorFunc func(ctx context.Context, n *Node) error
 
 // Validate implements [Validator]. It calls f and binds the error f
 // returns through n, so a nil [*Error] or [*SourceError] pointer from f
-// comes back as a nil error.
+// comes back as a nil error. For a document that did not parse, it
+// returns the syntax error [Node.Err] returns without calling f.
 func (f ValidatorFunc) Validate(ctx context.Context, n *Node) error {
+	if n.doc.err != nil {
+		return n.doc.err
+	}
+
 	return n.Bind(f(ctx, n))
 }
 
@@ -310,12 +325,13 @@ func MultiValidator(validators ...Validator) Validator {
 	})
 }
 
-// newDocuments creates the root [*Node] of each YAML document of file, the
-// AST src parsed, in file order. See alignDocumentTokens for how each
-// document node finds its tokens and foldPreambles for which nodes become
-// documents.
-func newDocuments(src *Source, file *ast.File) []*Node {
-	docs := foldPreambles(file.Docs, alignDocumentTokens(file, src.Tokens()))
+// newDocuments creates the root [*Node] of each YAML document of the file
+// src parsed, in file order. The file holds a stand-in for each document
+// the parser rejected, so that document gets a Node too, which carries its
+// syntax error. See alignDocumentTokens for how each document node finds
+// its tokens and foldPreambles for which nodes become documents.
+func newDocuments(src *Source) []*Node {
+	docs := foldPreambles(src.file.Docs, alignDocumentTokens(src.file, src.Tokens(), src.standIns), src.standIns)
 	liftHeaderComments(docs)
 	returnSameLineComments(docs)
 
@@ -351,20 +367,31 @@ func newDocuments(src *Source, file *ast.File) []*Node {
 // follows it. A file that holds only such nodes, such as a file of
 // comments, keeps the first as its one document, which decodes to
 // nothing as an empty file does.
-func foldPreambles(nodes []*ast.DocumentNode, groups []token.Tokens) []*document {
+//
+// A stand-in of standIns that carries an error is a document that did not
+// parse, whatever it holds, and its document takes the error. Any other
+// stand-in holds what the parser would have cut off, and it folds as a
+// node of the parser does.
+func foldPreambles(
+	nodes []*ast.DocumentNode,
+	groups []token.Tokens,
+	standIns map[*ast.DocumentNode]standIn,
+) []*document {
 	var (
 		docs    []*document
 		pending token.Tokens
 	)
 
 	for i, node := range nodes {
-		if isPreambleNode(node) {
+		err := standIns[node].err
+
+		if err == nil && isPreambleNode(node) {
 			pending = append(pending, groups[i]...)
 
 			continue
 		}
 
-		docs = append(docs, &document{root: node, fileIndex: i, tokens: slices.Concat(pending, groups[i])})
+		docs = append(docs, &document{root: node, fileIndex: i, tokens: slices.Concat(pending, groups[i]), err: err})
 		pending = nil
 	}
 
@@ -552,8 +579,9 @@ func documentSpans(groups []token.Tokens, total int) []position.Span {
 // the document below it. Matching by offset rather than by index keeps a
 // document paired with its own tokens when the parser and the splitter
 // disagree on boundaries, as they do for such a marker. A document with no
-// anchor gets nil tokens.
-func alignDocumentTokens(file *ast.File, tks token.Tokens) []token.Tokens {
+// anchor gets nil tokens. A stand-in of standIns has no body to anchor
+// at, so it anchors at the token [parsed.fail] gave it.
+func alignDocumentTokens(file *ast.File, tks token.Tokens, standIns map[*ast.DocumentNode]standIn) []token.Tokens {
 	var (
 		groups []token.Tokens
 		starts []int
@@ -572,6 +600,14 @@ func alignDocumentTokens(file *ast.File, tks token.Tokens) []token.Tokens {
 	anchored := make([]bool, len(file.Docs))
 
 	for i, doc := range file.Docs {
+		if in, ok := standIns[doc]; ok {
+			if in.anchor != nil {
+				anchors[i], anchored[i] = in.anchor.Position.Offset, true
+			}
+
+			continue
+		}
+
 		anchors[i], anchored[i] = documentOffset(doc)
 	}
 
@@ -637,7 +673,12 @@ func documentOffset(doc *ast.DocumentNode) (int, bool) {
 type document struct {
 	// The root Node of the document.
 	node *Node
+	// The node the document parsed into. For a document that did not
+	// parse, it is the stand-in [parsed.fail] made, which has no body.
 	root *ast.DocumentNode
+	// The syntax error of a document that did not parse, bound to the
+	// Source, which is nil for one that parsed.
+	err error
 	// Resolves every path in root, which pathResolver creates when the
 	// first path needs it. No Node edits the tree, so the resolver binds
 	// the aliases once however many paths the Nodes of the document
@@ -768,6 +809,17 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // the [Error] values it produces to that source, so the errors it returns
 // carry a [SourceError] that renders the offending lines.
 //
+// [Source.Documents] returns a Node for a document with a YAML syntax
+// error too. Such a document has no tree, and [Node.Err] returns the
+// syntax error. The methods that read the tree return that error:
+// [Node.Decode], [Node.DecodeInto], [Node.Validate], [Node.At],
+// [Node.Nodes], and [Node.Ranges]. [Node.AST] and
+// [Node.DocumentAST] return nil. The methods that read the tokens and the
+// lines work as they do for any document: [Node.Tokens], [Node.Preamble],
+// [Node.Span], [Node.View], and [Node.Lines]. A caller thus renders or
+// diffs a document that does not parse yet, and the other documents of
+// the file decode and validate as if it did.
+//
 // Receive instances from [Source.Documents], [Source.Document],
 // [Node.At], [Node.Nodes], [Node.Document], [SourceError.Node], or
 // [SourceError.Document].
@@ -803,9 +855,54 @@ type Node struct {
 // [Node.AST] returns the go-yaml node the Node selects, and [Node.Path]
 // is the path from the document root to it. The node is part of the
 // tree [Source.File] returns, which every Node of the Source shares and
-// resolves against, so a caller must not modify it.
+// resolves against, so a caller must not modify it. A document that did
+// not parse has no node, so DocumentAST returns nil for it, as [Node.Err]
+// describes.
 func (n *Node) DocumentAST() *ast.DocumentNode {
+	if n.doc.err != nil {
+		return nil
+	}
+
 	return n.doc.root
+}
+
+// Err returns the YAML syntax error of the document the Node belongs to,
+// or nil for a document that parsed. [Source.Documents] returns a Node
+// for every document of a file, and a syntax error fails the one document
+// that holds it. The error is the [*SourceError] the parser reported for
+// that document, bound to the Source, and it is among the errors
+// [Source.File] returns:
+//
+//	docs, _ := source.Documents()
+//	for _, doc := range docs {
+//		if err := doc.Err(); err != nil {
+//			log.Print(niceyaml.FormatError(err, 2))
+//
+//			continue
+//		}
+//
+//		lipgloss.Println(p.Print(doc.View()))
+//	}
+//
+// The Source produced the error before it built any document, so
+// [SourceError.Document] returns nil for it. The Node that returns the
+// error names the document, and [Node.DocumentIndex] is its index.
+//
+// A document that did not parse has no tree. [Node.Decode],
+// [Node.DecodeInto], [Node.Validate], [Node.At], [Node.Nodes], and
+// [Node.Ranges] return the error Err returns, and no [Validator] runs.
+// [Node.AST] and [Node.DocumentAST] return nil. A path in an error that
+// [Node.Bind] binds resolves nowhere, as Bind describes.
+//
+// A "---" header that directly follows an anchor with no value parses
+// together with the document above it, as [Source.Documents] describes.
+// Both documents then return the same error. A nil Node has none.
+func (n *Node) Err() error {
+	if n == nil {
+		return nil
+	}
+
+	return n.doc.err
 }
 
 // Document returns the root [*Node] of the document the Node belongs to,
@@ -851,9 +948,11 @@ func (n *Node) Document() *Node {
 // token [tokens.Tokenize] makes, and [tokens.IsPlaceholder] tells it
 // apart from a scalar the file holds. A document of whitespace below a
 // "---" header has a nil body. AST returns each of these bodies as it
-// is, as such a document decodes to nothing. The node is part of the tree
-// [Source.File] returns, which every Node of the Source shares and
-// resolves against, so a caller must not modify it.
+// is, as such a document decodes to nothing. A document that did not
+// parse has no body either, and [Node.Err] tells it apart from an empty
+// document. The node is part of the tree [Source.File] returns, which
+// every Node of the Source shares and resolves against, so a caller must
+// not modify it.
 func (n *Node) AST() ast.Node {
 	if n.base.IsRoot() {
 		return n.doc.root.Body
@@ -907,7 +1006,14 @@ func (n *Node) AST() ast.Node {
 //
 // A node whose tokens carry no position covers no lines and holds no
 // tokens.
+//
+// A document that did not parse has no node to select, so At returns the
+// syntax error [Node.Err] returns.
 func (n *Node) At(path paths.Path) (*Node, error) {
+	if n.doc.err != nil {
+		return nil, n.doc.err
+	}
+
 	c := *n
 	c.base = n.base.Join(path)
 	// The copy has a scope of its own, so it binds errors to itself.
@@ -953,8 +1059,13 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // resolve, [ErrExcessiveAliasing] when aliases lead a selector of the
 // path to far more nodes than the document holds, and
 // [paths.ErrExcessiveMerging] when the key lookups of a selector read far
-// more nodes under `<<` merge keys than that.
+// more nodes under `<<` merge keys than that. A document that did not
+// parse returns the syntax error [Node.Err] returns.
 func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
+	if n.doc.err != nil {
+		return nil, n.doc.err
+	}
+
 	found, err := n.doc.pathResolver().Matches(n.base.Join(path))
 	if err != nil {
 		return nil, n.Bind(err)
@@ -1314,9 +1425,14 @@ func (n *Node) Lines() line.Lines {
 //
 // A path that does not resolve returns the error [paths.Path.Token]
 // describes, bound to the source, and a path whose token carries no
-// position returns an error wrapping [ErrNoLocation]. Returns nil when the
-// value holds no content on any line.
+// position returns an error wrapping [ErrNoLocation]. A document that
+// did not parse returns the syntax error [Node.Err] returns. Returns nil
+// when the value holds no content on any line.
 func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
+	if n.doc.err != nil {
+		return nil, n.doc.err
+	}
+
 	loc, err := n.pathLocation(path)
 	if err != nil {
 		return nil, n.Bind(err)
@@ -1393,6 +1509,11 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 // [Node.Bind], so an [*Error] renders its location and any other error
 // names the source. Validate is thus the way to run a validator the
 // caller did not write.
+//
+// A document that did not parse fails before any validator runs, with the
+// syntax error [Node.Err] returns, even when Validate gets no validators.
+// A caller that validates each document of a file thus collects the syntax
+// errors of the file in the same loop.
 func (n *Node) Validate(ctx context.Context, validators ...Validator) error {
 	return n.validate(ctx, validators, nil)
 }
@@ -1401,8 +1522,13 @@ func (n *Node) Validate(ctx context.Context, validators ...Validator) error {
 // [Node.forValidators] returns for yamlOpts, and binds the first error
 // with n when the validator left it unbound. The Node the validators get
 // binds errors where n does, so an error a validator binds itself names
-// the same Node as one validate binds.
+// the same Node as one validate binds. A document that did not parse
+// returns its syntax error, and no validator runs.
 func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []yaml.DecodeOption) error {
+	if n.doc.err != nil {
+		return n.doc.err
+	}
+
 	seen := n.forValidators(yamlOpts)
 
 	for _, dv := range validators {
@@ -1508,6 +1634,12 @@ func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []
 // message keeps the position the inner binding resolved. An Error above
 // a binding that nests errors binds anew around it, with those errors as
 // children. Bind never modifies err.
+//
+// A document that did not parse has no tree to resolve a path in, so a
+// path bound through its Node resolves nowhere. The bound error keeps
+// its message and the name of the source, and [SourceError.Unresolved]
+// returns [ErrPathNeedsDocument] wrapping the syntax error [Node.Err]
+// returns. A position or a range binds there as it does in any document.
 func (n *Node) Bind(err error) error {
 	return bindTree(err, binder{src: n.source, node: n.bindTarget()})
 }
@@ -1694,7 +1826,9 @@ func WithReferences(data ...[]byte) DecodeOption {
 // DecodeInto validates and decodes the node, which is the whole document
 // for the root Node of a document, into v, which must be a non-nil
 // pointer. Any other v returns an error wrapping [ErrDecodeTarget],
-// bound to the source, before anything runs.
+// bound to the source, before anything runs. A document that did not
+// parse then returns the syntax error [Node.Err] returns, and v stays as
+// it is.
 //
 // Each [Validator] from [WithValidator] runs on the node before
 // decoding, in the order given, and no validator runs when opts name
