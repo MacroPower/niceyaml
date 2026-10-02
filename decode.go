@@ -145,20 +145,56 @@ type SelfValidator interface {
 //			return err
 //		}
 //
-//		return s.check(ctx, data)
+//		return n.Bind(s.check(ctx, data))
 //	}
 //
-// A validator that knows a location returns an unbound [*Error], and the
-// Node binds it to the source with itself as the scope its path resolves
-// from. A validator that binds an error itself does so through
-// [Node.Bind], since the Node leaves a bound error as it is. A decode
-// with go-yaml options hands its validators a copy of the Node that
-// carries them, and that copy binds errors to the Node the decode runs
-// on. [SourceError.Node] thus returns the Node the caller holds, whether
-// the decode binds the error or the validator binds it through the Node
-// it got. A Node the validator scopes from that copy with [Node.At] or
-// [Node.Nodes] binds errors to itself, so their paths resolve from its
-// scope.
+// Validate returns its errors bound through the Node it got, with
+// [Node.Bind]. Each error then resolves its paths from the scope the
+// validator wrote them in and names the source the validator read. A
+// caller that calls Validate itself thus gets the error [Node.Validate]
+// returns. A validator that runs another on a Node of its own choosing,
+// such as each element of a list or a document of another file, returns
+// that error as it is:
+//
+//	items, err := n.Nodes(itemsPath)
+//	if err != nil {
+//		return err
+//	}
+//
+//	for _, item := range items {
+//		if err := itemSchema.Validate(ctx, item); err != nil {
+//			return err // bound at $.items[i]
+//		}
+//	}
+//
+// [ValidatorFunc] and [MultiValidator] bind for the validators built with
+// them, so a function returns an [*Error] with a path as it is. A
+// validator of a type of its own binds before it returns:
+//
+//	return n.Bind(niceyaml.NewError("unknown kind", niceyaml.AtPath(kindPath)))
+//
+// Node.Validate and a decode bind what a validator leaves unbound and
+// leave a bound error as it is. A caller that runs a validator it did not
+// write therefore runs it with Node.Validate, as in
+// item.Validate(ctx, v), which binds either kind. A validator that writes
+// its paths from a scope other than the Node it got, such as the root of
+// the document, binds through the Node of that scope, which
+// [Node.Document] returns for the root.
+//
+// A bound error keeps its text. Context that a validator adds around the
+// error of another therefore stands in front of the position, as in
+// "config schema: svc.yaml:2:7: $.port: 0 is less than 1". [Rebase]
+// returns a bound error as it is, since the binding resolved its location
+// already. A check that reports under another path or in another document
+// starts from unbound errors instead. A check of the decoded data returns
+// those, as [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue]
+// does, and Rebase puts them under that path before a Node binds them.
+//
+// A decode with go-yaml options hands its validators a copy of the Node
+// that carries them, and that copy binds errors to the Node the decode
+// runs on. [SourceError.Node] thus returns the Node the caller holds. A
+// Node the validator scopes from that copy with [Node.At] or [Node.Nodes]
+// binds errors to itself, so their paths resolve from its scope.
 //
 // See [ValidatorFunc], [MultiValidator],
 // [go.jacobcolvin.com/niceyaml/schema.Schema], and
@@ -187,11 +223,18 @@ type Validator interface {
 //
 //		return nil
 //	})
+//
+// The function returns an [*Error] as it is, and Validate binds it
+// through the Node, as [Validator] asks. A function that writes its paths
+// from another scope binds its error through the Node of that scope
+// itself, and Validate leaves a bound error as it is.
 type ValidatorFunc func(ctx context.Context, n *Node) error
 
-// Validate implements [Validator].
+// Validate implements [Validator]. It calls f and binds the error f
+// returns through n, so a nil [*Error] or [*SourceError] pointer from f
+// comes back as a nil error.
 func (f ValidatorFunc) Validate(ctx context.Context, n *Node) error {
-	return f(ctx, n)
+	return n.Bind(f(ctx, n))
 }
 
 // MultiValidator returns a [Validator] that runs every validator in
@@ -207,14 +250,21 @@ func (f ValidatorFunc) Validate(ctx context.Context, n *Node) error {
 // a validator that decodes the node reports its own failure beside a
 // schema violation of the same value. A validator that needs an earlier
 // one to have passed runs on its own instead. The run skips a nil
-// validator, and one that holds a nil pointer or func. Two or more
-// failures come back joined in the order given, which the Node binds as
-// one, so [errors.Is] matches any one of them and the decode renders
-// them as one tree. A lone failure comes back as
-// the validator returned it, so it binds with its own position, as it
-// would if that validator ran alone. No failure is no error. A context
-// that ends stops the run, and the error is then the one the context
-// reports, or the one the validator that saw it end returned.
+// validator, and one that holds a nil pointer or func.
+//
+// MultiValidator binds each failure through the node, whether or not the
+// validator that returned it did. Two or more failures come back joined
+// in the order given, so [errors.Is] matches any one of them and the
+// decode renders them as one tree. Each line of the message carries the
+// source and the position of its own failure:
+//
+//	svc.yaml:2:7: $.port: 0 is less than 1
+//	svc.yaml:1:7: $.name: reserved name
+//
+// A lone failure comes back as it would if that validator ran alone. No
+// failure is no error. A context that ends stops the run, and the error
+// is then the one the context reports, or the one the validator that saw
+// it end returned.
 //
 // MultiValidator copies the validators it gets, so a caller that edits
 // the slice it passed changes nothing in the Validator.
@@ -231,7 +281,7 @@ func MultiValidator(validators ...Validator) Validator {
 
 			err := ctx.Err()
 			if err != nil {
-				return err //nolint:wrapcheck // The context names the reason, and the Node binds it.
+				return err //nolint:wrapcheck // The context names the reason, and ValidatorFunc binds it.
 			}
 
 			// A typed nil pointer is no failure, as [Node.Bind] reads it.
@@ -241,10 +291,12 @@ func MultiValidator(validators ...Validator) Validator {
 			}
 
 			if ctx.Err() != nil {
-				return err //nolint:wrapcheck // The validator's own error, which the Node binds.
+				return err //nolint:wrapcheck // The validator's own error, which ValidatorFunc binds.
 			}
 
-			errs = append(errs, err)
+			// Each failure binds on its own, so each line of the joined
+			// message carries its own position.
+			errs = append(errs, n.Bind(err))
 		}
 
 		switch len(errs) {
@@ -1335,18 +1387,21 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 // next one runs. [Decoder.Validate] runs the validators a [Decoder]
 // holds the same way.
 //
-// An error from a validator comes back bound to the source as a
-// [SourceError] through [Node.Bind], so an [*Error] renders its
-// location and any other error names the source.
+// A validator returns its errors bound, as [Validator] describes, and
+// Validate returns such an error as it is. An error a validator leaves
+// unbound comes back bound to the source as a [SourceError] through
+// [Node.Bind], so an [*Error] renders its location and any other error
+// names the source. Validate is thus the way to run a validator the
+// caller did not write.
 func (n *Node) Validate(ctx context.Context, validators ...Validator) error {
 	return n.validate(ctx, validators, nil)
 }
 
 // validate runs validators in order on the Node that
 // [Node.forValidators] returns for yamlOpts, and binds the first error
-// with n. The Node the validators get binds errors where n does, so an
-// error a validator binds itself names the same Node as one validate
-// binds.
+// with n when the validator left it unbound. The Node the validators get
+// binds errors where n does, so an error a validator binds itself names
+// the same Node as one validate binds.
 func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []yaml.DecodeOption) error {
 	seen := n.forValidators(yamlOpts)
 

@@ -161,7 +161,8 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // Schema is a compiled JSON schema. It is a [niceyaml.Validator] that
 // checks a document against the schema and reports constraint violations
 // as [*niceyaml.Error] values that carry the YAML path to each failing
-// location for [go.jacobcolvin.com/niceyaml/printer.Printer] to display.
+// location, bound to the source for
+// [go.jacobcolvin.com/niceyaml/printer.Printer] to display.
 // Each one wraps a [*Violation] that names the keyword the value fails.
 // [Schema.Validate] checks a node, which is the whole document for the
 // root [niceyaml.Node] of a document and one value inside it for a Node
@@ -225,9 +226,12 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // [niceyaml.Decoder] runs it on every node it decodes, and
 // [niceyaml.Node.Validate] runs it on its own. A Node from
 // [niceyaml.Node.At] decodes to the node it selects, so the schema checks
-// that node and a violation's path resolves from it. A decoding error
-// comes back bound to the source, and a violation as an unbound
-// [*niceyaml.Error], which the node binds.
+// that node and a violation's path resolves from it. Every error comes
+// back bound through n with [niceyaml.Node.Bind], so a call to Validate
+// returns the error [niceyaml.Node.Validate] returns for the schema. A
+// validator that runs the schema on each node of a list thus reports
+// each violation on its own lines. [Schema.ValidateValue] returns unbound
+// errors for a caller that reports them somewhere else.
 //
 // Holding the node lets Validate spell each key in a violation's path as
 // the source does, so a key the decoder respells, such as the hexadecimal
@@ -293,11 +297,13 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 
 	err := aliasing.CheckDecode(n)
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrValidate, err)
+		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
+		return n.Bind(fmt.Errorf("%w: %w", ErrValidate, err))
 	}
 
 	// A decode into any yields only the YAML built-in types, none of which
 	// validates itself, so the self-validation walk would find nothing.
+	// The decode binds its own error.
 	data, err := n.Decode[any](ctx, niceyaml.WithSelfValidation(false))
 	if err != nil {
 		return err
@@ -313,11 +319,13 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 	if aliasing.HoldsReferenceAlias(n) {
 		err = checkExpansion(data)
 		if err != nil {
-			return err
+			//nolint:wrapcheck // Binding names the document; the error keeps its own context.
+			return n.Bind(err)
 		}
 	}
 
-	return s.validate(ctx, data, n)
+	//nolint:wrapcheck // Binding resolves the violations; each keeps its own context.
+	return n.Bind(s.validate(ctx, data, n))
 }
 
 // ValidateValue checks data, the decoded form of a YAML value, against the
@@ -348,6 +356,13 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // describes. Any other failure wraps
 // [ErrValidate], including a $ref the validator cannot resolve, since no
 // location in the document is at fault for that.
+//
+// ValidateValue holds no source, so its errors are unbound and write
+// their paths from the root of data. The [niceyaml.Node] data came from
+// binds them with [niceyaml.Node.Bind]. A caller that reports them under
+// another path, or in another document, puts them under that path with
+// [niceyaml.Rebase] before it binds them, which the bound errors of
+// [Schema.Validate] do not allow.
 //
 // ValidateValue rejects two shapes of data before checking anything. A
 // value whose shared maps, slices, or byte slices would expand past the

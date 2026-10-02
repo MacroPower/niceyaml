@@ -244,7 +244,10 @@
 //
 // A validator reads the node it checks with [Node.Decode], which runs
 // the validators the caller passes and no other, so a validator never runs
-// itself again.
+// itself again. It returns its errors bound through that node, as
+// [Validator] describes, so a call to Validate returns the error
+// Node.Validate does. A validator that runs another on each element of a
+// list thus reports each failure on the lines of its element.
 //
 // A [SelfValidator] writes its paths from its own root. The decode calls
 // Validate on every value in the result that implements it, and puts the

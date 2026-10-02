@@ -2038,6 +2038,134 @@ func TestSchema_Validate_Scope(t *testing.T) {
 	})
 }
 
+func TestSchema_Validate_Bound(t *testing.T) {
+	t.Parallel()
+
+	v := compileSchema(t, []byte(`{
+		"type": "object",
+		"properties": {
+			"name": {"type": "string"},
+			"price": {"type": "number", "minimum": 0}
+		}
+	}`))
+
+	menu := stringtest.Input(`
+		price: 5
+		items:
+		  - price: 1
+		  - price: -2
+	`)
+	itemPath := paths.Root().Child("items").Index(1)
+
+	tcs := map[string]struct {
+		input string
+		path  paths.Path
+		// The message of the error, and the errors it matches.
+		want string
+		errs []error
+	}{
+		"a document that conforms": {
+			input: menu,
+		},
+		"a violation at the root": {
+			input: "price: -1\n",
+			want:  "menu.yaml:1:8: $.price: -1 is less than 0",
+		},
+		"a violation in a scoped node": {
+			input: menu,
+			path:  itemPath,
+			want:  "menu.yaml:4:12: $.items[1].price: -2 is less than 0",
+		},
+		"several violations": {
+			input: "name: 1\nprice: -1\n",
+			want:  "menu.yaml: 2 schema violations",
+		},
+		"a decoding error": {
+			input: "price: *nope\n",
+			want:  "menu.yaml:1:9: could not find alias \"nope\"",
+		},
+		"a document past the alias limit": {
+			input: yamltest.AliasLevels(7),
+			want:  "menu.yaml: validate schema: excessive aliasing",
+			errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			node := yamltest.FirstDocumentWithPath(t, tc.input, "menu.yaml")
+			if !tc.path.IsRoot() {
+				node = yamltest.At(t, node, tc.path)
+			}
+
+			err := v.Validate(t.Context(), node)
+			if tc.want == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.EqualError(t, err, tc.want)
+
+			for _, target := range tc.errs {
+				require.ErrorIs(t, err, target)
+			}
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+			assert.Same(t, node, bound.Node())
+
+			// The node returns the same error for the schema.
+			require.EqualError(t, node.Validate(t.Context(), v), tc.want)
+		})
+	}
+
+	t.Run("a validator that runs the schema on each element reports the element", func(t *testing.T) {
+		t.Parallel()
+
+		each := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			items, err := n.Nodes(paths.Root().Child("items").IndexAll())
+			if err != nil {
+				return err //nolint:wrapcheck // The test inspects the error as it is.
+			}
+
+			for _, item := range items {
+				err := v.Validate(ctx, item)
+				if err != nil {
+					return err //nolint:wrapcheck // The test inspects the error as it is.
+				}
+			}
+
+			return nil
+		})
+
+		doc := yamltest.FirstDocumentWithPath(t, menu, "menu.yaml")
+
+		err := doc.Validate(t.Context(), each)
+		require.EqualError(t, err, "menu.yaml:4:12: $.items[1].price: -2 is less than 0")
+
+		var violation *schema.Violation
+
+		require.ErrorAs(t, err, &violation)
+		assert.Equal(t, "minimum", violation.Keyword)
+	})
+
+	t.Run("a validator that checks another document names that document", func(t *testing.T) {
+		t.Parallel()
+
+		other := yamltest.FirstDocumentWithPath(t, "# other\nprice: -1\n", "other.yaml")
+		include := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+			return v.Validate(ctx, other)
+		})
+
+		err := yamltest.FirstDocumentWithPath(t, menu, "menu.yaml").Validate(t.Context(), include)
+		require.EqualError(t, err, "other.yaml:2:8: $.price: -1 is less than 0")
+	})
+}
+
 func TestSchema_SourcePath(t *testing.T) {
 	t.Parallel()
 

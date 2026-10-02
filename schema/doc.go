@@ -48,6 +48,11 @@
 //	    // err is a *niceyaml.SourceError; niceyaml.FormatError prints the failing lines.
 //	}
 //
+// [Schema.Validate] returns the same bound error, so a validator of the
+// program's own runs the schema on a node it picks and returns the
+// result. [Schema.ValidateValue] checks decoded data instead, and its
+// errors stay unbound for a caller that reports them under another path.
+//
 // To validate and decode in one step, pass the schema to
 // [go.jacobcolvin.com/niceyaml.Node.Decode] with
 // [go.jacobcolvin.com/niceyaml.WithValidator]. A schema compiled by

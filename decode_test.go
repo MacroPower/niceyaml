@@ -2479,15 +2479,16 @@ func TestNode_Bind_Scope(t *testing.T) {
 	t.Run("a scoped validator and the same check at the root agree", func(t *testing.T) {
 		t.Parallel()
 
+		// The validator writes its path from the root of the document, so
+		// it binds through the root, which binds the path as written.
 		reject := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
-			return niceyaml.NewError("bad", niceyaml.AtPath(n.Path().Join(closePath)))
+			return n.Document().Bind(niceyaml.NewError("bad", niceyaml.AtPath(n.Path().Join(closePath))))
 		})
 
-		// The validator writes an absolute path, which only the root of
-		// the document binds as written.
 		want := "cfg.yaml:5:14: $.shops[0].hours.close: bad"
 
-		require.EqualError(t, doc.Bind(reject.Validate(t.Context(), hours)), want)
+		require.EqualError(t, reject.Validate(t.Context(), hours), want)
+		require.EqualError(t, hours.Validate(t.Context(), reject), want)
 
 		scoped := niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
 			return niceyaml.NewError("bad", niceyaml.AtPath(closePath))
@@ -6302,9 +6303,12 @@ func TestDocument_Decode_ValidatorErrorBoundToReceiver(t *testing.T) {
 
 	// The Node a validator gets carries the go-yaml options of the
 	// decode, so the validators that bind an error themselves bind it
-	// through a copy of the receiver.
+	// through a copy of the receiver. A [niceyaml.ValidatorFunc] binds
+	// the error of its function that way, and the decode binds the error
+	// a validator of another type leaves unbound.
 	validators := map[string]niceyaml.Validator{
-		"returns an unbound error": fail,
+		"returns an unbound error":             &fieldValidator{err: errDocumentRejected},
+		"returns an unbound error from a func": fail,
 		"binds its own error": niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
 			return n.Bind(errDocumentRejected)
 		}),
@@ -7044,6 +7048,44 @@ func TestNode_Validate(t *testing.T) {
 		)
 		require.ErrorIs(t, err, errNameRequired)
 		assert.Equal(t, []string{"first", "after"}, order)
+	})
+
+	t.Run("binds the error a validator leaves unbound", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("meta:\n  name: test\n", niceyaml.WithName("x.yaml"))
+
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		scoped := yamltest.At(t, doc, paths.Root().Child("meta"))
+		unbound := &fieldValidator{
+			err: niceyaml.WrapError(errNameRequired, niceyaml.AtPath(paths.Root().Child("name"))),
+		}
+
+		// A direct call returns the error as the validator wrote it, and
+		// the Node binds it from its own scope.
+		require.EqualError(t, unbound.Validate(t.Context(), scoped), "$.name: name is required")
+
+		err = scoped.Validate(t.Context(), unbound)
+		require.EqualError(t, err, "x.yaml:2:9: $.meta.name: name is required")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, scoped, bound.Node())
+	})
+
+	t.Run("returns a bound error as it is", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "meta:\n  name: test\n")
+		scoped := yamltest.At(t, dd, paths.Root().Child("meta"))
+
+		want := scoped.Bind(niceyaml.WrapError(errNameRequired, niceyaml.AtPath(paths.Root().Child("name"))))
+
+		assert.Same(t, want, dd.Validate(t.Context(), &fieldValidator{err: want}))
+		assert.Same(t, want, dd.Validate(t.Context(), rejectingValidator(want)))
 	})
 
 	t.Run("with no validators runs none", func(t *testing.T) {
@@ -8078,6 +8120,175 @@ func TestErrDecodeRejected(t *testing.T) {
 	})
 }
 
+func TestValidatorFunc_Validate(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString(stringtest.Input(`
+		price: 5
+		items:
+		  - price: 1
+		  - price: -2
+	`), niceyaml.WithName("menu.yaml"))
+
+	doc, err := source.Document()
+	require.NoError(t, err)
+
+	other, err := niceyaml.NewSourceFromString("# other\nprice: 0\n", niceyaml.WithName("other.yaml")).Document()
+	require.NoError(t, err)
+
+	pricePath := paths.Root().Child("price")
+	item := yamltest.At(t, doc, paths.Root().Child("items").Index(1))
+	negative := niceyaml.NewError("negative price", niceyaml.AtPath(pricePath))
+
+	var (
+		nilError       *niceyaml.Error
+		nilSourceError *niceyaml.SourceError
+	)
+
+	tcs := map[string]struct {
+		// The error the function returns, and the node it runs on.
+		returns error
+		node    *niceyaml.Node
+		// The message of the bound error, or none for no error.
+		want string
+	}{
+		"an unbound error binds through the node": {
+			returns: negative,
+			node:    doc,
+			want:    "menu.yaml:1:8: $.price: negative price",
+		},
+		"a scoped node puts its path in front": {
+			returns: negative,
+			node:    item,
+			want:    "menu.yaml:4:12: $.items[1].price: negative price",
+		},
+		"an error with no location names the source": {
+			returns: errNameRequired,
+			node:    doc,
+			want:    "menu.yaml: name is required",
+		},
+		"an error bound through another node stays as it is": {
+			returns: item.Bind(negative),
+			node:    doc,
+			want:    "menu.yaml:4:12: $.items[1].price: negative price",
+		},
+		"an error bound to another source stays as it is": {
+			returns: other.Bind(negative),
+			node:    doc,
+			want:    "other.yaml:2:8: $.price: negative price",
+		},
+		"no error is no error": {
+			node: doc,
+		},
+		"a nil Error pointer is no error": {
+			returns: nilError,
+			node:    doc,
+		},
+		"a nil SourceError pointer is no error": {
+			returns: nilSourceError,
+			node:    doc,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			validator := rejectingValidator(tc.returns)
+
+			err := validator.Validate(t.Context(), tc.node)
+			if tc.want == "" {
+				require.NoError(t, err)
+				require.NoError(t, tc.node.Validate(t.Context(), validator))
+
+				return
+			}
+
+			require.EqualError(t, err, tc.want)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			// The node returns the same error for the validator.
+			require.EqualError(t, tc.node.Validate(t.Context(), validator), tc.want)
+		})
+	}
+
+	t.Run("a validator that runs another on each element reports the element", func(t *testing.T) {
+		t.Parallel()
+
+		perItem := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			node, err := n.At(pricePath)
+			if err != nil {
+				return err //nolint:wrapcheck // The test inspects the error as it is.
+			}
+
+			price, err := node.Decode[int](ctx)
+			if err != nil {
+				return err
+			}
+
+			if price < 0 {
+				return negative
+			}
+
+			return nil
+		})
+		each := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			items, err := n.Nodes(paths.Root().Child("items").IndexAll())
+			if err != nil {
+				return err //nolint:wrapcheck // The test inspects the error as it is.
+			}
+
+			for _, it := range items {
+				err := perItem.Validate(ctx, it)
+				if err != nil {
+					return err //nolint:wrapcheck // The test inspects the error as it is.
+				}
+			}
+
+			return nil
+		})
+
+		want := "menu.yaml:4:12: $.items[1].price: negative price"
+
+		require.EqualError(t, doc.Validate(t.Context(), each), want)
+
+		_, err := doc.Decode[map[string]any](t.Context(), niceyaml.WithValidator(each))
+		require.EqualError(t, err, want)
+	})
+
+	t.Run("a validator that checks another document names that document", func(t *testing.T) {
+		t.Parallel()
+
+		zero := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+			return niceyaml.NewError("no price", niceyaml.AtPath(pricePath))
+		})
+		include := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+			return zero.Validate(ctx, other)
+		})
+
+		require.EqualError(t, doc.Validate(t.Context(), include), "other.yaml:2:8: $.price: no price")
+	})
+
+	t.Run("context a wrapper adds stands in front of the position", func(t *testing.T) {
+		t.Parallel()
+
+		wrapped := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			return fmt.Errorf("menu check: %w", rejectingValidator(negative).Validate(ctx, n))
+		})
+
+		err := doc.Validate(t.Context(), wrapped)
+		require.EqualError(t, err, "menu check: menu.yaml:1:8: $.price: negative price")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, doc, bound.Node())
+	})
+}
+
 func TestMultiValidator(t *testing.T) {
 	t.Parallel()
 
@@ -8091,6 +8302,8 @@ func TestMultiValidator(t *testing.T) {
 		// A validator that binds its own error, as a schema does.
 		return n.Bind(niceyaml.WrapError(errC, niceyaml.AtPath(paths.Root().Child("a", "c"))))
 	})
+	// A validator of a type of its own that leaves its error unbound.
+	unboundB := &fieldValidator{err: niceyaml.WrapError(errB, niceyaml.AtPath(paths.Root().Child("a", "b")))}
 	passing := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
 		return nil
 	})
@@ -8191,7 +8404,7 @@ func TestMultiValidator(t *testing.T) {
 		require.ErrorIs(t, err, errC)
 	})
 
-	t.Run("the message names the source once", func(t *testing.T) {
+	t.Run("each line of the message carries its source and position", func(t *testing.T) {
 		t.Parallel()
 
 		src := niceyaml.NewSourceFromString("a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
@@ -8199,9 +8412,25 @@ func TestMultiValidator(t *testing.T) {
 		doc, err := src.Document()
 		require.NoError(t, err)
 
-		err = doc.Validate(t.Context(), niceyaml.MultiValidator(badB, badB))
-		require.Error(t, err)
-		assert.Equal(t, "x.yaml: $.a.b: bad b\n$.a.b: bad b", err.Error())
+		want := "x.yaml:2:6: $.a.b: bad b\nx.yaml:3:6: $.a.c: bad c"
+
+		tcs := map[string]struct {
+			first niceyaml.Validator
+		}{
+			"a validator that binds its error":          {first: badB},
+			"a validator that leaves its error unbound": {first: unboundB},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				multi := niceyaml.MultiValidator(tc.first, badC)
+
+				require.EqualError(t, doc.Validate(t.Context(), multi), want)
+				require.EqualError(t, multi.Validate(t.Context(), doc), want)
+			})
+		}
 	})
 
 	t.Run("a lone failure keeps its position", func(t *testing.T) {
@@ -8228,28 +8457,14 @@ func TestMultiValidator(t *testing.T) {
 		err = doc.Validate(t.Context(), niceyaml.MultiValidator(passing, badC))
 		require.ErrorIs(t, err, errC)
 		assert.Equal(t, "x.yaml:3:6: $.a.c: bad c", err.Error())
+
+		// A validator that leaves its error unbound reads the same.
+		err = doc.Validate(t.Context(), niceyaml.MultiValidator(passing, unboundB))
+		require.ErrorIs(t, err, errB)
+		assert.Equal(t, "x.yaml:2:6: $.a.b: bad b", err.Error())
 	})
 
-	t.Run("a validator that binds its own error names the source once", func(t *testing.T) {
-		t.Parallel()
-
-		src := niceyaml.NewSourceFromString("a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
-
-		doc, err := src.Document()
-		require.NoError(t, err)
-
-		err = doc.Validate(t.Context(), niceyaml.MultiValidator(badC))
-		require.Error(t, err)
-		assert.Equal(t, "x.yaml:3:6: $.a.c: bad c", err.Error())
-
-		// The binding supplies the first line, and the name goes only
-		// there, so a failure after it adds no name either.
-		err = doc.Validate(t.Context(), niceyaml.MultiValidator(badC, badB))
-		require.Error(t, err)
-		assert.Equal(t, "x.yaml:3:6: $.a.c: bad c\n$.a.b: bad b", err.Error())
-	})
-
-	t.Run("a sentinel around a binding names the source once", func(t *testing.T) {
+	t.Run("a sentinel around a binding stands in front of its position", func(t *testing.T) {
 		t.Parallel()
 
 		src := niceyaml.NewSourceFromString("a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
@@ -8264,7 +8479,7 @@ func TestMultiValidator(t *testing.T) {
 
 		err = doc.Validate(t.Context(), niceyaml.MultiValidator(classified, badB))
 		require.ErrorIs(t, err, errInvalid)
-		assert.Equal(t, "invalid: x.yaml:3:6: $.a.c: bad c\n$.a.b: bad b", err.Error())
+		assert.Equal(t, "invalid: x.yaml:3:6: $.a.c: bad c\nx.yaml:2:6: $.a.b: bad b", err.Error())
 	})
 
 	t.Run("a context that ends stops the run", func(t *testing.T) {
