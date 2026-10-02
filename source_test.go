@@ -815,7 +815,7 @@ func TestSource_File_BlankLineBeforeFirstKey(t *testing.T) {
 			assert.Len(t, yamltest.At(t, doc, paths.Root().Child("a").Key()).Tokens(), 1)
 
 			_, err = doc.Decode[struct{ B int }](t.Context(), niceyaml.WithDisallowUnknownFields(true))
-			require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
 		})
 	}
 }

@@ -2099,18 +2099,40 @@ func (*rejecting) UnmarshalYAML([]byte) error {
 	return errRejecting
 }
 
+// stopping decodes itself and reports the error of a deadline of its
+// own, which the context of the match has not reached.
+type stopping struct{}
+
+func (*stopping) UnmarshalYAML([]byte) error {
+	return fmt.Errorf("lookup stopped: %w", context.DeadlineExceeded)
+}
+
 func TestContent_UnmarshalerError(t *testing.T) {
 	t.Parallel()
 
-	// A value that rejects itself is not the decoder saying the value
-	// does not read as T, so the matcher returns the error rather than
-	// a no.
-	m := matcher.Content(kindPath, rejecting{})
 	doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 
-	ok, err := m.Match(t.Context(), doc)
-	require.ErrorIs(t, err, errRejecting)
-	assert.False(t, ok)
+	t.Run("value that rejects itself does not match", func(t *testing.T) {
+		t.Parallel()
+
+		// The decode of a value that rejects itself fails with
+		// niceyaml.ErrDecode, as a rejection of the decoder does, so the
+		// matcher answers no.
+		ok, err := matcher.Content(kindPath, rejecting{}).Match(t.Context(), doc)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("context error a value wraps comes back", func(t *testing.T) {
+		t.Parallel()
+
+		// The error of a context that ended is no answer about the value,
+		// so the matcher cannot decide.
+		ok, err := matcher.Content(kindPath, stopping{}).Match(t.Context(), doc)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.NotErrorIs(t, err, niceyaml.ErrDecode)
+		assert.False(t, ok)
+	})
 }
 
 func TestContent_UnparsableDuration(t *testing.T) {
@@ -2118,7 +2140,7 @@ func TestContent_UnparsableDuration(t *testing.T) {
 
 	// A string that time.ParseDuration rejects does not read as a
 	// time.Duration, and the decode reports it with
-	// niceyaml.ErrDecodeRejected, so the matcher answers no rather than
+	// niceyaml.ErrDecode, so the matcher answers no rather than
 	// returning the error. A quoted float is such a string, in an element
 	// or a field too.
 	tcs := map[string]struct {
@@ -2167,19 +2189,103 @@ func TestContent_UnparsableDuration(t *testing.T) {
 func TestContent_RefusedTargetType(t *testing.T) {
 	t.Parallel()
 
-	// The decoder refuses a struct with two fields of one name and
-	// reports it without niceyaml.ErrDecodeRejected, so the matcher
-	// returns the error rather than a no.
+	// The decoder refuses a struct with two fields of one name and an
+	// inline embedded struct that is not exported, whatever the document
+	// holds. No document matches such a type, so the matcher returns the
+	// error of the decode rather than a no.
 	type duplicated struct {
 		A int `yaml:"a"`
 		B int `yaml:"a"`
 	}
 
-	m := matcher.Content(paths.Root().Child("x"), duplicated{})
-	doc := yamltest.FirstDocument(t, stringtest.Input(`x: {a: 1}`))
+	type inner struct {
+		A int `yaml:"a"`
+	}
 
-	ok, err := m.Match(t.Context(), doc)
-	require.ErrorContains(t, err, "duplicated struct field name")
-	require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
-	assert.False(t, ok)
+	xPath := paths.Root().Child("x")
+
+	tcs := map[string]struct {
+		matcher matcher.Matcher
+		input   string
+		// The text of the error, or empty for none.
+		err  string
+		want bool
+	}{
+		"duplicated field name": {
+			matcher: matcher.Content(xPath, duplicated{}),
+			input:   "x: {a: 1}",
+			err:     "duplicated struct field name a",
+		},
+		"duplicated field name in a field": {
+			matcher: matcher.Content(xPath, struct{ D duplicated }{}),
+			input:   "x: {d: {a: 1}}",
+			err:     "duplicated struct field name a",
+		},
+		"duplicated field name in an element": {
+			matcher: matcher.Content(xPath, [1]duplicated{}),
+			input:   "x: [{a: 1}]",
+			err:     "duplicated struct field name a",
+		},
+		"duplicated field name behind a pointer": {
+			matcher: matcher.Content(xPath, (*duplicated)(nil)),
+			input:   "x: {a: 1}",
+			err:     "duplicated struct field name a",
+		},
+		"unexported inline embedded struct": {
+			matcher: matcher.Content(xPath, struct {
+				*inner `yaml:",inline"`
+
+				M int `yaml:"m"`
+			}{}),
+			input: "x: {a: 1, m: 2}",
+			err:   "cannot set embedded type as unexported field",
+		},
+		// The decoder reads the definition before the value.
+		"value of another kind": {
+			matcher: matcher.Content(xPath, duplicated{}),
+			input:   "x: 1",
+			err:     "duplicated struct field name a",
+		},
+		// The decoder never reads the definition of a field the document
+		// leaves out, so the decode passes.
+		"field the document leaves out": {
+			matcher: matcher.Content(xPath, struct{ D *duplicated }{}),
+			input:   "x: {}",
+			want:    true,
+		},
+		// The error of a value that decodes itself is no definition error,
+		// though the decoder reports both as plain errors.
+		"value that rejects itself beside a field": {
+			matcher: matcher.Content(xPath, struct {
+				R rejecting `yaml:"r"`
+				A int       `yaml:"a"`
+			}{}),
+			input: "x: {r: 1, a: 1}",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			ok, err := tc.matcher.Match(t.Context(), doc)
+			assert.Equal(t, tc.want, ok)
+
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorContains(t, err, tc.err)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+			assert.Same(t, doc.Source(), bound.Source())
+		})
+	}
 }

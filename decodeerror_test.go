@@ -407,7 +407,7 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 
 			err := dd.DecodeInto(t.Context(), &v, tc.opts...)
 			require.EqualError(t, err, tc.want)
-			require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 			var srcErr *niceyaml.SourceError
 
@@ -581,7 +581,7 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 
 			err := tc.decode(t.Context(), dd)
 			require.EqualError(t, err, tc.want)
-			require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 			// The decoder reports the two Go types it compared, and the
 			// message spells neither of them.
@@ -711,7 +711,7 @@ func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
 
 			_, err := scoped.Decode[rejectionServer](t.Context())
 			require.EqualError(t, err, tc.want)
-			require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 			var srcErr *niceyaml.SourceError
 
@@ -759,7 +759,7 @@ func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
 
 		err = doc.DecodeInto(t.Context(), &v)
 		require.EqualError(t, err, `2:1: $.name~: duplicate key "name"`)
-		require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 		var srcErr *niceyaml.SourceError
 
@@ -792,7 +792,7 @@ func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
 
 		_, err := doc.Decode[map[string]int](t.Context())
 		require.EqualError(t, err, `2:2: could not find alias "nope"`)
-		require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 		var srcErr *niceyaml.SourceError
 
@@ -1199,7 +1199,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 				err := tc.decode(t.Context(), dd)
 				require.EqualError(t, err, tc.want)
-				require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 				var srcErr *niceyaml.SourceError
 
@@ -1214,7 +1214,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 		}
 	})
 
-	t.Run("only a duration matches the rejection", func(t *testing.T) {
+	t.Run("matches the decode sentinel", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
@@ -1259,17 +1259,18 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 				err := tc.decode(t.Context(), dd)
 				require.EqualError(t, err, tc.want)
-				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
 			})
 		}
 
 		// The error of an unmarshaler is the value's own, so it keeps what
-		// it matched and gains nothing.
+		// it matched beside the sentinel.
 		dd := yamltest.FirstDocument(t, "name: api\ntier: mid\n")
 
 		_, err := dd.Decode[tierServer](t.Context())
+		require.EqualError(t, err, `2:7: $.tier: unknown tier "mid"`)
 		require.ErrorIs(t, err, errUnknownTier)
-		require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
 	})
 
 	t.Run("keeps the location the error carries", func(t *testing.T) {
@@ -1282,6 +1283,8 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			Value positioned `yaml:"value"`
 		}](t.Context())
 		require.EqualError(t, err, "2:8: unmarshaler rejected the value")
+		require.ErrorIs(t, err, errUnmarshal)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 		var srcErr *niceyaml.SourceError
 

@@ -177,7 +177,7 @@ func BenchmarkNode_DecodeRejectedStream(b *testing.B) {
 					var v struct{ A int }
 
 					err := doc.DecodeInto(b.Context(), &v)
-					if !errors.Is(err, niceyaml.ErrDecodeRejected) {
+					if !errors.Is(err, niceyaml.ErrDecode) {
 						b.Fatalf("got %v, want a rejection", err)
 					}
 				}
@@ -276,7 +276,7 @@ func BenchmarkNode_DecodeReferenceAliases(b *testing.B) {
 
 			for b.Loop() {
 				_, err := doc.Decode[config](b.Context(), ref)
-				if !errors.Is(err, niceyaml.ErrDecodeRejected) {
+				if !errors.Is(err, niceyaml.ErrDecode) {
 					b.Fatalf("got %v, want a rejection", err)
 				}
 			}

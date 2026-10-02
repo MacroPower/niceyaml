@@ -307,7 +307,7 @@
 // way.
 //
 // A value the go-yaml decoder rejects reports the same way. The error
-// matches [ErrDecodeRejected] and carries the path of the value, and its
+// matches [ErrDecode] and carries the path of the value, and its
 // message describes the document rather than the Go target:
 //
 //	config.yaml:3:11: $.servers[0].port: expected integer, got string
@@ -404,9 +404,9 @@
 // resolving a [paths.Path]. Positions, ranges, lines, errors, and styles are
 // niceyaml's own types, and [paths.Path.YAMLPath] converts to go-yaml's
 // path type when a caller needs it. Text the go-yaml parser rejects
-// matches [ErrSyntax]. A decode the go-yaml decoder rejects matches
-// [ErrDecodeRejected], with the exceptions its doc names. A caller thus
-// tells both cases apart without naming go-yaml's error types.
+// matches [ErrSyntax], and a decode that fails on YAML that parsed
+// matches [ErrDecode]. A caller thus tells both cases apart without
+// naming go-yaml's error types.
 //
 // The go-yaml settings niceyaml supports have named options, such as
 // [WithAllowDuplicateKeys] or [go.jacobcolvin.com/niceyaml/encoder.WithIndent].

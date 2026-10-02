@@ -94,15 +94,17 @@ type contentMatcher[T comparable] struct {
 // a null deeper inside such a value compares as go-yaml decodes it. A
 // document without the path, or whose value does not decode into T,
 // does not match, so a [time.Duration] T matches no timeout: 5.5,
-// timeout: 1e3, timeout: true, or timeout: 5 minutes. A T whose
-// definition the decoder refuses, such as a struct with two fields of
-// one name, is an exception, and so is a value whose own UnmarshalYAML
-// or UnmarshalText returns an error. The decoder reports these without
-// [niceyaml.ErrDecodeRejected], as it does the other errors
-// [niceyaml.Node.DecodeInto] names, so Match returns the error. Any other
-// error from the read comes back as the error, so a registry stops at the
-// document rather than routing it elsewhere. Such errors include a path
-// with a wildcard selector and a context that ended. They also include an
+// timeout: 1e3, timeout: true, or timeout: 5 minutes. Every decode that
+// fails with [niceyaml.ErrDecode] reads as no match. So a value whose own
+// UnmarshalYAML or UnmarshalText returns an error does not match,
+// whatever that error is. A T whose definition the decoder refuses, such
+// as a struct with two fields of one name, is the exception. No document
+// matches such a T, so Match returns the error of the decode, which
+// names the fault and matches niceyaml.ErrDecode as well. Any other
+// error from the read comes back as the error, so a registry stops at
+// the document rather than routing it elsewhere. Such errors include a
+// path with a wildcard selector and a context that ended, even when an
+// unmarshaler wraps the error of that context. They also include an
 // alias on the path, tagged or not, that names no anchor before it in the
 // document, even when a reference document holds an anchor of that name.
 // Match also refuses a document whose aliases would make the read cost
@@ -173,7 +175,7 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	// yields only the YAML built-in types, none of which validates itself,
 	// so the self-validation walk would find nothing.
 	raw, err := node.Decode[any](ctx, niceyaml.WithSelfValidation(false))
-	if errors.Is(err, niceyaml.ErrDecodeRejected) {
+	if errors.Is(err, niceyaml.ErrDecode) {
 		return false, nil
 	}
 
@@ -202,12 +204,13 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	if p, ok := any(&got).(*any); ok {
 		*p = raw
 	} else {
-		// A rejection from the decoder means the value does not read as T,
-		// which is a no rather than a failure. An error the value's own
-		// UnmarshalYAML returns is not a rejection, so it comes back as the
-		// error.
+		// A decode that fails means the value does not read as T, which is
+		// a no rather than a failure. That holds for an error the value's
+		// own UnmarshalYAML returns too. A definition the decoder refuses
+		// is a fault of T, which no document can match, so its error comes
+		// back.
 		got, err = node.Decode[T](ctx)
-		if errors.Is(err, niceyaml.ErrDecodeRejected) {
+		if errors.Is(err, niceyaml.ErrDecode) && !refusesDefinition(ctx, err, reflect.TypeFor[T]()) {
 			return false, nil
 		}
 
@@ -359,7 +362,7 @@ func matchStruct(
 	// A rejection means the mapping does not read as t, which is a no, as
 	// it is for the decode into T.
 	decoded, shadowed, err := fieldScope(ctx, node, t, parent)
-	if errors.Is(err, niceyaml.ErrDecodeRejected) {
+	if errors.Is(err, niceyaml.ErrDecode) {
 		return false, nil
 	}
 
@@ -769,7 +772,7 @@ func structReadsDurationFloat(
 	// A rejection means the mapping does not read as t, which the decode
 	// into T reports as well.
 	decoded, shadowed, err := fieldScope(ctx, node, t, parent)
-	if errors.Is(err, niceyaml.ErrDecodeRejected) {
+	if errors.Is(err, niceyaml.ErrDecode) {
 		return false, nil
 	}
 
@@ -1023,6 +1026,101 @@ func isPlainString(t reflect.Type) bool {
 func isPlain(t reflect.Type) bool {
 	return !slices.Contains(decoderTypes, t) &&
 		!slices.ContainsFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
+}
+
+// refusesDefinition reports whether err, the error of a decode into the
+// type t, is a definition error. The go-yaml decoder gives one for a
+// struct type it refuses, whatever the document holds. It refuses a
+// struct with two fields of one name and an inline embedded struct that
+// is not exported.
+//
+// The decoder reports a definition error as a plain error with no token,
+// as it reports the error of a value that decodes itself. Text alone
+// does not tell the two apart, so refusesDefinition asks the decoder. It
+// decodes an empty mapping into each struct type the decoder reaches
+// from the target and reads by its kind, as [isPlain] reports. A decode
+// that fails with the message of err names the definition err is about.
+func refusesDefinition(ctx context.Context, err error, t reflect.Type) bool {
+	want, ok := definitionMessage(err)
+	if !ok {
+		return false
+	}
+
+	empty, err := niceyaml.NewSourceFromString("{}").Document()
+	if err != nil {
+		return false
+	}
+
+	return refuses(ctx, empty, t, want, map[reflect.Type]bool{})
+}
+
+// definitionMessage returns the message of the error that err, the error
+// of a decode, binds, when that error may be a definition error. It
+// returns false for an err that binds a [yaml.Error], which is about a
+// value of the document. It returns false for an err with a location
+// too. The decode gives one to an error it places, such as the depth
+// limit, and to the error of a value that decodes itself.
+func definitionMessage(err error) (string, bool) {
+	bound, ok := errors.AsType[*niceyaml.SourceError](err)
+	if !ok || bound.Cause() == nil {
+		return "", false
+	}
+
+	if _, ok := errors.AsType[yaml.Error](bound.Cause()); ok {
+		return "", false
+	}
+
+	_, path := bound.Path()
+	_, rng := bound.Range()
+
+	if path || rng {
+		return "", false
+	}
+
+	return bound.Cause().Error(), true
+}
+
+// refuses reports whether a decode of empty, a document that holds an
+// empty mapping, into t or into a struct type the decoder reaches from t
+// fails with the message want. The decoder reaches the type a pointer
+// points to, the elements of a slice or an array, the keys and the
+// values of a map, and the fields of a struct that [yamlfield.Name] does
+// not skip. It reaches nothing through a type that [isPlain] does not
+// report. The seen set holds the types the walk has read, so a type that
+// holds itself ends the walk.
+func refuses(ctx context.Context, empty *niceyaml.Node, t reflect.Type, want string, seen map[reflect.Type]bool) bool {
+	t = pointerBase(t)
+	if seen[t] || !isPlain(t) {
+		return false
+	}
+
+	seen[t] = true
+
+	switch t.Kind() {
+	case reflect.Slice, reflect.Array:
+		return refuses(ctx, empty, t.Elem(), want, seen)
+
+	case reflect.Map:
+		return refuses(ctx, empty, t.Key(), want, seen) || refuses(ctx, empty, t.Elem(), want, seen)
+
+	case reflect.Struct:
+		err := empty.DecodeInto(ctx, reflect.New(t).Interface(), niceyaml.WithSelfValidation(false))
+		if got, ok := definitionMessage(err); ok && got == want {
+			return true
+		}
+
+		for field := range t.Fields() {
+			_, _, skip := yamlfield.Name(field)
+			if !skip && refuses(ctx, empty, field.Type, want, seen) {
+				return true
+			}
+		}
+
+		return false
+
+	default:
+		return false
+	}
 }
 
 // scalarText returns the text of the scalar node holds as the document

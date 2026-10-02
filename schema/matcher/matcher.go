@@ -41,7 +41,7 @@ type Matcher interface {
 //	    }
 //
 //	    kind, err := node.Decode[string](ctx)
-//	    if errors.Is(err, niceyaml.ErrDecodeRejected) {
+//	    if errors.Is(err, niceyaml.ErrDecode) {
 //	        return false, nil
 //	    }
 //

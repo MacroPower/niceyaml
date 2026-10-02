@@ -46,61 +46,45 @@ var (
 	// location.
 	ErrDecodeTarget = errors.New("decode target is not a non-nil pointer")
 
-	// ErrDecodeRejected indicates the go-yaml decoder rejected the value
-	// [Node.Decode], [Node.DecodeInto], or [Decoder.DecodeInto] gave it:
-	// a value that does not read as the target type, a number that
-	// overflows it, or a field the target lacks under
-	// [WithDisallowUnknownFields]. The decoder reports every rejection as
-	// one kind of error, so the sentinel tells them apart from nothing
-	// finer. A decode that rejects several unknown fields returns one
-	// error that nests a rejection for each, and it matches too.
-	// The error comes back bound as a [SourceError] at the path of the
-	// offending value, from the root of the document, or at the path of
-	// its key for a rejection of the key, such as an unknown field. Its
-	// message names kinds of YAML values and no Go type, as
-	// [Node.DecodeInto] describes. For a value the document leaves out,
-	// such as the value of a key with nothing after its colon, the path
-	// resolves to the null the parser puts there.
-	// Text that [time.ParseDuration] rejects for a [time.Duration]
-	// matches too. The decoder reports it without a token, so the decode
-	// binds it at the path of the value, as [Node.DecodeInto] describes.
-	// An error a value's own UnmarshalYAML or UnmarshalText returns does
-	// not match. It is the value's own, and the decode binds it at the
-	// path of the value the same way. The error of a context that ended
-	// comes back as it is and does not match either.
-	// Neither does any other error the decoder reports without a token
-	// of the source, which comes back with no location. One is
-	// an error for a target type whose definition the decoder refuses,
-	// such as a struct with two fields of one name or an inline embedded
-	// struct that is not exported. Another is an error for a key of a map
-	// tagged inline, such as the key `name` beside a map[int]int, or for
-	// a field tagged inline whose type cannot hold a mapping, such as an
-	// int. A value of an inline map keeps its token, so an error in that
-	// value matches as it would in any other field.
-	// A panic in the go-yaml decoder or in a value's own UnmarshalYAML
-	// does match, bound at the first token of the node that is not a
-	// comment, with no go-yaml error in the chain. So does a value nested
-	// deeper than the decoder allows, bound the same way, and a `<<`
-	// merge key whose alias names no anchor before it, or an anchor that
-	// holds the merge key, bound at the alias. The decoder reports those
-	// two without a location, and the chain holds its error. A rejection
-	// of a value that an alias reads from a reference document, from
-	// [WithReferences] or the yaml.Reference options, matches too, and
-	// so does an unwrapped go-yaml error an UnmarshalYAML returns from a
-	// parse of its own in such a node, since the decoder reports both
-	// alike. So does a go-yaml error the decoder reports without a token
-	// in such a node, such as the one for a key of an inline map[int]int.
-	// Each binds at the alias when the node holds one alias to a
-	// reference document, directly or inside an anchor its aliases reach.
-	// When the node holds several, the error carries no location, even
-	// if the target type reads only one of them. A definition error
-	// never matches, even beside an alias to a reference document, since
-	// the decoder returns it as a plain error, not a go-yaml error. The
-	// error for a [time.Duration] matches only where the decode binds it
-	// at the value. One the decode finds no path for, such as text an
-	// alias reads from a reference document, comes back with no location
-	// and does not match.
-	ErrDecodeRejected = errors.New("decoder rejected the value")
+	// ErrDecode indicates that the go-yaml decoder did not decode a node
+	// into its target. [Node.Decode], [Node.DecodeInto], and
+	// [Decoder.DecodeInto] return it. So does a [Validator] that decodes
+	// the node it checks, as a [go.jacobcolvin.com/niceyaml/schema.Schema]
+	// does. These errors match:
+	//
+	//   - A value the decoder rejects, such as one of the wrong kind, a
+	//     number that overflows its type, an alias with no anchor, or a
+	//     field the target lacks under [WithDisallowUnknownFields].
+	//   - The error a value's own UnmarshalYAML or UnmarshalText returns.
+	//     That error stays in the chain, so it still matches what the
+	//     method returned.
+	//   - A panic in the decoder or in such a method.
+	//   - The error for a target type whose definition the decoder
+	//     refuses, such as a struct with two fields of one name.
+	//   - The error of a go-yaml option, such as one for a reference file
+	//     the decoder cannot open.
+	//
+	// The error of a context that ended does not match, even when an
+	// unmarshaler wraps it. Neither does [ErrDecodeTarget] or
+	// [ErrExcessiveAliasing], which come back before the decoder runs, or
+	// an error that a [Validator] or a [SelfValidator] reports about the
+	// value it checks.
+	//
+	// A document that matches parsed, since text the parser rejects
+	// matches [ErrSyntax] instead. A server thus answers text that is not
+	// YAML and YAML that does not fit the target with a status for each:
+	//
+	//	config, err := source.Decode[Config](ctx)
+	//
+	//	switch {
+	//	case errors.Is(err, niceyaml.ErrSyntax):
+	//		http.Error(w, err.Error(), http.StatusBadRequest)
+	//	case errors.Is(err, niceyaml.ErrDecode):
+	//		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+	//	}
+	//
+	// [Node.DecodeInto] describes where each error binds.
+	ErrDecode = errors.New("value does not decode")
 
 	// ErrExcessiveAliasing indicates a node whose document holds so many
 	// nested aliases that a decode would read far more than the document
@@ -112,7 +96,7 @@ var (
 	// document go past the limit gopkg.in/yaml.v3 applies, unless
 	// [WithAliasLimit] turns the check off. The error comes back bound
 	// as a [SourceError] at the first token of the node that is not a
-	// comment, and it does not match [ErrDecodeRejected]. [Node.Nodes]
+	// comment, and it does not match [ErrDecode]. [Node.Nodes]
 	// returns it too, bound to its receiver, when aliases lead a selector
 	// of the path to far more nodes than the document holds. The paths
 	// and schema packages export the same error value.

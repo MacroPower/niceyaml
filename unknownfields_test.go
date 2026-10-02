@@ -448,7 +448,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				// The message lists each field under the summary, as the
 				// tree does.
 				require.EqualError(t, err, fmt.Sprintf("%d unknown fields\n%s", rows, tc.want))
-				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 				var srcErr *niceyaml.SourceError
 
@@ -466,7 +466,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				require.Len(t, fields, rows)
 
 				for _, field := range fields {
-					require.ErrorIs(t, field, niceyaml.ErrDecodeRejected)
+					require.ErrorIs(t, field, niceyaml.ErrDecode)
 					require.NoError(t, field.Unresolved())
 
 					path, ok := field.Path()
@@ -562,7 +562,7 @@ func TestDocument_Decode_UnknownFields_KeyKinds(t *testing.T) {
 			var w keyKinds
 
 			err = both.DecodeInto(t.Context(), &w, strict)
-			require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 			rows := rejectionRows(err)
 			assert.Contains(t, rows, `$.a.zzz~: unknown field "zzz"`)
@@ -623,7 +623,7 @@ func TestDocument_Decode_UnknownFields_IgnoredMerges(t *testing.T) {
 			// With a key of its own that no field reads, the report
 			// lists that key and still none the merge brings in.
 			err = decode(tc.merge+"  yyy: 2\n", &aliased{})
-			require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 			rows := rejectionRows(err)
 			assert.Contains(t, rows, `$.v.yyy~: unknown field "yyy"`)
@@ -634,7 +634,7 @@ func TestDocument_Decode_UnknownFields_IgnoredMerges(t *testing.T) {
 			// the field. It rejects a sequence of sources another way,
 			// and the report then lists no unknown field.
 			err = decode(tc.merge+"  yyy: 2\n", &merged{})
-			require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 			rows = rejectionRows(err)
 			if strings.Contains(tc.merge, "<<: [") {
@@ -665,7 +665,7 @@ func TestDocument_Decode_UnknownFields_Source(t *testing.T) {
 		`cfg.yaml:1:1: $.foo~: unknown field "foo"`,
 		`cfg.yaml:3:1: $.bar~: unknown field "bar"`,
 	))
-	require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+	require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 	assert.Equal(t, stringtest.JoinLF(
 		"cfg.yaml: 2 unknown fields",

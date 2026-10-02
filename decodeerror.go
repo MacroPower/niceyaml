@@ -245,10 +245,9 @@ func (n *Node) rejectionLocation(tk *token.Token) []ErrorOption {
 //
 // The result holds err under that path, as [Rebase] returns it, so the
 // [SourceError] that binds the result reports the path and marks the
-// value. The error of a [time.Duration] also matches
-// [ErrDecodeRejected], since the decoder rejected the value. The error
-// of any other value is the value's own, so it matches what it matched
-// before.
+// value. The result matches [ErrDecode], and err stays in its chain, so
+// the error of a value's own unmarshaler matches what it matched before
+// too.
 //
 // The path of a value under the node the decode reads is never the root,
 // with one exception. When node holds a scalar and the type of v
@@ -286,32 +285,26 @@ func (n *Node) locateDecodeError(
 
 	t := pointerBase(reflect.TypeOf(v).Elem())
 
+	// With no value below node, found is the place of node itself.
 	found, ok := l.below(t, node, place{})
-	if !ok {
-		if !reportsOwnError(t) || !isScalar(l.content(node)) {
-			return err
-		}
-
-		found = located{typ: t}
+	if !ok && (!reportsOwnError(t) || !isScalar(l.content(node))) {
+		return err
 	}
 
-	cause := n.doc.decodeTree().restoreError(err)
-	if found.typ == durationType {
-		cause = rejectedDurationError{err: cause}
-	}
+	cause := asDecodeError(n.doc.decodeTree().restoreError(err))
 
-	return Rebase(cause, found.at.path())
+	return Rebase(cause, found.path())
 }
 
 // lacksLocation reports whether err names no place in the source, so the
-// decode has to find one. It reports false for an err that already
-// matches [ErrDecodeRejected], which [Node.rejection] located, for the
-// error of a context that ended, and for a [yaml.Error] at a token of
+// decode has to find one. It reports false for an err that matches
+// [errPlaced], which [Node.rejection] or [decodeWithRecover] placed, for
+// the error of a context that ended, and for a [yaml.Error] at a token of
 // the source. It also reports false when an error in the tree of err is
 // a [*SourceError] or an [*Error] with a location, since those say where
 // they point.
 func (n *Node) lacksLocation(err error) bool {
-	if errors.Is(err, ErrDecodeRejected) ||
+	if errors.Is(err, errPlaced) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
@@ -348,26 +341,6 @@ func holdsLocation(err error) bool {
 	default:
 		return false
 	}
-}
-
-// rejectedDurationError is the error of [time.ParseDuration] that the
-// go-yaml decoder returned for a [time.Duration], which matches
-// [ErrDecodeRejected]. It unwraps to the error the decoder returned.
-type rejectedDurationError struct {
-	err error
-}
-
-func (e rejectedDurationError) Error() string {
-	return e.err.Error()
-}
-
-func (e rejectedDurationError) Unwrap() error {
-	return e.err
-}
-
-// Is reports whether target is [ErrDecodeRejected].
-func (e rejectedDurationError) Is(target error) bool {
-	return target == ErrDecodeRejected
 }
 
 // reportsOwnError reports whether the decoder can return an error for a
@@ -454,13 +427,6 @@ type errorLocator struct {
 	msg string
 }
 
-// located is the value an [errorLocator] found: its place under the node
-// the decode read, and its type with no pointer on it.
-type located struct {
-	typ reflect.Type
-	at  place
-}
-
 // inlineVisit names an inline field the walk is inside of, by the type
 // of the field and the mapping it reads. The fields together form the
 // key of the set the [errorLocator] keeps.
@@ -475,7 +441,7 @@ type inlineVisit struct {
 // at, that reproduces the error. When t is a type [reportsOwnError]
 // names, a decode of node into t has to reproduce it, and the value
 // itself is the result unless a value below it reproduces the error too.
-func (l *errorLocator) find(t reflect.Type, node ast.Node, at place) (located, bool) {
+func (l *errorLocator) find(t reflect.Type, node ast.Node, at place) (place, bool) {
 	t = pointerBase(t)
 
 	if !reportsOwnError(t) {
@@ -483,19 +449,19 @@ func (l *errorLocator) find(t reflect.Type, node ast.Node, at place) (located, b
 	}
 
 	if !l.reproduces(node, reflect.New(t).Interface()) {
-		return located{}, false
+		return place{}, false
 	}
 
 	if found, ok := l.below(t, node, at); ok {
 		return found, true
 	}
 
-	return located{typ: t, at: at}, true
+	return at, true
 }
 
 // below returns the first value below node, read as type t at the place
 // at, that reproduces the error.
-func (l *errorLocator) below(t reflect.Type, node ast.Node, at place) (located, bool) {
+func (l *errorLocator) below(t reflect.Type, node ast.Node, at place) (place, bool) {
 	switch t.Kind() {
 	case reflect.Struct:
 		return l.fields(t, node, at)
@@ -506,23 +472,23 @@ func (l *errorLocator) below(t reflect.Type, node ast.Node, at place) (located, 
 	case reflect.Map:
 		mapping, ok := l.content(node).(*ast.MappingNode)
 		if !ok {
-			return located{}, false
+			return place{}, false
 		}
 
 		return l.entries(t, node, mapping, at, map[*ast.MappingNode]bool{})
 
 	default:
-		return located{}, false
+		return place{}, false
 	}
 }
 
 // fields returns the first field of t, a struct type, that reproduces
 // the error when it reads the mapping at node. An inline field reads
 // that mapping itself, at the place of the struct.
-func (l *errorLocator) fields(t reflect.Type, node ast.Node, at place) (located, bool) {
+func (l *errorLocator) fields(t reflect.Type, node ast.Node, at place) (place, bool) {
 	mapping, ok := l.content(node).(*ast.MappingNode)
 	if !ok {
-		return located{}, false
+		return place{}, false
 	}
 
 	for field := range t.Fields() {
@@ -563,15 +529,15 @@ func (l *errorLocator) fields(t reflect.Type, node ast.Node, at place) (located,
 		}
 	}
 
-	return located{}, false
+	return place{}, false
 }
 
 // elements returns the first element of t, a slice or array type, that
 // reproduces the error when it reads the sequence at node.
-func (l *errorLocator) elements(t reflect.Type, node ast.Node, at place) (located, bool) {
+func (l *errorLocator) elements(t reflect.Type, node ast.Node, at place) (place, bool) {
 	seq, ok := l.content(node).(*ast.SequenceNode)
 	if !ok {
-		return located{}, false
+		return place{}, false
 	}
 
 	for i, element := range seq.Values {
@@ -585,7 +551,7 @@ func (l *errorLocator) elements(t reflect.Type, node ast.Node, at place) (locate
 		}
 	}
 
-	return located{}, false
+	return place{}, false
 }
 
 // entries returns the first key or value of t, a map type, that
@@ -603,9 +569,9 @@ func (l *errorLocator) entries(
 	mapping *ast.MappingNode,
 	at place,
 	seen map[*ast.MappingNode]bool,
-) (located, bool) {
+) (place, bool) {
 	if seen[mapping] {
-		return located{}, false
+		return place{}, false
 	}
 
 	seen[mapping] = true
@@ -652,7 +618,7 @@ func (l *errorLocator) entries(
 
 		key := pointerBase(t.Key())
 		if reportsOwnError(key) && l.reproduces(entry.Key, reflect.New(key).Interface()) {
-			return located{typ: key, at: child.key()}, true
+			return child.key(), true
 		}
 
 		value, ok := l.value(entry)
@@ -665,7 +631,7 @@ func (l *errorLocator) entries(
 		}
 	}
 
-	return located{}, false
+	return place{}, false
 }
 
 // value returns the node the decoder reads the value of entry from, an
