@@ -393,8 +393,11 @@ func matchStruct(
 
 		// The decoder hands the probe an alias under a tag or an anchor,
 		// so the probe is not nil when that alias reads as a null. The
-		// case below tells such a null by the node at its path, and it
-		// finds no node for an alias that no path resolves.
+		// default case tells such a null under a tag by the node at its
+		// path. This case covers an alias that no path resolves, where
+		// the default case finds no node. A null read through an alias
+		// under an anchor that a path resolves compares as go-yaml
+		// decodes it.
 		case value == nil && probe.readsUnresolved(node, name):
 			match = wantsNil(want.Field(i))
 		default:
