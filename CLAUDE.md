@@ -69,6 +69,7 @@ than achieving perfect compliance with the above. As an example, do not say
 - For inputs, use clear contextual names (e.g., `before`/`after` for diffs, `line`/`col` for positions).
 - Always use `t.Parallel()` in all tests.
 - Create test packages (`package foo_test`) testing public API.
+- Never test unexported code, whether through an in-package test file or an `export_test.go` hook. Cover it through the public API, and leave a branch no public call reaches untested. Only `package main` tests sit in their own package.
 - Name each test file after the source file it tests, so the tests for `foo.go` go in `foo_test.go`.
 - A test file name takes one qualifier at most: `foo_bench_test.go` for benchmarks, or a build-constraint suffix such as `foo_unix_test.go`.
 - Never name a test file for a topic, as in `helpers_test.go`. Put a shared helper in the test file of the source it exercises.

@@ -3136,50 +3136,6 @@ func TestCollect(t *testing.T) {
 	})
 }
 
-// TestValidateLines_EmptyLines checks which lines with no tokens
-// [yamltest.ValidateLines] accepts. Only package line can build one with a
-// number, so the test lives here.
-func TestValidateLines_EmptyLines(t *testing.T) {
-	t.Parallel()
-
-	// Lines numbered 1 to 3. The cases put a line with no tokens where
-	// the blank line 2 stands.
-	ls := line.NewLines(tokens.Tokenize("a: 1\n\nb: 2\n"))
-	require.Equal(t, 3, ls.Len())
-
-	tcs := map[string]struct {
-		lines []*line.Line
-		err   error
-	}{
-		"numberless placeholder": {
-			lines: []*line.Line{ls.Line(0), {}, ls.Line(2)},
-		},
-		"numbered empty line": {
-			lines: []*line.Line{line.NewNumberedEmptyLine(3)},
-			err:   yamltest.ErrEmptyLineNumbered,
-		},
-		"numbered empty line in sequence": {
-			lines: []*line.Line{ls.Line(0), line.NewNumberedEmptyLine(2), ls.Line(2)},
-			err:   yamltest.ErrEmptyLineNumbered,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			err := yamltest.ValidateLines(line.Collect(tc.lines...))
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-
-				return
-			}
-
-			require.NoError(t, err)
-		})
-	}
-}
-
 func TestLines_Line(t *testing.T) {
 	t.Parallel()
 

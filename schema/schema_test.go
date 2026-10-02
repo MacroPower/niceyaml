@@ -7,14 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/goccy/go-yaml"
-	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/jsonschema"
@@ -691,174 +687,6 @@ func TestSchema_PathTarget(t *testing.T) {
 	}
 }
 
-func TestSourcePath_TypedNilNode(t *testing.T) {
-	t.Parallel()
-
-	// The parser always puts a node where these trees hold a typed nil,
-	// but a tree built or rewritten by hand may not, and the walk keeps
-	// the decoded name for it rather than panicking. An alias that does
-	// not resolve, or one that leads back to itself, keeps the decoded
-	// name as well.
-	name := &ast.StringNode{Token: &token.Token{Value: "a"}, Value: "a"}
-	hexKey := &ast.IntegerNode{Token: &token.Token{Value: "0x10"}, Value: uint64(16)}
-
-	tcs := map[string]struct {
-		root     ast.Node
-		segments []jsonschema.Segment
-		want     string
-	}{
-		"mapping behind an anchor": {
-			root:     &ast.AnchorNode{Value: (*ast.MappingNode)(nil)},
-			segments: []jsonschema.Segment{{Key: "name"}},
-			want:     "$.name",
-		},
-		"mapping value behind an anchor": {
-			root:     &ast.AnchorNode{Value: (*ast.MappingValueNode)(nil)},
-			segments: []jsonschema.Segment{{Key: "name"}},
-			want:     "$.name",
-		},
-		"sequence behind an anchor": {
-			root:     &ast.AnchorNode{Value: (*ast.SequenceNode)(nil)},
-			segments: []jsonschema.Segment{{Index: 0, IsIndex: true}},
-			want:     "$[0]",
-		},
-		"tag behind an anchor": {
-			root:     &ast.AnchorNode{Value: (*ast.TagNode)(nil)},
-			segments: []jsonschema.Segment{{Key: "name"}},
-			want:     "$.name",
-		},
-		"anchor behind an anchor": {
-			root:     &ast.AnchorNode{Value: (*ast.AnchorNode)(nil)},
-			segments: []jsonschema.Segment{{Key: "name"}},
-			want:     "$.name",
-		},
-		"document behind an anchor": {
-			root:     &ast.AnchorNode{Value: (*ast.DocumentNode)(nil)},
-			segments: []jsonschema.Segment{{Key: "name"}},
-			want:     "$.name",
-		},
-		"mapping key behind an anchor": {
-			root:     &ast.AnchorNode{Value: (*ast.MappingKeyNode)(nil)},
-			segments: []jsonschema.Segment{{Key: "name"}},
-			want:     "$.name",
-		},
-		"alias behind an anchor": {
-			root:     &ast.AnchorNode{Value: (*ast.AliasNode)(nil)},
-			segments: []jsonschema.Segment{{Key: "name"}},
-			want:     "$.name",
-		},
-		"alias with no target keeps the decoded name": {
-			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
-				Key:   &ast.StringNode{Value: "a"},
-				Value: &ast.AliasNode{Value: &ast.StringNode{Value: "b"}},
-			}}},
-			segments: []jsonschema.Segment{{Key: "a"}, {Key: "16"}},
-			want:     "$.a.16",
-		},
-		"alias that leads back to itself": {
-			// The anchor holds the alias, so the alias refers to itself.
-			root:     &ast.AnchorNode{Name: name, Value: &ast.AliasNode{Value: name}},
-			segments: []jsonschema.Segment{{Key: "name"}},
-			want:     "$.name",
-		},
-		"alias that leads back to itself through a tag": {
-			root: &ast.AnchorNode{
-				Name:  name,
-				Value: &ast.TagNode{Value: &ast.AliasNode{Value: name}},
-			},
-			segments: []jsonschema.Segment{{Key: "name"}},
-			want:     "$.name",
-		},
-		"key with no token keeps the decoded name": {
-			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
-				Key:   &ast.IntegerNode{Value: 16},
-				Value: &ast.StringNode{Value: "x"},
-			}}},
-			segments: []jsonschema.Segment{{Key: "16"}},
-			want:     "$.16",
-		},
-		"key with empty token text spells the empty key": {
-			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
-				Key:   &ast.IntegerNode{Token: &token.Token{Value: ""}, Value: uint64(16)},
-				Value: &ast.StringNode{Value: "x"},
-			}}},
-			segments: []jsonschema.Segment{{Key: "16"}},
-			want:     "$.''",
-		},
-		"nil member": {
-			root:     &ast.MappingNode{Values: []*ast.MappingValueNode{nil}},
-			segments: []jsonschema.Segment{{Key: "a"}},
-			want:     "$.a",
-		},
-		"nil member beside a merge key": {
-			root: &ast.MappingNode{Values: []*ast.MappingValueNode{
-				nil,
-				{
-					Key: &ast.MergeKeyNode{},
-					Value: &ast.MappingNode{Values: []*ast.MappingValueNode{{
-						Key:   hexKey,
-						Value: &ast.StringNode{Value: "x"},
-					}}},
-				},
-			}},
-			segments: []jsonschema.Segment{{Key: "16"}},
-			want:     "$.0x10",
-		},
-		"merge key whose alias does not resolve": {
-			// The merge may set a member of any name, so the key 0x10
-			// before it cannot name the member 16.
-			root: &ast.MappingNode{Values: []*ast.MappingValueNode{
-				{Key: hexKey, Value: &ast.StringNode{Value: "x"}},
-				{
-					Key:   &ast.MergeKeyNode{},
-					Value: &ast.AliasNode{Value: &ast.StringNode{Value: "nope"}},
-				},
-			}},
-			segments: []jsonschema.Segment{{Key: "16"}},
-			want:     "$.16",
-		},
-		"typed-nil string key": {
-			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
-				Key:   (*ast.StringNode)(nil),
-				Value: &ast.StringNode{Value: "x"},
-			}}},
-			segments: []jsonschema.Segment{{Key: "a"}},
-			want:     "$.a",
-		},
-		"typed-nil integer key": {
-			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
-				Key:   (*ast.IntegerNode)(nil),
-				Value: &ast.StringNode{Value: "x"},
-			}}},
-			segments: []jsonschema.Segment{{Key: "a"}},
-			want:     "$.a",
-		},
-		"typed-nil key behind a tag": {
-			root: &ast.MappingNode{Values: []*ast.MappingValueNode{{
-				Key:   &ast.TagNode{Value: (*ast.StringNode)(nil)},
-				Value: &ast.StringNode{Value: "x"},
-			}}},
-			segments: []jsonschema.Segment{{Key: "a"}},
-			want:     "$.a",
-		},
-		"no tree": {
-			root:     nil,
-			segments: []jsonschema.Segment{{Key: "items"}, {Index: 1, IsIndex: true}, {Key: "16"}},
-			want:     "$.items[1].16",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			r := paths.NewResolver(&ast.DocumentNode{Body: tc.root})
-
-			assert.Equal(t, tc.want, schema.SourcePath(tc.root, r, tc.segments).String())
-		})
-	}
-}
-
 func TestSchema_NonFiniteFloats(t *testing.T) {
 	t.Parallel()
 
@@ -1305,151 +1133,24 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 	}
 }
 
-func TestNormalizeJSON(t *testing.T) {
-	t.Parallel()
-
-	// NormalizeJSON copies a map or slice only when a !!binary, a
-	// !!timestamp, or an ordered mapping sits somewhere under it, and it
-	// never writes into the caller's data. Each input builds a fresh value,
-	// so a second call yields the original to compare against.
-	stamp := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
-
-	tcs := map[string]struct {
-		input func() any
-		want  any
-	}{
-		"plain nested containers": {
-			input: func() any {
-				return map[string]any{
-					"list": []any{1, "x"},
-					"map":  map[string]any{"ok": true},
-				}
-			},
-			want: map[string]any{
-				"list": []any{1, "x"},
-				"map":  map[string]any{"ok": true},
-			},
-		},
-		"binary two levels deep beside a plain map": {
-			input: func() any {
-				return map[string]any{
-					"outer":   map[string]any{"b": []byte("hi")},
-					"sibling": map[string]any{"k": "v"},
-				}
-			},
-			want: map[string]any{
-				"outer":   map[string]any{"b": "aGk="},
-				"sibling": map[string]any{"k": "v"},
-			},
-		},
-		"timestamp in a slice beside a plain map": {
-			input: func() any {
-				return []any{stamp, map[string]any{"k": "v"}}
-			},
-			want: []any{"2024-01-02T03:04:05Z", map[string]any{"k": "v"}},
-		},
-		"ordered mapping beside a plain map": {
-			// Each key reads as a decode into a map names it, and the later
-			// of two items with the same key wins.
-			input: func() any {
-				return map[string]any{
-					"ordered": yaml.MapSlice{
-						{Key: "a", Value: 1},
-						{Key: nil, Value: []byte("hi")},
-						{Key: 16, Value: yaml.MapSlice{{Key: "k", Value: "v"}}},
-						{Key: "a", Value: 2},
-					},
-					"sibling": map[string]any{"k": "v"},
-				}
-			},
-			want: map[string]any{
-				"ordered": map[string]any{
-					"a":    2,
-					"null": "aGk=",
-					"16":   map[string]any{"k": "v"},
-				},
-				"sibling": map[string]any{"k": "v"},
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			input := tc.input()
-			got := schema.NormalizeJSON(input, nil)
-			require.Equal(t, tc.want, got)
-			assert.Equal(t, tc.input(), input)
-			assertCopiedOnChange(t, input, got)
-		})
-	}
-}
-
-func TestNormalizeJSON_TypedNilNode(t *testing.T) {
-	t.Parallel()
-
-	// The lookup of the scalar a timestamp came from reads a tree built by
-	// hand that holds a nil member or a typed-nil key without panicking.
-	// A nil member sets nothing. A typed-nil key has no name, so it may
-	// set a member of any name, and a timestamp under a member before it
-	// becomes a date-time.
-	date := &ast.TagNode{Value: &ast.StringNode{Value: "2001-12-14"}}
-	stamp := time.Date(2001, 12, 14, 0, 0, 0, 0, time.UTC)
-
-	tcs := map[string]struct {
-		root *ast.MappingNode
-		want string
-	}{
-		"nil member": {
-			root: &ast.MappingNode{Values: []*ast.MappingValueNode{
-				{Key: &ast.StringNode{Value: "a"}, Value: date},
-				nil,
-			}},
-			want: "2001-12-14",
-		},
-		"typed-nil key": {
-			root: &ast.MappingNode{Values: []*ast.MappingValueNode{
-				{Key: &ast.StringNode{Value: "a"}, Value: date},
-				{Key: (*ast.StringNode)(nil), Value: date},
-			}},
-			want: "2001-12-14T00:00:00Z",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := schema.NormalizeJSON(map[string]any{"a": stamp}, tc.root)
-			assert.Equal(t, map[string]any{"a": tc.want}, got)
-		})
-	}
-}
-
-func TestNormalizeJSON_OrderedMapDates(t *testing.T) {
+func TestSchema_Validate_OrderedMapDates(t *testing.T) {
 	t.Parallel()
 
 	// A decode with yaml.UseOrderedMap names each member by the key of its
 	// yaml.MapItem, and the lookup of the scalar a timestamp came from
 	// names each key node the same way, so a date-only timestamp under a
 	// key the decoder respells keeps its full-date spelling.
+	v, err := schema.Compile(t.Context(),
+		[]byte(`{"additionalProperties": {"type": "string", "format": "date"}}`),
+		schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)))
+	require.NoError(t, err)
+
 	tcs := map[string]struct {
 		input string
-		want  any
 	}{
-		"hexadecimal key": {
-			input: "0x10: !!timestamp 2001-12-14\n",
-			want:  map[string]any{"16": "2001-12-14"},
-		},
-		"null key": {
-			input: "~: !!timestamp 2001-12-14\n",
-			want:  map[string]any{"null": "2001-12-14"},
-		},
-		"bool-tagged key": {
-			input: "!!bool yes: !!timestamp 2001-12-14\n",
-			want:  map[string]any{"true": "2001-12-14"},
-		},
+		"hexadecimal key": {input: "0x10: !!timestamp 2001-12-14\n"},
+		"null key":        {input: "~: !!timestamp 2001-12-14\n"},
+		"bool-tagged key": {input: "!!bool yes: !!timestamp 2001-12-14\n"},
 	}
 
 	for name, tc := range tcs {
@@ -1458,52 +1159,13 @@ func TestNormalizeJSON_OrderedMapDates(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input)
 
-			data, err := doc.Decode[any](t.Context(), niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()))
+			_, err := doc.Decode[any](t.Context(),
+				niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()),
+				niceyaml.WithValidator(v),
+			)
 			require.NoError(t, err)
-
-			assert.Equal(t, tc.want, schema.NormalizeJSON(data, doc.AST()))
 		})
 	}
-}
-
-// assertCopiedOnChange asserts that each map and slice in input comes
-// back at the same place in got as the same container when nothing under
-// it holds a []byte, time.Time, or yaml.MapSlice, and as a different one
-// otherwise. It reports whether input holds any of these types.
-func assertCopiedOnChange(t *testing.T, input, got any) bool {
-	t.Helper()
-
-	changed := false
-
-	switch v := input.(type) {
-	case []byte, time.Time, yaml.MapSlice:
-		return true
-
-	case map[string]any:
-		out, ok := got.(map[string]any)
-		require.True(t, ok, "got %T for a map", got)
-
-		for key, elem := range v {
-			changed = assertCopiedOnChange(t, elem, out[key]) || changed
-		}
-
-	case []any:
-		out, ok := got.([]any)
-		require.True(t, ok, "got %T for a slice", got)
-		require.Len(t, out, len(v))
-
-		for i, elem := range v {
-			changed = assertCopiedOnChange(t, elem, out[i]) || changed
-		}
-
-	default:
-		return false
-	}
-
-	same := reflect.ValueOf(input).Pointer() == reflect.ValueOf(got).Pointer()
-	assert.Equal(t, !changed, same, "whether %v comes back as the same container", input)
-
-	return changed
 }
 
 func TestSchema_AliasExpansion(t *testing.T) {
@@ -2799,6 +2461,64 @@ func TestSchema_SourcePath(t *testing.T) {
 			}
 
 			require.NoError(t, err, "path from the error does not resolve")
+		})
+	}
+}
+
+func TestSchema_SourcePath_ReferenceAlias(t *testing.T) {
+	t.Parallel()
+
+	// An alias to an anchor of a reference document resolves in the decode
+	// and not in the document, so the walk cannot follow it. The path keeps
+	// the decoded name of a member below the alias. A merge key that names
+	// such an alias may set a member of any name, so the key 0x10 before
+	// it cannot name the member 16 either.
+	refs := niceyaml.WithReferences([]byte("base: &base {0x10: x}\nother: &other {k: 1}\n"))
+
+	tcs := map[string]struct {
+		schema string
+		input  string
+		want   string
+	}{
+		"member below the alias": {
+			schema: `{
+				"type": "object",
+				"properties": {
+					"a": {"additionalProperties": {"type": "integer"}}
+				}
+			}`,
+			input: "a: *base\n",
+			want:  "$.a.16",
+		},
+		"member beside a merge of the alias": {
+			schema: `{
+				"type": "object",
+				"additionalProperties": {"type": "integer"}
+			}`,
+			input: "0x10: x\n<<: *other\n",
+			want:  "$.16",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			v := compileSchema(t, []byte(tc.schema))
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			_, err := doc.Decode[any](t.Context(), refs, niceyaml.WithValidator(v))
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			gotPath, ok := bound.Path()
+			require.True(t, ok, "bound error carries no path")
+			assert.Equal(t, tc.want, gotPath.String())
+
+			_, err = doc.At(gotPath)
+			require.Error(t, err, "path from the error resolves")
 		})
 	}
 }

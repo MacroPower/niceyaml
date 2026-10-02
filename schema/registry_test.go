@@ -1814,30 +1814,31 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 func TestRegistry_WithHTTPClient(t *testing.T) {
 	t.Parallel()
 
-	t.Run("the default client has a timeout", func(t *testing.T) {
-		t.Parallel()
-
-		reg := schema.NewRegistry()
-
-		client := schema.HTTPClient(reg)
-		require.NotNil(t, client)
-		assert.Positive(t, client.Timeout)
-		assert.NotSame(t, http.DefaultClient, client)
-	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		//nolint:errcheck // Test helper.
+		w.Write([]byte(`{"type": "object"}`))
+	}))
+	t.Cleanup(server.Close)
 
 	t.Run("a nil client keeps the default", func(t *testing.T) {
 		t.Parallel()
 
-		reg := schema.NewRegistry(schema.WithHTTPClient(nil))
-		assert.Same(t, schema.HTTPClient(schema.NewRegistry()), schema.HTTPClient(reg))
+		reg := schema.NewRegistry(
+			schema.WithHTTPClient(nil),
+			schema.WithResolvers(schema.URL(server.URL+"/schema.json")),
+		)
+
+		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 1\n")))
 	})
 
 	t.Run("a client replaces the default", func(t *testing.T) {
 		t.Parallel()
 
-		client := &http.Client{}
-		reg := schema.NewRegistry(schema.WithHTTPClient(client))
-		assert.Same(t, client, schema.HTTPClient(reg))
+		var requests atomic.Int32
+
+		err := lookup(t, countingClient(&requests), schema.URL(server.URL+"/schema.json"))
+		require.NoError(t, err)
+		assert.Equal(t, int32(1), requests.Load())
 	})
 }
 
@@ -2680,6 +2681,17 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			want:     `missing required property "name"`,
 			requests: 1,
 		},
+		"url pointer with escapes in the query": {
+			// The registry decodes the unreserved %7e and spells the
+			// reserved %2f in upper-case hex, as the compiler does.
+			ref: func(_ *testing.T) schema.Ref {
+				return schema.URL(baseURL + "/defs.json?v=%7e1&q=%2f#/$defs/Foo")
+			},
+			valid:    "name: x\n",
+			invalid:  "other: 1\n",
+			want:     `missing required property "name"`,
+			requests: 1,
+		},
 		"url anchor": {
 			ref: func(_ *testing.T) schema.Ref {
 				return schema.URL(baseURL + "/defs.json#named")
@@ -2786,64 +2798,6 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		_, err := reg.Schema(t.Context(), schema.URL(baseURL+"/defs.json#/$defs/Missing"))
 		require.ErrorIs(t, err, schema.ErrCompile)
 	})
-}
-
-func TestCanonicalURL(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		url  string
-		want string
-	}{
-		"canonical url": {
-			url:  "https://example.com/defs.json",
-			want: "https://example.com/defs.json",
-		},
-		"fragment": {
-			url:  "https://example.com/defs.json#/$defs/Foo",
-			want: "https://example.com/defs.json",
-		},
-		"upper-case scheme and host": {
-			url:  "HTTPS://Example.COM/Defs.json",
-			want: "https://example.com/Defs.json",
-		},
-		"escaped unreserved characters": {
-			url:  "https://example.com/%64efs%2Ejson?v=%7E1",
-			want: "https://example.com/defs.json?v=~1",
-		},
-		"escaped reserved characters keep upper-case hex": {
-			url:  "https://example.com/a%2fb%3a.json?q=%2f",
-			want: "https://example.com/a%2Fb%3A.json?q=%2F",
-		},
-		"dot segments": {
-			url:  "https://example.com/a/./b/../defs.json",
-			want: "https://example.com/a/defs.json",
-		},
-		"trailing slash": {
-			url:  "https://example.com/a/",
-			want: "https://example.com/a/",
-		},
-		"port": {
-			url:  "http://Example.com:8080/defs.json",
-			want: "http://example.com:8080/defs.json",
-		},
-		"file url": {
-			url:  "file:///srv/My%20Schemas/defs.json#/$defs/Foo",
-			want: "file:///srv/My%20Schemas/defs.json",
-		},
-		"url that does not parse": {
-			url:  "https://example.com:port/defs.json#x",
-			want: "https://example.com:port/defs.json",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, schema.CanonicalURL(tc.url))
-		})
-	}
 }
 
 func TestRegistry_FragmentRefsDraft07(t *testing.T) {

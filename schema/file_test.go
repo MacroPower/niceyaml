@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
-	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -186,71 +185,23 @@ func TestFile_RelativePath(t *testing.T) {
 	}
 }
 
-func TestReadFile_ReadsTheAbsolutePath(t *testing.T) {
-	t.Parallel()
-
-	// A read from the working directory uses the path File made absolute
-	// to build the key, not the relative path made absolute again at read
-	// time. The bytes under a key then stay the same whatever the working
-	// directory is at the time of the read.
+// A read from the working directory uses the path File made absolute to
+// build the key, so the bytes under a key stay the same whatever the
+// working directory is at the time of the read. The test changes the
+// process's working directory, so it does not run in parallel.
+//
+//nolint:paralleltest // See above.
+func TestFile_ReadsAfterChdir(t *testing.T) {
 	dir := t.TempDir()
-	abs := filepath.Join(dir, "s.json")
-	require.NoError(t, os.WriteFile(abs, []byte(`{"type": "object"}`), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "s.json"), []byte(`{"type": "object"}`), 0o600))
 
-	data, err := schema.ReadFile(nil, "elsewhere/s.json", abs, "")
+	t.Chdir(dir)
+
+	ref := schema.File("s.json")
+
+	t.Chdir(t.TempDir())
+
+	_, data, err := load(t, ref)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"type": "object"}`, string(data))
-}
-
-func TestReadFile_FSReadsAgainstTheRecordedDirectory(t *testing.T) {
-	t.Parallel()
-
-	// The root of the file system stands for the working directory File
-	// recorded, not the one at the time of the read. A $ref that resolves
-	// to an absolute path under the recorded directory keeps reading after
-	// the program changes directory.
-	base := filepath.Join(t.TempDir(), "recorded")
-
-	cwd, err := os.Getwd()
-	require.NoError(t, err)
-
-	fsys := fstest.MapFS{
-		"schemas/defs.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
-	}
-
-	tests := map[string]struct {
-		err  error
-		name string
-		wd   string
-	}{
-		"under the recorded directory": {
-			name: filepath.Join(base, "schemas", "defs.json"),
-			wd:   base,
-		},
-		"outside the recorded directory": {
-			name: filepath.Join(filepath.Dir(base), "schemas", "defs.json"),
-			wd:   base,
-			err:  fs.ErrInvalid,
-		},
-		"no recorded directory": {
-			name: filepath.Join(cwd, "schemas", "defs.json"),
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			data, err := schema.ReadFile(fsys, tt.name, tt.name, tt.wd)
-			if tt.err != nil {
-				require.ErrorIs(t, err, tt.err)
-				assert.Nil(t, data)
-
-				return
-			}
-
-			require.NoError(t, err)
-			assert.JSONEq(t, `{"type": "string"}`, string(data))
-		})
-	}
 }

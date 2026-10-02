@@ -355,24 +355,26 @@ func TestFileOrURL(t *testing.T) {
 	})
 }
 
-func TestHasDriveLetter(t *testing.T) {
+func TestFileOrURL_DriveLetter(t *testing.T) {
 	t.Parallel()
 
+	// A path that starts with a drive letter is absolute wherever a
+	// program reads it, so it never joins baseDir and names the schema
+	// File names for it. A colon anywhere else is part of a file name,
+	// and the path joins baseDir like any other relative one.
+	baseDir := t.TempDir()
+
 	tcs := map[string]struct {
-		path string
-		want bool
+		path  string
+		drive bool
 	}{
-		"upper-case drive":        {path: "C:/schemas/config.json", want: true},
-		"lower-case drive":        {path: "c:/schemas/config.json", want: true},
-		"drive alone":             {path: "C:", want: true},
-		"backslash separator":     {path: `C:\schemas\config.json`, want: true},
+		"upper-case drive":        {path: "C:/schemas/config.json", drive: true},
+		"lower-case drive":        {path: "c:/schemas/config.json", drive: true},
+		"drive alone":             {path: "C:", drive: true},
+		"backslash separator":     {path: `C:\schemas\config.json`, drive: true},
 		"colon without separator": {path: "a:b.json"},
 		"digit before the colon":  {path: "1:/schemas/config.json"},
 		"longer first segment":    {path: "ab:/schemas/config.json"},
-		"leading slash":           {path: "/C:/schemas/config.json"},
-		"posix path":              {path: "/srv/schemas/config.json"},
-		"relative path":           {path: "schemas/config.json"},
-		"empty path":              {path: ""},
 		"single letter":           {path: "C"},
 	}
 
@@ -380,18 +382,23 @@ func TestHasDriveLetter(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, schema.HasDriveLetter(tc.path))
+			want := fileURL(t, filepath.Join(baseDir, tc.path))
+			if tc.drive {
+				want = fileURL(t, tc.path)
+			}
+
+			assert.Equal(t, want, fileOrURL(t, baseDir, tc.path).Key())
 		})
 	}
 }
 
-func TestFileURLPath(t *testing.T) {
+func TestFileOrURL_FileURL(t *testing.T) {
 	t.Parallel()
 
-	// The result is in the platform's native separator, so a Windows-shaped
-	// URL yields C:/schemas/config.json here and C:\schemas\config.json on
-	// Windows. Either way the drive letter comes first, so filepath.IsAbs
-	// reports the path absolute on Windows.
+	// A file URL names the schema File names for the local path the URL
+	// holds. A Windows-shaped URL holds C:/schemas/config.json, with the
+	// drive letter first, so filepath.IsAbs reports the path absolute on
+	// Windows.
 	//
 	// Off Windows, a colon escaped as %3A names a directory at the root,
 	// which keeps its leading slash. Windows has no such directory, so
@@ -402,77 +409,56 @@ func TestFileURLPath(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		ref    string
-		want   string
-		wantOK bool
+		ref  string
+		path string
 	}{
 		"unix path": {
-			ref:    "file:///srv/schemas/config.json",
-			want:   filepath.FromSlash("/srv/schemas/config.json"),
-			wantOK: true,
+			ref:  "file:///srv/schemas/config.json",
+			path: "/srv/schemas/config.json",
 		},
 		"windows drive letter": {
-			ref:    "file:///C:/schemas/config.json",
-			want:   filepath.FromSlash("C:/schemas/config.json"),
-			wantOK: true,
+			ref:  "file:///C:/schemas/config.json",
+			path: "C:/schemas/config.json",
 		},
 		"windows drive letter in lower case": {
-			ref:    "file:///c:/schemas/config.json",
-			want:   filepath.FromSlash("c:/schemas/config.json"),
-			wantOK: true,
+			ref:  "file:///c:/schemas/config.json",
+			path: "c:/schemas/config.json",
 		},
 		"windows drive letter with localhost": {
-			ref:    "file://localhost/C:/schemas/config.json",
-			want:   filepath.FromSlash("C:/schemas/config.json"),
-			wantOK: true,
+			ref:  "file://localhost/C:/schemas/config.json",
+			path: "C:/schemas/config.json",
 		},
 		"drive letter alone": {
-			ref:    "file:///C:",
-			want:   "C:",
-			wantOK: true,
+			ref:  "file:///C:",
+			path: "C:",
 		},
 		"percent-encoded drive letter": {
-			ref:    "file:///%43:/schemas/config.json",
-			want:   filepath.FromSlash("C:/schemas/config.json"),
-			wantOK: true,
+			ref:  "file:///%43:/schemas/config.json",
+			path: "C:/schemas/config.json",
 		},
 		"escaped colon": {
-			ref:    "file:///C%3A/schemas/config.json",
-			want:   filepath.FromSlash(escapedRoot + "/schemas/config.json"),
-			wantOK: true,
+			ref:  "file:///C%3A/schemas/config.json",
+			path: escapedRoot + "/schemas/config.json",
 		},
 		"escaped colon beside a literal non-ascii letter": {
-			ref:    "file:///C%3A/sch\u00e9mas/config.json",
-			want:   filepath.FromSlash(escapedRoot + "/sch\u00e9mas/config.json"),
-			wantOK: true,
+			ref:  "file:///C%3A/sch\u00e9mas/config.json",
+			path: escapedRoot + "/sch\u00e9mas/config.json",
 		},
 		"escaped colon beside a literal pipe": {
-			ref:    "file:///C%3A/a|b/config.json",
-			want:   filepath.FromSlash(escapedRoot + "/a|b/config.json"),
-			wantOK: true,
+			ref:  "file:///C%3A/a|b/config.json",
+			path: escapedRoot + "/a|b/config.json",
 		},
 		"colon after a digit is not a drive": {
-			ref:    "file:///1:/schemas/config.json",
-			want:   filepath.FromSlash("/1:/schemas/config.json"),
-			wantOK: true,
+			ref:  "file:///1:/schemas/config.json",
+			path: "/1:/schemas/config.json",
 		},
 		"colon in a longer first segment is not a drive": {
-			ref:    "file:///ab:/schemas/config.json",
-			want:   filepath.FromSlash("/ab:/schemas/config.json"),
-			wantOK: true,
+			ref:  "file:///ab:/schemas/config.json",
+			path: "/ab:/schemas/config.json",
 		},
 		"percent-encoded path": {
-			ref:    "file:///srv/my%20schemas/config.json",
-			want:   filepath.FromSlash("/srv/my schemas/config.json"),
-			wantOK: true,
-		},
-		"remote host is left as written": {
-			ref:  "file://host/C:/schemas/config.json",
-			want: "file://host/C:/schemas/config.json",
-		},
-		"empty path is left as written": {
-			ref:  "file://",
-			want: "file://",
+			ref:  "file:///srv/my%20schemas/config.json",
+			path: "/srv/my schemas/config.json",
 		},
 	}
 
@@ -480,9 +466,36 @@ func TestFileURLPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, ok := schema.FileURLPath(tc.ref)
-			assert.Equal(t, tc.want, got)
-			assert.Equal(t, tc.wantOK, ok)
+			// The path a file URL names needs no base directory.
+			got := fileOrURL(t, "", tc.ref)
+			assert.Equal(t, fileURL(t, filepath.FromSlash(tc.path)), got.Key())
+		})
+	}
+}
+
+func TestFileOrURL_FileURLWithoutLocalPath(t *testing.T) {
+	t.Parallel()
+
+	// A file URL with a remote host, or with no path, names no local
+	// path, so the whole reference is a relative file path.
+	baseDir := t.TempDir()
+
+	tcs := map[string]struct {
+		ref string
+	}{
+		"remote host": {ref: "file://host/C:/schemas/config.json"},
+		"empty path":  {ref: "file://"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := schema.FileOrURL("", tc.ref)
+			require.ErrorIs(t, err, schema.ErrNoBaseDir)
+
+			got := fileOrURL(t, baseDir, tc.ref)
+			assert.Equal(t, fileURL(t, filepath.Join(baseDir, tc.ref)), got.Key())
 		})
 	}
 }

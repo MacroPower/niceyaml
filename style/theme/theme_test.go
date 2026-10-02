@@ -345,6 +345,52 @@ func TestPalette_DiffAndErrorKindsStandOut(t *testing.T) {
 	}
 }
 
+func TestPalette_DiffAndErrorKindsDefaultFromStatusColors(t *testing.T) {
+	t.Parallel()
+
+	// Algol's source sets none of the diff and error kinds, so the theme
+	// draws inserted lines in its OK color, deleted lines in its Error
+	// color, and error marks as a badge on Error in whichever body color
+	// reads better there. Abap's source colors the error mark, and that
+	// color replaces the badge.
+	tests := map[string]struct {
+		theme string
+		kind  kind.Kind
+		want  string
+	}{
+		"inserted takes ok": {
+			theme: "algol",
+			kind:  kind.GenericInserted,
+			want:  "#22863a bg:#ffffff",
+		},
+		"deleted takes error": {
+			theme: "algol",
+			kind:  kind.GenericDeleted,
+			want:  "#cb2431 bg:#ffffff",
+		},
+		"error draws a badge": {
+			theme: "algol",
+			kind:  kind.GenericError,
+			want:  "#ffffff bg:#cb2431",
+		},
+		"error token wins": {
+			theme: "abap",
+			kind:  kind.GenericError,
+			want:  "#ff0000 bg:#ffffff",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			th, ok := theme.Builtin().Get(tc.theme)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, style.Encode(th.Style(tc.kind)))
+		})
+	}
+}
+
 func TestPalette_ErrorMarkShowsOnEveryToken(t *testing.T) {
 	t.Parallel()
 
@@ -968,6 +1014,62 @@ func TestPalette_ChromeReadable(t *testing.T) {
 			fg := styles.Style(kind.UI).GetForeground()
 			assert.GreaterOrEqual(t, contrast(fg, bg), floor,
 				"chrome draws %s on %s", hexOf(fg), hexOf(bg))
+		})
+	}
+}
+
+func TestPalette_ChromeTakesCommentColorAlone(t *testing.T) {
+	t.Parallel()
+
+	// The chrome takes the foreground of the comments and none of their
+	// attributes, so algol's italic comments leave its line numbers
+	// upright. Vim's source colors the chrome itself, and that color
+	// replaces the navy of its comments. The chrome kinds below UI inherit
+	// either way.
+	tests := map[string]struct {
+		theme string
+		kind  kind.Kind
+		want  string
+	}{
+		"italic comments": {
+			theme: "algol",
+			kind:  kind.Comment,
+			want:  "italic #888888 bg:#ffffff",
+		},
+		"chrome takes the comment color upright": {
+			theme: "algol",
+			kind:  kind.UI,
+			want:  "#888888 bg:#ffffff",
+		},
+		"children inherit the chrome": {
+			theme: "algol",
+			kind:  kind.UILineNumber,
+			want:  "#888888 bg:#ffffff",
+		},
+		"navy comments": {
+			theme: "vim",
+			kind:  kind.Comment,
+			want:  "#000080 bg:#000000",
+		},
+		"ui token replaces the comment color": {
+			theme: "vim",
+			kind:  kind.UI,
+			want:  "#7f7f7f bg:#000000",
+		},
+		"ui token reaches children": {
+			theme: "vim",
+			kind:  kind.UILineNumber,
+			want:  "#7f7f7f bg:#000000",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			th, ok := theme.Builtin().Get(tc.theme)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, style.Encode(th.Style(tc.kind)))
 		})
 	}
 }
