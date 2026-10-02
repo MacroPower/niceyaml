@@ -458,8 +458,8 @@ func TestSchema_PathTarget(t *testing.T) {
 			wantContains: "<genericError>extra</genericError>",
 		},
 		"required error highlights the parent key": {
-			// A missing required property targets the containing object's key,
-			// and the instance segments lead to it.
+			// A missing required property carries the path it would have,
+			// which binds at the key of the mapping that lacks it.
 			schema: `{
 				"type": "object",
 				"properties": {

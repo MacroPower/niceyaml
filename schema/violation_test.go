@@ -236,6 +236,205 @@ func TestViolation_Binding(t *testing.T) {
 	})
 }
 
+func TestViolation_MissingMember(t *testing.T) {
+	t.Parallel()
+
+	server := `{"properties": {"server": {"required": ["name"]}}}`
+
+	tcs := map[string]struct {
+		schema string
+		input  string
+		// The bound text of each violation, in the order the validator
+		// reports them.
+		want []string
+		// The path [niceyaml.SourceError.Nearest] reports for each
+		// violation, or the empty string for one that binds at a position
+		// beside its path.
+		near []string
+	}{
+		"required": {
+			schema: server,
+			input:  "a: 1\nserver:\n  port: 1\n",
+			want:   []string{`2:1: $.server.name: missing required property "name"`},
+			near:   []string{"$.server"},
+		},
+		"required at the root": {
+			schema: `{"required": ["name", "kind"]}`,
+			input:  "other: x\n",
+			want: []string{
+				`1:1: $.name: missing required property "name"`,
+				`1:1: $.kind: missing required property "kind"`,
+			},
+			near: []string{"$", "$"},
+		},
+		"element of a sequence": {
+			schema: `{"properties": {"items": {"items": {"required": ["name"]}}}}`,
+			input:  "items:\n  - name: a\n  - port: 1\n",
+			want:   []string{`3:5: $.items[1].name: missing required property "name"`},
+			near:   []string{"$.items[1]"},
+		},
+		"empty mapping": {
+			schema: server,
+			input:  "server: {}\n",
+			want:   []string{`1:1: $.server.name: missing required property "name"`},
+			near:   []string{"$.server"},
+		},
+		"mapping behind an alias": {
+			schema: server,
+			input:  "base: &b\n  port: 1\nserver: *b\n",
+			want:   []string{`3:1: $.server.name: missing required property "name"`},
+			near:   []string{"$.server"},
+		},
+		"mapping with a merge key": {
+			schema: server,
+			input:  "base: &b {port: 1}\nserver:\n  <<: *b\n",
+			want:   []string{`2:1: $.server.name: missing required property "name"`},
+			near:   []string{"$.server"},
+		},
+		"dependentRequired": {
+			schema: `{"properties": {"server": {"dependentRequired": {"port": ["name", "host"]}}}}`,
+			input:  "server:\n  port: 1\n",
+			want: []string{
+				`1:1: $.server.name: property "port" requires property "name"`,
+				`1:1: $.server.host: property "port" requires property "host"`,
+			},
+			near: []string{"$.server", "$.server"},
+		},
+		"dependencies": {
+			schema: `{
+				"$schema": "http://json-schema.org/draft-07/schema#",
+				"properties": {"server": {"dependencies": {"port": ["name"]}}}
+			}`,
+			input: "server:\n  port: 1\n",
+			want:  []string{`1:1: $.server.name: property "port" requires property "name"`},
+			near:  []string{"$.server"},
+		},
+		"names a selector quotes": {
+			schema: `{"properties": {"server": {"required": ["a.b", "c d", ""]}}}`,
+			input:  "server:\n  port: 1\n",
+			want: []string{
+				`1:1: $.server.'a.b': missing required property "a.b"`,
+				`1:1: $.server.'c d': missing required property "c d"`,
+				`1:1: $.server.'': missing required property ""`,
+			},
+			near: []string{"$.server", "$.server", "$.server"},
+		},
+		// Both names hold the quote and the words that part the two names
+		// in the message.
+		"names that hold a quote": {
+			schema: `{"dependentRequired": {"a \" requires property \"b": ["c \" d"]}}`,
+			input:  "'a \" requires property \"b': 1\n",
+			want: []string{
+				`1:1: $.'c " d': property "a \" requires property \"b" requires property "c \" d"`,
+			},
+			near: []string{"$"},
+		},
+		// The key 0x10 sets the member 16, so the mapping lacks the member
+		// 0x10, and the path of that member selects the entry of the key.
+		// The violation binds at the key of the mapping by a position.
+		"key spelled as the missing member": {
+			schema: `{"properties": {"server": {"required": ["0x10"]}}}`,
+			input:  "a: 1\nserver:\n  0x10: 1\n",
+			want:   []string{`2:1: $.server.0x10: missing required property "0x10"`},
+			near:   []string{""},
+		},
+		"merged key spelled as the missing member": {
+			schema: `{"properties": {"server": {"required": ["0x10"]}}}`,
+			input:  "base: &b {0x10: 1}\nserver:\n  <<: *b\n  x: 1\n",
+			want:   []string{`2:1: $.server.0x10: missing required property "0x10"`},
+			near:   []string{""},
+		},
+		// The quoted "0x10" wins the selector 0x10, so no path selects the
+		// mapping the key 0x10 holds, and the path names it as the decoder
+		// does.
+		"mapping no path selects": {
+			schema: `{"properties": {"user": {"properties": {"16": {"required": ["name"]}}}}}`,
+			input:  "user:\n  <<: {0x10: {port: 1}}\n  \"0x10\": 1\n",
+			want:   []string{`2:8: $.user.16.name: missing required property "name"`},
+			near:   []string{""},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			err := doc.Validate(t.Context(), compileSchema(t, []byte(tc.schema)))
+			require.Error(t, err)
+
+			var got, near []string
+
+			for bound := range niceyaml.AllBindings(err) {
+				v, ok := errors.AsType[*schema.Violation](bound.Cause())
+				if !ok {
+					continue
+				}
+
+				// The message stays the one the validator wrote.
+				assert.Equal(t, v.Message, bound.Message())
+
+				got = append(got, bound.Error())
+
+				at, ok := bound.Nearest()
+				if !ok {
+					near = append(near, "")
+
+					continue
+				}
+
+				near = append(near, at.String())
+
+				// The path names a member the document leaves out.
+				path, ok := bound.Path()
+				require.True(t, ok)
+
+				_, err := doc.At(path)
+				require.ErrorIs(t, err, paths.ErrNotFound)
+			}
+
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.near, near)
+		})
+	}
+
+	t.Run("scoped node", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "a: 1\nserver:\n  port: 1\n")
+		v := compileSchema(t, []byte(`{"required": ["name"]}`))
+
+		err := yamltest.At(t, doc, paths.Root().Child("server")).Validate(t.Context(), v)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Equal(t, `2:1: $.server.name: missing required property "name"`, bound.Error())
+
+		near, ok := bound.Nearest()
+		require.True(t, ok)
+		assert.Equal(t, "$.server", near.String())
+	})
+
+	t.Run("unbound", func(t *testing.T) {
+		t.Parallel()
+
+		v := compileSchema(t, []byte(server))
+
+		err := v.ValidateValue(t.Context(), map[string]any{"server": map[string]any{"port": 1}})
+
+		var located *niceyaml.Error
+
+		require.ErrorAs(t, err, &located)
+		assert.Equal(t, `$.server.name: missing required property "name"`, located.Error())
+
+		path, ok := located.Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.server.name", path.String())
+	})
+}
+
 func TestViolation_Unbound(t *testing.T) {
 	t.Parallel()
 
@@ -420,12 +619,12 @@ func TestViolation_Alternatives(t *testing.T) {
 			want: []string{
 				`2:3: $.step: value matches none of the allowed forms`,
 				`  form 1`,
-				`    1:1: $.step~: missing required property "cmd"`,
+				`    1:1: $.step.cmd: missing required property "cmd"`,
 				`    2:9: $.step.kind: value does not match const`,
 				`    3:3: $.step.from~: value is not allowed`,
 				`    4:3: $.step.dest~: value is not allowed`,
 				`  form 2`,
-				`    1:1: $.step~: missing required property "to"`,
+				`    1:1: $.step.to: missing required property "to"`,
 				`    4:3: $.step.dest~: value is not allowed`,
 			},
 		},
@@ -521,7 +720,7 @@ func TestViolation_Alternatives(t *testing.T) {
 			input: "a: no\nmode: x\n",
 			want: []string{
 				`2 schema violations`,
-				`  1:1: $~: missing required property "extra"`,
+				`  1:1: $.extra: missing required property "extra"`,
 				`  1:4: $.a: expected "integer", got "string"`,
 			},
 		},

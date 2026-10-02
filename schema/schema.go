@@ -245,6 +245,15 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // select the member, so the violation carries the position of the value
 // beside the path and binds there.
 //
+// A violation about a member the mapping leaves out, such as one of
+// required, carries the path the member would have, as [Violation]
+// describes. The path names the member as the schema does, since the
+// source spells no key for it. The mapping can hold a key with that
+// spelling for a member of another name, as the key 0x10 sets the member
+// 16 under a schema that requires 0x10. The path then selects the entry
+// of that key, so the violation carries the position of the mapping
+// beside the path and binds there.
+//
 // To tell which key a spelling selects, Validate reads the sources of
 // each `<<` merge key that brings the key in or stands after it. The
 // violations of one call may read as many nodes that way as
@@ -504,7 +513,20 @@ type sourceTarget struct {
 // it cannot all name. The path is then all that says where the violation
 // lies.
 func (t sourceTarget) token(key bool) *token.Token {
-	if !t.unspelled || astnode.IsNil(t.node) {
+	if !t.unspelled {
+		return nil
+	}
+
+	return t.start(key)
+}
+
+// start returns the token a path to the location of t would resolve to,
+// whether or not the path of t selects the location. With key set, that
+// is the key of the entry that holds the node, and the token that starts
+// the node otherwise or where no entry holds it. It returns nil when the
+// walk did not reach the location.
+func (t sourceTarget) start(key bool) *token.Token {
+	if astnode.IsNil(t.node) {
 		return nil
 	}
 

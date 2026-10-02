@@ -1,13 +1,18 @@
 package schema
 
 import (
+	"errors"
 	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/goccy/go-yaml/ast"
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -69,6 +74,17 @@ const noFormMessage = "value matches none of the allowed forms"
 // violation under its forms. A report that wants one row per value emits
 // the first and passes over the errors [niceyaml.SourceError.Errors]
 // nests under it.
+//
+// A mapping that leaves out a member the schema requires has no value to
+// point at. The violation of required, of dependentRequired, or of the
+// list form of dependencies carries the path the member would have, so a
+// report reads the missing field from the path and not from the message:
+//
+//	2:1: $.server.name: missing required property "name"
+//
+// The path names the member as the schema does. It selects nothing, so
+// the error binds at the key of the mapping, here server, and
+// [niceyaml.SourceError.Nearest] returns the path of that mapping.
 //
 //nolint:errname // Named for the finding it holds, which a [*niceyaml.Error] reports.
 type Violation struct {
@@ -330,7 +346,9 @@ func (c converter) leaf(e *jsonschema.ValidationError) *niceyaml.Error {
 // at returns the options that give an error the location e fails at. The
 // first is the YAML path to that location. A failure that constrains the
 // key of a member, such as an additional property, points at the key
-// through [paths.Path.Key], and any other at the value.
+// through [paths.Path.Key], and any other at the value. A failure about a
+// member the mapping leaves out, as [missingMember] finds one, has the
+// location [converter.atMissing] gives it instead.
 //
 // The path spells each key as the source does, so a key the decoder
 // respells, such as 0x10 for the member name 16, still names its member.
@@ -345,6 +363,10 @@ func (c converter) leaf(e *jsonschema.ValidationError) *niceyaml.Error {
 func (c converter) at(e *jsonschema.ValidationError) []niceyaml.ErrorOption {
 	target := sourcePath(c.root, c.idx, e.InstanceSegments())
 
+	if name, ok := missingMember(e); ok {
+		return c.atMissing(target, name)
+	}
+
 	path := target.path
 	if e.TargetsKey() {
 		path = path.Key()
@@ -357,4 +379,98 @@ func (c converter) at(e *jsonschema.ValidationError) []niceyaml.ErrorOption {
 	}
 
 	return opts
+}
+
+// atMissing returns the options that locate a failure about the member
+// name, which the mapping at target leaves out. The first is the path the
+// member would have, so the path of the violation names the missing
+// member. That path selects nothing, and the error binds at the key of
+// the mapping, as [niceyaml.SourceError.Nearest] describes. The source
+// spells no key for the member, so the path names it as the schema does.
+//
+// A second option gives the position of the mapping where the path would
+// bind elsewhere, and the error binds at that position. That holds where
+// the path to the mapping selects another entry, as [sourceTarget.token]
+// describes. It also holds where the mapping has a key a selector with
+// name selects, since the member that key sets has another name, as the
+// key 0x10 sets the member 16 under a schema that requires 0x10.
+func (c converter) atMissing(target sourceTarget, name string) []niceyaml.ErrorOption {
+	opts := []niceyaml.ErrorOption{niceyaml.AtPath(target.path.Child(name))}
+
+	if !target.unspelled && !c.selectsEntry(target.node, name) {
+		return opts
+	}
+
+	if tk := target.start(true); tk != nil && tk.Position != nil {
+		opts = append(opts, niceyaml.AtPosition(position.NewFromToken(tk)))
+	}
+
+	return opts
+}
+
+// selectsEntry reports whether a path selector with name selects an entry
+// of the mapping node holds, as the finder of the index reports. It also
+// reports true where the finder cannot tell, as it cannot past the limit
+// behind [paths.ErrExcessiveMerging], since the selector may then select
+// an entry. It reports false for no node.
+func (c converter) selectsEntry(node ast.Node, name string) bool {
+	if astnode.IsNil(node) {
+		return false
+	}
+
+	_, err := c.idx.finder.Entry(deref(c.idx.resolver, node), name)
+
+	return !errors.Is(err, paths.ErrNotFound)
+}
+
+// The text the validator puts in front of the name of a missing member in
+// the message of each keyword that requires one. The name follows, quoted
+// as [strconv.Quote] writes it.
+const (
+	requiredPrefix  = "missing required property "
+	dependentPrefix = "property "
+	dependentInfix  = " requires property "
+)
+
+// missingMember returns the name of the member e reports missing from the
+// mapping at its instance location, and true. Such a failure comes from
+// required, from dependentRequired, and from the list form of the legacy
+// dependencies. It reports false for any other failure.
+//
+// The validator carries the name in the message alone, so missingMember
+// reads it from there: `missing required property "name"` for required,
+// and `property "port" requires property "name"` for the other two. It
+// reports false for a message of another form.
+func missingMember(e *jsonschema.ValidationError) (string, bool) {
+	var (
+		quoted string
+		ok     bool
+	)
+
+	switch e.Keyword {
+	case jsonschema.KeywordRequired:
+		quoted, ok = strings.CutPrefix(e.Message, requiredPrefix)
+
+	case jsonschema.KeywordDependentRequired, jsonschema.KeywordDependencies:
+		rest, found := strings.CutPrefix(e.Message, dependentPrefix)
+		if !found {
+			return "", false
+		}
+
+		// The member whose presence requires the missing one.
+		trigger, err := strconv.QuotedPrefix(rest)
+		if err != nil {
+			return "", false
+		}
+
+		quoted, ok = strings.CutPrefix(rest[len(trigger):], dependentInfix)
+	}
+
+	if !ok {
+		return "", false
+	}
+
+	name, err := strconv.Unquote(quoted)
+
+	return name, err == nil
 }

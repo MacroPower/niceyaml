@@ -48,6 +48,10 @@
 //	    // err is a *niceyaml.SourceError; niceyaml.FormatError prints the failing lines.
 //	}
 //
+// A member the schema requires and the document leaves out reports the
+// path it would have, such as $.server.name, and the error binds at the
+// key of the mapping that lacks it.
+//
 // [Schema.Validate] returns the same bound error, so a validator of the
 // program's own runs the schema on a node it picks and returns the
 // result. [Schema.ValidateValue] checks decoded data instead, and its
