@@ -46,8 +46,10 @@ tasks:
   # check is the fast local gate. lint and test invoke their tools straight off
   # the devbox PATH, so check needs no Dagger engine. check:ci adds the gates
   # that run through Dagger because their tools (Trivy, zizmor,
-  # renovate-config-validator) are not on the devbox PATH. check:all is the
-  # union of both and matches the gates in the validate.yaml matrix.
+  # renovate-config-validator) are not on the devbox PATH. check:all runs both
+  # and go:build:pinned, so it matches the gates in the validate.yaml matrix.
+  # go:build:pinned stays out of check because it passes only after the
+  # niceyaml commit that bubbles and fangs require is pushed.
   check:
     desc: Runs the local checks using devbox
     deps: [lint, test]
@@ -58,7 +60,7 @@ tasks:
 
   check:all:
     desc: Runs every check, local and Dagger-backed
-    deps: [check, check:ci]
+    deps: [check, check:ci, go:build:pinned]
 
   scan:
     desc: Scans source dependencies for vulnerabilities

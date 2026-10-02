@@ -9,10 +9,19 @@ task format    # Format and tidy code, run generators
 task lint      # golangci-lint, go mod tidy check, prettier
 task test      # Run all tests (unit + integration)
 task check     # Local gate: lint + test (tools on the devbox PATH, no Dagger)
-task check:all # Everything CI runs (adds security + GitHub config, via Dagger)
+task check:all # Everything CI runs (adds security + GitHub config via Dagger, and go:build:pinned)
+
+task go:build:pinned # Build bubbles and fangs against the niceyaml version each requires
 ```
 
 Devbox provides all required tools on PATH automatically.
+
+The workspace and the `replace` directives build `bubbles` and `fangs` against
+the checkout. A module outside the repo gets the niceyaml version that their
+`go.mod` files require, and `task go:build:pinned` builds them that way. When
+one of them starts to use niceyaml code newer than that version, require a
+pushed niceyaml commit that has it. `task --summary go:build:pinned` lists the
+commands.
 
 CI runs these same tasks inside the devbox environment via the `ci` Dagger
 toolchain (`dagger call ci <task>`), so local and CI execute identical commands.

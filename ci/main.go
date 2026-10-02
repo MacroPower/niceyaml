@@ -84,14 +84,21 @@ func New(
 }
 
 // env returns the devbox environment container with the project source
-// overlaid and the Go module, Go build, and golangci-lint caches mounted.
-// [Ci.task] queues a Taskfile target on it. The caches persist across runs, so
-// the containerized tasks reuse work the way the local toolchain does.
+// overlaid and the Go module, Go checksum database, Go build, and
+// golangci-lint caches mounted. [Ci.task] queues a Taskfile target on it. The
+// caches persist across runs, so the containerized tasks reuse work the way
+// the local toolchain does.
+//
+// Go keeps its checksum database state beside the module cache, in a
+// directory the devbox user cannot create. [Ci.BuildPinned] downloads a
+// module version that no go.sum lists, and Go verifies it against that
+// database, so the mount gives Go a directory it can write.
 func (m *Ci) env() *dagger.Container {
 	owner := dagger.ContainerWithMountedCacheOpts{Owner: devboxUser}
 	return m.Devbox.WithSource().
 		WithMountedCache(devboxHome+"/go/pkg/mod", dag.CacheVolume(cacheNamespace+":gomod"), owner).
 		WithEnvVariable("GOMODCACHE", devboxHome+"/go/pkg/mod").
+		WithMountedCache(devboxHome+"/go/pkg/sumdb", dag.CacheVolume(cacheNamespace+":gosumdb"), owner).
 		WithMountedCache(devboxHome+"/.cache/go-build", dag.CacheVolume(cacheNamespace+":gobuild"), owner).
 		WithEnvVariable("GOCACHE", devboxHome+"/.cache/go-build").
 		WithMountedCache(devboxHome+"/.cache/golangci-lint", dag.CacheVolume(cacheNamespace+":golangci-lint"), owner)
@@ -117,6 +124,17 @@ func (m *Ci) runTask(ctx context.Context, target string) error {
 // +check
 func (m *Ci) Lint(ctx context.Context) error {
 	return m.runTask(ctx, "lint")
+}
+
+// BuildPinned builds and vets the bubbles and fangs modules through
+// `task go:build:pinned` inside the devbox environment. The target turns the
+// workspace off and drops the replace directive, so each module builds against
+// the niceyaml version its go.mod requires, as it does for a module outside
+// the repository.
+//
+// +check
+func (m *Ci) BuildPinned(ctx context.Context) error {
+	return m.runTask(ctx, "go:build:pinned")
 }
 
 // Test runs the unit tests with the race detector through `task go:test`

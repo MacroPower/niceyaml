@@ -20,9 +20,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Each entry is a function on the `ci` toolchain. lint, test, and
-        # test-integration run the matching Taskfile target inside the devbox
-        # environment (dagger -> devbox -> task). The rest compose a toolchain
+        # Each entry is a function on the `ci` toolchain. lint, build-pinned,
+        # test, and test-integration run the matching Taskfile target inside
+        # the devbox environment (dagger -> devbox -> task). build-pinned
+        # builds bubbles and fangs against the niceyaml version each requires,
+        # as a module outside the repo does. The rest compose a toolchain
         # or a Node container directly. security runs Trivy through the
         # security toolchain, lint-actions runs zizmor through the zizmor
         # toolchain, and lint-renovate runs renovate-config-validator in a
@@ -30,6 +32,7 @@ jobs:
         # runs.
         task:
           - lint
+          - build-pinned
           - test
           - test-integration
           - security

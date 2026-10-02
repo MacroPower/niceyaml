@@ -9,10 +9,13 @@ shopt: [globstar]
 # bubbles and fangs, and the nyaml CLI module under cmd/nyaml. The ./...
 # pattern stops at a nested module, so GO_PKGS names every tree. go mod tidy
 # ignores the workspace, so the tidy tasks visit each module directory in
-# GO_MODULES.
+# GO_MODULES. Other modules import the adapters in GO_ADAPTER_MODULES, so
+# build:pinned builds each against the GO_LIBRARY version it requires.
 vars:
   GO_PKGS: ./... ./bubbles/... ./fangs/... ./cmd/nyaml/...
   GO_MODULES: [".", "bubbles", "fangs", "cmd/nyaml"]
+  GO_ADAPTER_MODULES: ["bubbles", "fangs"]
+  GO_LIBRARY: go.jacobcolvin.com/niceyaml
   TEST_TIMEOUT: 30m
   # Tests whose names match this regex are integration tests. test skips them,
   # and test:integration selects them.
@@ -63,6 +66,48 @@ tasks:
     cmds:
       - for: { var: GO_MODULES }
         cmd: go -C {{.ITEM}} mod tidy -diff
+
+  # build:pinned declares no `sources`, for the reason the test tasks below
+  # give. It copies each go.mod and go.sum under .tmp/ and edits the copies,
+  # so it leaves the module files as they are.
+  build:pinned:
+    desc: Builds bubbles and fangs against the niceyaml version each requires
+    summary: |
+      Builds and vets each module in GO_ADAPTER_MODULES the way a module
+      outside this repo builds it. It turns the workspace off and drops the
+      replace directive, so niceyaml is the version that the go.mod of the
+      adapter requires. Every other task builds the adapters against the
+      checkout, where an adapter that uses niceyaml code newer than that
+      version still builds.
+
+      The task downloads the required niceyaml version, so it needs the
+      network on its first run for a version.
+
+      It fails when an adapter uses a package or a name that the required
+      version lacks. Require a pushed niceyaml commit that has it, then run
+      this task again:
+        v=$(cd "$(mktemp -d)" && go list -m -f '{{"{{.Version}}"}}' {{.GO_LIBRARY}}@<commit>)
+        go -C bubbles mod edit -require={{.GO_LIBRARY}}@$v
+        go -C fangs mod edit -require={{.GO_LIBRARY}}@$v
+        task go:tidy
+    env:
+      GOWORK: "off"
+    cmds:
+      - for: { var: GO_ADAPTER_MODULES }
+        cmd: |
+          dir="{{.ROOT_DIR}}/.tmp/pinned/{{.ITEM}}"
+          mkdir -p "$dir"
+          cp {{.ITEM}}/go.mod {{.ITEM}}/go.sum "$dir"
+          go mod edit -dropreplace={{.GO_LIBRARY}} "$dir/go.mod"
+          go -C {{.ITEM}} mod download -modfile="$dir/go.mod" {{.GO_LIBRARY}}
+          # -mod=readonly keeps go from adding a newer niceyaml to supply a
+          # package the required version lacks.
+          if ! go -C {{.ITEM}} build -mod=readonly -modfile="$dir/go.mod" ./... ||
+            ! go -C {{.ITEM}} vet -mod=readonly -modfile="$dir/go.mod" ./...; then
+            echo "{{.ITEM}} does not build against the niceyaml version that {{.ITEM}}/go.mod requires." >&2
+            echo "Run 'task --summary go:build:pinned' for the fix." >&2
+            exit 1
+          fi
 
   # test, test:integration, and test:cover deliberately declare no `sources`.
   # Go's build and test cache is content-addressed and re-runs the packages

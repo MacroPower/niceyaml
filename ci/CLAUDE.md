@@ -9,10 +9,13 @@ commands as `task check:all` runs locally.
 
 ### Devbox Checks
 
-- `lint`, `test`, and `test-integration` (all +check) run the matching
-  Taskfile target inside the project's devbox environment through the `devbox`
-  toolchain. The module mounts the Go module, Go build, and golangci-lint
-  caches for these runs.
+- `lint`, `build-pinned`, `test`, and `test-integration` (all +check) run the
+  matching Taskfile target inside the project's devbox environment through the
+  `devbox` toolchain. The module mounts the Go module, Go checksum database,
+  Go build, and golangci-lint caches for these runs.
+- `build-pinned` runs `task go:build:pinned`, which builds bubbles and fangs
+  against the niceyaml version each requires. It fails until that version is a
+  pushed commit with every package and name the module uses.
 - `test-coverage` runs the coverage target the same way and returns the
   coverage profile file.
 - `lint-renovate` (+check) validates the Renovate configuration with
