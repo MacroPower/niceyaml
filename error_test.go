@@ -5644,6 +5644,134 @@ func TestError_Accessors(t *testing.T) {
 	assert.Empty(t, nilErr.Errors())
 }
 
+// ruleError is a cause of a type the caller defines.
+type ruleError struct {
+	id string
+}
+
+func (e *ruleError) Error() string {
+	return "rule " + e.id
+}
+
+func TestSourceError_Cause(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("x:\n  a: 1\n  b: 2\n")
+	x := paths.Root().Child("x")
+	a := paths.Root().Child("a")
+
+	rule := &ruleError{id: "a"}
+	located := niceyaml.WrapError(rule, niceyaml.AtPath(a))
+	inContext := fmt.Errorf("check: %w", rule)
+	aroundLocated := fmt.Errorf("check: %w", niceyaml.WrapError(rule, niceyaml.AtPath(x.Child("a"))))
+
+	tcs := map[string]struct {
+		err  error
+		want error
+	}{
+		"located error": {
+			err:  niceyaml.WrapError(rule, niceyaml.AtPath(x.Child("a"))),
+			want: rule,
+		},
+		"rebased error": {
+			err:  niceyaml.Rebase(located, x),
+			want: rule,
+		},
+		"error rebased twice": {
+			err:  niceyaml.Rebase(niceyaml.Rebase(located, paths.Root()), x),
+			want: rule,
+		},
+		"error wrapped in a located error": {
+			err:  niceyaml.WrapError(located, niceyaml.AtPath(x.Child("b"))),
+			want: rule,
+		},
+		"error above a binding": {
+			err: niceyaml.WrapError(
+				yamltest.Bind(t, source, niceyaml.Rebase(located, x)),
+				niceyaml.WithErrors(errors.New("more")),
+			),
+			want: rule,
+		},
+		"wrapper under a located error": {
+			err:  niceyaml.WrapError(inContext, niceyaml.AtPath(x.Child("a"))),
+			want: inContext,
+		},
+		"wrapper around a located error": {
+			err:  aroundLocated,
+			want: aroundLocated,
+		},
+		"error created from nil": {
+			err: niceyaml.WrapError(nil, niceyaml.AtPath(x.Child("a"))),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, yamltest.Bind(t, source, tc.err), &bound)
+
+			if tc.want == nil {
+				assert.NoError(t, bound.Cause())
+
+				return
+			}
+
+			assert.Same(t, tc.want, bound.Cause())
+		})
+	}
+
+	t.Run("message from NewError", func(t *testing.T) {
+		t.Parallel()
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(x))), &bound)
+		require.EqualError(t, bound.Cause(), "bad")
+	})
+
+	t.Run("nested errors", func(t *testing.T) {
+		t.Parallel()
+
+		// A summary nests one error per violation. [errors.As] on its
+		// binding descends into them and finds the rule of the first, and
+		// Cause returns the error of each binding alone.
+		ruleB := &ruleError{id: "b"}
+		summary := niceyaml.NewError("2 violations", niceyaml.WithErrors(
+			located,
+			niceyaml.WrapError(ruleB, niceyaml.AtPath(paths.Root().Child("b"))),
+		))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.Rebase(summary, x)), &bound)
+
+		found, ok := errors.AsType[*ruleError](bound)
+		require.True(t, ok)
+		assert.Same(t, rule, found)
+
+		own, ok := errors.AsType[*ruleError](bound.Cause())
+		assert.False(t, ok)
+		assert.Nil(t, own)
+		require.EqualError(t, bound.Cause(), "2 violations")
+
+		children := bound.Errors()
+		require.Len(t, children, 2)
+		assert.Same(t, rule, children[0].Cause())
+		assert.Same(t, ruleB, children[1].Cause())
+	})
+
+	t.Run("nil receiver", func(t *testing.T) {
+		t.Parallel()
+
+		var nilErr *niceyaml.SourceError
+
+		assert.NoError(t, nilErr.Cause())
+	})
+}
+
 func TestSourceError_Errors(t *testing.T) {
 	t.Parallel()
 

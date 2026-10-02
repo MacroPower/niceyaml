@@ -660,8 +660,10 @@ func (e *Error) Unwrap() []error {
 }
 
 // Cause returns the error the [Error] wraps: the error given to
-// [WrapError], or one holding the message given to [NewError]. It is
-// nil for an Error created from a nil error, and a nil Error has no cause.
+// [WrapError], or one holding the message given to [NewError]. An Error
+// that wraps another Error returns that Error, where [SourceError.Cause]
+// looks through it. It is nil for an Error created from a nil error, and
+// a nil Error has no cause.
 func (e *Error) Cause() error {
 	if e == nil {
 		return nil
@@ -1655,6 +1657,46 @@ func (e *SourceError) Unwrap() error {
 	}
 
 	return e.err
+}
+
+// Cause returns the error the binding reports, without the Errors that
+// locate it. For a bound [*Error] it is the error given to [WrapError],
+// or one holding the message given to [NewError]. Cause looks through
+// each Error that wraps another, such as the one [Rebase] puts around a
+// located Error, and through a binding the bound error wraps. It returns
+// the same error however many of them stand above it. A validator that
+// wraps an error of its own type hands that value to the caller of each
+// binding this way:
+//
+//	for bound := range niceyaml.AllBindings(err) {
+//		if rule, ok := errors.AsType[*RuleError](bound.Cause()); ok {
+//			report(bound, rule.ID)
+//		}
+//	}
+//
+// [errors.As] on the binding searches the errors nested in it as well. On
+// a binding that reports several violations it finds the cause of the
+// first violation, where Cause returns the error of the binding alone. A
+// wrapper such as [fmt.Errorf] ends the walk and is the cause itself, so
+// the search above still finds a RuleError the wrapper holds. Cause is
+// nil for an Error created from a nil error, and a nil SourceError has no
+// cause.
+func (e *SourceError) Cause() error {
+	for e != nil {
+		cause := e.err
+		if x, ok := cause.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
+			cause = x.textCause()
+		}
+
+		inner, ok := cause.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
+		if !ok {
+			return cause
+		}
+
+		e = inner
+	}
+
+	return nil
 }
 
 // Errors returns the bound children of the [SourceError]. Each error
