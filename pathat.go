@@ -359,12 +359,8 @@ func (x *pathIndex) stepAt(off int) int {
 
 // pathAt returns the path of the innermost node that holds the token at
 // offset off, as [Node.PathAt] describes, with r resolving the keys of
-// the document.
-//
-// A path selects the entry of a step only when a lookup of its key name
-// in its mapping finds that entry, so pathAt runs that lookup for each
-// entry from the node up to the root. It reports false when one of them
-// finds another entry, or none.
+// the document. It reports false for a node that no path selects, as
+// [pathIndex.spell] finds.
 func (x *pathIndex) pathAt(r *paths.Resolver, off int) (paths.Path, bool) {
 	if !x.body.holds(off) {
 		return paths.Path{}, false
@@ -372,7 +368,90 @@ func (x *pathIndex) pathAt(r *paths.Resolver, off int) (paths.Path, bool) {
 
 	at := x.stepAt(off)
 
+	path, selects, ok := x.spell(r, at, x.inKey(at, off))
+	if !ok || !selects {
+		return paths.Path{}, false
+	}
+
+	return path, true
+}
+
+// ownerPath returns the path of the outermost node that has tk as its own
+// token, which is the node the go-yaml decoder names when it reports tk.
+// The results are those of [pathIndex.spell], with ok false for a token
+// that no node of the body holds.
+//
+// A node is the innermost one around its token, with one exception. A
+// block mapping has the ":" of its first entry as its token, and a block
+// sequence the "-" of its first element. The decoder reports a mapping
+// or a sequence by that token, and never the entry or the element, so
+// such a token gives the path of the collection. The null the parser
+// makes for a value the document leaves out sits at the offset of the
+// same ":" or "-", and its type tells it apart, so it gives the path of
+// the entry or the element.
+func (x *pathIndex) ownerPath(r *paths.Resolver, tk *token.Token) (paths.Path, bool, bool) {
+	if tk == nil || tk.Position == nil || !x.body.holds(tk.Position.Offset) {
+		return paths.Path{}, false, false
+	}
+
+	off := tk.Position.Offset
+	at := x.stepAt(off)
+
+	if at >= 0 && x.opens(at, tk) {
+		return x.spell(r, x.steps[at].parent, false)
+	}
+
+	return x.spell(r, at, x.inKey(at, off))
+}
+
+// opens reports whether tk is the token of the block collection that the
+// step at index at starts, as its first entry or its first element.
+func (x *pathIndex) opens(at int, tk *token.Token) bool {
+	step := x.steps[at]
+	off := tk.Position.Offset
+
+	if step.mapping == nil {
+		return tk.Type == token.SequenceEntryType && step.index == 0 && step.lo == off
+	}
+
+	start := step.mapping.GetToken()
+
+	return tk.Type == token.MappingValueType && start != nil && start.Position != nil &&
+		start.Position.Offset == off
+}
+
+// inKey reports whether the offset off lies in the key of the entry of
+// the step at index at. It reports false for an element, and for -1,
+// which stands for the body.
+func (x *pathIndex) inKey(at, off int) bool {
+	if at < 0 {
+		return false
+	}
+
+	entry := x.steps[at].entry()
+	if entry == nil {
+		return false
+	}
+
+	return tokenOffsets(&boundsFinder{skipComments: true}, entry.Key).holds(off)
+}
+
+// spell returns the path of the node of the step at index at, or the
+// root for -1, which stands for the body. With key set, the path ends in
+// the `~` selector, so it names the key of the entry. The resolver r
+// names the keys of the document.
+//
+// A path selects the entry of a step only when a lookup of its key name
+// in its mapping finds that entry, so spell runs that lookup for each
+// entry from the node up to the root. The selects result is false when
+// one of them finds another entry, or none. The path then names each
+// entry on the way as the source spells its key, and resolves to another
+// node or to none. The ok result is false when a key on the way has no
+// name, as [paths.Resolver.KeyName] reports, so no path spells the node.
+func (x *pathIndex) spell(r *paths.Resolver, at int, key bool) (paths.Path, bool, bool) {
 	var selectors []paths.Path
+
+	selects := true
 
 	for i := at; i >= 0; i = x.steps[i].parent {
 		step := x.steps[i]
@@ -386,12 +465,12 @@ func (x *pathIndex) pathAt(r *paths.Resolver, off int) (paths.Path, bool) {
 
 		name, ok := r.KeyName(entry.Key)
 		if !ok {
-			return paths.Path{}, false
+			return paths.Path{}, false, false
 		}
 
 		found, err := r.Entry(step.mapping, name)
 		if err != nil || found != ast.Node(entry) {
-			return paths.Path{}, false
+			selects = false
 		}
 
 		selectors = append(selectors, paths.Root().Child(name))
@@ -399,14 +478,9 @@ func (x *pathIndex) pathAt(r *paths.Resolver, off int) (paths.Path, bool) {
 
 	slices.Reverse(selectors)
 
-	if at >= 0 {
-		if entry := x.steps[at].entry(); entry != nil {
-			key := tokenOffsets(&boundsFinder{skipComments: true}, entry.Key)
-			if key.holds(off) {
-				selectors = append(selectors, paths.Root().Key())
-			}
-		}
+	if key {
+		selectors = append(selectors, paths.Root().Key())
 	}
 
-	return paths.Root().Join(selectors...), true
+	return paths.Root().Join(selectors...), selects, true
 }

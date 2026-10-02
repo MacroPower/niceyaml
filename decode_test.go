@@ -4340,23 +4340,23 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		}{
 			"anchor the node reads": {
 				input: "a: &x 1\nb: &x !!bool nope\nc:\n  d: *x\n",
-				err:   `2:14: cannot convert "nope" to boolean`,
+				err:   `2:14: $.b: cannot convert "nope" to boolean`,
 			},
 			"anchor another anchor reads": {
 				input: "a: &x 1\nm: &m {k: *x}\nb: &x !!bool nope\nc:\n  d: *x\n  e: *m\n",
-				err:   `3:14: cannot convert "nope" to boolean`,
+				err:   `3:14: $.b: cannot convert "nope" to boolean`,
 			},
 			"anchor read before a later redefinition": {
 				input: "a: &x 1\nb: &x !!bool nope\nm: &m {k: *x}\nz: &x 2\nc:\n  e: *m\n  f: *x\n",
-				err:   `2:14: cannot convert "nope" to boolean`,
+				err:   `2:14: $.b: cannot convert "nope" to boolean`,
 			},
 			"anchor inside a failing anchor": {
 				input: "q: &i 0\no: &o {bad: !!bool nope, i: &i 1}\nc:\n  d: *i\n",
-				err:   `2:20: cannot convert "nope" to boolean`,
+				err:   `2:20: $.o.bad: cannot convert "nope" to boolean`,
 			},
 			"anchor with an alias to nothing": {
 				input: "a: &x 1\nb: &x [*nope]\nc:\n  d: *x\n",
-				err:   `2:9: could not find alias "nope"`,
+				err:   `2:8: $.b[0]: could not find alias "nope"`,
 			},
 		}
 
@@ -4395,7 +4395,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			},
 			"error keeps the name the alias spells": {
 				input: "a: &\"x [1]\" 1\nb: &x 2\nc: &x 3\nd: *\"x [1]\"\n",
-				err:   `4:5: could not find alias "\"x [1]\""`,
+				err:   `4:4: $.d: could not find alias "\"x [1]\""`,
 			},
 		}
 
@@ -4437,7 +4437,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		}{
 			"unknown key": {
 				input: "a: &x 1\nb: &x 2\n\"x [1]\": 3\n",
-				err:   `3:1: unknown field "x [1]"`,
+				err:   `3:1: $.'x [1]'~: unknown field "x [1]"`,
 			},
 			"invalid duration": {
 				input: "a: &x 1\nb: &x 2\nd: x [2]\n",
@@ -4646,7 +4646,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		dd := yamltest.FirstDocument(t, "a: &x 1\nb: &x 2\nc: {k: !!bool nope}\n")
 
 		_, err := yamltest.At(t, dd, paths.Root().Child("c")).Decode[any](t.Context())
-		require.EqualError(t, err, `3:15: cannot convert "nope" to boolean`)
+		require.EqualError(t, err, `3:15: $.c.k: cannot convert "nope" to boolean`)
 		require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
 
 		var bound *niceyaml.SourceError
@@ -4700,14 +4700,14 @@ func TestDocument_Decode_ForwardAlias(t *testing.T) {
 			path:   paths.Root().Child("p"),
 			want:   map[string]any{"p": []any{uint64(1), uint64(2)}},
 			scoped: []any{uint64(1), uint64(2)},
-			err:    `1:6: could not find alias "x"`,
+			err:    `1:5: $.p[0]: could not find alias "x"`,
 		},
 		"mapping alias before the anchor": {
 			input:  "p:\n  a: *x\n  b: &x 2\n",
 			path:   paths.Root().Child("p"),
 			want:   map[string]any{"p": map[string]any{"a": uint64(1), "b": uint64(2)}},
 			scoped: map[string]any{"a": uint64(1), "b": uint64(2)},
-			err:    `2:7: could not find alias "x"`,
+			err:    `2:6: $.p.a: could not find alias "x"`,
 		},
 	}
 
@@ -5006,7 +5006,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 					return err
 				},
-				err: "1:14: string was used where sequence is expected",
+				err: "1:14: $.items: expected sequence, got string",
 			},
 			"str tag into a slice": {
 				input: "!!str foo\n",
@@ -5015,7 +5015,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 					return err
 				},
-				err: "1:7: string was used where sequence is expected",
+				err: "1:7: $: expected sequence, got string",
 			},
 		}
 
@@ -8141,7 +8141,7 @@ func TestErrDecodeRejected(t *testing.T) {
 
 				err := tc.decode(t.Context(), dd)
 				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
-				assert.Contains(t, err.Error(), "cannot unmarshal")
+				assert.Contains(t, err.Error(), "expected integer, got string")
 				assert.NotContains(t, err.Error(), "[1:", "go-yaml's position leaked into the message")
 				assert.NotContains(t, err.Error(), "base: &base", "go-yaml's excerpt leaked into the message")
 
@@ -8414,7 +8414,7 @@ func TestErrDecodeRejected(t *testing.T) {
 		}
 
 		err := dd.DecodeInto(t.Context(), &v)
-		require.ErrorContains(t, err, "cannot unmarshal string into Go struct field .M of type int")
+		require.EqualError(t, err, "2:4: $.b: expected integer, got string")
 		require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
 
 		var srcErr *niceyaml.SourceError

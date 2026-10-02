@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"reflect"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
@@ -26,7 +30,179 @@ var (
 
 	// The result of [reportsOwnError] for each type it has read.
 	ownErrors typeCache[bool]
+
+	// The types [kindOfType] names apart from their kind. The go-yaml
+	// decoder reads a !!timestamp tag as a [time.Time], a !!binary tag as
+	// a byte slice, and a mapping as a [yaml.MapSlice] under
+	// [yaml.UseOrderedMap].
+	timeType     = reflect.TypeFor[time.Time]()
+	bytesType    = reflect.TypeFor[[]byte]()
+	mapSliceType = reflect.TypeFor[yaml.MapSlice]()
 )
+
+// The names a rejection gives the kinds of YAML values, as
+// [rejectionMessage] writes them.
+const (
+	kindMapping  = "mapping"
+	kindSequence = "sequence"
+	kindString   = "string"
+	kindInteger  = "integer"
+	kindFloat    = "float"
+	kindBoolean  = "boolean"
+	kindNull     = "null"
+)
+
+// rejectionMessage returns the message of err, a rejection the go-yaml
+// decoder returned, worded for the document. The decoder words three of
+// its errors for the Go target, and names the outermost struct field on
+// the way to the value rather than the field that holds it.
+// Those errors carry what they compare in typed fields, so
+// rejectionMessage writes the message from the fields:
+//
+//   - A value of the wrong kind, a [yaml.TypeError] or a
+//     [yaml.UnexpectedNodeTypeError], reads "expected integer, got
+//     string", with the kinds [kindOfType] and [kindOfNode] name.
+//   - A number that overflows an integer type, a [yaml.OverflowError],
+//     reads "expected integer from -128 to 127, got 300", with the range
+//     of the type.
+//
+// Any other error keeps the message the decoder gave it, such as the one
+// for an unknown field, which names the field as the document does.
+func rejectionMessage(err yaml.Error) string {
+	switch e := err.(type) { //nolint:errorlint // The decoder returns these types unwrapped.
+	case *yaml.TypeError:
+		return fmt.Sprintf("expected %s, got %s", kindOfType(e.DstType), kindOfType(e.SrcType))
+
+	case *yaml.UnexpectedNodeTypeError:
+		return fmt.Sprintf("expected %s, got %s", kindOfNode(e.Expected), kindOfNode(e.Actual))
+
+	case *yaml.OverflowError:
+		lo, hi, ok := integerRange(e.DstType)
+		if !ok {
+			return err.GetMessage()
+		}
+
+		return fmt.Sprintf("expected %s from %s to %s, got %s", kindInteger, lo, hi, e.SrcNum)
+
+	default:
+		return err.GetMessage()
+	}
+}
+
+// kindOfType returns the kind of YAML value that the Go type t holds, for
+// the message of a rejection. The type is the target of a decode, or the
+// type the go-yaml decoder read a value of the document as. A nil type
+// is the null the decoder reads as a nil value. A pointer names what it
+// points to. A type of a kind no YAML value decodes into names itself.
+func kindOfType(t reflect.Type) string {
+	if t == nil {
+		return kindNull
+	}
+
+	t = pointerBase(t)
+
+	switch t {
+	case timeType:
+		return "timestamp"
+	case durationType:
+		return "duration"
+	case bytesType:
+		return "binary"
+	case mapSliceType:
+		return kindMapping
+	}
+
+	switch t.Kind() {
+	case reflect.Bool:
+		return kindBoolean
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return kindInteger
+	case reflect.Float32, reflect.Float64:
+		return kindFloat
+	case reflect.String:
+		return kindString
+	case reflect.Slice, reflect.Array:
+		return kindSequence
+	case reflect.Map, reflect.Struct:
+		return kindMapping
+	default:
+		return t.String()
+	}
+}
+
+// kindOfNode returns the kind of YAML value a node of type t holds, for
+// the message of a rejection. A type that holds no value, such as an
+// anchor, has the name go-yaml gives it.
+func kindOfNode(t ast.NodeType) string {
+	switch t {
+	case ast.MappingType, ast.MappingValueType:
+		return kindMapping
+	case ast.SequenceType:
+		return kindSequence
+	case ast.StringType, ast.LiteralType:
+		return kindString
+	case ast.IntegerType:
+		return kindInteger
+	case ast.FloatType, ast.InfinityType, ast.NanType:
+		return kindFloat
+	case ast.BoolType:
+		return kindBoolean
+	case ast.NullType:
+		return kindNull
+	default:
+		return t.YAMLName()
+	}
+}
+
+// integerRange returns the lowest and the highest value of the integer
+// type t in decimal, or false for a type of any other kind.
+func integerRange(t reflect.Type) (string, string, bool) {
+	if t == nil {
+		return "", "", false
+	}
+
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		shift := 64 - t.Bits()
+
+		return strconv.FormatInt(math.MinInt64>>shift, 10), strconv.FormatInt(math.MaxInt64>>shift, 10), true
+
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return "0", strconv.FormatUint(math.MaxUint64>>(64-t.Bits()), 10), true
+
+	default:
+		return "", "", false
+	}
+}
+
+// rejectionLocation returns the options that locate a rejection the
+// go-yaml decoder reported at tk, a token of the source.
+//
+// The first is the path of the node the decoder names by tk, as
+// [pathIndex.ownerPath] finds it, from the root of the document. The
+// error then binds where that path resolves, which is where an error at
+// the same path from a [Validator] or a [SelfValidator] binds.
+//
+// A path can name a node it does not select, as the path of the earlier
+// of two entries with one key does. A second option then gives the
+// position of tk. The error binds there, and the path only names the
+// node in the message.
+//
+// A node under a key with no name has no path, so the position of tk
+// alone locates it.
+func (n *Node) rejectionLocation(tk *token.Token) []ErrorOption {
+	path, selects, ok := n.doc.pathIndex().ownerPath(n.doc.pathResolver(), tk)
+
+	switch {
+	case !ok:
+		return []ErrorOption{atToken(tk)}
+	case selects:
+		return []ErrorOption{AtPath(path)}
+	default:
+		return []ErrorOption{AtPath(path), atToken(tk)}
+	}
+}
 
 // locateDecodeError returns err, the error a decode of node into v with
 // yamlOpts returned, at the path of the value that reported it. The

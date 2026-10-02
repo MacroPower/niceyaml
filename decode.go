@@ -1885,18 +1885,52 @@ func WithReferences(data ...[]byte) DecodeOption {
 // bound to the source as [SourceError] values, with a path in them
 // resolving from the scope. A decoding error the go-yaml decoder
 // reports, such as a value that does not read as the target type,
-// matches [ErrDecodeRejected]. An error the decoder reports without a
-// token of the source comes back as it is, with no location, and does
-// not match. The few that [ErrDecodeRejected] names are exceptions, and
-// so is the error of a value that decodes itself, which the next
-// paragraphs describe. The plain error for a target type whose
-// definition the decoder refuses never matches. The decoder reports one
-// for a struct with two fields of one name and for an inline embedded
+// matches [ErrDecodeRejected]. It carries the path of the value the
+// decoder rejected, from the root of the document, so
+// [SourceError.Path] reports it and the message names the value, as an
+// error from a [Validator] or a [SelfValidator] at that value does:
+//
+//	config.yaml:3:11: $.servers[0].port: expected integer, got string
+//
+// The message describes the document and names no Go type. A value of the
+// wrong kind reads "expected integer, got string". The kinds are mapping,
+// sequence, string, integer, float, boolean, null, timestamp, binary for
+// a value under a !!binary tag, and duration for a [time.Duration]
+// target. A number outside the range of an integer type reads "expected
+// integer from 0 to 65535, got 70000". A rejection of a key, such as an
+// unknown field or a key that does not read as the key type of a map,
+// carries the path of the key, which ends in `~`. The go-yaml error stays
+// in the chain, so [errors.As] reaches a [yaml.TypeError], a
+// [yaml.OverflowError], a [yaml.UnexpectedNodeTypeError], or a
+// [yaml.UnknownFieldError] for a caller that needs the Go types.
+//
+// The path names the place where the document writes the value. A value
+// that an alias or a `<<` merge key brings in reports the path where its
+// anchor defines it, which can lie outside the scope of a Node from
+// [Node.At]. The error binds where that path resolves, so it marks the
+// token an error from a validator at the same path marks. For a mapping
+// or a sequence that is the first key or element, and for a value under
+// a tag it is the value.
+//
+// A path cannot select every value. The earlier of two entries with one
+// key is such a value, which the decoder rejects when
+// [WithYAMLParserOptions] lets the parser accept it. The error then
+// binds at the token the decoder reported, and the path names the value
+// in the message. A value under a key with no name has no path, so its
+// error carries that position alone.
+//
+// An error the decoder reports without a token of the source comes back
+// as it is, with no location, and does not match [ErrDecodeRejected]. It
+// keeps the text go-yaml gave it. The few that ErrDecodeRejected names
+// are exceptions, and so is the error of a value that decodes itself,
+// which the next paragraphs describe. The plain error for a target type
+// whose definition the decoder refuses never matches. The decoder reports
+// one for a struct with two fields of one name and for an inline embedded
 // struct that is not exported. The decoder also reports a [yaml.Error]
 // without a token for a key of a map tagged inline, such as the key
 // `name` beside a map[int]int, and for a field tagged inline whose type
-// cannot hold a mapping, such as an int. That error matches when the
-// node holds an alias to a reference document, as [ErrDecodeRejected]
+// cannot hold a mapping, such as an int. That error matches when the node
+// holds an alias to a reference document, as [ErrDecodeRejected]
 // describes. A value of an inline map keeps its token, so an error in
 // that value matches as it would in any other field.
 //
@@ -2121,8 +2155,9 @@ func (n *Node) forValidators(yamlOpts []yaml.DecodeOption) *Node {
 }
 
 // decodeNode decodes node to v with yamlOpts, and binds the error to the
-// source: a YAML error as an [*Error] at the offending token, and any
-// other, such as a canceled context, as it is. A node without content,
+// source: a rejection of the decoder as an [*Error] at the path of the
+// offending value, as [Node.bindDecodeError] describes, and any other,
+// such as a canceled context, as it is. A node without content,
 // the body of an empty document, leaves v as it is, so defaults already
 // in v survive, as [Node.DecodeInto] promises. [yaml.Unmarshal] instead
 // zeroes its target for input that holds no value. A tagged null, such
@@ -2250,7 +2285,8 @@ func isNullAlias(ctx context.Context, dec *yaml.Decoder, node, view ast.Node) bo
 // alias. Any other [yaml.Error] without a token of the source matches
 // [ErrDecodeRejected] when scope holds an alias to a reference document,
 // as [decodeTree.referenceAliases] finds them, with go-yaml's position
-// and excerpt of that document left out. It binds at the alias when
+// and excerpt of that document left out and the message
+// [rejectionMessage] writes. It binds at the alias when
 // scope holds one such alias, and carries no location when it holds
 // several, since the token does not say which of them led to it. The
 // count ignores the target type, so a type that reads only one of
@@ -2294,7 +2330,7 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 			return err
 		}
 
-		msg := tree.restoreNames(yamlErr.GetMessage())
+		msg := tree.restoreNames(rejectionMessage(yamlErr))
 		rejected := decodeRejectedError{yamlMessageError{err: yamlErr, msg: msg}}
 
 		// The token does not say which anchor of a reference document
@@ -2466,9 +2502,13 @@ func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 }
 
 // bindDecodeError binds an error from the decoder to the source. A
-// [yaml.Error] at a token of the source binds as an [*Error] at that
-// token, so the excerpt marks it and the error matches
-// [ErrDecodeRejected]. Any other error binds as it is, such as a
+// [yaml.Error] at a token of the source binds as an [*Error] that
+// matches [ErrDecodeRejected], with the message [rejectionMessage]
+// writes for it. The Error carries the location
+// [Node.rejectionLocation] gives the token, which is the path of the
+// node the decoder names by it. That path reads from the root of the
+// document, so the Node binds the Error with no scope in front of the
+// path. Any other error binds as it is, such as a
 // canceled context, one a value's own UnmarshalYAML returns, or one the
 // decoder reports without a token of the source. An error that
 // [Node.locateDecodeError] put under a path binds at that path. The
@@ -2502,9 +2542,12 @@ func (n *Node) bindDecodeError(err error) error {
 		return n.Bind(tree.restoreError(err))
 	}
 
-	msg := tree.restoreNames(yamlErr.GetMessage())
+	rejected := decodeRejectedError{yamlMessageError{err: yamlErr, msg: tree.restoreNames(rejectionMessage(yamlErr))}}
+	located := WrapError(rejected, n.rejectionLocation(yamlErr.GetToken())...)
 
-	return n.Bind(WrapError(decodeRejectedError{yamlMessageError{err: yamlErr, msg: msg}}, atToken(yamlErr.GetToken())))
+	// The path reads from the root of the document, so the scope of n
+	// does not go in front of it.
+	return bindTree(located, binder{src: n.source, node: n.bindTarget(), rooted: true})
 }
 
 // holdsToken reports whether tk is a token of the source's parse. That is

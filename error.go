@@ -53,10 +53,13 @@ var (
 	// [WithDisallowUnknownFields]. The decoder reports every rejection as
 	// one kind of error, so the sentinel tells them apart from nothing
 	// finer.
-	// The error comes back bound as a [SourceError] at the offending
-	// token. For a value the document leaves out, such as the value of a
-	// key with nothing after its colon, that is the null the parser puts
-	// there, which an error at the path of the value binds to as well.
+	// The error comes back bound as a [SourceError] at the path of the
+	// offending value, from the root of the document, or at the path of
+	// its key for a rejection of the key, such as an unknown field. Its
+	// message names kinds of YAML values and no Go type, as
+	// [Node.DecodeInto] describes. For a value the document leaves out,
+	// such as the value of a key with nothing after its colon, the path
+	// resolves to the null the parser puts there.
 	// Text that [time.ParseDuration] rejects for a [time.Duration]
 	// matches too. The decoder reports it without a token, so the decode
 	// binds it at the path of the value, as [Node.DecodeInto] describes.
@@ -1000,22 +1003,25 @@ const DefaultContextLines = 2
 // ends, binds to the source alone. A binder that marks its paths
 // ambiguous binds errors whose paths may name another value, so it
 // resolves no path, for the reason [ErrAmbiguousPath]. It still locates
-// a position or a range.
+// a position or a range. A binder that is rooted binds errors whose
+// paths read from the root of the document already, as the path of a
+// decode rejection does, so it puts no scope in front of them.
 type binder struct {
 	src       *Source
 	node      *Node
 	route     bool
 	ambiguous bool
+	rooted    bool
 }
 
 // scoped returns err as a binding of b holds it. An error bound through
 // a Node from [Node.At] or [Node.Nodes] writes its paths from that node,
 // so it comes back under the scope of the node, as [underScope] returns
 // it, and its paths read from the root of the document. An error bound
-// through the root of a document, or through no node, comes back as it
-// is.
+// through the root of a document, through no node, or through a rooted
+// binder comes back as it is.
 func (b binder) scoped(err error) error {
-	if b.node == nil || b.node.base.IsRoot() {
+	if b.node == nil || b.node.base.IsRoot() || b.rooted {
 		return err
 	}
 
@@ -1534,7 +1540,9 @@ func (e *SourceError) Source() *Source {
 // scope a path in the error resolves, or, for an error bound through
 // [Source.Bind], the root of the document its location falls in. The
 // error wrote its path from that scope, and [SourceError.Path] reports
-// the path from the root of the document. A
+// the path from the root of the document. A rejection of the go-yaml
+// decoder is bound to the Node that decoded, and its path reads from the
+// root of the document already. A
 // position or a range falls in the document whose [Node.Span] holds its
 // line, and a path falls in the one document of the source. The error
 // stays bound to that root when its location does not resolve there, as
@@ -1626,6 +1634,10 @@ func (e *SourceError) Message() string {
 // document resolves the result, so it goes to the [Node.Ranges] or the
 // [Node.At] of [SourceError.Document]. [paths.Path.CutPrefix] with the
 // path of [SourceError.Node] gives back the path as the error wrote it.
+// A rejection of the go-yaml decoder is the exception. It reports the
+// path where the document writes the value, as [Node.DecodeInto]
+// describes, which lies outside the scope of the Node for a value an
+// alias or a `<<` merge key brings in from there.
 //
 // An error that carries a range or a position beside its path binds at
 // that location and reports the path the same way, resolved or not. A

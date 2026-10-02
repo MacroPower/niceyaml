@@ -291,6 +291,12 @@
 // on a value after Decode returns under the path of that value the same
 // way.
 //
+// A value the go-yaml decoder rejects reports the same way. The error
+// matches [ErrDecodeRejected] and carries the path of the value, and its
+// message describes the document rather than the Go target:
+//
+//	config.yaml:3:11: $.servers[0].port: expected integer, got string
+//
 // [Node.DecodeInto] runs the same pipeline on a value you already hold,
 // such as one pre-populated with defaults.
 //

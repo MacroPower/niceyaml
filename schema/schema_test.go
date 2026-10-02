@@ -2125,7 +2125,7 @@ func TestSchema_Validate_Bound(t *testing.T) {
 		},
 		"a decoding error": {
 			input: "price: *nope\n",
-			want:  "menu.yaml:1:9: could not find alias \"nope\"",
+			want:  "menu.yaml:1:8: $.price: could not find alias \"nope\"",
 		},
 		"a document past the alias limit": {
 			input: yamltest.AliasLevels(7),

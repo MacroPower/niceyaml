@@ -5,14 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -152,6 +155,506 @@ func (*canceling) UnmarshalYAML(ctx context.Context, _ []byte) error {
 	}
 
 	return errUnmarshal
+}
+
+// rejectionServer is an element of [rejectionConfig].
+type rejectionServer struct {
+	Host  string `yaml:"host"`
+	Port  int    `yaml:"port"`
+	Small int8   `yaml:"small"`
+	Wide  uint16 `yaml:"wide"`
+}
+
+// rejectionConfig holds a field of each kind the go-yaml decoder rejects
+// a value for with a token of the source.
+type rejectionConfig struct {
+	When    time.Time         `yaml:"when"`
+	Labels  map[string]string `yaml:"labels"`
+	Counts  map[int]int       `yaml:"counts"`
+	Name    string            `yaml:"name"`
+	Servers []rejectionServer `yaml:"servers"`
+	One     rejectionServer   `yaml:"one"`
+	Top     int               `yaml:"top"`
+	Ratio   float64           `yaml:"ratio"`
+	Wait    time.Duration     `yaml:"wait"`
+	On      bool              `yaml:"on"`
+}
+
+func TestDocument_Decode_Rejection(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		want  string
+		path  string
+		opts  []niceyaml.DecodeOption
+	}{
+		"scalar in an element": {
+			input: "servers:\n  - host: h\n    port: abc\n",
+			want:  "3:11: $.servers[0].port: expected integer, got string",
+			path:  "$.servers[0].port",
+		},
+		"block mapping for an integer": {
+			input: "top:\n  a: 1\n  b: 2\n",
+			want:  "2:3: $.top: expected integer, got mapping",
+			path:  "$.top",
+		},
+		"block mapping for a string in a map": {
+			input: "labels:\n  a:\n    b: 1\n",
+			want:  "3:5: $.labels.a: expected string, got mapping",
+			path:  "$.labels.a",
+		},
+		"block sequence for an integer": {
+			input: "top:\n  - 1\n  - 2\n",
+			want:  "2:5: $.top: expected integer, got sequence",
+			path:  "$.top",
+		},
+		"flow sequence for a string": {
+			input: "name: [a, b]\n",
+			want:  "1:8: $.name: expected string, got sequence",
+			path:  "$.name",
+		},
+		"flow mapping for an integer": {
+			input: "top: {a: 1}\n",
+			want:  "1:7: $.top: expected integer, got mapping",
+			path:  "$.top",
+		},
+		"empty flow sequence for an integer": {
+			input: "top: []\n",
+			want:  "1:6: $.top: expected integer, got sequence",
+			path:  "$.top",
+		},
+		"string for a sequence": {
+			input: "servers: abc\n",
+			want:  "1:10: $.servers: expected sequence, got string",
+			path:  "$.servers",
+		},
+		"string for a mapping": {
+			input: "one: abc\n",
+			want:  "1:6: $.one: expected mapping, got string",
+			path:  "$.one",
+		},
+		"block sequence for a mapping": {
+			input: "one:\n  - a\n",
+			want:  "2:5: $.one: expected mapping, got sequence",
+			path:  "$.one",
+		},
+		"sequence element for a mapping": {
+			input: "servers:\n  - - a\n",
+			want:  "2:7: $.servers[0]: expected mapping, got sequence",
+			path:  "$.servers[0]",
+		},
+		"integer for a sequence": {
+			input: "servers: 5\n",
+			want:  "1:10: $.servers: expected sequence, got integer",
+			path:  "$.servers",
+		},
+		"boolean for a mapping": {
+			input: "one: true\n",
+			want:  "1:6: $.one: expected mapping, got boolean",
+			path:  "$.one",
+		},
+		"block scalar for a mapping": {
+			input: "one: |\n  abc\n",
+			want:  "1:6: $.one: expected mapping, got string",
+			path:  "$.one",
+		},
+		"anchored scalar": {
+			input: "top: &t abc\n",
+			want:  "1:9: $.top: expected integer, got string",
+			path:  "$.top",
+		},
+		"tagged scalar": {
+			input: "top: !!str abc\n",
+			want:  "1:12: $.top: expected integer, got string",
+			path:  "$.top",
+		},
+		"value an alias reads": {
+			input: "defs:\n  p: &p abc\nservers:\n  - port: *p\n",
+			want:  "2:9: $.defs.p: expected integer, got string",
+			path:  "$.defs.p",
+		},
+		"value a merge key brings in": {
+			input: "defs: &d\n  port: abc\nservers:\n  - <<: *d\n    host: h\n",
+			want:  "2:9: $.defs.port: expected integer, got string",
+			path:  "$.defs.port",
+		},
+		"map key": {
+			input: "counts:\n  x: 1\n",
+			want:  "2:3: $.counts.x~: expected integer, got string",
+			path:  "$.counts.x~",
+		},
+		"explicit map key": {
+			input: "counts:\n  ? x\n  : 1\n",
+			want:  "2:5: $.counts.x~: expected integer, got string",
+			path:  "$.counts.x~",
+		},
+		"map value": {
+			input: "counts:\n  1: x\n",
+			want:  "2:6: $.counts.1: expected integer, got string",
+			path:  "$.counts.1",
+		},
+		"key a path quotes": {
+			input: "labels:\n  \"a.b\": [1]\n",
+			want:  "2:11: $.labels.'a.b': expected string, got sequence",
+			path:  "$.labels.'a.b'",
+		},
+		"overflow of a signed integer": {
+			input: "servers:\n  - small: 300\n",
+			want:  "2:12: $.servers[0].small: expected integer from -128 to 127, got 300",
+			path:  "$.servers[0].small",
+		},
+		"negative for an unsigned integer": {
+			input: "servers:\n  - wide: -1\n",
+			want:  "2:11: $.servers[0].wide: expected integer from 0 to 65535, got -1",
+			path:  "$.servers[0].wide",
+		},
+		"overflow of an unsigned integer": {
+			input: "one: {wide: 70000}\n",
+			want:  "1:13: $.one.wide: expected integer from 0 to 65535, got 70000",
+			path:  "$.one.wide",
+		},
+		"float past an integer": {
+			input: "one: {small: 1e10}\n",
+			want:  "1:14: $.one.small: expected integer from -128 to 127, got 1e10",
+			path:  "$.one.small",
+		},
+		"boolean for an integer": {
+			input: "top: true\n",
+			want:  "1:6: $.top: expected integer, got boolean",
+			path:  "$.top",
+		},
+		"integer for a boolean": {
+			input: "on: 5\n",
+			want:  "1:5: $.on: expected boolean, got integer",
+			path:  "$.on",
+		},
+		"mapping for a float": {
+			input: "ratio: {a: 1}\n",
+			want:  "1:9: $.ratio: expected float, got mapping",
+			path:  "$.ratio",
+		},
+		"sequence for a timestamp": {
+			input: "when: [1]\n",
+			want:  "1:8: $.when: expected timestamp, got sequence",
+			path:  "$.when",
+		},
+		"sequence for a duration": {
+			input: "wait: [1]\n",
+			want:  "1:8: $.wait: expected duration, got sequence",
+			path:  "$.wait",
+		},
+		"tagged null for an integer": {
+			input: "top: !!null x\n",
+			want:  "1:13: $.top: expected integer, got null",
+			path:  "$.top",
+		},
+		"binary for an integer": {
+			input: "top: !!binary YWJj\n",
+			want:  "1:15: $.top: expected integer, got binary",
+			path:  "$.top",
+		},
+		"timestamp for an integer": {
+			input: "top: !!timestamp 2020-01-01\n",
+			want:  "1:18: $.top: expected integer, got timestamp",
+			path:  "$.top",
+		},
+		"ordered mapping for an integer": {
+			input: "top: {a: 1}\n",
+			opts:  []niceyaml.DecodeOption{niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())},
+			want:  "1:7: $.top: expected integer, got mapping",
+			path:  "$.top",
+		},
+		"unknown field": {
+			input: "name: x\nfoo: 1\n",
+			opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
+			want:  "2:1: $.foo~: unknown field \"foo\"",
+			path:  "$.foo~",
+		},
+		"unknown field in an element": {
+			input: "servers:\n  - zzz: 1\n",
+			opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
+			want:  "2:5: $.servers[0].zzz~: unknown field \"zzz\"",
+			path:  "$.servers[0].zzz~",
+		},
+		"unknown field a merge key brings in": {
+			input: "defs: &d\n  zzz: 1\none:\n  <<: *d\n",
+			opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
+			want:  "2:3: $.defs.zzz~: unknown field \"zzz\"",
+			path:  "$.defs.zzz~",
+		},
+		"alias with no anchor": {
+			input: "top: *nope\n",
+			want:  "1:6: $.top: could not find alias \"nope\"",
+			path:  "$.top",
+		},
+		"value under renamed anchors": {
+			input: "a: &x 1\nb: &x 2\ntop: abc\n",
+			want:  "3:6: $.top: expected integer, got string",
+			path:  "$.top",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, tc.input)
+
+			var v rejectionConfig
+
+			err := dd.DecodeInto(t.Context(), &v, tc.opts...)
+			require.EqualError(t, err, tc.want)
+			require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+			var srcErr *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &srcErr)
+			require.NoError(t, srcErr.Unresolved())
+
+			path, ok := srcErr.Path()
+			require.True(t, ok, "the rejection carries no path")
+			assert.Equal(t, tc.path, path.String())
+
+			// The message names no Go type or field.
+			for _, word := range []string{"unmarshal", "Go ", "struct", "interface"} {
+				assert.NotContains(t, srcErr.Message(), word)
+			}
+
+			// The rejection binds where an error at its path binds, as one
+			// from a validator does.
+			var atPath *niceyaml.SourceError
+
+			require.ErrorAs(t, dd.Bind(niceyaml.NewError("at the path", niceyaml.AtPath(path))), &atPath)
+			require.NoError(t, atPath.Unresolved())
+
+			_, near := atPath.Nearest()
+			require.False(t, near, "the path selects nothing")
+
+			want, ok := atPath.Range()
+			require.True(t, ok)
+
+			got, ok := srcErr.Range()
+			require.True(t, ok)
+			assert.Equal(t, want, got)
+
+			// The position of the error lies at the path: on the key for
+			// the path of a key, and at or inside the value for any other.
+			pos, ok := srcErr.Position()
+			require.True(t, ok)
+
+			under, ok := dd.PathAt(pos)
+			require.True(t, ok)
+
+			if strings.HasSuffix(tc.path, "~") {
+				assert.Equal(t, tc.path, under.String())
+
+				return
+			}
+
+			_, ok = under.CutPrefix(path)
+			assert.True(t, ok, "position %s lies at %s", pos, under)
+		})
+	}
+}
+
+func TestDocument_Decode_Rejection_GoYAMLError(t *testing.T) {
+	t.Parallel()
+
+	// The message reads in YAML terms, and the error the decoder returned
+	// stays in the chain with its Go types.
+	t.Run("type mismatch", func(t *testing.T) {
+		t.Parallel()
+
+		var v rejectionConfig
+
+		err := yamltest.FirstDocument(t, "top: abc\n").DecodeInto(t.Context(), &v)
+		require.EqualError(t, err, "1:6: $.top: expected integer, got string")
+
+		got, ok := errors.AsType[*yaml.TypeError](err)
+		require.True(t, ok)
+		assert.Equal(t, reflect.TypeFor[int](), got.DstType)
+		assert.Equal(t, reflect.TypeFor[string](), got.SrcType)
+	})
+
+	t.Run("overflow", func(t *testing.T) {
+		t.Parallel()
+
+		var v rejectionConfig
+
+		err := yamltest.FirstDocument(t, "one: {small: 300}\n").DecodeInto(t.Context(), &v)
+		require.EqualError(t, err, "1:14: $.one.small: expected integer from -128 to 127, got 300")
+
+		got, ok := errors.AsType[*yaml.OverflowError](err)
+		require.True(t, ok)
+		assert.Equal(t, reflect.TypeFor[int8](), got.DstType)
+		assert.Equal(t, "300", got.SrcNum)
+	})
+
+	t.Run("unexpected node", func(t *testing.T) {
+		t.Parallel()
+
+		var v rejectionConfig
+
+		err := yamltest.FirstDocument(t, "servers: abc\n").DecodeInto(t.Context(), &v)
+		require.EqualError(t, err, "1:10: $.servers: expected sequence, got string")
+
+		got, ok := errors.AsType[*yaml.UnexpectedNodeTypeError](err)
+		require.True(t, ok)
+		assert.Equal(t, ast.SequenceType, got.Expected)
+		assert.Equal(t, ast.StringType, got.Actual)
+	})
+
+	t.Run("unknown field", func(t *testing.T) {
+		t.Parallel()
+
+		var v rejectionConfig
+
+		err := yamltest.FirstDocument(t, "foo: 1\n").
+			DecodeInto(t.Context(), &v, niceyaml.WithDisallowUnknownFields(true))
+		require.EqualError(t, err, `1:1: $.foo~: unknown field "foo"`)
+
+		got, ok := errors.AsType[*yaml.UnknownFieldError](err)
+		require.True(t, ok)
+		assert.Equal(t, `unknown field "foo"`, got.GetMessage())
+	})
+}
+
+func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`
+		defs: &d
+		  port: abc
+		servers:
+		  - host: h
+		    port: xyz
+		  - <<: *d
+	`), "s.yaml")
+
+	tcs := map[string]struct {
+		scope string
+		want  string
+		path  string
+	}{
+		// The path reads from the root of the document, so the scope
+		// of the Node does not go in front of it a second time.
+		"value inside the scope": {
+			scope: "$.servers[0]",
+			want:  "s.yaml:5:11: $.servers[0].port: expected integer, got string",
+			path:  "$.servers[0].port",
+		},
+		// The merge key brings the value in from outside the scope,
+		// and the path names the place where the anchor defines it.
+		"value a merge key brings in from outside the scope": {
+			scope: "$.servers[1]",
+			want:  "s.yaml:2:9: $.defs.port: expected integer, got string",
+			path:  "$.defs.port",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			scoped := yamltest.At(t, doc, paths.MustParse(tc.scope))
+
+			_, err := scoped.Decode[rejectionServer](t.Context())
+			require.EqualError(t, err, tc.want)
+			require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+			var srcErr *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &srcErr)
+
+			path, ok := srcErr.Path()
+			require.True(t, ok)
+			assert.Equal(t, tc.path, path.String())
+
+			// The error stays bound to the Node that decoded, and its
+			// path resolves from the root of the document.
+			assert.Same(t, scoped, srcErr.Node())
+			assert.Same(t, doc, srcErr.Document())
+
+			ranges, err := srcErr.Document().Ranges(path)
+			require.NoError(t, err)
+			require.Len(t, ranges, 1)
+
+			pos, ok := srcErr.Position()
+			require.True(t, ok)
+			assert.Equal(t, ranges[0].Start, pos)
+		})
+	}
+}
+
+func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
+	t.Parallel()
+
+	t.Run("path that selects another entry", func(t *testing.T) {
+		t.Parallel()
+
+		// The parser accepts the duplicate keys and the decoder rejects
+		// the second. A path through the key selects the third, so the
+		// error binds at the token the decoder reported, and the path
+		// names the key in the message.
+		source := niceyaml.NewSourceFromString(
+			"name: x\nname: y\nname: z\n",
+			niceyaml.WithYAMLParserOptions(parser.AllowDuplicateMapKey()),
+		)
+
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		var v rejectionConfig
+
+		err = doc.DecodeInto(t.Context(), &v)
+		require.EqualError(t, err, `2:1: $.name~: duplicate key "name"`)
+		require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+		var srcErr *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &srcErr)
+		require.NoError(t, srcErr.Unresolved())
+
+		path, ok := srcErr.Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.name~", path.String())
+
+		pos, ok := srcErr.Position()
+		require.True(t, ok)
+		assert.Equal(t, position.New(1, 0), pos)
+
+		ranges, err := doc.Ranges(path)
+		require.NoError(t, err)
+		require.Len(t, ranges, 1)
+		assert.Equal(t, position.New(2, 0), ranges[0].Start)
+
+		_, ok = doc.PathAt(pos)
+		assert.False(t, ok, "a path selects the second entry")
+	})
+
+	t.Run("key with no name", func(t *testing.T) {
+		t.Parallel()
+
+		// An alias key that names no anchor has no name, so no path
+		// spells its entry and the rejection carries the position alone.
+		doc := yamltest.FirstDocument(t, "b: 2\n*nope : 1\n")
+
+		_, err := doc.Decode[map[string]int](t.Context())
+		require.EqualError(t, err, `2:2: could not find alias "nope"`)
+		require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
+
+		var srcErr *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &srcErr)
+
+		_, ok := srcErr.Path()
+		assert.False(t, ok)
+
+		pos, ok := srcErr.Position()
+		require.True(t, ok)
+		assert.Equal(t, position.New(1, 1), pos)
+	})
 }
 
 func TestDocument_Decode_UnmarshalerError(t *testing.T) {
