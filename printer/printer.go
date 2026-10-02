@@ -310,6 +310,27 @@ func ColWidth(content string, col int) int {
 	return cells.NewRow(content).Width(col)
 }
 
+// Cut returns the grapheme clusters of row that start at or after cell left
+// and end by cell right, or "" when right is not past left. The row is one
+// row of what [Printer.Print] returns, with the escape sequences of its
+// styles. Cut counts the cells of the row as [Layout.CellOf] and
+// [Layout.GutterWidth] do, so a viewer that scrolls horizontally cuts each
+// row to its window from the cells they return. A keycap takes two cells
+// here, where [ansi.Cut] counts one for its ASCII base. A cluster that
+// straddles either edge drops out whole, so the result can come up short of
+// right-left cells. A cluster of no width at cell right falls outside.
+// Every escape sequence stays, so a style the row opens still closes.
+func Cut(row string, left, right int) string {
+	return cells.Cut(row, left, right)
+}
+
+// CutWidth returns what [Cut] returns along with the cells the cut takes.
+// A viewer that pads the cut to the width of its window measures it in the
+// same pass.
+func CutWidth(row string, left, right int) (string, int) {
+	return cells.CutWidth(row, left, right)
+}
+
 // AnnotationRow is a row an [AnnotationFunc] renders for the annotations
 // of one line and placement that render in one kind, as
 // [line.Annotation.RenderKind] reports it, so one [kind.UIAnnotation] row

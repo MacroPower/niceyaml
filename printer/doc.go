@@ -91,4 +91,11 @@
 // how wide the rows are. A viewer that scrolls by rendered row maps rows
 // to lines and back with it, and one that scrolls horizontally learns how
 // far the content reaches.
+//
+// A viewer that scrolls horizontally shows a window of each printed row.
+// [Layout.CellOf] gives the cell of a column, and [Cut] cuts a printed row
+// to a range of those cells with its styles intact:
+//
+//	rows := strings.Split(p.Print(view), "\n")
+//	window := printer.Cut(rows[0], offset, offset+width)
 package printer

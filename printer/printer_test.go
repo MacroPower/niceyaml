@@ -7436,3 +7436,88 @@ func TestColWidth(t *testing.T) {
 		})
 	}
 }
+
+func TestCut(t *testing.T) {
+	t.Parallel()
+
+	keycap := "ab1️⃣cd"
+
+	tcs := map[string]struct {
+		row       string
+		left      int
+		right     int
+		want      string
+		wantWidth int
+	}{
+		"ascii":                    {row: "abcdef", left: 1, right: 4, want: "bcd", wantWidth: 3},
+		"empty range":              {row: "\x1b[31mabcdef\x1b[0m", left: 2, right: 2, want: "", wantWidth: 0},
+		"range past the end":       {row: "ab", left: 1, right: 9, want: "b", wantWidth: 1},
+		"keycap whole":             {row: keycap, left: 0, right: 4, want: "ab1️⃣", wantWidth: 4},
+		"right edge inside keycap": {row: keycap, left: 0, right: 3, want: "ab", wantWidth: 2},
+		"past a keycap":            {row: keycap, left: 4, right: 6, want: "cd", wantWidth: 2},
+		"edges inside a wide rune": {row: "a日b", left: 2, right: 4, want: "b", wantWidth: 1},
+		"styled keeps escapes": {
+			row:       "\x1b[31m" + keycap + "\x1b[0m",
+			left:      1,
+			right:     3,
+			want:      "\x1b[31mb\x1b[0m",
+			wantWidth: 1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, printer.Cut(tc.row, tc.left, tc.right))
+
+			got, width := printer.CutWidth(tc.row, tc.left, tc.right)
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.wantWidth, width)
+		})
+	}
+}
+
+func TestCut_LayoutCells(t *testing.T) {
+	t.Parallel()
+
+	// A keycap takes two cells in the printed row, so the cell of each
+	// column after it is one more than ansi.Cut counts.
+	keycap := "1️⃣"
+	content := "k: " + keycap + " x"
+
+	tcs := map[string]struct {
+		gutter printer.Gutter
+	}{
+		"no gutter":      {gutter: printer.NoGutter},
+		"default gutter": {gutter: printer.DefaultGutter},
+	}
+
+	// Each column that starts a cluster, with the cluster it starts.
+	clusters := map[int]string{0: "k", 1: ":", 2: " ", 3: keycap, 6: " ", 7: "x"}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString(content).View()
+			p := printer.New(
+				printer.WithGutter(tc.gutter),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+			)
+			l := p.Layout(view)
+			row := p.Print(view)
+
+			require.NotEqual(t, ansi.Strip(row), row, "the row carries styles")
+
+			for col, want := range clusters {
+				cell := l.GutterWidth() + l.CellOf(position.New(0, col))
+				wantWidth := ansi.StringWidth(want)
+
+				got, width := printer.CutWidth(row, cell, cell+wantWidth)
+				assert.Equal(t, want, ansi.Strip(got), "column %d", col)
+				assert.Equal(t, wantWidth, width, "column %d", col)
+			}
+		})
+	}
+}
