@@ -19,7 +19,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -586,7 +585,7 @@ func (p *fieldProbe) readsUnresolved(node *niceyaml.Node, name string) bool {
 		return false
 	}
 
-	resolver := docstate.Of(node).Resolver()
+	resolver := node.Resolver()
 
 	entry, err := resolver.Entry(node.AST(), name)
 	if err != nil {
@@ -1102,7 +1101,7 @@ func valueNode(node *niceyaml.Node) (ast.Node, bool) {
 
 			followed = append(followed, v)
 
-			target, err := docstate.Of(node).Resolver().Deref(v)
+			target, err := node.Resolver().Deref(v)
 			if err != nil {
 				return nil, strTagged
 			}
@@ -1196,7 +1195,7 @@ func derefContent(node *niceyaml.Node) (ast.Node, bool) {
 		return content, true
 	}
 
-	anchor, _ := docstate.Of(node).Resolver().Anchor(alias) //nolint:errcheck // The path resolved the alias.
+	anchor, _ := node.Resolver().Anchor(alias) //nolint:errcheck // The path resolved the alias.
 
 	content = astnode.Content(anchor)
 	if _, ok := content.(*ast.AliasNode); ok {

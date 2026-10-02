@@ -17,6 +17,8 @@ type Node interface {
 	AST() ast.Node
 	// DocumentAST returns the document the node belongs to.
 	DocumentAST() *ast.DocumentNode
+	// Resolver returns the resolver every node of the document shares.
+	Resolver() *paths.Resolver
 }
 
 // CheckDecode returns [aliaslimit.ErrExcessiveAliasing] when n holds an
@@ -37,7 +39,7 @@ func CheckDecode(n Node) error {
 	}
 
 	excessive := state.ExcessiveAliasing(func() bool {
-		return excessiveRead(n, state, readValue)
+		return excessiveRead(n, readValue)
 	})
 	if excessive {
 		return aliaslimit.ErrExcessiveAliasing
@@ -65,7 +67,7 @@ func CheckDecodeText(n Node) error {
 	}
 
 	excessive := state.ExcessiveTextAliasing(func() bool {
-		return excessiveRead(n, state, readText)
+		return excessiveRead(n, readText)
 	})
 	if excessive {
 		return aliaslimit.ErrExcessiveAliasing
@@ -93,7 +95,7 @@ func HoldsReferenceAlias(n Node) bool {
 	}
 
 	return state.ReferenceAlias(func() bool {
-		found := referenceFinder{resolver: state.Resolver()}
+		found := referenceFinder{resolver: n.Resolver()}
 
 		ast.Walk(&found, n.DocumentAST().Body)
 
@@ -111,10 +113,9 @@ func stateOf(n Node) *docstate.State {
 }
 
 // excessiveRead reports whether aliases make up too much of what a
-// decode of the document of n, whose state is state, reads, with the
-// document read as mode.
-func excessiveRead(n Node, state *docstate.State, mode readMode) bool {
-	resolver := state.Resolver()
+// decode of the document of n reads, with the document read as mode.
+func excessiveRead(n Node, mode readMode) bool {
+	resolver := n.Resolver()
 	body := n.DocumentAST().Body
 
 	nulls := nullFinder{

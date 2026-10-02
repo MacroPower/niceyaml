@@ -2214,6 +2214,66 @@ func TestDocument_Node(t *testing.T) {
 	})
 }
 
+func TestNode_Resolver(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		base: &base
+		  name: app
+		items:
+		  - *base
+		  - name: other
+		---
+		second: 1
+	`)
+
+	documents := func(t *testing.T) []*niceyaml.Node {
+		t.Helper()
+
+		docs, err := niceyaml.NewSourceFromString(input).Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		return docs
+	}
+
+	t.Run("every node of a document shares one resolver", func(t *testing.T) {
+		t.Parallel()
+
+		docs := documents(t)
+		item := yamltest.At(t, docs[0], paths.Root().Child("items").Index(1))
+
+		assert.Same(t, docs[0].Resolver(), item.Resolver())
+		assert.Same(t, docs[0].Resolver(), item.Document().Resolver())
+		assert.NotSame(t, docs[0].Resolver(), docs[1].Resolver())
+	})
+
+	t.Run("paths resolve from the document root", func(t *testing.T) {
+		t.Parallel()
+
+		item := yamltest.At(t, documents(t)[0], paths.Root().Child("items").Index(1))
+
+		got, err := item.Resolver().Node(item.Path())
+		require.NoError(t, err)
+		assert.Same(t, item.AST(), got)
+	})
+
+	t.Run("an alias in a scoped node reaches its anchor", func(t *testing.T) {
+		t.Parallel()
+
+		docs := documents(t)
+		item := yamltest.At(t, docs[0], paths.Root().Child("items").Index(0))
+
+		got, err := item.Resolver().Deref(item.AST())
+		require.NoError(t, err)
+
+		want, err := paths.Root().Child("base").Node(docs[0].DocumentAST())
+		require.NoError(t, err)
+		assert.Same(t, want, got)
+		assert.Equal(t, "  name: app", got.String())
+	})
+}
+
 func TestDocument_Bind_Check(t *testing.T) {
 	t.Parallel()
 

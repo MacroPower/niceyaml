@@ -20,7 +20,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/internal/docstate"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -417,7 +416,7 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 	// binds the document once.
 	resolver := paths.NewResolver(nil)
 	if n != nil {
-		resolver = docstate.Of(n).Resolver()
+		resolver = n.Resolver()
 	}
 
 	// The timestamp lookups and every violation share one index, so each

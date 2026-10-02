@@ -29,6 +29,9 @@
 // above it with [Resolver.NodeFrom], so the path it resolves stays short
 // however deep the walk goes.
 //
+// A [go.jacobcolvin.com/niceyaml.Node] holds a Resolver for its document,
+// which its Resolver method returns, so a caller with a Node creates none.
+//
 // # Resolution
 //
 // Selectors apply to the content of a node. An anchor (`&name`) or tag

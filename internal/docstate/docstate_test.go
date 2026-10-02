@@ -26,7 +26,6 @@ func TestOf(t *testing.T) {
 
 	assert.Same(t, first, docstate.Of(scoped))
 	assert.NotSame(t, first, docstate.Of(docs[1]))
-	assert.Same(t, first.Resolver(), docstate.Of(scoped).Resolver())
 	assert.Nil(t, docstate.Of((*niceyaml.Node)(nil)))
 	assert.PanicsWithValue(t, "docstate.Of: string is not a *niceyaml.Node", func() {
 		docstate.Of("a")
@@ -47,7 +46,7 @@ func TestState_ExcessiveAliasing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			s := docstate.New(func() *paths.Resolver { return paths.NewResolver(nil) })
+			s := docstate.New()
 
 			calls := 0
 			count := func() bool {
@@ -77,7 +76,7 @@ func TestState_ReferenceAlias(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			s := docstate.New(func() *paths.Resolver { return paths.NewResolver(nil) })
+			s := docstate.New()
 
 			calls := 0
 			find := func() bool {
@@ -108,7 +107,7 @@ func TestState_ExcessiveTextAliasing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			s := docstate.New(func() *paths.Resolver { return paths.NewResolver(nil) })
+			s := docstate.New()
 
 			calls := 0
 			count := func() bool {

@@ -268,7 +268,10 @@
 // itself again. It returns its errors bound through that node, as
 // [Validator] describes, so a call to Validate returns the error
 // Node.Validate does. A validator that runs another on each element of a
-// list thus reports each failure on the lines of its element.
+// list thus reports each failure on the lines of its element. A validator
+// that follows the aliases of the document itself takes the resolver the
+// document holds from [Node.Resolver], so checking each item of a list
+// binds those aliases once.
 //
 // A [SelfValidator] writes its paths from its own root. The decode calls
 // Validate on every value in the result that implements it, and puts the

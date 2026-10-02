@@ -351,7 +351,7 @@ func newDocuments(src *Source) []*Node {
 			return tk == nil || tk.Position == nil
 		})
 		doc.node = &Node{source: src, doc: doc, content: doc.tokens, span: spans[i]}
-		doc.state = docstate.New(doc.pathResolver)
+		doc.state = docstate.New()
 		nodes[i] = doc.node
 	}
 
@@ -700,7 +700,7 @@ type document struct {
 	// the first call of PathAt.
 	paths *pathIndex
 	// The state that the packages of the module reach through
-	// docstate.Of, which shares resolver with them.
+	// docstate.Of.
 	state *docstate.State
 	// The tokens of the whole document.
 	tokens token.Tokens
@@ -912,6 +912,23 @@ func (n *Node) Err() error {
 	}
 
 	return n.doc.err
+}
+
+// Resolver returns the [*paths.Resolver] of the whole document the Node
+// belongs to, which every Node of the document shares. It resolves paths
+// from the document root, so a path below the Node starts with
+// [Node.Path], and it follows the aliases and merge keys of the go-yaml
+// nodes [Node.AST] and [Node.DocumentAST] return. The document creates
+// the resolver once, when the first of its Nodes needs it, and the
+// resolver binds the aliases of the document then. A [Validator] that
+// runs for each item of a list therefore binds them once, where a
+// resolver from [paths.NewResolver] binds them again for every item.
+//
+// A document that did not parse has no tree, as [Node.Err] describes, so
+// its resolver holds a document with no content, and every path it
+// resolves returns an error wrapping [paths.ErrNoDocument].
+func (n *Node) Resolver() *paths.Resolver {
+	return n.doc.pathResolver()
 }
 
 // Document returns the root [*Node] of the document the Node belongs to,

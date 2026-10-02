@@ -10,11 +10,7 @@
 // package that holds a Node reaches the State without an import cycle.
 package docstate
 
-import (
-	"sync"
-
-	"go.jacobcolvin.com/niceyaml/paths"
-)
+import "sync"
 
 // Of returns the [*State] of the document that n belongs to, where n is a
 // *niceyaml.Node, or nil for a nil Node. Package niceyaml sets Of when it
@@ -26,7 +22,6 @@ var Of func(n any) *State
 //
 // Create instances with [New].
 type State struct {
-	resolver       func() *paths.Resolver
 	aliasOnce      sync.Once
 	textOnce       sync.Once
 	referenceOnce  sync.Once
@@ -35,16 +30,9 @@ type State struct {
 	referenceAlias bool
 }
 
-// New creates a new [*State] whose [State.Resolver] returns the resolver
-// that resolver returns.
-func New(resolver func() *paths.Resolver) *State {
-	return &State{resolver: resolver}
-}
-
-// Resolver returns the [*paths.Resolver] that binds the aliases of the
-// whole document, which niceyaml creates once for the document.
-func (s *State) Resolver() *paths.Resolver {
-	return s.resolver()
+// New creates a new [*State] for one document.
+func New() *State {
+	return &State{}
 }
 
 // ExcessiveAliasing returns what count reports for the document. It
