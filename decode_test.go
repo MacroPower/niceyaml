@@ -3506,7 +3506,7 @@ func TestDocument_Err(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, doc, bound.Document())
-		assert.Equal(t, "f.yaml: $.d: bad", err.Error())
+		assert.Equal(t, "f.yaml: document 2: $.d: bad", err.Error())
 
 		_, ok := bound.Range()
 		assert.False(t, ok)
@@ -6244,7 +6244,7 @@ func TestDocument_Bind(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, source, bound.Source())
-		assert.Equal(t, "plain", err.Error(), "the source has no name to add")
+		assert.Equal(t, "document 2: plain", err.Error(), "the source has no name to add")
 
 		_, resolved := bound.Range()
 		require.False(t, resolved)

@@ -1381,16 +1381,64 @@ func (e *SourceError) findPassedLead() *SourceError {
 }
 
 // keepsMessage reports whether [SourceError.Error] returns the message of
-// e as it is, with no position or name in front. A binding that resolved
-// a location of its own writes its position. Any other binding keeps the
-// message when its source has no name, or when the first line names the
-// source already, as [SourceError.passedLead] finds.
+// e as it is, with no position, name, or document in front. A binding
+// that resolved a location of its own writes its position. Any other
+// binding keeps the message when the first line names the source already,
+// as [SourceError.passedLead] finds, or when [SourceError.place] has
+// nothing to put in front.
 func (e *SourceError) keepsMessage() bool {
 	if e.locErr == nil && !e.adopted {
 		return false
 	}
 
-	return e.source.Name() == "" || e.passedLead() != nil
+	return e.passedLead() != nil || e.place() == ""
+}
+
+// place returns what stands in front of the message of a binding that
+// writes no position: the name of its source, then the document
+// [SourceError.documentLabel] returns, each behind a colon, as
+// "cafe.yaml: document 3:". Either part stays out when e has none, and a
+// binding with neither has an empty place.
+func (e *SourceError) place() string {
+	name, doc := e.source.Name(), e.documentLabel()
+
+	switch {
+	case doc == "":
+		return suffixed(name)
+	case name == "":
+		return suffixed(doc)
+	default:
+		return name + ": " + doc + ":"
+	}
+}
+
+// suffixed returns s with a colon after it, or "" for an empty s.
+func suffixed(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	return s + ":"
+}
+
+// documentLabel returns the words that name the document of e in a
+// message with no position, as "document 3" does for the third document
+// of a file. No line says which document such an error is about, where a
+// position says it for every other error. The label is empty for a
+// binding that resolved a location, for one bound to no Node, and for
+// one in a source that holds a single document, which needs no telling
+// apart.
+func (e *SourceError) documentLabel() string {
+	if e.locErr == nil || e.node == nil {
+		return ""
+	}
+
+	docs, _ := e.node.source.documents() //nolint:errcheck // The syntax error of a document changes no count.
+	if len(docs) < 2 {
+		return ""
+	}
+
+	return "document " + oneBased(e.node.doc.index)
 }
 
 // holdsSource reports whether a child of e is bound to src. A child that
@@ -1643,8 +1691,8 @@ func (e *SourceError) Document() *Node {
 	return e.node.doc.node
 }
 
-// Message returns the text of the bound error with no position or path
-// in front: the message [NewError] or [WrapError] gave an [*Error],
+// Message returns the text of the bound error with no position, document,
+// or path in front: the message [NewError] or [WrapError] gave an [*Error],
 // without the path [Error.Error] puts before it, or the text of any other
 // error as it is. It is the text [SourceError.Excerpt] annotates a
 // location with, and the field a structured report such as a JSON line
@@ -1805,11 +1853,18 @@ func (e *SourceError) Errors() []*SourceError {
 // diagnostic that editors and build tools link to the line. An error
 // without a location, or one whose location does not resolve, has no
 // position to add, and the name then stands alone in front as "name: msg",
-// so an error from one file of many still says which file. The message
-// comes back as it is when the source has no name, and when the first
-// line of the message comes from a binding of the same source, which
-// puts the name or position there already. A first line from a binding
-// of another source names that source alone. The name then still goes in
+// so an error from one file of many still says which file. No line says
+// which document of the file such an error is about. In a source that
+// holds more than one document, the document of the [Node] it is bound to
+// therefore follows the name, counted from 1, as "name: document 3: msg".
+// A source with no name leads with the document, as "document 3: msg". An
+// error bound to no Node, such as one [Source.Bind] binds with no
+// location, names no document. The message comes back as it is when the
+// source has no name and no document to add. It also comes back as it is
+// when the first line of the message comes from a binding of the same
+// source, which puts the name or position there already. A first line
+// from a binding of another source names that source alone. The name
+// then still goes in
 // front when a child of the error is bound to this source. It stays out
 // when every child is bound to another, as under a wrapper around a join
 // of bindings from other files. A binding inside the message that leaves
@@ -1962,19 +2017,18 @@ func (e *SourceError) more(n int) string {
 }
 
 // prefixed returns msg behind the position e resolved to, behind the name of
-// its source, or as it is, by the rules [SourceError.Error] documents.
+// its source and the document it belongs to, or as it is, by the rules
+// [SourceError.Error] documents.
 func (e *SourceError) prefixed(msg string) string {
-	name := e.source.Name()
-
 	switch {
 	case e.locErr == nil && !e.adopted:
-		return prefix(formatPosition(name, e.loc.pos), msg)
+		return prefix(formatPosition(e.source.Name(), e.loc.pos), msg)
 
 	case e.keepsMessage():
 		return msg
 
 	default:
-		return prefix(name+":", msg)
+		return prefix(e.place(), msg)
 	}
 }
 
@@ -2088,11 +2142,11 @@ func oneBased(n int) string {
 	return strconv.Itoa(n + 1)
 }
 
-// prefix returns p and msg separated by a space, or p alone when msg is
-// empty.
+// prefix returns p and msg separated by a space, or the other one alone
+// when either is empty.
 func prefix(p, msg string) string {
-	if msg == "" {
-		return p
+	if p == "" || msg == "" {
+		return p + msg
 	}
 
 	return p + " " + msg

@@ -2537,6 +2537,35 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		)
 	})
 
+	t.Run("names the document in a file that holds several", func(t *testing.T) {
+		t.Parallel()
+
+		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+
+		source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n---\nkind: Wat\n", niceyaml.WithName("m.yaml"))
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 3)
+
+		err = docs[2].Validate(t.Context(), reg)
+		require.ErrorIs(t, err, schema.ErrNoMatch)
+		assert.Equal(t, stringtest.JoinLF(
+			"m.yaml: document 3: no matching schema",
+			"m.yaml: document 3: no schema directive",
+		), err.Error())
+		assert.Equal(t,
+			"m.yaml: document 3: no matching schema\n`-- no schema directive",
+			fmt.Sprintf("%+v", err),
+		)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Equal(t, "no matching schema", bound.Message())
+		assert.Equal(t, 2, bound.Document().DocumentIndex())
+	})
+
 	t.Run("reports ErrNoMatch alone when no resolver says more", func(t *testing.T) {
 		t.Parallel()
 

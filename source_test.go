@@ -2787,7 +2787,7 @@ func TestSource_Bind(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
-		assert.Equal(t, "two.yaml: far", err.Error())
+		assert.Equal(t, "two.yaml: document 2: far", err.Error())
 		assert.Same(t, docs[1], bound.Document())
 
 		rangeErr := bound.Unresolved()

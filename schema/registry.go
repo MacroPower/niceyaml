@@ -314,6 +314,9 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 //	├── no schema directive
 //	└── no catalog entry matches
 //
+// In a file that holds several documents, the message names the document
+// the lookup ran for, as "app.yaml: document 3: no matching schema".
+//
 // Returns [ErrResolve] if a resolver applied but could not name the schema, and
 // [ErrLoad] or [ErrCompile] if loading or compiling the schema fails. When
 // ctx ends before a resolver names a schema, or before Lookup finds that no

@@ -307,6 +307,196 @@ func TestSourceError_Error_Name(t *testing.T) {
 	}
 }
 
+func TestSourceError_Error_Document(t *testing.T) {
+	t.Parallel()
+
+	const input = "a: 1\n---\nb: 2\n---\nkind: Wat\nitems:\n  - x\n"
+
+	kindPath := paths.Root().Child("kind")
+	itemsPath := paths.Root().Child("items")
+
+	tcs := map[string]struct {
+		bind func(t *testing.T, source *niceyaml.Source, docs []*niceyaml.Node) error
+		want string
+		// The message of the binding, which carries no document.
+		message string
+		// The binding resolved a location, so its position stands in front.
+		located bool
+	}{
+		"a plain error names its document": {
+			bind: func(_ *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
+				return docs[2].Bind(errors.New("plain"))
+			},
+			want:    "m.yaml: document 3: plain",
+			message: "plain",
+		},
+		"an Error without a location names its document": {
+			bind: func(_ *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
+				return docs[0].Bind(niceyaml.NewError("bad"))
+			},
+			want:    "m.yaml: document 1: bad",
+			message: "bad",
+		},
+		"a path that does not resolve names its document": {
+			bind: func(_ *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
+				return docs[2].Bind(niceyaml.NewError("required", niceyaml.AtPath(itemsPath.Index(7))))
+			},
+			want:    "m.yaml: document 3: $.items[7]: required",
+			message: "required",
+		},
+		"a position says which document, so no document goes beside it": {
+			bind: func(_ *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
+				return docs[2].Bind(niceyaml.NewError("bad", niceyaml.AtPath(kindPath)))
+			},
+			want:    "m.yaml:5:7: $.kind: bad",
+			message: "bad",
+			located: true,
+		},
+		"each listed line without a position names its document": {
+			bind: func(_ *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
+				return docs[2].Bind(niceyaml.NewError("2 problems", niceyaml.WithErrors(
+					niceyaml.NewError("bad", niceyaml.AtPath(kindPath)),
+					errors.New("plain"),
+				)))
+			},
+			want: stringtest.JoinLF(
+				"m.yaml: document 3: 2 problems",
+				"m.yaml:5:7: $.kind: bad",
+				"m.yaml: document 3: plain",
+			),
+			message: "2 problems",
+		},
+		"a scoped Node names its document for an error that gains no location": {
+			bind: func(t *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
+				t.Helper()
+
+				return yamltest.At(t, docs[2], itemsPath).DecodeInto(t.Context(), nil)
+			},
+			want:    "m.yaml: document 3: decode target is not a non-nil pointer: got nil",
+			message: "decode target is not a non-nil pointer: got nil",
+		},
+		"an error of a Node's own operation names its document": {
+			bind: func(_ *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
+				_, err := docs[1].At(paths.Root().ChildAll())
+
+				return err //nolint:wrapcheck // The test inspects the error of the call.
+			},
+			want:    "m.yaml: document 2: resolve $.*: wildcard path matches any number of nodes",
+			message: "resolve $.*: wildcard path matches any number of nodes",
+		},
+		"the source binds an error with no location to no document": {
+			bind: func(_ *testing.T, source *niceyaml.Source, _ []*niceyaml.Node) error {
+				return source.Bind(errors.New("plain"))
+			},
+			want:    "m.yaml: plain",
+			message: "plain",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml"))
+
+			docs, err := source.Documents()
+			require.NoError(t, err)
+
+			err = tc.bind(t, source, docs)
+			require.EqualError(t, err, tc.want)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+			assert.Equal(t, tc.message, bound.Message())
+
+			_, ok := bound.Range()
+			assert.Equal(t, tc.located, ok)
+		})
+	}
+
+	t.Run("a source with one document names none", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("kind: Wat\n", niceyaml.WithName("m.yaml"))
+
+		require.EqualError(t, yamltest.Bind(t, source, errors.New("plain")), "m.yaml: plain")
+	})
+
+	t.Run("a source with no name leads with the document", func(t *testing.T) {
+		t.Parallel()
+
+		docs, err := niceyaml.NewSourceFromString(input).Documents()
+		require.NoError(t, err)
+
+		require.EqualError(t, docs[1].Bind(errors.New("plain")), "document 2: plain")
+		require.EqualError(t,
+			docs[2].Bind(niceyaml.NewError("bad", niceyaml.AtPath(kindPath))),
+			"5:7: $.kind: bad",
+		)
+	})
+
+	t.Run("a wrapper around a binding keeps the document the binding wrote", func(t *testing.T) {
+		t.Parallel()
+
+		docs, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml")).Documents()
+		require.NoError(t, err)
+
+		wrapped := fmt.Errorf("check: %w", docs[1].Bind(errors.New("plain")))
+		require.EqualError(t, wrapped, "check: m.yaml: document 2: plain")
+
+		// The binding names its document already, so binding the wrapper
+		// through another document adds none.
+		require.EqualError(t, docs[0].Bind(wrapped), "check: m.yaml: document 2: plain")
+	})
+
+	t.Run("a join of one binding per document names each", func(t *testing.T) {
+		t.Parallel()
+
+		docs, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml")).Documents()
+		require.NoError(t, err)
+
+		joined := errors.Join(
+			docs[0].Bind(errors.New("first")),
+			docs[2].Bind(errors.New("third")),
+		)
+
+		require.EqualError(t, joined, stringtest.JoinLF(
+			"m.yaml: document 1: first",
+			"m.yaml: document 3: third",
+		))
+		assert.Equal(t, stringtest.JoinLF(
+			"|-- m.yaml: document 1: first",
+			"`-- m.yaml: document 3: third",
+		), niceyaml.FormatError(joined, 2))
+	})
+
+	t.Run("a row of the tree names a document its parent does not", func(t *testing.T) {
+		t.Parallel()
+
+		docs, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml")).Documents()
+		require.NoError(t, err)
+
+		// The first nested error is bound to the second document, and the
+		// other binds with its parent to the first.
+		err = docs[0].Bind(niceyaml.NewError("summary", niceyaml.WithErrors(
+			docs[1].Bind(errors.New("elsewhere")),
+			errors.New("here"),
+		)))
+
+		require.EqualError(t, err, stringtest.JoinLF(
+			"m.yaml: document 1: summary",
+			"m.yaml: document 2: elsewhere",
+			"m.yaml: document 1: here",
+		))
+		assert.Equal(t, stringtest.JoinLF(
+			"m.yaml: document 1: summary",
+			"|-- document 2: elsewhere",
+			"`-- here",
+		), niceyaml.FormatError(err, 2))
+	})
+}
+
 func TestSourceError_Error_JoinLead(t *testing.T) {
 	t.Parallel()
 
@@ -7017,7 +7207,7 @@ func TestFormat(t *testing.T) {
 		assert.Equal(t, stringtest.JoinLF(
 			"|-- multi.yaml:1:4: $.a: not a number",
 			"|-- multi.yaml:3:4: $.a: not a number",
-			"|-- multi.yaml: 2 problems",
+			"|-- multi.yaml: document 3: 2 problems",
 			"|   `-- 6:4: $.b: not a string",
 			"`-- multi.yaml:8:1: $.c~: not allowed",
 			"",
@@ -7064,9 +7254,9 @@ func TestFormat(t *testing.T) {
 		)
 
 		assert.Equal(t, stringtest.JoinLF(
-			"|-- f.yaml: $.x[0]: gone",
+			"|-- f.yaml: document 1: $.x[0]: gone",
 			"|-- f.yaml:3:4: $.b: bad b",
-			"`-- f.yaml: plain",
+			"`-- f.yaml: document 2: plain",
 			"",
 			"   1 | a: 1",
 			"   2 | ---",

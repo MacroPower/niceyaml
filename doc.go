@@ -82,7 +82,9 @@
 // path in the one document of a source that holds one.
 // [SourceError.Error] puts the resolved position in front of the
 // message, or the name of the source alone when the error carries no
-// location, and runs over several lines when the message does. Under an
+// location, and runs over several lines when the message does. An error
+// with no position in a file of several documents names its document
+// behind the name, as "cafe.yaml: document 3: no matching schema". Under an
 // error that names no location, it lists the errors below, one per line
 // behind its own position. The message of a validator's report thus names
 // each violation wherever the error goes, as a wrapper from [fmt.Errorf]

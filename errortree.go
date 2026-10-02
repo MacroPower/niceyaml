@@ -66,7 +66,10 @@ type ErrorTree struct {
 // "name:line:col:" position [SourceError.Error] gives it, and
 // each child, a binding of its own from [SourceError.Errors],
 // carries the "line:col:" position its location resolved to without the
-// name, since the root names the source already. The children of a
+// name, since the root names the source already. A child with no
+// position likewise drops the document its message names, unless it is
+// bound to another document than its parent, and then it reads as
+// "document 2: msg". The children of a
 // binding sort by position within the source they are bound to, with the
 // sources in the order they first appear, since a line number counts only
 // in the source that holds it. Children whose location did not resolve
@@ -808,7 +811,10 @@ func trees(kids []positioned) []ErrorTree {
 // child bound to the same source when named is set, for a parent with no
 // text of its own. Otherwise a child bound to the same source carries the
 // "line:col:" its location resolved to in front of its message, without
-// the name the parent gives already. A child that wraps a binding through
+// the name the parent gives already. A child with no position carries
+// the document [SourceError.documentLabel] returns when it is bound to
+// another document than bound, or to one where bound has none. A child
+// that wraps a binding through
 // Errors alone, which add no text, reads as that binding does, unless the
 // child puts the name of its source in front, as [textBinding] describes.
 // A child behind a wrapper that adds text of its own, such as
@@ -846,8 +852,15 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 		if !named && src.Source() == bound.Source() {
 			if inner := src.texts().own; inner != text {
 				text = inner
-				if kid.located {
+
+				switch {
+				case kid.located:
 					text = prefix(editorPosition(kid.pos)+":", text)
+
+				case src.Document() != bound.Document():
+					// The parent names another document of the source, or
+					// none, so the child keeps the one it wrote.
+					text = prefix(suffixed(src.documentLabel()), text)
 				}
 			}
 		}

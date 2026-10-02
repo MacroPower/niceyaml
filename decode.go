@@ -1354,7 +1354,9 @@ func (n *Node) Source() *Source {
 // DocumentIndex returns the 0-indexed position within the file of the
 // document the Node belongs to. A Node from [Node.At] reports the index
 // of the document that holds it, and the index of the node itself within
-// a sequence is the last segment of [Node.Path].
+// a sequence is the last segment of [Node.Path]. The message of a bound
+// error counts documents from 1, as it counts lines, so "document 3" in
+// [SourceError.Error] is the document at index 2.
 func (n *Node) DocumentIndex() int {
 	return n.doc.index
 }
@@ -1674,12 +1676,13 @@ func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []
 // [go.jacobcolvin.com/niceyaml/paths] bound through the root of a
 // document, binds all the same, and the bound
 // error names the source in front of the message, as "name: msg". An
-// error from one file of many thus still says which file. The message of err
-// stays as it is, and the position goes in front of it, so bind such an
-// error before adding context with [fmt.Errorf] to keep the position
-// beside the message:
-//
-//	fmt.Errorf("document %d: %w", i, doc.Bind(err))
+// error from one file of many thus still says which file. In a source
+// that holds more than one document, the document stands behind the name,
+// counted from 1, as in "name: document 3: msg", so an error from one
+// document of many says which document. The message of err stays as it
+// is, and the position goes in front of it, so bind an error before
+// adding context with [fmt.Errorf] to keep the position beside the
+// message.
 //
 // [Source.Bind] binds an error to the document its location falls in,
 // so a caller that holds the source rather than a document binds there.
