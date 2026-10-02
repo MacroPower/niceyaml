@@ -2506,7 +2506,7 @@ func TestSource_Bind(t *testing.T) {
 		doc, err := one.Document()
 		require.NoError(t, err)
 
-		err = one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("zz"))))
+		err = one.Bind(niceyaml.NewError("bad", niceyaml.AtExactPath(paths.Root().Child("zz"))))
 
 		var bound *niceyaml.SourceError
 

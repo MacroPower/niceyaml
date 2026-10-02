@@ -251,8 +251,11 @@
 //	}
 //
 // A decode of a Config that holds Hours under spec reports
-// $.spec.hours.close. [Rebase] puts the result of a check run on a value
-// after Decode returns under the path of that value the same way.
+// $.spec.hours.close. A path may name a key the document leaves out, as
+// a check for a required field does, and the error then binds at the key
+// of the mapping that lacks it. [Rebase] puts the result of a check run
+// on a value after Decode returns under the path of that value the same
+// way.
 //
 // [Node.DecodeInto] runs the same pipeline on a value you already hold,
 // such as one pre-populated with defaults.

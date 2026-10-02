@@ -476,6 +476,11 @@ func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node, idx *m
 // Without n, which a [Schema.ValidateValue] caller does not hand over, the
 // path spells each key as the decoder does. The index idx finds the
 // members of the mappings in the document of n.
+//
+// The path is exact, as [niceyaml.AtExactPath] sets one. A path that
+// [sourcePath] could not spell selects nothing or another entry, so the
+// error binds with no position, where a mapping nearby would be a wrong
+// one.
 func leafError(leaf *jsonschema.ValidationError, n *niceyaml.Node, idx *memberIndex) *niceyaml.Error {
 	path := sourcePath(rootOf(n), idx, leaf.InstanceSegments())
 
@@ -483,7 +488,7 @@ func leafError(leaf *jsonschema.ValidationError, n *niceyaml.Node, idx *memberIn
 		path = path.Key()
 	}
 
-	return niceyaml.NewError(leaf.Message, niceyaml.AtPath(path))
+	return niceyaml.NewError(leaf.Message, niceyaml.AtExactPath(path))
 }
 
 // rootOf returns the tree of n, or nil for no node.

@@ -2320,8 +2320,13 @@ func TestNode_Bind_Scope(t *testing.T) {
 			want: "cfg.yaml:5:7: $.shops[0].hours.close~: bad",
 			path: "$.shops[0].hours.close~",
 		},
-		"a path that does not resolve joins the scope": {
+		"a key the scope leaves out binds at the key of the scope": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("nope"))),
+			want: "cfg.yaml:3:5: $.shops[0].hours.nope: bad",
+			path: "$.shops[0].hours.nope",
+		},
+		"an exact path that does not resolve joins the scope": {
+			err:  niceyaml.NewError("bad", niceyaml.AtExactPath(paths.Root().Child("nope"))),
 			want: "cfg.yaml: $.shops[0].hours.nope: bad",
 			path: "$.shops[0].hours.nope",
 		},

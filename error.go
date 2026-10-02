@@ -206,6 +206,9 @@ type Error struct {
 	// Rebase sets, when rebased, since the root is a base like any other.
 	base    paths.Path
 	hasPath bool
+	// The path came from AtExactPath, so it binds at the node it selects
+	// or nowhere.
+	exact   bool
 	rebased bool
 }
 
@@ -394,12 +397,14 @@ func (j *rebasedJoinError) As(target any) bool {
 	return ok && x.As(target)
 }
 
-// ErrorOption configures an [Error]. [AtPath] sets its path, [AtPosition]
-// or [AtRange] sets its position or range, and the last of those two
-// given wins. [WithErrors] adds nested errors.
+// ErrorOption configures an [Error]. [AtPath] or [AtExactPath] sets its
+// path, and the last of those two given wins. [AtPosition] or [AtRange]
+// sets its position or range, and the last of those two given wins.
+// [WithErrors] adds nested errors.
 //
 // Available options:
 //   - [AtPath]
+//   - [AtExactPath]
 //   - [AtPosition]
 //   - [AtRange]
 //   - [WithErrors]
@@ -425,9 +430,40 @@ type ErrorOption func(e *Error)
 // from SourceError.Path starts at that root already, so it binds through
 // the root of the document or through [Source.Bind], and a scoped Node
 // joins it under its own path again.
+//
+// The document may leave the value out, as it does when a check reports
+// a required field. The path then selects nothing, and the error binds at
+// the key of the mapping that lacks the value, as [SourceError.Nearest]
+// describes. A check thus names the field whether the document holds it
+// or not:
+//
+//	func (s Server) Validate() error {
+//		if s.Name == "" {
+//			return niceyaml.NewError("name is required", niceyaml.AtPath(paths.Root().Child("name")))
+//		}
+//
+//		return nil
+//	}
+//
+// [AtExactPath] sets a path that binds at the node it selects or nowhere.
 func AtPath(p paths.Path) ErrorOption {
 	return func(e *Error) {
-		e.path, e.hasPath = p, true
+		e.path, e.hasPath, e.exact = p, true, false
+	}
+}
+
+// AtExactPath is an [ErrorOption] that sets the YAML path of the value
+// the error is about, as [AtPath] does, for a path that must select a
+// node. It replaces a path set before it. When the document holds no
+// node at the path, the error binds with no position, and
+// [SourceError.Unresolved] gives the reason, where a path from AtPath
+// falls back to the mapping that lacks the key. A producer that derives
+// its paths from decoded data uses it, as a schema validator does. Such
+// a producer cannot always spell the key of a value, and a path that
+// selects nothing must then mark nothing, not a mapping nearby.
+func AtExactPath(p paths.Path) ErrorOption {
+	return func(e *Error) {
+		e.path, e.hasPath, e.exact = p, true, true
 	}
 }
 
@@ -568,12 +604,14 @@ func (e *Error) LogValue() slog.Value {
 }
 
 // locus is the location an [Error] carries: a path when hasPath, a
-// [position.Position] or a [position.Range] in loc, or both. The zero
-// locus is no location.
+// [position.Position] or a [position.Range] in loc, or both. A path from
+// [AtExactPath] is exact, so it binds at the node it selects or nowhere.
+// The zero locus is no location.
 type locus struct {
 	loc     any
 	path    paths.Path
 	hasPath bool
+	exact   bool
 }
 
 // rebase returns l with base in front of its path. A locus with no path
@@ -589,7 +627,7 @@ func (l locus) rebase(base paths.Path) locus {
 // locus returns the location e carries itself, without looking through
 // its cause chain or applying its base.
 func (e *Error) locus() locus {
-	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath}
+	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath, exact: e.exact}
 }
 
 // addsNothing reports whether e adds nothing to the error it wraps: e is
@@ -736,11 +774,14 @@ func (e *Error) textCause() error {
 
 // location is a resolved error location: the position the message reports,
 // the range to highlight when the error carried one, and the token a path
-// resolved to when the error carried a path.
+// resolved to when the error carried a path. For a path that names a key
+// the document leaves out, the token is the key of the mapping that lacks
+// it, and near is the path of that mapping.
 type location struct {
-	rng *position.Range
-	tk  *token.Token
-	pos position.Position
+	rng  *position.Range
+	tk   *token.Token
+	near *paths.Path
+	pos  position.Position
 }
 
 // locate resolves l, the location of an [Error], and returns the node it
@@ -769,7 +810,7 @@ func locate(b binder, l locus) (location, *Node, error) {
 			return location{}, b.node, fmt.Errorf("%w: %s", ErrAmbiguousPath, l.path)
 		}
 
-		return locatePath(b, l.path)
+		return locatePath(b, l.path, l.exact)
 	}
 
 	return location{}, b.node, errUnlocated
@@ -778,11 +819,13 @@ func locate(b binder, l locus) (location, *Node, error) {
 // locatePath resolves path from the root of the document of the node b
 // binds with, or of the one document of the source when b routes.
 // [binder.scoped] put the scope of that node in front of the path
-// already, so the path reads from the root. A source that holds no
-// document, holds several, or does not parse has no document to resolve
-// the path in, so the location is [ErrPathNeedsDocument] wrapping that
-// reason.
-func locatePath(b binder, path paths.Path) (location, *Node, error) {
+// already, so the path reads from the root. A path that names a key the
+// document leaves out resolves to the key of the mapping that lacks it,
+// as [Node.nearestLocation] finds it, unless the path is exact. A source
+// that holds no document, holds several, or does not parse has no
+// document to resolve the path in, so the location is
+// [ErrPathNeedsDocument] wrapping that reason.
+func locatePath(b binder, path paths.Path, exact bool) (location, *Node, error) {
 	node := b.node
 
 	if node == nil && b.route {
@@ -798,8 +841,18 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 		return location{}, nil, fmt.Errorf("%w: %s", ErrPathNeedsDocument, path)
 	}
 
-	loc, err := node.doc.node.pathLocation(path)
+	root := node.doc.node
+
+	loc, err := root.pathLocation(path)
 	if err != nil {
+		if exact {
+			return location{}, node, err
+		}
+
+		if near, ok := root.nearestLocation(path, err); ok {
+			return near, node, nil
+		}
+
 		return location{}, node, err
 	}
 
@@ -865,10 +918,16 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 // annotates each child with its message, with distant locations in
 // separate hunks.
 //
-// A location that does not resolve, such as a path the document does not
-// hold or a position on a line the source does not have, costs the
-// SourceError its position. An error that carries no location never had
-// one. [SourceError.Error] then puts the name of the source alone in
+// A path from [AtPath] that names a key the document leaves out, as an
+// error about a required field does, binds at the key of the mapping
+// that lacks the value. [SourceError.Nearest] reports that mapping, and
+// the message keeps the path the error carries.
+//
+// Any other location that does not resolve costs the SourceError its
+// position. Such locations include an index past the end of a sequence,
+// a path from [AtExactPath] that selects nothing, and a position on a
+// line the source does not have. An error that carries no location never
+// had one. [SourceError.Error] then puts the name of the source alone in
 // front of the message, [SourceError.Range] reports false, and
 // [SourceError.Unresolved] returns the reason for the first case and nil
 // for the second.
@@ -1485,7 +1544,7 @@ func (e *SourceError) Source() *Source {
 // position or a range falls in the document whose [Node.Span] holds its
 // line, and a path falls in the one document of the source. The error
 // stays bound to that root when its location does not resolve there, as
-// with a path the document does not hold or a column before the first.
+// with a path that selects nothing or a column before the first.
 // Source.Bind binds an error to none when it carries no location or the
 // source does not parse. It also binds to none a position or a range on
 // a line no document holds, and a path in a source that holds several
@@ -2058,6 +2117,9 @@ func writeString(f fmt.State, s string) {
 // spaces before it, or on a later line of a multi-line token, the range
 // starts where the content of the token starts instead. That start lies
 // at an earlier column or line, or at a later column past the spaces.
+// For a path that names a key the document leaves out, the range covers
+// the key of the mapping that lacks it, as [SourceError.Nearest]
+// describes.
 // The range is in the coordinates of the view [Source.Lines] returns, where
 // line 0 is line 1 of the text.
 //
@@ -2084,8 +2146,11 @@ func (e *SourceError) Range() (position.Range, bool) {
 // line the source does not hold or at a column before the first,
 // [ErrPathNeedsDocument] for a path bound through [Source.Bind] in a
 // source with no single document, the resolution error from
-// [go.jacobcolvin.com/niceyaml/paths] for a path the document does not
-// hold, or [ErrNoLocation] for a path whose token carries no position.
+// [go.jacobcolvin.com/niceyaml/paths] for a path that selects nothing
+// in the document, or [ErrNoLocation] for a path whose token carries no
+// position. A path that names a key a mapping leaves out resolves to the
+// key of that mapping, as [SourceError.Nearest] describes, so it has no
+// reason.
 // For a path that names the entries of several keys of a decoded map, it
 // is [ErrAmbiguousPath]. A renderer names the reason in place of the
 // excerpt:
@@ -2103,6 +2168,37 @@ func (e *SourceError) Unresolved() error {
 	}
 
 	return e.locErr
+}
+
+// Nearest returns the path of the mapping the error is bound at, and
+// true, when the path the error carries names a key the document leaves
+// out. An error about a missing value, such as a required field, carries
+// the path the value would have, and that path selects nothing. Binding
+// locates such an error at the key of the mapping that lacks the value,
+// the nearest node above the path that the document holds:
+//
+//	niceyaml.NewError("name is required", niceyaml.AtPath(paths.Root().Child("server", "name")))
+//	// cfg.yaml:3:1: $.server.name: name is required
+//
+// [SourceError.Range] then covers the key `server`, [SourceError.Path]
+// and the message keep the path as the error carries it, and
+// [SourceError.Unresolved] returns nil. A mapping that is an element of a
+// sequence, or the root of the document, has no key, so the range covers
+// its first key instead, as it does for an error at the mapping itself.
+//
+// [go.jacobcolvin.com/niceyaml/paths.Resolver.Nearest] finds the mapping
+// and says which paths have one. A path that misspells a name binds at
+// the nearest mapping the same way, so a caller that must tell an
+// approximate location from an exact one checks Nearest. It reports
+// false for an error bound at the node its path selects, for one with no
+// path, and for one whose location did not resolve. A nil SourceError
+// reports false.
+func (e *SourceError) Nearest() (paths.Path, bool) {
+	if e == nil || e.locErr != nil || e.loc.near == nil {
+		return paths.Path{}, false
+	}
+
+	return *e.loc.near, true
 }
 
 // rangeOf returns the one range that spans the highlight ranges from

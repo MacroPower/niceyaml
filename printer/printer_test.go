@@ -428,7 +428,7 @@ func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
 	// The reason a location did not resolve names the path, which spells a
 	// key of the document, so it gets the same treatment as the tree.
 	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
-	bound := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("mi\x1b[31mss"))))
+	bound := source.Bind(niceyaml.NewError("bad", niceyaml.AtExactPath(paths.Root().Child("mi\x1b[31mss"))))
 
 	got = p.PrintError(bound)
 	assert.NotContains(t, got, "\x1b")
@@ -441,7 +441,7 @@ func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
 	// spell the key the same way only if the width of a tab does not
 	// depend on its column.
 	named := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml"))
-	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("ab\tc"))))
+	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtExactPath(paths.Root().Child("ab\tc"))))
 
 	got = p.PrintError(bound)
 	assert.NotContains(t, got, "\u2409")
@@ -453,7 +453,7 @@ func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
 
 	// The reason stays on one row, so a line feed in the key is a picture
 	// there while it starts a new row in the tree.
-	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("x\ny\tz"))))
+	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtExactPath(paths.Root().Child("x\ny\tz"))))
 
 	assert.Equal(t, stringtest.JoinLF(
 		"cfg.yaml: $.'x",

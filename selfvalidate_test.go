@@ -740,7 +740,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"field go-yaml leaves as it was": {
 				input: "wrapped: 1\n",
 				start: parent{hours: hours{Open: "09:00", Close: "08:00"}},
-				err:   "$.hours.close: closes before it opens",
+				err:   "1:1: $.hours.close: closes before it opens",
 			},
 			"field that decodes its struct": {
 				input: "wrapped: -1\n",
@@ -758,12 +758,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"field of a struct in an interface": {
 				input: "wrapped: 1\n",
 				start: parent{Any: opened{hours: hours{Open: "09:00", Close: "08:00"}}},
-				err:   "$.any.hours.close: closes before it opens",
+				err:   "1:1: $.any.hours.close: closes before it opens",
 			},
 			"field that decodes a struct in an interface": {
 				input: "wrapped: 1\n",
 				start: parent{Any: wrapped{innerPositive: -1}},
-				err:   "$.any: negative",
+				err:   "1:1: $.any: negative",
 			},
 			"field that decodes a struct in an array in an interface": {
 				input: "wrapped: 1\n",
@@ -1105,16 +1105,16 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}{
 			"the head walks first": {
 				port: -1,
-				err:  "$.head.port: port out of range",
+				err:  "1:1: $.head.port: port out of range",
 			},
 			"the parent walks first": {
 				port:        -1,
 				parentFirst: true,
-				err:         "$.parent.link.back.port: port out of range",
+				err:         "1:1: $.parent.link.back.port: port out of range",
 			},
 			"a cycle that passes": {
 				port: 80,
-				err:  "$.parent: parent ran",
+				err:  "1:1: $.parent: parent ran",
 			},
 		}
 
@@ -1894,7 +1894,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				target: func() any {
 					return &pointers{M: map[*[]any]signed{{1, 2}: {N: -1}}}
 				},
-				want: "$.m.'(*[]interface {})'.n: negative -1",
+				want: "1:1: $.m.'(*[]interface {})'.n: negative -1",
 			},
 			"slices of one type": {
 				target: func() any {
@@ -1907,7 +1907,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				target: func() any {
 					return &pointers{M: map[*[]any]signed{cycle(): {N: -1}}}
 				},
-				want: "$.m.'(*[]interface {})'.n: negative -1",
+				want: "1:1: $.m.'(*[]interface {})'.n: negative -1",
 			},
 			"pointer to a slice that holds itself": {
 				target: func() any {
@@ -1915,19 +1915,19 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 					return &pointersToPointers{M: map[**[]any]signed{&p: {N: -1}}}
 				},
-				want: "$.m.'(*[]interface {})'.n: negative -1",
+				want: "1:1: $.m.'(*[]interface {})'.n: negative -1",
 			},
 			"slice that holds itself behind an interface": {
 				target: func() any {
 					return &interfaces{M: map[any]signed{cycle(): {N: -1}}}
 				},
-				want: "$.m.'(*[]interface {})'.n: negative -1",
+				want: "1:1: $.m.'(*[]interface {})'.n: negative -1",
 			},
 			"struct behind an interface": {
 				target: func() any {
 					return &interfaces{M: map[any]signed{&point{X: 1, Y: 2}: {N: -1}}}
 				},
-				want: "$.m.'(*niceyaml_test.point)'.n: negative -1",
+				want: "1:1: $.m.'(*niceyaml_test.point)'.n: negative -1",
 			},
 			"int behind an interface": {
 				target: func() any {
@@ -1935,7 +1935,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 					return &interfaces{M: map[any]signed{&n: {N: -1}}}
 				},
-				want: "$.m.'(*int)'.n: negative -1",
+				want: "1:1: $.m.'(*int)'.n: negative -1",
 			},
 		}
 
@@ -2409,7 +2409,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"map of strings in a map of any the caller filled": {
 				target: &withExtra{Extra: map[string]any{"l": labels{"b": ""}}},
 				input:  "name: x\n",
-				want:   "$.extra.l.b: empty label",
+				want:   "1:1: $.extra.l.b: empty label",
 			},
 			"validator deep in a map of any the caller filled": {
 				target: &withExtra{Extra: map[string]any{
@@ -2427,7 +2427,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"validator beside a map of any that holds itself": {
 				target: &withExtra{Extra: loop},
 				input:  "name: x\n",
-				want:   "$.extra.v.n: negative -1",
+				want:   "1:1: $.extra.v.n: negative -1",
 			},
 			"type that holds itself": {
 				target: &tree{},

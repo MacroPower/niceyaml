@@ -1292,6 +1292,33 @@ func (n *Node) pathLocation(path paths.Path) (location, error) {
 	return location{pos: position.NewFromToken(tk), tk: tk}, nil
 }
 
+// nearestLocation returns the location an error binds at when its path
+// names a key the document leaves out: the key of the mapping that lacks
+// it, as [paths.Resolver.Nearest] finds that mapping, with path
+// resolving from the scope. The reason is the error the path failed to
+// resolve with. It reports false when that reason is not
+// [paths.ErrNotFound], when no mapping lacks the key, and when the key of
+// that mapping carries no position.
+func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
+	if !errors.Is(reason, paths.ErrNotFound) {
+		return location{}, false
+	}
+
+	resolver := n.doc.pathResolver()
+
+	near, ok := resolver.Nearest(n.base.Join(path))
+	if !ok {
+		return location{}, false
+	}
+
+	tk, err := resolver.Token(near.Key())
+	if err != nil || tk == nil || tk.Position == nil {
+		return location{}, false
+	}
+
+	return location{pos: position.NewFromToken(tk), tk: tk, near: &near}, true
+}
+
 // Validate runs each validator on the node in the order given and stops
 // at the first that fails. It is the validation step of [Node.Decode] on
 // its own, for a caller that checks a document without decoding it:
