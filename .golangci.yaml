@@ -156,6 +156,12 @@ linters:
       expected-actual:
         pattern: ^want
 
+    testpackage:
+      # The default skips export_test.go and *_internal_test.go, which
+      # lets a test reach unexported code. No file name matches this
+      # pattern, so every test file outside package main is checked.
+      skip-regexp: ^$
+
     sloglint:
       attr-only: true
       static-msg: true
