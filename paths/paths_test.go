@@ -330,6 +330,103 @@ func TestPath_Join(t *testing.T) {
 	})
 }
 
+func TestPath_CutPrefix(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		p      paths.Path
+		prefix paths.Path
+		want   string
+		ok     bool
+	}{
+		"root from root": {
+			p:      paths.Root(),
+			prefix: paths.Root(),
+			want:   "$",
+			ok:     true,
+		},
+		"root from path": {
+			p:      paths.Root().Child("spec", "hours"),
+			prefix: paths.Root(),
+			want:   "$.spec.hours",
+			ok:     true,
+		},
+		"path from itself": {
+			p:      paths.Root().Child("spec", "hours"),
+			prefix: paths.Root().Child("spec", "hours"),
+			want:   "$",
+			ok:     true,
+		},
+		"leading selectors": {
+			p:      paths.Root().Child("spec", "hours", "open"),
+			prefix: paths.Root().Child("spec", "hours"),
+			want:   "$.open",
+			ok:     true,
+		},
+		"keeps every selector kind": {
+			p:      paths.Root().Child("items").Index(0).Recursive("name").IndexAll().Key(),
+			prefix: paths.Root().Child("items").Index(0),
+			want:   "$..name[*]~",
+			ok:     true,
+		},
+		"longer prefix": {
+			p:      paths.Root().Child("spec"),
+			prefix: paths.Root().Child("spec", "hours"),
+			want:   "$.spec",
+		},
+		"another name": {
+			p:      paths.Root().Child("spec", "hours"),
+			prefix: paths.Root().Child("meta"),
+			want:   "$.spec.hours",
+		},
+		"another index": {
+			p:      paths.Root().Child("items").Index(1).Child("name"),
+			prefix: paths.Root().Child("items").Index(0),
+			want:   "$.items[1].name",
+		},
+		"wildcard against an index": {
+			p:      paths.Root().Child("items").Index(0).Child("name"),
+			prefix: paths.Root().Child("items").IndexAll(),
+			want:   "$.items[0].name",
+		},
+		"key against its value": {
+			p:      paths.Root().Child("spec").Key(),
+			prefix: paths.Root().Child("spec").Child("hours"),
+			want:   "$.spec~",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := tc.p.CutPrefix(tc.prefix)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got.String())
+			assert.Equal(t, paths.MustParse(tc.want), got)
+
+			if ok {
+				assert.Equal(t, tc.p, tc.prefix.Join(got))
+			}
+		})
+	}
+
+	t.Run("leaves both paths as they were", func(t *testing.T) {
+		t.Parallel()
+
+		p := paths.Root().Child("spec", "hours", "open")
+		prefix := paths.Root().Child("spec")
+
+		rest, ok := p.CutPrefix(prefix)
+		require.True(t, ok)
+
+		assert.Equal(t, "$.hours.open.x", rest.Child("x").String())
+		assert.Equal(t, "$.hours.open", rest.String())
+		assert.Equal(t, "$.spec.hours.open", p.String())
+		assert.Equal(t, "$.spec", prefix.String())
+	})
+}
+
 func TestPath_IsRoot(t *testing.T) {
 	t.Parallel()
 

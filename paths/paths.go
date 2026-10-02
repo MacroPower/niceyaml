@@ -269,6 +269,32 @@ func (p Path) Join(qs ...Path) Path {
 	return Path{segments: merged}
 }
 
+// CutPrefix returns the path without the leading selectors of prefix and
+// reports whether the path starts with them, as [strings.CutPrefix] does
+// for a string. It undoes [Path.Join], so a path that reads from the root
+// of a document reads from one node of it:
+//
+//	hours := paths.Root().Child("spec", "hours")
+//	open := paths.Root().Child("spec", "hours", "open")
+//	open.CutPrefix(hours) // $.open, true
+//
+// A path that does not start with prefix comes back as it is, with false.
+// Every path starts with the root, and a path cut by itself is the root.
+// Two selectors match when they are equal, so `[*]` matches `[*]` and
+// not the index of an element it selects.
+func (p Path) CutPrefix(prefix Path) (Path, bool) {
+	n := len(prefix.segments)
+	if n > len(p.segments) || !slices.Equal(p.segments[:n], prefix.segments) {
+		return p, false
+	}
+
+	if n == len(p.segments) {
+		return Root(), true
+	}
+
+	return Path{segments: slices.Clone(p.segments[n:])}, true
+}
+
 // IsRoot reports whether the path holds no selectors, so it names the
 // document root as [Root] does.
 func (p Path) IsRoot() bool {
