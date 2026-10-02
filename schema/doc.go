@@ -54,6 +54,12 @@
 // [go.jacobcolvin.com/x/jsonschema] itself, such as one built from a Go
 // type, goes through [FromJSONSchema].
 //
+// The error of each violation wraps a [*Violation], which names the JSON
+// Schema keyword the value fails and where that keyword stands in the
+// schema. A program that suppresses a rule, rewords a message, or writes
+// a report of its own reads the Violation and leaves the text of the
+// message alone.
+//
 // Settings of the JSON Schema library pass through [WithJSONSchemaOptions].
 // Its JSONSchema prefix shows the dependency at the call site, as the YAML
 // prefix does on the options of the root package that pass go-yaml values

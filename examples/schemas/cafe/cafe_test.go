@@ -23,27 +23,16 @@ func cafeConfig(ctx context.Context, in string) (*cafe.Config, error) {
 	return &c, nil
 }
 
-// violationPaths returns the path of each violation in err, which must wrap
-// a [*niceyaml.SourceError]. When err holds a single violation, that
-// SourceError is the violation.
-func violationPaths(t *testing.T, err error) []string {
-	t.Helper()
-
-	var bound *niceyaml.SourceError
-
-	require.ErrorAs(t, err, &bound)
-
-	violations := bound.Errors()
-	if len(violations) == 0 {
-		violations = []*niceyaml.SourceError{bound}
-	}
-
+// violationPaths returns the path of each error bound in the tree of err
+// that carries one. The summary of several violations carries none, and
+// neither does a form under a value that matches no branch of an anyOf.
+func violationPaths(err error) []string {
 	got := []string{}
-	for _, violation := range violations {
-		path, ok := violation.Path()
-		require.True(t, ok)
 
-		got = append(got, path.String())
+	for bound := range niceyaml.AllBindings(err) {
+		if path, ok := bound.Path(); ok {
+			got = append(got, path.String())
+		}
 	}
 
 	return got
@@ -68,15 +57,15 @@ func TestCafeBrokenConfig(t *testing.T) {
 	t.Parallel()
 
 	_, err := cafeConfig(t.Context(), cafe.BrokenYAML)
-	require.EqualError(t, err, "3 schema violations", "broken config should fail schema validation")
+	require.EqualError(t, err, "2 schema violations", "broken config should fail schema validation")
 
 	// Both bad values also fail the plain decode, so the paths confirm
 	// that the schema rejected each one. The SLA schema admits a string
-	// or null, and the bad string fails both, so the schema reports the
-	// SLA twice.
+	// or null, and the bad string is no null, so the schema reports the
+	// pattern the string breaks and nothing for the null.
 	assert.ElementsMatch(t,
-		[]string{"$.spec.sla", "$.spec.sla", "$.spec.hours.days"},
-		violationPaths(t, err),
+		[]string{"$.spec.sla", "$.spec.hours.days"},
+		violationPaths(err),
 	)
 }
 
@@ -122,7 +111,7 @@ func TestCafeSLA(t *testing.T) {
 
 			// A schema violation carries the location of the value, which a
 			// decode failure inside UnmarshalText would not.
-			got := violationPaths(t, err)
+			got := violationPaths(err)
 			require.NotEmpty(t, got)
 
 			for _, path := range got {
@@ -167,7 +156,7 @@ func TestCafeHours(t *testing.T) {
 			// The schema admits both times, so the failure comes from
 			// Hours.Validate, and the decode reports it under the hours.
 			require.ErrorContains(t, err, "open must be before close")
-			assert.Equal(t, []string{"$.spec.hours.open"}, violationPaths(t, err))
+			assert.Equal(t, []string{"$.spec.hours.open"}, violationPaths(err))
 		})
 	}
 }

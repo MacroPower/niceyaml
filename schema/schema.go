@@ -161,6 +161,7 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // checks a document against the schema and reports constraint violations
 // as [*niceyaml.Error] values that carry the YAML path to each failing
 // location for [go.jacobcolvin.com/niceyaml/printer.Printer] to display.
+// Each one wraps a [*Violation] that names the keyword the value fails.
 // [Schema.Validate] checks a node, which is the whole document for the
 // root [niceyaml.Node] of a document and one value inside it for a Node
 // from [niceyaml.Node.At]. [Schema.ValidateValue] checks decoded data,
@@ -336,7 +337,12 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // Returns nil when data conforms. On a constraint violation, returns a
 // [*niceyaml.Error]. A single violation carries its YAML path on the error
 // itself, and several violations become a count summary whose nested errors
-// each carry the path to one failing location. Any other failure wraps
+// each carry the path to one failing location. The error of each violation
+// wraps a [*Violation] that names the keyword the value fails and where
+// that keyword stands in the schema. A value that matches no branch of an
+// anyOf or oneOf counts as one violation, which nests the failures of
+// each branch the value could have been meant for, as [Violation]
+// describes. Any other failure wraps
 // [ErrValidate], including a $ref the validator cannot resolve, since no
 // location in the document is at fault for that.
 //
@@ -433,62 +439,6 @@ func unresolvedRefs(ve *jsonschema.ValidationError) []error {
 	}
 
 	return errs
-}
-
-// newValidationError converts a [*jsonschema.ValidationError] into a
-// [*niceyaml.Error].
-//
-// The conversion flattens the error tree to its concrete failures with
-// [jsonschema.ValidationError.Leaves]. A single failure becomes the main
-// error and carries its own path, so the printer highlights that location
-// and [niceyaml.Error.Path] reports it. Several failures become a count
-// summary with no path of its own, and each nested error carries the path
-// to one failing location. The index idx finds the members of the
-// mappings in the document of n.
-func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node, idx *memberIndex) *niceyaml.Error {
-	leaves := ve.Leaves()
-
-	switch len(leaves) {
-	case 0:
-		return niceyaml.NewError(ve.Message)
-	case 1:
-		return leafError(leaves[0], n, idx)
-	}
-
-	causes := make([]error, 0, len(leaves))
-	for _, leaf := range leaves {
-		causes = append(causes, leafError(leaf, n, idx))
-	}
-
-	return niceyaml.NewError(
-		fmt.Sprintf("%d schema violations", len(leaves)),
-		niceyaml.WithErrors(causes...),
-	)
-}
-
-// leafError converts one concrete failure into a [*niceyaml.Error] carrying
-// the YAML path to the failing location. A failure that constrains the key
-// of a member, such as an additional property, points at the key through
-// [paths.Path.Key], and any other at the value.
-//
-// The path spells each key as the source does, so a key the decoder
-// respells, such as 0x10 for the member name 16, still names its member.
-// Without n, which a [Schema.ValidateValue] caller does not hand over, the
-// path spells each key as the decoder does. The index idx finds the
-// members of the mappings in the document of n.
-//
-// The path is exact, as [niceyaml.AtExactPath] sets one. A path that
-// [sourcePath] could not spell selects nothing or another entry, so the
-// error binds with no position, where a mapping nearby would be a wrong
-// one.
-func leafError(leaf *jsonschema.ValidationError, n *niceyaml.Node, idx *memberIndex) *niceyaml.Error {
-	path := sourcePath(rootOf(n), idx, leaf.InstanceSegments())
-
-	if leaf.TargetsKey() {
-		path = path.Key()
-	}
-
-	return niceyaml.NewError(leaf.Message, niceyaml.AtExactPath(path))
 }
 
 // rootOf returns the tree of n, or nil for no node.
