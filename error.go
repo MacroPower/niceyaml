@@ -2587,7 +2587,9 @@ func (e *SourceError) Unresolved() error {
 // [go.jacobcolvin.com/niceyaml/paths.Resolver.Nearest] finds the mapping
 // and says which paths have one. A path that misspells a name binds at
 // the nearest mapping the same way, so a caller that must tell an
-// approximate location from an exact one checks Nearest. It reports
+// approximate location from an exact one checks Nearest. The error
+// [Node.At] and [Node.Ranges] return for such a path binds there too,
+// with "not found" as its message. Nearest reports
 // false for an error bound at the node its path selects, for one with no
 // path, and for one whose location did not resolve. A nil SourceError
 // reports false.

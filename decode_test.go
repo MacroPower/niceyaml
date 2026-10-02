@@ -7006,6 +7006,176 @@ func TestDocument_Decode_ValidatorAmbiguousErrorBoundToReceiver(t *testing.T) {
 	}
 }
 
+func TestNode_At_NotFound(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString(stringtest.Input(`
+		# c
+		name: s
+		hours:
+		  open: 9
+		items:
+		  - x
+		  - k: 1
+	`), niceyaml.WithName("c.yaml"))
+
+	doc, err := source.Document()
+	require.NoError(t, err)
+
+	hoursPath := paths.Root().Child("hours")
+	itemsPath := paths.Root().Child("items")
+
+	tcs := map[string]struct {
+		// The path of the Node that resolves path, and the path it gets.
+		scope paths.Path
+		path  paths.Path
+		want  string
+		// The path the error reports and the mapping it is bound at, or ""
+		// for an error with no location.
+		wantPath string
+		near     string
+	}{
+		"a key the root leaves out binds at the first key of the root": {
+			path:     paths.Root().Child("zzz"),
+			want:     "c.yaml:2:1: $.zzz: not found",
+			wantPath: "$.zzz",
+			near:     "$",
+		},
+		"a key a mapping leaves out binds at the key of the mapping": {
+			path:     hoursPath.Child("close"),
+			want:     "c.yaml:3:1: $.hours.close: not found",
+			wantPath: "$.hours.close",
+			near:     "$.hours",
+		},
+		"a path below a key the root leaves out binds at the root": {
+			path:     paths.Root().Child("zzz", "yyy"),
+			want:     "c.yaml:2:1: $.zzz.yyy: not found",
+			wantPath: "$.zzz.yyy",
+			near:     "$",
+		},
+		"a key an element leaves out binds at the first key of the element": {
+			path:     itemsPath.Index(1).Child("q"),
+			want:     "c.yaml:7:5: $.items[1].q: not found",
+			wantPath: "$.items[1].q",
+			near:     "$.items[1]",
+		},
+		"a key the scope leaves out binds at the key of the scope": {
+			scope:    hoursPath,
+			path:     paths.Root().Child("close"),
+			want:     "c.yaml:3:1: $.hours.close: not found",
+			wantPath: "$.hours.close",
+			near:     "$.hours",
+		},
+		"an index past the end of a sequence has no location": {
+			path: itemsPath.Index(7),
+			want: "c.yaml: resolve $.items[7]: not found",
+		},
+		"an index past the end of the scope has no location": {
+			scope: itemsPath,
+			path:  paths.Root().Index(7),
+			want:  "c.yaml: resolve $.items[7]: not found",
+		},
+		"a key below a scalar has no location": {
+			path: paths.Root().Child("name", "sub"),
+			want: "c.yaml: resolve $.name.sub: not found",
+		},
+		"a key of a sequence has no location": {
+			path: itemsPath.Child("k"),
+			want: "c.yaml: resolve $.items.k: not found",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			node := doc
+			if !tc.scope.IsRoot() {
+				node = yamltest.At(t, doc, tc.scope)
+			}
+
+			// An Error at the same path binds at the same place, or at none.
+			var required *niceyaml.SourceError
+
+			require.ErrorAs(t, node.Bind(niceyaml.NewError("required", niceyaml.AtPath(tc.path))), &required)
+
+			wantRange, located := required.Range()
+			require.Equal(t, tc.wantPath != "", located)
+
+			_, atErr := node.At(tc.path)
+			_, rangesErr := node.Ranges(tc.path)
+
+			for method, err := range map[string]error{"At": atErr, "Ranges": rangesErr} {
+				require.ErrorIs(t, err, paths.ErrNotFound, method)
+				require.EqualError(t, err, tc.want, method)
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound, method)
+				assert.Same(t, node, bound.Node(), method)
+
+				rng, ok := bound.Range()
+				assert.Equal(t, located, ok, method)
+				assert.Equal(t, wantRange, rng, method)
+				require.NoError(t, bound.Unresolved(), method)
+
+				path, ok := bound.Path()
+				assert.Equal(t, located, ok, method)
+
+				near, nearOK := bound.Nearest()
+				assert.Equal(t, located, nearOK, method)
+
+				if !located {
+					continue
+				}
+
+				assert.Equal(t, "not found", bound.Message(), method)
+				assert.Equal(t, tc.wantPath, path.String(), method)
+				assert.Equal(t, tc.near, near.String(), method)
+			}
+		})
+	}
+
+	t.Run("the excerpt marks the mapping that lacks the key", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := doc.At(hoursPath.Child("close"))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"c.yaml:3:1: $.hours.close: not found",
+			"",
+			"   2 | name: s",
+			"   3 | hours:",
+			"     | ^^^^^",
+			"   4 |   open: 9",
+		), niceyaml.FormatError(err, 1))
+	})
+
+	t.Run("a document with no content has no mapping to bind at", func(t *testing.T) {
+		t.Parallel()
+
+		empty := yamltest.FirstDocumentWithPath(t, "# nothing\n", "e.yaml")
+		path := paths.Root().Child("zzz")
+		want := "e.yaml: resolve $.zzz: not found: document has no content"
+
+		_, err := empty.At(path)
+		require.ErrorIs(t, err, paths.ErrNoDocument)
+		require.EqualError(t, err, want)
+
+		_, err = empty.Ranges(path)
+		require.ErrorIs(t, err, paths.ErrNoDocument)
+		require.EqualError(t, err, want)
+	})
+
+	t.Run("Nodes returns no error for a key a mapping leaves out", func(t *testing.T) {
+		t.Parallel()
+
+		nodes, err := doc.Nodes(hoursPath.Child("close"))
+		require.NoError(t, err)
+		assert.Empty(t, nodes)
+	})
+}
+
 func TestDocument_At_ErrorBoundToReceiver(t *testing.T) {
 	t.Parallel()
 

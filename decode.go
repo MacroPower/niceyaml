@@ -1039,6 +1039,21 @@ func (n *Node) AST() ast.Node {
 //		return err
 //	}
 //
+// A path that names a key a mapping leaves out says where the value
+// belongs, so its error binds as an [Error] with [AtPath] of the path
+// binds. The error points at the key of the mapping that lacks the
+// value, as [SourceError.Nearest] describes. Its message carries the
+// path in front:
+//
+//	cfg.yaml:3:1: $.server.name: not found
+//
+// Any other path that selects nothing names no mapping, so its error
+// carries no location. That holds for an index past the end of a
+// sequence, for a key looked up in a scalar, and for any path in a
+// document with no content:
+//
+//	cfg.yaml: resolve $.items[7]: not found
+//
 // A node whose tokens carry no position covers no lines and holds no
 // tokens.
 //
@@ -1058,7 +1073,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 	if err != nil {
 		// Bind to the receiver, a Node that exists, rather than to the
 		// copy, whose scope moved to a path that resolves to no node.
-		return nil, n.bindOwn(err)
+		return nil, n.bindUnresolved(path, err)
 	}
 
 	c.node = node
@@ -1485,7 +1500,9 @@ func (n *Node) Lines() line.Lines {
 // and use [Node.Span] or [Node.View] of the Node it returns.
 //
 // A path that does not resolve returns the error [paths.Path.Token]
-// describes, bound to the source, and a path whose token carries no
+// describes, bound to the source. The error of a path that names a key a
+// mapping leaves out binds at that mapping, as it does for [Node.At]. A
+// path whose token carries no
 // position returns an error wrapping [ErrNoLocation]. A document that
 // did not parse returns the syntax error [Node.Err] returns. Returns nil
 // when the value holds no content on any line.
@@ -1496,7 +1513,7 @@ func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
 
 	loc, err := n.pathLocation(path)
 	if err != nil {
-		return nil, n.bindOwn(err)
+		return nil, n.bindUnresolved(path, err)
 	}
 
 	return highlightRanges(n.source.lines, loc), nil
@@ -1546,6 +1563,38 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 	}
 
 	return location{pos: position.NewFromToken(tk), tk: tk, near: &near}, true
+}
+
+// bindUnresolved binds reason, the error path failed to resolve with from
+// the scope of n, as [Node.At] and [Node.Ranges] return it. A path that
+// names a key a mapping leaves out binds as an [Error] with [AtPath] of
+// that path binds, at the key of the mapping that lacks it, as
+// [Node.nearestLocation] finds it. The Error writes the path in front, so
+// its message is the one of [notFoundError], which leaves the path out.
+// Any other reason is about the call, so it binds with no location, as
+// [Node.bindOwn] binds it.
+func (n *Node) bindUnresolved(path paths.Path, reason error) error {
+	if _, ok := n.nearestLocation(path, reason); !ok {
+		return n.bindOwn(reason)
+	}
+
+	return n.bindOwn(WrapError(notFoundError{err: reason}, AtPath(path)))
+}
+
+// notFoundError is the error of a path that names a key a mapping leaves
+// out. Its message is the message of [paths.ErrNotFound] alone, where the
+// error it unwraps to, the one the path failed to resolve with, names the
+// path too.
+type notFoundError struct {
+	err error
+}
+
+func (e notFoundError) Error() string {
+	return paths.ErrNotFound.Error()
+}
+
+func (e notFoundError) Unwrap() error {
+	return e.err
 }
 
 // Validate runs each validator on the node in the order given and stops
