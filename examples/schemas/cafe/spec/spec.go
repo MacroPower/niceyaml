@@ -122,7 +122,7 @@ func (d Duration) MarshalText() ([]byte, error) {
 // UnmarshalText parses the duration with [time.ParseDuration]. The schema
 // pattern checks the form of a duration but not its range, so a value too
 // large for a [time.Duration], such as "99999999999h", passes the schema
-// and fails here. That failure carries no location in the document.
+// and fails here. A decode binds that failure at the path of the value.
 func (d *Duration) UnmarshalText(b []byte) error {
 	v, err := time.ParseDuration(string(b))
 	if err != nil {

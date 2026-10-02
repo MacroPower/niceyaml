@@ -10,6 +10,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/examples/schemas/cafe"
+	"go.jacobcolvin.com/niceyaml/schema"
 )
 
 func cafeConfig(ctx context.Context, in string) (*cafe.Config, error) {
@@ -109,8 +110,12 @@ func TestCafeSLA(t *testing.T) {
 				return
 			}
 
-			// A schema violation carries the location of the value, which a
-			// decode failure inside UnmarshalText would not.
+			// A decode failure inside UnmarshalText binds at the value too,
+			// so the Violation confirms that the schema rejected it.
+			var violation *schema.Violation
+
+			require.ErrorAs(t, err, &violation)
+
 			got := violationPaths(err)
 			require.NotEmpty(t, got)
 

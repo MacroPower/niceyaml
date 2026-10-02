@@ -57,11 +57,15 @@ var (
 	// token. For a value the document leaves out, such as the value of a
 	// key with nothing after its colon, that is the null the parser puts
 	// there, which an error at the path of the value binds to as well.
-	// An error a value's own UnmarshalYAML returns, and the error
-	// of a context that ended, come back as they are and do not match.
-	// Neither does an error the decoder reports without a token of the
-	// source, which comes back with no location. The error of
-	// [time.ParseDuration] for a [time.Duration] it rejects is one. So is
+	// Text that [time.ParseDuration] rejects for a [time.Duration]
+	// matches too. The decoder reports it without a token, so the decode
+	// binds it at the path of the value, as [Node.DecodeInto] describes.
+	// An error a value's own UnmarshalYAML or UnmarshalText returns does
+	// not match. It is the value's own, and the decode binds it at the
+	// path of the value the same way. The error of a context that ended
+	// comes back as it is and does not match either.
+	// Neither does any other error the decoder reports without a token
+	// of the source, which comes back with no location. One is
 	// an error for a target type whose definition the decoder refuses,
 	// such as a struct with two fields of one name or an inline embedded
 	// struct that is not exported. Another is an error for a key of a map
@@ -85,10 +89,13 @@ var (
 	// Each binds at the alias when the node holds one alias to a
 	// reference document, directly or inside an anchor its aliases reach.
 	// When the node holds several, the error carries no location, even
-	// if the target type reads only one of them. The duration and
-	// definition errors never match, even beside an alias to a reference
-	// document, since the decoder returns them as plain errors, not
-	// go-yaml errors.
+	// if the target type reads only one of them. A definition error
+	// never matches, even beside an alias to a reference document, since
+	// the decoder returns it as a plain error, not a go-yaml error. The
+	// error for a [time.Duration] matches only where the decode binds it
+	// at the value. One the decode finds no path for, such as text an
+	// alias reads from a reference document, comes back with no location
+	// and does not match.
 	ErrDecodeRejected = errors.New("decoder rejected the value")
 
 	// ErrExcessiveAliasing indicates a node whose document holds so many

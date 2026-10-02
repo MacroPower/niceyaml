@@ -2116,44 +2116,38 @@ func TestContent_UnmarshalerError(t *testing.T) {
 func TestContent_UnparsableDuration(t *testing.T) {
 	t.Parallel()
 
-	// The decoder reports a string that time.ParseDuration rejects
-	// without niceyaml.ErrDecodeRejected, so the matcher returns the
-	// error rather than a no. A quoted float is such a string, in an
-	// element or a field too.
+	// A string that time.ParseDuration rejects does not read as a
+	// time.Duration, and the decode reports it with
+	// niceyaml.ErrDecodeRejected, so the matcher answers no rather than
+	// returning the error. A quoted float is such a string, in an element
+	// or a field too.
 	tcs := map[string]struct {
 		matcher matcher.Matcher
 		input   string
-		err     string
 	}{
 		"plain words": {
 			matcher: matcher.Content(timeoutPath, time.Minute),
 			input:   stringtest.Input(`timeout: 5 minutes`),
-			err:     "unknown unit",
 		},
 		"quoted exponent": {
 			matcher: matcher.Content(timeoutPath, time.Minute),
 			input:   stringtest.Input(`timeout: "1e3"`),
-			err:     "unknown unit",
 		},
 		"str tagged exponent": {
 			matcher: matcher.Content(timeoutPath, time.Minute),
 			input:   stringtest.Input(`timeout: !!str 1e3`),
-			err:     "unknown unit",
 		},
 		"plain inf": {
 			matcher: matcher.Content(timeoutPath, time.Minute),
 			input:   stringtest.Input(`timeout: inf`),
-			err:     "invalid duration",
 		},
 		"array element quoted exponent": {
 			matcher: matcher.Content(timeoutPath, [1]time.Duration{time.Minute}),
 			input:   stringtest.Input(`timeout: ["1e3"]`),
-			err:     "unknown unit",
 		},
 		"struct field quoted exponent": {
 			matcher: matcher.Content(timeoutPath, durationField{time.Minute}),
 			input:   stringtest.Input(`timeout: {t: "1e3"}`),
-			err:     "unknown unit",
 		},
 	}
 
@@ -2164,8 +2158,7 @@ func TestContent_UnparsableDuration(t *testing.T) {
 			doc := yamltest.FirstDocument(t, tc.input)
 
 			ok, err := tc.matcher.Match(t.Context(), doc)
-			require.ErrorContains(t, err, tc.err)
-			require.NotErrorIs(t, err, niceyaml.ErrDecodeRejected)
+			require.NoError(t, err)
 			assert.False(t, ok)
 		})
 	}

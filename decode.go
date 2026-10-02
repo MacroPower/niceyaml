@@ -1582,17 +1582,18 @@ func WithDisallowUnknownFields(disallow bool) DecodeOption {
 // is the escape hatch for decoder settings that have no option of their
 // own. A [Validator] the decode runs decodes its Node with them too.
 //
-// Each decode, each decode a [Validator] runs on its Node, and the key
-// decoding of self-validation apply the options to a new go-yaml
-// decoder. An option that holds state therefore serves only the first of
-// these decodes, even within one [Node.Decode] call that runs a
-// validator, and a [Decoder] that carries one is not safe to share
-// between goroutines. [yaml.ReferenceReaders] is such an option. The
-// first decode reads its readers to the end, and later decodes find no
-// anchors there. [WithReferences] reads the documents again for each
-// decode, and [yaml.ReferenceFiles] and [yaml.ReferenceDirs] read their
-// files again for each decode, so use one of those for reference
-// documents.
+// Each decode, each decode a [Validator] runs on its Node, the key
+// decoding of self-validation, and the second decode that finds the
+// value behind an error, as [Node.DecodeInto] describes, apply the
+// options to a new go-yaml decoder. An option that holds state
+// therefore serves only the first of these decodes, even within one
+// [Node.Decode] call that runs a validator, and a [Decoder] that
+// carries one is not safe to share between goroutines.
+// [yaml.ReferenceReaders] is such an option. The first decode reads its
+// readers to the end, and later decodes find no anchors there.
+// [WithReferences] reads the documents again for each decode, and
+// [yaml.ReferenceFiles] and [yaml.ReferenceDirs] read their files again
+// for each decode, so use one of those for reference documents.
 func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 	return func(c *decodeConfig) {
 		c.yamlOpts = append(c.yamlOpts, opts...)
@@ -1664,11 +1665,11 @@ func WithReferences(data ...[]byte) DecodeOption {
 // reports, such as a value that does not read as the target type,
 // matches [ErrDecodeRejected]. An error the decoder reports without a
 // token of the source comes back as it is, with no location, and does
-// not match, apart from the few that [ErrDecodeRejected] names. Some
-// of these are plain errors that never match. The error of
-// [time.ParseDuration] for a [time.Duration] it rejects is one, and so
-// is an error for a target type whose definition the decoder refuses,
-// such as a struct with two fields of one name or an inline embedded
+// not match. The few that [ErrDecodeRejected] names are exceptions, and
+// so is the error of a value that decodes itself, which the next
+// paragraphs describe. The plain error for a target type whose
+// definition the decoder refuses never matches. The decoder reports one
+// for a struct with two fields of one name and for an inline embedded
 // struct that is not exported. The decoder also reports a [yaml.Error]
 // without a token for a key of a map tagged inline, such as the key
 // `name` beside a map[int]int, and for a field tagged inline whose type
@@ -1676,6 +1677,43 @@ func WithReferences(data ...[]byte) DecodeOption {
 // node holds an alias to a reference document, as [ErrDecodeRejected]
 // describes. A value of an inline map keeps its token, so an error in
 // that value matches as it would in any other field.
+//
+// The decoder returns the error of a value that decodes itself with no
+// token of the source. Such a value has an UnmarshalYAML or
+// UnmarshalText method, or an UnmarshalJSON method under
+// [yaml.UseJSONUnmarshaler], or is a [time.Duration], which the decoder
+// parses with [time.ParseDuration]. DecodeInto finds the value and
+// binds the error at its path, so [SourceError.Path] reports the path
+// from the root of the document and the message names the value:
+//
+//	config.yaml:7:14: $.servers[1].timeout: time: invalid duration "soon"
+//
+// To find the value, DecodeInto decodes each such value of v a second
+// time, from its own node into a new value, in the order the decoder
+// reads them. The first one whose decode fails with the same message
+// takes the error. DecodeInto then looks below that value the same way,
+// so a value that decodes itself through a second type with the same
+// fields, such as `type plain T`, hands the error to the field that
+// failed. The error of a [time.Duration] matches [ErrDecodeRejected].
+// The error of an unmarshaler is the value's own, so it matches what
+// the unmarshaler returned and not [ErrDecodeRejected]. An error that
+// carries a location already keeps it, such as an [Error] with a
+// position that an UnmarshalYAML built from its node.
+//
+// The second decode runs only after a decode fails, and it calls the
+// unmarshaler of each value it reaches once more. The location is right
+// for an unmarshaler that returns the same error for the same node. An
+// unmarshaler that reads state an earlier call changed, such as a set
+// of the names it has seen, may fail at another value the second time,
+// and the error then binds there. An error that no value reproduces
+// comes back as it is, with no location. That holds for an unmarshaler
+// that reads the value v held before the decode, for a value an alias
+// reads from a reference document, and for a type that only
+// [yaml.CustomUnmarshaler] or [yaml.RegisterCustomUnmarshaler] decodes,
+// since the decoder never shows which types those name. It also holds
+// for a mapping or sequence that is the node itself, where the error
+// would point at the whole of what the caller decoded. A scalar that is
+// the node itself takes the error.
 //
 // A few hundred bytes of nested aliases can take the go-yaml decoder
 // minutes to decode, and the decoder never checks ctx. When the node
@@ -1875,7 +1913,9 @@ func (n *Node) forValidators(yamlOpts []yaml.DecodeOption) *Node {
 // [ErrDecodeRejected], bound at the first token of node that is not a
 // comment. The decoder reads node in the [decodeTree] of the document,
 // and for a node below the body, a failure in an anchor outside node
-// that node reads comes back as its error.
+// that node reads comes back as its error. The error of a value that
+// decodes itself binds at the path [Node.locateDecodeError] finds for
+// that value.
 //
 // The go-yaml decoder never checks the context, so a context that has
 // ended before the decode starts, or while it registers the anchors node
@@ -1917,7 +1957,11 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 	// own UnmarshalYAML, into a rejection.
 	err = decodeWithRecover(ctx, dec, view, decodeTarget(v, node))
 
-	return n.bindDecodeError(n.rejection(err, view))
+	// The decoder returns the error of a value that decodes itself with
+	// no token, so the Node finds the value that reported it.
+	err = n.locateDecodeError(ctx, n.rejection(err, view), node, v, yamlOpts)
+
+	return n.bindDecodeError(err)
 }
 
 // keepsNullTarget reports whether node, or the value an anchor on node
@@ -2204,9 +2248,10 @@ func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 // token, so the excerpt marks it and the error matches
 // [ErrDecodeRejected]. Any other error binds as it is, such as a
 // canceled context, one a value's own UnmarshalYAML returns, or one the
-// decoder reports without a token of the source. The decoder returns
-// the error of [time.ParseDuration] for a [time.Duration] it cannot
-// read, and one for a target type whose definition it refuses, as plain
+// decoder reports without a token of the source. An error that
+// [Node.locateDecodeError] put under a path binds at that path. The
+// decoder returns the error of a value that decodes itself, and
+// one for a target type whose definition it refuses, as plain
 // errors. It builds the mapping a field tagged inline decodes from,
 // with no token for the mapping or for its keys, around the values of
 // the source. So it returns a [yaml.Error] with no token for a key of

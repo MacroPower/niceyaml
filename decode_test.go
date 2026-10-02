@@ -4161,7 +4161,8 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		}
 
 		// The two anchors named x get new names, and each message quotes
-		// the text as the document spells it.
+		// the text as the document spells it. The error of a value that
+		// decodes itself keeps that text at the path of the value.
 		tcs := map[string]struct {
 			input string
 			err   string
@@ -4172,23 +4173,23 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			},
 			"invalid duration": {
 				input: "a: &x 1\nb: &x 2\nd: x [2]\n",
-				err:   `time: invalid duration "x [2]"`,
+				err:   `3:4: $.d: time: invalid duration "x [2]"`,
 			},
 			"escaped value": {
 				input: "a: &x 1\nb: &x 2\nd: \"x\\x20[1]\"\n",
-				err:   `time: invalid duration "x [1]"`,
+				err:   `3:4: $.d: time: invalid duration "x [1]"`,
 			},
 			"folded value": {
 				input: "a: &x 1\nb: &x 2\nd: x\n  [1]\n",
-				err:   `time: invalid duration "x [1]"`,
+				err:   `3:4: $.d: time: invalid duration "x [1]"`,
 			},
 			"unmarshaler text": {
 				input: "a: &x 1\nb: &x 2\nc: x [1]\n",
-				err:   `unmarshaler rejected the value: "x [1]\n"`,
+				err:   `3:4: $.c: unmarshaler rejected the value: "x [1]\n"`,
 			},
 			"unmarshaler text across tokens": {
 				input: "a: &x 1\nb: &x 2\nc: !x [1]\n",
-				err:   `unmarshaler rejected the value: "!x [1]\n"`,
+				err:   `3:8: $.c: unmarshaler rejected the value: "!x [1]\n"`,
 			},
 		}
 
@@ -7900,25 +7901,15 @@ func TestErrDecodeRejected(t *testing.T) {
 			A int `yaml:"a"`
 		}
 
-		// The decoder reports these with no token to bind them to. A
-		// go-yaml release that gives one a token flips its case into a
-		// rejection with a location.
+		// The decoder reports these with no token to bind them to, and
+		// none comes from a value that decodes itself, so the decode finds
+		// no value to bind them at. A go-yaml release that gives one a
+		// token flips its case into a rejection with a location.
 		tcs := map[string]struct {
 			input  string
 			decode func(ctx context.Context, dd *niceyaml.Node) error
 			msg    string
 		}{
-			"unparsable duration": {
-				input: "name: api\ntimeout: 5 minutes\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[struct {
-						Timeout time.Duration `yaml:"timeout"`
-					}](ctx)
-
-					return err
-				},
-				msg: "unknown unit",
-			},
 			"duplicated struct field name": {
 				input: "a: 1\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {

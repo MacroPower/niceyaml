@@ -95,10 +95,10 @@ type contentMatcher[T comparable] struct {
 // a null deeper inside such a value compares as go-yaml decodes it. A
 // document without the path, or whose value does not decode into T,
 // does not match, so a [time.Duration] T matches no timeout: 5.5,
-// timeout: 1e3, or timeout: true. A string that [time.ParseDuration]
-// rejects, such as timeout: 5 minutes, is an exception, and so is a T
-// whose definition the decoder refuses, such as a struct with two fields
-// of one name. The decoder reports these without
+// timeout: 1e3, timeout: true, or timeout: 5 minutes. A T whose
+// definition the decoder refuses, such as a struct with two fields of
+// one name, is an exception, and so is a value whose own UnmarshalYAML
+// or UnmarshalText returns an error. The decoder reports these without
 // [niceyaml.ErrDecodeRejected], as it does the other errors
 // [niceyaml.Node.DecodeInto] names, so Match returns the error. Any other
 // error from the read comes back as the error, so a registry stops at the
