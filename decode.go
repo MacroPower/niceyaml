@@ -696,6 +696,9 @@ type document struct {
 	// enclosedAliases finds once for both newDecodeTree and
 	// Source.decodeParse.
 	enclosed map[ast.Node]bool
+	// Finds the node of root at a position, which pathIndex builds for
+	// the first call of PathAt.
+	paths *pathIndex
 	// The state that the packages of the module reach through
 	// docstate.Of, which shares resolver with them.
 	state *docstate.State
@@ -718,6 +721,8 @@ type document struct {
 	treeOnce sync.Once
 	// Finds enclosed once.
 	enclosedOnce sync.Once
+	// Builds paths once, for the first call of PathAt.
+	pathsOnce sync.Once
 }
 
 // pathResolver returns the [paths.Resolver] for the document, and creates
@@ -803,7 +808,9 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 //
 // [Node.DocumentAST], [Node.DocumentIndex], [Node.Preamble], and
 // [Node.FilePath] describe the document as a whole, whatever Node of it a
-// caller holds.
+// caller holds. [Node.PathAt] reads the whole document too. It returns
+// the path of the node at a position, from the root of the document, so
+// a viewer names the value under its cursor.
 //
 // A Node holds the Source it came from, and every decoding method binds
 // the [Error] values it produces to that source, so the errors it returns
@@ -814,11 +821,12 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // syntax error. The methods that read the tree return that error:
 // [Node.Decode], [Node.DecodeInto], [Node.Validate], [Node.At],
 // [Node.Nodes], and [Node.Ranges]. [Node.AST] and
-// [Node.DocumentAST] return nil. The methods that read the tokens and the
-// lines work as they do for any document: [Node.Tokens], [Node.Preamble],
-// [Node.Span], [Node.View], and [Node.Lines]. A caller thus renders or
-// diffs a document that does not parse yet, and the other documents of
-// the file decode and validate as if it did.
+// [Node.DocumentAST] return nil, and [Node.PathAt] finds no node. The
+// methods that read the tokens and the lines work as they do for any
+// document: [Node.Tokens], [Node.Preamble], [Node.Span], [Node.View], and
+// [Node.Lines]. A caller thus renders or diffs a document that does not
+// parse yet, and the other documents of the file decode and validate as
+// if it did.
 //
 // Receive instances from [Source.Documents], [Source.Document],
 // [Node.At], [Node.Nodes], [Node.Document], [SourceError.Node], or
@@ -891,8 +899,9 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 // A document that did not parse has no tree. [Node.Decode],
 // [Node.DecodeInto], [Node.Validate], [Node.At], [Node.Nodes], and
 // [Node.Ranges] return the error Err returns, and no [Validator] runs.
-// [Node.AST] and [Node.DocumentAST] return nil. A path in an error that
-// [Node.Bind] binds resolves nowhere, as Bind describes.
+// [Node.AST] and [Node.DocumentAST] return nil, and [Node.PathAt] reports
+// false for every position. A path in an error that [Node.Bind] binds
+// resolves nowhere, as Bind describes.
 //
 // A "---" header that directly follows an anchor with no value parses
 // together with the document above it, as [Source.Documents] describes.

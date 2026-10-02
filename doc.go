@@ -193,7 +193,14 @@
 //
 // [Node.Ranges] returns the ranges an error at a path highlights, those of
 // the token that starts the value, for a caller that marks a value on a
-// view without an error to bind.
+// view without an error to bind. [Node.PathAt] goes the other way, from a
+// position to the path of the node there. A viewer names the value under
+// its cursor with it, and a check that reads the lines of a file reports
+// the path of the value it found:
+//
+//	if path, ok := doc.PathAt(cursor); ok {
+//		status = path.String() // $.spec.replicas
+//	}
 //
 // This separates error production (validators, decoders) from error
 // presentation (source context, formatting). Each layer provides what it
