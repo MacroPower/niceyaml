@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/tokens"
@@ -175,4 +177,91 @@ func TestHasContent(t *testing.T) {
 			assert.Equal(t, tc.want, astnode.HasContent(tc.node))
 		})
 	}
+}
+
+func TestFirstToken(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		// The text of the token.
+		want string
+	}{
+		"scalar": {
+			input: "abc\n",
+			want:  "abc",
+		},
+		"mapping starts at its first key": {
+			input: "k: v\n",
+			want:  "k",
+		},
+		"sequence starts at its first element": {
+			input: "- x\n- y\n",
+			want:  "x",
+		},
+		"anchor on a mapping": {
+			input: "&a {k: v}\n",
+			want:  "k",
+		},
+		"tag on a scalar": {
+			input: "!!str v\n",
+			want:  "v",
+		},
+		"explicit first key": {
+			input: "? k\n: v\n",
+			want:  "k",
+		},
+		"anchor on the first key": {
+			input: "&a k: v\n",
+			want:  "k",
+		},
+		"sequence of mappings": {
+			input: "- k: v\n",
+			want:  "k",
+		},
+		"empty mapping": {
+			input: "{}\n",
+			want:  "{",
+		},
+		"empty sequence": {
+			input: "[]\n",
+			want:  "[",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := parser.ParseBytes([]byte(tc.input), 0)
+			require.NoError(t, err)
+			require.Len(t, file.Docs, 1)
+
+			tk := astnode.FirstToken(file.Docs[0].Body)
+			require.NotNil(t, tk)
+
+			assert.Equal(t, tc.want, tk.Value)
+		})
+	}
+
+	t.Run("alias is its own token", func(t *testing.T) {
+		t.Parallel()
+
+		file, err := parser.ParseBytes([]byte("a: &x 1\nb: *x\n"), 0)
+		require.NoError(t, err)
+
+		mapping, ok := file.Docs[0].Body.(*ast.MappingNode)
+		require.True(t, ok)
+
+		alias := mapping.Values[1].Value
+
+		assert.Same(t, alias.GetToken(), astnode.FirstToken(alias))
+	})
+
+	t.Run("nil node has no token", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Nil(t, astnode.FirstToken(nil))
+		assert.Nil(t, astnode.FirstToken((*ast.MappingNode)(nil)))
+	})
 }

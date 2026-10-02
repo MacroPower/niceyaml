@@ -13,6 +13,7 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -233,7 +234,9 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // 0x10 for the member name 16, still names its member. Where a later key
 // in the mapping or its merge sources has the same spelling, a path
 // through that spelling selects the later key, so the path names the
-// member and each key below it as the decoder does.
+// member and each key below it as the decoder does. Such a path does not
+// select the member, so the violation carries the position of the value
+// beside the path and binds there.
 //
 // To tell which key a spelling selects, Validate reads the sources of
 // each `<<` merge key that brings the key in or stands after it. The
@@ -450,10 +453,64 @@ func rootOf(n *niceyaml.Node) ast.Node {
 	return n.AST()
 }
 
+// sourceTarget is where a violation lies in a document: the path that
+// names the location, and the node [sourcePath] reached there, which
+// locates the violation where the path cannot.
+type sourceTarget struct {
+	// The node at the location, or nil when the walk could not follow the
+	// path to it.
+	node ast.Node
+	// The entry that holds node, when a member name reached it.
+	entry *ast.MappingValueNode
+	path  paths.Path
+	// Whether the walk wrote a decoded name it could not show to select
+	// the entry of its member.
+	unspelled bool
+}
+
+// token returns the token to bind a violation at when the walk reached
+// its location and wrote a path it could not show to select it. With key
+// set, the violation constrains the key of the member, as a path that
+// ends in [paths.Path.Key] does. The token is the one a path to the
+// location would resolve to: the token that starts the node, or the key
+// of its entry.
+//
+// It returns nil when the path selects the location, and when the walk
+// did not reach the location, as it cannot through a mapping whose keys
+// it cannot all name. The path is then all that says where the violation
+// lies.
+func (t sourceTarget) token(key bool) *token.Token {
+	if !t.unspelled || astnode.IsNil(t.node) {
+		return nil
+	}
+
+	if key && t.entry != nil {
+		return keyToken(t.entry)
+	}
+
+	return astnode.FirstToken(t.node)
+}
+
+// keyToken returns the token that starts the key of entry, without the `?`
+// of an explicit key, as a path that ends in [paths.Path.Key] resolves
+// it. An entry with no key gives the token that starts its value.
+func keyToken(entry *ast.MappingValueNode) *token.Token {
+	if astnode.Content(entry.Key) == nil {
+		return astnode.FirstToken(entry.Value)
+	}
+
+	key := ast.Node(entry.Key)
+	if explicit, ok := key.(*ast.MappingKeyNode); ok {
+		key = explicit.Value
+	}
+
+	return astnode.FirstToken(key)
+}
+
 // sourcePath converts instance-location segments to a [paths.Path] that
-// resolves in root. Each [jsonschema.Segment] already distinguishes an
-// array index from a property name, so sourcePath does no numeric
-// guessing.
+// resolves in root, and returns it in a [sourceTarget] with the node the
+// walk reached. Each [jsonschema.Segment] already distinguishes an array
+// index from a property name, so sourcePath does no numeric guessing.
 //
 // A property name is the name the decoder produced, which the source may
 // spell another way, as it spells the member name 16 as 0x10. The walk
@@ -479,55 +536,59 @@ func rootOf(n *niceyaml.Node) ast.Node {
 // may select no entry, or another entry. Where the name a segment writes
 // does not select the entry of its member, every segment below keeps its
 // decoded name too, since a key spelled below would resolve under the
-// entry that name selects.
+// entry that name selects. The target then reports the path as unspelled.
+// The walk still follows each member it finds, so the target holds the
+// node of the location, and [sourceTarget.token] locates the violation
+// there. A member the walk does not find leaves the target with no node.
 //
 // The finder reads the sources of a merge key that brings a key in or
 // stands after it, and the walks that share idx share the limit of one
 // [paths.EntryFinder] on those reads. Past that limit the finder reports
 // no entry for such a key, so its segment and every segment below keep
 // their decoded names.
-func sourcePath(root ast.Node, idx *memberIndex, segments []jsonschema.Segment) paths.Path {
-	path := paths.Root()
-	node := deref(idx.resolver, root)
+func sourcePath(root ast.Node, idx *memberIndex, segments []jsonschema.Segment) sourceTarget {
+	t := sourceTarget{path: paths.Root(), node: root}
 
 	for _, seg := range segments {
+		content := deref(idx.resolver, t.node)
+
 		if seg.IsIndex {
-			path = path.Index(seg.Index)
-			node = deref(idx.resolver, elementNode(node, seg.Index))
+			t.path = t.path.Index(seg.Index)
+			t.node, t.entry = elementNode(content, seg.Index), nil
 
 			continue
 		}
 
 		name := seg.Key
-		member := idx.lookup(node, seg.Key)
+		member := idx.lookup(content, seg.Key)
 
-		// The walk follows the value of the member only where the name it
-		// writes selects the entry of that member. Otherwise next stays
-		// nil, so every segment below keeps its decoded name.
-		var (
-			next    ast.Node
-			spelled string
-			ok      bool
-		)
+		if !t.unspelled {
+			var (
+				spelled string
+				ok      bool
+			)
 
-		if member.entry != nil {
-			spelled, ok = idx.resolver.KeyName(member.entry.Key)
+			if member.entry != nil {
+				spelled, ok = idx.resolver.KeyName(member.entry.Key)
+			}
+
+			switch {
+			case ok && idx.selects(content, spelled, member):
+				name = spelled
+
+			case idx.selects(content, name, member):
+				// The decoded name selects the entry as it is.
+
+			default:
+				t.unspelled = true
+			}
 		}
 
-		switch {
-		case ok && idx.selects(node, spelled, member):
-			name = spelled
-			next = member.value
-
-		case idx.selects(node, name, member):
-			next = member.value
-		}
-
-		path = path.Child(name)
-		node = deref(idx.resolver, next)
+		t.path = t.path.Child(name)
+		t.node, t.entry = member.value, member.entry
 	}
 
-	return path
+	return t
 }
 
 // deref returns the content under node. It looks through what

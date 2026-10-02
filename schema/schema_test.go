@@ -2045,8 +2045,10 @@ func TestSchema_SourcePath(t *testing.T) {
 	// decoder respells, such as 0x10 for the member name 16, still names
 	// the member. The path prints in the error and resolves with Node.At.
 	// Where the walk cannot tell which key in the source names the member,
-	// the path keeps the decoded name, which Node.At does not resolve, and
-	// the error carries no position. Such a case sets unresolved.
+	// the path keeps the decoded name, which Node.At does not resolve. The
+	// error binds at the node of the member where the walk reached it, and
+	// at the key of the mapping that holds the member where the walk did
+	// not. Such a case sets unresolved.
 	tcs := map[string]struct {
 		schema     string
 		input      string
@@ -2144,7 +2146,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			// The merge brings in 0x10: x as the member 16. The quoted key
 			// "0x10" of m names a separate member with the same spelling,
 			// and a path selector matches that key, so the path keeps the
-			// name 16.
+			// name 16 and the error binds at the x.
 			schema: `{
 				"type": "object",
 				"properties": {
@@ -2153,7 +2155,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			}`,
 			input:      "m: {<<: {0x10: x}, \"0x10\": 5}\n",
 			wantPath:   "$.m.16",
-			want:       "$.m.16: expected \"integer\", got \"string\"",
+			want:       "1:16: $.m.16: expected \"integer\", got \"string\"",
 			unresolved: true,
 		},
 		"tagged alias key replaces an earlier key": {
@@ -2185,6 +2187,7 @@ func TestSchema_SourcePath(t *testing.T) {
 		"unnameable alias key hides earlier keys": {
 			// The alias key refers to a sequence, which the walk cannot
 			// name, so the key 0x10 before it cannot name the member 16.
+			// The walk finds no member there, so the error binds at m.
 			schema: `{
 				"type": "object",
 				"properties": {
@@ -2193,7 +2196,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			}`,
 			input:      "s: &s [a]\nm: {0x10: x, ? *s : 1}\n",
 			wantPath:   "$.m.16",
-			want:       "$.m.16: expected \"integer\", got \"string\"",
+			want:       "2:1: $.m.16: expected \"integer\", got \"string\"",
 			unresolved: true,
 		},
 		"spelled-out null key": {
@@ -2528,9 +2531,10 @@ func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 
 	// In each case the key 0x10 sets the member 16 to x. A later entry
 	// spells its key 0x10 too, and a path through 0x10 selects that entry.
-	// The path of the member keeps its decoded name and points nowhere
-	// rather than at the valid 1. The quoted "0x10" decodes to the member
-	// 0x10, as does an alias key whose anchor holds it.
+	// The path of the member keeps its decoded name and selects nothing,
+	// and the error binds at the x rather than at the valid 1. The quoted
+	// "0x10" decodes to the member 0x10, as does an alias key whose anchor
+	// holds it.
 	v := compileSchema(t, []byte(`{
 		"type": "object",
 		"properties": {
@@ -2540,30 +2544,39 @@ func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 
 	tcs := map[string]struct {
 		input string
-		opts  []niceyaml.SourceOption
+		// The position of the x, as the message prints it.
+		want string
+		opts []niceyaml.SourceOption
 	}{
 		"own key after the merge key": {
 			input: "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n",
+			want:  "2:14",
 		},
 		"merge key after the own key": {
 			input: "user:\n  0x10: x\n  <<: {\"0x10\": 1}\n",
+			want:  "2:9",
 		},
 		"later source of one merge key": {
 			input: "user:\n  <<: [{0x10: x}, {\"0x10\": 1}]\n",
+			want:  "2:15",
 		},
 		"later aliased source of one merge key": {
 			input: "a: &a {0x10: x}\nb: &b {\"0x10\": 1}\nuser:\n  <<: [*a, *b]\n",
+			want:  "1:14",
 		},
 		"later merge key": {
 			input: "user:\n  <<: {0x10: x}\n  <<: {\"0x10\": 1}\n",
+			want:  "2:14",
 			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 		},
 		"later own key": {
 			input: "user:\n  0x10: x\n  \"0x10\": 1\n",
+			want:  "2:9",
 			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 		},
 		"later alias key": {
 			input: "k: &k \"0x10\"\nuser:\n  0x10: x\n  *k : 1\n",
+			want:  "3:9",
 		},
 	}
 
@@ -2581,7 +2594,7 @@ func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 			var bound *niceyaml.SourceError
 
 			require.ErrorAs(t, err, &bound)
-			assert.Equal(t, "$.user.16: expected \"integer\", got \"string\"", bound.Error())
+			assert.Equal(t, tc.want+": $.user.16: expected \"integer\", got \"string\"", bound.Error())
 
 			path, ok := bound.Path()
 			require.True(t, ok, "bound error carries no path")
@@ -2598,8 +2611,8 @@ func TestSchema_SourcePath_BelowHiddenKey(t *testing.T) {
 	// In each case a later entry hides the key of the member that holds x,
 	// so the path writes the decoded name of that member. That name
 	// selects another entry, which holds a valid value under the spelling
-	// 0x11, so the keys below keep their decoded names too and the path
-	// points nowhere.
+	// 0x11, so the keys below keep their decoded names too. The path
+	// selects nothing, and the error binds at the x.
 	v := compileSchema(t, []byte(`{
 		"type": "object",
 		"properties": {
@@ -2617,7 +2630,7 @@ func TestSchema_SourcePath_BelowHiddenKey(t *testing.T) {
 	}{
 		"own key after the merge key": {
 			input: "user: {16: {0x11: 2}, <<: {0x10: {0x11: x}}, \"0x10\": 1}\n",
-			want:  "$.user.16.17: expected \"integer\", got \"string\"",
+			want:  "1:41: $.user.16.17: expected \"integer\", got \"string\"",
 		},
 		"block own key after the merge key": {
 			input: stringtest.Input(`
@@ -2626,21 +2639,21 @@ func TestSchema_SourcePath_BelowHiddenKey(t *testing.T) {
 				  <<: {0x10: {0x11: x}}
 				  "0x10": 1
 			`),
-			want: "$.user.16.17: expected \"integer\", got \"string\"",
+			want: "3:21: $.user.16.17: expected \"integer\", got \"string\"",
 		},
 		"later source of one merge key": {
 			input: "user: {16: {0x11: 2}, <<: [{0x10: {0x11: x}}, {\"0x10\": 1}]}\n",
-			want:  "$.user.16.17: expected \"integer\", got \"string\"",
+			want:  "1:42: $.user.16.17: expected \"integer\", got \"string\"",
 		},
 		"merge key after the own key": {
 			input: "user: {16: {0x11: 2}, 0x10: {0x11: x}, <<: {\"0x10\": 1}}\n",
-			want:  "$.user.16.17: expected \"integer\", got \"string\"",
+			want:  "1:36: $.user.16.17: expected \"integer\", got \"string\"",
 		},
 		"own key spelled as its name before a merge key": {
 			// The own key decodes to 0x10, and the merged 0x10 sets the
 			// member 16, but a path through 0x10 selects the merged key.
 			input: "user: {\"0x10\": {0x11: x}, <<: {0x10: {0x11: 1}, 16: 2}}\n",
-			want:  "$.user.0x10.17: expected \"integer\", got \"string\"",
+			want:  "1:23: $.user.0x10.17: expected \"integer\", got \"string\"",
 		},
 	}
 
@@ -2664,6 +2677,38 @@ func TestSchema_SourcePath_BelowHiddenKey(t *testing.T) {
 			require.Error(t, err, "path from the error resolves")
 		})
 	}
+}
+
+func TestSchema_SourcePath_HiddenKeyName(t *testing.T) {
+	t.Parallel()
+
+	// The schema allows no member of user, so each violation points at a
+	// key. The merge brings in 0x10 as the member 16, and the quoted key
+	// "0x10" wins a path through 0x10. The path of the member 16 keeps its
+	// decoded name, and its error binds at the key the merge brings in.
+	v := compileSchema(t, []byte(`{
+		"type": "object",
+		"properties": {"user": {"additionalProperties": false}}
+	}`))
+
+	dd := yamltest.FirstDocument(t, "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n")
+
+	err := dd.Validate(t.Context(), v)
+
+	var bound *niceyaml.SourceError
+
+	require.ErrorAs(t, err, &bound)
+
+	var got []string
+
+	for _, child := range bound.Errors() {
+		got = append(got, child.Error())
+	}
+
+	assert.ElementsMatch(t, []string{
+		"2:8: $.user.16~: value is not allowed",
+		"3:3: $.user.0x10~: value is not allowed",
+	}, got)
 }
 
 func TestSchema_SourcePath_SeveralViolations(t *testing.T) {

@@ -665,7 +665,7 @@ func (p Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
 // a typed nil where the parser always puts a node, and such a node has no
 // token to point at, which is [ErrNotFound].
 func (p Path) tokenOf(node ast.Node) (*token.Token, error) {
-	tk := firstToken(node)
+	tk := astnode.FirstToken(node)
 	if tk == nil {
 		return nil, fmt.Errorf("resolve %s: %w: node has no token", p, ErrNotFound)
 	}

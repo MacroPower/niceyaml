@@ -8,7 +8,7 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 )
 
 // noFormMessage is the message of the violation that stands for a value
@@ -251,7 +251,7 @@ func (c converter) union(e *jsonschema.ValidationError) []*niceyaml.Error {
 	v.Message = noFormMessage
 
 	return []*niceyaml.Error{
-		niceyaml.WrapError(v, niceyaml.AtExactPath(c.path(e)), niceyaml.WithErrors(forms...)),
+		niceyaml.WrapError(v, append(c.at(e), niceyaml.WithErrors(forms...))...),
 	}
 }
 
@@ -321,31 +321,40 @@ func (b branch) typeOnly(e *jsonschema.ValidationError) bool {
 }
 
 // leaf converts one concrete failure into a [*niceyaml.Error] that wraps
-// its [*Violation] and carries the YAML path to the failing location, as
-// [converter.path] writes it.
-//
-// The path is exact, as [niceyaml.AtExactPath] sets one. A path that
-// [sourcePath] could not spell selects nothing or another entry, so the
-// error binds with no position, where a mapping nearby would be a wrong
-// one.
+// its [*Violation] and carries the location e fails at, as [converter.at]
+// gives it.
 func (c converter) leaf(e *jsonschema.ValidationError) *niceyaml.Error {
-	return niceyaml.WrapError(newViolation(e), niceyaml.AtExactPath(c.path(e)))
+	return niceyaml.WrapError(newViolation(e), c.at(e)...)
 }
 
-// path returns the YAML path to the location e fails at. A failure that
-// constrains the key of a member, such as an additional property, points
-// at the key through [paths.Path.Key], and any other at the value.
+// at returns the options that give an error the location e fails at. The
+// first is the YAML path to that location. A failure that constrains the
+// key of a member, such as an additional property, points at the key
+// through [paths.Path.Key], and any other at the value.
 //
 // The path spells each key as the source does, so a key the decoder
 // respells, such as 0x10 for the member name 16, still names its member.
 // Without a root, which a [Schema.ValidateValue] caller does not hand
 // over, the path spells each key as the decoder does.
-func (c converter) path(e *jsonschema.ValidationError) paths.Path {
-	path := sourcePath(c.root, c.idx, e.InstanceSegments())
+//
+// Where no spelling selects the member, as [sourcePath] describes, the
+// path keeps the decoded name and selects nothing or another entry. A
+// second option then gives the position of the node the walk reached, as
+// [sourceTarget.token] finds it. The error binds at that position, and
+// the path only names the member in the message.
+func (c converter) at(e *jsonschema.ValidationError) []niceyaml.ErrorOption {
+	target := sourcePath(c.root, c.idx, e.InstanceSegments())
 
+	path := target.path
 	if e.TargetsKey() {
 		path = path.Key()
 	}
 
-	return path
+	opts := []niceyaml.ErrorOption{niceyaml.AtPath(path)}
+
+	if tk := target.token(e.TargetsKey()); tk != nil && tk.Position != nil {
+		opts = append(opts, niceyaml.AtPosition(position.NewFromToken(tk)))
+	}
+
+	return opts
 }

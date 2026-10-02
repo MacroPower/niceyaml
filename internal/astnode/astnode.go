@@ -1,5 +1,6 @@
 // Package astnode holds the nil and wrapper rules for go-yaml AST nodes,
-// and the rule for which document bodies hold a value.
+// the rule for which document bodies hold a value, and the rule for which
+// token starts a node.
 //
 // A tree built by hand may hold a typed nil behind a non-nil [ast.Node],
 // where the parser always puts a node. Code that walks a tree calls
@@ -16,10 +17,15 @@
 // whitespace alone. Code that reads a document checks its body with
 // [HasContent], so a decode and a path lookup agree on which documents
 // are empty.
+//
+// A path points at the token that starts the node it selects, which
+// [FirstToken] returns. Code that points at a node it reached without a
+// path calls it too, so both name the same place for one node.
 package astnode
 
 import (
 	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/tokens"
@@ -78,5 +84,47 @@ func HasContent(node ast.Node) bool {
 
 	default:
 		return true
+	}
+}
+
+// FirstToken returns the token that starts the content of node: the first
+// key of a mapping, the first element of a sequence, or the scalar itself.
+// It looks through anchors and tags, and through the `?` indicator,
+// anchors, and tags of the first key of a mapping. An alias is its own
+// token. An entry with no key starts at its own token. A nil node,
+// including a typed nil, has no token.
+func FirstToken(node ast.Node) *token.Token {
+	for {
+		if IsNil(node) {
+			return nil
+		}
+
+		switch n := node.(type) {
+		case *ast.AnchorNode:
+			node = n.Value
+		case *ast.TagNode:
+			node = n.Value
+		case *ast.MappingNode:
+			if len(n.Values) == 0 || n.Values[0] == nil {
+				return n.GetToken()
+			}
+
+			key := Content(n.Values[0].Key)
+			if key == nil {
+				return n.Values[0].GetToken()
+			}
+
+			node = key
+
+		case *ast.SequenceNode:
+			if len(n.Values) == 0 {
+				return n.GetToken()
+			}
+
+			node = n.Values[0]
+
+		default:
+			return node.GetToken()
+		}
 	}
 }
