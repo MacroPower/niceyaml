@@ -25,7 +25,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
-	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -2096,7 +2095,7 @@ func TestViewport_HorizontalScrollKeepsFrameAtKeycap(t *testing.T) {
 
 					for col, r := range []rune(top) {
 						if r == '┌' || r == '┐' {
-							assert.Equal(t, "│", cells.Cut(row, col, col+1),
+							assert.Equal(t, "│", printer.Cut(row, col, col+1),
 								"offset %d, row %d, col %d: %q", offset, i, col, row)
 						}
 					}

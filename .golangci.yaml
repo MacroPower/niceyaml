@@ -221,6 +221,18 @@ linters:
               desc: use log/slog
             - pkg: "github.com/pkg/errors"
               desc: use errors
+        # The bubbles and fangs modules are adapters a caller could write, so
+        # their non-test code builds on the public API of niceyaml alone. Go
+        # allows the import because their module paths sit under the
+        # library's. Their tests may still import internal/yamltest.
+        adapters:
+          files:
+            - "**/bubbles/**"
+            - "**/fangs/**"
+            - "!$test"
+          deny:
+            - pkg: "go.jacobcolvin.com/niceyaml/internal"
+              desc: build on the public API of niceyaml
 
   exclusions:
     rules:

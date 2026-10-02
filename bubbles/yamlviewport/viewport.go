@@ -2,6 +2,7 @@ package yamlviewport
 
 import (
 	"cmp"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -16,8 +17,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
 	"go.jacobcolvin.com/niceyaml/finder"
-	"go.jacobcolvin.com/niceyaml/internal/cells"
-	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
@@ -366,7 +365,7 @@ func (m *Model) setInitialValues() {
 		m.printer = printer.New()
 	}
 
-	if nilness.IsNil(m.searcher) {
+	if isNil(m.searcher) {
 		m.searcher = finderSearcher{finder: finder.New()}
 	}
 
@@ -627,7 +626,7 @@ func (m *Model) AddRevisions(rs ...Revision) {
 	// must not write into spare capacity that another copy can reach.
 	revisions := slices.Clip(m.revisions)
 	for _, r := range rs {
-		if !nilness.IsNil(r) {
+		if !isNil(r) {
 			revisions = append(revisions, r)
 		}
 	}
@@ -1245,7 +1244,7 @@ func comparePos(a, b position.Position) int {
 // find returns the matches of search in idx. A [Searcher] may return a nil
 // idx or one holding a nil pointer, and either finds nothing.
 func find(idx Index, search string) position.Ranges {
-	if nilness.IsNil(idx) {
+	if isNil(idx) {
 		return nil
 	}
 
@@ -1840,11 +1839,11 @@ func (m *Model) cutRow(row string, offset, width int) string {
 
 	inner := ansi.StringWidth(row) - left - right
 	if inner < 0 {
-		return cells.Cut(row, 0, width)
+		return printer.Cut(row, 0, width)
 	}
 
 	visible := max(0, width-left-right)
-	body := cells.Cut(row, left, left+inner)
+	body := printer.Cut(row, left, left+inner)
 
 	// The cut drops a wide cluster that straddles offset. A cut that ends
 	// at a column inside a cluster comes up short of that column, so start
@@ -1852,14 +1851,14 @@ func (m *Model) cutRow(row string, offset, width int) string {
 	// of the dropped cluster.
 	start := offset
 	for start < min(inner, offset+visible) {
-		if _, w := cells.CutWidth(body, 0, start); w == start {
+		if _, w := printer.CutWidth(body, 0, start); w == start {
 			break
 		}
 
 		start++
 	}
 
-	content, contentWidth := cells.CutWidth(body, start, offset+visible)
+	content, contentWidth := printer.CutWidth(body, start, offset+visible)
 	if start > offset {
 		content = m.printer.Style(kind.Text).Render(strings.Repeat(" ", start-offset)) + content
 		contentWidth += start - offset
@@ -1873,7 +1872,7 @@ func (m *Model) cutRow(row string, offset, width int) string {
 		content += m.printer.Style(kind.Text).Render(strings.Repeat(" ", padding))
 	}
 
-	return cells.Cut(row, 0, left) + content + cells.Cut(row, left+inner, left+inner+right)
+	return printer.Cut(row, 0, left) + content + printer.Cut(row, left+inner, left+inner+right)
 }
 
 // SetYOffset sets the vertical offset, in rows, clamped to the scrollable
@@ -2308,7 +2307,7 @@ func (m *Model) renderContent(lines []string, contentW, contentH int) string {
 	}
 
 	for i, row := range lines {
-		row, width := cells.CutWidth(row, 0, contentW)
+		row, width := printer.CutWidth(row, 0, contentW)
 		if pad := contentW - width; pad > 0 {
 			row += textStyle.Render(strings.Repeat(" ", pad))
 		}
@@ -2422,12 +2421,12 @@ func (m *Model) renderSideBySide(contentW, contentH int) string {
 			// view cuts both panes to the pane width, which the gutter of
 			// a pane row can exceed on its own, so the joined row fits the
 			// content width.
-			leftPadded, leftWidth := cells.CutWidth(left, 0, paneWidth)
+			leftPadded, leftWidth := printer.CutWidth(left, 0, paneWidth)
 			if padding := paneWidth - leftWidth; padding > 0 {
 				leftPadded += textStyle.Render(strings.Repeat(" ", padding))
 			}
 
-			combined = append(combined, leftPadded+separator+cells.Cut(right, 0, paneWidth))
+			combined = append(combined, leftPadded+separator+printer.Cut(right, 0, paneWidth))
 		}
 	}
 
@@ -2480,6 +2479,28 @@ func (m *Model) blankPaneRow(p *printer.Printer) string {
 
 func clamp[T cmp.Ordered](v, low, high T) T {
 	return min(high, max(low, v))
+}
+
+// isNil reports whether v is a nil interface or holds a nil pointer or nil
+// func. An interface that holds either compares unequal to nil, and a call
+// through it panics.
+//
+// The packages of niceyaml make the same check on their own options. The
+// viewport builds on the public API of niceyaml alone, so it keeps its own
+// copy.
+func isNil(v any) bool {
+	if v == nil {
+		return true
+	}
+
+	rv := reflect.ValueOf(v)
+
+	switch rv.Kind() {
+	case reflect.Pointer, reflect.Func:
+		return rv.IsNil()
+	default:
+		return false
+	}
 }
 
 // splitLines splits content by newlines. Unlike [strings.Split], it does not

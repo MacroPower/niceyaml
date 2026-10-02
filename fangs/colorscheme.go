@@ -88,9 +88,9 @@ func LightDarkColorSchemeFunc(light, dark style.Styler) fang.ColorSchemeFunc {
 // A nil [*style.Styles] satisfies [style.Styler] through its value method,
 // and a call to that method panics.
 //
-// This mirrors go.jacobcolvin.com/niceyaml/internal/nilness. The niceyaml
-// version that fangs requires predates that package, so fangs keeps its
-// own copy.
+// The packages of niceyaml make the same check on their own options. This
+// package builds on the public API of niceyaml alone, so it keeps its own
+// copy.
 func isNil(styles style.Styler) bool {
 	if styles == nil {
 		return true
