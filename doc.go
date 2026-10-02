@@ -297,6 +297,9 @@
 //
 //	config.yaml:3:11: $.servers[0].port: expected integer, got string
 //
+// Under [WithDisallowUnknownFields], one decode reports every key that
+// no field of the target reads, each at the path of the key.
+//
 // [Node.DecodeInto] runs the same pipeline on a value you already hold,
 // such as one pre-populated with defaults.
 //

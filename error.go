@@ -52,7 +52,8 @@ var (
 	// overflows it, or a field the target lacks under
 	// [WithDisallowUnknownFields]. The decoder reports every rejection as
 	// one kind of error, so the sentinel tells them apart from nothing
-	// finer.
+	// finer. A decode that rejects several unknown fields returns one
+	// error that nests a rejection for each, and it matches too.
 	// The error comes back bound as a [SourceError] at the path of the
 	// offending value, from the root of the document, or at the path of
 	// its key for a rejection of the key, such as an unknown field. Its

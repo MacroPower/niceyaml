@@ -1789,6 +1789,51 @@ func WithAliasLimit(enabled bool) DecodeOption {
 // WithDisallowUnknownFields is a [DecodeOption] that sets whether a mapping
 // key with no field in the target struct is an error. The default is false,
 // and the decode then skips unknown keys.
+//
+// A decode that rejects an unknown field reports every one the document
+// holds, in the order of the source, each at the path of its key:
+//
+//	cfg.yaml: 2 unknown fields
+//	    3:1: $.replicsa~: unknown field "replicsa"
+//	    7:5: $.servers[0].prot~: unknown field "prot"
+//
+// The error counts the fields in its message and nests one error for
+// each, which [SourceError.Errors] and [ErrorTree.Problems] list. Each
+// nested error matches [ErrDecodeRejected] and holds the
+// [yaml.UnknownFieldError] the go-yaml decoder returns for that field. A
+// document with one unknown field reports that field as the error itself.
+//
+// The go-yaml decoder decides whether the decode fails. It stops at the
+// first unknown field it finds, and it finds the fields of one mapping in
+// no fixed order, so the decode looks for the others once the decoder
+// has rejected one. It reads each mapping that a struct of the target
+// decodes from, and asks the decoder about each key no field of the
+// struct names, with the options of the decode. The report therefore
+// holds only keys the decoder rejects, and it is the same on every run.
+// A key under a prefix that [yaml.AllowFieldPrefixes] allows stays out
+// of it.
+//
+// The report follows the decoder where the decoder checks nothing:
+//
+//   - The decoder reports a value of the wrong kind before any unknown
+//     field, so a decode that fails that way reports no unknown field.
+//   - The decoder decodes no field from a mapping that holds a key it
+//     does not read as a string, such as `1` or `true`, and rejects no
+//     key of that mapping.
+//   - The decoder fills a field of an interface type with maps and
+//     slices, so no key below such a field is unknown.
+//   - A struct that decodes itself decides what the decoder checks. An
+//     UnmarshalYAML that decodes into a second type with the same fields
+//     has the decoder check them, and one that parses the text itself
+//     does not.
+//
+// Two limits remain. The search reads the values below a struct that
+// decodes itself as if its fields mirrored the document, so it misses an
+// unknown field below one whose fields do not, unless the decoder names
+// that field. And nothing shows which types [yaml.CustomUnmarshaler] or
+// [yaml.RegisterCustomUnmarshaler] decode, so the search reads the
+// values below such a type as the fields of its struct, and can report a
+// key there that the unmarshaler accepts.
 func WithDisallowUnknownFields(disallow bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.disallowUnknownFields = disallow
@@ -1918,6 +1963,14 @@ func WithReferences(data ...[]byte) DecodeOption {
 // binds at the token the decoder reported, and the path names the value
 // in the message. A value under a key with no name has no path, so its
 // error carries that position alone.
+//
+// The decoder stops at the first unknown field it finds under
+// [WithDisallowUnknownFields]. DecodeInto then finds the others, so one
+// decode reports every unknown field, in the order of the source.
+// Several come back as one error whose message counts them, such as "3
+// unknown fields", with one error nested for each field, at the path of
+// its key. [WithDisallowUnknownFields] describes which fields the report
+// holds.
 //
 // An error the decoder reports without a token of the source comes back
 // as it is, with no location, and does not match [ErrDecodeRejected]. It
@@ -2172,7 +2225,9 @@ func (n *Node) forValidators(yamlOpts []yaml.DecodeOption) *Node {
 // and for a node below the body, a failure in an anchor outside node
 // that node reads comes back as its error. The error of a value that
 // decodes itself binds at the path [Node.locateDecodeError] finds for
-// that value.
+// that value. A rejection of an unknown field comes back with the
+// rejections of the other unknown fields [Node.unknownFields] finds,
+// bound as one error.
 //
 // The go-yaml decoder never checks the context, so a context that has
 // ended before the decode starts, or while it registers the anchors node
@@ -2217,6 +2272,12 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 	// The decoder returns the error of a value that decodes itself with
 	// no token, so the Node finds the value that reported it.
 	err = n.locateDecodeError(ctx, n.rejection(err, view), node, v, yamlOpts)
+
+	// The decoder stops at the first unknown field, so the Node finds the
+	// others and reports them together.
+	if fields := n.unknownFields(ctx, err, node, v, yamlOpts); len(fields) > 1 {
+		return n.bindUnknownFields(fields)
+	}
 
 	return n.bindDecodeError(err)
 }

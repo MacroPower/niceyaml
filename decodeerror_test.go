@@ -378,10 +378,10 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			path:  "$.servers[0].zzz~",
 		},
 		"unknown field a merge key brings in": {
-			input: "defs: &d\n  zzz: 1\none:\n  <<: *d\n",
+			input: "labels: &d\n  zzz: 1\none:\n  <<: *d\n",
 			opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
-			want:  "2:3: $.defs.zzz~: unknown field \"zzz\"",
-			path:  "$.defs.zzz~",
+			want:  "2:3: $.labels.zzz~: unknown field \"zzz\"",
+			path:  "$.labels.zzz~",
 		},
 		"alias with no anchor": {
 			input: "top: *nope\n",

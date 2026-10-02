@@ -17,6 +17,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
+	"go.jacobcolvin.com/niceyaml/paths"
 )
 
 var (
@@ -651,18 +652,23 @@ func (l *errorLocator) value(entry ast.Node) (ast.Node, bool) {
 }
 
 // read returns the node the decoder reads a field, an element, or a map
-// value from, where node is the value the document holds for it. It
-// returns node itself without the anchors on it, or the content of the
-// anchor an alias refers to. The bool result is false when the decoder
-// reads no value there. The decoder reads none from a null, or from an
-// alias to one, and leaves the target as it is, with no call to an
-// unmarshaler. An alias that does not resolve gives no node either.
+// value from, as [readNode] finds it in the document of the walk.
 func (l *errorLocator) read(node ast.Node) (ast.Node, bool) {
+	return readNode(l.node.doc.pathResolver(), node)
+}
+
+// readNode returns the node the decoder reads a field, an element, or a
+// map value from, where node is the value the document holds for it and
+// resolver binds the aliases of that document. It returns node itself
+// without the anchors on it, or the content of the anchor an alias
+// refers to. The bool result is false when the decoder reads no value
+// there. The decoder reads none from a null, or from an alias to one,
+// and leaves the target as it is, with no call to an unmarshaler. An
+// alias that does not resolve gives no node either.
+func readNode(resolver *paths.Resolver, node ast.Node) (ast.Node, bool) {
 	if astnode.IsNil(node) {
 		return nil, false
 	}
-
-	resolver := l.node.doc.pathResolver()
 
 	held := node
 	if alias, ok := node.(*ast.AliasNode); ok {
@@ -686,10 +692,17 @@ func (l *errorLocator) read(node ast.Node) (ast.Node, bool) {
 	return content, true
 }
 
-// content returns the mapping, sequence, or scalar that node holds,
-// behind the anchors, tags, and aliases on it, or nil when an alias on
-// the way does not resolve.
+// content returns the mapping, sequence, or scalar that node holds, as
+// [contentNode] finds it in the document of the walk.
 func (l *errorLocator) content(node ast.Node) ast.Node {
+	return contentNode(l.node.doc.pathResolver(), node)
+}
+
+// contentNode returns the mapping, sequence, or scalar that node holds,
+// behind the anchors, tags, and aliases on it, or nil when an alias on
+// the way does not resolve. The resolver binds the aliases of the
+// document of node.
+func contentNode(resolver *paths.Resolver, node ast.Node) ast.Node {
 	for {
 		node = astnode.Content(node)
 
@@ -698,7 +711,7 @@ func (l *errorLocator) content(node ast.Node) ast.Node {
 			return node
 		}
 
-		next, err := l.node.doc.pathResolver().Deref(alias)
+		next, err := resolver.Deref(alias)
 		if err != nil {
 			return nil
 		}

@@ -103,6 +103,71 @@ func TestReadsAnchor(t *testing.T) {
 	}
 }
 
+func TestIgnoresMerges(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		typ  reflect.Type
+		want bool
+	}{
+		"alias with omitempty": {
+			typ: reflect.TypeFor[struct {
+				Base embedded `yaml:",inline,alias,omitempty"`
+				B    int
+			}](),
+			want: true,
+		},
+		"options in another order": {
+			typ: reflect.TypeFor[struct {
+				Base embedded `yaml:",omitempty,alias,inline"`
+			}](),
+			want: true,
+		},
+		"json tag": {
+			typ: reflect.TypeFor[struct {
+				Base *embedded `json:",inline,alias,omitempty"` //nolint:staticcheck // go-yaml reads the options of a json tag.
+			}](),
+			want: true,
+		},
+		"alias without omitempty": {
+			typ: reflect.TypeFor[struct {
+				Base embedded `yaml:",inline,alias"`
+			}](),
+		},
+		"omitempty without alias": {
+			typ: reflect.TypeFor[struct {
+				Base embedded `yaml:",inline,omitempty"`
+			}](),
+		},
+		"alias that names an anchor": {
+			typ: reflect.TypeFor[struct {
+				Base embedded `yaml:",inline,alias=base,omitempty"`
+			}](),
+		},
+		"alias without inline": {
+			typ: reflect.TypeFor[struct {
+				Base embedded `yaml:",alias,omitempty"`
+			}](),
+		},
+		"skipped field": {
+			typ: reflect.TypeFor[struct {
+				base embedded `yaml:",inline,alias,omitempty"` //nolint:unused // Only reflect reads the field.
+			}](),
+		},
+		"no fields": {
+			typ: reflect.TypeFor[struct{}](),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, yamlfield.IgnoresMerges(tc.typ))
+		})
+	}
+}
+
 func TestOwnNames(t *testing.T) {
 	t.Parallel()
 

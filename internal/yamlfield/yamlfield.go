@@ -12,7 +12,9 @@
 // One kind of field reads no entry of the mapping. An inline field that
 // carries an alias option gets the value of the anchor a `<<` key names.
 // [ReadsAnchor] reports such a field, so the pairing code can leave its
-// struct alone.
+// struct alone. With an omitempty option beside the alias option, go-yaml
+// also leaves out the entries the `<<` keys of the mapping bring in, which
+// [IgnoresMerges] reports.
 package yamlfield
 
 import (
@@ -62,6 +64,27 @@ func ReadsAnchor(field reflect.StructField) bool {
 	return slices.Contains(options, "inline") && slices.ContainsFunc(options, func(option string) bool {
 		return strings.HasPrefix(option, "alias") && !strings.Contains(option, "=")
 	})
+}
+
+// IgnoresMerges reports whether go-yaml leaves out the entries a `<<`
+// merge key brings in when it decodes a mapping into t, a struct type.
+// It does so when t holds a field that [ReadsAnchor] reports and whose
+// tag carries the omitempty option too, such as
+// `yaml:",inline,alias,omitempty"`. The fields of t then read the entries
+// of the mapping itself alone.
+func IgnoresMerges(t reflect.Type) bool {
+	for field := range t.Fields() {
+		if !ReadsAnchor(field) {
+			continue
+		}
+
+		tag, _ := fieldTag(field)
+		if slices.Contains(strings.Split(tag, ",")[1:], "omitempty") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // fieldTag returns the tag go-yaml reads for field, which is the yaml
