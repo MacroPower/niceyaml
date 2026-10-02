@@ -355,10 +355,10 @@ func TestPrinter_PrintError(t *testing.T) {
 		},
 		"joined bound error that marks nothing names its reason last": {
 			err: errors.Join(
-				yamltest.Bind(t, source, niceyaml.NewError("gone", niceyaml.AtExactPath(paths.Root().Child("x")))),
+				yamltest.Bind(t, source, niceyaml.NewError("gone", niceyaml.AtPath(paths.Root().Child("x").Index(0)))),
 				bound,
 			),
-			want: "├── $.x: gone\n└── 2:4: $.b: bad\n\n" + labeled + "\n\nno excerpt: resolve $.x: not found",
+			want: "├── $.x[0]: gone\n└── 2:4: $.b: bad\n\n" + labeled + "\n\nno excerpt: resolve $.x[0]: not found",
 		},
 		// A row drops its trailing spaces: the space after "b", and the
 		// blank indent in front of the blank line of the last branch.
@@ -462,7 +462,7 @@ func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
 	// The reason a location did not resolve names the path, which spells a
 	// key of the document, so it gets the same treatment as the tree.
 	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
-	bound := source.Bind(niceyaml.NewError("bad", niceyaml.AtExactPath(paths.Root().Child("mi\x1b[31mss"))))
+	bound := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("mi\x1b[31mss").Index(0))))
 
 	got = p.PrintError(bound)
 	assert.NotContains(t, got, "\x1b")
@@ -475,25 +475,25 @@ func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
 	// spell the key the same way only if the width of a tab does not
 	// depend on its column.
 	named := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml"))
-	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtExactPath(paths.Root().Child("ab\tc"))))
+	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("ab\tc").Index(0))))
 
 	got = p.PrintError(bound)
 	assert.NotContains(t, got, "\u2409")
 	assert.Equal(t, stringtest.JoinLF(
-		"cfg.yaml: $.'ab    c': bad",
+		"cfg.yaml: $.'ab    c'[0]: bad",
 		"",
-		"no excerpt: resolve $.'ab    c': not found",
+		"no excerpt: resolve $.'ab    c'[0]: not found",
 	), got)
 
 	// The reason stays on one row, so a line feed in the key is a picture
 	// there while it starts a new row in the tree.
-	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtExactPath(paths.Root().Child("x\ny\tz"))))
+	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("x\ny\tz").Index(0))))
 
 	assert.Equal(t, stringtest.JoinLF(
 		"cfg.yaml: $.'x",
-		"y    z': bad",
+		"y    z'[0]: bad",
 		"",
-		"no excerpt: resolve $.'x\u240ay    z': not found",
+		"no excerpt: resolve $.'x\u240ay    z'[0]: not found",
 	), p.PrintError(bound))
 }
 

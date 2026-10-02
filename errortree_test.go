@@ -559,7 +559,7 @@ func TestErrorTree_New(t *testing.T) {
 		},
 		"children without a position follow the positioned ones": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("3 problems", niceyaml.WithErrors(
-				niceyaml.NewError("bad x", niceyaml.AtExactPath(paths.Root().Child("x"))),
+				niceyaml.NewError("bad x", niceyaml.AtPath(paths.Root().Child("x").Index(0))),
 				niceyaml.NewError("no path"),
 				badA(),
 			))),
@@ -567,7 +567,7 @@ func TestErrorTree_New(t *testing.T) {
 				Text: "f.yaml: 3 problems",
 				Children: []niceyaml.ErrorTree{
 					{Text: "1:4: $.a: bad a"},
-					{Text: "$.x: bad x"},
+					{Text: "$.x[0]: bad x"},
 					{Text: "no path"},
 				},
 			},

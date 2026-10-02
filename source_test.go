@@ -2506,12 +2506,12 @@ func TestSource_Bind(t *testing.T) {
 		doc, err := one.Document()
 		require.NoError(t, err)
 
-		err = one.Bind(niceyaml.NewError("bad", niceyaml.AtExactPath(paths.Root().Child("zz"))))
+		err = one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("zz").Index(0))))
 
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
-		assert.Equal(t, "one.yaml: $.zz: bad", err.Error())
+		assert.Equal(t, "one.yaml: $.zz[0]: bad", err.Error())
 		assert.Same(t, doc, bound.Document())
 
 		rangeErr := bound.Unresolved()

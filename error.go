@@ -213,9 +213,6 @@ type Error struct {
 	// Rebase sets, when rebased, since the root is a base like any other.
 	base    paths.Path
 	hasPath bool
-	// The path came from AtExactPath, so it binds at the node it selects
-	// or nowhere.
-	exact   bool
 	rebased bool
 }
 
@@ -404,14 +401,12 @@ func (j *rebasedJoinError) As(target any) bool {
 	return ok && x.As(target)
 }
 
-// ErrorOption configures an [Error]. [AtPath] or [AtExactPath] sets its
-// path, and the last of those two given wins. [AtPosition] or [AtRange]
-// sets its position or range, and the last of those two given wins.
-// [WithErrors] adds nested errors.
+// ErrorOption configures an [Error]. [AtPath] sets its path. [AtPosition]
+// or [AtRange] sets its position or range, and the last of those two
+// given wins. [WithErrors] adds nested errors.
 //
 // Available options:
 //   - [AtPath]
-//   - [AtExactPath]
 //   - [AtPosition]
 //   - [AtRange]
 //   - [WithErrors]
@@ -452,25 +447,14 @@ type ErrorOption func(e *Error)
 //		return nil
 //	}
 //
-// [AtExactPath] sets a path that binds at the node it selects or nowhere.
+// A producer may know where the value lies and still have no path that
+// selects it. A validator that reads decoded data cannot always spell
+// the key of a value as the source does. Such a producer gives
+// [AtPosition] or [AtRange] beside the path. The error then binds there,
+// and the path names the value in the message.
 func AtPath(p paths.Path) ErrorOption {
 	return func(e *Error) {
-		e.path, e.hasPath, e.exact = p, true, false
-	}
-}
-
-// AtExactPath is an [ErrorOption] that sets the YAML path of the value
-// the error is about, as [AtPath] does, for a path that must select a
-// node. It replaces a path set before it. When the document holds no
-// node at the path, the error binds with no position, and
-// [SourceError.Unresolved] gives the reason, where a path from AtPath
-// falls back to the mapping that lacks the key. A producer that derives
-// its paths from decoded data uses it, as a schema validator does. Such
-// a producer cannot always spell the key of a value, and a path that
-// selects nothing must then mark nothing, not a mapping nearby.
-func AtExactPath(p paths.Path) ErrorOption {
-	return func(e *Error) {
-		e.path, e.hasPath, e.exact = p, true, true
+		e.path, e.hasPath = p, true
 	}
 }
 
@@ -611,14 +595,12 @@ func (e *Error) LogValue() slog.Value {
 }
 
 // locus is the location an [Error] carries: a path when hasPath, a
-// [position.Position] or a [position.Range] in loc, or both. A path from
-// [AtExactPath] is exact, so it binds at the node it selects or nowhere.
-// The zero locus is no location.
+// [position.Position] or a [position.Range] in loc, or both. The zero
+// locus is no location.
 type locus struct {
 	loc     any
 	path    paths.Path
 	hasPath bool
-	exact   bool
 }
 
 // rebase returns l with base in front of its path. A locus with no path
@@ -634,7 +616,7 @@ func (l locus) rebase(base paths.Path) locus {
 // locus returns the location e carries itself, without looking through
 // its cause chain or applying its base.
 func (e *Error) locus() locus {
-	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath, exact: e.exact}
+	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath}
 }
 
 // addsNothing reports whether e adds nothing to the error it wraps: e is
@@ -819,7 +801,7 @@ func locate(b binder, l locus) (location, *Node, error) {
 			return location{}, b.node, fmt.Errorf("%w: %s", ErrAmbiguousPath, l.path)
 		}
 
-		return locatePath(b, l.path, l.exact)
+		return locatePath(b, l.path)
 	}
 
 	return location{}, b.node, errUnlocated
@@ -830,11 +812,10 @@ func locate(b binder, l locus) (location, *Node, error) {
 // [binder.scoped] put the scope of that node in front of the path
 // already, so the path reads from the root. A path that names a key the
 // document leaves out resolves to the key of the mapping that lacks it,
-// as [Node.nearestLocation] finds it, unless the path is exact. A source
-// that holds no document, holds several, or does not parse has no
-// document to resolve the path in, so the location is
-// [ErrPathNeedsDocument] wrapping that reason.
-func locatePath(b binder, path paths.Path, exact bool) (location, *Node, error) {
+// as [Node.nearestLocation] finds it. A source that holds no document,
+// holds several, or does not parse has no document to resolve the path
+// in, so the location is [ErrPathNeedsDocument] wrapping that reason.
+func locatePath(b binder, path paths.Path) (location, *Node, error) {
 	node := b.node
 
 	if node == nil && b.route {
@@ -854,10 +835,6 @@ func locatePath(b binder, path paths.Path, exact bool) (location, *Node, error) 
 
 	loc, err := root.pathLocation(path)
 	if err != nil {
-		if exact {
-			return location{}, node, err
-		}
-
 		if near, ok := root.nearestLocation(path, err); ok {
 			return near, node, nil
 		}
@@ -934,8 +911,8 @@ func locatePath(b binder, path paths.Path, exact bool) (location, *Node, error) 
 //
 // Any other location that does not resolve costs the SourceError its
 // position. Such locations include an index past the end of a sequence,
-// a path from [AtExactPath] that selects nothing, and a position on a
-// line the source does not have. An error that carries no location never
+// a name looked up in a scalar, and a position on a line the source does
+// not have. An error that carries no location never
 // had one. [SourceError.Error] then puts the name of the source alone in
 // front of the message, [SourceError.Range] reports false, and
 // [SourceError.Unresolved] returns the reason for the first case and nil

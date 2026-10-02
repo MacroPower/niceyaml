@@ -2325,10 +2325,10 @@ func TestNode_Bind_Scope(t *testing.T) {
 			want: "cfg.yaml:3:5: $.shops[0].hours.nope: bad",
 			path: "$.shops[0].hours.nope",
 		},
-		"an exact path that does not resolve joins the scope": {
-			err:  niceyaml.NewError("bad", niceyaml.AtExactPath(paths.Root().Child("nope"))),
-			want: "cfg.yaml: $.shops[0].hours.nope: bad",
-			path: "$.shops[0].hours.nope",
+		"a path that does not resolve joins the scope": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("open", "nope"))),
+			want: "cfg.yaml: $.shops[0].hours.open.nope: bad",
+			path: "$.shops[0].hours.open.nope",
 		},
 		"a path beside a range joins the scope and binds at the range": {
 			err: niceyaml.NewError("bad",
