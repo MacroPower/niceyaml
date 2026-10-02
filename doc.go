@@ -248,6 +248,8 @@
 // document returns, so one pass names every syntax error and every
 // violation of the documents that parsed. [Source.File],
 // [Source.Document], and [Source.Decode] need the whole file to parse.
+// Every error of the parse matches [ErrSyntax], whichever of these
+// returns it.
 //
 // The root Node decodes, validates, and binds the whole document, and
 // every function that takes a Node takes it as it is. [Node.Decode] runs
@@ -401,9 +403,10 @@
 // [token.Tokens] it lexes, and [ast.Node] and [*token.Token] as results of
 // resolving a [paths.Path]. Positions, ranges, lines, errors, and styles are
 // niceyaml's own types, and [paths.Path.YAMLPath] converts to go-yaml's
-// path type when a caller needs it. A decode the go-yaml decoder rejects
-// matches [ErrDecodeRejected], with the exceptions its doc names, so a
-// caller tells that case apart without naming go-yaml's error types.
+// path type when a caller needs it. Text the go-yaml parser rejects
+// matches [ErrSyntax]. A decode the go-yaml decoder rejects matches
+// [ErrDecodeRejected], with the exceptions its doc names. A caller thus
+// tells both cases apart without naming go-yaml's error types.
 //
 // The go-yaml settings niceyaml supports have named options, such as
 // [WithAllowDuplicateKeys] or [go.jacobcolvin.com/niceyaml/encoder.WithIndent].

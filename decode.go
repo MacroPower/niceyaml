@@ -881,8 +881,8 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 // or nil for a document that parsed. [Source.Documents] returns a Node
 // for every document of a file, and a syntax error fails the one document
 // that holds it. The error is the [*SourceError] the parser reported for
-// that document, bound to the Source, and it is among the errors
-// [Source.File] returns:
+// that document, bound to the Source. It matches [ErrSyntax], and it is
+// among the errors [Source.File] returns:
 //
 //	docs, _ := source.Documents()
 //	for _, doc := range docs {
@@ -2668,8 +2668,8 @@ func (n *Node) holdsToken(tk *token.Token) bool {
 }
 
 // decodeRejectedError is a [yamlMessageError] the decoder returned, which
-// matches [ErrDecodeRejected]. The same error from the parser does not,
-// so [Source.Documents] wraps it in the plain [yamlMessageError].
+// matches [ErrDecodeRejected]. The same error from the parser matches
+// [ErrSyntax] instead, so the parse wraps it in a [syntaxError].
 type decodeRejectedError struct {
 	yamlMessageError
 }

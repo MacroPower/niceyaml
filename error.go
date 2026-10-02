@@ -118,12 +118,19 @@ var (
 	// and schema packages export the same error value.
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
-	// ErrParseRejected indicates the go-yaml parser panicked on the tokens
-	// of a [Source], such as a token with no position that
-	// [NewSourceFromTokens] received. [Source.File] returns it on every
-	// call, bound as a [SourceError] at the first token with a position
-	// among the ones the parser was reading.
-	ErrParseRejected = errors.New("parser rejected the tokens")
+	// ErrSyntax indicates text the go-yaml parser rejects, such as a flow
+	// sequence with no closing bracket, a tab that indents a key, or a key
+	// a mapping holds twice without [WithAllowDuplicateKeys]. Every error
+	// of the parse matches it. So does a panic in the parser, such as one
+	// on a token with no position that [NewSourceFromTokens] received.
+	// [Source.File], [Source.Documents], and [Source.Document] return it,
+	// and [Node.Err] returns it for a document that did not parse. Each
+	// error comes back bound as a [SourceError] at the offending token. A
+	// panic binds at the first token with a position among the ones the
+	// parser was reading. The error of a file with several such documents
+	// is a join, which matches through each of them. The go-yaml error
+	// stays in the chain, so [errors.As] still finds it.
+	ErrSyntax = errors.New("invalid YAML syntax")
 
 	// ErrOutOfRange indicates the error's location lies outside the source.
 	// The location starts on a line past the last or before the first,

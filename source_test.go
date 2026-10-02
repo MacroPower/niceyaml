@@ -14,6 +14,7 @@ import (
 	"testing/iotest"
 
 	"charm.land/lipgloss/v2"
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/parser"
@@ -1794,7 +1795,9 @@ func TestSource_Parse(t *testing.T) {
 		source := niceyaml.NewSourceFromTokens(tks)
 
 		file, err := source.File()
-		require.ErrorIs(t, err, niceyaml.ErrParseRejected)
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		require.EqualError(t, err,
+			"1:1: parser rejected the tokens: panic: runtime error: invalid memory address or nil pointer dereference")
 		assert.Nil(t, file)
 
 		var bound *niceyaml.SourceError
@@ -1806,11 +1809,13 @@ func TestSource_Parse(t *testing.T) {
 		assert.Nil(t, file)
 		assert.Same(t, err, again)
 
-		_, err = source.Documents()
-		require.ErrorIs(t, err, niceyaml.ErrParseRejected)
+		docs, err := source.Documents()
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		require.Len(t, docs, 1)
+		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
 
 		_, err = source.Document()
-		require.ErrorIs(t, err, niceyaml.ErrParseRejected)
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
 	})
 
 	t.Run("syntax error on a line the lexer dropped keeps its line", func(t *testing.T) {
@@ -1888,6 +1893,106 @@ func TestSource_Parse(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestSource_File_ErrSyntax(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		opts  []niceyaml.SourceOption
+		// Whether each document fails to parse, in file order.
+		want []bool
+	}{
+		"unclosed flow sequence": {
+			input: "a: [1\n",
+			want:  []bool{true},
+		},
+		"duplicate key": {
+			input: "a: 1\na: 2\n",
+			want:  []bool{true},
+		},
+		"duplicate key the source allows": {
+			input: "a: 1\na: 2\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			want:  []bool{false},
+		},
+		"tab indents a key": {
+			input: "a:\n\tb: 1\n",
+			want:  []bool{true},
+		},
+		"unknown escape": {
+			input: "a: \"\\q\"\n",
+			want:  []bool{true},
+		},
+		"second of three documents": {
+			input: "a: 1\n---\nb: [\n---\nc: 3\n",
+			want:  []bool{false, true, false},
+		},
+		"first and third of three documents": {
+			input: "a: [\n---\nb: 2\n---\nc: @x\n",
+			want:  []bool{true, false, true},
+		},
+		// The parser takes an alias with no anchor, and a decode rejects
+		// it.
+		"alias with no anchor": {
+			input: "a: *x\n",
+			want:  []bool{false},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input, tc.opts...)
+
+			docs, err := source.Documents()
+			require.Len(t, docs, len(tc.want))
+
+			for i, doc := range docs {
+				if !tc.want[i] {
+					require.NoError(t, doc.Err())
+
+					_, decodeErr := doc.Decode[any](t.Context())
+					require.NotErrorIs(t, decodeErr, niceyaml.ErrSyntax)
+
+					continue
+				}
+
+				require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
+
+				_, decodeErr := doc.Decode[any](t.Context())
+				require.ErrorIs(t, decodeErr, niceyaml.ErrSyntax)
+
+				// The go-yaml error stays in the chain.
+				var syntaxErr *yaml.SyntaxError
+
+				require.ErrorAs(t, doc.Err(), &syntaxErr)
+			}
+
+			file, fileErr := source.File()
+
+			if !slices.Contains(tc.want, true) {
+				require.NoError(t, err)
+				require.NoError(t, fileErr)
+				assert.NotNil(t, file)
+
+				return
+			}
+
+			// One error or a join of several, which matches through each.
+			require.ErrorIs(t, err, niceyaml.ErrSyntax)
+			require.ErrorIs(t, fileErr, niceyaml.ErrSyntax)
+			assert.Nil(t, file)
+
+			_, err = source.Document()
+			require.ErrorIs(t, err, niceyaml.ErrSyntax)
+
+			_, err = source.Decode[any](t.Context())
+			require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		})
+	}
 }
 
 func TestSource_Documents_SyntaxError(t *testing.T) {

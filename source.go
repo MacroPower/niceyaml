@@ -567,9 +567,9 @@ func (d *document) anchorToken() *token.Token {
 //
 // The message of a syntax error names each control character by its
 // Unicode Control Picture, so a tab the parser rejects reads as "␉" there
-// as it does in the excerpt. A panic in the parser comes back as a
-// [*SourceError] that matches [ErrParseRejected]. Every later call
-// returns the same error.
+// as it does in the excerpt. Every error of the parse matches
+// [ErrSyntax], and so does a panic in the parser, which comes back as a
+// [*SourceError] too. Every later call returns the same error.
 func (s *Source) File() (*ast.File, error) {
 	s.parseOnce()
 
@@ -681,10 +681,16 @@ func (s *Source) parse() parsed {
 		// The go-yaml scanner spells the tab it rejects as a raw tab, which
 		// the renderers would lay out as four spaces, so the message names
 		// each control character by its picture.
-		if yamlErr, ok := errors.AsType[yaml.Error](err); ok {
+		yamlErr, ok := errors.AsType[yaml.Error](err)
+
+		switch {
+		case ok:
 			msg := escape.Control(yamlErr.GetMessage())
 
-			err = WrapError(yamlMessageError{err: yamlErr, msg: msg}, atToken(yamlErr.GetToken()))
+			err = WrapError(syntaxError{err: yamlMessageError{err: yamlErr, msg: msg}}, atToken(yamlErr.GetToken()))
+
+		case !errors.Is(err, ErrSyntax):
+			err = syntaxError{err: err}
 		}
 
 		// The documents come from the file this parse returns, so the error
@@ -761,9 +767,28 @@ func isDocumentGroup(group token.Tokens) bool {
 	return preamble.Len(group) < len(group)
 }
 
+// syntaxError is an error of the parse, which matches [ErrSyntax]. It
+// reads as the error it holds and unwraps to it.
+type syntaxError struct {
+	err error
+}
+
+func (e syntaxError) Error() string {
+	return e.err.Error()
+}
+
+func (e syntaxError) Unwrap() error {
+	return e.err
+}
+
+// Is reports whether target is [ErrSyntax].
+func (e syntaxError) Is(target error) bool {
+	return target == ErrSyntax
+}
+
 // parseRun parses run, one run of [splitDocumentRuns]. It turns a panic
 // in the parser into a [*SourceError] bound to the Source that matches
-// [ErrParseRejected], located at the first token of run that carries a
+// [ErrSyntax], located at the first token of run that carries a
 // position.
 func (s *Source) parseRun(run token.Tokens) (*ast.File, error) {
 	var (
@@ -784,7 +809,9 @@ func (s *Source) parseRun(run token.Tokens) (*ast.File, error) {
 				at = run[i]
 			}
 
-			err = bindTree(WrapError(fmt.Errorf("%w: panic: %v", ErrParseRejected, p), atToken(at)), binder{src: s})
+			panicked := syntaxError{err: fmt.Errorf("parser rejected the tokens: panic: %v", p)}
+
+			err = bindTree(WrapError(panicked, atToken(at)), binder{src: s})
 		}()
 
 		f, err = parser.Parse(run, parser.ParseComments, s.parserOpts...)
