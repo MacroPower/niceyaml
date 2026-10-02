@@ -58,7 +58,11 @@ const wrapOnCharacters = " " + breakpoints
 // Use [Printer.Fprint] to write the rendered output to an [io.Writer] instead
 // of returning it as a string:
 //
-//	p.Fprint(os.Stdout, view)
+//	p.Fprint(w, view)
+//
+// The output holds 24-bit color escape sequences whatever w supports. The
+// package documentation covers the writers that fit them to a terminal, a
+// pipe, or a file.
 //
 // # Errors
 //
@@ -788,7 +792,10 @@ func (p *Printer) Style(s kind.Kind) lipgloss.Style {
 	return p.styles.Style(s)
 }
 
-// Fprint renders view to w as [Printer.Print] does.
+// Fprint renders view to w as [Printer.Print] does. It writes the escape
+// sequences of the output unchanged, whatever w supports, so a program
+// that prints to a terminal passes a writer that fits them to it, as the
+// package documentation describes.
 //
 // It returns the number of bytes written and any write error encountered.
 func (p *Printer) Fprint(w io.Writer, view *line.View) (int, error) {

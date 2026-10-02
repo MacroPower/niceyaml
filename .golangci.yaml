@@ -204,6 +204,10 @@ linters:
         - io.Copy(os.Stdout)
         - os.Remove
         - os.RemoveAll
+        # The lipgloss counterparts of the fmt functions errcheck skips.
+        - charm.land/lipgloss/v2.Print
+        - charm.land/lipgloss/v2.Printf
+        - charm.land/lipgloss/v2.Println
 
     grouper:
       import-require-single-import: true
@@ -251,6 +255,11 @@ linters:
         text: "printf"
         linters:
           - govet
+      # errcheck reports the unhandled errors that matter in an example.
+      - path: examples/
+        text: "G104"
+        linters:
+          - gosec
       - path: style/theme/
         linters:
           - dupl

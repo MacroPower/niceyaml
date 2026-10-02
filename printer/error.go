@@ -68,7 +68,7 @@ const errorConnectorWidth = 4
 // A program configures one printer and prints its errors through it:
 //
 //	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
-//	fmt.Println(p.PrintError(err))
+//	lipgloss.Fprintln(os.Stderr, p.PrintError(err))
 //
 // An error whose tree holds no SourceError prints as its tree alone,
 // which for an error with no nested errors is its message. So does an

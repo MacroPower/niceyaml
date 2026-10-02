@@ -961,7 +961,7 @@ func locatePath(b binder, path paths.Path, exact bool) (location, *Node, error) 
 // same tree and excerpt with color and the context lines the printer is
 // configured with:
 //
-//	fmt.Println(p.PrintError(err))
+//	lipgloss.Fprintln(os.Stderr, p.PrintError(err))
 //
 // A SourceError implements the error interface and unwraps to the error it
 // binds, so [errors.Is] and [errors.As] see through it.

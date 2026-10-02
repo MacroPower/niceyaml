@@ -422,7 +422,7 @@ func (v *View) Slice(spans ...position.Span) *View {
 //	for bound := range niceyaml.AllBindings(err) {
 //		bound.Annotate(view)
 //	}
-//	fmt.Println(p.Print(view.Hunks(2)))
+//	lipgloss.Println(p.Print(view.Hunks(2)))
 func (v *View) Hunks(context int) *View {
 	var marked []int
 

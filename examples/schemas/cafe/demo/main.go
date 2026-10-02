@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 
+	"charm.land/lipgloss/v2"
+
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/examples/schemas/cafe"
 	"go.jacobcolvin.com/niceyaml/printer"
@@ -19,7 +21,7 @@ func main() {
 
 	cfg, err := load(cafe.DefaultYAML)
 	if err != nil {
-		fmt.Println(p.PrintError(err))
+		lipgloss.Println(p.PrintError(err))
 	} else {
 		fmt.Printf("valid: %q with %d menu items, open %s-%s\n",
 			cfg.Metadata.Name, len(cfg.Spec.Menu.Items), cfg.Spec.Hours.Open, cfg.Spec.Hours.Close)
@@ -29,7 +31,7 @@ func main() {
 
 	_, err = load(cafe.BrokenYAML)
 	if err != nil {
-		fmt.Println(p.PrintError(err))
+		lipgloss.Println(p.PrintError(err))
 	}
 }
 

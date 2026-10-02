@@ -63,7 +63,7 @@ type Normalizer interface {
 //	idx := finder.New().Load(source.Lines())
 //	view := source.View()
 //	view.BlendOverlay(kind.GenericHighlight, idx.Find("search term")...)
-//	fmt.Println(p.Print(view))
+//	lipgloss.Println(p.Print(view))
 //
 // By default, a search folds case and ignores diacritics, so "cafe"
 // matches "Café", through the [normalizer.Normalizer] that

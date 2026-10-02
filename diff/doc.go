@@ -8,8 +8,8 @@
 //
 //	result := diff.Diff(before.Lines(), after.Lines())
 //	p := printer.New()
-//	fmt.Println(p.Print(result.Unified()))
-//	fmt.Println(p.Print(result.Hunks(3)))
+//	lipgloss.Println(p.Print(result.Unified()))
+//	lipgloss.Println(p.Print(result.Hunks(3)))
 //
 // The [Result] renders in three shapes. [Result.Unified] interleaves the
 // lines of both inputs, [Result.Hunks] keeps only the changes with context

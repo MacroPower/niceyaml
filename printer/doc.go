@@ -6,10 +6,51 @@
 // [Printer.Print] or [Printer.Fprint]:
 //
 //	p := printer.New(printer.WithStyles(theme.Charm))
-//	fmt.Println(p.Print(source.View()))
+//	lipgloss.Println(p.Print(source.View()))
 //
 // Every setting is an [Option]. A Printer never changes after construction,
 // so [Printer.With] derives a copy with more options applied.
+//
+// # Color Profiles
+//
+// A Printer writes every color as a 24-bit escape sequence, whatever the
+// output supports. [Printer.Print] and [Printer.PrintError] return those
+// sequences, and [Printer.Fprint] writes them to its writer unchanged, so
+// [fmt.Println] sends them to a pipe, to a file, and to a terminal that
+// has NO_COLOR set. The lipgloss print functions fit the sequences to
+// their destination instead. They convert each color to one the terminal
+// supports, drop the colors under NO_COLOR, and drop every sequence when
+// the output is not a terminal:
+//
+//	lipgloss.Println(p.Print(source.View()))
+//	lipgloss.Fprintln(os.Stderr, p.PrintError(err))
+//
+// A Bubble Tea program fits what its model draws to the terminal it runs
+// in, so a model draws what Print returns as it is.
+//
+// A program that chooses the profile itself, such as one with a --color
+// flag, prints through a
+// [github.com/charmbracelet/colorprofile.Writer].
+// [github.com/charmbracelet/colorprofile.NewWriter] detects the profile
+// of its destination as the lipgloss functions do, and the Profile field
+// of the writer overrides it:
+//
+//	w := colorprofile.NewWriter(os.Stdout, os.Environ())
+//	if forceColor {
+//		w.Profile = colorprofile.TrueColor
+//	}
+//	p.Fprint(w, view)
+//
+// NewWriter and [lipgloss.Fprintln] detect the profile on every call,
+// which inside tmux starts a process, so a program that prints many views
+// builds one writer and prints them all through it.
+//
+// Output without its sequences is not the plain text of a view. An
+// overlay marks its span with color alone, so a search match loses its
+// mark along with the colors. [line.View.String] renders a view as plain
+// text with a caret under every column an overlay covers, and
+// [niceyaml.FormatError] renders an error the same way, so output for a
+// log or a file goes through them.
 //
 // # Gutters
 //

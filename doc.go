@@ -15,7 +15,7 @@
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	p := printer.New()
-//	fmt.Println(p.Print(source.View()))
+//	lipgloss.Println(p.Print(source.View()))
 //
 // [NewSourceFromFile] reads a file from disk, [NewSourceFromFS] one from
 // an [fs.FS] such as an [embed.FS], and [NewSourceFromReader] any
@@ -119,7 +119,7 @@
 //	view := source.View()
 //	view.AddOverlay(kind.GenericError, errorRange)
 //	view.BlendOverlay(kind.GenericHighlight, matches...)
-//	fmt.Println(p.Print(view))
+//	lipgloss.Println(p.Print(view))
 //
 // The lines hold every token the module hands out, from [Source.Tokens],
 // [line.Lines.TokenAt], [line.Line.Tokens], or [line.Line.Token]. Treat
@@ -165,7 +165,7 @@
 // renderer of its own reads too:
 //
 //	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
-//	fmt.Println(p.PrintError(err))
+//	lipgloss.Fprintln(os.Stderr, p.PrintError(err))
 //
 // This package knows nothing of the printer. The marks of an error decorate a
 // [line.View], so a caller renders them with any renderer and composes them with
@@ -178,7 +178,7 @@
 //	for bound := range niceyaml.AllBindings(err) {
 //		bound.Annotate(view)
 //	}
-//	fmt.Println(p.Print(view))
+//	lipgloss.Println(p.Print(view))
 //
 // Annotate finds each line by identity, since every view over a source
 // shares its lines. The view may therefore be a slice of the source, such
@@ -189,7 +189,7 @@
 // each, so a viewer shows the excerpt of every error at once, with
 // search matches or any other decoration in it:
 //
-//	fmt.Println(p.Print(view.Hunks(2)))
+//	lipgloss.Println(p.Print(view.Hunks(2)))
 //
 // [Node.Ranges] returns the ranges an error at a path highlights, those of
 // the token that starts the value, for a caller that marks a value on a
@@ -310,8 +310,8 @@
 //
 //	result := diff.Diff(original.Lines(), modified.Lines())
 //	p := printer.New()
-//	fmt.Println(p.Print(result.Unified()))
-//	fmt.Println(p.Print(result.Hunks(3)))
+//	lipgloss.Println(p.Print(result.Unified()))
+//	lipgloss.Println(p.Print(result.Hunks(3)))
 //
 // Custom algorithms implement [go.jacobcolvin.com/niceyaml/diff/lcs.Algorithm]. For a
 // reusable [go.jacobcolvin.com/niceyaml/diff.Differ]:
@@ -345,7 +345,7 @@
 //	idx := finder.New().Load(source.Lines())
 //	view := source.View()
 //	view.AddOverlay(kind.GenericHighlight, idx.Find("search term")...)
-//	fmt.Println(p.Print(view))
+//	lipgloss.Println(p.Print(view))
 //
 // # Dependencies
 //

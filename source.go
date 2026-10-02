@@ -45,14 +45,14 @@ import (
 //
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	p := printer.New()
-//	fmt.Println(p.Print(source.View()))
+//	lipgloss.Println(p.Print(source.View()))
 //
 // A Source never changes after creation. Overlays and annotations go on the
 // view, and a fresh view renders the document as parsed:
 //
 //	view := source.View()
 //	view.AddOverlay(kind.GenericHighlight, ranges...)
-//	fmt.Println(p.Print(view))
+//	lipgloss.Println(p.Print(view))
 //
 // Since nothing mutates a Source, it is safe for concurrent use. Every view
 // taken from it shares its lines and owns its decoration, so creating one

@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 
+	"charm.land/lipgloss/v2"
+
 	_ "embed"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -28,9 +30,9 @@ func main() {
 	result := diff.Diff(before.Lines(), after.Lines())
 
 	fmt.Println("\nPrint the full diff:")
-	fmt.Println(p.Print(result.Unified()))
+	lipgloss.Println(p.Print(result.Unified()))
 
 	fmt.Println("\nPrint the summary diff:")
 
-	fmt.Println(p.Print(result.Hunks(2)))
+	lipgloss.Println(p.Print(result.Hunks(2)))
 }

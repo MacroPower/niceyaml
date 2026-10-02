@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 
+	"charm.land/lipgloss/v2"
+
 	_ "embed"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -44,5 +46,5 @@ func main() {
 	view.AddOverlay(highlightKind, results...)
 
 	fmt.Println("\nPrint with matches highlighted:")
-	fmt.Println(p.Print(view))
+	lipgloss.Println(p.Print(view))
 }

@@ -1198,7 +1198,7 @@ func (n *Node) FilePath() string {
 // slices any other view over the source, such as one that carries
 // decoration already:
 //
-//	fmt.Println(p.Print(view.Slice(doc.Span())))
+//	lipgloss.Println(p.Print(view.Slice(doc.Span())))
 func (n *Node) Span() position.Span {
 	return n.span
 }
@@ -1208,7 +1208,7 @@ func (n *Node) Span() position.Span {
 // file. A document of a file that holds several, or the node a Node from
 // [Node.At] selects, renders on its own:
 //
-//	fmt.Println(p.Print(doc.View()))
+//	lipgloss.Println(p.Print(doc.View()))
 //
 // Each call returns a view of its own with no decoration, as [Source.View]
 // does, so overlays and annotations added to one reach neither the Source
