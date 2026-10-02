@@ -3875,6 +3875,17 @@ func TestDocument_At(t *testing.T) {
 		assert.Nil(t, got)
 	})
 
+	t.Run("mapping wildcard path returns ErrWildcard", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "jobs:\n  build: 1\n")
+
+		got, err := dd.At(paths.Root().Child("jobs").ChildAll())
+		require.ErrorIs(t, err, paths.ErrWildcard)
+		require.NotErrorIs(t, err, paths.ErrNotFound)
+		assert.Nil(t, got)
+	})
+
 	t.Run("type mismatch returns Error", func(t *testing.T) {
 		t.Parallel()
 
@@ -7448,6 +7459,105 @@ func TestNode_Nodes(t *testing.T) {
 		got, err := images[1].Decode[string](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, "b", got)
+	})
+
+	t.Run("scopes each entry of a mapping", func(t *testing.T) {
+		t.Parallel()
+
+		workflow, err := niceyaml.NewSourceFromString(stringtest.Input(`
+			defaults: &defaults
+			  lint:
+			    runs-on: linux
+			jobs:
+			  <<: *defaults
+			  build:
+			    runs-on: mac
+			  3.10:
+			    runs-on: bsd
+			    steps:
+			      - uses: checkout
+			      - run: make
+		`), niceyaml.WithName("w.yaml")).Document()
+		require.NoError(t, err)
+
+		jobs, err := workflow.Nodes(paths.Root().Child("jobs").ChildAll())
+		require.NoError(t, err)
+		require.Len(t, jobs, 3)
+
+		type job struct {
+			RunsOn string `yaml:"runs-on"`
+		}
+
+		var gotPaths, gotNames, gotTexts, gotRunners []string
+
+		for _, j := range jobs {
+			gotPaths = append(gotPaths, j.Path().String())
+
+			// The key decodes as the decoder reads it, so the key 3.10
+			// gives 3.1, while the path keeps the text of the source.
+			key, err := j.At(paths.Root().Key())
+			require.NoError(t, err)
+
+			name, err := key.Decode[string](t.Context())
+			require.NoError(t, err)
+
+			gotNames = append(gotNames, name)
+			gotTexts = append(gotTexts, key.AST().GetToken().Value)
+
+			got, err := j.Decode[job](t.Context())
+			require.NoError(t, err)
+
+			gotRunners = append(gotRunners, got.RunsOn)
+
+			// A Node scoped to one entry is the Node its own path selects.
+			single, err := workflow.At(j.Path())
+			require.NoError(t, err)
+			assert.Same(t, j.AST(), single.AST())
+		}
+
+		assert.Equal(t, []string{"$.jobs.lint", "$.jobs.build", "$.jobs.'3.10'"}, gotPaths)
+		assert.Equal(t, []string{"lint", "build", "3.1"}, gotNames)
+		assert.Equal(t, []string{"lint", "build", "3.10"}, gotTexts)
+		assert.Equal(t, []string{"linux", "mac", "bsd"}, gotRunners)
+
+		// A merged entry lies where its anchor defines it.
+		assert.Equal(t, position.NewSpan(2, 3), jobs[0].Span())
+		assert.Same(t, workflow, jobs[2].Document())
+
+		err = jobs[2].Bind(niceyaml.NewError("unknown runner", niceyaml.AtPath(paths.Root().Child("runs-on"))))
+		require.EqualError(t, err, "w.yaml:9:14: $.jobs.'3.10'.runs-on: unknown runner")
+
+		uses, err := workflow.Nodes(paths.MustParse("$.jobs.*.steps[*].uses"))
+		require.NoError(t, err)
+		require.Len(t, uses, 1)
+		assert.Equal(t, "$.jobs.'3.10'.steps[0].uses", uses[0].Path().String())
+
+		keys, err := workflow.Nodes(paths.Root().Child("jobs").ChildAll().Key())
+		require.NoError(t, err)
+		require.Len(t, keys, 3)
+		assert.Equal(t, "$.jobs.build~", keys[1].Path().String())
+	})
+
+	t.Run("a mapping wildcard on a sequence yields no nodes", func(t *testing.T) {
+		t.Parallel()
+
+		nodes, err := doc.Nodes(paths.Root().Child("items").ChildAll())
+		require.NoError(t, err)
+		assert.Empty(t, nodes)
+	})
+
+	t.Run("a merge key that does not resolve is an error bound to the source", func(t *testing.T) {
+		t.Parallel()
+
+		broken := yamltest.FirstDocument(t, "jobs:\n  <<: *missing\n  build: 1\n")
+
+		_, err := broken.Nodes(paths.Root().Child("jobs").ChildAll())
+		require.ErrorIs(t, err, paths.ErrAlias)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, broken.Source(), bound.Source())
 	})
 
 	t.Run("keeps document order for nested recursive matches", func(t *testing.T) {

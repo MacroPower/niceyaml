@@ -28,6 +28,8 @@ var (
 //   - `.name` selects a mapping entry by key.
 //   - `.'name'` selects an entry whose key contains reserved characters.
 //   - Empty quotes after `.` select the entry with the empty key.
+//   - `.*` selects every entry of a mapping, and `.'*'` the entry with the
+//     key `*`.
 //   - `..name` selects every mapping entry with that key, at any depth.
 //   - `..'name'` does the same for a key containing reserved characters.
 //   - `[n]` selects a sequence element by 0-based index.
@@ -36,7 +38,9 @@ var (
 //
 // Inside quotes, `\` escapes the next character, so `\'` is a quote, `\\`
 // is a backslash, and `\t` is a plain `t`. An index is a decimal with no
-// sign and no leading zero. [Path.Key] appends the `~` selector.
+// sign and no leading zero. [Path.Key] appends the `~` selector. A `*` in
+// an unquoted name is malformed, and so is one after `..`, which has no
+// wildcard form.
 //
 // Returns an error wrapping [ErrInvalidPath] for a malformed expression.
 func Parse(expr string) (Path, error) {
@@ -84,7 +88,7 @@ func parseSegments(expr string) ([]segment, error) {
 		case strings.HasPrefix(rest, ".'"):
 			seg, rest, err = parseQuoted(rest[2:], segmentChild)
 		case strings.HasPrefix(rest, "."):
-			seg, rest, err = parseUnquoted(rest[1:], segmentChild)
+			seg, rest, err = parseChild(rest[1:])
 		case strings.HasPrefix(rest, "["):
 			seg, rest, err = parseIndex(rest[1:])
 		case strings.HasPrefix(rest, "~"):
@@ -133,6 +137,19 @@ func parseName(rest string) (string, string, error) {
 	}
 
 	return name, rest[end:], nil
+}
+
+// parseChild reads the selector after a single `.`: the `*` of a `.*`
+// selector, or the unquoted name of a `.name` selector. A `*` is the whole
+// selector, so a name that goes on after it is malformed, as any other
+// unquoted name with a `*` is.
+func parseChild(rest string) (segment, string, error) {
+	after, ok := strings.CutPrefix(rest, "*")
+	if ok && (after == "" || strings.IndexByte(".[~", after[0]) >= 0) {
+		return segment{kind: segmentChildAll}, after, nil
+	}
+
+	return parseUnquoted(rest, segmentChild)
 }
 
 // parseUnquoted reads an unquoted name after `.` or `..` as a selector of

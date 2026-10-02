@@ -86,16 +86,27 @@
 // back to itself, so the decoder reads it as null. [Path.Token] still finds
 // the token of such an alias.
 //
-// The wildcard selectors `[*]` and `..name` select any number of nodes, so
-// [Path.Token] and [Path.Node] reject them with [ErrWildcard]. Use
-// [Path.Nodes] to list every match. [ErrNotFound] means nothing exists at
-// the path, and [ErrAlias] means an alias on the path names no anchor or
-// forms a cycle. When the document has no content to resolve in, the error
-// wraps [ErrNoDocument] along with ErrNotFound.
+// A `.*` selector selects every entry of a mapping, as `[*]` selects every
+// element of a sequence, so one path reaches each job of a workflow or
+// each service of a Compose file. It selects the entries a `.name`
+// selector resolves in that mapping, one for each name. It thus lists an
+// entry a `<<` merge key brings in, at the place of that merge key, and
+// the later of two entries with one key. It leaves out the merge key
+// itself and a key with no name. The path of each match spells the key as
+// the source does, so the entry under the key `0x10` lies at
+// `$.ports.0x10`, where a decoded map holds it under 16.
+//
+// The wildcard selectors `.*`, `[*]`, and `..name` select any number of
+// nodes, so [Path.Token] and [Path.Node] reject them with [ErrWildcard].
+// Use [Path.Nodes] to list every match. [ErrNotFound] means nothing exists
+// at the path, and [ErrAlias] means an alias on the path names no anchor
+// or forms a cycle. When the document has no content to resolve in, the
+// error wraps [ErrNoDocument] along with ErrNotFound.
 //
 // A `[*]` selector lists the elements of a sequence once for each alias
-// that leads to it, so nested aliases can make a path select many times
-// the nodes the document holds. A resolve stops with
+// that leads to it, as a `.*` selector lists the entries of a mapping, so
+// nested aliases can make a path select many times the nodes the document
+// holds. A resolve stops with
 // [ErrExcessiveAliasing] once the aliases make up too much of what one
 // selector reaches, under the rule gopkg.in/yaml.v3 applies to the aliases
 // in a document it decodes.
@@ -108,7 +119,8 @@
 // last merge key of each mapping it walks, to learn whether a merge brings
 // in a real `<<` key. That lookup reads the whole merge chain behind the
 // mapping, whatever name the selector searches for. A `.name` after a
-// `[*]` looks up its key in each element. Each of these can make one
+// `[*]` looks up its key in each element, and a `.*` looks up each key of
+// its mapping and of the mappings it merges. Each of these can make one
 // selector read a chain many times. A resolve stops with
 // [ErrExcessiveMerging] once those reads come to many times the nodes the
 // document holds. One lookup alone can read that many, so [Path.Node] and
@@ -147,6 +159,7 @@
 //
 //	paths.Root().Child("items").Index(0).Child("name")  // $.items[0].name
 //	paths.Root().Child("spec").IndexAll()               // $.spec[*]
+//	paths.Root().Child("jobs").ChildAll()               // $.jobs.*
 //	paths.Root().Recursive("name")                      // $..name
 //	paths.Root().Child("spec").Key()                    // $.spec~
 //
@@ -164,5 +177,6 @@
 //	spec.Join(paths.Root().Child("replicas")) // $.spec.replicas
 //
 // For the goccy/go-yaml API, [Path.YAMLPath] converts the selectors to a
-// [*yaml.Path].
+// [*yaml.Path]. That syntax has no `.*` selector, so a path that holds one
+// does not convert, and YAMLPath returns an error wrapping [ErrNoYAMLPath].
 package paths

@@ -118,6 +118,22 @@ func TestExists(t *testing.T) {
 		_, err := m.Match(t.Context(), doc)
 		require.ErrorIs(t, err, paths.ErrAlias)
 	})
+
+	t.Run("wildcard path is an error", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			jobs:
+			  build:
+			    steps:
+			      - uses: checkout
+		`))
+
+		for _, expr := range []string{"$.jobs.*", "$.jobs.*.steps", "$.jobs.build.steps[*]", "$..uses"} {
+			_, err := matcher.Exists(paths.MustParse(expr)).Match(t.Context(), doc)
+			require.ErrorIs(t, err, paths.ErrWildcard, expr)
+		}
+	})
 }
 
 func TestExists_WithAll(t *testing.T) {

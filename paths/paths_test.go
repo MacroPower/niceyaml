@@ -53,6 +53,17 @@ func TestRoot(t *testing.T) {
 	})
 }
 
+// yamlPath returns the goccy/go-yaml form of p, for a path that has one.
+func yamlPath(t *testing.T, p paths.Path) *yaml.Path {
+	t.Helper()
+
+	yp, err := p.YAMLPath()
+	require.NoError(t, err)
+	require.NotNil(t, yp)
+
+	return yp
+}
+
 func TestPath_Build(t *testing.T) {
 	t.Parallel()
 
@@ -192,7 +203,7 @@ func TestPath_Build(t *testing.T) {
 				wantGoccy = tc.want
 			}
 
-			assert.Equal(t, wantGoccy, path.YAMLPath().String())
+			assert.Equal(t, wantGoccy, yamlPath(t, path).String())
 		})
 	}
 }
@@ -207,7 +218,7 @@ func TestPath_Index_Negative(t *testing.T) {
 
 	assert.Equal(t, zero, negative)
 	assert.Equal(t, "$.items[0]", negative.String())
-	assert.Equal(t, "$.items[0]", negative.YAMLPath().String())
+	assert.Equal(t, "$.items[0]", yamlPath(t, negative).String())
 
 	source := niceyaml.NewSourceFromString("items: [a, b]\n")
 	file, err := source.File()
@@ -216,6 +227,90 @@ func TestPath_Index_Negative(t *testing.T) {
 	tk, err := negative.Token(file.Docs[0])
 	require.NoError(t, err)
 	assert.Equal(t, "a", tk.Value)
+}
+
+func TestPath_ChildAll(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		path paths.Path
+		want string
+	}{
+		"after a child": {
+			path: paths.Root().Child("jobs").ChildAll(),
+			want: "$.jobs.*",
+		},
+		"on the root": {
+			path: paths.Root().ChildAll(),
+			want: "$.*",
+		},
+		"then a child": {
+			path: paths.Root().Child("jobs").ChildAll().Child("steps"),
+			want: "$.jobs.*.steps",
+		},
+		"then index all": {
+			path: paths.Root().Child("jobs").ChildAll().Child("steps").IndexAll().Child("uses"),
+			want: "$.jobs.*.steps[*].uses",
+		},
+		"then a key selector": {
+			path: paths.Root().Child("jobs").ChildAll().Key(),
+			want: "$.jobs.*~",
+		},
+		"twice": {
+			path: paths.Root().Child("paths").ChildAll().ChildAll(),
+			want: "$.paths.*.*",
+		},
+		"after index all": {
+			path: paths.Root().Child("items").IndexAll().ChildAll(),
+			want: "$.items[*].*",
+		},
+		"after a recursive selector": {
+			path: paths.Root().Recursive("env").ChildAll(),
+			want: "$..env.*",
+		},
+		"after the name star": {
+			path: paths.Root().Child("*").ChildAll(),
+			want: "$.'*'.*",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.path.String())
+
+			got, err := paths.Parse(tc.want)
+			require.NoError(t, err)
+			assert.Equal(t, tc.path, got)
+
+			// The goccy syntax has no selector for every entry of a
+			// mapping, and a path without it would name the mapping.
+			yp, err := tc.path.YAMLPath()
+			require.ErrorIs(t, err, paths.ErrNoYAMLPath)
+			assert.Nil(t, yp)
+
+			_, err = yaml.PathString(tc.want)
+			require.Error(t, err)
+		})
+	}
+
+	t.Run("the name star is a child selector", func(t *testing.T) {
+		t.Parallel()
+
+		star := paths.Root().Child("jobs", "*")
+
+		assert.NotEqual(t, paths.Root().Child("jobs").ChildAll(), star)
+		assert.Equal(t, "$.jobs.'*'", star.String())
+		assert.Equal(t, "$.jobs.'*'", yamlPath(t, star).String())
+	})
+
+	t.Run("YAMLPath names the path it cannot convert", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := paths.Root().Child("jobs").ChildAll().Child("steps").YAMLPath()
+		require.EqualError(t, err, "convert $.jobs.*.steps: selector has no goccy/go-yaml equivalent")
+	})
 }
 
 func TestPath_Immutable(t *testing.T) {
@@ -389,6 +484,28 @@ func TestPath_CutPrefix(t *testing.T) {
 			prefix: paths.Root().Child("items").IndexAll(),
 			want:   "$.items[0].name",
 		},
+		"mapping wildcard against a name": {
+			p:      paths.Root().Child("jobs", "build", "steps"),
+			prefix: paths.Root().Child("jobs").ChildAll(),
+			want:   "$.jobs.build.steps",
+		},
+		"mapping wildcard against itself": {
+			p:      paths.Root().Child("jobs").ChildAll().Child("steps"),
+			prefix: paths.Root().Child("jobs").ChildAll(),
+			want:   "$.steps",
+			ok:     true,
+		},
+		"mapping wildcard against the name star": {
+			p:      paths.Root().Child("jobs", "*"),
+			prefix: paths.Root().Child("jobs").ChildAll(),
+			want:   "$.jobs.'*'",
+		},
+		"keeps a mapping wildcard": {
+			p:      paths.Root().Child("jobs").ChildAll().Key(),
+			prefix: paths.Root().Child("jobs"),
+			want:   "$.*~",
+			ok:     true,
+		},
 		"key against its value": {
 			p:      paths.Root().Child("spec").Key(),
 			prefix: paths.Root().Child("spec").Child("hours"),
@@ -438,6 +555,7 @@ func TestPath_IsRoot(t *testing.T) {
 	assert.False(t, paths.Root().Child("a").IsRoot())
 	assert.False(t, paths.Root().Key().IsRoot())
 	assert.False(t, paths.Root().Index(0).IsRoot())
+	assert.False(t, paths.Root().ChildAll().IsRoot())
 }
 
 func TestParse(t *testing.T) {
@@ -519,6 +637,30 @@ func TestParse(t *testing.T) {
 			expr: "$.items[0]~",
 			want: "$.items[0]~",
 		},
+		"mapping wildcard": {
+			expr: "$.jobs.*",
+			want: "$.jobs.*",
+		},
+		"mapping wildcard on the root": {
+			expr: "$.*",
+			want: "$.*",
+		},
+		"mapping wildcard then child": {
+			expr: "$.jobs.*.steps[*].uses",
+			want: "$.jobs.*.steps[*].uses",
+		},
+		"mapping wildcard then index": {
+			expr: "$.*[0]",
+			want: "$.*[0]",
+		},
+		"mapping wildcard then key selector": {
+			expr: "$.jobs.*~",
+			want: "$.jobs.*~",
+		},
+		"quoted star is a name": {
+			expr: "$.'*'",
+			want: "$.'*'",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -576,8 +718,20 @@ func TestParse_Invalid(t *testing.T) {
 		"index overflows int": {
 			expr: "$[99999999999999999999]",
 		},
-		"wildcard child": {
-			expr: "$.*",
+		"star before a name": {
+			expr: "$.*a",
+		},
+		"star after a name": {
+			expr: "$.a*",
+		},
+		"two stars": {
+			expr: "$.**",
+		},
+		"recursive star": {
+			expr: "$..*",
+		},
+		"star before a quoted name": {
+			expr: "$.*'a'",
 		},
 		"unterminated quote": {
 			expr: "$.'foo",
@@ -631,6 +785,14 @@ func TestParse_ErrorMessage(t *testing.T) {
 		"invalid UTF-8 after quoted name": {
 			expr: "$.'a'\xff",
 			want: `parse path "$.'a'\xff": invalid path: unexpected "\xff" at 5`,
+		},
+		"star before a name": {
+			expr: "$.jobs.*a",
+			want: `parse path "$.jobs.*a": invalid path: unexpected '*' in selector "*a"`,
+		},
+		"recursive star": {
+			expr: "$..*",
+			want: `parse path "$..*": invalid path: unexpected '*' in selector "*"`,
 		},
 		"index with a leading zero": {
 			expr: "$[01]",
@@ -826,8 +988,7 @@ func TestPath_YAMLPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			yp := tc.path.YAMLPath()
-			require.NotNil(t, yp)
+			yp := yamlPath(t, tc.path)
 			assert.Equal(t, tc.wantString, yp.String())
 
 			node, err := yp.FilterNode(file.Docs[0].Body)
@@ -888,7 +1049,7 @@ func TestPath_YAMLPath_Replace(t *testing.T) {
 			replacement, err := parser.ParseBytes([]byte("9"), 0)
 			require.NoError(t, err)
 
-			err = tc.path.YAMLPath().ReplaceWithNode(file, replacement.Docs[0].Body)
+			err = yamlPath(t, tc.path).ReplaceWithNode(file, replacement.Docs[0].Body)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, file.String())
 		})
@@ -904,7 +1065,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		file, err := parser.ParseBytes([]byte("x: plain\n\"'x'\": quoted\n"), 0)
 		require.NoError(t, err)
 
-		node, err := paths.Root().Child("'x'").YAMLPath().FilterNode(file.Docs[0].Body)
+		node, err := yamlPath(t, paths.Root().Child("'x'")).FilterNode(file.Docs[0].Body)
 		require.NoError(t, err)
 		require.NotNil(t, node, "node not found")
 		assert.Equal(t, "plain", node.GetToken().Value)
@@ -918,7 +1079,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 
 		path := paths.Root().Child("a").Key().Child("b")
 
-		node, err := path.YAMLPath().FilterNode(file.Docs[0].Body)
+		node, err := yamlPath(t, path).FilterNode(file.Docs[0].Body)
 		require.NoError(t, err)
 		require.NotNil(t, node, "node not found")
 		assert.Equal(t, "1", node.GetToken().Value)
@@ -975,7 +1136,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, "v", node.GetToken().Value)
 
-				node, err = byName.YAMLPath().FilterNode(doc.Body)
+				node, err = yamlPath(t, byName).FilterNode(doc.Body)
 				require.NoError(t, err)
 				assert.Nil(t, node)
 
@@ -984,7 +1145,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 				_, err = byIndicator.Node(doc)
 				require.ErrorIs(t, err, paths.ErrNotFound)
 
-				node, err = byIndicator.YAMLPath().FilterNode(doc.Body)
+				node, err = yamlPath(t, byIndicator).FilterNode(doc.Body)
 				require.NoError(t, err)
 				require.NotNil(t, node, "node not found")
 				assert.Equal(t, "v", node.GetToken().Value)
@@ -1004,7 +1165,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "v", node.GetToken().Value)
 
-		node, err = path.YAMLPath().FilterNode(file.Docs[0].Body)
+		node, err = yamlPath(t, path).FilterNode(file.Docs[0].Body)
 		require.NoError(t, err)
 		assert.Nil(t, node)
 	})
@@ -1023,7 +1184,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "last", node.GetToken().Value)
 
-		node, err = path.YAMLPath().FilterNode(file.Docs[0].Body)
+		node, err = yamlPath(t, path).FilterNode(file.Docs[0].Body)
 		require.NoError(t, err)
 		require.NotNil(t, node, "node not found")
 		assert.Equal(t, "first", node.GetToken().Value)
@@ -1031,7 +1192,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		replacement, err := parser.ParseBytes([]byte("new\n"), 0)
 		require.NoError(t, err)
 
-		err = path.YAMLPath().ReplaceWithNode(file, replacement.Docs[0].Body)
+		err = yamlPath(t, path).ReplaceWithNode(file, replacement.Docs[0].Body)
 		require.NoError(t, err)
 		assert.Equal(t, "m:\n  k: new\n  k: new\n", file.String())
 	})
@@ -2272,6 +2433,93 @@ func TestPath_Matches_HandBuiltTreeRecursive(t *testing.T) {
 	}
 }
 
+func TestPath_Matches_HandBuiltTreeChildAll(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		body ast.Node
+		path string
+		want []string
+	}{
+		"nil entry and keys with no name": {
+			body: mapNode(
+				nil,
+				mapEntry(nil, &ast.StringNode{Value: "1"}),
+				mapEntry(&ast.IntegerNode{}, &ast.StringNode{Value: "2"}),
+				mapEntry((*ast.StringNode)(nil), &ast.StringNode{Value: "3"}),
+				mapEntry(&ast.MappingKeyNode{Value: (*ast.AnchorNode)(nil)}, &ast.StringNode{Value: "4"}),
+				mapEntry(&ast.StringNode{Value: "a"}, &ast.StringNode{Value: "5"}),
+			),
+			path: "$.*",
+			want: []string{"$.a"},
+		},
+		"entries without a value hold no node to list": {
+			body: mapNode(
+				mapEntry(&ast.StringNode{Value: "a"}, nil),
+				mapEntry(&ast.StringNode{Value: "b"}, &ast.StringNode{Value: "1"}),
+			),
+			path: "$.*",
+			want: []string{"$.b"},
+		},
+		"keys of entries without a value": {
+			body: mapNode(
+				mapEntry(&ast.StringNode{Value: "a"}, nil),
+				mapEntry(&ast.StringNode{Value: "b"}, nil),
+			),
+			path: "$.*~",
+			want: []string{"$.a~", "$.b~"},
+		},
+		"merge of a typed nil mapping": {
+			body: mapNode(
+				mapEntry(
+					&ast.MergeKeyNode{},
+					&ast.SequenceNode{BaseNode: &ast.BaseNode{}, Values: []ast.Node{(*ast.MappingNode)(nil)}},
+				),
+				mapEntry(&ast.StringNode{Value: "a"}, &ast.StringNode{Value: "1"}),
+			),
+			path: "$.*",
+			want: []string{"$.a"},
+		},
+		"merge key without a value": {
+			body: mapNode(
+				mapEntry(&ast.MergeKeyNode{}, nil),
+				mapEntry(&ast.StringNode{Value: "a"}, &ast.StringNode{Value: "1"}),
+			),
+			path: "$.*",
+			want: []string{"$.a"},
+		},
+		"merge source with a nil entry": {
+			body: mapNode(
+				mapEntry(&ast.MergeKeyNode{}, mapNode(
+					nil,
+					mapEntry(&ast.StringNode{Value: "b"}, &ast.StringNode{Value: "1"}),
+				)),
+				mapEntry(&ast.StringNode{Value: "a"}, &ast.StringNode{Value: "2"}),
+			),
+			path: "$.*",
+			want: []string{"$.b", "$.a"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := &ast.DocumentNode{Body: tc.body}
+
+			matches, err := paths.MustParse(tc.path).Matches(doc)
+			require.NoError(t, err)
+
+			got := make([]string, 0, len(matches))
+			for _, m := range matches {
+				got = append(got, m.Path.String())
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestPath_Nodes_HandBuiltTreeTypedNil(t *testing.T) {
 	t.Parallel()
 
@@ -2284,6 +2532,8 @@ func TestPath_Nodes_HandBuiltTreeTypedNil(t *testing.T) {
 
 	tcs := map[string]paths.Path{
 		"every element of a typed nil sequence": paths.Root().Child("s").IndexAll(),
+		"every entry of a typed nil mapping":    paths.Root().Child("m").ChildAll(),
+		"every entry of each typed nil":         paths.Root().ChildAll().ChildAll(),
 		"recursive through typed nils":          paths.Root().Recursive("q"),
 	}
 
@@ -2524,6 +2774,42 @@ refs: [*r, *r]
 			path: paths.Root().Child("meta").IndexAll(),
 			want: []string{},
 		},
+		"child all": {
+			path: paths.Root().Child("ref").ChildAll(),
+			want: []string{"e"},
+		},
+		"child all then child": {
+			path: paths.Root().Child("meta").ChildAll().Child("name"),
+			want: []string{"d"},
+		},
+		"child all on a sequence matches nothing": {
+			path: paths.Root().Child("items").ChildAll(),
+			want: []string{},
+		},
+		"child all on a scalar matches nothing": {
+			path: paths.Root().Child("meta", "name").ChildAll(),
+			want: []string{},
+		},
+		"index all then child all then index all": {
+			path: paths.Root().Child("items").IndexAll().ChildAll().IndexAll(),
+			want: []string{"x", "y", "z"},
+		},
+		"child all through an alias": {
+			path: paths.Root().Child("alias").ChildAll(),
+			want: []string{"e"},
+		},
+		"child all sees a merged entry": {
+			path: paths.Root().Child("merged").ChildAll(),
+			want: []string{"e"},
+		},
+		"child all through aliases repeats the anchor": {
+			path: paths.Root().Child("refs").IndexAll().ChildAll(),
+			want: []string{"e", "e"},
+		},
+		"recursive then child all": {
+			path: paths.Root().Recursive("nested").ChildAll(),
+			want: []string{"d"},
+		},
 		"recursive visits anchors once and skips aliases": {
 			path: paths.Root().Recursive("name"),
 			want: []string{"a", "b", "c", "d", "e"},
@@ -2604,6 +2890,17 @@ refs: [*r, *r]
 
 		_, err = paths.Root().Recursive("name").Key().Token(file.Docs[0])
 		require.ErrorIs(t, err, paths.ErrWildcard)
+
+		entries := paths.Root().Child("meta").ChildAll()
+
+		_, err = entries.Token(file.Docs[0])
+		require.ErrorIs(t, err, paths.ErrWildcard)
+
+		_, err = entries.Node(file.Docs[0])
+		require.ErrorIs(t, err, paths.ErrWildcard)
+
+		_, err = entries.Key().Token(file.Docs[0])
+		require.ErrorIs(t, err, paths.ErrWildcard)
 	})
 
 	t.Run("nodes rejects a nil document", func(t *testing.T) {
@@ -2626,12 +2923,36 @@ func TestPath_Matches_AliasFanOut(t *testing.T) {
 		return "a: &a [" + elems + "]\nb: [" + aliases + "]\n"
 	}
 
+	// The document of aliasMap holds n entries under the key a and n
+	// entries that are aliases to a under the key b, so $.b.*.* selects
+	// n*n nodes.
+	aliasMap := func(n int) string {
+		var entries, aliases []string
+
+		for i := range n {
+			entries = append(entries, fmt.Sprintf("k%d: x", i))
+			aliases = append(aliases, fmt.Sprintf("j%d: *a", i))
+		}
+
+		return "a: &a {" + strings.Join(entries, ", ") + "}\nb: {" + strings.Join(aliases, ", ") + "}\n"
+	}
+
 	tcs := map[string]struct {
 		err   error
 		input string
 		path  paths.Path
 		want  int
 	}{
+		"wide mapping of aliases": {
+			input: aliasMap(1000),
+			path:  paths.MustParse("$.b.*.*"),
+			err:   paths.ErrExcessiveAliasing,
+		},
+		"small mapping of aliases": {
+			input: aliasMap(10),
+			path:  paths.MustParse("$.b.*.*"),
+			want:  100,
+		},
 		"nested alias levels": {
 			input: yamltest.AliasLevels(5),
 			path:  paths.MustParse("$.a[5][*][*][*][*][*]"),
@@ -2848,6 +3169,36 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 			input: sharedMerge(1000),
 			path:  paths.MustParse("$.d.nope"),
 			err:   paths.ErrExcessiveMerging,
+		},
+		"every entry over a merge chain": {
+			input: mergeChain(2000),
+			path:  paths.MustParse("$.b1999.*"),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"every entry over a merge of many aliases": {
+			input: wideMerge(2000, "*a"),
+			path:  paths.MustParse("$.m.*"),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"every entry of each alias to a wide merge": {
+			input: aliasWideMerge(2000),
+			path:  paths.MustParse("$.l[*].*"),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"every entry over a short merge chain": {
+			input: mergeChain(10),
+			path:  paths.MustParse("$.b9.*"),
+			want:  10,
+		},
+		"every entry over a merge of a few aliases": {
+			input: wideMerge(10, "*a"),
+			path:  paths.MustParse("$.m.*"),
+			want:  11,
+		},
+		"every entry of each alias to a narrow merge": {
+			input: aliasWideMerge(10),
+			path:  paths.MustParse("$.l[*].*"),
+			want:  10,
 		},
 		"recursive key over a short merge chain": {
 			input: mergeChain(10),
@@ -3775,6 +4126,289 @@ func TestPath_Matches(t *testing.T) {
 				require.NoError(t, err)
 				assert.Same(t, m.Node, single)
 			}
+		})
+	}
+}
+
+func TestPath_Matches_ChildAll(t *testing.T) {
+	t.Parallel()
+
+	// A `.*` selector lists the entry a `.name` selector resolves in a
+	// mapping, once for each name, so the path of each match selects that
+	// match's node and reads back from its text.
+	dups := []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)}
+
+	tcs := map[string]struct {
+		input string
+		path  string
+		want  []string
+		opts  []niceyaml.SourceOption
+	}{
+		"each entry in document order": {
+			input: "jobs:\n  build: 1\n  test: 2\n  lint: 3\n",
+			path:  "$.jobs.*",
+			want:  []string{"$.jobs.build=1", "$.jobs.test=2", "$.jobs.lint=3"},
+		},
+		"entries of the root": {
+			input: "a: 1\nb: 2\n",
+			path:  "$.*",
+			want:  []string{"$.a=1", "$.b=2"},
+		},
+		"child of each entry": {
+			input: "jobs:\n  build:\n    runs-on: linux\n  docs:\n    uses: x\n  test:\n    runs-on: mac\n",
+			path:  "$.jobs.*.runs-on",
+			want:  []string{"$.jobs.build.runs-on=linux", "$.jobs.test.runs-on=mac"},
+		},
+		"element of a sequence in each entry": {
+			input: "jobs:\n  a:\n    steps:\n      - uses: x\n      - run: y\n  b:\n    steps:\n      - uses: z\n",
+			path:  "$.jobs.*.steps[*].uses",
+			want:  []string{"$.jobs.a.steps[0].uses=x", "$.jobs.b.steps[0].uses=z"},
+		},
+		"entries of each entry": {
+			input: "paths:\n  /a:\n    get: 1\n    post: 2\n  /b:\n    get: 3\n",
+			path:  "$.paths.*.*",
+			want:  []string{"$.paths./a.get=1", "$.paths./a.post=2", "$.paths./b.get=3"},
+		},
+		"key of each entry": {
+			input: "jobs:\n  build: 1\n  test: 2\n",
+			path:  "$.jobs.*~",
+			want:  []string{"$.jobs.build~=build", "$.jobs.test~=test"},
+		},
+		"entries below a recursive match": {
+			input: "x:\n  env: {A: 1}\ny:\n  env: {B: 2}\n",
+			path:  "$..env.*",
+			want:  []string{"$.x.env.A=1", "$.y.env.B=2"},
+		},
+		"recursive below each entry": {
+			input: "jobs:\n  a:\n    steps:\n      - uses: x\n  b:\n    uses: y\n",
+			path:  "$.jobs.*..uses",
+			want:  []string{"$.jobs.a.steps[0].uses=x", "$.jobs.b.uses=y"},
+		},
+		"keys the decoder respells keep their source text": {
+			input: "ports:\n  0x10: a\n  3.10: b\n  ~: c\n  yes: d\n  \"\": e\n  a.b: f\n  1_000: g\n",
+			path:  "$.ports.*",
+			want: []string{
+				"$.ports.0x10=a", "$.ports.'3.10'=b", "$.ports.'~'=c", "$.ports.yes=d",
+				"$.ports.''=e", "$.ports.'a.b'=f", "$.ports.1_000=g",
+			},
+		},
+		"key named star is one of the entries": {
+			input: "m:\n  \"*\": 1\n  b: 2\n",
+			path:  "$.m.*",
+			want:  []string{"$.m.'*'=1", "$.m.b=2"},
+		},
+		"quoted star selects the key named star alone": {
+			input: "m:\n  \"*\": 1\n  b: 2\n",
+			path:  "$.m.'*'",
+			want:  []string{"$.m.'*'=1"},
+		},
+		"alias key takes the name of its anchor": {
+			input: "k: &k name\nm:\n  *k : v\n",
+			path:  "$.m.*",
+			want:  []string{"$.m.name=v"},
+		},
+		"key with no name is left out": {
+			input: "m:\n  b: 2\n  *nope : 1\n",
+			path:  "$.m.*",
+			want:  []string{"$.m.b=2"},
+		},
+		"sequence has no entries": {
+			input: "m: [1, 2]\n",
+			path:  "$.m.*",
+		},
+		"scalar has no entries": {
+			input: "m: x\n",
+			path:  "$.m.*",
+		},
+		"null has no entries": {
+			input: "m:\nn: 1\n",
+			path:  "$.m.*",
+		},
+		"missing key has no entries": {
+			input: "m: x\n",
+			path:  "$.nope.*",
+		},
+		"empty mapping has no entries": {
+			input: "m: {}\n",
+			path:  "$.m.*",
+		},
+		"through an alias keeps the path as written": {
+			input: "base: &b {a: 1}\nm: *b\n",
+			path:  "$.m.*",
+			want:  []string{"$.m.a=1"},
+		},
+		"through a tag": {
+			input: "m: !!map {a: 1}\n",
+			path:  "$.m.*",
+			want:  []string{"$.m.a=1"},
+		},
+		"each alias to one mapping lists its entries": {
+			input: "base: &b {a: 1}\nl: [*b, *b]\n",
+			path:  "$.l[*].*",
+			want:  []string{"$.l[0].a=1", "$.l[1].a=1"},
+		},
+		"merged entries take the place of a merge key before the own keys": {
+			input: "base: &base\n  lint: a\n  build: old\njobs:\n  <<: *base\n  build: b\n  test: c\n",
+			path:  "$.jobs.*",
+			want:  []string{"$.jobs.lint=a", "$.jobs.build=b", "$.jobs.test=c"},
+			opts:  dups,
+		},
+		"merged entries take the place of a merge key after the own keys": {
+			input: "base: &base\n  lint: a\n  build: old\njobs:\n  build: b\n  test: c\n  <<: *base\n",
+			path:  "$.jobs.*",
+			want:  []string{"$.jobs.test=c", "$.jobs.lint=a", "$.jobs.build=old"},
+			opts:  dups,
+		},
+		"later source of a merge list wins": {
+			input: "a: &a {x: 1, y: 1}\nb: &b {y: 2, z: 2}\nm:\n  <<: [*a, *b]\n  w: 0\n",
+			path:  "$.m.*",
+			want:  []string{"$.m.x=1", "$.m.y=2", "$.m.z=2", "$.m.w=0"},
+		},
+		"merge of a mapping that merges another": {
+			input: "base: &base {a: 1}\nmid: &mid {<<: *base, b: 2}\nm:\n  <<: *mid\n  c: 3\n",
+			path:  "$.m.*",
+			want:  []string{"$.m.a=1", "$.m.b=2", "$.m.c=3"},
+		},
+		"inline merge source": {
+			input: "m:\n  <<: {a: 1}\n  b: 2\n",
+			path:  "$.m.*",
+			want:  []string{"$.m.a=1", "$.m.b=2"},
+		},
+		"key of a merged entry": {
+			input: "base: &base {a: 1}\nm:\n  <<: *base\n  b: 2\n",
+			path:  "$.m.*~",
+			want:  []string{"$.m.a~=a", "$.m.b~=b"},
+		},
+		"each merge key holds the entries it wins": {
+			input: "a: &a {x: 1, y: 1}\nb: &b {y: 2}\nm:\n  <<: *a\n  k: 0\n  <<: *b\n",
+			path:  "$.m.*",
+			want:  []string{"$.m.x=1", "$.m.k=0", "$.m.y=2"},
+			opts:  dups,
+		},
+		"one source under two merge keys counts at the later": {
+			input: "a: &a {x: 1}\nm:\n  <<: *a\n  k: 0\n  <<: *a\n",
+			path:  "$.m.*",
+			want:  []string{"$.m.k=0", "$.m.x=1"},
+			opts:  dups,
+		},
+		"merge that leads back to its own mapping": {
+			input: "a: &a\n  x: 1\n  <<: *a\n",
+			path:  "$.a.*",
+			want:  []string{"$.a.x=1"},
+		},
+		"later duplicate key wins": {
+			input: "m:\n  a: 1\n  b: 2\n  a: 3\n",
+			path:  "$.m.*",
+			want:  []string{"$.m.b=2", "$.m.a=3"},
+			opts:  dups,
+		},
+		"real key with the text of a merge key is an entry": {
+			input: "a: {? &x \"<<\" : 1}\nm:\n  <<: {k: 2}\n  *x : real\n",
+			path:  "$.m.*",
+			want:  []string{"$.m.k=2", "$.m.<<=real"},
+		},
+		"merge brings in a real key with the text of a merge key": {
+			input: "k: &k \"<<\"\ninner: &inner\n  j: 1\n  *k : real\ntop:\n  <<: *inner\n",
+			path:  "$.top.*",
+			want:  []string{"$.top.j=1", "$.top.<<=real"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).File()
+			require.NoError(t, err)
+
+			doc := file.Docs[0]
+			path := paths.MustParse(tc.path)
+
+			matches, err := path.Matches(doc)
+			require.NoError(t, err)
+
+			var got []string
+
+			for _, m := range matches {
+				got = append(got, m.Path.String()+"="+m.Node.String())
+			}
+
+			assert.Equal(t, tc.want, got)
+
+			nodes, err := path.Nodes(doc)
+			require.NoError(t, err)
+			require.Len(t, nodes, len(matches))
+
+			for i, m := range matches {
+				assert.Same(t, nodes[i], m.Node)
+
+				single, err := m.Path.Node(doc)
+				require.NoError(t, err)
+				assert.Same(t, m.Node, single)
+
+				parsed, err := paths.Parse(m.Path.String())
+				require.NoError(t, err)
+				assert.Equal(t, m.Path, parsed)
+			}
+		})
+	}
+}
+
+func TestPath_Matches_ChildAll_Errors(t *testing.T) {
+	t.Parallel()
+
+	// A merge key whose alias does not resolve could bring in any key, so
+	// a `.*` selector returns the error even where a `.name` selector
+	// finds a key of the mapping itself.
+	tcs := map[string]struct {
+		input string
+		path  string
+		named string
+	}{
+		"merge alias with no anchor": {
+			input: "m:\n  <<: *missing\n  a: 1\n",
+			path:  "$.m.*",
+			named: "$.m.a",
+		},
+		"merge list with an alias with no anchor": {
+			input: "b: &b {x: 1}\nm:\n  <<: [*b, *missing]\n  a: 1\n",
+			path:  "$.m.*",
+			named: "$.m.a",
+		},
+		"merge source that merges an alias with no anchor": {
+			input: "b: &b {<<: *missing, x: 1}\nm:\n  <<: *b\n  a: 1\n",
+			path:  "$.m.*",
+			named: "$.m.a",
+		},
+		"alias with no anchor": {
+			input: "m: *missing\n",
+			path:  "$.m.*",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input).File()
+			require.NoError(t, err)
+
+			doc := file.Docs[0]
+			path := paths.MustParse(tc.path)
+
+			_, err = path.Matches(doc)
+			require.ErrorIs(t, err, paths.ErrAlias)
+
+			_, err = path.Nodes(doc)
+			require.ErrorIs(t, err, paths.ErrAlias)
+
+			if tc.named == "" {
+				return
+			}
+
+			node, err := paths.MustParse(tc.named).Node(doc)
+			require.NoError(t, err)
+			assert.Equal(t, "1", node.String())
 		})
 	}
 }

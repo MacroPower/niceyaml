@@ -134,6 +134,11 @@ func TestResolver_Node(t *testing.T) {
 			path:  "$.a[*]",
 			err:   paths.ErrWildcard,
 		},
+		"mapping wildcard": {
+			input: "a: {x: 1}\n",
+			path:  "$.a.*",
+			err:   paths.ErrWildcard,
+		},
 		"missing path": {
 			input: "a: x\n",
 			path:  "$.b",
@@ -242,6 +247,12 @@ func TestResolver_NodeFrom(t *testing.T) {
 			path:  "$[*]",
 			err:   paths.ErrWildcard,
 		},
+		"mapping wildcard": {
+			input: "a: {x: 1}\n",
+			from:  "$.a",
+			path:  "$.*",
+			err:   paths.ErrWildcard,
+		},
 		"missing path": {
 			input: "a:\n  b: x\n",
 			from:  "$.a",
@@ -348,6 +359,11 @@ func TestResolver_Token(t *testing.T) {
 		"wildcard": {
 			input: "a: [x, y]\n",
 			path:  "$..a",
+			err:   paths.ErrWildcard,
+		},
+		"mapping wildcard": {
+			input: "a: {x: 1}\n",
+			path:  "$.a.*~",
 			err:   paths.ErrWildcard,
 		},
 		"missing path": {
@@ -489,6 +505,14 @@ func TestResolver_Nearest(t *testing.T) {
 			input: "servers:\n  - port: 80\n",
 			path:  "$.servers[*].name",
 		},
+		"mapping wildcard": {
+			input: "servers:\n  web:\n    port: 80\n",
+			path:  "$.servers.*.name",
+		},
+		"mapping wildcard before the missing key": {
+			input: "servers:\n  web:\n    port: 80\n",
+			path:  "$.*.web.name",
+		},
 		"recursive selector": {
 			input: "server:\n  port: 81\n",
 			path:  "$..name",
@@ -608,6 +632,16 @@ func TestResolver_Matches(t *testing.T) {
 			path:       "$..name~",
 			want:       []string{"$.a.name~", "$.b.name~"},
 			wantValues: []string{"name", "name"},
+		},
+		"every entry of a mapping": {
+			input:      "base: &b {k: x}\nm:\n  <<: *b\n  0x10: y\n",
+			path:       "$.m.*",
+			want:       []string{"$.m.k", "$.m.0x10"},
+			wantValues: []string{"x", "y"},
+		},
+		"every entry of a sequence": {
+			input: "a: [x, y]\n",
+			path:  "$.a.*",
 		},
 		"nothing": {
 			input: "a: x\n",

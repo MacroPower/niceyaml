@@ -115,8 +115,9 @@ func (r *Resolver) Token(p Path) (*token.Token, error) {
 // reports false too for a path that selects nothing for another reason,
 // such as an index past the end of a sequence or a name looked up in a
 // scalar or a sequence. A `[*]`, `..`, or `~` selector at or after the
-// missing key gives false as well. So does an alias that does not
-// resolve, and so does a document with no content.
+// missing key gives false as well, and a `.*` selector anywhere in p
+// does. So does an alias that does not resolve, and so does a document
+// with no content.
 func (r *Resolver) Nearest(p Path) (Path, bool) {
 	if p.wildcard() || r.doc == nil || !astnode.HasContent(r.doc.Body) {
 		return Path{}, false

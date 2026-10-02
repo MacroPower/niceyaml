@@ -766,8 +766,8 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // [Source.Documents] and [Source.Document] return, or a node a path
 // selects. [Node.At] returns the one node a path selects, and
 // [Node.Nodes] returns one Node per match of a path that can select
-// several, such as one with a `[*]` selector. Every method reads and
-// resolves from the node, so [Node.Decode] decodes it alone,
+// several, such as one with a `[*]` or `.*` selector. Every method reads
+// and resolves from the node, so [Node.Decode] decodes it alone,
 // [Node.Validate] runs a [Validator] on it, and [Node.Bind] resolves the
 // paths of an error from it, so a check written for the type of a value
 // reports the same lines whether the value is the whole document or one
@@ -1033,13 +1033,13 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 }
 
 // Nodes returns a [*Node] scoped to each node path selects, in document
-// order, with path resolving from the receiver, so a path with a `[*]`
-// or `..name` selector, which [Node.At] rejects, scopes every element of
-// a sequence or every entry with a name at any depth. Each Node is
-// scoped as one from Node.At is, and [Node.Path] is the path that
-// selects its node alone, as [paths.Path.Matches] resolves it, so a
-// validator run on each element, or an error bound to it, reports the
-// element it came from:
+// order, with path resolving from the receiver, so a path with a `[*]`,
+// `.*`, or `..name` selector, which [Node.At] rejects, scopes every
+// element of a sequence, every entry of a mapping, or every entry with a
+// name at any depth. Each Node is scoped as one from Node.At is, and
+// [Node.Path] is the path that selects its node alone, as
+// [paths.Path.Matches] resolves it, so a validator run on each element,
+// or an error bound to it, reports the element it came from:
 //
 //	items, err := doc.Nodes(paths.Root().Child("items").IndexAll())
 //	if err != nil {
@@ -1051,6 +1051,30 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 //			errs = append(errs, err) // bound at $.items[i]
 //		}
 //	}
+//
+// A mapping of named things, such as the jobs of a workflow, takes a `.*`
+// selector from [paths.Path.ChildAll]. Each Node is then scoped at the
+// path of one entry, with the key as the source spells it, and a `~`
+// selector from [paths.Path.Key] reaches that key:
+//
+//	jobs, err := doc.Nodes(paths.Root().Child("jobs").ChildAll())
+//	if err != nil {
+//		return err
+//	}
+//
+//	for _, job := range jobs {
+//		key, err := job.At(paths.Root().Key()) // $.jobs.build~
+//		if err != nil {
+//			return err
+//		}
+//
+//		name, err := key.Decode[string](ctx) // "build"
+//		// ...
+//	}
+//
+// The key decodes as the decoder reads it, so a key the source spells
+// `3.10` decodes to the string 3.1, while the path of its entry stays
+// `$.jobs.'3.10'`.
 //
 // A path that selects nothing returns no Nodes and no error, as
 // [paths.Path.Nodes] does, and the errors it returns come back bound to
