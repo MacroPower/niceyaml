@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/goccy/go-yaml/ast"
@@ -96,6 +97,62 @@ func (r *Resolver) Token(p Path) (*token.Token, error) {
 	}
 
 	return p.tokenOf(m.node)
+}
+
+// Nearest returns the path of the mapping that lacks a key p names, and
+// reports whether the document holds one. When p selects nothing because
+// the document leaves a key out, the longest prefix of p that resolves is
+// where that key belongs. Nearest returns that prefix when it resolves to
+// a mapping, or to a null, which stands where a mapping would, and every
+// selector of p after it is a `.name` selector. An error about a value
+// the document leaves out, such as a required field, points there:
+//
+//	// In a document that holds server and no tls under it.
+//	near, ok := r.Nearest(paths.Root().Child("server", "tls", "cert"))
+//	// $.server, true
+//
+// It reports false for a path that resolves, which misses no key. It
+// reports false too for a path that selects nothing for another reason,
+// such as an index past the end of a sequence or a name looked up in a
+// scalar or a sequence. A `[*]`, `..`, or `~` selector at or after the
+// missing key gives false as well. So does an alias that does not
+// resolve, and so does a document with no content.
+func (r *Resolver) Nearest(p Path) (Path, bool) {
+	if p.wildcard() || r.doc == nil || !astnode.HasContent(r.doc.Body) {
+		return Path{}, false
+	}
+
+	// A prefix resolves whenever a longer one does, so the first prefix
+	// that resolves, from the longest down, is the longest.
+	for k := len(p.segments); k >= 0; k-- {
+		m, err := Path{segments: p.segments[:k]}.single(r.resolver, r.doc)
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
+
+		if err != nil || k == len(p.segments) {
+			return Path{}, false
+		}
+
+		for _, seg := range p.segments[k:] {
+			if seg.kind != segmentChild {
+				return Path{}, false
+			}
+		}
+
+		content, err := r.resolver.unwrap(m.node)
+		if err != nil || astnode.IsNil(content) {
+			return Path{}, false
+		}
+
+		if _, ok := content.(*ast.MappingNode); !ok && content.Type() != ast.NullType {
+			return Path{}, false
+		}
+
+		return Root().extend(p.segments[:k]...), true
+	}
+
+	return Path{}, false
 }
 
 // Matches resolves every node p selects in the document of the Resolver,

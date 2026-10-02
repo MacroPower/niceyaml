@@ -389,6 +389,186 @@ func TestResolver_Token(t *testing.T) {
 	}
 }
 
+func TestResolver_Nearest(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		path  string
+		// The path of the mapping that lacks the key, or "" when the
+		// path has none.
+		want string
+	}{
+		"key a mapping leaves out": {
+			input: "server:\n  port: 81\n",
+			path:  "$.server.name",
+			want:  "$.server",
+		},
+		"key the root leaves out": {
+			input: "server:\n  port: 81\n",
+			path:  "$.name",
+			want:  "$",
+		},
+		"key an element of a sequence leaves out": {
+			input: "servers:\n  - port: 80\n    name: a\n  - port: 81\n",
+			path:  "$.servers[1].name",
+			want:  "$.servers[1]",
+		},
+		"several names below the mapping": {
+			input: "server:\n  port: 81\n",
+			path:  "$.server.tls.cert.file",
+			want:  "$.server",
+		},
+		"null stands where a mapping would": {
+			input: "server:\n",
+			path:  "$.server.name",
+			want:  "$.server",
+		},
+		"explicit null": {
+			input: "server: ~\n",
+			path:  "$.server.name",
+			want:  "$.server",
+		},
+		"empty flow mapping": {
+			input: "{}\n",
+			path:  "$.name",
+			want:  "$",
+		},
+		"mapping behind an alias": {
+			input: "base: &b {port: 81}\nserver: *b\n",
+			path:  "$.server.name",
+			want:  "$.server",
+		},
+		"mapping behind a tag": {
+			input: "server: !srv {port: 81}\n",
+			path:  "$.server.name",
+			want:  "$.server",
+		},
+		"mapping a merge key fills": {
+			input: "base: &b {port: 81}\nserver:\n  <<: *b\n",
+			path:  "$.server.name",
+			want:  "$.server",
+		},
+		"path that resolves": {
+			input: "server:\n  port: 81\n",
+			path:  "$.server.port",
+		},
+		"key a merge brings in": {
+			input: "base: &b {port: 81}\nserver:\n  <<: *b\n",
+			path:  "$.server.port",
+		},
+		"root": {
+			input: "server:\n  port: 81\n",
+			path:  "$",
+		},
+		"name in a scalar": {
+			input: "server: hello\n",
+			path:  "$.server.name",
+		},
+		"name in a sequence": {
+			input: "servers: [a, b]\n",
+			path:  "$.servers.name",
+		},
+		"index past the end": {
+			input: "servers: [a, b]\n",
+			path:  "$.servers[5]",
+		},
+		"name below an index past the end": {
+			input: "servers:\n  - port: 80\n",
+			path:  "$.servers[5].name",
+		},
+		"index below the missing key": {
+			input: "server:\n  port: 81\n",
+			path:  "$.server.names[0]",
+		},
+		"key selector on the missing key": {
+			input: "server:\n  port: 81\n",
+			path:  "$.server.name~",
+		},
+		"wildcard": {
+			input: "servers:\n  - port: 80\n",
+			path:  "$.servers[*].name",
+		},
+		"recursive selector": {
+			input: "server:\n  port: 81\n",
+			path:  "$..name",
+		},
+		"alias that does not resolve": {
+			input: "server: *nope\n",
+			path:  "$.server.name",
+		},
+		"document with no content": {
+			input: "# only a comment\n",
+			path:  "$.name",
+		},
+		"null document": {
+			input: "---\n",
+			path:  "$.name",
+		},
+		"nil document": {
+			path: "$.name",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// A case with no input resolves in a nil document.
+			var doc *ast.DocumentNode
+
+			if tc.input != "" {
+				file, err := niceyaml.NewSourceFromString(tc.input).File()
+				require.NoError(t, err)
+
+				doc = file.Docs[0]
+			}
+
+			r := paths.NewResolver(doc)
+			path := paths.MustParse(tc.path)
+
+			got, ok := r.Nearest(path)
+			assert.Equal(t, tc.want != "", ok)
+
+			if !ok {
+				assert.Equal(t, paths.Root(), got)
+
+				return
+			}
+
+			assert.Equal(t, tc.want, got.String())
+			assert.Equal(t, paths.MustParse(tc.want), got)
+
+			// The mapping resolves and the path below it does not.
+			_, err := r.Node(got)
+			require.NoError(t, err)
+
+			_, err = r.Node(path)
+			require.ErrorIs(t, err, paths.ErrNotFound)
+
+			rest, ok := path.CutPrefix(got)
+			require.True(t, ok)
+			assert.False(t, rest.IsRoot())
+		})
+	}
+
+	t.Run("leaves the path as it was", func(t *testing.T) {
+		t.Parallel()
+
+		file, err := niceyaml.NewSourceFromString("server:\n  port: 81\n").File()
+		require.NoError(t, err)
+
+		path := paths.Root().Child("server", "tls", "cert")
+
+		near, ok := paths.NewResolver(file.Docs[0]).Nearest(path)
+		require.True(t, ok)
+
+		assert.Equal(t, "$.server.x", near.Child("x").String())
+		assert.Equal(t, "$.server", near.String())
+		assert.Equal(t, "$.server.tls.cert", path.String())
+	})
+}
+
 func TestResolver_Matches(t *testing.T) {
 	t.Parallel()
 
