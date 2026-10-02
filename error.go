@@ -1587,25 +1587,32 @@ func (e *SourceError) Document() *Node {
 // error as it is. It is the text [SourceError.Excerpt] annotates a
 // location with, and the field a structured report such as a JSON line
 // or a CI annotation carries beside the position from
-// [SourceError.Range] and the path from [SourceError.Path]. Such a
-// report walks every binding in the tree with [AllBindings]. A validator
-// that found several violations reports them as the children of one
-// binding with no location of its own, and a binding whose location did
-// not resolve has no range but still names a violation:
+// [SourceError.Position] and the path from [SourceError.Path]. Such a
+// report walks [ErrorTree.Problems], which yields one node per problem.
+// That walk passes over the summary a validator puts above several
+// violations, and it yields each error bound to no source, which has no
+// binding to read:
 //
-//	for bound := range niceyaml.AllBindings(err) {
-//		path, _ := bound.Path()
-//		if rng, ok := bound.Range(); ok {
-//			emit(bound.Source().FilePath(), rng.Start, bound.Message(), path)
-//		} else {
-//			emit(bound.Source().FilePath(), position.Position{}, bound.Message(), path)
+//	for problem := range niceyaml.NewErrorTree(err).Problems() {
+//		bound := problem.Bound
+//		if bound == nil {
+//			emit("", position.Position{}, problem.Text, paths.Path{})
+//
+//			continue
 //		}
+//
+//		path, _ := bound.Path()
+//		pos, _ := bound.Position()
+//		emit(bound.Source().FilePath(), pos, bound.Message(), path)
 //	}
 //
-// The report carries the start of the resolved range. For a position an
-// error gave with [AtPosition] inside a token, that start marks where the
-// content of the token starts, and it can differ from the position
-// [SourceError.Error] reports, as [SourceError.Range] describes.
+// A binding whose location did not resolve has no position but still
+// names a problem, so the report carries the zero position for it. The
+// position is the one [SourceError.Error] prints, counted from 0. A
+// report that marks the text reads [SourceError.Range] instead. For a
+// position an error gave with [AtPosition] inside a token, that range
+// starts where the content of the token starts, which can differ from
+// the position.
 //
 // Text a wrapper such as [fmt.Errorf] added around the Error stays, with
 // the path the wrapper wrote in it, as it does everywhere else. A nil
@@ -1854,9 +1861,9 @@ func (e *SourceError) all(seen map[*SourceError]bool, yield func(*SourceError) b
 //
 // [FormatError] renders the whole error instead, as one tree and one
 // excerpt per source, as [Excerpts] yields them. A caller that marks a
-// view with [SourceError.Annotate], or that wants one entry per error,
-// the nodes below each binding included, walks [AllBindings]. A nil err
-// has no bindings.
+// view with [SourceError.Annotate] walks [AllBindings], which yields the
+// bindings below each one too. A caller that lists the problems of an
+// error walks [ErrorTree.Problems]. A nil err has no bindings.
 func Bindings(err error) iter.Seq[*SourceError] {
 	return func(yield func(*SourceError) bool) {
 		eachBinding(err, yield)
@@ -1905,9 +1912,11 @@ func eachBinding(err error, visit func(*SourceError) bool) bool {
 //		bound.Annotate(view)
 //	}
 //
-// It is also the walk a structured report makes, one that emits a row for
-// each error with a location of its own, as the example on
-// [SourceError.Message] shows. A nil err has no bindings.
+// A report that lists the problems of an error walks
+// [ErrorTree.Problems] instead, as the example on [SourceError.Message]
+// shows. AllBindings yields a summary beside the violations under it and
+// each reason beside the error it explains, and it passes over every
+// error bound to no source. A nil err has no bindings.
 func AllBindings(err error) iter.Seq[*SourceError] {
 	return func(yield func(*SourceError) bool) {
 		seen := make(map[*SourceError]bool)

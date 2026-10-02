@@ -149,6 +149,15 @@
 // [SourceError.LogValue], so a structured log names every nested error
 // in one attribute whichever handler writes it.
 //
+// A report a program reads, such as JSON lines, CI annotations, or editor
+// diagnostics, lists the problems of an error as rows.
+// [ErrorTree.Problems] yields one node per problem. It passes over the
+// summary a validator puts above its violations, and it yields an error
+// bound to no source, such as a file that failed to read. Each node
+// holds the binding of its error, so a row takes its fields from
+// [SourceError.Source], [SourceError.Position], [SourceError.Path], and
+// [SourceError.Message] rather than from the text.
+//
 // A terminal gets color from
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which prints
 // the same tree and excerpts with the printer's styles, width, and

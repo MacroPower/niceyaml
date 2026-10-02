@@ -3,6 +3,7 @@ package niceyaml
 import (
 	"errors"
 	"fmt"
+	"iter"
 	"reflect"
 	"slices"
 	"strings"
@@ -20,8 +21,22 @@ import (
 // reads the same tree so it never disagrees with them about which error
 // a line belongs to.
 //
+// Each node also holds the error it stands for and the binding that
+// resolved its location. A report a program reads, such as a JSON line,
+// a CI annotation, or an editor diagnostic, takes its fields from the
+// node rather than from the text. [ErrorTree.Problems] yields the nodes
+// such a report lists, one per problem, and [ErrorTree.All] yields every
+// node of the tree.
+//
 // Create instances with [NewErrorTree].
 type ErrorTree struct {
+	// Err is the error the node stands for, for [errors.Is] and
+	// [errors.As]. It is nil for a node with no text.
+	Err error
+	// Bound is the binding that gives the node its source and location:
+	// the [*SourceError] that Err is, or the one Err wraps along its cause
+	// chain. It is nil for an error bound to no source.
+	Bound *SourceError
 	// Text is the message of the node, the message of the error without
 	// the errors nested in it. It is empty for a node that stands for
 	// several errors and adds no message of its own, such as one built
@@ -68,9 +83,215 @@ type ErrorTree struct {
 //
 // The children come from the errors rather than from the text of the
 // message, so a wrapper that rewrites the message it wraps keeps its
-// children. A nil err yields the zero ErrorTree.
+// children.
+//
+// Each node holds its error in Err and its binding in Bound. The node of
+// a binding holds that binding in both. The node of a wrapper around a
+// binding, such as one from [fmt.Errorf], holds the wrapper in Err and
+// the binding in Bound, so the node reports the location its text shows.
+// So does the node of an [Error] that nests errors around a binding. A
+// located Error above a binding names a location no source resolved, so
+// its node has no Bound, as the node of any other error bound to no
+// source. A nil err yields the zero ErrorTree.
 func NewErrorTree(err error) ErrorTree {
-	return newTree("", appendTrees(nil, err))
+	return newTree(ErrorTree{}, appendTrees(nil, err))
+}
+
+// All returns an iterator over the nodes of the tree, t first and each
+// node before the nodes below it, in the order [FormatError] prints their
+// rows. A node with no text has no row, so All passes over it and yields
+// the nodes below it. The zero ErrorTree therefore yields nothing.
+//
+// Each node comes with its Children, and All yields those children after
+// it, so a caller reads one row per node or the whole subtree of a node:
+//
+//	for node := range niceyaml.NewErrorTree(err).All() {
+//		if errors.Is(node.Err, fs.ErrNotExist) {
+//			...
+//		}
+//	}
+func (t ErrorTree) All() iter.Seq[ErrorTree] {
+	return func(yield func(ErrorTree) bool) {
+		t.all(yield)
+	}
+}
+
+// all yields t when it has text, then every node below it, each before the
+// nodes below it, and reports whether the caller wants more.
+func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
+	if t.Text != "" && !yield(t) {
+		return false
+	}
+
+	for _, child := range t.Children {
+		if !child.all(yield) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// Problems returns an iterator over the nodes that each name one problem,
+// in the order [ErrorTree.All] yields them. It is the walk of a report
+// that lists the problems of an error as rows, such as JSON lines, CI
+// annotations, or editor diagnostics. A tree holds more nodes than
+// problems. A validator that found several violations reports a summary
+// above them, such as "3 schema violations". An error that gives its
+// reasons, such as "no matching schema" above "no schema directive", is
+// one problem in two nodes.
+//
+// A node carries a location when its error names a path, a position, or
+// a range of its own. The location counts whether or not a source holds
+// it, so it counts for a binding whose [SourceError.Unresolved] returns a
+// reason, and for an error bound to no source, as the errors of a
+// validator that checked a Go value are. The base an error takes from
+// [Rebase] is not a location of its own. Problems yields a node in two
+// cases:
+//
+//   - The node carries a location.
+//   - The node carries none, no node below it carries one, and Problems
+//     yielded no node above it.
+//
+// A summary above located violations therefore yields the violations and
+// not itself, and the rows are the same whether the validator found one
+// violation or several. An error with no location anywhere below it
+// yields once, and the nodes below it are its reasons. So are the nodes
+// without a location below a located one. Each yielded node keeps its
+// Children, so a report that shows the reasons reads them there. A decode
+// rebases the errors of every nested [SelfValidator] under the path of
+// its field. An error a Validate method returns without a location
+// therefore stays one problem above its reasons, and its Bound reports
+// the position of the field. An error bound to no source, such as a file
+// that failed to read, yields by the same rule, so the report holds every
+// failure:
+//
+//	for problem := range niceyaml.NewErrorTree(err).Problems() {
+//		row := Row{Message: problem.Text}
+//
+//		if bound := problem.Bound; bound != nil {
+//			row.File = bound.Source().FilePath()
+//			row.Message = bound.Message()
+//
+//			if pos, ok := bound.Position(); ok {
+//				row.Line, row.Column = pos.Line+1, pos.Col+1
+//			}
+//		}
+//
+//		report(row)
+//	}
+//
+// The rule reads the shape of the tree, since no error says whether it
+// summarizes the errors below it. Every node without a location above a
+// located one therefore reads as a summary. An error there that is a
+// problem of its own, such as "ports conflict" above the two ports it
+// names, yields the two ports without its message. A validator keeps
+// such a message in the report by giving the error a location.
+func (t ErrorTree) Problems() iter.Seq[ErrorTree] {
+	return func(yield func(ErrorTree) bool) {
+		t.problems(t.locations(), false, yield)
+	}
+}
+
+// problems yields the nodes of t that [ErrorTree.Problems] yields and
+// reports whether the caller wants more. The locations are those of t,
+// and under says whether the walk yielded a node above t.
+func (t ErrorTree) problems(at locations, under bool, yield func(ErrorTree) bool) bool {
+	switch {
+	case t.Text == "":
+		// The node adds nothing, so the nodes below it stand in its place.
+
+	case at.own:
+		if !yield(t) {
+			return false
+		}
+
+		under = true
+
+	case !at.below:
+		return under || yield(t)
+	}
+
+	for i, child := range t.Children {
+		if !child.problems(at.children[i], under, yield) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// locations is what [ErrorTree.Problems] learns of a node before it
+// yields any: whether the node carries a location, whether a node below
+// it does, and the same of each child. Looking below each node as the
+// walk reaches it would read the nodes under a chain of summaries once
+// per summary above them.
+type locations struct {
+	children []locations
+	own      bool
+	below    bool
+}
+
+// locations returns the [locations] of t. A node with no text adds
+// nothing, so it carries no location of its own.
+func (t ErrorTree) locations() locations {
+	at := locations{own: t.Text != "" && t.carriesLocation()}
+
+	if len(t.Children) == 0 {
+		return at
+	}
+
+	at.children = make([]locations, len(t.Children))
+
+	for i, child := range t.Children {
+		at.children[i] = child.locations()
+		at.below = at.below || at.children[i].own || at.children[i].below
+	}
+
+	return at
+}
+
+// carriesLocation reports whether the error of t names a location of its
+// own, as [namesLocation] finds one: the error its binding bound, or its
+// own error for a node bound to no source.
+func (t ErrorTree) carriesLocation() bool {
+	if t.Bound != nil {
+		return namesLocation(t.Bound)
+	}
+
+	return namesLocation(t.Err)
+}
+
+// namesLocation reports whether err names a location of its own: whether
+// the [*Error] that anchors its cause chain, as [anchorOf] finds it,
+// carries a path, a position, or a range. A binding names the location
+// of the error it binds, resolved or not. An Error from [Rebase] that
+// anchors the chain at its base names none. Rebase moves the paths of
+// the errors below it, so an error reads the same to
+// [ErrorTree.Problems] before and after a decode rebases it.
+func namesLocation(err error) bool {
+	switch x := anchorOf(err).err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
+	case *Error:
+		return x.hasLocation()
+
+	case *SourceError:
+		return namesLocation(x.err)
+
+	default:
+		return false
+	}
+}
+
+// bindingOf returns the binding err is or wraps along its cause chain, as
+// [anchorOf] follows it, or nil when the chain holds none. A located
+// [Error] above a binding anchors the chain itself, so such an error has
+// none.
+func bindingOf(err error) *SourceError {
+	if bound, ok := anchorOf(err).err.(*SourceError); ok { //nolint:errorlint // The anchor itself, found by the walk.
+		return bound
+	}
+
+	return nil
 }
 
 // appendTrees appends the nodes err stands for to dst and returns the
@@ -105,7 +326,9 @@ func appendTrees(dst []ErrorTree, err error) []ErrorTree {
 		return dst
 	}
 
-	return appendTree(dst, newTree(err.Error(), children(err)))
+	node := ErrorTree{Err: err, Bound: bindingOf(err), Text: err.Error()}
+
+	return appendTree(dst, newTree(node, children(err)))
 }
 
 // appendTree appends t to dst and returns the extended slice. A node with
@@ -507,7 +730,7 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 			}
 		}
 
-		kid.tree = newTree(text, children(child))
+		kid.tree = newTree(ErrorTree{Err: child, Bound: child, Text: text}, children(child))
 		kids = append(kids, kid)
 	}
 
@@ -587,12 +810,12 @@ func comparePositioned(a, b positioned) int {
 	}
 }
 
-// newTree returns the node with text and children, less the nodes that add
+// newTree returns node with children below it, less the nodes that add
 // nothing. A child with no text gives its place to its own children, and a
 // node with no text and a single child is that child.
-func newTree(text string, children []ErrorTree) ErrorTree {
+func newTree(node ErrorTree, children []ErrorTree) ErrorTree {
 	if len(children) == 0 {
-		return ErrorTree{Text: text}
+		return node
 	}
 
 	flat := make([]ErrorTree, 0, len(children))
@@ -601,13 +824,13 @@ func newTree(text string, children []ErrorTree) ErrorTree {
 		flat = appendTree(flat, child)
 	}
 
-	if text == "" && len(flat) == 1 {
+	if node.Text == "" && len(flat) == 1 {
 		return flat[0]
 	}
 
-	if len(flat) == 0 {
-		return ErrorTree{Text: text}
+	if len(flat) > 0 {
+		node.Children = flat
 	}
 
-	return ErrorTree{Text: text, Children: flat}
+	return node
 }
