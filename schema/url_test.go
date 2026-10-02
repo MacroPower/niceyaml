@@ -25,6 +25,18 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
 }
 
+// countingClient returns a client that counts the requests it sends and
+// sends them through the default transport.
+func countingClient(requests *atomic.Int32) *http.Client {
+	return &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			requests.Add(1)
+
+			return http.DefaultTransport.RoundTrip(r) //nolint:wrapcheck // Test helper.
+		}),
+	}
+}
+
 type errReader struct{}
 
 func (errReader) Read(_ []byte) (int, error) {

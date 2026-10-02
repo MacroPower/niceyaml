@@ -14,6 +14,27 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
+// document returns a document for resolvers that never read it.
+func document(t *testing.T) *niceyaml.Node {
+	t.Helper()
+
+	return yamltest.FirstDocument(t, "key: value\n")
+}
+
+// load resolves r and loads the schema it names. It returns the ref's Key
+// alongside the loaded bytes. Resolve itself must succeed, and load
+// returns only the Load error.
+func load(t *testing.T, r schema.Resolver) (string, []byte, error) {
+	t.Helper()
+
+	ref, err := r.Resolve(t.Context(), document(t))
+	require.NoError(t, err)
+
+	data, err := schema.NewRegistry().Load(t.Context(), ref)
+
+	return ref.Key(), data, err //nolint:wrapcheck // Tests inspect the loader's own error.
+}
+
 // Compile-time interface satisfaction checks.
 var (
 	_ schema.Resolver = schema.ResolverFunc(nil)

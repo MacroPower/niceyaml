@@ -14,6 +14,14 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
+// fileURL returns the key that [schema.File] names for path, which is its
+// file URL.
+func fileURL(t *testing.T, path string) string {
+	t.Helper()
+
+	return schema.File(path).Key()
+}
+
 func TestFile(t *testing.T) {
 	t.Parallel()
 

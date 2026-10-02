@@ -31,6 +31,23 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
+// lookup builds a registry that fetches with client and holds r as its
+// one resolver, and looks up the schema for a document r never reads. It
+// returns the Lookup error, so a test checks which client fetched and what
+// the fetch reported.
+func lookup(t *testing.T, client *http.Client, r schema.Resolver) error {
+	t.Helper()
+
+	reg := schema.NewRegistry(
+		schema.WithHTTPClient(client),
+		schema.WithResolvers(r),
+	)
+
+	_, err := reg.Lookup(t.Context(), document(t))
+
+	return err //nolint:wrapcheck // Tests inspect the registry's own error.
+}
+
 // Path helpers for tests.
 var kindPath = paths.Root().Child("kind")
 
