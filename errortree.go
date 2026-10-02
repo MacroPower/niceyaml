@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"unicode"
 
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -38,9 +39,9 @@ type ErrorTree struct {
 	// chain. It is nil for an error bound to no source.
 	Bound *SourceError
 	// Text is the message of the node, the message of the error without
-	// the errors nested in it. It is empty for a node that stands for
-	// several errors and adds no message of its own, such as one built
-	// from [errors.Join].
+	// the errors below it. It is empty for a node that stands for several
+	// errors and adds no message of its own, such as one built from
+	// [errors.Join].
 	Text string
 	// Children are the nodes of the nested errors, in the order the tree
 	// shows them.
@@ -49,8 +50,19 @@ type ErrorTree struct {
 
 // NewErrorTree creates a new [ErrorTree] from err.
 //
-// The root text is the message of err, so context a wrapper added stays
-// in front. For an error bound to a source, the root keeps the
+// The root text is the message of err without the errors below it, so
+// context a wrapper added stays in front. The message of a wrapper around
+// a join holds every branch of the join, and the message of one around a
+// binding holds the errors [SourceError.Error] lists. Those errors are
+// the children of the node, so each shows once. The root of a wrapper
+// around a binding keeps the text of the wrapper and the line of the
+// binding, as "load config: cafe.yaml: 2 schema violations" does. The
+// root of a wrapper around a join keeps the text of the wrapper alone,
+// such as "load config:". A wrapper that rewrites the message it wraps
+// leaves nothing to tell apart, so its text stays whole above its
+// children.
+//
+// For an error bound to a source, the root keeps the
 // "name:line:col:" position [SourceError.Error] gives it, and
 // each child, a binding of its own from [SourceError.Errors],
 // carries the "line:col:" position its location resolved to without the
@@ -70,10 +82,11 @@ type ErrorTree struct {
 // branch per file. An [Error] that only wraps such an error, with no
 // location and no errors nested with [WithErrors], is the same node. A
 // binding of such an error is the same node, with each child carrying
-// its whole [SourceError.Error], since no root names the source for it.
-// So is an Error that only wraps such a binding. A node with no text
-// adds nothing. Its children take its place in the tree above it, and
-// one with a single child is that child.
+// the name of its source in front of its position, since no root names
+// the source for it. So is an Error that only wraps such a binding, and
+// so are the children below a wrapper that keeps no line of the binding.
+// A node with no text adds nothing. Its children take its place in the
+// tree above it, and one with a single child is that child.
 //
 // Any other error that unwraps to several keeps its text and has a child
 // per branch. A wrapper that [fmt.Errorf] builds with several %w verbs
@@ -83,7 +96,8 @@ type ErrorTree struct {
 //
 // The children come from the errors rather than from the text of the
 // message, so a wrapper that rewrites the message it wraps keeps its
-// children.
+// children. Only the text of a node reads the message, to leave out what
+// the children show.
 //
 // Each node holds its error in Err and its binding in Bound. The node of
 // a binding holds that binding in both. The node of a wrapper around a
@@ -326,9 +340,16 @@ func appendTrees(dst []ErrorTree, err error) []ErrorTree {
 		return dst
 	}
 
-	node := ErrorTree{Err: err, Bound: bindingOf(err), Text: err.Error()}
+	kids, end := children(err)
+	node := ErrorTree{Err: err, Bound: bindingOf(err)}
 
-	return appendTree(dst, newTree(node, children(err)))
+	if x, ok := err.(*SourceError); ok { //nolint:errorlint // The node itself, not a chain search.
+		node.Text = x.headline()
+	} else {
+		node.Text, _, _ = end.cut(err.Error())
+	}
+
+	return appendTree(dst, newTree(node, kids))
 }
 
 // appendTree appends t to dst and returns the extended slice. A node with
@@ -393,12 +414,21 @@ func joinBinding(err error) *SourceError {
 // that unwraps to several is a join only when its message is that text,
 // as [isJoinMessage] reports.
 func joinBranches(err error) ([]error, bool) {
+	return joinBranchesOf(err, func() string { return err.Error() })
+}
+
+// joinBranchesOf is [joinBranches] for a caller that reads the message of
+// err itself. It calls msg for that message, and only for an error whose
+// type does not say whether it is a join, so a caller that keeps the
+// message reads it once. An Error that adds nothing has the message of
+// the error it wraps, so msg serves for that error too.
+func joinBranchesOf(err error, msg func() string) ([]error, bool) {
 	if x, ok := err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
 		if !x.addsNothing() {
 			return nil, false
 		}
 
-		return joinBranches(x.err)
+		return joinBranchesOf(x.err, msg)
 	}
 
 	joined, ok := err.(interface{ Unwrap() []error }) //nolint:errorlint // The node itself, not a chain search.
@@ -407,7 +437,7 @@ func joinBranches(err error) ([]error, bool) {
 	}
 
 	branches := joined.Unwrap()
-	if !isJoinError(err) && !isJoinMessage(err.Error(), branches) {
+	if !isJoinError(err) && !isJoinMessage(msg(), branches) {
 		return nil, false
 	}
 
@@ -469,24 +499,111 @@ func isJoinMessage(msg string, branches []error) bool {
 }
 
 // children returns the nodes of the children [walkChildren] finds along
-// the cause chain of err. A binding that ends the chain contributes its
-// bound children, each with the position it resolved to, since the
-// binding bound everything below it. Every other child is the tree of
-// the error rebased under its base, as binding rebases it. The nested
-// errors of an unbound Error and the branches of a join keep the order
-// their parent lists them in, since only the children of a binding carry
-// the source and position [trees] sorts by.
-func children(err error) []ErrorTree {
+// the cause chain of err, and the [chainEnd] of that chain. A binding
+// that ends the chain contributes its bound children, each with the
+// position it resolved to, since the binding bound everything below it.
+// Those children name their source when the binding has no line of its
+// own to name it. Every other child is the tree of the error rebased
+// under its base, as binding rebases it. The nested errors of an unbound
+// Error and the branches of a join keep the order their parent lists them
+// in, since only the children of a binding carry the source and position
+// [trees] sorts by.
+func children(err error) ([]ErrorTree, chainEnd) {
 	var kids []positioned
 
-	walkChildren(err,
-		func(x *SourceError) { kids = appendBoundChildren(kids, x, false) },
+	end := walkChildren(err,
+		func(x *SourceError) { kids = appendBoundChildren(kids, x, x.headline() == "") },
 		func(n error, base childBase) {
 			kids = append(kids, positioned{tree: NewErrorTree(base.rebase(n))})
 		},
 	)
 
-	return trees(kids)
+	return trees(kids), end
+}
+
+// chainEnd is the error that ends a cause chain as [walkChildren] walks
+// it, when the errors below it are children of the error the walk started
+// at: a [*SourceError], or an error that unwraps to the branches the walk
+// reported. The zero chainEnd is a chain that ends at neither.
+type chainEnd struct {
+	err error
+	// The number of branches the walk reported as children.
+	branches int
+	// Whether an error on the way to err added text of its own, so the
+	// message the walk started at differs from the message of err.
+	wrapped bool
+}
+
+// cut returns text, the message of the error the chain belongs to,
+// without the part the children show. The message of a wrapper holds the
+// message of the error it wraps, so the message of a wrapper around a
+// join holds every branch of the join, and one around a binding holds the
+// errors [SourceError.Error] lists. Those errors are children, so a join
+// leaves nothing of its message and a binding leaves its own line. Space
+// a cut leaves at the end of the text goes with it, so "load: " in front
+// of a join reads "load:".
+//
+// Any other error that unwraps to several keeps its message. The second
+// result is the number of children at the end of the list of children
+// whose messages the text holds already. They are the branches of such an
+// error when its message holds the message of its first branch, as a
+// wrapper [fmt.Errorf] builds with several %w verbs does and a count of
+// the branches does not, and the ones a binding reports the same of.
+//
+// A wrapper that rewrites the message it wraps leaves nothing to find.
+// The text then comes back whole, and the last result is false.
+func (c chainEnd) cut(text string) (string, int, bool) {
+	var (
+		full, own string
+		shown     int
+	)
+
+	switch x := c.err.(type) { //nolint:errorlint // The end of the chain, found by the walk.
+	case nil:
+		return text, 0, true
+
+	case *SourceError:
+		t := x.texts()
+		full, own, shown = t.msg, t.head, t.shown
+
+	case interface{ Unwrap() []error }:
+		msg := text
+		if c.wrapped {
+			msg = c.err.Error()
+		}
+
+		branches := x.Unwrap()
+
+		switch {
+		case isJoinError(c.err) || isJoinMessage(msg, branches):
+			full = msg
+
+		case isWrapErrors(c.err) || holdsFirst(msg, branches):
+			return text, c.branches, true
+
+		default:
+			return text, 0, true
+		}
+	}
+
+	if full == own {
+		return text, shown, true
+	}
+
+	before, after, ok := strings.Cut(text, full)
+	if !ok {
+		return text, 0, false
+	}
+
+	return strings.TrimRightFunc(before+own+after, unicode.IsSpace), shown, true
+}
+
+// holdsFirst reports whether msg holds the message of the first of
+// branches that is not a nil interface.
+func holdsFirst(msg string, branches []error) bool {
+	first := firstBranch(branches)
+
+	return first != nil && strings.Contains(msg, first.Error())
 }
 
 // walkChildren walks the cause chain of err and reports the children
@@ -500,15 +617,20 @@ func children(err error) []ErrorTree {
 // and otherwise ends there, with each branch that remains a child under
 // the same base. It also ends at a [*SourceError], which bound everything
 // below it already, so onBinding receives it in place of its children.
-func walkChildren(err error, onBinding func(*SourceError), onChild func(n error, base childBase)) {
-	var base childBase
+// The result is the [chainEnd] of the chain: that binding, or the error
+// whose branches the walk reported.
+func walkChildren(err error, onBinding func(*SourceError), onChild func(n error, base childBase)) chainEnd {
+	var (
+		base    childBase
+		wrapped bool
+	)
 
 	for cur := err; !isNothing(cur); {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
 		case *SourceError:
 			onBinding(x)
 
-			return
+			return chainEnd{err: x, wrapped: wrapped}
 
 		case *Error:
 			base = base.cross(x)
@@ -517,29 +639,39 @@ func walkChildren(err error, onBinding func(*SourceError), onChild func(n error,
 				onChild(n, base)
 			}
 
+			// An Error that adds nothing has the message of its cause.
+			wrapped = wrapped || !x.addsNothing()
 			cur = x.err
 
 		case interface{ Unwrap() error }:
+			wrapped = true
 			cur = x.Unwrap()
 
 		case interface{ Unwrap() []error }:
 			branches, next := followBranches(cur, x.Unwrap())
 			if next != nil {
+				wrapped = true
 				cur = next
 
 				continue
+			}
+
+			if len(branches) == 0 {
+				return chainEnd{}
 			}
 
 			for _, branch := range branches {
 				onChild(branch, base)
 			}
 
-			return
+			return chainEnd{err: cur, branches: len(branches), wrapped: wrapped}
 
 		default:
-			return
+			return chainEnd{}
 		}
 	}
+
+	return chainEnd{}
 }
 
 // followBranches returns the branches of err, an error that unwraps to
@@ -671,15 +803,15 @@ func trees(kids []positioned) []ErrorTree {
 
 // appendBoundChildren appends the nodes of the children of bound to kids,
 // each with its own children as a subtree, and returns the extended
-// slice. A child bound to another source carries its whole
-// [SourceError.Error], which names that source, and so does a child bound
-// to the same source when named is set, for a parent with no text of its
-// own. Otherwise a child bound to the same source carries the "line:col:"
-// its location resolved to in front of its message, without the name the
-// parent gives already. A child that wraps a binding through Errors
-// alone, which add no text, reads as that binding does, unless the child
-// puts the name of its source in front, as [textBinding] describes. A
-// child behind a wrapper that adds text of its own, such as
+// slice. A child bound to another source carries its whole line, as
+// [SourceError.headline] returns it, which names that source. So does a
+// child bound to the same source when named is set, for a parent with no
+// text of its own. Otherwise a child bound to the same source carries the
+// "line:col:" its location resolved to in front of its message, without
+// the name the parent gives already. A child that wraps a binding through
+// Errors alone, which add no text, reads as that binding does, unless the
+// child puts the name of its source in front, as [textBinding] describes.
+// A child behind a wrapper that adds text of its own, such as
 // [fmt.Errorf], carries the position inside that text, so it comes
 // through as it is, name included. A child that binds a join, or wraps
 // such a binding through Errors that add nothing, has no text and gives
@@ -698,17 +830,7 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 			continue
 		}
 
-		kid := positioned{src: child.Source()}
-
-		// A location the source does not hold resolved to nothing the
-		// excerpt can mark, so the node reads as an unlocated one. A
-		// located child reports the position its message carries, which
-		// is inside the token its range marks when the caller gave the
-		// error a position rather than a path.
-		if _, ok := child.Range(); ok {
-			kid.located = true
-			kid.pos = child.loc.pos
-		}
+		kid := placed(child)
 
 		// The binding put the position in front of the message it wraps,
 		// so stripping it back to that message leaves the position to
@@ -720,9 +842,9 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 		// put back.
 		src := textBinding(child)
 
-		text := src.Error()
+		text := src.headline()
 		if !named && src.Source() == bound.Source() {
-			if inner := src.Unwrap().Error(); inner != text {
+			if inner := src.texts().own; inner != text {
 				text = inner
 				if kid.located {
 					text = prefix(editorPosition(kid.pos)+":", text)
@@ -730,7 +852,9 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 			}
 		}
 
-		kid.tree = newTree(ErrorTree{Err: child, Bound: child, Text: text}, children(child))
+		below, _ := children(child)
+
+		kid.tree = newTree(ErrorTree{Err: child, Bound: child, Text: text}, below)
 		kids = append(kids, kid)
 	}
 
@@ -763,13 +887,33 @@ func textBinding(e *SourceError) *SourceError {
 
 // positioned is a child of a node, the source it is bound to, and the
 // position it resolved to, when located, for the order the children take.
-// [groupSources] fills group in.
+// The child is a binding, with the node [appendBoundChildren] builds for
+// it, or the node of an error bound to no source. [groupSources] fills
+// group in.
 type positioned struct {
 	src     *Source
+	bound   *SourceError
 	tree    ErrorTree
 	pos     position.Position
 	group   int
 	located bool
+}
+
+// placed returns child with the source and the position [trees] orders it
+// by. A location the source does not hold resolved to nothing the excerpt
+// can mark, so the child reads as an unlocated one. A located child
+// reports the position its message carries, which is inside the token its
+// range marks when the caller gave the error a position rather than a
+// path.
+func placed(child *SourceError) positioned {
+	kid := positioned{src: child.Source(), bound: child}
+
+	if _, ok := child.Range(); ok {
+		kid.located = true
+		kid.pos = child.loc.pos
+	}
+
+	return kid
 }
 
 // groupSources numbers the source of each of kids in the order the sources

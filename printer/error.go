@@ -45,9 +45,9 @@ const errorConnectorWidth = 4
 // PrintError draws the message as a tree with a connector in front of each
 // nested error, in the color of the gutter's line numbers, so a validator's
 // report reads as its summary with one branch per violation. The root
-// keeps the message as its wrappers wrote it, and each branch carries the
-// "line:col:" its location resolved to, without the name the root already
-// gives:
+// keeps the message as its wrappers wrote it, without the errors the
+// branches show, and each branch carries the "line:col:" its location
+// resolved to, without the name the root already gives:
 //
 //	cafe.yaml: 2 schema violations
 //	├── 6:8: $.spec.sla: string does not match pattern

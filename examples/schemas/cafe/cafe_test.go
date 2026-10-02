@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/examples/schemas/cafe"
@@ -58,7 +59,11 @@ func TestCafeBrokenConfig(t *testing.T) {
 	t.Parallel()
 
 	_, err := cafeConfig(t.Context(), cafe.BrokenYAML)
-	require.EqualError(t, err, "2 schema violations", "broken config should fail schema validation")
+	require.EqualError(t, err, stringtest.JoinLF(
+		"2 schema violations",
+		`6:8: $.spec.sla: string does not match pattern "^([0-9]+(\\.[0-9]+)?(ns|[uµμ]s|ms|s|m|h))+$"`,
+		`22:11: $.spec.hours.days: expected "array", got "string"`,
+	), "broken config should fail schema validation")
 
 	// Both bad values also fail the plain decode, so the paths confirm
 	// that the schema rejected each one. The SLA schema admits a string

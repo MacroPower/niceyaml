@@ -2502,10 +2502,14 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 		require.ErrorIs(t, err, schema.ErrNoDirective)
 		require.ErrorIs(t, err, errNoKind)
-		assert.Equal(t, "app.yaml: no matching schema", err.Error())
-
 		// A resolver that returned ErrNoMatch alone adds no reason, and the
 		// reasons read without the sentinel the message states already.
+		assert.Equal(t, stringtest.JoinLF(
+			"app.yaml: no matching schema",
+			"app.yaml: no schema directive",
+			"app.yaml: no kind",
+		), err.Error())
+
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)

@@ -445,7 +445,9 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 					continue
 				}
 
-				require.EqualError(t, err, fmt.Sprintf("%d unknown fields", rows))
+				// The message lists each field under the summary, as the
+				// tree does.
+				require.EqualError(t, err, fmt.Sprintf("%d unknown fields\n%s", rows, tc.want))
 				require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
 
 				var srcErr *niceyaml.SourceError
@@ -651,14 +653,18 @@ func TestDocument_Decode_UnknownFields_IgnoredMerges(t *testing.T) {
 func TestDocument_Decode_UnknownFields_Source(t *testing.T) {
 	t.Parallel()
 
-	// A named source puts its name in front of the summary, and each
-	// field keeps its own position.
+	// A named source puts its name in front of the summary and of each
+	// field in the message, and each field keeps its own position.
 	source := niceyaml.NewSourceFromString("foo: 1\nname: x\nbar: 2\n", niceyaml.WithName("cfg.yaml"))
 
 	_, err := source.Decode[struct {
 		Name string `yaml:"name"`
 	}](t.Context(), niceyaml.WithDisallowUnknownFields(true))
-	require.EqualError(t, err, "cfg.yaml: 2 unknown fields")
+	require.EqualError(t, err, stringtest.JoinLF(
+		"cfg.yaml: 2 unknown fields",
+		`cfg.yaml:1:1: $.foo~: unknown field "foo"`,
+		`cfg.yaml:3:1: $.bar~: unknown field "bar"`,
+	))
 	require.ErrorIs(t, err, niceyaml.ErrDecodeRejected)
 
 	assert.Equal(t, stringtest.JoinLF(

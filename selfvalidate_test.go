@@ -264,7 +264,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		_, err = doc.Decode[struct {
 			Schedule schedule `yaml:"schedule"`
 		}](t.Context())
-		require.EqualError(t, err, "cafe.yaml:2:3: $.schedule: invalid schedule")
+		require.EqualError(t, err, stringtest.JoinLF(
+			"cafe.yaml:2:3: $.schedule: invalid schedule",
+			"cafe.yaml:2:9: $.schedule.open: open is empty",
+			"cafe.yaml:3:10: $.schedule.close: close is empty",
+		))
 
 		var bound *niceyaml.SourceError
 
@@ -463,7 +467,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			},
 			"a field below a deeper inline struct validates": {
 				input: "host: a\nport: 0\n",
-				err:   "$.port: must be positive\n$.port: must be positive",
+				err:   "2:7: $.port: must be positive\n2:7: $.port: must be positive",
 				decode: func(n *niceyaml.Node) error {
 					_, err := n.Decode[deep](t.Context())
 
@@ -609,7 +613,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		`))
 
 		_, err := dd.Decode[parent](t.Context())
-		require.EqualError(t, err, "$.value: parent ran\n$.pointer: parent ran")
+		require.EqualError(t, err, "1:9: $.value: parent ran\n2:11: $.pointer: parent ran")
 	})
 
 	t.Run("an embedded field that decodes its struct validates at the struct", func(t *testing.T) {
@@ -948,8 +952,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err := dd.Decode[withRules](t.Context())
 		require.EqualError(t, err, stringtest.JoinLF(
-			"$.a: no rules",
-			"$.b: no rules",
+			"1:4: $.a: no rules",
+			"2:4: $.b: no rules",
 		))
 
 		type withFlags struct {
@@ -961,8 +965,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err = dd.Decode[withFlags](t.Context())
 		require.EqualError(t, err, stringtest.JoinLF(
-			"$.a: flag set",
-			"$.b: flag set",
+			"1:4: $.a: flag set",
+			"2:4: $.b: flag set",
 		))
 	})
 
@@ -980,12 +984,14 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "a: null\nm: null\n")
 
+		// A field the document leaves out binds at the mapping that lacks
+		// it, and the message lists the errors by position.
 		_, err := dd.Decode[withEmpty](t.Context())
 		require.EqualError(t, err, stringtest.JoinLF(
-			"$.a: no rules",
-			"$.b: no rules",
-			"$.m: no names",
-			"$.n: no names",
+			"1:1: $.b: no rules",
+			"1:1: $.n: no names",
+			"1:4: $.a: no rules",
+			"2:4: $.m: no names",
 		))
 
 		dd = yamltest.FirstDocument(t, "null\n")
@@ -1144,16 +1150,34 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "d: {price: -1}\nb: {price: -1}\nc: {price: -1}\na: {price: -1}\n")
 
-		want := stringtest.JoinLF(
-			"$.a.price: negative price",
-			"$.b.price: negative price",
-			"$.c.price: negative price",
-			"$.d.price: negative price",
-		)
+		// The message lists the errors by position, so the children show
+		// the order the walk reports them in.
+		want := []string{
+			"4:12: $.a.price: negative price",
+			"2:12: $.b.price: negative price",
+			"3:12: $.c.price: negative price",
+			"1:12: $.d.price: negative price",
+		}
 
 		for range 20 {
 			_, err := dd.Decode[map[string]item](t.Context())
-			require.EqualError(t, err, want)
+			require.EqualError(t, err, stringtest.JoinLF(
+				"1:12: $.d.price: negative price",
+				"2:12: $.b.price: negative price",
+				"3:12: $.c.price: negative price",
+				"4:12: $.a.price: negative price",
+			))
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			got := make([]string, 0, len(want))
+			for _, child := range bound.Errors() {
+				got = append(got, child.Error())
+			}
+
+			assert.Equal(t, want, got)
 		}
 	})
 

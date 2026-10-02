@@ -82,7 +82,17 @@
 // path in the one document of a source that holds one.
 // [SourceError.Error] puts the resolved position in front of the
 // message, or the name of the source alone when the error carries no
-// location, and runs over several lines when the message does.
+// location, and runs over several lines when the message does. Under an
+// error that names no location, it lists the errors below, one per line
+// behind its own position. The message of a validator's report thus names
+// each violation wherever the error goes, as a wrapper from [fmt.Errorf]
+// carries it:
+//
+//	load config: cafe.yaml: 2 schema violations
+//	cafe.yaml:6:8: $.spec.sla: string does not match pattern
+//	cafe.yaml:22:11: $.spec.hours.days: expected "array", got "string"
+//
+// The list stops after [ErrorListLimit] errors and counts the rest.
 // [SourceError.Excerpt] returns the surrounding lines with the location
 // highlighted.
 // The nested errors [WithErrors] adds are part of the Error, and binding

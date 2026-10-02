@@ -273,8 +273,11 @@ func (f ValidatorFunc) Validate(ctx context.Context, n *Node) error {
 // decode renders them as one tree. Each line of the message carries the
 // source and the position of its own failure:
 //
-//	svc.yaml:2:7: $.port: 0 is less than 1
 //	svc.yaml:1:7: $.name: reserved name
+//	svc.yaml:2:7: $.port: 0 is less than 1
+//
+// A decode binds the join, and the message of that binding lists the
+// failures in the order of their positions, as the tree shows them.
 //
 // A lone failure comes back as it would if that validator ran alone. No
 // failure is no error. A context that ends stops the run, and the error
@@ -1811,11 +1814,12 @@ func WithAliasLimit(enabled bool) DecodeOption {
 // holds, in the order of the source, each at the path of its key:
 //
 //	cfg.yaml: 2 unknown fields
-//	    3:1: $.replicsa~: unknown field "replicsa"
-//	    7:5: $.servers[0].prot~: unknown field "prot"
+//	cfg.yaml:3:1: $.replicsa~: unknown field "replicsa"
+//	cfg.yaml:7:5: $.servers[0].prot~: unknown field "prot"
 //
-// The error counts the fields in its message and nests one error for
-// each, which [SourceError.Errors] and [ErrorTree.Problems] list. Each
+// The error counts the fields on the first line of its message and nests
+// one error for each. The message lists them, and [SourceError.Errors]
+// and [ErrorTree.Problems] return them. Each
 // nested error matches [ErrDecodeRejected] and holds the
 // [yaml.UnknownFieldError] the go-yaml decoder returns for that field. A
 // document with one unknown field reports that field as the error itself.
@@ -1989,9 +1993,9 @@ func WithReferences(data ...[]byte) DecodeOption {
 // The decoder stops at the first unknown field it finds under
 // [WithDisallowUnknownFields]. DecodeInto then finds the others, so one
 // decode reports every unknown field, in the order of the source.
-// Several come back as one error whose message counts them, such as "3
-// unknown fields", with one error nested for each field, at the path of
-// its key. [WithDisallowUnknownFields] describes which fields the report
+// Several come back as one error whose first line counts them, such as
+// "3 unknown fields", with one error nested for each field, at the path
+// of its key. [WithDisallowUnknownFields] describes which fields the report
 // holds.
 //
 // An error the decoder reports without a token of the source comes back

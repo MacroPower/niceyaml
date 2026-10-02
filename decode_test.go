@@ -2422,7 +2422,11 @@ func TestNode_Bind_Scope(t *testing.T) {
 				errors.New("plain"),
 				niceyaml.NewError("late", niceyaml.AtPath(closePath)),
 			),
-			want: "cfg.yaml: $.shops[0].hours.open: early\nplain\n$.shops[0].hours.close: late",
+			want: stringtest.JoinLF(
+				"cfg.yaml:4:13: $.shops[0].hours.open: early",
+				"cfg.yaml:5:14: $.shops[0].hours.close: late",
+				"cfg.yaml: plain",
+			),
 			children: []string{
 				"cfg.yaml:4:13: $.shops[0].hours.open: early",
 				"cfg.yaml: plain",
@@ -2431,7 +2435,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 		},
 		"a join with no path stays as it is": {
 			err:  errors.Join(errors.New("one"), errors.New("two")),
-			want: "cfg.yaml: one\ntwo",
+			want: "cfg.yaml: one\ncfg.yaml: two",
 			children: []string{
 				"cfg.yaml: one",
 				"cfg.yaml: two",
@@ -2442,7 +2446,11 @@ func TestNode_Bind_Scope(t *testing.T) {
 				niceyaml.NewError("early", niceyaml.AtPath(openPath)),
 				errors.New("plain"),
 			)),
-			want: "cfg.yaml: 2 problems",
+			want: stringtest.JoinLF(
+				"cfg.yaml: 2 problems",
+				"cfg.yaml:4:13: $.shops[0].hours.open: early",
+				"cfg.yaml: plain",
+			),
 			children: []string{
 				"cfg.yaml:4:13: $.shops[0].hours.open: early",
 				"cfg.yaml: plain",
@@ -8905,7 +8913,7 @@ func TestMultiValidator(t *testing.T) {
 
 		err = doc.Validate(t.Context(), niceyaml.MultiValidator(classified, badB))
 		require.ErrorIs(t, err, errInvalid)
-		assert.Equal(t, "invalid: x.yaml:3:6: $.a.c: bad c\nx.yaml:2:6: $.a.b: bad b", err.Error())
+		assert.Equal(t, "x.yaml:2:6: $.a.b: bad b\ninvalid: x.yaml:3:6: $.a.c: bad c", err.Error())
 	})
 
 	t.Run("a context that ends stops the run", func(t *testing.T) {

@@ -2121,7 +2121,11 @@ func TestSchema_Validate_Bound(t *testing.T) {
 		},
 		"several violations": {
 			input: "name: 1\nprice: -1\n",
-			want:  "menu.yaml: 2 schema violations",
+			want: stringtest.JoinLF(
+				"menu.yaml: 2 schema violations",
+				`menu.yaml:1:7: $.name: expected "string", got "integer"`,
+				"menu.yaml:2:8: $.price: -1 is less than 0",
+			),
 		},
 		"a decoding error": {
 			input: "price: *nope\n",

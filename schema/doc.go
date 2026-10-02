@@ -48,6 +48,14 @@
 //	    // err is a *niceyaml.SourceError; niceyaml.FormatError prints the failing lines.
 //	}
 //
+// One violation is the error itself. Several come back as one error that
+// counts them, and its message lists each behind its own position, so a
+// program that prints the error alone still names every violation:
+//
+//	config.yaml: 2 schema violations
+//	config.yaml:2:7: $.port: 0 is less than 1
+//	config.yaml:3:1: $.extra~: value is not allowed
+//
 // A member the schema requires and the document leaves out reports the
 // path it would have, such as $.server.name, and the error binds at the
 // key of the mapping that lacks it.
