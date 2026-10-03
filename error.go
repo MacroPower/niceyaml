@@ -268,17 +268,47 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 //
 //	return doc.Bind(niceyaml.Rebase(checkHours(&cfg.Hours), paths.Root().Child("hours")))
 //
-// The same call puts each element of a slice under its index. Rebases
-// compose, so a chain of them composes the chain of paths. An error
-// under the base that carries no location and wraps no binding points at
-// base itself, and a position or a range stays as it is, since the base
-// moves paths alone. A decode rebases the errors of every nested
-// [SelfValidator] itself, so a Validate need not rebase the Validate of
-// a field. A Node from [Node.At] or [Node.Nodes] puts its own path in
-// front of each path in an error it binds, so a check bound through the
-// Node of its value needs no Rebase. Such a Node points an error with no
-// location at its own value, as Rebase points one at base, when no error
-// in its tree holds a location, as [Node.Bind] describes.
+// The same call puts each element of a slice under its index, but a key
+// of a map takes more care. A path names the key as the source spells
+// it, and the key a decode hands back can spell it another way. The key
+// `0x10` of a map[int]Server decodes to 16, so this loop rebases the
+// check under `$.ports.16`, which the document leaves out:
+//
+//	for k, server := range cfg.Ports {
+//		err := niceyaml.Rebase(checkServer(&server), paths.Root().Child("ports", strconv.Itoa(k)))
+//		errs = append(errs, doc.Bind(err)) // $.ports.16.name, at the ports: key
+//	}
+//
+// The error then binds at the `ports:` key, as [SourceError.Nearest]
+// describes, rather than at the entry. A key `3.10` of a
+// map[string]Server decodes to "3.1" and misses the same way. Range over
+// the entries with [Node.Nodes] instead, and bind through the Node of
+// each entry, which carries the key as the source spells it:
+//
+//	entries, err := doc.Nodes(paths.Root().Child("ports").ChildAll())
+//	if err != nil {
+//		return err
+//	}
+//
+//	for _, entry := range entries {
+//		server, err := entry.Decode[Server](ctx)
+//		if err != nil {
+//			return err
+//		}
+//
+//		errs = append(errs, entry.Bind(checkServer(&server))) // $.ports.0x10.name
+//	}
+//
+// Rebases compose, so a chain of them composes the chain of paths. An
+// error under the base that carries no location and wraps no binding
+// points at base itself, and a position or a range stays as it is, since
+// the base moves paths alone. A decode rebases the errors of every nested
+// [SelfValidator] itself, so a Validate need not rebase the Validate of a
+// field. A Node from [Node.At] or [Node.Nodes] puts its own path in front
+// of each path in an error it binds, so a check bound through the Node of
+// its value needs no Rebase. Such a Node points an error with no location
+// at its own value, as Rebase points one at base, when no error in its
+// tree holds a location, as [Node.Bind] describes.
 //
 // An error joined from several, as [errors.Join] builds one, rebases
 // branch by branch into a new join, so each line of its message carries
