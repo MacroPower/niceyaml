@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -15,9 +16,13 @@ import (
 // only comments. [Encoder.Encode] returns it.
 var ErrNoNode = errors.New("value encodes to no YAML node")
 
-// Pretty returns the [Option] values that make [New] produce
-// prettier-friendly YAML with two-space indentation and indented sequences.
-// Each call returns a new slice.
+// Pretty returns the [Option] values that make [New] write the layout
+// prettier writes, with two-space indentation and each sequence indented
+// one level below its parent key. A sequence at the root of a document
+// starts at the first column, as [WithIndentSequence] describes. The YAML
+// a marshaler returns keeps the indentation it had in that text, so a
+// sequence in it can sit at the indent of its parent key. Each call
+// returns a new slice.
 func Pretty() []Option {
 	return []Option{
 		WithIndent(2),
@@ -71,7 +76,12 @@ func WithIndent(spaces int) Option {
 
 // WithIndentSequence is an [Option] that sets whether the encoder indents
 // sequence entries one level below their parent key. The default is false,
-// and entries then sit at the indent of their parent key.
+// and entries then sit at the indent of their parent key. A sequence at
+// the root of a document has no parent key, so it starts at the first
+// column either way. The exception is a root sequence that holds YAML a
+// marshaler returned, which go-yaml leaves at the columns it had in that
+// text. The encoder writes such a sequence one level in, as go-yaml lays
+// it out.
 func WithIndentSequence(indent bool) Option {
 	return func(c *config) {
 		c.opts = append(c.opts, yaml.IndentSequence(indent))
@@ -196,6 +206,10 @@ func (e *Encoder) Encode(ctx context.Context, v any) error {
 	// prints the node.
 	ast.Walk(quoter{}, node)
 
+	// Prettier starts a sequence at the root of a document in the first
+	// column, where go-yaml indents it under IndentSequence.
+	outdentRoot(node)
+
 	// The comments go on after the quoting, which can replace a node.
 	err = setComments(node, comments)
 	if err != nil {
@@ -242,6 +256,52 @@ func render(node ast.Node) (_ []byte, err error) {
 	}()
 
 	return []byte(node.String() + "\n"), nil
+}
+
+// outdentRoot moves a block sequence at the root of a document, with
+// every node in it, to the first column. Under [yaml.IndentSequence],
+// go-yaml indents every sequence one level, the root one included, which
+// has no parent key to indent below. Go-yaml leaves the YAML a marshaler
+// returns at the columns it had in that text, left of the sequence that
+// holds it. The move would put that YAML left of the first column, so a
+// sequence that holds such YAML stays where go-yaml put it.
+func outdentRoot(node ast.Node) {
+	seq, ok := node.(*ast.SequenceNode)
+	if !ok || seq.IsFlowStyle {
+		return
+	}
+
+	shift := seq.Start.Position.Column - 1
+	if shift <= 0 {
+		return
+	}
+
+	lowest := lowestColumn{column: math.MaxInt}
+
+	ast.Walk(&lowest, seq)
+
+	if lowest.column > shift {
+		seq.AddColumn(-shift)
+	}
+}
+
+// lowestColumn is an [ast.Visitor] that finds the lowest column of the
+// nodes in a tree.
+type lowestColumn struct {
+	column int
+}
+
+// Visit implements [ast.Visitor].
+func (l *lowestColumn) Visit(node ast.Node) ast.Visitor {
+	if node == nil {
+		return nil
+	}
+
+	if tk := node.GetToken(); tk != nil {
+		l.column = min(l.column, tk.Position.Column)
+	}
+
+	return l
 }
 
 // holeFinder is an [ast.Visitor] that reports whether a tree holds a nil

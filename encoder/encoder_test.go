@@ -679,20 +679,123 @@ func TestPretty(t *testing.T) {
 		Items []string `yaml:"items"`
 	}
 
-	input := config{
-		Items: []string{"one", "two"},
+	type server struct {
+		Name  string `yaml:"name"`
+		Ports []int  `yaml:"ports"`
 	}
 
-	var buf bytes.Buffer
+	// Each input encodes as a document of its own. Every want is the text
+	// prettier writes for it, except where a marshaler returned YAML.
+	tcs := map[string]struct {
+		inputs []any
+		want   string
+	}{
+		"sequence under a key": {
+			inputs: []any{config{Items: []string{"one", "two"}}},
+			want:   "items:\n  - one\n  - two\n",
+		},
+		"root sequence": {
+			inputs: []any{[]string{"one", "two"}},
+			want:   "- one\n- two\n",
+		},
+		"root sequence of mappings": {
+			inputs: []any{[]server{{Name: "a", Ports: []int{1, 2}}, {Name: "b"}}},
+			want:   "- name: a\n  ports:\n    - 1\n    - 2\n- name: b\n  ports: []\n",
+		},
+		"root sequence of sequences": {
+			inputs: []any{[][]string{{"a", "b"}, {"c"}}},
+			want:   "- - a\n  - b\n- - c\n",
+		},
+		"literal block in a root sequence": {
+			inputs: []any{[]string{"one\ntwo\n"}},
+			want:   "- |\n  one\n  two\n",
+		},
+		"literal block in a mapping in a root sequence": {
+			inputs: []any{[]map[string]string{{"k": "one\ntwo\n"}}},
+			want:   "- k: |\n    one\n    two\n",
+		},
+		"root sequence in each document": {
+			inputs: []any{[]string{"a"}, config{Items: []string{"b"}}, []string{"c"}},
+			want:   "- a\n---\nitems:\n  - b\n---\n- c\n",
+		},
+		"root sequence that a marshaler returned": {
+			inputs: []any{rawYAML("- a\n- b\n")},
+			want:   "- a\n- b\n",
+		},
+		"root sequence that holds YAML a marshaler returned": {
+			inputs: []any{[]rawYAML{"- a\n- b\n"}},
+			want:   "  - - a\n    - b\n",
+		},
+	}
 
-	enc := encoder.New(&buf, encoder.Pretty()...)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	err := enc.Encode(t.Context(), input)
-	require.NoError(t, err)
+			var buf bytes.Buffer
 
-	got := buf.String()
-	want := "items:\n  - one\n  - two\n"
-	assert.Equal(t, want, got)
+			enc := encoder.New(&buf, encoder.Pretty()...)
+
+			for _, input := range tc.inputs {
+				require.NoError(t, enc.Encode(t.Context(), input))
+			}
+
+			assert.Equal(t, tc.want, buf.String())
+		})
+	}
+}
+
+func TestWithIndentSequence(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input  any
+		want   string
+		indent int
+		seq    bool
+	}{
+		"root sequence": {
+			input:  []string{"a"},
+			indent: 2,
+			want:   "- a\n",
+		},
+		"indented root sequence": {
+			input:  []string{"a"},
+			indent: 2,
+			seq:    true,
+			want:   "- a\n",
+		},
+		"sequence under a key": {
+			input:  []map[string][]string{{"k": {"a"}}},
+			indent: 2,
+			want:   "- k:\n  - a\n",
+		},
+		"indented sequence under a key": {
+			input:  []map[string][]string{{"k": {"a"}}},
+			indent: 2,
+			seq:    true,
+			want:   "- k:\n    - a\n",
+		},
+		"indented sequence under a key at indent 4": {
+			input:  []map[string][]string{{"k": {"a"}}},
+			indent: 4,
+			seq:    true,
+			want:   "- k:\n      - a\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+
+			enc := encoder.New(&buf, encoder.WithIndent(tc.indent), encoder.WithIndentSequence(tc.seq))
+
+			require.NoError(t, enc.Encode(t.Context(), tc.input))
+			assert.Equal(t, tc.want, buf.String())
+		})
+	}
 }
 
 func TestWithYAMLComments(t *testing.T) {

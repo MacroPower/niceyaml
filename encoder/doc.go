@@ -9,8 +9,10 @@
 //		return err
 //	}
 //
-// [Pretty] returns the options for two-space indentation with indented
-// sequences, which is the layout prettier produces. [WithYAMLOptions]
-// passes go-yaml options through for settings that have no option of their
-// own. [WithYAMLComments] adds comments to each document by YAML path.
+// [Pretty] returns the options for the layout prettier writes, with
+// two-space indentation and each sequence indented below its parent key,
+// and a sequence at the root of a document in the first column.
+// [WithYAMLOptions] passes go-yaml options through for settings that have
+// no option of their own. [WithYAMLComments] adds comments to each
+// document by YAML path.
 package encoder
