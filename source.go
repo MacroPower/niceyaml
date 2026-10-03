@@ -869,8 +869,8 @@ func isDocumentGroup(group token.Tokens) bool {
 	return preamble.Len(group) < len(group)
 }
 
-// syntaxError is an error of the parse, which matches [ErrSyntax]. It
-// reads as the error it holds and unwraps to it.
+// syntaxError is an error of the parse, which matches [ErrSyntax] and
+// [ErrInvalid]. It reads as the error it holds and unwraps to it.
 type syntaxError struct {
 	err error
 }
@@ -883,9 +883,9 @@ func (e syntaxError) Unwrap() error {
 	return e.err
 }
 
-// Is reports whether target is [ErrSyntax].
+// Is reports whether target is [ErrSyntax] or [ErrInvalid].
 func (e syntaxError) Is(target error) bool {
-	return target == ErrSyntax
+	return target == ErrSyntax || target == ErrInvalid
 }
 
 // parseRun parses run, one run of [splitDocumentRuns]. It turns a panic

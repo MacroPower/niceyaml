@@ -27,7 +27,9 @@ var (
 	// ErrValidate indicates an unexpected, non-validation failure while
 	// validating against a schema, such as a reference resolution problem.
 	// Schema constraint violations come back as [*niceyaml.Error] values
-	// with path information instead of wrapping this sentinel.
+	// with path information instead of wrapping this sentinel. A
+	// violation matches [niceyaml.ErrInvalid], and an error that wraps
+	// ErrValidate does not, since the validation could not run.
 	ErrValidate = errors.New("validate schema")
 
 	// ErrExcessiveAliasing indicates a value that shares maps, slices, or

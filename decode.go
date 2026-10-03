@@ -126,6 +126,13 @@ import (
 // or that the value's own UnmarshalYAML already ran, runs again inside
 // the decode, so it should be idempotent.
 //
+// A Validate checks the value, so the decode marks every error it returns
+// as a finding that matches [ErrInvalid], with a location or without, and
+// [IsInvalid] counts it as the document's fault. That holds for an error
+// of I/O too, such as one from a check that a named file exists, so a
+// Validate whose I/O can fail for reasons outside the document leaves that
+// check to the caller.
+//
 // A Validate that returns the error of a context that ended, one that
 // matches [context.Canceled] or [context.DeadlineExceeded], stops the
 // walk. The decode returns that error alone, with no location, in place
@@ -211,6 +218,16 @@ type SelfValidator interface {
 // value, as Node.Bind describes. A failure that is no fault of the value,
 // such as a schema that does not load, binds through the root
 // Node.Document returns, which gives it no location.
+//
+// A validator reports a finding about the document with an [*Error] that
+// carries a location of its own, which matches [ErrInvalid]. An error
+// from [NewError] with [AtPath] is one, and AtPath of [paths.Root] names
+// the whole node the validator got. Any other error is a failure of the
+// check, such as an I/O error, and does not match ErrInvalid. That holds
+// even when a scoped Node binds it at its value, since the location comes
+// from the binding and not from the error. [IsInvalid] therefore reports
+// a validator that leaves out the location as a check that could not run
+// rather than as a fault of the document.
 //
 // A bound error keeps its text. Context that a validator adds around the
 // error of another therefore stands in front of the position, as in
@@ -2848,9 +2865,10 @@ func (n *Node) holdsToken(tk *token.Token) bool {
 // looks for no value that reported it.
 var errPlaced = errors.New("placed")
 
-// decodeError is an error of a decode, which matches [ErrDecode]. It
-// reads as the error it holds and unwraps to it. An error of the parse
-// matches [ErrSyntax] instead, as a [syntaxError] does.
+// decodeError is an error of a decode, which matches [ErrDecode] and
+// [ErrInvalid]. It reads as the error it holds and unwraps to it. An
+// error of the parse matches [ErrSyntax] instead, as a [syntaxError]
+// does.
 type decodeError struct {
 	err error
 	// Whether the error matches [errPlaced] too.
@@ -2865,10 +2883,10 @@ func (e decodeError) Unwrap() error {
 	return e.err
 }
 
-// Is reports whether target is [ErrDecode], or [errPlaced] for an error
-// the decode placed.
+// Is reports whether target is [ErrDecode] or [ErrInvalid], or
+// [errPlaced] for an error the decode placed.
 func (e decodeError) Is(target error) bool {
-	return target == ErrDecode || e.placed && target == errPlaced
+	return target == ErrDecode || target == ErrInvalid || e.placed && target == errPlaced
 }
 
 // asDecodeError returns err, an error the go-yaml decoder returned, as

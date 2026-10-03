@@ -32,19 +32,22 @@ var (
 	ErrNoLocation = errors.New("no location provided")
 
 	// ErrMultipleDocuments indicates a [Source] that holds more than one YAML
-	// document where one was expected. [Source.Document] returns it.
+	// document where one was expected. [Source.Document] returns it,
+	// located at the second document, so it matches [ErrInvalid].
 	ErrMultipleDocuments = errors.New("multiple documents in source")
 
 	// ErrDecodeTarget indicates the value given to [Node.DecodeInto] is
 	// not a non-nil pointer, so there is nothing to decode into. The
 	// error comes back bound to the source as a [SourceError] with no
-	// location.
+	// location. It is a mistake of the caller, so it does not match
+	// [ErrInvalid].
 	ErrDecodeTarget = errors.New("decode target is not a non-nil pointer")
 
 	// ErrSelfValidateTarget indicates the value given to [Node.SelfValidate]
 	// or [Decoder.SelfValidate] is nil or a nil pointer, so there is nothing
 	// to validate. The error comes back bound to the source as a
-	// [SourceError] with no location.
+	// [SourceError] with no location. It is a mistake of the caller, so it
+	// does not match [ErrInvalid].
 	ErrSelfValidateTarget = errors.New("self-validation target is nil")
 
 	// ErrDecode indicates that the go-yaml decoder did not decode a node
@@ -72,19 +75,10 @@ var (
 	// value it checks.
 	//
 	// A document that matches parsed, since text the parser rejects
-	// matches [ErrSyntax] instead. A server thus answers text that is not
-	// YAML and YAML that does not fit the target with a status for each:
-	//
-	//	config, err := source.Decode[Config](ctx)
-	//
-	//	switch {
-	//	case errors.Is(err, niceyaml.ErrSyntax):
-	//		http.Error(w, err.Error(), http.StatusBadRequest)
-	//	case errors.Is(err, niceyaml.ErrDecode):
-	//		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
-	//	}
-	//
-	// [Node.DecodeInto] describes where each error binds.
+	// matches [ErrSyntax] instead. Every error that matches ErrDecode
+	// matches [ErrInvalid] too, which shows a server that answers each
+	// case with a status of its own. [Node.DecodeInto] describes where each
+	// error binds.
 	ErrDecode = errors.New("value does not decode")
 
 	// ErrExcessiveAliasing indicates a node whose document holds so many
@@ -97,10 +91,11 @@ var (
 	// document go past the limit gopkg.in/yaml.v3 applies, unless
 	// [WithAliasLimit] turns the check off. The error comes back bound
 	// as a [SourceError] at the first token of the node that is not a
-	// comment, and it does not match [ErrDecode]. [Node.Nodes]
-	// returns it too, bound to its receiver, when aliases lead a selector
-	// of the path to far more nodes than the document holds. The paths
-	// and schema packages export the same error value.
+	// comment, and it does not match [ErrDecode]. That location makes it
+	// match [ErrInvalid]. [Node.Nodes] returns it too, bound to its
+	// receiver with no location, when aliases lead a selector of the path
+	// to far more nodes than the document holds. The paths and schema
+	// packages export the same error value.
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// ErrSyntax indicates text the go-yaml parser rejects, such as a flow
@@ -114,8 +109,81 @@ var (
 	// panic binds at the first token with a position among the ones the
 	// parser was reading. The error of a file with several such documents
 	// is a join, which matches through each of them. The go-yaml error
-	// stays in the chain, so [errors.As] still finds it.
+	// stays in the chain, so [errors.As] still finds it. Every error that
+	// matches ErrSyntax matches [ErrInvalid] too.
 	ErrSyntax = errors.New("invalid YAML syntax")
+
+	// ErrInvalid indicates a problem the document is at fault for, where
+	// any other error is a check that could not run, such as a schema
+	// that does not load or a context that ended. It covers [ErrSyntax]
+	// and [ErrDecode], which say at which stage the document failed. These
+	// errors match:
+	//
+	//   - Every error that matches ErrSyntax or ErrDecode.
+	//   - An [*Error] that carries a path, a position, or a range of its
+	//     own, as a violation of a
+	//     [go.jacobcolvin.com/niceyaml/schema.Schema] does. So do
+	//     [ErrMultipleDocuments] and the [ErrExcessiveAliasing] of a
+	//     decode, which come back located.
+	//   - Every error a [SelfValidator] returns, with a location or
+	//     without, except the error of a context that ended.
+	//   - A [go.jacobcolvin.com/niceyaml/schema.Violation], which a schema
+	//     reports with no location when the failure names none.
+	//
+	// An [*Error] with no location of its own, an Error from [Rebase], a
+	// summary from [NewSummary], and a wrapper such as one from
+	// [fmt.Errorf] match only through the errors they hold. A [Validator]
+	// therefore makes a finding by returning an Error with a location,
+	// such as one from [NewError] with [AtPath], and AtPath of
+	// [paths.Root] makes a finding about the whole node it checks. Any
+	// other error a Validator returns stays a failure, even when a scoped
+	// [Node.Bind] points it at a value, since that location belongs to the
+	// binding and not to the error. A validator that leaves out the
+	// location thus reports a failure rather than a finding.
+	//
+	// [errors.Is] matches when any error in the tree of err matches, so a
+	// tree that holds one finding beside a failure matches too, as the
+	// error of a [MultiValidator] that met a violation and an I/O error
+	// does. A caller that picks a status code, an exit code, or whether to
+	// retry asks [IsInvalid] instead, which reports whether every problem
+	// is the document's. A caller that reports problem by problem, as an
+	// editor or a CI annotation does, checks the Err of each node
+	// [ErrorTree.Problems] yields against ErrInvalid with [errors.Is]. A
+	// server answers a document that is not YAML, one that does not fit
+	// the target, and a check that could not run with a status for each:
+	//
+	//	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(v))
+	//	switch {
+	//	case err == nil:
+	//	case !niceyaml.IsInvalid(err):
+	//		status = 500 // some problem is not the document's: schema load, canceled context, I/O
+	//	case errors.Is(err, niceyaml.ErrSyntax):
+	//		status = 400
+	//	default:
+	//		status = 422 // decode rejection, violation, Validate method
+	//	}
+	//
+	// The rule reads the shape of an error rather than what went wrong,
+	// so a few failures match:
+	//
+	//   - An I/O error inside an Error with a location, as
+	//     WrapError(err, AtPath(p)) builds one.
+	//   - The error [Node.At] returns for a key the document leaves out,
+	//     which comes back located at the mapping that lacks the key.
+	//   - An error that matches ErrDecode for a cause outside the document,
+	//     such as the I/O error of an UnmarshalYAML method, a panic in
+	//     decoding, or a target type the decoder refuses.
+	//   - An Error with no location whose details carry one, since a
+	//     match among the details counts for [errors.Is] too.
+	//
+	// A caller that must tell these apart checks for their own errors
+	// before it checks for ErrInvalid.
+	//
+	// [go.jacobcolvin.com/niceyaml/schema.ErrValidate] means the opposite:
+	// a validation that could not run. [io/fs.ErrInvalid], which a schema
+	// file that does not load can wrap, is an error of the file system and
+	// not of the document.
+	ErrInvalid = errors.New("invalid document")
 
 	// ErrOutOfRange indicates the error's location lies outside the source.
 	// The location starts on a line past the last or before the first,
@@ -208,7 +276,8 @@ var (
 // [Error.Format] prints them as a tree under the %+v verb.
 //
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
-// and [errors.As] to inspect wrapped errors.
+// and [errors.As] to inspect wrapped errors. An Error that carries a
+// location of its own matches [ErrInvalid], as [Error.Is] describes.
 //
 // Create instances with [NewError], [WrapError], or [NewSummary].
 type Error struct {
@@ -232,6 +301,10 @@ type Error struct {
 	// takes the base of the problem it explains, so it points nothing at
 	// its base.
 	movesOnly bool
+	// The Error comes from the rebase of the self-validation walk, so it
+	// and every error below it that a binding or a tree rebases are
+	// findings that match ErrInvalid.
+	finding bool
 }
 
 // NewError creates a new [*Error] with the given message.
@@ -293,6 +366,48 @@ func NewSummary(msg string, errs ...error) error {
 	}
 
 	return &Error{err: errors.New(msg), errors: members}
+}
+
+// Is reports whether target is [ErrInvalid] and the [Error] is a finding
+// about the document. An Error is a finding when it carries a path, a
+// position, or a range of its own, or when a decode rebased it from what
+// a [SelfValidator] returned. A location that a binding gives the Error
+// is not its own, so an Error with no location stays a failure wherever
+// it binds. Any other target matches through the errors the Error wraps,
+// as [Error.Unwrap] returns them.
+func (e *Error) Is(target error) bool {
+	return target == ErrInvalid && e != nil && (e.finding || e.hasLocation())
+}
+
+// IsInvalid reports whether err is not nil and the document is at fault
+// for every problem of err, which holds when every node
+// [ErrorTree.Problems] yields for err matches [ErrInvalid]. An error
+// with no problem to yield, such as one with an empty message, is not
+// invalid.
+//
+// A tree that holds one finding beside a failure matches ErrInvalid for
+// [errors.Is], since one match anywhere in the tree counts for it.
+// IsInvalid answers for the whole tree instead, so it is the check for a
+// status code, an exit code, or a retry:
+//
+//	if err != nil && !niceyaml.IsInvalid(err) {
+//		return err // retry, or report that the check could not run
+//	}
+//
+// A caller that reports each problem on its own checks the Err of each
+// node against ErrInvalid with [errors.Is].
+func IsInvalid(err error) bool {
+	found := false
+
+	for problem := range NewErrorTree(err).Problems() {
+		if !errors.Is(problem.Err, ErrInvalid) {
+			return false
+		}
+
+		found = true
+	}
+
+	return found
 }
 
 // With returns a copy of the [Error] with the given options applied. The
@@ -418,13 +533,15 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // heads errors, or holds details adds paths of its own, so Rebase puts
 // the base in front of those.
 func Rebase(err error, base paths.Path) error {
-	return rebase(err, base, false)
+	return rebase(err, base, false, false)
 }
 
 // rebase is [Rebase], and with movesOnly the result moves the paths of
 // err alone and points nothing at base, as a detail takes the base of the
-// problem it explains.
-func rebase(err error, base paths.Path, movesOnly bool) error {
+// problem it explains. With finding, each Error the rebase builds is a
+// finding that matches [ErrInvalid], as the self-validation walk marks
+// what a [SelfValidator] returns.
+func rebase(err error, base paths.Path, movesOnly, finding bool) error {
 	if isNothing(err) {
 		return nil
 	}
@@ -437,14 +554,14 @@ func rebase(err error, base paths.Path, movesOnly bool) error {
 	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
 	if ok && x.addsNothing() {
 		if _, joined := joinBranches(x.err); joined {
-			return WrapError(rebase(x.err, base, movesOnly))
+			return WrapError(rebase(x.err, base, movesOnly, finding))
 		}
 	}
 
 	if branches, ok := joinBranches(err); ok {
 		rebased := make([]error, 0, len(branches))
 		for _, branch := range branches {
-			r := rebase(branch, base, movesOnly)
+			r := rebase(branch, base, movesOnly, finding)
 			if r != nil {
 				rebased = append(rebased, r)
 			}
@@ -459,7 +576,7 @@ func rebase(err error, base paths.Path, movesOnly bool) error {
 		}
 	}
 
-	return &Error{err: err, base: base, rebased: true, movesOnly: movesOnly}
+	return &Error{err: err, base: base, rebased: true, movesOnly: movesOnly, finding: finding}
 }
 
 // rebasedJoinError is a join of a type other than the one [errors.Join]

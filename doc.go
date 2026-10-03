@@ -394,6 +394,14 @@
 // nothing, a decoding failure, or a validator's [Error] renders its
 // location through [FormatError] as it is.
 //
+// [ErrInvalid] tells a document at fault apart from a check that could
+// not run. A syntax error, a decode rejection, a schema violation, and an
+// error a [SelfValidator] returns match it, and a schema that does not
+// load or a context that ended does not. A [Validator] reports a finding
+// with an [Error] that carries a location. [IsInvalid] reports whether
+// the document is at fault for every problem of an error, which is the
+// check that picks a status code or an exit code.
+//
 // # Diffs
 //
 // [go.jacobcolvin.com/niceyaml/diff.Differ] computes line differences using an

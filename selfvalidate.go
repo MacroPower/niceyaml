@@ -1309,9 +1309,12 @@ func hasEmbedded(t reflect.Type) bool {
 
 // validate runs Validate on v when v implements [SelfValidator] through
 // a method of its own, on its value or its pointer, with the result
-// rebased under the path of at, and reports whether v passed. A value the
-// walk cannot take the address of, such as one held by a map, validates
-// through a copy, so a Validate with a pointer receiver runs on it too.
+// rebased under the path of at, and reports whether v passed. The rebase
+// marks each Error it builds as a finding, so every problem the result
+// holds matches [ErrInvalid] whether it carries a location or not. A
+// value the walk cannot take the address of, such as one held by a map,
+// validates through a copy, so a Validate with a pointer receiver runs on
+// it too.
 // The error of a context that ended stops the walk as it is, with no
 // path, as [selfWalker.stopped] describes.
 func (w *selfWalker) validate(v reflect.Value, at place) bool {
@@ -1341,7 +1344,7 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 		return false
 	}
 
-	w.errs = append(w.errs, Rebase(err, at.path()))
+	w.errs = append(w.errs, rebase(err, at.path(), false, true))
 
 	return false
 }

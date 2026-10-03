@@ -220,6 +220,10 @@ func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
 //
 //		report(row)
 //	}
+//
+// A row tells a fault of the document from a check that could not run by
+// checking its Err against [ErrInvalid] with [errors.Is], and [IsInvalid]
+// asks the same of every row.
 func (t ErrorTree) Problems() iter.Seq[ErrorTree] {
 	return func(yield func(ErrorTree) bool) {
 		t.problems(yield)
@@ -819,14 +823,16 @@ func isLeaf(err error) bool {
 
 // childBase is the base the children along a cause chain rebase under:
 // the base of every Error from [Rebase] above them, joined, whether the
-// walk met such an Error, and whether one of them moves paths alone. A
-// Rebase at the root still locates a problem with no location at the
-// root, so the children rebase whenever the walk met one, and only a
-// chain that holds none leaves them as they are.
+// walk met such an Error, and whether one of them moves paths alone. It
+// also records whether one of them marks a finding. A Rebase at the root
+// still locates a problem with no location at the root, so the children
+// rebase whenever the walk met one, and only a chain that holds none
+// leaves them as they are.
 type childBase struct {
 	path      paths.Path
 	rebased   bool
 	movesOnly bool
+	finding   bool
 }
 
 // cross returns the base below x: c joined with the base of x when x is
@@ -836,6 +842,7 @@ func (c childBase) cross(x *Error) childBase {
 		c.path = c.path.Join(x.base)
 		c.rebased = true
 		c.movesOnly = c.movesOnly || x.movesOnly
+		c.finding = c.finding || x.finding
 	}
 
 	return c
@@ -845,13 +852,15 @@ func (c childBase) cross(x *Error) childBase {
 // no Error from [Rebase]. A detail explains the error above it, so it
 // takes no location from the base, and the base moves its paths alone. So
 // does every child below a detail, or below any other Rebase that moves
-// paths alone.
+// paths alone. A child below an Error that marks a finding is a finding
+// too, so each error a summary of a [SelfValidator] heads matches
+// [ErrInvalid].
 func (c childBase) rebase(n error, detail bool) error {
 	if !c.rebased {
 		return n
 	}
 
-	return rebase(n, c.path, detail || c.movesOnly)
+	return rebase(n, c.path, detail || c.movesOnly, c.finding)
 }
 
 // trees returns the nodes of kids in position order within the source

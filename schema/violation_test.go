@@ -937,3 +937,69 @@ func TestViolation_Error(t *testing.T) {
 
 	assert.Empty(t, nilViolation.Error())
 }
+
+func TestViolation_Is(t *testing.T) {
+	t.Parallel()
+
+	var nilViolation *schema.Violation
+
+	violation := &schema.Violation{Keyword: "type", SchemaPath: "/type", Message: "bad type"}
+
+	tcs := map[string]struct {
+		input  error
+		target error
+		want   bool
+	}{
+		"invalid": {
+			input:  violation,
+			target: niceyaml.ErrInvalid,
+			want:   true,
+		},
+		"inside an error with no location": {
+			input:  niceyaml.WrapError(violation),
+			target: niceyaml.ErrInvalid,
+			want:   true,
+		},
+		"other target": {
+			input:  violation,
+			target: schema.ErrValidate,
+		},
+		"nil violation": {
+			input:  nilViolation,
+			target: niceyaml.ErrInvalid,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, errors.Is(tc.input, tc.target))
+		})
+	}
+
+	t.Run("every violation of a validation is invalid", func(t *testing.T) {
+		t.Parallel()
+
+		s := schema.MustCompile([]byte(`{"properties": {"a": {"type": "string"}, "b": {"maximum": 1}}}`))
+
+		err := s.Validate(t.Context(), yamltest.FirstDocument(t, "a: 1\nb: 2\n"))
+		require.Error(t, err)
+		assert.True(t, niceyaml.IsInvalid(err))
+
+		unbound := s.ValidateValue(t.Context(), map[string]any{"a": 1, "b": 2})
+		require.Error(t, unbound)
+		assert.True(t, niceyaml.IsInvalid(unbound))
+	})
+
+	t.Run("a validation that could not run is not invalid", func(t *testing.T) {
+		t.Parallel()
+
+		s := schema.MustCompile([]byte(`{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`))
+
+		err := s.ValidateValue(t.Context(), map[string]any{"a": 1})
+		require.ErrorIs(t, err, schema.ErrValidate)
+		require.NotErrorIs(t, err, niceyaml.ErrInvalid)
+		assert.False(t, niceyaml.IsInvalid(err))
+	})
+}

@@ -119,6 +119,15 @@ func (v *Violation) Error() string {
 	return v.Message
 }
 
+// Is reports whether target is [niceyaml.ErrInvalid], since a value that
+// breaks a constraint is the fault of the document. The [*niceyaml.Error]
+// that wraps a Violation matches by its path already, so this answers for
+// the violation a schema reports with no location, when the failure names
+// none. A nil Violation matches nothing.
+func (v *Violation) Is(target error) bool {
+	return v != nil && target == niceyaml.ErrInvalid
+}
+
 // newViolation returns the [*Violation] that the failure e reports.
 func newViolation(e *jsonschema.ValidationError) *Violation {
 	return &Violation{
