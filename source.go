@@ -263,7 +263,15 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 
 // Name returns the name of the [Source]: the one [WithName] set, or else
 // the file path. Returns an empty string when the Source has neither.
+//
+// A nil Source has no name and no file path. [SourceError.Source] returns
+// nil for an error bound to no Source, so a report can print the name of
+// the Source of any bound error without a nil check.
 func (s *Source) Name() string {
+	if s == nil {
+		return ""
+	}
+
 	if s.name == "" {
 		return s.filePath
 	}
@@ -274,8 +282,13 @@ func (s *Source) Name() string {
 // FilePath returns the file path of the [Source].
 //
 // Returns an empty string unless [WithFilePath], [NewSourceFromFile], or
-// [NewSourceFromFS] sets it.
+// [NewSourceFromFS] sets it. A nil Source has no file path, as
+// [Source.Name] describes.
 func (s *Source) FilePath() string {
+	if s == nil {
+		return ""
+	}
+
 	return s.filePath
 }
 
@@ -289,7 +302,13 @@ func (s *Source) FilePath() string {
 // using them, so treat them as read-only. When the input came from
 // [tokens.Tokenize], as it does for every constructor that reads text, the
 // Line and Column of each token name the rune where its text starts.
+//
+// A nil Source holds no tokens, so Tokens returns nil for it.
 func (s *Source) Tokens() token.Tokens {
+	if s == nil {
+		return nil
+	}
+
 	s.streamOnce.Do(func() {
 		s.stream = s.lines.Tokens()
 	})
@@ -1479,13 +1498,21 @@ func (s *Source) Bind(err error) error {
 // [go.jacobcolvin.com/niceyaml/finder.Finder] and
 // [go.jacobcolvin.com/niceyaml/diff.Differ] read it as it is. To render the Source,
 // take a [line.View] from [Source.View].
+//
+// A nil Source holds no lines, so Lines returns the zero [line.Lines] for
+// it, as it does for a Source of empty text.
 func (s *Source) Lines() line.Lines {
+	if s == nil {
+		return line.Lines{}
+	}
+
 	return s.lines
 }
 
 // View returns a new [*line.View] over [Source.Lines] with no decoration.
 // Each call returns a view of its own, so overlays and annotations added to
 // one never reach the Source or another view. Render the view to see them.
+// The view of a nil Source holds no lines.
 func (s *Source) View() *line.View {
-	return line.NewView(s.lines)
+	return line.NewView(s.Lines())
 }

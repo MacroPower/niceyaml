@@ -2345,6 +2345,51 @@ func TestSource_Name(t *testing.T) {
 	}
 }
 
+func TestSource_NilReceiver(t *testing.T) {
+	t.Parallel()
+
+	// A report reads the Source of each bound error, and a nil SourceError
+	// returns a nil Source. Each read answers as an empty Source does.
+	tcs := map[string]struct {
+		read func(s *niceyaml.Source) any
+		want any
+	}{
+		"name": {
+			read: func(s *niceyaml.Source) any { return s.Name() },
+			want: "",
+		},
+		"file path": {
+			read: func(s *niceyaml.Source) any { return s.FilePath() },
+			want: "",
+		},
+		"tokens": {
+			read: func(s *niceyaml.Source) any { return s.Tokens() },
+			want: token.Tokens(nil),
+		},
+		"lines": {
+			read: func(s *niceyaml.Source) any { return s.Lines().Len() },
+			want: 0,
+		},
+		"view": {
+			read: func(s *niceyaml.Source) any { return s.View().Count() },
+			want: 0,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var bound *niceyaml.SourceError
+
+			source := bound.Source()
+			require.Nil(t, source)
+
+			assert.Equal(t, tc.want, tc.read(source))
+		})
+	}
+}
+
 func TestSource_Len(t *testing.T) {
 	t.Parallel()
 
