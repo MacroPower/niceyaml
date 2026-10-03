@@ -69,9 +69,9 @@ func validateCmd() *cobra.Command {
 				err := validateFile(cmd.Context(), yamlPath, reg)
 
 				// A run canceled during the file stops there. The error of
-				// the document the cancellation hit already reports it, with
-				// an excerpt, so the bare cancellation joins only when no
-				// error of the file wraps it.
+				// the file reports the cancellation once it has read the
+				// file, so the bare cancellation joins only when no error of
+				// the file wraps it.
 				ctxErr = cmd.Context().Err()
 				if ctxErr != nil {
 					if err != nil {
@@ -111,11 +111,12 @@ func validateCmd() *cobra.Command {
 }
 
 // validateFile validates every document of the file at yamlPath against the
-// registry and joins what every document reports, so one run names each
-// invalid document. A document that does not parse reports its syntax
-// error, and the documents around it validate as they do in a file that
-// parses. Once ctx is canceled, validateFile validates no further
-// document, since each would report the cancellation again.
+// registry with [niceyaml.Source.ValidateDocuments], which joins what every
+// document reports, so one run names each invalid document. A document
+// that does not parse reports its syntax error, and the documents around
+// it validate as they do in a file that parses. Once ctx is canceled, no
+// further document validates, and the error reports the cancellation
+// once.
 //
 // Each error it returns is bound to the source, and the source takes
 // yamlPath as the user typed it for its name, with its control characters
@@ -149,40 +150,7 @@ func validateFile(ctx context.Context, yamlPath string, reg *schema.Registry) er
 		return err
 	}
 
-	// Documents returns every document beside the syntax errors of the
-	// file. Each document that did not parse reports its own error in the
-	// loop below, so the errors of a file come out in document order.
-	docs, _ := source.Documents() //nolint:errcheck // The documents come back with the error.
-
-	var (
-		errs []error
-		// The syntax errors reported so far. Two documents that parse
-		// together share one error, which the file reports once.
-		reported = map[error]bool{}
-	)
-
-	for _, doc := range docs {
-		if ctx.Err() != nil {
-			break
-		}
-
-		err := doc.Validate(ctx, reg)
-		if err == nil {
-			continue
-		}
-
-		if doc.Err() != nil {
-			if reported[doc.Err()] {
-				continue
-			}
-
-			reported[doc.Err()] = true
-		}
-
-		errs = append(errs, err)
-	}
-
-	return errors.Join(errs...)
+	return source.ValidateDocuments(ctx, reg)
 }
 
 // readSource reads the file at path into a [*niceyaml.Source] with opts, as

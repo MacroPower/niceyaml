@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"testing/iotest"
@@ -2230,6 +2231,268 @@ func TestSource_Documents_SyntaxErrorTokens(t *testing.T) {
 			yamltest.RequireTokensEqual(t, source.Tokens(), all)
 		})
 	}
+}
+
+// requireName is a [niceyaml.Validator] that rejects a document without a
+// name key at the root of the document, and counts its calls in calls when
+// calls is not nil.
+func requireName(calls *atomic.Int32) niceyaml.Validator {
+	return niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+		if calls != nil {
+			calls.Add(1)
+		}
+
+		_, err := n.At(paths.Root().Child("name"))
+		if err != nil {
+			return niceyaml.NewError("name is required", niceyaml.AtPath(paths.Root()))
+		}
+
+		return nil
+	})
+}
+
+// bindingMessages returns the message of each binding in the tree of err,
+// in order.
+func bindingMessages(err error) []string {
+	var msgs []string
+
+	for b := range niceyaml.Bindings(err) {
+		msgs = append(msgs, b.Error())
+	}
+
+	return msgs
+}
+
+func TestSource_ValidateDocuments(t *testing.T) {
+	t.Parallel()
+
+	const unclosed = "sequence end token ']' not found"
+
+	tcs := map[string]struct {
+		input string
+		// The message of each binding the result holds, in file order.
+		want []string
+	}{
+		"every document valid": {
+			input: "name: a\n---\nname: b\n",
+		},
+		"one document": {
+			input: "value: 1\n",
+			want:  []string{"f.yaml:1:1: $: name is required"},
+		},
+		"first and last document invalid": {
+			input: "value: 1\n---\nname: b\n---\nvalue: 3\n",
+			want:  []string{"f.yaml:1:1: $: name is required", "f.yaml:5:1: $: name is required"},
+		},
+		"syntax error beside violations": {
+			input: "value: 1\n---\nname: [\n---\nvalue: 3\n",
+			want: []string{
+				"f.yaml:1:1: $: name is required",
+				"f.yaml:3:7: " + unclosed,
+				"f.yaml:5:1: $: name is required",
+			},
+		},
+		"two syntax errors": {
+			input: "a: [\n---\nname: b\n---\nc: [\n",
+			want:  []string{"f.yaml:1:4: " + unclosed, "f.yaml:5:4: " + unclosed},
+		},
+		"syntax errors of adjacent documents": {
+			input: "a: [\n---\nb: [\n",
+			want:  []string{"f.yaml:1:4: " + unclosed, "f.yaml:3:4: " + unclosed},
+		},
+		// The header parses together with the document above it, so both
+		// documents carry the one error.
+		"syntax error two documents share": {
+			input: "name: &x\n---\nname: [\n---\nvalue: 5\n",
+			want:  []string{"f.yaml:3:7: " + unclosed, "f.yaml:5:1: $: name is required"},
+		},
+		"explicit empty document": {
+			input: "name: x\n---\n",
+			want:  []string{"f.yaml:2:1: $: name is required"},
+		},
+		"empty file": {
+			input: "",
+			want:  []string{"f.yaml: $: name is required"},
+		},
+		"stream of markers alone": {
+			input: "...\n",
+			want:  []string{"f.yaml: $: name is required"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("f.yaml"))
+
+			var calls atomic.Int32
+
+			err := source.ValidateDocuments(t.Context(), requireName(&calls))
+			if len(tc.want) == 0 {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+
+			assert.Equal(t, tc.want, bindingMessages(err))
+
+			for b := range niceyaml.Bindings(err) {
+				assert.Same(t, source, b.Source())
+			}
+
+			// Every document that parsed runs the validator.
+			docs, _ := source.Documents() //nolint:errcheck // The documents come back with the error.
+
+			var parsed int32
+
+			for _, doc := range docs {
+				if doc.Err() == nil {
+					parsed++
+				}
+			}
+
+			assert.Equal(t, parsed, calls.Load())
+		})
+	}
+
+	t.Run("no validators returns the error File returns", func(t *testing.T) {
+		t.Parallel()
+
+		for _, input := range []string{
+			"name: a\n---\nname: b\n",
+			"a: [\n",
+			"a: [\n---\nb: 1\n---\nc: [\n",
+			"a: &x\n---\nb: [\n",
+			"a: &x\n---\nb: [\n---\nc: 1\n---\nd: @x\n",
+			"...\n",
+		} {
+			source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
+
+			_, fileErr := source.File()
+
+			err := source.ValidateDocuments(t.Context())
+			assert.Equal(t, fileErr, err, input)
+		}
+	})
+
+	t.Run("syntax errors match ErrSyntax", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("value: 1\n---\nname: [\n", niceyaml.WithName("f.yaml"))
+
+		err := source.ValidateDocuments(t.Context(), requireName(nil))
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+	})
+}
+
+func TestSource_ValidateDocuments_Context(t *testing.T) {
+	t.Parallel()
+
+	const input = "value: 1\n---\nvalue: 2\n---\nvalue: 3\n---\nvalue: 4\n"
+
+	t.Run("ended before the call", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
+
+		var calls atomic.Int32
+
+		err := source.ValidateDocuments(ctx, requireName(&calls))
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Equal(t, int32(0), calls.Load())
+		assert.Equal(t, []string{"f.yaml: context canceled"}, bindingMessages(err))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, source, bound.Source())
+
+		// With no validators, the ended ctx still fails the call.
+		err = source.ValidateDocuments(ctx)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("ended by a validator that reports it", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+
+		var calls atomic.Int32
+
+		v := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+			if calls.Add(1) == 2 {
+				cancel()
+
+				return ctx.Err()
+			}
+
+			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Root()))
+		})
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
+
+		err := source.ValidateDocuments(ctx, v)
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Equal(t, int32(2), calls.Load())
+		assert.Equal(t, []string{"f.yaml:1:1: $: bad", "f.yaml: document 2: context canceled"}, bindingMessages(err))
+		assert.Equal(t, 1, strings.Count(err.Error(), context.Canceled.Error()), err.Error())
+	})
+
+	t.Run("ended by a validator that passes", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		t.Cleanup(cancel)
+
+		var calls atomic.Int32
+
+		v := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+			if calls.Add(1) == 2 {
+				cancel()
+
+				return nil
+			}
+
+			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Root()))
+		})
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
+
+		err := source.ValidateDocuments(ctx, v)
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Equal(t, int32(2), calls.Load())
+		assert.Equal(t, []string{"f.yaml:1:1: $: bad", "f.yaml: context canceled"}, bindingMessages(err))
+	})
+
+	t.Run("a deadline of a validator's own fails its document alone", func(t *testing.T) {
+		t.Parallel()
+
+		var calls atomic.Int32
+
+		v := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+			calls.Add(1)
+
+			short, cancel := context.WithTimeout(ctx, 0)
+			defer cancel()
+
+			<-short.Done()
+
+			return short.Err()
+		})
+
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
+
+		err := source.ValidateDocuments(t.Context(), v)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.NotErrorIs(t, err, context.Canceled)
+		assert.Equal(t, int32(4), calls.Load())
+		assert.Len(t, bindingMessages(err), 4)
+	})
 }
 
 func TestSource_WithYAMLParserOptions(t *testing.T) {

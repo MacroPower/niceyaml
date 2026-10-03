@@ -265,9 +265,9 @@
 // document beside the error, and the [Node] of a document that did not
 // parse returns its syntax error from [Node.Err], [Node.Decode], and
 // [Node.Validate]. A caller that reports on a whole file, as a linter
-// does, drops the error of Source.Documents and collects what each
-// document returns, so one pass names every syntax error and every
-// violation of the documents that parsed. [Source.File],
+// does, calls [Source.ValidateDocuments], which validates each document
+// and joins what they return, so one pass names every syntax error and
+// every violation of the documents that parsed. [Source.File],
 // [Source.Document], and [Source.Decode] need the whole file to parse.
 // Every error of the parse matches [ErrSyntax], whichever of these
 // returns it.

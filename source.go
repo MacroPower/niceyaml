@@ -353,15 +353,12 @@ func (s *Source) Tokens() token.Tokens {
 // A caller that reports on each document drops the error and reads the
 // documents one by one. The [Node] methods that read the tree, such as
 // [Node.Validate] and [Node.Decode], return the syntax error of a document
-// that did not parse, so one loop collects the syntax errors beside the
-// findings of the documents that parsed:
+// that did not parse, so a loop over the documents meets each syntax
+// error beside the findings of the documents that parsed. A caller that
+// validates a whole file, as a linter does, calls
+// [Source.ValidateDocuments], which runs that loop:
 //
-//	docs, _ := source.Documents()
-//	for _, doc := range docs {
-//		if err := doc.Validate(ctx, reg); err != nil {
-//			errs = append(errs, err)
-//		}
-//	}
+//	err := source.ValidateDocuments(ctx, reg)
 //
 // A "---" header that directly follows an anchor with no value parses
 // together with the document above it. A syntax error in either of those
@@ -370,6 +367,75 @@ func (s *Source) Documents() ([]*Node, error) {
 	docs, err := s.documents()
 
 	return slices.Clone(docs), err
+}
+
+// ValidateDocuments validates every document of the Source in file order
+// and joins what they return, so one call reports each syntax error and
+// each violation of a file that holds several documents:
+//
+//	err := source.ValidateDocuments(ctx, reg)
+//	if err != nil {
+//		log.Print(niceyaml.FormatError(err, 2))
+//	}
+//
+// Each document runs the validators as [Node.Validate] runs them. Every
+// document validates, an explicit empty one included, such as the one
+// below the header of `name: x\n---\n`. A document that did not parse
+// reports its syntax error, as Node.Validate returns it. Two documents
+// that parse together share one syntax error, as [Source.Documents]
+// describes, and ValidateDocuments reports it once. Given no validators
+// and a ctx that has not ended, it thus returns the error [Source.File]
+// returns.
+//
+// ValidateDocuments checks ctx before each document and once every
+// document has run. Once ctx has ended, no further document validates,
+// and the result includes the error of ctx bound to the Source, unless an
+// error in the result already wraps it. A ctx that ended before the call
+// thus returns its error. Only the ctx passed in stops the walk, so a
+// validator that reports a deadline of its own fails its document alone.
+//
+// [Source.Document] and [Source.Decode] need a Source of one document,
+// where ValidateDocuments takes any number, so a file it passes can still
+// fail Source.Decode.
+func (s *Source) ValidateDocuments(ctx context.Context, validators ...Validator) error {
+	// Each document that did not parse reports its own syntax error.
+	docs, _ := s.documents() //nolint:errcheck // The documents come back with the error.
+
+	var (
+		errs []error
+		// The syntax error of the document before, which the next document
+		// shares when the two parsed together.
+		prev error
+	)
+
+	for _, doc := range docs {
+		if ctx.Err() != nil {
+			break
+		}
+
+		err := doc.Validate(ctx, validators...)
+
+		shared := doc.doc.err != nil && errors.Is(doc.doc.err, prev)
+		prev = doc.doc.err
+
+		if err != nil && !shared {
+			errs = append(errs, err)
+		}
+	}
+
+	err := ctx.Err()
+	if err != nil && !slices.ContainsFunc(errs, func(e error) bool { return errors.Is(e, err) }) {
+		errs = append(errs, s.Bind(err))
+	}
+
+	switch len(errs) {
+	case 0:
+		return nil
+	case 1:
+		return errs[0]
+	default:
+		return errors.Join(errs...)
+	}
 }
 
 // documents returns the root [*Node] of each YAML document, as

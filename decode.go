@@ -1666,7 +1666,7 @@ func (e notFoundError) Unwrap() error {
 // A document that did not parse fails before any validator runs, with the
 // syntax error [Node.Err] returns, even when Validate gets no validators.
 // A caller that validates each document of a file thus collects the syntax
-// errors of the file in the same loop.
+// errors of the file in the same loop, as [Source.ValidateDocuments] does.
 func (n *Node) Validate(ctx context.Context, validators ...Validator) error {
 	return n.validate(ctx, validators, nil)
 }

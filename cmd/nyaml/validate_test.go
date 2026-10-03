@@ -102,15 +102,11 @@ func TestValidateFile(t *testing.T) {
 				return
 			}
 
-			var joined interface{ Unwrap() []error }
-
-			require.ErrorAs(t, err, &joined)
-
 			var got []string
 
-			for _, e := range joined.Unwrap() {
-				msg, ok := strings.CutPrefix(e.Error(), path+":")
-				require.True(t, ok, e.Error())
+			for b := range niceyaml.Bindings(err) {
+				msg, ok := strings.CutPrefix(b.Error(), path+":")
+				require.True(t, ok, b.Error())
 
 				pos, _, _ := strings.Cut(msg, " ")
 				got = append(got, pos)
