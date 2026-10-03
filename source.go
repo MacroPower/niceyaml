@@ -327,6 +327,12 @@ func (s *Source) Tokens() token.Tokens {
 // document that opens with a "---" header and holds only comments is an
 // explicit empty document and stays one.
 //
+// Every Source holds at least one document. An empty file, a file of
+// whitespace or comments alone, and a stream of "..." markers alone each
+// hold one empty document, which decodes to the zero value. The YAML spec
+// finds no document in a stream of markers alone. Documents departs from
+// it on purpose, so such a file reads as an empty file does.
+//
 // It parses the source and builds each Node once, so every call returns
 // the same pointers. The slice itself is a copy, so reordering it reaches
 // nothing.
@@ -395,18 +401,17 @@ func (s *Source) documents() ([]*Node, error) {
 // The comments above the first "---" are the preamble of the document
 // below them rather than a document of their own. A file that opens with
 // a license header therefore holds a single document. A file of comments
-// alone holds one that decodes to the zero value as an empty file does.
+// alone holds one that decodes to the zero value as an empty file does,
+// and so does a file of "..." markers alone, as [Source.Documents]
+// describes.
 //
 // When the file holds more than one document, it returns an error wrapping
 // [ErrMultipleDocuments], bound to the Source. The error points at the
 // header of the second document, or at the first token of its content
-// when a "..." marker rather than a header opens it. When the file holds
-// no document at all, which happens for text that is only a "..." marker
-// with or without a comment on its line, it returns an error wrapping
-// [ErrNoDocuments], bound to the Source. A file with a document that does
-// not parse returns the error [Source.File] returns, however many of its
-// other documents parse. Use [Source.Documents] for a file that may hold
-// several.
+// when a "..." marker rather than a header opens it. A file with a
+// document that does not parse returns the error [Source.File] returns,
+// however many of its other documents parse. Use [Source.Documents] for a
+// file that may hold several.
 func (s *Source) Document() (*Node, error) {
 	// The parse bound each syntax error already, and binding the join of
 	// several anew would return another error than File does.
@@ -425,10 +430,10 @@ func (s *Source) Document() (*Node, error) {
 
 // DecodeInto validates and decodes the one document of the [Source] into
 // v, as [Node.DecodeInto] decodes the root Node [Source.Document]
-// returns. A Source that holds more than one document, or none, returns
-// the error Source.Document returns, so a configuration file that must
-// hold one document decodes in one step and reports a second document
-// as the error it is.
+// returns. A Source that holds more than one document returns the error
+// Source.Document returns, so a configuration file that must hold one
+// document decodes in one step and reports a second document as the
+// error it is.
 func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
 	doc, err := s.Document()
 	if err != nil {
@@ -449,7 +454,7 @@ func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) er
 //
 //	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(schema))
 //
-// A Source that holds more than one document, or none, returns the error
+// A Source that holds more than one document returns the error
 // Source.Document returns. On error, the returned T is the zero value.
 func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
 	var v T
@@ -465,27 +470,23 @@ func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, er
 }
 
 // single returns the one document of the Source, or the reason it has
-// none, unbound: the error [Source.File] returns, [ErrNoDocuments], or
-// [ErrMultipleDocuments] at the anchor of the second document.
+// no single one, unbound: the error [Source.File] returns, or
+// [ErrMultipleDocuments] at the anchor of the second document. Every
+// Source holds at least one document, as [Source.Documents] describes.
 func (s *Source) single() (*Node, error) {
 	docs, err := s.documents()
 	if err != nil {
 		return nil, err
 	}
 
-	switch len(docs) {
-	case 0:
-		return nil, WrapError(ErrNoDocuments)
-
-	case 1:
-		return docs[0], nil
-
-	default:
+	if len(docs) > 1 {
 		return nil, WrapError(
 			fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(docs)),
 			atToken(docs[1].doc.anchorToken()),
 		)
 	}
+
+	return docs[0], nil
 }
 
 // anchorToken returns the token that locates the document: its header, or
@@ -715,6 +716,22 @@ func (s *Source) parse() parsed {
 		// The documents come from the file this parse returns, so the error
 		// binds to the source alone rather than routing to one of them.
 		p.fail(run, bindTree(err, binder{src: s}))
+	}
+
+	// The parser makes one empty document of an empty file, and none of a
+	// stream of "..." markers alone. That stream holds one empty document
+	// too, which the first marker ends, so every file holds a document and
+	// a file of markers decodes to the zero value as an empty file does.
+	// YAML holds no document there, so this departs from the spec on
+	// purpose.
+	if len(p.file.Docs) == 0 {
+		doc := ast.Document(nil, nil)
+
+		if i := slices.IndexFunc(tks, func(tk *token.Token) bool { return tk.Type == token.DocumentEndType }); i >= 0 {
+			doc.End = tks[i]
+		}
+
+		p.file.Docs = append(p.file.Docs, doc)
 	}
 
 	return p
@@ -1473,8 +1490,8 @@ func startsBelow(tk, mark *token.Token) bool {
 //
 //	return source.Bind(check(cfg))
 //
-// A path in a source that holds several documents, or none, resolves
-// nowhere. The bound error keeps its message and the name of the source,
+// A path in a source that holds several documents resolves nowhere. The
+// bound error keeps its message and the name of the source,
 // [SourceError.Unresolved] returns [ErrPathNeedsDocument] wrapping the
 // reason [Source.Document] gives, and [FormatError] names it in place of
 // the excerpt. Bind such an error through [Node.Bind] with the document

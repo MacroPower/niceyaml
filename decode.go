@@ -672,8 +672,9 @@ func alignDocumentTokens(file *ast.File, tks token.Tokens, standIns map[*ast.Doc
 }
 
 // documentOffset returns the offset of the token that anchors doc: its header
-// token, or its body's first token when it has no header. The boolean is
-// false when doc has neither.
+// token, its body's first token when it has no header, or the "..." marker
+// that ends it when it has neither, as the empty document of a stream of
+// markers alone does. The boolean is false when doc has none of them.
 func documentOffset(doc *ast.DocumentNode) (int, bool) {
 	if doc.Start != nil && doc.Start.Position != nil {
 		return doc.Start.Position.Offset, true
@@ -683,6 +684,10 @@ func documentOffset(doc *ast.DocumentNode) (int, bool) {
 		if tk := doc.Body.GetToken(); tk != nil && tk.Position != nil {
 			return tk.Position.Offset, true
 		}
+	}
+
+	if doc.End != nil && doc.End.Position != nil {
+		return doc.End.Position.Offset, true
 	}
 
 	return 0, false

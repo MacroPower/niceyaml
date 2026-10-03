@@ -2965,20 +2965,28 @@ func TestSource_Bind(t *testing.T) {
 		), fmt.Sprintf("%+v", err))
 	})
 
-	t.Run("path error resolves nowhere in no documents", func(t *testing.T) {
+	t.Run("path error in a stream of markers alone binds as in an empty file", func(t *testing.T) {
 		t.Parallel()
 
-		none := niceyaml.NewSourceFromString("...\n", niceyaml.WithName("none.yaml"))
-		err := none.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
+		// A stream of "..." markers alone holds one empty document, as an
+		// empty file does, so a path resolves in that document and finds
+		// nothing there.
+		for _, input := range []string{"...\n", ""} {
+			src := niceyaml.NewSourceFromString(input, niceyaml.WithName("none.yaml"))
+			err := src.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
 
-		var bound *niceyaml.SourceError
+			doc, docErr := src.Document()
+			require.NoError(t, docErr)
 
-		require.ErrorAs(t, err, &bound)
-		assert.Nil(t, bound.Document())
+			var bound *niceyaml.SourceError
 
-		rangeErr := bound.Unresolved()
-		require.ErrorIs(t, rangeErr, niceyaml.ErrPathNeedsDocument)
-		require.ErrorIs(t, rangeErr, niceyaml.ErrNoDocuments)
+			require.ErrorAs(t, err, &bound)
+			assert.Same(t, doc, bound.Document(), input)
+
+			rangeErr := bound.Unresolved()
+			require.ErrorIs(t, rangeErr, paths.ErrNoDocument, input)
+			require.NotErrorIs(t, rangeErr, niceyaml.ErrPathNeedsDocument, input)
+		}
 	})
 
 	t.Run("path error in a source that does not parse names the parse error", func(t *testing.T) {

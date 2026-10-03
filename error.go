@@ -31,11 +31,6 @@ var (
 	// reports it for an error bound at such a path.
 	ErrNoLocation = errors.New("no location provided")
 
-	// ErrNoDocuments indicates a [Source] that holds no YAML document where
-	// one was expected, such as a file holding only a "..." marker and any
-	// comment on its line. [Source.Document] returns it.
-	ErrNoDocuments = errors.New("no documents in source")
-
 	// ErrMultipleDocuments indicates a [Source] that holds more than one YAML
 	// document where one was expected. [Source.Document] returns it.
 	ErrMultipleDocuments = errors.New("multiple documents in source")
@@ -131,12 +126,11 @@ var (
 	// ErrPathNeedsDocument indicates that [Source.Bind] bound an error that
 	// carries a path in a source that holds no single document to resolve
 	// the path in. It wraps the reason [Source.Document] gives:
-	// [ErrMultipleDocuments], [ErrNoDocuments], or the error the file
-	// fails to parse with. [SourceError.Unresolved] reports it. Bind such
-	// an error through [Node.Bind] with the document the check ran
-	// against. Node.Bind reports it too for a path bound through a
-	// document that did not parse, where it wraps the syntax error
-	// [Node.Err] returns.
+	// [ErrMultipleDocuments], or the error the file fails to parse with.
+	// [SourceError.Unresolved] reports it. Bind such an error through
+	// [Node.Bind] with the document the check ran against. Node.Bind
+	// reports it too for a path bound through a document that did not
+	// parse, where it wraps the syntax error [Node.Err] returns.
 	ErrPathNeedsDocument = errors.New("path needs a document to resolve in")
 
 	// ErrAmbiguousPath indicates a path that names the entries of more
@@ -973,9 +967,9 @@ func locate(b binder, l locus) (location, *Node, error) {
 // [binder.scoped] put the scope of that node in front of the path
 // already, so the path reads from the root. A path that names a key the
 // document leaves out resolves to the key of the mapping that lacks it,
-// as [Node.nearestLocation] finds it. A source that holds no document,
-// holds several, or does not parse has no document to resolve the path
-// in, so the location is [ErrPathNeedsDocument] wrapping that reason. A
+// as [Node.nearestLocation] finds it. A source that holds several
+// documents, or does not parse, has no document to resolve the path in,
+// so the location is [ErrPathNeedsDocument] wrapping that reason. A
 // document that did not parse has no tree to resolve the path in either,
 // so the location is ErrPathNeedsDocument wrapping its syntax error.
 func locatePath(b binder, path paths.Path) (location, *Node, error) {

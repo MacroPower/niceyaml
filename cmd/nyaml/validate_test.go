@@ -121,11 +121,11 @@ func TestValidateFile(t *testing.T) {
 	}
 }
 
-func TestValidateFileNoDocuments(t *testing.T) {
+func TestValidateFileEmpty(t *testing.T) {
 	t.Parallel()
 
-	// A file of text that is only a "..." marker holds no document. It
-	// validates as an empty file does, which holds one null document.
+	// A file of text that is only a "..." marker holds one empty document,
+	// so it validates as an empty file does.
 	tcs := map[string]struct {
 		reg     *schema.Registry
 		content string

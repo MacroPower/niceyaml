@@ -258,19 +258,36 @@ func TestSource_Document(t *testing.T) {
 		assert.Nil(t, got)
 	})
 
-	t.Run("rejects a source with no documents", func(t *testing.T) {
+	t.Run("returns the empty document of a stream of markers alone", func(t *testing.T) {
 		t.Parallel()
 
-		// A lone "..." marker parses to zero documents, and the parser
-		// drops a comment on the marker's line.
+		// The parser finds no document in a stream of "..." markers alone,
+		// and the Source gives it one empty document, as it gives an
+		// empty file. The markers and any comment on their lines are the
+		// preamble of that document.
 		tcs := map[string]struct {
 			input string
+			lines int
 		}{
 			"lone marker": {
 				input: "...\n",
+				lines: 1,
+			},
+			"marker without a line break": {
+				input: "...",
+				lines: 1,
 			},
 			"marker with comment": {
 				input: "... # license\n",
+				lines: 1,
+			},
+			"two markers": {
+				input: "...\n...\n",
+				lines: 2,
+			},
+			"blank lines above a marker": {
+				input: "\n\n...\n",
+				lines: 3,
 			},
 		}
 
@@ -282,17 +299,25 @@ func TestSource_Document(t *testing.T) {
 
 				docs, err := source.Documents()
 				require.NoError(t, err)
-				require.Empty(t, docs)
+				require.Len(t, docs, 1)
 
-				_, err = source.Document()
-				require.ErrorIs(t, err, niceyaml.ErrNoDocuments)
-				require.NotErrorIs(t, err, niceyaml.ErrMultipleDocuments)
-				assert.Equal(t, "no documents in source", err.Error())
+				doc, err := source.Document()
+				require.NoError(t, err)
+				assert.Same(t, docs[0], doc)
 
-				var bound *niceyaml.SourceError
+				file, err := source.File()
+				require.NoError(t, err)
+				require.Len(t, file.Docs, 1)
+				assert.Same(t, file.Docs[0], doc.DocumentAST())
 
-				require.ErrorAs(t, err, &bound)
-				assert.Same(t, source, bound.Source())
+				assert.Nil(t, doc.AST())
+				assert.Equal(t, source.Tokens(), doc.Tokens())
+				assert.Equal(t, doc.Tokens(), doc.Preamble())
+				assert.Equal(t, position.NewSpan(0, tc.lines), doc.Span())
+
+				got, err := source.Decode[map[string]int](t.Context())
+				require.NoError(t, err)
+				assert.Nil(t, got)
 			})
 		}
 	})
