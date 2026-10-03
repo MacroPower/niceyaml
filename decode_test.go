@@ -2359,11 +2359,12 @@ func TestNode_Bind_Scope(t *testing.T) {
 
 	tcs := map[string]struct {
 		err error
-		// The message of the binding, its path, when it carries one, and
-		// the message of each of its children.
+		// The message of the binding, its path, when it carries one, the
+		// message of each problem it heads, and of each of its details.
 		want     string
 		path     string
 		children []string
+		details  []string
 	}{
 		"a path joins the scope": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPath(closePath)),
@@ -2430,8 +2431,8 @@ func TestNode_Bind_Scope(t *testing.T) {
 			want: "cfg.yaml:5:14: $.shops[0].hours.close: check: $.close: bad",
 			path: "$.shops[0].hours.close",
 		},
-		// A branch says where it points, so the branch with no location is
-		// not about the scope as a whole.
+		// Each branch is a problem of its own, so the branch with no
+		// location binds at the scope whatever the others carry.
 		"each line of a join joins the scope": {
 			err: errors.Join(
 				niceyaml.NewError("early", niceyaml.AtPath(openPath)),
@@ -2439,13 +2440,13 @@ func TestNode_Bind_Scope(t *testing.T) {
 				niceyaml.NewError("late", niceyaml.AtPath(closePath)),
 			),
 			want: stringtest.JoinLF(
+				"cfg.yaml:4:7: $.shops[0].hours: plain",
 				"cfg.yaml:4:13: $.shops[0].hours.open: early",
 				"cfg.yaml:5:14: $.shops[0].hours.close: late",
-				"cfg.yaml: plain",
 			),
 			children: []string{
 				"cfg.yaml:4:13: $.shops[0].hours.open: early",
-				"cfg.yaml: plain",
+				"cfg.yaml:4:7: $.shops[0].hours: plain",
 				"cfg.yaml:5:14: $.shops[0].hours.close: late",
 			},
 		},
@@ -2460,45 +2461,67 @@ func TestNode_Bind_Scope(t *testing.T) {
 				"cfg.yaml:4:7: $.shops[0].hours: two",
 			},
 		},
-		"a summary and the errors below it bind at the scope when none has a location": {
-			err: niceyaml.NewError("2 problems", niceyaml.WithErrors(
+		// A summary is a heading, so it takes no location, and each error
+		// it heads binds on its own.
+		"the errors a summary heads bind at the scope and the summary binds nowhere": {
+			err: niceyaml.NewSummary("2 problems",
 				errors.New("one"),
 				errors.New("two"),
-			)),
-			want: stringtest.JoinLF(
-				"cfg.yaml:4:7: $.shops[0].hours: 2 problems",
-				"cfg.yaml:4:7: $.shops[0].hours: one",
-				"cfg.yaml:4:7: $.shops[0].hours: two",
 			),
-			path: "$.shops[0].hours",
-			children: []string{
-				"cfg.yaml:4:7: $.shops[0].hours: one",
-				"cfg.yaml:4:7: $.shops[0].hours: two",
-			},
-		},
-		"each nested error joins the scope": {
-			err: niceyaml.NewError("2 problems", niceyaml.WithErrors(
-				niceyaml.NewError("early", niceyaml.AtPath(openPath)),
-				errors.New("plain"),
-			)),
 			want: stringtest.JoinLF(
 				"cfg.yaml: 2 problems",
+				"cfg.yaml:4:7: $.shops[0].hours: one",
+				"cfg.yaml:4:7: $.shops[0].hours: two",
+			),
+			children: []string{
+				"cfg.yaml:4:7: $.shops[0].hours: one",
+				"cfg.yaml:4:7: $.shops[0].hours: two",
+			},
+		},
+		"each error a summary heads joins the scope": {
+			err: niceyaml.NewSummary("2 problems",
+				niceyaml.NewError("early", niceyaml.AtPath(openPath)),
+				errors.New("plain"),
+			),
+			want: stringtest.JoinLF(
+				"cfg.yaml: 2 problems",
+				"cfg.yaml:4:7: $.shops[0].hours: plain",
 				"cfg.yaml:4:13: $.shops[0].hours.open: early",
-				"cfg.yaml: plain",
 			),
 			children: []string{
 				"cfg.yaml:4:13: $.shops[0].hours.open: early",
-				"cfg.yaml: plain",
+				"cfg.yaml:4:7: $.shops[0].hours: plain",
 			},
 		},
-		"an error with no location under a located parent stays as it is": {
+		// A problem with no location binds at the scope whatever its
+		// details carry, and each detail keeps its own location.
+		"a problem with no location binds at the scope above its located details": {
+			err: niceyaml.NewError("hours conflict", niceyaml.WithDetails(
+				niceyaml.NewError("opens here", niceyaml.AtPath(openPath)),
+				niceyaml.NewError("closes here", niceyaml.AtPath(closePath)),
+			)),
+			want: "cfg.yaml:4:7: $.shops[0].hours: hours conflict",
+			path: "$.shops[0].hours",
+			details: []string{
+				"cfg.yaml:4:13: $.shops[0].hours.open: opens here",
+				"cfg.yaml:5:14: $.shops[0].hours.close: closes here",
+			},
+		},
+		// A detail explains its parent, so it takes no location.
+		"a detail with no location stays as it is": {
 			err: niceyaml.NewError("bad",
 				niceyaml.AtPath(closePath),
-				niceyaml.WithErrors(errors.New("reason")),
+				niceyaml.WithDetails(errors.New("reason")),
 			),
-			want:     "cfg.yaml:5:14: $.shops[0].hours.close: bad",
-			path:     "$.shops[0].hours.close",
-			children: []string{"cfg.yaml: reason"},
+			want:    "cfg.yaml:5:14: $.shops[0].hours.close: bad",
+			path:    "$.shops[0].hours.close",
+			details: []string{"cfg.yaml: reason"},
+		},
+		"a detail with no location under a problem with none stays as it is": {
+			err:     niceyaml.NewError("bad", niceyaml.WithDetails(errors.New("reason"))),
+			want:    "cfg.yaml:4:7: $.shops[0].hours: bad",
+			path:    "$.shops[0].hours",
+			details: []string{"cfg.yaml: reason"},
 		},
 	}
 
@@ -2521,13 +2544,22 @@ func TestNode_Bind_Scope(t *testing.T) {
 				assert.Equal(t, tc.path, path.String())
 			}
 
-			var children []string
+			assert.Equal(t, tc.children, errorTexts(bound.Errors()))
+			assert.Equal(t, tc.details, errorTexts(bound.Details()))
 
-			for _, child := range bound.Errors() {
-				children = append(children, child.Error())
+			// A Rebase under the path of the scope binds the same way,
+			// except for the error of a context that ended, which is about
+			// the call, so a scoped bind gives it no location.
+			if errors.Is(tc.err, context.Canceled) || errors.Is(tc.err, context.DeadlineExceeded) {
+				return
 			}
 
-			assert.Equal(t, tc.children, children)
+			var rebased *niceyaml.SourceError
+
+			require.ErrorAs(t, doc.Bind(niceyaml.Rebase(tc.err, hoursPath)), &rebased)
+			assert.Equal(t, tc.want, rebased.Error())
+			assert.Equal(t, tc.children, errorTexts(rebased.Errors()))
+			assert.Equal(t, tc.details, errorTexts(rebased.Details()))
 		})
 	}
 

@@ -99,13 +99,12 @@ func TestErrorHandler(t *testing.T) {
 		silentError{niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name").Key()))},
 	))
 
-	nestedErr := yamltest.Bind(t, src, niceyaml.NewError(
-		"two problems",
-		niceyaml.WithErrors(
-			niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name").Key())),
-			niceyaml.NewError("bad value", niceyaml.AtPath(paths.Root().Child("value"))),
-		),
-	))
+	// A wrapper around a join heads the problems of the join, here and in
+	// the niceyaml version the go.mod of this module requires.
+	nestedErr := yamltest.Bind(t, src, fmt.Errorf("two problems: %w", errors.Join(
+		niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name").Key())),
+		niceyaml.NewError("bad value", niceyaml.AtPath(paths.Root().Child("value"))),
+	)))
 
 	// A source that ends with blank lines, which an excerpt of its last
 	// key shows as context below the caret.
@@ -416,7 +415,7 @@ func TestErrorHandler(t *testing.T) {
 			err: fmt.Errorf("document 0: %w", nestedErr),
 			want: stringtest.JoinLF(
 				"Error",
-				"  document 0: two problems",
+				"  document 0: two problems:",
 				"  ├── 1:1: $.name~: bad name",
 				"  └── 2:8: $.value: bad value",
 				"  ",
@@ -529,13 +528,10 @@ func TestErrorHandler_ColorProfile(t *testing.T) {
 		value: 123
 	`)))
 
-	err := yamltest.Bind(t, src, niceyaml.NewError(
-		"two problems",
-		niceyaml.WithErrors(
-			niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name").Key())),
-			niceyaml.NewError("bad value", niceyaml.AtPath(paths.Root().Child("value"))),
-		),
-	))
+	err := yamltest.Bind(t, src, fmt.Errorf("two problems: %w", errors.Join(
+		niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name").Key())),
+		niceyaml.NewError("bad value", niceyaml.AtPath(paths.Root().Child("value"))),
+	)))
 
 	p := printer.New(
 		printer.WithStyles(yamltest.NewXMLStyles()),

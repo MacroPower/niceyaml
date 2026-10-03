@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2498,7 +2499,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		return schema.Ref{}, errNoKind
 	})
 
-	t.Run("nests the reason of each resolver that gave one", func(t *testing.T) {
+	t.Run("gives the reason of each resolver that gave one as a detail", func(t *testing.T) {
 		t.Parallel()
 
 		reg := schema.NewRegistry(schema.WithResolvers(
@@ -2513,28 +2514,35 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 		require.ErrorIs(t, err, schema.ErrNoDirective)
 		require.ErrorIs(t, err, errNoKind)
-		// A resolver that returned ErrNoMatch alone adds no reason, and the
-		// reasons read without the sentinel the message states already.
-		assert.Equal(t, stringtest.JoinLF(
-			"app.yaml: no matching schema",
-			"app.yaml: no schema directive",
-			"app.yaml: no kind",
-		), err.Error())
-
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
-
-		reasons := make([]string, 0, 2)
-		for _, child := range bound.Errors() {
-			reasons = append(reasons, child.Unwrap().Error())
-		}
-
-		assert.Equal(t, []string{"no schema directive", "no kind"}, reasons)
+		// The lookup failed once, so the message is one line, and the
+		// reasons explain it in the tree below. A resolver that returned
+		// ErrNoMatch alone adds no reason, and the reasons read without the
+		// sentinel the message states already.
+		require.EqualError(t, err, "app.yaml: no matching schema")
+		assert.Equal(t,
+			"app.yaml: no matching schema\n|-- no schema directive\n`-- no kind",
+			niceyaml.FormatError(err, 0),
+		)
 		assert.Equal(t,
 			"app.yaml: no matching schema\n|-- no schema directive\n`-- no kind",
 			fmt.Sprintf("%+v", err),
 		)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Empty(t, bound.Errors())
+
+		reasons := make([]string, 0, 2)
+		for _, detail := range bound.Details() {
+			reasons = append(reasons, detail.Unwrap().Error())
+		}
+
+		assert.Equal(t, []string{"no schema directive", "no kind"}, reasons)
+
+		problems := slices.Collect(niceyaml.NewErrorTree(err).Problems())
+		require.Len(t, problems, 1)
+		assert.Len(t, problems[0].Children, 2)
 	})
 
 	t.Run("names the document in a file that holds several", func(t *testing.T) {
@@ -2550,10 +2558,11 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		err = docs[2].Validate(t.Context(), reg)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
-		assert.Equal(t, stringtest.JoinLF(
-			"m.yaml: document 3: no matching schema",
-			"m.yaml: document 3: no schema directive",
-		), err.Error())
+		require.EqualError(t, err, "m.yaml: document 3: no matching schema")
+		assert.Equal(t,
+			"m.yaml: document 3: no matching schema\n`-- no schema directive",
+			niceyaml.FormatError(err, 0),
+		)
 		assert.Equal(t,
 			"m.yaml: document 3: no matching schema\n`-- no schema directive",
 			fmt.Sprintf("%+v", err),

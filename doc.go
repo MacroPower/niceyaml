@@ -74,6 +74,21 @@
 // a range. [Error.Error] returns the message, with a path in front as
 // "$.path", so a validator can build one without holding the source.
 //
+// An Error is one problem. [WithDetails] adds the errors that explain it,
+// such as its reasons, the forms a value failed to match, or a related
+// location, and a detail is never a problem of its own. Several problems
+// are a join from [errors.Join], or a summary from [NewSummary] whose
+// message heads them, such as "2 schema violations":
+//
+//	conflict := niceyaml.NewError("port 80 conflicts", niceyaml.AtPath(portB),
+//		niceyaml.WithDetails(niceyaml.NewError("first declared here", niceyaml.AtPath(portA))))
+//
+//	return niceyaml.NewSummary(fmt.Sprintf("%d violations", len(errs)), errs...)
+//
+// Every reader keeps to these roles. The lines of a message, the rows of
+// a report, and the locations a scoped [Node] gives thus agree on what
+// the problems of an error are.
+//
 // [SourceError] binds an error to its [Source] and to the document its
 // path resolves in. Every error a Source or one of its Nodes produces is
 // one. [Node.Bind] binds an error built elsewhere to that document, and
@@ -84,11 +99,11 @@
 // message, or the name of the source alone when the error carries no
 // location, and runs over several lines when the message does. An error
 // with no position in a file of several documents names its document
-// behind the name, as "cafe.yaml: document 3: no matching schema". Under an
-// error that names no location, it lists the errors below, one per line
-// behind its own position. The message of a validator's report thus names
-// each violation wherever the error goes, as a wrapper from [fmt.Errorf]
-// carries it:
+// behind the name, as "cafe.yaml: document 3: no matching schema". Under a
+// summary or a join, it lists the problems below, one per line behind its
+// own position, and it leaves details out. The message of a validator's
+// report thus names each violation wherever the error goes, as a wrapper
+// from [fmt.Errorf] carries it:
 //
 //	load config: cafe.yaml: 2 schema violations
 //	cafe.yaml:6:8: $.spec.sla: string does not match pattern
@@ -97,20 +112,22 @@
 // The list stops after [ErrorListLimit] errors and counts the rest.
 // [SourceError.Excerpt] returns the surrounding lines with the location
 // highlighted.
-// The nested errors [WithErrors] adds are part of the Error, and binding
-// binds each of them too. [SourceError.Errors] returns one SourceError
-// per nested error, with its own children, if any, and its own location
-// when the nested error carries one. A validator's report of several
-// violations is therefore a tree of bound errors.
-// [FormatError] prints the message as a tree with a branch per nested
-// error behind its position, then the excerpt, so a log names every
-// violation and where it is. The excerpt marks every location
-// in the tree, with each nested error as an annotation below its own line
-// and distant errors in separate hunks. An error that unwraps to several,
-// such as one from [errors.Join], binds as one SourceError with a child
-// per branch. A wrapper from [fmt.Errorf] with several %w verbs keeps
-// only the branches that carry a location or errors nested below them,
-// so a sentinel it wraps beside a cause shows only in its message.
+// The errors a summary heads and the details of an Error are part of the
+// Error, and binding binds each of them too. [SourceError.Errors] returns
+// one SourceError per problem a summary heads and [SourceError.Details]
+// one per detail, each with its own children, if any, and its own
+// location when its error carries one. A validator's report of several
+// violations is therefore a tree of bound errors. [FormatError] prints
+// the message as a tree with a branch per error below another behind its
+// position, details included, then the excerpt, so a log names every
+// violation and where it is. The excerpt marks every location in the
+// tree, with the message of each error below the root as an annotation
+// below its own line and distant errors in separate hunks. An error that
+// unwraps to several, such as one from [errors.Join], binds as one
+// SourceError with a child per branch. A wrapper from [fmt.Errorf] with
+// several %w verbs keeps only the branches that carry a location or
+// errors below them, so a sentinel it wraps beside a cause shows only in
+// its message.
 // [Bindings] finds every binding in an error joined from bound errors,
 // such as one per document of a file. FormatError prints the errors of
 // such a join on one excerpt per source, each with its message beside
@@ -144,31 +161,33 @@
 // # Error Presentation
 //
 // [FormatError] prints an error as plain text. The message comes first,
-// as a tree with a connector in front of each nested error. The excerpt
-// around the locations follows, with the context lines the caller asks
-// for and carets under the offending columns. FormatError looks through
-// the wrappers and joins around a [SourceError], so it renders an error
-// however a program wrapped it, and it renders the excerpt of every
-// SourceError in the error's tree. The excerpt is [line.View.String], so
-// a view a caller decorates, such as one with search matches, renders the
-// same way. The output holds no escape sequences, so it goes into a log
-// as it is:
+// as a tree with a connector in front of each error below another. The
+// excerpt around the locations follows, with the context lines the
+// caller asks for and carets under the offending columns. FormatError
+// looks through the wrappers and joins around a [SourceError], so it
+// renders an error however a program wrapped it, and it renders the
+// excerpt of every SourceError in the error's tree. The excerpt is
+// [line.View.String], so a view a caller decorates, such as one with
+// search matches, renders the same way. The output holds no escape
+// sequences, so it goes into a log as it is:
 //
 //	log.Print(niceyaml.FormatError(err, 2))
 //
 // An [*Error] or a [*SourceError] logged as a [log/slog] attribute
 // logs the tree without the excerpt, through [Error.LogValue] and
-// [SourceError.LogValue], so a structured log names every nested error
-// in one attribute whichever handler writes it.
+// [SourceError.LogValue], so a structured log names every error in the
+// tree in one attribute whichever handler writes it.
 //
 // A report a program reads, such as JSON lines, CI annotations, or editor
 // diagnostics, lists the problems of an error as rows.
-// [ErrorTree.Problems] yields one node per problem. It passes over the
-// summary a validator puts above its violations, and it yields an error
-// bound to no source, such as a file that failed to read. Each node
-// holds the binding of its error, so a row takes its fields from
-// [SourceError.Source], [SourceError.Position], [SourceError.Path], and
-// [SourceError.Message] rather than from the text.
+// [ErrorTree.Problems] yields one node per problem, by the roles the
+// errors declare. It passes over the summary a validator puts above its
+// violations, it keeps the details of each problem below its node, and
+// it yields an error bound to no source, such as a file that failed to
+// read. Each node holds the binding of its error, so a row takes its
+// fields from [SourceError.Source], [SourceError.Position],
+// [SourceError.Path], and [SourceError.Message] rather than from the
+// text.
 //
 // A terminal gets color from
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which prints

@@ -255,6 +255,10 @@ linters:
       - text: "\\*go\\.jacobcolvin\\.com/niceyaml\\.Source"
         linters:
           - wrapcheck
+      # NewSummary builds a new error from others, as errors.Join does.
+      - text: "go\\.jacobcolvin\\.com/niceyaml\\.NewSummary"
+        linters:
+          - wrapcheck
       - path: cmd/
         linters:
           - wrapcheck

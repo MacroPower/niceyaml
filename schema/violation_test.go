@@ -2,11 +2,13 @@ package schema_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -776,9 +778,12 @@ func TestViolation_Forms(t *testing.T) {
 			Message:    "value matches none of the allowed forms",
 		}, *got)
 
-		// Each form carries no location and wraps no Violation, and the
-		// violation of its branch carries both.
-		forms := bound.Errors()
+		// The value is one problem, so the binding heads none, and the
+		// forms are its details. Each form carries no location and wraps
+		// no Violation, and the violation of its branch carries both.
+		assert.Empty(t, bound.Errors())
+
+		forms := bound.Details()
 		require.Len(t, forms, 2)
 
 		want := []schema.Violation{
@@ -808,7 +813,7 @@ func TestViolation_Forms(t *testing.T) {
 			assert.False(t, ok)
 			assert.Nil(t, own)
 
-			nested := form.Errors()
+			nested := form.Details()
 			require.Len(t, nested, 1)
 
 			path, ok := nested[0].Path()
@@ -838,7 +843,9 @@ func TestViolation_Forms(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "anyOf", got.Keyword)
 
-		forms := located.Errors()
+		assert.Empty(t, located.Errors())
+
+		forms := located.Details()
 		require.Len(t, forms, 2)
 
 		for i, form := range forms {
@@ -849,9 +856,71 @@ func TestViolation_Forms(t *testing.T) {
 
 			_, ok := unlocated.Path()
 			assert.False(t, ok)
-			assert.Len(t, unlocated.Errors(), 1)
+			assert.Len(t, unlocated.Details(), 1)
 		}
 	})
+}
+
+func TestViolation_Problems(t *testing.T) {
+	t.Parallel()
+
+	v := compileSchema(t, []byte(`{
+		"properties": {
+			"v": {"anyOf": [
+				{"type": "string", "minLength": 3},
+				{"type": "string", "pattern": "^x"}
+			]},
+			"port": {"type": "integer", "minimum": 1}
+		},
+		"additionalProperties": false
+	}`))
+
+	// Each row is the message of a problem and the number of nodes below
+	// it, which are its details.
+	tcs := map[string]struct {
+		input   string
+		wantMsg string
+		want    []string
+	}{
+		"a failed anyOf is one problem": {
+			input:   "v: ab\n",
+			wantMsg: "1:4: $.v: value matches none of the allowed forms",
+			want:    []string{"value matches none of the allowed forms (2)"},
+		},
+		"the problems of a validation match the count of its summary": {
+			input: "v: ab\nport: 0\nextra: 1\n",
+			wantMsg: stringtest.JoinLF(
+				"3 schema violations",
+				"1:4: $.v: value matches none of the allowed forms",
+				"2:7: $.port: 0 is less than 1",
+				"3:1: $.extra~: value is not allowed",
+			),
+			want: []string{
+				"value matches none of the allowed forms (2)",
+				"0 is less than 1 (0)",
+				"value is not allowed (0)",
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
+			require.EqualError(t, err, tc.wantMsg)
+
+			var got []string
+
+			for problem := range niceyaml.NewErrorTree(err).Problems() {
+				require.NotNil(t, problem.Bound)
+
+				got = append(got, fmt.Sprintf("%s (%d)", problem.Bound.Message(), len(problem.Children)))
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
 }
 
 func TestViolation_Error(t *testing.T) {

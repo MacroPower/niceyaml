@@ -67,7 +67,7 @@ const wrapOnCharacters = " " + breakpoints
 // # Errors
 //
 // [Printer.PrintError] renders any error as a tree, with a connector in
-// front of each nested error, and the source excerpt of every
+// front of each error below another, and the source excerpt of every
 // [niceyaml.SourceError] in it, with the printer's styles, width, and the
 // context lines [WithContextLines] sets. A program configures one printer
 // with its terminal width and theme and prints its errors through it.

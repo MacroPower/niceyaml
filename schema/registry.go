@@ -304,9 +304,10 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 // Lookup finds the validator for a document.
 //
 // Returns [ErrNoMatch] if no resolver applies to the document, with the
-// reason each resolver gave nested in it. [errors.Is] finds a reason such
-// as [ErrNoDirective], and a rendering of the error, such as
-// [niceyaml.FormatError] or
+// reason each resolver gave as a detail, from [niceyaml.WithDetails]. The
+// lookup failed once, so the message of the error is one line.
+// [errors.Is] finds a reason such as [ErrNoDirective], and a rendering of
+// the error, such as [niceyaml.FormatError] or
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], lists the
 // reasons below the message:
 //
@@ -425,28 +426,29 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 
 // noMatch returns the error a lookup reports when every resolver declined.
 // That is [ErrNoMatch] alone when no resolver said more than that, and
-// otherwise ErrNoMatch with the reason of each resolver that did nested
-// in it, in lookup order. [errors.Is] then finds a reason such as
-// [ErrNoDirective], and a rendering of the error lists the reasons below
-// the message.
+// otherwise ErrNoMatch with the reason of each resolver that did as a
+// detail from [niceyaml.WithDetails], in lookup order. The lookup failed
+// once, so the error is one problem, and its message is one line.
+// [errors.Is] finds a reason such as [ErrNoDirective], and
+// [niceyaml.FormatError] lists the reasons below the message.
 func noMatch(reasons []error) error {
-	var nested []error
+	var details []error
 
 	for _, reason := range reasons {
 		if reason.Error() != ErrNoMatch.Error() {
-			nested = append(nested, reasonError{err: reason})
+			details = append(details, reasonError{err: reason})
 		}
 	}
 
-	if len(nested) == 0 {
+	if len(details) == 0 {
 		return ErrNoMatch
 	}
 
-	return niceyaml.WrapError(ErrNoMatch, niceyaml.WithErrors(nested...))
+	return niceyaml.WrapError(ErrNoMatch, niceyaml.WithDetails(details...))
 }
 
-// reasonError is the reason one resolver declined a document, nested
-// under the [ErrNoMatch] the lookup reports. A resolver wraps ErrNoMatch,
+// reasonError is the reason one resolver declined a document, a detail of
+// the [ErrNoMatch] the lookup reports. A resolver wraps ErrNoMatch,
 // so its message repeats the sentinel the lookup's message states
 // already, and the reason reads without it.
 type reasonError struct {

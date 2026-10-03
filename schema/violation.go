@@ -39,11 +39,12 @@ const noFormMessage = "value matches none of the allowed forms"
 //	}
 //
 // [niceyaml.SourceError.Cause] returns the error of one binding alone, so
-// the search above finds the Violation of that binding or none. The count
-// summary of several violations wraps no Violation. [errors.As] on its
-// binding searches the errors nested in it too and finds the Violation of
-// the first. An unbound error from [Schema.ValidateValue] holds its
-// Violation as its [niceyaml.Error.Cause].
+// the search above finds the Violation of that binding or none. Several
+// violations come back under a count summary from [niceyaml.NewSummary],
+// which wraps no Violation. [errors.As] on its binding searches the
+// violations it heads too and finds the Violation of the first. An
+// unbound error from [Schema.ValidateValue] holds its Violation as its
+// [niceyaml.Error.Cause].
 //
 // A value that matches no branch of an anyOf or oneOf fails every branch
 // at once, and the failures of a branch say what is wrong with the value
@@ -57,12 +58,12 @@ const noFormMessage = "value matches none of the allowed forms"
 // When one branch remains, its failures are violations of their own, as
 // though the schema held that branch alone. When several remain, the
 // value has one violation, which carries the path to the value and wraps
-// a Violation with the keyword anyOf or oneOf. That error nests one error
-// per branch, named by the position of the branch in the schema, as
-// "form 2" names the second. A form carries no location and wraps no
-// Violation. It nests the violations of its branch, each with a path and
-// a Violation of its own, as for a string that must hold three characters
-// or start with x:
+// a Violation with the keyword anyOf or oneOf. That error holds one
+// detail per branch, from [niceyaml.WithDetails], named by the position
+// of the branch in the schema, as "form 2" names the second. A form
+// carries no location and wraps no Violation. Its details are the
+// violations of its branch, each with a path and a Violation of its own,
+// as for a string that must hold three characters or start with x:
 //
 //	1:4: $.v: value matches none of the allowed forms
 //	    form 1
@@ -70,10 +71,11 @@ const noFormMessage = "value matches none of the allowed forms"
 //	    form 2
 //	        1:4: $.v: string does not match pattern "^x"
 //
-// The walk above therefore emits the violation of the value and each
-// violation under its forms. A report that wants one row per value emits
-// the first and passes over the errors [niceyaml.SourceError.Errors]
-// nests under it.
+// The walk above reaches every binding, so it emits the violation of the
+// value and each violation under its forms. A report that wants one row
+// per problem walks [niceyaml.ErrorTree.Problems] instead. It yields the
+// violation of the value once, with the forms as the Children of its
+// node, so the rows of a validation match the count its summary states.
 //
 // A mapping that leaves out a member the schema requires has no value to
 // point at. The violation of required, of dependentRequired, or of the
@@ -133,29 +135,22 @@ func newViolation(e *jsonschema.ValidationError) *Violation {
 // [converter.violations] finds them. A single violation becomes the main
 // error and carries its own path, so the printer highlights that location
 // and [niceyaml.Error.Path] reports it. Several violations become a count
-// summary with no path of its own, and each nested error carries the path
-// to one failing location. The index idx finds the members of the
-// mappings in the document of n.
-func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node, idx *memberIndex) *niceyaml.Error {
+// summary from [niceyaml.NewSummary] with no path of its own, and each
+// violation it heads carries the path to one failing location. The index
+// idx finds the members of the mappings in the document of n.
+func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node, idx *memberIndex) error {
 	c := converter{root: rootOf(n), idx: idx}
 
 	found := c.violations(ve)
-
-	switch len(found) {
-	case 0:
+	if len(found) == 0 {
 		return niceyaml.WrapError(newViolation(ve))
-	case 1:
-		return found[0]
 	}
 
-	return niceyaml.NewError(
-		fmt.Sprintf("%d schema violations", len(found)),
-		niceyaml.WithErrors(nested(found)...),
-	)
+	return niceyaml.NewSummary(fmt.Sprintf("%d schema violations", len(found)), asErrors(found)...)
 }
 
-// nested returns errs as the errors [niceyaml.WithErrors] nests.
-func nested(errs []*niceyaml.Error) []error {
+// asErrors returns errs as a slice of error.
+func asErrors(errs []*niceyaml.Error) []error {
 	out := make([]error, 0, len(errs))
 	for _, err := range errs {
 		out = append(out, err)
@@ -259,7 +254,7 @@ func (c converter) union(e *jsonschema.ValidationError) []*niceyaml.Error {
 	for _, b := range kept {
 		forms = append(forms, niceyaml.NewError(
 			fmt.Sprintf("form %d", b.index+1),
-			niceyaml.WithErrors(nested(c.all(b.causes))...),
+			niceyaml.WithDetails(asErrors(c.all(b.causes))...),
 		))
 	}
 
@@ -267,7 +262,7 @@ func (c converter) union(e *jsonschema.ValidationError) []*niceyaml.Error {
 	v.Message = noFormMessage
 
 	return []*niceyaml.Error{
-		niceyaml.WrapError(v, append(c.at(e), niceyaml.WithErrors(forms...))...),
+		niceyaml.WrapError(v, append(c.at(e), niceyaml.WithDetails(forms...))...),
 	}
 }
 

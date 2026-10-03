@@ -85,7 +85,7 @@ func WithPrinter(p *printer.Printer) Option {
 // The handler writes the error header, then what
 // [printer.Printer.PrintError] renders for err. That output starts with the
 // message as a tree, with the context its wrappers added in front and a
-// connector before each nested error. The excerpt of each
+// connector before each error below another. The excerpt of each
 // [*go.jacobcolvin.com/niceyaml.SourceError] in the error's tree follows,
 // so a joined error annotates each failure it holds. The handler indents
 // each line by [Indent] columns and ends the output with a blank line. An

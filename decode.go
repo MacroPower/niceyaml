@@ -50,8 +50,11 @@ import (
 // yaml tag, its json tag, or its lowercased name. It names an element by
 // its index and a map entry by its key. A map key validates too, under
 // the path of its entry with a `~` after it, so its errors point at the
-// key rather than the value. A type thus checks its
-// invariants once and reports the right lines in any document:
+// key rather than the value. The decode reads the roles of the errors as
+// [Rebase] does. A problem with no location points at the value, whether
+// it stands alone or under a summary from [NewSummary], and a detail from
+// [WithDetails] gains no location. A type thus checks its invariants once
+// and reports the right lines in any document:
 //
 //	type Config struct {
 //		Hours Hours  `yaml:"hours"`
@@ -1702,27 +1705,33 @@ func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []
 // path in err, as [Rebase] does. A check that wrote `$.price` thus
 // reports `$.items[1].price` when the Node at `$.items[1]` binds it, in
 // the message and in [SourceError.Path], as a decode of the whole
-// document reports it. The paths of a join and of the errors nested with
-// [WithErrors] change the same way. Text that a wrapper such as
-// [fmt.Errorf] added around a located Error keeps the path the wrapper
-// wrote, behind the joined one.
+// document reports it. The paths of a join, of the errors a summary from
+// [NewSummary] heads, and of the details from [WithDetails] change the
+// same way. Text that a wrapper such as [fmt.Errorf] added around a
+// located Error keeps the path the wrapper wrote, behind the joined one.
 //
-// A Node from Node.At or Node.Nodes stands for one value, so an error
+// A Node from Node.At or Node.Nodes stands for one value, so a problem
 // with no location that it binds is about that value. The Node binds
-// such an error at itself, as it binds an Error with [AtPath] of
+// such a problem at itself, as it binds an Error with [AtPath] of
 // [paths.Root]. A check that returns a plain error thus reports
-// `$.items[1]` and the position of that item. A join of such errors
-// binds each branch there, and an Error that nests such errors with
-// WithErrors binds there with each of them.
+// `$.items[1]` and the position of that item. The Node reads the roles
+// the errors declare, problem by problem, as [Rebase] does:
 //
-// The Node points an error at itself only when no error in the tree of
-// err holds a location. A summary above located errors therefore keeps
-// no location. So does an error with no location in a join with located
-// ones, or under an Error that nests it beside them. An error that matches
-// [context.Canceled] or [context.DeadlineExceeded] is about the call, so
-// it gains no location either. The root of a document gives no error a
-// location, since an error bound there can be about the document as a
-// whole, such as a schema that does not load. A caller that holds a
+//   - A problem with no location binds at the Node whatever its details
+//     carry. An error "ports conflict" above the two ports it names thus
+//     keeps its message on the line of the value.
+//   - A summary, a join, and a wrapper around either are headings. A
+//     heading gains no location, and each problem it heads binds on its
+//     own, at the Node when it carries no location, beside located ones.
+//   - A detail explains the error above it, so it gains no location.
+//
+// The Node thus binds an error as the root of the document binds a
+// Rebase of it under [Node.Path], so a check bound through a scoped Node
+// and the same check run by a [SelfValidator] report alike. An error that
+// matches [context.Canceled] or [context.DeadlineExceeded] is about the
+// call, so it gains no location either. The root of a document gives no
+// error a location, since an error bound there can be about the document
+// as a whole, such as a schema that does not load. A caller that holds a
 // scoped Node binds such an error through the root [Node.Document]
 // returns.
 //
@@ -1752,17 +1761,18 @@ func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []
 // [ErrPathNeedsDocument] as the reason, and binds here instead.
 //
 // Binding binds the whole tree of err. The [Error] that anchors it gives
-// the [SourceError] its location, and every error nested with
-// [WithErrors] along the way becomes a child, which [SourceError.Errors]
+// the [SourceError] its location. Every error a summary along the way
+// heads becomes a child that [SourceError.Errors] returns, and every
+// detail of an Error along the way becomes one that [SourceError.Details]
 // returns. An error that unwraps to several, such as one from
 // [errors.Join], binds the same way whatever wraps it. The SourceError
 // carries no location of its own, and each branch is a child. A wrapper
 // that [fmt.Errorf] builds with several %w verbs keeps only its branches
-// that carry a location or errors nested below them, and when one
-// remains, it binds where that branch does. Each child binds at the
-// location its own error carries, if any, so a validator that joins its
-// violations reports each one with its position. To keep several errors
-// as separate bindings, bind each one before joining them.
+// that carry a location or errors below them, and when one remains, it
+// binds where that branch does. Each child binds at the location its own
+// error carries, if any, so a validator that joins its violations
+// reports each one with its position. To keep several errors as separate
+// bindings, bind each one before joining them.
 //
 // If err is nil, Bind returns nil. A nil [*Error] or [*SourceError]
 // pointer as err carries nothing to bind, so Bind returns a nil error for
@@ -1770,12 +1780,12 @@ func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []
 // it on success thus reports no error. Such a pointer inside the chain
 // binds nothing, so Bind looks past it. An error that is or wraps a
 // [*SourceError] along its cause chain, with no [*Error] above it that
-// carries a location or nests errors, is bound already, to this source
-// or another, and comes back as it is. Binding is thus idempotent. A
-// located Error above a binding binds anew at its own location, and its
-// message keeps the position the inner binding resolved. An Error above
-// a binding that nests errors binds anew around it, with those errors as
-// children. Bind never modifies err.
+// carries a location, heads errors, or holds details, is bound already,
+// to this source or another, and comes back as it is. Binding is thus
+// idempotent. A located Error above a binding binds anew at its own
+// location, and its message keeps the position the inner binding
+// resolved. An Error with details above a binding binds anew around it,
+// with those details as children. Bind never modifies err.
 //
 // A document that did not parse has no tree to resolve a path in, so a
 // path bound through its Node resolves nowhere. The bound error keeps
@@ -1924,10 +1934,10 @@ func WithAliasLimit(enabled bool) DecodeOption {
 //	cfg.yaml:3:1: $.replicsa~: unknown field "replicsa"
 //	cfg.yaml:7:5: $.servers[0].prot~: unknown field "prot"
 //
-// The error counts the fields on the first line of its message and nests
-// one error for each. The message lists them, and [SourceError.Errors]
-// and [ErrorTree.Problems] return them. Each
-// nested error matches [ErrDecode] and holds the
+// The error is a summary from [NewSummary] that counts the fields on the
+// first line of its message and heads one error for each. The message
+// lists them, and [SourceError.Errors] and [ErrorTree.Problems] return
+// them. Each of those errors matches [ErrDecode] and holds the
 // [yaml.UnknownFieldError] the go-yaml decoder returns for that field. A
 // document with one unknown field reports that field as the error itself.
 //

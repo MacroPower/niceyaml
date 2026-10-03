@@ -365,12 +365,13 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 //
 // Returns nil when data conforms. On a constraint violation, returns a
 // [*niceyaml.Error]. A single violation carries its YAML path on the error
-// itself, and several violations become a count summary whose nested errors
-// each carry the path to one failing location. The error of each violation
-// wraps a [*Violation] that names the keyword the value fails and where
-// that keyword stands in the schema. A value that matches no branch of an
-// anyOf or oneOf counts as one violation, which nests the failures of
-// each branch the value could have been meant for, as [Violation]
+// itself, and several violations become a count summary from
+// [niceyaml.NewSummary] that heads one error per violation, each with the
+// path to one failing location. The error of each violation wraps a
+// [*Violation] that names the keyword the value fails and where that
+// keyword stands in the schema. A value that matches no branch of an
+// anyOf or oneOf counts as one violation, whose details are the failures
+// of each branch the value could have been meant for, as [Violation]
 // describes. Any other failure wraps
 // [ErrValidate], including a $ref the validator cannot resolve, since no
 // location in the document is at fault for that.

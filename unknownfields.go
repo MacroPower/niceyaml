@@ -68,21 +68,22 @@ func (n *Node) unknownFields(
 }
 
 // bindUnknownFields binds the rejections of several unknown fields to the
-// source as one error. Its message counts the fields, and it nests one
-// [*Error] for each, which matches [ErrDecode] and carries the
-// path of the key of the field, as [Node.bindDecodeError] binds the
-// rejection of one field. The paths read from the root of the document,
-// so the Node binds the error with no scope in front of them.
+// source as one error. It is a summary from [NewSummary] whose message
+// counts the fields, and it heads one [*Error] for each, which matches
+// [ErrDecode] and carries the path of the key of the field, as
+// [Node.bindDecodeError] binds the rejection of one field. The paths read
+// from the root of the document, so the Node binds the error with no
+// scope in front of them.
 func (n *Node) bindUnknownFields(fields []*yaml.UnknownFieldError) error {
 	tree := n.doc.decodeTree()
-	nested := make([]error, 0, len(fields))
+	rejections := make([]error, 0, len(fields))
 
 	for _, field := range fields {
 		rejected := decodeError{err: yamlMessageError{err: field, msg: tree.restoreNames(rejectionMessage(field))}}
-		nested = append(nested, WrapError(rejected, n.rejectionLocation(field.Token)...))
+		rejections = append(rejections, WrapError(rejected, n.rejectionLocation(field.Token)...))
 	}
 
-	summary := NewError(fmt.Sprintf("%d unknown fields", len(fields)), WithErrors(nested...))
+	summary := NewSummary(fmt.Sprintf("%d unknown fields", len(fields)), rejections...)
 
 	return bindTree(summary, binder{src: n.source, node: n.bindTarget(), rooted: true})
 }

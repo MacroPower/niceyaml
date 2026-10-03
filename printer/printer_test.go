@@ -385,11 +385,11 @@ func TestPrinter_PrintError(t *testing.T) {
 		// The excerpt spells the message beside the caret as the tree
 		// spells it.
 		"tab in a message beside a caret": {
-			err: yamltest.Bind(t, source, niceyaml.NewError("2 problems", niceyaml.WithErrors(
+			err: yamltest.Bind(t, source, niceyaml.NewError("invalid", niceyaml.WithDetails(
 				niceyaml.NewError("bad\ta", niceyaml.AtPath(paths.Root().Child("a"))),
 			))),
 			want: stringtest.JoinLF(
-				"2 problems",
+				"invalid",
 				"└── 1:4: $.a: bad    a",
 				"",
 				"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>1</genericError>",
@@ -412,18 +412,18 @@ func TestPrinter_PrintError(t *testing.T) {
 			),
 		},
 		"nested errors draw as branches in position order": {
-			err: yamltest.Bind(t, source, niceyaml.NewError("2 problems", niceyaml.WithErrors(
+			err: yamltest.Bind(t, source, niceyaml.NewSummary("2 problems",
 				niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b"))),
 				niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a"))),
-			))),
+			)),
 			want: "2 problems\n├── 1:4: $.a: bad a\n└── 2:4: $.b: bad b\n\n" + annotated,
 		},
 		"joined nested errors draw as a forest of subtrees": {
 			err: errors.Join(
-				yamltest.Bind(t, source, niceyaml.NewError("2 problems", niceyaml.WithErrors(
+				yamltest.Bind(t, source, niceyaml.NewSummary("2 problems",
 					niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a"))),
 					niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b"))),
-				))),
+				)),
 				yamltest.Bind(t, other, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("c")))),
 			),
 			want: "├── 2 problems\n│   ├── 1:4: $.a: bad a\n│   └── 2:4: $.b: bad b\n└── 1:4: $.c: bad\n\n" +
@@ -5715,7 +5715,7 @@ func TestPrinter_PrintError_WrappedAnnotation(t *testing.T) {
 	// The sequence wraps over several rows, and item 16 sits near the
 	// start of its row, so the message fits beside the caret.
 	source := niceyaml.NewSourceFromString("items: [" + strings.Join(items, ", ") + "]\n")
-	err := yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
+	err := yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
 		niceyaml.NewError("expected string", niceyaml.AtPath(paths.Root().Child("items").Index(16))),
 	)))
 
@@ -5777,7 +5777,7 @@ func TestPrinter_PrintError_AnnotationOnWrappedRow(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
+			err := yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
 				niceyaml.NewError("expected string", niceyaml.AtPath(paths.Root().Child("items").Index(tc.index))),
 			)))
 
@@ -5806,7 +5806,7 @@ func TestPrinter_PrintError_AnnotationNearEdge(t *testing.T) {
 	// room beside the caret and moves to the rows below it.
 	key := strings.Repeat("a", 66)
 	source := niceyaml.NewSourceFromString(key + ": value\n")
-	err := yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithErrors(
+	err := yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
 		niceyaml.NewError("string does not match pattern", niceyaml.AtPath(paths.Root().Child(key))),
 	)))
 

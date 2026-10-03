@@ -36,8 +36,8 @@ func (h hours) Validate() error {
 	return nil
 }
 
-// schedule validates itself with several nested errors, each with a path
-// written from its own root.
+// schedule validates itself with a summary of its violations, each with a
+// path written from its own root.
 type schedule struct {
 	Open  string `yaml:"open"`
 	Close string `yaml:"close"`
@@ -54,11 +54,22 @@ func (s schedule) Validate() error {
 		errs = append(errs, niceyaml.NewError("close is empty", niceyaml.AtPath(paths.Root().Child("close"))))
 	}
 
-	if len(errs) == 0 {
-		return nil
-	}
+	return niceyaml.NewSummary("invalid schedule", errs...)
+}
 
-	return niceyaml.NewError("invalid schedule", niceyaml.WithErrors(errs...))
+// conflictingSchedule validates itself with one problem that carries no
+// location and names the values in conflict as details, each with a path
+// written from its own root.
+type conflictingSchedule struct {
+	Open  string `yaml:"open"`
+	Close string `yaml:"close"`
+}
+
+func (conflictingSchedule) Validate() error {
+	return niceyaml.NewError("schedule conflicts", niceyaml.WithDetails(
+		niceyaml.NewError("opens here", niceyaml.AtPath(paths.Root().Child("open"))),
+		niceyaml.NewError("closes here", niceyaml.AtPath(paths.Root().Child("close"))),
+	))
 }
 
 // item validates itself through a pointer receiver.
@@ -260,7 +271,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		assert.Equal(t, "$.hours.close", p.String())
 	})
 
-	t.Run("errors nested under a field report the joined path", func(t *testing.T) {
+	t.Run("the errors a summary under a field heads report the joined path", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString(stringtest.Input(`
@@ -275,8 +286,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		_, err = doc.Decode[struct {
 			Schedule schedule `yaml:"schedule"`
 		}](t.Context())
+		// The summary is a heading, so the decode rebases it under the field
+		// without giving it a location.
 		require.EqualError(t, err, stringtest.JoinLF(
-			"cafe.yaml:2:3: $.schedule: invalid schedule",
+			"cafe.yaml: invalid schedule",
 			"cafe.yaml:2:9: $.schedule.open: open is empty",
 			"cafe.yaml:3:10: $.schedule.close: close is empty",
 		))
@@ -294,16 +307,48 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		assert.Equal(t, "$.schedule.close", p.String())
 
 		assert.Equal(t, stringtest.JoinLF(
-			"cafe.yaml:2:3: $.schedule: invalid schedule",
+			"cafe.yaml: invalid schedule",
 			"|-- 2:9: $.schedule.open: open is empty",
 			"`-- 3:10: $.schedule.close: close is empty",
 			"",
 			"   1 | schedule:",
 			`   2 |   open: ""`,
-			"     |   ^^^^  ^^ open is empty",
+			"     |         ^^ open is empty",
 			`   3 |   close: ""`,
 			"     |          ^^ close is empty",
 		), niceyaml.FormatError(err, 2))
+	})
+
+	t.Run("a problem with no location under a field binds as a scoped bind does", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			schedule:
+			  open: "09:00"
+			  close: "08:00"
+		`), niceyaml.WithName("cafe.yaml"))
+
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		_, err = doc.Decode[struct {
+			Schedule conflictingSchedule `yaml:"schedule"`
+		}](t.Context())
+
+		want := stringtest.JoinLF(
+			"cafe.yaml:2:3: $.schedule: schedule conflicts",
+			"|-- 2:9: $.schedule.open: opens here",
+			"`-- 3:10: $.schedule.close: closes here",
+		)
+
+		// The problem takes the location of the field whatever its details
+		// carry, and the details keep their own.
+		require.EqualError(t, err, "cafe.yaml:2:3: $.schedule: schedule conflicts")
+		assert.Equal(t, want, report(err))
+
+		scoped := yamltest.At(t, doc, paths.Root().Child("schedule")).Bind(conflictingSchedule{}.Validate())
+		require.EqualError(t, scoped, err.Error())
+		assert.Equal(t, niceyaml.FormatError(err, 1), niceyaml.FormatError(scoped, 1))
 	})
 
 	t.Run("elements and entries report their index or key", func(t *testing.T) {

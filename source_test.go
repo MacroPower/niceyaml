@@ -3025,10 +3025,10 @@ func TestSource_Bind(t *testing.T) {
 	t.Run("nested path errors resolve nowhere in several documents", func(t *testing.T) {
 		t.Parallel()
 
-		err := source.Bind(niceyaml.NewError("2 problems", niceyaml.WithErrors(
+		err := source.Bind(niceyaml.NewSummary("2 problems",
 			niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a"))),
 			niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b"))),
-		)))
+		))
 
 		var bound *niceyaml.SourceError
 

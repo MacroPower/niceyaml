@@ -18,7 +18,7 @@ func BenchmarkError_Unwrap(b *testing.B) {
 		nested[i] = fmt.Errorf("violation %d", i)
 	}
 
-	err := niceyaml.WrapError(errors.New("schema"), niceyaml.WithErrors(nested...))
+	err := niceyaml.WrapError(errors.New("schema"), niceyaml.WithDetails(nested...))
 
 	b.ReportAllocs()
 
@@ -45,7 +45,7 @@ func BenchmarkSourceError_ExcerptOneLine(b *testing.B) {
 
 		var bound *niceyaml.SourceError
 
-		require.ErrorAs(b, doc.Bind(niceyaml.NewError("schema violations", niceyaml.WithErrors(errs...))), &bound)
+		require.ErrorAs(b, doc.Bind(niceyaml.NewSummary("schema violations", errs...)), &bound)
 
 		b.Run(fmt.Sprintf("errors_%d", n), func(b *testing.B) {
 			b.ReportAllocs()
@@ -84,7 +84,7 @@ func BenchmarkSourceError_Excerpts(b *testing.B) {
 
 		require.ErrorAs(b, sources[0].Bind(niceyaml.NewError("root",
 			niceyaml.AtPath(paths.Root().Child("k0")),
-			niceyaml.WithErrors(children...))), &bound)
+			niceyaml.WithDetails(children...))), &bound)
 
 		b.Run(fmt.Sprintf("sources_%d", k), func(b *testing.B) {
 			b.ReportAllocs()

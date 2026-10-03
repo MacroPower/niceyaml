@@ -11,9 +11,9 @@ import (
 )
 
 // errorConnectorWidth is the width of the connector in front of each
-// nested error in the tree [Printer.PrintError] draws: the three cells of
-// "├──" or "└──", and the one cell of padding after them. The indent
-// below a connector, "│  " and its padding, is as wide.
+// error below another in the tree [Printer.PrintError] draws: the three
+// cells of "├──" or "└──", and the one cell of padding after them. The
+// indent below a connector, "│  " and its padding, is as wide.
 const errorConnectorWidth = 4
 
 // PrintError renders err for a reader: its message as a tree, then one
@@ -21,8 +21,9 @@ const errorConnectorWidth = 4
 // yields them. Each excerpt keeps the context lines [WithContextLines]
 // sets on either side of each marked line. An error joined from one
 // bound error per document of a file therefore prints that file once,
-// with the errors of every document on it. A binding whose nested
-// errors point into another file prints an excerpt of that file too.
+// with the errors of every document on it. A binding whose children point
+// into another file, such as a detail that names where a value was first
+// declared, prints an excerpt of that file too.
 // Among several bindings, the message of each sits beside its caret, and
 // when they touch more than one source, the name of its source leads
 // each excerpt on a row of its own. A location with no message beside it
@@ -38,13 +39,13 @@ const errorConnectorWidth = 4
 // whose tree resolves no location, with the reason the location of the
 // SourceError itself did not resolve. A SourceError that carries no
 // location of its own gets no such line. A SourceError whose own
-// location does not resolve but whose nested errors do gets their
-// excerpts and no reason, and its message stays in the tree without a
-// position.
+// location does not resolve but whose children do gets their excerpts
+// and no reason, and its message stays in the tree without a position.
 //
 // PrintError draws the message as a tree with a connector in front of each
-// nested error, in the color of the gutter's line numbers, so a validator's
-// report reads as its summary with one branch per violation. The root
+// error below another, in the color of the gutter's line numbers. A
+// validator's report thus reads as its summary with one branch per
+// violation, and the details of an error branch off below it. The root
 // keeps the message as its wrappers wrote it, without the errors the
 // branches show, and each branch carries the "line:col:" its location
 // resolved to, without the name the root already gives:
@@ -53,7 +54,7 @@ const errorConnectorWidth = 4
 //	├── 6:8: $.spec.sla: string does not match pattern
 //	└── 22:11: $.spec.hours.days: expected "array", got "string"
 //
-// An error with no nested errors prints as a tree of one node that holds
+// An error with nothing below it prints as a tree of one node that holds
 // its whole message, so the context a wrapper added stays in front of the
 // position. PrintError draws every message of the tree, the root's
 // included, and each "no excerpt:" line with control characters as their
@@ -71,7 +72,7 @@ const errorConnectorWidth = 4
 //	lipgloss.Fprintln(os.Stderr, p.PrintError(err))
 //
 // An error whose tree holds no SourceError prints as its tree alone,
-// which for an error with no nested errors is its message. So does an
+// which for an error with nothing below it is its message. So does an
 // error whose SourceErrors yield no excerpt and carry no location of
 // their own that failed to resolve. A nil err prints as "". An error
 // whose tree and excerpts both render nothing, such as a bound join of
