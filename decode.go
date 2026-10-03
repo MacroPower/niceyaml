@@ -1103,9 +1103,10 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 
 // Nodes returns a [*Node] scoped to each node path selects, in document
 // order, with path resolving from the receiver, so a path with a `[*]`,
-// `.*`, or `..name` selector, which [Node.At] rejects, scopes every
-// element of a sequence, every entry of a mapping, or every entry with a
-// name at any depth. Each Node is scoped as one from Node.At is, and
+// `.*`, `..name`, or `..*` selector, which [Node.At] rejects, scopes every
+// element of a sequence, every entry of a mapping, every entry with a
+// name at any depth, or every node at any depth. Each Node is scoped as
+// one from Node.At is, and
 // [Node.Path] is the path that selects its node alone, as
 // [paths.Path.Matches] resolves it, so a validator run on each element,
 // or an error bound to it, reports the element it came from:
@@ -1142,6 +1143,24 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // has the name 3.10 and the path `$.jobs.'3.10'`. A `~` selector from
 // [paths.Path.Key] reaches the key node itself, which decodes as the
 // decoder reads it, so that key decodes to the string 3.1.
+//
+// A `..*` selector from [paths.Path.RecursiveAll] scopes every node below
+// the receiver, each once, where the source writes it. A check that
+// applies to every key of a document thus visits each key once:
+//
+//	nodes, err := doc.Nodes(paths.Root().RecursiveAll()) // $..*
+//	if err != nil {
+//		return err
+//	}
+//
+//	for _, n := range nodes {
+//		sel, ok := n.Path().Last()
+//		if ok && sel.Kind == paths.SelectorChild && !snake.MatchString(sel.Name) {
+//			errs = append(errs, doc.Bind(niceyaml.NewError(
+//				fmt.Sprintf("key %q is not snake_case", sel.Name),
+//				niceyaml.AtPath(n.Path().Key()))))
+//		}
+//	}
 //
 // A path that selects nothing returns no Nodes and no error, as
 // [paths.Path.Nodes] does, and the errors it returns come back bound to

@@ -314,6 +314,93 @@ func TestPath_ChildAll(t *testing.T) {
 	})
 }
 
+func TestPath_RecursiveAll(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		path paths.Path
+		want string
+	}{
+		"on the root": {
+			path: paths.Root().RecursiveAll(),
+			want: "$..*",
+		},
+		"after a child": {
+			path: paths.Root().Child("spec").RecursiveAll(),
+			want: "$.spec..*",
+		},
+		"then a child": {
+			path: paths.Root().RecursiveAll().Child("name"),
+			want: "$..*.name",
+		},
+		"then an index": {
+			path: paths.Root().RecursiveAll().Index(0),
+			want: "$..*[0]",
+		},
+		"then a key selector": {
+			path: paths.Root().RecursiveAll().Key(),
+			want: "$..*~",
+		},
+		"twice": {
+			path: paths.Root().RecursiveAll().RecursiveAll(),
+			want: "$..*..*",
+		},
+		"after index all": {
+			path: paths.Root().Child("items").IndexAll().RecursiveAll(),
+			want: "$.items[*]..*",
+		},
+		"after child all": {
+			path: paths.Root().ChildAll().RecursiveAll(),
+			want: "$.*..*",
+		},
+		"after a recursive selector": {
+			path: paths.Root().Recursive("env").RecursiveAll(),
+			want: "$..env..*",
+		},
+		"after the recursive name star": {
+			path: paths.Root().Recursive("*").RecursiveAll(),
+			want: "$..'*'..*",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.path.String())
+
+			got, err := paths.Parse(tc.want)
+			require.NoError(t, err)
+			assert.Equal(t, tc.path, got)
+
+			// The goccy syntax takes a name alone after `..`.
+			yp, err := tc.path.YAMLPath()
+			require.ErrorIs(t, err, paths.ErrNoYAMLPath)
+			assert.Nil(t, yp)
+
+			_, err = yaml.PathString(tc.want)
+			require.Error(t, err)
+		})
+	}
+
+	t.Run("the name star is a recursive selector", func(t *testing.T) {
+		t.Parallel()
+
+		star := paths.Root().Recursive("*")
+
+		assert.False(t, paths.Root().RecursiveAll().Equal(star))
+		assert.Equal(t, "$..'*'", star.String())
+		assert.Equal(t, star, paths.MustParse("$..'*'"))
+	})
+
+	t.Run("YAMLPath names the path it cannot convert", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := paths.Root().Child("spec").RecursiveAll().YAMLPath()
+		require.EqualError(t, err, "convert $.spec..*: selector has no goccy/go-yaml equivalent")
+	})
+}
+
 func TestPath_Immutable(t *testing.T) {
 	t.Parallel()
 
@@ -507,6 +594,17 @@ func TestPath_CutPrefix(t *testing.T) {
 			want:   "$.*~",
 			ok:     true,
 		},
+		"recursive wildcard against a name": {
+			p:      paths.Root().Child("spec", "name"),
+			prefix: paths.Root().RecursiveAll(),
+			want:   "$.spec.name",
+		},
+		"recursive wildcard against itself": {
+			p:      paths.Root().Child("spec").RecursiveAll().Key(),
+			prefix: paths.Root().Child("spec").RecursiveAll(),
+			want:   "$~",
+			ok:     true,
+		},
 		"key against its value": {
 			p:      paths.Root().Child("spec").Key(),
 			prefix: paths.Root().Child("spec").Child("hours"),
@@ -612,6 +710,16 @@ func TestPath_Parent(t *testing.T) {
 		"key of a mapping wildcard": {
 			p:    paths.Root().Child("jobs").ChildAll().Key(),
 			want: "$.jobs.*",
+			ok:   true,
+		},
+		"recursive wildcard": {
+			p:    paths.Root().Child("spec").RecursiveAll(),
+			want: "$.spec",
+			ok:   true,
+		},
+		"key of a recursive wildcard": {
+			p:    paths.Root().RecursiveAll().Key(),
+			want: "$..*",
 			ok:   true,
 		},
 		"recursive": {
@@ -760,6 +868,19 @@ func TestPath_Equal(t *testing.T) {
 			p: paths.Root().ChildAll(),
 			q: paths.Root().IndexAll(),
 		},
+		"recursive wildcard and recursive wildcard": {
+			p:    paths.Root().Child("spec").RecursiveAll(),
+			q:    paths.MustParse("$.spec..*"),
+			want: true,
+		},
+		"recursive wildcard and the recursive name star": {
+			p: paths.Root().RecursiveAll(),
+			q: paths.Root().Recursive("*"),
+		},
+		"recursive wildcard and mapping wildcard": {
+			p: paths.Root().RecursiveAll(),
+			q: paths.Root().ChildAll(),
+		},
 		"child and recursive of one name": {
 			p: paths.Root().Child("a"),
 			q: paths.Root().Recursive("a"),
@@ -824,6 +945,10 @@ func TestPath_MarshalText(t *testing.T) {
 		"key of a mapping wildcard": {
 			p:    paths.Root().Child("jobs").ChildAll().Key(),
 			want: "$.jobs.*~",
+		},
+		"recursive wildcard": {
+			p:    paths.Root().Child("spec").RecursiveAll().Key(),
+			want: "$.spec..*~",
 		},
 		"sequence wildcard": {
 			p:    paths.Root().Child("items").IndexAll(),
@@ -914,6 +1039,10 @@ func TestPath_UnmarshalText(t *testing.T) {
 		"mapping wildcard and its key": {
 			text: "$.jobs.*~",
 			want: paths.Root().Child("jobs").ChildAll().Key(),
+		},
+		"recursive wildcard": {
+			text: "$..*.name",
+			want: paths.Root().RecursiveAll().Child("name"),
 		},
 		"sequence wildcard": {
 			text: "$.items[*].name",
@@ -1106,6 +1235,30 @@ func TestParse(t *testing.T) {
 			expr: "$.'*'",
 			want: "$.'*'",
 		},
+		"recursive wildcard": {
+			expr: "$..*",
+			want: "$..*",
+		},
+		"recursive wildcard then child": {
+			expr: "$.spec..*.name",
+			want: "$.spec..*.name",
+		},
+		"recursive wildcard then index": {
+			expr: "$..*[0]",
+			want: "$..*[0]",
+		},
+		"recursive wildcard then key selector": {
+			expr: "$..*~",
+			want: "$..*~",
+		},
+		"recursive wildcard twice": {
+			expr: "$..*..*",
+			want: "$..*..*",
+		},
+		"quoted recursive star is a name": {
+			expr: "$..'*'",
+			want: "$..'*'",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1172,8 +1325,17 @@ func TestParse_Invalid(t *testing.T) {
 		"two stars": {
 			expr: "$.**",
 		},
-		"recursive star": {
-			expr: "$..*",
+		"recursive star before a name": {
+			expr: "$..*a",
+		},
+		"recursive star after a name": {
+			expr: "$..a*",
+		},
+		"two recursive stars": {
+			expr: "$..**",
+		},
+		"recursive star before a quoted name": {
+			expr: "$..*'a'",
 		},
 		"star before a quoted name": {
 			expr: "$.*'a'",
@@ -1235,9 +1397,9 @@ func TestParse_ErrorMessage(t *testing.T) {
 			expr: "$.jobs.*a",
 			want: `parse path "$.jobs.*a": invalid path: unexpected '*' in selector "*a"`,
 		},
-		"recursive star": {
-			expr: "$..*",
-			want: `parse path "$..*": invalid path: unexpected '*' in selector "*"`,
+		"recursive star before a name": {
+			expr: "$..*a",
+			want: `parse path "$..*a": invalid path: unexpected '*' in selector "*a"`,
 		},
 		"index with a leading zero": {
 			expr: "$[01]",
@@ -2825,6 +2987,8 @@ func TestPath_Matches_HandBuiltTreeRecursive(t *testing.T) {
 	t.Parallel()
 
 	shared := &ast.StringNode{Value: "1"}
+	sharedMap := mapNode(mapEntry(&ast.StringNode{Value: "x"}, shared))
+	sharedSeq := &ast.SequenceNode{Values: []ast.Node{shared}}
 
 	tcs := map[string]struct {
 		body ast.Node
@@ -2856,6 +3020,39 @@ func TestPath_Matches_HandBuiltTreeRecursive(t *testing.T) {
 			),
 			path: "$..x~",
 			want: []string{"$.c.x~", "$.d.x~"},
+		},
+		"every entry sharing a value node": {
+			body: mapNode(
+				mapEntry(&ast.StringNode{Value: "c"}, shared),
+				mapEntry(&ast.StringNode{Value: "d"}, shared),
+			),
+			path: "$..*",
+			want: []string{"$.c", "$.d"},
+		},
+		"elements sharing a value node": {
+			body: mapNode(
+				mapEntry(&ast.StringNode{Value: "s"}, &ast.SequenceNode{Values: []ast.Node{shared, shared}}),
+			),
+			path: "$..*",
+			want: []string{"$.s", "$.s[0]", "$.s[1]"},
+		},
+		// A walk lists each entry and each element of a shared node once,
+		// at the first place it reaches them.
+		"entries of a mapping two entries share": {
+			body: mapNode(
+				mapEntry(&ast.StringNode{Value: "c"}, sharedMap),
+				mapEntry(&ast.StringNode{Value: "d"}, sharedMap),
+			),
+			path: "$..*",
+			want: []string{"$.c", "$.c.x", "$.d"},
+		},
+		"elements of a sequence two entries share": {
+			body: mapNode(
+				mapEntry(&ast.StringNode{Value: "c"}, sharedSeq),
+				mapEntry(&ast.StringNode{Value: "d"}, sharedSeq),
+			),
+			path: "$..*",
+			want: []string{"$.c", "$.c[0]", "$.d"},
 		},
 	}
 
@@ -2980,6 +3177,7 @@ func TestPath_Nodes_HandBuiltTreeTypedNil(t *testing.T) {
 		"every entry of a typed nil mapping":    paths.Root().Child("m").ChildAll(),
 		"every entry of each typed nil":         paths.Root().ChildAll().ChildAll(),
 		"recursive through typed nils":          paths.Root().Recursive("q"),
+		"every node below typed nils":           paths.Root().RecursiveAll(),
 	}
 
 	for name, path := range tcs {
@@ -3629,6 +3827,38 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 			input: aliasWideMerge(2000),
 			path:  paths.MustParse("$.l[*].*"),
 			err:   paths.ErrExcessiveMerging,
+		},
+		"every node over a merge chain": {
+			input: mergeChain(2000),
+			path:  paths.Root().RecursiveAll(),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"every node over an inline merge chain": {
+			input: inlineChain(2000),
+			path:  paths.Root().RecursiveAll(),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"every node over a merge of many aliases": {
+			input: wideMerge(2000, "*a"),
+			path:  paths.Root().RecursiveAll(),
+			err:   paths.ErrExcessiveMerging,
+		},
+		"every node over a short merge chain": {
+			input: mergeChain(10),
+			path:  paths.Root().RecursiveAll(),
+			want:  20,
+		},
+		"every node over a merge of a few aliases": {
+			input: wideMerge(10, "*a"),
+			path:  paths.Root().RecursiveAll(),
+			want:  13,
+		},
+		// The lookups of this walk read as many nodes under merge keys as
+		// those of a `..name` walk do.
+		"every node over many records that merge one list": {
+			input: records(400),
+			path:  paths.Root().RecursiveAll(),
+			want:  41001,
 		},
 		"every entry over a short merge chain": {
 			input: mergeChain(10),
@@ -4854,6 +5084,239 @@ func TestPath_Matches_ChildAll_Errors(t *testing.T) {
 			node, err := paths.MustParse(tc.named).Node(doc)
 			require.NoError(t, err)
 			assert.Equal(t, "1", node.String())
+		})
+	}
+}
+
+func TestPath_Matches_RecursiveAll(t *testing.T) {
+	t.Parallel()
+
+	// A `..*` selector visits what a `..name` selector visits and lists
+	// each node it visits, so the path of each match selects that match's
+	// node and reads back from its text.
+	dups := []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)}
+
+	tcs := map[string]struct {
+		input string
+		path  string
+		want  []string
+		opts  []niceyaml.SourceOption
+	}{
+		"every node in document order": {
+			input: "a: 1\nb: [x, {c: 2}]\nd: {e: {f: 3}}\n",
+			path:  "$..*",
+			want: []string{
+				"$.a=1", "$.b=[x, {c: 2}]", "$.b[0]=x", "$.b[1]={c: 2}", "$.b[1].c=2",
+				"$.d={e: {f: 3}}", "$.d.e={f: 3}", "$.d.e.f=3",
+			},
+		},
+		"below a child": {
+			input: "a: 1\nd: {e: {f: 3}}\n",
+			path:  "$.d..*",
+			want:  []string{"$.d.e={f: 3}", "$.d.e.f=3"},
+		},
+		"below a sequence": {
+			input: "- [a]\n- b\n",
+			path:  "$..*",
+			want:  []string{"$[0]=[a]", "$[0][0]=a", "$[1]=b"},
+		},
+		"through a tag on the start": {
+			input: "!!map {a: [1]}\n",
+			path:  "$..*",
+			want:  []string{"$.a=[1]", "$.a[0]=1"},
+		},
+		"through an alias on the start keeps the path as written": {
+			input: "a: &x {k: [1]}\nb: *x\n",
+			path:  "$.b..*",
+			want:  []string{"$.b.k=[1]", "$.b.k[0]=1"},
+		},
+		"aliases below the start are not followed": {
+			input: "a: &x {k: 1}\nb: *x\nc: [*x]\n",
+			path:  "$..*",
+			want:  []string{"$.a={k: 1}", "$.a.k=1", "$.b={k: 1}", "$.c=[*x]", "$.c[0]={k: 1}"},
+		},
+		"anchors and tags below the start": {
+			input: "a: &x !!map {k: !!str 1}\n",
+			path:  "$..*",
+			want:  []string{"$.a=!!map {k: !!str 1}", "$.a.k=!!str 1"},
+		},
+		"scalar has nothing below it": {
+			input: "a: 1\n",
+			path:  "$.a..*",
+		},
+		"empty collections have nothing below them": {
+			input: "a: {}\nb: []\n",
+			path:  "$..*",
+			want:  []string{"$.a={}", "$.b=[]"},
+		},
+		"missing key has nothing below it": {
+			input: "a: 1\n",
+			path:  "$.b..*",
+		},
+		"key of each node": {
+			input: "a: [x]\nb: {c: 1}\n",
+			path:  "$..*~",
+			want:  []string{"$.a~=a", "$.a[0]~=x", "$.b~=b", "$.b.c~=c"},
+		},
+		"then a child": {
+			input: "a: {b: 1}\nc: [{b: 2}]\n",
+			path:  "$..*.b",
+			want:  []string{"$.a.b=1", "$.c[0].b=2"},
+		},
+		"twice lists each node once": {
+			input: "a: [x, [y]]\nb: {c: 1}\n",
+			path:  "$..*..*",
+			want:  []string{"$.a[0]=x", "$.a[1]=[y]", "$.a[1][0]=y", "$.b.c=1"},
+		},
+		"twice through an alias lists each node once": {
+			input: "a: &x {k: 1}\nb: *x\n",
+			path:  "$..*..*",
+			want:  []string{"$.a.k=1"},
+		},
+		"below each recursive match": {
+			input: "x:\n  env: {A: 1}\ny:\n  env: {B: [2]}\n",
+			path:  "$..env..*",
+			want:  []string{"$.x.env.A=1", "$.y.env.B=[2]", "$.y.env.B[0]=2"},
+		},
+		"keys the decoder respells keep the names a selector matches": {
+			input: "0x10: a\n3.10: b\n'q x': c\n",
+			path:  "$..*",
+			want:  []string{"$.0x10=a", "$.'3.10'=b", "$.'q x'=c"},
+		},
+		"key with no name is left out with everything below it": {
+			input: "*nope : {name: 1}\nb: {name: 2}\n",
+			path:  "$..*",
+			want:  []string{"$.b={name: 2}", "$.b.name=2"},
+		},
+		"merged entries are not listed under the mapping that merges them": {
+			input: "base: &b {k: 1}\nm: {<<: *b, j: 2}\n",
+			path:  "$..*",
+			want:  []string{"$.base={k: 1}", "$.base.k=1", "$.m={<<: *b, j: 2}", "$.m.j=2"},
+		},
+		"inline merge source": {
+			input: "m: {<<: {k: 1}, j: 2}\n",
+			path:  "$..*",
+			want:  []string{"$.m={<<: {k: 1}, j: 2}", "$.m.<<.k=1", "$.m.j=2"},
+		},
+		"sequence of merge sources": {
+			input: "b: &b {x: 1}\nm: {<<: [{k: 1}, *b], j: 2}\n",
+			path:  "$..*",
+			want:  []string{"$.b={x: 1}", "$.b.x=1", "$.m={<<: [{k: 1}, *b], j: 2}", "$.m.<<[0].k=1", "$.m.j=2"},
+		},
+		"from the sources of a merge key": {
+			input: "b: &b {x: 1}\nm: {<<: [{k: 1}, *b]}\n",
+			path:  "$.m.'<<'..*",
+			want:  []string{"$.m.<<[0].k=1"},
+		},
+		"entry that a later merge key overrides": {
+			input: "base: &b {k: 1}\nm: {k: 0, <<: *b}\n",
+			path:  "$..*",
+			want:  []string{"$.base={k: 1}", "$.base.k=1", "$.m={k: 0, <<: *b}"},
+		},
+		"real key with the text of a merge key": {
+			input: "x: &m '<<'\nm: {<<: {k: 1}, *m : 2}\n",
+			path:  "$..*",
+			want:  []string{"$.x='<<'", "$.m={<<: {k: 1}, *m: 2}", "$.m.<<=2"},
+		},
+		"later duplicate key wins": {
+			input: "a: {x: 1}\na: [2]\n",
+			path:  "$..*",
+			want:  []string{"$.a=[2]", "$.a[0]=2"},
+			opts:  dups,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).File()
+			require.NoError(t, err)
+
+			doc := file.Docs[0]
+			path := paths.MustParse(tc.path)
+
+			matches, err := path.Matches(doc)
+			require.NoError(t, err)
+
+			var got []string
+
+			for _, m := range matches {
+				got = append(got, m.Path.String()+"="+m.Node.String())
+			}
+
+			assert.Equal(t, tc.want, got)
+
+			nodes, err := path.Nodes(doc)
+			require.NoError(t, err)
+			require.Len(t, nodes, len(matches))
+
+			for i, m := range matches {
+				assert.Same(t, nodes[i], m.Node)
+
+				single, err := m.Path.Node(doc)
+				require.NoError(t, err)
+				assert.Same(t, m.Node, single)
+
+				parsed, err := paths.Parse(m.Path.String())
+				require.NoError(t, err)
+				assert.Equal(t, m.Path, parsed)
+			}
+		})
+	}
+}
+
+func TestPath_Matches_RecursiveAll_Errors(t *testing.T) {
+	t.Parallel()
+
+	// A `..*` selector lists every value below the node it starts from, so
+	// an alias there that does not resolve is an error, where a `..name`
+	// selector that lists no such value finds its entries.
+	tcs := map[string]struct {
+		input string
+		path  string
+		named string
+	}{
+		"alias with no anchor below the start": {
+			input: "a: {b: *missing}\nc: {name: 1}\n",
+			path:  "$..*",
+			named: "$..name",
+		},
+		"alias with no anchor as the start": {
+			input: "m: *missing\n",
+			path:  "$.m..*",
+		},
+		"alias inside its own anchor": {
+			input: "a: &x [*x]\nc: {name: 1}\n",
+			path:  "$..*",
+			named: "$..name",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input).File()
+			require.NoError(t, err)
+
+			doc := file.Docs[0]
+			path := paths.MustParse(tc.path)
+
+			_, err = path.Matches(doc)
+			require.ErrorIs(t, err, paths.ErrAlias)
+
+			_, err = path.Nodes(doc)
+			require.ErrorIs(t, err, paths.ErrAlias)
+
+			if tc.named == "" {
+				return
+			}
+
+			nodes, err := paths.MustParse(tc.named).Nodes(doc)
+			require.NoError(t, err)
+			require.Len(t, nodes, 1)
+			assert.Equal(t, "1", nodes[0].String())
 		})
 	}
 }

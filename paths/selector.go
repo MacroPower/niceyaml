@@ -21,6 +21,9 @@ const (
 	// SelectorRecursive is the `..name` selector, which [Path.Recursive]
 	// appends.
 	SelectorRecursive
+	// SelectorRecursiveAll is the `..*` selector, which
+	// [Path.RecursiveAll] appends.
+	SelectorRecursiveAll
 	// SelectorKey is the `~` selector, which [Path.Key] appends.
 	SelectorKey
 )
@@ -79,6 +82,8 @@ func (s Selector) segment() (segment, bool) {
 		seg.kind = segmentIndexAll
 	case SelectorRecursive:
 		seg.kind = segmentRecursive
+	case SelectorRecursiveAll:
+		seg.kind = segmentRecursiveAll
 	case SelectorKey:
 		seg.kind = segmentKey
 	default:
@@ -104,6 +109,8 @@ func (s segment) selector() Selector {
 		return Selector{Kind: SelectorKey}
 	case segmentChildAll:
 		return Selector{Kind: SelectorChildAll}
+	case segmentRecursiveAll:
+		return Selector{Kind: SelectorRecursiveAll}
 	default:
 		return Selector{}
 	}

@@ -99,12 +99,20 @@
 // the source does, so the entry under the key `0x10` lies at
 // `$.ports.0x10`, where a decoded map holds it under 16.
 //
-// The wildcard selectors `.*`, `[*]`, and `..name` select any number of
-// nodes, so [Path.Token] and [Path.Node] reject them with [ErrWildcard].
-// Use [Path.Nodes] to list every match. [ErrNotFound] means nothing exists
-// at the path, and [ErrAlias] means an alias on the path names no anchor
-// or forms a cycle. When the document has no content to resolve in, the
-// error wraps [ErrNoDocument] along with ErrNotFound.
+// A `..*` selector selects every node below the one it starts from, at any
+// depth, so one path reaches each key and each element of a document. It
+// visits what a `..name` selector visits, so it lists each node once,
+// where the source writes it, and does not follow aliases. It leaves out
+// the entry of a `<<` merge key and the sources that key lists, as `.*`
+// leaves out the merge key, and lists the entries of a mapping written
+// inline there.
+//
+// The wildcard selectors `.*`, `[*]`, `..name`, and `..*` select any
+// number of nodes, so [Path.Token] and [Path.Node] reject them with
+// [ErrWildcard]. Use [Path.Nodes] to list every match. [ErrNotFound] means
+// nothing exists at the path, and [ErrAlias] means an alias on the path
+// names no anchor or forms a cycle. When the document has no content to
+// resolve in, the error wraps [ErrNoDocument] along with ErrNotFound.
 //
 // A `[*]` selector lists the elements of a sequence once for each alias
 // that leads to it, as a `.*` selector lists the entries of a mapping, so
@@ -164,6 +172,7 @@
 //	paths.Root().Child("spec").IndexAll()               // $.spec[*]
 //	paths.Root().Child("jobs").ChildAll()               // $.jobs.*
 //	paths.Root().Recursive("name")                      // $..name
+//	paths.Root().RecursiveAll()                         // $..*
 //	paths.Root().Child("spec").Key()                    // $.spec~
 //
 // A Path is a value that never changes, so callers can share a common
@@ -225,6 +234,7 @@
 //	}
 //
 // For the goccy/go-yaml API, [Path.YAMLPath] converts the selectors to a
-// [*yaml.Path]. That syntax has no `.*` selector, so a path that holds one
-// does not convert, and YAMLPath returns an error wrapping [ErrNoYAMLPath].
+// [*yaml.Path]. That syntax has no `.*` or `..*` selector, so a path that
+// holds one does not convert, and YAMLPath returns an error wrapping
+// [ErrNoYAMLPath].
 package paths

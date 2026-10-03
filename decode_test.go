@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -4172,6 +4173,17 @@ func TestDocument_At(t *testing.T) {
 		assert.Nil(t, got)
 	})
 
+	t.Run("recursive wildcard path returns ErrWildcard", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "jobs:\n  build: 1\n")
+
+		got, err := dd.At(paths.Root().RecursiveAll())
+		require.ErrorIs(t, err, paths.ErrWildcard)
+		require.NotErrorIs(t, err, paths.ErrNotFound)
+		assert.Nil(t, got)
+	})
+
 	t.Run("type mismatch returns Error", func(t *testing.T) {
 		t.Parallel()
 
@@ -7915,6 +7927,67 @@ func TestNode_Nodes(t *testing.T) {
 		got, err := images[1].Decode[string](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, "b", got)
+	})
+
+	t.Run("scopes every node at any depth", func(t *testing.T) {
+		t.Parallel()
+
+		config, err := niceyaml.NewSourceFromString(stringtest.Input(`
+			defaults: &defaults
+			  logLevel: info
+			server:
+			  <<: *defaults
+			  listen_addr: ":80"
+			  TLS:
+			    cert_file: a.pem
+			routes:
+			  - match: /api
+			    upstreamURL: http://api
+			  - *defaults
+		`), niceyaml.WithName("c.yaml")).Document()
+		require.NoError(t, err)
+
+		nodes, err := config.Nodes(paths.Root().RecursiveAll())
+		require.NoError(t, err)
+
+		var gotPaths []string
+
+		for _, n := range nodes {
+			gotPaths = append(gotPaths, n.Path().String())
+		}
+
+		// The merged key and the alias are listed where the source writes
+		// them, not again where they are used.
+		assert.Equal(t, []string{
+			"$.defaults", "$.defaults.logLevel",
+			"$.server", "$.server.listen_addr", "$.server.TLS", "$.server.TLS.cert_file",
+			"$.routes", "$.routes[0]", "$.routes[0].match", "$.routes[0].upstreamURL", "$.routes[1]",
+		}, gotPaths)
+
+		snake := regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+
+		var errs []error
+
+		for _, n := range nodes {
+			sel, ok := n.Path().Last()
+			if ok && sel.Kind == paths.SelectorChild && !snake.MatchString(sel.Name) {
+				errs = append(errs, config.Bind(niceyaml.NewError(
+					fmt.Sprintf("key %q is not snake_case", sel.Name),
+					niceyaml.AtPath(n.Path().Key()),
+				)))
+			}
+		}
+
+		got := make([]string, 0, len(errs))
+		for _, err := range errs {
+			got = append(got, err.Error())
+		}
+
+		assert.Equal(t, []string{
+			`c.yaml:2:3: $.defaults.logLevel~: key "logLevel" is not snake_case`,
+			`c.yaml:6:3: $.server.TLS~: key "TLS" is not snake_case`,
+			`c.yaml:10:5: $.routes[0].upstreamURL~: key "upstreamURL" is not snake_case`,
+		}, got)
 	})
 
 	t.Run("scopes each entry of a mapping", func(t *testing.T) {

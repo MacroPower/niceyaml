@@ -16,10 +16,12 @@ import (
 
 // match is one node a path resolved to. The entry field holds the mapping
 // entry that holds the node when the last selector picked a mapping key.
-// The segs field holds the selectors that name the node alone. Those are
-// the ones applied so far, with a `[*]` replaced by the index it matched,
-// a `.*` by the name of the entry it matched, and a `..name` by the
-// selectors down to the entry it found.
+// The seq field holds the sequence that holds the node when a `..*`
+// selector found it as an element. The segs field holds the selectors
+// that name the node alone. Those are the ones applied so far, with a
+// `[*]` replaced by the index it matched, a `.*` by the name of the entry
+// it matched, and a `..name` or `..*` by the selectors down to the node it
+// found.
 //
 // The order field holds one place for each step of the walk that reached
 // the node. A step into a mapping adds the index of the entry, a step into
@@ -31,6 +33,7 @@ import (
 type match struct {
 	node  ast.Node
 	entry *ast.MappingValueNode
+	seq   *ast.SequenceNode
 	segs  []segment
 	order []int
 }
@@ -891,12 +894,12 @@ func (r *resolver) follow(node ast.Node, followed map[*ast.AliasNode]bool) (ast.
 // resolve applies segs to root and returns every match, in document order
 // along the path.
 //
-// A recursive selector can reach one entry from several matches, such as
-// when one match lies inside another or two aliases share an anchor.
-// Resolve keeps the first match of each entry, so a recursive selector
-// yields each entry once. Only a recursive selector drops repeats, so a
-// later `.name`, `.*`, `[n]`, or `[*]` selector can still reach one node
-// through several aliases.
+// A recursive selector can reach one entry or element from several
+// matches, such as when one match lies inside another or two aliases share
+// an anchor. Resolve keeps the first match of each, so a recursive
+// selector yields each entry or element once. Only a recursive selector
+// drops repeats, so a later `.name`, `.*`, `[n]`, or `[*]` selector can
+// still reach one node through several aliases.
 //
 // Returns [ErrExcessiveAliasing] once the matches of one selector pass the
 // limit [resolver.excessive] applies. Resolve checks after each match the
@@ -920,8 +923,8 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 				next = append(next, m.key())
 			}
 
-		case segmentRecursive:
-			found, err := r.recurse(matches, seg.name)
+		case segmentRecursive, segmentRecursiveAll:
+			found, err := r.recurse(matches, seg)
 			if err != nil {
 				return nil, err
 			}
@@ -949,7 +952,7 @@ func (r *resolver) resolve(root ast.Node, segs []segment) ([]match, error) {
 			return slices.Compare(a.order, b.order)
 		})
 
-		if seg.kind == segmentRecursive {
+		if seg.kind == segmentRecursive || seg.kind == segmentRecursiveAll {
 			next = uniqueMatches(next)
 		}
 
@@ -1006,24 +1009,42 @@ func (r *resolver) excessiveMerging(reads int) bool {
 	return reads > max(mergeReadFloor, mergeReadFactor*r.nodes)
 }
 
-// uniqueMatches returns the first match of each entry, in the order
-// matches holds them. It compares the entries rather than their values,
-// so two entries of a hand-built tree that share one value node, or that
-// both hold nil, count as two matches.
+// uniqueMatches returns the first match of each entry or element, in the
+// order matches holds them. It compares the entries, and the sequence and
+// index of the elements, rather than their values, so two entries or two
+// elements of a hand-built tree that share one value node, or that both
+// hold nil, count as two matches.
 func uniqueMatches(matches []match) []match {
-	seen := make(map[*ast.MappingValueNode]bool, len(matches))
+	seen := make(map[matchID]bool, len(matches))
 	unique := make([]match, 0, len(matches))
 
 	for _, m := range matches {
-		if seen[m.entry] {
+		id := matchID{entry: m.entry}
+		if m.seq != nil {
+			id.seq, id.index = m.seq, m.segs[len(m.segs)-1].index
+		}
+
+		if seen[id] {
 			continue
 		}
 
-		seen[m.entry] = true
+		seen[id] = true
+
 		unique = append(unique, m)
 	}
 
 	return unique
+}
+
+// matchID identifies the entry or the element a recursive selector found,
+// for [uniqueMatches]. An entry sets entry alone, and an element sets the
+// sequence that holds it and its index there.
+//
+//nolint:unused // The fields tell the keys of the set apart.
+type matchID struct {
+	entry *ast.MappingValueNode
+	seq   *ast.SequenceNode
+	index int
 }
 
 // apply applies one `.name`, `.*`, `[n]`, or `[*]` selector to the node of
@@ -1464,11 +1485,11 @@ func (r *resolver) mergeSources(buf []*ast.MappingNode, value ast.Node) ([]*ast.
 	}
 }
 
-// recurse applies the `..name` selector to each of matches, in order, and
-// returns every entry it finds below each, in the order it finds them.
-// It returns an error wrapping [ErrAlias] when the node of a match is an
-// alias that does not resolve, and [ErrExcessiveMerging] when the key
-// lookups of the walk read too many nodes under merge keys, as
+// recurse applies seg, a `..name` or `..*` selector, to each of matches,
+// in order, and returns every node it finds below each, in the order it
+// finds them. It returns an error wrapping [ErrAlias] when the node of a
+// match is an alias that does not resolve, and [ErrExcessiveMerging] when
+// the key lookups of the walk read too many nodes under merge keys, as
 // [recursiveWalk.descend] describes.
 //
 // A walk from one match can reach the start of another, such as when one
@@ -1480,10 +1501,11 @@ func (r *resolver) mergeSources(buf []*ast.MappingNode, value ast.Node) ([]*ast.
 // walk stops at the start of an earlier match whose order covers the walk
 // there. On a chain of nested matches the first walk thus covers the rest,
 // and the step costs one walk rather than one for each match.
-func (r *resolver) recurse(matches []match, name string) ([]match, error) {
+func (r *resolver) recurse(matches []match, seg segment) ([]match, error) {
 	w := &recursiveWalk{
 		resolver: r,
-		name:     name,
+		name:     seg.name,
+		all:      seg.kind == segmentRecursiveAll,
 		from:     matches,
 		starts:   make(map[ast.Node][]int, len(matches)),
 		skip:     make([]bool, len(matches)),
@@ -1517,7 +1539,11 @@ func (r *resolver) recurse(matches []match, name string) ([]match, error) {
 		w.order = slices.Clip(m.order)
 		w.heldSegs, w.heldOrder = 0, 0
 
-		err := w.descend(contents[i])
+		// A match of `.'<<'` or `..'<<'` starts at the sources of a merge
+		// key.
+		sources := m.entry != nil && isMergeKey(m.entry.Key)
+
+		err := w.descend(contents[i], sources)
 		if err != nil {
 			return nil, err
 		}
@@ -1542,8 +1568,10 @@ func covers(a, b []int) bool {
 	return len(a) == len(b)
 }
 
-// recursiveWalk walks the subtrees of the matches one `..name` selector
-// applies to, as [resolver.recurse] describes.
+// recursiveWalk walks the subtrees of the matches one `..name` or `..*`
+// selector applies to, as [resolver.recurse] describes. The name field
+// holds the name of a `..name` selector, and the all field reports a `..*`
+// selector.
 //
 // The from field holds those matches, and the starts field maps the
 // content each one starts from to its indexes in from. The cur field is
@@ -1572,13 +1600,21 @@ type recursiveWalk struct {
 	cur       int
 	heldSegs  int
 	heldOrder int
+	all       bool
 }
 
 // descend collects every mapping entry keyed name at any depth below node, in
-// document order. It looks through anchors and tags but not aliases, so it
-// visits an entry of the source at most once, at its definition. It skips a
-// mapping or sequence that the walk of another match covers, as
-// [resolver.recurse] describes.
+// document order, or for a `..*` selector every entry and every element of
+// a sequence, each before the nodes below it. It looks through anchors and
+// tags but not aliases, so it visits an entry of the source at most once,
+// at its definition. It skips a mapping or sequence that the walk of
+// another match covers, as [resolver.recurse] describes.
+//
+// The sources flag reports that node is the value of a `<<` merge key. A
+// `..*` selector leaves out the entry of a merge key, and each element of
+// a sequence that lists the sources of one, since those are sources of
+// entries rather than entries. Descend still walks them, so it lists the
+// entries of a mapping written inline there.
 //
 // For each entry and element it visits, descend pushes the selector and
 // the place of that step onto the stacks. Before it returns, descend cuts
@@ -1602,7 +1638,7 @@ type recursiveWalk struct {
 // the mappings they bring in. Returns [ErrExcessiveMerging] once the
 // lookups of the walk read past the limit [resolver.excessiveMerging]
 // applies.
-func (w *recursiveWalk) descend(node ast.Node) error {
+func (w *recursiveWalk) descend(node ast.Node, sources bool) error {
 	if astnode.IsNil(node) {
 		return nil
 	}
@@ -1638,12 +1674,12 @@ func (w *recursiveWalk) descend(node ast.Node) error {
 
 			w.push(segsDepth, orderDepth, segment{kind: segmentChild, name: key}, i)
 
-			if key == w.name {
+			if w.lists(entry, key) {
 				segs, order := w.hold()
 				w.found = append(w.found, match{node: entry.Value, entry: entry, segs: segs, order: order})
 			}
 
-			err = w.descend(entry.Value)
+			err = w.descend(entry.Value, isMergeKey(entry.Key))
 			if err != nil {
 				return err
 			}
@@ -1657,22 +1693,38 @@ func (w *recursiveWalk) descend(node ast.Node) error {
 		for i, v := range n.Values {
 			w.push(segsDepth, orderDepth, segment{kind: segmentIndex, index: i}, i)
 
-			err := w.descend(v)
+			if w.all && !sources {
+				segs, order := w.hold()
+				w.found = append(w.found, match{node: v, seq: n, segs: segs, order: order})
+			}
+
+			err := w.descend(v, false)
 			if err != nil {
 				return err
 			}
 		}
 
 	case *ast.AnchorNode:
-		return w.descend(n.Value)
+		return w.descend(n.Value, sources)
 	case *ast.TagNode:
-		return w.descend(n.Value)
+		return w.descend(n.Value, sources)
 	}
 
 	w.segs = w.segs[:segsDepth]
 	w.order = w.order[:orderDepth]
 
 	return nil
+}
+
+// lists reports whether the walk lists entry, whose key has the name key.
+// A `..name` selector lists an entry with that name, and a `..*` selector
+// lists every entry other than a `<<` merge key.
+func (w *recursiveWalk) lists(entry *ast.MappingValueNode, key string) bool {
+	if w.all {
+		return !isMergeKey(entry.Key)
+	}
+
+	return key == w.name
 }
 
 // covered reports whether the walk of an earlier match covers node, so

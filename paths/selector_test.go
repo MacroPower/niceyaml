@@ -65,6 +65,10 @@ func TestSelector_String(t *testing.T) {
 			sel:  paths.Selector{Kind: paths.SelectorRecursive, Name: "a.b"},
 			want: "..'a.b'",
 		},
+		"recursive wildcard": {
+			sel:  paths.Selector{Kind: paths.SelectorRecursiveAll},
+			want: "..*",
+		},
 		"key": {
 			sel:  paths.Selector{Kind: paths.SelectorKey},
 			want: "~",
@@ -159,6 +163,18 @@ func TestPath_Selectors(t *testing.T) {
 			expr: "$..'x y'",
 			want: []paths.Selector{{Kind: paths.SelectorRecursive, Name: "x y"}},
 		},
+		"recursive wildcard": {
+			expr: "$.spec..*.name",
+			want: []paths.Selector{
+				{Kind: paths.SelectorChild, Name: "spec"},
+				{Kind: paths.SelectorRecursiveAll},
+				{Kind: paths.SelectorChild, Name: "name"},
+			},
+		},
+		"recursive name star": {
+			expr: "$..'*'",
+			want: []paths.Selector{{Kind: paths.SelectorRecursive, Name: "*"}},
+		},
 		"key": {
 			expr: "$.jobs.build~",
 			want: []paths.Selector{
@@ -180,13 +196,14 @@ func TestPath_Selectors(t *testing.T) {
 			want: []paths.Selector{{Kind: paths.SelectorKey}},
 		},
 		"every kind": {
-			expr: "$.a.*[1][*]..b~",
+			expr: "$.a.*[1][*]..b..*~",
 			want: []paths.Selector{
 				{Kind: paths.SelectorChild, Name: "a"},
 				{Kind: paths.SelectorChildAll},
 				{Kind: paths.SelectorIndex, Index: 1},
 				{Kind: paths.SelectorIndexAll},
 				{Kind: paths.SelectorRecursive, Name: "b"},
+				{Kind: paths.SelectorRecursiveAll},
 				{Kind: paths.SelectorKey},
 			},
 		},
@@ -240,7 +257,7 @@ func TestPath_Selectors(t *testing.T) {
 	t.Run("builders", func(t *testing.T) {
 		t.Parallel()
 
-		p := paths.Root().Child("spec", "a.b").Index(-1, 2).ChildAll().IndexAll().Recursive("").Key()
+		p := paths.Root().Child("spec", "a.b").Index(-1, 2).ChildAll().IndexAll().Recursive("").RecursiveAll().Key()
 
 		assert.Equal(t, []paths.Selector{
 			{Kind: paths.SelectorChild, Name: "spec"},
@@ -250,6 +267,7 @@ func TestPath_Selectors(t *testing.T) {
 			{Kind: paths.SelectorChildAll},
 			{Kind: paths.SelectorIndexAll},
 			{Kind: paths.SelectorRecursive},
+			{Kind: paths.SelectorRecursiveAll},
 			{Kind: paths.SelectorKey},
 		}, slices.Collect(p.Selectors()))
 		assert.True(t, buildPath(t, p.Selectors()).Equal(p))
@@ -274,6 +292,8 @@ func buildPath(t *testing.T, sels iter.Seq[paths.Selector]) paths.Path {
 			p = p.IndexAll()
 		case paths.SelectorRecursive:
 			p = p.Recursive(sel.Name)
+		case paths.SelectorRecursiveAll:
+			p = p.RecursiveAll()
 		case paths.SelectorKey:
 			p = p.Key()
 		default:
@@ -324,6 +344,11 @@ func TestPath_Last(t *testing.T) {
 		"recursive": {
 			p:    paths.Root().Recursive("name"),
 			want: paths.Selector{Kind: paths.SelectorRecursive, Name: "name"},
+			ok:   true,
+		},
+		"recursive wildcard": {
+			p:    paths.Root().RecursiveAll(),
+			want: paths.Selector{Kind: paths.SelectorRecursiveAll},
 			ok:   true,
 		},
 		"key": {
@@ -434,6 +459,20 @@ func TestPath_Last_Matches(t *testing.T) {
 			),
 			expr: "$..name",
 			want: []paths.Selector{{Kind: paths.SelectorChild, Name: "name"}},
+		},
+		"recursive wildcard": {
+			input: stringtest.JoinLF(
+				"spec:",
+				"  containers:",
+				"    - name: app",
+			),
+			expr: "$..*",
+			want: []paths.Selector{
+				{Kind: paths.SelectorChild, Name: "spec"},
+				{Kind: paths.SelectorChild, Name: "containers"},
+				{Kind: paths.SelectorIndex},
+				{Kind: paths.SelectorChild, Name: "name"},
+			},
 		},
 		"keys": {
 			input: stringtest.JoinLF(
