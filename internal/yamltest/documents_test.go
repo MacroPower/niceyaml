@@ -26,6 +26,21 @@ func TestDocumentHelpers(t *testing.T) {
 		assert.Equal(t, 0, doc.DocumentIndex())
 	})
 
+	t.Run("FirstDocument with options", func(t *testing.T) {
+		t.Parallel()
+
+		var tb testing.TB = t
+
+		refs := niceyaml.NewSourceFromString("base: &x 1\n")
+		doc := yamltest.FirstDocument(tb, "a: *x\n", niceyaml.WithName("app.yaml"), niceyaml.WithReferences(refs))
+
+		got, err := doc.Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+
+		assert.Equal(t, map[string]int{"a": 1}, got)
+		assert.Equal(t, "app.yaml", doc.Source().Name())
+	})
+
 	t.Run("FirstDocumentWithPath", func(t *testing.T) {
 		t.Parallel()
 

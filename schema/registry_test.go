@@ -1703,29 +1703,33 @@ func TestRegistry_Validator_ErrorBoundToReceiver(t *testing.T) {
 		schema.Embedded([]byte(`{"properties": {"replicas": {"type": "integer"}}}`)),
 	)))
 
-	// A decode with go-yaml options hands the registry a copy of the
-	// document, and the registry binds its errors through that copy.
+	// The registry gets the document the decode runs on, whatever options
+	// the source and the decode hold, and binds its errors through it.
+	refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n"))
+	ordered := niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())
+
 	tcs := map[string]struct {
-		input string
-		opt   niceyaml.DecodeOption
-		err   error
+		input  string
+		source []niceyaml.SourceOption
+		opts   []niceyaml.DecodeOption
+		err    error
 	}{
 		"rejected with references": {
-			input: "kind: Deployment\nreplicas: many\n",
-			opt:   niceyaml.WithReferences([]byte("base: &x 1\n")),
+			input:  "kind: Deployment\nreplicas: many\n",
+			source: []niceyaml.SourceOption{refs},
 		},
 		"rejected with yaml options": {
 			input: "kind: Deployment\nreplicas: many\n",
-			opt:   niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()),
+			opts:  []niceyaml.DecodeOption{ordered},
 		},
 		"unmatched with references": {
-			input: "kind: Service\n",
-			opt:   niceyaml.WithReferences([]byte("base: &x 1\n")),
-			err:   schema.ErrNoMatch,
+			input:  "kind: Service\n",
+			source: []niceyaml.SourceOption{refs},
+			err:    schema.ErrNoMatch,
 		},
 		"unmatched with yaml options": {
 			input: "kind: Service\n",
-			opt:   niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()),
+			opts:  []niceyaml.DecodeOption{ordered},
 			err:   schema.ErrNoMatch,
 		},
 	}
@@ -1734,8 +1738,8 @@ func TestRegistry_Validator_ErrorBoundToReceiver(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
-			dec := niceyaml.NewDecoder(tc.opt, niceyaml.WithValidator(reg))
+			doc := yamltest.FirstDocument(t, tc.input, tc.source...)
+			dec := niceyaml.NewDecoder(append(slices.Clone(tc.opts), niceyaml.WithValidator(reg))...)
 
 			_, decodeErr := dec.Decode[any](t.Context(), doc)
 			validateErr := dec.Validate(t.Context(), doc)

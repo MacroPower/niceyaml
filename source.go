@@ -1,6 +1,7 @@
 package niceyaml
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -93,10 +94,13 @@ type Source struct {
 	docs             []*Node
 	parserOpts       []parser.Option
 	decodeOpts       []yaml.DecodeOption
-	streamOnce       sync.Once
-	fileOnce         sync.Once
-	docsOnce         sync.Once
-	decodeFileOnce   sync.Once
+	// Holds the text of each reference document from WithReferences, in
+	// the order every decode reads them.
+	references     [][]byte
+	streamOnce     sync.Once
+	fileOnce       sync.Once
+	docsOnce       sync.Once
+	decodeFileOnce sync.Once
 	// Accepts a mapping with the same key twice when parsing and decoding.
 	allowDuplicateKeys bool
 }
@@ -107,11 +111,15 @@ type Source struct {
 //   - [WithName]
 //   - [WithFilePath]
 //   - [WithAllowDuplicateKeys]
+//   - [WithReferences]
 //   - [WithYAMLParserOptions]
 //
-// Settings that only affect decoding, such as [WithDisallowUnknownFields],
-// are [DecodeOption] values. A caller passes them to [Node.Decode], or to
-// [NewDecoder] for a [Decoder] that decodes every document with them.
+// [WithAllowDuplicateKeys] and [WithReferences] change what the documents
+// mean, so the Source applies them to every decode and every validation
+// of its documents. Settings of one decode, such as
+// [WithDisallowUnknownFields], are [DecodeOption] values. A caller passes
+// them to [Node.Decode], or to [NewDecoder] for a [Decoder] that decodes
+// every document with them.
 type SourceOption func(*Source)
 
 // WithName is a [SourceOption] that sets the name for the [Source], which
@@ -143,6 +151,75 @@ func WithFilePath(path string) SourceOption {
 func WithAllowDuplicateKeys(allow bool) SourceOption {
 	return func(s *Source) {
 		s.allowDuplicateKeys = allow
+	}
+}
+
+// WithReferences is a [SourceOption] that lets an alias in the documents
+// of the [Source] name an anchor that the documents of refs define, such
+// as a file of shared defaults:
+//
+//	defaults, err := niceyaml.NewSourceFromFile("defaults.yaml")
+//	if err != nil {
+//		return err
+//	}
+//
+//	source, err := niceyaml.NewSourceFromFile("app.yaml", niceyaml.WithReferences(defaults))
+//	if err != nil {
+//		return err
+//	}
+//
+//	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(reg))
+//
+// The references change what an alias means, so the Source applies them
+// wherever one of its documents decodes: [Node.Decode], [Node.Validate],
+// [Node.SelfValidate], [Source.ValidateDocuments], every [Decoder], and
+// the decode a [Validator] runs on the Node it gets. A schema thus reads
+// `server: *base` as the decode does, and a check of the whole file
+// reports what a decode of each document reports.
+//
+// An alias reads an anchor of refs only when no anchor of its name comes
+// before it in its own document, as [Node.DecodeInto] describes. Each
+// decode reads the documents of refs in the order given, so an anchor of
+// a later document overrides one of the same name in an earlier one. A
+// Source in refs brings its own references, ahead of its own documents,
+// so its aliases resolve as they do in its own decodes.
+// WithReferences skips a nil Source. A reference document that does not
+// parse fails every decode of the Source.
+//
+// The references reach the decoder alone. A path resolves in the document
+// itself, so [Node.At] and [Node.Nodes] return an error wrapping
+// [go.jacobcolvin.com/niceyaml/paths.ErrAlias] for a path that reaches an
+// alias to a reference document. An error whose path leads into a
+// reference document binds with no position, so its message names the
+// source and the path alone.
+//
+// A reference that [WithYAMLDecodeOptions] passes to one decode, such as
+// [yaml.ReferenceFiles], reaches that decode alone, and an anchor it
+// defines wins over one of the same name in refs.
+func WithReferences(refs ...*Source) SourceOption {
+	return func(s *Source) {
+		for _, ref := range refs {
+			if ref == nil {
+				continue
+			}
+
+			s.references = append(s.references, ref.references...)
+			s.references = append(s.references, ref.text())
+		}
+	}
+}
+
+// referenceReaders returns a go-yaml option that hands the decoder a new
+// reader over each of docs, so every decode reads the documents from the
+// start.
+func referenceReaders(docs [][]byte) yaml.DecodeOption {
+	return func(d *yaml.Decoder) error {
+		readers := make([]io.Reader, len(docs))
+		for i, doc := range docs {
+			readers[i] = bytes.NewReader(doc)
+		}
+
+		return yaml.ReferenceReaders(readers...)(d)
 	}
 }
 
@@ -256,9 +333,25 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 		t.decodeOpts = append(t.decodeOpts, yaml.AllowDuplicateMapKey())
 	}
 
+	if len(t.references) > 0 {
+		t.decodeOpts = append(t.decodeOpts, referenceReaders(t.references))
+	}
+
 	t.lines = line.NewLines(tokens.ResetPositions(tks))
 
 	return t
+}
+
+// text returns the YAML text of the Source, as the Origins of its tokens
+// spell it.
+func (s *Source) text() []byte {
+	var b bytes.Buffer
+
+	for _, tk := range s.Tokens() {
+		b.WriteString(tk.Origin)
+	}
+
+	return b.Bytes()
 }
 
 // Name returns the name of the [Source]: the one [WithName] set, or else

@@ -68,10 +68,8 @@ type contentMatcher[T comparable] struct {
 // struct with an inline field tagged with a bare alias option, which
 // go-yaml fills from an anchor in place of the mapping. Match takes
 // a type to decode itself by its methods alone. It cannot see a type
-// that go-yaml decodes whole through a [yaml.CustomUnmarshaler]
-// option, a [yaml.RegisterCustomUnmarshaler] call, or an
-// UnmarshalJSON method under [yaml.UseJSONUnmarshaler], so it holds
-// a value of such a type to the rules of its kind. For an array of
+// that go-yaml decodes whole through a [yaml.RegisterCustomUnmarshaler]
+// call, so it holds a value of such a type to the rules of its kind. For an array of
 // such a type read from anything but a sequence, or a struct read
 // from anything but a mapping, want matches when it equals the value
 // go-yaml decodes. A field or a trailing element the document leaves
@@ -433,29 +431,11 @@ func fieldScope(
 }
 
 // mappingEntries returns the entries of raw, a mapping as the YAML types
-// name it, by key, and reports whether raw is a mapping. A decode with
-// [yaml.UseOrderedMap] yields a [yaml.MapSlice] in place of a map, with
-// each key the decoder reads written as a string. A later item with the
-// key of an earlier one wins, as it does in the map.
+// name it, by key, and reports whether raw is a mapping.
 func mappingEntries(raw any) (map[string]any, bool) {
-	switch m := raw.(type) {
-	case map[string]any:
-		return m, true
-	case yaml.MapSlice:
-		entries := make(map[string]any, len(m))
+	m, ok := raw.(map[string]any)
 
-		for _, item := range m {
-			key, ok := item.Key.(string)
-			if ok {
-				entries[key] = item.Value
-			}
-		}
-
-		return entries, true
-
-	default:
-		return nil, false
-	}
+	return m, ok
 }
 
 // decodedFields returns a [*fieldProbe] for each name the decoder sets a

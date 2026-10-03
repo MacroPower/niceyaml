@@ -5022,7 +5022,7 @@ func TestDocument_Decode_ForwardAlias(t *testing.T) {
 	// An alias before every anchor of its name in the document reads the
 	// anchor of a reference document, however many anchors of the name
 	// follow the alias.
-	refs := niceyaml.WithReferences([]byte("defaults: &defaults {port: 80}\nx: &x 1\n"))
+	refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("defaults: &defaults {port: 80}\nx: &x 1\n"))
 
 	tcs := map[string]struct {
 		input  string
@@ -5072,21 +5072,23 @@ func TestDocument_Decode_ForwardAlias(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			dd := yamltest.FirstDocument(t, tc.input)
+			dd := yamltest.FirstDocument(t, tc.input, refs)
 
-			got, err := dd.Decode[any](t.Context(), refs)
+			got, err := dd.Decode[any](t.Context())
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 
-			scoped, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context(), refs)
+			scoped, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context())
 			require.NoError(t, err)
 			assert.Equal(t, tc.scoped, scoped)
 
 			// Without the reference document, the alias finds no anchor.
-			_, err = dd.Decode[any](t.Context())
+			bare := yamltest.FirstDocument(t, tc.input)
+
+			_, err = bare.Decode[any](t.Context())
 			require.EqualError(t, err, tc.err)
 
-			_, err = yamltest.At(t, dd, tc.path).Decode[any](t.Context())
+			_, err = yamltest.At(t, bare, tc.path).Decode[any](t.Context())
 			require.EqualError(t, err, tc.err)
 		})
 	}
@@ -5546,10 +5548,11 @@ func TestDocument_DecodeInto(t *testing.T) {
 		type selfPointer *selfPointer
 
 		tcs := map[string]struct {
-			decode func(t *testing.T, dd *niceyaml.Node) (any, error)
-			want   any
-			err    error
-			input  string
+			decode     func(t *testing.T, dd *niceyaml.Node) (any, error)
+			want       any
+			err        error
+			input      string
+			references string
 		}{
 			"Decode validates the value": {
 				input: "name: a\nvalue: 1\n",
@@ -5645,51 +5648,56 @@ func TestDocument_DecodeInto(t *testing.T) {
 				want: (*validatorConfig)(nil),
 			},
 			"alias to a null of a reference document": {
-				input: "*x\n",
+				input:      "*x\n",
+				references: "a: &x ~\n",
 				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
 					t.Helper()
 
-					return dd.Decode[*validatorConfig](t.Context(), niceyaml.WithReferences([]byte("a: &x ~\n")))
+					return dd.Decode[*validatorConfig](t.Context())
 				},
 				want: (*validatorConfig)(nil),
 			},
 			"DecodeInto sets a non-nil pointer to nil for an alias to a null": {
-				input: "*x\n",
+				input:      "*x\n",
+				references: "a: &x ~\n",
 				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
 					t.Helper()
 
 					got := &plainConfig{Value: 7}
 
-					err := dd.DecodeInto(t.Context(), &got, niceyaml.WithReferences([]byte("a: &x ~\n")))
+					err := dd.DecodeInto(t.Context(), &got)
 
 					return got, err //nolint:wrapcheck // The test inspects the error of the decode.
 				},
 				want: (*plainConfig)(nil),
 			},
 			"anchored alias to a null of a reference document": {
-				input: "&y\n*x\n",
+				input:      "&y\n*x\n",
+				references: "a: &x ~\n",
 				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
 					t.Helper()
 
-					return dd.Decode[*validatorConfig](t.Context(), niceyaml.WithReferences([]byte("a: &x ~\n")))
+					return dd.Decode[*validatorConfig](t.Context())
 				},
 				want: (*validatorConfig)(nil),
 			},
 			"alias to a tagged null of a reference document": {
-				input: "*x\n",
+				input:      "*x\n",
+				references: "a: &x !!null\n",
 				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
 					t.Helper()
 
-					return dd.Decode[*string](t.Context(), niceyaml.WithReferences([]byte("a: &x !!null\n")))
+					return dd.Decode[*string](t.Context())
 				},
 				want: (*string)(nil),
 			},
 			"alias to a scalar of a reference document": {
-				input: "*x\n",
+				input:      "*x\n",
+				references: "a: &x 7\n",
 				decode: func(t *testing.T, dd *niceyaml.Node) (any, error) {
 					t.Helper()
 
-					return dd.Decode[*int](t.Context(), niceyaml.WithReferences([]byte("a: &x 7\n")))
+					return dd.Decode[*int](t.Context())
 				},
 				want: new(7),
 			},
@@ -5744,7 +5752,13 @@ func TestDocument_DecodeInto(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
+				var opts []niceyaml.SourceOption
+
+				if tc.references != "" {
+					opts = append(opts, niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.references)))
+				}
+
+				dd := yamltest.FirstDocument(t, tc.input, opts...)
 
 				got, err := tc.decode(t, dd)
 				if tc.err != nil {
@@ -6104,20 +6118,24 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		assert.Equal(t, 42, result.Value)
 	})
 
-	t.Run("decodes the node with the go-yaml options of the decode", func(t *testing.T) {
+	t.Run("decodes the node with the settings of the source", func(t *testing.T) {
 		t.Parallel()
 
-		// The alias names an anchor of the reference document, and the
-		// ordered map option changes the type of the decoded mapping.
-		dd := yamltest.FirstDocument(t, "b:\n  c: *x\n")
-		opts := []niceyaml.DecodeOption{
-			niceyaml.WithReferences([]byte("base: &x 1\n")),
-			niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()),
-		}
+		// The alias names an anchor of the reference document the source
+		// holds. The ordered map option reaches the decode that gets it and
+		// no decode the validator runs.
+		refs := niceyaml.NewSourceFromString("base: &x 1\n")
+		dd := yamltest.FirstDocument(t, "b:\n  c: *x\n", niceyaml.WithReferences(refs))
+		ordered := niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())
 
-		var seen []any
+		var (
+			seen  []any
+			nodes []*niceyaml.Node
+		)
 
 		record := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			nodes = append(nodes, n, n.Document())
+
 			for _, node := range []*niceyaml.Node{n, n.Document()} {
 				data, err := node.Decode[any](ctx)
 				if err != nil {
@@ -6142,19 +6160,26 @@ func TestDocument_Decode_Validator(t *testing.T) {
 			return nil
 		})
 
-		inner := yaml.MapSlice{{Key: "c", Value: uint64(1)}}
-		want := yaml.MapSlice{{Key: "b", Value: inner}}
+		inner := map[string]any{"c": uint64(1)}
+		plain := map[string]any{"b": inner}
+		want := yaml.MapSlice{{Key: "b", Value: yaml.MapSlice{{Key: "c", Value: uint64(1)}}}}
 
-		got, err := dd.Decode[any](t.Context(), append(opts, niceyaml.WithValidator(record))...)
+		got, err := dd.Decode[any](t.Context(), ordered, niceyaml.WithValidator(record))
 		require.NoError(t, err)
 		assert.Equal(t, want, got)
-		assert.Equal(t, []any{want, want, inner}, seen)
+		assert.Equal(t, []any{plain, plain, inner}, seen)
 
 		seen = nil
 
-		err = niceyaml.NewDecoder(append(opts, niceyaml.WithValidator(record))...).Validate(t.Context(), dd)
+		err = niceyaml.NewDecoder(ordered, niceyaml.WithValidator(record)).Validate(t.Context(), dd)
 		require.NoError(t, err)
-		assert.Equal(t, []any{want, want, inner}, seen)
+		assert.Equal(t, []any{plain, plain, inner}, seen)
+
+		require.Len(t, nodes, 4)
+
+		for _, n := range nodes {
+			assert.Same(t, dd, n)
+		}
 	})
 
 	t.Run("runs in order and stops at the first failure", func(t *testing.T) {
@@ -6925,11 +6950,10 @@ func TestDocument_Decode_ValidatorErrorBoundToReceiver(t *testing.T) {
 
 	fail := rejectingValidator(errDocumentRejected)
 
-	// The Node a validator gets carries the go-yaml options of the
-	// decode, so the validators that bind an error themselves bind it
-	// through a copy of the receiver. A [niceyaml.ValidatorFunc] binds
-	// the error of its function that way, and the decode binds the error
-	// a validator of another type leaves unbound.
+	// A validator gets the receiver itself, whatever options the source
+	// and the decode hold. A [niceyaml.ValidatorFunc] binds the error of
+	// its function through it, and the decode binds the error a
+	// validator of another type leaves unbound.
 	validators := map[string]niceyaml.Validator{
 		"returns an unbound error":             &fieldValidator{err: errDocumentRejected},
 		"returns an unbound error from a func": fail,
@@ -6950,11 +6974,14 @@ func TestDocument_Decode_ValidatorErrorBoundToReceiver(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		opts []niceyaml.DecodeOption
+		source []niceyaml.SourceOption
+		opts   []niceyaml.DecodeOption
 	}{
 		"no options": {},
 		"references": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithReferences([]byte("base: &x 1\n"))},
+			source: []niceyaml.SourceOption{
+				niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
+			},
 		},
 		"yaml options": {
 			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())},
@@ -6966,7 +6993,7 @@ func TestDocument_Decode_ValidatorErrorBoundToReceiver(t *testing.T) {
 			t.Run(name+"/"+validatorName, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, "a: 1\n")
+				dd := yamltest.FirstDocument(t, "a: 1\n", tc.source...)
 
 				opts := append(slices.Clone(tc.opts), niceyaml.WithValidator(validator))
 				dec := niceyaml.NewDecoder(opts...)
@@ -6992,9 +7019,8 @@ func TestDocument_Decode_ScopedValidatorErrorDocument(t *testing.T) {
 	t.Parallel()
 
 	// The validator scopes the Node it gets to the second item and binds
-	// its error there. In a decode with go-yaml options, that Node is a
-	// copy that carries them, so the scoped Node binds the error to
-	// itself and its Document method returns a copy of the root.
+	// its error there, so the scoped Node holds the error, and the root
+	// of its document is the receiver.
 	itemPath := paths.Root().Child("items").Index(1)
 
 	scopes := map[string]func(n *niceyaml.Node) (*niceyaml.Node, error){
@@ -7016,11 +7042,14 @@ func TestDocument_Decode_ScopedValidatorErrorDocument(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		opts []niceyaml.DecodeOption
+		source []niceyaml.SourceOption
+		opts   []niceyaml.DecodeOption
 	}{
 		"no options": {},
 		"references": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithReferences([]byte("base: &x 1\n"))},
+			source: []niceyaml.SourceOption{
+				niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
+			},
 		},
 		"yaml options": {
 			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())},
@@ -7041,7 +7070,7 @@ func TestDocument_Decode_ScopedValidatorErrorDocument(t *testing.T) {
 					return scoped.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("x"))))
 				})
 
-				dd := yamltest.FirstDocument(t, "x: 0\nitems:\n  - x: 1\n  - x: 2\n")
+				dd := yamltest.FirstDocument(t, "x: 0\nitems:\n  - x: 1\n  - x: 2\n", tc.source...)
 
 				opts := append(slices.Clone(tc.opts), niceyaml.WithValidator(scoping))
 
@@ -7062,9 +7091,8 @@ func TestDocument_Decode_ValidatorAmbiguousErrorBoundToReceiver(t *testing.T) {
 	t.Parallel()
 
 	// The validator decodes the Node it gets into a map whose NaN keys
-	// give its errors no position. In a decode with go-yaml options,
-	// that Node is a copy that carries them, and the errors still bind
-	// to the Node the decode runs on.
+	// give its errors no position. The errors bind to the Node the
+	// decode runs on, whatever options the source and the decode hold.
 	decoding := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 		_, err := n.Decode[map[float64]signed](ctx)
 
@@ -7072,11 +7100,14 @@ func TestDocument_Decode_ValidatorAmbiguousErrorBoundToReceiver(t *testing.T) {
 	})
 
 	tcs := map[string]struct {
-		opts []niceyaml.DecodeOption
+		source []niceyaml.SourceOption
+		opts   []niceyaml.DecodeOption
 	}{
 		"no options": {},
 		"references": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithReferences([]byte("base: &x 1\n"))},
+			source: []niceyaml.SourceOption{
+				niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
+			},
 		},
 		"yaml options": {
 			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())},
@@ -7087,7 +7118,7 @@ func TestDocument_Decode_ValidatorAmbiguousErrorBoundToReceiver(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			dd := yamltest.FirstDocument(t, "NaN: {n: -1}\n.nan: {n: -2}\n")
+			dd := yamltest.FirstDocument(t, "NaN: {n: -1}\n.nan: {n: -2}\n", tc.source...)
 
 			opts := append(slices.Clone(tc.opts), niceyaml.WithValidator(decoding))
 
@@ -7472,39 +7503,6 @@ func TestDecoder(t *testing.T) {
 		}
 	})
 
-	t.Run("reference documents serve every decode", func(t *testing.T) {
-		t.Parallel()
-
-		refs := []byte("base: &x 1\n")
-		dec := niceyaml.NewDecoder(niceyaml.WithReferences(refs))
-
-		// The option holds a copy, so an edit to the slice reaches nothing.
-		refs[len(refs)-2] = '2'
-
-		docs, err := niceyaml.NewSourceFromString("b: *x\n---\nc: *x\n").Documents()
-		require.NoError(t, err)
-		require.Len(t, docs, 2)
-
-		var wg sync.WaitGroup
-
-		for range 4 {
-			for i, dd := range docs {
-				wg.Go(func() {
-					got, err := dec.Decode[map[string]int](t.Context(), dd)
-					if assert.NoError(t, err) {
-						assert.Equal(t, map[string]int{[]string{"b", "c"}[i]: 1}, got)
-					}
-				})
-			}
-		}
-
-		wg.Wait()
-
-		got, err := docs[0].Decode[map[string]int](t.Context(), niceyaml.WithReferences([]byte("base: &x 3\n")))
-		require.NoError(t, err)
-		assert.Equal(t, map[string]int{"b": 3}, got)
-	})
-
 	t.Run("without options decodes as Node.Decode does", func(t *testing.T) {
 		t.Parallel()
 
@@ -7711,24 +7709,6 @@ func TestDecoder(t *testing.T) {
 		got, err = base.Decode[holder](t.Context(), dd)
 		require.NoError(t, err)
 		assert.Equal(t, marker("base"), got.Tag, "the receiver keeps its options")
-	})
-
-	t.Run("With adds reference documents after the receiver's", func(t *testing.T) {
-		t.Parallel()
-
-		base := niceyaml.NewDecoder(niceyaml.WithReferences([]byte("old: &old 1\nx: &x 1\n")))
-		derived := base.With(niceyaml.WithReferences([]byte("x: &x 2\n")))
-
-		dd := yamltest.FirstDocument(t, "a: *old\nb: *x\n")
-
-		got, err := derived.Decode[map[string]int](t.Context(), dd)
-		require.NoError(t, err)
-		assert.Equal(t, map[string]int{"a": 1, "b": 2}, got,
-			"the receiver's anchors still resolve, and the derived ones win")
-
-		got, err = base.Decode[map[string]int](t.Context(), dd)
-		require.NoError(t, err)
-		assert.Equal(t, map[string]int{"a": 1, "b": 1}, got, "the receiver keeps its references")
 	})
 
 	t.Run("a scoped node decodes with the same options", func(t *testing.T) {
@@ -8546,26 +8526,28 @@ func TestErrDecode(t *testing.T) {
 
 		// The decoder reports these with no token of the source, so the
 		// decode binds them where the document causes them.
+		refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {x: 1}\n"))
+
 		tcs := map[string]struct {
-			input string
-			path  paths.Path
-			opts  []niceyaml.DecodeOption
-			line  int
-			msg   string
+			input  string
+			path   paths.Path
+			source []niceyaml.SourceOption
+			line   int
+			msg    string
 		}{
 			"merge alias the references leave unbound": {
-				input: "a:\n  <<: *nope\n  b: 1\n",
-				path:  paths.Root(),
-				opts:  []niceyaml.DecodeOption{niceyaml.WithReferences([]byte("base: &base {x: 1}\n"))},
-				line:  1,
-				msg:   "cannot find anchor by alias name nope",
+				input:  "a:\n  <<: *nope\n  b: 1\n",
+				path:   paths.Root(),
+				source: []niceyaml.SourceOption{refs},
+				line:   1,
+				msg:    "cannot find anchor by alias name nope",
 			},
 			"merge alias after one the references bind": {
-				input: "a:\n  <<: *base\n  b:\n    <<: *nope\n",
-				path:  paths.Root(),
-				opts:  []niceyaml.DecodeOption{niceyaml.WithReferences([]byte("base: &base {x: 1}\n"))},
-				line:  3,
-				msg:   "cannot find anchor by alias name nope",
+				input:  "a:\n  <<: *base\n  b:\n    <<: *nope\n",
+				path:   paths.Root(),
+				source: []niceyaml.SourceOption{refs},
+				line:   3,
+				msg:    "cannot find anchor by alias name nope",
 			},
 			"merge of the mapping that holds it": {
 				input: "a: &x\n  <<: *x\n  b: 1\n",
@@ -8627,9 +8609,9 @@ func TestErrDecode(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
+				dd := yamltest.FirstDocument(t, tc.input, tc.source...)
 
-				_, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context(), tc.opts...)
+				_, err := yamltest.At(t, dd, tc.path).Decode[any](t.Context())
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 				assert.Contains(t, err.Error(), tc.msg)
 				assert.NotContains(t, err.Error(), "\n", "the go-yaml excerpt leaked into the message")
@@ -8655,7 +8637,7 @@ func TestErrDecode(t *testing.T) {
 			Item struct{ X int } `yaml:"item"`
 		}
 
-		ref := niceyaml.WithReferences([]byte("base: &base {x: notint}\nother: &other 1\n"))
+		ref := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {x: notint}\nother: &other 1\n"))
 
 		// A line of -1 means the rejection carries no location.
 		tcs := map[string]struct {
@@ -8666,7 +8648,7 @@ func TestErrDecode(t *testing.T) {
 			"merge from a reference": {
 				input: "item:\n  <<: *base\ny: 1\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[cfg](ctx, ref)
+					_, err := dd.Decode[cfg](ctx)
 
 					return err
 				},
@@ -8675,7 +8657,7 @@ func TestErrDecode(t *testing.T) {
 			"alias to a reference": {
 				input: "a: 1\nitem: *base\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[cfg](ctx, ref)
+					_, err := dd.Decode[cfg](ctx)
 
 					return err
 				},
@@ -8689,7 +8671,7 @@ func TestErrDecode(t *testing.T) {
 						return err //nolint:wrapcheck // The test inspects the error as it is.
 					}
 
-					_, err = node.Decode[cfg](ctx, ref)
+					_, err = node.Decode[cfg](ctx)
 
 					return err
 				},
@@ -8705,7 +8687,7 @@ func TestErrDecode(t *testing.T) {
 						return err //nolint:wrapcheck // The test inspects the error as it is.
 					}
 
-					_, err = node.Decode[cfg](ctx, ref)
+					_, err = node.Decode[cfg](ctx)
 
 					return err
 				},
@@ -8717,7 +8699,7 @@ func TestErrDecode(t *testing.T) {
 			"aliases to two references": {
 				input: "a: *other\nitem: *base\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[cfg](ctx, ref)
+					_, err := dd.Decode[cfg](ctx)
 
 					return err
 				},
@@ -8733,7 +8715,7 @@ func TestErrDecode(t *testing.T) {
 						M map[int]int `yaml:",inline"`
 					}
 
-					return dd.DecodeInto(ctx, &v, ref)
+					return dd.DecodeInto(ctx, &v)
 				},
 				line: 0,
 			},
@@ -8743,7 +8725,7 @@ func TestErrDecode(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
+				dd := yamltest.FirstDocument(t, tc.input, ref)
 
 				err := tc.decode(t.Context(), dd)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
@@ -8781,6 +8763,7 @@ func TestErrDecode(t *testing.T) {
 
 		tcs := map[string]struct {
 			input  string
+			source []niceyaml.SourceOption
 			decode func(ctx context.Context, dd *niceyaml.Node) error
 		}{
 			"top-level value": {
@@ -8795,9 +8778,11 @@ func TestErrDecode(t *testing.T) {
 			// the reference document defines for the decoder.
 			"merge the references resolve": {
 				input: "item:\n  <<: *base\n  when: x\n",
+				source: []niceyaml.SourceOption{
+					niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {x: 1}\n")),
+				},
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[map[string]item](ctx,
-						niceyaml.WithReferences([]byte("base: &base {x: 1}\n")))
+					_, err := dd.Decode[map[string]item](ctx)
 
 					return err
 				},
@@ -8808,7 +8793,7 @@ func TestErrDecode(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
+				dd := yamltest.FirstDocument(t, tc.input, tc.source...)
 
 				err := tc.decode(t.Context(), dd)
 				require.ErrorIs(t, err, errUnmarshal)

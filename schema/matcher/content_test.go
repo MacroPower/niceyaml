@@ -1397,11 +1397,10 @@ func TestContent(t *testing.T) {
 	t.Run("node a decode hands its validator", func(t *testing.T) {
 		t.Parallel()
 
-		// The Node a validator gets decodes with the go-yaml options of the
-		// decode that runs the validator, as a registry used as a validator
-		// sees it.
-		ordered := niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())
-		refs := niceyaml.WithReferences([]byte(stringtest.Input(`
+		// The Node a validator gets decodes with the settings of its
+		// source, so an alias to an anchor of a reference document reads
+		// as the decode reads it, as a registry used as a validator sees it.
+		refs := niceyaml.WithReferences(niceyaml.NewSourceFromString(stringtest.Input(`
 			r: &r 2
 			m: &m {i: 2}
 			n: &n null
@@ -1412,120 +1411,57 @@ func TestContent(t *testing.T) {
 			w: &w hello
 		`)))
 
-		// Match cannot see an unmarshaler that an option gives a type, so
-		// it takes these types to decode by their kind.
-		custom := niceyaml.WithYAMLDecodeOptions(
-			yaml.CustomUnmarshaler(func(v *majorMinor, text []byte) error {
-				_, err := fmt.Sscanf(string(text), "%d.%d", &v.Major, &v.Minor)
-				if err != nil {
-					return fmt.Errorf("read major.minor: %w", err)
-				}
-
-				return nil
-			}),
-			yaml.CustomUnmarshaler(func(v *intPair, text []byte) error {
-				_, err := fmt.Sscanf(string(text), "%dx%d", &v[0], &v[1])
-				if err != nil {
-					return fmt.Errorf("read pair: %w", err)
-				}
-
-				return nil
-			}),
-			yaml.CustomUnmarshaler(func(v *time.Time, text []byte) error {
-				if string(text) == "never" {
-					return nil
-				}
-
-				t, err := time.Parse("01/02/2006", string(text))
-				if err != nil {
-					return fmt.Errorf("read date: %w", err)
-				}
-
-				*v = t
-
-				return nil
-			}),
-		)
-
 		date := time.Date(2001, 12, 14, 0, 0, 0, 0, time.UTC)
 
 		tcs := map[string]struct {
 			matcher matcher.Matcher
 			err     error
 			input   string
-			opts    []niceyaml.DecodeOption
 			want    bool
 		}{
-			"struct matches an ordered mapping": {
-				matcher: matcher.Content(versionPath, intText{2, "x"}),
-				input:   `version: {i: 2, s: x}`,
-				opts:    []niceyaml.DecodeOption{ordered},
-				want:    true,
-			},
-			"struct int field in an ordered mapping does not match a fraction": {
-				matcher: matcher.Content(versionPath, intText{2, "x"}),
-				input:   `version: {i: 2.5, s: x}`,
-				opts:    []niceyaml.DecodeOption{ordered},
-				want:    false,
-			},
-			"array of structs matches ordered mappings": {
-				matcher: matcher.Content(versionPath, [1]intText{{2, "x"}}),
-				input:   `version: [{i: 2, s: x}]`,
-				opts:    []niceyaml.DecodeOption{ordered},
-				want:    true,
-			},
 			"array element matches an alias to a reference anchor": {
 				matcher: matcher.Content(versionPath, [1]int{2}),
 				input:   `version: [*r]`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    true,
 			},
 			"array element does not match a different reference value": {
 				matcher: matcher.Content(versionPath, [1]int{3}),
 				input:   `version: [*r]`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    false,
 			},
 			"struct field matches an alias to a reference anchor": {
 				matcher: matcher.Content(versionPath, intText{I: 2}),
 				input:   `version: {i: *r}`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    true,
 			},
 			"struct matches a merged reference mapping": {
 				matcher: matcher.Content(versionPath, intText{I: 2}),
 				input:   `version: {<<: *m}`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    true,
 			},
 			"array int element does not match an alias to a reference null": {
 				matcher: matcher.Content(versionPath, [1]int{0}),
 				input:   `version: [*n]`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    false,
 			},
 			"array nil pointer element matches an alias to a reference null": {
 				matcher: matcher.Content(versionPath, [1]*int{nil}),
 				input:   `version: [*n]`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    true,
 			},
 			"struct int field does not match an alias to a reference null": {
 				matcher: matcher.Content(versionPath, intText{}),
 				input:   `version: {i: *n}`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    false,
 			},
 			"struct string field does not match a tagged alias to a reference null": {
 				matcher: matcher.Content(versionPath, plainField{}),
 				input:   `version: {k: !t *n}`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    false,
 			},
 			"struct nil pointer field matches a tagged alias to a reference null": {
 				matcher: matcher.Content(versionPath, pointerField{}),
 				input:   `version: {p: !t *n}`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    true,
 			},
 			"struct string field does not match an anchored alias to a reference null": {
@@ -1535,7 +1471,6 @@ func TestContent(t *testing.T) {
 					  k: &y
 					    *n
 				`),
-				opts: []niceyaml.DecodeOption{refs},
 				want: false,
 			},
 			"struct nil pointer field matches an anchored alias to a reference null": {
@@ -1545,7 +1480,6 @@ func TestContent(t *testing.T) {
 					  p: &y
 					    *n
 				`),
-				opts: []niceyaml.DecodeOption{refs},
 				want: true,
 			},
 			"struct string field does not match an alias to an anchored alias to a reference null": {
@@ -1555,7 +1489,6 @@ func TestContent(t *testing.T) {
 					  *n
 					version: {k: *y}
 				`),
-				opts: []niceyaml.DecodeOption{refs},
 				want: false,
 			},
 			"struct string field does not match an alias to a tagged alias to a reference null": {
@@ -1564,73 +1497,41 @@ func TestContent(t *testing.T) {
 					x: &x !t *n
 					version: {k: *x}
 				`),
-				opts: []niceyaml.DecodeOption{refs},
 				want: false,
 			},
 			"struct string field does not match a merged tagged alias to a reference null": {
 				matcher: matcher.Content(versionPath, plainField{}),
 				input:   `version: {<<: {k: !t *n}}`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    false,
 			},
 			"struct matches its own entry before a merged tagged alias to a reference null": {
 				matcher: matcher.Content(versionPath, plainField{K: "v"}),
 				input:   `version: {k: v, <<: {7: y, k: !t *n}}`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    true,
 			},
 			"struct field under an alias key to a reference anchor compares the decode": {
 				matcher: matcher.Content(versionPath, intText{I: 2}),
 				input:   `version: {*k : 2.5}`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    true,
 			},
 			"struct int field does not match a null under an alias key to a reference anchor": {
 				matcher: matcher.Content(versionPath, intText{}),
 				input:   `version: {*k : null}`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    false,
 			},
 			"struct field compares a null inside a reference value as the decode": {
 				matcher: matcher.Content(versionPath, nestedIntText{}),
 				input:   `version: {a: *o}`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    true,
-			},
-			"struct an option reads from a scalar compares the decode": {
-				matcher: matcher.Content(versionPath, majorMinor{Major: 1, Minor: 10}),
-				input:   `version: 1.10`,
-				opts:    []niceyaml.DecodeOption{custom},
-				want:    true,
-			},
-			"struct an option reads from a scalar does not match a different decode": {
-				matcher: matcher.Content(versionPath, majorMinor{Major: 1, Minor: 1}),
-				input:   `version: 1.10`,
-				opts:    []niceyaml.DecodeOption{custom},
-				want:    false,
-			},
-			"array an option reads from a scalar compares the decode": {
-				matcher: matcher.Content(versionPath, intPair{2, 3}),
-				input:   `version: 2x3`,
-				opts:    []niceyaml.DecodeOption{custom},
-				want:    true,
-			},
-			"array an option reads from a scalar does not match a different decode": {
-				matcher: matcher.Content(versionPath, intPair{3, 2}),
-				input:   `version: 2x3`,
-				opts:    []niceyaml.DecodeOption{custom},
-				want:    false,
 			},
 			"alias to a reference anchor is an error": {
 				matcher: matcher.Content(createdPath, date),
 				input:   `created: *d`,
-				opts:    []niceyaml.DecodeOption{refs},
 				err:     paths.ErrAlias,
 			},
 			"tagged alias to a reference anchor is an error": {
 				matcher: matcher.Content(createdPath, date),
 				input:   `created: !!timestamp *d`,
-				opts:    []niceyaml.DecodeOption{refs},
 				err:     paths.ErrAlias,
 			},
 			"alias that leads to a tagged alias to a reference anchor is an error": {
@@ -1639,13 +1540,11 @@ func TestContent(t *testing.T) {
 					x: &x !!timestamp *z
 					created: *x
 				`),
-				opts: []niceyaml.DecodeOption{refs},
-				err:  paths.ErrAlias,
+				err: paths.ErrAlias,
 			},
 			"array time element matches a tagged alias to a reference anchor": {
 				matcher: matcher.Content(createdPath, [1]time.Time{date}),
 				input:   `created: [!!timestamp *d]`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    true,
 			},
 			"struct time field matches a tagged alias to a reference anchor": {
@@ -1653,26 +1552,12 @@ func TestContent(t *testing.T) {
 					A time.Time `yaml:"a"`
 				}{A: date}),
 				input: `created: {a: !!timestamp *d}`,
-				opts:  []niceyaml.DecodeOption{refs},
 				want:  true,
 			},
 			"array zero time element compares a tagged alias to a reference word as the decode": {
 				matcher: matcher.Content(createdPath, [1]time.Time{}),
 				input:   `created: [!!timestamp *w]`,
-				opts:    []niceyaml.DecodeOption{refs},
 				want:    true,
-			},
-			"time an option reads from other text compares the decode": {
-				matcher: matcher.Content(createdPath, date),
-				input:   `created: 12/14/2001`,
-				opts:    []niceyaml.DecodeOption{custom},
-				want:    true,
-			},
-			"zero time an option reads from other text does not match": {
-				matcher: matcher.Content(createdPath, time.Time{}),
-				input:   `created: never`,
-				opts:    []niceyaml.DecodeOption{custom},
-				want:    false,
 			},
 		}
 
@@ -1680,9 +1565,9 @@ func TestContent(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, tc.input)
+				doc := yamltest.FirstDocument(t, tc.input, refs)
 
-				got, err := matchInDecode(t, tc.matcher, doc, tc.opts...)
+				got, err := matchInDecode(t, tc.matcher, doc)
 				if tc.err != nil {
 					require.ErrorIs(t, err, tc.err)
 				} else {
@@ -1882,11 +1767,9 @@ func TestContent_ContextEnded(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// matchInDecode runs m on the Node that a decode of doc with opts hands
-// its validator, and returns what m returns.
-func matchInDecode(
-	t *testing.T, m matcher.Matcher, doc *niceyaml.Node, opts ...niceyaml.DecodeOption,
-) (bool, error) {
+// matchInDecode runs m on the Node that a decode of doc hands its
+// validator, and returns what m returns.
+func matchInDecode(t *testing.T, m matcher.Matcher, doc *niceyaml.Node) (bool, error) {
 	t.Helper()
 
 	var (
@@ -1900,7 +1783,7 @@ func matchInDecode(
 		return nil
 	})
 
-	_, err := doc.Decode[any](t.Context(), append(opts, niceyaml.WithValidator(validator))...)
+	_, err := doc.Decode[any](t.Context(), niceyaml.WithValidator(validator))
 	require.NoError(t, err)
 
 	return got, matchErr //nolint:wrapcheck // The test inspects the error of the match.
@@ -2007,17 +1890,6 @@ type aliasInlineParent struct {
 	Inline aliasInline `yaml:",inline"`
 	S      string
 }
-
-// majorMinor is a struct and intPair an array with no method that
-// decodes them. A test gives each a [yaml.CustomUnmarshaler] that reads
-// it from a scalar.
-type (
-	majorMinor struct {
-		Major int
-		Minor int
-	}
-	intPair [2]int
-)
 
 // scalarKeys reads entries whose plain keys spell a number or a bool.
 // The decoder reads such a key as a string only under a !!str tag.

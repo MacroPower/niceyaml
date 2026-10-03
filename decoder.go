@@ -36,6 +36,19 @@ import (
 // the same options decodes one node the same way, so a Decoder is the
 // options of a call held for reuse.
 //
+// A Decoder holds how a decode runs, and the [Source] holds what its
+// documents mean. A Decoder therefore carries no reference documents. A
+// document whose aliases name anchors of another file gets that file
+// through [WithReferences] on its Source, and every Decoder, validator,
+// and [Node] method then reads the aliases alike:
+//
+//	defaults := niceyaml.NewSourceFromBytes(defaultsYAML, niceyaml.WithName("defaults.yaml"))
+//
+//	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithReferences(defaults))
+//	if err != nil {
+//		return err
+//	}
+//
 // A Decoder never changes after [NewDecoder], so it is safe for
 // concurrent use as long as the go-yaml options it carries hold no state,
 // which [WithYAMLDecodeOptions] describes. [Decoder.With] returns a new
@@ -57,14 +70,11 @@ func NewDecoder(opts ...DecodeOption) *Decoder {
 
 // With returns a new [*Decoder] with opts applied over the options of
 // the receiver, in order. [WithValidator] appends to the validators the
-// receiver holds, and [WithYAMLDecodeOptions] and [WithReferences]
-// append to its go-yaml options. The reference documents of opts
-// therefore join those of the receiver, and an anchor they define wins
-// over one of the same name in the documents of the receiver's
-// [WithReferences], as [WithReferences] describes.
-// [WithSelfValidation], [WithAliasLimit], and [WithDisallowUnknownFields]
-// replace the setting the receiver holds. The receiver is unchanged, so a
-// Decoder shared between callers can be specialized per use:
+// receiver holds, and [WithYAMLDecodeOptions] appends to its go-yaml
+// options. [WithSelfValidation], [WithAliasLimit], and
+// [WithDisallowUnknownFields] replace the setting the receiver holds. The
+// receiver is unchanged, so a Decoder shared between callers can be
+// specialized per use:
 //
 //	strict := dec.With(niceyaml.WithDisallowUnknownFields(true))
 func (d *Decoder) With(opts ...DecodeOption) *Decoder {
@@ -87,7 +97,7 @@ func (d *Decoder) With(opts ...DecodeOption) *Decoder {
 // returns the syntax error [Node.Err] returns, whatever validators the
 // Decoder holds.
 func (d *Decoder) Validate(ctx context.Context, n *Node) error {
-	return n.validate(ctx, d.cfg.validators, d.cfg.yamlOpts)
+	return n.validate(ctx, d.cfg.validators)
 }
 
 // DecodeInto validates and decodes n into v with the options of the

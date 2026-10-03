@@ -10,13 +10,19 @@ import (
 )
 
 // FirstDocument creates the root [*niceyaml.Node] of the first document
-// of a YAML input for testing.
+// of a YAML input for testing, from a [*niceyaml.Source] created with
+// opts, such as [niceyaml.WithReferences].
 //
 // If the input contains no documents, the test fails.
-func FirstDocument(tb testing.TB, input string) *niceyaml.Node {
+func FirstDocument(tb testing.TB, input string, opts ...niceyaml.SourceOption) *niceyaml.Node {
 	tb.Helper()
 
-	return FirstDocumentWithPath(tb, input, "")
+	source := niceyaml.NewSourceFromString(input, opts...)
+	docs, err := source.Documents()
+	require.NoError(tb, err)
+	require.NotEmpty(tb, docs, "no documents found in input")
+
+	return docs[0]
 }
 
 // At scopes n to the node that path selects, through [niceyaml.Node.At].
@@ -49,10 +55,5 @@ func Bind(tb testing.TB, source *niceyaml.Source, err error) error {
 func FirstDocumentWithPath(tb testing.TB, input, filePath string) *niceyaml.Node {
 	tb.Helper()
 
-	source := niceyaml.NewSourceFromString(input, niceyaml.WithFilePath(filePath))
-	docs, err := source.Documents()
-	require.NoError(tb, err)
-	require.NotEmpty(tb, docs, "no documents found in input")
-
-	return docs[0]
+	return FirstDocument(tb, input, niceyaml.WithFilePath(filePath))
 }

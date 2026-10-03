@@ -85,7 +85,7 @@ func (n *Node) bindUnknownFields(fields []*yaml.UnknownFieldError) error {
 
 	summary := NewSummary(fmt.Sprintf("%d unknown fields", len(fields)), rejections...)
 
-	return bindTree(summary, binder{src: n.source, node: n.bindTarget(), rooted: true})
+	return bindTree(summary, binder{src: n.source, node: n, rooted: true})
 }
 
 // unknownFieldFinder finds the unknown fields of a decode that the

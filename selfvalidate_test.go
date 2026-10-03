@@ -1689,10 +1689,13 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd, err := niceyaml.NewSourceFromString(tc.input, niceyaml.WithAllowDuplicateKeys(true)).Document()
+				dd, err := niceyaml.NewSourceFromString(tc.input,
+					niceyaml.WithAllowDuplicateKeys(true),
+					niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.references)),
+				).Document()
 				require.NoError(t, err)
 
-				_, err = dd.Decode[merged](t.Context(), niceyaml.WithReferences([]byte(tc.references)))
+				_, err = dd.Decode[merged](t.Context())
 				require.EqualError(t, err, tc.want)
 			})
 		}
@@ -3130,11 +3133,12 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 	// walk off fills another, which SelfValidate then checks. Both report
 	// err for the node the at selectors lead to.
 	tcs := map[string]struct {
-		value func() any
-		input string
-		at    []string
-		opts  []niceyaml.DecodeOption
-		err   string
+		value  func() any
+		input  string
+		at     []string
+		source []niceyaml.SourceOption
+		opts   []niceyaml.DecodeOption
+		err    string
 	}{
 		"nested fields, elements, and entries": {
 			value: func() any { return new(nested) },
@@ -3188,6 +3192,39 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 			opts: []niceyaml.DecodeOption{gradeNames},
 			err:  `2:15: $.by_grade.high.url: url "ftp://h" is not http`,
 		},
+		// SelfValidate decodes the keys with the references of the source,
+		// as the decode does, and the caller passes them to neither.
+		"keys beside a merge of a reference document": {
+			value: func() any { return new(nested) },
+			input: stringtest.Input(`
+				by_id:
+				  <<: *r
+				  0x10: {price: -1}
+			`),
+			source: []niceyaml.SourceOption{
+				niceyaml.WithReferences(niceyaml.NewSourceFromString("r: &r {16: {price: 1}, 32: {price: -2}}\n")),
+			},
+			err: stringtest.JoinLF(
+				"3:17: $.by_id.0x10.price: negative price",
+				"$.by_id.32.price: negative price",
+			),
+		},
+		"key an alias reads from a reference document": {
+			value: func() any { return new(nested) },
+			input: "by_id:\n  *k : {price: -1}\n",
+			source: []niceyaml.SourceOption{
+				niceyaml.WithReferences(niceyaml.NewSourceFromString("k: &k 0x10\n")),
+			},
+			err: "1:1: $.by_id.16.price: negative price",
+		},
+		"values an alias reads from a reference document": {
+			value: func() any { return new(nested) },
+			input: "by_id: *ids\n",
+			source: []niceyaml.SourceOption{
+				niceyaml.WithReferences(niceyaml.NewSourceFromString("ids: &ids {0x10: {price: -3}}\n")),
+			},
+			err: "$.by_id.16.price: negative price",
+		},
 		"a scoped Node": {
 			value: func() any { return new(nested) },
 			input: stringtest.Input(`
@@ -3207,7 +3244,7 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			n := yamltest.FirstDocument(t, tc.input)
+			n := yamltest.FirstDocument(t, tc.input, tc.source...)
 			if len(tc.at) > 0 {
 				n = yamltest.At(t, n, paths.Root().Child(tc.at...))
 			}

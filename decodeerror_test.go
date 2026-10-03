@@ -1104,6 +1104,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			decode func(ctx context.Context, dd *niceyaml.Node) error
 			input  string
 			want   string
+			source []niceyaml.SourceOption
 		}{
 			// The fields of the value mirror nothing, and the mapping the
 			// decode reads is the whole of what the caller asked for.
@@ -1156,8 +1157,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// No path resolves through an alias to a reference document.
 			"value an alias reads from a reference document": {
 				input: "timeout: *limit\n",
+				source: []niceyaml.SourceOption{
+					niceyaml.WithReferences(niceyaml.NewSourceFromString("limit: &limit soon\n")),
+				},
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[tierServer](ctx, niceyaml.WithReferences([]byte("limit: &limit soon\n")))
+					_, err := dd.Decode[tierServer](ctx)
 
 					return err
 				},
@@ -1195,7 +1199,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
+				dd := yamltest.FirstDocument(t, tc.input, tc.source...)
 
 				err := tc.decode(t.Context(), dd)
 				require.EqualError(t, err, tc.want)

@@ -51,13 +51,13 @@ import (
 // with the walk on returns. The walk spells the key of each map entry as
 // the document does, so an error under a key such as 1.50 keeps that
 // text, and it decodes the keys of the mappings in the node to learn that
-// spelling. It decodes them with the go-yaml options of opts, the ones
-// [WithYAMLDecodeOptions] and [WithReferences] give, and reads no other
-// option, so pass the options of the decode. A key type that only a
-// [yaml.CustomUnmarshaler] option decodes matches no key of the document
-// without that option, and an error under such an entry then binds at the
-// key of the map. [Decoder.SelfValidate] runs with the options of a
-// [Decoder].
+// spelling. It decodes them with the settings of the [Source], such as
+// the reference documents of [WithReferences], and with the go-yaml
+// options that [WithYAMLDecodeOptions] adds in opts. It reads no other
+// option. A key type that only a [yaml.CustomUnmarshaler] option decodes
+// matches no key of the document unless opts carry that option, and an
+// error under such an entry then binds at the key of the map.
+// [Decoder.SelfValidate] runs with the options of a [Decoder].
 //
 // The walk follows v rather than the document, so v need not mirror the
 // node, and each error binds where its path resolves in the document. An
@@ -938,7 +938,7 @@ func (w *selfWalker) walkEntries(at place, entries []mapEntry, ambiguous bool) b
 		errs := w.errs[start:]
 		if ambiguous {
 			for i, err := range errs {
-				errs[i] = bindTree(err, binder{src: w.node.source, node: w.node.bindTarget(), ambiguous: true})
+				errs[i] = bindTree(err, binder{src: w.node.source, node: w.node, ambiguous: true})
 			}
 		}
 

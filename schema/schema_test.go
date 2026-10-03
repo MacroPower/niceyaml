@@ -1136,10 +1136,10 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 func TestSchema_Validate_OrderedMapDates(t *testing.T) {
 	t.Parallel()
 
-	// A decode with yaml.UseOrderedMap names each member by the key of its
-	// yaml.MapItem, and the lookup of the scalar a timestamp came from
-	// names each key node the same way, so a date-only timestamp under a
-	// key the decoder respells keeps its full-date spelling.
+	// The yaml.UseOrderedMap option reaches the decode that gets it and
+	// not the decode the schema runs, so the schema reads plain maps, and a
+	// date-only timestamp under a key the decoder respells keeps its
+	// full-date spelling.
 	v, err := schema.Compile(t.Context(),
 		[]byte(`{"additionalProperties": {"type": "string", "format": "date"}}`),
 		schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)))
@@ -1525,7 +1525,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			fmt.Fprintf(&entries, "  k%d: v\n", i)
 		}
 
-		refs := niceyaml.WithReferences([]byte("defaults: &defaults\n" + entries.String()))
+		refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("defaults: &defaults\n" + entries.String()))
 		v := compileSchema(t, []byte(`{"maxProperties": 5}`))
 
 		// Each flow sequence from repeated lists *defaults count times.
@@ -1561,12 +1561,12 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, tc.input)
+				doc := yamltest.FirstDocument(t, tc.input, refs)
 				if !tc.path.IsRoot() {
 					doc = yamltest.At(t, doc, tc.path)
 				}
 
-				_, err := doc.Decode[any](t.Context(), refs, niceyaml.WithValidator(v))
+				_, err := doc.Decode[any](t.Context(), niceyaml.WithValidator(v))
 				if tc.errs == nil {
 					require.NoError(t, err)
 
@@ -2669,7 +2669,7 @@ func TestSchema_SourcePath_ReferenceAlias(t *testing.T) {
 	// the decoded name of a member below the alias. A merge key that names
 	// such an alias may set a member of any name, so the key 0x10 before
 	// it cannot name the member 16 either.
-	refs := niceyaml.WithReferences([]byte("base: &base {0x10: x}\nother: &other {k: 1}\n"))
+	refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {0x10: x}\nother: &other {k: 1}\n"))
 
 	tcs := map[string]struct {
 		schema string
@@ -2701,9 +2701,9 @@ func TestSchema_SourcePath_ReferenceAlias(t *testing.T) {
 			t.Parallel()
 
 			v := compileSchema(t, []byte(tc.schema))
-			doc := yamltest.FirstDocument(t, tc.input)
+			doc := yamltest.FirstDocument(t, tc.input, refs)
 
-			_, err := doc.Decode[any](t.Context(), refs, niceyaml.WithValidator(v))
+			_, err := doc.Decode[any](t.Context(), niceyaml.WithValidator(v))
 
 			var bound *niceyaml.SourceError
 

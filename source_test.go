@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
@@ -31,6 +32,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/tokens"
@@ -3525,5 +3527,284 @@ func TestSource_Decode(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, source, bound.Source())
+	})
+}
+
+func TestWithReferences(t *testing.T) {
+	t.Parallel()
+
+	type server struct {
+		Port int `yaml:"port"`
+	}
+
+	type config struct {
+		Name   string `yaml:"name"`
+		Server server `yaml:"server"`
+	}
+
+	// The schema decodes the node it checks, so it reads an alias as the
+	// decodes of the source read it.
+	serverSchema := schema.MustCompile([]byte(`{
+		"type": "object",
+		"properties": {
+			"name": {"type": "string"},
+			"server": {
+				"type": "object",
+				"required": ["port"],
+				"properties": {"port": {"type": "integer"}}
+			}
+		}
+	}`))
+
+	defaults := niceyaml.NewSourceFromString("base: &base\n  port: 8080\n", niceyaml.WithName("defaults.yaml"))
+
+	t.Run("every decode and validation agrees", func(t *testing.T) {
+		t.Parallel()
+
+		// Each check runs v on the one document of src through one entry
+		// point.
+		checks := map[string]func(ctx context.Context, src *niceyaml.Source, doc *niceyaml.Node, v niceyaml.Validator) error{
+			"Node.Decode": func(ctx context.Context, _ *niceyaml.Source, doc *niceyaml.Node, v niceyaml.Validator) error {
+				_, err := doc.Decode[config](ctx, niceyaml.WithValidator(v))
+
+				return err
+			},
+			"Source.Decode": func(ctx context.Context, src *niceyaml.Source, _ *niceyaml.Node, v niceyaml.Validator) error {
+				_, err := src.Decode[config](ctx, niceyaml.WithValidator(v))
+
+				return err
+			},
+			"Decoder.Decode": func(ctx context.Context, _ *niceyaml.Source, doc *niceyaml.Node, v niceyaml.Validator) error {
+				_, err := niceyaml.NewDecoder(niceyaml.WithValidator(v)).Decode[config](ctx, doc)
+
+				return err
+			},
+			"Node.Validate": func(ctx context.Context, _ *niceyaml.Source, doc *niceyaml.Node, v niceyaml.Validator) error {
+				return doc.Validate(ctx, v)
+			},
+			"Decoder.Validate": func(ctx context.Context, _ *niceyaml.Source, doc *niceyaml.Node, v niceyaml.Validator) error {
+				return niceyaml.NewDecoder(niceyaml.WithValidator(v)).Validate(ctx, doc)
+			},
+			"Source.ValidateDocuments": func(ctx context.Context, src *niceyaml.Source, _ *niceyaml.Node, v niceyaml.Validator) error {
+				return src.ValidateDocuments(ctx, v)
+			},
+		}
+
+		tcs := map[string]struct {
+			input string
+			refs  []*niceyaml.Source
+			// The message of each binding the result holds.
+			want []string
+		}{
+			"alias to a mapping of the reference": {
+				input: "server: *base\n",
+				refs:  []*niceyaml.Source{defaults},
+			},
+			"merge of a mapping of the reference": {
+				input: "server:\n  <<: *base\n",
+				refs:  []*niceyaml.Source{defaults},
+			},
+			"violation beside an alias to the reference": {
+				input: "name: 1\nserver: *base\n",
+				refs:  []*niceyaml.Source{defaults},
+				want:  []string{`app.yaml:1:7: $.name: expected "string", got "integer"`},
+			},
+			"violation beside a merge of the reference": {
+				input: "server:\n  <<: *base\n  port: x\n",
+				refs:  []*niceyaml.Source{defaults},
+				want:  []string{`app.yaml:3:9: $.server.port: expected "integer", got "string"`},
+			},
+			"alias without the reference": {
+				input: "server: *base\n",
+				want:  []string{`app.yaml:1:9: $.server: could not find alias "base"`},
+			},
+		}
+
+		for name, tc := range tcs {
+			for checkName, check := range checks {
+				t.Run(name+"/"+checkName, func(t *testing.T) {
+					t.Parallel()
+
+					src := niceyaml.NewSourceFromString(tc.input,
+						niceyaml.WithName("app.yaml"),
+						niceyaml.WithReferences(tc.refs...),
+					)
+
+					doc, err := src.Document()
+					require.NoError(t, err)
+
+					// The validator records the Node each run gets.
+					var seen []*niceyaml.Node
+
+					v := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+						seen = append(seen, n)
+
+						return serverSchema.Validate(ctx, n)
+					})
+
+					err = check(t.Context(), src, doc, v)
+					assert.Equal(t, tc.want, bindingMessages(err))
+
+					require.Len(t, seen, 1)
+					assert.Same(t, doc, seen[0], "the validator got a Node other than the caller's")
+					assert.Same(t, doc, seen[0].Document())
+				})
+			}
+		}
+	})
+
+	t.Run("a file of several documents reports the real violation alone", func(t *testing.T) {
+		t.Parallel()
+
+		src := niceyaml.NewSourceFromString("server: *base\n---\nserver: {port: x}\n",
+			niceyaml.WithName("app.yaml"),
+			niceyaml.WithReferences(defaults),
+		)
+
+		want := []string{`app.yaml:3:16: $.server.port: expected "integer", got "string"`}
+
+		err := src.ValidateDocuments(t.Context(), serverSchema)
+		assert.Equal(t, want, bindingMessages(err))
+
+		docs, err := src.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		_, err = docs[0].Decode[config](t.Context(), niceyaml.WithValidator(serverSchema))
+		require.NoError(t, err)
+
+		_, err = docs[1].Decode[config](t.Context(), niceyaml.WithValidator(serverSchema))
+		assert.Equal(t, want, bindingMessages(err))
+	})
+
+	t.Run("anchors of the references", func(t *testing.T) {
+		t.Parallel()
+
+		first := niceyaml.NewSourceFromString("old: &old 1\nx: &x 1\n")
+		second := niceyaml.NewSourceFromString("x: &x 2\n")
+		nested := niceyaml.NewSourceFromString("list: &list [*x, 3]\n", niceyaml.WithReferences(second))
+
+		tcs := map[string]struct {
+			input string
+			refs  []*niceyaml.Source
+			want  map[string]any
+		}{
+			"later reference overrides an earlier one": {
+				input: "a: *old\nb: *x\n",
+				refs:  []*niceyaml.Source{first, second},
+				want:  map[string]any{"a": uint64(1), "b": uint64(2)},
+			},
+			"reference brings its own references": {
+				input: "a: *list\nb: *x\n",
+				refs:  []*niceyaml.Source{nested},
+				want:  map[string]any{"a": []any{uint64(2), uint64(3)}, "b": uint64(2)},
+			},
+			"nil reference is skipped": {
+				input: "a: *x\n",
+				refs:  []*niceyaml.Source{nil, second, nil},
+				want:  map[string]any{"a": uint64(2)},
+			},
+			"anchor of the document before the alias wins": {
+				input: "x: &x 5\na: *x\n",
+				refs:  []*niceyaml.Source{second},
+				want:  map[string]any{"x": uint64(5), "a": uint64(5)},
+			},
+			"reference with CRLF line endings": {
+				input: "a: *y\n",
+				refs:  []*niceyaml.Source{niceyaml.NewSourceFromString("y: &y\r\n  k: v\r\n")},
+				want:  map[string]any{"a": map[string]any{"k": "v"}},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithReferences(tc.refs...))
+
+				got, err := doc.Decode[map[string]any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
+	t.Run("references serve every decode from any goroutine", func(t *testing.T) {
+		t.Parallel()
+
+		docs, err := niceyaml.NewSourceFromString("b: *x\n---\nc: *x\n",
+			niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
+		).Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		dec := niceyaml.NewDecoder()
+
+		var wg sync.WaitGroup
+
+		for range 4 {
+			for i, doc := range docs {
+				wg.Go(func() {
+					got, err := dec.Decode[map[string]int](t.Context(), doc)
+					if assert.NoError(t, err) {
+						assert.Equal(t, map[string]int{[]string{"b", "c"}[i]: 1}, got)
+					}
+				})
+			}
+		}
+
+		wg.Wait()
+	})
+
+	t.Run("reference of one decode wins over the references of the source", func(t *testing.T) {
+		t.Parallel()
+
+		file := filepath.Join(t.TempDir(), "override.yaml")
+		require.NoError(t, os.WriteFile(file, []byte("x: &x 3\n"), 0o600))
+
+		doc := yamltest.FirstDocument(t, "a: *x\n",
+			niceyaml.WithReferences(niceyaml.NewSourceFromString("x: &x 1\n")))
+
+		got, err := doc.Decode[map[string]int](t.Context(),
+			niceyaml.WithYAMLDecodeOptions(yaml.ReferenceFiles(file)))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"a": 3}, got)
+
+		// The option reaches that decode alone.
+		got, err = doc.Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"a": 1}, got)
+	})
+
+	t.Run("a path resolves in the document alone", func(t *testing.T) {
+		t.Parallel()
+
+		bad := niceyaml.NewSourceFromString("base: &base\n  port: oops\n")
+		src := niceyaml.NewSourceFromString("server: *base\n",
+			niceyaml.WithName("app.yaml"),
+			niceyaml.WithReferences(bad),
+		)
+
+		doc, err := src.Document()
+		require.NoError(t, err)
+
+		_, err = doc.At(paths.Root().Child("server", "port"))
+		require.ErrorIs(t, err, paths.ErrAlias)
+
+		_, err = doc.Nodes(paths.Root().Child("server").ChildAll())
+		require.ErrorIs(t, err, paths.ErrAlias)
+
+		err = src.ValidateDocuments(t.Context(), serverSchema)
+		assert.Equal(t, []string{`app.yaml: $.server.port: expected "integer", got "string"`}, bindingMessages(err))
+	})
+
+	t.Run("reference that does not parse fails every decode", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "a: 1\n",
+			niceyaml.WithReferences(niceyaml.NewSourceFromString("x: [\n")))
+
+		_, err := doc.Decode[map[string]int](t.Context())
+		require.ErrorContains(t, err, "sequence end token ']' not found")
 	})
 }

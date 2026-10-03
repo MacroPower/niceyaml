@@ -300,6 +300,13 @@
 //		}
 //	}
 //
+// A Decoder holds how a decode runs, and the Source holds what its
+// documents mean. A document whose aliases name the anchors of another
+// file, such as a file of shared defaults, gets that file through
+// [WithReferences] on its Source. Every decode and every validation of
+// the document then reads those anchors, so [Source.ValidateDocuments]
+// reports what a decode of each document reports.
+//
 // A validator reads the node it checks with [Node.Decode], which runs
 // the validators the caller passes and no other, so a validator never runs
 // itself again. It returns its errors bound through that node, as

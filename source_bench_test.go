@@ -247,7 +247,7 @@ func BenchmarkNode_DecodeReferenceAliases(b *testing.B) {
 		{"anchors_8000", 8000},
 	}
 
-	ref := niceyaml.WithReferences([]byte("base: &base {x: notint}\n"))
+	ref := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {x: notint}\n"))
 
 	for _, sz := range sizes {
 		var sb strings.Builder
@@ -268,14 +268,14 @@ func BenchmarkNode_DecodeReferenceAliases(b *testing.B) {
 
 		sb.WriteString("]\nitem: *base\n")
 
-		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()
+		doc, err := niceyaml.NewSourceFromString(sb.String(), ref).Document()
 		require.NoError(b, err)
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				_, err := doc.Decode[config](b.Context(), ref)
+				_, err := doc.Decode[config](b.Context())
 				if !errors.Is(err, niceyaml.ErrDecode) {
 					b.Fatalf("got %v, want a rejection", err)
 				}
