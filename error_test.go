@@ -175,6 +175,90 @@ func TestError(t *testing.T) {
 	}
 }
 
+// blankError models a wrapper that blanks the text of the error it wraps.
+type blankError struct {
+	err error
+}
+
+// Error returns an empty message.
+func (blankError) Error() string {
+	return ""
+}
+
+// Unwrap returns the wrapped error.
+func (e blankError) Unwrap() error {
+	return e.err
+}
+
+func TestError_Error(t *testing.T) {
+	t.Parallel()
+
+	port := niceyaml.NewError("0 is less than 1", niceyaml.AtPath(paths.Root().Child("port")))
+	open := niceyaml.NewError("bad open", niceyaml.AtPath(paths.Root().Child("open")))
+	closeErr := niceyaml.NewError("bad close", niceyaml.AtPath(paths.Root().Child("close")))
+
+	// The message of an Error carries no location, so a program that
+	// prints an unbound one with fmt sees the message alone. FormatError
+	// reads the path from the Error, through any wrapper, and so do the
+	// %+v verb and LogValue of the Error itself. A join and a wrapper from
+	// fmt.Errorf have no Format method, so %+v prints their message.
+	tcs := map[string]struct {
+		err        error
+		want       string
+		wantPlus   string
+		wantFormat string
+	}{
+		"a located Error": {
+			err:        port,
+			want:       "0 is less than 1",
+			wantPlus:   "$.port: 0 is less than 1",
+			wantFormat: "$.port: 0 is less than 1",
+		},
+		"an Error with no message": {
+			err:        niceyaml.WrapError(nil, niceyaml.AtPath(paths.Root().Child("a"))),
+			want:       "",
+			wantPlus:   "$.a:",
+			wantFormat: "$.a:",
+		},
+		"a join of located Errors": {
+			err:        errors.Join(open, closeErr),
+			want:       "bad open\nbad close",
+			wantPlus:   "bad open\nbad close",
+			wantFormat: "|-- $.open: bad open\n`-- $.close: bad close",
+		},
+		"a wrapper around a located Error": {
+			err:        fmt.Errorf("check: %w", open),
+			want:       "check: bad open",
+			wantPlus:   "check: bad open",
+			wantFormat: "$.open: check: bad open",
+		},
+		"a wrapper that rewrites the text": {
+			err:        yamltest.RewriteError{Err: open},
+			want:       "rewritten",
+			wantPlus:   "rewritten",
+			wantFormat: "$.open: rewritten",
+		},
+		"a wrapper that blanks the text": {
+			err:        blankError{err: open},
+			want:       "",
+			wantPlus:   "",
+			wantFormat: "$.open:",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.err.Error())
+			assert.Equal(t, tc.want, fmt.Sprint(tc.err))
+			assert.Equal(t, tc.want, fmt.Sprintf("%v", tc.err))
+			assert.Equal(t, tc.wantPlus, fmt.Sprintf("%+v", tc.err))
+			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(tc.err, 0))
+		})
+	}
+}
+
 func TestSourceError_Error_Name(t *testing.T) {
 	t.Parallel()
 
@@ -611,6 +695,104 @@ func TestSourceError_Error_MultiErrorLead(t *testing.T) {
 		"list with the binding last": {
 			err:  listError{plain, boundA},
 			want: "f.yaml: plain; f.yaml:1:4: $.a: bad a",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := source.Bind(tc.err)
+
+			require.Error(t, err)
+			assert.Equal(t, tc.want, err.Error())
+		})
+	}
+}
+
+// headedError is a multi-error of its own type whose message is a heading
+// of its own, which can hold the message of a branch by chance.
+type headedError struct {
+	msg  string
+	errs []error
+}
+
+// Error returns the heading.
+func (e headedError) Error() string {
+	return e.msg
+}
+
+// Unwrap returns the branches.
+func (e headedError) Unwrap() []error {
+	return e.errs
+}
+
+func TestSourceError_Error_MultiErrorBranches(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	pathA := paths.Root().Child("a")
+	pathB := paths.Root().Child("b")
+
+	// A multi-error of its own type keeps the message it wrote. That
+	// message holds the text of a branch at most and never the location a
+	// binding gives it, so each branch the binding locates follows on a
+	// line of its own, whatever the message holds. A branch with no
+	// location follows only when the message does not hold the first
+	// branch.
+	tcs := map[string]struct {
+		err  error
+		want string
+	}{
+		"a list of located errors": {
+			err: listError{
+				niceyaml.NewError("bad a", niceyaml.AtPath(pathA)),
+				niceyaml.NewError("bad b", niceyaml.AtPath(pathB)),
+			},
+			want: stringtest.JoinLF(
+				"f.yaml: bad a; bad b",
+				"f.yaml:1:4: $.a: bad a",
+				"f.yaml:2:4: $.b: bad b",
+			),
+		},
+		"a heading that holds a short message by chance": {
+			err: headedError{msg: "invalid config: 2 problems", errs: []error{
+				niceyaml.NewError("invalid", niceyaml.AtPath(pathA)),
+				niceyaml.NewError("too old", niceyaml.AtPath(pathB)),
+			}},
+			want: stringtest.JoinLF(
+				"f.yaml: invalid config: 2 problems",
+				"f.yaml:1:4: $.a: invalid",
+				"f.yaml:2:4: $.b: too old",
+			),
+		},
+		"a branch whose path does not resolve": {
+			err: listError{
+				niceyaml.NewError("bad x", niceyaml.AtPath(paths.Root().Child("x").Index(0))),
+				niceyaml.NewError("bad a", niceyaml.AtPath(pathA)),
+			},
+			want: stringtest.JoinLF(
+				"f.yaml: bad x; bad a",
+				"f.yaml:1:4: $.a: bad a",
+				"f.yaml: $.x[0]: bad x",
+			),
+		},
+		"a list with located and unlocated branches": {
+			err: listError{
+				errors.New("plain"),
+				niceyaml.NewError("bad a", niceyaml.AtPath(pathA)),
+			},
+			want: stringtest.JoinLF(
+				"f.yaml: plain; bad a",
+				"f.yaml:1:4: $.a: bad a",
+			),
+		},
+		"unlocated branches the heading holds": {
+			err: headedError{msg: "invalid config: 2 problems", errs: []error{
+				errors.New("invalid"),
+				errors.New("config"),
+			}},
+			want: "f.yaml: invalid config: 2 problems",
 		},
 	}
 
@@ -2372,8 +2554,11 @@ func TestError_NilReceiver(t *testing.T) {
 	assert.Empty(t, missing.Error())
 	assert.Nil(t, missing.With(niceyaml.AtPath(paths.Root().Child("a"))))
 
+	// The path stays out of the message, so the message is empty, and
+	// FormatError, which reads an unbound Error, names the path alone.
 	wrapped := niceyaml.WrapError(missing, niceyaml.AtPath(paths.Root().Child("a")))
-	assert.Equal(t, "$.a:", wrapped.Error())
+	assert.Empty(t, wrapped.Error())
+	assert.Equal(t, "$.a:", niceyaml.FormatError(wrapped, 0))
 }
 
 func TestSourceError_NilReceiver(t *testing.T) {
@@ -2477,29 +2662,29 @@ func TestError_NilInnerErrorWithLocation(t *testing.T) {
 	tk := source.Lines().TokenAt(position.New(0, 3))
 	require.NotNil(t, tk)
 
-	// An Error from a nil error has no message, so its text is the path it
-	// carries and a colon, or nothing, and binding puts the resolved
-	// position in front.
+	// An Error from a nil error has no message, so its text is empty
+	// whatever location it carries. FormatError names the path alone, and
+	// binding puts the resolved position and the path in front.
 	tcs := map[string]struct {
 		err       *niceyaml.Error
-		want      string
+		wantTree  string
 		wantBound string
 	}{
 		"token": {
 			err:       niceyaml.WrapError(nil, niceyaml.AtPosition(position.NewFromToken(tk))),
-			want:      "",
+			wantTree:  "",
 			wantBound: "1:4:",
 		},
 		"range": {
 			err: niceyaml.WrapError(nil,
 				niceyaml.AtRange(position.NewRange(position.New(1, 3), position.New(1, 4))),
 			),
-			want:      "",
+			wantTree:  "",
 			wantBound: "2:4:",
 		},
 		"path": {
 			err:       niceyaml.WrapError(nil, niceyaml.AtPath(paths.Root().Child("b"))),
-			want:      "$.b:",
+			wantTree:  "$.b:",
 			wantBound: "2:4: $.b:",
 		},
 	}
@@ -2508,7 +2693,8 @@ func TestError_NilInnerErrorWithLocation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, tc.err.Error())
+			assert.Empty(t, tc.err.Error())
+			assert.Equal(t, tc.wantTree, niceyaml.FormatError(tc.err, 0))
 
 			bound := yamltest.Bind(t, source, tc.err)
 			assert.Equal(t, tc.wantBound, bound.Error())
@@ -3467,8 +3653,10 @@ func TestError_With(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, paths.Root().Child("key").Key(), locatedPath)
 
+	// The path stays out of the message, and FormatError names it.
 	assert.Equal(t, "bad key", base.Error())
-	assert.Equal(t, "$.key~: bad key", located.Error())
+	assert.Equal(t, "bad key", located.Error())
+	assert.Equal(t, "$.key~: bad key", niceyaml.FormatError(located, 0))
 
 	// The details of the copy are its own too.
 	reason := errors.New("reason")
@@ -3642,12 +3830,12 @@ func TestError_WrappedContext(t *testing.T) {
 	wrapped := docs[1].Bind(fmt.Errorf("document 1: %w", inner))
 
 	// The outer context stays as the wrapper wrote it, and the position the
-	// path resolves to goes in front of the whole message.
-	assert.Equal(t, "3:7: document 1: $.name: bad name", wrapped.Error())
-	assert.Equal(t, "3:7: document 1: $.name: bad name", fmt.Sprintf("%v", wrapped))
+	// path resolves to and the path go in front of the whole message.
+	assert.Equal(t, "3:7: $.name: document 1: bad name", wrapped.Error())
+	assert.Equal(t, "3:7: $.name: document 1: bad name", fmt.Sprintf("%v", wrapped))
 	require.ErrorIs(t, wrapped, inner)
 
-	// Binding first keeps the position beside the message under the context.
+	// Binding first puts the context in front of the position instead.
 	boundFirst := fmt.Errorf("document 1: %w", docs[1].Bind(inner))
 	assert.Equal(t, "document 1: 3:7: $.name: bad name", boundFirst.Error())
 
@@ -3695,8 +3883,9 @@ func TestError_ContextAboveLocation(t *testing.T) {
 	located := niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name")))
 	wrapped := docs[1].Bind(niceyaml.WrapError(fmt.Errorf("validate: %w", located)))
 
-	// The producer's context stays as written, behind the resolved position.
-	assert.Equal(t, "3:7: validate: $.name: bad name", wrapped.Error())
+	// The producer's context stays as written, behind the resolved position
+	// and the path.
+	assert.Equal(t, "3:7: $.name: validate: bad name", wrapped.Error())
 
 	// The highlight lands on the second document's value, not the first's.
 	var bound *niceyaml.SourceError
@@ -3789,20 +3978,20 @@ func TestError_NestedErrorChains(t *testing.T) {
 
 		got := trimLines(newXMLPrinter().Print(excerpt))
 		assert.Contains(t, got, "<genericError>2</genericError>")
-		assert.Contains(t, got, "^ ctx: $.b: bad")
+		assert.Contains(t, got, "^ ctx: bad")
 
 		// The excerpt follows the message, which lists the nested error
-		// with its position in front of the context it carries. The root
-		// has no message beside its range, so the printer marks the range
-		// with a caret run.
+		// with its position and its path in front of the context it
+		// carries. The root has no message beside its range, so the printer
+		// marks the range with a caret run.
 		assert.Equal(t, stringtest.JoinLF(
 			"1:4: $.a: outer",
-			"└── 2:4: ctx: $.b: bad",
+			"└── 2:4: $.b: ctx: bad",
 			"",
 			"<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>1</genericError>",
 			"<textError>   ^</textError>",
 			"<nameTag>b</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><genericError>2</genericError>",
-			"<textError>   ^ ctx: $.b: bad</textError>",
+			"<textError>   ^ ctx: bad</textError>",
 			"<nameTag>c</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>3</literalNumberInteger>",
 		), trimLines(render(err)))
 	})
@@ -3936,7 +4125,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		inner := niceyaml.NewError("bad name", niceyaml.AtPath(namePath))
 		wrapped := docs[0].Bind(fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", inner)))
 
-		assert.Equal(t, "1:7: outer: inner: $.name: bad name", wrapped.Error())
+		assert.Equal(t, "1:7: $.name: outer: inner: bad name", wrapped.Error())
 	})
 
 	t.Run("a bound join binds each branch as a child", func(t *testing.T) {
@@ -3950,9 +4139,9 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		))
 
 		// The join carries no location of its own, so the message is its
-		// branches, and each branch is a child with its position in front
-		// of the text its wrapper wrote.
-		assert.Equal(t, "1:7: a: $.name: bad first\n1:7: b: $.name: bad second", wrapped.Error())
+		// branches, and each branch is a child with its position and its
+		// path in front of the text its wrapper wrote.
+		assert.Equal(t, "1:7: $.name: a: bad first\n1:7: $.name: b: bad second", wrapped.Error())
 		require.ErrorIs(t, wrapped, first)
 		require.ErrorIs(t, wrapped, second)
 
@@ -3960,8 +4149,8 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 
 		require.ErrorAs(t, wrapped, &bound)
 		require.Len(t, bound.Errors(), 2)
-		assert.Equal(t, "1:7: a: $.name: bad first", bound.Errors()[0].Error())
-		assert.Equal(t, "1:7: b: $.name: bad second", bound.Errors()[1].Error())
+		assert.Equal(t, "1:7: $.name: a: bad first", bound.Errors()[0].Error())
+		assert.Equal(t, "1:7: $.name: b: bad second", bound.Errors()[1].Error())
 		assert.Len(t, slices.Collect(niceyaml.Bindings(wrapped)), 1)
 	})
 
@@ -3979,15 +4168,27 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		assert.Equal(t, "a: 1:7: $.name: bad first\nb: 3:7: $.name: bad second", joined.Error())
 	})
 
+	t.Run("a wrapper that blanks the message still gets the position", func(t *testing.T) {
+		t.Parallel()
+
+		inner := niceyaml.NewError("bad name", niceyaml.AtPath(namePath))
+		wrapped := docs[0].Bind(blankError{err: inner})
+
+		// The binding puts the position and the path in front of the
+		// empty text, so the line still says where the problem is.
+		assert.Equal(t, "1:7: $.name:", wrapped.Error())
+		require.ErrorIs(t, wrapped, inner)
+	})
+
 	t.Run("a wrapper that rewrites the message still gets the position", func(t *testing.T) {
 		t.Parallel()
 
 		inner := niceyaml.NewError("bad name", niceyaml.AtPath(namePath))
 		wrapped := docs[0].Bind(fmt.Errorf("outer: %w", yamltest.RewriteError{Err: inner}))
 
-		// The position comes from the Error in the chain, not from its text,
-		// so a wrapper that hides the text does not hide the position.
-		assert.Equal(t, "1:7: outer: rewritten", wrapped.Error())
+		// The position and the path come from the Error in the chain, not
+		// from its text, so a wrapper that hides the text hides neither.
+		assert.Equal(t, "1:7: $.name: outer: rewritten", wrapped.Error())
 		require.ErrorIs(t, wrapped, inner)
 	})
 
@@ -4055,7 +4256,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 				// the %+v verb lists after the message.
 				assert.Equal(t, tc.unbound, tc.err.Error())
 				assert.Equal(t, tc.bound, docs[0].Bind(tc.err).Error())
-				assert.Equal(t, tc.bound+"\n`-- 1:7: "+nested.Error(), report(docs[0].Bind(tc.err)))
+				assert.Equal(t, tc.bound+"\n`-- 1:7: $.name: bad name", report(docs[0].Bind(tc.err)))
 			})
 		}
 	})
@@ -4069,7 +4270,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 
 		// The path anchor resolves in the first document, and the message
 		// carries that one position, which agrees with the highlight.
-		assert.Equal(t, "$.name: bad token", outer.Error())
+		assert.Equal(t, "bad token", outer.Error())
 		assert.Equal(t, "1:7: $.name: bad token", docs[0].Bind(outer).Error())
 	})
 
@@ -4079,11 +4280,13 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		inner := niceyaml.NewError("bad token", niceyaml.AtPath(paths.Root().Child("other")))
 		outer := niceyaml.WrapError(inner, niceyaml.AtPath(namePath))
 
-		// The message names the one location Path reports, not both.
+		// The tree and the binding name the one location Path reports, not
+		// both.
 		p, ok := outer.Path()
 		require.True(t, ok)
 		assert.Equal(t, namePath, p)
-		assert.Equal(t, "$.name: bad token", outer.Error())
+		assert.Equal(t, "bad token", outer.Error())
+		assert.Equal(t, "$.name: bad token", niceyaml.FormatError(outer, 0))
 		assert.Equal(t, "1:7: $.name: bad token", docs[0].Bind(outer).Error())
 	})
 
@@ -5724,8 +5927,9 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		// wrapper all bind as a root without a location and one child
 		// per branch. The message of a join is its branches behind their
 		// positions, under the text a wrapper put in front. A wrapper with
-		// two %w verbs holds the messages of its branches already, so its
-		// message stays as it wrote it.
+		// two %w verbs keeps the message it wrote, which holds the text of
+		// its branches and none of their locations, so its branches follow
+		// behind their positions.
 		tcs := map[string]struct {
 			err  error
 			want string
@@ -5736,7 +5940,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 			},
 			"two %w verbs": {
 				err:  fmt.Errorf("%w; %w", badA, badB),
-				want: "$.a: bad a; $.b: bad b",
+				want: "bad a; bad b\n1:4: $.a: bad a\n2:4: $.b: bad b",
 			},
 			"wrapped join": {
 				err:  fmt.Errorf("ctx: %w", errors.Join(badA, badB)),
@@ -5780,7 +5984,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		}{
 			"sentinel first": {
 				err:  fmt.Errorf("%w: %w", errInvalid, badB),
-				want: "2:4: invalid: $.b: bad b",
+				want: "2:4: $.b: invalid: bad b",
 			},
 			"sentinel last": {
 				err:  fmt.Errorf("%w: %w", badB, errInvalid),
@@ -5831,14 +6035,14 @@ func TestSourceError_TreeBranches(t *testing.T) {
 
 		assert.Equal(t, stringtest.JoinLF(
 			"document 0:",
-			"1:4: first: $.a: bad a",
+			"1:4: $.a: first: bad a",
 			"summary",
 			"2:4: $.b: bad b",
 			"3:4: $.c: bad c",
 		), err.Error())
 		assert.Equal(t, stringtest.JoinLF(
 			"document 0:",
-			"|-- 1:4: first: $.a: bad a",
+			"|-- 1:4: $.a: first: bad a",
 			"`-- summary",
 			"    |-- 2:4: $.b: bad b",
 			"    `-- 3:4: $.c: bad c",
@@ -5846,7 +6050,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 
 		got := trimLines(render(err))
 		assert.Contains(t, got, "<genericError>1</genericError>")
-		assert.Contains(t, got, "^ first: $.a: bad a")
+		assert.Contains(t, got, "^ first: bad a")
 		assert.Contains(t, got, "^ bad b")
 		assert.Contains(t, got, "^ bad c")
 	})
@@ -6785,7 +6989,8 @@ func TestRebase(t *testing.T) {
 		p, ok := e.Path()
 		require.True(t, ok)
 		assert.Equal(t, "$.hours.close", p.String())
-		assert.Equal(t, "$.hours.close: closes before it opens", err.Error())
+		assert.Equal(t, "closes before it opens", err.Error())
+		assert.Equal(t, "$.hours.close: closes before it opens", niceyaml.FormatError(err, 0))
 	})
 
 	t.Run("a decode rebases a nested self validator the same way", func(t *testing.T) {
@@ -6878,7 +7083,8 @@ func TestRebase(t *testing.T) {
 		other := errors.New("bad hours")
 
 		err := niceyaml.Rebase(errors.Join(open, other), hours)
-		require.EqualError(t, err, "$.hours.open: bad open\n$.hours: bad hours")
+		require.EqualError(t, err, "bad open\nbad hours")
+		assert.Equal(t, "|-- $.hours.open: bad open\n`-- $.hours: bad hours", niceyaml.FormatError(err, 0))
 		require.ErrorIs(t, err, open)
 		require.ErrorIs(t, err, other)
 
@@ -6903,7 +7109,7 @@ func TestRebase(t *testing.T) {
 		closeErr := niceyaml.NewError("bad close", niceyaml.AtPath(closePath))
 
 		err := niceyaml.Rebase(niceyaml.WrapError(errors.Join(open, closeErr)), hours)
-		require.EqualError(t, err, "$.hours.open: bad open\n$.hours.close: bad close")
+		require.EqualError(t, err, "bad open\nbad close")
 		require.ErrorIs(t, err, open)
 		require.ErrorIs(t, err, closeErr)
 
@@ -6962,7 +7168,7 @@ func TestRebase(t *testing.T) {
 				t.Parallel()
 
 				err := niceyaml.Rebase(tc.err, hours)
-				require.EqualError(t, err, "$.hours.open: bad open\n$.hours.close: bad close")
+				require.EqualError(t, err, "bad open\nbad close")
 				require.ErrorIs(t, err, open)
 				require.ErrorIs(t, err, closeErr)
 
@@ -6986,7 +7192,7 @@ func TestRebase(t *testing.T) {
 		}}}
 
 		err := niceyaml.Rebase(joined, hours)
-		require.EqualError(t, err, "$.hours.open: bad open\n$.hours.close: bad close")
+		require.EqualError(t, err, "bad open\nbad close")
 		require.ErrorIs(t, err, errInvalidHours)
 
 		var custom *customTestError
@@ -7089,8 +7295,38 @@ func TestRebase(t *testing.T) {
 		inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
 		err := niceyaml.Rebase(niceyaml.Rebase(inner, hours), paths.Root().Child("spec"))
 
-		assert.Equal(t, "$.spec.hours.close: closes before it opens", err.Error())
+		assert.Equal(t, "closes before it opens", err.Error())
+		assert.Equal(t, "$.spec.hours.close: closes before it opens", niceyaml.FormatError(err, 0))
 		require.EqualError(t, dd.Bind(err), "4:12: $.spec.hours.close: closes before it opens")
+	})
+
+	t.Run("wrappers between rebases add no paths", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "spec:\n  hours:\n    open: 1\n    close: 0\n")
+
+		// Each level wraps the result of the level below and rebases it, so
+		// the text holds every wrapper and binding names the joined path
+		// once, in front of all of them.
+		inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
+		err := niceyaml.Rebase(
+			fmt.Errorf("check spec: %w", niceyaml.Rebase(fmt.Errorf("check hours: %w", inner), hours)),
+			paths.Root().Child("spec"),
+		)
+
+		assert.Equal(t, "check spec: check hours: closes before it opens", err.Error())
+		assert.Equal(t,
+			"$.spec.hours.close: check spec: check hours: closes before it opens",
+			niceyaml.FormatError(err, -1),
+		)
+
+		bound := dd.Bind(err)
+		require.EqualError(t, bound, "4:12: $.spec.hours.close: check spec: check hours: closes before it opens")
+
+		var se *niceyaml.SourceError
+
+		require.ErrorAs(t, bound, &se)
+		assert.Equal(t, "check spec: check hours: closes before it opens", se.Message())
 	})
 
 	t.Run("a position stays as it is", func(t *testing.T) {
@@ -7195,11 +7431,12 @@ func TestRebase(t *testing.T) {
 		p, ok := moved.Path()
 		require.True(t, ok)
 		assert.Equal(t, hours.Child("open"), p)
-		assert.Equal(t, "$.hours.open: closes before it opens", moved.Error())
+		assert.Equal(t, "closes before it opens", moved.Error())
+		assert.Equal(t, "$.hours.open: closes before it opens", niceyaml.FormatError(moved, 0))
 		require.EqualError(t, dd.Bind(moved), `3:9: $.hours.open: closes before it opens`)
 	})
 
-	t.Run("text a wrapper added stays as it is", func(t *testing.T) {
+	t.Run("a wrapper between the check and the rebase adds no path", func(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, input)
@@ -7207,9 +7444,17 @@ func TestRebase(t *testing.T) {
 		inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
 		err := niceyaml.Rebase(fmt.Errorf("checking hours: %w", inner), hours)
 
+		// The wrapper holds the message alone, so binding names the joined
+		// path once, in front of the text the wrapper added.
 		require.ErrorIs(t, err, inner)
-		assert.Equal(t, "$.hours.close: checking hours: $.close: closes before it opens", err.Error())
-		require.EqualError(t, dd.Bind(err), "4:10: $.hours.close: checking hours: $.close: closes before it opens")
+		assert.Equal(t, "checking hours: closes before it opens", err.Error())
+		assert.Equal(t, "$.hours.close: checking hours: closes before it opens", niceyaml.FormatError(err, 0))
+		require.EqualError(t, dd.Bind(err), "4:10: $.hours.close: checking hours: closes before it opens")
+
+		var se *niceyaml.SourceError
+
+		require.ErrorAs(t, dd.Bind(err), &se)
+		assert.Equal(t, "checking hours: closes before it opens", se.Message())
 	})
 
 	t.Run("a check runs under the scope it is written for", func(t *testing.T) {
@@ -7874,12 +8119,13 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		assert.Equal(t, 1, rng.Start.Line)
 	})
 
-	t.Run("text a wrapper added stays", func(t *testing.T) {
+	t.Run("text a wrapper added stays without the path", func(t *testing.T) {
 		t.Parallel()
 
 		bound := bind(t, fmt.Errorf("ctx: %w", niceyaml.NewError("bad", niceyaml.AtPath(bPath))))
 
-		assert.Equal(t, "ctx: $.a.b: bad", bound.Message())
+		assert.Equal(t, "ctx: bad", bound.Message())
+		assert.Equal(t, "x.yaml:2:6: $.a.b: ctx: bad", bound.Error())
 
 		p, ok := bound.Path()
 		require.True(t, ok)
@@ -8443,6 +8689,22 @@ func TestError_LogValue(t *testing.T) {
 		err := niceyaml.NewError("bad x", niceyaml.AtPath(paths.Root().Child("x")))
 
 		assert.Equal(t, "$.x: bad x", logged(t, err))
+	})
+
+	t.Run("a wrapper around an unbound error logs its message alone", func(t *testing.T) {
+		t.Parallel()
+
+		// The wrapper is no LogValuer, so a handler logs the message the
+		// wrapper wrote, which holds no path.
+		wrapped := fmt.Errorf("check: %w", niceyaml.NewError("bad x", niceyaml.AtPath(paths.Root().Child("x"))))
+
+		assert.Equal(t, "check: bad x", logged(t, wrapped))
+
+		var buf bytes.Buffer
+
+		slog.New(slog.NewTextHandler(&buf, nil)).Error("load", slog.Any("err", wrapped))
+
+		assert.Contains(t, buf.String(), `err="check: bad x"`)
 	})
 
 	t.Run("a join of typed-nil errors logs its message", func(t *testing.T) {

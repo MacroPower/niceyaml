@@ -21,9 +21,9 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
-// silentError wraps another error without adding a message of its own, so
-// the [niceyaml.SourceError] holding it renders an empty message while still
-// resolving a detail.
+// silentError wraps another error and blanks its message, so the
+// [niceyaml.SourceError] holding it renders the position and the path alone
+// while still resolving a detail.
 type silentError struct{ err error }
 
 func (s silentError) Error() string { return "" }
@@ -427,11 +427,11 @@ func TestErrorHandler(t *testing.T) {
 				"",
 			),
 		},
-		"niceyaml error with an empty message keeps the wrapper text": {
+		"niceyaml error with an empty message keeps the wrapper text and the path": {
 			err: fmt.Errorf("document 0: %w", emptyMessageErr),
 			want: stringtest.JoinLF(
 				"Error",
-				"  document 0: 1:1:",
+				"  document 0: 1:1: $.name~:",
 				"  ",
 				"  <genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
 				"  <textError>^^^^</textError>",

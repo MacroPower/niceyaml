@@ -91,6 +91,18 @@ import (
 // fields, and [Rebase] is for a check run on a value after Decode
 // returns.
 //
+// [Error.Error] carries no location, so a Validate may add context
+// around an Error with [fmt.Errorf] at any depth. The text the wrapper
+// writes holds no path, and the decode puts the position and the joined
+// path in front of the whole text:
+//
+//	cafe.yaml:4:10: $.hours.close: hours check: closes before it opens
+//
+// A caller that calls Validate itself holds an error that no binding
+// holds yet, and its message names no path. Such a caller reads it with
+// [FormatError], as FormatError(err, 0), which puts the path in front of
+// the text the same way.
+//
 // Any value with a Validate method takes part, including one from a
 // package that names its own check that way, such as a generated
 // message type. A decode runs those checks too and reports their errors
@@ -1611,8 +1623,9 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 // the scope of n, as [Node.At] and [Node.Ranges] return it. A path that
 // names a key a mapping leaves out binds as an [Error] with [AtPath] of
 // that path binds, at the key of the mapping that lacks it, as
-// [Node.nearestLocation] finds it. The Error writes the path in front, so
-// its message is the one of [notFoundError], which leaves the path out.
+// [Node.nearestLocation] finds it. The binding writes the path in front,
+// so the message is the one of [notFoundError], which leaves the path
+// out.
 // Any other reason is about the call, so it binds with no location, as
 // [Node.bindOwn] binds it.
 func (n *Node) bindUnresolved(path paths.Path, reason error) error {
@@ -1735,8 +1748,10 @@ func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []
 // the message and in [SourceError.Path], as a decode of the whole
 // document reports it. The paths of a join, of the errors a summary from
 // [NewSummary] heads, and of the details from [WithDetails] change the
-// same way. Text that a wrapper such as [fmt.Errorf] added around a
-// located Error keeps the path the wrapper wrote, behind the joined one.
+// same way. An Error writes no path into its own message, so text that a
+// wrapper such as [fmt.Errorf] added around a located Error holds none,
+// and the bound message names the joined path once, in front of that
+// text.
 //
 // A Node from Node.At or Node.Nodes stands for one value, so a problem
 // with no location that it binds is about that value. The Node binds
@@ -1777,9 +1792,7 @@ func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []
 // that holds more than one document, the document stands behind the name,
 // counted from 1, as in "name: document 3: msg", so an error from one
 // document of many says which document. The message of err stays as it
-// is, and the position goes in front of it, so bind an error before
-// adding context with [fmt.Errorf] to keep the position beside the
-// message.
+// is, and the position goes in front of it.
 //
 // [Source.Bind] binds an error to the document its location falls in,
 // so a caller that holds the source rather than a document binds there.

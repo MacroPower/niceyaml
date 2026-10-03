@@ -70,9 +70,11 @@
 // one, [go.jacobcolvin.com/niceyaml/printer.Printer] renders with
 // [go.jacobcolvin.com/niceyaml/style.Default].
 //
-// [Error] points at a location in a YAML document: a path, a position, or
-// a range. [Error.Error] returns the message, with a path in front as
-// "$.path", so a validator can build one without holding the source.
+// [Error] points at a location in a YAML document: a path, a position, or a
+// range, so a validator can build one without holding the source.
+// [Error.Error] returns the message alone, with no location in it, and a
+// binding puts the location in front. [FormatError] reads an Error that no
+// binding holds yet, with its path in front as "$.path: msg".
 //
 // An Error is one problem. [WithDetails] adds the errors that explain it,
 // such as its reasons, the forms a value failed to match, or a related
@@ -131,9 +133,10 @@
 // [Bindings] finds every binding in an error joined from bound errors,
 // such as one per document of a file. FormatError prints the errors of
 // such a join on one excerpt per source, each with its message beside
-// its caret. A SourceError keeps the text it binds, so an error built by
-// hand goes through Bind before [fmt.Errorf] adds context, which keeps
-// the position beside the message.
+// its caret. A SourceError keeps the text it binds and puts the position
+// and the path in front of it, so context that [fmt.Errorf] adds around
+// an Error before the binding stays behind the path, and context it adds
+// around the binding stands in front of the position.
 //
 // # Lines
 //

@@ -2452,10 +2452,44 @@ func TestNode_Bind_Scope(t *testing.T) {
 			err:  niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 7))),
 			want: "cfg.yaml:1:8: bad",
 		},
-		"text a wrapper wrote keeps the path it wrote": {
+		// The text a wrapper wrote holds the message alone, so the binding
+		// names the joined path once, in front of it.
+		"a wrapper adds no path of its own": {
 			err:  fmt.Errorf("check: %w", niceyaml.NewError("bad", niceyaml.AtPath(closePath))),
-			want: "cfg.yaml:5:14: $.shops[0].hours.close: check: $.close: bad",
+			want: "cfg.yaml:5:14: $.shops[0].hours.close: check: bad",
 			path: "$.shops[0].hours.close",
+		},
+		// A multi-error keeps the message it wrote, which names none of
+		// the paths, so each branch the scope locates follows it.
+		"a multi-error lists each branch below its own message": {
+			err: listError{
+				niceyaml.NewError("bad open", niceyaml.AtPath(openPath)),
+				niceyaml.NewError("bad close", niceyaml.AtPath(closePath)),
+			},
+			want: stringtest.JoinLF(
+				"cfg.yaml: bad open; bad close",
+				"cfg.yaml:4:13: $.shops[0].hours.open: bad open",
+				"cfg.yaml:5:14: $.shops[0].hours.close: bad close",
+			),
+			children: []string{
+				"cfg.yaml:4:13: $.shops[0].hours.open: bad open",
+				"cfg.yaml:5:14: $.shops[0].hours.close: bad close",
+			},
+		},
+		"a wrapper with two %w verbs lists each branch below its own message": {
+			err: fmt.Errorf("%w; %w",
+				niceyaml.NewError("bad open", niceyaml.AtPath(openPath)),
+				niceyaml.NewError("bad close", niceyaml.AtPath(closePath)),
+			),
+			want: stringtest.JoinLF(
+				"cfg.yaml: bad open; bad close",
+				"cfg.yaml:4:13: $.shops[0].hours.open: bad open",
+				"cfg.yaml:5:14: $.shops[0].hours.close: bad close",
+			),
+			children: []string{
+				"cfg.yaml:4:13: $.shops[0].hours.open: bad open",
+				"cfg.yaml:5:14: $.shops[0].hours.close: bad close",
+			},
 		},
 		// Each branch is a problem of its own, so the branch with no
 		// location binds at the scope whatever the others carry.
@@ -7825,7 +7859,7 @@ func TestNode_Validate(t *testing.T) {
 
 		// A direct call returns the error as the validator wrote it, and
 		// the Node binds it from its own scope.
-		require.EqualError(t, unbound.Validate(t.Context(), scoped), "$.name: name is required")
+		require.EqualError(t, unbound.Validate(t.Context(), scoped), "name is required")
 
 		err = scoped.Validate(t.Context(), unbound)
 		require.EqualError(t, err, "x.yaml:2:9: $.meta.name: name is required")

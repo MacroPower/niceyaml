@@ -426,10 +426,14 @@ func TestViolation_MissingMember(t *testing.T) {
 
 		err := v.ValidateValue(t.Context(), map[string]any{"server": map[string]any{"port": 1}})
 
+		// One violation comes back alone, and its message names no field
+		// until a binding or FormatError puts the path in front.
+		assert.Equal(t, `missing required property "name"`, err.Error())
+		assert.Equal(t, `$.server.name: missing required property "name"`, niceyaml.FormatError(err, 0))
+
 		var located *niceyaml.Error
 
 		require.ErrorAs(t, err, &located)
-		assert.Equal(t, `$.server.name: missing required property "name"`, located.Error())
 
 		path, ok := located.Path()
 		require.True(t, ok)

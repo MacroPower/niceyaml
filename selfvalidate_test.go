@@ -36,6 +36,22 @@ func (h hours) Validate() error {
 	return nil
 }
 
+// wrappedHours validates itself through the check of hours, and adds
+// context around the located error that check returns.
+type wrappedHours struct {
+	Open  string `yaml:"open"`
+	Close string `yaml:"close"`
+}
+
+func (h wrappedHours) Validate() error {
+	err := hours(h).Validate()
+	if err != nil {
+		return fmt.Errorf("hours check: %w", err)
+	}
+
+	return nil
+}
+
 // schedule validates itself with a summary of its violations, each with a
 // path written from its own root.
 type schedule struct {
@@ -269,6 +285,42 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		p, ok := e.Path()
 		require.True(t, ok)
 		assert.Equal(t, "$.hours.close", p.String())
+	})
+
+	t.Run("context a Validate adds around a located error follows the path", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			hours:
+			  open: "09:00"
+			  close: "08:00"
+		`), niceyaml.WithName("cafe.yaml"))
+
+		doc, err := source.Document()
+		require.NoError(t, err)
+
+		_, err = doc.Decode[struct {
+			Hours wrappedHours `yaml:"hours"`
+		}](t.Context())
+
+		// The wrapper holds the message alone, so the decode names the
+		// joined path once, in front of the context.
+		require.EqualError(t, err, "cafe.yaml:3:10: $.hours.close: hours check: closes before it opens")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Equal(t, "hours check: closes before it opens", bound.Message())
+
+		p, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.hours.close", p.String())
+
+		// The Validate alone returns the message with no path in it, and
+		// FormatError reads the path from the Error it wraps.
+		unbound := wrappedHours{Open: "09:00", Close: "08:00"}.Validate()
+		require.EqualError(t, unbound, "hours check: closes before it opens")
+		assert.Equal(t, "$.close: hours check: closes before it opens", niceyaml.FormatError(unbound, 0))
 	})
 
 	t.Run("the errors a summary under a field heads report the joined path", func(t *testing.T) {

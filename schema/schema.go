@@ -376,11 +376,15 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // [ErrValidate], including a $ref the validator cannot resolve, since no
 // location in the document is at fault for that.
 //
-// ValidateValue holds no source, so its errors are unbound and write
-// their paths from the root of data. The [niceyaml.Node] data came from
-// binds them with [niceyaml.Node.Bind]. A caller that reports them under
-// another path, or in another document, puts them under that path with
-// [niceyaml.Rebase] before it binds them, which the bound errors of
+// ValidateValue holds no source, so its errors are unbound and write their
+// paths from the root of data. The message of a violation names no path,
+// since a [niceyaml.Error] keeps its location out of its message, so a
+// caller that prints the errors before a binding holds them prints
+// [niceyaml.FormatError] of them, which puts each path in front. The
+// [niceyaml.Node] data came from binds them with [niceyaml.Node.Bind],
+// which puts the position and the path in front. A caller that reports them
+// under another path, or in another document, puts them under that path
+// with [niceyaml.Rebase] before it binds them, which the bound errors of
 // [Schema.Validate] do not allow.
 //
 // ValidateValue rejects two shapes of data before checking anything. A

@@ -1124,7 +1124,7 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 			case tc.err != "":
 				require.Error(t, err)
 				require.NotErrorIs(t, err, schema.ErrValidate)
-				assert.Contains(t, err.Error(), tc.err)
+				assert.Contains(t, niceyaml.FormatError(err, 0), tc.err)
 
 			default:
 				require.NoError(t, err)

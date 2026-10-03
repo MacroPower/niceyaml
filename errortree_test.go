@@ -240,7 +240,7 @@ func TestErrorTree_New_DeepMultiWrap(t *testing.T) {
 
 				return err
 			},
-			want: niceyaml.ErrorTree{Text: strings.Repeat("invalid: ", n-1) + "$.a: bad"},
+			want: niceyaml.ErrorTree{Text: "$.a: " + strings.Repeat("invalid: ", n-1) + "bad"},
 		},
 	}
 
@@ -316,6 +316,9 @@ func TestErrorTree_New_DeepRebind(t *testing.T) {
 			),
 		},
 		"multi-wrap over a located error bound at each level": {
+			// The text of each level holds the message of the located error
+			// it wraps and not its position, so the level lists that error.
+			// The binding below holds its own lines in its text already.
 			build: func(calls *atomic.Int64) error {
 				err := source.Bind(countingError{calls: calls, msg: "e0"})
 
@@ -326,10 +329,28 @@ func TestErrorTree_New_DeepRebind(t *testing.T) {
 
 				return err
 			},
-			want: "f.yaml: e0; $.a: e1; $.a: e2; $.a: e3; $.a: e4; $.a: e5; " +
-				"$.a: e6; $.a: e7; $.a: e8; $.a: e9; $.a: e10; $.a: e11; " +
-				"$.a: e12; $.a: e13; $.a: e14; $.a: e15; $.a: e16; $.a: e17; " +
-				"$.a: e18; $.a: e19",
+			want: stringtest.JoinLF(
+				"f.yaml: e0; e1",
+				"f.yaml:1:4: $.a: e1; e2",
+				"f.yaml:1:4: $.a: e2; e3",
+				"f.yaml:1:4: $.a: e3; e4",
+				"f.yaml:1:4: $.a: e4; e5",
+				"f.yaml:1:4: $.a: e5; e6",
+				"f.yaml:1:4: $.a: e6; e7",
+				"f.yaml:1:4: $.a: e7; e8",
+				"f.yaml:1:4: $.a: e8; e9",
+				"f.yaml:1:4: $.a: e9; e10",
+				"f.yaml:1:4: $.a: e10; e11",
+				"f.yaml:1:4: $.a: e11; e12",
+				"f.yaml:1:4: $.a: e12; e13",
+				"f.yaml:1:4: $.a: e13; e14",
+				"f.yaml:1:4: $.a: e14; e15",
+				"f.yaml:1:4: $.a: e15; e16",
+				"f.yaml:1:4: $.a: e16; e17",
+				"f.yaml:1:4: $.a: e17; e18",
+				"f.yaml:1:4: $.a: e18; e19",
+				"f.yaml:1:4: $.a: e19",
+			),
 		},
 	}
 
@@ -1704,7 +1725,7 @@ func TestErrorTree_Problems(t *testing.T) {
 		},
 		"unbound wrapper around a located error": {
 			err:  fmt.Errorf("check: %w", badA()),
-			want: []string{"check: $.a: bad a"},
+			want: []string{"$.a: check: bad a"},
 		},
 		"unbound error above an unbound error and a binding": {
 			err: niceyaml.NewSummary("2 files",
@@ -2224,11 +2245,12 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 			wantPath: "$.a",
 		},
 		"wrapper around an unbound Error": {
-			// The wrapper wrote the path into its own text, which stays.
+			// The text of the node puts the path in front of the text the
+			// wrapper added, and the message leaves the path out.
 			node: func(*testing.T) niceyaml.ErrorTree {
 				return niceyaml.NewErrorTree(fmt.Errorf("load config: %w", badA()))
 			},
-			want:     "load config: $.a: bad a",
+			want:     "load config: bad a",
 			wantPath: "$.a",
 		},
 		"Error with a path of its own around a binding": {

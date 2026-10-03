@@ -90,6 +90,12 @@ type ErrorTree struct {
 // documents in the order [errors.Join] took them. A child with children
 // of its own is a subtree.
 //
+// An error bound to no source has no position to show. When its cause
+// chain reaches a located [*Error] that carries a path before any
+// binding, the text of its node has that path in front, as
+// "$.path: msg". A binding puts the path there the same way, so the row
+// names the value whatever wraps the Error.
+//
 // An error that unwraps to several and whose message is theirs one per
 // line, such as one from [errors.Join], is a node with no text and one
 // child per error, so a run over several files reads as one tree with a
@@ -250,9 +256,10 @@ func (t ErrorTree) heads() bool {
 //
 //   - For a node with a binding, it is the [SourceError.Message] of
 //     Bound.
-//   - For a node whose Err is an [*Error] bound to no source, it is the
-//     message of the Error without the path [Error.Error] puts in front.
-//     A binding of the Error would report the same message.
+//   - For a node bound to no source that names a path, as
+//     [ErrorTree.Path] reports, it is the message of Err without the path
+//     Text puts in front of it. A binding of Err would report the same
+//     message.
 //   - For any other node, it is Text.
 //
 // A node with no text of its own, such as the root of a join, has an
@@ -268,16 +275,15 @@ func (t ErrorTree) Message() string {
 		return t.Bound.Message()
 	}
 
-	x, ok := t.Err.(*Error) //nolint:errorlint // The node itself, not a chain search.
-	if !ok || x == nil {
+	if _, ok := t.Path(); !ok {
 		return t.Text
 	}
 
 	// The part of the message the children show depends on the end of the
 	// cause chain, so the walk finds that end alone.
-	end := walkChildren(x, func(*SourceError) {}, func(error, childBase, bool) {})
+	end := walkChildren(t.Err, func(*SourceError) {}, func(error, childBase, bool) {})
 
-	return bareMessage(x, end)
+	return bareMessage(t.Err, end)
 }
 
 // Path returns the [paths.Path] the node is about and true, or the zero
@@ -286,8 +292,8 @@ func (t ErrorTree) Message() string {
 //   - For a node with a binding, it is the [SourceError.Path] of Bound.
 //   - For a node bound to no source, it is the path of the first located
 //     [*Error] along the cause chain of Err, with the base of every
-//     [Rebase] on the way joined in front. The text of the node names the
-//     same path.
+//     [Rebase] on the way joined in front. The text of the node puts the
+//     same path in front of the message.
 //
 // The source and the position come from Bound, which resolved them. The
 // methods of a nil [*SourceError] return zero values, so a report reads
@@ -355,9 +361,25 @@ func appendTrees(dst []ErrorTree, err error) []ErrorTree {
 		node.Text = x.headline()
 	} else {
 		node.Text, _, _ = end.cut(err.Error())
+		node.Text = unboundText(err, node.Text)
 	}
 
 	return appendTree(dst, newTree(node, kids))
+}
+
+// unboundText returns text, the message of err, behind the path of the
+// first located [*Error] along the cause chain of err, as [anchorOf]
+// finds it, when that Error carries a path. A binding puts the path there
+// the same way, so the row of an error no binding holds yet names the
+// value it is about, however the wrappers above that Error nest. The text
+// comes back as it is when the chain carries no path, or when it reaches
+// a [*SourceError] first, since that binding names its own path.
+func unboundText(err error, text string) string {
+	if a := anchorOf(err); a.hasPath {
+		return withPath(a.path, text)
+	}
+
+	return text
 }
 
 // appendTree appends t to dst and returns the extended slice. A node with
@@ -577,10 +599,13 @@ type chainEnd struct {
 //
 // Any other error that unwraps to several keeps its message. The second
 // result is the number of children at the end of the list of children
-// whose messages the text holds already. They are the branches of such an
+// whose text the message holds already. They are the branches of such an
 // error when its message holds the message of its first branch, as a
 // wrapper [fmt.Errorf] builds with several %w verbs does and a count of
-// the branches does not, and the ones a binding reports the same of.
+// the branches does not, and the ones a binding reports the same of. The
+// message holds the text of a branch and never the location a binding
+// gives it, so [SourceError.Error] still lists each of them that the
+// binding located.
 //
 // A wrapper that rewrites the message it wraps leaves nothing to find.
 // The text then comes back whole, and the last result is false.
