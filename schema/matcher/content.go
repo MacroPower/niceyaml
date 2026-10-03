@@ -143,7 +143,7 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	}
 
 	if err != nil {
-		//nolint:wrapcheck // The Document binds the error already.
+		//nolint:wrapcheck // The Node binds the error already.
 		return false, err
 	}
 

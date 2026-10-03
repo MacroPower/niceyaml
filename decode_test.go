@@ -83,7 +83,7 @@ func TestSource_Documents(t *testing.T) {
 	assert.Same(t, source, second.Source())
 	assert.NotNil(t, second.Tokens())
 
-	// Every call hands out the same Document for an index, in a slice of
+	// Every call hands out the same root Node for an index, in a slice of
 	// its own.
 	again, err := source.Documents()
 	require.NoError(t, err)
@@ -1923,7 +1923,7 @@ func TestDocument_View(t *testing.T) {
 		assert.False(t, view.Contains(0), "the view keeps the indices of the source")
 	})
 
-	t.Run("covers the node of a scoped Document", func(t *testing.T) {
+	t.Run("covers only the lines of a scoped Node", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString(input)
@@ -2006,7 +2006,7 @@ func TestDocument_Lines(t *testing.T) {
 		assert.Equal(t, 2, lines.Line(0).Number())
 	})
 
-	t.Run("covers the node of a scoped Document", func(t *testing.T) {
+	t.Run("covers only the lines of a scoped Node", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString(input)
@@ -7198,7 +7198,7 @@ func TestDocument_At_FlowCollectionSpan(t *testing.T) {
 	t.Parallel()
 
 	// The token that closes a flow collection belongs to the node, so the
-	// span and the tokens of a scoped Document run through it.
+	// span and the tokens of a scoped Node run through it.
 	tcs := map[string]struct {
 		input  string
 		path   paths.Path
@@ -7250,7 +7250,7 @@ func TestDocument_At_ZeroWidthBoundary(t *testing.T) {
 	// A token that holds no text can share its offset with a token of
 	// another node. The empty content of a block scalar sits where the
 	// next key starts, and an implicit null takes the offset of the ":"
-	// or "-" before it. The span and the tokens of a scoped Document keep
+	// or "-" before it. The span and the tokens of a scoped Node keep
 	// to the tokens of the node.
 	tcs := map[string]struct {
 		input  string

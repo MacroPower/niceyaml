@@ -1459,8 +1459,8 @@ func startsBelow(tk, mark *token.Token) bool {
 // [SourceError.Unresolved] returns [ErrPathNeedsDocument] wrapping the
 // reason [Source.Document] gives, and [FormatError] names it in place of
 // the excerpt. Bind such an error through [Node.Bind] with the document
-// the caller checked it against, which also resolves a path from the
-// scope of a Document from [Node.At].
+// the caller checked it against. A Node from [Node.At] binds through
+// Node.Bind too and resolves each path from its own scope.
 //
 // In every other way Bind is [Node.Bind], which describes what comes
 // back. [SourceError.Document] returns the document each location fell

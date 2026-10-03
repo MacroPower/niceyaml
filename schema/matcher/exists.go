@@ -48,7 +48,7 @@ func (m *existsMatcher) Match(ctx context.Context, doc *niceyaml.Node) (bool, er
 	}
 
 	if err != nil {
-		//nolint:wrapcheck // The Document binds the error already.
+		//nolint:wrapcheck // The Node binds the error already.
 		return false, err
 	}
 
