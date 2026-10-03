@@ -1002,6 +1002,11 @@ func (n *Node) Document() *Node {
 // document. The node is part of the tree [Source.File] returns, which
 // every Node of the Source shares and resolves against, so a caller must
 // not modify it.
+//
+// The node keeps the anchor or the tag written on it, so a type switch on
+// it can see an [*ast.AnchorNode] or an [*ast.TagNode] where the source
+// holds a mapping. [Node.Kind] looks through those and through an alias,
+// and reports whether the Node holds a mapping, a sequence, or a scalar.
 func (n *Node) AST() ast.Node {
 	if n.base.IsRoot() {
 		return n.doc.root.Body
