@@ -82,6 +82,22 @@
 // prefix does on the options of the root package that pass go-yaml values
 // through.
 //
+// [Compile] reads no file and fetches no URL, so a $ref to another
+// document resolves only through a ref resolver given with
+// [WithJSONSchemaOptions]. When such a $ref does not resolve, the schema
+// still compiles, and validation fails with an error wrapping
+// [ErrValidate] for each document that reaches it. A schema whose $refs
+// name files or URLs beside it loads through a [Registry], which resolves
+// each $ref against the location of the schema. Given [WithFS], the
+// registry reads the schema and the files its $refs name from an
+// [embed.FS]:
+//
+//	//go:embed schemas
+//	var schemasFS embed.FS
+//
+//	reg := schema.NewRegistry(schema.WithFS(schemasFS))
+//	root, err := reg.Schema(ctx, schema.File("schemas/root.json"))
+//
 // # Resolution
 //
 // When a document's schema is unknown ahead of time, a [Resolver] finds

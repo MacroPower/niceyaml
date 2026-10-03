@@ -110,6 +110,20 @@ func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 // scope. A registry compiles the schemas its resolvers name as bytes the
 // same way, with the options [WithCompileOptions] gives it, and takes a
 // compiled Schema as it is.
+//
+// Compile reads no file and fetches no URL. A $ref to another document,
+// such as "server.json" or an https URL, resolves only through a ref
+// resolver given with [WithJSONSchemaOptions]. When such a $ref does not
+// resolve, the schema still compiles. Each document whose validation
+// reaches the $ref then fails with an error wrapping [ErrValidate], and a
+// document that never reaches it passes. A $ref to a location the
+// document lacks, such as "#/$defs/missing", fails the compile.
+//
+// A schema whose $refs name files or URLs beside it loads through a
+// [Registry] instead. [Registry.Schema] loads the schema a [File] or [URL]
+// names and resolves each $ref against that location:
+//
+//	v, err := schema.NewRegistry().Schema(ctx, schema.File("schemas/root.json"))
 func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Schema, error) {
 	compiled, err := compileJSON(ctx, data, opts)
 	if err != nil {
@@ -137,6 +151,10 @@ func compileJSON(ctx context.Context, data []byte, opts []CompileOption) (*Schem
 // from a document go:embed brings in:
 //
 //	var Config = schema.MustCompile(schemaJSON)
+//
+// A schema whose $ref to another document does not resolve still
+// compiles, as [Compile] describes, so MustCompile returns it. Each
+// document that reaches that $ref then fails validation.
 func MustCompile(data []byte, opts ...CompileOption) *Schema {
 	v, err := Compile(context.Background(), data, opts...)
 	if err != nil {
