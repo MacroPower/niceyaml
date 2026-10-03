@@ -18,7 +18,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
-	go.jacobcolvin.com/niceyaml v0.0.0-20260928025007-fd1be398483f
+	go.jacobcolvin.com/niceyaml v0.0.0-20261002133153-f560a7f17d28
 	go.jacobcolvin.com/niceyaml/bubbles v0.0.0-00010101000000-000000000000
 	go.jacobcolvin.com/niceyaml/fangs v0.0.0-00010101000000-000000000000
 	go.jacobcolvin.com/x/cobras v0.1.0
