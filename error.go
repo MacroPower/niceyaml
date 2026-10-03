@@ -46,6 +46,12 @@ var (
 	// location.
 	ErrDecodeTarget = errors.New("decode target is not a non-nil pointer")
 
+	// ErrSelfValidateTarget indicates the value given to [Node.SelfValidate]
+	// or [Decoder.SelfValidate] is nil or a nil pointer, so there is nothing
+	// to validate. The error comes back bound to the source as a
+	// [SourceError] with no location.
+	ErrSelfValidateTarget = errors.New("self-validation target is nil")
+
 	// ErrDecode indicates that the go-yaml decoder did not decode a node
 	// into its target. [Node.Decode], [Node.DecodeInto], and
 	// [Decoder.DecodeInto] return it. So does a [Validator] that decodes

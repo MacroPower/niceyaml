@@ -101,12 +101,15 @@ import (
 // A struct that decodes itself through an UnmarshalYAML or UnmarshalText
 // method it gets from an embedded field decodes the document into that
 // field, so the field validates at the path of the struct.
-// A check that reads state the caller fills in after the decode runs on
-// a value with that state set already through [Node.DecodeInto], which
-// keeps the fields the document does not name, and [WithSelfValidation]
-// false switches the walk off for every value. A Validate that rewrites
-// its value, or that the value's own UnmarshalYAML already ran, runs
-// again inside the decode, so it should be idempotent.
+// A check that reads state the caller fills in after the decode, such as
+// a value from the environment or a flag, runs through
+// [Node.SelfValidate]. The caller decodes with [WithSelfValidation] off,
+// fills in that state, and then calls SelfValidate on the value, which
+// walks it as the decode would have. SelfValidate describes where an
+// error binds when the value no longer mirrors the document, such as
+// under a field the document lacks. A Validate that rewrites its value,
+// or that the value's own UnmarshalYAML already ran, runs again inside
+// the decode, so it should be idempotent.
 //
 // A Validate that returns the error of a context that ended, one that
 // matches [context.Canceled] or [context.DeadlineExceeded], stops the
@@ -799,7 +802,8 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // the same pipeline. Each [Validator] given with [WithValidator] checks
 // the node before decoding, and a value that implements [SelfValidator]
 // validates itself after, unless [WithSelfValidation] switches that off.
-// [Node.Validate] runs the first step on its own.
+// [Node.Validate] runs the first step on its own, and [Node.SelfValidate]
+// runs the last, on a value the caller may have changed since the decode.
 //
 //	for _, doc := range docs {
 //		config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(validator))
@@ -1811,7 +1815,8 @@ func (n *Node) bindTarget() *Node {
 
 // DecodeOption configures [Node.Decode] and [Node.DecodeInto], and
 // [NewDecoder] takes the same options for a [Decoder] that applies them
-// to every node it decodes.
+// to every node it decodes. [Node.SelfValidate] takes them too, and reads
+// only the go-yaml options among them.
 //
 // Available options:
 //   - [WithValidator]
@@ -1886,7 +1891,9 @@ func WithValidator(dv Validator) DecodeOption {
 // WithSelfValidation is a [DecodeOption] that sets whether the values
 // in a decoded value that implement [SelfValidator] validate themselves
 // after decoding. The default is true. Validators given with
-// [WithValidator] run either way.
+// [WithValidator] run either way. [Node.SelfValidate] and
+// [Decoder.SelfValidate] run the walk whatever the option says, so a
+// caller that turns it off for the decode validates the value later.
 func WithSelfValidation(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.skipSelfValidation = !enabled
@@ -2034,9 +2041,11 @@ func WithReferences(data ...[]byte) DecodeOption {
 // none. After decoding succeeds, every value in v that implements
 // [SelfValidator] validates itself, with the paths it reports put under
 // the path of the value, unless [WithSelfValidation] switches that off.
-// Fields absent from the document keep their existing values, so a
-// caller may fill v with defaults first. A null with no tag, anchored or
-// not, leaves v as it is, unless v points to a pointer or an interface.
+// [Node.SelfValidate] runs that step on its own, once the caller has
+// changed v. Fields absent from the document keep their existing values,
+// so a caller may fill v with defaults first. A null with no tag,
+// anchored or not, leaves v as it is, unless v points to a pointer or an
+// interface.
 // A null with neither a tag nor an anchor leaves a struct field as it is
 // too. The go-yaml decoder rejects a tagged or anchored null in a field
 // of some kinds, such as an int or a struct. When v points to a pointer,
@@ -2251,11 +2260,11 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 		return err
 	}
 
-	if !cfg.skipSelfValidation {
-		return n.Bind(selfValidate(ctx, v, n, yamlOpts))
+	if cfg.skipSelfValidation {
+		return nil
 	}
 
-	return nil
+	return n.selfValidate(ctx, v, cfg)
 }
 
 // checkDecodeTarget returns [ErrDecodeTarget] unless v is a non-nil

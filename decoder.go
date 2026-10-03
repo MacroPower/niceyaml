@@ -30,7 +30,9 @@ import (
 // scoped Node from [Node.At]. A [Validator] the Decoder carries sees the
 // same Node, so a Decoder that carries one for whole documents only, as
 // a [go.jacobcolvin.com/niceyaml/schema.Registry] is, decodes roots.
-// [Decoder.Validate] runs the validation step alone. [Node.Decode] with
+// [Decoder.Validate] runs the validation step alone, and
+// [Decoder.SelfValidate] runs the self-validation step alone, on a value
+// the caller may have changed since the decode. [Node.Decode] with
 // the same options decodes one node the same way, so a Decoder is the
 // options of a call held for reuse.
 //
@@ -94,6 +96,30 @@ func (d *Decoder) Validate(ctx context.Context, n *Node) error {
 // [ErrDecodeTarget], bound to the source, before anything runs.
 func (d *Decoder) DecodeInto(ctx context.Context, n *Node, v any) error {
 	return n.decodeInto(ctx, v, d.cfg)
+}
+
+// SelfValidate runs the self-validation step of [Decoder.DecodeInto] on
+// its own, on v with the go-yaml options of the [Decoder], as
+// [Node.SelfValidate] runs it with the same options. It runs whatever
+// [WithSelfValidation] says, and runs no [Validator] of the Decoder. A
+// Decoder with self-validation off thus decodes a file, and validates the
+// value once the caller has applied its other layers:
+//
+//	dec := niceyaml.NewDecoder(niceyaml.WithSelfValidation(false))
+//
+//	var cfg Config
+//	if err := dec.DecodeInto(ctx, doc, &cfg); err != nil {
+//		return err
+//	}
+//
+//	applyEnv(&cfg)
+//
+//	return dec.SelfValidate(ctx, doc, &cfg)
+//
+// On a value that no layer changed, SelfValidate returns what DecodeInto
+// returns with the walk on.
+func (d *Decoder) SelfValidate(ctx context.Context, n *Node, v any) error {
+	return n.selfValidate(ctx, v, d.cfg)
 }
 
 // Decode validates and decodes n into a new T with the options of the

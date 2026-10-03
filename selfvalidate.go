@@ -24,13 +24,116 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// selfValidate runs Validate on every value in the tree of v that
-// implements [SelfValidator], where v is a non-nil pointer to the value n
-// decoded to with ctx and opts. It returns what they report with the paths
-// in each error rebased under the path of the value in the document. That
-// path is the field name go-yaml decoded it under, the index of a slice or
-// array element, or the key of a map entry as the document spells it. A
-// map key validates at the path of its entry with a `~` after it, so its
+// SelfValidate runs the self-validation step of [Node.DecodeInto] on its
+// own. The step walks v, calls Validate on every value in it that
+// implements [SelfValidator], and puts the paths each one reports under
+// the path of the value in the node. SelfValidate binds the result
+// through [Node.Bind], as a decode does once it has filled its target,
+// and returns nil when nothing failed. It runs the walk whatever
+// [WithSelfValidation] says, and runs no [Validator].
+//
+// A program that layers its configuration validates the value once every
+// layer has set it. It decodes the file with the walk off, and applies
+// the environment, its flags, or its defaults over the result. It then
+// validates what it holds, so a required field that only the environment
+// sets passes:
+//
+//	var cfg Config
+//	if err := doc.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
+//		return err
+//	}
+//
+//	applyEnv(&cfg)
+//
+//	return doc.SelfValidate(ctx, &cfg)
+//
+// On a value that no layer changed, SelfValidate returns what the decode
+// with the walk on returns. The walk spells the key of each map entry as
+// the document does, so an error under a key such as 1.50 keeps that
+// text, and it decodes the keys of the mappings in the node to learn that
+// spelling. It decodes them with the go-yaml options of opts, the ones
+// [WithYAMLDecodeOptions] and [WithReferences] give, and reads no other
+// option, so pass the options of the decode. A key type that only a
+// [yaml.CustomUnmarshaler] option decodes matches no key of the document
+// without that option, and an error under such an entry then binds at the
+// key of the map. [Decoder.SelfValidate] runs with the options of a
+// [Decoder].
+//
+// The walk follows v rather than the document, so v need not mirror the
+// node, and each error binds where its path resolves in the document. An
+// error under a field or map entry that the document lacks binds at the
+// key of the mapping that lacks it, as [Node.Bind] binds the path of a
+// missing key. An error under an element that the document lacks, such
+// as one the caller appended to a slice, binds with no position. An error
+// under a value the caller replaced, or under an element of a slice it
+// reordered or grew at the front, marks what the document holds at that
+// path. The keys of a map that the document lacks take the text of their
+// Go values. A field that go-yaml never decodes does not validate, as in
+// a decode. That holds for a field tagged `yaml:"-"`, an unexported
+// field, and any value below a type that decodes itself through an
+// UnmarshalYAML or UnmarshalText method.
+//
+// Any v works but nil and a nil pointer, which each return an error
+// wrapping [ErrSelfValidateTarget], bound to the source. A v that is no
+// pointer validates as a copy, so a Validate with a pointer receiver
+// changes the copy and leaves v as it was.
+//
+// A document that did not parse has no tree. Every key of v then takes
+// the text of its Go value, and each error binds with no position, as
+// [Node.Bind] describes. SelfValidate returns those errors rather than
+// the syntax error [Node.Err] returns. A value that came from no file
+// validates through the root of an empty source, and its errors bind
+// with no position too.
+//
+// The walk stops once ctx ends, or once a Validate returns the error of a
+// context that ended, and SelfValidate then returns that error alone, as
+// [SelfValidator] describes.
+func (n *Node) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
+	return n.selfValidate(ctx, v, newDecodeConfig(opts))
+}
+
+// selfValidate is [Node.SelfValidate] with its settings resolved.
+// [Node.DecodeInto] runs it once the decode has filled v, so a decode and
+// a later call of SelfValidate on the same value return the same error.
+func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error {
+	err := checkSelfValidateTarget(v)
+	if err != nil {
+		return n.bindOwn(err)
+	}
+
+	return n.Bind(walkSelfValidators(ctx, v, n, n.yamlOptions(cfg.decodeOptions())))
+}
+
+// checkSelfValidateTarget returns [ErrSelfValidateTarget] when v is nil
+// or a nil pointer, which holds no value to validate. A pointer that v
+// points to may be nil, as a decode of a null leaves it.
+func checkSelfValidateTarget(v any) error {
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() {
+		return ErrSelfValidateTarget
+	}
+
+	if rv.Kind() == reflect.Pointer && rv.IsNil() {
+		return fmt.Errorf("%w: got %T", ErrSelfValidateTarget, v)
+	}
+
+	return nil
+}
+
+// walkSelfValidators runs Validate on every value in the tree of v that
+// implements [SelfValidator], where v is a non-nil pointer or a value
+// that is no pointer. The walk follows v rather than n, so v need not be
+// the value n decoded to. It reads n for the text the document spells
+// each map key with, and decodes those keys with ctx and opts, as the
+// decode of v did. It also reads n to bind the errors under a path that
+// names several keys. A map the document does not hold at its path has
+// no node there, so its keys take the text of their Go values.
+//
+// The walk returns what the values report with the paths in each error
+// rebased under the path of the value in the document. That path is the
+// field name go-yaml decoded it under, the index of a slice or array
+// element, or the key of a map entry as the document spells it. A map
+// key validates at the path of its entry with a `~` after it, so its
 // errors point at the key rather than the value. The values below a value
 // validate before it does, and a value validates only when every value
 // below it passed, so a parent that checks a relation between its fields
@@ -46,7 +149,7 @@ import (
 // The walk stops once ctx ends, or once a Validate returns the error of a
 // context that ended, and returns that error alone, as it is, in place of
 // the errors it collected.
-func selfValidate(ctx context.Context, v any, n *Node, opts []yaml.DecodeOption) error {
+func walkSelfValidators(ctx context.Context, v any, n *Node, opts []yaml.DecodeOption) error {
 	w := selfWalker{
 		ctx:      ctx,
 		node:     n,

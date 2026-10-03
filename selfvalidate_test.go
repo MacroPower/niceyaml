@@ -95,6 +95,17 @@ var (
 	errRing = errors.New("ring")
 	// The error every Validate of a loop reports.
 	errLoop = errors.New("loop")
+
+	// Decodes a grade from its name, the only form a document gives it.
+	gradeNames = niceyaml.WithYAMLDecodeOptions(yaml.CustomUnmarshaler(func(g *grade, b []byte) error {
+		if strings.TrimSpace(string(b)) != "high" {
+			return fmt.Errorf("unknown grade %q", b)
+		}
+
+		*g = gradeHigh
+
+		return nil
+	}))
 )
 
 // Hours is hours under an exported name, for embedding without a tag.
@@ -2706,6 +2717,426 @@ func TestNode_Decode_SelfValidatorContext(t *testing.T) {
 	}
 }
 
+func TestNode_SelfValidate(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		db:
+		  host: localhost
+		upstreams:
+		  a:
+		    url: http://a
+		items:
+		  - url: http://x
+		  - url: http://y
+		port: 80
+	`)
+
+	// Each layer changes the value a decode with the walk off filled from
+	// the file, as the environment, the flags, or the defaults of a
+	// program would.
+	tcs := map[string]struct {
+		layer  func(cfg *layeredConfig)
+		target func(cfg *layeredConfig) any
+		cancel bool
+		err    string
+	}{
+		"the file lacks a value no layer sets": {
+			err: "app.yaml:1:1: $.db.password: password is required",
+		},
+		"a layer sets the value the file lacks": {
+			layer: func(cfg *layeredConfig) {
+				cfg.DB.Password = "s3cret"
+			},
+		},
+		"an added map entry binds at the key of its map": {
+			layer: func(cfg *layeredConfig) {
+				cfg.DB.Password = "s3cret"
+				cfg.Upstreams["c"] = upstream{URL: "ftp://c"}
+			},
+			err: `app.yaml:3:1: $.upstreams.c.url: url "ftp://c" is not http`,
+		},
+		"an added field binds at the mapping that lacks it": {
+			layer: func(cfg *layeredConfig) {
+				cfg.DB.Password = "s3cret"
+				cfg.Backup = &database{Host: "backup"}
+			},
+			err: "app.yaml:1:1: $.backup.password: password is required",
+		},
+		"an appended element binds with no position": {
+			layer: func(cfg *layeredConfig) {
+				cfg.DB.Password = "s3cret"
+				cfg.Items = append(cfg.Items, upstream{URL: "ftp://z"})
+			},
+			err: `app.yaml: $.items[2].url: url "ftp://z" is not http`,
+		},
+		"a prepended element marks the element the document holds there": {
+			layer: func(cfg *layeredConfig) {
+				cfg.DB.Password = "s3cret"
+				cfg.Items = append([]upstream{{URL: "ftp://w"}}, cfg.Items...)
+			},
+			err: `app.yaml:7:10: $.items[0].url: url "ftp://w" is not http`,
+		},
+		"an overridden scalar marks the value the document holds": {
+			layer: func(cfg *layeredConfig) {
+				cfg.DB.Password = "s3cret"
+				cfg.Port = 70000
+			},
+			err: "app.yaml:9:7: $.port: port out of range",
+		},
+		"a field go-yaml ignores does not validate": {
+			layer: func(cfg *layeredConfig) {
+				cfg.DB.Password = "s3cret"
+				cfg.Ignored = database{}
+			},
+		},
+		"a value that is no pointer validates": {
+			target: func(cfg *layeredConfig) any {
+				return *cfg
+			},
+			err: "app.yaml:1:1: $.db.password: password is required",
+		},
+		"a pointer to a nil pointer validates nothing": {
+			target: func(*layeredConfig) any {
+				var cfg *layeredConfig
+
+				return &cfg
+			},
+		},
+		"a context that ended stops the walk": {
+			cancel: true,
+			err:    "app.yaml: context canceled",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("app.yaml")).Document()
+			require.NoError(t, err)
+
+			var cfg layeredConfig
+
+			err = doc.DecodeInto(t.Context(), &cfg, niceyaml.WithSelfValidation(false))
+			require.NoError(t, err)
+
+			if tc.layer != nil {
+				tc.layer(&cfg)
+			}
+
+			var target any = &cfg
+
+			if tc.target != nil {
+				target = tc.target(&cfg)
+			}
+
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+
+			if tc.cancel {
+				cancel()
+			}
+
+			err = doc.SelfValidate(ctx, target)
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.EqualError(t, err, tc.err)
+		})
+	}
+}
+
+func TestNode_SelfValidate_Target(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		v   any
+		err string
+	}{
+		"nil": {
+			v:   nil,
+			err: "app.yaml: self-validation target is nil",
+		},
+		"a nil pointer": {
+			v:   (*layeredConfig)(nil),
+			err: "app.yaml: self-validation target is nil: got *niceyaml_test.layeredConfig",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc, err := niceyaml.NewSourceFromString("port: 80\n", niceyaml.WithName("app.yaml")).Document()
+			require.NoError(t, err)
+
+			err = doc.SelfValidate(t.Context(), tc.v)
+			require.ErrorIs(t, err, niceyaml.ErrSelfValidateTarget)
+			require.EqualError(t, err, tc.err)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			_, ok := bound.Position()
+			assert.False(t, ok)
+		})
+	}
+}
+
+func TestNode_SelfValidate_Node(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		db:
+		  host: localhost
+		upstreams:
+		  a:
+		    url: http://a
+	`)
+
+	tcs := map[string]struct {
+		node       func(t *testing.T) *niceyaml.Node
+		v          any
+		unresolved error
+		err        string
+	}{
+		"a scoped Node puts its path in front": {
+			node: func(t *testing.T) *niceyaml.Node {
+				t.Helper()
+
+				doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("app.yaml")).Document()
+				require.NoError(t, err)
+
+				return yamltest.At(t, doc, paths.Root().Child("db"))
+			},
+			v:   &database{Host: "localhost"},
+			err: "app.yaml:1:1: $.db.password: password is required",
+		},
+		"an entry added under a scoped Node binds at the key of its map": {
+			node: func(t *testing.T) *niceyaml.Node {
+				t.Helper()
+
+				doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("app.yaml")).Document()
+				require.NoError(t, err)
+
+				return yamltest.At(t, doc, paths.Root().Child("upstreams"))
+			},
+			v: &map[string]upstream{
+				"a": {URL: "http://a"},
+				"c": {URL: "ftp://c"},
+			},
+			err: `app.yaml:3:1: $.upstreams.c.url: url "ftp://c" is not http`,
+		},
+		"an empty document binds with no position": {
+			node: func(t *testing.T) *niceyaml.Node {
+				t.Helper()
+
+				doc, err := niceyaml.NewSourceFromString("", niceyaml.WithName("env")).Document()
+				require.NoError(t, err)
+
+				return doc
+			},
+			v:          &layeredConfig{},
+			unresolved: paths.ErrNotFound,
+			err:        "env: $.db.password: password is required",
+		},
+		"a document that did not parse binds with no position": {
+			node: func(t *testing.T) *niceyaml.Node {
+				t.Helper()
+
+				docs, err := niceyaml.NewSourceFromString("db: [\n", niceyaml.WithName("bad.yaml")).Documents()
+				require.ErrorIs(t, err, niceyaml.ErrSyntax)
+				require.Len(t, docs, 1)
+
+				return docs[0]
+			},
+			v:          &layeredConfig{},
+			unresolved: niceyaml.ErrPathNeedsDocument,
+			err:        "bad.yaml: $.db.password: password is required",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.node(t).SelfValidate(t.Context(), tc.v)
+			require.EqualError(t, err, tc.err)
+
+			if tc.unresolved == nil {
+				return
+			}
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			_, ok := bound.Position()
+			assert.False(t, ok)
+			require.ErrorIs(t, bound.Unresolved(), tc.unresolved)
+		})
+	}
+}
+
+func TestNode_SelfValidate_KeyOptions(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		by_grade:
+		  high: {url: http://h}
+	`)
+
+	// A grade decodes from its name only under gradeNames, so the key of
+	// the document matches the key of the map only under that option.
+	tcs := map[string]struct {
+		opts []niceyaml.DecodeOption
+		err  string
+	}{
+		"the options of the decode match the key of the document": {
+			opts: []niceyaml.DecodeOption{gradeNames},
+			err:  `app.yaml:2:15: $.by_grade.high.url: url "ftp://h" is not http`,
+		},
+		"without them, the error binds at the key of the map": {
+			err: `app.yaml:1:1: $.by_grade.3.url: url "ftp://h" is not http`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("app.yaml")).Document()
+			require.NoError(t, err)
+
+			var cfg gradedConfig
+
+			err = doc.DecodeInto(t.Context(), &cfg, gradeNames, niceyaml.WithSelfValidation(false))
+			require.NoError(t, err)
+
+			cfg.ByGrade[gradeHigh] = upstream{URL: "ftp://h"}
+
+			err = doc.SelfValidate(t.Context(), &cfg, tc.opts...)
+			require.EqualError(t, err, tc.err)
+		})
+	}
+}
+
+func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
+	t.Parallel()
+
+	// A decode with the walk on fills one new value, and a decode with the
+	// walk off fills another, which SelfValidate then checks. Both report
+	// err for the node the at selectors lead to.
+	tcs := map[string]struct {
+		value func() any
+		input string
+		at    []string
+		opts  []niceyaml.DecodeOption
+		err   string
+	}{
+		"nested fields, elements, and entries": {
+			value: func() any { return new(nested) },
+			input: stringtest.Input(`
+				hours: {open: "09:00", close: "08:00"}
+				items:
+				  - price: -1
+				by_name:
+				  scone: {price: -2}
+				by_id:
+				  0x10: {price: -3}
+			`),
+			err: stringtest.JoinLF(
+				"1:31: $.hours.close: closes before it opens",
+				"3:12: $.items[0].price: negative price",
+				"5:18: $.by_name.scone.price: negative price",
+				"7:17: $.by_id.0x10.price: negative price",
+			),
+		},
+		"keys the document spells in another form": {
+			value: func() any { return new(gradedConfig) },
+			input: stringtest.Input(`
+				by_weight:
+				  1.50: {url: ftp://w}
+				  2e0: {url: ftp://x}
+			`),
+			err: stringtest.JoinLF(
+				`2:15: $.by_weight.'1.50'.url: url "ftp://w" is not http`,
+				`3:14: $.by_weight.2e0.url: url "ftp://x" is not http`,
+			),
+		},
+		"keys that share a path": {
+			value: func() any { return new(gradedConfig) },
+			input: stringtest.Input(`
+				base: &base {1: {url: ftp://a}}
+				by_any:
+				  <<: *base
+				  "1": {url: ftp://b}
+			`),
+			err: stringtest.JoinLF(
+				`$.by_any.1.url: url "ftp://b" is not http`,
+				`$.by_any.1.url: url "ftp://a" is not http`,
+			),
+		},
+		"keys that decode through a go-yaml option": {
+			value: func() any { return new(gradedConfig) },
+			input: stringtest.Input(`
+				by_grade:
+				  high: {url: ftp://h}
+			`),
+			opts: []niceyaml.DecodeOption{gradeNames},
+			err:  `2:15: $.by_grade.high.url: url "ftp://h" is not http`,
+		},
+		"a scoped Node": {
+			value: func() any { return new(nested) },
+			input: stringtest.Input(`
+				spec:
+				  hours: {open: "09:00", close: "08:00"}
+			`),
+			at:  []string{"spec"},
+			err: "2:33: $.spec.hours.close: closes before it opens",
+		},
+		"nothing fails": {
+			value: func() any { return new(nested) },
+			input: "hours: {open: \"09:00\", close: \"17:00\"}\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			n := yamltest.FirstDocument(t, tc.input)
+			if len(tc.at) > 0 {
+				n = yamltest.At(t, n, paths.Root().Child(tc.at...))
+			}
+
+			decoded := n.DecodeInto(t.Context(), tc.value(), tc.opts...)
+
+			v := tc.value()
+			off := append([]niceyaml.DecodeOption{niceyaml.WithSelfValidation(false)}, tc.opts...)
+			require.NoError(t, n.DecodeInto(t.Context(), v, off...))
+
+			validated := n.SelfValidate(t.Context(), v, tc.opts...)
+			if tc.err == "" {
+				require.NoError(t, decoded)
+				require.NoError(t, validated)
+
+				return
+			}
+
+			require.EqualError(t, decoded, tc.err)
+			require.Error(t, validated)
+			assert.Equal(t, decoded.Error(), validated.Error())
+			assert.Equal(t, niceyaml.FormatError(decoded, 1), niceyaml.FormatError(validated, 1))
+		})
+	}
+}
+
 // selfDecodingBytes decodes itself from the YAML bytes, so its fields
 // need not mirror the document. It fills Inner with hours that close
 // before they open, which the walk must not report.
@@ -3086,4 +3517,57 @@ func (p probed) Validate() error {
 	}
 
 	return p.probe.steps[n-1](p.probe.cancel)
+}
+
+// database requires a password, which a layer after the file may set.
+type database struct {
+	Host     string `yaml:"host"`
+	Password string `yaml:"password"`
+}
+
+func (d database) Validate() error {
+	if d.Password == "" {
+		return niceyaml.NewError("password is required", niceyaml.AtPath(paths.Root().Child("password")))
+	}
+
+	return nil
+}
+
+// upstream requires a URL with an http scheme.
+type upstream struct {
+	URL string `yaml:"url"`
+}
+
+func (u upstream) Validate() error {
+	if !strings.HasPrefix(u.URL, "http") {
+		return niceyaml.NewError(fmt.Sprintf("url %q is not http", u.URL), niceyaml.AtPath(paths.Root().Child("url")))
+	}
+
+	return nil
+}
+
+// layeredConfig is a configuration that the layers after the file can
+// change before it validates.
+type layeredConfig struct {
+	DB        database            `yaml:"db"`
+	Backup    *database           `yaml:"backup"`
+	Upstreams map[string]upstream `yaml:"upstreams"`
+	Items     []upstream          `yaml:"items"`
+	Ignored   database            `yaml:"-"`
+	Port      port                `yaml:"port"`
+}
+
+// grade is a level that a document names, and that only gradeNames
+// decodes.
+type grade int
+
+// gradeHigh is the grade a document names high.
+const gradeHigh grade = 3
+
+// gradedConfig holds maps whose keys the document spells in a form that
+// differs from the text of their Go values.
+type gradedConfig struct {
+	ByGrade  map[grade]upstream   `yaml:"by_grade"`
+	ByWeight map[float64]upstream `yaml:"by_weight"`
+	ByAny    map[any]upstream     `yaml:"by_any"`
 }

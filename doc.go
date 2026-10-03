@@ -320,6 +320,25 @@
 // [Node.DecodeInto] runs the same pipeline on a value you already hold,
 // such as one pre-populated with defaults.
 //
+// [Node.SelfValidate] runs the last step on its own, for a program that
+// layers its configuration. The program decodes the file with
+// [WithSelfValidation] off, applies the environment or its flags over the
+// value, and then validates the result, so a required field that only the
+// environment sets passes. Each error still binds to the file, where its
+// path resolves, as Node.SelfValidate describes for a value that no
+// longer mirrors the document:
+//
+//	var cfg Config
+//	if err := doc.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
+//		return err
+//	}
+//
+//	applyEnv(&cfg)
+//
+//	if err := doc.SelfValidate(ctx, &cfg); err != nil {
+//		return err
+//	}
+//
 // [Node.At] returns a Node scoped to the node a path selects, and the
 // same pipeline then runs on that node. Decode reads one value without
 // decoding the whole document, and a validator given to it checks the
