@@ -1118,8 +1118,8 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 //
 // A mapping of named things, such as the jobs of a workflow, takes a `.*`
 // selector from [paths.Path.ChildAll]. Each Node is then scoped at the
-// path of one entry, with the key as the source spells it, and a `~`
-// selector from [paths.Path.Key] reaches that key:
+// path of one entry, and the last selector of that path, which
+// [paths.Path.Last] gives, names the entry:
 //
 //	jobs, err := doc.Nodes(paths.Root().Child("jobs").ChildAll())
 //	if err != nil {
@@ -1127,18 +1127,16 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 //	}
 //
 //	for _, job := range jobs {
-//		key, err := job.At(paths.Root().Key()) // $.jobs.build~
-//		if err != nil {
-//			return err
-//		}
-//
-//		name, err := key.Decode[string](ctx) // "build"
+//		sel, _ := job.Path().Last() // .build
+//		fmt.Println(sel.Name)       // build
 //		// ...
 //	}
 //
-// The key decodes as the decoder reads it, so a key the source spells
-// `3.10` decodes to the string 3.1, while the path of its entry stays
-// `$.jobs.'3.10'`.
+// The name is the text the selector matches the key by, as
+// [paths.Resolver.KeyName] gives it, so a key the source spells `3.10`
+// has the name 3.10 and the path `$.jobs.'3.10'`. A `~` selector from
+// [paths.Path.Key] reaches the key node itself, which decodes as the
+// decoder reads it, so that key decodes to the string 3.1.
 //
 // A path that selects nothing returns no Nodes and no error, as
 // [paths.Path.Nodes] does, and the errors it returns come back bound to
@@ -1383,9 +1381,10 @@ func (n *Node) Source() *Source {
 // DocumentIndex returns the 0-indexed position within the file of the
 // document the Node belongs to. A Node from [Node.At] reports the index
 // of the document that holds it, and the index of the node itself within
-// a sequence is the last segment of [Node.Path]. The message of a bound
-// error counts documents from 1, as it counts lines, so "document 3" in
-// [SourceError.Error] is the document at index 2.
+// a sequence is the Index of the selector [paths.Path.Last] gives for
+// [Node.Path]. The message of a bound error counts documents from 1, as
+// it counts lines, so "document 3" in [SourceError.Error] is the document
+// at index 2.
 func (n *Node) DocumentIndex() int {
 	return n.doc.index
 }

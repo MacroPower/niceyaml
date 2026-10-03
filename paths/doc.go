@@ -184,6 +184,25 @@
 //
 //	replicas.Parent() // $.spec, true
 //
+// # Reading Selectors
+//
+// [Path.Selectors] yields each selector of a path as a [Selector], whose
+// kind, name, and index a caller reads without parsing [Path.String]. A
+// caller builds another form of the path from them, such as a JSON
+// Pointer or a breadcrumb. [Path.Last] gives the last selector alone,
+// which for a match of `.*` or `[*]` names the entry or element the match
+// is:
+//
+//	for _, m := range matches { // $.jobs.*
+//		sel, _ := m.Path.Last()
+//		fmt.Println(sel.Name) // build, test, ...
+//	}
+//
+// The name of a selector is the text it matches a key by. In a path the
+// library resolves, that is the text [Resolver.KeyName] gives the key, so
+// the entry under the key `0x10` has the name 0x10, where a decoded map
+// and the JSON form of the document hold the key 16.
+//
 // # Comparing and Encoding
 //
 // A Path holds its selectors in a slice, so the `==` operator does not

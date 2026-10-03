@@ -172,6 +172,8 @@ func isSeparatorRune(r rune) bool {
 // the `==` operator does not compile for a Path. A Path writes itself as
 // that expression through [Path.MarshalText] and reads it through
 // [Path.UnmarshalText], so it encodes as a string in JSON and YAML.
+// [Path.Selectors] yields the selectors themselves, so a caller reads each
+// name and index without parsing that expression.
 //
 // Create instances with [Root], [Parse], or [MustParse].
 type Path struct {
