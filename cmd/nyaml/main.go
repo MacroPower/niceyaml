@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.jacobcolvin.com/x/cobras/profile"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/fangs"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style/theme"
@@ -33,10 +34,7 @@ func main() {
 
 	stop()
 
-	code := 0
-	if err != nil {
-		code = 1
-	}
+	code := exitCode(err)
 
 	// The error handler of fang.Execute renders only the errors it returns,
 	// so main prints the error of a profile that fails to write this late.
@@ -44,11 +42,40 @@ func main() {
 	if stopErr != nil {
 		fmt.Fprintln(os.Stderr, "stop profiler:", stopErr)
 
-		code = 1
+		code = exitFailure
 	}
 
 	if code != 0 {
 		os.Exit(code)
+	}
+}
+
+// The statuses nyaml exits with when a command returns an error, which
+// [exitCode] picks.
+const (
+	// The status of a run whose every problem is a fault of a document,
+	// such as a syntax error or a schema violation.
+	exitInvalid = 1
+
+	// The status of a run that met any other error, such as a file that
+	// does not read, a schema that does not load, a canceled run, or a
+	// flag that does not parse.
+	exitFailure = 2
+)
+
+// exitCode returns the status nyaml exits with for err, the error a
+// command returned. It is 0 for no error, [exitInvalid] when
+// [niceyaml.IsInvalid] reports err, and [exitFailure] otherwise. A run
+// whose documents are at fault thus exits 1 only when nothing else went
+// wrong, so a script tells a document to fix from a check to retry.
+func exitCode(err error) int {
+	switch {
+	case err == nil:
+		return 0
+	case niceyaml.IsInvalid(err):
+		return exitInvalid
+	default:
+		return exitFailure
 	}
 }
 

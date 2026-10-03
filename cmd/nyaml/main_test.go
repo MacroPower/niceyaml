@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -162,6 +164,112 @@ func blockEvents() int64 {
 		}
 
 		return count
+	}
+}
+
+func TestExitCode(t *testing.T) {
+	t.Parallel()
+
+	// Each case runs nyaml validate in a directory of its own that holds
+	// schema.json, the schema of nameSchema. An argument that names no
+	// flag names a path in that directory.
+	tcs := map[string]struct {
+		// Contents of the files to write, by name.
+		files    map[string]string
+		args     []string
+		canceled bool
+		want     int
+	}{
+		"valid document": {
+			files: map[string]string{"a.yaml": "name: a\n"},
+			args:  []string{"--schema", "schema.json", "a.yaml"},
+			want:  0,
+		},
+		"schema violation": {
+			files: map[string]string{"a.yaml": "value: 1\n"},
+			args:  []string{"--schema", "schema.json", "a.yaml"},
+			want:  exitInvalid,
+		},
+		"syntax error": {
+			files: map[string]string{"a.yaml": "name: [\n"},
+			args:  []string{"--schema", "schema.json", "a.yaml"},
+			want:  exitInvalid,
+		},
+		"invalid documents in two files": {
+			files: map[string]string{"a.yaml": "value: 1\n", "b.yaml": "name: [\n"},
+			args:  []string{"--schema", "schema.json", "a.yaml", "b.yaml"},
+			want:  exitInvalid,
+		},
+		"file that does not read": {
+			args: []string{"--schema", "schema.json", "missing.yaml"},
+			want: exitFailure,
+		},
+		"invalid document beside a file that does not read": {
+			files: map[string]string{"a.yaml": "value: 1\n"},
+			args:  []string{"--schema", "schema.json", "a.yaml", "missing.yaml"},
+			want:  exitFailure,
+		},
+		"schema that does not load": {
+			files: map[string]string{"a.yaml": "name: a\n"},
+			args:  []string{"--schema", "missing.json", "a.yaml"},
+			want:  exitFailure,
+		},
+		"invalid document beside a directive that does not load": {
+			files: map[string]string{
+				"a.yaml": "# yaml-language-server: $schema=./schema.json\nvalue: 1\n",
+				"b.yaml": "# yaml-language-server: $schema=./missing.json\nname: b\n",
+			},
+			args: []string{"a.yaml", "b.yaml"},
+			want: exitFailure,
+		},
+		"no file argument": {
+			args: []string{"--schema", "schema.json"},
+			want: exitFailure,
+		},
+		"canceled run": {
+			files:    map[string]string{"a.yaml": "value: 1\n"},
+			args:     []string{"--schema", "schema.json", "a.yaml"},
+			canceled: true,
+			want:     exitFailure,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "schema.json"), nameSchema, 0o600))
+
+			for file, content := range tc.files {
+				require.NoError(t, os.WriteFile(filepath.Join(dir, file), []byte(content), 0o600))
+			}
+
+			args := make([]string, 0, len(tc.args))
+			for _, arg := range tc.args {
+				if !strings.HasPrefix(arg, "-") {
+					arg = filepath.Join(dir, arg)
+				}
+
+				args = append(args, arg)
+			}
+
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+
+			if tc.canceled {
+				cancel()
+			}
+
+			cmd := validateCmd()
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			cmd.SetOut(io.Discard)
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs(args)
+
+			assert.Equal(t, tc.want, exitCode(cmd.ExecuteContext(ctx)))
+		})
 	}
 }
 

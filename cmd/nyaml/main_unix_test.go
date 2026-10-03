@@ -208,8 +208,10 @@ func TestViewSignal(t *testing.T) {
 
 			var exitErr *exec.ExitError
 
+			// A canceled run is no fault of the document, so it exits with
+			// the status of a failure.
 			require.ErrorAs(t, err, &exitErr, "the viewer exited with status 0")
-			assert.Equal(t, 1, exitErr.ExitCode())
+			assert.Equal(t, exitFailure, exitErr.ExitCode())
 			assert.Contains(t, stderr.String(), context.Canceled.Error())
 		})
 	}

@@ -39,7 +39,13 @@ func validateCmd() *cobra.Command {
 			"unreachable, every document without such a comment fails. A " +
 			"$schema=none comment in the same place turns validation off for its " +
 			"document and skips the lookup.\n\n" +
-			"Supports glob patterns like *.yaml.",
+			"Supports glob patterns like *.yaml.\n\n" +
+			"Exits 0 when every document is valid. Exits 1 when the documents " +
+			"themselves are at fault for every error, such as a syntax error or " +
+			"a schema violation. Exits 2 when any error is not a fault of a " +
+			"document, such as a file that does not read, a schema file or URL " +
+			"that does not load, or a canceled run, even when other documents " +
+			"are invalid too.",
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Expand glob patterns.

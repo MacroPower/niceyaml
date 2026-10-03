@@ -565,9 +565,11 @@ func TestValidateCmdHelp(t *testing.T) {
 	t.Parallel()
 
 	// The help names every source of a document's schema, so a reader
-	// learns that a run without --schema can still download one.
+	// learns that a run without --schema can still download one. It also
+	// names each exit status, so a script tells an invalid document from a
+	// run that could not check one.
 	long := validateCmd().Long
-	for _, want := range []string{"--schema", "$schema=", "$schema=none", "SchemaStore"} {
+	for _, want := range []string{"--schema", "$schema=", "$schema=none", "SchemaStore", "Exits 1", "Exits 2"} {
 		assert.Contains(t, long, want)
 	}
 }
