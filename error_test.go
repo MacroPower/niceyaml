@@ -4669,7 +4669,7 @@ func TestSourceError_Range_MultiLineToken(t *testing.T) {
 	got, ok := bound.Range()
 	require.True(t, ok)
 
-	// The plain scalar continues on the second line, so the range ends there.
+	// The plain scalar spans two lines, so the range ends on the second.
 	assert.Equal(t, position.NewRange(position.New(0, 6), position.New(1, 8)), got)
 }
 
