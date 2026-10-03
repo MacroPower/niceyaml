@@ -107,6 +107,13 @@ import (
 // false switches the walk off for every value. A Validate that rewrites
 // its value, or that the value's own UnmarshalYAML already ran, runs
 // again inside the decode, so it should be idempotent.
+//
+// A Validate that returns the error of a context that ended, one that
+// matches [context.Canceled] or [context.DeadlineExceeded], stops the
+// walk. The decode returns that error alone, with no location, in place
+// of every failure the walk found before it, as [MultiValidator] does.
+// The walk stops the same way once the context of the decode ends, and
+// the decode then returns the error of that context.
 type SelfValidator interface {
 	Validate() error
 }

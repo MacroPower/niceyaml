@@ -2613,6 +2613,99 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	})
 }
 
+func TestNode_Decode_SelfValidatorContext(t *testing.T) {
+	t.Parallel()
+
+	canceled := func(context.CancelFunc) error { return context.Canceled }
+
+	// Each of the four elements runs the next step of the probe when it
+	// validates. The error of a context that ended stops the walk and
+	// comes back alone, with no location.
+	tcs := map[string]struct {
+		steps        []func(cancel context.CancelFunc) error
+		cancelBefore bool
+		calls        int32
+		is           error
+		err          string
+	}{
+		"a Validate returns the error of a context": {
+			steps: []func(context.CancelFunc) error{canceled},
+			calls: 1,
+			is:    context.Canceled,
+			err:   "cfg.yaml: context canceled",
+		},
+		"a Validate wraps the error of a context": {
+			steps: []func(context.CancelFunc) error{
+				func(context.CancelFunc) error {
+					return fmt.Errorf("look up name: %w", context.DeadlineExceeded)
+				},
+			},
+			calls: 1,
+			is:    context.DeadlineExceeded,
+			err:   "cfg.yaml: look up name: context deadline exceeded",
+		},
+		"a failure before the error of a context": {
+			steps: []func(context.CancelFunc) error{
+				func(context.CancelFunc) error { return niceyaml.NewError("unknown name") },
+				canceled,
+			},
+			calls: 2,
+			is:    context.Canceled,
+			err:   "cfg.yaml: context canceled",
+		},
+		"the context ends during the walk": {
+			steps: []func(context.CancelFunc) error{
+				func(cancel context.CancelFunc) error {
+					cancel()
+
+					return nil
+				},
+			},
+			calls: 1,
+			is:    context.Canceled,
+			err:   "cfg.yaml: context canceled",
+		},
+		"the context ends before the decode": {
+			cancelBefore: true,
+			calls:        0,
+			is:           context.Canceled,
+			err:          "cfg.yaml: context canceled",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc, err := niceyaml.NewSourceFromString("- a\n- b\n- c\n- d\n", niceyaml.WithName("cfg.yaml")).Document()
+			require.NoError(t, err)
+
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+
+			p := &probe{steps: tc.steps, cancel: cancel}
+			ctx = context.WithValue(ctx, probeCtxKey{}, p)
+
+			if tc.cancelBefore {
+				cancel()
+			}
+
+			_, err = doc.Decode[[]probed](ctx)
+			require.ErrorIs(t, err, tc.is)
+			require.EqualError(t, err, tc.err)
+			assert.Equal(t, tc.calls, p.calls.Load())
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			_, ok := bound.Position()
+			assert.False(t, ok)
+			assert.Empty(t, bound.Errors())
+		})
+	}
+}
+
 // selfDecodingBytes decodes itself from the YAML bytes, so its fields
 // need not mirror the document. It fills Inner with hours that close
 // before they open, which the walk must not report.
@@ -2956,4 +3049,41 @@ func (k *onceKey) UnmarshalYAML(ctx context.Context, b []byte) error {
 	*k = onceKey(strings.TrimSpace(string(b)))
 
 	return nil
+}
+
+// probeCtxKey keys the [probe] a [probed] reads from the context.
+type probeCtxKey struct{}
+
+// probe runs one step for each Validate of a [probed] that holds it, in
+// order, and counts the calls. A call past the last step passes.
+type probe struct {
+	cancel context.CancelFunc
+	steps  []func(cancel context.CancelFunc) error
+	calls  atomic.Int32
+}
+
+// probed takes the [probe] of the decode context, so its Validate runs a
+// step that the test chose.
+type probed struct {
+	probe *probe
+}
+
+func (p *probed) UnmarshalYAML(ctx context.Context, _ []byte) error {
+	pr, ok := ctx.Value(probeCtxKey{}).(*probe)
+	if !ok {
+		return errors.New("no probe in the context")
+	}
+
+	p.probe = pr
+
+	return nil
+}
+
+func (p probed) Validate() error {
+	n := int(p.probe.calls.Add(1))
+	if n > len(p.probe.steps) {
+		return nil
+	}
+
+	return p.probe.steps[n-1](p.probe.cancel)
 }

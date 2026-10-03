@@ -42,6 +42,10 @@ import (
 // an embedded field decodes the document into that field, so the field
 // validates first, at the path of the struct. Several errors come back
 // joined, one per value that failed. Returns nil when nothing failed.
+//
+// The walk stops once ctx ends, or once a Validate returns the error of a
+// context that ended, and returns that error alone, as it is, in place of
+// the errors it collected.
 func selfValidate(ctx context.Context, v any, n *Node, opts []yaml.DecodeOption) error {
 	w := selfWalker{
 		ctx:      ctx,
@@ -53,6 +57,10 @@ func selfValidate(ctx context.Context, v any, n *Node, opts []yaml.DecodeOption)
 		scanned:  map[visit]bool{},
 	}
 	w.walk(reflect.ValueOf(v), place{}, nil)
+
+	if w.ended != nil {
+		return w.ended
+	}
 
 	switch len(w.errs) {
 	case 0:
@@ -109,6 +117,9 @@ type selfWalker struct {
 	// for a map or slice covers only the values below it.
 	scanned map[visit]bool
 	errs    []error
+	// The error of a context that ended, once it stops the walk, as
+	// [selfWalker.stopped] describes.
+	ended error
 	// The node of the value the walk starts at, held as a [step] holds the
 	// node of its own value, once [selfWalker.nodeOf] resolves it.
 	start step
@@ -228,6 +239,10 @@ func (w *selfWalker) walk(v reflect.Value, at place, shadowed map[string]bool) b
 	// without a look at the values below it.
 	if !mayHoldValidator(v.Type()) {
 		return true
+	}
+
+	if w.stopped() {
+		return false
 	}
 
 	switch v.Kind() {
@@ -1194,9 +1209,15 @@ func hasEmbedded(t reflect.Type) bool {
 // rebased under the path of at, and reports whether v passed. A value the
 // walk cannot take the address of, such as one held by a map, validates
 // through a copy, so a Validate with a pointer receiver runs on it too.
+// The error of a context that ended stops the walk as it is, with no
+// path, as [selfWalker.stopped] describes.
 func (w *selfWalker) validate(v reflect.Value, at place) bool {
 	if !implementsSelfValidator(v.Type()) {
 		return true
+	}
+
+	if w.stopped() {
+		return false
 	}
 
 	v = addressable(v)
@@ -1211,9 +1232,27 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 		return true
 	}
 
+	if contextEnded(err) {
+		w.ended = err
+
+		return false
+	}
+
 	w.errs = append(w.errs, Rebase(err, at.path()))
 
 	return false
+}
+
+// stopped reports whether the walk has stopped, which it does once its
+// context ends or a Validate returns the error of a context that ended.
+// It keeps the first such error as the one the walk returns in place of
+// every other.
+func (w *selfWalker) stopped() bool {
+	if w.ended == nil {
+		w.ended = w.ctx.Err()
+	}
+
+	return w.ended != nil
 }
 
 // keyNames returns the text the document spells each key of the mapping
