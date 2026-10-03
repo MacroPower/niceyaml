@@ -26,10 +26,12 @@ import (
 // Each node also holds the error it stands for and the binding that
 // resolved its location. A report a program reads, such as a JSON line,
 // a CI annotation, or an editor diagnostic, takes its fields from the
-// node rather than from the text. [ErrorTree.Problems] yields the nodes
-// such a report lists, one per problem, and [ErrorTree.All] yields every
-// node of the tree. A node with Detail set explains its parent, and a
-// renderer that draws details apart from problems reads the mark.
+// node rather than from the text. It reads [ErrorTree.Message] and
+// [ErrorTree.Path] from the node, and the source and the position from
+// its binding. [ErrorTree.Problems] yields the nodes such a report
+// lists, one per problem, and [ErrorTree.All] yields every node of the
+// tree. A node with Detail set explains its parent, and a renderer that
+// draws details apart from problems reads the mark.
 //
 // Create instances with [NewErrorTree].
 type ErrorTree struct {
@@ -43,7 +45,9 @@ type ErrorTree struct {
 	// Text is the message of the node, the message of the error without
 	// the errors below it. It is empty for a node that stands for several
 	// errors and adds no message of its own, such as one built from
-	// [errors.Join].
+	// [errors.Join]. It carries the location the row of the node shows,
+	// in a form that depends on where the node sits in the tree, so a
+	// report reads the message alone from [ErrorTree.Message].
 	Text string
 	// Children are the nodes of the errors below the node, in the order
 	// the tree shows them: the problems a heading stands over, and the
@@ -180,25 +184,36 @@ func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
 // problems [SourceError.Error] lists below each heading. Whether a node
 // carries a location plays no part, so an error bound to no source, such
 // as a file that failed to read, yields by the same rule, and the report
-// holds every failure:
+// holds every failure.
+//
+// A row reads its message from [ErrorTree.Message] and its path from
+// [ErrorTree.Path], which answer for a node bound to no source as well,
+// and its file and position from the binding. The Children of a node
+// Problems yields are its details, such as the reasons for the problem
+// or the related locations it names, and each answers Message the same
+// way:
 //
 //	for problem := range niceyaml.NewErrorTree(err).Problems() {
-//		row := Row{Message: problem.Text}
+//		row := Row{Message: problem.Message()}
+//
+//		if path, ok := problem.Path(); ok {
+//			row.Path = path.String()
+//		}
 //
 //		if bound := problem.Bound; bound != nil {
 //			row.File = bound.Source().FilePath()
-//			row.Message = bound.Message()
 //
 //			if pos, ok := bound.Position(); ok {
 //				row.Line, row.Column = pos.Line+1, pos.Col+1
 //			}
 //		}
 //
+//		for _, detail := range problem.Children {
+//			row.Related = append(row.Related, detail.Message())
+//		}
+//
 //		report(row)
 //	}
-//
-// A report that shows the reasons for a problem, or the related locations
-// it names, reads them from the Children of its node.
 func (t ErrorTree) Problems() iter.Seq[ErrorTree] {
 	return func(yield func(ErrorTree) bool) {
 		t.problems(yield)
@@ -226,6 +241,67 @@ func (t ErrorTree) problems(yield func(ErrorTree) bool) bool {
 // its children are all problems it heads.
 func (t ErrorTree) heads() bool {
 	return slices.ContainsFunc(t.Children, func(c ErrorTree) bool { return !c.Detail })
+}
+
+// Message returns the message of the node with no position, document, or
+// path in front, the field a report carries beside the position and the
+// path. Text holds the same message behind the location the row of the
+// node shows, in a form that depends on where the node sits in the tree.
+//
+//   - For a node with a binding, it is the [SourceError.Message] of
+//     Bound.
+//   - For a node whose Err is an [*Error] bound to no source, it is the
+//     message of the Error without the path [Error.Error] puts in front.
+//     A binding of the Error would report the same message.
+//   - For any other node, it is Text.
+//
+// A node with no text of its own, such as the root of a join, has an
+// empty message. A detail answers like any other node, so a report that
+// lists the related locations of a problem reads the message of each
+// detail.
+//
+// The node of a wrapper around a binding, such as one from [fmt.Errorf],
+// holds that binding in Bound, so its message is the message of the
+// binding. The text the wrapper added stays in Text.
+func (t ErrorTree) Message() string {
+	if t.Bound != nil {
+		return t.Bound.Message()
+	}
+
+	x, ok := t.Err.(*Error) //nolint:errorlint // The node itself, not a chain search.
+	if !ok || x == nil {
+		return t.Text
+	}
+
+	// The part of the message the children show depends on the end of the
+	// cause chain, so the walk finds that end alone.
+	end := walkChildren(x, func(*SourceError) {}, func(error, childBase, bool) {})
+
+	return bareMessage(x, end)
+}
+
+// Path returns the [paths.Path] the node is about and true, or the zero
+// Path and false when the node names none.
+//
+//   - For a node with a binding, it is the [SourceError.Path] of Bound.
+//   - For a node bound to no source, it is the path of the first located
+//     [*Error] along the cause chain of Err, with the base of every
+//     [Rebase] on the way joined in front. The text of the node names the
+//     same path.
+//
+// The source and the position come from Bound, which resolved them. The
+// methods of a nil [*SourceError] return zero values, so a report reads
+// [SourceError.Source] and [SourceError.Position] from Bound for any
+// node. A position that an [*Error] bound to no source carries points
+// into no source, so the node leaves it to [Error.Position].
+func (t ErrorTree) Path() (paths.Path, bool) {
+	if t.Bound != nil {
+		return t.Bound.Path()
+	}
+
+	a := anchorOf(t.Err)
+
+	return a.path, a.hasPath
 }
 
 // bindingOf returns the binding err is or wraps along its cause chain, as

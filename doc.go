@@ -184,10 +184,11 @@
 // errors declare. It passes over the summary a validator puts above its
 // violations, it keeps the details of each problem below its node, and
 // it yields an error bound to no source, such as a file that failed to
-// read. Each node holds the binding of its error, so a row takes its
-// fields from [SourceError.Source], [SourceError.Position],
-// [SourceError.Path], and [SourceError.Message] rather than from the
-// text.
+// read. A row takes its fields from the node rather than from the text,
+// whose form depends on where the node sits in the tree.
+// [ErrorTree.Message] and [ErrorTree.Path] give the message and the path
+// of any node. The binding the node holds gives the file and the
+// position, through [SourceError.Source] and [SourceError.Position].
 //
 // A terminal gets color from
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which prints

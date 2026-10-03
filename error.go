@@ -1906,19 +1906,16 @@ func (e *SourceError) Document() *Node {
 // report walks [ErrorTree.Problems], which yields one node per problem.
 // That walk passes over the summary a validator puts above several
 // violations and the details below each problem, and it yields each
-// error bound to no source, which has no binding to read:
+// error bound to no source, which has no binding to read.
+// [ErrorTree.Message] and [ErrorTree.Path] answer for every node, with
+// the message and the path of the binding when the node has one. The
+// methods of a nil SourceError return zero values, so the report reads
+// the rest from the binding with no branch for a node that has none:
 //
 //	for problem := range niceyaml.NewErrorTree(err).Problems() {
-//		bound := problem.Bound
-//		if bound == nil {
-//			emit("", position.Position{}, problem.Text, paths.Path{})
-//
-//			continue
-//		}
-//
-//		path, _ := bound.Path()
-//		pos, _ := bound.Position()
-//		emit(bound.Source().FilePath(), pos, bound.Message(), path)
+//		path, _ := problem.Path()
+//		pos, _ := problem.Bound.Position()
+//		emit(problem.Bound.Source().FilePath(), pos, problem.Message(), path)
 //	}
 //
 // A binding whose location did not resolve has no position but still
@@ -2404,17 +2401,26 @@ func (e *SourceError) text() string {
 
 	e = textBinding(e)
 
-	bound := e.err
-	if x, ok := bound.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
-		bound = x.textCause()
+	return bareMessage(e.err, e.end)
+}
+
+// bareMessage returns the message of err with no location in front: the
+// message of [Error.textCause] for an [*Error], or the message of any
+// other error. The [chainEnd] of the cause chain of err, end, cuts out the
+// part of the message the errors below err show. A message that is all
+// such a part, as the message of a join is, stays whole. An Error with no
+// text cause has an empty message.
+func bareMessage(err error, end chainEnd) string {
+	if x, ok := err.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
+		err = x.textCause()
 	}
 
-	if bound == nil {
+	if err == nil {
 		return ""
 	}
 
-	msg := bound.Error()
-	if own, _, _ := e.end.cut(msg); own != "" {
+	msg := err.Error()
+	if own, _, _ := end.cut(msg); own != "" {
 		return own
 	}
 
