@@ -228,7 +228,7 @@ func TestViolation_Binding(t *testing.T) {
 
 		doc := yamltest.FirstDocument(t, "spec:\n  name: 123\n")
 
-		err := yamltest.At(t, doc, paths.Root().Child("spec")).Validate(t.Context(), v)
+		err := yamltest.At(t, doc, paths.Current().Child("spec")).Validate(t.Context(), v)
 
 		assert.Equal(t, []schema.Violation{{
 			Keyword:    "type",
@@ -407,7 +407,7 @@ func TestViolation_MissingMember(t *testing.T) {
 		doc := yamltest.FirstDocument(t, "a: 1\nserver:\n  port: 1\n")
 		v := compileSchema(t, []byte(`{"required": ["name"]}`))
 
-		err := yamltest.At(t, doc, paths.Root().Child("server")).Validate(t.Context(), v)
+		err := yamltest.At(t, doc, paths.Current().Child("server")).Validate(t.Context(), v)
 
 		var bound *niceyaml.SourceError
 
@@ -429,7 +429,7 @@ func TestViolation_MissingMember(t *testing.T) {
 		// One violation comes back alone, and its message names no field
 		// until a binding or FormatError puts the path in front.
 		assert.Equal(t, `missing required property "name"`, err.Error())
-		assert.Equal(t, `$.server.name: missing required property "name"`, niceyaml.FormatError(err, 0))
+		assert.Equal(t, `@.server.name: missing required property "name"`, niceyaml.FormatError(err, 0))
 
 		var located *niceyaml.Error
 
@@ -437,7 +437,7 @@ func TestViolation_MissingMember(t *testing.T) {
 
 		path, ok := located.Path()
 		require.True(t, ok)
-		assert.Equal(t, "$.server.name", path.String())
+		assert.Equal(t, "@.server.name", path.String())
 	})
 }
 
@@ -754,7 +754,7 @@ func TestViolation_Forms(t *testing.T) {
 		{"type": "string", "pattern": "^x"}
 	]}}}`))
 
-	value := paths.Root().Child("v")
+	value := paths.Current().Child("v")
 
 	t.Run("bound", func(t *testing.T) {
 		t.Parallel()
@@ -769,7 +769,7 @@ func TestViolation_Forms(t *testing.T) {
 		// value and names the keyword.
 		path, ok := bound.Path()
 		require.True(t, ok)
-		assert.Equal(t, value.String(), path.String())
+		assert.Equal(t, "$.v", path.String())
 
 		_, ok = bound.Range()
 		assert.True(t, ok)
@@ -822,7 +822,7 @@ func TestViolation_Forms(t *testing.T) {
 
 			path, ok := nested[0].Path()
 			require.True(t, ok)
-			assert.Equal(t, value.String(), path.String())
+			assert.Equal(t, "$.v", path.String())
 
 			got, ok := errors.AsType[*schema.Violation](nested[0].Cause())
 			require.True(t, ok)

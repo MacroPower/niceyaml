@@ -57,7 +57,7 @@ func TestDocumentHelpers(t *testing.T) {
 		var tb testing.TB = t
 
 		doc := yamltest.FirstDocument(tb, "a: 1\n")
-		got, err := yamltest.At(tb, doc, paths.Root().Child("a")).Decode[int](t.Context())
+		got, err := yamltest.At(tb, doc, paths.Current().Child("a")).Decode[int](t.Context())
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, got)
@@ -69,7 +69,7 @@ func TestDocumentHelpers(t *testing.T) {
 		var tb testing.TB = t
 
 		source := niceyaml.NewSourceFromString("a: 1\n")
-		err := yamltest.Bind(tb, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("a"))))
+		err := yamltest.Bind(tb, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a"))))
 
 		var srcErr *niceyaml.SourceError
 

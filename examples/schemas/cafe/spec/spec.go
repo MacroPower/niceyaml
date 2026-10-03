@@ -66,14 +66,14 @@ type Hours struct {
 
 // Validate checks that both times parse and that open is before close.
 // A decode calls it wherever a document holds the hours. Validate writes
-// each error path relative to the hours, so the decode reports a failure
-// under the field that holds them, such as $.spec.hours.open.
+// each error path from `@`, the hours themselves, so the decode reports
+// each problem under the field that holds them, such as $.spec.hours.open.
 func (h Hours) Validate() error {
 	openTime, err := time.Parse("15:04", h.Open)
 	if err != nil {
 		return niceyaml.WrapError(
 			fmt.Errorf("invalid open time: %w", err),
-			niceyaml.AtPath(paths.Root().Child("open")),
+			niceyaml.AtPath(paths.Current().Child("open")),
 		)
 	}
 
@@ -81,14 +81,14 @@ func (h Hours) Validate() error {
 	if err != nil {
 		return niceyaml.WrapError(
 			fmt.Errorf("invalid close time: %w", err),
-			niceyaml.AtPath(paths.Root().Child("close")),
+			niceyaml.AtPath(paths.Current().Child("close")),
 		)
 	}
 
 	if !openTime.Before(closeTime) {
 		return niceyaml.NewError(
 			"open must be before close",
-			niceyaml.AtPath(paths.Root().Child("open")),
+			niceyaml.AtPath(paths.Current().Child("open")),
 		)
 	}
 

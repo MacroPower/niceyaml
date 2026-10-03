@@ -37,7 +37,7 @@ func BenchmarkPath_Nodes_Recursive(b *testing.B) {
 	}
 
 	// No entry has this key, so the walk visits every node and finds none.
-	path := paths.Root().Recursive("zzz")
+	path := paths.Doc().Recursive("zzz")
 
 	for _, in := range inputs {
 		file, err := niceyaml.NewSourceFromString(in.yaml).File()
@@ -63,7 +63,7 @@ func BenchmarkPath_Nodes_RecursiveChained(b *testing.B) {
 
 	// The second ..a reaches each entry below the first from every
 	// enclosing match of the first.
-	path := paths.Root().Recursive("a").Recursive("a")
+	path := paths.Doc().Recursive("a").Recursive("a")
 
 	for _, depth := range depths {
 		src := strings.Repeat("{a: ", depth) + "1" + strings.Repeat("}", depth)
@@ -108,7 +108,7 @@ func BenchmarkResolver_Node_WideMapping(b *testing.B) {
 
 		ps := make([]paths.Path, keys)
 		for i := range keys {
-			ps[i] = paths.Root().Child(fmt.Sprintf("k%d", i))
+			ps[i] = paths.Doc().Child(fmt.Sprintf("k%d", i))
 		}
 
 		b.Run(fmt.Sprintf("keys_%d", keys), func(b *testing.B) {
@@ -141,7 +141,7 @@ func BenchmarkResolver_Node_DeepPath(b *testing.B) {
 		require.NoError(b, err)
 
 		r := paths.NewResolver(file.Docs[0])
-		path := paths.Root().Child(slices.Repeat([]string{"a"}, depth)...)
+		path := paths.Doc().Child(slices.Repeat([]string{"a"}, depth)...)
 
 		b.Run(fmt.Sprintf("depth_%d", depth), func(b *testing.B) {
 			b.ReportAllocs()
@@ -195,7 +195,7 @@ func BenchmarkNewResolver_NestedOpenMerges(b *testing.B) {
 // key stops at that alias, so the time per key should stay flat as the
 // mapping grows.
 func BenchmarkPath_Matches_MissingMergeFirst(b *testing.B) {
-	path := paths.Root().Recursive("nope")
+	path := paths.Doc().Recursive("nope")
 
 	for _, keys := range []int{8000, 16000, 32000, 64000} {
 		var sb strings.Builder
@@ -234,7 +234,7 @@ func BenchmarkPath_Matches_MissingMergeFirst(b *testing.B) {
 // nodes of the document however many records it holds. The time per
 // record should stay flat as the sequence grows.
 func BenchmarkResolver_Matches_MergedRecords(b *testing.B) {
-	path := paths.Root().Recursive("name")
+	path := paths.Doc().Recursive("name")
 
 	for _, records := range []int{500, 1000, 2000, 4000} {
 		var (

@@ -40,7 +40,7 @@ func BenchmarkSourceError_ExcerptOneLine(b *testing.B) {
 		errs := make([]error, 0, n)
 		for i := range n {
 			errs = append(errs, niceyaml.NewError(fmt.Sprintf("v%d", i),
-				niceyaml.AtPath(paths.Root().Index(i))))
+				niceyaml.AtPath(paths.Current().Index(i))))
 		}
 
 		var bound *niceyaml.SourceError
@@ -76,14 +76,14 @@ func BenchmarkSourceError_Excerpts(b *testing.B) {
 		// touches every source.
 		children := make([]error, 0, n)
 		for i := range n {
-			child := niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child(fmt.Sprintf("k%d", i))))
+			child := niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child(fmt.Sprintf("k%d", i))))
 			children = append(children, sources[i%k].Bind(child))
 		}
 
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(b, sources[0].Bind(niceyaml.NewError("root",
-			niceyaml.AtPath(paths.Root().Child("k0")),
+			niceyaml.AtPath(paths.Current().Child("k0")),
 			niceyaml.WithDetails(children...))), &bound)
 
 		b.Run(fmt.Sprintf("sources_%d", k), func(b *testing.B) {
@@ -108,7 +108,7 @@ func BenchmarkErrorTree_LeftDeepJoin(b *testing.B) {
 
 	for i := range n {
 		joined = errors.Join(joined, niceyaml.NewError(fmt.Sprintf("error %d", i),
-			niceyaml.AtPath(paths.Root().Child("a"))))
+			niceyaml.AtPath(paths.Current().Child("a"))))
 	}
 
 	tcs := map[string]error{
@@ -134,7 +134,7 @@ func BenchmarkSourceBind_SentinelChain(b *testing.B) {
 	for _, depth := range []int{400, 1600} {
 		// Each level classifies the one below it with the sentinel, as a
 		// caller does with fmt.Errorf("%w: %w", ErrSentinel, err).
-		var err error = niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("a")))
+		var err error = niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a")))
 
 		for range depth - 1 {
 			err = fmt.Errorf("%w: %w", sentinel, err)

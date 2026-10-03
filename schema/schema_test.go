@@ -1049,7 +1049,7 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 			input: stringtest.Input(`
 				a: 1
 			`),
-			err: `$.a: expected "string", got "integer"`,
+			err: `@.a: expected "string", got "integer"`,
 		},
 		"nested ordered mapping": {
 			schema: `{
@@ -1064,7 +1064,7 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 			input: stringtest.Input(`
 				n: {b: notint}
 			`),
-			err: `$.n.b`,
+			err: `@.n.b`,
 		},
 		"ordered mapping inside a sequence": {
 			schema: `{
@@ -1082,7 +1082,7 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 			input: stringtest.Input(`
 				items: [{b: notint}]
 			`),
-			err: `$.items[0].b`,
+			err: `@.items[0].b`,
 		},
 		"binary scalar inside ordered mapping": {
 			schema: `{
@@ -1331,7 +1331,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			"node holding an alias with a bomb outside it": {
 				// A decode of a node that holds an alias reads the whole
 				// document to find the anchor.
-				path:  paths.Root().Child("c"),
+				path:  paths.Current().Child("c"),
 				input: lists + "b:\n  ? *l7\n  : v\nc: [*k]\n",
 				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 			},
@@ -1365,7 +1365,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				t.Parallel()
 
 				doc := yamltest.FirstDocument(t, tc.input)
-				if !tc.path.IsRoot() {
+				if tc.path.Len() > 0 {
 					doc = yamltest.At(t, doc, tc.path)
 				}
 
@@ -1438,28 +1438,28 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			}{
 				"first node holding an alias": {
 					doc:  bomb,
-					path: paths.Root().Child("c"),
+					path: paths.Current().Child("c"),
 					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 				},
 				"second node holding an alias": {
 					doc:  bomb,
-					path: paths.Root().Child("d"),
+					path: paths.Current().Child("d"),
 					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 				},
 				"node without an alias": {
 					doc:  bomb,
-					path: paths.Root().Child("e"),
+					path: paths.Current().Child("e"),
 				},
 				"document diluting its aliases": {
 					doc: diluted,
 				},
 				"node of a document diluting its aliases": {
 					doc:  diluted,
-					path: paths.Root().Child("list"),
+					path: paths.Current().Child("list"),
 				},
 				"node with one alias to a binary aliased many times": {
 					doc:  binary,
-					path: paths.Root().Child("other"),
+					path: paths.Current().Child("other"),
 					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 				},
 				"document with aliases to a tag over an alias to a binary": {
@@ -1468,12 +1468,12 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				},
 				"node of aliases to a tag over an alias to a binary": {
 					doc:  chained,
-					path: paths.Root().Child("list"),
+					path: paths.Current().Child("list"),
 					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 				},
 				"node with one alias to a tag over an alias to a binary": {
 					doc:  chained,
-					path: paths.Root().Child("other"),
+					path: paths.Current().Child("other"),
 					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 				},
 				"document with aliases to a binary under another tag": {
@@ -1482,7 +1482,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				},
 				"node with one alias to a binary under another tag": {
 					doc:  wrapped,
-					path: paths.Root().Child("other"),
+					path: paths.Current().Child("other"),
 					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 				},
 			}
@@ -1492,7 +1492,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 					t.Parallel()
 
 					node := tc.doc
-					if !tc.path.IsRoot() {
+					if tc.path.Len() > 0 {
 						node = yamltest.At(t, node, tc.path)
 					}
 
@@ -1543,7 +1543,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 			},
 			"node of aliases to a mapping of a reference document": {
-				path:  paths.Root().Child("items"),
+				path:  paths.Current().Child("items"),
 				input: "items: " + repeated(300) + "\n",
 				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 			},
@@ -1562,7 +1562,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				t.Parallel()
 
 				doc := yamltest.FirstDocument(t, tc.input, refs)
-				if !tc.path.IsRoot() {
+				if tc.path.Len() > 0 {
 					doc = yamltest.At(t, doc, tc.path)
 				}
 
@@ -1850,6 +1850,76 @@ func TestSchema_ErrorMessages(t *testing.T) {
 	})
 }
 
+func TestSchema_PathAnchors(t *testing.T) {
+	t.Parallel()
+
+	whole := compileSchema(t, []byte(`{"properties": {"server": {"properties": {"port": {"minimum": 1}}}}}`))
+	server := compileSchema(t, []byte(`{"properties": {"port": {"minimum": 1}}}`))
+
+	doc := yamltest.FirstDocument(t, "server:\n  port: 0\n")
+	serverNode := yamltest.At(t, doc, paths.Doc().Child("server"))
+
+	// A violation of the value the schema checked carries an `@` path,
+	// and a binding reports the `$` path from the root of the document.
+	tcs := map[string]struct {
+		validate func(t *testing.T) error
+		want     string
+		wantPath string
+	}{
+		"unbound document": {
+			validate: func(t *testing.T) error {
+				t.Helper()
+
+				return whole.ValidateValue(t.Context(), map[string]any{"server": map[string]any{"port": 0}})
+			},
+			want:     "@.server.port: 0 is less than 1",
+			wantPath: "@.server.port",
+		},
+		"unbound value": {
+			validate: func(t *testing.T) error {
+				t.Helper()
+
+				return server.ValidateValue(t.Context(), map[string]any{"port": 0})
+			},
+			want:     "@.port: 0 is less than 1",
+			wantPath: "@.port",
+		},
+		"document": {
+			validate: func(t *testing.T) error {
+				t.Helper()
+
+				return doc.Validate(t.Context(), whole)
+			},
+			want:     "2:9: $.server.port: 0 is less than 1",
+			wantPath: "$.server.port",
+		},
+		"scoped Node": {
+			validate: func(t *testing.T) error {
+				t.Helper()
+
+				return serverNode.Validate(t.Context(), server)
+			},
+			want:     "2:9: $.server.port: 0 is less than 1",
+			wantPath: "$.server.port",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.validate(t)
+			require.Error(t, err)
+
+			assert.Equal(t, tc.want, strings.SplitN(niceyaml.FormatError(err, 0), "\n", 2)[0])
+
+			path, ok := niceyaml.NewErrorTree(err).Path()
+			require.True(t, ok)
+			assert.Equal(t, tc.wantPath, path.String())
+		})
+	}
+}
+
 func TestSchema_ErrorPaths(t *testing.T) {
 	t.Parallel()
 
@@ -1865,22 +1935,22 @@ func TestSchema_ErrorPaths(t *testing.T) {
 		"type error has path on main error": {
 			schema:   `{"type": "object", "properties": {"name": {"type": "string"}}}`,
 			input:    map[string]any{"name": 123},
-			wantPath: "$.name",
+			wantPath: "@.name",
 		},
 		"additional property has key path on main error": {
 			schema:   `{"type": "object", "properties": {"name": {"type": "string"}}, "additionalProperties": false}`,
 			input:    map[string]any{"name": "valid", "extra": "invalid"},
-			wantPath: "$.extra~",
+			wantPath: "@.extra~",
 		},
 		"nested validation error has path on main error": {
 			schema:   `{"type": "object", "properties": {"user": {"type": "object", "properties": {"age": {"type": "integer"}}}}}`,
 			input:    map[string]any{"user": map[string]any{"age": "notanumber"}},
-			wantPath: "$.user.age",
+			wantPath: "@.user.age",
 		},
 		"several violations have paths on nested errors": {
 			schema:          `{"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "number"}}}`,
 			input:           map[string]any{"name": 123, "age": "thirty"},
-			wantNestedPaths: []string{"$.name", "$.age"},
+			wantNestedPaths: []string{"@.name", "@.age"},
 		},
 	}
 
@@ -1934,7 +2004,7 @@ func TestSchema_Validate_Scope(t *testing.T) {
 		"additionalProperties": false
 	}`))
 
-	spec := paths.Root().Child("spec")
+	spec := paths.Current().Child("spec")
 
 	t.Run("violation resolves from the node", func(t *testing.T) {
 		t.Parallel()
@@ -2005,7 +2075,7 @@ func TestSchema_Validate_Scope(t *testing.T) {
 			}
 		}`))
 
-		err := yamltest.At(t, dd, paths.Root().Child("b")).Validate(t.Context(), aliased)
+		err := yamltest.At(t, dd, paths.Current().Child("b")).Validate(t.Context(), aliased)
 
 		var bound *niceyaml.SourceError
 
@@ -2098,7 +2168,7 @@ func TestSchema_Validate_Bound(t *testing.T) {
 		  - price: 1
 		  - price: -2
 	`)
-	itemPath := paths.Root().Child("items").Index(1)
+	itemPath := paths.Current().Child("items").Index(1)
 
 	tcs := map[string]struct {
 		input string
@@ -2131,7 +2201,7 @@ func TestSchema_Validate_Bound(t *testing.T) {
 		// so the scoped node gives it no location.
 		"several violations in a scoped node": {
 			input: "items:\n  - name: 1\n    price: -2\n",
-			path:  paths.Root().Child("items").Index(0),
+			path:  paths.Current().Child("items").Index(0),
 			want: stringtest.JoinLF(
 				"menu.yaml: 2 schema violations",
 				`menu.yaml:2:11: $.items[0].name: expected "string", got "integer"`,
@@ -2150,7 +2220,7 @@ func TestSchema_Validate_Bound(t *testing.T) {
 		// The error carries no location, so the scoped node takes it.
 		"a scoped node past the alias limit": {
 			input: yamltest.AliasLevels(7),
-			path:  paths.Root().Child("a"),
+			path:  paths.Current().Child("a"),
 			want:  "menu.yaml:2:10: $.a: validate schema: excessive aliasing",
 			errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
 		},
@@ -2161,7 +2231,7 @@ func TestSchema_Validate_Bound(t *testing.T) {
 			t.Parallel()
 
 			node := yamltest.FirstDocumentWithPath(t, tc.input, "menu.yaml")
-			if !tc.path.IsRoot() {
+			if tc.path.Len() > 0 {
 				node = yamltest.At(t, node, tc.path)
 			}
 
@@ -2192,7 +2262,7 @@ func TestSchema_Validate_Bound(t *testing.T) {
 		t.Parallel()
 
 		each := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-			items, err := n.Nodes(paths.Root().Child("items").IndexAll())
+			items, err := n.Nodes(paths.Current().Child("items").IndexAll())
 			if err != nil {
 				return err //nolint:wrapcheck // The test inspects the error as it is.
 			}
@@ -3014,7 +3084,7 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 				path, ok := child.Path()
 				require.True(t, ok, "violation carries no path")
 
-				if strings.HasPrefix(path.String(), "$.m.0x") {
+				if strings.HasPrefix(path.String(), "@.m.0x") {
 					_, err := dd.At(path)
 					require.NoError(t, err, "path %s does not resolve", path)
 

@@ -116,8 +116,10 @@ func (s segment) selector() Selector {
 	}
 }
 
-// Selectors returns the selectors of the path, in order from the root. The
-// root yields none. A caller that needs a form other than the path
+// Selectors returns the selectors of the path, in order from where it
+// starts, and leaves out the `$` or `@` it starts at, which is no
+// selector. A path with no selectors, such as [Doc] or [Current], yields
+// none. A caller that needs a form other than the path
 // expression reads the selectors one by one, such as to build a JSON
 // Pointer:
 //
@@ -150,7 +152,8 @@ func (p Path) Selectors() iter.Seq[Selector] {
 }
 
 // Last returns the last selector of the path and true, or the zero
-// [Selector] and false for the root, which holds none. The last selector
+// [Selector] and false for a path with no selectors, such as [Doc] or
+// [Current]. The last selector
 // of a match of a `.*` or `[*]` selector names the entry or the element
 // the match is, so it gives the key name of a job or the index of an
 // item:
@@ -171,8 +174,8 @@ func (p Path) Last() (Selector, bool) {
 	return p.segments[len(p.segments)-1].selector(), true
 }
 
-// Len returns the number of selectors the path holds, which is 0 for the
-// root.
+// Len returns the number of selectors the path holds, which is 0 for [Doc]
+// and [Current]. The `$` or `@` a path starts at is no selector.
 func (p Path) Len() int {
 	return len(p.segments)
 }

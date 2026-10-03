@@ -23,35 +23,74 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-func TestRoot(t *testing.T) {
+func TestDoc(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty path is the root", func(t *testing.T) {
-		t.Parallel()
+	tcs := map[string]struct {
+		path paths.Path
+		want string
+	}{
+		"no selectors": {
+			path: paths.Doc(),
+			want: "$",
+		},
+		"single child": {
+			path: paths.Doc().Child("kind"),
+			want: "$.kind",
+		},
+		"multiple children": {
+			path: paths.Doc().Child("metadata", "name"),
+			want: "$.metadata.name",
+		},
+	}
 
-		path := paths.Root()
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		require.NotNil(t, path)
-		assert.Equal(t, "$", path.String())
-	})
+			assert.Equal(t, tc.want, tc.path.String())
+			assert.True(t, tc.path.IsAbsolute())
+		})
+	}
+}
 
-	t.Run("single child", func(t *testing.T) {
-		t.Parallel()
+func TestCurrent(t *testing.T) {
+	t.Parallel()
 
-		path := paths.Root().Child("kind")
+	tcs := map[string]struct {
+		path paths.Path
+		want string
+	}{
+		"no selectors": {
+			path: paths.Current(),
+			want: "@",
+		},
+		"zero value": {
+			path: paths.Path{},
+			want: "@",
+		},
+		"single child": {
+			path: paths.Current().Child("kind"),
+			want: "@.kind",
+		},
+		"zero value child": {
+			path: paths.Path{}.Child("kind"),
+			want: "@.kind",
+		},
+		"multiple children": {
+			path: paths.Current().Child("metadata", "name"),
+			want: "@.metadata.name",
+		},
+	}
 
-		require.NotNil(t, path)
-		assert.Equal(t, "$.kind", path.String())
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("multiple children", func(t *testing.T) {
-		t.Parallel()
-
-		path := paths.Root().Child("metadata", "name")
-
-		require.NotNil(t, path)
-		assert.Equal(t, "$.metadata.name", path.String())
-	})
+			assert.Equal(t, tc.want, tc.path.String())
+			assert.False(t, tc.path.IsAbsolute())
+		})
+	}
 }
 
 // yamlPath returns the goccy/go-yaml form of p, for a path that has one.
@@ -74,115 +113,125 @@ func TestPath_Build(t *testing.T) {
 		wantYAML string
 	}{
 		"root path": {
-			build: paths.Root,
+			build: paths.Doc,
 			want:  "$",
 		},
+		"current path": {
+			build:    paths.Current,
+			want:     "@",
+			wantYAML: "$",
+		},
+		"current path with selectors": {
+			build:    func() paths.Path { return paths.Current().Child("items").Index(0).Key() },
+			want:     "@.items[0]~",
+			wantYAML: "$.items[0]",
+		},
 		"chained children": {
-			build: func() paths.Path { return paths.Root().Child("metadata", "labels") },
+			build: func() paths.Path { return paths.Doc().Child("metadata", "labels") },
 			want:  "$.metadata.labels",
 		},
 		"child then index": {
-			build: func() paths.Path { return paths.Root().Child("items").Index(0) },
+			build: func() paths.Path { return paths.Doc().Child("items").Index(0) },
 			want:  "$.items[0]",
 		},
 		"variadic index": {
-			build: func() paths.Path { return paths.Root().Child("matrix").Index(0, 1) },
+			build: func() paths.Path { return paths.Doc().Child("matrix").Index(0, 1) },
 			want:  "$.matrix[0][1]",
 		},
 		"index all": {
-			build: func() paths.Path { return paths.Root().Child("items").IndexAll() },
+			build: func() paths.Path { return paths.Doc().Child("items").IndexAll() },
 			want:  "$.items[*]",
 		},
 		"recursive descent": {
-			build: func() paths.Path { return paths.Root().Recursive("name") },
+			build: func() paths.Path { return paths.Doc().Recursive("name") },
 			want:  "$..name",
 		},
 		"large index": {
-			build: func() paths.Path { return paths.Root().Child("items").Index(999) },
+			build: func() paths.Path { return paths.Doc().Child("items").Index(999) },
 			want:  "$.items[999]",
 		},
 		"recursive with index": {
-			build: func() paths.Path { return paths.Root().Recursive("items").Index(0) },
+			build: func() paths.Path { return paths.Doc().Recursive("items").Index(0) },
 			want:  "$..items[0]",
 		},
 		"multiple recursive": {
-			build: func() paths.Path { return paths.Root().Recursive("containers").Recursive("name") },
+			build: func() paths.Path { return paths.Doc().Recursive("containers").Recursive("name") },
 			want:  "$..containers..name",
 		},
 		"child after index": {
-			build: func() paths.Path { return paths.Root().Child("items").Index(0).Child("name") },
+			build: func() paths.Path { return paths.Doc().Child("items").Index(0).Child("name") },
 			want:  "$.items[0].name",
 		},
 		"index all then index": {
-			build: func() paths.Path { return paths.Root().Child("matrix").IndexAll().Index(0) },
+			build: func() paths.Path { return paths.Doc().Child("matrix").IndexAll().Index(0) },
 			want:  "$.matrix[*][0]",
 		},
 		"dotted child name is quoted": {
-			build: func() paths.Path { return paths.Root().Child("kubernetes.io/name") },
+			build: func() paths.Path { return paths.Doc().Child("kubernetes.io/name") },
 			want:  "$.'kubernetes.io/name'",
 		},
 		"child name with quote is quoted and escaped": {
-			build:    func() paths.Path { return paths.Root().Child("it's") },
+			build:    func() paths.Path { return paths.Doc().Child("it's") },
 			want:     `$.'it\'s'`,
 			wantYAML: "$.it's",
 		},
 		"empty child name is quoted, but goccy leaves it bare": {
-			build:    func() paths.Path { return paths.Root().Child("") },
+			build:    func() paths.Path { return paths.Doc().Child("") },
 			want:     "$.''",
 			wantYAML: "$.",
 		},
 		"empty recursive name is quoted, but goccy leaves it bare": {
-			build:    func() paths.Path { return paths.Root().Recursive("") },
+			build:    func() paths.Path { return paths.Doc().Recursive("") },
 			want:     "$..''",
 			wantYAML: "$..",
 		},
 		"child name with brackets is quoted": {
-			build:    func() paths.Path { return paths.Root().Child("a[0]") },
+			build:    func() paths.Path { return paths.Doc().Child("a[0]") },
 			want:     "$.'a[0]'",
 			wantYAML: "$.a[0]",
 		},
 		"recursive name with a dot is quoted, but goccy cannot quote it": {
-			build:    func() paths.Path { return paths.Root().Recursive("x.y") },
+			build:    func() paths.Path { return paths.Doc().Recursive("x.y") },
 			want:     "$..'x.y'",
 			wantYAML: "$..x.y",
 		},
 		"key selector, which goccy has no form for": {
-			build:    func() paths.Path { return paths.Root().Child("spec", "name").Key() },
+			build:    func() paths.Path { return paths.Doc().Child("spec", "name").Key() },
 			want:     "$.spec.name~",
 			wantYAML: "$.spec.name",
 		},
 		"key selector mid-path": {
-			build:    func() paths.Path { return paths.Root().Child("a").Key().Child("b") },
+			build:    func() paths.Path { return paths.Doc().Child("a").Key().Child("b") },
 			want:     "$.a~.b",
 			wantYAML: "$.a.b",
 		},
 		"name wrapped in single quotes": {
-			build:    func() paths.Path { return paths.Root().Child("'x'") },
+			build:    func() paths.Path { return paths.Doc().Child("'x'") },
 			want:     `$.'\'x\''`,
 			wantYAML: "$.'x'",
 		},
 		"tilde in a name is quoted": {
-			build:    func() paths.Path { return paths.Root().Child("a~b") },
+			build:    func() paths.Path { return paths.Doc().Child("a~b") },
 			want:     "$.'a~b'",
 			wantYAML: "$.a~b",
 		},
 		"colon and space in a name are quoted": {
-			build:    func() paths.Path { return paths.Root().Child("x: y") },
+			build:    func() paths.Path { return paths.Doc().Child("x: y") },
 			want:     "$.'x: y'",
 			wantYAML: "$.x: y",
 		},
 		"trailing space in a name is quoted": {
-			build:    func() paths.Path { return paths.Root().Child("name ") },
+			build:    func() paths.Path { return paths.Doc().Child("name ") },
 			want:     "$.'name '",
 			wantYAML: "$.name ",
 		},
 		"line break in a name is quoted": {
-			build:    func() paths.Path { return paths.Root().Child("a\nb") },
+			build:    func() paths.Path { return paths.Doc().Child("a\nb") },
 			want:     "$.'a\nb'",
 			wantYAML: "$.a\nb",
 		},
 		"recursive name with a space is quoted": {
-			build:    func() paths.Path { return paths.Root().Recursive("a b") },
+			build:    func() paths.Path { return paths.Doc().Recursive("a b") },
 			want:     "$..'a b'",
 			wantYAML: "$..a b",
 		},
@@ -214,8 +263,8 @@ func TestPath_Index_Negative(t *testing.T) {
 
 	// A negative index has no meaning of its own, so every rendering of the
 	// path agrees on element 0.
-	negative := paths.Root().Child("items").Index(-1)
-	zero := paths.Root().Child("items").Index(0)
+	negative := paths.Doc().Child("items").Index(-1)
+	zero := paths.Doc().Child("items").Index(0)
 
 	assert.Equal(t, zero, negative)
 	assert.Equal(t, "$.items[0]", negative.String())
@@ -238,39 +287,39 @@ func TestPath_ChildAll(t *testing.T) {
 		want string
 	}{
 		"after a child": {
-			path: paths.Root().Child("jobs").ChildAll(),
+			path: paths.Doc().Child("jobs").ChildAll(),
 			want: "$.jobs.*",
 		},
 		"on the root": {
-			path: paths.Root().ChildAll(),
+			path: paths.Doc().ChildAll(),
 			want: "$.*",
 		},
 		"then a child": {
-			path: paths.Root().Child("jobs").ChildAll().Child("steps"),
+			path: paths.Doc().Child("jobs").ChildAll().Child("steps"),
 			want: "$.jobs.*.steps",
 		},
 		"then index all": {
-			path: paths.Root().Child("jobs").ChildAll().Child("steps").IndexAll().Child("uses"),
+			path: paths.Doc().Child("jobs").ChildAll().Child("steps").IndexAll().Child("uses"),
 			want: "$.jobs.*.steps[*].uses",
 		},
 		"then a key selector": {
-			path: paths.Root().Child("jobs").ChildAll().Key(),
+			path: paths.Doc().Child("jobs").ChildAll().Key(),
 			want: "$.jobs.*~",
 		},
 		"twice": {
-			path: paths.Root().Child("paths").ChildAll().ChildAll(),
+			path: paths.Doc().Child("paths").ChildAll().ChildAll(),
 			want: "$.paths.*.*",
 		},
 		"after index all": {
-			path: paths.Root().Child("items").IndexAll().ChildAll(),
+			path: paths.Doc().Child("items").IndexAll().ChildAll(),
 			want: "$.items[*].*",
 		},
 		"after a recursive selector": {
-			path: paths.Root().Recursive("env").ChildAll(),
+			path: paths.Doc().Recursive("env").ChildAll(),
 			want: "$..env.*",
 		},
 		"after the name star": {
-			path: paths.Root().Child("*").ChildAll(),
+			path: paths.Doc().Child("*").ChildAll(),
 			want: "$.'*'.*",
 		},
 	}
@@ -299,9 +348,9 @@ func TestPath_ChildAll(t *testing.T) {
 	t.Run("the name star is a child selector", func(t *testing.T) {
 		t.Parallel()
 
-		star := paths.Root().Child("jobs", "*")
+		star := paths.Doc().Child("jobs", "*")
 
-		assert.NotEqual(t, paths.Root().Child("jobs").ChildAll(), star)
+		assert.NotEqual(t, paths.Doc().Child("jobs").ChildAll(), star)
 		assert.Equal(t, "$.jobs.'*'", star.String())
 		assert.Equal(t, "$.jobs.'*'", yamlPath(t, star).String())
 	})
@@ -309,7 +358,7 @@ func TestPath_ChildAll(t *testing.T) {
 	t.Run("YAMLPath names the path it cannot convert", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := paths.Root().Child("jobs").ChildAll().Child("steps").YAMLPath()
+		_, err := paths.Doc().Child("jobs").ChildAll().Child("steps").YAMLPath()
 		require.EqualError(t, err, "convert $.jobs.*.steps: selector has no goccy/go-yaml equivalent")
 	})
 }
@@ -322,43 +371,43 @@ func TestPath_RecursiveAll(t *testing.T) {
 		want string
 	}{
 		"on the root": {
-			path: paths.Root().RecursiveAll(),
+			path: paths.Doc().RecursiveAll(),
 			want: "$..*",
 		},
 		"after a child": {
-			path: paths.Root().Child("spec").RecursiveAll(),
+			path: paths.Doc().Child("spec").RecursiveAll(),
 			want: "$.spec..*",
 		},
 		"then a child": {
-			path: paths.Root().RecursiveAll().Child("name"),
+			path: paths.Doc().RecursiveAll().Child("name"),
 			want: "$..*.name",
 		},
 		"then an index": {
-			path: paths.Root().RecursiveAll().Index(0),
+			path: paths.Doc().RecursiveAll().Index(0),
 			want: "$..*[0]",
 		},
 		"then a key selector": {
-			path: paths.Root().RecursiveAll().Key(),
+			path: paths.Doc().RecursiveAll().Key(),
 			want: "$..*~",
 		},
 		"twice": {
-			path: paths.Root().RecursiveAll().RecursiveAll(),
+			path: paths.Doc().RecursiveAll().RecursiveAll(),
 			want: "$..*..*",
 		},
 		"after index all": {
-			path: paths.Root().Child("items").IndexAll().RecursiveAll(),
+			path: paths.Doc().Child("items").IndexAll().RecursiveAll(),
 			want: "$.items[*]..*",
 		},
 		"after child all": {
-			path: paths.Root().ChildAll().RecursiveAll(),
+			path: paths.Doc().ChildAll().RecursiveAll(),
 			want: "$.*..*",
 		},
 		"after a recursive selector": {
-			path: paths.Root().Recursive("env").RecursiveAll(),
+			path: paths.Doc().Recursive("env").RecursiveAll(),
 			want: "$..env..*",
 		},
 		"after the recursive name star": {
-			path: paths.Root().Recursive("*").RecursiveAll(),
+			path: paths.Doc().Recursive("*").RecursiveAll(),
 			want: "$..'*'..*",
 		},
 	}
@@ -386,9 +435,9 @@ func TestPath_RecursiveAll(t *testing.T) {
 	t.Run("the name star is a recursive selector", func(t *testing.T) {
 		t.Parallel()
 
-		star := paths.Root().Recursive("*")
+		star := paths.Doc().Recursive("*")
 
-		assert.False(t, paths.Root().RecursiveAll().Equal(star))
+		assert.False(t, paths.Doc().RecursiveAll().Equal(star))
 		assert.Equal(t, "$..'*'", star.String())
 		assert.Equal(t, star, paths.MustParse("$..'*'"))
 	})
@@ -396,7 +445,7 @@ func TestPath_RecursiveAll(t *testing.T) {
 	t.Run("YAMLPath names the path it cannot convert", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := paths.Root().Child("spec").RecursiveAll().YAMLPath()
+		_, err := paths.Doc().Child("spec").RecursiveAll().YAMLPath()
 		require.EqualError(t, err, "convert $.spec..*: selector has no goccy/go-yaml equivalent")
 	})
 }
@@ -407,7 +456,7 @@ func TestPath_Immutable(t *testing.T) {
 	t.Run("shared prefix is not aliased", func(t *testing.T) {
 		t.Parallel()
 
-		spec := paths.Root().Child("spec")
+		spec := paths.Doc().Child("spec")
 		replicas := spec.Child("replicas")
 		image := spec.Child("image")
 
@@ -419,29 +468,31 @@ func TestPath_Immutable(t *testing.T) {
 	t.Run("extending does not change the receiver", func(t *testing.T) {
 		t.Parallel()
 
-		p := paths.Root().Child("metadata", "name")
+		p := paths.Doc().Child("metadata", "name")
 
 		assert.Equal(t, "$.metadata.name.labels", p.Child("labels").String())
 		assert.Equal(t, "$.metadata.name", p.String())
 	})
 
-	t.Run("zero value is the root", func(t *testing.T) {
+	t.Run("zero value is the current node", func(t *testing.T) {
 		t.Parallel()
 
 		var p paths.Path
 
-		assert.Equal(t, paths.Root(), p)
-		assert.Equal(t, "$", p.String())
-		assert.Equal(t, "$.a", p.Child("a").String())
+		assert.Equal(t, paths.Current(), p)
+		assert.Equal(t, "@", p.String())
+		assert.Equal(t, "@.a", p.Child("a").String())
 	})
 
 	t.Run("an empty extension is the root", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Equal(t, paths.Root(), paths.Root().Child())
-		assert.Equal(t, paths.Root(), paths.Root().Index())
-		assert.Equal(t, paths.Root(), paths.Root().Join(paths.Root()))
-		assert.Equal(t, paths.Root().Child("a"), paths.Root().Child("a").Child())
+		assert.Equal(t, paths.Doc(), paths.Doc().Child())
+		assert.Equal(t, paths.Doc(), paths.Doc().Index())
+		assert.Equal(t, paths.Doc(), paths.Doc().Join(paths.Doc()))
+		assert.Equal(t, paths.Doc().Child("a"), paths.Doc().Child("a").Child())
+		assert.Equal(t, paths.Current(), paths.Current().Child())
+		assert.Equal(t, paths.Current(), paths.Current().Join(paths.Current()))
 	})
 }
 
@@ -453,39 +504,83 @@ func TestPath_Join(t *testing.T) {
 		want string
 		qs   []paths.Path
 	}{
-		"root to root": {
-			p:    paths.Root(),
-			qs:   []paths.Path{paths.Root()},
+		"current to doc": {
+			p:    paths.Doc(),
+			qs:   []paths.Path{paths.Current()},
 			want: "$",
 		},
-		"root to path": {
-			p:    paths.Root(),
-			qs:   []paths.Path{paths.Root().Child("open")},
+		"doc to doc": {
+			p:    paths.Doc(),
+			qs:   []paths.Path{paths.Doc()},
+			want: "$",
+		},
+		"relative path to doc": {
+			p:    paths.Doc(),
+			qs:   []paths.Path{paths.Current().Child("open")},
 			want: "$.open",
 		},
-		"path to root": {
-			p:    paths.Root().Child("spec", "hours"),
-			qs:   []paths.Path{paths.Root()},
+		"current to path": {
+			p:    paths.Doc().Child("spec", "hours"),
+			qs:   []paths.Path{paths.Current()},
 			want: "$.spec.hours",
 		},
-		"path to path": {
-			p:    paths.Root().Child("spec", "hours"),
-			qs:   []paths.Path{paths.Root().Child("open")},
+		"relative path to path": {
+			p:    paths.Doc().Child("spec", "hours"),
+			qs:   []paths.Path{paths.Current().Child("open")},
 			want: "$.spec.hours.open",
 		},
+		"relative path to relative path": {
+			p:    paths.Current().Child("hours"),
+			qs:   []paths.Path{paths.Current().Child("open")},
+			want: "@.hours.open",
+		},
+		"relative path to current": {
+			p:    paths.Current(),
+			qs:   []paths.Path{paths.Current().Child("open")},
+			want: "@.open",
+		},
+		"absolute path replaces a path": {
+			p:    paths.Doc().Child("spec", "hours"),
+			qs:   []paths.Path{paths.Doc().Child("name")},
+			want: "$.name",
+		},
+		"absolute path replaces a relative path": {
+			p:    paths.Current().Child("hours"),
+			qs:   []paths.Path{paths.Doc().Child("name")},
+			want: "$.name",
+		},
+		"doc replaces a path": {
+			p:    paths.Doc().Child("spec", "hours"),
+			qs:   []paths.Path{paths.Doc()},
+			want: "$",
+		},
 		"keeps every selector kind": {
-			p:    paths.Root().Child("items").Index(0),
-			qs:   []paths.Path{paths.Root().Recursive("name").IndexAll().Key()},
+			p:    paths.Doc().Child("items").Index(0),
+			qs:   []paths.Path{paths.Current().Recursive("name").IndexAll().Key()},
 			want: "$.items[0]..name[*]~",
 		},
 		"nothing": {
-			p:    paths.Root().Child("spec"),
+			p:    paths.Doc().Child("spec"),
 			want: "$.spec",
 		},
+		"nothing to current": {
+			p:    paths.Current().Child("spec"),
+			want: "@.spec",
+		},
 		"several paths in order": {
-			p:    paths.Root().Child("spec"),
-			qs:   []paths.Path{paths.Root().Child("hours"), paths.Root(), paths.Root().Index(1).Key()},
+			p:    paths.Doc().Child("spec"),
+			qs:   []paths.Path{paths.Current().Child("hours"), paths.Current(), paths.Current().Index(1).Key()},
 			want: "$.spec.hours[1]~",
+		},
+		"several paths after an absolute one": {
+			p:    paths.Doc().Child("spec"),
+			qs:   []paths.Path{paths.Current().Child("hours"), paths.Doc().Child("meta"), paths.Current().Index(1)},
+			want: "$.meta[1]",
+		},
+		"last absolute path wins": {
+			p:    paths.Current().Child("spec"),
+			qs:   []paths.Path{paths.Doc().Child("a"), paths.Doc().Child("b"), paths.Current().Child("c")},
+			want: "$.b.c",
 		},
 	}
 
@@ -501,15 +596,26 @@ func TestPath_Join(t *testing.T) {
 	t.Run("leaves both paths as they were", func(t *testing.T) {
 		t.Parallel()
 
-		p := paths.Root().Child("spec")
-		q := paths.Root().Child("open")
+		p := paths.Doc().Child("spec")
+		q := paths.Current().Child("open")
 		joined := p.Join(q)
 
 		assert.Equal(t, "$.spec.open", joined.String())
 		assert.Equal(t, "$.spec", p.String())
-		assert.Equal(t, "$.open", q.String())
+		assert.Equal(t, "@.open", q.String())
 		assert.Equal(t, "$.spec.open.x", joined.Child("x").String())
 		assert.Equal(t, "$.spec", p.String())
+	})
+
+	t.Run("leaves a replacing path as it was", func(t *testing.T) {
+		t.Parallel()
+
+		p := paths.Doc().Child("spec")
+		q := paths.Doc().Child("name")
+		joined := p.Join(q, paths.Current().Child("first"))
+
+		assert.Equal(t, "$.name.first", joined.String())
+		assert.Equal(t, "$.name", q.String())
 	})
 }
 
@@ -523,91 +629,118 @@ func TestPath_CutPrefix(t *testing.T) {
 		ok     bool
 	}{
 		"root from root": {
-			p:      paths.Root(),
-			prefix: paths.Root(),
-			want:   "$",
+			p:      paths.Doc(),
+			prefix: paths.Doc(),
+			want:   "@",
 			ok:     true,
 		},
 		"root from path": {
-			p:      paths.Root().Child("spec", "hours"),
-			prefix: paths.Root(),
-			want:   "$.spec.hours",
+			p:      paths.Doc().Child("spec", "hours"),
+			prefix: paths.Doc(),
+			want:   "@.spec.hours",
 			ok:     true,
 		},
 		"path from itself": {
-			p:      paths.Root().Child("spec", "hours"),
-			prefix: paths.Root().Child("spec", "hours"),
-			want:   "$",
+			p:      paths.Doc().Child("spec", "hours"),
+			prefix: paths.Doc().Child("spec", "hours"),
+			want:   "@",
 			ok:     true,
 		},
 		"leading selectors": {
-			p:      paths.Root().Child("spec", "hours", "open"),
-			prefix: paths.Root().Child("spec", "hours"),
-			want:   "$.open",
+			p:      paths.Doc().Child("spec", "hours", "open"),
+			prefix: paths.Doc().Child("spec", "hours"),
+			want:   "@.open",
 			ok:     true,
 		},
+		"leading selectors of a relative path": {
+			p:      paths.Current().Child("spec", "hours", "open"),
+			prefix: paths.Current().Child("spec", "hours"),
+			want:   "@.open",
+			ok:     true,
+		},
+		"current from a relative path": {
+			p:      paths.Current().Child("spec"),
+			prefix: paths.Current(),
+			want:   "@.spec",
+			ok:     true,
+		},
+		"relative prefix of an absolute path": {
+			p:      paths.Doc().Child("spec", "hours"),
+			prefix: paths.Current().Child("spec"),
+			want:   "$.spec.hours",
+		},
+		"absolute prefix of a relative path": {
+			p:      paths.Current().Child("spec", "hours"),
+			prefix: paths.Doc().Child("spec"),
+			want:   "@.spec.hours",
+		},
+		"current from an absolute path": {
+			p:      paths.Doc().Child("spec"),
+			prefix: paths.Current(),
+			want:   "$.spec",
+		},
 		"keeps every selector kind": {
-			p:      paths.Root().Child("items").Index(0).Recursive("name").IndexAll().Key(),
-			prefix: paths.Root().Child("items").Index(0),
-			want:   "$..name[*]~",
+			p:      paths.Doc().Child("items").Index(0).Recursive("name").IndexAll().Key(),
+			prefix: paths.Doc().Child("items").Index(0),
+			want:   "@..name[*]~",
 			ok:     true,
 		},
 		"longer prefix": {
-			p:      paths.Root().Child("spec"),
-			prefix: paths.Root().Child("spec", "hours"),
+			p:      paths.Doc().Child("spec"),
+			prefix: paths.Doc().Child("spec", "hours"),
 			want:   "$.spec",
 		},
 		"another name": {
-			p:      paths.Root().Child("spec", "hours"),
-			prefix: paths.Root().Child("meta"),
+			p:      paths.Doc().Child("spec", "hours"),
+			prefix: paths.Doc().Child("meta"),
 			want:   "$.spec.hours",
 		},
 		"another index": {
-			p:      paths.Root().Child("items").Index(1).Child("name"),
-			prefix: paths.Root().Child("items").Index(0),
+			p:      paths.Doc().Child("items").Index(1).Child("name"),
+			prefix: paths.Doc().Child("items").Index(0),
 			want:   "$.items[1].name",
 		},
 		"wildcard against an index": {
-			p:      paths.Root().Child("items").Index(0).Child("name"),
-			prefix: paths.Root().Child("items").IndexAll(),
+			p:      paths.Doc().Child("items").Index(0).Child("name"),
+			prefix: paths.Doc().Child("items").IndexAll(),
 			want:   "$.items[0].name",
 		},
 		"mapping wildcard against a name": {
-			p:      paths.Root().Child("jobs", "build", "steps"),
-			prefix: paths.Root().Child("jobs").ChildAll(),
+			p:      paths.Doc().Child("jobs", "build", "steps"),
+			prefix: paths.Doc().Child("jobs").ChildAll(),
 			want:   "$.jobs.build.steps",
 		},
 		"mapping wildcard against itself": {
-			p:      paths.Root().Child("jobs").ChildAll().Child("steps"),
-			prefix: paths.Root().Child("jobs").ChildAll(),
-			want:   "$.steps",
+			p:      paths.Doc().Child("jobs").ChildAll().Child("steps"),
+			prefix: paths.Doc().Child("jobs").ChildAll(),
+			want:   "@.steps",
 			ok:     true,
 		},
 		"mapping wildcard against the name star": {
-			p:      paths.Root().Child("jobs", "*"),
-			prefix: paths.Root().Child("jobs").ChildAll(),
+			p:      paths.Doc().Child("jobs", "*"),
+			prefix: paths.Doc().Child("jobs").ChildAll(),
 			want:   "$.jobs.'*'",
 		},
 		"keeps a mapping wildcard": {
-			p:      paths.Root().Child("jobs").ChildAll().Key(),
-			prefix: paths.Root().Child("jobs"),
-			want:   "$.*~",
+			p:      paths.Doc().Child("jobs").ChildAll().Key(),
+			prefix: paths.Doc().Child("jobs"),
+			want:   "@.*~",
 			ok:     true,
 		},
 		"recursive wildcard against a name": {
-			p:      paths.Root().Child("spec", "name"),
-			prefix: paths.Root().RecursiveAll(),
+			p:      paths.Doc().Child("spec", "name"),
+			prefix: paths.Doc().RecursiveAll(),
 			want:   "$.spec.name",
 		},
 		"recursive wildcard against itself": {
-			p:      paths.Root().Child("spec").RecursiveAll().Key(),
-			prefix: paths.Root().Child("spec").RecursiveAll(),
-			want:   "$~",
+			p:      paths.Doc().Child("spec").RecursiveAll().Key(),
+			prefix: paths.Doc().Child("spec").RecursiveAll(),
+			want:   "@~",
 			ok:     true,
 		},
 		"key against its value": {
-			p:      paths.Root().Child("spec").Key(),
-			prefix: paths.Root().Child("spec").Child("hours"),
+			p:      paths.Doc().Child("spec").Key(),
+			prefix: paths.Doc().Child("spec").Child("hours"),
 			want:   "$.spec~",
 		},
 	}
@@ -630,14 +763,14 @@ func TestPath_CutPrefix(t *testing.T) {
 	t.Run("leaves both paths as they were", func(t *testing.T) {
 		t.Parallel()
 
-		p := paths.Root().Child("spec", "hours", "open")
-		prefix := paths.Root().Child("spec")
+		p := paths.Doc().Child("spec", "hours", "open")
+		prefix := paths.Doc().Child("spec")
 
 		rest, ok := p.CutPrefix(prefix)
 		require.True(t, ok)
 
-		assert.Equal(t, "$.hours.open.x", rest.Child("x").String())
-		assert.Equal(t, "$.hours.open", rest.String())
+		assert.Equal(t, "@.hours.open.x", rest.Child("x").String())
+		assert.Equal(t, "@.hours.open", rest.String())
 		assert.Equal(t, "$.spec.hours.open", p.String())
 		assert.Equal(t, "$.spec", prefix.String())
 	})
@@ -646,15 +779,56 @@ func TestPath_CutPrefix(t *testing.T) {
 func TestPath_IsRoot(t *testing.T) {
 	t.Parallel()
 
-	var zero paths.Path
+	tcs := map[string]struct {
+		path paths.Path
+		want bool
+	}{
+		"doc":                  {path: paths.Doc(), want: true},
+		"parsed doc":           {path: paths.MustParse("$"), want: true},
+		"doc child":            {path: paths.Doc().Child("a")},
+		"doc key":              {path: paths.Doc().Key()},
+		"doc index":            {path: paths.Doc().Index(0)},
+		"doc mapping wildcard": {path: paths.Doc().ChildAll()},
+		"current":              {path: paths.Current()},
+		"zero value":           {path: paths.Path{}},
+		"parsed current":       {path: paths.MustParse("@")},
+		"current child":        {path: paths.Current().Child("a")},
+	}
 
-	assert.True(t, paths.Root().IsRoot())
-	assert.True(t, zero.IsRoot())
-	assert.True(t, paths.MustParse("$").IsRoot())
-	assert.False(t, paths.Root().Child("a").IsRoot())
-	assert.False(t, paths.Root().Key().IsRoot())
-	assert.False(t, paths.Root().Index(0).IsRoot())
-	assert.False(t, paths.Root().ChildAll().IsRoot())
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.path.IsRoot())
+		})
+	}
+}
+
+func TestPath_IsAbsolute(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		path paths.Path
+		want bool
+	}{
+		"doc":            {path: paths.Doc(), want: true},
+		"doc child":      {path: paths.Doc().Child("a"), want: true},
+		"parsed doc":     {path: paths.MustParse("$.a[0]"), want: true},
+		"doc parent":     {path: parentOf(t, paths.Doc().Child("a")), want: true},
+		"current":        {path: paths.Current()},
+		"zero value":     {path: paths.Path{}},
+		"current child":  {path: paths.Current().Child("a")},
+		"parsed current": {path: paths.MustParse("@.a[0]")},
+		"current parent": {path: parentOf(t, paths.Current().Child("a"))},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.path.IsAbsolute())
+		})
+	}
 }
 
 func TestPath_Parent(t *testing.T) {
@@ -666,69 +840,88 @@ func TestPath_Parent(t *testing.T) {
 		ok   bool
 	}{
 		"root": {
-			p:    paths.Root(),
+			p:    paths.Doc(),
 			want: "$",
 		},
 		"zero value": {
-			want: "$",
+			want: "@",
+		},
+		"current": {
+			p:    paths.Current(),
+			want: "@",
 		},
 		"one child": {
-			p:    paths.Root().Child("spec"),
+			p:    paths.Doc().Child("spec"),
 			want: "$",
 			ok:   true,
 		},
+		"one child of current": {
+			p:    paths.Current().Child("spec"),
+			want: "@",
+			ok:   true,
+		},
+		"relative child": {
+			p:    paths.Current().Child("spec", "hours"),
+			want: "@.spec",
+			ok:   true,
+		},
+		"relative key": {
+			p:    paths.Current().Key(),
+			want: "@",
+			ok:   true,
+		},
 		"child": {
-			p:    paths.Root().Child("spec", "hours"),
+			p:    paths.Doc().Child("spec", "hours"),
 			want: "$.spec",
 			ok:   true,
 		},
 		"index": {
-			p:    paths.Root().Child("items").Index(2),
+			p:    paths.Doc().Child("items").Index(2),
 			want: "$.items",
 			ok:   true,
 		},
 		"key": {
-			p:    paths.Root().Child("spec").Key(),
+			p:    paths.Doc().Child("spec").Key(),
 			want: "$.spec",
 			ok:   true,
 		},
 		"key at the root": {
-			p:    paths.Root().Key(),
+			p:    paths.Doc().Key(),
 			want: "$",
 			ok:   true,
 		},
 		"sequence wildcard": {
-			p:    paths.Root().Child("items").IndexAll(),
+			p:    paths.Doc().Child("items").IndexAll(),
 			want: "$.items",
 			ok:   true,
 		},
 		"mapping wildcard": {
-			p:    paths.Root().Child("jobs").ChildAll(),
+			p:    paths.Doc().Child("jobs").ChildAll(),
 			want: "$.jobs",
 			ok:   true,
 		},
 		"key of a mapping wildcard": {
-			p:    paths.Root().Child("jobs").ChildAll().Key(),
+			p:    paths.Doc().Child("jobs").ChildAll().Key(),
 			want: "$.jobs.*",
 			ok:   true,
 		},
 		"recursive wildcard": {
-			p:    paths.Root().Child("spec").RecursiveAll(),
+			p:    paths.Doc().Child("spec").RecursiveAll(),
 			want: "$.spec",
 			ok:   true,
 		},
 		"key of a recursive wildcard": {
-			p:    paths.Root().RecursiveAll().Key(),
+			p:    paths.Doc().RecursiveAll().Key(),
 			want: "$..*",
 			ok:   true,
 		},
 		"recursive": {
-			p:    paths.Root().Child("spec").Recursive("name"),
+			p:    paths.Doc().Child("spec").Recursive("name"),
 			want: "$.spec",
 			ok:   true,
 		},
 		"quoted name": {
-			p:    paths.Root().Child("a.b", "c d"),
+			p:    paths.Doc().Child("a.b", "c d"),
 			want: "$.'a.b'",
 			ok:   true,
 		},
@@ -745,28 +938,31 @@ func TestPath_Parent(t *testing.T) {
 		})
 	}
 
-	t.Run("walks up to the root", func(t *testing.T) {
+	t.Run("walks up to the anchor", func(t *testing.T) {
 		t.Parallel()
 
-		var got []string
+		for _, anchor := range []string{"$", "@"} {
+			var got []string
 
-		p, ok := paths.MustParse("$.items[0].tags.*~"), true
-		for ok {
-			got = append(got, p.String())
-			p, ok = p.Parent()
+			p, ok := paths.MustParse(anchor+".items[0].tags.*~"), true
+			for ok {
+				got = append(got, p.String())
+				p, ok = p.Parent()
+			}
+
+			want := []string{".items[0].tags.*~", ".items[0].tags.*", ".items[0].tags", ".items[0]", ".items", ""}
+			for i, w := range want {
+				want[i] = anchor + w
+			}
+
+			assert.Equal(t, want, got)
 		}
-
-		assert.Equal(
-			t,
-			[]string{"$.items[0].tags.*~", "$.items[0].tags.*", "$.items[0].tags", "$.items[0]", "$.items", "$"},
-			got,
-		)
 	})
 
 	t.Run("leaves the path as it was", func(t *testing.T) {
 		t.Parallel()
 
-		p := paths.Root().Child("spec", "hours", "open")
+		p := paths.Doc().Child("spec", "hours", "open")
 
 		parent, ok := p.Parent()
 		require.True(t, ok)
@@ -788,27 +984,49 @@ func TestPath_Equal(t *testing.T) {
 		want bool
 	}{
 		"root and root": {
-			p:    paths.Root(),
-			q:    paths.Root(),
+			p:    paths.Doc(),
+			q:    paths.Doc(),
 			want: true,
 		},
-		"root and the zero value": {
-			p:    paths.Root(),
+		"current and the zero value": {
+			p:    paths.Current(),
 			q:    zero,
 			want: true,
 		},
+		"root and the zero value": {
+			p: paths.Doc(),
+			q: zero,
+		},
+		"root and current": {
+			p: paths.Doc(),
+			q: paths.Current(),
+		},
+		"absolute and relative path": {
+			p: paths.Doc().Child("a", "b"),
+			q: paths.Current().Child("a", "b"),
+		},
+		"relative and a parsed relative path": {
+			p:    paths.Current().Child("a").Index(0),
+			q:    paths.MustParse("@.a[0]"),
+			want: true,
+		},
+		"current and a cut path": {
+			p:    paths.Current(),
+			q:    cutOf(t, paths.Doc().Child("a"), paths.Doc().Child("a")),
+			want: true,
+		},
 		"root and a parsed root": {
-			p:    paths.Root(),
+			p:    paths.Doc(),
 			q:    paths.MustParse("$"),
 			want: true,
 		},
 		"root and the parent of a child": {
-			p:    paths.Root(),
-			q:    parentOf(t, paths.Root().Child("a")),
+			p:    paths.Doc(),
+			q:    parentOf(t, paths.Doc().Child("a")),
 			want: true,
 		},
 		"built and parsed": {
-			p:    paths.Root().Child("items").Index(0).Child("name"),
+			p:    paths.Doc().Child("items").Index(0).Child("name"),
 			q:    paths.MustParse("$.items[0].name"),
 			want: true,
 		},
@@ -818,80 +1036,80 @@ func TestPath_Equal(t *testing.T) {
 			want: true,
 		},
 		"every selector kind": {
-			p:    paths.Root().Child("a").ChildAll().Index(1).IndexAll().Recursive("b").Key(),
+			p:    paths.Doc().Child("a").ChildAll().Index(1).IndexAll().Recursive("b").Key(),
 			q:    paths.MustParse("$.a.*[1][*]..b~"),
 			want: true,
 		},
 		"negative index and zero": {
-			p:    paths.Root().Index(-1),
-			q:    paths.Root().Index(0),
+			p:    paths.Doc().Index(-1),
+			q:    paths.Doc().Index(0),
 			want: true,
 		},
 		"joined and built": {
-			p:    paths.Root().Child("spec").Join(paths.Root().Child("hours")),
-			q:    paths.Root().Child("spec", "hours"),
+			p:    paths.Doc().Child("spec").Join(paths.Current().Child("hours")),
+			q:    paths.Doc().Child("spec", "hours"),
 			want: true,
 		},
 		"another name": {
-			p: paths.Root().Child("a"),
-			q: paths.Root().Child("b"),
+			p: paths.Doc().Child("a"),
+			q: paths.Doc().Child("b"),
 		},
 		"another index": {
-			p: paths.Root().Index(0),
-			q: paths.Root().Index(1),
+			p: paths.Doc().Index(0),
+			q: paths.Doc().Index(1),
 		},
 		"prefix": {
-			p: paths.Root().Child("a"),
-			q: paths.Root().Child("a", "b"),
+			p: paths.Doc().Child("a"),
+			q: paths.Doc().Child("a", "b"),
 		},
 		"root and a child": {
-			p: paths.Root(),
-			q: paths.Root().Child("a"),
+			p: paths.Doc(),
+			q: paths.Doc().Child("a"),
 		},
 		"value and key": {
-			p: paths.Root().Child("a"),
-			q: paths.Root().Child("a").Key(),
+			p: paths.Doc().Child("a"),
+			q: paths.Doc().Child("a").Key(),
 		},
 		"sequence wildcard and an index": {
-			p: paths.Root().Child("items").IndexAll(),
-			q: paths.Root().Child("items").Index(0),
+			p: paths.Doc().Child("items").IndexAll(),
+			q: paths.Doc().Child("items").Index(0),
 		},
 		"mapping wildcard and a name": {
-			p: paths.Root().Child("jobs").ChildAll(),
-			q: paths.Root().Child("jobs", "build"),
+			p: paths.Doc().Child("jobs").ChildAll(),
+			q: paths.Doc().Child("jobs", "build"),
 		},
 		"mapping wildcard and the name star": {
-			p: paths.Root().ChildAll(),
-			q: paths.Root().Child("*"),
+			p: paths.Doc().ChildAll(),
+			q: paths.Doc().Child("*"),
 		},
 		"mapping wildcard and sequence wildcard": {
-			p: paths.Root().ChildAll(),
-			q: paths.Root().IndexAll(),
+			p: paths.Doc().ChildAll(),
+			q: paths.Doc().IndexAll(),
 		},
 		"recursive wildcard and recursive wildcard": {
-			p:    paths.Root().Child("spec").RecursiveAll(),
+			p:    paths.Doc().Child("spec").RecursiveAll(),
 			q:    paths.MustParse("$.spec..*"),
 			want: true,
 		},
 		"recursive wildcard and the recursive name star": {
-			p: paths.Root().RecursiveAll(),
-			q: paths.Root().Recursive("*"),
+			p: paths.Doc().RecursiveAll(),
+			q: paths.Doc().Recursive("*"),
 		},
 		"recursive wildcard and mapping wildcard": {
-			p: paths.Root().RecursiveAll(),
-			q: paths.Root().ChildAll(),
+			p: paths.Doc().RecursiveAll(),
+			q: paths.Doc().ChildAll(),
 		},
 		"child and recursive of one name": {
-			p: paths.Root().Child("a"),
-			q: paths.Root().Recursive("a"),
+			p: paths.Doc().Child("a"),
+			q: paths.Doc().Recursive("a"),
 		},
 		"name and the index it spells": {
-			p: paths.Root().Child("0"),
-			q: paths.Root().Index(0),
+			p: paths.Doc().Child("0"),
+			q: paths.Doc().Index(0),
 		},
 		"empty name and root": {
-			p: paths.Root().Child(""),
-			q: paths.Root(),
+			p: paths.Doc().Child(""),
+			q: paths.Doc(),
 		},
 	}
 
@@ -916,6 +1134,16 @@ func parentOf(t *testing.T, p paths.Path) paths.Path {
 	return parent
 }
 
+// cutOf returns p without prefix, which p must start with.
+func cutOf(t *testing.T, p, prefix paths.Path) paths.Path {
+	t.Helper()
+
+	rest, ok := p.CutPrefix(prefix)
+	require.True(t, ok)
+
+	return rest
+}
+
 func TestPath_MarshalText(t *testing.T) {
 	t.Parallel()
 
@@ -924,46 +1152,58 @@ func TestPath_MarshalText(t *testing.T) {
 		want string
 	}{
 		"root": {
-			p:    paths.Root(),
+			p:    paths.Doc(),
 			want: "$",
 		},
 		"zero value": {
-			want: "$",
+			want: "@",
+		},
+		"current": {
+			p:    paths.Current(),
+			want: "@",
 		},
 		"children and an index": {
-			p:    paths.Root().Child("items").Index(0).Child("name"),
+			p:    paths.Doc().Child("items").Index(0).Child("name"),
 			want: "$.items[0].name",
 		},
+		"relative children and an index": {
+			p:    paths.Current().Child("items").Index(0).Child("name"),
+			want: "@.items[0].name",
+		},
+		"relative key": {
+			p:    paths.Current().Child("spec").Key(),
+			want: "@.spec~",
+		},
 		"key": {
-			p:    paths.Root().Child("spec").Key(),
+			p:    paths.Doc().Child("spec").Key(),
 			want: "$.spec~",
 		},
 		"mapping wildcard": {
-			p:    paths.Root().Child("jobs").ChildAll().Child("steps"),
+			p:    paths.Doc().Child("jobs").ChildAll().Child("steps"),
 			want: "$.jobs.*.steps",
 		},
 		"key of a mapping wildcard": {
-			p:    paths.Root().Child("jobs").ChildAll().Key(),
+			p:    paths.Doc().Child("jobs").ChildAll().Key(),
 			want: "$.jobs.*~",
 		},
 		"recursive wildcard": {
-			p:    paths.Root().Child("spec").RecursiveAll().Key(),
+			p:    paths.Doc().Child("spec").RecursiveAll().Key(),
 			want: "$.spec..*~",
 		},
 		"sequence wildcard": {
-			p:    paths.Root().Child("items").IndexAll(),
+			p:    paths.Doc().Child("items").IndexAll(),
 			want: "$.items[*]",
 		},
 		"recursive": {
-			p:    paths.Root().Recursive("name"),
+			p:    paths.Doc().Recursive("name"),
 			want: "$..name",
 		},
 		"quoted names": {
-			p:    paths.Root().Child("a.b", "it's", "", "*").Recursive("x y"),
+			p:    paths.Doc().Child("a.b", "it's", "", "*").Recursive("x y"),
 			want: `$.'a.b'.'it\'s'.''.'*'..'x y'`,
 		},
 		"name that is not valid UTF-8": {
-			p:    paths.Root().Child("\xff"),
+			p:    paths.Doc().Child("\xff"),
 			want: "$.\xff",
 		},
 	}
@@ -993,15 +1233,15 @@ func TestPath_MarshalText(t *testing.T) {
 			Paths []paths.Path `json:"paths"`
 		}
 
-		key := paths.Root().Child("jobs").ChildAll().Key()
+		key := paths.Doc().Child("jobs").ChildAll().Key()
 
 		data, err := json.Marshal(report{
-			Path:  paths.Root().Child("items").Index(0),
+			Path:  paths.Doc().Child("items").Index(0),
 			Ptr:   &key,
-			Paths: []paths.Path{paths.Root(), paths.Root().Child("a b")},
+			Paths: []paths.Path{paths.Doc(), paths.Doc().Child("a b"), paths.Current().Child("c")},
 		})
 		require.NoError(t, err)
-		assert.JSONEq(t, `{"path":"$.items[0]","ptr":"$.jobs.*~","paths":["$","$.'a b'"]}`, string(data))
+		assert.JSONEq(t, `{"path":"$.items[0]","ptr":"$.jobs.*~","paths":["$","$.'a b'","@.c"]}`, string(data))
 	})
 
 	t.Run("writes a YAML string", func(t *testing.T) {
@@ -1011,9 +1251,19 @@ func TestPath_MarshalText(t *testing.T) {
 			Path paths.Path `yaml:"path"`
 		}
 
-		data, err := yaml.Marshal(report{Path: paths.Root().Child("items").Index(0).Key()})
+		data, err := yaml.Marshal(report{Path: paths.Doc().Child("items").Index(0).Key()})
 		require.NoError(t, err)
 		assert.Equal(t, "path: $.items[0]~\n", string(data))
+
+		relative := report{Path: paths.Current().Child("items").Index(0)}
+
+		data, err = yaml.Marshal(relative)
+		require.NoError(t, err)
+
+		var got report
+
+		require.NoError(t, yaml.Unmarshal(data, &got))
+		assert.Equal(t, relative, got)
 	})
 }
 
@@ -1026,35 +1276,43 @@ func TestPath_UnmarshalText(t *testing.T) {
 	}{
 		"root": {
 			text: "$",
-			want: paths.Root(),
+			want: paths.Doc(),
+		},
+		"current": {
+			text: "@",
+			want: paths.Current(),
 		},
 		"children and an index": {
 			text: "$.items[0].name",
-			want: paths.Root().Child("items").Index(0).Child("name"),
+			want: paths.Doc().Child("items").Index(0).Child("name"),
+		},
+		"relative children and an index": {
+			text: "@.items[0].name",
+			want: paths.Current().Child("items").Index(0).Child("name"),
 		},
 		"key": {
 			text: "$.spec~",
-			want: paths.Root().Child("spec").Key(),
+			want: paths.Doc().Child("spec").Key(),
 		},
 		"mapping wildcard and its key": {
 			text: "$.jobs.*~",
-			want: paths.Root().Child("jobs").ChildAll().Key(),
+			want: paths.Doc().Child("jobs").ChildAll().Key(),
 		},
 		"recursive wildcard": {
 			text: "$..*.name",
-			want: paths.Root().RecursiveAll().Child("name"),
+			want: paths.Doc().RecursiveAll().Child("name"),
 		},
 		"sequence wildcard": {
 			text: "$.items[*].name",
-			want: paths.Root().Child("items").IndexAll().Child("name"),
+			want: paths.Doc().Child("items").IndexAll().Child("name"),
 		},
 		"recursive": {
 			text: "$..'a.b'",
-			want: paths.Root().Recursive("a.b"),
+			want: paths.Doc().Recursive("a.b"),
 		},
 		"quoted star": {
 			text: "$.'*'",
-			want: paths.Root().Child("*"),
+			want: paths.Doc().Child("*"),
 		},
 	}
 
@@ -1063,7 +1321,7 @@ func TestPath_UnmarshalText(t *testing.T) {
 			t.Parallel()
 
 			// A path set before the call must not show through.
-			got := paths.Root().Child("before")
+			got := paths.Doc().Child("before")
 
 			require.NoError(t, got.UnmarshalText([]byte(tc.text)))
 			assert.True(t, tc.want.Equal(got), "got %s", got)
@@ -1074,7 +1332,7 @@ func TestPath_UnmarshalText(t *testing.T) {
 	t.Run("malformed expression", func(t *testing.T) {
 		t.Parallel()
 
-		got := paths.Root().Child("before")
+		got := paths.Doc().Child("before")
 
 		err := got.UnmarshalText([]byte("items[0]"))
 		require.ErrorIs(t, err, paths.ErrInvalidPath)
@@ -1106,14 +1364,15 @@ func TestPath_UnmarshalText(t *testing.T) {
 
 		require.NoError(
 			t,
-			json.Unmarshal([]byte(`{"path":"$.items[0]","ptr":"$.jobs.*~","paths":["$","$.'a b'"]}`), &got),
+			json.Unmarshal([]byte(`{"path":"$.items[0]","ptr":"$.jobs.*~","paths":["$","$.'a b'","@.c"]}`), &got),
 		)
 		assert.Equal(t, "$.items[0]", got.Path.String())
 		require.NotNil(t, got.Ptr)
 		assert.Equal(t, "$.jobs.*~", got.Ptr.String())
-		require.Len(t, got.Paths, 2)
+		require.Len(t, got.Paths, 3)
 		assert.Equal(t, "$", got.Paths[0].String())
 		assert.Equal(t, "$.'a b'", got.Paths[1].String())
+		assert.Equal(t, paths.Current().Child("c"), got.Paths[2])
 
 		err := json.Unmarshal([]byte(`{"path":"$.items["}`), &got)
 		require.ErrorIs(t, err, paths.ErrInvalidPath)
@@ -1129,6 +1388,12 @@ func TestPath_UnmarshalText(t *testing.T) {
 		got, err := yamltest.FirstDocument(t, "path: $.items[0].name~\n").Decode[rule](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, "$.items[0].name~", got.Path.String())
+
+		// A plain scalar cannot start with @, so the document quotes a
+		// relative path.
+		got, err = yamltest.FirstDocument(t, "path: '@.items[0]'\n").Decode[rule](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, paths.Current().Child("items").Index(0), got.Path)
 	})
 }
 
@@ -1259,6 +1524,30 @@ func TestParse(t *testing.T) {
 			expr: "$..'*'",
 			want: "$..'*'",
 		},
+		"current node": {
+			expr: "@",
+			want: "@",
+		},
+		"relative child": {
+			expr: "@.foo.bar",
+			want: "@.foo.bar",
+		},
+		"relative index": {
+			expr: "@[2]",
+			want: "@[2]",
+		},
+		"relative key": {
+			expr: "@~",
+			want: "@~",
+		},
+		"relative wildcards": {
+			expr: "@.jobs.*..name[*]",
+			want: "@.jobs.*..name[*]",
+		},
+		"at sign in a name": {
+			expr: "$.@ref",
+			want: "$.@ref",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1270,6 +1559,7 @@ func TestParse(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, p)
 			assert.Equal(t, tc.want, p.String())
+			assert.Equal(t, tc.expr[0] == '$', p.IsAbsolute())
 		})
 	}
 }
@@ -1283,8 +1573,23 @@ func TestParse_Invalid(t *testing.T) {
 		"empty": {
 			expr: "",
 		},
-		"no dollar prefix": {
+		"no anchor": {
 			expr: "foo",
+		},
+		"anchor after a selector": {
+			expr: ".foo$",
+		},
+		"two anchors": {
+			expr: "$@",
+		},
+		"two anchors the other way": {
+			expr: "@$",
+		},
+		"trailing dot after current": {
+			expr: "@.",
+		},
+		"bare text after current": {
+			expr: "@foo",
 		},
 		"leading dot without root": {
 			expr: ".foo",
@@ -1381,6 +1686,14 @@ func TestParse_ErrorMessage(t *testing.T) {
 			expr: "$a",
 			want: `parse path "$a": invalid path: unexpected 'a' at 1`,
 		},
+		"ASCII after current": {
+			expr: "@a",
+			want: `parse path "@a": invalid path: unexpected 'a' at 1`,
+		},
+		"no anchor": {
+			expr: ".a",
+			want: `parse path ".a": invalid path: expression must start with $ or @`,
+		},
 		"non-ASCII after root": {
 			expr: "$é",
 			want: `parse path "$é": invalid path: unexpected 'é' at 1`,
@@ -1426,24 +1739,27 @@ func TestParse_RoundTrip(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]paths.Path{
-		"root":             paths.Root(),
-		"children":         paths.Root().Child("a", "b"),
-		"index":            paths.Root().Child("items").Index(3),
-		"wildcards":        paths.Root().Child("items").IndexAll().Recursive("name"),
-		"dotted name":      paths.Root().Child("kubernetes.io/name"),
-		"quote in name":    paths.Root().Child("it's"),
-		"backslash":        paths.Root().Child(`a\b.c`),
-		"brackets":         paths.Root().Child("a[0]"),
-		"dollar":           paths.Root().Child("$ref"),
-		"star":             paths.Root().Child("*"),
-		"numeric name":     paths.Root().Child("1"),
-		"space in name":    paths.Root().Child("has space"),
-		"colon in name":    paths.Root().Child("x: y"),
-		"trailing space":   paths.Root().Child("name "),
-		"line break":       paths.Root().Child("a\nb"),
-		"only reserved":    paths.Root().Child("."),
-		"tilde in name":    paths.Root().Child("a~b"),
-		"goccy compatible": paths.Root().Child("a.b").Index(1).Child("c"),
+		"root":             paths.Doc(),
+		"children":         paths.Doc().Child("a", "b"),
+		"index":            paths.Doc().Child("items").Index(3),
+		"wildcards":        paths.Doc().Child("items").IndexAll().Recursive("name"),
+		"dotted name":      paths.Doc().Child("kubernetes.io/name"),
+		"quote in name":    paths.Doc().Child("it's"),
+		"backslash":        paths.Doc().Child(`a\b.c`),
+		"brackets":         paths.Doc().Child("a[0]"),
+		"dollar":           paths.Doc().Child("$ref"),
+		"star":             paths.Doc().Child("*"),
+		"numeric name":     paths.Doc().Child("1"),
+		"space in name":    paths.Doc().Child("has space"),
+		"colon in name":    paths.Doc().Child("x: y"),
+		"trailing space":   paths.Doc().Child("name "),
+		"line break":       paths.Doc().Child("a\nb"),
+		"only reserved":    paths.Doc().Child("."),
+		"tilde in name":    paths.Doc().Child("a~b"),
+		"goccy compatible": paths.Doc().Child("a.b").Index(1).Child("c"),
+		"current":          paths.Current(),
+		"relative":         paths.Current().Child("items").Index(3).Child("a.b"),
+		"at sign in name":  paths.Doc().Child("@"),
 	}
 
 	for name, want := range tcs {
@@ -1455,8 +1771,14 @@ func TestParse_RoundTrip(t *testing.T) {
 
 			assert.Equal(t, want, got)
 
-			// The goccy parser accepts the same expression.
-			_, err = yaml.PathString(want.String())
+			// The goccy parser accepts the same expression, with `$` in
+			// place of `@`.
+			expr := want.String()
+			if !want.IsAbsolute() {
+				expr = "$" + expr[1:]
+			}
+
+			_, err = yaml.PathString(expr)
 			require.NoError(t, err)
 		})
 	}
@@ -1468,14 +1790,16 @@ func TestParse_RoundTrip_Key(t *testing.T) {
 	// The goccy parser has no key selector, so a key path stays out of the
 	// table above, but Parse reads back what String writes.
 	tcs := map[string]paths.Path{
-		"key":               paths.Root().Child("a").Key(),
-		"key of root":       paths.Root().Key(),
-		"key of element":    paths.Root().Child("items").Index(0).Key(),
-		"key then child":    paths.Root().Child("a").Key().Child("b"),
-		"quoted name key":   paths.Root().Child("a.b").Key(),
-		"recursive key":     paths.Root().Recursive("name").Key(),
-		"empty name key":    paths.Root().Child("").Key(),
-		"tilde in name key": paths.Root().Child("a~b").Key(),
+		"key":               paths.Doc().Child("a").Key(),
+		"key of root":       paths.Doc().Key(),
+		"key of element":    paths.Doc().Child("items").Index(0).Key(),
+		"key then child":    paths.Doc().Child("a").Key().Child("b"),
+		"quoted name key":   paths.Doc().Child("a.b").Key(),
+		"recursive key":     paths.Doc().Recursive("name").Key(),
+		"empty name key":    paths.Doc().Child("").Key(),
+		"tilde in name key": paths.Doc().Child("a~b").Key(),
+		"key of current":    paths.Current().Key(),
+		"relative key":      paths.Current().Child("a").Key().Child("b"),
 	}
 
 	for name, want := range tcs {
@@ -1499,8 +1823,8 @@ func TestParse_RoundTrip_EmptyName(t *testing.T) {
 	require.NoError(t, err)
 
 	tcs := map[string]paths.Path{
-		"child":     paths.Root().Child(""),
-		"recursive": paths.Root().Recursive(""),
+		"child":     paths.Doc().Child(""),
+		"recursive": paths.Doc().Recursive(""),
 	}
 
 	for name, want := range tcs {
@@ -1555,37 +1879,47 @@ func TestPath_YAMLPath(t *testing.T) {
 		want       string
 	}{
 		"dotted name is quoted": {
-			path:       paths.Root().Child("a", "b.c").Index(1),
+			path:       paths.Doc().Child("a", "b.c").Index(1),
 			wantString: "$.a.'b.c'[1]",
 			want:       "y",
 		},
 		"name with a quote filters by its raw text": {
-			path:       paths.Root().Child("a", "don't"),
+			path:       paths.Doc().Child("a", "don't"),
 			wantString: "$.a.don't",
 			want:       "1",
 		},
 		"name with a backslash filters by its raw text": {
-			path:       paths.Root().Child("a", `a\.b`),
+			path:       paths.Doc().Child("a", `a\.b`),
 			wantString: `$.a.'a\.b'`,
 			want:       "2",
 		},
 		"dotted name with a quote filters by its raw text": {
-			path:       paths.Root().Child("a", "a.b'c"),
+			path:       paths.Doc().Child("a", "a.b'c"),
 			wantString: `$.a.'a.b\'c'`,
 			want:       "3",
 		},
 		"dotted name with a quote via builder fallback": {
-			path:       paths.Root().Child("", "a'.b"),
+			path:       paths.Doc().Child("", "a'.b"),
 			wantString: "$..'a'.b'",
 			want:       "4",
 		},
 		"star name with a quote via builder fallback": {
-			path:       paths.Root().Child("", "a'*b"),
+			path:       paths.Doc().Child("", "a'*b"),
 			wantString: "$..'a'*b'",
 			want:       "5",
 		},
 		"dotted name via builder fallback": {
-			path:       paths.Root().Child("", "a.b"),
+			path:       paths.Doc().Child("", "a.b"),
+			wantString: "$..'a.b'",
+			want:       "6",
+		},
+		"relative path reads from the node FilterNode starts at": {
+			path:       paths.Current().Child("a", "b.c").Index(0),
+			wantString: "$.a.'b.c'[0]",
+			want:       "x",
+		},
+		"relative path via builder fallback": {
+			path:       paths.Current().Child("", "a.b"),
 			wantString: "$..'a.b'",
 			want:       "6",
 		},
@@ -1616,32 +1950,32 @@ func TestPath_YAMLPath_Replace(t *testing.T) {
 	}{
 		"dotted name": {
 			src:  "plain: 1\na.b: 2\n",
-			path: paths.Root().Child("a.b"),
+			path: paths.Doc().Child("a.b"),
 			want: "plain: 1\na.b: 9\n",
 		},
 		"star name": {
 			src:  "plain: 1\na*b: 2\n",
-			path: paths.Root().Child("a*b"),
+			path: paths.Doc().Child("a*b"),
 			want: "plain: 1\na*b: 9\n",
 		},
 		"nested dotted label": {
 			src:  "metadata:\n  labels:\n    app.kubernetes.io/name: web\n",
-			path: paths.Root().Child("metadata", "labels", "app.kubernetes.io/name"),
+			path: paths.Doc().Child("metadata", "labels", "app.kubernetes.io/name"),
 			want: "metadata:\n  labels:\n    app.kubernetes.io/name: 9\n",
 		},
 		"empty name via builder fallback": {
 			src:  "\"\": v\n",
-			path: paths.Root().Child(""),
+			path: paths.Doc().Child(""),
 			want: "\"\": 9\n",
 		},
 		"dotted name with a quote via builder fallback matches no key": {
 			src:  "\"\":\n  a'.b: v\n",
-			path: paths.Root().Child("", "a'.b"),
+			path: paths.Doc().Child("", "a'.b"),
 			want: "\"\":\n  a'.b: v\n",
 		},
 		"name that is not valid UTF-8 matches no key": {
 			src:  string(utf8.RuneError) + ": v\n",
-			path: paths.Root().Child("\xff"),
+			path: paths.Doc().Child("\xff"),
 			want: string(utf8.RuneError) + ": v\n",
 		},
 	}
@@ -1672,7 +2006,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		file, err := parser.ParseBytes([]byte("x: plain\n\"'x'\": quoted\n"), 0)
 		require.NoError(t, err)
 
-		node, err := yamlPath(t, paths.Root().Child("'x'")).FilterNode(file.Docs[0].Body)
+		node, err := yamlPath(t, paths.Doc().Child("'x'")).FilterNode(file.Docs[0].Body)
 		require.NoError(t, err)
 		require.NotNil(t, node, "node not found")
 		assert.Equal(t, "plain", node.GetToken().Value)
@@ -1684,7 +2018,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		file, err := parser.ParseBytes([]byte("a:\n  b: 1\n"), 0)
 		require.NoError(t, err)
 
-		path := paths.Root().Child("a").Key().Child("b")
+		path := paths.Doc().Child("a").Key().Child("b")
 
 		node, err := yamlPath(t, path).FilterNode(file.Docs[0].Body)
 		require.NoError(t, err)
@@ -1737,7 +2071,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 
 				doc := file.Docs[0]
 
-				byName := paths.Root().Child("m", "k")
+				byName := paths.Doc().Child("m", "k")
 
 				node, err := byName.Node(doc)
 				require.NoError(t, err)
@@ -1747,7 +2081,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 				require.NoError(t, err)
 				assert.Nil(t, node)
 
-				byIndicator := paths.Root().Child("m", tc.indicator)
+				byIndicator := paths.Doc().Child("m", tc.indicator)
 
 				_, err = byIndicator.Node(doc)
 				require.ErrorIs(t, err, paths.ErrNotFound)
@@ -1766,7 +2100,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		file, err := parser.ParseBytes([]byte("base: &b\n  k: v\nm:\n  <<: *b\n"), 0)
 		require.NoError(t, err)
 
-		path := paths.Root().Child("m", "k")
+		path := paths.Doc().Child("m", "k")
 
 		node, err := path.Node(file.Docs[0])
 		require.NoError(t, err)
@@ -1785,7 +2119,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		file, err := parser.ParseBytes([]byte(input), 0, parser.AllowDuplicateMapKey())
 		require.NoError(t, err)
 
-		path := paths.Root().Child("m", "k")
+		path := paths.Doc().Child("m", "k")
 
 		node, err := path.Node(file.Docs[0])
 		require.NoError(t, err)
@@ -1837,82 +2171,82 @@ explicit_first:
 		wantType  token.Type
 	}{
 		"root value returns the first key": {
-			path:      paths.Root(),
+			path:      paths.Doc(),
 			wantValue: "name",
 			wantType:  token.StringType,
 		},
 		"root key returns the first key": {
-			path:      paths.Root(),
+			path:      paths.Doc(),
 			key:       true,
 			wantValue: "name",
 			wantType:  token.StringType,
 		},
 		"mapping value target returns its first key": {
-			path:      paths.Root().Child("metadata"),
+			path:      paths.Doc().Child("metadata"),
 			wantValue: "labels",
 			wantType:  token.StringType,
 		},
 		"mapping with a tagged first key starts at the key": {
-			path:      paths.Root().Child("tag_first"),
+			path:      paths.Doc().Child("tag_first"),
 			wantValue: "inner",
 			wantType:  token.StringType,
 		},
 		"mapping with an anchored first key starts at the key": {
-			path:      paths.Root().Child("anchor_first"),
+			path:      paths.Doc().Child("anchor_first"),
 			wantValue: "inner",
 			wantType:  token.StringType,
 		},
 		"mapping with an explicit first key starts at the key": {
-			path:      paths.Root().Child("explicit_first"),
+			path:      paths.Doc().Child("explicit_first"),
 			wantValue: "inner",
 			wantType:  token.StringType,
 		},
 		"mapping key target returns the entry key": {
-			path:      paths.Root().Child("metadata"),
+			path:      paths.Doc().Child("metadata"),
 			key:       true,
 			wantValue: "metadata",
 			wantType:  token.StringType,
 		},
 		"sequence value target returns its first element": {
-			path:      paths.Root().Child("items"),
+			path:      paths.Doc().Child("items"),
 			wantValue: "first",
 			wantType:  token.StringType,
 		},
 		"sequence key target returns the entry key": {
-			path:      paths.Root().Child("items"),
+			path:      paths.Doc().Child("items"),
 			key:       true,
 			wantValue: "items",
 			wantType:  token.StringType,
 		},
 		"simple key target returns key token": {
-			path:      paths.Root().Child("name"),
+			path:      paths.Doc().Child("name"),
 			key:       true,
 			wantValue: "name",
 			wantType:  token.StringType,
 		},
 		"simple value target returns value token": {
-			path:      paths.Root().Child("name"),
+			path:      paths.Doc().Child("name"),
 			wantValue: "test",
 			wantType:  token.StringType,
 		},
 		"nested key target": {
-			path:      paths.Root().Child("metadata", "labels", "app"),
+			path:      paths.Doc().Child("metadata", "labels", "app"),
 			key:       true,
 			wantValue: "app",
 			wantType:  token.StringType,
 		},
 		"nested value target": {
-			path:      paths.Root().Child("metadata", "labels", "app"),
+			path:      paths.Doc().Child("metadata", "labels", "app"),
 			wantValue: "myapp",
 			wantType:  token.StringType,
 		},
 		"array element value target": {
-			path:      paths.Root().Child("items").Index(0),
+			path:      paths.Doc().Child("items").Index(0),
 			wantValue: "first",
 			wantType:  token.StringType,
 		},
 		"array element key target returns value (no parent mapping)": {
-			path:      paths.Root().Child("items").Index(1),
+			path:      paths.Doc().Child("items").Index(1),
 			key:       true,
 			wantValue: "second",
 			wantType:  token.StringType,
@@ -1937,7 +2271,7 @@ func TestPath_Token_InvalidPath(t *testing.T) {
 	file, err := source.File()
 	require.NoError(t, err)
 
-	path := paths.Root().Child("nonexistent")
+	path := paths.Doc().Child("nonexistent")
 	_, err = path.Token(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrNotFound)
 }
@@ -1945,7 +2279,7 @@ func TestPath_Token_InvalidPath(t *testing.T) {
 func TestPath_Token_NoDocument(t *testing.T) {
 	t.Parallel()
 
-	path := paths.Root().Child("name")
+	path := paths.Doc().Child("name")
 
 	for name, resolve := range map[string]func(*ast.DocumentNode) (*token.Token, error){
 		"Token": path.Token,
@@ -1975,17 +2309,17 @@ func TestPath_DirectiveDocument(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, file.Docs, 2)
 
-	_, err = paths.Root().Node(file.Docs[0])
+	_, err = paths.Doc().Node(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 	require.ErrorIs(t, err, paths.ErrNotFound)
 
-	_, err = paths.Root().Child("key").Token(file.Docs[0])
+	_, err = paths.Doc().Child("key").Token(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 
-	_, err = paths.Root().Nodes(file.Docs[0])
+	_, err = paths.Doc().Nodes(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 
-	node, err := paths.Root().Child("key").Node(file.Docs[1])
+	node, err := paths.Doc().Child("key").Node(file.Docs[1])
 	require.NoError(t, err)
 	assert.Equal(t, "v", node.String())
 }
@@ -2000,14 +2334,14 @@ func TestPath_CommentDocument(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, file.Docs, 1)
 
-	_, err = paths.Root().Node(file.Docs[0])
+	_, err = paths.Doc().Node(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 	require.ErrorIs(t, err, paths.ErrNotFound)
 
-	_, err = paths.Root().Token(file.Docs[0])
+	_, err = paths.Doc().Token(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 
-	_, err = paths.Root().Nodes(file.Docs[0])
+	_, err = paths.Doc().Nodes(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 }
 
@@ -2034,15 +2368,15 @@ func TestPath_WhitespaceDocument(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, file.Docs, 1)
 
-			_, err = paths.Root().Node(file.Docs[0])
+			_, err = paths.Doc().Node(file.Docs[0])
 			require.ErrorIs(t, err, paths.ErrNoDocument)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 
-			_, err = paths.Root().Child("a").Token(file.Docs[0])
+			_, err = paths.Doc().Child("a").Token(file.Docs[0])
 			require.ErrorIs(t, err, paths.ErrNoDocument)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 
-			_, err = paths.Root().Nodes(file.Docs[0])
+			_, err = paths.Doc().Nodes(file.Docs[0])
 			require.ErrorIs(t, err, paths.ErrNoDocument)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 		})
@@ -2059,10 +2393,10 @@ func TestPath_Token_UnresolvableAlias(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, file.Docs, 1)
 
-	_, err = paths.Root().Child("a").Node(file.Docs[0])
+	_, err = paths.Doc().Child("a").Node(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrAlias)
 
-	tk, err := paths.Root().Child("a").Token(file.Docs[0])
+	tk, err := paths.Doc().Child("a").Token(file.Docs[0])
 	require.NoError(t, err)
 	assert.Equal(t, token.AliasType, tk.Type)
 }
@@ -2075,7 +2409,7 @@ func TestPath_Token_MultipleDocuments(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, file.Docs, 2)
 
-	path := paths.Root().Child("name")
+	path := paths.Doc().Child("name")
 
 	tk, err := path.Token(file.Docs[0])
 	require.NoError(t, err)
@@ -2116,22 +2450,22 @@ nested:
 		wantType  token.Type
 	}{
 		"nested array first element name": {
-			path:      paths.Root().Child("list").Index(0).Child("name"),
+			path:      paths.Doc().Child("list").Index(0).Child("name"),
 			wantValue: "first",
 			wantType:  token.StringType,
 		},
 		"nested array second element items first": {
-			path:      paths.Root().Child("list").Index(1).Child("items").Index(0),
+			path:      paths.Doc().Child("list").Index(1).Child("items").Index(0),
 			wantValue: "c",
 			wantType:  token.StringType,
 		},
 		"deeply nested value": {
-			path:      paths.Root().Child("nested", "deep", "deeper", "value"),
+			path:      paths.Doc().Child("nested", "deep", "deeper", "value"),
 			wantValue: "found",
 			wantType:  token.StringType,
 		},
 		"deeply nested key": {
-			path:      paths.Root().Child("nested", "deep", "deeper", "value"),
+			path:      paths.Doc().Child("nested", "deep", "deeper", "value"),
 			key:       true,
 			wantValue: "value",
 			wantType:  token.StringType,
@@ -2156,7 +2490,7 @@ func TestPath_Node(t *testing.T) {
 	file, err := source.File()
 	require.NoError(t, err)
 
-	node, err := paths.Root().Child("a", "b").Node(file.Docs[0])
+	node, err := paths.Doc().Child("a", "b").Node(file.Docs[0])
 	require.NoError(t, err)
 
 	seq, ok := node.(*ast.SequenceNode)
@@ -2206,111 +2540,111 @@ late:
 		wantLine  int
 	}{
 		"child of anchored mapping": {
-			path:      paths.Root().Child("base", "a"),
+			path:      paths.Doc().Child("base", "a"),
 			wantValue: "1",
 			wantLine:  3,
 		},
 		"key of anchored mapping entry": {
-			path:      paths.Root().Child("base", "a"),
+			path:      paths.Doc().Child("base", "a"),
 			key:       true,
 			wantValue: "a",
 			wantLine:  3,
 		},
 		"anchored mapping value target skips the anchor": {
-			path:      paths.Root().Child("base"),
+			path:      paths.Doc().Child("base"),
 			wantValue: "a",
 			wantLine:  3,
 		},
 		"child through alias lands in the anchor": {
-			path:      paths.Root().Child("other", "b"),
+			path:      paths.Doc().Child("other", "b"),
 			wantValue: "2",
 			wantLine:  4,
 		},
 		"alias value target is the alias token": {
-			path:      paths.Root().Child("other"),
+			path:      paths.Doc().Child("other"),
 			wantValue: "*",
 			wantLine:  6,
 		},
 		"alias key target is its key": {
-			path:      paths.Root().Child("other"),
+			path:      paths.Doc().Child("other"),
 			key:       true,
 			wantValue: "other",
 			wantLine:  6,
 		},
 		"index through anchored sequence": {
-			path:      paths.Root().Child("list").Index(1),
+			path:      paths.Doc().Child("list").Index(1),
 			wantValue: "two",
 			wantLine:  9,
 		},
 		"index through aliased sequence": {
-			path:      paths.Root().Child("copy").Index(0),
+			path:      paths.Doc().Child("copy").Index(0),
 			wantValue: "one",
 			wantLine:  8,
 		},
 		"tagged scalar value target skips the tag": {
-			path:      paths.Root().Child("tagged"),
+			path:      paths.Doc().Child("tagged"),
 			wantValue: "5",
 			wantLine:  11,
 		},
 		"merged key resolves to the anchor": {
-			path:      paths.Root().Child("merged", "a"),
+			path:      paths.Doc().Child("merged", "a"),
 			wantValue: "1",
 			wantLine:  3,
 		},
 		"merged key target resolves to the anchor key": {
-			path:      paths.Root().Child("merged", "a"),
+			path:      paths.Doc().Child("merged", "a"),
 			key:       true,
 			wantValue: "a",
 			wantLine:  3,
 		},
 		"own key after merge wins": {
-			path:      paths.Root().Child("merged", "b"),
+			path:      paths.Doc().Child("merged", "b"),
 			wantValue: "20",
 			wantLine:  14,
 		},
 		"merge after own key wins": {
-			path:      paths.Root().Child("late", "b"),
+			path:      paths.Doc().Child("late", "b"),
 			wantValue: "2",
 			wantLine:  4,
 		},
 		"merge after own key wins at the key": {
-			path:      paths.Root().Child("late", "b"),
+			path:      paths.Doc().Child("late", "b"),
 			key:       true,
 			wantValue: "b",
 			wantLine:  4,
 		},
 		"own key before merge without that key": {
-			path:      paths.Root().Child("late", "c"),
+			path:      paths.Doc().Child("late", "c"),
 			wantValue: "31",
 			wantLine:  25,
 		},
 		"own key next to merge": {
-			path:      paths.Root().Child("merged", "c"),
+			path:      paths.Doc().Child("merged", "c"),
 			wantValue: "3",
 			wantLine:  15,
 		},
 		"merge sequence first source": {
-			path:      paths.Root().Child("multi", "a"),
+			path:      paths.Doc().Child("multi", "a"),
 			wantValue: "1",
 			wantLine:  3,
 		},
 		"merge sequence second source": {
-			path:      paths.Root().Child("multi", "x"),
+			path:      paths.Doc().Child("multi", "x"),
 			wantValue: "10",
 			wantLine:  5,
 		},
 		"merge sequence later source wins": {
-			path:      paths.Root().Child("multi", "b"),
+			path:      paths.Doc().Child("multi", "b"),
 			wantValue: "200",
 			wantLine:  5,
 		},
 		"merge of a merged mapping": {
-			path:      paths.Root().Child("chain", "a"),
+			path:      paths.Doc().Child("chain", "a"),
 			wantValue: "1",
 			wantLine:  3,
 		},
 		"merge of a merged mapping own key": {
-			path:      paths.Root().Child("chain", "d"),
+			path:      paths.Doc().Child("chain", "d"),
 			wantValue: "4",
 			wantLine:  20,
 		},
@@ -2329,14 +2663,14 @@ late:
 	t.Run("merged key not present", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := paths.Root().Child("merged", "zzz").Token(file.Docs[0])
+		_, err := paths.Doc().Child("merged", "zzz").Token(file.Docs[0])
 		require.ErrorIs(t, err, paths.ErrNotFound)
 	})
 
 	t.Run("merge key entry itself is addressable", func(t *testing.T) {
 		t.Parallel()
 
-		tk, err := paths.Root().Child("merged", "<<").Key().Token(file.Docs[0])
+		tk, err := paths.Doc().Child("merged", "<<").Key().Token(file.Docs[0])
 		require.NoError(t, err)
 		assert.Equal(t, "<<", tk.Value)
 	})
@@ -2352,7 +2686,7 @@ func TestPath_Node_Anchors(t *testing.T) {
 	t.Run("anchor is looked through", func(t *testing.T) {
 		t.Parallel()
 
-		node, err := paths.Root().Child("base").Node(file.Docs[0])
+		node, err := paths.Doc().Child("base").Node(file.Docs[0])
 		require.NoError(t, err)
 		assert.IsType(t, &ast.MappingNode{}, node)
 	})
@@ -2360,7 +2694,7 @@ func TestPath_Node_Anchors(t *testing.T) {
 	t.Run("alias is looked through", func(t *testing.T) {
 		t.Parallel()
 
-		node, err := paths.Root().Child("other").Node(file.Docs[0])
+		node, err := paths.Doc().Child("other").Node(file.Docs[0])
 		require.NoError(t, err)
 		assert.IsType(t, &ast.MappingNode{}, node)
 	})
@@ -2368,7 +2702,7 @@ func TestPath_Node_Anchors(t *testing.T) {
 	t.Run("tag is kept", func(t *testing.T) {
 		t.Parallel()
 
-		node, err := paths.Root().Child("tagged").Node(file.Docs[0])
+		node, err := paths.Doc().Child("tagged").Node(file.Docs[0])
 		require.NoError(t, err)
 		assert.IsType(t, &ast.TagNode{}, node)
 	})
@@ -2416,7 +2750,7 @@ func TestPath_Node_TaggedKey(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
-			path := paths.Root().Child("2").Key()
+			path := paths.Doc().Child("2").Key()
 
 			node, err := path.Node(doc)
 			require.NoError(t, err)
@@ -2441,12 +2775,12 @@ func TestPath_UnknownAlias(t *testing.T) {
 	file, err := source.File()
 	require.NoError(t, err)
 
-	_, err = paths.Root().Child("other", "a").Token(file.Docs[0])
+	_, err = paths.Doc().Child("other", "a").Token(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrAlias)
 	require.NotErrorIs(t, err, paths.ErrNotFound)
 	assert.Contains(t, err.Error(), "*nope")
 
-	_, err = paths.Root().Child("other").Node(file.Docs[0])
+	_, err = paths.Doc().Child("other").Node(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrAlias)
 }
 
@@ -2463,22 +2797,22 @@ func TestPath_TaggedAlias(t *testing.T) {
 	}{
 		"alias to an anchor": {
 			input: "x: &x {k: 1}\nb: !t *x\n",
-			path:  paths.Root().Child("b"),
+			path:  paths.Doc().Child("b"),
 			want:  "!t *x",
 		},
 		"alias with no anchor before it": {
 			input: "b: !t *nope\n",
-			path:  paths.Root().Child("b"),
+			path:  paths.Doc().Child("b"),
 			err:   paths.ErrAlias,
 		},
 		"alias inside its own anchor": {
 			input: "a: &x [!t *x]\n",
-			path:  paths.Root().Child("a").Index(0),
+			path:  paths.Doc().Child("a").Index(0),
 			err:   paths.ErrAlias,
 		},
 		"anchor over a tag on an alias to itself": {
 			input: "a: &x !t *x\n",
-			path:  paths.Root().Child("a"),
+			path:  paths.Doc().Child("a"),
 			err:   paths.ErrAlias,
 		},
 	}
@@ -2522,17 +2856,17 @@ func TestPath_UnknownAliasKey(t *testing.T) {
 
 	doc := file.Docs[0]
 
-	node, err := paths.Root().Child("b").Node(doc)
+	node, err := paths.Doc().Child("b").Node(doc)
 	require.NoError(t, err)
 	assert.Equal(t, "2", node.String())
 
-	matches, err := paths.Root().Recursive("b").Matches(doc)
+	matches, err := paths.Doc().Recursive("b").Matches(doc)
 	require.NoError(t, err)
 	require.Len(t, matches, 1)
 	assert.Equal(t, "$.b", matches[0].Path.String())
 
 	for _, name := range []string{"nope", "*"} {
-		_, err := paths.Root().Child(name).Node(doc)
+		_, err := paths.Doc().Child(name).Node(doc)
 		require.ErrorIs(t, err, paths.ErrNotFound, "Child(%q)", name)
 	}
 }
@@ -2637,34 +2971,34 @@ func TestPath_AliasCycle(t *testing.T) {
 	}{
 		"alias inside its own anchor through a tag": {
 			input: "a: &x !t *x\n",
-			path:  paths.Root().Child("a", "c"),
+			path:  paths.Doc().Child("a", "c"),
 			want:  "*x forms a cycle",
 		},
 		"merge key through an alias inside its own anchor": {
 			input: "a: &x !t *x\nm:\n  <<: *x\n",
-			path:  paths.Root().Child("m", "c"),
+			path:  paths.Doc().Child("m", "c"),
 			want:  "*x forms a cycle",
 		},
 		"anchors whose tags alias each other": {
 			// The *y on line 1 comes before &y, so it names no anchor and
 			// resolution stops there.
 			input: "a: &x !t *y\nb: &y !t *x\n",
-			path:  paths.Root().Child("b", "c"),
+			path:  paths.Doc().Child("b", "c"),
 			want:  "*y has no anchor before it",
 		},
 		"alias inside its own mapping anchor": {
 			input: "b: &x {s: *x, t: 1}\n",
-			path:  paths.Root().Child("b", "s", "t"),
+			path:  paths.Doc().Child("b", "s", "t"),
 			want:  "*x forms a cycle",
 		},
 		"alias inside its own sequence anchor": {
 			input: "a: &a [1, *a]\n",
-			path:  paths.Root().Child("a").Index(1).Index(0),
+			path:  paths.Doc().Child("a").Index(1).Index(0),
 			want:  "*a forms a cycle",
 		},
 		"alias inside its own anchor on a merge value": {
 			input: "x: {<<: &m {k: *m, j: 1}}\n",
-			path:  paths.Root().Child("x", "k", "j"),
+			path:  paths.Doc().Child("x", "k", "j"),
 			want:  "*m forms a cycle",
 		},
 	}
@@ -2723,17 +3057,17 @@ func TestPath_AliasInsideOwnAnchor(t *testing.T) {
 	}{
 		"mapping": {
 			input: "b: &x {s: *x, t: 1}\n",
-			path:  paths.Root().Child("b", "s"),
+			path:  paths.Doc().Child("b", "s"),
 			err:   paths.ErrAlias,
 		},
 		"sequence": {
 			input: "a: &a [1, *a]\n",
-			path:  paths.Root().Child("a").Index(1),
+			path:  paths.Doc().Child("a").Index(1),
 			err:   paths.ErrAlias,
 		},
 		"anchor on a merge value": {
 			input: "x: {<<: &m {k: *m, j: 1}}\n",
-			path:  paths.Root().Child("x", "k"),
+			path:  paths.Doc().Child("x", "k"),
 			err:   paths.ErrAlias,
 		},
 		"alias a merge key names inside its own anchor": {
@@ -2741,14 +3075,14 @@ func TestPath_AliasInsideOwnAnchor(t *testing.T) {
 			// is, so a path through the merge key reaches the content of
 			// the anchor.
 			input: "a: &a {k: 1, i: {<<: *a}}\n",
-			path:  paths.Root().Child("a", "i", "<<"),
+			path:  paths.Doc().Child("a", "i", "<<"),
 			want:  "{k: 1, i: {<<: *a}}",
 		},
 		"alias after an anchor of the same name inside the content": {
 			// The inner &x is the last anchor of its name before *x, and *x
 			// lies outside the content of that anchor.
 			input: "b: &x {a: &x 1, s: *x}\n",
-			path:  paths.Root().Child("b", "s"),
+			path:  paths.Doc().Child("b", "s"),
 			want:  "1",
 		},
 	}
@@ -2801,11 +3135,11 @@ func TestPath_HandBuiltAST(t *testing.T) {
 
 		mapping.Values[0].Value = &ast.AliasNode{}
 
-		_, err = paths.Root().Child("a").Node(doc)
+		_, err = paths.Doc().Child("a").Node(doc)
 		require.ErrorIs(t, err, paths.ErrAlias)
 		assert.Contains(t, err.Error(), "alias has no name")
 
-		_, err = paths.Root().Child("a", "b").Token(doc)
+		_, err = paths.Doc().Child("a", "b").Token(doc)
 		require.ErrorIs(t, err, paths.ErrAlias)
 	})
 
@@ -2821,13 +3155,13 @@ func TestPath_HandBuiltAST(t *testing.T) {
 
 		mapping.Values[0].Key = nil
 
-		tk, err := paths.Root().Token(doc)
+		tk, err := paths.Doc().Token(doc)
 		require.NoError(t, err)
 		assert.Equal(t, mapping.Values[0].GetToken(), tk)
 
 		// An entry without a key has no name, so not even the empty
 		// name selects it.
-		_, err = paths.Root().Child("").Key().Token(doc)
+		_, err = paths.Doc().Child("").Key().Token(doc)
 		require.ErrorIs(t, err, paths.ErrNotFound)
 	})
 }
@@ -2853,17 +3187,17 @@ func TestPath_Node_HandBuiltTree(t *testing.T) {
 	}{
 		"nil mapping entry": {
 			body: mapNode(nil),
-			path: paths.Root().Child("a"),
+			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"nil entry beside a real one": {
 			body: mapNode(nil, mapEntry(&ast.StringNode{Value: "a"}, &ast.StringNode{Value: "1"})),
-			path: paths.Root().Child("b"),
+			path: paths.Doc().Child("b"),
 			err:  paths.ErrNotFound,
 		},
 		"key without a token": {
 			body: mapNode(mapEntry(&ast.IntegerNode{}, &ast.StringNode{Value: "1"})),
-			path: paths.Root().Child("a"),
+			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"alias name holding a typed nil": {
@@ -2871,7 +3205,7 @@ func TestPath_Node_HandBuiltTree(t *testing.T) {
 				&ast.StringNode{Value: "a"},
 				&ast.AliasNode{Value: (*ast.StringNode)(nil)},
 			)),
-			path: paths.Root().Child("a"),
+			path: paths.Doc().Child("a"),
 			err:  paths.ErrAlias,
 		},
 		"anchor name without a token": {
@@ -2879,37 +3213,37 @@ func TestPath_Node_HandBuiltTree(t *testing.T) {
 				Name:  &ast.StringNode{},
 				Value: &ast.StringNode{Value: "1"},
 			})),
-			path: paths.Root().Child("a", "b"),
+			path: paths.Doc().Child("a", "b"),
 			err:  paths.ErrNotFound,
 		},
 		"entry without a value": {
 			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, nil)),
-			path: paths.Root().Child("a", "b"),
+			path: paths.Doc().Child("a", "b"),
 			err:  paths.ErrNotFound,
 		},
 		"path ending at an entry without a value": {
 			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, nil)),
-			path: paths.Root().Child("a"),
+			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"key holding a typed nil": {
 			body: mapNode(mapEntry((*ast.StringNode)(nil), &ast.StringNode{Value: "1"})),
-			path: paths.Root().Child("a"),
+			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"key holding a typed nil anchor": {
 			body: mapNode(mapEntry((*ast.AnchorNode)(nil), &ast.StringNode{Value: "1"})),
-			path: paths.Root().Child("a"),
+			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"key holding a typed nil tag": {
 			body: mapNode(mapEntry((*ast.TagNode)(nil), &ast.StringNode{Value: "1"})),
-			path: paths.Root().Child("a"),
+			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"key holding a typed nil explicit key": {
 			body: mapNode(mapEntry((*ast.MappingKeyNode)(nil), &ast.StringNode{Value: "1"})),
-			path: paths.Root().Child("a"),
+			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"explicit key wrapping a typed nil anchor": {
@@ -2917,32 +3251,32 @@ func TestPath_Node_HandBuiltTree(t *testing.T) {
 				&ast.MappingKeyNode{Value: (*ast.AnchorNode)(nil)},
 				&ast.StringNode{Value: "1"},
 			)),
-			path: paths.Root().Child("a"),
+			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"child of a typed nil mapping": {
 			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.MappingNode)(nil))),
-			path: paths.Root().Child("a", "b"),
+			path: paths.Doc().Child("a", "b"),
 			err:  paths.ErrNotFound,
 		},
 		"index of a typed nil sequence": {
 			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.SequenceNode)(nil))),
-			path: paths.Root().Child("a").Index(0),
+			path: paths.Doc().Child("a").Index(0),
 			err:  paths.ErrNotFound,
 		},
 		"path ending at a typed nil anchor": {
 			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.AnchorNode)(nil))),
-			path: paths.Root().Child("a"),
+			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"child of a typed nil anchor": {
 			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.AnchorNode)(nil))),
-			path: paths.Root().Child("a", "b"),
+			path: paths.Doc().Child("a", "b"),
 			err:  paths.ErrNotFound,
 		},
 		"child of a typed nil tag": {
 			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.TagNode)(nil))),
-			path: paths.Root().Child("a", "b"),
+			path: paths.Doc().Child("a", "b"),
 			err:  paths.ErrNotFound,
 		},
 		"merge of a typed nil mapping": {
@@ -2950,7 +3284,7 @@ func TestPath_Node_HandBuiltTree(t *testing.T) {
 				&ast.MergeKeyNode{},
 				&ast.SequenceNode{BaseNode: &ast.BaseNode{}, Values: []ast.Node{(*ast.MappingNode)(nil)}},
 			)),
-			path: paths.Root().Child("b"),
+			path: paths.Doc().Child("b"),
 			err:  paths.ErrNotFound,
 		},
 	}
@@ -2978,7 +3312,7 @@ func TestPath_Nodes_HandBuiltTreeRecursive(t *testing.T) {
 		)),
 	)}
 
-	nodes, err := paths.Root().Recursive("b").Nodes(doc)
+	nodes, err := paths.Doc().Recursive("b").Nodes(doc)
 	require.NoError(t, err)
 	assert.Empty(t, nodes)
 }
@@ -3173,11 +3507,11 @@ func TestPath_Nodes_HandBuiltTreeTypedNil(t *testing.T) {
 	)}
 
 	tcs := map[string]paths.Path{
-		"every element of a typed nil sequence": paths.Root().Child("s").IndexAll(),
-		"every entry of a typed nil mapping":    paths.Root().Child("m").ChildAll(),
-		"every entry of each typed nil":         paths.Root().ChildAll().ChildAll(),
-		"recursive through typed nils":          paths.Root().Recursive("q"),
-		"every node below typed nils":           paths.Root().RecursiveAll(),
+		"every element of a typed nil sequence": paths.Doc().Child("s").IndexAll(),
+		"every entry of a typed nil mapping":    paths.Doc().Child("m").ChildAll(),
+		"every entry of each typed nil":         paths.Doc().ChildAll().ChildAll(),
+		"recursive through typed nils":          paths.Doc().Recursive("q"),
+		"every node below typed nils":           paths.Doc().RecursiveAll(),
 	}
 
 	for name, path := range tcs {
@@ -3221,12 +3555,12 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk, err := paths.Root().Child(tc.key, "v").Token(file.Docs[0])
+			tk, err := paths.Doc().Child(tc.key, "v").Token(file.Docs[0])
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantValue, tk.Value)
 			assert.Equal(t, tc.wantLine, tk.Position.Line)
 
-			node, err := paths.Root().Child(tc.key).Node(file.Docs[0])
+			node, err := paths.Doc().Child(tc.key).Node(file.Docs[0])
 			require.NoError(t, err)
 
 			mapping, ok := node.(*ast.MappingNode)
@@ -3250,7 +3584,7 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 		assert.Equal(t, map[string]any{"a": "v1", "b": "v1", "c": "v2", "d": "v2"}, decoded)
 
 		for _, key := range []string{"b", "d"} {
-			got, err := yamltest.At(t, dd, paths.Root().Child(key)).Decode[string](t.Context())
+			got, err := yamltest.At(t, dd, paths.Doc().Child(key)).Decode[string](t.Context())
 			require.NoError(t, err)
 			assert.Equal(t, decoded[key], got)
 		}
@@ -3289,7 +3623,7 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 
 				dd := yamltest.FirstDocument(t, tc.input)
 
-				node, err := paths.Root().Child(tc.key).Node(dd.DocumentAST())
+				node, err := paths.Doc().Child(tc.key).Node(dd.DocumentAST())
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, node.String())
 
@@ -3297,7 +3631,7 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 
 				require.NoError(t, yaml.Unmarshal([]byte(tc.input), &decoded))
 
-				got, err := yamltest.At(t, dd, paths.Root().Child(tc.key)).Decode[any](t.Context())
+				got, err := yamltest.At(t, dd, paths.Doc().Child(tc.key)).Decode[any](t.Context())
 				require.NoError(t, err)
 				assert.Equal(t, decoded[tc.key], got)
 			})
@@ -3311,12 +3645,12 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 		forwardFile, err := forward.File()
 		require.NoError(t, err)
 
-		_, err = paths.Root().Child("b", "v").Token(forwardFile.Docs[0])
+		_, err = paths.Doc().Child("b", "v").Token(forwardFile.Docs[0])
 		require.ErrorIs(t, err, paths.ErrAlias)
 		require.NotErrorIs(t, err, paths.ErrNotFound)
 		assert.Contains(t, err.Error(), "*x has no anchor before it")
 
-		_, err = paths.Root().Child("b").Node(forwardFile.Docs[0])
+		_, err = paths.Doc().Child("b").Node(forwardFile.Docs[0])
 		require.ErrorIs(t, err, paths.ErrAlias)
 	})
 }
@@ -3329,15 +3663,15 @@ func TestPath_Token_NotFound(t *testing.T) {
 	require.NoError(t, err)
 
 	tcs := map[string]paths.Path{
-		"missing key":              paths.Root().Child("nope"),
-		"child of scalar":          paths.Root().Child("name", "x"),
-		"index of mapping":         paths.Root().Index(0),
-		"index of scalar":          paths.Root().Child("name").Index(0),
-		"index out of range":       paths.Root().Child("items").Index(2),
-		"child of sequence":        paths.Root().Child("items", "a"),
-		"missing key then index":   paths.Root().Child("nope").Index(0),
-		"missing key then child":   paths.Root().Child("nope", "deeper"),
-		"index then missing child": paths.Root().Child("items").Index(0).Child("x"),
+		"missing key":              paths.Doc().Child("nope"),
+		"child of scalar":          paths.Doc().Child("name", "x"),
+		"index of mapping":         paths.Doc().Index(0),
+		"index of scalar":          paths.Doc().Child("name").Index(0),
+		"index out of range":       paths.Doc().Child("items").Index(2),
+		"child of sequence":        paths.Doc().Child("items", "a"),
+		"missing key then index":   paths.Doc().Child("nope").Index(0),
+		"missing key then child":   paths.Doc().Child("nope", "deeper"),
+		"index then missing child": paths.Doc().Child("items").Index(0).Child("x"),
 	}
 
 	for name, path := range tcs {
@@ -3406,100 +3740,100 @@ refs: [*r, *r]
 		want []string
 	}{
 		"index all": {
-			path: paths.Root().Child("items").IndexAll().Child("name"),
+			path: paths.Doc().Child("items").IndexAll().Child("name"),
 			want: []string{"a", "b"},
 		},
 		"index all then index all": {
-			path: paths.Root().Child("items").IndexAll().Child("tags").IndexAll(),
+			path: paths.Doc().Child("items").IndexAll().Child("tags").IndexAll(),
 			want: []string{"x", "y", "z"},
 		},
 		"index all on a mapping matches nothing": {
-			path: paths.Root().Child("meta").IndexAll(),
+			path: paths.Doc().Child("meta").IndexAll(),
 			want: []string{},
 		},
 		"child all": {
-			path: paths.Root().Child("ref").ChildAll(),
+			path: paths.Doc().Child("ref").ChildAll(),
 			want: []string{"e"},
 		},
 		"child all then child": {
-			path: paths.Root().Child("meta").ChildAll().Child("name"),
+			path: paths.Doc().Child("meta").ChildAll().Child("name"),
 			want: []string{"d"},
 		},
 		"child all on a sequence matches nothing": {
-			path: paths.Root().Child("items").ChildAll(),
+			path: paths.Doc().Child("items").ChildAll(),
 			want: []string{},
 		},
 		"child all on a scalar matches nothing": {
-			path: paths.Root().Child("meta", "name").ChildAll(),
+			path: paths.Doc().Child("meta", "name").ChildAll(),
 			want: []string{},
 		},
 		"index all then child all then index all": {
-			path: paths.Root().Child("items").IndexAll().ChildAll().IndexAll(),
+			path: paths.Doc().Child("items").IndexAll().ChildAll().IndexAll(),
 			want: []string{"x", "y", "z"},
 		},
 		"child all through an alias": {
-			path: paths.Root().Child("alias").ChildAll(),
+			path: paths.Doc().Child("alias").ChildAll(),
 			want: []string{"e"},
 		},
 		"child all sees a merged entry": {
-			path: paths.Root().Child("merged").ChildAll(),
+			path: paths.Doc().Child("merged").ChildAll(),
 			want: []string{"e"},
 		},
 		"child all through aliases repeats the anchor": {
-			path: paths.Root().Child("refs").IndexAll().ChildAll(),
+			path: paths.Doc().Child("refs").IndexAll().ChildAll(),
 			want: []string{"e", "e"},
 		},
 		"recursive then child all": {
-			path: paths.Root().Recursive("nested").ChildAll(),
+			path: paths.Doc().Recursive("nested").ChildAll(),
 			want: []string{"d"},
 		},
 		"recursive visits anchors once and skips aliases": {
-			path: paths.Root().Recursive("name"),
+			path: paths.Doc().Recursive("name"),
 			want: []string{"a", "b", "c", "d", "e"},
 		},
 		"recursive below a child": {
-			path: paths.Root().Child("meta").Recursive("name"),
+			path: paths.Doc().Child("meta").Recursive("name"),
 			want: []string{"c", "d"},
 		},
 		"recursive then index": {
-			path: paths.Root().Recursive("tags").Index(0),
+			path: paths.Doc().Recursive("tags").Index(0),
 			want: []string{"x", "z"},
 		},
 		"chained recursive yields each node once": {
 			// The inner ..a reaches the scalar 1 from two outer matches. The
 			// mapping {a: 1} prints as its ":" token.
-			path: paths.Root().Child("chain").Recursive("a").Recursive("a"),
+			path: paths.Doc().Child("chain").Recursive("a").Recursive("a"),
 			want: []string{":", "1"},
 		},
 		"recursive then child keeps document order": {
 			// The outer entry a comes first, but its c follows the c of
 			// the inner one in the source.
-			path: paths.Root().Child("nest").Recursive("a").Child("c"),
+			path: paths.Doc().Child("nest").Recursive("a").Child("c"),
 			want: []string{"1", "2"},
 		},
 		"recursive then index all keeps document order": {
 			// The mapping {a: [x, y]} prints as its ":" token.
-			path: paths.Root().Child("nestseq").Recursive("a").IndexAll(),
+			path: paths.Doc().Child("nestseq").Recursive("a").IndexAll(),
 			want: []string{":", "x", "y", "z"},
 		},
 		"index all through an alias keeps path order": {
-			path: paths.Root().Child("aliased").IndexAll().IndexAll(),
+			path: paths.Doc().Child("aliased").IndexAll().IndexAll(),
 			want: []string{"p", "q", "r", "p", "q"},
 		},
 		"index all through aliases repeats the anchor": {
-			path: paths.Root().Child("refs").IndexAll().Child("name"),
+			path: paths.Doc().Child("refs").IndexAll().Child("name"),
 			want: []string{"e", "e"},
 		},
 		"recursive looks through an alias at its start": {
-			path: paths.Root().Child("alias").Recursive("name"),
+			path: paths.Doc().Child("alias").Recursive("name"),
 			want: []string{"e"},
 		},
 		"recursive skips alias merge sources": {
-			path: paths.Root().Child("merged").Recursive("name"),
+			path: paths.Doc().Child("merged").Recursive("name"),
 			want: []string{},
 		},
 		"single match": {
-			path: paths.Root().Child("meta", "name"),
+			path: paths.Doc().Child("meta", "name"),
 			want: []string{"c"},
 		},
 	}
@@ -3523,7 +3857,7 @@ refs: [*r, *r]
 	t.Run("token and node refuse wildcards", func(t *testing.T) {
 		t.Parallel()
 
-		path := paths.Root().Child("items").IndexAll().Child("name")
+		path := paths.Doc().Child("items").IndexAll().Child("name")
 
 		_, err := path.Token(file.Docs[0])
 		require.ErrorIs(t, err, paths.ErrWildcard)
@@ -3531,10 +3865,10 @@ refs: [*r, *r]
 		_, err = path.Node(file.Docs[0])
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
-		_, err = paths.Root().Recursive("name").Key().Token(file.Docs[0])
+		_, err = paths.Doc().Recursive("name").Key().Token(file.Docs[0])
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
-		entries := paths.Root().Child("meta").ChildAll()
+		entries := paths.Doc().Child("meta").ChildAll()
 
 		_, err = entries.Token(file.Docs[0])
 		require.ErrorIs(t, err, paths.ErrWildcard)
@@ -3549,7 +3883,7 @@ refs: [*r, *r]
 	t.Run("nodes rejects a nil document", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := paths.Root().Nodes(nil)
+		_, err := paths.Doc().Nodes(nil)
 		require.ErrorIs(t, err, paths.ErrNoDocument)
 	})
 }
@@ -3765,12 +4099,12 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 	}{
 		"recursive key over a merge chain": {
 			input: mergeChain(2000),
-			path:  paths.Root().Recursive("nope"),
+			path:  paths.Doc().Recursive("nope"),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over an inline merge chain": {
 			input: inlineChain(2000),
-			path:  paths.Root().Recursive("nope"),
+			path:  paths.Doc().Recursive("nope"),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"child key of each alias to a merge chain": {
@@ -3780,27 +4114,27 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 		},
 		"recursive key over a merge of many aliases": {
 			input: wideMerge(2000, "*a"),
-			path:  paths.Root().Recursive("nope"),
+			path:  paths.Doc().Recursive("nope"),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many scalars": {
 			input: wideMerge(2000, "0"),
-			path:  paths.Root().Recursive("nope"),
+			path:  paths.Doc().Recursive("nope"),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many aliases and a missing one": {
 			input: wideMerge(2000, "*a", "*missing"),
-			path:  paths.Root().Recursive("nope"),
+			path:  paths.Doc().Recursive("nope"),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many aliases and a later anchor": {
 			input: wideMerge(2000, "*a", "*late") + "late: &late {y: 1}\n",
-			path:  paths.Root().Recursive("nope"),
+			path:  paths.Doc().Recursive("nope"),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many scalars and a missing alias": {
 			input: wideMerge(2000, "0", "*missing"),
-			path:  paths.Root().Recursive("nope"),
+			path:  paths.Doc().Recursive("nope"),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"child key of each alias to a wide merge": {
@@ -3830,34 +4164,34 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 		},
 		"every node over a merge chain": {
 			input: mergeChain(2000),
-			path:  paths.Root().RecursiveAll(),
+			path:  paths.Doc().RecursiveAll(),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"every node over an inline merge chain": {
 			input: inlineChain(2000),
-			path:  paths.Root().RecursiveAll(),
+			path:  paths.Doc().RecursiveAll(),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"every node over a merge of many aliases": {
 			input: wideMerge(2000, "*a"),
-			path:  paths.Root().RecursiveAll(),
+			path:  paths.Doc().RecursiveAll(),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"every node over a short merge chain": {
 			input: mergeChain(10),
-			path:  paths.Root().RecursiveAll(),
+			path:  paths.Doc().RecursiveAll(),
 			want:  20,
 		},
 		"every node over a merge of a few aliases": {
 			input: wideMerge(10, "*a"),
-			path:  paths.Root().RecursiveAll(),
+			path:  paths.Doc().RecursiveAll(),
 			want:  13,
 		},
 		// The lookups of this walk read as many nodes under merge keys as
 		// those of a `..name` walk do.
 		"every node over many records that merge one list": {
 			input: records(400),
-			path:  paths.Root().RecursiveAll(),
+			path:  paths.Doc().RecursiveAll(),
 			want:  41001,
 		},
 		"every entry over a short merge chain": {
@@ -3877,7 +4211,7 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 		},
 		"recursive key over a short merge chain": {
 			input: mergeChain(10),
-			path:  paths.Root().Recursive("x5"),
+			path:  paths.Doc().Recursive("x5"),
 			want:  1,
 		},
 		"child key of each alias to a short merge chain": {
@@ -3887,22 +4221,22 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 		},
 		"recursive key over a merge of a few aliases": {
 			input: wideMerge(10, "*a"),
-			path:  paths.Root().Recursive("k5"),
+			path:  paths.Doc().Recursive("k5"),
 			want:  1,
 		},
 		"recursive key over a merge of a few aliases and a missing one": {
 			input: wideMerge(10, "*a", "*missing"),
-			path:  paths.Root().Recursive("k5"),
+			path:  paths.Doc().Recursive("k5"),
 			want:  0,
 		},
 		"recursive key over a merge that lists a missing alias first": {
 			input: missingFirst(10),
-			path:  paths.Root().Recursive("k5"),
+			path:  paths.Doc().Recursive("k5"),
 			want:  0,
 		},
 		"recursive key over a wide merge that lists a missing alias first": {
 			input: missingFirst(2000),
-			path:  paths.Root().Recursive("nope"),
+			path:  paths.Doc().Recursive("nope"),
 			want:  0,
 		},
 		"child key of each alias to a narrow merge": {
@@ -3919,7 +4253,7 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 		// keys, which is about 20 times the nodes of the document.
 		"recursive key over many records that merge one list": {
 			input: records(400),
-			path:  paths.Root().Recursive("name"),
+			path:  paths.Doc().Recursive("name"),
 			want:  400,
 		},
 	}
@@ -4014,7 +4348,7 @@ l: [*c, *c, *c]
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			node, err := paths.Root().Child("c", tc.name).Node(doc)
+			node, err := paths.Doc().Child("c", tc.name).Node(doc)
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 
@@ -4026,7 +4360,7 @@ l: [*c, *c, *c]
 
 			// The `[*]` selector shares one lookup state among the lookups
 			// in each element, and each of them finds the same entry.
-			nodes, err := paths.Root().Child("l").IndexAll().Child(tc.name).Nodes(doc)
+			nodes, err := paths.Doc().Child("l").IndexAll().Child(tc.name).Nodes(doc)
 			require.NoError(t, err)
 			require.Len(t, nodes, 3)
 
@@ -4068,67 +4402,67 @@ base: &kk aliased_name
 		key       bool
 	}{
 		"double quoted key": {
-			path:      paths.Root().Child("quoted key"),
+			path:      paths.Doc().Child("quoted key"),
 			wantValue: "1",
 		},
 		"single quoted key": {
-			path:      paths.Root().Child("single"),
+			path:      paths.Doc().Child("single"),
 			wantValue: "2",
 		},
 		"dotted key": {
-			path:      paths.Root().Child("plain.dotted"),
+			path:      paths.Doc().Child("plain.dotted"),
 			wantValue: "3",
 		},
 		"integer key": {
-			path:      paths.Root().Child("7"),
+			path:      paths.Doc().Child("7"),
 			wantValue: "4",
 		},
 		"explicit key": {
-			path:      paths.Root().Child("complex"),
+			path:      paths.Doc().Child("complex"),
 			wantValue: "5",
 		},
 		"explicit key target is the key itself, not the indicator": {
-			path:      paths.Root().Child("complex"),
+			path:      paths.Doc().Child("complex"),
 			key:       true,
 			wantValue: "complex",
 		},
 		"tagged key matches by content": {
-			path:      paths.Root().Child("tagged"),
+			path:      paths.Doc().Child("tagged"),
 			wantValue: "6",
 		},
 		"tagged key target skips the tag": {
-			path:      paths.Root().Child("tagged"),
+			path:      paths.Doc().Child("tagged"),
 			key:       true,
 			wantValue: "tagged",
 		},
 		"anchored key matches by content": {
-			path:      paths.Root().Child("anchored"),
+			path:      paths.Doc().Child("anchored"),
 			wantValue: "7",
 		},
 		"anchored key target skips the anchor": {
-			path:      paths.Root().Child("anchored"),
+			path:      paths.Doc().Child("anchored"),
 			key:       true,
 			wantValue: "anchored",
 		},
 		"alias key matches by its anchor's content": {
-			path:      paths.Root().Child("aliased_name"),
+			path:      paths.Doc().Child("aliased_name"),
 			wantValue: "8",
 		},
 		"alias key target is the alias": {
-			path:      paths.Root().Child("aliased_name"),
+			path:      paths.Doc().Child("aliased_name"),
 			key:       true,
 			wantValue: "*",
 		},
 		"block scalar key matches by its content": {
-			path:      paths.Root().Child("block\n"),
+			path:      paths.Doc().Child("block\n"),
 			wantValue: "9",
 		},
 		"empty flow mapping value target": {
-			path:      paths.Root().Child("empty"),
+			path:      paths.Doc().Child("empty"),
 			wantValue: "{",
 		},
 		"empty flow sequence value target": {
-			path:      paths.Root().Child("none"),
+			path:      paths.Doc().Child("none"),
 			wantValue: "[",
 		},
 	}
@@ -4146,7 +4480,7 @@ base: &kk aliased_name
 		t.Parallel()
 
 		for _, name := range []string{"!!str", "&k", "k", "&", "?", "*", "kk", "|"} {
-			_, err := paths.Root().Child(name).Node(file.Docs[0])
+			_, err := paths.Doc().Child(name).Node(file.Docs[0])
 			require.ErrorIs(t, err, paths.ErrNotFound, "Child(%q)", name)
 		}
 	})
@@ -4183,17 +4517,17 @@ func TestPath_Token_HandBuiltMapping(t *testing.T) {
 	}{
 		"key holding a typed nil": {
 			body: mapNode(mapEntry((*ast.StringNode)(nil), &ast.StringNode{Value: "1"})),
-			path: paths.Root(),
+			path: paths.Doc(),
 			want: "resolve $: not found: node has no token",
 		},
 		"nil entry": {
 			body: &ast.MappingNode{Values: []*ast.MappingValueNode{nil}},
-			path: paths.Root(),
+			path: paths.Doc(),
 			want: "resolve $: not found: node has no token",
 		},
 		"value holding a typed nil": {
 			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.StringNode)(nil))),
-			path: paths.Root().Child("a"),
+			path: paths.Doc().Child("a"),
 			want: "resolve $.a: not found: node has no token",
 		},
 	}
@@ -4709,68 +5043,76 @@ func TestPath_Matches(t *testing.T) {
 		want []string
 	}{
 		"index all": {
-			path: paths.Root().Child("items").IndexAll(),
+			path: paths.Doc().Child("items").IndexAll(),
 			want: []string{"$.items[0]", "$.items[1]"},
 		},
 		"index all gives each element its own path below a long prefix": {
-			path: paths.Root().Child("levels", "one", "two").IndexAll(),
+			path: paths.Doc().Child("levels", "one", "two").IndexAll(),
 			want: []string{"$.levels.one.two[0]", "$.levels.one.two[1]"},
 		},
 		"recursive": {
-			path: paths.Root().Recursive("name"),
+			path: paths.Doc().Recursive("name"),
 			want: []string{"$.spec.name", "$.spec.deep[0].name", "$.base.name"},
 		},
 		"recursive below a child": {
-			path: paths.Root().Child("spec").Recursive("name"),
+			path: paths.Doc().Child("spec").Recursive("name"),
 			want: []string{"$.spec.name", "$.spec.deep[0].name"},
 		},
 		"recursive gives each sibling its own path": {
-			path: paths.Root().Recursive("id"),
+			path: paths.Doc().Recursive("id"),
 			want: []string{"$.siblings.a.id", "$.siblings.a.x[0].id", "$.siblings.b.id"},
 		},
 		"recursive below a recursive match": {
-			path: paths.Root().Recursive("a").Recursive("id"),
+			path: paths.Doc().Recursive("a").Recursive("id"),
 			want: []string{"$.siblings.a.id", "$.siblings.a.x[0].id"},
 		},
 		"single": {
-			path: paths.Root().Child("spec", "name"),
+			path: paths.Doc().Child("spec", "name"),
 			want: []string{"$.spec.name"},
 		},
 		"key of an entry": {
-			path: paths.Root().Child("spec").Recursive("name").Key(),
+			path: paths.Doc().Child("spec").Recursive("name").Key(),
 			want: []string{"$.spec.name~", "$.spec.deep[0].name~"},
 		},
 		"through an alias keeps the path as written": {
-			path: paths.Root().Child("ref", "name"),
+			path: paths.Doc().Child("ref", "name"),
 			want: []string{"$.ref.name"},
 		},
 		"through a merge key keeps the path of the mapping": {
-			path: paths.Root().Child("mixed", "name"),
+			path: paths.Doc().Child("mixed", "name"),
 			want: []string{"$.mixed.name"},
 		},
 		"each alias to one anchor is its own match": {
-			path: paths.Root().Child("twice").IndexAll(),
+			path: paths.Doc().Child("twice").IndexAll(),
 			want: []string{"$.twice[0]", "$.twice[1]"},
 		},
 		"recursive then child keeps document order": {
-			path: paths.Root().Child("nest").Recursive("a").Child("c"),
+			path: paths.Doc().Child("nest").Recursive("a").Child("c"),
 			want: []string{"$.nest.a.b.a.c", "$.nest.a.c"},
 		},
 		"quoted name": {
-			path: paths.Root().Child("dot.key").IndexAll(),
+			path: paths.Doc().Child("dot.key").IndexAll(),
 			want: []string{"$.'dot.key'[0]"},
 		},
 		"recursive finds an alias key by its anchor's content": {
-			path: paths.Root().Recursive("tagline"),
+			path: paths.Doc().Recursive("tagline"),
 			want: []string{"$.keyed.tagline"},
 		},
 		"recursive finds a block scalar key by its content": {
-			path: paths.Root().Recursive("folded text"),
+			path: paths.Doc().Recursive("folded text"),
 			want: []string{"$.keyed.'folded text'"},
 		},
 		"nothing": {
-			path: paths.Root().Child("missing").IndexAll(),
+			path: paths.Doc().Child("missing").IndexAll(),
 			want: nil,
+		},
+		"relative path reads from the root": {
+			path: paths.Current().Child("items").IndexAll(),
+			want: []string{"$.items[0]", "$.items[1]"},
+		},
+		"relative path with no wildcard": {
+			path: paths.Current().Child("spec", "name"),
+			want: []string{"$.spec.name"},
 		},
 	}
 
@@ -5344,11 +5686,11 @@ func TestPath_EmptyDocument(t *testing.T) {
 
 		doc := emptyDocument(t, "a: 1\n---\n")
 
-		node, err := paths.Root().Node(doc)
+		node, err := paths.Doc().Node(doc)
 		require.NoError(t, err)
 		assert.Equal(t, ast.NullType, node.Type())
 
-		tk, err := paths.Root().Token(doc)
+		tk, err := paths.Doc().Token(doc)
 		require.NoError(t, err)
 		assert.Equal(t, token.DocumentHeaderType, tk.Type)
 		assert.Equal(t, 2, tk.Position.Line)
@@ -5359,7 +5701,7 @@ func TestPath_EmptyDocument(t *testing.T) {
 
 		doc := emptyDocument(t, "a: 1\n---\n")
 
-		tk, err := paths.Root().Key().Token(doc)
+		tk, err := paths.Doc().Key().Token(doc)
 		require.NoError(t, err)
 		assert.Equal(t, token.DocumentHeaderType, tk.Type)
 	})
@@ -5387,16 +5729,16 @@ func TestPath_EmptyDocument(t *testing.T) {
 
 				doc := docs[len(docs)-1].DocumentAST()
 
-				node, err := paths.Root().Node(doc)
+				node, err := paths.Doc().Node(doc)
 				require.NoError(t, err)
 				assert.Equal(t, ast.NullType, node.Type())
 
-				tk, err := paths.Root().Token(doc)
+				tk, err := paths.Doc().Token(doc)
 				require.NoError(t, err)
 				assert.Equal(t, token.DocumentHeaderType, tk.Type)
 				assert.Equal(t, tc.line, tk.Position.Line)
 
-				_, err = paths.Root().Child("a").Node(doc)
+				_, err = paths.Doc().Child("a").Node(doc)
 				require.ErrorIs(t, err, paths.ErrNoDocument)
 				require.ErrorIs(t, err, paths.ErrNotFound)
 			})
@@ -5408,7 +5750,7 @@ func TestPath_EmptyDocument(t *testing.T) {
 
 		doc := emptyDocument(t, "---\n")
 
-		for _, path := range []paths.Path{paths.Root(), paths.Root().Key()} {
+		for _, path := range []paths.Path{paths.Doc(), paths.Doc().Key()} {
 			matches, err := path.Matches(doc)
 			require.NoError(t, err)
 			require.Len(t, matches, 1)
@@ -5424,8 +5766,8 @@ func TestPath_EmptyDocument(t *testing.T) {
 		tcs := map[string]struct {
 			path paths.Path
 		}{
-			"child": {path: paths.Root().Child("a")},
-			"index": {path: paths.Root().Index(0)},
+			"child": {path: paths.Doc().Child("a")},
+			"index": {path: paths.Doc().Index(0)},
 		}
 
 		for name, tc := range tcs {
@@ -5442,7 +5784,7 @@ func TestPath_EmptyDocument(t *testing.T) {
 	t.Run("a document without a header reaches nothing", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := paths.Root().Node(&ast.DocumentNode{})
+		_, err := paths.Doc().Node(&ast.DocumentNode{})
 		require.ErrorIs(t, err, paths.ErrNoDocument)
 	})
 }

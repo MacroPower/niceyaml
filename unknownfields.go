@@ -71,9 +71,8 @@ func (n *Node) unknownFields(
 // source as one error. It is a summary from [NewSummary] whose message
 // counts the fields, and it heads one [*Error] for each, which matches
 // [ErrDecode] and carries the path of the key of the field, as
-// [Node.bindDecodeError] binds the rejection of one field. The paths read
-// from the root of the document, so the Node binds the error with no
-// scope in front of them.
+// [Node.bindDecodeError] binds the rejection of one field. The paths start
+// at `$`, so the Node binds the error with no scope in front of them.
 func (n *Node) bindUnknownFields(fields []*yaml.UnknownFieldError) error {
 	tree := n.doc.decodeTree()
 	rejections := make([]error, 0, len(fields))
@@ -85,7 +84,7 @@ func (n *Node) bindUnknownFields(fields []*yaml.UnknownFieldError) error {
 
 	summary := NewSummary(fmt.Sprintf("%d unknown fields", len(fields)), rejections...)
 
-	return bindTree(summary, binder{src: n.source, node: n, rooted: true})
+	return bindTree(summary, binder{src: n.source, node: n})
 }
 
 // unknownFieldFinder finds the unknown fields of a decode that the

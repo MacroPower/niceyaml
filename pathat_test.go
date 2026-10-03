@@ -536,7 +536,7 @@ func TestNode_PathAt_OutsideLines(t *testing.T) {
 
 			got, ok := doc.PathAt(position.New(tc.line, tc.col))
 			assert.False(t, ok)
-			assert.Equal(t, paths.Root(), got)
+			assert.Equal(t, paths.Current(), got)
 		})
 	}
 }
@@ -623,7 +623,7 @@ func TestNode_PathAt_ScopedNode(t *testing.T) {
 		    open: 9
 		name: x
 	`))
-	hours := yamltest.At(t, doc, paths.Root().Child("spec", "hours"))
+	hours := yamltest.At(t, doc, paths.Doc().Child("spec", "hours"))
 
 	tcs := map[string]struct {
 		line int
@@ -653,8 +653,29 @@ func TestNode_PathAt_ScopedNode(t *testing.T) {
 			fromRoot, ok := hours.Document().PathAt(pos)
 			require.True(t, ok)
 			assert.Equal(t, want, fromRoot)
+
+			// The path starts at `$`, so it goes back through the scoped
+			// Node and selects the node at pos.
+			back, err := hours.At(got)
+			require.NoError(t, err)
+			assert.Equal(t, got, back.Path())
+
+			ranges, err := hours.Ranges(got)
+			require.NoError(t, err)
+			require.NotEmpty(t, ranges)
+			assert.Equal(t, tc.line, ranges[0].Start.Line)
 		})
 	}
+
+	t.Run("the path of the scoped Node selects the Node", func(t *testing.T) {
+		t.Parallel()
+
+		self, err := hours.At(hours.Path())
+		require.NoError(t, err)
+		assert.Equal(t, hours.Path(), self.Path())
+		assert.Equal(t, hours.Span(), self.Span())
+		assert.Same(t, hours.AST(), self.AST())
+	})
 }
 
 func TestNode_PathAt_NilNode(t *testing.T) {
@@ -664,7 +685,7 @@ func TestNode_PathAt_NilNode(t *testing.T) {
 
 	got, ok := n.PathAt(position.New(0, 0))
 	assert.False(t, ok)
-	assert.Equal(t, paths.Root(), got)
+	assert.Equal(t, paths.Current(), got)
 }
 
 func TestNode_PathAt_Concurrent(t *testing.T) {
@@ -679,7 +700,7 @@ func TestNode_PathAt_Concurrent(t *testing.T) {
 		spec:
 		  replicas: 1
 	`))
-	spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+	spec := yamltest.At(t, doc, paths.Current().Child("spec"))
 
 	var wg sync.WaitGroup
 

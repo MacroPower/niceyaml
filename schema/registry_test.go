@@ -50,7 +50,7 @@ func lookup(t *testing.T, client *http.Client, r schema.Resolver) error {
 }
 
 // Path helpers for tests.
-var kindPath = paths.Root().Child("kind")
+var kindPath = paths.Current().Child("kind")
 
 // countingLoader returns a resolver that names key, serves data, and counts
 // how many times its Load runs.
@@ -204,7 +204,7 @@ func TestRegistry_Validate_ScopedNode(t *testing.T) {
 			spec:
 			  replicas: 1
 		`))
-		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
 
 		err := reg.Validate(t.Context(), spec)
 		require.ErrorIs(t, err, schema.ErrScopedDocument)
@@ -234,7 +234,7 @@ func TestRegistry_Validate_ScopedNode(t *testing.T) {
 			spec:
 			  replicas: 1
 		`))
-		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
 
 		var v struct {
 			Replicas int `yaml:"replicas"`
@@ -255,7 +255,7 @@ func TestRegistry_Validate_ScopedNode(t *testing.T) {
 			spec:
 			  replicas: 1
 		`))
-		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
 
 		require.ErrorIs(t, lax.Validate(t.Context(), spec), schema.ErrScopedDocument)
 	})
@@ -271,7 +271,7 @@ func TestRegistry_Validate_ScopedNode(t *testing.T) {
 
 		require.NoError(t, doc.Validate(t.Context(), reg))
 
-		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
 
 		var v struct {
 			Replicas int `yaml:"replicas"`
@@ -289,7 +289,7 @@ func TestRegistry_Validate_ScopedNode(t *testing.T) {
 			spec:
 			  replicas: 1
 		`))
-		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
 
 		_, err := reg.Lookup(t.Context(), spec)
 		require.ErrorIs(t, err, schema.ErrScopedDocument)

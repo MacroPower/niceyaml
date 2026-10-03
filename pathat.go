@@ -23,11 +23,12 @@ import (
 //		status = path.String() // $.spec.containers[0].image
 //	}
 //
-// The path reads from the root of the document, whichever [Node] of the
-// document the caller holds, so it goes to the [Node.At] or the
-// [Node.Ranges] of [Node.Document]. A position in another document of
-// the source reports false, so a caller with a file of several documents
-// asks each one:
+// The path starts at `$`, the root of the document, whichever [Node] of
+// the document the caller holds. A `$` path resolves from that root
+// through any Node, so the path goes back to the [Node.At] or the
+// [Node.Ranges] of the Node that returned it, or of any other Node of
+// the document. A position in another document of the source reports
+// false, so a caller with a file of several documents asks each one:
 //
 //	for _, doc := range docs {
 //		if path, ok := doc.PathAt(pos); ok {
@@ -458,7 +459,7 @@ func (x *pathIndex) spell(r *paths.Resolver, at int, key bool) (paths.Path, bool
 
 		entry := step.entry()
 		if entry == nil {
-			selectors = append(selectors, paths.Root().Index(step.index))
+			selectors = append(selectors, paths.Current().Index(step.index))
 
 			continue
 		}
@@ -473,14 +474,14 @@ func (x *pathIndex) spell(r *paths.Resolver, at int, key bool) (paths.Path, bool
 			selects = false
 		}
 
-		selectors = append(selectors, paths.Root().Child(name))
+		selectors = append(selectors, paths.Current().Child(name))
 	}
 
 	slices.Reverse(selectors)
 
 	if key {
-		selectors = append(selectors, paths.Root().Key())
+		selectors = append(selectors, paths.Current().Key())
 	}
 
-	return paths.Root().Join(selectors...), selects, true
+	return paths.Doc().Join(selectors...), selects, true
 }

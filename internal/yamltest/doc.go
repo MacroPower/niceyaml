@@ -62,13 +62,13 @@
 // path. [At] scopes a node to a path and fails the test when nothing matches:
 //
 //	doc := yamltest.FirstDocument(t, input)
-//	replicas := yamltest.At(t, doc, paths.Root().Child("spec", "replicas"))
+//	replicas := yamltest.At(t, doc, paths.Doc().Child("spec", "replicas"))
 //
 // Tests that check how a bound error reads use [Bind]. It binds an error to
 // the single document of a [*niceyaml.Source] and fails the test unless the
 // source holds exactly one document:
 //
-//	path := paths.Root().Child("spec", "replicas")
+//	path := paths.Doc().Child("spec", "replicas")
 //	err := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(path)))
 //
 // Tests of alias limits build their documents with [AliasLevels] and

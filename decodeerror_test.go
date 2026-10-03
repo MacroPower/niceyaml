@@ -687,8 +687,8 @@ func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
 		want  string
 		path  string
 	}{
-		// The path reads from the root of the document, so the scope
-		// of the Node does not go in front of it a second time.
+		// The path starts at `$`, so the scope of the Node does not go
+		// in front of it a second time.
 		"value inside the scope": {
 			scope: "$.servers[0]",
 			want:  "s.yaml:5:11: $.servers[0].port: expected integer, got string",
@@ -1035,7 +1035,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			"scalar the decode reads": {
 				input: "name: api\ntier: mid\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					node, err := dd.At(paths.Root().Child("tier"))
+					node, err := dd.At(paths.Current().Child("tier"))
 					if err != nil {
 						return err //nolint:wrapcheck // The test inspects the error as it is.
 					}
@@ -1050,7 +1050,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			"value below a scoped node": {
 				input: "servers:\n  - name: a\n    tier: mid\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					node, err := dd.At(paths.Root().Child("servers").Index(0))
+					node, err := dd.At(paths.Current().Child("servers").Index(0))
 					if err != nil {
 						return err //nolint:wrapcheck // The test inspects the error as it is.
 					}

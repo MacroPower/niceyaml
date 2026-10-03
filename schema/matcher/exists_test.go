@@ -195,7 +195,7 @@ func TestExists_ContextEnded(t *testing.T) {
 
 	// A matcher whose context ended cannot decide, so it returns the error
 	// rather than a match, and the registry stops at the document.
-	ok, err := matcher.Exists(paths.Root().Child("kind")).Match(ctx, doc)
+	ok, err := matcher.Exists(paths.Current().Child("kind")).Match(ctx, doc)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.False(t, ok)
 }

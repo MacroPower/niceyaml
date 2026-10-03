@@ -453,25 +453,25 @@ func TestDocument_Decode(t *testing.T) {
 		}{
 			"mapping value": {
 				input:   "base: &x 1\nref: *x # same as base\n",
-				path:    paths.Root(),
+				path:    paths.Current(),
 				want:    map[string]any{"base": uint64(1), "ref": uint64(1)},
 				comment: "# same as base",
 			},
 			"sequence item": {
 				input:   "- &x 1\n- *x # c\n",
-				path:    paths.Root(),
+				path:    paths.Current(),
 				want:    []any{uint64(1), uint64(1)},
 				comment: "# c",
 			},
 			"scoped node": {
 				input:   "base: &x 1\nsub:\n  ref: *x # same as base\n",
-				path:    paths.Root().Child("sub"),
+				path:    paths.Current().Child("sub"),
 				want:    map[string]any{"ref": uint64(1)},
 				comment: "# same as base",
 			},
 			"scoped node through an anchor": {
 				input:   "a: &a 1\nb: &b\n  - *a # c\nsub: {k: *b}\n",
-				path:    paths.Root().Child("sub"),
+				path:    paths.Current().Child("sub"),
 				want:    map[string]any{"k": []any{uint64(1)}},
 				comment: "# c",
 			},
@@ -486,7 +486,7 @@ func TestDocument_Decode(t *testing.T) {
 					  - *SS # Subsequent occurrence
 					  - Ken Griffey
 				`),
-				path: paths.Root(),
+				path: paths.Current(),
 				want: map[string]any{
 					"hr":  []any{"Mark McGwire", "Sammy Sosa"},
 					"rbi": []any{"Sammy Sosa", "Ken Griffey"},
@@ -868,27 +868,27 @@ func TestDocument_Decode(t *testing.T) {
 		}{
 			"anchored null": {
 				input: "&x ~\n",
-				path:  paths.Root(),
+				path:  paths.Current(),
 			},
 			"root": {
 				input: "&x\n# c\n",
-				path:  paths.Root(),
+				path:  paths.Current(),
 			},
 			"root above a header": {
 				input: "--- &x\n# c\n---\nb: 1\n",
-				path:  paths.Root(),
+				path:  paths.Current(),
 			},
 			"mapping value": {
 				input: "list: &d\n# end\n",
-				path:  paths.Root().Child("list"),
+				path:  paths.Current().Child("list"),
 			},
 			"mapping value after a reused anchor name": {
 				input: "x: &d 1\ny: *d\nlist: &d\n# end\n",
-				path:  paths.Root().Child("list"),
+				path:  paths.Current().Child("list"),
 			},
 			"sequence item": {
 				input: "- &d\n# end\n",
-				path:  paths.Root().Index(0),
+				path:  paths.Current().Index(0),
 			},
 		}
 
@@ -1019,7 +1019,7 @@ func TestDocument_Decode(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, config{Version: int(tc.want)}, got)
 
-				node := yamltest.At(t, dd, paths.Root().Child("version"))
+				node := yamltest.At(t, dd, paths.Current().Child("version"))
 
 				gotInt, err := node.Decode[int64](t.Context())
 				require.NoError(t, err)
@@ -1958,7 +1958,7 @@ func TestDocument_View(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, docs, 2)
 
-		hours := yamltest.At(t, docs[1], paths.Root().Child("spec", "hours"))
+		hours := yamltest.At(t, docs[1], paths.Current().Child("spec", "hours"))
 
 		assert.Equal(t, stringtest.JoinLF(
 			`   5 |     open: "09:00"`,
@@ -1989,7 +1989,11 @@ func TestDocument_View(t *testing.T) {
 
 		var bound *niceyaml.SourceError
 
-		require.ErrorAs(t, docs[1].Bind(niceyaml.NewError("closed", niceyaml.AtPath(paths.Root().Child("b")))), &bound)
+		require.ErrorAs(
+			t,
+			docs[1].Bind(niceyaml.NewError("closed", niceyaml.AtPath(paths.Current().Child("b")))),
+			&bound,
+		)
 
 		view := docs[1].View()
 		require.True(t, bound.Annotate(view))
@@ -2040,7 +2044,7 @@ func TestDocument_Lines(t *testing.T) {
 		docs, err := source.Documents()
 		require.NoError(t, err)
 
-		hours := yamltest.At(t, docs[1], paths.Root().Child("spec", "hours"))
+		hours := yamltest.At(t, docs[1], paths.Current().Child("spec", "hours"))
 		lines := hours.Lines()
 
 		require.Equal(t, 2, lines.Len())
@@ -2095,7 +2099,7 @@ func TestDocument_At_DirectiveBody(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, d, 1)
 
-	path := paths.Root().Child("key")
+	path := paths.Current().Child("key")
 
 	v, err := yamltest.At(t, d[0], path).Decode[string](t.Context())
 	require.NoError(t, err)
@@ -2130,10 +2134,10 @@ func TestDocument_Node(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		node := yamltest.At(t, dd, paths.Root().Child("meta")).AST()
+		node := yamltest.At(t, dd, paths.Current().Child("meta")).AST()
 		assert.Equal(t, "  name: app", node.String())
 
-		want, err := paths.Root().Child("meta").Node(dd.DocumentAST())
+		want, err := paths.Current().Child("meta").Node(dd.DocumentAST())
 		require.NoError(t, err)
 		assert.Same(t, want, node)
 	})
@@ -2143,7 +2147,7 @@ func TestDocument_Node(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		node := yamltest.At(t, yamltest.At(t, dd, paths.Root().Child("meta")), paths.Root().Child("name")).AST()
+		node := yamltest.At(t, yamltest.At(t, dd, paths.Current().Child("meta")), paths.Current().Child("name")).AST()
 		assert.Equal(t, "app", node.String())
 	})
 
@@ -2152,7 +2156,7 @@ func TestDocument_Node(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		scoped, err := dd.At(paths.Root().Child("missing"))
+		scoped, err := dd.At(paths.Current().Child("missing"))
 		require.ErrorIs(t, err, paths.ErrNotFound)
 		assert.Nil(t, scoped)
 
@@ -2224,14 +2228,14 @@ func TestDocument_Node(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, input)
-		meta := yamltest.At(t, dd, paths.Root().Child("meta"))
+		meta := yamltest.At(t, dd, paths.Current().Child("meta"))
 
 		assert.Same(t, dd, meta.Document())
 		assert.Same(t, dd.DocumentAST(), meta.Document().DocumentAST())
 		assert.Same(t, dd.Source(), meta.Source())
-		assert.Equal(t, paths.Root().Child("meta"), meta.Path())
+		assert.Equal(t, paths.Doc().Child("meta"), meta.Path())
 		assert.True(t, dd.Path().IsRoot())
-		assert.Equal(t, paths.Root(), yamltest.At(t, dd, paths.Root()).Path())
+		assert.Equal(t, paths.Doc(), yamltest.At(t, dd, paths.Doc()).Path())
 		assert.Same(t, dd, dd.Document())
 
 		var nothing *niceyaml.Node
@@ -2267,7 +2271,7 @@ func TestNode_Resolver(t *testing.T) {
 		t.Parallel()
 
 		docs := documents(t)
-		item := yamltest.At(t, docs[0], paths.Root().Child("items").Index(1))
+		item := yamltest.At(t, docs[0], paths.Current().Child("items").Index(1))
 
 		assert.Same(t, docs[0].Resolver(), item.Resolver())
 		assert.Same(t, docs[0].Resolver(), item.Document().Resolver())
@@ -2277,7 +2281,7 @@ func TestNode_Resolver(t *testing.T) {
 	t.Run("paths resolve from the document root", func(t *testing.T) {
 		t.Parallel()
 
-		item := yamltest.At(t, documents(t)[0], paths.Root().Child("items").Index(1))
+		item := yamltest.At(t, documents(t)[0], paths.Current().Child("items").Index(1))
 
 		got, err := item.Resolver().Node(item.Path())
 		require.NoError(t, err)
@@ -2288,12 +2292,12 @@ func TestNode_Resolver(t *testing.T) {
 		t.Parallel()
 
 		docs := documents(t)
-		item := yamltest.At(t, docs[0], paths.Root().Child("items").Index(0))
+		item := yamltest.At(t, docs[0], paths.Current().Child("items").Index(0))
 
 		got, err := item.Resolver().Deref(item.AST())
 		require.NoError(t, err)
 
-		want, err := paths.Root().Child("base").Node(docs[0].DocumentAST())
+		want, err := paths.Current().Child("base").Node(docs[0].DocumentAST())
 		require.NoError(t, err)
 		assert.Same(t, want, got)
 		assert.Equal(t, "  name: app", got.String())
@@ -2311,7 +2315,7 @@ func TestDocument_Bind_Check(t *testing.T) {
 		    close: "17:00"
 	`)
 
-	hoursPath := paths.Root().Child("spec", "hours")
+	hoursPath := paths.Doc().Child("spec", "hours")
 
 	t.Run("path in a check error resolves from the scope", func(t *testing.T) {
 		t.Parallel()
@@ -2324,7 +2328,7 @@ func TestDocument_Bind_Check(t *testing.T) {
 		assert.Equal(t, "09:00", h.Open)
 
 		check := func(_ *checkHours) error {
-			return niceyaml.NewError("closes too early", niceyaml.AtPath(paths.Root().Child("close")))
+			return niceyaml.NewError("closes too early", niceyaml.AtPath(paths.Current().Child("close")))
 		}
 
 		err = hours.Bind(check(&h))
@@ -2377,11 +2381,11 @@ func TestNode_Bind_Scope(t *testing.T) {
 	doc, err := source.Document()
 	require.NoError(t, err)
 
-	hoursPath := paths.Root().Child("shops").Index(0).Child("hours")
+	hoursPath := paths.Current().Child("shops").Index(0).Child("hours")
 	hours := yamltest.At(t, doc, hoursPath)
 
-	openPath := paths.Root().Child("open")
-	closePath := paths.Root().Child("close")
+	openPath := paths.Current().Child("open")
+	closePath := paths.Current().Child("close")
 
 	tcs := map[string]struct {
 		err error
@@ -2398,7 +2402,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 			path: "$.shops[0].hours.close",
 		},
 		"the root path names the scope": {
-			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Root())),
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Current())),
 			want: "cfg.yaml:4:7: $.shops[0].hours: bad",
 			path: "$.shops[0].hours",
 		},
@@ -2408,12 +2412,12 @@ func TestNode_Bind_Scope(t *testing.T) {
 			path: "$.shops[0].hours.close~",
 		},
 		"a key the scope leaves out binds at the key of the scope": {
-			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("nope"))),
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("nope"))),
 			want: "cfg.yaml:3:5: $.shops[0].hours.nope: bad",
 			path: "$.shops[0].hours.nope",
 		},
 		"a path that does not resolve joins the scope": {
-			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("open", "nope"))),
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("open", "nope"))),
 			want: "cfg.yaml: $.shops[0].hours.open.nope: bad",
 			path: "$.shops[0].hours.open.nope",
 		},
@@ -2652,7 +2656,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 
 		assert.Same(t, bound, hours.Bind(bound))
 		assert.Same(t, bound, doc.Bind(bound))
-		assert.Same(t, bound, yamltest.At(t, doc, paths.Root().Child("shops")).Bind(bound))
+		assert.Same(t, bound, yamltest.At(t, doc, paths.Current().Child("shops")).Bind(bound))
 	})
 
 	t.Run("the root of the document binds a path as written", func(t *testing.T) {
@@ -2678,7 +2682,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 		require.NoError(t, bound.Unresolved())
 
 		// A Node scoped to the root path is the root of the document too.
-		err = yamltest.At(t, doc, paths.Root()).Bind(errors.New("bad"))
+		err = yamltest.At(t, doc, paths.Current()).Bind(errors.New("bad"))
 		require.EqualError(t, err, "cfg.yaml: bad")
 	})
 
@@ -2697,7 +2701,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 		// does.
 		var located *niceyaml.SourceError
 
-		require.ErrorAs(t, hours.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root()))), &located)
+		require.ErrorAs(t, hours.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current()))), &located)
 
 		rng, ok := bound.Range()
 		require.True(t, ok)
@@ -2763,7 +2767,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 				run: func(t *testing.T) error {
 					t.Helper()
 
-					_, err := hours.At(paths.Root().ChildAll())
+					_, err := hours.At(paths.Current().ChildAll())
 
 					return err //nolint:wrapcheck // The test inspects the error of the call.
 				},
@@ -2774,7 +2778,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 				run: func(t *testing.T) error {
 					t.Helper()
 
-					_, err := hours.At(paths.Root().Index(3))
+					_, err := hours.At(paths.Current().Index(3))
 
 					return err //nolint:wrapcheck // The test inspects the error of the call.
 				},
@@ -2785,7 +2789,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 				run: func(t *testing.T) error {
 					t.Helper()
 
-					_, err := hours.Ranges(paths.Root().ChildAll())
+					_, err := hours.Ranges(paths.Current().ChildAll())
 
 					return err //nolint:wrapcheck // The test inspects the error of the call.
 				},
@@ -2816,7 +2820,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 	t.Run("an error a scoped method returns names the scope once", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := hours.At(paths.Root().Child("nope"))
+		_, err := hours.At(paths.Current().Child("nope"))
 		require.ErrorIs(t, err, paths.ErrNotFound)
 		assert.Equal(t, 1, strings.Count(err.Error(), "$.shops[0].hours.nope"))
 		assert.NotContains(t, err.Error(), "$.shops[0].hours.shops")
@@ -2825,8 +2829,8 @@ func TestNode_Bind_Scope(t *testing.T) {
 	t.Run("a scoped validator and the same check at the root agree", func(t *testing.T) {
 		t.Parallel()
 
-		// The validator writes its path from the root of the document, so
-		// it binds through the root, which binds the path as written.
+		// The validator writes a `$` path, which reads from the root of the
+		// document, so the binding leaves the path as written.
 		reject := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
 			return n.Document().Bind(niceyaml.NewError("bad", niceyaml.AtPath(n.Path().Join(closePath))))
 		})
@@ -2860,7 +2864,7 @@ func (c accumulatingConfig) Validate() error {
 	var err *niceyaml.Error
 
 	if c.Value == 0 {
-		err = niceyaml.NewError("value is required", niceyaml.AtPath(paths.Root().Child("value")))
+		err = niceyaml.NewError("value is required", niceyaml.AtPath(paths.Current().Child("value")))
 	}
 
 	return err
@@ -3026,7 +3030,7 @@ func (c *validatorConfig) Validate() error {
 	if c.Name == "" {
 		return niceyaml.WrapError(
 			errNameRequired,
-			niceyaml.AtPath(paths.Root().Child("name").Key()),
+			niceyaml.AtPath(paths.Current().Child("name").Key()),
 		)
 	}
 
@@ -3056,7 +3060,7 @@ func nameSchema(called *bool) niceyaml.Validator {
 		if name, ok := m["name"].(string); ok && name == "invalid" {
 			return niceyaml.WrapError(
 				errSchemaValidationFailed,
-				niceyaml.AtPath(paths.Root().Child("name").Key()),
+				niceyaml.AtPath(paths.Current().Child("name").Key()),
 			)
 		}
 
@@ -3078,7 +3082,7 @@ func (c *bothValidatorConfig) Validate() error {
 	if c.Name == "" {
 		return niceyaml.WrapError(
 			errNameRequired,
-			niceyaml.AtPath(paths.Root().Child("name").Key()),
+			niceyaml.AtPath(paths.Current().Child("name").Key()),
 		)
 	}
 
@@ -3154,7 +3158,7 @@ func TestDocument_Tokens(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, d, 2)
 
-		kindPath := paths.Root().Child("kind")
+		kindPath := paths.Current().Child("kind")
 
 		for i, dd := range d {
 			kind, err := yamltest.At(t, dd, kindPath).Decode[string](t.Context())
@@ -3354,7 +3358,7 @@ type failingValidator struct {
 }
 
 func (failingValidator) Validate() error {
-	return niceyaml.NewError("rejected", niceyaml.AtPath(paths.Root().Child("name")))
+	return niceyaml.NewError("rejected", niceyaml.AtPath(paths.Current().Child("name")))
 }
 
 // fieldValidator is a [niceyaml.Validator] that returns the error its
@@ -3403,7 +3407,7 @@ func TestDocument_Err(t *testing.T) {
 
 		require.NoError(t, docs[0].Validate(t.Context(), passingValidator()))
 
-		scoped, err := docs[2].At(paths.Root().Child("e"))
+		scoped, err := docs[2].At(paths.Current().Child("e"))
 		require.NoError(t, err)
 		assert.Equal(t, 2, scoped.DocumentIndex())
 		require.NoError(t, scoped.Err())
@@ -3456,7 +3460,7 @@ func TestDocument_Err(t *testing.T) {
 			"At": {call: func(t *testing.T, doc *niceyaml.Node) error {
 				t.Helper()
 
-				scoped, err := doc.At(paths.Root().Child("d"))
+				scoped, err := doc.At(paths.Current().Child("d"))
 				assert.Nil(t, scoped)
 
 				return err //nolint:wrapcheck // The test inspects the error of the call.
@@ -3464,14 +3468,14 @@ func TestDocument_Err(t *testing.T) {
 			"At the root": {call: func(t *testing.T, doc *niceyaml.Node) error {
 				t.Helper()
 
-				_, err := doc.At(paths.Root())
+				_, err := doc.At(paths.Current())
 
 				return err //nolint:wrapcheck // The test inspects the error of the call.
 			}},
 			"Nodes": {call: func(t *testing.T, doc *niceyaml.Node) error {
 				t.Helper()
 
-				nodes, err := doc.Nodes(paths.Root().Child("d").IndexAll())
+				nodes, err := doc.Nodes(paths.Current().Child("d").IndexAll())
 				assert.Nil(t, nodes)
 
 				return err //nolint:wrapcheck // The test inspects the error of the call.
@@ -3479,7 +3483,7 @@ func TestDocument_Err(t *testing.T) {
 			"Ranges": {call: func(t *testing.T, doc *niceyaml.Node) error {
 				t.Helper()
 
-				ranges, err := doc.Ranges(paths.Root().Child("d"))
+				ranges, err := doc.Ranges(paths.Current().Child("d"))
 				assert.Nil(t, ranges)
 
 				return err //nolint:wrapcheck // The test inspects the error of the call.
@@ -3592,7 +3596,7 @@ func TestDocument_Err(t *testing.T) {
 
 		doc := documents(t)[1]
 
-		err := doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("d"))))
+		err := doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("d"))))
 
 		var bound *niceyaml.SourceError
 
@@ -3631,7 +3635,7 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 		---
 		name: second
 	`)
-	namePath := paths.Root().Child("name")
+	namePath := paths.Current().Child("name")
 
 	// The first line of each error's message.
 	headlines := func(t *testing.T, errs []error) []string {
@@ -3788,7 +3792,7 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 		`)
 		dd := yamltest.FirstDocument(t, input)
 
-		innerPath := paths.Root().Child("inner")
+		innerPath := paths.Current().Child("inner")
 
 		_, err := yamltest.At(t, dd, innerPath).Decode[strictConfig](
 			t.Context(),
@@ -3874,44 +3878,44 @@ func TestDocument_Ranges(t *testing.T) {
 		key  bool
 	}{
 		"value": {
-			path: paths.Root().Child("kind"),
+			path: paths.Current().Child("kind"),
 			want: position.Ranges{position.NewRange(position.New(0, 6), position.New(0, 16))},
 		},
 		"key": {
-			path: paths.Root().Child("kind"),
+			path: paths.Current().Child("kind"),
 			key:  true,
 			want: position.Ranges{position.NewRange(position.New(0, 0), position.New(0, 4))},
 		},
 		"key of a sequence element is the element": {
-			path: paths.Root().Child("list").Index(0),
+			path: paths.Current().Child("list").Index(0),
 			key:  true,
 			want: position.Ranges{position.NewRange(position.New(8, 4), position.New(8, 5))},
 		},
 		"mapping with a tagged first key starts at the key": {
-			path: paths.Root().Child("tagged"),
+			path: paths.Current().Child("tagged"),
 			want: position.Ranges{position.NewRange(position.New(13, 8), position.New(13, 9))},
 		},
 		"value across lines": {
-			path: paths.Root().Child("text"),
+			path: paths.Current().Child("text"),
 			want: position.Ranges{
 				position.NewRange(position.New(1, 6), position.New(1, 11)),
 				position.NewRange(position.New(2, 2), position.New(2, 8)),
 			},
 		},
 		"block scalar covers its indicator": {
-			path: paths.Root().Child("block"),
+			path: paths.Current().Child("block"),
 			want: position.Ranges{position.NewRange(position.New(3, 7), position.New(3, 8))},
 		},
 		"mapping covers its first key": {
-			path: paths.Root().Child("map"),
+			path: paths.Current().Child("map"),
 			want: position.Ranges{position.NewRange(position.New(10, 2), position.New(10, 3))},
 		},
 		"sequence covers its first element": {
-			path: paths.Root().Child("list"),
+			path: paths.Current().Child("list"),
 			want: position.Ranges{position.NewRange(position.New(8, 4), position.New(8, 5))},
 		},
 		"missing path": {
-			path: paths.Root().Child("missing"),
+			path: paths.Current().Child("missing"),
 			is:   paths.ErrNotFound,
 		},
 	}
@@ -3951,7 +3955,7 @@ func TestDocument_Ranges(t *testing.T) {
 		// and the range of b still covers the runes of its value.
 		dd := yamltest.FirstDocument(t, "m: {a: \"\\u00e9\", b: xx}\n")
 
-		got, err := dd.Ranges(paths.Root().Child("m").Child("b"))
+		got, err := dd.Ranges(paths.Current().Child("m").Child("b"))
 		require.NoError(t, err)
 		assert.Equal(t, position.Ranges{position.NewRange(position.New(0, 20), position.New(0, 22))}, got)
 	})
@@ -3966,10 +3970,10 @@ func TestDocument_Ranges(t *testing.T) {
 			input string
 			path  paths.Path
 		}{
-			"nothing after the colon": {input: "a:\nb: 1\n", path: paths.Root().Child("a")},
-			"comment after the colon": {input: "a: # c\nb: 1\n", path: paths.Root().Child("a")},
-			"spaces after the colon":  {input: "a:   \nb: 1\n", path: paths.Root().Child("a")},
-			"comment after the dash":  {input: "- # c\n- 1\n", path: paths.Root().Index(0)},
+			"nothing after the colon": {input: "a:\nb: 1\n", path: paths.Current().Child("a")},
+			"comment after the colon": {input: "a: # c\nb: 1\n", path: paths.Current().Child("a")},
+			"spaces after the colon":  {input: "a:   \nb: 1\n", path: paths.Current().Child("a")},
+			"comment after the dash":  {input: "- # c\n- 1\n", path: paths.Current().Index(0)},
 		}
 
 		for name, tc := range tcs {
@@ -3989,14 +3993,14 @@ func TestDocument_Ranges(t *testing.T) {
 		dd := yamltest.FirstDocument(t, input)
 
 		for _, path := range []paths.Path{
-			paths.Root().Child("kind"),
-			paths.Root().Child("text"),
-			paths.Root().Child("block"),
-			paths.Root().Child("empty"),
-			paths.Root().Child("list"),
-			paths.Root().Child("map"),
-			paths.Root().Child("list").Index(0),
-			paths.Root().Child("kind").Key(),
+			paths.Current().Child("kind"),
+			paths.Current().Child("text"),
+			paths.Current().Child("block"),
+			paths.Current().Child("empty"),
+			paths.Current().Child("list"),
+			paths.Current().Child("map"),
+			paths.Current().Child("list").Index(0),
+			paths.Current().Child("kind").Key(),
 		} {
 			want, err := dd.Ranges(path)
 			require.NoError(t, err)
@@ -4048,7 +4052,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := yamltest.At(t, dd, paths.Root().Child("kind")).Decode[string](t.Context())
+		got, err := yamltest.At(t, dd, paths.Current().Child("kind")).Decode[string](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, "Deployment", got)
 	})
@@ -4058,7 +4062,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := yamltest.At(t, dd, paths.Root().Child("version")).Decode[int](t.Context())
+		got, err := yamltest.At(t, dd, paths.Current().Child("version")).Decode[int](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, 2, got)
 	})
@@ -4102,7 +4106,7 @@ func TestDocument_At(t *testing.T) {
 				require.NoError(t, err)
 				require.Contains(t, whole, tc.want)
 
-				got, err := yamltest.At(t, dd, paths.Root().Child("2").Key()).Decode[any](t.Context())
+				got, err := yamltest.At(t, dd, paths.Current().Child("2").Key()).Decode[any](t.Context())
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, got)
 			})
@@ -4114,7 +4118,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := yamltest.At(t, dd, paths.Root().Child("enabled")).Decode[bool](t.Context())
+		got, err := yamltest.At(t, dd, paths.Current().Child("enabled")).Decode[bool](t.Context())
 		require.NoError(t, err)
 		assert.True(t, got)
 	})
@@ -4124,7 +4128,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := yamltest.At(t, dd, paths.Root().Child("empty")).Decode[string](t.Context())
+		got, err := yamltest.At(t, dd, paths.Current().Child("empty")).Decode[string](t.Context())
 		require.NoError(t, err)
 		assert.Empty(t, got)
 	})
@@ -4134,7 +4138,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := yamltest.At(t, dd, paths.Root().Child("tags")).Decode[[]string](t.Context())
+		got, err := yamltest.At(t, dd, paths.Current().Child("tags")).Decode[[]string](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, []string{"a", "b"}, got)
 	})
@@ -4148,7 +4152,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := yamltest.At(t, dd, paths.Root().Child("meta")).Decode[meta](t.Context())
+		got, err := yamltest.At(t, dd, paths.Current().Child("meta")).Decode[meta](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, meta{Name: "app"}, got)
 	})
@@ -4158,7 +4162,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "a: &x\n# c\nb: 1\n")
 
-		got, err := yamltest.At(t, dd, paths.Root().Child("b")).Decode[int](t.Context())
+		got, err := yamltest.At(t, dd, paths.Current().Child("b")).Decode[int](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, 1, got)
 	})
@@ -4168,7 +4172,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := dd.At(paths.Root().Child("nonexistent"))
+		got, err := dd.At(paths.Current().Child("nonexistent"))
 		require.ErrorIs(t, err, paths.ErrNotFound)
 		require.NotErrorIs(t, err, paths.ErrAlias)
 		assert.Nil(t, got)
@@ -4179,7 +4183,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "---\n")
 
-		got, err := dd.At(paths.Root().Child("key"))
+		got, err := dd.At(paths.Current().Child("key"))
 		require.ErrorIs(t, err, paths.ErrNotFound)
 		require.ErrorIs(t, err, paths.ErrNoDocument)
 		assert.Contains(t, err.Error(), "$.key")
@@ -4191,7 +4195,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "\n")
 
-		got, err := dd.At(paths.Root().Child("key"))
+		got, err := dd.At(paths.Current().Child("key"))
 		require.ErrorIs(t, err, paths.ErrNotFound)
 		require.ErrorIs(t, err, paths.ErrNoDocument)
 		assert.Contains(t, err.Error(), "$.key")
@@ -4203,7 +4207,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "kind: *nope")
 
-		got, err := dd.At(paths.Root().Child("kind"))
+		got, err := dd.At(paths.Current().Child("kind"))
 		require.ErrorIs(t, err, paths.ErrAlias)
 		require.NotErrorIs(t, err, paths.ErrNotFound)
 		assert.Contains(t, err.Error(), "*nope")
@@ -4215,7 +4219,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "tags: [a, b]")
 
-		got, err := dd.At(paths.Root().Child("tags").IndexAll())
+		got, err := dd.At(paths.Current().Child("tags").IndexAll())
 		require.ErrorIs(t, err, paths.ErrWildcard)
 		require.NotErrorIs(t, err, paths.ErrNotFound)
 		assert.Nil(t, got)
@@ -4226,7 +4230,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "jobs:\n  build: 1\n")
 
-		got, err := dd.At(paths.Root().Child("jobs").ChildAll())
+		got, err := dd.At(paths.Current().Child("jobs").ChildAll())
 		require.ErrorIs(t, err, paths.ErrWildcard)
 		require.NotErrorIs(t, err, paths.ErrNotFound)
 		assert.Nil(t, got)
@@ -4237,7 +4241,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "jobs:\n  build: 1\n")
 
-		got, err := dd.At(paths.Root().RecursiveAll())
+		got, err := dd.At(paths.Current().RecursiveAll())
 		require.ErrorIs(t, err, paths.ErrWildcard)
 		require.NotErrorIs(t, err, paths.ErrNotFound)
 		assert.Nil(t, got)
@@ -4248,7 +4252,7 @@ func TestDocument_At(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := yamltest.At(t, dd, paths.Root().Child("kind")).Decode[int](t.Context())
+		got, err := yamltest.At(t, dd, paths.Current().Child("kind")).Decode[int](t.Context())
 		require.Error(t, err)
 
 		var yamlErr *niceyaml.Error
@@ -4269,11 +4273,11 @@ func TestDocument_At(t *testing.T) {
 			  - *b
 		`))
 
-		got, err := yamltest.At(t, dd, paths.Root().Child("item")).Decode[map[string]any](t.Context())
+		got, err := yamltest.At(t, dd, paths.Current().Child("item")).Decode[map[string]any](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, map[string]any{"ref": map[string]any{"x": uint64(1)}}, got)
 
-		list, err := yamltest.At(t, dd, paths.Root().Child("list")).Decode[[]map[string]int](t.Context())
+		list, err := yamltest.At(t, dd, paths.Current().Child("list")).Decode[[]map[string]int](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, []map[string]int{{"x": 1}}, list)
 	})
@@ -4304,7 +4308,7 @@ func TestDocument_At(t *testing.T) {
 
 				dd := yamltest.FirstDocument(t, tc.input)
 
-				got, err := yamltest.At(t, dd, paths.Root().Child("sub")).Decode[map[string]any](t.Context())
+				got, err := yamltest.At(t, dd, paths.Current().Child("sub")).Decode[map[string]any](t.Context())
 				require.NoError(t, err)
 				assert.Equal(t, map[string]any{"k": uint64(1)}, got)
 			})
@@ -4323,19 +4327,19 @@ func TestDocument_At(t *testing.T) {
 		}{
 			"later anchor after the node": {
 				input: "a: &x v1\nm:\n  k: *x\nc: &x v2\n",
-				path:  paths.Root().Child("m"),
+				path:  paths.Current().Child("m"),
 			},
 			"later anchor inside an enclosing mapping": {
 				input: "a: &x v1\nm:\n  s:\n    k: *x\n  c: &x v2\n",
-				path:  paths.Root().Child("m", "s"),
+				path:  paths.Current().Child("m", "s"),
 			},
 			"later anchor inside an enclosing anchor": {
 				input: "m: &m\n  a: &x v1\n  s:\n    k: *x\n  c: &x v2\n",
-				path:  paths.Root().Child("m", "s"),
+				path:  paths.Current().Child("m", "s"),
 			},
 			"later anchor inside an enclosing merge": {
 				input: "a: &x v1\nm:\n  <<:\n    s:\n      k: *x\n    c: &x v2\n",
-				path:  paths.Root().Child("m", "s"),
+				path:  paths.Current().Child("m", "s"),
 			},
 		}
 
@@ -4372,27 +4376,27 @@ func TestDocument_At(t *testing.T) {
 		}{
 			"merge key in each list entry": {
 				input: "defaults: &d\n  a: 1\nitems:\n  - <<: *d\n    name: x\n  - <<: *d\n    name: y\n",
-				path:  paths.Root().Child("items").Index(1),
+				path:  paths.Current().Child("items").Index(1),
 				want:  map[string]any{"a": uint64(1), "name": "y"},
 			},
 			"anchor inside another anchor": {
 				input: "outer: &o\n  inner: &i 1\nsub: {k: *i}\n",
-				path:  paths.Root().Child("sub"),
+				path:  paths.Current().Child("sub"),
 				want:  map[string]any{"k": uint64(1)},
 			},
 			"anchor inside an anchor that holds the node": {
 				input: "outer: &o\n  inner: &i 1\n  sub: {k: *i, s: *o}\n",
-				path:  paths.Root().Child("outer", "sub"),
+				path:  paths.Current().Child("outer", "sub"),
 				want:  map[string]any{"k": uint64(1), "s": nil},
 			},
 			"anchor that refers to another anchor": {
 				input: "a: &a 1\nb: &b [*a]\nsub: {k: *b}\n",
-				path:  paths.Root().Child("sub"),
+				path:  paths.Current().Child("sub"),
 				want:  map[string]any{"k": []any{uint64(1)}},
 			},
 			"anchor inside the node": {
 				input: "a: &x 1\nsub:\n  b: &x 2\n  k: *x\n",
-				path:  paths.Root().Child("sub"),
+				path:  paths.Current().Child("sub"),
 				want:  map[string]any{"b": uint64(2), "k": uint64(2)},
 			},
 			"merge key that records an anchor again": {
@@ -4410,7 +4414,7 @@ func TestDocument_At(t *testing.T) {
 					  p: *b
 					  r: *X
 				`),
-				path: paths.Root().Child("node"),
+				path: paths.Current().Child("node"),
 				want: map[string]any{"p": uint64(1), "r": map[string]any{"z": uint64(2)}},
 			},
 		}
@@ -4440,12 +4444,12 @@ func TestDocument_At(t *testing.T) {
 		}{
 			"value of the anchor": {
 				input: "a: &a\n  - 1\n  - *a\n",
-				path:  paths.Root().Child("a"),
+				path:  paths.Current().Child("a"),
 				want:  []any{uint64(1), nil},
 			},
 			"node inside the anchor": {
 				input: "a: &a\n  b:\n    c: *a\n",
-				path:  paths.Root().Child("a", "b"),
+				path:  paths.Current().Child("a", "b"),
 				want:  map[string]any{"c": nil},
 			},
 		}
@@ -4496,7 +4500,7 @@ func TestDocument_At(t *testing.T) {
 
 				dd := yamltest.FirstDocument(t, tc.input)
 
-				got, err := yamltest.At(t, dd, paths.Root().Child("kind")).Decode[map[string]rawText](t.Context())
+				got, err := yamltest.At(t, dd, paths.Current().Child("kind")).Decode[map[string]rawText](t.Context())
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, got["x"].text)
 			})
@@ -4515,7 +4519,7 @@ func TestDocument_At(t *testing.T) {
 
 		// The document defines the anchor after the alias, so the value's
 		// own decode reports the alias error, bound to the source.
-		_, err := yamltest.At(t, dd, paths.Root().Child("item")).Decode[map[string]any](t.Context())
+		_, err := yamltest.At(t, dd, paths.Current().Child("item")).Decode[map[string]any](t.Context())
 		require.Error(t, err)
 
 		var bound *niceyaml.SourceError
@@ -4560,37 +4564,37 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		}{
 			"sequence redefines the name after the alias": {
 				input: "x0: &x 1\nl:\n  - *x\n  - &x 2\n",
-				path:  paths.Root().Child("l"),
+				path:  paths.Current().Child("l"),
 				want:  []any{uint64(1), uint64(2)},
 			},
 			"mapping redefines the name after the alias": {
 				input: "b: &x 2\nd:\n  e: *x\n  f: &x 3\n",
-				path:  paths.Root().Child("d"),
+				path:  paths.Current().Child("d"),
 				want:  map[string]any{"e": uint64(2), "f": uint64(3)},
 			},
 			"aliases before and after the redefinition": {
 				input: "a: &x 1\nb:\n  c: *x\n  d: &x 2\n  e: *x\n",
-				path:  paths.Root().Child("b"),
+				path:  paths.Current().Child("b"),
 				want:  map[string]any{"c": uint64(1), "d": uint64(2), "e": uint64(2)},
 			},
 			"sequence aliases before and after the redefinition": {
 				input: "a: &x 1\nb:\n  - *x\n  - &x 2\n  - *x\n",
-				path:  paths.Root().Child("b"),
+				path:  paths.Current().Child("b"),
 				want:  []any{uint64(1), uint64(2), uint64(2)},
 			},
 			"each element reads the anchor before it": {
 				input: "items:\n  - &x {a: 1}\n  - {b: *x}\n  - &x {a: 2}\n  - {b: *x}\n",
-				path:  paths.Root().Child("items").Index(1),
+				path:  paths.Current().Child("items").Index(1),
 				want:  map[string]any{"b": map[string]any{"a": uint64(1)}},
 			},
 			"merge key that records an anchor again": {
 				input: "m: &m {k: &b 1}\nb: &b 2\nq: {<<: *m}\nnode:\n  p: *b\n  r: *b\n",
-				path:  paths.Root().Child("node"),
+				path:  paths.Current().Child("node"),
 				want:  map[string]any{"p": uint64(1), "r": uint64(1)},
 			},
 			"whole document with an alias to a sibling in an anchor": {
 				input: "outer: &o\n  one: &y 1\n  two: &x {d: *y}\nuse:\n  v: *x\n",
-				path:  paths.Root(),
+				path:  paths.Current(),
 				want: map[string]any{
 					"outer": map[string]any{
 						"one": uint64(1),
@@ -4601,12 +4605,12 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			},
 			"node with an alias to a sibling in an anchor": {
 				input: "outer: &o\n  one: &y 1\n  two: &x {d: *y}\nuse:\n  v: *x\n",
-				path:  paths.Root().Child("use"),
+				path:  paths.Current().Child("use"),
 				want:  map[string]any{"v": map[string]any{"d": uint64(1)}},
 			},
 			"node with an alias to a redefined sibling in an anchor": {
 				input: "d: &x\n  &y b: &x {q: *x}\n  a: &x\n    d: *y\nc:\n  <<: *x\n  b: *x\na:\n  a: [*y, &y 5, *x]\n",
-				path:  paths.Root().Child("a"),
+				path:  paths.Current().Child("a"),
 				want: map[string]any{
 					"a": []any{"b", uint64(5), map[string]any{"d": "b"}},
 				},
@@ -4637,7 +4641,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "x0: &x 1\nl:\n  - *x\n  - &x 2\n")
 
-		list, err := yamltest.At(t, dd, paths.Root().Child("l")).Decode[[]int](t.Context())
+		list, err := yamltest.At(t, dd, paths.Current().Child("l")).Decode[[]int](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, []int{1, 2}, list)
 
@@ -4683,7 +4687,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			  sidecar: *img
 		`))
 
-		got, err := yamltest.At(t, dd, paths.Root().Child("svc")).Decode[svc](t.Context())
+		got, err := yamltest.At(t, dd, paths.Current().Child("svc")).Decode[svc](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, svc{Web: base{Image: "nginx:1.0"}, Sidecar: "nginx:2.0"}, got)
 	})
@@ -4726,7 +4730,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 				_, err := dd.Decode[any](t.Context())
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-				_, err = yamltest.At(t, dd, paths.Root().Child("c")).Decode[any](t.Context())
+				_, err = yamltest.At(t, dd, paths.Current().Child("c")).Decode[any](t.Context())
 				require.EqualError(t, err, tc.err)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 			})
@@ -4851,7 +4855,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, docs, 2)
 
-		got, err := yamltest.At(t, docs[1], paths.Root().Child("b")).Decode[[]int](t.Context())
+		got, err := yamltest.At(t, docs[1], paths.Current().Child("b")).Decode[[]int](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, []int{1, 2, 2}, got)
 	})
@@ -4861,7 +4865,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "a: &x !!bool nope\nb: &x 1\nc:\n  d: *x\n")
 
-		got, err := yamltest.At(t, dd, paths.Root().Child("c")).Decode[any](t.Context())
+		got, err := yamltest.At(t, dd, paths.Current().Child("c")).Decode[any](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, map[string]any{"d": uint64(1)}, got)
 	})
@@ -4965,7 +4969,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 
 		for range 4 {
 			for _, doc := range docs {
-				scope := yamltest.At(t, doc, paths.Root().Child("t"))
+				scope := yamltest.At(t, doc, paths.Current().Child("t"))
 
 				wg.Go(func() {
 					got, err := doc.Decode[wrapper](t.Context())
@@ -5002,7 +5006,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "a: &x 1\nb: &x 2\nc: {k: !!bool nope}\n")
 
-		_, err := yamltest.At(t, dd, paths.Root().Child("c")).Decode[any](t.Context())
+		_, err := yamltest.At(t, dd, paths.Current().Child("c")).Decode[any](t.Context())
 		require.EqualError(t, err, `3:15: $.c.k: cannot convert "nope" to boolean`)
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 
@@ -5033,7 +5037,7 @@ func TestDocument_Decode_ForwardAlias(t *testing.T) {
 	}{
 		"merge key before the anchor": {
 			input: "service:\n  <<: *defaults\ndefaults: &defaults\n  port: 8080\n",
-			path:  paths.Root().Child("service"),
+			path:  paths.Current().Child("service"),
 			want: map[string]any{
 				"service":  map[string]any{"port": uint64(80)},
 				"defaults": map[string]any{"port": uint64(8080)},
@@ -5043,7 +5047,7 @@ func TestDocument_Decode_ForwardAlias(t *testing.T) {
 		},
 		"merge key before two anchors": {
 			input: "service:\n  <<: *defaults\ndefaults: &defaults\n  port: 8080\nother: &defaults\n  port: 9090\n",
-			path:  paths.Root().Child("service"),
+			path:  paths.Current().Child("service"),
 			want: map[string]any{
 				"service":  map[string]any{"port": uint64(80)},
 				"defaults": map[string]any{"port": uint64(8080)},
@@ -5054,14 +5058,14 @@ func TestDocument_Decode_ForwardAlias(t *testing.T) {
 		},
 		"sequence alias before the anchor": {
 			input:  "p: [*x, &x 2]\n",
-			path:   paths.Root().Child("p"),
+			path:   paths.Current().Child("p"),
 			want:   map[string]any{"p": []any{uint64(1), uint64(2)}},
 			scoped: []any{uint64(1), uint64(2)},
 			err:    `1:5: $.p[0]: could not find alias "x"`,
 		},
 		"mapping alias before the anchor": {
 			input:  "p:\n  a: *x\n  b: &x 2\n",
-			path:   paths.Root().Child("p"),
+			path:   paths.Current().Child("p"),
 			want:   map[string]any{"p": map[string]any{"a": uint64(1), "b": uint64(2)}},
 			scoped: map[string]any{"a": uint64(1), "b": uint64(2)},
 			err:    `2:6: $.p.a: could not find alias "x"`,
@@ -5186,7 +5190,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, "items: !!seq\n")
-		scoped := yamltest.At(t, dd, paths.Root().Child("items"))
+		scoped := yamltest.At(t, dd, paths.Current().Child("items"))
 
 		got, err := scoped.Decode[[]string](t.Context())
 		require.NoError(t, err)
@@ -5240,19 +5244,19 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 				scoped := defaults()
 
-				err = yamltest.At(t, dd, paths.Root().Child("int")).DecodeInto(t.Context(), &scoped.Int)
+				err = yamltest.At(t, dd, paths.Current().Child("int")).DecodeInto(t.Context(), &scoped.Int)
 				require.NoError(t, err)
 
-				err = yamltest.At(t, dd, paths.Root().Child("uint")).DecodeInto(t.Context(), &scoped.Uint)
+				err = yamltest.At(t, dd, paths.Current().Child("uint")).DecodeInto(t.Context(), &scoped.Uint)
 				require.NoError(t, err)
 
-				err = yamltest.At(t, dd, paths.Root().Child("map")).DecodeInto(t.Context(), &scoped.Map)
+				err = yamltest.At(t, dd, paths.Current().Child("map")).DecodeInto(t.Context(), &scoped.Map)
 				require.NoError(t, err)
 
-				err = yamltest.At(t, dd, paths.Root().Child("config")).DecodeInto(t.Context(), &scoped.Config)
+				err = yamltest.At(t, dd, paths.Current().Child("config")).DecodeInto(t.Context(), &scoped.Config)
 				require.NoError(t, err)
 
-				items, err := dd.Nodes(paths.Root().Child("items").IndexAll())
+				items, err := dd.Nodes(paths.Current().Child("items").IndexAll())
 				require.NoError(t, err)
 
 				for _, item := range items {
@@ -5325,13 +5329,13 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 				value := 1
 
-				err := yamltest.At(t, dd, paths.Root().Child("int")).DecodeInto(t.Context(), &value)
+				err := yamltest.At(t, dd, paths.Current().Child("int")).DecodeInto(t.Context(), &value)
 				require.NoError(t, err)
 				assert.Equal(t, 1, value)
 
 				config := plainConfig{Name: "default", Value: 7}
 
-				err = yamltest.At(t, dd, paths.Root().Child("config")).DecodeInto(t.Context(), &config)
+				err = yamltest.At(t, dd, paths.Current().Child("config")).DecodeInto(t.Context(), &config)
 				require.NoError(t, err)
 				assert.Equal(t, plainConfig{Name: "default", Value: 7}, config)
 
@@ -5428,12 +5432,12 @@ func TestDocument_DecodeInto(t *testing.T) {
 		}{
 			"whole document": {
 				input: "# about the file\n\nname: x\nitems: [a]\n",
-				path:  paths.Root(),
+				path:  paths.Current(),
 				want:  position.New(2, 0),
 			},
 			"scoped node": {
 				input: "a: 1\nwrap:\n  # the list\n  items: [a]\n",
-				path:  paths.Root().Child("wrap"),
+				path:  paths.Current().Child("wrap"),
 				want:  position.New(3, 2),
 			},
 		}
@@ -5888,7 +5892,7 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, d, 1)
 
-		name := yamltest.At(t, d[0], paths.Root().Child("name"))
+		name := yamltest.At(t, d[0], paths.Current().Child("name"))
 
 		got, err := name.Decode[string](t.Context())
 		require.NoError(t, err)
@@ -5920,7 +5924,7 @@ func (plainValidated) Validate() error {
 func TestDocument_ErrorsBindToSource(t *testing.T) {
 	t.Parallel()
 
-	namePath := paths.Root().Child("name")
+	namePath := paths.Current().Child("name")
 
 	newDoc := func(t *testing.T, input string) (*niceyaml.Source, *niceyaml.Node) {
 		t.Helper()
@@ -6046,7 +6050,7 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 
 		source, doc := newDoc(t, "name: a\n")
 
-		_, err := doc.At(paths.Root().Child("missing"))
+		_, err := doc.At(paths.Current().Child("missing"))
 		require.ErrorIs(t, err, paths.ErrNotFound)
 		requireBound(t, source, err)
 	})
@@ -6055,7 +6059,7 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 func TestDocument_ValidatorErrorsResolveInDocument(t *testing.T) {
 	t.Parallel()
 
-	namePath := paths.Root().Child("name")
+	namePath := paths.Current().Child("name")
 
 	source := niceyaml.NewSourceFromString("name: a\n---\nname: b\n")
 	docs, err := source.Documents()
@@ -6145,7 +6149,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 				seen = append(seen, data)
 			}
 
-			b, err := n.At(paths.Root().Child("b"))
+			b, err := n.At(paths.Current().Child("b"))
 			if err != nil {
 				return fmt.Errorf("scope b: %w", err)
 			}
@@ -6271,7 +6275,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 
 		_, err = dd.Decode[plainConfig](t.Context(),
 			niceyaml.WithValidator(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-				return niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name")))
+				return niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name")))
 			})),
 		)
 		require.Error(t, err)
@@ -6282,7 +6286,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
-		valuePath := paths.Root().Child("value")
+		valuePath := paths.Doc().Child("value")
 		scoped := yamltest.At(t, dd, valuePath)
 
 		var got *niceyaml.Node
@@ -6337,7 +6341,7 @@ func TestDocument_Bind(t *testing.T) {
 	second := docs[1]
 	require.NotNil(t, second)
 
-	namePath := paths.Root().Child("name")
+	namePath := paths.Current().Child("name")
 
 	t.Run("nil comes back nil", func(t *testing.T) {
 		t.Parallel()
@@ -6408,11 +6412,11 @@ type hoursConfig struct {
 
 func (h hoursConfig) Validate() error {
 	if h.Open == "" {
-		return niceyaml.NewError("open is required", niceyaml.AtPath(paths.Root().Child("open").Key()))
+		return niceyaml.NewError("open is required", niceyaml.AtPath(paths.Current().Child("open").Key()))
 	}
 
 	if h.Open >= h.Close {
-		return niceyaml.NewError("open must be before close", niceyaml.AtPath(paths.Root().Child("open")))
+		return niceyaml.NewError("open must be before close", niceyaml.AtPath(paths.Current().Child("open")))
 	}
 
 	return nil
@@ -6428,7 +6432,7 @@ func TestDocument_At_Scope(t *testing.T) {
 		    open: "17:00"
 		    close: "09:00"
 	`)
-	hoursPath := paths.Root().Child("spec", "hours")
+	hoursPath := paths.Doc().Child("spec", "hours")
 
 	// The value of spec.hours.open sits on line 4 (index 3) at column 11
 	// (index 10), and the root key open on line 1.
@@ -6458,7 +6462,7 @@ func TestDocument_At_Scope(t *testing.T) {
 		dd := yamltest.FirstDocument(t, input)
 		hours := yamltest.At(t, dd, hoursPath)
 
-		err := hours.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("open"))))
+		err := hours.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("open"))))
 
 		var bound *niceyaml.SourceError
 
@@ -6471,7 +6475,7 @@ func TestDocument_At_Scope(t *testing.T) {
 		assert.Same(t, dd, bound.Document())
 
 		// The whole document resolves the same path at its root.
-		err = dd.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("open"))))
+		err = dd.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("open"))))
 		require.ErrorAs(t, err, &bound)
 
 		rng, ok = bound.Range()
@@ -6487,7 +6491,7 @@ func TestDocument_At_Scope(t *testing.T) {
 		want, err := dd.Ranges(hoursPath.Child("open"))
 		require.NoError(t, err)
 
-		got, err := yamltest.At(t, dd, hoursPath).Ranges(paths.Root().Child("open"))
+		got, err := yamltest.At(t, dd, hoursPath).Ranges(paths.Current().Child("open"))
 		require.NoError(t, err)
 		assert.Equal(t, want, got)
 		assert.Equal(t, openValue, got[0].Start)
@@ -6525,7 +6529,7 @@ func TestDocument_At_Scope(t *testing.T) {
 		dd := yamltest.FirstDocument(t, input)
 
 		reject := niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
-			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("open")))
+			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("open")))
 		})
 
 		err := yamltest.At(t, dd, hoursPath).Validate(t.Context(), reject)
@@ -6547,8 +6551,8 @@ func TestDocument_At_Scope(t *testing.T) {
 
 		open := yamltest.At(
 			t,
-			yamltest.At(t, yamltest.At(t, dd, paths.Root().Child("spec")), paths.Root().Child("hours")),
-			paths.Root().Child("open"),
+			yamltest.At(t, yamltest.At(t, dd, paths.Current().Child("spec")), paths.Current().Child("hours")),
+			paths.Current().Child("open"),
 		)
 		assert.Equal(t, "$.spec.hours.open", open.Path().String())
 
@@ -6590,7 +6594,7 @@ func TestDocument_At_Scope(t *testing.T) {
 				tokens: []string{"open", ":", "17:00", "close", ":", "09:00"},
 			},
 			"scalar on the key line": {
-				path:   paths.Root().Child("open"),
+				path:   paths.Current().Child("open"),
 				span:   position.NewSpan(0, 1),
 				tokens: []string{"1"},
 			},
@@ -6636,7 +6640,7 @@ func TestDocument_At_Scope(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, "text: |\n  a\n  b\nnext: 1\n")
-		text := yamltest.At(t, dd, paths.Root().Child("text"))
+		text := yamltest.At(t, dd, paths.Current().Child("text"))
 
 		assert.Equal(t, position.NewSpan(0, 3), text.Span())
 		require.Len(t, text.Tokens(), 2)
@@ -6670,7 +6674,7 @@ func TestDocument_At_Scope(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				scoped := yamltest.At(t, yamltest.FirstDocument(t, tc.input), paths.Root().Child("c"))
+				scoped := yamltest.At(t, yamltest.FirstDocument(t, tc.input), paths.Current().Child("c"))
 
 				assert.Equal(t, tc.span, scoped.Span())
 				assert.Equal(t, tc.want, scoped.AST().String())
@@ -6693,37 +6697,37 @@ func TestDocument_At_Scope(t *testing.T) {
 		}{
 			"block scalar with trailing blank lines": {
 				input:  "a: |\n  t\n\n\nb: 1\n",
-				path:   paths.Root().Child("a"),
+				path:   paths.Current().Child("a"),
 				span:   position.NewSpan(0, 2),
 				tokens: []string{"|", "t\n"},
 			},
 			"kept block scalar with trailing blank lines": {
 				input:  "a: |+\n  t\n\n\nb: 1\n",
-				path:   paths.Root().Child("a"),
+				path:   paths.Current().Child("a"),
 				span:   position.NewSpan(0, 2),
 				tokens: []string{"|+", "t\n\n\n"},
 			},
 			"multi-line plain scalar": {
 				input:  "a: one\n  two\n  three\nb: 1\n",
-				path:   paths.Root().Child("a"),
+				path:   paths.Current().Child("a"),
 				span:   position.NewSpan(0, 3),
 				tokens: []string{"one two three"},
 			},
 			"multi-line double-quoted scalar": {
 				input:  "a: \"one\n  two\"\nb: 1\n",
-				path:   paths.Root().Child("a"),
+				path:   paths.Current().Child("a"),
 				span:   position.NewSpan(0, 2),
 				tokens: []string{"one two"},
 			},
 			"CRLF source": {
 				input:  "a:\r\n  x: 1\r\n  y: |\r\n    t\r\nb: 1\r\n",
-				path:   paths.Root().Child("a"),
+				path:   paths.Current().Child("a"),
 				span:   position.NewSpan(1, 4),
 				tokens: []string{"x", ":", "1", "y", ":", "|", "t\n"},
 			},
 			"element that ends in a trailing comment": {
 				input:  "- x: 1\n  y: 2 # c\n- b\n",
-				path:   paths.Root().Index(0),
+				path:   paths.Current().Index(0),
 				span:   position.NewSpan(0, 2),
 				tokens: []string{"x", ":", "1", "y", ":", "2", " c"},
 			},
@@ -6761,72 +6765,72 @@ func TestDocument_At_Scope(t *testing.T) {
 		}{
 			"mapping value": {
 				input: "base: &base\n  # c\n  restart: always\n",
-				path:  paths.Root().Child("base"),
+				path:  paths.Current().Child("base"),
 				span:  position.NewSpan(1, 3),
 			},
 			"sequence value": {
 				input: "base: &base\n  # c\n  - 1\n",
-				path:  paths.Root().Child("base"),
+				path:  paths.Current().Child("base"),
 				span:  position.NewSpan(1, 3),
 			},
 			"sequence in the column of the key": {
 				input: "base: &base\n# c\n- 1\n",
-				path:  paths.Root().Child("base"),
+				path:  paths.Current().Child("base"),
 				span:  position.NewSpan(1, 3),
 			},
 			"value of an anchored key": {
 				input: "&k a: &x\n# c\n  b: 1\n",
-				path:  paths.Root().Child("a"),
+				path:  paths.Current().Child("a"),
 				span:  position.NewSpan(1, 3),
 			},
 			"value of an explicit key": {
 				input: "? a\n: &x\n# c\n  b: 2\n",
-				path:  paths.Root().Child("a"),
+				path:  paths.Current().Child("a"),
 				span:  position.NewSpan(2, 4),
 			},
 			"value in a flow mapping": {
 				input: "{a: &x\n# c\n b}\n",
-				path:  paths.Root().Child("a"),
+				path:  paths.Current().Child("a"),
 				span:  position.NewSpan(1, 3),
 			},
 			"sequence entry": {
 				input: "- &e\n  # c\n  name: x\n",
-				path:  paths.Root().Index(0),
+				path:  paths.Current().Index(0),
 				span:  position.NewSpan(1, 3),
 			},
 			"root": {
 				input: "&x\n# c\nb: 1\n",
-				path:  paths.Root(),
+				path:  paths.Current(),
 				span:  position.NewSpan(1, 3),
 			},
 			"anchor below the key and comment left of the key": {
 				input: "x:\n  a:\n    &x\n# c\n    b: 1\n",
-				path:  paths.Root().Child("x", "a"),
+				path:  paths.Current().Child("x", "a"),
 				span:  position.NewSpan(3, 5),
 			},
 			"sequence below an anchor below the key": {
 				input: "x:\n  a:\n    &x\n# c\n  - 1\n",
-				path:  paths.Root().Child("x", "a"),
+				path:  paths.Current().Child("x", "a"),
 				span:  position.NewSpan(3, 5),
 			},
 			"anchor below the key in a sequence entry": {
 				input: "- a:\n    &x\n# c\n    b: 1\n",
-				path:  paths.Root().Index(0).Child("a"),
+				path:  paths.Current().Index(0).Child("a"),
 				span:  position.NewSpan(2, 4),
 			},
 			"anchor below the dash and comment left of the dash": {
 				input: "x:\n  -\n    &x\n# c\n    b: 1\n",
-				path:  paths.Root().Child("x").Index(0),
+				path:  paths.Current().Child("x").Index(0),
 				span:  position.NewSpan(3, 5),
 			},
 			"anchor after a tag and comment left of the key": {
 				input: "x:\n  a: !t &x\n# c\n    b: 1\n",
-				path:  paths.Root().Child("x", "a"),
+				path:  paths.Current().Child("x", "a"),
 				span:  position.NewSpan(1, 4),
 			},
 			"anchor after a tag and comment left of the dash": {
 				input: "x:\n  - !t &x\n# c\n    b: 1\n",
-				path:  paths.Root().Child("x").Index(0),
+				path:  paths.Current().Child("x").Index(0),
 				span:  position.NewSpan(1, 4),
 			},
 		}
@@ -6848,7 +6852,7 @@ func TestDocument_At_Scope(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 		direct := yamltest.At(t, dd, hoursPath)
-		chained := yamltest.At(t, yamltest.At(t, dd, paths.Root().Child("spec")), paths.Root().Child("hours"))
+		chained := yamltest.At(t, yamltest.At(t, dd, paths.Current().Child("spec")), paths.Current().Child("hours"))
 
 		assert.Equal(t, direct.Span(), chained.Span())
 		assert.Equal(t, direct.Tokens(), chained.Tokens())
@@ -6859,7 +6863,7 @@ func TestDocument_At_Scope(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		missing, err := dd.At(paths.Root().Child("spec", "missing"))
+		missing, err := dd.At(paths.Current().Child("spec", "missing"))
 		require.ErrorIs(t, err, paths.ErrNotFound)
 		assert.Contains(t, err.Error(), "$.spec.missing")
 		assert.Nil(t, missing)
@@ -6926,7 +6930,7 @@ func TestDocument_Decode_ValidatorDecodesWithoutHooks(t *testing.T) {
 		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
 
 		readName := niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Node) error {
-			scoped := yamltest.At(t, doc, paths.Root().Child("name"))
+			scoped := yamltest.At(t, doc, paths.Current().Child("name"))
 
 			name, err := scoped.Decode[string](ctx)
 			if err != nil {
@@ -7021,14 +7025,14 @@ func TestDocument_Decode_ScopedValidatorErrorDocument(t *testing.T) {
 	// The validator scopes the Node it gets to the second item and binds
 	// its error there, so the scoped Node holds the error, and the root
 	// of its document is the receiver.
-	itemPath := paths.Root().Child("items").Index(1)
+	itemPath := paths.Doc().Child("items").Index(1)
 
 	scopes := map[string]func(n *niceyaml.Node) (*niceyaml.Node, error){
 		"at": func(n *niceyaml.Node) (*niceyaml.Node, error) {
 			return n.At(itemPath)
 		},
 		"nodes": func(n *niceyaml.Node) (*niceyaml.Node, error) {
-			items, err := n.Nodes(paths.Root().Child("items").IndexAll())
+			items, err := n.Nodes(paths.Current().Child("items").IndexAll())
 			if err != nil {
 				return nil, fmt.Errorf("items: %w", err)
 			}
@@ -7067,7 +7071,7 @@ func TestDocument_Decode_ScopedValidatorErrorDocument(t *testing.T) {
 						return fmt.Errorf("scope: %w", err)
 					}
 
-					return scoped.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("x"))))
+					return scoped.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("x"))))
 				})
 
 				dd := yamltest.FirstDocument(t, "x: 0\nitems:\n  - x: 1\n  - x: 2\n", tc.source...)
@@ -7156,8 +7160,8 @@ func TestNode_At_NotFound(t *testing.T) {
 	doc, err := source.Document()
 	require.NoError(t, err)
 
-	hoursPath := paths.Root().Child("hours")
-	itemsPath := paths.Root().Child("items")
+	hoursPath := paths.Current().Child("hours")
+	itemsPath := paths.Current().Child("items")
 
 	tcs := map[string]struct {
 		// The path of the Node that resolves path, and the path it gets.
@@ -7170,7 +7174,7 @@ func TestNode_At_NotFound(t *testing.T) {
 		near     string
 	}{
 		"a key the root leaves out binds at the first key of the root": {
-			path:     paths.Root().Child("zzz"),
+			path:     paths.Current().Child("zzz"),
 			want:     "c.yaml:2:1: $.zzz: not found",
 			wantPath: "$.zzz",
 			near:     "$",
@@ -7182,7 +7186,7 @@ func TestNode_At_NotFound(t *testing.T) {
 			near:     "$.hours",
 		},
 		"a path below a key the root leaves out binds at the root": {
-			path:     paths.Root().Child("zzz", "yyy"),
+			path:     paths.Current().Child("zzz", "yyy"),
 			want:     "c.yaml:2:1: $.zzz.yyy: not found",
 			wantPath: "$.zzz.yyy",
 			near:     "$",
@@ -7195,7 +7199,7 @@ func TestNode_At_NotFound(t *testing.T) {
 		},
 		"a key the scope leaves out binds at the key of the scope": {
 			scope:    hoursPath,
-			path:     paths.Root().Child("close"),
+			path:     paths.Current().Child("close"),
 			want:     "c.yaml:3:1: $.hours.close: not found",
 			wantPath: "$.hours.close",
 			near:     "$.hours",
@@ -7206,11 +7210,11 @@ func TestNode_At_NotFound(t *testing.T) {
 		},
 		"an index past the end of the scope has no location": {
 			scope: itemsPath,
-			path:  paths.Root().Index(7),
+			path:  paths.Current().Index(7),
 			want:  "c.yaml: resolve $.items[7]: not found",
 		},
 		"a key below a scalar has no location": {
-			path: paths.Root().Child("name", "sub"),
+			path: paths.Current().Child("name", "sub"),
 			want: "c.yaml: resolve $.name.sub: not found",
 		},
 		"a key of a sequence has no location": {
@@ -7224,7 +7228,7 @@ func TestNode_At_NotFound(t *testing.T) {
 			t.Parallel()
 
 			node := doc
-			if !tc.scope.IsRoot() {
+			if tc.scope.Len() > 0 {
 				node = yamltest.At(t, doc, tc.scope)
 			}
 
@@ -7289,7 +7293,7 @@ func TestNode_At_NotFound(t *testing.T) {
 		t.Parallel()
 
 		empty := yamltest.FirstDocumentWithPath(t, "# nothing\n", "e.yaml")
-		path := paths.Root().Child("zzz")
+		path := paths.Current().Child("zzz")
 		want := "e.yaml: resolve $.zzz: not found: document has no content"
 
 		_, err := empty.At(path)
@@ -7314,9 +7318,9 @@ func TestDocument_At_ErrorBoundToReceiver(t *testing.T) {
 	t.Parallel()
 
 	dd := yamltest.FirstDocument(t, "a:\n  b: 1\nc: 2\n")
-	scoped := yamltest.At(t, dd, paths.Root().Child("a"))
+	scoped := yamltest.At(t, dd, paths.Current().Child("a"))
 
-	_, err := scoped.At(paths.Root().Child("missing"))
+	_, err := scoped.At(paths.Current().Child("missing"))
 	require.ErrorIs(t, err, paths.ErrNotFound)
 
 	// At binds the error to its receiver, not to a copy scoped to the
@@ -7326,6 +7330,216 @@ func TestDocument_At_ErrorBoundToReceiver(t *testing.T) {
 	require.ErrorAs(t, err, &bound)
 	assert.Same(t, scoped, bound.Node())
 	assert.Same(t, dd, bound.Document())
+}
+
+func TestDocument_PathAnchors(t *testing.T) {
+	t.Parallel()
+
+	// The hours mapping holds a key `open`, and so does the root, so a
+	// path that resolves from the wrong node selects a node on another
+	// line rather than none.
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		open: 1
+		spec:
+		  hours:
+		    open: 9
+		name: x
+	`))
+
+	hoursPath := paths.Doc().Child("spec", "hours")
+
+	tcs := map[string]struct {
+		scope paths.Path
+		path  paths.Path
+		want  string
+		err   error
+	}{
+		"relative path from a scoped Node": {
+			scope: hoursPath,
+			path:  paths.Current().Child("open"),
+			want:  "$.spec.hours.open",
+		},
+		"absolute path from a scoped Node": {
+			scope: hoursPath,
+			path:  paths.Doc().Child("open"),
+			want:  "$.open",
+		},
+		"absolute path outside the scope": {
+			scope: hoursPath,
+			path:  paths.Doc().Child("name"),
+			want:  "$.name",
+		},
+		"path of the scoped Node itself": {
+			scope: hoursPath,
+			path:  hoursPath,
+			want:  "$.spec.hours",
+		},
+		"current node": {
+			scope: hoursPath,
+			path:  paths.Current(),
+			want:  "$.spec.hours",
+		},
+		"document root from a scoped Node": {
+			scope: hoursPath,
+			path:  paths.Doc(),
+			want:  "$",
+		},
+		"absolute path names no key of the root": {
+			scope: hoursPath,
+			path:  paths.Doc().Child("hours"),
+			err:   paths.ErrNotFound,
+		},
+		"relative path from the root": {
+			scope: paths.Doc(),
+			path:  paths.Current().Child("spec", "hours", "open"),
+			want:  "$.spec.hours.open",
+		},
+		"absolute path from the root": {
+			scope: paths.Doc(),
+			path:  paths.Doc().Child("spec", "hours", "open"),
+			want:  "$.spec.hours.open",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			node := yamltest.At(t, doc, tc.scope)
+
+			got, err := node.At(tc.path)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+
+				_, err = node.Ranges(tc.path)
+				require.ErrorIs(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got.Path().String())
+
+			want := yamltest.At(t, doc, paths.MustParse(tc.want))
+			assert.Equal(t, want.Span(), got.Span())
+
+			nodes, err := node.Nodes(tc.path)
+			require.NoError(t, err)
+			require.Len(t, nodes, 1)
+			assert.Equal(t, tc.want, nodes[0].Path().String())
+
+			ranges, err := node.Ranges(tc.path)
+			require.NoError(t, err)
+
+			wantRanges, err := doc.Ranges(paths.MustParse(tc.want))
+			require.NoError(t, err)
+			assert.Equal(t, wantRanges, ranges)
+
+			// An Error at the path binds where the path resolves, and the
+			// binding reports the path from the root of the document.
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, node.Bind(niceyaml.NewError("bad", niceyaml.AtPath(tc.path))), &bound)
+			require.NoError(t, bound.Unresolved())
+
+			path, ok := bound.Path()
+			require.True(t, ok)
+			assert.Equal(t, tc.want, path.String())
+
+			rng, ok := bound.Range()
+			require.True(t, ok)
+			require.NotEmpty(t, wantRanges)
+			assert.Equal(t, wantRanges[0].Start, rng.Start)
+		})
+	}
+}
+
+func TestDocument_Validate_NodePaths(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString(stringtest.Input(`
+		spec:
+		  containers:
+		    - name: a
+		      image: ""
+		    - name: b
+		      image: nginx
+	`), niceyaml.WithFilePath("m.yaml"))
+
+	doc, err := source.Document()
+	require.NoError(t, err)
+
+	// The check names each image by the path its Node reports, which starts
+	// at `$`, and binds through the Node it got.
+	images := func(selector paths.Path) niceyaml.Validator {
+		return niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			nodes, err := n.Nodes(selector)
+			if err != nil {
+				return fmt.Errorf("images: %w", err)
+			}
+
+			var errs []error
+
+			for _, image := range nodes {
+				got, err := image.Decode[string](ctx)
+				if err != nil {
+					return fmt.Errorf("image: %w", err)
+				}
+
+				if got == "" {
+					errs = append(errs, n.Bind(niceyaml.NewError("image is empty", niceyaml.AtPath(image.Path()))))
+				}
+			}
+
+			return niceyaml.NewSummary(fmt.Sprintf("%d empty images", len(errs)), errs...)
+		})
+	}
+
+	const want = "m.yaml:4:14: $.spec.containers[0].image: image is empty"
+
+	tcs := map[string]struct {
+		scope    paths.Path
+		selector paths.Path
+	}{
+		"root": {
+			scope:    paths.Doc(),
+			selector: paths.Current().Child("spec", "containers").IndexAll().Child("image"),
+		},
+		"scoped": {
+			scope:    paths.Doc().Child("spec"),
+			selector: paths.Current().Child("containers").IndexAll().Child("image"),
+		},
+		"scoped with an absolute selector": {
+			scope:    paths.Doc().Child("spec"),
+			selector: paths.Doc().Child("spec", "containers").IndexAll().Child("image"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			node := yamltest.At(t, doc, tc.scope)
+
+			err := node.Validate(t.Context(), images(tc.selector))
+			require.EqualError(t, err, want)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			path, ok := bound.Path()
+			require.True(t, ok)
+			assert.Equal(t, paths.MustParse("$.spec.containers[0].image"), path)
+
+			pos, ok := bound.Position()
+			require.True(t, ok)
+			assert.Equal(t, position.New(3, 13), pos)
+
+			_, err = node.Decode[any](t.Context(), niceyaml.WithValidator(images(tc.selector)))
+			require.EqualError(t, err, want)
+		})
+	}
 }
 
 func TestDocument_At_FlowCollectionSpan(t *testing.T) {
@@ -7341,19 +7555,19 @@ func TestDocument_At_FlowCollectionSpan(t *testing.T) {
 	}{
 		"flow sequence over several lines": {
 			input:  "a: [\n  1,\n  2,\n]\nb: 3\n",
-			path:   paths.Root().Child("a"),
+			path:   paths.Current().Child("a"),
 			span:   position.NewSpan(0, 4),
 			tokens: []string{"[", "1", ",", "2", ",", "]"},
 		},
 		"flow mapping at the root": {
 			input:  "{\n  \"a\": 1,\n  \"b\": [\n    2\n  ]\n}\n",
-			path:   paths.Root(),
+			path:   paths.Current(),
 			span:   position.NewSpan(0, 6),
 			tokens: []string{"{", "a", ":", "1", ",", "b", ":", "[", "2", "]", "}"},
 		},
 		"flow sequence on one line": {
 			input:  "a: [1, 2]\n",
-			path:   paths.Root().Child("a"),
+			path:   paths.Current().Child("a"),
 			span:   position.NewSpan(0, 1),
 			tokens: []string{"[", "1", ",", "2", "]"},
 		},
@@ -7394,47 +7608,47 @@ func TestDocument_At_ZeroWidthBoundary(t *testing.T) {
 	}{
 		"empty block scalar before a sibling": {
 			input:  "a: |\nb: 1\n",
-			path:   paths.Root().Child("a"),
+			path:   paths.Current().Child("a"),
 			span:   position.NewSpan(0, 1),
 			tokens: []string{"|", ""},
 		},
 		"empty folded scalar before an indented sibling": {
 			input:  "x:\n  a: >\n  b: 1\n",
-			path:   paths.Root().Child("x", "a"),
+			path:   paths.Current().Child("x", "a"),
 			span:   position.NewSpan(1, 2),
 			tokens: []string{">", ""},
 		},
 		"mapping that ends in an empty block scalar": {
 			input:  "x:\n  a: 1\n  b: |\ny: 1\n",
-			path:   paths.Root().Child("x"),
+			path:   paths.Current().Child("x"),
 			span:   position.NewSpan(1, 3),
 			tokens: []string{"a", ":", "1", "b", ":", "|", ""},
 		},
 		"key after an empty block scalar": {
 			input:  "a: |\nb: 1\n",
-			path:   paths.Root().Child("b").Key(),
+			path:   paths.Current().Child("b").Key(),
 			span:   position.NewSpan(1, 2),
 			tokens: []string{"b"},
 		},
 		"implicit null in a mapping": {
 			input: "a:\nb: 1\n",
-			path:  paths.Root().Child("a"),
+			path:  paths.Current().Child("a"),
 			span:  position.NewSpan(0, 1),
 		},
 		"implicit null in a sequence": {
 			input: "- \n- 1\n",
-			path:  paths.Root().Index(0),
+			path:  paths.Current().Index(0),
 			span:  position.NewSpan(0, 1),
 		},
 		"mapping that ends in an implicit null": {
 			input:  "x:\n  a: 1\n  b:\ny: 2\n",
-			path:   paths.Root().Child("x"),
+			path:   paths.Current().Child("x"),
 			span:   position.NewSpan(1, 3),
 			tokens: []string{"a", ":", "1", "b", ":"},
 		},
 		"sequence that ends in an implicit null": {
 			input:  "x:\n  - a\n  -\ny: 1\n",
-			path:   paths.Root().Child("x"),
+			path:   paths.Current().Child("x"),
 			span:   position.NewSpan(1, 3),
 			tokens: []string{"-", "a", "-"},
 		},
@@ -7720,7 +7934,7 @@ func TestDecoder(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, input)
 
-		name, err := dec.Decode[string](t.Context(), yamltest.At(t, dd, paths.Root().Child("name")))
+		name, err := dec.Decode[string](t.Context(), yamltest.At(t, dd, paths.Current().Child("name")))
 		require.NoError(t, err)
 		assert.Equal(t, "test", name)
 		assert.Equal(t, []string{"call"}, order)
@@ -7787,7 +8001,7 @@ func TestNode_Validate(t *testing.T) {
 		var order []string
 
 		dd := yamltest.FirstDocument(t, "meta:\n  name: test\n")
-		scoped := yamltest.At(t, dd, paths.Root().Child("meta"))
+		scoped := yamltest.At(t, dd, paths.Current().Child("meta"))
 
 		err := scoped.Validate(t.Context(),
 			record(&order, "first"),
@@ -7832,9 +8046,9 @@ func TestNode_Validate(t *testing.T) {
 		doc, err := source.Document()
 		require.NoError(t, err)
 
-		scoped := yamltest.At(t, doc, paths.Root().Child("meta"))
+		scoped := yamltest.At(t, doc, paths.Current().Child("meta"))
 		unbound := &fieldValidator{
-			err: niceyaml.WrapError(errNameRequired, niceyaml.AtPath(paths.Root().Child("name"))),
+			err: niceyaml.WrapError(errNameRequired, niceyaml.AtPath(paths.Current().Child("name"))),
 		}
 
 		// A direct call returns the error as the validator wrote it, and
@@ -7854,9 +8068,9 @@ func TestNode_Validate(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, "meta:\n  name: test\n")
-		scoped := yamltest.At(t, dd, paths.Root().Child("meta"))
+		scoped := yamltest.At(t, dd, paths.Current().Child("meta"))
 
-		want := scoped.Bind(niceyaml.WrapError(errNameRequired, niceyaml.AtPath(paths.Root().Child("name"))))
+		want := scoped.Bind(niceyaml.WrapError(errNameRequired, niceyaml.AtPath(paths.Current().Child("name"))))
 
 		assert.Same(t, want, dd.Validate(t.Context(), &fieldValidator{err: want}))
 		assert.Same(t, want, dd.Validate(t.Context(), rejectingValidator(want)))
@@ -7930,7 +8144,7 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("scopes each element of a sequence", func(t *testing.T) {
 		t.Parallel()
 
-		items, err := doc.Nodes(paths.Root().Child("items").IndexAll())
+		items, err := doc.Nodes(paths.Current().Child("items").IndexAll())
 		require.NoError(t, err)
 		require.Len(t, items, 2)
 
@@ -7939,7 +8153,7 @@ func TestNode_Nodes(t *testing.T) {
 		assert.Equal(t, position.NewSpan(1, 3), items[0].Span())
 		assert.Same(t, doc, items[1].Document())
 
-		price, err := items[1].At(paths.Root().Child("price"))
+		price, err := items[1].At(paths.Current().Child("price"))
 		require.NoError(t, err)
 
 		got, err := price.Decode[int](t.Context())
@@ -7949,14 +8163,14 @@ func TestNode_Nodes(t *testing.T) {
 		// The error writes its path from the scope, and the message
 		// carries it from the root of the document, beside the position
 		// it resolved to.
-		err = items[1].Bind(niceyaml.NewError("negative price", niceyaml.AtPath(paths.Root().Child("price"))))
+		err = items[1].Bind(niceyaml.NewError("negative price", niceyaml.AtPath(paths.Current().Child("price"))))
 		require.EqualError(t, err, "m.yaml:5:12: $.items[1].price: negative price")
 	})
 
 	t.Run("scopes each entry a recursive selector finds", func(t *testing.T) {
 		t.Parallel()
 
-		images, err := doc.Nodes(paths.Root().Recursive("image"))
+		images, err := doc.Nodes(paths.Current().Recursive("image"))
 		require.NoError(t, err)
 		require.Len(t, images, 2)
 
@@ -7986,7 +8200,7 @@ func TestNode_Nodes(t *testing.T) {
 		`), niceyaml.WithName("c.yaml")).Document()
 		require.NoError(t, err)
 
-		nodes, err := config.Nodes(paths.Root().RecursiveAll())
+		nodes, err := config.Nodes(paths.Current().RecursiveAll())
 		require.NoError(t, err)
 
 		var gotPaths []string
@@ -8048,7 +8262,7 @@ func TestNode_Nodes(t *testing.T) {
 		`), niceyaml.WithName("w.yaml")).Document()
 		require.NoError(t, err)
 
-		jobs, err := workflow.Nodes(paths.Root().Child("jobs").ChildAll())
+		jobs, err := workflow.Nodes(paths.Current().Child("jobs").ChildAll())
 		require.NoError(t, err)
 		require.Len(t, jobs, 3)
 
@@ -8063,7 +8277,7 @@ func TestNode_Nodes(t *testing.T) {
 
 			// The key decodes as the decoder reads it, so the key 3.10
 			// gives 3.1, while the path keeps the text of the source.
-			key, err := j.At(paths.Root().Key())
+			key, err := j.At(paths.Current().Key())
 			require.NoError(t, err)
 
 			name, err := key.Decode[string](t.Context())
@@ -8092,7 +8306,7 @@ func TestNode_Nodes(t *testing.T) {
 		assert.Equal(t, position.NewSpan(2, 3), jobs[0].Span())
 		assert.Same(t, workflow, jobs[2].Document())
 
-		err = jobs[2].Bind(niceyaml.NewError("unknown runner", niceyaml.AtPath(paths.Root().Child("runs-on"))))
+		err = jobs[2].Bind(niceyaml.NewError("unknown runner", niceyaml.AtPath(paths.Current().Child("runs-on"))))
 		require.EqualError(t, err, "w.yaml:9:14: $.jobs.'3.10'.runs-on: unknown runner")
 
 		uses, err := workflow.Nodes(paths.MustParse("$.jobs.*.steps[*].uses"))
@@ -8100,7 +8314,7 @@ func TestNode_Nodes(t *testing.T) {
 		require.Len(t, uses, 1)
 		assert.Equal(t, "$.jobs.'3.10'.steps[0].uses", uses[0].Path().String())
 
-		keys, err := workflow.Nodes(paths.Root().Child("jobs").ChildAll().Key())
+		keys, err := workflow.Nodes(paths.Current().Child("jobs").ChildAll().Key())
 		require.NoError(t, err)
 		require.Len(t, keys, 3)
 		assert.Equal(t, "$.jobs.build~", keys[1].Path().String())
@@ -8109,7 +8323,7 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("a mapping wildcard on a sequence yields no nodes", func(t *testing.T) {
 		t.Parallel()
 
-		nodes, err := doc.Nodes(paths.Root().Child("items").ChildAll())
+		nodes, err := doc.Nodes(paths.Current().Child("items").ChildAll())
 		require.NoError(t, err)
 		assert.Empty(t, nodes)
 	})
@@ -8119,7 +8333,7 @@ func TestNode_Nodes(t *testing.T) {
 
 		broken := yamltest.FirstDocument(t, "jobs:\n  <<: *missing\n  build: 1\n")
 
-		_, err := broken.Nodes(paths.Root().Child("jobs").ChildAll())
+		_, err := broken.Nodes(paths.Current().Child("jobs").ChildAll())
 		require.ErrorIs(t, err, paths.ErrAlias)
 
 		var bound *niceyaml.SourceError
@@ -8135,7 +8349,7 @@ func TestNode_Nodes(t *testing.T) {
 
 		// The outer entry a comes first, but its c follows the c of the
 		// inner one in the source.
-		nodes, err := nested.Nodes(paths.Root().Recursive("a").Child("c"))
+		nodes, err := nested.Nodes(paths.Current().Recursive("a").Child("c"))
 		require.NoError(t, err)
 		require.Len(t, nodes, 2)
 		assert.Equal(t, "$.a.b.a.c", nodes[0].Path().String())
@@ -8150,7 +8364,7 @@ func TestNode_Nodes(t *testing.T) {
 
 		// The path $.a selects the later entry, so `..a` lists only that
 		// one.
-		entries, err := dup.Nodes(paths.Root().Recursive("a"))
+		entries, err := dup.Nodes(paths.Current().Recursive("a"))
 		require.NoError(t, err)
 		require.Len(t, entries, 1)
 		assert.Equal(t, "$.a", entries[0].Path().String())
@@ -8163,9 +8377,9 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("resolves from the scope of the receiver", func(t *testing.T) {
 		t.Parallel()
 
-		spec := yamltest.At(t, doc, paths.Root().Child("spec"))
+		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
 
-		images, err := spec.Nodes(paths.Root().Recursive("image"))
+		images, err := spec.Nodes(paths.Current().Recursive("image"))
 		require.NoError(t, err)
 		require.Len(t, images, 2)
 		assert.Equal(t, "$.spec.image", images[0].Path().String())
@@ -8174,7 +8388,7 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("a single path yields its one node", func(t *testing.T) {
 		t.Parallel()
 
-		nodes, err := doc.Nodes(paths.Root().Child("spec", "image"))
+		nodes, err := doc.Nodes(paths.Current().Child("spec", "image"))
 		require.NoError(t, err)
 		require.Len(t, nodes, 1)
 		assert.Equal(t, "$.spec.image", nodes[0].Path().String())
@@ -8185,7 +8399,7 @@ func TestNode_Nodes(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "x:\n  a: |\n  b: 1\n")
 
-		nodes, err := dd.Nodes(paths.Root().Child("x", "a"))
+		nodes, err := dd.Nodes(paths.Current().Child("x", "a"))
 		require.NoError(t, err)
 		require.Len(t, nodes, 1)
 		assert.Equal(t, position.NewSpan(1, 2), nodes[0].Span())
@@ -8194,7 +8408,7 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("a path that selects nothing yields no nodes", func(t *testing.T) {
 		t.Parallel()
 
-		nodes, err := doc.Nodes(paths.Root().Child("missing").IndexAll())
+		nodes, err := doc.Nodes(paths.Current().Child("missing").IndexAll())
 		require.NoError(t, err)
 		assert.Empty(t, nodes)
 	})
@@ -8202,7 +8416,7 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("a node through an alias keeps the path as written", func(t *testing.T) {
 		t.Parallel()
 
-		nodes, err := doc.Nodes(paths.Root().Child("ref").IndexAll())
+		nodes, err := doc.Nodes(paths.Current().Child("ref").IndexAll())
 		require.NoError(t, err)
 		require.Len(t, nodes, 1)
 		assert.Equal(t, "$.ref[0]", nodes[0].Path().String())
@@ -8214,13 +8428,13 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("an error at the root of an aliased scope binds at the alias", func(t *testing.T) {
 		t.Parallel()
 
-		ref := yamltest.At(t, doc, paths.Root().Child("ref"))
+		ref := yamltest.At(t, doc, paths.Current().Child("ref"))
 		assert.Equal(t, position.NewSpan(10, 11), ref.Span())
 
 		// The path points at the alias, so the error binds there, where
 		// the document binds the same path, and the view of the scope
 		// holds no line to mark.
-		err := ref.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root())))
+		err := ref.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current())))
 		require.EqualError(t, err, "m.yaml:12:6: $.ref: bad")
 
 		var bound *niceyaml.SourceError
@@ -8228,7 +8442,7 @@ func TestNode_Nodes(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 		assert.False(t, bound.Annotate(ref.View()))
 
-		err = doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("ref"))))
+		err = doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("ref"))))
 		require.EqualError(t, err, "m.yaml:12:6: $.ref: bad")
 	})
 
@@ -8237,7 +8451,7 @@ func TestNode_Nodes(t *testing.T) {
 
 		empty := yamltest.FirstDocument(t, "# only a comment\n")
 
-		_, err := empty.Nodes(paths.Root().IndexAll())
+		_, err := empty.Nodes(paths.Current().IndexAll())
 		require.ErrorIs(t, err, paths.ErrNoDocument)
 
 		var bound *niceyaml.SourceError
@@ -8389,24 +8603,24 @@ func TestNode_ConcurrentPaths(t *testing.T) {
 	`)).Document()
 	require.NoError(t, err)
 
-	spec, err := doc.At(paths.Root().Child("spec"))
+	spec, err := doc.At(paths.Current().Child("spec"))
 	require.NoError(t, err)
 
 	var wg sync.WaitGroup
 
 	for range 8 {
 		wg.Go(func() {
-			node, err := doc.At(paths.Root().Child("items").Index(1).Child("name"))
+			node, err := doc.At(paths.Current().Child("items").Index(1).Child("name"))
 			if assert.NoError(t, err) {
 				assert.Equal(t, position.NewSpan(1, 2), node.Span())
 			}
 
-			items, err := doc.Nodes(paths.Root().Child("items").IndexAll())
+			items, err := doc.Nodes(paths.Current().Child("items").IndexAll())
 			if assert.NoError(t, err) {
 				assert.Len(t, items, 2)
 			}
 
-			ranges, err := spec.Ranges(paths.Root().Child("replicas"))
+			ranges, err := spec.Ranges(paths.Current().Child("replicas"))
 			if assert.NoError(t, err) {
 				want := position.NewRange(position.New(4, 12), position.New(4, 13))
 				assert.Equal(t, position.Ranges{want}, ranges)
@@ -8469,7 +8683,7 @@ func TestErrDecode(t *testing.T) {
 		"mapping value with only a tag": {
 			input: "a: null\nc: !!int\n",
 			decode: func(ctx context.Context, dd *niceyaml.Node) error {
-				node, err := dd.At(paths.Root().Child("c"))
+				node, err := dd.At(paths.Current().Child("c"))
 				if err != nil {
 					return err //nolint:wrapcheck // The test inspects the error as it is.
 				}
@@ -8482,7 +8696,7 @@ func TestErrDecode(t *testing.T) {
 		"sequence item with only a tag": {
 			input: "items:\n  - !!int\n",
 			decode: func(ctx context.Context, dd *niceyaml.Node) error {
-				items, err := dd.Nodes(paths.Root().Child("items").IndexAll())
+				items, err := dd.Nodes(paths.Current().Child("items").IndexAll())
 				if err != nil {
 					return err //nolint:wrapcheck // The test inspects the error as it is.
 				}
@@ -8537,69 +8751,69 @@ func TestErrDecode(t *testing.T) {
 		}{
 			"merge alias the references leave unbound": {
 				input:  "a:\n  <<: *nope\n  b: 1\n",
-				path:   paths.Root(),
+				path:   paths.Current(),
 				source: []niceyaml.SourceOption{refs},
 				line:   1,
 				msg:    "cannot find anchor by alias name nope",
 			},
 			"merge alias after one the references bind": {
 				input:  "a:\n  <<: *base\n  b:\n    <<: *nope\n",
-				path:   paths.Root(),
+				path:   paths.Current(),
 				source: []niceyaml.SourceOption{refs},
 				line:   3,
 				msg:    "cannot find anchor by alias name nope",
 			},
 			"merge of the mapping that holds it": {
 				input: "a: &x\n  <<: *x\n  b: 1\n",
-				path:  paths.Root(),
+				path:  paths.Current(),
 				line:  1,
 				msg:   "cannot find anchor by alias name x",
 			},
 			"merge alias with no anchor": {
 				input: "a:\n  <<: *nope\n  b: 1\n",
-				path:  paths.Root(),
+				path:  paths.Current(),
 				line:  1,
 				msg:   "cannot find anchor by alias name nope",
 			},
 			"merge alias before its anchor": {
 				input: "a:\n  <<: *y\n  b: 1\nc: &y\n  d: 1\n",
-				path:  paths.Root(),
+				path:  paths.Current(),
 				line:  1,
 				msg:   "cannot find anchor by alias name y",
 			},
 			"merge alias in a list of sources": {
 				input: "a: {<<: [{b: 1}, *nope]}\n",
-				path:  paths.Root(),
+				path:  paths.Current(),
 				line:  0,
 				msg:   "cannot find anchor by alias name nope",
 			},
 			"merge alias with no anchor in a scoped decode": {
 				input: "a:\n  <<: *nope\n  b: 1\n",
-				path:  paths.Root().Child("a"),
+				path:  paths.Current().Child("a"),
 				line:  1,
 				msg:   "cannot find anchor by alias name nope",
 			},
 			"merge alias in an anchor the node merges": {
 				input: "b: &b {<<: *nope}\nc: {<<: *b}\n",
-				path:  paths.Root().Child("c"),
+				path:  paths.Current().Child("c"),
 				line:  0,
 				msg:   "cannot find anchor by alias name nope",
 			},
 			"merge of an anchor that holds the node": {
 				input: "a: &x\n  m:\n    <<: *x\n",
-				path:  paths.Root().Child("a", "m"),
+				path:  paths.Current().Child("a", "m"),
 				line:  2,
 				msg:   "cannot find anchor by alias name x",
 			},
 			"merge of an anchor that holds the node after one of the same name": {
 				input: "a: &x {k: 1}\nb: &x\n  j: 2\n  <<: *x\n",
-				path:  paths.Root().Child("b"),
+				path:  paths.Current().Child("b"),
 				line:  3,
 				msg:   "cannot find anchor by alias name x",
 			},
 			"depth limit": {
 				input: "a: " + strings.Repeat("[", 10005) + strings.Repeat("]", 10005) + "\n",
-				path:  paths.Root(),
+				path:  paths.Current(),
 				line:  0,
 				msg:   "exceeded max depth",
 			},
@@ -8666,7 +8880,7 @@ func TestErrDecode(t *testing.T) {
 			"alias to a reference in a scoped decode": {
 				input: "a: 1\nouter:\n  item: *base\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					node, err := dd.At(paths.Root().Child("outer"))
+					node, err := dd.At(paths.Current().Child("outer"))
 					if err != nil {
 						return err //nolint:wrapcheck // The test inspects the error as it is.
 					}
@@ -8682,7 +8896,7 @@ func TestErrDecode(t *testing.T) {
 			"alias to a reference through an anchor in a scoped decode": {
 				input: "m: &m {<<: *base}\nouter:\n  item: *m\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					node, err := dd.At(paths.Root().Child("outer"))
+					node, err := dd.At(paths.Current().Child("outer"))
 					if err != nil {
 						return err //nolint:wrapcheck // The test inspects the error as it is.
 					}
@@ -9049,7 +9263,7 @@ func TestErrDecode(t *testing.T) {
 		dd := yamltest.FirstDocument(t, "value: 1\n")
 
 		rejects := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-			return niceyaml.NewError("too low", niceyaml.AtPath(paths.Root().Child("value")))
+			return niceyaml.NewError("too low", niceyaml.AtPath(paths.Current().Child("value")))
 		})
 
 		_, err := dd.Decode[struct{ Value int }](t.Context(), niceyaml.WithValidator(rejects))
@@ -9167,7 +9381,7 @@ func TestErrDecode(t *testing.T) {
 		tcs := map[string]struct {
 			node *niceyaml.Node
 		}{
-			"scoped": {node: yamltest.At(t, dd, paths.Root().Child("b"))},
+			"scoped": {node: yamltest.At(t, dd, paths.Current().Child("b"))},
 			"root":   {node: dd},
 		}
 
@@ -9199,8 +9413,8 @@ func TestValidatorFunc_Validate(t *testing.T) {
 	other, err := niceyaml.NewSourceFromString("# other\nprice: 0\n", niceyaml.WithName("other.yaml")).Document()
 	require.NoError(t, err)
 
-	pricePath := paths.Root().Child("price")
-	item := yamltest.At(t, doc, paths.Root().Child("items").Index(1))
+	pricePath := paths.Current().Child("price")
+	item := yamltest.At(t, doc, paths.Current().Child("items").Index(1))
 	negative := niceyaml.NewError("negative price", niceyaml.AtPath(pricePath))
 
 	var (
@@ -9299,7 +9513,7 @@ func TestValidatorFunc_Validate(t *testing.T) {
 			return nil
 		})
 		each := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-			items, err := n.Nodes(paths.Root().Child("items").IndexAll())
+			items, err := n.Nodes(paths.Current().Child("items").IndexAll())
 			if err != nil {
 				return err //nolint:wrapcheck // The test inspects the error as it is.
 			}
@@ -9359,14 +9573,14 @@ func TestMultiValidator(t *testing.T) {
 	errC := errors.New("bad c")
 
 	badB := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return niceyaml.WrapError(errB, niceyaml.AtPath(paths.Root().Child("a", "b")))
+		return niceyaml.WrapError(errB, niceyaml.AtPath(paths.Current().Child("a", "b")))
 	})
 	badC := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
 		// A validator that binds its own error, as a schema does.
-		return n.Bind(niceyaml.WrapError(errC, niceyaml.AtPath(paths.Root().Child("a", "c"))))
+		return n.Bind(niceyaml.WrapError(errC, niceyaml.AtPath(paths.Current().Child("a", "c"))))
 	})
 	// A validator of a type of its own that leaves its error unbound.
-	unboundB := &fieldValidator{err: niceyaml.WrapError(errB, niceyaml.AtPath(paths.Root().Child("a", "b")))}
+	unboundB := &fieldValidator{err: niceyaml.WrapError(errB, niceyaml.AtPath(paths.Current().Child("a", "b")))}
 	passing := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
 		return nil
 	})
@@ -9584,12 +9798,12 @@ func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 		},
 		"node with an alias in a document past the limit": {
 			input: yamltest.MergeLevels(7),
-			path:  paths.Root().Child("m7"),
+			path:  paths.Current().Child("m7"),
 			err:   niceyaml.ErrExcessiveAliasing,
 		},
 		"node without an alias in a document past the limit": {
 			input: yamltest.MergeLevels(7),
-			path:  paths.Root().Child("m0"),
+			path:  paths.Current().Child("m0"),
 		},
 		"nested lists": {
 			input: yamltest.AliasLevels(7),
@@ -9611,7 +9825,7 @@ func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, tc.input)
-			if !tc.path.IsRoot() {
+			if tc.path.Len() > 0 {
 				doc = yamltest.At(t, doc, tc.path)
 			}
 
@@ -9690,7 +9904,7 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 	// the scalar between the aliases, so it decodes.
 	manyAliases := "a: &a " + strings.Repeat("x", 2000) + "\n" +
 		"kind: [" + strings.TrimSuffix(strings.Repeat("*a, ", 500), ", ") + "]\n"
-	kind := paths.Root().Child("kind")
+	kind := paths.Current().Child("kind")
 
 	tcs := map[string]struct {
 		err    error
@@ -9827,7 +10041,7 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 				t.Parallel()
 
 				doc := yamltest.FirstDocument(t, tc.input)
-				if !tc.path.IsRoot() {
+				if tc.path.Len() > 0 {
 					doc = yamltest.At(t, doc, tc.path)
 				}
 

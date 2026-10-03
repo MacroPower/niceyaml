@@ -26,8 +26,8 @@ import (
 
 // SelfValidate runs the self-validation step of [Node.DecodeInto] on its
 // own. The step walks v, calls Validate on every value in it that
-// implements [SelfValidator], and puts the paths each one reports under
-// the path of the value in the node. SelfValidate binds the result
+// implements [SelfValidator], and puts the `@` paths each one reports
+// under the path of the value in the node. SelfValidate binds the result
 // through [Node.Bind], as a decode does once it has filled its target,
 // and returns nil when nothing failed. It runs the walk whatever
 // [WithSelfValidation] says, and runs no [Validator].
@@ -293,17 +293,17 @@ type step struct {
 // child returns the place of the field or map entry name of the value
 // at p.
 func (p place) child(name string) place {
-	return p.then(paths.Root().Child(name), false)
+	return p.then(paths.Current().Child(name), false)
 }
 
 // index returns the place of element i of the value at p.
 func (p place) index(i int) place {
-	return p.then(paths.Root().Index(i), false)
+	return p.then(paths.Current().Index(i), false)
 }
 
 // key returns the place of the key of the map entry at p.
 func (p place) key() place {
-	return p.then(paths.Root().Key(), true)
+	return p.then(paths.Current().Key(), true)
 }
 
 // then returns the place one step below p, through selector, which is a
@@ -313,7 +313,7 @@ func (p place) then(selector paths.Path, key bool) place {
 }
 
 // path returns the path of the value at p under the [Node] the walk
-// validates.
+// validates, as an `@` path that reads from that Node.
 func (p place) path() paths.Path {
 	var selectors []paths.Path
 
@@ -323,7 +323,7 @@ func (p place) path() paths.Path {
 
 	slices.Reverse(selectors)
 
-	return paths.Root().Join(selectors...)
+	return paths.Current().Join(selectors...)
 }
 
 // walk validates v and everything below it, with at as the place of v

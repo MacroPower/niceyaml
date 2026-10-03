@@ -1617,7 +1617,7 @@ func TestContent(t *testing.T) {
 	t.Run("wildcard path is an error", func(t *testing.T) {
 		t.Parallel()
 
-		m := matcher.Content(paths.Root().Child("items").IndexAll(), "x")
+		m := matcher.Content(paths.Current().Child("items").IndexAll(), "x")
 		doc := yamltest.FirstDocument(t, stringtest.Input(`items: [x]`))
 
 		_, err := m.Match(t.Context(), doc)
@@ -2074,7 +2074,7 @@ func TestContent_RefusedTargetType(t *testing.T) {
 		A int `yaml:"a"`
 	}
 
-	xPath := paths.Root().Child("x")
+	xPath := paths.Current().Child("x")
 
 	tcs := map[string]struct {
 		matcher matcher.Matcher

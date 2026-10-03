@@ -242,7 +242,7 @@ func TestNode_Kind(t *testing.T) {
 			"  - *n",
 		))
 
-		items, err := doc.Nodes(paths.Root().Child("items").IndexAll())
+		items, err := doc.Nodes(paths.Current().Child("items").IndexAll())
 		require.NoError(t, err)
 
 		got := make([]niceyaml.NodeKind, 0, len(items))

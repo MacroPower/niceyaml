@@ -74,7 +74,17 @@
 // range, so a validator can build one without holding the source.
 // [Error.Error] returns the message alone, with no location in it, and a
 // binding puts the location in front. [FormatError] reads an Error that no
-// binding holds yet, with its path in front as "$.path: msg".
+// binding holds yet, with its path in front as "@.path: msg".
+//
+// A path starts at one of two points, as in RFC 9535 JSONPath. A `$`
+// path, from [paths.Doc], reads from the root of the document. An `@`
+// path, from [paths.Current], reads from the current node: the [Node]
+// that resolves the path, binds an error that carries it, or rebases it.
+// A check written for a type reports `@` paths, which read from the value
+// it checked, and the Node of that value puts its own path in front when
+// it binds them. Every path the package hands out, such as [Node.Path],
+// [Node.PathAt], and [SourceError.Path], starts at `$`, so it names the
+// same value through any Node of the document.
 //
 // An Error is one problem. [WithDetails] adds the errors that explain it,
 // such as its reasons, the forms a value failed to match, or a related
@@ -317,15 +327,16 @@
 // document holds from [Node.Resolver], so checking each item of a list
 // binds those aliases once.
 //
-// A [SelfValidator] writes its paths from its own root. The decode calls
-// Validate on every value in the result that implements it, and puts the
-// paths each one reports under the path of that value in the document.
+// A [SelfValidator] writes `@` paths, which read from the value itself.
+// The decode calls Validate on every value in the result that implements
+// it, and puts the paths each one reports under the path of that value in
+// the document.
 // A type therefore checks its own invariants once, and a document
 // reports the lines of the field, element, or entry that holds it:
 //
 //	func (h Hours) Validate() error {
 //		if h.Close.Before(h.Open) {
-//			return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Root().Child("close")))
+//			return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Current().Child("close")))
 //		}
 //
 //		return nil
@@ -372,13 +383,14 @@
 // [Node.At] returns a Node scoped to the node a path selects, and the
 // same pipeline then runs on that node. Decode reads one value without
 // decoding the whole document, and a validator given to it checks the
-// node. The paths in every error it returns or binds resolve from the
-// node, and the bound error carries them from the root of the document.
+// node. The `@` paths in every error it returns or binds resolve from the
+// node, and the bound error carries them as `$` paths from the root of
+// the document.
 // A check written for a type thus reports the same lines and the same
 // paths whether the type is the whole document or a value inside one. The
 // Node reaches the document it belongs to through [Node.Document]:
 //
-//	hours, err := doc.At(paths.Root().Child("spec", "hours"))
+//	hours, err := doc.At(paths.Doc().Child("spec", "hours"))
 //	if err != nil {
 //		return err
 //	}
@@ -394,8 +406,8 @@
 //
 // A check the caller runs on the value, such as one that needs a registry
 // of known names, binds its result through [Node.Bind], so an [Error]
-// with a path resolves from the node the value came from, and an error
-// with no location points at that node.
+// with an `@` path resolves from the node the value came from, and an
+// error with no location points at that node.
 //
 // All three return errors bound to the source, so a path that selects
 // nothing, a decoding failure, or a validator's [Error] renders its

@@ -18,15 +18,15 @@ import (
 var (
 	_ matcher.Matcher = matcher.Func(nil)
 
-	kindPath       = paths.Root().Child("kind")
-	apiVersionPath = paths.Root().Child("apiVersion")
-	metadataName   = paths.Root().Child("metadata").Child("name")
-	missingPath    = paths.Root().Child("missing")
-	versionPath    = paths.Root().Child("version")
-	twoKeyPath     = paths.Root().Child("2").Key()
-	enabledPath    = paths.Root().Child("enabled")
-	timeoutPath    = paths.Root().Child("timeout")
-	createdPath    = paths.Root().Child("created")
+	kindPath       = paths.Current().Child("kind")
+	apiVersionPath = paths.Current().Child("apiVersion")
+	metadataName   = paths.Current().Child("metadata").Child("name")
+	missingPath    = paths.Current().Child("missing")
+	versionPath    = paths.Current().Child("version")
+	twoKeyPath     = paths.Current().Child("2").Key()
+	enabledPath    = paths.Current().Child("enabled")
+	timeoutPath    = paths.Current().Child("timeout")
+	createdPath    = paths.Current().Child("created")
 )
 
 // pointerMatcher is a [matcher.Matcher] with a pointer receiver, so a nil

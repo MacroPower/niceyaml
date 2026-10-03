@@ -257,7 +257,7 @@ func TestPath_Selectors(t *testing.T) {
 	t.Run("builders", func(t *testing.T) {
 		t.Parallel()
 
-		p := paths.Root().Child("spec", "a.b").Index(-1, 2).ChildAll().IndexAll().Recursive("").RecursiveAll().Key()
+		p := paths.Doc().Child("spec", "a.b").Index(-1, 2).ChildAll().IndexAll().Recursive("").RecursiveAll().Key()
 
 		assert.Equal(t, []paths.Selector{
 			{Kind: paths.SelectorChild, Name: "spec"},
@@ -278,7 +278,7 @@ func TestPath_Selectors(t *testing.T) {
 func buildPath(t *testing.T, sels iter.Seq[paths.Selector]) paths.Path {
 	t.Helper()
 
-	p := paths.Root()
+	p := paths.Doc()
 
 	for sel := range sels {
 		switch sel.Kind {
@@ -313,46 +313,46 @@ func TestPath_Last(t *testing.T) {
 		ok   bool
 	}{
 		"root": {
-			p: paths.Root(),
+			p: paths.Doc(),
 		},
 		"zero value": {},
 		"child": {
-			p:    paths.Root().Child("spec", "replicas"),
+			p:    paths.Doc().Child("spec", "replicas"),
 			want: paths.Selector{Kind: paths.SelectorChild, Name: "replicas"},
 			ok:   true,
 		},
 		"empty name": {
-			p:    paths.Root().Child(""),
+			p:    paths.Doc().Child(""),
 			want: paths.Selector{Kind: paths.SelectorChild},
 			ok:   true,
 		},
 		"index": {
-			p:    paths.Root().Child("items").Index(2),
+			p:    paths.Doc().Child("items").Index(2),
 			want: paths.Selector{Kind: paths.SelectorIndex, Index: 2},
 			ok:   true,
 		},
 		"mapping wildcard": {
-			p:    paths.Root().Child("jobs").ChildAll(),
+			p:    paths.Doc().Child("jobs").ChildAll(),
 			want: paths.Selector{Kind: paths.SelectorChildAll},
 			ok:   true,
 		},
 		"sequence wildcard": {
-			p:    paths.Root().Child("items").IndexAll(),
+			p:    paths.Doc().Child("items").IndexAll(),
 			want: paths.Selector{Kind: paths.SelectorIndexAll},
 			ok:   true,
 		},
 		"recursive": {
-			p:    paths.Root().Recursive("name"),
+			p:    paths.Doc().Recursive("name"),
 			want: paths.Selector{Kind: paths.SelectorRecursive, Name: "name"},
 			ok:   true,
 		},
 		"recursive wildcard": {
-			p:    paths.Root().RecursiveAll(),
+			p:    paths.Doc().RecursiveAll(),
 			want: paths.Selector{Kind: paths.SelectorRecursiveAll},
 			ok:   true,
 		},
 		"key": {
-			p:    paths.Root().Child("jobs", "build").Key(),
+			p:    paths.Doc().Child("jobs", "build").Key(),
 			want: paths.Selector{Kind: paths.SelectorKey},
 			ok:   true,
 		},

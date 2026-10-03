@@ -43,17 +43,19 @@ import (
 // [Node.Decode] and checks the value it gets, as the Validator example
 // shows.
 //
-// An [*Error] the value returns writes its path from the value's own
-// root. The decode puts it under the path of the value in the document.
-// That path names a field by the name go-yaml decoded it under, from its
-// yaml tag, its json tag, or its lowercased name. It names an element by
-// its index and a map entry by its key. A map key validates too, under
-// the path of its entry with a `~` after it, so its errors point at the
-// key rather than the value. The decode reads the roles of the errors as
-// [Rebase] does. A problem with no location points at the value, whether
-// it stands alone or under a summary from [NewSummary], and a detail from
-// [WithDetails] gains no location. A type thus checks its invariants once
-// and reports the right lines in any document:
+// An [*Error] the value returns writes an `@` path, which reads from the
+// value itself. The decode puts it under the path of the value in the
+// document, and leaves a `$` path, which reads from the root of the
+// document, as it is. The path of the value names a field by the name
+// go-yaml decoded it under, from its yaml tag, its json tag, or its
+// lowercased name. It names an element by its index and a map entry by
+// its key. A map key validates too, under the path of its entry with a
+// `~` after it, so its errors point at the key rather than the value. The
+// decode reads the roles of the errors as [Rebase] does. A problem with
+// no location points at the value, whether it stands alone or under a
+// summary from [NewSummary], and a detail from [WithDetails] gains no
+// location. A type thus checks its invariants once and reports the right
+// lines in any document:
 //
 //	type Config struct {
 //		Hours Hours  `yaml:"hours"`
@@ -62,7 +64,7 @@ import (
 //
 //	func (h Hours) Validate() error {
 //		if h.Close.Before(h.Open) {
-//			return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Root().Child("close")))
+//			return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Current().Child("close")))
 //		}
 //
 //		return nil
@@ -100,7 +102,10 @@ import (
 // A caller that calls Validate itself holds an error that no binding
 // holds yet, and its message names no path. Such a caller reads it with
 // [FormatError], as FormatError(err, 0), which puts the path in front of
-// the text the same way.
+// the text the same way. That path is the one the value wrote, so it
+// reads from the value:
+//
+//	@.close: hours check: closes before it opens
 //
 // Any value with a Validate method takes part, including one from a
 // package that names its own check that way, such as a generated
@@ -151,7 +156,7 @@ type SelfValidator interface {
 // one on its own with [Node.Validate]. The Node is the scope that runs
 // the validator: the root of a whole document, or the node a Node from
 // [Node.At] selects, so a validator given to a scoped decode checks that
-// node and its paths resolve from it. A validator that needs the whole
+// node and its `@` paths resolve from it. A validator that needs the whole
 // document reaches it through [Node.Document]. One that can only check
 // a whole document, as a [go.jacobcolvin.com/niceyaml/schema.Registry]
 // can, refuses a scoped Node with an error instead of checking the
@@ -179,12 +184,22 @@ type SelfValidator interface {
 //	}
 //
 // Validate returns its errors bound through the Node it got, with
-// [Node.Bind]. Each error then resolves its paths from the scope the
-// validator wrote them in and names the source the validator read. A
-// caller that calls Validate itself thus gets the error [Node.Validate]
-// returns. A validator that runs another on a Node of its own choosing,
-// such as each element of a list or a document of another file, returns
-// that error as it is:
+// [Node.Bind]. Each error then resolves its `@` paths from that Node and
+// its `$` paths from the root of the document, and names the source the
+// validator read. A caller that calls Validate itself thus gets the error
+// [Node.Validate] returns. [ValidatorFunc] and [MultiValidator] bind for
+// the validators built with them, so a function returns an [*Error] with
+// a path as it is. A validator of a type of its own binds before it
+// returns:
+//
+//	return n.Bind(niceyaml.NewError("unknown kind", niceyaml.AtPath(kindPath)))
+//
+// Node.Validate and a decode bind what a validator leaves unbound and
+// leave a bound error as it is. A caller that runs a validator it did not
+// write therefore runs it with Node.Validate, which binds either kind. A
+// validator that runs another on a Node of its own choosing, such as
+// each element of a list, runs it that way and returns the error as it
+// is:
 //
 //	items, err := n.Nodes(itemsPath)
 //	if err != nil {
@@ -192,24 +207,18 @@ type SelfValidator interface {
 //	}
 //
 //	for _, item := range items {
-//		if err := itemSchema.Validate(ctx, item); err != nil {
+//		if err := item.Validate(ctx, itemSchema); err != nil {
 //			return err // bound at $.items[i]
 //		}
 //	}
 //
-// [ValidatorFunc] and [MultiValidator] bind for the validators built with
-// them, so a function returns an [*Error] with a path as it is. A
-// validator of a type of its own binds before it returns:
+// A path that a Node hands out, such as [Node.Path] of a Node from
+// [Node.Nodes], starts at `$`, so it names the same value through the
+// Node a validator got, whatever the scope of that Node:
 //
-//	return n.Bind(niceyaml.NewError("unknown kind", niceyaml.AtPath(kindPath)))
-//
-// Node.Validate and a decode bind what a validator leaves unbound and
-// leave a bound error as it is. A caller that runs a validator it did not
-// write therefore runs it with Node.Validate, as in
-// item.Validate(ctx, v), which binds either kind. A validator that writes
-// its paths from a scope other than the Node it got, such as the root of
-// the document, binds through the Node of that scope, which
-// [Node.Document] returns for the root.
+//	for _, item := range items {
+//		errs = append(errs, n.Bind(niceyaml.NewError("bad item", niceyaml.AtPath(item.Path()))))
+//	}
 //
 // A validator that runs on a Node from [Node.At] or [Node.Nodes] checks
 // one value, so an error with no location that it returns binds at that
@@ -261,8 +270,8 @@ type SelfValidator interface {
 // A decode hands its validators the Node it decodes, the one the caller
 // holds, so [SourceError.Node] of an error a validator binds through it
 // returns that Node. A Node the validator scopes from it with [Node.At]
-// or [Node.Nodes] binds errors to itself, so their paths resolve from its
-// scope.
+// or [Node.Nodes] binds errors to itself, so their `@` paths resolve from
+// its scope.
 //
 // See [ValidatorFunc], [MultiValidator],
 // [go.jacobcolvin.com/niceyaml/schema.Schema], and
@@ -273,7 +282,7 @@ type Validator interface {
 
 // ValidatorFunc adapts a function to the [Validator] interface.
 //
-//	kindPath := paths.Root().Child("kind")
+//	kindPath := paths.Current().Child("kind")
 //	known := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 //		node, err := n.At(kindPath)
 //		if err != nil {
@@ -293,9 +302,9 @@ type Validator interface {
 //	})
 //
 // The function returns an [*Error] as it is, and Validate binds it
-// through the Node, as [Validator] asks. A function that writes its paths
-// from another scope binds its error through the Node of that scope
-// itself, and Validate leaves a bound error as it is.
+// through the Node, as [Validator] asks. A function may bind its error
+// itself, such as through a Node it scoped, and Validate leaves a bound
+// error as it is.
 type ValidatorFunc func(ctx context.Context, n *Node) error
 
 // Validate implements [Validator]. It calls f and binds the error f
@@ -411,7 +420,7 @@ func newDocuments(src *Source) []*Node {
 		doc.positioned = slices.DeleteFunc(slices.Clone(doc.tokens), func(tk *token.Token) bool {
 			return tk == nil || tk.Position == nil
 		})
-		doc.node = &Node{source: src, doc: doc, content: doc.tokens, span: spans[i]}
+		doc.node = &Node{source: src, doc: doc, content: doc.tokens, base: paths.Doc(), span: spans[i]}
 		doc.state = docstate.New()
 		nodes[i] = doc.node
 	}
@@ -838,11 +847,12 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // selects. [Node.At] returns the one node a path selects, and
 // [Node.Nodes] returns one Node per match of a path that can select
 // several, such as one with a `[*]` or `.*` selector. Every method reads
-// and resolves from the node, so [Node.Decode] decodes it alone,
-// [Node.Validate] runs a [Validator] on it, and [Node.Bind] resolves the
-// paths of an error from it, so a check written for the type of a value
-// reports the same lines whether the value is the whole document or one
-// inside it.
+// from the node and resolves an `@` path from it, so [Node.Decode]
+// decodes it alone, [Node.Validate] runs a [Validator] on it, and
+// [Node.Bind] resolves the `@` paths of an error from it, so a check
+// written for the type of a value reports the same lines whether the
+// value is the whole document or one inside it. A `$` path resolves from
+// the root of the document through any Node.
 //
 // [Node.Decode] returns a new value and [Node.DecodeInto] fills one the
 // caller already holds, such as one pre-populated with defaults. Both run
@@ -865,19 +875,19 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // A Node from [Node.At] or [Node.Nodes] is scoped to the node a path
 // selects. Decode decodes that node alone, which reads one value without
 // decoding the whole document, such as a discriminator field that routes
-// the document. Bind resolves the paths in an error from the node, so a
-// check written for the type of that value reports the right lines. The
-// bound error carries each path from the root of the document, so it
-// names the value as a decode of the whole document does. Any
-// Node reaches the root of its document through [Node.Document], and
-// [Node.Path] is [paths.Root] for the root and the path from it for a
-// scoped Node.
+// the document. Bind resolves the `@` paths in an error from the node, so
+// a check written for the type of that value reports the right lines.
+// The bound error carries each path from the root of the document, as a
+// `$` path, so it names the value as a decode of the whole document does.
+// Any Node reaches the root of its document through [Node.Document], and
+// [Node.Path] is [paths.Doc] for the root and the `$` path to the node
+// for a scoped Node.
 //
 // [Node.DocumentAST], [Node.DocumentIndex], [Node.Preamble], and
 // [Node.FilePath] describe the document as a whole, whatever Node of it a
 // caller holds. [Node.PathAt] reads the whole document too. It returns
-// the path of the node at a position, from the root of the document, so
-// a viewer names the value under its cursor.
+// the `$` path of the node at a position, so a viewer names the value
+// under its cursor.
 //
 // A Node holds the Source it came from, and every decoding method binds
 // the [Error] values it produces to that source, so the errors it returns
@@ -909,8 +919,8 @@ type Node struct {
 	// The tokens of the node: the tokens of the whole document for its
 	// root, and a sub-slice of them for a Node from At.
 	content token.Tokens
-	// The scope: the path from the document root to the node, which is
-	// the root for a whole document.
+	// The scope: the `$` path from the document root to the node, which is
+	// paths.Doc for a whole document.
 	base paths.Path
 	// The lines of the source that the node covers.
 	span position.Span
@@ -974,9 +984,11 @@ func (n *Node) Err() error {
 }
 
 // Resolver returns the [*paths.Resolver] of the whole document the Node
-// belongs to, which every Node of the document shares. It resolves paths
-// from the document root, so a path below the Node starts with
-// [Node.Path], and it follows the aliases and merge keys of the go-yaml
+// belongs to, which every Node of the document shares. It resolves every
+// path from the document root, whether it starts at `$` or `@`, as
+// [paths.Resolver] describes. A path below the Node therefore starts with
+// [Node.Path], which [paths.Path.Join] puts in front of an `@` path. The
+// resolver follows the aliases and merge keys of the go-yaml
 // nodes [Node.AST] and [Node.DocumentAST] return. The document creates
 // the resolver once, when the first of its Nodes needs it, and the
 // resolver binds the aliases of the document then. A [Validator] that
@@ -1041,15 +1053,17 @@ func (n *Node) AST() ast.Node {
 	return n.node
 }
 
-// At returns a [*Node] scoped to the node path selects, with path
-// resolving from the receiver. The Node shares the source and the
-// document with the receiver, and reaches the document through
+// At returns a [*Node] scoped to the node path selects. An `@` path
+// resolves from the receiver, and a `$` path from the root of the
+// document, so a path from [Node.Path] or [Node.PathAt] of any Node of
+// the document scopes the node it names. The Node shares the source and
+// the document with the receiver, and reaches the document through
 // [Node.Document]. A validator given to a scoped decode checks the node,
-// and a path in an error it or the decoded value reports resolves from
-// the node. A check written for a type thus reports the same lines
+// and an `@` path in an error it or the decoded value reports resolves
+// from the node. A check written for a type thus reports the same lines
 // whether the type is the whole document or a value inside one:
 //
-//	hours, err := doc.At(paths.Root().Child("spec", "hours"))
+//	hours, err := doc.At(paths.Doc().Child("spec", "hours"))
 //	if err != nil {
 //		return err
 //	}
@@ -1129,16 +1143,16 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 }
 
 // Nodes returns a [*Node] scoped to each node path selects, in document
-// order, with path resolving from the receiver, so a path with a `[*]`,
-// `.*`, `..name`, or `..*` selector, which [Node.At] rejects, scopes every
-// element of a sequence, every entry of a mapping, every entry with a
-// name at any depth, or every node at any depth. Each Node is scoped as
-// one from Node.At is, and
-// [Node.Path] is the path that selects its node alone, as
-// [paths.Path.Matches] resolves it, so a validator run on each element,
-// or an error bound to it, reports the element it came from:
+// order, so a path with a `[*]`, `.*`, `..name`, or `..*` selector, which
+// [Node.At] rejects, scopes every element of a sequence, every entry of a
+// mapping, every entry with a name at any depth, or every node at any
+// depth. An `@` path resolves from the receiver and a `$` path from the
+// root of the document, as for Node.At. Each Node is scoped as one from
+// Node.At is, and [Node.Path] is the `$` path that selects its node
+// alone, as [paths.Path.Matches] resolves it, so a validator run on each
+// element, or an error bound to it, reports the element it came from:
 //
-//	items, err := doc.Nodes(paths.Root().Child("items").IndexAll())
+//	items, err := doc.Nodes(paths.Current().Child("items").IndexAll())
 //	if err != nil {
 //		return err
 //	}
@@ -1154,7 +1168,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // path of one entry, and the last selector of that path, which
 // [paths.Path.Last] gives, names the entry:
 //
-//	jobs, err := doc.Nodes(paths.Root().Child("jobs").ChildAll())
+//	jobs, err := doc.Nodes(paths.Current().Child("jobs").ChildAll())
 //	if err != nil {
 //		return err
 //	}
@@ -1175,7 +1189,7 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // the receiver, each once, where the source writes it. A check that
 // applies to every key of a document thus visits each key once:
 //
-//	nodes, err := doc.Nodes(paths.Root().RecursiveAll()) // $..*
+//	nodes, err := doc.Nodes(paths.Current().RecursiveAll()) // @..*
 //	if err != nil {
 //		return err
 //	}
@@ -1421,11 +1435,13 @@ func (b *boundsFinder) consider(tk *token.Token) {
 	}
 }
 
-// Path returns the scope of the [Node]: the path from the document root
-// to the node, which is [paths.Root] for the root Node of a document and
-// the joined paths for one from [Node.At]. A Node from [Node.Nodes]
+// Path returns the scope of the [Node]: the `$` path from the document
+// root to the node, which is [paths.Doc] for the root Node of a document
+// and the joined paths for one from [Node.At]. A Node from [Node.Nodes]
 // reports the path that selects its node alone, so the Node for the first
-// match of `$.items[*]` reports `$.items[0]`.
+// match of `$.items[*]` reports `$.items[0]`. The path starts at `$`, so
+// it goes back to [Node.At], [Node.Ranges], or [AtPath] through any Node
+// of the document and names the same node.
 func (n *Node) Path() paths.Path {
 	return n.base
 }
@@ -1550,15 +1566,15 @@ func (n *Node) Lines() line.Lines {
 // token [paths.Path.Token] resolves, one per line the token spans, without
 // the spaces around its content. They are the ranges [SourceError.Excerpt]
 // highlights for an [Error] built with [AtPath] at that path, and the path
-// resolves from the scope of the Node, as it does in such an Error. A path
-// from [SourceError.Path] reads from the root of the document, so the
-// Node from [SourceError.Document] resolves it. A
-// scalar covers every line of its text, a block scalar its indicator, a
-// mapping its first key, and a sequence its first element. A path from
+// resolves as it does in such an Error: an `@` path from the scope of the
+// Node, and a `$` path, such as one from [SourceError.Path], from the root
+// of the document. A scalar covers every line of its text, a block scalar
+// its indicator, a mapping its first key, and a sequence its first
+// element. A path from
 // [paths.Path.Key] covers the key of the entry rather than its value.
 // The ranges mark where the value starts on a view of the source:
 //
-//	ranges, err := doc.Ranges(paths.Root().Child("spec", "replicas"))
+//	ranges, err := doc.Ranges(paths.Doc().Child("spec", "replicas"))
 //	if err != nil {
 //		return err
 //	}
@@ -1591,10 +1607,10 @@ func (n *Node) Ranges(path paths.Path) (position.Ranges, error) {
 }
 
 // pathLocation returns the location of the token that path resolves to in
-// the document, through [paths.Path.Token], with path resolving from the
-// scope. The location holds the token and its position. An error from
-// [paths.Path.Token] names the path already and comes back as it is, and
-// a token without a position is [ErrNoLocation].
+// the document, through [paths.Path.Token], with an `@` path resolving
+// from the scope. The location holds the token and its position. An error
+// from [paths.Path.Token] names the path already and comes back as it is,
+// and a token without a position is [ErrNoLocation].
 func (n *Node) pathLocation(path paths.Path) (location, error) {
 	tk, err := n.doc.pathResolver().Token(n.base.Join(path))
 	if err != nil {
@@ -1611,7 +1627,7 @@ func (n *Node) pathLocation(path paths.Path) (location, error) {
 
 // nearestLocation returns the location an error binds at when its path
 // names a key the document leaves out: the key of the mapping that lacks
-// it, as [paths.Resolver.Nearest] finds that mapping, with path
+// it, as [paths.Resolver.Nearest] finds that mapping, with an `@` path
 // resolving from the scope. The reason is the error the path failed to
 // resolve with. It reports false when that reason is not
 // [paths.ErrNotFound], when no mapping lacks the key, and when the key of
@@ -1733,7 +1749,8 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 }
 
 // Bind binds err to the document's source, with the paths in err
-// resolving in this document from its scope. It resolves every location
+// resolving in this document: an `@` path from the scope of the Node, and
+// a `$` path from the root of the document. It resolves every location
 // in err as it binds, so the position [SourceError.Error] reports and the
 // range [SourceError.Range] returns are fixed from then on, and
 // [SourceError.Excerpt] returns the excerpt as a view for the caller to
@@ -1742,7 +1759,7 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 // The Node methods bind the errors they return already. Bind is for an
 // error built elsewhere, such as a validator's [*Error] with a path, or
 // one from a check the caller runs on a value it took from the document.
-// Such an error writes its path from the value, so the Node scoped to
+// Such an error writes an `@` path from the value, so the Node scoped to
 // that value with [Node.At] binds it, and a check written for a type
 // takes a pointer to it and goes with any decode of that type:
 //
@@ -1759,22 +1776,24 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 //	return item.Bind(check(value))
 //
 // The message of a bound [*Error] carries its path from the root of the
-// document, behind the position the path resolved to. A Node from
-// [Node.At] or [Node.Nodes] puts its own [Node.Path] in front of each
-// path in err, as [Rebase] does. A check that wrote `$.price` thus
-// reports `$.items[1].price` when the Node at `$.items[1]` binds it, in
-// the message and in [SourceError.Path], as a decode of the whole
-// document reports it. The paths of a join, of the errors a summary from
-// [NewSummary] heads, and of the details from [WithDetails] change the
-// same way. An Error writes no path into its own message, so text that a
-// wrapper such as [fmt.Errorf] added around a located Error holds none,
-// and the bound message names the joined path once, in front of that
-// text.
+// document, as a `$` path, behind the position the path resolved to. The
+// Node puts its own [Node.Path] in front of each `@` path in err, as
+// [Rebase] does, and leaves a `$` path as it is. A check that wrote
+// `@.price` thus reports `$.items[1].price` when the Node at `$.items[1]`
+// binds it, in the message and in [SourceError.Path], as a decode of the
+// whole document reports it. A path that names the value by its place in
+// the document, such as the [Node.Path] of another Node, starts at `$`
+// and binds through any Node of the document. The paths of a join, of the
+// errors a summary from [NewSummary] heads, and of the details from
+// [WithDetails] change the same way. An Error writes no path into its own
+// message, so text that a wrapper such as [fmt.Errorf] added around a
+// located Error holds none, and the bound message names the joined path
+// once, in front of that text.
 //
 // A Node from Node.At or Node.Nodes stands for one value, so a problem
 // with no location that it binds is about that value. The Node binds
 // such a problem at itself, as it binds an Error with [AtPath] of
-// [paths.Root]. A check that returns a plain error thus reports
+// [paths.Current]. A check that returns a plain error thus reports
 // `$.items[1]` and the position of that item. The Node reads the roles
 // the errors declare, problem by problem, as [Rebase] does:
 //
@@ -2090,11 +2109,11 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // !!int tag, such as `!!int 0x10`, decodes into any integer type, as the
 // integer alone does.
 // YAML decoding errors, and [Error] values from the validators, come back
-// bound to the source as [SourceError] values, with a path in them
+// bound to the source as [SourceError] values, with an `@` path in them
 // resolving from the scope. Every error of the decode itself matches
 // [ErrDecode], which lists them. A value the go-yaml decoder rejects,
-// such as one that does not read as the target type, carries the path
-// of that value, from the root of the document, so
+// such as one that does not read as the target type, carries the `$`
+// path of that value, so
 // [SourceError.Path] reports it and the message names the value, as an
 // error from a [Validator] or a [SelfValidator] at that value does:
 //
@@ -2173,8 +2192,8 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // UnmarshalText method, or an UnmarshalJSON method under
 // [yaml.UseJSONUnmarshaler], or is a [time.Duration], which the decoder
 // parses with [time.ParseDuration]. DecodeInto finds the value and
-// binds the error at its path, so [SourceError.Path] reports the path
-// from the root of the document and the message names the value:
+// binds the error at its path, so [SourceError.Path] reports the `$`
+// path of the value and the message names the value:
 //
 //	config.yaml:7:14: $.servers[1].timeout: time: invalid duration "soon"
 //
@@ -2729,23 +2748,21 @@ func viewsOf[T ast.Node](nodes []T, view func(T) (T, bool)) ([]T, bool) {
 // bindDecodeError binds an error from the decoder to the source. A
 // [yaml.Error] at a token of the source binds as an [*Error] that
 // matches [ErrDecode], with the message [rejectionMessage]
-// writes for it. The Error carries the location
-// [Node.rejectionLocation] gives the token, which is the path of the
-// node the decoder names by it. That path reads from the root of the
-// document, so the Node binds the Error with no scope in front of the
-// path. Any other error binds with the location it carries, if any, such
-// as one a value's own UnmarshalYAML returns, or one the decoder reports
-// without a token of the source. It matches ErrDecode too, as
-// [asDecodeError] returns it, so the error of a canceled context binds
-// as it is. An error that [Node.locateDecodeError] put under a path
+// writes for it. The Error carries the location [Node.rejectionLocation]
+// gives the token, which is the path of the node the decoder names by it.
+// That path starts at `$`, so the Node binds the Error with no scope in
+// front of the path. Any other error binds with the location it carries,
+// if any, such as one a value's own UnmarshalYAML returns, or one the
+// decoder reports without a token of the source. It matches ErrDecode
+// too, as [asDecodeError] returns it, so the error of a canceled context
+// binds as it is. An error that [Node.locateDecodeError] put under a path
 // binds at that path. The decoder returns the error of a value that
 // decodes itself, and one for a target type whose definition it
 // refuses, as plain errors. It builds the mapping a field tagged inline
-// decodes from,
-// with no token for the mapping or for its keys, around the values of
-// the source. So it returns a [yaml.Error] with no token for a key of
-// an inline map, such as the key `name` beside a map[int]int, and for
-// an inline field whose type cannot hold a mapping, such as an int. A
+// decodes from, with no token for the mapping or for its keys, around the
+// values of the source. So it returns a [yaml.Error] with no token for a
+// key of an inline map, such as the key `name` beside a map[int]int, and
+// for an inline field whose type cannot hold a mapping, such as an int. A
 // [yaml.Error] for a value of an inline map has the token of that
 // value, so it binds as it does for any other value. Only a
 // [yaml.Error] the decoder returns itself converts, so a [yaml.Error]
@@ -2772,9 +2789,9 @@ func (n *Node) bindDecodeError(err error) error {
 	rejected := decodeError{err: yamlMessageError{err: yamlErr, msg: tree.restoreNames(rejectionMessage(yamlErr))}}
 	located := WrapError(rejected, n.rejectionLocation(yamlErr.GetToken())...)
 
-	// The path reads from the root of the document, so the scope of n
-	// does not go in front of it.
-	return bindTree(located, binder{src: n.source, node: n, rooted: true})
+	// The path starts at `$`, so the scope of n does not go in front of
+	// it.
+	return bindTree(located, binder{src: n.source, node: n})
 }
 
 // holdsToken reports whether tk is a token of the source's parse. That is
@@ -3005,7 +3022,7 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 // discriminator field such as kind. A number decodes into a string in its
 // canonical spelling, so 1.10 reads as "1.1" and 0x10 as "16":
 //
-//	kindPath := paths.Root().Child("kind")
+//	kindPath := paths.Current().Child("kind")
 //	for _, doc := range docs {
 //		node, err := doc.At(kindPath)
 //		if err != nil {

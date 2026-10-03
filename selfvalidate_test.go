@@ -22,7 +22,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// hours validates itself with a path written from its own root.
+// hours validates itself with an `@` path that reads from the hours.
 type hours struct {
 	Open  string `yaml:"open"`
 	Close string `yaml:"close"`
@@ -30,7 +30,7 @@ type hours struct {
 
 func (h hours) Validate() error {
 	if h.Close < h.Open {
-		return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Root().Child("close")))
+		return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Current().Child("close")))
 	}
 
 	return nil
@@ -52,8 +52,24 @@ func (h wrappedHours) Validate() error {
 	return nil
 }
 
-// schedule validates itself with a summary of its violations, each with a
-// path written from its own root.
+// anchoredOpen validates itself with an error at a path whose anchor its
+// open field names: the `$` path of the root key name for "doc", and the
+// `@` path of its own open field otherwise.
+type anchoredOpen struct {
+	Open string `yaml:"open"`
+}
+
+func (a anchoredOpen) Validate() error {
+	path := paths.Current().Child("open")
+	if a.Open == "doc" {
+		path = paths.Doc().Child("name")
+	}
+
+	return niceyaml.NewError("bad open", niceyaml.AtPath(path))
+}
+
+// schedule validates itself with a summary of its violations, each with an
+// `@` path that reads from the schedule.
 type schedule struct {
 	Open  string `yaml:"open"`
 	Close string `yaml:"close"`
@@ -63,19 +79,19 @@ func (s schedule) Validate() error {
 	var errs []error
 
 	if s.Open == "" {
-		errs = append(errs, niceyaml.NewError("open is empty", niceyaml.AtPath(paths.Root().Child("open"))))
+		errs = append(errs, niceyaml.NewError("open is empty", niceyaml.AtPath(paths.Current().Child("open"))))
 	}
 
 	if s.Close == "" {
-		errs = append(errs, niceyaml.NewError("close is empty", niceyaml.AtPath(paths.Root().Child("close"))))
+		errs = append(errs, niceyaml.NewError("close is empty", niceyaml.AtPath(paths.Current().Child("close"))))
 	}
 
 	return niceyaml.NewSummary("invalid schedule", errs...)
 }
 
 // conflictingSchedule validates itself with one problem that carries no
-// location and names the values in conflict as details, each with a path
-// written from its own root.
+// location and names the values in conflict as details, each with an `@`
+// path that reads from the schedule.
 type conflictingSchedule struct {
 	Open  string `yaml:"open"`
 	Close string `yaml:"close"`
@@ -83,8 +99,8 @@ type conflictingSchedule struct {
 
 func (conflictingSchedule) Validate() error {
 	return niceyaml.NewError("schedule conflicts", niceyaml.WithDetails(
-		niceyaml.NewError("opens here", niceyaml.AtPath(paths.Root().Child("open"))),
-		niceyaml.NewError("closes here", niceyaml.AtPath(paths.Root().Child("close"))),
+		niceyaml.NewError("opens here", niceyaml.AtPath(paths.Current().Child("open"))),
+		niceyaml.NewError("closes here", niceyaml.AtPath(paths.Current().Child("close"))),
 	))
 }
 
@@ -96,7 +112,7 @@ type item struct {
 
 func (it *item) Validate() error {
 	if it.Price < 0 {
-		return niceyaml.NewError("negative price", niceyaml.AtPath(paths.Root().Child("price")))
+		return niceyaml.NewError("negative price", niceyaml.AtPath(paths.Current().Child("price")))
 	}
 
 	return nil
@@ -109,7 +125,7 @@ type signed struct {
 
 func (s signed) Validate() error {
 	if s.N < 0 {
-		return niceyaml.NewError(fmt.Sprintf("negative %d", s.N), niceyaml.AtPath(paths.Root().Child("n")))
+		return niceyaml.NewError(fmt.Sprintf("negative %d", s.N), niceyaml.AtPath(paths.Current().Child("n")))
 	}
 
 	return nil
@@ -145,7 +161,7 @@ type Named struct {
 
 func (n Named) Validate() error {
 	if n.Name == "" {
-		return niceyaml.NewError("name required", niceyaml.AtPath(paths.Root().Child("name")))
+		return niceyaml.NewError("name required", niceyaml.AtPath(paths.Current().Child("name")))
 	}
 
 	return nil
@@ -320,7 +336,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		// FormatError reads the path from the Error it wraps.
 		unbound := wrappedHours{Open: "09:00", Close: "08:00"}.Validate()
 		require.EqualError(t, unbound, "hours check: closes before it opens")
-		assert.Equal(t, "$.close: hours check: closes before it opens", niceyaml.FormatError(unbound, 0))
+		assert.Equal(t, "@.close: hours check: closes before it opens", niceyaml.FormatError(unbound, 0))
 	})
 
 	t.Run("the errors a summary under a field heads report the joined path", func(t *testing.T) {
@@ -398,7 +414,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.EqualError(t, err, "cafe.yaml:2:3: $.schedule: schedule conflicts")
 		assert.Equal(t, want, report(err))
 
-		scoped := yamltest.At(t, doc, paths.Root().Child("schedule")).Bind(conflictingSchedule{}.Validate())
+		scoped := yamltest.At(t, doc, paths.Current().Child("schedule")).Bind(conflictingSchedule{}.Validate())
 		require.EqualError(t, scoped, err.Error())
 		assert.Equal(t, niceyaml.FormatError(err, 1), niceyaml.FormatError(scoped, 1))
 	})
@@ -988,7 +1004,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		doc, err := source.Document()
 		require.NoError(t, err)
 
-		_, err = yamltest.At(t, doc, paths.Root().Child("spec")).Decode[nested](t.Context())
+		_, err = yamltest.At(t, doc, paths.Current().Child("spec")).Decode[nested](t.Context())
 		require.EqualError(t, err, "cafe.yaml:4:14: $.spec.items[1].price: negative price")
 	})
 
@@ -2236,7 +2252,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			},
 			"maps below a node at a path": {
 				input: "spec:\n  a:\n    0x10: {price: -1}\n",
-				at:    paths.Root().Child("spec"),
+				at:    paths.Current().Child("spec"),
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
 					_, err := dd.Decode[map[string]map[float64]item](ctx)
 
@@ -2450,7 +2466,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		_, err := dd.Decode[withPort](t.Context())
 		require.EqualError(t, err, "1:7: $.port: port out of range")
 
-		scoped := yamltest.At(t, dd, paths.Root().Child("port"))
+		scoped := yamltest.At(t, dd, paths.Current().Child("port"))
 
 		_, err = scoped.Decode[port](t.Context())
 		require.EqualError(t, err, "1:7: $.port: port out of range")
@@ -2722,6 +2738,61 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestDocument_Decode_SelfValidatorAnchors(t *testing.T) {
+	t.Parallel()
+
+	type config struct {
+		Spec struct {
+			Hours anchoredOpen `yaml:"hours"`
+		} `yaml:"spec"`
+	}
+
+	tcs := map[string]struct {
+		open string
+		// The text FormatError gives the error the value returns, and the
+		// message of the error a decode returns.
+		wantUnbound string
+		want        string
+	}{
+		"relative path": {
+			open:        "current",
+			wantUnbound: "@.open: bad open",
+			want:        "c.yaml:3:11: $.spec.hours.open: bad open",
+		},
+		"absolute path": {
+			open:        "doc",
+			wantUnbound: "$.name: bad open",
+			want:        "c.yaml:4:7: $.name: bad open",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(
+				"spec:\n  hours:\n    open: "+tc.open+"\nname: x\n",
+				niceyaml.WithName("c.yaml"),
+			)
+
+			doc, err := source.Document()
+			require.NoError(t, err)
+
+			unbound := anchoredOpen{Open: tc.open}.Validate()
+			assert.Equal(t, tc.wantUnbound, niceyaml.FormatError(unbound, 0))
+
+			_, err = doc.Decode[config](t.Context())
+			require.EqualError(t, err, tc.want)
+
+			// A decode of the hours alone reports the same place.
+			hours := yamltest.At(t, doc, paths.Doc().Child("spec", "hours"))
+
+			_, err = hours.Decode[anchoredOpen](t.Context())
+			require.EqualError(t, err, tc.want)
+		})
+	}
 }
 
 func TestNode_Decode_SelfValidatorContext(t *testing.T) {
@@ -3012,7 +3083,7 @@ func TestNode_SelfValidate_Node(t *testing.T) {
 				doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("app.yaml")).Document()
 				require.NoError(t, err)
 
-				return yamltest.At(t, doc, paths.Root().Child("db"))
+				return yamltest.At(t, doc, paths.Current().Child("db"))
 			},
 			v:   &database{Host: "localhost"},
 			err: "app.yaml:1:1: $.db.password: password is required",
@@ -3024,7 +3095,7 @@ func TestNode_SelfValidate_Node(t *testing.T) {
 				doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("app.yaml")).Document()
 				require.NoError(t, err)
 
-				return yamltest.At(t, doc, paths.Root().Child("upstreams"))
+				return yamltest.At(t, doc, paths.Current().Child("upstreams"))
 			},
 			v: &map[string]upstream{
 				"a": {URL: "http://a"},
@@ -3246,7 +3317,7 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 
 			n := yamltest.FirstDocument(t, tc.input, tc.source...)
 			if len(tc.at) > 0 {
-				n = yamltest.At(t, n, paths.Root().Child(tc.at...))
+				n = yamltest.At(t, n, paths.Current().Child(tc.at...))
 			}
 
 			decoded := n.DecodeInto(t.Context(), tc.value(), tc.opts...)
@@ -3542,7 +3613,7 @@ type labels map[string]string
 func (l labels) Validate() error {
 	for k, v := range l {
 		if v == "" {
-			return niceyaml.NewError("empty label", niceyaml.AtPath(paths.Root().Child(k)))
+			return niceyaml.NewError("empty label", niceyaml.AtPath(paths.Current().Child(k)))
 		}
 	}
 
@@ -3661,7 +3732,7 @@ type database struct {
 
 func (d database) Validate() error {
 	if d.Password == "" {
-		return niceyaml.NewError("password is required", niceyaml.AtPath(paths.Root().Child("password")))
+		return niceyaml.NewError("password is required", niceyaml.AtPath(paths.Current().Child("password")))
 	}
 
 	return nil
@@ -3674,7 +3745,10 @@ type upstream struct {
 
 func (u upstream) Validate() error {
 	if !strings.HasPrefix(u.URL, "http") {
-		return niceyaml.NewError(fmt.Sprintf("url %q is not http", u.URL), niceyaml.AtPath(paths.Root().Child("url")))
+		return niceyaml.NewError(
+			fmt.Sprintf("url %q is not http", u.URL),
+			niceyaml.AtPath(paths.Current().Child("url")),
+		)
 	}
 
 	return nil

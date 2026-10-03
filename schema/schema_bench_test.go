@@ -89,7 +89,7 @@ func BenchmarkSchema_Validate_AliasedItems(b *testing.B) {
 		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()
 		require.NoError(b, err)
 
-		nodes, err := doc.Nodes(paths.Root().Child("items").IndexAll())
+		nodes, err := doc.Nodes(paths.Current().Child("items").IndexAll())
 		require.NoError(b, err)
 
 		dec := niceyaml.NewDecoder(niceyaml.WithValidator(s))

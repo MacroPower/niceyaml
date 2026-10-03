@@ -195,80 +195,98 @@ func TestResolver_NodeFrom(t *testing.T) {
 		"child": {
 			input: "a:\n  b:\n    c: x\n",
 			from:  "$.a",
-			path:  "$.b.c",
+			path:  "@.b.c",
 			want:  "x",
 		},
 		"index": {
 			input: "a: [x, [y, z]]\n",
 			from:  "$.a",
-			path:  "$[1][0]",
+			path:  "@[1][0]",
 			want:  "y",
 		},
-		"root path selects the node itself": {
+		"current path selects the node itself": {
 			input: "a:\n  b: x\n",
 			from:  "$.a.b",
-			path:  "$",
+			path:  "@",
 			want:  "x",
 		},
 		"from a node an alias leads to": {
 			input: "base: &b {k: {v: x}}\nref: *b\n",
 			from:  "$.ref",
-			path:  "$.k.v",
+			path:  "@.k.v",
 			want:  "x",
 		},
 		"key a merge brings in": {
 			input: "base: &b {k: x}\nm:\n  <<: *b\n  own: 1\n",
 			from:  "$.m",
-			path:  "$.k",
+			path:  "@.k",
 			want:  "x",
 		},
 		"from a tagged mapping": {
 			input: "a: !!map {b: x}\n",
 			from:  "$.a",
-			path:  "$.b",
+			path:  "@.b",
 			want:  "x",
 		},
 		"key of an entry": {
 			input: "a:\n  b: x\n",
 			from:  "$.a",
-			path:  "$.b~",
+			path:  "@.b~",
 			want:  "b",
 		},
 		"leading key selects the node itself": {
 			input: "a:\n  b: x\n",
 			from:  "$.a.b",
-			path:  "$~",
+			path:  "@~",
 			want:  "x",
 		},
 		"unknown alias": {
 			input: "a:\n  b: *nope\n",
 			from:  "$.a",
-			path:  "$.b",
+			path:  "@.b",
 			err:   paths.ErrAlias,
 		},
 		"wildcard": {
 			input: "a: [x, y]\n",
 			from:  "$.a",
-			path:  "$[*]",
+			path:  "@[*]",
 			err:   paths.ErrWildcard,
 		},
 		"mapping wildcard": {
 			input: "a: {x: 1}\n",
 			from:  "$.a",
-			path:  "$.*",
+			path:  "@.*",
 			err:   paths.ErrWildcard,
 		},
 		"recursive wildcard": {
 			input: "a: {x: 1}\n",
 			from:  "$.a",
-			path:  "$..*",
+			path:  "@..*",
 			err:   paths.ErrWildcard,
 		},
 		"missing path": {
 			input: "a:\n  b: x\n",
 			from:  "$.a",
-			path:  "$.c",
+			path:  "@.c",
 			err:   paths.ErrNotFound,
+		},
+		"absolute path reads from the root": {
+			input: "a:\n  b: x\nc: y\n",
+			from:  "$.a",
+			path:  "$.c",
+			want:  "y",
+		},
+		"absolute path misses where the node holds the key": {
+			input: "a:\n  b: x\n",
+			from:  "$.a",
+			path:  "$.b",
+			err:   paths.ErrNotFound,
+		},
+		"doc selects the root": {
+			input: "a: x\n",
+			from:  "$.a",
+			path:  "$",
+			want:  "a: x",
 		},
 	}
 
@@ -297,7 +315,7 @@ func TestResolver_NodeFrom(t *testing.T) {
 
 			// A `~` at the start of the path selects the start node, where
 			// the joined path selects the key of its entry.
-			if strings.HasPrefix(tc.path, "$~") {
+			if strings.HasPrefix(tc.path, "@~") {
 				return
 			}
 
@@ -315,10 +333,15 @@ func TestResolver_NodeFrom(t *testing.T) {
 
 		r := paths.NewResolver(file.Docs[0])
 
-		for _, path := range []paths.Path{paths.Root(), paths.Root().Child("a"), paths.Root().Key()} {
+		for _, path := range []paths.Path{paths.Current(), paths.Current().Child("a"), paths.Current().Key()} {
 			_, err := r.NodeFrom(nil, path)
 			require.ErrorIs(t, err, paths.ErrNotFound, path.String())
 		}
+
+		// A `$` path reads from the root, so a nil node plays no part.
+		node, err := r.NodeFrom(nil, paths.Doc().Child("a"))
+		require.NoError(t, err)
+		assert.Equal(t, "x", node.String())
 	})
 }
 
@@ -575,7 +598,7 @@ func TestResolver_Nearest(t *testing.T) {
 			assert.Equal(t, tc.want != "", ok)
 
 			if !ok {
-				assert.Equal(t, paths.Root(), got)
+				assert.Equal(t, paths.Path{}, got)
 
 				return
 			}
@@ -592,7 +615,13 @@ func TestResolver_Nearest(t *testing.T) {
 
 			rest, ok := path.CutPrefix(got)
 			require.True(t, ok)
-			assert.False(t, rest.IsRoot())
+			assert.Positive(t, rest.Len())
+
+			// The resolver reads an `@` path from the root, and the path
+			// it returns starts at `$`.
+			fromCurrent, ok := r.Nearest(paths.MustParse("@" + tc.path[1:]))
+			require.True(t, ok)
+			assert.Equal(t, got, fromCurrent)
 		})
 	}
 
@@ -602,7 +631,7 @@ func TestResolver_Nearest(t *testing.T) {
 		file, err := niceyaml.NewSourceFromString("server:\n  port: 81\n").File()
 		require.NoError(t, err)
 
-		path := paths.Root().Child("server", "tls", "cert")
+		path := paths.Doc().Child("server", "tls", "cert")
 
 		near, ok := paths.NewResolver(file.Docs[0]).Nearest(path)
 		require.True(t, ok)
@@ -817,7 +846,7 @@ func TestResolver_ConcurrentUse(t *testing.T) {
 
 	for i := range 50 {
 		for _, name := range []string{"own", "shared"} {
-			p := paths.Root().Child(fmt.Sprintf("k%d", i), name)
+			p := paths.Doc().Child(fmt.Sprintf("k%d", i), name)
 
 			node, err := p.Node(doc)
 			require.NoError(t, err)
@@ -883,7 +912,7 @@ func TestResolver_NestedMerges(t *testing.T) {
 	nodes := make(chan ast.Node, 1)
 
 	go func() {
-		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Root().Child("v"))
+		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("v"))
 		assert.NoError(t, err)
 
 		nodes <- node
@@ -921,7 +950,7 @@ func TestResolver_NestedOpenMerges(t *testing.T) {
 	nodes := make(chan ast.Node, 1)
 
 	go func() {
-		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Root().Child("a", "v"))
+		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("a", "v"))
 		assert.NoError(t, err)
 
 		nodes <- node
@@ -1144,7 +1173,7 @@ func TestResolver_KeyName(t *testing.T) {
 			require.NoError(t, err)
 
 			r := paths.NewResolver(file.Docs[0])
-			m := paths.Root().Child("m")
+			m := paths.Doc().Child("m")
 
 			node, err := r.Node(m)
 			require.NoError(t, err)
@@ -1176,7 +1205,7 @@ func TestResolver_KeyName(t *testing.T) {
 		require.NoError(t, err)
 
 		r := paths.NewResolver(file.Docs[0])
-		m := paths.Root().Child("m")
+		m := paths.Doc().Child("m")
 
 		node, err := r.Node(m)
 		require.NoError(t, err)

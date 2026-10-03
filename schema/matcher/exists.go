@@ -14,21 +14,22 @@ type existsMatcher struct {
 }
 
 // Exists creates a new [Matcher] that matches documents that hold a node
-// at path, whatever its value. A key with a null or empty value is present,
+// at path, whatever its value. The path resolves as [niceyaml.Node.At]
+// resolves it. A key with a null or empty value is present,
 // so `kind:` and `kind: ""` both match. A document without the path does
 // not match. A path that cannot resolve, because an alias on it names no
 // anchor or it holds a wildcard selector, comes back as the error. To
 // match a particular value, use [Content].
 //
 //	// Matches documents that have a kind field.
-//	matcher.Exists(paths.Root().Child("kind"))
+//	matcher.Exists(paths.Doc().Child("kind"))
 //
 // To require several fields, combine with [All]:
 //
 //	// Matches Kubernetes manifests (documents with both apiVersion and kind).
 //	matcher.All(
-//	    matcher.Exists(paths.Root().Child("apiVersion")),
-//	    matcher.Exists(paths.Root().Child("kind")),
+//	    matcher.Exists(paths.Doc().Child("apiVersion")),
+//	    matcher.Exists(paths.Doc().Child("kind")),
 //	)
 func Exists(path paths.Path) Matcher {
 	return &existsMatcher{path: path}

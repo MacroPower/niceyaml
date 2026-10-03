@@ -1,13 +1,13 @@
 // Package paths locates nodes and tokens in a YAML document.
 //
-// A [Path] is a sequence of selectors from the document root, written in the
-// YAMLPath syntax that goccy/go-yaml uses (`$.metadata.name`,
+// A [Path] is a sequence of selectors that starts at `$` or `@`, written
+// in the YAMLPath syntax that goccy/go-yaml uses (`$.metadata.name`,
 // `$.items[0]`). A path selects a node, which for a mapping entry is its
 // value. Error highlighting and precise editing often need the key of an
 // entry rather than its value, so [Path.Key] appends a `~` selector that
 // picks the key instead, and every method reads which one from the Path:
 //
-//	p := paths.Root().Child("metadata", "name")
+//	p := paths.Doc().Child("metadata", "name")
 //	node, err := p.Node(doc)          // the value node
 //	value, err := p.Token(doc)        // the token that starts the value
 //	key, err := p.Key().Token(doc)    // the key token "name"
@@ -31,6 +31,30 @@
 //
 // A [go.jacobcolvin.com/niceyaml.Node] holds a Resolver for its document,
 // which its Resolver method returns, so a caller with a Node creates none.
+//
+// # Starting Points
+//
+// A path starts at one of two points, as in RFC 9535 JSONPath. A `$` path
+// reads from the document root, wherever it resolves. An `@` path reads
+// from the current node: the node that resolves the path, binds an error
+// that carries it, or rebases it. [Doc] starts a path at `$`, and
+// [Current] at `@`:
+//
+//	paths.Doc().Child("spec", "replicas") // $.spec.replicas
+//	paths.Current().Child("replicas")     // @.replicas
+//
+// A check written for a type reports `@` paths, which read from the value
+// it checked, so the check reports the right place wherever the value sits
+// in a document. The [go.jacobcolvin.com/niceyaml.Node] of that value
+// resolves an `@` path from itself and a `$` path from the root of its
+// document. Every path the niceyaml packages hand out, such as the path
+// of a Node or of a bound error, starts at `$`, so it goes back to any
+// Node of the document and names the same node.
+//
+// The Path methods and a [Resolver] resolve in a document, and the root
+// is the only node they have to start at. They read an `@` path from the
+// root, as they read a `$` path, and the paths they return start at `$`.
+// [Resolver.NodeFrom] takes the node an `@` path reads from.
 //
 // # Resolution
 //
@@ -143,13 +167,13 @@
 // the value at the path, or the key of the entry for a path from
 // [Path.Key]. The error carries the path, and
 // [go.jacobcolvin.com/niceyaml.Node.Bind] resolves it against the
-// document:
+// document, an `@` path from the Node that binds it:
 //
 //	err := niceyaml.NewError(
 //		"invalid value",
-//		niceyaml.AtPath(paths.Root().Child("spec", "replicas")),
+//		niceyaml.AtPath(paths.Current().Child("replicas")),
 //	)
-//	fmt.Printf("%+v\n", doc.Bind(err))
+//	fmt.Printf("%+v\n", specNode.Bind(err)) // $.spec.replicas
 //
 // # Parsing Path Expressions
 //
@@ -161,37 +185,46 @@
 //
 //	var namePath = paths.MustParse("$.items[0].name")
 //
+// An expression starts with `$` or `@`, so "@.name" parses to a path that
+// starts at the current node, as [Current] does.
+//
 // [Path.String] returns the expression, so Parse(p.String()) yields an
 // equal path.
 //
 // # Building Paths
 //
-// Use [Root] to start at the document root and chain selectors:
+// Use [Doc] to start at the document root, or [Current] to start at the
+// current node, and chain selectors:
 //
-//	paths.Root().Child("items").Index(0).Child("name")  // $.items[0].name
-//	paths.Root().Child("spec").IndexAll()               // $.spec[*]
-//	paths.Root().Child("jobs").ChildAll()               // $.jobs.*
-//	paths.Root().Recursive("name")                      // $..name
-//	paths.Root().RecursiveAll()                         // $..*
-//	paths.Root().Child("spec").Key()                    // $.spec~
+//	paths.Doc().Child("items").Index(0).Child("name")  // $.items[0].name
+//	paths.Doc().Child("spec").IndexAll()               // $.spec[*]
+//	paths.Doc().Child("jobs").ChildAll()               // $.jobs.*
+//	paths.Doc().Recursive("name")                      // $..name
+//	paths.Doc().RecursiveAll()                         // $..*
+//	paths.Doc().Child("spec").Key()                    // $.spec~
+//	paths.Current().Child("name")                      // @.name
 //
 // A Path is a value that never changes, so callers can share a common
 // prefix safely:
 //
-//	spec := paths.Root().Child("spec")
+//	spec := paths.Doc().Child("spec")
 //	replicas := spec.Child("replicas") // $.spec.replicas
 //	image := spec.Child("image")       // $.spec.image
 //
-// [Path.Join] appends one or more paths to another, so a path written
+// [Path.Join] appends one or more paths to another, so an `@` path written
 // from a node of the document, such as one a check on a decoded value
-// reports, resolves from the root:
+// reports, resolves from the root. A `$` path reads from the root already,
+// so joining one replaces the path before it:
 //
-//	spec.Join(paths.Root().Child("replicas")) // $.spec.replicas
+//	spec.Join(paths.Current().Child("replicas")) // $.spec.replicas
+//	spec.Join(paths.Doc().Child("kind"))         // $.kind
 //
 // [Path.Parent] drops the last selector, so a caller walks from a path
-// up to the root, and [Path.CutPrefix] drops the leading ones:
+// up to its `$` or `@`, and [Path.CutPrefix] drops the leading ones and
+// returns the rest as an `@` path:
 //
-//	replicas.Parent() // $.spec, true
+//	replicas.Parent()        // $.spec, true
+//	replicas.CutPrefix(spec) // @.replicas, true
 //
 // # Reading Selectors
 //
@@ -215,8 +248,9 @@
 // # Comparing and Encoding
 //
 // A Path holds its selectors in a slice, so the `==` operator does not
-// compile for it and it cannot key a map. [Path.Equal] compares two paths
-// selector by selector, and [Path.String] gives the key for a map:
+// compile for it and it cannot key a map. [Path.Equal] compares where two
+// paths start and their selectors one by one, and [Path.String] gives the
+// key for a map:
 //
 //	if p.Equal(replicas) {
 //		// ...
@@ -234,7 +268,8 @@
 //	}
 //
 // For the goccy/go-yaml API, [Path.YAMLPath] converts the selectors to a
-// [*yaml.Path]. That syntax has no `.*` or `..*` selector, so a path that
+// [*yaml.Path]. That syntax has no `@`, so YAMLPath writes `$` in its
+// place. It has no `.*` or `..*` selector either, so a path that
 // holds one does not convert, and YAMLPath returns an error wrapping
 // [ErrNoYAMLPath].
 package paths

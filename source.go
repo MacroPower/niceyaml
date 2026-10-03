@@ -1645,8 +1645,10 @@ func startsBelow(tk, mark *token.Token) bool {
 //	}
 //
 // A path resolves in the one document of the source, the one
-// [Source.Document] returns, so a check on a configuration file binds its
-// errors here as it would through [Node.Bind]:
+// [Source.Document] returns, from its root whether it starts at `$` or
+// `@`, so a
+// check on a configuration file binds its errors here as it would through
+// [Node.Bind] of that root:
 //
 //	return source.Bind(check(cfg))
 //
@@ -1656,7 +1658,7 @@ func startsBelow(tk, mark *token.Token) bool {
 // reason [Source.Document] gives, and [FormatError] names it in place of
 // the excerpt. Bind such an error through [Node.Bind] with the document
 // the caller checked it against. A Node from [Node.At] binds through
-// Node.Bind too and resolves each path from its own scope.
+// Node.Bind too and resolves each `@` path from its own scope.
 //
 // In every other way Bind is [Node.Bind], which describes what comes
 // back. [SourceError.Document] returns the document each location fell

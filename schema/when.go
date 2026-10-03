@@ -22,7 +22,7 @@ type guarded struct {
 // This pairs a [Ref], which applies to every document, with a matcher that
 // decides which documents it should apply to:
 //
-//	kindPath := paths.Root().Child("kind")
+//	kindPath := paths.Doc().Child("kind")
 //	reg := schema.NewRegistry(schema.WithResolvers(schema.When(
 //	    matcher.Content(kindPath, "Deployment"),
 //	    schema.Embedded(deploymentSchema),

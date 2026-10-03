@@ -64,6 +64,10 @@
 // program's own runs the schema on a node it picks and returns the
 // result. [Schema.ValidateValue] checks decoded data instead, and its
 // errors stay unbound for a caller that reports them under another path.
+// Their paths start at `@`, the value the schema checked, so
+// [go.jacobcolvin.com/niceyaml.Rebase] or the
+// [go.jacobcolvin.com/niceyaml.Node] of that value puts them under its
+// path.
 //
 // To validate and decode in one step, pass the schema to
 // [go.jacobcolvin.com/niceyaml.Node.Decode] with
@@ -110,7 +114,7 @@
 // schema by the key. A Ref is a Resolver itself, so the loaders below go
 // in directly or behind a [When] guard:
 //
-//	kindPath := paths.Root().Child("kind")
+//	kindPath := paths.Doc().Child("kind")
 //	reg := schema.NewRegistry(schema.WithResolvers(
 //	    // Directive matching first (i.e. explicit user intent).
 //	    schema.Directive(),

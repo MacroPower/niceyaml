@@ -209,7 +209,7 @@ func integerRange(t reflect.Type) (string, string, bool) {
 // go-yaml decoder reported at tk, a token of the source.
 //
 // The first is the path of the node the decoder names by tk, as
-// [pathIndex.ownerPath] finds it, from the root of the document. The
+// [pathIndex.ownerPath] finds it, which starts at `$`. The
 // error then binds where that path resolves, which is where an error at
 // the same path from a [Validator] or a [SelfValidator] binds.
 //

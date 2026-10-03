@@ -91,12 +91,12 @@ func TestCheckDecode(t *testing.T) {
 			// The limit applies to the whole document, even where a
 			// decode of the node would read only the anchor it needs.
 			input: "k: &k a\n" + yamltest.AliasLevels(7) + "b:\n  ? *l7\n  : v\nc: [*k]\n",
-			path:  paths.Root().Child("c"),
+			path:  paths.Current().Child("c"),
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"node without an alias beside a bomb": {
 			input: yamltest.AliasLevels(7) + "b:\n  ? *l7\n  : v\nc: [x]\n",
-			path:  paths.Root().Child("c"),
+			path:  paths.Current().Child("c"),
 		},
 		"aliases inside their own anchor": {
 			input: "x: &x [" + strings.Repeat("a, ", 10) + strings.Repeat("*x, ", 299) + "*x]\n",
@@ -261,7 +261,7 @@ func TestCheckDecode(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, tc.input)
-			if !tc.path.IsRoot() {
+			if tc.path.Len() > 0 {
 				doc = yamltest.At(t, doc, tc.path)
 			}
 
@@ -326,7 +326,7 @@ func TestHoldsReferenceAlias(t *testing.T) {
 		},
 		"node without an alias beside an alias with no anchor": {
 			input: "a: [x]\nt: *s\n",
-			path:  paths.Root().Child("a"),
+			path:  paths.Current().Child("a"),
 			want:  true,
 		},
 	}
@@ -336,7 +336,7 @@ func TestHoldsReferenceAlias(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, tc.input)
-			if !tc.path.IsRoot() {
+			if tc.path.Len() > 0 {
 				doc = yamltest.At(t, doc, tc.path)
 			}
 
@@ -377,7 +377,7 @@ func TestCheckDecodeText(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.At(t, yamltest.FirstDocument(t, tc.input), paths.Root().Child("kind"))
+			doc := yamltest.At(t, yamltest.FirstDocument(t, tc.input), paths.Current().Child("kind"))
 
 			err := aliasing.CheckDecodeText(doc)
 			if tc.err != nil {

@@ -29,7 +29,7 @@ type Matcher interface {
 // such as a mapping or a sequence, reads as a plain no, so the function
 // returns false with no error for it, as [Content] does:
 //
-//	kindPath := paths.Root().Child("kind")
+//	kindPath := paths.Doc().Child("kind")
 //	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Node) (bool, error) {
 //	    node, err := doc.At(kindPath)
 //	    if errors.Is(err, paths.ErrNotFound) {

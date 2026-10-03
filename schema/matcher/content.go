@@ -32,9 +32,11 @@ type contentMatcher[T comparable] struct {
 // Content creates a new [Matcher] that matches documents whose value at
 // path decodes to want.
 //
-// Match decodes the value at path, from the scope of the document, with
-// [niceyaml.Node.Decode] as a T and compares the result to want, so
-// the type of want decides how Match reads the YAML. A string matches
+// Match decodes the value at path with [niceyaml.Node.Decode] as a T and
+// compares the result to want, so the type of want decides how Match
+// reads the YAML. The path resolves as [niceyaml.Node.At] resolves it: a
+// `$` path from the root of the document, and an `@` path from the Node
+// the matcher gets. A string matches
 // the text of a scalar as the document spells it, so "1.10" matches
 // version: 1.10 and "1.1" does not. A string type that decodes itself,
 // through an UnmarshalYAML or UnmarshalText method, matches the value its
@@ -111,17 +113,17 @@ type contentMatcher[T comparable] struct {
 // [go.jacobcolvin.com/niceyaml/schema.ErrExcessiveAliasing]:
 //
 //	// Matches kind: Deployment.
-//	matcher.Content(paths.Root().Child("kind"), "Deployment")
+//	matcher.Content(paths.Doc().Child("kind"), "Deployment")
 //
 //	// Matches version: 1.0 and version: 1.
-//	matcher.Content(paths.Root().Child("version"), 1.0)
+//	matcher.Content(paths.Doc().Child("version"), 1.0)
 //
 // For several conditions, use [All] (AND) or [Any] (OR):
 //
 //	// Matches kind: Deployment AND apiVersion: apps/v1.
 //	matcher.All(
-//	    matcher.Content(paths.Root().Child("kind"), "Deployment"),
-//	    matcher.Content(paths.Root().Child("apiVersion"), "apps/v1"),
+//	    matcher.Content(paths.Doc().Child("kind"), "Deployment"),
+//	    matcher.Content(paths.Doc().Child("apiVersion"), "apps/v1"),
 //	)
 func Content[T comparable](path paths.Path, want T) Matcher {
 	return &contentMatcher[T]{path: path, want: want}
@@ -310,7 +312,7 @@ func matchArray(ctx context.Context, node *niceyaml.Node, raw any, got, want ref
 		case elems[i] == nil:
 			match = wantsNil(want.Index(i))
 		default:
-			match, err = matchEntry(ctx, node, paths.Root().Index(i), elems[i], nil, got.Index(i), want.Index(i))
+			match, err = matchEntry(ctx, node, paths.Current().Index(i), elems[i], nil, got.Index(i), want.Index(i))
 		}
 
 		if err != nil || !match {
@@ -401,7 +403,7 @@ func matchStruct(
 		case value == nil && probe.readsUnresolved(node, name):
 			match = wantsNil(want.Field(i))
 		default:
-			path := paths.Root().Child(name)
+			path := paths.Current().Child(name)
 			match, err = matchEntry(ctx, node, path, value, probe.reads, got.Field(i), want.Field(i))
 		}
 
@@ -711,7 +713,7 @@ func readsDurationFloat(ctx context.Context, node *niceyaml.Node, raw any, t ref
 		}
 
 		for i, elem := range elems {
-			floats, err := entryReadsDurationFloat(ctx, node, paths.Root().Index(i), elem, nil, t.Elem())
+			floats, err := entryReadsDurationFloat(ctx, node, paths.Current().Index(i), elem, nil, t.Elem())
 			if floats || err != nil {
 				return floats, err
 			}
@@ -779,7 +781,7 @@ func structReadsDurationFloat(
 
 		case inline || !set || !found:
 		default:
-			path := paths.Root().Child(name)
+			path := paths.Current().Child(name)
 			floats, err = entryReadsDurationFloat(ctx, node, path, value, probe.reads, field.Type)
 		}
 

@@ -92,9 +92,10 @@ type ErrorTree struct {
 //
 // An error bound to no source has no position to show. When its cause
 // chain reaches a located [*Error] that carries a path before any
-// binding, the text of its node has that path in front, as
-// "$.path: msg". A binding puts the path there the same way, so the row
-// names the value whatever wraps the Error.
+// binding, the text of its node has that path in front, as the Error
+// wrote it, such as "@.path: msg" for a check of a value. A binding puts
+// the path there the same way, as a `$` path from the root of the
+// document, so the row names the value whatever wraps the Error.
 //
 // An error that unwraps to several and whose message is theirs one per
 // line, such as one from [errors.Join], is a node with no text and one

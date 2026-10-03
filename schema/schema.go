@@ -246,7 +246,7 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // [niceyaml.Decoder] runs it on every node it decodes, and
 // [niceyaml.Node.Validate] runs it on its own. A Node from
 // [niceyaml.Node.At] decodes to the node it selects, so the schema checks
-// that node and a violation's path resolves from it. Every error comes
+// that node and a violation's `@` path resolves from it. Every error comes
 // back bound through n with [niceyaml.Node.Bind], so a call to Validate
 // returns the error [niceyaml.Node.Validate] returns for the schema. A
 // validator that runs the schema on each node of a list thus reports
@@ -397,11 +397,12 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // [ErrValidate], including a $ref the validator cannot resolve, since no
 // location in the document is at fault for that.
 //
-// ValidateValue holds no source, so its errors are unbound and write their
-// paths from the root of data. The message of a violation names no path,
-// since a [niceyaml.Error] keeps its location out of its message, so a
-// caller that prints the errors before a binding holds them prints
-// [niceyaml.FormatError] of them, which puts each path in front. The
+// ValidateValue holds no source, so its errors are unbound and write `@`
+// paths, which read from the value data stands for. The message of a
+// violation names no path, since a [niceyaml.Error] keeps its location out
+// of its message, so a caller that prints the errors before a binding
+// holds them prints [niceyaml.FormatError] of them, which puts each path
+// in front, as in "@.port: 0 is less than 1". The
 // [niceyaml.Node] data came from binds them with [niceyaml.Node.Bind],
 // which puts the position and the path in front. A caller that reports them
 // under another path, or in another document, puts them under that path
@@ -619,7 +620,7 @@ func keyToken(entry *ast.MappingValueNode) *token.Token {
 // no entry for such a key, so its segment and every segment below keep
 // their decoded names.
 func sourcePath(root ast.Node, idx *memberIndex, segments []jsonschema.Segment) sourceTarget {
-	t := sourceTarget{path: paths.Root(), node: root}
+	t := sourceTarget{path: paths.Current(), node: root}
 
 	for _, seg := range segments {
 		content := deref(idx.resolver, t.node)

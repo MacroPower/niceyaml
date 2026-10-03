@@ -132,7 +132,7 @@ func BenchmarkNode_DecodeScoped(b *testing.B) {
 
 		doc := yamltest.FirstDocument(b, sb.String())
 
-		items, err := doc.Nodes(paths.Root().Child("items").IndexAll())
+		items, err := doc.Nodes(paths.Current().Child("items").IndexAll())
 		require.NoError(b, err)
 
 		b.Run(sz.name, func(b *testing.B) {
@@ -392,7 +392,7 @@ func BenchmarkNode_Nodes(b *testing.B) {
 		{"items_10000", 10000},
 	}
 
-	path := paths.Root().Child("items").IndexAll()
+	path := paths.Current().Child("items").IndexAll()
 
 	for _, sz := range sizes {
 		var sb strings.Builder
@@ -441,7 +441,7 @@ func BenchmarkNode_BindManyPaths(b *testing.B) {
 			fmt.Fprintf(&sb, "k%d: v%d\n", i, i)
 
 			errs = append(errs, niceyaml.NewError("bad value",
-				niceyaml.AtPath(paths.Root().Child(fmt.Sprintf("k%d", i)))))
+				niceyaml.AtPath(paths.Current().Child(fmt.Sprintf("k%d", i)))))
 		}
 
 		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()

@@ -35,9 +35,9 @@ const (
 //
 //	switch n.Kind() {
 //	case niceyaml.NodeMapping:
-//		children, err = n.Nodes(paths.Root().ChildAll())
+//		children, err = n.Nodes(paths.Current().ChildAll())
 //	case niceyaml.NodeSequence:
-//		children, err = n.Nodes(paths.Root().IndexAll())
+//		children, err = n.Nodes(paths.Current().IndexAll())
 //	}
 //
 // Kind looks through the anchor and the tag on the node, an alias and

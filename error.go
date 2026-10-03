@@ -236,8 +236,9 @@ var (
 //		// The error is about the value at path.
 //	}
 //
-// A path resolves within one document of a source, from the [Node] that
-// binds the Error, whether its own methods and validators produced the
+// A path resolves within one document of a source. An `@` path resolves
+// from the [Node] that binds the Error, and a `$` path from the root of
+// its document, whether the Node's own methods and validators produced the
 // Error or [Node.Bind] bound one built elsewhere. An Error that carries
 // a position or a range as well binds there, and the path is not
 // resolved, so it names the value in the message of the binding and in
@@ -269,7 +270,8 @@ var (
 // "name:line:col: $.path: msg" or "name:line:col: msg". A program that
 // prints an Error no binding holds yet reads it with [FormatError], as
 // FormatError(err, 0), which puts the path in front of the text the same
-// way through any wrapper. The errors a summary heads and the details of
+// way through any wrapper, as the Error wrote it, such as
+// "@.path: msg". The errors a summary heads and the details of
 // an Error are structure rather than text. [Error.Errors] and [Error.Details]
 // return them, [Error.Unwrap] exposes them to [errors.Is] and
 // [errors.As], and the [SourceError] that binds the Error binds each one
@@ -291,10 +293,12 @@ type Error struct {
 	errors []error
 	// The errors from WithDetails, which leave out the nil ones.
 	details []error
-	// The path, when hasPath, since the root is a path like any other.
+	// The path, when hasPath, since a path with no selectors is a path
+	// like any other.
 	path paths.Path
-	// The path the errors under the Error write their paths from, which
-	// Rebase sets, when rebased, since the root is a base like any other.
+	// The path the errors under the Error write their `@` paths from,
+	// which Rebase sets, when rebased, since a path with no selectors is
+	// a base like any other.
 	base    paths.Path
 	hasPath bool
 	rebased bool
@@ -448,24 +452,28 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 	return &c
 }
 
-// Rebase returns an error that writes its paths from base. Every path
-// in the tree of err resolves as base joined with that path, whether it
-// sits on the [*Error] that anchors the tree, on an error a summary from
-// [NewSummary] heads, or on a detail from [WithDetails]. [Error.Path]
-// reports the joined path, and the binding of the result names it. A
-// check written for a type writes paths from the value's own root. A
-// caller that runs it on a value inside a document rebases the result
-// under the path of that value before it binds the result:
+// Rebase returns an error that writes its `@` paths from base. Every `@`
+// path in the tree of err resolves as base joined with that path, whether
+// it sits on the [*Error] that anchors the tree, on an error a summary
+// from [NewSummary] heads, or on a detail from [WithDetails]. A `$` path
+// reads from the root of the document already, so Rebase leaves it as it
+// is, as [paths.Path.Join] does. [Error.Path] reports the joined path,
+// and the binding of the result names it. A base that starts at `@` reads
+// from the Node that binds the result, and one that starts at `$` from
+// the root of the document. A check written for a type writes `@` paths,
+// which read from the value. A caller that runs it on a value inside a
+// document rebases the result under the path of that value before it
+// binds the result:
 //
 //	func checkHours(h *Hours) error {
 //		if h.Close.Before(h.Open) {
-//			return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Root().Child("close")))
+//			return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Current().Child("close")))
 //		}
 //
 //		return nil
 //	}
 //
-//	return doc.Bind(niceyaml.Rebase(checkHours(&cfg.Hours), paths.Root().Child("hours")))
+//	return doc.Bind(niceyaml.Rebase(checkHours(&cfg.Hours), paths.Doc().Child("hours")))
 //
 // The same call puts each element of a slice under its index, but a key
 // of a map takes more care. A path names the key as the source spells
@@ -474,7 +482,7 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // check under `$.ports.16`, which the document leaves out:
 //
 //	for k, server := range cfg.Ports {
-//		err := niceyaml.Rebase(checkServer(&server), paths.Root().Child("ports", strconv.Itoa(k)))
+//		err := niceyaml.Rebase(checkServer(&server), paths.Doc().Child("ports", strconv.Itoa(k)))
 //		errs = append(errs, doc.Bind(err)) // $.ports.16.name, at the ports: key
 //	}
 //
@@ -484,7 +492,7 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // the entries with [Node.Nodes] instead, and bind through the Node of
 // each entry, which carries the key as the source spells it:
 //
-//	entries, err := doc.Nodes(paths.Root().Child("ports").ChildAll())
+//	entries, err := doc.Nodes(paths.Doc().Child("ports").ChildAll())
 //	if err != nil {
 //		return err
 //	}
@@ -498,8 +506,10 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 //		errs = append(errs, entry.Bind(checkServer(&server))) // $.ports.0x10.name
 //	}
 //
-// Rebases compose, so a chain of them composes the chain of paths. A
-// position or a range stays as it is, since the base moves paths alone.
+// Rebases compose, so a chain of them composes the chain of paths, and a
+// `$` base anywhere in the chain stops the bases above it from moving the
+// paths below it. A position or a range stays as it is, since the base
+// moves paths alone.
 // Rebase reads the roles the errors declare, problem by problem:
 //
 //   - A summary, a join, and any other error that unwraps to several are
@@ -531,7 +541,11 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // error it binds, so a check bound through the Node of its value needs no
 // Rebase. Such a Node points each problem with no location at its own
 // value by the same rules, so it binds an error as a Rebase under its
-// path does, as [Node.Bind] describes.
+// path does, as [Node.Bind] describes. A Rebase under [Node.Path] before
+// that Node binds the error puts the path in front once, since the base
+// starts at `$`:
+//
+//	hours.Bind(niceyaml.Rebase(err, hours.Path())) // $.spec.hours.open
 //
 // An error joined from several, as [errors.Join] builds one, rebases branch
 // by branch into a new join, so each branch carries the joined path of its
@@ -719,16 +733,20 @@ type ErrorOption func(e *Error)
 // path from [paths.Path.Key] points at the key of the entry instead,
 // which suits an error about the key itself, such as an unknown field:
 //
-//	niceyaml.NewError("unknown field", niceyaml.AtPath(paths.Root().Child("spec", "foo").Key()))
+//	niceyaml.NewError("unknown field", niceyaml.AtPath(paths.Current().Child("spec", "foo").Key()))
 //
-// The path resolves from the scope of the [Node] that binds the Error,
-// so [paths.Root] names that node itself, and a check on a value from
-// [Node.At] writes its paths from the value. The binding puts the path
-// of that Node in front, so its message and [SourceError.Path] carry
-// the path from the root of the document. A path from [Node.Path] or
-// from SourceError.Path starts at that root already, so it binds through
-// the root of the document or through [Source.Bind], and a scoped Node
-// joins it under its own path again.
+// An `@` path resolves from the scope of the [Node] that binds the Error,
+// so [paths.Current] names that node itself, and a check on a value from
+// [Node.At] writes its paths from the value. The binding puts the path of
+// that Node in front, so its message and [SourceError.Path] carry the `$`
+// path from the root of the document. A `$` path resolves from that root
+// through any Node, and the binding leaves it as it is. A path from
+// [Node.Path], [Node.PathAt], or SourceError.Path starts at `$`, so it
+// binds through the Node a validator got whatever the scope of that Node:
+//
+//	for _, item := range items {
+//		errs = append(errs, n.Bind(niceyaml.NewError("bad item", niceyaml.AtPath(item.Path()))))
+//	}
 //
 // The document may leave the value out, as it does when a check reports
 // a required field. The path then selects nothing, and the error binds at
@@ -738,7 +756,7 @@ type ErrorOption func(e *Error)
 //
 //	func (s Server) Validate() error {
 //		if s.Name == "" {
-//			return niceyaml.NewError("name is required", niceyaml.AtPath(paths.Root().Child("name")))
+//			return niceyaml.NewError("name is required", niceyaml.AtPath(paths.Current().Child("name")))
 //		}
 //
 //		return nil
@@ -908,7 +926,9 @@ type locus struct {
 }
 
 // rebase returns l with base in front of its path. A locus with no path
-// comes back as it is, since a base moves paths alone.
+// comes back as it is, since a base moves paths alone. An `@` path takes
+// base in front, and a `$` path stays as it is, as [paths.Path.Join]
+// joins them.
 func (l locus) rebase(base paths.Path) locus {
 	if l.hasPath {
 		l.path = base.Join(l.path)
@@ -1092,14 +1112,15 @@ type location struct {
 // is bound to. A range or a position is the location as it is, and a
 // path locates the error at the position of the token it resolves to in
 // the document. [anchorOf] joins the base of every Error from [Rebase]
-// above that Error in front of the path, so locate resolves the path as
-// it is. A path beside a range or a position names the value in the
-// message and is not resolved, so a range locates the error whether or
-// not the document holds the path. The node is the one b binds with, or,
-// when b routes, the root of the document [binder.route] picks for the
-// location. An empty l is errUnlocated, a path bound where no document
-// resolves it is [ErrPathNeedsDocument], and a path bound through a
-// binder that marks its paths ambiguous is [ErrAmbiguousPath].
+// above that Error in front of the path, and [binder.scoped] put the
+// scope of the binding there, so the path starts at `$` and locate
+// resolves it as it is. A path beside a range or a position names the
+// value in the message and is not resolved, so a range locates the error
+// whether or not the document holds the path. The node is the one b binds
+// with, or, when b routes, the root of the document [binder.route] picks
+// for the location. An empty l is errUnlocated, a path bound where no
+// document resolves it is [ErrPathNeedsDocument], and a path bound
+// through a binder that marks its paths ambiguous is [ErrAmbiguousPath].
 func locate(b binder, l locus) (location, *Node, error) {
 	switch loc := l.loc.(type) {
 	case position.Range:
@@ -1123,7 +1144,7 @@ func locate(b binder, l locus) (location, *Node, error) {
 // locatePath resolves path from the root of the document of the node b
 // binds with, or of the one document of the source when b routes.
 // [binder.scoped] put the scope of that node in front of the path
-// already, so the path reads from the root. A path that names a key the
+// already, so the path starts at `$`. A path that names a key the
 // document leaves out resolves to the key of the mapping that lacks it,
 // as [Node.nearestLocation] finds it. A source that holds several
 // documents, or does not parse, has no document to resolve the path in,
@@ -1187,14 +1208,14 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 //		log.Print(niceyaml.FormatError(err, 2))
 //	}
 //
-// A path resolves from the [Node] that bound the error, which for
-// [Source.Bind] is the root of the one document of the source. A Node
-// from [Node.At] or [Node.Nodes] puts its own path in front of each path
-// the error carries. The message and [SourceError.Path] thus read from
-// the root of the document whichever Node bound the error, as the
-// position beside them does. A path bound through Source.Bind in a
-// source that holds none or several resolves nowhere, and the reason is
-// [ErrPathNeedsDocument].
+// An `@` path resolves from the [Node] that bound the error, which for
+// [Source.Bind] is the root of the one document of the source, and a `$`
+// path from the root of the document. The Node puts its own path in front
+// of each `@` path the error carries. The message and [SourceError.Path]
+// thus carry `$` paths, which read from the root of the document
+// whichever Node bound the error, as the position beside them does. A
+// path bound through Source.Bind in a source that holds none or several
+// resolves nowhere, and the reason is [ErrPathNeedsDocument].
 //
 // The bound error is a tree, and binding binds every node of it. The
 // location of the SourceError is that of the first located [Error] along
@@ -1370,27 +1391,24 @@ type boundTexts struct {
 // ends, binds to the source alone. A binder that marks its paths
 // ambiguous binds errors whose paths may name another value, so it
 // resolves no path, for the reason [ErrAmbiguousPath]. It still locates
-// a position or a range. A binder that is rooted binds errors whose
-// paths read from the root of the document already, as the path of a
-// decode rejection does, so it puts no scope in front of them. A binder
-// that locates binds an error a caller or a validator gave a Node, so
-// [binder.located] points an error that holds no location at that Node.
+// a position or a range. A binder that locates binds an error a caller or
+// a validator gave a Node, so [binder.located] points an error that holds
+// no location at that Node.
 type binder struct {
 	src       *Source
 	node      *Node
 	route     bool
 	ambiguous bool
-	rooted    bool
 	locate    bool
 }
 
 // located returns err as b binds it at the top of its tree. A binder that
 // locates binds through a Node from [Node.At] or [Node.Nodes], and a
 // problem that carries no location is then about the value of that Node.
-// The error comes back from [Rebase] under the root of the scope, so each
-// such problem binds at the Node as an [Error] with [AtPath] of
-// [paths.Root] does, and [binder.scoped] puts the scope in front. Rebase
-// decides problem by problem, so a summary, a join, and a detail gain no
+// The error comes back from [Rebase] under [paths.Current], so each such
+// problem binds at the Node as an [Error] with [AtPath] of paths.Current
+// does, and [binder.scoped] puts the scope in front. Rebase decides
+// problem by problem, so a summary, a join, and a detail gain no
 // location, and a scoped bind agrees with a Rebase under the path of the
 // Node. The error of a context that ended is about the call and comes
 // back as it is. So does every error for a binder that does not locate,
@@ -1400,40 +1418,72 @@ func (b binder) located(err error) error {
 		return err
 	}
 
-	return Rebase(err, paths.Root())
+	return Rebase(err, paths.Current())
 }
 
-// scoped returns err as a binding of b holds it. An error bound through
-// a Node from [Node.At] or [Node.Nodes] writes its paths from that node,
-// so it comes back under the scope of the node, as [underScope] returns
-// it, and its paths read from the root of the document. An error bound
-// through the root of a document, through no node, or through a rooted
-// binder comes back as it is.
-func (b binder) scoped(err error) error {
-	if b.node == nil || b.node.base.IsRoot() || b.rooted {
-		return err
+// scopedError is an error as a binding holds it, with the `@` paths it
+// carries under the scope of the binding, and the anchor of that error, as
+// [anchorOf] finds it.
+type scopedError struct {
+	err    error
+	anchor anchor
+}
+
+// scoped returns err as a binding of b holds it. An error writes its `@`
+// paths from the node that binds it, so it comes back under the scope of
+// that node, as [underScope] returns it, and its paths start at `$`. The
+// scope is the [Node.Path] of the node b binds with, which is
+// [paths.Doc] for the root of a document, or paths.Doc when b binds with
+// no node, since a path then resolves from the root of a document.
+func (b binder) scoped(err error) scopedError {
+	scope := paths.Doc()
+	if b.node != nil {
+		scope = b.node.base
 	}
 
-	scoped, _ := underScope(err, b.node.base)
+	scoped, _ := underScope(err, scope)
 
 	return scoped
 }
 
-// underScope returns err with scope in front of each path it carries, and
-// reports whether it changed anything. An error whose cause chain reaches
-// an [*Error] that carries a path comes back inside an Error from [Rebase]
-// at scope, so [Error.Path] reports the joined path. A join, as
-// [joinBranches] finds one, comes back as a new join of its branches under
-// scope, as Rebase builds one, so each branch carries the joined path of
-// its own. Rebase points a problem with no location at its base, and
-// underScope leaves such an error as it is. [binder.located] gives each
-// such problem the scope before underScope runs, so an error that names no
-// path here gains none. A binding resolved its location already and comes
-// back as it is.
-func underScope(err error, scope paths.Path) (error, bool) {
+// underScope returns err with scope in front of each `@` path it carries,
+// and reports whether it changed anything. It finds the anchor of the
+// result while it walks err, so the binding reads the chain of err once.
+//
+// An error whose cause chain reaches an [*Error] that carries an `@` path
+// comes back inside an Error from [Rebase] at scope, so [Error.Path]
+// reports the joined path. One whose cause chain reaches a `$` path reads
+// from the root of the document already, and Rebase would leave that path
+// as it is, so the error comes back as it is. A chain with an anchor is no
+// join, since a join holds separate problems, so underScope reads whether
+// err is a join only for a chain with none. A join, as [joinBranches]
+// finds one, comes back as a new join of its branches under scope, as
+// Rebase builds one, so each branch carries the joined path of its own.
+// Rebase points a problem with no location at its base, and underScope
+// leaves such an error as it is. [binder.located] gives each such problem
+// the scope before underScope runs, so an error that names no path here
+// gains none. A binding resolved its location already and comes back as
+// it is.
+func underScope(err error, scope paths.Path) (scopedError, bool) {
 	if isNothing(err) {
-		return err, false
+		return scopedError{err: err}, false
 	}
+
+	a := anchorOf(err)
+	if a.err != nil {
+		_, located := a.err.(*Error) //nolint:errorlint // The anchor itself, found by the walk.
+		if !located || !a.hasPath || a.path.IsAbsolute() {
+			return scopedError{err: err, anchor: a}, false
+		}
+
+		// The anchor of the Error from Rebase is the anchor below it, with
+		// the base in front of its path, as anchorOf reads it.
+		a.locus = a.rebase(scope)
+
+		return scopedError{err: &Error{err: err, base: scope, rebased: true}, anchor: a}, true
+	}
+
+	unchanged := scopedError{err: err, anchor: a}
 
 	// An Error that adds nothing to the join it wraps reads as the join.
 	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
@@ -1441,44 +1491,47 @@ func underScope(err error, scope paths.Path) (error, bool) {
 		if _, joined := joinBranches(x.err); joined {
 			inner, changed := underScope(x.err, scope)
 			if !changed {
-				return err, false
+				return unchanged, false
 			}
 
 			// The copy keeps what the Error declared.
-			return &Error{err: inner, invalid: x.invalid}, true
+			return anchored(&Error{err: inner.err, invalid: x.invalid}), true
 		}
 	}
 
-	if branches, ok := joinBranches(err); ok {
-		scoped := make([]error, 0, len(branches))
-		changed := false
-
-		for _, branch := range branches {
-			if branch == nil {
-				continue
-			}
-
-			s, c := underScope(branch, scope)
-			scoped = append(scoped, s)
-			changed = changed || c
-		}
-
-		switch {
-		case !changed:
-			return err, false
-		case isJoinError(err):
-			return errors.Join(scoped...), true
-		default:
-			return &rebasedJoinError{join: err, branches: scoped}, true
-		}
+	branches, ok := joinBranches(err)
+	if !ok {
+		return unchanged, false
 	}
 
-	a := anchorOf(err)
-	if _, located := a.err.(*Error); located && a.hasPath { //nolint:errorlint // The anchor itself, found by the walk.
-		return &Error{err: err, base: scope, rebased: true}, true
+	scoped := make([]error, 0, len(branches))
+	changed := false
+
+	for _, branch := range branches {
+		if branch == nil {
+			continue
+		}
+
+		s, c := underScope(branch, scope)
+		scoped = append(scoped, s.err)
+		changed = changed || c
 	}
 
-	return err, false
+	switch {
+	case !changed:
+		return unchanged, false
+
+	case isJoinError(err):
+		return anchored(errors.Join(scoped...)), true
+
+	default:
+		return anchored(&rebasedJoinError{join: err, branches: scoped}), true
+	}
+}
+
+// anchored returns err with its anchor, as [anchorOf] finds it.
+func anchored(err error) scopedError {
+	return scopedError{err: err, anchor: anchorOf(err)}
 }
 
 // nodeAt returns the node an error on line idx binds to: the one b binds
@@ -1907,16 +1960,15 @@ func boundLocus(e *SourceError) locus {
 
 // newSourceError binds err to b and resolves its location, with a path
 // resolving in the document of b. The binding holds err as
-// [binder.scoped] returns it, so the path of an error bound through a
-// scoped Node reads from the root of the document. The children of err
-// bind the same way, each under the scope on its own, so a child that
-// carries no path stays as it is.
+// [binder.scoped] returns it, so each path of the bound error starts at
+// `$` and reads from the root of the document. The children of err bind
+// the same way, each under the scope on its own, so a child that carries
+// no path stays as it is.
 func newSourceError(err error, b binder) *SourceError {
 	scoped := b.scoped(err)
+	found := scoped.anchor
 
-	e := &SourceError{err: scoped, source: b.src, node: b.node, locErr: errUnlocated}
-
-	found := anchorOf(scoped)
+	e := &SourceError{err: scoped.err, source: b.src, node: b.node, locErr: errUnlocated}
 
 	switch a := found.err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
 	case *Error:
@@ -2022,12 +2074,12 @@ func (e *SourceError) Source() *Source {
 
 // Node returns the [*Node] the error is bound to: the one whose methods
 // and validators produced it or whose [Node.Bind] bound it, from whose
-// scope a path in the error resolves, or, for an error bound through
+// scope an `@` path in the error resolves, or, for an error bound through
 // [Source.Bind], the root of the document its location falls in. The
-// error wrote its path from that scope, and [SourceError.Path] reports
-// the path from the root of the document. A rejection of the go-yaml
-// decoder is bound to the Node that decoded, and its path reads from the
-// root of the document already. A
+// error wrote such a path from that scope, and [SourceError.Path] reports
+// the `$` path from the root of the document. A rejection of the go-yaml
+// decoder is bound to the Node that decoded, and its path starts at `$`
+// already. A
 // position or a range falls in the document whose [Node.Span] holds its
 // line, and a path falls in the one document of the source. The error
 // stays bound to that root when its location does not resolve there, as
@@ -2106,16 +2158,16 @@ func (e *SourceError) Message() string {
 }
 
 // Path returns the [paths.Path] the bound error is about and true, or the
-// zero Path and false when it carries none. The path reads from the root
-// of the document, whichever [Node] bound the error. It is the path
-// [Error.Path] reports for the [*Error] that gave the binding its
-// location, with the base of every [Rebase] on the way joined in front.
-// A Node from [Node.At] or [Node.Nodes] joins its own [Node.Path] in
-// front of that, so an error written as `$.price` and bound through the
-// Node at `$.items[1]` reports `$.items[1].price`. The root of the
-// document resolves the result, so it goes to the [Node.Ranges] or the
-// [Node.At] of [SourceError.Document]. [paths.Path.CutPrefix] with the
-// path of [SourceError.Node] gives back the path as the error wrote it.
+// zero Path and false when it carries none. The path starts at `$`, so it
+// reads from the root of the document, whichever [Node] bound the error.
+// It is the path [Error.Path] reports for the [*Error] that gave the
+// binding its location, with the base of every [Rebase] on the way joined
+// in front. The Node that bound the error joins its own [Node.Path] in
+// front of an `@` path, so an error written as `@.price` and bound
+// through the Node at `$.items[1]` reports `$.items[1].price`. The result
+// goes to the [Node.Ranges] or the [Node.At] of any Node of the document.
+// [paths.Path.CutPrefix] with the path of [SourceError.Node] gives back
+// the `@` path the error wrote.
 // A rejection of the go-yaml decoder is the exception. It reports the
 // path where the document writes the value, as [Node.DecodeInto]
 // describes, which lies outside the scope of the Node for a value an
@@ -2814,7 +2866,8 @@ func (e *SourceError) LogValue() slog.Value {
 //
 // An error that binds to no source renders as its tree alone. For an error
 // with nothing nested, that tree is its message behind the path the
-// [*Error] along its cause chain carries, where a binding would put it. An
+// [*Error] along its cause chain carries, where a binding would put it,
+// as in "@.open: closes before it opens" for a check of a value. An
 // error whose tree and excerpts both render nothing, such as a bound join
 // of typed-nil errors, renders its message in their place, with control
 // characters as their pictures like any other.
@@ -3002,7 +3055,7 @@ func (e *SourceError) Unresolved() error {
 // locates such an error at the key of the mapping that lacks the value,
 // the nearest node above the path that the document holds:
 //
-//	niceyaml.NewError("name is required", niceyaml.AtPath(paths.Root().Child("server", "name")))
+//	niceyaml.NewError("name is required", niceyaml.AtPath(paths.Doc().Child("server", "name")))
 //	// cfg.yaml:3:1: $.server.name: name is required
 //
 // [SourceError.Range] then covers the key `server`, [SourceError.Path]

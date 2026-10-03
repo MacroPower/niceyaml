@@ -22,8 +22,9 @@ var (
 
 // Parse parses a path expression into a [Path].
 //
-// An expression starts with `$` for the document root, followed by any number
-// of selectors:
+// An expression starts with `$` for the document root or `@` for the
+// current node, as in RFC 9535 JSONPath, followed by any number of
+// selectors:
 //
 //   - `.name` selects a mapping entry by key.
 //   - `.'name'` selects an entry whose key contains reserved characters.
@@ -46,12 +47,17 @@ var (
 //
 // Returns an error wrapping [ErrInvalidPath] for a malformed expression.
 func Parse(expr string) (Path, error) {
+	absolute := strings.HasPrefix(expr, "$")
+	if !absolute && !strings.HasPrefix(expr, "@") {
+		return Path{}, fmt.Errorf("parse path %q: %w: expression must start with $ or @", expr, ErrInvalidPath)
+	}
+
 	segs, err := parseSegments(expr)
 	if err != nil {
 		return Path{}, fmt.Errorf("parse path %q: %w: %w", expr, ErrInvalidPath, err)
 	}
 
-	return Path{segments: segs}, nil
+	return Path{segments: segs, absolute: absolute}, nil
 }
 
 // MustParse is like [Parse] but panics if the expression is invalid.
@@ -66,12 +72,9 @@ func MustParse(expr string) Path {
 	return p
 }
 
-// parseSegments reads the selectors of expr after its `$` root.
+// parseSegments reads the selectors of expr after the `$` or `@` that
+// [Parse] checked.
 func parseSegments(expr string) ([]segment, error) {
-	if !strings.HasPrefix(expr, "$") {
-		return nil, errors.New("expression must start with $")
-	}
-
 	var segs []segment
 
 	rest := expr[1:]

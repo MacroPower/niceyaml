@@ -22,7 +22,7 @@ func TestOf(t *testing.T) {
 	first := docstate.Of(docs[0])
 	require.NotNil(t, first)
 
-	scoped := yamltest.At(t, docs[0], paths.Root().Child("a").Index(1))
+	scoped := yamltest.At(t, docs[0], paths.Current().Child("a").Index(1))
 
 	assert.Same(t, first, docstate.Of(scoped))
 	assert.NotSame(t, first, docstate.Of(docs[1]))

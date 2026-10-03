@@ -41,7 +41,7 @@ func BenchmarkContent_TaggedAliasElements(b *testing.B) {
 			want[i] = "x"
 		}
 
-		m := matcher.Content(paths.Root().Child("l"), want)
+		m := matcher.Content(paths.Current().Child("l"), want)
 
 		b.Run(fmt.Sprintf("elems_%d", elems), func(b *testing.B) {
 			b.ReportAllocs()

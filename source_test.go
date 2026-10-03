@@ -800,7 +800,7 @@ func TestSource_File_BlankLineBeforeFirstKey(t *testing.T) {
 
 			doc := docs[0]
 
-			keyTk, err := paths.Root().Child("a").Key().Token(doc.DocumentAST())
+			keyTk, err := paths.Current().Child("a").Key().Token(doc.DocumentAST())
 			require.NoError(t, err)
 			require.NotNil(t, keyTk)
 
@@ -813,9 +813,9 @@ func TestSource_File_BlankLineBeforeFirstKey(t *testing.T) {
 
 			assert.Equal(t,
 				yamltest.DumpTokenOrigins(source.Tokens()),
-				yamltest.DumpTokenOrigins(yamltest.At(t, doc, paths.Root()).Tokens()),
+				yamltest.DumpTokenOrigins(yamltest.At(t, doc, paths.Current()).Tokens()),
 			)
-			assert.Len(t, yamltest.At(t, doc, paths.Root().Child("a").Key()).Tokens(), 1)
+			assert.Len(t, yamltest.At(t, doc, paths.Current().Child("a").Key()).Tokens(), 1)
 
 			_, err = doc.Decode[struct{ B int }](t.Context(), niceyaml.WithDisallowUnknownFields(true))
 			require.ErrorIs(t, err, niceyaml.ErrDecode)
@@ -867,7 +867,7 @@ func TestSource_File_BlankBlockScalarContent(t *testing.T) {
 
 			yamltest.RequireTokensEqual(t,
 				source.Tokens()[2:4],
-				yamltest.At(t, doc, paths.Root().Child("a")).Tokens(),
+				yamltest.At(t, doc, paths.Current().Child("a")).Tokens(),
 			)
 
 			mapping, ok := file.Docs[0].Body.(*ast.MappingNode)
@@ -1164,7 +1164,7 @@ func TestSource_File_TokensFindLines(t *testing.T) {
 
 		// The parser holds copies of the Source's tokens, and a copy finds
 		// the ranges the original does.
-		tk, err := paths.Root().Child("other").Token(doc.DocumentAST())
+		tk, err := paths.Current().Child("other").Token(doc.DocumentAST())
 		require.NoError(t, err)
 		require.NotNil(t, tk)
 
@@ -1179,13 +1179,13 @@ func TestSource_File_TokensFindLines(t *testing.T) {
 
 		// A path to a key resolves to the key token, and a block scalar to
 		// its indicator, each of which finds its own columns.
-		keyTk, err := paths.Root().Child("other").Key().Token(doc.DocumentAST())
+		keyTk, err := paths.Current().Child("other").Key().Token(doc.DocumentAST())
 		require.NoError(t, err)
 		assert.Equal(t, position.Ranges{
 			position.NewRange(position.New(3, 0), position.New(3, 5)),
 		}, source.Lines().ContentRanges(keyTk))
 
-		blockTk, err := paths.Root().Child("key").Token(doc.DocumentAST())
+		blockTk, err := paths.Current().Child("key").Token(doc.DocumentAST())
 		require.NoError(t, err)
 		assert.Equal(t, position.Ranges{
 			position.NewRange(position.New(0, 5), position.New(0, 6)),
@@ -1259,7 +1259,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 	t.Run("path error reports the renumbered line", func(t *testing.T) {
 		t.Parallel()
 
-		err := yamltest.Bind(t, source, niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b"))))
+		err := yamltest.Bind(t, source, niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b"))))
 		assert.Equal(t, "2:4: $.b: bad b", err.Error())
 
 		var bound *niceyaml.SourceError
@@ -1438,7 +1438,7 @@ func TestNewSourceFromString_ByteOrderMarkLaterDocument(t *testing.T) {
 
 			// The positions count in the text the Source holds, so an
 			// error at the value of b points at it.
-			err = docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
+			err = docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
 			assert.EqualError(t, err, tc.err)
 		})
 	}
@@ -2244,9 +2244,9 @@ func requireName(calls *atomic.Int32) niceyaml.Validator {
 			calls.Add(1)
 		}
 
-		_, err := n.At(paths.Root().Child("name"))
+		_, err := n.At(paths.Current().Child("name"))
 		if err != nil {
-			return niceyaml.NewError("name is required", niceyaml.AtPath(paths.Root()))
+			return niceyaml.NewError("name is required", niceyaml.AtPath(paths.Current()))
 		}
 
 		return nil
@@ -2433,7 +2433,7 @@ func TestSource_ValidateDocuments_Context(t *testing.T) {
 				return ctx.Err()
 			}
 
-			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Root()))
+			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Current()))
 		})
 
 		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
@@ -2460,7 +2460,7 @@ func TestSource_ValidateDocuments_Context(t *testing.T) {
 				return nil
 			}
 
-			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Root()))
+			return niceyaml.NewError("bad", niceyaml.AtPath(paths.Current()))
 		})
 
 		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
@@ -2904,7 +2904,7 @@ func TestDocument_BindChain(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("name: value\n")
-		pathErr := niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name")))
+		pathErr := niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name")))
 
 		var nilBound *niceyaml.SourceError
 
@@ -2947,7 +2947,7 @@ func TestDocument_BindChain(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("name: value\n")
-		namePath := paths.Root().Child("name")
+		namePath := paths.Current().Child("name")
 
 		once := yamltest.Bind(t, source, niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
 		assert.Same(t, once, yamltest.Bind(t, source, once))
@@ -2961,7 +2961,7 @@ func TestDocument_BindChain(t *testing.T) {
 
 		first := niceyaml.NewSourceFromString("name: value\n")
 		second := niceyaml.NewSourceFromString("# comment\nname: value\n", niceyaml.WithName("second"))
-		namePath := paths.Root().Child("name")
+		namePath := paths.Current().Child("name")
 
 		once := yamltest.Bind(t, first, niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
 		twice := yamltest.Bind(t, second, once)
@@ -3129,7 +3129,7 @@ func TestSource_Bind(t *testing.T) {
 		doc, err := one.Document()
 		require.NoError(t, err)
 
-		err = one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
+		err = one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
 
 		var bound *niceyaml.SourceError
 
@@ -3158,7 +3158,7 @@ func TestSource_Bind(t *testing.T) {
 		doc, err := one.Document()
 		require.NoError(t, err)
 
-		err = one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("zz").Index(0))))
+		err = one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("zz").Index(0))))
 
 		var bound *niceyaml.SourceError
 
@@ -3184,7 +3184,7 @@ func TestSource_Bind(t *testing.T) {
 			niceyaml.WithName("f.yaml"),
 		)
 
-		err := keyed.Bind(niceyaml.NewError("bad port", niceyaml.AtPath(paths.Root().Child("port"))))
+		err := keyed.Bind(niceyaml.NewError("bad port", niceyaml.AtPath(paths.Current().Child("port"))))
 
 		var bound *niceyaml.SourceError
 
@@ -3211,7 +3211,7 @@ func TestSource_Bind(t *testing.T) {
 		// The source holds two documents and Bind picks neither, so the
 		// error keeps its message and name and no position, and names the
 		// reason in place of the excerpt.
-		err := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
+		err := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
 
 		var bound *niceyaml.SourceError
 
@@ -3238,7 +3238,7 @@ func TestSource_Bind(t *testing.T) {
 		// nothing there.
 		for _, input := range []string{"...\n", ""} {
 			src := niceyaml.NewSourceFromString(input, niceyaml.WithName("none.yaml"))
-			err := src.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
+			err := src.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
 
 			doc, docErr := src.Document()
 			require.NoError(t, docErr)
@@ -3261,7 +3261,7 @@ func TestSource_Bind(t *testing.T) {
 		_, parseErr := broken.File()
 		require.Error(t, parseErr)
 
-		err := broken.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("a"))))
+		err := broken.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a"))))
 
 		var bound *niceyaml.SourceError
 
@@ -3299,8 +3299,8 @@ func TestSource_Bind(t *testing.T) {
 		t.Parallel()
 
 		err := source.Bind(niceyaml.NewSummary("2 problems",
-			niceyaml.NewError("bad a", niceyaml.AtPath(paths.Root().Child("a"))),
-			niceyaml.NewError("bad b", niceyaml.AtPath(paths.Root().Child("b"))),
+			niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a"))),
+			niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b"))),
 		))
 
 		var bound *niceyaml.SourceError
@@ -3340,7 +3340,7 @@ func TestSource_Bind(t *testing.T) {
 		docs, err := source.Documents()
 		require.NoError(t, err)
 
-		bound := docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Root().Child("b"))))
+		bound := docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
 		assert.Same(t, bound, source.Bind(bound))
 	})
 }
@@ -3788,10 +3788,10 @@ func TestWithReferences(t *testing.T) {
 		doc, err := src.Document()
 		require.NoError(t, err)
 
-		_, err = doc.At(paths.Root().Child("server", "port"))
+		_, err = doc.At(paths.Current().Child("server", "port"))
 		require.ErrorIs(t, err, paths.ErrAlias)
 
-		_, err = doc.Nodes(paths.Root().Child("server").ChildAll())
+		_, err = doc.Nodes(paths.Current().Child("server").ChildAll())
 		require.ErrorIs(t, err, paths.ErrAlias)
 
 		err = src.ValidateDocuments(t.Context(), serverSchema)

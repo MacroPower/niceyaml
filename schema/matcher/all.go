@@ -27,7 +27,7 @@ type allMatcher struct {
 //	// Matches YAML files in k8s directories with kind: Deployment.
 //	matcher.All(
 //	    matcher.MustFilePath("**/k8s/*.yaml"),
-//	    matcher.Content(paths.Root().Child("kind"), "Deployment"),
+//	    matcher.Content(paths.Doc().Child("kind"), "Deployment"),
 //	)
 func All(matchers ...Matcher) Matcher {
 	for i, m := range matchers {

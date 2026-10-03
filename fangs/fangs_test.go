@@ -65,7 +65,7 @@ func TestErrorHandler(t *testing.T) {
 
 	niceyamlErr := yamltest.Bind(t, src, niceyaml.NewError(
 		"invalid name",
-		niceyaml.AtPath(paths.Root().Child("name").Key()),
+		niceyaml.AtPath(paths.MustParse("$.name~")),
 	))
 
 	// Two named sources with the same content, so a joined error names the
@@ -75,12 +75,12 @@ func TestErrorHandler(t *testing.T) {
 
 	badName := yamltest.Bind(t, fileA, niceyaml.NewError(
 		"bad name",
-		niceyaml.AtPath(paths.Root().Child("name").Key()),
+		niceyaml.AtPath(paths.MustParse("$.name~")),
 	))
 
 	badValue := yamltest.Bind(t, fileB, niceyaml.NewError(
 		"bad value",
-		niceyaml.AtPath(paths.Root().Child("value")),
+		niceyaml.AtPath(paths.MustParse("$.value")),
 	))
 
 	// A source whose name opens with Cobra's wording for an unknown flag,
@@ -92,18 +92,18 @@ func TestErrorHandler(t *testing.T) {
 
 	flagLikeNameErr := yamltest.Bind(t, flagLikeFile, niceyaml.NewError(
 		"bad name",
-		niceyaml.AtPath(paths.Root().Child("name").Key()),
+		niceyaml.AtPath(paths.MustParse("$.name~")),
 	))
 
 	emptyMessageErr := yamltest.Bind(t, src, niceyaml.WrapError(
-		silentError{niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name").Key()))},
+		silentError{niceyaml.NewError("bad name", niceyaml.AtPath(paths.MustParse("$.name~")))},
 	))
 
 	// A wrapper around a join heads the problems of the join, here and in
 	// the niceyaml version the go.mod of this module requires.
 	nestedErr := yamltest.Bind(t, src, fmt.Errorf("two problems: %w", errors.Join(
-		niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name").Key())),
-		niceyaml.NewError("bad value", niceyaml.AtPath(paths.Root().Child("value"))),
+		niceyaml.NewError("bad name", niceyaml.AtPath(paths.MustParse("$.name~"))),
+		niceyaml.NewError("bad value", niceyaml.AtPath(paths.MustParse("$.value"))),
 	)))
 
 	// A source that ends with blank lines, which an excerpt of its last
@@ -111,7 +111,7 @@ func TestErrorHandler(t *testing.T) {
 	spaced := niceyaml.NewSourceFromString("name: test\n\n\n")
 	spacedErr := yamltest.Bind(t, spaced, niceyaml.NewError(
 		"bad name",
-		niceyaml.AtPath(paths.Root().Child("name")),
+		niceyaml.AtPath(paths.MustParse("$.name")),
 	))
 
 	tcs := map[string]struct {
@@ -498,7 +498,7 @@ func TestNewErrorHandler_Width(t *testing.T) {
 
 			err := yamltest.Bind(t, src, niceyaml.NewError(
 				"invalid name",
-				niceyaml.AtPath(paths.Root().Child("name")),
+				niceyaml.AtPath(paths.MustParse("$.name")),
 			))
 
 			p := printer.New(printer.WithWrap(tc.width - fangs.Indent))
@@ -529,8 +529,8 @@ func TestErrorHandler_ColorProfile(t *testing.T) {
 	`)))
 
 	err := yamltest.Bind(t, src, fmt.Errorf("two problems: %w", errors.Join(
-		niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name").Key())),
-		niceyaml.NewError("bad value", niceyaml.AtPath(paths.Root().Child("value"))),
+		niceyaml.NewError("bad name", niceyaml.AtPath(paths.MustParse("$.name~"))),
+		niceyaml.NewError("bad value", niceyaml.AtPath(paths.MustParse("$.value"))),
 	)))
 
 	p := printer.New(

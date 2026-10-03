@@ -75,7 +75,7 @@ const defaultHTTPTimeout = 30 * time.Second
 //
 // Example:
 //
-//	kindPath := paths.Root().Child("kind")
+//	kindPath := paths.Doc().Child("kind")
 //	reg := schema.NewRegistry(schema.WithResolvers(
 //	    // Directive matching first (i.e. explicit user intent).
 //	    schema.Directive(),
@@ -481,7 +481,7 @@ func (e reasonError) Unwrap() error {
 //		return err
 //	}
 //
-//	items, err := doc.Nodes(paths.Root().Child("items").IndexAll())
+//	items, err := doc.Nodes(paths.Doc().Child("items").IndexAll())
 //	if err != nil {
 //		return err
 //	}

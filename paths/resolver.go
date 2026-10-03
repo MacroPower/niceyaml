@@ -10,7 +10,13 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 )
 
-// Resolver resolves paths in one document. [NewResolver] binds each alias
+// Resolver resolves paths in one document, from its root. The root is the
+// node a `$` path reads from, and a Resolver has no other node for an `@`
+// path to read from, so it reads both from the root.
+// [Resolver.NodeFrom] takes the node an `@` path reads from. Every path a
+// Resolver returns starts at `$`.
+//
+// [NewResolver] binds each alias
 // of the document to its anchor once, so resolving many paths in one
 // document walks it once rather than once per path. A Resolver also reads
 // the keys of a mapping once, the first time a path looks up a key there,
@@ -45,24 +51,32 @@ func (r *Resolver) Node(p Path) (ast.Node, error) {
 	return r.nodeOf(p, m)
 }
 
-// NodeFrom resolves the node at p from node, as [Resolver.Node] resolves
-// p from the root of the document. The node belongs to the document of
-// the Resolver, such as one that Node or NodeFrom returned. A caller that
-// walks down the document can resolve each step from the node above it,
-// rather than a longer path from the root each time:
+// NodeFrom resolves the node at p with node as the current node, which
+// an `@` path reads from, as [Resolver.Node] resolves p from the root of
+// the document. The node belongs to the document of the Resolver, such
+// as one that Node or NodeFrom returned. A caller that walks down the
+// document can resolve each step from the node above it, rather than a
+// longer path from the root each time:
 //
-//	spec, err := r.Node(paths.Root().Child("spec"))
-//	replicas, err := r.NodeFrom(spec, paths.Root().Child("replicas"))
+//	spec, err := r.Node(paths.Doc().Child("spec"))
+//	replicas, err := r.NodeFrom(spec, paths.Current().Child("replicas"))
 //
 // Where q is the path that resolves to node, NodeFrom gives the node
-// that q joined with p resolves to, unless p starts with the `~` selector
-// from [Path.Key]. A path starts at node as it would at the root, so a
-// `~` there selects node itself.
+// that q joined with an `@` path p resolves to, unless p starts with the
+// `~` selector from [Path.Key]. A path starts at node as it would at the
+// root, so a `~` there selects node itself. A `$` path reads from the
+// document root wherever it resolves, so NodeFrom resolves it as
+// Resolver.Node does and node plays no part.
 //
-// Returns the errors [Resolver.Node] returns, other than
-// [ErrNoDocument]. A nil node holds nothing to resolve in, so NodeFrom
-// wraps [ErrNotFound] for it.
+// Returns the errors [Resolver.Node] returns. Only a `$` path wraps
+// [ErrNoDocument], since an `@` path resolves in node rather than in the
+// document. A nil node holds nothing to resolve in, so NodeFrom wraps
+// [ErrNotFound] for an `@` path and a nil node.
 func (r *Resolver) NodeFrom(node ast.Node, p Path) (ast.Node, error) {
+	if p.absolute {
+		return r.Node(p)
+	}
+
 	m, err := p.singleFrom(r.resolver, node)
 	if err != nil {
 		return nil, err
@@ -100,15 +114,17 @@ func (r *Resolver) Token(p Path) (*token.Token, error) {
 }
 
 // Nearest returns the path of the mapping that lacks a key p names, and
-// reports whether the document holds one. When p selects nothing because
-// the document leaves a key out, the longest prefix of p that resolves is
-// where that key belongs. Nearest returns that prefix when it resolves to
-// a mapping, or to a null, which stands where a mapping would, and every
-// selector of p after it is a `.name` selector. An error about a value
-// the document leaves out, such as a required field, points there:
+// reports whether the document holds one. It resolves p from the root of
+// the document, whether p starts at `$` or `@`, and the path it returns
+// starts at `$`. When p selects nothing because the document leaves a key
+// out, the longest prefix of p that resolves is where that key belongs.
+// Nearest returns that prefix when it resolves to a mapping, or to a
+// null, which stands where a mapping would, and every selector of p after
+// it is a `.name` selector. An error about a value the document leaves
+// out, such as a required field, points there:
 //
 //	// In a document that holds server and no tls under it.
-//	near, ok := r.Nearest(paths.Root().Child("server", "tls", "cert"))
+//	near, ok := r.Nearest(paths.Doc().Child("server", "tls", "cert"))
 //	// $.server, true
 //
 // It reports false for a path that resolves, which misses no key. It
@@ -150,7 +166,7 @@ func (r *Resolver) Nearest(p Path) (Path, bool) {
 			return Path{}, false
 		}
 
-		return Root().extend(p.segments[:k]...), true
+		return Doc().extend(p.segments[:k]...), true
 	}
 
 	return Path{}, false
@@ -178,7 +194,7 @@ func (r *Resolver) Matches(p Path) ([]Match, error) {
 			continue
 		}
 
-		matches = append(matches, Match{Node: node, Path: Path{segments: m.segs}})
+		matches = append(matches, Match{Node: node, Path: Path{segments: m.segs, absolute: true}})
 	}
 
 	return matches, nil

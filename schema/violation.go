@@ -23,10 +23,12 @@ const noFormMessage = "value matches none of the allowed forms"
 // Violation is one constraint of a JSON schema that a value breaks.
 // [Schema.Validate] and [Schema.ValidateValue] report each one as a
 // [*niceyaml.Error] that wraps a Violation and carries the YAML path to
-// the failing location. A caller reads the constraint from the Violation
-// instead of matching on the text of the message. A report that
-// suppresses a rule, rewords a message, or writes a format such as SARIF
-// walks the bound errors and reads the Violation of each:
+// the failing location. That path starts at `@`, the value the schema
+// checked, until a binding reports it from the root of the document. A
+// caller reads the constraint from the Violation instead of matching on
+// the text of the message. A report that suppresses a rule, rewords a
+// message, or writes a format such as SARIF walks the bound errors and
+// reads the Violation of each:
 //
 //	for bound := range niceyaml.AllBindings(err) {
 //		v, ok := errors.AsType[*schema.Violation](bound.Cause())
