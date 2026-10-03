@@ -519,8 +519,9 @@ func isSeparator(a Annotation) bool {
 // bound error this way. A printer renders the same view with styles, and
 // color marks the overlays there, so its rows below a line can differ
 // from these. [go.jacobcolvin.com/niceyaml/printer.DefaultAnnotation]
-// draws overlay carets only on the row of a kind without content and
-// gives a row with content a single caret. An empty view renders as "".
+// draws the overlay carets on the row of each kind below a line rather
+// than the first alone, and draws none for a blend overlay or for a line
+// with no annotation below it. An empty view renders as "".
 func (v *View) String() string {
 	width := 4
 	for _, ln := range v.All() {
@@ -697,8 +698,8 @@ func renderMarks(content string, marks []bool) string {
 		}
 	}
 
-	// The loop reads the length of marks on every pass, so a mark it
-	// moves past the end is still rendered.
+	// The loop reads the length of marks on every pass, so it still
+	// renders a mark it moves past the end.
 	for col := 0; col < len(marks); col++ {
 		if !marks[col] || row.Start(col) != col || row.Cells(col) > 0 {
 			continue

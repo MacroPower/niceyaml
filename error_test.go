@@ -2176,7 +2176,7 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 				"└── 1:1: $.key~: nested with path",
 				"",
 				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
-				"<textError>^ nested with path</textError>",
+				"<textError>^^^ nested with path</textError>",
 				"<nameTag>other</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>data</literalString>",
 			),
 		},
@@ -2199,7 +2199,7 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 				"└── 1:1: nested with token",
 				"",
 				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
-				"<textError>^ nested with token</textError>",
+				"<textError>^^^ nested with token</textError>",
 				"<nameTag>other</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>data</literalString>",
 			),
 		},
@@ -2220,7 +2220,7 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 				"└── also no path",
 				"",
 				"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
-				"<textError>^ has path</textError>",
+				"<textError>^^^ has path</textError>",
 				"<nameTag>other</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>data</literalString>",
 			),
 		},
@@ -2825,10 +2825,10 @@ func TestError_NestedErrorExcerpt(t *testing.T) {
 			"└── 6:1: $.line6~: error at line6",
 			"",
 			"<genericError>line1</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
-			"<textError>^ error at line1</textError>",
+			"<textError>^^^^^ error at line1</textError>",
 			"<uiSeparator>...</uiSeparator>",
 			"<genericError>line6</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>f</literalString>",
-			"<textError>^ error at line6</textError>",
+			"<textError>^^^^^ error at line6</textError>",
 		), trimLines(renderContext(err, 0)))
 	})
 
@@ -3043,10 +3043,10 @@ func TestError_HunkDisplay(t *testing.T) {
 			"└── 3:1: $.line3~: second error",
 			"",
 			"<genericError>line1</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
-			"<textError>^ first error</textError>",
+			"<textError>^^^^^ first error</textError>",
 			"<nameTag>line2</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
 			"<genericError>line3</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>c</literalString>",
-			"<textError>^ second error</textError>",
+			"<textError>^^^^^ second error</textError>",
 			"<nameTag>line4</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>d</literalString>",
 		), trimLines(renderContext(err, 1)))
 	})
@@ -3123,12 +3123,12 @@ func TestError_HunkDisplay(t *testing.T) {
 			"└── 7:1: $.last~: error at last",
 			"",
 			"<genericError>first</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
-			"<textError>^ error at first</textError>",
+			"<textError>^^^^^ error at first</textError>",
 			"<nameTag>middle1</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
 			"<uiSeparator>...</uiSeparator>",
 			"<nameTag>middle5</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>e</literalString>",
 			"<genericError>last</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
-			"<textError>^ error at last</textError>",
+			"<textError>^^^^ error at last</textError>",
 		), trimLines(renderContext(err, 1)))
 	})
 
@@ -3201,9 +3201,9 @@ func TestError_HunkDisplay(t *testing.T) {
 			"└── 2:1: $.line2~: error at line2",
 			"",
 			"<genericError>line1</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
-			"<textError>^ error at line1</textError>",
+			"<textError>^^^^^ error at line1</textError>",
 			"<genericError>line2</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
-			"<textError>^ error at line2</textError>",
+			"<textError>^^^^^ error at line2</textError>",
 		), trimLines(renderContext(err, 0)))
 	})
 }
@@ -3370,9 +3370,10 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 			),
 			want: stringtest.JoinLF(
 				"key: value",
-				"     ^ this is a very long error message",
-				"       that should definitely wrap when",
-				"       the width is limited",
+				"^^^  ^^^^^ this is a very long error",
+				"           message that should",
+				"           definitely wrap when the",
+				"           width is limited",
 				"other: data",
 			),
 		},
@@ -3385,7 +3386,7 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 			),
 			want: stringtest.JoinLF(
 				"key: value",
-				"     ^ this is a very long error message that should not wrap",
+				"^^^  ^^^^^ this is a very long error message that should not wrap",
 				"other: data",
 			),
 		},
@@ -3398,7 +3399,7 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 			),
 			want: stringtest.JoinLF(
 				"key: value",
-				"     ^ short error",
+				"^^^  ^^^^^ short error",
 				"other: data",
 			),
 		},
@@ -3474,11 +3475,11 @@ func TestError_Width_MultipleAnnotationsWrapping(t *testing.T) {
 		"",
 		"name: test",
 		"value: 123",
-		"       ^ first error with a very long message that",
-		"         should wrap properly",
+		"       ^^^ first error with a very long message",
+		"           that should wrap properly",
 		"other: data",
-		"^ second error also with a long message for",
-		"  testing wrap behavior",
+		"^^^^^ second error also with a long message for",
+		"      testing wrap behavior",
 	)
 	assert.Equal(t, want, got)
 }
@@ -3522,8 +3523,8 @@ func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 		"    here",
 		"",
 		"key: value",
-		"^ first error message here; second error",
-		"  message here",
+		"^^^  ^^^^^ first error message here;",
+		"           second error message here",
 	)
 	assert.Equal(t, want, got)
 }
@@ -7524,7 +7525,7 @@ func TestSourceError_MessageAtHighlightStart(t *testing.T) {
 			input:   "parent:\n  child: x\n  other: 1\n",
 			at:      position.New(2, 0),
 			want:    "     |   ^^^^^ bad",
-			wantXML: "<textError>  ^ bad</textError>",
+			wantXML: "<textError>  ^^^^^ bad</textError>",
 		},
 		"position on the spaces after a value": {
 			input:   "a: 1   \n",
@@ -7536,7 +7537,7 @@ func TestSourceError_MessageAtHighlightStart(t *testing.T) {
 			input:   "key: value\n",
 			at:      position.New(0, 7),
 			want:    "     |      ^^^^^ bad",
-			wantXML: "<textError>     ^ bad</textError>",
+			wantXML: "<textError>     ^^^^^ bad</textError>",
 		},
 	}
 

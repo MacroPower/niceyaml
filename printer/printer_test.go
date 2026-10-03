@@ -640,6 +640,178 @@ func TestPrinter_PrintError_MarksRangeWithoutStyles(t *testing.T) {
 	}
 }
 
+func TestPrinter_PrintError_MarksBindingsWithoutStyles(t *testing.T) {
+	t.Parallel()
+
+	// Among several bindings, each message sits beside the carets of its
+	// line, so without color the carets still show the extent of each
+	// range, as FormatError draws them.
+	source := niceyaml.NewSourceFromString("ports: {http: eighty, https: ninety}\nname: Web-App\nport: 8\n")
+
+	tcs := map[string]struct {
+		err  error
+		want string
+	}{
+		"bindings on one line": {
+			err: yamltest.Bind(t, source, errors.Join(
+				niceyaml.NewError("not a number", niceyaml.AtPath(paths.Root().Child("ports").Child("http"))),
+				niceyaml.NewError("also not a number", niceyaml.AtPath(paths.Root().Child("ports").Child("https"))),
+			)),
+			want: stringtest.JoinLF(
+				"├── 1:15: $.ports.http: not a number",
+				"└── 1:30: $.ports.https: also not a number",
+				"",
+				"ports: {http: eighty, https: ninety}",
+				"              ^^^^^^         ^^^^^^ not a number; also not a number",
+				"name: Web-App",
+				"port: 8",
+			),
+		},
+		"bindings on separate lines": {
+			err: yamltest.Bind(t, source, errors.Join(
+				niceyaml.NewError("not a number", niceyaml.AtPath(paths.Root().Child("ports").Child("https"))),
+				niceyaml.NewError("reserved name", niceyaml.AtPath(paths.Root().Child("name"))),
+				niceyaml.NewError("too small", niceyaml.AtPath(paths.Root().Child("port"))),
+			)),
+			want: stringtest.JoinLF(
+				"├── 1:30: $.ports.https: not a number",
+				"├── 2:7: $.name: reserved name",
+				"└── 3:7: $.port: too small",
+				"",
+				"ports: {http: eighty, https: ninety}",
+				"                             ^^^^^^ not a number",
+				"name: Web-App",
+				"      ^^^^^^^ reserved name",
+				"port: 8",
+				"      ^ too small",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := printer.New(
+				printer.WithStyles(style.Styles{}),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithGutter(printer.NoGutter),
+			)
+
+			got := p.PrintError(tc.err)
+			assert.Equal(t, tc.want, got)
+
+			// FormatError draws the same excerpt behind a gutter of its own,
+			// and a tree with ASCII connectors.
+			_, gotExcerpt, ok := strings.Cut(got, "\n\n")
+			require.True(t, ok)
+
+			_, formatted, ok := strings.Cut(niceyaml.FormatError(tc.err, p.ContextLines()), "\n\n")
+			require.True(t, ok)
+
+			rows := strings.Split(formatted, "\n")
+			for i, row := range rows {
+				_, rows[i], _ = strings.Cut(row, " | ")
+			}
+
+			assert.Equal(t, strings.Join(rows, "\n"), gotExcerpt)
+		})
+	}
+}
+
+func TestPrinter_PrintError_MarksWrappedBindings(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("ports: {http: eighty, https: ninety}\nname: x\n")
+
+	tcs := map[string]struct {
+		err   error
+		want  string
+		width int
+	}{
+		// The message sits beside the carets of the wrapped row that holds
+		// its column, here the second.
+		"message beside the carets of a later row": {
+			err: yamltest.Bind(t, source, errors.Join(
+				niceyaml.NewError("not a number", niceyaml.AtPath(paths.Root().Child("ports").Child("https"))),
+				niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name"))),
+			)),
+			width: 30,
+			want: stringtest.JoinLF(
+				"├── 1:30: $.ports.https: not a",
+				"│   number",
+				"└── 2:7: $.name: bad name",
+				"",
+				"ports: {http: eighty, https:",
+				"ninety}",
+				"^^^^^^ not a number",
+				"name: x",
+				"      ^ bad name",
+			),
+		},
+		// The messages of the first row join beside the carets of both
+		// values, which leave them too little room, so they move to the
+		// rows below the carets.
+		"bindings on one row": {
+			err: yamltest.Bind(t, source, errors.Join(
+				niceyaml.NewError("not a number", niceyaml.AtPath(paths.Root().Child("ports").Child("http"))),
+				niceyaml.NewError("also not a number", niceyaml.AtPath(paths.Root().Child("ports").Child("https"))),
+				niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name"))),
+			)),
+			width: 40,
+			want: stringtest.JoinLF(
+				"├── 1:15: $.ports.http: not a number",
+				"├── 1:30: $.ports.https: also not a",
+				"│   number",
+				"└── 2:7: $.name: bad name",
+				"",
+				"ports: {http: eighty, https: ninety}",
+				"              ^^^^^^         ^^^^^^",
+				"                    not a number; also",
+				"                    not a number",
+				"name: x",
+				"      ^ bad name",
+			),
+		},
+		// A range across a break gets carets below each row it covers, and
+		// the message sits with the carets of the first.
+		"range across a break": {
+			err: yamltest.Bind(t, source, errors.Join(
+				niceyaml.NewError("bad", niceyaml.AtRange(position.NewRange(position.New(0, 14), position.New(0, 35)))),
+				niceyaml.NewError("bad name", niceyaml.AtPath(paths.Root().Child("name"))),
+			)),
+			width: 30,
+			want: stringtest.JoinLF(
+				"├── 1:15: bad",
+				"└── 2:7: $.name: bad name",
+				"",
+				"ports: {http: eighty, https:",
+				"              ^^^^^^^^^^^^^^",
+				"          bad",
+				"ninety}",
+				"^^^^^^",
+				"name: x",
+				"      ^ bad name",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := printer.New(
+				printer.WithStyles(style.Styles{}),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+				printer.WithGutter(printer.NoGutter),
+				printer.WithWrap(tc.width),
+			)
+
+			assert.Equal(t, tc.want, p.PrintError(tc.err))
+		})
+	}
+}
+
 func TestPrinter_MarksRangeUnderHighlight(t *testing.T) {
 	t.Parallel()
 
@@ -1021,6 +1193,35 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 			want: stringtest.JoinLF(
 				"ccca日ccca\u200b",
 				"^^^^^^^^^^^",
+			),
+		},
+		// The message sits beside the carets of the wrapped row that holds
+		// its column, and the other rows get their carets alone.
+		"message beside the carets of a later row": {
+			content:    "key: aaaa bbbb cccc dddd",
+			cols:       []position.Span{position.NewSpan(5, 9), position.NewSpan(20, 24)},
+			annotation: &line.Annotation{Placement: line.Below, Col: 20, Content: "bad"},
+			width:      20,
+			want: stringtest.JoinLF(
+				"key: aaaa bbbb cccc",
+				"     ^^^^",
+				"dddd",
+				"^^^^ bad",
+			),
+		},
+		// Carets that run to the end of a row leave the message no room
+		// beside them, so it moves to the row below the carets.
+		"message below carets that fill the row": {
+			content:    "key: aaaa bbbb cccc dddd",
+			cols:       []position.Span{position.NewSpan(5, 24)},
+			annotation: &line.Annotation{Placement: line.Below, Col: 5, Content: "bad"},
+			width:      20,
+			want: stringtest.JoinLF(
+				"key: aaaa bbbb cccc",
+				"     ^^^^^^^^^^^^^^",
+				"bad",
+				"dddd",
+				"^^^^",
 			),
 		},
 	}
@@ -4828,12 +5029,82 @@ func TestDefaultAnnotation(t *testing.T) {
 			overlays:    line.Overlays{{Cols: position.NewSpan(3, 4)}},
 			position:    line.Above,
 		},
-		"content beside the overlays keeps its own caret": {
+		"content follows the carets under the overlays": {
 			content:     "  sla: 99",
 			annotations: line.Annotations{{Content: "bad", Placement: line.Below, Col: 7}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(7, 9)}},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 7, Marker: "^ ", Text: "bad"}},
+			want:        []printer.AnnotationRow{{Col: 7, Marker: "^^ ", Text: "bad"}},
+		},
+		"content follows the carets under every overlay": {
+			content: "a: one, b: two",
+			annotations: line.Annotations{
+				{Content: "second", Placement: line.Below, Col: 11},
+				{Content: "first", Placement: line.Below, Col: 3},
+			},
+			overlays: line.Overlays{
+				{Cols: position.NewSpan(11, 14)},
+				{Cols: position.NewSpan(3, 6)},
+			},
+			position: line.Below,
+			want:     []printer.AnnotationRow{{Col: 3, Marker: "^^^     ^^^ ", Text: "first; second"}},
+		},
+		"content marks its column outside the overlays": {
+			content:     "key: value",
+			annotations: line.Annotations{{Content: "note", Placement: line.Below}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(5, 10)}},
+			position:    line.Below,
+			want:        []printer.AnnotationRow{{Col: 0, Marker: "^    ^^^^^ ", Text: "note"}},
+		},
+		"content marks its column past the end of the line": {
+			content:     "a: 1",
+			annotations: line.Annotations{{Content: "here", Placement: line.Below, Col: 6}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(3, 4)}},
+			position:    line.Below,
+			want:        []printer.AnnotationRow{{Col: 3, Marker: "^  ^ ", Text: "here"}},
+		},
+		"content marks a far column at the bound past the end of the line": {
+			content:     "k: v",
+			annotations: line.Annotations{{Content: "x", Placement: line.Below, Col: math.MaxInt}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(3, 4)}},
+			position:    line.Below,
+			want: []printer.AnnotationRow{
+				{Col: 3, Marker: "^" + strings.Repeat(" ", line.MaxColPastEnd) + "^ ", Text: "x"},
+			},
+		},
+		"content marks wide runes with two carets each": {
+			content:     "k: 日本, v: 語",
+			annotations: line.Annotations{{Content: "bad", Placement: line.Below, Col: 3}},
+			overlays: line.Overlays{
+				{Cols: position.NewSpan(3, 5)},
+				{Cols: position.NewSpan(10, 11)},
+			},
+			position: line.Below,
+			want:     []printer.AnnotationRow{{Col: 3, Marker: "^^^^     ^^ ", Text: "bad"}},
+		},
+		"content with an overlay of no width keeps a single caret": {
+			content:     "a: 1",
+			annotations: line.Annotations{{Content: "bad", Placement: line.Below, Col: 4}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(4, 4)}},
+			position:    line.Below,
+			want:        []printer.AnnotationRow{{Col: 4, Marker: "^ ", Text: "bad"}},
+		},
+		"content with blend overlays alone keeps a single caret": {
+			content:     "name: value",
+			annotations: line.Annotations{{Content: "bad", Placement: line.Below, Col: 6}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(0, 11), Blend: true}},
+			position:    line.Below,
+			want:        []printer.AnnotationRow{{Col: 6, Marker: "^ ", Text: "bad"}},
+		},
+		"content leaves blend overlays without carets": {
+			content:     "name: other value",
+			annotations: line.Annotations{{Content: "bad", Placement: line.Below, Col: 6}},
+			overlays: line.Overlays{
+				{Cols: position.NewSpan(6, 17)},
+				{Cols: position.NewSpan(0, 4), Blend: true},
+			},
+			position: line.Below,
+			want:     []printer.AnnotationRow{{Col: 6, Marker: "^^^^^^^^^^^ ", Text: "bad"}},
 		},
 		"single below annotation": {
 			annotations: line.Annotations{{Content: "error here", Placement: line.Below, Col: 0}},
@@ -4984,13 +5255,39 @@ func TestDefaultAnnotation(t *testing.T) {
 			position:    line.Below,
 			want:        []printer.AnnotationRow{{Col: 20, Marker: "^^"}},
 		},
-		"wrapped content keeps content annotations on one row": {
+		"wrapped content puts the text beside the carets of the row that holds its column": {
 			content:     "key: aaaa bbbb",
 			annotations: line.Annotations{{Content: "bad", Placement: line.Below, Col: 10}},
 			overlays:    line.Overlays{{Cols: position.NewSpan(5, 14)}},
 			rowStarts:   []int{0, 10},
 			position:    line.Below,
-			want:        []printer.AnnotationRow{{Col: 10, Marker: "^ ", Text: "bad"}},
+			want: []printer.AnnotationRow{
+				{Col: 5, Marker: "^^^^"},
+				{Col: 10, Marker: "^^^^ ", Text: "bad"},
+			},
+		},
+		"wrapped content puts the text on the first row of a range across a break": {
+			content:     "key: aaaa bbbb cccc dddd",
+			annotations: line.Annotations{{Content: "bad", Placement: line.Below, Col: 5}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(5, 24)}},
+			rowStarts:   []int{0, 10, 20},
+			position:    line.Below,
+			want: []printer.AnnotationRow{
+				{Col: 5, Marker: "^^^^ ", Text: "bad"},
+				{Col: 10, Marker: "^^^^^^^^^"},
+				{Col: 20, Marker: "^^^^"},
+			},
+		},
+		"wrapped content keeps a single caret on a row without carets": {
+			content:     "key: aaaa bbbb",
+			annotations: line.Annotations{{Content: "bad", Placement: line.Below, Col: 9}},
+			overlays:    line.Overlays{{Cols: position.NewSpan(10, 14)}},
+			rowStarts:   []int{0, 10},
+			position:    line.Below,
+			want: []printer.AnnotationRow{
+				{Col: 9, Marker: "^ ", Text: "bad"},
+				{Col: 10, Marker: "^^^^"},
+			},
 		},
 		"wrapped content clamps a negative row start and end": {
 			content:     "abc",
@@ -5748,7 +6045,9 @@ func TestPrinter_PrintError_AnnotationOnWrappedRow(t *testing.T) {
 	}
 
 	// The message sits below the wrapped row that holds the item, whether
-	// or not that row is the last, so the caret lands under the item.
+	// or not that row is the last, so the carets land under the item. On
+	// the earlier row, the message wraps, and its second row starts under
+	// its first word.
 	tcs := map[string]struct {
 		want  []string
 		index int
@@ -5758,7 +6057,10 @@ func TestPrinter_PrintError_AnnotationOnWrappedRow(t *testing.T) {
 			want: slices.Concat(
 				[]string{"outer", "└── 1:49: $.items[5]: expected string", ""},
 				rows[:2],
-				[]string{strings.Repeat(" ", 22) + "^ expected string"},
+				[]string{
+					strings.Repeat(" ", 22) + "^^^^^^ expected",
+					strings.Repeat(" ", 29) + "string",
+				},
 				rows[2:],
 			),
 		},
@@ -5767,7 +6069,7 @@ func TestPrinter_PrintError_AnnotationOnWrappedRow(t *testing.T) {
 			want: slices.Concat(
 				[]string{"outer", "└── 1:137: $.items[16]: expected string", ""},
 				rows[:5],
-				[]string{strings.Repeat(" ", 14) + "^ expected string"},
+				[]string{strings.Repeat(" ", 14) + "^^^^^^ expected string"},
 				rows[5:],
 			),
 		},
@@ -7398,7 +7700,10 @@ func TestPrinter_AnnotationGutterSoftPerWrappedRow(t *testing.T) {
 		gutters = append(gutters, row[:1])
 	}
 
-	assert.Equal(t, []string{"L", "F", "S", "C", "F", "C"}, gutters)
+	// Each kind draws the carets of the overlays below each row they
+	// cover, and the message of the second kind moves to a row of its own,
+	// since its carets leave it no room.
+	assert.Equal(t, []string{"L", "F", "S", "S", "C", "F", "S", "C"}, gutters)
 }
 
 func TestColWidth(t *testing.T) {

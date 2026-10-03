@@ -278,8 +278,8 @@ type AnnotationContext struct {
 
 	// RowEnds holds the column of Content just past the last rune each
 	// row of the line shows once the printer wraps it, one for each entry
-	// of RowStarts, so a row ends before the spaces the wrap drops at its
-	// break or at the end of the line. When it is nil, each row ends
+	// of RowStarts. A row thus ends before the spaces the wrap drops at
+	// its break or at the end of the line. When it is nil, each row ends
 	// where the next begins, less the spaces before that, and the last
 	// row ends at the end of Content. Each context holds a copy.
 	RowEnds []int
@@ -345,11 +345,11 @@ func CutWidth(row string, left, right int) (string, int) {
 // takes on it.
 type AnnotationRow struct {
 	// Marker is the text between the padding and Text on the first row,
-	// such as the "^ " [DefaultAnnotation] puts before a [line.Below]
-	// annotation. The printer keeps the Marker whole on one row, even
-	// when it runs past the width, so a func that marks columns puts the
-	// marks in the Marker and leaves Text empty, as the caret rows of
-	// [DefaultAnnotation] do. When Text wraps, its continuation rows
+	// such as the carets and the space [DefaultAnnotation] puts before the
+	// text of a [line.Below] annotation. The printer keeps the Marker
+	// whole on one row, even when it runs past the width, so a func that
+	// marks columns puts the marks in the Marker, as [DefaultAnnotation]
+	// does with its carets. When Text wraps, its continuation rows
 	// indent past the Marker, so they align under the start of Text. When
 	// the column leaves Text less room than its widest word, the Marker
 	// keeps its column on a row of its own, and Text moves to the rows
@@ -407,55 +407,184 @@ func NoAnnotation(AnnotationContext) []AnnotationRow {
 
 // DefaultAnnotation is the [AnnotationFunc] [New] uses. It joins the
 // annotations with "; " in column order, as [line.Annotations.WithContent]
-// sorts them, at their column, [line.Annotations.Col], and
-// marks [line.Below] annotations with "^ ". It leaves out annotations
-// with empty content. When none remain, an annotation below the line
-// still marks it. The row is then a caret under every column the line's
-// overlays cover, as [line.Overlays.MarkerRow] draws them, so a marked
-// range shows its extent without color. Overlays with
-// [line.Overlay.Blend] set, such as search highlights, get no carets,
-// since they mark a match rather than the range the annotation belongs
-// to. When the other overlays cover no column, as an overlay of no width
-// covers none, the row is a single caret at the column of the
-// annotations, so the spot still shows. When the line wraps, each wrapped row that holds a
-// covered column gets a caret row of its own below it, which marks the
-// covered columns of that row. A space the wrap drops, at a break or at
-// the end of the line, gets no caret. An annotation above the line with
-// no content renders nothing, as [line.Annotation.String] does. A
-// newline in an annotation renders as its picture rather than starting a
-// row, as every other control character does.
+// sorts them, and leaves out annotations with empty content. Above the
+// line, the joined text starts at the column of the annotations,
+// [line.Annotations.Col], and annotations with no content render
+// nothing, as [line.Annotation.String] does.
+//
+// Below the line, carets mark it, so a marked range shows its extent
+// without color. The caret row holds a caret under every column the
+// line's overlays cover, as [line.Overlays.MarkerRow] draws them. When
+// the annotations have content, the row also marks their column, and the
+// joined text follows the last caret after a space, as
+// [line.View.String] draws the row. Annotations with no content get the
+// carets alone. Overlays with [line.Overlay.Blend] set, such as search
+// highlights, get no carets, since they mark a match rather than the
+// range the annotation belongs to. When the other overlays cover no
+// column, as an overlay of no width covers none, the row is a single
+// caret at the column of the annotations, so the spot still shows, and
+// any joined text follows that caret.
+//
+// When the line wraps, each wrapped row that holds a caret gets a caret
+// row of its own below it, which marks the covered columns of that row.
+// The joined text follows the carets of the wrapped row that holds the
+// column of the annotations, or a single caret at that column when that
+// row holds none. A space the wrap drops, at a break or at the end of the
+// line, gets no caret. A newline in an annotation renders as its picture
+// rather than starting a row, as every other control character does.
 func DefaultAnnotation(ctx AnnotationContext) []AnnotationRow {
 	// Filter the annotations rather than their contents, so the column
 	// comes from the ones that remain.
 	kept := ctx.Annotations.WithContent()
-	if len(kept) == 0 {
-		if ctx.Placement != line.Below {
+
+	if ctx.Placement != line.Below {
+		if len(kept) == 0 {
 			return nil
 		}
 
+		return []AnnotationRow{{Col: kept.Col(), Text: joinContents(kept)}}
+	}
+
+	if len(kept) == 0 {
 		return markerRows(ctx)
 	}
 
-	row := AnnotationRow{
-		Col:  kept.Col(),
-		Text: escape.Control(strings.Join(kept.Contents(), "; ")),
-	}
-
-	if ctx.Placement == line.Below {
-		row.Marker = "^ "
-	}
-
-	return []AnnotationRow{row}
+	return messageRows(ctx, kept)
 }
 
-// markerRows returns a caret row for each wrapped row of ctx.Content that
-// holds a column the overlays of ctx without Blend set cover, in order,
-// each under the covered columns of its row. A row ends at its entry of RowEnds, before
-// the spaces the wrap drops, so those spaces get no caret. It escapes the
-// content first, as the printer shows it, so a tab counts as its picture
-// rather than a space. When the overlays cover no column, it returns one
-// row with a single caret at the column of the annotations.
+// joinContents returns the contents of anns joined with "; ", with each
+// control character as its picture.
+func joinContents(anns line.Annotations) string {
+	return escape.Control(strings.Join(anns.Contents(), "; "))
+}
+
+// markerRows returns the caret rows of ctx, which holds no annotation
+// with content: one for each wrapped row of ctx.Content that holds a
+// column the overlays of ctx without Blend set cover, as [caretRuns]
+// finds them. When the overlays cover no column, it returns one row with
+// a single caret at the column of the annotations.
 func markerRows(ctx AnnotationContext) []AnnotationRow {
+	var rows []AnnotationRow
+
+	for _, run := range caretRuns(ctx, overlayCarets(ctx)) {
+		rows = append(rows, run.row)
+	}
+
+	if len(rows) == 0 && len(ctx.Annotations) > 0 {
+		rows = append(rows, caretRow(ctx.Content, ctx.Annotations.Col()))
+	}
+
+	return rows
+}
+
+// messageRows returns the rows of kept, the [line.Below] annotations of
+// ctx that have content. Each wrapped row of ctx.Content that holds a
+// caret gets a caret row, as [markerRows] draws them, with a caret at the
+// column of kept as well. The joined contents follow the carets of the
+// wrapped row that holds that column, after a space, as [line.View.String]
+// draws the row. When the overlays of ctx without Blend set cover no
+// column, or that wrapped row holds no caret, as when the column falls on
+// a space the wrap drops, the contents follow a single caret at the
+// column instead.
+func messageRows(ctx AnnotationContext, kept line.Annotations) []AnnotationRow {
+	single := AnnotationRow{Col: kept.Col(), Marker: "^ ", Text: joinContents(kept)}
+
+	carets := overlayCarets(ctx)
+	if carets == "" {
+		return []AnnotationRow{single}
+	}
+
+	// The printer starts a column further past the end of the content at
+	// the bound, and writes each row beside the wrapped row that holds its
+	// column, so the contents go beside the carets of that row.
+	col := min(max(0, single.Col), utf8.RuneCountInString(ctx.Content)+line.MaxColPastEnd)
+	at := rowIndex(ctx.RowStarts, col)
+
+	runs := caretRuns(ctx, mergeCarets(carets, colCarets(ctx.Content, col)))
+
+	i := slices.IndexFunc(runs, func(run caretRun) bool { return run.at >= at })
+
+	switch {
+	case i >= 0 && runs[i].at == at:
+		runs[i].row.Marker += " "
+		runs[i].row.Text = single.Text
+
+	case i >= 0:
+		runs = slices.Insert(runs, i, caretRun{row: single, at: at})
+
+	default:
+		runs = append(runs, caretRun{row: single, at: at})
+	}
+
+	rows := make([]AnnotationRow, 0, len(runs))
+	for _, run := range runs {
+		rows = append(rows, run.row)
+	}
+
+	return rows
+}
+
+// overlayCarets returns the caret row of the overlays of ctx without Blend
+// set, as [line.Overlays.MarkerRow] draws it under ctx.Content, or "" when
+// they cover no column. The row holds one byte per cell, a caret or a
+// space. A blend overlay, such as a search highlight, marks nothing the
+// annotation belongs to, so it gets no caret.
+func overlayCarets(ctx AnnotationContext) string {
+	marked := slices.DeleteFunc(slices.Clone(ctx.Overlays), func(o line.Overlay) bool {
+		return o.Blend
+	})
+
+	return marked.MarkerRow(ctx.Content)
+}
+
+// colCarets returns the caret row that marks col of content alone, with a
+// caret as wide as [line.Overlays.MarkerRow] draws the rune there. A
+// column past the end of the content gets a caret one cell wide, in the
+// cell [ColWidth] gives it, and a column more than [line.MaxColPastEnd]
+// columns past the end gets the caret of the column at that bound.
+func colCarets(content string, col int) string {
+	col = min(max(0, col), utf8.RuneCountInString(content)+line.MaxColPastEnd)
+
+	carets := line.Overlays{{Cols: position.NewSpan(col, col+1)}}.MarkerRow(content)
+	if carets == "" {
+		carets = strings.Repeat(" ", ColWidth(content, col)) + "^"
+	}
+
+	return carets
+}
+
+// mergeCarets returns the caret row that holds a caret in every cell where
+// a or b holds one, as long as the longer of the two.
+func mergeCarets(a, b string) string {
+	if len(a) < len(b) {
+		a, b = b, a
+	}
+
+	merged := []byte(a)
+
+	for i := range len(b) {
+		if b[i] == '^' {
+			merged[i] = '^'
+		}
+	}
+
+	return string(merged)
+}
+
+// caretRun is a caret row that [caretRuns] finds, with the index in
+// [AnnotationContext.RowStarts] of the wrapped row it marks.
+type caretRun struct {
+	row AnnotationRow
+	at  int
+}
+
+// caretRuns returns a caret row for each wrapped row of ctx.Content that
+// holds a caret of carets, the caret row of the whole line, in order,
+// each under the carets of its own row. A row ends at its entry of
+// RowEnds, before the spaces the wrap drops, so those spaces get no
+// caret. It escapes the content first, as the printer shows it, so a tab
+// counts as its picture rather than a space.
+func caretRuns(ctx AnnotationContext, carets string) []caretRun {
 	starts := ctx.RowStarts
 	if len(starts) == 0 {
 		starts = []int{0}
@@ -464,17 +593,7 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 	shown := []rune(escape.Control(ctx.Content))
 	cellRow := cells.NewRow(ctx.Content)
 
-	// The caret row of the whole line comes from MarkerRow once, and each
-	// wrapped row takes the cells of its own columns from it. The row
-	// holds one byte per cell, a caret or a space. A blend overlay, such
-	// as a search highlight, marks nothing the annotation belongs to, so
-	// it gets no caret.
-	marked := slices.DeleteFunc(slices.Clone(ctx.Overlays), func(o line.Overlay) bool {
-		return o.Blend
-	})
-	marks := marked.MarkerRow(ctx.Content)
-
-	var rows []AnnotationRow
+	var runs []caretRun
 
 	for r, lo := range starts {
 		lo = min(max(0, lo), len(shown))
@@ -503,10 +622,10 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 		lo = cellRow.Next(lo)
 		from, to := cellRow.Width(lo), cellRow.Width(cellRow.Next(hi))
 		if hi == len(shown) {
-			to = len(marks)
+			to = len(carets)
 		}
 
-		cut := marks[min(from, len(marks)):min(to, len(marks))]
+		cut := carets[min(from, len(carets)):min(to, len(carets))]
 
 		i := strings.IndexByte(cut, '^')
 		if i < 0 {
@@ -517,17 +636,16 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 		// padding before them. They go in the Marker, which the printer
 		// keeps whole on one row, so a caret that lands one cell past a
 		// row that fills the width stays beside the others.
-		rows = append(rows, AnnotationRow{
-			Col:    cellRow.Col(lo, from+i),
-			Marker: strings.TrimRight(cut[i:], " "),
+		runs = append(runs, caretRun{
+			row: AnnotationRow{
+				Col:    cellRow.Col(lo, from+i),
+				Marker: strings.TrimRight(cut[i:], " "),
+			},
+			at: r,
 		})
 	}
 
-	if len(rows) == 0 && len(ctx.Annotations) > 0 {
-		rows = append(rows, caretRow(ctx.Content, ctx.Annotations.Col()))
-	}
-
-	return rows
+	return runs
 }
 
 // caretRow returns a row that marks col of content with a caret as wide
@@ -536,14 +654,7 @@ func markerRows(ctx AnnotationContext) []AnnotationRow {
 func caretRow(content string, col int) AnnotationRow {
 	col = max(0, col)
 
-	mark := line.Overlays{{Cols: position.NewSpan(col, col+1)}}
-	text := strings.TrimLeft(mark.MarkerRow(content), " ")
-
-	if text == "" {
-		text = "^"
-	}
-
-	return AnnotationRow{Col: col, Marker: text}
+	return AnnotationRow{Col: col, Marker: strings.TrimLeft(colCarets(content, col), " ")}
 }
 
 // renderLineNumber renders the line number portion of a gutter. The number
@@ -731,8 +842,9 @@ func WithGutter(g Gutter) Option {
 
 // WithAnnotation is an [Option] that sets the [AnnotationFunc] that
 // renders annotations. By default, [DefaultAnnotation] joins them and
-// marks [line.Below] annotations with "^ ". [NoAnnotation] leaves
-// annotations out. A nil fn selects [DefaultAnnotation].
+// marks [line.Below] annotations with carets under the columns the
+// line's overlays cover. [NoAnnotation] leaves annotations out. A nil fn
+// selects [DefaultAnnotation].
 func WithAnnotation(fn AnnotationFunc) Option {
 	return func(p *Printer) {
 		if fn == nil {

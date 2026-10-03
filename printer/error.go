@@ -24,17 +24,17 @@ const errorConnectorWidth = 4
 // with the errors of every document on it. A binding whose children point
 // into another file, such as a detail that names where a value was first
 // declared, prints an excerpt of that file too.
-// Among several bindings, the message of each sits beside its caret, and
-// when they touch more than one source, the name of its source leads
-// each excerpt on a row of its own. A location with no message beside it
-// in the excerpt, such as the root of a lone bound error, gets a caret
-// run under its range on the row below, as [niceyaml.FormatError] draws
-// one.
-// [niceyaml.SourceError.Excerpt] marks such a line with an annotation
-// without content, and [DefaultAnnotation] draws that as the caret run, so
-// the range shows its extent without color. A location that covers no
-// column, such as a path to an empty value, gets a single caret at its
-// column. Blank lines separate the parts. A line starting "no excerpt:"
+// Each location gets a caret run under its range on the row below its
+// line, as [niceyaml.FormatError] draws one, so the range shows its
+// extent without color. A location that covers no column, such as a path
+// to an empty value, gets a single caret at its column instead. Among
+// several bindings, the message of each sits after the carets of its
+// line, and when they touch more than one source, the name of its source
+// leads each excerpt on a row of its own. A location with no message
+// beside it in the excerpt, such as the root of a lone bound error, gets
+// its carets alone. [niceyaml.SourceError.Excerpt] marks such a line with
+// an annotation without content, and [DefaultAnnotation] draws the carets
+// for it. Blank lines separate the parts. A line starting "no excerpt:"
 // follows the excerpts for each SourceError [niceyaml.Bindings] finds
 // whose tree resolves no location, with the reason the location of the
 // SourceError itself did not resolve. A SourceError that carries no
@@ -61,7 +61,7 @@ const errorConnectorWidth = 4
 // pictures, as an excerpt draws them. A line feed in a message of the
 // tree starts a new row instead. A tab becomes four spaces wherever it
 // falls, in the tree, in a "no excerpt:" line, and in the message an
-// excerpt carries beside a caret. PrintError wraps each message to the
+// excerpt carries beside its carets. PrintError wraps each message to the
 // width [WithWrap] sets less the connectors in front of it. Each excerpt
 // wraps to that width less the horizontal frame of the container style,
 // so an excerpt and its frame fit the width together.

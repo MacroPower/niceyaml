@@ -45,12 +45,16 @@
 // which inside tmux starts a process, so a program that prints many views
 // builds one writer and prints them all through it.
 //
-// Output without its sequences is not the plain text of a view. An
-// overlay marks its span with color alone, so a search match loses its
-// mark along with the colors. [line.View.String] renders a view as plain
-// text with a caret under every column an overlay covers, and
-// [niceyaml.FormatError] renders an error the same way, so output for a
-// log or a file goes through them.
+// Output without its sequences is not the plain text of a view. Below a
+// line with an annotation below it, such as each line an error marks in
+// [Printer.PrintError], [DefaultAnnotation] draws a caret under every
+// column the line's overlays cover, so those ranges keep their extent.
+// An overlay on any other line, and a blend overlay such as a search
+// match, marks its span with color alone and loses its mark along with
+// the colors. The default container also pads each row with spaces.
+// [line.View.String] renders a view as plain text with a caret under
+// every column an overlay covers, and [niceyaml.FormatError] renders an
+// error the same way, so output for a log or a file goes through them.
 //
 // # Gutters
 //
