@@ -354,7 +354,7 @@ func (s *Source) Tokens() token.Tokens {
 // documents one by one. The [Node] methods that read the tree, such as
 // [Node.Validate] and [Node.Decode], return the syntax error of a document
 // that did not parse, so a loop over the documents meets each syntax
-// error beside the findings of the documents that parsed. A caller that
+// error beside the errors of the documents that parsed. A caller that
 // validates a whole file, as a linter does, calls
 // [Source.ValidateDocuments], which runs that loop:
 //
@@ -891,7 +891,8 @@ func (e syntaxError) Is(target error) bool {
 // parseRun parses run, one run of [splitDocumentRuns]. It turns a panic
 // in the parser into a [*SourceError] bound to the Source that matches
 // [ErrSyntax], located at the first token of run that carries a
-// position.
+// position. The Error around the panic declares nothing, so the binding
+// matches [ErrInvalid] only as every error that matches ErrSyntax does.
 func (s *Source) parseRun(run token.Tokens) (*ast.File, error) {
 	var (
 		f   *ast.File
@@ -913,7 +914,7 @@ func (s *Source) parseRun(run token.Tokens) (*ast.File, error) {
 
 			panicked := syntaxError{err: fmt.Errorf("parser rejected the tokens: panic: %v", p)}
 
-			err = bindTree(WrapError(panicked, atToken(at)), binder{src: s})
+			err = bindTree(wrapUndeclared(panicked, atToken(at)), binder{src: s})
 		}()
 
 		f, err = parser.Parse(run, parser.ParseComments, s.parserOpts...)
@@ -1552,7 +1553,7 @@ func startsBelow(tk, mark *token.Token) bool {
 //
 // A path resolves in the one document of the source, the one
 // [Source.Document] returns, so a check on a configuration file binds its
-// findings here as it would through [Node.Bind]:
+// errors here as it would through [Node.Bind]:
 //
 //	return source.Bind(check(cfg))
 //

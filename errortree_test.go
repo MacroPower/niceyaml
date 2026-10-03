@@ -1974,6 +1974,70 @@ func TestErrorTree_Problems_Reasons(t *testing.T) {
 	require.ErrorIs(t, got[0].Err, err)
 }
 
+func TestErrorTree_Problems_WrappedJoin(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("hours:\n  open: a\n", niceyaml.WithName("f.yaml"))
+
+	doc, err := source.Document()
+	require.NoError(t, err)
+
+	early := errors.New("opens too early")
+	late := errors.New("closes too late")
+
+	tcs := map[string]struct {
+		build func(t *testing.T) error
+		want  []string
+	}{
+		"unbound": {
+			build: func(*testing.T) error {
+				return niceyaml.WrapError(errors.Join(early, late))
+			},
+			want: []string{"opens too early", "closes too late"},
+		},
+		"bound at the root": {
+			build: func(*testing.T) error {
+				return doc.Bind(niceyaml.WrapError(errors.Join(early, late)))
+			},
+			want: []string{"f.yaml: opens too early", "f.yaml: closes too late"},
+		},
+		"bound through a scoped Node": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				hours := yamltest.At(t, doc, paths.Root().Child("hours"))
+
+				return hours.Bind(niceyaml.WrapError(errors.Join(early, late)))
+			},
+			want: []string{"f.yaml:2:3: $.hours: opens too early", "f.yaml:2:3: $.hours: closes too late"},
+		},
+		"rebased": {
+			build: func(*testing.T) error {
+				return niceyaml.Rebase(niceyaml.WrapError(errors.Join(early, late)), paths.Root().Child("hours"))
+			},
+			want: []string{"$.hours: opens too early", "$.hours: closes too late"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// WrapError declares each branch of the join a problem the
+			// document is at fault for, and each keeps its text.
+			var got []string
+
+			for problem := range niceyaml.NewErrorTree(tc.build(t)).Problems() {
+				require.ErrorIs(t, problem.Err, niceyaml.ErrInvalid)
+
+				got = append(got, problem.Text)
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 // reasonedHours is a [niceyaml.SelfValidator] whose error names no
 // location and gives two reasons.
 type reasonedHours struct {

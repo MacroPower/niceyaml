@@ -190,7 +190,7 @@ func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
 // problems [SourceError.Error] lists below each heading. Whether a node
 // carries a location plays no part, so an error bound to no source, such
 // as a file that failed to read, yields by the same rule, and the report
-// holds every failure.
+// holds every problem.
 //
 // A row reads its message from [ErrorTree.Message] and its path from
 // [ErrorTree.Path], which answer for a node bound to no source as well,
@@ -223,7 +223,9 @@ func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
 //
 // A row tells a fault of the document from a check that could not run by
 // checking its Err against [ErrInvalid] with [errors.Is], and [IsInvalid]
-// asks the same of every row.
+// asks the same of every row. A problem that an [*Error] matching
+// ErrInvalid heads matches too, so each branch of a join that [WrapError]
+// wraps yields a row whose Err matches, while its text stays its own.
 func (t ErrorTree) Problems() iter.Seq[ErrorTree] {
 	return func(yield func(ErrorTree) bool) {
 		t.problems(yield)
@@ -335,14 +337,22 @@ func bindingOf(err error) *SourceError {
 // own. A loop that joins each new error onto the ones before with
 // [errors.Join] nests each join in the next, and copying the nodes of each
 // level into the level above would take time and memory quadratic in
-// their number. A nil err appends nothing.
+// their number. A join that an [*Error] matching [ErrInvalid] wraps, as
+// one from [WrapError] does, marks each branch as [markInvalid] does. A
+// nil err appends nothing.
 func appendTrees(dst []ErrorTree, err error) []ErrorTree {
 	if isNothing(err) {
 		return dst
 	}
 
 	if branches, ok := joinBranches(err); ok {
+		invalid := headsInvalid(err)
+
 		for _, branch := range branches {
+			if invalid {
+				branch = markInvalid(branch)
+			}
+
 			dst = appendTrees(dst, branch)
 		}
 
@@ -824,26 +834,28 @@ func isLeaf(err error) bool {
 // childBase is the base the children along a cause chain rebase under:
 // the base of every Error from [Rebase] above them, joined, whether the
 // walk met such an Error, and whether one of them moves paths alone. It
-// also records whether one of them marks a finding. A Rebase at the root
-// still locates a problem with no location at the root, so the children
-// rebase whenever the walk met one, and only a chain that holds none
-// leaves them as they are.
+// also records whether an Error above them matches [ErrInvalid]. A Rebase
+// at the root still locates a problem with no location at the root, so
+// the children rebase whenever the walk met one, and only a chain that
+// holds none leaves them as they are.
 type childBase struct {
 	path      paths.Path
 	rebased   bool
 	movesOnly bool
-	finding   bool
+	invalid   bool
 }
 
 // cross returns the base below x: c joined with the base of x when x is
-// an Error from [Rebase], and c as it is otherwise.
+// an Error from [Rebase], and c as it is otherwise, marked invalid when x
+// matches [ErrInvalid].
 func (c childBase) cross(x *Error) childBase {
 	if x.rebased {
 		c.path = c.path.Join(x.base)
 		c.rebased = true
 		c.movesOnly = c.movesOnly || x.movesOnly
-		c.finding = c.finding || x.finding
 	}
+
+	c.invalid = c.invalid || x.invalid
 
 	return c
 }
@@ -852,15 +864,23 @@ func (c childBase) cross(x *Error) childBase {
 // no Error from [Rebase]. A detail explains the error above it, so it
 // takes no location from the base, and the base moves its paths alone. So
 // does every child below a detail, or below any other Rebase that moves
-// paths alone. A child below an Error that marks a finding is a finding
-// too, so each error a summary of a [SelfValidator] heads matches
-// [ErrInvalid].
+// paths alone. A problem below an Error that matches [ErrInvalid] matches
+// too, as [markInvalid] marks it, so each error a summary of a
+// [SelfValidator] heads, and each branch of a join that [WrapError]
+// wraps, is the document's fault. A detail is no problem, so it gains no
+// mark.
 func (c childBase) rebase(n error, detail bool) error {
+	invalid := c.invalid && !detail
+
 	if !c.rebased {
+		if invalid {
+			return markInvalid(n)
+		}
+
 		return n
 	}
 
-	return rebase(n, c.path, detail || c.movesOnly, c.finding)
+	return rebase(n, c.path, detail || c.movesOnly, invalid)
 }
 
 // trees returns the nodes of kids in position order within the source

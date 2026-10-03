@@ -126,17 +126,17 @@ import (
 // or that the value's own UnmarshalYAML already ran, runs again inside
 // the decode, so it should be idempotent.
 //
-// A Validate checks the value, so the decode marks every error it returns
-// as a finding that matches [ErrInvalid], with a location or without, and
-// [IsInvalid] counts it as the document's fault. That holds for an error
-// of I/O too, such as one from a check that a named file exists, so a
-// Validate whose I/O can fail for reasons outside the document leaves that
-// check to the caller.
+// A Validate checks the value, so every error it returns matches
+// [ErrInvalid], with a location or without, and [IsInvalid] counts it as
+// the document's fault. That holds for an error of I/O too, such as one
+// from a check that a named file exists. A Validate whose I/O can fail
+// for reasons outside the document thus leaves that check to the caller,
+// or to a [Validator], which declares each error itself.
 //
 // A Validate that returns the error of a context that ended, one that
 // matches [context.Canceled] or [context.DeadlineExceeded], stops the
 // walk. The decode returns that error alone, with no location, in place
-// of every failure the walk found before it, as [MultiValidator] does.
+// of every error the walk found before it, as [MultiValidator] does.
 // The walk stops the same way once the context of the decode ends, and
 // the decode then returns the error of that context.
 type SelfValidator interface {
@@ -215,19 +215,31 @@ type SelfValidator interface {
 //
 // A validator that runs on a Node from [Node.At] or [Node.Nodes] checks
 // one value, so an error with no location that it returns binds at that
-// value, as Node.Bind describes. A failure that is no fault of the value,
+// value, as Node.Bind describes. An error that is no fault of the value,
 // such as a schema that does not load, binds through the root
 // Node.Document returns, which gives it no location.
 //
-// A validator reports a finding about the document with an [*Error] that
-// carries a location of its own, which matches [ErrInvalid]. An error
-// from [NewError] with [AtPath] is one, and AtPath of [paths.Root] names
-// the whole node the validator got. Any other error is a failure of the
-// check, such as an I/O error, and does not match ErrInvalid. That holds
-// even when a scoped Node binds it at its value, since the location comes
-// from the binding and not from the error. [IsInvalid] therefore reports
-// a validator that leaves out the location as a check that could not run
-// rather than as a fault of the document.
+// A validator declares which of its errors are the fault of the document.
+// It returns an [*Error] from [NewError] or [WrapError] to report what is
+// wrong with the document, with a location or without, and that Error
+// matches [ErrInvalid]. It returns any other error when the check itself
+// could not run, such as an I/O error, and that error does not match
+// ErrInvalid. A location changes neither. [Rebase] or a scoped
+// [Node.Bind] shows an error of the second kind at the value the check
+// read:
+//
+//	_, err := os.Stat(spec.License)
+//	switch {
+//	case errors.Is(err, fs.ErrNotExist):
+//		return niceyaml.NewError("license file does not exist", niceyaml.AtPath(licensePath))
+//	case err != nil:
+//		return niceyaml.Rebase(fmt.Errorf("stat license: %w", err), licensePath)
+//	}
+//
+// The first error is the fault of the document, which names a file that
+// does not exist. The second binds at the same value, as in
+// "c.yaml:3:12: $.spec.license: stat license: permission denied", and
+// [IsInvalid] reports it as a check that could not run.
 //
 // A bound error keeps its text. Context that a validator adds around the
 // error of another therefore stands in front of the position, as in
@@ -1107,6 +1119,9 @@ func (n *Node) AST() ast.Node {
 //
 //	cfg.yaml: resolve $.items[7]: not found
 //
+// The document lacks the value in each case, so every error that wraps
+// [paths.ErrNotFound] matches [ErrInvalid], with a location or without.
+//
 // A node whose tokens carry no position covers no lines and holds no
 // tokens.
 //
@@ -1203,8 +1218,10 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 // resolve, [ErrExcessiveAliasing] when aliases lead a selector of the
 // path to far more nodes than the document holds, and
 // [paths.ErrExcessiveMerging] when the key lookups of a selector read far
-// more nodes under `<<` merge keys than that. A document that did not
-// parse returns the syntax error [Node.Err] returns.
+// more nodes under `<<` merge keys than that. The error of a document
+// with no content wraps [paths.ErrNotFound] too, and it matches
+// [ErrInvalid], as it does for Node.At. A document that did not parse
+// returns the syntax error [Node.Err] returns.
 func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	if n.doc.err != nil {
 		return nil, n.doc.err
@@ -1212,6 +1229,11 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 
 	found, err := n.doc.pathResolver().Matches(n.base.Join(path))
 	if err != nil {
+		// The document lacks every value the path could select.
+		if errors.Is(err, paths.ErrNotFound) {
+			return nil, n.bindOwn(WrapError(err))
+		}
+
 		return nil, n.bindOwn(err)
 	}
 
@@ -1572,7 +1594,8 @@ func (n *Node) Lines() line.Lines {
 //
 // A path that does not resolve returns the error [paths.Path.Token]
 // describes, bound to the source. The error of a path that names a key a
-// mapping leaves out binds at that mapping, as it does for [Node.At]. A
+// mapping leaves out binds at that mapping, as it does for [Node.At], and
+// every error that wraps [paths.ErrNotFound] matches [ErrInvalid]. A
 // path whose token carries no
 // position returns an error wrapping [ErrNoLocation]. A document that
 // did not parse returns the syntax error [Node.Err] returns. Returns nil
@@ -1637,17 +1660,23 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 }
 
 // bindUnresolved binds reason, the error path failed to resolve with from
-// the scope of n, as [Node.At] and [Node.Ranges] return it. A path that
-// names a key a mapping leaves out binds as an [Error] with [AtPath] of
-// that path binds, at the key of the mapping that lacks it, as
-// [Node.nearestLocation] finds it. The binding writes the path in front,
-// so the message is the one of [notFoundError], which leaves the path
-// out.
-// Any other reason is about the call, so it binds with no location, as
-// [Node.bindOwn] binds it.
+// the scope of n, as [Node.At] and [Node.Ranges] return it. A reason that
+// wraps [paths.ErrNotFound] says the document lacks the value, so it
+// binds inside an [Error] from [WrapError], which matches [ErrInvalid]. A
+// path that names a key a mapping leaves out binds as an Error with
+// [AtPath] of that path binds, at the key of the mapping that lacks it,
+// as [Node.nearestLocation] finds it. The binding writes the path in
+// front, so the message is the one of [notFoundError], which leaves the
+// path out. Any other path that selects nothing names no mapping, so its
+// error binds with no location, as [Node.bindOwn] binds it. Any other
+// reason is about the call, and it binds as it is.
 func (n *Node) bindUnresolved(path paths.Path, reason error) error {
-	if _, ok := n.nearestLocation(path, reason); !ok {
+	if !errors.Is(reason, paths.ErrNotFound) {
 		return n.bindOwn(reason)
+	}
+
+	if _, ok := n.nearestLocation(path, reason); !ok {
+		return n.bindOwn(WrapError(reason))
 	}
 
 	return n.bindOwn(WrapError(notFoundError{err: reason}, AtPath(path)))
@@ -1787,7 +1816,10 @@ func (n *Node) validate(ctx context.Context, validators []Validator, yamlOpts []
 //
 // The Node thus binds an error as the root of the document binds a
 // Rebase of it under [Node.Path], so a check bound through a scoped Node
-// and the same check run by a [SelfValidator] report alike. An error that
+// reports the lines and the paths that the same check run by a
+// [SelfValidator] reports. The location places the error and declares
+// nothing about it, so the bound error matches [ErrInvalid] only when err
+// does, where every error a SelfValidator returns matches. An error that
 // matches [context.Canceled] or [context.DeadlineExceeded] is about the
 // call, so it gains no location either. The root of a document gives no
 // error a location, since an error bound there can be about the document
@@ -3014,7 +3046,9 @@ func isTaggedNull(node ast.Node) bool {
 // decodeWithRecover decodes node into v with dec. It turns a panic in the
 // decoder into an [*Error] that matches [ErrDecode] and [errPlaced], with
 // no [yaml.Error] behind it, located at the first token of node that is not
-// a comment, so a comment above the value does not take the location.
+// a comment, so a comment above the value does not take the location. The
+// panic is no fault of the document, so the Error declares nothing, and it
+// matches [ErrInvalid] only as every error that matches ErrDecode does.
 func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v any) (err error) {
 	defer func() {
 		p := recover()
@@ -3024,7 +3058,7 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 
 		panicked := decodeError{err: fmt.Errorf("decoder rejected the value: panic: %v", p), placed: true}
 
-		err = WrapError(panicked, atToken(contentStart(node)))
+		err = wrapUndeclared(panicked, atToken(contentStart(node)))
 	}()
 
 	return dec.DecodeFromNodeContext(ctx, node, v) //nolint:wrapcheck // The caller binds the error.

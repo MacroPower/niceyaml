@@ -88,7 +88,7 @@ const noFormMessage = "value matches none of the allowed forms"
 // the error binds at the key of the mapping, here server, and
 // [niceyaml.SourceError.Nearest] returns the path of that mapping.
 //
-//nolint:errname // Named for the finding it holds, which a [*niceyaml.Error] reports.
+//nolint:errname // Named for the constraint the value breaks, which a [*niceyaml.Error] reports.
 type Violation struct {
 	// Keyword is the JSON Schema keyword the value fails, such as "type",
 	// "required", or "pattern". [jsonschema.KeywordType] and the constants
@@ -121,9 +121,9 @@ func (v *Violation) Error() string {
 
 // Is reports whether target is [niceyaml.ErrInvalid], since a value that
 // breaks a constraint is the fault of the document. The [*niceyaml.Error]
-// that wraps a Violation matches by its path already, so this answers for
-// the violation a schema reports with no location, when the failure names
-// none. A nil Violation matches nothing.
+// a schema builds around each Violation matches already, so this answers
+// for a Violation that reaches a caller on its own, such as one a
+// [niceyaml.Validator] returns as it is. A nil Violation matches nothing.
 func (v *Violation) Is(target error) bool {
 	return v != nil && target == niceyaml.ErrInvalid
 }

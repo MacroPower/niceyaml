@@ -115,7 +115,9 @@
 // A Registry implements [go.jacobcolvin.com/niceyaml.Validator],
 // so [go.jacobcolvin.com/niceyaml.WithValidator] runs it before a decode.
 // A document no resolver applies to fails with [ErrNoMatch], which is the
-// answer a validation command wants. A decode that should check the
+// answer a validation command wants. That error matches
+// [go.jacobcolvin.com/niceyaml.ErrInvalid], so the command counts it as a
+// fault of the document. A decode that should check the
 // documents it recognizes and accept the rest builds the registry with
 // [WithRequireSchema] set false:
 //

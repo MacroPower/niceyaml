@@ -424,12 +424,13 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 	return nil, true, noMatch(reasons)
 }
 
-// noMatch returns the error a lookup reports when every resolver declined.
-// That is [ErrNoMatch] alone when no resolver said more than that, and
-// otherwise ErrNoMatch with the reason of each resolver that did as a
-// detail from [niceyaml.WithDetails], in lookup order. The lookup failed
-// once, so the error is one problem, and its message is one line.
-// [errors.Is] finds a reason such as [ErrNoDirective], and
+// noMatch returns the error a lookup reports when every resolver declined:
+// [ErrNoMatch] inside a [*niceyaml.Error] from [niceyaml.WrapError], with
+// the reason of each resolver that said more than ErrNoMatch as a detail
+// from [niceyaml.WithDetails], in lookup order. The document names no
+// schema the registry knows, so the error matches [niceyaml.ErrInvalid].
+// The lookup failed once, so the error is one problem, and its message is
+// one line. [errors.Is] finds a reason such as [ErrNoDirective], and
 // [niceyaml.FormatError] lists the reasons below the message.
 func noMatch(reasons []error) error {
 	var details []error
@@ -438,10 +439,6 @@ func noMatch(reasons []error) error {
 		if reason.Error() != ErrNoMatch.Error() {
 			details = append(details, reasonError{err: reason})
 		}
-	}
-
-	if len(details) == 0 {
-		return ErrNoMatch
 	}
 
 	return niceyaml.WrapError(ErrNoMatch, niceyaml.WithDetails(details...))
@@ -496,6 +493,8 @@ func (e reasonError) Unwrap() error {
 //
 // Returns [ErrNoMatch] if no resolver applies to the document, unless
 // [WithRequireSchema] set false, in which case such a document passes.
+// That error matches [niceyaml.ErrInvalid], since the document names no
+// schema the registry knows.
 // A document a resolver applies to never passes that way, even when the
 // load error of its schema wraps ErrNoMatch. Callers of a registry that
 // requires a schema can check for the error to allow unmatched documents
