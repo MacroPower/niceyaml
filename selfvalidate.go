@@ -63,7 +63,9 @@ import (
 // node, and each error binds where its path resolves in the document. An
 // error under a field or map entry that the document lacks binds at the
 // key of the mapping that lacks it, as [Node.Bind] binds the path of a
-// missing key. An error under an element that the document lacks, such
+// missing key. An error under a value that an alias reads from a
+// reference document binds at that alias, as [SourceError.Nearest]
+// describes. An error under an element that the document lacks, such
 // as one the caller appended to a slice, binds with no position. An error
 // under a value the caller replaced, or under an element of a slice it
 // reordered or grew at the front, marks what the document holds at that

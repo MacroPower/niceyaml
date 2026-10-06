@@ -908,6 +908,10 @@ type ErrorOption func(e *Error)
 //		return nil
 //	}
 //
+// The value may also lie behind an alias the document cannot follow, as
+// one in a reference document from [WithReferences] does. The error then
+// binds at that alias, as SourceError.Nearest describes.
+//
 // A producer may know where the value lies and still have no path that
 // selects it. A validator that reads decoded data cannot always spell
 // the key of a value as the source does. Such a producer gives
@@ -1247,12 +1251,16 @@ func (e *Error) textCause() error {
 // the range to highlight when the error carried one, and the token a path
 // resolved to when the error carried a path. For a path that names a key
 // the document leaves out, the token is the key of the mapping that lacks
-// it, and near is the path of that mapping.
+// it, and near is the path of that mapping. For a path that enters an
+// alias the document cannot follow, the token is that alias, near is the
+// path of the alias, and unfollowed is the error the path failed to
+// resolve with.
 type location struct {
-	rng  *position.Range
-	tk   *token.Token
-	near *paths.Path
-	pos  position.Position
+	unfollowed error
+	rng        *position.Range
+	tk         *token.Token
+	near       *paths.Path
+	pos        position.Position
 }
 
 // locate resolves l, the location of an [Error], and returns the node it
@@ -1293,7 +1301,9 @@ func locate(b binder, l locus) (location, *Node, error) {
 // [binder.scoped] put the scope of that node in front of the path
 // already, so the path starts at `$`. A path that names a key the
 // document leaves out resolves to the key of the mapping that lacks it,
-// as [Node.nearestLocation] finds it. A source that holds several
+// as [Node.nearestLocation] finds it. A path that enters an alias the
+// document cannot follow resolves to that alias, as [Node.aliasLocation]
+// finds it. A source that holds several
 // documents, or does not parse, has no document to resolve the path in,
 // so the location is [ErrPathNeedsDocument] wrapping that reason. A
 // document that did not parse has no tree to resolve the path in either,
@@ -1324,6 +1334,10 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 	if err != nil {
 		if near, ok := root.nearestLocation(path, err); ok {
 			return near, node, nil
+		}
+
+		if alias, ok := root.aliasLocation(path, err); ok {
+			return alias, node, nil
 		}
 
 		return location{}, node, err
@@ -1400,6 +1414,14 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 // error about a required field does, binds at the key of the mapping
 // that lacks the value. [SourceError.Nearest] reports that mapping, and
 // the message keeps the path the error carries.
+//
+// A path that enters an alias the document cannot follow binds at that
+// alias. Such an alias names no anchor before it, as one to an anchor of
+// a reference document from [WithReferences] does. The value lies
+// outside the document, so the alias is the nearest line the document
+// holds for it. SourceError.Nearest reports the path of the alias, and
+// [SourceError.Unresolved] still returns the reason, which tells such a
+// binding from one at the value itself.
 //
 // Any other location that does not resolve costs the SourceError its
 // position. Such locations include an index past the end of a sequence,
@@ -3122,7 +3144,8 @@ func writeString(f fmt.State, s string) {
 // at an earlier column or line, or at a later column past the spaces.
 // For a path that names a key the document leaves out, the range covers
 // the key of the mapping that lacks it, as [SourceError.Nearest]
-// describes.
+// describes. For a path that enters an alias the document cannot follow,
+// it covers the `*` of that alias.
 // The range is in the coordinates of the view [Source.Lines] returns, where
 // line 0 is line 1 of the text.
 //
@@ -3186,21 +3209,41 @@ func (e *SourceError) Position() (position.Position, bool) {
 //		fmt.Println("no excerpt:", reason)
 //	}
 //
+// One binding has a reason and a position both. A path that enters an
+// alias the document cannot follow binds at that alias, as
+// [SourceError.Nearest] describes, and Unresolved returns the resolution
+// error of the path, which wraps
+// [go.jacobcolvin.com/niceyaml/paths.ErrAlias]. The excerpt marks the
+// alias, so the renderer above prints it. A caller that must know
+// whether the position is the value or an alias in front of it checks
+// the reason:
+//
+//	if errors.Is(bound.Unresolved(), paths.ErrAlias) {
+//		// The value lies behind the alias, such as in a reference document.
+//	}
+//
 // A nil SourceError has nothing to resolve.
 func (e *SourceError) Unresolved() error {
 	if e == nil || errors.Is(e.locErr, errUnlocated) {
 		return nil
 	}
 
+	if e.locErr == nil {
+		return e.loc.unfollowed
+	}
+
 	return e.locErr
 }
 
-// Nearest returns the path of the mapping the error is bound at, and
-// true, when the path the error carries names a key the document leaves
-// out. An error about a missing value, such as a required field, carries
-// the path the value would have, and that path selects nothing. Binding
-// locates such an error at the key of the mapping that lacks the value,
-// the nearest node above the path that the document holds:
+// Nearest returns the path of the node the error is bound at, and true,
+// when the document does not hold the value its path names. Binding then
+// locates the error at the nearest node above the path that the document
+// holds. That node is the mapping that lacks a key the path names, or an
+// alias on the path that the document cannot follow.
+//
+// An error about a missing value, such as a required field, carries the
+// path the value would have, and that path selects nothing. Binding
+// locates such an error at the key of the mapping that lacks the value:
 //
 //	niceyaml.NewError("name is required", niceyaml.AtPath(paths.Doc().Child("server", "name")))
 //	// cfg.yaml:3:1: $.server.name: name is required
@@ -3216,10 +3259,37 @@ func (e *SourceError) Unresolved() error {
 // the nearest mapping the same way, so a caller that must tell an
 // approximate location from an exact one checks Nearest. The error
 // [Node.At] and [Node.Ranges] return for such a path binds there too,
-// with "not found" as its message. Nearest reports
-// false for an error bound at the node its path selects, for one with no
-// path, and for one whose location did not resolve. A nil SourceError
-// reports false.
+// with "not found" as its message.
+//
+// An alias the document cannot follow names no anchor before it, as one
+// to an anchor of a reference document from [WithReferences] does, or
+// lies inside the anchor it names. A decode reads the value behind an
+// alias to a reference document, and the document holds no line for
+// that value. An error whose path goes through the alias therefore binds
+// at the alias:
+//
+//	// Line 2 of app.yaml holds `server: *server`, and a reference
+//	// document holds the anchor.
+//	niceyaml.NewError("port must be at least 1", niceyaml.AtPath(paths.Doc().Child("server", "port")))
+//	// app.yaml:2:9: $.server.port: port must be at least 1
+//
+// SourceError.Range then covers the `*` of the alias, Nearest returns
+// `$.server`, and SourceError.Unresolved returns the error the path
+// failed to resolve with, which wraps
+// [go.jacobcolvin.com/niceyaml/paths.ErrAlias]. That reason tells an
+// alias from a mapping that lacks a key. The document cannot tell
+// whether the value behind the alias holds the key, so an error about a
+// key that value leaves out binds the same way.
+//
+// A path enters no alias to read a key of a mapping, even when a `<<`
+// merge key of that mapping names an alias the document cannot follow.
+// An error at such a key therefore has no position. The merge may set
+// the key or leave it as the mapping spells it, so the document cannot
+// tell which line holds the value.
+//
+// Nearest reports false for an error bound at the node its path selects,
+// for one with no path, and for one that has no position. A nil
+// SourceError reports false.
 func (e *SourceError) Nearest() (paths.Path, bool) {
 	if e == nil || e.locErr != nil || e.loc.near == nil {
 		return paths.Path{}, false

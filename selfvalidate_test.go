@@ -3288,13 +3288,15 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 			},
 			err: "1:1: $.by_id.16.price: negative price",
 		},
+		// The document holds no line for the value, so the error binds at
+		// the alias.
 		"values an alias reads from a reference document": {
 			value: func() any { return new(nested) },
 			input: "by_id: *ids\n",
 			source: []niceyaml.SourceOption{
 				niceyaml.WithReferences(niceyaml.NewSourceFromString("ids: &ids {0x10: {price: -3}}\n")),
 			},
-			err: "$.by_id.16.price: negative price",
+			err: "1:8: $.by_id.16.price: negative price",
 		},
 		"a scoped Node": {
 			value: func() any { return new(nested) },

@@ -315,7 +315,8 @@
 // file, such as a file of shared defaults, gets that file through
 // [WithReferences] on its Source. Every decode and every validation of
 // the document then reads those anchors, so [Source.ValidateDocuments]
-// reports what a decode of each document reports.
+// reports what a decode of each document reports. An error about a value
+// that file holds points at the alias in the document that reads it.
 //
 // The Source also says whether the alias limit applies to its documents.
 // A decode, a schema, and a content matcher refuse a document whose

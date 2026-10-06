@@ -1657,6 +1657,47 @@ func (n *Node) nearestLocation(path paths.Path, reason error) (location, bool) {
 	return location{pos: position.NewFromToken(tk), tk: tk, near: &near}, true
 }
 
+// aliasLocation returns the location an error binds at when its path
+// enters an alias the document cannot follow: the token of that alias,
+// with an `@` path resolving from the scope. Such an alias names no
+// anchor before it, as one to an anchor of a reference document does, or
+// lies inside the anchor it names. The reason is the error the path
+// failed to resolve with, which the location keeps. It reports false when
+// that reason is not [paths.ErrAlias] and when the token of the alias
+// carries no position. It also reports false when the alias sits under a
+// `<<` merge key. A path enters no alias to read a key of such a mapping,
+// and the alias may set any key or none, so it says nothing of where the
+// value is.
+func (n *Node) aliasLocation(path paths.Path, reason error) (location, bool) {
+	if !errors.Is(reason, paths.ErrAlias) {
+		return location{}, false
+	}
+
+	resolver := n.doc.pathResolver()
+
+	// The path fails at the first selector that reads through the alias,
+	// so the longest path above it that resolves ends at the node that
+	// selector reads.
+	for at, ok := n.base.Join(path).Parent(); ok; at, ok = at.Parent() {
+		tk, err := resolver.Token(at)
+		if err != nil {
+			continue
+		}
+
+		// The resolver reads through every node but an alias it cannot
+		// follow. Where it reads through this one, the selector failed at
+		// an alias under a `<<` merge key of the mapping here.
+		_, err = resolver.Node(at)
+		if !errors.Is(err, paths.ErrAlias) || tk == nil || tk.Position == nil {
+			return location{}, false
+		}
+
+		return location{pos: position.NewFromToken(tk), tk: tk, near: &at, unfollowed: reason}, true
+	}
+
+	return location{}, false
+}
+
 // bindUnresolved binds reason, the error path failed to resolve with from
 // the scope of n, as [Node.At] and [Node.Ranges] return it. A reason that
 // wraps [paths.ErrNotFound] says the document lacks the value, so it

@@ -277,12 +277,29 @@ func WithAliasLimit(enabled bool) SourceOption {
 // a struct or a []int, reads the second anchor. Give each anchor of refs
 // a name that no other anchor of refs has.
 //
-// The references reach the decoder alone. A path resolves in the document
-// itself, so [Node.At] and [Node.Nodes] return an error wrapping
-// [go.jacobcolvin.com/niceyaml/paths.ErrAlias] for a path that reaches an
-// alias to a reference document. An error whose path leads into a
-// reference document binds with no position, so its message names the
-// source and the path alone.
+// The references reach the decoder alone, so a decode and a validation
+// read through an alias to a reference document. A path resolves in the
+// document itself and stops at that alias. [Node.At] and [Node.Nodes]
+// return an error wrapping [go.jacobcolvin.com/niceyaml/paths.ErrAlias]
+// for a path that reaches the alias, and [Node.Ranges] returns one for a
+// path that goes through it. [IsInvalid] does not report that error. A
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Content] matcher whose
+// path reaches the alias returns the error too, so a registry stops at
+// that document and routes it nowhere.
+//
+// An error whose path leads into a reference document binds at the alias
+// the path enters, since the document holds no line for the value:
+//
+//	app.yaml:2:9: $.server.port: port must be at least 1
+//
+//	   2 | server: *server
+//	     |         ^
+//
+// [SourceError.Nearest] reports the path of that alias, and
+// [SourceError.Unresolved] returns the error wrapping ErrAlias, so a
+// caller tells the position from one at the value itself. An error at a
+// key of a mapping that merges a reference document under a `<<` key
+// still binds with no position, as SourceError.Nearest describes.
 //
 // A reference that [WithYAMLDecodeOptions] passes to one decode, such as
 // [yaml.ReferenceFiles], reaches that decode alone, and an anchor it

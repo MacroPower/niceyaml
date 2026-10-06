@@ -3999,23 +3999,167 @@ func TestWithReferences(t *testing.T) {
 	t.Run("a path resolves in the document alone", func(t *testing.T) {
 		t.Parallel()
 
-		bad := niceyaml.NewSourceFromString("base: &base\n  port: oops\n")
-		src := niceyaml.NewSourceFromString("server: *base\n",
+		src := niceyaml.NewSourceFromString("name: app\nserver: *base\n",
 			niceyaml.WithName("app.yaml"),
-			niceyaml.WithReferences(bad),
+			niceyaml.WithReferences(defaults),
 		)
 
 		doc, err := src.Document()
 		require.NoError(t, err)
 
-		_, err = doc.At(paths.Current().Child("server", "port"))
-		require.ErrorIs(t, err, paths.ErrAlias)
+		alias := paths.Current().Child("server")
+		port := alias.Child("port")
 
-		_, err = doc.Nodes(paths.Current().Child("server").ChildAll())
-		require.ErrorIs(t, err, paths.ErrAlias)
+		_, atBelow := doc.At(port)
+		_, atAlias := doc.At(alias)
+		_, nodesBelow := doc.Nodes(alias.ChildAll())
+		_, nodesAlias := doc.Nodes(alias)
+		_, rangesBelow := doc.Ranges(port)
+		_, matchBelow := matcher.Content(port, 8080).Match(t.Context(), doc)
 
-		err = src.ValidateDocuments(t.Context(), serverSchema)
-		assert.Equal(t, []string{`app.yaml: $.server.port: expected "integer", got "string"`}, bindingMessages(err))
+		// The error of each read that stops at the alias.
+		tcs := map[string]error{
+			"At below the alias":              atBelow,
+			"At the alias":                    atAlias,
+			"Nodes below the alias":           nodesBelow,
+			"Nodes at the alias":              nodesAlias,
+			"Ranges below the alias":          rangesBelow,
+			"Content matcher below the alias": matchBelow,
+		}
+
+		for name, err := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				require.ErrorIs(t, err, paths.ErrAlias)
+				assert.False(t, niceyaml.IsInvalid(err))
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+
+				_, ok := bound.Position()
+				assert.False(t, ok)
+			})
+		}
+
+		t.Run("Ranges at the alias", func(t *testing.T) {
+			t.Parallel()
+
+			got, err := doc.Ranges(alias)
+			require.NoError(t, err)
+			assert.Equal(t, position.Ranges{
+				position.NewRange(position.New(1, 8), position.New(1, 9)),
+			}, got)
+		})
+	})
+
+	t.Run("error under an alias to a reference binds at the alias", func(t *testing.T) {
+		t.Parallel()
+
+		type target struct {
+			Server minPort `yaml:"server"`
+		}
+
+		tcs := map[string]struct {
+			reference string
+			validator niceyaml.Validator
+			// The message of the error and the tree and excerpt FormatError
+			// prints for it.
+			want   string
+			format string
+		}{
+			"error of a SelfValidator": {
+				reference: "base: &base\n  port: 0\n",
+				want:      "app.yaml:2:9: $.server.port: port must be at least 1",
+				format: stringtest.JoinLF(
+					"app.yaml:2:9: $.server.port: port must be at least 1",
+					"",
+					"   2 | server: *base",
+					"     |         ^",
+				),
+			},
+			"key the reference leaves out": {
+				reference: "base: &base\n  host: localhost\n",
+				want:      "app.yaml:2:9: $.server.port: port must be at least 1",
+				format: stringtest.JoinLF(
+					"app.yaml:2:9: $.server.port: port must be at least 1",
+					"",
+					"   2 | server: *base",
+					"     |         ^",
+				),
+			},
+			"violation of a schema": {
+				reference: "base: &base\n  port: oops\n",
+				validator: serverSchema,
+				want:      `app.yaml:2:9: $.server.port: expected "integer", got "string"`,
+				format: stringtest.JoinLF(
+					`app.yaml:2:9: $.server.port: expected "integer", got "string"`,
+					"",
+					"   2 | server: *base",
+					"     |         ^",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, "name: app\nserver: *base\n",
+					niceyaml.WithName("app.yaml"),
+					niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.reference)),
+				)
+
+				_, err := doc.Decode[target](t.Context(), niceyaml.WithValidator(tc.validator))
+				require.EqualError(t, err, tc.want)
+				assert.True(t, niceyaml.IsInvalid(err))
+				assert.Equal(t, tc.format, niceyaml.FormatError(err, 0))
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+
+				near, ok := bound.Nearest()
+				require.True(t, ok)
+				assert.Equal(t, paths.Doc().Child("server"), near)
+				require.ErrorIs(t, bound.Unresolved(), paths.ErrAlias)
+
+				path, ok := bound.Path()
+				require.True(t, ok)
+				assert.Equal(t, paths.Doc().Child("server", "port"), path)
+			})
+		}
+	})
+
+	t.Run("error at a key beside a merge of a reference has no position", func(t *testing.T) {
+		t.Parallel()
+
+		// The merge sets no kind, so the decode keeps the misspelled one.
+		// The document cannot tell, so a caret under the alias would point
+		// one line below the typo.
+		doc := yamltest.FirstDocument(t, "kind: Deploymnet\n<<: *base\n",
+			niceyaml.WithName("app.yaml"),
+			niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base\n  replicas: 1\n")),
+		)
+
+		kinds := schema.MustCompile([]byte(`{"properties": {"kind": {"enum": ["Deployment", "Service"]}}}`))
+
+		err := doc.Validate(t.Context(), kinds)
+		require.EqualError(t, err, "app.yaml: $.kind: value does not match any enum member")
+		assert.Equal(t, stringtest.JoinLF(
+			"app.yaml: $.kind: value does not match any enum member",
+			"",
+			"no excerpt: resolve $.kind: alias does not resolve: *base has no anchor before it",
+		), niceyaml.FormatError(err, 0))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		_, ok := bound.Nearest()
+		assert.False(t, ok)
+		require.ErrorIs(t, bound.Unresolved(), paths.ErrAlias)
 	})
 
 	t.Run("reference that does not parse fails every decode", func(t *testing.T) {
@@ -4027,6 +4171,21 @@ func TestWithReferences(t *testing.T) {
 		_, err := doc.Decode[map[string]int](t.Context())
 		require.ErrorContains(t, err, "sequence end token ']' not found")
 	})
+}
+
+// minPort is a server whose port must be at least 1, for the test of an
+// error under an alias to a reference document.
+type minPort struct {
+	Port int `yaml:"port"`
+}
+
+// Validate implements [niceyaml.SelfValidator].
+func (s minPort) Validate() error {
+	if s.Port < 1 {
+		return niceyaml.NewError("port must be at least 1", niceyaml.AtPath(paths.Current().Child("port")))
+	}
+
+	return nil
 }
 
 func TestWithAliasLimit(t *testing.T) {

@@ -8575,6 +8575,207 @@ func TestSourceError_Nearest(t *testing.T) {
 		assert.False(t, ok)
 		assert.Equal(t, paths.Current(), near)
 	})
+
+	t.Run("alias the document cannot follow", func(t *testing.T) {
+		t.Parallel()
+
+		// No alias but *base and *loop names an anchor of the document, as
+		// an alias to an anchor of a reference document does.
+		aliased := yamltest.FirstDocument(t, stringtest.Input(`
+			server: *server
+			servers:
+			  - *server
+			base: &base
+			  tls: *tls
+			copy: *base
+			loop: &loop
+			  self: *loop
+			merged:
+			  kind: Deploymnet
+			  <<: *shared
+			after:
+			  <<: *shared
+			  server: *server
+		`), niceyaml.WithName("app.yaml"))
+
+		server := paths.Doc().Child("server")
+		star := position.NewRange(position.New(0, 8), position.New(0, 9))
+
+		tcs := map[string]struct {
+			err error
+			// The message, the path of the alias the error is bound at,
+			// when it is bound at one, the range it covers, if any, and
+			// the reason it keeps.
+			want   string
+			near   string
+			rng    position.Range
+			reason error
+		}{
+			"value below the alias": {
+				err:    niceyaml.NewError("bad", niceyaml.AtPath(server.Child("port"))),
+				want:   "app.yaml:1:9: $.server.port: bad",
+				near:   "$.server",
+				rng:    star,
+				reason: paths.ErrAlias,
+			},
+			"several names below the alias": {
+				err:    niceyaml.NewError("bad", niceyaml.AtPath(server.Child("tls", "cert"))),
+				want:   "app.yaml:1:9: $.server.tls.cert: bad",
+				near:   "$.server",
+				rng:    star,
+				reason: paths.ErrAlias,
+			},
+			"key of an entry below the alias": {
+				err:    niceyaml.NewError("bad", niceyaml.AtPath(server.Child("port").Key())),
+				want:   "app.yaml:1:9: $.server.port~: bad",
+				near:   "$.server",
+				rng:    star,
+				reason: paths.ErrAlias,
+			},
+			"rebased under the alias": {
+				err: niceyaml.Rebase(
+					niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("port"))),
+					server,
+				),
+				want:   "app.yaml:1:9: $.server.port: bad",
+				near:   "$.server",
+				rng:    star,
+				reason: paths.ErrAlias,
+			},
+			"alias that is an element of a sequence": {
+				err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("servers").Index(0).Child("port"))),
+				want:   "app.yaml:3:5: $.servers[0].port: bad",
+				near:   "$.servers[0]",
+				rng:    position.NewRange(position.New(2, 4), position.New(2, 5)),
+				reason: paths.ErrAlias,
+			},
+			"alias inside an anchor the path reads through": {
+				err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("copy", "tls", "cert"))),
+				want:   "app.yaml:5:8: $.copy.tls.cert: bad",
+				near:   "$.copy.tls",
+				rng:    position.NewRange(position.New(4, 7), position.New(4, 8)),
+				reason: paths.ErrAlias,
+			},
+			"alias inside the anchor it names": {
+				err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("loop", "self", "port"))),
+				want:   "app.yaml:8:9: $.loop.self.port: bad",
+				near:   "$.loop.self",
+				rng:    position.NewRange(position.New(7, 8), position.New(7, 9)),
+				reason: paths.ErrAlias,
+			},
+			"alias below a merge key": {
+				err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("after", "server", "port"))),
+				want:   "app.yaml:14:11: $.after.server.port: bad",
+				near:   "$.after.server",
+				rng:    position.NewRange(position.New(13, 10), position.New(13, 11)),
+				reason: paths.ErrAlias,
+			},
+			"the alias itself": {
+				err:  niceyaml.NewError("bad", niceyaml.AtPath(server)),
+				want: "app.yaml:1:9: $.server: bad",
+				rng:  star,
+			},
+			"key above a merge of an alias": {
+				err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("merged", "kind"))),
+				want:   "app.yaml: $.merged.kind: bad",
+				reason: paths.ErrAlias,
+			},
+			"key a merge of an alias may set": {
+				err:    niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("merged", "replicas"))),
+				want:   "app.yaml: $.merged.replicas: bad",
+				reason: paths.ErrAlias,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := aliased.Bind(tc.err)
+				require.EqualError(t, err, tc.want)
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+
+				near, ok := bound.Nearest()
+				assert.Equal(t, tc.near != "", ok)
+
+				if ok {
+					assert.Equal(t, tc.near, near.String())
+				}
+
+				rng, located := bound.Range()
+				assert.Equal(t, tc.rng != position.Range{}, located)
+				assert.Equal(t, tc.rng, rng)
+
+				if tc.reason == nil {
+					require.NoError(t, bound.Unresolved())
+
+					return
+				}
+
+				require.ErrorIs(t, bound.Unresolved(), tc.reason)
+			})
+		}
+
+		t.Run("the message keeps the path and the excerpt marks the alias", func(t *testing.T) {
+			t.Parallel()
+
+			err := aliased.Bind(niceyaml.NewError("bad", niceyaml.AtPath(server.Child("port"))))
+
+			assert.Equal(t, stringtest.JoinLF(
+				"app.yaml:1:9: $.server.port: bad",
+				"",
+				"   1 | server: *server",
+				"     |         ^",
+				"   2 | servers:",
+			), niceyaml.FormatError(err, 1))
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			path, ok := bound.Path()
+			require.True(t, ok)
+			assert.Equal(t, server.Child("port"), path)
+		})
+
+		t.Run("a scoped Node binds at an alias below it", func(t *testing.T) {
+			t.Parallel()
+
+			scoped := yamltest.At(t, aliased, paths.Doc().Child("base"))
+
+			err := scoped.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("tls", "cert"))))
+			require.EqualError(t, err, "app.yaml:5:8: $.base.tls.cert: bad")
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			near, ok := bound.Nearest()
+			require.True(t, ok)
+			assert.Equal(t, paths.Doc().Child("base", "tls"), near)
+		})
+
+		t.Run("a binding that wraps one bound at an alias keeps the alias and the reason", func(t *testing.T) {
+			t.Parallel()
+
+			inner := aliased.Bind(niceyaml.NewError("bad", niceyaml.AtPath(server.Child("port"))))
+
+			var outer *niceyaml.SourceError
+
+			require.ErrorAs(t, aliased.Bind(niceyaml.NewError("outer", niceyaml.WithDetails(
+				fmt.Errorf("check: %w", inner),
+			))), &outer)
+			require.Len(t, outer.Details(), 1)
+
+			near, ok := outer.Details()[0].Nearest()
+			require.True(t, ok)
+			assert.Equal(t, server, near)
+			require.ErrorIs(t, outer.Details()[0].Unresolved(), paths.ErrAlias)
+		})
+	})
 }
 
 // requiredNames is a value whose servers each need a name, for the test
