@@ -9143,6 +9143,352 @@ func TestWrapError(t *testing.T) {
 	})
 }
 
+func TestPlace(t *testing.T) {
+	t.Parallel()
+
+	input := stringtest.Input(`
+		hours:
+		  open: 9
+		  close: 5
+		license: /root/x
+	`)
+
+	hoursPath := paths.Current().Child("hours")
+	openPath := hoursPath.Child("open")
+	licensePath := paths.Current().Child("license")
+	licenseStart := position.New(3, 9)
+	licenseRange := position.NewRange(licenseStart, position.New(3, 16))
+
+	errStat := fmt.Errorf("stat license: %w", fs.ErrPermission)
+
+	document := func(t *testing.T) *niceyaml.Node {
+		t.Helper()
+
+		return yamltest.FirstDocument(t, input, niceyaml.WithName("cfg.yaml"))
+	}
+
+	t.Run("nothing to place returns nil", func(t *testing.T) {
+		t.Parallel()
+
+		var (
+			nilErr   *niceyaml.Error
+			nilBound *niceyaml.SourceError
+		)
+
+		tcs := map[string]struct {
+			err error
+		}{
+			"nil":                     {err: nil},
+			"nil Error pointer":       {err: nilErr},
+			"nil SourceError pointer": {err: nilBound},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				// NoError compares the interface with nil, which a nil
+				// *Error inside it would fail.
+				require.NoError(t, niceyaml.Place(tc.err))
+				require.NoError(t, niceyaml.Place(tc.err,
+					niceyaml.AtPath(licensePath),
+					niceyaml.AtRange(licenseRange),
+					niceyaml.WithDetails(errors.New("named here")),
+				))
+			})
+		}
+	})
+
+	t.Run("places as WrapError does and declares no fault", func(t *testing.T) {
+		t.Parallel()
+
+		// One I/O error at one path prints the same line from each
+		// wrapper, and only WrapError declares the document at fault.
+		tcs := map[string]struct {
+			err  error
+			want bool
+		}{
+			"WrapError": {
+				err:  niceyaml.WrapError(errStat, niceyaml.AtPath(licensePath)),
+				want: true,
+			},
+			"Place": {
+				err: niceyaml.Place(errStat, niceyaml.AtPath(licensePath)),
+			},
+			"Rebase": {
+				err: niceyaml.Rebase(errStat, licensePath),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := document(t).Bind(tc.err)
+
+				require.EqualError(t, err, "cfg.yaml:4:10: $.license: stat license: permission denied")
+				require.ErrorIs(t, err, fs.ErrPermission)
+				assert.Equal(t, tc.want, niceyaml.IsInvalid(tc.err), "unbound")
+				assert.Equal(t, tc.want, niceyaml.IsInvalid(err), "bound")
+			})
+		}
+	})
+
+	t.Run("takes every option", func(t *testing.T) {
+		t.Parallel()
+
+		why := errors.New("the license check reads this file")
+
+		tcs := map[string]struct {
+			opts []niceyaml.ErrorOption
+			want string
+		}{
+			"no option": {
+				want: "cfg.yaml: stat license: permission denied",
+			},
+			"path": {
+				opts: []niceyaml.ErrorOption{niceyaml.AtPath(licensePath)},
+				want: "cfg.yaml:4:10: $.license: stat license: permission denied",
+			},
+			"position": {
+				opts: []niceyaml.ErrorOption{niceyaml.AtPosition(licenseStart)},
+				want: "cfg.yaml:4:10: stat license: permission denied",
+			},
+			"range": {
+				opts: []niceyaml.ErrorOption{niceyaml.AtRange(licenseRange)},
+				want: "cfg.yaml:4:10: stat license: permission denied",
+			},
+			"path and range": {
+				opts: []niceyaml.ErrorOption{niceyaml.AtPath(licensePath), niceyaml.AtRange(licenseRange)},
+				want: "cfg.yaml:4:10: $.license: stat license: permission denied",
+			},
+			"range and details": {
+				opts: []niceyaml.ErrorOption{niceyaml.AtRange(licenseRange), niceyaml.WithDetails(why)},
+				want: "cfg.yaml:4:10: stat license: permission denied",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				placed := niceyaml.Place(errStat, tc.opts...)
+				want := wrapError(t, errStat, tc.opts...)
+
+				// The Error carries what the same options give WrapError.
+				got, ok := errors.AsType[*niceyaml.Error](placed)
+				require.True(t, ok)
+
+				assert.Same(t, errStat, got.Cause())
+				assert.Equal(t, want.Details(), got.Details())
+
+				gotPath, gotOK := got.Path()
+				wantPath, wantOK := want.Path()
+				assert.Equal(t, wantOK, gotOK)
+				assert.Equal(t, wantPath, gotPath)
+
+				gotPos, gotOK := got.Position()
+				wantPos, wantOK := want.Position()
+				assert.Equal(t, wantOK, gotOK)
+				assert.Equal(t, wantPos, gotPos)
+
+				gotRange, gotOK := got.Range()
+				wantRange, wantOK := want.Range()
+				assert.Equal(t, wantOK, gotOK)
+				assert.Equal(t, wantRange, gotRange)
+
+				err := document(t).Bind(placed)
+
+				require.EqualError(t, err, tc.want)
+				assert.False(t, niceyaml.IsInvalid(placed), "unbound")
+				assert.False(t, niceyaml.IsInvalid(err), "bound")
+			})
+		}
+	})
+
+	t.Run("declares nothing and clears nothing", func(t *testing.T) {
+		t.Parallel()
+
+		badOpen := niceyaml.NewError("opens too late", niceyaml.AtPath(openPath))
+
+		tcs := map[string]struct {
+			err  error
+			want bool
+		}{
+			"I/O error with a located detail from NewError": {
+				// The detail explains the I/O error and decides nothing.
+				err: niceyaml.Place(errStat,
+					niceyaml.AtRange(licenseRange),
+					niceyaml.WithDetails(niceyaml.NewError("named here", niceyaml.AtPath(openPath))),
+				),
+			},
+			"NewError": {
+				err:  niceyaml.Place(badOpen, niceyaml.AtRange(licenseRange)),
+				want: true,
+			},
+			"fmt wrapper around NewError": {
+				err:  niceyaml.Place(fmt.Errorf("check hours: %w", badOpen), niceyaml.AtRange(licenseRange)),
+				want: true,
+			},
+			"WrapError of an I/O error": {
+				err:  niceyaml.Place(niceyaml.WrapError(errStat), niceyaml.AtRange(licenseRange)),
+				want: true,
+			},
+			"WrapError around Place": {
+				err:  niceyaml.WrapError(niceyaml.Place(errStat, niceyaml.AtRange(licenseRange))),
+				want: true,
+			},
+			"Rebase around Place": {
+				err: niceyaml.Rebase(
+					niceyaml.Place(errStat, niceyaml.AtPath(paths.Current().Child("open"))),
+					hoursPath,
+				),
+			},
+			"canceled context": {
+				err: niceyaml.Place(context.Canceled, niceyaml.AtRange(licenseRange)),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.Equal(t, tc.want, niceyaml.IsInvalid(tc.err), "unbound")
+				assert.Equal(t, tc.want, niceyaml.IsInvalid(document(t).Bind(tc.err)), "bound")
+			})
+		}
+	})
+
+	t.Run("a scoped Node binds a placed error at its value", func(t *testing.T) {
+		t.Parallel()
+
+		hours := yamltest.At(t, document(t), hoursPath)
+
+		tcs := map[string]struct {
+			err  error
+			want string
+		}{
+			"no location": {
+				err:  niceyaml.Place(errStat),
+				want: "cfg.yaml:2:3: $.hours: stat license: permission denied",
+			},
+			"path from the value": {
+				err:  niceyaml.Place(errStat, niceyaml.AtPath(paths.Current().Child("close"))),
+				want: "cfg.yaml:3:10: $.hours.close: stat license: permission denied",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := hours.Bind(tc.err)
+
+				require.EqualError(t, err, tc.want)
+				assert.False(t, niceyaml.IsInvalid(err))
+			})
+		}
+	})
+
+	t.Run("a SelfValidator marks a placed error invalid", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := checkedConfig{Hours: selfChecked{check: func() error {
+			return niceyaml.Place(errStat, niceyaml.AtPath(paths.Current().Child("close")))
+		}}}
+
+		err := document(t).DecodeInto(t.Context(), &cfg)
+
+		require.EqualError(t, err, "cfg.yaml:3:10: $.hours.close: stat license: permission denied")
+		require.ErrorIs(t, err, fs.ErrPermission)
+		assert.True(t, niceyaml.IsInvalid(err))
+	})
+
+	t.Run("options on a join locate the heading and no branch", func(t *testing.T) {
+		t.Parallel()
+
+		// The path of the located branch starts at `$`, so Rebase leaves
+		// it as it is.
+		joined := errors.Join(
+			niceyaml.NewError("opens too late", niceyaml.AtPath(paths.Doc().Join(openPath))),
+			errStat,
+		)
+
+		// Each row of problems is the text of a problem and what Invalid
+		// reports for it.
+		tcs := map[string]struct {
+			err      error
+			want     string
+			problems []string
+		}{
+			"no option": {
+				err: niceyaml.Place(joined),
+				want: stringtest.JoinLF(
+					"cfg.yaml:2:9: $.hours.open: opens too late",
+					"cfg.yaml: stat license: permission denied",
+				),
+				problems: []string{
+					"cfg.yaml:2:9: $.hours.open: opens too late true",
+					"cfg.yaml: stat license: permission denied false",
+				},
+			},
+			"path": {
+				err: niceyaml.Place(joined, niceyaml.AtPath(licensePath)),
+				want: stringtest.JoinLF(
+					"cfg.yaml:4:10: $.license:",
+					"cfg.yaml:2:9: $.hours.open: opens too late",
+					"cfg.yaml: stat license: permission denied",
+				),
+				problems: []string{
+					"2:9: $.hours.open: opens too late true",
+					"stat license: permission denied false",
+				},
+			},
+			"range": {
+				err: niceyaml.Place(joined, niceyaml.AtRange(licenseRange)),
+				want: stringtest.JoinLF(
+					"cfg.yaml:2:9: $.hours.open: opens too late",
+					"cfg.yaml: stat license: permission denied",
+				),
+				problems: []string{
+					"cfg.yaml:2:9: $.hours.open: opens too late true",
+					"cfg.yaml: stat license: permission denied false",
+				},
+			},
+			"Rebase moves each branch under the path": {
+				err: niceyaml.Rebase(joined, licensePath),
+				want: stringtest.JoinLF(
+					"cfg.yaml:2:9: $.hours.open: opens too late",
+					"cfg.yaml:4:10: $.license: stat license: permission denied",
+				),
+				problems: []string{
+					"cfg.yaml:2:9: $.hours.open: opens too late true",
+					"cfg.yaml:4:10: $.license: stat license: permission denied false",
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := document(t).Bind(tc.err)
+
+				require.EqualError(t, err, tc.want)
+				assert.False(t, niceyaml.IsInvalid(err))
+
+				var problems []string
+
+				for problem := range niceyaml.NewErrorTree(err).Problems() {
+					problems = append(problems, fmt.Sprintf("%s %t", problem.Text, problem.Invalid()))
+				}
+
+				assert.Equal(t, tc.problems, problems)
+			})
+		}
+	})
+}
+
 func TestError_Is(t *testing.T) {
 	t.Parallel()
 
@@ -9241,19 +9587,18 @@ func TestIsInvalid(t *testing.T) {
 		return n.DecodeInto(ctx, &target)
 	})
 
+	placed := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+		return niceyaml.Place(fmt.Errorf("stat license: %w", fs.ErrPermission), niceyaml.AtPath(namePath))
+	})
+
 	// The explained error is an I/O error placed at the name, with a
 	// located detail the document is at fault for.
-	explained := func(t *testing.T) error {
-		t.Helper()
-
-		placed, ok := errors.AsType[*niceyaml.Error](
-			niceyaml.Rebase(fmt.Errorf("stat license: %w", fs.ErrPermission), namePath),
+	explained := func(*testing.T) error {
+		return niceyaml.Place(
+			fmt.Errorf("stat license: %w", fs.ErrPermission),
+			niceyaml.AtRange(position.NewRange(position.New(0, 6), position.New(0, 10))),
+			niceyaml.WithDetails(niceyaml.NewError("license named here", niceyaml.AtPath(namePath))),
 		)
-		require.True(t, ok)
-
-		return placed.With(niceyaml.WithDetails(
-			niceyaml.NewError("license named here", niceyaml.AtPath(namePath)),
-		))
 	}
 
 	canceled := func(t *testing.T) context.Context {
@@ -9560,6 +9905,47 @@ func TestIsInvalid(t *testing.T) {
 				return validated(t, rebased)
 			},
 			err: fs.ErrPermission,
+		},
+		"Validator Place of an I/O error at the root": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return validated(t, placed)
+			},
+			err: fs.ErrPermission,
+		},
+		"Validator Place of an I/O error on a scoped Node": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return scopedValidated(t, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+					return niceyaml.Place(ioErr)
+				}))
+			},
+			err: fs.ErrNotExist,
+		},
+		"Validator Place of NewError": {
+			// Place declares nothing and clears nothing.
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return validated(t, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+					return niceyaml.Place(niceyaml.NewError("unknown name"), niceyaml.AtPath(namePath))
+				}))
+			},
+			want: true,
+		},
+		"SelfValidator Place of an I/O error": {
+			// A decode marks every error a SelfValidator returns.
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return selfValidated(t, func() error {
+					return niceyaml.Place(ioErr, niceyaml.AtPath(closePath))
+				})
+			},
+			err:  fs.ErrNotExist,
+			want: true,
 		},
 		"Validator error with no location and a located detail": {
 			build: func(t *testing.T) error {
@@ -10033,6 +10419,44 @@ func TestIsInvalid(t *testing.T) {
 			},
 			err: fs.ErrNotExist,
 		},
+		"unbound Place of an I/O error": {
+			build: func(*testing.T) error {
+				return niceyaml.Place(ioErr, niceyaml.AtPath(namePath))
+			},
+			err: fs.ErrNotExist,
+		},
+		"unbound Place of a fmt wrapper around NewError": {
+			build: func(*testing.T) error {
+				return niceyaml.Place(
+					fmt.Errorf("check names: %w", niceyaml.NewError("unknown name")),
+					niceyaml.AtPath(namePath),
+				)
+			},
+			want: true,
+		},
+		"unbound WrapError of Place of an I/O error": {
+			build: func(*testing.T) error {
+				return niceyaml.WrapError(niceyaml.Place(ioErr, niceyaml.AtPath(namePath)))
+			},
+			err:  fs.ErrNotExist,
+			want: true,
+		},
+		"unbound Place of a mixed join": {
+			// Each branch answers for itself, as it does with no Place.
+			build: func(*testing.T) error {
+				return niceyaml.Place(errors.Join(niceyaml.NewError("unknown name"), ioErr))
+			},
+			err: fs.ErrNotExist,
+		},
+		"unbound Place of a join of NewErrors": {
+			build: func(*testing.T) error {
+				return niceyaml.Place(errors.Join(
+					niceyaml.NewError("unknown name"),
+					niceyaml.NewError("closes before it opens"),
+				))
+			},
+			want: true,
+		},
 		"unbound Rebase of NewError with no location": {
 			build: func(*testing.T) error {
 				return niceyaml.Rebase(niceyaml.NewError("name taken"), namePath)
@@ -10158,19 +10582,32 @@ func TestIsInvalid(t *testing.T) {
 		assert.False(t, niceyaml.IsInvalid(nilBound))
 	})
 
-	t.Run("Rebase places an error that is not invalid at a value", func(t *testing.T) {
+	t.Run("an error that is not invalid shows at a value", func(t *testing.T) {
 		t.Parallel()
 
-		err := validated(t, rebased)
+		tcs := map[string]struct {
+			validator niceyaml.Validator
+		}{
+			"Place with a path":   {validator: placed},
+			"Rebase under a path": {validator: rebased},
+		}
 
-		var bound *niceyaml.SourceError
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		require.ErrorAs(t, err, &bound)
+				err := validated(t, tc.validator)
 
-		path, ok := bound.Path()
-		require.True(t, ok)
-		assert.Equal(t, paths.Doc().Join(namePath), path)
-		assert.Equal(t, "1:7: $.name: stat license: permission denied", err.Error())
-		assert.False(t, niceyaml.IsInvalid(err))
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+
+				path, ok := bound.Path()
+				require.True(t, ok)
+				assert.Equal(t, paths.Doc().Join(namePath), path)
+				assert.Equal(t, "1:7: $.name: stat license: permission denied", err.Error())
+				assert.False(t, niceyaml.IsInvalid(err))
+			})
+		}
 	})
 }

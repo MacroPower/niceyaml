@@ -1007,7 +1007,7 @@ func (s *Source) parseRun(run token.Tokens) (*ast.File, error) {
 
 			panicked := syntaxError{err: fmt.Errorf("parser rejected the tokens: panic: %v", p)}
 
-			err = bindTree(wrapUndeclared(panicked, atToken(at)), binder{src: s})
+			err = bindTree(Place(panicked, atToken(at)), binder{src: s})
 		}()
 
 		f, err = parser.Parse(run, parser.ParseComments, s.parserOpts...)

@@ -2359,7 +2359,7 @@ func TestErrorTree_Invalid(t *testing.T) {
 		},
 		"read error with an invalid detail": {
 			// A detail explains the problem and decides nothing.
-			err: readWithDetail(t, errRead, badB()),
+			err: niceyaml.Place(errRead, niceyaml.AtPath(paths.Current().Child("a")), niceyaml.WithDetails(badB())),
 		},
 		"invalid problem with a detail that is a read error": {
 			err:  niceyaml.NewError("ports conflict", niceyaml.WithDetails(errRead)),
@@ -2383,18 +2383,6 @@ func TestErrorTree_Invalid(t *testing.T) {
 	}
 }
 
-// readWithDetail returns err, an error that is no fault of the document,
-// placed at a value and explained by detail. [niceyaml.Rebase] builds the
-// only [*niceyaml.Error] that declares nothing and takes details.
-func readWithDetail(t *testing.T, err, detail error) error {
-	t.Helper()
-
-	placed, ok := errors.AsType[*niceyaml.Error](niceyaml.Rebase(err, paths.Current().Child("a")))
-	require.True(t, ok)
-
-	return placed.With(niceyaml.WithDetails(detail))
-}
-
 func TestErrorTree_Invalid_Nodes(t *testing.T) {
 	t.Parallel()
 
@@ -2416,7 +2404,7 @@ func TestErrorTree_Invalid_Nodes(t *testing.T) {
 		want []string
 	}{
 		"detail of a read error answers for itself": {
-			err: readWithDetail(t, errRead, badB()),
+			err: niceyaml.Place(errRead, niceyaml.AtPath(paths.Current().Child("a")), niceyaml.WithDetails(badB())),
 			want: []string{
 				"read g.yaml: permission denied false",
 				"bad b true",

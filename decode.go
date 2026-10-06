@@ -133,9 +133,9 @@ import (
 // A Validate checks the value, so the document is at fault for every
 // error it returns, with a location or without, and [IsInvalid] reports
 // it. That holds for an error of I/O too, such as one from a check that a
-// named file exists. A Validate whose I/O can fail for reasons outside
-// the document thus leaves that check to the caller, or to a [Validator],
-// which declares each error itself.
+// named file exists, and for an error inside [Place]. A Validate whose
+// I/O can fail for reasons outside the document thus leaves that check to
+// the caller, or to a [Validator], which declares each error itself.
 //
 // A Validate that returns the error of a context that ended, one that
 // matches [context.Canceled] or [context.DeadlineExceeded], stops the
@@ -233,15 +233,16 @@ type SelfValidator interface {
 // fault inside WrapError, where [errors.As] still finds it. The validator
 // returns any other error when the check itself could not run, such as an
 // I/O error, and IsInvalid does not report that error. A location changes
-// neither. [Rebase] or a scoped [Node.Bind] shows an error of the second
-// kind at the value the check read:
+// neither. [Place] shows an error of the second kind at the value the
+// check read, with the options NewError and WrapError take, and declares
+// no fault:
 //
 //	_, err := os.Stat(spec.License)
 //	switch {
 //	case errors.Is(err, fs.ErrNotExist):
 //		return niceyaml.NewError("license file does not exist", niceyaml.AtPath(licensePath))
 //	case err != nil:
-//		return niceyaml.Rebase(fmt.Errorf("stat license: %w", err), licensePath)
+//		return niceyaml.Place(fmt.Errorf("stat license: %w", err), niceyaml.AtPath(licensePath))
 //	}
 //
 // The first error is the fault of the document, which names a file that
@@ -2998,7 +2999,7 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 
 		panicked := decodeError{err: fmt.Errorf("decoder rejected the value: panic: %v", p), placed: true}
 
-		err = wrapUndeclared(panicked, atToken(contentStart(node)))
+		err = Place(panicked, atToken(contentStart(node)))
 	}()
 
 	return dec.DecodeFromNodeContext(ctx, node, v) //nolint:wrapcheck // The caller binds the error.

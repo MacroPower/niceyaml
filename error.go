@@ -200,11 +200,11 @@ var (
 // An Error is immutable once created. [Error.With] returns a copy with more
 // options applied.
 //
-// An Error from [NewError] or [WrapError] is one problem. [WithDetails]
-// adds the errors that explain it, such as its reasons or a related
-// location, and a detail is never a problem of its own. Several problems
-// are a join from [errors.Join], or a summary from [NewSummary], an Error
-// whose message heads them. Every reader keeps to these roles:
+// An Error from [NewError], [WrapError], or [Place] is one problem.
+// [WithDetails] adds the errors that explain it, such as its reasons or a
+// related location, and a detail is never a problem of its own. Several
+// problems are a join from [errors.Join], or a summary from [NewSummary],
+// an Error whose message heads them. Every reader keeps to these roles:
 // [SourceError.Error] prints one line per problem, [ErrorTree.Problems]
 // yields one node per problem, and [Rebase] and a scoped [Node.Bind] give
 // their location to each problem that carries none, and to no heading
@@ -227,10 +227,16 @@ var (
 // [Error.Format] prints them as a tree under the %+v verb.
 //
 // Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
-// and [errors.As] to inspect wrapped errors. An Error from [NewError] or
-// [WrapError] declares the document at fault, as [IsInvalid] describes.
+// and [errors.As] to inspect wrapped errors.
 //
-// Create instances with [NewError], [WrapError], or [NewSummary].
+// The constructor of an Error says whether the document is at fault for
+// it, as [IsInvalid] describes. An Error from [NewError] or [WrapError]
+// declares the document at fault. One from [Place] takes the same
+// options and declares nothing, so it gives a location to an error of a
+// check that could not run.
+//
+// Create instances with [NewError], [WrapError], [Place], or
+// [NewSummary].
 type Error struct {
 	err error
 	// The position or the range: a position.Position or a position.Range,
@@ -285,7 +291,9 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 // whatever err is. The document is at fault for each problem the Error
 // heads too, such as each branch of a join it wraps, including a branch
 // that is a [*SourceError] already.
-// Use [NewError] instead if creating an error from a message string.
+// Use [NewError] instead if creating an error from a message string, and
+// [Place] to give a location to an error the document is not at fault
+// for.
 //
 // WrapError returns nil for a nil err, and for a nil [*Error] or
 // [*SourceError] pointer, whatever the options. It returns an error
@@ -327,11 +335,57 @@ func WrapError(err error, opts ...ErrorOption) error {
 	return e
 }
 
+// Place creates a new [*Error] wrapping an existing error. The Error
+// gives err the location and the details of the options and declares
+// nothing about it, so [IsInvalid] reports the result only when it
+// reports err. A check that could not run, such as one whose I/O fails,
+// shows its error at the value it read this way:
+//
+//	return niceyaml.Place(fmt.Errorf("stat license: %w", err),
+//		niceyaml.AtRange(licenseRange), niceyaml.WithDetails(why))
+//
+// [NewError] and [WrapError] declare the document at fault, and Place
+// places an error without declaring a fault. All three take every
+// [ErrorOption], and one error binds and prints the same from either
+// wrapper:
+//
+//	niceyaml.WrapError(err, niceyaml.AtPath(p)) // invalid
+//	niceyaml.Place(err, niceyaml.AtPath(p))     // not invalid
+//
+// Either one binds as this line:
+//
+//	cfg.yaml:4:10: $.license: stat license: permission denied
+//
+// Place declares nothing, and it clears nothing either. An err the
+// document is at fault for through its own chain, such as an Error from
+// NewError or a decode rejection, stays a fault inside Place. A detail
+// decides nothing, so an I/O error that Place gives a located detail
+// from NewError stays a check that could not run. A decode marks every
+// error a [SelfValidator] returns, so a Validate method that returns an
+// Error from Place still reports a fault of the document. A [Validator]
+// declares each of its errors itself, so a check whose I/O can fail
+// belongs there.
+//
+// Place returns nil for a nil err, and for a nil [*Error] or
+// [*SourceError] pointer, whatever the options. It returns an error
+// rather than an [*Error] for the reason WrapError gives.
+//
+// An err that is a join stays a list of problems, and the options locate
+// the heading above them and no branch, as WrapError describes. A path
+// binds as a line of its own with no message, and a position or a range
+// puts no line in the message. [Rebase] moves each branch of a join
+// under a path, and it declares nothing either.
+func Place(err error, opts ...ErrorOption) error {
+	if isNothing(err) {
+		return nil
+	}
+
+	return wrapUndeclared(err, opts...)
+}
+
 // wrapUndeclared returns an [*Error] around err with opts applied. The
 // Error does not match [errInvalid] itself, so it declares nothing about
-// err. [NewError] and [WrapError] build on it, and the library calls it
-// for an error the document is not at fault for, such as a panic it
-// recovers.
+// err. [NewError], [WrapError], and [Place] build on it.
 func wrapUndeclared(err error, opts ...ErrorOption) *Error {
 	e := &Error{err: err}
 	for _, opt := range opts {
@@ -391,12 +445,12 @@ func NewSummary(msg string, errs ...error) error {
 // a caller asks [IsInvalid] or [ErrorTree.Invalid] instead of
 // [errors.Is]. An Error from [NewError] or [WrapError] declares the
 // fault, with a location or without, and so does the Error a decode puts
-// around what a [SelfValidator] returns. An Error from [Rebase], a
-// summary from [NewSummary], and the Error a scoped [Node.Bind] puts
-// around an error declare nothing, and neither does an Error from
-// WrapError around the error of a context that ended. Any other target
-// matches through the errors the Error wraps, as [Error.Unwrap] returns
-// them.
+// around what a [SelfValidator] returns. An Error from [Place] or
+// [Rebase], a summary from [NewSummary], and the Error a scoped
+// [Node.Bind] puts around an error declare nothing, and neither does an
+// Error from WrapError around the error of a context that ended. Any
+// other target matches through the errors the Error wraps, as
+// [Error.Unwrap] returns them.
 func (e *Error) Is(target error) bool {
 	return target == errInvalid && e != nil && e.invalid
 }
@@ -434,13 +488,14 @@ func (e *Error) Is(target error) bool {
 // Any other error declares nothing, and the document is at fault for it
 // only when it is for the error it wraps. That covers a plain error, a
 // wrapper such as one from [fmt.Errorf], the error of a context, an Error
-// from [Rebase], and the Error a scoped [Node.Bind] puts around an error
-// to point it at a value. A [Validator] thus returns an Error from
-// NewError or WrapError to report what is wrong with the document, and
-// any other error when the check itself could not run. An error type of
-// the validator's own declares the fault inside WrapError, where
-// [errors.As] still finds it. Rebase or a scoped Node.Bind shows an error
-// of either kind at a value, as [Validator] describes.
+// from [Place] or [Rebase], and the Error a scoped [Node.Bind] puts
+// around an error to point it at a value. A [Validator] thus returns an
+// Error from NewError or WrapError to report what is wrong with the
+// document, and any other error when the check itself could not run. An
+// error type of the validator's own declares the fault inside WrapError,
+// where [errors.As] still finds it. Place gives an error of the second
+// kind a location, so it shows at a value and stays no fault of the
+// document, as [Validator] describes.
 //
 // Each problem answers for itself, and one that is no fault of the
 // document makes the whole error not invalid. The error of a
@@ -603,11 +658,11 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // heads no problem, so it is one problem of its own, and it points at
 // base.
 //
-// Rebase places an error and declares nothing about it, so [IsInvalid]
+// Rebase moves paths and declares nothing about err, so [IsInvalid]
 // reports the result only when it reports err. A check that could not
-// run, such as one whose I/O fails, rebases its error to show it at the
-// value it was checking, and the error still reads as no fault of the
-// document, as [Validator] shows.
+// run, such as one whose I/O fails, gives its error a location with
+// [Place], which takes a position, a range, or details as well as a
+// path.
 //
 // A decode rebases the errors of every nested [SelfValidator] itself, so
 // a Validate need not rebase the Validate of a field. A Node from
@@ -792,9 +847,11 @@ func (j *rebasedJoinError) As(target any) bool {
 	return ok && x.As(target)
 }
 
-// ErrorOption configures an [Error]. [AtPath] sets its path. [AtPosition]
-// or [AtRange] sets its position or range, and the last of those two
-// given wins. [WithDetails] adds the errors that explain it.
+// ErrorOption configures an [Error]. [NewError], [WrapError], [Place],
+// and [Error.With] take the same options. [AtPath] sets the path of the
+// Error. [AtPosition] or [AtRange] sets its position or range, and the
+// last of those two given wins. [WithDetails] adds the errors that
+// explain it.
 //
 // Available options:
 //   - [AtPath]

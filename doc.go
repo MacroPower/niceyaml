@@ -417,12 +417,20 @@
 // not run. The document is at fault for a syntax error, a decode
 // rejection, a schema violation, and an error a [SelfValidator] returns,
 // and it is not for a schema that does not load or a context that ended.
-// A [Validator] declares the fault of the document with an [Error] from
-// [NewError] or [WrapError], with a location or without, and returns any
-// other error for a check that could not run. IsInvalid reports whether
-// the document is at fault for every problem of an error, which is the
-// check that picks a status code or an exit code. A report that lists
-// the problems one by one asks [ErrorTree.Invalid] of each.
+// A [Validator] declares which of its errors is which by the constructor
+// it calls. [NewError] and [WrapError] declare the document at fault,
+// with a location or without. [Place] takes the same options and
+// declares nothing, as any other error does, so it shows a check that
+// could not run at the value the check read:
+//
+//	niceyaml.NewError("license file does not exist", niceyaml.AtPath(p)) // the document is at fault
+//	niceyaml.WrapError(checkErr, niceyaml.AtPath(p))                     // the document is at fault
+//	niceyaml.Place(statErr, niceyaml.AtPath(p))                          // the check could not run
+//
+// IsInvalid reports whether the document is at fault for every problem
+// of an error, which is the check that picks a status code or an exit
+// code. A report that lists the problems one by one asks
+// [ErrorTree.Invalid] of each.
 //
 // # Diffs
 //
