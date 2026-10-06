@@ -18,7 +18,7 @@ func BenchmarkError_Unwrap(b *testing.B) {
 		nested[i] = fmt.Errorf("violation %d", i)
 	}
 
-	err := niceyaml.WrapError(errors.New("schema"), niceyaml.WithDetails(nested...))
+	err := wrapError(b, errors.New("schema"), niceyaml.WithDetails(nested...))
 
 	b.ReportAllocs()
 

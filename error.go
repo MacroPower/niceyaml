@@ -255,17 +255,29 @@ type Error struct {
 	// its base.
 	movesOnly bool
 	// The document is at fault for the Error, so it matches errInvalid.
-	// NewError and WrapError set it, and so does the rebase of the
-	// self-validation walk. A binding or a tree marks each problem below
-	// the Error the same way, as childBase.rebase does.
+	// NewError sets it, WrapError sets it around any error but that of a
+	// context that ended, and so does the rebase of the self-validation
+	// walk. A binding or a tree marks each problem below the Error the
+	// same way, as childBase.rebase does.
 	invalid bool
 }
 
 // NewError creates a new [*Error] with the given message. The Error is a
 // problem the document is at fault for, so [IsInvalid] reports it.
 // Use [WrapError] instead if wrapping an existing error.
+//
+// An Error may carry a location and no message, as a detail that marks a
+// related location does. Such an Error comes from an empty message:
+//
+//	niceyaml.NewError("", niceyaml.AtPath(firstUse))
+//
+// Its binding names the position and the path alone, and an excerpt marks
+// the location with a caret run and no text beside it.
 func NewError(msg string, opts ...ErrorOption) *Error {
-	return WrapError(errors.New(msg), opts...)
+	e := wrapUndeclared(errors.New(msg), opts...)
+	e.invalid = true
+
+	return e
 }
 
 // WrapError creates a new [*Error] wrapping an existing error. The Error
@@ -274,16 +286,52 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 // heads too, such as each branch of a join it wraps, including a branch
 // that is a [*SourceError] already.
 // Use [NewError] instead if creating an error from a message string.
-func WrapError(err error, opts ...ErrorOption) *Error {
+//
+// WrapError returns nil for a nil err, and for a nil [*Error] or
+// [*SourceError] pointer, whatever the options. It returns an error
+// rather than an [*Error], as [NewSummary] does, so the nil compares
+// equal to nil wherever it goes. A check that returns nil for a valid
+// value thus goes inside WrapError as it is, and a validator returns the
+// result:
+//
+//	return hours.Bind(niceyaml.WrapError(spec.Check()))
+//
+// A caller that reads the Error itself finds it with [errors.AsType]. An
+// Error that carries a location and no message has no error to wrap, so
+// it comes from NewError with an empty message.
+//
+// The error of a context that ended is about the call, so the document
+// is not at fault for it. WrapError gives an err that matches
+// [context.Canceled] or [context.DeadlineExceeded] the options and
+// declares nothing about it, as a decode returns such an error from a
+// [SelfValidator] with no mark. A canceled check inside WrapError thus
+// reads as a check that could not run. A join with such a branch matches
+// too, so WrapError declares nothing about any branch of it.
+//
+// An err that is a join stays a list of problems, and the Error is a
+// heading above them, so the options locate the heading and no branch. A
+// path from [AtPath] binds as a line of its own with no message, as in
+// "cfg.yaml:4:10: $.license:", above branches with no location. A
+// position or a range puts no line in the message, and an excerpt marks
+// it with no text beside it. To point each branch at a value, move the
+// join under the path of the value with [Rebase], or wrap each branch
+// before joining them.
+func WrapError(err error, opts ...ErrorOption) error {
+	if isNothing(err) {
+		return nil
+	}
+
 	e := wrapUndeclared(err, opts...)
-	e.invalid = true
+	e.invalid = !contextEnded(err)
 
 	return e
 }
 
-// wrapUndeclared is [WrapError] for an error the library builds that the
-// document is not at fault for, such as a panic it recovers. The Error
-// does not match [errInvalid] itself, so it declares nothing about err.
+// wrapUndeclared returns an [*Error] around err with opts applied. The
+// Error does not match [errInvalid] itself, so it declares nothing about
+// err. [NewError] and [WrapError] build on it, and the library calls it
+// for an error the document is not at fault for, such as a panic it
+// recovers.
 func wrapUndeclared(err error, opts ...ErrorOption) *Error {
 	e := &Error{err: err}
 	for _, opt := range opts {
@@ -345,8 +393,10 @@ func NewSummary(msg string, errs ...error) error {
 // fault, with a location or without, and so does the Error a decode puts
 // around what a [SelfValidator] returns. An Error from [Rebase], a
 // summary from [NewSummary], and the Error a scoped [Node.Bind] puts
-// around an error declare nothing. Any other target matches through the
-// errors the Error wraps, as [Error.Unwrap] returns them.
+// around an error declare nothing, and neither does an Error from
+// WrapError around the error of a context that ended. Any other target
+// matches through the errors the Error wraps, as [Error.Unwrap] returns
+// them.
 func (e *Error) Is(target error) bool {
 	return target == errInvalid && e != nil && e.invalid
 }
@@ -366,7 +416,8 @@ func (e *Error) Is(target error) bool {
 //
 //   - An [*Error] from [NewError] or [WrapError], with a location or
 //     without, and each problem such an Error heads, such as each branch
-//     of a join that WrapError wraps.
+//     of a join that WrapError wraps. WrapError declares nothing about
+//     the error of a context that ended.
 //   - Each problem the parse reports with [ErrSyntax] and each one a
 //     decode reports with [ErrDecode], which say at which stage the
 //     document failed.
@@ -866,11 +917,12 @@ func AtRange(r position.Range) ErrorOption {
 // of its own. [Error.Details] returns them, and the [SourceError] that
 // binds the Error binds each one as a detail at the location its own
 // error carries, if any. [SourceError.Excerpt] annotates the line of each
-// detail whose location resolves. A detail that is a [*SourceError]
-// already, or wraps one, binds as it is, so a detail can point into
-// another file. [Rebase] and a scoped [Node.Bind] move the paths of the
-// details and give no location to a detail that carries none.
-// WithDetails skips a nil error.
+// detail whose location resolves, and a detail from [NewError] with an
+// empty message marks its location with no text beside it. A detail that
+// is a [*SourceError] already, or wraps one, binds as it is, so a detail
+// can point into another file. [Rebase] and a scoped [Node.Bind] move the
+// paths of the details and give no location to a detail that carries
+// none. WithDetails skips a nil error.
 //
 // To report several separate problems, join them with [errors.Join] or
 // head them with [NewSummary].
@@ -894,8 +946,8 @@ func WithDetails(errs ...error) ErrorOption {
 // a summary from [NewSummary] heads put nothing in the message either,
 // since that SourceError lists them behind their own positions, and
 // neither do the details from [WithDetails], which the tree [FormatError]
-// prints shows below the message. An Error created from a nil error has
-// an empty message, whatever location it carries, so binding is what
+// prints shows below the message. An Error from [NewError] with an empty
+// message has no text, whatever location it carries, so binding is what
 // names its location.
 //
 // [FormatError] reads an Error that no binding holds yet. It puts the
@@ -1012,8 +1064,8 @@ func (e *Error) Unwrap() []error {
 // Cause returns the error the [Error] wraps: the error given to
 // [WrapError], or one holding the message given to [NewError]. An Error
 // that wraps another Error returns that Error, where [SourceError.Cause]
-// looks through it. It is nil for an Error created from a nil error, and
-// a nil Error has no cause.
+// looks through it. It is nil for the zero Error, and a nil Error has no
+// cause.
 func (e *Error) Cause() error {
 	if e == nil {
 		return nil
@@ -2246,7 +2298,7 @@ func (e *SourceError) Unwrap() error {
 // first violation, where Cause returns the error of the binding alone. A
 // wrapper such as [fmt.Errorf] ends the walk and is the cause itself, so
 // the search above still finds a RuleError the wrapper holds. Cause is
-// nil for an Error created from a nil error, and a nil SourceError has no
+// nil for a binding of the zero [Error], and a nil SourceError has no
 // cause.
 func (e *SourceError) Cause() error {
 	for e != nil {

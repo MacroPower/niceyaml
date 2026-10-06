@@ -326,7 +326,7 @@ func TestPrinter_PrintError(t *testing.T) {
 			),
 		},
 		"bound error with an empty message": {
-			err:  yamltest.Bind(t, source, niceyaml.WrapError(nil, niceyaml.AtPath(paths.Current().Child("b")))),
+			err:  yamltest.Bind(t, source, niceyaml.NewError("", niceyaml.AtPath(paths.Current().Child("b")))),
 			want: "2:4: $.b:\n\n" + excerpt,
 		},
 		"joined bound errors print one excerpt per source": {
@@ -880,7 +880,7 @@ func TestPrinter_MarksRangeUnderHighlight(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.source)
-			bound := yamltest.Bind(t, source, niceyaml.WrapError(nil,
+			bound := yamltest.Bind(t, source, niceyaml.NewError("",
 				niceyaml.AtPath(paths.Current().Child(tc.key)),
 			))
 

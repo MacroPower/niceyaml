@@ -1130,7 +1130,7 @@ func TestErrorTree_New(t *testing.T) {
 			},
 		},
 		"error without a message and nested errors is a forest": {
-			err: niceyaml.WrapError(nil, niceyaml.WithDetails(
+			err: niceyaml.NewError("", niceyaml.WithDetails(
 				niceyaml.NewError("one"),
 				niceyaml.NewError("two"),
 			)),

@@ -306,6 +306,13 @@ type Validator interface {
 // through the Node, as [Validator] asks. A function may bind its error
 // itself, such as through a Node it scoped, and Validate leaves a bound
 // error as it is.
+//
+// A check that knows nothing of YAML returns a plain error, which
+// declares no fault. The function declares the document at fault for
+// that error by returning the check inside [WrapError], which returns
+// nil for a value that passes:
+//
+//	return n.Bind(niceyaml.WrapError(check(v)))
 type ValidatorFunc func(ctx context.Context, n *Node) error
 
 // Validate implements [Validator]. It calls f and binds the error f

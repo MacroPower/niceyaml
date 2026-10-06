@@ -160,17 +160,7 @@ func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node, idx *m
 		return niceyaml.WrapError(newViolation(ve))
 	}
 
-	return niceyaml.NewSummary(fmt.Sprintf("%d schema violations", len(found)), asErrors(found)...)
-}
-
-// asErrors returns errs as a slice of error.
-func asErrors(errs []*niceyaml.Error) []error {
-	out := make([]error, 0, len(errs))
-	for _, err := range errs {
-		out = append(out, err)
-	}
-
-	return out
+	return niceyaml.NewSummary(fmt.Sprintf("%d schema violations", len(found)), found...)
 }
 
 // converter turns the failures of one validation into violations. The
@@ -189,13 +179,13 @@ type converter struct {
 // violations [converter.union] reduces it to. Any other keyword that
 // wraps the failures of its subschemas, such as allOf, $ref, or then,
 // adds nothing to them, so those failures stand in its place.
-func (c converter) violations(e *jsonschema.ValidationError) []*niceyaml.Error {
+func (c converter) violations(e *jsonschema.ValidationError) []error {
 	switch {
 	case e == nil:
 		return nil
 
 	case isConcrete(e):
-		return []*niceyaml.Error{c.leaf(e)}
+		return []error{c.leaf(e)}
 
 	case e.Keyword == jsonschema.KeywordAnyOf || e.Keyword == jsonschema.KeywordOneOf:
 		return c.union(e)
@@ -205,8 +195,8 @@ func (c converter) violations(e *jsonschema.ValidationError) []*niceyaml.Error {
 }
 
 // all returns the violations in the error trees of causes, in order.
-func (c converter) all(causes []*jsonschema.ValidationError) []*niceyaml.Error {
-	var out []*niceyaml.Error
+func (c converter) all(causes []*jsonschema.ValidationError) []error {
+	var out []error
 
 	for _, cause := range causes {
 		out = append(out, c.violations(cause)...)
@@ -242,7 +232,7 @@ func isConcrete(e *jsonschema.ValidationError) bool {
 //
 // Where [branches] cannot tell the branches apart, the failures of e
 // stand in its place, as those of any other wrapper do.
-func (c converter) union(e *jsonschema.ValidationError) []*niceyaml.Error {
+func (c converter) union(e *jsonschema.ValidationError) []error {
 	all, ok := branches(e)
 	if !ok {
 		return c.all(e.Causes)
@@ -268,14 +258,14 @@ func (c converter) union(e *jsonschema.ValidationError) []*niceyaml.Error {
 	for _, b := range kept {
 		forms = append(forms, niceyaml.NewError(
 			fmt.Sprintf("form %d", b.index+1),
-			niceyaml.WithDetails(asErrors(c.all(b.causes))...),
+			niceyaml.WithDetails(c.all(b.causes)...),
 		))
 	}
 
 	v := newViolation(e)
 	v.Message = noFormMessage
 
-	return []*niceyaml.Error{
+	return []error{
 		niceyaml.WrapError(v, append(c.at(e), niceyaml.WithDetails(forms...))...),
 	}
 }
@@ -348,7 +338,7 @@ func (b branch) typeOnly(e *jsonschema.ValidationError) bool {
 // leaf converts one concrete failure into a [*niceyaml.Error] that wraps
 // its [*Violation] and carries the location e fails at, as [converter.at]
 // gives it.
-func (c converter) leaf(e *jsonschema.ValidationError) *niceyaml.Error {
+func (c converter) leaf(e *jsonschema.ValidationError) error {
 	return niceyaml.WrapError(newViolation(e), c.at(e)...)
 }
 
