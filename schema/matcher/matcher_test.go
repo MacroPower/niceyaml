@@ -26,7 +26,6 @@ var (
 	twoKeyPath     = paths.Current().Child("2").Key()
 	enabledPath    = paths.Current().Child("enabled")
 	timeoutPath    = paths.Current().Child("timeout")
-	createdPath    = paths.Current().Child("created")
 )
 
 // pointerMatcher is a [matcher.Matcher] with a pointer receiver, so a nil
@@ -79,4 +78,58 @@ func TestFunc(t *testing.T) {
 		_, err := m.Match(t.Context(), doc)
 		require.ErrorIs(t, err, undecided)
 	})
+}
+
+func TestFunc_Null(t *testing.T) {
+	t.Parallel()
+
+	// The function the doc of matcher.Func shows, which matches a null.
+	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Node) (bool, error) {
+		node, err := doc.At(enabledPath)
+		if errors.Is(err, paths.ErrNotFound) {
+			return false, nil
+		}
+
+		if err != nil {
+			//nolint:wrapcheck // The Node binds the error already.
+			return false, err
+		}
+
+		value, err := node.Decode[any](ctx)
+		if errors.Is(err, niceyaml.ErrDecode) {
+			return false, nil
+		}
+
+		if err != nil {
+			return false, err
+		}
+
+		return value == nil, nil
+	})
+
+	tcs := map[string]struct {
+		input string
+		want  bool
+	}{
+		"null":                      {input: `enabled: null`, want: true},
+		"tilde":                     {input: `enabled: ~`, want: true},
+		"no value":                  {input: `enabled:`, want: true},
+		"alias to a null":           {input: "n: &n null\nenabled: *n", want: true},
+		"false":                     {input: `enabled: false`},
+		"empty string":              {input: `enabled: ""`},
+		"str-tagged null":           {input: `enabled: !!str null`},
+		"empty mapping":             {input: `enabled: {}`},
+		"missing path":              {input: `kind: Test`},
+		"value the decoder rejects": {input: `enabled: !!int x`},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			assert.Equal(t, tc.want, match(t, m, doc))
+		})
+	}
 }

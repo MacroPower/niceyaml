@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -54,6 +54,11 @@ func TestContent(t *testing.T) {
 			matcher: matcher.Content(versionPath, "1.10"),
 			input:   stringtest.Input(`version: 1.10`),
 			want:    true,
+		},
+		"string does not match respelled float text": {
+			matcher: matcher.Content(versionPath, "1.1"),
+			input:   stringtest.Input(`version: 1.10`),
+			want:    false,
 		},
 		"string matches trailing zero as written": {
 			matcher: matcher.Content(versionPath, "1.0"),
@@ -119,6 +124,33 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: "1.10"`),
 			want:    true,
 		},
+		"string matches quoted number text": {
+			matcher: matcher.Content(versionPath, "2"),
+			input:   stringtest.Input(`version: "2"`),
+			want:    true,
+		},
+		"string matches the character a quoted escape names": {
+			matcher: matcher.Content(versionPath, "a\tb"),
+			input:   stringtest.Input(`version: "a\tb"`),
+			want:    true,
+		},
+		"string matches a block scalar with its newline": {
+			matcher: matcher.Content(versionPath, "1.10\n"),
+			input:   "version: |\n  1.10\n",
+			want:    true,
+		},
+		"string matches the respelling of a float-tagged quoted scalar": {
+			// The tag makes the quoted text a float, which the decoder
+			// respells.
+			matcher: matcher.Content(versionPath, "1.1"),
+			input:   stringtest.Input(`version: !!float "1.10"`),
+			want:    true,
+		},
+		"string does not match the text of a float-tagged quoted scalar": {
+			matcher: matcher.Content(versionPath, "1.10"),
+			input:   stringtest.Input(`version: !!float "1.10"`),
+			want:    false,
+		},
 		"string matches infinity text as written": {
 			matcher: matcher.Content(versionPath, ".inf"),
 			input:   stringtest.Input(`version: .inf`),
@@ -169,11 +201,21 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 1.10`),
 			want:    false,
 		},
-		"uncomparable dynamic type does not match": {
-			// T is any, so the compared values may hold a map, which ==
-			// cannot compare. The matcher declines rather than panics.
-			matcher: matcher.Content[any](kindPath, map[string]any{"a": uint64(1)}),
-			input:   stringtest.Input("kind:\n  a: 1"),
+		"self-decoding string matches text its decode changes": {
+			matcher: matcher.Content(kindPath, lowerString("deployment")),
+			input:   stringtest.Input(`kind: Deployment`),
+			want:    true,
+		},
+		"self-decoding integer matches the name it decodes from": {
+			matcher: matcher.Content(versionPath, slog.LevelInfo),
+			input:   stringtest.Input(`version: INFO`),
+			want:    true,
+		},
+		"self-decoding integer does not match the number it holds": {
+			// A slog.Level decodes from the name of a level, and 0 names
+			// none.
+			matcher: matcher.Content(versionPath, slog.LevelInfo),
+			input:   stringtest.Input(`version: 0`),
 			want:    false,
 		},
 		"float matches unquoted float": {
@@ -194,6 +236,11 @@ func TestContent(t *testing.T) {
 		"int matches float spelling": {
 			matcher: matcher.Content(versionPath, 1),
 			input:   stringtest.Input(`version: 1.0`),
+			want:    true,
+		},
+		"int matches hex spelling": {
+			matcher: matcher.Content(versionPath, 16),
+			input:   stringtest.Input(`version: 0x10`),
 			want:    true,
 		},
 		"int matches an int-tagged integer": {
@@ -289,14 +336,6 @@ func TestContent(t *testing.T) {
 			`),
 			want: false,
 		},
-		"any int does not match a quoted integer behind a tagged alias": {
-			matcher: matcher.Content[any](versionPath, 2),
-			input: stringtest.Input(`
-				v: &v "2"
-				version: !t *v
-			`),
-			want: false,
-		},
 		"int matches a plain integer key": {
 			matcher: matcher.Content(twoKeyPath, 2),
 			input:   stringtest.Input(`2: x`),
@@ -323,11 +362,6 @@ func TestContent(t *testing.T) {
 		"int does not match an anchored str-tagged integer key": {
 			matcher: matcher.Content(twoKeyPath, 2),
 			input:   stringtest.Input(`&k !!str 2: x`),
-			want:    false,
-		},
-		"any int does not match a str-tagged integer key": {
-			matcher: matcher.Content[any](twoKeyPath, 2),
-			input:   stringtest.Input(`!!str 2: x`),
 			want:    false,
 		},
 		"float does not match a str-tagged integer key": {
@@ -383,8 +417,8 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: .nan`),
 			want:    true,
 		},
-		"any NaN matches NaN spelling": {
-			matcher: matcher.Content[any](versionPath, math.NaN()),
+		"float NaN matches NaN spelling": {
+			matcher: matcher.Content(versionPath, math.NaN()),
 			input:   stringtest.Input(`version: .NaN`),
 			want:    true,
 		},
@@ -469,200 +503,97 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`enabled: null`),
 			want:    false,
 		},
-		"nil matches null": {
-			matcher: matcher.Content[any](enabledPath, nil),
-			input:   stringtest.Input(`enabled: ~`),
-			want:    true,
-		},
-		"nil pointer matches null": {
-			matcher: matcher.Content[*string](enabledPath, nil),
-			input:   stringtest.Input(`enabled: null`),
-			want:    true,
-		},
-		"nil pointer does not match a value": {
-			matcher: matcher.Content[*string](kindPath, nil),
-			input:   stringtest.Input(`kind: Deployment`),
-			want:    false,
-		},
-		"string pointer matches its pointee": {
-			matcher: matcher.Content(kindPath, new("Deployment")),
-			input:   stringtest.Input(`kind: Deployment`),
-			want:    true,
-		},
-		"string pointer does not match other string": {
-			matcher: matcher.Content(kindPath, new("Deployment")),
-			input:   stringtest.Input(`kind: Service`),
-			want:    false,
-		},
-		"string pointer does not match null": {
-			matcher: matcher.Content(kindPath, new("")),
-			input:   stringtest.Input(`kind: null`),
-			want:    false,
-		},
-		"string pointer matches float text as written": {
-			matcher: matcher.Content(versionPath, new("1.10")),
-			input:   stringtest.Input(`version: 1.10`),
-			want:    true,
-		},
-		"bool pointer matches its pointee": {
-			matcher: matcher.Content(enabledPath, new(true)),
-			input:   stringtest.Input(`enabled: true`),
-			want:    true,
-		},
-		"int pointer does not match a fraction": {
-			matcher: matcher.Content(versionPath, new(1)),
-			input:   stringtest.Input(`version: 1.5`),
-			want:    false,
-		},
-		"int pointer does not match a quoted integer": {
-			matcher: matcher.Content(versionPath, new(2)),
-			input:   stringtest.Input(`version: "2"`),
-			want:    false,
-		},
-		"any string pointer matches its pointee": {
-			matcher: matcher.Content[any](kindPath, new("Deployment")),
-			input:   stringtest.Input(`kind: Deployment`),
-			want:    true,
-		},
-		"any string pointer does not match other string": {
-			matcher: matcher.Content[any](kindPath, new("Deployment")),
-			input:   stringtest.Input(`kind: Service`),
-			want:    false,
-		},
-		"any int pointer matches its pointee": {
-			matcher: matcher.Content[any](versionPath, new(2)),
-			input:   stringtest.Input(`version: 2`),
-			want:    true,
-		},
-		"any int pointer does not match a quoted integer": {
-			matcher: matcher.Content[any](versionPath, new(2)),
-			input:   stringtest.Input(`version: "2"`),
-			want:    false,
-		},
-		"any nil pointer matches null": {
-			matcher: matcher.Content[any](kindPath, (*string)(nil)),
-			input:   stringtest.Input(`kind: null`),
-			want:    true,
-		},
-		"any nil pointer does not match a value": {
-			matcher: matcher.Content[any](kindPath, (*string)(nil)),
-			input:   stringtest.Input(`kind: Deployment`),
-			want:    false,
-		},
-		"any large int does not match a rounded float": {
-			matcher: matcher.Content[any](versionPath, int64(9007199254740993)),
+		"large int does not match a rounded float": {
+			matcher: matcher.Content(versionPath, int64(9007199254740993)),
 			input:   stringtest.Input(`version: 9007199254740992.0`),
 			want:    false,
 		},
-		"any large int matches its float spelling": {
-			matcher: matcher.Content[any](versionPath, int64(9007199254740992)),
+		"large int matches its float spelling": {
+			matcher: matcher.Content(versionPath, int64(9007199254740992)),
 			input:   stringtest.Input(`version: 9007199254740992.0`),
 			want:    true,
 		},
-		"nil does not match a value": {
-			matcher: matcher.Content[any](enabledPath, nil),
-			input:   stringtest.Input(`enabled: false`),
-			want:    false,
-		},
-		"any int matches integer": {
-			matcher: matcher.Content[any](versionPath, 1),
+		"int matches integer": {
+			matcher: matcher.Content(versionPath, 1),
 			input:   stringtest.Input(`version: 1`),
 			want:    true,
 		},
-		"any int matches float spelling": {
-			matcher: matcher.Content[any](versionPath, 1),
-			input:   stringtest.Input(`version: 1.0`),
-			want:    true,
-		},
-		"any int does not match other integer": {
-			matcher: matcher.Content[any](versionPath, 1),
-			input:   stringtest.Input(`version: 2`),
-			want:    false,
-		},
-		"any negative int does not match unsigned": {
-			matcher: matcher.Content[any](versionPath, -1),
+		"negative int does not match unsigned": {
+			matcher: matcher.Content(versionPath, -1),
 			input:   stringtest.Input(`version: 18446744073709551615`),
 			want:    false,
 		},
-		"any float matches a plain exponent": {
-			matcher: matcher.Content[any](versionPath, 1000.0),
+		"float matches a plain exponent": {
+			matcher: matcher.Content(versionPath, 1000.0),
 			input:   stringtest.Input(`version: 1e3`),
 			want:    true,
 		},
-		"any int matches a plain exponent": {
-			matcher: matcher.Content[any](versionPath, 1000),
-			input:   stringtest.Input(`version: 1e3`),
-			want:    true,
-		},
-		"any float matches a plain exponent fraction": {
-			matcher: matcher.Content[any](versionPath, 2.5),
+		"float matches a plain exponent fraction": {
+			matcher: matcher.Content(versionPath, 2.5),
 			input:   stringtest.Input(`version: 25e-1`),
 			want:    true,
 		},
-		"any float matches a large plain exponent": {
-			matcher: matcher.Content[any](versionPath, 1e19),
+		"float matches a large plain exponent": {
+			matcher: matcher.Content(versionPath, 1e19),
 			input:   stringtest.Input(`version: 1e19`),
 			want:    true,
 		},
-		"any int does not match a plain exponent fraction": {
-			matcher: matcher.Content[any](versionPath, 2),
-			input:   stringtest.Input(`version: 25e-1`),
-			want:    false,
-		},
-		"any float does not match a quoted exponent": {
-			matcher: matcher.Content[any](versionPath, 1000.0),
+		"float does not match a quoted exponent": {
+			matcher: matcher.Content(versionPath, 1000.0),
 			input:   stringtest.Input(`version: "1e3"`),
 			want:    false,
 		},
-		"any float does not match plain inf": {
-			matcher: matcher.Content[any](versionPath, math.Inf(1)),
-			input:   stringtest.Input(`version: inf`),
-			want:    false,
-		},
-		"any float does not match Infinity": {
-			matcher: matcher.Content[any](versionPath, math.Inf(1)),
-			input:   stringtest.Input(`version: Infinity`),
-			want:    false,
-		},
-		"any NaN does not match plain NaN": {
-			matcher: matcher.Content[any](versionPath, math.NaN()),
+		"float NaN does not match plain NaN": {
+			matcher: matcher.Content(versionPath, math.NaN()),
 			input:   stringtest.Input(`version: NaN`),
 			want:    false,
 		},
-		"any float does not match a hex float": {
-			matcher: matcher.Content[any](versionPath, 0.25),
-			input:   stringtest.Input(`version: 0x1p-2`),
-			want:    false,
-		},
-		"any string matches plain inf": {
-			matcher: matcher.Content[any](versionPath, "inf"),
+		"string matches plain inf": {
+			matcher: matcher.Content(versionPath, "inf"),
 			input:   stringtest.Input(`version: inf`),
 			want:    true,
 		},
-		"any string matches a plain exponent": {
-			matcher: matcher.Content[any](versionPath, "1e3"),
+		"string matches a plain exponent": {
+			matcher: matcher.Content(versionPath, "1e3"),
 			input:   stringtest.Input(`version: 1e3`),
 			want:    true,
 		},
-		"any named int matches integer": {
-			matcher: matcher.Content[any](versionPath, namedInt(1)),
+		"named int matches integer": {
+			matcher: matcher.Content(versionPath, namedInt(1)),
 			input:   stringtest.Input(`version: 1`),
 			want:    true,
 		},
-		"any named int does not match other integer": {
-			matcher: matcher.Content[any](versionPath, namedInt(1)),
+		"named int does not match other integer": {
+			matcher: matcher.Content(versionPath, namedInt(1)),
 			input:   stringtest.Input(`version: 2`),
 			want:    false,
 		},
-		"any named float matches float": {
-			matcher: matcher.Content[any](versionPath, namedFloat(1.5)),
+		"named float matches float": {
+			matcher: matcher.Content(versionPath, namedFloat(1.5)),
 			input:   stringtest.Input(`version: 1.5`),
 			want:    true,
 		},
-		"any duration matches integer": {
-			matcher: matcher.Content[any](versionPath, time.Duration(80)),
-			input:   stringtest.Input(`version: 80`),
+		"named float matches a plain exponent": {
+			// The decoder reads 1e3 as a string, which go-yaml cannot set
+			// a named float from.
+			matcher: matcher.Content(versionPath, namedFloat(1000)),
+			input:   stringtest.Input(`version: 1e3`),
 			want:    true,
+		},
+		"named float32 matches a plain exponent": {
+			matcher: matcher.Content(versionPath, namedFloat32(1000)),
+			input:   stringtest.Input(`version: 1e3`),
+			want:    true,
+		},
+		"named float matches a plain exponent fraction": {
+			matcher: matcher.Content(versionPath, namedFloat(2.5)),
+			input:   stringtest.Input(`version: 25e-1`),
+			want:    true,
+		},
+		"named float does not match a quoted exponent": {
+			matcher: matcher.Content(versionPath, namedFloat(1000)),
+			input:   stringtest.Input(`version: "1e3"`),
+			want:    false,
 		},
 		"duration matches plain": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
@@ -694,10 +625,10 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`timeout: "6s"`),
 			want:    false,
 		},
-		"pointer duration matches quoted": {
-			matcher: matcher.Content(timeoutPath, new(5*time.Second)),
-			input:   stringtest.Input(`timeout: "5s"`),
-			want:    true,
+		"duration does not match an integer of nanoseconds": {
+			matcher: matcher.Content(timeoutPath, 5*time.Second),
+			input:   stringtest.Input(`timeout: 5000000000`),
+			want:    false,
 		},
 		"duration does not match plain float": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
@@ -729,284 +660,28 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`timeout: 1.5e999`),
 			want:    false,
 		},
-		"pointer duration does not match plain exponent": {
-			matcher: matcher.Content(timeoutPath, new(5*time.Second)),
-			input:   stringtest.Input(`timeout: 1e3`),
-			want:    false,
-		},
-		"array duration element matches duration text": {
-			matcher: matcher.Content(timeoutPath, [1]time.Duration{5 * time.Second}),
-			input:   stringtest.Input(`timeout: [5s]`),
-			want:    true,
-		},
-		"array duration element does not match plain exponent": {
-			matcher: matcher.Content(timeoutPath, [1]time.Duration{5 * time.Second}),
-			input:   stringtest.Input(`timeout: [1e3]`),
-			want:    false,
-		},
-		"array duration elements do not match plain exponent before float": {
-			matcher: matcher.Content(timeoutPath, [2]time.Duration{5 * time.Second, 5 * time.Second}),
-			input:   stringtest.Input(`timeout: [1e3, 1.5e3]`),
-			want:    false,
-		},
-		"array duration elements do not match plain exponent after float": {
-			matcher: matcher.Content(timeoutPath, [2]time.Duration{5 * time.Second, 5 * time.Second}),
-			input:   stringtest.Input(`timeout: [1.5e3, 1e3]`),
-			want:    false,
-		},
-		"array duration does not match plain exponent past its end": {
-			matcher: matcher.Content(timeoutPath, [1]time.Duration{5 * time.Second}),
-			input:   stringtest.Input(`timeout: [5s, 1e3]`),
-			want:    false,
-		},
-		"array duration element does not match aliased plain exponent": {
-			matcher: matcher.Content(timeoutPath, [1]time.Duration{5 * time.Second}),
-			input: stringtest.Input(`
-				a: &a 1e3
-				timeout: [*a]
-			`),
-			want: false,
-		},
-		"struct duration field does not match plain exponent": {
-			matcher: matcher.Content(timeoutPath, durationField{5 * time.Second}),
-			input:   stringtest.Input(`timeout: {t: 1e3}`),
-			want:    false,
-		},
-		"struct duration field does not match merged plain exponent": {
-			matcher: matcher.Content(timeoutPath, durationField{5 * time.Second}),
-			input:   stringtest.Input(`timeout: {<<: {t: 1e3}}`),
-			want:    false,
-		},
-		"struct duration field matches its own entry before a dropped merge": {
-			matcher: matcher.Content(timeoutPath, durationField{5 * time.Second}),
-			input:   stringtest.Input(`timeout: {t: 5s, <<: {7: x, t: 1e3}}`),
-			want:    true,
-		},
-		"inline struct duration field does not match plain exponent": {
-			matcher: matcher.Content(timeoutPath, inlineDuration{durationField{5 * time.Second}}),
-			input:   stringtest.Input(`timeout: {t: 1e3}`),
-			want:    false,
-		},
-		"array struct pointer duration field does not match plain exponent": {
-			matcher: matcher.Content(timeoutPath, [1]*durationField{{5 * time.Second}}),
-			input:   stringtest.Input(`timeout: [{t: 1e3}]`),
-			want:    false,
-		},
-		"struct with an inline alias field ignores a plain exponent beside it": {
-			matcher: matcher.Content(timeoutPath, aliasInlineDuration{K: "x"}),
-			input:   stringtest.Input(`timeout: {t: 1e3, k: x}`),
-			want:    true,
-		},
-		"struct that inlines itself does not match": {
-			matcher: matcher.Content(timeoutPath, selfInline{T: 5 * time.Second}),
-			input:   stringtest.Input(`timeout: {t: 5s}`),
-			want:    false,
-		},
-		"time matches UTC timestamp": {
-			matcher: matcher.Content(createdPath, time.Date(2001, 12, 15, 2, 59, 43, 0, time.UTC)),
-			input:   stringtest.Input(`created: 2001-12-15T02:59:43Z`),
-			want:    true,
-		},
-		"time matches offset timestamp in same offset": {
-			matcher: matcher.Content(createdPath, time.Date(2001, 12, 14, 21, 59, 43, 0, time.FixedZone("", -5*3600))),
-			input:   stringtest.Input(`created: 2001-12-14T21:59:43-05:00`),
-			want:    true,
-		},
-		"time matches offset timestamp in UTC": {
-			matcher: matcher.Content(createdPath, time.Date(2001, 12, 15, 2, 59, 43, 0, time.UTC)),
-			input:   stringtest.Input(`created: 2001-12-14T21:59:43-05:00`),
-			want:    true,
-		},
-		"time does not match other instant": {
-			matcher: matcher.Content(createdPath, time.Date(2001, 12, 15, 3, 0, 0, 0, time.UTC)),
-			input:   stringtest.Input(`created: 2001-12-14T21:59:43-05:00`),
-			want:    false,
-		},
-		"pointer time matches offset timestamp": {
-			matcher: matcher.Content(createdPath, new(time.Date(2001, 12, 15, 2, 59, 43, 0, time.UTC))),
-			input:   stringtest.Input(`created: 2001-12-14T21:59:43-05:00`),
-			want:    true,
-		},
-		"zero time matches zero date": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input:   stringtest.Input(`created: 0001-01-01`),
-			want:    true,
-		},
-		"zero time matches zero timestamp": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input:   stringtest.Input(`created: 0001-01-01T00:00:00Z`),
-			want:    true,
-		},
-		"zero time matches tagged zero date": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input:   stringtest.Input(`created: !!timestamp 0001-01-01`),
-			want:    true,
-		},
-		"zero time matches tagged block zero date": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input: stringtest.Input(`
-				created: !!timestamp |-
-				  0001-01-01
-			`),
-			want: true,
-		},
-		"zero time does not match word": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input:   stringtest.Input(`created: hello`),
-			want:    false,
-		},
-		"zero time does not match quoted string": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input:   stringtest.Input(`created: "x"`),
-			want:    false,
-		},
-		"zero time does not match empty string": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input:   stringtest.Input(`created: ""`),
-			want:    false,
-		},
-		"zero time does not match plain float": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input:   stringtest.Input(`created: 1e3`),
-			want:    false,
-		},
-		"zero time does not match tagged word": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input:   stringtest.Input(`created: !!timestamp hello`),
-			want:    false,
-		},
-		"zero time does not match tagged integer": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input:   stringtest.Input(`created: !!timestamp 5`),
-			want:    false,
-		},
-		"zero time does not match date under int tag": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input:   stringtest.Input(`created: !!timestamp !!int 2001-12-14`),
-			want:    false,
-		},
-		"zero time does not match date under float tag": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input:   stringtest.Input(`created: !!timestamp !!float 2001-12-14`),
-			want:    false,
-		},
-		"time matches date under str tag": {
-			matcher: matcher.Content(createdPath, time.Date(2001, 12, 14, 0, 0, 0, 0, time.UTC)),
-			input:   stringtest.Input(`created: !!timestamp !!str 2001-12-14`),
-			want:    true,
-		},
-		"zero time does not match aliased tagged word": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input: stringtest.Input(`
-				x: &a !!timestamp hello
-				created: *a
-			`),
-			want: false,
-		},
-		"time matches tagged alias to date": {
-			matcher: matcher.Content(createdPath, time.Date(2001, 12, 14, 0, 0, 0, 0, time.UTC)),
-			input: stringtest.Input(`
-				x: &a 2001-12-14
-				created: !!timestamp *a
-			`),
-			want: true,
-		},
-		"zero time does not match tagged alias to word": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input: stringtest.Input(`
-				x: &a hello
-				created: !!timestamp *a
-			`),
-			want: false,
-		},
-		"zero time matches tagged alias to zero date": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input: stringtest.Input(`
-				x: &a 0001-01-01
-				created: !!timestamp *a
-			`),
-			want: true,
-		},
-		"zero time matches tagged alias to the nearest anchor before it": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input: stringtest.Input(`
-				x: &a hello
-				y: &a 0001-01-01
-				created: !!timestamp *a
-			`),
-			want: true,
-		},
-		"zero time does not match tagged alias to a word before a later anchor": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input: stringtest.Input(`
-				x: &a hello
-				created: !!timestamp *a
-				y: &a 0001-01-01
-			`),
-			want: false,
-		},
-		"zero time matches tagged alias through a second tagged alias": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input: stringtest.Input(`
-				x: &a 0001-01-01
-				y: &b !!timestamp *a
-				created: !!timestamp *b
-			`),
-			want: true,
-		},
-		"zero time compares tagged alias through a second alias to word as the decode": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input: stringtest.Input(`
-				x: &a hello
-				y: &b !!timestamp *a
-				created: !!timestamp *b
-			`),
-			want: true,
-		},
-		"zero time does not match alias to tagged alias to word": {
-			matcher: matcher.Content(createdPath, time.Time{}),
-			input: stringtest.Input(`
-				x: &a hello
-				y: &b !!timestamp *a
-				created: *b
-			`),
-			want: false,
-		},
-		"pointer zero time does not match word": {
-			matcher: matcher.Content(createdPath, new(time.Time)),
-			input:   stringtest.Input(`created: hello`),
-			want:    false,
-		},
-		"any zero time does not match tagged word": {
-			matcher: matcher.Content[any](createdPath, time.Time{}),
-			input:   stringtest.Input(`created: !!timestamp hello`),
-			want:    false,
-		},
-		"any zero time does not match date under int tag": {
-			matcher: matcher.Content[any](createdPath, time.Time{}),
-			input:   stringtest.Input(`created: !!timestamp !!int 2001-12-14`),
-			want:    false,
-		},
-		"array zero time element does not match word": {
-			matcher: matcher.Content(createdPath, [1]time.Time{}),
-			input:   stringtest.Input(`created: [hello]`),
-			want:    false,
-		},
-		"array time element matches tagged alias to date": {
-			matcher: matcher.Content(createdPath, [1]time.Time{time.Date(2001, 12, 14, 0, 0, 0, 0, time.UTC)}),
-			input: stringtest.Input(`
-				x: &a 2001-12-14
-				created: [!!timestamp *a]
-			`),
-			want: true,
-		},
-		"any string does not match number": {
-			matcher: matcher.Content[any](versionPath, "1"),
-			input:   stringtest.Input(`version: 1`),
-			want:    false,
-		},
 		"bool match": {
 			matcher: matcher.Content(enabledPath, true),
+			input:   stringtest.Input(`enabled: true`),
+			want:    true,
+		},
+		"bool no match": {
+			matcher: matcher.Content(enabledPath, true),
+			input:   stringtest.Input(`enabled: false`),
+			want:    false,
+		},
+		"bool matches a capitalized spelling": {
+			matcher: matcher.Content(enabledPath, true),
+			input:   stringtest.Input(`enabled: True`),
+			want:    true,
+		},
+		"bool matches a bool-tagged quoted scalar": {
+			matcher: matcher.Content(enabledPath, true),
+			input:   stringtest.Input(`enabled: !!bool "true"`),
+			want:    true,
+		},
+		"named bool matches": {
+			matcher: matcher.Content(enabledPath, namedBool(true)),
 			input:   stringtest.Input(`enabled: true`),
 			want:    true,
 		},
@@ -1050,295 +725,6 @@ func TestContent(t *testing.T) {
 			input:   stringtest.Input(`version: 2.5`),
 			want:    false,
 		},
-		"array matches equal elements": {
-			matcher: matcher.Content(versionPath, [2]int{1, 2}),
-			input:   stringtest.Input(`version: [1, 2]`),
-			want:    true,
-		},
-		"array matches a shorter sequence with zero elements past its end": {
-			matcher: matcher.Content(versionPath, [2]int{1, 0}),
-			input:   stringtest.Input(`version: [1]`),
-			want:    true,
-		},
-		"array int element does not match a fraction": {
-			matcher: matcher.Content(versionPath, [1]int{2}),
-			input:   stringtest.Input(`version: [2.5]`),
-			want:    false,
-		},
-		"array int element does not match a quoted integer": {
-			matcher: matcher.Content(versionPath, [1]int{1}),
-			input:   stringtest.Input(`version: ["1"]`),
-			want:    false,
-		},
-		"array float element does not match a quoted number": {
-			matcher: matcher.Content(versionPath, [1]float64{2}),
-			input:   stringtest.Input(`version: ["2"]`),
-			want:    false,
-		},
-		"array float element does not match a Go-only float": {
-			matcher: matcher.Content(versionPath, [1]float64{0.25}),
-			input:   stringtest.Input(`version: [0x1p-2]`),
-			want:    false,
-		},
-		"array int64 element does not match an overflowing float": {
-			matcher: matcher.Content(versionPath, [1]int64{math.MaxInt64}),
-			input:   stringtest.Input(`version: [1e19]`),
-			want:    false,
-		},
-		"array float32 inf element does not match an overflowing float": {
-			matcher: matcher.Content(versionPath, [1]float32{float32(math.Inf(1))}),
-			input:   stringtest.Input(`version: [4.0e+38]`),
-			want:    false,
-		},
-		"array string element matches float text as written": {
-			matcher: matcher.Content(versionPath, [1]string{"1.10"}),
-			input:   stringtest.Input(`version: [1.10]`),
-			want:    true,
-		},
-		"array string element does not match respelled float": {
-			matcher: matcher.Content(versionPath, [1]string{"1.1"}),
-			input:   stringtest.Input(`version: [1.10]`),
-			want:    false,
-		},
-		"array NaN element matches .nan": {
-			matcher: matcher.Content(versionPath, [1]float64{math.NaN()}),
-			input:   stringtest.Input(`version: [.nan]`),
-			want:    true,
-		},
-		"array int element does not match null": {
-			matcher: matcher.Content(versionPath, [1]int{0}),
-			input:   stringtest.Input(`version: [null]`),
-			want:    false,
-		},
-		"array nil pointer element matches null": {
-			matcher: matcher.Content(versionPath, [1]*int{nil}),
-			input:   stringtest.Input(`version: [null]`),
-			want:    true,
-		},
-		"array time element matches offset timestamp": {
-			matcher: matcher.Content(createdPath, [1]time.Time{time.Date(2001, 12, 15, 2, 59, 43, 0, time.UTC)}),
-			input:   stringtest.Input(`created: [2001-12-14T21:59:43-05:00]`),
-			want:    true,
-		},
-		"struct matches equal fields": {
-			matcher: matcher.Content(versionPath, intText{2, "x"}),
-			input:   stringtest.Input(`version: {i: 2, s: x}`),
-			want:    true,
-		},
-		"struct matches a missing field as zero": {
-			matcher: matcher.Content(versionPath, intText{2, ""}),
-			input:   stringtest.Input(`version: {i: 2}`),
-			want:    true,
-		},
-		"struct matches fields a merge key brings in": {
-			matcher: matcher.Content(versionPath, intText{2, "x"}),
-			input:   stringtest.Input(`version: {<<: {i: 2}, s: x}`),
-			want:    true,
-		},
-		"struct int field does not match a fraction": {
-			matcher: matcher.Content(versionPath, intText{2, "x"}),
-			input:   stringtest.Input(`version: {i: 2.5, s: x}`),
-			want:    false,
-		},
-		"struct int field does not match a quoted integer": {
-			matcher: matcher.Content(versionPath, intText{2, "x"}),
-			input:   stringtest.Input(`version: {i: "2", s: x}`),
-			want:    false,
-		},
-		"struct string field matches float text as written": {
-			matcher: matcher.Content(versionPath, intText{1, "1.10"}),
-			input:   stringtest.Input(`version: {i: 1, s: 1.10}`),
-			want:    true,
-		},
-		"nested struct int field does not match null": {
-			matcher: matcher.Content(versionPath, nestedIntText{}),
-			input:   stringtest.Input(`version: {a: {i: null}}`),
-			want:    false,
-		},
-		"struct pointer field matches its pointee": {
-			matcher: matcher.Content(versionPath, plainField{K: "x", N: new(2)}),
-			input:   stringtest.Input(`version: {k: x, n: 2}`),
-			want:    true,
-		},
-		"struct nil pointer field matches null": {
-			matcher: matcher.Content(versionPath, plainField{K: "x"}),
-			input:   stringtest.Input(`version: {k: x, n: null}`),
-			want:    true,
-		},
-		"struct string field does not match a tagged alias to the anchor it sits in": {
-			matcher: matcher.Content(versionPath, plainField{}),
-			input:   stringtest.Input(`version: &x {k: !t *x}`),
-			want:    false,
-		},
-		"struct nil pointer field matches a tagged alias to the anchor it sits in": {
-			matcher: matcher.Content(versionPath, pointerField{}),
-			input:   stringtest.Input(`version: &x {p: !t *x}`),
-			want:    true,
-		},
-		"struct string field does not match an anchored alias to the anchor it sits in": {
-			matcher: matcher.Content(versionPath, plainField{}),
-			input: stringtest.Input(`
-				version: &x
-				  k: &y
-				    *x
-			`),
-			want: false,
-		},
-		"struct string field does not match a null-tagged alias without an anchor": {
-			matcher: matcher.Content(versionPath, plainField{}),
-			input:   stringtest.Input(`version: {k: !!null *q}`),
-			want:    false,
-		},
-		"inline struct int field does not match a fraction": {
-			matcher: matcher.Content(versionPath, inlineIntText{Inline: intText{I: 2}, S: "x"}),
-			input:   stringtest.Input(`version: {i: 2.5, s: x}`),
-			want:    false,
-		},
-		"inline struct matches with a shadowed field zero": {
-			matcher: matcher.Content(versionPath, inlineIntText{Inline: intText{I: 2}, S: "x"}),
-			input:   stringtest.Input(`version: {i: 2, s: x}`),
-			want:    true,
-		},
-		"inline struct shadowed field does not match the entry of its parent": {
-			matcher: matcher.Content(versionPath, inlineIntText{Inline: intText{I: 2, S: "x"}, S: "x"}),
-			input:   stringtest.Input(`version: {i: 2, s: x}`),
-			want:    false,
-		},
-		"struct field does not match a mapping with a number key": {
-			matcher: matcher.Content(versionPath, intText{S: "1.10"}),
-			input:   stringtest.Input(`version: {s: 1.10, 7: x}`),
-			want:    false,
-		},
-		"struct zero fields match a mapping with a number key": {
-			matcher: matcher.Content(versionPath, intText{}),
-			input:   stringtest.Input(`version: {i: 2.5, 7: x}`),
-			want:    true,
-		},
-		"struct field reads a mapping whose number key is quoted": {
-			matcher: matcher.Content(versionPath, intText{S: "1.10"}),
-			input:   stringtest.Input(`version: {s: 1.10, "7": x}`),
-			want:    true,
-		},
-		"struct field named for a number key does not match it": {
-			matcher: matcher.Content(versionPath, scalarKeys{One: "1.10"}),
-			input:   stringtest.Input(`version: {1: 1.10}`),
-			want:    false,
-		},
-		"struct field named for a bool key does not match it": {
-			matcher: matcher.Content(versionPath, scalarKeys{True: "2"}),
-			input:   stringtest.Input(`version: {true: 2}`),
-			want:    false,
-		},
-		"struct field named for a number key reads it under a str tag": {
-			matcher: matcher.Content(versionPath, scalarKeys{Sixteen: "x"}),
-			input:   stringtest.Input(`version: {!!str 0x10: x}`),
-			want:    true,
-		},
-		"struct field named for a number key does not read it untagged": {
-			matcher: matcher.Content(versionPath, scalarKeys{Sixteen: "x"}),
-			input:   stringtest.Input(`version: {0x10: x}`),
-			want:    false,
-		},
-		"struct field does not match a merged mapping with a number key": {
-			matcher: matcher.Content(versionPath, intText{S: "1.10"}),
-			input:   stringtest.Input(`version: {<<: {1: x, s: 1.10}}`),
-			want:    false,
-		},
-		"struct matches its own entries beside a merged mapping with a number key": {
-			matcher: matcher.Content(versionPath, intText{2, "x"}),
-			input:   stringtest.Input(`version: {<<: {1: x, i: 3}, i: 2, s: x}`),
-			want:    true,
-		},
-		"inline struct zero fields match a mapping with a number key": {
-			matcher: matcher.Content(versionPath, inlineIntText{}),
-			input:   stringtest.Input(`version: {i: 2.5, 7: x}`),
-			want:    true,
-		},
-		"struct matches its own entry before a merged mapping with a number key": {
-			matcher: matcher.Content(versionPath, intText{I: 2}),
-			input:   stringtest.Input(`version: {i: 2, <<: {7: x, i: 3.5}}`),
-			want:    true,
-		},
-		"struct int field does not match its own null before a merged mapping with a number key": {
-			matcher: matcher.Content(versionPath, intText{}),
-			input:   stringtest.Input(`version: {i: null, <<: {7: x, i: 3.5}}`),
-			want:    false,
-		},
-		"struct nil pointer field matches its own null before a merged mapping with a number key": {
-			matcher: matcher.Content(versionPath, plainField{K: "x"}),
-			input:   stringtest.Input(`version: {k: x, n: null, <<: {7: x, n: 3}}`),
-			want:    true,
-		},
-		"struct field before a dropped merged mapping compares the decode": {
-			matcher: matcher.Content(versionPath, intText{I: 2}),
-			input:   stringtest.Input(`version: {i: 2.5, <<: {7: x, i: 3}}`),
-			want:    true,
-		},
-		"struct string field does not match a null under a key a path cannot name": {
-			matcher: matcher.Content(versionPath, scalarKeys{}),
-			input:   stringtest.Input(`version: {!!str 0x10: null}`),
-			want:    false,
-		},
-		"struct field under a key a path cannot name compares the decode": {
-			matcher: matcher.Content(versionPath, scalarKeys{Sixteen: "1.1"}),
-			input:   stringtest.Input(`version: {!!str 0x10: 1.10}`),
-			want:    true,
-		},
-		"struct interface field holding a mapping matches nothing": {
-			matcher: matcher.Content(versionPath, anyField{F: map[string]any{"a": uint64(1)}}),
-			input:   stringtest.Input(`version: {!!str 0x10: {a: 1}}`),
-			want:    false,
-		},
-		"struct with an inline alias field compares the decode beside a fraction": {
-			matcher: matcher.Content(versionPath, aliasInline{K: "x"}),
-			input:   stringtest.Input(`version: {i: 2.5, k: x}`),
-			want:    true,
-		},
-		"struct with an inline alias field compares the decode beside float text": {
-			matcher: matcher.Content(versionPath, aliasInline{K: "x"}),
-			input:   stringtest.Input(`version: {s: 1.10, k: x}`),
-			want:    true,
-		},
-		"struct with an inline alias field compares its own field as the decode": {
-			matcher: matcher.Content(versionPath, aliasInline{K: "1.1"}),
-			input:   stringtest.Input(`version: {k: 1.10}`),
-			want:    true,
-		},
-		"struct with an inline alias field does not match a different decode": {
-			matcher: matcher.Content(versionPath, aliasInline{K: "y"}),
-			input:   stringtest.Input(`version: {i: 2, k: x}`),
-			want:    false,
-		},
-		"struct with an omitempty inline alias field ignores a merged entry": {
-			matcher: matcher.Content(versionPath, aliasInlineOmit{}),
-			input:   stringtest.Input(`version: {<<: {k: 1.10}}`),
-			want:    true,
-		},
-		"struct with an omitempty inline alias field ignores a merged fraction": {
-			matcher: matcher.Content(versionPath, aliasInlineOmit{K: "x"}),
-			input:   stringtest.Input(`version: {<<: {i: 2.5}, k: x}`),
-			want:    true,
-		},
-		"array of structs with an inline alias field compares the decode": {
-			matcher: matcher.Content(versionPath, [1]aliasInline{{K: "x"}}),
-			input:   stringtest.Input(`version: [{i: 2.5, k: x}]`),
-			want:    true,
-		},
-		"inline struct with an inline alias field compares the decode": {
-			matcher: matcher.Content(versionPath, aliasInlineParent{S: "1.10"}),
-			input:   stringtest.Input(`version: {i: 2.5, s: 1.10}`),
-			want:    true,
-		},
-		"map item matches the first entry of a mapping": {
-			matcher: matcher.Content(versionPath, yaml.MapItem{Key: "key", Value: "x"}),
-			input:   stringtest.Input(`version: {key: x, value: null}`),
-			want:    true,
-		},
-		"map item does not match a different first entry": {
-			matcher: matcher.Content(versionPath, yaml.MapItem{Key: "key", Value: "y"}),
-			input:   stringtest.Input(`version: {key: x, value: null}`),
-			want:    false,
-		},
 		"value that does not decode": {
 			matcher: matcher.Content(versionPath, 1),
 			input:   stringtest.Input(`version: abc`),
@@ -1351,6 +737,11 @@ func TestContent(t *testing.T) {
 				  name: Deployment
 			`),
 			want: false,
+		},
+		"sequence does not decode into scalar": {
+			matcher: matcher.Content(kindPath, "Deployment"),
+			input:   stringtest.Input(`kind: [Deployment]`),
+			want:    false,
 		},
 	}
 
@@ -1398,20 +789,12 @@ func TestContent(t *testing.T) {
 		t.Parallel()
 
 		// The Node a validator gets decodes with the settings of its
-		// source, so an alias to an anchor of a reference document reads
-		// as the decode reads it, as a registry used as a validator sees it.
+		// source, so a decode of it reads an alias to an anchor of a
+		// reference document. The path of a matcher resolves in the
+		// document alone, so it cannot follow such an alias.
 		refs := niceyaml.WithReferences(niceyaml.NewSourceFromString(stringtest.Input(`
 			r: &r 2
-			m: &m {i: 2}
-			n: &n null
-			k: &k i
-			o: &o {i: null}
-			d: &d 2001-12-14
-			z: &z 0001-01-01
-			w: &w hello
 		`)))
-
-		date := time.Date(2001, 12, 14, 0, 0, 0, 0, time.UTC)
 
 		tcs := map[string]struct {
 			matcher matcher.Matcher
@@ -1419,145 +802,31 @@ func TestContent(t *testing.T) {
 			input   string
 			want    bool
 		}{
-			"array element matches an alias to a reference anchor": {
-				matcher: matcher.Content(versionPath, [1]int{2}),
-				input:   `version: [*r]`,
-				want:    true,
-			},
-			"array element does not match a different reference value": {
-				matcher: matcher.Content(versionPath, [1]int{3}),
-				input:   `version: [*r]`,
-				want:    false,
-			},
-			"struct field matches an alias to a reference anchor": {
-				matcher: matcher.Content(versionPath, intText{I: 2}),
-				input:   `version: {i: *r}`,
-				want:    true,
-			},
-			"struct matches a merged reference mapping": {
-				matcher: matcher.Content(versionPath, intText{I: 2}),
-				input:   `version: {<<: *m}`,
-				want:    true,
-			},
-			"array int element does not match an alias to a reference null": {
-				matcher: matcher.Content(versionPath, [1]int{0}),
-				input:   `version: [*n]`,
-				want:    false,
-			},
-			"array nil pointer element matches an alias to a reference null": {
-				matcher: matcher.Content(versionPath, [1]*int{nil}),
-				input:   `version: [*n]`,
-				want:    true,
-			},
-			"struct int field does not match an alias to a reference null": {
-				matcher: matcher.Content(versionPath, intText{}),
-				input:   `version: {i: *n}`,
-				want:    false,
-			},
-			"struct string field does not match a tagged alias to a reference null": {
-				matcher: matcher.Content(versionPath, plainField{}),
-				input:   `version: {k: !t *n}`,
-				want:    false,
-			},
-			"struct nil pointer field matches a tagged alias to a reference null": {
-				matcher: matcher.Content(versionPath, pointerField{}),
-				input:   `version: {p: !t *n}`,
-				want:    true,
-			},
-			"struct string field does not match an anchored alias to a reference null": {
-				matcher: matcher.Content(versionPath, plainField{}),
+			"value beside an alias to a reference anchor matches": {
+				matcher: matcher.Content(versionPath, 2),
 				input: stringtest.Input(`
-					version:
-					  k: &y
-					    *n
-				`),
-				want: false,
-			},
-			"struct nil pointer field matches an anchored alias to a reference null": {
-				matcher: matcher.Content(versionPath, pointerField{}),
-				input: stringtest.Input(`
-					version:
-					  p: &y
-					    *n
+					other: *r
+					version: 2
 				`),
 				want: true,
 			},
-			"struct string field does not match an alias to an anchored alias to a reference null": {
-				matcher: matcher.Content(versionPath, plainField{}),
-				input: stringtest.Input(`
-					y: &y
-					  *n
-					version: {k: *y}
-				`),
-				want: false,
-			},
-			"struct string field does not match an alias to a tagged alias to a reference null": {
-				matcher: matcher.Content(versionPath, plainField{}),
-				input: stringtest.Input(`
-					x: &x !t *n
-					version: {k: *x}
-				`),
-				want: false,
-			},
-			"struct string field does not match a merged tagged alias to a reference null": {
-				matcher: matcher.Content(versionPath, plainField{}),
-				input:   `version: {<<: {k: !t *n}}`,
-				want:    false,
-			},
-			"struct matches its own entry before a merged tagged alias to a reference null": {
-				matcher: matcher.Content(versionPath, plainField{K: "v"}),
-				input:   `version: {k: v, <<: {7: y, k: !t *n}}`,
-				want:    true,
-			},
-			"struct field under an alias key to a reference anchor compares the decode": {
-				matcher: matcher.Content(versionPath, intText{I: 2}),
-				input:   `version: {*k : 2.5}`,
-				want:    true,
-			},
-			"struct int field does not match a null under an alias key to a reference anchor": {
-				matcher: matcher.Content(versionPath, intText{}),
-				input:   `version: {*k : null}`,
-				want:    false,
-			},
-			"struct field compares a null inside a reference value as the decode": {
-				matcher: matcher.Content(versionPath, nestedIntText{}),
-				input:   `version: {a: *o}`,
-				want:    true,
-			},
 			"alias to a reference anchor is an error": {
-				matcher: matcher.Content(createdPath, date),
-				input:   `created: *d`,
+				matcher: matcher.Content(versionPath, 2),
+				input:   `version: *r`,
 				err:     paths.ErrAlias,
 			},
 			"tagged alias to a reference anchor is an error": {
-				matcher: matcher.Content(createdPath, date),
-				input:   `created: !!timestamp *d`,
+				matcher: matcher.Content(versionPath, 2),
+				input:   `version: !!int *r`,
 				err:     paths.ErrAlias,
 			},
 			"alias that leads to a tagged alias to a reference anchor is an error": {
-				matcher: matcher.Content(createdPath, time.Time{}),
+				matcher: matcher.Content(versionPath, 2),
 				input: stringtest.Input(`
-					x: &x !!timestamp *z
-					created: *x
+					x: &x !!int *r
+					version: *x
 				`),
 				err: paths.ErrAlias,
-			},
-			"array time element matches a tagged alias to a reference anchor": {
-				matcher: matcher.Content(createdPath, [1]time.Time{date}),
-				input:   `created: [!!timestamp *d]`,
-				want:    true,
-			},
-			"struct time field matches a tagged alias to a reference anchor": {
-				matcher: matcher.Content(createdPath, struct {
-					A time.Time `yaml:"a"`
-				}{A: date}),
-				input: `created: {a: !!timestamp *d}`,
-				want:  true,
-			},
-			"array zero time element compares a tagged alias to a reference word as the decode": {
-				matcher: matcher.Content(createdPath, [1]time.Time{}),
-				input:   `created: [!!timestamp *w]`,
-				want:    true,
 			},
 		}
 
@@ -1592,12 +861,12 @@ func TestContent(t *testing.T) {
 				input:   `kind: *missing`,
 			},
 			"tagged alias without an anchor": {
-				matcher: matcher.Content(createdPath, time.Time{}),
-				input:   `created: !!timestamp *missing`,
+				matcher: matcher.Content(kindPath, "Deployment"),
+				input:   `kind: !!str *missing`,
 			},
 			"tagged alias to itself": {
-				matcher: matcher.Content(createdPath, time.Time{}),
-				input:   `created: &a !!timestamp *a`,
+				matcher: matcher.Content(kindPath, "Deployment"),
+				input:   `kind: &a !!str *a`,
 			},
 		}
 
@@ -1647,10 +916,11 @@ func TestContent(t *testing.T) {
 	t.Run("alias bomb in a source with the limit off is read", func(t *testing.T) {
 		t.Parallel()
 
-		// The node at kind holds an alias, so Match counts the document
-		// before it reads the node, and the levels put it past the limit.
-		input := "name: &name Deployment\n" + yamltest.AliasLevels(4) + "kind: [*name]\n"
-		m := matcher.Content(kindPath, [1]string{"Deployment"})
+		// The tag keeps the alias in the node at kind, so Match counts the
+		// document before it reads the node, and the levels put it past
+		// the limit.
+		input := "name: &name Deployment\n" + yamltest.AliasLevels(4) + "kind: !!str *name\n"
+		m := matcher.Content(kindPath, "Deployment")
 
 		ok, err := m.Match(t.Context(), yamltest.FirstDocument(t, input))
 		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
@@ -1684,28 +954,8 @@ func TestContent(t *testing.T) {
 				m:    matcher.Content(kindPath, prefixedString("vx")),
 				opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
 			},
-			"pointer to a text unmarshaler": {
-				m:   matcher.Content(kindPath, new(prefixedString)),
-				err: schema.ErrExcessiveAliasing,
-			},
 			"bytes unmarshaler": {
 				m:   matcher.Content(kindPath, millis(1000)),
-				err: schema.ErrExcessiveAliasing,
-			},
-			"struct field text unmarshaler": {
-				m:   matcher.Content(kindPath, textField{}),
-				err: schema.ErrExcessiveAliasing,
-			},
-			"array element text unmarshaler": {
-				m:   matcher.Content(kindPath, [2]prefixedString{}),
-				err: schema.ErrExcessiveAliasing,
-			},
-			"slice element behind a pointer": {
-				m:   matcher.Content(kindPath, new(textSlice)),
-				err: schema.ErrExcessiveAliasing,
-			},
-			"recursive type with a text field": {
-				m:   matcher.Content(kindPath, textChain{}),
 				err: schema.ErrExcessiveAliasing,
 			},
 			"unmarshaler that decodes into text unmarshalers": {
@@ -1715,11 +965,11 @@ func TestContent(t *testing.T) {
 			"plain string": {
 				m: matcher.Content(kindPath, "x"),
 			},
-			"struct of plain fields": {
-				m: matcher.Content(kindPath, plainField{}),
+			"named string": {
+				m: matcher.Content(kindPath, methodString("x")),
 			},
-			"time": {
-				m: matcher.Content(kindPath, time.Time{}),
+			"duration": {
+				m: matcher.Content(kindPath, time.Second),
 			},
 		}
 
@@ -1741,6 +991,48 @@ func TestContent(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestContent_Kinds(t *testing.T) {
+	t.Parallel()
+
+	// A want of each kind in matcher.Scalar matches the scalar that holds
+	// its value, and so does a type defined on that kind.
+	tcs := map[string]struct {
+		matcher matcher.Matcher
+		input   string
+	}{
+		"string":        {matcher: versionIs("2"), input: `version: 2`},
+		"bool":          {matcher: versionIs(true), input: `version: true`},
+		"int":           {matcher: versionIs(2), input: `version: 2`},
+		"int8":          {matcher: versionIs(int8(2)), input: `version: 2`},
+		"int16":         {matcher: versionIs(int16(2)), input: `version: 2`},
+		"int32":         {matcher: versionIs(int32(2)), input: `version: 2`},
+		"int64":         {matcher: versionIs(int64(2)), input: `version: 2`},
+		"uint":          {matcher: versionIs(uint(2)), input: `version: 2`},
+		"uint8":         {matcher: versionIs(uint8(2)), input: `version: 2`},
+		"uint16":        {matcher: versionIs(uint16(2)), input: `version: 2`},
+		"uint32":        {matcher: versionIs(uint32(2)), input: `version: 2`},
+		"uint64":        {matcher: versionIs(uint64(2)), input: `version: 2`},
+		"uintptr":       {matcher: versionIs(uintptr(2)), input: `version: 2`},
+		"float32":       {matcher: versionIs(float32(2.5)), input: `version: 2.5`},
+		"float64":       {matcher: versionIs(2.5), input: `version: 2.5`},
+		"named string":  {matcher: versionIs(methodString("2")), input: `version: 2`},
+		"named bool":    {matcher: versionIs(namedBool(true)), input: `version: true`},
+		"named int":     {matcher: versionIs(namedInt(2)), input: `version: 2`},
+		"named uint8":   {matcher: versionIs(namedUint8(2)), input: `version: 2`},
+		"named float32": {matcher: versionIs(namedFloat32(2.5)), input: `version: 2.5`},
+		"named float64": {matcher: versionIs(namedFloat(2.5)), input: `version: 2.5`},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.True(t, match(t, tc.matcher, yamltest.FirstDocument(t, tc.input)))
+			assert.False(t, match(t, tc.matcher, yamltest.FirstDocument(t, `version: other`)))
+		})
+	}
 }
 
 func TestContent_WithAll(t *testing.T) {
@@ -1794,6 +1086,166 @@ func TestContent_ContextEnded(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestContent_UnmarshalerError(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+
+	t.Run("value that rejects itself does not match", func(t *testing.T) {
+		t.Parallel()
+
+		// The decode of a value that rejects itself fails with
+		// niceyaml.ErrDecode, as a rejection of the decoder does, so the
+		// matcher answers no.
+		ok, err := matcher.Content(kindPath, rejecting("")).Match(t.Context(), doc)
+		require.NoError(t, err)
+		assert.False(t, ok)
+	})
+
+	t.Run("context error a value wraps comes back", func(t *testing.T) {
+		t.Parallel()
+
+		// The error of a context that ended is no answer about the value,
+		// so the matcher cannot decide.
+		ok, err := matcher.Content(kindPath, stopping("")).Match(t.Context(), doc)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.NotErrorIs(t, err, niceyaml.ErrDecode)
+		assert.False(t, ok)
+	})
+}
+
+func TestContent_UnparsableDuration(t *testing.T) {
+	t.Parallel()
+
+	// A string that time.ParseDuration rejects does not read as a
+	// time.Duration, and the decode reports it with
+	// niceyaml.ErrDecode, so the matcher answers no rather than
+	// returning the error. A quoted float is such a string.
+	tcs := map[string]struct {
+		matcher matcher.Matcher
+		input   string
+	}{
+		"plain words": {
+			matcher: matcher.Content(timeoutPath, time.Minute),
+			input:   stringtest.Input(`timeout: 5 minutes`),
+		},
+		"quoted exponent": {
+			matcher: matcher.Content(timeoutPath, time.Minute),
+			input:   stringtest.Input(`timeout: "1e3"`),
+		},
+		"str tagged exponent": {
+			matcher: matcher.Content(timeoutPath, time.Minute),
+			input:   stringtest.Input(`timeout: !!str 1e3`),
+		},
+		"plain inf": {
+			matcher: matcher.Content(timeoutPath, time.Minute),
+			input:   stringtest.Input(`timeout: inf`),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			ok, err := tc.matcher.Match(t.Context(), doc)
+			require.NoError(t, err)
+			assert.False(t, ok)
+		})
+	}
+}
+
+func TestContent_SelfValidator(t *testing.T) {
+	t.Parallel()
+
+	// A want with a Validate method validates the value the matcher
+	// reads, as a decode of its type does. A value that fails is the
+	// fault of the document, so the matcher returns the error rather
+	// than a no, whatever the want holds.
+	tcs := map[string]struct {
+		matcher matcher.Matcher
+		err     error
+		input   string
+		want    bool
+	}{
+		"valid value matches": {
+			matcher: matcher.Content(versionPath, evenInt(2)),
+			input:   `version: 2`,
+			want:    true,
+		},
+		"valid value does not match another": {
+			matcher: matcher.Content(versionPath, evenInt(2)),
+			input:   `version: 4`,
+		},
+		"invalid value is an error": {
+			matcher: matcher.Content(versionPath, evenInt(2)),
+			input:   `version: 3`,
+			err:     errOdd,
+		},
+		"invalid value is an error for a want that equals it": {
+			matcher: matcher.Content(versionPath, evenInt(3)),
+			input:   `version: 3`,
+			err:     errOdd,
+		},
+		"value the decoder rejects does not match": {
+			matcher: matcher.Content(versionPath, evenInt(2)),
+			input:   `version: three`,
+		},
+		"null does not match": {
+			matcher: matcher.Content(versionPath, evenInt(2)),
+			input:   `version: null`,
+		},
+		"named float validates a plain exponent": {
+			matcher: matcher.Content(versionPath, share(1000)),
+			input:   `version: 1e3`,
+			want:    true,
+		},
+		"named float rejects a negative plain exponent": {
+			matcher: matcher.Content(versionPath, share(1000)),
+			input:   `version: -1e3`,
+			err:     errNegative,
+		},
+		"self-decoding value validates its own decode": {
+			matcher: matcher.Content(versionPath, checkedString("v:good")),
+			input:   `version: good`,
+			want:    true,
+		},
+		"self-decoding value rejects its own decode": {
+			matcher: matcher.Content(versionPath, checkedString("v:bad")),
+			input:   `version: bad`,
+			err:     errChecked,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			ok, err := tc.matcher.Match(t.Context(), doc)
+			assert.Equal(t, tc.want, ok)
+
+			if tc.err == nil {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, tc.err)
+			require.NotErrorIs(t, err, niceyaml.ErrDecode)
+			assert.True(t, niceyaml.IsInvalid(err))
+		})
+	}
+}
+
+// versionIs returns a [matcher.Content] for the version of a document,
+// for a want of any type [matcher.Scalar] admits.
+func versionIs[T matcher.Scalar](want T) matcher.Matcher {
+	return matcher.Content(versionPath, want)
+}
+
 // matchInDecode runs m on the Node that a decode of doc hands its
 // validator, and returns what m returns.
 func matchInDecode(t *testing.T, m matcher.Matcher, doc *niceyaml.Node) (bool, error) {
@@ -1836,101 +1288,14 @@ func (p *prefixedString) UnmarshalText(text []byte) error {
 	return nil
 }
 
-// textField, textSlice, and textChain reach a [prefixedString] through a
-// field or an element, so a decode into them reads text too.
-type (
-	textField struct {
-		K prefixedString
-	}
-	textSlice struct {
-		S []prefixedString
-	}
-	textChain struct {
-		Next *textChain
-		K    prefixedString
-	}
-)
+// lowerString decodes itself from the text the decoder hands it, in
+// lower case.
+type lowerString string
 
-// intText is a struct want whose fields read the entries i and s.
-type intText struct {
-	I int
-	S string
-}
+func (l *lowerString) UnmarshalText(text []byte) error {
+	*l = lowerString(strings.ToLower(string(text)))
 
-// durationField is a struct want whose field reads the entry t as a
-// [time.Duration].
-type durationField struct {
-	T time.Duration
-}
-
-// inlineDuration reads the entries of a [durationField] inline.
-type inlineDuration struct {
-	Inline durationField `yaml:",inline"`
-}
-
-// aliasInlineDuration holds a [durationField] in an inline field with an
-// alias option, which the decoder fills from an anchor and never from
-// the entry t.
-type aliasInlineDuration struct {
-	Inline durationField `yaml:",inline,alias"`
-	K      string
-}
-
-// selfInline inlines itself through a pointer, so the decoder reads the
-// same mapping into it until it reaches its depth limit and rejects it.
-type selfInline struct {
-	Next *selfInline `yaml:",inline"`
-	T    time.Duration
-}
-
-// inlineIntText reads the entries of an [intText] inline. Its own S
-// shadows the S of the inline struct, which the decoder leaves zero.
-type inlineIntText struct {
-	Inline intText `yaml:",inline"`
-	S      string
-}
-
-// nestedIntText is a struct want whose field reads the entry a as an
-// [intText].
-type nestedIntText struct {
-	A intText
-}
-
-// aliasInline holds an inline field with an alias option. The decoder
-// fills Base from the anchor that a `<<` key names with an alias, and
-// from no entry of the mapping, so Base stays zero without such a key.
-type aliasInline struct {
-	Base intText `yaml:",inline,alias"`
-	K    string
-}
-
-// aliasInlineOmit is an [aliasInline] whose inline field carries
-// omitempty too, which makes the decoder read no `<<` key into K either.
-type aliasInlineOmit struct {
-	Base intText `yaml:",omitempty,inline,alias"`
-	K    string
-}
-
-// aliasInlineParent reads the entries of an [aliasInline] inline, beside
-// a field of its own.
-type aliasInlineParent struct {
-	Inline aliasInline `yaml:",inline"`
-	S      string
-}
-
-// scalarKeys reads entries whose plain keys spell a number or a bool.
-// The decoder reads such a key as a string only under a !!str tag.
-type scalarKeys struct {
-	One     string `yaml:"1"`
-	True    string `yaml:"true"`
-	Sixteen string `yaml:"16"`
-}
-
-// anyField reads the key !!str 0x10 into an interface, which holds a map
-// when the value is a mapping. The document has no node at the path of
-// the field, since the path spells the key 16.
-type anyField struct {
-	F any `yaml:"16"`
+	return nil
 }
 
 // forwardedText decodes its node into a list of [prefixedString]
@@ -1954,23 +1319,14 @@ func (f *forwardedText) UnmarshalYAML(unmarshal func(any) error) error {
 	return nil
 }
 
-// plainField holds only fields that decode as plain values do.
-type plainField struct {
-	K string
-	N *int
-}
-
-// pointerField is a struct want whose field reads the entry p as a
-// pointer to a string.
-type pointerField struct {
-	P *string
-}
-
-// namedInt and namedFloat are numeric types a caller names, which compare
-// by value behind an interface as the predeclared types do.
+// The named types below have no methods, so each decodes as the basic
+// type of its kind does.
 type (
-	namedInt   int
-	namedFloat float64
+	namedBool    bool
+	namedInt     int
+	namedUint8   uint8
+	namedFloat   float64
+	namedFloat32 float32
 )
 
 // millis decodes itself from seconds, which it holds as milliseconds.
@@ -1987,12 +1343,20 @@ func (m *millis) UnmarshalYAML(data []byte) error {
 	return nil
 }
 
-// The error rejecting reports from its own decode.
-var errRejecting = errors.New("value rejected itself")
+// The errors the types below report.
+var (
+	// The error rejecting reports from its own decode.
+	errRejecting = errors.New("value rejected itself")
+
+	// The errors evenInt, share, and checkedString report from Validate.
+	errOdd      = errors.New("odd")
+	errNegative = errors.New("negative")
+	errChecked  = errors.New("bad")
+)
 
 // rejecting decodes itself and reports errRejecting, so the decoder
 // returns the value's own error rather than a rejection of its own.
-type rejecting struct{}
+type rejecting string
 
 func (*rejecting) UnmarshalYAML([]byte) error {
 	return errRejecting
@@ -2000,191 +1364,50 @@ func (*rejecting) UnmarshalYAML([]byte) error {
 
 // stopping decodes itself and reports the error of a deadline of its
 // own, which the context of the match has not reached.
-type stopping struct{}
+type stopping string
 
 func (*stopping) UnmarshalYAML([]byte) error {
 	return fmt.Errorf("lookup stopped: %w", context.DeadlineExceeded)
 }
 
-func TestContent_UnmarshalerError(t *testing.T) {
-	t.Parallel()
+// evenInt is a plain integer that validates itself, and accepts only an
+// even value.
+type evenInt int
 
-	doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+func (e evenInt) Validate() error {
+	if e%2 != 0 {
+		return errOdd
+	}
 
-	t.Run("value that rejects itself does not match", func(t *testing.T) {
-		t.Parallel()
-
-		// The decode of a value that rejects itself fails with
-		// niceyaml.ErrDecode, as a rejection of the decoder does, so the
-		// matcher answers no.
-		ok, err := matcher.Content(kindPath, rejecting{}).Match(t.Context(), doc)
-		require.NoError(t, err)
-		assert.False(t, ok)
-	})
-
-	t.Run("context error a value wraps comes back", func(t *testing.T) {
-		t.Parallel()
-
-		// The error of a context that ended is no answer about the value,
-		// so the matcher cannot decide.
-		ok, err := matcher.Content(kindPath, stopping{}).Match(t.Context(), doc)
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-		require.NotErrorIs(t, err, niceyaml.ErrDecode)
-		assert.False(t, ok)
-	})
+	return nil
 }
 
-func TestContent_UnparsableDuration(t *testing.T) {
-	t.Parallel()
+// share is a plain float that validates itself, and accepts no negative
+// value.
+type share float64
 
-	// A string that time.ParseDuration rejects does not read as a
-	// time.Duration, and the decode reports it with
-	// niceyaml.ErrDecode, so the matcher answers no rather than
-	// returning the error. A quoted float is such a string, in an element
-	// or a field too.
-	tcs := map[string]struct {
-		matcher matcher.Matcher
-		input   string
-	}{
-		"plain words": {
-			matcher: matcher.Content(timeoutPath, time.Minute),
-			input:   stringtest.Input(`timeout: 5 minutes`),
-		},
-		"quoted exponent": {
-			matcher: matcher.Content(timeoutPath, time.Minute),
-			input:   stringtest.Input(`timeout: "1e3"`),
-		},
-		"str tagged exponent": {
-			matcher: matcher.Content(timeoutPath, time.Minute),
-			input:   stringtest.Input(`timeout: !!str 1e3`),
-		},
-		"plain inf": {
-			matcher: matcher.Content(timeoutPath, time.Minute),
-			input:   stringtest.Input(`timeout: inf`),
-		},
-		"array element quoted exponent": {
-			matcher: matcher.Content(timeoutPath, [1]time.Duration{time.Minute}),
-			input:   stringtest.Input(`timeout: ["1e3"]`),
-		},
-		"struct field quoted exponent": {
-			matcher: matcher.Content(timeoutPath, durationField{time.Minute}),
-			input:   stringtest.Input(`timeout: {t: "1e3"}`),
-		},
+func (s share) Validate() error {
+	if s < 0 {
+		return errNegative
 	}
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			doc := yamltest.FirstDocument(t, tc.input)
-
-			ok, err := tc.matcher.Match(t.Context(), doc)
-			require.NoError(t, err)
-			assert.False(t, ok)
-		})
-	}
+	return nil
 }
 
-func TestContent_RefusedTargetType(t *testing.T) {
-	t.Parallel()
+// checkedString decodes itself from the text the decoder hands it with
+// a "v:" in front, and validates the value that gives.
+type checkedString string
 
-	// The decoder refuses a struct with two fields of one name and an
-	// inline embedded struct that is not exported, whatever the document
-	// holds. No document matches such a type, so the matcher returns the
-	// error of the decode rather than a no.
-	type duplicated struct {
-		A int `yaml:"a"`
-		B int `yaml:"a"`
+func (c *checkedString) UnmarshalText(text []byte) error {
+	*c = checkedString("v:" + string(text))
+
+	return nil
+}
+
+func (c checkedString) Validate() error {
+	if c == "v:bad" {
+		return errChecked
 	}
 
-	type inner struct {
-		A int `yaml:"a"`
-	}
-
-	xPath := paths.Current().Child("x")
-
-	tcs := map[string]struct {
-		matcher matcher.Matcher
-		input   string
-		// The text of the error, or empty for none.
-		err  string
-		want bool
-	}{
-		"duplicated field name": {
-			matcher: matcher.Content(xPath, duplicated{}),
-			input:   "x: {a: 1}",
-			err:     "duplicated struct field name a",
-		},
-		"duplicated field name in a field": {
-			matcher: matcher.Content(xPath, struct{ D duplicated }{}),
-			input:   "x: {d: {a: 1}}",
-			err:     "duplicated struct field name a",
-		},
-		"duplicated field name in an element": {
-			matcher: matcher.Content(xPath, [1]duplicated{}),
-			input:   "x: [{a: 1}]",
-			err:     "duplicated struct field name a",
-		},
-		"duplicated field name behind a pointer": {
-			matcher: matcher.Content(xPath, (*duplicated)(nil)),
-			input:   "x: {a: 1}",
-			err:     "duplicated struct field name a",
-		},
-		"unexported inline embedded struct": {
-			matcher: matcher.Content(xPath, struct {
-				*inner `yaml:",inline"`
-
-				M int `yaml:"m"`
-			}{}),
-			input: "x: {a: 1, m: 2}",
-			err:   "cannot set embedded type as unexported field",
-		},
-		// The decoder reads the definition before the value.
-		"value of another kind": {
-			matcher: matcher.Content(xPath, duplicated{}),
-			input:   "x: 1",
-			err:     "duplicated struct field name a",
-		},
-		// The decoder never reads the definition of a field the document
-		// leaves out, so the decode passes.
-		"field the document leaves out": {
-			matcher: matcher.Content(xPath, struct{ D *duplicated }{}),
-			input:   "x: {}",
-			want:    true,
-		},
-		// The error of a value that decodes itself is no definition error,
-		// though the decoder reports both as plain errors.
-		"value that rejects itself beside a field": {
-			matcher: matcher.Content(xPath, struct {
-				R rejecting `yaml:"r"`
-				A int       `yaml:"a"`
-			}{}),
-			input: "x: {r: 1, a: 1}",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			doc := yamltest.FirstDocument(t, tc.input)
-
-			ok, err := tc.matcher.Match(t.Context(), doc)
-			assert.Equal(t, tc.want, ok)
-
-			if tc.err == "" {
-				require.NoError(t, err)
-
-				return
-			}
-
-			require.ErrorContains(t, err, tc.err)
-			require.ErrorIs(t, err, niceyaml.ErrDecode)
-
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound)
-			assert.Same(t, doc.Source(), bound.Source())
-		})
-	}
+	return nil
 }

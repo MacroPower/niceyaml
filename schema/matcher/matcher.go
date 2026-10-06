@@ -25,13 +25,14 @@ type Matcher interface {
 }
 
 // Func adapts a function to the [Matcher] interface. The function below
-// matches a kind that starts with "Custom". A kind the decoder rejects,
-// such as a mapping or a sequence, reads as a plain no, so the function
-// returns false with no error for it, as [Content] does:
+// matches a null at enabled, which [Content] has no want for. A document
+// without the path reads as a plain no, and so does a value the decoder
+// rejects, so the function returns false with no error for each, as
+// [Content] does:
 //
-//	kindPath := paths.Doc().Child("kind")
+//	enabledPath := paths.Doc().Child("enabled")
 //	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Node) (bool, error) {
-//	    node, err := doc.At(kindPath)
+//	    node, err := doc.At(enabledPath)
 //	    if errors.Is(err, paths.ErrNotFound) {
 //	        return false, nil
 //	    }
@@ -40,7 +41,7 @@ type Matcher interface {
 //	        return false, err
 //	    }
 //
-//	    kind, err := node.Decode[string](ctx)
+//	    value, err := node.Decode[any](ctx)
 //	    if errors.Is(err, niceyaml.ErrDecode) {
 //	        return false, nil
 //	    }
@@ -49,7 +50,7 @@ type Matcher interface {
 //	        return false, err
 //	    }
 //
-//	    return strings.HasPrefix(kind, "Custom"), nil
+//	    return value == nil, nil
 //	})
 type Func func(ctx context.Context, doc *niceyaml.Node) (bool, error)
 
