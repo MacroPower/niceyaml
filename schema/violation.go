@@ -1,7 +1,6 @@
 package schema
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -11,9 +10,8 @@ import (
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
-	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/fault"
-	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
@@ -152,7 +150,7 @@ func newViolation(e *jsonschema.ValidationError) *Violation {
 // summary from [niceyaml.NewSummary] with no path of its own, and each
 // violation it heads carries the path to one failing location. The index
 // idx finds the members of the mappings in the document of n.
-func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node, idx *memberIndex) error {
+func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node, idx *datapath.Index) error {
 	c := converter{root: rootOf(n), idx: idx}
 
 	found := c.violations(ve)
@@ -169,7 +167,7 @@ func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node, idx *m
 // document.
 type converter struct {
 	root ast.Node
-	idx  *memberIndex
+	idx  *datapath.Index
 }
 
 // violations returns the violations in the error tree of e, each a
@@ -357,7 +355,7 @@ func (c converter) leaf(e *jsonschema.ValidationError) error {
 // Where no spelling selects the member, as [sourcePath] describes, the
 // path keeps the decoded name and selects nothing or another entry. A
 // second option then gives the position of the node the walk reached, as
-// [sourceTarget.token] finds it. The error binds at that position, and
+// [datapath.Target.Token] finds it. The error binds at that position, and
 // the path only names the member in the message.
 func (c converter) at(e *jsonschema.ValidationError) []niceyaml.ErrorOption {
 	target := sourcePath(c.root, c.idx, e.InstanceSegments())
@@ -366,14 +364,14 @@ func (c converter) at(e *jsonschema.ValidationError) []niceyaml.ErrorOption {
 		return c.atMissing(target, name)
 	}
 
-	path := target.path
+	path := target.Path
 	if e.TargetsKey() {
 		path = path.Key()
 	}
 
 	opts := []niceyaml.ErrorOption{niceyaml.AtPath(path)}
 
-	if tk := target.token(e.TargetsKey()); tk != nil && tk.Position != nil {
+	if tk := target.Token(e.TargetsKey()); tk != nil && tk.Position != nil {
 		opts = append(opts, niceyaml.AtPosition(position.NewFromToken(tk)))
 	}
 
@@ -389,37 +387,23 @@ func (c converter) at(e *jsonschema.ValidationError) []niceyaml.ErrorOption {
 //
 // A second option gives the position of the mapping where the path would
 // bind elsewhere, and the error binds at that position. That holds where
-// the path to the mapping selects another entry, as [sourceTarget.token]
-// describes. It also holds where the mapping has a key a selector with
-// name selects, since the member that key sets has another name, as the
-// key 0x10 sets the member 16 under a schema that requires 0x10.
-func (c converter) atMissing(target sourceTarget, name string) []niceyaml.ErrorOption {
-	opts := []niceyaml.ErrorOption{niceyaml.AtPath(target.path.Child(name))}
+// the path to the mapping selects another entry, as
+// [datapath.Target.Token] describes. It also holds where the mapping has
+// a key a selector with name selects, as [datapath.Index.SelectsEntry]
+// reports, since the member that key sets has another name, as the key
+// 0x10 sets the member 16 under a schema that requires 0x10.
+func (c converter) atMissing(target datapath.Target, name string) []niceyaml.ErrorOption {
+	opts := []niceyaml.ErrorOption{niceyaml.AtPath(target.Path.Child(name))}
 
-	if !target.unspelled && !c.selectsEntry(target.node, name) {
+	if !target.Unspelled && !c.idx.SelectsEntry(target.Node, name) {
 		return opts
 	}
 
-	if tk := target.start(true); tk != nil && tk.Position != nil {
+	if tk := target.Start(true); tk != nil && tk.Position != nil {
 		opts = append(opts, niceyaml.AtPosition(position.NewFromToken(tk)))
 	}
 
 	return opts
-}
-
-// selectsEntry reports whether a path selector with name selects an entry
-// of the mapping node holds, as the finder of the index reports. It also
-// reports true where the finder cannot tell, as it cannot past the limit
-// behind [paths.ErrExcessiveMerging], since the selector may then select
-// an entry. It reports false for no node.
-func (c converter) selectsEntry(node ast.Node, name string) bool {
-	if astnode.IsNil(node) {
-		return false
-	}
-
-	_, err := c.idx.finder.Entry(deref(c.idx.resolver, node), name)
-
-	return !errors.Is(err, paths.ErrNotFound)
 }
 
 // The text the validator puts in front of the name of a missing member in

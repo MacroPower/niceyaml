@@ -13,13 +13,13 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/token"
 	"go.jacobcolvin.com/x/jsonschema"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -482,7 +482,7 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 
 	// The timestamp lookups and every violation share one index, so each
 	// key decodes once however many of them lie under its mapping.
-	idx := newMemberIndex(resolver)
+	idx := datapath.NewIndex(resolver)
 
 	err := s.compiled.Validate(ctx, normalizeJSON(data, rootOf(n), idx))
 	if err == nil {
@@ -538,430 +538,35 @@ func rootOf(n *niceyaml.Node) ast.Node {
 	return n.AST()
 }
 
-// sourceTarget is where a violation lies in a document: the path that
-// names the location, and the node [sourcePath] reached there, which
-// locates the violation where the path cannot.
-type sourceTarget struct {
-	// The node at the location, or nil when the walk could not follow the
-	// path to it.
-	node ast.Node
-	// The entry that holds node, when a member name reached it.
-	entry *ast.MappingValueNode
-	path  paths.Path
-	// Whether the walk wrote a decoded name it could not show to select
-	// the entry of its member.
-	unspelled bool
-}
-
-// token returns the token to bind a violation at when the walk reached
-// its location and wrote a path it could not show to select it. With key
-// set, the violation constrains the key of the member, as a path that
-// ends in [paths.Path.Key] does. The token is the one a path to the
-// location would resolve to: the token that starts the node, or the key
-// of its entry.
-//
-// It returns nil when the path selects the location, and when the walk
-// did not reach the location, as it cannot through a mapping whose keys
-// it cannot all name. The path is then all that says where the violation
-// lies.
-func (t sourceTarget) token(key bool) *token.Token {
-	if !t.unspelled {
-		return nil
-	}
-
-	return t.start(key)
-}
-
-// start returns the token a path to the location of t would resolve to,
-// whether or not the path of t selects the location. With key set, that
-// is the key of the entry that holds the node, and the token that starts
-// the node otherwise or where no entry holds it. It returns nil when the
-// walk did not reach the location.
-func (t sourceTarget) start(key bool) *token.Token {
-	if astnode.IsNil(t.node) {
-		return nil
-	}
-
-	if key && t.entry != nil {
-		return keyToken(t.entry)
-	}
-
-	return astnode.FirstToken(t.node)
-}
-
-// keyToken returns the token that starts the key of entry, without the `?`
-// of an explicit key, as a path that ends in [paths.Path.Key] resolves
-// it. An entry with no key gives the token that starts its value.
-func keyToken(entry *ast.MappingValueNode) *token.Token {
-	if astnode.Content(entry.Key) == nil {
-		return astnode.FirstToken(entry.Value)
-	}
-
-	key := ast.Node(entry.Key)
-	if explicit, ok := key.(*ast.MappingKeyNode); ok {
-		key = explicit.Value
-	}
-
-	return astnode.FirstToken(key)
-}
-
 // sourcePath converts instance-location segments to a [paths.Path] that
-// resolves in root, and returns it in a [sourceTarget] with the node the
-// walk reached. Each [jsonschema.Segment] already distinguishes an array
-// index from a property name, so sourcePath does no numeric guessing.
+// resolves in root, and returns it in a [datapath.Target] with the node
+// the walk reached. Each [jsonschema.Segment] already distinguishes an
+// array index from a property name, so sourcePath does no numeric
+// guessing.
 //
 // A property name is the name the decoder produced, which the source may
 // spell another way, as it spells the member name 16 as 0x10. The walk
-// down root matches each mapping key by its decoded name and writes the
-// source spelling of that key into the path instead. The spelling is the
-// text [paths.Resolver.KeyName] gives the key, which a path selector
-// matches.
+// writes the source spelling of each key into the path wherever a path
+// selector with that spelling selects the entry of the member, as
+// [datapath.Index.Member] describes. Where it cannot, the segment and
+// every segment below keep their decoded names, and
+// [datapath.Target.Token] locates the violation at the node the walk
+// reached. Every segment keeps its decoded name when root is nil.
 //
-// The walk follows each alias through the resolver of idx, so it reaches
-// the node a path through the same alias resolves to. A key under an
-// aliased mapping keeps its source spelling too, and an alias used as a
-// key takes the spelling of its anchor's content. A segment the walk
-// cannot follow keeps its decoded name, such as a member behind an alias
-// that does not resolve. A member a merge key brings in takes the
-// spelling its source gives the key. Every segment keeps its decoded name
-// when root is nil, as does a key the walk finds but cannot spell.
-//
-// The walk writes a spelling only where a path selector with that
-// spelling selects the entry that sets the member, as the finder of idx
-// reports. A later entry with the same spelling can win the selector,
-// such as a later key of the mapping, a later merge key, or a later
-// source of one merge key. The segment then keeps its decoded name, which
-// may select no entry, or another entry. Where the name a segment writes
-// does not select the entry of its member, every segment below keeps its
-// decoded name too, since a key spelled below would resolve under the
-// entry that name selects. The target then reports the path as unspelled.
-// The walk still follows each member it finds, so the target holds the
-// node of the location, and [sourceTarget.token] locates the violation
-// there. A member the walk does not find leaves the target with no node.
-//
-// The finder reads the sources of a merge key that brings a key in or
-// stands after it, and the walks that share idx share the limit of one
-// [paths.EntryFinder] on those reads. Past that limit the finder reports
-// no entry for such a key, so its segment and every segment below keep
-// their decoded names.
-func sourcePath(root ast.Node, idx *memberIndex, segments []jsonschema.Segment) sourceTarget {
-	t := sourceTarget{path: paths.Current(), node: root}
+// The walks that share idx share its limit on the merge sources they
+// read, which is the limit of one [paths.EntryFinder].
+func sourcePath(root ast.Node, idx *datapath.Index, segments []jsonschema.Segment) datapath.Target {
+	t := datapath.Target{Path: paths.Current(), Node: root}
 
 	for _, seg := range segments {
-		content := deref(idx.resolver, t.node)
-
 		if seg.IsIndex {
-			t.path = t.path.Index(seg.Index)
-			t.node, t.entry = elementNode(content, seg.Index), nil
-
-			continue
+			t = idx.Element(t, seg.Index)
+		} else {
+			t = idx.Member(t, seg.Key)
 		}
-
-		name := seg.Key
-		member := idx.lookup(content, seg.Key)
-
-		if !t.unspelled {
-			var (
-				spelled string
-				ok      bool
-			)
-
-			if member.entry != nil {
-				spelled, ok = idx.resolver.KeyName(member.entry.Key)
-			}
-
-			switch {
-			case ok && idx.selects(content, spelled, member):
-				name = spelled
-
-			case idx.selects(content, name, member):
-				// The decoded name selects the entry as it is.
-
-			default:
-				t.unspelled = true
-			}
-		}
-
-		t.path = t.path.Child(name)
-		t.node, t.entry = member.value, member.entry
 	}
 
 	return t
-}
-
-// deref returns the content under node. It looks through what
-// [astnode.Content] looks through and follows each alias through r. It
-// returns nil for an alias that does not resolve, and for an alias it
-// reaches again, which leads back to itself through a tag.
-func deref(r *paths.Resolver, node ast.Node) ast.Node {
-	var followed []*ast.AliasNode
-
-	for {
-		node = astnode.Content(node)
-
-		alias, ok := node.(*ast.AliasNode)
-		if !ok {
-			return node
-		}
-
-		if slices.Contains(followed, alias) {
-			return nil
-		}
-
-		followed = append(followed, alias)
-
-		target, err := r.Deref(alias)
-		if err != nil {
-			return nil
-		}
-
-		node = target
-	}
-}
-
-// elementNode returns the element at index of the sequence node holds, or
-// nil for any other node, including a typed nil, and for an index the
-// sequence does not hold.
-func elementNode(node ast.Node, index int) ast.Node {
-	seq, ok := astnode.Content(node).(*ast.SequenceNode)
-	if !ok || index < 0 || index >= len(seq.Values) {
-		return nil
-	}
-
-	return seq.Values[index]
-}
-
-// memberIndex finds the members of the mappings that [sourcePath] steps
-// through to spell a violation's path, and that [normalizeJSON] steps
-// through to find the scalar a timestamp came from. It holds the member
-// table of each mapping it has read, so each key decodes once however
-// many lookups pass through its mapping or merge it in. The resolver
-// binds the aliases of the document. The finder tells which entry a
-// spelling selects, and weighs the merge reads of every walk together
-// against the limit behind [paths.ErrExcessiveMerging].
-//
-// Create instances with [newMemberIndex].
-type memberIndex struct {
-	resolver *paths.Resolver
-	finder   *paths.EntryFinder
-	members  map[ast.Node]memberTable
-}
-
-// memberTable holds the members of one mapping, by the name a decode
-// gives each key. It is complete when it names every member the decode
-// keeps, so a member of an earlier mapping entry holds the value the
-// decode keeps whenever the table leaves its name out.
-type memberTable struct {
-	members  map[string]memberNode
-	complete bool
-}
-
-// newMemberIndex creates a new [*memberIndex] that follows aliases
-// through r.
-func newMemberIndex(r *paths.Resolver) *memberIndex {
-	return &memberIndex{resolver: r, finder: r.EntryFinder(), members: map[ast.Node]memberTable{}}
-}
-
-// lookup returns the member [memberIndex.memberNodes] finds for name in
-// the mapping node holds, or a member with nil nodes when it finds none.
-func (idx *memberIndex) lookup(node ast.Node, name string) memberNode {
-	return idx.memberNodes(node).members[name]
-}
-
-// selects reports whether a path selector with name selects the entry
-// that sets member in the mapping node holds, as the finder of idx
-// reports. It reports false for a member with no entry, and where the
-// finder returns an error, such as [paths.ErrExcessiveMerging] once its
-// lookups pass that limit.
-func (idx *memberIndex) selects(node ast.Node, name string, member memberNode) bool {
-	entry, err := idx.finder.Entry(node, name)
-
-	return err == nil && member.entry != nil && entry == member.entry
-}
-
-// memberNode holds the entry that sets a mapping member, with the value
-// node of that entry.
-type memberNode struct {
-	entry *ast.MappingValueNode
-	value ast.Node
-}
-
-// memberNodes returns the members of the mapping node holds, by the name
-// a decode gives each key, or an empty table for any other node. A decode
-// sets the members in order, so where several members decode to one
-// name, the table holds the last, which is the member whose value the
-// decode keeps.
-//
-// A merge key sets each member its sources define, and the table holds
-// the member a source gives that name. A merge key whose sources do not
-// resolve, or that lead back to the mapping, may set a member of any
-// name, so the table leaves out every member before it.
-//
-// An alias key decodes to the name the content of its anchor gives. A
-// key with no name, such as an alias key [aliasKeyName] cannot name or a
-// typed-nil key a tree built by hand may hold, may set a member of any
-// name. The table leaves out every member before such a key rather than
-// hold one the key may have replaced.
-func (idx *memberIndex) memberNodes(node ast.Node) memberTable {
-	node = astnode.Content(node)
-
-	if table, ok := idx.members[node]; ok {
-		return table
-	}
-
-	// A merge source that leads back to node reads this incomplete table.
-	idx.members[node] = memberTable{}
-
-	table := memberTable{members: map[string]memberNode{}, complete: true}
-	members := mappingMembers(node)
-
-	for _, member := range slices.Backward(members) {
-		// A tree built by hand may hold a nil member, which sets nothing.
-		if member == nil {
-			continue
-		}
-
-		if isMergeKey(member.Key) {
-			if !idx.addMerged(table.members, member) {
-				table.complete = false
-
-				break
-			}
-
-			continue
-		}
-
-		var (
-			name string
-			ok   bool
-		)
-
-		if _, isAlias := astnode.Content(member.Key).(*ast.AliasNode); isAlias {
-			name, ok = aliasKeyName(idx.resolver, member.Key)
-		} else {
-			name, ok = decodedKey(member.Key)
-		}
-
-		if !ok {
-			table.complete = false
-
-			break
-		}
-
-		if _, seen := table.members[name]; !seen {
-			table.members[name] = memberNode{entry: member, value: member.Value}
-		}
-	}
-
-	idx.members[node] = table
-
-	return table
-}
-
-// addMerged adds to found each member the sources of the merge key of
-// member define, for a name found does not hold yet. A later source wins
-// over an earlier one, as it does in a decode. It reports false when the
-// sources do not resolve, or when the table of one of them is not
-// complete.
-func (idx *memberIndex) addMerged(found map[string]memberNode, member *ast.MappingValueNode) bool {
-	sources, err := idx.resolver.MergeSources(&ast.MappingNode{
-		Values: []*ast.MappingValueNode{member},
-	})
-	if err != nil {
-		return false
-	}
-
-	for _, src := range slices.Backward(sources) {
-		table := idx.memberNodes(src)
-		if !table.complete {
-			return false
-		}
-
-		for name, m := range table.members {
-			if _, seen := found[name]; !seen {
-				found[name] = m
-			}
-		}
-	}
-
-	return true
-}
-
-// aliasKeyName returns the member name a decode gives an alias key. That is
-// the name [decodedKey] gives the content of the anchor the alias refers
-// to, which r resolves. It reports false for an alias that does not resolve
-// and for content with no name. It also reports false for an alias under a
-// tag or an anchor of the key's own, which may change the name.
-func aliasKeyName(r *paths.Resolver, key ast.MapKeyNode) (string, bool) {
-	var node ast.Node = key
-
-	if explicit, ok := node.(*ast.MappingKeyNode); ok && explicit != nil {
-		node = explicit.Value
-	}
-
-	alias, ok := node.(*ast.AliasNode)
-	if !ok || alias == nil {
-		return "", false
-	}
-
-	target, err := r.Deref(alias)
-	if err != nil {
-		return "", false
-	}
-
-	content, ok := target.(ast.MapKeyNode)
-	if !ok {
-		return "", false
-	}
-
-	return decodedKey(content)
-}
-
-// mappingMembers returns the members of the mapping node holds, or nil
-// for any other node, including a typed nil.
-func mappingMembers(node ast.Node) []*ast.MappingValueNode {
-	switch n := astnode.Content(node).(type) {
-	case *ast.MappingNode:
-		return n.Values
-	case *ast.MappingValueNode:
-		return []*ast.MappingValueNode{n}
-	}
-
-	return nil
-}
-
-// decodedKey returns the member name a decode gives the key node, with
-// the key's tag applied, and reports whether the key has a name. A
-// string key gives its unquoted text, and any other scalar gives its Go
-// value as the decoder spells it. The hexadecimal key 0x10 reads as 16,
-// !!bool yes reads as true, and a !!timestamp key reads as its time
-// value. A null key reads as null in every spelling. A merge key has no
-// name, because the decoder folds its value into the mapping. A key that
-// is no scalar, such as a sequence, has no name either, and neither does
-// a key the decoder cannot read on its own, such as an alias. A nil key,
-// including a typed nil a tree built by hand may hold, has no name.
-func decodedKey(key ast.MapKeyNode) (string, bool) {
-	if _, ok := astnode.Content(key).(ast.ScalarNode); !ok || isMergeKey(key) {
-		return "", false
-	}
-
-	var v any
-
-	err := yaml.NodeToValue(key, &v)
-	if err != nil {
-		return "", false
-	}
-
-	return mapItemKey(v), true
-}
-
-// isMergeKey reports whether key is a `<<` merge key, looking through the
-// `?` indicator, anchors, and tags. A nil key, including a typed nil, is
-// not a merge key.
-func isMergeKey(key ast.Node) bool {
-	_, ok := astnode.Content(key).(*ast.MergeKeyNode)
-
-	return ok
 }
 
 // normalizeJSON converts the YAML-native values a decode produces that the
@@ -986,10 +591,10 @@ func isMergeKey(key ast.Node) bool {
 // into the caller's data. Handing the validator the caller's own
 // containers is safe because [jsonschema.Validator.Validate] only reads
 // its instance and keeps no reference to it.
-func normalizeJSON(data any, root ast.Node, idx *memberIndex) any {
+func normalizeJSON(data any, root ast.Node, idx *datapath.Index) any {
 	w := normalizer{
 		idx:   idx,
-		nodes: []ast.Node{deref(idx.resolver, root)},
+		nodes: []ast.Node{idx.Deref(root)},
 	}
 
 	out, _ := w.normalize(data)
@@ -1005,7 +610,7 @@ func normalizeJSON(data any, root ast.Node, idx *memberIndex) any {
 // index reads each mapping at most once.
 type normalizer struct {
 	// Finds the members of each mapping the lookups step through.
-	idx  *memberIndex
+	idx  *datapath.Index
 	path []jsonschema.Segment
 	// The node each prefix of path leads to in root, as far down path as
 	// the lookups have gone. The first is root, and nodes[i] is the node
@@ -1069,7 +674,7 @@ func (w *normalizer) normalize(data any) (any, bool) {
 		out := make(map[string]any, len(v))
 
 		for _, item := range v {
-			key := mapItemKey(item.Key)
+			key := datapath.MemberName(item.Key)
 			norm, _ := w.child(jsonschema.Segment{Key: key}, item.Value)
 			out[key] = norm
 		}
@@ -1107,12 +712,12 @@ func (w *normalizer) node() ast.Node {
 		var next ast.Node
 
 		if seg.IsIndex {
-			next = elementNode(parent, seg.Index)
+			next = datapath.ElementNode(parent, seg.Index)
 		} else {
-			next = w.idx.lookup(parent, seg.Key).value
+			next = w.idx.MemberNode(parent, seg.Key)
 		}
 
-		w.nodes = append(w.nodes, deref(w.idx.resolver, next))
+		w.nodes = append(w.nodes, w.idx.Deref(next))
 	}
 
 	return w.nodes[len(w.path)]
@@ -1157,22 +762,6 @@ func stringText(node ast.Node) (string, bool) {
 	}
 
 	return "", false
-}
-
-// mapItemKey returns the member name a decode into a map gives a key it
-// reads as the Go value key, such as the key of a [yaml.MapItem] or the
-// value [decodedKey] reads from a key node. A string key gives its text,
-// and any other key gives its printed Go value. A nil key gives null
-// rather than the <nil> it would print as.
-func mapItemKey(key any) string {
-	switch k := key.(type) {
-	case nil:
-		return "null"
-	case string:
-		return k
-	default:
-		return fmt.Sprint(k)
-	}
 }
 
 // checkExpansion returns an error wrapping [ErrValidate] when a map or
@@ -1290,7 +879,7 @@ func (w *expansionWalker) walk(data any) (int, error) {
 
 	case yaml.MapSlice:
 		for _, item := range v {
-			// The key is a node of its own, and mapItemKey prints a key
+			// The key is a node of its own, and datapath.MemberName prints a key
 			// that is no string in full, so the walk reads the key as it
 			// reads a value.
 			kn, err := w.walk(item.Key)
