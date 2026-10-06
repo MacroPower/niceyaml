@@ -92,17 +92,19 @@ func (v *View) Lines() Lines {
 
 // Held returns the lines the [View] holds as new [Lines], in the order
 // [View.All] yields them. The result shares the lines by pointer with the
-// content, as [Collect] does. It is the input for a diff of the lines a
-// slice holds, such as one document of a file that holds several, where
-// [View.Lines] would diff every line of the file:
+// content, as [Collect] does. It has the methods a View lacks, such as
+// [Lines.Content], [Lines.Tokens], [Lines.Runes], and [Lines.TokenAt], so
+// it reaches the text of the lines a slice holds, such as one document of
+// a file that holds several:
 //
-//	result := diff.Diff(before.View().Held(), after.View().Held())
+//	text := doc.View().Held().Content()
 //
-// Each line keeps the number it has in the file, and the hunk headers of
-// such a diff name lines by those numbers too. Line i of the result
-// is the i-th held line, not line i of the content, so a range from a
-// search of the result does not apply to the View. Search the content
-// with [View.Lines] for that. A nil View holds no lines.
+// Each line keeps the number it has in the file, but the indices of the
+// result start at zero. Line i of the result is the i-th held line, not
+// line i of the content, so an index or a range computed on the result
+// does not apply to the View. A diff or a search of the held lines takes
+// the View itself, as a [Sequence], and works in the coordinates of the
+// content. A nil View holds no lines.
 func (v *View) Held() Lines {
 	if v == nil {
 		return Lines{}

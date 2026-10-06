@@ -2215,7 +2215,6 @@ func TestSource_Documents_SyntaxErrorTokens(t *testing.T) {
 			var all token.Tokens
 
 			for i, doc := range docs {
-				assert.Equal(t, tc.want[i], doc.Lines().Content())
 				assert.Equal(t, tc.want[i], doc.View().Held().Content())
 
 				var preamble []string

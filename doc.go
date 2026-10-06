@@ -450,11 +450,12 @@
 //	d := diff.New(diff.WithAlgorithm(myAlgo))
 //	result := d.Diff(before.Lines(), after.Lines())
 //
-// [Source.Lines] is every line of the file. [Node.Lines] is the lines one
-// document or node covers, so a diff of one document of a file that holds
-// several compares that document alone:
+// [Source.Lines] is every line of the file. [Node.View] holds the lines one
+// document or node covers, and a diff reads a view as it reads lines, so a
+// diff of one document of a file that holds several compares that document
+// alone:
 //
-//	result := diff.Diff(before[1].Lines(), after[1].Lines())
+//	result := diff.Diff(before[1].View(), after[1].View())
 //
 // Its gutter and hunk headers show the line numbers of the file.
 //

@@ -2002,7 +2002,7 @@ func TestDocument_View(t *testing.T) {
 	})
 }
 
-func TestDocument_Lines(t *testing.T) {
+func TestDocument_View_Lines(t *testing.T) {
 	t.Parallel()
 
 	input := stringtest.Input(`
@@ -2015,7 +2015,7 @@ func TestDocument_Lines(t *testing.T) {
 		b: 2
 	`)
 
-	t.Run("covers the document with the file's line numbers", func(t *testing.T) {
+	t.Run("holds the lines of the document at their indices in the file", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString(input)
@@ -2024,19 +2024,29 @@ func TestDocument_Lines(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, docs, 2)
 
-		lines := docs[1].Lines()
+		view := docs[1].View()
 		span := docs[1].Span()
 
-		require.Equal(t, span.Len(), lines.Len())
+		require.Equal(t, span.Len(), view.Count())
 
-		for i := range lines.Len() {
-			assert.Same(t, source.Lines().Line(span.Start+i), lines.Line(i))
+		want := span.Start
+
+		for i, l := range view.All() {
+			assert.Equal(t, want, i)
+			assert.Same(t, source.Lines().Line(i), l)
+
+			want++
 		}
 
-		assert.Equal(t, 2, lines.Line(0).Number())
+		// The held lines count from zero and keep the numbers of the file.
+		held := view.Held()
+
+		require.Equal(t, span.Len(), held.Len())
+		assert.Same(t, source.Lines().Line(span.Start), held.Line(0))
+		assert.Equal(t, 2, held.Line(0).Number())
 	})
 
-	t.Run("covers only the lines of a scoped Node", func(t *testing.T) {
+	t.Run("holds only the lines of a scoped Node", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString(input)
@@ -2045,7 +2055,7 @@ func TestDocument_Lines(t *testing.T) {
 		require.NoError(t, err)
 
 		hours := yamltest.At(t, docs[1], paths.Current().Child("spec", "hours"))
-		lines := hours.Lines()
+		lines := hours.View().Held()
 
 		require.Equal(t, 2, lines.Len())
 		assert.Equal(t, `    open: "09:00"`, lines.Line(0).Content())
@@ -2078,7 +2088,7 @@ func TestDocument_Lines(t *testing.T) {
 			c: 9
 		`))
 
-		result := diff.Diff(before[1].Lines(), after[1].Lines())
+		result := diff.Diff(before[1].View(), after[1].View())
 
 		assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, result.Stats())
 
@@ -3543,9 +3553,8 @@ func TestDocument_Err(t *testing.T) {
 
 		assert.Equal(t, 1, doc.DocumentIndex())
 		assert.Equal(t, position.NewSpan(3, 5), doc.Span())
-		assert.Equal(t, "---\nd: [", doc.Lines().Content())
-		assert.Equal(t, 4, doc.Lines().Line(0).Number())
 		assert.Equal(t, "---\nd: [", doc.View().Held().Content())
+		assert.Equal(t, 4, doc.View().Held().Line(0).Number())
 
 		var values []string
 
@@ -3567,7 +3576,7 @@ func TestDocument_Err(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, after, 3)
 
-		result := diff.Diff(before[1].Lines(), after[1].Lines())
+		result := diff.Diff(before[1].View(), after[1].View())
 
 		assert.Equal(t, diff.Stats{Added: 1, Removed: 1}, result.Stats())
 

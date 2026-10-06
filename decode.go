@@ -909,10 +909,9 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // [Node.Nodes], and [Node.Ranges]. [Node.AST] and
 // [Node.DocumentAST] return nil, and [Node.PathAt] finds no node. The
 // methods that read the tokens and the lines work as they do for any
-// document: [Node.Tokens], [Node.Preamble], [Node.Span], [Node.View], and
-// [Node.Lines]. A caller thus renders or diffs a document that does not
-// parse yet, and the other documents of the file decode and validate as
-// if it did.
+// document: [Node.Tokens], [Node.Preamble], [Node.Span], and [Node.View].
+// A caller thus renders or diffs a document that does not parse yet, and
+// the other documents of the file decode and validate as if it did.
 //
 // Receive instances from [Source.Documents], [Source.Document],
 // [Node.At], [Node.Nodes], [Node.Document], [SourceError.Node], or
@@ -1544,6 +1543,18 @@ func (n *Node) Span() position.Span {
 //
 //	lipgloss.Println(p.Print(doc.View()))
 //
+// The view keeps the index each line has in the source, so a diff or a
+// search of the node takes the view and reports lines of the file. The
+// views of one document in two revisions of a file that holds several
+// diff that document alone:
+//
+//	result := diff.Diff(before[1].View(), after[1].View())
+//
+// [line.View.Held] returns the lines of the view on their own, such as
+// for the text of the node:
+//
+//	text := doc.View().Held().Content()
+//
 // Each call returns a view of its own with no decoration, as [Source.View]
 // does, so overlays and annotations added to one reach neither the Source
 // nor another view. The view shares its lines with every view over the
@@ -1554,21 +1565,6 @@ func (n *Node) Span() position.Span {
 // the anchor, marks nothing on the view.
 func (n *Node) View() *line.View {
 	return line.NewView(n.source.lines, n.span)
-}
-
-// Lines returns the lines of [Source.Lines] that the node covers,
-// [Node.Span], as new [line.Lines] that share the lines of the source,
-// what [line.View.Held] returns for [Node.View]. It is the input for a
-// diff of one document of a file that holds several, where [Source.Lines]
-// would diff the whole file:
-//
-//	result := diff.Diff(before[1].Lines(), after[1].Lines())
-//
-// Each line keeps the number it has in the file, so the gutter and hunk
-// headers of the diff name lines of the file. A Node that covers no lines
-// returns empty Lines.
-func (n *Node) Lines() line.Lines {
-	return n.View().Held()
 }
 
 // Ranges returns the ranges of the token that starts the node at path, the
