@@ -963,7 +963,7 @@ func isDocumentGroup(group token.Tokens) bool {
 }
 
 // syntaxError is an error of the parse, which matches [ErrSyntax] and
-// [ErrInvalid]. It reads as the error it holds and unwraps to it.
+// [errInvalid]. It reads as the error it holds and unwraps to it.
 type syntaxError struct {
 	err error
 }
@@ -976,16 +976,16 @@ func (e syntaxError) Unwrap() error {
 	return e.err
 }
 
-// Is reports whether target is [ErrSyntax] or [ErrInvalid].
+// Is reports whether target is [ErrSyntax] or [errInvalid].
 func (e syntaxError) Is(target error) bool {
-	return target == ErrSyntax || target == ErrInvalid
+	return target == ErrSyntax || target == errInvalid
 }
 
 // parseRun parses run, one run of [splitDocumentRuns]. It turns a panic
 // in the parser into a [*SourceError] bound to the Source that matches
 // [ErrSyntax], located at the first token of run that carries a
 // position. The Error around the panic declares nothing, so the binding
-// matches [ErrInvalid] only as every error that matches ErrSyntax does.
+// matches [errInvalid] only as every [syntaxError] does.
 func (s *Source) parseRun(run token.Tokens) (*ast.File, error) {
 	var (
 		f   *ast.File

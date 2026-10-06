@@ -12,6 +12,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/fault"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -121,13 +122,15 @@ func (v *Violation) Error() string {
 	return v.Message
 }
 
-// Is reports whether target is [niceyaml.ErrInvalid], since a value that
-// breaks a constraint is the fault of the document. The [*niceyaml.Error]
-// a schema builds around each Violation matches already, so this answers
-// for a Violation that reaches a caller on its own, such as one a
-// [niceyaml.Validator] returns as it is. A nil Violation matches nothing.
+// Is reports whether target is the mark [niceyaml.IsInvalid] reads, since
+// a value that breaks a constraint is the fault of the document. The
+// module keeps the mark internal, so the method matches no target a
+// caller can name. The [*niceyaml.Error] a schema builds around each
+// Violation declares the fault already, so this answers for a Violation
+// that reaches a caller on its own, such as one a [niceyaml.Validator]
+// returns as it is. A nil Violation matches nothing.
 func (v *Violation) Is(target error) bool {
-	return v != nil && target == niceyaml.ErrInvalid
+	return v != nil && target == fault.ErrInvalid
 }
 
 // newViolation returns the [*Violation] that the failure e reports.

@@ -1311,7 +1311,7 @@ func hasEmbedded(t reflect.Type) bool {
 // a method of its own, on its value or its pointer, with the result
 // rebased under the path of at, and reports whether v passed. The rebase
 // marks each Error it builds as invalid, so every problem the result
-// holds matches [ErrInvalid] whether it carries a location or not. A
+// holds matches [errInvalid] whether it carries a location or not. A
 // value the walk cannot take the address of, such as one held by a map,
 // validates through a copy, so a Validate with a pointer receiver runs on
 // it too.

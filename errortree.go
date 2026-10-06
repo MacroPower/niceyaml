@@ -31,7 +31,8 @@ import (
 // its binding. [ErrorTree.Problems] yields the nodes such a report
 // lists, one per problem, and [ErrorTree.All] yields every node of the
 // tree. A node with Detail set explains its parent, and a renderer that
-// draws details apart from problems reads the mark.
+// draws details apart from problems reads the mark. [ErrorTree.Invalid]
+// reports whether the document is at fault for the problems of a node.
 //
 // Create instances with [NewErrorTree].
 type ErrorTree struct {
@@ -222,11 +223,11 @@ func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
 //		report(row)
 //	}
 //
-// A row tells a fault of the document from a check that could not run by
-// checking its Err against [ErrInvalid] with [errors.Is], and [IsInvalid]
-// asks the same of every row. A problem that an [*Error] matching
-// ErrInvalid heads matches too, so each branch of a join that [WrapError]
-// wraps yields a row whose Err matches, while its text stays its own.
+// A row tells a fault of the document from a check that could not run
+// with [ErrorTree.Invalid], and [IsInvalid] asks the same of every row.
+// The document is at fault for each problem an [*Error] from [WrapError]
+// heads, so each branch of a join that WrapError wraps yields a row that
+// is invalid, while its text stays its own.
 func (t ErrorTree) Problems() iter.Seq[ErrorTree] {
 	return func(yield func(ErrorTree) bool) {
 		t.problems(yield)
@@ -254,6 +255,75 @@ func (t ErrorTree) problems(yield func(ErrorTree) bool) bool {
 // its children are all problems it heads.
 func (t ErrorTree) heads() bool {
 	return slices.ContainsFunc(t.Children, func(c ErrorTree) bool { return !c.Detail })
+}
+
+// Invalid reports whether the document is at fault for every problem at
+// or below the node, the ones [ErrorTree.Problems] yields for it. A node
+// that yields no problem, such as the zero ErrorTree, is not invalid.
+// [IsInvalid] answers for an error as the root of its tree does, and it
+// describes which problems the document is at fault for.
+//
+// A report that lists the problems of an error as rows asks each row, to
+// tell a fault of the document from a check that could not run:
+//
+//	for problem := range niceyaml.NewErrorTree(err).Problems() {
+//		row := Row{Message: problem.Message(), Invalid: problem.Invalid()}
+//		...
+//	}
+//
+// A heading answers through the problems it heads, whatever its own
+// error declares. The root of a join of a violation and a read error is
+// not invalid, and neither is a summary or a wrapper above that pair. The
+// details of a problem explain it and decide nothing, so a read error
+// that names a located detail from [NewError] is not invalid. A node with
+// Detail set answers as any other node does, for its own error or for the
+// problems it heads, and its answer changes nothing for the node it
+// explains.
+//
+// Invalid reads Err, so a node built by hand with no Err is not invalid.
+func (t ErrorTree) Invalid() bool {
+	found := false
+
+	for problem := range t.Problems() {
+		if !declaresInvalid(problem.Err) {
+			return false
+		}
+
+		found = true
+	}
+
+	return found
+}
+
+// declaresInvalid reports whether err, the error of one problem, declares
+// the document at fault: whether an error along its cause chain matches
+// [errInvalid] from an Is method of its own. The chain follows an
+// [*Error] to its cause and never to its details, which explain the
+// problem and decide nothing, and a wrapper to the error it wraps. A
+// wrapper with several %w verbs is one problem, so it declares the fault
+// when any of its branches does.
+func declaresInvalid(err error) bool {
+	for cur := err; !isNothing(cur); {
+		if x, ok := cur.(interface{ Is(target error) bool }); ok && x.Is(errInvalid) {
+			return true
+		}
+
+		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *Error:
+			cur = x.err
+
+		case interface{ Unwrap() error }:
+			cur = x.Unwrap()
+
+		case interface{ Unwrap() []error }:
+			return slices.ContainsFunc(x.Unwrap(), declaresInvalid)
+
+		default:
+			return false
+		}
+	}
+
+	return false
 }
 
 // Message returns the message of the node with no position, document, or
@@ -338,7 +408,7 @@ func bindingOf(err error) *SourceError {
 // own. A loop that joins each new error onto the ones before with
 // [errors.Join] nests each join in the next, and copying the nodes of each
 // level into the level above would take time and memory quadratic in
-// their number. A join that an [*Error] matching [ErrInvalid] wraps, as
+// their number. A join that an [*Error] matching [errInvalid] wraps, as
 // one from [WrapError] does, marks each branch as [markInvalid] does. A
 // nil err appends nothing.
 func appendTrees(dst []ErrorTree, err error) []ErrorTree {
@@ -835,7 +905,7 @@ func isLeaf(err error) bool {
 // childBase is the base the children along a cause chain rebase under:
 // the base of every Error from [Rebase] above them, joined, whether the
 // walk met such an Error, and whether one of them moves paths alone. It
-// also records whether an Error above them matches [ErrInvalid]. A Rebase
+// also records whether an Error above them matches [errInvalid]. A Rebase
 // at the root still locates a problem with no location at the root, so
 // the children rebase whenever the walk met one, and only a chain that
 // holds none leaves them as they are.
@@ -848,7 +918,7 @@ type childBase struct {
 
 // cross returns the base below x: c joined with the base of x when x is
 // an Error from [Rebase], and c as it is otherwise, marked invalid when x
-// matches [ErrInvalid].
+// matches [errInvalid].
 func (c childBase) cross(x *Error) childBase {
 	if x.rebased {
 		c.path = c.path.Join(x.base)
@@ -865,7 +935,7 @@ func (c childBase) cross(x *Error) childBase {
 // no Error from [Rebase]. A detail explains the error above it, so it
 // takes no location from the base, and the base moves its paths alone. So
 // does every child below a detail, or below any other Rebase that moves
-// paths alone. A problem below an Error that matches [ErrInvalid] matches
+// paths alone. A problem below an Error that matches [errInvalid] matches
 // too, as [markInvalid] marks it, so each error a summary of a
 // [SelfValidator] heads, and each branch of a join that [WrapError]
 // wraps, is the document's fault. A detail is no problem, so it gains no

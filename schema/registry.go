@@ -428,7 +428,7 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 // [ErrNoMatch] inside a [*niceyaml.Error] from [niceyaml.WrapError], with
 // the reason of each resolver that said more than ErrNoMatch as a detail
 // from [niceyaml.WithDetails], in lookup order. The document names no
-// schema the registry knows, so the error matches [niceyaml.ErrInvalid].
+// schema the registry knows, so [niceyaml.IsInvalid] reports the error.
 // The lookup failed once, so the error is one problem, and its message is
 // one line. [errors.Is] finds a reason such as [ErrNoDirective], and
 // [niceyaml.FormatError] lists the reasons below the message.
@@ -493,7 +493,7 @@ func (e reasonError) Unwrap() error {
 //
 // Returns [ErrNoMatch] if no resolver applies to the document, unless
 // [WithRequireSchema] set false, in which case such a document passes.
-// That error matches [niceyaml.ErrInvalid], since the document names no
+// [niceyaml.IsInvalid] reports that error, since the document names no
 // schema the registry knows.
 // A document a resolver applies to never passes that way, even when the
 // load error of its schema wraps ErrNoMatch. Callers of a registry that

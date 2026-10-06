@@ -11,8 +11,8 @@ import (
 // ErrNoMatch reports that a [Resolver] does not apply to a document. A
 // registry moves on to its next resolver when Resolve returns an error
 // wrapping ErrNoMatch, and reports it to the caller when no resolver
-// applies. The document then names no schema the registry knows, so the
-// error the registry reports matches [niceyaml.ErrInvalid].
+// applies. The document then names no schema the registry knows, so
+// [niceyaml.IsInvalid] reports the error the registry returns.
 var ErrNoMatch = errors.New("no matching schema")
 
 // Ref is the schema a [Resolver] names for a document. A Ref from

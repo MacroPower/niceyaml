@@ -1,8 +1,10 @@
 package niceyaml_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -2101,7 +2103,7 @@ func TestErrorTree_Problems_WrappedJoin(t *testing.T) {
 			var got []string
 
 			for problem := range niceyaml.NewErrorTree(tc.build(t)).Problems() {
-				require.ErrorIs(t, problem.Err, niceyaml.ErrInvalid)
+				assert.True(t, problem.Invalid(), problem.Text)
 
 				got = append(got, problem.Text)
 			}
@@ -2273,6 +2275,276 @@ func TestErrorTree_Problems_Stops(t *testing.T) {
 	}
 
 	assert.Equal(t, []string{"first", "second"}, got)
+}
+
+func TestErrorTree_Invalid(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+
+	badA := func() *niceyaml.Error {
+		return niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a")))
+	}
+	badB := func() *niceyaml.Error {
+		return niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b")))
+	}
+
+	errRead := fmt.Errorf("read g.yaml: %w", fs.ErrPermission)
+
+	tcs := map[string]struct {
+		err  error
+		want bool
+	}{
+		"empty tree": {
+			err: nil,
+		},
+		"error with an empty message": {
+			err: errors.New(""),
+		},
+		"invalid problem": {
+			err:  badA(),
+			want: true,
+		},
+		"read error": {
+			err: errRead,
+		},
+		"context error": {
+			err: context.Canceled,
+		},
+		"join of invalid problems": {
+			err:  errors.Join(badA(), badB()),
+			want: true,
+		},
+		"mixed join": {
+			err: errors.Join(badA(), errRead),
+		},
+		"summary of invalid problems": {
+			err:  niceyaml.NewSummary("2 problems", badA(), badB()),
+			want: true,
+		},
+		"mixed summary": {
+			err: niceyaml.NewSummary("2 problems", badA(), errRead),
+		},
+		"fmt wrapper over an invalid problem": {
+			err:  fmt.Errorf("load: %w", badA()),
+			want: true,
+		},
+		"fmt wrapper over a join of invalid problems": {
+			err:  fmt.Errorf("load: %w", errors.Join(badA(), badB())),
+			want: true,
+		},
+		"fmt wrapper over a mixed join": {
+			err: fmt.Errorf("load: %w", errors.Join(badA(), errRead)),
+		},
+		"joins of joins of invalid problems": {
+			err: errors.Join(
+				errors.Join(badA(), badB()),
+				errors.Join(niceyaml.NewError("too old")),
+			),
+			want: true,
+		},
+		"joins of joins with one read error": {
+			err: errors.Join(
+				errors.Join(badA(), badB()),
+				errors.Join(niceyaml.NewError("too old"), errors.Join(errRead)),
+			),
+		},
+		"wrapper with several verbs over an invalid problem and a read error": {
+			// The wrapper is one problem, and the invalid branch decides.
+			err:  fmt.Errorf("%w; close: %w", badA(), errRead),
+			want: true,
+		},
+		"wrapper with several verbs over a sentinel and a read error": {
+			err: fmt.Errorf("%w: %w", errors.New("config rejected"), errRead),
+		},
+		"read error with an invalid detail": {
+			// A detail explains the problem and decides nothing.
+			err: readWithDetail(t, errRead, badB()),
+		},
+		"invalid problem with a detail that is a read error": {
+			err:  niceyaml.NewError("ports conflict", niceyaml.WithDetails(errRead)),
+			want: true,
+		},
+		"invalid problem with a detail that heads a read error": {
+			err: niceyaml.NewError("ports conflict", niceyaml.WithDetails(
+				niceyaml.NewSummary("2 reasons", badA(), errRead),
+			)),
+			want: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, niceyaml.NewErrorTree(tc.err).Invalid(), "unbound")
+			assert.Equal(t, tc.want, niceyaml.NewErrorTree(yamltest.Bind(t, source, tc.err)).Invalid(), "bound")
+		})
+	}
+}
+
+// readWithDetail returns err, an error that is no fault of the document,
+// placed at a value and explained by detail. [niceyaml.Rebase] builds the
+// only [*niceyaml.Error] that declares nothing and takes details.
+func readWithDetail(t *testing.T, err, detail error) error {
+	t.Helper()
+
+	placed, ok := errors.AsType[*niceyaml.Error](niceyaml.Rebase(err, paths.Current().Child("a")))
+	require.True(t, ok)
+
+	return placed.With(niceyaml.WithDetails(detail))
+}
+
+func TestErrorTree_Invalid_Nodes(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+
+	badA := func() *niceyaml.Error {
+		return niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a")))
+	}
+	badB := func() *niceyaml.Error {
+		return niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b")))
+	}
+
+	errRead := fmt.Errorf("read g.yaml: %w", fs.ErrPermission)
+
+	// Each row of want is the message of a node and what Invalid reports
+	// for it.
+	tcs := map[string]struct {
+		err  error
+		want []string
+	}{
+		"detail of a read error answers for itself": {
+			err: readWithDetail(t, errRead, badB()),
+			want: []string{
+				"read g.yaml: permission denied false",
+				"bad b true",
+			},
+		},
+		"detail of an invalid problem answers for itself": {
+			err: niceyaml.NewError("ports conflict", niceyaml.WithDetails(errRead)),
+			want: []string{
+				"ports conflict true",
+				"read g.yaml: permission denied false",
+			},
+		},
+		"detail that heads problems answers for them": {
+			err: niceyaml.NewError("ports conflict", niceyaml.WithDetails(
+				niceyaml.NewSummary("2 reasons", badA(), errRead),
+			)),
+			want: []string{
+				"ports conflict true",
+				"2 reasons false",
+				"bad a true",
+				"read g.yaml: permission denied false",
+			},
+		},
+		"summary below a mixed join": {
+			err: errors.Join(niceyaml.NewSummary("2 violations", badA(), badB()), errRead),
+			want: []string{
+				"2 violations true",
+				"bad a true",
+				"bad b true",
+				"read g.yaml: permission denied false",
+			},
+		},
+		"mixed summary": {
+			err: niceyaml.NewSummary("2 problems", badA(), errRead),
+			want: []string{
+				"2 problems false",
+				"bad a true",
+				"read g.yaml: permission denied false",
+			},
+		},
+		"fmt wrapper over a mixed join": {
+			err: fmt.Errorf("load: %w", errors.Join(badA(), errRead)),
+			want: []string{
+				"load: false",
+				"bad a true",
+				"read g.yaml: permission denied false",
+			},
+		},
+	}
+
+	answers := func(tree niceyaml.ErrorTree) []string {
+		var out []string
+
+		for node := range tree.All() {
+			out = append(out, fmt.Sprintf("%s %t", node.Message(), node.Invalid()))
+		}
+
+		return out
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, answers(niceyaml.NewErrorTree(tc.err)), "unbound")
+
+			// A binding orders its children by position, so the rows
+			// hold in any order.
+			bound := niceyaml.NewErrorTree(yamltest.Bind(t, source, tc.err))
+			assert.ElementsMatch(t, tc.want, answers(bound), "bound")
+		})
+	}
+}
+
+func TestErrorTree_Invalid_HandBuilt(t *testing.T) {
+	t.Parallel()
+
+	errRead := fmt.Errorf("read g.yaml: %w", fs.ErrPermission)
+
+	tcs := map[string]struct {
+		tree niceyaml.ErrorTree
+		want bool
+	}{
+		"zero tree": {
+			tree: niceyaml.ErrorTree{},
+		},
+		"node with no Err": {
+			tree: niceyaml.ErrorTree{Text: "bad a"},
+		},
+		"heading over invalid problems": {
+			tree: niceyaml.ErrorTree{
+				Text: "2 problems",
+				Children: []niceyaml.ErrorTree{
+					{Text: "bad a", Err: niceyaml.NewError("bad a")},
+					{Text: "bad b", Err: niceyaml.NewError("bad b")},
+				},
+			},
+			want: true,
+		},
+		"heading answers through its problems": {
+			// The Err of a heading decides nothing.
+			tree: niceyaml.ErrorTree{
+				Text: "2 problems",
+				Err:  niceyaml.NewError("2 problems"),
+				Children: []niceyaml.ErrorTree{
+					{Text: "bad a", Err: niceyaml.NewError("bad a")},
+					{Text: "read g.yaml: permission denied", Err: errRead},
+				},
+			},
+		},
+		"problem above an invalid detail": {
+			tree: niceyaml.ErrorTree{
+				Text: "read g.yaml: permission denied",
+				Err:  errRead,
+				Children: []niceyaml.ErrorTree{
+					{Text: "bad a", Err: niceyaml.NewError("bad a"), Detail: true},
+				},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, tc.tree.Invalid())
+		})
+	}
 }
 
 func TestErrorTree_MessageAndPath(t *testing.T) {

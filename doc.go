@@ -413,15 +413,16 @@
 // nothing, a decoding failure, or a validator's [Error] renders its
 // location through [FormatError] as it is.
 //
-// [ErrInvalid] tells a document at fault apart from a check that could
-// not run. A syntax error, a decode rejection, a schema violation, and an
-// error a [SelfValidator] returns match it, and a schema that does not
-// load or a context that ended does not. A [Validator] declares the fault
-// of the document with an [Error] from [NewError] or [WrapError], with a
-// location or without, and returns any other error for a check that
-// could not run. [IsInvalid] reports whether the document is at fault for
-// every problem of an error, which is the check that picks a status code
-// or an exit code.
+// [IsInvalid] tells a document at fault apart from a check that could
+// not run. The document is at fault for a syntax error, a decode
+// rejection, a schema violation, and an error a [SelfValidator] returns,
+// and it is not for a schema that does not load or a context that ended.
+// A [Validator] declares the fault of the document with an [Error] from
+// [NewError] or [WrapError], with a location or without, and returns any
+// other error for a check that could not run. IsInvalid reports whether
+// the document is at fault for every problem of an error, which is the
+// check that picks a status code or an exit code. A report that lists
+// the problems one by one asks [ErrorTree.Invalid] of each.
 //
 // # Diffs
 //

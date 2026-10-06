@@ -945,28 +945,26 @@ func TestViolation_Is(t *testing.T) {
 
 	violation := &schema.Violation{Keyword: "type", SchemaPath: "/type", Message: "bad type"}
 
+	// The module keeps the mark internal, so each case reads it through
+	// niceyaml.IsInvalid.
 	tcs := map[string]struct {
-		input  error
-		target error
-		want   bool
+		input error
+		want  bool
 	}{
-		"invalid": {
-			input:  violation,
-			target: niceyaml.ErrInvalid,
-			want:   true,
+		"bare violation": {
+			input: violation,
+			want:  true,
 		},
 		"inside an error with no location": {
-			input:  niceyaml.WrapError(violation),
-			target: niceyaml.ErrInvalid,
-			want:   true,
+			input: niceyaml.WrapError(violation),
+			want:  true,
 		},
-		"other target": {
-			input:  violation,
-			target: schema.ErrValidate,
+		"behind a wrapper": {
+			input: fmt.Errorf("check config: %w", violation),
+			want:  true,
 		},
-		"nil violation": {
-			input:  nilViolation,
-			target: niceyaml.ErrInvalid,
+		"nil violation behind a wrapper": {
+			input: fmt.Errorf("check config: %w", nilViolation),
 		},
 	}
 
@@ -974,9 +972,16 @@ func TestViolation_Is(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, errors.Is(tc.input, tc.target))
+			assert.Equal(t, tc.want, niceyaml.IsInvalid(tc.input))
 		})
 	}
+
+	t.Run("matches no exported target", func(t *testing.T) {
+		t.Parallel()
+
+		require.NotErrorIs(t, violation, schema.ErrValidate)
+		require.NotErrorIs(t, violation, schema.ErrNoMatch)
+	})
 
 	t.Run("every violation of a validation is invalid", func(t *testing.T) {
 		t.Parallel()
@@ -999,7 +1004,6 @@ func TestViolation_Is(t *testing.T) {
 
 		err := s.ValidateValue(t.Context(), map[string]any{"a": 1})
 		require.ErrorIs(t, err, schema.ErrValidate)
-		require.NotErrorIs(t, err, niceyaml.ErrInvalid)
 		assert.False(t, niceyaml.IsInvalid(err))
 	})
 }
