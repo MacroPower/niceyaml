@@ -16,17 +16,21 @@ import (
 // only comments. [Encoder.Encode] returns it.
 var ErrNoNode = errors.New("value encodes to no YAML node")
 
-// Pretty returns the [Option] values that make [New] write the layout
-// prettier writes, with two-space indentation and each sequence indented
-// one level below its parent key. A sequence at the root of a document
-// starts at the first column, as [WithIndentSequence] describes. The YAML
-// a marshaler returns keeps the indentation it had in that text, so a
-// sequence in it can sit at the indent of its parent key. Each call
-// returns a new slice.
-func Pretty() []Option {
-	return []Option{
-		WithIndent(2),
-		WithIndentSequence(true),
+// Pretty is an [Option] that makes the encoder write the layout prettier
+// writes, with two-space indentation and each sequence indented one level
+// below its parent key. A sequence at the root of a document starts at the
+// first column, as [WithIndentSequence] describes. The YAML a marshaler
+// returns keeps the indentation it had in that text, so a sequence in it
+// can sit at the indent of its parent key.
+//
+// Pretty applies [WithIndent] with 2 and [WithIndentSequence] with true.
+// Options apply in order and the last one to set a value wins, so
+// New(w, Pretty(), WithIndent(4)) indents by four spaces and
+// New(w, WithIndent(4), Pretty()) indents by two.
+func Pretty() Option {
+	return func(c *config) {
+		WithIndent(2)(c)
+		WithIndentSequence(true)(c)
 	}
 }
 
@@ -47,6 +51,7 @@ type Encoder struct {
 // Option configures an [Encoder].
 //
 // Available options:
+//   - [Pretty]
 //   - [WithIndent]
 //   - [WithIndentSequence]
 //   - [WithYAMLComments]

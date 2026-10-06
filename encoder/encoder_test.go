@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,7 +35,7 @@ func TestNew(t *testing.T) {
 
 		var buf bytes.Buffer
 
-		enc := encoder.New(&buf, encoder.Pretty()...)
+		enc := encoder.New(&buf, encoder.Pretty())
 		require.NotNil(t, enc)
 	})
 }
@@ -734,13 +735,206 @@ func TestPretty(t *testing.T) {
 
 			var buf bytes.Buffer
 
-			enc := encoder.New(&buf, encoder.Pretty()...)
+			enc := encoder.New(&buf, encoder.Pretty())
 
 			for _, input := range tc.inputs {
 				require.NoError(t, enc.Encode(t.Context(), input))
 			}
 
 			assert.Equal(t, tc.want, buf.String())
+		})
+	}
+}
+
+func TestPretty_order(t *testing.T) {
+	t.Parallel()
+
+	const (
+		pretty     = "k:\n  items:\n    - one\n"
+		fourSpaces = "k:\n    items:\n        - one\n"
+		atParent   = "k:\n  items:\n  - one\n"
+	)
+
+	tcs := map[string]struct {
+		want string
+		opts []encoder.Option
+	}{
+		"alone": {
+			opts: []encoder.Option{encoder.Pretty()},
+			want: pretty,
+		},
+		"twice": {
+			opts: []encoder.Option{encoder.Pretty(), encoder.Pretty()},
+			want: pretty,
+		},
+		"before WithIndent": {
+			opts: []encoder.Option{encoder.Pretty(), encoder.WithIndent(4)},
+			want: fourSpaces,
+		},
+		"after WithIndent": {
+			opts: []encoder.Option{encoder.WithIndent(4), encoder.Pretty()},
+			want: pretty,
+		},
+		"before WithIndentSequence": {
+			opts: []encoder.Option{encoder.Pretty(), encoder.WithIndentSequence(false)},
+			want: atParent,
+		},
+		"after WithIndentSequence": {
+			opts: []encoder.Option{encoder.WithIndentSequence(false), encoder.Pretty()},
+			want: pretty,
+		},
+		"before a go-yaml indent": {
+			opts: []encoder.Option{encoder.Pretty(), encoder.WithYAMLOptions(yaml.Indent(4))},
+			want: fourSpaces,
+		},
+		"after a go-yaml indent": {
+			opts: []encoder.Option{encoder.WithYAMLOptions(yaml.Indent(4)), encoder.Pretty()},
+			want: pretty,
+		},
+		"before a go-yaml sequence indent": {
+			opts: []encoder.Option{encoder.Pretty(), encoder.WithYAMLOptions(yaml.IndentSequence(false))},
+			want: atParent,
+		},
+		"after a go-yaml sequence indent": {
+			opts: []encoder.Option{encoder.WithYAMLOptions(yaml.IndentSequence(false)), encoder.Pretty()},
+			want: pretty,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var buf bytes.Buffer
+
+			enc := encoder.New(&buf, tc.opts...)
+
+			require.NoError(t, enc.Encode(t.Context(), map[string]map[string][]string{"k": {"items": {"one"}}}))
+			assert.Equal(t, tc.want, buf.String())
+		})
+	}
+}
+
+func TestPretty_reuse(t *testing.T) {
+	t.Parallel()
+
+	pretty := encoder.Pretty()
+	input := map[string][]string{"items": {"one"}}
+
+	var wide, plain bytes.Buffer
+
+	require.NoError(t, encoder.New(&wide, pretty, encoder.WithIndent(4)).Encode(t.Context(), input))
+	require.NoError(t, encoder.New(&plain, pretty).Encode(t.Context(), input))
+
+	assert.Equal(t, "items:\n    - one\n", wide.String())
+	assert.Equal(t, "items:\n  - one\n", plain.String(), "an option after Pretty in one call reaches no other call")
+}
+
+// TestPretty_indentOptions checks that Pretty writes what WithIndent(2) and
+// WithIndentSequence(true) write in its place, before and after each set of
+// other options.
+func TestPretty_indentOptions(t *testing.T) {
+	t.Parallel()
+
+	type server struct {
+		Name  string   `yaml:"name"`
+		Note  string   `yaml:"note,omitempty"`
+		Ports []int    `yaml:"ports"`
+		Tags  []string `yaml:"tags,omitempty"`
+	}
+
+	inputs := map[string]any{
+		"null":                       nil,
+		"plain string":               "x",
+		"quoted keyword":             ".inf",
+		"quoted tab":                 "a\tb",
+		"root sequence":              []string{"a", "b"},
+		"root sequence of sequences": [][]string{{"a", "b"}, {"c"}},
+		"nested mapping": map[string]any{
+			"k": map[string]any{"items": []string{"one", "two"}, "n": 1},
+		},
+		"root sequence of mappings": []server{
+			{Name: "a", Ports: []int{1, 2}, Note: "l1\nl2\n"},
+			{Name: "b", Tags: []string{"x"}},
+		},
+		"literal block in a root sequence":      []map[string]string{{"k": "one\ntwo\n"}},
+		"root sequence that a marshaler wrote":  rawYAML("- a\n- b\n"),
+		"root sequence of YAML from marshalers": []rawYAML{"- a\n- b\n"},
+		"YAML from a marshaler under a key":     map[string]rawYAML{"k": "x:\n  - 1\n"},
+	}
+
+	// The head comment has no place on a root scalar, so the comments case
+	// also compares the errors of four inputs.
+	tcs := map[string]struct {
+		opts []encoder.Option
+	}{
+		"no other option": {},
+		"indent 4": {
+			opts: []encoder.Option{encoder.WithIndent(4)},
+		},
+		"indent 1": {
+			opts: []encoder.Option{encoder.WithIndent(1)},
+		},
+		"sequences at the parent indent": {
+			opts: []encoder.Option{encoder.WithIndentSequence(false)},
+		},
+		"go-yaml indent 3": {
+			opts: []encoder.Option{encoder.WithYAMLOptions(yaml.Indent(3))},
+		},
+		"flow style": {
+			opts: []encoder.Option{encoder.WithYAMLOptions(yaml.Flow(true))},
+		},
+		"literal style": {
+			opts: []encoder.Option{encoder.WithYAMLOptions(yaml.UseLiteralStyleIfMultiline(true))},
+		},
+		"comments": {
+			opts: []encoder.Option{encoder.WithYAMLComments(yaml.CommentMap{"$": {yaml.HeadComment(" h")}})},
+		},
+		"indent, sequence, and block style": {
+			opts: []encoder.Option{
+				encoder.WithIndent(4),
+				encoder.WithIndentSequence(false),
+				encoder.WithYAMLOptions(yaml.Flow(false)),
+			},
+		},
+	}
+
+	encode := func(t *testing.T, input any, opts ...encoder.Option) (string, string) {
+		t.Helper()
+
+		var (
+			buf bytes.Buffer
+			msg string
+		)
+
+		err := encoder.New(&buf, opts...).Encode(t.Context(), input)
+		if err != nil {
+			msg = err.Error()
+		}
+
+		return buf.String(), msg
+	}
+
+	pretty := []encoder.Option{encoder.Pretty()}
+	indentOptions := []encoder.Option{encoder.WithIndent(2), encoder.WithIndentSequence(true)}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			for inputName, input := range inputs {
+				want, wantErr := encode(t, input, slices.Concat(indentOptions, tc.opts)...)
+				got, gotErr := encode(t, input, slices.Concat(pretty, tc.opts)...)
+
+				assert.Equal(t, want, got, "%s, with Pretty first", inputName)
+				assert.Equal(t, wantErr, gotErr, "%s, with Pretty first", inputName)
+
+				want, wantErr = encode(t, input, slices.Concat(tc.opts, indentOptions)...)
+				got, gotErr = encode(t, input, slices.Concat(tc.opts, pretty)...)
+
+				assert.Equal(t, want, got, "%s, with Pretty last", inputName)
+				assert.Equal(t, wantErr, gotErr, "%s, with Pretty last", inputName)
+			}
 		})
 	}
 }
@@ -844,7 +1038,7 @@ func TestWithYAMLComments(t *testing.T) {
 		"head comment on a sequence entry": {
 			input:    map[string][]string{"items": {"one", "two"}},
 			comments: yaml.CommentMap{"$.items[1]": {yaml.HeadComment(" second")}},
-			opts:     encoder.Pretty(),
+			opts:     []encoder.Option{encoder.Pretty()},
 			want:     "items:\n  - one\n  # second\n  - two\n",
 		},
 		"head comment on a root sequence": {
