@@ -2465,6 +2465,30 @@ func TestErrorTree_Invalid_Nodes(t *testing.T) {
 				"read g.yaml: permission denied false",
 			},
 		},
+		"WrapError over a summary of bound errors": {
+			// A problem that is bound already takes the mark as any other
+			// problem the Error heads does.
+			err: niceyaml.WrapError(niceyaml.NewSummary("2 problems",
+				yamltest.Bind(t, source, niceyaml.Rebase(errRead, paths.Current().Child("a"))),
+				yamltest.Bind(t, source, errors.New("too many keys")),
+			)),
+			want: []string{
+				"2 problems true",
+				"read g.yaml: permission denied true",
+				"too many keys true",
+			},
+		},
+		"summary of bound errors": {
+			err: niceyaml.NewSummary("2 problems",
+				yamltest.Bind(t, source, niceyaml.Rebase(errRead, paths.Current().Child("a"))),
+				yamltest.Bind(t, source, errors.New("too many keys")),
+			),
+			want: []string{
+				"2 problems false",
+				"read g.yaml: permission denied false",
+				"too many keys false",
+			},
+		},
 	}
 
 	answers := func(tree niceyaml.ErrorTree) []string {

@@ -271,7 +271,8 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 // WrapError creates a new [*Error] wrapping an existing error. The Error
 // is a problem the document is at fault for, so [IsInvalid] reports it
 // whatever err is. The document is at fault for each problem the Error
-// heads too, such as each branch of a join it wraps.
+// heads too, such as each branch of a join it wraps, including a branch
+// that is a [*SourceError] already.
 // Use [NewError] instead if creating an error from a message string.
 func WrapError(err error, opts ...ErrorOption) *Error {
 	e := wrapUndeclared(err, opts...)
@@ -599,13 +600,18 @@ func Rebase(err error, base paths.Path) error {
 // err alone and points nothing at base, as a detail takes the base of the
 // problem it explains. With invalid, each Error the rebase builds matches
 // [errInvalid], as the self-validation walk marks what a [SelfValidator]
-// returns.
+// returns. A binding takes no base, and with invalid it comes back as
+// [markInvalid] marks it.
 func rebase(err error, base paths.Path, movesOnly, invalid bool) error {
 	if isNothing(err) {
 		return nil
 	}
 
 	if isBound(err) {
+		if invalid {
+			return markInvalid(err)
+		}
+
 		return err
 	}
 
@@ -641,12 +647,13 @@ func rebase(err error, base paths.Path, movesOnly, invalid bool) error {
 
 // markInvalid returns err as a problem the document is at fault for, as
 // an [*Error] the caller declared invalid marks each problem it heads. An
-// Error that matches [errInvalid] itself comes back as it is, and so does
-// a binding, which [Rebase] returns as it is too. Any other err comes back
-// inside an Error that adds nothing to it but the mark, so the error keeps
-// its text, its location, and its children.
+// Error that matches [errInvalid] itself comes back as it is. Any other
+// err comes back inside an Error that adds nothing to it but the mark, so
+// the error keeps its text, its location, and its children. A binding
+// gains the mark the same way, and [isBound] still reads the result as a
+// binding.
 func markInvalid(err error) error {
-	if isNothing(err) || isBound(err) {
+	if isNothing(err) {
 		return err
 	}
 
@@ -2039,14 +2046,14 @@ func (e *SourceError) collect(err error, b binder) {
 // addChild binds n as a child of e, among its details when detail is set
 // and among the problems it heads otherwise. A binding is the child as it
 // is, and any other error binds where e binds, or takes over the binding
-// it wraps. The base is the base of every Error from [Rebase] above n,
-// and a child under an Error from Rebase binds as a rebased Error at that
-// base, the root included, so its own message and [SourceError.Path]
-// carry the joined path as the message of the root does. A nil n, or a
-// nil pointer, adds nothing.
+// it wraps, as a binding that [markInvalid] marked does. The base is the
+// base of every Error from [Rebase] above n, and a child under an Error
+// from Rebase binds as a rebased Error at that base, the root included,
+// so its own message and [SourceError.Path] carry the joined path as the
+// message of the root does. A nil n, or a nil pointer, adds nothing.
 func (e *SourceError) addChild(n error, b binder, base childBase, detail bool) {
-	// Rebase returns a binding as it is, so the child is a binding exactly
-	// when n is.
+	// The base returns a binding as it is unless it marks the binding
+	// invalid, so the child is a binding when n is one that gains no mark.
 	child := base.rebase(n, detail)
 	if isNothing(child) {
 		return

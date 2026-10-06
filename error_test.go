@@ -9083,6 +9083,22 @@ func TestIsInvalid(t *testing.T) {
 		return err
 	}
 
+	// The errors of boundRead and boundPlain are no fault of the document,
+	// and each is bound at a value already.
+	boundRead := func(t *testing.T) error {
+		t.Helper()
+
+		return yamltest.FirstDocument(t, input).Bind(niceyaml.Rebase(ioErr, namePath))
+	}
+
+	boundPlain := func(t *testing.T) error {
+		t.Helper()
+
+		doc := yamltest.FirstDocument(t, input)
+
+		return yamltest.At(t, doc, hoursPath).Bind(errors.New("closes before it opens"))
+	}
+
 	// Each case builds the error of one origin. The err field pins the
 	// origin, so a case that stops reaching it fails rather than passing
 	// on another error.
@@ -9198,6 +9214,30 @@ func TestIsInvalid(t *testing.T) {
 
 				return selfValidated(t, func() error {
 					return fmt.Errorf("load holidays: %w", ioErr)
+				})
+			},
+			err:  fs.ErrNotExist,
+			want: true,
+		},
+		"SelfValidator bound I/O error": {
+			// A binding is an error a SelfValidator returns as any other
+			// is.
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return selfValidated(t, func() error {
+					return boundRead(t)
+				})
+			},
+			err:  fs.ErrNotExist,
+			want: true,
+		},
+		"SelfValidator join of bound errors": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return selfValidated(t, func() error {
+					return errors.Join(boundRead(t), boundPlain(t))
 				})
 			},
 			err:  fs.ErrNotExist,
@@ -9647,6 +9687,50 @@ func TestIsInvalid(t *testing.T) {
 			},
 			err:  fs.ErrNotExist,
 			want: true,
+		},
+		"unbound WrapError of a join of bound errors": {
+			// A branch that is bound already is a problem the Error
+			// heads, as any other branch is.
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return niceyaml.WrapError(errors.Join(boundRead(t), boundPlain(t)))
+			},
+			err:  fs.ErrNotExist,
+			want: true,
+		},
+		"bound WrapError of a join of a bound error and a plain one": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return yamltest.FirstDocument(t, input).Bind(
+					niceyaml.WrapError(errors.Join(boundRead(t), errors.New("opens too late"))),
+				)
+			},
+			err:  fs.ErrNotExist,
+			want: true,
+		},
+		"bound Rebase of WrapError of a summary of bound errors": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return yamltest.FirstDocument(t, input).Bind(niceyaml.Rebase(
+					niceyaml.WrapError(niceyaml.NewSummary("2 problems", boundRead(t), boundPlain(t))),
+					hoursPath,
+				))
+			},
+			err:  fs.ErrNotExist,
+			want: true,
+		},
+		"unbound join of bound errors": {
+			// No WrapError heads the join, so each binding answers for
+			// itself.
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return errors.Join(boundRead(t), boundPlain(t))
+			},
+			err: fs.ErrNotExist,
 		},
 		"unbound join of plain errors": {
 			build: func(*testing.T) error {
