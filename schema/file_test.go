@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -183,6 +184,69 @@ func TestFile_RelativePath(t *testing.T) {
 	for _, path := range []string{"schemas/config.json", "./schemas/config.json"} {
 		assert.Equal(t, want, fileURL(t, path), path)
 	}
+}
+
+// File has no working directory to make a relative path absolute against
+// once the directory is gone, and it builds a Ref all the same. The test
+// removes the process's working directory, so it does not run in
+// parallel.
+//
+//nolint:paralleltest // See above.
+func TestFile_NoWorkingDirectory(t *testing.T) {
+	schemaPath := filepath.Join(t.TempDir(), "s.json")
+	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type": "object"}`), 0o600))
+
+	gone := filepath.Join(t.TempDir(), "gone")
+	require.NoError(t, os.Mkdir(gone, 0o700))
+	t.Chdir(gone)
+
+	err := os.Remove(gone)
+	if err != nil {
+		t.Skipf("remove the working directory: %v", err)
+	}
+
+	_, err = os.Getwd()
+	if err == nil {
+		t.Skip("the platform still names the removed working directory")
+	}
+
+	//nolint:paralleltest // See above.
+	t.Run("a relative path builds a Ref that does not load", func(t *testing.T) {
+		var ref schema.Ref
+
+		require.NotPanics(t, func() { ref = schema.File("schemas/root.json") })
+		assert.Equal(t, "file:///schemas/root.json", ref.Key())
+
+		_, _, err := load(t, ref)
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorContains(t, err, "read schemas/root.json: no absolute path")
+
+		_, err = schema.NewRegistry().Schema(t.Context(), ref)
+		require.ErrorIs(t, err, schema.ErrLoad)
+	})
+
+	//nolint:paralleltest // See above.
+	t.Run("a relative path never takes the schema of the path under the root", func(t *testing.T) {
+		// The two Refs share a key, and only the absolute one names a file.
+		rooted := schema.Loadable(schema.File("/schemas/root.json").Key(), func(context.Context) ([]byte, error) {
+			return []byte(`{"type": "object"}`), nil
+		})
+
+		reg := schema.NewRegistry()
+
+		_, err := reg.Schema(t.Context(), rooted)
+		require.NoError(t, err)
+
+		_, err = reg.Schema(t.Context(), schema.File("schemas/root.json"))
+		require.ErrorIs(t, err, schema.ErrLoad)
+	})
+
+	//nolint:paralleltest // See above.
+	t.Run("an absolute path loads", func(t *testing.T) {
+		_, data, err := load(t, schema.File(schemaPath))
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"type": "object"}`, string(data))
+	})
 }
 
 // A read from the working directory uses the path File made absolute to

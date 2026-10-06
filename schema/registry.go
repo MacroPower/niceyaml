@@ -589,6 +589,14 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 		return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.name(), errNotHTTPURL)
 	}
 
+	// A path File could not make absolute shares its key with the same
+	// path under the root, so this check also runs before the cache.
+	// Otherwise such a Ref would return the schema of that other file.
+	err := noAbsPath(ref)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %q: %w", ErrLoad, ref.name(), err)
+	}
+
 	key := r.cacheKey(ref)
 
 	if v, ok := r.cached(key); ok {
@@ -685,6 +693,11 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 		return httpfetch.Get(ctx, r.client, ref.key)
 
 	case ref.file != "":
+		err := noAbsPath(ref)
+		if err != nil {
+			return nil, err
+		}
+
 		return readFile(r.fsys, ref.file, ref.abs, ref.wd)
 
 	case ref.load != nil:

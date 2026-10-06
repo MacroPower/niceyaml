@@ -69,9 +69,14 @@ const driveLen = 2
 // [fs.Sub] wraps around [os.DirFS], [fs.Stat] opens the file to check it,
 // so a named pipe already at the path blocks the read as well.
 //
+// A relative path has no absolute form in a process without a working
+// directory, such as one whose directory no longer exists. File then
+// names the path by the URL of the same path under the root, so
+// "schemas/config.json" becomes file:///schemas/config.json, and the
+// registry reports the missing directory when it loads the Ref.
+//
 // File is for a path written in the program, so it panics on an empty
-// path, as [Loadable] panics on an empty key, and when it cannot get the
-// working directory to make the path absolute. A reference read from a
+// path, as [Loadable] panics on an empty key. A reference read from a
 // directive or a command line, which may be empty or a URL, goes through
 // [FileOrURL], which returns an error instead. The result is the shape a
 // [Resolver] returns, so a resolver that builds the path from the document
@@ -115,7 +120,8 @@ func File(path string) Ref {
 
 // file is [File] that returns an error rather than panicking, for
 // [FileOrURL], which takes a reference from the input. An empty path is
-// [ErrEmptyPath].
+// [ErrEmptyPath]. A path with no absolute form is not an error, and the
+// read of its Ref reports why it has none.
 func file(path string) (Ref, error) {
 	if path == "" {
 		return Ref{}, ErrEmptyPath
@@ -130,7 +136,10 @@ func file(path string) (Ref, error) {
 		wd = ""
 	}
 
-	abs := path
+	var (
+		abs    = path
+		absErr error
+	)
 
 	switch {
 	case !onWindows && wd != "" && !filepath.IsAbs(path) && !hasDriveLetter(path):
@@ -143,10 +152,7 @@ func file(path string) (Ref, error) {
 		abs = filepath.Join(wd, path)
 
 	case !hasDriveLetter(path) || onWindows:
-		abs, err = filepath.Abs(path)
-		if err != nil {
-			return Ref{}, fmt.Errorf("resolve %s: %w", path, err)
-		}
+		abs, absErr = filepath.Abs(path)
 
 	case len(path) > driveLen:
 		// A drive-letter path is absolute on every platform, but
@@ -159,7 +165,25 @@ func file(path string) (Ref, error) {
 		abs = path[:driveLen] + slashpath.Clean(rest)
 	}
 
-	return Ref{key: fileURL(abs), file: path, abs: abs, wd: wd}, nil
+	// A relative path has no absolute form while the process has no
+	// working directory. The key then names the path under the root, and
+	// the read reports absErr.
+	named := abs
+	if absErr != nil {
+		abs, named = "", slashpath.Clean("/"+filepath.ToSlash(path))
+	}
+
+	return Ref{key: fileURL(named), file: path, abs: abs, wd: wd, absErr: absErr}, nil
+}
+
+// noAbsPath returns the error a read of ref reports when [File] could not
+// make its path absolute, and nil for any other Ref.
+func noAbsPath(ref Ref) error {
+	if ref.file == "" || ref.abs != "" {
+		return nil
+	}
+
+	return fmt.Errorf("read %s: no absolute path: %w", ref.file, ref.absErr)
 }
 
 // readFile returns the bytes of the file a [Ref] from [File] names. It

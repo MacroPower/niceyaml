@@ -76,6 +76,9 @@ type Ref struct {
 	// The path of the file the registry reads, as given to File, which
 	// an error from a read under WithFS names.
 	file string
+	// Why File could not make the path absolute, which leaves abs empty.
+	// A read of the Ref reports it.
+	absErr error
 	// The file made absolute against the working directory as File made
 	// it to build the key, which every read uses, so the bytes under the
 	// key stay the same wherever the read happens.
