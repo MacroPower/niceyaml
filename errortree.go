@@ -923,8 +923,8 @@ func trees(kids []positioned) []ErrorTree {
 // its place to the branches of the join. Those branches keep the name of
 // their source when named is set or when the join is bound to another
 // source. They go straight into kids, as [appendTrees] appends the
-// branches of a join. The node of a detail has Detail set, and so do the
-// branches that take the place of a detail.
+// branches of a join. The node of a detail has Detail set, as [asDetail]
+// sets it, and so do the branches that take the place of a detail.
 func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []positioned {
 	for _, c := range bound.below {
 		child, detail := c.bound, c.detail
@@ -974,7 +974,11 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 
 		below, _ := children(child)
 
-		kid.tree = newTree(ErrorTree{Err: child, Bound: child, Text: text, Detail: detail}, below)
+		kid.tree = newTree(ErrorTree{Err: child, Bound: child, Text: text}, below)
+		if detail {
+			kid.tree = asDetail(kid.tree)
+		}
+
 		kids = append(kids, kid)
 	}
 

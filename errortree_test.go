@@ -1635,6 +1635,26 @@ func TestErrorTree_Problems(t *testing.T) {
 			)),
 			want: []string{"invalid"},
 		},
+		"detail above a join and a reason": {
+			// The branches of the join explain the error as the detail
+			// does, so the error stays one row.
+			err: yamltest.Bind(t, source, niceyaml.NewError("ports conflict", niceyaml.WithDetails(
+				niceyaml.WrapError(errors.Join(badA(), badB()), niceyaml.WithDetails(errors.New("see docs"))),
+			))),
+			want: []string{"ports conflict"},
+		},
+		"detail above a join of one and a reason": {
+			err: yamltest.Bind(t, source, niceyaml.NewError("ports conflict", niceyaml.WithDetails(
+				niceyaml.WrapError(errors.Join(badA()), niceyaml.WithDetails(errors.New("see docs"))),
+			))),
+			want: []string{"ports conflict"},
+		},
+		"unbound detail above a join and a reason": {
+			err: niceyaml.NewError("ports conflict", niceyaml.WithDetails(
+				niceyaml.WrapError(errors.Join(badA(), badB()), niceyaml.WithDetails(errors.New("see docs"))),
+			)),
+			want: []string{"ports conflict"},
+		},
 		"summary above problems with no location": {
 			// A summary and an error with reasons share a shape, and the
 			// constructor tells them apart.
@@ -1957,6 +1977,48 @@ func TestErrorTree_New_Detail(t *testing.T) {
 			// The problems the summary heads carry no mark, and the details
 			// of a problem carry it.
 			assert.Equal(t, tc.want, marks(niceyaml.NewErrorTree(tc.err), ""))
+		})
+	}
+}
+
+func TestErrorTree_Problems_JoinDetail(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
+
+	// The detail wraps a join and holds a reason, so it has no text of its
+	// own, and the reason and the branches take its place below the error.
+	build := func() error {
+		return niceyaml.NewError("conflict", niceyaml.WithDetails(niceyaml.WrapError(
+			errors.Join(errors.New("first"), errors.New("second")),
+			niceyaml.WithDetails(errors.New("reason")),
+		)))
+	}
+
+	tcs := map[string]struct {
+		err error
+	}{
+		"unbound": {err: build()},
+		"bound":   {err: yamltest.Bind(t, source, build())},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := slices.Collect(niceyaml.NewErrorTree(tc.err).Problems())
+			require.Len(t, got, 1)
+			assert.Equal(t, "conflict", got[0].Message())
+
+			var details []string
+
+			for _, child := range got[0].Children {
+				assert.True(t, child.Detail, child.Text)
+
+				details = append(details, child.Message())
+			}
+
+			assert.Equal(t, []string{"reason", "first", "second"}, details)
 		})
 	}
 }
