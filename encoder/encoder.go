@@ -146,12 +146,14 @@ func New(w io.Writer, opts ...Option) *Encoder {
 
 // Encode encodes v as YAML and writes it to the underlying writer as one
 // document. Every document after the first starts with a "---" separator.
-// Each document defines its own anchors, so a later document never aliases
-// an anchor from an earlier one. A write the writer refuses is an error,
-// and every later call returns that same error without encoding v. The
-// encoder passes ctx to every marshaler that accepts one, such as a
-// [yaml.InterfaceMarshalerContext] or a marshaler registered with
-// [yaml.RegisterCustomMarshalerContext].
+// Encode makes one Write call for each document, separator included, and
+// buffers nothing, so the document has reached the writer when Encode
+// returns. Each document defines its own anchors, so a later document
+// never aliases an anchor from an earlier one. A write the writer refuses
+// is an error, and every later call returns that same error without
+// encoding v. The encoder passes ctx to every marshaler that accepts one,
+// such as a [yaml.InterfaceMarshalerContext] or a marshaler registered
+// with [yaml.RegisterCustomMarshalerContext].
 //
 // Encode double-quotes every string that go-yaml would write unquoted or
 // as a literal block in a form that reads back as a different value or
@@ -240,13 +242,6 @@ func (e *Encoder) Encode(ctx context.Context, v any) error {
 	e.written = true
 
 	return nil
-}
-
-// Close reports the write error, if any, from an earlier [Encoder.Encode].
-// It does not flush the writer, so a caller holding a buffered writer
-// flushes it after Close.
-func (e *Encoder) Close() error {
-	return e.writeErr()
 }
 
 // render returns the YAML text of node, or an error when the go-yaml

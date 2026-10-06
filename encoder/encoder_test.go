@@ -599,15 +599,32 @@ func TestEncoder_Encode_noNode(t *testing.T) {
 	}
 }
 
-func TestEncoder_Close(t *testing.T) {
+// writeRecorder keeps the text of each write it receives.
+type writeRecorder struct {
+	writes []string
+}
+
+func (w *writeRecorder) Write(p []byte) (int, error) {
+	w.writes = append(w.writes, string(p))
+
+	return len(p), nil
+}
+
+func TestEncoder_Encode_writes(t *testing.T) {
 	t.Parallel()
 
-	var buf bytes.Buffer
+	var w writeRecorder
 
-	enc := encoder.New(&buf)
+	enc := encoder.New(&w)
 
-	err := enc.Close()
-	assert.NoError(t, err)
+	require.NoError(t, enc.Encode(t.Context(), map[string]int{"a": 1}))
+	assert.Equal(t, []string{"a: 1\n"}, w.writes, "the document reaches the writer before Encode returns")
+
+	require.NoError(t, enc.Encode(t.Context(), []string{"b", "c"}))
+	assert.Equal(t, []string{"a: 1\n", "---\n- b\n- c\n"}, w.writes, "a separator shares the write of its document")
+
+	require.ErrorIs(t, enc.Encode(t.Context(), emptyMarshaler{}), encoder.ErrNoNode)
+	assert.Len(t, w.writes, 2, "an Encode that returns an error makes no write")
 }
 
 // failWriter refuses every write with errWrite.
@@ -648,9 +665,6 @@ func TestEncoder_Encode_writeError(t *testing.T) {
 	err = enc.Encode(t.Context(), countingMarshaler{calls: &calls})
 	require.ErrorIs(t, err, errWrite)
 	assert.Zero(t, calls, "Encode runs no marshaler after a refused write")
-
-	err = enc.Close()
-	require.ErrorIs(t, err, errWrite, "Close reports the write error")
 }
 
 func TestWithIndent_panicsBelowOne(t *testing.T) {

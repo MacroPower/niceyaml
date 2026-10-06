@@ -9,6 +9,9 @@
 //		return err
 //	}
 //
+// Each call writes one whole document to the writer, so an [Encoder] holds
+// no output to flush and has no Close method.
+//
 // [Pretty] is the option for the layout prettier writes, with two-space
 // indentation and each sequence indented below its parent key, and a
 // sequence at the root of a document in the first column. Options apply in
