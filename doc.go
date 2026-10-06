@@ -478,6 +478,13 @@
 //	view.AddOverlay(kind.GenericHighlight, idx.Find("search term")...)
 //	lipgloss.Println(p.Print(view))
 //
+// A Finder loads a [line.View] too and searches the lines it holds. The
+// ranges are in the coordinates of the file, so a search of one document
+// marks the view of that document:
+//
+//	view := doc.View()
+//	view.AddOverlay(kind.GenericHighlight, finder.New().Load(view).Find("search term")...)
+//
 // # Dependencies
 //
 // niceyaml is a facade over go-yaml. The exported API names go-yaml types

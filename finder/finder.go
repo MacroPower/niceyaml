@@ -1,4 +1,4 @@
-// Package finder locates strings within [line.Lines] content.
+// Package finder locates strings within the lines of a [line.Sequence].
 //
 // A [Finder] maps matches back to [position.Ranges] in the original lines,
 // even when normalization changes the character count, so the ranges can
@@ -8,6 +8,16 @@
 //
 //	idx := finder.New().Load(source.Lines())
 //	view := source.View()
+//	view.BlendOverlay(kind.GenericHighlight, idx.Find("search term")...)
+//
+// Load takes the [line.Lines] of a whole file or a [*line.View]. A view
+// loads the lines it holds, and the ranges of its matches are in the
+// coordinates of its content, as every range a view takes is. A search of
+// one document of a file that holds several therefore marks the view of
+// that document:
+//
+//	view := doc.View()
+//	idx := finder.New().Load(view)
 //	view.BlendOverlay(kind.GenericHighlight, idx.Find("search term")...)
 //
 // A search folds case and ignores diacritics by default, through the
@@ -25,6 +35,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
+	"go.jacobcolvin.com/niceyaml/internal/nilness"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/normalizer"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -42,8 +53,8 @@ type Normalizer interface {
 	Normalize(in string) string
 }
 
-// Finder builds an [Index] over [line.Lines] content, so the [position.Ranges]
-// of a search can highlight matches in rendered output.
+// Finder builds an [Index] over the lines of a [line.Sequence], so the
+// [position.Ranges] of a search can highlight matches in rendered output.
 //
 // The typical use case is search-as-you-type highlighting. The user views
 // YAML content, types a search term, and sees matching text highlighted
@@ -77,7 +88,8 @@ type Finder struct {
 }
 
 // New creates a new [*Finder].
-// Call [Finder.Load] to build an [Index] over [line.Lines] before searching.
+// Call [Finder.Load] to build an [Index] over a [line.Sequence] before
+// searching.
 //
 // Without options, the Finder normalizes with [normalizer.New], which
 // folds case and strips diacritics. [WithNormalizer] replaces that
@@ -140,26 +152,38 @@ func WithNormalizer(n Normalizer) Option {
 	}
 }
 
-// Load reads the given [line.Lines] and returns an [Index] over them. The
-// Index holds the loaded text and a map from its positions back to the
-// lines.
+// Load reads the lines of a [line.Sequence] and returns an [Index] over
+// them. The Index holds the loaded text and a map from its positions back
+// to the lines.
+//
+// [line.Lines] loads every line. A [*line.View] loads the lines it holds,
+// and [Index.Find] reports each match in the coordinates of the view's
+// content, so the ranges apply to the view and to any other view over that
+// content. A view holds whole lines. The view of a node that shares its
+// line with other nodes, such as host in `server: {host: h, port: 80}`,
+// loads that whole line, so a search of it for "port" finds a match there.
+//
+// A view can skip lines of its content, as the hunks of a diff do. No
+// match runs from the line before the skipped lines into the line after
+// them.
 //
 // Each call builds a new Index and leaves the Finder as it was, so load once
 // per distinct content and call [Index.Find] as many times as needed. The
 // lines never change, so the index stays valid however callers decorate the
-// views over them.
-func (f *Finder) Load(lines line.Lines) *Index {
+// views over them. A nil sequence loads no lines, and so does one that
+// holds a nil pointer, such as a nil [*line.View].
+func (f *Finder) Load(lines line.Sequence) *Index {
 	idx := &Index{normalizer: f.normalizer}
 	idx.text, idx.posMap = f.buildTextAndPositionMap(lines)
 
 	return idx
 }
 
-// Index is the loaded text of one [line.Lines] together with the map from
-// its characters back to [position.Position] values in the lines. It never
-// changes after [Finder.Load] builds it, so it is safe for concurrent use
-// when the Finder's [Normalizer] is. Every Index from one Finder shares that
-// normalizer.
+// Index is the loaded text of one [line.Sequence] together with the map
+// from its characters back to [position.Position] values in the lines. It
+// never changes after [Finder.Load] builds it, so it is safe for concurrent
+// use when the Finder's [Normalizer] is. Every Index from one Finder shares
+// that normalizer.
 //
 // Create instances with [Finder.Load].
 type Index struct {
@@ -177,12 +201,14 @@ type Index struct {
 // the loaded text, so Find finds any run of whole characters that appears
 // in the source, as [WithNormalizer] defines a character.
 // Bytes that are not valid UTF-8 read as U+FFFD on both sides, and a CRLF
-// or bare CR line ending reads as "\n" on both sides. Every line but the
-// last reads as ending in "\n", even one with no line ending of its own,
-// such as the last line of a diff revision or a placeholder row. That "\n"
-// keeps a match from joining two lines unless the normalizer drops it. A
-// normalizer that removes all whitespace drops it, so "1b" then matches
-// across the lines "a: 1" and "b: 2".
+// or bare CR line ending reads as "\n" on both sides. Every loaded line but
+// the last reads as ending in "\n", even one with no line ending of its
+// own, such as the last line of a diff revision or a placeholder row. That
+// "\n" keeps a match from joining two lines unless the normalizer drops it.
+// A normalizer that removes all whitespace drops it, so "1b" then matches
+// across the lines "a: 1" and "b: 2". Where the loaded lines skip lines of
+// their content, as a [line.View] of hunks does, no match joins the lines
+// on either side, whatever the normalizer drops.
 //
 // Every match starts at a source character, and every range covers whole
 // characters, so an exact search for "cafe" in a "café" that spells its
@@ -222,10 +248,12 @@ func (i *Index) Find(search string) position.Ranges {
 		matchEnd := matchStart + len(searchStr)
 
 		// A match that starts inside the normalized form of one source
-		// character has no entry to start at, so skip one rune of the
-		// loaded text.
+		// character has no entry to start at, and one that crosses a gap
+		// covers lines the Index never loaded. Skip one rune of the loaded
+		// text for either, so a later match that overlaps this one still
+		// counts.
 		start, ok := i.posMap.at(matchStart)
-		if !ok {
+		if !ok || i.posMap.crossesGap(matchStart, matchEnd) {
 			_, size := utf8.DecodeRuneInString(i.text[matchStart:])
 			offset = matchStart + size
 
@@ -311,18 +339,21 @@ func writeRunes(sb *strings.Builder, s string) {
 // line ending as a single "\n", and every line but the last without an
 // ending of its own gets a "\n" at column [line.Line.Width], where an
 // ending would sit, so no match joins the text of two lines unless the
-// normalizer drops "\n".
+// normalizer drops "\n". The position map records a gap where a line
+// begins whose index does not follow the index of the line before it. No
+// match crosses a gap, so the lines on either side of lines the sequence
+// skips never join, even when the normalizer drops "\n".
 //
 // When the Finder has a normalizer, the normalizer transforms the returned
 // text one character at a time, as [eachCharacter] splits each line. The
 // position map records where each source character begins in the
 // normalized text, so lookups in normalized text resolve to the right place.
-func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap) {
+func (f *Finder) buildTextAndPositionMap(lines line.Sequence) (string, *positionMap) {
 	var sb strings.Builder
 
 	pm := &positionMap{}
 
-	if lines.Len() == 0 {
+	if nilness.IsNil(lines) {
 		return "", pm
 	}
 
@@ -332,8 +363,9 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 
 	var rs []rune
 
-	last := lines.Len() - 1
-	for i, l := range lines.All() {
+	// Add appends l, the line at index i, to the loaded text and the
+	// position map. Every line but the last ends in "\n".
+	add := func(i int, l *line.Line, last bool) {
 		// Runes yields the columns 0, 1, 2, and so on, so the index of a
 		// rune in rs is its column.
 		rs = rs[:0]
@@ -341,7 +373,7 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 			rs = append(rs, r)
 		}
 
-		if i < last && (len(rs) == 0 || rs[len(rs)-1] != '\n') {
+		if !last && (len(rs) == 0 || rs[len(rs)-1] != '\n') {
 			rs = append(rs, '\n')
 		}
 
@@ -373,6 +405,31 @@ func (f *Finder) buildTextAndPositionMap(lines line.Lines) (string, *positionMap
 		})
 	}
 
+	// A sequence does not say which of its lines is the last, so each line
+	// waits for the one after it. That line shows that the waiting one is
+	// not the last, and its index shows whether the sequence skips lines
+	// between the two.
+	var (
+		prev    *line.Line
+		prevIdx int
+	)
+
+	for i, l := range lines.All() {
+		if prev != nil {
+			add(prevIdx, prev, false)
+
+			if i != prevIdx+1 {
+				pm.gaps = append(pm.gaps, sb.Len())
+			}
+		}
+
+		prev, prevIdx = l, i
+	}
+
+	if prev != nil {
+		add(prevIdx, prev, true)
+	}
+
 	return sb.String(), pm
 }
 
@@ -388,6 +445,18 @@ type positionMap struct {
 	// The column just past each entry's source character and the
 	// characters after it on its line that normalize to nothing.
 	ends []int
+	// The offset where each line begins that does not follow the line
+	// loaded before it in the content, in increasing order.
+	gaps []int
+}
+
+// crossesGap reports whether the bytes of the loaded text from start up to
+// end hold text from both sides of a gap, which is so when a gap lies
+// after start and before end.
+func (m *positionMap) crossesGap(start, end int) bool {
+	idx := sort.SearchInts(m.gaps, start+1)
+
+	return idx < len(m.gaps) && m.gaps[idx] < end
 }
 
 // add records the byte offset at which a source character begins and the

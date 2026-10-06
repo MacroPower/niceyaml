@@ -142,6 +142,11 @@
 // decorated lines with context around each. An error excerpt shows those
 // hunks.
 //
+// The finder and diff packages read a [Sequence], which Lines and a view
+// both are. A view yields the lines it holds with the indices they have in
+// its content. A search of a slice therefore returns ranges that apply to
+// the slice, and a diff of two slices compares the lines they hold.
+//
 // [View.String] renders a view as plain text: each line behind its number,
 // the annotations above it on rows of their own, carets under the columns
 // its overlays cover, and the annotations below it beside the carets, with

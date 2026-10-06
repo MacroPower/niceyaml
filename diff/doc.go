@@ -1,15 +1,21 @@
-// Package diff computes line differences between two [line.Lines] values
-// and renders them as [line.View] values.
+// Package diff computes line differences between two [line.Sequence]
+// values and renders them as [line.View] values.
 //
-// A [Differ] compares two [line.Lines] values, such as the lines of two
-// niceyaml Source values, with an [lcs.Algorithm]. The default is
-// [lcs.Hirschberg]. Create one with [New], or call [Diff] for the default
-// algorithm:
+// A [Differ] compares two revisions, such as the lines of two niceyaml
+// Source values, with an [lcs.Algorithm]. The default is [lcs.Hirschberg].
+// Create one with [New], or call [Diff] for the default algorithm:
 //
 //	result := diff.Diff(before.Lines(), after.Lines())
 //	p := printer.New()
 //	lipgloss.Println(p.Print(result.Unified()))
 //	lipgloss.Println(p.Print(result.Hunks(3)))
+//
+// Each revision is the [line.Lines] of a whole file, or a [*line.View] for
+// the lines it holds. The views of one document in two revisions of a file
+// that holds several diff that document alone, and the gutter and hunk
+// headers show the line numbers of the file:
+//
+//	result := diff.Diff(before[1].View(), after[1].View())
 //
 // The [Result] renders in three shapes. [Result.Unified] interleaves the
 // lines of both inputs, [Result.Hunks] keeps only the changes with context

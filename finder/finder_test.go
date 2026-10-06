@@ -7,6 +7,8 @@ import (
 	"unicode"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 	"golang.org/x/text/runes"
@@ -18,7 +20,9 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/normalizer"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
 func TestFinder_Find(t *testing.T) {
@@ -757,11 +761,207 @@ func TestFinder_Find_CRLF(t *testing.T) {
 func TestFinder_Find_NilLines(t *testing.T) {
 	t.Parallel()
 
-	f := finder.New()
-	idx := f.Load(line.Lines{})
+	tcs := map[string]struct {
+		lines line.Sequence
+	}{
+		"zero lines": {
+			lines: line.Lines{},
+		},
+		"nil sequence": {
+			lines: nil,
+		},
+		"nil view": {
+			lines: (*line.View)(nil),
+		},
+		"nil pointer to lines": {
+			lines: (*line.Lines)(nil),
+		},
+		"view that holds no line": {
+			lines: niceyaml.NewSourceFromString("test: 1\n").View().Slice(position.Span{}),
+		},
+	}
 
-	got := idx.Find("test")
-	assert.Nil(t, got)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			idx := finder.New().Load(tc.lines)
+
+			assert.Nil(t, idx.Find("test"))
+		})
+	}
+}
+
+func TestFinder_Find_View(t *testing.T) {
+	t.Parallel()
+
+	// The first document holds lines 0 and 1 of the file, and the second
+	// holds lines 2 through 4.
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n---\nname: x\nport: 80\n")
+
+	docs, err := source.Documents()
+	require.NoError(t, err)
+	require.Len(t, docs, 2)
+
+	// The view skips lines 1 and 2.
+	gapped := source.View().Slice(position.NewSpan(0, 1), position.NewSpan(3, 5))
+
+	// The view skips line 1, so "a\na" matches on lines 2 and 3 alone.
+	repeated := niceyaml.NewSourceFromString("a\nz\na\na\n").View().
+		Slice(position.NewSpan(0, 1), position.NewSpan(2, 4))
+
+	// The unified diff holds nine rows, and its hunks hold rows 0 and 1,
+	// where k1 changed, and rows 7 and 8, where k7 changed.
+	hunks := diff.Diff(
+		niceyaml.NewSourceFromString("k1: a\nk2: b\nk3: c\nk4: d\nk5: e\nk6: f\nk7: g\n").Lines(),
+		niceyaml.NewSourceFromString("k1: A\nk2: b\nk3: c\nk4: d\nk5: e\nk6: f\nk7: G\n").Lines(),
+	).Hunks(0)
+	require.Equal(t, 4, hunks.Count())
+
+	// The host shares line 2 of the file with the port beside it.
+	flow, err := niceyaml.NewSourceFromString("top: 1\n---\nserver: {host: h, port: 80}\nport: 1\n").Documents()
+	require.NoError(t, err)
+	require.Len(t, flow, 2)
+
+	host := yamltest.At(t, flow[1], paths.Doc().Child("server", "host"))
+
+	noSpace := normalizer.New(normalizer.WithTransformer(func() transform.Transformer {
+		return runes.Remove(runes.In(unicode.White_Space))
+	}))
+
+	tcs := map[string]struct {
+		view       *line.View
+		normalizer finder.Normalizer
+		search     string
+		want       position.Ranges
+	}{
+		"view of every line matches as its lines do": {
+			view:   source.View(),
+			search: "2\n---",
+			want: position.Ranges{
+				position.NewRange(position.New(1, 3), position.New(2, 3)),
+			},
+		},
+		"document reports the lines of the file": {
+			view:   docs[1].View(),
+			search: "port",
+			want: position.Ranges{
+				position.NewRange(position.New(4, 0), position.New(4, 4)),
+			},
+		},
+		"line the view does not hold": {
+			view:   docs[1].View(),
+			search: "a: 1",
+		},
+		"match ends with the last held line": {
+			view:   docs[0].View(),
+			search: "2\n",
+			want: position.Ranges{
+				position.NewRange(position.New(1, 3), position.New(1, 5)),
+			},
+		},
+		"match does not run past the last held line": {
+			view:   docs[0].View(),
+			search: "2\n---",
+		},
+		"match does not start above the first held line": {
+			view:   docs[1].View(),
+			search: "2\n---",
+		},
+		"match spans held lines in a row": {
+			view:   gapped,
+			search: "x\nport",
+			want: position.Ranges{
+				position.NewRange(position.New(3, 6), position.New(4, 4)),
+			},
+		},
+		"match does not cross a gap": {
+			view:   gapped,
+			search: "1\nname",
+		},
+		"normalizer dropping whitespace joins held lines in a row": {
+			view:       gapped,
+			normalizer: noSpace,
+			search:     "xport",
+			want: position.Ranges{
+				position.NewRange(position.New(3, 6), position.New(4, 4)),
+			},
+		},
+		"normalizer dropping whitespace does not join text across a gap": {
+			view:       gapped,
+			normalizer: noSpace,
+			search:     "1name",
+		},
+		"match that overlaps one crossing a gap": {
+			view:   repeated,
+			search: "a\na",
+			want: position.Ranges{
+				position.NewRange(position.New(2, 0), position.New(3, 1)),
+			},
+		},
+		"hunks report the rows of the unified diff": {
+			view:   hunks,
+			search: "k7",
+			want: position.Ranges{
+				position.NewRange(position.New(7, 0), position.New(7, 2)),
+				position.NewRange(position.New(8, 0), position.New(8, 2)),
+			},
+		},
+		"match spans the rows of one hunk": {
+			view:   hunks,
+			search: "a\nk1",
+			want: position.Ranges{
+				position.NewRange(position.New(0, 4), position.New(1, 2)),
+			},
+		},
+		"match does not run from one hunk into the next": {
+			view:   hunks,
+			search: "A\nk7",
+		},
+		"node holds the whole of its line": {
+			view:   host.View(),
+			search: "port",
+			want: position.Ranges{
+				position.NewRange(position.New(2, 18), position.New(2, 22)),
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var opts []finder.Option
+
+			if tc.normalizer != nil {
+				opts = append(opts, finder.WithNormalizer(tc.normalizer))
+			}
+
+			got := finder.New(opts...).Load(tc.view).Find(tc.search)
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestFinder_Find_ViewMarksItself(t *testing.T) {
+	t.Parallel()
+
+	docs, err := niceyaml.NewSourceFromString("a: 1\nb: 2\n---\nname: x\nport: 80\n").Documents()
+	require.NoError(t, err)
+	require.Len(t, docs, 2)
+
+	// The matches of a view are in the coordinates of its content, so they
+	// mark the view they came from.
+	view := docs[1].View()
+	view.AddOverlay(kind.GenericHighlight, finder.New().Load(view).Find("port")...)
+
+	assert.Equal(t, stringtest.JoinLF(
+		"   3 | ---",
+		"   4 | name: x",
+		"   5 | port: 80",
+		"     | ^^^^",
+	), view.String())
 }
 
 func TestFinder_Find_DiffBuiltLines(t *testing.T) {
@@ -839,7 +1039,7 @@ func TestFinder_Find_LineWithoutEnding(t *testing.T) {
 	)
 
 	tcs := map[string]struct {
-		lines  line.Lines
+		lines  line.Sequence
 		search string
 		want   position.Ranges
 	}{
@@ -871,6 +1071,17 @@ func TestFinder_Find_LineWithoutEnding(t *testing.T) {
 		},
 		"last line without an ending reads no line break": {
 			lines:  niceyaml.NewSourceFromString("a: 1").Lines(),
+			search: "1\n",
+		},
+		"placeholder rows a view holds each read as a line break": {
+			lines:  placeholders.Before().Slice(position.NewSpan(1, 4)),
+			search: "\n\nb",
+			want: position.Ranges{
+				position.NewRange(position.New(1, 0), position.New(3, 1)),
+			},
+		},
+		"last held line without an ending reads no line break": {
+			lines:  noEnding.Unified().Slice(position.NewSpan(0, 1)),
 			search: "1\n",
 		},
 	}

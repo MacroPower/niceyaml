@@ -1,6 +1,7 @@
 package diff_test
 
 import (
+	"iter"
 	"sync"
 	"testing"
 
@@ -22,11 +23,13 @@ func TestDiffer_Views(t *testing.T) {
 	before := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
 	after := niceyaml.NewSourceFromString("a: 1\nb: 3\n")
 
-	// An overlay on an input view stays on that view.
+	// The decoration of an input view stays on that view.
 	decorated := before.View()
 	decorated.AddOverlay(kind.GenericHighlight, position.NewRange(position.New(1, 0), position.New(1, 1)))
+	decorated.Annotate(1, line.Annotation{Content: "note", Placement: line.Below})
+	decorated.SetFlag(0, line.FlagInserted)
 
-	result := diff.Diff(decorated.Lines(), after.Lines())
+	result := diff.Diff(decorated, after.View())
 
 	got := result.Unified()
 	require.Equal(t, 3, got.Count())
@@ -34,26 +37,31 @@ func TestDiffer_Views(t *testing.T) {
 	assert.Equal(t, line.FlagDeleted, got.Flag(1))
 	assert.Equal(t, line.FlagInserted, got.Flag(2))
 
-	// Inputs are content only, so the result carries the flags of the diff
-	// and no overlays.
-	for i := range got.All() {
-		assert.Empty(t, got.Overlays(i))
+	// A diff reads the lines of its inputs alone, so the result carries the
+	// flags of the diff and no overlays or annotations.
+	for _, view := range []*line.View{got, result.Before(), result.After()} {
+		for i := range view.All() {
+			assert.Empty(t, view.Overlays(i))
+			assert.Empty(t, view.Annotations(i))
+		}
 	}
 
-	for i := range result.Before().All() {
-		assert.Empty(t, result.Before().Overlays(i))
-	}
-
+	assert.Equal(t, line.FlagDefault, result.Before().Flag(0))
 	assert.Len(t, decorated.Overlays(1), 1)
+	assert.Len(t, decorated.Annotations(1), 1)
+	assert.Equal(t, line.FlagInserted, decorated.Flag(0))
 
 	// Each result view owns its decoration.
 	got.AddOverlay(kind.GenericHighlight, position.NewRange(position.New(2, 0), position.New(2, 1)))
 	assert.Len(t, got.Overlays(2), 1)
 	assert.Empty(t, result.Unified().Overlays(2))
 
-	// The diff of a diff is a diff of the view's content.
-	again := diff.Diff(got.Lines(), got.Lines())
+	// The diff of a diff is a diff of the lines the view holds, and it
+	// ignores the flags of the first diff.
+	again := diff.Diff(got, got)
 	assert.Equal(t, 3, again.Unified().Count())
+	assert.False(t, again.Stats().Changed())
+	assert.Equal(t, line.FlagDefault, again.Unified().Flag(1))
 }
 
 func TestDiffer_Views_LineNumbers(t *testing.T) {
@@ -79,6 +87,128 @@ func TestDiffer_Views_LineNumbers(t *testing.T) {
 
 	assert.Equal(t, []int{0, 1, 2}, beforeNumbers)
 	assert.Equal(t, []int{1, 2, 3}, afterNumbers)
+}
+
+// sequenceFunc adapts an iterator to [line.Sequence], as an implementation
+// from outside the line package. It ignores the spans.
+type sequenceFunc iter.Seq2[int, *line.Line]
+
+func (f sequenceFunc) All(...position.Span) iter.Seq2[int, *line.Line] {
+	return iter.Seq2[int, *line.Line](f)
+}
+
+func TestDiffer_Diff_Sequences(t *testing.T) {
+	t.Parallel()
+
+	before := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n")
+	after := niceyaml.NewSourceFromString("a: 1\nb: 9\nc: 3\nd: 4\n")
+
+	whole := stringtest.JoinLF(
+		"   1 | a: 1",
+		"   2 | b: 2",
+		"   2 | b: 9",
+		"   3 | c: 3",
+		"   4 | d: 4",
+	)
+	afterAlone := stringtest.JoinLF(
+		"   1 | a: 1",
+		"   2 | b: 9",
+		"   3 | c: 3",
+		"   4 | d: 4",
+	)
+
+	tcs := map[string]struct {
+		before    line.Sequence
+		after     line.Sequence
+		want      string
+		wantStats diff.Stats
+	}{
+		"lines": {
+			before:    before.Lines(),
+			after:     after.Lines(),
+			want:      whole,
+			wantStats: diff.Stats{Added: 2, Removed: 1},
+		},
+		"views of every line": {
+			before:    before.View(),
+			after:     after.View(),
+			want:      whole,
+			wantStats: diff.Stats{Added: 2, Removed: 1},
+		},
+		"lines against a view": {
+			before:    before.Lines(),
+			after:     after.View(),
+			want:      whole,
+			wantStats: diff.Stats{Added: 2, Removed: 1},
+		},
+		"views of some lines": {
+			before: before.View().Slice(position.NewSpan(1, 3)),
+			after:  after.View().Slice(position.NewSpan(1, 3)),
+			want: stringtest.JoinLF(
+				"   2 | b: 2",
+				"   2 | b: 9",
+				"   3 | c: 3",
+			),
+			wantStats: diff.Stats{Added: 1, Removed: 1},
+		},
+		"views with a gap": {
+			before: before.View().Slice(position.NewSpan(0, 1), position.NewSpan(2, 3)),
+			after:  after.View().Slice(position.NewSpan(0, 1), position.NewSpan(2, 4)),
+			want: stringtest.JoinLF(
+				"   1 | a: 1",
+				"   3 | c: 3",
+				"   4 | d: 4",
+			),
+			wantStats: diff.Stats{Added: 1},
+		},
+		"another implementation": {
+			before: sequenceFunc(func(yield func(int, *line.Line) bool) {
+				_ = yield(0, before.Lines().Line(0)) && yield(2, before.Lines().Line(2))
+			}),
+			after:     after.Lines(),
+			want:      afterAlone,
+			wantStats: diff.Stats{Added: 2},
+		},
+		"nil sequences": {},
+		"nil sequence against lines": {
+			after:     after.Lines(),
+			want:      afterAlone,
+			wantStats: diff.Stats{Added: 4},
+		},
+		"nil view against a view": {
+			before:    (*line.View)(nil),
+			after:     after.View(),
+			want:      afterAlone,
+			wantStats: diff.Stats{Added: 4},
+		},
+		"nil pointer to lines": {
+			before:    (*line.Lines)(nil),
+			after:     after.Lines(),
+			want:      afterAlone,
+			wantStats: diff.Stats{Added: 4},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			result := diff.Diff(tc.before, tc.after)
+
+			got := result.Unified()
+			assert.Equal(t, tc.want, got.String())
+			assert.Equal(t, tc.wantStats, result.Stats())
+			assert.Equal(t, tc.want == "", result.IsEmpty())
+
+			// The result shares its lines with the inputs.
+			for _, l := range got.All() {
+				_, inBefore := before.View().Index(l)
+				_, inAfter := after.View().Index(l)
+
+				assert.True(t, inBefore || inAfter, "line %d", l.Number())
+			}
+		})
+	}
 }
 
 func TestDiffer_Full(t *testing.T) {
@@ -1008,7 +1138,7 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, afterDocs, 2)
 
-			got := diff.Diff(beforeDocs[1].Lines(), afterDocs[1].Lines()).Hunks(tc.context)
+			got := diff.Diff(beforeDocs[1].View(), afterDocs[1].View()).Hunks(tc.context)
 			assert.Equal(t, tc.want, hunkHeaders(got))
 
 			// With the same first document, a diff of the whole file
@@ -1054,11 +1184,15 @@ func TestDiffer_HunksOfHeldLines(t *testing.T) {
 			before := niceyaml.NewSourceFromString(tc.before)
 			after := niceyaml.NewSourceFromString(tc.after)
 
-			beforeHeld := before.View().Slice(tc.beforeSpan).Held()
-			afterHeld := after.View().Slice(tc.afterSpan).Held()
+			beforeView := before.View().Slice(tc.beforeSpan)
+			afterView := after.View().Slice(tc.afterSpan)
 
-			got := diff.Diff(beforeHeld, afterHeld).Hunks(0)
+			got := diff.Diff(beforeView, afterView).Hunks(0)
 			assert.Equal(t, tc.want, hunkHeaders(got))
+
+			// The lines a view holds diff as the view does.
+			held := diff.Diff(beforeView.Held(), afterView.Held()).Hunks(0)
+			assert.Equal(t, tc.want, hunkHeaders(held))
 
 			// Each change falls within the spans, so a diff of the whole
 			// file names the same lines.
@@ -1123,10 +1257,10 @@ func TestDiffer_HunksOfGappedHeldLines(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			beforeHeld := niceyaml.NewSourceFromString(before).View().Slice(beforeSpans...).Held()
-			afterHeld := niceyaml.NewSourceFromString(tc.after).View().Slice(tc.afterSpans...).Held()
+			beforeView := niceyaml.NewSourceFromString(before).View().Slice(beforeSpans...)
+			afterView := niceyaml.NewSourceFromString(tc.after).View().Slice(tc.afterSpans...)
 
-			got := diff.Diff(beforeHeld, afterHeld).Hunks(tc.context)
+			got := diff.Diff(beforeView, afterView).Hunks(tc.context)
 			assert.Equal(t, tc.want, hunkHeaders(got))
 		})
 	}

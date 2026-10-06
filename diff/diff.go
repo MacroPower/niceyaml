@@ -58,8 +58,18 @@ func New(opts ...Option) *Differ {
 	return d
 }
 
-// Diff computes the difference between two revisions, such as the
-// [line.Lines] of two niceyaml Source values.
+// Diff computes the difference between two revisions. Each revision is a
+// [line.Sequence], which is the [line.Lines] of a niceyaml Source for a
+// whole file or a [*line.View] for the lines it holds. The views of one
+// document in two revisions of a file that holds several diff that
+// document alone:
+//
+//	result := diff.Diff(before[1].View(), after[1].View())
+//
+// Diff reads the lines of a view and ignores its decoration, so the flags,
+// overlays, and annotations of an input never reach the result. A nil
+// sequence holds no lines, and so does one that holds a nil pointer, such
+// as a nil [*line.View].
 //
 // Lines compare by [line.Line.Content], which strips the line ending, so
 // two revisions that differ only in LF versus CRLF endings or in a missing
@@ -79,12 +89,38 @@ func New(opts ...Option) *Differ {
 // Diff panics when the [lcs.Algorithm] returns an [lcs.Op] with an
 // [lcs.OpKind] other than [lcs.OpEqual], [lcs.OpDelete], or [lcs.OpInsert],
 // or with an index outside the input it refers to.
-func (d *Differ) Diff(a, b line.Lines) *Result {
+func (d *Differ) Diff(a, b line.Sequence) *Result {
+	before, after := collect(a), collect(b)
+
 	return &Result{
-		before: a,
-		after:  b,
-		ops:    d.computeOps(a, b),
+		before: before,
+		after:  after,
+		ops:    d.computeOps(before, after),
 	}
+}
+
+// collect returns the lines of seq as [line.Lines], which a diff reads by
+// position. A [line.Lines] value never changes, so it comes back as it is
+// and the diff of two whole files copies neither.
+func collect(seq line.Sequence) line.Lines {
+	switch seq := seq.(type) {
+	case line.Lines:
+		return seq
+	case *line.View:
+		return seq.Held()
+	}
+
+	if nilness.IsNil(seq) {
+		return line.Lines{}
+	}
+
+	var ls []*line.Line
+
+	for _, l := range seq.All() {
+		ls = append(ls, l)
+	}
+
+	return line.Collect(ls...)
 }
 
 // computeOps computes line operations using the configured algorithm. The
@@ -196,13 +232,13 @@ func (r *Result) Unified() *line.View {
 //
 // The first line of each hunk carries a [line.Above] annotation holding
 // the unified hunk header. The header names each side's lines by their
-// [line.Line.Number], the numbers the gutter prints, so a diff of
-// [line.View.Held] or of the lines of one document names lines of the
-// file. A line with no number counts by its 1-indexed position in its
-// input instead.
+// [line.Line.Number], the numbers the gutter prints, so a diff of a
+// [line.View] that holds part of a file, such as one document, names
+// lines of the file. A line with no number counts by its 1-indexed
+// position in its input instead.
 //
-// An input can skip lines of the file, as the held lines of a slice over
-// several spans do. No hunk reaches across such a gap on either side.
+// An input can skip lines of the file, as a view sliced to several spans
+// does. No hunk reaches across such a gap on either side.
 // Context lines stop at the gap, and a run of changes that crosses it
 // splits into several hunks, so each header names only lines its hunk
 // holds. A side where a hunk holds no lines places the change next to a
@@ -533,7 +569,7 @@ var defaultDiffer = New()
 //
 // Every call goes through one shared [Differ], which is safe for concurrent
 // use, so repeated calls reuse its pooled working buffers.
-func Diff(a, b line.Lines) *Result {
+func Diff(a, b line.Sequence) *Result {
 	return defaultDiffer.Diff(a, b)
 }
 
