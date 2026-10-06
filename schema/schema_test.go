@@ -1211,6 +1211,13 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				schema: `{"properties": {"list": {"items": {"type": "string"}}}}`,
 				input:  binaryAliases(4<<10, 10),
 			},
+			"small mapping aliased in each item of a long list": {
+				// Each alias counts as a node of the document, so the 150
+				// aliases stay a small enough share of what a decode reads.
+				schema: `{"properties": {"matrix": {"items": {"required": ["os"]}}}}`,
+				input: "base: &b {os: linux, arch: amd64, go: stable, cgo: false}\nmatrix:\n" +
+					strings.Repeat("  - *b\n", 150),
+			},
 			"anchor reused a few times": {
 				schema: `{
 					"type": "object",

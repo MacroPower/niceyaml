@@ -49,13 +49,25 @@ func flowList(item string, count int) string {
 	return "[" + strings.TrimSuffix(strings.Repeat(item+", ", count), ", ") + "]"
 }
 
-// blockEntries returns 1000 entries of a block mapping, each indented
+// blockEntries returns count entries of a block mapping, each indented
 // under a key.
-func blockEntries() string {
+func blockEntries(count int) string {
 	var sb strings.Builder
 
-	for i := range 1000 {
+	for i := range count {
 		fmt.Fprintf(&sb, "  k%d: v\n", i)
+	}
+
+	return sb.String()
+}
+
+// aliasEntries returns count entries of a block mapping, each indented
+// under a key and holding item under a key of its own.
+func aliasEntries(item string, count int) string {
+	var sb strings.Builder
+
+	for i := range count {
+		fmt.Fprintf(&sb, "  s%d: %s\n", i, item)
 	}
 
 	return sb.String()
@@ -74,6 +86,20 @@ func TestCheckDecode(t *testing.T) {
 		},
 		"alias to a small sequence": {
 			input: "s: &s [a, b]\nt: *s\n",
+		},
+		"aliases to a small mapping in a long sequence": {
+			// Each alias is a node of the document as well as a read of
+			// its anchor, so the 150 aliases add 150 nodes to the 13 the
+			// document holds without them.
+			input: "base: &b {os: linux, arch: amd64, go: stable, cgo: false}\nmatrix: " + flowList("*b", 150) + "\n",
+		},
+		"aliases to a mapping of 200 keys under keys of their own": {
+			input: "defaults: &d\n" + blockEntries(200) + "services:\n" + aliasEntries("*d", 150),
+		},
+		"aliases to a mapping of 1000 keys under keys of their own": {
+			// The aliases still repeat far more than the document holds.
+			input: "defaults: &d\n" + blockEntries(1000) + "services:\n" + aliasEntries("*d", 300),
+			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias bomb as mapping key": {
 			input: yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n",
@@ -104,15 +130,15 @@ func TestCheckDecode(t *testing.T) {
 		"aliases to an anchor holding an alias to the anchor around it": {
 			// The decoder reads *A inside A as null, so each *B reads
 			// {c: null}.
-			input: "a: &A\n  b: &B {c: *A}\n" + blockEntries() + "d: " + flowList("*B", 300) + "\n",
+			input: "a: &A\n  b: &B {c: *A}\n" + blockEntries(1000) + "d: " + flowList("*B", 300) + "\n",
 		},
 		"same aliases after one inside the anchor around it": {
 			// The count does not depend on which alias to B comes first.
-			input: "a: &A\n  b: &B {c: *A}\n" + blockEntries() + "  e: *B\nd: " + flowList("*B", 300) + "\n",
+			input: "a: &A\n  b: &B {c: *A}\n" + blockEntries(1000) + "  e: *B\nd: " + flowList("*B", 300) + "\n",
 		},
 		"aliases to an anchor on an alias to the anchor around it": {
 			// P reads null, so each *Q reads [null].
-			input: "a: &A\n  p: &P\n    *A\n  q: &Q [*P]\n" + blockEntries() + "d: " + flowList("*Q", 300) + "\n",
+			input: "a: &A\n  p: &P\n    *A\n  q: &Q [*P]\n" + blockEntries(1000) + "d: " + flowList("*Q", 300) + "\n",
 		},
 		"scalar aliases written out in a key": {
 			// The decoder spells the key as text, with a copy of the
@@ -125,15 +151,15 @@ func TestCheckDecode(t *testing.T) {
 		},
 		"aliases to a tag over an alias to a mapping": {
 			// Each *s reads all of k through the alias under the tag.
-			input: "k: &k\n" + blockEntries() + "s: &s !foo *k\nl: " + flowList("*s", 300) + "\n",
+			input: "k: &k\n" + blockEntries(1000) + "s: &s !foo *k\nl: " + flowList("*s", 300) + "\n",
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"a few aliases to a tag over an alias to a mapping": {
-			input: "k: &k\n" + blockEntries() + "s: &s !foo *k\nl: " + flowList("*s", 2) + "\n",
+			input: "k: &k\n" + blockEntries(1000) + "s: &s !foo *k\nl: " + flowList("*s", 2) + "\n",
 		},
 		"aliases to chained tags over an alias to a mapping": {
 			// Each *t reads all of k through *s and then *k.
-			input: "k: &k\n" + blockEntries() + "s: &s !foo *k\nt: &t !bar *s\nl: " + flowList("*t", 300) + "\n",
+			input: "k: &k\n" + blockEntries(1000) + "s: &s !foo *k\nt: &t !bar *s\nl: " + flowList("*t", 300) + "\n",
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"aliases to a string tag over an alias to scalar aliases": {

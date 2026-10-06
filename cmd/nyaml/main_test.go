@@ -185,6 +185,13 @@ func TestExitCode(t *testing.T) {
 			args:  []string{"--schema", "schema.json", "a.yaml"},
 			want:  0,
 		},
+		"valid document of many aliases to a small mapping": {
+			files: map[string]string{
+				"a.yaml": "name: a\nbase: &b {os: linux, arch: amd64}\nmatrix:\n" + strings.Repeat("  - *b\n", 400),
+			},
+			args: []string{"--schema", "schema.json", "a.yaml"},
+			want: 0,
+		},
 		"schema violation": {
 			files: map[string]string{"a.yaml": "value: 1\n"},
 			args:  []string{"--schema", "schema.json", "a.yaml"},

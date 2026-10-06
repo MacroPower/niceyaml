@@ -306,20 +306,20 @@ const (
 // tag and anchor, as in `&s !foo &b !!binary x`, or behind a tagged
 // alias, as it does for *s with `&s !foo *b`.
 //
-// The distinct field counts the nodes of the tree once each, and the
-// aliased field counts the nodes the aliases in the tree repeat. The
-// sizes maps hold the size of each alias's content once the counter has
-// read it, one map for each read mode, so a chain of nested aliases costs
-// one read per anchor. The open map holds the content of each alias the
-// counter is reading, so an alias that leads back into that content
-// counts as one node and the count ends. For each alias
-// [treeCounter.reaches] has followed, the collections map holds whether
-// the alias refers to a mapping or a sequence, and the textKeys map holds
-// whether the decoder writes out a key that is the alias as text. The
-// binaries map holds whether such an alias refers to a !!binary scalar.
-// A chain of tagged aliases then costs one walk, however many aliases
-// lead into it. The repeated map holds what [treeCounter.repeats] has
-// found for the content of each alias.
+// The distinct field counts the nodes of the tree once each, and an alias
+// in the tree is one of them. The aliased field counts the nodes the
+// aliases in the tree repeat. The sizes maps hold the size of each
+// alias's content once the counter has read it, one map for each read
+// mode, so a chain of nested aliases costs one read per anchor. The open
+// map holds the content of each alias the counter is reading, so an alias
+// that leads back into that content counts as one node and the count
+// ends. For each alias [treeCounter.reaches] has followed, the
+// collections map holds whether the alias refers to a mapping or a
+// sequence, and the textKeys map holds whether the decoder writes out a
+// key that is the alias as text. The binaries map holds whether such an
+// alias refers to a !!binary scalar. A chain of tagged aliases then costs
+// one walk, however many aliases lead into it. The repeated map holds
+// what [treeCounter.repeats] has found for the content of each alias.
 type treeCounter struct {
 	resolver    *paths.Resolver
 	nulls       map[*ast.AliasNode]bool
@@ -473,8 +473,9 @@ func (c *treeCounter) anchor(anchor *ast.AnchorNode, top bool, mode readMode) in
 // anchors or through a tagged alias, as [treeCounter.holdsBinary] finds
 // it. Any other alias counts one. An alias to a tag over another alias,
 // as in `&s !foo *k`, refers to what that alias refers to. With top set,
-// the alias lies outside the content of every other alias, and alias
-// adds that size to aliased, or the one node to distinct.
+// the alias lies outside the content of every other alias. It is then a
+// node of the tree itself, so alias adds one to distinct, and it adds
+// the size of what the alias repeats to aliased.
 func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 	target, err := c.resolver.Deref(alias)
 	if err != nil || c.nulls[alias] || c.open[target] || (mode == readValue && !c.repeats(target)) {
@@ -495,6 +496,8 @@ func (c *treeCounter) alias(alias *ast.AliasNode, top bool, mode readMode) int {
 	}
 
 	if top {
+		// The alias is a node of its own, as gopkg.in/yaml.v3 counts it.
+		c.distinct = aliaslimit.AddCapped(c.distinct, 1)
 		c.aliased = aliaslimit.AddCapped(c.aliased, size)
 	}
 
