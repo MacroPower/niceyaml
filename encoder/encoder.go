@@ -1,6 +1,7 @@
 package encoder
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,7 +14,7 @@ import (
 
 // ErrNoNode indicates a value that go-yaml encodes to no YAML node, such
 // as a marshaler that returns no YAML document or an AST node that holds
-// only comments. [Encoder.Encode] returns it.
+// only comments. [Encoder.Encode] and [Marshal] return it.
 var ErrNoNode = errors.New("value encodes to no YAML node")
 
 // Pretty is an [Option] that makes the encoder write the layout prettier
@@ -242,6 +243,21 @@ func (e *Encoder) Encode(ctx context.Context, v any) error {
 	e.written = true
 
 	return nil
+}
+
+// Marshal returns v as one YAML document that ends in a line break. The
+// document is what a new [Encoder] with opts writes for v, and
+// [Encoder.Encode] describes how it encodes v, where it passes ctx, and
+// the errors it returns. Marshal returns nil bytes with an error.
+func Marshal(ctx context.Context, v any, opts ...Option) ([]byte, error) {
+	var buf bytes.Buffer
+
+	err := New(&buf, opts...).Encode(ctx, v)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
 
 // render returns the YAML text of node, or an error when the go-yaml

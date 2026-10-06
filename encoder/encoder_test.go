@@ -667,6 +667,140 @@ func TestEncoder_Encode_writeError(t *testing.T) {
 	assert.Zero(t, calls, "Encode runs no marshaler after a refused write")
 }
 
+func TestMarshal(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input any
+		want  string
+		opts  []encoder.Option
+	}{
+		"null": {
+			input: nil,
+			want:  "null\n",
+		},
+		"number": {
+			input: 1,
+			want:  "1\n",
+		},
+		"empty string": {
+			input: "",
+			want:  "\"\"\n",
+		},
+		"empty mapping": {
+			input: map[string]int{},
+			want:  "{}\n",
+		},
+		"empty sequence": {
+			input: []int{},
+			want:  "[]\n",
+		},
+		"empty struct": {
+			input: struct{}{},
+			want:  "{}\n",
+		},
+		"root sequence": {
+			input: []string{"a", "b"},
+			want:  "- a\n- b\n",
+		},
+		"literal block": {
+			input: map[string]string{"k": "a\nb\n"},
+			want:  "k: |\n  a\n  b\n",
+		},
+		"literal block that keeps its final line breaks": {
+			input: map[string]string{"k": "a\nb\n\n"},
+			want:  "k: |+\n  a\n  b\n\n",
+		},
+		"marshaled YAML with no final line break": {
+			input: rawYAML("a: 1"),
+			want:  "a: 1\n",
+		},
+		"marshaled YAML of two documents": {
+			input: rawYAML("a: 1\n---\nb: 2\n"),
+			want:  "a: 1\n",
+		},
+		"options": {
+			input: map[string]map[string][]string{"k": {"items": {"one"}}},
+			opts: []encoder.Option{
+				encoder.Pretty(),
+				encoder.WithYAMLComments(yaml.CommentMap{"$.k": {yaml.HeadComment(" head")}}),
+			},
+			want: "# head\nk:\n  items:\n    - one\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := encoder.Marshal(t.Context(), tc.input, tc.opts...)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, string(got))
+
+			var buf bytes.Buffer
+
+			require.NoError(t, encoder.New(&buf, tc.opts...).Encode(t.Context(), tc.input))
+			assert.Equal(t, buf.String(), string(got), "Marshal returns what Encode writes")
+		})
+	}
+}
+
+func TestMarshal_errors(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input any
+		err   error
+		// Holds the message of an error that has no sentinel.
+		msg  string
+		opts []encoder.Option
+	}{
+		"value that encodes to no node": {
+			input: emptyMarshaler{},
+			err:   encoder.ErrNoNode,
+		},
+		"comment key that is not a path": {
+			input: map[string]int{"a": 1},
+			opts:  []encoder.Option{encoder.WithYAMLComments(yaml.CommentMap{"a": {yaml.LineComment(" x")}})},
+			err:   yaml.ErrInvalidPathString,
+		},
+		"value go-yaml cannot encode": {
+			input: make(chan int),
+			msg:   "unknown value type chan int",
+		},
+		"negative indent": {
+			input: map[string]map[string]int{"a": {"b": 1}},
+			opts:  []encoder.Option{encoder.WithYAMLOptions(yaml.Indent(-2))},
+			msg:   "print YAML: strings: negative Repeat count",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := encoder.Marshal(t.Context(), tc.input, tc.opts...)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+			} else {
+				require.EqualError(t, err, tc.msg)
+			}
+
+			assert.Nil(t, got)
+		})
+	}
+}
+
+func TestMarshal_context(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.WithValue(t.Context(), policyKey{}, "redact")
+
+	got, err := encoder.Marshal(ctx, map[string]policyMarshaler{"policy": {}})
+	require.NoError(t, err)
+	assert.Equal(t, "policy: redact\n", string(got))
+}
+
 func TestWithIndent_panicsBelowOne(t *testing.T) {
 	t.Parallel()
 
