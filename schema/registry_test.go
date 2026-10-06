@@ -49,6 +49,30 @@ func lookup(t *testing.T, client *http.Client, r schema.Resolver) error {
 	return err //nolint:wrapcheck // Tests inspect the registry's own error.
 }
 
+// writeFiles writes files, a map from slash-separated path to content,
+// under dir.
+func writeFiles(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+
+	for name, data := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o700))
+		require.NoError(t, os.WriteFile(path, []byte(data), 0o600))
+	}
+}
+
+// rootFS returns the file system of an [os.Root] opened on dir. The Root
+// stays open until the test ends.
+func rootFS(t *testing.T, dir string) fs.FS {
+	t.Helper()
+
+	root, err := os.OpenRoot(dir)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, root.Close()) })
+
+	return root.FS()
+}
+
 // Path helpers for tests.
 var kindPath = paths.Current().Child("kind")
 
@@ -1924,6 +1948,11 @@ func TestRegistry_WithFS(t *testing.T) {
 		"schemas/pod.json":        &fstest.MapFile{Data: schemaData},
 	}
 
+	// The working directory holds none of these files, so a read that
+	// went to it would fail.
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
 	t.Run("a file ref reads from the file system", func(t *testing.T) {
 		t.Parallel()
 
@@ -1967,15 +1996,183 @@ func TestRegistry_WithFS(t *testing.T) {
 		require.ErrorIs(t, err, os.ErrNotExist)
 	})
 
-	t.Run("a missing file reports the path", func(t *testing.T) {
+	t.Run("a directive with a fragment selects a subschema", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := fstest.MapFS{
+			"configs/defs.json": &fstest.MapFile{
+				Data: []byte(`{"$defs": {"Foo": {"$ref": "#/$defs/Name"}, "Name": {"required": ["name"]}}}`),
+			},
+		}
+
+		reg := schema.NewRegistry(schema.WithFS(fsys), schema.WithResolvers(schema.Directive()))
+
+		const directive = "# yaml-language-server: $schema=./defs.json#/$defs/Foo\n"
+
+		valid := yamltest.FirstDocumentWithPath(t, directive+"name: x\n", "configs/app.yaml")
+		require.NoError(t, reg.Validate(t.Context(), valid))
+
+		invalid := yamltest.FirstDocumentWithPath(t, directive+"other: 1\n", "configs/app.yaml")
+		err := reg.Validate(t.Context(), invalid)
+		require.ErrorContains(t, err, `missing required property "name"`)
+
+		// A pointer that names nothing reports the path in the file system.
+		missing := yamltest.FirstDocumentWithPath(t,
+			"# yaml-language-server: $schema=./defs.json#/$defs/Missing\nname: x\n", "configs/app.yaml")
+		err = reg.Validate(t.Context(), missing)
+		require.ErrorIs(t, err, schema.ErrCompile)
+		assert.Contains(t, err.Error(), `"configs/defs.json#/$defs/Missing"`)
+		assert.NotContains(t, err.Error(), wd)
+	})
+
+	t.Run("a $ref through the parent stays in the file system", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := fstest.MapFS{
+			"schemas/app/main.json": &fstest.MapFile{
+				Data: []byte(`{"properties": {"a": {"$ref": "../defs/a.json"}}}`),
+			},
+			"schemas/defs/a.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
+		}
+
+		reg := schema.NewRegistry(
+			schema.WithFS(fsys),
+			schema.WithResolvers(schema.File("schemas/app/main.json")),
+		)
+
+		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
+
+		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+		require.ErrorContains(t, err, `$.a: expected "string", got "integer"`)
+	})
+
+	t.Run("a missing file reports the path in the file system", func(t *testing.T) {
 		t.Parallel()
 
 		reg := schema.NewRegistry(schema.WithFS(bundle))
 
-		_, err := reg.Load(t.Context(), schema.File("schemas/missing.json"))
+		_, err := reg.Load(t.Context(), schema.File("./schemas/missing.json"))
 		require.ErrorIs(t, err, schema.ErrLoad)
 		require.ErrorIs(t, err, fs.ErrNotExist)
-		assert.Contains(t, err.Error(), "schemas/missing.json")
+		assert.Equal(t,
+			`load schema: "./schemas/missing.json": read schemas/missing.json: `+
+				`open schemas/missing.json: file does not exist`,
+			err.Error())
+	})
+
+	t.Run("a missing $ref reports the path in the file system", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := fstest.MapFS{
+			"schemas/root.json": &fstest.MapFile{
+				Data: []byte(`{"properties": {"a": {"$ref": "defs.json"}}}`),
+			},
+		}
+
+		reg := schema.NewRegistry(
+			schema.WithFS(fsys),
+			schema.WithResolvers(schema.File("schemas/root.json")),
+		)
+
+		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
+		require.ErrorIs(t, err, schema.ErrValidate)
+		assert.Contains(t, err.Error(), "read schemas/defs.json: open schemas/defs.json: file does not exist")
+		assert.NotContains(t, err.Error(), wd)
+	})
+
+	t.Run("a path outside the file system names no file", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			path string
+		}{
+			"absolute path under the working directory": {
+				path: filepath.Join(wd, "schemas", "pod.json"),
+			},
+			"absolute path elsewhere": {
+				path: filepath.Join(t.TempDir(), "pod.json"),
+			},
+			"rooted path": {
+				path: "/schemas/pod.json",
+			},
+			"drive-letter path": {
+				path: "C:/schemas/pod.json",
+			},
+			"relative path through the parent": {
+				path: "../schemas/pod.json",
+			},
+			"relative path out of the root and back": {
+				path: "../" + filepath.Base(wd) + "/schemas/pod.json",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				reg := schema.NewRegistry(schema.WithFS(bundle))
+
+				_, err := reg.Load(t.Context(), schema.File(tc.path))
+				require.ErrorIs(t, err, schema.ErrLoad)
+				require.ErrorIs(t, err, fs.ErrInvalid)
+
+				_, err = reg.Schema(t.Context(), schema.File(tc.path))
+				require.ErrorIs(t, err, schema.ErrLoad)
+				require.ErrorIs(t, err, fs.ErrInvalid)
+			})
+		}
+	})
+
+	t.Run("a directive in a document opened by absolute path names no file", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocumentWithPath(t,
+			"# yaml-language-server: $schema=./app.schema.json\nkind: App\n",
+			filepath.Join(wd, "configs", "app.yaml"))
+
+		reg := schema.NewRegistry(
+			schema.WithFS(bundle),
+			schema.WithResolvers(schema.Directive()),
+		)
+
+		err := reg.Validate(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, fs.ErrInvalid)
+	})
+
+	t.Run("a file and a loadable with one name stay apart", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := fstest.MapFS{"s.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)}}
+
+		file := schema.File("s.json")
+		loadable := schema.Loadable("s.json", func(context.Context) ([]byte, error) {
+			return []byte(`{"type": "integer"}`), nil
+		})
+
+		assert.NotEqual(t, loadable.Key(), file.Key())
+
+		// Load the two in both orders, each in a registry of its own.
+		for _, loadableFirst := range []bool{true, false} {
+			reg := schema.NewRegistry(schema.WithFS(fsys))
+
+			if loadableFirst {
+				_, err := reg.Schema(t.Context(), loadable)
+				require.NoError(t, err)
+			}
+
+			fromFile, err := reg.Schema(t.Context(), file)
+			require.NoError(t, err)
+
+			fromLoadable, err := reg.Schema(t.Context(), loadable)
+			require.NoError(t, err)
+
+			require.NoError(t, fromFile.ValidateValue(t.Context(), "x"))
+			require.Error(t, fromFile.ValidateValue(t.Context(), 5))
+
+			require.NoError(t, fromLoadable.ValidateValue(t.Context(), 5))
+			require.Error(t, fromLoadable.ValidateValue(t.Context(), "x"))
+		}
 	})
 
 	t.Run("a named pipe is invalid", func(t *testing.T) {
@@ -2008,55 +2205,6 @@ func TestRegistry_WithFS(t *testing.T) {
 		require.ErrorContains(t, err, "exceeds")
 	})
 
-	t.Run("an absolute path reads relative to the working directory", func(t *testing.T) {
-		t.Parallel()
-
-		wd, err := os.Getwd()
-		require.NoError(t, err)
-
-		reg := schema.NewRegistry(schema.WithFS(bundle))
-
-		data, err := reg.Load(t.Context(), schema.File(filepath.Join(wd, "schemas", "pod.json")))
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
-	})
-
-	t.Run("a directive resolves beside a document opened by absolute path", func(t *testing.T) {
-		t.Parallel()
-
-		wd, err := os.Getwd()
-		require.NoError(t, err)
-
-		source := niceyaml.NewSourceFromString(
-			"# yaml-language-server: $schema=./app.schema.json\nkind: App\n",
-			niceyaml.WithFilePath(filepath.Join(wd, "configs", "app.yaml")),
-		)
-
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		reg := schema.NewRegistry(
-			schema.WithFS(bundle),
-			schema.WithResolvers(schema.Directive()),
-		)
-
-		require.NoError(t, reg.Validate(t.Context(), doc))
-	})
-
-	t.Run("an absolute path outside the working directory names no file", func(t *testing.T) {
-		t.Parallel()
-
-		reg := schema.NewRegistry(schema.WithFS(bundle))
-
-		_, err := reg.Load(t.Context(), schema.File(filepath.Join(t.TempDir(), "pod.json")))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrInvalid)
-
-		_, err = reg.Load(t.Context(), schema.File("/schemas/pod.json"))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrInvalid)
-	})
-
 	t.Run("an os.Root refuses a symlink out of its tree", func(t *testing.T) {
 		t.Parallel()
 
@@ -2070,11 +2218,7 @@ func TestRegistry_WithFS(t *testing.T) {
 			t.Skipf("create symlink: %v", err)
 		}
 
-		r, err := os.OpenRoot(root)
-		require.NoError(t, err)
-		t.Cleanup(func() { assert.NoError(t, r.Close()) })
-
-		reg := schema.NewRegistry(schema.WithFS(r.FS()))
+		reg := schema.NewRegistry(schema.WithFS(rootFS(t, root)))
 
 		_, err = reg.Load(t.Context(), schema.File("s.json"))
 		require.ErrorIs(t, err, schema.ErrLoad)
@@ -2100,6 +2244,397 @@ func TestRegistry_WithFS(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
 	})
+
+	t.Run("the last file system option wins", func(t *testing.T) {
+		t.Parallel()
+
+		abs := filepath.Join(wd, "schemas", "pod.json")
+
+		// WithFS last reads only the path as written.
+		reg := schema.NewRegistry(schema.WithFSAt(".", fstest.MapFS{}), schema.WithFS(bundle))
+
+		data, err := reg.Load(t.Context(), schema.File("schemas/pod.json"))
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, data)
+
+		_, err = reg.Load(t.Context(), schema.File(abs))
+		require.ErrorIs(t, err, fs.ErrInvalid)
+
+		// WithFSAt last reads the path on disk.
+		reg = schema.NewRegistry(schema.WithFS(fstest.MapFS{}), schema.WithFSAt(".", bundle))
+
+		data, err = reg.Load(t.Context(), schema.File(abs))
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, data)
+	})
+}
+
+func TestRegistry_WithFSAt(t *testing.T) {
+	t.Parallel()
+
+	const (
+		nameSchema = `{"properties": {"name": {"type": "string"}}}`
+		directive  = "# yaml-language-server: $schema=./schema.json\n"
+	)
+
+	t.Run("a document opened by absolute path resolves its directive", func(t *testing.T) {
+		t.Parallel()
+
+		tenant := t.TempDir()
+		writeFiles(t, tenant, map[string]string{
+			"app.yaml":    directive + "name: 5\n",
+			"ok.yaml":     directive + "name: cafe\n",
+			"schema.json": nameSchema,
+		})
+
+		tcs := map[string]struct {
+			fsys fs.FS
+		}{
+			"os.DirFS":   {fsys: os.DirFS(tenant)},
+			"os.Root.FS": {fsys: rootFS(t, tenant)},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				reg := schema.NewRegistry(
+					schema.WithFSAt(tenant, tc.fsys),
+					schema.WithResolvers(schema.Directive()),
+				)
+
+				source, err := niceyaml.NewSourceFromFile(filepath.Join(tenant, "app.yaml"))
+				require.NoError(t, err)
+
+				err = source.ValidateDocuments(t.Context(), reg)
+				require.ErrorContains(t, err, `expected "string", got "integer"`)
+
+				source, err = niceyaml.NewSourceFromFile(filepath.Join(tenant, "ok.yaml"))
+				require.NoError(t, err)
+				require.NoError(t, source.ValidateDocuments(t.Context(), reg))
+			})
+		}
+	})
+
+	t.Run("a path the directory does not hold names no file", func(t *testing.T) {
+		t.Parallel()
+
+		base := t.TempDir()
+		tenant := filepath.Join(base, "tenant")
+		writeFiles(t, base, map[string]string{
+			"tenant/schema.json": nameSchema,
+			"shared/schema.json": nameSchema,
+		})
+
+		tcs := map[string]struct {
+			path string
+			want string
+		}{
+			"path in another directory": {
+				path: filepath.Join(base, "shared", "schema.json"),
+				want: "not under " + tenant,
+			},
+			"path through the parent": {
+				path: filepath.Join(tenant, "..", "shared", "schema.json"),
+				want: "not under " + tenant,
+			},
+			"the directory itself": {
+				path: tenant,
+				want: "not a regular file",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				reg := schema.NewRegistry(schema.WithFSAt(tenant, os.DirFS(tenant)))
+
+				_, err := reg.Load(t.Context(), schema.File(tc.path))
+				require.ErrorIs(t, err, schema.ErrLoad)
+				require.ErrorIs(t, err, fs.ErrInvalid)
+				require.ErrorContains(t, err, tc.want)
+			})
+		}
+	})
+
+	t.Run("a drive-letter path names no file", func(t *testing.T) {
+		t.Parallel()
+
+		tenant := t.TempDir()
+		reg := schema.NewRegistry(schema.WithFSAt(tenant, os.DirFS(tenant)))
+
+		_, err := reg.Load(t.Context(), schema.File("Q:/schemas/config.json"))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, fs.ErrInvalid)
+	})
+
+	t.Run("a missing file reports the path on disk", func(t *testing.T) {
+		t.Parallel()
+
+		tenant := t.TempDir()
+		missing := filepath.Join(tenant, "schemas", "missing.json")
+
+		reg := schema.NewRegistry(schema.WithFSAt(tenant, os.DirFS(tenant)))
+
+		_, err := reg.Load(t.Context(), schema.File(missing))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		require.ErrorContains(t, err, "read "+missing)
+	})
+
+	t.Run("a $ref reads under the directory and no further", func(t *testing.T) {
+		t.Parallel()
+
+		base := t.TempDir()
+		tenant := filepath.Join(base, "tenant")
+		writeFiles(t, base, map[string]string{
+			"tenant/main.json": `{"properties": {
+				"in": {"$ref": "defs.json"},
+				"out": {"$ref": "../shared/defs.json"}
+			}}`,
+			"tenant/defs.json": `{"type": "string"}`,
+			"shared/defs.json": `{"type": "string"}`,
+		})
+
+		reg := schema.NewRegistry(
+			schema.WithFSAt(tenant, os.DirFS(tenant)),
+			schema.WithResolvers(schema.File(filepath.Join(tenant, "main.json"))),
+		)
+
+		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "in: 5\n"))
+		require.Error(t, err)
+		require.NotErrorIs(t, err, schema.ErrValidate)
+		assert.Contains(t, err.Error(), `$.in: expected "string", got "integer"`)
+
+		err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "out: 5\n"))
+		require.ErrorIs(t, err, schema.ErrValidate)
+		assert.Contains(t, err.Error(), "not under "+tenant)
+
+		// Without the file system, the same schema reads the file outside.
+		disk := schema.NewRegistry(schema.WithResolvers(schema.File(filepath.Join(tenant, "main.json"))))
+		err = disk.Validate(t.Context(), yamltest.FirstDocument(t, "out: 5\n"))
+		require.Error(t, err)
+		require.NotErrorIs(t, err, schema.ErrValidate)
+		assert.Contains(t, err.Error(), `$.out: expected "string", got "integer"`)
+	})
+
+	t.Run("a fragment selects a subschema", func(t *testing.T) {
+		t.Parallel()
+
+		tenant := t.TempDir()
+		writeFiles(t, tenant, map[string]string{
+			"defs.json": `{"$defs": {"Foo": {"$ref": "#/$defs/Name"}, "Name": {"required": ["name"]}}}`,
+		})
+
+		ref := fileOrURL(t, "", "file://"+filepath.ToSlash(filepath.Join(tenant, "defs.json"))+"#/$defs/Foo")
+		reg := schema.NewRegistry(schema.WithFSAt(tenant, os.DirFS(tenant)), schema.WithResolvers(ref))
+
+		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "name: x\n")))
+
+		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "other: 1\n"))
+		require.ErrorContains(t, err, `missing required property "name"`)
+	})
+
+	t.Run("a file system stands for the working directory", func(t *testing.T) {
+		t.Parallel()
+
+		schemaData := []byte(`{"type": "object", "required": ["kind"]}`)
+		bundle := fstest.MapFS{
+			"configs/app.schema.json": &fstest.MapFile{Data: schemaData},
+			"schemas/pod.json":        &fstest.MapFile{Data: schemaData},
+		}
+
+		wd, err := os.Getwd()
+		require.NoError(t, err)
+
+		reg := schema.NewRegistry(
+			schema.WithFSAt(".", bundle),
+			schema.WithResolvers(schema.Directive()),
+		)
+
+		// A relative path and the absolute path it resolves to name one
+		// file.
+		for _, path := range []string{"schemas/pod.json", filepath.Join(wd, "schemas", "pod.json")} {
+			data, err := reg.Load(t.Context(), schema.File(path))
+			require.NoError(t, err, path)
+			assert.Equal(t, schemaData, data, path)
+		}
+
+		doc := yamltest.FirstDocumentWithPath(t,
+			"# yaml-language-server: $schema=./app.schema.json\nkind: App\n",
+			filepath.Join(wd, "configs", "app.yaml"))
+		require.NoError(t, reg.Validate(t.Context(), doc))
+
+		_, err = reg.Load(t.Context(), schema.File(filepath.Join(t.TempDir(), "pod.json")))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, fs.ErrInvalid)
+	})
+
+	t.Run("a link to the directory names the directory", func(t *testing.T) {
+		t.Parallel()
+
+		base := t.TempDir()
+		dir := filepath.Join(base, "dir")
+		link := filepath.Join(base, "link")
+
+		writeFiles(t, dir, map[string]string{"schemas/s.json": nameSchema})
+
+		err := os.Symlink(dir, link)
+		if err != nil {
+			t.Skipf("create symlink: %v", err)
+		}
+
+		tcs := map[string]struct {
+			at   string
+			path string
+			err  error
+		}{
+			"path through the link": {
+				at:   dir,
+				path: filepath.Join(link, "schemas", "s.json"),
+			},
+			"directory through the link": {
+				at:   link,
+				path: filepath.Join(dir, "schemas", "s.json"),
+			},
+			"missing file through the link": {
+				at:   dir,
+				path: filepath.Join(link, "schemas", "missing.json"),
+				err:  fs.ErrNotExist,
+			},
+			"missing directory through the link": {
+				at:   dir,
+				path: filepath.Join(link, "missing", "s.json"),
+				err:  fs.ErrNotExist,
+			},
+			"path beside the link": {
+				at:   dir,
+				path: filepath.Join(base, "schemas", "s.json"),
+				err:  fs.ErrInvalid,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				reg := schema.NewRegistry(schema.WithFSAt(tc.at, os.DirFS(tc.at)))
+
+				data, err := reg.Load(t.Context(), schema.File(tc.path))
+				if tc.err != nil {
+					require.ErrorIs(t, err, schema.ErrLoad)
+					require.ErrorIs(t, err, tc.err)
+
+					return
+				}
+
+				require.NoError(t, err)
+				assert.JSONEq(t, nameSchema, string(data))
+			})
+		}
+	})
+
+	t.Run("a link inside the directory is the file system's to follow", func(t *testing.T) {
+		t.Parallel()
+
+		outside := t.TempDir()
+		writeFiles(t, outside, map[string]string{"s.json": nameSchema})
+
+		root := t.TempDir()
+
+		err := os.Symlink(filepath.Join(outside, "s.json"), filepath.Join(root, "s.json"))
+		if err != nil {
+			t.Skipf("create symlink: %v", err)
+		}
+
+		ref := schema.File(filepath.Join(root, "s.json"))
+
+		data, err := schema.NewRegistry(schema.WithFSAt(root, os.DirFS(root))).Load(t.Context(), ref)
+		require.NoError(t, err)
+		assert.JSONEq(t, nameSchema, string(data))
+
+		_, err = schema.NewRegistry(schema.WithFSAt(root, rootFS(t, root))).Load(t.Context(), ref)
+		require.ErrorIs(t, err, schema.ErrLoad)
+	})
+
+	t.Run("a nil file system keeps the disk", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		writeFiles(t, dir, map[string]string{"s.json": nameSchema})
+
+		// The directory holds no schema, and the registry reads past it.
+		reg := schema.NewRegistry(schema.WithFSAt(t.TempDir(), nil))
+
+		data, err := reg.Load(t.Context(), schema.File(filepath.Join(dir, "s.json")))
+		require.NoError(t, err)
+		assert.JSONEq(t, nameSchema, string(data))
+	})
+
+	t.Run("an empty directory panics", func(t *testing.T) {
+		t.Parallel()
+
+		assert.PanicsWithValue(t, "schema.WithFSAt: dir is empty", func() {
+			schema.WithFSAt("", fstest.MapFS{})
+		})
+	})
+}
+
+// A registry confined to one directory never validates a document outside
+// it against the schema at the same relative path inside. The schema
+// beside the document takes only a string, and the one under the tenant
+// takes anything, so the wrong schema would pass the document.
+func TestRegistry_DocumentOutsideFileSystem(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	tenant := filepath.Join(base, "tenant")
+
+	writeFiles(t, base, map[string]string{
+		"shared/app.yaml":           "# yaml-language-server: $schema=./schema.json\nname: 5\n",
+		"shared/schema.json":        `{"properties": {"name": {"type": "string"}}}`,
+		"tenant/shared/schema.json": `{}`,
+	})
+
+	tcs := map[string]struct {
+		err  error
+		want string
+		opts []schema.RegistryOption
+	}{
+		"WithFS": {
+			opts: []schema.RegistryOption{schema.WithFS(os.DirFS(tenant))},
+			err:  fs.ErrInvalid,
+			want: "an absolute path names no file",
+		},
+		"WithFSAt": {
+			opts: []schema.RegistryOption{schema.WithFSAt(tenant, os.DirFS(tenant))},
+			err:  fs.ErrInvalid,
+			want: "not under " + tenant,
+		},
+		"no file system": {
+			want: `expected "string", got "integer"`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source, err := niceyaml.NewSourceFromFile(filepath.Join(base, "shared", "app.yaml"))
+			require.NoError(t, err)
+
+			reg := schema.NewRegistry(append(tc.opts, schema.WithResolvers(schema.Directive()))...)
+
+			err = source.ValidateDocuments(t.Context(), reg)
+			require.ErrorContains(t, err, tc.want)
+
+			if tc.err != nil {
+				require.ErrorIs(t, err, schema.ErrLoad)
+				require.ErrorIs(t, err, tc.err)
+			}
+		})
+	}
 }
 
 // A program can build a Ref with File, change directory, and only then
@@ -2107,7 +2642,7 @@ func TestRegistry_WithFS(t *testing.T) {
 // process's working directory, so it does not run in parallel.
 //
 //nolint:paralleltest // See above.
-func TestRegistry_WithFS_AfterChdir(t *testing.T) {
+func TestRegistry_FileSystemAfterChdir(t *testing.T) {
 	bundle := fstest.MapFS{
 		"schemas/config.json": &fstest.MapFile{
 			Data: []byte(`{"properties": {"a": {"$ref": "defs.json"}}}`),
@@ -2115,17 +2650,27 @@ func TestRegistry_WithFS_AfterChdir(t *testing.T) {
 		"schemas/defs.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
 	}
 
-	// In both cases the registry reads the path File made absolute,
-	// relative to the directory File saw, and the $ref resolves to an
-	// absolute path.
+	rel := func(string) string { return "schemas/config.json" }
+	abs := func(wd string) string { return filepath.Join(wd, "schemas", "config.json") }
+
+	// WithFS reads the path as written, which no directory changes.
+	// WithFSAt reads the path File made absolute, and the $ref resolves
+	// to an absolute path beside it.
 	tcs := map[string]struct {
 		path func(wd string) string
+		opt  func(wd string) schema.RegistryOption
 	}{
-		"relative path": {
-			path: func(string) string { return "schemas/config.json" },
+		"relative path under WithFS": {
+			path: rel,
+			opt:  func(string) schema.RegistryOption { return schema.WithFS(bundle) },
 		},
-		"absolute path": {
-			path: func(wd string) string { return filepath.Join(wd, "schemas", "config.json") },
+		"relative path under WithFSAt": {
+			path: rel,
+			opt:  func(wd string) schema.RegistryOption { return schema.WithFSAt(wd, bundle) },
+		},
+		"absolute path under WithFSAt": {
+			path: abs,
+			opt:  func(wd string) schema.RegistryOption { return schema.WithFSAt(wd, bundle) },
 		},
 	}
 
@@ -2139,7 +2684,7 @@ func TestRegistry_WithFS_AfterChdir(t *testing.T) {
 
 			t.Chdir(t.TempDir())
 
-			reg := schema.NewRegistry(schema.WithFS(bundle), schema.WithResolvers(ref))
+			reg := schema.NewRegistry(tc.opt(wd), schema.WithResolvers(ref))
 
 			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
 
@@ -2151,80 +2696,14 @@ func TestRegistry_WithFS_AfterChdir(t *testing.T) {
 	}
 }
 
-// File reads the working directory once, so the key and the directory
-// the file system stands for agree even when another goroutine changes
-// directory while File runs. The test changes the process's working
-// directory, so it does not run in parallel.
-//
-//nolint:paralleltest // See above.
-func TestRegistry_WithFS_ChdirDuringFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("File on Windows reads the working directory again in filepath.Abs")
-	}
-
-	bundle := fstest.MapFS{
-		"schemas/config.json": &fstest.MapFile{
-			Data: []byte(`{"properties": {"a": {"$ref": "defs.json"}}}`),
-		},
-		"schemas/defs.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
-	}
-
-	a, b := t.TempDir(), t.TempDir()
-	t.Chdir(a)
-
-	var (
-		stop   atomic.Bool
-		passes atomic.Int64
-		wg     sync.WaitGroup
-	)
-
-	// Each pass ends in a, so the directory is a again once the loop stops.
-	// The goroutine calls os.Chdir, since t.Chdir would register a cleanup
-	// for every change.
-	wg.Go(func() {
-		for !stop.Load() {
-			assert.NoError(t, os.Chdir(b)) //nolint:usetesting // See above.
-			assert.NoError(t, os.Chdir(a)) //nolint:usetesting // See above.
-			passes.Add(1)
-		}
-	})
-
-	// Build the refs only once the goroutine changes directory, so the
-	// two overlap.
-	for passes.Load() == 0 {
-		runtime.Gosched()
-	}
-
-	// Most of the refs are equal, so keep one of each to validate, keyed
-	// by its fields. The loop then builds enough refs to catch a change
-	// of directory while File runs, and the test compiles only a few
-	// schemas.
-	refs := make(map[string]schema.Ref)
-
-	for range 5000 {
-		ref := schema.File("schemas/config.json")
-		refs[fmt.Sprintf("%#v", ref)] = ref
-	}
-
-	stop.Store(true)
-	wg.Wait()
-
-	doc := yamltest.FirstDocument(t, "a: x\n")
-
-	for _, ref := range refs {
-		reg := schema.NewRegistry(schema.WithFS(bundle), schema.WithResolvers(ref))
-		require.NoError(t, reg.Validate(t.Context(), doc))
-	}
-}
-
-// Under WithFS, each Ref reads relative to the working directory File
-// saw, so two Refs that share a Key, or a $ref URI, can name different
-// files. The registry keeps them apart whichever it compiles first. The
+// Under WithFS, a Ref reads the path File took, whatever directory File
+// ran in. Two Refs with one path share a schema though their Keys differ,
+// and two Refs with one Key name two files when their paths differ. The
 // test changes the process's working directory, so it does not run in
 // parallel.
 //
 //nolint:paralleltest // See above.
-func TestRegistry_WithFS_ChdirBetweenFiles(t *testing.T) {
+func TestRegistry_WithFS_AnyWorkingDirectory(t *testing.T) {
 	bundle := fstest.MapFS{
 		"x/s.json":    &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
 		"s.json":      &fstest.MapFile{Data: []byte(`{"type": "integer"}`)},
@@ -2234,41 +2713,31 @@ func TestRegistry_WithFS_ChdirBetweenFiles(t *testing.T) {
 		"defs.json":   &fstest.MapFile{Data: []byte(`{"type": "integer"}`)},
 	}
 
-	rel := func(path string) func(string) string {
-		return func(string) string { return path }
-	}
-
-	abs := func(path string) func(string) string {
-		return func(base string) string { return filepath.Join(base, filepath.FromSlash(path)) }
-	}
-
 	// Each Ref is File(path) run from dir under a temporary base, and its
 	// schema accepts only values of the JSON type want.
 	type fileRef struct {
-		path func(base string) string
 		dir  string
+		path string
 		want string
 	}
 
 	tcs := map[string]struct {
-		first  fileRef
-		second fileRef
+		first   fileRef
+		second  fileRef
+		sameKey bool
 	}{
-		"one key from relative paths": {
-			first:  fileRef{dir: ".", path: rel("x/s.json"), want: "string"},
-			second: fileRef{dir: "x", path: rel("s.json"), want: "integer"},
+		"one path from two directories": {
+			first:  fileRef{dir: ".", path: "s.json", want: "integer"},
+			second: fileRef{dir: "x", path: "s.json", want: "integer"},
 		},
-		"one key from an absolute path": {
-			first:  fileRef{dir: ".", path: abs("x/s.json"), want: "string"},
-			second: fileRef{dir: "x", path: abs("x/s.json"), want: "integer"},
+		"one key from two paths": {
+			first:   fileRef{dir: ".", path: "x/s.json", want: "string"},
+			second:  fileRef{dir: "x", path: "s.json", want: "integer"},
+			sameKey: true,
 		},
-		"one $ref URI": {
-			first:  fileRef{dir: ".", path: rel("x/main.json"), want: "string"},
-			second: fileRef{dir: "x", path: rel("other.json"), want: "integer"},
-		},
-		"one key from a path through the parent": {
-			first:  fileRef{dir: "x", path: rel("../x/s.json"), want: "integer"},
-			second: fileRef{dir: "x", path: rel("s.json"), want: "integer"},
+		"one $ref from two directories": {
+			first:  fileRef{dir: ".", path: "x/main.json", want: "string"},
+			second: fileRef{dir: "x", path: "other.json", want: "integer"},
 		},
 	}
 
@@ -2286,16 +2755,21 @@ func TestRegistry_WithFS_ChdirBetweenFiles(t *testing.T) {
 			for i, f := range files {
 				t.Chdir(filepath.Join(base, f.dir))
 
-				refs[i] = schema.File(f.path(base))
+				refs[i] = schema.File(f.path)
 			}
+
+			assert.Equal(t, tc.sameKey, refs[0].Key() == refs[1].Key())
 
 			// Compile the two in both orders, each in a registry of its own.
 			for _, order := range [][]int{{0, 1}, {1, 0}} {
 				reg := schema.NewRegistry(schema.WithFS(bundle))
+				schemas := make([]*schema.Schema, len(files))
 
 				for _, i := range order {
 					s, err := reg.Schema(t.Context(), refs[i])
 					require.NoError(t, err)
+
+					schemas[i] = s
 
 					for typ, v := range values {
 						err := s.ValidateValue(t.Context(), v)
@@ -2306,9 +2780,124 @@ func TestRegistry_WithFS_ChdirBetweenFiles(t *testing.T) {
 						}
 					}
 				}
+
+				// One path is one cache entry, whatever the Key.
+				if files[0].path == files[1].path {
+					assert.Same(t, schemas[0], schemas[1])
+				} else {
+					assert.NotSame(t, schemas[0], schemas[1])
+				}
 			}
 		})
 	}
+}
+
+// Under WithFSAt, a relative document resolves against the working
+// directory, as it does without a file system, and not against the
+// directory the file system stands for. The test changes the process's
+// working directory, so it does not run in parallel.
+//
+//nolint:paralleltest // See above.
+func TestRegistry_WithFSAt_RelativeDocument(t *testing.T) {
+	repo := t.TempDir()
+
+	// The schema beside the document takes only a string, and the one at
+	// the root of the repository takes anything.
+	writeFiles(t, repo, map[string]string{
+		"schema.json":     `{}`,
+		"sub/schema.json": `{"properties": {"name": {"type": "string"}}}`,
+		"sub/app.yaml":    "# yaml-language-server: $schema=./schema.json\nname: 5\n",
+	})
+
+	t.Chdir(filepath.Join(repo, "sub"))
+
+	reg := schema.NewRegistry(
+		schema.WithFSAt(repo, os.DirFS(repo)),
+		schema.WithResolvers(schema.Directive()),
+	)
+
+	source, err := niceyaml.NewSourceFromFile("app.yaml")
+	require.NoError(t, err)
+
+	err = source.ValidateDocuments(t.Context(), reg)
+	require.ErrorContains(t, err, `expected "string", got "integer"`)
+}
+
+// A relative directory resolves against the working directory when
+// NewRegistry runs, not when WithFSAt runs or when the registry reads.
+// The test changes the process's working directory, so it does not run
+// in parallel.
+//
+//nolint:paralleltest // See above.
+func TestRegistry_WithFSAt_RelativeDirectory(t *testing.T) {
+	bundle := fstest.MapFS{"s.json": &fstest.MapFile{Data: []byte(`{"type": "object"}`)}}
+
+	before, at, after := t.TempDir(), t.TempDir(), t.TempDir()
+
+	t.Chdir(before)
+
+	opt := schema.WithFSAt(".", bundle)
+
+	t.Chdir(at)
+
+	reg := schema.NewRegistry(opt)
+
+	t.Chdir(after)
+
+	data, err := reg.Load(t.Context(), schema.File(filepath.Join(at, "s.json")))
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"type": "object"}`, string(data))
+
+	for _, dir := range []string{before, after} {
+		_, err := reg.Load(t.Context(), schema.File(filepath.Join(dir, "s.json")))
+		require.ErrorIs(t, err, fs.ErrInvalid, dir)
+	}
+}
+
+// A shell that enters a project through a symbolic link leaves the link
+// in the working directory, while a program that finds the project root
+// itself names the directory the link leads to. A relative document
+// still lies under that root. The test changes the process's working
+// directory, so it does not run in parallel.
+//
+//nolint:paralleltest // See above.
+func TestRegistry_WithFSAt_WorkingDirectoryThroughLink(t *testing.T) {
+	base := t.TempDir()
+	link := filepath.Join(base, "link")
+
+	writeFiles(t, base, map[string]string{
+		"repo/sub/schema.json": `{"properties": {"name": {"type": "string"}}}`,
+		"repo/sub/app.yaml":    "# yaml-language-server: $schema=./schema.json\nname: 5\n",
+	})
+
+	// The temporary directory may lie behind a link of its own.
+	repo, err := filepath.EvalSymlinks(filepath.Join(base, "repo"))
+	require.NoError(t, err)
+
+	err = os.Symlink(repo, link)
+	if err != nil {
+		t.Skipf("create symlink: %v", err)
+	}
+
+	t.Chdir(filepath.Join(link, "sub"))
+
+	wd, err := os.Getwd()
+	require.NoError(t, err)
+
+	if wd != filepath.Join(link, "sub") {
+		t.Skipf("the platform resolves the link in the working directory: %s", wd)
+	}
+
+	reg := schema.NewRegistry(
+		schema.WithFSAt(repo, rootFS(t, repo)),
+		schema.WithResolvers(schema.Directive()),
+	)
+
+	source, err := niceyaml.NewSourceFromFile("app.yaml")
+	require.NoError(t, err)
+
+	err = source.ValidateDocuments(t.Context(), reg)
+	require.ErrorContains(t, err, `expected "string", got "integer"`)
 }
 
 func TestRegistry_Load(t *testing.T) {

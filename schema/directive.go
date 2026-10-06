@@ -165,7 +165,7 @@ type directiveResolver struct{}
 // so a directive can name any file the registry can read, a path outside
 // the document's directory included, and any host the client can reach.
 // A program that validates documents from another trust domain confines
-// the registry. [WithFS] with the file system of an [os.Root] restricts
+// the registry. [WithFSAt] with the file system of an [os.Root] restricts
 // file reads to one directory tree, and a client whose Transport or
 // CheckRedirect restricts hosts on every hop bounds the fetch. Neither
 // limits how many schemas documents can name. The registry keeps every

@@ -175,9 +175,9 @@
 //
 // The loaders return a [Ref] whose key identifies the schema and whose
 // bytes the registry loads through [Registry.Load]. [Embedded] holds a
-// copy of the bytes. The registry reads a file from the working directory
-// or from the file system [WithFS] gave it, and it fetches a URL with the
-// client [WithHTTPClient] gave it. [Registry.Schema] checks its cache by
+// copy of the bytes. The registry reads a file from disk or from the
+// file system [WithFS] or [WithFSAt] gave it, and it fetches a URL with
+// the client [WithHTTPClient] gave it. [Registry.Schema] checks its cache by
 // key before it loads and compiles those bytes, so once a schema
 // compiles, the registry serves it to every later document that names it
 // without loading it again. A failed load or compile stays out of the
@@ -222,6 +222,27 @@
 //
 //	schema.File("./schemas/config.json")
 //	schema.URL("https://example.com/schema.json")
+//
+// A registry reads schema files from disk unless an option gives it a
+// file system. [WithFS] reads each path as written from a file system of
+// its own, such as an [embed.FS], and pairs with the documents of
+// [go.jacobcolvin.com/niceyaml.NewSourceFromFS]. [WithFSAt] reads the
+// paths a registry reads from disk, through a file system that stands
+// for one directory, and pairs with the documents of
+// [go.jacobcolvin.com/niceyaml.NewSourceFromFile]. A path outside that
+// directory then fails to load, so the option confines a program that
+// validates documents from another trust domain:
+//
+//	root, err := os.OpenRoot(dir)
+//	if err != nil {
+//	    return err
+//	}
+//	defer root.Close()
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithFSAt(dir, root.FS()),
+//	    schema.WithResolvers(schema.Directive()),
+//	)
 //
 // [FileOrURL] routes a reference as written in a directive or on a command
 // line, which may be a file path or a URL, and returns an error for one

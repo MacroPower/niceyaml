@@ -19,9 +19,9 @@ func TestFile_FSRootedPath(t *testing.T) {
 
 	// Windows reads a rooted path without a drive, such as \proj\x.json,
 	// as relative, while File makes it absolute on the current drive. A
-	// registry with a file system reads such a path relative to the
-	// working directory, as it reads a path with a drive, and so does a
-	// $ref that names one.
+	// registry under WithFSAt reads such a path relative to its
+	// directory, as it reads a path with a drive, and so does a $ref
+	// that names one.
 	cwd, err := os.Getwd()
 	require.NoError(t, err)
 
@@ -43,7 +43,7 @@ func TestFile_FSRootedPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			reg := schema.NewRegistry(schema.WithFS(fsys))
+			reg := schema.NewRegistry(schema.WithFSAt(".", fsys))
 
 			s, err := reg.Schema(t.Context(), schema.File(tc.path))
 			require.NoError(t, err)

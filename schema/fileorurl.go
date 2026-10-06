@@ -41,7 +41,7 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // FileOrURL uses the reference as written, so whoever wrote it picks the
 // file or host, as the note on [File] says of a path. A registry that
 // takes references from another trust domain confines its reads with
-// [WithFS] and the file system of an [os.Root], and its fetches with a
+// [WithFSAt] and the file system of an [os.Root], and its fetches with a
 // client that restricts hosts. It also serves one batch or request rather
 // than the whole process, since it keeps a schema for every distinct URL
 // it fetches, and an allowed host can answer endless ones.

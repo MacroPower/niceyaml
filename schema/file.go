@@ -29,14 +29,18 @@ const driveLen = 2
 
 // File creates a [Ref] that names a schema file. The Ref is a [Resolver]
 // that names the file for every document. The registry reads the file
-// with [Registry.Load] from the working directory, with path made
-// absolute against it. Given [WithFS], the registry reads path from that
-// file system instead, whose root stands for the working directory, so a
-// schema shipped in an [embed.FS] loads without touching the disk. A
-// relative path reads relative to that root, in slash form. An absolute
-// path reads relative to the working directory File made it absolute
-// against, so an absolute path outside that directory names no file in
-// the file system. See [WithFS] for details.
+// with [Registry.Load]. Without a file system, it reads the file from
+// disk, with a relative path made absolute against the working directory
+// at the time File runs. A change of working directory after File
+// therefore leaves the Ref on the same file.
+//
+// Given [WithFS], the registry reads path from that file system instead,
+// as written and in slash form, so a schema shipped in an [embed.FS]
+// loads without touching the disk. The working directory plays no part
+// there, and an absolute path names no file. Given [WithFSAt], the
+// registry reads the path it would read from disk through a file system
+// that stands for one directory, so a path outside that directory names
+// no file. See the two options for details.
 //
 // File names the schema by the file:// URL of the path made absolute
 // against the working directory, such as file:///srv/schemas/config.json,
@@ -50,30 +54,36 @@ const driveLen = 2
 // document that names it. The registry reads the file when the Ref
 // loads, not when File runs.
 //
-// A $ref in the schema resolves against that file:// URL, so "defs.json"
-// names the file beside it. The registry reads each file or HTTP URL a
-// reference names the way it reads the schema, once however many schemas
-// reference it. When a reference fails to load, a later validation that
-// reaches it loads it again. A remote schema that names a local file fails
-// to resolve, and the registry does not read that file.
+// A $ref in the schema resolves against the URL of the file, so
+// "defs.json" names the file beside it. Under [WithFS], that URL holds
+// the path in the file system, as file:///schemas/config.json does for
+// schemas/config.json, while [Ref.Key] keeps the URL of the path on
+// disk. The registry reads each file or HTTP URL a reference names the
+// way it reads the schema, once however many schemas reference it. When
+// a reference fails to load, a later validation that reaches it loads it
+// again. A remote schema that names a local file fails to resolve, and
+// the registry does not read that file.
 //
 // The registry reads only a regular file of at most 10 MB, the limit it
 // sets on a response from a [URL], so a path that names a directory, a
-// device, or a named pipe fails to load. Given [WithFS], the registry
-// checks the path with [fs.Stat] before it opens the file, and an [fs.FS]
-// opens a file with no flags, so a named pipe can still block the read
-// until a writer opens it. A file system that implements [fs.StatFS],
-// such as [os.DirFS] or the one [os.Root.FS] returns, answers the check
-// without an open, so only a named pipe that replaces the file while the
-// registry reads it blocks. On any other file system, such as the one
-// [fs.Sub] wraps around [os.DirFS], [fs.Stat] opens the file to check it,
-// so a named pipe already at the path blocks the read as well.
+// device, or a named pipe fails to load. Given a file system, the
+// registry checks the path with [fs.Stat] before it opens the file, and
+// an [fs.FS] opens a file with no flags, so a named pipe can still block
+// the read until a writer opens it. A file system that implements
+// [fs.StatFS], such as [os.DirFS] or the one [os.Root.FS] returns,
+// answers the check without an open, so only a named pipe that replaces
+// the file while the registry reads it blocks. On any other file system,
+// such as the one [fs.Sub] wraps around [os.DirFS], [fs.Stat] opens the
+// file to check it, so a named pipe already at the path blocks the read
+// as well.
 //
 // A relative path has no absolute form in a process without a working
-// directory, such as one whose directory no longer exists. File then
-// names the path by the URL of the same path under the root, so
-// "schemas/config.json" becomes file:///schemas/config.json, and the
-// registry reports the missing directory when it loads the Ref.
+// directory, such as one whose directory no longer exists or one that
+// runs in a browser. File then names the path by the URL of the same
+// path under the root, so "schemas/config.json" becomes
+// file:///schemas/config.json. Such a Ref loads under [WithFS], which
+// reads the path as written. Any other registry reports the missing
+// directory when it loads the Ref.
 //
 // File is for a path written in the program, so it panics on an empty
 // path, as [Loadable] panics on an empty key. A reference read from a
@@ -107,8 +117,8 @@ const driveLen = 2
 //
 // File uses the path as written, so a path built from a document can
 // name any file the registry can read. Check such a path before passing
-// it to File, as the example does, or confine the registry with
-// [WithFS], so a path outside its file system names no file.
+// it to File, as the example does, or confine the registry with [WithFS]
+// or [WithFSAt], so a path outside its file system names no file.
 func File(path string) Ref {
 	ref, err := file(path)
 	if err != nil {
@@ -127,31 +137,16 @@ func file(path string) (Ref, error) {
 		return Ref{}, ErrEmptyPath
 	}
 
-	// A registry with a file system reads an absolute path relative to
-	// this directory. When os.Getwd fails, wd stays empty and the registry
-	// uses the working directory at the time of the read, so an absolute
-	// path still builds a Ref.
-	wd, err := os.Getwd()
-	if err != nil {
-		wd = ""
-	}
-
 	var (
 		abs    = path
 		absErr error
 	)
 
 	switch {
-	case !onWindows && wd != "" && !filepath.IsAbs(path) && !hasDriveLetter(path):
-		// Off Windows, filepath.Abs joins a relative path to a second read
-		// of the working directory, which can differ from wd if another
-		// goroutine changes directory in between. Join path to wd instead,
-		// so the key and wd name one directory. Windows keeps
-		// filepath.Abs, which resolves rooted and drive-relative paths
-		// that Join does not.
-		abs = filepath.Join(wd, path)
-
 	case !hasDriveLetter(path) || onWindows:
+		// The Ref keeps the absolute path rather than the working
+		// directory, so every read names the file the key does, wherever
+		// the process stands by then.
 		abs, absErr = filepath.Abs(path)
 
 	case len(path) > driveLen:
@@ -167,48 +162,215 @@ func file(path string) (Ref, error) {
 
 	// A relative path has no absolute form while the process has no
 	// working directory. The key then names the path under the root, and
-	// the read reports absErr.
+	// a read from disk reports absErr.
 	named := abs
 	if absErr != nil {
 		abs, named = "", slashpath.Clean("/"+filepath.ToSlash(path))
 	}
 
-	return Ref{key: fileURL(named), file: path, abs: abs, wd: wd, absErr: absErr}, nil
+	return Ref{key: fileURL(named), file: path, abs: abs, absErr: absErr}, nil
 }
 
-// noAbsPath returns the error a read of ref reports when [File] could not
-// make its path absolute, and nil for any other Ref.
-func noAbsPath(ref Ref) error {
-	if ref.file == "" || ref.abs != "" {
-		return nil
+// An fsDir is the directory on disk that the root of a registry's file
+// system stands for, as [WithFSAt] names it.
+type fsDir struct {
+	// Why the directory has no absolute path, which every read reports.
+	err error
+	// The directory as an absolute path.
+	dir string
+	// The directory with its symbolic links resolved.
+	physical string
+}
+
+// newFSDir returns the [fsDir] for dir. It makes a relative dir absolute
+// against the working directory at the time of the call.
+func newFSDir(dir string) *fsDir {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return &fsDir{err: fmt.Errorf("no absolute path for directory %s: %w", dir, err)}
 	}
 
-	return fmt.Errorf("read %s: no absolute path: %w", ref.file, ref.absErr)
+	return &fsDir{dir: abs, physical: resolveLinks(abs)}
 }
 
-// readFile returns the bytes of the file a [Ref] from [File] names. It
-// reads abs, the path [File] made absolute to build the key, so a change
-// of working directory after [File] does not put another file's bytes
-// under the key.
+// rel returns the path in the file system that names path, an absolute
+// path on disk, in slash form. A path names a file there when it is the
+// directory or lies under it as written. Otherwise rel resolves the
+// symbolic links in the directories of both and compares them again.
+// That second comparison finds a path made absolute against a working
+// directory that a link led to. Any other path, and a drive-letter path
+// off Windows, is [fs.ErrInvalid].
+func (d *fsDir) rel(path string) (string, error) {
+	if d.err != nil {
+		return "", d.err
+	}
+
+	// Off Windows, a drive letter is an ordinary directory name, so the
+	// path is relative there, while its key names the drive.
+	if hasDriveLetter(path) && !onWindows {
+		return "", noDriveLetter()
+	}
+
+	// Windows reads a rooted path without a volume, such as \proj\x.json,
+	// as relative. A $ref can name one, and it can lie only on the drive
+	// of the directory. Off Windows, a rooted path is absolute already.
+	if os.IsPathSeparator(path[0]) && filepath.VolumeName(path) == "" && !filepath.IsAbs(path) {
+		path = filepath.VolumeName(d.dir) + path
+	}
+
+	// The path as written comes first, so a link under the directory
+	// reaches the file system, which decides whether to follow it.
+	rel, ok := under(d.dir, path)
+	if !ok && filepath.IsAbs(path) {
+		// Resolve the directory of the file and keep its name, so a file
+		// that is itself a link counts where it stands.
+		physical := filepath.Join(resolveLinks(filepath.Dir(path)), filepath.Base(path))
+		rel, ok = under(d.physical, physical)
+	}
+
+	if !ok {
+		return "", fmt.Errorf(
+			"%w: not under %s, the directory the registry's file system stands for",
+			fs.ErrInvalid, d.dir,
+		)
+	}
+
+	return filepath.ToSlash(rel), nil
+}
+
+// under returns path relative to dir, and whether path is dir or lies
+// under it.
+func under(dir, path string) (string, bool) {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+
+	return rel, true
+}
+
+// resolveLinks returns path, an absolute path, with its symbolic links
+// resolved. Where path names nothing on disk, resolveLinks resolves the
+// longest leading part that does and keeps the rest as written.
+func resolveLinks(path string) string {
+	rest := ""
+
+	for dir := path; ; {
+		resolved, err := filepath.EvalSymlinks(dir)
+		if err == nil {
+			return filepath.Join(resolved, rest)
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return path
+		}
+
+		dir, rest = parent, filepath.Join(filepath.Base(dir), rest)
+	}
+}
+
+// isRelative reports whether path, as given to [File], is relative. Such
+// a path is not absolute, does not start at a root, and names no drive.
+func isRelative(path string) bool {
+	return !filepath.IsAbs(path) && !hasDriveLetter(path) &&
+		!os.IsPathSeparator(path[0]) && filepath.VolumeName(path) == ""
+}
+
+// filePath returns the absolute path that names the file of ref, a [Ref]
+// from [File], in the registry. The file URL of that path is the URL the
+// registry knows the file by, and [Registry.readFile] reads it.
 //
-// The root of fsys stands for wd, the working directory [File] made the
-// path absolute against, so readFile reads abs from fsys relative to wd,
-// in slash form. Its errors then name the file by name, the path as
-// given. A path outside wd, or a drive-letter path off Windows, names no
-// file in fsys. A rooted path without a drive, such as \proj\x.json,
-// counts as absolute on the drive of wd. Off Windows, readFile refuses a
-// drive-letter path with [fs.ErrInvalid] whether fsys is nil or not.
-func readFile(fsys fs.FS, name, abs, wd string) ([]byte, error) {
-	if fsys != nil {
-		return readFS(fsys, name, abs, wd)
+// Without a file system and under [WithFSAt], that is the path on disk
+// [File] made absolute. A Ref that File built without a working directory
+// has none. Under [WithFS], it is the path as given to File, cleaned, in
+// slash form, and behind a slash, so schemas/config.json becomes
+// /schemas/config.json. The working directory plays no part there. An
+// absolute path, or one that leads out of the root, is [fs.ErrInvalid].
+func (r *Registry) filePath(ref Ref) (string, error) {
+	if !r.ownFS() {
+		if ref.abs == "" {
+			return "", fmt.Errorf("read %s: no absolute path: %w", ref.file, ref.absErr)
+		}
+
+		return ref.abs, nil
 	}
 
+	if !isRelative(ref.file) {
+		return "", fmt.Errorf(
+			"read %s: %w: an absolute path names no file in the registry's file system (see WithFSAt)",
+			ref.file, fs.ErrInvalid,
+		)
+	}
+
+	name := slashpath.Clean(filepath.ToSlash(ref.file))
+	if !fs.ValidPath(name) {
+		return "", fmt.Errorf("read %s: %w: not a path in the registry's file system", ref.file, fs.ErrInvalid)
+	}
+
+	return slashpath.Join("/", name), nil
+}
+
+// ownFS reports whether the registry reads files from a file system that
+// is a namespace of its own, as [WithFS] sets it, rather than from disk
+// or from a file system that stands for a directory on disk.
+func (r *Registry) ownFS() bool {
+	return r.fsys != nil && r.fsAt == nil
+}
+
+// readFile returns the bytes of the file at path, an absolute path as
+// [Registry.filePath] returns it for a [Ref] and as a file URL in a $ref
+// names it.
+//
+// Without a file system, readFile reads path from disk. Under [WithFSAt],
+// it reads path relative to the directory the file system stands for,
+// and a path outside that directory is [fs.ErrInvalid]. Its errors name
+// path either way. Under [WithFS], it reads path without its leading
+// slash from the file system, and its errors name that path. Off Windows,
+// a drive-letter path is [fs.ErrInvalid] everywhere, and under [WithFS]
+// it is on Windows too.
+func (r *Registry) readFile(path string) ([]byte, error) {
+	switch {
+	case r.fsys == nil:
+		return readDisk(path)
+
+	case r.fsAt != nil:
+		name, err := r.fsAt.rel(path)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
+
+		return readFS(r.fsys, name, path)
+
+	default:
+		rooted := slashpath.Clean(filepath.ToSlash(path))
+		if !strings.HasPrefix(rooted, "/") {
+			return nil, fmt.Errorf(
+				"read %s: %w: a drive letter names no file in the registry's file system",
+				path, fs.ErrInvalid,
+			)
+		}
+
+		// The root itself is "." to an fs.FS.
+		name := strings.TrimPrefix(rooted, "/")
+		if name == "" {
+			name = "."
+		}
+
+		return readFS(r.fsys, name, name)
+	}
+}
+
+// readDisk returns the bytes of the file at abs, an absolute path on
+// disk. Off Windows, readDisk refuses a drive-letter path with
+// [fs.ErrInvalid].
+func readDisk(abs string) ([]byte, error) {
 	// Off Windows, a drive letter is an ordinary directory name, so
 	// the read would resolve the path against the working directory
 	// while the key stays the cwd-independent drive URL. One key would
 	// then name different bytes per directory, so refuse the read.
 	if hasDriveLetter(abs) && !onWindows {
-		return nil, fmt.Errorf("read %s: %w: a drive letter names no file on %s", abs, fs.ErrInvalid, runtime.GOOS)
+		return nil, fmt.Errorf("read %s: %w", abs, noDriveLetter())
 	}
 
 	// Stat before the open, since opening a FIFO blocks until a writer
@@ -233,27 +395,12 @@ func readFile(fsys fs.FS, name, abs, wd string) ([]byte, error) {
 	return readBounded(f, abs)
 }
 
-// readFS returns the bytes of the file at abs, an absolute path, in
-// fsys, whose root stands for wd. It reads abs relative to wd, so the
-// file it reads depends only on abs and wd, and errors name the file by
-// name. A rooted path without a drive, such as \proj\x.json, counts as
-// absolute, as it does for [FileOrURL]. An empty wd stands for the
-// working directory at the time of the read. A path outside wd, or a
-// drive-letter path off Windows, is [fs.ErrInvalid].
-func readFS(fsys fs.FS, name, abs, wd string) ([]byte, error) {
-	rel, err := fsRelative(abs, wd)
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", name, err)
-	}
-
-	fsPath := slashpath.Clean(filepath.ToSlash(rel))
-	if !fs.ValidPath(fsPath) {
-		return nil, fmt.Errorf("read %s: %w: not a path in the registry's file system", name, fs.ErrInvalid)
-	}
-
-	// Stat before the open, as readFile does. The Stat of [os.DirFS]
+// readFS returns the bytes of the file at fsPath in fsys. Its errors
+// name the file by name.
+func readFS(fsys fs.FS, fsPath, name string) ([]byte, error) {
+	// Stat before the open, as readDisk does. The Stat of [os.DirFS]
 	// follows a symbolic link, so a link to a device is not regular.
-	// Unlike readFile, the open takes no flags, since [fs.FS] has none
+	// Unlike readDisk, the open takes no flags, since [fs.FS] has none
 	// to pass. A FIFO that replaces the file after the Stat therefore
 	// blocks the open until a writer opens the other end. When fsys does
 	// not implement [fs.StatFS], as the [fs.Sub] wrapper of [os.DirFS]
@@ -275,40 +422,6 @@ func readFS(fsys fs.FS, name, abs, wd string) ([]byte, error) {
 	defer f.Close() //nolint:errcheck // Best-effort close.
 
 	return readBounded(f, name)
-}
-
-// fsRelative returns abs, an absolute path, relative to wd, the
-// directory the root of the registry's file system stands for, for
-// [readFS]. An empty wd stands for the working directory at the time of
-// the call.
-func fsRelative(abs, wd string) (string, error) {
-	if wd == "" {
-		var err error
-
-		wd, err = os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("resolve working directory: %w", err)
-		}
-	}
-
-	// Windows reads a rooted path without a volume, such as \proj\x.json,
-	// as relative, though File made it absolute on the drive of the
-	// working directory, so it takes the drive of wd. Off Windows, a
-	// rooted path is absolute already.
-	target := abs
-	if abs != "" && os.IsPathSeparator(abs[0]) && filepath.VolumeName(abs) == "" && !filepath.IsAbs(abs) {
-		target = filepath.VolumeName(wd) + abs
-	}
-
-	rel, err := filepath.Rel(wd, target)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf(
-			"%w: not under the working directory the registry's file system stands for",
-			fs.ErrInvalid,
-		)
-	}
-
-	return rel, nil
 }
 
 // readBounded returns the bytes of f, the file at name. It checks again
@@ -344,6 +457,12 @@ func readBounded(f fs.File, name string) ([]byte, error) {
 // device, or a named pipe.
 func notRegular(name string) error {
 	return fmt.Errorf("read %s: %w: not a regular file", name, fs.ErrInvalid)
+}
+
+// noDriveLetter returns the [fs.ErrInvalid] error for a drive-letter
+// path on a platform other than Windows, where it names no file.
+func noDriveLetter() error {
+	return fmt.Errorf("%w: a drive letter names no file on %s", fs.ErrInvalid, runtime.GOOS)
 }
 
 // fileURL returns the file:// URL that names the absolute path abs.

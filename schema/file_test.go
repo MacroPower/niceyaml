@@ -6,11 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -186,15 +190,72 @@ func TestFile_RelativePath(t *testing.T) {
 	}
 }
 
+// A '#' in a file name is part of the name. The key escapes it, so it
+// opens no fragment, and every registry reads the file.
+func TestFile_HashInName(t *testing.T) {
+	t.Parallel()
+
+	const data = `{"type": "string"}`
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a#b.json")
+	require.NoError(t, os.WriteFile(path, []byte(data), 0o600))
+
+	tcs := map[string]struct {
+		path string
+		opts []schema.RegistryOption
+	}{
+		"on disk": {
+			path: path,
+		},
+		"under WithFS": {
+			path: "a#b.json",
+			opts: []schema.RegistryOption{
+				schema.WithFS(fstest.MapFS{"a#b.json": &fstest.MapFile{Data: []byte(data)}}),
+			},
+		},
+		"under WithFSAt": {
+			path: path,
+			opts: []schema.RegistryOption{schema.WithFSAt(dir, os.DirFS(dir))},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ref := schema.File(tc.path)
+			assert.True(t, strings.HasSuffix(ref.Key(), "/a%23b.json"), ref.Key())
+
+			s, err := schema.NewRegistry(tc.opts...).Schema(t.Context(), ref)
+			require.NoError(t, err)
+
+			require.NoError(t, s.ValidateValue(t.Context(), "x"))
+			require.Error(t, s.ValidateValue(t.Context(), 5))
+		})
+	}
+}
+
 // File has no working directory to make a relative path absolute against
-// once the directory is gone, and it builds a Ref all the same. The test
-// removes the process's working directory, so it does not run in
-// parallel.
+// once the directory is gone, and it builds a Ref all the same. A
+// registry under WithFS reads the path as written, so the Ref loads
+// there and nowhere else. The test removes the process's working
+// directory, so it does not run in parallel.
 //
 //nolint:paralleltest // See above.
 func TestFile_NoWorkingDirectory(t *testing.T) {
 	schemaPath := filepath.Join(t.TempDir(), "s.json")
 	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type": "object"}`), 0o600))
+
+	elsewhere := t.TempDir()
+
+	bundle := fstest.MapFS{
+		"configs/app.yaml": &fstest.MapFile{
+			Data: []byte("# yaml-language-server: $schema=../schemas/root.json\nname: 5\n"),
+		},
+		"schemas/root.json": &fstest.MapFile{Data: []byte(`{"properties": {"name": {"$ref": "defs.json"}}}`)},
+		"schemas/defs.json": &fstest.MapFile{Data: []byte(`{"type": "string"}`)},
+	}
 
 	gone := filepath.Join(t.TempDir(), "gone")
 	require.NoError(t, os.Mkdir(gone, 0o700))
@@ -211,18 +272,65 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 	}
 
 	//nolint:paralleltest // See above.
-	t.Run("a relative path builds a Ref that does not load", func(t *testing.T) {
+	t.Run("a relative path builds a Ref", func(t *testing.T) {
 		var ref schema.Ref
 
 		require.NotPanics(t, func() { ref = schema.File("schemas/root.json") })
 		assert.Equal(t, "file:///schemas/root.json", ref.Key())
+	})
 
-		_, _, err := load(t, ref)
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorContains(t, err, "read schemas/root.json: no absolute path")
+	//nolint:paralleltest // See above.
+	t.Run("a relative path loads under WithFS", func(t *testing.T) {
+		reg := schema.NewRegistry(
+			schema.WithFS(bundle),
+			schema.WithResolvers(schema.File("schemas/root.json")),
+		)
 
-		_, err = schema.NewRegistry().Schema(t.Context(), ref)
-		require.ErrorIs(t, err, schema.ErrLoad)
+		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "name: cafe\n")))
+
+		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "name: 5\n"))
+		require.ErrorContains(t, err, `$.name: expected "string", got "integer"`)
+	})
+
+	//nolint:paralleltest // See above.
+	t.Run("a directive resolves under WithFS", func(t *testing.T) {
+		source, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
+		require.NoError(t, err)
+
+		reg := schema.NewRegistry(
+			schema.WithFS(bundle),
+			schema.WithResolvers(schema.Directive()),
+		)
+
+		err = source.ValidateDocuments(t.Context(), reg)
+		require.ErrorContains(t, err, `$.name: expected "string", got "integer"`)
+	})
+
+	//nolint:paralleltest // See above.
+	t.Run("a relative path loads nowhere else", func(t *testing.T) {
+		tcs := map[string]struct {
+			opts []schema.RegistryOption
+		}{
+			"on disk": {},
+			"under WithFSAt": {
+				opts: []schema.RegistryOption{schema.WithFSAt(elsewhere, bundle)},
+			},
+		}
+
+		for name, tc := range tcs {
+			//nolint:paralleltest // See above.
+			t.Run(name, func(t *testing.T) {
+				reg := schema.NewRegistry(tc.opts...)
+				ref := schema.File("schemas/root.json")
+
+				_, err := reg.Load(t.Context(), ref)
+				require.ErrorIs(t, err, schema.ErrLoad)
+				require.ErrorContains(t, err, "read schemas/root.json: no absolute path")
+
+				_, err = reg.Schema(t.Context(), ref)
+				require.ErrorIs(t, err, schema.ErrLoad)
+			})
+		}
 	})
 
 	//nolint:paralleltest // See above.
@@ -246,6 +354,15 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 		_, data, err := load(t, schema.File(schemaPath))
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"type": "object"}`, string(data))
+	})
+
+	//nolint:paralleltest // See above.
+	t.Run("a relative directory under WithFSAt names none", func(t *testing.T) {
+		reg := schema.NewRegistry(schema.WithFSAt(".", bundle))
+
+		_, err := reg.Load(t.Context(), schema.File(schemaPath))
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorContains(t, err, "no absolute path for directory .")
 	})
 }
 
