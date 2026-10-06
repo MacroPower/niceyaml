@@ -430,7 +430,7 @@ func newDocuments(src *Source) []*Node {
 			return tk == nil || tk.Position == nil
 		})
 		doc.node = &Node{source: src, doc: doc, content: doc.tokens, base: paths.Doc(), span: spans[i]}
-		doc.state = docstate.New()
+		doc.state = docstate.New(docstate.WithAliasLimit(!src.skipAliasLimit))
 		nodes[i] = doc.node
 	}
 
@@ -1905,13 +1905,14 @@ func contextEnded(err error) bool {
 // Available options:
 //   - [WithValidator]
 //   - [WithSelfValidation]
-//   - [WithAliasLimit]
 //   - [WithDisallowUnknownFields]
 //   - [WithYAMLDecodeOptions]
 //
-// A DecodeOption sets how one decode runs. What the documents mean, such
-// as the anchors of the reference documents that [WithReferences] names,
-// belongs to the [Source], which applies it to every decode.
+// A DecodeOption sets how one decode runs. A setting that describes the
+// documents belongs to the [Source], which applies it to every decode
+// and every validation. [WithReferences] names the reference documents
+// whose anchors an alias reads that way, and [WithAliasLimit] says
+// whether the alias limit applies.
 type DecodeOption func(*decodeConfig)
 
 // decodeConfig holds the settings a [DecodeOption] configures. Its zero
@@ -1921,7 +1922,6 @@ type decodeConfig struct {
 	validators            []Validator
 	yamlOpts              []yaml.DecodeOption
 	skipSelfValidation    bool
-	skipAliasLimit        bool
 	disallowUnknownFields bool
 }
 
@@ -1984,19 +1984,6 @@ func WithValidator(dv Validator) DecodeOption {
 func WithSelfValidation(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.skipSelfValidation = !enabled
-	}
-}
-
-// WithAliasLimit is a [DecodeOption] that sets whether a decode refuses
-// a node that holds an alias when the aliases of its document go past
-// the limit [Node.DecodeInto] describes. The default is true. Turn it off
-// only for trusted input, since the go-yaml decoder can take minutes on a
-// few hundred bytes of nested aliases and never checks the context. A
-// [go.jacobcolvin.com/niceyaml/schema.Schema] given with [WithValidator]
-// applies its own limit either way.
-func WithAliasLimit(enabled bool) DecodeOption {
-	return func(c *decodeConfig) {
-		c.skipAliasLimit = !enabled
 	}
 }
 
@@ -2250,7 +2237,8 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // [time.Time] from its value, so it adds no such count either. The count
 // sees only the types in v, so it misses text that a go-yaml option
 // hands to other code, such as [yaml.CustomUnmarshaler] or
-// [yaml.UseJSONUnmarshaler]. [WithAliasLimit] turns both counts off.
+// [yaml.UseJSONUnmarshaler]. [WithAliasLimit] on the [Source] turns both
+// counts off for every decode of its documents.
 //
 // An alias inside the node resolves against the anchors of the whole
 // document, to the anchor of its name defined last before the alias,
@@ -2299,15 +2287,13 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 		return err
 	}
 
-	if !cfg.skipAliasLimit {
-		err = aliasing.CheckDecode(n)
-		if err == nil && aliasing.DecodesText(reflect.TypeOf(v).Elem()) {
-			err = aliasing.CheckDecodeText(n)
-		}
+	err = aliasing.CheckDecode(n)
+	if err == nil && aliasing.DecodesText(reflect.TypeOf(v).Elem()) {
+		err = aliasing.CheckDecodeText(n)
+	}
 
-		if err != nil {
-			return n.Bind(WrapError(err, atToken(contentStart(n.AST()))))
-		}
+	if err != nil {
+		return n.Bind(WrapError(err, atToken(contentStart(n.AST()))))
 	}
 
 	yamlOpts := n.yamlOptions(cfg.decodeOptions())

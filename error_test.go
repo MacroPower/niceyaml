@@ -33,6 +33,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/schema"
+	"go.jacobcolvin.com/niceyaml/schema/matcher"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
@@ -10234,6 +10235,56 @@ func TestIsInvalid(t *testing.T) {
 			},
 			err:  niceyaml.ErrExcessiveAliasing,
 			want: true,
+		},
+		"excessive aliasing a schema refuses": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return yamltest.FirstDocument(t, yamltest.AliasLevels(5)).Validate(t.Context(), portSchema)
+			},
+			err:  niceyaml.ErrExcessiveAliasing,
+			want: true,
+		},
+		"excessive aliasing a schema refuses in a decoded value": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				trusted := yamltest.FirstDocument(t, yamltest.AliasLevels(5), niceyaml.WithAliasLimit(false))
+
+				data, err := trusted.Decode[any](t.Context())
+				require.NoError(t, err)
+
+				return portSchema.ValidateValue(t.Context(), data)
+			},
+			err:  niceyaml.ErrExcessiveAliasing,
+			want: true,
+		},
+		"excessive aliasing a content matcher refuses": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				routed := schema.NewRegistry(schema.WithResolvers(schema.When(
+					matcher.Content(paths.Doc().Child("a"), "x"),
+					portSchema.Ref(),
+				)))
+
+				return yamltest.FirstDocument(t, yamltest.AliasLevels(5)).Validate(t.Context(), routed)
+			},
+			err:  schema.ErrResolve,
+			want: true,
+		},
+		"excessive aliasing of a path": {
+			// The path selects far more nodes than the document holds,
+			// which is no fault of the document.
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				_, err := yamltest.FirstDocument(t, yamltest.AliasLevels(5)).
+					Nodes(paths.MustParse("$.a[5][*][*][*][*][*]"))
+
+				return err //nolint:wrapcheck // The test inspects the error of the call.
+			},
+			err: niceyaml.ErrExcessiveAliasing,
 		},
 		"source that does not read": {
 			build: func(*testing.T) error {

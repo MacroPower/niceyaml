@@ -307,6 +307,57 @@ func TestCheckDecode(t *testing.T) {
 
 		require.NoError(t, aliasing.CheckDecode((*niceyaml.Node)(nil)))
 	})
+
+	t.Run("source with the limit off", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, yamltest.MergeLevels(7), niceyaml.WithAliasLimit(false))
+
+		require.NoError(t, aliasing.CheckDecode(doc))
+		require.NoError(t, aliasing.CheckDecode(yamltest.At(t, doc, paths.Current().Child("m7"))))
+	})
+}
+
+func TestLimited(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		opts []niceyaml.SourceOption
+		want bool
+	}{
+		"default": {
+			want: true,
+		},
+		"limit on": {
+			opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(true)},
+			want: true,
+		},
+		"limit off": {
+			opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// The source holds the setting, so every document of it and
+			// every node of a document answer alike.
+			docs, err := niceyaml.NewSourceFromString("a: [x]\n---\nb: 1\n", tc.opts...).Documents()
+			require.NoError(t, err)
+			require.Len(t, docs, 2)
+
+			assert.Equal(t, tc.want, aliasing.Limited(docs[0]))
+			assert.Equal(t, tc.want, aliasing.Limited(docs[1]))
+			assert.Equal(t, tc.want, aliasing.Limited(yamltest.At(t, docs[0], paths.Current().Child("a"))))
+		})
+	}
+
+	t.Run("nil node", func(t *testing.T) {
+		t.Parallel()
+
+		assert.False(t, aliasing.Limited((*niceyaml.Node)(nil)))
+	})
 }
 
 func TestHoldsReferenceAlias(t *testing.T) {
@@ -420,5 +471,14 @@ func TestCheckDecodeText(t *testing.T) {
 		t.Parallel()
 
 		require.NoError(t, aliasing.CheckDecodeText((*niceyaml.Node)(nil)))
+	})
+
+	t.Run("source with the limit off", func(t *testing.T) {
+		t.Parallel()
+
+		input := longScalar + "kind: " + flowList("*a", 500) + "\n"
+		doc := yamltest.FirstDocument(t, input, niceyaml.WithAliasLimit(false))
+
+		require.NoError(t, aliasing.CheckDecodeText(yamltest.At(t, doc, paths.Current().Child("kind"))))
 	})
 }

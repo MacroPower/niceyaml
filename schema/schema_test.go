@@ -35,6 +35,18 @@ func compileSchema(t *testing.T, schemaData []byte) *schema.Schema {
 	return v
 }
 
+// requireExcessiveAliasing fails the test unless err is a refusal of the
+// alias limit. Such an error matches [schema.ErrExcessiveAliasing], the
+// document or the value is at fault for it, and it does not wrap
+// [schema.ErrValidate].
+func requireExcessiveAliasing(t *testing.T, err error) {
+	t.Helper()
+
+	require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
+	require.NotErrorIs(t, err, schema.ErrValidate)
+	assert.True(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
+}
+
 func TestSchema_Validate(t *testing.T) {
 	t.Parallel()
 
@@ -1027,10 +1039,10 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		schema string
-		input  string
-		err    string
-		errs   []error
+		schema    string
+		input     string
+		err       string
+		excessive bool
 	}{
 		"conforming ordered mapping": {
 			schema: `{
@@ -1094,9 +1106,9 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 			`),
 		},
 		"alias bomb of ordered mappings": {
-			schema: `{"type": "object"}`,
-			input:  bomb.String(),
-			errs:   []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			schema:    `{"type": "object"}`,
+			input:     bomb.String(),
+			excessive: true,
 		},
 	}
 
@@ -1105,21 +1117,20 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 			t.Parallel()
 
 			v := compileSchema(t, []byte(tc.schema))
-			doc := yamltest.FirstDocument(t, tc.input)
 
-			data, err := doc.Decode[any](t.Context(),
-				niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()),
-				niceyaml.WithAliasLimit(false),
-			)
+			// The source turns the alias limit off, so the bomb decodes.
+			// ValidateValue holds no source and applies the limit to the
+			// value all the same.
+			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithAliasLimit(false))
+
+			data, err := doc.Decode[any](t.Context(), niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()))
 			require.NoError(t, err)
 
 			err = v.ValidateValue(t.Context(), data)
 
 			switch {
-			case tc.errs != nil:
-				for _, want := range tc.errs {
-					require.ErrorIs(t, err, want)
-				}
+			case tc.excessive:
+				requireExcessiveAliasing(t, err)
 
 			case tc.err != "":
 				require.Error(t, err)
@@ -1189,21 +1200,21 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		}
 
 		tcs := map[string]struct {
-			schema string
-			input  string
-			err    string
-			errs   []error
+			schema    string
+			input     string
+			err       string
+			excessive bool
 		}{
 			"alias bomb": {
-				schema: `{"type": "object"}`,
-				input:  yamltest.AliasLevels(8),
-				errs:   []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				schema:    `{"type": "object"}`,
+				input:     yamltest.AliasLevels(8),
+				excessive: true,
 			},
 			"binary aliased many times": {
 				// Each alias would add the 22 KB of base64 text again.
-				schema: `{"type": "object"}`,
-				input:  binaryAliases(16<<10, 1000),
-				errs:   []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				schema:    `{"type": "object"}`,
+				input:     binaryAliases(16<<10, 1000),
+				excessive: true,
 			},
 			"binary aliased a few times": {
 				// The aliases make up nine tenths of the base64 text, which
@@ -1271,15 +1282,18 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				v := compileSchema(t, []byte(tc.schema))
 				doc := yamltest.FirstDocument(t, tc.input)
 
-				data, err := doc.Decode[any](t.Context(), niceyaml.WithAliasLimit(false))
+				// A source with the alias limit off decodes the value
+				// ValidateValue checks, and ValidateValue applies the
+				// limit to it all the same.
+				trusted := yamltest.FirstDocument(t, tc.input, niceyaml.WithAliasLimit(false))
+
+				data, err := trusted.Decode[any](t.Context())
 				require.NoError(t, err)
 
 				for _, err := range []error{doc.Validate(t.Context(), v), v.ValidateValue(t.Context(), data)} {
 					switch {
-					case tc.errs != nil:
-						for _, want := range tc.errs {
-							require.ErrorIs(t, err, want)
-						}
+					case tc.excessive:
+						requireExcessiveAliasing(t, err)
 
 					case tc.err != "":
 						require.Error(t, err)
@@ -1315,40 +1329,40 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		v := compileSchema(t, []byte(`{"maxProperties": 5}`))
 
 		tcs := map[string]struct {
-			path  paths.Path
-			input string
-			errs  []error
+			path      paths.Path
+			input     string
+			excessive bool
 		}{
 			"alias bomb as mapping key": {
-				input: lists + "b:\n  ? *l7\n  : v\n",
-				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				input:     lists + "b:\n  ? *l7\n  : v\n",
+				excessive: true,
 			},
 			"alias bomb as flow mapping key": {
-				input: lists + "b: {*l7 : v}\n",
-				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				input:     lists + "b: {*l7 : v}\n",
+				excessive: true,
 			},
 			"alias bomb under a string tag": {
-				input: lists + "b: !!str *l7\n",
-				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				input:     lists + "b: !!str *l7\n",
+				excessive: true,
 			},
 			"merge key bomb": {
-				input: yamltest.MergeLevels(7),
-				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				input:     yamltest.MergeLevels(7),
+				excessive: true,
 			},
 			"node holding an alias with a bomb outside it": {
 				// A decode of a node that holds an alias reads the whole
 				// document to find the anchor.
-				path:  paths.Current().Child("c"),
-				input: lists + "b:\n  ? *l7\n  : v\nc: [*k]\n",
-				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				path:      paths.Current().Child("c"),
+				input:     lists + "b:\n  ? *l7\n  : v\nc: [*k]\n",
+				excessive: true,
 			},
 			"alias to a small sequence as mapping key": {
 				input: "s: &s [a, b]\n*s : v\n",
 			},
 			// The key holds a copy of the long scalar for each alias.
 			"scalar aliases written out in a key": {
-				input: scalarAliases + "m: {? *k : v}\n",
-				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				input:     scalarAliases + "m: {? *k : v}\n",
+				excessive: true,
 			},
 			"scalar aliases in a value": {
 				input: scalarAliases + "m: {n: *k}\n",
@@ -1377,15 +1391,13 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				}
 
 				err := doc.Validate(t.Context(), v)
-				if tc.errs == nil {
+				if !tc.excessive {
 					require.NoError(t, err)
 
 					return
 				}
 
-				for _, want := range tc.errs {
-					require.ErrorIs(t, err, want)
-				}
+				requireExcessiveAliasing(t, err)
 			})
 		}
 
@@ -1439,19 +1451,19 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			)
 
 			tcs := map[string]struct {
-				doc  *niceyaml.Node
-				path paths.Path
-				errs []error
+				doc       *niceyaml.Node
+				path      paths.Path
+				excessive bool
 			}{
 				"first node holding an alias": {
-					doc:  bomb,
-					path: paths.Current().Child("c"),
-					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+					doc:       bomb,
+					path:      paths.Current().Child("c"),
+					excessive: true,
 				},
 				"second node holding an alias": {
-					doc:  bomb,
-					path: paths.Current().Child("d"),
-					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+					doc:       bomb,
+					path:      paths.Current().Child("d"),
+					excessive: true,
 				},
 				"node without an alias": {
 					doc:  bomb,
@@ -1465,32 +1477,32 @@ func TestSchema_AliasExpansion(t *testing.T) {
 					path: paths.Current().Child("list"),
 				},
 				"node with one alias to a binary aliased many times": {
-					doc:  binary,
-					path: paths.Current().Child("other"),
-					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+					doc:       binary,
+					path:      paths.Current().Child("other"),
+					excessive: true,
 				},
 				"document with aliases to a tag over an alias to a binary": {
-					doc:  chained,
-					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+					doc:       chained,
+					excessive: true,
 				},
 				"node of aliases to a tag over an alias to a binary": {
-					doc:  chained,
-					path: paths.Current().Child("list"),
-					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+					doc:       chained,
+					path:      paths.Current().Child("list"),
+					excessive: true,
 				},
 				"node with one alias to a tag over an alias to a binary": {
-					doc:  chained,
-					path: paths.Current().Child("other"),
-					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+					doc:       chained,
+					path:      paths.Current().Child("other"),
+					excessive: true,
 				},
 				"document with aliases to a binary under another tag": {
-					doc:  wrapped,
-					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+					doc:       wrapped,
+					excessive: true,
 				},
 				"node with one alias to a binary under another tag": {
-					doc:  wrapped,
-					path: paths.Current().Child("other"),
-					errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+					doc:       wrapped,
+					path:      paths.Current().Child("other"),
+					excessive: true,
 				},
 			}
 
@@ -1505,19 +1517,71 @@ func TestSchema_AliasExpansion(t *testing.T) {
 
 					for range 2 {
 						err := node.Validate(t.Context(), v)
-						if tc.errs == nil {
+						if !tc.excessive {
 							require.NoError(t, err)
 
 							continue
 						}
 
-						for _, want := range tc.errs {
-							require.ErrorIs(t, err, want)
-						}
+						requireExcessiveAliasing(t, err)
 					}
 				})
 			}
 		})
+	})
+
+	// A source with the alias limit off decodes and validates a document
+	// the limit refuses. The schema then reads every use of every alias,
+	// so each case stays small.
+	t.Run("sources with the limit off", func(t *testing.T) {
+		t.Parallel()
+
+		v := compileSchema(t, []byte(`{"type": ["object", "array"]}`))
+
+		tcs := map[string]struct {
+			path  paths.Path
+			input string
+		}{
+			"alias bomb": {
+				input: yamltest.AliasLevels(4),
+			},
+			"node of an alias bomb": {
+				path:  paths.Current().Child("a").Index(4),
+				input: yamltest.AliasLevels(4),
+			},
+			"merge key bomb": {
+				input: yamltest.MergeLevels(4),
+			},
+			"alias bomb as mapping key": {
+				input: yamltest.AliasLevels(4) + "b:\n  ? *l4\n  : v\n",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+				if tc.path.Len() > 0 {
+					doc = yamltest.At(t, doc, tc.path)
+				}
+
+				requireExcessiveAliasing(t, doc.Validate(t.Context(), v))
+
+				trusted := yamltest.FirstDocument(t, tc.input, niceyaml.WithAliasLimit(false))
+				if tc.path.Len() > 0 {
+					trusted = yamltest.At(t, trusted, tc.path)
+				}
+
+				require.NoError(t, trusted.Validate(t.Context(), v))
+
+				// The schema passes as a validator of a decode too, and
+				// the decode then reads the node.
+				data, err := trusted.Decode[any](t.Context(), niceyaml.WithValidator(v))
+				require.NoError(t, err)
+				assert.NotEmpty(t, data)
+			})
+		}
 	})
 
 	// The count of a document cannot see the anchors of a reference
@@ -1540,24 +1604,28 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			return "[" + strings.TrimSuffix(strings.Repeat("*defaults, ", count), ", ") + "]"
 		}
 
+		// The refusal carries no location, so each case names where the
+		// node that binds it puts it.
 		tcs := map[string]struct {
 			path  paths.Path
 			input string
-			errs  []error
+			// The message of the refusal, or empty for a document
+			// within the limit.
+			want string
 		}{
 			"aliases to a mapping of a reference document": {
 				input: "items: " + repeated(300) + "\n",
-				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				want:  "app.yaml: excessive aliasing",
 			},
 			"node of aliases to a mapping of a reference document": {
 				path:  paths.Current().Child("items"),
 				input: "items: " + repeated(300) + "\n",
-				errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				want:  "app.yaml:1:9: $.items: excessive aliasing",
 			},
 			"aliases to an anchor on a tagged alias to a reference document": {
 				input: "local: &local !foo *defaults\nitems: " +
 					strings.ReplaceAll(repeated(300), "*defaults", "*local") + "\n",
-				errs: []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+				want: "app.yaml: excessive aliasing",
 			},
 			"a few aliases to a mapping of a reference document": {
 				input: "items: " + repeated(2) + "\n",
@@ -1568,21 +1636,30 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, tc.input, refs)
+				doc := yamltest.FirstDocument(t, tc.input, refs, niceyaml.WithName("app.yaml"))
 				if tc.path.Len() > 0 {
 					doc = yamltest.At(t, doc, tc.path)
 				}
 
 				_, err := doc.Decode[any](t.Context(), niceyaml.WithValidator(v))
-				if tc.errs == nil {
+				if tc.want == "" {
 					require.NoError(t, err)
 
 					return
 				}
 
-				for _, want := range tc.errs {
-					require.ErrorIs(t, err, want)
+				require.EqualError(t, err, tc.want)
+				requireExcessiveAliasing(t, err)
+
+				// With the alias limit off, the schema reads every use of
+				// the mapping and the document conforms.
+				trusted := yamltest.FirstDocument(t, tc.input, refs, niceyaml.WithAliasLimit(false))
+				if tc.path.Len() > 0 {
+					trusted = yamltest.At(t, trusted, tc.path)
 				}
+
+				_, err = trusted.Decode[any](t.Context(), niceyaml.WithValidator(v))
+				require.NoError(t, err)
 			})
 		}
 	})
@@ -1649,7 +1726,6 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			},
 			"ordered mapping key sharing a slice": {
 				data:      yaml.MapSlice{{Key: shared, Value: 1}},
-				err:       schema.ErrValidate,
 				excessive: true,
 			},
 		}
@@ -1659,18 +1735,20 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				t.Parallel()
 
 				err := v.ValidateValue(t.Context(), tc.data)
-				if tc.err == nil {
+
+				switch {
+				case tc.excessive:
+					requireExcessiveAliasing(t, err)
+
+				case tc.err != nil:
+					// A value that contains itself is no fault of a
+					// document, since no document decodes to one.
+					require.ErrorIs(t, err, tc.err)
+					require.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
+					assert.False(t, niceyaml.IsInvalid(err))
+
+				default:
 					require.NoError(t, err)
-
-					return
-				}
-
-				require.ErrorIs(t, err, tc.err)
-
-				if tc.excessive {
-					require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
-				} else {
-					assert.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
 				}
 			})
 		}
@@ -2180,9 +2258,10 @@ func TestSchema_Validate_Bound(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 		path  paths.Path
-		// The message of the error, and the errors it matches.
+		// The message of the error.
 		want string
-		errs []error
+		// The error is the refusal of the alias limit.
+		excessive bool
 	}{
 		"a document that conforms": {
 			input: menu,
@@ -2219,17 +2298,20 @@ func TestSchema_Validate_Bound(t *testing.T) {
 			input: "price: *nope\n",
 			want:  "menu.yaml:1:8: $.price: could not find alias \"nope\"",
 		},
+		// The decode the schema runs refuses the document, and binds the
+		// error at the first token of the node.
 		"a document past the alias limit": {
-			input: yamltest.AliasLevels(7),
-			want:  "menu.yaml: validate schema: excessive aliasing",
-			errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			input:     yamltest.AliasLevels(7),
+			want:      "menu.yaml:1:1: excessive aliasing",
+			excessive: true,
 		},
-		// The error carries no location, so the scoped node takes it.
+		// The error carries a position already, so the scoped node adds
+		// no path to it.
 		"a scoped node past the alias limit": {
-			input: yamltest.AliasLevels(7),
-			path:  paths.Current().Child("a"),
-			want:  "menu.yaml:2:10: $.a: validate schema: excessive aliasing",
-			errs:  []error{schema.ErrValidate, schema.ErrExcessiveAliasing},
+			input:     yamltest.AliasLevels(7),
+			path:      paths.Current().Child("a"),
+			want:      "menu.yaml:2:3: excessive aliasing",
+			excessive: true,
 		},
 	}
 
@@ -2251,8 +2333,8 @@ func TestSchema_Validate_Bound(t *testing.T) {
 
 			require.EqualError(t, err, tc.want)
 
-			for _, target := range tc.errs {
-				require.ErrorIs(t, err, target)
+			if tc.excessive {
+				requireExcessiveAliasing(t, err)
 			}
 
 			var bound *niceyaml.SourceError

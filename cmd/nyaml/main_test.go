@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -170,6 +171,18 @@ func blockEvents() int64 {
 func TestExitCode(t *testing.T) {
 	t.Parallel()
 
+	// Each list of the bomb holds nine aliases to the list before it, so
+	// the last one expands to 9^5 scalars from a few hundred bytes. The
+	// document conforms to the schema otherwise.
+	var bomb strings.Builder
+
+	bomb.WriteString("name: a\na0: &a0 [x]\n")
+
+	for level := 1; level <= 5; level++ {
+		aliases := strings.Repeat(fmt.Sprintf("*a%d, ", level-1), 9)
+		fmt.Fprintf(&bomb, "a%d: &a%d [%s]\n", level, level, strings.TrimSuffix(aliases, ", "))
+	}
+
 	// Each case runs nyaml validate in a directory of its own that holds
 	// schema.json, the schema of nameSchema. An argument that names no
 	// flag names a path in that directory.
@@ -199,6 +212,11 @@ func TestExitCode(t *testing.T) {
 		},
 		"syntax error": {
 			files: map[string]string{"a.yaml": "name: [\n"},
+			args:  []string{"--schema", "schema.json", "a.yaml"},
+			want:  exitInvalid,
+		},
+		"document past the alias limit": {
+			files: map[string]string{"a.yaml": bomb.String()},
 			args:  []string{"--schema", "schema.json", "a.yaml"},
 			want:  exitInvalid,
 		},

@@ -39,10 +39,16 @@ var (
 	// than the value holds, as aliases in a YAML document make a decode
 	// share them. It also indicates a document whose aliases would make
 	// the decoder itself read that much. [Schema.Validate] and
-	// [Schema.ValidateValue] return it wrapped together with [ErrValidate].
-	// A [matcher.Content] guard refuses such a document with it too, and
-	// [Registry.Lookup] then returns it wrapped together with [ErrResolve].
-	// It is the same error value as [niceyaml.ErrExcessiveAliasing].
+	// [Schema.ValidateValue] return it. A [matcher.Content] guard refuses
+	// such a document with it too, and [Registry.Lookup] then returns it
+	// wrapped together with [ErrResolve]. The document or the value is at
+	// fault in every case, so [niceyaml.IsInvalid] reports each of these
+	// errors, and none of them wraps [ErrValidate].
+	//
+	// [niceyaml.WithAliasLimit] on the source of a document turns the
+	// limit off for Validate and for the guard. ValidateValue holds no
+	// source, so it applies the limit to every value. It is the same
+	// error value as [niceyaml.ErrExcessiveAliasing].
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// ErrCompile indicates a schema document that does not compile.
@@ -240,19 +246,20 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 
 // Validate implements [niceyaml.Validator]. It reads n as any through
 // [niceyaml.Node.Decode] and checks the result against the schema as
-// [Schema.ValidateValue] does. Validate applies the alias limit to the
-// document of n before the decode. It applies the limit to the result as
-// well only where the document holds an alias to a reference document.
-// [niceyaml.WithValidator] runs the schema before a decode, a
+// [Schema.ValidateValue] does. The decode applies the alias limit to the
+// document of n before it reads anything. Validate applies the limit to
+// the result as well only where the document holds an alias to a
+// reference document. [niceyaml.WithAliasLimit] on the source of n turns
+// both off. [niceyaml.WithValidator] runs the schema before a decode, a
 // [niceyaml.Decoder] runs it on every node it decodes, and
 // [niceyaml.Node.Validate] runs it on its own. A Node from
 // [niceyaml.Node.At] decodes to the node it selects, so the schema checks
-// that node and a violation's `@` path resolves from it. Every error comes
-// back bound through n with [niceyaml.Node.Bind], so a call to Validate
-// returns the error [niceyaml.Node.Validate] returns for the schema. A
-// validator that runs the schema on each node of a list thus reports
-// each violation on its own lines. [Schema.ValidateValue] returns unbound
-// errors for a caller that reports them somewhere else.
+// that node and a violation's `@` path resolves from it. Every error
+// comes back bound through n with [niceyaml.Node.Bind], so a call to
+// Validate returns the error [niceyaml.Node.Validate] returns for the
+// schema. A validator that runs the schema on each node of a list thus
+// reports each violation on its own lines. [Schema.ValidateValue] returns
+// unbound errors for a caller that reports them somewhere else.
 //
 // A document that did not parse has no data to check, so Validate returns
 // the syntax error [niceyaml.Node.Err] returns for it, whatever the
@@ -296,26 +303,33 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // member of the same name. A merge key whose sources do not resolve is
 // one such key.
 //
-// The decoder writes out the whole content of an alias it spells as
-// text, such as an alias used as a key. It also reads a mapping a merge
-// key brings in again at every merge. A small document can therefore cost
-// far more to decode than the decoded value shows. Before Validate
-// decodes a node that holds an alias, it counts the nodes a decode of the
-// whole document reads, with each alias reading its content in full. The
-// count covers the whole document even for a node below the root, so
-// every node in a document that holds an alias gets the same verdict.
-// Validate applies the alias limit of [Schema.ValidateValue] to the
-// count. An alias to a text tag, such as !!binary or !!str, counts one
-// node per byte of the text under the tag. So does an alias that reaches
-// a !!binary scalar through another tagged alias, as *s does for
+// The decoder writes out the whole content of an alias it spells as text,
+// such as an alias used as a key. It also reads a mapping a merge key
+// brings in again at every merge. A small document can therefore cost far
+// more to decode than the decoded value shows. The decode Validate runs
+// therefore counts before it reads. For a node that holds an alias, it
+// counts the nodes a decode of the whole document reads, with each alias
+// reading its content in full, as [niceyaml.Node.DecodeInto] describes.
+// The count covers the whole document even for a node below the root, so
+// every node in a document that holds an alias gets the same verdict. The
+// decode applies the alias limit of [Schema.ValidateValue] to the count.
+// An alias to a text tag, such as !!binary or !!str, counts one node per
+// byte of the text under the tag. So does an alias that reaches a
+// !!binary scalar through another tagged alias, as *s does for
 // `&s !foo *b`. Each copy of a scalar the decoder writes out as text,
 // such as in a key that holds a sequence, counts the same way. Any other
-// alias to a scalar counts as one unaliased node. A document past the
-// limit returns an error wrapping both [ErrValidate] and
-// [ErrExcessiveAliasing] without decoding. Validate puts no limit of its
-// own on the result of the decode. A node below the root then passes the
-// limit wherever its document does, even when aliases make up a larger
-// share of the node than of the document.
+// alias to a scalar counts as one unaliased node. For a document past the
+// limit, Validate returns the error of that decode, which matches
+// [ErrExcessiveAliasing] and binds at the first token of the node that is
+// not a comment:
+//
+//	app.yaml:1:1: excessive aliasing
+//
+// The aliases of the document are the cause, so [niceyaml.IsInvalid]
+// reports the error, and it does not wrap [ErrValidate]. Validate puts no
+// limit of its own on the result of the decode. A node below the root
+// then passes the limit wherever its document does, even when aliases
+// make up a larger share of the node than of the document.
 //
 // A document that holds an alias with no anchor of its name before it
 // is the exception. A decode resolves such an alias against a reference
@@ -323,7 +337,15 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // see a reference document, so it takes the alias as one node. For such
 // a document Validate also applies the limit to the result of the
 // decode, as [Schema.ValidateValue] does. A node below the root can then
-// exceed the limit where its document passes.
+// exceed the limit where its document passes. That error matches
+// ErrExcessiveAliasing as well, and IsInvalid reports it. It carries no
+// location, so it binds through n as any such error does. A node below
+// the root binds it at the node, under its path, and a root binds it
+// with no position.
+//
+// [niceyaml.WithAliasLimit] on the source of n turns the limit off for
+// the decode and for the result. Validate then reads every use of every
+// alias, at the cost WithAliasLimit describes.
 func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 	err := n.Err()
 	if err != nil {
@@ -335,28 +357,23 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 		return nil
 	}
 
-	err = aliasing.CheckDecode(n)
-	if err != nil {
-		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
-		return n.Bind(fmt.Errorf("%w: %w", ErrValidate, err))
-	}
-
 	// A decode into any yields only the YAML built-in types, none of which
 	// validates itself, so the self-validation walk would find nothing.
-	// The decode binds its own error.
+	// The decode applies the alias limit to the document before it reads
+	// anything, and it binds its own error.
 	data, err := n.Decode[any](ctx, niceyaml.WithSelfValidation(false))
 	if err != nil {
 		return err
 	}
 
-	// The count above takes each alias as the validator reads the value
-	// a decode shares at it, which is a mapping or a sequence in full and
-	// a !!binary scalar by its text. An expansion check of data would
-	// repeat that count for the node alone, and could give a node below
-	// the root a verdict apart from its document's. The count cannot see
-	// a reference document, though, so data gets the check where the
-	// document holds an alias to one.
-	if aliasing.HoldsReferenceAlias(n) {
+	// The count of that decode takes each alias as the validator reads
+	// the value a decode shares at it, which is a mapping or a sequence
+	// in full and a !!binary scalar by its text. An expansion check of
+	// data would repeat that count for the node alone, and could give a
+	// node below the root a verdict apart from its document's. The count
+	// cannot see a reference document, though, so data gets the check
+	// where the document holds an alias to one and the limit applies.
+	if aliasing.Limited(n) && aliasing.HoldsReferenceAlias(n) {
 		err = checkExpansion(data)
 		if err != nil {
 			//nolint:wrapcheck // Binding names the document; the error keeps its own context.
@@ -412,15 +429,19 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 //
 // ValidateValue rejects two shapes of data before checking anything. A
 // value whose shared maps, slices, or byte slices would expand past the
-// alias limit, as YAML aliases make them, returns an error wrapping both
-// [ErrValidate] and [ErrExcessiveAliasing]. The limit follows the rule
-// gopkg.in/yaml.v3 applies to the share of aliased nodes in a document,
-// and a []byte counts as one node per character of its base64 text.
-// Where yaml.v3 applies the rule node by node as it decodes,
-// ValidateValue applies it once to the whole value. It counts each use of
-// an aliased scalar other than a !!binary as an unaliased node, so it
-// accepts some documents yaml.v3 rejects. A map or slice that contains
-// itself returns an error wrapping [ErrValidate].
+// alias limit, as YAML aliases make them, returns an error matching
+// [ErrExcessiveAliasing]. The value is at fault for it, so
+// [niceyaml.IsInvalid] reports the error, and it does not wrap
+// [ErrValidate]. The limit follows the rule gopkg.in/yaml.v3 applies to
+// the share of aliased nodes in a document, and a []byte counts as one
+// node per character of its base64 text. Where yaml.v3 applies the rule
+// node by node as it decodes, ValidateValue applies it once to the whole
+// value. It counts each use of an aliased scalar other than a !!binary as
+// an unaliased node, so it accepts some documents yaml.v3 rejects.
+// ValidateValue holds no source, so it applies the limit to every value,
+// including one decoded from a source that [niceyaml.WithAliasLimit]
+// turned the limit off for. A map or slice that contains itself returns
+// an error wrapping [ErrValidate].
 //
 // The context reaches the underlying [jsonschema.Validator], where remote
 // reference resolution honors its cancellation and deadlines.
@@ -1152,9 +1173,10 @@ func mapItemKey(key any) string {
 }
 
 // checkExpansion returns an error wrapping [ErrValidate] when a map or
-// slice in data contains itself. It returns one wrapping both
-// [ErrValidate] and [ErrExcessiveAliasing] when aliases make up too much
-// of the data the validator would read.
+// slice in data contains itself. It returns one matching
+// [ErrExcessiveAliasing] when aliases make up too much of the data the
+// validator would read. The data is at fault for that error, so it comes
+// from [niceyaml.WrapError] and does not wrap ErrValidate.
 func checkExpansion(data any) error {
 	w := expansionWalker{sizes: map[sharedKey]int{}, onPath: map[sharedKey]bool{}}
 
@@ -1164,7 +1186,7 @@ func checkExpansion(data any) error {
 	}
 
 	if aliaslimit.Excessive(w.distinct, w.aliased) {
-		return fmt.Errorf("%w: %w", ErrValidate, ErrExcessiveAliasing)
+		return niceyaml.WrapError(ErrExcessiveAliasing)
 	}
 
 	return nil

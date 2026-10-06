@@ -28,11 +28,40 @@ type State struct {
 	excessive      bool
 	excessiveText  bool
 	referenceAlias bool
+	skipAliasLimit bool
+}
+
+// Option configures [New].
+//
+// Available options:
+//   - [WithAliasLimit]
+type Option func(*State)
+
+// WithAliasLimit is an [Option] that sets whether the alias limit applies
+// to the document, which [State.AliasLimit] reports. The default is true.
+// Package niceyaml passes what its own WithAliasLimit set on the source
+// of the document.
+func WithAliasLimit(enabled bool) Option {
+	return func(s *State) {
+		s.skipAliasLimit = !enabled
+	}
 }
 
 // New creates a new [*State] for one document.
-func New() *State {
-	return &State{}
+func New(opts ...Option) *State {
+	s := &State{}
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	return s
+}
+
+// AliasLimit reports whether the alias limit applies to the document. A
+// reader that limits what the aliases of a document make it read, such as
+// the decode check of the aliasing package, asks before it counts.
+func (s *State) AliasLimit() bool {
+	return !s.skipAliasLimit
 }
 
 // ExcessiveAliasing returns what count reports for the document. It

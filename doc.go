@@ -317,6 +317,13 @@
 // the document then reads those anchors, so [Source.ValidateDocuments]
 // reports what a decode of each document reports.
 //
+// The Source also says whether the alias limit applies to its documents.
+// A decode, a schema, and a content matcher refuse a document whose
+// nested aliases would make them read far more than the document holds,
+// with an error matching [ErrExcessiveAliasing] that [IsInvalid] reports.
+// [WithAliasLimit] on the Source turns the limit off for input the
+// program trusts.
+//
 // A validator reads the node it checks with [Node.Decode], which runs
 // the validators the caller passes and no other, so a validator never runs
 // itself again. It returns its errors bound through that node, as

@@ -96,15 +96,19 @@ var (
 	// decoder minutes to decode, and the decoder never checks the context.
 	// [Node.Decode], [Node.DecodeInto], and [Decoder.DecodeInto] refuse
 	// to decode a node that holds an alias when the aliases of its
-	// document go past the limit gopkg.in/yaml.v3 applies, unless
-	// [WithAliasLimit] turns the check off. The error comes back bound
-	// as a [SourceError] at the first token of the node that is not a
-	// comment. The document is at fault for it, as [IsInvalid] describes,
-	// and it does not match [ErrDecode]. [Node.Nodes] returns it too, bound
-	// to its receiver with no location, when aliases lead a selector of the
-	// path to far more nodes than the document holds, and IsInvalid does
-	// not report that error. The paths and schema packages export the same
-	// error value.
+	// document go past the limit gopkg.in/yaml.v3 applies. A [Validator]
+	// that decodes the node it checks returns the same error, as a
+	// [go.jacobcolvin.com/niceyaml/schema.Schema] does. [WithAliasLimit]
+	// on the [Source] turns the limit off for every one of them. The
+	// error comes back bound as a [SourceError] at the first token of the
+	// node that is not a comment. The document is at fault for it, as
+	// [IsInvalid] describes, and it does not match [ErrDecode].
+	//
+	// [Node.Nodes] returns ErrExcessiveAliasing too, bound to its receiver
+	// with no location, when aliases lead a selector of the path to far
+	// more nodes than the document holds. IsInvalid does not report that
+	// error, and WithAliasLimit leaves that limit on. The paths and schema
+	// packages export the same error value.
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// ErrSyntax indicates text the go-yaml parser rejects, such as a flow
@@ -477,10 +481,15 @@ func (e *Error) Is(target error) bool {
 //     document failed.
 //   - Every error a [SelfValidator] returns, with a location or without,
 //     except the error of a context that ended.
-//   - [ErrMultipleDocuments], the [ErrExcessiveAliasing] of a decode,
-//     and an error that [Node.At], [Node.Ranges], or [Node.Nodes]
-//     returns for a value the document lacks, which wraps
-//     [paths.ErrNotFound].
+//   - [ErrMultipleDocuments], and an error that [Node.At],
+//     [Node.Ranges], or [Node.Nodes] returns for a value the document
+//     lacks, which wraps [paths.ErrNotFound].
+//   - [ErrExcessiveAliasing] from every reader that applies the alias
+//     limit to a document or a decoded value: a decode, a
+//     [go.jacobcolvin.com/niceyaml/schema.Schema], and a
+//     [go.jacobcolvin.com/niceyaml/schema/matcher.Content] matcher. The
+//     ErrExcessiveAliasing of [Node.Nodes] is about the path, so the
+//     document is not at fault for it.
 //   - A [go.jacobcolvin.com/niceyaml/schema.Violation], and the
 //     [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] that a registry
 //     reports for a document that names no schema it knows.

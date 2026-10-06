@@ -28,13 +28,14 @@ type Node interface {
 // anchors the node needs, but CheckDecode applies one limit per
 // document, so every node that holds an alias gets the verdict of its
 // document. A node without an alias decodes on its own and reads nothing
-// twice, so it passes, as does a nil Node.
+// twice, so it passes, as does a nil Node. So does every node of a
+// document the limit does not apply to, as [Limited] reports.
 //
 // The count depends on the document alone, so the document keeps it, and
 // a check of each item of a list counts the document once.
 func CheckDecode(n Node) error {
 	state := stateOf(n)
-	if state == nil || !holdsAlias(n.AST()) {
+	if state == nil || !state.AliasLimit() || !holdsAlias(n.AST()) {
 		return nil
 	}
 
@@ -55,14 +56,14 @@ func CheckDecode(n Node) error {
 // each alias in full. The count covers the whole document as
 // [CheckDecode] does. It reads every node as text, so each scalar counts
 // one node per byte of its text. A node without an alias passes, as does
-// a nil Node. The document keeps the count, as it keeps the count of
-// CheckDecode.
+// a nil Node and every node of a document the limit does not apply to.
+// The document keeps the count, as it keeps the count of CheckDecode.
 //
 // A caller that decodes n into a type that [DecodesText] reports runs
 // CheckDecodeText as well as CheckDecode.
 func CheckDecodeText(n Node) error {
 	state := stateOf(n)
-	if state == nil || !holdsAlias(n.AST()) {
+	if state == nil || !state.AliasLimit() || !holdsAlias(n.AST()) {
 		return nil
 	}
 
@@ -76,6 +77,19 @@ func CheckDecodeText(n Node) error {
 	return nil
 }
 
+// Limited reports whether the alias limit applies to the document of n.
+// It applies unless the source of the document turned it off with
+// niceyaml.WithAliasLimit. [CheckDecode] and [CheckDecodeText] pass
+// every node of a document it does not apply to. A caller that applies
+// [aliaslimit.Excessive] to a value it decoded from n, as
+// [HoldsReferenceAlias] describes, asks Limited first. No limit applies
+// to a nil Node.
+func Limited(n Node) bool {
+	state := stateOf(n)
+
+	return state != nil && state.AliasLimit()
+}
+
 // HoldsReferenceAlias reports whether the document of n holds a
 // reference alias, which is an alias with no anchor of its name before
 // it in the document. A decode resolves such an alias only against a
@@ -84,7 +98,8 @@ func CheckDecodeText(n Node) error {
 // so they count the alias as one node whatever its anchor holds. A
 // caller that reads a decoded value again at every alias applies
 // [aliaslimit.Excessive] to that value when the document holds a
-// reference alias. A nil Node holds none.
+// reference alias and [Limited] reports that the limit applies. A nil
+// Node holds none.
 //
 // The answer depends on the document alone, so the document keeps it, as
 // it keeps the count of CheckDecode.

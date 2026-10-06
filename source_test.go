@@ -33,6 +33,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/schema"
+	"go.jacobcolvin.com/niceyaml/schema/matcher"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/tokens"
@@ -3805,5 +3806,186 @@ func TestWithReferences(t *testing.T) {
 
 		_, err := doc.Decode[map[string]int](t.Context())
 		require.ErrorContains(t, err, "sequence end token ']' not found")
+	})
+}
+
+func TestWithAliasLimit(t *testing.T) {
+	t.Parallel()
+
+	// Each level of the bomb lists nine aliases to the level below, so a4
+	// expands to 9^5 scalars from 252 bytes.
+	var sb strings.Builder
+
+	sb.WriteString("a0: &a0 [x, x, x, x, x, x, x, x, x]\n")
+
+	for level := 1; level <= 4; level++ {
+		aliases := strings.Repeat(fmt.Sprintf("*a%d, ", level-1), 9)
+		fmt.Fprintf(&sb, "a%d: &a%d [%s]\n", level, level, strings.TrimSuffix(aliases, ", "))
+	}
+
+	bomb := sb.String()
+	last := paths.Current().Child("a4")
+
+	// The schema accepts the root and the list under a4, and it decodes
+	// the node it checks, which a schema that accepts everything skips.
+	shape := schema.MustCompile([]byte(`{"type": ["object", "array"]}`))
+
+	// The registry routes a document on the content of a4, so its matcher
+	// reads a node that holds an alias. No document matches, and the
+	// registry then passes it.
+	routed := schema.NewRegistry(
+		schema.WithResolvers(schema.When(matcher.Content(paths.Doc().Child("a4"), "x"), shape.Ref())),
+		schema.WithRequireSchema(false),
+	)
+
+	decode := func(ctx context.Context, n *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
+		_, err := n.Decode[any](ctx, opts...)
+
+		return err
+	}
+
+	tcs := map[string]struct {
+		read func(ctx context.Context, n *niceyaml.Node) error
+		path paths.Path
+		// The message of the refusal with the limit on.
+		want string
+		// The refusal comes from a resolver of a registry.
+		resolve bool
+	}{
+		"decode": {
+			read: func(ctx context.Context, n *niceyaml.Node) error {
+				return decode(ctx, n)
+			},
+			want: "bomb.yaml:1:1: excessive aliasing",
+		},
+		"decode with a schema validator": {
+			read: func(ctx context.Context, n *niceyaml.Node) error {
+				return decode(ctx, n, niceyaml.WithValidator(shape))
+			},
+			want: "bomb.yaml:1:1: excessive aliasing",
+		},
+		"decoder with a schema validator": {
+			read: func(ctx context.Context, n *niceyaml.Node) error {
+				_, err := niceyaml.NewDecoder(niceyaml.WithValidator(shape)).Decode[any](ctx, n)
+
+				return err
+			},
+			want: "bomb.yaml:1:1: excessive aliasing",
+		},
+		"schema validation": {
+			read: func(ctx context.Context, n *niceyaml.Node) error {
+				return n.Validate(ctx, shape)
+			},
+			want: "bomb.yaml:1:1: excessive aliasing",
+		},
+		"validation of every document": {
+			read: func(ctx context.Context, n *niceyaml.Node) error {
+				return n.Source().ValidateDocuments(ctx, shape)
+			},
+			want: "bomb.yaml:1:1: excessive aliasing",
+		},
+		"registry with a content matcher": {
+			read: func(ctx context.Context, n *niceyaml.Node) error {
+				return n.Validate(ctx, routed)
+			},
+			want:    "resolve schema: bomb.yaml: excessive aliasing",
+			resolve: true,
+		},
+		"decode with a registry with a content matcher": {
+			read: func(ctx context.Context, n *niceyaml.Node) error {
+				return decode(ctx, n, niceyaml.WithValidator(routed))
+			},
+			want:    "resolve schema: bomb.yaml: excessive aliasing",
+			resolve: true,
+		},
+		// The decode binds its refusal at the first token of the node, so
+		// a scoped node names no path in front of it.
+		"decode of a scoped node": {
+			path: last,
+			read: func(ctx context.Context, n *niceyaml.Node) error {
+				return decode(ctx, n)
+			},
+			want: "bomb.yaml:5:9: excessive aliasing",
+		},
+		"schema validation of a scoped node": {
+			path: last,
+			read: func(ctx context.Context, n *niceyaml.Node) error {
+				return n.Validate(ctx, shape)
+			},
+			want: "bomb.yaml:5:9: excessive aliasing",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			sources := map[string][]niceyaml.SourceOption{
+				"default":  {niceyaml.WithName("bomb.yaml")},
+				"limit on": {niceyaml.WithName("bomb.yaml"), niceyaml.WithAliasLimit(true)},
+			}
+
+			for via, opts := range sources {
+				node := yamltest.FirstDocument(t, bomb, opts...)
+				if tc.path.Len() > 0 {
+					node = yamltest.At(t, node, tc.path)
+				}
+
+				// Every reader reports the aliases of the document as a
+				// fault of the document.
+				err := tc.read(t.Context(), node)
+				require.EqualError(t, err, tc.want, via)
+				require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing, via)
+				require.NotErrorIs(t, err, schema.ErrValidate, via)
+				require.NotErrorIs(t, err, niceyaml.ErrDecode, via)
+				assert.Equal(t, tc.resolve, errors.Is(err, schema.ErrResolve), via)
+				assert.True(t, niceyaml.IsInvalid(err), via)
+			}
+
+			// With the limit off, the same reader reads the document.
+			trusted := yamltest.FirstDocument(t, bomb, niceyaml.WithName("bomb.yaml"), niceyaml.WithAliasLimit(false))
+			if tc.path.Len() > 0 {
+				trusted = yamltest.At(t, trusted, tc.path)
+			}
+
+			require.NoError(t, tc.read(t.Context(), trusted))
+		})
+	}
+
+	t.Run("every document of the source", func(t *testing.T) {
+		t.Parallel()
+
+		docs, err := niceyaml.NewSourceFromString(bomb+"---\n"+bomb, niceyaml.WithAliasLimit(false)).Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		for _, doc := range docs {
+			require.NoError(t, decode(t.Context(), doc, niceyaml.WithValidator(shape)))
+		}
+	})
+
+	t.Run("limits that stay on", func(t *testing.T) {
+		t.Parallel()
+
+		trusted := yamltest.FirstDocument(t, bomb, niceyaml.WithName("bomb.yaml"), niceyaml.WithAliasLimit(false))
+
+		data, err := trusted.Decode[any](t.Context(), niceyaml.WithValidator(shape))
+		require.NoError(t, err)
+
+		// ValidateValue takes a Go value and holds no source, so it
+		// applies the limit to the value the source decoded.
+		err = shape.ValidateValue(t.Context(), data)
+		require.EqualError(t, err, "excessive aliasing")
+		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+		require.NotErrorIs(t, err, schema.ErrValidate)
+		assert.True(t, niceyaml.IsInvalid(err))
+
+		// Each [*] lists nine aliases to the level below, so the path
+		// would select 9^5 nodes. The path is at fault for that, and the
+		// document is not.
+		_, err = trusted.Nodes(paths.MustParse("$.a4[*][*][*][*][*]"))
+		require.EqualError(t, err, "bomb.yaml: resolve $.a4[*][*][*][*][*]: excessive aliasing")
+		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+		assert.False(t, niceyaml.IsInvalid(err))
 	})
 }

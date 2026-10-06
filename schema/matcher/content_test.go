@@ -1638,6 +1638,27 @@ func TestContent(t *testing.T) {
 		ok, err := m.Match(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
 		assert.False(t, ok)
+
+		// The aliases of the document are the cause, so the document is
+		// at fault for the refusal.
+		assert.True(t, niceyaml.IsInvalid(err))
+	})
+
+	t.Run("alias bomb in a source with the limit off is read", func(t *testing.T) {
+		t.Parallel()
+
+		// The node at kind holds an alias, so Match counts the document
+		// before it reads the node, and the levels put it past the limit.
+		input := "name: &name Deployment\n" + yamltest.AliasLevels(4) + "kind: [*name]\n"
+		m := matcher.Content(kindPath, [1]string{"Deployment"})
+
+		ok, err := m.Match(t.Context(), yamltest.FirstDocument(t, input))
+		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
+		assert.False(t, ok)
+
+		ok, err = m.Match(t.Context(), yamltest.FirstDocument(t, input, niceyaml.WithAliasLimit(false)))
+		require.NoError(t, err)
+		assert.True(t, ok)
 	})
 
 	t.Run("scalar aliases written out as text", func(t *testing.T) {
@@ -1651,12 +1672,17 @@ func TestContent(t *testing.T) {
 			"kind: [" + strings.TrimSuffix(strings.Repeat("*a, ", 500), ", ") + "]\n"
 
 		tcs := map[string]struct {
-			m   matcher.Matcher
-			err error
+			m    matcher.Matcher
+			err  error
+			opts []niceyaml.SourceOption
 		}{
 			"text unmarshaler": {
 				m:   matcher.Content(kindPath, prefixedString("vx")),
 				err: schema.ErrExcessiveAliasing,
+			},
+			"text unmarshaler in a source with the limit off": {
+				m:    matcher.Content(kindPath, prefixedString("vx")),
+				opts: []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
 			},
 			"pointer to a text unmarshaler": {
 				m:   matcher.Content(kindPath, new(prefixedString)),
@@ -1701,11 +1727,12 @@ func TestContent(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, input)
+				doc := yamltest.FirstDocument(t, input, tc.opts...)
 
 				ok, err := tc.m.Match(t.Context(), doc)
 				if tc.err != nil {
 					require.ErrorIs(t, err, tc.err)
+					assert.True(t, niceyaml.IsInvalid(err))
 				} else {
 					require.NoError(t, err)
 				}

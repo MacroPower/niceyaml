@@ -103,6 +103,8 @@ type Source struct {
 	decodeFileOnce sync.Once
 	// Accepts a mapping with the same key twice when parsing and decoding.
 	allowDuplicateKeys bool
+	// Turns off the alias limit for every reader of the documents.
+	skipAliasLimit bool
 }
 
 // SourceOption configures [Source] creation.
@@ -111,15 +113,17 @@ type Source struct {
 //   - [WithName]
 //   - [WithFilePath]
 //   - [WithAllowDuplicateKeys]
+//   - [WithAliasLimit]
 //   - [WithReferences]
 //   - [WithYAMLParserOptions]
 //
 // [WithAllowDuplicateKeys] and [WithReferences] change what the documents
-// mean, so the Source applies them to every decode and every validation
-// of its documents. Settings of one decode, such as
-// [WithDisallowUnknownFields], are [DecodeOption] values. A caller passes
-// them to [Node.Decode], or to [NewDecoder] for a [Decoder] that decodes
-// every document with them.
+// mean, and [WithAliasLimit] says whether the program trusts their
+// aliases. All three describe the documents themselves, so the Source
+// applies them to every decode and every validation of its documents.
+// Settings of one decode, such as [WithDisallowUnknownFields], are
+// [DecodeOption] values. A caller passes them to [Node.Decode], or to
+// [NewDecoder] for a [Decoder] that decodes every document with them.
 type SourceOption func(*Source)
 
 // WithName is a [SourceOption] that sets the name for the [Source], which
@@ -154,6 +158,65 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 	}
 }
 
+// WithAliasLimit is a [SourceOption] that sets whether the alias limit
+// applies to the documents of the [Source]. The default is true.
+//
+// The limit refuses a document whose aliases would make a reader read
+// far more than the document holds, as [ErrExcessiveAliasing] describes.
+// With the limit on, three readers refuse a node of such a document
+// that holds an alias:
+//
+//   - A decode, as [Node.DecodeInto] describes.
+//   - A [go.jacobcolvin.com/niceyaml/schema.Schema] that validates the
+//     node.
+//   - A [go.jacobcolvin.com/niceyaml/schema/matcher.Content] matcher that
+//     reads the node to route its document.
+//
+// Each returns an error matching ErrExcessiveAliasing. The aliases of
+// the document are the cause wherever the count runs, so [IsInvalid]
+// reports the error of all three.
+//
+// Turn the limit off only for input the program trusts, such as a file
+// it ships:
+//
+//	source, err := niceyaml.NewSourceFromFile(path, niceyaml.WithAliasLimit(false))
+//	if err != nil {
+//		return err
+//	}
+//
+//	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(v))
+//
+// The decode, the schema, and the matcher then read the document
+// whatever its aliases hold. The go-yaml decoder can take minutes on a
+// few hundred bytes of nested aliases and never checks the context. A
+// schema reads every use of every alias. For a 369-byte document with
+// six levels of nested aliases, a validation against {"type": "object"}
+// held about 160 MiB for a tenth of a second. One against a schema whose
+// items keyword refers back to itself held about 300 MiB for five
+// seconds.
+//
+// Two limits stay on whatever the option says:
+//
+//   - [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] takes a
+//     Go value and holds no Source. It refuses a value that shares its
+//     maps and slices past the limit, including one a Source with the
+//     limit off decoded.
+//   - [Node.Nodes] refuses a path whose selectors reach far more nodes
+//     through aliases than the document holds.
+//
+// The option covers the documents of the Source alone. [WithReferences]
+// takes the text of a reference Source and none of its settings, so the
+// option on a reference Source changes nothing. The count behind the
+// limit reads the documents of the Source and no reference document.
+// Every decode reads each reference document in full, so nested `<<`
+// merge keys there cost every decode of the Source what they expand to,
+// with the limit on or off. Pass WithReferences trusted files only.
+func WithAliasLimit(enabled bool) SourceOption {
+	return func(s *Source) {
+		s.skipAliasLimit = !enabled
+	}
+}
+
 // WithReferences is a [SourceOption] that lets an alias in the documents
 // of the [Source] name an anchor that the documents of refs define, such
 // as a file of shared defaults:
@@ -182,9 +245,11 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 // decode reads the documents of refs in the order given, so an anchor of
 // a later document overrides one of the same name in an earlier one. A
 // Source in refs brings its own references, ahead of its own documents,
-// so its aliases resolve as they do in its own decodes.
-// WithReferences skips a nil Source. A reference document that does not
-// parse fails every decode of the Source.
+// so its aliases resolve as they do in its own decodes. It brings no
+// other setting, so [WithAliasLimit] on a Source in refs changes nothing,
+// and the alias limit counts no reference document, as WithAliasLimit
+// describes. WithReferences skips a nil Source. A reference document
+// that does not parse fails every decode of the Source.
 //
 // The references reach the decoder alone. A path resolves in the document
 // itself, so [Node.At] and [Node.Nodes] return an error wrapping

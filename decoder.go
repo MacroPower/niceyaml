@@ -49,6 +49,10 @@ import (
 //		return err
 //	}
 //
+// A Decoder carries no setting of the alias limit either. [WithAliasLimit]
+// on the Source turns the limit off for every Decoder and validator that
+// reads its documents.
+//
 // A Decoder never changes after [NewDecoder], so it is safe for
 // concurrent use as long as the go-yaml options it carries hold no state,
 // which [WithYAMLDecodeOptions] describes. [Decoder.With] returns a new
@@ -71,10 +75,9 @@ func NewDecoder(opts ...DecodeOption) *Decoder {
 // With returns a new [*Decoder] with opts applied over the options of
 // the receiver, in order. [WithValidator] appends to the validators the
 // receiver holds, and [WithYAMLDecodeOptions] appends to its go-yaml
-// options. [WithSelfValidation], [WithAliasLimit], and
-// [WithDisallowUnknownFields] replace the setting the receiver holds. The
-// receiver is unchanged, so a Decoder shared between callers can be
-// specialized per use:
+// options. [WithSelfValidation] and [WithDisallowUnknownFields] replace
+// the setting the receiver holds. The receiver is unchanged, so a Decoder
+// shared between callers can be specialized per use:
 //
 //	strict := dec.With(niceyaml.WithDisallowUnknownFields(true))
 func (d *Decoder) With(opts ...DecodeOption) *Decoder {

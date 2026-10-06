@@ -9819,7 +9819,7 @@ func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 		err   error
 		input string
 		path  paths.Path
-		opts  []niceyaml.DecodeOption
+		opts  []niceyaml.SourceOption
 	}{
 		"nested merge keys": {
 			input: yamltest.MergeLevels(7),
@@ -9842,7 +9842,21 @@ func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 			// The decoder shares each list between its aliases, so it
 			// decodes the document quickly.
 			input: yamltest.AliasLevels(7),
-			opts:  []niceyaml.DecodeOption{niceyaml.WithAliasLimit(false)},
+			opts:  []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
+		},
+		"node of nested lists with the limit off": {
+			input: yamltest.AliasLevels(7),
+			path:  paths.Current().Child("a").Index(7),
+			opts:  []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
+		},
+		"nested lists with the limit on again": {
+			// The last option wins, as it does for every source option.
+			input: yamltest.AliasLevels(7),
+			opts: []niceyaml.SourceOption{
+				niceyaml.WithAliasLimit(false),
+				niceyaml.WithAliasLimit(true),
+			},
+			err: niceyaml.ErrExcessiveAliasing,
 		},
 		"a few aliases": {
 			input: "base: &b {a: 1, b: 2}\nx:\n  <<: *b\ny: [*b, *b]\n",
@@ -9866,17 +9880,18 @@ func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input)
+			doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
 			if tc.path.Len() > 0 {
 				doc = yamltest.At(t, doc, tc.path)
 			}
 
-			var got map[string]any
+			var got any
 
-			err := doc.DecodeInto(t.Context(), &got, tc.opts...)
+			err := doc.DecodeInto(t.Context(), &got)
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 				require.NotErrorIs(t, err, niceyaml.ErrDecode)
+				assert.True(t, niceyaml.IsInvalid(err))
 				assert.Nil(t, got)
 
 				return
@@ -9953,7 +9968,7 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 		target func() any
 		input  string
 		path   paths.Path
-		opts   []niceyaml.DecodeOption
+		opts   []niceyaml.SourceOption
 	}{
 		"text unmarshaler elements": {
 			input:  manyAliases,
@@ -10064,16 +10079,18 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new([]aliasText) },
-			opts:   []niceyaml.DecodeOption{niceyaml.WithAliasLimit(false)},
+			opts:   []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
 		},
 	}
 
-	decoders := map[string]func(ctx context.Context, n *niceyaml.Node, v any, opts ...niceyaml.DecodeOption) error{
-		"node": func(ctx context.Context, n *niceyaml.Node, v any, opts ...niceyaml.DecodeOption) error {
-			return n.DecodeInto(ctx, v, opts...)
+	// The source holds the setting of the limit, so a Node and a Decoder
+	// apply it alike.
+	decoders := map[string]func(ctx context.Context, n *niceyaml.Node, v any) error{
+		"node": func(ctx context.Context, n *niceyaml.Node, v any) error {
+			return n.DecodeInto(ctx, v)
 		},
-		"decoder": func(ctx context.Context, n *niceyaml.Node, v any, opts ...niceyaml.DecodeOption) error {
-			return niceyaml.NewDecoder(opts...).DecodeInto(ctx, n, v)
+		"decoder": func(ctx context.Context, n *niceyaml.Node, v any) error {
+			return niceyaml.NewDecoder().DecodeInto(ctx, n, v)
 		},
 	}
 
@@ -10082,15 +10099,16 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 			t.Run(name+"/"+via, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, tc.input)
+				doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
 				if tc.path.Len() > 0 {
 					doc = yamltest.At(t, doc, tc.path)
 				}
 
-				err := decode(t.Context(), doc, tc.target(), tc.opts...)
+				err := decode(t.Context(), doc, tc.target())
 				if tc.err != nil {
 					require.ErrorIs(t, err, tc.err)
 					require.NotErrorIs(t, err, niceyaml.ErrDecode)
+					assert.True(t, niceyaml.IsInvalid(err))
 
 					return
 				}

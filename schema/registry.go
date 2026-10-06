@@ -29,7 +29,10 @@ var (
 	// name its schema, either by returning an error of its own or the zero
 	// Ref with no error. A lookup whose context ends before a resolver names
 	// a schema reports it too, and so does [Registry.Schema] for the zero
-	// Ref.
+	// Ref. A [matcher.Content] guard that refuses a document for its
+	// aliases returns [ErrExcessiveAliasing], and the document is at fault
+	// for that one, so [niceyaml.IsInvalid] reports the ErrResolve around
+	// it.
 	ErrResolve = errors.New("resolve schema")
 
 	// ErrLoad indicates the registry could not load the schema.

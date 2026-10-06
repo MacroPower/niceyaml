@@ -32,6 +32,38 @@ func TestOf(t *testing.T) {
 	})
 }
 
+func TestState_AliasLimit(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		opts []docstate.Option
+		want bool
+	}{
+		"default": {
+			want: true,
+		},
+		"limit on": {
+			opts: []docstate.Option{docstate.WithAliasLimit(true)},
+			want: true,
+		},
+		"limit off": {
+			opts: []docstate.Option{docstate.WithAliasLimit(false)},
+		},
+		"limit off and on again": {
+			opts: []docstate.Option{docstate.WithAliasLimit(false), docstate.WithAliasLimit(true)},
+			want: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, docstate.New(tc.opts...).AliasLimit())
+		})
+	}
+}
+
 func TestState_ExcessiveAliasing(t *testing.T) {
 	t.Parallel()
 

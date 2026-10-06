@@ -120,10 +120,15 @@ func TestWhen(t *testing.T) {
 			schema.Embedded(schemaData),
 		)))
 
-		doc := yamltest.FirstDocument(t, input)
+		doc := yamltest.FirstDocumentWithPath(t, input, "app.yaml")
 		err := reg.Validate(t.Context(), doc)
+		require.EqualError(t, err, "resolve schema: app.yaml: excessive aliasing")
 		require.ErrorIs(t, err, schema.ErrResolve)
 		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
+
+		// The aliases of the document are the cause, so the document is
+		// at fault for the error, as it is for a schema's refusal.
+		assert.True(t, niceyaml.IsInvalid(err))
 	})
 
 	t.Run("guarded resolver is not consulted on reject", func(t *testing.T) {

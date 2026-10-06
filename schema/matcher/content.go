@@ -108,8 +108,10 @@ type contentMatcher[T comparable] struct {
 // alias on the path, tagged or not, that names no anchor before it in the
 // document, even when a reference document holds an anchor of that name.
 // Match also refuses a document whose aliases would make the read cost
-// far more than the document holds. It refuses such a document before it
-// decodes anything, as the schema validator does, with an error matching
+// far more than the document holds, unless [niceyaml.WithAliasLimit]
+// turned the limit off for its source. It refuses such a document before
+// it decodes anything, as a decode does. The document is at fault for
+// that error, as [niceyaml.IsInvalid] describes, and it matches
 // [go.jacobcolvin.com/niceyaml/schema.ErrExcessiveAliasing]:
 //
 //	// Matches kind: Deployment.
@@ -149,11 +151,13 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 
 	// A few hundred bytes of nested aliases can make a decode take
 	// minutes, so a node that holds an alias decodes only when its whole
-	// document passes the alias limit of the schema validator.
+	// document passes the alias limit. The aliases of the document are
+	// the cause of a refusal, so the error declares the document at
+	// fault.
 	err = aliasing.CheckDecode(node)
 	if err != nil {
 		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
-		return false, doc.Bind(err)
+		return false, doc.Bind(niceyaml.WrapError(err))
 	}
 
 	// A decode into a type that decodes itself from text writes the node
@@ -165,7 +169,7 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 		err = aliasing.CheckDecodeText(node)
 		if err != nil {
 			//nolint:wrapcheck // Binding names the document; the error keeps its own context.
-			return false, doc.Bind(err)
+			return false, doc.Bind(niceyaml.WrapError(err))
 		}
 	}
 
