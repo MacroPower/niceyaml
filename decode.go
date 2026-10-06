@@ -2056,6 +2056,11 @@ func WithDisallowUnknownFields(disallow bool) DecodeOption {
 // should read therefore go to the Source, through [WithReferences]. A
 // [yaml.ReferenceFiles] or [yaml.ReferenceDirs] option passed here serves
 // the one call, and a validator it runs finds no anchor of those files.
+// The Source cannot see those files either, so it keeps their anchors
+// apart from the anchors of its documents only when it has references of
+// its own. Without them, an alias inside such a file reads an anchor of
+// the document that shares its name in a decode into a typed value, and
+// the anchor of the file in a decode into an any value.
 //
 // Within that call, the decode, the key decoding of self-validation, and
 // the second decode that finds the value behind an error, as
@@ -2257,8 +2262,10 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // in fails the decode instead. The decoder reads a copy of the document
 // that gives a name of its own to an anchor whose name another anchor
 // shares, and to an anchor that follows an alias of its name with no
-// anchor before it. Each alias to such an anchor carries the new name
-// too.
+// anchor before it. The copy of a document whose [Source] has reference
+// documents from [WithReferences] gives every anchor a name of its own,
+// so an alias inside a reference document never reads an anchor of the
+// document. Each alias to a renamed anchor carries the new name too.
 //
 // An [ast.Node] the decode fills, or one an UnmarshalYAML method takes,
 // spells a renamed alias with the new name of its anchor. It spells a

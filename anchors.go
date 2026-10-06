@@ -34,6 +34,17 @@ import (
 // alias the resolver binds to no anchor keeps its name, so it reads an
 // anchor of a reference document or none.
 //
+// The decoder keeps the anchors of the reference documents in the same
+// maps, and it reads those documents first. It reads the value of each
+// anchor there into an interface, and it reads the nodes of the anchor
+// again for each target of another type. An alias among those nodes finds
+// its anchor by name at every read. The second read thus finds an anchor
+// of the document that shares the name, where the first found the anchor
+// of the reference document. When the [Source] has reference documents
+// from [WithReferences], the tree therefore gives every anchor of the
+// document a name of its own, so an alias of a reference document reads
+// the anchors of the reference documents alone.
+//
 // The decoder reads an alias inside the anchor it refers to as null,
 // since it has not finished reading the anchor. For a type with an
 // UnmarshalText method, or one that reads YAML bytes, the decoder writes
@@ -122,7 +133,7 @@ func (d *document) decodeTree() *decodeTree {
 func (d *document) newDecodeTree() *decodeTree {
 	body := d.root.Body
 
-	names := renamedAnchorNames(d.pathResolver(), body)
+	names := renamedAnchorNames(d.pathResolver(), body, len(d.node.source.references) > 0)
 	enclosed := d.enclosedAliases()
 
 	if len(names) > 0 || len(enclosed) > 0 || holdsIntegerTag(body) {
@@ -161,15 +172,21 @@ func (d *document) parsedTree(names map[string]bool, enclosed map[ast.Node]bool)
 	ast.Walk(tokens, body)
 
 	source := sourceNodes(d.root.Body)
-	spelled := spelledNames(names, d.tokens)
 
 	// Each anchor with a name in names gets the name followed by a count in
 	// brackets, higher than the count of the last anchor of that name, so
 	// no two new names match. A key, a value, a comment, or a quoted anchor
 	// name can hold the same text, so the count skips a new name that the
-	// document spells anywhere, even in part. An alias that spells such a
-	// name would read the wrong anchor, and restoreNames would rewrite the
-	// text in any message that quotes it.
+	// document or a reference document spells anywhere, even in part. An
+	// alias that spells such a name would read the wrong anchor, and
+	// restoreNames would rewrite the text in any message that quotes it.
+	spelled := map[string]bool{}
+
+	if len(names) > 0 {
+		newSpellings(d.tokens).find(names, spelled)
+		src.referenceSpellings().find(names, spelled)
+	}
+
 	renamed := map[ast.Node]string{}
 	count := map[string]int{}
 
@@ -806,8 +823,10 @@ func (e restoredError) Unwrap() error {
 // anchor has, and the names of anchors that follow an alias of their name
 // that resolver binds to no anchor. The decoder would read such an alias
 // as the later anchor, although it names no anchor of the document before
-// it and reads a reference document's anchor, if any.
-func renamedAnchorNames(resolver *paths.Resolver, body ast.Node) map[string]bool {
+// it and reads a reference document's anchor, if any. When references is
+// set, the [Source] has reference documents, which may define an anchor
+// of any name, so the result holds the name of every anchor.
+func renamedAnchorNames(resolver *paths.Resolver, body ast.Node, references bool) map[string]bool {
 	anchors := map[string]int{}
 	unbound := map[string]bool{}
 
@@ -833,7 +852,7 @@ func renamedAnchorNames(resolver *paths.Resolver, body ast.Node) map[string]bool
 	names := map[string]bool{}
 
 	for name, count := range anchors {
-		if count > 1 || unbound[name] {
+		if references || count > 1 || unbound[name] {
 			names[name] = true
 		}
 	}
@@ -841,20 +860,30 @@ func renamedAnchorNames(resolver *paths.Resolver, body ast.Node) map[string]bool
 	return names
 }
 
-// spelledNames returns the new names that tks spell, even in part, among
-// those [document.parsedTree] can give an anchor with a name in names,
-// the name followed by a count in brackets. It reads the text of tks,
-// which holds a spelling that runs across tokens, such as a tag before a
-// flow sequence. It also reads the value of each token, which differs
-// from its text where a quoted scalar holds an escape or a scalar folds
-// a line break.
-func spelledNames(names map[string]bool, tks token.Tokens) map[string]bool {
-	spelled := map[string]bool{}
+// spellings indexes the counts in brackets that tokens spell, such as the
+// " [2]" of "x [2]", so [spellings.find] reports the new names
+// [document.parsedTree] cannot give an anchor.
+//
+// Create instances with [newSpellings].
+type spellings struct {
+	// Finds each place a name precedes " [" in data.
+	index *suffixarray.Index
+	// Each count in brackets of data, by the offset of its " [".
+	brackets map[int]bracket
+	// The strings that spell a count, joined.
+	data []byte
+}
 
-	if len(names) == 0 {
-		return spelled
-	}
+// bracket is a count in brackets in the data of a [spellings]. The string
+// that holds it starts at start, and the bracket ends before end.
+type bracket struct{ start, end int }
 
+// newSpellings creates a new [*spellings] for tks. It reads the text of
+// tks, which holds a spelling that runs across tokens, such as a tag
+// before a flow sequence. It also reads the value of each token, which
+// differs from its text where a quoted scalar holds an escape or a scalar
+// folds a line break.
+func newSpellings(tks token.Tokens) *spellings {
 	var (
 		text   strings.Builder
 		values []string
@@ -872,22 +901,17 @@ func spelledNames(names map[string]bool, tks token.Tokens) map[string]bool {
 		}
 	}
 
-	// A bracket is a count in brackets in data, such as " [2]". The string
-	// that holds it starts at start, and the bracket ends before end.
-	type bracket struct{ start, end int }
-
 	// The data joins the strings, so that one index finds each name in all
-	// of them, and brackets holds each bracket by the offset of its " [".
-	var data []byte
+	// of them. A string that spells no count spells no new name, so the
+	// data leaves it out.
+	s := &spellings{brackets: map[int]bracket{}}
 
-	brackets := map[int]bracket{}
-
-	for _, s := range append(values, text.String()) {
-		start := len(data)
-		data = append(data, s...)
+	for _, str := range append(values, text.String()) {
+		start := len(s.data)
+		counts := 0
 
 		for off := 0; ; {
-			i := strings.Index(s[off:], " [")
+			i := strings.Index(str[off:], " [")
 			if i < 0 {
 				break
 			}
@@ -896,33 +920,44 @@ func spelledNames(names map[string]bool, tks token.Tokens) map[string]bool {
 			off = at + 1
 
 			end := at + len(" [")
-			for end < len(s) && s[end] >= '0' && s[end] <= '9' {
+			for end < len(str) && str[end] >= '0' && str[end] <= '9' {
 				end++
 			}
 
-			if end == at+len(" [") || end == len(s) || s[end] != ']' {
+			if end == at+len(" [") || end == len(str) || str[end] != ']' {
 				continue
 			}
 
-			brackets[start+at] = bracket{start: start, end: start + end + 1}
+			s.brackets[start+at] = bracket{start: start, end: start + end + 1}
+			counts++
+		}
+
+		if counts > 0 {
+			s.data = append(s.data, str...)
 		}
 	}
 
 	// The index finds each place a name precedes " [", so the time grows
-	// with those places rather than with the names times the brackets. A
-	// place where the name starts in an earlier string spells nothing.
-	index := suffixarray.New(data)
+	// with those places rather than with the names times the brackets.
+	s.index = suffixarray.New(s.data)
 
+	return s
+}
+
+// find adds to spelled the new names that the tokens of s spell, even in
+// part, among those [document.parsedTree] can give an anchor with a name
+// in names, the name followed by a count in brackets.
+func (s *spellings) find(names, spelled map[string]bool) {
 	for name := range names {
-		for _, at := range index.Lookup([]byte(name+" ["), -1) {
-			b, ok := brackets[at+len(name)]
+		for _, at := range s.index.Lookup([]byte(name+" ["), -1) {
+			// A place where the name starts in an earlier string spells
+			// nothing.
+			b, ok := s.brackets[at+len(name)]
 			if ok && at >= b.start {
-				spelled[name+string(data[at+len(name):b.end])] = true
+				spelled[name+string(s.data[at+len(name):b.end])] = true
 			}
 		}
 	}
-
-	return spelled
 }
 
 // pairNodes maps each node under a, outside its comments, to the node in

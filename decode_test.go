@@ -4953,6 +4953,79 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		}
 	})
 
+	t.Run("new names skip the counts a reference document spells", func(t *testing.T) {
+		t.Parallel()
+
+		type wrapper struct {
+			C ast.Node `yaml:"c"`
+		}
+
+		// The one anchor named x gets a new name, since the source has a
+		// reference document.
+		tcs := map[string]struct {
+			reference string
+			want      string
+		}{
+			"nothing spelled": {
+				reference: "r: 1\n",
+				want:      "[*x [1]]",
+			},
+			"count of another name": {
+				reference: "r: y [1]\n",
+				want:      "[*x [1]]",
+			},
+			"key": {
+				reference: "\"x [1]\": 1\n",
+				want:      "[*x [2]]",
+			},
+			"escaped value": {
+				reference: "r: \"x\\x20[1]\"\n",
+				want:      "[*x [2]]",
+			},
+			"tag before a flow sequence": {
+				reference: "r: !x [1]\n",
+				want:      "[*x [2]]",
+			},
+			"second reference": {
+				reference: "r: x [1]\n---\nr: x [2] # x [3]\n",
+				want:      "[*x [4]]",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, "a: &x 1\nc: [*x]\n",
+					niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.reference)))
+
+				got, err := dd.Decode[wrapper](t.Context())
+				require.NoError(t, err)
+				require.NotNil(t, got.C)
+				assert.Equal(t, tc.want, got.C.String())
+			})
+		}
+	})
+
+	t.Run("text of a reference document spelled like a renamed anchor", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			V struct {
+				A int `yaml:"a"`
+			} `yaml:"v"`
+			X int `yaml:"x"`
+		}
+
+		// The anchor named x gets a new name, and the message quotes the
+		// key as the reference document spells it.
+		dd := yamltest.FirstDocument(t, "x: &x 9\nv: *r\n",
+			niceyaml.WithReferences(niceyaml.NewSourceFromString("r: &r {\"x [1]\": 2}\n")))
+
+		_, err := dd.Decode[config](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+		require.EqualError(t, err, `2:4: unknown field "x [1]"`)
+	})
+
 	t.Run("documents of one source decode at once", func(t *testing.T) {
 		t.Parallel()
 

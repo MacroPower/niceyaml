@@ -91,16 +91,20 @@ type Source struct {
 	// parser.
 	decodeFile       *ast.File
 	decodeFileTokens map[*token.Token]struct{}
-	docs             []*Node
-	parserOpts       []parser.Option
-	decodeOpts       []yaml.DecodeOption
+	// Indexes the counts in brackets the reference documents spell, which
+	// referenceSpellings fills on its first call.
+	refSpellings *spellings
+	docs         []*Node
+	parserOpts   []parser.Option
+	decodeOpts   []yaml.DecodeOption
 	// Holds the text of each reference document from WithReferences, in
 	// the order every decode reads them.
-	references     [][]byte
-	streamOnce     sync.Once
-	fileOnce       sync.Once
-	docsOnce       sync.Once
-	decodeFileOnce sync.Once
+	references       [][]byte
+	streamOnce       sync.Once
+	fileOnce         sync.Once
+	docsOnce         sync.Once
+	decodeFileOnce   sync.Once
+	refSpellingsOnce sync.Once
 	// Accepts a mapping with the same key twice when parsing and decoding.
 	allowDuplicateKeys bool
 	// Turns off the alias limit for every reader of the documents.
@@ -250,6 +254,28 @@ func WithAliasLimit(enabled bool) SourceOption {
 // and the alias limit counts no reference document, as WithAliasLimit
 // describes. WithReferences skips a nil Source. A reference document
 // that does not parse fails every decode of the Source.
+//
+// An alias inside refs reads the anchors of refs alone, whatever anchors
+// the document defines. Both files here define `base`:
+//
+//	# defaults.yaml
+//	base: &base {port: 443}
+//	server: &server {<<: *base}
+//
+//	# app.yaml
+//	base: &base {port: 80}
+//	server: *server
+//
+// The server of app.yaml has port 443 in every decode, into an any value
+// and into a struct alike, so a schema checks the value the decode
+// returns.
+//
+// One limit remains among the documents of refs themselves. When they
+// define an anchor name twice, a value of refs that holds an alias
+// between the two reads the first anchor in a decode into an any value,
+// which is the decode a schema runs. A decode into a typed value, such as
+// a struct or a []int, reads the second anchor. Give each anchor of refs
+// a name that no other anchor of refs has.
 //
 // The references reach the decoder alone. A path resolves in the document
 // itself, so [Node.At] and [Node.Nodes] return an error wrapping
@@ -1105,6 +1131,22 @@ func (s *Source) decodeParse() (*ast.File, map[*token.Token]struct{}) {
 	})
 
 	return s.decodeFile, s.decodeFileTokens
+}
+
+// referenceSpellings returns the [*spellings] of the reference documents
+// of the Source, and builds it on the first call.
+func (s *Source) referenceSpellings() *spellings {
+	s.refSpellingsOnce.Do(func() {
+		var tks token.Tokens
+
+		for _, ref := range s.references {
+			tks = append(tks, tokens.Tokenize(string(ref))...)
+		}
+
+		s.refSpellings = newSpellings(tks)
+	})
+
+	return s.refSpellings
 }
 
 // splitDocumentRuns cuts tks into runs that each parse on its own. It cuts

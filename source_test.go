@@ -3729,6 +3729,183 @@ func TestWithReferences(t *testing.T) {
 		}
 	})
 
+	t.Run("alias inside a reference reads the anchors of the references", func(t *testing.T) {
+		t.Parallel()
+
+		type target struct {
+			Base   server `yaml:"base"`
+			Server server `yaml:"server"`
+			V      []int  `yaml:"v"`
+			W      []int  `yaml:"w"`
+			X      int    `yaml:"x"`
+		}
+
+		list := niceyaml.NewSourceFromString("x: &x 1\nlist: &list [*x]\n")
+		merged := niceyaml.NewSourceFromString("base: &base {port: 443}\nserver: &server {<<: *base}\n")
+
+		tcs := map[string]struct {
+			ref   *niceyaml.Source
+			input string
+			want  target
+		}{
+			"anchor of the document before the alias": {
+				ref:   list,
+				input: "x: &x 9\nv: *list\n",
+				want:  target{X: 9, V: []int{1}},
+			},
+			"anchor of the document after the alias": {
+				ref:   list,
+				input: "v: *list\nx: &x 9\n",
+				want:  target{X: 9, V: []int{1}},
+			},
+			"alias of the document to its own anchor": {
+				ref:   list,
+				input: "x: &x 9\nv: *list\nw: [*x]\n",
+				want:  target{X: 9, V: []int{1}, W: []int{9}},
+			},
+			"two anchors of the document": {
+				ref:   list,
+				input: "w: [&x 8, *x, &x 9, *x]\nv: *list\n",
+				want:  target{V: []int{1}, W: []int{8, 8, 9, 9}},
+			},
+			"merge inside the reference": {
+				ref:   merged,
+				input: "base: &base {port: 80}\nserver: *server\n",
+				want:  target{Base: server{Port: 80}, Server: server{Port: 443}},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithReferences(tc.ref))
+
+				got, err := doc.Decode[target](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+
+				// A decode into any reads each alias as the typed decode
+				// does. The text it encodes to holds no alias, so go-yaml
+				// reads that text into the target on its own.
+				untyped, err := doc.Decode[any](t.Context())
+				require.NoError(t, err)
+
+				text, err := yaml.Marshal(untyped)
+				require.NoError(t, err)
+
+				var again target
+
+				require.NoError(t, yaml.Unmarshal(text, &again))
+				assert.Equal(t, tc.want, again)
+			})
+		}
+	})
+
+	t.Run("schema checks the value the decode returns", func(t *testing.T) {
+		t.Parallel()
+
+		type target struct {
+			Server server `yaml:"server"`
+		}
+
+		secure := schema.MustCompile([]byte(`{
+			"type": "object",
+			"required": ["server"],
+			"properties": {
+				"server": {
+					"type": "object",
+					"required": ["port"],
+					"properties": {"port": {"const": 443}}
+				}
+			}
+		}`))
+
+		tcs := map[string]struct {
+			input string
+			want  int
+			err   []string
+		}{
+			"alias inside the reference reads the reference": {
+				input: "base: &base {port: 80}\nserver: *server\n",
+				want:  443,
+			},
+			"alias of the document reads the document": {
+				input: "base: &base {port: 80}\nserver: *base\n",
+				err:   []string{`app.yaml:1:20: $.server.port: value does not match const`},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input,
+					niceyaml.WithName("app.yaml"),
+					niceyaml.WithReferences(niceyaml.NewSourceFromString(
+						"base: &base {port: 443}\nserver: &server {<<: *base}\n",
+					)),
+				)
+
+				got, err := doc.Decode[target](t.Context(), niceyaml.WithValidator(secure))
+				assert.Equal(t, tc.err, bindingMessages(err))
+				assert.Equal(t, tc.want, got.Server.Port)
+			})
+		}
+	})
+
+	t.Run("merge of a reference sets a key the document sets before it", func(t *testing.T) {
+		t.Parallel()
+
+		// The go-yaml decoder lets a `<<` merge key set a key the mapping
+		// holds above it.
+		doc := yamltest.FirstDocument(t, "kind: Deployment\n<<: *base\n",
+			niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {kind: Bogus}\n")))
+
+		got, err := doc.Decode[map[string]any](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"kind": "Bogus"}, got)
+	})
+
+	t.Run("anchor name the references define twice", func(t *testing.T) {
+		t.Parallel()
+
+		// WithReferences documents this limit. The go-yaml decoder reads the
+		// alias inside the list by name again for a typed target, after it
+		// has read every reference document, so it finds the second anchor.
+		tcs := map[string]struct {
+			refs []*niceyaml.Source
+		}{
+			"in one reference": {
+				refs: []*niceyaml.Source{
+					niceyaml.NewSourceFromString("x: &x 1\nlist: &list [*x]\ny: &x 2\n"),
+				},
+			},
+			"in two references": {
+				refs: []*niceyaml.Source{
+					niceyaml.NewSourceFromString("x: &x 1\nlist: &list [*x]\n"),
+					niceyaml.NewSourceFromString("x: &x 2\n"),
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, "v: *list\n", niceyaml.WithReferences(tc.refs...))
+
+				untyped, err := doc.Decode[map[string]any](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, map[string]any{"v": []any{uint64(1)}}, untyped)
+
+				typed, err := doc.Decode[map[string][]int](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, map[string][]int{"v": {2}}, typed)
+			})
+		}
+	})
+
 	t.Run("references serve every decode from any goroutine", func(t *testing.T) {
 		t.Parallel()
 
@@ -3774,6 +3951,49 @@ func TestWithReferences(t *testing.T) {
 		got, err = doc.Decode[map[string]int](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, map[string]int{"a": 1}, got)
+	})
+
+	t.Run("reference of one decode shares its anchor names with the document", func(t *testing.T) {
+		t.Parallel()
+
+		file := filepath.Join(t.TempDir(), "lists.yaml")
+		require.NoError(t, os.WriteFile(file, []byte("x: &x 1\nlist: &list [*x]\n"), 0o600))
+
+		// WithYAMLDecodeOptions documents this limit. The source sees no
+		// reference file that one decode names, so it keeps the anchors of
+		// that file apart from its own only when it has references.
+		tcs := map[string]struct {
+			opts []niceyaml.SourceOption
+			want map[string][]int
+		}{
+			"source without references": {
+				want: map[string][]int{"w": {9}, "v": {9}},
+			},
+			"source with references": {
+				opts: []niceyaml.SourceOption{
+					niceyaml.WithReferences(niceyaml.NewSourceFromString("other: &other 0\n")),
+				},
+				want: map[string][]int{"w": {9}, "v": {1}},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, "w: [&x 9]\nv: *list\n", tc.opts...)
+
+				untyped, err := doc.Decode[map[string]any](t.Context(),
+					niceyaml.WithYAMLDecodeOptions(yaml.ReferenceFiles(file)))
+				require.NoError(t, err)
+				assert.Equal(t, map[string]any{"w": []any{uint64(9)}, "v": []any{uint64(1)}}, untyped)
+
+				typed, err := doc.Decode[map[string][]int](t.Context(),
+					niceyaml.WithYAMLDecodeOptions(yaml.ReferenceFiles(file)))
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, typed)
+			})
+		}
 	})
 
 	t.Run("a path resolves in the document alone", func(t *testing.T) {
