@@ -3165,7 +3165,10 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 		assert.Equal(t, "no matching schema", bound.Message())
-		assert.Equal(t, 2, bound.Document().DocumentIndex())
+
+		index, ok := bound.DocumentIndex()
+		require.True(t, ok)
+		assert.Equal(t, 2, index)
 	})
 
 	t.Run("reports ErrNoMatch alone when no resolver says more", func(t *testing.T) {
