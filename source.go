@@ -66,7 +66,10 @@ import (
 type Source struct {
 	name     string
 	filePath string
-	lines    line.Lines
+	// The file system filePath names a file in, or nil when the path
+	// names a file on disk or the Source has no path.
+	fsys  fs.FS
+	lines line.Lines
 	// Holds the stream that [Source.Tokens] rebuilds from lines on its
 	// first call.
 	stream token.Tokens
@@ -115,6 +118,7 @@ type Source struct {
 // Available options:
 //   - [WithName]
 //   - [WithFilePath]
+//   - [WithFS]
 //   - [WithAllowDuplicateKeys]
 //   - [WithAliasLimit]
 //   - [WithReferences]
@@ -150,6 +154,26 @@ func WithName(name string) SourceOption {
 func WithFilePath(path string) SourceOption {
 	return func(s *Source) {
 		s.filePath = path
+	}
+}
+
+// WithFS is a [SourceOption] that sets the file system the file path of
+// the [Source] names a file in. Each document of the Source reports it
+// from [Node.FS], and a schema reference written beside the document,
+// such as a yaml-language-server directive, then resolves in that file
+// system and never on disk.
+//
+// [NewSourceFromFS] sets it. A program that reads the bytes itself sets
+// it beside [WithFilePath], so a Source built from those bytes resolves
+// as one that NewSourceFromFS opened:
+//
+//	source := niceyaml.NewSourceFromBytes(data,
+//		niceyaml.WithFilePath("configs/app.yaml"), niceyaml.WithFS(bundle))
+//
+// Without it, and with a nil fsys, the file path names a file on disk.
+func WithFS(fsys fs.FS) SourceOption {
+	return func(s *Source) {
+		s.fsys = fsys
 	}
 }
 
@@ -361,10 +385,8 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 // A schema registry reads from disk the schema file that a directive in
 // the document names, and resolves a relative name against that path.
 // The registry option [go.jacobcolvin.com/niceyaml/schema.WithFSAt]
-// confines those reads to one directory.
-// [go.jacobcolvin.com/niceyaml/schema.WithFS] reads each path from a
-// file system of its own, so it goes with the documents of
-// NewSourceFromFS instead.
+// confines those reads to one directory. A document that NewSourceFromFS
+// opened resolves its directive in its own file system instead.
 //
 // Returns an error when it cannot read the file.
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
@@ -383,14 +405,15 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 // from fsys, such as an [embed.FS] that ships configuration with the
 // binary or an [fs.FS] a test builds. It sets the path on the [Source] as
 // [NewSourceFromFile] does, so each document reports it for schema
-// routing and a schema directive resolves relative to it in the same
-// file system, through the registry option
-// [go.jacobcolvin.com/niceyaml/schema.WithFS]:
+// routing. It sets the file system too, as [WithFS] does, so a schema
+// directive in a document resolves beside the document in fsys, whatever
+// registry validates it:
 //
 //	source, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
 //
-// A registry for documents that NewSourceFromFile opens by a path on
-// disk takes [go.jacobcolvin.com/niceyaml/schema.WithFSAt] instead.
+// A directive there that names ./schema.json reads configs/schema.json
+// from bundle. A document that [NewSourceFromFile] opens resolves its
+// directive on disk, so one registry validates both.
 //
 // Returns an error when it cannot read the file.
 func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, error) {
@@ -399,7 +422,7 @@ func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, er
 		return nil, fmt.Errorf("read file: %w", err)
 	}
 
-	return NewSourceFromBytes(data, append([]SourceOption{WithFilePath(path)}, opts...)...), nil
+	return NewSourceFromBytes(data, append([]SourceOption{WithFilePath(path), WithFS(fsys)}, opts...)...), nil
 }
 
 // NewSourceFromReader creates a new [*Source] by reading r to its end,
@@ -506,6 +529,18 @@ func (s *Source) FilePath() string {
 	}
 
 	return s.filePath
+}
+
+// FS returns the file system the file path of the [Source] names a file
+// in, which [NewSourceFromFS] or [WithFS] sets. It returns nil when the
+// path names a file on disk, when the Source has no path, and for a nil
+// Source.
+func (s *Source) FS() fs.FS {
+	if s == nil {
+		return nil
+	}
+
+	return s.fsys
 }
 
 // Tokens returns the full [token.Tokens] stream of the [Source]. The first

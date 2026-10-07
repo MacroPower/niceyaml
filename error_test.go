@@ -10538,13 +10538,18 @@ func TestIsInvalid(t *testing.T) {
 		return ctx
 	}
 
-	directive := func(t *testing.T, ref string) *niceyaml.Node {
+	// The document names its schema in fsys, which holds the files of the
+	// case.
+	directive := func(t *testing.T, fsys fs.FS, ref string) *niceyaml.Node {
 		t.Helper()
 
-		return yamltest.FirstDocumentWithPath(t, "# yaml-language-server: $schema="+ref+"\nname: cafe\n", "c.yaml")
+		return yamltest.FirstDocument(t,
+			"# yaml-language-server: $schema="+ref+"\nname: cafe\n",
+			niceyaml.WithFilePath("c.yaml"), niceyaml.WithFS(fsys),
+		)
 	}
 
-	notLoading := schema.NewRegistry(schema.WithFS(fstest.MapFS{}), schema.WithResolvers(schema.Directive()))
+	byDirective := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
 	validated := func(t *testing.T, v niceyaml.Validator) error {
 		t.Helper()
@@ -10890,7 +10895,7 @@ func TestIsInvalid(t *testing.T) {
 			build: func(t *testing.T) error {
 				t.Helper()
 
-				return directive(t, "./missing.json").Validate(t.Context(), notLoading)
+				return directive(t, fstest.MapFS{}, "./missing.json").Validate(t.Context(), byDirective)
 			},
 			err: schema.ErrLoad,
 		},
@@ -10898,12 +10903,9 @@ func TestIsInvalid(t *testing.T) {
 			build: func(t *testing.T) error {
 				t.Helper()
 
-				reg := schema.NewRegistry(
-					schema.WithFS(fstest.MapFS{"bad.json": {Data: []byte(`{"type": 12}`)}}),
-					schema.WithResolvers(schema.Directive()),
-				)
+				bad := fstest.MapFS{"bad.json": {Data: []byte(`{"type": 12}`)}}
 
-				return directive(t, "./bad.json").Validate(t.Context(), reg)
+				return directive(t, bad, "./bad.json").Validate(t.Context(), byDirective)
 			},
 			err: schema.ErrCompile,
 		},
@@ -10955,7 +10957,7 @@ func TestIsInvalid(t *testing.T) {
 			build: func(t *testing.T) error {
 				t.Helper()
 
-				return directive(t, "./missing.json").Validate(canceled(t), notLoading)
+				return directive(t, fstest.MapFS{}, "./missing.json").Validate(canceled(t), byDirective)
 			},
 			err: context.Canceled,
 		},
@@ -11227,7 +11229,7 @@ func TestIsInvalid(t *testing.T) {
 
 				return errors.Join(
 					validated(t, portSchema),
-					directive(t, "./missing.json").Validate(t.Context(), notLoading),
+					directive(t, fstest.MapFS{}, "./missing.json").Validate(t.Context(), byDirective),
 				)
 			},
 			err: schema.ErrLoad,

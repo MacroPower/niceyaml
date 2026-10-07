@@ -27,20 +27,18 @@ const onWindows = runtime.GOOS == "windows"
 // driveLen is the length of a Windows drive prefix: a letter and a colon.
 const driveLen = 2
 
-// File creates a [Ref] that names a schema file. The Ref is a [Resolver]
-// that names the file for every document. The registry reads the file
-// with [Registry.Load]. Without a file system, it reads the file from
-// disk, with a relative path made absolute against the working directory
-// at the time File runs. A change of working directory after File
-// therefore leaves the Ref on the same file.
+// File creates a [Ref] that names a schema file on disk. The Ref is a
+// [Resolver] that names the file for every document. The registry reads
+// the file with [Registry.Load], with a relative path made absolute
+// against the working directory at the time File runs. A change of
+// working directory after File therefore leaves the Ref on the same file.
 //
-// Given [WithFS], the registry reads path from that file system instead,
-// as written and in slash form, so a schema shipped in an [embed.FS]
-// loads without touching the disk. The working directory plays no part
-// there, and an absolute path names no file. Given [WithFSAt], the
-// registry reads the path it would read from disk through a file system
-// that stands for one directory, so a path outside that directory names
-// no file. See the two options for details.
+// A schema shipped in an [embed.FS], or in any other file system, takes
+// [FileFS] instead, which reads the path from that file system and never
+// from disk. Given [WithFSAt], the registry reads the path it would read
+// from disk through a file system that stands for one directory, so a
+// path outside that directory names no file. See that option for
+// details.
 //
 // File names the schema by the file:// URL of the path made absolute
 // against the working directory, such as file:///srv/schemas/config.json,
@@ -55,10 +53,8 @@ const driveLen = 2
 // loads, not when File runs.
 //
 // A $ref in the schema resolves against the URL of the file, so
-// "defs.json" names the file beside it. Under [WithFS], that URL holds
-// the path in the file system, as file:///schemas/config.json does for
-// schemas/config.json, while [Ref.Key] keeps the URL of the path on
-// disk. The registry reads each file or HTTP URL a reference names the
+// "defs.json" names the file beside it. The registry reads each file or
+// HTTP URL a reference names the
 // way it reads the schema, once however many schemas reference it. When
 // a reference fails to load, a later validation that reaches it loads it
 // again. A remote schema that names a local file fails to resolve, and
@@ -81,9 +77,9 @@ const driveLen = 2
 // directory, such as one whose directory no longer exists or one that
 // runs in a browser. File then names the path by the URL of the same
 // path under the root, so "schemas/config.json" becomes
-// file:///schemas/config.json. Such a Ref loads under [WithFS], which
-// reads the path as written. Any other registry reports the missing
-// directory when it loads the Ref.
+// file:///schemas/config.json. The registry reports the missing
+// directory when it loads such a Ref. A Ref from [FileFS] needs no
+// working directory.
 //
 // File is for a path written in the program, so it panics on an empty
 // path, as [Loadable] panics on an empty key. A reference read from a
@@ -114,8 +110,8 @@ const driveLen = 2
 //
 // File uses the path as written, so a path built from a document can
 // name any file the registry can read. Check such a path before passing
-// it to File, as the example does, or confine the registry with [WithFS]
-// or [WithFSAt], so a path outside its file system names no file.
+// it to File, as the example does, or confine the registry with
+// [WithFSAt], so a path outside its file system names no file.
 func File(path string) Ref {
 	ref, err := file(path)
 	if err != nil {
@@ -166,6 +162,83 @@ func file(path string) (Ref, error) {
 	}
 
 	return Ref{key: fileURL(named), file: path, abs: abs, absErr: absErr}, nil
+}
+
+// FileFS creates a [Ref] that names a schema file in fsys, such as a
+// schema an [embed.FS] ships beside the program. The Ref is a [Resolver]
+// that names the file for every document, as a Ref from [File] is. The
+// registry reads path from fsys as written, in slash form, whatever
+// file system its other schemas come from, so one registry serves
+// bundled schemas and schemas on disk:
+//
+//	reg := schema.NewRegistry(schema.WithResolvers(
+//	    schema.Directive(),
+//	    schema.When(isWidget, schema.FileFS(bundle, "schemas/widget.json")),
+//	))
+//
+// The working directory plays no part, and the registry never reads the
+// disk for the Ref. An absolute path names no file in fsys, and neither
+// does a relative path that leads out of its root, such as
+// "../schema.json". Both fail to load with [fs.ErrInvalid].
+//
+// The registry knows the file by the URL of its path in fsys, such as
+// file:///schemas/widget.json, which is its [Ref.Key]. A $ref in the
+// schema resolves against that URL, so "defs.json" names
+// schemas/defs.json, and the registry reads it from fsys too. A file URL
+// in a $ref names a path in fsys the same way, and an HTTP URL is
+// fetched as for any other schema.
+//
+// Two file systems can hold one path, so the registry caches the schema
+// by the file system and the path together. It tells one file system
+// from another by comparing the values, so fsys must be a value Go can
+// compare, such as an [embed.FS], a pointer, or the file system
+// [os.DirFS] returns, or a map, such as an [fstest.MapFS], which the
+// registry knows by the map itself. A value of any other type, such as
+// a struct that holds a slice, fails to load with [fs.ErrInvalid], and a
+// pointer to it loads. Each distinct value is a file system of its own,
+// so a program builds its file system once and passes the same value
+// each time. A new [fs.Sub] or a new [os.Root] per document would add an
+// entry to the registry per document.
+//
+// The registry reads only a regular file of at most 10 MB, as [File]
+// describes, and the note there on [fs.StatFS] holds for fsys.
+//
+// Panics if fsys is nil or path is empty.
+func FileFS(fsys fs.FS, path string) Ref {
+	if fsys == nil {
+		panic("schema.FileFS: fsys is nil")
+	}
+
+	ref, err := file(path)
+	if err != nil {
+		panic("schema.FileFS: " + err.Error())
+	}
+
+	return inFS(ref, fsys)
+}
+
+// inFS returns ref, a [Ref] from [file], as a Ref that names its path in
+// fsys. The key becomes the URL of the path in fsys, with the fragment
+// of the key of ref, so the working directory has no part in it. A path
+// that names no file in a file system keeps its key, and the read of the
+// Ref reports why. A nil fsys, and a Ref that names no file, return ref
+// as it is.
+func inFS(ref Ref, fsys fs.FS) Ref {
+	if fsys == nil || ref.file == "" {
+		return ref
+	}
+
+	fragment := fileFragment(ref)
+
+	ref.fsys = fsys
+	ref.abs, ref.absErr = "", nil
+
+	path, err := filePath(ref)
+	if err == nil {
+		ref.key = fileURL(path) + fragment
+	}
+
+	return ref
 }
 
 // An fsDir is the directory on disk that the root of a registry's file
@@ -275,17 +348,18 @@ func isRelative(path string) bool {
 }
 
 // filePath returns the absolute path that names the file of ref, a [Ref]
-// from [File], in the registry. The file URL of that path is the URL the
+// from [File] or [FileFS]. The file URL of that path is the URL the
 // registry knows the file by, and [Registry.readFile] reads it.
 //
-// Without a file system and under [WithFSAt], that is the path on disk
-// [File] made absolute. A Ref that File built without a working directory
-// has none. Under [WithFS], it is the path as given to File, cleaned, in
-// slash form, and behind a slash, so schemas/config.json becomes
-// /schemas/config.json. The working directory plays no part there. An
-// absolute path, or one that leads out of the root, is [fs.ErrInvalid].
-func (r *Registry) filePath(ref Ref) (string, error) {
-	if !r.ownFS() {
+// For a Ref from File, that is the path on disk File made absolute. A
+// Ref that File built without a working directory has none. For a Ref
+// that names its file in a file system, it is the path as given,
+// cleaned, in slash form, and behind a slash, so schemas/config.json
+// becomes /schemas/config.json. The working directory plays no part
+// there. An absolute path, or one that leads out of the root, is
+// [fs.ErrInvalid].
+func filePath(ref Ref) (string, error) {
+	if ref.fsys == nil {
 		if ref.abs == "" {
 			return "", fmt.Errorf("read %s: no absolute path: %w", ref.file, ref.absErr)
 		}
@@ -295,55 +369,42 @@ func (r *Registry) filePath(ref Ref) (string, error) {
 
 	if !isRelative(ref.file) {
 		return "", fmt.Errorf(
-			"read %s: %w: an absolute path names no file in the registry's file system (see WithFSAt)",
+			"read %s: %w: an absolute path names no file in the file system of the document or the Ref",
 			ref.file, fs.ErrInvalid,
 		)
 	}
 
 	name := slashpath.Clean(filepath.ToSlash(ref.file))
 	if !fs.ValidPath(name) {
-		return "", fmt.Errorf("read %s: %w: not a path in the registry's file system", ref.file, fs.ErrInvalid)
+		return "", fmt.Errorf(
+			"read %s: %w: not a path in the file system of the document or the Ref",
+			ref.file,
+			fs.ErrInvalid,
+		)
 	}
 
 	return slashpath.Join("/", name), nil
 }
 
-// ownFS reports whether the registry reads files from a file system that
-// is a namespace of its own, as [WithFS] sets it, rather than from disk
-// or from a file system that stands for a directory on disk.
-func (r *Registry) ownFS() bool {
-	return r.fsys != nil && r.fsAt == nil
-}
-
 // readFile returns the bytes of the file at path, an absolute path as
-// [Registry.filePath] returns it for a [Ref] and as a file URL in a $ref
-// names it.
+// [filePath] returns it for a [Ref] and as a file URL in a $ref names
+// it. The file system is the one the Ref names its file in, or nil for a
+// Ref that names a file on disk.
 //
-// Without a file system, readFile reads path from disk. Under [WithFSAt],
-// it reads path relative to the directory the file system stands for,
-// and a path outside that directory is [fs.ErrInvalid]. Its errors name
-// path either way. Under [WithFS], it reads path without its leading
-// slash from the file system, and its errors name that path. Off Windows,
-// a drive-letter path is [fs.ErrInvalid] everywhere, and under [WithFS]
-// it is on Windows too.
-func (r *Registry) readFile(path string) ([]byte, error) {
+// With a file system, readFile reads path without its leading slash from
+// it, and its errors name that path. A drive-letter path is
+// [fs.ErrInvalid] there on every platform. With none, readFile reads
+// path from disk, or under [WithFSAt] relative to the directory the file
+// system of the registry stands for, where a path outside that directory
+// is [fs.ErrInvalid]. Its errors name path either way, and off Windows a
+// drive-letter path is invalid the same way.
+func (r *Registry) readFile(fsys fs.FS, path string) ([]byte, error) {
 	switch {
-	case r.fsys == nil:
-		return readDisk(path)
-
-	case r.fsAt != nil:
-		name, err := r.fsAt.rel(path)
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", path, err)
-		}
-
-		return readFS(r.fsys, name, path)
-
-	default:
+	case fsys != nil:
 		rooted := slashpath.Clean(filepath.ToSlash(path))
 		if !strings.HasPrefix(rooted, "/") {
 			return nil, fmt.Errorf(
-				"read %s: %w: a drive letter names no file in the registry's file system",
+				"read %s: %w: a drive letter names no file in the file system of the document or the Ref",
 				path, fs.ErrInvalid,
 			)
 		}
@@ -354,7 +415,18 @@ func (r *Registry) readFile(path string) ([]byte, error) {
 			name = "."
 		}
 
-		return readFS(r.fsys, name, name)
+		return readFS(fsys, name, name)
+
+	case r.fsys == nil:
+		return readDisk(path)
+
+	default:
+		name, err := r.fsAt.rel(path)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
+
+		return readFS(r.fsys, name, path)
 	}
 }
 

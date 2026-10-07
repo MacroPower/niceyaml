@@ -42,7 +42,7 @@ func TestFile_FIFO(t *testing.T) {
 	}
 }
 
-func TestFile_FIFOWithFS(t *testing.T) {
+func TestFileFS_FIFO(t *testing.T) {
 	t.Parallel()
 
 	// A file system that implements fs.StatFS stats the path without
@@ -75,11 +75,12 @@ func TestFile_FIFOWithFS(t *testing.T) {
 			dir := t.TempDir()
 			require.NoError(t, syscall.Mkfifo(filepath.Join(dir, "schema.json"), 0o600))
 
-			reg := schema.NewRegistry(schema.WithFS(tc.fsys(t, dir)))
+			reg := schema.NewRegistry()
+			ref := schema.FileFS(tc.fsys(t, dir), "schema.json")
 			errc := make(chan error, 1)
 
 			go func() {
-				_, err := reg.Load(t.Context(), schema.File("schema.json"))
+				_, err := reg.Load(t.Context(), ref)
 				errc <- err
 			}()
 

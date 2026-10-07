@@ -4151,6 +4151,72 @@ func TestNewSourceFromReader(t *testing.T) {
 	})
 }
 
+func TestSource_FS(t *testing.T) {
+	t.Parallel()
+
+	const text = "key: value\n"
+
+	// A pointer compares by identity, so the test tells this file system
+	// from any other.
+	bundle := &fstest.MapFS{"configs/app.yaml": &fstest.MapFile{Data: []byte(text)}}
+
+	fromFS, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
+	require.NoError(t, err)
+
+	replaced, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml", niceyaml.WithFS(nil))
+	require.NoError(t, err)
+
+	tcs := map[string]struct {
+		source *niceyaml.Source
+		want   fs.FS
+	}{
+		"NewSourceFromFS keeps its file system": {
+			source: fromFS,
+			want:   bundle,
+		},
+		"WithFS sets it for a source built from bytes": {
+			source: niceyaml.NewSourceFromBytes([]byte(text),
+				niceyaml.WithFilePath("configs/app.yaml"), niceyaml.WithFS(bundle)),
+			want: bundle,
+		},
+		"a later option replaces it": {
+			source: replaced,
+		},
+		"a source with a path alone has none": {
+			source: niceyaml.NewSourceFromString(text, niceyaml.WithFilePath("configs/app.yaml")),
+		},
+		"a source with no path has none": {
+			source: niceyaml.NewSourceFromString(text),
+		},
+		"a nil source has none": {},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			if tc.want == nil {
+				assert.Nil(t, tc.source.FS())
+			} else {
+				assert.Same(t, tc.want, tc.source.FS())
+			}
+
+			if tc.source == nil {
+				return
+			}
+
+			doc, err := tc.source.Document()
+			require.NoError(t, err)
+
+			if tc.want == nil {
+				assert.Nil(t, doc.FS())
+			} else {
+				assert.Same(t, tc.want, doc.FS())
+			}
+		})
+	}
+}
+
 func TestNewSourceFromFS(t *testing.T) {
 	t.Parallel()
 

@@ -10,7 +10,9 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -62,8 +64,8 @@ const defaultHTTPTimeout = 30 * time.Second
 //
 // Lookup tries the resolvers [WithResolvers] gave it in order, and the
 // first [Resolver] that does not report [ErrNoMatch] wins. The registry
-// caches the schemas it compiles by [Ref.Key], or under [WithFS] by the
-// path of a Ref from [File] in the file system. It consults that cache
+// caches the schemas it compiles by [Ref.Key], and a Ref from [FileFS]
+// by its file system too. It consults that cache
 // before loading, so once a schema compiles, the registry serves it to
 // every later document that names it without loading it again. A failed
 // load or compile stays out of the cache, so the next document that names
@@ -96,11 +98,12 @@ type Registry struct {
 	cache       map[string]*Schema // compiled schemas by cacheKey
 	refDocs     map[string]refDoc  // the documents a $ref names, by URI without fragment
 	client      *http.Client       // fetches the schemas URL refs name
-	fsys        fs.FS              // reads the schemas File refs name; nil reads the disk
+	fsys        fs.FS              // reads the schemas File refs name under WithFSAt; nil reads the disk
+	fsIDs       map[any]int        // the number of each file system a Ref names its file in
 	fsAt        *fsDir             // the directory on disk the root of fsys stands for; nil when it stands for none
 	resolvers   []Resolver
 	compileOpts []CompileOption
-	mu          sync.RWMutex // guards cache and refDocs
+	mu          sync.RWMutex // guards cache, refDocs, and fsIDs
 	// Makes Validate report ErrNoMatch when no resolver applies.
 	requireSchema bool
 }
@@ -112,64 +115,17 @@ type Registry struct {
 //   - [WithCompileOptions]
 //   - [WithRequireSchema]
 //   - [WithHTTPClient]
-//   - [WithFS]
 //   - [WithFSAt]
 type RegistryOption func(*Registry)
 
-// WithFS is a [RegistryOption] that sets the file system the registry
-// reads schema files from. It serves every [Ref] from [File], whether a
-// resolver holds it or [Directive] and [FileOrURL] build it from a
-// reference in the input. A path names a file in fsys as written, in
-// slash form, and the registry never reads the working directory, so
-// schemas shipped in an [embed.FS] beside the documents that name them
-// resolve without touching the disk:
-//
-//	source, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
-//
-//	reg := schema.NewRegistry(
-//	    schema.WithFS(bundle),
-//	    schema.WithResolvers(schema.Directive()),
-//	)
-//
-// A directive in that document that names ./schema.json resolves to
-// configs/schema.json in bundle. An absolute path names no file in fsys,
-// and neither does a relative path that leads out of its root, such as
-// ../schema.json from a document at the root. Both fail to load with
-// [fs.ErrInvalid].
-//
-// The option pairs with [niceyaml.NewSourceFromFS], which gives each
-// document a path in the same file system. A path does not say which
-// file system it belongs to, so a document that
-// [niceyaml.NewSourceFromFile] opens from disk by a relative path still
-// resolves its directive in fsys, under that relative path. A registry
-// for documents on disk takes [WithFSAt] instead.
-//
-// The registry knows each file by the URL of its path in fsys, such as
-// file:///configs/schema.json. A $ref in the schema resolves against
-// that URL, so "defs.json" names configs/defs.json, and an error names
-// the path in fsys. The registry caches the schema by that URL too,
-// since the [Ref.Key] of a Ref from [File] holds the working directory
-// of the process that built it. Two Refs that File built in different
-// directories for one relative path therefore share a cached schema.
-//
-// Without the option, the registry reads schema files from disk, and a
-// nil fsys keeps that. Given more than once, or beside [WithFSAt], the
-// last option wins. Either way, the registry reads only a regular file
-// of at most 10 MB, the limit it sets on a response from a [URL]. Pass a
-// file system that implements [fs.StatFS], such as one from [os.DirFS]
-// or [os.Root.FS], so that a named pipe at the path fails to load rather
-// than blocking the read. See [File] for details.
-func WithFS(fsys fs.FS) RegistryOption {
-	return func(r *Registry) {
-		if fsys != nil {
-			r.fsys, r.fsAt = fsys, nil
-		}
-	}
-}
-
 // WithFSAt is a [RegistryOption] that confines the schema files the
-// registry reads to dir, a directory on disk, and reads them through
-// fsys. The root of fsys stands for dir, as it does in the file system
+// registry reads from disk to dir, a directory there, and reads them
+// through fsys. It serves every [Ref] that names a file on disk: one from
+// [File], and one [Directive], [RefBeside], or [FileOrURL] builds for a
+// document on disk. A Ref from [FileFS], and one built for a document in
+// a file system, reads from its own file system and never from disk, so
+// the option has no part in it. The root of fsys stands for dir, as it
+// does in the file system
 // [os.DirFS] returns for dir and in the one of an [os.Root] opened on
 // dir. The registry resolves each path as it does without a file system,
 // so a relative path resolves against the working directory at the time
@@ -215,9 +171,14 @@ func WithFS(fsys fs.FS) RegistryOption {
 // [Ref.Key], the cache, and the URL a $ref resolves against stay as they
 // are without a file system, and an error names the path on disk.
 //
-// A nil fsys leaves the registry as it is. Given more than once, or
-// beside [WithFS], the last option wins. The registry reads only a
-// regular file of at most 10 MB, as [WithFS] describes.
+// A registry that must read nothing from disk takes a file system that
+// holds no file, since every path on disk then names none:
+//
+//	schema.WithFSAt(".", fstest.MapFS{})
+//
+// A nil fsys leaves the registry as it is. Given more than once, the
+// last option wins. The registry reads only a regular file of at most
+// 10 MB, as [File] describes.
 //
 // Panics if dir is empty.
 func WithFSAt(dir string, fsys fs.FS) RegistryOption {
@@ -352,6 +313,7 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 	r := &Registry{
 		cache:         make(map[string]*Schema),
 		refDocs:       make(map[string]refDoc),
+		fsIDs:         make(map[any]int),
 		client:        defaultHTTPClient,
 		requireSchema: true,
 	}
@@ -612,9 +574,9 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 // other Ref, Schema compiles the bytes [Registry.Load] loads for it on
 // the first request for its cache key, with the options
 // [WithCompileOptions] gave the registry, and serves the result from the
-// cache after that. The cache key is the [Ref.Key]. Under [WithFS], the
-// cache key of a Ref from [File] is the URL of its path in the file
-// system instead, such as file:///schemas/root.json. [Registry.Lookup]
+// cache after that. The cache key is the [Ref.Key], and for a Ref from
+// [FileFS] the file system beside it, so one path in two file systems is
+// two schemas. [Registry.Lookup]
 // takes the schema it validates with from here, so a caller that holds a
 // Ref of its own, such as one that checks a Go value with
 // [Schema.ValidateValue], shares the same load and compile:
@@ -733,8 +695,9 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 }
 
 // Load returns the bytes of the schema ref names. For a Ref from [File],
-// Load reads the file from the file system [WithFS] or [WithFSAt] gave
-// the registry, or from disk. For a Ref from [URL], it fetches the URL
+// Load reads the file from disk, or through the file system [WithFSAt]
+// gave the registry. For a Ref from [FileFS], it reads the file from the
+// file system of the Ref. For a Ref from [URL], it fetches the URL
 // with the client [WithHTTPClient] gave the registry. For a Ref from
 // [Loadable], it returns the bytes the Ref's load returns. Load reads the
 // bytes on every call and caches nothing. [Registry.Schema] loads the
@@ -768,12 +731,12 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 		return httpfetch.Get(ctx, r.client, ref.key)
 
 	case ref.file != "":
-		path, err := r.filePath(ref)
+		path, err := filePath(ref)
 		if err != nil {
 			return nil, err
 		}
 
-		return r.readFile(path)
+		return r.readFile(ref.fsys, path)
 
 	case ref.load != nil:
 		return ref.load(ctx)
@@ -865,8 +828,8 @@ type refDoc struct {
 // calling load. A load that fails and bytes that do not parse stay out of
 // the registry, so the next call loads again. When two calls load one
 // document at once, both return the document the first of them kept.
-func (r *Registry) refDocument(uri string, load func() ([]byte, error)) (refDoc, error) {
-	if doc, ok := r.keptRefDoc(uri); ok {
+func (r *Registry) refDocument(key, uri string, load func() ([]byte, error)) (refDoc, error) {
+	if doc, ok := r.keptRefDoc(key); ok {
 		return doc, nil
 	}
 
@@ -885,7 +848,7 @@ func (r *Registry) refDocument(uri string, load func() ([]byte, error)) (refDoc,
 		doc.fileURL, doc.fileURLErr = localFileURL(data)
 	}
 
-	return r.keepRefDoc(uri, doc), nil
+	return r.keepRefDoc(key, doc), nil
 }
 
 // keptRefDoc returns the document the registry keeps under key, if any.
@@ -961,6 +924,11 @@ func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsons
 
 	allowFile := !ref.url
 
+	// The cache key of ref held this text already, so the file system has
+	// one. A file URL names a file in the file system of ref, and the
+	// registry keeps the document apart from one of that URL in another.
+	inFS, _ := r.fsKey(ref.fsys) //nolint:errcheck // The cache key of ref reported it.
+
 	resolver := jsonschema.RefResolverFunc(func(ctx context.Context, uri string) (*jsonschema.Schema, error) {
 		if i := strings.IndexByte(uri, '#'); i >= 0 {
 			uri = uri[:i]
@@ -969,13 +937,17 @@ func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsons
 		// The scheme decides what a schema may reach before the registry
 		// looks for a kept document, so a schema from URL never receives a
 		// local file that a schema from File loaded. The registry keeps the
-		// document under uri, which names one file in a registry however
-		// the registry reads it.
-		var load func() ([]byte, error)
+		// document under key, which is uri for a URL and names the file
+		// system beside it for a file.
+		var (
+			load func() ([]byte, error)
+			key  string
+		)
 
 		switch {
 		case httpfetch.IsHTTPURL(uri):
 			uri = user.apply(uri)
+			key = uri
 			load = func() ([]byte, error) {
 				//nolint:wrapcheck // The fetch error names the URL already.
 				return httpfetch.Get(ctx, r.client, uri)
@@ -987,15 +959,16 @@ func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsons
 				return nil, fmt.Errorf("%w: %q", jsonschema.ErrNotResolved, httpfetch.Redacted(uri))
 			}
 
+			key = inFS + uri
 			load = func() ([]byte, error) {
-				return r.readFile(path)
+				return r.readFile(ref.fsys, path)
 			}
 
 		default:
 			return nil, fmt.Errorf("%w: %q", jsonschema.ErrNotResolved, httpfetch.Redacted(uri))
 		}
 
-		doc, err := r.refDocument(uri, load)
+		doc, err := r.refDocument(key, uri, load)
 		if err != nil {
 			return nil, err
 		}
@@ -1054,25 +1027,86 @@ func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsons
 }
 
 // cacheKey returns the key the registry caches the schema ref names
-// under. That is [Ref.Key], except for a [Ref] from [File], which the
-// registry caches by the file URL of its [Registry.filePath], with the
-// fragment of its Key. Without a file system and under [WithFSAt], that
-// URL is the Key. Under [WithFS], it names the path in the file system,
-// which the working directory in the Key has no part in. A Ref from File
-// that names no file in the registry has no cache key, and cacheKey
-// returns the error its read reports.
+// under. That is [Ref.Key], except for a [Ref] that names a file, which
+// the registry caches by the URL [fileBase] returns for it. For a file on
+// disk, that URL is the Key. For a file in a file system, the text
+// [Registry.fsKey] returns for the file system stands in front, so one
+// path in two file systems is two entries. A Ref that names no file the
+// registry can read has no cache key, and cacheKey returns the error its
+// read reports.
 func (r *Registry) cacheKey(ref Ref) (string, error) {
 	if ref.file == "" {
 		return ref.Key(), nil
 	}
 
-	path, err := r.filePath(ref)
+	base, err := fileBase(ref)
+	if err != nil {
+		return "", err
+	}
+
+	inFS, err := r.fsKey(ref.fsys)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", ref.file, err)
+	}
+
+	return inFS + base, nil
+}
+
+// fileBase returns the URL the registry knows the file of ref by, a
+// [Ref] from [File] or [FileFS], with the fragment of its key. A $ref in
+// the schema resolves against it.
+func fileBase(ref Ref) (string, error) {
+	path, err := filePath(ref)
 	if err != nil {
 		return "", err
 	}
 
 	return fileURL(path) + fileFragment(ref), nil
 }
+
+// fsKey returns the text that tells fsys apart from every other file
+// system in the keys of the registry, or "" for a nil fsys, which stands
+// for the disk. The text opens with a NUL, which no URL holds.
+//
+// The registry knows a file system by its value when Go can compare the
+// value, as it can an [embed.FS], a pointer, and the file system
+// [os.DirFS] returns. It knows a map, such as an [fstest.MapFS], by the
+// map itself. A value of any other type has no identity the registry can
+// read, so fsKey returns [fs.ErrInvalid] for it.
+func (r *Registry) fsKey(fsys fs.FS) (string, error) {
+	if fsys == nil {
+		return "", nil
+	}
+
+	var id any
+
+	switch v := reflect.ValueOf(fsys); {
+	case v.Comparable():
+		id = fsys
+	case v.Kind() == reflect.Map:
+		id = mapIdentity(v.Pointer())
+	default:
+		return "", fmt.Errorf(
+			"%w: a file system of type %T has no identity to cache a schema by: pass a pointer to it",
+			fs.ErrInvalid, fsys,
+		)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	n, ok := r.fsIDs[id]
+	if !ok {
+		n = len(r.fsIDs) + 1
+		r.fsIDs[id] = n
+	}
+
+	return "\x00fs" + strconv.Itoa(n) + "\x00", nil
+}
+
+// mapIdentity is the identity of a file system that is a map, which
+// [Registry.fsKey] knows by the address of the map.
+type mapIdentity uintptr
 
 // fileFragment returns the fragment of the key of ref, a [Ref] from
 // [File], behind its '#', or "" when the key has none. [fileURL] escapes
@@ -1088,12 +1122,11 @@ func fileFragment(ref Ref) string {
 }
 
 // name returns the name of ref for a message. That is the key, as
-// [Ref.name] returns it, except under [WithFS] for a [Ref] from [File].
-// The key of such a Ref holds the working directory of the process, which
-// the file system has no part in, so the registry names the Ref by the
-// path as given to File, with the fragment of its key.
+// [Ref.name] returns it, except for a [Ref] that names its file in a
+// file system. The registry names such a Ref by the path as given, with
+// the fragment of its key, since that is the path the file system reads.
 func (r *Registry) name(ref Ref) string {
-	if ref.file == "" || !r.ownFS() {
+	if ref.file == "" || ref.fsys == nil {
 		return ref.name()
 	}
 
@@ -1156,17 +1189,19 @@ func (r *Registry) compile(ctx context.Context, ref Ref, cacheKey string) (*Sche
 	}
 
 	// The compiler resolves the references of the schema against base.
-	// For a file, that is the URL the registry caches the schema under,
-	// which names the path in the file system under WithFS. For a URL, it
-	// is the key without its userinfo, and the resolver adds the userinfo
-	// back to each fetch.
+	// For a file, that is the URL of its path, on disk or in the file
+	// system of the Ref. For a URL, it is the key without its userinfo,
+	// and the resolver adds the userinfo back to each fetch.
 	base, user := ref.Key(), keyUserinfo{}
 
 	switch {
 	case ref.url:
 		base, user = splitUserinfo(base)
 	case ref.file != "":
-		base = cacheKey
+		base, err = fileBase(ref)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, r.name(ref), err)
+		}
 	}
 
 	// A fragment on the key of a file or a URL names a subschema of the

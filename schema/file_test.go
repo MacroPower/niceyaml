@@ -202,20 +202,17 @@ func TestFile_HashInName(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(data), 0o600))
 
 	tcs := map[string]struct {
-		path string
+		ref  schema.Ref
 		opts []schema.RegistryOption
 	}{
 		"on disk": {
-			path: path,
+			ref: schema.File(path),
 		},
-		"under WithFS": {
-			path: "a#b.json",
-			opts: []schema.RegistryOption{
-				schema.WithFS(fstest.MapFS{"a#b.json": &fstest.MapFile{Data: []byte(data)}}),
-			},
+		"in a file system": {
+			ref: schema.FileFS(fstest.MapFS{"a#b.json": &fstest.MapFile{Data: []byte(data)}}, "a#b.json"),
 		},
 		"under WithFSAt": {
-			path: path,
+			ref:  schema.File(path),
 			opts: []schema.RegistryOption{schema.WithFSAt(dir, os.DirFS(dir))},
 		},
 	}
@@ -224,7 +221,7 @@ func TestFile_HashInName(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			ref := schema.File(tc.path)
+			ref := tc.ref
 			assert.True(t, strings.HasSuffix(ref.Key(), "/a%23b.json"), ref.Key())
 
 			s, err := schema.NewRegistry(tc.opts...).Schema(t.Context(), ref)
@@ -280,11 +277,8 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 	})
 
 	//nolint:paralleltest // See above.
-	t.Run("a relative path loads under WithFS", func(t *testing.T) {
-		reg := schema.NewRegistry(
-			schema.WithFS(bundle),
-			schema.WithResolvers(schema.File("schemas/root.json")),
-		)
+	t.Run("a relative path loads from a file system", func(t *testing.T) {
+		reg := schema.NewRegistry(schema.WithResolvers(schema.FileFS(bundle, "schemas/root.json")))
 
 		require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "name: cafe\n")))
 
@@ -293,14 +287,11 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 	})
 
 	//nolint:paralleltest // See above.
-	t.Run("a directive resolves under WithFS", func(t *testing.T) {
+	t.Run("a directive resolves in the file system of its document", func(t *testing.T) {
 		source, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
 		require.NoError(t, err)
 
-		reg := schema.NewRegistry(
-			schema.WithFS(bundle),
-			schema.WithResolvers(schema.Directive()),
-		)
+		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
 		err = source.ValidateDocuments(t.Context(), reg)
 		require.ErrorContains(t, err, `$.name: expected "string", got "integer"`)

@@ -103,15 +103,15 @@
 // still compiles, and validation fails with an error wrapping
 // [ErrValidate] for each document that reaches it. A schema whose $refs
 // name files or URLs beside it loads through a [Registry], which resolves
-// each $ref against the location of the schema. Given [WithFS], the
-// registry reads the schema and the files its $refs name from an
-// [embed.FS]:
+// each $ref against the location of the schema. [FileFS] names a schema
+// in a file system, and the registry reads it and the files its $refs
+// name from there, such as from an [embed.FS]:
 //
 //	//go:embed schemas
 //	var schemasFS embed.FS
 //
-//	reg := schema.NewRegistry(schema.WithFS(schemasFS))
-//	root, err := reg.Schema(ctx, schema.File("schemas/root.json"))
+//	reg := schema.NewRegistry()
+//	root, err := reg.Schema(ctx, schema.FileFS(schemasFS, "schemas/root.json"))
 //
 // # Resolution
 //
@@ -186,9 +186,10 @@
 //
 // The loaders return a [Ref] whose key identifies the schema and whose
 // bytes the registry loads through [Registry.Load]. [Embedded] holds a
-// copy of the bytes. The registry reads a file from disk or from the
-// file system [WithFS] or [WithFSAt] gave it, and it fetches a URL with
-// the client [WithHTTPClient] gave it. [Registry.Schema] checks its cache by
+// copy of the bytes. The registry reads a file from the file system its
+// Ref names, or from disk, where [WithFSAt] confines the read, and it
+// fetches a URL with the client [WithHTTPClient] gave it.
+// [Registry.Schema] checks its cache by
 // key before it loads and compiles those bytes, so once a schema
 // compiles, the registry serves it to every later document that names it
 // without loading it again. A failed load or compile stays out of the
@@ -231,15 +232,19 @@
 //	schema.File("./schemas/config.json")
 //	schema.URL("https://example.com/schema.json")
 //
-// A registry reads schema files from disk unless an option gives it a
-// file system. [WithFS] reads each path as written from a file system of
-// its own, such as an [embed.FS], and pairs with the documents of
-// [go.jacobcolvin.com/niceyaml.NewSourceFromFS]. [WithFSAt] reads the
-// paths a registry reads from disk, through a file system that stands
-// for one directory, and pairs with the documents of
-// [go.jacobcolvin.com/niceyaml.NewSourceFromFile]. A path outside that
-// directory then fails to load, so the option confines a program that
-// validates documents from another trust domain:
+// A schema file lives on disk or in a file system, and each [Ref] says
+// which. [File] names a file on disk, and [FileFS] names one in a file
+// system, such as an [embed.FS]. A reference written beside a document
+// lives where the document does, so [Directive] and [RefBeside] read it
+// from the file system of a document that
+// [go.jacobcolvin.com/niceyaml.NewSourceFromFS] opened and from disk for
+// one that [go.jacobcolvin.com/niceyaml.NewSourceFromFile] opened. One
+// registry thus serves bundled documents and documents on disk.
+//
+// [WithFSAt] confines the files a registry reads from disk. It reads
+// them through a file system that stands for one directory, and a path
+// outside that directory fails to load, so the option suits a program
+// that validates documents from another trust domain:
 //
 //	root, err := os.OpenRoot(dir)
 //	if err != nil {

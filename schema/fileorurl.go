@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 )
 
@@ -46,21 +47,10 @@ var ErrNoBaseDir = errors.New("relative schema path has no base directory")
 // than the whole process, since it keeps a schema for every distinct URL
 // it fetches, and an allowed host can answer endless ones.
 //
-// The result is the shape a [Resolver] returns, so a resolver that builds
-// the reference from the document hands it back as it is. [filepath.Dir]
-// of an empty path is ".", so the resolver leaves baseDir empty for a
-// document without a file path. A relative reference from such a document
-// then reports [ErrNoBaseDir] instead of resolving against the working
-// directory:
-//
-//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
-//	    var baseDir string
-//	    if path := doc.FilePath(); path != "" {
-//	        baseDir = filepath.Dir(path)
-//	    }
-//
-//	    return schema.FileOrURL(baseDir, pickSchema(doc))
-//	})
+// FileOrURL names a file on disk. A reference that belongs to a document
+// goes through [RefBeside] instead, which takes the base directory from
+// the document and names the file in the file system the document came
+// from.
 //
 // A reference from a command line reports its error where the flag is
 // read:
@@ -121,6 +111,45 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 	}
 
 	return file(filepath.Join(baseDir, path))
+}
+
+// RefBeside creates a [Ref] for a schema reference that belongs to doc,
+// such as one a field of the document holds or a resolver derives from
+// its content. It reads the reference as [FileOrURL] does, with the
+// directory of the document's file as the base directory, so a relative
+// path names a file beside the document. A document without a file path
+// has no such directory, and a relative path then reports [ErrNoBaseDir].
+//
+// The file the Ref names lives where the document does. For a document
+// from [niceyaml.NewSourceFromFile], that is the disk. For one from
+// [niceyaml.NewSourceFromFS], or one whose source [niceyaml.WithFS] gave
+// a file system, it is that file system, as [FileFS] names a file in
+// one. An absolute path and a file:// URL then name no file and fail to
+// load with [fs.ErrInvalid], so a document in a file system never
+// reaches the disk. An HTTP/HTTPS reference names a URL either way.
+//
+// [Directive] resolves the reference of a directive this way. A resolver
+// of the program does the same for a reference it reads itself:
+//
+//	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
+//	    return schema.RefBeside(doc, pickSchema(doc))
+//	})
+//
+// RefBeside uses the reference as written, so whoever wrote it picks the
+// file or host, as the note on [FileOrURL] says.
+func RefBeside(doc *niceyaml.Node, ref string) (Ref, error) {
+	var baseDir string
+
+	if path := doc.FilePath(); path != "" {
+		baseDir = filepath.Dir(path)
+	}
+
+	r, err := FileOrURL(baseDir, ref)
+	if err != nil {
+		return Ref{}, err
+	}
+
+	return inFS(r, doc.FS()), nil
 }
 
 // isFileURL reports whether ref is a file URL, in any letter case. RFC 8089

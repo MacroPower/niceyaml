@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -132,11 +131,20 @@ type directiveResolver struct{}
 //
 // Resolve reads the directive comment from the document's
 // [niceyaml.Node.Preamble] and names the schema it references through
-// [FileOrURL]. It resolves a relative path against the directory of the
+// [RefBeside]. It resolves a relative path against the directory of the
 // document's file, so a document without a file path reports
 // [ErrNoFilePath] for a relative path. A URL or an absolute path needs no
 // file and resolves either way. A document without a directive reports
 // [ErrNoDirective].
+//
+// The schema lives where the document does. A document that
+// [niceyaml.NewSourceFromFile] opened names a file on disk. A document
+// that [niceyaml.NewSourceFromFS] opened, or one whose source
+// [niceyaml.WithFS] gave a file system, names a file in that file
+// system, and the registry never reads the disk for it. An absolute path
+// names no file there and fails to load with [fs.ErrInvalid]. One
+// registry thus validates bundled documents and documents on disk, each
+// against the schema beside it.
 //
 // A fragment selects a subschema on a path as it does on a URL, so
 // "$schema=./schema.json#/definitions/Foo" names the Foo definition in
@@ -166,7 +174,10 @@ type directiveResolver struct{}
 // the document's directory included, and any host the client can reach.
 // A program that validates documents from another trust domain confines
 // the registry. [WithFSAt] with the file system of an [os.Root] restricts
-// file reads to one directory tree, and a client whose Transport or
+// the reads of documents on disk to one directory tree. A document in a
+// file system reads only that file system. A document built from bytes
+// with a file path and no file system counts as one on disk, so such a
+// program gives it one with [niceyaml.WithFS]. A client whose Transport or
 // CheckRedirect restricts hosts on every hop bounds the fetch. Neither
 // limits how many schemas documents can name. The registry keeps every
 // schema it compiles, so documents that name endless distinct URLs on an
@@ -191,12 +202,6 @@ func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Node) (Ref, er
 		return noneSchema.Ref(), nil
 	}
 
-	var baseDir string
-
-	if filePath := doc.FilePath(); filePath != "" {
-		baseDir = filepath.Dir(filePath)
-	}
-
 	// Like yaml-language-server, read a '#' after the first character of a
 	// path as the start of a fragment that names a subschema, rather than
 	// as part of the file name. [FileOrURL] splits the fragment off a URL
@@ -208,7 +213,7 @@ func (directiveResolver) Resolve(_ context.Context, doc *niceyaml.Node) (Ref, er
 		}
 	}
 
-	ref, err := FileOrURL(baseDir, path)
+	ref, err := RefBeside(doc, path)
 	if errors.Is(err, ErrNoBaseDir) {
 		return Ref{}, fmt.Errorf("%w: %w", ErrNoFilePath, err)
 	}

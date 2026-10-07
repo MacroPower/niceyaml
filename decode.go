@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"reflect"
 	"slices"
 	"sort"
@@ -1739,6 +1740,13 @@ func (n *Node) Preamble() token.Tokens {
 // [Source.FilePath]. Returns an empty string when the source has none.
 func (n *Node) FilePath() string {
 	return n.source.FilePath()
+}
+
+// FS returns the file system the path of the file the document came from
+// names a file in, which is [Source.FS]. It returns nil when the path
+// names a file on disk and when the source has none.
+func (n *Node) FS() fs.FS {
+	return n.source.FS()
 }
 
 // Span returns the lines of [Source.Lines] that the node covers. A whole

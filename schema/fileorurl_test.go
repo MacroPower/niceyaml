@@ -1,6 +1,8 @@
 package schema_test
 
 import (
+	"context"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,10 +11,13 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -498,4 +503,134 @@ func TestFileOrURL_FileURLWithoutLocalPath(t *testing.T) {
 			assert.Equal(t, fileURL(t, filepath.Join(baseDir, tc.ref)), got.Key())
 		})
 	}
+}
+
+func TestRefBeside(t *testing.T) {
+	t.Parallel()
+
+	const schemaData = `{"type": "object", "required": ["kind"]}`
+
+	bundle := fstest.MapFS{
+		"configs/schema.json": &fstest.MapFile{Data: []byte(schemaData)},
+	}
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "schema.json"), []byte(schemaData), 0o600))
+
+	inBundle := yamltest.FirstDocument(t, "kind: App\n",
+		niceyaml.WithFilePath("configs/app.yaml"), niceyaml.WithFS(bundle))
+	onDisk := yamltest.FirstDocumentWithPath(t, "kind: App\n", filepath.Join(dir, "app.yaml"))
+	noPath := yamltest.FirstDocument(t, "kind: App\n")
+
+	reg := schema.NewRegistry()
+
+	t.Run("a relative path names a file beside a document in a file system", func(t *testing.T) {
+		t.Parallel()
+
+		ref, err := schema.RefBeside(inBundle, "./schema.json")
+		require.NoError(t, err)
+		assert.Equal(t, "file:///configs/schema.json", ref.Key())
+
+		data, err := reg.Load(t.Context(), ref)
+		require.NoError(t, err)
+		assert.JSONEq(t, schemaData, string(data))
+	})
+
+	t.Run("a relative path names a file beside a document on disk", func(t *testing.T) {
+		t.Parallel()
+
+		ref, err := schema.RefBeside(onDisk, "schema.json")
+		require.NoError(t, err)
+		assert.Equal(t, schema.File(filepath.Join(dir, "schema.json")).Key(), ref.Key())
+
+		data, err := reg.Load(t.Context(), ref)
+		require.NoError(t, err)
+		assert.JSONEq(t, schemaData, string(data))
+	})
+
+	t.Run("a path through the parent stays in the file system", func(t *testing.T) {
+		t.Parallel()
+
+		ref, err := schema.RefBeside(inBundle, "../configs/schema.json")
+		require.NoError(t, err)
+		assert.Equal(t, "file:///configs/schema.json", ref.Key())
+
+		out, err := schema.RefBeside(inBundle, "../../schema.json")
+		require.NoError(t, err)
+
+		_, err = reg.Load(t.Context(), out)
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, fs.ErrInvalid)
+	})
+
+	t.Run("a URL names a URL wherever the document lives", func(t *testing.T) {
+		t.Parallel()
+
+		for _, doc := range []*niceyaml.Node{inBundle, onDisk, noPath} {
+			ref, err := schema.RefBeside(doc, "https://example.com/schema.json")
+			require.NoError(t, err)
+			assert.Equal(t, "https://example.com/schema.json", ref.Key())
+		}
+	})
+
+	t.Run("an absolute path names no file in a file system", func(t *testing.T) {
+		t.Parallel()
+
+		abs := filepath.Join(dir, "schema.json")
+
+		for _, written := range []string{abs, "file://" + filepath.ToSlash(abs)} {
+			ref, err := schema.RefBeside(inBundle, written)
+			require.NoError(t, err)
+
+			_, err = reg.Load(t.Context(), ref)
+			require.ErrorIs(t, err, schema.ErrLoad)
+			require.ErrorIs(t, err, fs.ErrInvalid)
+
+			// The same reference beside a document on disk reads the file.
+			ref, err = schema.RefBeside(onDisk, written)
+			require.NoError(t, err)
+
+			_, err = reg.Load(t.Context(), ref)
+			require.NoError(t, err)
+		}
+	})
+
+	t.Run("a relative path needs the path of the document", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := schema.RefBeside(noPath, "./schema.json")
+		require.ErrorIs(t, err, schema.ErrNoBaseDir)
+
+		// A file system alone gives the document no directory either.
+		orphan := yamltest.FirstDocument(t, "kind: App\n", niceyaml.WithFS(bundle))
+
+		_, err = schema.RefBeside(orphan, "./schema.json")
+		require.ErrorIs(t, err, schema.ErrNoBaseDir)
+	})
+
+	t.Run("an empty reference names no schema", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := schema.RefBeside(inBundle, "")
+		require.ErrorIs(t, err, schema.ErrEmptyPath)
+	})
+
+	t.Run("a resolver returns the result as it is", func(t *testing.T) {
+		t.Parallel()
+
+		beside := schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Node) (schema.Ref, error) {
+			return schema.RefBeside(doc, "schema.json")
+		})
+
+		byName := schema.NewRegistry(schema.WithResolvers(beside))
+
+		require.NoError(t, byName.Validate(t.Context(), inBundle))
+		require.NoError(t, byName.Validate(t.Context(), onDisk))
+
+		invalid := yamltest.FirstDocument(t, "name: x\n",
+			niceyaml.WithFilePath("configs/other.yaml"), niceyaml.WithFS(bundle))
+
+		err := byName.Validate(t.Context(), invalid)
+		require.ErrorContains(t, err, `missing required property "kind"`)
+	})
 }

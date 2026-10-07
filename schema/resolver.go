@@ -3,6 +3,7 @@ package schema
 import (
 	"context"
 	"errors"
+	"io/fs"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
@@ -18,9 +19,11 @@ var ErrNoMatch = errors.New("no matching schema")
 // Ref is the schema a [Resolver] names for a document. A Ref from
 // [Loadable], which [Embedded] builds, holds a key and a function that
 // loads the bytes to compile. A Ref from [File] names a file the registry
-// reads, and one from [URL] names an HTTP URL the registry fetches. A Ref
-// from [Schema.Ref] carries a [*Schema] compiled already. [FileOrURL]
-// builds a file or a URL Ref from a reference as written.
+// reads from disk, one from [FileFS] names a file in a file system, and
+// one from [URL] names an HTTP URL the registry fetches. A Ref from
+// [Schema.Ref] carries a [*Schema] compiled already. [FileOrURL] builds a
+// file or a URL Ref from a reference as written, and [RefBeside] builds
+// one for a reference that belongs to a document.
 //
 // A Ref is itself a [Resolver] that names its schema for every document,
 // so one goes into [WithResolvers] or [When] as it is, and a resolver that
@@ -51,18 +54,18 @@ var ErrNoMatch = errors.New("no matching schema")
 // cache miss, so once a schema compiles, the registry serves it to every
 // later document that names it without loading it again. A failed load
 // or compile stays out of the cache, so the next document that names the
-// Key loads it again. Under [WithFS], the registry caches a Ref from
-// [File] by its path in the file system instead, so two such Refs with
-// one path share a schema whatever directory File built each in. The
-// registry compiles every schema with the options [WithCompileOptions]
-// gave it. [Registry.Load] reads a file from the file system [WithFS] or
-// [WithFSAt] gave the registry and fetches a URL with the client
-// [WithHTTPClient] gave it, so one file system and one client serve
-// every Ref its resolvers name. A Ref that carries a compiled schema has
-// nothing to load, and the registry validates with the schema as it is.
+// Key loads it again. The registry caches a Ref from [FileFS] by its
+// file system and its path together, so one path in two file systems is
+// two schemas. The registry compiles every schema with the options
+// [WithCompileOptions] gave it. [Registry.Load] reads a file from the
+// file system its Ref names, or from disk, where [WithFSAt] confines the
+// read. It fetches a URL with the client [WithHTTPClient] gave the
+// registry. A Ref that carries a compiled schema has nothing to load,
+// and the registry validates with the schema as it is.
 //
-// Create instances with [Loadable], [Embedded], [File], [URL],
-// [FileOrURL], or [Schema.Ref]. The zero Ref names no schema. Return it
+// Create instances with [Loadable], [Embedded], [File], [FileFS], [URL],
+// [FileOrURL], [RefBeside], or [Schema.Ref]. The zero Ref names no
+// schema. Return it
 // beside an error, as a resolver does with [ErrNoMatch].
 type Ref struct {
 	load func(ctx context.Context) ([]byte, error)
@@ -70,16 +73,19 @@ type Ref struct {
 	// registry validates with as it is.
 	schema *Schema
 	key    string
-	// The path of the file, as given to File. A registry under WithFS
-	// reads it from its file system and names it in a message.
+	// The path of the file, as given to File or FileFS. A Ref that names
+	// the file in a file system reads this path from it, and the registry
+	// names the Ref by it in a message.
 	file string
+	// The file system the file lives in, or nil for a file on disk.
+	fsys fs.FS
 	// Why File could not make the path absolute, which leaves abs empty.
 	// A read of the Ref from disk reports it.
 	absErr error
 	// The file made absolute against the working directory as File made
-	// it to build the key. Every read from disk or under WithFSAt uses
-	// it, so the bytes under the key stay the same wherever the read
-	// happens.
+	// it to build the key, and empty for a Ref with a file system. Every
+	// read from disk or under WithFSAt uses it, so the bytes under the
+	// key stay the same wherever the read happens.
 	abs string
 	// The key is an HTTP URL the registry fetches with its client.
 	url bool
@@ -92,9 +98,8 @@ type Ref struct {
 // key are one schema to every registry that caches on it. The key is a
 // name, not necessarily a fetchable address. [URL] uses the URL, [File]
 // the file URL of the absolute path, and [Embedded] a digest of the bytes.
-// A registry with [WithFS] caches a Ref from File by its path in the
-// file system instead, so two such Refs with one key are two schemas
-// when File took a different relative path for each. The load may be
+// [FileFS] uses the file URL of the path in its file system, and the
+// registry tells two file systems apart itself. The load may be
 // expensive and may fail, and must return the same bytes each time it
 // runs for one key.
 //
