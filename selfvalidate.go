@@ -48,12 +48,12 @@ import (
 //	return doc.SelfValidate(ctx, &cfg)
 //
 // A program that layers one file over another decodes each into the
-// value in turn, and validates through the Node of the last file. Every
-// error then binds in that Node, whichever file set the value. With the
-// Nodes of the files below named in [WithFallback], each error binds in
-// the file that set its value, as that option describes:
+// value in turn. A SelfValidate through the Node of the last file then
+// binds every error in that Node, whichever file set the value.
+// [Layers.SelfValidate] binds each error in the file that set its value
+// instead:
 //
-//	return prod.SelfValidate(ctx, &cfg, niceyaml.WithFallback(base))
+//	return niceyaml.NewLayers(base, prod).SelfValidate(ctx, &cfg)
 //
 // On a value that no layer changed, SelfValidate returns what the decode
 // with the walk on returns. The walk spells the key of each map entry as
@@ -62,7 +62,7 @@ import (
 // spelling. It decodes them with the settings of the [Source], such as
 // the reference documents of [WithReferences], and with the go-yaml
 // options that [WithYAMLDecodeOptions] adds in opts. It reads those
-// options and [WithFallback], and no other option. A key type that only
+// options and no other. A key type that only
 // a [yaml.CustomUnmarshaler] option decodes matches no key of the
 // document unless opts carry that option, and an error under such an
 // entry then binds at the key of the map. [Decoder.SelfValidate] runs
@@ -108,15 +108,16 @@ import (
 // context that ended, and SelfValidate then returns that error alone, as
 // [SelfValidator] describes.
 func (n *Node) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
-	return n.selfValidate(ctx, v, newDecodeConfig(opts))
+	return n.selfValidate(ctx, v, newDecodeConfig(opts), nil)
 }
 
 // selfValidate is [Node.SelfValidate] with its settings resolved.
 // [Node.DecodeInto] runs it once the decode has filled v, so a decode and
 // a later call of SelfValidate on the same value return the same error.
 // It binds what the walk returns as [Node.Bind] does, through a binder
-// that also holds the layers [WithFallback] names, when cfg names any.
-func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error {
+// that also holds the Nodes below, the layers under n that [Layers]
+// names, nearest first.
+func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig, below []*Node) error {
 	err := checkSelfValidateTarget(v)
 	if err != nil {
 		return n.bindOwn(err)
@@ -128,7 +129,7 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 		src:      n.source,
 		node:     n,
 		locate:   true,
-		fallback: newFallback(v, cfg.fallbacks),
+		fallback: newFallback(v, below),
 	})
 }
 

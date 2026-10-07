@@ -1401,7 +1401,7 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 // the one error it wraps and ends at an error that unwraps to several,
 // such as one from [errors.Join], which carries no location of its own.
 // Binding binds the errors below the chain the same way, to the same
-// document unless [WithFallback] picks another for one of them, and each
+// document unless [Layers] picks another for one of them, and each
 // becomes a child. They are every error a summary from
 // [NewSummary] along the chain heads, every detail from [WithDetails] of
 // an Error along it, and every branch of the error that ends it. A
@@ -1583,7 +1583,7 @@ type boundTexts struct {
 // a validator gave a Node, so [binder.located] points an error that holds
 // no location at that Node. A binder with a fallback binds each path in
 // the layer [fallback.layer] picks for it, which is its own Node or one
-// of the Nodes [WithFallback] names below it.
+// of the Nodes below it in a [Layers].
 type binder struct {
 	src       *Source
 	node      *Node
@@ -2292,9 +2292,8 @@ func (e *SourceError) Source() *Source {
 // that wraps a binding. Such an error keeps the node of the binding it
 // wraps, whether Node.Bind returns it as it is or binds it anew around
 // the binding with the details it holds, so its node can be nil or belong
-// to another document or source. An error of a self-validation that ran
-// with [WithFallback] is bound to the Node of the layer its path bound
-// in, which is the Node of the call or one of the Nodes the option names.
+// to another document or source. An error that [Layers] binds is bound
+// to the Node of the layer its path bound in.
 // A nil SourceError is bound to none.
 func (e *SourceError) Node() *Node {
 	if e == nil {

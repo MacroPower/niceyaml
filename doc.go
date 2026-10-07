@@ -446,15 +446,12 @@
 // "$.servers[1].port: port is required".
 //
 // A program that layers one file over another decodes both into one
-// value, the lower file first. [WithFallback] names the Node of the lower
-// file in the decode of the upper one, and each error then binds in the
-// file that set its value:
+// value through [Layers], which holds the Node of each file in the order
+// they apply. The value validates once the last file has set it, and
+// each error binds in the file that set its value:
 //
-//	if err := base.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
-//		return err
-//	}
-//
-//	if err := prod.DecodeInto(ctx, &cfg, niceyaml.WithFallback(base)); err != nil {
+//	cfg, err := niceyaml.NewLayers(base, prod).Decode[Config](ctx)
+//	if err != nil {
 //		return err
 //	}
 //

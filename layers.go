@@ -1,8 +1,10 @@
 package niceyaml
 
 import (
+	"context"
 	"errors"
 	"reflect"
+	"slices"
 
 	"github.com/goccy/go-yaml/ast"
 
@@ -11,48 +13,57 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// WithFallback is a [DecodeOption] for a value that several files fill in
-// turn. It names the Nodes the value decoded from before the Node of the
-// call, nearest first. The self-validation step then binds each error in
-// the file that set the value the error is about.
+// Layers holds the Nodes that fill one value in turn, in the order they
+// apply, such as a base file with the file of one environment over it:
 //
-// A program that layers one file over another decodes both into one
-// value, and validates the value once the last file has set it:
+//	layers := niceyaml.NewLayers(base, prod)
 //
-//	var cfg Config
-//	if err := base.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
-//		return err
-//	}
+//	cfg, err := layers.Decode[Config](ctx)
 //
-//	return prod.DecodeInto(ctx, &cfg, niceyaml.WithFallback(base))
-//
-// Without the option, every error binds in the Node of the call, so a
-// port that only base.yaml sets reports a line of prod.yaml. With it, the
-// error names the line that sets the port:
+// [Layers.Decode] and [Layers.DecodeInto] decode each Node into the value
+// in that order, and validate the value once the last Node has set it.
+// The self-validation step binds each error in the file that set the
+// value the error is about, so a port that only base.yaml sets reports
+// the line that sets it:
 //
 //	base.yaml:3:9: $.server.port: port must be at least 1
 //
-// [Node.SelfValidate] takes the option too, for a program that applies
-// its environment or its flags after the last file:
+// A program that applies its environment or its flags after the last
+// file turns the step off for the decode, and runs it with
+// [Layers.SelfValidate] once the value is whole:
 //
-//	err := prod.SelfValidate(ctx, &cfg, niceyaml.WithFallback(base))
+//	var cfg Config
+//	if err := layers.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
+//		return err
+//	}
 //
-// The Node of the call and the Nodes in below are the layers of the
-// value, from the top down. An error binds in one of them by the way
+//	applyEnv(&cfg)
+//
+//	return layers.SelfValidate(ctx, &cfg)
+//
+// [Layers.Bind] binds the error of a check the program runs itself the
+// same way.
+//
+// The layers do not merge as documents. Each decode fills the value as
 // [Node.DecodeInto] fills a value that an earlier decode set. A mapping
 // merges into a struct field by field, so a field keeps the value of a
-// lower layer when the layers above leave its key out. The option
-// therefore follows the path of an error down the type of the value for
-// as long as the path names struct fields, through pointers to structs
-// and inline fields. The error binds in the highest layer whose document
-// holds a value at the end of that stretch, and the rest of the path
-// resolves in that document. A slice, an array, a map, and a value of an
-// interface type end the stretch, since the highest layer that holds one
-// replaced it whole. An error under an element or an entry thus binds in
-// the layer that holds the collection, and never in a layer below it,
-// whose elements the decode discarded. A type that decodes itself,
-// through an UnmarshalYAML or UnmarshalText method, ends the stretch the
-// same way.
+// lower layer when the layers above leave its key out. A slice, an
+// array, a map, and a value of an interface type take what the highest
+// layer that holds one gives them, whole. A map in prod.yaml thus
+// replaces the map of base.yaml, and an entry that only base.yaml holds
+// is gone.
+//
+// An error binds in one of the layers by the same rule. Layers follows
+// the path of the error down the type of the value for as long as the
+// path names struct fields, through pointers to structs and inline
+// fields. The error binds in the highest layer whose document holds a
+// value at the end of that stretch, and the rest of the path resolves in
+// that document. A slice, an array, a map, and a value of an interface
+// type end the stretch, since the highest layer that holds one replaced
+// it whole. An error under an element or an entry thus binds in the
+// layer that holds the collection, and never in a layer below it, whose
+// elements the decode discarded. A type that decodes itself, through an
+// UnmarshalYAML or UnmarshalText method, ends the stretch the same way.
 //
 // A null leaves a field as the layers below set it, so a layer that holds
 // a null there holds no value. A null in a pointer field sets the pointer
@@ -70,58 +81,181 @@ import (
 // It binds in the layer whose mapping lies deepest along the path, and in
 // the highest of several such layers.
 //
-// Each Node in below must be the Node the value decoded from in its own
-// file, so a path below the value names the same field in every layer.
-// That Node is the root of each document for a value that holds a whole
-// file, or the Node [Node.At] returns for the value in each. The bound
-// error reports the [SourceError.Source] and the [SourceError.Node] of
-// the layer it binds in. Its message and [SourceError.Path] carry the
-// path as the Node of the call reads it. [FormatError] prints one excerpt
-// per file when the errors of one call bind in several.
-//
-// The option changes where an error of the self-validation step binds.
-// A [Validator] from [WithValidator] and the decode itself read the Node
-// of the call alone, so a schema on a file that holds part of a
-// configuration still sees only that part. [Node.Decode] fills a new
-// value, which no Node decoded into before, so the option has no use
-// there. A [Decoder] built with the option falls back to the same Nodes
-// for every Node it decodes, which suits many files layered over one
-// shared base.
+// Each Node must be the Node the value decodes from in its own file, so a
+// path below the value names the same field in every layer. That Node is
+// the root of each document for a value that holds a whole file, or the
+// Node [Node.At] returns for the value in each. The bound error reports
+// the [SourceError.Source] and the [SourceError.Node] of the layer it
+// binds in. Its message and [SourceError.Path] carry the path as the
+// highest layer reads it. [FormatError] prints one excerpt per file when
+// the errors of one call bind in several.
 //
 // Two limits remain. A value that the environment or a flag set binds at
 // whatever a file holds at its path, as [Node.SelfValidate] describes.
-// The walk reads the spelling of each map key from the Node of the call,
-// so the keys of a map that only a lower layer holds take the text of
-// their Go values. An error under a key that the document spells another
-// way, such as 1.50, then binds at the key of the map.
+// The walk reads the spelling of each map key from the highest layer, so
+// the keys of a map that only a lower layer holds take the text of their
+// Go values. An error under a key that the document spells another way,
+// such as 1.50, then binds at the key of the map.
 //
-// Each WithFallback appends to the Nodes given before it. A nil Node adds
-// nothing, so a program with an optional base file passes its Node as it
+// Layers that hold no Node stand for a value that came from no file,
+// such as defaults with the environment over them. A decode then leaves
+// the value as it was, and each error binds with no position, as in
+// "$.servers[1].port: port is required". A program whose files are
+// optional thus makes the same calls whichever of them exist.
+//
+// Layers never change after [NewLayers], so they are safe for concurrent
+// use.
+//
+// Create instances with [NewLayers].
+type Layers struct {
+	// The Node of the highest layer, or nil when there are no layers.
+	top *Node
+	// The Nodes in the order they apply, lowest first, and the ones
+	// below top, nearest first. None is nil.
+	nodes []*Node
+	below []*Node
+}
+
+// NewLayers creates a new [*Layers] from the given Nodes, in the order
+// they apply: the lowest layer first and the highest last. A nil Node
+// adds nothing, so a program with an optional file passes its Node as it
 // is.
-func WithFallback(below ...*Node) DecodeOption {
-	return func(c *decodeConfig) {
-		for _, n := range below {
-			if n != nil {
-				c.fallbacks = append(c.fallbacks, n)
+func NewLayers(nodes ...*Node) *Layers {
+	l := &Layers{nodes: make([]*Node, 0, len(nodes))}
+
+	for _, n := range nodes {
+		if n != nil {
+			l.nodes = append(l.nodes, n)
+		}
+	}
+
+	if len(l.nodes) == 0 {
+		return l
+	}
+
+	last := len(l.nodes) - 1
+
+	l.top = l.nodes[last]
+	l.below = slices.Clone(l.nodes[:last])
+	slices.Reverse(l.below)
+
+	return l
+}
+
+// split returns the Node the layers validate and bind through, and the
+// Nodes below it, nearest first. The Node is the highest layer, or the
+// one document of an empty [Source] when l holds no layers.
+func (l *Layers) split() (*Node, []*Node) {
+	if l == nil || l.top == nil {
+		return NewSourceFromString("").documents()[0], nil
+	}
+
+	return l.top, l.below
+}
+
+// DecodeInto validates and decodes each layer into v, lowest first, as
+// [Node.DecodeInto] decodes it with the same options, and stops at the
+// first layer that fails. It then runs the self-validation step once, on
+// the value every layer has set, as [Layers.SelfValidate] runs it. Any v
+// that is not a non-nil pointer returns an error wrapping
+// [ErrDecodeTarget] before anything runs.
+//
+// The options apply to the decode of every layer. A [Validator] from
+// [WithValidator] therefore runs on each layer before that layer decodes,
+// and sees that layer alone. A validator that needs the whole
+// configuration, such as a schema that requires a key, rejects a layer
+// that leaves the key to another one. A program with such a schema
+// decodes each Node itself, with the validator that fits it, and then
+// calls Layers.SelfValidate.
+//
+// [WithSelfValidation] turns the one self-validation step off, for a
+// program that changes the value before it validates.
+func (l *Layers) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
+	top, below := l.split()
+
+	err := checkDecodeTarget(v)
+	if err != nil {
+		return top.bindOwn(err)
+	}
+
+	cfg := newDecodeConfig(opts)
+
+	each := cfg
+	each.skipSelfValidation = true
+
+	if l != nil {
+		for _, n := range l.nodes {
+			err := n.decodeInto(ctx, v, each)
+			if err != nil {
+				return err
 			}
 		}
 	}
+
+	if cfg.skipSelfValidation {
+		return nil
+	}
+
+	return top.selfValidate(ctx, v, cfg, below)
+}
+
+// SelfValidate runs the self-validation step of [Layers.DecodeInto] on
+// its own, on v through the highest layer, as [Node.SelfValidate] runs
+// it. Each error binds in the layer that set its value, as [Layers]
+// describes. It runs whatever [WithSelfValidation] says, and reads only
+// the go-yaml options among opts.
+func (l *Layers) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
+	top, below := l.split()
+
+	return top.selfValidate(ctx, v, newDecodeConfig(opts), below)
+}
+
+// Bind binds err as [Node.Bind] binds it through the highest layer, with
+// one difference. Each path binds in the layer that set the value it
+// names, as [Layers] describes, so a check the program runs on the value
+// reports the file a self-validation would report:
+//
+//	return layers.Bind(&cfg, checkQuota(&cfg))
+//
+// The value v is the one the layers filled, or a pointer to it. Bind
+// reads its type alone, to learn which fields the layers merged and
+// which one layer replaced whole. With a nil v, every path binds in the
+// highest layer.
+func (l *Layers) Bind(v any, err error) error {
+	top, below := l.split()
+
+	return bindTree(err, binder{src: top.source, node: top, locate: true, fallback: newFallback(v, below)})
+}
+
+// Decode validates and decodes each layer into a new T, as
+// [Layers.DecodeInto] decodes them into a value the caller holds. On
+// error, the returned T is the zero value.
+func (l *Layers) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
+	var v T
+
+	err := l.DecodeInto(ctx, &v, opts...)
+	if err != nil {
+		var zero T
+
+		return zero, err
+	}
+
+	return v, nil
 }
 
 // fallback holds what a binder needs to bind an error in a layer below
-// its Node, as [WithFallback] describes: the type of the value the
-// layers filled, and the Nodes below the Node of the binder, nearest
-// first.
+// its Node, as [Layers] describes: the type of the value the layers
+// filled, and the Nodes below the Node of the binder, nearest first.
 type fallback struct {
 	typ   reflect.Type
 	below []*Node
 }
 
-// newFallback returns the [fallback] for v, a value that is not nil, and
-// the Nodes below, or nil when below is empty. A binder with a nil
-// fallback binds every path in its own Node.
+// newFallback returns the [fallback] for v and the Nodes below, or nil
+// when v is nil or below is empty. A binder with a nil fallback binds
+// every path in its own Node.
 func newFallback(v any, below []*Node) *fallback {
-	if len(below) == 0 {
+	if v == nil || len(below) == 0 {
 		return nil
 	}
 
