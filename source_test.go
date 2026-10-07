@@ -2657,9 +2657,12 @@ func TestSource_ValidateDocuments(t *testing.T) {
 			input: "name: &x\n---\nname: [\n---\nvalue: 5\n",
 			want:  []string{"f.yaml:3:7: " + unclosed, "f.yaml:5:1: $: name is required"},
 		},
-		"explicit empty document": {
+		"empty document beside one with content": {
 			input: "name: x\n---\n",
-			want:  []string{"f.yaml:2:1: $: name is required"},
+		},
+		"empty documents alone": {
+			input: "---\n---\n",
+			want:  []string{"f.yaml:1:1: $: name is required", "f.yaml:2:1: $: name is required"},
 		},
 		"empty file": {
 			input: "",
@@ -2692,16 +2695,20 @@ func TestSource_ValidateDocuments(t *testing.T) {
 				assert.Same(t, source, b.Source())
 			}
 
-			// Every document that parsed runs the validator.
-			var parsed int32
+			// Every document that parsed runs the validator, but an empty
+			// one in a file that holds a document with content.
+			docs := source.AllDocuments()
+			content := slices.ContainsFunc(docs, func(doc *niceyaml.Node) bool { return !doc.IsEmpty() })
 
-			for _, doc := range source.AllDocuments() {
-				if doc.Err() == nil {
-					parsed++
+			var ran int32
+
+			for _, doc := range docs {
+				if doc.Err() == nil && (!content || !doc.IsEmpty()) {
+					ran++
 				}
 			}
 
-			assert.Equal(t, parsed, calls.Load())
+			assert.Equal(t, ran, calls.Load())
 		})
 	}
 
@@ -2863,15 +2870,14 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		strict []string
 		want   []string
 	}{
+		// An empty document beside one with content passes with v alone.
 		"schema, trailing header": {
-			v:      manifest,
-			input:  "kind: Pod\n---\n",
-			strict: []string{"f.yaml:2:1: " + notNull},
+			v:     manifest,
+			input: "kind: Pod\n---\n",
 		},
 		"registry, trailing header": {
-			v:      registry,
-			input:  "kind: Pod\n---\n",
-			strict: []string{"f.yaml: document 2: " + noMatch},
+			v:     registry,
+			input: "kind: Pod\n---\n",
 		},
 		"schema, empty file": {
 			v:      manifest,
@@ -2884,24 +2890,32 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 			strict: []string{"f.yaml: " + noMatch},
 		},
 		"schema, comment after a manifest": {
-			v:      manifest,
-			input:  "kind: A\n---\n# Source: t.yaml\n",
-			strict: []string{"f.yaml:2:1: " + notNull},
+			v:     manifest,
+			input: "kind: A\n---\n# Source: t.yaml\n",
 		},
 		"registry, comment after a manifest": {
-			v:      registry,
-			input:  "kind: A\n---\n# Source: t.yaml\n",
-			strict: []string{"f.yaml: document 2: " + noMatch},
+			v:     registry,
+			input: "kind: A\n---\n# Source: t.yaml\n",
 		},
 		"schema, chart output": {
-			v:      manifest,
-			input:  helm,
-			strict: []string{"f.yaml:8:1: " + notNull},
+			v:     manifest,
+			input: helm,
 		},
 		"registry, chart output": {
+			v:     registry,
+			input: helm,
+		},
+		// A file that holds empty documents alone validates each with v
+		// alone.
+		"schema, headers alone": {
+			v:      manifest,
+			input:  "---\n---\n",
+			strict: []string{"f.yaml:1:1: " + notNull, "f.yaml:2:1: " + notNull},
+		},
+		"registry, headers alone": {
 			v:      registry,
-			input:  helm,
-			strict: []string{"f.yaml: document 2: " + noMatch},
+			input:  "---\n---\n",
+			strict: []string{"f.yaml: document 1: " + noMatch, "f.yaml: document 2: " + noMatch},
 		},
 		"schema, template that renders a comment alone": {
 			v:      manifest,
@@ -2947,30 +2961,22 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		"registry, document below an empty one": {
 			v:      registry,
 			input:  "kind: A\n---\n---\nkind: B\n",
-			strict: []string{"f.yaml: document 2: " + noMatch, "f.yaml: document 3: " + noMatch},
+			strict: []string{"f.yaml: document 3: " + noMatch},
 			want:   []string{"f.yaml: document 3: " + noMatch},
 		},
 		"registry, syntax error beside an empty document": {
-			v:     registry,
-			input: "kind: A\n---\nkind: [\n---\n---\nkind: B\n",
-			strict: []string{
-				"f.yaml:3:7: " + unclosed,
-				"f.yaml: document 3: " + noMatch,
-				"f.yaml: document 4: " + noMatch,
-			},
-			want: []string{"f.yaml:3:7: " + unclosed, "f.yaml: document 4: " + noMatch},
+			v:      registry,
+			input:  "kind: A\n---\nkind: [\n---\n---\nkind: B\n",
+			strict: []string{"f.yaml:3:7: " + unclosed, "f.yaml: document 4: " + noMatch},
+			want:   []string{"f.yaml:3:7: " + unclosed, "f.yaml: document 4: " + noMatch},
 		},
 		// The header parses together with the document above it, so both
 		// documents carry the one error, which the result holds once.
 		"schema, syntax error two documents share": {
-			v:     manifest,
-			input: "name: &x\n---\nname: [\n---\n---\nvalue: 5\n",
-			strict: []string{
-				"f.yaml:3:7: " + unclosed,
-				"f.yaml:4:1: " + notNull,
-				`f.yaml:6:1: $.kind: missing required property "kind"`,
-			},
-			want: []string{"f.yaml:3:7: " + unclosed, `f.yaml:6:1: $.kind: missing required property "kind"`},
+			v:      manifest,
+			input:  "name: &x\n---\nname: [\n---\n---\nvalue: 5\n",
+			strict: []string{"f.yaml:3:7: " + unclosed, `f.yaml:6:1: $.kind: missing required property "kind"`},
+			want:   []string{"f.yaml:3:7: " + unclosed, `f.yaml:6:1: $.kind: missing required property "kind"`},
 		},
 	}
 
@@ -2981,6 +2987,10 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 			source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("f.yaml"))
 
 			err := source.ValidateDocuments(t.Context(), tc.v)
+			if len(tc.strict) == 0 {
+				require.NoError(t, err)
+			}
+
 			assert.Equal(t, tc.strict, bindingMessages(err))
 
 			err = source.ValidateDocuments(t.Context(), niceyaml.SkipEmpty(tc.v))
@@ -2992,7 +3002,7 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		})
 	}
 
-	t.Run("agrees with a loop over the documents", func(t *testing.T) {
+	t.Run("a loop over the documents validates the empty one", func(t *testing.T) {
 		t.Parallel()
 
 		type manifestKind struct {
@@ -3027,13 +3037,14 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 
 				assert.Equal(t, []string{"A", ""}, kinds)
 
-				// Alone, the validator fails the empty document the same
-				// way in all three.
-				strict := source.ValidateDocuments(t.Context(), v)
-				require.Error(t, strict)
-
+				// Alone, ValidateDocuments passes over the empty document,
+				// and a loop that validates or decodes each document fails
+				// it.
+				require.NoError(t, source.ValidateDocuments(t.Context(), v))
 				require.NoError(t, docs[0].Validate(t.Context(), v))
-				require.EqualError(t, docs[1].Validate(t.Context(), v), strict.Error())
+
+				strict := docs[1].Validate(t.Context(), v)
+				require.Error(t, strict)
 
 				_, err = docs[1].Decode[manifestKind](t.Context(), niceyaml.WithValidator(v))
 				require.EqualError(t, err, strict.Error())

@@ -637,14 +637,21 @@ func (s *Source) AllDocuments() []*Node {
 //	err := source.ValidateDocuments(ctx, niceyaml.MultiValidator(schema, names))
 //	err := source.ValidateDocuments(ctx, niceyaml.ChainValidator(schema, refs))
 //
-// Every document validates, an explicit empty one included, such as the
-// one below the header of `name: x\n---\n`. A caller whose stream may
-// hold empty documents, such as the output of a Helm chart, wraps its
-// validator in [SkipEmpty], which takes either composition. The validator
-// then runs on the documents with content and not on the ones
-// [Node.IsEmpty] reports:
+// A file of several documents often holds empty ones, which
+// [Node.IsEmpty] reports. A trailing "---" leaves one, as in
+// `name: x\n---\n`, and so does a Helm template that renders to a comment
+// alone. ValidateDocuments passes over an empty document when the file
+// holds a document that is not empty, so v runs on the documents with
+// content. A file that holds no other document validates each empty one,
+// so a schema that wants a mapping still rejects an empty file. A caller
+// whose file may be empty as a whole wraps its validator in [SkipEmpty],
+// which takes either composition:
 //
 //	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(niceyaml.MultiValidator(schema, names)))
+//
+// A [Validator] that reads the comments of a document, as a schema
+// directive does, does not run on a document of comments alone that
+// ValidateDocuments passes over.
 //
 // A document that did not parse reports its syntax error, as
 // Node.Validate returns it. Two documents that parse together share one
@@ -671,10 +678,22 @@ func (s *Source) ValidateDocuments(ctx context.Context, v Validator) error {
 		prev error
 	)
 
+	docs := s.documents()
+
+	// An empty document beside one with content is what a separator left,
+	// so it passes. A file that holds empty documents alone validates each.
+	skipEmpty := slices.ContainsFunc(docs, func(doc *Node) bool { return !doc.IsEmpty() })
+
 	// Each document that did not parse reports its own syntax error.
-	for _, doc := range s.documents() {
+	for _, doc := range docs {
 		if ctx.Err() != nil {
 			break
+		}
+
+		if skipEmpty && doc.IsEmpty() {
+			prev = nil
+
+			continue
 		}
 
 		err := doc.Validate(ctx, v)

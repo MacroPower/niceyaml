@@ -64,7 +64,7 @@ func TestValidateFile(t *testing.T) {
 		},
 		"invalid document after consecutive headers": {
 			content: "name: a\n---\n---\nvalue: 1\n",
-			want:    []string{"2:1:", "4:1:"},
+			want:    []string{"4:1:"},
 		},
 		"only document does not parse": {
 			content: "name: [\n",

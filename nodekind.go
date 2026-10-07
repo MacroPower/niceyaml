@@ -111,9 +111,9 @@ func (n *Node) Kind() NodeKind {
 //		// ...
 //	}
 //
-// [SkipEmpty] wraps a [Validator] so that it passes such a document,
-// for a caller that hands the validator to [Source.ValidateDocuments] or
-// to a decode.
+// [Source.ValidateDocuments] passes over such a document in a file that
+// holds a document with content. [SkipEmpty] wraps a [Validator] so that
+// it passes one wherever it runs, such as in a decode.
 func (n *Node) IsEmpty() bool {
 	if n == nil || n.doc.err != nil || !n.base.IsRoot() {
 		return false

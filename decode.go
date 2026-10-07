@@ -531,13 +531,17 @@ func ChainValidator(validators ...Validator) Validator {
 // document: an empty file, a file of comments alone, or a "---" header
 // with nothing but comments below it.
 //
-// Every document validates, an empty one included, so a schema that
-// wants a mapping rejects the document a trailing "---" leaves, and a
-// registry that requires a schema finds none for it. A caller whose
-// stream may hold empty documents, such as a file of Kubernetes
-// manifests or the output of a Helm chart, wraps its validator:
+// An empty document validates as any other, so a schema that wants a
+// mapping rejects it, and a registry that requires a schema finds none
+// for it. [Source.ValidateDocuments] passes over the empty documents of
+// a file that holds a document with content, and validates the one
+// document of an empty file. A caller whose file may be empty as a whole
+// wraps its validator:
 //
 //	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(reg))
+//
+// So does a caller that validates each document itself, with
+// [Node.Validate], where every document runs the validator.
 //
 // A decode takes it the same way, so a configuration file that may be
 // empty decodes to the zero value:

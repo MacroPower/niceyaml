@@ -291,13 +291,14 @@
 // [Source.Decode] need the whole file to parse. Every error of the parse
 // matches [ErrSyntax], whichever of these returns it.
 //
-// Every document validates and decodes, an empty one included, such as
-// the one a trailing "---" leaves at the end of a file. A schema that
-// wants a mapping rejects that document. [Node.IsEmpty] reports a
-// document with no content, and [SkipEmpty] wraps a validator so that
-// it passes one. A caller whose files may hold empty documents, as
-// Kubernetes manifests and the output of a Helm chart do, wraps its
-// validator:
+// A file of several documents often holds empty ones, such as the one a
+// trailing "---" leaves at the end of a file, and [Node.IsEmpty] reports
+// them. [Source.ValidateDocuments] passes over an empty document in a
+// file that holds a document with content, so Kubernetes manifests and
+// the output of a Helm chart validate as they are. An empty document
+// validates and decodes everywhere else, and a schema that wants a
+// mapping rejects it. [SkipEmpty] wraps a validator so that it passes
+// one, for a caller whose file may be empty as a whole:
 //
 //	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(reg))
 //
