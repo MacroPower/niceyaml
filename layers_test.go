@@ -263,6 +263,41 @@ func TestLayers_SelfValidate(t *testing.T) {
 			require.EqualError(t, err, tc.err)
 		})
 	}
+
+	t.Run("a layer that did not parse holds no value", func(t *testing.T) {
+		t.Parallel()
+
+		const want = "base.yaml:3:9: $.server.port: " + portMessage
+
+		nodes := layerNodes(t, badPort, "server:\n  host: prod.example.com\n")
+		base, prod := nodes[0], nodes[1]
+
+		var cfg layerConfig
+
+		err := niceyaml.NewLayers(base, prod).DecodeInto(t.Context(), &cfg, niceyaml.WithSelfValidation(false))
+		require.NoError(t, err)
+
+		docs := niceyaml.NewSourceFromString("server: [\n", niceyaml.WithName("mid.yaml")).AllDocuments()
+		require.Len(t, docs, 1)
+		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
+
+		// The error binds in the layer below the one that did not parse,
+		// whether that one lies between two layers or on top.
+		err = niceyaml.NewLayers(base, docs[0], prod).SelfValidate(t.Context(), &cfg)
+		require.EqualError(t, err, want)
+
+		err = niceyaml.NewLayers(base, docs[0]).SelfValidate(t.Context(), &cfg)
+		require.EqualError(t, err, want)
+
+		err = niceyaml.NewLayers(base, docs[0]).Bind(&cfg,
+			niceyaml.NewError(portMessage, niceyaml.AtPath(paths.Doc().Child("server", "port"))))
+		require.EqualError(t, err, want)
+
+		// On its own it resolves no path, so the error names the file
+		// and no position.
+		err = niceyaml.NewLayers(docs[0]).SelfValidate(t.Context(), &cfg)
+		require.EqualError(t, err, "mid.yaml: $.server.port: "+portMessage)
+	})
 }
 
 func TestLayers_DecodeInto(t *testing.T) {
