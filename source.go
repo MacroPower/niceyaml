@@ -170,6 +170,12 @@ func WithFilePath(path string) SourceOption {
 //	source := niceyaml.NewSourceFromBytes(data,
 //		niceyaml.WithFilePath("configs/app.yaml"), niceyaml.WithFS(bundle))
 //
+// A schema registry tells one file system from another by its value, so
+// fsys must be a value Go can compare, such as an [embed.FS] or a
+// pointer, or a map. [go.jacobcolvin.com/niceyaml/schema.FileFS] gives
+// the rule, and a schema beside a document in a file system of any
+// other type does not load.
+//
 // Without it, and with a nil fsys, the file path names a file on disk.
 func WithFS(fsys fs.FS) SourceOption {
 	return func(s *Source) {

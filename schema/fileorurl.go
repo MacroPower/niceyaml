@@ -128,6 +128,11 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 // load with [fs.ErrInvalid], so a document in a file system never
 // reaches the disk. An HTTP/HTTPS reference names a URL either way.
 //
+// The registry tells the file system of one document from that of
+// another by its value. It must be a value Go can compare, or a map, as
+// FileFS describes, and a Ref in a file system of any other type fails
+// to load with [fs.ErrInvalid].
+//
 // [Directive] resolves the reference of a directive this way. A resolver
 // of the program does the same for a reference it reads itself:
 //
