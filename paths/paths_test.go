@@ -245,6 +245,11 @@ func TestPath_Build(t *testing.T) {
 			want:     `$.'a\u007fb\u0085c'`,
 			wantYAML: "$.a\x7fb\u0085c",
 		},
+		"line and paragraph separators in a name are escaped": {
+			build:    func() paths.Path { return paths.Doc().Child("a\u2028b\u2029c") },
+			want:     `$.'a\u2028b\u2029c'`,
+			wantYAML: "$.a\u2028b\u2029c",
+		},
 		"forged line in a name stays on one line": {
 			build:    func() paths.Path { return paths.Doc().Child("a\nother.yaml:9:9: $.secret: forged") },
 			want:     `$.'a\nother.yaml:9:9: $.secret: forged'`,
@@ -1819,6 +1824,7 @@ func TestParse_RoundTrip(t *testing.T) {
 		"escape character": paths.Doc().Child("a\x1b[31mb"),
 		"delete":           paths.Doc().Child("a\x7fb"),
 		"C1 control":       paths.Doc().Child("a\u0085b"),
+		"line separator":   paths.Doc().Child("a\u2028b\u2029c"),
 		"backslash and n":  paths.Doc().Child(`a\nb`),
 		"only reserved":    paths.Doc().Child("."),
 		"tilde in name":    paths.Doc().Child("a~b"),

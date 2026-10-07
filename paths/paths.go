@@ -131,6 +131,12 @@ func (s segment) String() string {
 // single quotes so that [Parse] reads it back as one selector.
 const reservedNameChars = ".*[]$'~"
 
+// lineSeparator is the Unicode line separator, U+2028.
+const lineSeparator = ' '
+
+// paragraphSeparator is the Unicode paragraph separator, U+2029.
+const paragraphSeparator = ' '
+
 // quoteName returns name in the form [Parse] accepts as a child or
 // recursive selector. It wraps the name in single quotes when it contains
 // reserved characters or is empty, since an unquoted empty name would leave
@@ -142,7 +148,9 @@ const reservedNameChars = ".*[]$'~"
 // A name that holds a control character comes back in quotes too, with
 // the character written as an escape Parse reads back: `\n`, `\r`, or
 // `\t` for a line feed, a carriage return, or a tab, and `\u` with four
-// hexadecimal digits for any other. A path thus stays on one line and
+// hexadecimal digits for any other. The Unicode line and paragraph
+// separators, U+2028 and U+2029, are no control characters, and they
+// come back as `\u` escapes too. A path thus stays on one line and
 // sends no control character to a terminal, whatever key it names.
 func quoteName(name string) string {
 	if name != "" && !strings.ContainsAny(name, reservedNameChars) &&
@@ -169,7 +177,7 @@ func quoteName(name string) string {
 			sb.WriteString(`\r`)
 		case r == '\t':
 			sb.WriteString(`\t`)
-		case unicode.IsControl(r):
+		case unicode.IsControl(r) || r == lineSeparator || r == paragraphSeparator:
 			fmt.Fprintf(&sb, `\u%04x`, r)
 		default:
 			// The bytes go out as they are, so a name that is no valid
@@ -499,8 +507,9 @@ func (p Path) Equal(q Path) bool {
 // that holds a reserved character, `:`, or whitespace comes back in
 // single quotes, as in "$.'x: y'". A control character in a name comes
 // back as an escape inside the quotes, as in `$.'a\nb'` for a line feed
-// and `$.'a\u001bb'` for an escape, so the expression stays on one line
-// and changes nothing in a terminal that prints it.
+// and `$.'a\u001bb'` for an escape, and so does a Unicode line or
+// paragraph separator. The expression thus stays on one line and changes
+// nothing in a terminal that prints it.
 func (p Path) String() string {
 	var sb strings.Builder
 
