@@ -1316,6 +1316,10 @@ func locate(b binder, l locus) (location, *Node, error) {
 // so the location is [ErrPathNeedsDocument] wrapping that reason. A
 // document that did not parse has no tree to resolve the path in either,
 // so the location is ErrPathNeedsDocument wrapping its syntax error.
+//
+// When b holds a fallback, the path resolves in the document of the
+// layer [fallback.layer] picks, and that layer is the node locatePath
+// returns, so it can belong to another source than the one b binds to.
 func locatePath(b binder, path paths.Path) (location, *Node, error) {
 	node := b.node
 
@@ -1331,6 +1335,8 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 	if node == nil {
 		return location{}, nil, fmt.Errorf("%w: %s", ErrPathNeedsDocument, path)
 	}
+
+	node, path = b.fallback.layer(node, path)
 
 	root := node.doc.node
 
@@ -1391,8 +1397,9 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 // the cause chain of the error it binds. The chain follows each wrapper to
 // the one error it wraps and ends at an error that unwraps to several,
 // such as one from [errors.Join], which carries no location of its own.
-// Binding binds the errors below the chain the same way to the same
-// document, and each becomes a child. They are every error a summary from
+// Binding binds the errors below the chain the same way, to the same
+// document unless [WithFallback] picks another for one of them, and each
+// becomes a child. They are every error a summary from
 // [NewSummary] along the chain heads, every detail from [WithDetails] of
 // an Error along it, and every branch of the error that ends it. A
 // wrapper that [fmt.Errorf] builds with
@@ -1571,10 +1578,13 @@ type boundTexts struct {
 // resolves no path, for the reason [ErrAmbiguousPath]. It still locates
 // a position or a range. A binder that locates binds an error a caller or
 // a validator gave a Node, so [binder.located] points an error that holds
-// no location at that Node.
+// no location at that Node. A binder with a fallback binds each path in
+// the layer [fallback.layer] picks for it, which is its own Node or one
+// of the Nodes [WithFallback] names below it.
 type binder struct {
 	src       *Source
 	node      *Node
+	fallback  *fallback
 	route     bool
 	ambiguous bool
 	locate    bool
@@ -2137,7 +2147,9 @@ func boundLocus(e *SourceError) locus {
 // [binder.scoped] returns it, so each path of the bound error starts at
 // `$` and reads from the root of the document. The children of err bind
 // the same way, each under the scope on its own, so a child that carries
-// no path stays as it is.
+// no path stays as it is. A binding takes the source of the node its
+// location resolved in, which is the source of b unless b holds a
+// fallback and the path bound in a layer of another source.
 func newSourceError(err error, b binder) *SourceError {
 	scoped := b.scoped(err)
 	found := scoped.anchor
@@ -2147,6 +2159,10 @@ func newSourceError(err error, b binder) *SourceError {
 	switch a := found.err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
 	case *Error:
 		e.loc, e.node, e.locErr = locate(b, found.locus)
+
+		if e.node != nil {
+			e.source = e.node.source
+		}
 
 	case *SourceError:
 		// The error wraps a binding, so it is that binding with more
@@ -2162,11 +2178,11 @@ func newSourceError(err error, b binder) *SourceError {
 
 	if !e.adopted {
 		if e.locErr == nil {
-			e.locErr = checkInRange(e.loc, b.src.lines)
+			e.locErr = checkInRange(e.loc, e.source.lines)
 		}
 
 		if e.locErr == nil {
-			e.ranges = highlightRanges(b.src.lines, e.loc)
+			e.ranges = highlightRanges(e.source.lines, e.loc)
 			e.rng = rangeOf(e.ranges, e.loc.pos)
 		}
 	}
@@ -2273,7 +2289,10 @@ func (e *SourceError) Source() *Source {
 // that wraps a binding. Such an error keeps the node of the binding it
 // wraps, whether Node.Bind returns it as it is or binds it anew around
 // the binding with the details it holds, so its node can be nil or belong
-// to another document or source. A nil SourceError is bound to none.
+// to another document or source. An error of a self-validation that ran
+// with [WithFallback] is bound to the Node of the layer its path bound
+// in, which is the Node of the call or one of the Nodes the option names.
+// A nil SourceError is bound to none.
 func (e *SourceError) Node() *Node {
 	if e == nil {
 		return nil

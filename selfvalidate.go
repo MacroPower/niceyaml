@@ -28,9 +28,9 @@ import (
 // own. The step walks v, calls Validate on every value in it that
 // implements [SelfValidator], and puts the `@` paths each one reports
 // under the path of the value in the node. SelfValidate binds the result
-// through [Node.Bind], as a decode does once it has filled its target,
-// and returns nil when nothing failed. It runs the walk whatever
-// [WithSelfValidation] says, and runs no [Validator].
+// as [Node.Bind] binds an error, which a decode does too once it has
+// filled its target, and returns nil when nothing failed. It runs the
+// walk whatever [WithSelfValidation] says, and runs no [Validator].
 //
 // A program that layers its configuration validates the value once every
 // layer has set it. It decodes the file with the walk off, and applies
@@ -47,17 +47,26 @@ import (
 //
 //	return doc.SelfValidate(ctx, &cfg)
 //
+// A program that layers one file over another decodes each into the
+// value in turn, and validates through the Node of the last file. Every
+// error then binds in that Node, whichever file set the value. With the
+// Nodes of the files below named in [WithFallback], each error binds in
+// the file that set its value, as that option describes:
+//
+//	return prod.SelfValidate(ctx, &cfg, niceyaml.WithFallback(base))
+//
 // On a value that no layer changed, SelfValidate returns what the decode
 // with the walk on returns. The walk spells the key of each map entry as
 // the document does, so an error under a key such as 1.50 keeps that
 // text, and it decodes the keys of the mappings in the node to learn that
 // spelling. It decodes them with the settings of the [Source], such as
 // the reference documents of [WithReferences], and with the go-yaml
-// options that [WithYAMLDecodeOptions] adds in opts. It reads no other
-// option. A key type that only a [yaml.CustomUnmarshaler] option decodes
-// matches no key of the document unless opts carry that option, and an
-// error under such an entry then binds at the key of the map.
-// [Decoder.SelfValidate] runs with the options of a [Decoder].
+// options that [WithYAMLDecodeOptions] adds in opts. It reads those
+// options and [WithFallback], and no other option. A key type that only
+// a [yaml.CustomUnmarshaler] option decodes matches no key of the
+// document unless opts carry that option, and an error under such an
+// entry then binds at the key of the map. [Decoder.SelfValidate] runs
+// with the options of a [Decoder].
 //
 // The walk follows v rather than the document, so v need not mirror the
 // node, and each error binds where its path resolves in the document. An
@@ -105,13 +114,22 @@ func (n *Node) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) er
 // selfValidate is [Node.SelfValidate] with its settings resolved.
 // [Node.DecodeInto] runs it once the decode has filled v, so a decode and
 // a later call of SelfValidate on the same value return the same error.
+// It binds what the walk returns as [Node.Bind] does, through a binder
+// that also holds the layers [WithFallback] names, when cfg names any.
 func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error {
 	err := checkSelfValidateTarget(v)
 	if err != nil {
 		return n.bindOwn(err)
 	}
 
-	return n.Bind(walkSelfValidators(ctx, v, n, n.yamlOptions(cfg.decodeOptions())))
+	walked := walkSelfValidators(ctx, v, n, n.yamlOptions(cfg.decodeOptions()))
+
+	return bindTree(walked, binder{
+		src:      n.source,
+		node:     n,
+		locate:   true,
+		fallback: newFallback(v, cfg.fallbacks),
+	})
 }
 
 // checkSelfValidateTarget returns [ErrSelfValidateTarget] when v is nil

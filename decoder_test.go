@@ -11,6 +11,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
 func TestDecoder_SelfValidate(t *testing.T) {
@@ -110,6 +111,65 @@ func TestDecoder_SelfValidate(t *testing.T) {
 		err = niceyaml.NewDecoder().SelfValidate(t.Context(), doc, nil)
 		require.ErrorIs(t, err, niceyaml.ErrSelfValidateTarget)
 		require.EqualError(t, err, "app.yaml: self-validation target is nil")
+	})
+}
+
+func TestDecoder_WithFallback(t *testing.T) {
+	t.Parallel()
+
+	const (
+		baseInput = "server:\n  host: example.com\n  port: 0\n"
+
+		inBase = "base.yaml:3:9: $.server.port: port must be at least 1"
+	)
+
+	t.Run("a Decoder falls back for every Node it decodes", func(t *testing.T) {
+		t.Parallel()
+
+		base := yamltest.FirstDocument(t, baseInput, niceyaml.WithName("base.yaml"))
+		dec := niceyaml.NewDecoder(niceyaml.WithFallback(base))
+
+		// Each file layers over the one shared base.
+		for _, name := range []string{"east.yaml", "west.yaml"} {
+			var cfg fallbackConfig
+
+			err := base.DecodeInto(t.Context(), &cfg, niceyaml.WithSelfValidation(false))
+			require.NoError(t, err)
+
+			top := yamltest.FirstDocument(t, "server:\n  host: "+name+"\n", niceyaml.WithName(name))
+
+			err = dec.DecodeInto(t.Context(), top, &cfg)
+			require.EqualError(t, err, inBase)
+
+			err = dec.SelfValidate(t.Context(), top, &cfg)
+			require.EqualError(t, err, inBase)
+		}
+	})
+
+	t.Run("With appends below the Nodes of the receiver and leaves it unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		var cfg fallbackConfig
+
+		nodes := decodeLayers(t, &cfg, baseInput, "server:\n  port: -1\n", "server:\n  host: prod.example.com\n")
+		top, mid, base := nodes[0], nodes[1], nodes[2]
+
+		plain := niceyaml.NewDecoder()
+		overBase := plain.With(niceyaml.WithFallback(base))
+		overBoth := overBase.With(niceyaml.WithFallback(mid))
+
+		err := plain.SelfValidate(t.Context(), top, &cfg)
+		require.EqualError(t, err, "prod.yaml:1:1: $.server.port: port must be at least 1")
+
+		err = overBase.SelfValidate(t.Context(), top, &cfg)
+		require.EqualError(t, err, inBase)
+
+		// The base file stays nearest, so it binds before the middle one.
+		err = overBoth.SelfValidate(t.Context(), top, &cfg)
+		require.EqualError(t, err, inBase)
+
+		err = plain.With(niceyaml.WithFallback(mid, base)).SelfValidate(t.Context(), top, &cfg)
+		require.EqualError(t, err, "mid.yaml:2:9: $.server.port: port must be at least 1")
 	})
 }
 

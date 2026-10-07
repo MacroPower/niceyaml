@@ -425,6 +425,19 @@
 // error then reads as its path and its message, as in
 // "$.servers[1].port: port is required".
 //
+// A program that layers one file over another decodes both into one
+// value, the lower file first. [WithFallback] names the Node of the lower
+// file in the decode of the upper one, and each error then binds in the
+// file that set its value:
+//
+//	if err := base.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
+//		return err
+//	}
+//
+//	if err := prod.DecodeInto(ctx, &cfg, niceyaml.WithFallback(base)); err != nil {
+//		return err
+//	}
+//
 // [Node.At] returns a Node scoped to the node a path selects, and the
 // same pipeline then runs on that node. Decode reads one value without
 // decoding the whole document, and a validator given to it checks the

@@ -2081,12 +2081,13 @@ func contextEnded(err error) bool {
 // [Node.DecodeAt], and [Node.DecodeIfPresent], and [NewDecoder] takes
 // the same options for a [Decoder] that applies them to every node it
 // decodes. [Node.SelfValidate] and [Source.SelfValidate] take them too,
-// and read only the go-yaml options among them.
+// and read only [WithFallback] and the go-yaml options among them.
 //
 // Available options:
 //   - [WithValidator]
 //   - [WithSelfValidation]
 //   - [WithDisallowUnknownFields]
+//   - [WithFallback]
 //   - [WithYAMLDecodeOptions]
 //
 // A DecodeOption sets how one decode runs. A setting that describes the
@@ -2102,6 +2103,7 @@ type DecodeOption func(*decodeConfig)
 type decodeConfig struct {
 	validators            []Validator
 	yamlOpts              []yaml.DecodeOption
+	fallbacks             []*Node
 	skipSelfValidation    bool
 	disallowUnknownFields bool
 }
@@ -2124,6 +2126,7 @@ func newDecodeConfig(opts []DecodeOption) decodeConfig {
 func (c decodeConfig) clone() decodeConfig {
 	c.validators = slices.Clone(c.validators)
 	c.yamlOpts = slices.Clone(c.yamlOpts)
+	c.fallbacks = slices.Clone(c.fallbacks)
 
 	return c
 }
@@ -2293,8 +2296,11 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // merges the same way through a pointer to a struct and through an
 // inline field. The document replaces a slice, an array, a map, or a
 // value of an interface type whole, so no element or entry of the old
-// one remains. A null with no tag, anchored or not, leaves v as it is,
-// unless v points to a pointer or an interface.
+// one remains. A program that decodes a second file over the first names
+// the Node of the first in [WithFallback], so each error of the
+// self-validation step binds in the file that set its value. A null with
+// no tag, anchored or not, leaves v as it is, unless v points to a
+// pointer or an interface.
 // A null with neither a tag nor an anchor leaves a struct field as it is
 // too, unless the field is a pointer, which the null sets to nil. The
 // go-yaml decoder rejects a tagged or anchored null in a field of some

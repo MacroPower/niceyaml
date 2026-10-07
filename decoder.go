@@ -53,6 +53,11 @@ import (
 // on the Source turns the limit off for every Decoder and validator that
 // reads its documents.
 //
+// A Decoder built with [WithFallback] holds the Nodes of the layers below
+// every Node it decodes, so it suits many files that each layer over one
+// shared base. A program whose layers differ from one decode to the next
+// adds the option per use, through [Decoder.With].
+//
 // A Decoder never changes after [NewDecoder], so it is safe for
 // concurrent use as long as the go-yaml options it carries hold no state,
 // which [WithYAMLDecodeOptions] describes. [Decoder.With] returns a new
@@ -75,9 +80,11 @@ func NewDecoder(opts ...DecodeOption) *Decoder {
 // With returns a new [*Decoder] with opts applied over the options of
 // the receiver, in order. [WithValidator] appends to the validators the
 // receiver holds, and [WithYAMLDecodeOptions] appends to its go-yaml
-// options. [WithSelfValidation] and [WithDisallowUnknownFields] replace
-// the setting the receiver holds. The receiver is unchanged, so a Decoder
-// shared between callers can be specialized per use:
+// options. [WithFallback] appends to its Nodes, so the Nodes of the
+// receiver stay nearest. [WithSelfValidation] and
+// [WithDisallowUnknownFields] replace the setting the receiver holds. The
+// receiver is unchanged, so a Decoder shared between callers can be
+// specialized per use:
 //
 //	strict := dec.With(niceyaml.WithDisallowUnknownFields(true))
 func (d *Decoder) With(opts ...DecodeOption) *Decoder {
@@ -112,11 +119,11 @@ func (d *Decoder) DecodeInto(ctx context.Context, n *Node, v any) error {
 }
 
 // SelfValidate runs the self-validation step of [Decoder.DecodeInto] on
-// its own, on v with the go-yaml options of the [Decoder], as
-// [Node.SelfValidate] runs it with the same options. It runs whatever
-// [WithSelfValidation] says, and runs no [Validator] of the Decoder. A
-// Decoder with self-validation off thus decodes a file, and validates the
-// value once the caller has applied its other layers:
+// its own, on v with the go-yaml options and the [WithFallback] Nodes of
+// the [Decoder], as [Node.SelfValidate] runs it with the same options. It
+// runs whatever [WithSelfValidation] says, and runs no [Validator] of the
+// Decoder. A Decoder with self-validation off thus decodes a file, and
+// validates the value once the caller has applied its other layers:
 //
 //	dec := niceyaml.NewDecoder(niceyaml.WithSelfValidation(false))
 //
