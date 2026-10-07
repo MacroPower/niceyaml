@@ -1015,6 +1015,262 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 	}
 }
 
+// requestSchema is a schema for the body of a request, which comes from
+// no document. A port of 0 breaks its minimum, and a body with no name
+// breaks its required.
+const requestSchema = `{
+	"type": "object",
+	"properties": {
+		"port": {"type": "integer", "minimum": 1},
+		"name": {"type": "string"}
+	},
+	"required": ["name"]
+}`
+
+func TestSchema_ValidateValue(t *testing.T) {
+	t.Parallel()
+
+	v := compileSchema(t, []byte(requestSchema))
+
+	// The value came from no document, so the error is bound to a source
+	// with no text and no name. Its text then names the path of each
+	// violation wherever the error prints.
+	tcs := map[string]struct {
+		data       map[string]any
+		want       string
+		wantFormat string
+		wantPaths  []string
+	}{
+		"one violation": {
+			data:       map[string]any{"port": 0, "name": "x"},
+			want:       "$.port: 0 is less than 1",
+			wantFormat: "$.port: 0 is less than 1",
+			wantPaths:  []string{"$.port"},
+		},
+		"two violations": {
+			data: map[string]any{"port": 0},
+			want: stringtest.JoinLF(
+				"2 schema violations",
+				"$.port: 0 is less than 1",
+				`$.name: missing required property "name"`,
+			),
+			wantFormat: stringtest.JoinLF(
+				"2 schema violations",
+				"|-- $.port: 0 is less than 1",
+				"`-- $.name: missing required property \"name\"",
+			),
+			wantPaths: []string{"$.port", "$.name"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := v.ValidateValue(t.Context(), tc.data)
+			require.EqualError(t, err, tc.want)
+
+			// A wrapper and a join keep the text of the error they hold,
+			// so each path shows through both.
+			assert.Equal(t, tc.want, fmt.Sprintf("%v", err))
+			require.EqualError(t, fmt.Errorf("invalid request: %w", err), "invalid request: "+tc.want)
+			require.EqualError(t, errors.Join(errors.New("other failure"), err), "other failure\n"+tc.want)
+
+			// The value is at fault, and the first violation is in reach.
+			assert.True(t, niceyaml.IsInvalid(err))
+			require.NotErrorIs(t, err, schema.ErrValidate)
+
+			var violation *schema.Violation
+
+			require.ErrorAs(t, err, &violation)
+			assert.Equal(t, jsonschema.KeywordMinimum, violation.Keyword)
+
+			// The source holds no line to excerpt, so the tree stands
+			// alone, with no line that says so.
+			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(err, 2))
+			assert.Equal(t, tc.wantFormat, fmt.Sprintf("%+v", err))
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+			assert.Empty(t, bound.Source().Name())
+			assert.Zero(t, bound.Source().Lines().Len())
+
+			var gotPaths []string
+
+			for problem := range niceyaml.NewErrorTree(err).Problems() {
+				require.NotNil(t, problem.Bound)
+
+				_, ok := problem.Bound.Position()
+				assert.False(t, ok)
+
+				path, ok := problem.Path()
+				require.True(t, ok)
+
+				gotPaths = append(gotPaths, path.String())
+			}
+
+			assert.Equal(t, tc.wantPaths, gotPaths)
+		})
+	}
+
+	t.Run("conforming value", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, v.ValidateValue(t.Context(), map[string]any{"port": 80, "name": "x"}))
+	})
+
+	t.Run("binding the result into a document moves nothing", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "request:\n  port: 0\n", niceyaml.WithName("app.yaml"))
+		base := paths.Doc().Child("request")
+
+		err := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
+
+		// The result is bound already, so Rebase and Bind hand it back.
+		// Its path still reads from the value, and it gains neither the
+		// name of the document nor a position in it.
+		got := doc.Bind(niceyaml.Rebase(err, base))
+		assert.Same(t, err, got)
+		require.EqualError(t, got, "$.port: 0 is less than 1")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, got, &bound)
+		assert.NotSame(t, doc.Source(), bound.Source())
+
+		_, ok := bound.Position()
+		assert.False(t, ok)
+
+		// A Node scoped to the value and a wrapper around the result
+		// change nothing either.
+		assert.Same(t, err, yamltest.At(t, doc, base).Bind(err))
+		require.EqualError(t,
+			doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", err), base)),
+			"check: $.port: 0 is less than 1",
+		)
+
+		// CheckValue returns the errors a document can place.
+		placed := doc.Bind(niceyaml.Rebase(v.CheckValue(t.Context(), map[string]any{"port": 0, "name": "x"}), base))
+		require.EqualError(t, placed, "app.yaml:2:9: $.request.port: 0 is less than 1")
+	})
+}
+
+func TestSchema_CheckValue(t *testing.T) {
+	t.Parallel()
+
+	v := compileSchema(t, []byte(requestSchema))
+
+	doc := yamltest.FirstDocument(t, "request:\n  port: 0\n", niceyaml.WithName("app.yaml"))
+	base := paths.Doc().Child("request")
+
+	// The errors come back unbound, so their text names no path until a
+	// caller places them in a document. Each path then shows once, with
+	// or without a wrapper around the result.
+	tcs := map[string]struct {
+		data        map[string]any
+		want        string
+		wantFormat  string
+		wantBound   string
+		wantWrapped string
+	}{
+		"one violation": {
+			data:        map[string]any{"port": 0, "name": "x"},
+			want:        "0 is less than 1",
+			wantFormat:  "@.port: 0 is less than 1",
+			wantBound:   "app.yaml:2:9: $.request.port: 0 is less than 1",
+			wantWrapped: "app.yaml:2:9: $.request.port: check: 0 is less than 1",
+		},
+		"two violations": {
+			data: map[string]any{"port": 0},
+			want: "2 schema violations",
+			wantFormat: stringtest.JoinLF(
+				"2 schema violations",
+				"|-- @.port: 0 is less than 1",
+				"`-- @.name: missing required property \"name\"",
+			),
+			wantBound: stringtest.JoinLF(
+				"app.yaml: 2 schema violations",
+				`app.yaml:1:1: $.request.name: missing required property "name"`,
+				"app.yaml:2:9: $.request.port: 0 is less than 1",
+			),
+			wantWrapped: stringtest.JoinLF(
+				"app.yaml: check: 2 schema violations",
+				`app.yaml:1:1: $.request.name: missing required property "name"`,
+				"app.yaml:2:9: $.request.port: 0 is less than 1",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := v.CheckValue(t.Context(), tc.data)
+			require.EqualError(t, err, tc.want)
+			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(err, 0))
+			assert.True(t, niceyaml.IsInvalid(err))
+
+			var bound *niceyaml.SourceError
+
+			require.NotErrorAs(t, err, &bound)
+
+			require.EqualError(t, doc.Bind(niceyaml.Rebase(err, base)), tc.wantBound)
+			require.EqualError(t,
+				doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", err), base)),
+				tc.wantWrapped,
+			)
+
+			// A Node scoped to the value puts its own path in front.
+			require.EqualError(t, yamltest.At(t, doc, base).Bind(err), tc.wantBound)
+		})
+	}
+
+	t.Run("conforming value", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, v.CheckValue(t.Context(), map[string]any{"port": 80, "name": "x"}))
+	})
+
+	t.Run("path names a key as the decoder does", func(t *testing.T) {
+		t.Parallel()
+
+		ports := compileSchema(t, []byte(`{"properties": {"ports": {"additionalProperties": {"minimum": 1}}}}`))
+		hex := yamltest.FirstDocument(t, "ports:\n  0x10: 0\n", niceyaml.WithName("app.yaml"))
+
+		data, err := hex.Decode[any](t.Context())
+		require.NoError(t, err)
+
+		// The decoder names the key 0x10 as 16, and CheckValue reads no
+		// source that spells it another way.
+		err = ports.CheckValue(t.Context(), data)
+
+		var located *niceyaml.Error
+
+		require.ErrorAs(t, err, &located)
+
+		path, ok := located.Path()
+		require.True(t, ok)
+		assert.Equal(t, "@.ports.16", path.String())
+
+		// No key of the document has that spelling, so the path binds at
+		// the key of the mapping.
+		require.EqualError(t, hex.Bind(err), "app.yaml:1:1: $.ports.16: 0 is less than 1")
+
+		// A DataLocator reads the names as the decoder does, so it finds
+		// the entry.
+		var names []string
+
+		for sel := range path.Selectors() {
+			names = append(names, sel.Name)
+		}
+
+		found := niceyaml.NewError(located.Error(), hex.DataLocator().At(names...))
+		require.EqualError(t, hex.Bind(found), "app.yaml:2:9: $.ports.0x10: 0 is less than 1")
+	})
+}
+
 func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 	t.Parallel()
 
@@ -1061,7 +1317,7 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 			input: stringtest.Input(`
 				a: 1
 			`),
-			err: `@.a: expected "string", got "integer"`,
+			err: `$.a: expected "string", got "integer"`,
 		},
 		"nested ordered mapping": {
 			schema: `{
@@ -1076,7 +1332,7 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 			input: stringtest.Input(`
 				n: {b: notint}
 			`),
-			err: `@.n.b`,
+			err: `$.n.b: expected "integer", got "string"`,
 		},
 		"ordered mapping inside a sequence": {
 			schema: `{
@@ -1094,7 +1350,7 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 			input: stringtest.Input(`
 				items: [{b: notint}]
 			`),
-			err: `@.items[0].b`,
+			err: `$.items[0].b: expected "integer", got "string"`,
 		},
 		"binary scalar inside ordered mapping": {
 			schema: `{
@@ -1119,7 +1375,7 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 			v := compileSchema(t, []byte(tc.schema))
 
 			// The source turns the alias limit off, so the bomb decodes.
-			// ValidateValue holds no source and applies the limit to the
+			// ValidateValue takes no source and applies the limit to the
 			// value all the same.
 			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithAliasLimit(false))
 
@@ -1133,9 +1389,8 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 				requireExcessiveAliasing(t, err)
 
 			case tc.err != "":
-				require.Error(t, err)
+				require.EqualError(t, err, tc.err)
 				require.NotErrorIs(t, err, schema.ErrValidate)
-				assert.Contains(t, niceyaml.FormatError(err, 0), tc.err)
 
 			default:
 				require.NoError(t, err)
@@ -1283,14 +1538,18 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				doc := yamltest.FirstDocument(t, tc.input)
 
 				// A source with the alias limit off decodes the value
-				// ValidateValue checks, and ValidateValue applies the
-				// limit to it all the same.
+				// ValidateValue and CheckValue check, and each applies
+				// the limit to it all the same.
 				trusted := yamltest.FirstDocument(t, tc.input, niceyaml.WithAliasLimit(false))
 
 				data, err := trusted.Decode[any](t.Context())
 				require.NoError(t, err)
 
-				for _, err := range []error{doc.Validate(t.Context(), v), v.ValidateValue(t.Context(), data)} {
+				for _, err := range []error{
+					doc.Validate(t.Context(), v),
+					v.ValidateValue(t.Context(), data),
+					v.CheckValue(t.Context(), data),
+				} {
 					switch {
 					case tc.excessive:
 						requireExcessiveAliasing(t, err)
@@ -1734,21 +1993,26 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				err := v.ValidateValue(t.Context(), tc.data)
+				// The bound error of ValidateValue and the unbound one of
+				// CheckValue answer alike.
+				for _, err := range []error{
+					v.ValidateValue(t.Context(), tc.data),
+					v.CheckValue(t.Context(), tc.data),
+				} {
+					switch {
+					case tc.excessive:
+						requireExcessiveAliasing(t, err)
 
-				switch {
-				case tc.excessive:
-					requireExcessiveAliasing(t, err)
+					case tc.err != nil:
+						// A value that contains itself is no fault of a
+						// document, since no document decodes to one.
+						require.ErrorIs(t, err, tc.err)
+						require.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
+						assert.False(t, niceyaml.IsInvalid(err))
 
-				case tc.err != nil:
-					// A value that contains itself is no fault of a
-					// document, since no document decodes to one.
-					require.ErrorIs(t, err, tc.err)
-					require.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
-					assert.False(t, niceyaml.IsInvalid(err))
-
-				default:
-					require.NoError(t, err)
+					default:
+						require.NoError(t, err)
+					}
 				}
 			})
 		}
@@ -1946,6 +2210,8 @@ func TestSchema_PathAnchors(t *testing.T) {
 
 	// A violation of the value the schema checked carries an `@` path,
 	// and a binding reports the `$` path from the root of the document.
+	// ValidateValue binds to a source that holds no document, so its `$`
+	// is the value.
 	tcs := map[string]struct {
 		validate func(t *testing.T) error
 		want     string
@@ -1955,7 +2221,7 @@ func TestSchema_PathAnchors(t *testing.T) {
 			validate: func(t *testing.T) error {
 				t.Helper()
 
-				return whole.ValidateValue(t.Context(), map[string]any{"server": map[string]any{"port": 0}})
+				return whole.CheckValue(t.Context(), map[string]any{"server": map[string]any{"port": 0}})
 			},
 			want:     "@.server.port: 0 is less than 1",
 			wantPath: "@.server.port",
@@ -1964,10 +2230,28 @@ func TestSchema_PathAnchors(t *testing.T) {
 			validate: func(t *testing.T) error {
 				t.Helper()
 
-				return server.ValidateValue(t.Context(), map[string]any{"port": 0})
+				return server.CheckValue(t.Context(), map[string]any{"port": 0})
 			},
 			want:     "@.port: 0 is less than 1",
 			wantPath: "@.port",
+		},
+		"value of a document": {
+			validate: func(t *testing.T) error {
+				t.Helper()
+
+				return whole.ValidateValue(t.Context(), map[string]any{"server": map[string]any{"port": 0}})
+			},
+			want:     "$.server.port: 0 is less than 1",
+			wantPath: "$.server.port",
+		},
+		"value": {
+			validate: func(t *testing.T) error {
+				t.Helper()
+
+				return server.ValidateValue(t.Context(), map[string]any{"port": 0})
+			},
+			want:     "$.port: 0 is less than 1",
+			wantPath: "$.port",
 		},
 		"document": {
 			validate: func(t *testing.T) error {
@@ -2010,7 +2294,8 @@ func TestSchema_ErrorPaths(t *testing.T) {
 
 	// A single violation puts its path on the main error. Several violations
 	// leave the main error without a path and expose one path per nested
-	// error through Unwrap.
+	// error through Unwrap. CheckValue returns those errors as they are,
+	// with each path from `@`.
 	tcs := map[string]struct {
 		schema          string
 		input           any
@@ -2045,7 +2330,7 @@ func TestSchema_ErrorPaths(t *testing.T) {
 
 			v := compileSchema(t, []byte(tc.schema))
 
-			err := v.ValidateValue(t.Context(), tc.input)
+			err := v.CheckValue(t.Context(), tc.input)
 			require.Error(t, err)
 
 			var validationErr *niceyaml.Error

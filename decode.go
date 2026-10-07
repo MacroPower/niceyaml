@@ -285,7 +285,7 @@ type SelfValidator interface {
 // returns a bound error as it is, since the binding resolved its location
 // already. A check that reports under another path or in another document
 // starts from unbound errors instead. A check of the decoded data returns
-// those, as [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue]
+// those, as [go.jacobcolvin.com/niceyaml/schema.Schema.CheckValue]
 // does, and Rebase puts them under that path before a Node binds them.
 //
 // A document with a YAML syntax error has no tree to check. Node.Validate

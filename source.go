@@ -200,10 +200,11 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 //
 // Two limits stay on whatever the option says:
 //
-//   - [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] takes a
-//     Go value and holds no Source. It refuses a value that shares its
-//     maps and slices past the limit, including one a Source with the
-//     limit off decoded.
+//   - [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] and
+//     [go.jacobcolvin.com/niceyaml/schema.Schema.CheckValue] take a Go
+//     value and no Source. Each refuses a value that shares its maps and
+//     slices past the limit, including one a Source with the limit off
+//     decoded.
 //   - [Node.Nodes] refuses a path whose selectors reach far more nodes
 //     through aliases than the document holds.
 //

@@ -38,23 +38,29 @@ var (
 	// byte slices so heavily that the validator would read far more data
 	// than the value holds, as aliases in a YAML document make a decode
 	// share them. It also indicates a document whose aliases would make
-	// the decoder itself read that much. [Schema.Validate] and
-	// [Schema.ValidateValue] return it. A [matcher.Content] or
-	// [matcher.Text] guard refuses such a document with it too, and
-	// [Registry.Lookup] then returns it wrapped together with
-	// [ErrResolve]. The document or the value is at fault in every case,
-	// so [niceyaml.IsInvalid] reports each of these errors, and none of
-	// them wraps [ErrValidate].
+	// the decoder itself read that much. [Schema.Validate],
+	// [Schema.ValidateValue], and [Schema.CheckValue] return it. A
+	// [matcher.Content] or [matcher.Text] guard refuses such a document
+	// with it too, and [Registry.Lookup] then returns it wrapped together
+	// with [ErrResolve]. The document or the value is at fault in every
+	// case, so [niceyaml.IsInvalid] reports each of these errors, and none
+	// of them wraps [ErrValidate].
 	//
 	// [niceyaml.WithAliasLimit] on the source of a document turns the
-	// limit off for Validate and for the guard. ValidateValue holds no
-	// source, so it applies the limit to every value. It is the same
-	// error value as [niceyaml.ErrExcessiveAliasing].
+	// limit off for Validate and for the guard. ValidateValue and
+	// CheckValue take no source, so they apply the limit to every value.
+	// It is the same error value as [niceyaml.ErrExcessiveAliasing].
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// ErrCompile indicates a schema document that does not compile.
 	// [Compile] and [Registry.Lookup] return it.
 	ErrCompile = errors.New("compile schema")
+
+	// The source [Schema.ValidateValue] binds its errors to. It holds no
+	// text and no name, since the value came from no file, so an error
+	// bound to it reads as its path and its message. Every call shares
+	// the one source, which never changes.
+	noSource = niceyaml.NewSourceFromString("")
 )
 
 // CompileOption configures [Compile] and [MustCompile], and
@@ -194,9 +200,11 @@ func FromJSONSchema(v *jsonschema.Validator) *Schema {
 // Each one wraps a [*Violation] that names the keyword the value fails.
 // [Schema.Validate] checks a node, which is the whole document for the
 // root [niceyaml.Node] of a document and one value inside it for a Node
-// from [niceyaml.Node.At]. [Schema.ValidateValue] checks decoded data,
-// such as one value taken from a document with a scoped
-// [niceyaml.Node.Decode] into any.
+// from [niceyaml.Node.At]. [Schema.ValidateValue] checks decoded data
+// that came from no document, such as the body of a request, and the
+// text of its error names the path of each violation.
+// [Schema.CheckValue] returns the same errors unbound, for a caller that
+// places them in a document.
 //
 // A Schema is the validator for a program that holds one schema and
 // compiles it itself. It is also a [Resolver] that names itself for every
@@ -259,7 +267,7 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // comes back bound through n with [niceyaml.Node.Bind], so a call to
 // Validate returns the error [niceyaml.Node.Validate] returns for the
 // schema. A validator that runs the schema on each node of a list thus
-// reports each violation on its own lines. [Schema.ValidateValue] returns
+// reports each violation on its own lines. [Schema.CheckValue] returns
 // unbound errors for a caller that reports them somewhere else.
 //
 // A document that did not parse has no data to check, so Validate returns
@@ -406,29 +414,40 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // it does in a decode into a map.
 //
 // Returns nil when data conforms. On a constraint violation, returns a
-// [*niceyaml.Error]. A single violation carries its YAML path on the error
-// itself, and several violations become a count summary from
+// [*niceyaml.SourceError]. A single violation carries its YAML path on
+// the error itself, and several violations become a count summary from
 // [niceyaml.NewSummary] that heads one error per violation, each with the
 // path to one failing location. The error of each violation wraps a
 // [*Violation] that names the keyword the value fails and where that
 // keyword stands in the schema. A value that matches no branch of an
 // anyOf or oneOf counts as one violation, whose details are the failures
 // of each branch the value could have been meant for, as [Violation]
-// describes. Any other failure wraps
-// [ErrValidate], including a $ref the validator cannot resolve, since no
-// location in the document is at fault for that.
+// describes. Any other failure wraps [ErrValidate], including a $ref the
+// validator cannot resolve, since the value is not at fault for that.
 //
-// ValidateValue holds no source, so its errors are unbound and write `@`
-// paths, which read from the value data stands for. The message of a
-// violation names no path, since a [niceyaml.Error] keeps its location out
-// of its message, so a caller that prints the errors before a binding
-// holds them prints [niceyaml.FormatError] of them, which puts each path
-// in front, as in "@.port: 0 is less than 1". The
-// [niceyaml.Node] data came from binds them with [niceyaml.Node.Bind],
-// which puts the position and the path in front. A caller that reports them
-// under another path, or in another document, puts them under that path
-// with [niceyaml.Rebase] before it binds them, which the bound errors of
-// [Schema.Validate] do not allow.
+// ValidateValue takes no document, so it binds every error to an empty
+// source with no name. The binding puts each path in the text of the
+// error, so the error names every failing location through %v, inside a
+// wrapper from [fmt.Errorf], in a join from [errors.Join], and in a log.
+// One violation reads "$.port: 0 is less than 1", and several read as
+// the summary with one violation per line:
+//
+//	2 schema violations
+//	$.port: 0 is less than 1
+//	$.name: missing required property "name"
+//
+// Each path starts at `$`, which here is the value data stands for, and
+// no position stands in front of it. [niceyaml.IsInvalid] reports the
+// error of a violation, and [errors.As] finds the [*Violation] in it,
+// which is the first among several. [niceyaml.FormatError] prints the
+// same errors as a tree.
+//
+// The result is for reading and not for binding. [niceyaml.Rebase] and
+// [niceyaml.Node.Bind] return a bound error as it is. A caller that binds
+// the result into a document therefore gets it back with the path from
+// the value and no position, and nothing reports the mistake. A caller
+// that places the errors in a document calls [Schema.CheckValue], which
+// returns them unbound.
 //
 // ValidateValue rejects two shapes of data before checking anything. A
 // value whose shared maps, slices, or byte slices would expand past the
@@ -441,7 +460,7 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // node by node as it decodes, ValidateValue applies it once to the whole
 // value. It counts each use of an aliased scalar other than a !!binary as
 // an unaliased node, so it accepts some documents yaml.v3 rejects.
-// ValidateValue holds no source, so it applies the limit to every value,
+// ValidateValue takes no source, so it applies the limit to every value,
 // including one decoded from a source that [niceyaml.WithAliasLimit]
 // turned the limit off for. A map or slice that contains itself returns
 // an error wrapping [ErrValidate].
@@ -449,6 +468,37 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // The context reaches the underlying [jsonschema.Validator], where remote
 // reference resolution honors its cancellation and deadlines.
 func (s *Schema) ValidateValue(ctx context.Context, data any) error {
+	//nolint:wrapcheck // Binding puts each path in the text; the error keeps its own context.
+	return noSource.Bind(s.CheckValue(ctx, data))
+}
+
+// CheckValue checks data against the schema as [Schema.ValidateValue]
+// does and returns the errors unbound, for a caller that places them in
+// a document. Each path starts at `@`, the value data stands for.
+// [niceyaml.Rebase] puts the errors under the path of that value, and a
+// [niceyaml.Node] of the document then binds them:
+//
+//	err := s.CheckValue(ctx, data)
+//
+//	return doc.Bind(niceyaml.Rebase(err, paths.Doc().Child("request")))
+//
+// The bound error reads "app.yaml:2:9: $.request.port: 0 is less than 1".
+// A wrapper such as [fmt.Errorf] around the result keeps its text through
+// both calls, behind the position and the path.
+//
+// CheckValue holds no source, so each path names a key as the decoder
+// does, such as 16 for a key the document spells 0x10. A caller that
+// reports the errors in the document the data came from takes each
+// location from [niceyaml.Node.DataLocator].
+//
+// The result is for binding and not for reading. A [niceyaml.Error]
+// keeps its location out of its message, so one violation prints as
+// "0 is less than 1" and several print as "2 schema violations", and
+// neither names a path. A caller that prints the errors calls
+// ValidateValue, whose text names each path. That result is bound
+// already, and Rebase and [niceyaml.Node.Bind] return a bound error as it
+// is, so it takes no place in a document.
+func (s *Schema) CheckValue(ctx context.Context, data any) error {
 	if s.acceptAll {
 		return nil
 	}
@@ -463,9 +513,9 @@ func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 	return s.validate(ctx, data, nil)
 }
 
-// validate checks data against the schema as [Schema.ValidateValue] does
+// validate checks data against the schema as [Schema.CheckValue] does
 // once data passes its expansion check. It takes the node a decode read
-// data from, which [Schema.Validate] has and a caller of ValidateValue
+// data from, which [Schema.Validate] has and a caller of CheckValue
 // does not. A violation at a key the decoder respells, such as the
 // hexadecimal 0x10, needs the node to spell the key in its path as the
 // source does, and a !!timestamp needs it to show whether the source

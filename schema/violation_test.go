@@ -424,7 +424,7 @@ func TestViolation_MissingMember(t *testing.T) {
 
 		v := compileSchema(t, []byte(server))
 
-		err := v.ValidateValue(t.Context(), map[string]any{"server": map[string]any{"port": 1}})
+		err := v.CheckValue(t.Context(), map[string]any{"server": map[string]any{"port": 1}})
 
 		// One violation comes back alone, and its message names no field
 		// until a binding or FormatError puts the path in front.
@@ -438,6 +438,28 @@ func TestViolation_MissingMember(t *testing.T) {
 		path, ok := located.Path()
 		require.True(t, ok)
 		assert.Equal(t, "@.server.name", path.String())
+	})
+
+	t.Run("value", func(t *testing.T) {
+		t.Parallel()
+
+		v := compileSchema(t, []byte(server))
+
+		err := v.ValidateValue(t.Context(), map[string]any{"server": map[string]any{"port": 1}})
+
+		// The value came from no document, so the message names the field
+		// and no position.
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Equal(t, `$.server.name: missing required property "name"`, bound.Error())
+
+		path, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.server.name", path.String())
+
+		_, ok = bound.Nearest()
+		assert.False(t, ok)
 	})
 }
 
@@ -454,7 +476,7 @@ func TestViolation_Unbound(t *testing.T) {
 	t.Run("single violation", func(t *testing.T) {
 		t.Parallel()
 
-		err := v.ValidateValue(t.Context(), map[string]any{"name": 123})
+		err := v.CheckValue(t.Context(), map[string]any{"name": 123})
 
 		var located *niceyaml.Error
 
@@ -472,7 +494,7 @@ func TestViolation_Unbound(t *testing.T) {
 	t.Run("several violations", func(t *testing.T) {
 		t.Parallel()
 
-		err := v.ValidateValue(t.Context(), map[string]any{"name": 123, "age": "old"})
+		err := v.CheckValue(t.Context(), map[string]any{"name": 123, "age": "old"})
 
 		var summary *niceyaml.Error
 
@@ -833,7 +855,7 @@ func TestViolation_Forms(t *testing.T) {
 	t.Run("unbound", func(t *testing.T) {
 		t.Parallel()
 
-		err := v.ValidateValue(t.Context(), map[string]any{"v": "ab"})
+		err := v.CheckValue(t.Context(), map[string]any{"v": "ab"})
 
 		var located *niceyaml.Error
 
@@ -992,7 +1014,11 @@ func TestViolation_Is(t *testing.T) {
 		require.Error(t, err)
 		assert.True(t, niceyaml.IsInvalid(err))
 
-		unbound := s.ValidateValue(t.Context(), map[string]any{"a": 1, "b": 2})
+		value := s.ValidateValue(t.Context(), map[string]any{"a": 1, "b": 2})
+		require.Error(t, value)
+		assert.True(t, niceyaml.IsInvalid(value))
+
+		unbound := s.CheckValue(t.Context(), map[string]any{"a": 1, "b": 2})
 		require.Error(t, unbound)
 		assert.True(t, niceyaml.IsInvalid(unbound))
 	})

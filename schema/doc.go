@@ -62,12 +62,23 @@
 //
 // [Schema.Validate] returns the same bound error, so a validator of the
 // program's own runs the schema on a node it picks and returns the
-// result. [Schema.ValidateValue] checks decoded data instead, and its
-// errors stay unbound for a caller that reports them under another path.
-// Their paths start at `@`, the value the schema checked, so
-// [go.jacobcolvin.com/niceyaml.Rebase] or the
+// result.
+//
+// [Schema.ValidateValue] checks decoded data that came from no document,
+// such as the body of a request. The text of its error names the path of
+// each violation from the value, so a program prints or returns the
+// error as it is:
+//
+//	2 schema violations
+//	$.port: 0 is less than 1
+//	$.name: missing required property "name"
+//
+// [Schema.CheckValue] returns the same errors unbound, for a caller that
+// reports them in a document. Their paths start at `@`, the value the
+// schema checked, so [go.jacobcolvin.com/niceyaml.Rebase] or the
 // [go.jacobcolvin.com/niceyaml.Node] of that value puts them under its
-// path.
+// path. The error of ValidateValue is bound already and stays where it
+// is, so only the errors of CheckValue take a place in a document.
 //
 // To validate and decode in one step, pass the schema to
 // [go.jacobcolvin.com/niceyaml.Node.Decode] with
