@@ -1120,44 +1120,34 @@ func TestSchema_ValidateValue(t *testing.T) {
 		require.NoError(t, v.ValidateValue(t.Context(), map[string]any{"port": 80, "name": "x"}))
 	})
 
-	t.Run("binding the result into a document moves nothing", func(t *testing.T) {
+	t.Run("the result reads the same once a document placed it", func(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t, "request:\n  port: 0\n", niceyaml.WithName("app.yaml"))
 		base := paths.Doc().Child("request")
 
 		err := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
+		require.EqualError(t, err, "$.port: 0 is less than 1")
 
-		// The result is bound already, so Rebase and Bind hand it back.
-		// Its path still reads from the value, and it gains neither the
-		// name of the document nor a position in it.
 		got := doc.Bind(niceyaml.Rebase(err, base))
-		assert.Same(t, err, got)
-		require.EqualError(t, got, "$.port: 0 is less than 1")
+		require.EqualError(t, got, "app.yaml:2:9: $.request.port: 0 is less than 1")
+		assert.NotSame(t, err, got)
 
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, got, &bound)
+		assert.Same(t, doc.Source(), bound.Source())
+
+		// Placing the result builds a new error and leaves the result as
+		// it was.
+		require.EqualError(t, err, "$.port: 0 is less than 1")
+
+		require.ErrorAs(t, err, &bound)
 		assert.NotSame(t, doc.Source(), bound.Source())
-
-		_, ok := bound.Position()
-		assert.False(t, ok)
-
-		// A Node scoped to the value and a wrapper around the result
-		// change nothing either.
-		assert.Same(t, err, yamltest.At(t, doc, base).Bind(err))
-		require.EqualError(t,
-			doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", err), base)),
-			"check: $.port: 0 is less than 1",
-		)
-
-		// CheckValue returns the errors a document can place.
-		placed := doc.Bind(niceyaml.Rebase(v.CheckValue(t.Context(), map[string]any{"port": 0, "name": "x"}), base))
-		require.EqualError(t, placed, "app.yaml:2:9: $.request.port: 0 is less than 1")
 	})
 }
 
-func TestSchema_CheckValue(t *testing.T) {
+func TestSchema_ValidateValue_Place(t *testing.T) {
 	t.Parallel()
 
 	v := compileSchema(t, []byte(requestSchema))
@@ -1165,31 +1155,25 @@ func TestSchema_CheckValue(t *testing.T) {
 	doc := yamltest.FirstDocument(t, "request:\n  port: 0\n", niceyaml.WithName("app.yaml"))
 	base := paths.Doc().Child("request")
 
-	// The errors come back unbound, so their text names no path until a
-	// caller places them in a document. Each path then shows once, with
-	// or without a wrapper around the result.
+	// The result stands in no document, so Rebase and Bind place it as
+	// they place an error that no source bound yet. Each path then shows
+	// once, with or without a wrapper around the result.
 	tcs := map[string]struct {
 		data        map[string]any
-		want        string
-		wantFormat  string
 		wantBound   string
 		wantWrapped string
+		// The result bound through the root with no Rebase, where each
+		// path reads from the root of the document.
+		wantRoot string
 	}{
 		"one violation": {
 			data:        map[string]any{"port": 0, "name": "x"},
-			want:        "0 is less than 1",
-			wantFormat:  "@.port: 0 is less than 1",
 			wantBound:   "app.yaml:2:9: $.request.port: 0 is less than 1",
 			wantWrapped: "app.yaml:2:9: $.request.port: check: 0 is less than 1",
+			wantRoot:    "app.yaml:1:1: $.port: 0 is less than 1",
 		},
 		"two violations": {
 			data: map[string]any{"port": 0},
-			want: "2 schema violations",
-			wantFormat: stringtest.JoinLF(
-				"2 schema violations",
-				"|-- @.port: 0 is less than 1",
-				"`-- @.name: missing required property \"name\"",
-			),
 			wantBound: stringtest.JoinLF(
 				"app.yaml: 2 schema violations",
 				`app.yaml:1:1: $.request.name: missing required property "name"`,
@@ -1200,6 +1184,11 @@ func TestSchema_CheckValue(t *testing.T) {
 				`app.yaml:1:1: $.request.name: missing required property "name"`,
 				"app.yaml:2:9: $.request.port: 0 is less than 1",
 			),
+			wantRoot: stringtest.JoinLF(
+				"app.yaml: 2 schema violations",
+				"app.yaml:1:1: $.port: 0 is less than 1",
+				`app.yaml:1:1: $.name: missing required property "name"`,
+			),
 		},
 	}
 
@@ -1207,30 +1196,122 @@ func TestSchema_CheckValue(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := v.CheckValue(t.Context(), tc.data)
-			require.EqualError(t, err, tc.want)
-			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(err, 0))
-			assert.True(t, niceyaml.IsInvalid(err))
+			err := v.ValidateValue(t.Context(), tc.data)
 
-			var bound *niceyaml.SourceError
+			placed := doc.Bind(niceyaml.Rebase(err, base))
+			require.EqualError(t, placed, tc.wantBound)
+			assert.True(t, niceyaml.IsInvalid(placed))
 
-			require.NotErrorAs(t, err, &bound)
+			var violation *schema.Violation
 
-			require.EqualError(t, doc.Bind(niceyaml.Rebase(err, base)), tc.wantBound)
+			require.ErrorAs(t, placed, &violation)
+
+			for b := range niceyaml.AllBindings(placed) {
+				assert.Same(t, doc.Source(), b.Source())
+			}
+
 			require.EqualError(t,
 				doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", err), base)),
 				tc.wantWrapped,
 			)
+			require.EqualError(t,
+				doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", fmt.Errorf("body: %w", err)), base)),
+				strings.Replace(tc.wantWrapped, "check: ", "check: body: ", 1),
+			)
 
-			// A Node scoped to the value puts its own path in front.
+			// A Node scoped to the value puts its own path in front, and
+			// the root reads each path from the root of the document.
 			require.EqualError(t, yamltest.At(t, doc, base).Bind(err), tc.wantBound)
+			require.EqualError(t, doc.Bind(err), tc.wantRoot)
+
+			// A summary and a join place each result they hold.
+			require.EqualError(t,
+				doc.Bind(niceyaml.Rebase(errors.Join(err), base)),
+				tc.wantBound,
+			)
 		})
 	}
 
 	t.Run("conforming value", func(t *testing.T) {
 		t.Parallel()
 
-		require.NoError(t, v.CheckValue(t.Context(), map[string]any{"port": 80, "name": "x"}))
+		require.NoError(t, v.ValidateValue(t.Context(), map[string]any{"port": 80, "name": "x"}))
+	})
+
+	t.Run("a wrapper keeps what it matches", func(t *testing.T) {
+		t.Parallel()
+
+		wrapped := &placeCheckError{err: v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})}
+		require.EqualError(t, wrapped, "check: $.port: 0 is less than 1")
+
+		placed := doc.Bind(niceyaml.Rebase(wrapped, base))
+		require.EqualError(t, placed, "app.yaml:2:9: $.request.port: check: 0 is less than 1")
+		require.ErrorIs(t, placed, wrapped)
+
+		var got *placeCheckError
+
+		require.ErrorAs(t, placed, &got)
+		assert.Same(t, wrapped, got)
+	})
+
+	t.Run("a wrapper that rewrites the text stays as it is", func(t *testing.T) {
+		t.Parallel()
+
+		err := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
+
+		// The text of the wrapper holds the text of the result nowhere,
+		// so no path could leave it, and the error keeps one path.
+		shouted := placeShoutError{err: err}
+
+		require.EqualError(t, doc.Bind(niceyaml.Rebase(shouted, base)), "$.PORT: 0 IS LESS THAN 1")
+	})
+
+	t.Run("a Validate method returns the result", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := placeConfig{Request: placeRequest{schema: v}}
+
+		err := doc.DecodeInto(t.Context(), &cfg)
+		require.EqualError(t, err, "app.yaml:2:9: $.request.port: 0 is less than 1")
+		assert.True(t, niceyaml.IsInvalid(err))
+	})
+
+	t.Run("a Validator returns the result", func(t *testing.T) {
+		t.Parallel()
+
+		check := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+			return v.ValidateValue(ctx, map[string]any{"port": 0, "name": "x"})
+		})
+
+		err := yamltest.At(t, doc, base).Validate(t.Context(), check)
+		require.EqualError(t, err, "app.yaml:2:9: $.request.port: 0 is less than 1")
+	})
+
+	t.Run("a summary and a detail place the results they hold", func(t *testing.T) {
+		t.Parallel()
+
+		err := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
+
+		unnamed := v.ValidateValue(t.Context(), map[string]any{"port": 80})
+
+		summary := niceyaml.NewSummary("request checks", err, unnamed)
+		require.EqualError(t, doc.Bind(niceyaml.Rebase(summary, base)), stringtest.JoinLF(
+			"app.yaml: request checks",
+			`app.yaml:1:1: $.request.name: missing required property "name"`,
+			"app.yaml:2:9: $.request.port: 0 is less than 1",
+		))
+
+		detailed := niceyaml.NewError(
+			"bad request",
+			niceyaml.AtPath(base),
+			niceyaml.WithDetails(niceyaml.Rebase(err, base)),
+		)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, doc.Bind(detailed), &bound)
+		require.Len(t, bound.Details(), 1)
+		assert.Same(t, doc.Source(), bound.Details()[0].Source())
 	})
 
 	t.Run("path names a key as the decoder does", func(t *testing.T) {
@@ -1242,17 +1323,17 @@ func TestSchema_CheckValue(t *testing.T) {
 		data, err := hex.Decode[any](t.Context())
 		require.NoError(t, err)
 
-		// The decoder names the key 0x10 as 16, and CheckValue reads no
+		// The decoder names the key 0x10 as 16, and ValidateValue reads no
 		// source that spells it another way.
-		err = ports.CheckValue(t.Context(), data)
+		err = ports.ValidateValue(t.Context(), data)
 
-		var located *niceyaml.Error
+		var located *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &located)
 
 		path, ok := located.Path()
 		require.True(t, ok)
-		assert.Equal(t, "@.ports.16", path.String())
+		assert.Equal(t, "$.ports.16", path.String())
 
 		// No key of the document has that spelling, so the path binds at
 		// the key of the mapping.
@@ -1266,9 +1347,54 @@ func TestSchema_CheckValue(t *testing.T) {
 			names = append(names, sel.Name)
 		}
 
-		found := niceyaml.NewError(located.Error(), hex.DataLocator().At(names...))
+		found := niceyaml.NewError(located.Message(), hex.DataLocator().At(names...))
 		require.EqualError(t, hex.Bind(found), "app.yaml:2:9: $.ports.0x10: 0 is less than 1")
 	})
+}
+
+// placeCheckError wraps the error of a check with a prefix, as a caller's
+// own error type does.
+type placeCheckError struct {
+	err error
+}
+
+func (e *placeCheckError) Error() string {
+	return "check: " + e.err.Error()
+}
+
+func (e *placeCheckError) Unwrap() error {
+	return e.err
+}
+
+// placeShoutError wraps an error and rewrites its text.
+type placeShoutError struct {
+	err error
+}
+
+func (e placeShoutError) Error() string {
+	return strings.ToUpper(e.err.Error())
+}
+
+func (e placeShoutError) Unwrap() error {
+	return e.err
+}
+
+// placeConfig holds a [placeRequest] under the key request.
+type placeConfig struct {
+	Request placeRequest `yaml:"request"`
+}
+
+// placeRequest checks itself against a schema the test sets before the
+// decode, and returns what ValidateValue returns.
+type placeRequest struct {
+	schema *schema.Schema
+
+	Port int `yaml:"port"`
+}
+
+func (r placeRequest) Validate() error {
+	//nolint:wrapcheck // The test checks where a decode places the result as it is.
+	return r.schema.ValidateValue(context.Background(), map[string]any{"port": r.Port, "name": "x"})
 }
 
 func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
@@ -1538,8 +1664,8 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				doc := yamltest.FirstDocument(t, tc.input)
 
 				// A source with the alias limit off decodes the value
-				// ValidateValue and CheckValue check, and each applies
-				// the limit to it all the same.
+				// ValidateValue checks, which applies the limit to it all
+				// the same.
 				trusted := yamltest.FirstDocument(t, tc.input, niceyaml.WithAliasLimit(false))
 
 				data, err := trusted.Decode[any](t.Context())
@@ -1548,7 +1674,6 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				for _, err := range []error{
 					doc.Validate(t.Context(), v),
 					v.ValidateValue(t.Context(), data),
-					v.CheckValue(t.Context(), data),
 				} {
 					switch {
 					case tc.excessive:
@@ -1993,26 +2118,21 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				// The bound error of ValidateValue and the unbound one of
-				// CheckValue answer alike.
-				for _, err := range []error{
-					v.ValidateValue(t.Context(), tc.data),
-					v.CheckValue(t.Context(), tc.data),
-				} {
-					switch {
-					case tc.excessive:
-						requireExcessiveAliasing(t, err)
+				err := v.ValidateValue(t.Context(), tc.data)
 
-					case tc.err != nil:
-						// A value that contains itself is no fault of a
-						// document, since no document decodes to one.
-						require.ErrorIs(t, err, tc.err)
-						require.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
-						assert.False(t, niceyaml.IsInvalid(err))
+				switch {
+				case tc.excessive:
+					requireExcessiveAliasing(t, err)
 
-					default:
-						require.NoError(t, err)
-					}
+				case tc.err != nil:
+					// A value that contains itself is no fault of a
+					// document, since no document decodes to one.
+					require.ErrorIs(t, err, tc.err)
+					require.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
+					assert.False(t, niceyaml.IsInvalid(err))
+
+				default:
+					require.NoError(t, err)
 				}
 			})
 		}
@@ -2208,8 +2328,7 @@ func TestSchema_PathAnchors(t *testing.T) {
 	doc := yamltest.FirstDocument(t, "server:\n  port: 0\n")
 	serverNode := yamltest.At(t, doc, paths.Doc().Child("server"))
 
-	// A violation of the value the schema checked carries an `@` path,
-	// and a binding reports the `$` path from the root of the document.
+	// A binding reports the `$` path from the root of the document.
 	// ValidateValue binds to a source that holds no document, so its `$`
 	// is the value.
 	tcs := map[string]struct {
@@ -2217,24 +2336,6 @@ func TestSchema_PathAnchors(t *testing.T) {
 		want     string
 		wantPath string
 	}{
-		"unbound document": {
-			validate: func(t *testing.T) error {
-				t.Helper()
-
-				return whole.CheckValue(t.Context(), map[string]any{"server": map[string]any{"port": 0}})
-			},
-			want:     "@.server.port: 0 is less than 1",
-			wantPath: "@.server.port",
-		},
-		"unbound value": {
-			validate: func(t *testing.T) error {
-				t.Helper()
-
-				return server.CheckValue(t.Context(), map[string]any{"port": 0})
-			},
-			want:     "@.port: 0 is less than 1",
-			wantPath: "@.port",
-		},
 		"value of a document": {
 			validate: func(t *testing.T) error {
 				t.Helper()
@@ -2293,9 +2394,8 @@ func TestSchema_ErrorPaths(t *testing.T) {
 	t.Parallel()
 
 	// A single violation puts its path on the main error. Several violations
-	// leave the main error without a path and expose one path per nested
-	// error through Unwrap. CheckValue returns those errors as they are,
-	// with each path from `@`.
+	// leave the main error without a path and expose one path per problem
+	// below it. ValidateValue writes each path from `$`, the value.
 	tcs := map[string]struct {
 		schema          string
 		input           any
@@ -2305,22 +2405,22 @@ func TestSchema_ErrorPaths(t *testing.T) {
 		"type error has path on main error": {
 			schema:   `{"type": "object", "properties": {"name": {"type": "string"}}}`,
 			input:    map[string]any{"name": 123},
-			wantPath: "@.name",
+			wantPath: "$.name",
 		},
 		"additional property has key path on main error": {
 			schema:   `{"type": "object", "properties": {"name": {"type": "string"}}, "additionalProperties": false}`,
 			input:    map[string]any{"name": "valid", "extra": "invalid"},
-			wantPath: "@.extra~",
+			wantPath: "$.extra~",
 		},
 		"nested validation error has path on main error": {
 			schema:   `{"type": "object", "properties": {"user": {"type": "object", "properties": {"age": {"type": "integer"}}}}}`,
 			input:    map[string]any{"user": map[string]any{"age": "notanumber"}},
-			wantPath: "@.user.age",
+			wantPath: "$.user.age",
 		},
 		"several violations have paths on nested errors": {
 			schema:          `{"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "number"}}}`,
 			input:           map[string]any{"name": 123, "age": "thirty"},
-			wantNestedPaths: []string{"@.name", "@.age"},
+			wantNestedPaths: []string{"$.name", "$.age"},
 		},
 	}
 
@@ -2330,14 +2430,12 @@ func TestSchema_ErrorPaths(t *testing.T) {
 
 			v := compileSchema(t, []byte(tc.schema))
 
-			err := v.CheckValue(t.Context(), tc.input)
+			err := v.ValidateValue(t.Context(), tc.input)
 			require.Error(t, err)
 
-			var validationErr *niceyaml.Error
+			tree := niceyaml.NewErrorTree(err)
 
-			require.ErrorAs(t, err, &validationErr)
-
-			gotPath, ok := validationErr.Path()
+			gotPath, ok := tree.Path()
 			assert.Equal(t, tc.wantPath != "", ok)
 
 			if ok {
@@ -2346,13 +2444,8 @@ func TestSchema_ErrorPaths(t *testing.T) {
 
 			var gotNestedPaths []string
 
-			for _, uerr := range validationErr.Unwrap() {
-				nestedErr, ok := errors.AsType[*niceyaml.Error](uerr)
-				if !ok {
-					continue
-				}
-
-				if nestedPath, ok := nestedErr.Path(); ok {
+			for _, child := range tree.Children {
+				if nestedPath, ok := child.Path(); ok {
 					gotNestedPaths = append(gotNestedPaths, nestedPath.String())
 				}
 			}

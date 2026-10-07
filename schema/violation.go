@@ -20,12 +20,11 @@ import (
 const noFormMessage = "value matches none of the allowed forms"
 
 // Violation is one constraint of a JSON schema that a value breaks.
-// [Schema.Validate], [Schema.ValidateValue], and [Schema.CheckValue]
-// report each one as a [*niceyaml.Error] that wraps a Violation and
-// carries the YAML path to the failing location. That path starts at
-// `@`, the value the schema checked, until a binding reports it from
-// `$`. For Validate, `$` is the root of the document. For ValidateValue,
-// it is the value, which came from no document. A
+// [Schema.Validate] and [Schema.ValidateValue] report each one as a
+// [*niceyaml.Error] that wraps a Violation and carries the YAML path to
+// the failing location. A binding reports that path from `$`. For
+// Validate, `$` is the root of the document. For ValidateValue, it is
+// the value, which came from no document. A
 // caller reads the constraint from the Violation instead of matching on
 // the text of the message. A report that suppresses a rule, rewords a
 // message, or writes a format such as SARIF walks the bound errors and
@@ -45,9 +44,7 @@ const noFormMessage = "value matches none of the allowed forms"
 // the search above finds the Violation of that binding or none. Several
 // violations come back under a count summary from [niceyaml.NewSummary],
 // which wraps no Violation. [errors.As] on its binding searches the
-// violations it heads too and finds the Violation of the first. An
-// unbound error from [Schema.CheckValue] holds its Violation as its
-// [niceyaml.Error.Cause].
+// violations it heads too and finds the Violation of the first.
 //
 // A value that matches no branch of an anyOf or oneOf fails every branch
 // at once, and the failures of a branch say what is wrong with the value
@@ -351,9 +348,8 @@ func (c converter) leaf(e *jsonschema.ValidationError) error {
 //
 // The path spells each key as the source does, so a key the decoder
 // respells, such as 0x10 for the member name 16, still names its member.
-// Without a root, which a caller of [Schema.CheckValue] or
-// [Schema.ValidateValue] does not hand over, the path spells each key as
-// the decoder does.
+// Without a root, which a caller of [Schema.ValidateValue] does not hand
+// over, the path spells each key as the decoder does.
 //
 // Where no spelling selects the member, as [sourcePath] describes, the
 // path keeps the decoded name and selects nothing or another entry. A

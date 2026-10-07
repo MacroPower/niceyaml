@@ -73,12 +73,12 @@
 //	$.port: 0 is less than 1
 //	$.name: missing required property "name"
 //
-// [Schema.CheckValue] returns the same errors unbound, for a caller that
-// reports them in a document. Their paths start at `@`, the value the
-// schema checked, so [go.jacobcolvin.com/niceyaml.Rebase] or the
-// [go.jacobcolvin.com/niceyaml.Node] of that value puts them under its
-// path. The error of ValidateValue is bound already and stays where it
-// is, so only the errors of CheckValue take a place in a document.
+// That error stands in no document, so a caller that knows where the
+// data stands in one places it there.
+// [go.jacobcolvin.com/niceyaml.Rebase] or the
+// [go.jacobcolvin.com/niceyaml.Node] of that value puts the errors under
+// its path, and the bound error then names the file and the position of
+// each violation.
 //
 // To validate and decode in one step, pass the schema to
 // [go.jacobcolvin.com/niceyaml.Node.Decode] with

@@ -19,6 +19,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/fault"
+	"go.jacobcolvin.com/niceyaml/internal/unplaced"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -714,6 +715,12 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // comes back as it is. An Error above a binding that carries a location,
 // heads errors, or holds details adds paths of its own, so Rebase puts
 // the base in front of those.
+//
+// One binding stands in no document, which is the error
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] returns for a
+// value that came from none. Rebase reads it as the errors it was made
+// from, so they take the base, and a Node then binds them in its
+// document.
 func Rebase(err error, base paths.Path) error {
 	return rebase(err, base, false, false)
 }
@@ -723,8 +730,14 @@ func Rebase(err error, base paths.Path) error {
 // problem it explains. With invalid, each Error the rebase builds matches
 // [errInvalid], as the self-validation walk marks what a [SelfValidator]
 // returns. A binding takes no base, and with invalid it comes back as
-// [markInvalid] marks it.
+// [markInvalid] marks it. A binding that stands in no document rebases
+// as the error [placeable] returns for it.
 func rebase(err error, base paths.Path, movesOnly, invalid bool) error {
+	if isNothing(err) {
+		return nil
+	}
+
+	err = placeable(err)
 	if isNothing(err) {
 		return nil
 	}
@@ -1478,6 +1491,10 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 // from the [Source] and [Node] methods.
 type SourceError struct {
 	err error
+	// The error the binding was made from when it stands in no document,
+	// as [unplacedError] finds one, and nil for every other binding.
+	// [placeable] hands it to a later binding in place of this one.
+	free error
 	// The reason the location did not resolve, which is nil when it did:
 	// errUnlocated for an error that carries none, the error of a path
 	// that does not resolve, or ErrOutOfRange for a location the source
@@ -1760,11 +1777,154 @@ func bindTree(err error, b binder) error {
 		return nil
 	}
 
+	free, marked := unplacedError(err)
+	if marked {
+		err = free
+	}
+
+	err = placeable(err)
+	if isNothing(err) {
+		return nil
+	}
+
 	if isBound(err) {
 		return err
 	}
 
-	return newSourceError(b.located(err), b)
+	bound := newSourceError(b.located(err), b)
+	if marked {
+		bound.free = err
+	}
+
+	return bound
+}
+
+// unplacedError returns the error err wraps, and reports true, when err
+// itself matches [unplaced.Err] from an Is method. Such an err declares
+// that the error it wraps is about a value that came from no document.
+// Its binding reads as any other, and [placeable] hands the error to a
+// later binding that places it in a document.
+func unplacedError(err error) (error, bool) {
+	x, ok := err.(interface{ Is(target error) bool }) //nolint:errorlint // The error itself, not a chain search.
+	if !ok || !x.Is(unplaced.Err) {
+		return nil, false
+	}
+
+	return errors.Unwrap(err), true
+}
+
+// placeable returns err with a binding that stands in no document, as
+// [unplacedError] describes one, replaced by the error the binding was
+// made from. Bind and [Rebase] thus place such an error in a document as
+// they place an error that no source bound yet. Every other binding is a
+// binding of a document, and comes back as it is.
+//
+// The binding may sit below wrappers that each unwrap to one error, such
+// as the ones [fmt.Errorf] builds with one %w verb. The text of the
+// binding names the paths of its errors, and the text of the error it
+// was made from names none. Each wrapper therefore comes back as a
+// [placedError], whose message is the message of the wrapper with the
+// text of the binding cut down to that of its error. A wrapper whose
+// message does not hold the text of the binding once, such as one that
+// quotes it, comes back as it is, and so does err. An [*Error] above the
+// binding binds around it, so placeable leaves it alone too.
+func placeable(err error) error {
+	placed, _ := replaceUnplaced(err)
+
+	return placed
+}
+
+// replaceUnplaced is [placeable], and it reports whether it replaced a
+// binding.
+func replaceUnplaced(err error) (error, bool) {
+	switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
+	case *SourceError:
+		if x == nil || x.free == nil {
+			return err, false
+		}
+
+		return x.free, true
+
+	case *Error:
+		return err, false
+
+	case interface{ Unwrap() error }:
+		below := x.Unwrap()
+		if below == nil {
+			return err, false
+		}
+
+		placed, ok := replaceUnplaced(below)
+		if !ok {
+			return err, false
+		}
+
+		msg, old := err.Error(), below.Error()
+		if old == "" || strings.Count(msg, old) != 1 {
+			return err, false
+		}
+
+		return &placedError{wrapper: err, err: placed, msg: strings.Replace(msg, old, placed.Error(), 1)}, true
+
+	default:
+		return err, false
+	}
+}
+
+// placedError stands for a wrapper around a binding that stood in no
+// document, once [placeable] replaced that binding with its error. Its
+// message is the message of the wrapper with the text of the binding cut
+// down to the message of the error, and it unwraps to the error. It
+// matches the wrapper for [errors.Is] and [errors.As] rather than
+// unwrapping to it, since the wrapper still unwraps to the binding.
+type placedError struct {
+	// The wrapper Bind or Rebase received.
+	wrapper error
+	// The error below the wrapper, with the binding replaced.
+	err error
+	msg string
+}
+
+// Error returns the message of the wrapper with the text of the binding
+// cut down to the message of its error.
+func (p *placedError) Error() string {
+	return p.msg
+}
+
+// Unwrap returns the error below the wrapper, with the binding replaced.
+func (p *placedError) Unwrap() error {
+	return p.err
+}
+
+// Is reports whether target is the wrapper, or whether the Is method of
+// the wrapper, if it has one, matches target. Like [errors.Is], it
+// compares the wrapper with target only when the type of target is
+// comparable.
+func (p *placedError) Is(target error) bool {
+	if target != nil && reflect.TypeOf(target).Comparable() && p.wrapper == target {
+		return true
+	}
+
+	x, ok := p.wrapper.(interface{ Is(target error) bool }) //nolint:errorlint // The wrapper itself, not a chain search.
+
+	return ok && x.Is(target)
+}
+
+// As sets target to the wrapper when target points at a type the wrapper
+// is assignable to, as [errors.As] does for an error in the chain.
+// Otherwise it reports what the As method of the wrapper, if it has one,
+// reports.
+func (p *placedError) As(target any) bool {
+	val := reflect.ValueOf(target)
+	if val.Kind() == reflect.Pointer && !val.IsNil() && reflect.TypeOf(p.wrapper).AssignableTo(val.Type().Elem()) {
+		val.Elem().Set(reflect.ValueOf(p.wrapper))
+
+		return true
+	}
+
+	x, ok := p.wrapper.(interface{ As(target any) bool }) //nolint:errorlint // The wrapper itself, not a chain search.
+
+	return ok && x.As(target)
 }
 
 // isBound reports whether err is a binding already: a [*SourceError], or
@@ -2218,7 +2378,8 @@ func (e *SourceError) collect(err error, b binder) {
 func (e *SourceError) addChild(n error, b binder, base childBase, detail bool) {
 	// The base returns a binding as it is unless it marks the binding
 	// invalid, so the child is a binding when n is one that gains no mark.
-	child := base.rebase(n, detail)
+	// A binding that stands in no document binds here as its error does.
+	child := base.rebase(placeable(n), detail)
 	if isNothing(child) {
 		return
 	}

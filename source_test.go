@@ -5231,17 +5231,13 @@ func TestWithAliasLimit(t *testing.T) {
 		data, err := trusted.Decode[any](t.Context(), niceyaml.WithValidator(shape))
 		require.NoError(t, err)
 
-		// ValidateValue and CheckValue take a Go value and no source, so
-		// each applies the limit to the value the source decoded.
-		for _, err := range []error{
-			shape.ValidateValue(t.Context(), data),
-			shape.CheckValue(t.Context(), data),
-		} {
-			require.EqualError(t, err, "excessive aliasing")
-			require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
-			require.NotErrorIs(t, err, schema.ErrValidate)
-			assert.True(t, niceyaml.IsInvalid(err))
-		}
+		// ValidateValue takes a Go value and no source, so it applies the
+		// limit to the value the source decoded.
+		err = shape.ValidateValue(t.Context(), data)
+		require.EqualError(t, err, "excessive aliasing")
+		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
+		require.NotErrorIs(t, err, schema.ErrValidate)
+		assert.True(t, niceyaml.IsInvalid(err))
 
 		// Each [*] lists nine aliases to the level below, so the path
 		// would select 9^5 nodes. The path is at fault for that, and the

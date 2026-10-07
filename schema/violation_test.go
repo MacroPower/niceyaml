@@ -419,27 +419,6 @@ func TestViolation_MissingMember(t *testing.T) {
 		assert.Equal(t, "$.server", near.String())
 	})
 
-	t.Run("unbound", func(t *testing.T) {
-		t.Parallel()
-
-		v := compileSchema(t, []byte(server))
-
-		err := v.CheckValue(t.Context(), map[string]any{"server": map[string]any{"port": 1}})
-
-		// One violation comes back alone, and its message names no field
-		// until a binding or FormatError puts the path in front.
-		assert.Equal(t, `missing required property "name"`, err.Error())
-		assert.Equal(t, `@.server.name: missing required property "name"`, niceyaml.FormatError(err, 0))
-
-		var located *niceyaml.Error
-
-		require.ErrorAs(t, err, &located)
-
-		path, ok := located.Path()
-		require.True(t, ok)
-		assert.Equal(t, "@.server.name", path.String())
-	})
-
 	t.Run("value", func(t *testing.T) {
 		t.Parallel()
 
@@ -463,7 +442,7 @@ func TestViolation_MissingMember(t *testing.T) {
 	})
 }
 
-func TestViolation_Unbound(t *testing.T) {
+func TestViolation_Value(t *testing.T) {
 	t.Parallel()
 
 	v := compileSchema(t, []byte(`{
@@ -476,7 +455,7 @@ func TestViolation_Unbound(t *testing.T) {
 	t.Run("single violation", func(t *testing.T) {
 		t.Parallel()
 
-		err := v.CheckValue(t.Context(), map[string]any{"name": 123})
+		err := v.ValidateValue(t.Context(), map[string]any{"name": 123})
 
 		var located *niceyaml.Error
 
@@ -494,7 +473,7 @@ func TestViolation_Unbound(t *testing.T) {
 	t.Run("several violations", func(t *testing.T) {
 		t.Parallel()
 
-		err := v.CheckValue(t.Context(), map[string]any{"name": 123, "age": "old"})
+		err := v.ValidateValue(t.Context(), map[string]any{"name": 123, "age": "old"})
 
 		var summary *niceyaml.Error
 
@@ -776,8 +755,6 @@ func TestViolation_Forms(t *testing.T) {
 		{"type": "string", "pattern": "^x"}
 	]}}}`))
 
-	value := paths.Current().Child("v")
-
 	t.Run("bound", func(t *testing.T) {
 		t.Parallel()
 
@@ -852,38 +829,47 @@ func TestViolation_Forms(t *testing.T) {
 		}
 	})
 
-	t.Run("unbound", func(t *testing.T) {
+	t.Run("value", func(t *testing.T) {
 		t.Parallel()
 
-		err := v.CheckValue(t.Context(), map[string]any{"v": "ab"})
+		err := v.ValidateValue(t.Context(), map[string]any{"v": "ab"})
 
-		var located *niceyaml.Error
+		var bound *niceyaml.SourceError
 
-		require.ErrorAs(t, err, &located)
+		require.ErrorAs(t, err, &bound)
 
-		path, ok := located.Path()
+		path, ok := bound.Path()
 		require.True(t, ok)
-		assert.Equal(t, value.String(), path.String())
+		assert.Equal(t, "$.v", path.String())
 
-		got, ok := errors.AsType[*schema.Violation](located.Cause())
+		_, ok = bound.Range()
+		assert.False(t, ok)
+
+		got, ok := errors.AsType[*schema.Violation](bound.Cause())
 		require.True(t, ok)
 		assert.Equal(t, "anyOf", got.Keyword)
 
-		assert.Empty(t, located.Errors())
+		assert.Empty(t, bound.Errors())
 
-		forms := located.Details()
+		forms := bound.Details()
 		require.Len(t, forms, 2)
 
 		for i, form := range forms {
-			var unlocated *niceyaml.Error
+			assert.Equal(t, []string{"form 1", "form 2"}[i], form.Message())
 
-			require.ErrorAs(t, form, &unlocated)
-			require.EqualError(t, unlocated, []string{"form 1", "form 2"}[i])
-
-			_, ok := unlocated.Path()
+			_, ok := form.Path()
 			assert.False(t, ok)
-			assert.Len(t, unlocated.Details(), 1)
+			assert.Len(t, form.Details(), 1)
 		}
+
+		// A document places the violation, and its forms come with it.
+		placed := yamltest.FirstDocument(t, "v: ab\n").Bind(err)
+
+		require.ErrorAs(t, placed, &bound)
+
+		_, ok = bound.Range()
+		assert.True(t, ok)
+		assert.Len(t, bound.Details(), 2)
 	})
 }
 
@@ -1017,10 +1003,6 @@ func TestViolation_Is(t *testing.T) {
 		value := s.ValidateValue(t.Context(), map[string]any{"a": 1, "b": 2})
 		require.Error(t, value)
 		assert.True(t, niceyaml.IsInvalid(value))
-
-		unbound := s.CheckValue(t.Context(), map[string]any{"a": 1, "b": 2})
-		require.Error(t, unbound)
-		assert.True(t, niceyaml.IsInvalid(unbound))
 	})
 
 	t.Run("a validation that could not run is not invalid", func(t *testing.T) {

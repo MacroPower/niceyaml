@@ -629,8 +629,8 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 // The value came from no document, and the text of the error
 // ValidateValue returns names the path of each violation, as in
 // "$.port: 0 is less than 1", so the caller returns it as it is. A
-// caller that places the errors in a document calls [Schema.CheckValue]
-// here instead.
+// caller that places the errors in a document binds the same result
+// there, as ValidateValue describes.
 //
 // The zero Ref names no schema, so it is [ErrResolve]. A load that fails
 // is [ErrLoad], and a compile that fails is [ErrCompile]. Schema caches

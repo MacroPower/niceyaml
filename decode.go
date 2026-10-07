@@ -341,9 +341,10 @@ type SelfValidator interface {
 // "config schema: svc.yaml:2:7: $.port: 0 is less than 1". [Rebase]
 // returns a bound error as it is, since the binding resolved its location
 // already. A check that reports under another path or in another document
-// starts from unbound errors instead. A check of the decoded data returns
-// those, as [go.jacobcolvin.com/niceyaml/schema.Schema.CheckValue]
-// does, and Rebase puts them under that path before a Node binds them.
+// starts from errors that stand in no document instead. A check of the
+// decoded data returns those, as
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] does, and
+// Rebase puts them under that path before a Node binds them.
 //
 // A document with a YAML syntax error has no tree to check. Node.Validate
 // and a decode return the syntax error [Node.Err] returns before any
@@ -2164,6 +2165,12 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 // location, and its message keeps the position the inner binding
 // resolved. An Error with details above a binding binds anew around it,
 // with those details as children. Bind never modifies err.
+//
+// One binding stands in no document, which is the error
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] returns for a
+// value that came from none. Bind binds the errors it was made from, as
+// it binds an error that no source bound yet, so a validator that
+// returns such a result reports it in the document.
 //
 // A document that did not parse has no tree to resolve a path in, so a
 // path bound through its Node resolves nowhere. The bound error keeps
