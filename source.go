@@ -66,8 +66,8 @@ import (
 type Source struct {
 	name     string
 	filePath string
-	// The file system filePath names a file in, or nil when the path
-	// names a file on disk or the Source has no path.
+	// The file system filePath names a file in, or nil when no option
+	// set one, where a path names a file on disk.
 	fsys  fs.FS
 	lines line.Lines
 	// Holds the stream that [Source.Tokens] rebuilds from lines on its
@@ -532,9 +532,10 @@ func (s *Source) FilePath() string {
 }
 
 // FS returns the file system the file path of the [Source] names a file
-// in, which [NewSourceFromFS] or [WithFS] sets. It returns nil when the
-// path names a file on disk, when the Source has no path, and for a nil
-// Source.
+// in, which [NewSourceFromFS] or [WithFS] sets. It returns nil when
+// neither set one, where a path names a file on disk, and for a nil
+// Source. A Source that WithFS gave a file system and no path returns
+// that file system.
 func (s *Source) FS() fs.FS {
 	if s == nil {
 		return nil

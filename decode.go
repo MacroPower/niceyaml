@@ -1743,8 +1743,8 @@ func (n *Node) FilePath() string {
 }
 
 // FS returns the file system the path of the file the document came from
-// names a file in, which is [Source.FS]. It returns nil when the path
-// names a file on disk and when the source has none.
+// names a file in, which is [Source.FS]. It returns nil when the source
+// has none, where a path names a file on disk.
 func (n *Node) FS() fs.FS {
 	return n.source.FS()
 }

@@ -4179,6 +4179,10 @@ func TestSource_FS(t *testing.T) {
 				niceyaml.WithFilePath("configs/app.yaml"), niceyaml.WithFS(bundle)),
 			want: bundle,
 		},
+		"WithFS sets it for a source with no path": {
+			source: niceyaml.NewSourceFromString(text, niceyaml.WithFS(bundle)),
+			want:   bundle,
+		},
 		"a later option replaces it": {
 			source: replaced,
 		},
