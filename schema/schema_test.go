@@ -1305,6 +1305,48 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		assert.True(t, niceyaml.IsInvalid(err))
 	})
 
+	t.Run("a Validate method returns the result inside Invalid", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := placeConfig{Request: placeRequest{schema: v, invalid: true}}
+
+		err := doc.DecodeInto(t.Context(), &cfg)
+		require.EqualError(t, err, "app.yaml:2:9: $.request.port: 0 is less than 1")
+		assert.True(t, niceyaml.IsInvalid(err))
+	})
+
+	t.Run("an Error with no option places the result", func(t *testing.T) {
+		t.Parallel()
+
+		err := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
+		request := yamltest.At(t, doc, base)
+
+		const want = "app.yaml:2:9: $.request.port: 0 is less than 1"
+
+		// Invalid and Place with no option add nothing to the result, so
+		// it places as it does alone.
+		require.EqualError(t, request.Invalid(err), want)
+		require.EqualError(t, request.Place(err), want)
+		require.EqualError(t, doc.Bind(niceyaml.Rebase(niceyaml.Invalid(err), base)), want)
+		require.EqualError(t,
+			doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", niceyaml.Invalid(err)), base)),
+			"app.yaml:2:9: $.request.port: check: 0 is less than 1",
+		)
+		require.EqualError(t,
+			doc.Bind(niceyaml.Rebase(fmt.Errorf("%w: %w", errPlaceCheck, niceyaml.Place(err)), base)),
+			"app.yaml:2:9: $.request.port: check: 0 is less than 1",
+		)
+
+		for b := range niceyaml.AllBindings(request.Invalid(err)) {
+			assert.Same(t, doc.Source(), b.Source())
+		}
+
+		// An Error with a location binds around the result, which stays
+		// in no document and names its path from the value.
+		located := request.Invalid(err, niceyaml.AtPath(paths.Current()))
+		require.EqualError(t, located, "app.yaml:2:3: $.request: $.port: 0 is less than 1")
+	})
+
 	t.Run("a Validator returns the result", func(t *testing.T) {
 		t.Parallel()
 
@@ -1452,16 +1494,24 @@ type placeConfig struct {
 }
 
 // placeRequest checks itself against a schema the test sets before the
-// decode, and returns what ValidateValue returns.
+// decode, and returns what ValidateValue returns. With invalid, it
+// returns that result inside [niceyaml.Invalid] with no option.
 type placeRequest struct {
 	schema *schema.Schema
 
 	Port int `yaml:"port"`
+
+	invalid bool
 }
 
 func (r placeRequest) Validate() error {
+	err := r.schema.ValidateValue(context.Background(), map[string]any{"port": r.Port, "name": "x"})
+	if r.invalid {
+		return niceyaml.Invalid(err)
+	}
+
 	//nolint:wrapcheck // The test checks where a decode places the result as it is.
-	return r.schema.ValidateValue(context.Background(), map[string]any{"port": r.Port, "name": "x"})
+	return err
 }
 
 func TestSchema_ValidateValue_OrderedMap(t *testing.T) {

@@ -1857,8 +1857,14 @@ func unplacedError(err error) (error, bool) {
 // the message of the wrapper with the text of the binding cut down to
 // that of its error. A wrapper whose message does not hold the text of
 // the binding once, such as one that quotes it, comes back as it is, and
-// so does err. An [*Error] above the binding binds around it, so
-// placeable leaves it alone too.
+// so does err.
+//
+// An [*Error] that adds nothing to the binding, as [Error.addsNothing]
+// reports, reads as the binding does, and comes back as a copy that
+// keeps what the Error declared. [Invalid] and [Place] build one when
+// they take no option. An Error that carries a location, heads errors,
+// or holds details binds around the binding, so placeable leaves it
+// alone.
 func placeable(err error) error {
 	placed, _ := replaceUnplaced(err)
 
@@ -1877,7 +1883,18 @@ func replaceUnplaced(err error) (error, bool) {
 		return x.free, true
 
 	case *Error:
-		return err, false
+		// An Error that adds nothing reads as the error it wraps, and the
+		// copy keeps what the Error declared.
+		if !x.addsNothing() {
+			return err, false
+		}
+
+		placed, ok := replaceUnplaced(x.err)
+		if !ok {
+			return err, false
+		}
+
+		return &Error{err: placed, invalid: x.invalid}, true
 
 	case interface{ Unwrap() error }:
 		return replaceBelow(err, x.Unwrap(), nil)
@@ -1903,8 +1920,9 @@ func replaceUnplaced(err error) (error, bool) {
 
 // holdsUnplaced reports whether [replaceUnplaced] could find a binding
 // that stands in no document below err. It follows each wrapper that
-// unwraps to one error, and every branch of a wrapper that [fmt.Errorf]
-// builds with several %w verbs, and it reads the message of none.
+// unwraps to one error, each [*Error] that adds nothing, and every branch
+// of a wrapper that [fmt.Errorf] builds with several %w verbs, and it
+// reads the message of none.
 func holdsUnplaced(err error) bool {
 	for {
 		switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -1912,7 +1930,11 @@ func holdsUnplaced(err error) bool {
 			return x != nil && x.free != nil
 
 		case *Error:
-			return false
+			if !x.addsNothing() {
+				return false
+			}
+
+			err = x.err
 
 		case interface{ Unwrap() error }:
 			err = x.Unwrap()
