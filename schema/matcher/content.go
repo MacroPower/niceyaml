@@ -157,7 +157,7 @@ func readScalar(ctx context.Context, doc *niceyaml.Node, path paths.Path, t refl
 	err = aliasing.CheckDecode(node)
 	if err != nil {
 		//nolint:wrapcheck // Binding names the document; the error keeps its own context.
-		return nil, nil, doc.Bind(niceyaml.Invalid(err))
+		return nil, nil, doc.Invalid(err)
 	}
 
 	// A decode into a type that decodes itself from text writes the node
@@ -168,7 +168,7 @@ func readScalar(ctx context.Context, doc *niceyaml.Node, path paths.Path, t refl
 		err = aliasing.CheckDecodeText(node)
 		if err != nil {
 			//nolint:wrapcheck // Binding names the document; the error keeps its own context.
-			return nil, nil, doc.Bind(niceyaml.Invalid(err))
+			return nil, nil, doc.Invalid(err)
 		}
 	}
 
