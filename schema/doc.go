@@ -187,18 +187,15 @@
 // the same Refs:
 //
 //	schema.ResolverFunc(func(ctx context.Context, doc *niceyaml.Node) (schema.Ref, error) {
-//	    node, err := doc.At(kindPath)
-//	    if errors.Is(err, paths.ErrNotFound) {
+//	    var kind string
+//
+//	    found, err := doc.DecodeIfPresent(ctx, kindPath, &kind)
+//	    if err != nil {
+//	        return schema.Ref{}, err
+//	    }
+//
+//	    if !found {
 //	        return schema.Ref{}, schema.ErrNoMatch
-//	    }
-//
-//	    if err != nil {
-//	        return schema.Ref{}, err
-//	    }
-//
-//	    kind, err := node.Decode[string](ctx)
-//	    if err != nil {
-//	        return schema.Ref{}, err
 //	    }
 //
 //	    // The document picks kind, so keep it to a file name in schemas/.

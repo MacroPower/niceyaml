@@ -2,6 +2,7 @@ package niceyaml
 
 import (
 	"context"
+	"errors"
 
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -31,8 +32,8 @@ import (
 // key below the node returns the error of At for that key, as in
 // "cfg.yaml:2:3: $.spec.hours.close: not found", and the node at path is
 // present then. A caller that falls back to a default when the value is
-// absent calls At, tests its error for paths.ErrNotFound, and decodes
-// the Node only after that test.
+// absent calls [Node.DecodeIfPresent], which reports an absent value
+// apart from every other failure.
 //
 // DecodeAt returns the value and drops the Node that holds it. A check
 // the caller runs on the value writes `@` paths that read from the
@@ -68,4 +69,87 @@ func (n *Node) DecodeAt[T any](ctx context.Context, path paths.Path, opts ...Dec
 	}
 
 	return node.Decode[T](ctx, opts...)
+}
+
+// DecodeIfPresent validates and decodes the node path selects into v,
+// and reports whether the document holds a node at path. It is
+// [Node.At] and then [Node.DecodeInto] on the Node that At returns, for
+// a value the document may leave out. The caller fills v with its
+// default first, and a path that selects nothing leaves v as it is:
+//
+//	version := 1
+//
+//	found, err := doc.DecodeIfPresent(ctx, versionPath, &version)
+//	if err != nil {
+//		return err
+//	}
+//
+//	if !found {
+//		log.Print("the config names no version, so it reads as version 1")
+//	}
+//
+// DecodeIfPresent returns false with a nil error in one case alone, when
+// At returns an error that matches [paths.ErrNotFound]. Every other
+// failure returns false and the error. That holds for the syntax error
+// of a document that did not parse, for an alias on the path that does
+// not resolve, for a wildcard path, and for every error of the decode.
+// An error of the decode can match paths.ErrNotFound itself, as
+// [Node.DecodeAt] describes, and it comes back as an error all the same.
+// A node that is present and fails a [Validator] therefore never reads
+// as absent.
+//
+// A null is present. For `version: ~`, found is true and version keeps
+// its default, since a decode leaves v as it is under a null with no
+// tag, as DecodeInto describes. A v that points to a pointer or an
+// interface is the exception, and such a null sets that pointer or
+// interface to nil. The default thus covers an absent value and a null
+// alike, and found tells the two apart.
+//
+// A value is absent when At selects no node for path. A key looked up in
+// a value that is no mapping selects nothing, so $.server.port is absent
+// from `server: hello`, where a decode of the whole document into a
+// struct reports "expected mapping, got string" for server. An index
+// past the end of a sequence is absent too. A document with no content,
+// which [Node.IsEmpty] reports, holds no node for a path with a
+// selector, so every such path is absent there.
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Exists] finds a path
+// absent in the same cases.
+//
+// The target v must be a non-nil pointer. Any other v returns an error
+// wrapping [ErrDecodeTarget], bound to the source, before the path
+// resolves, so the mistake shows whether or not the document holds the
+// value.
+//
+// The decode runs on the node path selects, so each Validator from
+// [WithValidator] gets a Node scoped to that node. DecodeIfPresent drops
+// that Node as DecodeAt does, so a caller that binds errors of its own
+// about v scopes the Node with At or rebases them, as DecodeAt
+// describes. A caller that decodes through a [Decoder] calls At, tests
+// its error for paths.ErrNotFound, and hands the Node to
+// [Decoder.DecodeInto].
+func (n *Node) DecodeIfPresent(ctx context.Context, path paths.Path, v any, opts ...DecodeOption) (bool, error) {
+	// The target check runs first, so a wrong target fails for an absent
+	// path too, where no decode would run to reject it.
+	err := checkDecodeTarget(v)
+	if err != nil {
+		return false, n.bindOwn(err)
+	}
+
+	node, err := n.At(path)
+	if errors.Is(err, paths.ErrNotFound) {
+		return false, nil
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	// The decode can return an error that matches paths.ErrNotFound too,
+	// so only the error of At above counts as an absent value.
+	err = node.DecodeInto(ctx, v, opts...)
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }

@@ -453,9 +453,21 @@
 //
 // A caller that needs the value and not the Node reads it in one call.
 // [Node.DecodeAt] reads a value the document must hold, and returns the
-// error of At when the document lacks it:
+// error of At when the document lacks it. [Node.DecodeIfPresent] reads a
+// value the document may leave out into a variable that holds the
+// default, and reports whether the document holds the value:
 //
 //	kind, err := doc.DecodeAt[string](ctx, paths.Doc().Child("kind"))
+//	if err != nil {
+//		return err
+//	}
+//
+//	version := 1
+//
+//	found, err := doc.DecodeIfPresent(ctx, paths.Doc().Child("version"), &version)
+//	if err != nil {
+//		return err
+//	}
 //
 // [IsInvalid] tells a document at fault apart from a check that could
 // not run. The document is at fault for a syntax error, a decode

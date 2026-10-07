@@ -32,16 +32,9 @@ type Matcher interface {
 //
 //	enabledPath := paths.Doc().Child("enabled")
 //	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Node) (bool, error) {
-//	    node, err := doc.At(enabledPath)
-//	    if errors.Is(err, paths.ErrNotFound) {
-//	        return false, nil
-//	    }
+//	    var value any
 //
-//	    if err != nil {
-//	        return false, err
-//	    }
-//
-//	    value, err := node.Decode[any](ctx)
+//	    found, err := doc.DecodeIfPresent(ctx, enabledPath, &value)
 //	    if errors.Is(err, niceyaml.ErrDecode) {
 //	        return false, nil
 //	    }
@@ -50,7 +43,7 @@ type Matcher interface {
 //	        return false, err
 //	    }
 //
-//	    return value == nil, nil
+//	    return found && value == nil, nil
 //	})
 type Func func(ctx context.Context, doc *niceyaml.Node) (bool, error)
 

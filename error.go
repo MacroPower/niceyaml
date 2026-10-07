@@ -37,8 +37,9 @@ var (
 	// [IsInvalid] describes.
 	ErrMultipleDocuments = errors.New("multiple documents in source")
 
-	// ErrDecodeTarget indicates the value given to [Node.DecodeInto] is
-	// not a non-nil pointer, so there is nothing to decode into. The
+	// ErrDecodeTarget indicates the value given to [Node.DecodeInto] or
+	// [Node.DecodeIfPresent] is not a non-nil pointer, so there is nothing
+	// to decode into. The
 	// error comes back bound to the source as a [SourceError] with no
 	// location. It is a mistake of the caller, so [IsInvalid] does not
 	// report it.

@@ -1010,9 +1010,10 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // selects. Decode decodes that node alone, which reads one value without
 // decoding the whole document, such as a discriminator field that routes
 // the document. [Node.DecodeAt] scopes and decodes in one call, for a
-// caller that needs the value and not the Node. Bind resolves the `@`
-// paths in an error from the node, so a check written for the type of
-// that value reports the right lines.
+// caller that needs the value and not the Node, and
+// [Node.DecodeIfPresent] does so for a value the document may leave out.
+// Bind resolves the `@` paths in an error from the node, so a check
+// written for the type of that value reports the right lines.
 // The bound error carries each path from the root of the document, as a
 // `$` path, so it names the value as a decode of the whole document does.
 // Any Node reaches the root of its document through [Node.Document], and
@@ -1032,8 +1033,9 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // [Source.AllDocuments] returns a Node for a document with a YAML syntax
 // error too. Such a document has no tree, and [Node.Err] returns the
 // syntax error. The methods that read the tree return that error:
-// [Node.Decode], [Node.DecodeInto], [Node.DecodeAt], [Node.Validate],
-// [Node.At], [Node.Nodes], and [Node.Ranges]. [Node.AST] and
+// [Node.Decode], [Node.DecodeInto], [Node.DecodeAt],
+// [Node.DecodeIfPresent], [Node.Validate], [Node.At], [Node.Nodes], and
+// [Node.Ranges]. [Node.AST] and
 // [Node.DocumentAST] return nil, and [Node.PathAt] finds no node. The
 // methods that read the tokens and the lines work as they do for any
 // document: [Node.Tokens], [Node.Preamble], [Node.Span], and [Node.View].
@@ -1101,9 +1103,9 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 // error.
 //
 // A document that did not parse has no tree. [Node.Decode],
-// [Node.DecodeInto], [Node.DecodeAt], [Node.Validate], [Node.At],
-// [Node.Nodes], and [Node.Ranges] return the error Err returns, and no
-// [Validator] runs.
+// [Node.DecodeInto], [Node.DecodeAt], [Node.DecodeIfPresent],
+// [Node.Validate], [Node.At], [Node.Nodes], and [Node.Ranges] return the
+// error Err returns, and no [Validator] runs.
 // [Node.AST] and [Node.DocumentAST] return nil, and [Node.PathAt] reports
 // false for every position. A path in an error that [Node.Bind] binds
 // resolves nowhere, as Bind describes.
@@ -1225,18 +1227,21 @@ func (n *Node) AST() ast.Node {
 // the path read far more nodes under `<<` merge keys than the document
 // holds; and [paths.ErrWildcard] for a path that could match several
 // nodes, which [Node.Nodes] scopes one by one. A caller that falls back
-// when a value is absent checks for [paths.ErrNotFound]:
+// to a default when a value is absent reads it with
+// [Node.DecodeIfPresent]:
 //
 //	version := 1
 //
-//	node, err := doc.At(versionPath)
-//	if err == nil {
-//		version, err = node.Decode[int](ctx)
-//	}
-//
-//	if err != nil && !errors.Is(err, paths.ErrNotFound) {
+//	_, err := doc.DecodeIfPresent(ctx, versionPath, &version)
+//	if err != nil {
 //		return err
 //	}
+//
+// A caller that needs the Node of such a value tests the error of At for
+// [paths.ErrNotFound] before it decodes. A decode can return an error
+// that matches paths.ErrNotFound for a node that is present, as
+// [Node.DecodeAt] describes, so the same test after the decode takes
+// that failure for an absent value.
 //
 // A path that names a key a mapping leaves out says where the value
 // belongs, so its error binds as an [Error] with [AtPath] of the path
@@ -2072,11 +2077,11 @@ func contextEnded(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
-// DecodeOption configures [Node.Decode], [Node.DecodeInto], and
-// [Node.DecodeAt], and [NewDecoder] takes the same options for a
-// [Decoder] that applies them to every node it decodes.
-// [Node.SelfValidate] takes them too, and reads only the go-yaml options
-// among them.
+// DecodeOption configures [Node.Decode], [Node.DecodeInto],
+// [Node.DecodeAt], and [Node.DecodeIfPresent], and [NewDecoder] takes
+// the same options for a [Decoder] that applies them to every node it
+// decodes. [Node.SelfValidate] takes them too, and reads only the go-yaml
+// options among them.
 //
 // Available options:
 //   - [WithValidator]

@@ -85,8 +85,10 @@ func TestFunc_Null(t *testing.T) {
 
 	// The function the doc of matcher.Func shows, which matches a null.
 	m := matcher.Func(func(ctx context.Context, doc *niceyaml.Node) (bool, error) {
-		node, err := doc.At(enabledPath)
-		if errors.Is(err, paths.ErrNotFound) {
+		var value any
+
+		found, err := doc.DecodeIfPresent(ctx, enabledPath, &value)
+		if errors.Is(err, niceyaml.ErrDecode) {
 			return false, nil
 		}
 
@@ -95,16 +97,7 @@ func TestFunc_Null(t *testing.T) {
 			return false, err
 		}
 
-		value, err := node.Decode[any](ctx)
-		if errors.Is(err, niceyaml.ErrDecode) {
-			return false, nil
-		}
-
-		if err != nil {
-			return false, err
-		}
-
-		return value == nil, nil
+		return found && value == nil, nil
 	})
 
 	tcs := map[string]struct {

@@ -362,3 +362,375 @@ func TestNode_DecodeAt(t *testing.T) {
 		assert.Empty(t, got)
 	})
 }
+
+func TestNode_DecodeIfPresent(t *testing.T) {
+	t.Parallel()
+
+	versionPath := paths.Current().Child("version")
+	portPath := paths.Current().Child("server", "port")
+	hoursPath := paths.Doc().Child("spec", "hours")
+
+	tcs := map[string]struct {
+		// The sentinel the error matches, or nil for a call that succeeds.
+		err   error
+		input string
+		// The message of the error.
+		wantErr string
+		path    paths.Path
+		// The value of a target that held 1 before the call.
+		want  int
+		found bool
+	}{
+		"a value": {
+			input: "version: 3\n",
+			path:  versionPath,
+			want:  3,
+			found: true,
+		},
+		"a value behind an alias": {
+			input: "base: &b 3\nversion: *b\n",
+			path:  versionPath,
+			want:  3,
+			found: true,
+		},
+		"a null keeps the default": {
+			input: "version: ~\n",
+			path:  versionPath,
+			want:  1,
+			found: true,
+		},
+		"a key with no value keeps the default": {
+			input: "version:\n",
+			path:  versionPath,
+			want:  1,
+			found: true,
+		},
+		"an anchored null keeps the default": {
+			input: "version: &v ~\n",
+			path:  versionPath,
+			want:  1,
+			found: true,
+		},
+		"a key the mapping leaves out": {
+			input: "name: app\n",
+			path:  versionPath,
+			want:  1,
+		},
+		"a key below a key the mapping leaves out": {
+			input: "name: app\n",
+			path:  portPath,
+			want:  1,
+		},
+		"a key looked up in a scalar": {
+			input: "server: hello\n",
+			path:  portPath,
+			want:  1,
+		},
+		"an index past the end of a sequence": {
+			input: "ports: [80, 443]\n",
+			path:  paths.Current().Child("ports").Index(7),
+			want:  1,
+		},
+		"a key of an empty file": {
+			input: "",
+			path:  versionPath,
+			want:  1,
+		},
+		"a key of a file of comments": {
+			input: "# nothing\n",
+			path:  versionPath,
+			want:  1,
+		},
+		"a key below a header": {
+			input: "---\n",
+			path:  versionPath,
+			want:  1,
+		},
+		"the root of an empty file": {
+			input: "",
+			path:  paths.Current(),
+			want:  1,
+		},
+		"a value of the wrong type": {
+			input:   "version: three\n",
+			path:    versionPath,
+			want:    1,
+			err:     niceyaml.ErrDecode,
+			wantErr: "cfg.yaml:1:10: $.version: expected integer, got string",
+		},
+		"an alias that does not resolve": {
+			input:   "version: *nope\n",
+			path:    versionPath,
+			want:    1,
+			err:     paths.ErrAlias,
+			wantErr: "cfg.yaml: resolve $.version: alias does not resolve: *nope has no anchor before it",
+		},
+		"a path through an alias that does not resolve": {
+			input:   "server: *nope\n",
+			path:    portPath,
+			want:    1,
+			err:     paths.ErrAlias,
+			wantErr: "cfg.yaml: resolve $.server.port: alias does not resolve: *nope has no anchor before it",
+		},
+		"a wildcard path": {
+			input:   "ports: [80, 443]\n",
+			path:    paths.Current().Child("ports").IndexAll(),
+			want:    1,
+			err:     paths.ErrWildcard,
+			wantErr: "cfg.yaml: resolve $.ports[*]: wildcard path matches any number of nodes",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocumentWithPath(t, tc.input, "cfg.yaml")
+
+			version := 1
+
+			found, err := doc.DecodeIfPresent(t.Context(), tc.path, &version)
+			assert.Equal(t, tc.found, found)
+			assert.Equal(t, tc.want, version)
+
+			if tc.err == nil {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.ErrorIs(t, err, tc.err)
+			require.EqualError(t, err, tc.wantErr)
+
+			// The error is the one At and then DecodeInto return.
+			scoped, scopedErr := doc.At(tc.path)
+			if scopedErr == nil {
+				other := 1
+				scopedErr = scoped.DecodeInto(t.Context(), &other)
+			}
+
+			require.EqualError(t, scopedErr, tc.wantErr)
+		})
+	}
+
+	t.Run("a validator that reads a required key fails a present node", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocumentWithPath(t, "spec:\n  hours:\n    open: 9\n", "cfg.yaml")
+		h := openHours{Open: 8, Close: 17}
+
+		// The error matches paths.ErrNotFound, as the error of an absent
+		// path does, and it comes back as an error.
+		found, err := doc.DecodeIfPresent(t.Context(), hoursPath, &h, niceyaml.WithValidator(requiresClose()))
+		require.ErrorIs(t, err, paths.ErrNotFound)
+		require.EqualError(t, err, "cfg.yaml:2:3: $.spec.hours.close: not found")
+		assert.False(t, found)
+		assert.Equal(t, openHours{Open: 8, Close: 17}, h)
+	})
+
+	t.Run("a validator checks the node the path selects", func(t *testing.T) {
+		t.Parallel()
+
+		var seen []string
+
+		records := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+			seen = append(seen, n.Path().String())
+
+			return nil
+		})
+
+		doc := yamltest.FirstDocumentWithPath(t, "spec:\n  hours:\n    open: 9\n", "cfg.yaml")
+
+		var h openHours
+
+		found, err := doc.DecodeIfPresent(t.Context(), hoursPath, &h, niceyaml.WithValidator(records))
+		require.NoError(t, err)
+		assert.True(t, found)
+		assert.Equal(t, []string{"$.spec.hours"}, seen)
+
+		// No validator runs for a path that selects nothing.
+		found, err = doc.DecodeIfPresent(t.Context(), hoursPath.Child("lunch"), &h, niceyaml.WithValidator(records))
+		require.NoError(t, err)
+		assert.False(t, found)
+		assert.Equal(t, []string{"$.spec.hours"}, seen)
+	})
+
+	t.Run("a struct target keeps the fields the node leaves out", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			// The value of a target that held 8 and 17 before the call.
+			want  openHours
+			found bool
+		}{
+			"a mapping that sets one field": {
+				input: "spec:\n  hours:\n    open: 9\n",
+				want:  openHours{Open: 9, Close: 17},
+				found: true,
+			},
+			"a null": {
+				input: "spec:\n  hours: ~\n",
+				want:  openHours{Open: 8, Close: 17},
+				found: true,
+			},
+			"a key the mapping leaves out": {
+				input: "spec: {}\n",
+				want:  openHours{Open: 8, Close: 17},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocumentWithPath(t, tc.input, "cfg.yaml")
+				h := openHours{Open: 8, Close: 17}
+
+				found, err := doc.DecodeIfPresent(t.Context(), hoursPath, &h)
+				require.NoError(t, err)
+				assert.Equal(t, tc.found, found)
+				assert.Equal(t, tc.want, h)
+			})
+		}
+	})
+
+	t.Run("a pointer target", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			want  *int
+			input string
+			// Whether the target points to a 7 before the call. It is
+			// nil otherwise.
+			preset bool
+			found  bool
+		}{
+			"a value fills a nil pointer": {
+				input: "version: 3\n",
+				want:  new(3),
+				found: true,
+			},
+			"a value fills the value the pointer points to": {
+				input:  "version: 3\n",
+				preset: true,
+				want:   new(3),
+				found:  true,
+			},
+			"a null sets the pointer to nil": {
+				input:  "version: ~\n",
+				preset: true,
+				found:  true,
+			},
+			"a key the mapping leaves out leaves the pointer as it is": {
+				input:  "name: app\n",
+				preset: true,
+				want:   new(7),
+			},
+			"a key the mapping leaves out leaves a nil pointer nil": {
+				input: "name: app\n",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocumentWithPath(t, tc.input, "cfg.yaml")
+
+				var target *int
+
+				if tc.preset {
+					target = new(7)
+				}
+
+				before := target
+
+				found, err := doc.DecodeIfPresent(t.Context(), versionPath, &target)
+				require.NoError(t, err)
+				assert.Equal(t, tc.found, found)
+				assert.Equal(t, tc.want, target)
+
+				// The decode fills the value the pointer points to.
+				if tc.preset && tc.want != nil {
+					assert.Same(t, before, target)
+				}
+			})
+		}
+	})
+
+	t.Run("a null sets an interface target to nil", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocumentWithPath(t, "version: ~\n", "cfg.yaml")
+
+		var target any = "unset"
+
+		found, err := doc.DecodeIfPresent(t.Context(), paths.Current().Child("name"), &target)
+		require.NoError(t, err)
+		assert.False(t, found)
+		assert.Equal(t, "unset", target)
+
+		found, err = doc.DecodeIfPresent(t.Context(), versionPath, &target)
+		require.NoError(t, err)
+		assert.True(t, found)
+		assert.Nil(t, target)
+	})
+
+	t.Run("a target that is no pointer returns ErrDecodeTarget", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			target  any
+			wantErr string
+		}{
+			"a value": {
+				target:  1,
+				wantErr: "cfg.yaml: decode target is not a non-nil pointer: got int",
+			},
+			"a nil pointer": {
+				target:  (*int)(nil),
+				wantErr: "cfg.yaml: decode target is not a non-nil pointer: got *int",
+			},
+			"nil": {
+				wantErr: "cfg.yaml: decode target is not a non-nil pointer: got nil",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocumentWithPath(t, "version: 3\n", "cfg.yaml")
+
+				// The target fails the call whether or not the document
+				// holds the value.
+				for holds, path := range map[string]paths.Path{
+					"present": versionPath,
+					"absent":  paths.Current().Child("name"),
+				} {
+					found, err := doc.DecodeIfPresent(t.Context(), path, tc.target)
+					require.ErrorIs(t, err, niceyaml.ErrDecodeTarget, holds)
+					require.EqualError(t, err, tc.wantErr, holds)
+					assert.False(t, found, holds)
+				}
+			})
+		}
+	})
+
+	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
+		t.Parallel()
+
+		docs := niceyaml.NewSourceFromString("version: [\n", niceyaml.WithFilePath("cfg.yaml")).AllDocuments()
+		require.Len(t, docs, 1)
+		require.Error(t, docs[0].Err())
+
+		version := 1
+
+		found, err := docs[0].DecodeIfPresent(t.Context(), versionPath, &version)
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		require.ErrorIs(t, err, docs[0].Err())
+		assert.False(t, found)
+		assert.Equal(t, 1, version)
+	})
+}
