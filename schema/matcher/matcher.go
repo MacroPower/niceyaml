@@ -14,8 +14,8 @@ import (
 // Matcher declines and returns the error of one that cannot decide, so a
 // registry moves past the first and stops at the second.
 //
-// See [Content], [Exists], [FilePath], [Any], [All], and [Func] for
-// implementations.
+// See [Content], [Text], [Exists], [FilePath], [Any], [All], and [Func]
+// for implementations.
 type Matcher interface {
 	// Match reports whether the document satisfies the matcher. The error
 	// is for a matcher that cannot decide, such as one whose context ended

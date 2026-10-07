@@ -39,11 +39,12 @@ var (
 	// than the value holds, as aliases in a YAML document make a decode
 	// share them. It also indicates a document whose aliases would make
 	// the decoder itself read that much. [Schema.Validate] and
-	// [Schema.ValidateValue] return it. A [matcher.Content] guard refuses
-	// such a document with it too, and [Registry.Lookup] then returns it
-	// wrapped together with [ErrResolve]. The document or the value is at
-	// fault in every case, so [niceyaml.IsInvalid] reports each of these
-	// errors, and none of them wraps [ErrValidate].
+	// [Schema.ValidateValue] return it. A [matcher.Content] or
+	// [matcher.Text] guard refuses such a document with it too, and
+	// [Registry.Lookup] then returns it wrapped together with
+	// [ErrResolve]. The document or the value is at fault in every case,
+	// so [niceyaml.IsInvalid] reports each of these errors, and none of
+	// them wraps [ErrValidate].
 	//
 	// [niceyaml.WithAliasLimit] on the source of a document turns the
 	// limit off for Validate and for the guard. ValidateValue holds no

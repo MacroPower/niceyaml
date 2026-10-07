@@ -115,20 +115,38 @@ func TestWhen(t *testing.T) {
 		// registry stops at the document.
 		input := yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n"
 
-		reg := schema.NewRegistry(schema.WithResolvers(schema.When(
-			matcher.Content(kindPath, "Deployment"),
-			schema.Embedded(schemaData),
-		)))
+		tcs := map[string]struct {
+			matcher matcher.Matcher
+		}{
+			"content matcher": {
+				matcher: matcher.Content(kindPath, "Deployment"),
+			},
+			"text matcher": {
+				matcher: matcher.Text(kindPath, func(string) bool { return true }),
+			},
+		}
 
-		doc := yamltest.FirstDocumentWithPath(t, input, "app.yaml")
-		err := reg.Validate(t.Context(), doc)
-		require.EqualError(t, err, "resolve schema: app.yaml: excessive aliasing")
-		require.ErrorIs(t, err, schema.ErrResolve)
-		require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		// The aliases of the document are the cause, so the document is
-		// at fault for the error, as it is for a schema's refusal.
-		assert.True(t, niceyaml.IsInvalid(err))
+				reg := schema.NewRegistry(schema.WithResolvers(schema.When(
+					tc.matcher,
+					schema.Embedded(schemaData),
+				)))
+
+				doc := yamltest.FirstDocumentWithPath(t, input, "app.yaml")
+				err := reg.Validate(t.Context(), doc)
+				require.EqualError(t, err, "resolve schema: app.yaml: excessive aliasing")
+				require.ErrorIs(t, err, schema.ErrResolve)
+				require.ErrorIs(t, err, schema.ErrExcessiveAliasing)
+
+				// The aliases of the document are the cause, so the
+				// document is at fault for the error, as it is for a
+				// schema's refusal.
+				assert.True(t, niceyaml.IsInvalid(err))
+			})
+		}
 	})
 
 	t.Run("guarded resolver is not consulted on reject", func(t *testing.T) {

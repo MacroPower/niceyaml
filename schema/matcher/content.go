@@ -40,10 +40,9 @@ type contentMatcher[T Scalar] struct {
 // Content creates a new [Matcher] that matches documents whose scalar at
 // path holds want. The type of want decides how Match reads the scalar.
 //
-// A string matches the string the scalar holds, quoted or plain. A plain
-// number or bool keeps its spelling, so "1.10" matches version: 1.10 and
-// "1.1" does not. A tag that makes a quoted scalar a number or a bool
-// respells it, so version: !!float "1.10" holds "1.1".
+// A string matches the text of the scalar, quoted or plain, as [Text]
+// reads it. A plain number or bool keeps its spelling, so "1.10" matches
+// version: 1.10 and "1.1" does not.
 //
 // A number matches a scalar that YAML reads as a number, and a bool
 // matches one that YAML reads as a bool, each by its value. So 16
@@ -61,7 +60,8 @@ type contentMatcher[T Scalar] struct {
 //
 // A null, a mapping, and a sequence match no want. Neither does a
 // document without the path, or a scalar that does not read as the type
-// of want. To match a null, use a [Func], as its example does.
+// of want. To match a null, use a [Func], as its example does. To test
+// the text of a scalar rather than compare it, use [Text].
 //
 // The path resolves as [niceyaml.Node.At] resolves it: a `$` path from
 // the root of the document, and an `@` path from the Node the matcher
@@ -232,12 +232,10 @@ func matchScalar(node *niceyaml.Node, raw any, got, want reflect.Value) bool {
 	case kind == reflect.String:
 		text := got.String()
 
-		// The decoder respells a number or a bool it reads into a string,
-		// so 1.10 becomes "1.1", 0x10 becomes "16", and True becomes
-		// "true". A string want matches the text of such a scalar as the
-		// document writes it instead.
-		if written, ok := scalarText(node); ok && plain {
-			text = written
+		// A string type that decodes itself keeps the value its own
+		// decode gave.
+		if plain {
+			text = writtenText(node, text)
 		}
 
 		return text == want.String()
@@ -336,18 +334,21 @@ func isPlain(t reflect.Type) bool {
 		!slices.ContainsFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
 }
 
-// scalarText returns the text of the scalar node holds as the document
-// spells it, for a scalar the decoder respells: an integer, a float, an
-// infinity, a NaN, or a bool. It reaches the scalar as [valueNode] does.
-// The second result is false when node holds anything else.
-func scalarText(node *niceyaml.Node) (string, bool) {
+// writtenText returns the text of the scalar node holds, where decoded
+// is the string node decodes to. The decoder respells a number or a bool
+// it reads into a string, so 1.10 becomes "1.1", 0x10 becomes "16", and
+// True becomes "true". For such a scalar, which is an integer, a float,
+// an infinity, a NaN, or a bool, writtenText returns the text as the
+// document spells it. It returns decoded for any other. It reaches the
+// scalar as [valueNode] does.
+func writtenText(node *niceyaml.Node, decoded string) string {
 	n, _ := valueNode(node)
 
 	switch v := n.(type) {
 	case *ast.IntegerNode, *ast.FloatNode, *ast.InfinityNode, *ast.NanNode, *ast.BoolNode:
-		return v.GetToken().Value, true
+		return v.GetToken().Value
 	default:
-		return "", false
+		return decoded
 	}
 }
 

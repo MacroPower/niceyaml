@@ -11,11 +11,11 @@
 // writes a node out as text, each alias to a scalar copies the text of
 // the scalar, so the count weighs such a copy by its length in bytes.
 // Every decode of a niceyaml Node runs [CheckDecode], the decode the
-// schema validator runs among them, and the content matcher runs it
-// before it decodes too. A registry that routes a document by its content
-// thus refuses the same documents its schemas do. A decode into a type
-// that [DecodesText] reports, by a Node or by the content matcher, runs
-// [CheckDecodeText] as well.
+// schema validator runs among them, and the content and text matchers
+// run it before they decode too. A registry that routes a document by
+// its content thus refuses the same documents its schemas do. A decode
+// into a type that [DecodesText] reports, by a Node or by the content
+// matcher, runs [CheckDecodeText] as well.
 //
 // Neither count can see a reference document of a decode, so an alias to
 // one of its anchors counts as one node. [HoldsReferenceAlias] reports a
