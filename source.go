@@ -172,7 +172,8 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 //   - A decode, as [Node.DecodeInto] describes.
 //   - A [go.jacobcolvin.com/niceyaml/schema.Schema] that validates the
 //     node.
-//   - A [go.jacobcolvin.com/niceyaml/schema/matcher.Content] matcher that
+//   - A [go.jacobcolvin.com/niceyaml/schema/matcher.Content] or
+//     [go.jacobcolvin.com/niceyaml/schema/matcher.Text] matcher that
 //     reads the node to route its document.
 //
 // Each returns an error matching ErrExcessiveAliasing. The aliases of
@@ -283,9 +284,11 @@ func WithAliasLimit(enabled bool) SourceOption {
 // return an error wrapping [go.jacobcolvin.com/niceyaml/paths.ErrAlias]
 // for a path that reaches the alias, and [Node.Ranges] returns one for a
 // path that goes through it. [IsInvalid] does not report that error. A
-// [go.jacobcolvin.com/niceyaml/schema/matcher.Content] matcher whose
-// path reaches the alias returns the error too, so a registry stops at
-// that document and routes it nowhere.
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Content],
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Text], or
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Exists] matcher whose path
+// reaches the alias returns the error too, so a registry stops at that
+// document and routes it nowhere.
 //
 // An error whose path leads into a reference document binds at the alias
 // the path enters, since the document holds no line for the value:
@@ -354,6 +357,14 @@ func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
 // schema routing, and [Source.Name] returns it unless [WithName] sets a
 // name. [NewSourceFromFS] reads a file from an [fs.FS] the same way.
 //
+// A schema registry reads from disk the schema file that a directive in
+// the document names, and resolves a relative name against that path.
+// The registry option [go.jacobcolvin.com/niceyaml/schema.WithFSAt]
+// confines those reads to one directory.
+// [go.jacobcolvin.com/niceyaml/schema.WithFS] reads each path from a
+// file system of its own, so it goes with the documents of
+// NewSourceFromFS instead.
+//
 // Returns an error when it cannot read the file.
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // User-provided file paths are intentional.
@@ -376,6 +387,9 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 // [go.jacobcolvin.com/niceyaml/schema.WithFS]:
 //
 //	source, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
+//
+// A registry for documents that NewSourceFromFile opens by a path on
+// disk takes [go.jacobcolvin.com/niceyaml/schema.WithFSAt] instead.
 //
 // Returns an error when it cannot read the file.
 func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, error) {

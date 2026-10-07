@@ -488,7 +488,8 @@ func (e *Error) Is(target error) bool {
 //   - [ErrExcessiveAliasing] from every reader that applies the alias
 //     limit to a document or a decoded value: a decode, a
 //     [go.jacobcolvin.com/niceyaml/schema.Schema], and a
-//     [go.jacobcolvin.com/niceyaml/schema/matcher.Content] matcher. The
+//     [go.jacobcolvin.com/niceyaml/schema/matcher.Content] or
+//     [go.jacobcolvin.com/niceyaml/schema/matcher.Text] matcher. The
 //     ErrExcessiveAliasing of [Node.Nodes] is about the path, so the
 //     document is not at fault for it.
 //   - A [go.jacobcolvin.com/niceyaml/schema.Violation], and the

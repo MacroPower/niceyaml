@@ -63,8 +63,9 @@
 // [go.jacobcolvin.com/niceyaml/printer.Printer] renders a [line.View] with syntax
 // highlighting via lipgloss. It supports customizable gutters (line numbers, diff
 // markers), word wrapping, and annotation rendering.
-// [go.jacobcolvin.com/niceyaml/diff.Differ] compares two [line.Lines] values, and
-// [go.jacobcolvin.com/niceyaml/finder.Finder] searches one.
+// [go.jacobcolvin.com/niceyaml/diff.Differ] compares two [line.Sequence] values, each
+// a [line.Lines] or a [line.View], and [go.jacobcolvin.com/niceyaml/finder.Finder]
+// searches one.
 //
 // Themes from [go.jacobcolvin.com/niceyaml/style/theme] provide color palettes. Without
 // one, [go.jacobcolvin.com/niceyaml/printer.Printer] renders with
@@ -201,7 +202,9 @@
 // whose form depends on where the node sits in the tree.
 // [ErrorTree.Message] and [ErrorTree.Path] give the message and the path
 // of any node. The binding the node holds gives the file and the
-// position, through [SourceError.Source] and [SourceError.Position].
+// position, through [SourceError.Source] and [SourceError.Position]. In
+// a file that holds several documents, [SourceError.DocumentIndex] gives
+// the document.
 //
 // A terminal gets color from
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which prints
@@ -345,9 +348,12 @@
 // that file holds points at the alias in the document that reads it.
 //
 // The Source also says whether the alias limit applies to its documents.
-// A decode, a schema, and a content matcher refuse a document whose
-// nested aliases would make them read far more than the document holds,
-// with an error matching [ErrExcessiveAliasing] that [IsInvalid] reports.
+// A decode, a schema, and a
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Content] or
+// [go.jacobcolvin.com/niceyaml/schema/matcher.Text] matcher refuse a
+// document whose nested aliases would make them read far more than the
+// document holds. The error matches [ErrExcessiveAliasing], and
+// [IsInvalid] reports it.
 // [WithAliasLimit] on the Source turns the limit off for input the
 // program trusts.
 //
