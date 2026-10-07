@@ -9798,6 +9798,95 @@ func TestErrDecode(t *testing.T) {
 	})
 }
 
+// TestValidator_DirectCall calls the Validate method of every validator
+// the library ships, where [niceyaml.Node.Validate] would bind an error
+// the validator left unbound.
+func TestValidator_DirectCall(t *testing.T) {
+	t.Parallel()
+
+	itemPath := paths.Doc().Child("items").Index(1)
+
+	// A rule of a type of its own that leaves its error unbound, so the
+	// validator around it has an error to bind.
+	rule := &fieldValidator{
+		err: niceyaml.NewError("reserved name", niceyaml.AtPath(paths.Current().Child("name"))),
+	}
+
+	nameSchema := schema.MustCompile([]byte(`{
+		"type": "object",
+		"properties": {"name": {"not": {"const": "admin"}}}
+	}`))
+	reg := schema.NewRegistry(schema.WithResolvers(nameSchema))
+
+	tcs := map[string]struct {
+		v niceyaml.Validator
+		// The Node the validator runs on.
+		path paths.Path
+		want string
+	}{
+		"Schema": {
+			v:    nameSchema,
+			path: itemPath,
+			want: "c.yaml:4:11: $.items[1].name: should not validate against the schema",
+		},
+		"Registry refuses a scoped Node": {
+			v:    reg,
+			path: itemPath,
+			want: "c.yaml: registry needs a whole document: node is scoped to $.items[1]",
+		},
+		"Registry at the root": {
+			v:    reg,
+			path: paths.Doc(),
+			want: "c.yaml:1:7: $.name: should not validate against the schema",
+		},
+		"ValidatorFunc": {
+			v:    niceyaml.ValidatorFunc(rule.Validate),
+			path: itemPath,
+			want: "c.yaml:4:11: $.items[1].name: reserved name",
+		},
+		"MultiValidator": {
+			v:    niceyaml.MultiValidator(rule, nameSchema),
+			path: itemPath,
+			want: "c.yaml:4:11: $.items[1].name: reserved name\n" +
+				"c.yaml:4:11: $.items[1].name: should not validate against the schema",
+		},
+		"ChainValidator": {
+			v:    niceyaml.ChainValidator(rule, nameSchema),
+			path: itemPath,
+			want: "c.yaml:4:11: $.items[1].name: reserved name",
+		},
+		"SkipEmpty": {
+			v:    niceyaml.SkipEmpty(rule),
+			path: itemPath,
+			want: "c.yaml:4:11: $.items[1].name: reserved name",
+		},
+		"Decoder": {
+			v:    niceyaml.NewDecoder(niceyaml.WithValidator(rule)),
+			path: itemPath,
+			want: "c.yaml:4:11: $.items[1].name: reserved name",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, stringtest.Input(`
+				name: admin
+				items:
+				  - name: soup
+				  - name: admin
+			`), niceyaml.WithName("c.yaml"))
+			node := yamltest.At(t, doc, tc.path)
+
+			err := tc.v.Validate(t.Context(), node)
+
+			require.EqualError(t, err, tc.want)
+			yamltest.RequireBound(t, node, err)
+		})
+	}
+}
+
 func TestValidatorFunc_Validate(t *testing.T) {
 	t.Parallel()
 

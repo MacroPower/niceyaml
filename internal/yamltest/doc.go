@@ -71,6 +71,14 @@
 //	path := paths.Doc().Child("spec", "replicas")
 //	err := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(path)))
 //
+// Tests of a [niceyaml.Validator] call its Validate method on a scoped
+// node and check the error with [RequireBound]. [niceyaml.Node.Validate]
+// binds an error the validator left unbound, so a test that runs the
+// validator through it passes for a validator that binds nothing:
+//
+//	item := yamltest.At(t, doc, paths.Doc().Child("items").Index(1))
+//	yamltest.RequireBound(t, item, rule.Validate(t.Context(), item))
+//
 // Tests of alias limits build their documents with [AliasLevels] and
 // [MergeLevels]. Each level refers to the level before it ten times, so a
 // few levels make a small document that holds millions of nodes once its
