@@ -132,10 +132,10 @@ func (s segment) String() string {
 const reservedNameChars = ".*[]$'~"
 
 // lineSeparator is the Unicode line separator, U+2028.
-const lineSeparator = ' '
+const lineSeparator = '\u2028'
 
 // paragraphSeparator is the Unicode paragraph separator, U+2029.
-const paragraphSeparator = ' '
+const paragraphSeparator = '\u2029'
 
 // quoteName returns name in the form [Parse] accepts as a child or
 // recursive selector. It wraps the name in single quotes when it contains
