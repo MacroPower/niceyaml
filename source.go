@@ -602,28 +602,42 @@ func (s *Source) AllDocuments() []*Node {
 }
 
 // ValidateDocuments validates every document of the Source in file order
-// and joins what they return, so one call reports each syntax error and
-// each violation of a file that holds several documents:
+// with v and joins what the documents return. One call thus reports each
+// syntax error of a file that holds several documents, beside what v
+// reports for each document that parsed:
 //
 //	err := source.ValidateDocuments(ctx, reg)
 //	if err != nil {
 //		log.Print(niceyaml.FormatError(err, 2))
 //	}
 //
-// Each document runs the validators as [Node.Validate] runs them. Every
-// document validates, an explicit empty one included, such as the one
-// below the header of `name: x\n---\n`. A caller whose stream may hold
-// empty documents, such as the output of a Helm chart, wraps each
-// validator in [SkipEmpty]. The validator then runs on the documents
-// with content and not on the ones [Node.IsEmpty] reports:
+// Each document runs v as [Node.Validate] runs it. ValidateDocuments
+// takes one validator, and that validator decides how many violations a
+// document reports. A caller with several validators names how they run
+// together. [MultiValidator] runs every one on each document and reports
+// every failure, which suits rules that check a document independently,
+// as the rules of a linter do. [ChainValidator] stops at the first that
+// fails in each document, which suits a check that needs an earlier one
+// to pass, such as one that reads the values a schema requires:
 //
-//	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(reg))
+//	err := source.ValidateDocuments(ctx, niceyaml.MultiValidator(schema, names))
+//	err := source.ValidateDocuments(ctx, niceyaml.ChainValidator(schema, refs))
+//
+// Every document validates, an explicit empty one included, such as the
+// one below the header of `name: x\n---\n`. A caller whose stream may
+// hold empty documents, such as the output of a Helm chart, wraps its
+// validator in [SkipEmpty], which takes either composition. The validator
+// then runs on the documents with content and not on the ones
+// [Node.IsEmpty] reports:
+//
+//	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(niceyaml.MultiValidator(schema, names)))
 //
 // A document that did not parse reports its syntax error, as
 // Node.Validate returns it. Two documents that parse together share one
 // syntax error, as [Source.AllDocuments] describes, and ValidateDocuments
-// reports it once. Given no validators and a ctx that has not ended, it
-// thus returns the error [Source.File] returns.
+// reports it once. A nil v checks the syntax alone, so with a ctx that
+// has not ended, ValidateDocuments then returns the error [Source.File]
+// returns.
 //
 // ValidateDocuments checks ctx before each document and once every
 // document has run. Once ctx has ended, no further document validates,
@@ -635,7 +649,7 @@ func (s *Source) AllDocuments() []*Node {
 // [Source.Document] and [Source.Decode] need a Source of one document,
 // where ValidateDocuments takes any number, so a file it passes can still
 // fail Source.Decode.
-func (s *Source) ValidateDocuments(ctx context.Context, validators ...Validator) error {
+func (s *Source) ValidateDocuments(ctx context.Context, v Validator) error {
 	var (
 		errs []error
 		// The syntax error of the document before, which the next document
@@ -649,7 +663,7 @@ func (s *Source) ValidateDocuments(ctx context.Context, validators ...Validator)
 			break
 		}
 
-		err := doc.Validate(ctx, validators...)
+		err := doc.Validate(ctx, v)
 
 		shared := doc.doc.err != nil && errors.Is(doc.doc.err, prev)
 		prev = doc.doc.err

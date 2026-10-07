@@ -7302,7 +7302,7 @@ func TestSourceError_Document(t *testing.T) {
 			want: brokenDocs[1],
 		},
 		"syntax error from the document that holds it": {
-			err:  brokenDocs[1].Validate(t.Context()),
+			err:  brokenDocs[1].Validate(t.Context(), nil),
 			want: brokenDocs[1],
 		},
 		"bound by the source at a position beside a syntax error": {
@@ -7409,7 +7409,7 @@ func TestSourceError_DocumentIndex(t *testing.T) {
 			ok:   true,
 		},
 		"syntax error from the document that parsed together with its own": {
-			err:  together[0].Validate(t.Context()),
+			err:  together[0].Validate(t.Context(), nil),
 			want: 1,
 			ok:   true,
 		},
@@ -7452,7 +7452,7 @@ func TestSourceError_DocumentIndex(t *testing.T) {
 		// A syntax error, a violation in a document that parsed, and an
 		// error bound to no source, which has no binding to read.
 		err := errors.Join(
-			broken.ValidateDocuments(t.Context()),
+			broken.ValidateDocuments(t.Context(), nil),
 			brokenDocs[2].Bind(niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c")))),
 			errors.New("schema server unreachable"),
 		)

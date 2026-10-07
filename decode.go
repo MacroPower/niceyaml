@@ -503,7 +503,7 @@ func SkipEmpty(v Validator) Validator {
 			return nil
 		}
 
-		return n.validate(ctx, []Validator{v})
+		return n.Validate(ctx, v)
 	})
 }
 
@@ -1911,9 +1911,8 @@ func (e notFoundError) Unwrap() error {
 	return e.err
 }
 
-// Validate runs each validator on the node in the order given and stops
-// at the first that fails. It is the validation step of [Node.Decode] on
-// its own, for a caller that checks a document without decoding it:
+// Validate runs v on the node. It is the validation step of [Node.Decode]
+// on its own, for a caller that checks a document without decoding it:
 //
 //	for _, doc := range docs {
 //		if err := doc.Validate(ctx, reg); err != nil {
@@ -1921,11 +1920,24 @@ func (e notFoundError) Unwrap() error {
 //		}
 //	}
 //
-// Given no validators, Validate runs none and returns nil, and it skips
-// a nil validator, and one that holds a nil pointer or func. A validator
-// that returns a nil [*Error] or [*SourceError] pointer passes, and the
-// next one runs. [Decoder.Validate] runs the validators a [Decoder]
-// holds the same way.
+// Validate takes one validator, and that validator decides how many
+// violations the node reports. A caller with several validators names how
+// they run together. [MultiValidator] runs every one and reports every
+// failure, which suits rules that check the node independently, as the
+// rules of a linter do. [ChainValidator] stops at the first that fails,
+// which suits a check that needs an earlier one to pass, such as one
+// that reads the values a schema requires:
+//
+//	err := doc.Validate(ctx, niceyaml.MultiValidator(schema, names))
+//	err := doc.Validate(ctx, niceyaml.ChainValidator(schema, refs))
+//
+// [SkipEmpty] wraps either one, so that a document with no content
+// passes. [Decoder.Validate] runs the validators a [Decoder] holds as
+// ChainValidator runs them.
+//
+// A nil v runs nothing, and neither does one that holds a nil pointer or
+// func, so Validate then returns what [Node.Err] returns. A validator
+// that returns a nil [*Error] or [*SourceError] pointer passes.
 //
 // A validator returns its errors bound, as [Validator] describes, and
 // Validate returns such an error as it is. An error a validator leaves
@@ -1935,12 +1947,12 @@ func (e notFoundError) Unwrap() error {
 // error with no location at its own value, as Node.Bind describes.
 // Validate is thus the way to run a validator the caller did not write.
 //
-// A document that did not parse fails before any validator runs, with the
-// syntax error [Node.Err] returns, even when Validate gets no validators.
-// A caller that validates each document of a file thus collects the syntax
-// errors of the file in the same loop, as [Source.ValidateDocuments] does.
-func (n *Node) Validate(ctx context.Context, validators ...Validator) error {
-	return n.validate(ctx, validators)
+// A document that did not parse fails before v runs, with the syntax
+// error [Node.Err] returns, even when v is nil. A caller that validates
+// each document of a file thus collects the syntax errors of the file in
+// the same loop, as [Source.ValidateDocuments] does.
+func (n *Node) Validate(ctx context.Context, v Validator) error {
+	return n.validate(ctx, []Validator{v})
 }
 
 // validate runs validators in order on n, and binds the first error with

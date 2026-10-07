@@ -2075,7 +2075,7 @@ func TestSource_AllDocuments(t *testing.T) {
 		assert.Same(t, all[0].Err(), all[1].Err())
 
 		// ValidateDocuments reports the error both documents return once.
-		assert.Same(t, all[0].Err(), source.ValidateDocuments(t.Context()))
+		assert.Same(t, all[0].Err(), source.ValidateDocuments(t.Context(), nil))
 
 		// The one error is bound to the document that holds its location,
 		// whichever of the two returns it.
@@ -2705,7 +2705,7 @@ func TestSource_ValidateDocuments(t *testing.T) {
 		})
 	}
 
-	t.Run("no validators returns the error File returns", func(t *testing.T) {
+	t.Run("a nil validator returns the error File returns", func(t *testing.T) {
 		t.Parallel()
 
 		for _, input := range []string{
@@ -2720,8 +2720,85 @@ func TestSource_ValidateDocuments(t *testing.T) {
 
 			_, fileErr := source.File()
 
-			err := source.ValidateDocuments(t.Context())
-			assert.Equal(t, fileErr, err, input)
+			// A nil pointer to a fieldValidator panics if it runs.
+			for _, v := range []niceyaml.Validator{nil, (*fieldValidator)(nil), niceyaml.ValidatorFunc(nil)} {
+				err := source.ValidateDocuments(t.Context(), v)
+				assert.Equal(t, fileErr, err, input)
+			}
+		}
+	})
+
+	t.Run("the validator decides how many violations a document reports", func(t *testing.T) {
+		t.Parallel()
+
+		namePath := paths.Current().Child("name")
+
+		// Rejects returns a validator that reports msg at the name of a
+		// document whose name is one of bad.
+		rejects := func(msg string, bad ...string) niceyaml.Validator {
+			return niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+				name, err := n.DecodeAt[string](ctx, namePath)
+				if err != nil {
+					return err
+				}
+
+				if slices.Contains(bad, name) {
+					return niceyaml.NewError(msg, niceyaml.AtPath(namePath))
+				}
+
+				return nil
+			})
+		}
+
+		// The first document breaks both rules, and the last breaks the
+		// second alone.
+		const input = "name: root\n---\nname: [\n---\nname: ok\n---\nname: admin\n"
+
+		reserved := rejects("reserved name", "root")
+		privileged := rejects("privileged name", "root", "admin")
+
+		tcs := map[string]struct {
+			v niceyaml.Validator
+			// The message of each binding the result holds, in file order.
+			want []string
+		}{
+			"nil reports the syntax alone": {
+				v:    nil,
+				want: []string{"f.yaml:3:7: " + unclosed},
+			},
+			"one validator": {
+				v:    reserved,
+				want: []string{"f.yaml:1:7: $.name: reserved name", "f.yaml:3:7: " + unclosed},
+			},
+			"ChainValidator stops at the first failure of each document": {
+				v: niceyaml.ChainValidator(reserved, privileged),
+				want: []string{
+					"f.yaml:1:7: $.name: reserved name",
+					"f.yaml:3:7: " + unclosed,
+					"f.yaml:7:7: $.name: privileged name",
+				},
+			},
+			// The failures of one document come back in one binding.
+			"MultiValidator reports every failure of each document": {
+				v: niceyaml.MultiValidator(reserved, privileged),
+				want: []string{
+					"f.yaml:1:7: $.name: reserved name\nf.yaml:1:7: $.name: privileged name",
+					"f.yaml:3:7: " + unclosed,
+					"f.yaml:7:7: $.name: privileged name",
+				},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
+
+				err := source.ValidateDocuments(t.Context(), tc.v)
+				require.ErrorIs(t, err, niceyaml.ErrSyntax)
+				assert.Equal(t, tc.want, bindingMessages(err))
+			})
 		}
 	})
 
@@ -2990,9 +3067,10 @@ func TestSource_ValidateDocuments_Context(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, source, bound.Source())
 
-		// With no validators, the ended ctx still fails the call.
-		err = source.ValidateDocuments(ctx)
+		// With a nil validator, the ended ctx still fails the call.
+		err = source.ValidateDocuments(ctx, nil)
 		require.ErrorIs(t, err, context.Canceled)
+		assert.Equal(t, []string{"f.yaml: context canceled"}, bindingMessages(err))
 	})
 
 	t.Run("ended by a validator that reports it", func(t *testing.T) {

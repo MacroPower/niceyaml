@@ -282,11 +282,11 @@
 // not parse returns its syntax error from [Node.Err], [Node.Decode], and
 // [Node.Validate]. A caller that reports on a whole file, as a linter
 // does, calls [Source.ValidateDocuments], which validates each document
-// and joins what they return, so one pass names every syntax error and
-// every violation of the documents that parsed. [Source.File],
-// [Source.Documents], [Source.Document], and [Source.Decode] need the
-// whole file to parse. Every error of the parse matches [ErrSyntax],
-// whichever of these returns it.
+// and joins what they return. One pass thus names every syntax error,
+// beside what the validator reports for each document that parsed.
+// [Source.File], [Source.Documents], [Source.Document], and
+// [Source.Decode] need the whole file to parse. Every error of the parse
+// matches [ErrSyntax], whichever of these returns it.
 //
 // Every document validates and decodes, an empty one included, such as
 // the one a trailing "---" leaves at the end of a file. A schema that
@@ -310,9 +310,9 @@
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
-// [Node.Validate] runs the same validators without decoding, and a
-// [Decoder] holds the options for every node it decodes, so a file of
-// many documents states its schema once:
+// [Node.Validate] runs a validator without decoding, and a [Decoder]
+// holds the options for every node it decodes, so a file of many
+// documents states its schema once:
 //
 //	dec := niceyaml.NewDecoder(niceyaml.WithValidator(reg))
 //	for _, doc := range docs {
@@ -321,6 +321,20 @@
 //			return err
 //		}
 //	}
+//
+// Node.Validate and Source.ValidateDocuments take one validator, so a
+// caller with several names how they run together. [MultiValidator] runs
+// every one and reports every failure, which suits rules that check a
+// document independently, as the rules of a linter do. [ChainValidator]
+// stops at the first that fails, which suits a check that needs an
+// earlier one to pass, such as one that reads the values a schema
+// requires:
+//
+//	err := source.ValidateDocuments(ctx, niceyaml.MultiValidator(schema, names))
+//	err := source.ValidateDocuments(ctx, niceyaml.ChainValidator(schema, refs))
+//
+// A decode runs the validators of repeated WithValidator options as
+// ChainValidator runs them.
 //
 // A Decoder holds how a decode runs, and the Source holds what its
 // documents mean. A document whose aliases name the anchors of another

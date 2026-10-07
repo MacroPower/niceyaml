@@ -3495,10 +3495,10 @@ func TestDocument_Err(t *testing.T) {
 
 				return err //nolint:wrapcheck // The test inspects the error of the call.
 			}},
-			"Validate without validators": {call: func(t *testing.T, doc *niceyaml.Node) error {
+			"Validate with a nil validator": {call: func(t *testing.T, doc *niceyaml.Node) error {
 				t.Helper()
 
-				return doc.Validate(t.Context())
+				return doc.Validate(t.Context(), nil)
 			}},
 			"Validate": {call: func(t *testing.T, doc *niceyaml.Node) error {
 				t.Helper()
@@ -8287,47 +8287,76 @@ func TestNode_Validate(t *testing.T) {
 		})
 	}
 
-	t.Run("runs the validators on the receiver in order", func(t *testing.T) {
+	t.Run("runs the validator on the receiver", func(t *testing.T) {
 		t.Parallel()
-
-		var order []string
 
 		dd := yamltest.FirstDocument(t, "meta:\n  name: test\n")
 		scoped := yamltest.At(t, dd, paths.Current().Child("meta"))
 
-		err := scoped.Validate(t.Context(),
-			record(&order, "first"),
-			niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
-				assert.Equal(t, "$.meta", n.Path().String())
+		var got []*niceyaml.Node
 
-				return errNameRequired
-			}),
-			record(&order, "unreached"),
-		)
+		err := scoped.Validate(t.Context(), niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+			got = append(got, n)
+
+			return errNameRequired
+		}))
 		require.ErrorIs(t, err, errNameRequired)
-		assert.Equal(t, []string{"first"}, order)
+		require.Len(t, got, 1)
+		assert.Same(t, scoped, got[0])
 	})
 
-	t.Run("a typed nil pointer is no failure and the next validator runs", func(t *testing.T) {
+	t.Run("the validator decides how many failures the node reports", func(t *testing.T) {
 		t.Parallel()
 
 		var order []string
 
+		doc, err := niceyaml.NewSourceFromString("meta:\n  name: test\n", niceyaml.WithName("x.yaml")).Document()
+		require.NoError(t, err)
+
+		scoped := yamltest.At(t, doc, paths.Current().Child("meta"))
+
+		namePath := paths.Current().Child("name")
+		reserved := &fieldValidator{err: niceyaml.NewError("reserved name", niceyaml.AtPath(namePath))}
+		short := &fieldValidator{err: niceyaml.NewError("name is too short", niceyaml.AtPath(namePath))}
+
+		// A ChainValidator stops at the first validator that fails.
+		err = scoped.Validate(t.Context(), niceyaml.ChainValidator(
+			record(&order, "first"),
+			reserved,
+			record(&order, "unreached"),
+			short,
+		))
+		require.EqualError(t, err, "x.yaml:2:9: $.meta.name: reserved name")
+		assert.Equal(t, []string{"first"}, order)
+
+		order = nil
+
+		// A MultiValidator runs every one and joins the failures.
+		err = scoped.Validate(t.Context(), niceyaml.MultiValidator(
+			record(&order, "first"),
+			reserved,
+			record(&order, "second"),
+			short,
+		))
+		require.EqualError(t, err, stringtest.JoinLF(
+			"x.yaml:2:9: $.meta.name: reserved name",
+			"x.yaml:2:9: $.meta.name: name is too short",
+		))
+		assert.Equal(t, []string{"first", "second"}, order)
+	})
+
+	t.Run("a typed nil pointer is no failure", func(t *testing.T) {
+		t.Parallel()
+
 		dd := yamltest.FirstDocument(t, "name: test\n")
 
-		err := dd.Validate(t.Context(),
-			record(&order, "first"),
+		for _, v := range []niceyaml.Validator{
 			typedNilValidator(),
-			niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-				var e *niceyaml.SourceError
-
-				return e
-			}),
-			record(&order, "after"),
-			rejectingValidator(errNameRequired),
-		)
-		require.ErrorIs(t, err, errNameRequired)
-		assert.Equal(t, []string{"first", "after"}, order)
+			&fieldValidator{err: (*niceyaml.Error)(nil)},
+			&fieldValidator{err: (*niceyaml.SourceError)(nil)},
+		} {
+			require.NoError(t, dd.Validate(t.Context(), v))
+		}
 	})
 
 	t.Run("binds the error a validator leaves unbound", func(t *testing.T) {
@@ -8368,29 +8397,29 @@ func TestNode_Validate(t *testing.T) {
 		assert.Same(t, want, dd.Validate(t.Context(), rejectingValidator(want)))
 	})
 
-	t.Run("with no validators runs none", func(t *testing.T) {
+	t.Run("a nil validator returns what Err returns", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "name: test\n")
-		require.NoError(t, dd.Validate(t.Context()))
-	})
+		docs := niceyaml.NewSourceFromString("name: test\n---\nname: [\n", niceyaml.WithName("f.yaml")).AllDocuments()
+		require.Len(t, docs, 2)
+		require.NoError(t, docs[0].Err())
+		require.EqualError(t, docs[1].Err(), "f.yaml:3:7: sequence end token ']' not found")
 
-	t.Run("skips a nil validator", func(t *testing.T) {
-		t.Parallel()
+		scoped := yamltest.At(t, docs[0], paths.Current().Child("name"))
 
-		var order []string
+		// A nil pointer to a fieldValidator panics if it runs.
+		for _, v := range []niceyaml.Validator{nil, (*fieldValidator)(nil), niceyaml.ValidatorFunc(nil)} {
+			require.NoError(t, docs[0].Validate(t.Context(), v))
+			require.NoError(t, scoped.Validate(t.Context(), v))
+			assert.Same(t, docs[1].Err(), docs[1].Validate(t.Context(), v))
+		}
 
-		dd := yamltest.FirstDocument(t, "name: test\n")
+		// A context that ended changes neither result.
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
 
-		err := dd.Validate(t.Context(),
-			record(&order, "first"),
-			nil,
-			(*fieldValidator)(nil),
-			niceyaml.ValidatorFunc(nil),
-			record(&order, "second"),
-		)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"first", "second"}, order)
+		require.NoError(t, docs[0].Validate(ctx, nil))
+		assert.Same(t, docs[1].Err(), docs[1].Validate(ctx, nil))
 	})
 
 	t.Run("a validator of one call reaches no other decode", func(t *testing.T) {
@@ -10227,8 +10256,22 @@ func TestChainValidator(t *testing.T) {
 	t.Run("a later validator runs once the ones before it pass", func(t *testing.T) {
 		t.Parallel()
 
-		err := newDoc(t).Validate(t.Context(), niceyaml.ChainValidator(passing, typedNilValidator(), second))
+		var order []string
+
+		// A typed nil pointer is no failure, so the chain goes on.
+		err := newDoc(t).Validate(t.Context(), niceyaml.ChainValidator(
+			record(&order, "before"),
+			typedNilValidator(),
+			niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				var e *niceyaml.SourceError
+
+				return e
+			}),
+			record(&order, "after"),
+			second,
+		))
 		require.EqualError(t, err, "x.yaml:3:7: $.name: second rule")
+		assert.Equal(t, []string{"before", "after"}, order)
 	})
 
 	t.Run("no failure is no error", func(t *testing.T) {
