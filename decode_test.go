@@ -27,6 +27,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -9976,6 +9977,234 @@ func TestMultiValidator(t *testing.T) {
 
 		require.ErrorIs(t, dd.Validate(ctx, niceyaml.MultiValidator(canceling)), context.Canceled)
 		assert.Equal(t, 1, calls, "an ended context runs no validator")
+	})
+}
+
+func TestSkipEmpty(t *testing.T) {
+	t.Parallel()
+
+	errBad := errors.New("bad")
+
+	// Rejecting returns a validator that fails every Node and counts its
+	// runs.
+	rejecting := func(calls *int) niceyaml.Validator {
+		return niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+			*calls++
+
+			return niceyaml.WrapError(errBad)
+		})
+	}
+
+	t.Run("passes a document with no content", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+		}{
+			"empty file":           {input: ""},
+			"whitespace":           {input: "\n"},
+			"comments alone":       {input: "# only a comment\n"},
+			"header alone":         {input: "---\n"},
+			"header and comment":   {input: "---\n# Source: chart/templates/empty.yaml\n"},
+			"directive and header": {input: "%YAML 1.2\n---\n"},
+			"end marker alone":     {input: "...\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				var calls int
+
+				skip := niceyaml.SkipEmpty(rejecting(&calls))
+
+				require.NoError(t, doc.Validate(t.Context(), skip))
+				require.NoError(t, skip.Validate(t.Context(), doc))
+				assert.Zero(t, calls)
+
+				// The validator alone still runs on the document.
+				require.ErrorIs(t, doc.Validate(t.Context(), rejecting(&calls)), errBad)
+				assert.Equal(t, 1, calls)
+			})
+		}
+	})
+
+	t.Run("runs the validator on a document that holds a value", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+		}{
+			"null":                 {input: "null\n"},
+			"tilde":                {input: "~\n"},
+			"null below a header":  {input: "--- null\n"},
+			"empty mapping":        {input: "{}\n"},
+			"empty sequence":       {input: "[]\n"},
+			"empty string":         {input: "\"\"\n"},
+			"alias with no anchor": {input: "--- *nope\n"},
+			"mapping":              {input: "a: 1\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, tc.input)
+
+				var calls int
+
+				err := doc.Validate(t.Context(), niceyaml.SkipEmpty(rejecting(&calls)))
+				require.ErrorIs(t, err, errBad)
+				assert.Equal(t, 1, calls)
+			})
+		}
+	})
+
+	t.Run("runs the validator on a scoped Node", func(t *testing.T) {
+		t.Parallel()
+
+		// The key holds no value of its own, and its Node is no document.
+		value := yamltest.At(t, yamltest.FirstDocument(t, "a:\n"), paths.Current().Child("a"))
+
+		var calls int
+
+		err := value.Validate(t.Context(), niceyaml.SkipEmpty(rejecting(&calls)))
+		require.ErrorIs(t, err, errBad)
+		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
+		t.Parallel()
+
+		for _, input := range []string{"a: [\n", "---\na: [\n"} {
+			docs, err := niceyaml.NewSourceFromString(input).Documents()
+			require.ErrorIs(t, err, niceyaml.ErrSyntax, input)
+			require.Len(t, docs, 1, input)
+
+			var calls int
+
+			skip := niceyaml.SkipEmpty(rejecting(&calls))
+
+			assert.Same(t, docs[0].Err(), docs[0].Validate(t.Context(), skip), input)
+			assert.Same(t, docs[0].Err(), skip.Validate(t.Context(), docs[0]), input)
+			assert.Zero(t, calls, input)
+		}
+	})
+
+	t.Run("binds the error of the validator through the Node", func(t *testing.T) {
+		t.Parallel()
+
+		src := niceyaml.NewSourceFromString("a:\n  b: 1\n", niceyaml.WithFilePath("x.yaml"))
+
+		doc, err := src.Document()
+		require.NoError(t, err)
+
+		located := niceyaml.WrapError(errBad, niceyaml.AtPath(paths.Current().Child("a", "b")))
+		want := "x.yaml:2:6: $.a.b: bad"
+
+		tcs := map[string]struct {
+			v niceyaml.Validator
+		}{
+			"a validator that leaves its error unbound": {v: &fieldValidator{err: located}},
+			"a validator that binds its error": {
+				v: niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+					return located
+				}),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				skip := niceyaml.SkipEmpty(tc.v)
+
+				// A direct call returns the error Node.Validate returns.
+				require.EqualError(t, skip.Validate(t.Context(), doc), want)
+				require.EqualError(t, doc.Validate(t.Context(), skip), want)
+			})
+		}
+	})
+
+	t.Run("a nil validator passes every Node", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "a: 1\n")
+
+		for _, v := range []niceyaml.Validator{nil, (*fieldValidator)(nil), niceyaml.ValidatorFunc(nil)} {
+			require.NoError(t, doc.Validate(t.Context(), niceyaml.SkipEmpty(v)))
+		}
+
+		// A typed nil pointer reports no failure, as it does from a
+		// validator given alone.
+		typedNil := &fieldValidator{err: (*niceyaml.Error)(nil)}
+
+		require.NoError(t, niceyaml.SkipEmpty(typedNil).Validate(t.Context(), doc))
+	})
+
+	t.Run("a decode of an empty document returns the zero value", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Name string `yaml:"name"`
+		}
+
+		named := schema.MustCompile([]byte(`{"type": "object", "required": ["name"]}`))
+
+		for name, input := range map[string]string{
+			"empty file":     "",
+			"comments alone": "# Defaults apply.\n",
+			"header alone":   "---\n",
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocument(t, input)
+
+				got, err := doc.Decode[config](t.Context(), niceyaml.WithValidator(niceyaml.SkipEmpty(named)))
+				require.NoError(t, err)
+				assert.Equal(t, config{}, got)
+
+				// The schema alone rejects the null the document decodes to.
+				_, err = doc.Decode[config](t.Context(), niceyaml.WithValidator(named))
+				require.ErrorContains(t, err, `expected "object", got "null"`)
+				assert.True(t, niceyaml.IsInvalid(err))
+
+				// A Decoder carries the validator to the same decode.
+				dec := niceyaml.NewDecoder(niceyaml.WithValidator(niceyaml.SkipEmpty(named)))
+
+				got, err = dec.Decode[config](t.Context(), doc)
+				require.NoError(t, err)
+				assert.Equal(t, config{}, got)
+			})
+		}
+
+		// A file with content still answers to the schema.
+		_, err := yamltest.FirstDocument(t, "port: 1\n").
+			Decode[config](t.Context(), niceyaml.WithValidator(niceyaml.SkipEmpty(named)))
+		require.ErrorContains(t, err, `missing required property "name"`)
+	})
+
+	t.Run("wraps one validator and takes its place among several", func(t *testing.T) {
+		t.Parallel()
+
+		empty := yamltest.FirstDocument(t, "# only a comment\n")
+
+		var first, second int
+
+		// Around a MultiValidator, it passes the document for all of them.
+		all := niceyaml.SkipEmpty(niceyaml.MultiValidator(rejecting(&first), rejecting(&second)))
+		require.NoError(t, empty.Validate(t.Context(), all))
+		assert.Zero(t, first)
+		assert.Zero(t, second)
+
+		// Inside one, the validators beside it still run.
+		one := niceyaml.MultiValidator(niceyaml.SkipEmpty(rejecting(&first)), rejecting(&second))
+		require.ErrorIs(t, empty.Validate(t.Context(), one), errBad)
+		assert.Zero(t, first)
+		assert.Equal(t, 1, second)
 	})
 }
 

@@ -582,12 +582,18 @@ func (s *Source) Documents() ([]*Node, error) {
 //
 // Each document runs the validators as [Node.Validate] runs them. Every
 // document validates, an explicit empty one included, such as the one
-// below the header of `name: x\n---\n`. A document that did not parse
-// reports its syntax error, as Node.Validate returns it. Two documents
-// that parse together share one syntax error, as [Source.Documents]
-// describes, and ValidateDocuments reports it once. Given no validators
-// and a ctx that has not ended, it thus returns the error [Source.File]
-// returns.
+// below the header of `name: x\n---\n`. A caller whose stream may hold
+// empty documents, such as the output of a Helm chart, wraps each
+// validator in [SkipEmpty]. The validator then runs on the documents
+// with content and not on the ones [Node.IsEmpty] reports:
+//
+//	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(reg))
+//
+// A document that did not parse reports its syntax error, as
+// Node.Validate returns it. Two documents that parse together share one
+// syntax error, as [Source.Documents] describes, and ValidateDocuments
+// reports it once. Given no validators and a ctx that has not ended, it
+// thus returns the error [Source.File] returns.
 //
 // ValidateDocuments checks ctx before each document and once every
 // document has run. Once ctx has ended, no further document validates,

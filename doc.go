@@ -286,6 +286,16 @@
 // Every error of the parse matches [ErrSyntax], whichever of these
 // returns it.
 //
+// Every document validates and decodes, an empty one included, such as
+// the one a trailing "---" leaves at the end of a file. A schema that
+// wants a mapping rejects that document. [Node.IsEmpty] reports a
+// document with no content, and [SkipEmpty] wraps a validator so that
+// it passes one. A caller whose files may hold empty documents, as
+// Kubernetes manifests and the output of a Helm chart do, wraps its
+// validator:
+//
+//	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(reg))
+//
 // The root Node decodes, validates, and binds the whole document, and
 // every function that takes a Node takes it as it is. [Node.Decode] runs
 // validation on both sides of the decode. A [Validator] passed with

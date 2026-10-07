@@ -2388,6 +2388,236 @@ func TestSource_ValidateDocuments(t *testing.T) {
 	})
 }
 
+func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
+	t.Parallel()
+
+	const (
+		unclosed = "sequence end token ']' not found"
+		notNull  = `$: expected "object", got "null"`
+		noMatch  = "no matching schema"
+	)
+
+	// The schema wants a mapping with a kind. The registry picks it for
+	// the kinds it knows and requires a schema of every other document.
+	manifest := schema.MustCompile([]byte(`{"type": "object", "required": ["kind"]}`))
+	kindPath := paths.Doc().Child("kind")
+
+	var known []matcher.Matcher
+
+	for _, kind := range []string{"A", "Pod", "ConfigMap", "Service"} {
+		known = append(known, matcher.Content(kindPath, kind))
+	}
+
+	registry := schema.NewRegistry(schema.WithResolvers(schema.When(matcher.Any(known...), manifest)))
+
+	// A chart renders each template below a header and a comment that
+	// names it, and a template that renders nothing else leaves an empty
+	// document.
+	helm := stringtest.JoinLF(
+		"---",
+		"# Source: demo/templates/cm.yaml",
+		"apiVersion: v1",
+		"kind: ConfigMap",
+		"metadata:",
+		"  name: demo",
+		"",
+		"---",
+		"# Source: demo/templates/ingress.yaml",
+		"# Ingress is optional.",
+		"---",
+		"# Source: demo/templates/svc.yaml",
+		"apiVersion: v1",
+		"kind: Service",
+		"",
+	)
+
+	tcs := map[string]struct {
+		v     niceyaml.Validator
+		input string
+		// The message of each binding the result holds, in file order,
+		// with v alone and with v inside SkipEmpty.
+		strict []string
+		want   []string
+	}{
+		"schema, trailing header": {
+			v:      manifest,
+			input:  "kind: Pod\n---\n",
+			strict: []string{"f.yaml:2:1: " + notNull},
+		},
+		"registry, trailing header": {
+			v:      registry,
+			input:  "kind: Pod\n---\n",
+			strict: []string{"f.yaml: document 2: " + noMatch},
+		},
+		"schema, empty file": {
+			v:      manifest,
+			input:  "",
+			strict: []string{"f.yaml: " + notNull},
+		},
+		"registry, empty file": {
+			v:      registry,
+			input:  "",
+			strict: []string{"f.yaml: " + noMatch},
+		},
+		"schema, comment after a manifest": {
+			v:      manifest,
+			input:  "kind: A\n---\n# Source: t.yaml\n",
+			strict: []string{"f.yaml:2:1: " + notNull},
+		},
+		"registry, comment after a manifest": {
+			v:      registry,
+			input:  "kind: A\n---\n# Source: t.yaml\n",
+			strict: []string{"f.yaml: document 2: " + noMatch},
+		},
+		"schema, chart output": {
+			v:      manifest,
+			input:  helm,
+			strict: []string{"f.yaml:8:1: " + notNull},
+		},
+		"registry, chart output": {
+			v:      registry,
+			input:  helm,
+			strict: []string{"f.yaml: document 2: " + noMatch},
+		},
+		"schema, template that renders a comment alone": {
+			v:      manifest,
+			input:  "---\n# Source: demo/templates/ingress.yaml\n# Ingress is optional.\n\n",
+			strict: []string{"f.yaml:1:1: " + notNull},
+		},
+		"registry, template that renders a comment alone": {
+			v:      registry,
+			input:  "---\n# Source: demo/templates/ingress.yaml\n# Ingress is optional.\n\n",
+			strict: []string{"f.yaml: " + noMatch},
+		},
+		// A document that holds a value answers to the validator.
+		"schema, explicit null": {
+			v:      manifest,
+			input:  "kind: Pod\n--- null\n",
+			strict: []string{"f.yaml:2:5: " + notNull},
+			want:   []string{"f.yaml:2:5: " + notNull},
+		},
+		"registry, explicit null": {
+			v:      registry,
+			input:  "kind: Pod\n--- null\n",
+			strict: []string{"f.yaml: document 2: " + noMatch},
+			want:   []string{"f.yaml: document 2: " + noMatch},
+		},
+		"schema, alias with no anchor": {
+			v:      manifest,
+			input:  "kind: Pod\n--- *nope\n",
+			strict: []string{`f.yaml:2:5: $: could not find alias "nope"`},
+			want:   []string{`f.yaml:2:5: $: could not find alias "nope"`},
+		},
+		"registry, alias with no anchor": {
+			v:     registry,
+			input: "kind: Pod\n--- *nope\n",
+			strict: []string{
+				"f.yaml: document 2: resolve $.kind: alias does not resolve: *nope has no anchor before it",
+			},
+			want: []string{
+				"f.yaml: document 2: resolve $.kind: alias does not resolve: *nope has no anchor before it",
+			},
+		},
+		// The empty document still counts, so the one below it keeps its
+		// number.
+		"registry, document below an empty one": {
+			v:      registry,
+			input:  "kind: A\n---\n---\nkind: B\n",
+			strict: []string{"f.yaml: document 2: " + noMatch, "f.yaml: document 3: " + noMatch},
+			want:   []string{"f.yaml: document 3: " + noMatch},
+		},
+		"registry, syntax error beside an empty document": {
+			v:     registry,
+			input: "kind: A\n---\nkind: [\n---\n---\nkind: B\n",
+			strict: []string{
+				"f.yaml:3:7: " + unclosed,
+				"f.yaml: document 3: " + noMatch,
+				"f.yaml: document 4: " + noMatch,
+			},
+			want: []string{"f.yaml:3:7: " + unclosed, "f.yaml: document 4: " + noMatch},
+		},
+		// The header parses together with the document above it, so both
+		// documents carry the one error, which the result holds once.
+		"schema, syntax error two documents share": {
+			v:     manifest,
+			input: "name: &x\n---\nname: [\n---\n---\nvalue: 5\n",
+			strict: []string{
+				"f.yaml:3:7: " + unclosed,
+				"f.yaml:4:1: " + notNull,
+				`f.yaml:6:1: $.kind: missing required property "kind"`,
+			},
+			want: []string{"f.yaml:3:7: " + unclosed, `f.yaml:6:1: $.kind: missing required property "kind"`},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("f.yaml"))
+
+			err := source.ValidateDocuments(t.Context(), tc.v)
+			assert.Equal(t, tc.strict, bindingMessages(err))
+
+			err = source.ValidateDocuments(t.Context(), niceyaml.SkipEmpty(tc.v))
+			if len(tc.want) == 0 {
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tc.want, bindingMessages(err))
+		})
+	}
+
+	t.Run("agrees with a loop over the documents", func(t *testing.T) {
+		t.Parallel()
+
+		type manifestKind struct {
+			Kind string `yaml:"kind"`
+		}
+
+		for name, v := range map[string]niceyaml.Validator{"schema": manifest, "registry": registry} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString("kind: A\n---\n# Source: t.yaml\n", niceyaml.WithName("f.yaml"))
+
+				docs, err := source.Documents()
+				require.NoError(t, err)
+				require.Len(t, docs, 2)
+
+				// Inside SkipEmpty, all three forms pass the file.
+				skip := niceyaml.SkipEmpty(v)
+
+				require.NoError(t, source.ValidateDocuments(t.Context(), skip))
+
+				var kinds []string
+
+				for _, doc := range docs {
+					require.NoError(t, doc.Validate(t.Context(), skip))
+
+					got, err := doc.Decode[manifestKind](t.Context(), niceyaml.WithValidator(skip))
+					require.NoError(t, err)
+
+					kinds = append(kinds, got.Kind)
+				}
+
+				assert.Equal(t, []string{"A", ""}, kinds)
+
+				// Alone, the validator fails the empty document the same
+				// way in all three.
+				strict := source.ValidateDocuments(t.Context(), v)
+				require.Error(t, strict)
+
+				require.NoError(t, docs[0].Validate(t.Context(), v))
+				require.EqualError(t, docs[1].Validate(t.Context(), v), strict.Error())
+
+				_, err = docs[1].Decode[manifestKind](t.Context(), niceyaml.WithValidator(v))
+				require.EqualError(t, err, strict.Error())
+			})
+		}
+	})
+}
+
 func TestSource_ValidateDocuments_Context(t *testing.T) {
 	t.Parallel()
 

@@ -567,6 +567,13 @@ func (e reasonError) Unwrap() error {
 //	    return err
 //	}
 //
+// An empty document validates as any other, so the one a trailing "---"
+// leaves at the end of a file fails with ErrNoMatch when no resolver
+// applies to it. [niceyaml.SkipEmpty] wraps the registry to pass such a
+// document:
+//
+//	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(reg))
+//
 // Returns validation errors if the document doesn't conform to the schema.
 // Returns resolution, loading, or compilation errors if schema preparation
 // fails. When ctx ends before the lookup finishes, Validate returns the

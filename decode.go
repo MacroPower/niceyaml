@@ -275,7 +275,7 @@ type SelfValidator interface {
 // or [Node.Nodes] binds errors to itself, so their `@` paths resolve from
 // its scope.
 //
-// See [ValidatorFunc], [MultiValidator],
+// See [ValidatorFunc], [MultiValidator], [SkipEmpty],
 // [go.jacobcolvin.com/niceyaml/schema.Schema], and
 // [go.jacobcolvin.com/niceyaml/schema.Registry] for implementations.
 type Validator interface {
@@ -401,6 +401,45 @@ func MultiValidator(validators ...Validator) Validator {
 		default:
 			return errors.Join(errs...)
 		}
+	})
+}
+
+// SkipEmpty returns a [Validator] that passes a document with no content
+// and runs v on every other Node. [Node.IsEmpty] reports such a
+// document: an empty file, a file of comments alone, or a "---" header
+// with nothing but comments below it.
+//
+// Every document validates, an empty one included, so a schema that
+// wants a mapping rejects the document a trailing "---" leaves, and a
+// registry that requires a schema finds none for it. A caller whose
+// stream may hold empty documents, such as a file of Kubernetes
+// manifests or the output of a Helm chart, wraps its validator:
+//
+//	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(reg))
+//
+// A decode takes it the same way, so a configuration file that may be
+// empty decodes to the zero value:
+//
+//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(niceyaml.SkipEmpty(schema)))
+//
+// SkipEmpty passes only the documents IsEmpty reports. A document that
+// holds a value runs v, whatever the value, so v still checks an
+// explicit null such as `--- null` and an alias with no anchor before
+// it. A document that did not parse returns its syntax error. A Node
+// that [Node.At] or [Node.Nodes] scopes below the root is not a
+// document, so v runs on it.
+//
+// SkipEmpty runs v as [Node.Validate] runs it. The error of v comes
+// back bound through the Node whether or not v bound it, and a nil v
+// passes every Node. SkipEmpty takes one validator, and [MultiValidator]
+// makes one of several.
+func SkipEmpty(v Validator) Validator {
+	return ValidatorFunc(func(ctx context.Context, n *Node) error {
+		if n.IsEmpty() {
+			return nil
+		}
+
+		return n.validate(ctx, []Validator{v})
 	})
 }
 
@@ -2022,6 +2061,9 @@ func (c decodeConfig) decodeOptions() []yaml.DecodeOption {
 // picks for the document:
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
+//
+// An empty document validates as any other. [SkipEmpty] wraps a
+// validator that should pass one, so the decode returns the zero value.
 func WithValidator(dv Validator) DecodeOption {
 	return func(c *decodeConfig) {
 		c.validators = append(c.validators, dv)

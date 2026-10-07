@@ -110,6 +110,10 @@ func (n *Node) Kind() NodeKind {
 //		manifest, err := doc.Decode[Manifest](ctx)
 //		// ...
 //	}
+//
+// [SkipEmpty] wraps a [Validator] so that it passes such a document,
+// for a caller that hands the validator to [Source.ValidateDocuments] or
+// to a decode.
 func (n *Node) IsEmpty() bool {
 	if n == nil || n.doc.err != nil || !n.base.IsRoot() {
 		return false
