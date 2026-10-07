@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"strconv"
 	"strings"
@@ -2888,6 +2889,33 @@ func TestNode_Decode_SelfValidatorContext(t *testing.T) {
 	}
 }
 
+func ExampleNode_SelfValidate() {
+	ctx := context.Background()
+
+	doc, err := niceyaml.NewSourceFromString("db:\n  host: localhost\n", niceyaml.WithName("app.yaml")).Document()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var cfg layeredConfig
+
+	err = doc.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// The file leaves the password to the environment.
+	fmt.Println(doc.SelfValidate(ctx, &cfg))
+
+	applyEnv(&cfg, map[string]string{"DB_PASSWORD": "s3cret"})
+
+	fmt.Println(doc.SelfValidate(ctx, &cfg))
+
+	// Output:
+	// app.yaml:1:1: $.db.password: password is required
+	// <nil>
+}
+
 func TestNode_SelfValidate(t *testing.T) {
 	t.Parallel()
 
@@ -3765,6 +3793,14 @@ type layeredConfig struct {
 	Items     []upstream          `yaml:"items"`
 	Ignored   database            `yaml:"-"`
 	Port      port                `yaml:"port"`
+}
+
+// applyEnv sets the fields of cfg that env names, as a program sets them
+// from its environment.
+func applyEnv(cfg *layeredConfig, env map[string]string) {
+	if password, ok := env["DB_PASSWORD"]; ok {
+		cfg.DB.Password = password
+	}
 }
 
 // grade is a level that a document names, and that only gradeNames

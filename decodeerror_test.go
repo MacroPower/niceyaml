@@ -1062,12 +1062,12 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: `3:11: $.servers[0].tier: unknown tier "mid"`,
 				path: "$.servers[0].tier",
 			},
-			"decoder": {
+			"DecodeInto": {
 				input: "name: api\ntier: mid\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
 					var v tierServer
 
-					return niceyaml.NewDecoder().DecodeInto(ctx, dd, &v)
+					return dd.DecodeInto(ctx, &v)
 				},
 				want: `2:7: $.tier: unknown tier "mid"`,
 				path: "$.tier",

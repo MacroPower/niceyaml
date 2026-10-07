@@ -3628,18 +3628,6 @@ func TestDocument_Err(t *testing.T) {
 
 				return err //nolint:wrapcheck // The test inspects the error of the call.
 			}},
-			"Decoder.Decode": {call: func(t *testing.T, doc *niceyaml.Node) error {
-				t.Helper()
-
-				_, err := niceyaml.NewDecoder(niceyaml.WithValidator(ran)).Decode[map[string]any](t.Context(), doc)
-
-				return err
-			}},
-			"Decoder.Validate": {call: func(t *testing.T, doc *niceyaml.Node) error {
-				t.Helper()
-
-				return niceyaml.NewDecoder(niceyaml.WithValidator(ran)).Validate(t.Context(), doc)
-			}},
 			"ValidatorFunc called directly": {call: func(t *testing.T, doc *niceyaml.Node) error {
 				t.Helper()
 
@@ -4566,7 +4554,7 @@ func TestDocument_At(t *testing.T) {
 
 				var scoped map[string]any
 
-				err = niceyaml.NewDecoder().DecodeInto(t.Context(), yamltest.At(t, dd, tc.path), &scoped)
+				err = yamltest.At(t, dd, tc.path).DecodeInto(t.Context(), &scoped)
 				require.NoError(t, err)
 				assert.Equal(t, map[string]any{"k": "v1"}, scoped)
 			})
@@ -4836,7 +4824,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 
 				var scoped any
 
-				err = niceyaml.NewDecoder().DecodeInto(t.Context(), yamltest.At(t, dd, tc.path), &scoped)
+				err = yamltest.At(t, dd, tc.path).DecodeInto(t.Context(), &scoped)
 				require.NoError(t, err)
 				assert.Equal(t, tc.want, scoped)
 			})
@@ -6622,7 +6610,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 
 		seen = nil
 
-		err = niceyaml.NewDecoder(ordered, niceyaml.WithValidator(record)).Validate(t.Context(), dd)
+		err = dd.Validate(t.Context(), record)
 		require.NoError(t, err)
 		assert.Equal(t, []any{plain, plain, inner}, seen)
 
@@ -6691,7 +6679,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 				require.NoError(t, err)
 				assert.Equal(t, plainConfig{Name: "test", Value: 42}, result)
 
-				require.NoError(t, niceyaml.NewDecoder(niceyaml.WithValidator(tc.validator)).Validate(t.Context(), dd))
+				require.NoError(t, dd.Validate(t.Context(), tc.validator))
 			})
 		}
 	})
@@ -7447,11 +7435,10 @@ func TestDocument_Decode_ValidatorErrorBoundToReceiver(t *testing.T) {
 				dd := yamltest.FirstDocument(t, "a: 1\n", tc.source...)
 
 				opts := append(slices.Clone(tc.opts), niceyaml.WithValidator(validator))
-				dec := niceyaml.NewDecoder(opts...)
 
 				_, decodeErr := dd.Decode[any](t.Context(), opts...)
-				validateErr := dec.Validate(t.Context(), dd)
-				decodeIntoErr := dec.DecodeInto(t.Context(), dd, new(any))
+				validateErr := dd.Validate(t.Context(), validator)
+				decodeIntoErr := dd.DecodeInto(t.Context(), new(any), niceyaml.DecodeOptions(opts...))
 
 				for _, err := range []error{decodeErr, validateErr, decodeIntoErr} {
 					var bound *niceyaml.SourceError
@@ -8120,7 +8107,7 @@ func TestDocument_At_ZeroWidthBoundary(t *testing.T) {
 	}
 }
 
-func TestDecoder(t *testing.T) {
+func TestDecodeOptions(t *testing.T) {
 	t.Parallel()
 
 	type strictConfig struct {
@@ -8135,63 +8122,113 @@ func TestDecoder(t *testing.T) {
 		extra: field
 	`)
 
-	record := func(order *[]string, name string) niceyaml.Validator {
-		return niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
+	record := func(order *[]string, name string) niceyaml.DecodeOption {
+		return niceyaml.WithValidator(niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
 			*order = append(*order, name)
 
 			return nil
-		})
+		}))
 	}
 
-	t.Run("decodes every node with the options stated once", func(t *testing.T) {
+	strict := niceyaml.WithDisallowUnknownFields(true)
+	lax := niceyaml.WithDisallowUnknownFields(false)
+
+	t.Run("decodes every document with the options stated once", func(t *testing.T) {
 		t.Parallel()
 
-		dec := niceyaml.NewDecoder(niceyaml.WithDisallowUnknownFields(true))
+		var order []string
+
+		opts := niceyaml.DecodeOptions(record(&order, "schema"), strict)
 
 		docs, err := niceyaml.NewSourceFromString(input).Documents()
 		require.NoError(t, err)
 		require.Len(t, docs, 2)
 
 		for _, dd := range docs {
-			_, err := dec.Decode[strictConfig](t.Context(), dd)
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "extra")
+			_, err := dd.Decode[strictConfig](t.Context(), opts)
+			require.ErrorContains(t, err, `unknown field "extra"`)
 
 			var bound *niceyaml.SourceError
 
 			require.ErrorAs(t, err, &bound)
-			assert.Same(t, dd.Source(), bound.Source())
+			assert.Same(t, dd, bound.Node())
 		}
+
+		assert.Equal(t, []string{"schema", "schema"}, order)
 	})
 
-	t.Run("without options decodes as Node.Decode does", func(t *testing.T) {
+	t.Run("without options decodes as a call without options does", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "name: test\n")
+		dd := yamltest.FirstDocument(t, input)
 
-		got, err := niceyaml.NewDecoder().Decode[failingValidator](t.Context(), dd)
-		require.Error(t, err, "the value validates itself")
-		assert.Equal(t, failingValidator{}, got)
-
-		lax, err := niceyaml.NewDecoder(niceyaml.WithSelfValidation(false)).Decode[failingValidator](t.Context(), dd)
+		got, err := dd.Decode[validatorConfig](t.Context(), niceyaml.DecodeOptions())
 		require.NoError(t, err)
-		assert.Equal(t, "test", lax.Name)
+		assert.Equal(t, "test", got.Name)
+		assert.True(t, got.validated, "the value did not validate itself")
 	})
 
-	t.Run("the zero value decodes as NewDecoder does", func(t *testing.T) {
+	t.Run("applies its options in order among the options of the call", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		opts := niceyaml.DecodeOptions(
+			record(&order, "first"),
+			niceyaml.DecodeOptions(record(&order, "nested")),
+			record(&order, "last"),
+		)
+
+		dd := yamltest.FirstDocument(t, input)
+
+		_, err := dd.Decode[strictConfig](t.Context(), record(&order, "before"), opts, record(&order, "after"))
+		require.NoError(t, err)
+		assert.Equal(t, []string{"before", "first", "nested", "last", "after"}, order)
+	})
+
+	t.Run("stops at the first validator that fails", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		opts := niceyaml.DecodeOptions(
+			record(&order, "first"),
+			niceyaml.WithValidator(rejectingValidator(errNameRequired)),
+			record(&order, "unreached"),
+		)
+
+		dd := yamltest.FirstDocument(t, input)
+
+		got, err := dd.Decode[strictConfig](t.Context(), opts, record(&order, "after"))
+		require.ErrorIs(t, err, errNameRequired)
+		assert.Equal(t, strictConfig{}, got)
+		assert.Equal(t, []string{"first"}, order)
+	})
+
+	t.Run("the last WithDisallowUnknownFields of the call sets the value", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
-			dec *niceyaml.Decoder
+			opts []niceyaml.DecodeOption
+			err  string
 		}{
-			"zero value": {
-				dec: &niceyaml.Decoder{},
+			"the option alone": {
+				opts: []niceyaml.DecodeOption{niceyaml.DecodeOptions(strict)},
+				err:  `2:1: $.extra~: unknown field "extra"`,
 			},
-			"With on the zero value": {
-				dec: (&niceyaml.Decoder{}).With(),
+			"an option after it": {
+				opts: []niceyaml.DecodeOption{niceyaml.DecodeOptions(strict), lax},
 			},
-			"With an option on the zero value": {
-				dec: (&niceyaml.Decoder{}).With(niceyaml.WithDisallowUnknownFields(false)),
+			"an option before it": {
+				opts: []niceyaml.DecodeOption{lax, niceyaml.DecodeOptions(strict)},
+				err:  `2:1: $.extra~: unknown field "extra"`,
+			},
+			"two options inside it": {
+				opts: []niceyaml.DecodeOption{niceyaml.DecodeOptions(strict, lax)},
+			},
+			"a nested value after an option": {
+				opts: []niceyaml.DecodeOption{niceyaml.DecodeOptions(lax, niceyaml.DecodeOptions(strict))},
+				err:  `2:1: $.extra~: unknown field "extra"`,
 			},
 		}
 
@@ -8199,138 +8236,76 @@ func TestDecoder(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, "name: test\n")
+				dd := yamltest.FirstDocument(t, input)
 
-				got, err := tc.dec.Decode[validatorConfig](t.Context(), dd)
+				got, err := dd.Decode[strictConfig](t.Context(), tc.opts...)
+				if tc.err != "" {
+					require.EqualError(t, err, tc.err)
+
+					return
+				}
+
 				require.NoError(t, err)
-				assert.True(t, got.validated, "the value did not validate itself")
+				assert.Equal(t, strictConfig{Name: "test"}, got)
 			})
 		}
 	})
 
-	t.Run("runs the validators in order and stops at the first that fails", func(t *testing.T) {
+	t.Run("the last WithSelfValidation of the call sets the value", func(t *testing.T) {
 		t.Parallel()
 
-		var order []string
-
-		dec := niceyaml.NewDecoder(
-			niceyaml.WithValidator(record(&order, "first")),
-			niceyaml.WithValidator(niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
-				assert.True(t, n.Path().IsRoot())
-
-				return errNameRequired
-			})),
-			niceyaml.WithValidator(record(&order, "unreached")),
-		)
+		off := niceyaml.DecodeOptions(niceyaml.WithSelfValidation(false))
 
 		dd := yamltest.FirstDocument(t, input)
 
-		_, err := dec.Decode[strictConfig](t.Context(), dd)
-		require.ErrorIs(t, err, errNameRequired)
-		assert.Equal(t, []string{"first"}, order)
-
-		order = nil
-
-		require.ErrorIs(t, dec.Validate(t.Context(), dd), errNameRequired)
-		assert.Equal(t, []string{"first"}, order)
-	})
-
-	t.Run("a typed nil pointer is no failure and the next validator runs", func(t *testing.T) {
-		t.Parallel()
-
-		dec := niceyaml.NewDecoder(
-			niceyaml.WithValidator(typedNilValidator()),
-			niceyaml.WithValidator(rejectingValidator(errNameRequired)),
-		)
-
-		dd := yamltest.FirstDocument(t, "name: test\n")
-
-		got, err := dec.Decode[strictConfig](t.Context(), dd)
-		require.ErrorIs(t, err, errNameRequired)
-		assert.Equal(t, strictConfig{}, got)
-
-		require.ErrorIs(t, dec.Validate(t.Context(), dd), errNameRequired)
-	})
-
-	t.Run("Validate runs the validators without decoding", func(t *testing.T) {
-		t.Parallel()
-
-		var order []string
-
-		dec := niceyaml.NewDecoder(niceyaml.WithValidator(record(&order, "given")))
-
-		dd := yamltest.FirstDocument(t, "name: test\n")
-
-		require.NoError(t, dec.Validate(t.Context(), dd))
-		assert.Equal(t, []string{"given"}, order)
-
-		require.NoError(t, niceyaml.NewDecoder().Validate(t.Context(), dd))
-	})
-
-	t.Run("a validator reads the node with Decode without running itself again", func(t *testing.T) {
-		t.Parallel()
-
-		runs := 0
-
-		reading := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-			runs++
-
-			// A plain Decode runs no validator, this one included, so
-			// the validator reads the node it checks without recursing.
-			_, err := n.Decode[map[string]any](ctx)
-
-			return err
-		})
-
-		dec := niceyaml.NewDecoder(niceyaml.WithValidator(reading))
-
-		dd := yamltest.FirstDocument(t, input)
-
-		_, err := dec.Decode[strictConfig](t.Context(), dd)
+		got, err := dd.Decode[failingValidator](t.Context(), off)
 		require.NoError(t, err)
-		assert.Equal(t, 1, runs)
+		assert.Equal(t, "test", got.Name)
 
-		runs = 0
+		_, err = dd.Decode[failingValidator](t.Context(), off, niceyaml.WithSelfValidation(true))
+		require.Error(t, err, "the value validates itself")
 
-		_, err = dd.Decode[strictConfig](t.Context(), niceyaml.WithValidator(reading))
+		_, err = dd.Decode[failingValidator](t.Context(), niceyaml.WithSelfValidation(true), off)
 		require.NoError(t, err)
-		assert.Equal(t, 1, runs)
 	})
 
-	t.Run("With adds validators and replaces settings on a copy", func(t *testing.T) {
+	t.Run("the same value twice runs its validators twice", func(t *testing.T) {
 		t.Parallel()
 
 		var order []string
 
-		base := niceyaml.NewDecoder(
-			niceyaml.WithValidator(record(&order, "base")),
-			niceyaml.WithDisallowUnknownFields(true),
-		)
-		derived := base.With(
-			niceyaml.WithValidator(record(&order, "derived")),
-			niceyaml.WithDisallowUnknownFields(false),
-		)
+		opts := niceyaml.DecodeOptions(record(&order, "schema"))
 
 		dd := yamltest.FirstDocument(t, input)
 
-		got, err := derived.Decode[strictConfig](t.Context(), dd)
+		_, err := dd.Decode[strictConfig](t.Context(), opts, opts) //nolint:gocritic // The call gets the value twice.
+		require.NoError(t, err)
+		assert.Equal(t, []string{"schema", "schema"}, order)
+	})
+
+	t.Run("a value built from another leaves it as it was", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		base := niceyaml.DecodeOptions(record(&order, "base"), strict)
+		derived := niceyaml.DecodeOptions(base, record(&order, "derived"), lax)
+
+		dd := yamltest.FirstDocument(t, input)
+
+		got, err := dd.Decode[strictConfig](t.Context(), derived)
 		require.NoError(t, err)
 		assert.Equal(t, "test", got.Name)
 		assert.Equal(t, []string{"base", "derived"}, order)
 
 		order = nil
 
-		require.NoError(t, derived.Validate(t.Context(), dd))
-		assert.Equal(t, []string{"base", "derived"}, order)
-
-		order = nil
-
-		_, err = base.Decode[strictConfig](t.Context(), dd)
-		require.Error(t, err, "the receiver keeps its strictness")
-		assert.Equal(t, []string{"base"}, order, "the receiver keeps its validators")
+		_, err = dd.Decode[strictConfig](t.Context(), base)
+		require.Error(t, err, "the first value keeps its strictness")
+		assert.Equal(t, []string{"base"}, order, "the first value keeps its validators")
 	})
 
-	t.Run("With adds go-yaml options after the receiver's", func(t *testing.T) {
+	t.Run("adds go-yaml options after the ones before it", func(t *testing.T) {
 		t.Parallel()
 
 		type marker string
@@ -8351,84 +8326,255 @@ func TestDecoder(t *testing.T) {
 			})
 		}
 
-		base := niceyaml.NewDecoder(niceyaml.WithYAMLDecodeOptions(
+		base := niceyaml.DecodeOptions(niceyaml.WithYAMLDecodeOptions(
 			yaml.UseOrderedMap(),
 			setMarker("base"),
 		))
-		derived := base.With(niceyaml.WithYAMLDecodeOptions(setMarker("derived")))
+		derived := niceyaml.DecodeOptions(base, niceyaml.WithYAMLDecodeOptions(setMarker("derived")))
 
 		dd := yamltest.FirstDocument(t, "m: {b: 1, a: 2}\ntag: x\n")
 
-		got, err := derived.Decode[holder](t.Context(), dd)
+		got, err := dd.Decode[holder](t.Context(), derived)
 		require.NoError(t, err)
 		assert.Equal(t, yaml.MapSlice{
 			{Key: "b", Value: uint64(1)},
 			{Key: "a", Value: uint64(2)},
-		}, got.M, "the receiver's options still apply")
-		assert.Equal(t, marker("derived"), got.Tag, "the derived options apply after the receiver's")
+		}, got.M, "the options of the first value still apply")
+		assert.Equal(t, marker("derived"), got.Tag, "the later options apply after the ones of the first value")
 
-		got, err = base.Decode[holder](t.Context(), dd)
+		got, err = dd.Decode[holder](t.Context(), base)
 		require.NoError(t, err)
-		assert.Equal(t, marker("base"), got.Tag, "the receiver keeps its options")
+		assert.Equal(t, marker("base"), got.Tag, "the first value keeps its options")
 	})
 
-	t.Run("a scoped node decodes with the same options", func(t *testing.T) {
+	t.Run("keeps its options when the caller edits the slice", func(t *testing.T) {
 		t.Parallel()
 
 		var order []string
 
-		dec := niceyaml.NewDecoder(niceyaml.WithValidator(record(&order, "call")))
+		given := []niceyaml.DecodeOption{record(&order, "given")}
+		opts := niceyaml.DecodeOptions(given...)
+		given[0] = record(&order, "edited")
 
 		dd := yamltest.FirstDocument(t, input)
 
-		name, err := dec.Decode[string](t.Context(), yamltest.At(t, dd, paths.Current().Child("name")))
+		_, err := dd.Decode[strictConfig](t.Context(), opts)
 		require.NoError(t, err)
-		assert.Equal(t, "test", name)
-		assert.Equal(t, []string{"call"}, order)
+		assert.Equal(t, []string{"given"}, order)
 	})
 
-	t.Run("DecodeInto keeps the fields the document leaves out", func(t *testing.T) {
+	t.Run("a nil option panics in the call that applies it", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "name: test\n")
+		var opts niceyaml.DecodeOption
 
-		cfg := plainConfig{Value: 7}
-		require.NoError(t, niceyaml.NewDecoder().DecodeInto(t.Context(), dd, &cfg))
-		assert.Equal(t, plainConfig{Name: "test", Value: 7}, cfg)
+		require.NotPanics(t, func() {
+			opts = niceyaml.DecodeOptions(nil)
+		})
+
+		dd := yamltest.FirstDocument(t, input)
+
+		assert.Panics(t, func() {
+			_, _ = dd.Decode[strictConfig](t.Context(), opts) //nolint:errcheck // The call panics before it returns.
+		})
+		assert.Panics(t, func() {
+			_, _ = dd.Decode[strictConfig](t.Context(), nil) //nolint:errcheck // The call panics before it returns.
+		}, "a nil option given to the call panics too")
 	})
+}
 
-	t.Run("Decode decodes through a pointer target", func(t *testing.T) {
-		t.Parallel()
+// TestDecodeOptions_EntryPoints gives one [niceyaml.DecodeOptions] value
+// to every method that takes a [niceyaml.DecodeOption], and requires what
+// the same options written out in the call give.
+func TestDecodeOptions_EntryPoints(t *testing.T) {
+	t.Parallel()
 
-		dec := niceyaml.NewDecoder()
+	input := stringtest.Input(`
+		by_grade:
+		  high: {url: http://h}
+		extra: 1
+	`)
 
-		got, err := dec.Decode[*validatorConfig](t.Context(), yamltest.FirstDocument(t, "name: test\n"))
+	byGrade := paths.Current().Child("by_grade")
+	unknown := `app.yaml:3:1: $.extra~: unknown field "extra"`
+	notHTTP := `app.yaml:2:15: $.by_grade.high.url: url "ftp://h" is not http`
+
+	// The value a layer changed after the decode, which the walk rejects.
+	changed := func() *gradedConfig {
+		return &gradedConfig{ByGrade: map[grade]upstream{gradeHigh: {URL: "ftp://h"}}}
+	}
+
+	document := func(t *testing.T, src *niceyaml.Source) *niceyaml.Node {
+		t.Helper()
+
+		doc, err := src.Document()
 		require.NoError(t, err)
-		assert.Equal(t, &validatorConfig{Name: "test", validated: true}, got)
 
-		got, err = dec.Decode[*validatorConfig](t.Context(), yamltest.FirstDocument(t, "value: 1\n"))
-		require.ErrorIs(t, err, errNameRequired)
-		assert.Nil(t, got)
-	})
+		return doc
+	}
 
-	t.Run("rejects a target that is not a pointer", func(t *testing.T) {
-		t.Parallel()
+	// Each option shows that it reached the call. A grade decodes only
+	// under gradeNames, and the walk binds at the key of the document
+	// only under it. The unknown key fails only a strict decode. The
+	// validator counts its runs, and the walk runs with the option that
+	// turns it off for a decode.
+	tcs := map[string]struct {
+		// Calls the method on src, or on its document, with opts.
+		call func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error
+		err  string
+		// How many times the validator runs.
+		runs int
+	}{
+		"Node.Decode": {
+			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
+				t.Helper()
 
-		dd := yamltest.FirstDocument(t, "name: test\n")
+				_, err := document(t, src).Decode[gradedConfig](t.Context(), opts...)
 
-		var cfg plainConfig
+				return err
+			},
+			err:  unknown,
+			runs: 1,
+		},
+		"Node.DecodeInto": {
+			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
+				t.Helper()
 
-		dec := niceyaml.NewDecoder()
+				return document(t, src).DecodeInto(t.Context(), new(gradedConfig), opts...)
+			},
+			err:  unknown,
+			runs: 1,
+		},
+		"Node.DecodeAt": {
+			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
+				t.Helper()
 
-		for _, target := range []any{cfg, nil} {
-			err := dec.DecodeInto(t.Context(), dd, target)
-			require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+				got, err := document(t, src).DecodeAt[map[grade]upstream](t.Context(), byGrade, opts...)
+				assert.Equal(t, map[grade]upstream{gradeHigh: {URL: "http://h"}}, got)
 
-			var srcErr *niceyaml.SourceError
+				return err
+			},
+			runs: 1,
+		},
+		"Node.DecodeIfPresent": {
+			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
+				t.Helper()
 
-			require.ErrorAs(t, err, &srcErr)
+				var got map[grade]upstream
+
+				present, err := document(t, src).DecodeIfPresent(t.Context(), byGrade, &got, opts...)
+				assert.True(t, present)
+				assert.Equal(t, map[grade]upstream{gradeHigh: {URL: "http://h"}}, got)
+
+				return err //nolint:wrapcheck // The test inspects the error of the call.
+			},
+			runs: 1,
+		},
+		"Node.SelfValidate": {
+			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
+				t.Helper()
+
+				return document(t, src).SelfValidate(t.Context(), changed(), opts...)
+			},
+			err: notHTTP,
+		},
+		"Source.Decode": {
+			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
+				t.Helper()
+
+				_, err := src.Decode[gradedConfig](t.Context(), opts...)
+
+				return err
+			},
+			err:  unknown,
+			runs: 1,
+		},
+		"Source.DecodeInto": {
+			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
+				t.Helper()
+
+				return src.DecodeInto(t.Context(), new(gradedConfig), opts...)
+			},
+			err:  unknown,
+			runs: 1,
+		},
+		"Source.SelfValidate": {
+			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
+				t.Helper()
+
+				return src.SelfValidate(t.Context(), changed(), opts...)
+			},
+			err: notHTTP,
+		},
+		"Layers.Decode": {
+			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
+				t.Helper()
+
+				_, err := niceyaml.NewLayers(document(t, src)).Decode[gradedConfig](t.Context(), opts...)
+
+				return err
+			},
+			err:  unknown,
+			runs: 1,
+		},
+		"Layers.DecodeInto": {
+			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
+				t.Helper()
+
+				return niceyaml.NewLayers(document(t, src)).DecodeInto(t.Context(), new(gradedConfig), opts...)
+			},
+			err:  unknown,
+			runs: 1,
+		},
+		"Layers.SelfValidate": {
+			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
+				t.Helper()
+
+				return niceyaml.NewLayers(document(t, src)).SelfValidate(t.Context(), changed(), opts...)
+			},
+			err: notHTTP,
+		},
+	}
+
+	// How the call gets the options.
+	forms := map[string]func(opts []niceyaml.DecodeOption) []niceyaml.DecodeOption{
+		"written out": func(opts []niceyaml.DecodeOption) []niceyaml.DecodeOption {
+			return opts
+		},
+		"as one value": func(opts []niceyaml.DecodeOption) []niceyaml.DecodeOption {
+			return []niceyaml.DecodeOption{niceyaml.DecodeOptions(opts...)}
+		},
+	}
+
+	for name, tc := range tcs {
+		for formName, form := range forms {
+			t.Run(name+"/"+formName, func(t *testing.T) {
+				t.Parallel()
+
+				runs := 0
+
+				opts := form([]niceyaml.DecodeOption{
+					gradeNames,
+					niceyaml.WithValidator(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+						runs++
+
+						return nil
+					})),
+					niceyaml.WithDisallowUnknownFields(true),
+					niceyaml.WithSelfValidation(false),
+				})
+
+				err := tc.call(t, niceyaml.NewSourceFromString(input, niceyaml.WithName("app.yaml")), opts...)
+				if tc.err == "" {
+					require.NoError(t, err)
+				} else {
+					require.EqualError(t, err, tc.err)
+				}
+
+				assert.Equal(t, tc.runs, runs)
+			})
 		}
-	})
+	}
 }
 
 func TestNode_Validate(t *testing.T) {
@@ -9222,12 +9368,12 @@ func TestErrDecode(t *testing.T) {
 				return err
 			},
 		},
-		"decoder": {
+		"DecodeInto": {
 			input: "value: abc",
 			decode: func(ctx context.Context, dd *niceyaml.Node) error {
 				var v struct{ Value int }
 
-				return niceyaml.NewDecoder().DecodeInto(ctx, dd, &v)
+				return dd.DecodeInto(ctx, &v)
 			},
 		},
 		// The parser makes a null token for each value the document leaves
@@ -9685,18 +9831,6 @@ func TestErrDecode(t *testing.T) {
 				},
 				msg: "duplicated struct field name a",
 			},
-			"duplicated struct field name in a decoder": {
-				input: "a: 1\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					var v struct {
-						A int `yaml:"a"`
-						B int `yaml:"a"`
-					}
-
-					return niceyaml.NewDecoder().DecodeInto(ctx, dd, &v)
-				},
-				msg: "duplicated struct field name a",
-			},
 			"unexported inline embedded struct": {
 				input: "a: 1\nm: 2\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
@@ -10015,11 +10149,6 @@ func TestValidator_DirectCall(t *testing.T) {
 			path: itemPath,
 			want: "c.yaml:4:11: $.items[1].name: reserved name",
 		},
-		"Decoder": {
-			v:    niceyaml.NewDecoder(niceyaml.WithValidator(rule)),
-			path: itemPath,
-			want: "c.yaml:4:11: $.items[1].name: reserved name",
-		},
 	}
 
 	for name, tc := range tcs {
@@ -10316,12 +10445,12 @@ func TestMultiValidator(t *testing.T) {
 		require.ErrorIs(t, err, errB)
 	})
 
-	t.Run("a Decoder carries it to every decode", func(t *testing.T) {
+	t.Run("WithValidator carries it to a decode", func(t *testing.T) {
 		t.Parallel()
 
-		dec := niceyaml.NewDecoder(niceyaml.WithValidator(niceyaml.MultiValidator(badB, badC)))
+		multi := niceyaml.WithValidator(niceyaml.MultiValidator(badB, badC))
 
-		_, err := dec.Decode[map[string]any](t.Context(), dd)
+		_, err := dd.Decode[map[string]any](t.Context(), multi)
 		require.ErrorIs(t, err, errB)
 		require.ErrorIs(t, err, errC)
 	})
@@ -10723,15 +10852,17 @@ func TestChainValidator(t *testing.T) {
 					node = yamltest.At(t, node, paths.Current().Child("meta"))
 				}
 
-				chained := niceyaml.NewDecoder(niceyaml.WithValidator(niceyaml.ChainValidator(tc.a, tc.b)))
-				repeated := niceyaml.NewDecoder(niceyaml.WithValidator(tc.a), niceyaml.WithValidator(tc.b))
+				chain := niceyaml.ChainValidator(tc.a, tc.b)
 
-				_, chainedDecode := chained.Decode[map[string]any](t.Context(), node)
-				_, repeatedDecode := repeated.Decode[map[string]any](t.Context(), node)
+				_, chainedDecode := node.Decode[map[string]any](t.Context(), niceyaml.WithValidator(chain))
+				_, repeatedDecode := node.Decode[map[string]any](t.Context(),
+					niceyaml.WithValidator(tc.a),
+					niceyaml.WithValidator(tc.b),
+				)
 
 				pairs := map[string][2]error{
 					"Decode":   {chainedDecode, repeatedDecode},
-					"Validate": {chained.Validate(t.Context(), node), repeated.Validate(t.Context(), node)},
+					"Validate": {node.Validate(t.Context(), chain), repeatedDecode},
 				}
 
 				for step, pair := range pairs {
@@ -11016,13 +11147,6 @@ func TestSkipEmpty(t *testing.T) {
 				_, err = doc.Decode[config](t.Context(), niceyaml.WithValidator(named))
 				require.ErrorContains(t, err, `expected "object", got "null"`)
 				assert.True(t, niceyaml.IsInvalid(err))
-
-				// A Decoder carries the validator to the same decode.
-				dec := niceyaml.NewDecoder(niceyaml.WithValidator(niceyaml.SkipEmpty(named)))
-
-				got, err = dec.Decode[config](t.Context(), doc)
-				require.NoError(t, err)
-				assert.Equal(t, config{}, got)
 			})
 		}
 
@@ -11344,38 +11468,25 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 		},
 	}
 
-	// The source holds the setting of the limit, so a Node and a Decoder
-	// apply it alike.
-	decoders := map[string]func(ctx context.Context, n *niceyaml.Node, v any) error{
-		"node": func(ctx context.Context, n *niceyaml.Node, v any) error {
-			return n.DecodeInto(ctx, v)
-		},
-		"decoder": func(ctx context.Context, n *niceyaml.Node, v any) error {
-			return niceyaml.NewDecoder().DecodeInto(ctx, n, v)
-		},
-	}
-
 	for name, tc := range tcs {
-		for via, decode := range decoders {
-			t.Run(name+"/"+via, func(t *testing.T) {
-				t.Parallel()
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-				doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
-				if tc.path.Len() > 0 {
-					doc = yamltest.At(t, doc, tc.path)
-				}
+			doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
+			if tc.path.Len() > 0 {
+				doc = yamltest.At(t, doc, tc.path)
+			}
 
-				err := decode(t.Context(), doc, tc.target())
-				if tc.err != nil {
-					require.ErrorIs(t, err, tc.err)
-					require.NotErrorIs(t, err, niceyaml.ErrDecode)
-					assert.True(t, niceyaml.IsInvalid(err))
+			err := doc.DecodeInto(t.Context(), tc.target())
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				require.NotErrorIs(t, err, niceyaml.ErrDecode)
+				assert.True(t, niceyaml.IsInvalid(err))
 
-					return
-				}
+				return
+			}
 
-				require.NoError(t, err)
-			})
-		}
+			require.NoError(t, err)
+		})
 	}
 }

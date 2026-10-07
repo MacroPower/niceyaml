@@ -48,17 +48,17 @@ var (
 
 	// ErrSelfValidateTarget indicates the value given to
 	// [Node.SelfValidate], [Source.SelfValidate], or
-	// [Decoder.SelfValidate] is nil or a nil pointer, so there is nothing
+	// [Layers.SelfValidate] is nil or a nil pointer, so there is nothing
 	// to validate. The error comes back bound to the source as a
 	// [SourceError] with no location. It is a mistake of the caller, so
 	// [IsInvalid] does not report it.
 	ErrSelfValidateTarget = errors.New("self-validation target is nil")
 
 	// ErrDecode indicates that the go-yaml decoder did not decode a node
-	// into its target. [Node.Decode], [Node.DecodeInto], and
-	// [Decoder.DecodeInto] return it. So does a [Validator] that decodes
-	// the node it checks, as a [go.jacobcolvin.com/niceyaml/schema.Schema]
-	// does. These errors match:
+	// into its target. [Node.Decode] and [Node.DecodeInto] return it. So
+	// does a [Validator] that decodes the node it checks, as a
+	// [go.jacobcolvin.com/niceyaml/schema.Schema] does. These errors
+	// match:
 	//
 	//   - A value the decoder rejects, such as one of the wrong kind, a
 	//     number that overflows its type, an alias with no anchor, or a
@@ -96,9 +96,9 @@ var (
 	// holds. A merge key reads the mapping it brings in again at every
 	// merge, so a few hundred bytes of nested aliases can take the go-yaml
 	// decoder minutes to decode, and the decoder never checks the context.
-	// [Node.Decode], [Node.DecodeInto], and [Decoder.DecodeInto] refuse
-	// to decode a node that holds an alias when the aliases of its
-	// document go past the limit gopkg.in/yaml.v3 applies. A [Validator]
+	// [Node.Decode] and [Node.DecodeInto] refuse to decode a node that
+	// holds an alias when the aliases of its document go past the limit
+	// gopkg.in/yaml.v3 applies. A [Validator]
 	// that decodes the node it checks returns the same error, as a
 	// [go.jacobcolvin.com/niceyaml/schema.Schema] does. [WithAliasLimit]
 	// on the [Source] turns the limit off for every one of them. The

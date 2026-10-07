@@ -733,11 +733,11 @@ func TestDocument_Decode_UnknownFields_Source(t *testing.T) {
 	), strings.TrimRight(niceyaml.FormatError(err, 0), "\n"))
 }
 
-func TestDecoder_DecodeInto_UnknownFields(t *testing.T) {
+func TestDocument_DecodeInto_UnknownFields_EachDocument(t *testing.T) {
 	t.Parallel()
 
-	// A Decoder carries the option to every node it decodes.
-	dec := niceyaml.NewDecoder(niceyaml.WithDisallowUnknownFields(true))
+	// One value carries the option to the decode of every document.
+	strict := niceyaml.DecodeOptions(niceyaml.WithDisallowUnknownFields(true))
 
 	docs, err := niceyaml.NewSourceFromString("foo: 1\nbar: 2\n---\nname: x\n---\nbaz: 3\n").Documents()
 	require.NoError(t, err)
@@ -757,7 +757,7 @@ func TestDecoder_DecodeInto_UnknownFields(t *testing.T) {
 			Name string `yaml:"name"`
 		}
 
-		err := dec.DecodeInto(t.Context(), doc, &v)
+		err := doc.DecodeInto(t.Context(), &v, strict)
 		assert.Equal(t, want[i], rejectionRows(err), "document %d", i)
 	}
 }

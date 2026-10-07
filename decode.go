@@ -38,8 +38,8 @@ import (
 // to the caller rather than the type, such as one that needs a registry
 // of known names, runs on the decoded value after Decode returns, and
 // [Node.Bind] binds its result to the document the value came from. A
-// check that must run inside the decode, so a [Decoder] carries it to
-// every node and its failures report beside the others, is a
+// check that must run inside the decode, so a [DecodeOption] carries it
+// to every decode and its failures report beside the others, is a
 // [Validator]. Such a Validator decodes the node itself with
 // [Node.Decode] and checks the value it gets, as the Validator example
 // shows.
@@ -175,10 +175,9 @@ type SelfValidator interface {
 // or a schema registry that picks the schema from the document's content
 // or file path.
 //
-// Pass one to [Node.Decode] with [WithValidator], give one to
-// [NewDecoder] for a [Decoder] that checks every node it decodes, or run
-// one on its own with [Node.Validate]. The Node is the scope that runs
-// the validator: the root of a whole document, or the node a Node from
+// Pass one to [Node.Decode] with [WithValidator], or run one on its own
+// with [Node.Validate]. The Node is the scope that runs the validator:
+// the root of a whole document, or the node a Node from
 // [Node.At] selects, so a validator given to a scoped decode checks that
 // node and its `@` paths resolve from it. A validator that needs the whole
 // document reaches it through [Node.Document]. One that can only check
@@ -2003,8 +2002,7 @@ func (e notFoundError) Unwrap() error {
 //	err := doc.Validate(ctx, niceyaml.ChainValidator(schema, refs))
 //
 // [SkipEmpty] wraps either one, so that a document with no content
-// passes. [Decoder.Validate] runs the validators a [Decoder] holds as
-// ChainValidator runs them.
+// passes.
 //
 // A nil v runs nothing, and neither does one that holds a nil pointer or
 // func, so Validate then returns what [Node.Err] returns. A validator
@@ -2242,18 +2240,17 @@ func contextEnded(err error) bool {
 }
 
 // DecodeOption configures [Node.Decode], [Node.DecodeInto],
-// [Node.DecodeAt], and [Node.DecodeIfPresent], and [NewDecoder] takes
-// the same options for a [Decoder] that applies them to every node it
-// decodes. [Layers.Decode] and [Layers.DecodeInto] apply them to the
-// decode of every layer. [Node.SelfValidate], [Source.SelfValidate], and
-// [Layers.SelfValidate] take them too, and read only the go-yaml options
-// among them.
+// [Node.DecodeAt], and [Node.DecodeIfPresent]. [Layers.Decode] and
+// [Layers.DecodeInto] apply them to the decode of every layer.
+// [Node.SelfValidate], [Source.SelfValidate], and [Layers.SelfValidate]
+// take them too, and read only the go-yaml options among them.
 //
 // Available options:
 //   - [WithValidator]
 //   - [WithSelfValidation]
 //   - [WithDisallowUnknownFields]
 //   - [WithYAMLDecodeOptions]
+//   - [DecodeOptions]
 //
 // A DecodeOption sets how one decode runs. A setting that describes the
 // documents belongs to the [Source], which applies it to every decode
@@ -2263,8 +2260,7 @@ func contextEnded(err error) bool {
 type DecodeOption func(*decodeConfig)
 
 // decodeConfig holds the settings a [DecodeOption] configures. Its zero
-// value holds the defaults, so a zero [Decoder] decodes as [NewDecoder]
-// without options does.
+// value holds the defaults.
 type decodeConfig struct {
 	validators            []Validator
 	yamlOpts              []yaml.DecodeOption
@@ -2283,15 +2279,6 @@ func newDecodeConfig(opts []DecodeOption) decodeConfig {
 	}
 
 	return cfg
-}
-
-// clone returns a copy of the settings that shares no slice with the
-// receiver, so an option applied to the copy reaches no other decode.
-func (c decodeConfig) clone() decodeConfig {
-	c.validators = slices.Clone(c.validators)
-	c.yamlOpts = slices.Clone(c.yamlOpts)
-
-	return c
 }
 
 // decodeOptions returns the go-yaml options for one decode: the escape
@@ -2330,7 +2317,7 @@ func WithValidator(dv Validator) DecodeOption {
 // in a decoded value that implement [SelfValidator] validate themselves
 // after decoding. The default is true. Validators given with
 // [WithValidator] run either way. [Node.SelfValidate],
-// [Source.SelfValidate], and [Decoder.SelfValidate] run the walk
+// [Source.SelfValidate], and [Layers.SelfValidate] run the walk
 // whatever the option says, so a caller that turns it off for the decode
 // validates the value later.
 func WithSelfValidation(enabled bool) DecodeOption {
@@ -2429,8 +2416,8 @@ func WithDisallowUnknownFields(disallow bool) DecodeOption {
 // the other problems of a decode that failed, as [Node.DecodeInto]
 // describes them, each apply the options to a new go-yaml decoder. An
 // option that holds state therefore serves only the first of
-// them, and a [Decoder] that carries one is not safe to share between
-// goroutines.
+// them, and a [DecodeOption] that carries one is not safe to share
+// between goroutines.
 // [yaml.ReferenceReaders] is such an option. The first decode reads its
 // readers to the end, and later decodes find no anchors there.
 // [yaml.ReferenceFiles] and [yaml.ReferenceDirs] read their files again
@@ -2438,6 +2425,53 @@ func WithDisallowUnknownFields(disallow bool) DecodeOption {
 func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 	return func(c *decodeConfig) {
 		c.yamlOpts = append(c.yamlOpts, opts...)
+	}
+}
+
+// DecodeOptions is a [DecodeOption] that applies opts in order. A
+// program that decodes many documents names its schema and its decoder
+// settings in one place, and passes the one value wherever a
+// DecodeOption goes:
+//
+//	strict := niceyaml.DecodeOptions(
+//		niceyaml.WithValidator(reg),
+//		niceyaml.WithDisallowUnknownFields(true),
+//	)
+//
+//	docs, err := source.Documents()
+//	if err != nil {
+//		return err
+//	}
+//
+//	for _, doc := range docs {
+//		manifest, err := doc.Decode[Manifest](ctx, strict)
+//		...
+//	}
+//
+// A call applies the result as it applies opts written in its place, so
+// other options go before it and after it:
+//
+//	kind, err := doc.DecodeAt[string](ctx, kindPath, strict, niceyaml.WithSelfValidation(false))
+//
+// [WithValidator] and [WithYAMLDecodeOptions] add to what the options
+// before them gave. [WithSelfValidation] and [WithDisallowUnknownFields]
+// replace it, so the last of them in a call sets the value. A call that
+// gets the same DecodeOptions twice therefore runs each of its validators
+// twice. A program that also validates a document without decoding it
+// keeps its [Validator] in a variable, and gives it to both WithValidator
+// and [Node.Validate].
+//
+// DecodeOptions copies opts, so the result keeps its options when the
+// caller changes the slice it passed. A nil DecodeOption among opts
+// panics in the call that applies the result, as a nil DecodeOption
+// given to that call does.
+func DecodeOptions(opts ...DecodeOption) DecodeOption {
+	opts = slices.Clone(opts)
+
+	return func(c *decodeConfig) {
+		for _, opt := range opts {
+			opt(c)
+		}
 	}
 }
 
@@ -2704,8 +2738,8 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // [Node.DocumentAST] returns, or of the copy of it that every decode of
 // the document reads, so a caller must not modify it.
 //
-// [Decoder.DecodeInto] decodes with options stated once, for every node
-// a [Decoder] decodes.
+// A program that decodes many nodes with the same options states them
+// once with [DecodeOptions].
 func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
 	return n.decodeInto(ctx, v, newDecodeConfig(opts))
 }
@@ -3453,7 +3487,8 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 // the node from [Node.AST] and call its String method.
 //
 // To decode into a value you already hold, use [Node.DecodeInto]. To
-// decode many nodes with options stated once, use a [Decoder].
+// decode many nodes with options stated once, hold them in
+// [DecodeOptions].
 func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
 	var v T
 

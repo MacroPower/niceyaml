@@ -260,8 +260,7 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // document of n before it reads anything. Validate applies the limit to
 // the result as well only where the document holds an alias to a
 // reference document. [niceyaml.WithAliasLimit] on the source of n turns
-// both off. [niceyaml.WithValidator] runs the schema before a decode, a
-// [niceyaml.Decoder] runs it on every node it decodes, and
+// both off. [niceyaml.WithValidator] runs the schema before a decode, and
 // [niceyaml.Node.Validate] runs it on its own. A Node from
 // [niceyaml.Node.At] decodes to the node it selects, so the schema checks
 // that node and a violation's `@` path resolves from it. Every error

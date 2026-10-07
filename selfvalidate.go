@@ -65,8 +65,7 @@ import (
 // options and no other. A key type that only
 // a [yaml.CustomUnmarshaler] option decodes matches no key of the
 // document unless opts carry that option, and an error under such an
-// entry then binds at the key of the map. [Decoder.SelfValidate] runs
-// with the options of a [Decoder].
+// entry then binds at the key of the map.
 //
 // The walk follows v rather than the document, so v need not mirror the
 // node, and each error binds where its path resolves in the document. An

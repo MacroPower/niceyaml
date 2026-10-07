@@ -4524,16 +4524,8 @@ func TestWithReferences(t *testing.T) {
 
 				return err
 			},
-			"Decoder.Decode": func(ctx context.Context, _ *niceyaml.Source, doc *niceyaml.Node, v niceyaml.Validator) error {
-				_, err := niceyaml.NewDecoder(niceyaml.WithValidator(v)).Decode[config](ctx, doc)
-
-				return err
-			},
 			"Node.Validate": func(ctx context.Context, _ *niceyaml.Source, doc *niceyaml.Node, v niceyaml.Validator) error {
 				return doc.Validate(ctx, v)
-			},
-			"Decoder.Validate": func(ctx context.Context, _ *niceyaml.Source, doc *niceyaml.Node, v niceyaml.Validator) error {
-				return niceyaml.NewDecoder(niceyaml.WithValidator(v)).Validate(ctx, doc)
 			},
 			"Source.ValidateDocuments": func(ctx context.Context, src *niceyaml.Source, _ *niceyaml.Node, v niceyaml.Validator) error {
 				return src.ValidateDocuments(ctx, v)
@@ -4865,14 +4857,12 @@ func TestWithReferences(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, docs, 2)
 
-		dec := niceyaml.NewDecoder()
-
 		var wg sync.WaitGroup
 
 		for range 4 {
 			for i, doc := range docs {
 				wg.Go(func() {
-					got, err := dec.Decode[map[string]int](t.Context(), doc)
+					got, err := doc.Decode[map[string]int](t.Context())
 					if assert.NoError(t, err) {
 						assert.Equal(t, map[string]int{[]string{"b", "c"}[i]: 1}, got)
 					}
@@ -5190,14 +5180,6 @@ func TestWithAliasLimit(t *testing.T) {
 		"decode with a schema validator": {
 			read: func(ctx context.Context, n *niceyaml.Node) error {
 				return decode(ctx, n, niceyaml.WithValidator(shape))
-			},
-			want: "bomb.yaml:1:1: excessive aliasing",
-		},
-		"decoder with a schema validator": {
-			read: func(ctx context.Context, n *niceyaml.Node) error {
-				_, err := niceyaml.NewDecoder(niceyaml.WithValidator(shape)).Decode[any](ctx, n)
-
-				return err
 			},
 			want: "bomb.yaml:1:1: excessive aliasing",
 		},

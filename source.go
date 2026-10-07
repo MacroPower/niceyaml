@@ -129,8 +129,8 @@ type Source struct {
 // aliases. All three describe the documents themselves, so the Source
 // applies them to every decode and every validation of its documents.
 // Settings of one decode, such as [WithDisallowUnknownFields], are
-// [DecodeOption] values. A caller passes them to [Node.Decode], or to
-// [NewDecoder] for a [Decoder] that decodes every document with them.
+// [DecodeOption] values. A caller passes them to [Node.Decode], and
+// holds them in [DecodeOptions] to decode every document with them.
 type SourceOption func(*Source)
 
 // WithName is a [SourceOption] that sets the name for the [Source], which
@@ -271,8 +271,8 @@ func WithAliasLimit(enabled bool) SourceOption {
 //
 // The references change what an alias means, so the Source applies them
 // wherever one of its documents decodes: [Node.Decode], [Node.Validate],
-// [Node.SelfValidate], [Source.ValidateDocuments], every [Decoder], and
-// the decode a [Validator] runs on the Node it gets. A schema thus reads
+// [Node.SelfValidate], [Source.ValidateDocuments], and the decode a
+// [Validator] runs on the Node it gets. A schema thus reads
 // `server: *base` as the decode does, and a check of the whole file
 // reports what a decode of each document reports.
 //

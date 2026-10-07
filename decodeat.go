@@ -56,10 +56,6 @@ import (
 // there, which wraps [paths.ErrNoDocument], where Decode on the root of
 // such a document returns the zero value. The root path returns that
 // error too in a document with no "---" header, such as an empty file.
-//
-// A caller that decodes through a [Decoder] scopes the Node with At and
-// hands it to [Decoder.Decode], which runs the options of the Decoder on
-// that Node.
 func (n *Node) DecodeAt[T any](ctx context.Context, path paths.Path, opts ...DecodeOption) (T, error) {
 	node, err := n.At(path)
 	if err != nil {
@@ -124,9 +120,7 @@ func (n *Node) DecodeAt[T any](ctx context.Context, path paths.Path, opts ...Dec
 // [WithValidator] gets a Node scoped to that node. DecodeIfPresent drops
 // that Node as DecodeAt does, so a caller that binds errors of its own
 // about v scopes the Node with At or rebases them, as DecodeAt
-// describes. A caller that decodes through a [Decoder] calls At, tests
-// its error for paths.ErrNotFound, and hands the Node to
-// [Decoder.DecodeInto].
+// describes.
 func (n *Node) DecodeIfPresent(ctx context.Context, path paths.Path, v any, opts ...DecodeOption) (bool, error) {
 	// The target check runs first, so a wrong target fails for an absent
 	// path too, where no decode would run to reject it.

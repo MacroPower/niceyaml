@@ -92,14 +92,14 @@ func BenchmarkSchema_Validate_AliasedItems(b *testing.B) {
 		nodes, err := doc.Nodes(paths.Current().Child("items").IndexAll())
 		require.NoError(b, err)
 
-		dec := niceyaml.NewDecoder(niceyaml.WithValidator(s))
+		validated := niceyaml.WithValidator(s)
 
 		b.Run(fmt.Sprintf("items_%d", items), func(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
 				for _, node := range nodes {
-					_, err := dec.Decode[any](b.Context(), node)
+					_, err := node.Decode[any](b.Context(), validated)
 					if err != nil {
 						b.Fatal(err)
 					}

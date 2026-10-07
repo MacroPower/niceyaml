@@ -314,13 +314,16 @@
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
-// [Node.Validate] runs a validator without decoding, and a [Decoder]
-// holds the options for every node it decodes, so a file of many
-// documents states its schema once:
+// [Node.Validate] runs a validator without decoding, and
+// [DecodeOptions] holds several options as one, so a file of many
+// documents states its schema and its decoder settings once:
 //
-//	dec := niceyaml.NewDecoder(niceyaml.WithValidator(reg))
+//	strict := niceyaml.DecodeOptions(
+//		niceyaml.WithValidator(reg),
+//		niceyaml.WithDisallowUnknownFields(true),
+//	)
 //	for _, doc := range docs {
-//		config, err := dec.Decode[Config](ctx, doc)
+//		config, err := doc.Decode[Config](ctx, strict)
 //		if err != nil {
 //			return err
 //		}
@@ -340,7 +343,7 @@
 // A decode runs the validators of repeated WithValidator options as
 // ChainValidator runs them.
 //
-// A Decoder holds how a decode runs, and the Source holds what its
+// A DecodeOption sets how one decode runs, and the Source holds what its
 // documents mean. A document whose aliases name the anchors of another
 // file, such as a file of shared defaults, gets that file through
 // [WithReferences] on its Source. Every decode and every validation of

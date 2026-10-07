@@ -1764,10 +1764,10 @@ func TestRegistry_Validator_ErrorBoundToReceiver(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, tc.input, tc.source...)
-			dec := niceyaml.NewDecoder(append(slices.Clone(tc.opts), niceyaml.WithValidator(reg))...)
+			opts := niceyaml.DecodeOptions(append(slices.Clone(tc.opts), niceyaml.WithValidator(reg))...)
 
-			_, decodeErr := dec.Decode[any](t.Context(), doc)
-			validateErr := dec.Validate(t.Context(), doc)
+			_, decodeErr := doc.Decode[any](t.Context(), opts)
+			validateErr := doc.Validate(t.Context(), reg)
 
 			for _, err := range []error{decodeErr, validateErr} {
 				if tc.err != nil {
