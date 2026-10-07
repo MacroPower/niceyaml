@@ -219,6 +219,10 @@ func TestPrinter_PrintError(t *testing.T) {
 	empty := niceyaml.NewSourceFromString("a:\nb: 2\n")
 	flags := niceyaml.NewSourceFromString("flags: 🇺🇸🇫🇷\n")
 
+	// Two sources whose one document has no content.
+	blank := niceyaml.NewSourceFromString("")
+	comments := niceyaml.NewSourceFromString("# defaults apply\n", niceyaml.WithName("app.yaml"))
+
 	_, tabErr := niceyaml.NewSourceFromString("a:\n\tb: 1\n").File()
 
 	// The root has no message beside its range, so a caret run under the
@@ -363,6 +367,29 @@ func TestPrinter_PrintError(t *testing.T) {
 				bound,
 			),
 			want: "├── $.x[0]: gone\n└── 2:4: $.b: bad\n\n" + labeled + "\n\nno excerpt: resolve $.x[0]: not found",
+		},
+		// No path resolves in a document with no content, so the tree
+		// names each path and no reason follows it.
+		"bound error in a source with no content": {
+			err:  yamltest.Bind(t, blank, niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")))),
+			want: "$.b: bad",
+		},
+		"bound errors in a source with no content": {
+			err: yamltest.Bind(t, blank, niceyaml.NewSummary("2 problems",
+				niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a"))),
+				niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b"))),
+			)),
+			want: "2 problems\n├── $.a: bad a\n└── $.b: bad b",
+		},
+		"bound error at the root of a file of comments": {
+			err:  yamltest.Bind(t, comments, niceyaml.NewError("bad", niceyaml.AtPath(paths.Current()))),
+			want: "app.yaml: $: bad",
+		},
+		// A position names a line, which a source with no content does not
+		// hold, so its reason stays.
+		"bound error at a position in a source with no content": {
+			err:  yamltest.Bind(t, blank, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(3, 0)))),
+			want: "bad\n\nno excerpt: location outside source: line 4 of an empty source",
 		},
 		// A row drops its trailing spaces: the space after "b", and the
 		// blank indent in front of the blank line of the last branch.

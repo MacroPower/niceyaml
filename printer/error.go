@@ -1,12 +1,14 @@
 package printer
 
 import (
+	"errors"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
@@ -38,9 +40,12 @@ const errorConnectorWidth = 4
 // follows the excerpts for each SourceError [niceyaml.Bindings] finds
 // whose tree resolves no location, with the reason the location of the
 // SourceError itself did not resolve. A SourceError that carries no
-// location of its own gets no such line. A SourceError whose own
-// location does not resolve but whose children do gets their excerpts
-// and no reason, and its message stays in the tree without a position.
+// location of its own gets no such line. Neither does a SourceError that
+// carries a path into a document with no content, such as an empty file,
+// since no path resolves there and the tree names the path already. A
+// SourceError whose own location does not resolve but whose children do
+// gets their excerpts and no reason, and its message stays in the tree
+// without a position.
 //
 // PrintError draws the message as a tree with a connector in front of each
 // error below another, in the color of the gutter's line numbers. A
@@ -109,9 +114,10 @@ func (p *Printer) PrintError(err error) string {
 // source, the name of its source leads each excerpt on a row of its own.
 // A line starting "no excerpt:" follows for each binding
 // [niceyaml.Bindings] finds whose tree marks nothing, with the reason
-// [niceyaml.SourceError.Unresolved] returns, and a binding that carries
-// no location has nothing to explain. Returns nothing when there is
-// nothing to show.
+// [niceyaml.SourceError.Unresolved] returns. A binding that carries no
+// location has nothing to explain, and neither has one whose reason
+// wraps [paths.ErrNoDocument]. Returns nothing when there is nothing to
+// show.
 func (p *Printer) details(err error) []string {
 	// Print wraps the gutter and content to the printer's width and draws
 	// the container's frame outside it, so the excerpts wrap to the width
@@ -143,16 +149,20 @@ func (p *Printer) details(err error) []string {
 			continue
 		}
 
+		// A document with no content has no line to show for any path, so
+		// that reason explains nothing the tree leaves out.
+		reason := bound.Unresolved()
+		if reason == nil || errors.Is(reason, paths.ErrNoDocument) {
+			continue
+		}
+
 		// The reason names the path that did not resolve, which a key of
 		// the document spells, so its control characters render as
 		// pictures like those of the tree. A tab in the key becomes four
 		// spaces, as it does in the tree.
-		reason := bound.Unresolved()
-		if reason != nil {
-			text := escape.Control(escape.Tabs("no excerpt: " + reason.Error()))
+		text := escape.Control(escape.Tabs("no excerpt: " + reason.Error()))
 
-			parts = append(parts, strings.Join(p.wrapContent(text, 0), "\n"))
-		}
+		parts = append(parts, strings.Join(p.wrapContent(text, 0), "\n"))
 	}
 
 	return parts

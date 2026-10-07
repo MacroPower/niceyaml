@@ -1306,12 +1306,14 @@ func TestError_GracefulDegradation(t *testing.T) {
 			),
 			want: "@.key~: missing source",
 		},
+		// No path resolves in a document with no content, so the reason
+		// would add nothing to the path the message names.
 		"empty source": {
 			err: yamltest.Bind(t, niceyaml.NewSourceFromTokens(emptyTokens), niceyaml.NewError(
 				"error in empty source",
 				niceyaml.AtPath(paths.Current().Child("key").Key()),
 			)),
-			want: "$.key~: error in empty source\n\nno excerpt: resolve $.key~: not found: document has no content",
+			want: "$.key~: error in empty source",
 		},
 		"nonexistent path in source": {
 			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
@@ -8661,6 +8663,94 @@ func TestFormatError_JoinOfNothing(t *testing.T) {
 			assert.Equal(t, niceyaml.FormatError(errors.New(err.Error()), 2), got)
 			assert.Equal(t, got, fmt.Sprintf("%+v", err))
 			assert.NotContains(t, got, "\x1b")
+		})
+	}
+}
+
+func TestFormatError_NoContent(t *testing.T) {
+	t.Parallel()
+
+	badPort := niceyaml.NewError("0 is less than 1", niceyaml.AtPath(paths.Current().Child("port")))
+	noName := niceyaml.NewError("name is required", niceyaml.AtPath(paths.Current().Child("name")))
+
+	// No path resolves in a document with no content, so the tree names
+	// each path and no "no excerpt:" line repeats it. One binding and a
+	// summary above two thus read alike.
+	tcs := map[string]struct {
+		err    error
+		reason error
+		source string
+		name   string
+		want   string
+	}{
+		"one error": {
+			err:    badPort,
+			reason: paths.ErrNoDocument,
+			want:   "$.port: 0 is less than 1",
+		},
+		"two errors under a summary": {
+			err: niceyaml.NewSummary("2 problems", badPort, noName),
+			want: stringtest.JoinLF(
+				"2 problems",
+				"|-- $.port: 0 is less than 1",
+				"`-- $.name: name is required",
+			),
+		},
+		"two errors joined": {
+			err: errors.Join(badPort, noName),
+			want: stringtest.JoinLF(
+				"|-- $.port: 0 is less than 1",
+				"`-- $.name: name is required",
+			),
+		},
+		"error at the root of a named file": {
+			err:    niceyaml.NewError(`expected "object", got "null"`, niceyaml.AtPath(paths.Current())),
+			reason: paths.ErrNoDocument,
+			name:   "app.yaml",
+			want:   `app.yaml: $: expected "object", got "null"`,
+		},
+		"file of comments alone": {
+			err:    badPort,
+			reason: paths.ErrNoDocument,
+			source: "# defaults apply\n",
+			name:   "app.yaml",
+			want:   "app.yaml: $.port: 0 is less than 1",
+		},
+		// A position names a line, which an empty source does not hold, so
+		// its reason still follows the tree.
+		"position keeps its reason": {
+			err:    niceyaml.NewError("bad", niceyaml.AtPosition(position.New(3, 0))),
+			reason: niceyaml.ErrOutOfRange,
+			want:   "bad\n\nno excerpt: location outside source: line 4 of an empty source",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var opts []niceyaml.SourceOption
+
+			if tc.name != "" {
+				opts = append(opts, niceyaml.WithName(tc.name))
+			}
+
+			err := yamltest.Bind(t, niceyaml.NewSourceFromString(tc.source, opts...), tc.err)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			// The binding still reports why its location did not resolve,
+			// for a caller that renders the error itself.
+			if tc.reason == nil {
+				require.NoError(t, bound.Unresolved())
+			} else {
+				require.ErrorIs(t, bound.Unresolved(), tc.reason)
+			}
+
+			assert.Equal(t, tc.want, niceyaml.FormatError(err, 2))
+			assert.Equal(t, tc.want, fmt.Sprintf("%+v", err))
 		})
 	}
 }

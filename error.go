@@ -3066,9 +3066,12 @@ func (e *SourceError) LogValue() slog.Value {
 // A line starting "no excerpt:" follows the excerpts for each binding
 // [Bindings] finds whose tree resolves no location, with the reason the
 // location of the binding itself did not resolve. A binding that carries
-// no location of its own gets no such line. A binding whose own location
-// does not resolve but whose children do gets their excerpts and no
-// reason, and its message stays in the tree without a position.
+// no location of its own gets no such line. Neither does a binding that
+// carries a path into a document with no content, such as an empty file,
+// since no path resolves there and the tree names the path already. A
+// binding whose own location does not resolve but whose children do gets
+// their excerpts and no reason, and its message stays in the tree without
+// a position.
 //
 // The output holds no
 // escape sequences, so it reads in a log as it does in a terminal.
@@ -3259,6 +3262,10 @@ func (e *SourceError) Position() (position.Position, bool) {
 //	} else if reason := bound.Unresolved(); reason != nil {
 //		fmt.Println("no excerpt:", reason)
 //	}
+//
+// [FormatError] prints that line for every reason but one that wraps
+// [go.jacobcolvin.com/niceyaml/paths.ErrNoDocument], since no path
+// resolves in a document with no content.
 //
 // One binding has a reason and a position both. A path that enters an
 // alias the document cannot follow binds at that alias, as
@@ -3608,10 +3615,12 @@ func yieldExcerpts(
 // as plain text, then a line starting "no excerpt:" for each binding
 // [Bindings] finds whose tree marks nothing, with the reason
 // [SourceError.Unresolved] returns. A binding that carries no location
-// has nothing to explain. When the bindings touch more than one source,
-// the name of its source leads each excerpt on a row of its own, so the
-// reader tells the excerpts apart. Returns nothing when there is nothing
-// to show. The printer renders the same parts with its styles.
+// has nothing to explain, and neither has one whose reason wraps
+// [paths.ErrNoDocument], since no path resolves in a document with no
+// content. When the bindings touch more than one source, the name of its
+// source leads each excerpt on a row of its own, so the reader tells the
+// excerpts apart. Returns nothing when there is nothing to show. The
+// printer renders the same parts with its styles.
 func errorDetails(err error, context int) []string {
 	bindings := slices.Collect(Bindings(err))
 	sources, positions := excerptPositions(bindings)
@@ -3637,14 +3646,18 @@ func errorDetails(err error, context int) []string {
 			continue
 		}
 
+		// A document with no content has no line to show for any path, so
+		// that reason explains nothing the tree leaves out.
+		reason := bound.Unresolved()
+		if reason == nil || errors.Is(reason, paths.ErrNoDocument) {
+			continue
+		}
+
 		// The reason names the path, which a key of the document spells,
 		// so its control characters render as pictures like those of the
 		// tree. A tab in the key becomes four spaces, as it does in the
 		// tree.
-		reason := bound.Unresolved()
-		if reason != nil {
-			parts = append(parts, "no excerpt: "+escape.Control(escape.Tabs(reason.Error())))
-		}
+		parts = append(parts, "no excerpt: "+escape.Control(escape.Tabs(reason.Error())))
 	}
 
 	return parts
