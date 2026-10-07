@@ -1219,6 +1219,13 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 				strings.Replace(tc.wantWrapped, "check: ", "check: body: ", 1),
 			)
 
+			// A wrapper that names a sentinel beside the result reads as
+			// a wrapper around the result alone.
+			require.EqualError(t,
+				doc.Bind(niceyaml.Rebase(fmt.Errorf("%w: %w", errPlaceCheck, err), base)),
+				tc.wantWrapped,
+			)
+
 			// A Node scoped to the value puts its own path in front, and
 			// the root reads each path from the root of the document.
 			require.EqualError(t, yamltest.At(t, doc, base).Bind(err), tc.wantBound)
@@ -1252,6 +1259,28 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 		require.ErrorAs(t, placed, &got)
 		assert.Same(t, wrapped, got)
+	})
+
+	t.Run("a wrapper keeps the errors beside the result", func(t *testing.T) {
+		t.Parallel()
+
+		typed := &placeCheckError{err: errPlaceCheck}
+
+		err := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
+
+		placed := doc.Bind(niceyaml.Rebase(fmt.Errorf("%w: %w", typed, err), base))
+		require.EqualError(t, placed, "app.yaml:2:9: $.request.port: check: check: 0 is less than 1")
+		require.ErrorIs(t, placed, errPlaceCheck)
+		assert.True(t, niceyaml.IsInvalid(placed))
+
+		var got *placeCheckError
+
+		require.ErrorAs(t, placed, &got)
+		assert.Same(t, typed, got)
+
+		var violation *schema.Violation
+
+		require.ErrorAs(t, placed, &violation)
 	})
 
 	t.Run("a wrapper that rewrites the text stays as it is", func(t *testing.T) {
@@ -1351,6 +1380,9 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		require.EqualError(t, hex.Bind(found), "app.yaml:2:9: $.ports.0x10: 0 is less than 1")
 	})
 }
+
+// errPlaceCheck is a sentinel a caller wraps beside the error of a check.
+var errPlaceCheck = errors.New("check")
 
 // placeCheckError wraps the error of a check with a prefix, as a caller's
 // own error type does.

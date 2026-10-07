@@ -1838,14 +1838,17 @@ func unplacedError(err error) (error, bool) {
 // binding of a document, and comes back as it is.
 //
 // The binding may sit below wrappers that each unwrap to one error, such
-// as the ones [fmt.Errorf] builds with one %w verb. The text of the
-// binding names the paths of its errors, and the text of the error it
-// was made from names none. Each wrapper therefore comes back as a
-// [placedError], whose message is the message of the wrapper with the
-// text of the binding cut down to that of its error. A wrapper whose
-// message does not hold the text of the binding once, such as one that
-// quotes it, comes back as it is, and so does err. An [*Error] above the
-// binding binds around it, so placeable leaves it alone too.
+// as the ones [fmt.Errorf] builds with one %w verb. A wrapper that
+// [fmt.Errorf] builds with several %w verbs counts as one of them when
+// [followBranches] keeps a single branch of it, as it does for a
+// sentinel beside the binding. The text of the binding names the paths
+// of its errors, and the text of the error it was made from names none.
+// Each wrapper therefore comes back as a [placedError], whose message is
+// the message of the wrapper with the text of the binding cut down to
+// that of its error. A wrapper whose message does not hold the text of
+// the binding once, such as one that quotes it, comes back as it is, and
+// so does err. An [*Error] above the binding binds around it, so
+// placeable leaves it alone too.
 func placeable(err error) error {
 	placed, _ := replaceUnplaced(err)
 
@@ -1867,26 +1870,86 @@ func replaceUnplaced(err error) (error, bool) {
 		return err, false
 
 	case interface{ Unwrap() error }:
-		below := x.Unwrap()
-		if below == nil {
+		return replaceBelow(err, x.Unwrap(), nil)
+
+	case interface{ Unwrap() []error }:
+		// Both checks read no message, so a wrapper that holds no such
+		// binding, as nearly every one does, costs a walk of its errors
+		// and formats nothing.
+		if !isWrapErrors(err) || !holdsUnplaced(err) {
 			return err, false
 		}
 
-		placed, ok := replaceUnplaced(below)
-		if !ok {
-			return err, false
-		}
+		branches := x.Unwrap()
 
-		msg, old := err.Error(), below.Error()
-		if old == "" || strings.Count(msg, old) != 1 {
-			return err, false
-		}
+		_, below := followBranches(err, branches)
 
-		return &placedError{wrapper: err, err: placed, msg: strings.Replace(msg, old, placed.Error(), 1)}, true
+		return replaceBelow(err, below, branches)
 
 	default:
 		return err, false
 	}
+}
+
+// holdsUnplaced reports whether [replaceUnplaced] could find a binding
+// that stands in no document below err. It follows each wrapper that
+// unwraps to one error, and every branch of a wrapper that [fmt.Errorf]
+// builds with several %w verbs, and it reads the message of none.
+func holdsUnplaced(err error) bool {
+	for {
+		switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *SourceError:
+			return x != nil && x.free != nil
+
+		case *Error:
+			return false
+
+		case interface{ Unwrap() error }:
+			err = x.Unwrap()
+
+		case interface{ Unwrap() []error }:
+			return isWrapErrors(err) && slices.ContainsFunc(x.Unwrap(), holdsUnplaced)
+
+		default:
+			return false
+		}
+	}
+}
+
+// replaceBelow is [replaceUnplaced] for wrapper, an error whose cause
+// chain goes on through below. The branches are every error wrapper
+// unwraps to when it unwraps to several, and nil otherwise. The ones
+// beside below add nothing to the tree, as a sentinel does, so the
+// [placedError] keeps them to match as wrapper does.
+func replaceBelow(wrapper, below error, branches []error) (error, bool) {
+	if below == nil {
+		return wrapper, false
+	}
+
+	placed, ok := replaceUnplaced(below)
+	if !ok {
+		return wrapper, false
+	}
+
+	msg, old := wrapper.Error(), below.Error()
+	if old == "" || strings.Count(msg, old) != 1 {
+		return wrapper, false
+	}
+
+	var beside []error
+
+	for _, branch := range branches {
+		if !isNothing(branch) && isLeaf(branch) {
+			beside = append(beside, branch)
+		}
+	}
+
+	return &placedError{
+		wrapper: wrapper,
+		err:     placed,
+		beside:  beside,
+		msg:     strings.Replace(msg, old, placed.Error(), 1),
+	}, true
 }
 
 // placedError stands for a wrapper around a binding that stood in no
@@ -1894,13 +1957,18 @@ func replaceUnplaced(err error) (error, bool) {
 // message is the message of the wrapper with the text of the binding cut
 // down to the message of the error, and it unwraps to the error. It
 // matches the wrapper for [errors.Is] and [errors.As] rather than
-// unwrapping to it, since the wrapper still unwraps to the binding.
+// unwrapping to it, since the wrapper still unwraps to the binding. A
+// wrapper with several %w verbs unwraps to other errors beside the
+// binding, such as a sentinel, and the placedError matches those too.
 type placedError struct {
 	// The wrapper Bind or Rebase received.
 	wrapper error
 	// The error below the wrapper, with the binding replaced.
 	err error
 	msg string
+	// The errors the wrapper unwraps to beside the one that held the
+	// binding, when it unwraps to several.
+	beside []error
 }
 
 // Error returns the message of the wrapper with the text of the binding
@@ -1917,17 +1985,27 @@ func (p *placedError) Unwrap() error {
 // Is reports whether target is the wrapper, or whether the Is method of
 // the wrapper, if it has one, matches target. Like [errors.Is], it
 // compares the wrapper with target only when the type of target is
-// comparable.
+// comparable. It also reports whether an error the wrapper unwraps to
+// beside the binding matches target, as [errors.Is] reports it.
 func (p *placedError) Is(target error) bool {
-	return matchesItself(p.wrapper, target)
+	if matchesItself(p.wrapper, target) {
+		return true
+	}
+
+	return slices.ContainsFunc(p.beside, func(err error) bool { return errors.Is(err, target) })
 }
 
 // As sets target to the wrapper when target points at a type the wrapper
 // is assignable to, as [errors.As] does for an error in the chain.
 // Otherwise it reports what the As method of the wrapper, if it has one,
-// reports.
+// reports, and then what [errors.As] reports for each error the wrapper
+// unwraps to beside the binding.
 func (p *placedError) As(target any) bool {
-	return asItself(p.wrapper, target)
+	if asItself(p.wrapper, target) {
+		return true
+	}
+
+	return slices.ContainsFunc(p.beside, func(err error) bool { return errors.As(err, target) })
 }
 
 // isBound reports whether err is a binding already: a [*SourceError], or
