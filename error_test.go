@@ -5031,6 +5031,41 @@ func TestSourceError_Excerpt(t *testing.T) {
 		}
 	})
 
+	t.Run("a line several errors mark carries one annotation per message", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("key: value\n")
+		value := paths.Current().Child("key")
+
+		var bound *niceyaml.SourceError
+
+		// The second and third problems say the same of one value, as two
+		// branches of an anyOf do.
+		require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewSummary("3 problems",
+			niceyaml.NewError("about value", niceyaml.AtPath(value)),
+			niceyaml.NewError("about value", niceyaml.AtPath(value)),
+			niceyaml.NewError("about key", niceyaml.AtPosition(position.New(0, 0))),
+		)), &bound)
+
+		excerpt, ok := bound.Excerpt(0)
+		require.True(t, ok)
+
+		assert.Equal(t, line.Annotations{
+			{Content: "about value", Kind: kind.TextError, Placement: line.Below, Col: 5},
+			{Content: "about key", Kind: kind.TextError, Placement: line.Below, Col: 0},
+		}, excerpt.Annotations(0))
+		assert.Equal(t, line.Overlays{
+			{Kind: kind.GenericError, Cols: position.NewSpan(5, 10)},
+			{Kind: kind.GenericError, Cols: position.NewSpan(0, 3)},
+		}, excerpt.Overlays(0))
+
+		// A renderer joins the messages in the order of their columns.
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | key: value",
+			"     | ^^^  ^^^^^ about key; about value",
+		), excerpt.String())
+	})
+
 	t.Run("a range that covers no column still shows its line", func(t *testing.T) {
 		t.Parallel()
 
@@ -5395,6 +5430,16 @@ func TestSourceError_Annotate(t *testing.T) {
 		excerpt, ok := bound.Excerpt(0)
 		require.True(t, ok)
 		assert.Equal(t, view.Annotations(0), excerpt.Annotations(0))
+
+		// A walk of the tree meets the binding once per node that holds it,
+		// and the line keeps the mark of the first.
+		walked := source.View()
+		for node := range niceyaml.NewErrorTree(err).All() {
+			node.Bound.Annotate(walked)
+		}
+
+		assert.Equal(t, view.Annotations(0), walked.Annotations(0))
+		assert.Equal(t, view.Overlays(0), walked.Overlays(0))
 	})
 
 	t.Run("a binding reached along many paths marks in linear time", func(t *testing.T) {
@@ -5477,6 +5522,109 @@ func TestSourceError_Annotate(t *testing.T) {
 			"   2 | b: 2",
 			"     |    ^ bad b; too big",
 		), view.Slice(position.NewSpan(1, 2)).String())
+	})
+
+	t.Run("a message that repeats at one column reads once", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(excerptSource)
+		view := source.View()
+
+		// Two bindings say the same of one value, as two branches of an
+		// anyOf do.
+		for range 2 {
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError(
+				"bad b", niceyaml.AtPath(paths.Current().Child("b")),
+			)), &bound)
+			require.True(t, bound.Annotate(view), "the view holds the line, marked or not")
+		}
+
+		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(1))
+		assert.Equal(t, line.Annotations{
+			{Content: "bad b", Kind: kind.TextError, Placement: line.Below, Col: 3},
+		}, view.Annotations(1))
+	})
+
+	t.Run("marking a view twice leaves it as marking it once does", func(t *testing.T) {
+		t.Parallel()
+
+		b := paths.Current().Child("b")
+
+		tcs := map[string]struct {
+			err error
+			// The lines of excerptSource the error marks, by index.
+			want []int
+		}{
+			"error at a path": {
+				err:  niceyaml.NewError("bad b", niceyaml.AtPath(b)),
+				want: []int{1},
+			},
+			"error with no message": {
+				err:  niceyaml.NewError("", niceyaml.AtPath(b)),
+				want: []int{1},
+			},
+			"position past the end of its line": {
+				err:  niceyaml.NewError("far", niceyaml.AtPosition(position.New(1, 99))),
+				want: []int{1},
+			},
+			"range over two lines": {
+				err: niceyaml.NewError("wide", niceyaml.AtRange(
+					position.NewRange(position.New(1, 0), position.New(2, 4)),
+				)),
+				want: []int{1, 2},
+			},
+			"detail below a problem": {
+				err: niceyaml.NewError("bad b", niceyaml.AtPath(b), niceyaml.WithDetails(
+					niceyaml.NewError("bad h", niceyaml.AtPath(paths.Current().Child("h"))),
+				)),
+				want: []int{1, 7},
+			},
+			"two problems on one line": {
+				err: niceyaml.NewSummary("2 problems",
+					niceyaml.NewError("bad key", niceyaml.AtPosition(position.New(1, 0))),
+					niceyaml.NewError("bad value", niceyaml.AtPath(b)),
+				),
+				want: []int{1},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(excerptSource)
+				err := yamltest.Bind(t, source, tc.err)
+
+				once, twice := source.View(), source.View()
+
+				for bound := range niceyaml.AllBindings(err) {
+					bound.Annotate(once)
+				}
+
+				for range 2 {
+					for bound := range niceyaml.AllBindings(err) {
+						bound.Annotate(twice)
+					}
+				}
+
+				var marked []int
+
+				for i := range once.Hunks(0).All() {
+					marked = append(marked, i)
+				}
+
+				assert.Equal(t, tc.want, marked)
+
+				for i := range once.All() {
+					assert.Equal(t, once.Overlays(i), twice.Overlays(i), "overlays of line %d", i)
+					assert.Equal(t, once.Annotations(i), twice.Annotations(i), "annotations of line %d", i)
+				}
+
+				assert.Equal(t, once.String(), twice.String())
+			})
+		}
 	})
 
 	t.Run("an error with no message marks a caret run alone", func(t *testing.T) {

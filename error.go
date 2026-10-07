@@ -1,7 +1,6 @@
 package niceyaml
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"io"
@@ -3335,22 +3334,25 @@ func rangeOf(ranges position.Ranges, at position.Position) position.Range {
 //
 // A line several errors mark carries an annotation for each, which
 // [line.View.String] and the printer draw on one row joined by "; " in
-// column order, whatever order the bindings come in. An error with no
-// message marks its line with an annotation below it with no content. A
-// renderer that draws marks from annotations, as the printer does, draws
-// that annotation as a caret run under the highlight, so the range shows
-// its extent without color. The annotation starts at the first column the
-// highlight covers on its line, so a position on the spaces around a token
-// puts the message under the token. A location whose highlight leaves out
-// its own line gets an overlay of no width at its column on that line. Such
-// locations include a position past the end of a line and a path to an
-// empty value. They also include a position on a line of only spaces inside
-// a block scalar, and a range that starts at the end of its first line. The
-// overlay renders nothing and still counts as decoration, so
-// [line.View.Hunks] keeps the line. Annotate moves a column past the end of
-// its line to the column after its last rune, for the overlay and the
-// message alike, so a renderer spends at most one cell past the line on the
-// mark. [SourceError.Error] still reports the column as given.
+// column order, whatever order the bindings come in. A line keeps each
+// mark once, so an error that marks a view twice leaves it as the first
+// call did, and a message that repeats at one column of a line reads once.
+// An error with no message marks its line with an annotation below it
+// with no content. A renderer that draws marks from annotations, as the
+// printer does, draws that annotation as a caret run under the highlight,
+// so the range shows its extent without color. The annotation starts at
+// the first column the highlight covers on its line, so a position on the
+// spaces around a token puts the message under the token. A location whose
+// highlight leaves out its own line gets an overlay of no width at its
+// column on that line. Such locations include a position past the end of a
+// line and a path to an empty value. They also include a position on a
+// line of only spaces inside a block scalar, and a range that starts at
+// the end of its first line. The overlay renders nothing and still counts
+// as decoration, so [line.View.Hunks] keeps the line. Annotate moves a
+// column past the end of its line to the column after its last rune, for
+// the overlay and the message alike, so a renderer spends at most one cell
+// past the line on the mark. [SourceError.Error] still reports the column
+// as given.
 //
 // Annotate finds each line by identity rather than by index, since every
 // view over a source shares its [*line.Line] values, so the view may be
@@ -3366,9 +3368,10 @@ func rangeOf(ranges position.Ranges, at position.Position) position.Range {
 // [go.jacobcolvin.com/niceyaml/diff.Result.Before] holds every line of
 // the before revision.
 //
-// Annotate reports whether it marked any line. It reports false when the
-// location did not resolve, for the reason [SourceError.Unresolved]
-// gives, or when the view holds none of the lines the location falls on.
+// Annotate reports whether it marked any line, including one that carried
+// the marks already. It reports false when the location did not resolve,
+// for the reason [SourceError.Unresolved] gives, or when the view holds
+// none of the lines the location falls on.
 //
 // [SourceError.Excerpt] marks the whole tree of the error on a fresh view
 // of its source, with the message of each node below the root beside its
@@ -3390,9 +3393,10 @@ func (e *SourceError) Annotate(view *line.View) bool {
 // marks a fresh [Source.View] with the location of every node in the
 // tree and the message of each node below the root as an annotation
 // below its own line, with each tab as four spaces, as
-// [SourceError.Annotate] adds it. The root's own location gets a caret
-// run alone, since the tree [FormatError] prints above the excerpt names
-// the root.
+// [SourceError.Annotate] adds it. A line several nodes mark carries one
+// annotation per message, and a message that repeats at one column of it
+// reads once. The root's own location gets a caret run alone, since the
+// tree [FormatError] prints above the excerpt names the root.
 // [line.View.Hunks] then keeps context lines of unchanged content on
 // either side of each marked line. Excerpt leaves out a node bound to
 // another source, and [SourceError.Excerpts] shows it in its own source.
@@ -3627,14 +3631,28 @@ func annotate(view *line.View, src *Source, positions []errorPosition) bool {
 // position on a line of only spaces inside a block scalar, and a range that
 // starts at the end of its first line. The overlay renders nothing and
 // still marks the line as decorated, so the line joins the hunks
-// [line.View.Hunks] keeps. The annotation below a line starts at the first
-// column the highlight of its position covers on that line, where
+// [line.View.Hunks] keeps.
+//
+// Each position with a message adds one annotation below its line, so a
+// line several positions mark carries one annotation per message, and a
+// renderer joins them in column order. Each tab in a message becomes four
+// spaces, as [escape.Tabs] returns it, so the annotation spells the message
+// as the tree of [FormatError] does. A renderer draws the other control
+// characters of an annotation as their pictures. The annotation starts at
+// the first column the highlight of its position covers on that line, where
 // [markUnannotated] starts a caret run, so a position on the spaces around
 // a token puts its message under the token. A position with no highlight on
 // its line keeps its column. A column past the end of its line moves to the
 // column after its last rune, in the overlay and in the annotation below
 // the line. A far column then costs a renderer no more cells than a column
 // at the end.
+//
+// A line keeps each mark once. [addOverlay] and [addAnnotation] skip a mark
+// the line holds already, so positions that repeat, in one call or across
+// several, leave the view as the first of them does. A message that repeats
+// at one column thus reads once. Several errors say the same of one value
+// when a schema states a constraint twice, or when a value fails two
+// branches of an anyOf the same way.
 func annotateSource(view *line.View, src *Source, positions []errorPosition) []int {
 	if len(positions) == 0 {
 		return nil
@@ -3644,8 +3662,6 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 
 	var marked []int
 
-	notes := make([]errorPosition, 0, len(positions))
-
 	for _, pos := range positions {
 		var segments []position.Range
 
@@ -3653,20 +3669,26 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 			segments = append(segments, src.lines.SliceLines(r)...)
 		}
 
-		start, onLine := highlightStart(pos.pos, segments)
-
-		note := pos
-		note.pos.Col = start
-		notes = append(notes, note)
-
 		if i, ok := index(pos.pos.Line); ok {
 			marked = append(marked, i)
 
+			width := src.lines.Line(pos.pos.Line).Width()
+			start, onLine := highlightStart(pos.pos, segments)
+
 			if !onLine {
-				col := min(pos.pos.Col, src.lines.Line(pos.pos.Line).Width())
-				view.AddLineOverlay(i, line.Overlay{
+				col := min(pos.pos.Col, width)
+				addOverlay(view, i, line.Overlay{
 					Cols: position.NewSpan(col, col),
 					Kind: kind.GenericError,
+				})
+			}
+
+			if pos.message != "" {
+				addAnnotation(view, i, line.Annotation{
+					Content:   escape.Tabs(pos.message),
+					Kind:      kind.TextError,
+					Placement: line.Below,
+					Col:       min(start, width),
 				})
 			}
 		}
@@ -3675,7 +3697,7 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 		// line, which the view holds at index i.
 		for _, lr := range segments {
 			if i, ok := index(lr.Start.Line); ok {
-				view.AddLineOverlay(i, line.Overlay{
+				addOverlay(view, i, line.Overlay{
 					Cols: position.NewSpan(lr.Start.Col, lr.End.Col),
 					Kind: kind.GenericError,
 				})
@@ -3685,18 +3707,23 @@ func annotateSource(view *line.View, src *Source, positions []errorPosition) []i
 		}
 	}
 
-	if len(marked) == 0 {
-		return nil
-	}
-
-	for lineIdx, annotation := range prepareLineAnnotations(notes) {
-		if i, ok := index(lineIdx); ok {
-			annotation.Col = min(annotation.Col, src.lines.Line(lineIdx).Width())
-			view.Annotate(i, annotation)
-		}
-	}
-
 	return marked
+}
+
+// addOverlay adds o to line i of view, unless the line holds an equal
+// overlay already.
+func addOverlay(view *line.View, i int, o line.Overlay) {
+	if !slices.Contains(view.Overlays(i), o) {
+		view.AddLineOverlay(i, o)
+	}
+}
+
+// addAnnotation adds a to line i of view, unless the line holds an equal
+// annotation already.
+func addAnnotation(view *line.View, i int, a line.Annotation) {
+	if !slices.Contains(view.Annotations(i), a) {
+		view.Annotate(i, a)
+	}
 }
 
 // highlightStart returns the first column that segments cover on the
@@ -3873,52 +3900,4 @@ func clampRange(lines line.Lines, r position.Range) position.Range {
 	r.End.Col = max(r.End.Col, 0)
 
 	return r
-}
-
-// prepareLineAnnotations prepares annotations grouped by line index. It
-// includes only positions with messages. Each line joins its messages in
-// column order, so they read in the order of the carets, and messages at
-// the same column keep the order they arrived in. A message that repeats
-// at one column reads once. Several errors say the same of one value when
-// a schema states a constraint twice, or when a value fails two branches
-// of an anyOf the same way. Each tab in a message becomes four spaces, as
-// [escape.Tabs] returns it, so the annotation spells the message as the
-// tree of [FormatError] does. A renderer draws the other control
-// characters of an annotation as their pictures.
-func prepareLineAnnotations(positions []errorPosition) map[int]line.Annotation {
-	linePositions := make(map[int][]errorPosition)
-
-	for _, pos := range positions {
-		if pos.message != "" {
-			linePositions[pos.pos.Line] = append(linePositions[pos.pos.Line], pos)
-		}
-	}
-
-	result := make(map[int]line.Annotation)
-
-	for lineIdx, lineErrs := range linePositions {
-		slices.SortStableFunc(lineErrs, func(a, b errorPosition) int {
-			return cmp.Compare(a.pos.Col, b.pos.Col)
-		})
-
-		messages := make([]string, 0, len(lineErrs))
-
-		for i, r := range lineErrs {
-			repeats := slices.ContainsFunc(lineErrs[:i], func(prev errorPosition) bool {
-				return prev.pos.Col == r.pos.Col && prev.message == r.message
-			})
-			if !repeats {
-				messages = append(messages, escape.Tabs(r.message))
-			}
-		}
-
-		result[lineIdx] = line.Annotation{
-			Content:   strings.Join(messages, "; "),
-			Kind:      kind.TextError,
-			Placement: line.Below,
-			Col:       lineErrs[0].pos.Col,
-		}
-	}
-
-	return result
 }
