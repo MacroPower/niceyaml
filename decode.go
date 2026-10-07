@@ -1054,11 +1054,12 @@ func (n *Node) Document() *Node {
 // token [tokens.Tokenize] makes, and [tokens.IsPlaceholder] tells it
 // apart from a scalar the file holds. A document of whitespace below a
 // "---" header has a nil body. AST returns each of these bodies as it
-// is, as such a document decodes to nothing. A document that did not
-// parse has no body either, and [Node.Err] tells it apart from an empty
-// document. The node is part of the tree [Source.File] returns, which
-// every Node of the Source shares and resolves against, so a caller must
-// not modify it.
+// is, as such a document decodes to nothing. [Node.IsEmpty] reports
+// each of these documents, so a caller need not tell the bodies apart.
+// A document that did not parse has no body either, and [Node.Err]
+// tells it apart from an empty document. The node is part of the tree
+// [Source.File] returns, which every Node of the Source shares and
+// resolves against, so a caller must not modify it.
 //
 // The node keeps the anchor or the tag written on it, so a type switch on
 // it can see an [*ast.AnchorNode] or an [*ast.TagNode] where the source
@@ -1223,13 +1224,13 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 //	}
 //
 // A path that selects nothing returns no Nodes and no error, as
-// [paths.Path.Nodes] does. A document with no content, such as an empty
-// document or one of comments alone, holds nothing for a selector to
-// reach. A path with selectors returns no Nodes there too, where Node.At
-// returns an error wrapping [paths.ErrNoDocument]. A loop over the items
-// of each document of a file thus passes over an empty document. The
-// root path selects the null at the "---" header of such a document, and
-// nothing in one without a header, such as an empty file.
+// [paths.Path.Nodes] does. A document with no content, which
+// [Node.IsEmpty] reports, holds nothing for a selector to reach. A path
+// with selectors returns no Nodes there too, where Node.At returns an
+// error wrapping [paths.ErrNoDocument]. A loop over the items of each
+// document of a file thus passes over an empty document. The root path
+// selects the null at the "---" header of such a document, and nothing
+// in one without a header, such as an empty file.
 //
 // The errors [paths.Path.Nodes] returns come back bound to the source:
 // one wrapping [paths.ErrAlias] when an alias on the path does not

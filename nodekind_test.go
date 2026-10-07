@@ -260,3 +260,190 @@ func TestNode_Kind(t *testing.T) {
 		}, got)
 	})
 }
+
+func TestNode_IsEmpty(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		path  string
+		want  bool
+	}{
+		"empty source": {
+			input: "",
+			want:  true,
+		},
+		"whitespace alone": {
+			input: "   \n",
+			want:  true,
+		},
+		"comments alone": {
+			input: "# only a comment\n",
+			want:  true,
+		},
+		"header alone": {
+			input: "---\n",
+			want:  true,
+		},
+		"header and comment": {
+			input: "---\n# Source: chart/templates/empty.yaml\n",
+			want:  true,
+		},
+		"comment on the header line": {
+			input: "--- # nothing\n",
+			want:  true,
+		},
+		"directive and header": {
+			input: "%YAML 1.2\n---\n",
+			want:  true,
+		},
+		"header and end marker": {
+			input: "---\n...\n",
+			want:  true,
+		},
+		"end marker alone": {
+			input: "...\n",
+			want:  true,
+		},
+		"null": {
+			input: "null\n",
+		},
+		"tilde": {
+			input: "~\n",
+		},
+		"null below a header": {
+			input: "--- null\n",
+		},
+		"tagged null": {
+			input: "!!null\n",
+		},
+		"empty mapping": {
+			input: "{}\n",
+		},
+		"empty sequence": {
+			input: "[]\n",
+		},
+		"empty single-quoted string": {
+			input: "''\n",
+		},
+		"empty double-quoted string": {
+			input: "\"\"\n",
+		},
+		"empty block scalar": {
+			input: "--- |\n",
+		},
+		"alias with no anchor": {
+			input: "*nope\n",
+		},
+		"alias with no anchor below a header": {
+			input: "--- *nope\n",
+		},
+		"mapping": {
+			input: "a: 1\n",
+		},
+		"value left out": {
+			input: "a:\n",
+			path:  "$.a",
+		},
+		"empty mapping value": {
+			input: "a: {}\n",
+			path:  "$.a",
+		},
+		"key": {
+			input: "a: 1\n",
+			path:  "$.a~",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			n := yamltest.FirstDocument(t, tc.input)
+			if tc.path != "" {
+				n = yamltest.At(t, n, paths.MustParse(tc.path))
+			}
+
+			assert.Equal(t, tc.want, n.IsEmpty())
+		})
+	}
+
+	t.Run("nil node", func(t *testing.T) {
+		t.Parallel()
+
+		var n *niceyaml.Node
+
+		assert.False(t, n.IsEmpty())
+	})
+
+	t.Run("document that did not parse", func(t *testing.T) {
+		t.Parallel()
+
+		// The Node of such a document holds no body, with a header above
+		// it or without, and the document is not empty.
+		for _, input := range []string{"a: [\n", "---\na: [\n"} {
+			docs, err := niceyaml.NewSourceFromString(input).Documents()
+			require.Error(t, err)
+			require.Len(t, docs, 1)
+
+			assert.False(t, docs[0].IsEmpty(), input)
+			require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
+		}
+	})
+
+	t.Run("each document", func(t *testing.T) {
+		t.Parallel()
+
+		docs, err := niceyaml.NewSourceFromString(stringtest.JoinLF(
+			"a: 1",
+			"---",
+			"# Source: chart/templates/empty.yaml",
+			"---",
+			"--- ~",
+			"--- *nope",
+			"---",
+			"b: 2",
+			"---",
+			"",
+		)).Documents()
+		require.NoError(t, err)
+
+		got := make([]bool, 0, len(docs))
+		for _, doc := range docs {
+			got = append(got, doc.IsEmpty())
+		}
+
+		assert.Equal(t, []bool{false, true, true, false, false, false, true}, got)
+	})
+
+	t.Run("node at the root path", func(t *testing.T) {
+		t.Parallel()
+
+		// The root path of an empty document below a header selects the
+		// null at the header, and the Node there is the root.
+		empty := yamltest.FirstDocument(t, "---\n")
+		assert.True(t, yamltest.At(t, empty, paths.Doc()).IsEmpty())
+
+		nodes, err := empty.Nodes(paths.Doc())
+		require.NoError(t, err)
+		require.Len(t, nodes, 1)
+		assert.True(t, nodes[0].IsEmpty())
+
+		full := yamltest.FirstDocument(t, "a: 1\n")
+		assert.False(t, yamltest.At(t, full, paths.Doc()).IsEmpty())
+	})
+
+	t.Run("every empty document has no kind", func(t *testing.T) {
+		t.Parallel()
+
+		// Kind is NodeNone for more than the empty documents, so a caller
+		// that skips those asks IsEmpty.
+		alias := yamltest.FirstDocument(t, "*nope\n")
+		assert.Equal(t, niceyaml.NodeNone, alias.Kind())
+		assert.False(t, alias.IsEmpty())
+
+		empty := yamltest.FirstDocument(t, "# only a comment\n")
+		assert.Equal(t, niceyaml.NodeNone, empty.Kind())
+		assert.True(t, empty.IsEmpty())
+	})
+}

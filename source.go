@@ -533,6 +533,7 @@ func (s *Source) Tokens() token.Tokens {
 // hold one empty document, which decodes to the zero value. The YAML spec
 // finds no document in a stream of markers alone. Documents departs from
 // it on purpose, so such a file reads as an empty file does.
+// [Node.IsEmpty] reports each empty document, an explicit one included.
 //
 // It parses the source and builds each Node once, so every call returns
 // the same pointers. The slice itself is a copy, so reordering it reaches

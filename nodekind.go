@@ -14,8 +14,11 @@ type NodeKind int
 const (
 	// NodeNone is the kind of a Node that holds no value: the root of an
 	// empty document, of a document of comments or directives alone, or
-	// of a document that did not parse, and a nil Node. [Node.Err] tells a
-	// document that did not parse apart from an empty one.
+	// of a document that did not parse, and a nil Node. The root of a
+	// document that is an alias with no anchor before it has this kind
+	// too. [Node.IsEmpty] reports the documents with no content among
+	// these, and [Node.Err] tells a document that did not parse apart
+	// from an empty one.
 	NodeNone NodeKind = iota
 	// NodeMapping is the kind of a mapping, block or flow.
 	NodeMapping
@@ -71,4 +74,46 @@ func (n *Node) Kind() NodeKind {
 	default:
 		return NodeScalar
 	}
+}
+
+// IsEmpty reports whether the Node is the root of a document that parsed
+// and holds no content. Such a document is an empty file, a file of
+// whitespace or comments alone, or a "---" header with nothing but
+// comments below it. A %YAML or %TAG directive above the header adds no
+// content.
+//
+// IsEmpty describes the document and not a value in it. A document that
+// holds any value is not empty, so IsEmpty is false for an empty mapping
+// `{}`, an empty sequence `[]`, and an empty string `""`. It is false
+// for an explicit null such as `null` or `~`, and for an alias, even one
+// with no anchor before it. A caller that asks whether a mapping or a
+// sequence holds anything lists its entries with [Node.Nodes].
+//
+// It is false for a document that did not parse, which [Node.Err]
+// reports, for a Node that [Node.At] or [Node.Nodes] scopes below the
+// root, and for a nil Node. [Node.Kind] is [NodeNone] for every Node
+// IsEmpty reports. Kind is NodeNone too for the root of a document that
+// did not parse and for a root that is an alias with no anchor before
+// it, so a caller that passes over empty documents asks IsEmpty.
+//
+// Every document validates and decodes, an empty one included. A file
+// of several documents often holds empty ones. A trailing "---" leaves
+// one, and so does a Helm template that renders to a comment alone. A
+// loop that reads the documents with content passes over the ones
+// IsEmpty reports:
+//
+//	for _, doc := range docs {
+//		if doc.IsEmpty() {
+//			continue
+//		}
+//
+//		manifest, err := doc.Decode[Manifest](ctx)
+//		// ...
+//	}
+func (n *Node) IsEmpty() bool {
+	if n == nil || n.doc.err != nil || !n.base.IsRoot() {
+		return false
+	}
+
+	return !astnode.HasContent(n.doc.root.Body)
 }
