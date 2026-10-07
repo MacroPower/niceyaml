@@ -100,10 +100,11 @@ type Registry struct {
 	client      *http.Client       // fetches the schemas URL refs name
 	fsys        fs.FS              // reads the schemas File refs name under WithFSAt; nil reads the disk
 	fsIDs       map[any]int        // the number of each file system a Ref names its file in
+	fsKept      []fs.FS            // each file system in fsIDs, which keeps a map known by address alive
 	fsAt        *fsDir             // the directory on disk the root of fsys stands for; nil when it stands for none
 	resolvers   []Resolver
 	compileOpts []CompileOption
-	mu          sync.RWMutex // guards cache, refDocs, and fsIDs
+	mu          sync.RWMutex // guards cache, refDocs, fsIDs, and fsKept
 	// Makes Validate report ErrNoMatch when no resolver applies.
 	requireSchema bool
 }
@@ -1094,7 +1095,7 @@ func (r *Registry) fsKey(fsys fs.FS) (string, error) {
 
 	n, ok := r.keptFSNumber(id)
 	if !ok {
-		n = r.keepFSNumber(id)
+		n = r.keepFSNumber(id, fsys)
 	}
 
 	return "\x00fs" + strconv.Itoa(n) + "\x00", nil
@@ -1112,10 +1113,12 @@ func (r *Registry) keptFSNumber(id any) (int, bool) {
 	return n, ok
 }
 
-// keepFSNumber gives the file system id names the next number and
+// keepFSNumber gives fsys, the file system id names, the next number and
 // returns it, unless the registry keeps a number for id already, in
-// which case it returns that number.
-func (r *Registry) keepFSNumber(id any) int {
+// which case it returns that number. The registry holds fsys from then
+// on. An id that is a [mapIdentity] holds nothing alive, and a later map
+// at the address of a collected one would take its number.
+func (r *Registry) keepFSNumber(id any, fsys fs.FS) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -1123,6 +1126,7 @@ func (r *Registry) keepFSNumber(id any) int {
 	if !ok {
 		n = len(r.fsIDs) + 1
 		r.fsIDs[id] = n
+		r.fsKept = append(r.fsKept, fsys)
 	}
 
 	return n
