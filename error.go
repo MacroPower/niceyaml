@@ -2293,13 +2293,44 @@ func (e *SourceError) Node() *Node {
 // in a source that holds several documents or has a syntax error. A nil
 // SourceError is bound to none, and [ErrorTree.Bound] is nil for an error
 // bound to no source. [Node.DocumentIndex] panics on a nil Node, so a
-// caller checks the root before it reads the index of the document.
+// caller that sorts the errors of a file by document reads
+// [SourceError.DocumentIndex], which reports false wherever Document
+// returns nil.
 func (e *SourceError) Document() *Node {
 	if e == nil {
 		return nil
 	}
 
 	return e.node.Document()
+}
+
+// DocumentIndex returns the 0-indexed position within the file of the
+// document the error is bound to and true, or 0 and false for an error
+// bound to no document. It is the [Node.DocumentIndex] of the root
+// [SourceError.Document] returns, and it reports false wherever Document
+// returns nil. A report that groups the problems of a file by document
+// thus reads the index from the binding and never holds a nil Node:
+//
+//	byDocument := make(map[int][]string)
+//	for problem := range niceyaml.NewErrorTree(err).Problems() {
+//		if index, ok := problem.Bound.DocumentIndex(); ok {
+//			byDocument[index] = append(byDocument[index], problem.Message())
+//		}
+//	}
+//
+// A YAML syntax error reports the index of the document it belongs to, so
+// the syntax error of the second document of three reports 1. An error
+// [Source.Bind] bound with no location reports false, and so does a nil
+// SourceError, which a node for an error bound to no source holds. The
+// message of a bound error counts documents from 1, as it counts lines,
+// so "document 3" in [SourceError.Error] is the document at index 2.
+func (e *SourceError) DocumentIndex() (int, bool) {
+	doc := e.Document()
+	if doc == nil {
+		return 0, false
+	}
+
+	return doc.DocumentIndex(), true
 }
 
 // Message returns the text of the bound error with no position, document,

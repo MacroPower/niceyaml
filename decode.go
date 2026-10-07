@@ -1594,7 +1594,9 @@ func (n *Node) Source() *Source {
 // a sequence is the Index of the selector [paths.Path.Last] gives for
 // [Node.Path]. The message of a bound error counts documents from 1, as
 // it counts lines, so "document 3" in [SourceError.Error] is the document
-// at index 2.
+// at index 2. [SourceError.DocumentIndex] reports the index of the
+// document an error is bound to, for a caller that holds the error and
+// no Node.
 func (n *Node) DocumentIndex() int {
 	return n.doc.index
 }

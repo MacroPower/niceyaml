@@ -2599,6 +2599,10 @@ func TestSourceError_NilReceiver(t *testing.T) {
 	assert.Nil(t, missing.Source())
 	assert.Nil(t, missing.Document())
 	assert.Nil(t, missing.Errors())
+
+	index, bound := missing.DocumentIndex()
+	assert.Zero(t, index)
+	assert.False(t, bound)
 	assert.NoError(t, missing.Unwrap()) //nolint:testifylint // Asserts the nil, not a test failure.
 
 	_, resolved := missing.Range()
@@ -7340,6 +7344,130 @@ func TestSourceError_Document(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSourceError_DocumentIndex(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
+	docs, err := source.Documents()
+	require.NoError(t, err)
+
+	// The second document of three does not parse.
+	broken := niceyaml.NewSourceFromString("a: 1\n---\nb: [\n---\nc: 3\n")
+	brokenDocs := broken.AllDocuments()
+	require.Len(t, brokenDocs, 3)
+
+	// The header follows an anchor with no value, so both documents parse
+	// together and share the syntax error of the second.
+	together := niceyaml.NewSourceFromString("a: &x\n---\nb: [1\n").AllDocuments()
+	require.Len(t, together, 2)
+
+	tcs := map[string]struct {
+		err  error
+		want int
+		ok   bool
+	}{
+		"bound by the first document": {
+			err:  docs[0].Bind(niceyaml.NewError("bad")),
+			want: 0,
+			ok:   true,
+		},
+		"bound by the second document": {
+			err:  docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")))),
+			want: 1,
+			ok:   true,
+		},
+		"bound by a scoped node of the second document": {
+			err:  yamltest.At(t, docs[1], paths.Current().Child("b")).Bind(niceyaml.NewError("bad")),
+			want: 1,
+			ok:   true,
+		},
+		"bound by the source at a position": {
+			err:  source.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(2, 0)))),
+			want: 1,
+			ok:   true,
+		},
+		"bound by the source at no location": {
+			err: source.Bind(niceyaml.NewError("bad")),
+		},
+		"bound by the source on a line no document holds": {
+			err: source.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(9, 0)))),
+		},
+		"bound by the source at a path among several documents": {
+			err: source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")))),
+		},
+		"syntax error of the second document of three": {
+			err: func() error {
+				_, err := broken.File()
+
+				return err
+			}(),
+			want: 1,
+			ok:   true,
+		},
+		"syntax error from the document that parsed together with its own": {
+			err:  together[0].Validate(t.Context()),
+			want: 1,
+			ok:   true,
+		},
+		"bound by the source at a position beside a syntax error": {
+			err:  broken.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(4, 0)))),
+			want: 2,
+			ok:   true,
+		},
+		"wrapping a binding keeps its document": {
+			err:  docs[1].Bind(fmt.Errorf("context: %w", docs[0].Bind(niceyaml.NewError("bad")))),
+			want: 0,
+			ok:   true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, tc.err, &bound)
+
+			got, ok := bound.DocumentIndex()
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+
+			// The index is that of the document, where the error has one.
+			if doc := bound.Document(); doc != nil {
+				assert.Equal(t, doc.DocumentIndex(), got)
+			} else {
+				assert.False(t, ok)
+			}
+		})
+	}
+
+	t.Run("a report reads the document of every problem from its binding", func(t *testing.T) {
+		t.Parallel()
+
+		// A syntax error, a violation in a document that parsed, and an
+		// error bound to no source, which has no binding to read.
+		err := errors.Join(
+			broken.ValidateDocuments(t.Context()),
+			brokenDocs[2].Bind(niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c")))),
+			errors.New("schema server unreachable"),
+		)
+
+		var got []string
+
+		for problem := range niceyaml.NewErrorTree(err).Problems() {
+			index, ok := problem.Bound.DocumentIndex()
+			got = append(got, fmt.Sprintf("%d %t %s", index, ok, problem.Message()))
+		}
+
+		assert.Equal(t, []string{
+			"1 true sequence end token ']' not found",
+			"2 true bad c",
+			"0 false schema server unreachable",
+		}, got)
+	})
 }
 
 // rebasedHours is a [niceyaml.SelfValidator] that writes an `@` path, which
