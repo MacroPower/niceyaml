@@ -475,8 +475,9 @@ func SkipEmpty(v Validator) Validator {
 // newDocuments creates the root [*Node] of each YAML document of the file
 // src parsed, in file order. The file holds a stand-in for each document
 // the parser rejected, so that document gets a Node too, which carries its
-// syntax error. See alignDocumentTokens for how each document node finds
-// its tokens and foldPreambles for which nodes become documents.
+// syntax error, and [bindSyntaxErrors] binds that error to its document.
+// See alignDocumentTokens for how each document node finds its tokens and
+// foldPreambles for which nodes become documents.
 func newDocuments(src *Source) []*Node {
 	docs := foldPreambles(src.file.Docs, alignDocumentTokens(src.file, src.Tokens(), src.standIns), src.standIns)
 	liftHeaderComments(docs)
@@ -502,7 +503,53 @@ func newDocuments(src *Source) []*Node {
 		nodes[i] = doc.node
 	}
 
+	bindSyntaxErrors(nodes)
+
 	return nodes
+}
+
+// bindSyntaxErrors binds the syntax error of each of docs that did not
+// parse to the root of the document it belongs to. The parser reports an
+// error before any document exists, so the error arrives bound to the
+// source alone. The documents of one run follow one another and share its
+// error, so the error belongs to the one of them whose span holds its
+// line. An error that resolved no location belongs to the first of them.
+// The error stays one binding with one document, whichever of the
+// documents returns it.
+func bindSyntaxErrors(docs []*Node) {
+	for i, doc := range docs {
+		if doc.doc.err == nil {
+			continue
+		}
+
+		for bound := range AllBindings(doc.doc.err) {
+			// An earlier document of the run bound the error already.
+			if bound.node != nil {
+				continue
+			}
+
+			bound.node = doc
+
+			if bound.locErr != nil {
+				continue
+			}
+
+			// The parse hands every document of a run the one binding of
+			// its error, so the documents that follow with that error are
+			// the rest of the run.
+			for _, other := range docs[i:] {
+				if !errors.Is(other.doc.err, doc.doc.err) {
+					break
+				}
+
+				if other.span.Contains(bound.loc.pos.Line) {
+					bound.node = other
+
+					break
+				}
+			}
+		}
+	}
 }
 
 // foldPreambles pairs each document node with its token group and folds
@@ -829,7 +876,8 @@ type document struct {
 	// parse, it is the stand-in [parsed.fail] made, which has no body.
 	root *ast.DocumentNode
 	// The syntax error of a document that did not parse, bound to the
-	// Source, which is nil for one that parsed.
+	// Source and to the document bindSyntaxErrors picks for it, which is
+	// nil for one that parsed.
 	err error
 	// Resolves every path in root, which pathResolver creates when the
 	// first path needs it. No Node edits the tree, so the resolver binds
@@ -1045,9 +1093,10 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 //		lipgloss.Println(p.Print(doc.View()))
 //	}
 //
-// The Source produced the error before it built any document, so
-// [SourceError.Document] returns nil for it. The Node that returns the
-// error names the document, and [Node.DocumentIndex] is its index.
+// The error is bound to the document it belongs to, so
+// [SourceError.Document] returns the root of that document for it,
+// whether [Node.Err], [Source.File], or a method of the Node returned the
+// error.
 //
 // A document that did not parse has no tree. [Node.Decode],
 // [Node.DecodeInto], [Node.Validate], [Node.At], [Node.Nodes], and
@@ -1058,8 +1107,8 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 //
 // A "---" header that directly follows an anchor with no value parses
 // together with the document above it, as [Source.AllDocuments]
-// describes. Both documents then return the same error. A nil Node has
-// none.
+// describes. Both documents then return the same error, which is bound to
+// the one of the two that holds its location. A nil Node has none.
 func (n *Node) Err() error {
 	if n == nil {
 		return nil

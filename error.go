@@ -1563,7 +1563,8 @@ type boundTexts struct {
 // itself. A binder that routes picks the document for each location it
 // resolves, as [Source.Bind] does; one that does not, as the parser's
 // binder must not, since the documents are not built until the parse
-// ends, binds to the source alone. A binder that marks its paths
+// ends, binds to the source alone, and [bindSyntaxErrors] gives each error
+// of the parse its document afterwards. A binder that marks its paths
 // ambiguous binds errors whose paths may name another value, so it
 // resolves no path, for the reason [ErrAmbiguousPath]. It still locates
 // a position or a range. A binder that locates binds an error a caller or
@@ -1711,18 +1712,13 @@ func anchored(err error) scopedError {
 
 // nodeAt returns the node an error on line idx binds to: the one b binds
 // with, or, when b routes, the root of the document of the source whose
-// span holds the line. That root is nil when the source does not parse or
-// the line lies outside it. The spans of the documents run in order and each
-// ends where the next starts, so a search for the first span that ends
-// past the line finds the one that holds it.
+// span holds the line, whether or not that document parsed. That root is
+// nil when the line lies outside the source. The spans of the documents
+// run in order and each ends where the next starts, so a search for the
+// first span that ends past the line finds the one that holds it.
 func (b binder) nodeAt(idx int) *Node {
 	if b.node != nil || !b.route {
 		return b.node
-	}
-
-	_, err := b.src.File()
-	if err != nil {
-		return nil
 	}
 
 	docs := b.src.documents()
@@ -2255,21 +2251,27 @@ func (e *SourceError) Source() *Source {
 // error wrote such a path from that scope, and [SourceError.Path] reports
 // the `$` path from the root of the document. A rejection of the go-yaml
 // decoder is bound to the Node that decoded, and its path starts at `$`
-// already. A
-// position or a range falls in the document whose [Node.Span] holds its
-// line, and a path falls in the one document of the source. The error
-// stays bound to that root when its location does not resolve there, as
-// with a path that selects nothing or a column before the first.
-// Source.Bind binds an error to none when it carries no location or the
-// source does not parse. It also binds to none a position or a range on
-// a line no document holds, and a path in a source that holds several
-// documents or none. An error a [Source] that does not parse produced
-// itself is bound to none as well. Node.Bind keeps its node on every
-// error it binds anew, except an error that wraps a binding. Such an
-// error keeps the node of the binding it wraps, whether Node.Bind
-// returns it as it is or binds it anew around the binding with the
-// details it holds, so its node can be nil or belong to another document
-// or source. A nil SourceError is bound to none.
+// already. A position or a range falls in the document whose [Node.Span]
+// holds its line, whether or not that document parsed, and a path falls
+// in the one document of the source. The error stays bound to that root
+// when its location does not resolve there, as with a path that selects
+// nothing or a column before the first. Source.Bind binds an error to
+// none when it carries no location. It also binds to none a position or a
+// range on a line no document holds, and a path in a source that holds
+// several documents or has a YAML syntax error.
+//
+// A YAML syntax error is bound to the root of the document it belongs
+// to, the one whose span holds its location, so the error [Node.Err]
+// returns names that document. Two documents that parse together share
+// one error, as [Source.AllDocuments] describes, and it is bound to the
+// one of the two that holds its location. A syntax error with no location
+// in the source is bound to the first document it fails.
+//
+// Node.Bind keeps its node on every error it binds anew, except an error
+// that wraps a binding. Such an error keeps the node of the binding it
+// wraps, whether Node.Bind returns it as it is or binds it anew around
+// the binding with the details it holds, so its node can be nil or belong
+// to another document or source. A nil SourceError is bound to none.
 func (e *SourceError) Node() *Node {
 	if e == nil {
 		return nil
@@ -2279,11 +2281,19 @@ func (e *SourceError) Node() *Node {
 }
 
 // Document returns the root [*Node] of the document the error is bound
-// to, the one the node [SourceError.Node] returns belongs to, so a caller
-// that sorts the errors of a file by document reads its
-// [Node.DocumentIndex]. The root is the one [Source.AllDocuments] returns.
-// An error bound to no node is bound to no document. A nil SourceError is
-// bound to none.
+// to, the one the node [SourceError.Node] returns belongs to. The root is
+// the one [Source.AllDocuments] returns at the index of the document. A
+// YAML syntax error is bound to the document it belongs to, so the syntax
+// error of the second document of three returns the root of that
+// document, as a violation there does.
+//
+// Document returns nil for an error bound to no node, which
+// SourceError.Node lists: an error [Source.Bind] bound with no location,
+// with a position or a range on a line no document holds, or with a path
+// in a source that holds several documents or has a syntax error. A nil
+// SourceError is bound to none, and [ErrorTree.Bound] is nil for an error
+// bound to no source. [Node.DocumentIndex] panics on a nil Node, so a
+// caller checks the root before it reads the index of the document.
 func (e *SourceError) Document() *Node {
 	if e == nil {
 		return nil

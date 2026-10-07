@@ -2076,6 +2076,160 @@ func TestSource_AllDocuments(t *testing.T) {
 
 		// ValidateDocuments reports the error both documents return once.
 		assert.Same(t, all[0].Err(), source.ValidateDocuments(t.Context()))
+
+		// The one error is bound to the document that holds its location,
+		// whichever of the two returns it.
+		var cfg map[string]any
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, all[0].DecodeInto(t.Context(), &cfg), &bound)
+		assert.Same(t, all[1], bound.Document())
+	})
+
+	t.Run("each syntax error is bound to the document that holds it", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			// The index of the document each syntax error of the file is
+			// bound to, in file order.
+			want []int
+		}{
+			"only document": {
+				input: "a: [1\n",
+				want:  []int{0},
+			},
+			"first of three": {
+				input: "a: [1\n---\nb: 2\n---\nc: 3\n",
+				want:  []int{0},
+			},
+			"second of three": {
+				input: "a: 1\n---\nb: [1, 2\n---\nc: 3\n",
+				want:  []int{1},
+			},
+			"last of three": {
+				input: "a: 1\n---\nb: 2\n---\nc: [3\n",
+				want:  []int{2},
+			},
+			"first and last of three": {
+				input: "a: [1\n---\nb: 2\n---\nc: [3\n",
+				want:  []int{0, 2},
+			},
+			"second of two that parse together": {
+				input: "a: &x\n---\nb: [1\n",
+				want:  []int{1},
+			},
+			"first of two that parse together": {
+				input: "a: [1\nb: &x\n---\nc: 1\n",
+				want:  []int{0},
+			},
+			"second of two that parse together below another": {
+				input: "k: 1\n---\na: &x\n---\nb: [1\n---\nc: 2\n",
+				want:  []int{2},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(tc.input)
+
+				_, err := source.File()
+				require.ErrorIs(t, err, niceyaml.ErrSyntax)
+
+				docs := source.AllDocuments()
+
+				var got []int
+
+				for bound := range niceyaml.Bindings(err) {
+					doc := bound.Document()
+					require.NotNil(t, doc)
+					assert.Same(t, bound.Node(), doc)
+					assert.Same(t, docs[doc.DocumentIndex()], doc)
+					assert.Same(t, error(bound), doc.Err(), "the document returns the error bound to it")
+
+					rng, ok := bound.Range()
+					require.True(t, ok)
+					assert.True(t, doc.Span().Contains(rng.Start.Line))
+
+					got = append(got, doc.DocumentIndex())
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
+	})
+
+	t.Run("a syntax error with no location is bound to the first document it fails", func(t *testing.T) {
+		t.Parallel()
+
+		// The parser panics on a token with no position, and no token of
+		// the run has one to locate the error at. The header follows an
+		// anchor with no value, so both documents parse together.
+		tks := lexer.Tokenize("a: &x\n---\nb: 1\n")
+		for _, tk := range tks {
+			tk.Position = nil
+		}
+
+		source := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("f.yaml"))
+
+		all := source.AllDocuments()
+		require.Len(t, all, 2)
+		require.ErrorIs(t, all[0].Err(), niceyaml.ErrSyntax)
+		assert.Same(t, all[0].Err(), all[1].Err())
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, all[1].Err(), &bound)
+		assert.Same(t, all[0], bound.Document())
+
+		_, ok := bound.Position()
+		assert.False(t, ok)
+
+		// No position says which document the error is about, so the
+		// message names the document.
+		assert.True(t,
+			strings.HasPrefix(bound.Error(), "f.yaml: document 1: parser rejected the tokens:"),
+			bound.Error(),
+		)
+	})
+
+	t.Run("File and AllDocuments from two goroutines return the bound error", func(t *testing.T) {
+		t.Parallel()
+
+		// Binding a syntax error to its document writes to the error. The
+		// race detector fails the test when one goroutine reads the error
+		// File returned while the other still builds the documents.
+		for range 20 {
+			source := niceyaml.NewSourceFromString("a: 1\n---\nb: [1, 2\n---\nc: 3\n")
+
+			var (
+				wg                 sync.WaitGroup
+				fromFile, fromDocs *niceyaml.Node
+			)
+
+			wg.Go(func() {
+				_, err := source.File()
+
+				for bound := range niceyaml.Bindings(err) {
+					fromFile = bound.Document()
+				}
+			})
+
+			wg.Go(func() {
+				for bound := range niceyaml.Bindings(source.AllDocuments()[1].Err()) {
+					fromDocs = bound.Document()
+				}
+			})
+
+			wg.Wait()
+
+			require.NotNil(t, fromFile)
+			assert.Same(t, fromFile, fromDocs)
+			assert.Same(t, source.AllDocuments()[1], fromFile)
+		}
 	})
 }
 
@@ -3530,7 +3684,63 @@ func TestSource_Bind(t *testing.T) {
 		assert.False(t, ok)
 	})
 
-	t.Run("position in a source that does not parse binds to none", func(t *testing.T) {
+	t.Run("position in a source with a syntax error binds to the document holding the line", func(t *testing.T) {
+		t.Parallel()
+
+		// The second document of three does not parse.
+		broken := niceyaml.NewSourceFromString("a: 1\n---\nb: [1, 2\n---\nc: 3\n", niceyaml.WithName("broken.yaml"))
+
+		docs := broken.AllDocuments()
+		require.Len(t, docs, 3)
+		require.NoError(t, docs[0].Err())
+		require.ErrorIs(t, docs[1].Err(), niceyaml.ErrSyntax)
+		require.NoError(t, docs[2].Err())
+
+		tcs := map[string]struct {
+			opt niceyaml.ErrorOption
+			// The index of the document the error binds to.
+			want int
+			msg  string
+		}{
+			"position in the document above the syntax error": {
+				opt:  niceyaml.AtPosition(position.New(0, 0)),
+				want: 0,
+				msg:  "broken.yaml:1:1: bad",
+			},
+			"position in the document that did not parse": {
+				opt:  niceyaml.AtPosition(position.New(2, 0)),
+				want: 1,
+				msg:  "broken.yaml:3:1: bad",
+			},
+			"position in the document below the syntax error": {
+				opt:  niceyaml.AtPosition(position.New(4, 3)),
+				want: 2,
+				msg:  "broken.yaml:5:4: bad",
+			},
+			"range in the document below the syntax error": {
+				opt:  niceyaml.AtRange(position.NewRange(position.New(4, 0), position.New(4, 1))),
+				want: 2,
+				msg:  "broken.yaml:5:1: bad",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := broken.Bind(niceyaml.NewError("bad", tc.opt))
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+				assert.Same(t, docs[tc.want], bound.Document())
+				assert.Equal(t, tc.msg, err.Error())
+				require.NoError(t, bound.Unresolved())
+			})
+		}
+	})
+
+	t.Run("position in a source of one document that does not parse binds to it", func(t *testing.T) {
 		t.Parallel()
 
 		broken := niceyaml.NewSourceFromString("a: [\n", niceyaml.WithName("broken.yaml"))
@@ -3539,7 +3749,7 @@ func TestSource_Bind(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
-		assert.Nil(t, bound.Document())
+		assert.Same(t, broken.AllDocuments()[0], bound.Document())
 		assert.Equal(t, "broken.yaml:1:1: bad", err.Error())
 	})
 

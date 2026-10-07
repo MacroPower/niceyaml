@@ -7259,6 +7259,11 @@ func TestSourceError_Document(t *testing.T) {
 	docs, err := source.Documents()
 	require.NoError(t, err)
 
+	// The second document of three does not parse.
+	broken := niceyaml.NewSourceFromString("a: 1\n---\nb: [\n---\nc: 3\n")
+	brokenDocs := broken.AllDocuments()
+	require.Len(t, brokenDocs, 3)
+
 	tcs := map[string]struct {
 		err  error
 		want *niceyaml.Node
@@ -7282,12 +7287,24 @@ func TestSourceError_Document(t *testing.T) {
 		"bound by the source at no location": {
 			err: source.Bind(niceyaml.NewError("bad")),
 		},
-		"produced by the source": {
+		"syntax error of the second document of three": {
 			err: func() error {
-				_, err := niceyaml.NewSourceFromString("a: [\n").File()
+				_, err := broken.File()
 
 				return err
 			}(),
+			want: brokenDocs[1],
+		},
+		"syntax error from the document that holds it": {
+			err:  brokenDocs[1].Validate(t.Context()),
+			want: brokenDocs[1],
+		},
+		"bound by the source at a position beside a syntax error": {
+			err:  broken.Bind(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(4, 0)))),
+			want: brokenDocs[2],
+		},
+		"bound by the source at a path beside a syntax error": {
+			err: broken.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("c")))),
 		},
 		"wrapping a binding keeps its document": {
 			err:  docs[1].Bind(fmt.Errorf("context: %w", docs[0].Bind(niceyaml.NewError("bad")))),

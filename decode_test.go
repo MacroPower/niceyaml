@@ -3623,7 +3623,7 @@ func TestDocument_Err(t *testing.T) {
 		assert.NotContains(t, unified, "a: &x 1", "the first document is not in the diff")
 	})
 
-	t.Run("the source produced the error before it built the document", func(t *testing.T) {
+	t.Run("the error is bound to the document", func(t *testing.T) {
 		t.Parallel()
 
 		doc := documents(t)[1]
@@ -3631,11 +3631,16 @@ func TestDocument_Err(t *testing.T) {
 		bound, ok := doc.Err().(*niceyaml.SourceError) //nolint:errorlint // The value itself is the bound error.
 		require.True(t, ok, "want *niceyaml.SourceError, got %T", doc.Err())
 		assert.Same(t, doc.Source(), bound.Source())
-		assert.Nil(t, bound.Document())
+		assert.Same(t, doc, bound.Node())
+		assert.Same(t, doc, bound.Document())
 
 		rng, ok := bound.Range()
 		require.True(t, ok)
 		assert.True(t, doc.Span().Contains(rng.Start.Line))
+
+		// File returns the same binding, so it names the document too.
+		_, fileErr := doc.Source().File()
+		assert.Same(t, doc.Err(), fileErr)
 	})
 
 	t.Run("a path bound through the document resolves nowhere", func(t *testing.T) {

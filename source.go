@@ -102,7 +102,6 @@ type Source struct {
 	references       [][]byte
 	streamOnce       sync.Once
 	fileOnce         sync.Once
-	docsOnce         sync.Once
 	decodeFileOnce   sync.Once
 	refSpellingsOnce sync.Once
 	// Accepts a mapping with the same key twice when parsing and decoding.
@@ -585,9 +584,11 @@ func (s *Source) Documents() ([]*Node, error) {
 // A "---" header that directly follows an anchor with no value parses
 // together with the document above it. A syntax error in either of those
 // two documents fails both, and both return that error, so a loop that
-// collects the error of each document holds it twice. A caller that
-// validates every document calls [Source.ValidateDocuments], which runs
-// that loop and reports a shared error once:
+// collects the error of each document holds it twice. The error is bound
+// to the one of the two that holds its location, which
+// [SourceError.Document] returns whichever of them returned it. A caller
+// that validates every document calls [Source.ValidateDocuments], which
+// runs that loop and reports a shared error once:
 //
 //	err := source.ValidateDocuments(ctx, reg)
 //
@@ -677,10 +678,6 @@ func (s *Source) ValidateDocuments(ctx context.Context, validators ...Validator)
 // copy, so a caller must not change it.
 func (s *Source) documents() []*Node {
 	s.parseOnce()
-
-	s.docsOnce.Do(func() {
-		s.docs = newDocuments(s)
-	})
 
 	return s.docs
 }
@@ -882,9 +879,10 @@ func (d *document) anchorToken() *token.Token {
 // comes back as a [*SourceError] bound to this Source, so [FormatError]
 // renders it with the offending token marked. Several come back joined,
 // each a SourceError of its own in file order, and FormatError marks them
-// all. [Bindings] iterates over them. [Source.Documents] returns that
-// error too, and [Source.AllDocuments] returns the documents of such a
-// file, for a caller that reads the ones that parsed.
+// all. [Bindings] iterates over them. Each is bound to the document it
+// belongs to, which [SourceError.Document] returns. [Source.Documents]
+// returns that error too, and [Source.AllDocuments] returns the documents
+// of such a file, for a caller that reads the ones that parsed.
 //
 // The message of a syntax error names each control character by its
 // Unicode Control Picture, so a tab the parser rejects reads as "␉" there
@@ -901,8 +899,12 @@ func (s *Source) File() (*ast.File, error) {
 	return s.file, nil
 }
 
-// parseOnce parses the tokens of the Source on the first call, and keeps
-// what [Source.parse] returns.
+// parseOnce parses the tokens of the Source on the first call, keeps what
+// [Source.parse] returns, and builds the documents of the file it parsed.
+// [newDocuments] binds each syntax error to its document, which writes to
+// the error. The documents are therefore built here, before any caller
+// holds the error of the parse, and not when the first caller asks for
+// them.
 func (s *Source) parseOnce() {
 	s.fileOnce.Do(func() {
 		p := s.parse()
@@ -916,6 +918,8 @@ func (s *Source) parseOnce() {
 		default:
 			s.fileErr = errors.Join(p.errs...)
 		}
+
+		s.docs = newDocuments(s)
 	})
 }
 
@@ -1016,6 +1020,7 @@ func (s *Source) parse() parsed {
 
 		// The documents come from the file this parse returns, so the error
 		// binds to the source alone rather than routing to one of them.
+		// [bindSyntaxErrors] gives it its document once they exist.
 		p.fail(run, bindTree(err, binder{src: s}))
 	}
 
@@ -1792,7 +1797,7 @@ func startsBelow(tk, mark *token.Token) bool {
 // document. An error that carries a [position.Position] or a
 // [position.Range], as a check that runs on [Source.Lines] produces, binds
 // to the document whose [Node.Span] holds the line, whatever the
-// file holds:
+// file holds, a YAML syntax error in that document or another included:
 //
 //	for i, ln := range source.Lines().All() {
 //		if ln.Width() > 120 {
