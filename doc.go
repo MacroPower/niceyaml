@@ -451,6 +451,12 @@
 // nothing, a decoding failure, or a validator's [Error] renders its
 // location through [FormatError] as it is.
 //
+// A caller that needs the value and not the Node reads it in one call.
+// [Node.DecodeAt] reads a value the document must hold, and returns the
+// error of At when the document lacks it:
+//
+//	kind, err := doc.DecodeAt[string](ctx, paths.Doc().Child("kind"))
+//
 // [IsInvalid] tells a document at fault apart from a check that could
 // not run. The document is at fault for a syntax error, a decode
 // rejection, a schema violation, and an error a [SelfValidator] returns,
