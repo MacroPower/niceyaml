@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"sync"
 
 	"github.com/goccy/go-yaml/ast"
 
@@ -142,12 +143,19 @@ func NewLayers(nodes ...*Node) *Layers {
 	return l
 }
 
+// noLayers returns the Node that [Layers] with no Node validate and bind
+// through: the one document of an empty [Source], which has no name.
+// Every call shares the one Node, which never changes.
+var noLayers = sync.OnceValue(func() *Node {
+	return NewSourceFromString("").documents()[0]
+})
+
 // split returns the Node the layers validate and bind through, and the
 // Nodes below it, nearest first. The Node is the highest layer, or the
-// one document of an empty [Source] when l holds no layers.
+// one [noLayers] returns when l holds no layers.
 func (l *Layers) split() (*Node, []*Node) {
 	if l == nil || l.top == nil {
-		return NewSourceFromString("").documents()[0], nil
+		return noLayers(), nil
 	}
 
 	return l.top, l.below
