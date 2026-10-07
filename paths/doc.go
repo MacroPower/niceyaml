@@ -136,7 +136,9 @@
 // [ErrWildcard]. Use [Path.Nodes] to list every match. [ErrNotFound] means
 // nothing exists at the path, and [ErrAlias] means an alias on the path
 // names no anchor or forms a cycle. When the document has no content to
-// resolve in, the error wraps [ErrNoDocument] along with ErrNotFound.
+// resolve in, the error of Path.Token and Path.Node wraps [ErrNoDocument]
+// along with ErrNotFound. Path.Nodes lists nothing in such a document, as
+// it does for any path that selects nothing.
 //
 // A `[*]` selector lists the elements of a sequence once for each alias
 // that leads to it, as a `.*` selector lists the entries of a mapping, so

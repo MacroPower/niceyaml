@@ -810,9 +810,18 @@ type document struct {
 }
 
 // pathResolver returns the [paths.Resolver] for the document, and creates
-// it on the first call.
+// it on the first call. A document that did not parse gets a resolver
+// with no document, so every path returns an error there. A resolver for
+// its stand-in root would list no nodes for a path and return no error,
+// as it does for an empty document.
 func (d *document) pathResolver() *paths.Resolver {
 	d.resolverOnce.Do(func() {
+		if d.err != nil {
+			d.resolver = paths.NewResolver(nil)
+
+			return
+		}
+
 		d.resolver = paths.NewResolver(d.root)
 	})
 
@@ -1004,8 +1013,10 @@ func (n *Node) Err() error {
 // resolver from [paths.NewResolver] binds them again for every item.
 //
 // A document that did not parse has no tree, as [Node.Err] describes, so
-// its resolver holds a document with no content, and every path it
-// resolves returns an error wrapping [paths.ErrNoDocument].
+// its resolver holds no document, as [paths.NewResolver] of a nil
+// document does. Every path it resolves returns an error wrapping
+// [paths.ErrNoDocument], where [paths.Resolver.Matches] returns no
+// matches and no error in an empty document that parsed.
 func (n *Node) Resolver() *paths.Resolver {
 	return n.doc.pathResolver()
 }
@@ -1212,16 +1223,21 @@ func (n *Node) At(path paths.Path) (*Node, error) {
 //	}
 //
 // A path that selects nothing returns no Nodes and no error, as
-// [paths.Path.Nodes] does, and the errors it returns come back bound to
-// the source: an error wrapping [paths.ErrNoDocument] when the document
-// has no content, [paths.ErrAlias] when an alias on the path does not
+// [paths.Path.Nodes] does. A document with no content, such as an empty
+// document or one of comments alone, holds nothing for a selector to
+// reach. A path with selectors returns no Nodes there too, where Node.At
+// returns an error wrapping [paths.ErrNoDocument]. A loop over the items
+// of each document of a file thus passes over an empty document. The
+// root path selects the null at the "---" header of such a document, and
+// nothing in one without a header, such as an empty file.
+//
+// The errors [paths.Path.Nodes] returns come back bound to the source:
+// one wrapping [paths.ErrAlias] when an alias on the path does not
 // resolve, [ErrExcessiveAliasing] when aliases lead a selector of the
 // path to far more nodes than the document holds, and
 // [paths.ErrExcessiveMerging] when the key lookups of a selector read far
-// more nodes under `<<` merge keys than that. The error of a document
-// with no content wraps [paths.ErrNotFound] too, and [IsInvalid] reports
-// it, as it does for Node.At. A document that did not parse returns the
-// syntax error [Node.Err] returns.
+// more nodes under `<<` merge keys than that. A document that did not
+// parse returns the syntax error [Node.Err] returns.
 func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 	if n.doc.err != nil {
 		return nil, n.doc.err
@@ -1229,11 +1245,6 @@ func (n *Node) Nodes(path paths.Path) ([]*Node, error) {
 
 	found, err := n.doc.pathResolver().Matches(n.base.Join(path))
 	if err != nil {
-		// The document lacks every value the path could select.
-		if errors.Is(err, paths.ErrNotFound) {
-			return nil, n.bindOwn(WrapError(err))
-		}
-
 		return nil, n.bindOwn(err)
 	}
 

@@ -707,8 +707,30 @@ func TestResolver_Matches(t *testing.T) {
 			path:  "$.a[*]",
 			err:   paths.ErrAlias,
 		},
+		"document of comments alone": {
+			input: "# nothing\n",
+			path:  "$.a[*]",
+		},
+		"root of a document of comments alone": {
+			input: "# nothing\n",
+			path:  "$",
+		},
+		"empty document below a header": {
+			input: "---\n",
+			path:  "$.a[*]",
+		},
+		"root of an empty document below a header": {
+			input:      "---\n",
+			path:       "$",
+			want:       []string{"$"},
+			wantValues: []string{"null"},
+		},
 		"nil document": {
 			path: "$.a",
+			err:  paths.ErrNoDocument,
+		},
+		"wildcard in a nil document": {
+			path: "$.a[*]",
 			err:  paths.ErrNoDocument,
 		},
 	}

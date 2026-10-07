@@ -23,7 +23,10 @@ var (
 	// directives or comments, or a document of whitespace alone. Errors
 	// that wrap it also wrap [ErrNotFound], since nothing exists at any
 	// path in such a document. The root path of such a document under a
-	// "---" header still resolves, to the null at the header.
+	// "---" header still resolves, to the null at the header. [Path.Node]
+	// and [Path.Token] return it for each of these documents. [Path.Nodes]
+	// and [Path.Matches] return it for a nil document alone, and select
+	// nothing in the others.
 	ErrNoDocument = errors.New("document has no content")
 
 	// ErrNotFound indicates that nothing exists at the path in the document.
@@ -663,21 +666,25 @@ func (p Path) wildcard() bool {
 // document. Its body is nil, or it holds only comments or directives, as a
 // parse that keeps comments leaves in a comment-only document. A path with
 // no selectors matches that null at the header, so an error about the
-// document as a whole points at its header line. Every deeper path has no
-// node to reach.
+// document as a whole points at its header line. Every deeper path
+// matches nothing there, and no path matches anything in a document
+// without a header that holds no content. A file of whitespace alone
+// parses to such a document, whose body is a placeholder scalar, and
+// [astnode.HasContent] finds no content in it.
 //
 // Returns an error wrapping [ErrNotFound] and [ErrNoDocument] when doc is
-// nil, when a document without a header holds no content, or when a path
-// with segments meets a document without content. A file of whitespace
-// alone parses to a document without a header whose body is a
-// placeholder scalar, and [astnode.HasContent] finds no content in it.
+// nil.
 func (p Path) matches(r *resolver, doc *ast.DocumentNode) ([]match, error) {
 	if doc != nil && doc.Start != nil && !astnode.HasContent(doc.Body) && p.selectsRoot() {
 		return []match{{node: ast.Null(doc.Start), segs: slices.Clone(p.segments)}}, nil
 	}
 
-	if doc == nil || !astnode.HasContent(doc.Body) {
+	if doc == nil {
 		return nil, fmt.Errorf("resolve %s: %w: %w", p, ErrNotFound, ErrNoDocument)
+	}
+
+	if !astnode.HasContent(doc.Body) {
+		return nil, nil
 	}
 
 	found, err := r.resolve(doc.Body, p.segments)
@@ -705,7 +712,8 @@ func (p Path) selectsRoot() bool {
 // one match.
 //
 // Returns [ErrWildcard] for a path with a `.*`, `[*]`, or `..` selector and
-// wraps [ErrNotFound] when nothing exists at the path.
+// wraps [ErrNotFound] when nothing exists at the path, together with
+// [ErrNoDocument] when doc is nil or holds no content.
 func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 	if p.wildcard() {
 		return match{}, fmt.Errorf("resolve %s: %w", p, ErrWildcard)
@@ -717,6 +725,10 @@ func (p Path) single(r *resolver, doc *ast.DocumentNode) (match, error) {
 	}
 
 	if len(found) == 0 {
+		if !astnode.HasContent(doc.Body) {
+			return match{}, fmt.Errorf("resolve %s: %w: %w", p, ErrNotFound, ErrNoDocument)
+		}
+
 		return match{}, fmt.Errorf("resolve %s: %w", p, ErrNotFound)
 	}
 
@@ -796,8 +808,14 @@ func (p Path) singleFrom(r *resolver, node ast.Node) (match, error) {
 // sequence that lists the sources of one, but lists the entries of a
 // mapping written inline there.
 //
-// Wraps [ErrNoDocument], together with [ErrNotFound], when the document has
-// no content to resolve in, and [ErrAlias] when an alias on the path does
+// A document with no content, such as an empty one or one of comments
+// alone, holds no node for a selector to reach. Nodes returns an empty
+// result for a path with selectors there, as it does wherever a path
+// selects nothing. The root path selects the null at the "---" header of
+// such a document, and nothing when the document has no header.
+//
+// Wraps [ErrNoDocument], together with [ErrNotFound], when doc is nil,
+// and [ErrAlias] when an alias on the path does
 // not resolve, including one under a tag. A `.*` selector reads every `<<`
 // merge key of its mapping and of the mappings it merges, so an alias one
 // of them names counts as on the path. A `..*` selector lists every value

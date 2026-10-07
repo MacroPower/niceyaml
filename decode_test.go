@@ -2312,6 +2312,43 @@ func TestNode_Resolver(t *testing.T) {
 		assert.Same(t, want, got)
 		assert.Equal(t, "  name: app", got.String())
 	})
+
+	t.Run("a document that did not parse resolves no path", func(t *testing.T) {
+		t.Parallel()
+
+		// A path that lists nothing in an empty document is an error
+		// here, with or without a header above the document.
+		for name, input := range map[string]string{
+			"no header": "items: [\n",
+			"header":    "---\nitems: [\n",
+		} {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				docs, err := niceyaml.NewSourceFromString(input).Documents()
+				require.ErrorIs(t, err, niceyaml.ErrSyntax)
+				require.Len(t, docs, 1)
+
+				resolver := docs[0].Resolver()
+
+				for _, path := range []paths.Path{
+					paths.Doc(),
+					paths.Doc().Child("items"),
+					paths.Doc().Child("items").IndexAll(),
+				} {
+					matches, err := resolver.Matches(path)
+					require.ErrorIs(t, err, paths.ErrNoDocument, path)
+					assert.Empty(t, matches, path)
+				}
+
+				_, err = resolver.Node(paths.Doc())
+				require.ErrorIs(t, err, paths.ErrNoDocument)
+
+				_, err = resolver.Token(paths.Doc().Child("items"))
+				require.ErrorIs(t, err, paths.ErrNoDocument)
+			})
+		}
+	})
 }
 
 func TestDocument_Bind_Check(t *testing.T) {
@@ -8528,18 +8565,95 @@ func TestNode_Nodes(t *testing.T) {
 		require.EqualError(t, err, "m.yaml:12:6: $.ref: bad")
 	})
 
-	t.Run("an empty document binds the error to the receiver", func(t *testing.T) {
+	t.Run("a document with no content yields no nodes", func(t *testing.T) {
+		t.Parallel()
+
+		// A document that holds null yields none either, so a loop over
+		// the items of each document reads an empty one the same way.
+		inputs := map[string]string{
+			"empty file":           "",
+			"whitespace":           "\n",
+			"comments alone":       "# only a comment\n",
+			"header alone":         "---\n",
+			"directive and header": "%YAML 1.2\n---\n",
+			"null":                 "null\n",
+		}
+
+		selectors := map[string]paths.Path{
+			"every element of a key": paths.Current().Child("items").IndexAll(),
+			"every element":          paths.Current().IndexAll(),
+			"every entry":            paths.Current().ChildAll(),
+			"every node":             paths.Current().RecursiveAll(),
+			"key":                    paths.Current().Child("items"),
+		}
+
+		for name, input := range inputs {
+			for selector, path := range selectors {
+				t.Run(name+"/"+selector, func(t *testing.T) {
+					t.Parallel()
+
+					nodes, err := yamltest.FirstDocument(t, input).Nodes(path)
+					require.NoError(t, err)
+					assert.Empty(t, nodes)
+				})
+			}
+		}
+	})
+
+	t.Run("the root path selects the null at a header", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+			want  int
+		}{
+			"empty file":           {input: ""},
+			"comments alone":       {input: "# only a comment\n"},
+			"header alone":         {input: "---\n", want: 1},
+			"header and comment":   {input: "---\n# only a comment\n", want: 1},
+			"directive and header": {input: "%YAML 1.2\n---\n", want: 1},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				nodes, err := yamltest.FirstDocument(t, tc.input).Nodes(paths.Doc())
+				require.NoError(t, err)
+				require.Len(t, nodes, tc.want)
+
+				for _, n := range nodes {
+					assert.Equal(t, "$", n.Path().String())
+				}
+			})
+		}
+	})
+
+	t.Run("At keeps its error in a document with no content", func(t *testing.T) {
 		t.Parallel()
 
 		empty := yamltest.FirstDocument(t, "# only a comment\n")
 
-		_, err := empty.Nodes(paths.Current().IndexAll())
+		_, err := empty.At(paths.Current().Child("items"))
+		require.ErrorIs(t, err, paths.ErrNotFound)
 		require.ErrorIs(t, err, paths.ErrNoDocument)
 
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, empty.Source(), bound.Source())
+	})
+
+	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
+		t.Parallel()
+
+		docs, err := niceyaml.NewSourceFromString("items: [\n").Documents()
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		require.Len(t, docs, 1)
+
+		_, err = docs[0].Nodes(paths.Current().Child("items").IndexAll())
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		assert.Same(t, docs[0].Err(), err)
 	})
 
 	t.Run("a path that fans out through nested aliases is refused", func(t *testing.T) {

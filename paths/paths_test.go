@@ -2316,8 +2316,11 @@ func TestPath_DirectiveDocument(t *testing.T) {
 	_, err = paths.Doc().Child("key").Token(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 
-	_, err = paths.Doc().Nodes(file.Docs[0])
-	require.ErrorIs(t, err, paths.ErrNoDocument)
+	// The directive stands above the header, so its document holds no
+	// header for the root path to select.
+	nodes, err := paths.Doc().Nodes(file.Docs[0])
+	require.NoError(t, err)
+	assert.Empty(t, nodes)
 
 	node, err := paths.Doc().Child("key").Node(file.Docs[1])
 	require.NoError(t, err)
@@ -2328,7 +2331,8 @@ func TestPath_CommentDocument(t *testing.T) {
 	t.Parallel()
 
 	// A parse that keeps comments makes the comment group the body of a
-	// document that holds nothing else, and nothing resolves in it.
+	// document that holds nothing else. No single node resolves in it, and
+	// a path lists no nodes.
 	source := niceyaml.NewSourceFromString("# just a comment\n")
 	file, err := source.File()
 	require.NoError(t, err)
@@ -2341,8 +2345,9 @@ func TestPath_CommentDocument(t *testing.T) {
 	_, err = paths.Doc().Token(file.Docs[0])
 	require.ErrorIs(t, err, paths.ErrNoDocument)
 
-	_, err = paths.Doc().Nodes(file.Docs[0])
-	require.ErrorIs(t, err, paths.ErrNoDocument)
+	nodes, err := paths.Doc().Nodes(file.Docs[0])
+	require.NoError(t, err)
+	assert.Empty(t, nodes)
 }
 
 func TestPath_WhitespaceDocument(t *testing.T) {
@@ -2350,7 +2355,8 @@ func TestPath_WhitespaceDocument(t *testing.T) {
 
 	// The tokenizer gives a source the lexer emits nothing for one
 	// placeholder token, which the parser reads as a plain scalar. That
-	// scalar is not content, so nothing resolves in the document.
+	// scalar is not content, so no single node resolves in the document
+	// and a path lists no nodes.
 	tcs := map[string]struct {
 		input string
 	}{
@@ -2376,9 +2382,9 @@ func TestPath_WhitespaceDocument(t *testing.T) {
 			require.ErrorIs(t, err, paths.ErrNoDocument)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 
-			_, err = paths.Doc().Nodes(file.Docs[0])
-			require.ErrorIs(t, err, paths.ErrNoDocument)
-			require.ErrorIs(t, err, paths.ErrNotFound)
+			nodes, err := paths.Doc().Nodes(file.Docs[0])
+			require.NoError(t, err)
+			assert.Empty(t, nodes)
 		})
 	}
 }
@@ -5781,10 +5787,63 @@ func TestPath_EmptyDocument(t *testing.T) {
 		}
 	})
 
+	t.Run("a path with segments lists nothing", func(t *testing.T) {
+		t.Parallel()
+
+		doc := emptyDocument(t, "a: 1\n---\n")
+
+		tcs := map[string]struct {
+			path paths.Path
+		}{
+			"child":         {path: paths.Doc().Child("a")},
+			"index":         {path: paths.Doc().Index(0)},
+			"every element": {path: paths.Doc().Child("items").IndexAll()},
+			"every entry":   {path: paths.Doc().ChildAll()},
+			"every node":    {path: paths.Doc().RecursiveAll()},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				nodes, err := tc.path.Nodes(doc)
+				require.NoError(t, err)
+				assert.Empty(t, nodes)
+
+				matches, err := tc.path.Matches(doc)
+				require.NoError(t, err)
+				assert.Empty(t, matches)
+			})
+		}
+	})
+
 	t.Run("a document without a header reaches nothing", func(t *testing.T) {
 		t.Parallel()
 
 		_, err := paths.Doc().Node(&ast.DocumentNode{})
 		require.ErrorIs(t, err, paths.ErrNoDocument)
+	})
+
+	t.Run("a document without a header lists nothing", func(t *testing.T) {
+		t.Parallel()
+
+		for _, path := range []paths.Path{paths.Doc(), paths.Doc().Child("items").IndexAll()} {
+			nodes, err := path.Nodes(&ast.DocumentNode{})
+			require.NoError(t, err, path)
+			assert.Empty(t, nodes, path)
+		}
+	})
+
+	t.Run("a nil document is an error", func(t *testing.T) {
+		t.Parallel()
+
+		for _, path := range []paths.Path{paths.Doc(), paths.Doc().Child("items").IndexAll()} {
+			_, err := path.Nodes(nil)
+			require.ErrorIs(t, err, paths.ErrNoDocument, path)
+			require.ErrorIs(t, err, paths.ErrNotFound, path)
+
+			_, err = path.Matches(nil)
+			require.ErrorIs(t, err, paths.ErrNoDocument, path)
+		}
 	})
 }

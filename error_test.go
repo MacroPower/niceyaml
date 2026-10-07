@@ -10349,11 +10349,11 @@ func TestIsInvalid(t *testing.T) {
 			err:  paths.ErrNotFound,
 			want: true,
 		},
-		"Node.Nodes in a document with no content": {
+		"Node.At in a document with no content": {
 			build: func(t *testing.T) error {
 				t.Helper()
 
-				_, err := yamltest.FirstDocument(t, "# no content\n").Nodes(paths.Current().Child("items").IndexAll())
+				_, err := yamltest.FirstDocument(t, "# no content\n").At(paths.Current().Child("items"))
 
 				return err //nolint:wrapcheck // The test inspects the error of the call.
 			},
