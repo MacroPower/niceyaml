@@ -458,12 +458,19 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // [niceyaml.Validator] returns, which a decode places at the value it
 // checked. A wrapper such as [fmt.Errorf] around the result keeps its
 // text through both calls, behind the position and the path, as in
-// "app.yaml:2:9: $.request.port: check: 0 is less than 1". A result
-// inside [niceyaml.Invalid] or [niceyaml.Place] with no option places
-// as the result alone does. A wrapper whose text does not hold the text
-// of the result, such as one that quotes it, stays as it is. So does a
-// result under an [*niceyaml.Error] that carries a location or details,
-// which binds around the result. The result itself never changes.
+// "app.yaml:2:9: $.request.port: check: 0 is less than 1". A wrapper
+// whose text does not hold the text of the result once, such as one
+// that quotes it or writes a message of its own, places the violations
+// too. It keeps the text it wrote, with any path that text names from
+// the value.
+//
+// A result inside [niceyaml.Invalid] or [niceyaml.Place] places as the
+// errors it was made from place inside that Error. With no option, the
+// result places as it does alone. Details stay with the Error. A
+// location on the Error is the location of the bound error, as it is
+// above any error that carries a path. One violation thus reports at
+// that location, and several keep their own lines below it. The result
+// itself never changes.
 //
 // Each violation the result heads places the same way on its own, so a
 // caller that drops some of them places the rest. The violations are

@@ -1283,16 +1283,74 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		require.ErrorAs(t, placed, &violation)
 	})
 
-	t.Run("a wrapper that rewrites the text stays as it is", func(t *testing.T) {
+	t.Run("a wrapper that rewrites the text keeps its text", func(t *testing.T) {
 		t.Parallel()
 
-		err := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
+		one := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
+		two := v.ValidateValue(t.Context(), map[string]any{"port": 0})
 
-		// The text of the wrapper holds the text of the result nowhere,
-		// so no path could leave it, and the error keeps one path.
-		shouted := placeShoutError{err: err}
+		// The text of each wrapper holds the text of the result nowhere, or
+		// twice, so no path could leave it. The document places every
+		// violation all the same, and the wrapper keeps the text it wrote.
+		tcs := map[string]struct {
+			err  error
+			want string
+		}{
+			"message of its own": {
+				err:  placeFixedError{err: one},
+				want: "app.yaml:2:9: $.request.port: invalid body",
+			},
+			"message of its own above two violations": {
+				err: placeFixedError{err: two},
+				want: stringtest.JoinLF(
+					"app.yaml: invalid body",
+					`app.yaml:1:1: $.request.name: missing required property "name"`,
+					"app.yaml:2:9: $.request.port: 0 is less than 1",
+				),
+			},
+			"message of its own beside a sentinel": {
+				err:  fmt.Errorf("%w: %w", errPlaceCheck, placeFixedError{err: one}),
+				want: "app.yaml:2:9: $.request.port: check: invalid body",
+			},
+			"upper case": {
+				err:  placeShoutError{err: one},
+				want: "app.yaml:2:9: $.request.port: $.PORT: 0 IS LESS THAN 1",
+			},
+			"indented lines": {
+				err: placeIndentError{err: two},
+				want: stringtest.JoinLF(
+					"app.yaml: validation:",
+					"  2 schema violations",
+					"  $.port: 0 is less than 1",
+					`  $.name: missing required property "name"`,
+					`app.yaml:1:1: $.request.name: missing required property "name"`,
+					"app.yaml:2:9: $.request.port: 0 is less than 1",
+				),
+			},
+			"text held twice": {
+				err:  fmt.Errorf("%w (again: %s)", one, one.Error()),
+				want: "app.yaml:2:9: $.request.port: $.port: 0 is less than 1 (again: $.port: 0 is less than 1)",
+			},
+		}
 
-		require.EqualError(t, doc.Bind(niceyaml.Rebase(shouted, base)), "$.PORT: 0 IS LESS THAN 1")
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				placed := doc.Bind(niceyaml.Rebase(tc.err, base))
+				require.EqualError(t, placed, tc.want)
+				require.ErrorIs(t, placed, tc.err)
+				assert.True(t, niceyaml.IsInvalid(placed))
+
+				var violation *schema.Violation
+
+				require.ErrorAs(t, placed, &violation)
+
+				for b := range niceyaml.AllBindings(placed) {
+					assert.Same(t, doc.Source(), b.Source())
+				}
+			})
+		}
 	})
 
 	t.Run("a Validate method returns the result", func(t *testing.T) {
@@ -1302,6 +1360,16 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 		err := doc.DecodeInto(t.Context(), &cfg)
 		require.EqualError(t, err, "app.yaml:2:9: $.request.port: 0 is less than 1")
+		assert.True(t, niceyaml.IsInvalid(err))
+	})
+
+	t.Run("a Validate method returns the result under a message of its own", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := placeConfig{Request: placeRequest{schema: v, fixed: true}}
+
+		err := doc.DecodeInto(t.Context(), &cfg)
+		require.EqualError(t, err, "app.yaml:2:9: $.request.port: invalid body")
 		assert.True(t, niceyaml.IsInvalid(err))
 	})
 
@@ -1340,11 +1408,85 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		for b := range niceyaml.AllBindings(request.Invalid(err)) {
 			assert.Same(t, doc.Source(), b.Source())
 		}
+	})
 
-		// An Error with a location binds around the result, which stays
-		// in no document and names its path from the value.
-		located := request.Invalid(err, niceyaml.AtPath(paths.Current()))
-		require.EqualError(t, located, "app.yaml:2:3: $.request: $.port: 0 is less than 1")
+	t.Run("an Error with a location or details places the result", func(t *testing.T) {
+		t.Parallel()
+
+		one := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
+		two := v.ValidateValue(t.Context(), map[string]any{"port": 0})
+		at := niceyaml.AtPath(paths.Current())
+		why := niceyaml.WithDetails(errors.New("the body of the request"))
+
+		// An Error writes the message of the error it wraps, so the Error
+		// binds around the violations as it binds around errors that no
+		// source bound yet. No line keeps a path from the value.
+		tcs := map[string]struct {
+			err         error
+			want        string
+			wantDetails []string
+		}{
+			"location above one violation": {
+				err:  niceyaml.Invalid(one, at),
+				want: "app.yaml:2:3: $.request: 0 is less than 1",
+			},
+			"location above two violations": {
+				err: niceyaml.Invalid(two, at),
+				want: stringtest.JoinLF(
+					"app.yaml:2:3: $.request: 2 schema violations",
+					`app.yaml:1:1: $.request.name: missing required property "name"`,
+					"app.yaml:2:9: $.request.port: 0 is less than 1",
+				),
+			},
+			"wrapper around a location": {
+				err: fmt.Errorf("check: %w", niceyaml.Place(two, at)),
+				want: stringtest.JoinLF(
+					"app.yaml:2:3: $.request: check: 2 schema violations",
+					`app.yaml:1:1: $.request.name: missing required property "name"`,
+					"app.yaml:2:9: $.request.port: 0 is less than 1",
+				),
+			},
+			"details beside one violation": {
+				err:         niceyaml.Place(one, why),
+				want:        "app.yaml:2:9: $.request.port: 0 is less than 1",
+				wantDetails: []string{"the body of the request"},
+			},
+			"details beside two violations": {
+				err: niceyaml.Invalid(two, why),
+				want: stringtest.JoinLF(
+					"app.yaml: 2 schema violations",
+					`app.yaml:1:1: $.request.name: missing required property "name"`,
+					"app.yaml:2:9: $.request.port: 0 is less than 1",
+				),
+				wantDetails: []string{"the body of the request"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				placed := doc.Bind(niceyaml.Rebase(tc.err, base))
+				require.EqualError(t, placed, tc.want)
+				assert.True(t, niceyaml.IsInvalid(placed))
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, placed, &bound)
+
+				var gotDetails []string
+
+				for _, detail := range bound.Details() {
+					gotDetails = append(gotDetails, detail.Message())
+				}
+
+				assert.Equal(t, tc.wantDetails, gotDetails)
+
+				for _, problem := range bound.Errors() {
+					assert.Same(t, doc.Source(), problem.Source())
+				}
+			})
+		}
 	})
 
 	t.Run("a Validator returns the result", func(t *testing.T) {
@@ -1488,6 +1630,33 @@ func (e placeShoutError) Unwrap() error {
 	return e.err
 }
 
+// placeFixedError wraps an error under a message of its own, as an error
+// type that maps a failure to a status does.
+type placeFixedError struct {
+	err error
+}
+
+func (e placeFixedError) Error() string {
+	return "invalid body"
+}
+
+func (e placeFixedError) Unwrap() error {
+	return e.err
+}
+
+// placeIndentError wraps an error and indents each line of its text.
+type placeIndentError struct {
+	err error
+}
+
+func (e placeIndentError) Error() string {
+	return "validation:\n  " + strings.ReplaceAll(e.err.Error(), "\n", "\n  ")
+}
+
+func (e placeIndentError) Unwrap() error {
+	return e.err
+}
+
 // placeConfig holds a [placeRequest] under the key request.
 type placeConfig struct {
 	Request placeRequest `yaml:"request"`
@@ -1495,19 +1664,26 @@ type placeConfig struct {
 
 // placeRequest checks itself against a schema the test sets before the
 // decode, and returns what ValidateValue returns. With invalid, it
-// returns that result inside [niceyaml.Invalid] with no option.
+// returns that result inside [niceyaml.Invalid] with no option. With
+// fixed, it returns that result inside a [placeFixedError].
 type placeRequest struct {
 	schema *schema.Schema
 
 	Port int `yaml:"port"`
 
 	invalid bool
+	fixed   bool
 }
 
 func (r placeRequest) Validate() error {
 	err := r.schema.ValidateValue(context.Background(), map[string]any{"port": r.Port, "name": "x"})
-	if r.invalid {
+
+	switch {
+	case r.invalid:
 		return niceyaml.Invalid(err)
+
+	case r.fixed:
+		return placeFixedError{err: err}
 	}
 
 	//nolint:wrapcheck // The test checks where a decode places the result as it is.

@@ -1856,15 +1856,16 @@ func unplacedError(err error) (error, bool) {
 // Each wrapper therefore comes back as a [placedError], whose message is
 // the message of the wrapper with the text of the binding cut down to
 // that of its error. A wrapper whose message does not hold the text of
-// the binding once, such as one that quotes it, comes back as it is, and
-// so does err.
+// the binding once, such as one that quotes it or writes a message of
+// its own, keeps that message with every path it names. Its error
+// places all the same, as an error that no source bound yet places
+// under such a wrapper.
 //
-// An [*Error] that adds nothing to the binding, as [Error.addsNothing]
-// reports, reads as the binding does, and comes back as a copy that
-// keeps what the Error declared. [Invalid] and [Place] build one when
-// they take no option. An Error that carries a location, heads errors,
-// or holds details binds around the binding, so placeable leaves it
-// alone.
+// An [*Error] writes the message of the error it wraps, so an Error
+// above the binding comes back as a copy around the error the binding
+// was made from. The copy keeps the location, the details, and the fault
+// the Error declared, and binds as it would around an error that no
+// source bound yet.
 func placeable(err error) error {
 	placed, _ := replaceUnplaced(err)
 
@@ -1883,9 +1884,7 @@ func replaceUnplaced(err error) (error, bool) {
 		return x.free, true
 
 	case *Error:
-		// An Error that adds nothing reads as the error it wraps, and the
-		// copy keeps what the Error declared.
-		if !x.addsNothing() {
+		if x == nil {
 			return err, false
 		}
 
@@ -1894,7 +1893,12 @@ func replaceUnplaced(err error) (error, bool) {
 			return err, false
 		}
 
-		return &Error{err: placed, invalid: x.invalid}, true
+		// The copy keeps what the Error declared and writes the message of
+		// the placed error.
+		c := *x
+		c.err = placed
+
+		return &c, true
 
 	case interface{ Unwrap() error }:
 		return replaceBelow(err, x.Unwrap(), nil)
@@ -1920,9 +1924,9 @@ func replaceUnplaced(err error) (error, bool) {
 
 // holdsUnplaced reports whether [replaceUnplaced] could find a binding
 // that stands in no document below err. It follows each wrapper that
-// unwraps to one error, each [*Error] that adds nothing, and every branch
-// of a wrapper that [fmt.Errorf] builds with several %w verbs, and it
-// reads the message of none.
+// unwraps to one error, each [*Error] to its cause, and every branch of
+// a wrapper that [fmt.Errorf] builds with several %w verbs, and it reads
+// the message of none.
 func holdsUnplaced(err error) bool {
 	for {
 		switch x := err.(type) { //nolint:errorlint // Walks the chain one node at a time.
@@ -1930,7 +1934,7 @@ func holdsUnplaced(err error) bool {
 			return x != nil && x.free != nil
 
 		case *Error:
-			if !x.addsNothing() {
+			if x == nil {
 				return false
 			}
 
@@ -1952,7 +1956,8 @@ func holdsUnplaced(err error) bool {
 // chain goes on through below. The branches are every error wrapper
 // unwraps to when it unwraps to several, and nil otherwise. The ones
 // beside below add nothing to the tree, as a sentinel does, so the
-// [placedError] keeps them to match as wrapper does.
+// [placedError] keeps them to match as wrapper does. The message of
+// wrapper stays as it is unless it holds the message of below once.
 func replaceBelow(wrapper, below error, branches []error) (error, bool) {
 	if below == nil {
 		return wrapper, false
@@ -1963,9 +1968,12 @@ func replaceBelow(wrapper, below error, branches []error) (error, bool) {
 		return wrapper, false
 	}
 
+	// A message that holds the text below it once shows where that text
+	// stands, so the text of the placed error, which names no path, takes
+	// its place.
 	msg, old := wrapper.Error(), below.Error()
-	if old == "" || strings.Count(msg, old) != 1 {
-		return wrapper, false
+	if old != "" && strings.Count(msg, old) == 1 {
+		msg = strings.Replace(msg, old, placed.Error(), 1)
 	}
 
 	var beside []error
@@ -1980,15 +1988,16 @@ func replaceBelow(wrapper, below error, branches []error) (error, bool) {
 		wrapper: wrapper,
 		err:     placed,
 		beside:  beside,
-		msg:     strings.Replace(msg, old, placed.Error(), 1),
+		msg:     msg,
 	}, true
 }
 
 // placedError stands for a wrapper around a binding that stood in no
 // document, once [placeable] replaced that binding with its error. Its
 // message is the message of the wrapper with the text of the binding cut
-// down to the message of the error, and it unwraps to the error. It
-// matches the wrapper for [errors.Is] and [errors.As] rather than
+// down to the message of the error, or the message as the wrapper wrote
+// it when that text does not stand there once. It unwraps to the error.
+// It matches the wrapper for [errors.Is] and [errors.As] rather than
 // unwrapping to it, since the wrapper still unwraps to the binding. A
 // wrapper with several %w verbs unwraps to other errors beside the
 // binding, such as a sentinel, and the placedError matches those too.
@@ -2003,8 +2012,9 @@ type placedError struct {
 	beside []error
 }
 
-// Error returns the message of the wrapper with the text of the binding
-// cut down to the message of its error.
+// Error returns the message of the wrapper, with the text of the binding
+// cut down to the message of its error where the wrapper holds that
+// text once.
 func (p *placedError) Error() string {
 	return p.msg
 }
