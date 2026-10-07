@@ -3120,9 +3120,9 @@ func TestNode_SelfValidate_Node(t *testing.T) {
 			node: func(t *testing.T) *niceyaml.Node {
 				t.Helper()
 
-				docs, err := niceyaml.NewSourceFromString("db: [\n", niceyaml.WithName("bad.yaml")).Documents()
-				require.ErrorIs(t, err, niceyaml.ErrSyntax)
+				docs := niceyaml.NewSourceFromString("db: [\n", niceyaml.WithName("bad.yaml")).AllDocuments()
 				require.Len(t, docs, 1)
+				require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
 
 				return docs[0]
 			},

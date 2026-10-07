@@ -2216,9 +2216,9 @@ func TestSchema_Validate_SyntaxError(t *testing.T) {
 
 			v := compileSchema(t, []byte(tc.schema))
 
-			docs, err := niceyaml.NewSourceFromString("a: 1\n---\nb: [\n").Documents()
-			require.Error(t, err)
+			docs := niceyaml.NewSourceFromString("a: 1\n---\nb: [\n").AllDocuments()
 			require.Len(t, docs, 2)
+			require.ErrorIs(t, docs[1].Err(), niceyaml.ErrSyntax)
 
 			// The second document did not parse, so the schema has no data
 			// to check and returns the syntax error.
@@ -2226,7 +2226,7 @@ func TestSchema_Validate_SyntaxError(t *testing.T) {
 			assert.Same(t, docs[1].Err(), docs[1].Validate(t.Context(), v))
 
 			// The first document parsed, so the schema checks it.
-			err = v.Validate(t.Context(), docs[0])
+			err := v.Validate(t.Context(), docs[0])
 			if tc.err == "" {
 				require.NoError(t, err)
 			} else {

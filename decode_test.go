@@ -2326,9 +2326,9 @@ func TestNode_Resolver(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				docs, err := niceyaml.NewSourceFromString(input).Documents()
-				require.ErrorIs(t, err, niceyaml.ErrSyntax)
+				docs := niceyaml.NewSourceFromString(input).AllDocuments()
 				require.Len(t, docs, 1)
+				require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
 
 				resolver := docs[0].Resolver()
 
@@ -2342,7 +2342,7 @@ func TestNode_Resolver(t *testing.T) {
 					assert.Empty(t, matches, path)
 				}
 
-				_, err = resolver.Node(paths.Doc())
+				_, err := resolver.Node(paths.Doc())
 				require.ErrorIs(t, err, paths.ErrNoDocument)
 
 				_, err = resolver.Token(paths.Doc().Child("items"))
@@ -3430,9 +3430,9 @@ func TestDocument_Err(t *testing.T) {
 	documents := func(t *testing.T) []*niceyaml.Node {
 		t.Helper()
 
-		docs, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml")).Documents()
-		require.EqualError(t, err, "f.yaml:5:4: sequence end token ']' not found")
+		docs := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml")).AllDocuments()
 		require.Len(t, docs, 3)
+		require.EqualError(t, docs[1].Err(), "f.yaml:5:4: sequence end token ']' not found")
 
 		return docs
 	}
@@ -8648,11 +8648,10 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := niceyaml.NewSourceFromString("items: [\n").Documents()
-		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		docs := niceyaml.NewSourceFromString("items: [\n").AllDocuments()
 		require.Len(t, docs, 1)
 
-		_, err = docs[0].Nodes(paths.Current().Child("items").IndexAll())
+		_, err := docs[0].Nodes(paths.Current().Child("items").IndexAll())
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
 		assert.Same(t, docs[0].Err(), err)
 	})
@@ -9501,9 +9500,13 @@ func TestErrDecode(t *testing.T) {
 	t.Run("parse error does not match", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := niceyaml.NewSourceFromString("a: [\n").Documents()
+		source := niceyaml.NewSourceFromString("a: [\n")
+
+		_, err := source.Documents()
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
 		require.NotErrorIs(t, err, niceyaml.ErrDecode)
+
+		docs := source.AllDocuments()
 		require.Len(t, docs, 1)
 
 		_, err = docs[0].Decode[any](t.Context())
@@ -10079,9 +10082,9 @@ func TestSkipEmpty(t *testing.T) {
 		t.Parallel()
 
 		for _, input := range []string{"a: [\n", "---\na: [\n"} {
-			docs, err := niceyaml.NewSourceFromString(input).Documents()
-			require.ErrorIs(t, err, niceyaml.ErrSyntax, input)
+			docs := niceyaml.NewSourceFromString(input).AllDocuments()
 			require.Len(t, docs, 1, input)
+			require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax, input)
 
 			var calls int
 

@@ -715,11 +715,11 @@ func TestRegistry_Validate_SyntaxError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			docs, err := niceyaml.NewSourceFromString(tc.input).Documents()
-			require.Error(t, err)
+			docs := niceyaml.NewSourceFromString(tc.input).AllDocuments()
 			require.Len(t, docs, 1)
 
 			doc := docs[0]
+			require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
 
 			// The document did not parse, so every route to the registry
 			// returns its syntax error.

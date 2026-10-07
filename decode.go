@@ -979,7 +979,7 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // the [Error] values it produces to that source, so the errors it returns
 // carry a [SourceError] that renders the offending lines.
 //
-// [Source.Documents] returns a Node for a document with a YAML syntax
+// [Source.AllDocuments] returns a Node for a document with a YAML syntax
 // error too. Such a document has no tree, and [Node.Err] returns the
 // syntax error. The methods that read the tree return that error:
 // [Node.Decode], [Node.DecodeInto], [Node.Validate], [Node.At],
@@ -990,9 +990,9 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // A caller thus renders or diffs a document that does not parse yet, and
 // the other documents of the file decode and validate as if it did.
 //
-// Receive instances from [Source.Documents], [Source.Document],
-// [Node.At], [Node.Nodes], [Node.Document], [SourceError.Node], or
-// [SourceError.Document].
+// Receive instances from [Source.Documents], [Source.AllDocuments],
+// [Source.Document], [Node.At], [Node.Nodes], [Node.Document],
+// [SourceError.Node], or [SourceError.Document].
 type Node struct {
 	// The node the scope selects, which At or Nodes resolves once when it
 	// scopes the Node. The root of a document leaves it unset, since its
@@ -1029,14 +1029,13 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 }
 
 // Err returns the YAML syntax error of the document the Node belongs to,
-// or nil for a document that parsed. [Source.Documents] returns a Node
+// or nil for a document that parsed. [Source.AllDocuments] returns a Node
 // for every document of a file, and a syntax error fails the one document
 // that holds it. The error is the [*SourceError] the parser reported for
 // that document, bound to the Source. It matches [ErrSyntax], and it is
 // among the errors [Source.File] returns:
 //
-//	docs, _ := source.Documents()
-//	for _, doc := range docs {
+//	for _, doc := range source.AllDocuments() {
 //		if err := doc.Err(); err != nil {
 //			log.Print(niceyaml.FormatError(err, 2))
 //
@@ -1058,8 +1057,9 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 // resolves nowhere, as Bind describes.
 //
 // A "---" header that directly follows an anchor with no value parses
-// together with the document above it, as [Source.Documents] describes.
-// Both documents then return the same error. A nil Node has none.
+// together with the document above it, as [Source.AllDocuments]
+// describes. Both documents then return the same error. A nil Node has
+// none.
 func (n *Node) Err() error {
 	if n == nil {
 		return nil
@@ -1092,7 +1092,7 @@ func (n *Node) Resolver() *paths.Resolver {
 // Document returns the root [*Node] of the document the Node belongs to,
 // so a Node from [Node.At] reaches the whole document, as a validator
 // that picks a schema from the file path or the content of the document
-// does. Every Node of a document returns the root [Source.Documents]
+// does. Every Node of a document returns the root [Source.AllDocuments]
 // returns, and that root returns itself. A nil Node belongs to none.
 func (n *Node) Document() *Node {
 	if n == nil {

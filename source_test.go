@@ -1813,10 +1813,13 @@ func TestSource_Parse(t *testing.T) {
 		assert.Nil(t, file)
 		assert.Same(t, err, again)
 
-		docs, err := source.Documents()
-		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		docs, again := source.Documents()
+		assert.Nil(t, docs)
+		assert.Same(t, err, again)
+
+		docs = source.AllDocuments()
 		require.Len(t, docs, 1)
-		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
+		assert.Same(t, err, docs[0].Err())
 
 		_, err = source.Document()
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
@@ -1951,10 +1954,10 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 
 			source := niceyaml.NewSourceFromString(tc.input, tc.opts...)
 
-			docs, err := source.Documents()
-			require.Len(t, docs, len(tc.want))
+			all := source.AllDocuments()
+			require.Len(t, all, len(tc.want))
 
-			for i, doc := range docs {
+			for i, doc := range all {
 				if !tc.want[i] {
 					require.NoError(t, doc.Err())
 
@@ -1976,19 +1979,25 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			}
 
 			file, fileErr := source.File()
+			docs, err := source.Documents()
 
 			if !slices.Contains(tc.want, true) {
-				require.NoError(t, err)
 				require.NoError(t, fileErr)
 				assert.NotNil(t, file)
+
+				require.NoError(t, err)
+				assert.Equal(t, all, docs)
 
 				return
 			}
 
 			// One error or a join of several, which matches through each.
-			require.ErrorIs(t, err, niceyaml.ErrSyntax)
 			require.ErrorIs(t, fileErr, niceyaml.ErrSyntax)
 			assert.Nil(t, file)
+
+			// Documents needs the whole file to parse, as File does.
+			assert.Same(t, fileErr, err)
+			assert.Nil(t, docs)
 
 			_, err = source.Document()
 			require.ErrorIs(t, err, niceyaml.ErrSyntax)
@@ -1999,7 +2008,190 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 	}
 }
 
-func TestSource_Documents_SyntaxError(t *testing.T) {
+func TestSource_AllDocuments(t *testing.T) {
+	t.Parallel()
+
+	t.Run("file that parses holds the Nodes Documents returns", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		all := source.AllDocuments()
+		require.Len(t, all, 2)
+
+		for i, doc := range docs {
+			assert.Same(t, doc, all[i])
+		}
+
+		// Every call returns a slice of its own.
+		all[1] = nil
+
+		assert.Same(t, docs[1], source.AllDocuments()[1])
+	})
+
+	t.Run("file with a syntax error holds every document", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(
+			"a: 1\n---\nb: 2\n---\na: [\n---\nc: 3\n",
+			niceyaml.WithName("cfg.yaml"),
+		)
+
+		_, fileErr := source.File()
+		require.EqualError(t, fileErr, "cfg.yaml:5:4: sequence end token ']' not found")
+
+		// Documents needs the whole file to parse, as File does.
+		docs, err := source.Documents()
+		assert.Nil(t, docs)
+		assert.Same(t, fileErr, err)
+
+		all := source.AllDocuments()
+		require.Len(t, all, 4)
+
+		require.NoError(t, all[0].Err())
+		require.NoError(t, all[1].Err())
+		assert.Same(t, fileErr, all[2].Err())
+		require.NoError(t, all[3].Err())
+
+		// The document below the one that did not parse decodes.
+		last, err := all[3].Decode[map[string]int](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"c": 3}, last)
+	})
+
+	t.Run("two documents that parse together return one syntax error", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("a: &x\n---\nb: [\n")
+
+		all := source.AllDocuments()
+		require.Len(t, all, 2)
+
+		require.ErrorIs(t, all[0].Err(), niceyaml.ErrSyntax)
+		assert.Same(t, all[0].Err(), all[1].Err())
+
+		// ValidateDocuments reports the error both documents return once.
+		assert.Same(t, all[0].Err(), source.ValidateDocuments(t.Context()))
+	})
+}
+
+func TestSource_Documents_CollectErrors(t *testing.T) {
+	t.Parallel()
+
+	const unclosed = "sequence end token ']' not found"
+
+	// A caller that needs the whole file to parse collects the error of
+	// Documents, and then the error of each document it returned.
+	strict := func(t *testing.T, source *niceyaml.Source, wrap func(error) error) error {
+		t.Helper()
+
+		var errs []error
+
+		docs, err := source.Documents()
+		if err != nil {
+			errs = append(errs, wrap(err))
+		}
+
+		for _, doc := range docs {
+			_, err := doc.Decode[map[string]any](t.Context())
+			if err != nil {
+				errs = append(errs, wrap(err))
+			}
+		}
+
+		return errors.Join(errs...)
+	}
+
+	// A caller that reports on each document collects the error of every
+	// document, parsed or not.
+	tolerant := func(t *testing.T, source *niceyaml.Source, wrap func(error) error) error {
+		t.Helper()
+
+		var errs []error
+
+		for _, doc := range source.AllDocuments() {
+			_, err := doc.Decode[map[string]any](t.Context())
+			if err != nil {
+				errs = append(errs, wrap(err))
+			}
+		}
+
+		return errors.Join(errs...)
+	}
+
+	wraps := map[string]func(error) error{
+		"as returned": func(err error) error { return err },
+		"wrapped":     func(err error) error { return fmt.Errorf("load: %w", err) },
+	}
+
+	tcs := map[string]struct {
+		input string
+		// The message of each binding a loop over Documents collects.
+		strict []string
+		// The message of each binding a loop over AllDocuments collects.
+		tolerant []string
+	}{
+		"file that parses": {
+			input: "a: 1\n---\nb: 2\n",
+		},
+		"one syntax error": {
+			input:    "a: 1\n---\nb: 2\n---\na: [\n---\nc: 3\n",
+			strict:   []string{"cfg.yaml:5:4: " + unclosed},
+			tolerant: []string{"cfg.yaml:5:4: " + unclosed},
+		},
+		"two syntax errors": {
+			input:    "a: [\n---\nb: 1\n---\nc: [\n",
+			strict:   []string{"cfg.yaml:1:4: " + unclosed, "cfg.yaml:5:4: " + unclosed},
+			tolerant: []string{"cfg.yaml:1:4: " + unclosed, "cfg.yaml:5:4: " + unclosed},
+		},
+		// The header parses together with the document above it, so both
+		// documents return the one error.
+		"syntax error two documents share": {
+			input:    "a: &x\n---\nb: [\n",
+			strict:   []string{"cfg.yaml:3:4: " + unclosed},
+			tolerant: []string{"cfg.yaml:3:4: " + unclosed, "cfg.yaml:3:4: " + unclosed},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			for wrapName, wrap := range wraps {
+				t.Run(wrapName, func(t *testing.T) {
+					t.Parallel()
+
+					source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("cfg.yaml"))
+
+					// Each binding reads as one line of the message.
+					err := strict(t, source, wrap)
+					assert.Equal(t, tc.strict, bindingMessages(err))
+					assert.Len(t, messageLines(err), len(tc.strict))
+
+					err = tolerant(t, source, wrap)
+					assert.Equal(t, tc.tolerant, bindingMessages(err))
+					assert.Len(t, messageLines(err), len(tc.tolerant))
+				})
+			}
+		})
+	}
+}
+
+// messageLines returns the lines of the message of err, which are none
+// for a nil err.
+func messageLines(err error) []string {
+	if err == nil {
+		return nil
+	}
+
+	return strings.Split(err.Error(), "\n")
+}
+
+func TestSource_AllDocuments_SyntaxError(t *testing.T) {
 	t.Parallel()
 
 	const unclosed = "sequence end token ']' not found"
@@ -2089,8 +2281,7 @@ func TestSource_Documents_SyntaxError(t *testing.T) {
 
 			source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("f.yaml"))
 
-			docs, err := source.Documents()
-			require.Error(t, err)
+			docs := source.AllDocuments()
 			require.Len(t, docs, len(tc.want))
 
 			// The syntax errors in file order. The two documents of one
@@ -2121,8 +2312,12 @@ func TestSource_Documents_SyntaxError(t *testing.T) {
 				}
 			}
 
-			// One syntax error comes back as it is, and several come back
-			// joined in file order.
+			// File returns one syntax error as it is, and several joined
+			// in file order.
+			file, err := source.File()
+			require.Error(t, err)
+			assert.Nil(t, file)
+
 			if len(failed) == 1 {
 				assert.Same(t, failed[0], err)
 			} else {
@@ -2135,27 +2330,25 @@ func TestSource_Documents_SyntaxError(t *testing.T) {
 				}
 			}
 
-			// The methods that need the whole file to parse return the
-			// same error and nothing beside it.
-			file, fileErr := source.File()
-			assert.Nil(t, file)
-			assert.Equal(t, err, fileErr)
+			// The other methods that need the whole file to parse return
+			// the same error and nothing beside it.
+			strict, strictErr := source.Documents()
+			assert.Nil(t, strict)
+			assert.Same(t, err, strictErr)
 
 			doc, docErr := source.Document()
 			assert.Nil(t, doc)
-			assert.Equal(t, err, docErr)
+			assert.Same(t, err, docErr)
 
 			_, decodeErr := source.Decode[any](t.Context())
-			assert.Equal(t, err, decodeErr)
+			assert.Same(t, err, decodeErr)
 
-			again, againErr := source.Documents()
-			assert.Equal(t, err, againErr)
-			assert.Equal(t, docs, again)
+			assert.Equal(t, docs, source.AllDocuments())
 		})
 	}
 }
 
-func TestSource_Documents_SyntaxErrorTokens(t *testing.T) {
+func TestSource_AllDocuments_SyntaxErrorTokens(t *testing.T) {
 	t.Parallel()
 
 	// A document that did not parse keeps the tokens a document in its
@@ -2209,8 +2402,10 @@ func TestSource_Documents_SyntaxErrorTokens(t *testing.T) {
 
 			source := niceyaml.NewSourceFromString(tc.input)
 
-			docs, err := source.Documents()
+			_, err := source.File()
 			require.Error(t, err)
+
+			docs := source.AllDocuments()
 			require.Len(t, docs, len(tc.want))
 
 			var all token.Tokens
@@ -2344,11 +2539,9 @@ func TestSource_ValidateDocuments(t *testing.T) {
 			}
 
 			// Every document that parsed runs the validator.
-			docs, _ := source.Documents() //nolint:errcheck // The documents come back with the error.
-
 			var parsed int32
 
-			for _, doc := range docs {
+			for _, doc := range source.AllDocuments() {
 				if doc.Err() == nil {
 					parsed++
 				}

@@ -275,16 +275,16 @@
 //	}
 //
 // Each document parses on its own, so a YAML syntax error fails the
-// document that holds it and no other. [Source.Documents] returns every
-// document beside the error, and the [Node] of a document that did not
-// parse returns its syntax error from [Node.Err], [Node.Decode], and
+// document that holds it and no other. [Source.AllDocuments] returns
+// every document of such a file, and the [Node] of a document that did
+// not parse returns its syntax error from [Node.Err], [Node.Decode], and
 // [Node.Validate]. A caller that reports on a whole file, as a linter
 // does, calls [Source.ValidateDocuments], which validates each document
 // and joins what they return, so one pass names every syntax error and
 // every violation of the documents that parsed. [Source.File],
-// [Source.Document], and [Source.Decode] need the whole file to parse.
-// Every error of the parse matches [ErrSyntax], whichever of these
-// returns it.
+// [Source.Documents], [Source.Document], and [Source.Decode] need the
+// whole file to parse. Every error of the parse matches [ErrSyntax],
+// whichever of these returns it.
 //
 // Every document validates and decodes, an empty one included, such as
 // the one a trailing "---" leaves at the end of a file. A schema that

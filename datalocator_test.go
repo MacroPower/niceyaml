@@ -648,12 +648,11 @@ func TestDataLocator_SyntaxError(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("a: [1\n", niceyaml.WithName("f.yaml"))
 
-	// The document comes back beside its syntax error.
-	docs, err := source.Documents()
-	require.ErrorIs(t, err, niceyaml.ErrSyntax)
+	docs := source.AllDocuments()
 	require.Len(t, docs, 1)
 
 	doc := docs[0]
+	require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
 
 	var bound *niceyaml.SourceError
 

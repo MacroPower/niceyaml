@@ -202,8 +202,7 @@ func TestNode_Kind(t *testing.T) {
 	t.Run("document that did not parse", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := niceyaml.NewSourceFromString("a: [\n").Documents()
-		require.Error(t, err)
+		docs := niceyaml.NewSourceFromString("a: [\n").AllDocuments()
 		require.Len(t, docs, 1)
 
 		assert.Equal(t, niceyaml.NodeNone, docs[0].Kind())
@@ -382,8 +381,7 @@ func TestNode_IsEmpty(t *testing.T) {
 		// The Node of such a document holds no body, with a header above
 		// it or without, and the document is not empty.
 		for _, input := range []string{"a: [\n", "---\na: [\n"} {
-			docs, err := niceyaml.NewSourceFromString(input).Documents()
-			require.Error(t, err)
+			docs := niceyaml.NewSourceFromString(input).AllDocuments()
 			require.Len(t, docs, 1)
 
 			assert.False(t, docs[0].IsEmpty(), input)

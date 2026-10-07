@@ -1721,10 +1721,12 @@ func (b binder) nodeAt(idx int) *Node {
 		return b.node
 	}
 
-	docs, err := b.src.documents()
+	_, err := b.src.File()
 	if err != nil {
 		return nil
 	}
+
+	docs := b.src.documents()
 
 	i := sort.Search(len(docs), func(i int) bool {
 		return docs[i].span.End > idx
@@ -1996,8 +1998,7 @@ func (e *SourceError) documentLabel() string {
 		return ""
 	}
 
-	docs, _ := e.node.source.documents() //nolint:errcheck // The syntax error of a document changes no count.
-	if len(docs) < 2 {
+	if len(e.node.source.documents()) < 2 {
 		return ""
 	}
 
@@ -2281,7 +2282,7 @@ func (e *SourceError) Node() *Node {
 // Document returns the root [*Node] of the document the error is bound
 // to, the one the node [SourceError.Node] returns belongs to, so a caller
 // that sorts the errors of a file by document reads its
-// [Node.DocumentIndex]. The root is the one [Source.Documents] returns.
+// [Node.DocumentIndex]. The root is the one [Source.AllDocuments] returns.
 // An error bound to no node is bound to no document. A nil SourceError is
 // bound to none.
 func (e *SourceError) Document() *Node {

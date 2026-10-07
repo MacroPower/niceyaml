@@ -34,7 +34,7 @@ func pathsAt(t *testing.T, source *niceyaml.Source) string {
 
 	// A document that did not parse still has a Node, so the error is not
 	// one of the test.
-	docs, _ := source.Documents() //nolint:errcheck // The documents come back with the error.
+	docs := source.AllDocuments()
 
 	var sb strings.Builder
 

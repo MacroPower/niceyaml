@@ -518,7 +518,18 @@ func (s *Source) Tokens() token.Tokens {
 }
 
 // Documents returns the root [*Node] of each YAML document of this
-// [Source], in file order.
+// [Source], in file order, for a caller that needs the whole file to
+// parse:
+//
+//	docs, err := source.Documents()
+//	if err != nil {
+//		return err
+//	}
+//
+// For a file with a YAML syntax error, Documents returns no documents and
+// the error [Source.File] returns, which names each syntax error of the
+// file. [Source.AllDocuments] returns the documents of such a file, for a
+// caller that reports on each document.
 //
 // The parser cuts the comments and %YAML or %TAG directives above a "---"
 // header, and the comments after a "..." marker, into a node of their own
@@ -538,37 +549,54 @@ func (s *Source) Tokens() token.Tokens {
 // It parses the source and builds each Node once, so every call returns
 // the same pointers. The slice itself is a copy, so reordering it reaches
 // nothing.
+func (s *Source) Documents() ([]*Node, error) {
+	_, err := s.File()
+	if err != nil {
+		return nil, err
+	}
+
+	return slices.Clone(s.documents()), nil
+}
+
+// AllDocuments returns the root [*Node] of each YAML document of this
+// [Source], in file order, whether the document parsed or not. It serves
+// a caller that renders, diffs, or reports each document, and it returns
+// no error:
 //
-// Each document parses on its own, so a YAML syntax error fails the
-// document that holds it and no other. Documents then returns every
-// document together with the error [Source.File] returns, which names
-// each syntax error of the file. The Node of a document that did not parse
-// sits in the slice at the index of the document, and [Node.Err] returns
-// the syntax error. A caller that needs the whole file to parse checks
-// the error as usual:
+//	for _, doc := range source.AllDocuments() {
+//		if err := doc.Err(); err != nil {
+//			log.Print(niceyaml.FormatError(err, 2))
 //
-//	docs, err := source.Documents()
-//	if err != nil {
-//		return err
+//			continue
+//		}
+//
+//		lipgloss.Println(p.Print(doc.View()))
 //	}
 //
-// A caller that reports on each document drops the error and reads the
-// documents one by one. The [Node] methods that read the tree, such as
-// [Node.Validate] and [Node.Decode], return the syntax error of a document
-// that did not parse, so a loop over the documents meets each syntax
-// error beside the errors of the documents that parsed. A caller that
-// validates a whole file, as a linter does, calls
-// [Source.ValidateDocuments], which runs that loop:
-//
-//	err := source.ValidateDocuments(ctx, reg)
+// Each document parses on its own, so a YAML syntax error fails the
+// document that holds it and no other. The Node of a document that did
+// not parse sits in the slice at the index of the document. [Node.Err]
+// returns its syntax error, and so do the [Node] methods that read the
+// tree, such as [Node.Validate] and [Node.Decode]. A loop over the
+// documents thus meets each syntax error beside the errors of the
+// documents that parsed. [Source.File] returns those syntax errors as
+// one error.
 //
 // A "---" header that directly follows an anchor with no value parses
 // together with the document above it. A syntax error in either of those
-// two documents fails both, and both return that error.
-func (s *Source) Documents() ([]*Node, error) {
-	docs, err := s.documents()
-
-	return slices.Clone(docs), err
+// two documents fails both, and both return that error, so a loop that
+// collects the error of each document holds it twice. A caller that
+// validates every document calls [Source.ValidateDocuments], which runs
+// that loop and reports a shared error once:
+//
+//	err := source.ValidateDocuments(ctx, reg)
+//
+// AllDocuments divides the file into documents as [Source.Documents]
+// describes, and it returns the Nodes Documents returns for a file with
+// no syntax error. The slice itself is a copy, so reordering it reaches
+// nothing.
+func (s *Source) AllDocuments() []*Node {
+	return slices.Clone(s.documents())
 }
 
 // ValidateDocuments validates every document of the Source in file order
@@ -591,7 +619,7 @@ func (s *Source) Documents() ([]*Node, error) {
 //
 // A document that did not parse reports its syntax error, as
 // Node.Validate returns it. Two documents that parse together share one
-// syntax error, as [Source.Documents] describes, and ValidateDocuments
+// syntax error, as [Source.AllDocuments] describes, and ValidateDocuments
 // reports it once. Given no validators and a ctx that has not ended, it
 // thus returns the error [Source.File] returns.
 //
@@ -606,9 +634,6 @@ func (s *Source) Documents() ([]*Node, error) {
 // where ValidateDocuments takes any number, so a file it passes can still
 // fail Source.Decode.
 func (s *Source) ValidateDocuments(ctx context.Context, validators ...Validator) error {
-	// Each document that did not parse reports its own syntax error.
-	docs, _ := s.documents() //nolint:errcheck // The documents come back with the error.
-
 	var (
 		errs []error
 		// The syntax error of the document before, which the next document
@@ -616,7 +641,8 @@ func (s *Source) ValidateDocuments(ctx context.Context, validators ...Validator)
 		prev error
 	)
 
-	for _, doc := range docs {
+	// Each document that did not parse reports its own syntax error.
+	for _, doc := range s.documents() {
 		if ctx.Err() != nil {
 			break
 		}
@@ -647,16 +673,16 @@ func (s *Source) ValidateDocuments(ctx context.Context, validators ...Validator)
 }
 
 // documents returns the root [*Node] of each YAML document, as
-// [Source.Documents] does, in the slice the Source keeps rather than a
+// [Source.AllDocuments] does, in the slice the Source keeps rather than a
 // copy, so a caller must not change it.
-func (s *Source) documents() ([]*Node, error) {
+func (s *Source) documents() []*Node {
 	s.parseOnce()
 
 	s.docsOnce.Do(func() {
 		s.docs = newDocuments(s)
 	})
 
-	return s.docs, s.fileErr
+	return s.docs
 }
 
 // Document returns the root [*Node] of a [Source] that holds a single
@@ -689,7 +715,7 @@ func (s *Source) documents() ([]*Node, error) {
 func (s *Source) Document() (*Node, error) {
 	// The parse bound each syntax error already, and binding the join of
 	// several anew would return another error than File does.
-	_, err := s.documents()
+	_, err := s.File()
 	if err != nil {
 		return nil, err
 	}
@@ -748,11 +774,12 @@ func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, er
 // [ErrMultipleDocuments] at the anchor of the second document. Every
 // Source holds at least one document, as [Source.Documents] describes.
 func (s *Source) single() (*Node, error) {
-	docs, err := s.documents()
+	_, err := s.File()
 	if err != nil {
 		return nil, err
 	}
 
+	docs := s.documents()
 	if len(docs) > 1 {
 		return nil, WrapError(
 			fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(docs)),
@@ -855,9 +882,9 @@ func (d *document) anchorToken() *token.Token {
 // comes back as a [*SourceError] bound to this Source, so [FormatError]
 // renders it with the offending token marked. Several come back joined,
 // each a SourceError of its own in file order, and FormatError marks them
-// all. [Bindings] iterates over them. [Source.Documents] still returns
-// the documents of such a file, for a caller that reads the ones that
-// parsed.
+// all. [Bindings] iterates over them. [Source.Documents] returns that
+// error too, and [Source.AllDocuments] returns the documents of such a
+// file, for a caller that reads the ones that parsed.
 //
 // The message of a syntax error names each control character by its
 // Unicode Control Picture, so a tab the parser rejects reads as "␉" there
