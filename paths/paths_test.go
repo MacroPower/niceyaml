@@ -1788,6 +1788,16 @@ func TestParse_ErrorMessage(t *testing.T) {
 			want: `parse path "$[99999999999999999999]": invalid path: ` +
 				`index "99999999999999999999": out of range`,
 		},
+		"unicode escape with too few digits": {
+			expr: `$.'a\u00'`,
+			want: `parse path "$.'a\\u00'": invalid path: ` +
+				`\u escape in quoted selector needs four hexadecimal digits`,
+		},
+		"unicode escape of a surrogate half": {
+			expr: `$.'a\ud800'`,
+			want: `parse path "$.'a\\ud800'": invalid path: ` +
+				`\ud800 in quoted selector is a surrogate half, which names no character`,
+		},
 	}
 
 	for name, tc := range tcs {

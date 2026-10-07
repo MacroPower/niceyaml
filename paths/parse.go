@@ -18,6 +18,10 @@ var (
 
 	// An index selector too large for an int produces errIndexOutOfRange.
 	errIndexOutOfRange = errors.New("out of range")
+
+	// A `\u` in a quoted selector with fewer than four hexadecimal digits
+	// behind it produces errUnicodeEscapeDigits.
+	errUnicodeEscapeDigits = errors.New(`\u escape in quoted selector needs four hexadecimal digits`)
 )
 
 // Parse parses a path expression into a [Path].
@@ -196,9 +200,9 @@ func parseQuoted(rest string, kind segmentKind) (segment, string, error) {
 			case 't':
 				sb.WriteByte('\t')
 			case 'u':
-				r, ok := parseUnicodeEscape(rest[i+1:])
-				if !ok {
-					return segment{}, "", errors.New(`\u escape in quoted selector needs four hexadecimal digits`)
+				r, err := parseUnicodeEscape(rest[i+1:])
+				if err != nil {
+					return segment{}, "", err
 				}
 
 				sb.WriteRune(r)
@@ -225,12 +229,12 @@ func parseQuoted(rest string, kind segmentKind) (segment, string, error) {
 const unicodeEscapeDigits = 4
 
 // parseUnicodeEscape reads the [unicodeEscapeDigits] hexadecimal digits
-// that start rest as the code of a character, and reports whether rest
-// starts with that many and they name a character. A surrogate half
-// names none.
-func parseUnicodeEscape(rest string) (rune, bool) {
+// that start rest as the code of a character. It returns an error when
+// rest starts with fewer, and when the digits name a surrogate half,
+// which is no character.
+func parseUnicodeEscape(rest string) (rune, error) {
 	if len(rest) < unicodeEscapeDigits {
-		return 0, false
+		return 0, errUnicodeEscapeDigits
 	}
 
 	var r rune
@@ -238,13 +242,18 @@ func parseUnicodeEscape(rest string) (rune, bool) {
 	for i := range unicodeEscapeDigits {
 		digit, ok := hexDigit(rest[i])
 		if !ok {
-			return 0, false
+			return 0, errUnicodeEscapeDigits
 		}
 
 		r = r<<4 | digit
 	}
 
-	return r, utf8.ValidRune(r)
+	if !utf8.ValidRune(r) {
+		return 0, fmt.Errorf(`\u%s in quoted selector is a surrogate half, which names no character`,
+			rest[:unicodeEscapeDigits])
+	}
+
+	return r, nil
 }
 
 // hexDigit returns the value of the hexadecimal digit c, and reports
