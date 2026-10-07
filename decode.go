@@ -92,6 +92,29 @@ import (
 // fields, and [Rebase] is for a check run on a value after Decode
 // returns.
 //
+// A Validate holds no [Node], so it has no [DataLocator] to find how the
+// document spells a key. A parent that checks the entries of a map and
+// builds each path from the Go key names the key as the decoder read it,
+// such as 16 for the key 0x10, and that path misses the entry. The check
+// of an entry belongs in a Validate of the entry's own type instead. The
+// decode puts the errors of that Validate under the key as the document
+// spells it:
+//
+//	type Config struct {
+//		Ports map[int]Server `yaml:"ports"`
+//	}
+//
+//	func (s Server) Validate() error {
+//		if s.Name == "" {
+//			return niceyaml.NewError("name is required", niceyaml.AtPath(paths.Current().Child("name")))
+//		}
+//
+//		return nil
+//	}
+//
+// A decode of Config then reports $.ports.0x10.name for the entry under
+// the key 0x10.
+//
 // [Error.Error] carries no location, so a Validate may add context
 // around an Error with [fmt.Errorf] at any depth. The text the wrapper
 // writes holds no path, and the decode puts the position and the joined
@@ -182,6 +205,12 @@ type SelfValidator interface {
 //
 //		return n.Bind(s.check(ctx, data))
 //	}
+//
+// The names of that data are not the keys of the document, since the
+// decoder respells a key such as 0x10, which sets the member 16. A
+// validator that reports where a finding lies in the data takes each
+// location from [Node.DataLocator], which reads the names as the decoder
+// does.
 //
 // Validate returns its errors bound through the Node it got, with
 // [Node.Bind]. Each error then resolves its `@` paths from that Node and

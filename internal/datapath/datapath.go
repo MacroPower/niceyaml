@@ -263,6 +263,28 @@ func (idx *Index) MemberNode(node ast.Node, name string) ast.Node {
 	return idx.lookup(node, name).value
 }
 
+// Lacks reports whether the value a decode reads from node is sure to
+// hold no member name. That holds for a mapping whose every member the
+// index names, where none has that name, and for a sequence or a scalar,
+// which holds no member. It follows each alias on the way to the value,
+// as [Index.Member] does.
+//
+// It reports false where the index cannot tell. That holds for no node
+// and behind an alias that does not resolve. It also holds for a mapping
+// with a key whose name the index cannot tell, such as a merge key whose
+// sources do not resolve, since such a key may set a member of any name.
+func (idx *Index) Lacks(node ast.Node, name string) bool {
+	content := idx.Deref(node)
+	if content == nil {
+		return false
+	}
+
+	table := idx.memberNodes(content)
+	_, found := table.members[name]
+
+	return table.complete && !found
+}
+
 // SelectsEntry reports whether a path selector with name selects an entry
 // of the mapping node holds, as the finder of the index reports. It also
 // reports true where the finder cannot tell, as it cannot past the limit
@@ -276,6 +298,38 @@ func (idx *Index) SelectsEntry(node ast.Node, name string) bool {
 	_, err := idx.finder.Entry(idx.Deref(node), name)
 
 	return !errors.Is(err, paths.ErrNotFound)
+}
+
+// SelectsOther reports whether a path selector with name selects an entry
+// of the mapping node holds whose key a decode gives another name, as the
+// key 3.10 has the name 3.1. A path that ends in name then selects an
+// entry that sets no member of that name. It follows each alias on the
+// way to the mapping, as [Index.Member] does.
+//
+// It reports true as well for an entry whose key the index cannot name,
+// since such a key may set a member of any name. It reports false where
+// the index finds a member name in the mapping, since [Index.Member]
+// tells which entry sets it, and where the finder of the index finds no
+// entry or returns an error.
+func (idx *Index) SelectsOther(node ast.Node, name string) bool {
+	content := idx.Deref(node)
+	if content == nil || idx.lookup(content, name).entry != nil {
+		return false
+	}
+
+	found, err := idx.finder.Entry(content, name)
+	if err != nil {
+		return false
+	}
+
+	entry, ok := found.(*ast.MappingValueNode)
+	if !ok || entry == nil {
+		return false
+	}
+
+	decoded, ok := idx.keyName(entry.Key)
+
+	return !ok || decoded != name
 }
 
 // lookup returns the member [Index.memberNodes] finds for name in the
@@ -347,17 +401,7 @@ func (idx *Index) memberNodes(node ast.Node) memberTable {
 			continue
 		}
 
-		var (
-			name string
-			ok   bool
-		)
-
-		if _, isAlias := astnode.Content(member.Key).(*ast.AliasNode); isAlias {
-			name, ok = aliasKeyName(idx.resolver, member.Key)
-		} else {
-			name, ok = decodedKey(member.Key)
-		}
-
+		name, ok := idx.keyName(member.Key)
 		if !ok {
 			table.complete = false
 
@@ -372,6 +416,17 @@ func (idx *Index) memberNodes(node ast.Node) memberTable {
 	idx.members[node] = table
 
 	return table
+}
+
+// keyName returns the member name a decode gives key, and reports whether
+// the key has one. An alias key has the name [aliasKeyName] gives it, and
+// any other key the name [decodedKey] gives it.
+func (idx *Index) keyName(key ast.MapKeyNode) (string, bool) {
+	if _, isAlias := astnode.Content(key).(*ast.AliasNode); isAlias {
+		return aliasKeyName(idx.resolver, key)
+	}
+
+	return decodedKey(key)
 }
 
 // addMerged adds to found each member the sources of the merge key of

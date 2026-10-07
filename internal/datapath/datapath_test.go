@@ -573,6 +573,191 @@ func TestIndex_SelectsEntry(t *testing.T) {
 	}
 }
 
+// The key 3.10 of python sets the member 3.1. The tagged alias key has no
+// name the index can tell, so it may set a member of any name, and the
+// index leaves out the members before it.
+const unnamedKeyInput = "k: &k 0x10\npython:\n  3.10: {image: a}\n  a: 1\n  !!str *k : v\n  b: 2\n"
+
+func TestIndex_Lacks(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		steps []any
+		name  string
+		want  bool
+	}{
+		"member the mapping holds": {
+			input: "ports:\n  0x10: x\n",
+			steps: []any{"ports"},
+			name:  "16",
+		},
+		"source spelling of a respelled key": {
+			input: "ports:\n  0x10: x\n",
+			steps: []any{"ports"},
+			name:  "0x10",
+			want:  true,
+		},
+		"member of no key": {
+			input: "ports:\n  0x10: x\n",
+			steps: []any{"ports"},
+			name:  "name",
+			want:  true,
+		},
+		"member a merge source holds": {
+			input: "m:\n  <<: {0x10: x}\n",
+			steps: []any{"m"},
+			name:  "16",
+		},
+		"mapping behind an alias": {
+			input: "base: &base {a: b}\nal: *base\n",
+			steps: []any{"al"},
+			name:  "c",
+			want:  true,
+		},
+		"sequence": {
+			input: "items: [a]\n",
+			steps: []any{"items"},
+			name:  "0",
+			want:  true,
+		},
+		"scalar": {
+			input: "a: b\n",
+			steps: []any{"a"},
+			name:  "b",
+			want:  true,
+		},
+		"null": {
+			input: "a: ~\n",
+			steps: []any{"a"},
+			name:  "b",
+			want:  true,
+		},
+		"member before a key with no name": {
+			input: unnamedKeyInput,
+			steps: []any{"python"},
+			name:  "a",
+		},
+		"member after a key with no name": {
+			input: unnamedKeyInput,
+			steps: []any{"python"},
+			name:  "b",
+		},
+		"member of no key beside a key with no name": {
+			input: unnamedKeyInput,
+			steps: []any{"python"},
+			name:  "zz",
+		},
+		"member beside a merge key that does not resolve": {
+			input: "m:\n  a: 1\n  <<: *missing\n",
+			steps: []any{"m"},
+			name:  "zz",
+		},
+		"alias that does not resolve": {
+			input: "a: *missing\n",
+			steps: []any{"a"},
+			name:  "b",
+		},
+		"no node": {
+			input: "a: b\n",
+			steps: []any{"missing"},
+			name:  "a",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+			idx := datapath.NewIndex(doc.Resolver())
+
+			got := idx.Lacks(walk(t, idx, doc.AST(), tc.steps...).Node, tc.name)
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestIndex_SelectsOther(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		steps []any
+		name  string
+		want  bool
+	}{
+		"spelling of a key with another name": {
+			input: "python:\n  3.10: a\n",
+			steps: []any{"python"},
+			name:  "3.10",
+			want:  true,
+		},
+		"name of a member": {
+			input: "python:\n  3.10: a\n",
+			steps: []any{"python"},
+			name:  "3.1",
+		},
+		"name no key spells": {
+			input: "python:\n  3.10: a\n",
+			steps: []any{"python"},
+			name:  "zz",
+		},
+		"spelling a merge source gives a key with another name": {
+			input: "m:\n  <<: {0x10: x}\n",
+			steps: []any{"m"},
+			name:  "0x10",
+			want:  true,
+		},
+		"spelling of a key with another name before a key with no name": {
+			input: unnamedKeyInput,
+			steps: []any{"python"},
+			name:  "3.10",
+			want:  true,
+		},
+		"key spelled as its name before a key with no name": {
+			input: unnamedKeyInput,
+			steps: []any{"python"},
+			name:  "a",
+		},
+		"spelling of a key with no name": {
+			input: unnamedKeyInput,
+			steps: []any{"python"},
+			name:  "0x10",
+			want:  true,
+		},
+		"merge key that does not resolve": {
+			input: "m:\n  3.10: a\n  <<: *missing\n",
+			steps: []any{"m"},
+			name:  "3.10",
+		},
+		"sequence": {
+			input: "items: [a]\n",
+			steps: []any{"items"},
+			name:  "0",
+		},
+		"no node": {
+			input: "a: b\n",
+			steps: []any{"missing"},
+			name:  "a",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+			idx := datapath.NewIndex(doc.Resolver())
+
+			got := idx.SelectsOther(walk(t, idx, doc.AST(), tc.steps...).Node, tc.name)
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestMemberName(t *testing.T) {
 	t.Parallel()
 

@@ -46,7 +46,8 @@ const (
 // A JSON Pointer built from the names thus spells a key as the YAML
 // source does, which can differ from the key the JSON form of the
 // document holds. The key 0x10 gives /ports/0x10, where JSON holds the
-// key 16.
+// key 16. [go.jacobcolvin.com/niceyaml.Node.DataLocator] goes the other
+// way, from the names of decoded data to the document.
 type Selector struct {
 	Name  string
 	Index int

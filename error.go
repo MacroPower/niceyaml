@@ -626,23 +626,26 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 //
 // The error then binds at the `ports:` key, as [SourceError.Nearest]
 // describes, rather than at the entry. A key `3.10` of a
-// map[string]Server decodes to "3.1" and misses the same way. Range over
-// the entries with [Node.Nodes] instead, and bind through the Node of
-// each entry, which carries the key as the source spells it:
+// map[string]Server decodes to "3.1" and misses the same way. A
+// [DataLocator] from [Node.DataLocator] finds an entry by the name the
+// decoder gives its key. A check of a map entry therefore takes each
+// location from one, in place of a base built from the key:
 //
-//	entries, err := doc.Nodes(paths.Doc().Child("ports").ChildAll())
-//	if err != nil {
-//		return err
-//	}
+//	loc := doc.DataLocator()
 //
-//	for _, entry := range entries {
-//		server, err := entry.Decode[Server](ctx)
-//		if err != nil {
-//			return err
+//	for k, server := range cfg.Ports {
+//		if server.Name == "" {
+//			at := loc.At("ports", strconv.Itoa(k), "name")
+//			errs = append(errs, niceyaml.NewError("name is required", at))
 //		}
-//
-//		errs = append(errs, entry.Bind(checkServer(&server))) // $.ports.0x10.name
 //	}
+//
+//	return doc.Bind(errors.Join(errs...)) // $.ports.0x10.name
+//
+// The names a DataLocator reads are those of a decode into any, and a
+// decode into a map can name some keys another way, as [DataLocator]
+// describes. A check that runs during the decode belongs in a Validate
+// of the entry's type instead, as [SelfValidator] describes.
 //
 // Rebases compose, so a chain of them composes the chain of paths, and a
 // `$` base anywhere in the chain stops the bases above it from moving the
@@ -860,13 +863,16 @@ func (j *rebasedJoinError) As(target any) bool {
 // and [Error.With] take the same options. [AtPath] sets the path of the
 // Error. [AtPosition] or [AtRange] sets its position or range, and the
 // last of those two given wins. [WithDetails] adds the errors that
-// explain it.
+// explain it. A [DataLocator] returns the options that locate an error by
+// the names of decoded data.
 //
 // Available options:
 //   - [AtPath]
 //   - [AtPosition]
 //   - [AtRange]
 //   - [WithDetails]
+//   - [DataLocator.At]
+//   - [DataLocator.AtKey]
 type ErrorOption func(e *Error)
 
 // AtPath is an [ErrorOption] that sets the YAML path of the value the
@@ -916,7 +922,8 @@ type ErrorOption func(e *Error)
 // selects it. A validator that reads decoded data cannot always spell
 // the key of a value as the source does. Such a producer gives
 // [AtPosition] or [AtRange] beside the path. The error then binds there,
-// and the path names the value in the message.
+// and the path names the value in the message. [DataLocator.At] builds
+// both from the names of decoded data.
 func AtPath(p paths.Path) ErrorOption {
 	return func(e *Error) {
 		e.path, e.hasPath = p, true

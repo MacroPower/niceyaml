@@ -345,6 +345,21 @@
 // document holds from [Node.Resolver], so checking each item of a list
 // binds those aliases once.
 //
+// A validator that checks the decoded data, as an adapter for another
+// schema language does, names what it finds by the member names and
+// indices of that data. A path names a key as the source spells it, and
+// the decoder respells some keys, so the key 0x10 sets the member 16.
+// [Node.DataLocator] finds where such names lie in the document, so the
+// adapter reports a finding where a
+// [go.jacobcolvin.com/niceyaml/schema.Schema] reports a violation of the
+// same value:
+//
+//	loc := n.DataLocator()
+//
+//	for _, f := range findings {
+//		errs = append(errs, niceyaml.NewError(f.Msg, loc.At(f.Path...))) // $.ports.0x10.name
+//	}
+//
 // A [SelfValidator] writes `@` paths, which read from the value itself.
 // The decode calls Validate on every value in the result that implements
 // it, and puts the paths each one reports under the path of that value in
