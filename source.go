@@ -741,6 +741,47 @@ func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) er
 	return doc.DecodeInto(ctx, v, opts...)
 }
 
+// SelfValidate runs the self-validation step of [Source.DecodeInto] on
+// its own, on v through the one document of the [Source], as
+// [Node.SelfValidate] runs it through the root Node [Source.Document]
+// returns. A Source that holds more than one document, or a document
+// that does not parse, returns the error Source.Document returns.
+//
+// A value that came from no file validates through an empty Source,
+// which holds one document with no content. A program whose
+// configuration file is optional thus runs the same calls whether or not
+// the file exists:
+//
+//	source, err := niceyaml.NewSourceFromFile(path)
+//	switch {
+//	case errors.Is(err, fs.ErrNotExist):
+//		source = niceyaml.NewSourceFromString("")
+//	case err != nil:
+//		return err
+//	}
+//
+//	var cfg Config
+//	if err := source.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
+//		return err
+//	}
+//
+//	applyEnv(&cfg)
+//
+//	return source.SelfValidate(ctx, &cfg)
+//
+// The decode of an empty Source leaves cfg as it was. Each error of the
+// walk then binds with no position, and its text names the path from v,
+// as in "$.servers[1].port: port is required". With the file, the same
+// error reads "app.yaml:3:5: $.servers[1].port: port is required".
+func (s *Source) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
+	doc, err := s.Document()
+	if err != nil {
+		return err
+	}
+
+	return doc.SelfValidate(ctx, v, opts...)
+}
+
 // Decode validates and decodes the one document of the [Source] into a
 // new T, as [Node.Decode] decodes the root Node [Source.Document]
 // returns, which is the direct path for a configuration file:

@@ -83,9 +83,17 @@ import (
 // A document that did not parse has no tree. Every key of v then takes
 // the text of its Go value, and each error binds with no position, as
 // [Node.Bind] describes. SelfValidate returns those errors rather than
-// the syntax error [Node.Err] returns. A value that came from no file
-// validates through the root of an empty source, and its errors bind
-// with no position too.
+// the syntax error [Node.Err] returns.
+//
+// A value that came from no file, such as defaults with the environment
+// over them, validates through an empty [Source]. [Source.SelfValidate]
+// runs the walk through the one document of a Source, so a program whose
+// file is optional makes the same call with or without the file:
+//
+//	return niceyaml.NewSourceFromString("").SelfValidate(ctx, &cfg)
+//
+// Each error then binds with no position too, and its text names the
+// path from v, as in "$.servers[1].port: port is required".
 //
 // The walk stops once ctx ends, or once a Validate returns the error of a
 // context that ended, and SelfValidate then returns that error alone, as

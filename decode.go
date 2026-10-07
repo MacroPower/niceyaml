@@ -2080,8 +2080,8 @@ func contextEnded(err error) bool {
 // DecodeOption configures [Node.Decode], [Node.DecodeInto],
 // [Node.DecodeAt], and [Node.DecodeIfPresent], and [NewDecoder] takes
 // the same options for a [Decoder] that applies them to every node it
-// decodes. [Node.SelfValidate] takes them too, and reads only the go-yaml
-// options among them.
+// decodes. [Node.SelfValidate] and [Source.SelfValidate] take them too,
+// and read only the go-yaml options among them.
 //
 // Available options:
 //   - [WithValidator]
@@ -2162,9 +2162,10 @@ func WithValidator(dv Validator) DecodeOption {
 // WithSelfValidation is a [DecodeOption] that sets whether the values
 // in a decoded value that implement [SelfValidator] validate themselves
 // after decoding. The default is true. Validators given with
-// [WithValidator] run either way. [Node.SelfValidate] and
-// [Decoder.SelfValidate] run the walk whatever the option says, so a
-// caller that turns it off for the decode validates the value later.
+// [WithValidator] run either way. [Node.SelfValidate],
+// [Source.SelfValidate], and [Decoder.SelfValidate] run the walk
+// whatever the option says, so a caller that turns it off for the decode
+// validates the value later.
 func WithSelfValidation(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.skipSelfValidation = !enabled

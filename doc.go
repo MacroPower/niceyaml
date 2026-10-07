@@ -418,6 +418,13 @@
 //		return err
 //	}
 //
+// [Source.SelfValidate] runs the same step through the one document of a
+// Source, as [Source.DecodeInto] decodes it. An empty Source stands in
+// for a file that does not exist, so a program whose file is optional
+// validates its defaults and the environment through the same calls. An
+// error then reads as its path and its message, as in
+// "$.servers[1].port: port is required".
+//
 // [Node.At] returns a Node scoped to the node a path selects, and the
 // same pipeline then runs on that node. Decode reads one value without
 // decoding the whole document, and a validator given to it checks the

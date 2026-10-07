@@ -4163,6 +4163,164 @@ func TestSource_Decode(t *testing.T) {
 	})
 }
 
+func TestSource_SelfValidate(t *testing.T) {
+	t.Parallel()
+
+	type config struct {
+		Servers []minPort `yaml:"servers"`
+	}
+
+	// The second server sets no port, whatever the Source holds.
+	failing := func() *config {
+		return &config{Servers: []minPort{{Port: 80}, {}}}
+	}
+
+	// The walk runs through the one document of the Source, so one call
+	// validates a value with a file behind it and a value with none. An
+	// empty Source holds no line for the error, so its text is the path
+	// and the message.
+	tcs := map[string]struct {
+		source     string
+		name       string
+		want       string
+		wantFormat string
+		located    bool
+	}{
+		"no file": {
+			want:       "$.servers[1].port: port must be at least 1",
+			wantFormat: "$.servers[1].port: port must be at least 1",
+		},
+		"no file under a name": {
+			name:       "defaults",
+			want:       "defaults: $.servers[1].port: port must be at least 1",
+			wantFormat: "defaults: $.servers[1].port: port must be at least 1",
+		},
+		"file of comments alone": {
+			source:     "# every default applies\n",
+			name:       "app.yaml",
+			want:       "app.yaml: $.servers[1].port: port must be at least 1",
+			wantFormat: "app.yaml: $.servers[1].port: port must be at least 1",
+		},
+		"file that holds the value": {
+			source: "servers:\n  - port: 80\n  - {}\n",
+			name:   "app.yaml",
+			want:   "app.yaml:3:5: $.servers[1].port: port must be at least 1",
+			wantFormat: stringtest.JoinLF(
+				"app.yaml:3:5: $.servers[1].port: port must be at least 1",
+				"",
+				"   3 |   - {}",
+				"     |     ^",
+			),
+			located: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var opts []niceyaml.SourceOption
+
+			if tc.name != "" {
+				opts = append(opts, niceyaml.WithName(tc.name))
+			}
+
+			source := niceyaml.NewSourceFromString(tc.source, opts...)
+
+			err := source.SelfValidate(t.Context(), failing())
+			require.EqualError(t, err, tc.want)
+			assert.True(t, niceyaml.IsInvalid(err))
+			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(err, 0))
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+			assert.Same(t, source, bound.Source())
+
+			_, ok := bound.Position()
+			assert.Equal(t, tc.located, ok)
+
+			// The root Node of the document returns the same error.
+			doc, err := source.Document()
+			require.NoError(t, err)
+			require.EqualError(t, doc.SelfValidate(t.Context(), failing()), tc.want)
+
+			// The walk runs whatever WithSelfValidation says.
+			require.EqualError(t,
+				source.SelfValidate(t.Context(), failing(), niceyaml.WithSelfValidation(false)),
+				tc.want,
+			)
+
+			require.NoError(t, source.SelfValidate(t.Context(), &config{Servers: []minPort{{Port: 80}}}))
+		})
+	}
+
+	t.Run("validates the layers over a file that may not exist", func(t *testing.T) {
+		t.Parallel()
+
+		layers := map[string]struct {
+			source string
+		}{
+			"no file": {},
+			"file":    {source: "servers:\n  - port: 80\n  - {}\n"},
+		}
+
+		for name, tc := range layers {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(tc.source)
+
+				// The decode of an empty Source leaves the defaults as
+				// they were, and the file sets the same value.
+				cfg := failing()
+				require.NoError(t, source.DecodeInto(t.Context(), cfg, niceyaml.WithSelfValidation(false)))
+				assert.Equal(t, failing(), cfg)
+				require.Error(t, source.SelfValidate(t.Context(), cfg))
+
+				// A later layer sets the port, and the value passes.
+				cfg.Servers[1].Port = 8080
+				require.NoError(t, source.SelfValidate(t.Context(), cfg))
+			})
+		}
+	})
+
+	t.Run("several documents return the error DecodeInto returns", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("servers: []\n---\nservers: []\n", niceyaml.WithName("two.yaml"))
+
+		err := source.SelfValidate(t.Context(), failing())
+		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
+		require.EqualError(t, err, "two.yaml:2:1: multiple documents in source: 2 documents")
+		require.EqualError(t, source.DecodeInto(t.Context(), failing()), err.Error())
+
+		// A value that passes meets the same error.
+		require.ErrorIs(t, source.SelfValidate(t.Context(), &config{}), niceyaml.ErrMultipleDocuments)
+	})
+
+	t.Run("document that does not parse returns its syntax error", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString("servers: [\n", niceyaml.WithName("bad.yaml"))
+
+		_, fileErr := source.File()
+		require.ErrorIs(t, fileErr, niceyaml.ErrSyntax)
+
+		err := source.SelfValidate(t.Context(), failing())
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		require.EqualError(t, err, fileErr.Error())
+	})
+
+	t.Run("nil target", func(t *testing.T) {
+		t.Parallel()
+
+		err := niceyaml.NewSourceFromString("").SelfValidate(t.Context(), nil)
+		require.ErrorIs(t, err, niceyaml.ErrSelfValidateTarget)
+		assert.False(t, niceyaml.IsInvalid(err))
+	})
+}
+
 func TestWithReferences(t *testing.T) {
 	t.Parallel()
 

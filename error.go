@@ -45,8 +45,9 @@ var (
 	// report it.
 	ErrDecodeTarget = errors.New("decode target is not a non-nil pointer")
 
-	// ErrSelfValidateTarget indicates the value given to [Node.SelfValidate]
-	// or [Decoder.SelfValidate] is nil or a nil pointer, so there is nothing
+	// ErrSelfValidateTarget indicates the value given to
+	// [Node.SelfValidate], [Source.SelfValidate], or
+	// [Decoder.SelfValidate] is nil or a nil pointer, so there is nothing
 	// to validate. The error comes back bound to the source as a
 	// [SourceError] with no location. It is a mistake of the caller, so
 	// [IsInvalid] does not report it.
