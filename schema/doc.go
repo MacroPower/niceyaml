@@ -138,7 +138,7 @@
 //
 //	// Validate documents.
 //	for _, doc := range docs {
-//	    if err := reg.Validate(ctx, doc); err != nil {
+//	    if err := doc.Validate(ctx, reg); err != nil {
 //	        return err
 //	    }
 //	}
