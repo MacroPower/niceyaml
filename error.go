@@ -851,27 +851,45 @@ func (j *rebasedJoinError) Unwrap() []error {
 // join, if it has one, matches target. Like [errors.Is], it compares the
 // join with target only when the type of target is comparable.
 func (j *rebasedJoinError) Is(target error) bool {
-	if target != nil && reflect.TypeOf(target).Comparable() && j.join == target {
-		return true
-	}
-
-	x, ok := j.join.(interface{ Is(target error) bool }) //nolint:errorlint // The join itself, not a chain search.
-
-	return ok && x.Is(target)
+	return matchesItself(j.join, target)
 }
 
 // As sets target to the join when target points at a type the join is
 // assignable to, as [errors.As] does for an error in the chain. Otherwise
 // it reports what the As method of the join, if it has one, reports.
 func (j *rebasedJoinError) As(target any) bool {
+	return asItself(j.join, target)
+}
+
+// matchesItself reports whether err itself matches target, as
+// [errors.Is] asks of one error in a chain. It compares err with target
+// when the type of target is comparable, and then calls the Is method of
+// err, if it has one. It reads no error err unwraps to, so a type that
+// stands for err above other errors calls it from its own Is method.
+func matchesItself(err, target error) bool {
+	//nolint:errorlint // The error itself, not a chain search.
+	if target != nil && reflect.TypeOf(target).Comparable() && err == target {
+		return true
+	}
+
+	x, ok := err.(interface{ Is(target error) bool }) //nolint:errorlint // The error itself, not a chain search.
+
+	return ok && x.Is(target)
+}
+
+// asItself sets target to err when target points at a type err is
+// assignable to, as [errors.As] does for one error in a chain. Otherwise
+// it reports what the As method of err, if it has one, reports. Like
+// [matchesItself], it reads no error err unwraps to.
+func asItself(err error, target any) bool {
 	val := reflect.ValueOf(target)
-	if val.Kind() == reflect.Pointer && !val.IsNil() && reflect.TypeOf(j.join).AssignableTo(val.Type().Elem()) {
-		val.Elem().Set(reflect.ValueOf(j.join))
+	if val.Kind() == reflect.Pointer && !val.IsNil() && reflect.TypeOf(err).AssignableTo(val.Type().Elem()) {
+		val.Elem().Set(reflect.ValueOf(err))
 
 		return true
 	}
 
-	x, ok := j.join.(interface{ As(target any) bool }) //nolint:errorlint // The join itself, not a chain search.
+	x, ok := err.(interface{ As(target any) bool }) //nolint:errorlint // The error itself, not a chain search.
 
 	return ok && x.As(target)
 }
@@ -1901,13 +1919,7 @@ func (p *placedError) Unwrap() error {
 // compares the wrapper with target only when the type of target is
 // comparable.
 func (p *placedError) Is(target error) bool {
-	if target != nil && reflect.TypeOf(target).Comparable() && p.wrapper == target {
-		return true
-	}
-
-	x, ok := p.wrapper.(interface{ Is(target error) bool }) //nolint:errorlint // The wrapper itself, not a chain search.
-
-	return ok && x.Is(target)
+	return matchesItself(p.wrapper, target)
 }
 
 // As sets target to the wrapper when target points at a type the wrapper
@@ -1915,16 +1927,7 @@ func (p *placedError) Is(target error) bool {
 // Otherwise it reports what the As method of the wrapper, if it has one,
 // reports.
 func (p *placedError) As(target any) bool {
-	val := reflect.ValueOf(target)
-	if val.Kind() == reflect.Pointer && !val.IsNil() && reflect.TypeOf(p.wrapper).AssignableTo(val.Type().Elem()) {
-		val.Elem().Set(reflect.ValueOf(p.wrapper))
-
-		return true
-	}
-
-	x, ok := p.wrapper.(interface{ As(target any) bool }) //nolint:errorlint // The wrapper itself, not a chain search.
-
-	return ok && x.As(target)
+	return asItself(p.wrapper, target)
 }
 
 // isBound reports whether err is a binding already: a [*SourceError], or
