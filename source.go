@@ -524,6 +524,15 @@ func (s *Source) Name() string {
 	return s.name
 }
 
+// label returns the name of the [Source] as a message and the heading of
+// an excerpt show it, with each control character drawn as its picture
+// and each tab as spaces. A name that holds a line feed, as the name of
+// a file can, thus stays on the line it names. [Source.Name] returns the
+// name as the caller gave it.
+func (s *Source) label() string {
+	return escape.Control(escape.Tabs(s.Name()))
+}
+
 // FilePath returns the file path of the [Source].
 //
 // Returns an empty string unless [WithFilePath], [NewSourceFromFile], or

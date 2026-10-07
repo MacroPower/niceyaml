@@ -2216,7 +2216,7 @@ func (e *SourceError) keepsMessage() bool {
 // "cafe.yaml: document 3:". Either part stays out when e has none, and a
 // binding with neither has an empty place.
 func (e *SourceError) place() string {
-	name, doc := e.sourceLabel(), e.documentLabel()
+	name, doc := e.source.label(), e.documentLabel()
 
 	switch {
 	case doc == "":
@@ -2226,15 +2226,6 @@ func (e *SourceError) place() string {
 	default:
 		return name + ": " + doc + ":"
 	}
-}
-
-// sourceLabel returns the name of the source of e as a message shows it,
-// with each control character drawn as its picture and each tab as
-// spaces, as the heading of an excerpt shows it. A name that holds a line
-// feed, as the name of a file can, thus stays on the line it names.
-// [Source.Name] returns the name as the caller gave it.
-func (e *SourceError) sourceLabel() string {
-	return escape.Control(escape.Tabs(e.source.Name()))
 }
 
 // suffixed returns s with a colon after it, or "" for an empty s.
@@ -2962,7 +2953,7 @@ func (e *SourceError) buildTexts() boundTexts {
 func (e *SourceError) more(n int) string {
 	rest := "and " + strconv.Itoa(n) + " more"
 
-	name := e.sourceLabel()
+	name := e.source.label()
 	if name == "" {
 		return rest
 	}
@@ -2983,7 +2974,7 @@ func withPath(p paths.Path, msg string) string {
 func (e *SourceError) prefixed(msg string) string {
 	switch {
 	case e.locErr == nil && !e.adopted:
-		return prefix(formatPosition(e.sourceLabel(), e.loc.pos), msg)
+		return prefix(formatPosition(e.source.label(), e.loc.pos), msg)
 
 	case e.keepsMessage():
 		return msg
@@ -3911,7 +3902,7 @@ func errorDetails(err error, context int) []string {
 		// The name is the caller's text, so its control characters render
 		// as pictures like those of the tree.
 		if len(sources) > 1 && src.Name() != "" {
-			part = escape.Control(escape.Tabs(src.Name())) + "\n" + part
+			part = src.label() + "\n" + part
 		}
 
 		parts = append(parts, part)
