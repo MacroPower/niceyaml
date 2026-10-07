@@ -216,20 +216,22 @@
 // [line.View], so a caller renders them with any renderer and composes them with
 // anything else it renders. [SourceError.Excerpt] returns the hunks around the
 // locations as a view, as [go.jacobcolvin.com/niceyaml/diff.Result.Hunks] does for a
-// diff, and [SourceError.Annotate] marks a view that holds lines of the source, so a
-// viewer shows a document with every error in place:
+// diff, and [Annotate] marks a view that holds lines of the source with
+// every binding in an error, so a viewer shows a document with every
+// error in place:
 //
 //	view := source.View()
-//	for bound := range niceyaml.AllBindings(err) {
-//		bound.Annotate(view)
-//	}
+//	niceyaml.Annotate(err, view)
 //	lipgloss.Println(p.Print(view))
 //
 // Annotate finds each line by identity, since every view over a source
 // shares its lines. The view may therefore be a slice of the source, such
 // as one document of a file from [Node.Span], or a diff against another
 // revision, where the marks of each error land on the lines of its own
-// source that the diff holds.
+// source that the diff holds. A line keeps each mark once, so a caller
+// marks one view with several errors, or with the same error again, and
+// no message doubles. [SourceError.Annotate] makes the same marks for one
+// binding and the bindings below it.
 // [line.View.Hunks] then keeps the marked lines with context around
 // each, so a viewer shows the excerpt of every error at once, with
 // search matches or any other decoration in it:
