@@ -2135,7 +2135,7 @@ func (e *SourceError) keepsMessage() bool {
 // "cafe.yaml: document 3:". Either part stays out when e has none, and a
 // binding with neither has an empty place.
 func (e *SourceError) place() string {
-	name, doc := e.source.Name(), e.documentLabel()
+	name, doc := e.sourceLabel(), e.documentLabel()
 
 	switch {
 	case doc == "":
@@ -2145,6 +2145,15 @@ func (e *SourceError) place() string {
 	default:
 		return name + ": " + doc + ":"
 	}
+}
+
+// sourceLabel returns the name of the source of e as a message shows it,
+// with each control character drawn as its picture and each tab as
+// spaces, as the heading of an excerpt shows it. A name that holds a line
+// feed, as the name of a file can, thus stays on the line it names.
+// [Source.Name] returns the name as the caller gave it.
+func (e *SourceError) sourceLabel() string {
+	return escape.Control(escape.Tabs(e.source.Name()))
 }
 
 // suffixed returns s with a colon after it, or "" for an empty s.
@@ -2757,8 +2766,13 @@ func (e *SourceError) Details() []*SourceError {
 // A wrapper such as [fmt.Errorf] formats the error it wraps with Error,
 // so the list reaches a log through any wrapper, and [SourceError.Message]
 // returns the line of the error alone. The result never includes source
-// lines, so it is safe to log or compare. [SourceError.Excerpt] and
-// [FormatError] return the annotated source excerpt. Error reads the text
+// lines, so it stays short in a log. The name of the source, each path,
+// and the text of a decode rejection reach it with their control
+// characters drawn or escaped, so a key or a file name cannot start a
+// line of its own or write to a terminal. A message the caller wrote
+// reaches it as it is, with any line feed it holds. [SourceError.Excerpt]
+// and [FormatError] return the annotated source excerpt. Error reads the
+// text
 // of the bound error the first time it is called and returns the same
 // message from then on. A nil SourceError, as [errors.As] can yield from a
 // chain that holds one, has an empty message, as a nil [*Error] does.
@@ -2867,7 +2881,7 @@ func (e *SourceError) buildTexts() boundTexts {
 func (e *SourceError) more(n int) string {
 	rest := "and " + strconv.Itoa(n) + " more"
 
-	name := e.source.Name()
+	name := e.sourceLabel()
 	if name == "" {
 		return rest
 	}
@@ -2888,7 +2902,7 @@ func withPath(p paths.Path, msg string) string {
 func (e *SourceError) prefixed(msg string) string {
 	switch {
 	case e.locErr == nil && !e.adopted:
-		return prefix(formatPosition(e.source.Name(), e.loc.pos), msg)
+		return prefix(formatPosition(e.sourceLabel(), e.loc.pos), msg)
 
 	case e.keepsMessage():
 		return msg

@@ -132,7 +132,9 @@ type SourceOption func(*Source)
 // WithName is a [SourceOption] that sets the name for the [Source], which
 // [SourceError.Error] puts in front of the position of every error bound
 // to it, as "name:line:col: msg". Without it, [Source.Name] returns the
-// file path.
+// file path. A message draws each control character of the name as its
+// picture, so a file name that holds a line feed stays on one line, and
+// Source.Name returns the name as given.
 func WithName(name string) SourceOption {
 	return func(s *Source) {
 		s.name = name

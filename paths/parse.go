@@ -40,10 +40,14 @@ var (
 //   - `[*]` selects every sequence element.
 //   - `~` selects the key of the entry the selector before it picked.
 //
-// Inside quotes, `\` escapes the next character, so `\'` is a quote, `\\`
-// is a backslash, and `\t` is a plain `t`. An index is a decimal with no
-// sign and no leading zero. [Path.Key] appends the `~` selector. A `*` in
-// an unquoted name is malformed.
+// Inside quotes, `\` escapes the next character, so `\'` is a quote and
+// `\\` is a backslash. Four escapes name a control character, which is
+// how [Path.String] writes one: `\n` is a line feed, `\r` a carriage
+// return, `\t` a tab, and `\u` with four hexadecimal digits the character
+// with that code, as `\u001b` is an escape. Any other character after `\`
+// stands for itself. An index is a decimal with no sign and no leading
+// zero. [Path.Key] appends the `~` selector. A `*` in an unquoted name is
+// malformed.
 //
 // Returns an error wrapping [ErrInvalidPath] for a malformed expression.
 func Parse(expr string) (Path, error) {
@@ -170,8 +174,8 @@ func parseUnquoted(rest string, kind segmentKind) (segment, string, error) {
 }
 
 // parseQuoted reads a single-quoted name after `.'` or `..'` as a selector
-// of the given kind, where `\` escapes the next character. The quotes may
-// hold nothing, which names the empty key.
+// of the given kind, where `\` escapes the next character as [Parse]
+// describes. The quotes may hold nothing, which names the empty key.
 func parseQuoted(rest string, kind segmentKind) (segment, string, error) {
 	var sb strings.Builder
 
@@ -184,7 +188,26 @@ func parseQuoted(rest string, kind segmentKind) (segment, string, error) {
 
 			i++
 
-			sb.WriteByte(rest[i])
+			switch rest[i] {
+			case 'n':
+				sb.WriteByte('\n')
+			case 'r':
+				sb.WriteByte('\r')
+			case 't':
+				sb.WriteByte('\t')
+			case 'u':
+				r, ok := parseUnicodeEscape(rest[i+1:])
+				if !ok {
+					return segment{}, "", errors.New(`\u escape in quoted selector needs four hexadecimal digits`)
+				}
+
+				sb.WriteRune(r)
+
+				i += unicodeEscapeDigits
+
+			default:
+				sb.WriteByte(rest[i])
+			}
 
 		case '\'':
 			return segment{kind: kind, name: sb.String()}, rest[i+1:], nil
@@ -195,6 +218,48 @@ func parseQuoted(rest string, kind segmentKind) (segment, string, error) {
 	}
 
 	return segment{}, "", errors.New("unterminated quoted selector")
+}
+
+// unicodeEscapeDigits is the number of hexadecimal digits after `\u` in
+// a quoted selector.
+const unicodeEscapeDigits = 4
+
+// parseUnicodeEscape reads the [unicodeEscapeDigits] hexadecimal digits
+// that start rest as the code of a character, and reports whether rest
+// starts with that many and they name a character. A surrogate half
+// names none.
+func parseUnicodeEscape(rest string) (rune, bool) {
+	if len(rest) < unicodeEscapeDigits {
+		return 0, false
+	}
+
+	var r rune
+
+	for i := range unicodeEscapeDigits {
+		digit, ok := hexDigit(rest[i])
+		if !ok {
+			return 0, false
+		}
+
+		r = r<<4 | digit
+	}
+
+	return r, utf8.ValidRune(r)
+}
+
+// hexDigit returns the value of the hexadecimal digit c, and reports
+// whether c is one.
+func hexDigit(c byte) (rune, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return rune(c - '0'), true
+	case c >= 'a' && c <= 'f':
+		return rune(c-'a') + 10, true
+	case c >= 'A' && c <= 'F':
+		return rune(c-'A') + 10, true
+	default:
+		return 0, false
+	}
 }
 
 // parseIndex reads `n]` or `*]` after `[`.

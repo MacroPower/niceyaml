@@ -3856,6 +3856,69 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 	})
 }
 
+func TestWithDisallowUnknownFields_ControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	type config struct {
+		Name string `yaml:"name"`
+	}
+
+	// The decoder writes the name of an unknown field into its message as
+	// the document spells it. A key with a line feed or an escape sequence
+	// thus reaches the message, where it must not start a line that reads
+	// as another error or write to a terminal.
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"a key that forges a line": {
+			input: "name: x\n\"a\\nother.yaml:9:9: $.secret: forged\": 1\n",
+			want: `f.yaml:2:1: $.'a\nother.yaml:9:9: $.secret: forged'~: ` +
+				"unknown field \"a\u240aother.yaml:9:9: $.secret: forged\"",
+		},
+		"a key with an escape sequence": {
+			input: "name: x\n\"a\\e[31mb\": 1\n",
+			want:  `f.yaml:2:1: $.'a\u001b[31mb'~: ` + "unknown field \"a\u241b[31mb\"",
+		},
+		"two keys": {
+			input: "name: x\n\"a\\nb\": 1\n\"c\\td\": 2\n",
+			want: stringtest.JoinLF(
+				"f.yaml: 2 unknown fields",
+				`f.yaml:2:1: $.'a\nb'~: `+"unknown field \"a\u240ab\"",
+				`f.yaml:3:1: $.'c\td'~: `+"unknown field \"c\u2409d\"",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("f.yaml"))
+
+			_, err := source.Decode[config](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+			require.EqualError(t, err, tc.want)
+			assert.NotContains(t, err.Error(), "\x1b")
+
+			// The path reads back as the key the document holds.
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			for b := range niceyaml.AllBindings(err) {
+				path, ok := b.Path()
+				if !ok {
+					continue
+				}
+
+				parsed, err := paths.Parse(path.String())
+				require.NoError(t, err)
+				assert.Equal(t, path, parsed)
+			}
+		})
+	}
+}
+
 func TestWithDisallowUnknownFields(t *testing.T) {
 	t.Parallel()
 

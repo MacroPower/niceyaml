@@ -2984,7 +2984,7 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 			return err
 		}
 
-		msg := tree.restoreNames(rejectionMessage(yamlErr))
+		msg := tree.rejectionText(yamlErr)
 		rejected := decodeError{err: yamlMessageError{err: yamlErr, msg: msg}, placed: true}
 
 		// The token does not say which anchor of a reference document

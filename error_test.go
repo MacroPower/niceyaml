@@ -420,6 +420,61 @@ func TestSourceError_Error_Name(t *testing.T) {
 	}
 }
 
+func TestSourceError_Error_NameControl(t *testing.T) {
+	t.Parallel()
+
+	// The name of a file can hold a line feed or an escape sequence. A
+	// message that wrote it as it is would start a line that reads as an
+	// error of another file, and would write to a terminal.
+	const (
+		name  = "a.yaml: valid\nb.yaml\x1b[31m\tx"
+		shown = "a.yaml: valid\u240ab.yaml\u241b[31m    x"
+	)
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName(name))
+
+	doc, err := source.Document()
+	require.NoError(t, err)
+
+	atA := niceyaml.NewError("x", niceyaml.AtPath(paths.Doc().Child("a")))
+	atB := niceyaml.NewError("y", niceyaml.AtPath(paths.Doc().Child("b")))
+
+	tcs := map[string]struct {
+		err  error
+		want string
+	}{
+		"in front of a position": {
+			err:  doc.Bind(atB),
+			want: shown + ":2:4: $.b: y",
+		},
+		"in front of a message with no position": {
+			err:  doc.Bind(errors.New("bad")),
+			want: shown + ": bad",
+		},
+		"on every line of a list": {
+			err: doc.Bind(niceyaml.NewSummary("two", atA, atB)),
+			want: stringtest.JoinLF(
+				shown+": two",
+				shown+":1:4: $.a: x",
+				shown+":2:4: $.b: y",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			require.EqualError(t, tc.err, tc.want)
+			assert.NotContains(t, tc.err.Error(), "\x1b")
+			assert.Contains(t, niceyaml.FormatError(tc.err, 0), shown)
+		})
+	}
+
+	// The Source keeps the name as the caller gave it.
+	assert.Equal(t, name, source.Name())
+}
+
 func TestSourceError_Error_Document(t *testing.T) {
 	t.Parallel()
 
@@ -2466,9 +2521,10 @@ func TestSourceError_Format_Plain(t *testing.T) {
 	t.Run("control characters in the tree and the reason render as pictures", func(t *testing.T) {
 		t.Parallel()
 
-		// The message and the path spell a key of the document, so an
-		// escape sequence in either renders as its picture in the tree
-		// and in the reason a location did not resolve.
+		// The message and the path spell a key of the document. An
+		// escape sequence in the message renders as its picture, and the
+		// path writes one as an escape, in the tree and in the reason a
+		// location did not resolve.
 		src := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f"))
 		err := yamltest.Bind(t, src, niceyaml.NewError(
 			"m\x1b[31mX",
@@ -2478,7 +2534,7 @@ func TestSourceError_Format_Plain(t *testing.T) {
 		got := niceyaml.FormatError(err, 0)
 		assert.NotContains(t, got, "\x1b")
 		assert.Contains(t, got, "m\u241b[31mX")
-		assert.Contains(t, got, "no excerpt: resolve $.'k\u241b[31mY'")
+		assert.Contains(t, got, `no excerpt: resolve $.'k\u001b[31mY'`)
 	})
 
 	t.Run("control characters render as pictures", func(t *testing.T) {
@@ -8509,33 +8565,31 @@ func TestFormat(t *testing.T) {
 					"        validate",
 				),
 			},
-			// The tree and the reason a location did not resolve both spell
-			// the key. Their prefixes differ in width by other than a
-			// multiple of four, so the two lines match only if the width of
-			// a tab does not depend on its column.
+			// A path writes a tab in a key as an escape, so the tree and
+			// the reason a location did not resolve spell the key alike
+			// and neither lays out a tab.
 			"key of a path that does not resolve": {
 				err: yamltest.Bind(t,
 					niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml")),
 					niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("ab\tc").Index(0))),
 				),
 				want: stringtest.JoinLF(
-					"cfg.yaml: $.'ab    c'[0]: bad",
+					`cfg.yaml: $.'ab\tc'[0]: bad`,
 					"",
-					"no excerpt: resolve $.'ab    c'[0]: not found",
+					`no excerpt: resolve $.'ab\tc'[0]: not found`,
 				),
 			},
-			// The reason stays on one row, so a line feed in the key is a
-			// picture there while it starts a new row in the tree.
+			// A line feed in the key is an escape too, so the key starts
+			// no row of its own in the tree or in the reason.
 			"key with a line feed and a tab": {
 				err: yamltest.Bind(t,
 					niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml")),
 					niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("x\ny\tz").Index(0))),
 				),
 				want: stringtest.JoinLF(
-					"cfg.yaml: $.'x",
-					"y    z'[0]: bad",
+					`cfg.yaml: $.'x\ny\tz'[0]: bad`,
 					"",
-					"no excerpt: resolve $.'x\u240ay    z'[0]: not found",
+					`no excerpt: resolve $.'x\ny\tz'[0]: not found`,
 				),
 			},
 			// The excerpt spells the message beside the caret as the tree

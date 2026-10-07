@@ -2,7 +2,10 @@
 //
 // A [Path] is a sequence of selectors that starts at `$` or `@`, written
 // in the YAMLPath syntax that goccy/go-yaml uses (`$.metadata.name`,
-// `$.items[0]`). A path selects a node, which for a mapping entry is its
+// `$.items[0]`). One spelling differs. A quoted name writes a control
+// character as an escape, such as `\n`, where goccy/go-yaml writes the
+// character itself, so a path that names a key with a line feed stays on
+// one line. A path selects a node, which for a mapping entry is its
 // value. Error highlighting and precise editing often need the key of an
 // entry rather than its value, so [Path.Key] appends a `~` selector that
 // picks the key instead, and every method reads which one from the Path:

@@ -78,8 +78,8 @@ var (
 	// read that many between them.
 	ErrExcessiveMerging = errors.New("excessive merging")
 
-	// Before quoteName or goccyString wraps a selector name in single
-	// quotes, nameEscaper escapes its backslashes and single quotes. A
+	// Before goccyString wraps a selector name in single quotes,
+	// nameEscaper escapes its backslashes and single quotes. A
 	// [strings.Replacer] is safe for concurrent use, so every call shares
 	// this one.
 	nameEscaper = strings.NewReplacer(`\`, `\\`, `'`, `\'`)
@@ -138,21 +138,59 @@ const reservedNameChars = ".*[]$'~"
 // whitespace, which Parse reads back unquoted too, so the name stays apart
 // from the ": " that follows a path in an error message, and a space at
 // either end of it stays visible.
+//
+// A name that holds a control character comes back in quotes too, with
+// the character written as an escape Parse reads back: `\n`, `\r`, or
+// `\t` for a line feed, a carriage return, or a tab, and `\u` with four
+// hexadecimal digits for any other. A path thus stays on one line and
+// sends no control character to a terminal, whatever key it names.
 func quoteName(name string) string {
 	if name != "" && !strings.ContainsAny(name, reservedNameChars) &&
 		!strings.ContainsFunc(name, isSeparatorRune) {
 		return name
 	}
 
-	escaped := nameEscaper.Replace(name)
+	var sb strings.Builder
 
-	return "'" + escaped + "'"
+	sb.Grow(len(name) + len("''"))
+	sb.WriteByte('\'')
+
+	for i := 0; i < len(name); {
+		r, size := utf8.DecodeRuneInString(name[i:])
+
+		switch {
+		case r == '\\' || r == '\'':
+			sb.WriteByte('\\')
+			sb.WriteRune(r)
+
+		case r == '\n':
+			sb.WriteString(`\n`)
+		case r == '\r':
+			sb.WriteString(`\r`)
+		case r == '\t':
+			sb.WriteString(`\t`)
+		case unicode.IsControl(r):
+			fmt.Fprintf(&sb, `\u%04x`, r)
+		default:
+			// The bytes go out as they are, so a name that is no valid
+			// UTF-8 keeps its bytes.
+			sb.WriteString(name[i : i+size])
+		}
+
+		i += size
+	}
+
+	sb.WriteByte('\'')
+
+	return sb.String()
 }
 
-// isSeparatorRune reports whether r is `:` or whitespace, which read as
-// part of the text around a path rather than part of a name.
+// isSeparatorRune reports whether r is `:`, whitespace, or a control
+// character. The first two read as part of the text around a path rather
+// than part of a name, and a control character changes how a terminal
+// shows that text.
 func isSeparatorRune(r rune) bool {
-	return r == ':' || unicode.IsSpace(r)
+	return r == ':' || unicode.IsSpace(r) || unicode.IsControl(r)
 }
 
 // Path is a location in a YAML document, given as a sequence of selectors
@@ -459,7 +497,10 @@ func (p Path) Equal(q Path) bool {
 // String returns the path expression, such as "$.metadata.name" or
 // "@.name", which [Parse] reads back. It starts with `$` or `@`. A name
 // that holds a reserved character, `:`, or whitespace comes back in
-// single quotes, as in "$.'x: y'".
+// single quotes, as in "$.'x: y'". A control character in a name comes
+// back as an escape inside the quotes, as in `$.'a\nb'` for a line feed
+// and `$.'a\u001bb'` for an escape, so the expression stays on one line
+// and changes nothing in a terminal that prints it.
 func (p Path) String() string {
 	var sb strings.Builder
 

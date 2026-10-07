@@ -225,10 +225,30 @@ func TestPath_Build(t *testing.T) {
 			want:     "$.'name '",
 			wantYAML: "$.name ",
 		},
-		"line break in a name is quoted": {
+		"line break in a name is escaped": {
 			build:    func() paths.Path { return paths.Doc().Child("a\nb") },
-			want:     "$.'a\nb'",
+			want:     `$.'a\nb'`,
 			wantYAML: "$.a\nb",
+		},
+		"tab and carriage return in a name are escaped": {
+			build:    func() paths.Path { return paths.Doc().Child("a\tb\rc") },
+			want:     `$.'a\tb\rc'`,
+			wantYAML: "$.a\tb\rc",
+		},
+		"escape character in a name is escaped": {
+			build:    func() paths.Path { return paths.Doc().Child("a\x1b[31mb") },
+			want:     `$.'a\u001b[31mb'`,
+			wantYAML: "$.a\x1b[31mb",
+		},
+		"delete and a C1 control in a name are escaped": {
+			build:    func() paths.Path { return paths.Doc().Child("a\x7fb\u0085c") },
+			want:     `$.'a\u007fb\u0085c'`,
+			wantYAML: "$.a\x7fb\u0085c",
+		},
+		"forged line in a name stays on one line": {
+			build:    func() paths.Path { return paths.Doc().Child("a\nother.yaml:9:9: $.secret: forged") },
+			want:     `$.'a\nother.yaml:9:9: $.secret: forged'`,
+			wantYAML: "$.'a\nother.yaml:9:9: $.secret: forged'",
 		},
 		"recursive name with a space is quoted": {
 			build:    func() paths.Path { return paths.Doc().Recursive("a b") },
@@ -1449,8 +1469,36 @@ func TestParse(t *testing.T) {
 			want: `$.'a\\b.c'`,
 		},
 		"backslash before another character is dropped": {
-			expr: `$.'C:\temp'`,
-			want: `$.'C:temp'`,
+			expr: `$.'C:\docs'`,
+			want: `$.'C:docs'`,
+		},
+		"escaped line feed": {
+			expr: `$.'a\nb'`,
+			want: `$.'a\nb'`,
+		},
+		"escaped tab and carriage return": {
+			expr: `$.'a\tb\rc'`,
+			want: `$.'a\tb\rc'`,
+		},
+		"unicode escape of a control character": {
+			expr: `$.'a\u001bb'`,
+			want: `$.'a\u001bb'`,
+		},
+		"unicode escape in upper case": {
+			expr: `$.'a\u001Bb'`,
+			want: `$.'a\u001bb'`,
+		},
+		"unicode escape of a plain character": {
+			expr: `$.'\u0041bc'`,
+			want: "$.Abc",
+		},
+		"raw line feed in quotes": {
+			expr: "$.'a\nb'",
+			want: `$.'a\nb'`,
+		},
+		"escaped backslash before n": {
+			expr: `$.'a\\nb'`,
+			want: `$.a\nb`,
 		},
 		"quoted key followed by index": {
 			expr: "$.'a.b'[1].c",
@@ -1651,6 +1699,18 @@ func TestParse_Invalid(t *testing.T) {
 		"unterminated escape": {
 			expr: `$.'a\`,
 		},
+		"unicode escape with too few digits": {
+			expr: `$.'a\u00'`,
+		},
+		"unicode escape at the end": {
+			expr: `$.'a\u`,
+		},
+		"unicode escape with a digit that is not hexadecimal": {
+			expr: `$.'a\u00zz'`,
+		},
+		"unicode escape of a surrogate half": {
+			expr: `$.'a\ud800'`,
+		},
 		"bare text after root": {
 			expr: "$foo",
 		},
@@ -1754,6 +1814,12 @@ func TestParse_RoundTrip(t *testing.T) {
 		"colon in name":    paths.Doc().Child("x: y"),
 		"trailing space":   paths.Doc().Child("name "),
 		"line break":       paths.Doc().Child("a\nb"),
+		"tab":              paths.Doc().Child("a\tb"),
+		"carriage return":  paths.Doc().Child("a\rb"),
+		"escape character": paths.Doc().Child("a\x1b[31mb"),
+		"delete":           paths.Doc().Child("a\x7fb"),
+		"C1 control":       paths.Doc().Child("a\u0085b"),
+		"backslash and n":  paths.Doc().Child(`a\nb`),
 		"only reserved":    paths.Doc().Child("."),
 		"tilde in name":    paths.Doc().Child("a~b"),
 		"goccy compatible": paths.Doc().Child("a.b").Index(1).Child("c"),

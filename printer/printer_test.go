@@ -491,40 +491,37 @@ func TestPrinter_PrintError_ControlCharacters(t *testing.T) {
 	assert.Equal(t, "bad \u241b[31mred\u2407 thing", p.PrintError(errors.New("bad \x1b[31mred\x07 thing")))
 
 	// The reason a location did not resolve names the path, which spells a
-	// key of the document, so it gets the same treatment as the tree.
+	// key of the document and writes a control character in it as an
+	// escape, in the reason as in the tree.
 	source := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml"))
 	bound := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("mi\x1b[31mss").Index(0))))
 
 	got = p.PrintError(bound)
 	assert.NotContains(t, got, "\x1b")
 	assert.Contains(t, got, "no excerpt: ")
-	assert.Contains(t, got, "mi\u241b[31mss")
+	assert.Contains(t, got, `mi\u001b[31mss`)
 
-	// A tab in the key becomes four spaces in the reason as it does in the
-	// tree. The prefix "cfg.yaml: " and the prefix "no excerpt: resolve "
-	// differ in width by other than a multiple of four, so the two lines
-	// spell the key the same way only if the width of a tab does not
-	// depend on its column.
+	// A tab in the key is an escape in the reason as it is in the tree, so
+	// neither lays out a tab.
 	named := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml"))
 	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("ab\tc").Index(0))))
 
 	got = p.PrintError(bound)
 	assert.NotContains(t, got, "\u2409")
 	assert.Equal(t, stringtest.JoinLF(
-		"cfg.yaml: $.'ab    c'[0]: bad",
+		`cfg.yaml: $.'ab\tc'[0]: bad`,
 		"",
-		"no excerpt: resolve $.'ab    c'[0]: not found",
+		`no excerpt: resolve $.'ab\tc'[0]: not found`,
 	), got)
 
-	// The reason stays on one row, so a line feed in the key is a picture
-	// there while it starts a new row in the tree.
+	// A line feed in the key is an escape too, so the key starts no row of
+	// its own.
 	bound = named.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("x\ny\tz").Index(0))))
 
 	assert.Equal(t, stringtest.JoinLF(
-		"cfg.yaml: $.'x",
-		"y    z'[0]: bad",
+		`cfg.yaml: $.'x\ny\tz'[0]: bad`,
 		"",
-		"no excerpt: resolve $.'x\u240ay    z'[0]: not found",
+		`no excerpt: resolve $.'x\ny\tz'[0]: not found`,
 	), p.PrintError(bound))
 }
 

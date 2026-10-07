@@ -156,7 +156,7 @@ func (n *Node) decodeRejection(err error) error {
 // [Node.rejectionLocation] gives the token. The path in that location
 // starts at `$`.
 func (n *Node) tokenRejection(err yaml.Error) error {
-	msg := n.doc.decodeTree().restoreNames(rejectionMessage(err))
+	msg := n.doc.decodeTree().rejectionText(err)
 	rejected := decodeError{err: yamlMessageError{err: err, msg: msg}}
 
 	return Invalid(rejected, n.rejectionLocation(err.GetToken())...)
