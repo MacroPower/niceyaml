@@ -95,9 +95,9 @@ func TestErrorHandler(t *testing.T) {
 		niceyaml.AtPath(paths.MustParse("$.name~")),
 	))
 
-	emptyMessageErr := yamltest.Bind(t, src, niceyaml.Invalid(
+	emptyMessageErr := yamltest.Bind(t, src,
 		silentError{niceyaml.NewError("bad name", niceyaml.AtPath(paths.MustParse("$.name~")))},
-	))
+	)
 
 	// A wrapper around a join heads the problems of the join, here and in
 	// the niceyaml version the go.mod of this module requires.
