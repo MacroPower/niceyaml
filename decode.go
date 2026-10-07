@@ -311,14 +311,14 @@ type SelfValidator interface {
 // the root Node.Document returns, which gives it no location.
 //
 // A validator declares which of its errors are the fault of the document.
-// It returns an [*Error] from [NewError] or [WrapError] to report what is
+// It returns an [*Error] from [NewError] or [Invalid] to report what is
 // wrong with the document, with a location or without, and [IsInvalid]
 // reports that Error. An error of the validator's own type declares the
-// fault inside WrapError, where [errors.As] still finds it. The validator
+// fault inside Invalid, where [errors.As] still finds it. The validator
 // returns any other error when the check itself could not run, such as an
 // I/O error, and IsInvalid does not report that error. A location changes
 // neither. [Place] shows an error of the second kind at the value the
-// check read, with the options NewError and WrapError take, and declares
+// check read, with the options NewError and Invalid take, and declares
 // no fault:
 //
 //	_, err := os.Stat(spec.License)
@@ -395,10 +395,10 @@ type Validator interface {
 //
 // A check that knows nothing of YAML returns a plain error, which
 // declares no fault. The function declares the document at fault for
-// that error by returning the check inside [WrapError], which returns
+// that error by returning the check inside [Invalid], which returns
 // nil for a value that passes:
 //
-//	return n.Bind(niceyaml.WrapError(check(v)))
+//	return n.Bind(niceyaml.Invalid(check(v)))
 type ValidatorFunc func(ctx context.Context, n *Node) error
 
 // Validate implements [Validator]. It calls f and binds the error f
@@ -1931,7 +1931,7 @@ func (n *Node) aliasLocation(path paths.Path, reason error) (location, bool) {
 // bindUnresolved binds reason, the error path failed to resolve with from
 // the scope of n, as [Node.At] and [Node.Ranges] return it. A reason that
 // wraps [paths.ErrNotFound] says the document lacks the value, so it
-// binds inside an [Error] from [WrapError], which matches [errInvalid]. A
+// binds inside an [Error] from [Invalid], which matches [errInvalid]. A
 // path that names a key a mapping leaves out binds as an Error with
 // [AtPath] of that path binds, at the key of the mapping that lacks it,
 // as [Node.nearestLocation] finds it. The binding writes the path in
@@ -1945,10 +1945,10 @@ func (n *Node) bindUnresolved(path paths.Path, reason error) error {
 	}
 
 	if _, ok := n.nearestLocation(path, reason); !ok {
-		return n.bindOwn(WrapError(reason))
+		return n.bindOwn(Invalid(reason))
 	}
 
-	return n.bindOwn(WrapError(notFoundError{err: reason}, AtPath(path)))
+	return n.bindOwn(Invalid(notFoundError{err: reason}, AtPath(path)))
 }
 
 // notFoundError is the error of a path that names a key a mapping leaves
@@ -2671,7 +2671,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 	}
 
 	if err != nil {
-		return n.Bind(WrapError(err, atToken(contentStart(n.AST()))))
+		return n.Bind(Invalid(err, atToken(contentStart(n.AST()))))
 	}
 
 	yamlOpts := n.yamlOptions(cfg.decodeOptions())
@@ -2943,10 +2943,10 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 		// holds it, so only a decode that reads one alias from a
 		// reference knows which alias led to it.
 		if len(refs) > 1 {
-			return WrapError(rejected)
+			return Invalid(rejected)
 		}
 
-		return WrapError(rejected, atToken(refs[0]))
+		return Invalid(rejected, atToken(refs[0]))
 	}
 
 	if at == nil {
@@ -2955,7 +2955,7 @@ func (n *Node) rejection(err error, scope ast.Node) error {
 
 	rejected := decodeError{err: fmt.Errorf("decoder rejected the value: %w", cause), placed: true}
 
-	return WrapError(rejected, atToken(at))
+	return Invalid(rejected, atToken(at))
 }
 
 // decodeView returns node as the go-yaml decoder reads it: the same tree,

@@ -71,7 +71,7 @@ type Hours struct {
 func (h Hours) Validate() error {
 	openTime, err := time.Parse("15:04", h.Open)
 	if err != nil {
-		return niceyaml.WrapError(
+		return niceyaml.Invalid(
 			fmt.Errorf("invalid open time: %w", err),
 			niceyaml.AtPath(paths.Current().Child("open")),
 		)
@@ -79,7 +79,7 @@ func (h Hours) Validate() error {
 
 	closeTime, err := time.Parse("15:04", h.Close)
 	if err != nil {
-		return niceyaml.WrapError(
+		return niceyaml.Invalid(
 			fmt.Errorf("invalid close time: %w", err),
 			niceyaml.AtPath(paths.Current().Child("close")),
 		)

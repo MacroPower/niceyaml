@@ -3076,7 +3076,7 @@ func (c *validatorConfig) Validate() error {
 	c.validated = true
 
 	if c.Name == "" {
-		return niceyaml.WrapError(
+		return niceyaml.Invalid(
 			errNameRequired,
 			niceyaml.AtPath(paths.Current().Child("name").Key()),
 		)
@@ -3106,7 +3106,7 @@ func nameSchema(called *bool) niceyaml.Validator {
 		}
 
 		if name, ok := m["name"].(string); ok && name == "invalid" {
-			return niceyaml.WrapError(
+			return niceyaml.Invalid(
 				errSchemaValidationFailed,
 				niceyaml.AtPath(paths.Current().Child("name").Key()),
 			)
@@ -3128,7 +3128,7 @@ func (c *bothValidatorConfig) Validate() error {
 	c.validated = true
 
 	if c.Name == "" {
-		return niceyaml.WrapError(
+		return niceyaml.Invalid(
 			errNameRequired,
 			niceyaml.AtPath(paths.Current().Child("name").Key()),
 		)
@@ -8369,7 +8369,7 @@ func TestNode_Validate(t *testing.T) {
 
 		scoped := yamltest.At(t, doc, paths.Current().Child("meta"))
 		unbound := &fieldValidator{
-			err: niceyaml.WrapError(errNameRequired, niceyaml.AtPath(paths.Current().Child("name"))),
+			err: niceyaml.Invalid(errNameRequired, niceyaml.AtPath(paths.Current().Child("name"))),
 		}
 
 		// A direct call returns the error as the validator wrote it, and
@@ -8391,7 +8391,7 @@ func TestNode_Validate(t *testing.T) {
 		dd := yamltest.FirstDocument(t, "meta:\n  name: test\n")
 		scoped := yamltest.At(t, dd, paths.Current().Child("meta"))
 
-		want := scoped.Bind(niceyaml.WrapError(errNameRequired, niceyaml.AtPath(paths.Current().Child("name"))))
+		want := scoped.Bind(niceyaml.Invalid(errNameRequired, niceyaml.AtPath(paths.Current().Child("name"))))
 
 		assert.Same(t, want, dd.Validate(t.Context(), &fieldValidator{err: want}))
 		assert.Same(t, want, dd.Validate(t.Context(), rejectingValidator(want)))
@@ -10063,14 +10063,14 @@ func TestMultiValidator(t *testing.T) {
 	errC := errors.New("bad c")
 
 	badB := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return niceyaml.WrapError(errB, niceyaml.AtPath(paths.Current().Child("a", "b")))
+		return niceyaml.Invalid(errB, niceyaml.AtPath(paths.Current().Child("a", "b")))
 	})
 	badC := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
 		// A validator that binds its own error, as a schema does.
-		return n.Bind(niceyaml.WrapError(errC, niceyaml.AtPath(paths.Current().Child("a", "c"))))
+		return n.Bind(niceyaml.Invalid(errC, niceyaml.AtPath(paths.Current().Child("a", "c"))))
 	})
 	// A validator of a type of its own that leaves its error unbound.
-	unboundB := &fieldValidator{err: niceyaml.WrapError(errB, niceyaml.AtPath(paths.Current().Child("a", "b")))}
+	unboundB := &fieldValidator{err: niceyaml.Invalid(errB, niceyaml.AtPath(paths.Current().Child("a", "b")))}
 	passing := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
 		return nil
 	})
@@ -10284,10 +10284,10 @@ func TestChainValidator(t *testing.T) {
 	// Both validators fail at the same value, as a schema and a check
 	// that decodes the node do.
 	first := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return niceyaml.WrapError(errFirst, niceyaml.AtPath(namePath))
+		return niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath))
 	})
 	second := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return niceyaml.WrapError(errSecond, niceyaml.AtPath(namePath))
+		return niceyaml.Invalid(errSecond, niceyaml.AtPath(namePath))
 	})
 	passing := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
 		return nil
@@ -10426,7 +10426,7 @@ func TestChainValidator(t *testing.T) {
 
 		doc := newDoc(t)
 		meta := yamltest.At(t, doc, paths.Current().Child("meta"))
-		located := niceyaml.WrapError(errFirst, niceyaml.AtPath(namePath))
+		located := niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath))
 
 		tcs := map[string]struct {
 			v    niceyaml.Validator
@@ -10449,7 +10449,7 @@ func TestChainValidator(t *testing.T) {
 				want: "x.yaml:2:9: $.meta.name: first rule",
 			},
 			"an unbound error with no location on a scoped Node": {
-				v:    &fieldValidator{err: niceyaml.WrapError(errFirst)},
+				v:    &fieldValidator{err: niceyaml.Invalid(errFirst)},
 				node: meta,
 				want: "x.yaml:2:3: $.meta: first rule",
 			},
@@ -10498,7 +10498,7 @@ func TestChainValidator(t *testing.T) {
 		doc := newDoc(t)
 		meta := yamltest.At(t, doc, paths.Current().Child("meta"))
 
-		want := meta.Bind(niceyaml.WrapError(errFirst, niceyaml.AtPath(namePath)))
+		want := meta.Bind(niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath)))
 
 		assert.Same(t, want, doc.Validate(t.Context(), niceyaml.ChainValidator(&fieldValidator{err: want})))
 		assert.Same(t, want, doc.Validate(t.Context(), niceyaml.ChainValidator(rejectingValidator(want))))
@@ -10507,8 +10507,8 @@ func TestChainValidator(t *testing.T) {
 	t.Run("a decode runs repeated WithValidator options the same way", func(t *testing.T) {
 		t.Parallel()
 
-		unboundFirst := &fieldValidator{err: niceyaml.WrapError(errFirst, niceyaml.AtPath(namePath))}
-		unboundSecond := &fieldValidator{err: niceyaml.WrapError(errSecond, niceyaml.AtPath(namePath))}
+		unboundFirst := &fieldValidator{err: niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath))}
+		unboundSecond := &fieldValidator{err: niceyaml.Invalid(errSecond, niceyaml.AtPath(namePath))}
 
 		tcs := map[string]struct {
 			a, b niceyaml.Validator
@@ -10681,7 +10681,7 @@ func TestSkipEmpty(t *testing.T) {
 		return niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
 			*calls++
 
-			return niceyaml.WrapError(errBad)
+			return niceyaml.Invalid(errBad)
 		})
 	}
 
@@ -10791,7 +10791,7 @@ func TestSkipEmpty(t *testing.T) {
 		doc, err := src.Document()
 		require.NoError(t, err)
 
-		located := niceyaml.WrapError(errBad, niceyaml.AtPath(paths.Current().Child("a", "b")))
+		located := niceyaml.Invalid(errBad, niceyaml.AtPath(paths.Current().Child("a", "b")))
 		want := "x.yaml:2:6: $.a.b: bad"
 
 		tcs := map[string]struct {

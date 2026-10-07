@@ -136,7 +136,7 @@ func (l *lockable) UnmarshalText(text []byte) error {
 type positioned struct{}
 
 func (*positioned) UnmarshalYAML(node ast.Node) error {
-	return niceyaml.WrapError(errUnmarshal, niceyaml.AtPosition(position.NewFromToken(node.GetToken())))
+	return niceyaml.Invalid(errUnmarshal, niceyaml.AtPosition(position.NewFromToken(node.GetToken())))
 }
 
 // optionDecoded has no method of its own. A yaml.CustomUnmarshaler

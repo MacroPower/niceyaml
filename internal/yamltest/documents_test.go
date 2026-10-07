@@ -139,7 +139,7 @@ func TestRequireBound(t *testing.T) {
 		},
 		"location above a bound error": {
 			build: func(item *niceyaml.Node) error {
-				return niceyaml.WrapError(item.Bind(reserved), niceyaml.AtPath(namePath))
+				return niceyaml.Invalid(item.Bind(reserved), niceyaml.AtPath(namePath))
 			},
 		},
 	}

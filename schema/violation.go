@@ -157,7 +157,7 @@ func newValidationError(ve *jsonschema.ValidationError, n *niceyaml.Node, idx *d
 
 	found := c.violations(ve)
 	if len(found) == 0 {
-		return niceyaml.WrapError(newViolation(ve))
+		return niceyaml.Invalid(newViolation(ve))
 	}
 
 	return niceyaml.NewSummary(fmt.Sprintf("%d schema violations", len(found)), found...)
@@ -266,7 +266,7 @@ func (c converter) union(e *jsonschema.ValidationError) []error {
 	v.Message = noFormMessage
 
 	return []error{
-		niceyaml.WrapError(v, append(c.at(e), niceyaml.WithDetails(forms...))...),
+		niceyaml.Invalid(v, append(c.at(e), niceyaml.WithDetails(forms...))...),
 	}
 }
 
@@ -339,7 +339,7 @@ func (b branch) typeOnly(e *jsonschema.ValidationError) bool {
 // its [*Violation] and carries the location e fails at, as [converter.at]
 // gives it.
 func (c converter) leaf(e *jsonschema.ValidationError) error {
-	return niceyaml.WrapError(newViolation(e), c.at(e)...)
+	return niceyaml.Invalid(newViolation(e), c.at(e)...)
 }
 
 // at returns the options that give an error the location e fails at. The

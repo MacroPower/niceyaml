@@ -818,7 +818,7 @@ func stringText(node ast.Node) (string, bool) {
 // slice in data contains itself. It returns one matching
 // [ErrExcessiveAliasing] when aliases make up too much of the data the
 // validator would read. The data is at fault for that error, so it comes
-// from [niceyaml.WrapError] and does not wrap ErrValidate.
+// from [niceyaml.Invalid] and does not wrap ErrValidate.
 func checkExpansion(data any) error {
 	w := expansionWalker{sizes: map[sharedKey]int{}, onPath: map[sharedKey]bool{}}
 
@@ -828,7 +828,7 @@ func checkExpansion(data any) error {
 	}
 
 	if aliaslimit.Excessive(w.distinct, w.aliased) {
-		return niceyaml.WrapError(ErrExcessiveAliasing)
+		return niceyaml.Invalid(ErrExcessiveAliasing)
 	}
 
 	return nil

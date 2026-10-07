@@ -225,8 +225,8 @@ func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
 //
 // A row tells a fault of the document from a check that could not run
 // with [ErrorTree.Invalid], and [IsInvalid] asks the same of every row.
-// The document is at fault for each problem an [*Error] from [WrapError]
-// heads, so each branch of a join that WrapError wraps yields a row that
+// The document is at fault for each problem an [*Error] from [Invalid]
+// heads, so each branch of a join that Invalid wraps yields a row that
 // is invalid, while its text stays its own.
 func (t ErrorTree) Problems() iter.Seq[ErrorTree] {
 	return func(yield func(ErrorTree) bool) {
@@ -409,7 +409,7 @@ func bindingOf(err error) *SourceError {
 // [errors.Join] nests each join in the next, and copying the nodes of each
 // level into the level above would take time and memory quadratic in
 // their number. A join that an [*Error] matching [errInvalid] wraps, as
-// one from [WrapError] does, marks each branch as [markInvalid] does. A
+// one from [Invalid] does, marks each branch as [markInvalid] does. A
 // nil err appends nothing.
 func appendTrees(dst []ErrorTree, err error) []ErrorTree {
 	if isNothing(err) {
@@ -937,7 +937,7 @@ func (c childBase) cross(x *Error) childBase {
 // does every child below a detail, or below any other Rebase that moves
 // paths alone. A problem below an Error that matches [errInvalid] matches
 // too, as [markInvalid] marks it, so each error a summary of a
-// [SelfValidator] heads, and each branch of a join that [WrapError]
+// [SelfValidator] heads, and each branch of a join that [Invalid]
 // wraps, is the document's fault. A detail is no problem, so it gains no
 // mark.
 func (c childBase) rebase(n error, detail bool) error {

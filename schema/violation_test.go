@@ -978,7 +978,7 @@ func TestViolation_Is(t *testing.T) {
 			want:  true,
 		},
 		"inside an error with no location": {
-			input: niceyaml.WrapError(violation),
+			input: niceyaml.Invalid(violation),
 			want:  true,
 		},
 		"behind a wrapper": {

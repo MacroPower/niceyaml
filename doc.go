@@ -514,13 +514,13 @@
 // rejection, a schema violation, and an error a [SelfValidator] returns,
 // and it is not for a schema that does not load or a context that ended.
 // A [Validator] declares which of its errors is which by the constructor
-// it calls. [NewError] and [WrapError] declare the document at fault,
+// it calls. [NewError] and [Invalid] declare the document at fault,
 // with a location or without. [Place] takes the same options and
 // declares nothing, as any other error does, so it shows a check that
 // could not run at the value the check read:
 //
 //	niceyaml.NewError("license file does not exist", niceyaml.AtPath(p)) // the document is at fault
-//	niceyaml.WrapError(checkErr, niceyaml.AtPath(p))                     // the document is at fault
+//	niceyaml.Invalid(checkErr, niceyaml.AtPath(p))                       // the document is at fault
 //	niceyaml.Place(statErr, niceyaml.AtPath(p))                          // the check could not run
 //
 // IsInvalid reports whether the document is at fault for every problem

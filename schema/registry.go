@@ -486,7 +486,7 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 }
 
 // noMatch returns the error a lookup reports when every resolver declined:
-// [ErrNoMatch] inside a [*niceyaml.Error] from [niceyaml.WrapError], with
+// [ErrNoMatch] inside a [*niceyaml.Error] from [niceyaml.Invalid], with
 // the reason of each resolver that said more than ErrNoMatch as a detail
 // from [niceyaml.WithDetails], in lookup order. The document names no
 // schema the registry knows, so [niceyaml.IsInvalid] reports the error.
@@ -502,7 +502,7 @@ func noMatch(reasons []error) error {
 		}
 	}
 
-	return niceyaml.WrapError(ErrNoMatch, niceyaml.WithDetails(details...))
+	return niceyaml.Invalid(ErrNoMatch, niceyaml.WithDetails(details...))
 }
 
 // reasonError is the reason one resolver declined a document, a detail of

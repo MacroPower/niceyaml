@@ -95,7 +95,7 @@ func TestErrorHandler(t *testing.T) {
 		niceyaml.AtPath(paths.MustParse("$.name~")),
 	))
 
-	emptyMessageErr := yamltest.Bind(t, src, niceyaml.WrapError(
+	emptyMessageErr := yamltest.Bind(t, src, niceyaml.Invalid(
 		silentError{niceyaml.NewError("bad name", niceyaml.AtPath(paths.MustParse("$.name~")))},
 	))
 

@@ -259,9 +259,9 @@ linters:
       - text: "go\\.jacobcolvin\\.com/niceyaml\\.NewSummary"
         linters:
           - wrapcheck
-      # WrapError and Place build a new error around another, as
+      # Invalid and Place build a new error around another, as
       # fmt.Errorf does.
-      - text: "go\\.jacobcolvin\\.com/niceyaml\\.(WrapError|Place)"
+      - text: "go\\.jacobcolvin\\.com/niceyaml\\.(Invalid|Place)"
         linters:
           - wrapcheck
       - path: cmd/

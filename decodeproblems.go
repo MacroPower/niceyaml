@@ -159,7 +159,7 @@ func (n *Node) tokenRejection(err yaml.Error) error {
 	msg := n.doc.decodeTree().restoreNames(rejectionMessage(err))
 	rejected := decodeError{err: yamlMessageError{err: err, msg: msg}}
 
-	return WrapError(rejected, n.rejectionLocation(err.GetToken())...)
+	return Invalid(rejected, n.rejectionLocation(err.GetToken())...)
 }
 
 // decodeProblem is one problem of a decode, before the Node binds it.

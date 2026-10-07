@@ -848,7 +848,7 @@ func (s *Source) single() (*Node, error) {
 
 	docs := s.documents()
 	if len(docs) > 1 {
-		return nil, WrapError(
+		return nil, Invalid(
 			fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(docs)),
 			atToken(docs[1].doc.anchorToken()),
 		)
@@ -1082,7 +1082,7 @@ func (s *Source) parse() parsed {
 		case ok:
 			msg := escape.Control(yamlErr.GetMessage())
 
-			err = WrapError(syntaxError{err: yamlMessageError{err: yamlErr, msg: msg}}, atToken(yamlErr.GetToken()))
+			err = Invalid(syntaxError{err: yamlMessageError{err: yamlErr, msg: msg}}, atToken(yamlErr.GetToken()))
 
 		case !errors.Is(err, ErrSyntax):
 			err = syntaxError{err: err}
