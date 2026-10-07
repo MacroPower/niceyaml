@@ -5942,6 +5942,172 @@ func TestDocument_DecodeInto(t *testing.T) {
 	})
 }
 
+// mergeLeaf is a struct with two fields, so a second decode can set one
+// and leave the other.
+type mergeLeaf struct {
+	A int `yaml:"a"`
+	B int `yaml:"b"`
+}
+
+// mergeNested holds a [mergeLeaf] one struct down.
+type mergeNested struct {
+	Name string    `yaml:"name"`
+	Leaf mergeLeaf `yaml:"leaf"`
+}
+
+// MergeInline holds the fields [mergeTarget] inlines.
+type MergeInline struct {
+	InA int `yaml:"in_a"`
+	InB int `yaml:"in_b"`
+}
+
+// MergeShared holds the fields [mergeTarget] inlines through a pointer.
+type MergeShared struct {
+	SharedA int `yaml:"shared_a"`
+	SharedB int `yaml:"shared_b"`
+}
+
+// mergeTarget holds a field of each kind that a second decode into one
+// value merges or replaces.
+type mergeTarget struct {
+	*MergeShared `yaml:",inline"`
+	MergeInline  `yaml:",inline"`
+
+	Any     any                  `yaml:"any"`
+	Map     map[string]mergeLeaf `yaml:"map"`
+	Pointer *mergeLeaf           `yaml:"pointer"`
+	Number  *int                 `yaml:"number"`
+	Slice   []mergeLeaf          `yaml:"slice"`
+	Nested  mergeNested          `yaml:"nested"`
+	Struct  mergeLeaf            `yaml:"struct"`
+	Array   [2]mergeLeaf         `yaml:"array"`
+}
+
+func TestNode_DecodeInto_Merge(t *testing.T) {
+	t.Parallel()
+
+	base := stringtest.Input(`
+		in_a: 1
+		in_b: 2
+		shared_a: 1
+		shared_b: 2
+		struct: {a: 1, b: 2}
+		nested: {name: n, leaf: {a: 1, b: 2}}
+		pointer: {a: 1, b: 2}
+		number: 1
+		slice: [{a: 1, b: 2}, {a: 3, b: 4}]
+		array: [{a: 1, b: 2}, {a: 3, b: 4}]
+		map: {k: {a: 1, b: 2}, j: {a: 3, b: 4}}
+		any: {k: v, j: w}
+	`)
+
+	// The value a decode of base fills, built anew for each case.
+	decoded := func() mergeTarget {
+		number := 1
+
+		return mergeTarget{
+			InA:         1,
+			InB:         2,
+			MergeShared: &MergeShared{SharedA: 1, SharedB: 2},
+			Struct:      mergeLeaf{A: 1, B: 2},
+			Nested:      mergeNested{Name: "n", Leaf: mergeLeaf{A: 1, B: 2}},
+			Pointer:     &mergeLeaf{A: 1, B: 2},
+			Number:      &number,
+			Slice:       []mergeLeaf{{A: 1, B: 2}, {A: 3, B: 4}},
+			Array:       [2]mergeLeaf{{A: 1, B: 2}, {A: 3, B: 4}},
+			Map:         map[string]mergeLeaf{"k": {A: 1, B: 2}, "j": {A: 3, B: 4}},
+			Any:         map[string]any{"k": "v", "j": "w"},
+		}
+	}
+
+	// Each case decodes base into a value and then over into the same
+	// value. The want func changes the value base filled into the value
+	// both leave, and a nil one says over changed nothing. A program that
+	// decodes one file over another relies on these results, so a go-yaml
+	// release that changes one fails here first.
+	tcs := map[string]struct {
+		want func(v *mergeTarget)
+		over string
+	}{
+		"a struct merges field by field": {
+			over: "struct: {a: 9}\n",
+			want: func(v *mergeTarget) { v.Struct.A = 9 },
+		},
+		"a nested struct merges at every depth": {
+			over: "nested: {leaf: {a: 9}}\n",
+			want: func(v *mergeTarget) { v.Nested.Leaf.A = 9 },
+		},
+		"an inline struct merges": {
+			over: "in_a: 9\n",
+			want: func(v *mergeTarget) { v.InA = 9 },
+		},
+		"an inline pointer to a struct merges": {
+			over: "shared_a: 9\n",
+			want: func(v *mergeTarget) { v.SharedA = 9 },
+		},
+		"a pointer to a struct merges": {
+			over: "pointer: {a: 9}\n",
+			want: func(v *mergeTarget) { v.Pointer.A = 9 },
+		},
+		"an empty mapping keeps a struct": {
+			over: "struct: {}\nnested: {leaf: {}}\npointer: {}\n",
+		},
+		"a slice replaces": {
+			over: "slice: [{a: 9}]\n",
+			want: func(v *mergeTarget) { v.Slice = []mergeLeaf{{A: 9}} },
+		},
+		"an empty sequence replaces a slice": {
+			over: "slice: []\n",
+			want: func(v *mergeTarget) { v.Slice = []mergeLeaf{} },
+		},
+		"an array replaces": {
+			over: "array: [{a: 9}]\n",
+			want: func(v *mergeTarget) { v.Array = [2]mergeLeaf{{A: 9}} },
+		},
+		"a map replaces": {
+			over: "map: {k: {a: 9}}\n",
+			want: func(v *mergeTarget) { v.Map = map[string]mergeLeaf{"k": {A: 9}} },
+		},
+		"an empty mapping replaces a map": {
+			over: "map: {}\n",
+			want: func(v *mergeTarget) { v.Map = map[string]mergeLeaf{} },
+		},
+		"a value of an interface type replaces": {
+			over: "any: {z: y}\n",
+			want: func(v *mergeTarget) { v.Any = map[string]any{"z": "y"} },
+		},
+		"a null keeps every kind but a pointer": {
+			over: "struct: {a: null}\nnested: null\nslice: null\narray: null\nmap: null\nany: null\n",
+		},
+		"a null sets a pointer to nil": {
+			over: "pointer: null\nnumber: null\n",
+			want: func(v *mergeTarget) { v.Pointer, v.Number = nil, nil },
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			var got mergeTarget
+
+			err := yamltest.FirstDocument(t, base).DecodeInto(t.Context(), &got)
+			require.NoError(t, err)
+			require.Equal(t, decoded(), got)
+
+			err = yamltest.FirstDocument(t, tc.over).DecodeInto(t.Context(), &got)
+			require.NoError(t, err)
+
+			want := decoded()
+			if tc.want != nil {
+				tc.want(&want)
+			}
+
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
 func TestDocument_Decode_ValueReceivers(t *testing.T) {
 	t.Parallel()
 

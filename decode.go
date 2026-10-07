@@ -2287,12 +2287,17 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // the path of the value, unless [WithSelfValidation] switches that off.
 // [Node.SelfValidate] runs that step on its own, once the caller has
 // changed v. Fields absent from the document keep their existing values,
-// so a caller may fill v with defaults first. A null with no tag,
-// anchored or not, leaves v as it is, unless v points to a pointer or an
-// interface.
+// so a caller may fill v with defaults first. A mapping in the document
+// merges into a struct v holds, field by field at every depth, and it
+// merges the same way through a pointer to a struct and through an
+// inline field. The document replaces a slice, an array, a map, or a
+// value of an interface type whole, so no element or entry of the old
+// one remains. A null with no tag, anchored or not, leaves v as it is,
+// unless v points to a pointer or an interface.
 // A null with neither a tag nor an anchor leaves a struct field as it is
-// too. The go-yaml decoder rejects a tagged or anchored null in a field
-// of some kinds, such as an int or a struct. When v points to a pointer,
+// too, unless the field is a pointer, which the null sets to nil. The
+// go-yaml decoder rejects a tagged or anchored null in a field of some
+// kinds, such as an int or a struct. When v points to a pointer,
 // a nil pointer gets a new value, and the node decodes into the value
 // the pointer points to. An untagged null sets the pointer to nil.
 // So does a document whose body is an alias to a null in a reference
