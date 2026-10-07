@@ -13,4 +13,4 @@ import "errors"
 // Err is the target an error matches from an Is method to declare that
 // the error it wraps stands in no document. No error wraps it, so its
 // message reaches no caller.
-var Err = errors.New("unplaced error")
+var Err = errors.New("stands in no document")
