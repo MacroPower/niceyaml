@@ -464,6 +464,14 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // quotes it, stays as it is, and so does a result under an
 // [*niceyaml.Error]. The result itself never changes.
 //
+// Each violation the result heads places the same way on its own, so a
+// caller that drops some of them places the rest. The violations are
+// the bindings [niceyaml.SourceError.Errors] returns for the result:
+//
+//	for _, violation := range bound.Errors() {
+//		errs = append(errs, doc.Bind(niceyaml.Rebase(violation, base)))
+//	}
+//
 // ValidateValue holds no source, so each path names a key as the decoder
 // does, such as 16 for a key the document spells 0x10. A caller that
 // reports the errors in the document the data came from takes each

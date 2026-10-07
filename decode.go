@@ -2178,7 +2178,8 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 // [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] returns for a
 // value that came from none. Bind binds the errors it was made from, as
 // it binds an error that no source bound yet, so a validator that
-// returns such a result reports it in the document.
+// returns such a result reports it in the document. Each binding below
+// that one binds the same way on its own.
 //
 // A document that did not parse has no tree to resolve a path in, so a
 // path bound through its Node resolves nowhere. The bound error keeps

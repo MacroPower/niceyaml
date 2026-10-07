@@ -720,7 +720,8 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] returns for a
 // value that came from none. Rebase reads it as the errors it was made
 // from, so they take the base, and a Node then binds them in its
-// document.
+// document. Each binding below that one, as [SourceError.Errors] and
+// [SourceError.Details] return them, rebases the same way on its own.
 func Rebase(err error, base paths.Path) error {
 	return rebase(err, base, false, false)
 }
@@ -1510,7 +1511,8 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 type SourceError struct {
 	err error
 	// The error the binding was made from when it stands in no document,
-	// as [unplacedError] finds one, and nil for every other binding.
+	// as [unplacedError] finds one, and nil for every other binding. Each
+	// binding below such a binding holds the error it was made from too.
 	// [placeable] hands it to a later binding in place of this one.
 	free error
 	// The reason the location did not resolve, which is nil when it did:
@@ -1618,7 +1620,10 @@ type boundTexts struct {
 // a validator gave a Node, so [binder.located] points an error that holds
 // no location at that Node. A binder with a fallback binds each path in
 // the layer [fallback.layer] picks for it, which is its own Node or one
-// of the Nodes below it in a [Layers].
+// of the Nodes below it in a [Layers]. A binder that is unplaced binds
+// an error about a value that came from no document, as [unplacedError]
+// finds one, so each binding it builds keeps the error it was made from
+// for [placeable].
 type binder struct {
 	src       *Source
 	node      *Node
@@ -1626,6 +1631,7 @@ type binder struct {
 	route     bool
 	ambiguous bool
 	locate    bool
+	unplaced  bool
 }
 
 // located returns err as b binds it at the top of its tree. A binder that
@@ -1809,6 +1815,8 @@ func bindTree(err error, b binder) error {
 		return err
 	}
 
+	b.unplaced = marked
+
 	bound := newSourceError(b.located(err), b)
 	if marked {
 		bound.free = err
@@ -1821,7 +1829,9 @@ func bindTree(err error, b binder) error {
 // itself matches [unplaced.Err] from an Is method. Such an err declares
 // that the error it wraps is about a value that came from no document.
 // Its binding reads as any other, and [placeable] hands the error to a
-// later binding that places it in a document.
+// later binding that places it in a document. The bindings below it,
+// one per problem and detail, stand in no document either, so placeable
+// hands on the error of each the same way.
 func unplacedError(err error) (error, bool) {
 	x, ok := err.(interface{ Is(target error) bool }) //nolint:errorlint // The error itself, not a chain search.
 	if !ok || !x.Is(unplaced.Err) {
@@ -2468,6 +2478,12 @@ func (e *SourceError) addChild(n error, b binder, base childBase, detail bool) {
 	bound, ok := child.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
 	if !ok {
 		bound = newSourceError(child, b)
+
+		// A child that took over a binding of a document stands where
+		// that binding does.
+		if b.unplaced && !bound.adopted {
+			bound.free = child
+		}
 	}
 
 	// A binding that takes its location from an Error never reports

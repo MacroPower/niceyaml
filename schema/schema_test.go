@@ -1343,6 +1343,41 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		assert.Same(t, doc.Source(), bound.Details()[0].Source())
 	})
 
+	t.Run("each violation places on its own", func(t *testing.T) {
+		t.Parallel()
+
+		err := v.ValidateValue(t.Context(), map[string]any{"port": 0})
+
+		var result *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &result)
+		require.Len(t, result.Errors(), 2)
+
+		// A caller that keeps only some of the violations places the
+		// ones it keeps, and each stands in the document as it does
+		// when the caller places the whole result.
+		want := []string{
+			"app.yaml:2:9: $.request.port: 0 is less than 1",
+			`app.yaml:1:1: $.request.name: missing required property "name"`,
+		}
+
+		for i, violation := range result.Errors() {
+			placed := doc.Bind(niceyaml.Rebase(violation, base))
+			require.EqualError(t, placed, want[i])
+			assert.True(t, niceyaml.IsInvalid(placed))
+
+			for b := range niceyaml.AllBindings(placed) {
+				assert.Same(t, doc.Source(), b.Source())
+			}
+
+			// The violation itself stays where the result put it.
+			assert.NotSame(t, doc.Source(), violation.Source())
+		}
+
+		kept := errors.Join(result.Errors()[1], result.Errors()[0])
+		require.EqualError(t, yamltest.At(t, doc, base).Bind(kept), stringtest.JoinLF(want[1], want[0]))
+	})
+
 	t.Run("path names a key as the decoder does", func(t *testing.T) {
 		t.Parallel()
 
