@@ -390,8 +390,11 @@
 //
 //	config.yaml:3:11: $.servers[0].port: expected integer, got string
 //
-// Under [WithDisallowUnknownFields], one decode reports every key that
-// no field of the target reads, each at the path of the key.
+// The decoder stops at the first value it rejects. The decode then looks
+// for the other values the decoder rejects for their kind or range, so
+// one decode reports them together, as [Node.DecodeInto] describes.
+// Under [WithDisallowUnknownFields], the report also holds every key
+// that no field of the target reads, each at the path of the key.
 //
 // [Node.DecodeInto] runs the same pipeline on a value you already hold,
 // such as one pre-populated with defaults.

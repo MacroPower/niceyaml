@@ -1,10 +1,7 @@
 package niceyaml
 
 import (
-	"bytes"
-	"cmp"
 	"context"
-	"fmt"
 	"reflect"
 	"slices"
 
@@ -17,80 +14,14 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// unknownFields returns the rejection of every unknown field that a
-// decode of node into v with yamlOpts reports, in the order of their
-// keys in the source, when err, the error that decode returned, is the
-// rejection of one. The go-yaml decoder stops at the first unknown field
-// it finds, and it finds the fields of one mapping in no fixed order, so
-// one decode names one field, and not always the same one.
-//
-// The decoder decides whether a decode fails. UnknownFields runs only
-// after the decoder rejected an unknown field, and its result always
-// holds that rejection, so no decode passes or fails because of it. For
-// any other err it returns nil, and so it does for an unknown field the
-// decoder reported with no token of the source.
-//
-// An [unknownFieldFinder] finds the other fields. Each rejection it
-// returns is one the decoder itself returned for that field.
-func (n *Node) unknownFields(
-	ctx context.Context,
-	err error,
-	node ast.Node,
-	v any,
-	yamlOpts []yaml.DecodeOption,
-) []*yaml.UnknownFieldError {
-	reported, ok := err.(*yaml.UnknownFieldError) //nolint:errorlint // A wrapped error is the unmarshaler's own.
-	if !ok || !n.holdsToken(reported.Token) || reported.Token.Position == nil {
-		return nil
-	}
-
-	f := &unknownFieldFinder{
-		ctx:      ctx,
-		node:     n,
-		resolver: n.doc.pathResolver(),
-		decoder:  yaml.NewDecoder(bytes.NewReader(nil), yamlOpts...),
-		found:    map[int]*yaml.UnknownFieldError{reported.Token.Position.Offset: reported},
-		visited:  map[structVisit]bool{},
-	}
-
-	f.walk(reflect.TypeOf(v).Elem(), node, nil)
-
-	fields := make([]*yaml.UnknownFieldError, 0, len(f.found))
-	for _, field := range f.found {
-		fields = append(fields, field)
-	}
-
-	slices.SortFunc(fields, func(a, b *yaml.UnknownFieldError) int {
-		return cmp.Compare(a.Token.Position.Offset, b.Token.Position.Offset)
-	})
-
-	return fields
-}
-
-// bindUnknownFields binds the rejections of several unknown fields to the
-// source as one error. It is a summary from [NewSummary] whose message
-// counts the fields, and it heads one [*Error] for each, which matches
-// [ErrDecode] and carries the path of the key of the field, as
-// [Node.bindDecodeError] binds the rejection of one field. The paths start
-// at `$`, so the Node binds the error with no scope in front of them.
-func (n *Node) bindUnknownFields(fields []*yaml.UnknownFieldError) error {
-	tree := n.doc.decodeTree()
-	rejections := make([]error, 0, len(fields))
-
-	for _, field := range fields {
-		rejected := decodeError{err: yamlMessageError{err: field, msg: tree.restoreNames(rejectionMessage(field))}}
-		rejections = append(rejections, WrapError(rejected, n.rejectionLocation(field.Token)...))
-	}
-
-	summary := NewSummary(fmt.Sprintf("%d unknown fields", len(fields)), rejections...)
-
-	return bindTree(summary, binder{src: n.source, node: n})
-}
-
 // unknownFieldFinder finds the unknown fields of a decode that the
-// go-yaml decoder rejected for one of them. It walks the type the decode
-// filled beside the node the decode read, as an [errorLocator] does, and
-// reads each mapping that a struct decodes from.
+// go-yaml decoder rejected, for a decoder that rejects unknown fields.
+// The decoder stops at the first unknown field it finds, and it finds the
+// fields of one mapping in no fixed order, so one decode names one field,
+// and not always the same one. A decode that rejects a value names none.
+// The finder walks the type the decode filled beside the node the decode
+// read, as an [errorLocator] does, and reads each mapping that a struct
+// decodes from.
 //
 // A key of such a mapping is a candidate when no field of the struct has
 // its name, as [fieldNames] lists them. The walk follows the rules
@@ -117,8 +48,14 @@ func (n *Node) bindUnknownFields(fields []*yaml.UnknownFieldError) error {
 // The walk reads nothing below an interface, since the decoder fills it
 // with values of no struct type.
 //
-// One go-yaml decoder runs every decode of the walk, so the walk applies
-// the options once.
+// One go-yaml decoder runs every decode of the walk. The
+// [problemCollector] that runs the finder hands it the decoder of its
+// own decodes, so the two apply the options once between them. That
+// decoder holds the anchors of the decode already, as
+// [problemCollector.register] leaves them, so an alias in an entry the
+// finder decodes reads what it read in the decode.
+//
+// Create instances with [newUnknownFieldFinder].
 type unknownFieldFinder struct {
 	ctx      context.Context
 	node     *Node
@@ -130,6 +67,25 @@ type unknownFieldFinder struct {
 	// The structs the walk has read, so it reads a mapping that several
 	// aliases reach, or one that holds itself, once for each type.
 	visited map[structVisit]bool
+	// The entries [unknownFieldFinder.dropped] found for each mapping it
+	// has read.
+	droppedEntries map[*ast.MappingNode]map[*ast.MappingValueNode]bool
+}
+
+// newUnknownFieldFinder creates a new [*unknownFieldFinder] for a decode
+// of n, which asks dec about each candidate. The decoder holds the
+// anchors of that decode.
+func newUnknownFieldFinder(ctx context.Context, n *Node, dec *yaml.Decoder) *unknownFieldFinder {
+	return &unknownFieldFinder{
+		ctx:      ctx,
+		node:     n,
+		resolver: n.doc.pathResolver(),
+		decoder:  dec,
+		found:    map[int]*yaml.UnknownFieldError{},
+		visited:  map[structVisit]bool{},
+
+		droppedEntries: map[*ast.MappingNode]map[*ast.MappingValueNode]bool{},
+	}
 }
 
 // structVisit names a struct the walk has read, by its type and the
@@ -230,7 +186,11 @@ func (f *unknownFieldFinder) value(t reflect.Type, node ast.Node, chain *decodeC
 // [unknownFieldFinder.entry] finds it, so the walk passes over an entry
 // that a later one with the same key hides. A `<<` merge key brings in
 // the keys of its sources, unless t leaves them out, as
-// [yamlfield.IgnoresMerges] reports.
+// [yamlfield.IgnoresMerges] reports. It brings in none the decoder
+// gathers nothing of, as [unknownFieldFinder.dropped] finds them. The
+// decoder decodes no field either from a mapping whose merge keys it
+// refuses, as [unknownFieldFinder.mergeRefused] reports, so the walk
+// stops there too.
 //
 // A struct that decodes itself has no field names the walk can trust, so
 // each of its keys is a candidate. Where no chain leads to it, the
@@ -248,6 +208,9 @@ func (f *unknownFieldFinder) fields(t reflect.Type, mapping *ast.MappingNode, ch
 	}
 
 	merges := !yamlfield.IgnoresMerges(t)
+	if merges && f.mergeRefused(mapping) {
+		return
+	}
 
 	var names map[string]bool
 
@@ -310,8 +273,10 @@ func (f *unknownFieldFinder) below(
 // entry returns the entry of mapping that the decoder reads for the key
 // name when it decodes a struct, or nil when mapping holds none. With
 // merges set, that is the entry a path through name selects, which a
-// `<<` merge key may bring in. Without, it is the last entry of mapping
-// itself with that name.
+// `<<` merge key may bring in. A path can select an entry the decoder
+// gathers nothing of, as [unknownFieldFinder.dropped] finds them, and
+// entry returns nil for that one. Without merges, it is the last entry
+// of mapping itself with that name.
 func (f *unknownFieldFinder) entry(mapping *ast.MappingNode, name string, merges bool) *ast.MappingValueNode {
 	if merges {
 		selected, err := f.resolver.Entry(mapping, name)
@@ -319,11 +284,12 @@ func (f *unknownFieldFinder) entry(mapping *ast.MappingNode, name string, merges
 			return nil
 		}
 
-		if entry, ok := selected.(*ast.MappingValueNode); ok {
-			return entry
+		entry, ok := selected.(*ast.MappingValueNode)
+		if !ok || f.dropped(mapping)[entry] {
+			return nil
 		}
 
-		return nil
+		return entry
 	}
 
 	for _, entry := range slices.Backward(mapping.Values) {
@@ -369,16 +335,92 @@ func (f *unknownFieldFinder) eachEntry(
 			continue
 		}
 
-		sources, err := f.resolver.MergeSources(&ast.MappingNode{
-			Values: []*ast.MappingValueNode{entry},
+		for _, src := range f.sources(entry) {
+			f.eachEntry(src, merges, seen, visit)
+		}
+	}
+}
+
+// sources returns the mappings that entry, a `<<` merge key, brings in,
+// in the order the decoder applies them. It returns none when an alias
+// on the way does not resolve.
+func (f *unknownFieldFinder) sources(entry *ast.MappingValueNode) []*ast.MappingNode {
+	found, err := f.resolver.MergeSources(&ast.MappingNode{
+		Values: []*ast.MappingValueNode{entry},
+	})
+	if err != nil {
+		return nil
+	}
+
+	sources := make([]*ast.MappingNode, 0, len(found))
+
+	for _, src := range found {
+		if merged, ok := contentNode(f.resolver, src).(*ast.MappingNode); ok {
+			sources = append(sources, merged)
+		}
+	}
+
+	return sources
+}
+
+// dropped returns the entries the `<<` merge keys of mapping bring in
+// that the decoder gathers nothing of when it decodes a struct. The
+// decoder gathers the entries of each source before it reads a field. It
+// gathers none from a source that holds a key it does not read as a
+// string, as [unknownFieldFinder.readsAsStruct] tells, and none from the
+// sources that one merges. It reports nothing then, and reads the struct
+// from the entries that remain. A path through such a source still
+// selects its entries, so [unknownFieldFinder.entry] leaves them out.
+func (f *unknownFieldFinder) dropped(mapping *ast.MappingNode) map[*ast.MappingValueNode]bool {
+	if entries, ok := f.droppedEntries[mapping]; ok {
+		return entries
+	}
+
+	var entries map[*ast.MappingValueNode]bool
+
+	f.eachSource(mapping, map[*ast.MappingNode]bool{}, func(src *ast.MappingNode) bool {
+		if f.readsAsStruct(src) {
+			return true
+		}
+
+		if entries == nil {
+			entries = map[*ast.MappingValueNode]bool{}
+		}
+
+		f.eachEntry(src, true, map[*ast.MappingNode]bool{}, func(entry *ast.MappingValueNode) {
+			entries[entry] = true
 		})
-		if err != nil {
+
+		return false
+	})
+
+	f.droppedEntries[mapping] = entries
+
+	return entries
+}
+
+// eachSource calls visit for each mapping the `<<` merge keys of mapping
+// bring in, in document order. Where visit reports true for a source, it
+// goes on to the mappings that source merges. The seen set holds the
+// mappings the walk has read, so a mapping that merges itself ends the
+// walk.
+func (f *unknownFieldFinder) eachSource(
+	mapping *ast.MappingNode, seen map[*ast.MappingNode]bool, visit func(*ast.MappingNode) bool,
+) {
+	if seen[mapping] {
+		return
+	}
+
+	seen[mapping] = true
+
+	for _, entry := range mapping.Values {
+		if entry == nil || entry.Key == nil || !entry.Key.IsMergeKey() {
 			continue
 		}
 
-		for _, src := range sources {
-			if merged, ok := contentNode(f.resolver, src).(*ast.MappingNode); ok {
-				f.eachEntry(merged, merges, seen, visit)
+		for _, src := range f.sources(entry) {
+			if visit(src) {
+				f.eachSource(src, seen, visit)
 			}
 		}
 	}
@@ -399,6 +441,50 @@ func (f *unknownFieldFinder) readsAsStruct(mapping *ast.MappingNode) bool {
 	}
 
 	return true
+}
+
+// mergeRefused reports whether the decoder refuses the `<<` merge keys of
+// mapping when it decodes a struct that reads them. The decoder gathers
+// the entries those keys bring in before it reads a field. It refuses a
+// merge key whose value it reads as no mapping, such as a sequence of
+// sources or an alias to a scalar. It then decodes no field of the
+// struct and rejects none of its keys.
+//
+// To ask the decoder, mergeRefused decodes a mapping that holds the
+// merge keys alone into a struct with no field. A decoder that rejects
+// unknown fields rejects a key of a source there, which is no refusal of
+// the merge. A merge key the [decodeTree] holds no entry for counts as
+// refused.
+func (f *unknownFieldFinder) mergeRefused(mapping *ast.MappingNode) bool {
+	var merges []*ast.MappingValueNode
+
+	for _, entry := range mapping.Values {
+		if entry == nil || entry.Key == nil || !entry.Key.IsMergeKey() {
+			continue
+		}
+
+		view := f.view(entry)
+		if view == nil {
+			return true
+		}
+
+		merges = append(merges, view)
+	}
+
+	if len(merges) == 0 {
+		return false
+	}
+
+	var shell struct{}
+
+	err := decodeWithRecover(f.ctx, f.decoder, ast.Mapping(mapping.Start, false, merges...), &shell)
+	if err == nil {
+		return false
+	}
+
+	_, unknown := err.(*yaml.UnknownFieldError) //nolint:errorlint // The decoder returns it unwrapped.
+
+	return !unknown
 }
 
 // readsAsString reports whether the go-yaml decoder reads key, the key
@@ -466,8 +552,7 @@ func readsAsString(resolver *paths.Resolver, key ast.Node) bool {
 // the document holds it.
 //
 // Any other outcome leaves the fields as they are. That is a decode that
-// passes, one that fails another way, and one whose anchors do not
-// decode.
+// passes, and one that fails another way.
 func (f *unknownFieldFinder) confirm(t reflect.Type, entry *ast.MappingValueNode, chain *decodeChain) {
 	if f.ctx.Err() != nil {
 		return
@@ -500,12 +585,7 @@ func (f *unknownFieldFinder) confirm(t reflect.Type, entry *ast.MappingValueNode
 		}
 	}
 
-	err := f.node.primeAnchors(f.ctx, f.decoder, node)
-	if err != nil {
-		return
-	}
-
-	err = decodeWithRecover(f.ctx, f.decoder, node, reflect.New(t).Interface())
+	err := decodeWithRecover(f.ctx, f.decoder, node, reflect.New(t).Interface())
 
 	rejected, ok := err.(*yaml.UnknownFieldError) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 	if !ok || rejected.Token == nil || rejected.Token != view.Key.GetToken() || rejected.Token.Position == nil {

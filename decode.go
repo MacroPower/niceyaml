@@ -2166,8 +2166,8 @@ func WithSelfValidation(enabled bool) DecodeOption {
 // key with no field in the target struct is an error. The default is false,
 // and the decode then skips unknown keys.
 //
-// A decode that rejects an unknown field reports every one the document
-// holds, in the order of the source, each at the path of its key:
+// A decode that fails reports every unknown field the document holds, in
+// the order of the source, each at the path of its key:
 //
 //	cfg.yaml: 2 unknown fields
 //	cfg.yaml:3:1: $.replicsa~: unknown field "replicsa"
@@ -2179,24 +2179,31 @@ func WithSelfValidation(enabled bool) DecodeOption {
 // them. Each of those errors matches [ErrDecode] and holds the
 // [yaml.UnknownFieldError] the go-yaml decoder returns for that field. A
 // document with one unknown field reports that field as the error itself.
+// A document that holds another problem too, such as a value of the
+// wrong kind, lists its unknown fields among the problems
+// [Node.DecodeInto] reports for one decode, and the first line then
+// counts problems.
 //
-// The go-yaml decoder decides whether the decode fails. It stops at the
-// first unknown field it finds, and it finds the fields of one mapping in
-// no fixed order, so the decode looks for the others once the decoder
-// has rejected one. It reads each mapping that a struct of the target
-// decodes from, and asks the decoder about each key no field of the
-// struct names, with the options of the decode. The report therefore
-// holds only keys the decoder rejects, and it is the same on every run.
-// A key under a prefix that [yaml.AllowFieldPrefixes] allows stays out
-// of it.
+// The go-yaml decoder decides whether the decode fails. It reports a
+// value it rejects before any unknown field. It stops at the first
+// unknown field it finds, and it finds the fields of one mapping in no
+// fixed order. So the decode looks for the unknown fields itself once
+// the decoder has rejected the document. It reads each mapping that a
+// struct of the target decodes from, and asks the decoder about each key
+// no field of the struct names, with the options of the decode. The
+// report therefore holds only keys the decoder rejects, and it is the
+// same on every run. A key under a prefix that [yaml.AllowFieldPrefixes]
+// allows stays out of it.
 //
 // The report follows the decoder where the decoder checks nothing:
 //
-//   - The decoder reports a value of the wrong kind before any unknown
-//     field, so a decode that fails that way reports no unknown field.
 //   - The decoder decodes no field from a mapping that holds a key it
 //     does not read as a string, such as `1` or `true`, and rejects no
-//     key of that mapping.
+//     key of that mapping. It takes no key either from such a mapping
+//     that a `<<` merge key brings in.
+//   - The decoder decodes no field from a mapping whose `<<` merge key
+//     it refuses, such as one that names a sequence of mappings, and
+//     rejects no key of that mapping.
 //   - The decoder fills a field of an interface type with maps and
 //     slices, so no key below such a field is unknown.
 //   - A struct that decodes itself decides what the decoder checks. An
@@ -2204,13 +2211,16 @@ func WithSelfValidation(enabled bool) DecodeOption {
 //     has the decoder check them, and one that parses the text itself
 //     does not.
 //
-// Two limits remain. The search reads the values below a struct that
-// decodes itself as if its fields mirrored the document, so it misses an
-// unknown field below one whose fields do not, unless the decoder names
-// that field. And nothing shows which types [yaml.CustomUnmarshaler] or
-// [yaml.RegisterCustomUnmarshaler] decode, so the search reads the
-// values below such a type as the fields of its struct, and can report a
-// key there that the unmarshaler accepts.
+// Three limits remain. The decode adds no unknown field to a rejection
+// that binds at no position in the source, as [Node.DecodeInto]
+// describes, so such a rejection comes back alone. The search reads the
+// values below a struct that decodes itself as if its fields mirrored
+// the document, so it misses an unknown field below one whose fields do
+// not, unless the decoder names that field. And nothing shows which
+// types [yaml.CustomUnmarshaler] or [yaml.RegisterCustomUnmarshaler]
+// decode, so the search reads the values below such a type as the fields
+// of its struct, and can report a key there that the unmarshaler
+// accepts.
 func WithDisallowUnknownFields(disallow bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.disallowUnknownFields = disallow
@@ -2237,10 +2247,11 @@ func WithDisallowUnknownFields(disallow bool) DecodeOption {
 // the document that shares its name in a decode into a typed value, and
 // the anchor of the file in a decode into an any value.
 //
-// Within that call, the decode, the key decoding of self-validation, and
-// the second decode that finds the value behind an error, as
-// [Node.DecodeInto] describes, each apply the options to a new go-yaml
-// decoder. An option that holds state therefore serves only the first of
+// Within that call, the decode, the key decoding of self-validation, the
+// second decode that finds the value behind an error, and the search for
+// the other problems of a decode that failed, as [Node.DecodeInto]
+// describes them, each apply the options to a new go-yaml decoder. An
+// option that holds state therefore serves only the first of
 // them, and a [Decoder] that carries one is not safe to share between
 // goroutines.
 // [yaml.ReferenceReaders] is such an option. The first decode reads its
@@ -2323,13 +2334,70 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 // in the message. A value under a key with no name has no path, so its
 // error carries that position alone.
 //
-// The decoder stops at the first unknown field it finds under
-// [WithDisallowUnknownFields]. DecodeInto then finds the others, so one
-// decode reports every unknown field, in the order of the source.
-// Several come back as one error whose first line counts them, such as
-// "3 unknown fields", with one error nested for each field, at the path
-// of its key. [WithDisallowUnknownFields] describes which fields the report
-// holds.
+// The decoder stops at the first value it rejects, in the order the
+// target declares its fields, and it rejects an unknown field under
+// [WithDisallowUnknownFields] only when it rejects no value. DecodeInto
+// then looks for the other problems of the document, so one decode
+// reports them together, in the order of the source:
+//
+//	app.yaml: 3 problems
+//	app.yaml:1:1: $.replcas~: unknown field "replcas"
+//	app.yaml:2:10: $.timeout: expected integer, got string
+//	app.yaml:4:11: $.servers[0].port: expected integer, got string
+//
+// The error is a summary from [NewSummary] whose first line counts the
+// problems, and reads "3 unknown fields" when each is an unknown field.
+// It heads one error for each problem, which [SourceError.Errors] and
+// [ErrorTree.Problems] return, and the rejection of the decoder is
+// always one of them. The summary points at no value, so its
+// [SourceError.Position] and [SourceError.Path] report false, and each
+// error below it reports its own. The message lists [ErrorListLimit]
+// problems at most and counts the rest, and SourceError.Errors returns
+// every one. A document with one problem returns that problem as the
+// error itself.
+//
+// The decoder decides whether the decode fails. DecodeInto adds a
+// problem only where the decoder, given that one value alone, returns
+// one of these rejections:
+//
+//   - A value of the wrong kind, or a number out of range. The value is
+//     a scalar, or a mapping or a sequence where the target takes
+//     another kind.
+//   - A [time.Duration] that does not parse.
+//   - An unknown field, as [WithDisallowUnknownFields] describes.
+//
+// The search leaves every other problem to the next decode:
+//
+//   - It reads nothing at or below a value that decodes itself, other
+//     than a [time.Duration] or a [time.Time], since a second call of an
+//     unmarshaler can answer otherwise than the first. An enum with an
+//     UnmarshalText method thus reports one bad value for each decode.
+//   - It reads nothing below an interface, and nothing in a mapping the
+//     decoder decodes no field from, as WithDisallowUnknownFields lists
+//     them.
+//   - It reads nothing behind an alias to an anchor of a reference
+//     document, from [WithReferences] or the yaml.Reference options,
+//     since the document holds no line for that value.
+//   - It adds nothing to a rejection that binds at no position in the
+//     source, as the next paragraphs describe one, and nothing once ctx
+//     has ended.
+//   - No value validates itself until the decoder rejects nothing, so
+//     the report holds no error of a [SelfValidator].
+//
+// One limit remains. Nothing shows which types [yaml.CustomUnmarshaler]
+// or [yaml.RegisterCustomUnmarshaler] decode, so the search reads the
+// values below such a type as the fields or elements of the type. The
+// decoder confirms a problem with the struct that reads the value as a
+// field, so such a function judges the fields of its own struct. The
+// search can still report a value further below that the function
+// accepts.
+//
+// The search runs only after a decode fails, and it decodes one value at
+// a time, so it calls no unmarshaler of a value it reads. To confirm a
+// problem, it decodes the struct that reads the value from that one
+// entry. That decode can call a custom unmarshaler function or a
+// [yaml.StructValidator] again, and the unmarshaler of a field of the
+// same name in an inline struct. What they return adds no problem.
 //
 // An error the decoder reports without a token of the source comes back
 // with no location and keeps the text go-yaml gave it. The decoder
@@ -2579,9 +2647,8 @@ func (n *Node) yamlOptions(yamlOpts []yaml.DecodeOption) []yaml.DecodeOption {
 // and for a node below the body, a failure in an anchor outside node
 // that node reads comes back as its error. The error of a value that
 // decodes itself binds at the path [Node.locateDecodeError] finds for
-// that value. A rejection of an unknown field comes back with the
-// rejections of the other unknown fields [Node.unknownFields] finds,
-// bound as one error.
+// that value. A rejection comes back with the other problems of the
+// document that [Node.bindDecodeProblems] finds, bound as one error.
 //
 // The go-yaml decoder never checks the context, so a context that has
 // ended before the decode starts, or while it registers the anchors node
@@ -2627,13 +2694,9 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 	// no token, so the Node finds the value that reported it.
 	err = n.locateDecodeError(ctx, n.rejection(err, view), node, v, yamlOpts)
 
-	// The decoder stops at the first unknown field, so the Node finds the
-	// others and reports them together.
-	if fields := n.unknownFields(ctx, err, node, v, yamlOpts); len(fields) > 1 {
-		return n.bindUnknownFields(fields)
-	}
-
-	return n.bindDecodeError(err)
+	// The decoder stops at its first rejection, so the Node finds the
+	// other problems of the document and reports them together.
+	return n.bindDecodeProblems(ctx, err, node, v, yamlOpts)
 }
 
 // keepsNullTarget reports whether node, or the value an anchor on node
@@ -2952,19 +3015,9 @@ func (n *Node) bindDecodeError(err error) error {
 		return nil
 	}
 
-	tree := n.doc.decodeTree()
-
-	yamlErr, ok := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
-	if !ok || !n.holdsToken(yamlErr.GetToken()) {
-		return n.bindOwn(asDecodeError(tree.restoreError(err)))
-	}
-
-	rejected := decodeError{err: yamlMessageError{err: yamlErr, msg: tree.restoreNames(rejectionMessage(yamlErr))}}
-	located := WrapError(rejected, n.rejectionLocation(yamlErr.GetToken())...)
-
-	// The path starts at `$`, so the scope of n does not go in front of
-	// it.
-	return bindTree(located, binder{src: n.source, node: n})
+	// The path of a rejection starts at `$`, so the scope of n does not
+	// go in front of it.
+	return n.bindOwn(n.decodeRejection(err))
 }
 
 // holdsToken reports whether tk is a token of the source's parse. That is

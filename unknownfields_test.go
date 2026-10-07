@@ -13,6 +13,7 @@ import (
 	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -314,16 +315,6 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				`4:1: $.ppp~: unknown field "ppp"`,
 			),
 		},
-		// The decoder reports the mismatch and no unknown field, so the
-		// decode reports the mismatch alone.
-		"type mismatch first": {
-			decode: decodeInto[struct {
-				T int `yaml:"t"`
-			}](),
-			input: "t: abc\nqqq: 1\nppp: 2\n",
-			opts:  []niceyaml.DecodeOption{strict},
-			want:  `1:4: $.t: expected integer, got string`,
-		},
 		// The decoder decodes no field from a mapping with a key it does
 		// not read as a string, and rejects none of its keys.
 		"mapping with a key that is no string": {
@@ -336,6 +327,23 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			want: stringtest.JoinLF(
 				`2:3: $.a.zzz~: unknown field "zzz"`,
 				`3:3: $.a.yyy~: unknown field "yyy"`,
+			),
+		},
+		// The decoder takes no key from such a mapping that a merge key
+		// brings in either, so it rejects the keys of the struct itself
+		// and neither www nor the key under in.
+		"merged mapping with a key that is no string": {
+			decode: decodeInto[struct {
+				V struct {
+					In strictInner `yaml:"in"`
+					B  int         `yaml:"b"`
+				} `yaml:"v"`
+			}](),
+			input: "v:\n  <<: {1: x, in: {qqq: 1}, www: 1}\n  b: 1\n  yyy: 2\n  zzz: 3\n",
+			opts:  []niceyaml.DecodeOption{strict},
+			want: stringtest.JoinLF(
+				`4:3: $.v.yyy~: unknown field "yyy"`,
+				`5:3: $.v.zzz~: unknown field "zzz"`,
 			),
 		},
 		// The paths read from the root of the document.
@@ -481,6 +489,51 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDocument_Decode_UnknownFields_BesideValues(t *testing.T) {
+	t.Parallel()
+
+	// The decoder reports the value of the wrong kind and no unknown
+	// field. The decode lists the unknown fields beside that rejection,
+	// and counts problems, since not each of them is an unknown field.
+	doc := yamltest.FirstDocument(t, "t: abc\nqqq: 1\nppp: 2\n")
+
+	_, err := doc.Decode[struct {
+		T int `yaml:"t"`
+	}](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+	require.EqualError(t, err, stringtest.JoinLF(
+		"3 problems",
+		"1:4: $.t: expected integer, got string",
+		`2:1: $.qqq~: unknown field "qqq"`,
+		`3:1: $.ppp~: unknown field "ppp"`,
+	))
+	require.ErrorIs(t, err, niceyaml.ErrDecode)
+	requireInvalid(t, err, 3)
+
+	var srcErr *niceyaml.SourceError
+
+	require.ErrorAs(t, err, &srcErr)
+
+	problems := srcErr.Errors()
+	require.Len(t, problems, 3)
+
+	var mismatch *yaml.TypeError
+
+	require.ErrorAs(t, problems[0], &mismatch)
+
+	for _, field := range problems[1:] {
+		var unknown *yaml.UnknownFieldError
+
+		require.ErrorAs(t, field, &unknown)
+	}
+
+	// Without the option the decoder skips both keys, and the decode
+	// reports the value alone.
+	_, err = doc.Decode[struct {
+		T int `yaml:"t"`
+	}](t.Context())
+	require.EqualError(t, err, "1:4: $.t: expected integer, got string")
 }
 
 func TestDocument_Decode_UnknownFields_KeyKinds(t *testing.T) {
