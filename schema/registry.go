@@ -1092,6 +1092,30 @@ func (r *Registry) fsKey(fsys fs.FS) (string, error) {
 		)
 	}
 
+	n, ok := r.keptFSNumber(id)
+	if !ok {
+		n = r.keepFSNumber(id)
+	}
+
+	return "\x00fs" + strconv.Itoa(n) + "\x00", nil
+}
+
+// keptFSNumber returns the number the registry keeps for the file system
+// id names, if any. Every lookup of a schema in a file system asks for
+// it, so it takes the read lock alone.
+func (r *Registry) keptFSNumber(id any) (int, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	n, ok := r.fsIDs[id]
+
+	return n, ok
+}
+
+// keepFSNumber gives the file system id names the next number and
+// returns it, unless the registry keeps a number for id already, in
+// which case it returns that number.
+func (r *Registry) keepFSNumber(id any) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -1101,7 +1125,7 @@ func (r *Registry) fsKey(fsys fs.FS) (string, error) {
 		r.fsIDs[id] = n
 	}
 
-	return "\x00fs" + strconv.Itoa(n) + "\x00", nil
+	return n
 }
 
 // mapIdentity is the identity of a file system that is a map, which
