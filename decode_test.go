@@ -10155,6 +10155,389 @@ func TestMultiValidator(t *testing.T) {
 	})
 }
 
+func TestChainValidator(t *testing.T) {
+	t.Parallel()
+
+	errFirst := errors.New("first rule")
+	errSecond := errors.New("second rule")
+
+	namePath := paths.Current().Child("name")
+
+	// Both validators fail at the same value, as a schema and a check
+	// that decodes the node do.
+	first := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+		return niceyaml.WrapError(errFirst, niceyaml.AtPath(namePath))
+	})
+	second := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+		return niceyaml.WrapError(errSecond, niceyaml.AtPath(namePath))
+	})
+	passing := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+		return nil
+	})
+	record := func(order *[]string, name string) niceyaml.Validator {
+		return niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+			*order = append(*order, name)
+
+			return nil
+		})
+	}
+
+	newDoc := func(t *testing.T) *niceyaml.Node {
+		t.Helper()
+
+		doc, err := niceyaml.NewSourceFromString("meta:\n  name: 5\nname: 7\n", niceyaml.WithName("x.yaml")).Document()
+		require.NoError(t, err)
+
+		return doc
+	}
+
+	t.Run("runs the validators in order and stops at the first that fails", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		chain := niceyaml.ChainValidator(
+			record(&order, "before"),
+			first,
+			record(&order, "unreached"),
+			second,
+		)
+
+		err := newDoc(t).Validate(t.Context(), chain)
+		require.EqualError(t, err, "x.yaml:3:7: $.name: first rule")
+		require.NotErrorIs(t, err, errSecond)
+		assert.Equal(t, []string{"before"}, order)
+	})
+
+	t.Run("reports the first of two failures where MultiValidator reports both", func(t *testing.T) {
+		t.Parallel()
+
+		doc := newDoc(t)
+
+		err := doc.Validate(t.Context(), niceyaml.ChainValidator(first, second))
+		require.EqualError(t, err, "x.yaml:3:7: $.name: first rule")
+
+		err = doc.Validate(t.Context(), niceyaml.ChainValidator(second, first))
+		require.EqualError(t, err, "x.yaml:3:7: $.name: second rule")
+
+		err = doc.Validate(t.Context(), niceyaml.MultiValidator(first, second))
+		require.EqualError(t, err, "x.yaml:3:7: $.name: first rule\nx.yaml:3:7: $.name: second rule")
+	})
+
+	t.Run("a later validator runs once the ones before it pass", func(t *testing.T) {
+		t.Parallel()
+
+		err := newDoc(t).Validate(t.Context(), niceyaml.ChainValidator(passing, typedNilValidator(), second))
+		require.EqualError(t, err, "x.yaml:3:7: $.name: second rule")
+	})
+
+	t.Run("no failure is no error", func(t *testing.T) {
+		t.Parallel()
+
+		doc := newDoc(t)
+
+		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator()))
+		require.NoError(t, niceyaml.ChainValidator().Validate(t.Context(), doc))
+		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator(passing, passing)))
+		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator(typedNilValidator())))
+	})
+
+	t.Run("skips a nil validator", func(t *testing.T) {
+		t.Parallel()
+
+		var order []string
+
+		doc := newDoc(t)
+
+		err := doc.Validate(t.Context(), niceyaml.ChainValidator(
+			record(&order, "before"),
+			nil,
+			(*fieldValidator)(nil),
+			niceyaml.ValidatorFunc(nil),
+			record(&order, "after"),
+			first,
+		))
+		require.ErrorIs(t, err, errFirst)
+		assert.Equal(t, []string{"before", "after"}, order)
+
+		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator(nil)))
+	})
+
+	t.Run("keeps its validators when the caller edits the slice", func(t *testing.T) {
+		t.Parallel()
+
+		vs := []niceyaml.Validator{first}
+		chain := niceyaml.ChainValidator(vs...)
+		vs[0] = passing
+
+		require.ErrorIs(t, newDoc(t).Validate(t.Context(), chain), errFirst)
+	})
+
+	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
+		t.Parallel()
+
+		docs := niceyaml.NewSourceFromString("a: [\n").AllDocuments()
+		require.Len(t, docs, 1)
+		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
+
+		var order []string
+
+		chain := niceyaml.ChainValidator(record(&order, "unreached"))
+
+		assert.Same(t, docs[0].Err(), docs[0].Validate(t.Context(), chain))
+		assert.Same(t, docs[0].Err(), chain.Validate(t.Context(), docs[0]))
+		assert.Empty(t, order)
+	})
+
+	t.Run("binds the failure as Node.Validate binds it", func(t *testing.T) {
+		t.Parallel()
+
+		doc := newDoc(t)
+		meta := yamltest.At(t, doc, paths.Current().Child("meta"))
+		located := niceyaml.WrapError(errFirst, niceyaml.AtPath(namePath))
+
+		tcs := map[string]struct {
+			v    niceyaml.Validator
+			node *niceyaml.Node
+			want string
+		}{
+			"a validator that binds its error": {
+				v:    first,
+				node: doc,
+				want: "x.yaml:3:7: $.name: first rule",
+			},
+			"a validator that leaves its error unbound": {
+				v:    &fieldValidator{err: located},
+				node: doc,
+				want: "x.yaml:3:7: $.name: first rule",
+			},
+			"an unbound error with an @ path on a scoped Node": {
+				v:    &fieldValidator{err: located},
+				node: meta,
+				want: "x.yaml:2:9: $.meta.name: first rule",
+			},
+			"an unbound error with no location on a scoped Node": {
+				v:    &fieldValidator{err: niceyaml.WrapError(errFirst)},
+				node: meta,
+				want: "x.yaml:2:3: $.meta: first rule",
+			},
+			"an unbound plain error on a scoped Node": {
+				v:    &fieldValidator{err: errFirst},
+				node: meta,
+				want: "x.yaml:2:3: $.meta: first rule",
+			},
+			"an unbound plain error on the root": {
+				v:    &fieldValidator{err: errFirst},
+				node: doc,
+				want: "x.yaml: first rule",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				alone := tc.node.Validate(t.Context(), tc.v)
+				require.EqualError(t, alone, tc.want)
+
+				chain := niceyaml.ChainValidator(passing, tc.v, second)
+
+				// A direct call returns the error Node.Validate returns.
+				for _, err := range []error{
+					tc.node.Validate(t.Context(), chain),
+					chain.Validate(t.Context(), tc.node),
+				} {
+					require.EqualError(t, err, tc.want)
+					assert.Equal(t, niceyaml.IsInvalid(alone), niceyaml.IsInvalid(err))
+					assert.Equal(t, niceyaml.FormatError(alone, 2), niceyaml.FormatError(err, 2))
+
+					var bound *niceyaml.SourceError
+
+					require.ErrorAs(t, err, &bound)
+					assert.Same(t, tc.node, bound.Node())
+				}
+			})
+		}
+	})
+
+	t.Run("returns a bound error as it is", func(t *testing.T) {
+		t.Parallel()
+
+		doc := newDoc(t)
+		meta := yamltest.At(t, doc, paths.Current().Child("meta"))
+
+		want := meta.Bind(niceyaml.WrapError(errFirst, niceyaml.AtPath(namePath)))
+
+		assert.Same(t, want, doc.Validate(t.Context(), niceyaml.ChainValidator(&fieldValidator{err: want})))
+		assert.Same(t, want, doc.Validate(t.Context(), niceyaml.ChainValidator(rejectingValidator(want))))
+	})
+
+	t.Run("a decode runs repeated WithValidator options the same way", func(t *testing.T) {
+		t.Parallel()
+
+		unboundFirst := &fieldValidator{err: niceyaml.WrapError(errFirst, niceyaml.AtPath(namePath))}
+		unboundSecond := &fieldValidator{err: niceyaml.WrapError(errSecond, niceyaml.AtPath(namePath))}
+
+		tcs := map[string]struct {
+			a, b niceyaml.Validator
+			want string
+			// Whether the Node at $.meta decodes, and not the root.
+			scoped bool
+		}{
+			"both fail": {
+				a:    first,
+				b:    second,
+				want: "x.yaml:3:7: $.name: first rule",
+			},
+			"both fail and leave their errors unbound": {
+				a:    unboundFirst,
+				b:    unboundSecond,
+				want: "x.yaml:3:7: $.name: first rule",
+			},
+			"the second fails": {
+				a:    passing,
+				b:    second,
+				want: "x.yaml:3:7: $.name: second rule",
+			},
+			"the second fails and leaves its error unbound": {
+				a:    typedNilValidator(),
+				b:    unboundSecond,
+				want: "x.yaml:3:7: $.name: second rule",
+			},
+			"the first is nil": {
+				a:    nil,
+				b:    second,
+				want: "x.yaml:3:7: $.name: second rule",
+			},
+			"an unbound error with an @ path on a scoped Node": {
+				a:      unboundFirst,
+				b:      unboundSecond,
+				scoped: true,
+				want:   "x.yaml:2:9: $.meta.name: first rule",
+			},
+			"an unbound plain error on a scoped Node": {
+				a:      passing,
+				b:      &fieldValidator{err: errSecond},
+				scoped: true,
+				want:   "x.yaml:2:3: $.meta: second rule",
+			},
+			"neither fails": {
+				a: passing,
+				b: typedNilValidator(),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				node := newDoc(t)
+				if tc.scoped {
+					node = yamltest.At(t, node, paths.Current().Child("meta"))
+				}
+
+				chained := niceyaml.NewDecoder(niceyaml.WithValidator(niceyaml.ChainValidator(tc.a, tc.b)))
+				repeated := niceyaml.NewDecoder(niceyaml.WithValidator(tc.a), niceyaml.WithValidator(tc.b))
+
+				_, chainedDecode := chained.Decode[map[string]any](t.Context(), node)
+				_, repeatedDecode := repeated.Decode[map[string]any](t.Context(), node)
+
+				pairs := map[string][2]error{
+					"Decode":   {chainedDecode, repeatedDecode},
+					"Validate": {chained.Validate(t.Context(), node), repeated.Validate(t.Context(), node)},
+				}
+
+				for step, pair := range pairs {
+					got, want := pair[0], pair[1]
+
+					if tc.want == "" {
+						require.NoError(t, got, step)
+						require.NoError(t, want, step)
+
+						continue
+					}
+
+					require.EqualError(t, want, tc.want, step)
+					require.EqualError(t, got, tc.want, step)
+					assert.Equal(t, niceyaml.FormatError(want, 2), niceyaml.FormatError(got, 2), step)
+					assert.Equal(t, fmt.Sprintf("%+v", want), fmt.Sprintf("%+v", got), step)
+					assert.Equal(t, niceyaml.IsInvalid(want), niceyaml.IsInvalid(got), step)
+
+					var gotBound, wantBound *niceyaml.SourceError
+
+					require.ErrorAs(t, got, &gotBound, step)
+					require.ErrorAs(t, want, &wantBound, step)
+					assert.Same(t, node, wantBound.Node(), step)
+					assert.Same(t, node, gotBound.Node(), step)
+
+					wantPath, wantOK := wantBound.Path()
+					gotPath, gotOK := gotBound.Path()
+					assert.Equal(t, wantOK, gotOK, step)
+					assert.Equal(t, wantPath.String(), gotPath.String(), step)
+				}
+			})
+		}
+	})
+
+	t.Run("takes its place inside MultiValidator and SkipEmpty", func(t *testing.T) {
+		t.Parallel()
+
+		doc := newDoc(t)
+
+		// Inside a MultiValidator, the chain reports its first failure
+		// beside the failures of the validators around it.
+		multi := niceyaml.MultiValidator(niceyaml.ChainValidator(first, second), second)
+		require.EqualError(t, doc.Validate(t.Context(), multi),
+			"x.yaml:3:7: $.name: first rule\nx.yaml:3:7: $.name: second rule")
+
+		// Around one, the chain stops once the MultiValidator fails.
+		var order []string
+
+		chain := niceyaml.ChainValidator(niceyaml.MultiValidator(first, second), record(&order, "unreached"))
+		require.EqualError(t, doc.Validate(t.Context(), chain),
+			"x.yaml:3:7: $.name: first rule\nx.yaml:3:7: $.name: second rule")
+		assert.Empty(t, order)
+
+		// A chain inside a chain runs as one chain.
+		nested := niceyaml.ChainValidator(niceyaml.ChainValidator(passing, second), first)
+		require.EqualError(t, doc.Validate(t.Context(), nested), "x.yaml:3:7: $.name: second rule")
+
+		empty := yamltest.FirstDocument(t, "# only a comment\n")
+
+		// Inside a SkipEmpty, no validator of the chain runs on a document
+		// with no content.
+		require.NoError(t, empty.Validate(t.Context(), niceyaml.SkipEmpty(niceyaml.ChainValidator(first, second))))
+		require.ErrorIs(
+			t,
+			doc.Validate(t.Context(), niceyaml.SkipEmpty(niceyaml.ChainValidator(first, second))),
+			errFirst,
+		)
+
+		// Around one, the validators after it still run.
+		skipFirst := niceyaml.ChainValidator(niceyaml.SkipEmpty(first), second)
+		require.ErrorIs(t, empty.Validate(t.Context(), skipFirst), errSecond)
+		require.ErrorIs(t, doc.Validate(t.Context(), skipFirst), errFirst)
+	})
+
+	t.Run("a context that ends stops the run at the validator that reports it", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+
+		var order []string
+
+		canceling := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
+			cancel()
+
+			return ctx.Err()
+		})
+
+		err := newDoc(t).Validate(ctx, niceyaml.ChainValidator(canceling, record(&order, "unreached")))
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Empty(t, order)
+	})
+}
+
 func TestSkipEmpty(t *testing.T) {
 	t.Parallel()
 

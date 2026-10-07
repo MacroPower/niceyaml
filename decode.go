@@ -216,10 +216,10 @@ type SelfValidator interface {
 // [Node.Bind]. Each error then resolves its `@` paths from that Node and
 // its `$` paths from the root of the document, and names the source the
 // validator read. A caller that calls Validate itself thus gets the error
-// [Node.Validate] returns. [ValidatorFunc] and [MultiValidator] bind for
-// the validators built with them, so a function returns an [*Error] with
-// a path as it is. A validator of a type of its own binds before it
-// returns:
+// [Node.Validate] returns. [ValidatorFunc], [MultiValidator], and
+// [ChainValidator] bind for the validators built with them, so a function
+// returns an [*Error] with a path as it is. A validator of a type of its
+// own binds before it returns:
 //
 //	return n.Bind(niceyaml.NewError("unknown kind", niceyaml.AtPath(kindPath)))
 //
@@ -294,9 +294,9 @@ type SelfValidator interface {
 // parsed. A caller that calls Validate itself can hand it a Node whose
 // document did not parse. [Node.Decode], [Node.At], and [Node.Nodes]
 // return the syntax error for such a Node, and a validator passes that
-// error on. [ValidatorFunc], [MultiValidator], and the validators of
-// [go.jacobcolvin.com/niceyaml/schema] return it before they read the
-// Node.
+// error on. [ValidatorFunc], [MultiValidator], [ChainValidator], and the
+// validators of [go.jacobcolvin.com/niceyaml/schema] return it before
+// they read the Node.
 //
 // A decode hands its validators the Node it decodes, the one the caller
 // holds, so [SourceError.Node] of an error a validator binds through it
@@ -304,7 +304,7 @@ type SelfValidator interface {
 // or [Node.Nodes] binds errors to itself, so their `@` paths resolve from
 // its scope.
 //
-// See [ValidatorFunc], [MultiValidator], [SkipEmpty],
+// See [ValidatorFunc], [MultiValidator], [ChainValidator], [SkipEmpty],
 // [go.jacobcolvin.com/niceyaml/schema.Schema], and
 // [go.jacobcolvin.com/niceyaml/schema.Registry] for implementations.
 type Validator interface {
@@ -358,19 +358,18 @@ func (f ValidatorFunc) Validate(ctx context.Context, n *Node) error {
 }
 
 // MultiValidator returns a [Validator] that runs every validator in
-// order and reports every failure, where the validators [WithValidator]
-// gives a decode run in order and stop at the first that fails. It suits
-// validators that check a document independently, such as a schema and
-// a check on the names it uses, so one run reports the violations of
-// both:
+// order and reports every failure, where [ChainValidator] stops at the
+// first that fails. It suits rules that check a document independently,
+// as the rules of a linter do, such as a schema and a check on the names
+// it uses, so one run reports the violations of both:
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(niceyaml.MultiValidator(schema, names)))
 //
 // Each validator sees the node whatever the ones before it reported, so
 // a validator that decodes the node reports its own failure beside a
 // schema violation of the same value. A validator that needs an earlier
-// one to have passed runs on its own instead. The run skips a nil
-// validator, and one that holds a nil pointer or func.
+// one to have passed goes in a ChainValidator instead. The run skips a
+// nil validator, and one that holds a nil pointer or func.
 //
 // MultiValidator binds each failure through the node, whether or not the
 // validator that returned it did. Two or more failures come back joined
@@ -433,6 +432,42 @@ func MultiValidator(validators ...Validator) Validator {
 	})
 }
 
+// ChainValidator returns a [Validator] that runs the validators in order
+// and stops at the first that fails, where [MultiValidator] runs every
+// one. It suits a check that needs an earlier one to pass, such as a
+// check that follows the references of a document once a schema has
+// accepted its shape:
+//
+//	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(niceyaml.ChainValidator(schema, refs)))
+//
+// A validator runs only after every validator before it has passed, so
+// it can trust the shape the schema checked, and one that decodes the
+// node reports no value the schema already rejected. Rules that check a
+// document independently go in a MultiValidator instead, which reports
+// the failures of all of them. The run skips a nil validator, and one
+// that holds a nil pointer or func, and a ChainValidator of no
+// validators passes every Node.
+//
+// A decode runs the validators of repeated [WithValidator] options the
+// same way, so these two decodes return the same error:
+//
+//	doc.Decode[Config](ctx, niceyaml.WithValidator(niceyaml.ChainValidator(schema, refs)))
+//	doc.Decode[Config](ctx, niceyaml.WithValidator(schema), niceyaml.WithValidator(refs))
+//
+// ChainValidator binds the failure through the node when the validator
+// left it unbound and returns a bound error as it is, so the failure
+// comes back as it would if that validator ran alone.
+//
+// ChainValidator copies the validators it gets, so a caller that edits
+// the slice it passed changes nothing in the Validator.
+func ChainValidator(validators ...Validator) Validator {
+	validators = slices.Clone(validators)
+
+	return ValidatorFunc(func(ctx context.Context, n *Node) error {
+		return n.validate(ctx, validators)
+	})
+}
+
 // SkipEmpty returns a [Validator] that passes a document with no content
 // and runs v on every other Node. [Node.IsEmpty] reports such a
 // document: an empty file, a file of comments alone, or a "---" header
@@ -460,8 +495,8 @@ func MultiValidator(validators ...Validator) Validator {
 //
 // SkipEmpty runs v as [Node.Validate] runs it. The error of v comes
 // back bound through the Node whether or not v bound it, and a nil v
-// passes every Node. SkipEmpty takes one validator, and [MultiValidator]
-// makes one of several.
+// passes every Node. SkipEmpty takes one validator, and it wraps the one
+// that [MultiValidator] or [ChainValidator] makes of several.
 func SkipEmpty(v Validator) Validator {
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
 		if n.IsEmpty() {
@@ -2143,14 +2178,15 @@ func (c decodeConfig) decodeOptions() []yaml.DecodeOption {
 
 // WithValidator is a [DecodeOption] that validates the document with dv
 // before decoding it, and a validation error ends the decode before any
-// typed decoding. Several validators run in the order given and stop at
-// the first that fails, and [MultiValidator] runs several and
-// reports every failure. Validation skips a nil dv, and one that holds a
-// nil pointer or func, such as a schema a program loads only on some
-// paths. A [go.jacobcolvin.com/niceyaml/schema.Schema] checks the
-// document against one JSON schema, and a
-// [go.jacobcolvin.com/niceyaml/schema.Registry] against the schema it
-// picks for the document:
+// typed decoding. Each WithValidator option adds a validator. The decode
+// runs them as [ChainValidator] runs them, so it runs them in the order
+// given and stops at the first that fails. A caller that wants every
+// failure of several validators gives one option a [MultiValidator].
+// Validation skips a nil dv, and one that holds a nil pointer or func,
+// such as a schema a program loads only on some paths. A
+// [go.jacobcolvin.com/niceyaml/schema.Schema] checks the document against
+// one JSON schema, and a [go.jacobcolvin.com/niceyaml/schema.Registry]
+// against the schema it picks for the document:
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
