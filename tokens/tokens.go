@@ -39,6 +39,17 @@ import (
 // in the first key. Every position names a rune of the text without
 // those marks.
 //
+// The lexer counts the flow collections it has open, and a "---" or "..."
+// marker does not reset the counts. After a "{" or "[" that nothing
+// closes, the lexer reads every later document as the inside of a flow
+// collection, where a "," splits a plain scalar. After a "]" that closes
+// nothing, it reads the content of the next flow sequence as one scalar.
+// Tokenize lexes the source again from each marker the lexer reaches with
+// a count off zero, so the documents after it lex as they do in a source
+// that starts at that marker. The stream stays as the lexer made it at a
+// marker that follows text the lexer dropped or swallowed, such as a ":"
+// after a tab used as indentation.
+//
 // The joined Origins match that text, except in a few places Tokenize
 // leaves as the lexer made them. The lexer drops some text outright, such
 // as a tag that ends a file after other text, and it can drop some or all
@@ -83,10 +94,90 @@ import (
 func Tokenize(src string) token.Tokens {
 	src = dropByteOrderMarks(src)
 
+	tks, cut := tokenize(src)
+
+	// The lexer read the tokens from tks[cut] on with a flow count off
+	// zero, so the tokens of the source from that marker on take their
+	// place. Those count their positions from the marker, and lines and
+	// runes count the lines and runes of the source ahead of it.
+	var lines, runes int
+
+	for cut >= 0 {
+		marker := tks[cut]
+		tks = tks[:cut]
+
+		src = src[runeIndex(src, marker.Position.Offset-1-runes):]
+		lines, runes = marker.Position.Line-1, marker.Position.Offset-1
+
+		rest, next := tokenizeRest(src)
+		for _, tk := range rest {
+			tk.Position.Line += lines
+			tk.Position.Offset += runes
+		}
+
+		// The whitespace the stream holds in front of the marker stays
+		// in front of it.
+		lead := len(marker.Origin) - len(strings.TrimLeft(marker.Origin, " \t\r\n"))
+		rest[0].Origin = marker.Origin[:lead] + rest[0].Origin
+
+		cut = next
+		if cut >= 0 {
+			cut += len(tks)
+		}
+
+		tks.Add(rest...)
+	}
+
+	return tks
+}
+
+// firstWindow is the number of bytes of the first window [tokenizeRest]
+// lexes.
+const firstWindow = 64
+
+// tokenizeRest tokenizes src, the rest of a source from a marker on, as
+// [tokenize] does. It returns the tokens through the next marker to lex
+// again from, with the index of that marker, or every token of src and -1
+// when src holds no such marker.
+//
+// It lexes a window of whole lines from the start of src and doubles the
+// window until it holds that marker or all of src. The time it takes thus
+// grows with the distance to the marker and not with the length of src. A
+// source of many documents that each leave a flow collection open would
+// otherwise take time quadratic in their number. The lexer and the repairs
+// read the source from left to right, so the tokens through a marker are
+// the same whatever follows the line of the marker.
+func tokenizeRest(src string) (token.Tokens, int) {
+	for size := firstWindow; ; size *= 2 {
+		end := 0
+
+		for line := range lineend.Lines(src) {
+			end += len(line)
+			if end >= size {
+				break
+			}
+		}
+
+		tks, cut := tokenize(src[:end])
+
+		switch {
+		case cut >= 0:
+			return tks[:cut+1], cut
+		case end == len(src):
+			return tks, -1
+		}
+	}
+}
+
+// tokenize returns the token stream [Tokenize] makes of src, a source
+// without byte order marks, from one run of the lexer. It also returns the
+// index of the marker [openFlowMarker] finds in that stream, or -1 when it
+// finds none.
+func tokenize(src string) (token.Tokens, int) {
 	tks := dropHeaderRepeat(src, lexer.Tokenize(src))
 	if len(tks) == 0 {
 		if src == "" {
-			return tks
+			return tks, -1
 		}
 
 		// The lexer emits nothing for a source of whitespace alone, and
@@ -109,7 +200,7 @@ func Tokenize(src string) token.Tokens {
 			repairPositions([]rune(src), tks)
 		}
 
-		return tks
+		return tks, -1
 	}
 
 	// The repeats hold a tab the source lacks, so the repairs below read
@@ -177,10 +268,101 @@ func Tokenize(src string) token.Tokens {
 	}
 
 	runes := []rune(src)
+	spans := repairPositions(runes, tks)
 
-	restoreWhitespace(runes, tks, repairPositions(runes, tks))
+	restoreWhitespace(runes, tks, spans)
 
-	return dropTokens(tks, repeats)
+	marker := openFlowMarker(runes, tks, spans)
+
+	tks = dropTokens(tks, repeats)
+	if marker == nil {
+		return tks, -1
+	}
+
+	return tks, slices.Index(tks, marker)
+}
+
+// openFlowMarker returns the first "---" or "..." marker of tks that the
+// lexer reached with a flow count off zero and that spans places in src,
+// or nil when tks holds none. [Tokenize] lexes the source again from that
+// marker.
+//
+// The go-yaml scanner (v1.19.3-0.20260407131736-edee2f91616c) counts the
+// flow mappings and the flow sequences it has open, and reads its input
+// as the inside of a flow collection while either count is above zero. It
+// resets neither count at a marker (scanner/scanner.go:1509), so a "{" or
+// "[" that nothing closes keeps every later document in flow context.
+// There a "," splits a plain scalar, and after a "{" the scanner takes no
+// ":" as an indicator right after another one, so a mapping nested under a
+// key reads as one scalar. A "]" that closes nothing takes its count below
+// zero. The next "[" brings the count back to zero, and the scanner reads
+// the content of that sequence as one plain scalar. The scanner changes a
+// count only where it makes the token that opens or closes a flow
+// collection (scanner/scanner.go:917, 931, 945, and 959), so the tokens
+// ahead of a marker give the counts the scanner reached it with.
+//
+// Tokenize cuts the source in front of the marker, so the marker has to
+// sit where the stream puts it. It does when the source holds the text of
+// the marker and of the token before it, with whitespace alone between
+// the two. Around text the lexer dropped or swallowed, such as a ":"
+// after a tab used as indentation, the position of the marker can name
+// another rune, and openFlowMarker passes over such a marker.
+func openFlowMarker(src []rune, tks token.Tokens, spans []span) *token.Token {
+	var maps, seqs int
+
+	// The span of the last token that holds text. No text comes before
+	// the first token, so the empty span at the start of src stands in.
+	prev := span{ok: true}
+
+	for i, tk := range tks {
+		if tk == nil || tk.Position == nil {
+			continue
+		}
+
+		sp := spans[i]
+
+		switch tk.Type {
+		case token.MappingStartType:
+			maps++
+
+		case token.MappingEndType:
+			maps--
+
+		case token.SequenceStartType:
+			seqs++
+
+		case token.SequenceEndType:
+			seqs--
+
+		case token.DocumentHeaderType, token.DocumentEndType:
+			open := maps != 0 || seqs != 0
+			if open && prev.ok && sp.ok && strings.Trim(string(src[prev.end:sp.start]), " \t\r\n") == "" {
+				return tk
+			}
+
+		default:
+		}
+
+		if strings.Trim(tk.Origin, " \t\r\n") != "" {
+			prev = sp
+		}
+	}
+
+	return nil
+}
+
+// runeIndex returns the byte index of rune n of s, or the length of s
+// when s holds no more than n runes.
+func runeIndex(s string, n int) int {
+	for i := range s {
+		if n == 0 {
+			return i
+		}
+
+		n--
+	}
+
+	return len(s)
 }
 
 // dropHeaderRepeat returns tks without the token the lexer adds when the

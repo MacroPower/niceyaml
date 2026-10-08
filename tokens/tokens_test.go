@@ -616,6 +616,183 @@ func TestTokenize_ByteOrderMark(t *testing.T) {
 	}
 }
 
+func TestTokenize_OpenFlowAtMarker(t *testing.T) {
+	t.Parallel()
+
+	// The lexer keeps its counts of open flow collections across a marker.
+	// On its own, it reads the documents after a "{" or "[" that nothing
+	// closes as the inside of a flow collection, and misses the flow
+	// sequence after a "]" that closes nothing. Each head ends in such a
+	// document. The tokens from the marker that opens tail on are those of
+	// tail as a source of its own, moved to where tail sits in the input.
+	tcs := map[string]struct {
+		head string
+		tail string
+		// The values of the tokens of tail, for a case that lists them.
+		want []string
+	}{
+		"comma and nested mapping after an open mapping": {
+			head: "name: web\nlabels: {app: web\n",
+			tail: "---\nname: worker\ncommand: sleep 1, 2\nspec:\n  replicas: 2\n",
+			want: []string{
+				"---",
+				"name", ":", "worker",
+				"command", ":", "sleep 1, 2",
+				"spec", ":", "replicas", ":", "2",
+			},
+		},
+		"comma after an open sequence": {
+			head: "a: [b, c\n",
+			tail: "---\nk: v, w\n",
+			want: []string{"---", "k", ":", "v, w"},
+		},
+		"flow sequence after a sequence end that closes nothing": {
+			head: "a: ]\n",
+			tail: "---\nx: [a, b]\n",
+			want: []string{"---", "x", ":", "[", "a", ",", "b", "]"},
+		},
+		"document end marker": {
+			head: "a: [b\n",
+			tail: "...\nk:\n  r: 2\nm: x, y\n",
+			want: []string{"...", "k", ":", "r", ":", "2", "m", ":", "x, y"},
+		},
+		"content on the line of the marker": {
+			head: "a: [b\n",
+			tail: "--- v, w\n",
+			want: []string{"---", "v, w"},
+		},
+		"crlf": {
+			head: "a: {b\r\n",
+			tail: "---\r\nk:\r\n  r: 2\r\nm: x, y\r\n",
+			want: []string{"---", "k", ":", "r", ":", "2", "m", ":", "x, y"},
+		},
+		// The lexer counts a CRLF after a comment as two lines, so its
+		// own Line for the marker is two lines late here.
+		"crlf after comments": {
+			head: "a: [b # one\r\n# two\r\n",
+			tail: "---\r\nk: v, w\r\n",
+			want: []string{"---", "k", ":", "v, w"},
+		},
+		"bare cr": {
+			head: "a: {b\r",
+			tail: "---\rk: v, w\r",
+			want: []string{"---", "k", ":", "v, w"},
+		},
+		"text of several bytes ahead of the marker": {
+			head: "é: [ü,\n",
+			tail: "---\nk: v, w\n",
+			want: []string{"---", "k", ":", "v, w"},
+		},
+		"blank lines ahead of the marker": {
+			head: "a: {b\n\n  \n",
+			tail: "---\nk: v, w\n",
+			want: []string{"---", "k", ":", "v, w"},
+		},
+		"unclosed quote inside the flow": {
+			head: "a: [\"b\n",
+			tail: "---\nk: v, w\n",
+			want: []string{"---", "k", ":", "v, w"},
+		},
+		"each of several documents leaves a flow open": {
+			head: "a: {\n",
+			tail: "---\nb: [\n---\nk: v, w\n---\nz: ]\n---\nl: [a, b]\n",
+			want: []string{
+				"---", "b", ":", "[",
+				"---", "k", ":", "v, w",
+				"---", "z", ":", "]",
+				"---", "l", ":", "[", "a", ",", "b", "]",
+			},
+		},
+		// The second open flow sits past the first window of lines that
+		// Tokenize lexes from the first marker.
+		"open flows far apart": {
+			head: "a: {b\n",
+			tail: "---\n" + strings.Repeat("- item, more\n", 20) + "c: [\n---\n" + strings.Repeat("k: v, w\n", 20),
+		},
+		// The windows end inside the block scalar and the quoted scalar.
+		"scalars of many lines between open flows": {
+			head: "a: [b\n",
+			tail: "---\ns: |\n" + strings.Repeat("  text, more\n", 20) +
+				"q: \"" + strings.Repeat("text, more\n  ", 20) + "\"\nc: {\n---\nk: v, w\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			input := tc.head + tc.tail
+
+			got := tokens.Tokenize(input)
+			assert.Equal(t, input, yamltest.DumpTokenOrigins(got))
+
+			want := tokens.Tokenize(tc.tail)
+			require.Greater(t, len(got), len(want))
+
+			lines, runes := countLineBreaks(tc.head), utf8.RuneCountInString(tc.head)
+			for _, tk := range want {
+				tk.Position.Line += lines
+				tk.Position.Offset += runes
+			}
+
+			tail := got[len(got)-len(want):]
+
+			// The marker keeps the whitespace the stream holds in front
+			// of it, such as the line break after a "{".
+			assert.Equal(t, want[0].Origin, strings.TrimLeft(tail[0].Origin, " \t\r\n"))
+
+			want[0].Origin = tail[0].Origin
+
+			yamltest.RequireTokensEqual(t, want, tail)
+
+			if tc.want != nil {
+				values := make([]string, 0, len(tail))
+				for _, tk := range tail {
+					values = append(values, tk.Value)
+				}
+
+				assert.Equal(t, tc.want, values)
+			}
+
+			// The tokens on both sides of the marker link to each other.
+			for i, tk := range got {
+				if i > 0 {
+					assert.Same(t, got[i-1], tk.Prev, "token %d %q", i, tk.Origin)
+				}
+
+				if i < len(got)-1 {
+					assert.Same(t, got[i+1], tk.Next, "token %d %q", i, tk.Origin)
+				}
+			}
+
+			assert.Nil(t, got[0].Prev)
+			assert.Nil(t, got[len(got)-1].Next)
+		})
+	}
+}
+
+func TestTokenize_OpenFlowBehindSwallowedText(t *testing.T) {
+	t.Parallel()
+
+	// A tab in front of a ":" makes the lexer swallow the ":", so the
+	// source holds text between the "{" and the marker that no token
+	// holds. Tokenize leaves the stream as the lexer made it there, and
+	// the "," of the next document still reads as a flow indicator.
+	const input = "{\t: \n---\nk: v, w\n"
+
+	want := lexer.Tokenize(input)
+	got := tokens.Tokenize(input)
+
+	require.Len(t, got, len(want))
+
+	for i, tk := range got {
+		assert.Equal(t, want[i].Type, tk.Type, "token %d %q", i, tk.Origin)
+		assert.Equal(t, want[i].Value, tk.Value, "token %d %q", i, tk.Origin)
+	}
+
+	assert.Equal(t, token.CollectEntryType, got[len(got)-2].Type)
+}
+
 func TestIsPlaceholder(t *testing.T) {
 	t.Parallel()
 

@@ -2499,6 +2499,97 @@ func TestSource_AllDocuments_SyntaxError(t *testing.T) {
 	}
 }
 
+func TestSource_AllDocuments_UnclosedFlow(t *testing.T) {
+	t.Parallel()
+
+	// A "{" or "[" that nothing closes fails its own document. The
+	// documents after it decode to the values they hold in a file of
+	// their own, where the lexer alone would read them as the inside of
+	// that flow collection.
+	tcs := map[string]struct {
+		input string
+		// The value of each document in file order, nil for a document
+		// with a syntax error.
+		want []any
+	}{
+		"nested mapping after an open mapping": {
+			input: "name: web\nlabels: {app: web\n---\nname: worker\nspec:\n  tier: db\n",
+			want: []any{
+				nil,
+				map[string]any{"name": "worker", "spec": map[string]any{"tier": "db"}},
+			},
+		},
+		"comma in a plain scalar after an open mapping": {
+			input: "name: web\nlabels: {app: web\n---\nname: worker\ncommand: sleep 1, 2\n",
+			want: []any{
+				nil,
+				map[string]any{"name": "worker", "command": "sleep 1, 2"},
+			},
+		},
+		"comma in a plain scalar after an open sequence": {
+			input: "ports: [80, 443\n---\ncommand: sleep 1, 2\n",
+			want: []any{
+				nil,
+				map[string]any{"command": "sleep 1, 2"},
+			},
+		},
+		"flow sequence after a sequence end that closes nothing": {
+			input: "a: ]\n---\nx: [a, b]\n",
+			want: []any{
+				nil,
+				map[string]any{"x": []any{"a", "b"}},
+			},
+		},
+		"document end marker": {
+			input: "a: [b\n...\nspec:\n  tier: db\ncommand: sleep 1, 2\n",
+			want: []any{
+				nil,
+				map[string]any{"spec": map[string]any{"tier": "db"}, "command": "sleep 1, 2"},
+			},
+		},
+		"crlf": {
+			input: "a: {b\r\n---\r\nspec:\r\n  tier: db\r\ncommand: sleep 1, 2\r\n",
+			want: []any{
+				nil,
+				map[string]any{"spec": map[string]any{"tier": "db"}, "command": "sleep 1, 2"},
+			},
+		},
+		"each of several documents leaves a flow open": {
+			input: "a: {\n---\nb: [\n---\nspec:\n  tier: db\n---\nz: ]\n---\nx: [a, b]\n",
+			want: []any{
+				nil,
+				nil,
+				map[string]any{"spec": map[string]any{"tier": "db"}},
+				nil,
+				map[string]any{"x": []any{"a", "b"}},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			docs := niceyaml.NewSourceFromString(tc.input).AllDocuments()
+			require.Len(t, docs, len(tc.want))
+
+			for i, doc := range docs {
+				if tc.want[i] == nil {
+					require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax, "document %d", i)
+
+					continue
+				}
+
+				require.NoError(t, doc.Err(), "document %d", i)
+
+				got, err := doc.Decode[any](t.Context())
+				require.NoError(t, err, "document %d", i)
+				assert.Equal(t, tc.want[i], got, "document %d", i)
+			}
+		})
+	}
+}
+
 func TestSource_AllDocuments_SyntaxErrorTokens(t *testing.T) {
 	t.Parallel()
 

@@ -26,3 +26,22 @@ func BenchmarkTokenize_TabRepeats(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkTokenize_OpenFlows tokenizes documents that each leave a flow
+// sequence open. The lexer reads each document after the first as the
+// inside of that sequence, and Tokenize lexes the source again from the
+// marker of each one.
+func BenchmarkTokenize_OpenFlows(b *testing.B) {
+	for _, docs := range []int{100, 1000, 10000} {
+		src := strings.Repeat("k: [v,\n---\n", docs)
+
+		b.Run(strconv.Itoa(docs), func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(src)))
+
+			for b.Loop() {
+				_ = tokens.Tokenize(src)
+			}
+		})
+	}
+}
