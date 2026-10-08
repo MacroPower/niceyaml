@@ -519,7 +519,7 @@ func (c *problemCollector) walk(t reflect.Type, held ast.Node, at place, in hold
 		// refuses any other node itself, unless another unmarshaler of the
 		// type takes that node.
 		if refusesForText(t, c.cfg.unmarshalers, content) ||
-			decodesFromText(t, c.cfg.unmarshalers) && isScalar(content) {
+			isScalar(content) && decodesFromText(t, c.cfg.unmarshalers) {
 			c.leaf(t, held, node, at, in)
 		}
 
