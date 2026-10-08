@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/netip"
 	"regexp"
 	"slices"
@@ -8105,6 +8106,58 @@ func TestDocument_At_ZeroWidthBoundary(t *testing.T) {
 			assert.Equal(t, tc.tokens, got)
 		})
 	}
+}
+
+func ExampleDecodeOptions() {
+	ctx := context.Background()
+
+	type manifest struct {
+		Kind string `yaml:"kind"`
+		Name string `yaml:"name"`
+	}
+
+	manifests := schema.MustCompile([]byte(`{"type": "object", "required": ["kind", "name"]}`))
+
+	settings := niceyaml.DecodeOptions(niceyaml.WithDisallowUnknownFields(true))
+	strict := niceyaml.DecodeOptions(niceyaml.WithValidator(manifests), settings)
+
+	docs, err := niceyaml.NewSourceFromString(
+		"kind: Service\nname: web\n---\nkind: Deployment\nname: web\nreplicas: 3\n",
+		niceyaml.WithName("app.yaml"),
+	).Documents()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Each whole document validates against the schema and decodes with
+	// the settings.
+	for _, doc := range docs {
+		m, err := doc.Decode[manifest](ctx, strict)
+		if err != nil {
+			fmt.Println(err)
+
+			continue
+		}
+
+		fmt.Println(m.Kind, m.Name)
+	}
+
+	kindPath := paths.Current().Child("kind")
+
+	// The validator checks the node the call decodes, and the schema of
+	// the document does not describe the value at $.kind.
+	_, err = docs[0].DecodeAt[string](ctx, kindPath, strict)
+	fmt.Println(err)
+
+	// A decode of one value takes the settings without that schema.
+	kind, err := docs[0].DecodeAt[string](ctx, kindPath, settings)
+	fmt.Println(kind, err)
+
+	// Output:
+	// Service web
+	// app.yaml:6:1: $.replicas~: unknown field "replicas"
+	// app.yaml:1:7: $.kind: expected "object", got "string"
+	// Service <nil>
 }
 
 func TestDecodeOptions(t *testing.T) {

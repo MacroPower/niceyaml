@@ -2433,14 +2433,13 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 }
 
 // DecodeOptions is a [DecodeOption] that applies opts in order. A
-// program that decodes many documents names its schema and its decoder
-// settings in one place, and passes the one value wherever a
-// DecodeOption goes:
+// program that decodes many documents names its decoder settings in one
+// place, and passes the one value wherever a DecodeOption goes. A second
+// value adds the schema of the documents to those settings, for each
+// decode of a whole document:
 //
-//	strict := niceyaml.DecodeOptions(
-//		niceyaml.WithValidator(reg),
-//		niceyaml.WithDisallowUnknownFields(true),
-//	)
+//	settings := niceyaml.DecodeOptions(niceyaml.WithDisallowUnknownFields(true))
+//	strict := niceyaml.DecodeOptions(niceyaml.WithValidator(reg), settings)
 //
 //	docs, err := source.Documents()
 //	if err != nil {
@@ -2452,10 +2451,15 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 //		...
 //	}
 //
-// A call applies the result as it applies opts written in its place, so
-// other options go before it and after it:
+// A validator among opts checks the node that each call decodes. For
+// [Node.DecodeAt], [Node.DecodeIfPresent], and a Node from [Node.At] or
+// [Node.Nodes], that node is one value inside the document, which the
+// schema of the whole document does not describe, so those calls take
+// the settings without that schema. A call applies the result as it
+// applies opts written in its place, so other options go before it and
+// after it:
 //
-//	kind, err := doc.DecodeAt[string](ctx, kindPath, strict, niceyaml.WithSelfValidation(false))
+//	kind, err := doc.DecodeAt[string](ctx, kindPath, settings, niceyaml.WithSelfValidation(false))
 //
 // [WithValidator] and [WithYAMLDecodeOptions] add to what the options
 // before them gave. [WithSelfValidation] and [WithDisallowUnknownFields]
