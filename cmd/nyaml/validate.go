@@ -29,7 +29,9 @@ func validateCmd() *cobra.Command {
 			"One run thus reports every syntax error and every schema violation " +
 			"of a file.\n\n" +
 			"With --schema, every document validates against that schema, " +
-			"a local file or an http/https URL.\n\n" +
+			"a local file or an http/https URL. A $ref in the schema to a file " +
+			"or URL that does not load fails the run with one error, before " +
+			"it reads any file.\n\n" +
 			"Without --schema, a document validates against the schema named by a " +
 			`"# yaml-language-server: $schema=" comment above its content, or else ` +
 			"against the SchemaStore schema that matches its file path. A $schema " +
@@ -38,7 +40,8 @@ func validateCmd() *cobra.Command {
 			"downloads the catalog from schemastore.org, so while that site is " +
 			"unreachable, every document without such a comment fails. A " +
 			"$schema=none comment in the same place turns validation off for its " +
-			"document and skips the lookup.\n\n" +
+			"document and skips the lookup. A $ref in such a schema to a file or " +
+			"URL that does not load fails only the documents that reach it.\n\n" +
 			"Supports glob patterns like *.yaml.\n\n" +
 			"Exits 0 when every document is valid. Exits 1 when the documents " +
 			"themselves are at fault for every error, such as a syntax error or " +
@@ -277,7 +280,9 @@ func lastDotDotEnd(path string) int {
 // cannot load or compile fails the command with one "--schema:" error. A
 // schema path resolves relative to the current working directory, through
 // [physicalAbs], so it names the file the OS opens for it. A $ref inside
-// the schema resolves relative to the schema's own file or URL.
+// the schema resolves relative to the schema's own file or URL, and one
+// that names a file or URL that does not load fails the command the same
+// way.
 //
 // Otherwise the registry matches on schema directives first, and a
 // directive's reference resolves relative to its own YAML file. A document
@@ -286,6 +291,10 @@ func lastDotDotEnd(path string) int {
 // document that reaches it, and a file it cannot fetch the catalog for
 // reports that in the file's error. Schema validation is optional here, so
 // a document that no resolver claims passes rather than failing the file.
+// A catalog schema is not the user's to fix, and a public schema can name
+// a document that is gone under a branch few documents take. The registry
+// therefore compiles a schema without the documents its $refs fail to
+// load, and only a document that reaches such a $ref fails.
 func buildRegistry(ctx context.Context, schemaRef string) (*schema.Registry, error) {
 	if schemaRef != "" {
 		// FileOrURL cleans a path as text, which drops a ".." together
@@ -328,5 +337,6 @@ func buildRegistry(ctx context.Context, schemaRef string) (*schema.Registry, err
 			schemastore.New(),  // Automatic discovery by absolute file path.
 		),
 		schema.WithRequireSchema(false),
+		schema.WithCompileOptions(schema.WithRequireRefs(false)),
 	), nil
 }

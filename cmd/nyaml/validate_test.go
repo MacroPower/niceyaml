@@ -232,6 +232,47 @@ func TestValidateFileDotDotAfterSymlink(t *testing.T) {
 	require.NoError(t, validateFile(t.Context(), path, reg))
 }
 
+func TestBuildRegistryRefs(t *testing.T) {
+	t.Parallel()
+
+	// The schema names a file that does not exist from a property a
+	// document can leave out.
+	dir := t.TempDir()
+	schemaPath := filepath.Join(dir, "s.json")
+
+	files := map[string]string{
+		"s.json":       `{"properties": {"name": {"type": "string"}, "extra": {"$ref": "missing.json"}}}`,
+		"skips.yaml":   "# yaml-language-server: $schema=./s.json\nname: a\n",
+		"reaches.yaml": "# yaml-language-server: $schema=./s.json\nextra: 1\n",
+	}
+	for name, content := range files {
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600))
+	}
+
+	t.Run("--schema fails before any file", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := buildRegistry(t.Context(), schemaPath)
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		assert.True(t, strings.HasPrefix(err.Error(), "--schema: "), err.Error())
+		assert.Contains(t, err.Error(), filepath.Join(dir, "missing.json"))
+	})
+
+	t.Run("a directive fails only the document that reaches the ref", func(t *testing.T) {
+		t.Parallel()
+
+		reg, err := buildRegistry(t.Context(), "")
+		require.NoError(t, err)
+
+		require.NoError(t, validateFile(t.Context(), filepath.Join(dir, "skips.yaml"), reg))
+
+		err = validateFile(t.Context(), filepath.Join(dir, "reaches.yaml"), reg)
+		require.ErrorIs(t, err, schema.ErrValidate)
+		require.ErrorIs(t, err, fs.ErrNotExist)
+	})
+}
+
 func TestBuildRegistrySchemaDotDotAfterSymlink(t *testing.T) {
 	t.Parallel()
 
@@ -490,6 +531,12 @@ func TestValidateCmdSchemaError(t *testing.T) {
 			content: `{"type": 12`,
 			err:     schema.ErrCompile,
 		},
+		// One of the three documents sets no "a", so its validation would
+		// never reach the $ref.
+		"$ref names a missing file": {
+			content: `{"properties": {"a": {"$ref": "defs.json"}}}`,
+			err:     schema.ErrLoad,
+		},
 		"URL fails": {
 			url: true,
 			err: schema.ErrLoad,
@@ -569,7 +616,7 @@ func TestValidateCmdHelp(t *testing.T) {
 	// names each exit status, so a script tells an invalid document from a
 	// run that could not check one.
 	long := validateCmd().Long
-	for _, want := range []string{"--schema", "$schema=", "$schema=none", "SchemaStore", "Exits 1", "Exits 2"} {
+	for _, want := range []string{"--schema", "$schema=", "$schema=none", "SchemaStore", "$ref", "Exits 1", "Exits 2"} {
 		assert.Contains(t, long, want)
 	}
 }
