@@ -133,7 +133,9 @@ import (
 //
 // A caller that returns or logs the error binds it with [BindValue]
 // instead. The text of that error names each path wherever it prints,
-// and a document can still place it.
+// and a document can still place it. [SelfValidateValue] runs the
+// Validate of every value below the value too, as a decode does, and
+// binds the result the same way.
 //
 // Any value with a Validate method takes part, including one from a
 // package that names its own check that way, such as a generated
@@ -144,7 +146,10 @@ import (
 // ignored, or when the struct decodes itself through an UnmarshalYAML or
 // UnmarshalText method it declares, since the decode validates nothing
 // below such a struct. To keep the check, a struct like that declares a
-// Validate of its own that calls the field's.
+// Validate of its own that calls the field's. To keep the checks of
+// every value below it, that Validate walks those values with
+// [SelfValidateValue], and the decode places each error under the
+// struct.
 // A struct that decodes itself through an UnmarshalYAML or UnmarshalText
 // method it gets from an embedded field decodes the document into that
 // field, so the field validates at the path of the struct.

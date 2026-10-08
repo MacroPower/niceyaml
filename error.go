@@ -47,11 +47,12 @@ var (
 	ErrDecodeTarget = errors.New("decode target is not a non-nil pointer")
 
 	// ErrSelfValidateTarget indicates the value given to
-	// [Node.SelfValidate], [Source.SelfValidate], or
-	// [Layers.SelfValidate] is nil or a nil pointer, so there is nothing
+	// [Node.SelfValidate], [Source.SelfValidate], [Layers.SelfValidate],
+	// or [SelfValidateValue] is nil or a nil pointer, so there is nothing
 	// to validate. The error comes back bound to the source as a
-	// [SourceError] with no location. It is a mistake of the caller, so
-	// [IsInvalid] does not report it.
+	// [SourceError] with no location, and SelfValidateValue binds it to
+	// no document. It is a mistake of the caller, so [IsInvalid] does not
+	// report it.
 	ErrSelfValidateTarget = errors.New("self-validation target is nil")
 
 	// ErrDecode indicates that the go-yaml decoder did not decode a node
@@ -1952,6 +1953,10 @@ func (b binder) nodeAt(idx int) *Node {
 //	if err := niceyaml.BindValue(request.Validate()); err != nil {
 //		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 //	}
+//
+// That call runs the one method. [SelfValidateValue] runs the Validate
+// of every value below request too, as a decode does, and binds the
+// result as BindValue binds it.
 //
 // The result stands in no document, so a document can still place it.
 // [Rebase] and every Bind return an error bound to a document as it is,

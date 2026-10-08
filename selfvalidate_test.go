@@ -1,6 +1,7 @@
 package niceyaml_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -3372,6 +3373,414 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 	}
 }
 
+func ExampleSelfValidateValue() {
+	ctx := context.Background()
+
+	// The value came from no document, as the body of a request does.
+	cfg := layeredConfig{
+		DB:    database{Host: "localhost", Password: "s3cret"},
+		Items: []upstream{{URL: "http://x"}, {URL: "ftp://y"}},
+	}
+
+	err := niceyaml.SelfValidateValue(ctx, &cfg)
+	fmt.Println(err)
+
+	// A document that holds the value under a key places the error later.
+	doc, docErr := niceyaml.NewSourceFromString(
+		"config:\n  items:\n    - url: http://x\n    - url: ftp://y\n",
+		niceyaml.WithName("app.yaml"),
+	).Document()
+	if docErr != nil {
+		log.Fatal(docErr)
+	}
+
+	fmt.Println(doc.Bind(niceyaml.Rebase(err, paths.Doc().Child("config"))))
+
+	// Output:
+	// $.items[1].url: url "ftp://y" is not http
+	// app.yaml:4:12: $.config.items[1].url: url "ftp://y" is not http
+}
+
+func TestSelfValidateValue(t *testing.T) {
+	t.Parallel()
+
+	// A value that passes every check, which each case changes.
+	valid := func() *layeredConfig {
+		return &layeredConfig{DB: database{Host: "localhost", Password: "s3cret"}}
+	}
+
+	tcs := map[string]struct {
+		value  func() any
+		cancel bool
+		err    string
+	}{
+		"a value that passes": {
+			value: func() any { return valid() },
+		},
+		"a field reports its path from the value": {
+			value: func() any {
+				cfg := valid()
+				cfg.DB.Password = ""
+
+				return cfg
+			},
+			err: "$.db.password: password is required",
+		},
+		"an element reports its index": {
+			value: func() any {
+				cfg := valid()
+				cfg.Items = []upstream{{URL: "http://x"}, {URL: "ftp://y"}}
+
+				return cfg
+			},
+			err: `$.items[1].url: url "ftp://y" is not http`,
+		},
+		"a map entry reports the text of its Go key": {
+			value: func() any {
+				return &gradedConfig{ByGrade: map[grade]upstream{gradeHigh: {URL: "ftp://g"}}}
+			},
+			err: `$.by_grade.3.url: url "ftp://g" is not http`,
+		},
+		"several values report together": {
+			value: func() any {
+				cfg := valid()
+				cfg.DB.Password = ""
+				cfg.Upstreams = map[string]upstream{"a": {URL: "ftp://a"}}
+				cfg.Port = 70000
+
+				return cfg
+			},
+			err: stringtest.JoinLF(
+				"$.db.password: password is required",
+				`$.upstreams.a.url: url "ftp://a" is not http`,
+				"$.port: port out of range",
+			),
+		},
+		"a field go-yaml ignores does not validate": {
+			value: func() any {
+				cfg := valid()
+				cfg.Ignored = database{}
+
+				return cfg
+			},
+		},
+		"a value that is no pointer validates": {
+			value: func() any {
+				cfg := valid()
+				cfg.DB.Password = ""
+
+				return *cfg
+			},
+			err: "$.db.password: password is required",
+		},
+		"a pointer to a nil pointer validates nothing": {
+			value: func() any {
+				var cfg *layeredConfig
+
+				return &cfg
+			},
+		},
+		"a context that ended stops the walk": {
+			value: func() any {
+				cfg := valid()
+				cfg.DB.Password = ""
+
+				return cfg
+			},
+			cancel: true,
+			err:    "context canceled",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithCancel(t.Context())
+			t.Cleanup(cancel)
+
+			if tc.cancel {
+				cancel()
+			}
+
+			err := niceyaml.SelfValidateValue(ctx, tc.value())
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.EqualError(t, err, tc.err)
+			assert.Equal(t, !tc.cancel, niceyaml.IsInvalid(err))
+
+			// The result stands in no document, as one from BindValue does.
+			for bound := range niceyaml.AllBindings(err) {
+				assert.Nil(t, bound.Node())
+				assert.Nil(t, bound.Document())
+
+				_, ok := bound.Position()
+				assert.False(t, ok)
+			}
+		})
+	}
+}
+
+func TestSelfValidateValue_Target(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		v   any
+		err string
+	}{
+		"nil": {
+			v:   nil,
+			err: "self-validation target is nil",
+		},
+		"a nil pointer": {
+			v:   (*layeredConfig)(nil),
+			err: "self-validation target is nil: got *niceyaml_test.layeredConfig",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := niceyaml.SelfValidateValue(t.Context(), tc.v)
+			require.ErrorIs(t, err, niceyaml.ErrSelfValidateTarget)
+			require.EqualError(t, err, tc.err)
+			assert.False(t, niceyaml.IsInvalid(err))
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+			assert.Nil(t, bound.Node())
+
+			_, ok := bound.Position()
+			assert.False(t, ok)
+		})
+	}
+}
+
+func TestSelfValidateValue_SharedPath(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		value func() any
+		want  []string
+	}{
+		"keys of two types with one text": {
+			value: func() any {
+				return map[any]signed{1: {N: -1}, "1": {N: -2}}
+			},
+			want: []string{"$.1.n: negative -1", "$.1.n: negative -2"},
+		},
+		"several NaN keys": {
+			value: func() any {
+				m := map[float64]signed{}
+				m[math.NaN()] = signed{N: -1}
+				m[math.NaN()] = signed{N: -2}
+
+				return m
+			},
+			want: []string{"$.NaN.n: negative -1", "$.NaN.n: negative -2"},
+		},
+		"a map below such a key": {
+			value: func() any {
+				return map[any]map[string]signed{
+					1:   {"a": {N: -1}},
+					"1": {"a": {N: -2}},
+				}
+			},
+			want: []string{"$.1.a.n: negative -1", "$.1.a.n: negative -2"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// The map iterates in a new order on each walk.
+			for range 20 {
+				err := niceyaml.SelfValidateValue(t.Context(), tc.value())
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+
+				var got []string
+
+				for _, child := range bound.Errors() {
+					require.ErrorIs(t, child.Unresolved(), niceyaml.ErrAmbiguousPath)
+
+					got = append(got, child.Error())
+				}
+
+				assert.Equal(t, tc.want, got)
+			}
+		})
+	}
+}
+
+func TestSelfValidateValue_Place(t *testing.T) {
+	t.Parallel()
+
+	// Each value stands under the request key of its document. The walk
+	// held no document, so Rebase and Bind place its errors there.
+	type request struct {
+		ByPort map[int]upstream `yaml:"by_port"`
+		ByAny  map[any]signed   `yaml:"by_any"`
+		Items  []upstream       `yaml:"items"`
+	}
+
+	tcs := map[string]struct {
+		input string
+		// The error through the Node of the value, which reads each key
+		// as the document spells it, when it differs from want.
+		through string
+		want    string
+		opts    []niceyaml.SourceOption
+		value   request
+		shared  bool
+	}{
+		"an element places at its line": {
+			input: "request:\n  items:\n    - url: http://x\n    - url: ftp://y\n",
+			value: request{Items: []upstream{{URL: "http://x"}, {URL: "ftp://y"}}},
+			want:  `app.yaml:4:12: $.request.items[1].url: url "ftp://y" is not http`,
+		},
+		"an element the document lacks places with no position": {
+			input: "request:\n  items:\n    - url: http://x\n",
+			value: request{Items: []upstream{{URL: "http://x"}, {URL: "ftp://y"}}},
+			want:  `app.yaml: $.request.items[1].url: url "ftp://y" is not http`,
+		},
+		"a key the document spells as the Go value places at its line": {
+			input: "request:\n  by_port:\n    16:\n      url: ftp://y\n",
+			value: request{ByPort: map[int]upstream{16: {URL: "ftp://y"}}},
+			want:  `app.yaml:4:12: $.request.by_port.16.url: url "ftp://y" is not http`,
+		},
+		"a key the document spells another way places at the key of its map": {
+			input:   "request:\n  by_port:\n    0x10:\n      url: ftp://y\n",
+			value:   request{ByPort: map[int]upstream{16: {URL: "ftp://y"}}},
+			want:    `app.yaml:2:3: $.request.by_port.16.url: url "ftp://y" is not http`,
+			through: `app.yaml:4:12: $.request.by_port.0x10.url: url "ftp://y" is not http`,
+		},
+		"keys that share a path place with no position": {
+			input: "request:\n  by_any:\n    1: {n: -1}\n    \"1\": {n: -2}\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			value: request{ByAny: map[any]signed{1: {N: -1}, "1": {N: -2}}},
+			want: stringtest.JoinLF(
+				"app.yaml: $.request.by_any.1.n: negative -1",
+				"app.yaml: $.request.by_any.1.n: negative -2",
+			),
+			shared: true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			opts := append([]niceyaml.SourceOption{niceyaml.WithName("app.yaml")}, tc.opts...)
+			doc := yamltest.FirstDocument(t, tc.input, opts...)
+			base := paths.Doc().Child("request")
+
+			err := niceyaml.SelfValidateValue(t.Context(), &tc.value)
+			require.Error(t, err)
+
+			placed := doc.Bind(niceyaml.Rebase(err, base))
+			require.EqualError(t, placed, tc.want)
+			assert.True(t, niceyaml.IsInvalid(placed))
+
+			for bound := range niceyaml.AllBindings(placed) {
+				assert.Same(t, doc.Source(), bound.Source())
+
+				if _, ok := bound.Path(); ok && tc.shared {
+					require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrAmbiguousPath)
+				}
+			}
+
+			// Placing leaves the result as it is, so it still names each
+			// path from the value.
+			assert.NotContains(t, err.Error(), "app.yaml")
+
+			through := yamltest.At(t, doc, base).SelfValidate(t.Context(), &tc.value)
+			require.EqualError(t, through, cmp.Or(tc.through, tc.want))
+		})
+	}
+}
+
+func TestSelfValidateValue_Validate(t *testing.T) {
+	t.Parallel()
+
+	// A decode validates nothing below a type that decodes itself, so
+	// the Validate of pool walks its upstreams. That walk holds no
+	// document, and the decode places what it returns at the pool.
+	type config struct {
+		Pool  *pool  `yaml:"pool"`
+		Pools []pool `yaml:"pools"`
+	}
+
+	tcs := map[string]struct {
+		input string
+		err   string
+	}{
+		"upstreams that pass": {
+			input: stringtest.Input(`
+				pool:
+				  upstreams:
+				    - url: http://a
+			`),
+		},
+		"an upstream reports its line and the path from the root": {
+			input: stringtest.Input(`
+				pool:
+				  upstreams:
+				    - url: http://a
+				    - url: ftp://b
+			`),
+			err: `app.yaml:4:12: $.pool.upstreams[1].url: url "ftp://b" is not http`,
+		},
+		"each pool of a sequence reports under its own index": {
+			input: stringtest.Input(`
+				pools:
+				  - upstreams:
+				      - url: ftp://a
+				  - upstreams:
+				      - url: http://b
+				      - url: ftp://c
+			`),
+			err: stringtest.JoinLF(
+				`app.yaml:3:14: $.pools[0].upstreams[0].url: url "ftp://a" is not http`,
+				`app.yaml:6:14: $.pools[1].upstreams[1].url: url "ftp://c" is not http`,
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("app.yaml"))
+
+			var cfg config
+
+			err := doc.DecodeInto(t.Context(), &cfg)
+			if tc.err == "" {
+				require.NoError(t, err)
+
+				return
+			}
+
+			require.EqualError(t, err, tc.err)
+			assert.True(t, niceyaml.IsInvalid(err))
+
+			// The walk on its own reports what the decode reports.
+			validated := doc.SelfValidate(t.Context(), &cfg)
+			require.EqualError(t, validated, tc.err)
+		})
+	}
+}
+
 // selfDecodingBytes decodes itself from the YAML bytes, so its fields
 // need not mirror the document. It fills Inner with hours that close
 // before they open, which the walk must not report.
@@ -3816,4 +4225,33 @@ type gradedConfig struct {
 	ByGrade  map[grade]upstream   `yaml:"by_grade"`
 	ByWeight map[float64]upstream `yaml:"by_weight"`
 	ByAny    map[any]upstream     `yaml:"by_any"`
+}
+
+// pool decodes itself, so a decode validates nothing below it. Its
+// Validate walks the upstreams it holds, as a decode walks the values
+// below a type that decodes field by field.
+type pool struct {
+	Upstreams []upstream
+}
+
+func (p *pool) UnmarshalYAML(unmarshal func(any) error) error {
+	var raw struct {
+		Upstreams []upstream `yaml:"upstreams"`
+	}
+
+	err := unmarshal(&raw)
+	if err != nil {
+		return err
+	}
+
+	p.Upstreams = raw.Upstreams
+
+	return nil
+}
+
+func (p *pool) Validate() error {
+	err := niceyaml.SelfValidateValue(context.Background(), p.Upstreams)
+
+	//nolint:wrapcheck // The decode places the error as it is.
+	return niceyaml.Rebase(err, paths.Current().Child("upstreams"))
 }

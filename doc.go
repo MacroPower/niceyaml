@@ -422,6 +422,8 @@
 // document, so the text names each path, as in "$.close: closes before
 // it opens". A caller that later learns where the value stands in a
 // document places the same error there with Rebase and [Node.Bind].
+// [SelfValidateValue] runs the Validate of every value below such a
+// value, as a decode does, and binds the result the same way.
 //
 // A value the go-yaml decoder rejects reports the same way. The error
 // matches [ErrDecode] and carries the path of the value, and its

@@ -124,6 +124,78 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 	return bindTree(walked, binder{src: n.source, node: n, locate: true})
 }
 
+// SelfValidateValue runs the self-validation step of [Node.DecodeInto]
+// on a value that came from no document, such as a value the program
+// built or the body of a request. The step walks v and calls Validate on
+// every value in it that implements [SelfValidator], as
+// [Node.SelfValidate] walks a value through its document.
+// SelfValidateValue binds the result as [BindValue] binds an error, so
+// the text names each failing path from v, as in
+// "$.servers[1].port: port is required". It returns nil when nothing
+// failed.
+//
+// The result stands in no document, so a document can still place it,
+// as BindValue describes. A decode places the result a Validate returns
+// at the value that owns the method. A Validate holds no [Node], so one
+// that validates the values below its own value calls
+// SelfValidateValue. A type that decodes itself through an
+// UnmarshalYAML method needs such a Validate, since a decode validates
+// nothing below that type:
+//
+//	func (p *Pool) Validate() error {
+//		err := niceyaml.SelfValidateValue(context.Background(), p.Servers)
+//
+//		return niceyaml.Rebase(err, paths.Current().Child("servers"))
+//	}
+//
+// A decode of a document that holds the Pool under pool then reports
+// "app.yaml:4:7: $.pool.servers[1].port: port is required". A Validate
+// must not pass its own receiver, since the walk then calls that
+// Validate again, without end.
+//
+// The walk names each value as a decode of YAML into v names it. A
+// field takes its yaml tag, its json tag when it has no yaml tag, and
+// its lowercased name when it has neither. A struct embedded with no
+// inline option is such a field, under the lowercased name of its type.
+// A value that another format decoded, such as a JSON body, may thus
+// report paths that its own keys do not spell. A field that go-yaml
+// never decodes does not validate, as Node.SelfValidate describes.
+//
+// No document spells the key of a map entry, so each key takes the text
+// of its Go value. A document that spells a key another way, such as
+// 0x10 for 16, holds no entry under that text, so an error below the
+// entry binds at the key of the map, as [Rebase] describes. A caller
+// that holds the document therefore validates through the Node of the
+// value, which reads each key as the document spells it:
+//
+//	request, err := doc.At(paths.Doc().Child("request"))
+//	if err != nil {
+//		return err
+//	}
+//
+//	return request.SelfValidate(ctx, &cfg.Request)
+//
+// Several keys of one map that share a path, such as 1 and "1" in a
+// map[any]T, name no single entry. An error under such a key keeps its
+// path and binds with no position in every document that places it, for
+// the reason [ErrAmbiguousPath].
+//
+// Any v works but nil and a nil pointer, which each return an error
+// wrapping [ErrSelfValidateTarget], bound to no document too. The walk
+// stops once ctx ends, or once a Validate returns the error of a
+// context that ended, and SelfValidateValue then returns that error
+// alone, as [SelfValidator] describes. SelfValidateValue takes no
+// [DecodeOption], since the walk reads those options to decode the keys
+// of a document.
+func SelfValidateValue(ctx context.Context, v any) error {
+	err := checkSelfValidateTarget(v)
+	if err != nil {
+		return BindValue(err)
+	}
+
+	return BindValue(walkSelfValidators(ctx, v, nil, nil))
+}
+
 // checkSelfValidateTarget returns [ErrSelfValidateTarget] when v is nil
 // or a nil pointer, which holds no value to validate. A pointer that v
 // points to may be nil, as a decode of a null leaves it.
@@ -147,7 +219,9 @@ func checkSelfValidateTarget(v any) error {
 // each map key with, and decodes those keys with ctx and opts, as the
 // decode of v did. It also reads n to bind the errors under a path that
 // names several keys. A map the document does not hold at its path has
-// no node there, so its keys take the text of their Go values.
+// no node there, so its keys take the text of their Go values. A nil n
+// stands for no document, as [SelfValidateValue] walks a value, so every
+// key takes that text and the walk reads no option.
 //
 // The walk returns what the values report with the paths in each error
 // rebased under the path of the value in the document. That path is the
@@ -969,7 +1043,7 @@ func (w *selfWalker) walkEntries(at place, entries []mapEntry, ambiguous bool) b
 		errs := w.errs[start:]
 		if ambiguous {
 			for i, err := range errs {
-				errs[i] = bindTree(err, binder{src: w.node.source, node: w.node})
+				errs[i] = w.bind(err)
 			}
 		}
 
@@ -990,6 +1064,18 @@ func (w *selfWalker) walkEntries(at place, entries []mapEntry, ambiguous bool) b
 	}
 
 	return ok
+}
+
+// bind binds err where the walk binds an error before it returns: through
+// the [Node] of the walk, as [Node.Bind] binds it at the root of a
+// document, or to no document when the walk has no Node, as [BindValue]
+// binds it.
+func (w *selfWalker) bind(err error) error {
+	if w.node == nil {
+		return BindValue(err)
+	}
+
+	return bindTree(err, binder{src: w.node.source, node: w.node})
 }
 
 // structFields holds the fields of a struct type that the walk reads, as
@@ -1419,8 +1505,13 @@ func (w *selfWalker) keyNames(node ast.Node, t reflect.Type) map[any]string {
 // value the walk starts at, whose node lies at the path of the [Node] the
 // walk validates. The node of any other step resolves from the node of
 // the step before, the first time the walk asks for it, and the step
-// keeps it, so no step resolves twice.
+// keeps it, so no step resolves twice. A walk through no document holds
+// no node for any value.
 func (w *selfWalker) nodeOf(s *step) ast.Node {
+	if w.node == nil {
+		return nil
+	}
+
 	if s == nil {
 		s = &w.start
 	}
