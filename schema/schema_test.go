@@ -331,6 +331,15 @@ func TestSchema_UnresolvableRef(t *testing.T) {
 				require.ErrorIs(t, err, tc.err)
 			}
 
+			// The failure states the error of the resolver, so the tree
+			// shows the two in one row.
+			assert.Equal(t, 1, strings.Count(niceyaml.FormatError(err, 0), tc.want))
+
+			var failure *jsonschema.ValidationError
+
+			require.ErrorAs(t, err, &failure)
+			assert.Equal(t, jsonschema.KeywordRef, failure.Keyword)
+
 			var nerr *niceyaml.Error
 
 			require.NotErrorAs(t, err, &nerr)

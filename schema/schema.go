@@ -564,12 +564,12 @@ func (s *Schema) validate(ctx context.Context, data any, n *niceyaml.Node) error
 }
 
 // unresolvedRefs returns the failures in the tree of ve that report a $ref
-// or $dynamicRef the validator could not resolve. Either a resolver
-// returned an error, which wraps [jsonschema.ErrRefResolve], or no
-// resolver served the reference, which the message names. A reference
-// keyword that is itself a leaf for any other reason names a target that
-// allows nothing, such as false or {"not": {}}, so its failure is the
-// document's and stays a violation.
+// or $dynamicRef the validator could not resolve, each as an
+// [unresolvedRefError]. Either a resolver returned an error, which wraps
+// [jsonschema.ErrRefResolve], or no resolver served the reference, which
+// the message names. A reference keyword that is itself a leaf for any
+// other reason names a target that allows nothing, such as false or
+// {"not": {}}, so its failure is the document's and stays a violation.
 func unresolvedRefs(ve *jsonschema.ValidationError) []error {
 	var errs []error
 
@@ -577,12 +577,51 @@ func unresolvedRefs(ve *jsonschema.ValidationError) []error {
 		switch leaf.Keyword {
 		case jsonschema.KeywordRef, jsonschema.KeywordDynamicRef:
 			if errors.Is(leaf, jsonschema.ErrRefResolve) || strings.HasPrefix(leaf.Message, "cannot resolve ") {
-				errs = append(errs, leaf)
+				errs = append(errs, unresolvedRefError{leaf: leaf})
 			}
 		}
 	}
 
 	return errs
+}
+
+// unresolvedRefError is the failure of a $ref or $dynamicRef the validator
+// could not resolve. Its message is the message of the failure, which
+// states the error of the resolver when one returned an error. The
+// failure unwraps to a list that holds that error, and an error tree
+// gives each error of such a list a row of its own, so the tree would
+// show the error of the resolver twice. An unresolvedRefError unwraps to
+// that error alone, as a wrapper from [fmt.Errorf] does, so the tree
+// shows the failure in one row. [errors.As] still finds the
+// [*jsonschema.ValidationError].
+type unresolvedRefError struct {
+	leaf *jsonschema.ValidationError
+}
+
+func (e unresolvedRefError) Error() string {
+	return e.leaf.Error()
+}
+
+// Unwrap returns the error of the resolver, or nil when no resolver
+// served the reference. The failure of a reference keyword that is a leaf
+// has no causes, so it holds one error at most.
+func (e unresolvedRefError) Unwrap() error {
+	if attached := e.leaf.Unwrap(); len(attached) > 0 {
+		return attached[0]
+	}
+
+	return nil
+}
+
+// As sets target to the failure when target is a
+// [*jsonschema.ValidationError] pointer.
+func (e unresolvedRefError) As(target any) bool {
+	ve, ok := target.(**jsonschema.ValidationError)
+	if ok {
+		*ve = e.leaf
+	}
+
+	return ok
 }
 
 // rootOf returns the tree of n, or nil for no node.
