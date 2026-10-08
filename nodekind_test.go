@@ -212,8 +212,7 @@ func TestNode_Kind(t *testing.T) {
 	t.Run("each document", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := niceyaml.NewSourceFromString("a: 1\n---\n- b\n---\nc\n---\n").Documents()
-		require.NoError(t, err)
+		docs := niceyaml.NewSourceFromString("a: 1\n---\n- b\n---\nc\n---\n").AllDocuments()
 
 		got := make([]niceyaml.NodeKind, 0, len(docs))
 		for _, doc := range docs {
@@ -392,7 +391,7 @@ func TestNode_IsEmpty(t *testing.T) {
 	t.Run("each document", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := niceyaml.NewSourceFromString(stringtest.JoinLF(
+		docs := niceyaml.NewSourceFromString(stringtest.JoinLF(
 			"a: 1",
 			"---",
 			"# Source: chart/templates/empty.yaml",
@@ -403,8 +402,7 @@ func TestNode_IsEmpty(t *testing.T) {
 			"b: 2",
 			"---",
 			"",
-		)).Documents()
-		require.NoError(t, err)
+		)).AllDocuments()
 
 		got := make([]bool, 0, len(docs))
 		for _, doc := range docs {

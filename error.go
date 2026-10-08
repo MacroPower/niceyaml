@@ -32,9 +32,10 @@ var (
 	ErrNoLocation = errors.New("no location provided")
 
 	// ErrMultipleDocuments indicates a [Source] that holds more than one YAML
-	// document where one was expected. [Source.Document] returns it,
-	// located at the second document. The document is at fault for it, as
-	// [IsInvalid] describes.
+	// document where one was expected, among the documents
+	// [Source.Documents] returns. [Source.Document] returns it, located at
+	// the second of them. The document is at fault for it, as [IsInvalid]
+	// describes.
 	ErrMultipleDocuments = errors.New("multiple documents in source")
 
 	// ErrDecodeTarget indicates the value given to [Node.DecodeInto] or
@@ -2476,7 +2477,9 @@ func suffixed(s string) string {
 // position says it for every other error. The label is empty for a
 // binding that resolved a location, for one bound to no Node, and for
 // one in a source that holds a single document, which needs no telling
-// apart.
+// apart. The label counts every document of the file, as
+// [Source.AllDocuments] returns them, so the number is the place of the
+// document in the file.
 func (e *SourceError) documentLabel() string {
 	if e.locErr == nil || e.node == nil {
 		return ""
@@ -3042,6 +3045,9 @@ func (e *SourceError) Details() []*SourceError {
 // which document of the file such an error is about. In a source that
 // holds more than one document, the document of the [Node] it is bound to
 // therefore follows the name, counted from 1, as "name: document 3: msg".
+// The count takes in every document [Source.AllDocuments] returns, an
+// empty one included, so the number is the place of the document in the
+// file.
 // A source with no name leads with the document, as "document 3: msg". An
 // error bound to no Node, such as one [Source.Bind] binds with no
 // location, names no document. The message comes back as it is when the

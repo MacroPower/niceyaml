@@ -1046,8 +1046,7 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 			source, err := niceyaml.NewSourceFromFile(yamlPath)
 			require.NoError(t, err)
 
-			docs, err := source.Documents()
-			require.NoError(t, err)
+			docs := source.AllDocuments()
 			require.Len(t, docs, len(tc.want))
 
 			reg := schema.NewRegistry(schema.WithResolvers(

@@ -150,12 +150,59 @@ func TestSource_Document(t *testing.T) {
 		assert.Equal(t, "3:1: multiple documents in source: 2 documents", err.Error())
 	})
 
-	t.Run("rejects several documents at a header that follows another", func(t *testing.T) {
+	t.Run("returns the document with content beside the empty ones", func(t *testing.T) {
 		t.Parallel()
 
-		// The first header holds an empty document, so the second header
-		// starts another one.
+		tcs := map[string]struct {
+			input string
+			// The index in the file of the document Document returns.
+			want int
+		}{
+			"trailing header": {
+				input: "b: 2\n---\n",
+				want:  0,
+			},
+			"comment below a trailing header": {
+				input: "b: 2\n---\n# Source: t.yaml\n",
+				want:  0,
+			},
+			// The first header holds an empty document, so the second
+			// header starts another one.
+			"header that follows another": {
+				input: "---\n---\nb: 2\n",
+				want:  1,
+			},
+			"empty documents on both sides": {
+				input: "--- # head\n---\nb: 2\n---\n---\n",
+				want:  1,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				source := niceyaml.NewSourceFromString(tc.input)
+
+				doc, err := source.Document()
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, doc.DocumentIndex())
+				assert.Same(t, source.AllDocuments()[tc.want], doc)
+
+				got, err := source.Decode[map[string]int](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, map[string]int{"b": 2}, got)
+			})
+		}
+	})
+
+	t.Run("rejects several documents past an empty one between them", func(t *testing.T) {
+		t.Parallel()
+
+		// The empty document between the two does not count, and the
+		// error points at the header of the second document with content.
 		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			a: 1
 			---
 			---
 			b: 2
@@ -163,7 +210,23 @@ func TestSource_Document(t *testing.T) {
 
 		_, err := source.Document()
 		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
-		assert.Equal(t, "2:1: multiple documents in source: 2 documents", err.Error())
+		assert.Equal(t, "3:1: multiple documents in source: 2 documents", err.Error())
+	})
+
+	t.Run("rejects several empty documents", func(t *testing.T) {
+		t.Parallel()
+
+		// A file of empty documents alone keeps each of them.
+		source := niceyaml.NewSourceFromString(stringtest.Input(`
+			---
+			# a
+			---
+			# b
+		`))
+
+		_, err := source.Document()
+		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
+		assert.Equal(t, "3:1: multiple documents in source: 2 documents", err.Error())
 	})
 
 	t.Run("rejects several documents past the comments above the second", func(t *testing.T) {
@@ -1755,8 +1818,12 @@ func TestDocument_Preamble(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			docs, err := niceyaml.NewSourceFromString(tc.input).Documents()
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			_, err := source.File()
 			require.NoError(t, err)
+
+			docs := source.AllDocuments()
 			require.Len(t, docs, len(tc.want))
 
 			for i, d := range docs {
@@ -1885,8 +1952,10 @@ func TestDocument_Span(t *testing.T) {
 
 			source := niceyaml.NewSourceFromString(tc.input)
 
-			docs, err := source.Documents()
+			_, err := source.File()
 			require.NoError(t, err)
+
+			docs := source.AllDocuments()
 			require.Len(t, docs, len(tc.want))
 
 			got := make([]position.Span, 0, len(docs))
@@ -2230,8 +2299,7 @@ func TestDocument_Node(t *testing.T) {
 
 		assert.Nil(t, yamltest.FirstDocument(t, "---\n  \n").AST())
 
-		docs, err := niceyaml.NewSourceFromString("a: 1\n---\n  \n").Documents()
-		require.NoError(t, err)
+		docs := niceyaml.NewSourceFromString("a: 1\n---\n  \n").AllDocuments()
 		require.Len(t, docs, 2)
 		assert.Nil(t, docs[1].AST())
 	})
@@ -3393,8 +3461,7 @@ func TestDocument_Tokens(t *testing.T) {
 			b: 2
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		d := source.AllDocuments()
 		require.Len(t, d, 2)
 
 		first := d[0].Tokens()
@@ -3426,12 +3493,10 @@ func TestDocument_Tokens(t *testing.T) {
 			---
 			c: 3
 		`))
-		d, err := source.Documents()
-		require.NoError(t, err)
 
 		var got []map[string]int
 
-		for _, dd := range d {
+		for _, dd := range source.AllDocuments() {
 			v, err := dd.Decode[map[string]int](t.Context())
 			require.NoError(t, err)
 
@@ -3451,8 +3516,7 @@ func TestDocument_Tokens(t *testing.T) {
 			---
 			port: http
 		`))
-		d, err := source.Documents()
-		require.NoError(t, err)
+		d := source.AllDocuments()
 		require.Len(t, d, 2)
 
 		got, err := d[1].Decode[map[string]string](t.Context())
@@ -5739,13 +5803,12 @@ func TestDocument_DecodeInto(t *testing.T) {
 		}
 	})
 
-	t.Run("decodes each document of a stream with a comment-only document", func(t *testing.T) {
+	t.Run("decodes every document of a stream with a comment-only document", func(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("a: 1\n---\n# placeholder\n---\nb: 2\n")
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.AllDocuments()
 		require.Len(t, docs, 3)
 
 		want := []map[string]int{{"a": 1}, nil, {"b": 2}}

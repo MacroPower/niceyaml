@@ -5756,8 +5756,7 @@ func TestPath_Matches_RecursiveAll_Errors(t *testing.T) {
 func emptyDocument(t *testing.T, input string) *ast.DocumentNode {
 	t.Helper()
 
-	docs, err := niceyaml.NewSourceFromString(input).Documents()
-	require.NoError(t, err)
+	docs := niceyaml.NewSourceFromString(input).AllDocuments()
 	require.NotEmpty(t, docs)
 
 	node := docs[len(docs)-1].DocumentAST()
@@ -5811,8 +5810,7 @@ func TestPath_EmptyDocument(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				docs, err := niceyaml.NewSourceFromString(tc.input).Documents()
-				require.NoError(t, err)
+				docs := niceyaml.NewSourceFromString(tc.input).AllDocuments()
 				require.NotEmpty(t, docs)
 
 				doc := docs[len(docs)-1].DocumentAST()

@@ -11,7 +11,9 @@ import (
 
 // FirstDocument creates the root [*niceyaml.Node] of the first document
 // of a YAML input for testing, from a [*niceyaml.Source] created with
-// opts, such as [niceyaml.WithReferences].
+// opts, such as [niceyaml.WithReferences]. It reads the documents
+// [niceyaml.Source.Documents] returns, which leaves out an empty document
+// beside one with content.
 //
 // If the input contains no documents, the test fails.
 func FirstDocument(tb testing.TB, input string, opts ...niceyaml.SourceOption) *niceyaml.Node {

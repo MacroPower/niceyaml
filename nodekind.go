@@ -98,9 +98,12 @@ func (n *Node) Kind() NodeKind {
 //
 // Every document validates and decodes, an empty one included. A file
 // of several documents often holds empty ones. A trailing "---" leaves
-// one, and so does a Helm template that renders to a comment alone. A
-// loop that reads the documents with content passes over the ones
-// IsEmpty reports:
+// one, and so does a Helm template that renders to a comment alone.
+// [Source.Documents] leaves those out of a file that holds a document
+// with content, and [Source.AllDocuments] returns them. A file with no
+// content holds empty documents alone, so Documents returns them. A loop
+// that reads the documents with content passes over the ones IsEmpty
+// reports:
 //
 //	for _, doc := range docs {
 //		if doc.IsEmpty() {
@@ -111,9 +114,8 @@ func (n *Node) Kind() NodeKind {
 //		// ...
 //	}
 //
-// [Source.ValidateDocuments] passes over such a document in a file that
-// holds a document with content. [SkipEmpty] wraps a [Validator] so that
-// it passes one wherever it runs, such as in a decode.
+// [SkipEmpty] wraps a [Validator] so that it passes an empty document
+// wherever it runs, such as in a decode.
 func (n *Node) IsEmpty() bool {
 	if n == nil || n.doc.err != nil || !n.base.IsRoot() {
 		return false

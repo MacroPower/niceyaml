@@ -591,6 +591,25 @@ func TestSourceError_Error_Document(t *testing.T) {
 		require.EqualError(t, yamltest.Bind(t, source, errors.New("plain")), "m.yaml: plain")
 	})
 
+	t.Run("a document below an empty one keeps its place in the file", func(t *testing.T) {
+		t.Parallel()
+
+		// The source holds one document for a decode, and the message
+		// counts the empty document above it.
+		source := niceyaml.NewSourceFromString("---\n---\nkind: Wat\n", niceyaml.WithName("m.yaml"))
+
+		err := yamltest.Bind(t, source, errors.New("plain"))
+		require.EqualError(t, err, "m.yaml: document 2: plain")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+
+		index, ok := bound.DocumentIndex()
+		require.True(t, ok)
+		assert.Equal(t, 1, index)
+	})
+
 	t.Run("a source with no name leads with the document", func(t *testing.T) {
 		t.Parallel()
 
@@ -2748,8 +2767,7 @@ func TestSourceError_EmptyDocument(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			docs, err := niceyaml.NewSourceFromString(tc.input).Documents()
-			require.NoError(t, err)
+			docs := niceyaml.NewSourceFromString(tc.input).AllDocuments()
 			require.Len(t, docs, 2)
 
 			bound := docs[1].Bind(niceyaml.NewError("required property 'a' missing", niceyaml.AtPath(paths.Current())))

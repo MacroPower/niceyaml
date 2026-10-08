@@ -28,8 +28,9 @@ import (
 // documents. It holds the tokens lexed from the text, the [*ast.File]
 // they parse into, and the settings for parsing and for reporting
 // errors. [Source.Documents] returns the root [*Node] of each document in
-// the file, and [Source.Document] returns the root of the one document of
-// a file that holds one, which is where decoding and validation live.
+// the file but the empty ones a separator leaves, and [Source.Document]
+// returns the root of the one document of a file that holds one, which is
+// where decoding and validation live.
 //
 // Source separates two concerns. Parsing lives on Source itself, where [Source.File]
 // lazily parses the AST and [Source.Documents] builds the documents. Every error they
@@ -99,6 +100,9 @@ type Source struct {
 	layers     *layering
 	docs       []*Node
 	decodeOpts []yaml.DecodeOption
+	// Holds the documents among docs that [Source.Documents] returns, as
+	// [pickContentDocuments] picks them.
+	content []*Node
 	sourceConfig
 	streamOnce       sync.Once
 	fileOnce         sync.Once
@@ -617,12 +621,30 @@ func (s *Source) Tokens() token.Tokens {
 // document that opens with a "---" header and holds only comments is an
 // explicit empty document and stays one.
 //
+// A file of several documents often holds empty ones, which
+// [Node.IsEmpty] reports, an explicit one included. A trailing "---"
+// leaves one, as in `name: x\n---\n`, and so does a Helm template that
+// renders to a comment alone. Documents leaves out each empty document of
+// a file that holds a document with content, so a loop over the slice
+// decodes and validates the documents with content. [Source.Document],
+// [Source.Decode], and [Source.ValidateDocuments] leave the same
+// documents out, and so does [Source.Bind] where it resolves a path, so
+// `name: x\n---\n` holds one document for each of them.
+// [Source.AllDocuments] returns the empty documents too, for a caller
+// that renders or formats the file. [Node.DocumentIndex] counts them as
+// well, so a document below an empty one has a DocumentIndex larger than
+// its index in the slice Documents returns.
+//
 // Every Source holds at least one document. An empty file, a file of
 // whitespace or comments alone, and a stream of "..." markers alone each
 // hold one empty document, which decodes to the zero value. The YAML spec
 // finds no document in a stream of markers alone. Documents departs from
-// it on purpose, so such a file reads as an empty file does.
-// [Node.IsEmpty] reports each empty document, an explicit one included.
+// it on purpose, so such a file reads as an empty file does. A file of
+// empty documents alone, such as `---\n---\n`, keeps each of them. A loop
+// over the documents of a file with no content therefore meets an empty
+// document. A schema that wants a mapping rejects that document, and a
+// decode with no such schema returns the zero value for it. A caller that
+// wants neither passes over the documents IsEmpty reports.
 //
 // It parses the source and builds each Node once, so every call returns
 // the same pointers. The slice itself is a copy, so reordering it reaches
@@ -633,13 +655,13 @@ func (s *Source) Documents() ([]*Node, error) {
 		return nil, err
 	}
 
-	return slices.Clone(s.documents()), nil
+	return slices.Clone(s.contentDocuments()), nil
 }
 
-// AllDocuments returns the root [*Node] of each YAML document of this
-// [Source], in file order, whether the document parsed or not. It serves
-// a caller that renders, diffs, or reports each document, and it returns
-// no error:
+// AllDocuments returns the root [*Node] of every YAML document of this
+// [Source], in file order, whether the document parsed or not and whether
+// it holds content or not. It serves a caller that renders, diffs, or
+// reports each document, and it returns no error:
 //
 //	for _, doc := range source.AllDocuments() {
 //		if err := doc.Err(); err != nil {
@@ -666,20 +688,24 @@ func (s *Source) Documents() ([]*Node, error) {
 // collects the error of each document holds it twice. The error is bound
 // to the one of the two that holds its location, which
 // [SourceError.Document] returns whichever of them returned it. A caller
-// that validates every document calls [Source.ValidateDocuments], which
-// runs that loop and reports a shared error once:
+// that validates the documents of a file calls
+// [Source.ValidateDocuments], which runs that loop without the empty
+// documents [Source.Documents] leaves out and reports a shared error
+// once:
 //
 //	err := source.ValidateDocuments(ctx, reg)
 //
-// AllDocuments divides the file into documents as [Source.Documents]
-// describes, and it returns the Nodes Documents returns for a file with
-// no syntax error. The slice itself is a copy, so reordering it reaches
-// nothing.
+// AllDocuments divides the file into documents as Source.Documents
+// describes, and it returns the empty documents Documents leaves out. The
+// Node at index i is the one whose [Node.DocumentIndex] is i. For a file
+// with no syntax error and no empty document beside one with content,
+// AllDocuments returns the Nodes Documents returns. The slice itself is a
+// copy, so reordering it reaches nothing.
 func (s *Source) AllDocuments() []*Node {
 	return slices.Clone(s.documents())
 }
 
-// ValidateDocuments validates every document of the Source in file order
+// ValidateDocuments validates the documents of the Source in file order
 // with v and joins what the documents return. One call thus reports each
 // syntax error of a file that holds several documents, beside what v
 // reports for each document that parsed:
@@ -701,21 +727,24 @@ func (s *Source) AllDocuments() []*Node {
 //	err := source.ValidateDocuments(ctx, niceyaml.MultiValidator(schema, names))
 //	err := source.ValidateDocuments(ctx, niceyaml.ChainValidator(schema, refs))
 //
-// A file of several documents often holds empty ones, which
-// [Node.IsEmpty] reports. A trailing "---" leaves one, as in
-// `name: x\n---\n`, and so does a Helm template that renders to a comment
-// alone. ValidateDocuments passes over an empty document when the file
-// holds a document that is not empty, so v runs on the documents with
-// content. A file that holds no other document validates each empty one,
-// so a schema that wants a mapping still rejects an empty file. A caller
-// whose file may be empty as a whole wraps its validator in [SkipEmpty],
-// which takes either composition:
+// ValidateDocuments leaves out the empty documents [Source.Documents]
+// leaves out, which are the ones [Node.IsEmpty] reports in a file that
+// holds a document that is not empty. A trailing "---" leaves an empty
+// document, as in `name: x\n---\n`, and so does a Helm template that
+// renders to a comment alone, so v runs on the documents with content.
+// For a file with no syntax error, the result thus holds what a loop that
+// calls [Node.Validate] on each document Documents returns collects. A
+// document that did not parse is not empty. A file that holds empty
+// documents alone validates each of them, so a schema that wants a
+// mapping still rejects an empty file. A caller whose file may be empty
+// as a whole wraps its validator in [SkipEmpty], which takes either
+// composition:
 //
 //	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(niceyaml.MultiValidator(schema, names)))
 //
 // A [Validator] that reads the comments of a document, as a schema
 // directive does, does not run on a document of comments alone that
-// ValidateDocuments passes over.
+// ValidateDocuments leaves out.
 //
 // A document that did not parse reports its syntax error, as
 // Node.Validate returns it. Two documents that parse together share one
@@ -731,9 +760,10 @@ func (s *Source) AllDocuments() []*Node {
 // thus returns its error. Only the ctx passed in stops the walk, so a
 // validator that reports a deadline of its own fails its document alone.
 //
-// [Source.Document] and [Source.Decode] need a Source of one document,
-// where ValidateDocuments takes any number, so a file it passes can still
-// fail Source.Decode.
+// [Source.Document] and [Source.Decode] need a Source that holds one of
+// those documents, where ValidateDocuments takes any number. A file of
+// two documents with content that ValidateDocuments passes therefore
+// fails Source.Decode with [ErrMultipleDocuments].
 func (s *Source) ValidateDocuments(ctx context.Context, v Validator) error {
 	var (
 		errs []error
@@ -742,22 +772,10 @@ func (s *Source) ValidateDocuments(ctx context.Context, v Validator) error {
 		prev error
 	)
 
-	docs := s.documents()
-
-	// An empty document beside one with content is what a separator left,
-	// so it passes. A file that holds empty documents alone validates each.
-	skipEmpty := slices.ContainsFunc(docs, func(doc *Node) bool { return !doc.IsEmpty() })
-
 	// Each document that did not parse reports its own syntax error.
-	for _, doc := range docs {
+	for _, doc := range s.contentDocuments() {
 		if ctx.Err() != nil {
 			break
-		}
-
-		if skipEmpty && doc.IsEmpty() {
-			prev = nil
-
-			continue
 		}
 
 		err := doc.Validate(ctx, v)
@@ -794,6 +812,29 @@ func (s *Source) documents() []*Node {
 	return s.docs
 }
 
+// contentDocuments returns the root [*Node] of each YAML document
+// [Source.Documents] describes, whether the file parsed or not, in the
+// slice the Source keeps rather than a copy, so a caller must not change
+// it.
+func (s *Source) contentDocuments() []*Node {
+	s.parseOnce()
+
+	return s.content
+}
+
+// pickContentDocuments returns the documents among docs that are not
+// empty, in file order, or docs itself when every one of them is empty.
+// An empty document beside one that is not empty is what a separator
+// left, and a file of empty documents alone keeps each of them. A document
+// that did not parse is not empty, as [Node.IsEmpty] reports it.
+func pickContentDocuments(docs []*Node) []*Node {
+	if !slices.ContainsFunc(docs, func(doc *Node) bool { return !doc.IsEmpty() }) {
+		return docs
+	}
+
+	return slices.DeleteFunc(slices.Clone(docs), (*Node).IsEmpty)
+}
+
 // Document returns the root [*Node] of a [Source] that holds a single
 // YAML document, for a caller that reads a configuration file in more
 // than one step, such as one that scopes a Node with [Node.At] or binds
@@ -814,13 +855,21 @@ func (s *Source) documents() []*Node {
 // and so does a file of "..." markers alone, as [Source.Documents]
 // describes.
 //
-// When the file holds more than one document, it returns an error wrapping
-// [ErrMultipleDocuments], bound to the Source. The error points at the
-// header of the second document, or at the first token of its content
-// when a "..." marker rather than a header opens it. A file with a
-// document that does not parse returns the error [Source.File] returns,
-// however many of its other documents parse. Use [Source.Documents] for a
-// file that may hold several.
+// Document counts the documents Source.Documents returns, which leaves
+// out each empty document of a file that holds a document with content.
+// A file that ends in "---" therefore holds a single document, and so
+// does one whose content sits below an empty document. Document returns
+// the document with content, and [Node.DocumentIndex] gives its place
+// among every document of the file.
+//
+// When the file holds more than one of those documents, it returns an
+// error wrapping [ErrMultipleDocuments], bound to the Source. The error
+// points at the header of the second of them, or at the first token of
+// its content when a "..." marker rather than a header opens it. A file
+// of several empty documents and no other returns that error too. A file
+// with a document that does not parse returns the error [Source.File]
+// returns, however many of its other documents parse. Use
+// [Source.Documents] for a file that may hold several.
 func (s *Source) Document() (*Node, error) {
 	// The parse bound each syntax error already, and binding the join of
 	// several anew would return another error than File does.
@@ -919,17 +968,18 @@ func (s *Source) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, er
 	return v, nil
 }
 
-// single returns the one document of the Source, or the reason it has
-// no single one, unbound: the error [Source.File] returns, or
-// [ErrMultipleDocuments] at the anchor of the second document. Every
-// Source holds at least one document, as [Source.Documents] describes.
+// single returns the one document of the Source among those
+// [Source.Documents] returns, or the reason it has no single one,
+// unbound: the error [Source.File] returns, or [ErrMultipleDocuments] at
+// the anchor of the second of them. Every Source holds at least one
+// document, as Source.Documents describes.
 func (s *Source) single() (*Node, error) {
 	_, err := s.File()
 	if err != nil {
 		return nil, err
 	}
 
-	docs := s.documents()
+	docs := s.contentDocuments()
 	if len(docs) > 1 {
 		return nil, Invalid(
 			fmt.Errorf("%w: %d documents", ErrMultipleDocuments, len(docs)),
@@ -1073,6 +1123,7 @@ func (s *Source) parseOnce() {
 		}
 
 		s.docs = newDocuments(s)
+		s.content = pickContentDocuments(s.docs)
 	})
 }
 
@@ -1959,6 +2010,10 @@ func startsBelow(tk, mark *token.Token) bool {
 //			return source.Bind(niceyaml.NewError("line exceeds 120 columns", niceyaml.AtRange(rng)))
 //		}
 //	}
+//
+// Every line of the file belongs to one of the documents
+// [Source.AllDocuments] returns, so the document may be an empty one
+// that [Source.Documents] leaves out.
 //
 // A path resolves in the one document of the source, the one
 // [Source.Document] returns, from its root whether it starts at `$` or

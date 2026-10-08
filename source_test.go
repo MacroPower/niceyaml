@@ -1725,10 +1725,7 @@ func TestSource_Parse(t *testing.T) {
 				file, err := source.File()
 				require.NoError(t, err)
 				assert.Len(t, file.Docs, tc.want)
-
-				docs, err := source.Documents()
-				require.NoError(t, err)
-				assert.Len(t, docs, tc.want)
+				assert.Len(t, source.AllDocuments(), tc.want)
 			})
 		}
 	})
@@ -2602,6 +2599,120 @@ func requireName(calls *atomic.Int32) niceyaml.Validator {
 	})
 }
 
+func TestSource_Documents_LeavesOutEmpty(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		// The index in the file of each document Documents returns.
+		want []int
+		// The number of documents AllDocuments returns.
+		all int
+	}{
+		"no empty document": {
+			input: "a: 1\n---\nb: 2\n",
+			want:  []int{0, 1},
+			all:   2,
+		},
+		"trailing header": {
+			input: "a: 1\n---\n",
+			want:  []int{0},
+			all:   2,
+		},
+		"comment below a trailing header": {
+			input: "a: 1\n---\n# Source: t.yaml\n",
+			want:  []int{0},
+			all:   2,
+		},
+		"header that follows another": {
+			input: "---\n---\nb: 2\n",
+			want:  []int{1},
+			all:   2,
+		},
+		"directive above an empty document": {
+			input: "%YAML 1.2\n---\n---\nb: 2\n",
+			want:  []int{1},
+			all:   2,
+		},
+		"empty document between two": {
+			input: "a: 1\n---\n---\nb: 2\n",
+			want:  []int{0, 2},
+			all:   3,
+		},
+		"empty documents on both sides": {
+			input: "--- # head\n---\na: 1\n---\n---\n",
+			want:  []int{1},
+			all:   4,
+		},
+		// A document that holds a value is not empty, whatever the value.
+		"explicit null": {
+			input: "a: 1\n--- ~\n",
+			want:  []int{0, 1},
+			all:   2,
+		},
+		"empty mapping": {
+			input: "a: 1\n---\n{}\n",
+			want:  []int{0, 1},
+			all:   2,
+		},
+		"empty string": {
+			input: "a: 1\n---\n\"\"\n",
+			want:  []int{0, 1},
+			all:   2,
+		},
+		// A file with no content keeps each of its documents.
+		"empty file": {
+			input: "",
+			want:  []int{0},
+			all:   1,
+		},
+		"comments alone": {
+			input: "# a\n",
+			want:  []int{0},
+			all:   1,
+		},
+		"header alone": {
+			input: "---\n",
+			want:  []int{0},
+			all:   1,
+		},
+		"headers alone": {
+			input: "---\n---\n",
+			want:  []int{0, 1},
+			all:   2,
+		},
+		"comments below headers alone": {
+			input: "---\n# a\n---\n# b\n",
+			want:  []int{0, 1},
+			all:   2,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			all := source.AllDocuments()
+			require.Len(t, all, tc.all)
+
+			docs, err := source.Documents()
+			require.NoError(t, err)
+
+			got := make([]int, 0, len(docs))
+			for _, doc := range docs {
+				got = append(got, doc.DocumentIndex())
+
+				// Documents hands out the Nodes AllDocuments does.
+				assert.Same(t, all[doc.DocumentIndex()], doc)
+			}
+
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 // bindingMessages returns the message of each binding in the tree of err,
 // in order.
 func bindingMessages(err error) []string {
@@ -2956,8 +3067,8 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 				"f.yaml: document 2: resolve $.kind: alias does not resolve: *nope has no anchor before it",
 			},
 		},
-		// The empty document still counts, so the one below it keeps its
-		// number.
+		// The message counts every document of the file, so the one below
+		// an empty document keeps its number.
 		"registry, document below an empty one": {
 			v:      registry,
 			input:  "kind: A\n---\n---\nkind: B\n",
@@ -2969,6 +3080,14 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 			input:  "kind: A\n---\nkind: [\n---\n---\nkind: B\n",
 			strict: []string{"f.yaml:3:7: " + unclosed, "f.yaml: document 4: " + noMatch},
 			want:   []string{"f.yaml:3:7: " + unclosed, "f.yaml: document 4: " + noMatch},
+		},
+		// A document that did not parse is not empty, so the empty one
+		// beside it passes.
+		"schema, empty document beside one that did not parse": {
+			v:      manifest,
+			input:  "kind: [\n---\n",
+			strict: []string{"f.yaml:1:7: " + unclosed},
+			want:   []string{"f.yaml:1:7: " + unclosed},
 		},
 		// The header parses together with the document above it, so both
 		// documents carry the one error, which the result holds once.
@@ -3002,12 +3121,75 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		})
 	}
 
-	t.Run("a loop over the documents validates the empty one", func(t *testing.T) {
+	type manifestKind struct {
+		Kind string `yaml:"kind"`
+	}
+
+	t.Run("agrees with a loop over the documents", func(t *testing.T) {
 		t.Parallel()
 
-		type manifestKind struct {
-			Kind string `yaml:"kind"`
+		files := map[string]struct {
+			input string
+			// The kind each document Documents returns decodes to.
+			want []string
+		}{
+			"trailing header":             {input: "kind: Pod\n---\n", want: []string{"Pod"}},
+			"comment after a manifest":    {input: "kind: A\n---\n# Source: t.yaml\n", want: []string{"A"}},
+			"chart output":                {input: helm, want: []string{"ConfigMap", "Service"}},
+			"document below an empty one": {input: "kind: A\n---\n---\nkind: B\n", want: []string{"A", "B"}},
+			"headers alone":               {input: "---\n---\n", want: []string{"", ""}},
+			"template that renders no content": {
+				input: "---\n# Source: demo/templates/ingress.yaml\n",
+				want:  []string{""},
+			},
+			"empty file": {input: "", want: []string{""}},
 		}
+
+		for name, v := range map[string]niceyaml.Validator{"schema": manifest, "registry": registry} {
+			for file, tc := range files {
+				t.Run(name+", "+file, func(t *testing.T) {
+					t.Parallel()
+
+					source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("f.yaml"))
+
+					docs, err := source.Documents()
+					require.NoError(t, err)
+
+					// A loop that validates each document reports what
+					// ValidateDocuments does, and a decode with the
+					// validator fails the documents the loop fails.
+					var (
+						errs  []error
+						kinds []string
+					)
+
+					for _, doc := range docs {
+						err := doc.Validate(t.Context(), v)
+						if err != nil {
+							errs = append(errs, err)
+						}
+
+						_, decodeErr := doc.Decode[manifestKind](t.Context(), niceyaml.WithValidator(v))
+						assert.Equal(t, err == nil, decodeErr == nil)
+
+						got, err := doc.Decode[manifestKind](t.Context())
+						require.NoError(t, err)
+
+						kinds = append(kinds, got.Kind)
+					}
+
+					assert.Equal(t, tc.want, kinds)
+					assert.Equal(t,
+						bindingMessages(source.ValidateDocuments(t.Context(), v)),
+						bindingMessages(errors.Join(errs...)),
+					)
+				})
+			}
+		}
+	})
+
+	t.Run("an empty document from AllDocuments runs the validator", func(t *testing.T) {
+		t.Parallel()
 
 		for name, v := range map[string]niceyaml.Validator{"schema": manifest, "registry": registry} {
 			t.Run(name, func(t *testing.T) {
@@ -3015,39 +3197,27 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 
 				source := niceyaml.NewSourceFromString("kind: A\n---\n# Source: t.yaml\n", niceyaml.WithName("f.yaml"))
 
-				docs, err := source.Documents()
-				require.NoError(t, err)
+				docs := source.AllDocuments()
 				require.Len(t, docs, 2)
+				require.True(t, docs[1].IsEmpty())
 
-				// Inside SkipEmpty, all three forms pass the file.
-				skip := niceyaml.SkipEmpty(v)
-
-				require.NoError(t, source.ValidateDocuments(t.Context(), skip))
-
-				var kinds []string
-
-				for _, doc := range docs {
-					require.NoError(t, doc.Validate(t.Context(), skip))
-
-					got, err := doc.Decode[manifestKind](t.Context(), niceyaml.WithValidator(skip))
-					require.NoError(t, err)
-
-					kinds = append(kinds, got.Kind)
-				}
-
-				assert.Equal(t, []string{"A", ""}, kinds)
-
-				// Alone, ValidateDocuments passes over the empty document,
-				// and a loop that validates or decodes each document fails
-				// it.
+				// ValidateDocuments leaves the empty document out, and
+				// the document itself fails v alone, in a decode too.
 				require.NoError(t, source.ValidateDocuments(t.Context(), v))
-				require.NoError(t, docs[0].Validate(t.Context(), v))
 
 				strict := docs[1].Validate(t.Context(), v)
 				require.Error(t, strict)
 
-				_, err = docs[1].Decode[manifestKind](t.Context(), niceyaml.WithValidator(v))
+				_, err := docs[1].Decode[manifestKind](t.Context(), niceyaml.WithValidator(v))
 				require.EqualError(t, err, strict.Error())
+
+				// Inside SkipEmpty it passes and decodes to the zero value.
+				skip := niceyaml.SkipEmpty(v)
+				require.NoError(t, docs[1].Validate(t.Context(), skip))
+
+				got, err := docs[1].Decode[manifestKind](t.Context(), niceyaml.WithValidator(skip))
+				require.NoError(t, err)
+				assert.Empty(t, got.Kind)
 			})
 		}
 	})
@@ -3952,6 +4122,30 @@ func TestSource_Bind(t *testing.T) {
 		), fmt.Sprintf("%+v", err))
 	})
 
+	t.Run("path error resolves in the one document beside an empty one", func(t *testing.T) {
+		t.Parallel()
+
+		// The empty documents do not count, so the path resolves in the
+		// document with content, wherever it sits in the file.
+		for input, want := range map[string]string{
+			"b: 2\n---\n":      "one.yaml:1:4: $.b: bad",
+			"---\n---\nb: 2\n": "one.yaml:3:4: $.b: bad",
+		} {
+			src := niceyaml.NewSourceFromString(input, niceyaml.WithName("one.yaml"))
+			err := src.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
+
+			doc, docErr := src.Document()
+			require.NoError(t, docErr)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+			assert.Equal(t, want, err.Error())
+			assert.Same(t, doc, bound.Document(), input)
+			require.NoError(t, bound.Unresolved(), input)
+		}
+	})
+
 	t.Run("path error in a stream of markers alone binds as in an empty file", func(t *testing.T) {
 		t.Parallel()
 
@@ -4101,8 +4295,9 @@ func TestSource_Bind_RoutesDocuments(t *testing.T) {
 
 			source := niceyaml.NewSourceFromString(tc.input)
 
-			docs, err := source.Documents()
-			require.NoError(t, err)
+			// A line of an empty document binds to that document, which
+			// Documents leaves out beside one with content.
+			docs := source.AllDocuments()
 
 			rng := position.NewRange(position.New(tc.line, 0), position.New(tc.line, 1))
 
@@ -4296,6 +4491,22 @@ func TestSource_Decode(t *testing.T) {
 		assert.Equal(t, config{Name: "default"}, cfg)
 	})
 
+	t.Run("decodes the one document beside an empty one", func(t *testing.T) {
+		t.Parallel()
+
+		for _, input := range []string{"name: a\n---\n", "---\n# head\n---\nname: a\n"} {
+			source := niceyaml.NewSourceFromString(input)
+
+			got, err := source.Decode[config](t.Context())
+			require.NoError(t, err, input)
+			assert.Equal(t, config{Name: "a"}, got, input)
+
+			cfg := config{Name: "default"}
+			require.NoError(t, source.DecodeInto(t.Context(), &cfg), input)
+			assert.Equal(t, config{Name: "a"}, cfg, input)
+		}
+	})
+
 	t.Run("several documents return the error Document returns", func(t *testing.T) {
 		t.Parallel()
 
@@ -4362,6 +4573,18 @@ func TestSource_SelfValidate(t *testing.T) {
 		},
 		"file that holds the value": {
 			source: "servers:\n  - port: 80\n  - {}\n",
+			name:   "app.yaml",
+			want:   "app.yaml:3:5: $.servers[1].port: port must be at least 1",
+			wantFormat: stringtest.JoinLF(
+				"app.yaml:3:5: $.servers[1].port: port must be at least 1",
+				"",
+				"   3 |   - {}",
+				"     |     ^",
+			),
+			located: true,
+		},
+		"file that holds the value above a trailing header": {
+			source: "servers:\n  - port: 80\n  - {}\n---\n",
 			name:   "app.yaml",
 			want:   "app.yaml:3:5: $.servers[1].port: port must be at least 1",
 			wantFormat: stringtest.JoinLF(

@@ -574,12 +574,13 @@ func (e reasonError) Unwrap() error {
 //	    return err
 //	}
 //
-// An empty document validates as any other, so the one a trailing "---"
-// leaves at the end of a file fails with ErrNoMatch when no resolver
-// applies to it. [niceyaml.Source.ValidateDocuments] passes over that
-// document in a file that holds a document with content.
-// [niceyaml.SkipEmpty] wraps the registry to pass an empty document
-// wherever the registry runs, such as on a file that is empty as a whole:
+// An empty document validates as any other, so it fails with ErrNoMatch
+// when no resolver applies to it. [niceyaml.Source.Documents] and
+// [niceyaml.Source.ValidateDocuments] leave out the empty documents of a
+// file that holds a document with content, such as the one a trailing
+// "---" leaves at the end of a file. [niceyaml.SkipEmpty] wraps the
+// registry to pass an empty document wherever the registry runs, such as
+// on a file that is empty as a whole:
 //
 //	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(reg))
 //

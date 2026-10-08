@@ -538,15 +538,16 @@ func ChainValidator(validators ...Validator) Validator {
 //
 // An empty document validates as any other, so a schema that wants a
 // mapping rejects it, and a registry that requires a schema finds none
-// for it. [Source.ValidateDocuments] passes over the empty documents of
-// a file that holds a document with content, and validates the one
-// document of an empty file. A caller whose file may be empty as a whole
-// wraps its validator:
+// for it. [Source.Documents] and [Source.ValidateDocuments] leave out the
+// empty documents of a file that holds a document with content, and keep
+// the one document of an empty file. A caller whose file may be empty as
+// a whole wraps its validator:
 //
 //	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(reg))
 //
-// So does a caller that validates each document itself, with
-// [Node.Validate], where every document runs the validator.
+// So does a caller that validates each document [Source.AllDocuments]
+// returns with [Node.Validate], where every empty document runs the
+// validator.
 //
 // A decode takes it the same way, so a configuration file that may be
 // empty decodes to the zero value:
@@ -1105,7 +1106,12 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 //		}
 //	}
 //
-// A source that holds one document hands its root out from
+// [Source.Documents] returns the documents of such a loop. It leaves out
+// the empty documents beside one with content, so the loop decodes the
+// documents with content. A file with no content holds an empty document,
+// which [Node.IsEmpty] reports. A validator that wants a mapping rejects
+// it, and a decode with no such validator returns the zero value. A
+// source that holds one document hands its root out from
 // [Source.Document].
 //
 // A Node from [Node.At] or [Node.Nodes] is scoped to the node a path
@@ -1699,7 +1705,11 @@ func (n *Node) Source() *Source {
 }
 
 // DocumentIndex returns the 0-indexed position within the file of the
-// document the Node belongs to. A Node from [Node.At] reports the index
+// document the Node belongs to. It counts every document of the file, an
+// empty one included, so it is the index of the root in the slice
+// [Source.AllDocuments] returns. [Source.Documents] leaves out the empty
+// documents beside one with content, so a root below one of them has a
+// smaller index in that slice. A Node from [Node.At] reports the index
 // of the document that holds it, and the index of the node itself within
 // a sequence is the Index of the selector [paths.Path.Last] gives for
 // [Node.Path]. The message of a bound error counts documents from 1, as

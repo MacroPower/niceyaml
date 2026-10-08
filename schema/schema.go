@@ -265,9 +265,11 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 //
 // A document that did not parse has no data to check, so Validate returns
 // the syntax error [niceyaml.Node.Err] returns for it, whatever the
-// schema accepts. An empty document, such as the one a trailing "---"
-// leaves, decodes to null, so a schema that wants a mapping rejects it.
-// [niceyaml.SkipEmpty] wraps the schema to pass such a document.
+// schema accepts. An empty document, such as an empty file, decodes to
+// null, so a schema that wants a mapping rejects it.
+// [niceyaml.Source.Documents] leaves out the empty document a trailing
+// "---" leaves beside one with content, and [niceyaml.SkipEmpty] wraps
+// the schema to pass an empty document wherever it runs.
 //
 // Holding the node lets Validate spell each key in a violation's path as
 // the source does, so a key the decoder respells, such as the hexadecimal
