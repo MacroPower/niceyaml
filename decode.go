@@ -289,18 +289,20 @@ type SelfValidator interface {
 // When the item is a Node of another source, the error names the wrong
 // file too, since it takes the source of the Node that binds it.
 //
-// Node.Validate binds for a validator that binds nothing, so a test that
-// runs a validator through it passes either way. A test of a validator
-// calls Validate itself, on a Node from Node.At, and compares the whole
-// message:
+// Node.Validate binds what a validator left unbound, so a test of a
+// validator calls Validate itself, on a Node from Node.At. It passes the
+// result to [go.jacobcolvin.com/niceyaml/niceyamltest.CheckBound] and
+// compares the whole message:
 //
 //	item, err := doc.At(paths.Doc().Child("items").Index(1))
 //	require.NoError(t, err)
 //
-//	require.EqualError(t, rule.Validate(ctx, item), "c.yaml:4:11: $.items[1].name: reserved name")
+//	err = rule.Validate(ctx, item)
+//	require.NoError(t, niceyamltest.CheckBound(err))
+//	require.EqualError(t, err, "c.yaml:4:11: $.items[1].name: reserved name")
 //
-// An error the validator left unbound reads "reserved name" there, with
-// no source and no path.
+// For an error the validator left unbound, CheckBound returns
+// `bound to no source: "reserved name"`.
 //
 // A path that a Node hands out, such as [Node.Path] of a Node from
 // [Node.Nodes], starts at `$`, so it names the same value through the
