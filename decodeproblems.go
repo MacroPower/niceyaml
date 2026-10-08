@@ -18,20 +18,20 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// bindDecodeProblems binds err, the rejection a decode of node into v
-// with cfg returned, to the source, with the other problems of that
-// decode beside it.
+// decodeProblems returns err, the rejection a decode of node into v
+// with cfg returned, with the other problems of that decode beside it,
+// for the Node to bind.
 //
 // The go-yaml decoder decides whether a decode fails, and it returns one
 // rejection for a document that holds several problems. That is the
 // first value it rejects, in the order the target declares its fields,
-// or an unknown field when it rejects no value. BindDecodeProblems runs
+// or an unknown field when it rejects no value. DecodeProblems runs
 // only after the decoder rejected, and its result always holds that
-// rejection as [Node.bindDecodeError] binds it, so no decode passes or
+// rejection as [Node.decodeRejection] returns it, so no decode passes or
 // fails because of it. A [problemCollector] finds the other problems.
 //
 // With no other problem, the result is the rejection as
-// [Node.bindDecodeError] binds it. With more, it is a summary from
+// [Node.decodeRejection] returns it. With more, it is a summary from
 // [NewSummary] that heads the rejection and each other problem, in the
 // order of the source. Its message counts them, as "3 problems" does,
 // and reads "3 unknown fields" when each is the rejection of an unknown
@@ -46,7 +46,7 @@ import (
 // back alone once ctx has ended, before the pass or during it, since the
 // collector then stops before it has read the whole document. Returns
 // nil for a nil err.
-func (n *Node) bindDecodeProblems(
+func (n *Node) decodeProblems(
 	ctx context.Context,
 	err error,
 	node ast.Node,
@@ -61,7 +61,7 @@ func (n *Node) bindDecodeProblems(
 
 	at, ok := n.rejectedAt(err, bound)
 	if !ok || ctx.Err() != nil {
-		return bound
+		return n.decodeRejection(err)
 	}
 
 	c := newProblemCollector(ctx, n, cfg)
@@ -70,7 +70,7 @@ func (n *Node) bindDecodeProblems(
 	delete(c.found, at)
 
 	if len(c.found) == 0 || ctx.Err() != nil {
-		return bound
+		return n.decodeRejection(err)
 	}
 
 	unknown, ok := err.(*yaml.UnknownFieldError) //nolint:errorlint // A wrapped error is the unmarshaler's own.
@@ -103,7 +103,7 @@ func (n *Node) bindDecodeProblems(
 		msg = fmt.Sprintf("%d unknown fields", len(errs))
 	}
 
-	return n.bindOwn(NewSummary(msg, errs...))
+	return NewSummary(msg, errs...)
 }
 
 // rejectedAt returns the position that marks err, a rejection of the

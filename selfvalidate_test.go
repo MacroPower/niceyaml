@@ -143,9 +143,16 @@ var (
 	errLoop = errors.New("loop")
 
 	// Decodes a grade from its name, the only form a document gives it.
-	gradeNames = niceyaml.WithCustomUnmarshaler(func(_ context.Context, g *grade, b []byte) error {
-		if strings.TrimSpace(string(b)) != "high" {
-			return fmt.Errorf("unknown grade %q", b)
+	gradeNames = niceyaml.WithCustomUnmarshaler(func(_ context.Context, g *grade, decode func(any) error) error {
+		var name string
+
+		err := decode(&name)
+		if err != nil {
+			return err
+		}
+
+		if name != "high" {
+			return fmt.Errorf("unknown grade %q", name)
 		}
 
 		*g = gradeHigh
@@ -158,11 +165,14 @@ var (
 // a decode into a typed value, the keys of its maps among them, and
 // counts its calls in n.
 func countStrings(n *int) niceyaml.DecodeOption {
-	return niceyaml.WithCustomUnmarshaler(func(_ context.Context, s *string, text []byte) error {
-		*n++
-		*s = strings.TrimSpace(string(text))
+	return niceyaml.WithCustomUnmarshaler(func(_ context.Context, s *string, decode func(any) error) error {
+		// The function decodes a string, so its decode reads a second
+		// type that the function does not decode.
+		type text string
 
-		return nil
+		*n++
+
+		return decode((*text)(s))
 	})
 }
 
@@ -2690,7 +2700,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		// path of that close, so each error binds at the value the option
 		// gives an unmarshaler.
 		opts := niceyaml.DecodeOptions(
-			niceyaml.WithCustomUnmarshaler(func(_ context.Context, o *optionDecodedHours, _ []byte) error {
+			niceyaml.WithCustomUnmarshaler(func(_ context.Context, o *optionDecodedHours, _ func(any) error) error {
 				o.Inner = hours{Open: "17:00", Close: "09:00"}
 
 				return nil

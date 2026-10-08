@@ -1166,7 +1166,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 						Name  string        `yaml:"name"`
 						Value optionDecoded `yaml:"value"`
 					}](ctx, niceyaml.WithCustomUnmarshaler(
-						func(context.Context, *optionDecoded, []byte) error { return errUnmarshal },
+						func(context.Context, *optionDecoded, func(any) error) error { return errUnmarshal },
 					))
 
 					return err
@@ -1664,7 +1664,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 						Name  string        `yaml:"name"`
 						Value optionDecoded `yaml:"value"`
 					}](ctx, niceyaml.WithCustomUnmarshaler(
-						func(context.Context, *optionDecoded, []byte) error { return spanError() },
+						func(context.Context, *optionDecoded, func(any) error) error { return spanError() },
 					))
 
 					return err

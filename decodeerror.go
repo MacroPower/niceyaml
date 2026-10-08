@@ -417,6 +417,75 @@ func textRejection(content ast.Node) error {
 	return decodeError{err: fmt.Errorf("expected %s, got %s", kindString, kindOfNode(content.Type()))}
 }
 
+// valueError returns err as an error about one value of a document, for
+// the decode of that document to place. The err argument is what a
+// decode of the text of the value returned before any Node bound it, as
+// [Node.decodeValue] runs one. It is one problem, or the summary of
+// several that [Node.decodeProblems] builds, and each problem comes back
+// as [valueProblem] writes it.
+func valueError(err error) error {
+	summary, ok := err.(*Error) //nolint:errorlint // The decode returns its summary unwrapped.
+	if !ok || summary == nil || len(summary.errors) == 0 {
+		return valueProblem(err)
+	}
+
+	problems := make([]error, 0, len(summary.errors))
+	for _, problem := range summary.errors {
+		problems = append(problems, valueProblem(problem))
+	}
+
+	return NewSummary(summary.Error(), problems...)
+}
+
+// valueProblem returns problem as a problem of one value of a document,
+// where problem is a problem of a decode of the text of that value.
+//
+// The decode locates a rejection by a token of the text. The path of
+// that token reads from the root of the text, which is the value, so
+// the result writes it as an `@` path. The decode of the document puts
+// that path under the path of the value, as [Node.locateDecodeError]
+// describes, and the path then resolves in the document, through each
+// alias and `<<` merge key the text wrote out. A position counts the
+// lines of the text and not of the document, so the result keeps none.
+// A rejection of the value itself thus comes back with no location, and
+// the decode of the document points it at the value it finds. So does an
+// error the decode placed in the text, such as a panic, which the decode
+// of the document has yet to place.
+//
+// Any other problem is the error of an unmarshaler below the value. Its
+// `@` paths read from the value already, so it comes back as it is.
+// When it names a position, as an unmarshaler that takes its node can
+// build one, it comes back under the path it names, or under the path
+// of the value, which stands over that position.
+func valueProblem(problem error) error {
+	x, ok := problem.(*Error) //nolint:errorlint // The decode returns the Error it located unwrapped.
+	if !ok || x == nil || x.rebased || !x.hasLocation() {
+		at := anchorOf(problem)
+		if at.loc == nil {
+			return problem
+		}
+
+		return Place(problem, AtPath(at.path))
+	}
+
+	located := *x
+	located.loc = nil
+
+	if placed, ok := x.err.(decodeError); ok { //nolint:errorlint // The decode placed the error it built.
+		placed.placed = false
+		located.err = placed
+	}
+
+	rel, _ := x.path.CutPrefix(paths.Doc())
+	located.path, located.hasPath = rel, !rel.Equal(paths.Current())
+
+	if located.addsNothing() {
+		return located.err
+	}
+
+	return &located
+}
+
 // pointerBase returns the type t points to through every pointer on it,
 // since the decoder decodes a pointer as the value it points to.
 func pointerBase(t reflect.Type) reflect.Type {

@@ -31,7 +31,14 @@ var (
 	// problemPulled, in every decode of the program.
 	registerPulled = sync.OnceFunc(func() {
 		yaml.RegisterCustomUnmarshalerContext(func(ctx context.Context, p *problemRegistered, data []byte) error {
-			return decodePulled(ctx, (*problemPulled)(p), data)
+			return decodePulled(ctx, (*problemPulled)(p), func(v any) error {
+				err := yaml.Unmarshal(data, v)
+				if err != nil {
+					return fmt.Errorf("decode image: %w", err)
+				}
+
+				return nil
+			})
 		})
 	})
 
@@ -114,16 +121,16 @@ type problemJSON problemPulled
 func (*problemJSON) UnmarshalJSON([]byte) error { return nil }
 
 // decodePulled decodes a [problemPulled] as [problemImage] decodes
-// itself.
-func decodePulled(_ context.Context, p *problemPulled, data []byte) error {
+// itself, through decode.
+func decodePulled(_ context.Context, p *problemPulled, decode func(any) error) error {
 	var raw struct {
 		Repo string `yaml:"repo"`
 		Pull string `yaml:"pull"`
 	}
 
-	err := yaml.Unmarshal(data, &raw)
+	err := decode(&raw)
 	if err != nil {
-		return fmt.Errorf("decode image: %w", err)
+		return err
 	}
 
 	if raw.Repo == "" {
@@ -230,13 +237,19 @@ func (*problemUniqueText) UnmarshalText([]byte) error {
 // uniqueTier decodes a [tier] in place of the UnmarshalText method of the
 // type, as a function from niceyaml.WithCustomUnmarshaler does, and
 // rejects a name another value of the decode holds.
-func uniqueTier(ctx context.Context, _ *tier, text []byte) error {
+func uniqueTier(ctx context.Context, _ *tier, decode func(any) error) error {
 	calls, ok := ctx.Value(callsKey{}).(*problemCalls)
 	if !ok {
 		return nil
 	}
 
-	name := strings.TrimSpace(string(text))
+	var name string
+
+	err := decode(&name)
+	if err != nil {
+		return err
+	}
+
 	if calls.seen[name] {
 		return fmt.Errorf("duplicate name %q", name)
 	}
@@ -1668,7 +1681,7 @@ func TestDocument_Decode_Problems_Context(t *testing.T) {
 		t.Parallel()
 
 		calls := 0
-		counting := niceyaml.WithCustomUnmarshaler(func(context.Context, *problemPulled, []byte) error {
+		counting := niceyaml.WithCustomUnmarshaler(func(context.Context, *problemPulled, func(any) error) error {
 			calls++
 
 			return nil

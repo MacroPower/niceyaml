@@ -290,7 +290,9 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
 			opts: []niceyaml.DecodeOption{
 				strict,
-				niceyaml.WithCustomUnmarshaler(func(context.Context, *strictOption, []byte) error { return nil }),
+				niceyaml.WithCustomUnmarshaler(
+					func(context.Context, *strictOption, func(any) error) error { return nil },
+				),
 			},
 			want: `7:1: $.qqq~: unknown field "qqq"`,
 		},

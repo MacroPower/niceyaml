@@ -4174,14 +4174,83 @@ const (
 )
 
 // decodeLevel decodes a [plainLevel] from its name.
-func decodeLevel(_ context.Context, l *plainLevel, text []byte) error {
-	switch name := strings.TrimSpace(string(text)); name {
+func decodeLevel(_ context.Context, l *plainLevel, decode func(any) error) error {
+	var name string
+
+	err := decode(&name)
+	if err != nil {
+		return err
+	}
+
+	switch name {
 	case "low":
 		*l = levelLow
 	case "high":
 		*l = levelHigh
 	default:
 		return fmt.Errorf("%w %q", errUnknownLevel, name)
+	}
+
+	return nil
+}
+
+// decodeCIDR decodes a [net.IPNet] from a string in CIDR notation, as
+// the example of niceyaml.WithCustomUnmarshaler does.
+func decodeCIDR(_ context.Context, n *net.IPNet, decode func(any) error) error {
+	var s string
+
+	err := decode(&s)
+	if err != nil {
+		return err
+	}
+
+	_, parsed, err := net.ParseCIDR(s)
+	if err != nil {
+		return err //nolint:wrapcheck // The test inspects the error as it is.
+	}
+
+	*n = *parsed
+
+	return nil
+}
+
+// plainSpan has no method of its own. A function from
+// niceyaml.WithCustomUnmarshaler decodes it, as decodeSpan does.
+type plainSpan struct {
+	From  int        `yaml:"from"`
+	To    int        `yaml:"to"`
+	Level plainLevel `yaml:"level"`
+}
+
+// decodeSpan decodes a [plainSpan] by its fields and reports a to below
+// its from at the path of the to, which reads from the span.
+func decodeSpan(_ context.Context, s *plainSpan, decode func(any) error) error {
+	type fields plainSpan
+
+	err := decode((*fields)(s))
+	if err != nil {
+		return err
+	}
+
+	if s.To < s.From {
+		return niceyaml.NewError("to is below from", niceyaml.AtPath(paths.Current().Child("to")))
+	}
+
+	return nil
+}
+
+// levelHolder decodes itself through a second type with the same fields
+// and puts text of its own in front of the error of its level.
+type levelHolder struct {
+	Level plainLevel `yaml:"level"`
+}
+
+func (h *levelHolder) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain levelHolder
+
+	err := unmarshal((*plain)(h))
+	if err != nil {
+		return fmt.Errorf("holder: %w", err)
 	}
 
 	return nil
@@ -4233,66 +4302,478 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 		}, got)
 	})
 
-	t.Run("hands the function the context and the text of the node", func(t *testing.T) {
+	t.Run("hands the function the context and a decode of the value", func(t *testing.T) {
 		t.Parallel()
 
 		type ctxKey struct{}
 
 		var got []string
 
-		record := niceyaml.WithCustomUnmarshaler(func(ctx context.Context, _ *plainLevel, text []byte) error {
-			got = append(got, fmt.Sprintf("%v|%s", ctx.Value(ctxKey{}), text))
+		record := niceyaml.WithCustomUnmarshaler(
+			func(ctx context.Context, _ *plainLevel, decode func(any) error) error {
+				var name string
 
-			return nil
-		})
+				err := decode(&name)
+				if err != nil {
+					return err
+				}
 
-		// The text spells an alias as the content of its anchor, and keeps
-		// the quotes and the comment of a scalar.
+				got = append(got, fmt.Sprintf("%v|%s", ctx.Value(ctxKey{}), name))
+
+				return nil
+			},
+		)
+
+		// The decode reads an alias as the content of its anchor, and a
+		// scalar without its quotes and the comment on its line.
 		doc := yamltest.FirstDocument(t, "a: &a low\nlevels:\n  - *a\n  - \"high\" # top\n")
 
 		_, err := doc.Decode[struct {
 			Levels []plainLevel `yaml:"levels"`
 		}](context.WithValue(t.Context(), ctxKey{}, "decode"), record)
 		require.NoError(t, err)
-		assert.Equal(t, []string{"decode|low\n", "decode|\"high\" # top\n"}, got)
+		assert.Equal(t, []string{"decode|low", "decode|high"}, got)
 	})
 
-	t.Run("the function reads its text with a source of its own", func(t *testing.T) {
+	t.Run("the decode reads a scalar however the document writes it", func(t *testing.T) {
 		t.Parallel()
 
-		cidr := niceyaml.WithCustomUnmarshaler(func(ctx context.Context, n *net.IPNet, text []byte) error {
-			s, err := niceyaml.NewSourceFromBytes(text).Decode[string](ctx)
+		tcs := map[string]struct {
+			input string
+		}{
+			"plain":          {input: "office: 10.0.0.0/8\n"},
+			"double quoted":  {input: "office: \"10.0.0.0/8\"\n"},
+			"single quoted":  {input: "office: '10.0.0.0/8'\n"},
+			"with a comment": {input: "office: 10.0.0.0/8 # the office\n"},
+			"block":          {input: "office: |-\n  10.0.0.0/8\n"},
+			"folded":         {input: "office: >-\n  10.0.0.0/8\n"},
+			"tagged":         {input: "office: !!str 10.0.0.0/8\n"},
+			"anchored":       {input: "office: &net 10.0.0.0/8\n"},
+			"alias":          {input: "net: &net 10.0.0.0/8\noffice: *net\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				got, err := yamltest.FirstDocument(t, tc.input).Decode[map[string]net.IPNet](
+					t.Context(), niceyaml.WithCustomUnmarshaler(decodeCIDR),
+				)
+				require.NoError(t, err)
+				assert.Equal(t, "10.0.0.0/8", new(got["office"]).String())
+			})
+		}
+	})
+
+	t.Run("the decode reads the text of the value into a raw message", func(t *testing.T) {
+		t.Parallel()
+
+		var got []string
+
+		record := niceyaml.WithCustomUnmarshaler(
+			func(_ context.Context, _ *plainLevel, decode func(any) error) error {
+				var text yaml.RawMessage
+
+				err := decode(&text)
+				if err != nil {
+					return err
+				}
+
+				got = append(got, string(text))
+
+				return nil
+			},
+		)
+
+		// The text spells an alias as the content of its anchor, and keeps
+		// the quotes and the comment of a scalar.
+		doc := yamltest.FirstDocument(t, "a: &a low\nlevels:\n  - *a\n  - \"high\" # top\n  - {a: 1}\n")
+
+		_, err := doc.Decode[struct {
+			Levels []plainLevel `yaml:"levels"`
+		}](t.Context(), record)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"low\n", "\"high\" # top\n", "{a: 1}\n"}, got)
+	})
+
+	// The decode callback returns the rejection of a decode, and the
+	// decode that called the function binds it in the document.
+	t.Run("the error of the function binds in the document", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Base    any                   `yaml:"base"`
+			ByName  map[string]net.IPNet  `yaml:"by_name"`
+			ByLevel map[plainLevel]string `yaml:"by_level"`
+			Nets    []net.IPNet           `yaml:"nets"`
+			Spans   []plainSpan           `yaml:"spans"`
+			Count   int                   `yaml:"count"`
+		}
+
+		decoders := niceyaml.DecodeOptions(
+			niceyaml.WithCustomUnmarshaler(decodeCIDR),
+			niceyaml.WithCustomUnmarshaler(decodeSpan),
+			levels,
+		)
+
+		tcs := map[string]struct {
+			input string
+			want  string
+			opts  []niceyaml.DecodeOption
+		}{
+			"sequence where the function decodes a string": {
+				input: "nets:\n  - 10.0.0.0/8\n  - [1, 2]\n",
+				want:  "3:6: $.nets[1]: expected string, got sequence",
+			},
+			"mapping where the function decodes a string": {
+				input: "nets:\n  - 10.0.0.0/8\n  - {a: 1}\n",
+				want:  "3:6: $.nets[1]: expected string, got mapping",
+			},
+			"string the function rejects": {
+				input: "nets:\n  - 10.0.0.0/8\n  - 10.0.0.0/33\n",
+				want:  "3:5: $.nets[1]: invalid CIDR address: 10.0.0.0/33",
+			},
+			"map value": {
+				input: "by_name:\n  a: 10.0.0.0/8\n  b: [1]\n",
+				want:  "3:7: $.by_name.b: expected string, got sequence",
+			},
+			"map key": {
+				input: "by_level:\n  low: a\n  mid: b\n",
+				want:  `3:3: $.by_level.mid~: unknown level "mid"`,
+			},
+			"field of the value": {
+				input: "spans:\n  - {from: 1, to: 5}\n  - from: nine\n    to: 3\n",
+				want:  "3:11: $.spans[1].from: expected integer, got string",
+			},
+			// The decode of a value reports every problem of that value.
+			"two fields of the value": {
+				input: "spans:\n  - from: nine\n    to: [3]\n",
+				want: stringtest.JoinLF(
+					"2 problems",
+					"2:11: $.spans[0].from: expected integer, got string",
+					"3:10: $.spans[0].to: expected integer, got sequence",
+				),
+			},
+			// The path the function writes reads from its value.
+			"path the function writes": {
+				input: "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n",
+				want:  "4:9: $.spans[1].to: to is below from",
+			},
+			// A path goes through an alias to the line that holds the
+			// value.
+			"path in a value an alias holds": {
+				input: "base: &base {from: 9, to: 3}\nspans:\n  - *base\n",
+				want:  "1:27: $.spans[0].to: to is below from",
+			},
+			"field of a value an alias holds": {
+				input: "base: &base {from: nine}\nspans:\n  - *base\n",
+				want:  "1:20: $.spans[0].from: expected integer, got string",
+			},
+			// The text of the value writes out what a merge key brings in,
+			// so the path names the merge key, and resolves through it.
+			"field a merge key brings in": {
+				input: "base: &base {from: nine}\nspans:\n  - <<: *base\n    to: 3\n",
+				want:  "1:20: $.spans[0].<<.from: expected integer, got string",
+			},
+			"field that holds an alias": {
+				input: "base: &base [1]\nspans:\n  - from: *base\n    to: 3\n",
+				want:  "3:11: $.spans[0].from: expected integer, got sequence",
+			},
+			// The decode of a value takes the options of the decode that
+			// called the function, so another function decodes the level.
+			"value another function decodes below the value": {
+				input: "spans:\n  - {from: 1, to: 2, level: mid}\n",
+				want:  `2:29: $.spans[0].level: unknown level "mid"`,
+			},
+			"unknown field of the value": {
+				input: "spans:\n  - from: 1\n    until: 2\n",
+				opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
+				want:  `3:5: $.spans[0].until~: unknown field "until"`,
+			},
+			// The decoder stops at the first value a function rejects, and
+			// the search for the other problems of the decode calls no
+			// function again. One decode thus reports the first network
+			// alone.
+			"second value a function rejects": {
+				input: "nets:\n  - 10.0.0.0/33\n  - [1, 2]\n",
+				want:  "2:5: $.nets[0]: invalid CIDR address: 10.0.0.0/33",
+			},
+			// The search still finds the count, which no function decodes.
+			"second value a function rejects beside another problem": {
+				input: "count: x\nnets:\n  - [1, 2]\n  - {a: 1}\n",
+				want: stringtest.JoinLF(
+					"2 problems",
+					"1:8: $.count: expected integer, got string",
+					"3:6: $.nets[0]: expected string, got sequence",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := yamltest.FirstDocument(t, tc.input).Decode[config](
+					t.Context(), append([]niceyaml.DecodeOption{decoders}, tc.opts...)...,
+				)
+				require.EqualError(t, err, tc.want)
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
+				requireInvalid(t, err, max(strings.Count(tc.want, "\n"), 1))
+			})
+		}
+	})
+
+	// An unmarshaler below the value writes its paths from its own value,
+	// and the decode of the value puts them under the path that value has
+	// below the value of the function.
+	t.Run("the error of an unmarshaler below the value binds in the document", func(t *testing.T) {
+		t.Parallel()
+
+		type box struct {
+			Item   reporting            `yaml:"item"`
+			Placed positioned           `yaml:"placed"`
+			Broken panickingUnmarshaler `yaml:"broken"`
+		}
+
+		boxes := niceyaml.WithCustomUnmarshaler(func(_ context.Context, b *box, decode func(any) error) error {
+			type fields box
+
+			return decode((*fields)(b))
+		})
+
+		tcs := map[string]struct {
+			report error
+			input  string
+			want   string
+			detail string
+		}{
+			"path": {
+				input:  "boxes:\n  - item: {from: 9, to: 3}\n",
+				report: spanError(),
+				want:   "2:25: $.boxes[0].item.to: to is below from",
+			},
+			"path of a detail": {
+				input: "boxes:\n  - item: {from: 9, to: 3}\n",
+				report: niceyaml.NewError("span is odd", niceyaml.WithDetails(
+					niceyaml.NewError("to set here", niceyaml.AtPath(paths.Current().Child("to"))),
+				)),
+				want:   "2:12: $.boxes[0].item: span is odd",
+				detail: "2:25: $.boxes[0].item.to: to set here",
+			},
+			"join": {
+				input:  "boxes:\n  - item: {from: 9, to: 3}\n",
+				report: errors.Join(errors.New("from is odd"), errors.New("to is odd")),
+				want: stringtest.JoinLF(
+					"2:12: $.boxes[0].item: from is odd",
+					"2:12: $.boxes[0].item: to is odd",
+				),
+			},
+			// The position counts the lines of the text of the value, so
+			// the error binds at the value in its place.
+			"position an unmarshaler built from its node": {
+				input: "boxes:\n  - name: a\n  - placed: [a, b]\n",
+				want:  "3:5: $.boxes[1]: unmarshaler rejected the value",
+			},
+			"panic": {
+				input: "boxes:\n  - name: a\n  - broken: 1\n",
+				want:  "3:5: $.boxes[1]: decoder rejected the value: panic: unmarshaler rejected the value",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := yamltest.FirstDocument(t, tc.input).Decode[struct {
+					Boxes []box `yaml:"boxes"`
+				}](context.WithValue(t.Context(), reportKey{}, tc.report), boxes)
+				require.EqualError(t, err, tc.want)
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+				if tc.detail == "" {
+					return
+				}
+
+				var srcErr *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &srcErr)
+				require.Len(t, srcErr.Details(), 1)
+				assert.EqualError(t, srcErr.Details()[0], tc.detail)
+			})
+		}
+	})
+
+	// The error reaches the unmarshaler above the value inside a wrapper
+	// that matches what the error matches, and the error that unmarshaler
+	// returns binds at its own value.
+	t.Run("an unmarshaler above the value wraps the error of the function", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			is    error
+			input string
+			want  string
+		}{
+			"error of the function": {
+				input: "main:\n  level: mid\n",
+				is:    errUnknownLevel,
+				want:  `2:3: $.main: holder: unknown level "mid"`,
+			},
+			"rejection of the decode": {
+				input: "main:\n  level: [a]\n",
+				is:    niceyaml.ErrDecode,
+				want:  "2:3: $.main: holder: expected string, got sequence",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := yamltest.FirstDocument(t, tc.input).Decode[map[string]levelHolder](t.Context(), levels)
+				require.EqualError(t, err, tc.want)
+				require.ErrorIs(t, err, tc.is)
+			})
+		}
+	})
+
+	// No value below the node reports the error, so the rejection of a
+	// scalar points at the node, and that of a sequence gains no location,
+	// as the error of any unmarshaler does there.
+	t.Run("the error of the function for the node the decode reads", func(t *testing.T) {
+		t.Parallel()
+
+		cidr := niceyaml.WithCustomUnmarshaler(decodeCIDR)
+
+		_, err := yamltest.FirstDocument(t, "10.0.0.0/33\n").Decode[net.IPNet](t.Context(), cidr)
+		require.EqualError(t, err, "1:1: $: invalid CIDR address: 10.0.0.0/33")
+
+		_, err = yamltest.FirstDocument(t, "[1, 2]\n").Decode[net.IPNet](t.Context(), cidr)
+		require.EqualError(t, err, "expected string, got sequence")
+
+		_, err = yamltest.FirstDocument(t, "from: nine\nto: 3\n").Decode[plainSpan](
+			t.Context(), niceyaml.WithCustomUnmarshaler(decodeSpan),
+		)
+		require.EqualError(t, err, "1:7: $.from: expected integer, got string")
+	})
+
+	t.Run("the decode of a value below a scoped node binds in the document", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "name: api\nnets:\n  - 10.0.0.0/8\n  - {a: 1}\n")
+
+		_, err := doc.DecodeAt[[]net.IPNet](
+			t.Context(), paths.Current().Child("nets"), niceyaml.WithCustomUnmarshaler(decodeCIDR),
+		)
+		require.EqualError(t, err, "4:6: $.nets[1]: expected string, got mapping")
+	})
+
+	t.Run("the decode of a value allows the duplicate keys its source allows", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "span: {from: 1, from: 2, to: 3}\n", niceyaml.WithAllowDuplicateKeys(true))
+
+		got, err := doc.Decode[map[string]plainSpan](t.Context(), niceyaml.WithCustomUnmarshaler(decodeSpan))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]plainSpan{"span": {From: 2, To: 3}}, got)
+	})
+
+	t.Run("the decode takes a pointer alone", func(t *testing.T) {
+		t.Parallel()
+
+		byValue := niceyaml.WithCustomUnmarshaler(func(_ context.Context, _ *plainLevel, decode func(any) error) error {
+			var name string
+
+			return decode(name)
+		})
+
+		_, err := yamltest.FirstDocument(t, "level: high\n").Decode[map[string]plainLevel](t.Context(), byValue)
+		require.EqualError(t, err, "1:8: $.level: decode target is not a non-nil pointer: got string")
+		require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+	})
+
+	// A decode into the type of the function would call the function for
+	// the same value again, and so on without end.
+	t.Run("the decode refuses the type its function decodes", func(t *testing.T) {
+		t.Parallel()
+
+		recursive := niceyaml.WithCustomUnmarshaler(
+			func(_ context.Context, l *plainLevel, decode func(any) error) error {
+				return decode(l)
+			},
+		)
+
+		_, err := yamltest.FirstDocument(t, "level: 2\n").Decode[map[string]plainLevel](t.Context(), recursive)
+		require.EqualError(
+			t, err, "1:8: $.level: decode target is the type the function decodes: got *niceyaml_test.plainLevel",
+		)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+
+	// The go-yaml decoder returns the type error it finds in the error of
+	// a struct field in place of that error.
+	t.Run("an error that wraps a go-yaml type error keeps its text", func(t *testing.T) {
+		t.Parallel()
+
+		counted := niceyaml.WithCustomUnmarshaler(func(_ context.Context, _ *plainLevel, decode func(any) error) error {
+			var text yaml.RawMessage
+
+			err := decode(&text)
 			if err != nil {
 				return err
 			}
 
-			_, parsed, err := net.ParseCIDR(s)
-			if err != nil {
-				return fmt.Errorf("network: %w", err)
-			}
+			var count int
 
-			*n = *parsed
+			err = yaml.Unmarshal(text, &count)
+			if err != nil {
+				return fmt.Errorf("%w: %w", errUnknownLevel, err)
+			}
 
 			return nil
 		})
 
-		got, err := yamltest.FirstDocument(t, "office: \"10.0.0.0/8\" # the office\n").Decode[map[string]net.IPNet](
-			t.Context(), cidr,
-		)
-		require.NoError(t, err)
-		assert.Equal(t, "10.0.0.0/8", new(got["office"]).String())
+		_, err := yamltest.FirstDocument(t, "name: api\nlevel: high\n").Decode[struct {
+			Name  string     `yaml:"name"`
+			Level plainLevel `yaml:"level"`
+		}](t.Context(), counted)
+		require.ErrorIs(t, err, errUnknownLevel)
 
-		_, err = yamltest.FirstDocument(t, "office: 10.0.0.0/8\nhome: 10.0.0.0/33\n").Decode[map[string]net.IPNet](
-			t.Context(), cidr,
-		)
-		require.EqualError(t, err, "2:7: $.home: network: invalid CIDR address: 10.0.0.0/33")
+		var typeErr *yaml.TypeError
+
+		require.ErrorAs(t, err, &typeErr)
+		require.EqualError(t, err, "2:8: $.level: unknown level: "+typeErr.Error())
+	})
+
+	// The decode of a value writes to no comment map, so the map of the
+	// decode keeps the comments it collected before the function ran.
+	t.Run("the decode of a value leaves the comment map alone", func(t *testing.T) {
+		t.Parallel()
+
+		type config struct {
+			Name  string     `yaml:"name"`
+			Level plainLevel `yaml:"level"`
+		}
+
+		doc := yamltest.FirstDocument(t, "name: api # the name\nlevel: high # the level\n")
+		want, got := yaml.CommentMap{}, yaml.CommentMap{}
+
+		_, err := doc.Decode[config](t.Context(), niceyaml.WithYAMLComments(want), niceyaml.WithCustomUnmarshaler(
+			func(context.Context, *plainLevel, func(any) error) error { return nil },
+		))
+		require.NoError(t, err)
+		require.NotEmpty(t, want)
+
+		_, err = doc.Decode[config](t.Context(), niceyaml.WithYAMLComments(got), levels)
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
 	})
 
 	t.Run("a null leaves a pointer nil without a call", func(t *testing.T) {
 		t.Parallel()
 
 		calls := 0
-		count := niceyaml.WithCustomUnmarshaler(func(context.Context, *plainLevel, []byte) error {
+		count := niceyaml.WithCustomUnmarshaler(func(context.Context, *plainLevel, func(any) error) error {
 			calls++
 
 			return nil
@@ -4309,7 +4790,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 	t.Run("the function decodes ahead of a method of the type", func(t *testing.T) {
 		t.Parallel()
 
-		byFunction := niceyaml.WithCustomUnmarshaler(func(_ context.Context, l *methodLevel, _ []byte) error {
+		byFunction := niceyaml.WithCustomUnmarshaler(func(_ context.Context, l *methodLevel, _ func(any) error) error {
 			*l = 7
 
 			return nil
@@ -4352,7 +4833,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 
 		// The decoder decodes the value a pointer points to, so no value
 		// of the document reaches a function for the pointer.
-		pointers := niceyaml.WithCustomUnmarshaler(func(context.Context, **plainLevel, []byte) error {
+		pointers := niceyaml.WithCustomUnmarshaler(func(context.Context, **plainLevel, func(any) error) error {
 			return errors.New("the decoder called the function")
 		})
 
@@ -9075,7 +9556,7 @@ func TestDecodeOptions(t *testing.T) {
 		// The last WithCustomUnmarshaler given for a type decodes it, so
 		// the marker a decode yields names the option that came last.
 		setMarker := func(value marker) niceyaml.DecodeOption {
-			return niceyaml.WithCustomUnmarshaler(func(_ context.Context, m *marker, _ []byte) error {
+			return niceyaml.WithCustomUnmarshaler(func(_ context.Context, m *marker, _ func(any) error) error {
 				*m = value
 
 				return nil
@@ -12115,18 +12596,17 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 		"kind: [" + strings.TrimSuffix(strings.Repeat("*a, ", 500), ", ") + "]\n"
 	kind := paths.Current().Child("kind")
 
-	plainText := niceyaml.WithCustomUnmarshaler(func(_ context.Context, a *aliasPlain, text []byte) error {
-		*a = aliasPlain(text)
-
-		return nil
+	plainText := niceyaml.WithCustomUnmarshaler(func(_ context.Context, a *aliasPlain, decode func(any) error) error {
+		return decode((*string)(a))
 	})
 
-	pointerText := niceyaml.WithCustomUnmarshaler(func(_ context.Context, a **aliasPlain, text []byte) error {
-		plain := aliasPlain(text)
-		*a = &plain
+	pointerText := niceyaml.WithCustomUnmarshaler(
+		func(_ context.Context, a **aliasPlain, decode func(any) error) error {
+			*a = new(aliasPlain)
 
-		return nil
-	})
+			return decode((*string)(*a))
+		},
+	)
 
 	tcs := map[string]struct {
 		err    error
