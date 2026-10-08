@@ -4350,6 +4350,23 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 		assert.Equal(t, map[string]plainLevel{"level": levelHigh}, got)
 	})
 
+	t.Run("a pointer type names no type", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder decodes the value a pointer points to, so no value
+		// of the document reaches a function for the pointer.
+		pointers := niceyaml.WithCustomUnmarshaler(func(context.Context, **plainLevel, []byte) error {
+			return errors.New("the decoder called the function")
+		})
+
+		got, err := yamltest.FirstDocument(t, "level: 2\n").Decode[map[string]*plainLevel](t.Context(), pointers)
+		require.NoError(t, err)
+
+		high := levelHigh
+
+		assert.Equal(t, map[string]*plainLevel{"level": &high}, got)
+	})
+
 	t.Run("the option reaches the decode that gets it alone", func(t *testing.T) {
 		t.Parallel()
 
@@ -12230,6 +12247,13 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 		return nil
 	})
 
+	pointerText := niceyaml.WithCustomUnmarshaler(func(_ context.Context, a **aliasPlain, text []byte) error {
+		plain := aliasPlain(text)
+		*a = &plain
+
+		return nil
+	})
+
 	tcs := map[string]struct {
 		err    error
 		target func() any
@@ -12255,6 +12279,12 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 			path:   kind,
 			target: func() any { return new([]string) },
 			decode: []niceyaml.DecodeOption{plainText},
+		},
+		"custom unmarshaler of a pointer type, which names no type": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new([]*aliasPlain) },
+			decode: []niceyaml.DecodeOption{pointerText},
 		},
 		"json unmarshaler elements under their option": {
 			input:  manyAliases,

@@ -2621,10 +2621,13 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 // [Node.DecodeInto] describes.
 //
 // Each WithCustomUnmarshaler names one type, and a later one for the
-// same T replaces the earlier. A nil fn names no type. The function
-// serves the decode that gets the option, and a [Validator] that decodes
-// T gives the option to its own decode. A [DecodeOptions] value holds
-// the option for every decode of a program.
+// same T replaces the earlier. A nil fn names no type, and neither does
+// a T that is a pointer type. The decoder decodes the value a pointer
+// points to, so no value reaches an fn for the pointer, and T names the
+// type of that value instead. The function serves the decode that gets
+// the option, and a [Validator] that decodes T gives the option to its
+// own decode. A [DecodeOptions] value holds the option for every decode
+// of a program.
 //
 // A function that [yaml.RegisterCustomUnmarshaler] registers decodes T
 // the same way in every decode of the program, with no option. Nothing
@@ -2633,8 +2636,9 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 // WithCustomUnmarshaler instead.
 func WithCustomUnmarshaler[T any](fn func(ctx context.Context, v *T, text []byte) error) DecodeOption {
 	return func(c *decodeConfig) {
-		if fn != nil {
-			c.unmarshalers = c.unmarshalers.with(reflect.TypeFor[T](), yaml.CustomUnmarshalerContext(fn))
+		t := reflect.TypeFor[T]()
+		if fn != nil && t.Kind() != reflect.Pointer {
+			c.unmarshalers = c.unmarshalers.with(t, yaml.CustomUnmarshalerContext(fn))
 		}
 	}
 }
