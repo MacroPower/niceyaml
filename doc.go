@@ -478,10 +478,14 @@
 //		return err
 //	}
 //
-// A [Validator] gets the root Node of the merged document, which takes
-// its name and its preamble from the lowest file. The decode fills the
-// Go value from that document by the rule of [Node.DecodeInto], so
-// defaults the value holds survive where the files leave a field out.
+// [Layers.Document] returns the root Node of the merged document, and a
+// [Validator] gets that Node. A caller reads one value of the files
+// through it, as [Node.DecodeAt] reads one of a document, or prints
+// what the files merge into. The document takes its name and its
+// preamble from the lowest file, and its text is no file, so each error
+// still binds in the file that holds its value. The decode fills the Go
+// value from that document by the rule of [Node.DecodeInto], so defaults
+// the value holds survive where the files leave a field out.
 //
 // [Node.At] returns a Node scoped to the node a path selects, and the
 // same pipeline then runs on that node. Decode reads one value without

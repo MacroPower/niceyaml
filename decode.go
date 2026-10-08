@@ -1152,9 +1152,14 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 // A caller thus renders or diffs a document that does not parse yet, and
 // the other documents of the file decode and validate as if it did.
 //
+// A Node from [Layers.Document] is the root of the document that
+// [Layers] merge their files into. Its Source holds the merged text,
+// which is no file, so each error it returns binds in the file of a
+// layer instead, as Layers.Document describes.
+//
 // Receive instances from [Source.Documents], [Source.AllDocuments],
 // [Source.Document], [Node.At], [Node.Nodes], [Node.Document],
-// [SourceError.Node], or [SourceError.Document].
+// [Layers.Document], [SourceError.Node], or [SourceError.Document].
 type Node struct {
 	// The node the scope selects, which At or Nodes resolves once when it
 	// scopes the Node. The root of a document leaves it unset, since its

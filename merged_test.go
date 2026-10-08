@@ -21,8 +21,8 @@ func TestLayers_Decode_Merge(t *testing.T) {
 	t.Parallel()
 
 	// Each case merges its layers and reads the text of the merged
-	// document, as a validator reads it. The files are base.yaml and
-	// prod.yaml, with mid.yaml between them when the case has three.
+	// document. The files are base.yaml and prod.yaml, with mid.yaml
+	// between them when the case has three.
 	tcs := map[string]struct {
 		// Where an error at each path binds, as "file:line:col", or as the
 		// name of the file for one that binds with no position.
@@ -1162,38 +1162,22 @@ func TestLayers_MergedLayer(t *testing.T) {
 }
 
 // mergedDocument returns the root Node of the document layers merge
-// into, as a [niceyaml.Validator] gets it.
+// into.
 func mergedDocument(t *testing.T, layers *niceyaml.Layers) *niceyaml.Node {
 	t.Helper()
 
-	var doc *niceyaml.Node
-
-	err := layers.Validate(t.Context(), niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
-		doc = n
-
-		return nil
-	}))
+	doc, err := layers.Document()
 	require.NoError(t, err)
-	require.NotNil(t, doc)
 
 	return doc
 }
 
-// mergedText returns the text of the document layers merge into, as a
-// [niceyaml.Validator] reads it from the lines of the Source of its
-// Node, with a line break behind each line.
+// mergedText returns the text of the document layers merge into, with a
+// line break behind each line.
 func mergedText(t *testing.T, layers *niceyaml.Layers) string {
 	t.Helper()
 
-	var text string
-
-	err := layers.Validate(t.Context(), niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
-		text = n.Source().View().Held().Content()
-
-		return nil
-	}))
-	require.NoError(t, err)
-
+	text := mergedDocument(t, layers).Source().View().Held().Content()
 	if text == "" {
 		return ""
 	}

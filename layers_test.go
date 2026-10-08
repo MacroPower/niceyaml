@@ -56,6 +56,53 @@ func ExampleLayers() {
 	//      |     ^^^^ port must be at least 1
 }
 
+func ExampleLayers_Document() {
+	ctx := context.Background()
+
+	base, err := niceyaml.NewSourceFromString(
+		"kind: Service\n\nserver:\n  host: example.com\n  port: 0\n",
+		niceyaml.WithName("base.yaml"),
+	).Document()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	prod, err := niceyaml.NewSourceFromString(
+		"server:\n  host: prod.example.com\n",
+		niceyaml.WithName("prod.yaml"),
+	).Document()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	doc, err := niceyaml.NewLayers(base, prod).Document()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// One value of the layers decodes on its own.
+	host, err := doc.DecodeAt[string](ctx, paths.Doc().Child("server", "host"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(host)
+
+	// The view holds the text the layers merge into, which is no file.
+	fmt.Println(doc.View().Held().Content())
+
+	// An error binds in the file that holds its value.
+	fmt.Println(doc.NewError("port must be at least 1", niceyaml.AtPath(paths.Doc().Child("server", "port"))))
+
+	// Output:
+	// prod.example.com
+	// kind: Service
+	// server:
+	//   host: prod.example.com
+	//   port: 0
+	// base.yaml:5:9: $.server.port: port must be at least 1
+}
+
 func TestLayers_SelfValidate(t *testing.T) {
 	t.Parallel()
 
@@ -740,6 +787,219 @@ func TestLayers_Validate(t *testing.T) {
 	})
 }
 
+func TestLayers_Document(t *testing.T) {
+	t.Parallel()
+
+	// The blank line keeps the lines of base.yaml apart from the lines of
+	// the merged document.
+	const (
+		baseInput = "# base\nname: shop\n\nserver:\n  host: example.com\n  port: 0\n"
+		prodInput = "server:\n  host: prod.example.com\n"
+	)
+
+	var (
+		host = paths.Doc().Child("server", "host")
+		port = paths.Doc().Child("server", "port")
+	)
+
+	t.Run("the Node is the root of the merged document", func(t *testing.T) {
+		t.Parallel()
+
+		nodes := layerNodes(t, baseInput, prodInput)
+		layers := niceyaml.NewLayers(nodes...)
+
+		doc, err := layers.Document()
+		require.NoError(t, err)
+
+		assert.NotContains(t, nodes, doc)
+		assert.True(t, doc.Path().IsRoot())
+		assert.Same(t, doc, doc.Document())
+		assert.Equal(t, "base.yaml", doc.Source().Name())
+		assert.Equal(t, niceyaml.NodeMapping, doc.Kind())
+		assert.Equal(t, "# base\nname: shop\nserver:\n  host: prod.example.com\n  port: 0",
+			doc.View().Held().Content())
+
+		// Every call returns the Node a validator gets.
+		again, err := layers.Document()
+		require.NoError(t, err)
+		assert.Same(t, doc, again)
+
+		ran := false
+
+		err = layers.Validate(t.Context(), niceyaml.ValidatorFunc(
+			func(_ context.Context, n *niceyaml.Node) error {
+				ran = true
+
+				assert.Same(t, doc, n)
+
+				return nil
+			},
+		))
+		require.NoError(t, err)
+		assert.True(t, ran)
+	})
+
+	t.Run("a caller reads one value of the layers", func(t *testing.T) {
+		t.Parallel()
+
+		doc, err := niceyaml.NewLayers(layerNodes(t, baseInput, prodInput)...).Document()
+		require.NoError(t, err)
+
+		got, err := doc.DecodeAt[string](t.Context(), host)
+		require.NoError(t, err)
+		assert.Equal(t, "prod.example.com", got)
+
+		server, err := yamltest.At(t, doc, paths.Doc().Child("server")).Decode[layerServer](
+			t.Context(), niceyaml.WithSelfValidation(false),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, layerServer{Host: "prod.example.com"}, server)
+
+		var tls string
+
+		found, err := doc.DecodeIfPresent(t.Context(), paths.Doc().Child("server", "tls"), &tls)
+		require.NoError(t, err)
+		assert.False(t, found)
+
+		fields, err := doc.Nodes(paths.Doc().Child("server").ChildAll())
+		require.NoError(t, err)
+		require.Len(t, fields, 2)
+		assert.Equal(t, "$.server.host", fields[0].Path().String())
+		assert.Equal(t, "$.server.port", fields[1].Path().String())
+	})
+
+	t.Run("an error binds in the file of a layer", func(t *testing.T) {
+		t.Parallel()
+
+		doc, err := niceyaml.NewLayers(layerNodes(t, baseInput, prodInput)...).Document()
+		require.NoError(t, err)
+
+		server := yamltest.At(t, doc, paths.Doc().Child("server"))
+
+		_, wrongType := doc.DecodeAt[int](t.Context(), host)
+		_, missing := doc.At(paths.Doc().Child("server", "tls"))
+
+		tcs := map[string]struct {
+			err  error
+			want string
+		}{
+			"at a path": {
+				err:  doc.NewError("here", niceyaml.AtPath(port)),
+				want: "base.yaml:6:9: $.server.port: here",
+			},
+			"at a path from a scoped Node": {
+				err:  server.NewError("here", niceyaml.AtPath(paths.Current().Child("host"))),
+				want: "prod.yaml:2:9: $.server.host: here",
+			},
+			"at a scoped Node": {
+				err:  server.NewError("here"),
+				want: "prod.yaml:2:3: $.server: here",
+			},
+			"of a decode of one value": {
+				err:  wrongType,
+				want: "prod.yaml:2:9: $.server.host: expected integer, got string",
+			},
+			"of a path no layer holds": {
+				err:  missing,
+				want: "prod.yaml:1:1: $.server.tls: not found",
+			},
+			"with no location": {
+				err:  doc.Bind(errors.New("quota service: connection refused")),
+				want: "base.yaml: quota service: connection refused",
+			},
+		}
+
+		for name, tc := range tcs {
+			require.EqualError(t, tc.err, tc.want, name)
+		}
+	})
+
+	t.Run("the positions of the Node read the merged text", func(t *testing.T) {
+		t.Parallel()
+
+		nodes := layerNodes(t, baseInput, prodInput)
+
+		doc, err := niceyaml.NewLayers(nodes...).Document()
+		require.NoError(t, err)
+
+		merged, err := doc.Ranges(port)
+		require.NoError(t, err)
+
+		inBase, err := nodes[0].Ranges(port)
+		require.NoError(t, err)
+
+		assert.Equal(t, position.New(4, 8), merged[0].Start)
+		assert.Equal(t, position.New(5, 8), inBase[0].Start)
+
+		// The error binds in base.yaml, at the range that file has for
+		// the value.
+		err = doc.NewError("here", niceyaml.AtPath(port))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, nodes[0], bound.Node())
+		assert.Same(t, nodes[0].Source(), bound.Source())
+
+		rng, ok := bound.Range()
+		require.True(t, ok)
+		assert.Equal(t, inBase[0], rng)
+
+		assert.False(t, niceyaml.Annotate(err, doc.View()))
+		assert.True(t, niceyaml.Annotate(err, nodes[0].View()))
+
+		// A position reads the merged text, so the one base.yaml has for
+		// the port names no value of the merged document.
+		err = doc.NewError("here", niceyaml.AtPosition(merged[0].Start))
+		require.EqualError(t, err, "base.yaml:6:9: here")
+
+		err = doc.NewError("here", niceyaml.AtPosition(inBase[0].Start))
+		require.EqualError(t, err, "base.yaml: here")
+	})
+
+	t.Run("a layer that holds no value returns its error and no Node", func(t *testing.T) {
+		t.Parallel()
+
+		docs := niceyaml.NewSourceFromString("server: [\n", niceyaml.WithName("prod.yaml")).AllDocuments()
+		require.Len(t, docs, 1)
+
+		layers := niceyaml.NewLayers(layerNodes(t, baseInput)[0], docs[0])
+
+		doc, err := layers.Document()
+		require.ErrorIs(t, err, docs[0].Err())
+		assert.Nil(t, doc)
+
+		// A bind goes on without the layer.
+		err = layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(port)))
+		require.EqualError(t, err, "base.yaml:6:9: $.server.port: here")
+	})
+
+	t.Run("layers that hold no Node return an empty document", func(t *testing.T) {
+		t.Parallel()
+
+		var zero niceyaml.Layers
+
+		tcs := map[string]*niceyaml.Layers{
+			"no Nodes":       niceyaml.NewLayers(),
+			"only nil Nodes": niceyaml.NewLayers(nil, nil),
+			"the zero value": &zero,
+			"a nil pointer":  nil,
+		}
+
+		for name, layers := range tcs {
+			doc, err := layers.Document()
+			require.NoError(t, err, name)
+			require.NotNil(t, doc, name)
+
+			assert.True(t, doc.IsEmpty(), name)
+			assert.Empty(t, doc.Source().Name(), name)
+
+			err = doc.NewError("port is required", niceyaml.AtPath(port))
+			require.EqualError(t, err, "$.server.port: port is required", name)
+		}
+	})
+}
+
 func TestLayers_Empty(t *testing.T) {
 	t.Parallel()
 
@@ -972,9 +1232,12 @@ func TestLayers_Concurrent(t *testing.T) {
 	var wg sync.WaitGroup
 
 	decoded, bound := make([]error, calls), make([]error, calls)
+	docs, merged := make([]*niceyaml.Node, calls), make([]error, calls)
 
 	for i := range calls {
 		wg.Go(func() {
+			docs[i], merged[i] = layers.Document()
+
 			_, decoded[i] = layers.Decode[layerConfig](t.Context())
 
 			bound[i] = layers.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("server", "host"))))
@@ -984,6 +1247,8 @@ func TestLayers_Concurrent(t *testing.T) {
 	wg.Wait()
 
 	for i := range calls {
+		require.NoError(t, merged[i])
+		assert.Same(t, docs[0], docs[i])
 		require.EqualError(t, decoded[i], "base.yaml:3:9: $.server.port: port must be at least 1")
 		require.EqualError(t, bound[i], "prod.yaml:2:9: $.server.host: bad")
 	}

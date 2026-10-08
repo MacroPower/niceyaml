@@ -121,6 +121,17 @@ base.yaml:3:9: $.server.port: port must be at least 1
 
 The decode fills the Go value from the merged document as any decode does, so defaults the value holds survive where the files leave a field out.
 
+`Layers.Document` returns the merged document as a [`Node`][niceyaml.Node], and its errors still report the file and the line that hold each value. One value of the files then decodes on its own, and the merged text prints as any document does:
+
+```go
+doc, err := niceyaml.NewLayers(base, prod).Document()
+if err != nil {
+	return err
+}
+
+kind, err := doc.DecodeAt[string](ctx, paths.Doc().Child("kind"))
+```
+
 ### Viewport
 
 See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pages, searches, diffs, and validates YAML documents.

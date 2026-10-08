@@ -113,18 +113,11 @@ var (
 // decode names [WithReferences]. That option gives the reference
 // documents to the Source of the layer that reads them.
 //
-// The merged document belongs to a [Source] of its own, and a
-// [Validator] gets its root Node. The Source holds the merged value as
-// block-style YAML, below the preamble of the lowest layer, so a schema
-// directive in the comments of base.yaml names the schema of the merged
-// document. Every scalar keeps the text its layer spells, such as 0x10
-// or 1.50, and a string keeps its quotes, except that a block scalar or
-// a string of several lines reads as one double-quoted line. The Source
-// takes its [Source.Name], its [Source.FilePath], and its [Source.FS]
-// from the Source of the lowest layer, with what [WithAllowDuplicateKeys],
-// [WithAliasLimit], and [WithYAMLParserOptions] set there. A validator
-// that reads the lines or the positions of its Node thus reads the
-// merged text, which is no file of the program.
+// [Layers.Document] returns the root Node of the merged document, and a
+// [Validator] gets that Node. The document belongs to a [Source] of its
+// own, which holds the merged value as YAML text under the name of the
+// lowest layer. Document describes that text, which is no file of the
+// program.
 //
 // An error never binds in that text. An error with a path binds in the
 // highest layer whose document holds the value at that path, and the
@@ -151,7 +144,7 @@ var (
 // `$.defaults.server.port` where it binds in a layer that holds the
 // value under defaults.
 //
-// A Node of a merged document is a layer like any other. Layers that
+// A Node from [Layers.Document] is a layer like any other. Layers that
 // hold one merge its value as they merge a file of the same text. Each
 // error still binds in the file that holds its value, with the path
 // that file has for it.
@@ -168,9 +161,9 @@ var (
 // A layer whose document did not parse holds no value. Neither does a
 // layer that a decode of it alone into an any value rejects, as it
 // rejects an alias with no anchor. [Layers.Decode], [Layers.DecodeInto],
-// and [Layers.Validate] return the error of the lowest such layer,
-// bound in its file. [Layers.SelfValidate] and [Layers.Bind] go on
-// without that layer.
+// [Layers.Validate], and [Layers.Document] return the error of the
+// lowest such layer, bound in its file. [Layers.SelfValidate] and
+// [Layers.Bind] go on without that layer.
 //
 // Layers that hold no Node stand for a value that came from no file,
 // such as defaults with the environment over them. A decode then leaves
@@ -206,6 +199,57 @@ func NewLayers(nodes ...*Node) *Layers {
 	}
 
 	return l
+}
+
+// Document returns the root [*Node] of the merged document, the Node a
+// [Validator] gets from [Layers.Validate]. A caller reads one value of
+// the layers through it without a decode of the rest, or prints what
+// they hold together:
+//
+//	doc, err := layers.Document()
+//	if err != nil {
+//		return err
+//	}
+//
+//	kind, err := doc.DecodeAt[string](ctx, paths.Doc().Child("kind"))
+//
+// A layer that holds no value, as [Layers] describes, returns its error
+// and no Node. Layers that hold no Node return the root of an empty
+// document with no name. Every call returns the same Node.
+//
+// The merged document belongs to a [Source] of its own. The Source holds
+// the merged value as block-style YAML, below the preamble of the lowest
+// layer, so a schema directive in the comments of base.yaml names the
+// schema of the merged document. It keeps no other comment of a layer.
+// Every scalar keeps the text its layer spells, such as 0x10 or 1.50,
+// and a string keeps its quotes, except that a block scalar or a string
+// of several lines reads as one double-quoted line. The Source takes its
+// [Source.Name], its [Source.FilePath], and its [Source.FS] from the
+// Source of the lowest layer, with what [WithAllowDuplicateKeys],
+// [WithAliasLimit], and [WithYAMLParserOptions] set there.
+//
+// That text is no file of the program, though it has the name of one.
+// [Node.View], [Node.Span], [Node.Tokens], [Node.Ranges], and
+// [Node.PathAt] read its lines and its positions. So does a position or
+// a range in an error bound through the Node. A position taken from the
+// file of a layer thus names whatever lies there in the merged text.
+//
+// An error bound through the Node binds in the file of a layer, as
+// [Layers] describes, and never in the merged text. Its position is thus
+// not the one [Node.Ranges] returns for its path. [Annotate] marks the
+// error on a view of the layer and marks nothing on [Node.View], and
+// [SourceError.Excerpt] shows the lines of the layer. [SourceError.Node]
+// and [SourceError.Document] return the Node of the layer, and
+// [SourceError.Path] is the path of the value in its file. For a layer
+// from [Node.At], that path differs from the path in the merged
+// document.
+func (l *Layers) Document() (*Node, error) {
+	doc, err := l.document(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	return doc, nil
 }
 
 // document returns the root Node of the merged document, as
