@@ -22,6 +22,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/capture"
+	"go.jacobcolvin.com/niceyaml/internal/fault"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
 )
@@ -493,8 +494,15 @@ func (e noMatchError) Error() string {
 // Is reports whether target is [ErrNoMatch], or whether a reason matches
 // target, as [errors.Is] reports it. A lookup thus matches a reason such
 // as [ErrNoDirective].
+//
+// It also matches the mark of a problem the document is at fault for. A
+// reason can wrap the error of a context that ended, as one from a
+// resolver with a deadline of its own does, and [niceyaml.Invalid]
+// declares no fault for an error that matches one. A lookup whose own
+// context ended never reports a no-match, so the no-match declares the
+// fault itself.
 func (e noMatchError) Is(target error) bool {
-	return target == ErrNoMatch ||
+	return target == ErrNoMatch || target == fault.ErrInvalid ||
 		slices.ContainsFunc(e.reasons, func(reason error) bool { return errors.Is(reason, target) })
 }
 

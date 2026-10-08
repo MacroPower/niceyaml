@@ -3415,6 +3415,24 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		assert.Equal(t, "no schema for kind Service", problems[0].Children[1].Message())
 	})
 
+	t.Run("a reason that wraps the error of a context leaves the document at fault", func(t *testing.T) {
+		t.Parallel()
+
+		// The resolver gave up under a deadline of its own, and the
+		// context of the lookup goes on.
+		timedOut := schema.ResolverFunc(func(context.Context, *niceyaml.Node) (schema.Ref, error) {
+			return schema.Ref{}, fmt.Errorf("%w: read catalog: %w", schema.ErrNoMatch, context.DeadlineExceeded)
+		})
+		reg := schema.NewRegistry(schema.WithResolvers(timedOut))
+
+		doc := yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml")
+
+		_, err := reg.Lookup(t.Context(), doc)
+		require.EqualError(t, err, "app.yaml: no matching schema")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		assert.True(t, niceyaml.IsInvalid(err))
+	})
+
 	t.Run("Validate passes the reasons through when it requires a schema", func(t *testing.T) {
 		t.Parallel()
 
