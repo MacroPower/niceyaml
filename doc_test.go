@@ -72,9 +72,6 @@ var policies = []dependencyPolicy{
 			// itself, since go-yaml's own option for them works only when
 			// go-yaml writes the document.
 			"yaml.CommentMap",
-			// The check WithYAMLStructValidator runs on each struct of a
-			// decode.
-			"yaml.StructValidator",
 		},
 		prefix: "YAML",
 	},

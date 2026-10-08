@@ -2281,7 +2281,6 @@ func contextEnded(err error) bool {
 //   - [WithJSONUnmarshalers]
 //   - [WithYAMLOrderedMaps]
 //   - [WithYAMLComments]
-//   - [WithYAMLStructValidator]
 //   - [DecodeOptions]
 //
 // A DecodeOption sets how one decode runs. A setting that describes the
@@ -2299,9 +2298,7 @@ type DecodeOption func(*decodeConfig)
 // value holds the defaults.
 type decodeConfig struct {
 	// Receives the comments of the decode, or nil for none.
-	comments yaml.CommentMap
-	// Checks each struct the decoder fills, or nil for none.
-	structValidator      yaml.StructValidator
+	comments             yaml.CommentMap
 	validators           []Validator
 	allowedFieldPrefixes []string
 	// The types the options hand to an unmarshaler that no method of the
@@ -2342,10 +2339,6 @@ func (c decodeConfig) yamlOptions() []yaml.DecodeOption {
 
 	if c.orderedMaps {
 		opts = append(opts, yaml.UseOrderedMap())
-	}
-
-	if c.structValidator != nil {
-		opts = append(opts, yaml.Validator(c.structValidator))
 	}
 
 	return opts
@@ -2709,39 +2702,6 @@ func WithYAMLComments(cm yaml.CommentMap) DecodeOption {
 	}
 }
 
-// WithYAMLStructValidator is a [DecodeOption] that has sv check every
-// struct the decode fills, once the decoder has set its fields, as
-// go-yaml's [yaml.Validator] option does. A [yaml.StructValidator] has
-// one method, Struct, which a validator of
-// github.com/go-playground/validator/v10 implements, so a program that
-// tags its fields with the rules of that package checks them inside the
-// decode:
-//
-//	check := niceyaml.WithYAMLStructValidator(validator.New())
-//
-//	cfg, err := doc.Decode[Config](ctx, check)
-//
-// An error from sv fails the decode and matches [ErrDecode]. When the
-// error lists a [yaml.FieldError] for each field, as the errors of that
-// package do, it binds at the value of the first field it lists. Where
-// the document lacks that field, it binds at the struct, or with no
-// location when the struct is the node the decode reads. Any other error
-// from sv binds with no location.
-//
-// A type that checks its own invariants implements [SelfValidator]
-// instead, and each of its errors then binds at the path the type names.
-// The decoder checks a struct with sv each time it fills one, so the
-// search for the other problems of a failed decode, which
-// [Node.DecodeInto] describes, can call sv again on a struct that holds
-// one of its fields. What sv returns there adds no problem. The last
-// WithYAMLStructValidator option replaces the earlier ones, and a nil sv
-// checks nothing.
-func WithYAMLStructValidator(sv yaml.StructValidator) DecodeOption {
-	return func(c *decodeConfig) {
-		c.structValidator = sv
-	}
-}
-
 // DecodeOptions is a [DecodeOption] that applies opts in order. A
 // program that decodes many documents names its decoder settings in one
 // place, and passes the one value wherever a DecodeOption goes. A second
@@ -2953,9 +2913,8 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 //
 // To confirm a problem, the search decodes the struct that reads the
 // value from that one entry. That decode can call a registered function
-// or the struct validator of [WithYAMLStructValidator] again, and the
-// unmarshaler of a field of the same name in an inline struct. What they
-// return adds no problem.
+// again, and the unmarshaler of a field of the same name in an inline
+// struct. What they return adds no problem.
 //
 // An error the decoder reports without a token of the source comes back
 // with no location and keeps the text go-yaml gave it. The decoder

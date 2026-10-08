@@ -669,14 +669,13 @@
 // yields a go-yaml value carries a YAML prefix, so a caller can tell at
 // the call site when the go-yaml dependency shows. [WithYAMLComments] and
 // [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] take go-yaml's
-// comment map, [WithYAMLStructValidator] takes its struct validator, and
-// a decode under [WithYAMLOrderedMaps] yields its ordered map. The
-// encoder settings with no option of their own pass through
-// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLOptions], which takes
-// go-yaml's own options. A test in this package checks every exported
-// declaration. It fails when a declaration names a go-yaml type outside
-// the test's allowlist, or names the encoder option type, the comment
-// map, or the struct validator in an identifier without the YAML prefix.
+// comment map, and a decode under [WithYAMLOrderedMaps] yields its
+// ordered map. The encoder settings with no option of their own pass
+// through [go.jacobcolvin.com/niceyaml/encoder.WithYAMLOptions], which
+// takes go-yaml's own options. A test in this package checks every
+// exported declaration. It fails when a declaration names a go-yaml type
+// outside the test's allowlist, or names the encoder option type or the
+// comment map in an identifier without the YAML prefix.
 //
 // The [go.jacobcolvin.com/niceyaml/schema] package follows the same rule
 // for the JSON Schema library it builds on:

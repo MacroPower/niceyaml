@@ -285,12 +285,9 @@ type decodeProblem struct {
 // method once for each field, element, or map value that reads the
 // scalar, and once more to confirm a scalar the method rejects. A decode
 // of the struct that reads a leaf can call code the walk does not pair
-// with the leaf. That is a registered function, the
-// [yaml.StructValidator] of [WithYAMLStructValidator], and the
-// unmarshaler of another value that reads the entry of the leaf, as a
-// field of the same name in an inline struct does. What those return
-// adds no problem. A struct with no field that a probe decodes reaches a
-// StructValidator too.
+// with the leaf. That is a registered function and the unmarshaler of
+// another value that reads the entry of the leaf, as a field of the same
+// name in an inline struct does. What those return adds no problem.
 //
 // When the decoder rejects unknown fields, an [unknownFieldFinder] adds
 // the rejection of each one the document holds.

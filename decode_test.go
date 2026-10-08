@@ -49,9 +49,6 @@ var (
 
 	// The error decodeLevel reports for a name that is no level.
 	errUnknownLevel = errors.New("unknown level")
-
-	// The error a structChecks reports with no field.
-	errStructRejected = errors.New("struct rejected")
 )
 
 func TestSource_Decoder(t *testing.T) {
@@ -4752,129 +4749,6 @@ func TestWithYAMLComments(t *testing.T) {
 		)
 		require.NoError(t, err)
 		assert.Empty(t, first)
-	})
-}
-
-// structFieldError names the field a [structChecks] rejects, as a
-// [yaml.FieldError].
-type structFieldError struct {
-	field string
-}
-
-func (e structFieldError) Error() string       { return e.field + " is not valid" }
-func (e structFieldError) StructField() string { return e.field }
-
-// structFieldErrors lists the fields a [structChecks] rejects, in the
-// shape go-yaml reads the fields from.
-type structFieldErrors []structFieldError
-
-func (e structFieldErrors) Error() string { return e[0].Error() }
-
-// structChecks is a [yaml.StructValidator] that records the type of each
-// struct it checks, and rejects a structLimits by the field its fail
-// names, or with errStructRejected when fail is "-".
-type structChecks struct {
-	seen *[]string
-	fail string
-}
-
-// structLimits is the struct a [structChecks] rejects.
-type structLimits struct {
-	Max int `yaml:"max"`
-	Min int `yaml:"min"`
-}
-
-func (c structChecks) Struct(v any) error {
-	if c.seen != nil {
-		*c.seen = append(*c.seen, fmt.Sprintf("%T", v))
-	}
-
-	if _, ok := v.(structLimits); !ok {
-		return nil
-	}
-
-	switch c.fail {
-	case "":
-		return nil
-	case "-":
-		return errStructRejected
-	default:
-		return structFieldErrors{{field: c.fail}}
-	}
-}
-
-func TestWithYAMLStructValidator(t *testing.T) {
-	t.Parallel()
-
-	type config struct {
-		Name   string       `yaml:"name"`
-		Limits structLimits `yaml:"limits"`
-	}
-
-	input := "name: api\nlimits:\n  max: 9\n"
-
-	t.Run("checks every struct the decode fills", func(t *testing.T) {
-		t.Parallel()
-
-		var seen []string
-
-		_, err := yamltest.FirstDocument(t, input).Decode[config](
-			t.Context(), niceyaml.WithYAMLStructValidator(structChecks{seen: &seen}),
-		)
-		require.NoError(t, err)
-		assert.Equal(t, []string{"niceyaml_test.structLimits", "niceyaml_test.config"}, seen)
-	})
-
-	tcs := map[string]struct {
-		is   error
-		err  string
-		opts []niceyaml.DecodeOption
-	}{
-		"field the document sets": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLStructValidator(structChecks{fail: "Max"})},
-			err:  "3:8: $.limits.max: Max is not valid",
-		},
-		"field the document lacks": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLStructValidator(structChecks{fail: "Min"})},
-			err:  "3:3: $.limits: Min is not valid",
-		},
-		"error that names no field": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLStructValidator(structChecks{fail: "-"})},
-			is:   errStructRejected,
-			err:  "struct rejected",
-		},
-		"the last option replaces the earlier ones": {
-			opts: []niceyaml.DecodeOption{
-				niceyaml.WithYAMLStructValidator(structChecks{fail: "-"}),
-				niceyaml.WithYAMLStructValidator(structChecks{fail: "Max"}),
-			},
-			err: "3:8: $.limits.max: Max is not valid",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			_, err := yamltest.FirstDocument(t, input).Decode[config](t.Context(), tc.opts...)
-			require.EqualError(t, err, tc.err)
-			require.ErrorIs(t, err, niceyaml.ErrDecode)
-
-			if tc.is != nil {
-				require.ErrorIs(t, err, tc.is)
-			}
-		})
-	}
-
-	t.Run("a nil validator checks nothing", func(t *testing.T) {
-		t.Parallel()
-
-		_, err := yamltest.FirstDocument(t, input).Decode[config](
-			t.Context(),
-			niceyaml.WithYAMLStructValidator(structChecks{fail: "-"}),
-			niceyaml.WithYAMLStructValidator(nil),
-		)
-		require.NoError(t, err)
 	})
 }
 

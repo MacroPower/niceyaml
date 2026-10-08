@@ -175,18 +175,6 @@ func (p *problemPorted) UnmarshalYAML(unmarshal func(any) error) error {
 	return nil
 }
 
-// portValidator is a [yaml.StructValidator] that requires the port of a
-// [problemServer].
-type portValidator struct{}
-
-func (portValidator) Struct(v any) error {
-	if s, ok := v.(problemServer); ok && s.Port == 0 {
-		return errPortRequired
-	}
-
-	return nil
-}
-
 // callsKey is the context key of the [*problemCalls] of a decode.
 type callsKey struct{}
 
@@ -1375,21 +1363,6 @@ func TestDocument_DecodeInto_Problems_Defaults(t *testing.T) {
 		}{Server: problemPorted{Port: 8080}}
 
 		err := yamltest.FirstDocument(t, input).DecodeInto(t.Context(), &cfg)
-		require.EqualError(t, err, "1:10: $.timeout: expected integer, got string")
-		require.NotErrorIs(t, err, errPortRequired)
-	})
-
-	t.Run("struct validator", func(t *testing.T) {
-		t.Parallel()
-
-		cfg := struct {
-			Server  problemServer `yaml:"server"`
-			Timeout int           `yaml:"timeout"`
-		}{Server: problemServer{Port: 8080}}
-
-		err := yamltest.FirstDocument(t, input).DecodeInto(
-			t.Context(), &cfg, niceyaml.WithYAMLStructValidator(portValidator{}),
-		)
 		require.EqualError(t, err, "1:10: $.timeout: expected integer, got string")
 		require.NotErrorIs(t, err, errPortRequired)
 	})
