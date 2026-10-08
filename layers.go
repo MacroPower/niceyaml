@@ -165,11 +165,13 @@ var (
 // lowest such layer, bound in its file. [Layers.SelfValidate] and
 // [Layers.Bind] go on without that layer.
 //
-// Layers that hold no Node stand for a value that came from no file,
-// such as defaults with the environment over them. A decode then leaves
-// the value as it was, and each error binds with no position, as in
-// "$.servers[1].port: port is required". A program whose files are
-// optional thus makes the same calls whichever of them exist.
+// A program whose optional files are all missing builds Layers that
+// hold no Node. A decode then leaves the value as it was, and each error
+// binds with no position, as in "$.servers[1].port: port is required".
+// The program thus makes the same calls whichever of its files exist.
+// Each such error is bound to an empty document, so no other document
+// places it. A value that came from no document validates through
+// [SelfValidateValue] instead.
 //
 // Layers merge their Nodes once, on the first call that needs the merged
 // document, and never change after that, so they are safe for

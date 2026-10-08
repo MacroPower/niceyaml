@@ -907,10 +907,9 @@ func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) er
 // returns. A Source that holds more than one document, or a document
 // that does not parse, returns the error Source.Document returns.
 //
-// A value that came from no file validates through an empty Source,
-// which holds one document with no content. A program whose
-// configuration file is optional thus runs the same calls whether or not
-// the file exists:
+// An empty Source, which holds one document with no content, stands in
+// for a file that does not exist. A program whose configuration file is
+// optional thus runs the same calls whether or not the file exists:
 //
 //	source, err := niceyaml.NewSourceFromFile(path)
 //	switch {
@@ -933,6 +932,10 @@ func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) er
 // walk then binds with no position, and its text names the path from v,
 // as in "$.servers[1].port: port is required". With the file, the same
 // error reads "app.yaml:3:5: $.servers[1].port: port is required".
+//
+// An error of an empty Source is bound to its document, so no other
+// document places it. [SelfValidateValue] validates a value that came
+// from no document, and a document can still place its errors.
 func (s *Source) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
 	doc, err := s.Document()
 	if err != nil {
