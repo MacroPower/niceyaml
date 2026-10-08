@@ -120,6 +120,7 @@ type Source struct {
 //   - [WithAllowDuplicateKeys]
 //   - [WithAliasLimit]
 //   - [WithReferences]
+//   - [WithExcerpts]
 //
 // [WithAllowDuplicateKeys] and [WithReferences] change what the documents
 // mean, and [WithAliasLimit] says whether the program trusts their
@@ -128,6 +129,11 @@ type Source struct {
 // Settings of one decode, such as [WithDisallowUnknownFields], are
 // [DecodeOption] values. A caller passes them to [Node.Decode], and
 // holds them in [DecodeOptions] to decode every document with them.
+//
+// [WithExcerpts] says whether the text holds something an error must not
+// show, such as a secret. The code that loads the text knows that, and
+// the code that prints an error does not, so the Source carries the
+// answer to every renderer of its errors.
 type SourceOption func(*sourceConfig)
 
 // sourceConfig holds the settings a [SourceOption] configures. An option
@@ -146,6 +152,12 @@ type sourceConfig struct {
 	allowDuplicateKeys bool
 	// Turns off the alias limit for every reader of the documents.
 	skipAliasLimit bool
+	// Says no error may show the text, so no excerpt holds a line of the
+	// Source.
+	noExcerpts bool
+	// Says the same of the text of a reference document, which the lines
+	// of the Source do not hold and the document [Layers] merge does.
+	noReferenceExcerpts bool
 }
 
 // WithName is a [SourceOption] that sets the name for the [Source], which
@@ -301,6 +313,8 @@ func WithAliasLimit(enabled bool) SourceOption {
 // and the alias limit counts no reference document, as WithAliasLimit
 // describes. WithReferences skips a nil Source. A reference document
 // that does not parse fails every decode of the Source.
+// [Layers] carry what [WithExcerpts] says of a Source in refs to the
+// document they merge, which holds the values an alias reads from it.
 //
 // An alias inside refs reads the anchors of refs alone, whatever anchors
 // the document defines. Both files here define `base`:
@@ -388,7 +402,75 @@ func WithReferences(refs ...*Source) SourceOption {
 
 			c.references = append(c.references, ref.references...)
 			c.references = append(c.references, ref.text())
+
+			if ref.noExcerpts || ref.noReferenceExcerpts {
+				c.noReferenceExcerpts = true
+			}
 		}
+	}
+}
+
+// WithExcerpts is a [SourceOption] that says whether an error may show
+// the text of the [Source] in an excerpt. The default is true. Pass
+// false for a Source whose text holds secrets, such as the values a
+// program read from its environment:
+//
+//	env, err := niceyaml.NewSourceFromBytes(data,
+//		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false)).Document()
+//
+// The option states a fact about the text. The code that loads the text
+// knows whether it holds a secret, and the code that prints an error
+// does not, so the Source carries the fact to every renderer of its
+// errors.
+//
+// An error bound in a Source with excerpts off keeps its position, its
+// path, and its message, and no excerpt holds a line of the Source:
+//
+//	environment:3:9: $.db.port: port must be at least 1
+//
+// [SourceError.Excerpt] reports false for the error, and
+// [SourceError.Excerpts] and [Excerpts] yield no excerpt of the Source.
+// [FormatError], the %+v verb, and
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] thus print
+// the tree of the error and add no line in place of the excerpt, since
+// the tree names the position of the error already. An error that holds
+// bindings in several sources keeps the excerpt of each other source. A
+// renderer that builds an excerpt of its own, as one that reads an
+// [ErrorTree] can, checks [Source.Excerpts] first.
+//
+// The option covers the excerpts this module builds. The text still
+// reaches a reader in other ways:
+//
+//   - [Annotate] and [SourceError.Annotate] mark a view the caller
+//     supplies, so the caller decides who sees it.
+//   - [Source.View], [Source.Lines], and [Source.Tokens] return the text
+//     as they do for any Source, and so do the methods of each [Node].
+//   - A message that quotes what it rejects prints it. A type that reads
+//     text quotes the value, as in `time: invalid duration
+//     "sk-live-abcdef"` and "invalid IP address: sk-live-abcdef". A
+//     number out of range prints too, as in "expected integer from 0 to
+//     255, got 300". A key prints in the path of each error at it or
+//     below it, and in a message such as `unknown field
+//     "sk-live-abcdef"`. The name of an alias prints in the message for
+//     an anchor the document lacks.
+//   - The error of a document that did not parse unwraps to the go-yaml
+//     error, and so does the error of a value the go-yaml decoder
+//     rejects. The text of the go-yaml error holds an excerpt that
+//     go-yaml builds itself. A program that finds that error with
+//     [errors.As] and prints it shows lines of the Source, and so does a
+//     reporter that prints every error of a chain. An UnmarshalYAML
+//     method that returns the go-yaml error of a parse of its bytes puts
+//     that excerpt in the message.
+//
+// The fact follows the text into the document [Layers] merge, which
+// holds the values of every layer and of each reference document a
+// layer reads through [WithReferences]. The Source of that document has
+// excerpts off when the Source of any of them has. A Source that reads a
+// reference document holds none of its text in its own lines, so its
+// excerpts stay as its own option says.
+func WithExcerpts(enabled bool) SourceOption {
+	return func(c *sourceConfig) {
+		c.noExcerpts = !enabled
 	}
 }
 
@@ -581,6 +663,15 @@ func (s *Source) FS() fs.FS {
 	}
 
 	return s.fsys
+}
+
+// Excerpts reports whether an error may show the text of the [Source] in
+// an excerpt, which [WithExcerpts] sets. A renderer that builds an
+// excerpt of its own, from [Source.View] and [Annotate], checks it
+// first. A nil Source holds no text, so Excerpts reports true for it, as
+// it does for a Source with no option.
+func (s *Source) Excerpts() bool {
+	return s == nil || !s.noExcerpts
 }
 
 // Tokens returns the full [token.Tokens] stream of the [Source]. The first

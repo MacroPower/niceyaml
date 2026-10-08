@@ -12,6 +12,7 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/encoder"
@@ -1327,6 +1328,108 @@ func TestLayers_Bind(t *testing.T) {
 		assert.Same(t, nodes[1], bound.Node())
 		assert.Same(t, nodes[1].Source(), bound.Source())
 	})
+}
+
+func TestLayers_ExcerptsOff(t *testing.T) {
+	t.Parallel()
+
+	// The environment sets a password alone, and its text must not show.
+	base := yamltest.FirstDocument(t, "db:\n  host: db.internal\n  port: 0\n", niceyaml.WithName("base.yaml"))
+	env := yamltest.FirstDocument(t, "db:\n  password: hunter2\n",
+		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
+
+	layers := niceyaml.NewLayers(base, env)
+	db := paths.Doc().Child("db")
+
+	requiresName := schema.MustCompile([]byte(`{
+		"properties": {"db": {"required": ["name"]}}
+	}`))
+	requiresPort := schema.MustCompile([]byte(`{
+		"properties": {"db": {"required": ["name"], "properties": {"port": {"minimum": 1}}}}
+	}`))
+
+	validate := func(v niceyaml.Validator) func(t *testing.T) error {
+		return func(t *testing.T) error {
+			t.Helper()
+
+			_, err := layers.Decode[map[string]any](t.Context(), niceyaml.WithValidator(v))
+
+			return err
+		}
+	}
+
+	bind := func(err error) func(t *testing.T) error {
+		return func(*testing.T) error { return layers.Bind(err) }
+	}
+
+	tcs := map[string]struct {
+		fail func(t *testing.T) error
+		want string
+	}{
+		// No layer holds the name, so its error binds in the highest
+		// layer that holds the mapping, which is the environment.
+		"a key no layer holds prints no line of the environment": {
+			fail: validate(requiresName),
+			want: `environment:1:1: $.db.name: missing required property "name"`,
+		},
+		"a value of the environment prints no line": {
+			fail: bind(niceyaml.NewError("too short", niceyaml.AtPath(db.Child("password")))),
+			want: "environment:2:13: $.db.password: too short",
+		},
+		"a value of a file keeps its excerpt": {
+			fail: bind(niceyaml.NewError("port must be at least 1", niceyaml.AtPath(db.Child("port")))),
+			want: stringtest.JoinLF(
+				"base.yaml:3:9: $.db.port: port must be at least 1",
+				"",
+				"   1 | db:",
+				"   2 |   host: db.internal",
+				"   3 |   port: 0",
+				"     |         ^",
+			),
+		},
+		"errors in both layers print the excerpt of the file alone": {
+			fail: validate(requiresPort),
+			want: stringtest.JoinLF(
+				"base.yaml: 2 schema violations",
+				"|-- 3:9: $.db.port: 0 is less than 1",
+				"`-- environment:1:1: $.db.name: missing required property \"name\"",
+				"",
+				"base.yaml",
+				"   1 | db:",
+				"   2 |   host: db.internal",
+				"   3 |   port: 0",
+				"     |         ^ 0 is less than 1",
+			),
+		},
+		// The position names the password in the merged text, whose error
+		// binds at the value in its layer.
+		"a position in the merged text prints no line": {
+			fail: func(t *testing.T) error {
+				t.Helper()
+
+				doc, err := layers.Document()
+				require.NoError(t, err)
+
+				return doc.Bind(niceyaml.NewError("too short", niceyaml.AtPosition(position.New(3, 12))))
+			},
+			want: "environment:2:13: too short",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tc.fail(t)
+			require.Error(t, err)
+
+			assert.Equal(t, tc.want, niceyaml.FormatError(err, niceyaml.DefaultContextLines))
+
+			for renderer, got := range renderings(err) {
+				assert.NotContains(t, got, excerptSecret, renderer)
+			}
+		})
+	}
 }
 
 func TestLayers_Alias(t *testing.T) {

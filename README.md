@@ -140,7 +140,8 @@ if err != nil {
 	return err
 }
 
-env, err := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment")).Document()
+env, err := niceyaml.NewSourceFromBytes(data,
+	niceyaml.WithName("environment"), niceyaml.WithExcerpts(false)).Document()
 if err != nil {
 	return err
 }
@@ -151,6 +152,8 @@ cfg, err := niceyaml.NewLayers(base, prod, env).Decode[Config](ctx, niceyaml.Wit
 ```text
 environment:2:9: $.server.port: port must be at least 1
 ```
+
+The environment holds secrets, and the excerpt of an error shows the lines around it. `WithExcerpts(false)` marks the text of that layer as one no error may show, so an error there prints its position, its path, and its message, and no line of the layer. An error in a file keeps its excerpt.
 
 The docs of [`Layers`][niceyaml.Layers] say what such a layer cannot do, such as unset a value.
 

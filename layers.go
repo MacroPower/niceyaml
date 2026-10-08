@@ -195,10 +195,21 @@ var (
 // [WithDisallowUnknownFields] reports such a key. An error at a mapping
 // binds in the highest layer that holds the mapping, and so does an
 // error for a key the mapping lacks. Both thus bind in such a layer once
-// it sets one key there, whichever layer the fix belongs in. The excerpt
-// of an error shows lines of its layer. A secret the environment set
-// thus prints when it sits on the line of the error or among the context
-// lines around it, and the text of [Layers.Document] holds it too.
+// it sets one key there, whichever layer the fix belongs in.
+//
+// The excerpt of an error shows lines of its layer, so a secret the
+// environment set prints when it sits on the line of the error or among
+// the context lines around it. A program builds a layer that holds
+// secrets from a [Source] with [WithExcerpts] set to false:
+//
+//	env, err := niceyaml.NewSourceFromBytes(data,
+//		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false)).Document()
+//
+// An error in that layer then prints its position, its path, and its
+// message, and no line of the layer. An error in another layer keeps its
+// excerpt. The text of [Layers.Document] holds the secret whatever the
+// option says, so the Source of that document has excerpts off when the
+// Source of any layer has.
 //
 // A layer whose document did not parse holds no value. Neither does a
 // layer that a decode of it alone into an any value rejects, as it
@@ -270,7 +281,9 @@ func NewLayers(nodes ...*Node) *Layers {
 // of several lines reads as one double-quoted line. The Source takes its
 // [Source.Name], its [Source.FilePath], and its [Source.FS] from the
 // Source of the lowest layer, with what [WithAllowDuplicateKeys] and
-// [WithAliasLimit] set there.
+// [WithAliasLimit] set there. Its text holds values of every layer, so
+// [Source.Excerpts] reports false for it when the Source of any layer
+// has excerpts off, as [WithExcerpts] describes.
 //
 // That text is no file of the program, though it has the name of one.
 // [Node.View], [Node.Span], [Node.Tokens], [Node.Ranges], and

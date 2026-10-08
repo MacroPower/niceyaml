@@ -3518,6 +3518,10 @@ func TestSource_NilReceiver(t *testing.T) {
 			read: func(s *niceyaml.Source) any { return s.View().Count() },
 			want: 0,
 		},
+		"excerpts": {
+			read: func(s *niceyaml.Source) any { return s.Excerpts() },
+			want: true,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -5360,6 +5364,79 @@ func (s minPort) Validate() error {
 	}
 
 	return nil
+}
+
+func TestWithExcerpts(t *testing.T) {
+	t.Parallel()
+
+	// The anchor of the reference document holds a secret, and its
+	// Source has excerpts off.
+	refs := niceyaml.NewSourceFromString("port: &port hunter2\n", niceyaml.WithExcerpts(false))
+
+	tcs := map[string]struct {
+		input string
+		// The excerpt of an error at the port, which is empty when the
+		// error has none.
+		excerpt string
+		opts    []niceyaml.SourceOption
+		want    bool
+	}{
+		"no option": {
+			input:   "port: 0\n",
+			want:    true,
+			excerpt: "   1 | port: 0\n     |       ^",
+		},
+		"on": {
+			input:   "port: 0\n",
+			opts:    []niceyaml.SourceOption{niceyaml.WithExcerpts(true)},
+			want:    true,
+			excerpt: "   1 | port: 0\n     |       ^",
+		},
+		"off": {
+			input: "port: 0\n",
+			opts:  []niceyaml.SourceOption{niceyaml.WithExcerpts(false)},
+			want:  false,
+		},
+		"the last option wins": {
+			input:   "port: 0\n",
+			opts:    []niceyaml.SourceOption{niceyaml.WithExcerpts(false), niceyaml.WithExcerpts(true)},
+			want:    true,
+			excerpt: "   1 | port: 0\n     |       ^",
+		},
+		// The lines of the Source hold the alias and none of the text of
+		// the reference document, so its own option decides.
+		"a reference document with excerpts off": {
+			input:   "port: *port\n",
+			opts:    []niceyaml.SourceOption{niceyaml.WithReferences(refs)},
+			want:    true,
+			excerpt: "   1 | port: *port\n     |       ^",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input, tc.opts...)
+			assert.Equal(t, tc.want, source.Excerpts())
+
+			err := yamltest.Bind(t, source, niceyaml.NewError("bad port", niceyaml.AtPath(paths.Doc().Child("port"))))
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			excerpt, ok := bound.Excerpt(0)
+			require.Equal(t, tc.want, ok)
+
+			got := ""
+			if ok {
+				got = excerpt.String()
+			}
+
+			assert.Equal(t, tc.excerpt, got)
+		})
+	}
 }
 
 func TestWithAliasLimit(t *testing.T) {

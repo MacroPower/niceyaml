@@ -985,6 +985,144 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 	})
 }
 
+func TestLayers_Document_Excerpts(t *testing.T) {
+	t.Parallel()
+
+	const (
+		baseInput = "db:\n  host: db.internal\n"
+		prodInput = "db:\n  port: 5432\n"
+		envInput  = "db:\n  password: hunter2\n"
+	)
+
+	shown := func(t *testing.T, input, name string, opts ...niceyaml.SourceOption) *niceyaml.Node {
+		t.Helper()
+
+		return yamltest.FirstDocument(t, input, append(opts, niceyaml.WithName(name))...)
+	}
+
+	off := func(t *testing.T, input, name string) *niceyaml.Node {
+		t.Helper()
+
+		return shown(t, input, name, niceyaml.WithExcerpts(false))
+	}
+
+	// The merged text holds the values of every layer, so its Source has
+	// excerpts off when the Source of any layer has, whichever layer gave
+	// the Source its name.
+	tcs := map[string]struct {
+		layers func(t *testing.T) []*niceyaml.Node
+		want   bool
+	}{
+		"every layer has excerpts on": {
+			layers: func(t *testing.T) []*niceyaml.Node {
+				t.Helper()
+
+				return []*niceyaml.Node{shown(t, baseInput, "base.yaml"), shown(t, prodInput, "prod.yaml")}
+			},
+			want: true,
+		},
+		"the highest layer has excerpts off": {
+			layers: func(t *testing.T) []*niceyaml.Node {
+				t.Helper()
+
+				return []*niceyaml.Node{shown(t, baseInput, "base.yaml"), off(t, envInput, "environment")}
+			},
+		},
+		"the lowest layer has excerpts off": {
+			layers: func(t *testing.T) []*niceyaml.Node {
+				t.Helper()
+
+				return []*niceyaml.Node{off(t, envInput, "environment"), shown(t, baseInput, "base.yaml")}
+			},
+		},
+		"a layer between two others has excerpts off": {
+			layers: func(t *testing.T) []*niceyaml.Node {
+				t.Helper()
+
+				return []*niceyaml.Node{
+					shown(t, baseInput, "base.yaml"),
+					off(t, envInput, "environment"),
+					shown(t, prodInput, "prod.yaml"),
+				}
+			},
+		},
+		"a layer scoped to a value has excerpts off": {
+			layers: func(t *testing.T) []*niceyaml.Node {
+				t.Helper()
+
+				scoped := yamltest.At(t, off(t, "defaults:\n  db: {password: hunter2}\n", "environment"),
+					paths.Doc().Child("defaults"))
+
+				return []*niceyaml.Node{shown(t, baseInput, "base.yaml"), scoped}
+			},
+		},
+		// The merged text holds the value the alias reads, which no line
+		// of the layer holds.
+		"a layer reads a reference document with excerpts off": {
+			layers: func(t *testing.T) []*niceyaml.Node {
+				t.Helper()
+
+				refs := niceyaml.NewSourceFromString("password: &password hunter2\n", niceyaml.WithExcerpts(false))
+
+				return []*niceyaml.Node{
+					shown(t, baseInput, "base.yaml"),
+					shown(t, "db:\n  password: *password\n", "prod.yaml", niceyaml.WithReferences(refs)),
+				}
+			},
+		},
+		"a layer reads a reference document through another": {
+			layers: func(t *testing.T) []*niceyaml.Node {
+				t.Helper()
+
+				refs := niceyaml.NewSourceFromString("password: &password hunter2\n", niceyaml.WithExcerpts(false))
+				shared := niceyaml.NewSourceFromString("db: &db {password: *password}\n", niceyaml.WithReferences(refs))
+
+				return []*niceyaml.Node{
+					shown(t, baseInput, "base.yaml"),
+					shown(t, "db: *db\n", "prod.yaml", niceyaml.WithReferences(shared)),
+				}
+			},
+		},
+		"a merged layer holds a layer with excerpts off": {
+			layers: func(t *testing.T) []*niceyaml.Node {
+				t.Helper()
+
+				inner := niceyaml.NewLayers(shown(t, baseInput, "base.yaml"), off(t, envInput, "environment"))
+
+				return []*niceyaml.Node{mergedDocument(t, inner), shown(t, prodInput, "prod.yaml")}
+			},
+		},
+		"a merged layer holds layers with excerpts on": {
+			layers: func(t *testing.T) []*niceyaml.Node {
+				t.Helper()
+
+				inner := niceyaml.NewLayers(shown(t, baseInput, "base.yaml"), shown(t, prodInput, "prod.yaml"))
+
+				return []*niceyaml.Node{mergedDocument(t, inner), shown(t, "db:\n  name: app\n", "local.yaml")}
+			},
+			want: true,
+		},
+		"no layer": {
+			layers: func(*testing.T) []*niceyaml.Node { return nil },
+			want:   true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			layers := niceyaml.NewLayers(tc.layers(t)...)
+
+			assert.Equal(t, tc.want, mergedDocument(t, layers).Source().Excerpts())
+
+			// The Source has excerpts off for each merged text that holds
+			// the secret.
+			assert.Equal(t, !tc.want, strings.Contains(mergedText(t, layers), "hunter2"))
+		})
+	}
+}
+
 func TestLayers_MergedLayer(t *testing.T) {
 	t.Parallel()
 

@@ -194,6 +194,12 @@
 // [SourceError.LogValue], so a structured log names every error in the
 // tree in one attribute whichever handler writes it.
 //
+// An excerpt shows lines of the source to whoever reads the log or the
+// terminal. A program that loads a text with secrets in it, such as the
+// values of its environment, creates that [Source] with [WithExcerpts]
+// set to false. Every renderer then prints the position, the path, and
+// the message of an error bound there, and no line of the text.
+//
 // A report a program reads, such as JSON lines, CI annotations, or editor
 // diagnostics, lists the problems of an error as rows.
 // [ErrorTree.Problems] yields one node per problem, by the roles the

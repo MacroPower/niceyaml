@@ -848,8 +848,9 @@ type mergedLayers struct {
 // takes its name, its file path, and its file system from the Source of
 // that layer, with the settings [WithAllowDuplicateKeys] and
 // [WithAliasLimit] gave it. It takes no reference documents, since the
-// merged value holds no alias. With no nodes, the Source is empty and
-// has no name.
+// merged value holds no alias. It has excerpts off when [showsLayers]
+// reports false, whatever [WithExcerpts] gave the lowest layer. With no
+// nodes, the Source is empty and has no name.
 //
 // A text that does not parse to one document gives that error, with the
 // Node [noLayers] returns, so the layers then bind every error with no
@@ -884,7 +885,7 @@ func mergeLayers(ctx context.Context, nodes []*Node) mergedLayers {
 	w.sb.WriteString(preambleText(lowest))
 	w.document(root)
 
-	doc, err := newMergedDocument(lowest.source, w.sb.String())
+	doc, err := newMergedDocument(lowest.source, w.sb.String(), showsLayers(nodes))
 	if err != nil {
 		if merged.err == nil {
 			merged.err = fmt.Errorf("merge layers: %w", err)
@@ -923,17 +924,36 @@ func preambleText(n *Node) string {
 	return text + "\n"
 }
 
+// showsLayers reports whether an error may show the text nodes merge
+// into, as [WithExcerpts] says it for the [Source] of each. That text
+// holds the values of every layer, and the values an alias of a layer
+// reads from a reference document. It is thus out of excerpts when the
+// text of any layer is, or the text of a reference document of one.
+func showsLayers(nodes []*Node) bool {
+	for _, n := range nodes {
+		if n.source.noExcerpts || n.source.noReferenceExcerpts {
+			return false
+		}
+	}
+
+	return true
+}
+
 // newMergedDocument returns the root Node of the one document of a new
 // [Source] that holds text, with the name, the file, and the settings of
-// from, as [mergeLayers] lists them. It returns an error when text does
-// not parse to one document.
-func newMergedDocument(from *Source, text string) (*Node, error) {
+// from, as [mergeLayers] lists them. An error may show the text in an
+// excerpt when excerpts is set, whatever [WithExcerpts] says of from. It
+// returns an error when text does not parse to one document.
+func newMergedDocument(from *Source, text string, excerpts bool) (*Node, error) {
 	src := NewSourceFromString(text, func(c *sourceConfig) {
 		*c = from.sourceConfig
 
 		// The merged value holds no alias, so it reads no reference
 		// document.
 		c.references = nil
+		c.noReferenceExcerpts = false
+
+		c.noExcerpts = !excerpts
 	})
 
 	docs := src.documents()

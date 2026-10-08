@@ -3586,6 +3586,15 @@ func AllBindings(err error) iter.Seq[*SourceError] {
 // FormatError for the excerpt. Every other verb formats
 // [SourceError.Error] as it formats a string, with the width, precision,
 // and flags given, so %q quotes the message and %-20v pads it.
+//
+// The excerpt shows lines of the source around the location, so a
+// logger that formats an error with %+v writes those lines into the log.
+// Zap does so for every error that implements [fmt.Formatter]. Its
+// zap.Error field holds [SourceError.Error] under the key "error" and
+// the %+v output under "errorVerbose". The handlers of [log/slog] read
+// [SourceError.LogValue] instead, which holds no excerpt. A program
+// whose source holds secrets creates it with [WithExcerpts] set to
+// false, and no verb then prints a line of that source.
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
@@ -3649,6 +3658,11 @@ func (e *SourceError) LogValue() slog.Value {
 // binding whose own location does not resolve but whose children do gets
 // their excerpts and no reason, and its message stays in the tree without
 // a position.
+//
+// A source with excerpts off, as [WithExcerpts] sets it for a text that
+// holds secrets, adds no excerpt and no line in its place. The tree
+// names the position, the path, and the message of each error bound in
+// that source, and the excerpt of every other source follows the tree.
 //
 // The output holds no
 // escape sequences, so it reads in a log as it does in a terminal.
@@ -4036,6 +4050,10 @@ func (e *SourceError) Annotate(view *line.View) bool {
 // [Excerpts] marks a fresh view of each source instead and cuts it to the
 // hunks around the marks, for the excerpts under the tree [FormatError]
 // prints.
+//
+// Annotate marks the lines of a source with excerpts off as it marks
+// those of any other. The caller supplied the view and decides who sees
+// it, and [WithExcerpts] covers the excerpts this package builds.
 func Annotate(err error, view *line.View) bool {
 	sources, positions := treePositions(slices.Collect(Bindings(err)), true)
 
@@ -4080,19 +4098,17 @@ func Annotate(err error, view *line.View) bool {
 // reason. Excerpt leaves out a node whose location does not resolve. Its
 // message is still part of the tree [FormatError] prints. A nil
 // SourceError carries no location.
+//
+// Excerpt also reports false for an error bound to a source with
+// excerpts off, as [WithExcerpts] describes, whatever resolves there.
 func (e *SourceError) Excerpt(context int) (*line.View, bool) {
 	if e == nil {
 		return nil, false
 	}
 
 	_, positions := excerptPositions([]*SourceError{e})
-	view := e.source.View()
 
-	if !annotate(view, e.source, positions[e.source]) {
-		return nil, false
-	}
-
-	return view.Hunks(context), true
+	return e.source.excerpt(positions[e.source], context)
 }
 
 // Excerpts returns an iterator over one excerpt per source the tree of
@@ -4114,6 +4130,9 @@ func (e *SourceError) Excerpt(context int) (*line.View, bool) {
 // [Excerpts] yields the same excerpts for the binding alone, and one
 // excerpt per source for an error that holds several bindings. A nil
 // SourceError yields nothing.
+//
+// A source with excerpts off, as [WithExcerpts] describes, yields
+// nothing either, and the other sources of the tree yield theirs.
 func (e *SourceError) Excerpts(context int) iter.Seq2[*Source, *line.View] {
 	return func(yield func(*Source, *line.View) bool) {
 		if e == nil {
@@ -4151,6 +4170,8 @@ func (e *SourceError) Excerpts(context int) iter.Seq2[*Source, *line.View] {
 // [SourceError.Excerpts] yields for that binding. Excerpts marks a
 // binding the error reaches twice once.
 //
+// A source with excerpts off, as [WithExcerpts] describes, yields
+// nothing, whatever resolves in it.
 // A source none of whose locations resolve yields nothing. [FormatError]
 // and [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] render
 // these excerpts under the tree of the error. A caller that wants one
@@ -4165,9 +4186,8 @@ func Excerpts(err error, context int) iter.Seq2[*Source, *line.View] {
 	}
 }
 
-// yieldExcerpts yields the excerpt of each of sources that positions marks
-// a line of, in order: a fresh view of the source with its positions
-// marked, cut to the hunks around them with context lines.
+// yieldExcerpts yields the excerpt of each of sources that has one, in
+// order, as [Source.excerpt] builds it from the positions of that source.
 func yieldExcerpts(
 	sources []*Source,
 	positions map[*Source][]errorPosition,
@@ -4175,16 +4195,35 @@ func yieldExcerpts(
 	yield func(*Source, *line.View) bool,
 ) {
 	for _, src := range sources {
-		view := src.View()
-
-		if !annotate(view, src, positions[src]) {
+		excerpt, ok := src.excerpt(positions[src], context)
+		if !ok {
 			continue
 		}
 
-		if !yield(src, view.Hunks(context)) {
+		if !yield(src, excerpt) {
 			return
 		}
 	}
+}
+
+// excerpt returns the excerpt of s for positions, the resolved locations
+// of the nodes bound to s: a fresh view of the source with the positions
+// marked, cut to the hunks around them with context lines. Every excerpt
+// of an error comes from here, so the check of [WithExcerpts] stands in
+// one place. It reports false, with no view, when positions mark no line
+// of s, and for a Source whose text WithExcerpts keeps out of excerpts.
+func (s *Source) excerpt(positions []errorPosition, context int) (*line.View, bool) {
+	if !s.Excerpts() {
+		return nil, false
+	}
+
+	view := s.View()
+
+	if !annotate(view, s, positions) {
+		return nil, false
+	}
+
+	return view.Hunks(context), true
 }
 
 // errorDetails returns what the tree of err leaves out: each excerpt

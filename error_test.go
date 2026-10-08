@@ -11,11 +11,13 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"net"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml/ast"
@@ -7082,6 +7084,566 @@ func TestExcerpts(t *testing.T) {
 
 		// The source keeps no decoration from the excerpt.
 		assert.Equal(t, "   1 | a: 1\n   2 | b: 2", first.View().String())
+	})
+}
+
+// excerptSecret is the text every secret holds in the tests of
+// [niceyaml.WithExcerpts], so a test finds a line of a source with
+// excerpts off in any output.
+const excerptSecret = "hunter2"
+
+// secretConfig is the value the tests of [niceyaml.WithExcerpts] decode a
+// source into.
+type secretConfig struct {
+	Limits   map[string]int `yaml:"limits"`
+	Password string         `yaml:"password"`
+	Token    string         `yaml:"token"`
+	Address  net.IP         `yaml:"address"`
+	Timeout  time.Duration  `yaml:"timeout"`
+	Port     int            `yaml:"port"`
+	Retries  uint8          `yaml:"retries"`
+}
+
+// checkedSecretConfig is a [secretConfig] that validates itself.
+type checkedSecretConfig secretConfig
+
+// Validate reports a port below 1.
+func (c checkedSecretConfig) Validate() error {
+	if c.Port < 1 {
+		return niceyaml.NewError("port must be at least 1", niceyaml.AtPath(paths.Current().Child("port")))
+	}
+
+	return nil
+}
+
+// renderings returns err as each renderer of an error prints it, under
+// the name of the renderer, so a test looks for a text in all of them.
+// Each excerpt keeps every line of its source.
+func renderings(err error) map[string]string {
+	const whole = 1000
+
+	var logged bytes.Buffer
+
+	slog.New(slog.NewTextHandler(&logged, nil)).Error("load", slog.Any("err", err))
+	slog.New(slog.NewJSONHandler(&logged, nil)).Error("load", slog.Any("err", err))
+
+	var excerpts, rows []string
+
+	for _, excerpt := range niceyaml.Excerpts(err, whole) {
+		excerpts = append(excerpts, excerpt.String())
+	}
+
+	for bound := range niceyaml.AllBindings(err) {
+		if excerpt, ok := bound.Excerpt(whole); ok {
+			excerpts = append(excerpts, excerpt.String())
+		}
+
+		for _, excerpt := range bound.Excerpts(whole) {
+			excerpts = append(excerpts, excerpt.String())
+		}
+	}
+
+	for node := range niceyaml.NewErrorTree(err).All() {
+		rows = append(rows, node.Text)
+	}
+
+	return map[string]string{
+		"Error":       err.Error(),
+		"%v":          fmt.Sprintf("%v", err),
+		"%+v":         fmt.Sprintf("%+v", err),
+		"FormatError": niceyaml.FormatError(err, whole),
+		"PrintError":  printer.New(printer.WithContextLines(whole)).PrintError(err),
+		"Excerpts":    strings.Join(excerpts, "\n"),
+		"ErrorTree":   strings.Join(rows, "\n"),
+		"slog":        logged.String(),
+	}
+}
+
+func TestFormatError_ExcerptsOff(t *testing.T) {
+	t.Parallel()
+
+	// Every line but the one that holds the port holds a secret, so any
+	// excerpt of the source shows one.
+	const text = "db:\n  password: hunter2\n  port: 0\n  token: hunter2-token\n"
+
+	secrets := niceyaml.NewSourceFromString(text, niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
+	open := niceyaml.NewSourceFromString("host: example.com\nport: 0\n", niceyaml.WithName("open.yaml"))
+
+	db := paths.Doc().Child("db")
+	message := "port must be at least 1"
+
+	badPort := yamltest.Bind(t, secrets, niceyaml.NewError(message, niceyaml.AtPath(db.Child("port"))))
+	openPort := yamltest.Bind(t, open, niceyaml.NewError(message, niceyaml.AtPath(paths.Doc().Child("port"))))
+
+	openExcerpt := stringtest.JoinLF(
+		"open.yaml",
+		"   1 | host: example.com",
+		"   2 | port: 0",
+		"     |       ^ port must be at least 1",
+	)
+
+	tcs := map[string]struct {
+		err  error
+		want string
+	}{
+		"a path keeps its position and its message": {
+			err:  badPort,
+			want: "secrets.yaml:3:9: $.db.port: port must be at least 1",
+		},
+		"a position on a secret": {
+			err:  yamltest.Bind(t, secrets, niceyaml.NewError("too short", niceyaml.AtPosition(position.New(1, 12)))),
+			want: "secrets.yaml:2:13: too short",
+		},
+		"a range across every line": {
+			err: yamltest.Bind(t, secrets, niceyaml.NewError("too long", niceyaml.AtRange(
+				position.NewRange(position.New(0, 0), position.New(3, 21)),
+			))),
+			want: "secrets.yaml:1:1: too long",
+		},
+		"a key the mapping lacks": {
+			err:  yamltest.Bind(t, secrets, niceyaml.NewError("name is required", niceyaml.AtPath(db.Child("name")))),
+			want: "secrets.yaml:1:1: $.db.name: name is required",
+		},
+		"a wrapper keeps its context": {
+			err:  fmt.Errorf("load config: %w", badPort),
+			want: "load config: secrets.yaml:3:9: $.db.port: port must be at least 1",
+		},
+		"a summary keeps every branch": {
+			err: yamltest.Bind(t, secrets, niceyaml.NewSummary("2 problems",
+				niceyaml.NewError(message, niceyaml.AtPath(db.Child("port"))),
+				niceyaml.NewError("too short", niceyaml.AtPath(db.Child("password"))),
+			)),
+			want: stringtest.JoinLF(
+				"secrets.yaml: 2 problems",
+				"|-- 2:13: $.db.password: too short",
+				"`-- 3:9: $.db.port: port must be at least 1",
+			),
+		},
+		"several bindings add no excerpt": {
+			err: errors.Join(badPort, yamltest.Bind(t, secrets,
+				niceyaml.NewError("too short", niceyaml.AtPath(db.Child("password"))))),
+			want: stringtest.JoinLF(
+				"|-- secrets.yaml:3:9: $.db.port: port must be at least 1",
+				"`-- secrets.yaml:2:13: $.db.password: too short",
+			),
+		},
+		// The reason names the path, which the tree names already, and no
+		// text of the source.
+		"a location that does not resolve keeps its reason": {
+			err: yamltest.Bind(t, secrets, niceyaml.NewError("not a list", niceyaml.AtPath(db.Child("port").Index(3)))),
+			want: stringtest.JoinLF(
+				"secrets.yaml: $.db.port[3]: not a list",
+				"",
+				"no excerpt: resolve $.db.port[3]: not found",
+			),
+		},
+		"a binding in another source keeps its excerpt": {
+			err: errors.Join(openPort, badPort),
+			want: stringtest.JoinLF(
+				"|-- open.yaml:2:7: $.port: port must be at least 1",
+				"`-- secrets.yaml:3:9: $.db.port: port must be at least 1",
+				"",
+				openExcerpt,
+			),
+		},
+		"a detail in another source keeps its excerpt": {
+			err: yamltest.Bind(t, secrets, niceyaml.NewError(
+				"ports differ",
+				niceyaml.AtPath(db.Child("port")),
+				niceyaml.WithDetails(openPort),
+			)),
+			want: stringtest.JoinLF(
+				"secrets.yaml:3:9: $.db.port: ports differ",
+				"`-- open.yaml:2:7: $.port: port must be at least 1",
+				"",
+				openExcerpt,
+			),
+		},
+		"a detail in the source adds no excerpt to its parent": {
+			err: yamltest.Bind(t, open, niceyaml.NewError(
+				"ports differ",
+				niceyaml.AtPath(paths.Doc().Child("port")),
+				niceyaml.WithDetails(badPort),
+			)),
+			want: stringtest.JoinLF(
+				"open.yaml:2:7: $.port: ports differ",
+				"`-- secrets.yaml:3:9: $.db.port: port must be at least 1",
+				"",
+				"open.yaml",
+				"   1 | host: example.com",
+				"   2 | port: 0",
+				"     |       ^",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, niceyaml.FormatError(tc.err, niceyaml.DefaultContextLines))
+
+			for renderer, got := range renderings(tc.err) {
+				assert.NotContains(t, got, excerptSecret, renderer)
+			}
+		})
+	}
+
+	t.Run("the same error shows the secret with excerpts on", func(t *testing.T) {
+		t.Parallel()
+
+		shown := niceyaml.NewSourceFromString(text, niceyaml.WithName("secrets.yaml"))
+		err := yamltest.Bind(t, shown, niceyaml.NewError(message, niceyaml.AtPath(db.Child("port"))))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"secrets.yaml:3:9: $.db.port: port must be at least 1",
+			"",
+			"   1 | db:",
+			"   2 |   password: hunter2",
+			"   3 |   port: 0",
+			"     |         ^",
+			"   4 |   token: hunter2-token",
+		), niceyaml.FormatError(err, niceyaml.DefaultContextLines))
+
+		// The renderers that print an excerpt are the ones the option
+		// changes.
+		got := renderings(err)
+
+		for _, renderer := range []string{"%+v", "FormatError", "PrintError", "Excerpts"} {
+			assert.Contains(t, got[renderer], excerptSecret, renderer)
+		}
+	})
+}
+
+func TestFormatError_ExcerptsOff_Documents(t *testing.T) {
+	t.Parallel()
+
+	documents := func(_ *testing.T, source *niceyaml.Source) error {
+		_, err := source.Documents()
+
+		return err
+	}
+
+	file := func(_ *testing.T, source *niceyaml.Source) error {
+		_, err := source.File()
+
+		return err
+	}
+
+	decode := func(t *testing.T, source *niceyaml.Source) error {
+		t.Helper()
+
+		_, err := source.Decode[checkedSecretConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+
+		return err
+	}
+
+	requiresName := schema.MustCompile([]byte(`{"required": ["name"]}`))
+
+	// The errors the module finds in a source name no line of it, whether
+	// the document parsed or not.
+	tcs := map[string]struct {
+		fail  func(t *testing.T, source *niceyaml.Source) error
+		input string
+		want  string
+	}{
+		"a flow sequence left open": {
+			input: "password: hunter2\nlist: [1, 2\nport: 1\n",
+			fail:  documents,
+			want:  "secrets.yaml:3:1: ',' or ']' must be specified",
+		},
+		"a flow sequence left open on the secret": {
+			input: "password: [hunter2, 2\nport: 1\n",
+			fail:  file,
+			want:  "secrets.yaml:2:1: ',' or ']' must be specified",
+		},
+		// The parser reports the tab at the value before it, which is the
+		// secret.
+		"a tab in the indentation": {
+			input: "password: hunter2\n\tport: 1\n",
+			fail:  documents,
+			want:  "secrets.yaml:1:11: found character '␉' that cannot start any token",
+		},
+		"a later document that did not parse": {
+			input: "port: 1\n---\npassword: hunter2\nlist: [1\n",
+			fail:  documents,
+			want:  "secrets.yaml:4:7: sequence end token ']' not found",
+		},
+		"a decode of a document that did not parse": {
+			input: "password: hunter2\nlist: [1, 2\nport: 1\n",
+			fail:  decode,
+			want:  "secrets.yaml:3:1: ',' or ']' must be specified",
+		},
+		// The reason is the syntax error, which names its position.
+		"a path bound in a document that did not parse": {
+			input: "password: hunter2\nlist: [1, 2\nport: 1\n",
+			fail: func(_ *testing.T, source *niceyaml.Source) error {
+				return source.Bind(niceyaml.NewError("too short", niceyaml.AtPath(paths.Doc().Child("password"))))
+			},
+			want: stringtest.JoinLF(
+				"secrets.yaml: $.password: too short",
+				"",
+				"no excerpt: path needs a document to resolve in: $.password: "+
+					"secrets.yaml:3:1: ',' or ']' must be specified",
+			),
+		},
+		"a value of the wrong type": {
+			input: "password: hunter2\nport: eighty\ntoken: hunter2-token\n",
+			fail:  decode,
+			want:  "secrets.yaml:2:7: $.port: expected integer, got string",
+		},
+		"an unknown field": {
+			input: "password: hunter2\nextra: 1\ntoken: hunter2-token\n",
+			fail:  decode,
+			want:  `secrets.yaml:2:1: $.extra~: unknown field "extra"`,
+		},
+		"a value that fails its own validation": {
+			input: "password: hunter2\nport: 0\ntoken: hunter2-token\n",
+			fail:  decode,
+			want:  "secrets.yaml:2:7: $.port: port must be at least 1",
+		},
+		"a schema violation": {
+			input: "password: hunter2\nport: 1\n",
+			fail: func(t *testing.T, source *niceyaml.Source) error {
+				t.Helper()
+
+				return source.ValidateDocuments(t.Context(), requiresName)
+			},
+			want: `secrets.yaml:1:1: $.name: missing required property "name"`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input,
+				niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
+
+			err := tc.fail(t, source)
+			require.Error(t, err)
+
+			assert.Equal(t, tc.want, niceyaml.FormatError(err, niceyaml.DefaultContextLines))
+
+			for renderer, got := range renderings(err) {
+				assert.NotContains(t, got, excerptSecret, renderer)
+			}
+		})
+	}
+}
+
+func TestFormatError_ExcerptsOff_EchoedText(t *testing.T) {
+	t.Parallel()
+
+	// A message that quotes what it rejects prints it, and a key prints
+	// in the path of an error. [niceyaml.WithExcerpts] names each of
+	// these, and the output holds the message alone, with no line of the
+	// source after it.
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"a duration quotes its value": {
+			input: "timeout: hunter2\n",
+			want:  `secrets.yaml:1:10: $.timeout: time: invalid duration "hunter2"`,
+		},
+		"an IP address quotes its value": {
+			input: "address: hunter2\n",
+			want:  "secrets.yaml:1:10: $.address: invalid IP address: hunter2",
+		},
+		"a number out of range names itself": {
+			input: "retries: 300\n",
+			want:  "secrets.yaml:1:10: $.retries: expected integer from 0 to 255, got 300",
+		},
+		"an unknown field names its key": {
+			input: "hunter2: 1\n",
+			want:  `secrets.yaml:1:1: $.hunter2~: unknown field "hunter2"`,
+		},
+		"a path names each key on the way": {
+			input: "limits:\n  hunter2: many\n",
+			want:  "secrets.yaml:2:12: $.limits.hunter2: expected integer, got string",
+		},
+		"a missing anchor names its alias": {
+			input: "port: *hunter2\n",
+			want:  `secrets.yaml:1:7: $.port: could not find alias "hunter2"`,
+		},
+		"a duplicate key names itself": {
+			input: "hunter2: 1\nhunter2: 2\n",
+			want:  `secrets.yaml:2:1: mapping key "hunter2" already defined at [1:1]`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input,
+				niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
+
+			_, err := source.Decode[secretConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+			require.Error(t, err)
+
+			assert.Equal(t, tc.want, niceyaml.FormatError(err, niceyaml.DefaultContextLines))
+			assert.Equal(t, tc.want, fmt.Sprintf("%+v", err))
+			assert.Empty(t, maps.Collect(niceyaml.Excerpts(err, 0)))
+		})
+	}
+}
+
+func TestSourceError_Format_ExcerptsOff(t *testing.T) {
+	t.Parallel()
+
+	secrets := niceyaml.NewSourceFromString("password: hunter2\nport: 0\n",
+		niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
+	open := niceyaml.NewSourceFromString("port: 0\n", niceyaml.WithName("open.yaml"))
+
+	port := paths.Doc().Child("port")
+	openPort := yamltest.Bind(t, open, niceyaml.NewError("port is 0", niceyaml.AtPath(port)))
+
+	tcs := map[string]struct {
+		err  error
+		want string
+	}{
+		"plus v prints the message alone": {
+			err:  niceyaml.NewError("port must be at least 1", niceyaml.AtPath(port)),
+			want: "secrets.yaml:2:7: $.port: port must be at least 1",
+		},
+		"plus v prints the tree of a summary": {
+			err: niceyaml.NewSummary("2 problems",
+				niceyaml.NewError("port must be at least 1", niceyaml.AtPath(port)),
+				niceyaml.NewError("too short", niceyaml.AtPath(paths.Doc().Child("password"))),
+			),
+			want: stringtest.JoinLF(
+				"secrets.yaml: 2 problems",
+				"|-- 1:11: $.password: too short",
+				"`-- 2:7: $.port: port must be at least 1",
+			),
+		},
+		"plus v keeps the excerpt of another source": {
+			err: niceyaml.NewError("ports differ", niceyaml.AtPath(port), niceyaml.WithDetails(openPort)),
+			want: stringtest.JoinLF(
+				"secrets.yaml:2:7: $.port: ports differ",
+				"`-- open.yaml:1:7: $.port: port is 0",
+				"",
+				"open.yaml",
+				"   1 | port: 0",
+				"     |       ^ port is 0",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := fmt.Sprintf("%+v", yamltest.Bind(t, secrets, tc.err))
+
+			assert.Equal(t, tc.want, got)
+			assert.NotContains(t, got, excerptSecret)
+		})
+	}
+}
+
+func TestExcerpts_ExcerptsOff(t *testing.T) {
+	t.Parallel()
+
+	secrets := niceyaml.NewSourceFromString("password: hunter2\nport: 0\n",
+		niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
+	open := niceyaml.NewSourceFromString("port: 0\n", niceyaml.WithName("open.yaml"))
+
+	port := paths.Doc().Child("port")
+
+	badPort := yamltest.Bind(t, secrets, niceyaml.NewError("bad port", niceyaml.AtPath(port)))
+	openPort := yamltest.Bind(t, open, niceyaml.NewError("open port", niceyaml.AtPath(port)))
+
+	// Each excerpt reads as the name of its source on a row above it.
+	collect := func(excerpts iter.Seq2[*niceyaml.Source, *line.View]) []string {
+		var got []string
+
+		for src, view := range excerpts {
+			got = append(got, src.Name()+"\n"+view.String())
+		}
+
+		return got
+	}
+
+	tcs := map[string]struct {
+		err error
+		// What Excerpts yields for err.
+		want []string
+		// What the Excerpts method of the first binding in err yields.
+		wantOwn []string
+	}{
+		"a binding in the source yields nothing": {
+			err: badPort,
+		},
+		"several bindings in the source yield nothing": {
+			err: errors.Join(badPort, yamltest.Bind(t, secrets,
+				niceyaml.NewError("too short", niceyaml.AtPath(paths.Doc().Child("password"))))),
+		},
+		"a binding in another source yields its excerpt": {
+			err:  errors.Join(badPort, openPort),
+			want: []string{"open.yaml\n   1 | port: 0\n     |       ^ open port"},
+		},
+		"a detail in another source yields its excerpt": {
+			err: yamltest.Bind(t, secrets, niceyaml.NewError(
+				"ports differ", niceyaml.AtPath(port), niceyaml.WithDetails(openPort),
+			)),
+			want:    []string{"open.yaml\n   1 | port: 0\n     |       ^ open port"},
+			wantOwn: []string{"open.yaml\n   1 | port: 0\n     |       ^ open port"},
+		},
+		"a detail in the source leaves the excerpt of its parent": {
+			err: yamltest.Bind(t, open, niceyaml.NewError(
+				"ports differ", niceyaml.AtPath(port), niceyaml.WithDetails(badPort),
+			)),
+			want:    []string{"open.yaml\n   1 | port: 0\n     |       ^"},
+			wantOwn: []string{"open.yaml\n   1 | port: 0\n     |       ^"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, collect(niceyaml.Excerpts(tc.err, 2)))
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, tc.err, &bound)
+			assert.Equal(t, tc.wantOwn, collect(bound.Excerpts(2)))
+		})
+	}
+
+	t.Run("Excerpt reports false for a location that resolved", func(t *testing.T) {
+		t.Parallel()
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, badPort, &bound)
+
+		excerpt, ok := bound.Excerpt(2)
+		assert.False(t, ok)
+		assert.Nil(t, excerpt)
+
+		// The binding still names where it is, and it has no reason to
+		// print in place of the excerpt.
+		pos, ok := bound.Position()
+		require.True(t, ok)
+		assert.Equal(t, position.New(1, 6), pos)
+		require.NoError(t, bound.Unresolved())
+	})
+
+	t.Run("Annotate marks a view the caller supplies", func(t *testing.T) {
+		t.Parallel()
+
+		view := secrets.View()
+		require.True(t, niceyaml.Annotate(badPort, view))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | password: hunter2",
+			"   2 | port: 0",
+			"     |       ^ bad port",
+		), view.String())
 	})
 }
 

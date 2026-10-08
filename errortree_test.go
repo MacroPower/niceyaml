@@ -1202,6 +1202,69 @@ func TestErrorTree_New(t *testing.T) {
 	}
 }
 
+func TestErrorTree_New_ExcerptsOff(t *testing.T) {
+	t.Parallel()
+
+	const text = "password: hunter2\nport: 0\n"
+
+	// The tree holds the message of each error and no excerpt, so it
+	// reads the same whether or not an error may show the text of its
+	// source.
+	shown := niceyaml.NewSourceFromString(text, niceyaml.WithName("secrets.yaml"))
+	secrets := niceyaml.NewSourceFromString(text, niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
+
+	badPort := niceyaml.NewError("bad port", niceyaml.AtPath(paths.Doc().Child("port")))
+	short := niceyaml.NewError("too short", niceyaml.AtPath(paths.Doc().Child("password")))
+
+	tcs := map[string]struct {
+		err  error
+		want niceyaml.ErrorTree
+	}{
+		"one error": {
+			err:  badPort,
+			want: niceyaml.ErrorTree{Text: "secrets.yaml:2:7: $.port: bad port"},
+		},
+		"a summary over two errors": {
+			err: niceyaml.NewSummary("2 problems", badPort, short),
+			want: niceyaml.ErrorTree{
+				Text: "secrets.yaml: 2 problems",
+				Children: []niceyaml.ErrorTree{
+					{Text: "1:11: $.password: too short"},
+					{Text: "2:7: $.port: bad port"},
+				},
+			},
+		},
+		"an error with a detail": {
+			err: niceyaml.NewError("bad port", niceyaml.AtPath(paths.Doc().Child("port")), niceyaml.WithDetails(short)),
+			want: niceyaml.ErrorTree{
+				Text:     "secrets.yaml:2:7: $.port: bad port",
+				Children: []niceyaml.ErrorTree{{Text: "1:11: $.password: too short"}},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			tree := niceyaml.NewErrorTree(yamltest.Bind(t, secrets, tc.err))
+
+			assert.Equal(t, tc.want, textTree(tree))
+			assert.Equal(t, textTree(niceyaml.NewErrorTree(yamltest.Bind(t, shown, tc.err))), textTree(tree))
+
+			// A renderer that reads the tree asks the binding of each node
+			// for its excerpt, and the binding has none to give.
+			for node := range tree.All() {
+				require.NotNil(t, node.Bound)
+				assert.False(t, node.Bound.Source().Excerpts())
+
+				_, ok := node.Bound.Excerpt(0)
+				assert.False(t, ok)
+			}
+		})
+	}
+}
+
 func TestErrorTree_Bound(t *testing.T) {
 	t.Parallel()
 

@@ -47,6 +47,11 @@ const errorConnectorWidth = 4
 // gets their excerpts and no reason, and its message stays in the tree
 // without a position.
 //
+// A source with excerpts off, as [niceyaml.WithExcerpts] sets it for a
+// text that holds secrets, prints no excerpt and no line in its place.
+// The tree names the position, the path, and the message of each error
+// bound in that source.
+//
 // PrintError draws the message as a tree with a connector in front of each
 // error below another, in the color of the gutter's line numbers. A
 // validator's report thus reads as its summary with one branch per
