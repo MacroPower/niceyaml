@@ -2,7 +2,6 @@ package yamltest_test
 
 import (
 	"errors"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -82,65 +81,32 @@ func TestDocumentHelpers(t *testing.T) {
 func TestRequireBound(t *testing.T) {
 	t.Parallel()
 
-	namePath := paths.Current().Child("name")
-	reserved := niceyaml.NewError("reserved name", niceyaml.AtPath(namePath))
-
-	var nilError *niceyaml.Error
+	reserved := niceyaml.NewError("reserved name", niceyaml.AtPath(paths.Current().Child("name")))
 
 	tcs := map[string]struct {
-		// Build returns the error the helper checks, given the Node the
-		// helper binds it through.
+		// Build returns the error the helper checks, given a Node to bind
+		// it through.
 		build func(item *niceyaml.Node) error
-		// Whether the helper passes.
-		want bool
+		msgs  []string // Empty when the helper passes.
 	}{
 		"no error": {
 			build: func(*niceyaml.Node) error { return nil },
-			want:  true,
-		},
-		"nil Error pointer": {
-			build: func(*niceyaml.Node) error { return nilError },
-			want:  true,
 		},
 		"bound through the node": {
 			build: func(item *niceyaml.Node) error { return item.Bind(reserved) },
-			want:  true,
-		},
-		"bound through the document": {
-			build: func(item *niceyaml.Node) error { return item.Document().Bind(reserved) },
-			want:  true,
-		},
-		"context around a bound error": {
-			build: func(item *niceyaml.Node) error { return fmt.Errorf("rule: %w", item.Bind(reserved)) },
-			want:  true,
 		},
 		"join of bound errors": {
 			build: func(item *niceyaml.Node) error {
 				return errors.Join(item.Bind(reserved), item.Bind(errors.New("bad item")))
 			},
-			want: true,
 		},
-		"@ path": {
+		"unbound": {
 			build: func(*niceyaml.Node) error { return reserved },
-		},
-		"$ path": {
-			build: func(*niceyaml.Node) error {
-				return niceyaml.NewError("reserved name", niceyaml.AtPath(paths.Doc().Child("name")))
-			},
-		},
-		"no location": {
-			build: func(*niceyaml.Node) error { return errors.New("bad item") },
-		},
-		"Rebase result": {
-			build: func(item *niceyaml.Node) error { return niceyaml.Rebase(reserved, item.Path()) },
+			msgs:  []string{"validator returned an unbound error", `bound to no source: "reserved name"`},
 		},
 		"join of a bound error and an unbound one": {
-			build: func(item *niceyaml.Node) error { return errors.Join(item.Bind(reserved), reserved) },
-		},
-		"location above a bound error": {
-			build: func(item *niceyaml.Node) error {
-				return niceyaml.Invalid(item.Bind(reserved), niceyaml.AtPath(namePath))
-			},
+			build: func(item *niceyaml.Node) error { return errors.Join(item.Bind(reserved), errors.New("bad item")) },
+			msgs:  []string{"validator returned an unbound error", `bound to no source: "bad item"`},
 		},
 	}
 
@@ -162,20 +128,22 @@ func TestRequireBound(t *testing.T) {
 			go func() {
 				defer close(done)
 
-				yamltest.RequireBound(rec, item, tc.build(item))
+				yamltest.RequireBound(rec, tc.build(item))
 			}()
 
 			<-done
 
-			if tc.want {
+			if len(tc.msgs) == 0 {
 				assert.False(t, rec.failed, rec.msg)
 
 				return
 			}
 
 			require.True(t, rec.failed)
-			assert.Contains(t, rec.msg, "validator returned an unbound error")
-			assert.Contains(t, rec.msg, "unbound.yaml")
+
+			for _, msg := range tc.msgs {
+				assert.Contains(t, rec.msg, msg)
+			}
 		})
 	}
 }

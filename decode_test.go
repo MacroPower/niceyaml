@@ -10282,7 +10282,7 @@ func TestValidator_DirectCall(t *testing.T) {
 			err := tc.v.Validate(t.Context(), node)
 
 			require.EqualError(t, err, tc.want)
-			yamltest.RequireBound(t, node, err)
+			yamltest.RequireBound(t, err)
 		})
 	}
 }

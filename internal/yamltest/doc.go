@@ -77,7 +77,7 @@
 // validator through it passes for a validator that binds nothing:
 //
 //	item := yamltest.At(t, doc, paths.Doc().Child("items").Index(1))
-//	yamltest.RequireBound(t, item, rule.Validate(t.Context(), item))
+//	yamltest.RequireBound(t, rule.Validate(t.Context(), item))
 //
 // Tests of alias limits build their documents with [AliasLevels] and
 // [MergeLevels]. Each level refers to the level before it ten times, so a
