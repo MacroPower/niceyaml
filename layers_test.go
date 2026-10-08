@@ -497,6 +497,89 @@ func TestLayers_DecodeInto(t *testing.T) {
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 	})
 
+	t.Run("a rejection with no token reports beside the other problems", func(t *testing.T) {
+		t.Parallel()
+
+		// The decoder returns the error of a duration, and of a value that
+		// decodes itself from text, with no token of the document. It
+		// rejects such a value first in each case.
+		type config struct {
+			Server problemTimed `yaml:"server"`
+			Tier   tier         `yaml:"tier"`
+		}
+
+		tcs := map[string]struct {
+			want   string
+			layers []string
+		}{
+			"the other problems lie in the layer above": {
+				layers: []string{"server:\n  timeout: soon\n", "server:\n  port: 70000\ntier: mid\nzone: prod\n"},
+				want: "base.yaml: 4 problems\n" +
+					"base.yaml:2:12: $.server.timeout: time: invalid duration \"soon\"\n" +
+					"prod.yaml:2:9: $.server.port: expected integer from 0 to 65535, got 70000\n" +
+					"prod.yaml:3:7: $.tier: unknown tier \"mid\"\n" +
+					"prod.yaml:4:1: $.zone~: unknown field \"zone\"",
+			},
+			"the other problems lie in the layer below": {
+				layers: []string{"server:\n  port: 70000\nzone: base\n", "server:\n  tier: mid\n"},
+				want: "base.yaml: 3 problems\n" +
+					"base.yaml:2:9: $.server.port: expected integer from 0 to 65535, got 70000\n" +
+					"base.yaml:3:1: $.zone~: unknown field \"zone\"\n" +
+					"prod.yaml:2:9: $.server.tier: unknown tier \"mid\"",
+			},
+			// The merged text is block style, so it holds no value at the
+			// position either file has for it, and each value reports once.
+			"flow style": {
+				layers: []string{
+					"{server: {timeout: soon}}\n",
+					"# prod\n\n{server: {port: 70000}, tier: mid, zone: prod}\n",
+				},
+				want: "base.yaml: 4 problems\n" +
+					"base.yaml:1:20: $.server.timeout: time: invalid duration \"soon\"\n" +
+					"prod.yaml:3:17: $.server.port: expected integer from 0 to 65535, got 70000\n" +
+					"prod.yaml:3:31: $.tier: unknown tier \"mid\"\n" +
+					"prod.yaml:3:36: $.zone~: unknown field \"zone\"",
+			},
+			"a layer above replaces the value": {
+				layers: []string{
+					"server:\n  timeout: soon\n  port: 1\n",
+					"server:\n  timeout: later\n  port: 70000\n",
+				},
+				want: "base.yaml: 2 problems\n" +
+					"prod.yaml:2:12: $.server.timeout: time: invalid duration \"later\"\n" +
+					"prod.yaml:3:9: $.server.port: expected integer from 0 to 65535, got 70000",
+			},
+			"three layers": {
+				layers: []string{"server:\n  timeout: soon\n", "server:\n  tier: mid\n", "server:\n  port: 70000\n"},
+				want: "base.yaml: 3 problems\n" +
+					"base.yaml:2:12: $.server.timeout: time: invalid duration \"soon\"\n" +
+					"mid.yaml:2:9: $.server.tier: unknown tier \"mid\"\n" +
+					"prod.yaml:2:9: $.server.port: expected integer from 0 to 65535, got 70000",
+			},
+		}
+
+		for name, tc := range tcs {
+			nodes := layerNodes(t, tc.layers...)
+
+			_, err := niceyaml.NewLayers(nodes...).Decode[config](
+				t.Context(), niceyaml.WithDisallowUnknownFields(true),
+			)
+			require.EqualError(t, err, tc.want, name)
+			require.ErrorIs(t, err, niceyaml.ErrDecode, name)
+
+			// The merged text has the name of the base file, and no
+			// problem binds in it.
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound, name)
+			assert.Same(t, nodes[0], bound.Node(), name)
+
+			for _, problem := range bound.Errors() {
+				assert.Contains(t, nodes, problem.Node(), name)
+			}
+		}
+	})
+
 	t.Run("a key no field reads reports in the layer that holds it", func(t *testing.T) {
 		t.Parallel()
 
@@ -916,6 +999,43 @@ func TestLayers_Document(t *testing.T) {
 		require.Len(t, fields, 2)
 		assert.Equal(t, "$.server.host", fields[0].Path().String())
 		assert.Equal(t, "$.server.port", fields[1].Path().String())
+	})
+
+	t.Run("a decode of one value reports every problem below it", func(t *testing.T) {
+		t.Parallel()
+
+		server := paths.Doc().Child("server")
+
+		nodes := layerNodes(t, "server:\n  timeout: soon\n", "server:\n  port: 70000\nname: [prod]\n")
+
+		doc, err := niceyaml.NewLayers(nodes...).Document()
+		require.NoError(t, err)
+
+		// The decoder rejects the timeout first, with no token of the
+		// document, and the port lies in the other file.
+		_, err = doc.DecodeAt[problemTimed](t.Context(), server)
+		require.EqualError(t, err, "base.yaml: 2 problems\n"+
+			"base.yaml:2:12: $.server.timeout: time: invalid duration \"soon\"\n"+
+			"prod.yaml:2:9: $.server.port: expected integer from 0 to 65535, got 70000")
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+		// One layer reports what a decode of its file reports.
+		file := yamltest.FirstDocument(t,
+			"name: [base]\nserver: {port: 70000, tier: mid, timeout: soon}\n",
+			niceyaml.WithName("base.yaml"))
+
+		_, want := file.DecodeAt[problemTimed](t.Context(), server)
+		require.EqualError(t, want, "base.yaml: 3 problems\n"+
+			"base.yaml:2:16: $.server.port: expected integer from 0 to 65535, got 70000\n"+
+			"base.yaml:2:29: $.server.tier: unknown tier \"mid\"\n"+
+			"base.yaml:2:43: $.server.timeout: time: invalid duration \"soon\"")
+
+		doc, err = niceyaml.NewLayers(file).Document()
+		require.NoError(t, err)
+
+		_, got := doc.DecodeAt[problemTimed](t.Context(), server)
+		require.EqualError(t, got, want.Error())
+		assert.Equal(t, niceyaml.FormatError(want, 0), niceyaml.FormatError(got, 0))
 	})
 
 	t.Run("an error binds in the file of a layer", func(t *testing.T) {

@@ -114,6 +114,10 @@ func (n *Node) bindDecodeProblems(
 // resolved it, which is where the collector marks a problem that takes a
 // path.
 //
+// The binding of a rejection in the document [Layers] build resolves in
+// the file of a layer, and the collector reads the merged text. Such a
+// rejection lies where [Node.mergedPosition] finds it in that text.
+//
 // The bool result is false for a rejection that binds at no position,
 // such as one the decoder reports with no token for a value that
 // [Node.locateDecodeError] did not find. It is false too for a binding
@@ -125,12 +129,63 @@ func (n *Node) rejectedAt(err, bound error) (position.Position, bool) {
 		return position.NewFromToken(yamlErr.GetToken()), true
 	}
 
+	if n.merges() {
+		return n.mergedPosition(n.decodeRejection(err))
+	}
+
 	srcErr, ok := bound.(*SourceError) //nolint:errorlint // A binding below a wrapper is not one n made.
 	if !ok || srcErr.Node() != n {
 		return position.Position{}, false
 	}
 
 	return srcErr.Position()
+}
+
+// mergedPosition returns the position of rejection in the text of the
+// document of n, which [Layers] built, where rejection is a rejection as
+// [Node.decodeRejection] returns it. That is the position the binding of
+// the rejection reports in a document no Layers built. A position stands
+// as it is, and so does the start of a range. A path that starts at `@`
+// reads from the scope of n. Every path resolves as
+// [Node.resolveLocation] resolves it.
+//
+// The bool result is false for a rejection with no location. It is false
+// for one that takes the location of a binding, as the error an
+// unmarshaler returns for a source of its own does. It is false too for
+// a location that resolves nowhere in the text.
+func (n *Node) mergedPosition(rejection error) (position.Position, bool) {
+	found := anchorOf(placeable(rejection))
+	if _, own := found.err.(*Error); !own { //nolint:errorlint // The anchor itself, found by the walk.
+		return position.Position{}, false
+	}
+
+	var loc location
+
+	switch at := found.loc.(type) {
+	case position.Range:
+		loc.pos = at.Start
+
+	case position.Position:
+		loc.pos = at
+
+	default:
+		if found.ambiguous {
+			return position.Position{}, false
+		}
+
+		var err error
+
+		loc, err = n.resolveLocation(n.base.Join(found.path))
+		if err != nil {
+			return position.Position{}, false
+		}
+	}
+
+	if checkInRange(loc, n.source.lines) != nil {
+		return position.Position{}, false
+	}
+
+	return loc.pos, true
 }
 
 // decodeRejection returns err, an error from the decoder, as

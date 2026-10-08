@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -379,6 +380,102 @@ func (*problemNested) UnmarshalYAML(ctx context.Context, data []byte) error {
 	}](ctx, niceyaml.WithDisallowUnknownFields(true))
 
 	return err
+}
+
+// problemLocated decodes itself from a word and returns the error the
+// word names, located as an unmarshaler locates its own error. The
+// decoder hands it the node of its value, and the token of that node
+// gives the position of the word. It panics for the word "panic" and
+// accepts a word it does not know.
+type problemLocated struct{}
+
+func (*problemLocated) UnmarshalYAML(ctx context.Context, node ast.Node) error {
+	tk := node.GetToken()
+	at := position.NewFromToken(tk)
+	port := paths.Doc().Child("port")
+
+	switch tk.Value {
+	case "plain":
+		return errBadServer
+
+	case "position":
+		return niceyaml.Invalid(errBadServer, niceyaml.AtPosition(at))
+
+	case "range":
+		end := position.New(at.Line, at.Col+len(tk.Value))
+
+		return niceyaml.Invalid(errBadServer, niceyaml.AtRange(position.NewRange(at, end)))
+
+	case "far":
+		far := position.New(at.Line+100, at.Col)
+
+		return niceyaml.Invalid(errBadServer, niceyaml.AtRange(position.NewRange(far, far)))
+
+	case "path":
+		return niceyaml.Invalid(errBadServer, niceyaml.AtPath(port))
+
+	case "absent":
+		return niceyaml.Invalid(errBadServer, niceyaml.AtPath(paths.Doc().Child("absent")))
+
+	case "below":
+		return niceyaml.Invalid(errBadServer, niceyaml.AtPath(port.Child("unit")))
+
+	case "unplaced":
+		//nolint:wrapcheck // The test checks where a decode places the result as it is.
+		return niceyaml.BindValue(niceyaml.Invalid(errBadServer, niceyaml.AtPath(port)))
+
+	case "ambiguous":
+		// The keys 1 and "1" share a path, and the rate under the first
+		// has no limit.
+		//nolint:wrapcheck // The test checks where a decode places the result as it is.
+		return niceyaml.SelfValidateValue(ctx, map[any]layerRate{1: {}, "1": {Limit: 1}})
+
+	case "elsewhere":
+		inner := niceyaml.NewSourceFromString("port: 1\n", niceyaml.WithName("inner.yaml"))
+
+		return inner.Bind(niceyaml.Invalid(errBadServer, niceyaml.AtPath(port)))
+
+	case "panic":
+		panic(errBadServer)
+
+	default:
+		return nil
+	}
+}
+
+// problemTimed is the target of a document whose first rejection names no
+// token. The decoder reads the fields in the order below. It thus rejects
+// a value that reports its own error, a timeout, or a tier ahead of the
+// port, and it rejects the port at a token.
+type problemTimed struct {
+	Own     problemLocated `yaml:"own"`
+	Timeout time.Duration  `yaml:"timeout"`
+	Tier    tier           `yaml:"tier"`
+	Port    uint16         `yaml:"port"`
+}
+
+// decodeRows returns what a report reads from err, the error of a decode
+// of doc, as one row for each node of its [niceyaml.ErrorTree]. A row
+// holds the name of the source, the text and the message of the node,
+// its path, its position, and its range. It also says whether the node
+// has a path and a position, is bound to doc, matches
+// [niceyaml.ErrDecode], and blames the document.
+func decodeRows(doc *niceyaml.Node, err error) []string {
+	var rows []string
+
+	for node := range niceyaml.NewErrorTree(err).All() {
+		path, pathed := node.Path()
+		pos, located := node.Bound.Position()
+		rng, _ := node.Bound.Range()
+
+		rows = append(rows, fmt.Sprintf(
+			"%s | %s | %s | %s %t | %s %s %t | bound=%t decode=%t invalid=%t",
+			node.Bound.Source().Name(), node.Text, node.Message(), path, pathed, pos, rng, located,
+			node.Bound.Node() == doc, errors.Is(node.Err, niceyaml.ErrDecode), node.IsInvalid(),
+		))
+	}
+
+	return rows
 }
 
 // problemDeep holds itself, for a document nested many levels deep.
@@ -1533,6 +1630,211 @@ func TestDocument_Decode_Problems_BoundElsewhere(t *testing.T) {
 		Replicas int           `yaml:"replicas"`
 	}](t.Context())
 	require.EqualError(t, err, `inner.yaml:1:2: $.prt~: unknown field "prt"`)
+}
+
+func TestLayers_Decode_Problems(t *testing.T) {
+	t.Parallel()
+
+	strict := niceyaml.WithDisallowUnknownFields(true)
+
+	// The decoder names no token for the value it rejects first in each
+	// input. The layers hold one file, so their decode reports what a
+	// decode of that file reports.
+	tcs := map[string]struct {
+		err   error
+		input string
+		want  string
+		opts  []niceyaml.DecodeOption
+	}{
+		"one problem": {
+			input: "timeout: soon\n",
+			want:  `base.yaml:1:10: $.timeout: time: invalid duration "soon"`,
+		},
+		"duration beside an unknown field": {
+			input: "timeout: soon\nextra: 1\n",
+			opts:  []niceyaml.DecodeOption{strict},
+			want: stringtest.JoinLF(
+				"base.yaml: 2 problems",
+				`base.yaml:1:10: $.timeout: time: invalid duration "soon"`,
+				`base.yaml:2:1: $.extra~: unknown field "extra"`,
+			),
+		},
+		"text value beside a number out of range": {
+			input: "tier: mid\nport: 70000\n",
+			err:   errUnknownTier,
+			want: stringtest.JoinLF(
+				"base.yaml: 2 problems",
+				`base.yaml:1:7: $.tier: unknown tier "mid"`,
+				"base.yaml:2:7: $.port: expected integer from 0 to 65535, got 70000",
+			),
+		},
+		// The rows come in the order of the file, with the rejection of
+		// the decoder among them.
+		"rejection after the other problems": {
+			input: "extra: 1\nport: 70000\ntier: mid\ntimeout: soon\n",
+			opts:  []niceyaml.DecodeOption{strict},
+			err:   errUnknownTier,
+			want: stringtest.JoinLF(
+				"base.yaml: 4 problems",
+				`base.yaml:1:1: $.extra~: unknown field "extra"`,
+				"base.yaml:2:7: $.port: expected integer from 0 to 65535, got 70000",
+				`base.yaml:3:7: $.tier: unknown tier "mid"`,
+				`base.yaml:4:10: $.timeout: time: invalid duration "soon"`,
+			),
+		},
+		// The merged text holds each value on a line of its own, at
+		// another position than the file has for it. Each value still
+		// reports once, at its place in the file.
+		"flow mapping": {
+			input: "{port: 70000, timeout: soon, extra: 1}\n",
+			opts:  []niceyaml.DecodeOption{strict},
+			want: stringtest.JoinLF(
+				"base.yaml: 3 problems",
+				"base.yaml:1:8: $.port: expected integer from 0 to 65535, got 70000",
+				`base.yaml:1:24: $.timeout: time: invalid duration "soon"`,
+				`base.yaml:1:30: $.extra~: unknown field "extra"`,
+			),
+		},
+		"flow mapping below a comment": {
+			input: "# prod\n\n{tier: mid, port: 70000, timeout: soon}\n",
+			err:   errUnknownTier,
+			want: stringtest.JoinLF(
+				"base.yaml: 3 problems",
+				`base.yaml:3:8: $.tier: unknown tier "mid"`,
+				"base.yaml:3:19: $.port: expected integer from 0 to 65535, got 70000",
+				`base.yaml:3:35: $.timeout: time: invalid duration "soon"`,
+			),
+		},
+		"alias to a duration": {
+			input: "wait: &wait soon\ntimeout: *wait\nport: 70000\n",
+			want: stringtest.JoinLF(
+				"base.yaml: 2 problems",
+				`base.yaml:2:10: $.timeout: time: invalid duration "soon"`,
+				"base.yaml:3:7: $.port: expected integer from 0 to 65535, got 70000",
+			),
+		},
+		// The merged text leaves out the blank line of each input below,
+		// so the unmarshaler reads another position than the file has for
+		// its value.
+		"unmarshaler error with no location": {
+			input: "# prod\n\nport: 70000\nown: plain\ntimeout: soon\n",
+			err:   errBadServer,
+			want: stringtest.JoinLF(
+				"base.yaml: 3 problems",
+				"base.yaml:3:7: $.port: expected integer from 0 to 65535, got 70000",
+				"base.yaml:4:6: $.own: bad server",
+				`base.yaml:5:10: $.timeout: time: invalid duration "soon"`,
+			),
+		},
+		"unmarshaler error at a position": {
+			input: "# prod\n\nport: 70000\nown: position\ntimeout: soon\n",
+			err:   errBadServer,
+			want: stringtest.JoinLF(
+				"base.yaml: 3 problems",
+				"base.yaml:3:7: $.port: expected integer from 0 to 65535, got 70000",
+				"base.yaml:4:6: bad server",
+				`base.yaml:5:10: $.timeout: time: invalid duration "soon"`,
+			),
+		},
+		"unmarshaler error at a range": {
+			input: "# prod\n\nport: 70000\nown: range\ntimeout: soon\n",
+			err:   errBadServer,
+			want: stringtest.JoinLF(
+				"base.yaml: 3 problems",
+				"base.yaml:3:7: $.port: expected integer from 0 to 65535, got 70000",
+				"base.yaml:4:6: bad server",
+				`base.yaml:5:10: $.timeout: time: invalid duration "soon"`,
+			),
+		},
+		// The error names the port, so it stands for the problem the
+		// search finds there.
+		"unmarshaler error at the path of another problem": {
+			input: "# prod\n\nport: 70000\nown: path\ntimeout: soon\n",
+			err:   errBadServer,
+			want: stringtest.JoinLF(
+				"base.yaml: 2 problems",
+				"base.yaml:3:7: $.port: bad server",
+				`base.yaml:5:10: $.timeout: time: invalid duration "soon"`,
+			),
+		},
+		"unmarshaler error from BindValue": {
+			input: "# prod\n\nport: 70000\nown: unplaced\ntimeout: soon\n",
+			err:   errBadServer,
+			want: stringtest.JoinLF(
+				"base.yaml: 2 problems",
+				"base.yaml:3:7: $.port: bad server",
+				`base.yaml:5:10: $.timeout: time: invalid duration "soon"`,
+			),
+		},
+		// The error binds at the key of the mapping that lacks the key.
+		"unmarshaler error at a path the document leaves out": {
+			input: "# prod\n\nport: 70000\nown: absent\ntimeout: soon\n",
+			err:   errBadServer,
+			want: stringtest.JoinLF(
+				"base.yaml: 3 problems",
+				"base.yaml:3:1: $.absent: bad server",
+				"base.yaml:3:7: $.port: expected integer from 0 to 65535, got 70000",
+				`base.yaml:5:10: $.timeout: time: invalid duration "soon"`,
+			),
+		},
+		// The panic binds at the first key of the mapping, so it stands
+		// for the unknown field the search finds there.
+		"unmarshaler that panics": {
+			input: "# prod\n\nextra: 1\nown: panic\ntimeout: soon\n",
+			opts:  []niceyaml.DecodeOption{strict},
+			want: stringtest.JoinLF(
+				"base.yaml: 2 problems",
+				"base.yaml:3:1: decoder rejected the value: panic: bad server",
+				`base.yaml:5:10: $.timeout: time: invalid duration "soon"`,
+			),
+		},
+		// An error with no position comes back alone, since nothing tells
+		// it apart from a problem the search finds.
+		"unmarshaler error at a range no line holds": {
+			input: "# prod\n\nport: 70000\nown: far\ntimeout: soon\n",
+			err:   errBadServer,
+			want:  "base.yaml: bad server",
+		},
+		"unmarshaler error at a path that resolves nowhere": {
+			input: "# prod\n\nport: 70000\nown: below\ntimeout: soon\n",
+			err:   errBadServer,
+			want:  "base.yaml: $.port.unit: bad server",
+		},
+		"unmarshaler error at a path several keys share": {
+			input: "# prod\n\nport: 70000\nown: ambiguous\ntimeout: soon\n",
+			want:  "base.yaml: $.1.limit: limit must be at least 1",
+		},
+		// The position of the error lies in the other source, so nothing
+		// joins it either.
+		"unmarshaler error bound to another source": {
+			input: "# prod\n\nport: 70000\nown: elsewhere\ntimeout: soon\n",
+			err:   errBadServer,
+			want:  "inner.yaml:1:7: $.port: bad server",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("base.yaml"))
+
+			_, fromLayers := niceyaml.NewLayers(doc).Decode[problemTimed](t.Context(), tc.opts...)
+			_, fromSource := doc.Source().Decode[problemTimed](t.Context(), tc.opts...)
+
+			for route, err := range map[string]error{"layers": fromLayers, "source": fromSource} {
+				require.EqualError(t, err, tc.want, route)
+				require.ErrorIs(t, err, niceyaml.ErrDecode, route)
+
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err, route)
+				}
+			}
+
+			want := decodeRows(doc, fromSource)
+			assert.Equal(t, want, decodeRows(doc, fromLayers))
+		})
+	}
 }
 
 func TestDocument_Decode_Problems_Deep(t *testing.T) {
