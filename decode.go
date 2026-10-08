@@ -155,7 +155,7 @@ import (
 // method it gets from an embedded field decodes the document into that
 // field, so the field validates at the path of the struct.
 // A check that reads state the caller fills in after the decode, such as
-// a value from the environment or a flag, runs through
+// a field a library sets from the environment or a flag, runs through
 // [Node.SelfValidate]. The caller decodes with [WithSelfValidation] off,
 // fills in that state, and then calls SelfValidate on the value, which
 // walks it as the decode would have. SelfValidate describes where an

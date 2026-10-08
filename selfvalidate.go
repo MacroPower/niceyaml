@@ -32,11 +32,13 @@ import (
 // filled its target, and returns nil when nothing failed. It runs the
 // walk whatever [WithSelfValidation] says, and runs no [Validator].
 //
-// A program that layers its configuration validates the value once every
-// layer has set it. It decodes the file with the walk off, and applies
-// the environment, its flags, or its defaults over the result. It then
-// validates what it holds, so a required field that only the environment
-// sets passes:
+// A program that can list what its environment or its flags set passes
+// those values as a layer of [Layers], which validates them as it
+// validates a file. SelfValidate is for the program whose library writes
+// them into the value instead, or that applies its defaults there. That
+// program decodes the file with the walk off, sets the rest of the
+// value, and then validates what it holds, so a required field that only
+// the environment sets passes:
 //
 //	var cfg Config
 //	if err := doc.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
@@ -46,6 +48,10 @@ import (
 //	applyEnv(&cfg)
 //
 //	return doc.SelfValidate(ctx, &cfg)
+//
+// No [Validator] of the decode sees a value set this way. A schema thus
+// leaves the value unchecked, and reports a key it requires as missing
+// when only the environment sets it.
 //
 // A program that layers one file over another merges them through
 // [Layers]. [Layers.SelfValidate] then binds each error in the file that
@@ -80,7 +86,9 @@ import (
 // as one the caller appended to a slice, binds with no position. An error
 // under a value the caller replaced, or under an element of a slice it
 // reordered or grew at the front, marks what the document holds at that
-// path. The keys of a map that the document lacks take the text of their
+// path. An error about a port the environment set to 0 thus marks the
+// 8080 of the file.
+// The keys of a map that the document lacks take the text of their
 // Go values. A field that go-yaml never decodes does not validate, as in
 // a decode. That holds for a field tagged `yaml:"-"`, an unexported
 // field, and any value below a type that decodes itself, through an

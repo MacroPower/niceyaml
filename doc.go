@@ -440,13 +440,16 @@
 // [Node.DecodeInto] runs the same pipeline on a value you already hold,
 // such as one pre-populated with defaults.
 //
-// [Node.SelfValidate] runs the last step on its own, for a program that
-// layers its configuration. The program decodes the file with
-// [WithSelfValidation] off, applies the environment or its flags over the
-// value, and then validates the result, so a required field that only the
-// environment sets passes. Each error still binds to the file, where its
-// path resolves, as Node.SelfValidate describes for a value that no
-// longer mirrors the document:
+// A program that reads its environment or its flags passes what they set
+// as one more layer of [Layers], as described below, and the whole
+// pipeline then checks those values. [Node.SelfValidate] runs the last
+// step on its own, for a program whose library writes them into the
+// value instead. The program decodes the file with [WithSelfValidation]
+// off, lets the library fill the value, and then validates the result,
+// so a required field that only the environment sets passes. No
+// [Validator] sees a value set this way, and each error still binds to
+// the file, where its path resolves, as Node.SelfValidate describes for
+// a value that no longer mirrors the document:
 //
 //	var cfg Config
 //	if err := doc.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
@@ -488,6 +491,32 @@
 // still binds in the file that holds its value. The decode fills the Go
 // value from that document by the rule of [Node.DecodeInto], so defaults
 // the value holds survive where the files leave a field out.
+//
+// The environment and the flags of a program go in as one more layer,
+// above the files. The program builds a map of the keys they set, under
+// the names the YAML uses. Each value has the Go type of its field. The
+// program encodes the map into a document:
+//
+//	overrides := map[string]any{
+//		"server": map[string]any{"port": port}, // APP_SERVER_PORT
+//	}
+//
+//	data, err := encoder.Marshal(ctx, overrides)
+//	if err != nil {
+//		return err
+//	}
+//
+//	env, err := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment")).Document()
+//	if err != nil {
+//		return err
+//	}
+//
+//	cfg, err := niceyaml.NewLayers(base, prod, env).Decode[Config](ctx, niceyaml.WithValidator(schema))
+//
+// The schema then checks the port the environment set. An error under
+// the port binds in that layer, as in
+// "environment:2:9: $.server.port: port must be at least 1". [Layers]
+// describes what such a layer cannot do, such as unset a value.
 //
 // [Node.At] returns a Node scoped to the node a path selects, and the
 // same pipeline then runs on that node. Decode reads one value without

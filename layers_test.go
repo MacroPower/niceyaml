@@ -9,10 +9,12 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -101,6 +103,54 @@ func ExampleLayers_Document() {
 	//   host: prod.example.com
 	//   port: 0
 	// base.yaml:5:9: $.server.port: port must be at least 1
+}
+
+func ExampleLayers_environment() {
+	ctx := context.Background()
+
+	// The file leaves the port to the environment.
+	base, err := niceyaml.NewSourceFromString(
+		"server:\n  host: example.com\n",
+		niceyaml.WithName("base.yaml"),
+	).Document()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// The program read APP_SERVER_PORT=0. The map holds the keys the
+	// environment set and no other, under the names the YAML uses, and the
+	// port as the integer a file would write.
+	overrides := map[string]any{
+		"server": map[string]any{"port": 0},
+	}
+
+	// A comment names the variable beside its value.
+	data, err := encoder.Marshal(ctx, overrides, encoder.WithYAMLComments(yaml.CommentMap{
+		"$.server.port": {yaml.LineComment(" APP_SERVER_PORT")},
+	}))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	env, err := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment")).Document()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	requires := schema.MustCompile([]byte(`{
+		"properties": {"server": {"required": ["host", "port"]}}
+	}`))
+
+	// The schema finds the port it requires in the environment, and the
+	// check of the server reports the port in that layer.
+	_, err = niceyaml.NewLayers(base, env).Decode[layerConfig](ctx, niceyaml.WithValidator(requires))
+	fmt.Println(niceyaml.FormatError(err, 0))
+
+	// Output:
+	// environment:2:9: $.server.port: port must be at least 1
+	//
+	//    2 |   port: 0 # APP_SERVER_PORT
+	//      |         ^
 }
 
 func TestLayers_SelfValidate(t *testing.T) {

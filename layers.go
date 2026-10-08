@@ -37,9 +37,50 @@ var (
 //
 //	base.yaml:3:9: $.server.port: port must be at least 1
 //
-// A program that applies its environment or its flags after the last
-// file turns the self-validation step off for the decode, and runs it
-// with [Layers.SelfValidate] once the value is whole:
+// A program that reads its environment or its flags passes what they set
+// as one more layer, above the files. It builds a map that holds the
+// keys they set and no other, under the names the YAML uses. Each value
+// has the Go type of the field it sets, so the program parses the text
+// of a variable first. The encoder quotes a string that reads as another
+// type, so a schema reads "8080" as a string, and a bool field rejects
+// "true". The program encodes the map with
+// [go.jacobcolvin.com/niceyaml/encoder.Marshal] and passes the Node of
+// the result:
+//
+//	overrides := map[string]any{
+//		"server": map[string]any{"port": port}, // APP_SERVER_PORT
+//	}
+//
+//	data, err := encoder.Marshal(ctx, overrides)
+//	if err != nil {
+//		return err
+//	}
+//
+//	env, err := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment")).Document()
+//	if err != nil {
+//		return err
+//	}
+//
+//	cfg, err := niceyaml.NewLayers(base, prod, env).Decode[Config](ctx)
+//
+// Every [Validator] and the self-validation step then check the port the
+// environment set, and a schema that requires a key passes when only the
+// environment sets it. An error under the port binds in that layer,
+// under the name the program gave it:
+//
+//	environment:2:9: $.server.port: port must be at least 1
+//
+// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] adds a comment
+// at a path of the encoded map, such as the name of the variable beside
+// the port, and the excerpt of the error then shows it. A program that
+// prints the configuration it runs with reads the text of
+// [Layers.Document], which holds what the files and the environment set
+// together.
+//
+// A program whose library writes the environment or the flags into the
+// Go value holds no such map. It turns the self-validation step off for
+// the decode, lets the library fill the value, and runs the step with
+// [Layers.SelfValidate] once the value is whole:
 //
 //	var cfg Config
 //	if err := layers.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
@@ -49,6 +90,11 @@ var (
 //	applyEnv(&cfg)
 //
 //	return layers.SelfValidate(ctx, &cfg)
+//
+// No [Validator] sees a value set this way. A schema thus leaves the
+// value unchecked, and reports a key it requires as missing when only
+// the library sets it. An error under such a value binds at whatever a
+// file holds at its path, as [Node.SelfValidate] describes.
 //
 // [Layers.Validate] runs a [Validator] on the merged document without a
 // decode, and [Layers.Bind] binds the error of a check the program runs
@@ -141,8 +187,18 @@ var (
 // replaces a map the value holds, whole. Defaults that should merge key
 // by key go in a layer, such as an embedded file below the others.
 //
-// One limit remains. A value that the environment or a flag set binds at
-// whatever a file holds at its path, as [Node.SelfValidate] describes.
+// A layer the program builds from its environment or its flags merges
+// and binds as a file does, and those rules set its limits. A null keeps
+// the value below it, so the layer cannot unset a value. A sequence
+// replaces the one below it whole, so the layer cannot set one element.
+// A key that no field of the target reads sets nothing, and
+// [WithDisallowUnknownFields] reports such a key. An error at a mapping
+// binds in the highest layer that holds the mapping, and so does an
+// error for a key the mapping lacks. Both thus bind in such a layer once
+// it sets one key there, whichever layer the fix belongs in. The excerpt
+// of an error shows lines of its layer. A secret the environment set
+// thus prints when it sits on the line of the error or among the context
+// lines around it, and the text of [Layers.Document] holds it too.
 //
 // A layer whose document did not parse holds no value. Neither does a
 // layer that a decode of it alone into an any value rejects, as it
