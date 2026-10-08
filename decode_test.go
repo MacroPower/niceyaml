@@ -4651,6 +4651,32 @@ func TestWithYAMLComments(t *testing.T) {
 		assert.Equal(t, want, comments)
 	})
 
+	t.Run("empties the map for a node that leaves the target as it is", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input string
+		}{
+			"empty document":       {input: ""},
+			"document of comments": {input: "# note\n"},
+			"null":                 {input: "~ # none\n"},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				comments := yaml.CommentMap{"$.stale": {yaml.LineComment(" old")}}
+
+				_, err := yamltest.FirstDocument(t, tc.input).Decode[map[string]any](
+					t.Context(), niceyaml.WithYAMLComments(comments),
+				)
+				require.NoError(t, err)
+				assert.Empty(t, comments)
+			})
+		}
+	})
+
 	t.Run("the last option replaces the earlier ones", func(t *testing.T) {
 		t.Parallel()
 

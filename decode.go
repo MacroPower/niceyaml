@@ -3208,7 +3208,8 @@ func (n *Node) yamlOptions(cfg decodeConfig) []yaml.DecodeOption {
 // The decoder that fills v is the one decoder of the call that writes to
 // the comment map of [WithYAMLComments]. The go-yaml decoder empties
 // that map when it starts, so a second decoder with the option would
-// drop what the first collected.
+// drop what the first collected. A node that leaves v as it is starts no
+// decoder, so decodeNode empties the map itself before it reads node.
 //
 // The go-yaml decoder never checks the context, so a context that has
 // ended before the decode starts, or while it registers the anchors node
@@ -3219,6 +3220,8 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, cfg decodeC
 	if err != nil {
 		return n.Bind(err)
 	}
+
+	clear(cfg.comments)
 
 	if !astnode.HasContent(node) || isTaggedNull(node) || keepsNullTarget(node, v) {
 		return nil
