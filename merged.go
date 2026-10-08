@@ -260,6 +260,14 @@ func (r *layerReader) follow(
 		return r.follow(n.Value, ref, outer, visit)
 
 	case *ast.AliasNode:
+		// An alias that lies inside the anchor it refers to reads as null
+		// wherever the reader reaches it from. The open anchors alone miss
+		// one that a `<<` merge key brought in, since mapping reads that
+		// value once the anchor has closed.
+		if !ref && r.layer.doc.enclosedAliases()[n] {
+			return visit(nil, outer, ref)
+		}
+
 		anchor, inRef, err := r.anchor(n, ref)
 		if err != nil {
 			return err

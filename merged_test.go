@@ -455,6 +455,10 @@ var mergedCorpus = map[string]struct {
 			"list: [*s, *base, &t tail, *t]\nnested: &n\n  inner: &i {deep: 1}\n  again: *i\n" +
 			"whole: *n\n*s : key\ntagged: &g !!str 5\nread: *g\n",
 	},
+	"aliases inside their own anchor": {
+		input: "outer: &outer\n  inner: &inner\n    self: *inner\n    list: [1, *inner]\n" +
+			"  merged:\n    <<: *inner\n    more: 2\n  nested: &nested {up: *outer}\ncopy: *nested\n",
+	},
 	"merge keys": {
 		input: "base: &base {a: 1, b: 2}\nmore: &more {c: 3}\none: {<<: *base, d: 4}\n" +
 			"many: {<<: [*base, *more], e: 5}\nblock:\n  <<: *more\n  f: 6\ninline: {<<: {g: 7}, h: 8}\n" +
