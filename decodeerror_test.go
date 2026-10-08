@@ -938,11 +938,16 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			},
 			// The decoder reads the fields of a struct in the order the
 			// struct declares them, so the first field that fails reports
-			// the error, wherever the document puts it.
+			// the error, wherever the document puts it. The search for the
+			// other problems of the decode reads no opaqueValue, so the
+			// error comes back alone.
 			"first field in struct order": {
-				input: "tier: mid\ntimeout: soon\n",
+				input: "value: bad\ntimeout: soon\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[tierServer](ctx)
+					_, err := dd.Decode[struct {
+						Timeout time.Duration `yaml:"timeout"`
+						Value   opaqueValue   `yaml:"value"`
+					}](ctx)
 
 					return err
 				},

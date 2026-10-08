@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"errors"
+	"encoding"
 	"fmt"
 	"reflect"
 	"slices"
@@ -190,24 +190,31 @@ type decodeProblem struct {
 // its slice. A value thus costs the same however deep it lies, and the
 // pass decodes no value below such a mapping or sequence a second time.
 //
-// A leaf adds a problem only for a rejection the decoder builds itself,
-// with no code of the caller:
+// A leaf adds a problem only for these rejections. The decoder builds
+// the first two itself, with no code of the caller:
 //
 //   - A [yaml.TypeError], a [yaml.OverflowError], or a
 //     [yaml.UnexpectedNodeTypeError] at a token of the source. Those are
 //     a value of the wrong kind and a number out of range.
 //   - The error of [time.ParseDuration] for a scalar in a
 //     [time.Duration], which the decoder returns with no token.
+//   - The error of an UnmarshalText method for a scalar in a type that
+//     [decodesFromText] reports, which the decoder returns with no token
+//     too.
 //
-// The walk reads nothing at or below a value that decodes itself, as
-// [reportsOwnError] lists those types, a type an option of the decode
-// gives an unmarshaler among them. Only the unmarshaler of such a value
-// says what it accepts, and a second call can answer otherwise than the
-// first, as one that counts the names it has seen does. A [time.Duration]
-// and a [time.Time] are the exception, since the decoder parses both
-// itself. The walk reads nothing below an interface or a [yaml.MapSlice]
-// either, which take any value. It passes over a struct the decoder
-// decodes no field of, as [unknownFieldFinder.fields] describes those.
+// The walk reads nothing at or below any other value that decodes
+// itself, as [reportsOwnError] lists those types, a type an option of
+// the decode gives an unmarshaler among them. Only the unmarshaler of
+// such a value says what it accepts, and a second call can answer
+// otherwise than the first, as one that counts the names it has seen
+// does. The decoder parses a [time.Duration] and a [time.Time] itself,
+// so the walk reads both. It hands an UnmarshalText method the text of a
+// scalar, without the context or the node of the decode. The walk
+// therefore takes that method to answer the same for the same text, and
+// reads the scalar. The walk reads nothing below an interface or a
+// [yaml.MapSlice] either, which take any value. It passes over a struct
+// the decoder decodes no field of, as [unknownFieldFinder.fields]
+// describes those.
 //
 // The walk cannot see every rule the decode applies, such as the types
 // [yaml.RegisterCustomUnmarshaler] gave a function, or the value the
@@ -218,13 +225,16 @@ type decodeProblem struct {
 // thus judges its own fields. It judges nothing below them, so the
 // collector can add a problem there that the function accepts.
 //
-// The pass decodes one leaf at a time, so it calls no unmarshaler of a
-// value the walk reads. A decode of the struct that reads a leaf can call
-// code the walk does not pair with the leaf. That is a registered
-// function, the [yaml.StructValidator] of [WithYAMLStructValidator], and
-// the unmarshaler of another value that reads the entry of the leaf, as a
-// field of the same name in an inline struct does. What those return adds
-// no problem. A struct with no field that a probe decodes reaches a
+// The pass decodes one leaf at a time, so the one unmarshaler it calls
+// for a value the walk reads is that UnmarshalText method. It calls the
+// method once for each field, element, or map value that reads the
+// scalar, and once more to confirm a scalar the method rejects. A decode
+// of the struct that reads a leaf can call code the walk does not pair
+// with the leaf. That is a registered function, the
+// [yaml.StructValidator] of [WithYAMLStructValidator], and the
+// unmarshaler of another value that reads the entry of the leaf, as a
+// field of the same name in an inline struct does. What those return
+// adds no problem. A struct with no field that a probe decodes reaches a
 // StructValidator too.
 //
 // When the decoder rejects unknown fields, an [unknownFieldFinder] adds
@@ -421,7 +431,9 @@ func (c *problemCollector) visit(t reflect.Type, node ast.Node) bool {
 // The decoder reads nothing from a null, as [readNode] describes, so the
 // walk stops there. It stops too at an alias the document cannot follow,
 // such as one to an anchor of a reference document, since the document
-// holds no node for the value behind it.
+// holds no node for the value behind it. Of the values that decode
+// themselves, it reads a duration, a time, and a scalar in a type that
+// [decodesFromText] reports, each as a leaf.
 func (c *problemCollector) walk(t reflect.Type, held ast.Node, at place, in holder) {
 	if c.ctx.Err() != nil {
 		return
@@ -440,7 +452,17 @@ func (c *problemCollector) walk(t reflect.Type, held ast.Node, at place, in hold
 		return
 	}
 
-	if reportsOwnError(t, c.cfg.unmarshalers) || t.Kind() == reflect.Interface || t == mapSliceType {
+	if reportsOwnError(t, c.cfg.unmarshalers) {
+		// The decoder calls an UnmarshalText method for a scalar alone,
+		// and can call another unmarshaler of the type for any other node.
+		if decodesFromText(t, c.cfg.unmarshalers) && isScalar(contentNode(c.resolver, node)) {
+			c.leaf(t, held, node, at, in)
+		}
+
+		return
+	}
+
+	if t.Kind() == reflect.Interface || t == mapSliceType {
 		return
 	}
 
@@ -581,8 +603,10 @@ func (c *problemCollector) entries(t reflect.Type, mapping *ast.MappingNode, at 
 // is the content of.
 //
 // A rejection at a token of the source takes the location of that token,
-// as [Node.tokenRejection] gives it. The error of a parse has no token,
-// so it takes the path the walk reached the value by, as
+// as [Node.tokenRejection] gives it. The error of a parse has no token.
+// That is the error of [time.ParseDuration] for a scalar in a duration,
+// or of the UnmarshalText method of a type that [decodesFromText]
+// reports. It takes the path the walk reached the value by, as
 // [Node.locateDecodeError] puts one under the path of its value. It adds
 // a problem only when that path selects held, which the path of an entry
 // that a later one hides does not.
@@ -590,7 +614,9 @@ func (c *problemCollector) entries(t reflect.Type, mapping *ast.MappingNode, at 
 // Any other error adds nothing. That is another rejection of the
 // decoder, such as one for a tag that does not convert its value, the
 // error of a type that only a [yaml.RegisterCustomUnmarshaler] function
-// decodes, or a panic that [decodeWithRecover] placed.
+// decodes, or a panic that [decodeWithRecover] placed. It is also an
+// error of an UnmarshalText method that [Node.locateDecodeError] would
+// return as it is, such as one that names a place already.
 func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, at place, in holder) {
 	err := c.decode(node, reflect.New(t).Interface())
 	if err == nil {
@@ -606,10 +632,15 @@ func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, at place, i
 		return
 	}
 
-	// The decoder parses the text of a scalar as a duration, and returns
-	// the error of that parse as it is.
+	// The decoder parses the text of a scalar as a duration, or hands it
+	// to an UnmarshalText method, and returns the error of that parse as
+	// it is.
 	_, isYAML := err.(yaml.Error) //nolint:errorlint // The decoder returns it unwrapped.
-	if isYAML || errors.Is(err, errPlaced) || t != durationType || !isScalar(contentNode(c.resolver, node)) {
+	if isYAML || !c.node.lacksLocation(err) || !isScalar(contentNode(c.resolver, node)) {
+		return
+	}
+
+	if t != durationType && !decodesFromText(t, c.cfg.unmarshalers) {
 		return
 	}
 
@@ -621,6 +652,26 @@ func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, at place, i
 	}
 
 	c.add(decodeProblem{err: Rebase(asDecodeError(c.tree.restoreError(err)), path), at: loc.pos})
+}
+
+// decodesFromText reports whether the decoder decodes a scalar into a
+// value of type t through the UnmarshalText method of the type. The u
+// argument holds the unmarshalers the options of the decode name. The
+// decoder calls the first unmarshaler it finds on the pointer to the
+// type, in the order of [unmarshalerTypes], so a type with an
+// UnmarshalYAML method reports false. So does a type a
+// [WithCustomUnmarshaler] function decodes, since the decoder calls that
+// function ahead of any method. The decoder parses a [time.Time] itself,
+// ahead of the UnmarshalText method of the type, and
+// [problemCollector.walk] reads a time before it asks.
+func decodesFromText(t reflect.Type, u optionUnmarshalers) bool {
+	if u.decodesCustom(t) {
+		return false
+	}
+
+	k := slices.IndexFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
+
+	return k >= 0 && unmarshalerTypes[k] == reflect.TypeFor[encoding.TextUnmarshaler]()
 }
 
 // builtRejection returns err as a rejection the decoder builds itself

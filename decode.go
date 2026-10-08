@@ -2898,16 +2898,20 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 //     a scalar, or a mapping or a sequence where the target takes
 //     another kind.
 //   - A [time.Duration] that does not parse.
+//   - A scalar that the UnmarshalText method of the target rejects, when
+//     the target has neither an UnmarshalYAML method nor a function from
+//     [WithCustomUnmarshaler]. An enum with an UnmarshalText method thus
+//     reports every bad value in one decode.
 //   - An unknown field, as [WithDisallowUnknownFields] describes.
 //
 // The search leaves every other problem to the next decode:
 //
-//   - It reads nothing at or below a value that decodes itself, other
-//     than a [time.Duration] or a [time.Time], since a second call of an
-//     unmarshaler can answer otherwise than the first. An enum with an
-//     UnmarshalText method thus reports one bad value for each decode. A
-//     value that a [WithCustomUnmarshaler] function decodes is such a
-//     value, and so is one with an UnmarshalJSON method under
+//   - It reads nothing at or below any other value that decodes itself,
+//     apart from a [time.Time], since a second call of an unmarshaler
+//     can answer otherwise than the first. A type with an UnmarshalYAML
+//     method thus reports one bad value for each decode. A value that a
+//     [WithCustomUnmarshaler] function decodes is such a value, and so
+//     is one that decodes through an UnmarshalJSON method under
 //     [WithJSONUnmarshalers].
 //   - It reads nothing below an interface, and nothing in a mapping the
 //     decoder decodes no field from, as WithDisallowUnknownFields lists
@@ -2931,12 +2935,23 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // no such limit.
 //
 // The search runs only after a decode fails, and it decodes one value at
-// a time, so it calls no unmarshaler of a value it reads. To confirm a
-// problem, it decodes the struct that reads the value from that one
-// entry. That decode can call a registered function or the struct
-// validator of [WithYAMLStructValidator] again, and the unmarshaler of a
-// field of the same name in an inline struct. What they return adds no
-// problem.
+// a time. The one unmarshaler it calls for a value it reads is the
+// UnmarshalText method the list above names. It hands the method the
+// scalar again, on a new value of the target type, so the method must
+// answer from its text alone. One that reads the value v held before the
+// decode, or state that an earlier call changed, can reject in the
+// search what it took in the decode, and the report then holds a problem
+// the document does not have. A decode that fails can call the method
+// four times for one value. The decode calls it once. The second decode
+// that finds the value behind an error calls it once more, as the
+// paragraphs below describe. The search calls it once, and again to
+// confirm a scalar the method rejects.
+//
+// To confirm a problem, the search decodes the struct that reads the
+// value from that one entry. That decode can call a registered function
+// or the struct validator of [WithYAMLStructValidator] again, and the
+// unmarshaler of a field of the same name in an inline struct. What they
+// return adds no problem.
 //
 // An error the decoder reports without a token of the source comes back
 // with no location and keeps the text go-yaml gave it. The decoder

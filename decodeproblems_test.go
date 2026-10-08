@@ -33,6 +33,12 @@ var (
 			return decodePulled(ctx, (*problemPulled)(p), data)
 		})
 	})
+
+	// The calls of the UnmarshalText method of [problemLevel], by text.
+	levelCalls callCounter
+
+	// The calls of the UnmarshalJSON method of [problemEither].
+	eitherCalls callCounter
 )
 
 // problemServer is an element of [problemConfig].
@@ -50,6 +56,13 @@ type problemConfig struct {
 	Servers  []problemServer `yaml:"servers"`
 	Replicas int             `yaml:"replicas"`
 	Timeout  int             `yaml:"timeout"`
+}
+
+// problemTiered is a server whose tier decodes itself from text.
+type problemTiered struct {
+	Name string `yaml:"name"`
+	Tier tier   `yaml:"tier"`
+	Port int    `yaml:"port"`
 }
 
 // problemImage decodes itself through a type whose fields do not mirror
@@ -210,6 +223,111 @@ func (u *problemUnique) UnmarshalYAML(ctx context.Context, unmarshal func(any) e
 	*u = problemUnique(name)
 
 	return nil
+}
+
+// problemUniqueText rejects a name another value of the decode holds, as
+// [problemUnique] does, and has an UnmarshalText method too. The decoder
+// finds its UnmarshalYAML method first and never calls the other.
+type problemUniqueText string
+
+func (u *problemUniqueText) UnmarshalYAML(ctx context.Context, unmarshal func(any) error) error {
+	return (*problemUnique)(u).UnmarshalYAML(ctx, unmarshal)
+}
+
+func (*problemUniqueText) UnmarshalText([]byte) error {
+	return errBadServer
+}
+
+// uniqueTier decodes a [tier] in place of the UnmarshalText method of the
+// type, as a function from niceyaml.WithCustomUnmarshaler does, and
+// rejects a name another value of the decode holds.
+func uniqueTier(ctx context.Context, _ *tier, text []byte) error {
+	calls, ok := ctx.Value(callsKey{}).(*problemCalls)
+	if !ok {
+		return nil
+	}
+
+	name := strings.TrimSpace(string(text))
+	if calls.seen[name] {
+		return fmt.Errorf("duplicate name %q", name)
+	}
+
+	calls.seen[name] = true
+
+	return nil
+}
+
+// callCounter counts the calls of an unmarshaler that takes no context,
+// under a name the unmarshaler gives each call. Every decode of the type
+// shares the count, so one test alone decodes a type that counts in one.
+type callCounter struct {
+	calls map[string]int
+	mu    sync.Mutex
+}
+
+// add counts one call under name.
+func (c *callCounter) add(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.calls == nil {
+		c.calls = map[string]int{}
+	}
+
+	c.calls[name]++
+}
+
+// take returns the calls counted since the last take.
+func (c *callCounter) take() map[string]int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	calls := c.calls
+	c.calls = nil
+
+	return calls
+}
+
+// problemLevel decodes itself from text, takes "info" and "warn" alone,
+// and counts its calls in levelCalls.
+type problemLevel string
+
+func (l *problemLevel) UnmarshalText(text []byte) error {
+	level := string(text)
+
+	levelCalls.add(level)
+
+	if level != "info" && level != "warn" {
+		return fmt.Errorf("unknown level %q", level)
+	}
+
+	*l = problemLevel(level)
+
+	return nil
+}
+
+// problemEither decodes itself from the text of a scalar. Under
+// [niceyaml.WithJSONUnmarshalers], the decoder hands its UnmarshalJSON
+// method a mapping or a sequence, and the method counts its calls in
+// eitherCalls.
+type problemEither struct{}
+
+func (*problemEither) UnmarshalText([]byte) error {
+	return nil
+}
+
+func (*problemEither) UnmarshalJSON([]byte) error {
+	eitherCalls.add("json")
+
+	return nil
+}
+
+// problemPlaced decodes itself from text and reports an error that names
+// a position already.
+type problemPlaced string
+
+func (*problemPlaced) UnmarshalText([]byte) error {
+	return niceyaml.Invalid(errBadServer, niceyaml.AtPosition(position.New(0, 0)))
 }
 
 // problemCounted decodes itself from any mapping and counts its calls.
@@ -904,8 +1022,8 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 				"3:8: $.limit: expected integer, got string",
 			),
 		},
-		// An enum reports one value for each decode, as its unmarshaler
-		// alone says what it takes.
+		// An enum reports every value its UnmarshalText method rejects,
+		// since the search hands the method each scalar again.
 		"values that decode themselves": {
 			decode: decodeInto[struct {
 				Tiers []tier `yaml:"tiers"`
@@ -914,10 +1032,101 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			input: "tiers: [low, mid, top]\nn: x\n",
 			is:    errUnknownTier,
 			want: stringtest.JoinLF(
-				"2 problems",
+				"3 problems",
 				`1:14: $.tiers[1]: unknown tier "mid"`,
+				`1:19: $.tiers[2]: unknown tier "top"`,
 				"2:4: $.n: expected integer, got string",
 			),
+		},
+		// The decoder rejects the port first, and the search finds the
+		// tier.
+		"text value beside a value of the wrong kind": {
+			decode: decodeInto[struct {
+				Port int  `yaml:"port"`
+				Tier tier `yaml:"tier"`
+			}](),
+			input: "tier: mid\nport: x\n",
+			is:    errUnknownTier,
+			want: stringtest.JoinLF(
+				"2 problems",
+				`1:7: $.tier: unknown tier "mid"`,
+				"2:7: $.port: expected integer, got string",
+			),
+		},
+		// The decoder rejects the timeout first, the field its struct
+		// declares before the tier.
+		"text value beside a duration": {
+			decode: decodeInto[tierServer](),
+			input:  "tier: mid\ntimeout: soon\n",
+			is:     errUnknownTier,
+			want: stringtest.JoinLF(
+				"2 problems",
+				`1:7: $.tier: unknown tier "mid"`,
+				`2:10: $.timeout: time: invalid duration "soon"`,
+			),
+		},
+		// The map holds pointers, and the search reads the value each
+		// points to.
+		"text values of a map": {
+			decode: decodeInto[struct {
+				Tiers map[string]*tier `yaml:"tiers"`
+			}](),
+			input: "tiers: {a: mid, b: low, c: top}\n",
+			is:    errUnknownTier,
+			want: stringtest.JoinLF(
+				"2 problems",
+				`1:12: $.tiers.a: unknown tier "mid"`,
+				`1:28: $.tiers.c: unknown tier "top"`,
+			),
+		},
+		// An alias reads the scalar into an element of its own, so the
+		// element reports at the alias, as a duration behind one does.
+		"alias to a text value": {
+			decode: decodeInto[struct {
+				Tiers []tier `yaml:"tiers"`
+			}](),
+			input: "tiers: [&t mid, *t, top]\n",
+			is:    errUnknownTier,
+			want: stringtest.JoinLF(
+				"3 problems",
+				`1:12: $.tiers[0]: unknown tier "mid"`,
+				`1:17: $.tiers[1]: unknown tier "mid"`,
+				`1:21: $.tiers[2]: unknown tier "top"`,
+			),
+		},
+		// The document writes the tier once, so both servers that merge
+		// it report one problem.
+		"text value a merge key brings in": {
+			decode: decodeInto[struct {
+				Servers []problemTiered `yaml:"servers"`
+			}](),
+			input: "base: &b {tier: mid}\nservers:\n  - {<<: *b, name: a}\n  - {<<: *b, name: b, port: x}\n",
+			is:    errUnknownTier,
+			want: stringtest.JoinLF(
+				"2 problems",
+				`1:17: $.servers[0].tier: unknown tier "mid"`,
+				"4:29: $.servers[1].port: expected integer, got string",
+			),
+		},
+		// The search reads no key of a map, so the key reports in a
+		// later decode.
+		"text keys of a map": {
+			decode: decodeInto[struct {
+				N     int          `yaml:"n"`
+				Tiers map[tier]int `yaml:"tiers"`
+			}](),
+			input: "n: x\ntiers: {mid: 1, low: 2}\n",
+			want:  "1:4: $.n: expected integer, got string",
+		},
+		// The error of the method points at a place of its own, so the
+		// search does not put it at the value.
+		"text error that names a place": {
+			decode: decodeInto[struct {
+				N      int           `yaml:"n"`
+				Placed problemPlaced `yaml:"placed"`
+			}](),
+			input: "n: x\nplaced: a\n",
+			want:  "1:4: $.n: expected integer, got string",
 		},
 	}
 
@@ -1094,23 +1303,104 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 
 	// The unmarshaler takes each name once. A second call for a name it
 	// has seen would report a duplicate.
-	t.Run("unmarshaler with state", func(t *testing.T) {
+	stateful := map[string]struct {
+		decode func(context.Context, *niceyaml.Node, ...niceyaml.DecodeOption) error
+		opts   []niceyaml.DecodeOption
+	}{
+		"unmarshaler with state": {
+			decode: decodeInto[struct {
+				Names    []problemUnique `yaml:"names"`
+				Timeout  int             `yaml:"timeout"`
+				Replicas int             `yaml:"replicas"`
+			}](),
+		},
+		// The decoder calls the UnmarshalYAML method of the type and
+		// never its UnmarshalText method, so the search hands the type no
+		// scalar again.
+		"unmarshaler with state and an UnmarshalText method": {
+			decode: decodeInto[struct {
+				Names    []problemUniqueText `yaml:"names"`
+				Timeout  int                 `yaml:"timeout"`
+				Replicas int                 `yaml:"replicas"`
+			}](),
+		},
+		// The decoder calls the function in place of the UnmarshalText
+		// method of the type, so the search hands the type no scalar
+		// again.
+		"custom unmarshaler function with state": {
+			decode: decodeInto[struct {
+				Names    []tier `yaml:"names"`
+				Timeout  int    `yaml:"timeout"`
+				Replicas int    `yaml:"replicas"`
+			}](),
+			opts: []niceyaml.DecodeOption{niceyaml.WithCustomUnmarshaler(uniqueTier)},
+		},
+	}
+
+	for name, tc := range stateful {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			calls := &problemCalls{seen: map[string]bool{}}
+			ctx := context.WithValue(t.Context(), callsKey{}, calls)
+
+			err := tc.decode(
+				ctx,
+				yamltest.FirstDocument(t, "names: [a, b, c]\ntimeout: soon\nreplicas: x\n"),
+				tc.opts...,
+			)
+			require.EqualError(t, err, stringtest.JoinLF(
+				"2 problems",
+				"2:10: $.timeout: expected integer, got string",
+				"3:11: $.replicas: expected integer, got string",
+			))
+			assert.Len(t, calls.seen, 3)
+		})
+	}
+
+	// The decode calls the method once for each level. The second decode
+	// that finds the value behind the rejection calls it again for the
+	// levels up to "loud". The search calls it once more for each level,
+	// and again to confirm each level the method rejects.
+	t.Run("UnmarshalText method", func(t *testing.T) {
 		t.Parallel()
 
-		calls := &problemCalls{seen: map[string]bool{}}
-		ctx := context.WithValue(t.Context(), callsKey{}, calls)
-
-		_, err := yamltest.FirstDocument(t, "names: [a, b, c]\ntimeout: soon\nreplicas: x\n").Decode[struct {
-			Names    []problemUnique `yaml:"names"`
-			Timeout  int             `yaml:"timeout"`
-			Replicas int             `yaml:"replicas"`
-		}](ctx)
+		_, err := yamltest.FirstDocument(t, stringtest.JoinLF(
+			"services:",
+			"  - {name: a, level: info, port: 1}",
+			"  - {name: b, level: loud, port: x}",
+			"  - {name: c, level: quiet, port: y}",
+			"",
+		)).Decode[struct {
+			Services []struct {
+				Name  string       `yaml:"name"`
+				Level problemLevel `yaml:"level"`
+				Port  int          `yaml:"port"`
+			} `yaml:"services"`
+		}](t.Context())
 		require.EqualError(t, err, stringtest.JoinLF(
-			"2 problems",
-			"2:10: $.timeout: expected integer, got string",
-			"3:11: $.replicas: expected integer, got string",
+			"4 problems",
+			`3:22: $.services[1].level: unknown level "loud"`,
+			"3:34: $.services[1].port: expected integer, got string",
+			`4:22: $.services[2].level: unknown level "quiet"`,
+			"4:35: $.services[2].port: expected integer, got string",
 		))
-		assert.Len(t, calls.seen, 3)
+		requireInvalid(t, err, 4)
+		assert.Equal(t, map[string]int{"info": 3, "loud": 4, "quiet": 3}, levelCalls.take())
+	})
+
+	// The decoder hands the mapping to the UnmarshalJSON method of the
+	// type. The search hands a type with an UnmarshalText method a scalar
+	// alone, so it does not call the other method again.
+	t.Run("UnmarshalJSON method beside an UnmarshalText method", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := yamltest.FirstDocument(t, "either: {a: 1}\nport: x\n").Decode[struct {
+			Either problemEither `yaml:"either"`
+			Port   int           `yaml:"port"`
+		}](t.Context(), niceyaml.WithJSONUnmarshalers(true))
+		require.EqualError(t, err, "2:7: $.port: expected integer, got string")
+		assert.Equal(t, map[string]int{"json": 1}, eitherCalls.take())
 	})
 
 	// A decode of the struct would call the unmarshaler of its inline
