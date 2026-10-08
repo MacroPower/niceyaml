@@ -57,11 +57,11 @@ func (n *Node) decodeProblems(
 		return nil
 	}
 
-	bound := n.bindDecodeError(err)
+	rejection := n.decodeRejection(err)
 
-	at, ok := n.rejectedAt(err, bound)
+	at, ok := n.rejectedAt(err, rejection)
 	if !ok || ctx.Err() != nil {
-		return n.decodeRejection(err)
+		return rejection
 	}
 
 	c := newProblemCollector(ctx, n, cfg)
@@ -70,14 +70,14 @@ func (n *Node) decodeProblems(
 	delete(c.found, at)
 
 	if len(c.found) == 0 || ctx.Err() != nil {
-		return n.decodeRejection(err)
+		return rejection
 	}
 
 	unknown, ok := err.(*yaml.UnknownFieldError) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 
 	problems := make([]decodeProblem, 0, len(c.found)+1)
 	problems = append(problems, decodeProblem{
-		err:          n.decodeRejection(err),
+		err:          rejection,
 		at:           at,
 		unknownField: ok && n.holdsToken(unknown.Token),
 	})
@@ -107,12 +107,12 @@ func (n *Node) decodeProblems(
 }
 
 // rejectedAt returns the position that marks err, a rejection of the
-// decoder, among the problems a [problemCollector] finds, where bound is
-// err as [Node.bindDecodeError] binds it. The decoder names a value it
-// rejects by a token of the source, and the collector marks a problem it
-// decodes by the same token. Any other rejection lies where its binding
-// resolved it, which is where the collector marks a problem that takes a
-// path.
+// decoder, among the problems a [problemCollector] finds, where
+// rejection is err as [Node.decodeRejection] returns it. The decoder
+// names a value it rejects by a token of the source, and the collector
+// marks a problem it decodes by the same token. Any other rejection lies
+// where [Node.bindDecodeError] resolves it, which is where the collector
+// marks a problem that takes a path.
 //
 // The binding of a rejection in the document [Layers] build resolves in
 // the file of a layer, and the collector reads the merged text. Such a
@@ -123,17 +123,17 @@ func (n *Node) decodeProblems(
 // [Node.locateDecodeError] did not find. It is false too for a binding
 // that n did not make, such as one an unmarshaler returns for a source
 // of its own.
-func (n *Node) rejectedAt(err, bound error) (position.Position, bool) {
+func (n *Node) rejectedAt(err, rejection error) (position.Position, bool) {
 	yamlErr, ok := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
 	if ok && n.holdsToken(yamlErr.GetToken()) {
 		return position.NewFromToken(yamlErr.GetToken()), true
 	}
 
 	if n.merges() {
-		return n.mergedPosition(n.decodeRejection(err))
+		return n.mergedPosition(rejection)
 	}
 
-	srcErr, ok := bound.(*SourceError) //nolint:errorlint // A binding below a wrapper is not one n made.
+	srcErr, ok := n.bindDecodeError(err).(*SourceError) //nolint:errorlint // A binding below a wrapper is not one n made.
 	if !ok || srcErr.Node() != n {
 		return position.Position{}, false
 	}
