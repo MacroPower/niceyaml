@@ -70,8 +70,8 @@ import (
 // [WithJSONUnmarshalers], [WithDisallowUnknownFields],
 // [WithAllowedFieldPrefixes], and [WithYAMLOrderedMaps]. It reads those
 // options and no other, so it fills no comment map. A caller passes the
-// options of the decode, and the walk then stops at each type that
-// decodes itself where the decode did. A key type that a
+// options of the decode, and the walk then reads each type they give an
+// unmarshaler as the decode did. A key type that a
 // WithCustomUnmarshaler function decodes matches no key of the document
 // unless opts carry that option, and an error under such an entry then
 // binds at the key of the map.
@@ -90,10 +90,17 @@ import (
 // 8080 of the file.
 // The keys of a map that the document lacks take the text of their
 // Go values. A field that go-yaml never decodes does not validate, as in
-// a decode. That holds for a field tagged `yaml:"-"`, an unexported
-// field, and any value below a type that decodes itself, through an
-// UnmarshalYAML or UnmarshalText method or through an unmarshaler that
-// WithCustomUnmarshaler or WithJSONUnmarshalers gives it in opts.
+// a decode. That holds for a field tagged `yaml:"-"` and for an
+// unexported field.
+//
+// The values below a value that decodes itself validate as in a decode.
+// An error at or below such a value binds at that value where an error
+// below any other value binds with no position, and every error below a
+// slice, an array, or a map that decodes itself binds at it.
+// [SelfValidator] describes both rules. They hold for a type with an
+// UnmarshalYAML or UnmarshalText method, and for one that
+// WithCustomUnmarshaler or WithJSONUnmarshalers gives an unmarshaler in
+// opts.
 //
 // Any v works but nil and a nil pointer, which each return an error
 // wrapping [ErrSelfValidateTarget], bound to the source. A v that is no
@@ -154,21 +161,28 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // The result stands in no document, so a document can still place it,
 // as BindValue describes. A decode places the result a Validate returns
 // at the value that owns the method. A Validate holds no [Node], so one
-// that validates the values below its own value calls
-// SelfValidateValue. A type that decodes itself through an
-// UnmarshalYAML method needs such a Validate, since a decode validates
-// nothing below that type:
+// that validates values the decode does not reach calls
+// SelfValidateValue. A struct that decodes itself holds such values in a
+// field it tags `yaml:"-"`, as it tags one that it fills from a place no
+// tag can name. The Pool below reads its servers from the servers key
+// under spec:
+//
+//	type Pool struct {
+//		Servers []Server `yaml:"-"`
+//	}
 //
 //	func (p *Pool) Validate() error {
 //		err := niceyaml.SelfValidateValue(context.Background(), p.Servers)
 //
-//		return niceyaml.Rebase(err, paths.Current().Child("servers"))
+//		return niceyaml.Rebase(err, paths.Current().Child("spec", "servers"))
 //	}
 //
 // A decode of a document that holds the Pool under pool then reports
-// "app.yaml:4:7: $.pool.servers[1].port: port is required". A Validate
-// must not pass its own receiver, since the walk then calls that
-// Validate again, without end.
+// "app.yaml:5:9: $.pool.spec.servers[1].port: port is required". A decode
+// reaches every field with any other tag itself, as [SelfValidator]
+// describes, so the Validate of such a struct leaves those fields to it.
+// A Validate must not pass its own receiver, since the walk then calls
+// that Validate again, without end.
 //
 // The walk names each value as a decode of YAML into v names it. A
 // field takes its yaml tag, its json tag when it has no yaml tag, and
@@ -195,7 +209,8 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // Several keys of one map that share a path, such as 1 and "1" in a
 // map[any]T, name no single entry. An error under such a key keeps its
 // path and binds with no position in every document that places it, for
-// the reason [ErrAmbiguousPath].
+// the reason [ErrAmbiguousPath]. Below a slice, an array, or a map that
+// decodes itself, it binds at that value, as every error there does.
 //
 // Any v works but nil and a nil pointer, which each return an error
 // wrapping [ErrSelfValidateTarget], bound to no document too. The walk
@@ -204,10 +219,13 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // alone, as [SelfValidator] describes.
 //
 // SelfValidateValue takes no [DecodeOption]. A walk through a document
-// reads those options to decode its keys, and to stop at each type that
+// reads those options to decode its keys, and to learn which types
 // [WithCustomUnmarshaler] or [WithJSONUnmarshalers] gives an
-// unmarshaler. This walk thus reads below such a type by its fields,
-// and stops only at a type whose own method decodes it.
+// unmarshaler. This walk reads such a type as one that decodes field by
+// field, and knows a type that decodes itself by its own method alone.
+// A document that places the result thus binds an error at a value that
+// decodes itself, as [SelfValidator] describes, only for a type with
+// such a method.
 func SelfValidateValue(ctx context.Context, v any) error {
 	err := checkSelfValidateTarget(v)
 	if err != nil {
@@ -254,14 +272,16 @@ func checkSelfValidateTarget(v any) error {
 // validate before it does, and a value validates only when every value
 // below it passed, so a parent that checks a relation between its fields
 // sees fields that hold together. A value whose type decodes itself,
-// through an unmarshaler method or one of unmarshalers, validates itself
-// and nothing below it, since its fields need not mirror the document and
-// the paths under it would point nowhere. So does a node of the syntax
-// tree, which go-yaml sets whole. A struct that decodes itself through a
-// method it gets from an embedded field decodes the document into that
-// field, so the field validates first, at the path of the struct. Several
-// errors come back joined, one per value that failed. Returns nil when
-// nothing failed.
+// through an unmarshaler method or one of unmarshalers, walks as any
+// other. Its fields need not mirror the document, so each error at or
+// below it carries the path of the value as a [fallback], where the
+// error binds when the document does not hold its own path. A node of
+// the syntax tree, which go-yaml sets whole, validates nothing below it.
+// A struct that decodes itself through a method it gets from an embedded
+// field decodes the document into that field, so that field alone
+// validates below it, at the path of the struct. Several errors come
+// back joined, one per value that failed. Returns nil when nothing
+// failed.
 //
 // The walk stops once ctx ends, or once a Validate returns the error of a
 // context that ended, and returns that error alone, as it is, in place of
@@ -346,6 +366,9 @@ type selfWalker struct {
 	// The error of a context that ended, once it stops the walk, as
 	// [selfWalker.stopped] describes.
 	ended error
+	// The places of the values the walk is inside of that decode
+	// themselves, the outermost first, as [selfWalker.enter] records them.
+	within []place
 	// The node of the value the walk starts at, held as a [step] holds the
 	// node of its own value, once [selfWalker.nodeOf] resolves it.
 	start step
@@ -359,6 +382,9 @@ type selfWalker struct {
 	// of several keys, as [selfWalker.walkEntries] finds one. The path of
 	// each error the walk collects there is ambiguous.
 	ambiguous bool
+	// Whether the last of within is a slice, an array, or a map, so no path
+	// below it says where its value sits in the document.
+	sealed bool
 }
 
 // visit names a pointer, map, or slice the walker is inside of. It names
@@ -517,6 +543,11 @@ func (w *selfWalker) walk(v reflect.Value, at place, shadowed map[string]bool) b
 // shadowed names are those [selfWalker.walk] takes. A struct the walk
 // cannot take the address of, such as one held by a map, walks as a
 // copy, so [exposed] can read its unexported embedded fields.
+//
+// A value that decodes itself walks as any other, and the walk records it
+// for the errors at and below it, as [selfWalker.enter] describes. A
+// struct that decodes itself through a method it gets from an embedded
+// field walks that field alone, at its own place.
 func (w *selfWalker) walkValue(v reflect.Value, at place, shadowed map[string]bool) bool {
 	if v.Kind() == reflect.Struct {
 		v = addressable(v)
@@ -524,19 +555,66 @@ func (w *selfWalker) walkValue(v reflect.Value, at place, shadowed map[string]bo
 
 	field, whole := w.unmarshalers.decodesWhole(v.Type())
 
-	switch {
-	case !whole:
-		if !w.children(v, at, shadowed) {
-			return false
-		}
-
-	case field >= 0:
-		if !w.walk(v.Field(field), at, nil) {
-			return false
-		}
+	mark, sealed := len(w.within), w.sealed
+	if whole {
+		w.enter(v.Kind(), at)
 	}
 
-	return w.validate(v, at)
+	var ok bool
+
+	if field >= 0 {
+		ok = w.walk(v.Field(field), at, nil)
+	} else {
+		ok = w.children(v, at, shadowed)
+	}
+
+	ok = ok && w.validate(v, at)
+
+	w.within, w.sealed = w.within[:mark], sealed
+
+	return ok
+}
+
+// enter records that the walk is inside of a value of the given kind
+// that decodes itself, which lies at the place at. The fields of such a
+// value need not mirror the document, so an error at or below it whose
+// path the document does not hold binds at the value, as
+// [selfWalker.fallback] hands it to the error. A slice, an array, or a
+// map that decodes itself has no field tags to say where its elements
+// sit, so every error below one binds at it. The values below such a
+// value add nothing to the record, since no path says where they sit
+// either.
+func (w *selfWalker) enter(kind reflect.Kind, at place) {
+	if w.sealed {
+		return
+	}
+
+	// A struct and the embedded field that decodes it share a place.
+	if n := len(w.within); n == 0 || w.within[n-1] != at {
+		w.within = append(w.within, at)
+	}
+
+	switch kind {
+	case reflect.Slice, reflect.Array, reflect.Map:
+		w.sealed = true
+	default:
+	}
+}
+
+// fallback returns where an error of the value the walk is at binds when
+// the document does not hold its path: the values the walk is inside of
+// that decode themselves, the nearest first.
+func (w *selfWalker) fallback() fallback {
+	if len(w.within) == 0 {
+		return fallback{}
+	}
+
+	at := make([]paths.Path, 0, len(w.within))
+	for _, p := range slices.Backward(w.within) {
+		at = append(at, p.path())
+	}
+
+	return fallback{at: at, only: w.sealed}
 }
 
 // exposed returns v, or a view of it that the walk can read when v is an
@@ -720,11 +798,16 @@ func (c *typeCache[V]) get(t reflect.Type, compute func(reflect.Type) V) V {
 // both receivers, as the decoder checks it.
 func decodesItself(t reflect.Type) bool {
 	return decodesWhole.get(t, func(t reflect.Type) bool {
-		pt := reflect.PointerTo(t)
-		isNode := t.PkgPath() == astPackage && pt.Implements(reflect.TypeFor[ast.Node]())
-
-		return isNode || slices.ContainsFunc(unmarshalerTypes, pt.Implements)
+		return isSyntaxNode(t) || slices.ContainsFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
 	})
+}
+
+// isSyntaxNode reports whether t is an [ast.Node] type the ast package
+// declares, which go-yaml sets to the node it decodes. The tokens of such
+// a node link to every other token of the file, so the self-validation
+// walk reads nothing below one.
+func isSyntaxNode(t reflect.Type) bool {
+	return t.PkgPath() == astPackage && reflect.PointerTo(t).Implements(reflect.TypeFor[ast.Node]())
 }
 
 // decoderField returns the index of the embedded field of t that decodes
@@ -871,10 +954,11 @@ func methodDepth(t reflect.Type, name string) int {
 // whose type may. The walk passes a value whose type may not without a look
 // below it.
 //
-// The answer reads the methods of t and no option of a decode, so every
-// walk shares it. A type that an option gives an unmarshaler can thus
-// report a validator below it that the walk of that decode never
-// reaches, and the walk then looks at the value and stops there.
+// The answer reads the fields of t and no option of a decode, so every
+// walk shares it. A struct that decodes itself through a method of an
+// embedded field can thus report a validator in another field, which
+// the walk never reaches, and the walk then looks at the value and stops
+// there. A node of the syntax tree holds none the walk reaches.
 func mayHoldValidator(t reflect.Type) bool {
 	return holdsValidator.get(t, func(t reflect.Type) bool {
 		return reachesValidator(t, map[reflect.Type]bool{})
@@ -896,12 +980,9 @@ func reachesValidator(t reflect.Type, seen map[reflect.Type]bool) bool {
 		return true
 	}
 
-	// The walk validates a value that decodes itself and nothing below it
-	// but the embedded field that decodes it.
-	if decodesItself(t) {
-		i, ok := decoderField(t)
-
-		return ok && reachesValidator(t.Field(i).Type, seen)
+	// The walk reads nothing below a node of the syntax tree.
+	if isSyntaxNode(t) {
+		return false
 	}
 
 	switch t.Kind() {
@@ -1091,9 +1172,11 @@ func (w *selfWalker) walkEntries(at place, entries []mapEntry, ambiguous bool) b
 	groups := make([][]error, 0, len(entries))
 
 	// A path below an entry that shares its path is ambiguous too,
-	// whatever the maps further down hold.
+	// whatever the maps further down hold. Below a slice, an array, or a
+	// map that decodes itself, every error binds at that value, so the
+	// path of an entry there locates none.
 	outer := w.ambiguous
-	w.ambiguous = outer || ambiguous
+	w.ambiguous = outer || (ambiguous && !w.sealed)
 
 	for _, e := range entries {
 		if !w.walk(e.key, at.key(), nil) {
@@ -1254,8 +1337,8 @@ func (w *selfWalker) holdsBelow(v reflect.Value) bool {
 // [SelfValidator] where the walk would validate it. It follows the walk
 // down: through interfaces and pointers, into fields, elements, and map
 // keys and values, and not below a value whose type may hold no
-// validator. Below a value that decodes itself, it follows only the
-// embedded field that decodes it, as [decoderField] finds it. The second
+// validator. Below a struct that an embedded field decodes, it follows
+// only that field, as [selfWalker.walkValue] does. The second
 // result is false when the scan stopped at a value it had already
 // reached, whose first read decides the answer, so a false first result
 // then holds only for that scan.
@@ -1332,12 +1415,8 @@ func (w *selfWalker) scanSelf(v reflect.Value) (bool, bool) {
 		return true, true
 	}
 
-	if field, whole := w.unmarshalers.decodesWhole(v.Type()); whole {
-		if field >= 0 {
-			return w.scanValue(v.Field(field))
-		}
-
-		return false, true
+	if field, _ := w.unmarshalers.decodesWhole(v.Type()); field >= 0 {
+		return w.scanValue(v.Field(field))
 	}
 
 	return w.scanChildren(v)
@@ -1436,10 +1515,7 @@ func iterValue(iter *reflect.MapIter, holder reflect.Value) reflect.Value {
 // the check to the field. The walk validates that field at its own path,
 // or at the path of the struct when the field decodes the struct, as
 // [decoderField] finds it. The method does not run when the field is nil
-// or go-yaml skips it, since the walk never reaches such a field. Nor
-// does it run when the struct declares the unmarshaler method go-yaml
-// calls, since the walk validates nothing below a struct that decodes
-// itself.
+// or go-yaml skips it, since the walk never reaches such a field.
 func implementsSelfValidator(t reflect.Type) bool {
 	return ownsValidator.get(t, func(t reflect.Type) bool {
 		return reflect.PointerTo(t).Implements(reflect.TypeFor[SelfValidator]()) && !promotesMethod(t, "Validate")
@@ -1528,7 +1604,7 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 		return false
 	}
 
-	w.errs = append(w.errs, rebase(err, at.path(), false, true, w.ambiguous))
+	w.errs = append(w.errs, rebase(err, at.path(), false, true, w.ambiguous, w.fallback()))
 
 	return false
 }

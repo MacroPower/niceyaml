@@ -79,20 +79,75 @@ import (
 // that failed. A field an inline tag flattens keeps the path of
 // the struct that holds it. A flattened field whose name a field of
 // that struct also uses does not validate, since go-yaml sets it to its
-// zero value and decodes the document into the other field. A value
-// whose type decodes itself, through an UnmarshalYAML or UnmarshalText
-// method, validates itself and nothing below it, since its fields need
-// not mirror the document. So does a value that a function from
-// [WithCustomUnmarshaler] decodes, and one with an UnmarshalJSON method
-// under [WithJSONUnmarshalers]. So does a node type of the go-yaml ast
-// package, which go-yaml sets to the node it decodes. A struct that
-// embeds a node decodes field by field, so its fields validate. The
-// decode cannot see a type that a function from
+// zero value and decodes the document into the other field. A node type
+// of the go-yaml ast package validates nothing below it, since go-yaml
+// sets it to the node it decodes. A struct that embeds a node decodes
+// field by field, so its fields validate. A parent need not call the
+// Validate of its fields, and [Rebase] is for a check run on a value
+// after Decode returns.
+//
+// A value whose type decodes itself validates as any other value does,
+// and so does every value below it. A type decodes itself through an
+// UnmarshalYAML or UnmarshalText method, through a function from
+// [WithCustomUnmarshaler], or through an UnmarshalJSON method under
+// [WithJSONUnmarshalers]. A method that sets defaults and then decodes
+// the fields thus keeps every check below its type.
+//
+//	func (s *Server) UnmarshalYAML(unmarshal func(any) error) error {
+//		type plain Server
+//
+//		*s = Server{Port: 8080}
+//
+//		return unmarshal((*plain)(s))
+//	}
+//
+// Such a method may fill its value from anything, so the fields need not
+// mirror the document. The decode names each field of the struct by its
+// tag all the same, as it names the fields of any struct. A field the
+// method leaves as it was, or fills from anything but the document,
+// validates too. The document may thus hold nothing at the path of an
+// error at or below such a value. A path that names a key a mapping
+// leaves out binds at the key of that mapping, as it does below any
+// struct. Any other path the document does not hold binds at the nearest
+// value that decodes itself, which is the value that returned the error
+// or one above it. The error keeps its path, and [SourceError.Nearest]
+// returns the path of the value it bound at. An Addr that decodes from
+// the text "db:0" thus reports its port on that text:
+//
+//	app.yaml:2:7: $.addr.port: port must be at least 1
+//
+// A slice, an array, or a map that decodes itself has no tags, and its
+// method may sort its elements, drop some, or key them anew. No path
+// below such a value says where an element sits in the document, so
+// every error below it binds at the value.
+//
+// The tags of a struct that decodes itself are how its author says where
+// each field sits. A field tagged `yaml:",inline"` reads the mapping of
+// the struct, so the errors below it report their own lines. That suits
+// a struct that holds one of several types, which a key of its mapping
+// names.
+//
+//	type Box struct {
+//		Store Store `yaml:",inline"`
+//	}
+//
+// Without the tag, the decode looks for the Store under a key named
+// store, and each error below it binds at the Box. A field tagged
+// `yaml:"-"` does not validate, so the Validate of the struct checks it,
+// and walks the values below it with [SelfValidateValue]. The decode
+// reads every other field itself and runs that Validate only when they
+// all pass, so no field reports twice. A struct whose method reorders a
+// slice field keeps the tag of that field, so an error under one of the
+// elements reports at the element the document holds at that index.
+//
+// The decode cannot see a type that a function from
 // [yaml.RegisterCustomUnmarshaler] decodes in every decode of the
-// program, so the values below such a type walk as if its fields mirrored
-// the document. A program gives that function to WithCustomUnmarshaler
-// instead. A parent need not call the Validate of its fields, and
-// [Rebase] is for a check run on a value after Decode returns.
+// program. The values below such a type validate the same way, but the
+// decode reads it as a type that decodes field by field. An error below
+// it whose path resolves to nothing thus has no value to bind at, and an
+// error below a slice or a map of such a type reports at the element its
+// path names. A program gives that function to WithCustomUnmarshaler
+// instead.
 //
 // A Validate holds no [Node], so it has no [DataLocator] to find how the
 // document spells a key. A parent that checks the entries of a map and
@@ -144,16 +199,11 @@ import (
 // at the value that owns the method. A struct does not own a Validate it
 // gets from an embedded field, so the method runs once, on that field at
 // the field's own path. The method does not run when the field is nil or
-// ignored, or when the struct decodes itself through an UnmarshalYAML or
-// UnmarshalText method it declares, since the decode validates nothing
-// below such a struct. To keep the check, a struct like that declares a
-// Validate of its own that calls the field's. To keep the checks of
-// every value below it, that Validate walks those values with
-// [SelfValidateValue], and the decode places each error under the
-// struct.
+// ignored.
 // A struct that decodes itself through an UnmarshalYAML or UnmarshalText
 // method it gets from an embedded field decodes the document into that
-// field, so the field validates at the path of the struct.
+// field, so the field validates at the path of the struct. Go-yaml
+// decodes no other field of such a struct, so none of them validates.
 // A check that reads state the caller fills in after the decode, such as
 // a field a library sets from the environment or a flag, runs through
 // [Node.SelfValidate]. The caller decodes with [WithSelfValidation] off,
@@ -2607,8 +2657,8 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 // decodes through fn too, and a null leaves it nil without a call.
 //
 // The decode reads T as a type that decodes itself, as it reads one with
-// an UnmarshalYAML method. A value of T thus validates itself and nothing
-// below it, as [SelfValidator] describes. The error fn returns binds at
+// an UnmarshalYAML method. The values below a value of T thus validate
+// as [SelfValidator] describes. The error fn returns binds at
 // the value, and the search for unknown fields and for the other
 // problems of a failed decode leaves the value to fn, as
 // [Node.DecodeInto] describes.
@@ -2646,8 +2696,8 @@ func WithCustomUnmarshaler[T any](fn func(ctx context.Context, v *T, text []byte
 // calls an UnmarshalYAML method of the type in place of UnmarshalJSON,
 // and an UnmarshalText method for a node that reads as a string.
 //
-// The decode then reads such a type as one that decodes itself. A value
-// of the type validates itself and nothing below it, as [SelfValidator]
+// The decode then reads such a type as one that decodes itself. The
+// values below a value of the type thus validate as [SelfValidator]
 // describes, and the error its method returns binds at the value, as
 // [Node.DecodeInto] describes. A struct that gets the method from an
 // embedded field decodes the document into that field, so the field

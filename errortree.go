@@ -917,12 +917,14 @@ func isLeaf(err error) bool {
 // the base of every Error from [Rebase] above them, joined, whether the
 // walk met such an Error, and whether one of them moves paths alone. It
 // also records whether an Error above them matches [errInvalid], and
-// whether the path of one of them is ambiguous, as [locus] describes. A
-// Rebase at the root still locates a problem with no location at the
+// whether the path of one of them is ambiguous, as [locus] describes. It
+// holds the fallback of those Errors too, with its paths under the base.
+// A Rebase at the root still locates a problem with no location at the
 // root, so the children rebase whenever the walk met one, and only a
 // chain that holds none leaves them as they are.
 type childBase struct {
 	path      paths.Path
+	fallback  fallback
 	rebased   bool
 	movesOnly bool
 	invalid   bool
@@ -932,13 +934,24 @@ type childBase struct {
 // cross returns the base below x: c joined with the base of x when x is
 // an Error from [Rebase], and c as it is otherwise, marked invalid when x
 // matches [errInvalid]. The base is ambiguous once the path of such an x
-// is.
+// is. The fallback and the mark of x join those of c as [Error.move]
+// joins them from below. A `$` base replaces the base above it, so the
+// fallback of x then stands alone. A fallback of c that binds every
+// error below it makes no path below it ambiguous.
 func (c childBase) cross(x *Error) childBase {
 	if x.rebased {
+		covered := c.fallback.only && !x.base.IsAbsolute()
+
+		if x.base.IsAbsolute() {
+			c.fallback = x.fallback
+		} else {
+			c.fallback = x.fallback.rebase(c.path).then(c.fallback)
+		}
+
 		c.path = c.path.Join(x.base)
 		c.rebased = true
 		c.movesOnly = c.movesOnly || x.movesOnly
-		c.ambiguous = c.ambiguous || x.ambiguous
+		c.ambiguous = c.ambiguous || (x.ambiguous && !covered)
 	}
 
 	c.invalid = c.invalid || x.invalid
@@ -967,7 +980,7 @@ func (c childBase) rebase(n error, detail bool) error {
 		return n
 	}
 
-	return rebase(n, c.path, detail || c.movesOnly, invalid, c.ambiguous)
+	return rebase(n, c.path, detail || c.movesOnly, invalid, c.ambiguous, c.fallback)
 }
 
 // trees returns the nodes of kids in position order within the source

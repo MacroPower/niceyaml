@@ -162,7 +162,9 @@ var (
 	// the document entry of one of them at most. A decode binds the
 	// errors a [SelfValidator] reports under such a path with no
 	// position, so none points at the line of another entry.
-	// [SourceError.Unresolved] reports it.
+	// [SourceError.Unresolved] reports it. An error below a slice, an
+	// array, or a map that decodes itself binds at that value instead, as
+	// SelfValidator describes for every error there.
 	ErrAmbiguousPath = errors.New("path names the entries of several keys")
 
 	// The reason of a [SourceError] whose error carries no location at
@@ -268,6 +270,10 @@ type Error struct {
 	// which Rebase sets, when rebased, since a path with no selectors is
 	// a base like any other.
 	base paths.Path
+	// Where a path below the Error binds when the document does not hold
+	// it. Its paths read from the node that base reads from. The rebase of
+	// the self-validation walk sets it below a value that decodes itself.
+	fallback fallback
 	errorConfig
 	rebased bool
 	// The Error comes from a Rebase that moves paths alone, as a detail
@@ -743,7 +749,7 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // [SourceError.Errors] and [SourceError.Details] return them, rebases
 // the same way on its own.
 func Rebase(err error, base paths.Path) error {
-	return rebase(err, base, false, false, false)
+	return rebase(err, base, false, false, false, fallback{})
 }
 
 // rebase is [Rebase], and with movesOnly the result moves the paths of
@@ -752,11 +758,12 @@ func Rebase(err error, base paths.Path) error {
 // [errInvalid], as the self-validation walk marks what a [SelfValidator]
 // returns. With ambiguous, the path of each Error the rebase builds
 // resolves in no document, for the reason [ErrAmbiguousPath], as the walk
-// marks an error under a map entry that shares its path. A binding takes
-// no base, and with invalid it comes back as [markInvalid] marks it. A
-// binding that stands in no document rebases as the error [placeable]
-// returns for it.
-func rebase(err error, base paths.Path, movesOnly, invalid, ambiguous bool) error {
+// marks an error under a map entry that shares its path. Each Error the
+// rebase builds takes fb, which the walk gives an error below a value
+// that decodes itself. A binding takes no base, and with invalid it comes
+// back as [markInvalid] marks it. A binding that stands in no document
+// rebases as the error [placeable] returns for it.
+func rebase(err error, base paths.Path, movesOnly, invalid, ambiguous bool, fb fallback) error {
 	if isNothing(err) {
 		return nil
 	}
@@ -779,14 +786,14 @@ func rebase(err error, base paths.Path, movesOnly, invalid, ambiguous bool) erro
 	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
 	if ok && x.addsNothing() {
 		if _, joined := joinBranches(x.err); joined {
-			return &Error{err: rebase(x.err, base, movesOnly, invalid, ambiguous), invalid: x.invalid || invalid}
+			return &Error{err: rebase(x.err, base, movesOnly, invalid, ambiguous, fb), invalid: x.invalid || invalid}
 		}
 	}
 
 	if branches, ok := joinBranches(err); ok {
 		rebased := make([]error, 0, len(branches))
 		for _, branch := range branches {
-			r := rebase(branch, base, movesOnly, invalid, ambiguous)
+			r := rebase(branch, base, movesOnly, invalid, ambiguous, fb)
 			if r != nil {
 				rebased = append(rebased, r)
 			}
@@ -801,7 +808,9 @@ func rebase(err error, base paths.Path, movesOnly, invalid, ambiguous bool) erro
 		}
 	}
 
-	return &Error{err: err, base: base, rebased: true, movesOnly: movesOnly, invalid: invalid, ambiguous: ambiguous}
+	return &Error{
+		err: err, base: base, rebased: true, movesOnly: movesOnly, invalid: invalid, ambiguous: ambiguous, fallback: fb,
+	}
 }
 
 // markInvalid returns err as a problem the document is at fault for, as
@@ -1162,24 +1171,74 @@ func (e *Error) LogValue() slog.Value {
 // [position.Position] or a [position.Range] in loc, or both. The zero
 // locus is no location. The path of a locus that is ambiguous names the
 // entries of several keys of a decoded map, so [locate] resolves it in no
-// document.
+// document. The fallback says where the path binds when the document does
+// not hold it.
 type locus struct {
 	loc       any
 	path      paths.Path
+	fallback  fallback
 	hasPath   bool
 	ambiguous bool
 }
 
-// rebase returns l with base in front of its path. A locus with no path
-// comes back as it is, since a base moves paths alone. An `@` path takes
-// base in front, and a `$` path stays as it is, as [paths.Path.Join]
-// joins them.
+// rebase returns l with base in front of its path and of each path of its
+// fallback. A locus with no path comes back as it is, since a base moves
+// paths alone. An `@` path takes base in front, and a `$` path stays as
+// it is, as [paths.Path.Join] joins them.
 func (l locus) rebase(base paths.Path) locus {
 	if l.hasPath {
 		l.path = base.Join(l.path)
+		l.fallback = l.fallback.rebase(base)
 	}
 
 	return l
+}
+
+// fallback is where an error binds when the document does not hold its
+// path. The self-validation walk gives one to each error at or below a
+// value that decodes itself, since the fields of such a value need not
+// mirror the document. The zero fallback is none, so a path that does
+// not resolve then leaves its error with no position.
+type fallback struct {
+	// The paths of the values above the error that decode themselves, the
+	// nearest first. The error binds at the first one the document holds.
+	at []paths.Path
+	// The first of at is a slice, an array, or a map, which has no field
+	// tags to say where its elements sit. The path of the error then
+	// names a value of the program alone, and the error binds at the
+	// first of at that the document holds whether or not the document
+	// holds a node at that path.
+	only bool
+}
+
+// rebase returns f with base in front of each of its paths, as
+// [locus.rebase] puts it in front of the path they stand in for.
+func (f fallback) rebase(base paths.Path) fallback {
+	if len(f.at) == 0 {
+		return f
+	}
+
+	at := make([]paths.Path, 0, len(f.at))
+	for _, p := range f.at {
+		at = append(at, base.Join(p))
+	}
+
+	f.at = at
+
+	return f
+}
+
+// then returns the fallback of a path that has f and lies below an
+// [Error] whose fallback is outer, once the paths of both read from one
+// node. The values of f lie below those of outer, so they come first.
+// When outer binds every error below it, the values of f say nothing of
+// where the path sits, so outer stands alone.
+func (f fallback) then(outer fallback) fallback {
+	if outer.only {
+		return outer
+	}
+
+	return fallback{at: slices.Concat(f.at, outer.at), only: f.only}
 }
 
 // locus returns the location e carries itself, without looking through
@@ -1194,6 +1253,12 @@ func (e *Error) locus() locus {
 // front of a `$` path too, in place of the root, since such a path reads
 // from the value [Layers] hold and the base is where a layer holds it.
 // A path below an Error that is ambiguous is ambiguous too.
+//
+// An `@` path takes the fallback of e behind its own, as [fallback.then]
+// joins them, and a `$` path, which the base leaves as it is, takes none.
+// A fallback that binds every error below e stands in for the path of
+// each, so a key that shares its path there makes no path ambiguous, and
+// only the mark of e itself counts.
 func (e *Error) move(l locus) locus {
 	l.ambiguous = l.ambiguous || e.ambiguous
 
@@ -1204,7 +1269,18 @@ func (e *Error) move(l locus) locus {
 		return l
 	}
 
-	return l.rebase(e.base)
+	if !l.hasPath || l.path.IsAbsolute() {
+		return l.rebase(e.base)
+	}
+
+	l = l.rebase(e.base)
+	l.fallback = l.fallback.then(e.fallback)
+
+	if e.fallback.only {
+		l.ambiguous = e.ambiguous
+	}
+
+	return l
 }
 
 // addsNothing reports whether e adds nothing to the error it wraps: e is
@@ -1373,7 +1449,9 @@ func (e *Error) textCause() error {
 // it, and near is the path of that mapping. For a path that enters an
 // alias the document cannot follow, the token is that alias, near is the
 // path of the alias, and unfollowed is the error the path failed to
-// resolve with.
+// resolve with. For a path that bound at its [fallback], the token is
+// that of the value the fallback names, and near is the path of that
+// value.
 type location struct {
 	unfollowed error
 	rng        *position.Range
@@ -1426,10 +1504,53 @@ func locate(b binder, l locus) (location, *Node, error) {
 			return location{}, b.node, fmt.Errorf("%w: %s", ErrAmbiguousPath, l.path)
 		}
 
-		return locatePath(b, l.path)
+		return locateBelow(b, l)
 	}
 
 	return location{}, b.node, errUnlocated
+}
+
+// locateBelow resolves the path of l as [locatePath] does. A path that
+// does not resolve binds at the first path of its fallback that does.
+// The near of that location is the path it resolved, unless that path
+// resolved to a node near it already. A fallback that stands in for the
+// path, as [fallback] describes one, resolves in its place. A path of the
+// fallback that equals the path sets no near, since the error then binds
+// at the node its own path selects. When nothing resolves, the result is
+// that of the first path locateBelow tried.
+func locateBelow(b binder, l locus) (location, *Node, error) {
+	var (
+		loc   location
+		node  *Node
+		err   error
+		tried bool
+	)
+
+	if !l.fallback.only {
+		loc, node, err = locatePath(b, l.path)
+		if err == nil {
+			return loc, node, nil
+		}
+
+		tried = true
+	}
+
+	for _, path := range l.fallback.at {
+		floc, fnode, ferr := locatePath(b, path)
+		if ferr == nil {
+			if floc.near == nil && !path.Equal(l.path) {
+				floc.near = &path
+			}
+
+			return floc, fnode, nil
+		}
+
+		if !tried {
+			loc, node, err, tried = floc, fnode, ferr, true
+		}
+	}
+
+	return loc, node, err
 }
 
 // locatePath resolves path from the root of the document of the node b
@@ -1605,6 +1726,12 @@ func locateMerged(b binder, node *Node, at position.Position, l locus) (location
 // holds for it. SourceError.Nearest reports the path of the alias, and
 // [SourceError.Unresolved] still returns the reason, which tells such a
 // binding from one at the value itself.
+//
+// An error a [SelfValidator] returns at or below a value that decodes
+// itself may carry a path that resolves to nothing, since the fields of
+// such a value need not mirror the document. It binds at that value, as
+// SelfValidator describes, and SourceError.Nearest reports the path of
+// the value.
 //
 // Any other location that does not resolve costs the SourceError its
 // position. Such locations include an index past the end of a sequence,
@@ -2587,7 +2714,7 @@ func findAnchor(err error) (anchor, bool) {
 		if x.hasLocation() {
 			l := x.locus()
 			if x.rebased {
-				l = l.rebase(x.base)
+				l = x.move(l)
 			}
 
 			return anchor{err: x, locus: l}, false
@@ -2605,7 +2732,7 @@ func findAnchor(err error) (anchor, bool) {
 		heading = heading || len(x.errors) > 0
 
 		if x.rebased && !x.movesOnly && !heading {
-			at := locus{path: x.base, hasPath: true, ambiguous: x.ambiguous}
+			at := locus{path: x.base, hasPath: true, ambiguous: x.ambiguous, fallback: x.fallback}
 
 			return anchor{err: x, locus: at}, false
 		}
@@ -3888,7 +4015,8 @@ func (e *SourceError) Unresolved() error {
 // when the document does not hold the value its path names. Binding then
 // locates the error at the nearest node above the path that the document
 // holds. That node is the mapping that lacks a key the path names, or an
-// alias on the path that the document cannot follow.
+// alias on the path that the document cannot follow. For an error of a
+// [SelfValidator], it may also be a value that decodes itself.
 //
 // An error about a missing value, such as a required field, carries the
 // path the value would have, and that path selects nothing. Binding
@@ -3935,6 +4063,20 @@ func (e *SourceError) Unresolved() error {
 // An error at such a key therefore has no position. The merge may set
 // the key or leave it as the mapping spells it, so the document cannot
 // tell which line holds the value.
+//
+// A value that decodes itself, as [SelfValidator] describes one, fills
+// its fields as its method chooses, so the document may hold nothing at
+// the path of an error at or below it. A decode binds such an error at
+// that value:
+//
+//	// Line 2 of app.yaml holds `addr: db:0`, which an UnmarshalText
+//	// method of the Addr type parses into a host and a port.
+//	// app.yaml:2:7: $.addr.port: port must be at least 1
+//
+// SourceError.Range then covers the text of the value, Nearest returns
+// `$.addr`, and SourceError.Unresolved returns nil. Every error below a
+// slice, an array, or a map that decodes itself binds at it the same
+// way, whether or not the document holds a node at its path.
 //
 // Nearest reports false for an error bound at the node its path selects,
 // for one with no path, and for one that has no position. A nil

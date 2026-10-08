@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -808,8 +809,9 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"nil embedded pointer": {
 				input: "wrapped: 1\n",
 			},
-			"struct that declares its own unmarshaler skips the field": {
+			"struct that declares its own unmarshaler validates the field at its own path": {
 				input: "declared: -1\n",
+				err:   "1:11: $.declared.positive: negative",
 			},
 			"struct that declares an unmarshaler go-yaml checks later": {
 				input: "text: -1\n",
@@ -2641,7 +2643,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		assert.Equal(t, "$.hours", p.String())
 	})
 
-	t.Run("a value that decodes itself validates itself alone", func(t *testing.T) {
+	t.Run("the values below a value that decodes itself validate", func(t *testing.T) {
 		t.Parallel()
 
 		type withSelfDecoding struct {
@@ -2653,24 +2655,29 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		var got withSelfDecoding
 
-		// Each unmarshaler fills its hours with a close before its open,
-		// which no Validate reports, since the walk stops at a value that
-		// decodes itself. Each value still validates itself.
-		require.NoError(t, dd.DecodeInto(t.Context(), &got))
-		assert.True(t, got.Bytes.validated)
-		assert.True(t, got.Text.validated)
+		// Each unmarshaler fills its hours with a close before its open.
+		// The document holds no node at the path of that close, so each
+		// error binds at the value that decodes itself. That value does
+		// not validate, since a value below it failed.
+		err := dd.DecodeInto(t.Context(), &got)
+		require.EqualError(t, err, stringtest.JoinLF(
+			"1:8: $.bytes.inner.close: closes before it opens",
+			"2:7: $.text.inner.close: closes before it opens",
+		))
+		assert.False(t, got.Bytes.validated)
+		assert.False(t, got.Text.validated)
 		assert.Equal(t, hours{Open: "17:00", Close: "09:00"}, got.Bytes.Inner)
 		assert.Equal(t, hours{Open: "17:00", Close: "09:00"}, got.Text.Inner)
 
-		type withNestedFailure struct {
+		type withOwnFailure struct {
 			Bytes failingSelfDecoding `yaml:"bytes"`
 		}
 
-		_, err := dd.Decode[withNestedFailure](t.Context())
+		_, err = dd.Decode[withOwnFailure](t.Context())
 		require.EqualError(t, err, "1:8: $.bytes: rejected")
 	})
 
-	t.Run("a value an option gives an unmarshaler validates itself alone", func(t *testing.T) {
+	t.Run("the values below a value an option gives an unmarshaler validate", func(t *testing.T) {
 		t.Parallel()
 
 		type withOptionDecoded struct {
@@ -2679,9 +2686,9 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 
 		// The function fills its hours with a close before its open, as
-		// the UnmarshalJSON method does, which no Validate reports, since
-		// the walk stops at a value an option gives an unmarshaler. Each
-		// value still validates itself.
+		// the UnmarshalJSON method does. The document holds no node at the
+		// path of that close, so each error binds at the value the option
+		// gives an unmarshaler.
 		opts := niceyaml.DecodeOptions(
 			niceyaml.WithCustomUnmarshaler(func(_ context.Context, o *optionDecodedHours, _ []byte) error {
 				o.Inner = hours{Open: "17:00", Close: "09:00"}
@@ -2691,21 +2698,28 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			niceyaml.WithJSONUnmarshalers(true),
 		)
 
+		want := stringtest.JoinLF(
+			"1:9: $.custom.inner.close: closes before it opens",
+			"2:7: $.json.inner.close: closes before it opens",
+		)
+
 		dd := yamltest.FirstDocument(t, "custom: anything\njson: anything\n")
+
+		_, err := dd.Decode[withOptionDecoded](t.Context(), opts)
+		require.EqualError(t, err, want)
 
 		var got withOptionDecoded
 
-		require.NoError(t, dd.DecodeInto(t.Context(), &got, opts))
-		assert.True(t, got.Custom.validated)
-		assert.True(t, got.JSON.validated)
+		require.NoError(t, dd.DecodeInto(t.Context(), &got, opts, niceyaml.WithSelfValidation(false)))
 		assert.Equal(t, hours{Open: "17:00", Close: "09:00"}, got.Custom.Inner)
 		assert.Equal(t, hours{Open: "17:00", Close: "09:00"}, got.JSON.Inner)
 
-		// SelfValidate stops at the same values under the same options,
-		// and reads the hours below each one without them.
-		require.NoError(t, dd.SelfValidate(t.Context(), &got, opts))
+		// SelfValidate binds each error at the same value under the same
+		// options. Without them, it reads each type as one that decodes
+		// field by field, so the errors have no value to bind at.
+		require.EqualError(t, dd.SelfValidate(t.Context(), &got, opts), want)
 
-		err := dd.SelfValidate(t.Context(), &got)
+		err = dd.SelfValidate(t.Context(), &got)
 		require.EqualError(t, err, stringtest.JoinLF(
 			"$.custom.inner.close: closes before it opens",
 			"$.json.inner.close: closes before it opens",
@@ -2717,7 +2731,9 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		// The method of the embedded field decodes the document into that
 		// field, so the field validates at the path of the struct, as a
-		// field that gives its struct an UnmarshalYAML method does.
+		// field that gives its struct an UnmarshalYAML method does. The
+		// hours the method fills thus report under the struct, with no
+		// name of the field in their path.
 		type embedsJSON struct {
 			jsonDecodedHours
 
@@ -2726,17 +2742,18 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "shop: anything\n")
 
-		got, err := dd.Decode[map[string]*embedsJSON](t.Context(), niceyaml.WithJSONUnmarshalers(true))
-		require.NoError(t, err)
-		assert.True(t, got["shop"].validated)
+		_, err := dd.Decode[map[string]*embedsJSON](t.Context(), niceyaml.WithJSONUnmarshalers(true))
+		require.EqualError(t, err, "1:7: $.shop.inner.close: closes before it opens")
 	})
 
 	t.Run("a value a registered function decodes walks as its fields", func(t *testing.T) {
 		t.Parallel()
 
 		// Nothing shows which types yaml.RegisterCustomUnmarshaler gave a
-		// function, so the walk reads the hours below the value, at a
-		// path the document does not hold.
+		// function, so the walk reads the type as one that decodes field
+		// by field. It reads the hours below the value as it does below
+		// any type, at a path the document does not hold, and the error
+		// has no value that decodes itself to bind at.
 		yaml.RegisterCustomUnmarshaler(func(r *registeredHours, _ []byte) error {
 			r.Inner = hours{Open: "17:00", Close: "09:00"}
 
@@ -3559,6 +3576,18 @@ func TestSelfValidateValue(t *testing.T) {
 				return cfg
 			},
 		},
+		"the values below a type that decodes itself report their paths": {
+			value: func() any {
+				return map[string]any{
+					"servers": []defaultedServer{{Host: "a"}, {Host: "b", Port: 70000}},
+					"limits":  sortedLimits{{N: 1}, {N: -1}},
+				}
+			},
+			err: stringtest.JoinLF(
+				"$.limits[1].n: negative -1",
+				"$.servers[1].port: port out of range",
+			),
+		},
 		"a value that is no pointer validates": {
 			value: func() any {
 				cfg := valid()
@@ -3807,9 +3836,9 @@ func TestSelfValidateValue_Place(t *testing.T) {
 func TestSelfValidateValue_Validate(t *testing.T) {
 	t.Parallel()
 
-	// A decode validates nothing below a type that decodes itself, so
-	// the Validate of pool walks its upstreams. That walk holds no
-	// document, and the decode places what it returns at the pool.
+	// A decode skips the field pool tags `-`, so the Validate of pool
+	// walks its upstreams. That walk holds no document, and the decode
+	// places what it returns at the pool.
 	type config struct {
 		Pool  *pool  `yaml:"pool"`
 		Pools []pool `yaml:"pools"`
@@ -3822,31 +3851,35 @@ func TestSelfValidateValue_Validate(t *testing.T) {
 		"upstreams that pass": {
 			input: stringtest.Input(`
 				pool:
-				  upstreams:
-				    - url: http://a
+				  spec:
+				    upstreams:
+				      - url: http://a
 			`),
 		},
 		"an upstream reports its line and the path from the root": {
 			input: stringtest.Input(`
 				pool:
-				  upstreams:
-				    - url: http://a
-				    - url: ftp://b
+				  spec:
+				    upstreams:
+				      - url: http://a
+				      - url: ftp://b
 			`),
-			err: `app.yaml:4:12: $.pool.upstreams[1].url: url "ftp://b" is not http`,
+			err: `app.yaml:5:14: $.pool.spec.upstreams[1].url: url "ftp://b" is not http`,
 		},
 		"each pool of a sequence reports under its own index": {
 			input: stringtest.Input(`
 				pools:
-				  - upstreams:
-				      - url: ftp://a
-				  - upstreams:
-				      - url: http://b
-				      - url: ftp://c
+				  - spec:
+				      upstreams:
+				        - url: ftp://a
+				  - spec:
+				      upstreams:
+				        - url: http://b
+				        - url: ftp://c
 			`),
 			err: stringtest.JoinLF(
-				`app.yaml:3:14: $.pools[0].upstreams[0].url: url "ftp://a" is not http`,
-				`app.yaml:6:14: $.pools[1].upstreams[1].url: url "ftp://c" is not http`,
+				`app.yaml:4:16: $.pools[0].spec.upstreams[0].url: url "ftp://a" is not http`,
+				`app.yaml:8:16: $.pools[1].spec.upstreams[1].url: url "ftp://c" is not http`,
 			),
 		},
 	}
@@ -3876,9 +3909,314 @@ func TestSelfValidateValue_Validate(t *testing.T) {
 	}
 }
 
+func TestNode_Decode_SelfDecoding(t *testing.T) {
+	t.Parallel()
+
+	type nestedFleet struct {
+		Servers []defaultedServer `yaml:"servers"`
+	}
+
+	type withFleet struct {
+		Fleet growingFleet `yaml:"fleet"`
+	}
+
+	type withReversed struct {
+		Fleet reversedFleet `yaml:"fleet"`
+	}
+
+	type withAddr struct {
+		Name string   `yaml:"name"`
+		Addr hostPort `yaml:"addr"`
+	}
+
+	type withPeers struct {
+		Peers hostPorts `yaml:"peers"`
+	}
+
+	type withLazy struct {
+		Lazy lazyServer `yaml:"lazy"`
+	}
+
+	type withHours struct {
+		Label string     `yaml:"label"`
+		Hours rangeHours `yaml:"hours"`
+	}
+
+	type withShared struct {
+		Label string         `yaml:"label"`
+		Hours sharedKeysList `yaml:"hours"`
+	}
+
+	type withSpec struct {
+		Spec nodeSpec `yaml:"spec"`
+	}
+
+	// A fleet whose servers fail four checks, at four lines.
+	fleetInput := stringtest.Input(`
+		servers:
+		  - {host: a, limit: {n: -1}}
+		  - host: b
+		    port: 70000
+		    limit:
+		      n: -2
+		  - host: c
+		    hours:
+		      open: "17:00"
+		      close: "09:00"
+	`)
+
+	fleetErr := stringtest.JoinLF(
+		"app.yaml:2:26: $.servers[0].limit.n: negative -1",
+		"app.yaml:4:11: $.servers[1].port: port out of range",
+		"app.yaml:6:10: $.servers[1].limit.n: negative -2",
+		"app.yaml:10:14: $.servers[2].hours.close: closes before it opens",
+	)
+
+	// Two stores, each a mapping whose type key names its type.
+	storesInput := stringtest.Input(`
+		stores:
+		  - type: bucket
+		    name: ""
+		  - type: bucket
+		    name: b
+		    limit:
+		      n: -3
+	`)
+
+	// The stores report at the box when no tag says where the store sits.
+	boxErr := stringtest.JoinLF(
+		"app.yaml:2:5: $.stores[0].store.name: name is required",
+		"app.yaml:4:5: $.stores[1].store.limit.n: negative -3",
+	)
+
+	boxNearest := map[string]string{
+		"$.stores[0].store.name":    "$.stores[0]",
+		"$.stores[1].store.limit.n": "$.stores[1]",
+	}
+
+	storesErr := stringtest.JoinLF(
+		"app.yaml:3:11: $.stores[0].name: name is required",
+		"app.yaml:7:10: $.stores[1].limit.n: negative -3",
+	)
+
+	// Each target holds a value whose type decodes itself. The nearest
+	// paths are those SourceError.Nearest returns, by the path of each
+	// error that bound at a value above the one its path names.
+	tcs := map[string]struct {
+		target  func() any
+		nearest map[string]string
+		input   string
+		err     string
+	}{
+		"a struct that decodes field by field": {
+			target: func() any { return new(fleet) },
+			input:  fleetInput,
+			err:    fleetErr,
+		},
+		"a defaults method below a list reports the same lines": {
+			target: func() any { return new(nestedFleet) },
+			input:  fleetInput,
+			err:    fleetErr,
+		},
+		"a defaults method at the root reports the same lines": {
+			target: func() any { return new(defaultedFleet) },
+			input:  fleetInput,
+			err:    fleetErr,
+		},
+		"a Validate that walks the fields of its struct reports each once": {
+			target: func() any { return new(map[string][]rewalkedServer) },
+			input:  fleetInput,
+			err:    fleetErr,
+		},
+		"values that pass": {
+			target: func() any { return new(nestedFleet) },
+			input:  "servers:\n  - {host: a, limit: {n: 1}}\n",
+		},
+		"a struct parsed from text reports its own error at the text": {
+			target:  func() any { return new(withAddr) },
+			input:   "name: x\naddr: db:0\n",
+			err:     "app.yaml:2:7: $.addr.port: port must be at least 1",
+			nearest: map[string]string{"$.addr.port": "$.addr"},
+		},
+		"a value below a struct parsed from text binds at the text": {
+			target:  func() any { return new(withAddr) },
+			input:   "name: x\naddr: db:70000\n",
+			err:     "app.yaml:2:7: $.addr.port: port out of range",
+			nearest: map[string]string{"$.addr.port": "$.addr"},
+		},
+		"a value binds at the nearest value above it that the document holds": {
+			target:  func() any { return new(withPeers) },
+			input:   "peers: a:1,b:0\n",
+			err:     "app.yaml:1:8: $.peers.addrs[1].port: port must be at least 1",
+			nearest: map[string]string{"$.peers.addrs[1].port": "$.peers"},
+		},
+		"an element the method adds binds at its struct": {
+			target:  func() any { return new(withFleet) },
+			input:   "fleet:\n  servers:\n    - host: a\n",
+			err:     "app.yaml:2:3: $.fleet.servers[1].port: port out of range",
+			nearest: map[string]string{"$.fleet.servers[1].port": "$.fleet"},
+		},
+		"an element the method moves reports at the element of its index": {
+			target: func() any { return new(withReversed) },
+			input:  "fleet:\n  servers:\n    - {host: a, port: 80}\n    - {host: b, port: 70000}\n",
+			err:    "app.yaml:3:23: $.fleet.servers[0].port: port out of range",
+		},
+		"a field the method leaves unset validates": {
+			target:  func() any { return new(withLazy) },
+			input:   "lazy: later\n",
+			err:     "app.yaml:1:7: $.lazy.server.password: password is required",
+			nearest: map[string]string{"$.lazy.server.password": "$.lazy"},
+		},
+		"a summary, a detail, and a path from the root": {
+			target: func() any { return new(withHours) },
+			input:  "label: x\nhours: 17-09\n",
+			err: stringtest.JoinLF(
+				"app.yaml: invalid hours",
+				"app.yaml:1:8: $.label: see the label",
+				"app.yaml:2:8: $.hours.open: opens late",
+				"app.yaml:2:8: $.hours: closes early",
+			),
+			nearest: map[string]string{"$.hours.open": "$.hours", "$.hours.close": "$.hours"},
+		},
+		"a sorted list binds at the list": {
+			target:  func() any { return new(map[string]sortedLimits) },
+			input:   "limits:\n  - {n: 3}\n  - {n: -1}\n",
+			err:     "app.yaml:2:6: $.limits[0].n: negative -1",
+			nearest: map[string]string{"$.limits[0].n": "$.limits"},
+		},
+		"a list with an element in front binds at the list": {
+			target:  func() any { return new(map[string]leadingLimits) },
+			input:   "limits:\n  - {n: 2}\n  - {n: -1}\n",
+			err:     "app.yaml:2:6: $.limits[2].n: negative -1",
+			nearest: map[string]string{"$.limits[2].n": "$.limits"},
+		},
+		"a swapped array binds at the array": {
+			target:  func() any { return new(map[string]swappedLimits) },
+			input:   "limits: [{n: -1}, {n: 2}]\n",
+			err:     "app.yaml:1:11: $.limits[1].n: negative -1",
+			nearest: map[string]string{"$.limits[1].n": "$.limits"},
+		},
+		"a map built from a list binds at the list": {
+			target:  func() any { return new(map[string]serversByHost) },
+			input:   "servers:\n  - {host: a, port: 70000}\n",
+			err:     "app.yaml:2:6: $.servers.a.port: port out of range",
+			nearest: map[string]string{"$.servers.a.port": "$.servers"},
+		},
+		"keys that share a path below a map bind at the map": {
+			target: func() any { return new(map[string]limitsByAny) },
+			input:  "limits:\n  - {n: -1}\n  - {n: -2}\n",
+			err: stringtest.JoinLF(
+				"app.yaml:2:6: $.limits.1.n: negative -1",
+				"app.yaml:2:6: $.limits.1.n: negative -2",
+			),
+			nearest: map[string]string{"$.limits.1.n": "$.limits"},
+		},
+		"keys that share a path below a Validate of a list bind at the list": {
+			target: func() any { return new(withShared) },
+			input:  "label: x\nhours:\n  - 17-09,-2\n",
+			err: stringtest.JoinLF(
+				"app.yaml:3:5: $.hours[0].1.n: negative -2",
+				"app.yaml: invalid hours",
+				"app.yaml:1:8: $.label: see the label",
+				"app.yaml:3:5: $.hours[0].1.open: opens late",
+				"app.yaml:3:5: $.hours[0].1: closes early",
+			),
+			nearest: map[string]string{
+				"$.hours[0].1":       "$.hours",
+				"$.hours[0].1.open":  "$.hours",
+				"$.hours[0].1.close": "$.hours",
+				"$.hours[0].1.n":     "$.hours",
+			},
+		},
+		"a store in a field with no tag binds at the box, once": {
+			target:  func() any { return new(map[string][]storeBox) },
+			input:   storesInput,
+			err:     boxErr,
+			nearest: boxNearest,
+		},
+		"a store in an inline field reports its lines": {
+			target: func() any { return new(map[string][]inlineStoreBox) },
+			input:  storesInput,
+			err:    storesErr,
+		},
+		"a store in a skipped field reports the lines its Validate finds": {
+			target: func() any { return new(map[string][]skippedStoreBox) },
+			input:  storesInput,
+			err:    storesErr,
+		},
+		"a node below a struct that decodes itself validates nothing": {
+			target: func() any {
+				return &withSpec{Spec: nodeSpec{Node: &ast.MappingNode{
+					Values: []*ast.MappingValueNode{{Value: walkedNode{}}},
+				}}}
+			},
+			input: "spec: {hours: {open: \"09:00\", close: \"17:00\"}}\n",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("app.yaml"))
+
+			// A walk on its own checks a value that a decode with the walk
+			// off filled.
+			v := tc.target()
+			require.NoError(t, doc.DecodeInto(t.Context(), v, niceyaml.WithSelfValidation(false)))
+
+			err := doc.DecodeInto(t.Context(), tc.target())
+			if tc.err == "" {
+				require.NoError(t, err)
+				require.NoError(t, doc.SelfValidate(t.Context(), v))
+				require.NoError(t, niceyaml.SelfValidateValue(t.Context(), v))
+
+				return
+			}
+
+			require.EqualError(t, err, tc.err)
+			assert.True(t, niceyaml.IsInvalid(err))
+
+			var nearest map[string]string
+
+			for bound := range niceyaml.AllBindings(err) {
+				near, ok := bound.Nearest()
+				if !ok {
+					continue
+				}
+
+				// The error has a position, and no reason it lacks one.
+				_, located := bound.Position()
+				assert.True(t, located)
+				require.NoError(t, bound.Unresolved())
+
+				p, ok := bound.Path()
+				require.True(t, ok)
+
+				if nearest == nil {
+					nearest = map[string]string{}
+				}
+
+				nearest[p.String()] = near.String()
+			}
+
+			assert.Equal(t, tc.nearest, nearest)
+
+			// Node.SelfValidate reports what the decode reports, and so does
+			// a document that places the result of SelfValidateValue.
+			require.EqualError(t, doc.SelfValidate(t.Context(), v), tc.err)
+
+			unplaced := niceyaml.SelfValidateValue(t.Context(), v)
+			require.Error(t, unplaced)
+			assert.NotContains(t, unplaced.Error(), "app.yaml")
+			require.EqualError(t, doc.Bind(unplaced), tc.err)
+		})
+	}
+}
+
 // selfDecodingBytes decodes itself from the YAML bytes, so its fields
 // need not mirror the document. It fills Inner with hours that close
-// before they open, which the walk must not report.
+// before they open, at a path the document does not hold.
 type selfDecodingBytes struct {
 	Inner     hours
 	validated bool
@@ -3918,33 +4256,19 @@ func (s *selfDecodingText) Validate() error {
 // niceyaml.WithCustomUnmarshaler decodes it, so its fields need not
 // mirror the document.
 type optionDecodedHours struct {
-	Inner     hours `yaml:"inner"`
-	validated bool
-}
-
-func (o *optionDecodedHours) Validate() error {
-	o.validated = true
-
-	return nil
+	Inner hours `yaml:"inner"`
 }
 
 // jsonDecodedHours decodes itself from JSON under
 // niceyaml.WithJSONUnmarshalers, so its fields need not mirror the
-// document. It fills Inner with hours that close before they open, which
-// the walk must not report.
+// document. It fills Inner with hours that close before they open, at a
+// path the document does not hold.
 type jsonDecodedHours struct {
-	Inner     hours `yaml:"inner"`
-	validated bool
+	Inner hours `yaml:"inner"`
 }
 
 func (j *jsonDecodedHours) UnmarshalJSON([]byte) error {
 	j.Inner = hours{Open: "17:00", Close: "09:00"}
-
-	return nil
-}
-
-func (j *jsonDecodedHours) Validate() error {
-	j.validated = true
 
 	return nil
 }
@@ -3956,14 +4280,14 @@ type registeredHours struct {
 	Inner hours `yaml:"inner"`
 }
 
-// failingSelfDecoding decodes itself and rejects itself, so its own
-// Validate still runs at its own path.
+// failingSelfDecoding decodes itself and rejects itself. The hours it
+// fills pass, so its own Validate runs, at its own path.
 type failingSelfDecoding struct {
 	Inner hours
 }
 
 func (f *failingSelfDecoding) UnmarshalYAML([]byte) error {
-	f.Inner = hours{Open: "17:00", Close: "09:00"}
+	f.Inner = hours{Open: "09:00", Close: "17:00"}
 
 	return nil
 }
@@ -4364,16 +4688,18 @@ type gradedConfig struct {
 	ByAny    map[any]upstream     `yaml:"by_any"`
 }
 
-// pool decodes itself, so a decode validates nothing below it. Its
-// Validate walks the upstreams it holds, as a decode walks the values
-// below a type that decodes field by field.
+// pool decodes its upstreams from the upstreams key under spec, a place
+// no tag names. It tags the field `-`, so a decode leaves the field to
+// its Validate, which walks the upstreams and puts them under that key.
 type pool struct {
-	Upstreams []upstream
+	Upstreams []upstream `yaml:"-"`
 }
 
 func (p *pool) UnmarshalYAML(unmarshal func(any) error) error {
 	var raw struct {
-		Upstreams []upstream `yaml:"upstreams"`
+		Spec struct {
+			Upstreams []upstream `yaml:"upstreams"`
+		} `yaml:"spec"`
 	}
 
 	err := unmarshal(&raw)
@@ -4381,7 +4707,7 @@ func (p *pool) UnmarshalYAML(unmarshal func(any) error) error {
 		return err
 	}
 
-	p.Upstreams = raw.Upstreams
+	p.Upstreams = raw.Spec.Upstreams
 
 	return nil
 }
@@ -4390,5 +4716,435 @@ func (p *pool) Validate() error {
 	err := niceyaml.SelfValidateValue(context.Background(), p.Upstreams)
 
 	//nolint:wrapcheck // The decode places the error as it is.
-	return niceyaml.Rebase(err, paths.Current().Child("upstreams"))
+	return niceyaml.Rebase(err, paths.Current().Child("spec", "upstreams"))
+}
+
+// server holds values that validate themselves, and decodes field by
+// field.
+type server struct {
+	Host  string `yaml:"host"`
+	Port  port   `yaml:"port"`
+	Hours hours  `yaml:"hours"`
+	Limit signed `yaml:"limit"`
+}
+
+// defaultedServer is a server that sets a default port and then decodes
+// its fields, as a type that declares its defaults does.
+type defaultedServer server
+
+func (s *defaultedServer) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain defaultedServer
+
+	*s = defaultedServer{Port: 8080}
+
+	return unmarshal((*plain)(s))
+}
+
+// rewalkedServer is a defaultedServer whose Validate walks its own
+// fields, which a decode walks too.
+type rewalkedServer server
+
+func (s *rewalkedServer) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain rewalkedServer
+
+	*s = rewalkedServer{Port: 8080}
+
+	return unmarshal((*plain)(s))
+}
+
+func (s rewalkedServer) Validate() error {
+	//nolint:wrapcheck // The decode places the error as it is.
+	return niceyaml.SelfValidateValue(context.Background(), server(s))
+}
+
+// fleet holds servers under a name, and decodes field by field.
+type fleet struct {
+	Name    string   `yaml:"name"`
+	Servers []server `yaml:"servers"`
+}
+
+// defaultedFleet is a fleet that sets a default name and then decodes its
+// fields.
+type defaultedFleet fleet
+
+func (f *defaultedFleet) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain defaultedFleet
+
+	*f = defaultedFleet{Name: "main"}
+
+	return unmarshal((*plain)(f))
+}
+
+// growingFleet is a fleet that decodes its fields and then adds a server
+// the document does not hold.
+type growingFleet fleet
+
+func (f *growingFleet) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain growingFleet
+
+	err := unmarshal((*plain)(f))
+	if err != nil {
+		return err
+	}
+
+	f.Servers = append(f.Servers, server{Host: "spare", Port: 70000})
+
+	return nil
+}
+
+// reversedFleet is a fleet that decodes its fields and then reverses its
+// servers, so each index names another server of the document.
+type reversedFleet fleet
+
+func (f *reversedFleet) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain reversedFleet
+
+	err := unmarshal((*plain)(f))
+	if err != nil {
+		return err
+	}
+
+	slices.Reverse(f.Servers)
+
+	return nil
+}
+
+// nodeSpec decodes its hours and keeps a syntax tree beside them, which
+// holds a value that reports any walk that reaches it.
+type nodeSpec struct {
+	Node  ast.Node `yaml:"node"`
+	Hours hours    `yaml:"hours"`
+}
+
+func (s *nodeSpec) UnmarshalYAML(unmarshal func(any) error) error {
+	var raw struct {
+		Hours hours `yaml:"hours"`
+	}
+
+	err := unmarshal(&raw)
+	if err != nil {
+		return err
+	}
+
+	s.Hours = raw.Hours
+	s.Node = &ast.MappingNode{Values: []*ast.MappingValueNode{{Value: walkedNode{}}}}
+
+	return nil
+}
+
+// hostPort parses itself from the text "host:port", so the document
+// holds a scalar where its fields name keys. It requires a port.
+type hostPort struct {
+	Host string `yaml:"host"`
+	Port port   `yaml:"port"`
+}
+
+func (a *hostPort) UnmarshalText(text []byte) error {
+	host, portText, ok := strings.Cut(string(text), ":")
+	if !ok {
+		return errors.New("want host:port")
+	}
+
+	n, err := strconv.Atoi(portText)
+	if err != nil {
+		return fmt.Errorf("port: %w", err)
+	}
+
+	a.Host, a.Port = host, port(n)
+
+	return nil
+}
+
+func (a hostPort) Validate() error {
+	if a.Port < 1 {
+		return niceyaml.NewError("port must be at least 1", niceyaml.AtPath(paths.Current().Child("port")))
+	}
+
+	return nil
+}
+
+// hostPorts parses a list of hostPort values from one text, with a comma
+// between them.
+type hostPorts struct {
+	Addrs []hostPort `yaml:"addrs"`
+}
+
+func (h *hostPorts) UnmarshalText(text []byte) error {
+	for part := range strings.SplitSeq(string(text), ",") {
+		var addr hostPort
+
+		err := addr.UnmarshalText([]byte(part))
+		if err != nil {
+			return err
+		}
+
+		h.Addrs = append(h.Addrs, addr)
+	}
+
+	return nil
+}
+
+// sortedLimits decodes a list and sorts it, so its indexes are not those
+// of the document.
+type sortedLimits []signed
+
+func (s *sortedLimits) UnmarshalYAML(unmarshal func(any) error) error {
+	var raw []signed
+
+	err := unmarshal(&raw)
+	if err != nil {
+		return err
+	}
+
+	slices.SortFunc(raw, func(a, b signed) int { return cmp.Compare(a.N, b.N) })
+
+	*s = raw
+
+	return nil
+}
+
+// leadingLimits decodes a list behind a limit the document does not
+// hold, so the list holds one element more than the document.
+type leadingLimits []signed
+
+func (l *leadingLimits) UnmarshalYAML(unmarshal func(any) error) error {
+	var raw []signed
+
+	err := unmarshal(&raw)
+	if err != nil {
+		return err
+	}
+
+	*l = append(leadingLimits{{N: 1}}, raw...)
+
+	return nil
+}
+
+// swappedLimits decodes two limits and swaps them.
+type swappedLimits [2]signed
+
+func (s *swappedLimits) UnmarshalYAML(unmarshal func(any) error) error {
+	var raw [2]signed
+
+	err := unmarshal(&raw)
+	if err != nil {
+		return err
+	}
+
+	s[0], s[1] = raw[1], raw[0]
+
+	return nil
+}
+
+// serversByHost decodes a list of servers into a map that keys each by
+// its host.
+type serversByHost map[string]server
+
+func (m *serversByHost) UnmarshalYAML(unmarshal func(any) error) error {
+	var raw []server
+
+	err := unmarshal(&raw)
+	if err != nil {
+		return err
+	}
+
+	*m = serversByHost{}
+	for _, s := range raw {
+		(*m)[s.Host] = s
+	}
+
+	return nil
+}
+
+// limitsByAny decodes two limits into a map whose keys share a path.
+type limitsByAny map[any]signed
+
+func (m *limitsByAny) UnmarshalYAML(unmarshal func(any) error) error {
+	var raw [2]signed
+
+	err := unmarshal(&raw)
+	if err != nil {
+		return err
+	}
+
+	*m = limitsByAny{1: raw[0], "1": raw[1]}
+
+	return nil
+}
+
+// bucket is the one kind of store a document names, and requires a name.
+type bucket struct {
+	Type  string `yaml:"type"`
+	Name  string `yaml:"name"`
+	Limit signed `yaml:"limit"`
+}
+
+func (b bucket) Validate() error {
+	if b.Name == "" {
+		return niceyaml.NewError("name is required", niceyaml.AtPath(paths.Current().Child("name")))
+	}
+
+	return nil
+}
+
+// decodeStore decodes the store a mapping holds, by the type its type key
+// names.
+func decodeStore(unmarshal func(any) error) (any, error) {
+	var head struct {
+		Type string `yaml:"type"`
+	}
+
+	err := unmarshal(&head)
+	if err != nil {
+		return nil, err
+	}
+
+	if head.Type != "bucket" {
+		return nil, fmt.Errorf("unknown store type %q", head.Type)
+	}
+
+	var b bucket
+
+	err = unmarshal(&b)
+	if err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+// storeBox holds the store its mapping names in a field with no tag, so
+// a decode looks for the store under a key the mapping does not hold.
+// Its Validate walks the store, which the decode walks too.
+type storeBox struct {
+	Store any
+}
+
+func (b *storeBox) UnmarshalYAML(unmarshal func(any) error) error {
+	store, err := decodeStore(unmarshal)
+	b.Store = store
+
+	return err
+}
+
+func (b storeBox) Validate() error {
+	//nolint:wrapcheck // The decode places the error as it is.
+	return niceyaml.SelfValidateValue(context.Background(), b.Store)
+}
+
+// inlineStoreBox holds its store in a field tagged inline, so a decode
+// reads the store from the mapping of the box.
+type inlineStoreBox struct {
+	Store any `yaml:",inline"`
+}
+
+func (b *inlineStoreBox) UnmarshalYAML(unmarshal func(any) error) error {
+	store, err := decodeStore(unmarshal)
+	b.Store = store
+
+	return err
+}
+
+// skippedStoreBox is storeBox with its field tagged `-`, so a decode
+// leaves the store to the Validate of the box.
+type skippedStoreBox struct {
+	Store any `yaml:"-"`
+}
+
+func (b *skippedStoreBox) UnmarshalYAML(unmarshal func(any) error) error {
+	store, err := decodeStore(unmarshal)
+	b.Store = store
+
+	return err
+}
+
+func (b skippedStoreBox) Validate() error {
+	//nolint:wrapcheck // The decode places the error as it is.
+	return niceyaml.SelfValidateValue(context.Background(), b.Store)
+}
+
+// lazyServer decodes its name from a scalar and leaves its server unset.
+type lazyServer struct {
+	Name   string   `yaml:"name"`
+	Server database `yaml:"server"`
+}
+
+func (l *lazyServer) UnmarshalYAML(unmarshal func(any) error) error {
+	return unmarshal(&l.Name)
+}
+
+// rangeHours parses hours from the text "open-close", and reports them
+// with a summary, a detail, and an error at a path from the root.
+type rangeHours struct {
+	Open  string `yaml:"open"`
+	Close string `yaml:"close"`
+}
+
+func (r *rangeHours) UnmarshalText(text []byte) error {
+	r.Open, r.Close, _ = strings.Cut(string(text), "-")
+
+	return nil
+}
+
+func (r rangeHours) Validate() error {
+	if r.Close >= r.Open {
+		return nil
+	}
+
+	return niceyaml.NewSummary("invalid hours",
+		niceyaml.NewError("opens late", niceyaml.AtPath(paths.Current().Child("open"))),
+		niceyaml.NewError("closes early", niceyaml.WithDetails(
+			niceyaml.NewError("closes here", niceyaml.AtPath(paths.Current().Child("close"))),
+		)),
+		niceyaml.NewError("see the label", niceyaml.AtPath(paths.Doc().Child("label"))),
+	)
+}
+
+// sharedKeys parses a rangeHours and a limit from one text, with a comma
+// between them, and holds them under keys that share a path. A decode
+// skips the field, and the Validate of sharedKeys walks it.
+type sharedKeys struct {
+	ByKey map[any]any `yaml:"-"`
+}
+
+func (s *sharedKeys) UnmarshalText(text []byte) error {
+	first, second, _ := strings.Cut(string(text), ",")
+
+	var h rangeHours
+
+	err := h.UnmarshalText([]byte(first))
+	if err != nil {
+		return err
+	}
+
+	n, err := strconv.Atoi(second)
+	if err != nil {
+		return fmt.Errorf("limit: %w", err)
+	}
+
+	s.ByKey = map[any]any{1: h, "1": signed{N: n}}
+
+	return nil
+}
+
+func (s sharedKeys) Validate() error {
+	//nolint:wrapcheck // The decode places the error as it is.
+	return niceyaml.SelfValidateValue(context.Background(), s.ByKey)
+}
+
+// sharedKeysList decodes a list of sharedKeys, as a list that decodes
+// itself.
+type sharedKeysList []sharedKeys
+
+func (l *sharedKeysList) UnmarshalYAML(unmarshal func(any) error) error {
+	var raw []sharedKeys
+
+	err := unmarshal(&raw)
+	if err != nil {
+		return err
+	}
+
+	*l = raw
+
+	return nil
 }
