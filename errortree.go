@@ -31,8 +31,9 @@ import (
 // its binding. [ErrorTree.Problems] yields the nodes such a report
 // lists, one per problem, and [ErrorTree.All] yields every node of the
 // tree. A node with Detail set explains its parent, and a renderer that
-// draws details apart from problems reads the mark. [ErrorTree.Invalid]
-// reports whether the document is at fault for the problems of a node.
+// draws details apart from problems reads the mark.
+// [ErrorTree.IsInvalid] reports whether the document is at fault for the
+// problems of a node.
 //
 // Create instances with [NewErrorTree].
 type ErrorTree struct {
@@ -233,7 +234,7 @@ func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
 //	}
 //
 // A row tells a fault of the document from a check that could not run
-// with [ErrorTree.Invalid], and [IsInvalid] asks the same of every row.
+// with [ErrorTree.IsInvalid], and [IsInvalid] asks the same of every row.
 // The document is at fault for each problem an [*Error] from [Invalid]
 // heads, so each branch of a join that Invalid wraps yields a row that
 // is invalid, while its text stays its own.
@@ -266,17 +267,17 @@ func (t ErrorTree) heads() bool {
 	return slices.ContainsFunc(t.Children, func(c ErrorTree) bool { return !c.Detail })
 }
 
-// Invalid reports whether the document is at fault for every problem at
+// IsInvalid reports whether the document is at fault for every problem at
 // or below the node, the ones [ErrorTree.Problems] yields for it. A node
 // that yields no problem, such as the zero ErrorTree, is not invalid.
-// [IsInvalid] answers for an error as the root of its tree does, and it
-// describes which problems the document is at fault for.
+// The function [IsInvalid] answers for an error as the root of its tree
+// does, and it describes which problems the document is at fault for.
 //
 // A report that lists the problems of an error as rows asks each row, to
 // tell a fault of the document from a check that could not run:
 //
 //	for problem := range niceyaml.NewErrorTree(err).Problems() {
-//		row := Row{Message: problem.Message(), Invalid: problem.Invalid()}
+//		row := Row{Message: problem.Message(), Invalid: problem.IsInvalid()}
 //		...
 //	}
 //
@@ -289,8 +290,9 @@ func (t ErrorTree) heads() bool {
 // problems it heads, and its answer changes nothing for the node it
 // explains.
 //
-// Invalid reads Err, so a node built by hand with no Err is not invalid.
-func (t ErrorTree) Invalid() bool {
+// The method reads Err, so a node built by hand with no Err is not
+// invalid.
+func (t ErrorTree) IsInvalid() bool {
 	found := false
 
 	for problem := range t.Problems() {

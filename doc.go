@@ -546,7 +546,7 @@
 // IsInvalid reports whether the document is at fault for every problem
 // of an error, which is the check that picks a status code or an exit
 // code. A report that lists the problems one by one asks
-// [ErrorTree.Invalid] of each.
+// [ErrorTree.IsInvalid] of each.
 //
 // # Diffs
 //

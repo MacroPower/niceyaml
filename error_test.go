@@ -11202,7 +11202,7 @@ func TestPlace(t *testing.T) {
 				var problems []string
 
 				for problem := range niceyaml.NewErrorTree(err).Problems() {
-					problems = append(problems, fmt.Sprintf("%s %t", problem.Text, problem.Invalid()))
+					problems = append(problems, fmt.Sprintf("%s %t", problem.Text, problem.IsInvalid()))
 				}
 
 				assert.Equal(t, tc.problems, problems)
@@ -12347,10 +12347,10 @@ func TestIsInvalid(t *testing.T) {
 			// The root of the tree answers as IsInvalid does, and each
 			// problem answers as IsInvalid does for its error.
 			tree := niceyaml.NewErrorTree(err)
-			assert.Equal(t, tc.want, tree.Invalid())
+			assert.Equal(t, tc.want, tree.IsInvalid())
 
 			for problem := range tree.Problems() {
-				assert.Equal(t, niceyaml.IsInvalid(problem.Err), problem.Invalid(), problem.Text)
+				assert.Equal(t, niceyaml.IsInvalid(problem.Err), problem.IsInvalid(), problem.Text)
 			}
 		})
 	}

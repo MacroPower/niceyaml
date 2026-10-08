@@ -170,7 +170,7 @@ var (
 
 	// The mark of a problem the document is at fault for. An error
 	// declares the fault by matching it from an Is method, as [Error.Is]
-	// does, and [ErrorTree.Invalid] reads it. The schema package matches
+	// does, and [ErrorTree.IsInvalid] reads it. The schema package matches
 	// the same value, so it comes from an internal package.
 	errInvalid = fault.ErrInvalid
 
@@ -462,7 +462,7 @@ func NewSummary(msg string, errs ...error) error {
 // Is reports whether target is the mark of a problem the document is at
 // fault for and the [Error] declares that fault. The module keeps the
 // mark internal, so the method matches no target a caller can name, and
-// a caller asks [IsInvalid] or [ErrorTree.Invalid] instead of
+// a caller asks [IsInvalid] or [ErrorTree.IsInvalid] instead of
 // [errors.Is]. An Error from [NewError] or [Invalid] declares the
 // fault, with a location or without, and so does the Error a decode puts
 // around what a [SelfValidator] returns. An Error from [Place] or
@@ -478,10 +478,11 @@ func (e *Error) Is(target error) bool {
 // IsInvalid reports whether the document is at fault for every problem
 // of err, the question a caller asks to pick a status code, an exit code,
 // or whether to retry. The problems are the nodes [ErrorTree.Problems]
-// yields for err, and IsInvalid answers as [ErrorTree.Invalid] does for
-// the root of that tree, so IsInvalid(err) and NewErrorTree(err).Invalid()
-// agree. A nil err is not invalid, and neither is an error with no
-// problem to yield, such as one with an empty message.
+// yields for err, and IsInvalid answers as [ErrorTree.IsInvalid] does for
+// the root of that tree, so IsInvalid(err) and
+// NewErrorTree(err).IsInvalid() agree. A nil err is not invalid, and
+// neither is an error with no problem to yield, such as one with an empty
+// message.
 //
 // A problem is the document's fault or a check that could not run, such
 // as a schema that does not load or a context that ended. The code that
@@ -561,7 +562,7 @@ func (e *Error) Is(target error) bool {
 //	}
 //
 // A caller that reports problem by problem, as an editor or a CI
-// annotation does, asks [ErrorTree.Invalid] of each node
+// annotation does, asks [ErrorTree.IsInvalid] of each node
 // [ErrorTree.Problems] yields.
 //
 // The document is at fault for every problem of the parse and of a
@@ -583,7 +584,7 @@ func (e *Error) Is(target error) bool {
 // does not load can wrap, an error of the file system. IsInvalid reports
 // neither.
 func IsInvalid(err error) bool {
-	return NewErrorTree(err).Invalid()
+	return NewErrorTree(err).IsInvalid()
 }
 
 // With returns a copy of the [Error] with the given options applied. The

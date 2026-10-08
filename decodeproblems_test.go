@@ -264,7 +264,7 @@ func requireInvalid(t *testing.T, err error, count int) {
 	found := 0
 
 	for problem := range niceyaml.NewErrorTree(err).Problems() {
-		require.True(t, problem.Invalid(), problem.Text)
+		require.True(t, problem.IsInvalid(), problem.Text)
 
 		found++
 	}

@@ -2203,7 +2203,7 @@ func TestErrorTree_Problems_WrappedJoin(t *testing.T) {
 			var got []string
 
 			for problem := range niceyaml.NewErrorTree(tc.build(t)).Problems() {
-				assert.True(t, problem.Invalid(), problem.Text)
+				assert.True(t, problem.IsInvalid(), problem.Text)
 
 				got = append(got, problem.Text)
 			}
@@ -2377,7 +2377,7 @@ func TestErrorTree_Problems_Stops(t *testing.T) {
 	assert.Equal(t, []string{"first", "second"}, got)
 }
 
-func TestErrorTree_Invalid(t *testing.T) {
+func TestErrorTree_IsInvalid(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
@@ -2477,13 +2477,13 @@ func TestErrorTree_Invalid(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, niceyaml.NewErrorTree(tc.err).Invalid(), "unbound")
-			assert.Equal(t, tc.want, niceyaml.NewErrorTree(yamltest.Bind(t, source, tc.err)).Invalid(), "bound")
+			assert.Equal(t, tc.want, niceyaml.NewErrorTree(tc.err).IsInvalid(), "unbound")
+			assert.Equal(t, tc.want, niceyaml.NewErrorTree(yamltest.Bind(t, source, tc.err)).IsInvalid(), "bound")
 		})
 	}
 }
 
-func TestErrorTree_Invalid_Nodes(t *testing.T) {
+func TestErrorTree_IsInvalid_Nodes(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
@@ -2583,7 +2583,7 @@ func TestErrorTree_Invalid_Nodes(t *testing.T) {
 		var out []string
 
 		for node := range tree.All() {
-			out = append(out, fmt.Sprintf("%s %t", node.Message(), node.Invalid()))
+			out = append(out, fmt.Sprintf("%s %t", node.Message(), node.IsInvalid()))
 		}
 
 		return out
@@ -2603,7 +2603,7 @@ func TestErrorTree_Invalid_Nodes(t *testing.T) {
 	}
 }
 
-func TestErrorTree_Invalid_HandBuilt(t *testing.T) {
+func TestErrorTree_IsInvalid_HandBuilt(t *testing.T) {
 	t.Parallel()
 
 	errRead := fmt.Errorf("read g.yaml: %w", fs.ErrPermission)
@@ -2654,7 +2654,7 @@ func TestErrorTree_Invalid_HandBuilt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, tc.tree.Invalid())
+			assert.Equal(t, tc.want, tc.tree.IsInvalid())
 		})
 	}
 }
