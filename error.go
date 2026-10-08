@@ -70,8 +70,8 @@ var (
 	//   - A panic in the decoder or in such a method.
 	//   - The error for a target type whose definition the decoder
 	//     refuses, such as a struct with two fields of one name.
-	//   - The error of a go-yaml option, such as one for a reference file
-	//     the decoder cannot open.
+	//   - The error of a reference document from [WithReferences] that
+	//     does not parse.
 	//
 	// The error of a context that ended does not match, even when an
 	// unmarshaler wraps it. Neither does [ErrDecodeTarget] or

@@ -65,13 +65,16 @@ var policies = []dependencyPolicy{
 		// Add to this list too only with a matching change to the
 		// dependency policy in the package documentation.
 		passThrough: []string{
-			// Escape hatches.
-			"yaml.DecodeOption",
+			// Escape hatch.
 			"yaml.EncodeOption",
-			// The comments encoder.WithYAMLComments adds. The encoder
-			// applies them itself, since go-yaml's own option for them
-			// works only when go-yaml writes the document.
+			// The comments WithYAMLComments collects in a decode and
+			// encoder.WithYAMLComments adds. The encoder applies them
+			// itself, since go-yaml's own option for them works only when
+			// go-yaml writes the document.
 			"yaml.CommentMap",
+			// The check WithYAMLStructValidator runs on each struct of a
+			// decode.
+			"yaml.StructValidator",
 		},
 		prefix: "YAML",
 	},

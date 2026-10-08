@@ -627,16 +627,21 @@
 // naming go-yaml's error types.
 //
 // The go-yaml settings niceyaml supports have named options, such as
-// [WithAllowDuplicateKeys] or [go.jacobcolvin.com/niceyaml/encoder.WithIndent].
-// The rest pass through options that take go-yaml values, and these carry a
-// YAML prefix, as in [WithYAMLDecodeOptions] and
-// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLOptions], so a caller can tell
-// at the call site when the go-yaml dependency shows.
-// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] takes go-yaml's
-// comment map under the same prefix. A test in this package checks every
-// exported declaration. It fails when a declaration names a go-yaml type
-// outside the test's allowlist, or names a go-yaml option type or the
-// comment map in an identifier without the YAML prefix.
+// [WithAllowDuplicateKeys], [WithCustomUnmarshaler], or
+// [go.jacobcolvin.com/niceyaml/encoder.WithIndent]. A parse and a decode
+// take named options alone, so niceyaml knows what each one changes and
+// applies it to every decoder a call runs. An option that takes or
+// yields a go-yaml value carries a YAML prefix, so a caller can tell at
+// the call site when the go-yaml dependency shows. [WithYAMLComments] and
+// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] take go-yaml's
+// comment map, [WithYAMLStructValidator] takes its struct validator, and
+// a decode under [WithYAMLOrderedMaps] yields its ordered map. The
+// encoder settings with no option of their own pass through
+// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLOptions], which takes
+// go-yaml's own options. A test in this package checks every exported
+// declaration. It fails when a declaration names a go-yaml type outside
+// the test's allowlist, or names the encoder option type, the comment
+// map, or the struct validator in an identifier without the YAML prefix.
 //
 // The [go.jacobcolvin.com/niceyaml/schema] package follows the same rule
 // for the JSON Schema library it builds on:

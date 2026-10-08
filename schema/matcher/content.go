@@ -264,7 +264,7 @@ func matchScalar(node *niceyaml.Node, raw any, got, want reflect.Value) bool {
 var (
 	// The interfaces go-yaml decodes a value through when its pointer
 	// implements one. The decoder reads an UnmarshalJSON method only under
-	// [yaml.UseJSONUnmarshaler], which a match never sets.
+	// [niceyaml.WithJSONUnmarshalers], which a match never sets.
 	unmarshalerTypes = []reflect.Type{
 		reflect.TypeFor[yaml.BytesUnmarshaler](),
 		reflect.TypeFor[yaml.BytesUnmarshalerContext](),

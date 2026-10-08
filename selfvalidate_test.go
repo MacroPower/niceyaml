@@ -142,7 +142,7 @@ var (
 	errLoop = errors.New("loop")
 
 	// Decodes a grade from its name, the only form a document gives it.
-	gradeNames = niceyaml.WithYAMLDecodeOptions(yaml.CustomUnmarshaler(func(g *grade, b []byte) error {
+	gradeNames = niceyaml.WithCustomUnmarshaler(func(_ context.Context, g *grade, b []byte) error {
 		if strings.TrimSpace(string(b)) != "high" {
 			return fmt.Errorf("unknown grade %q", b)
 		}
@@ -150,8 +150,20 @@ var (
 		*g = gradeHigh
 
 		return nil
-	}))
+	})
 )
+
+// countStrings returns an option whose function decodes every string of
+// a decode into a typed value, the keys of its maps among them, and
+// counts its calls in n.
+func countStrings(n *int) niceyaml.DecodeOption {
+	return niceyaml.WithCustomUnmarshaler(func(_ context.Context, s *string, text []byte) error {
+		*n++
+		*s = strings.TrimSpace(string(text))
+
+		return nil
+	})
+}
 
 // Hours is hours under an exported name, for embedding without a tag.
 type Hours = hours
@@ -2290,11 +2302,9 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
-	t.Run("the keys of every map decode with one go-yaml decoder", func(t *testing.T) {
+	t.Run("the walk decodes each key once", func(t *testing.T) {
 		t.Parallel()
 
-		// A go-yaml decoder applies its options once, when it first
-		// decodes, and reads any reference files then too.
 		var sb strings.Builder
 
 		for i := range 50 {
@@ -2303,18 +2313,21 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, sb.String())
 
-		decoders := 0
-		count := yaml.DecodeOption(func(*yaml.Decoder) error {
-			decoders++
+		keys := 0
+		count := countStrings(&keys)
 
-			return nil
-		})
+		_, err := dd.Decode[map[string]map[float64]item](t.Context(), count, niceyaml.WithSelfValidation(false))
+		require.NoError(t, err)
+		require.Equal(t, 50, keys)
 
-		_, err := dd.Decode[map[string]map[float64]item](t.Context(), niceyaml.WithYAMLDecodeOptions(count))
+		keys = 0
+
+		_, err = dd.Decode[map[string]map[float64]item](t.Context(), count)
 		require.NoError(t, err)
 
-		// One decoder decodes the value, and one reads its keys.
-		assert.LessOrEqual(t, decoders, 2)
+		// The decode reads each key of the outer map, and the walk reads
+		// each one again to spell it.
+		assert.Equal(t, 100, keys)
 	})
 
 	t.Run("a key decodes with the context of the decode", func(t *testing.T) {
@@ -2426,17 +2439,18 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				dd := yamltest.FirstDocument(t, tc.input)
 
-				decoders := 0
-				count := yaml.DecodeOption(func(*yaml.Decoder) error {
-					decoders++
+				decoded := 0
+				count := countStrings(&decoded)
 
-					return nil
-				})
+				require.NoError(t, tc.decode(t.Context(), dd, count, niceyaml.WithSelfValidation(false)))
 
-				require.NoError(t, tc.decode(t.Context(), dd, niceyaml.WithYAMLDecodeOptions(count)))
+				want := decoded
+				decoded = 0
 
-				// One decoder decodes the value, and none reads its keys.
-				assert.Equal(t, 1, decoders)
+				require.NoError(t, tc.decode(t.Context(), dd, count))
+
+				// The decode reads each key, and the walk reads none again.
+				assert.Equal(t, want, decoded)
 			})
 		}
 	})
@@ -2654,6 +2668,87 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err := dd.Decode[withNestedFailure](t.Context())
 		require.EqualError(t, err, "1:8: $.bytes: rejected")
+	})
+
+	t.Run("a value an option gives an unmarshaler validates itself alone", func(t *testing.T) {
+		t.Parallel()
+
+		type withOptionDecoded struct {
+			Custom optionDecodedHours `yaml:"custom"`
+			JSON   jsonDecodedHours   `yaml:"json"`
+		}
+
+		// The function fills its hours with a close before its open, as
+		// the UnmarshalJSON method does, which no Validate reports, since
+		// the walk stops at a value an option gives an unmarshaler. Each
+		// value still validates itself.
+		opts := niceyaml.DecodeOptions(
+			niceyaml.WithCustomUnmarshaler(func(_ context.Context, o *optionDecodedHours, _ []byte) error {
+				o.Inner = hours{Open: "17:00", Close: "09:00"}
+
+				return nil
+			}),
+			niceyaml.WithJSONUnmarshalers(true),
+		)
+
+		dd := yamltest.FirstDocument(t, "custom: anything\njson: anything\n")
+
+		var got withOptionDecoded
+
+		require.NoError(t, dd.DecodeInto(t.Context(), &got, opts))
+		assert.True(t, got.Custom.validated)
+		assert.True(t, got.JSON.validated)
+		assert.Equal(t, hours{Open: "17:00", Close: "09:00"}, got.Custom.Inner)
+		assert.Equal(t, hours{Open: "17:00", Close: "09:00"}, got.JSON.Inner)
+
+		// SelfValidate stops at the same values under the same options,
+		// and reads the hours below each one without them.
+		require.NoError(t, dd.SelfValidate(t.Context(), &got, opts))
+
+		err := dd.SelfValidate(t.Context(), &got)
+		require.EqualError(t, err, stringtest.JoinLF(
+			"$.custom.inner.close: closes before it opens",
+			"$.json.inner.close: closes before it opens",
+		))
+	})
+
+	t.Run("a struct that gets UnmarshalJSON from an embedded field validates the field", func(t *testing.T) {
+		t.Parallel()
+
+		// The method of the embedded field decodes the document into that
+		// field, so the field validates at the path of the struct, as a
+		// field that gives its struct an UnmarshalYAML method does.
+		type embedsJSON struct {
+			jsonDecodedHours
+
+			Name string `yaml:"name"`
+		}
+
+		dd := yamltest.FirstDocument(t, "shop: anything\n")
+
+		got, err := dd.Decode[map[string]*embedsJSON](t.Context(), niceyaml.WithJSONUnmarshalers(true))
+		require.NoError(t, err)
+		assert.True(t, got["shop"].validated)
+	})
+
+	t.Run("a value a registered function decodes walks as its fields", func(t *testing.T) {
+		t.Parallel()
+
+		// Nothing shows which types yaml.RegisterCustomUnmarshaler gave a
+		// function, so the walk reads the hours below the value, at a
+		// path the document does not hold.
+		yaml.RegisterCustomUnmarshaler(func(r *registeredHours, _ []byte) error {
+			r.Inner = hours{Open: "17:00", Close: "09:00"}
+
+			return nil
+		})
+
+		dd := yamltest.FirstDocument(t, "registered: anything\n")
+
+		_, err := dd.Decode[struct {
+			Registered registeredHours `yaml:"registered"`
+		}](t.Context())
+		require.EqualError(t, err, "$.registered.inner.close: closes before it opens")
 	})
 
 	t.Run("an ast.Node value validates itself alone", func(t *testing.T) {
@@ -3283,7 +3378,7 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 				`$.by_any.1.url: url "ftp://a" is not http`,
 			),
 		},
-		"keys that decode through a go-yaml option": {
+		"keys that a custom unmarshaler decodes": {
 			value: func() any { return new(gradedConfig) },
 			input: stringtest.Input(`
 				by_grade:
@@ -3817,6 +3912,48 @@ func (s *selfDecodingText) Validate() error {
 	s.validated = true
 
 	return nil
+}
+
+// optionDecodedHours has no unmarshaler method. A function from
+// niceyaml.WithCustomUnmarshaler decodes it, so its fields need not
+// mirror the document.
+type optionDecodedHours struct {
+	Inner     hours `yaml:"inner"`
+	validated bool
+}
+
+func (o *optionDecodedHours) Validate() error {
+	o.validated = true
+
+	return nil
+}
+
+// jsonDecodedHours decodes itself from JSON under
+// niceyaml.WithJSONUnmarshalers, so its fields need not mirror the
+// document. It fills Inner with hours that close before they open, which
+// the walk must not report.
+type jsonDecodedHours struct {
+	Inner     hours `yaml:"inner"`
+	validated bool
+}
+
+func (j *jsonDecodedHours) UnmarshalJSON([]byte) error {
+	j.Inner = hours{Open: "17:00", Close: "09:00"}
+
+	return nil
+}
+
+func (j *jsonDecodedHours) Validate() error {
+	j.validated = true
+
+	return nil
+}
+
+// registeredHours has no unmarshaler method. A function from
+// yaml.RegisterCustomUnmarshaler decodes it in every decode of the
+// program.
+type registeredHours struct {
+	Inner hours `yaml:"inner"`
 }
 
 // failingSelfDecoding decodes itself and rejects itself, so its own

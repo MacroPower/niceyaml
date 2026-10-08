@@ -93,7 +93,7 @@ func (*opaqueValue) UnmarshalYAML(data []byte) error {
 }
 
 // jsonDecoded decodes itself from JSON, which the decoder hands it only
-// under yaml.UseJSONUnmarshaler.
+// under niceyaml.WithJSONUnmarshalers.
 type jsonDecoded struct {
 	V string `yaml:"v"`
 }
@@ -103,8 +103,8 @@ func (*jsonDecoded) UnmarshalJSON([]byte) error {
 }
 
 // jsonFielded has an UnmarshalJSON method the decoder calls only under
-// yaml.UseJSONUnmarshaler. Without that option the decoder reads its
-// field.
+// niceyaml.WithJSONUnmarshalers. Without that option the decoder reads
+// its field.
 type jsonFielded struct {
 	Tier tier `yaml:"tier"`
 }
@@ -138,9 +138,14 @@ func (*positioned) UnmarshalYAML(node ast.Node) error {
 	return niceyaml.Invalid(errUnmarshal, niceyaml.AtPosition(position.NewFromToken(node.GetToken())))
 }
 
-// optionDecoded has no method of its own. A yaml.CustomUnmarshaler
-// option decodes it.
+// optionDecoded has no method of its own. A function from
+// niceyaml.WithCustomUnmarshaler decodes it.
 type optionDecoded struct{}
+
+// registeredDecoded has no method of its own. A function from
+// yaml.RegisterCustomUnmarshaler decodes it in every decode of the
+// program.
+type registeredDecoded struct{}
 
 // cancelKey is the context key of the function canceling calls.
 type cancelKey struct{}
@@ -362,7 +367,7 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 		},
 		"ordered mapping for an integer": {
 			input: "top: {a: 1}\n",
-			opts:  []niceyaml.DecodeOption{niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())},
+			opts:  []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)},
 			want:  "1:7: $.top: expected integer, got mapping",
 			path:  "$.top",
 		},
@@ -999,11 +1004,26 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					_, err := dd.Decode[struct {
 						Name  string      `yaml:"name"`
 						Value jsonDecoded `yaml:"value"`
-					}](ctx, niceyaml.WithYAMLDecodeOptions(yaml.UseJSONUnmarshaler()))
+					}](ctx, niceyaml.WithJSONUnmarshalers(true))
 
 					return err
 				},
 				want: `3:3: $.value: unmarshaler rejected the value`,
+				path: "$.value",
+			},
+			"type an option decodes": {
+				input: "name: api\nvalue: bad\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Name  string        `yaml:"name"`
+						Value optionDecoded `yaml:"value"`
+					}](ctx, niceyaml.WithCustomUnmarshaler(
+						func(context.Context, *optionDecoded, []byte) error { return errUnmarshal },
+					))
+
+					return err
+				},
+				want: `2:8: $.value: unmarshaler rejected the value`,
 				path: "$.value",
 			},
 			// The decoder reads the value field by field, so the field
@@ -1131,16 +1151,17 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				},
 				want: "unmarshaler rejected the value",
 			},
-			// The decoder shows no type an option decodes.
-			"type an option decodes": {
+			// The decoder shows no type a function registered for the
+			// whole program decodes.
+			"type a registered function decodes": {
 				input: "name: api\nvalue: bad\n",
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					yaml.RegisterCustomUnmarshaler(func(*registeredDecoded, []byte) error { return errUnmarshal })
+
 					_, err := dd.Decode[struct {
-						Name  string        `yaml:"name"`
-						Value optionDecoded `yaml:"value"`
-					}](ctx, niceyaml.WithYAMLDecodeOptions(yaml.CustomUnmarshaler(
-						func(*optionDecoded, []byte) error { return errUnmarshal },
-					)))
+						Name  string            `yaml:"name"`
+						Value registeredDecoded `yaml:"value"`
+					}](ctx)
 
 					return err
 				},
@@ -1163,14 +1184,15 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// target, so no value of the target reported the error.
 			"error of the decoder itself": {
 				input: "timeout: soon\n",
+				source: []niceyaml.SourceOption{
+					niceyaml.WithReferences(niceyaml.NewSourceFromString("limit: [\n")),
+				},
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[tierServer](ctx, niceyaml.WithYAMLDecodeOptions(
-						yaml.ReferenceFiles("testdata/no-such-reference.yaml"),
-					))
+					_, err := dd.Decode[tierServer](ctx)
 
 					return err
 				},
-				want: "open testdata/no-such-reference.yaml: no such file or directory",
+				want: "[1:8] sequence end token ']' not found\n>  1 | limit: [\n              ^\n",
 			},
 			// The walk decodes nothing once the context has ended.
 			"context an unmarshaler ends": {

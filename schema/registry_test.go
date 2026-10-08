@@ -20,7 +20,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/goccy/go-yaml"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/jsonschema"
@@ -1753,7 +1752,7 @@ func TestRegistry_Validator_ErrorBoundToReceiver(t *testing.T) {
 	// The registry gets the document the decode runs on, whatever options
 	// the source and the decode hold, and binds its errors through it.
 	refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n"))
-	ordered := niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())
+	ordered := niceyaml.WithYAMLOrderedMaps(true)
 
 	tcs := map[string]struct {
 		input  string
@@ -1765,7 +1764,7 @@ func TestRegistry_Validator_ErrorBoundToReceiver(t *testing.T) {
 			input:  "kind: Deployment\nreplicas: many\n",
 			source: []niceyaml.SourceOption{refs},
 		},
-		"rejected with yaml options": {
+		"rejected with ordered maps": {
 			input: "kind: Deployment\nreplicas: many\n",
 			opts:  []niceyaml.DecodeOption{ordered},
 		},
@@ -1774,7 +1773,7 @@ func TestRegistry_Validator_ErrorBoundToReceiver(t *testing.T) {
 			source: []niceyaml.SourceOption{refs},
 			err:    schema.ErrNoMatch,
 		},
-		"unmatched with yaml options": {
+		"unmatched with ordered maps": {
 			input: "kind: Service\n",
 			opts:  []niceyaml.DecodeOption{ordered},
 			err:   schema.ErrNoMatch,

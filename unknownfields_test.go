@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/goccy/go-yaml"
@@ -63,6 +64,31 @@ func (s *strictText) UnmarshalYAML(data []byte) error {
 	return yaml.Unmarshal(data, (*plain)(s)) //nolint:wrapcheck // The decode reports the error as it is.
 }
 
+// strictOption has the fields of [strictText] and no method. A function
+// from niceyaml.WithCustomUnmarshaler decodes it and accepts every key.
+type strictOption struct {
+	N strictInner `yaml:"n"`
+	X int         `yaml:"x"`
+}
+
+// strictRegistered has the fields of [strictOption]. A function from
+// yaml.RegisterCustomUnmarshaler decodes it in every decode of the
+// program, as [registerStrict] registers one, and accepts every key.
+type strictRegistered strictOption
+
+// registerStrict has go-yaml decode a [strictRegistered] with a function
+// that accepts every key, in every decode of the program.
+var registerStrict = sync.OnceFunc(func() {
+	yaml.RegisterCustomUnmarshaler(func(*strictRegistered, []byte) error { return nil })
+})
+
+// strictJSON has the fields of [strictOption] and an UnmarshalJSON
+// method that accepts every key, which the decoder calls only under
+// niceyaml.WithJSONUnmarshalers.
+type strictJSON strictOption
+
+func (*strictJSON) UnmarshalJSON([]byte) error { return nil }
+
 // StrictBase is the type of an anchor that [strictAliased] reads through
 // its inline field.
 type StrictBase struct {
@@ -106,6 +132,8 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 	t.Parallel()
 
 	strict := niceyaml.WithDisallowUnknownFields(true)
+
+	registerStrict()
 
 	tcs := map[string]struct {
 		decode     func(context.Context, *niceyaml.Node, ...niceyaml.DecodeOption) error
@@ -223,14 +251,14 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 		},
 		// The decoder allows the prefix, so the keys under it stay out
 		// of the report though no field has their names.
-		"prefix a go-yaml option allows": {
+		"prefix an option allows": {
 			decode: decodeInto[struct {
 				Name string `yaml:"name"`
 			}](),
 			input: "name: x\nx-foo: 1\nzzz: 2\nx-bar: 3\nyyy: 4\n",
 			opts: []niceyaml.DecodeOption{
 				strict,
-				niceyaml.WithYAMLDecodeOptions(yaml.AllowFieldPrefixes("x-")),
+				niceyaml.WithAllowedFieldPrefixes("x-"),
 			},
 			want: stringtest.JoinLF(
 				`3:1: $.zzz~: unknown field "zzz"`,
@@ -251,6 +279,54 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				`7:7: $.s.n[0].www~: unknown field "www"`,
 				`8:7: $.s.n[1].vvv~: unknown field "vvv"`,
 				`9:1: $.qqq~: unknown field "qqq"`,
+			),
+		},
+		// The option names the type its function decodes, so the function
+		// decides, at the struct and below it.
+		"type a custom unmarshaler decodes": {
+			decode: decodeInto[struct {
+				S strictOption `yaml:"s"`
+			}](),
+			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
+			opts: []niceyaml.DecodeOption{
+				strict,
+				niceyaml.WithCustomUnmarshaler(func(context.Context, *strictOption, []byte) error { return nil }),
+			},
+			want: `7:1: $.qqq~: unknown field "qqq"`,
+		},
+		// Nothing shows which type a registered function decodes. The
+		// function still decides the keys of its own struct, and the
+		// search reports a key below it that the function accepts.
+		"type a registered function decodes": {
+			decode: decodeInto[struct {
+				S strictRegistered `yaml:"s"`
+			}](),
+			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
+			opts:  []niceyaml.DecodeOption{strict},
+			want: stringtest.JoinLF(
+				`6:5: $.s.n.www~: unknown field "www"`,
+				`7:1: $.qqq~: unknown field "qqq"`,
+			),
+		},
+		"type with an UnmarshalJSON method under its option": {
+			decode: decodeInto[struct {
+				S strictJSON `yaml:"s"`
+			}](),
+			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
+			opts:  []niceyaml.DecodeOption{strict, niceyaml.WithJSONUnmarshalers(true)},
+			want:  `7:1: $.qqq~: unknown field "qqq"`,
+		},
+		// The decoder reads the fields of the type, and checks them.
+		"type with an UnmarshalJSON method without its option": {
+			decode: decodeInto[struct {
+				S strictJSON `yaml:"s"`
+			}](),
+			input: "s:\n  x: 1\n  zzz: 2\n  n:\n    a: 1\n    www: 2\nqqq: 1\n",
+			opts:  []niceyaml.DecodeOption{strict},
+			want: stringtest.JoinLF(
+				`3:3: $.s.zzz~: unknown field "zzz"`,
+				`6:5: $.s.n.www~: unknown field "www"`,
+				`7:1: $.qqq~: unknown field "qqq"`,
 			),
 		},
 		"decode into a type that decodes itself": {
@@ -355,17 +431,6 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			want: stringtest.JoinLF(
 				`3:5: $.servers[0].zzz~: unknown field "zzz"`,
 				`4:5: $.servers[0].yyy~: unknown field "yyy"`,
-			),
-		},
-		"go-yaml option": {
-			decode: decodeInto[struct {
-				Name string `yaml:"name"`
-			}](),
-			input: "foo: 1\nbar: 2\n",
-			opts:  []niceyaml.DecodeOption{niceyaml.WithYAMLDecodeOptions(yaml.DisallowUnknownField())},
-			want: stringtest.JoinLF(
-				`1:1: $.foo~: unknown field "foo"`,
-				`2:1: $.bar~: unknown field "bar"`,
 			),
 		},
 		// The later of two entries with one key is the one the decoder

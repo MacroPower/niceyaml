@@ -5139,69 +5139,6 @@ func TestWithReferences(t *testing.T) {
 		wg.Wait()
 	})
 
-	t.Run("reference of one decode wins over the references of the source", func(t *testing.T) {
-		t.Parallel()
-
-		file := filepath.Join(t.TempDir(), "override.yaml")
-		require.NoError(t, os.WriteFile(file, []byte("x: &x 3\n"), 0o600))
-
-		doc := yamltest.FirstDocument(t, "a: *x\n",
-			niceyaml.WithReferences(niceyaml.NewSourceFromString("x: &x 1\n")))
-
-		got, err := doc.Decode[map[string]int](t.Context(),
-			niceyaml.WithYAMLDecodeOptions(yaml.ReferenceFiles(file)))
-		require.NoError(t, err)
-		assert.Equal(t, map[string]int{"a": 3}, got)
-
-		// The option reaches that decode alone.
-		got, err = doc.Decode[map[string]int](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]int{"a": 1}, got)
-	})
-
-	t.Run("reference of one decode shares its anchor names with the document", func(t *testing.T) {
-		t.Parallel()
-
-		file := filepath.Join(t.TempDir(), "lists.yaml")
-		require.NoError(t, os.WriteFile(file, []byte("x: &x 1\nlist: &list [*x]\n"), 0o600))
-
-		// WithYAMLDecodeOptions documents this limit. The source sees no
-		// reference file that one decode names, so it keeps the anchors of
-		// that file apart from its own only when it has references.
-		tcs := map[string]struct {
-			opts []niceyaml.SourceOption
-			want map[string][]int
-		}{
-			"source without references": {
-				want: map[string][]int{"w": {9}, "v": {9}},
-			},
-			"source with references": {
-				opts: []niceyaml.SourceOption{
-					niceyaml.WithReferences(niceyaml.NewSourceFromString("other: &other 0\n")),
-				},
-				want: map[string][]int{"w": {9}, "v": {1}},
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				doc := yamltest.FirstDocument(t, "w: [&x 9]\nv: *list\n", tc.opts...)
-
-				untyped, err := doc.Decode[map[string]any](t.Context(),
-					niceyaml.WithYAMLDecodeOptions(yaml.ReferenceFiles(file)))
-				require.NoError(t, err)
-				assert.Equal(t, map[string]any{"w": []any{uint64(9)}, "v": []any{uint64(1)}}, untyped)
-
-				typed, err := doc.Decode[map[string][]int](t.Context(),
-					niceyaml.WithYAMLDecodeOptions(yaml.ReferenceFiles(file)))
-				require.NoError(t, err)
-				assert.Equal(t, tc.want, typed)
-			})
-		}
-	})
-
 	t.Run("a path resolves in the document alone", func(t *testing.T) {
 		t.Parallel()
 
@@ -5366,6 +5303,37 @@ func TestWithReferences(t *testing.T) {
 		_, ok := bound.Nearest()
 		assert.False(t, ok)
 		require.ErrorIs(t, bound.Unresolved(), paths.ErrAlias)
+	})
+
+	t.Run("references read from the files of a directory", func(t *testing.T) {
+		t.Parallel()
+
+		// A program reads each file of a directory into a Source, in the
+		// order it picks, and an anchor of a later file wins a name two
+		// files define.
+		fsys := fstest.MapFS{
+			"refs/a.yaml":  &fstest.MapFile{Data: []byte("base: &base\n  port: 80\n")},
+			"refs/b.yaml":  &fstest.MapFile{Data: []byte("base: &base\n  port: 443\nname: &name api\n")},
+			"refs/note.md": &fstest.MapFile{Data: []byte("no reference")},
+		}
+
+		names, err := fs.Glob(fsys, "refs/*.yaml")
+		require.NoError(t, err)
+
+		refs := make([]*niceyaml.Source, 0, len(names))
+
+		for _, name := range names {
+			ref, err := niceyaml.NewSourceFromFS(fsys, name)
+			require.NoError(t, err)
+
+			refs = append(refs, ref)
+		}
+
+		doc := yamltest.FirstDocument(t, "name: *name\nserver: *base\n", niceyaml.WithReferences(refs...))
+
+		got, err := doc.Decode[config](t.Context(), niceyaml.WithValidator(serverSchema))
+		require.NoError(t, err)
+		assert.Equal(t, config{Name: "api", Server: server{Port: 443}}, got)
 	})
 
 	t.Run("reference that does not parse fails every decode", func(t *testing.T) {

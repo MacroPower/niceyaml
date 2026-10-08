@@ -82,16 +82,17 @@ import (
 // zero value and decodes the document into the other field. A value
 // whose type decodes itself, through an UnmarshalYAML or UnmarshalText
 // method, validates itself and nothing below it, since its fields need
-// not mirror the document. So does a node type of the go-yaml ast
+// not mirror the document. So does a value that a function from
+// [WithCustomUnmarshaler] decodes, and one with an UnmarshalJSON method
+// under [WithJSONUnmarshalers]. So does a node type of the go-yaml ast
 // package, which go-yaml sets to the node it decodes. A struct that
 // embeds a node decodes field by field, so its fields validate. The
-// decode cannot see a type that go-yaml decodes whole through a
-// [yaml.CustomUnmarshaler] option or an UnmarshalJSON method under
-// [yaml.UseJSONUnmarshaler], so the values below such a type walk as if
-// its fields mirrored the document. A decode of one runs its checks with
-// [WithSelfValidation] off. A parent need not call the Validate of its
-// fields, and [Rebase] is for a check run on a value after Decode
-// returns.
+// decode cannot see a type that a function from
+// [yaml.RegisterCustomUnmarshaler] decodes in every decode of the
+// program, so the values below such a type walk as if its fields mirrored
+// the document. A program gives that function to WithCustomUnmarshaler
+// instead. A parent need not call the Validate of its fields, and
+// [Rebase] is for a check run on a value after Decode returns.
 //
 // A Validate holds no [Node], so it has no [DataLocator] to find how the
 // document spells a key. A parent that checks the entries of a map and
@@ -200,11 +201,11 @@ type SelfValidator interface {
 // other, so a validator never runs itself again. That decode reads the
 // node with the settings of its [Source], such as the reference
 // documents of [WithReferences], so a validator reads an alias as every
-// decode of the Source reads it. The go-yaml options that
-// [WithYAMLDecodeOptions] gives one decode reach that decode alone, and
-// a validator it runs decodes without them. The context carries
-// cancellation and deadlines to validators doing cancellable work, such
-// as remote schema reference resolution:
+// decode of the Source reads it. A [DecodeOption] reaches the decode that
+// gets it and no other, so a validator that decodes a type a
+// [WithCustomUnmarshaler] function decodes gives that option to its own
+// decode. The context carries cancellation and deadlines to validators
+// doing cancellable work, such as remote schema reference resolution:
 //
 //	func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 //		data, err := n.Decode[any](ctx)
@@ -2268,14 +2269,19 @@ func contextEnded(err error) bool {
 // [Node.DecodeAt], and [Node.DecodeIfPresent]. [Layers.Decode] and
 // [Layers.DecodeInto] apply them to the one decode of the merged
 // document. [Node.SelfValidate], [Source.SelfValidate], and
-// [Layers.SelfValidate] take them too, and read only the go-yaml options
-// among them.
+// [Layers.SelfValidate] take them too, and read only the options that
+// say how a value decodes, as Node.SelfValidate lists them.
 //
 // Available options:
 //   - [WithValidator]
 //   - [WithSelfValidation]
 //   - [WithDisallowUnknownFields]
-//   - [WithYAMLDecodeOptions]
+//   - [WithAllowedFieldPrefixes]
+//   - [WithCustomUnmarshaler]
+//   - [WithJSONUnmarshalers]
+//   - [WithYAMLOrderedMaps]
+//   - [WithYAMLComments]
+//   - [WithYAMLStructValidator]
 //   - [DecodeOptions]
 //
 // A DecodeOption sets how one decode runs. A setting that describes the
@@ -2283,15 +2289,27 @@ func contextEnded(err error) bool {
 // and every validation. [WithReferences] names the reference documents
 // whose anchors an alias reads that way, and [WithAliasLimit] says
 // whether the alias limit applies.
+//
+// An option reaches the call that gets it and no other. A [Validator]
+// that decodes the Node it gets makes a call of its own, with the
+// options the validator gives that call.
 type DecodeOption func(*decodeConfig)
 
 // decodeConfig holds the settings a [DecodeOption] configures. Its zero
 // value holds the defaults.
 type decodeConfig struct {
-	validators            []Validator
-	yamlOpts              []yaml.DecodeOption
+	// Receives the comments of the decode, or nil for none.
+	comments yaml.CommentMap
+	// Checks each struct the decoder fills, or nil for none.
+	structValidator      yaml.StructValidator
+	validators           []Validator
+	allowedFieldPrefixes []string
+	// The types the options hand to an unmarshaler that no method of the
+	// type declares.
+	unmarshalers          optionUnmarshalers
 	skipSelfValidation    bool
 	disallowUnknownFields bool
+	orderedMaps           bool
 }
 
 // newDecodeConfig returns the settings of a decode: the defaults, with
@@ -2307,14 +2325,141 @@ func newDecodeConfig(opts []DecodeOption) decodeConfig {
 	return cfg
 }
 
-// decodeOptions returns the go-yaml options for one decode: the escape
-// hatch options as given, then the ones the named settings stand for.
-func (c decodeConfig) decodeOptions() []yaml.DecodeOption {
-	if !c.disallowUnknownFields {
-		return c.yamlOpts
+// yamlOptions returns the go-yaml options the settings stand for, which
+// every go-yaml decoder of the call applies. They leave out the comment
+// map, which the decoder that fills the target gets alone, as
+// [Node.decodeNode] hands it over.
+func (c decodeConfig) yamlOptions() []yaml.DecodeOption {
+	opts := c.unmarshalers.yamlOptions()
+
+	if c.disallowUnknownFields {
+		opts = append(opts, yaml.DisallowUnknownField())
 	}
 
-	return append(slices.Clone(c.yamlOpts), yaml.DisallowUnknownField())
+	if len(c.allowedFieldPrefixes) > 0 {
+		opts = append(opts, yaml.AllowFieldPrefixes(c.allowedFieldPrefixes...))
+	}
+
+	if c.orderedMaps {
+		opts = append(opts, yaml.UseOrderedMap())
+	}
+
+	if c.structValidator != nil {
+		opts = append(opts, yaml.Validator(c.structValidator))
+	}
+
+	return opts
+}
+
+// optionUnmarshalers holds the types that the options of a decode give
+// an unmarshaler, where no method of the type declares one the go-yaml
+// decoder calls on its own. [WithCustomUnmarshaler] names a type and the
+// function that decodes it, and [WithJSONUnmarshalers] turns on the
+// UnmarshalJSON method of every type that has one.
+//
+// The decoder decodes a value of such a type whole, through that
+// function or method, in place of its fields, elements, or entries. The
+// walks that read a type beside a document thus treat it as a type that
+// decodes itself, as [decodesItself] reports one. The zero value holds
+// no type.
+type optionUnmarshalers struct {
+	// The function of each [WithCustomUnmarshaler], with one entry for
+	// each type.
+	custom []customUnmarshaler
+	// Whether [WithJSONUnmarshalers] is on.
+	json bool
+}
+
+// customUnmarshaler is the function a [WithCustomUnmarshaler] gives a
+// type, as the go-yaml option that registers it.
+type customUnmarshaler struct {
+	typ reflect.Type
+	opt yaml.DecodeOption
+}
+
+// with returns u with the function that opt registers for the type t,
+// in place of the one an earlier option gave t.
+func (u optionUnmarshalers) with(t reflect.Type, opt yaml.DecodeOption) optionUnmarshalers {
+	u.custom = slices.DeleteFunc(slices.Clone(u.custom), func(c customUnmarshaler) bool { return c.typ == t })
+	u.custom = append(u.custom, customUnmarshaler{typ: t, opt: opt})
+
+	return u
+}
+
+// yamlOptions returns the go-yaml options that register the unmarshalers
+// with a decoder.
+func (u optionUnmarshalers) yamlOptions() []yaml.DecodeOption {
+	opts := make([]yaml.DecodeOption, 0, len(u.custom)+1)
+
+	for _, c := range u.custom {
+		opts = append(opts, c.opt)
+	}
+
+	if u.json {
+		opts = append(opts, yaml.UseJSONUnmarshaler())
+	}
+
+	return opts
+}
+
+// decodesCustom reports whether a [WithCustomUnmarshaler] function
+// decodes a value of type t. The decoder calls that function ahead of
+// any unmarshaler method of t.
+func (u optionUnmarshalers) decodesCustom(t reflect.Type) bool {
+	return slices.ContainsFunc(u.custom, func(c customUnmarshaler) bool { return c.typ == t })
+}
+
+// decodesJSON reports whether the decoder decodes a value of type t
+// through its UnmarshalJSON method. It does under [WithJSONUnmarshalers],
+// for a type with that method that has no function from
+// [WithCustomUnmarshaler] and no method [decodesItself] reports, since
+// the decoder looks for both of those first.
+func (u optionUnmarshalers) decodesJSON(t reflect.Type) bool {
+	return u.json && !u.decodesCustom(t) && !decodesItself(t) &&
+		reflect.PointerTo(t).Implements(jsonUnmarshalerType)
+}
+
+// decodes reports whether the options give the type t an unmarshaler, so
+// the decoder decodes a value of t whole.
+func (u optionUnmarshalers) decodes(t reflect.Type) bool {
+	return u.decodesCustom(t) || u.decodesJSON(t)
+}
+
+// decodesWhole reports whether the decoder decodes a value of type t
+// whole, through a method of t, as [decodesItself] reports, or through
+// an unmarshaler the options give t. The field result is the index of
+// the embedded field of t whose method decodes t, which holds the
+// document in place of t, or -1 when t has no such field. A type that
+// declares its method has none, and neither does one a
+// [WithCustomUnmarshaler] function decodes.
+func (u optionUnmarshalers) decodesWhole(t reflect.Type) (int, bool) {
+	switch {
+	case u.decodesCustom(t):
+		return -1, true
+
+	case decodesItself(t):
+		field, _ := decoderField(t)
+
+		return field, true
+
+	case u.decodesJSON(t):
+		return jsonDecoderField(t), true
+
+	default:
+		return -1, false
+	}
+}
+
+// readsText reports whether a decode into t hands some value the text of
+// its node, through a method of the value, as [aliasing.DecodesText]
+// reports, or through an unmarshaler the options give its type.
+func (u optionUnmarshalers) readsText(t reflect.Type) bool {
+	text := aliasing.Unmarshalers{JSON: u.json}
+	if len(u.custom) > 0 {
+		text.Custom = u.decodesCustom
+	}
+
+	return aliasing.DecodesTextWith(t, text)
 }
 
 // WithValidator is a [DecodeOption] that validates the document with dv
@@ -2382,7 +2527,7 @@ func WithSelfValidation(enabled bool) DecodeOption {
 // struct of the target decodes from, and asks the decoder about each key
 // no field of the struct names, with the options of the decode. The
 // report therefore holds only keys the decoder rejects, and it is the
-// same on every run. A key under a prefix that [yaml.AllowFieldPrefixes]
+// same on every run. A key under a prefix that [WithAllowedFieldPrefixes]
 // allows stays out of it.
 //
 // The report follows the decoder where the decoder checks nothing:
@@ -2399,7 +2544,9 @@ func WithSelfValidation(enabled bool) DecodeOption {
 //   - A struct that decodes itself decides what the decoder checks. An
 //     UnmarshalYAML that decodes into a second type with the same fields
 //     has the decoder check them, and one that parses the text itself
-//     does not.
+//     does not. A struct that a [WithCustomUnmarshaler] function decodes,
+//     or an UnmarshalJSON method under [WithJSONUnmarshalers], decides
+//     the same way.
 //
 // Three limits remain. The decode adds no unknown field to a rejection
 // that binds at no position in the source, as [Node.DecodeInto]
@@ -2407,50 +2554,187 @@ func WithSelfValidation(enabled bool) DecodeOption {
 // values below a struct that decodes itself as if its fields mirrored
 // the document, so it misses an unknown field below one whose fields do
 // not, unless the decoder names that field. And nothing shows which
-// types [yaml.CustomUnmarshaler] or [yaml.RegisterCustomUnmarshaler]
-// decode, so the search reads the values below such a type as the fields
-// of its struct, and can report a key there that the unmarshaler
-// accepts.
+// types [yaml.RegisterCustomUnmarshaler] gave a function for the whole
+// program, so the search reads the values below such a type as the
+// fields of its struct, and can report a key there that the function
+// accepts. A function from WithCustomUnmarshaler has no such limit.
 func WithDisallowUnknownFields(disallow bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.disallowUnknownFields = disallow
 	}
 }
 
-// WithYAMLDecodeOptions is a [DecodeOption] that passes [yaml.DecodeOption]
-// values to the go-yaml decoder, after the ones the [Source] sends for
-// every decode. Each WithYAMLDecodeOptions appends to the values given
-// before it, so the go-yaml decoder receives them in the order given. It
-// is the escape hatch for decoder settings that have no option of their
-// own.
+// WithAllowedFieldPrefixes is a [DecodeOption] that lets a mapping hold
+// a key that starts with one of prefixes where
+// [WithDisallowUnknownFields] rejects a key with no field, such as the
+// `x-` keys a format reserves for extensions:
 //
-// The options reach the call that gets them and no other. A [Validator]
-// that decodes the Node it gets decodes with the settings of the Source
-// alone, so it reads the document as every other decode of the Source
-// does. Reference documents that every decode and every validation
-// should read therefore go to the Source, through [WithReferences]. A
-// [yaml.ReferenceFiles] or [yaml.ReferenceDirs] option passed here serves
-// the one call, and a validator it runs finds no anchor of those files.
-// The Source cannot see those files either, so it keeps their anchors
-// apart from the anchors of its documents only when it has references of
-// its own. Without them, an alias inside such a file reads an anchor of
-// the document that shares its name in a decode into a typed value, and
-// the anchor of the file in a decode into an any value.
+//	spec, err := doc.Decode[Spec](ctx,
+//		niceyaml.WithDisallowUnknownFields(true),
+//		niceyaml.WithAllowedFieldPrefixes("x-"),
+//	)
 //
-// Within that call, the decode, the key decoding of self-validation, the
-// second decode that finds the value behind an error, and the search for
-// the other problems of a decode that failed, as [Node.DecodeInto]
-// describes them, each apply the options to a new go-yaml decoder. An
-// option that holds state therefore serves only the first of
-// them, and a [DecodeOption] that carries one is not safe to share
-// between goroutines.
-// [yaml.ReferenceReaders] is such an option. The first decode reads its
-// readers to the end, and later decodes find no anchors there.
-// [yaml.ReferenceFiles] and [yaml.ReferenceDirs] read their files again
-// for each decode.
-func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
+// Each WithAllowedFieldPrefixes adds to the prefixes given before it. An
+// empty prefix allows every key. The option changes nothing in a decode
+// that accepts unknown fields.
+func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 	return func(c *decodeConfig) {
-		c.yamlOpts = append(c.yamlOpts, opts...)
+		c.allowedFieldPrefixes = append(c.allowedFieldPrefixes, prefixes...)
+	}
+}
+
+// WithCustomUnmarshaler is a [DecodeOption] that decodes every value of
+// type T with fn, for a type the program cannot give an UnmarshalYAML
+// method, such as one of another package:
+//
+//	cidr := niceyaml.WithCustomUnmarshaler(func(ctx context.Context, n *net.IPNet, text []byte) error {
+//		s, err := niceyaml.NewSourceFromBytes(text).Decode[string](ctx)
+//		if err != nil {
+//			return err
+//		}
+//
+//		_, parsed, err := net.ParseCIDR(s)
+//		if err != nil {
+//			return err
+//		}
+//
+//		*n = *parsed
+//
+//		return nil
+//	})
+//
+//	cfg, err := doc.Decode[Config](ctx, cidr)
+//
+// The decoder calls fn in place of decoding the fields, elements, or
+// entries of T, and ahead of any unmarshaler method T has. It hands fn
+// the context of the decode and the node as YAML text, with each alias
+// in the node written out in full. The text is a document of its own,
+// so a scalar keeps its quotes and the comment on its line. The decoder
+// reads a pointer as the value it points to, so a field of type *T
+// decodes through fn too, and a null leaves it nil without a call.
+//
+// The decode reads T as a type that decodes itself, as it reads one with
+// an UnmarshalYAML method. A value of T thus validates itself and nothing
+// below it, as [SelfValidator] describes. The error fn returns binds at
+// the value, and the search for unknown fields and for the other
+// problems of a failed decode leaves the value to fn, as
+// [Node.DecodeInto] describes.
+//
+// Each WithCustomUnmarshaler names one type, and a later one for the
+// same T replaces the earlier. A nil fn names no type. The function
+// serves the decode that gets the option, and a [Validator] that decodes
+// T gives the option to its own decode. A [DecodeOptions] value holds
+// the option for every decode of a program.
+//
+// A function that [yaml.RegisterCustomUnmarshaler] registers decodes T
+// the same way in every decode of the program, with no option. Nothing
+// shows which types have one, so a decode reads such a type by its
+// fields, with the limits Node.DecodeInto lists. Give the function to
+// WithCustomUnmarshaler instead.
+func WithCustomUnmarshaler[T any](fn func(ctx context.Context, v *T, text []byte) error) DecodeOption {
+	return func(c *decodeConfig) {
+		if fn != nil {
+			c.unmarshalers = c.unmarshalers.with(reflect.TypeFor[T](), yaml.CustomUnmarshalerContext(fn))
+		}
+	}
+}
+
+// WithJSONUnmarshalers is a [DecodeOption] that sets whether a type with
+// an UnmarshalJSON method decodes through that method. The default is
+// false, and the decode then reads such a type by its fields, elements,
+// or entries, as it reads a type with no method.
+//
+// When enabled, the decoder converts the node to JSON, with each alias
+// in the node written out in full, and hands the JSON to the method. It
+// calls an UnmarshalYAML method of the type in place of UnmarshalJSON,
+// and an UnmarshalText method for a node that reads as a string.
+//
+// The decode then reads such a type as one that decodes itself. A value
+// of the type validates itself and nothing below it, as [SelfValidator]
+// describes, and the error its method returns binds at the value, as
+// [Node.DecodeInto] describes. A struct that gets the method from an
+// embedded field decodes the document into that field, so the field
+// validates at the path of the struct.
+func WithJSONUnmarshalers(enabled bool) DecodeOption {
+	return func(c *decodeConfig) {
+		c.unmarshalers.json = enabled
+	}
+}
+
+// WithYAMLOrderedMaps is a [DecodeOption] that sets whether a mapping
+// that decodes into an any value becomes a [yaml.MapSlice], which holds
+// the entries in the order of the document. The default is false, and
+// such a mapping then becomes a map[string]any. The option carries the
+// YAML prefix because the decoded value holds a go-yaml type.
+//
+//	data, err := doc.Decode[any](ctx, niceyaml.WithYAMLOrderedMaps(true))
+//
+// A target of a typed map or a struct decodes as it does without the
+// option. A [go.jacobcolvin.com/niceyaml/schema.Schema] reads a MapSlice
+// as the mapping it holds, so
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] checks the
+// decoded value as it is.
+func WithYAMLOrderedMaps(enabled bool) DecodeOption {
+	return func(c *decodeConfig) {
+		c.orderedMaps = enabled
+	}
+}
+
+// WithYAMLComments is a [DecodeOption] that collects the comments of the
+// decoded node in cm, each under the YAML path of the value it belongs
+// to, as go-yaml's [yaml.CommentToMap] option does.
+// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] writes such a
+// map back, so a program that decodes a document, changes the value, and
+// encodes it again keeps the comments:
+//
+//	comments := yaml.CommentMap{}
+//
+//	cfg, err := doc.Decode[Config](ctx, niceyaml.WithYAMLComments(comments))
+//
+// The decode empties cm before it reads the node, so cm holds the
+// comments of one decode. Each path reads from the root of the document,
+// whatever node the decode reads. A decode that fails can leave comments
+// in cm. The last WithYAMLComments option replaces the earlier ones, and
+// a nil cm collects nothing.
+//
+// A decode writes to cm with no lock, so a [DecodeOptions] value that
+// holds the option serves one decode at a time.
+func WithYAMLComments(cm yaml.CommentMap) DecodeOption {
+	return func(c *decodeConfig) {
+		c.comments = cm
+	}
+}
+
+// WithYAMLStructValidator is a [DecodeOption] that has sv check every
+// struct the decode fills, once the decoder has set its fields, as
+// go-yaml's [yaml.Validator] option does. A [yaml.StructValidator] has
+// one method, Struct, which a validator of
+// github.com/go-playground/validator/v10 implements, so a program that
+// tags its fields with the rules of that package checks them inside the
+// decode:
+//
+//	check := niceyaml.WithYAMLStructValidator(validator.New())
+//
+//	cfg, err := doc.Decode[Config](ctx, check)
+//
+// An error from sv fails the decode and matches [ErrDecode]. When the
+// error lists a [yaml.FieldError] for each field, as the errors of that
+// package do, it binds at the value of the first field it lists. Where
+// the document lacks that field, it binds at the struct, or with no
+// location when the struct is the node the decode reads. Any other error
+// from sv binds with no location.
+//
+// A type that checks its own invariants implements [SelfValidator]
+// instead, and each of its errors then binds at the path the type names.
+// The decoder checks a struct with sv each time it fills one, so the
+// search for the other problems of a failed decode, which
+// [Node.DecodeInto] describes, can call sv again on a struct that holds
+// one of its fields. What sv returns there adds no problem. The last
+// WithYAMLStructValidator option replaces the earlier ones, and a nil sv
+// checks nothing.
+func WithYAMLStructValidator(sv yaml.StructValidator) DecodeOption {
+	return func(c *decodeConfig) {
+		c.structValidator = sv
 	}
 }
 
@@ -2483,13 +2767,13 @@ func WithYAMLDecodeOptions(opts ...yaml.DecodeOption) DecodeOption {
 //
 //	kind, err := doc.DecodeAt[string](ctx, kindPath, settings, niceyaml.WithSelfValidation(false))
 //
-// [WithValidator] and [WithYAMLDecodeOptions] add to what the options
-// before them gave. [WithSelfValidation] and [WithDisallowUnknownFields]
-// replace it, so the last of them in a call sets the value. A call that
-// gets the same DecodeOptions twice therefore runs each of its validators
-// twice. A program that also validates a document without decoding it
-// keeps its [Validator] in a variable, and gives it to both WithValidator
-// and [Node.Validate].
+// [WithValidator] and [WithAllowedFieldPrefixes] add to what the options
+// before them gave, and [WithCustomUnmarshaler] adds a type. Every other
+// option replaces what an earlier one of its kind set, so the last of
+// them in a call sets the value. A call that gets the same DecodeOptions
+// twice therefore runs each of its validators twice. A program that also
+// validates a document without decoding it keeps its [Validator] in a
+// variable, and gives it to both WithValidator and [Node.Validate].
 //
 // DecodeOptions copies opts, so the result keeps its options when the
 // caller changes the slice it passed. A nil DecodeOption among opts
@@ -2621,33 +2905,38 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 //   - It reads nothing at or below a value that decodes itself, other
 //     than a [time.Duration] or a [time.Time], since a second call of an
 //     unmarshaler can answer otherwise than the first. An enum with an
-//     UnmarshalText method thus reports one bad value for each decode.
+//     UnmarshalText method thus reports one bad value for each decode. A
+//     value that a [WithCustomUnmarshaler] function decodes is such a
+//     value, and so is one with an UnmarshalJSON method under
+//     [WithJSONUnmarshalers].
 //   - It reads nothing below an interface, and nothing in a mapping the
 //     decoder decodes no field from, as WithDisallowUnknownFields lists
 //     them.
 //   - It reads nothing behind an alias to an anchor of a reference
-//     document, from [WithReferences] or the yaml.Reference options,
-//     since the document holds no line for that value.
+//     document from [WithReferences], since the document holds no line
+//     for that value.
 //   - It adds nothing to a rejection that binds at no position in the
 //     source, as the next paragraphs describe one, and nothing once ctx
 //     has ended.
 //   - No value validates itself until the decoder rejects nothing, so
 //     the report holds no error of a [SelfValidator].
 //
-// One limit remains. Nothing shows which types [yaml.CustomUnmarshaler]
-// or [yaml.RegisterCustomUnmarshaler] decode, so the search reads the
-// values below such a type as the fields or elements of the type. The
-// decoder confirms a problem with the struct that reads the value as a
-// field, so such a function judges the fields of its own struct. The
-// search can still report a value further below that the function
-// accepts.
+// One limit remains. Nothing shows which types
+// [yaml.RegisterCustomUnmarshaler] gave a function for the whole program,
+// so the search reads the values below such a type as the fields or
+// elements of the type. The decoder confirms a problem with the struct
+// that reads the value as a field, so such a function judges the fields
+// of its own struct. The search can still report a value further below
+// that the function accepts. A function from [WithCustomUnmarshaler] has
+// no such limit.
 //
 // The search runs only after a decode fails, and it decodes one value at
 // a time, so it calls no unmarshaler of a value it reads. To confirm a
 // problem, it decodes the struct that reads the value from that one
-// entry. That decode can call a custom unmarshaler function or a
-// [yaml.StructValidator] again, and the unmarshaler of a field of the
-// same name in an inline struct. What they return adds no problem.
+// entry. That decode can call a registered function or the struct
+// validator of [WithYAMLStructValidator] again, and the unmarshaler of a
+// field of the same name in an inline struct. What they return adds no
+// problem.
 //
 // An error the decoder reports without a token of the source comes back
 // with no location and keeps the text go-yaml gave it. The decoder
@@ -2666,24 +2955,23 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // nested deeper than the decoder allows. A `<<` merge key whose alias
 // names no anchor before it, or an anchor that holds the merge key,
 // binds at the alias. A rejection of a value that an alias reads from a
-// reference document, from [WithReferences] or the yaml.Reference
-// options, binds at that alias when the node holds one alias to a
-// reference document, directly or inside an anchor its aliases reach.
-// When the node holds several, the error carries no location, even if
-// the target type reads only one of them. The decoder reports two other
-// errors as it reports that rejection, so they bind the same way in such
-// a node. One is an unwrapped go-yaml error that an UnmarshalYAML
-// returns from a parse of its own. The other is a go-yaml error the
-// decoder reports without a token, such as the one for a key of an
-// inline map[int]int.
+// reference document from [WithReferences] binds at that alias when the
+// node holds one alias to a reference document, directly or inside an
+// anchor its aliases reach. When the node holds several, the error
+// carries no location, even if the target type reads only one of them.
+// The decoder reports two other errors as it reports that rejection, so
+// they bind the same way in such a node. One is an unwrapped go-yaml
+// error that an UnmarshalYAML returns from a parse of its own. The other
+// is a go-yaml error the decoder reports without a token, such as the one
+// for a key of an inline map[int]int.
 //
 // The decoder returns the error of a value that decodes itself with no
-// token of the source. Such a value has an UnmarshalYAML or
-// UnmarshalText method, or an UnmarshalJSON method under
-// [yaml.UseJSONUnmarshaler], or is a [time.Duration], which the decoder
-// parses with [time.ParseDuration]. DecodeInto finds the value and
-// binds the error at its path, so [SourceError.Path] reports the `$`
-// path of the value and the message names the value:
+// token of the source. Such a value has an UnmarshalYAML or UnmarshalText
+// method, an UnmarshalJSON method under [WithJSONUnmarshalers], or a
+// function from [WithCustomUnmarshaler], or is a [time.Duration], which
+// the decoder parses with [time.ParseDuration]. DecodeInto finds the
+// value and binds the error at its path, so [SourceError.Path] reports
+// the `$` path of the value and the message names the value:
 //
 //	config.yaml:7:14: $.servers[1].timeout: time: invalid duration "soon"
 //
@@ -2706,12 +2994,12 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // and the error then binds there. An error that no value reproduces
 // comes back as it is, with no location. That holds for an unmarshaler
 // that reads the value v held before the decode, for a value an alias
-// reads from a reference document, and for a type that only
-// [yaml.CustomUnmarshaler] or [yaml.RegisterCustomUnmarshaler] decodes,
-// since the decoder never shows which types those name. It also holds
-// for a mapping or sequence that is the node itself, where the error
-// would point at the whole of what the caller decoded. A scalar that is
-// the node itself takes the error.
+// reads from a reference document, and for a type that only a function
+// from [yaml.RegisterCustomUnmarshaler] decodes, since the decoder never
+// shows which types have one. It also holds for a mapping or sequence
+// that is the node itself, where the error would point at the whole of
+// what the caller decoded. A scalar that is the node itself takes the
+// error.
 //
 // A few hundred bytes of nested aliases can take the go-yaml decoder
 // minutes to decode, and the decoder never checks ctx. When the node
@@ -2732,33 +3020,36 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // it is, and the decoder calls it ahead of an UnmarshalText method. A
 // type with such a method adds no such count, and neither do the types
 // of its fields, which the decoder never reaches. The decoder reads a
-// [time.Time] from its value, so it adds no such count either. The count
-// sees only the types in v, so it misses text that a go-yaml option
-// hands to other code, such as [yaml.CustomUnmarshaler] or
-// [yaml.UseJSONUnmarshaler]. [WithAliasLimit] on the [Source] turns both
-// counts off for every decode of its documents.
+// [time.Time] from its value, so it adds no such count either. A function
+// from [WithCustomUnmarshaler] takes its node as text too, and so does an
+// UnmarshalJSON method under [WithJSONUnmarshalers], so DecodeInto counts
+// the document as text for a type either one decodes. The count sees only
+// the types in v and the options of the decode, so it misses text that
+// go-yaml hands a function from [yaml.RegisterCustomUnmarshaler].
+// [WithAliasLimit] on the [Source] turns both counts off for every decode
+// of its documents.
 //
 // An alias inside the node resolves against the anchors of the whole
 // document, to the anchor of its name defined last before the alias,
 // inside the node or outside it, as a path through the alias resolves.
 // That holds whatever order the decoder reads the anchors in, including
 // the order of the fields of a struct. An alias with no anchor of its
-// name before it reads an anchor of a reference document, from
-// [WithReferences] or the yaml.Reference options, even when the document
-// defines the name after the alias. A failure in an anchor outside the
-// node that the node reads, directly or through another anchor, fails
-// the decode, as it fails a decode of the whole document. An alias inside
-// the anchor it names, such as `*x` in `b: &x {s: *x}`, reads as null
-// into every target, in a decode of the node and of the whole document
-// alike. The text the decoder hands an UnmarshalText or UnmarshalYAML
-// method spells it as null too. A `<<` key that merges the anchor it sits
-// in fails the decode instead. The decoder reads a copy of the document
-// that gives a name of its own to an anchor whose name another anchor
-// shares, and to an anchor that follows an alias of its name with no
-// anchor before it. The copy of a document whose [Source] has reference
-// documents from [WithReferences] gives every anchor a name of its own,
-// so an alias inside a reference document never reads an anchor of the
-// document. Each alias to a renamed anchor carries the new name too.
+// name before it reads an anchor of a reference document from
+// [WithReferences], even when the document defines the name after the
+// alias. A failure in an anchor outside the node that the node reads,
+// directly or through another anchor, fails the decode, as it fails a
+// decode of the whole document. An alias inside the anchor it names, such
+// as `*x` in `b: &x {s: *x}`, reads as null into every target, in a
+// decode of the node and of the whole document alike. The text the
+// decoder hands an UnmarshalText or UnmarshalYAML method spells it as
+// null too. A `<<` key that merges the anchor it sits in fails the decode
+// instead. The decoder reads a copy of the document that gives a name of
+// its own to an anchor whose name another anchor shares, and to an anchor
+// that follows an alias of its name with no anchor before it. The copy of
+// a document whose [Source] has reference documents from [WithReferences]
+// gives every anchor a name of its own, so an alias inside a reference
+// document never reads an anchor of the document. Each alias to a renamed
+// anchor carries the new name too.
 //
 // An [ast.Node] the decode fills, or one an UnmarshalYAML method takes,
 // spells a renamed alias with the new name of its anchor. It spells a
@@ -2788,7 +3079,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 	}
 
 	err = aliasing.CheckDecode(n)
-	if err == nil && aliasing.DecodesText(reflect.TypeOf(v).Elem()) {
+	if err == nil && cfg.unmarshalers.readsText(reflect.TypeOf(v).Elem()) {
 		err = aliasing.CheckDecodeText(n)
 	}
 
@@ -2796,9 +3087,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 		return n.Invalid(err, atToken(contentStart(n.AST())))
 	}
 
-	yamlOpts := n.yamlOptions(cfg.decodeOptions())
-
-	err = n.decodeNode(ctx, n.AST(), v, yamlOpts)
+	err = n.decodeNode(ctx, n.AST(), v, cfg)
 	if err != nil {
 		return err
 	}
@@ -2873,13 +3162,14 @@ func decodeTarget(v any, node ast.Node) any {
 	return rv.Interface()
 }
 
-// yamlOptions returns the go-yaml options for a decode: the source's
-// decode options, then yamlOpts.
-func (n *Node) yamlOptions(yamlOpts []yaml.DecodeOption) []yaml.DecodeOption {
-	return slices.Concat(n.source.decodeOpts, yamlOpts)
+// yamlOptions returns the go-yaml options for a decoder of a call with
+// cfg: the source's decode options, then the ones the settings of cfg
+// stand for.
+func (n *Node) yamlOptions(cfg decodeConfig) []yaml.DecodeOption {
+	return slices.Concat(n.source.decodeOpts, cfg.yamlOptions())
 }
 
-// decodeNode decodes node to v with yamlOpts, and binds the error to the
+// decodeNode decodes node to v with cfg, and binds the error to the
 // source: a rejection of the decoder as an [*Error] at the path of the
 // offending value, as [Node.bindDecodeError] describes, and any other,
 // such as a canceled context, as it is. A node without content,
@@ -2900,11 +3190,16 @@ func (n *Node) yamlOptions(yamlOpts []yaml.DecodeOption) []yaml.DecodeOption {
 // that value. A rejection comes back with the other problems of the
 // document that [Node.bindDecodeProblems] finds, bound as one error.
 //
+// The decoder that fills v is the one decoder of the call that writes to
+// the comment map of [WithYAMLComments]. The go-yaml decoder empties
+// that map when it starts, so a second decoder with the option would
+// drop what the first collected.
+//
 // The go-yaml decoder never checks the context, so a context that has
 // ended before the decode starts, or while it registers the anchors node
 // needs, stops the decode, and its error comes back as it is, whatever
 // node holds.
-func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []yaml.DecodeOption) error {
+func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, cfg decodeConfig) error {
 	err := ctx.Err()
 	if err != nil {
 		return n.Bind(err)
@@ -2912,6 +3207,11 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 
 	if !astnode.HasContent(node) || isTaggedNull(node) || keepsNullTarget(node, v) {
 		return nil
+	}
+
+	yamlOpts := n.yamlOptions(cfg)
+	if cfg.comments != nil {
+		yamlOpts = append(yamlOpts, yaml.CommentToMap(cfg.comments))
 	}
 
 	dec := yaml.NewDecoder(bytes.NewReader(nil), yamlOpts...)
@@ -2942,11 +3242,11 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, yamlOpts []
 
 	// The decoder returns the error of a value that decodes itself with
 	// no token, so the Node finds the value that reported it.
-	err = n.locateDecodeError(ctx, n.rejection(err, view), node, v, yamlOpts)
+	err = n.locateDecodeError(ctx, n.rejection(err, view), node, v, cfg)
 
 	// The decoder stops at its first rejection, so the Node finds the
 	// other problems of the document and reports them together.
-	return n.bindDecodeProblems(ctx, err, node, v, yamlOpts)
+	return n.bindDecodeProblems(ctx, err, node, v, cfg)
 }
 
 // keepsNullTarget reports whether node, or the value an anchor on node
@@ -2983,9 +3283,8 @@ func keepsNullTarget(node ast.Node, v any) bool {
 // on a path to its anchor, so only the body of a document reaches a
 // decode as an alias. Such an alias names an anchor of a reference
 // document, which only dec can read. The check reads view, the
-// [decodeView] of node, with dec itself, so an option that reads its
-// references once, such as [yaml.ReferenceReaders], still has them for
-// the decode that follows.
+// [decodeView] of node, with dec itself, which holds the anchors of the
+// reference documents for the decode that follows.
 func isNullAlias(ctx context.Context, dec *yaml.Decoder, node, view ast.Node) bool {
 	if anchor, ok := node.(*ast.AnchorNode); ok {
 		node = anchor.Value

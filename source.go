@@ -350,9 +350,35 @@ func WithAliasLimit(enabled bool) SourceOption {
 // key of a mapping that merges a reference document under a `<<` key
 // still binds with no position, as SourceError.Nearest describes.
 //
-// A reference that [WithYAMLDecodeOptions] passes to one decode, such as
-// [yaml.ReferenceFiles], reaches that decode alone, and an anchor it
-// defines wins over one of the same name in refs.
+// A reference document comes from wherever a Source does.
+// [NewSourceFromFile] reads a file, [NewSourceFromFS] reads a file of a
+// file system, and [NewSourceFromReader] reads a stream. A program that
+// keeps its reference documents in a directory reads each file into a
+// Source of its own. It picks the files and their order, which decides
+// the anchor that wins a name two of them define:
+//
+//	names, err := fs.Glob(fsys, "refs/*.yaml")
+//	if err != nil {
+//		return err
+//	}
+//
+//	refs := make([]*niceyaml.Source, 0, len(names))
+//
+//	for _, name := range names {
+//		ref, err := niceyaml.NewSourceFromFS(fsys, name)
+//		if err != nil {
+//			return err
+//		}
+//
+//		refs = append(refs, ref)
+//	}
+//
+//	source, err := niceyaml.NewSourceFromFile("app.yaml", niceyaml.WithReferences(refs...))
+//
+// [fs.WalkDir] finds the files of a whole tree the same way. A decode
+// takes no reference documents of its own, so these calls stand in for
+// the ReferenceFiles, ReferenceDirs, RecursiveDir, and ReferenceReaders
+// options of go-yaml.
 func WithReferences(refs ...*Source) SourceOption {
 	return func(c *sourceConfig) {
 		for _, ref := range refs {

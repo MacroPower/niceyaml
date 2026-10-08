@@ -59,12 +59,16 @@ import (
 // the document does, so an error under a key such as 1.50 keeps that
 // text, and it decodes the keys of the mappings in the node to learn that
 // spelling. It decodes them with the settings of the [Source], such as
-// the reference documents of [WithReferences], and with the go-yaml
-// options that [WithYAMLDecodeOptions] adds in opts. It reads those
-// options and no other. A key type that only
-// a [yaml.CustomUnmarshaler] option decodes matches no key of the
-// document unless opts carry that option, and an error under such an
-// entry then binds at the key of the map.
+// the reference documents of [WithReferences], and with the options in
+// opts that say how a value decodes: [WithCustomUnmarshaler],
+// [WithJSONUnmarshalers], [WithDisallowUnknownFields],
+// [WithAllowedFieldPrefixes], [WithYAMLOrderedMaps], and
+// [WithYAMLStructValidator]. It reads those options and no other, so it
+// fills no comment map. A caller passes the options of the decode, and
+// the walk then stops at each type that decodes itself where the decode
+// did. A key type that a WithCustomUnmarshaler function decodes matches
+// no key of the document unless opts carry that option, and an error
+// under such an entry then binds at the key of the map.
 //
 // The walk follows v rather than the document, so v need not mirror the
 // node, and each error binds where its path resolves in the document. An
@@ -79,8 +83,9 @@ import (
 // path. The keys of a map that the document lacks take the text of their
 // Go values. A field that go-yaml never decodes does not validate, as in
 // a decode. That holds for a field tagged `yaml:"-"`, an unexported
-// field, and any value below a type that decodes itself through an
-// UnmarshalYAML or UnmarshalText method.
+// field, and any value below a type that decodes itself, through an
+// UnmarshalYAML or UnmarshalText method or through an unmarshaler that
+// WithCustomUnmarshaler or WithJSONUnmarshalers gives it in opts.
 //
 // Any v works but nil and a nil pointer, which each return an error
 // wrapping [ErrSelfValidateTarget], bound to the source. A v that is no
@@ -123,7 +128,7 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 		return n.bindOwn(err)
 	}
 
-	walked := walkSelfValidators(ctx, v, n, n.yamlOptions(cfg.decodeOptions()))
+	walked := walkSelfValidators(ctx, v, n, n.yamlOptions(cfg), cfg.unmarshalers)
 
 	return bindTree(walked, binder{src: n.source, node: n, locate: true})
 }
@@ -188,16 +193,20 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // wrapping [ErrSelfValidateTarget], bound to no document too. The walk
 // stops once ctx ends, or once a Validate returns the error of a
 // context that ended, and SelfValidateValue then returns that error
-// alone, as [SelfValidator] describes. SelfValidateValue takes no
-// [DecodeOption], since the walk reads those options to decode the keys
-// of a document.
+// alone, as [SelfValidator] describes.
+//
+// SelfValidateValue takes no [DecodeOption]. A walk through a document
+// reads those options to decode its keys, and to stop at each type that
+// [WithCustomUnmarshaler] or [WithJSONUnmarshalers] gives an
+// unmarshaler. This walk thus reads below such a type by its fields,
+// and stops only at a type whose own method decodes it.
 func SelfValidateValue(ctx context.Context, v any) error {
 	err := checkSelfValidateTarget(v)
 	if err != nil {
 		return BindValue(err)
 	}
 
-	return BindValue(walkSelfValidators(ctx, v, nil, nil))
+	return BindValue(walkSelfValidators(ctx, v, nil, nil, optionUnmarshalers{}))
 }
 
 // checkSelfValidateTarget returns [ErrSelfValidateTarget] when v is nil
@@ -221,11 +230,12 @@ func checkSelfValidateTarget(v any) error {
 // that is no pointer. The walk follows v rather than n, so v need not be
 // the value n decoded to. It reads n for the text the document spells
 // each map key with, and decodes those keys with ctx and opts, as the
-// decode of v did. It also reads n to bind the errors under a path that
-// names several keys. A map the document does not hold at its path has
-// no node there, so its keys take the text of their Go values. A nil n
-// stands for no document, as [SelfValidateValue] walks a value, so every
-// key takes that text and the walk reads no option.
+// decode of v did. The unmarshalers are the ones those options give a
+// type. It also reads n to bind the errors under a path that names
+// several keys. A map the document does not hold at its path has no node
+// there, so its keys take the text of their Go values. A nil n stands
+// for no document, as [SelfValidateValue] walks a value, so every key
+// takes that text and the walk reads no option.
 //
 // The walk returns what the values report with the paths in each error
 // rebased under the path of the value in the document. That path is the
@@ -236,18 +246,21 @@ func checkSelfValidateTarget(v any) error {
 // validate before it does, and a value validates only when every value
 // below it passed, so a parent that checks a relation between its fields
 // sees fields that hold together. A value whose type decodes itself,
-// through an unmarshaler method, validates itself and nothing below it,
-// since its fields need not mirror the document and the paths under it
-// would point nowhere. So does a node of the syntax tree, which go-yaml
-// sets whole. A struct that decodes itself through a method it gets from
-// an embedded field decodes the document into that field, so the field
-// validates first, at the path of the struct. Several errors come back
-// joined, one per value that failed. Returns nil when nothing failed.
+// through an unmarshaler method or one of unmarshalers, validates itself
+// and nothing below it, since its fields need not mirror the document and
+// the paths under it would point nowhere. So does a node of the syntax
+// tree, which go-yaml sets whole. A struct that decodes itself through a
+// method it gets from an embedded field decodes the document into that
+// field, so the field validates first, at the path of the struct. Several
+// errors come back joined, one per value that failed. Returns nil when
+// nothing failed.
 //
 // The walk stops once ctx ends, or once a Validate returns the error of a
 // context that ended, and returns that error alone, as it is, in place of
 // the errors it collected.
-func walkSelfValidators(ctx context.Context, v any, n *Node, opts []yaml.DecodeOption) error {
+func walkSelfValidators(
+	ctx context.Context, v any, n *Node, opts []yaml.DecodeOption, unmarshalers optionUnmarshalers,
+) error {
 	w := selfWalker{
 		ctx:      ctx,
 		node:     n,
@@ -256,6 +269,8 @@ func walkSelfValidators(ctx context.Context, v any, n *Node, opts []yaml.DecodeO
 		reach:    math.MaxInt,
 		scanning: map[visit]bool{},
 		scanned:  map[visit]bool{},
+
+		unmarshalers: unmarshalers,
 	}
 	w.walk(reflect.ValueOf(v), place{}, nil)
 
@@ -303,6 +318,8 @@ type selfWalker struct {
 	node    *Node
 	decoder *yaml.Decoder
 	opts    []yaml.DecodeOption
+	// The types the options of the decode give an unmarshaler.
+	unmarshalers optionUnmarshalers
 	// The result of the walk through each pointer, map, and slice the walk
 	// has entered, as [walkResult] describes.
 	walked map[visit]walkResult
@@ -497,12 +514,18 @@ func (w *selfWalker) walkValue(v reflect.Value, at place, shadowed map[string]bo
 		v = addressable(v)
 	}
 
-	if !decodesItself(v.Type()) {
+	field, whole := w.unmarshalers.decodesWhole(v.Type())
+
+	switch {
+	case !whole:
 		if !w.children(v, at, shadowed) {
 			return false
 		}
-	} else if i, ok := decoderField(v.Type()); ok && !w.walk(v.Field(i), at, nil) {
-		return false
+
+	case field >= 0:
+		if !w.walk(v.Field(field), at, nil) {
+			return false
+		}
 	}
 
 	return w.validate(v, at)
@@ -647,6 +670,9 @@ var (
 	// a type that has no such field.
 	decoderFields typeCache[int]
 
+	// The result of [jsonDecoderField] for each type it has read.
+	jsonDecoderFields typeCache[int]
+
 	// The result of [decodesItself] for each type it has read.
 	decodesWhole typeCache[bool]
 
@@ -712,16 +738,37 @@ func decoderField(t reflect.Type) (int, bool) {
 // findDecoderField returns the index [decoderField] returns, or -1 when
 // t has no such field.
 func findDecoderField(t reflect.Type) int {
-	if t.Kind() != reflect.Struct || !hasEmbedded(t) {
-		return -1
-	}
-
 	k := slices.IndexFunc(unmarshalerTypes, reflect.PointerTo(t).Implements)
 	if k < 0 {
 		return -1
 	}
 
-	unmarshaler := unmarshalerTypes[k]
+	return promotingField(t, unmarshalerTypes[k])
+}
+
+// jsonDecoderField returns the index of the embedded field of t whose
+// UnmarshalJSON method decodes t under [WithJSONUnmarshalers], or -1
+// when t declares the method or has none. It reads t as [decoderField]
+// reads a type with an UnmarshalYAML method, and holds only for a type
+// go-yaml decodes through UnmarshalJSON, as
+// [optionUnmarshalers.decodesJSON] reports one.
+func jsonDecoderField(t reflect.Type) int {
+	return jsonDecoderFields.get(t, func(t reflect.Type) int {
+		if !reflect.PointerTo(t).Implements(jsonUnmarshalerType) {
+			return -1
+		}
+
+		return promotingField(t, jsonUnmarshalerType)
+	})
+}
+
+// promotingField returns the index of the embedded field that gives t
+// the one method of unmarshaler, an interface the pointer to t
+// implements, or -1 when t declares that method itself.
+func promotingField(t, unmarshaler reflect.Type) int {
+	if t.Kind() != reflect.Struct || !hasEmbedded(t) {
+		return -1
+	}
 
 	name := unmarshaler.Method(0).Name
 	if !promotesMethod(t, name) {
@@ -815,6 +862,11 @@ func methodDepth(t reflect.Type, name string) int {
 // any type, or through a field, element, map key, map value, or pointee
 // whose type may. The walk passes a value whose type may not without a look
 // below it.
+//
+// The answer reads the methods of t and no option of a decode, so every
+// walk shares it. A type that an option gives an unmarshaler can thus
+// report a validator below it that the walk of that decode never
+// reaches, and the walk then looks at the value and stops there.
 func mayHoldValidator(t reflect.Type) bool {
 	return holdsValidator.get(t, func(t reflect.Type) bool {
 		return reachesValidator(t, map[reflect.Type]bool{})
@@ -1272,9 +1324,9 @@ func (w *selfWalker) scanSelf(v reflect.Value) (bool, bool) {
 		return true, true
 	}
 
-	if decodesItself(v.Type()) {
-		if i, ok := decoderField(v.Type()); ok {
-			return w.scanValue(v.Field(i))
+	if field, whole := w.unmarshalers.decodesWhole(v.Type()); whole {
+		if field >= 0 {
+			return w.scanValue(v.Field(field))
 		}
 
 		return false, true

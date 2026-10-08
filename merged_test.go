@@ -583,6 +583,54 @@ func TestLayers_Decode_Equivalence_Errors(t *testing.T) {
 	})
 }
 
+func TestLayers_Decode_Options(t *testing.T) {
+	t.Parallel()
+
+	type config struct {
+		Level  plainLevel `yaml:"level"`
+		Backup plainLevel `yaml:"backup"`
+	}
+
+	levels := niceyaml.WithCustomUnmarshaler(decodeLevel)
+
+	// The options reach the one decode of the merged document, so the
+	// function decodes a level whichever layer holds it, and its error
+	// binds in that layer.
+	tcs := map[string]struct {
+		base string
+		err  string
+		want config
+	}{
+		"function decodes the value of each layer": {
+			base: "level: low\nbackup: low\n",
+			want: config{Level: levelHigh, Backup: levelLow},
+		},
+		"error of the function binds in the layer of its value": {
+			base: "level: low\nbackup: mid\n",
+			err:  `base.yaml:2:9: $.backup: unknown level "mid"`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			layers := niceyaml.NewLayers(layerNodes(t, tc.base, "level: high\n")...)
+
+			got, err := layers.Decode[config](t.Context(), levels)
+			if tc.err != "" {
+				require.EqualError(t, err, tc.err)
+				require.ErrorIs(t, err, errUnknownLevel)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
 func TestLayers_Decode_Maps(t *testing.T) {
 	t.Parallel()
 
@@ -888,16 +936,9 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, nodes[1], bound.Node())
-
-		// The layer decodes with or without a go-yaml option, so the
-		// error blames no option.
-		ordered := niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())
-
-		_, err = niceyaml.NewLayers(nodes...).Decode[any](t.Context(), ordered)
-		require.EqualError(t, err, "prod.yaml:2:3: mapping key has no name")
 	})
 
-	t.Run("an alias that a decode option defines does not resolve", func(t *testing.T) {
+	t.Run("a layer reads a reference document from its own Source", func(t *testing.T) {
 		t.Parallel()
 
 		const (
@@ -906,38 +947,17 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 			prodInput = "server: *shared\n"
 		)
 
-		// A reader reads once, so each decode takes an option of its own.
-		option := func() niceyaml.DecodeOption {
-			return niceyaml.WithYAMLDecodeOptions(yaml.ReferenceReaders(strings.NewReader(shared)))
-		}
-
 		nodes := layerNodes(t, baseInput, prodInput)
 
-		// The option reaches a decode of the layer alone.
-		alone, err := nodes[1].Decode[map[string]any](t.Context(), option())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"server": map[string]any{"host": "shared.example.com"}}, alone)
-
-		// It reaches no layer of the Layers, and the error says where the
-		// reference document goes.
-		_, err = niceyaml.NewLayers(nodes...).Decode[any](t.Context(), option())
-		require.EqualError(t, err,
-			"layer reads a reference document from a decode option, which belongs in WithReferences: "+
-				"prod.yaml:1:9: $.server: could not find alias \"shared\"")
+		// A layer whose Source holds no reference document fails as it
+		// does alone.
+		_, err := niceyaml.NewLayers(nodes...).Decode[any](t.Context())
+		require.EqualError(t, err, "prod.yaml:1:9: $.server: could not find alias \"shared\"")
 
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, nodes[1], bound.Node())
-
-		// Without the option the layer fails as it does alone.
-		_, err = niceyaml.NewLayers(nodes...).Decode[any](t.Context())
-		require.EqualError(t, err, "prod.yaml:1:9: $.server: could not find alias \"shared\"")
-
-		// An option that does not help changes nothing.
-		_, err = niceyaml.NewLayers(nodes...).Decode[any](t.Context(),
-			niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()))
-		require.EqualError(t, err, "prod.yaml:1:9: $.server: could not find alias \"shared\"")
 
 		// The Source of the layer takes the reference document.
 		prod := yamltest.FirstDocument(t, prodInput, niceyaml.WithName("prod.yaml"),

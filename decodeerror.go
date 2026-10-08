@@ -26,16 +26,13 @@ var (
 	durationType = reflect.TypeFor[time.Duration]()
 
 	// The interface go-yaml decodes a value through under
-	// [yaml.UseJSONUnmarshaler].
+	// [WithJSONUnmarshalers].
 	jsonUnmarshalerType = reflect.TypeFor[interface{ UnmarshalJSON(data []byte) error }]()
-
-	// The result of [reportsOwnError] for each type it has read.
-	ownErrors typeCache[bool]
 
 	// The types [kindOfType] names apart from their kind. The go-yaml
 	// decoder reads a !!timestamp tag as a [time.Time], a !!binary tag as
 	// a byte slice, and a mapping as a [yaml.MapSlice] under
-	// [yaml.UseOrderedMap].
+	// [WithYAMLOrderedMaps].
 	timeType     = reflect.TypeFor[time.Time]()
 	bytesType    = reflect.TypeFor[[]byte]()
 	mapSliceType = reflect.TypeFor[yaml.MapSlice]()
@@ -234,14 +231,14 @@ func (n *Node) rejectionLocation(tk *token.Token) []ErrorOption {
 }
 
 // locateDecodeError returns err, the error a decode of node into v with
-// yamlOpts returned, at the path of the value that reported it. The
-// go-yaml decoder returns the error of a value that decodes itself with
-// no token of the source. Such a value is a [time.Duration] or has an
-// unmarshaler method, as [reportsOwnError] lists them. To find that
-// value, locateDecodeError walks the type of v beside node, as
-// [errorLocator] describes, and decodes each such value again from its
-// own node. The first one whose decode fails with the message of err
-// reported it.
+// cfg returned, at the path of the value that reported it. The go-yaml
+// decoder returns the error of a value that decodes itself with no token
+// of the source. Such a value is a [time.Duration] or has an unmarshaler,
+// from a method or from an option of cfg, as [reportsOwnError] lists
+// them. To find that value, locateDecodeError walks the type of v beside
+// node, as [errorLocator] describes, and decodes each such value again
+// from its own node. The first one whose decode fails with the message
+// of err reported it.
 //
 // The result holds err under that path, as [Rebase] returns it, so the
 // [SourceError] that binds the result reports the path and marks the
@@ -263,7 +260,7 @@ func (n *Node) locateDecodeError(
 	err error,
 	node ast.Node,
 	v any,
-	yamlOpts []yaml.DecodeOption,
+	cfg decodeConfig,
 ) error {
 	if err == nil || !n.lacksLocation(err) {
 		return err
@@ -272,9 +269,11 @@ func (n *Node) locateDecodeError(
 	l := &errorLocator{
 		ctx:     ctx,
 		node:    n,
-		decoder: yaml.NewDecoder(bytes.NewReader(nil), yamlOpts...),
+		decoder: yaml.NewDecoder(bytes.NewReader(nil), n.yamlOptions(cfg)...),
 		msg:     err.Error(),
 		inlined: map[inlineVisit]bool{},
+
+		unmarshalers: cfg.unmarshalers,
 	}
 
 	var sink any
@@ -287,7 +286,7 @@ func (n *Node) locateDecodeError(
 
 	// With no value below node, found is the place of node itself.
 	found, ok := l.below(t, node, place{})
-	if !ok && (!reportsOwnError(t) || !isScalar(l.content(node))) {
+	if !ok && (!reportsOwnError(t, l.unmarshalers) || !isScalar(l.content(node))) {
 		return err
 	}
 
@@ -346,22 +345,17 @@ func holdsLocation(err error) bool {
 }
 
 // reportsOwnError reports whether the decoder can return an error for a
-// value of type t with no token of the source. It can for a
-// [time.Duration], for a type that decodes itself, as [decodesItself]
-// reads it, and for a type with an UnmarshalJSON method, which the
-// decoder calls under [yaml.UseJSONUnmarshaler].
+// value of type t with no token of the source, in a decode whose options
+// name the unmarshalers u. It can for a [time.Duration], for a type that
+// decodes itself, as [decodesItself] reads it, and for a type u gives an
+// unmarshaler: one a [WithCustomUnmarshaler] function decodes, and one
+// with an UnmarshalJSON method under [WithJSONUnmarshalers].
 //
-// The decoder gives no way to learn whether that option is set, so
-// [errorLocator] decodes a value with an UnmarshalJSON method again
-// either way. Without the option the decoder reads such a value field by
-// field, and the second decode fails only where a value below it fails.
-// The [yaml.CustomUnmarshaler] option and [yaml.RegisterCustomUnmarshaler]
-// name a type the decoder never shows, so reportsOwnError is false for a
-// type only they decode.
-func reportsOwnError(t reflect.Type) bool {
-	return ownErrors.get(t, func(t reflect.Type) bool {
-		return t == durationType || decodesItself(t) || reflect.PointerTo(t).Implements(jsonUnmarshalerType)
-	})
+// A function from [yaml.RegisterCustomUnmarshaler] names a type the
+// decoder never shows, so reportsOwnError is false for a type only such
+// a function decodes.
+func reportsOwnError(t reflect.Type, u optionUnmarshalers) bool {
+	return t == durationType || decodesItself(t) || u.decodes(t)
 }
 
 // pointerBase returns the type t points to through every pointer on it,
@@ -427,6 +421,8 @@ type errorLocator struct {
 	inlined map[inlineVisit]bool
 	// The message of the error to locate.
 	msg string
+	// The types the options of the decode give an unmarshaler.
+	unmarshalers optionUnmarshalers
 }
 
 // inlineVisit names an inline field the walk is inside of, by the type
@@ -446,7 +442,7 @@ type inlineVisit struct {
 func (l *errorLocator) find(t reflect.Type, node ast.Node, at place) (place, bool) {
 	t = pointerBase(t)
 
-	if !reportsOwnError(t) {
+	if !reportsOwnError(t, l.unmarshalers) {
 		return l.below(t, node, at)
 	}
 
@@ -619,7 +615,7 @@ func (l *errorLocator) entries(
 		child := at.child(name)
 
 		key := pointerBase(t.Key())
-		if reportsOwnError(key) && l.reproduces(entry.Key, reflect.New(key).Interface()) {
+		if reportsOwnError(key, l.unmarshalers) && l.reproduces(entry.Key, reflect.New(key).Interface()) {
 			return child.key(), true
 		}
 

@@ -1837,8 +1837,8 @@ func (r placeRequest) Validate() error {
 func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 	t.Parallel()
 
-	// A decode with yaml.UseOrderedMap yields yaml.MapSlice for every
-	// mapping, which the JSON Schema validator does not accept.
+	// A decode with niceyaml.WithYAMLOrderedMaps yields yaml.MapSlice for
+	// every mapping, which the JSON Schema validator does not accept.
 	// ValidateValue converts each one to a map with the same members, so
 	// the schema checks the data as it checks a plain decode.
 	//
@@ -1942,7 +1942,7 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 			// value all the same.
 			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithAliasLimit(false))
 
-			data, err := doc.Decode[any](t.Context(), niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()))
+			data, err := doc.Decode[any](t.Context(), niceyaml.WithYAMLOrderedMaps(true))
 			require.NoError(t, err)
 
 			err = v.ValidateValue(t.Context(), data)
@@ -1965,10 +1965,10 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 func TestSchema_Validate_OrderedMapDates(t *testing.T) {
 	t.Parallel()
 
-	// The yaml.UseOrderedMap option reaches the decode that gets it and
-	// not the decode the schema runs, so the schema reads plain maps, and a
-	// date-only timestamp under a key the decoder respells keeps its
-	// full-date spelling.
+	// The niceyaml.WithYAMLOrderedMaps option reaches the decode that
+	// gets it and not the decode the schema runs, so the schema reads
+	// plain maps, and a date-only timestamp under a key the decoder
+	// respells keeps its full-date spelling.
 	v, err := schema.Compile(t.Context(),
 		[]byte(`{"additionalProperties": {"type": "string", "format": "date"}}`),
 		schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)))
@@ -1989,7 +1989,7 @@ func TestSchema_Validate_OrderedMapDates(t *testing.T) {
 			doc := yamltest.FirstDocument(t, tc.input)
 
 			_, err := doc.Decode[any](t.Context(),
-				niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()),
+				niceyaml.WithYAMLOrderedMaps(true),
 				niceyaml.WithValidator(v),
 			)
 			require.NoError(t, err)

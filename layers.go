@@ -3,7 +3,6 @@ package niceyaml
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 )
 
@@ -15,12 +14,6 @@ var (
 	// two layers cannot hold it as one key. The error binds at the key,
 	// in the layer that holds it.
 	ErrUnnamedKey = errors.New("mapping key has no name")
-
-	// The error of a layer that decodes only with the go-yaml options of
-	// a call, as [Layers.layerError] finds one.
-	errOptionReference = errors.New(
-		"layer reads a reference document from a decode option, which belongs in WithReferences",
-	)
 
 	// The Node that [Layers] with no Node validate and bind through: the
 	// one document of an empty [Source], which has no name. Every call
@@ -105,13 +98,6 @@ var (
 // The merge writes each alias out in full, so a layer must pass the
 // alias limit of [WithAliasLimit] as a decode into a type that reads
 // text does.
-//
-// The go-yaml options of a decode reach the merged document and no
-// layer. An alias that only a reference from [WithYAMLDecodeOptions]
-// defines, such as [yaml.ReferenceFiles], [yaml.ReferenceDirs], or
-// [yaml.ReferenceReaders], thus does not resolve, and the error of the
-// decode names [WithReferences]. That option gives the reference
-// documents to the Source of the layer that reads them.
 //
 // [Layers.Document] returns the root Node of the merged document, and a
 // [Validator] gets that Node. The document belongs to a [Source] of its
@@ -271,30 +257,6 @@ func (l *Layers) document(ctx context.Context) (*Node, error) {
 	return l.merged.doc, l.merged.err
 }
 
-// layerError returns the error of the layer that holds no value, for a
-// decode with cfg. Where the decoder rejected that layer and the go-yaml
-// options of cfg let it decode, the layer reads something those options
-// alone define, such as an anchor of a reference document. The options
-// reach the decode of the merged document and no layer, so the error
-// then names the option that reaches a layer. A layer that decodes and
-// does not merge, such as one with a key that has no name, fails the
-// same way with the options, so its error comes back as it is.
-func (l *Layers) layerError(ctx context.Context, cfg decodeConfig) error {
-	failed, err := l.merged.failed, l.merged.err
-
-	if failed == nil || failed.doc.err != nil || len(cfg.yamlOpts) == 0 || !errors.Is(err, ErrDecode) {
-		return err
-	}
-
-	var discard any
-
-	if failed.decodeInto(ctx, &discard, decodeConfig{yamlOpts: cfg.yamlOpts, skipSelfValidation: true}) != nil {
-		return err
-	}
-
-	return fmt.Errorf("%w: %w", errOptionReference, err)
-}
-
 // DecodeInto validates and decodes the merged document into v, as
 // [Node.DecodeInto] decodes a document with the same options. It then
 // runs the self-validation step on v, as [Layers.SelfValidate] runs it.
@@ -318,7 +280,7 @@ func (l *Layers) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) er
 	cfg := newDecodeConfig(opts)
 
 	if layerErr != nil {
-		return l.layerError(ctx, cfg)
+		return layerErr
 	}
 
 	return doc.decodeInto(ctx, v, cfg)
@@ -346,9 +308,9 @@ func (l *Layers) Validate(ctx context.Context, v Validator) error {
 // SelfValidate runs the self-validation step of [Layers.DecodeInto] on
 // its own, on v through the merged document, as [Node.SelfValidate] runs
 // it. Each error binds in the layer that holds its value, as [Layers]
-// describes. It runs whatever [WithSelfValidation] says, and reads only
-// the go-yaml options among opts. A layer that holds no value adds
-// nothing, and SelfValidate returns no error for it.
+// describes. It runs whatever [WithSelfValidation] says, and reads the
+// options Node.SelfValidate reads among opts. A layer that holds no
+// value adds nothing, and SelfValidate returns no error for it.
 func (l *Layers) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
 	doc, _ := l.document(ctx) //nolint:errcheck // A layer that holds no value adds nothing.
 

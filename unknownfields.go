@@ -25,20 +25,22 @@ import (
 //
 // A key of such a mapping is a candidate when no field of the struct has
 // its name, as [fieldNames] lists them. The walk follows the rules
-// [yamlfield] holds for those names. It cannot see every rule the decode
-// applies, such as the prefixes [yaml.AllowFieldPrefixes] allows or the
-// types [yaml.CustomUnmarshaler] decodes. So the decoder confirms each
-// candidate. The finder decodes the one entry of the candidate into a
-// new value of the struct type, with the options of the decode, and
-// keeps the candidate only when that decode rejects its key as an
-// unknown field. A key the decoder accepts thus never joins the result.
+// [yamlfield] holds for those names. It leaves every other rule of the
+// decode to the decoder, such as the prefixes [WithAllowedFieldPrefixes]
+// allows, and it cannot see the types [yaml.RegisterCustomUnmarshaler]
+// gave a function. So the decoder confirms each candidate. The finder
+// decodes the one entry of the candidate into a new value of the struct
+// type, with the options of the decode, and keeps the candidate only when
+// that decode rejects its key as an unknown field. A key the decoder
+// accepts thus never joins the result.
 //
 // The fields of a struct that decodes itself, as [reportsOwnError] lists
 // those types, need not mirror the document, and only its unmarshaler
-// says whether the decoder checks them. An UnmarshalYAML that decodes
-// into a second type with the same fields has the decoder check them,
-// and one that parses the text itself does not. The walk therefore reads
-// such a struct, and the values below it, as if the fields mirrored the
+// says whether the decoder checks them. That holds for a struct an option
+// of the decode gives an unmarshaler too. An UnmarshalYAML that decodes
+// into a second type with the same fields has the decoder check them, and
+// one that parses the text itself does not. The walk therefore reads such
+// a struct, and the values below it, as if the fields mirrored the
 // document, and takes every key of its own mapping for a candidate. The
 // decode that confirms a candidate at or below such a struct runs the
 // unmarshaler of the outermost one, on the entries that lead from its
@@ -70,12 +72,16 @@ type unknownFieldFinder struct {
 	// The entries [unknownFieldFinder.dropped] found for each mapping it
 	// has read.
 	droppedEntries map[*ast.MappingNode]map[*ast.MappingValueNode]bool
+	// The types the options of the decode give an unmarshaler.
+	unmarshalers optionUnmarshalers
 }
 
 // newUnknownFieldFinder creates a new [*unknownFieldFinder] for a decode
-// of n, which asks dec about each candidate. The decoder holds the
-// anchors of that decode.
-func newUnknownFieldFinder(ctx context.Context, n *Node, dec *yaml.Decoder) *unknownFieldFinder {
+// of n whose options name the unmarshalers u, which asks dec about each
+// candidate. The decoder holds the anchors of that decode.
+func newUnknownFieldFinder(
+	ctx context.Context, n *Node, dec *yaml.Decoder, u optionUnmarshalers,
+) *unknownFieldFinder {
 	return &unknownFieldFinder{
 		ctx:      ctx,
 		node:     n,
@@ -85,6 +91,7 @@ func newUnknownFieldFinder(ctx context.Context, n *Node, dec *yaml.Decoder) *unk
 		visited:  map[structVisit]bool{},
 
 		droppedEntries: map[*ast.MappingNode]map[*ast.MappingValueNode]bool{},
+		unmarshalers:   u,
 	}
 }
 
@@ -149,14 +156,14 @@ func (f *unknownFieldFinder) walk(t reflect.Type, node ast.Node, chain *decodeCh
 		case t.Kind() == reflect.Struct:
 			f.fields(t, content, chain)
 
-		case t.Kind() == reflect.Map && !reportsOwnError(t):
+		case t.Kind() == reflect.Map && !reportsOwnError(t, f.unmarshalers):
 			f.eachEntry(content, true, map[*ast.MappingNode]bool{}, func(entry *ast.MappingValueNode) {
 				f.value(t.Elem(), entry.Value, chain.through(entry))
 			})
 		}
 
 	case *ast.SequenceNode:
-		if reportsOwnError(t) || (t.Kind() != reflect.Slice && t.Kind() != reflect.Array) {
+		if reportsOwnError(t, f.unmarshalers) || (t.Kind() != reflect.Slice && t.Kind() != reflect.Array) {
 			return
 		}
 
@@ -214,7 +221,7 @@ func (f *unknownFieldFinder) fields(t reflect.Type, mapping *ast.MappingNode, ch
 
 	var names map[string]bool
 
-	if reportsOwnError(t) {
+	if reportsOwnError(t, f.unmarshalers) {
 		if chain == nil {
 			chain = &decodeChain{owner: t}
 		}
@@ -253,7 +260,7 @@ func (f *unknownFieldFinder) below(
 
 		if inline {
 			inner := pointerBase(field.Type)
-			if inner.Kind() != reflect.Struct || reportsOwnError(inner) || inlined[inner] {
+			if inner.Kind() != reflect.Struct || reportsOwnError(inner, f.unmarshalers) || inlined[inner] {
 				continue
 			}
 

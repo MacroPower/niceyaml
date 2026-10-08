@@ -833,10 +833,9 @@ func (v *mergedValue) child(sel paths.Selector) *mergedValue {
 type mergedLayers struct {
 	// The root Node of the merged document.
 	doc *Node
-	// The lowest layer that holds no value a decode can read, such as one
-	// that did not parse, or nil when every layer holds one.
-	failed *Node
-	// The error of failed.
+	// The error of the lowest layer that holds no value a decode can
+	// read, such as one that did not parse, or nil when every layer holds
+	// one.
 	err error
 }
 
@@ -869,7 +868,7 @@ func mergeLayers(ctx context.Context, nodes []*Node) mergedLayers {
 		v, err := newLayerReader(n).read(ctx)
 		if err != nil {
 			if merged.err == nil {
-				merged.failed, merged.err = n, err
+				merged.err = err
 			}
 
 			continue

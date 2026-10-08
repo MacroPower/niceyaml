@@ -2,12 +2,15 @@ package niceyaml_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/netip"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +26,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/diff"
+	"go.jacobcolvin.com/niceyaml/encoder"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
@@ -42,6 +46,12 @@ var (
 	// The error rejectingUnmarshaler and wrappingUnmarshaler report from
 	// their own decode.
 	errUnmarshal = errors.New("unmarshaler rejected the value")
+
+	// The error decodeLevel reports for a name that is no level.
+	errUnknownLevel = errors.New("unknown level")
+
+	// The error a structChecks reports with no field.
+	errStructRejected = errors.New("struct rejected")
 )
 
 func TestSource_Decoder(t *testing.T) {
@@ -4095,19 +4105,713 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 
 		assert.Equal(t, 2, errCount)
 	})
+}
 
-	t.Run("no options is the default", func(t *testing.T) {
+func TestWithAllowedFieldPrefixes(t *testing.T) {
+	t.Parallel()
+
+	type config struct {
+		Name string `yaml:"name"`
+	}
+
+	strict := niceyaml.WithDisallowUnknownFields(true)
+
+	tcs := map[string]struct {
+		input string
+		err   string
+		opts  []niceyaml.DecodeOption
+	}{
+		"allows a key under a prefix": {
+			input: "name: a\nx-note: b\n",
+			opts:  []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFieldPrefixes("x-")},
+		},
+		"rejects a key under no prefix": {
+			input: "name: a\nx-note: b\nnote: c\n",
+			opts:  []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFieldPrefixes("x-")},
+			err:   `3:1: $.note~: unknown field "note"`,
+		},
+		"each option adds to the prefixes before it": {
+			input: "name: a\nx-note: b\ny-note: c\nz-note: d\n",
+			opts: []niceyaml.DecodeOption{
+				strict,
+				niceyaml.WithAllowedFieldPrefixes("x-"),
+				niceyaml.WithAllowedFieldPrefixes("y-"),
+			},
+			err: `4:1: $.z-note~: unknown field "z-note"`,
+		},
+		"empty prefix allows every key": {
+			input: "name: a\nnote: b\n",
+			opts:  []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFieldPrefixes("")},
+		},
+		"changes nothing in a decode that accepts unknown fields": {
+			input: "name: a\nnote: b\n",
+			opts:  []niceyaml.DecodeOption{niceyaml.WithAllowedFieldPrefixes("x-")},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := yamltest.FirstDocument(t, tc.input).Decode[config](t.Context(), tc.opts...)
+			if tc.err != "" {
+				require.EqualError(t, err, tc.err)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, config{Name: "a"}, got)
+		})
+	}
+}
+
+// plainLevel has no method of its own. A function from
+// niceyaml.WithCustomUnmarshaler decodes it from the name of a level.
+type plainLevel int
+
+// The levels a document names.
+const (
+	levelLow plainLevel = iota + 1
+	levelHigh
+)
+
+// decodeLevel decodes a [plainLevel] from its name.
+func decodeLevel(_ context.Context, l *plainLevel, text []byte) error {
+	switch name := strings.TrimSpace(string(text)); name {
+	case "low":
+		*l = levelLow
+	case "high":
+		*l = levelHigh
+	default:
+		return fmt.Errorf("%w %q", errUnknownLevel, name)
+	}
+
+	return nil
+}
+
+// methodLevel decodes itself from text, and reports an error whenever
+// the decoder calls its method.
+type methodLevel int
+
+func (*methodLevel) UnmarshalText([]byte) error {
+	return errors.New("the decoder called the method")
+}
+
+func TestWithCustomUnmarshaler(t *testing.T) {
+	t.Parallel()
+
+	levels := niceyaml.WithCustomUnmarshaler(decodeLevel)
+
+	t.Run("decodes every value of the type", func(t *testing.T) {
 		t.Parallel()
 
-		input := stringtest.Input(`
-			name: test
-			extra: field
-		`)
-		dd := yamltest.FirstDocument(t, input)
+		type config struct {
+			Pointer *plainLevel           `yaml:"pointer"`
+			ByName  map[string]plainLevel `yaml:"by_name"`
+			ByLevel map[plainLevel]string `yaml:"by_level"`
+			List    []plainLevel          `yaml:"list"`
+			Level   plainLevel            `yaml:"level"`
+		}
 
-		result, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithYAMLDecodeOptions())
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			level: high
+			pointer: low
+			list: [low, high]
+			by_name: {a: high}
+			by_level: {low: a}
+		`))
+
+		got, err := doc.Decode[config](t.Context(), levels)
 		require.NoError(t, err)
-		assert.Equal(t, "test", result.Name)
+
+		low := levelLow
+
+		assert.Equal(t, config{
+			Level:   levelHigh,
+			Pointer: &low,
+			List:    []plainLevel{levelLow, levelHigh},
+			ByName:  map[string]plainLevel{"a": levelHigh},
+			ByLevel: map[plainLevel]string{levelLow: "a"},
+		}, got)
+	})
+
+	t.Run("hands the function the context and the text of the node", func(t *testing.T) {
+		t.Parallel()
+
+		type ctxKey struct{}
+
+		var got []string
+
+		record := niceyaml.WithCustomUnmarshaler(func(ctx context.Context, _ *plainLevel, text []byte) error {
+			got = append(got, fmt.Sprintf("%v|%s", ctx.Value(ctxKey{}), text))
+
+			return nil
+		})
+
+		// The text spells an alias as the content of its anchor, and keeps
+		// the quotes and the comment of a scalar.
+		doc := yamltest.FirstDocument(t, "a: &a low\nlevels:\n  - *a\n  - \"high\" # top\n")
+
+		_, err := doc.Decode[struct {
+			Levels []plainLevel `yaml:"levels"`
+		}](context.WithValue(t.Context(), ctxKey{}, "decode"), record)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"decode|low\n", "decode|\"high\" # top\n"}, got)
+	})
+
+	t.Run("the function reads its text with a source of its own", func(t *testing.T) {
+		t.Parallel()
+
+		cidr := niceyaml.WithCustomUnmarshaler(func(ctx context.Context, n *net.IPNet, text []byte) error {
+			s, err := niceyaml.NewSourceFromBytes(text).Decode[string](ctx)
+			if err != nil {
+				return err
+			}
+
+			_, parsed, err := net.ParseCIDR(s)
+			if err != nil {
+				return fmt.Errorf("network: %w", err)
+			}
+
+			*n = *parsed
+
+			return nil
+		})
+
+		got, err := yamltest.FirstDocument(t, "office: \"10.0.0.0/8\" # the office\n").Decode[map[string]net.IPNet](
+			t.Context(), cidr,
+		)
+		require.NoError(t, err)
+		assert.Equal(t, "10.0.0.0/8", new(got["office"]).String())
+
+		_, err = yamltest.FirstDocument(t, "office: 10.0.0.0/8\nhome: 10.0.0.0/33\n").Decode[map[string]net.IPNet](
+			t.Context(), cidr,
+		)
+		require.EqualError(t, err, "2:7: $.home: network: invalid CIDR address: 10.0.0.0/33")
+	})
+
+	t.Run("a null leaves a pointer nil without a call", func(t *testing.T) {
+		t.Parallel()
+
+		calls := 0
+		count := niceyaml.WithCustomUnmarshaler(func(context.Context, *plainLevel, []byte) error {
+			calls++
+
+			return nil
+		})
+
+		got, err := yamltest.FirstDocument(t, "level: null\n").Decode[struct {
+			Level *plainLevel `yaml:"level"`
+		}](t.Context(), count)
+		require.NoError(t, err)
+		assert.Nil(t, got.Level)
+		assert.Zero(t, calls)
+	})
+
+	t.Run("the function decodes ahead of a method of the type", func(t *testing.T) {
+		t.Parallel()
+
+		byFunction := niceyaml.WithCustomUnmarshaler(func(_ context.Context, l *methodLevel, _ []byte) error {
+			*l = 7
+
+			return nil
+		})
+
+		doc := yamltest.FirstDocument(t, "level: high\n")
+
+		got, err := doc.Decode[map[string]methodLevel](t.Context(), byFunction)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]methodLevel{"level": 7}, got)
+
+		_, err = doc.Decode[map[string]methodLevel](t.Context())
+		require.EqualError(t, err, "1:8: $.level: the decoder called the method")
+	})
+
+	t.Run("the error of the function binds at the value", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := yamltest.FirstDocument(t, "name: api\nlevel: mid\n").Decode[struct {
+			Name  string     `yaml:"name"`
+			Level plainLevel `yaml:"level"`
+		}](t.Context(), levels)
+		require.EqualError(t, err, `2:8: $.level: unknown level "mid"`)
+		require.ErrorIs(t, err, errUnknownLevel)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+
+	t.Run("a nil function names no type", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := yamltest.FirstDocument(t, "level: 2\n").Decode[map[string]plainLevel](
+			t.Context(), niceyaml.WithCustomUnmarshaler[plainLevel](nil),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]plainLevel{"level": levelHigh}, got)
+	})
+
+	t.Run("the option reaches the decode that gets it alone", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "level: high\n")
+
+		_, err := doc.Decode[map[string]plainLevel](t.Context(), levels)
+		require.NoError(t, err)
+
+		_, err = doc.Decode[map[string]plainLevel](t.Context())
+		require.EqualError(t, err, "1:8: $.level: expected integer, got string")
+	})
+
+	t.Run("a validator decodes with the options it gives its own decode", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "level: high\n")
+
+		// The validator decodes the node it gets, and that decode takes
+		// the options the validator passes and no option of the decode
+		// that runs the validator.
+		decodes := func(opts ...niceyaml.DecodeOption) niceyaml.DecodeOption {
+			return niceyaml.WithValidator(niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
+				_, err := n.Decode[map[string]plainLevel](ctx, opts...)
+
+				return err
+			}))
+		}
+
+		_, err := doc.Decode[map[string]plainLevel](t.Context(), levels, decodes(levels))
+		require.NoError(t, err)
+
+		_, err = doc.Decode[map[string]plainLevel](t.Context(), levels, decodes())
+		require.EqualError(t, err, "1:8: $.level: expected integer, got string")
+	})
+}
+
+// jsonSize has an UnmarshalJSON method that reads a size such as "4k",
+// which its field does not mirror.
+type jsonSize struct {
+	Bytes int `yaml:"bytes"`
+}
+
+func (s *jsonSize) UnmarshalJSON(data []byte) error {
+	var text string
+
+	err := json.Unmarshal(data, &text)
+	if err != nil {
+		return fmt.Errorf("size: %w", err)
+	}
+
+	kilobytes, err := strconv.Atoi(strings.TrimSuffix(text, "k"))
+	if err != nil {
+		return fmt.Errorf("size: %w", err)
+	}
+
+	s.Bytes = kilobytes * 1024
+
+	return nil
+}
+
+// yamlSize has an UnmarshalYAML method beside an UnmarshalJSON method
+// that reports an error whenever the decoder calls it.
+type yamlSize struct {
+	Bytes int
+}
+
+func (s *yamlSize) UnmarshalYAML([]byte) error {
+	s.Bytes = 1
+
+	return nil
+}
+
+func (*yamlSize) UnmarshalJSON([]byte) error {
+	return errors.New("the decoder called UnmarshalJSON")
+}
+
+func TestWithJSONUnmarshalers(t *testing.T) {
+	t.Parallel()
+
+	type config struct {
+		Size jsonSize `yaml:"size"`
+	}
+
+	tcs := map[string]struct {
+		input string
+		err   string
+		opts  []niceyaml.DecodeOption
+		want  int
+	}{
+		"decodes through the method": {
+			input: "size: 4k\n",
+			opts:  []niceyaml.DecodeOption{niceyaml.WithJSONUnmarshalers(true)},
+			want:  4096,
+		},
+		"reads the fields by default": {
+			input: "size: {bytes: 3}\n",
+			want:  3,
+		},
+		"a later false turns the option off": {
+			input: "size: {bytes: 3}\n",
+			opts: []niceyaml.DecodeOption{
+				niceyaml.WithJSONUnmarshalers(true),
+				niceyaml.WithJSONUnmarshalers(false),
+			},
+			want: 3,
+		},
+		"the error of the method binds at the value": {
+			input: "size: big\n",
+			opts:  []niceyaml.DecodeOption{niceyaml.WithJSONUnmarshalers(true)},
+			err:   `1:7: $.size: size: strconv.Atoi: parsing "big": invalid syntax`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := yamltest.FirstDocument(t, tc.input).Decode[config](t.Context(), tc.opts...)
+			if tc.err != "" {
+				require.EqualError(t, err, tc.err)
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got.Size.Bytes)
+		})
+	}
+
+	t.Run("a type with an UnmarshalYAML method keeps it", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := yamltest.FirstDocument(t, "size: 4k\n").Decode[map[string]yamlSize](
+			t.Context(), niceyaml.WithJSONUnmarshalers(true),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]yamlSize{"size": {Bytes: 1}}, got)
+	})
+}
+
+func TestWithYAMLOrderedMaps(t *testing.T) {
+	t.Parallel()
+
+	input := "b: 1\na: {d: 2, c: 3}\n"
+
+	tcs := map[string]struct {
+		want any
+		opts []niceyaml.DecodeOption
+	}{
+		"a mapping decodes into a map by default": {
+			want: map[string]any{
+				"b": uint64(1),
+				"a": map[string]any{"d": uint64(2), "c": uint64(3)},
+			},
+		},
+		"a mapping keeps the order of the document": {
+			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)},
+			want: yaml.MapSlice{
+				{Key: "b", Value: uint64(1)},
+				{Key: "a", Value: yaml.MapSlice{
+					{Key: "d", Value: uint64(2)},
+					{Key: "c", Value: uint64(3)},
+				}},
+			},
+		},
+		"a later false turns the option off": {
+			opts: []niceyaml.DecodeOption{
+				niceyaml.WithYAMLOrderedMaps(true),
+				niceyaml.WithYAMLOrderedMaps(false),
+			},
+			want: map[string]any{
+				"b": uint64(1),
+				"a": map[string]any{"d": uint64(2), "c": uint64(3)},
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := yamltest.FirstDocument(t, input).Decode[any](t.Context(), tc.opts...)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+
+	t.Run("a typed map decodes as it does without the option", func(t *testing.T) {
+		t.Parallel()
+
+		got, err := yamltest.FirstDocument(t, "b: 1\na: 2\n").Decode[map[string]int](
+			t.Context(), niceyaml.WithYAMLOrderedMaps(true),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"b": 1, "a": 2}, got)
+	})
+}
+
+func TestWithYAMLComments(t *testing.T) {
+	t.Parallel()
+
+	type config struct {
+		Items map[string]plainValidated `yaml:"items"`
+		Name  string                    `yaml:"name"`
+	}
+
+	input := stringtest.Input(`
+		# The name of the service.
+		name: api # short
+		items:
+		  # The first item.
+		  a: {name: x}
+	`)
+
+	want := yaml.CommentMap{
+		"$.name": {
+			yaml.HeadComment(" The name of the service."),
+			yaml.LineComment(" short"),
+		},
+		"$.items.a": {yaml.HeadComment(" The first item.")},
+	}
+
+	t.Run("collects the comments of the node by path", func(t *testing.T) {
+		t.Parallel()
+
+		comments := yaml.CommentMap{}
+
+		_, err := yamltest.FirstDocument(t, input).Decode[map[string]any](
+			t.Context(), niceyaml.WithYAMLComments(comments),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, want, comments)
+	})
+
+	// The walk decodes the keys of the items with a decoder of its own,
+	// which gets no comment map to empty.
+	t.Run("keeps the comments through the self-validation step", func(t *testing.T) {
+		t.Parallel()
+
+		comments := yaml.CommentMap{}
+
+		_, err := yamltest.FirstDocument(t, input).Decode[config](
+			t.Context(), niceyaml.WithYAMLComments(comments),
+		)
+		require.ErrorIs(t, err, errPlainValidation)
+		assert.Equal(t, want, comments)
+	})
+
+	t.Run("the encoder writes the comments back", func(t *testing.T) {
+		t.Parallel()
+
+		type service struct {
+			Items map[string]map[string]string `yaml:"items"`
+			Name  string                       `yaml:"name"`
+		}
+
+		comments := yaml.CommentMap{}
+
+		got, err := yamltest.FirstDocument(t, input).Decode[service](
+			t.Context(), niceyaml.WithYAMLComments(comments),
+		)
+		require.NoError(t, err)
+
+		got.Name = "web"
+
+		out, err := encoder.Marshal(t.Context(), got, encoder.WithYAMLComments(comments))
+		require.NoError(t, err)
+		assert.Equal(t, stringtest.Input(`
+			items:
+			  # The first item.
+			  a:
+			    name: x
+			# The name of the service.
+			name: web # short
+		`)+"\n", string(out))
+	})
+
+	t.Run("keeps the paths of the document in a scoped decode", func(t *testing.T) {
+		t.Parallel()
+
+		comments := yaml.CommentMap{}
+		items := yamltest.At(t, yamltest.FirstDocument(t, input), paths.Doc().Child("items"))
+
+		_, err := items.Decode[map[string]any](t.Context(), niceyaml.WithYAMLComments(comments))
+		require.NoError(t, err)
+		assert.Equal(t, yaml.CommentMap{"$.items.a": want["$.items.a"]}, comments)
+	})
+
+	t.Run("empties the map before it reads the node", func(t *testing.T) {
+		t.Parallel()
+
+		comments := yaml.CommentMap{"$.stale": {yaml.LineComment(" old")}}
+
+		_, err := yamltest.FirstDocument(t, input).Decode[map[string]any](
+			t.Context(), niceyaml.WithYAMLComments(comments),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, want, comments)
+	})
+
+	t.Run("the last option replaces the earlier ones", func(t *testing.T) {
+		t.Parallel()
+
+		first, last := yaml.CommentMap{}, yaml.CommentMap{}
+
+		_, err := yamltest.FirstDocument(t, input).Decode[map[string]any](
+			t.Context(), niceyaml.WithYAMLComments(first), niceyaml.WithYAMLComments(last),
+		)
+		require.NoError(t, err)
+		assert.Empty(t, first)
+		assert.Equal(t, want, last)
+	})
+
+	t.Run("SelfValidate fills no comment map", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, input)
+
+		got, err := doc.Decode[config](t.Context(), niceyaml.WithSelfValidation(false))
+		require.NoError(t, err)
+
+		comments := yaml.CommentMap{"$.stale": {yaml.LineComment(" old")}}
+
+		err = doc.SelfValidate(t.Context(), &got, niceyaml.WithYAMLComments(comments))
+		require.ErrorIs(t, err, errPlainValidation)
+		assert.Equal(t, yaml.CommentMap{"$.stale": {yaml.LineComment(" old")}}, comments)
+	})
+
+	t.Run("a nil map collects nothing", func(t *testing.T) {
+		t.Parallel()
+
+		first := yaml.CommentMap{}
+
+		_, err := yamltest.FirstDocument(t, input).Decode[map[string]any](
+			t.Context(), niceyaml.WithYAMLComments(first), niceyaml.WithYAMLComments(nil),
+		)
+		require.NoError(t, err)
+		assert.Empty(t, first)
+	})
+}
+
+// structFieldError names the field a [structChecks] rejects, as a
+// [yaml.FieldError].
+type structFieldError struct {
+	field string
+}
+
+func (e structFieldError) Error() string       { return e.field + " is not valid" }
+func (e structFieldError) StructField() string { return e.field }
+
+// structFieldErrors lists the fields a [structChecks] rejects, in the
+// shape go-yaml reads the fields from.
+type structFieldErrors []structFieldError
+
+func (e structFieldErrors) Error() string { return e[0].Error() }
+
+// structChecks is a [yaml.StructValidator] that records the type of each
+// struct it checks, and rejects a structLimits by the field its fail
+// names, or with errStructRejected when fail is "-".
+type structChecks struct {
+	seen *[]string
+	fail string
+}
+
+// structLimits is the struct a [structChecks] rejects.
+type structLimits struct {
+	Max int `yaml:"max"`
+	Min int `yaml:"min"`
+}
+
+func (c structChecks) Struct(v any) error {
+	if c.seen != nil {
+		*c.seen = append(*c.seen, fmt.Sprintf("%T", v))
+	}
+
+	if _, ok := v.(structLimits); !ok {
+		return nil
+	}
+
+	switch c.fail {
+	case "":
+		return nil
+	case "-":
+		return errStructRejected
+	default:
+		return structFieldErrors{{field: c.fail}}
+	}
+}
+
+func TestWithYAMLStructValidator(t *testing.T) {
+	t.Parallel()
+
+	type config struct {
+		Name   string       `yaml:"name"`
+		Limits structLimits `yaml:"limits"`
+	}
+
+	input := "name: api\nlimits:\n  max: 9\n"
+
+	t.Run("checks every struct the decode fills", func(t *testing.T) {
+		t.Parallel()
+
+		var seen []string
+
+		_, err := yamltest.FirstDocument(t, input).Decode[config](
+			t.Context(), niceyaml.WithYAMLStructValidator(structChecks{seen: &seen}),
+		)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"niceyaml_test.structLimits", "niceyaml_test.config"}, seen)
+	})
+
+	tcs := map[string]struct {
+		is   error
+		err  string
+		opts []niceyaml.DecodeOption
+	}{
+		"field the document sets": {
+			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLStructValidator(structChecks{fail: "Max"})},
+			err:  "3:8: $.limits.max: Max is not valid",
+		},
+		"field the document lacks": {
+			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLStructValidator(structChecks{fail: "Min"})},
+			err:  "3:3: $.limits: Min is not valid",
+		},
+		"error that names no field": {
+			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLStructValidator(structChecks{fail: "-"})},
+			is:   errStructRejected,
+			err:  "struct rejected",
+		},
+		"the last option replaces the earlier ones": {
+			opts: []niceyaml.DecodeOption{
+				niceyaml.WithYAMLStructValidator(structChecks{fail: "-"}),
+				niceyaml.WithYAMLStructValidator(structChecks{fail: "Max"}),
+			},
+			err: "3:8: $.limits.max: Max is not valid",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := yamltest.FirstDocument(t, input).Decode[config](t.Context(), tc.opts...)
+			require.EqualError(t, err, tc.err)
+			require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+			if tc.is != nil {
+				require.ErrorIs(t, err, tc.is)
+			}
+		})
+	}
+
+	t.Run("a nil validator checks nothing", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := yamltest.FirstDocument(t, input).Decode[config](
+			t.Context(),
+			niceyaml.WithYAMLStructValidator(structChecks{fail: "-"}),
+			niceyaml.WithYAMLStructValidator(nil),
+		)
+		require.NoError(t, err)
 	})
 }
 
@@ -6629,7 +7333,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		// no decode the validator runs.
 		refs := niceyaml.NewSourceFromString("base: &x 1\n")
 		dd := yamltest.FirstDocument(t, "b:\n  c: *x\n", niceyaml.WithReferences(refs))
-		ordered := niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())
+		ordered := niceyaml.WithYAMLOrderedMaps(true)
 
 		var (
 			seen  []any
@@ -7468,7 +8172,7 @@ func TestDocument_Decode_ValidatorErrorBoundToReceiver(t *testing.T) {
 		}),
 		"fails a decode of its own": niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 			_, err := n.Decode[any](ctx,
-				niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap()),
+				niceyaml.WithYAMLOrderedMaps(true),
 				niceyaml.WithValidator(fail),
 			)
 
@@ -7486,8 +8190,8 @@ func TestDocument_Decode_ValidatorErrorBoundToReceiver(t *testing.T) {
 				niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
 			},
 		},
-		"yaml options": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())},
+		"ordered maps": {
+			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)},
 		},
 	}
 
@@ -7553,8 +8257,8 @@ func TestDocument_Decode_ScopedValidatorErrorDocument(t *testing.T) {
 				niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
 			},
 		},
-		"yaml options": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())},
+		"ordered maps": {
+			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)},
 		},
 	}
 
@@ -7611,8 +8315,8 @@ func TestDocument_Decode_ValidatorAmbiguousErrorBoundToReceiver(t *testing.T) {
 				niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
 			},
 		},
-		"yaml options": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())},
+		"ordered maps": {
+			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)},
 		},
 	}
 
@@ -8421,7 +9125,7 @@ func TestDecodeOptions(t *testing.T) {
 		assert.Equal(t, []string{"base"}, order, "the first value keeps its validators")
 	})
 
-	t.Run("adds go-yaml options after the ones before it", func(t *testing.T) {
+	t.Run("a later custom unmarshaler replaces the one before it", func(t *testing.T) {
 		t.Parallel()
 
 		type marker string
@@ -8431,22 +9135,18 @@ func TestDecodeOptions(t *testing.T) {
 			Tag marker `yaml:"tag"`
 		}
 
-		// The go-yaml decoder keeps the last CustomUnmarshaler given for
-		// a type, so the marker a decode yields names the option that
-		// came last.
-		setMarker := func(value marker) yaml.DecodeOption {
-			return yaml.CustomUnmarshaler(func(m *marker, _ []byte) error {
+		// The last WithCustomUnmarshaler given for a type decodes it, so
+		// the marker a decode yields names the option that came last.
+		setMarker := func(value marker) niceyaml.DecodeOption {
+			return niceyaml.WithCustomUnmarshaler(func(_ context.Context, m *marker, _ []byte) error {
 				*m = value
 
 				return nil
 			})
 		}
 
-		base := niceyaml.DecodeOptions(niceyaml.WithYAMLDecodeOptions(
-			yaml.UseOrderedMap(),
-			setMarker("base"),
-		))
-		derived := niceyaml.DecodeOptions(base, niceyaml.WithYAMLDecodeOptions(setMarker("derived")))
+		base := niceyaml.DecodeOptions(niceyaml.WithYAMLOrderedMaps(true), setMarker("base"))
+		derived := niceyaml.DecodeOptions(base, setMarker("derived"))
 
 		dd := yamltest.FirstDocument(t, "m: {b: 1, a: 2}\ntag: x\n")
 
@@ -11454,6 +12154,20 @@ func (*nodeDecoded) UnmarshalText([]byte) error {
 	return errors.New("unexpected UnmarshalText call")
 }
 
+// aliasPlain has no method of its own, so it reads text only when a
+// function from niceyaml.WithCustomUnmarshaler decodes it.
+type aliasPlain string
+
+// aliasJSON has an UnmarshalJSON method, so it reads text only under
+// niceyaml.WithJSONUnmarshalers.
+type aliasJSON string
+
+func (a *aliasJSON) UnmarshalJSON(data []byte) error {
+	*a = aliasJSON(data)
+
+	return nil
+}
+
 func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 	t.Parallel()
 
@@ -11464,13 +12178,50 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 		"kind: [" + strings.TrimSuffix(strings.Repeat("*a, ", 500), ", ") + "]\n"
 	kind := paths.Current().Child("kind")
 
+	plainText := niceyaml.WithCustomUnmarshaler(func(_ context.Context, a *aliasPlain, text []byte) error {
+		*a = aliasPlain(text)
+
+		return nil
+	})
+
 	tcs := map[string]struct {
 		err    error
 		target func() any
 		input  string
 		path   paths.Path
 		opts   []niceyaml.SourceOption
+		decode []niceyaml.DecodeOption
 	}{
+		"custom unmarshaler elements": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new([]aliasPlain) },
+			decode: []niceyaml.DecodeOption{plainText},
+			err:    niceyaml.ErrExcessiveAliasing,
+		},
+		"elements no custom unmarshaler decodes": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new([]aliasPlain) },
+		},
+		"custom unmarshaler of a type the target does not reach": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new([]string) },
+			decode: []niceyaml.DecodeOption{plainText},
+		},
+		"json unmarshaler elements under their option": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new([]aliasJSON) },
+			decode: []niceyaml.DecodeOption{niceyaml.WithJSONUnmarshalers(true)},
+			err:    niceyaml.ErrExcessiveAliasing,
+		},
+		"json unmarshaler elements without their option": {
+			input:  manyAliases,
+			path:   kind,
+			target: func() any { return new([]aliasJSON) },
+		},
 		"text unmarshaler elements": {
 			input:  manyAliases,
 			path:   kind,
@@ -11593,7 +12344,7 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 				doc = yamltest.At(t, doc, tc.path)
 			}
 
-			err := doc.DecodeInto(t.Context(), tc.target())
+			err := doc.DecodeInto(t.Context(), tc.target(), tc.decode...)
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 				require.NotErrorIs(t, err, niceyaml.ErrDecode)

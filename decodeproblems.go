@@ -11,7 +11,6 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
@@ -20,7 +19,7 @@ import (
 )
 
 // bindDecodeProblems binds err, the rejection a decode of node into v
-// with yamlOpts returned, to the source, with the other problems of that
+// with cfg returned, to the source, with the other problems of that
 // decode beside it.
 //
 // The go-yaml decoder decides whether a decode fails, and it returns one
@@ -52,7 +51,7 @@ func (n *Node) bindDecodeProblems(
 	err error,
 	node ast.Node,
 	v any,
-	yamlOpts []yaml.DecodeOption,
+	cfg decodeConfig,
 ) error {
 	if err == nil {
 		return nil
@@ -65,7 +64,7 @@ func (n *Node) bindDecodeProblems(
 		return bound
 	}
 
-	c := newProblemCollector(ctx, n, yamlOpts)
+	c := newProblemCollector(ctx, n, cfg)
 	c.collect(reflect.TypeOf(v).Elem(), node)
 
 	delete(c.found, at)
@@ -201,31 +200,31 @@ type decodeProblem struct {
 //     [time.Duration], which the decoder returns with no token.
 //
 // The walk reads nothing at or below a value that decodes itself, as
-// [reportsOwnError] lists those types. Only the unmarshaler of such a
-// value says what it accepts, and a second call can answer otherwise
-// than the first, as one that counts the names it has seen does. A
-// [time.Duration] and a [time.Time] are the exception, since the decoder
-// parses both itself. The walk reads nothing below an interface or a
-// [yaml.MapSlice] either, which take any value. It passes over a struct
-// the decoder decodes no field of, as [unknownFieldFinder.fields]
-// describes those.
+// [reportsOwnError] lists those types, a type an option of the decode
+// gives an unmarshaler among them. Only the unmarshaler of such a value
+// says what it accepts, and a second call can answer otherwise than the
+// first, as one that counts the names it has seen does. A [time.Duration]
+// and a [time.Time] are the exception, since the decoder parses both
+// itself. The walk reads nothing below an interface or a [yaml.MapSlice]
+// either, which take any value. It passes over a struct the decoder
+// decodes no field of, as [unknownFieldFinder.fields] describes those.
 //
 // The walk cannot see every rule the decode applies, such as the types
-// [yaml.CustomUnmarshaler] decodes, or the value the decoder holds for
-// an anchor. So the value that reads a leaf confirms each problem, as
-// [problemCollector.confirmed] describes. The collector keeps a problem
-// only when the decoder rejects the leaf there as it rejected the leaf
-// alone. A struct that a custom unmarshaler decodes thus judges its own
-// fields. It judges nothing below them, so the collector can add a
-// problem there that the unmarshaler accepts.
+// [yaml.RegisterCustomUnmarshaler] gave a function, or the value the
+// decoder holds for an anchor. So the value that reads a leaf confirms
+// each problem, as [problemCollector.confirmed] describes. The collector
+// keeps a problem only when the decoder rejects the leaf there as it
+// rejected the leaf alone. A struct that a registered function decodes
+// thus judges its own fields. It judges nothing below them, so the
+// collector can add a problem there that the function accepts.
 //
 // The pass decodes one leaf at a time, so it calls no unmarshaler of a
-// value the walk reads. A decode of the struct that reads a leaf can
-// call code the walk does not pair with the leaf. That is a function
-// from [yaml.CustomUnmarshaler], a [yaml.StructValidator], and the
-// unmarshaler of another value that reads the entry of the leaf, as a
-// field of the same name in an inline struct does. What those return
-// adds no problem. A struct with no field that a probe decodes reaches a
+// value the walk reads. A decode of the struct that reads a leaf can call
+// code the walk does not pair with the leaf. That is a registered
+// function, the [yaml.StructValidator] of [WithYAMLStructValidator], and
+// the unmarshaler of another value that reads the entry of the leaf, as a
+// field of the same name in an inline struct does. What those return adds
+// no problem. A struct with no field that a probe decodes reaches a
 // StructValidator too.
 //
 // When the decoder rejects unknown fields, an [unknownFieldFinder] adds
@@ -251,6 +250,8 @@ type problemCollector struct {
 	// The mappings and sequences the walk has read, each as one type, so
 	// it reads a value that several aliases reach once for each type.
 	visited map[valueVisit]bool
+	// The settings of the decode.
+	cfg decodeConfig
 }
 
 // valueVisit names a mapping or a sequence the walk has read, by the
@@ -280,23 +281,30 @@ type holder struct {
 	unmarshals bool
 }
 
-// The result of [inlinesUnmarshaler] for each struct type it has read.
+// The result of [inlinesUnmarshaler] for each struct type it has read,
+// in a decode whose options name no unmarshaler.
 var inlineUnmarshalers typeCache[bool]
 
 // inlinesUnmarshaler reports whether t, a struct type, holds an inline
-// field that decodes itself, as [reportsOwnError] lists those types, in
-// its own fields or in those of a struct it holds inline. A decode of t
-// calls the unmarshaler of that field whatever the mapping holds.
-func inlinesUnmarshaler(t reflect.Type) bool {
+// field that decodes itself, as [reportsOwnError] lists those types for
+// the unmarshalers u, in its own fields or in those of a struct it holds
+// inline. A decode of t calls the unmarshaler of that field whatever the
+// mapping holds. The answer for a u that names a type holds for its
+// decode alone, so the cache serves only a u that names none.
+func inlinesUnmarshaler(t reflect.Type, u optionUnmarshalers) bool {
+	if len(u.custom) > 0 || u.json {
+		return holdsInlineUnmarshaler(t, u, map[reflect.Type]bool{})
+	}
+
 	return inlineUnmarshalers.get(t, func(t reflect.Type) bool {
-		return holdsInlineUnmarshaler(t, map[reflect.Type]bool{})
+		return holdsInlineUnmarshaler(t, u, map[reflect.Type]bool{})
 	})
 }
 
 // holdsInlineUnmarshaler is [inlinesUnmarshaler] without its cache. The
 // seen set holds the structs the walk is inside of, so a struct that
 // holds itself inline ends the walk.
-func holdsInlineUnmarshaler(t reflect.Type, seen map[reflect.Type]bool) bool {
+func holdsInlineUnmarshaler(t reflect.Type, u optionUnmarshalers, seen map[reflect.Type]bool) bool {
 	if seen[t] {
 		return false
 	}
@@ -310,7 +318,7 @@ func holdsInlineUnmarshaler(t reflect.Type, seen map[reflect.Type]bool) bool {
 		}
 
 		inner := pointerBase(field.Type)
-		if reportsOwnError(inner) || inner.Kind() == reflect.Struct && holdsInlineUnmarshaler(inner, seen) {
+		if reportsOwnError(inner, u) || inner.Kind() == reflect.Struct && holdsInlineUnmarshaler(inner, u, seen) {
 			return true
 		}
 	}
@@ -319,9 +327,9 @@ func holdsInlineUnmarshaler(t reflect.Type, seen map[reflect.Type]bool) bool {
 }
 
 // newProblemCollector creates a new [*problemCollector] for a decode of
-// n with yamlOpts.
-func newProblemCollector(ctx context.Context, n *Node, yamlOpts []yaml.DecodeOption) *problemCollector {
-	dec := yaml.NewDecoder(bytes.NewReader(nil), yamlOpts...)
+// n with cfg.
+func newProblemCollector(ctx context.Context, n *Node, cfg decodeConfig) *problemCollector {
+	dec := yaml.NewDecoder(bytes.NewReader(nil), n.yamlOptions(cfg)...)
 
 	return &problemCollector{
 		ctx:      ctx,
@@ -329,7 +337,8 @@ func newProblemCollector(ctx context.Context, n *Node, yamlOpts []yaml.DecodeOpt
 		resolver: n.doc.pathResolver(),
 		tree:     n.doc.decodeTree(),
 		decoder:  dec,
-		finder:   newUnknownFieldFinder(ctx, n, dec),
+		finder:   newUnknownFieldFinder(ctx, n, dec, cfg.unmarshalers),
+		cfg:      cfg,
 		found:    map[position.Position]decodeProblem{},
 		visited:  map[valueVisit]bool{},
 	}
@@ -342,7 +351,7 @@ func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 	c.register(node)
 	c.walk(t, node, place{}, holder{})
 
-	if !c.rejectsUnknownFields() {
+	if !c.cfg.disallowUnknownFields {
 		return
 	}
 
@@ -383,26 +392,6 @@ func (c *problemCollector) register(node ast.Node) {
 	var sink any
 
 	_ = decodeWithRecover(c.ctx, c.decoder, view, &sink) //nolint:errcheck // The decode returned this rejection.
-}
-
-// rejectsUnknownFields reports whether the decoder of the pass rejects a
-// key that no field of a struct reads, as [yaml.DisallowUnknownField]
-// makes it. An option tells nothing about itself, so the collector asks
-// the decoder, with a decode of a mapping of one key into a struct with
-// no field. The key is the empty string. Only the empty prefix from
-// [yaml.AllowFieldPrefixes] allows that key, and it allows every other
-// key too.
-func (c *problemCollector) rejectsUnknownFields() bool {
-	tk := token.String("", `""`, &token.Position{Line: 1, Column: 1})
-	probe := ast.Mapping(tk, false, ast.MappingValue(tk, ast.String(tk), ast.Null(tk)))
-
-	var shell struct{}
-
-	err := decodeWithRecover(c.ctx, c.decoder, probe, &shell)
-
-	_, unknown := err.(*yaml.UnknownFieldError) //nolint:errorlint // The decoder returns it unwrapped.
-
-	return unknown
 }
 
 // add keeps problem, unless the collector holds one at the same position
@@ -451,7 +440,7 @@ func (c *problemCollector) walk(t reflect.Type, held ast.Node, at place, in hold
 		return
 	}
 
-	if reportsOwnError(t) || t.Kind() == reflect.Interface || t == mapSliceType {
+	if reportsOwnError(t, c.cfg.unmarshalers) || t.Kind() == reflect.Interface || t == mapSliceType {
 		return
 	}
 
@@ -493,7 +482,7 @@ func (c *problemCollector) fields(t reflect.Type, mapping *ast.MappingNode, at p
 		return
 	}
 
-	in := holder{typ: t, unmarshals: inlinesUnmarshaler(t)}
+	in := holder{typ: t, unmarshals: inlinesUnmarshaler(t, c.cfg.unmarshalers)}
 
 	c.below(in, t, mapping, merges, at, map[reflect.Type]bool{})
 }
@@ -528,7 +517,7 @@ func (c *problemCollector) below(
 		inner := pointerBase(field.Type)
 
 		switch {
-		case reportsOwnError(inner):
+		case reportsOwnError(inner, c.cfg.unmarshalers):
 			// The unmarshaler of the field reads the mapping.
 
 		case inner.Kind() == reflect.Map:
@@ -600,8 +589,8 @@ func (c *problemCollector) entries(t reflect.Type, mapping *ast.MappingNode, at 
 //
 // Any other error adds nothing. That is another rejection of the
 // decoder, such as one for a tag that does not convert its value, the
-// error of a type that only [yaml.CustomUnmarshaler] decodes, or a panic
-// that [decodeWithRecover] placed.
+// error of a type that only a [yaml.RegisterCustomUnmarshaler] function
+// decodes, or a panic that [decodeWithRecover] placed.
 func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, at place, in holder) {
 	err := c.decode(node, reflect.New(t).Interface())
 	if err == nil {
@@ -664,9 +653,10 @@ func (c *problemCollector) decode(node ast.Node, v any) error {
 // A struct reads the leaf from a mapping that holds the entry of its
 // field alone, into a new value of the type of that struct, as the
 // [decodeTree] of the document reads the entry. The decoder thus applies
-// what the walk cannot see, such as a [yaml.CustomUnmarshaler] for the
-// struct. A struct that holds an inline field that decodes itself
-// confirms nothing, since any decode of it calls that unmarshaler.
+// what the walk cannot see, such as a [yaml.RegisterCustomUnmarshaler]
+// function for the struct. A struct that holds an inline field that
+// decodes itself confirms nothing, since any decode of it calls that
+// unmarshaler.
 //
 // A sequence or a map reads the leaf as the one element of a sequence,
 // which decodes into a slice of the type of the leaf. The decoder reads

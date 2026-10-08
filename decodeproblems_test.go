@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,11 +20,19 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// The errors the unmarshalers of this file report.
 var (
+	// The errors the unmarshalers of this file report.
 	errBadServer    = errors.New("bad server")
 	errRepoRequired = errors.New("repo is required")
 	errPortRequired = errors.New("port is required")
+
+	// Has go-yaml decode a problemRegistered as decodePulled decodes a
+	// problemPulled, in every decode of the program.
+	registerPulled = sync.OnceFunc(func() {
+		yaml.RegisterCustomUnmarshalerContext(func(ctx context.Context, p *problemRegistered, data []byte) error {
+			return decodePulled(ctx, (*problemPulled)(p), data)
+		})
+	})
 )
 
 // problemServer is an element of [problemConfig].
@@ -72,15 +81,27 @@ func (i *problemImage) UnmarshalYAML(unmarshal func(any) error) error {
 }
 
 // problemPulled has the fields of [problemImage] and no method. A
-// yaml.CustomUnmarshaler option decodes it.
+// function from niceyaml.WithCustomUnmarshaler decodes it.
 type problemPulled struct {
 	Repo string `yaml:"repo"`
 	Pull bool   `yaml:"pull"`
 }
 
+// problemRegistered has the fields of [problemPulled]. A function from
+// yaml.RegisterCustomUnmarshaler decodes it in every decode of the
+// program, as registerPulled registers one.
+type problemRegistered problemPulled
+
+// problemJSON has the fields of [problemPulled] and an UnmarshalJSON
+// method that accepts every value, which the decoder calls only under
+// niceyaml.WithJSONUnmarshalers.
+type problemJSON problemPulled
+
+func (*problemJSON) UnmarshalJSON([]byte) error { return nil }
+
 // decodePulled decodes a [problemPulled] as [problemImage] decodes
 // itself.
-func decodePulled(p *problemPulled, data []byte) error {
+func decodePulled(_ context.Context, p *problemPulled, data []byte) error {
 	var raw struct {
 		Repo string `yaml:"repo"`
 		Pull string `yaml:"pull"`
@@ -749,7 +770,9 @@ func TestDocument_Decode_Problems_SecondDocument(t *testing.T) {
 func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 	t.Parallel()
 
-	custom := niceyaml.WithYAMLDecodeOptions(yaml.CustomUnmarshaler(decodePulled))
+	custom := niceyaml.WithCustomUnmarshaler(decodePulled)
+
+	registerPulled()
 
 	tcs := map[string]struct {
 		decode func(context.Context, *niceyaml.Node, ...niceyaml.DecodeOption) error
@@ -790,8 +813,8 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			input: "replicas: x\nimage: {repo: r, pull: always}\n",
 			want:  "1:11: $.replicas: expected integer, got string",
 		},
-		// Nothing shows which type the option decodes, so the error of
-		// its function has no location and comes back alone.
+		// The option names the type its function decodes, so the error
+		// of the function binds at the value, beside the other problem.
 		"custom unmarshaler function": {
 			decode: decodeInto[struct {
 				Image    problemPulled `yaml:"image"`
@@ -800,10 +823,14 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			input: "image: {pull: always}\nreplicas: x\n",
 			opts:  []niceyaml.DecodeOption{custom},
 			is:    errRepoRequired,
-			want:  "repo is required",
+			want: stringtest.JoinLF(
+				"2 problems",
+				"1:9: $.image: repo is required",
+				"2:11: $.replicas: expected integer, got string",
+			),
 		},
-		// The struct the function decodes confirms each of its fields,
-		// so the function, which takes pull as text, has the last word.
+		// The search leaves the image to the function, which takes pull
+		// as text, so the boolean field of the type is no problem.
 		"value beside a custom unmarshaler function that passes": {
 			decode: decodeInto[struct {
 				Image    problemPulled `yaml:"image"`
@@ -812,6 +839,53 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			input: "replicas: x\nimage: {repo: r, pull: always}\n",
 			opts:  []niceyaml.DecodeOption{custom},
 			want:  "1:11: $.replicas: expected integer, got string",
+		},
+		// Nothing shows which type a registered function decodes, so the
+		// error of the function has no location and comes back alone.
+		"registered unmarshaler function": {
+			decode: decodeInto[struct {
+				Image    problemRegistered `yaml:"image"`
+				Replicas int               `yaml:"replicas"`
+			}](),
+			input: "image: {pull: always}\nreplicas: x\n",
+			is:    errRepoRequired,
+			want:  "repo is required",
+		},
+		// The struct the function decodes confirms each of its fields,
+		// so the function, which takes pull as text, has the last word.
+		"value beside a registered unmarshaler function that passes": {
+			decode: decodeInto[struct {
+				Image    problemRegistered `yaml:"image"`
+				Replicas int               `yaml:"replicas"`
+			}](),
+			input: "replicas: x\nimage: {repo: r, pull: always}\n",
+			want:  "1:11: $.replicas: expected integer, got string",
+		},
+		// The option turns the method on, so the search leaves the image
+		// to the method, which accepts it.
+		"json unmarshaler under its option": {
+			decode: decodeInto[struct {
+				Image    problemJSON `yaml:"image"`
+				Replicas int         `yaml:"replicas"`
+			}](),
+			input: "replicas: x\nimage: {repo: [r], pull: always}\n",
+			opts:  []niceyaml.DecodeOption{niceyaml.WithJSONUnmarshalers(true)},
+			want:  "1:11: $.replicas: expected integer, got string",
+		},
+		// The decoder reads the fields of the type, so the search reads
+		// them too.
+		"json unmarshaler without its option": {
+			decode: decodeInto[struct {
+				Image    problemJSON `yaml:"image"`
+				Replicas int         `yaml:"replicas"`
+			}](),
+			input: "replicas: x\nimage: {repo: [r], pull: always}\n",
+			want: stringtest.JoinLF(
+				"3 problems",
+				"1:11: $.replicas: expected integer, got string",
+				"2:16: $.image.repo: expected string, got sequence",
+				"2:26: $.image.pull: expected boolean, got string",
+			),
 		},
 		// The error of the unmarshaler keeps its wrapper and its
 		// sentinel beside the other problems.
@@ -1008,7 +1082,7 @@ func TestDocument_DecodeInto_Problems_Defaults(t *testing.T) {
 		}{Server: problemServer{Port: 8080}}
 
 		err := yamltest.FirstDocument(t, input).DecodeInto(
-			t.Context(), &cfg, niceyaml.WithYAMLDecodeOptions(yaml.Validator(portValidator{})),
+			t.Context(), &cfg, niceyaml.WithYAMLStructValidator(portValidator{}),
 		)
 		require.EqualError(t, err, "1:10: $.timeout: expected integer, got string")
 		require.NotErrorIs(t, err, errPortRequired)
@@ -1099,17 +1173,23 @@ func TestDocument_Decode_Problems_Context(t *testing.T) {
 		require.EqualError(t, err, "2:11: $.replicas: expected integer, got string")
 	})
 
-	// The function decodes the image in the decode, and ends the context
-	// when the search asks it about a field of the image. The search has
-	// found the timeout by then, and reports none of what it found.
+	// The registered function decodes the image in the decode, and ends
+	// the context when the search asks it about a field of the image. The
+	// search has found the timeout by then, and reports none of what it
+	// found.
 	t.Run("context that ends in the search", func(t *testing.T) {
 		t.Parallel()
+
+		type ended struct {
+			Pull bool `yaml:"pull"`
+		}
 
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
 		calls := 0
-		ending := yaml.CustomUnmarshaler(func(*problemPulled, []byte) error {
+
+		yaml.RegisterCustomUnmarshaler(func(*ended, []byte) error {
 			calls++
 			if calls > 1 {
 				cancel()
@@ -1119,12 +1199,37 @@ func TestDocument_Decode_Problems_Context(t *testing.T) {
 		})
 
 		_, err := yamltest.FirstDocument(t, "replicas: x\ntimeout: soon\nimage: {pull: always}\n").Decode[struct {
+			Replicas int   `yaml:"replicas"`
+			Timeout  int   `yaml:"timeout"`
+			Image    ended `yaml:"image"`
+		}](ctx)
+		require.EqualError(t, err, "1:11: $.replicas: expected integer, got string")
+		assert.Equal(t, 2, calls)
+	})
+
+	// The option names the type its function decodes, so the search asks
+	// the function about no field of the image, and reports the timeout.
+	t.Run("custom unmarshaler the search leaves alone", func(t *testing.T) {
+		t.Parallel()
+
+		calls := 0
+		counting := niceyaml.WithCustomUnmarshaler(func(context.Context, *problemPulled, []byte) error {
+			calls++
+
+			return nil
+		})
+
+		_, err := yamltest.FirstDocument(t, "replicas: x\ntimeout: soon\nimage: {pull: always}\n").Decode[struct {
 			Replicas int           `yaml:"replicas"`
 			Timeout  int           `yaml:"timeout"`
 			Image    problemPulled `yaml:"image"`
-		}](ctx, niceyaml.WithYAMLDecodeOptions(ending))
-		require.EqualError(t, err, "1:11: $.replicas: expected integer, got string")
-		assert.Equal(t, 2, calls)
+		}](t.Context(), counting)
+		require.EqualError(t, err, stringtest.JoinLF(
+			"2 problems",
+			"1:11: $.replicas: expected integer, got string",
+			"2:10: $.timeout: expected integer, got string",
+		))
+		assert.Equal(t, 1, calls)
 	})
 }
 

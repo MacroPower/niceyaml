@@ -530,9 +530,9 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // source wrote as a bare date, since a [time.Time] does not record that.
 // [Schema.Validate] reads the source and spells such a timestamp as a
 // full-date where it can. The [yaml.MapSlice] a decode with
-// [yaml.UseOrderedMap] yields for each mapping becomes a map with the
-// same members, and where two items share a key, the later one wins, as
-// it does in a decode into a map.
+// [niceyaml.WithYAMLOrderedMaps] yields for each mapping becomes a map
+// with the same members, and where two items share a key, the later one
+// wins, as it does in a decode into a map.
 //
 // Returns nil when data conforms. On a constraint violation, returns a
 // [*niceyaml.SourceError]. A single violation carries its YAML path on
@@ -799,12 +799,12 @@ func sourcePath(root ast.Node, idx *datapath.Index, segments []jsonschema.Segmen
 // every timestamp becomes a date-time. The index idx finds the members of
 // the mappings in the document of root, and its resolver follows the
 // aliases there. A [yaml.MapSlice], which a decode with
-// [yaml.UseOrderedMap] yields for each mapping, becomes a map with the
-// same members, and a later item replaces an earlier one with the same
-// key, as a decode into a map does. It walks maps, slices, and ordered
-// mappings so such a value anywhere in a document stays validatable.
-// Every other value comes back unchanged, non-finite floats included,
-// since the validator treats those as numbers.
+// [niceyaml.WithYAMLOrderedMaps] yields for each mapping, becomes a map
+// with the same members, and a later item replaces an earlier one with
+// the same key, as a decode into a map does. It walks maps, slices, and
+// ordered mappings so such a value anywhere in a document stays
+// validatable. Every other value comes back unchanged, non-finite floats
+// included, since the validator treats those as numbers.
 //
 // A map or slice that holds none of these values comes back as the same
 // container, and one that does comes back as a copy. An ordered mapping
