@@ -20,14 +20,20 @@ import (
 //
 // Create instances with [New].
 type Differ struct {
-	algo lcs.Algorithm
+	config
 }
 
 // Option configures a [Differ].
 //
 // Available options:
 //   - [WithAlgorithm]
-type Option func(*Differ)
+type Option func(*config)
+
+// config holds the settings an [Option] configures. An option takes it in
+// place of the [Differ] that embeds it, so only [New] can apply one.
+type config struct {
+	algo lcs.Algorithm
+}
 
 // WithAlgorithm is an [Option] that sets the diff algorithm. A nil
 // algorithm keeps the default, and so does a nil pointer such as a nil
@@ -37,8 +43,8 @@ type Option func(*Differ)
 //
 // Default is [lcs.Hirschberg].
 func WithAlgorithm(algo lcs.Algorithm) Option {
-	return func(d *Differ) {
-		d.algo = algo
+	return func(c *config) {
+		c.algo = algo
 	}
 }
 
@@ -48,7 +54,7 @@ func WithAlgorithm(algo lcs.Algorithm) Option {
 func New(opts ...Option) *Differ {
 	d := &Differ{}
 	for _, opt := range opts {
-		opt(d)
+		opt(&d.config)
 	}
 
 	if nilness.IsNil(d.algo) {

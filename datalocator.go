@@ -211,10 +211,10 @@ func (l *DataLocator) option(names []string, key bool) ErrorOption {
 	path, tk := l.locate(names, key)
 	place := atToken(tk)
 
-	return func(e *Error) {
-		e.path, e.hasPath = path, true
+	return func(c *errorConfig) {
+		c.path, c.hasPath = path, true
 
-		place(e)
+		place(c)
 	}
 }
 

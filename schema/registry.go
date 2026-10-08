@@ -94,19 +94,13 @@ const defaultHTTPTimeout = 30 * time.Second
 // A Registry never changes after construction except for its cache, so it
 // is safe for concurrent use. Create instances with [NewRegistry].
 type Registry struct {
-	group       singleflight.Group // one load and compile in flight per cacheKey
-	cache       map[string]*Schema // compiled schemas by cacheKey
-	refDocs     map[string]refDoc  // the documents a $ref names, by URI without fragment
-	client      *http.Client       // fetches the schemas URL refs name
-	fsys        fs.FS              // reads the schemas File refs name under WithFSAt; nil reads the disk
-	fsIDs       map[any]int        // the number of each file system a Ref names its file in
-	fsKept      []fs.FS            // each file system in fsIDs, which keeps a map known by address alive
-	fsAt        *fsDir             // the directory on disk the root of fsys stands for; nil when it stands for none
-	resolvers   []Resolver
-	compileOpts []CompileOption
-	mu          sync.RWMutex // guards cache, refDocs, fsIDs, and fsKept
-	// Makes Validate report ErrNoMatch when no resolver applies.
-	requireSchema bool
+	group   singleflight.Group // one load and compile in flight per cacheKey
+	cache   map[string]*Schema // compiled schemas by cacheKey
+	refDocs map[string]refDoc  // the documents a $ref names, by URI without fragment
+	fsIDs   map[any]int        // the number of each file system a Ref names its file in
+	fsKept  []fs.FS            // each file system in fsIDs, which keeps a map known by address alive
+	registryConfig
+	mu sync.RWMutex // guards cache, refDocs, fsIDs, and fsKept
 }
 
 // RegistryOption configures [Registry] creation.
@@ -117,7 +111,20 @@ type Registry struct {
 //   - [WithRequireSchema]
 //   - [WithHTTPClient]
 //   - [WithFSAt]
-type RegistryOption func(*Registry)
+type RegistryOption func(*registryConfig)
+
+// registryConfig holds the settings a [RegistryOption] configures. An
+// option takes it in place of the [Registry] that embeds it, so only
+// [NewRegistry] can apply one.
+type registryConfig struct {
+	client      *http.Client // fetches the schemas URL refs name
+	fsys        fs.FS        // reads the schemas File refs name under WithFSAt; nil reads the disk
+	fsAt        *fsDir       // the directory on disk the root of fsys stands for; nil when it stands for none
+	resolvers   []Resolver
+	compileOpts []CompileOption
+	// Makes Validate report ErrNoMatch when no resolver applies.
+	requireSchema bool
+}
 
 // WithFSAt is a [RegistryOption] that confines the schema files the
 // registry reads from disk to dir, a directory there, and reads them
@@ -187,9 +194,9 @@ func WithFSAt(dir string, fsys fs.FS) RegistryOption {
 		panic("schema.WithFSAt: dir is empty")
 	}
 
-	return func(r *Registry) {
+	return func(c *registryConfig) {
 		if fsys != nil {
-			r.fsys, r.fsAt = fsys, newFSDir(dir)
+			c.fsys, c.fsAt = fsys, newFSDir(dir)
 		}
 	}
 }
@@ -212,9 +219,9 @@ func WithFSAt(dir string, fsys fs.FS) RegistryOption {
 // its catalog with a client of its own, since the catalog is not a schema
 // the registry loads.
 func WithHTTPClient(client *http.Client) RegistryOption {
-	return func(r *Registry) {
+	return func(c *registryConfig) {
 		if client != nil {
-			r.client = client
+			c.client = client
 		}
 	}
 }
@@ -250,8 +257,8 @@ func WithResolvers(res ...Resolver) RegistryOption {
 		}
 	}
 
-	return func(r *Registry) {
-		r.resolvers = append(r.resolvers, res...)
+	return func(c *registryConfig) {
+		c.resolvers = append(c.resolvers, res...)
 	}
 }
 
@@ -272,8 +279,8 @@ func WithResolvers(res ...Resolver) RegistryOption {
 // [Registry.Lookup] reports [ErrNoMatch] either way, since a caller that
 // asks for the validator needs to know there is none.
 func WithRequireSchema(require bool) RegistryOption {
-	return func(r *Registry) {
-		r.requireSchema = require
+	return func(c *registryConfig) {
+		c.requireSchema = require
 	}
 }
 
@@ -304,8 +311,8 @@ func WithRequireSchema(require bool) RegistryOption {
 func WithCompileOptions(opts ...CompileOption) RegistryOption {
 	opts = slices.Clone(opts)
 
-	return func(r *Registry) {
-		r.compileOpts = append(r.compileOpts, opts...)
+	return func(c *registryConfig) {
+		c.compileOpts = append(c.compileOpts, opts...)
 	}
 }
 
@@ -319,7 +326,7 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 		requireSchema: true,
 	}
 	for _, opt := range opts {
-		opt(r)
+		opt(&r.registryConfig)
 	}
 
 	return r

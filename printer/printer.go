@@ -72,18 +72,7 @@ const wrapOnCharacters = " " + breakpoints
 // context lines [WithContextLines] sets. A program configures one printer
 // with its terminal width and theme and prints its errors through it.
 type Printer struct {
-	styles         style.Styler
-	style          lipgloss.Style
-	gutter         Gutter
-	annotationFunc AnnotationFunc
-	// Blended styles by the kinds that produce them. WithStyles replaces
-	// it, since the kinds then resolve to other styles.
-	blends         *blendCache
-	wrap           int
-	containerWidth int
-	maxNumber      int
-	contextLines   int
-	hasCustomStyle bool
+	config
 }
 
 // DefaultContextLines is the number of context lines [Printer.PrintError]
@@ -126,7 +115,7 @@ func (p *Printer) With(opts ...Option) *Printer {
 // apply runs opts and recomputes the derived container style.
 func (p *Printer) apply(opts []Option) {
 	for _, opt := range opts {
-		opt(p)
+		opt(&p.config)
 	}
 
 	if !p.hasCustomStyle {
@@ -146,7 +135,26 @@ func (p *Printer) apply(opts []Option) {
 //   - [WithWrap]
 //   - [WithMaxNumber]
 //   - [WithContextLines]
-type Option func(*Printer)
+type Option func(*config)
+
+// config holds the settings an [Option] configures, and the cache of
+// blended styles that [WithStyles] replaces. An option takes it in place
+// of the [Printer] that embeds it, so only [New] and [Printer.With] can
+// apply one.
+type config struct {
+	styles         style.Styler
+	style          lipgloss.Style
+	gutter         Gutter
+	annotationFunc AnnotationFunc
+	// Blended styles by the kinds that produce them. WithStyles replaces
+	// it, since the kinds then resolve to other styles.
+	blends         *blendCache
+	wrap           int
+	containerWidth int
+	maxNumber      int
+	contextLines   int
+	hasCustomStyle bool
+}
 
 // GutterContext provides context about the current row for gutter rendering.
 // The printer passes it to [Gutter.Render] to determine the gutter content.
@@ -783,9 +791,9 @@ func (noGutter) Render(GutterContext) string {
 //
 //nolint:gocritic // hugeParam: Copying.
 func WithContainerStyle(s lipgloss.Style) Option {
-	return func(p *Printer) {
-		p.style = s
-		p.hasCustomStyle = true
+	return func(c *config) {
+		c.style = s
+		c.hasCustomStyle = true
 	}
 }
 
@@ -804,8 +812,8 @@ func WithContainerStyle(s lipgloss.Style) Option {
 // a window of short lines would otherwise draw a narrower box than the one
 // beside it.
 func WithContainerWidth(n int) Option {
-	return func(p *Printer) {
-		p.containerWidth = max(0, n)
+	return func(c *config) {
+		c.containerWidth = max(0, n)
 	}
 }
 
@@ -816,13 +824,13 @@ func WithContainerWidth(n int) Option {
 //
 // To style the frame around the output, use [WithContainerStyle].
 func WithStyles(s style.Styler) Option {
-	return func(p *Printer) {
+	return func(c *config) {
 		if nilness.IsNil(s) {
 			s = style.Default()
 		}
 
-		p.styles = s
-		p.blends = newBlendCache()
+		c.styles = s
+		c.blends = newBlendCache()
 	}
 }
 
@@ -831,12 +839,12 @@ func WithStyles(s style.Styler) Option {
 // g, or one holding a nil func or pointer such as a nil [GutterFunc],
 // selects [NoGutter].
 func WithGutter(g Gutter) Option {
-	return func(p *Printer) {
+	return func(c *config) {
 		if nilness.IsNil(g) {
 			g = NoGutter
 		}
 
-		p.gutter = g
+		c.gutter = g
 	}
 }
 
@@ -846,12 +854,12 @@ func WithGutter(g Gutter) Option {
 // line's overlays cover. [NoAnnotation] leaves annotations out. A nil fn
 // selects [DefaultAnnotation].
 func WithAnnotation(fn AnnotationFunc) Option {
-	return func(p *Printer) {
+	return func(c *config) {
 		if fn == nil {
 			fn = DefaultAnnotation
 		}
 
-		p.annotationFunc = fn
+		c.annotationFunc = fn
 	}
 }
 
@@ -860,8 +868,8 @@ func WithAnnotation(fn AnnotationFunc) Option {
 // counts as 0. The width of the box around the output is
 // [WithContainerWidth].
 func WithWrap(width int) Option {
-	return func(p *Printer) {
-		p.wrap = max(0, width)
+	return func(c *config) {
+		c.wrap = max(0, width)
 	}
 }
 
@@ -873,8 +881,8 @@ func WithWrap(width int) Option {
 // Use it to give two views the same gutter width, as a side-by-side diff
 // needs when one revision is longer than the other.
 func WithMaxNumber(n int) Option {
-	return func(p *Printer) {
-		p.maxNumber = max(0, n)
+	return func(c *config) {
+		c.maxNumber = max(0, n)
 	}
 }
 
@@ -883,8 +891,8 @@ func WithMaxNumber(n int) Option {
 // [DefaultContextLines], and a negative count shows the error lines alone,
 // as 0 does.
 func WithContextLines(n int) Option {
-	return func(p *Printer) {
-		p.contextLines = max(0, n)
+	return func(c *config) {
+		c.contextLines = max(0, n)
 	}
 }
 

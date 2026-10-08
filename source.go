@@ -64,11 +64,6 @@ import (
 // [NewSourceFromReader], [NewSourceFromBytes], [NewSourceFromString], or
 // [NewSourceFromTokens].
 type Source struct {
-	name     string
-	filePath string
-	// The file system filePath names a file in, or nil when no option
-	// set one, where a path names a file on disk.
-	fsys  fs.FS
 	lines line.Lines
 	// Holds the stream that [Source.Tokens] rebuilds from lines on its
 	// first call.
@@ -98,19 +93,12 @@ type Source struct {
 	// referenceSpellings fills on its first call.
 	refSpellings *spellings
 	docs         []*Node
-	parserOpts   []parser.Option
 	decodeOpts   []yaml.DecodeOption
-	// Holds the text of each reference document from WithReferences, in
-	// the order every decode reads them.
-	references       [][]byte
+	sourceConfig
 	streamOnce       sync.Once
 	fileOnce         sync.Once
 	decodeFileOnce   sync.Once
 	refSpellingsOnce sync.Once
-	// Accepts a mapping with the same key twice when parsing and decoding.
-	allowDuplicateKeys bool
-	// Turns off the alias limit for every reader of the documents.
-	skipAliasLimit bool
 }
 
 // SourceOption configures [Source] creation.
@@ -131,7 +119,26 @@ type Source struct {
 // Settings of one decode, such as [WithDisallowUnknownFields], are
 // [DecodeOption] values. A caller passes them to [Node.Decode], and
 // holds them in [DecodeOptions] to decode every document with them.
-type SourceOption func(*Source)
+type SourceOption func(*sourceConfig)
+
+// sourceConfig holds the settings a [SourceOption] configures. An option
+// takes it in place of the [Source] that embeds it, so only a constructor
+// can apply one.
+type sourceConfig struct {
+	name     string
+	filePath string
+	// The file system filePath names a file in, or nil when no option
+	// set one, where a path names a file on disk.
+	fsys       fs.FS
+	parserOpts []parser.Option
+	// Holds the text of each reference document from WithReferences, in
+	// the order every decode reads them.
+	references [][]byte
+	// Accepts a mapping with the same key twice when parsing and decoding.
+	allowDuplicateKeys bool
+	// Turns off the alias limit for every reader of the documents.
+	skipAliasLimit bool
+}
 
 // WithName is a [SourceOption] that sets the name for the [Source], which
 // [SourceError.Error] puts in front of the position of every error bound
@@ -140,8 +147,8 @@ type SourceOption func(*Source)
 // picture, so a file name that holds a line feed stays on one line, and
 // Source.Name returns the name as given.
 func WithName(name string) SourceOption {
-	return func(s *Source) {
-		s.name = name
+	return func(c *sourceConfig) {
+		c.name = name
 	}
 }
 
@@ -152,8 +159,8 @@ func WithName(name string) SourceOption {
 // For file-based sources, [NewSourceFromFile] and [NewSourceFromFS] set
 // this automatically.
 func WithFilePath(path string) SourceOption {
-	return func(s *Source) {
-		s.filePath = path
+	return func(c *sourceConfig) {
+		c.filePath = path
 	}
 }
 
@@ -178,8 +185,8 @@ func WithFilePath(path string) SourceOption {
 //
 // Without it, and with a nil fsys, the file path names a file on disk.
 func WithFS(fsys fs.FS) SourceOption {
-	return func(s *Source) {
-		s.fsys = fsys
+	return func(c *sourceConfig) {
+		c.fsys = fsys
 	}
 }
 
@@ -188,8 +195,8 @@ func WithFS(fsys fs.FS) SourceOption {
 // when a [Node] decodes it. When allowed, the last value wins. The default
 // is false, and a duplicate key is then an error.
 func WithAllowDuplicateKeys(allow bool) SourceOption {
-	return func(s *Source) {
-		s.allowDuplicateKeys = allow
+	return func(c *sourceConfig) {
+		c.allowDuplicateKeys = allow
 	}
 }
 
@@ -248,8 +255,8 @@ func WithAllowDuplicateKeys(allow bool) SourceOption {
 // merge keys there cost every decode of the Source what they expand to,
 // with the limit on or off. Pass WithReferences trusted files only.
 func WithAliasLimit(enabled bool) SourceOption {
-	return func(s *Source) {
-		s.skipAliasLimit = !enabled
+	return func(c *sourceConfig) {
+		c.skipAliasLimit = !enabled
 	}
 }
 
@@ -339,14 +346,14 @@ func WithAliasLimit(enabled bool) SourceOption {
 // [yaml.ReferenceFiles], reaches that decode alone, and an anchor it
 // defines wins over one of the same name in refs.
 func WithReferences(refs ...*Source) SourceOption {
-	return func(s *Source) {
+	return func(c *sourceConfig) {
 		for _, ref := range refs {
 			if ref == nil {
 				continue
 			}
 
-			s.references = append(s.references, ref.references...)
-			s.references = append(s.references, ref.text())
+			c.references = append(c.references, ref.references...)
+			c.references = append(c.references, ref.text())
 		}
 	}
 }
@@ -377,8 +384,8 @@ func referenceReaders(docs [][]byte) yaml.DecodeOption {
 // typed map then rejects. A mapping that decodes into an any value, at
 // the top level or in a field, keeps the last value instead.
 func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
-	return func(s *Source) {
-		s.parserOpts = append(s.parserOpts, opts...)
+	return func(c *sourceConfig) {
+		c.parserOpts = append(c.parserOpts, opts...)
 	}
 }
 
@@ -477,7 +484,7 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	t := &Source{}
 	for _, opt := range opts {
-		opt(t)
+		opt(&t.sourceConfig)
 	}
 
 	if t.allowDuplicateKeys {

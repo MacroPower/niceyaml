@@ -254,22 +254,14 @@ var (
 // [NewSummary].
 type Error struct {
 	err error
-	// The position or the range: a position.Position or a position.Range,
-	// or nil when neither is set.
-	loc any
 	// The errors a summary from NewSummary heads, which leave out the nil
 	// ones. Only a summary has any.
 	errors []error
-	// The errors from WithDetails, which leave out the nil ones.
-	details []error
-	// The path, when hasPath, since a path with no selectors is a path
-	// like any other.
-	path paths.Path
 	// The path the errors under the Error write their `@` paths from,
 	// which Rebase sets, when rebased, since a path with no selectors is
 	// a base like any other.
-	base    paths.Path
-	hasPath bool
+	base paths.Path
+	errorConfig
 	rebased bool
 	// The Error comes from a Rebase that moves paths alone, as a detail
 	// takes the base of the problem it explains, so it points nothing at
@@ -406,7 +398,7 @@ func Place(err error, opts ...ErrorOption) error {
 func wrapUndeclared(err error, opts ...ErrorOption) *Error {
 	e := &Error{err: err}
 	for _, opt := range opts {
-		opt(e)
+		opt(&e.errorConfig)
 	}
 
 	return e
@@ -598,7 +590,7 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 	c.details = slices.Clone(e.details)
 
 	for _, opt := range opts {
-		opt(&c)
+		opt(&c.errorConfig)
 	}
 
 	return &c
@@ -918,7 +910,22 @@ func asItself(err error, target any) bool {
 //   - [WithDetails]
 //   - [DataLocator.At]
 //   - [DataLocator.AtKey]
-type ErrorOption func(e *Error)
+type ErrorOption func(*errorConfig)
+
+// errorConfig holds the settings an [ErrorOption] configures. An option
+// takes it in place of the [Error] that embeds it, so only a constructor
+// and [Error.With] can apply one.
+type errorConfig struct {
+	// The position or the range: a position.Position or a position.Range,
+	// or nil when neither is set.
+	loc any
+	// The errors from WithDetails, which leave out the nil ones.
+	details []error
+	// The path, when hasPath, since a path with no selectors is a path
+	// like any other.
+	path    paths.Path
+	hasPath bool
+}
 
 // AtPath is an [ErrorOption] that sets the YAML path of the value the
 // error is about. It replaces a path set before it. The error points at
@@ -970,8 +977,8 @@ type ErrorOption func(e *Error)
 // and the path names the value in the message. [DataLocator.At] builds
 // both from the names of decoded data.
 func AtPath(p paths.Path) ErrorOption {
-	return func(e *Error) {
-		e.path, e.hasPath = p, true
+	return func(c *errorConfig) {
+		c.path, c.hasPath = p, true
 	}
 }
 
@@ -985,8 +992,8 @@ func AtPath(p paths.Path) ErrorOption {
 // [position.NewFromToken], and one that holds none names the position on
 // its own.
 func AtPosition(p position.Position) ErrorOption {
-	return func(e *Error) {
-		e.loc = p
+	return func(c *errorConfig) {
+		c.loc = p
 	}
 }
 
@@ -995,7 +1002,7 @@ func AtPosition(p position.Position) ErrorOption {
 // go-yaml error can be.
 func atToken(tk *token.Token) ErrorOption {
 	if tk == nil || tk.Position == nil {
-		return func(*Error) {}
+		return func(*errorConfig) {}
 	}
 
 	return AtPosition(position.NewFromToken(tk))
@@ -1016,8 +1023,8 @@ func atToken(tk *token.Token) ErrorOption {
 // A range that ends before its start covers nothing, so it binds as the
 // empty range at its start.
 func AtRange(r position.Range) ErrorOption {
-	return func(e *Error) {
-		e.loc = r
+	return func(c *errorConfig) {
+		c.loc = r
 	}
 }
 
@@ -1049,10 +1056,10 @@ func AtRange(r position.Range) ErrorOption {
 // To report several separate problems, join them with [errors.Join] or
 // head them with [NewSummary].
 func WithDetails(errs ...error) ErrorOption {
-	return func(e *Error) {
+	return func(c *errorConfig) {
 		for _, n := range errs {
 			if !isNothing(n) {
-				e.details = append(e.details, n)
+				c.details = append(c.details, n)
 			}
 		}
 	}

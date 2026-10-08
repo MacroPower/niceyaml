@@ -120,19 +120,14 @@ type CatalogEntry struct {
 //
 //	reg := schema.NewRegistry(schema.WithResolvers(schemastore.New()))
 type Store struct {
-	lastFetch      time.Time // Last successful fetch; zero until the first one succeeds.
-	lastAttempt    time.Time // Last fetch, successful or not.
-	client         *http.Client
-	filter         func(CatalogEntry) bool
-	inflight       *fetchCall // Fetch in progress, or nil when none is running.
-	lastErr        error      // Error from the last fetch, or nil when it succeeded.
-	catalogURL     string
-	lastMatch      atomic.Pointer[matchMemo] // Outcome of the last scan in FindMatch.
-	entries        []CatalogEntry
-	cacheTTL       time.Duration
-	refreshTimeout time.Duration
-	retryAfter     time.Duration
-	mu             sync.Mutex // Guards entries, inflight, lastFetch, lastAttempt, and lastErr.
+	lastFetch   time.Time                 // Last successful fetch; zero until the first one succeeds.
+	lastAttempt time.Time                 // Last fetch, successful or not.
+	inflight    *fetchCall                // Fetch in progress, or nil when none is running.
+	lastErr     error                     // Error from the last fetch, or nil when it succeeded.
+	lastMatch   atomic.Pointer[matchMemo] // Outcome of the last scan in FindMatch.
+	entries     []CatalogEntry
+	config
+	mu sync.Mutex // Guards entries, inflight, lastFetch, lastAttempt, and lastErr.
 }
 
 // fetchCall is a catalog fetch in progress. The fetch sets entries and err
@@ -152,14 +147,25 @@ type fetchCall struct {
 //   - [WithRefreshTimeout]
 //   - [WithRetryAfter]
 //   - [WithFilter]
-type Option func(*Store)
+type Option func(*config)
+
+// config holds the settings an [Option] configures. An option takes it in
+// place of the [Store] that embeds it, so only [New] can apply one.
+type config struct {
+	client         *http.Client
+	filter         func(CatalogEntry) bool
+	catalogURL     string
+	cacheTTL       time.Duration
+	refreshTimeout time.Duration
+	retryAfter     time.Duration
+}
 
 // WithCatalogURL is an [Option] that sets a custom catalog URL.
 //
 // Defaults to "https://www.schemastore.org/api/json/catalog.json".
 func WithCatalogURL(url string) Option {
-	return func(s *Store) {
-		s.catalogURL = url
+	return func(c *config) {
+		c.catalogURL = url
 	}
 }
 
@@ -168,9 +174,9 @@ func WithCatalogURL(url string) Option {
 // registry fetches the schemas the catalog names with its own client, from
 // [go.jacobcolvin.com/niceyaml/schema.WithHTTPClient].
 func WithHTTPClient(client *http.Client) Option {
-	return func(s *Store) {
+	return func(c *config) {
 		if client != nil {
-			s.client = client
+			c.client = client
 		}
 	}
 }
@@ -179,8 +185,8 @@ func WithHTTPClient(client *http.Client) Option {
 //
 // Defaults to 1 hour. Set to 0 to disable caching (fetch on every lookup).
 func WithCacheTTL(ttl time.Duration) Option {
-	return func(s *Store) {
-		s.cacheTTL = ttl
+	return func(c *config) {
+		c.cacheTTL = ttl
 	}
 }
 
@@ -199,9 +205,9 @@ func WithCacheTTL(ttl time.Duration) Option {
 // Defaults to 10 seconds. A timeout of zero or less keeps the default,
 // since a fetch under an expired deadline could never succeed.
 func WithRefreshTimeout(timeout time.Duration) Option {
-	return func(s *Store) {
+	return func(c *config) {
 		if timeout > 0 {
-			s.refreshTimeout = timeout
+			c.refreshTimeout = timeout
 		}
 	}
 }
@@ -216,9 +222,9 @@ func WithRefreshTimeout(timeout time.Duration) Option {
 // Defaults to 1 minute. An interval of zero or less keeps the default,
 // since it would retry on every lookup.
 func WithRetryAfter(interval time.Duration) Option {
-	return func(s *Store) {
+	return func(c *config) {
 		if interval > 0 {
-			s.retryAfter = interval
+			c.retryAfter = interval
 		}
 	}
 }
@@ -238,8 +244,8 @@ func WithRetryAfter(interval time.Duration) Option {
 //	    return strings.Contains(strings.ToLower(e.Name), "github")
 //	}))
 func WithFilter(fn func(CatalogEntry) bool) Option {
-	return func(s *Store) {
-		s.filter = fn
+	return func(c *config) {
+		c.filter = fn
 	}
 }
 
@@ -264,7 +270,7 @@ func New(opts ...Option) *Store {
 		retryAfter:     defaultRetryAfter,
 	}
 	for _, opt := range opts {
-		opt(store)
+		opt(&store.config)
 	}
 
 	return store

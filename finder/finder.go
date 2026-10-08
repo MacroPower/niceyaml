@@ -84,7 +84,7 @@ type Normalizer interface {
 //
 // Create instances with [New].
 type Finder struct {
-	normalizer Normalizer
+	config
 }
 
 // New creates a new [*Finder].
@@ -97,7 +97,7 @@ type Finder struct {
 func New(opts ...Option) *Finder {
 	f := &Finder{normalizer: normalizer.New()}
 	for _, opt := range opts {
-		opt(f)
+		opt(&f.config)
 	}
 
 	return f
@@ -107,7 +107,13 @@ func New(opts ...Option) *Finder {
 //
 // Available options:
 //   - [WithNormalizer]
-type Option func(*Finder)
+type Option func(*config)
+
+// config holds the settings an [Option] configures. An option takes it in
+// place of the [Finder] that embeds it, so only [New] can apply one.
+type config struct {
+	normalizer Normalizer
+}
 
 // WithNormalizer is an [Option] that sets the [Normalizer] applied to
 // both the search string and the loaded text before matching, in place
@@ -147,8 +153,8 @@ type Option func(*Finder)
 //
 // See [normalizer.Normalizer] for an implementation.
 func WithNormalizer(n Normalizer) Option {
-	return func(f *Finder) {
-		f.normalizer = n
+	return func(c *config) {
+		c.normalizer = n
 	}
 }
 

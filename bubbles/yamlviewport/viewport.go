@@ -170,7 +170,16 @@ const (
 //   - [WithContainerStyle]
 //   - [WithSearcher]
 //   - [WithFinder]
-type Option func(*Model)
+type Option func(*config)
+
+// config holds the settings an [Option] configures. An option takes it in
+// place of the [Model] that embeds it, so only [New] can apply one.
+type config struct {
+	// The container style applied to the viewport frame.
+	style    lipgloss.Style
+	printer  *printer.Printer
+	searcher Searcher
+}
 
 // WithPrinter is an [Option] that sets the [*printer.Printer] used for
 // rendering. Without it, the viewport creates a default [printer.Printer].
@@ -183,8 +192,8 @@ type Option func(*Model)
 // on the printer's container style. To fix the size of the viewport, set
 // them on [WithContainerStyle] instead.
 func WithPrinter(p *printer.Printer) Option {
-	return func(m *Model) {
-		m.printer = p
+	return func(c *config) {
+		c.printer = p
 	}
 }
 
@@ -194,8 +203,8 @@ func WithPrinter(p *printer.Printer) Option {
 //
 //nolint:gocritic // hugeParam: Copying.
 func WithContainerStyle(s lipgloss.Style) Option {
-	return func(m *Model) {
-		m.style = s
+	return func(c *config) {
+		c.style = s
 	}
 }
 
@@ -205,8 +214,8 @@ func WithContainerStyle(s lipgloss.Style) Option {
 // diacritics. A nil s, or one holding a nil pointer, selects that same
 // default.
 func WithSearcher(s Searcher) Option {
-	return func(m *Model) {
-		m.searcher = s
+	return func(c *config) {
+		c.searcher = s
 	}
 }
 
@@ -229,7 +238,7 @@ func New(opts ...Option) Model {
 	var m Model
 
 	for _, opt := range opts {
-		opt(&m)
+		opt(&m.config)
 	}
 
 	m.setInitialValues()
@@ -269,10 +278,8 @@ func New(opts ...Option) Model {
 // the term has one. A new revision changes the content, as does a diff mode
 // that changes the diff on display or a view mode while a diff shows.
 type Model struct {
-	// The container style applied to the viewport frame.
-	style    lipgloss.Style
-	printer  *printer.Printer
-	searcher Searcher
+	config
+
 	// Index over the lines on display, built when they change. In
 	// side-by-side mode index covers the left pane and indexRight the
 	// right one.

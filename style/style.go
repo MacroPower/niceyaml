@@ -36,25 +36,25 @@ type Styler interface {
 // The zero value resolves every kind to an empty style. Create instances
 // with [New].
 type Styles struct {
-	overrides map[kind.Kind]*lipgloss.Style
-	parents   map[kind.Kind]kind.Kind
-	resolved  map[kind.Kind]*lipgloss.Style
-	// Building is true while [New] or [Styles.With] runs options on maps
-	// it just made, so the options may write to those maps in place.
-	building bool
+	config
+
+	resolved map[kind.Kind]*lipgloss.Style
 }
 
 // Option configures a [Styles] value during construction.
 //
-// An option applied by hand to an existing value changes that value
-// alone and leaves every copy of it as it was, including the shared value
-// [Default] returns. [Styles.Style] reports the change once [Styles.With]
-// resolves inheritance again.
-//
 // Available options:
 //   - [Set]
 //   - [Inherit]
-type Option func(*Styles)
+type Option func(*config)
+
+// config holds the settings an [Option] configures. An option takes it in
+// place of the [Styles] that embeds it, so only [New] and [Styles.With]
+// can apply one, and each runs it on maps it just made.
+type config struct {
+	overrides map[kind.Kind]*lipgloss.Style
+	parents   map[kind.Kind]kind.Kind
+}
 
 // Set returns an [Option] that sets the [lipgloss.Style] for a [kind.Kind].
 // Kinds below it in the hierarchy inherit it unless a [Set] on the kind
@@ -62,15 +62,8 @@ type Option func(*Styles)
 //
 //nolint:gocritic // Value semantics preferred for API ergonomics.
 func Set(s kind.Kind, ls lipgloss.Style) Option {
-	return func(st *Styles) {
-		switch {
-		case st.overrides == nil:
-			st.overrides = make(map[kind.Kind]*lipgloss.Style, 1)
-		case !st.building:
-			st.overrides = maps.Clone(st.overrides)
-		}
-
-		st.overrides[s] = &ls
+	return func(c *config) {
+		c.overrides[s] = &ls
 	}
 }
 
@@ -90,15 +83,8 @@ func Set(s kind.Kind, ls lipgloss.Style) Option {
 // parents that loops before it reaches a set kind resolves to the base
 // style.
 func Inherit(child, parent kind.Kind) Option {
-	return func(st *Styles) {
-		switch {
-		case st.parents == nil:
-			st.parents = make(map[kind.Kind]kind.Kind, 1)
-		case !st.building:
-			st.parents = maps.Clone(st.parents)
-		}
-
-		st.parents[child] = parent
+	return func(c *config) {
+		c.parents[child] = parent
 	}
 }
 
@@ -113,14 +99,13 @@ func Inherit(child, parent kind.Kind) Option {
 func New(base lipgloss.Style, opts ...Option) Styles {
 	st := Styles{
 		overrides: map[kind.Kind]*lipgloss.Style{kind.Text: &base},
-		building:  true,
+		parents:   make(map[kind.Kind]kind.Kind, len(opts)),
 	}
 
 	for _, opt := range opts {
-		opt(&st)
+		opt(&st.config)
 	}
 
-	st.building = false
 	st.resolved = st.resolve()
 
 	return st
@@ -216,7 +201,6 @@ func (s Styles) With(opts ...Option) Styles {
 	c := Styles{
 		overrides: make(map[kind.Kind]*lipgloss.Style, len(s.overrides)+len(opts)),
 		parents:   make(map[kind.Kind]kind.Kind, len(s.parents)+len(opts)),
-		building:  true,
 	}
 	maps.Copy(c.overrides, s.overrides)
 	maps.Copy(c.parents, s.parents)
@@ -226,10 +210,9 @@ func (s Styles) With(opts ...Option) Styles {
 	}
 
 	for _, opt := range opts {
-		opt(&c)
+		opt(&c.config)
 	}
 
-	c.building = false
 	c.resolved = c.resolve()
 
 	return c
