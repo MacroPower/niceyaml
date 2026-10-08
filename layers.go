@@ -221,15 +221,17 @@ func (l *Layers) document(ctx context.Context) (*Node, error) {
 }
 
 // layerError returns the error of the layer that holds no value, for a
-// decode with cfg. Where the go-yaml options of cfg let that layer
-// decode, the layer reads something those options alone define, such as
-// an anchor of a reference document. The options reach the decode of the
-// merged document and no layer, so the error then names the option that
-// reaches a layer.
+// decode with cfg. Where the decoder rejected that layer and the go-yaml
+// options of cfg let it decode, the layer reads something those options
+// alone define, such as an anchor of a reference document. The options
+// reach the decode of the merged document and no layer, so the error
+// then names the option that reaches a layer. A layer that decodes and
+// does not merge, such as one with a key that has no name, fails the
+// same way with the options, so its error comes back as it is.
 func (l *Layers) layerError(ctx context.Context, cfg decodeConfig) error {
 	failed, err := l.merged.failed, l.merged.err
 
-	if failed == nil || failed.doc.err != nil || len(cfg.yamlOpts) == 0 {
+	if failed == nil || failed.doc.err != nil || len(cfg.yamlOpts) == 0 || !errors.Is(err, ErrDecode) {
 		return err
 	}
 

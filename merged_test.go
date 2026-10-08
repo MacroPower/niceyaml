@@ -888,6 +888,13 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, nodes[1], bound.Node())
+
+		// The layer decodes with or without a go-yaml option, so the
+		// error blames no option.
+		ordered := niceyaml.WithYAMLDecodeOptions(yaml.UseOrderedMap())
+
+		_, err = niceyaml.NewLayers(nodes...).Decode[any](t.Context(), ordered)
+		require.EqualError(t, err, "prod.yaml:2:3: mapping key has no name")
 	})
 
 	t.Run("an alias that a decode option defines does not resolve", func(t *testing.T) {
