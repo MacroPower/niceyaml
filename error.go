@@ -1623,7 +1623,7 @@ type boundTexts struct {
 // of the Nodes below it in a [Layers]. A binder that is unplaced binds
 // an error about a value that came from no document, as [unplacedError]
 // finds one, so each binding it builds keeps the error it was made from
-// for [placeable].
+// for [placeable] and is bound to no node.
 type binder struct {
 	src       *Source
 	node      *Node
@@ -2435,7 +2435,9 @@ func boundLocus(e *SourceError) locus {
 // the same way, each under the scope on its own, so a child that carries
 // no path stays as it is. A binding takes the source of the node its
 // location resolved in, which is the source of b unless b holds a
-// fallback and the path bound in a layer of another source.
+// fallback and the path bound in a layer of another source. A binder
+// that is unplaced binds to no node, since its error stands in no
+// document.
 func newSourceError(err error, b binder) *SourceError {
 	scoped := b.scoped(err)
 	found := scoped.anchor
@@ -2445,6 +2447,12 @@ func newSourceError(err error, b binder) *SourceError {
 	switch a := found.err.(type) { //nolint:errorlint // The anchor itself, found by the walk.
 	case *Error:
 		e.loc, e.node, e.locErr = locate(b, found.locus)
+
+		// The path looked in the one document of an empty source, and the
+		// binding stands in none.
+		if b.unplaced {
+			e.node = nil
+		}
 
 		if e.node != nil {
 			e.source = e.node.source
@@ -2584,6 +2592,10 @@ func (e *SourceError) Source() *Source {
 // the binding with the details it holds, so its node can be nil or belong
 // to another document or source. An error that [Layers] binds is bound
 // to the Node of the layer its path bound in.
+//
+// The error [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue]
+// returns is about a value that came from no document. It is bound to
+// none, and so is each binding below it, with a path or without.
 // A nil SourceError is bound to none.
 func (e *SourceError) Node() *Node {
 	if e == nil {

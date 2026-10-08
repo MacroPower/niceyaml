@@ -1111,6 +1111,22 @@ func TestSchema_ValidateValue(t *testing.T) {
 			}
 
 			assert.Equal(t, tc.wantPaths, gotPaths)
+
+			// The value came from no document, so no binding of the
+			// result names a Node, a document, or the index of one.
+			for b := range niceyaml.AllBindings(err) {
+				assert.Nil(t, b.Node())
+				assert.Nil(t, b.Document())
+
+				_, ok := b.DocumentIndex()
+				assert.False(t, ok)
+
+				// The reason for a path is the one of a document with no
+				// content, which FormatError leaves out.
+				if _, hasPath := b.Path(); hasPath {
+					require.ErrorIs(t, b.Unresolved(), paths.ErrNoDocument)
+				}
+			}
 		})
 	}
 
