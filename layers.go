@@ -315,6 +315,12 @@ func (l *Layers) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) 
 // at `$` or at `@`, and the bound error reports it as the document of
 // its layer reads it.
 func (l *Layers) Bind(err error) error {
+	// A check that passed has nothing to bind, so its call merges no
+	// layer.
+	if isNothing(err) {
+		return nil
+	}
+
 	doc, _ := l.document(context.Background()) //nolint:errcheck // A layer that holds no value adds nothing.
 
 	return doc.Bind(err)
