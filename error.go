@@ -283,6 +283,11 @@ type Error struct {
 	// walk. A binding or a tree marks each problem below the Error the
 	// same way, as childBase.rebase does.
 	invalid bool
+	// The path of the Error names the entries of several keys of a
+	// decoded map, so it resolves in no document, for the reason
+	// ErrAmbiguousPath. The rebase of the self-validation walk sets it
+	// under such an entry, and it holds for every error below the Error.
+	ambiguous bool
 }
 
 // NewError creates a new [*Error] with the given message. The Error is a
@@ -737,17 +742,20 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // [SourceError.Errors] and [SourceError.Details] return them, rebases
 // the same way on its own.
 func Rebase(err error, base paths.Path) error {
-	return rebase(err, base, false, false)
+	return rebase(err, base, false, false, false)
 }
 
 // rebase is [Rebase], and with movesOnly the result moves the paths of
 // err alone and points nothing at base, as a detail takes the base of the
 // problem it explains. With invalid, each Error the rebase builds matches
 // [errInvalid], as the self-validation walk marks what a [SelfValidator]
-// returns. A binding takes no base, and with invalid it comes back as
-// [markInvalid] marks it. A binding that stands in no document rebases
-// as the error [placeable] returns for it.
-func rebase(err error, base paths.Path, movesOnly, invalid bool) error {
+// returns. With ambiguous, the path of each Error the rebase builds
+// resolves in no document, for the reason [ErrAmbiguousPath], as the walk
+// marks an error under a map entry that shares its path. A binding takes
+// no base, and with invalid it comes back as [markInvalid] marks it. A
+// binding that stands in no document rebases as the error [placeable]
+// returns for it.
+func rebase(err error, base paths.Path, movesOnly, invalid, ambiguous bool) error {
 	if isNothing(err) {
 		return nil
 	}
@@ -770,14 +778,14 @@ func rebase(err error, base paths.Path, movesOnly, invalid bool) error {
 	x, ok := err.(*Error) //nolint:errorlint // The node itself, not a chain search.
 	if ok && x.addsNothing() {
 		if _, joined := joinBranches(x.err); joined {
-			return &Error{err: rebase(x.err, base, movesOnly, invalid), invalid: x.invalid || invalid}
+			return &Error{err: rebase(x.err, base, movesOnly, invalid, ambiguous), invalid: x.invalid || invalid}
 		}
 	}
 
 	if branches, ok := joinBranches(err); ok {
 		rebased := make([]error, 0, len(branches))
 		for _, branch := range branches {
-			r := rebase(branch, base, movesOnly, invalid)
+			r := rebase(branch, base, movesOnly, invalid, ambiguous)
 			if r != nil {
 				rebased = append(rebased, r)
 			}
@@ -792,7 +800,7 @@ func rebase(err error, base paths.Path, movesOnly, invalid bool) error {
 		}
 	}
 
-	return &Error{err: err, base: base, rebased: true, movesOnly: movesOnly, invalid: invalid}
+	return &Error{err: err, base: base, rebased: true, movesOnly: movesOnly, invalid: invalid, ambiguous: ambiguous}
 }
 
 // markInvalid returns err as a problem the document is at fault for, as
@@ -1151,11 +1159,14 @@ func (e *Error) LogValue() slog.Value {
 
 // locus is the location an [Error] carries: a path when hasPath, a
 // [position.Position] or a [position.Range] in loc, or both. The zero
-// locus is no location.
+// locus is no location. The path of a locus that is ambiguous names the
+// entries of several keys of a decoded map, so [locate] resolves it in no
+// document.
 type locus struct {
-	loc     any
-	path    paths.Path
-	hasPath bool
+	loc       any
+	path      paths.Path
+	hasPath   bool
+	ambiguous bool
 }
 
 // rebase returns l with base in front of its path. A locus with no path
@@ -1173,7 +1184,7 @@ func (l locus) rebase(base paths.Path) locus {
 // locus returns the location e carries itself, without looking through
 // its cause chain or applying its base.
 func (e *Error) locus() locus {
-	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath}
+	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath, ambiguous: e.ambiguous}
 }
 
 // move returns l, the location of an error below e, with the base of e
@@ -1181,7 +1192,10 @@ func (e *Error) locus() locus {
 // path, as [locus.rebase] puts it there. An Error that reroots puts it in
 // front of a `$` path too, in place of the root, since such a path reads
 // from the value [Layers] hold and the base is where a layer holds it.
+// A path below an Error that is ambiguous is ambiguous too.
 func (e *Error) move(l locus) locus {
+	l.ambiguous = l.ambiguous || e.ambiguous
+
 	if e.reroots && l.hasPath {
 		rel, _ := l.path.CutPrefix(paths.Doc())
 		l.path = e.base.Join(rel)
@@ -1385,8 +1399,8 @@ type location struct {
 // instead. The node is the one b binds
 // with, or, when b routes, the root of the document [binder.route] picks
 // for the location. An empty l is errUnlocated, a path bound where no
-// document resolves it is [ErrPathNeedsDocument], and a path bound
-// through a binder that marks its paths ambiguous is [ErrAmbiguousPath].
+// document resolves it is [ErrPathNeedsDocument], and a path that is
+// ambiguous, as [locus] describes one, is [ErrAmbiguousPath].
 func locate(b binder, l locus) (location, *Node, error) {
 	switch loc := l.loc.(type) {
 	case position.Range:
@@ -1407,7 +1421,7 @@ func locate(b binder, l locus) (location, *Node, error) {
 	}
 
 	if l.hasPath {
-		if b.ambiguous {
+		if l.ambiguous {
 			return location{}, b.node, fmt.Errorf("%w: %s", ErrAmbiguousPath, l.path)
 		}
 
@@ -1506,7 +1520,7 @@ func locateMerged(b binder, node *Node, at position.Position, l locus) (location
 		return locatePath(b, path)
 	}
 
-	if l.hasPath && !b.ambiguous {
+	if l.hasPath && !l.ambiguous {
 		return locatePath(b, l.path)
 	}
 
@@ -1732,22 +1746,18 @@ type boundTexts struct {
 // resolves, as [Source.Bind] does; one that does not, as the parser's
 // binder must not, since the documents are not built until the parse
 // ends, binds to the source alone, and [bindSyntaxErrors] gives each error
-// of the parse its document afterwards. A binder that marks its paths
-// ambiguous binds errors whose paths may name another value, so it
-// resolves no path, for the reason [ErrAmbiguousPath]. It still locates
-// a position or a range. A binder that locates binds an error a caller or
-// a validator gave a Node, so [binder.located] points an error that holds
-// no location at that Node. A binder that is unplaced binds
-// an error about a value that came from no document, as [BindValue]
-// does, so each binding it builds keeps the error it was made from for
-// [placeable] and is bound to no node.
+// of the parse its document afterwards. A binder that locates binds an
+// error a caller or a validator gave a Node, so [binder.located] points
+// an error that holds no location at that Node. A binder that is
+// unplaced binds an error about a value that came from no document, as
+// [BindValue] does, so each binding it builds keeps the error it was
+// made from for [placeable] and is bound to no node.
 type binder struct {
-	src       *Source
-	node      *Node
-	route     bool
-	ambiguous bool
-	locate    bool
-	unplaced  bool
+	src      *Source
+	node     *Node
+	route    bool
+	locate   bool
+	unplaced bool
 }
 
 // located returns err as b binds it at the top of its tree. A binder that
@@ -2590,7 +2600,7 @@ func findAnchor(err error) (anchor, bool) {
 		heading = heading || len(x.errors) > 0
 
 		if x.rebased && !x.movesOnly && !heading {
-			at := locus{path: x.base, hasPath: true}
+			at := locus{path: x.base, hasPath: true, ambiguous: x.ambiguous}
 
 			return anchor{err: x, locus: at}, false
 		}

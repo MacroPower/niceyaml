@@ -252,6 +252,10 @@ type selfWalker struct {
 	// The lowest number of a value the walk is inside of that the values
 	// below the current one lead back to, or math.MaxInt when none does.
 	reach int
+	// Whether the walk is below a map entry whose path names the entries
+	// of several keys, as [selfWalker.walkEntries] finds one. The path of
+	// each error the walk collects there is ambiguous.
+	ambiguous bool
 }
 
 // visit names a pointer, map, or slice the walker is inside of. It names
@@ -939,12 +943,19 @@ type mapEntry struct {
 // entry walks first, and the map iteration decides which.
 //
 // When ambiguous is true, the path of at names the entries of several
-// keys, so the errors of entries bind with no position, for the reason
-// [ErrAmbiguousPath].
+// keys, so the walk marks each path below entries ambiguous, and the
+// errors of entries bind with no position, for the reason
+// [ErrAmbiguousPath]. They bind here, so the text that orders the groups
+// names the path of each.
 func (w *selfWalker) walkEntries(at place, entries []mapEntry, ambiguous bool) bool {
 	ok := true
 	start := len(w.errs)
 	groups := make([][]error, 0, len(entries))
+
+	// A path below an entry that shares its path is ambiguous too,
+	// whatever the maps further down hold.
+	outer := w.ambiguous
+	w.ambiguous = outer || ambiguous
 
 	for _, e := range entries {
 		if !w.walk(e.key, at.key(), nil) {
@@ -958,13 +969,15 @@ func (w *selfWalker) walkEntries(at place, entries []mapEntry, ambiguous bool) b
 		errs := w.errs[start:]
 		if ambiguous {
 			for i, err := range errs {
-				errs[i] = bindTree(err, binder{src: w.node.source, node: w.node, ambiguous: true})
+				errs[i] = bindTree(err, binder{src: w.node.source, node: w.node})
 			}
 		}
 
 		groups = append(groups, slices.Clone(errs))
 		w.errs = w.errs[:start]
 	}
+
+	w.ambiguous = outer
 
 	slices.SortStableFunc(groups, func(a, b []error) int {
 		return slices.CompareFunc(a, b, func(x, y error) int {
@@ -1332,9 +1345,10 @@ func hasEmbedded(t reflect.Type) bool {
 // rebased under the path of at, and reports whether v passed. The rebase
 // marks each Error it builds as invalid, and each binding it meets, so
 // every problem the result holds matches [errInvalid] whether it carries
-// a location or not. A value the walk cannot take the address of, such as
-// one held by a map, validates through a copy, so a Validate with a
-// pointer receiver runs on it too.
+// a location or not. Below a map entry that shares its path, the rebase
+// marks the path of each Error ambiguous too. A value the walk cannot
+// take the address of, such as one held by a map, validates through a
+// copy, so a Validate with a pointer receiver runs on it too.
 // The error of a context that ended stops the walk as it is, with no
 // path, as [selfWalker.stopped] describes.
 func (w *selfWalker) validate(v reflect.Value, at place) bool {
@@ -1364,7 +1378,7 @@ func (w *selfWalker) validate(v reflect.Value, at place) bool {
 		return false
 	}
 
-	w.errs = append(w.errs, rebase(err, at.path(), false, true))
+	w.errs = append(w.errs, rebase(err, at.path(), false, true, w.ambiguous))
 
 	return false
 }

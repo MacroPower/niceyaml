@@ -916,25 +916,29 @@ func isLeaf(err error) bool {
 // childBase is the base the children along a cause chain rebase under:
 // the base of every Error from [Rebase] above them, joined, whether the
 // walk met such an Error, and whether one of them moves paths alone. It
-// also records whether an Error above them matches [errInvalid]. A Rebase
-// at the root still locates a problem with no location at the root, so
-// the children rebase whenever the walk met one, and only a chain that
-// holds none leaves them as they are.
+// also records whether an Error above them matches [errInvalid], and
+// whether the path of one of them is ambiguous, as [locus] describes. A
+// Rebase at the root still locates a problem with no location at the
+// root, so the children rebase whenever the walk met one, and only a
+// chain that holds none leaves them as they are.
 type childBase struct {
 	path      paths.Path
 	rebased   bool
 	movesOnly bool
 	invalid   bool
+	ambiguous bool
 }
 
 // cross returns the base below x: c joined with the base of x when x is
 // an Error from [Rebase], and c as it is otherwise, marked invalid when x
-// matches [errInvalid].
+// matches [errInvalid]. The base is ambiguous once the path of such an x
+// is.
 func (c childBase) cross(x *Error) childBase {
 	if x.rebased {
 		c.path = c.path.Join(x.base)
 		c.rebased = true
 		c.movesOnly = c.movesOnly || x.movesOnly
+		c.ambiguous = c.ambiguous || x.ambiguous
 	}
 
 	c.invalid = c.invalid || x.invalid
@@ -950,7 +954,8 @@ func (c childBase) cross(x *Error) childBase {
 // too, as [markInvalid] marks it, so each error a summary of a
 // [SelfValidator] heads, and each branch of a join that [Invalid]
 // wraps, is the document's fault. A detail is no problem, so it gains no
-// mark.
+// mark. The path of a child below an Error whose path is ambiguous is
+// ambiguous too, whether the child is a problem or a detail.
 func (c childBase) rebase(n error, detail bool) error {
 	invalid := c.invalid && !detail
 
@@ -962,7 +967,7 @@ func (c childBase) rebase(n error, detail bool) error {
 		return n
 	}
 
-	return rebase(n, c.path, detail || c.movesOnly, invalid)
+	return rebase(n, c.path, detail || c.movesOnly, invalid, c.ambiguous)
 }
 
 // trees returns the nodes of kids in position order within the source
