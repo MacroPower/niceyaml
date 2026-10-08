@@ -1364,10 +1364,12 @@ type location struct {
 	rng        *position.Range
 	tk         *token.Token
 	near       *paths.Path
-	pos        position.Position
-	// The location resolved in a layer of the document [Layers] build,
-	// rather than in the document the error bound through.
-	layer bool
+	// Set for a location that resolved in a layer of the document
+	// [Layers] build, rather than in the document the error bound
+	// through. It is the path of the root of that document in the
+	// document of the layer.
+	layerRoot *paths.Path
+	pos       position.Position
 }
 
 // locate resolves l, the location of an [Error], and returns the node it
@@ -1431,7 +1433,8 @@ func locate(b binder, l locus) (location, *Node, error) {
 // In the document [Layers] build, the path resolves in the document of
 // the layer [layering.layer] picks, and that layer is the node locatePath
 // returns, so it belongs to another source than the one b binds to. The
-// location then says so, whether or not the path resolved there.
+// location then says so, whether or not the path resolved there, and
+// holds the path of the root of the merged document in that layer.
 func locatePath(b binder, path paths.Path) (location, *Node, error) {
 	node := b.node
 
@@ -1448,10 +1451,12 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 		return location{}, nil, fmt.Errorf("%w: %s", ErrPathNeedsDocument, path)
 	}
 
-	layer, path := node.source.layers.layer(node, path)
+	layer, base, path := node.source.layers.layer(node, path)
 
 	loc, err := layer.resolveLocation(path)
-	loc.layer = layer != node
+	if layer != node {
+		loc.layerRoot = &base
+	}
 
 	return loc, layer, err
 }
@@ -2655,8 +2660,8 @@ func newSourceError(err error, b binder) *SourceError {
 		// The path of the error reads from the value the layers hold.
 		// The binding reports it from the root of the document of the
 		// layer it bound in, as a bind through that layer would.
-		if e.loc.layer && found.hasPath && !e.node.base.IsRoot() {
-			e.err = &Error{err: e.err, base: e.node.base, rebased: true, movesOnly: true, reroots: true}
+		if root := e.loc.layerRoot; root != nil && found.hasPath && !root.IsRoot() {
+			e.err = &Error{err: e.err, base: *root, rebased: true, movesOnly: true, reroots: true}
 		}
 
 	case *SourceError:

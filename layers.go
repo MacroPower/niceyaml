@@ -151,6 +151,11 @@ var (
 // `$.defaults.server.port` where it binds in a layer that holds the
 // value under defaults.
 //
+// A Node of a merged document is a layer like any other. Layers that
+// hold one merge its value as they merge a file of the same text. Each
+// error still binds in the file that holds its value, with the path
+// that file has for it.
+//
 // The decode still fills the Go value by the rule of [Node.DecodeInto],
 // once, from the merged document. A value that holds defaults keeps each
 // field the merged document leaves out, and a mapping of the document

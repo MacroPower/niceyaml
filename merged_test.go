@@ -965,6 +965,220 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 	})
 }
 
+func TestLayers_MergedLayer(t *testing.T) {
+	t.Parallel()
+
+	// The blank line keeps the lines of base.yaml apart from the lines of
+	// any document it merges into.
+	const (
+		baseInput = "# base\nname: shop\n\nserver:\n  host: example.com\n  port: 0\n"
+		midInput  = "server:\n  host: mid.example.com\n"
+		prodInput = "server:\n  tls: {cert: 1}\n"
+	)
+
+	// Each case layers base.yaml, mid.yaml, and prod.yaml in that order,
+	// with some of them merged into one document first. Every error
+	// binds where it binds with no layer merged.
+	tcs := map[string]struct {
+		layers func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Layers
+	}{
+		"no layer merged": {
+			layers: func(_ *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Layers {
+				return niceyaml.NewLayers(base, mid, prod)
+			},
+		},
+		"the lower two merged": {
+			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Layers {
+				t.Helper()
+
+				return niceyaml.NewLayers(mergedDocument(t, niceyaml.NewLayers(base, mid)), prod)
+			},
+		},
+		"the upper two merged": {
+			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Layers {
+				t.Helper()
+
+				return niceyaml.NewLayers(base, mergedDocument(t, niceyaml.NewLayers(mid, prod)))
+			},
+		},
+		"all three merged": {
+			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Layers {
+				t.Helper()
+
+				return niceyaml.NewLayers(mergedDocument(t, niceyaml.NewLayers(base, mid, prod)))
+			},
+		},
+		"the lower two merged twice": {
+			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Layers {
+				t.Helper()
+
+				lower := mergedDocument(t, niceyaml.NewLayers(base, mid))
+
+				return niceyaml.NewLayers(mergedDocument(t, niceyaml.NewLayers(lower)), prod)
+			},
+		},
+	}
+
+	binds := map[string]string{
+		"$.name":            "base.yaml:2:7",
+		"$.server.port":     "base.yaml:6:9",
+		"$.server.host":     "mid.yaml:2:9",
+		"$.server.tls.cert": "prod.yaml:2:15",
+		"$.server":          "prod.yaml:2:3",
+		"$.server.debug":    "prod.yaml:1:1",
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			layers := tc.layers(t,
+				yamltest.FirstDocument(t, baseInput, niceyaml.WithName("base.yaml")),
+				yamltest.FirstDocument(t, midInput, niceyaml.WithName("mid.yaml")),
+				yamltest.FirstDocument(t, prodInput, niceyaml.WithName("prod.yaml")),
+			)
+
+			assert.Equal(t, "# base\nname: shop\nserver:\n  host: mid.example.com\n  port: 0\n  tls:\n    cert: 1\n",
+				mergedText(t, layers))
+
+			for expr, at := range binds {
+				path := paths.MustParse(expr)
+
+				err := layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(path)))
+				require.EqualError(t, err, fmt.Sprintf("%s: %s: here", at, path), expr)
+			}
+
+			err := layers.Bind(errors.New("quota service: connection refused"))
+			require.EqualError(t, err, "base.yaml: quota service: connection refused")
+
+			// The validator reads a position of the merged text, which is
+			// no line of base.yaml.
+			err = layers.Validate(t.Context(), niceyaml.ValidatorFunc(
+				func(_ context.Context, n *niceyaml.Node) error {
+					port, err := n.Ranges(paths.Doc().Child("server", "port"))
+					require.NoError(t, err)
+
+					return niceyaml.NewError("at a position", niceyaml.AtPosition(port[0].Start))
+				},
+			))
+			require.EqualError(t, err, "base.yaml:6:9: at a position")
+
+			_, err = layers.Decode[layerConfig](t.Context())
+			require.EqualError(t, err, "base.yaml:6:9: $.server.port: port must be at least 1")
+
+			_, err = layers.Decode[struct {
+				Server struct {
+					Port bool `yaml:"port"`
+				} `yaml:"server"`
+			}](t.Context())
+			require.EqualError(t, err, "base.yaml:6:9: $.server.port: expected boolean, got integer")
+		})
+	}
+
+	t.Run("a scoped Node of a merged document binds in its files with their paths", func(t *testing.T) {
+		t.Parallel()
+
+		base := yamltest.FirstDocument(t,
+			"defaults:\n  server:\n    host: example.com\n    port: 0\n",
+			niceyaml.WithName("base.yaml"),
+		)
+		defaults := yamltest.At(t, base, paths.Doc().Child("defaults"))
+		mid := yamltest.FirstDocument(t, midInput, niceyaml.WithName("mid.yaml"))
+		prod := yamltest.FirstDocument(t, "tls: {cert: 1}\n", niceyaml.WithName("prod.yaml"))
+
+		lower := mergedDocument(t, niceyaml.NewLayers(defaults, mid))
+		layers := niceyaml.NewLayers(yamltest.At(t, lower, paths.Doc().Child("server")), prod)
+
+		assert.Equal(t, "host: mid.example.com\nport: 0\ntls:\n  cert: 1\n", mergedText(t, layers))
+
+		// The merged document holds the port at $.port, and each file
+		// holds its value under a path of its own.
+		scoped := map[string]struct {
+			err  error
+			want string
+		}{
+			"a value of the lowest file": {
+				err:  niceyaml.NewError("here", niceyaml.AtPath(paths.Doc().Child("port"))),
+				want: "base.yaml:4:11: $.defaults.server.port: here",
+			},
+			"a value of the file above it": {
+				err:  niceyaml.NewError("here", niceyaml.AtPath(paths.Current().Child("host"))),
+				want: "mid.yaml:2:9: $.server.host: here",
+			},
+			"a value of the highest file": {
+				err:  niceyaml.NewError("here", niceyaml.AtPath(paths.Doc().Child("tls", "cert"))),
+				want: "prod.yaml:1:13: $.tls.cert: here",
+			},
+			"a key": {
+				err:  niceyaml.NewError("here", niceyaml.AtPath(paths.Doc().Child("port").Key())),
+				want: "base.yaml:4:5: $.defaults.server.port~: here",
+			},
+			"an error with no location": {
+				err:  errors.New("quota service: connection refused"),
+				want: "base.yaml: quota service: connection refused",
+			},
+		}
+
+		for name, tc := range scoped {
+			require.EqualError(t, layers.Bind(tc.err), tc.want, name)
+		}
+
+		_, err := layers.Decode[layerServer](t.Context())
+		require.EqualError(t, err, "base.yaml:4:11: $.defaults.server.port: port must be at least 1")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, defaults, bound.Node())
+		assert.Same(t, base, bound.Document())
+
+		path, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.defaults.server.port", path.String())
+	})
+
+	t.Run("a merged document is a layer as a file of its text is", func(t *testing.T) {
+		t.Parallel()
+
+		nodes := layerNodes(t, "x: {p: 1}\n", "x: 5\n", "x: {q: 2}\n")
+
+		// The scalar of mid.yaml replaces the mapping of base.yaml, and
+		// the mapping of prod.yaml replaces the scalar.
+		assert.Equal(t, "x:\n  q: 2\n", mergedText(t, niceyaml.NewLayers(nodes...)))
+
+		// The document of mid.yaml and prod.yaml holds a mapping, which
+		// merges into the mapping of base.yaml.
+		upper := mergedDocument(t, niceyaml.NewLayers(nodes[1], nodes[2]))
+		layers := niceyaml.NewLayers(nodes[0], upper)
+
+		assert.Equal(t, "x:\n  p: 1\n  q: 2\n", mergedText(t, layers))
+
+		err := layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.Doc().Child("x", "p"))))
+		require.EqualError(t, err, "base.yaml:1:8: $.x.p: here")
+
+		err = layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.Doc().Child("x", "q"))))
+		require.EqualError(t, err, "prod.yaml:1:8: $.x.q: here")
+	})
+}
+
+// mergedDocument returns the root Node of the document layers merge
+// into, as a [niceyaml.Validator] gets it.
+func mergedDocument(t *testing.T, layers *niceyaml.Layers) *niceyaml.Node {
+	t.Helper()
+
+	var doc *niceyaml.Node
+
+	err := layers.Validate(t.Context(), niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+		doc = n
+
+		return nil
+	}))
+	require.NoError(t, err)
+	require.NotNil(t, doc)
+
+	return doc
+}
+
 // mergedText returns the text of the document layers merge into, as a
 // [niceyaml.Validator] reads it from the lines of the Source of its
 // Node, with a line break behind each line.

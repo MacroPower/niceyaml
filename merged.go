@@ -729,6 +729,12 @@ func (w *mergedWriter) nested(v *mergedValue, indent int, compact bool) {
 // since the merged text is no file of the caller. An error with a
 // location binds in the layer [layering.layer] picks, and any other
 // error in the lowest layer, whose name the Source has.
+//
+// A layer can be a Node of a document that other [Layers] built, whose
+// text is no file of the caller either. An error that reaches such a
+// layer binds in a layer of that document instead, as an error bound
+// through that Node does. Every error thus binds in a document that no
+// Layers built.
 type layering struct {
 	// The merged value, or nil when no layer holds a value.
 	root *mergedValue
@@ -737,19 +743,25 @@ type layering struct {
 }
 
 // home returns the layer an error binds in when it found no layer of its
-// own, which is the lowest one, or nil for a nil l.
+// own, which is the lowest one. A lowest layer that other [Layers] built
+// gives the home of its own layers. A nil l has no home.
 func (l *layering) home() *Node {
 	if l == nil {
 		return nil
 	}
 
+	if home := l.lowest.source.layers.home(); home != nil {
+		return home
+	}
+
 	return l.lowest
 }
 
-// layer returns the Node an error at path binds in, and path as the
-// document of that Node reads it. The path starts at `$` and reads from
-// the root of doc, the merged document. A nil l binds in doc with path
-// as it is.
+// layer returns the Node an error at path binds in, and two paths in
+// the document of that Node: the one of the value path reads from, and
+// path as that document reads it. The path starts at `$` and reads from
+// the root of doc, the merged document. A nil l binds in doc, where `$`
+// and path stay as they are.
 //
 // The search follows path down the merged value for as long as the value
 // holds it. The result is the layer of the last value it reaches, which
@@ -758,9 +770,12 @@ func (l *layering) home() *Node {
 // that names a key a mapping leaves out, it is the highest layer that
 // holds the mapping. It is the highest layer of all when no layer holds a
 // value.
-func (l *layering) layer(doc *Node, path paths.Path) (*Node, paths.Path) {
+//
+// A layer that other [Layers] built holds the value in a layer of its
+// own, so the search goes on there with the path as the layer reads it.
+func (l *layering) layer(doc *Node, path paths.Path) (*Node, paths.Path, paths.Path) {
 	if l == nil {
-		return doc, path
+		return doc, paths.Doc(), path
 	}
 
 	// The merged value stands at the root of its document, so the rest of
@@ -782,7 +797,13 @@ func (l *layering) layer(doc *Node, path paths.Path) (*Node, paths.Path) {
 		layer = at.layer
 	}
 
-	return layer, layer.base.Join(rel)
+	// The layer holds the merged value at its scope, and the search finds
+	// the root of the document of the layer at base.
+	scope, _ := layer.base.CutPrefix(paths.Doc())
+
+	holder, base, held := layer.source.layers.layer(layer, layer.base.Join(rel))
+
+	return holder, base.Join(scope), held
 }
 
 // child returns the value sel selects in v, or nil when v holds none. The
