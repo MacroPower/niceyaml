@@ -113,6 +113,16 @@ func (*jsonFielded) UnmarshalJSON([]byte) error {
 	return nil
 }
 
+// tierHolder decodes itself from text and holds a field that decodes
+// from text too, which the decoder never reads.
+type tierHolder struct {
+	Tier tier `yaml:"tier"`
+}
+
+func (*tierHolder) UnmarshalText([]byte) error {
+	return nil
+}
+
 // lockable decodes itself from text unless the value it decodes into is
 // locked already, which only a value the caller filled can be.
 type lockable struct {
@@ -1110,6 +1120,159 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 				_, ok = srcErr.Range()
 				assert.True(t, ok, "the error carries no location")
+			})
+		}
+	})
+
+	// The decoder hands an UnmarshalText method a scalar alone, and words
+	// its refusal of any other node for neither the value nor its kind.
+	t.Run("reads a mapping or a sequence in a text type as a string field does", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			decode func(ctx context.Context, dd *niceyaml.Node) error
+			input  string
+			want   string
+			path   string
+		}{
+			"sequence element": {
+				input: "addrs:\n  - 10.0.0.1\n  - [a, b]\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Addrs []netip.Addr `yaml:"addrs"`
+					}](ctx)
+
+					return err
+				},
+				want: "3:6: $.addrs[1]: expected string, got sequence",
+				path: "$.addrs[1]",
+			},
+			"mapping field": {
+				input: "name: api\naddr: {a: b}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Name string     `yaml:"name"`
+						Addr netip.Addr `yaml:"addr"`
+					}](ctx)
+
+					return err
+				},
+				want: "2:8: $.addr: expected string, got mapping",
+				path: "$.addr",
+			},
+			"pointer field": {
+				input: "tier:\n  a: b\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Tier *tier `yaml:"tier"`
+					}](ctx)
+
+					return err
+				},
+				want: "2:3: $.tier: expected string, got mapping",
+				path: "$.tier",
+			},
+			"map value": {
+				input: "a: low\nb: [mid]\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[map[string]tier](ctx)
+
+					return err
+				},
+				want: "2:5: $.b: expected string, got sequence",
+				path: "$.b",
+			},
+			// The path of a value an alias holds points at the alias.
+			"alias to a sequence": {
+				input: "all: &all [low, high]\ntier: *all\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Tier tier `yaml:"tier"`
+					}](ctx)
+
+					return err
+				},
+				want: "2:7: $.tier: expected string, got sequence",
+				path: "$.tier",
+			},
+			// The decoder reads nothing below the mapping, so the tier in
+			// it reports nothing.
+			"mapping that holds a sequence": {
+				input: "holder:\n  tier: [a]\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Holder tierHolder `yaml:"holder"`
+					}](ctx)
+
+					return err
+				},
+				want: "2:3: $.holder: expected string, got mapping",
+				path: "$.holder",
+			},
+			// The decoder calls the UnmarshalJSON method of the type only
+			// under its option.
+			"type with an UnmarshalJSON method too": {
+				input: "either: {a: 1}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Either problemTextual `yaml:"either"`
+					}](ctx)
+
+					return err
+				},
+				want: "1:10: $.either: expected string, got mapping",
+				path: "$.either",
+			},
+			"sequence the decode reads": {
+				input: "[a, b]\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[tier](ctx)
+
+					return err
+				},
+				want: "1:2: $: expected string, got sequence",
+				path: "$",
+			},
+			"empty mapping the decode reads": {
+				input: "{}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[*tier](ctx)
+
+					return err
+				},
+				want: "1:1: $: expected string, got mapping",
+				path: "$",
+			},
+			"mapping a scoped decode reads": {
+				input: "name: api\ntier: {a: b}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.DecodeAt[tier](ctx, paths.Current().Child("tier"))
+
+					return err
+				},
+				want: "2:8: $.tier: expected string, got mapping",
+				path: "$.tier",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				err := tc.decode(t.Context(), dd)
+				require.EqualError(t, err, tc.want)
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
+				assert.True(t, niceyaml.IsInvalid(err))
+
+				var srcErr *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &srcErr)
+
+				path, ok := srcErr.Path()
+				require.True(t, ok, "the error carries no path")
+				assert.Equal(t, tc.path, path.String())
 			})
 		}
 	})

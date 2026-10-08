@@ -246,16 +246,20 @@ type decodeProblem struct {
 // pass decodes no value below such a mapping or sequence a second time.
 //
 // A leaf adds a problem only for these rejections. The decoder builds
-// the first two itself, with no code of the caller:
+// the first three itself, with no code of the caller:
 //
 //   - A [yaml.TypeError], a [yaml.OverflowError], or a
 //     [yaml.UnexpectedNodeTypeError] at a token of the source. Those are
 //     a value of the wrong kind and a number out of range.
 //   - The error of [time.ParseDuration] for a scalar in a
 //     [time.Duration], which the decoder returns with no token.
+//   - The refusal of a mapping or a sequence in a type that takes a
+//     scalar alone, as [refusesForText] reports, which the decoder
+//     returns with no token too. The problem reads as [textRejection]
+//     writes it.
 //   - The error of an UnmarshalText method for a scalar in a type that
 //     [decodesFromText] reports, which the decoder returns with no token
-//     too.
+//     as well.
 //
 // The walk reads nothing at or below any other value that decodes
 // itself, as [reportsOwnError] lists those types, a type an option of
@@ -266,7 +270,9 @@ type decodeProblem struct {
 // so the walk reads both. It hands an UnmarshalText method the text of a
 // scalar, without the context or the node of the decode. The walk
 // therefore takes that method to answer the same for the same text, and
-// reads the scalar. The walk reads nothing below an interface or a
+// reads the scalar. The decoder calls no method for a mapping or a
+// sequence it refuses for such a type, so the walk reads that node as a
+// leaf too. The walk reads nothing below an interface or a
 // [yaml.MapSlice] either, which take any value. It passes over a struct
 // the decoder decodes no field of, as [unknownFieldFinder.fields]
 // describes those.
@@ -485,7 +491,9 @@ func (c *problemCollector) visit(t reflect.Type, node ast.Node) bool {
 // such as one to an anchor of a reference document, since the document
 // holds no node for the value behind it. Of the values that decode
 // themselves, it reads a duration, a time, and a scalar in a type that
-// [decodesFromText] reports, each as a leaf.
+// [decodesFromText] reports, each as a leaf. A mapping or a sequence the
+// decoder refuses for such a type, as [refusesForText] reports, is a
+// leaf as well.
 func (c *problemCollector) walk(t reflect.Type, held ast.Node, at place, in holder) {
 	if c.ctx.Err() != nil {
 		return
@@ -505,9 +513,13 @@ func (c *problemCollector) walk(t reflect.Type, held ast.Node, at place, in hold
 	}
 
 	if reportsOwnError(t, c.cfg.unmarshalers) {
-		// The decoder calls an UnmarshalText method for a scalar alone,
-		// and can call another unmarshaler of the type for any other node.
-		if decodesFromText(t, c.cfg.unmarshalers) && isScalar(contentNode(c.resolver, node)) {
+		content := contentNode(c.resolver, node)
+
+		// The decoder calls an UnmarshalText method for a scalar alone. It
+		// refuses any other node itself, unless another unmarshaler of the
+		// type takes that node.
+		if refusesForText(t, c.cfg.unmarshalers, content) ||
+			decodesFromText(t, c.cfg.unmarshalers) && isScalar(content) {
 			c.leaf(t, held, node, at, in)
 		}
 
@@ -661,7 +673,9 @@ func (c *problemCollector) entries(t reflect.Type, mapping *ast.MappingNode, at 
 // reports. It takes the path the walk reached the value by, as
 // [Node.locateDecodeError] puts one under the path of its value. It adds
 // a problem only when that path selects held, which the path of an entry
-// that a later one hides does not.
+// that a later one hides does not. The refusal of a mapping or a
+// sequence that [refusesForText] reports has no token either. It takes
+// that path the same way, and reads as [textRejection] writes it.
 //
 // Any other error adds nothing. That is another rejection of the
 // decoder, such as one for a tag that does not convert its value, the
@@ -684,15 +698,26 @@ func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, at place, i
 		return
 	}
 
-	// The decoder parses the text of a scalar as a duration, or hands it
-	// to an UnmarshalText method, and returns the error of that parse as
-	// it is.
 	_, isYAML := err.(yaml.Error) //nolint:errorlint // The decoder returns it unwrapped.
-	if isYAML || !c.node.lacksLocation(err) || !isScalar(contentNode(c.resolver, node)) {
+	if isYAML || !c.node.lacksLocation(err) {
 		return
 	}
 
-	if t != durationType && !decodesFromText(t, c.cfg.unmarshalers) {
+	content := contentNode(c.resolver, node)
+
+	var cause error
+
+	switch {
+	case refusesForText(t, c.cfg.unmarshalers, content):
+		cause = textRejection(content)
+
+	// The decoder parses the text of a scalar as a duration, or hands it
+	// to an UnmarshalText method, and returns the error of that parse as
+	// it is.
+	case isScalar(content) && (t == durationType || decodesFromText(t, c.cfg.unmarshalers)):
+		cause = asDecodeError(c.tree.restoreError(err))
+
+	default:
 		return
 	}
 
@@ -703,7 +728,7 @@ func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, at place, i
 		return
 	}
 
-	c.add(decodeProblem{err: Rebase(asDecodeError(c.tree.restoreError(err)), path), at: loc.pos})
+	c.add(decodeProblem{err: Rebase(cause, path), at: loc.pos})
 }
 
 // decodesFromText reports whether the decoder decodes a scalar into a

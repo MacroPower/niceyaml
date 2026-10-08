@@ -247,8 +247,14 @@ func (n *Node) rejectionLocation(tk *token.Token) []ErrorOption {
 // too.
 //
 // The path of a value under the node the decode reads is never the root,
-// with one exception. When node holds a scalar and the type of v
-// decodes itself, the scalar is the value, so err points at node.
+// with two exceptions. When node holds a scalar and the type of v
+// decodes itself, the scalar is the value, so err points at node. When
+// the decoder refuses node for the type of v, as [refusesForText]
+// reports, node is the value it refused.
+//
+// The decoder words that refusal for neither the value nor its kind, so
+// the result then holds the rejection [textRejection] writes in place of
+// err.
 //
 // An err that names a place already comes back as it is. So does one
 // that holds a location or a binding anywhere in its tree, one of a
@@ -285,12 +291,21 @@ func (n *Node) locateDecodeError(
 	t := pointerBase(reflect.TypeOf(v).Elem())
 
 	// With no value below node, found is the place of node itself.
-	found, ok := l.below(t, node, place{})
-	if !ok && (!reportsOwnError(t, l.unmarshalers) || !isScalar(l.content(node))) {
-		return err
+	var found place
+
+	if !l.refuses(t, node) {
+		var ok bool
+
+		found, ok = l.below(t, node, place{})
+		if !ok && (!reportsOwnError(t, l.unmarshalers) || !isScalar(l.content(node))) {
+			return err
+		}
 	}
 
-	cause := asDecodeError(n.doc.decodeTree().restoreError(err))
+	cause := l.refusal
+	if cause == nil {
+		cause = asDecodeError(n.doc.decodeTree().restoreError(err))
+	}
 
 	return Rebase(cause, found.path())
 }
@@ -358,6 +373,37 @@ func reportsOwnError(t reflect.Type, u optionUnmarshalers) bool {
 	return t == durationType || decodesItself(t) || u.decodes(t)
 }
 
+// refusesForText reports whether the decoder refuses content for a value
+// of type t and calls no unmarshaler. The content argument is the
+// mapping, sequence, or scalar the value reads, as [contentNode] returns
+// it. The u argument holds the unmarshalers the options of the decode
+// name.
+//
+// The decoder hands an UnmarshalText method the string it reads from a
+// scalar. It reads no string from a mapping or a sequence, so it calls
+// no method for one and returns an error of its own, with no token of
+// the source. A type that [decodesFromText] reports thus takes a scalar
+// alone. Two such types take a mapping or a sequence another way. The
+// decoder parses a [time.Time] itself, and under [WithJSONUnmarshalers]
+// it hands the node to the UnmarshalJSON method of a type that has one.
+func refusesForText(t reflect.Type, u optionUnmarshalers, content ast.Node) bool {
+	if astnode.IsNil(content) || isScalar(content) || t == timeType || !decodesFromText(t, u) {
+		return false
+	}
+
+	return !u.json || !reflect.PointerTo(t).Implements(jsonUnmarshalerType)
+}
+
+// textRejection returns the rejection of content, a mapping or a
+// sequence the decoder refuses as [refusesForText] reports. The error
+// the decoder returns for it names neither the value nor its kind. The
+// rejection matches [ErrDecode] and reads "expected string, got
+// sequence", as [rejectionMessage] writes the rejection of a sequence
+// that a string field reads.
+func textRejection(content ast.Node) error {
+	return decodeError{err: fmt.Errorf("expected %s, got %s", kindString, kindOfNode(content.Type()))}
+}
+
 // pointerBase returns the type t points to through every pointer on it,
 // since the decoder decodes a pointer as the value it points to.
 func pointerBase(t reflect.Type) reflect.Type {
@@ -398,7 +444,10 @@ func isScalar(node ast.Node) bool {
 // through a second type with the same fields, such as an UnmarshalYAML
 // that decodes into `type plain T`, returns the error of a field as it
 // is, so the walk narrows to that field. The walk stops at the first
-// value that reproduces the error with nothing below it that does.
+// value that reproduces the error with nothing below it that does. It
+// stops too at a value whose node the decoder refuses, as
+// [refusesForText] reports, since the decoder reads nothing below that
+// node.
 //
 // The second decode runs the unmarshaler of each value the walk reaches
 // again, on a value of its own, so the first decode keeps what it set.
@@ -421,6 +470,9 @@ type errorLocator struct {
 	inlined map[inlineVisit]bool
 	// The message of the error to locate.
 	msg string
+	// The rejection of the value the walk found, as [textRejection]
+	// writes it, or nil when that value reported the error itself.
+	refusal error
 	// The types the options of the decode give an unmarshaler.
 	unmarshalers optionUnmarshalers
 }
@@ -439,6 +491,8 @@ type inlineVisit struct {
 // at, that reproduces the error. When t is a type [reportsOwnError]
 // names, a decode of node into t has to reproduce it, and the value
 // itself is the result unless a value below it reproduces the error too.
+// The value is the result as well when the decoder refuses node for it,
+// as [errorLocator.refuses] reports.
 func (l *errorLocator) find(t reflect.Type, node ast.Node, at place) (place, bool) {
 	t = pointerBase(t)
 
@@ -450,11 +504,31 @@ func (l *errorLocator) find(t reflect.Type, node ast.Node, at place) (place, boo
 		return place{}, false
 	}
 
+	if l.refuses(t, node) {
+		return at, true
+	}
+
 	if found, ok := l.below(t, node, at); ok {
 		return found, true
 	}
 
 	return at, true
+}
+
+// refuses reports whether the decoder refuses node for a value of type
+// t, as [refusesForText] reports. The value is then the one the walk
+// looks for, since its decode calls no unmarshaler and reads nothing
+// below node, so refuses keeps the rejection [textRejection] writes for
+// it.
+func (l *errorLocator) refuses(t reflect.Type, node ast.Node) bool {
+	content := l.content(node)
+	if !refusesForText(t, l.unmarshalers, content) {
+		return false
+	}
+
+	l.refusal = textRejection(content)
+
+	return true
 }
 
 // below returns the first value below node, read as type t at the place

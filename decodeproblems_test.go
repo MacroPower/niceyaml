@@ -311,6 +311,18 @@ func (*problemEither) UnmarshalJSON([]byte) error {
 	return nil
 }
 
+// problemTextual has the methods of [problemEither] and counts no call,
+// so several tests decode it at once.
+type problemTextual struct{}
+
+func (*problemTextual) UnmarshalText([]byte) error {
+	return nil
+}
+
+func (*problemTextual) UnmarshalJSON([]byte) error {
+	return nil
+}
+
 // problemPlaced decodes itself from text and reports an error that names
 // a position already.
 type problemPlaced string
@@ -1212,6 +1224,74 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			}](),
 			input: "n: x\nplaced: a\n",
 			want:  "1:4: $.n: expected integer, got string",
+		},
+		// The decoder refuses a mapping or a sequence for a text type
+		// with no call of its method, so the search reports each one.
+		"mappings and sequences in a text type": {
+			decode: decodeInto[struct {
+				Tiers []tier `yaml:"tiers"`
+				N     int    `yaml:"n"`
+			}](),
+			input: "tiers: [low, [a], mid, {b: 1}]\nn: x\n",
+			is:    errUnknownTier,
+			want: stringtest.JoinLF(
+				"4 problems",
+				"1:15: $.tiers[1]: expected string, got sequence",
+				`1:19: $.tiers[2]: unknown tier "mid"`,
+				"1:25: $.tiers[3]: expected string, got mapping",
+				"2:4: $.n: expected integer, got string",
+			),
+		},
+		// The decoder rejects the port first, and the search finds the
+		// sequence.
+		"sequence in a text type beside a value of the wrong kind": {
+			decode: decodeInto[struct {
+				Port int  `yaml:"port"`
+				Tier tier `yaml:"tier"`
+			}](),
+			input: "tier: [a]\nport: x\n",
+			want: stringtest.JoinLF(
+				"2 problems",
+				"1:8: $.tier: expected string, got sequence",
+				"2:7: $.port: expected integer, got string",
+			),
+		},
+		// The decoder rejects the sequence first, and the search finds
+		// it again, so the report holds it once.
+		"sequence in a text type the decoder rejects first": {
+			decode: decodeInto[struct {
+				Tier tier `yaml:"tier"`
+				Port int  `yaml:"port"`
+			}](),
+			input: "tier: [a]\nport: x\n",
+			want: stringtest.JoinLF(
+				"2 problems",
+				"1:8: $.tier: expected string, got sequence",
+				"2:7: $.port: expected integer, got string",
+			),
+		},
+		// The option hands the mapping to the UnmarshalJSON method of the
+		// type, so the search leaves it to that method.
+		"mapping in a text type with an UnmarshalJSON method under its option": {
+			decode: decodeInto[struct {
+				Either map[string]problemTextual `yaml:"either"`
+				Port   int                       `yaml:"port"`
+			}](),
+			input: "either: {a: {b: 1}}\nport: x\n",
+			opts:  []niceyaml.DecodeOption{niceyaml.WithJSONUnmarshalers(true)},
+			want:  "2:7: $.port: expected integer, got string",
+		},
+		"mapping in a text type with an UnmarshalJSON method": {
+			decode: decodeInto[struct {
+				Either map[string]problemTextual `yaml:"either"`
+				Port   int                       `yaml:"port"`
+			}](),
+			input: "either: {a: {b: 1}}\nport: x\n",
+			want: stringtest.JoinLF(
+				"2 problems",
+				"1:14: $.either.a: expected string, got mapping",
+				"2:7: $.port: expected integer, got string",
+			),
 		},
 	}
 

@@ -2916,6 +2916,8 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 //     the target has neither an UnmarshalYAML method nor a function from
 //     [WithCustomUnmarshaler]. An enum with an UnmarshalText method thus
 //     reports every bad value in one decode.
+//   - A mapping or a sequence where such a target takes a scalar, as the
+//     paragraphs below describe.
 //   - An unknown field, as [WithDisallowUnknownFields] describes.
 //
 // The search leaves every other problem to the next decode:
@@ -3003,6 +3005,16 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 //
 //	config.yaml:7:14: $.servers[1].timeout: time: invalid duration "soon"
 //
+// The decoder hands an UnmarshalText method the text of a scalar. For a
+// mapping or a sequence it calls no method and returns an error of its
+// own, which names neither the value nor its kind. DecodeInto reports
+// that value as it reports one a string field rejects:
+//
+//	config.yaml:4:6: $.nets[1]: expected string, got sequence
+//
+// Under [WithJSONUnmarshalers], a type that has an UnmarshalJSON method
+// too takes the mapping or the sequence through that method instead.
+//
 // To find the value, DecodeInto decodes each such value of v a second
 // time, from its own node into a new value, in the order the decoder
 // reads them. The first one whose decode fails with the same message
@@ -3027,7 +3039,8 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // shows which types have one. It also holds for a mapping or sequence
 // that is the node itself, where the error would point at the whole of
 // what the caller decoded. A scalar that is the node itself takes the
-// error.
+// error. So does a mapping or a sequence the decoder refuses for an
+// UnmarshalText method, since the node is the value it refused.
 //
 // A few hundred bytes of nested aliases can take the go-yaml decoder
 // minutes to decode, and the decoder never checks ctx. When the node
