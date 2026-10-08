@@ -19,7 +19,6 @@ import (
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/lexer"
-	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -3422,53 +3421,6 @@ func TestSource_ValidateDocuments_Context(t *testing.T) {
 		assert.Equal(t, int32(4), calls.Load())
 		assert.Len(t, bindingMessages(err), 4)
 	})
-}
-
-func TestSource_WithYAMLParserOptions(t *testing.T) {
-	t.Parallel()
-
-	input := stringtest.Input(`
-		name: first
-		name: second
-	`)
-
-	tcs := map[string]struct {
-		opts []niceyaml.SourceOption
-		err  string
-	}{
-		"without options the parser rejects duplicate keys": {
-			opts: []niceyaml.SourceOption{niceyaml.WithYAMLParserOptions()},
-			err:  `mapping key "name" already defined`,
-		},
-		"forwards parser options": {
-			opts: []niceyaml.SourceOption{
-				niceyaml.WithYAMLParserOptions(parser.AllowDuplicateMapKey()),
-			},
-		},
-		"a later call keeps earlier options": {
-			opts: []niceyaml.SourceOption{
-				niceyaml.WithYAMLParserOptions(parser.AllowDuplicateMapKey()),
-				niceyaml.WithYAMLParserOptions(),
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			file, err := niceyaml.NewSourceFromString(input, tc.opts...).File()
-			if tc.err != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tc.err)
-
-				return
-			}
-
-			require.NoError(t, err)
-			assert.Len(t, file.Docs, 1)
-		})
-	}
 }
 
 func TestSource_View_IndependentViews(t *testing.T) {

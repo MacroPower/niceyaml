@@ -99,6 +99,7 @@ type Source struct {
 	// describes.
 	layers     *layering
 	docs       []*Node
+	parserOpts []parser.Option
 	decodeOpts []yaml.DecodeOption
 	// Holds the documents among docs that [Source.Documents] returns, as
 	// [pickContentDocuments] picks them.
@@ -119,7 +120,6 @@ type Source struct {
 //   - [WithAllowDuplicateKeys]
 //   - [WithAliasLimit]
 //   - [WithReferences]
-//   - [WithYAMLParserOptions]
 //
 // [WithAllowDuplicateKeys] and [WithReferences] change what the documents
 // mean, and [WithAliasLimit] says whether the program trusts their
@@ -138,8 +138,7 @@ type sourceConfig struct {
 	filePath string
 	// The file system filePath names a file in, or nil when no option
 	// set one, where a path names a file on disk.
-	fsys       fs.FS
-	parserOpts []parser.Option
+	fsys fs.FS
 	// Holds the text of each reference document from WithReferences, in
 	// the order every decode reads them.
 	references [][]byte
@@ -378,23 +377,6 @@ func referenceReaders(docs [][]byte) yaml.DecodeOption {
 		}
 
 		return yaml.ReferenceReaders(readers...)(d)
-	}
-}
-
-// WithYAMLParserOptions is a [SourceOption] that passes [parser.Option]
-// values to the go-yaml parser when [Source.File] parses the document. It is
-// the escape hatch for parser settings that have no option of their own.
-// The parser always parses comments.
-//
-// These options reach the parser only, never the decoder that [Node]
-// decodes with. Allow duplicate keys through [WithAllowDuplicateKeys],
-// which sets both. [parser.AllowDuplicateMapKey] passed here lets
-// [Source.File] accept a duplicate key that a decode into a struct or a
-// typed map then rejects. A mapping that decodes into an any value, at
-// the top level or in a field, keeps the last value instead.
-func WithYAMLParserOptions(opts ...parser.Option) SourceOption {
-	return func(c *sourceConfig) {
-		c.parserOpts = append(c.parserOpts, opts...)
 	}
 }
 
@@ -1015,13 +997,13 @@ func (d *document) anchorToken() *token.Token {
 
 // File returns an [*ast.File] for the [Source] tokens.
 //
-// The first call parses the file with [parser.Parse] and the options
-// [WithYAMLParserOptions] provides. Subsequent calls return the cached
-// result. A "---" header that directly follows another header starts a
-// document of its own, and a "..." end marker ends its document.
-// [parser.Parse] alone drops the rest of the stream after such a header,
-// and it can reject what follows a marker or join it to the document the
-// marker ends.
+// The first call parses the file with [parser.Parse], which accepts a
+// duplicate key when [WithAllowDuplicateKeys] allows one. Subsequent
+// calls return the cached result. A "---" header that directly follows
+// another header starts a document of its own, and a "..." end marker
+// ends its document. [parser.Parse] alone drops the rest of the stream
+// after such a header, and it can reject what follows a marker or join
+// it to the document the marker ends.
 //
 // The tree leaves out a comment on a line of its own below a document whose
 // root is a scalar or a flow collection. Below a block mapping or a block

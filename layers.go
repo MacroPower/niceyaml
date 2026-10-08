@@ -227,8 +227,8 @@ func NewLayers(nodes ...*Node) *Layers {
 // and a string keeps its quotes, except that a block scalar or a string
 // of several lines reads as one double-quoted line. The Source takes its
 // [Source.Name], its [Source.FilePath], and its [Source.FS] from the
-// Source of the lowest layer, with what [WithAllowDuplicateKeys],
-// [WithAliasLimit], and [WithYAMLParserOptions] set there.
+// Source of the lowest layer, with what [WithAllowDuplicateKeys] and
+// [WithAliasLimit] set there.
 //
 // That text is no file of the program, though it has the name of one.
 // [Node.View], [Node.Span], [Node.Tokens], [Node.Ranges], and

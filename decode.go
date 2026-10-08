@@ -2578,11 +2578,11 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // a tag it is the value.
 //
 // A path cannot select every value. The earlier of two entries with one
-// key is such a value, which the decoder rejects when
-// [WithYAMLParserOptions] lets the parser accept it. The error then
-// binds at the token the decoder reported, and the path names the value
-// in the message. A value under a key with no name has no path, so its
-// error carries that position alone.
+// key is such a value, which a decode into a map reads when
+// [WithAllowDuplicateKeys] lets the mapping hold both. An error at that
+// value binds at the token the decoder reported, and the path names the
+// value in the message. A value under a key with no name has no path, so
+// its error carries that position alone.
 //
 // The decoder stops at the first value it rejects, in the order the
 // target declares its fields, and it rejects an unknown field under

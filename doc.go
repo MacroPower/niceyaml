@@ -629,7 +629,7 @@
 // The go-yaml settings niceyaml supports have named options, such as
 // [WithAllowDuplicateKeys] or [go.jacobcolvin.com/niceyaml/encoder.WithIndent].
 // The rest pass through options that take go-yaml values, and these carry a
-// YAML prefix, as in [WithYAMLDecodeOptions], [WithYAMLParserOptions], and
+// YAML prefix, as in [WithYAMLDecodeOptions] and
 // [go.jacobcolvin.com/niceyaml/encoder.WithYAMLOptions], so a caller can tell
 // at the call site when the go-yaml dependency shows.
 // [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] takes go-yaml's

@@ -14,7 +14,6 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/parser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -743,22 +742,15 @@ func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
 	t.Run("path that selects another entry", func(t *testing.T) {
 		t.Parallel()
 
-		// The parser accepts the duplicate keys and the decoder rejects
-		// the second. A path through the key selects the third, so the
-		// error binds at the token the decoder reported, and the path
-		// names the key in the message.
-		source := niceyaml.NewSourceFromString(
-			"name: x\nname: y\nname: z\n",
-			niceyaml.WithYAMLParserOptions(parser.AllowDuplicateMapKey()),
-		)
+		// The document may hold the key twice, and a decode into a map
+		// reads every entry, so the decoder rejects the value of the
+		// second. A path through the key selects the third, so the error
+		// binds at the token the decoder reported, and the path names
+		// the value in the message.
+		doc := yamltest.FirstDocument(t, "name: 1\nname: y\nname: 3\n", niceyaml.WithAllowDuplicateKeys(true))
 
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		var v rejectionConfig
-
-		err = doc.DecodeInto(t.Context(), &v)
-		require.EqualError(t, err, `2:1: $.name~: duplicate key "name"`)
+		_, err := doc.Decode[map[string]int](t.Context())
+		require.EqualError(t, err, "2:7: $.name: expected integer, got string")
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 		var srcErr *niceyaml.SourceError
@@ -768,16 +760,16 @@ func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
 
 		path, ok := srcErr.Path()
 		require.True(t, ok)
-		assert.Equal(t, "$.name~", path.String())
+		assert.Equal(t, "$.name", path.String())
 
 		pos, ok := srcErr.Position()
 		require.True(t, ok)
-		assert.Equal(t, position.New(1, 0), pos)
+		assert.Equal(t, position.New(1, 6), pos)
 
 		ranges, err := doc.Ranges(path)
 		require.NoError(t, err)
 		require.Len(t, ranges, 1)
-		assert.Equal(t, position.New(2, 0), ranges[0].Start)
+		assert.Equal(t, position.New(2, 6), ranges[0].Start)
 
 		_, ok = doc.PathAt(pos)
 		assert.False(t, ok, "a path selects the second entry")

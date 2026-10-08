@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -848,10 +847,10 @@ type mergedLayers struct {
 // The document belongs to a [Source] of its own, which holds the merged
 // value as YAML text below the preamble of the lowest layer. The Source
 // takes its name, its file path, and its file system from the Source of
-// that layer, with the settings [WithAllowDuplicateKeys],
-// [WithAliasLimit], and [WithYAMLParserOptions] gave it. It takes no
-// reference documents, since the merged value holds no alias. With no
-// nodes, the Source is empty and has no name.
+// that layer, with the settings [WithAllowDuplicateKeys] and
+// [WithAliasLimit] gave it. It takes no reference documents, since the
+// merged value holds no alias. With no nodes, the Source is empty and
+// has no name.
 //
 // A text that does not parse to one document gives that error, with the
 // Node [noLayers] returns, so the layers then bind every error with no
@@ -936,11 +935,6 @@ func newMergedDocument(from *Source, text string) (*Node, error) {
 		// The merged value holds no alias, so it reads no reference
 		// document.
 		c.references = nil
-
-		// The parser options of from hold the one that allows a duplicate
-		// key already. The constructor adds it again, which changes
-		// nothing, and the copy keeps it out of the options of from.
-		c.parserOpts = slices.Clone(c.parserOpts)
 	})
 
 	docs := src.documents()

@@ -68,7 +68,6 @@ var policies = []dependencyPolicy{
 			// Escape hatches.
 			"yaml.DecodeOption",
 			"yaml.EncodeOption",
-			"parser.Option",
 			// The comments encoder.WithYAMLComments adds. The encoder
 			// applies them itself, since go-yaml's own option for them
 			// works only when go-yaml writes the document.
@@ -137,6 +136,7 @@ func TestCheckFile_Coverage(t *testing.T) {
 	const header = `package p
 
 import (
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 )
@@ -172,11 +172,11 @@ import (
 }`,
 		},
 		"pass-through type without the prefix": {
-			src:  `func WithOptions(opts ...parser.Option) {}`,
+			src:  `func WithOptions(opts ...yaml.EncodeOption) {}`,
 			want: []string{"WithOptions"},
 		},
 		"pass-through type with the prefix": {
-			src: `func WithYAMLOptions(opts ...parser.Option) {}`,
+			src: `func WithYAMLOptions(opts ...yaml.EncodeOption) {}`,
 		},
 		"method on receiver with type parameters": {
 			src: `type Map[K comparable, V any] struct{}
