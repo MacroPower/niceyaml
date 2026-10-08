@@ -99,19 +99,26 @@
 //
 // [Compile] reads no file and fetches no URL, so a $ref to another
 // document resolves only through a ref resolver given with
-// [WithJSONSchemaOptions]. When such a $ref does not resolve, the schema
-// still compiles, and validation fails with an error wrapping
-// [ErrValidate] for each document that reaches it. A schema whose $refs
-// name files or URLs beside it loads through a [Registry], which resolves
-// each $ref against the location of the schema. [FileFS] names a schema
-// in a file system, and the registry reads it and the files its $refs
-// name from there, such as from an [embed.FS]:
+// [WithJSONSchemaOptions]. Without one, the schema does not compile. A
+// schema whose $refs name files or URLs beside it loads through a
+// [Registry], which resolves each $ref against the location of the
+// schema. [FileFS] names a schema in a file system, and the registry
+// reads it and the files its $refs name from there, such as from an
+// [embed.FS]:
 //
 //	//go:embed schemas
 //	var schemasFS embed.FS
 //
 //	reg := schema.NewRegistry()
 //	root, err := reg.Schema(ctx, schema.FileFS(schemasFS, "schemas/root.json"))
+//
+// A schema loads only when each document its $refs name loads too, so a
+// $ref to a file that is missing fails the schema once, with an error
+// wrapping [ErrLoad], rather than each document that reaches the $ref.
+// [WithRequireRefs] turns the check off for schemas the program does not
+// maintain, such as the ones a catalog names. Such a schema then
+// compiles, and validation fails with an error wrapping [ErrValidate]
+// for each document that reaches the $ref.
 //
 // # Resolution
 //
@@ -193,7 +200,9 @@
 // key before it loads and compiles those bytes, so once a schema
 // compiles, the registry serves it to every later document that names it
 // without loading it again. A failed load or compile stays out of the
-// cache, so the next document that names the key loads it again. A
+// cache, so the next document that names the key loads it again. The
+// registry does keep the failure of a schema whose $ref names a document
+// that does not load, as [Registry.Schema] describes. A
 // caller that holds a Ref of its own takes the compiled schema from the
 // same cache. A resolver that picks the schema from the document returns
 // the same Refs:

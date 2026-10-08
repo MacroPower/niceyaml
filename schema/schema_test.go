@@ -265,6 +265,120 @@ func TestSchema_Validate(t *testing.T) {
 	}
 }
 
+func TestCompile_RequireRefs(t *testing.T) {
+	t.Parallel()
+
+	const nope = "https://example.invalid/nope.json"
+
+	// The message of the compile error for a $ref to document.
+	unresolved := func(document string) string {
+		return fmt.Sprintf("no ref resolver for $ref to %q: schema URI not resolved", document)
+	}
+
+	serving := schema.WithJSONSchemaOptions(jsonschema.WithRefResolver(jsonschema.SchemaMap{
+		nope: {},
+	}))
+
+	tcs := map[string]struct {
+		schema string
+		// The text of the compile error, or empty for a schema that
+		// compiles.
+		want string
+		opts []schema.CompileOption
+	}{
+		"ref to another document": {
+			schema: `{"properties": {"a": {"$ref": "` + nope + `#/$defs/a"}}}`,
+			want:   "compile schema: " + unresolved(nope),
+		},
+		"relative ref": {
+			schema: `{"properties": {"a": {"$ref": "defs.json#/$defs/port"}}}`,
+			want:   "compile schema: " + unresolved("defs.json"),
+		},
+		"dynamic ref to another document": {
+			schema: `{"properties": {"a": {"$dynamicRef": "` + nope + `#node"}}}`,
+			want:   "compile schema: " + unresolved(nope),
+		},
+		"under a branch no document takes": {
+			schema: `{"if": false, "then": {"$ref": "` + nope + `"}}`,
+			want:   "compile schema: " + unresolved(nope),
+		},
+		"in a definition nothing refers to": {
+			schema: `{"$defs": {"unused": {"$ref": "` + nope + `"}}}`,
+			want:   "compile schema: " + unresolved(nope),
+		},
+		"two refs to one document": {
+			schema: `{"allOf": [{"$ref": "` + nope + `#/$defs/a"}, {"$ref": "` + nope + `#/$defs/b"}]}`,
+			want:   "compile schema: " + unresolved(nope),
+		},
+		"refs to two documents": {
+			schema: `{"allOf": [{"$ref": "a.json"}, {"$ref": "b.json"}]}`,
+			want:   "compile schema: " + unresolved("a.json") + "\n" + unresolved("b.json"),
+		},
+		"password in the ref": {
+			schema: `{"$ref": "https://user:secret@example.invalid/nope.json"}`,
+			want:   "compile schema: " + unresolved("https://user:xxxxx@example.invalid/nope.json"),
+		},
+		"required again after not required": {
+			opts:   []schema.CompileOption{schema.WithRequireRefs(false), schema.WithRequireRefs(true)},
+			schema: `{"$ref": "` + nope + `"}`,
+			want:   "compile schema: " + unresolved(nope),
+		},
+		"refs not required": {
+			opts:   []schema.CompileOption{schema.WithRequireRefs(false)},
+			schema: `{"properties": {"a": {"$ref": "` + nope + `"}}}`,
+		},
+		"ref inside the schema": {
+			schema: `{"properties": {"a": {"$ref": "#/$defs/a"}}, "$defs": {"a": {"type": "string"}}}`,
+		},
+		"ref to a document the schema holds": {
+			schema: `{
+				"properties": {"a": {"$ref": "` + nope + `"}},
+				"$defs": {"held": {"$id": "` + nope + `", "type": "string"}}
+			}`,
+		},
+		"ref to the schema by its own id": {
+			schema: `{
+				"$id": "` + nope + `",
+				"properties": {"a": {"$ref": "` + nope + `#/$defs/a"}},
+				"$defs": {"a": {"type": "string"}}
+			}`,
+		},
+		"resolver that serves the document": {
+			opts:   []schema.CompileOption{serving},
+			schema: `{"properties": {"a": {"$ref": "` + nope + `"}}}`,
+		},
+		// The compile cannot tell which documents a resolver of the
+		// caller's serves, so the validation reports the ref.
+		"resolver that does not serve the document": {
+			opts:   []schema.CompileOption{serving},
+			schema: `{"properties": {"a": {"$ref": "https://example.invalid/other.json"}}}`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := schema.Compile(t.Context(), []byte(tc.schema), tc.opts...)
+			if tc.want == "" {
+				require.NoError(t, err)
+				assert.NotNil(t, s)
+
+				return
+			}
+
+			require.ErrorIs(t, err, schema.ErrCompile)
+			require.ErrorIs(t, err, jsonschema.ErrNotResolved)
+			assert.Equal(t, tc.want, err.Error())
+			assert.Nil(t, s)
+
+			assert.PanicsWithError(t, tc.want, func() {
+				schema.MustCompile([]byte(tc.schema), tc.opts...)
+			})
+		})
+	}
+}
+
 func TestSchema_UnresolvableRef(t *testing.T) {
 	t.Parallel()
 
@@ -273,9 +387,12 @@ func TestSchema_UnresolvableRef(t *testing.T) {
 		return nil, unreachable
 	})
 
-	// The ref resolves when the validator walks to it, so the failure
-	// arrives at the location of the value that referenced it. The schema
-	// is at fault, not the document, so every case wraps ErrValidate.
+	// Each schema compiles with a $ref that does not resolve, either
+	// because the compile does not require it to or because a resolver
+	// of the caller's stands in for the check. The validator reports the
+	// ref when it walks to it, so the failure arrives at the location of
+	// the value that referenced it. The schema is at fault, not the
+	// document, so every case wraps ErrValidate.
 	tcs := map[string]struct {
 		data   map[string]any
 		err    error
@@ -284,6 +401,7 @@ func TestSchema_UnresolvableRef(t *testing.T) {
 		opts   []schema.CompileOption
 	}{
 		"no resolver": {
+			opts:   []schema.CompileOption{schema.WithRequireRefs(false)},
 			schema: `{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`,
 			data:   map[string]any{"a": 1},
 			want:   `cannot resolve $ref "https://example.invalid/nope.json"`,
@@ -306,6 +424,7 @@ func TestSchema_UnresolvableRef(t *testing.T) {
 			want:   "host unreachable",
 		},
 		"beside a violation": {
+			opts: []schema.CompileOption{schema.WithRequireRefs(false)},
 			schema: `{"properties": {
 				"a": {"$ref": "https://example.invalid/nope.json"},
 				"b": {"type": "string"}

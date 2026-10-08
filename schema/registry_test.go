@@ -62,6 +62,13 @@ func writeFiles(t *testing.T, dir string, files map[string]string) {
 	}
 }
 
+// requireRefs returns the option that sets whether a registry compiles a
+// schema only when each $ref to another document resolves, as
+// [schema.WithRequireRefs] sets it for one compile.
+func requireRefs(required bool) schema.RegistryOption {
+	return schema.WithCompileOptions(schema.WithRequireRefs(required))
+}
+
 // rootFS returns the file system of an [os.Root] opened on dir. The Root
 // stays open until the test ends.
 func rootFS(t *testing.T, dir string) fs.FS {
@@ -74,8 +81,23 @@ func rootFS(t *testing.T, dir string) fs.FS {
 	return root.FS()
 }
 
-// Path helpers for tests.
-var kindPath = paths.Current().Child("kind")
+var (
+	// Path helpers for tests.
+	kindPath = paths.Current().Child("kind")
+
+	// The two settings of [schema.WithRequireRefs] for a registry, each
+	// with the sentinel that a document fails with when its schema holds a
+	// $ref the registry cannot resolve. A registry that requires refs
+	// fails to load the schema. One that does not compiles it, and the
+	// validation that reaches the $ref fails.
+	refModes = map[string]struct {
+		err     error
+		require bool
+	}{
+		"refs required":     {require: true, err: schema.ErrLoad},
+		"refs not required": {require: false, err: schema.ErrValidate},
+	}
+)
 
 // countingLoader returns a resolver that names key, serves data, and counts
 // how many times its Load runs.
@@ -2065,12 +2087,21 @@ func TestRegistry_FileFS(t *testing.T) {
 			},
 		}
 
-		reg := schema.NewRegistry(schema.WithResolvers(schema.FileFS(fsys, "schemas/root.json")))
+		for name, mode := range refModes {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
-		require.ErrorIs(t, err, schema.ErrValidate)
-		assert.Contains(t, err.Error(), "read schemas/defs.json: open schemas/defs.json: file does not exist")
-		assert.NotContains(t, err.Error(), wd)
+				reg := schema.NewRegistry(
+					requireRefs(mode.require),
+					schema.WithResolvers(schema.FileFS(fsys, "schemas/root.json")),
+				)
+
+				err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
+				require.ErrorIs(t, err, mode.err)
+				assert.Contains(t, err.Error(), "read schemas/defs.json: open schemas/defs.json: file does not exist")
+				assert.NotContains(t, err.Error(), wd)
+			})
+		}
 	})
 
 	t.Run("a path outside the file system names no file", func(t *testing.T) {
@@ -2563,17 +2594,15 @@ func TestRegistry_WithFSAt(t *testing.T) {
 		base := t.TempDir()
 		tenant := filepath.Join(base, "tenant")
 		writeFiles(t, base, map[string]string{
-			"tenant/main.json": `{"properties": {
-				"in": {"$ref": "defs.json"},
-				"out": {"$ref": "../shared/defs.json"}
-			}}`,
+			"tenant/in.json":   `{"properties": {"in": {"$ref": "defs.json"}}}`,
+			"tenant/out.json":  `{"properties": {"out": {"$ref": "../shared/defs.json"}}}`,
 			"tenant/defs.json": `{"type": "string"}`,
 			"shared/defs.json": `{"type": "string"}`,
 		})
 
 		reg := schema.NewRegistry(
 			schema.WithFSAt(tenant, os.DirFS(tenant)),
-			schema.WithResolvers(schema.File(filepath.Join(tenant, "main.json"))),
+			schema.WithResolvers(schema.File(filepath.Join(tenant, "in.json"))),
 		)
 
 		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "in: 5\n"))
@@ -2581,12 +2610,24 @@ func TestRegistry_WithFSAt(t *testing.T) {
 		require.NotErrorIs(t, err, schema.ErrValidate)
 		assert.Contains(t, err.Error(), `$.in: expected "string", got "integer"`)
 
-		err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "out: 5\n"))
-		require.ErrorIs(t, err, schema.ErrValidate)
-		assert.Contains(t, err.Error(), "not under "+tenant)
+		for name, mode := range refModes {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				reg := schema.NewRegistry(
+					requireRefs(mode.require),
+					schema.WithFSAt(tenant, os.DirFS(tenant)),
+					schema.WithResolvers(schema.File(filepath.Join(tenant, "out.json"))),
+				)
+
+				err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "out: 5\n"))
+				require.ErrorIs(t, err, mode.err)
+				assert.Contains(t, err.Error(), "not under "+tenant)
+			})
+		}
 
 		// Without the file system, the same schema reads the file outside.
-		disk := schema.NewRegistry(schema.WithResolvers(schema.File(filepath.Join(tenant, "main.json"))))
+		disk := schema.NewRegistry(schema.WithResolvers(schema.File(filepath.Join(tenant, "out.json"))))
 		err = disk.Validate(t.Context(), yamltest.FirstDocument(t, "out: 5\n"))
 		require.Error(t, err)
 		require.NotErrorIs(t, err, schema.ErrValidate)
@@ -3449,6 +3490,197 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 	})
 }
 
+func TestRegistry_Schema_RequireRefs(t *testing.T) {
+	t.Parallel()
+
+	const (
+		rootSchema = `{"properties": {"a": {"$ref": "defs.json#/$defs/a"}}}`
+		twoSchema  = `{"allOf": [{"$ref": "one.json"}, {"$ref": "other.json"}]}`
+	)
+
+	tmpDir := t.TempDir()
+	writeFiles(t, tmpDir, map[string]string{"root.json": rootSchema})
+
+	bundle := fstest.MapFS{
+		"schemas/root.json": &fstest.MapFile{Data: []byte(rootSchema)},
+		"schemas/two.json":  &fstest.MapFile{Data: []byte(twoSchema)},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/s/root.json" {
+			http.NotFound(w, r)
+
+			return
+		}
+
+		//nolint:errcheck // Test helper.
+		w.Write([]byte(rootSchema))
+	}))
+	t.Cleanup(server.Close)
+
+	// A file URL takes a fragment, which a plain path does not.
+	rootURL := "file://" + filepath.ToSlash(filepath.Join(tmpDir, "root.json"))
+
+	fragment, err := schema.FileOrURL(tmpDir, rootURL+"#/properties/a")
+	require.NoError(t, err)
+
+	tcs := map[string]struct {
+		// The sentinel of the error, or nil for a schema that loads.
+		err error
+		// An error the load error wraps besides the sentinel.
+		cause error
+		ref   schema.Ref
+		// Text the message of the error holds.
+		want string
+		opts []schema.RegistryOption
+	}{
+		"file on disk": {
+			ref:   schema.File(filepath.Join(tmpDir, "root.json")),
+			err:   schema.ErrLoad,
+			cause: fs.ErrNotExist,
+			want:  "cannot resolve $ref: read " + filepath.Join(tmpDir, "defs.json"),
+		},
+		"fragment of a file on disk": {
+			ref:   fragment,
+			err:   schema.ErrLoad,
+			cause: fs.ErrNotExist,
+			want:  "cannot resolve $ref: read " + filepath.Join(tmpDir, "defs.json"),
+		},
+		"file in a file system": {
+			ref:   schema.FileFS(bundle, "schemas/root.json"),
+			err:   schema.ErrLoad,
+			cause: fs.ErrNotExist,
+			want: `load schema: "schemas/root.json": cannot resolve $ref: ` +
+				`read schemas/defs.json: open schemas/defs.json: file does not exist`,
+		},
+		"url": {
+			ref:  schema.URL(server.URL + "/s/root.json"),
+			err:  schema.ErrLoad,
+			want: `/s/root.json": cannot resolve $ref: `,
+		},
+		"two documents": {
+			ref:   schema.FileFS(bundle, "schemas/two.json"),
+			err:   schema.ErrLoad,
+			cause: fs.ErrNotExist,
+			want: `load schema: "schemas/two.json": cannot resolve $ref: ` +
+				"read schemas/one.json: open schemas/one.json: file does not exist\n" +
+				"read schemas/other.json: open schemas/other.json: file does not exist",
+		},
+		// The registry resolves no $ref of a schema it holds as bytes, so
+		// the schema does not compile, as it does not in Compile.
+		"embedded bytes": {
+			ref:   schema.Embedded([]byte(rootSchema)),
+			err:   schema.ErrCompile,
+			cause: jsonschema.ErrNotResolved,
+			want:  `no ref resolver for $ref to "defs.json": schema URI not resolved`,
+		},
+		"refs not required": {
+			opts: []schema.RegistryOption{requireRefs(false)},
+			ref:  schema.FileFS(bundle, "schemas/root.json"),
+		},
+		// The registry cannot tell which documents a resolver of the
+		// caller's serves, so the validation reports the ref.
+		"resolver of the caller's that does not serve the document": {
+			opts: []schema.RegistryOption{schema.WithCompileOptions(schema.WithJSONSchemaOptions(
+				jsonschema.WithRefResolver(jsonschema.SchemaMap{}),
+			))},
+			ref: schema.FileFS(bundle, "schemas/root.json"),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			reg := schema.NewRegistry(tc.opts...)
+
+			s, err := reg.Schema(t.Context(), tc.ref)
+			if tc.err == nil {
+				require.NoError(t, err)
+
+				err = yamltest.FirstDocument(t, "a: 5\n").Validate(t.Context(), s)
+				require.ErrorIs(t, err, schema.ErrValidate)
+
+				return
+			}
+
+			require.ErrorIs(t, err, tc.err)
+			assert.Nil(t, s)
+			assert.Contains(t, err.Error(), tc.want)
+
+			if tc.cause != nil {
+				require.ErrorIs(t, err, tc.cause)
+			}
+
+			// The registry answers a document that names the schema the
+			// same way, bound to the document.
+			byDocument := schema.NewRegistry(append(tc.opts, schema.WithResolvers(tc.ref))...)
+
+			err = byDocument.Validate(t.Context(), yamltest.FirstDocument(t, "b: 5\n"))
+			require.ErrorIs(t, err, tc.err)
+			assert.False(t, niceyaml.IsInvalid(err))
+		})
+	}
+
+	t.Run("a miss under a context that ended is not kept", func(t *testing.T) {
+		t.Parallel()
+
+		// The referenced document answers once release closes. A request
+		// before then waits for it, or for its own context to end.
+		entered := make(chan struct{}, 1)
+		release := make(chan struct{})
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/root.json":
+				//nolint:errcheck // Test helper.
+				w.Write([]byte(`{"properties": {"a": {"$ref": "slow.json"}}}`))
+
+			case "/slow.json":
+				select {
+				case entered <- struct{}{}:
+				default:
+				}
+
+				select {
+				case <-release:
+					//nolint:errcheck // Test helper.
+					w.Write([]byte(`{"type": "string"}`))
+
+				case <-r.Context().Done():
+				}
+
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		ref := schema.URL(server.URL + "/root.json")
+		reg := schema.NewRegistry()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		go func() {
+			<-entered
+			cancel()
+		}()
+
+		_, err := reg.Schema(ctx, ref)
+		require.ErrorIs(t, err, schema.ErrLoad)
+		require.ErrorIs(t, err, context.Canceled)
+
+		close(release)
+
+		s, err := reg.Schema(t.Context(), ref)
+		require.NoError(t, err)
+
+		err = yamltest.FirstDocument(t, "a: 5\n").Validate(t.Context(), s)
+		require.ErrorContains(t, err, `expected "string"`)
+	})
+}
+
 func TestRegistry_Schema_PanicReachesCaller(t *testing.T) {
 	t.Parallel()
 
@@ -3917,11 +4149,20 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 	t.Run("a url schema reads no local file", func(t *testing.T) {
 		t.Parallel()
 
-		reg := schema.NewRegistry(schema.WithResolvers(schema.URL(server.URL + "/s/local.json")))
+		for name, mode := range refModes {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
-		require.ErrorIs(t, err, schema.ErrValidate)
-		assert.Contains(t, err.Error(), "cannot resolve $ref")
+				reg := schema.NewRegistry(
+					requireRefs(mode.require),
+					schema.WithResolvers(schema.URL(server.URL+"/s/local.json")),
+				)
+
+				err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+				require.ErrorIs(t, err, mode.err)
+				assert.Contains(t, err.Error(), "cannot resolve $ref")
+			})
+		}
 	})
 
 	t.Run("a url reached from a file schema reads no local file", func(t *testing.T) {
@@ -3955,17 +4196,23 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 				rootSchema := fmt.Appendf(nil, `{"$ref": %q}`, server.URL+tc.remote)
 				require.NoError(t, os.WriteFile(root, rootSchema, 0o600))
 
-				reg := schema.NewRegistry(schema.WithResolvers(schema.File(root)))
+				for name, mode := range refModes {
+					t.Run(name, func(t *testing.T) {
+						t.Parallel()
 
-				err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
-				require.ErrorIs(t, err, schema.ErrValidate)
-				assert.NotContains(t, err.Error(), `expected "string", got "integer"`)
-				assert.Contains(t, err.Error(), "names local file")
+						reg := schema.NewRegistry(requireRefs(mode.require), schema.WithResolvers(schema.File(root)))
 
-				// A string fails too, since the registry refuses the remote
-				// schema rather than skip the reference.
-				err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: x\n"))
-				require.ErrorContains(t, err, "names local file")
+						err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+						require.ErrorIs(t, err, mode.err)
+						assert.NotContains(t, err.Error(), `expected "string", got "integer"`)
+						assert.Contains(t, err.Error(), "names local file")
+
+						// A string fails too, since the registry refuses the
+						// remote schema rather than skip the reference.
+						err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: x\n"))
+						require.ErrorContains(t, err, "names local file")
+					})
+				}
 			})
 		}
 	})
@@ -3987,6 +4234,8 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		"/f.json":          []byte(`{"properties": {"b": {"$ref": "flaky.json"}}}`),
 		"/flaky.json":      []byte(`{"type": "integer"}`),
 		"/g.json":          []byte(`{"properties": {"b": {"$ref": "missing.json"}}}`),
+		"/kept/f.json":     []byte(`{"properties": {"b": {"$ref": "flaky.json"}}}`),
+		"/kept/flaky.json": []byte(`{"type": "integer"}`),
 		"/names-file.json": namesFile,
 		"/via-remote.json": []byte(`{"$ref": "remote-names-file.json"}`),
 		// The remote document the two roots of one subtest share.
@@ -3994,7 +4243,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 	}
 
 	// Count the requests for each path, so a subtest can tell how often the
-	// registry fetched a document. The flaky document answers 500 to its
+	// registry fetched a document. Each flaky document answers 500 to its
 	// first request, and the missing one answers 404 to every request.
 	hits := map[string]*atomic.Int32{"/missing.json": {}}
 	for path := range served {
@@ -4013,7 +4262,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		data, ok := served[r.URL.Path]
 
 		switch {
-		case r.URL.Path == "/flaky.json" && n == 1:
+		case strings.HasSuffix(r.URL.Path, "/flaky.json") && n == 1:
 			http.Error(w, "unavailable", http.StatusInternalServerError)
 
 		case !ok:
@@ -4045,7 +4294,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 	t.Run("a document that missed at compile loads once after it recovers", func(t *testing.T) {
 		t.Parallel()
 
-		reg := schema.NewRegistry(schema.WithResolvers(schema.URL(server.URL + "/f.json")))
+		reg := schema.NewRegistry(requireRefs(false), schema.WithResolvers(schema.URL(server.URL+"/f.json")))
 
 		for range 5 {
 			require.NoError(t, reg.Validate(t.Context(), yamltest.FirstDocument(t, "b: 2\n")))
@@ -4059,10 +4308,35 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		require.ErrorContains(t, err, `expected "integer"`)
 	})
 
+	t.Run("a required document that missed at compile is not fetched again", func(t *testing.T) {
+		t.Parallel()
+
+		ref := schema.URL(server.URL + "/kept/f.json")
+		reg := schema.NewRegistry(schema.WithResolvers(ref))
+
+		for range 3 {
+			err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "b: 2\n"))
+			require.ErrorIs(t, err, schema.ErrLoad)
+			assert.Contains(t, err.Error(), "/kept/flaky.json")
+		}
+
+		_, err := reg.Schema(t.Context(), ref)
+		require.ErrorIs(t, err, schema.ErrLoad)
+
+		// The registry keeps the miss in place of the schema, so it fetches
+		// neither again, although the document has recovered.
+		assert.Equal(t, int32(1), hits["/kept/f.json"].Load())
+		assert.Equal(t, int32(1), hits["/kept/flaky.json"].Load())
+
+		// A new registry fetches both and compiles the schema.
+		fresh := schema.NewRegistry(schema.WithResolvers(ref))
+		require.NoError(t, fresh.Validate(t.Context(), yamltest.FirstDocument(t, "b: 2\n")))
+	})
+
 	t.Run("a document that fails to load is fetched again", func(t *testing.T) {
 		t.Parallel()
 
-		reg := schema.NewRegistry(schema.WithResolvers(schema.URL(server.URL + "/g.json")))
+		reg := schema.NewRegistry(requireRefs(false), schema.WithResolvers(schema.URL(server.URL+"/g.json")))
 
 		_, err := reg.Schema(t.Context(), schema.URL(server.URL+"/g.json"))
 		require.NoError(t, err)
@@ -4082,17 +4356,26 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		root := filepath.Join(t.TempDir(), "root.json")
 		require.NoError(t, os.WriteFile(root, namesFile, 0o600))
 
-		reg := schema.NewRegistry(schema.WithResolvers(schema.URL(server.URL + "/names-file.json")))
+		for name, mode := range refModes {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		s, err := reg.Schema(t.Context(), schema.File(root))
-		require.NoError(t, err)
+				reg := schema.NewRegistry(
+					requireRefs(mode.require),
+					schema.WithResolvers(schema.URL(server.URL+"/names-file.json")),
+				)
 
-		err = yamltest.FirstDocument(t, "a: 5\n").Validate(t.Context(), s)
-		require.ErrorContains(t, err, `expected "string"`)
+				s, err := reg.Schema(t.Context(), schema.File(root))
+				require.NoError(t, err)
 
-		err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
-		require.ErrorIs(t, err, schema.ErrValidate)
-		assert.Contains(t, err.Error(), "cannot resolve $ref")
+				err = yamltest.FirstDocument(t, "a: 5\n").Validate(t.Context(), s)
+				require.ErrorContains(t, err, `expected "string"`)
+
+				err = reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+				require.ErrorIs(t, err, mode.err)
+				assert.Contains(t, err.Error(), "cannot resolve $ref")
+			})
+		}
 	})
 
 	t.Run("a cached remote document still cannot name a local file", func(t *testing.T) {
@@ -4102,7 +4385,9 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		rootSchema := fmt.Appendf(nil, `{"$ref": %q}`, server.URL+"/remote-names-file.json")
 		require.NoError(t, os.WriteFile(root, rootSchema, 0o600))
 
-		reg := schema.NewRegistry(schema.WithResolvers(schema.File(root)))
+		// The url root compiles only in a registry that does not require
+		// refs, since it cannot reach the file its document names.
+		reg := schema.NewRegistry(requireRefs(false), schema.WithResolvers(schema.File(root)))
 
 		// A url root loads the remote document first, which may name a
 		// local file there because the file stays out of its reach.
@@ -4145,6 +4430,10 @@ func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 			//nolint:errcheck // Test helper.
 			w.Write([]byte(`{"$defs": {"a": {"$anchor": "1bad"}}}`))
 
+		case "/d/lost.json":
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(`{"properties": {"a": {"$ref": "../gone.json"}}}`))
+
 		default:
 			http.NotFound(w, r)
 		}
@@ -4157,6 +4446,10 @@ func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 		err error
 		url string
 	}{
+		"a relative $ref to a document that does not load": {
+			url: withPassword + "/d/lost.json",
+			err: schema.ErrLoad,
+		},
 		"a fetch that fails": {
 			url: withPassword + "/missing.json",
 			err: schema.ErrLoad,
@@ -4236,7 +4529,7 @@ func TestRegistry_Validate_RedactsPassword(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	ref := schema.URL(strings.Replace(server.URL, "://", "://user:secret@", 1) + "/d/root.json")
-	reg := schema.NewRegistry(schema.WithResolvers(ref))
+	reg := schema.NewRegistry(requireRefs(false), schema.WithResolvers(ref))
 
 	_, err := reg.Schema(t.Context(), ref)
 	require.NoError(t, err)

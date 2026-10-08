@@ -11739,6 +11739,7 @@ func TestIsInvalid(t *testing.T) {
 
 				return validated(t, schema.MustCompile(
 					[]byte(`{"properties": {"port": {"$ref": "https://example.invalid/nope.json"}}}`),
+					schema.WithRequireRefs(false),
 				))
 			},
 			err: schema.ErrValidate,

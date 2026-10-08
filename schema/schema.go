@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/goccy/go-yaml"
@@ -20,6 +21,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
+	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -53,7 +55,9 @@ var (
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
 
 	// ErrCompile indicates a schema document that does not compile.
-	// [Compile] and [Registry.Lookup] return it.
+	// [Compile] and [Registry.Lookup] return it. A schema with a $ref to
+	// another document and no ref resolver to serve that document does
+	// not compile, as [WithRequireRefs] describes.
 	ErrCompile = errors.New("compile schema")
 )
 
@@ -62,16 +66,19 @@ var (
 //
 // Available options:
 //   - [WithJSONSchemaOptions]
+//   - [WithRequireRefs]
 type CompileOption func(*compileConfig)
 
 // compileConfig holds the settings a [CompileOption] configures.
 type compileConfig struct {
 	jsonOpts []jsonschema.ValidateOption
+	// Fails a compile that leaves a $ref to another document unresolved.
+	requireRefs bool
 }
 
 // newCompileConfig applies opts over the defaults.
 func newCompileConfig(opts []CompileOption) compileConfig {
-	var cfg compileConfig
+	cfg := compileConfig{requireRefs: true}
 
 	for _, opt := range opts {
 		opt(&cfg)
@@ -90,7 +97,8 @@ func newCompileConfig(opts []CompileOption) compileConfig {
 //
 // A [Registry] resolves the $refs of a schema from [File] or [URL] with
 // a resolver of its own, and [WithCompileOptions] says when a
-// [jsonschema.WithRefResolver] given here replaces it.
+// [jsonschema.WithRefResolver] given here replaces it. A compile checks
+// no document such a resolver serves, as [WithRequireRefs] describes.
 //
 // The option keeps its own copy of opts, so writing to the caller's slice
 // afterwards changes nothing, even for a [Registry] that compiles later.
@@ -99,6 +107,37 @@ func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 
 	return func(cfg *compileConfig) {
 		cfg.jsonOpts = append(cfg.jsonOpts, opts...)
+	}
+}
+
+// WithRequireRefs is a [CompileOption] that sets whether a schema
+// compiles only when each $ref to another document resolves. The default
+// is true. A compile resolves every $ref in the schema, whether or not a
+// document can reach it, so a schema with a $ref that does not resolve
+// fails once, where it compiles. [Compile] has no ref resolver of its
+// own, so it returns an error wrapping [ErrCompile] for such a $ref
+// unless [WithJSONSchemaOptions] gives it a resolver. A [Registry]
+// returns an error wrapping [ErrLoad] for a document it cannot load, as
+// [Registry.Schema] describes.
+//
+// With false, such a schema compiles. Each document whose validation
+// reaches the $ref then fails with an error wrapping [ErrValidate], and a
+// document that never reaches it passes. A registry of schemas the
+// program does not maintain takes false, since a public schema may name
+// a document that is gone under a branch few documents take:
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithResolvers(schema.Directive(), schemastore.New()),
+//	    schema.WithCompileOptions(schema.WithRequireRefs(false)),
+//	)
+//
+// A ref resolver given with [WithJSONSchemaOptions] answers the JSON
+// Schema library itself, so the compile cannot tell which documents it
+// serves. A $ref to a document that resolver does not serve compiles
+// under either setting and fails validation as above.
+func WithRequireRefs(require bool) CompileOption {
+	return func(cfg *compileConfig) {
+		cfg.requireRefs = require
 	}
 }
 
@@ -121,11 +160,17 @@ func WithJSONSchemaOptions(opts ...jsonschema.ValidateOption) CompileOption {
 //
 // Compile reads no file and fetches no URL. A $ref to another document,
 // such as "server.json" or an https URL, resolves only through a ref
-// resolver given with [WithJSONSchemaOptions]. When such a $ref does not
-// resolve, the schema still compiles. Each document whose validation
-// reaches the $ref then fails with an error wrapping [ErrValidate], and a
-// document that never reaches it passes. A $ref to a location the
-// document lacks, such as "#/$defs/missing", fails the compile.
+// resolver given with [WithJSONSchemaOptions]. Without one, the schema
+// does not compile, and the error names the document:
+//
+//	compile schema: no ref resolver for $ref to "server.json": schema URI not resolved
+//
+// The schema fails wherever the $ref stands, even under a branch no
+// document takes. [WithRequireRefs] lets such a schema compile and
+// leaves the $ref to fail the documents that reach it. A $ref to a
+// document the schema holds under an $id resolves there and needs no
+// resolver. A $ref to a location the document lacks, such as
+// "#/$defs/missing", fails the compile under either setting.
 //
 // A schema whose $refs name files or URLs beside it loads through a
 // [Registry] instead. [Registry.Schema] loads the schema a [File] or [URL]
@@ -144,14 +189,95 @@ func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Schema, 
 // compileJSON is [Compile] before wrapping the error with [ErrCompile].
 func compileJSON(ctx context.Context, data []byte, opts []CompileOption) (*Schema, error) {
 	cfg := newCompileConfig(opts)
+	jsonOpts := cfg.jsonOpts
+	rec := &refRecorder{}
 
-	compiled, err := jsonschema.CompileJSON(ctx, data, cfg.jsonOpts...)
+	// The recording resolver goes first, so a ref resolver among the
+	// options replaces it. It then answers only for a compile that has no
+	// other resolver, where no $ref to another document can resolve.
+	if cfg.requireRefs {
+		jsonOpts = slices.Concat(
+			[]jsonschema.ValidateOption{
+				jsonschema.WithRefResolver(rec.resolver(jsonschema.RefResolverFunc(noRefResolver))),
+			},
+			jsonOpts,
+		)
+	}
+
+	compiled, err := jsonschema.CompileJSON(ctx, data, jsonOpts...)
 	if err != nil {
 		//nolint:wrapcheck // Callers wrap the error with ErrCompile.
 		return nil, err
 	}
 
+	err = rec.stop()
+	if err != nil {
+		return nil, err
+	}
+
 	return FromJSONSchema(compiled), nil
+}
+
+// noRefResolver is the ref resolver of a compile whose options hold none.
+// It serves no document, as the schema library does without a resolver,
+// and its error says why the $ref does not resolve.
+func noRefResolver(_ context.Context, uri string) (*jsonschema.Schema, error) {
+	return nil, fmt.Errorf("no ref resolver for $ref to %q: %w", httpfetch.Redacted(uri), jsonschema.ErrNotResolved)
+}
+
+// refRecorder records the errors a ref resolver returns while a schema
+// compiles. The schema library compiles a schema whose $ref names a
+// document the resolver does not serve, and reports the $ref only to a
+// validation that reaches it. The recorder lets the compile fail for
+// such a document instead. The compiled schema keeps the resolver for its
+// validations, which run concurrently, so [refRecorder.stop] ends the
+// recording once the compile returns.
+type refRecorder struct {
+	errs    []error
+	mu      sync.Mutex
+	stopped bool
+}
+
+// resolver returns a resolver that answers as next does and records each
+// error next returns until [refRecorder.stop].
+func (rec *refRecorder) resolver(next jsonschema.RefResolver) jsonschema.RefResolver {
+	return jsonschema.RefResolverFunc(func(ctx context.Context, uri string) (*jsonschema.Schema, error) {
+		s, err := next.ResolveRef(ctx, uri)
+		if err != nil {
+			rec.record(err)
+		}
+
+		//nolint:wrapcheck // The recorder answers as the resolver does.
+		return s, err
+	})
+}
+
+// record keeps err unless the recording has stopped.
+func (rec *refRecorder) record(err error) {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+
+	if !rec.stopped {
+		rec.errs = append(rec.errs, err)
+	}
+}
+
+// stop ends the recording and returns the errors recorded as one error,
+// or nil when the resolver returned none.
+func (rec *refRecorder) stop() error {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+
+	rec.stopped = true
+
+	errs := rec.errs
+	rec.errs = nil
+
+	if len(errs) == 1 {
+		return errs[0]
+	}
+
+	return errors.Join(errs...)
 }
 
 // MustCompile is [Compile] with a background context that panics when the
@@ -160,9 +286,9 @@ func compileJSON(ctx context.Context, data []byte, opts []CompileOption) (*Schem
 //
 //	var Config = schema.MustCompile(schemaJSON)
 //
-// A schema whose $ref to another document does not resolve still
-// compiles, as [Compile] describes, so MustCompile returns it. Each
-// document that reaches that $ref then fails validation.
+// A schema with a $ref to another document does not compile without a
+// ref resolver, as [Compile] describes, so MustCompile panics for it
+// when the package initializes.
 func MustCompile(data []byte, opts ...CompileOption) *Schema {
 	v, err := Compile(context.Background(), data, opts...)
 	if err != nil {

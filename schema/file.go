@@ -56,9 +56,9 @@ const driveLen = 2
 // "defs.json" names the file beside it. The registry reads each file or
 // HTTP URL a reference names the
 // way it reads the schema, once however many schemas reference it. When
-// a reference fails to load, a later validation that reaches it loads it
-// again. A remote schema that names a local file fails to resolve, and
-// the registry does not read that file.
+// a reference fails to load, the schema fails to load, as
+// [Registry.Schema] describes. A remote schema that names a local file
+// fails to resolve, and the registry does not read that file.
 //
 // The registry reads only a regular file of at most 10 MB, the limit it
 // sets on a response from a [URL], so a path that names a directory, a

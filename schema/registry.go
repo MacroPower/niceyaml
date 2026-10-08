@@ -38,7 +38,9 @@ var (
 	// the ErrResolve around it.
 	ErrResolve = errors.New("resolve schema")
 
-	// ErrLoad indicates the registry could not load the schema.
+	// ErrLoad indicates the registry could not load the schema, or a
+	// document that a $ref of the schema names, as [Registry.Schema]
+	// describes.
 	ErrLoad = errors.New("load schema")
 
 	// ErrScopedDocument indicates a caller passed a [*niceyaml.Node] from
@@ -70,10 +72,13 @@ const defaultHTTPTimeout = 30 * time.Second
 // before loading, so once a schema compiles, the registry serves it to
 // every later document that names it without loading it again. A failed
 // load or compile stays out of the cache, so the next document that names
-// the Key loads it again. The cache never evicts, so the registry keeps every
-// schema it compiles for its whole lifetime, and each distinct Key adds
-// an entry, a URL that differs from another only in its query string or
-// fragment included. The registry compiles every schema with the options
+// the Key loads it again. A schema whose $ref names a document that does
+// not load is the exception, since the registry keeps that failure with
+// the Key, as [Registry.Schema] describes. The cache never evicts, so
+// the registry keeps every schema it compiles for its whole lifetime,
+// and each distinct Key adds an entry, a URL that differs from another
+// only in its query string or fragment included. The registry compiles
+// every schema with the options
 // [WithCompileOptions] gave it. [Registry.Schema] hands out the compiled
 // schema a [Ref] names through that cache, for a caller that holds a Ref
 // of its own. A [*Schema] compiled elsewhere is a resolver too, and the
@@ -95,11 +100,11 @@ const defaultHTTPTimeout = 30 * time.Second
 // A Registry never changes after construction except for its cache, so it
 // is safe for concurrent use. Create instances with [NewRegistry].
 type Registry struct {
-	group   singleflight.Group // one load and compile in flight per cacheKey
-	cache   map[string]*Schema // compiled schemas by cacheKey
-	refDocs map[string]refDoc  // the documents a $ref names, by URI without fragment
-	fsIDs   map[any]int        // the number of each file system a Ref names its file in
-	fsKept  []fs.FS            // each file system in fsIDs, which keeps a map known by address alive
+	group   singleflight.Group    // one load and compile in flight per cacheKey
+	cache   map[string]cacheEntry // compiled schemas by cacheKey
+	refDocs map[string]refDoc     // the documents a $ref names, by URI without fragment
+	fsIDs   map[any]int           // the number of each file system a Ref names its file in
+	fsKept  []fs.FS               // each file system in fsIDs, which keeps a map known by address alive
 	registryConfig
 	mu sync.RWMutex // guards cache, refDocs, fsIDs, and fsKept
 }
@@ -297,10 +302,16 @@ func WithRequireSchema(require bool) RegistryOption {
 //	    schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)),
 //	))
 //
+// [WithRequireRefs] set false among these options lets the registry
+// compile a schema whose $ref names a document that does not load, as
+// [Registry.Schema] describes.
+//
 // A [jsonschema.WithRefResolver] among these options replaces the
 // registry's own resolution of the $refs in a whole schema from [File] or
 // [URL]. A relative $ref there then resolves only if that resolver serves
-// it. A [Ref] that names a subschema by a fragment, such as
+// it, and the registry cannot tell whether it does, so such a schema
+// compiles whatever [WithRequireRefs] sets. A [Ref] that names a
+// subschema by a fragment, such as
 // "https://example.com/defs.json#/$defs/a", always resolves its $refs
 // through the registry, because only the registry holds the document the
 // fragment points into. A resolver among these options does not apply to
@@ -320,7 +331,7 @@ func WithCompileOptions(opts ...CompileOption) RegistryOption {
 // NewRegistry creates a new [*Registry].
 func NewRegistry(opts ...RegistryOption) *Registry {
 	r := &Registry{
-		cache:         make(map[string]*Schema),
+		cache:         make(map[string]cacheEntry),
 		refDocs:       make(map[string]refDoc),
 		fsIDs:         make(map[any]int),
 		client:        defaultHTTPClient,
@@ -646,6 +657,29 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 // ends before the schema loads, Schema returns [ErrLoad] wrapping the
 // context's error without waiting for the load to finish.
 //
+// A schema from [File], [FileFS], or [URL] loads only when each document
+// its $refs name loads too. The compile resolves every $ref in the
+// schema and in each document it loads for one, whether or not a
+// document can reach the $ref. When one of those documents does not
+// load, Schema returns an error wrapping [ErrLoad] that names the schema
+// and holds the error of each such document:
+//
+//	load schema: "file:///srv/root.json": cannot resolve $ref: read /srv/defs.json: ...
+//
+// The registry keeps those errors under the cache key in place of a
+// schema. Every later request for the key returns them and loads nothing
+// again, so a schema that many documents name costs one attempt. A new
+// registry tries again. The registry keeps nothing when a document did
+// not load because ctx ended, and the next request compiles again.
+//
+// [WithRequireRefs] set false among the options of [WithCompileOptions]
+// makes the registry compile such a schema. Each validation that reaches
+// the $ref then loads the document again, and fails with an error
+// wrapping [ErrValidate] while it does not load. A schema the registry
+// holds as bytes, such as one from [Embedded], has no location to
+// resolve a $ref against, so a $ref to another document fails its
+// compile with [ErrCompile], as it does in [Compile].
+//
 // Concurrent requests for one cache key share a single load and compile,
 // and each caller waits for it only until its own context ends. The shared
 // load runs under the context of the caller that started it and reports
@@ -682,8 +716,8 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 		return nil, fmt.Errorf("%w: %q: %w", ErrLoad, r.name(ref), err)
 	}
 
-	if v, ok := r.cached(key); ok {
-		return v, nil
+	if e, ok := r.cached(key); ok {
+		return r.answer(ref, e)
 	}
 
 	for {
@@ -934,7 +968,10 @@ func (r *Registry) keepRefDoc(key string, doc refDoc) refDoc {
 // and keeps it for every schema that references it, at compile time and
 // during validation. A document that fails to load stays out of the
 // registry, so a later validation that reaches the reference loads it
-// again. A schema from [File] reaches local files and URLs, and one from
+// again. A non-nil rec records the error of each such load for a
+// registry that requires every $ref to resolve, which then hands out no
+// schema to validate with. A schema from [File] reaches local files and
+// URLs, and one from
 // [URL] reaches only URLs, so a remote schema cannot read the local disk,
 // even when a schema from [File] loaded the file first. A remote document
 // that a schema from [File] reaches cannot read the local disk either,
@@ -963,7 +1000,9 @@ func (r *Registry) keepRefDoc(key string, doc refDoc) refDoc {
 // For a whole document, the options from [WithCompileOptions] come after
 // the registry's own, so they win. For a fragment, they come first, and
 // the registry's resolver wins, because only it can serve doc.
-func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsonschema.Schema) []CompileOption {
+func (r *Registry) refOptions(
+	ref Ref, base string, user keyUserinfo, doc *jsonschema.Schema, rec *refRecorder,
+) []CompileOption {
 	if !ref.url && ref.file == "" {
 		return r.compileOpts
 	}
@@ -1032,9 +1071,17 @@ func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsons
 		return doc.schema, nil
 	})
 
+	// A registry that requires every $ref to resolve records each error
+	// the resolver returns while the schema compiles.
+	var recorded jsonschema.RefResolver = resolver
+
+	if rec != nil {
+		recorded = rec.resolver(resolver)
+	}
+
 	refOpts := []jsonschema.ValidateOption{
 		jsonschema.WithBaseURI(base),
-		jsonschema.WithRefResolver(resolver),
+		jsonschema.WithRefResolver(recorded),
 	}
 
 	// The schema that names the fragment takes no base URI, because a base
@@ -1052,7 +1099,7 @@ func (r *Registry) refOptions(ref Ref, base string, user keyUserinfo, doc *jsons
 		})
 
 		refOpts = []jsonschema.ValidateOption{
-			jsonschema.WithRefResolver(jsonschema.ChainResolvers(preload, resolver)),
+			jsonschema.WithRefResolver(jsonschema.ChainResolvers(preload, recorded)),
 		}
 	}
 
@@ -1206,14 +1253,35 @@ func (r *Registry) name(ref Ref) string {
 	return ref.file + fileFragment(ref)
 }
 
-// cached returns the schema cached under key, if any.
-func (r *Registry) cached(key string) (*Schema, bool) {
+// A cacheEntry is what the registry keeps for a cache key. That is the
+// compiled schema, or the errors of the documents a $ref of the schema
+// names and the registry could not load. A registry that requires each
+// $ref to resolve keeps those errors in place of the schema, so it
+// returns them for every request without loading the documents again.
+type cacheEntry struct {
+	schema     *Schema
+	unresolved error
+}
+
+// cached returns the entry cached under key, if any.
+func (r *Registry) cached(key string) (cacheEntry, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	v, ok := r.cache[key]
+	e, ok := r.cache[key]
 
-	return v, ok
+	return e, ok
+}
+
+// answer returns what a request for ref gets from e, the entry cached for
+// it. That is the schema of the entry, or an error wrapping [ErrLoad]
+// that names ref and holds the errors of the documents its $refs name.
+func (r *Registry) answer(ref Ref, e cacheEntry) (*Schema, error) {
+	if e.unresolved != nil {
+		return nil, fmt.Errorf("%w: %q: cannot resolve $ref: %w", ErrLoad, r.name(ref), e.unresolved)
+	}
+
+	return e.schema, nil
 }
 
 // A flight carries the result of a shared load to every caller that
@@ -1251,9 +1319,13 @@ func (r *Registry) compileRecovering(ctx context.Context, ref Ref, cacheKey stri
 // flight cached a schema under that key, compile returns that schema. The
 // group runs one compile per key at a time and each compile checks the
 // cache first, so every caller sees one schema per key.
+//
+// In a registry that requires every $ref to resolve, a schema whose
+// $refs name documents that did not load caches as the errors of those
+// loads, and compile returns them as [Registry.answer] does.
 func (r *Registry) compile(ctx context.Context, ref Ref, cacheKey string) (*Schema, error) {
-	if v, ok := r.cached(cacheKey); ok {
-		return v, nil
+	if e, ok := r.cached(cacheKey); ok {
+		return r.answer(ref, e)
 	}
 
 	data, err := r.Load(ctx, ref)
@@ -1305,17 +1377,43 @@ func (r *Registry) compile(ctx context.Context, ref Ref, cacheKey string) (*Sche
 		}
 	}
 
-	compiled, err := compileJSON(ctx, data, r.refOptions(ref, base, user, doc))
+	// The recorder tells the registry which documents its resolver could
+	// not load for the compile. A registry that lets a schema compile
+	// without them needs none.
+	var rec *refRecorder
+
+	if newCompileConfig(r.compileOpts).requireRefs {
+		rec = &refRecorder{}
+	}
+
+	compiled, err := compileJSON(ctx, data, r.refOptions(ref, base, user, doc, rec))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %q: %w", ErrCompile, r.name(ref), err)
+	}
+
+	entry := cacheEntry{schema: compiled}
+
+	if rec != nil {
+		unresolved := rec.stop()
+
+		// A document that did not load because the context ended says
+		// nothing about the document, so the registry keeps nothing, and
+		// the next request compiles again.
+		if unresolved != nil && ctx.Err() != nil {
+			return nil, fmt.Errorf("%w: %q: %w", ErrLoad, r.name(ref), ctx.Err())
+		}
+
+		if unresolved != nil {
+			entry = cacheEntry{unresolved: unresolved}
+		}
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.cache[cacheKey] = compiled
+	r.cache[cacheKey] = entry
 
-	return compiled, nil
+	return r.answer(ref, entry)
 }
 
 // A keyUserinfo is the userinfo of a URL key, with the scheme and host

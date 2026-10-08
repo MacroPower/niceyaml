@@ -1008,7 +1008,10 @@ func TestViolation_Is(t *testing.T) {
 	t.Run("a validation that could not run is not invalid", func(t *testing.T) {
 		t.Parallel()
 
-		s := schema.MustCompile([]byte(`{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`))
+		s := schema.MustCompile(
+			[]byte(`{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`),
+			schema.WithRequireRefs(false),
+		)
 
 		err := s.ValidateValue(t.Context(), map[string]any{"a": 1})
 		require.ErrorIs(t, err, schema.ErrValidate)

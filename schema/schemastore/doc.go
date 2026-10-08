@@ -28,6 +28,17 @@
 // store picks the one with the most specific pattern, so a pattern for a
 // tool's own directory wins over a broad one such as "**/tasks/*.yml".
 //
+// The program does not maintain a catalog schema, and some of them name
+// a document in a $ref that no longer loads. A registry fails such a
+// schema for every document by default.
+// [go.jacobcolvin.com/niceyaml/schema.WithRequireRefs] lets the schema
+// compile, so only a document that reaches the $ref fails:
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithResolvers(schemastore.New()),
+//	    schema.WithCompileOptions(schema.WithRequireRefs(false)),
+//	)
+//
 // New performs no I/O. The first lookup fetches the catalog, and later
 // lookups reuse it until the cache TTL expires. A refresh that fails keeps
 // the previous catalog in use. When a fetch fails and no earlier one
