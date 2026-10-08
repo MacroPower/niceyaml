@@ -1733,7 +1733,7 @@ func TestError_Unwrap(t *testing.T) {
 		require.ErrorIs(t, err, sentinel)
 	})
 
-	t.Run("unwraps nested errors", func(t *testing.T) {
+	t.Run("leaves the details out", func(t *testing.T) {
 		t.Parallel()
 
 		underlying := errors.New("main error")
@@ -1743,37 +1743,51 @@ func TestError_Unwrap(t *testing.T) {
 		err := wrapError(t, underlying,
 			niceyaml.WithDetails(
 				niceyaml.Invalid(nested1),
+				nil,
 				niceyaml.Invalid(nested2),
 			),
 		)
 
-		got := err.Unwrap()
-
-		require.Len(t, got, 3)
-		assert.Equal(t, underlying, got[0])
-		// The error matches each nested error under require.ErrorIs.
-		require.ErrorIs(t, err, nested1)
-		require.ErrorIs(t, err, nested2)
+		assert.Equal(t, []error{underlying}, err.Unwrap())
+		require.Len(t, err.Details(), 2)
+		// A detail explains the problem, so the problem matches neither.
+		require.ErrorIs(t, err, underlying)
+		require.NotErrorIs(t, err, nested1)
+		require.NotErrorIs(t, err, nested2)
+		// Each detail still matches for itself.
+		require.ErrorIs(t, err.Details()[0], nested1)
+		require.ErrorIs(t, err.Details()[1], nested2)
 	})
 
-	t.Run("skips nil nested errors", func(t *testing.T) {
+	t.Run("an empty message with details unwraps to its cause", func(t *testing.T) {
 		t.Parallel()
 
-		underlying := errors.New("main error")
-		nested := errors.New("nested error")
+		err := niceyaml.NewError("", niceyaml.WithDetails(errors.New("nested error")))
 
-		err := wrapError(t, underlying,
-			niceyaml.WithDetails(
-				nil,
-				niceyaml.Invalid(nested),
-				nil,
-			),
-		)
+		assert.Equal(t, []error{err.Cause()}, err.Unwrap())
+	})
 
-		got := err.Unwrap()
+	t.Run("unwraps to the errors a summary heads", func(t *testing.T) {
+		t.Parallel()
 
-		require.Len(t, got, 2)
-		assert.Equal(t, underlying, got[0])
+		nested1 := errors.New("nested error 1")
+		nested2 := errors.New("nested error 2")
+
+		summary, ok := errors.AsType[*niceyaml.Error](niceyaml.NewSummary("main error",
+			nil,
+			niceyaml.Invalid(nested1),
+			nil,
+			niceyaml.Invalid(nested2),
+		))
+		require.True(t, ok)
+
+		got := summary.Unwrap()
+
+		require.Len(t, got, 3)
+		assert.Equal(t, summary.Cause(), got[0])
+		// Each error a summary heads is a problem, so the summary matches it.
+		require.ErrorIs(t, summary, nested1)
+		require.ErrorIs(t, summary, nested2)
 	})
 }
 
@@ -1999,14 +2013,19 @@ func TestError_MultiError(t *testing.T) {
 
 		// The errors below are structure, not text. Errors returns the
 		// errors a summary heads and Details the details of a problem,
-		// and both surface through Unwrap, while the message stays one
-		// line and %+v lists them as a tree under it.
+		// while the message stays one line and %+v lists them as a tree
+		// under it.
 		for _, err := range []*niceyaml.Error{summary, detailed} {
 			assert.Equal(t, "main error", err.Error())
 			assert.Equal(t, "main error\n|-- nested 1\n`-- nested 2", render(err))
-			require.ErrorIs(t, err, nested1)
-			require.ErrorIs(t, err, nested2)
 		}
+
+		// A summary matches each problem it heads, and a problem matches
+		// none of its details.
+		require.ErrorIs(t, summary, nested1)
+		require.ErrorIs(t, summary, nested2)
+		require.NotErrorIs(t, detailed, nested1)
+		require.NotErrorIs(t, detailed, nested2)
 
 		assert.Equal(t, []error{nested1, nested2}, summary.Errors())
 		assert.Empty(t, summary.Details())
@@ -2052,7 +2071,24 @@ func TestError_MultiError(t *testing.T) {
 		require.ErrorIs(t, err, sentinel2)
 	})
 
-	t.Run("errors.As works with nested errors", func(t *testing.T) {
+	t.Run("errors.As works with the errors a summary heads", func(t *testing.T) {
+		t.Parallel()
+
+		customErr := &customTestError{msg: "custom error"}
+
+		err := niceyaml.NewSummary(
+			"main",
+			niceyaml.NewError("other"),
+			niceyaml.Invalid(customErr),
+		)
+
+		var target *customTestError
+
+		require.ErrorAs(t, err, &target)
+		assert.Equal(t, "custom error", target.msg)
+	})
+
+	t.Run("errors.As passes over a detail", func(t *testing.T) {
 		t.Parallel()
 
 		customErr := &customTestError{msg: "custom error"}
@@ -2064,10 +2100,12 @@ func TestError_MultiError(t *testing.T) {
 			),
 		)
 
-		// The errors.As function finds the custom error through the nested errors.
 		var target *customTestError
 
-		require.ErrorAs(t, err, &target)
+		require.NotErrorAs(t, err, &target)
+
+		// The detail holds the custom error, and a caller reads it there.
+		require.ErrorAs(t, err.Details()[0], &target)
 		assert.Equal(t, "custom error", target.msg)
 	})
 
@@ -6664,6 +6702,17 @@ func TestBindings(t *testing.T) {
 			err:  outer,
 			want: []error{outer},
 		},
+		"binding in a detail of an Error bound to no source": {
+			err:  niceyaml.Place(errors.New("defaults do not load"), niceyaml.WithDetails(first)),
+			want: []error{first},
+		},
+		"bindings an Error bound to no source wraps, heads, and holds as a detail": {
+			err: fmt.Errorf("ctx: %w", niceyaml.Invalid(
+				niceyaml.NewSummary("2 problems", first, errors.New("plain")),
+				niceyaml.WithDetails(second),
+			)),
+			want: []error{first, second},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -7031,7 +7080,7 @@ func TestError_Accessors(t *testing.T) {
 	assert.Equal(t, cause, err.Cause())
 	assert.Equal(t, []error{nested}, err.Details())
 	assert.Empty(t, err.Errors())
-	assert.Equal(t, []error{cause, nested}, err.Unwrap())
+	assert.Equal(t, []error{cause}, err.Unwrap())
 
 	// The slice of details is a copy.
 	err.Details()[0] = nil
@@ -11204,6 +11253,18 @@ func (*fetchingUnmarshaler) UnmarshalYAML([]byte) error {
 	return &fs.PathError{Op: "open", Path: "include.yaml", Err: fs.ErrNotExist}
 }
 
+// hintedUnmarshaler rejects its value with an error whose detail wraps
+// the error of a context that ended, as a suggestion that took too long
+// to look up leaves one.
+type hintedUnmarshaler struct{}
+
+func (*hintedUnmarshaler) UnmarshalYAML([]byte) error {
+	return niceyaml.Place(
+		errors.New("unknown name"),
+		niceyaml.WithDetails(fmt.Errorf("look up a suggestion: %w", context.DeadlineExceeded)),
+	)
+}
+
 // invalidConfig is a target the decodes of [TestIsInvalid] reject.
 type invalidConfig struct {
 	Name string `yaml:"name"`
@@ -12293,6 +12354,129 @@ func TestIsInvalid(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("an error a detail wraps decides nothing", func(t *testing.T) {
+		t.Parallel()
+
+		// The hint explains a problem and wraps the error of a context
+		// that ended, which is about a call and no fault of the document.
+		hint := fmt.Errorf("look up a suggestion: %w", context.DeadlineExceeded)
+		hinted := niceyaml.WithDetails(hint)
+		syntaxErr := decoded(t, "name: [cafe\n")
+
+		// The err field pins what the problem itself matches, and the
+		// detail field what the detail wraps, which the error must not
+		// match. The path is the one the single problem binds at.
+		tcs := map[string]struct {
+			build  func(t *testing.T) error
+			err    error
+			detail error
+			path   string
+			want   bool
+		}{
+			"Invalid around Place with a hint": {
+				build: func(*testing.T) error {
+					return niceyaml.Invalid(niceyaml.Place(errors.New("unknown name"), hinted))
+				},
+				detail: context.DeadlineExceeded,
+				want:   true,
+			},
+			"Invalid around a wrapper around NewError with a hint": {
+				build: func(*testing.T) error {
+					return niceyaml.Invalid(fmt.Errorf("check name: %w", niceyaml.NewError("unknown name", hinted)))
+				},
+				detail: context.DeadlineExceeded,
+				want:   true,
+			},
+			"Place with a hint": {
+				build: func(*testing.T) error {
+					return niceyaml.Place(fmt.Errorf("read names.db: %w", fs.ErrPermission), hinted)
+				},
+				err:    fs.ErrPermission,
+				detail: context.DeadlineExceeded,
+			},
+			"Validator error with a hint on a scoped Node": {
+				build: func(t *testing.T) error {
+					t.Helper()
+
+					return scopedValidated(t, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+						return niceyaml.NewError("closes before it opens", hinted)
+					}))
+				},
+				detail: context.DeadlineExceeded,
+				path:   "$.hours",
+				want:   true,
+			},
+			"SelfValidator error with a hint": {
+				build: func(t *testing.T) error {
+					t.Helper()
+
+					return selfValidated(t, func() error {
+						return niceyaml.NewError("closes before it opens", hinted)
+					})
+				},
+				detail: context.DeadlineExceeded,
+				path:   "$.hours",
+				want:   true,
+			},
+			"unmarshaler error with a hint": {
+				build: func(t *testing.T) error {
+					t.Helper()
+
+					var target struct {
+						Name hintedUnmarshaler `yaml:"name"`
+					}
+
+					return yamltest.FirstDocument(t, input).DecodeInto(t.Context(), &target)
+				},
+				err:    niceyaml.ErrDecode,
+				detail: context.DeadlineExceeded,
+				path:   "$.name",
+				want:   true,
+			},
+			"Place with a syntax error as a detail": {
+				build: func(*testing.T) error {
+					return niceyaml.Place(errors.New("defaults do not load"), niceyaml.WithDetails(syntaxErr))
+				},
+				detail: niceyaml.ErrSyntax,
+			},
+			"Invalid with a syntax error as a detail": {
+				build: func(*testing.T) error {
+					return niceyaml.Invalid(errors.New("defaults do not merge"), niceyaml.WithDetails(syntaxErr))
+				},
+				detail: niceyaml.ErrSyntax,
+				want:   true,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := tc.build(t)
+				require.Error(t, err)
+
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err)
+				}
+
+				require.NotErrorIs(t, err, tc.detail)
+				assert.Equal(t, tc.want, niceyaml.IsInvalid(err))
+
+				problems := slices.Collect(niceyaml.NewErrorTree(err).Problems())
+				require.Len(t, problems, 1)
+				require.Len(t, problems[0].Children, 1)
+				// The detail still matches for itself.
+				require.ErrorIs(t, problems[0].Children[0].Err, tc.detail)
+
+				if tc.path != "" {
+					path, ok := problems[0].Path()
+					require.True(t, ok)
+					assert.Equal(t, tc.path, path.String())
+				}
+			})
+		}
+	})
 
 	t.Run("nil is not invalid", func(t *testing.T) {
 		t.Parallel()

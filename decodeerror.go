@@ -319,7 +319,8 @@ func (n *Node) lacksLocation(err error) bool {
 
 // holdsLocation reports whether err, or an error anywhere in the tree it
 // unwraps to, is a [*SourceError] or an [*Error] that carries a location
-// or comes from [Rebase].
+// or comes from [Rebase]. The details of an Error count as part of that
+// tree, though [Error.Unwrap] leaves them out.
 func holdsLocation(err error) bool {
 	switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
 	case *SourceError:
@@ -330,7 +331,8 @@ func holdsLocation(err error) bool {
 			return false
 		}
 
-		return x.hasLocation() || x.rebased || slices.ContainsFunc(x.Unwrap(), holdsLocation)
+		return x.hasLocation() || x.rebased ||
+			slices.ContainsFunc(x.Unwrap(), holdsLocation) || slices.ContainsFunc(x.details, holdsLocation)
 
 	case interface{ Unwrap() error }:
 		return holdsLocation(x.Unwrap())

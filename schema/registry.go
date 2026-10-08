@@ -336,9 +336,10 @@ func NewRegistry(opts ...RegistryOption) *Registry {
 //
 // Returns [ErrNoMatch] if no resolver applies to the document, with the
 // reason each resolver gave as a detail, from [niceyaml.WithDetails]. The
-// lookup failed once, so the message of the error is one line.
-// [errors.Is] finds a reason such as [ErrNoDirective], and a rendering of
-// the error, such as [niceyaml.FormatError] or
+// lookup failed once, so the message of the error is one line. The error
+// matches each reason as well as ErrNoMatch, so [errors.Is] finds a
+// reason such as [ErrNoDirective]. A rendering of the error, such as
+// [niceyaml.FormatError] or
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], lists the
 // reasons below the message:
 //
@@ -456,13 +457,13 @@ func (r *Registry) lookup(ctx context.Context, doc *niceyaml.Node) (*Schema, boo
 }
 
 // noMatch returns the error a lookup reports when every resolver declined:
-// [ErrNoMatch] inside a [*niceyaml.Error] from [niceyaml.Invalid], with
-// the reason of each resolver that said more than ErrNoMatch as a detail
-// from [niceyaml.WithDetails], in lookup order. The document names no
-// schema the registry knows, so [niceyaml.IsInvalid] reports the error.
-// The lookup failed once, so the error is one problem, and its message is
-// one line. [errors.Is] finds a reason such as [ErrNoDirective], and
-// [niceyaml.FormatError] lists the reasons below the message.
+// a [noMatchError] inside a [*niceyaml.Error] from [niceyaml.Invalid],
+// with the reason of each resolver that said more than ErrNoMatch as a
+// detail from [niceyaml.WithDetails], in lookup order. The document names
+// no schema the registry knows, so [niceyaml.IsInvalid] reports the
+// error. The lookup failed once, so the error is one problem, and its
+// message is one line. [niceyaml.FormatError] lists the reasons below the
+// message.
 func noMatch(reasons []error) error {
 	var details []error
 
@@ -472,7 +473,35 @@ func noMatch(reasons []error) error {
 		}
 	}
 
-	return niceyaml.Invalid(ErrNoMatch, niceyaml.WithDetails(details...))
+	return niceyaml.Invalid(noMatchError{reasons: reasons}, niceyaml.WithDetails(details...))
+}
+
+// noMatchError is the [ErrNoMatch] a lookup reports when every resolver
+// declined. Its message is the message of ErrNoMatch. The reasons the
+// resolvers gave show as details of the [*niceyaml.Error] around it, and
+// [errors.Is] and [errors.As] pass over details, so this error matches
+// each reason itself.
+type noMatchError struct {
+	// The error each resolver declined with, in lookup order.
+	reasons []error
+}
+
+func (e noMatchError) Error() string {
+	return ErrNoMatch.Error()
+}
+
+// Is reports whether target is [ErrNoMatch], or whether a reason matches
+// target, as [errors.Is] reports it. A lookup thus matches a reason such
+// as [ErrNoDirective].
+func (e noMatchError) Is(target error) bool {
+	return target == ErrNoMatch ||
+		slices.ContainsFunc(e.reasons, func(reason error) bool { return errors.Is(reason, target) })
+}
+
+// As reports whether [errors.As] finds target in a reason, and sets
+// target from the first reason that holds it.
+func (e noMatchError) As(target any) bool {
+	return slices.ContainsFunc(e.reasons, func(reason error) bool { return errors.As(reason, target) })
 }
 
 // reasonError is the reason one resolver declined a document, a detail of

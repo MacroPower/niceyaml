@@ -87,7 +87,9 @@ var (
 	// ErrDecode, and the error can hold a problem of another kind beside
 	// it. The error of a [MultiValidator] whose first validator decodes the
 	// node and whose second meets an I/O error matches ErrDecode, and
-	// IsInvalid does not report it.
+	// IsInvalid does not report it. A detail from [WithDetails] is no
+	// problem, so an error that names a decode error only among its
+	// details does not match.
 	ErrDecode = errors.New("value does not decode")
 
 	// ErrExcessiveAliasing indicates a node whose document holds so many
@@ -130,7 +132,9 @@ var (
 	// [errors.Is] reports whether any problem of an error matches
 	// ErrSyntax, and the error can hold a problem of another kind beside
 	// it. A join of a syntax error and a file that did not read matches
-	// ErrSyntax, and IsInvalid does not report it.
+	// ErrSyntax, and IsInvalid does not report it. A detail from
+	// [WithDetails] is no problem, so an error that names a syntax error
+	// only among its details does not match.
 	ErrSyntax = errors.New("invalid YAML syntax")
 
 	// ErrOutOfRange indicates the error's location lies outside the source.
@@ -236,13 +240,14 @@ var (
 // with [BindValue], and the text of that error names each path. The
 // errors a summary heads and the details of
 // an Error are structure rather than text. [Error.Errors] and [Error.Details]
-// return them, [Error.Unwrap] exposes them to [errors.Is] and
-// [errors.As], and the [SourceError] that binds the Error binds each one
+// return them, and the [SourceError] that binds the Error binds each one
 // as a child at the location its own error carries, if any.
 // [Error.Format] prints them as a tree under the %+v verb.
 //
-// Error implements the error interface. Use [Error.Unwrap] with [errors.Is]
-// and [errors.As] to inspect wrapped errors.
+// Error implements the error interface. [errors.Is] and [errors.As]
+// search the error an Error wraps and each problem a summary heads, as
+// [Error.Unwrap] returns them, so a match names a problem. They pass
+// over the details, which explain a problem and are none themselves.
 //
 // The constructor of an Error says whether the document is at fault for
 // it, as [IsInvalid] describes. An Error from [NewError] or [Invalid]
@@ -323,7 +328,9 @@ func NewError(msg string, opts ...ErrorOption) *Error {
 // declares nothing about it, as a decode returns such an error from a
 // [SelfValidator] with no mark. A canceled check inside Invalid thus
 // reads as a check that could not run. A join with such a branch matches
-// too, so Invalid declares nothing about any branch of it.
+// too, so Invalid declares nothing about any branch of it. A detail of
+// err decides nothing, so Invalid declares the fault for an err whose
+// detail alone wraps the error of a context.
 //
 // An err that is a join stays a list of problems, and the Error is a
 // heading above them, so the options locate the heading and no branch. A
@@ -1053,6 +1060,14 @@ func AtRange(r position.Range) ErrorOption {
 // paths of the details and give no location to a detail that carries
 // none. WithDetails skips a nil error.
 //
+// [errors.Is] and [errors.As] on the Error search the problem and pass
+// over its details, which [Error.Unwrap] leaves out. A detail that wraps
+// a sentinel or a typed error thus never matches for the problem it
+// explains. A caller reads the error of a detail from [Error.Details],
+// or from the Err of each child of a node [ErrorTree.Problems] yields. An
+// error type that matches its reasons too says so with Is and As methods
+// of its own.
+//
 // To report several separate problems, join them with [errors.Join] or
 // head them with [NewSummary].
 func WithDetails(errs ...error) ErrorOption {
@@ -1175,21 +1190,27 @@ func (e *Error) hasLocation() bool {
 	return e.hasPath || e.loc != nil
 }
 
-// Unwrap returns the underlying errors for [errors.Is] and [errors.As]. A
-// nil Error unwraps to nothing, so a chain that holds one is safe to walk.
+// Unwrap returns the errors [errors.Is] and [errors.As] search: the error
+// the [Error] wraps, then each error a summary from [NewSummary] heads.
+// A match thus means that the problem matches, or a problem the summary
+// heads.
+//
+// Unwrap leaves out the details from [WithDetails], which explain a
+// problem and are none themselves. A sentinel or a typed error that a
+// detail wraps thus never matches for the problem it explains.
+// [Error.Details] returns the details. A nil Error unwraps to nothing, so
+// a chain that holds one is safe to walk.
 func (e *Error) Unwrap() []error {
-	if e == nil || (e.err == nil && !e.nests()) {
+	if e == nil || (e.err == nil && len(e.errors) == 0) {
 		return nil
 	}
 
-	result := make([]error, 0, 1+len(e.errors)+len(e.details))
+	result := make([]error, 0, 1+len(e.errors))
 	if e.err != nil {
 		result = append(result, e.err)
 	}
 
-	result = append(result, e.errors...)
-
-	return append(result, e.details...)
+	return append(result, e.errors...)
 }
 
 // Cause returns the error the [Error] wraps: the error given to
@@ -2854,7 +2875,7 @@ func (e *SourceError) Unwrap() error {
 //		}
 //	}
 //
-// [errors.As] on the binding searches the errors below it as well. On
+// [errors.As] on the binding searches the problems it heads as well. On
 // a binding that reports several violations it finds the cause of the
 // first violation, where Cause returns the error of the binding alone. A
 // wrapper such as [fmt.Errorf] ends the walk and is the cause itself, so
@@ -3370,9 +3391,11 @@ func Bindings(err error) iter.Seq[*SourceError] {
 
 // eachBinding calls visit for each [*SourceError] reached through the
 // wrappers and joins around err, in depth-first order, and stops when
-// visit reports false. It does not look below a binding, whose children
-// visit reaches through the binding itself. Reports whether every visit
-// wanted more.
+// visit reports false. Below an [*Error] it reaches the error the Error
+// wraps, then each error a summary heads, then each detail, which
+// [Error.Unwrap] leaves out. It does not look below a binding, whose
+// children visit reaches through the binding itself. Reports whether
+// every visit wanted more.
 func eachBinding(err error, visit func(*SourceError) bool) bool {
 	switch x := err.(type) { //nolint:errorlint // Walks the tree one node at a time.
 	case *SourceError:
@@ -3381,6 +3404,21 @@ func eachBinding(err error, visit func(*SourceError) bool) bool {
 		}
 
 		return visit(x)
+
+	case *Error:
+		if x == nil {
+			return true
+		}
+
+		if !eachBinding(x.err, visit) {
+			return false
+		}
+
+		for _, inner := range slices.Concat(x.errors, x.details) {
+			if !eachBinding(inner, visit) {
+				return false
+			}
+		}
 
 	case interface{ Unwrap() error }:
 		return eachBinding(x.Unwrap(), visit)

@@ -2049,6 +2049,106 @@ func TestErrorTree_Problems_Reasons(t *testing.T) {
 	require.ErrorIs(t, got[0].Err, err)
 }
 
+func TestErrorTree_Problems_Err(t *testing.T) {
+	t.Parallel()
+
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	a := paths.Current().Child("a")
+	b := paths.Current().Child("b")
+
+	own := &ruleError{id: "own"}
+	// The detail names where the value was first declared and wraps a rule
+	// of its own, which is never the rule of the problem it explains.
+	first := niceyaml.Invalid(&ruleError{id: "first-use"}, niceyaml.AtPath(a))
+	detailed := niceyaml.WithDetails(first)
+
+	bind := func(t *testing.T, err error) error {
+		t.Helper()
+
+		return yamltest.Bind(t, source, err)
+	}
+
+	// Each case builds one problem, and want is the rule [errors.As] finds
+	// on the Err of its row, or empty when the problem wraps none.
+	tcs := map[string]struct {
+		build func(t *testing.T) error
+		want  string
+	}{
+		"rule of the problem beside a rule of its detail": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return bind(t, niceyaml.Invalid(own, niceyaml.AtPath(b), detailed))
+			},
+			want: "own",
+		},
+		"no rule beside a rule of its detail": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return bind(t, niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed))
+			},
+		},
+		"wrapper below the binding": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return bind(t, fmt.Errorf("check: %w", niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed)))
+			},
+		},
+		"rule in a wrapper above the binding": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				return fmt.Errorf("%w: %w", own, bind(t, niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed)))
+			},
+			want: "own",
+		},
+		"bound to no source": {
+			build: func(*testing.T) error {
+				return niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed)
+			},
+		},
+		"bound to no source below a wrapper": {
+			build: func(*testing.T) error {
+				return fmt.Errorf("check: %w", niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed))
+			},
+		},
+		"rule of a problem bound to no source": {
+			build: func(*testing.T) error {
+				return niceyaml.Place(fmt.Errorf("%w: read rules: %w", own, fs.ErrNotExist), detailed)
+			},
+			want: "own",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			problems := slices.Collect(niceyaml.NewErrorTree(tc.build(t)).Problems())
+			require.Len(t, problems, 1)
+
+			problem := problems[0]
+
+			got := ""
+			if rule, ok := errors.AsType[*ruleError](problem.Err); ok {
+				got = rule.id
+			}
+
+			assert.Equal(t, tc.want, got)
+
+			// The detail keeps its own rule, and the row reads it there.
+			require.Len(t, problem.Children, 1)
+			assert.True(t, problem.Children[0].Detail)
+
+			rule, ok := errors.AsType[*ruleError](problem.Children[0].Err)
+			require.True(t, ok)
+			assert.Equal(t, "first-use", rule.id)
+		})
+	}
+}
+
 func TestErrorTree_Problems_WrappedJoin(t *testing.T) {
 	t.Parallel()
 

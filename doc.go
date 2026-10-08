@@ -100,7 +100,9 @@
 //
 // Every reader keeps to these roles. The lines of a message, the rows of
 // a report, and the locations a scoped [Node] gives thus agree on what
-// the problems of an error are.
+// the problems of an error are. So do [errors.Is] and [errors.As], which
+// match the problems of an error and pass over the details that explain
+// them.
 //
 // [SourceError] binds an error to its [Source] and to the document its
 // path resolves in. Every error a Source or one of its Nodes produces is
@@ -204,7 +206,9 @@
 // of any node. The binding the node holds gives the file and the
 // position, through [SourceError.Source] and [SourceError.Position]. In
 // a file that holds several documents, [SourceError.DocumentIndex] gives
-// the document.
+// the document. The node holds the error of its problem in Err, so
+// [errors.As] there finds the typed error of that row, such as the rule
+// a validator wrapped, and never one of a detail.
 //
 // A terminal gets color from
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which prints

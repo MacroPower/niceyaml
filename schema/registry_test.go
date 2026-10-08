@@ -3259,6 +3259,20 @@ func TestRegistry_Schema(t *testing.T) {
 	})
 }
 
+// kindError is the reason of a resolver that has no schema for a kind, of
+// a type a caller reads the kind from.
+type kindError struct {
+	kind string
+}
+
+func (e *kindError) Error() string {
+	return schema.ErrNoMatch.Error() + ": no schema for kind " + e.kind
+}
+
+func (e *kindError) Unwrap() error {
+	return schema.ErrNoMatch
+}
+
 func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 	t.Parallel()
 
@@ -3364,6 +3378,41 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 		assert.Empty(t, bound.Errors())
+	})
+
+	t.Run("matches each reason, which is a detail the error does not unwrap to", func(t *testing.T) {
+		t.Parallel()
+
+		typed := schema.ResolverFunc(func(context.Context, *niceyaml.Node) (schema.Ref, error) {
+			return schema.Ref{}, &kindError{kind: "Service"}
+		})
+		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive(), typed, byKind))
+
+		doc := yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml")
+
+		_, err := reg.Lookup(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrNoMatch)
+		require.ErrorIs(t, err, schema.ErrNoDirective)
+		require.ErrorIs(t, err, errNoKind)
+
+		reason, ok := errors.AsType[*kindError](err)
+		require.True(t, ok)
+		assert.Equal(t, "Service", reason.kind)
+
+		// The error matches what a reason matches and nothing more.
+		require.NotErrorIs(t, err, schema.ErrResolve)
+
+		var pathErr *fs.PathError
+
+		require.NotErrorAs(t, err, &pathErr)
+
+		// The one row of a report matches the reasons the same way, and
+		// each reason stays a detail below it.
+		problems := slices.Collect(niceyaml.NewErrorTree(err).Problems())
+		require.Len(t, problems, 1)
+		require.ErrorIs(t, problems[0].Err, schema.ErrNoDirective)
+		require.Len(t, problems[0].Children, 3)
+		assert.Equal(t, "no schema for kind Service", problems[0].Children[1].Message())
 	})
 
 	t.Run("Validate passes the reasons through when it requires a schema", func(t *testing.T) {

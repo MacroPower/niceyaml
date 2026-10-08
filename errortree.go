@@ -223,6 +223,15 @@ func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
 //		report(row)
 //	}
 //
+// A row reads the typed error of its problem from Err. [errors.Is] and
+// [errors.As] there search that problem and pass over its details, for a
+// node bound to no source as well, so a rule that a detail wraps never
+// reads as the rule of the row:
+//
+//	if rule, ok := errors.AsType[*RuleError](problem.Err); ok {
+//		row.Rule = rule.ID
+//	}
+//
 // A row tells a fault of the document from a check that could not run
 // with [ErrorTree.Invalid], and [IsInvalid] asks the same of every row.
 // The document is at fault for each problem an [*Error] from [Invalid]
