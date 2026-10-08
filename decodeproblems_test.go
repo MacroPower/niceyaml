@@ -1020,6 +1020,21 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 				"2:11: $.replicas: expected integer, got string",
 			),
 		},
+		// The unmarshaler names a field of its value, and the report
+		// holds the error at that field beside the other problem.
+		"unmarshaler error at a path of its own beside a value": {
+			decode: decodeInto[struct {
+				Spans    []span `yaml:"spans"`
+				Replicas int    `yaml:"replicas"`
+			}](),
+			input: "spans:\n  - {from: 9, to: 3}\nreplicas: x\n",
+			is:    errSpan,
+			want: stringtest.JoinLF(
+				"2 problems",
+				"2:19: $.spans[0].to: to is below from",
+				"3:11: $.replicas: expected integer, got string",
+			),
+		},
 		"value beside an unmarshaler that passes": {
 			decode: decodeInto[struct {
 				Image    problemImage `yaml:"image"`

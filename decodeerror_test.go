@@ -24,8 +24,13 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// The error tier reports for text it does not know.
-var errUnknownTier = errors.New("unknown tier")
+var (
+	// The error tier reports for text it does not know.
+	errUnknownTier = errors.New("unknown tier")
+
+	// The error a span reports for a to below its from.
+	errSpan = errors.New("to is below from")
+)
 
 // tier decodes itself from text and reports errUnknownTier for any text
 // but "low" and "high".
@@ -146,6 +151,134 @@ type positioned struct{}
 
 func (*positioned) UnmarshalYAML(node ast.Node) error {
 	return niceyaml.Invalid(errUnmarshal, niceyaml.AtPosition(position.NewFromToken(node.GetToken())))
+}
+
+// spanError returns errSpan at the path of the to, which reads from the
+// value that reports it.
+func spanError() error {
+	return niceyaml.Invalid(errSpan, niceyaml.AtPath(paths.Current().Child("to")))
+}
+
+// span decodes itself through a second type with the same fields and
+// reports a to below its from, as spanError returns it.
+type span struct {
+	From int `yaml:"from"`
+	To   int `yaml:"to"`
+}
+
+func (s *span) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain span
+
+	err := unmarshal((*plain)(s))
+	if err != nil {
+		return err
+	}
+
+	if s.To < s.From {
+		return spanError()
+	}
+
+	return nil
+}
+
+// spanNode decodes itself from its node and reports spanError for every
+// node.
+type spanNode struct{}
+
+func (*spanNode) UnmarshalYAML(ast.Node) error {
+	return spanError()
+}
+
+// spanBytes decodes itself from YAML bytes and reports spanError for
+// every node.
+type spanBytes struct{}
+
+func (*spanBytes) UnmarshalYAML(context.Context, []byte) error {
+	return spanError()
+}
+
+// spanMirror decodes itself through a second type with the same fields,
+// so the error of its span comes back as the span reported it.
+type spanMirror struct {
+	Name string `yaml:"name"`
+	Span span   `yaml:"span"`
+}
+
+func (m *spanMirror) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain spanMirror
+
+	return unmarshal((*plain)(m))
+}
+
+// spanWrapper decodes itself as [spanMirror] does and puts text of its
+// own in front of the error of its span.
+type spanWrapper struct {
+	Span span `yaml:"span"`
+}
+
+func (w *spanWrapper) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain spanWrapper
+
+	err := unmarshal((*plain)(w))
+	if err != nil {
+		return fmt.Errorf("wrapper: %w", err)
+	}
+
+	return nil
+}
+
+// spanRebaser decodes itself as [spanMirror] does and puts the error of
+// its span under the path of that field itself.
+type spanRebaser struct {
+	Span span `yaml:"span"`
+}
+
+func (r *spanRebaser) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain spanRebaser
+
+	//nolint:wrapcheck // The test inspects the error as it is.
+	return niceyaml.Rebase(unmarshal((*plain)(r)), paths.Current().Child("span"))
+}
+
+// tierNamer decodes itself through a second type with the same fields
+// and names its tier in the error of that tier, at a path of its own.
+type tierNamer struct {
+	Tier tier `yaml:"tier"`
+}
+
+func (n *tierNamer) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain tierNamer
+
+	return niceyaml.Invalid(unmarshal((*plain)(n)), niceyaml.AtPath(paths.Current().Child("tier")))
+}
+
+// reportKey is the context key of the error a [reporting] returns.
+type reportKey struct{}
+
+// reporting decodes itself from any value and reports the error the
+// context of the decode holds under reportKey.
+type reporting struct{}
+
+func (*reporting) UnmarshalYAML(ctx context.Context, _ func(any) error) error {
+	err, ok := ctx.Value(reportKey{}).(error)
+	if !ok {
+		return nil
+	}
+
+	return err
+}
+
+// rebasing decodes itself through a second type with the same fields
+// and puts the error of its item under the path of that field itself.
+type rebasing struct {
+	Item reporting `yaml:"item"`
+}
+
+func (r *rebasing) UnmarshalYAML(unmarshal func(any) error) error {
+	type plain rebasing
+
+	//nolint:wrapcheck // The test inspects the error as it is.
+	return niceyaml.Rebase(unmarshal((*plain)(r)), paths.Current().Child("item"))
 }
 
 // optionDecoded has no method of its own. A function from
@@ -1457,6 +1590,372 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 		require.EqualError(t, err, `2:7: $.tier: unknown tier "mid"`)
 		require.ErrorIs(t, err, errUnknownTier)
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+
+	// An unmarshaler holds no Node, so the path it writes reads from its
+	// own value, as the path of a niceyaml.SelfValidator does.
+	t.Run("puts the path an unmarshaler writes under its value", func(t *testing.T) {
+		t.Parallel()
+
+		// Returns a decode of a document whose items report err.
+		reported := func(err error) func(context.Context, *niceyaml.Node) error {
+			return func(ctx context.Context, dd *niceyaml.Node) error {
+				_, derr := dd.Decode[struct {
+					Name  string      `yaml:"name"`
+					Items []reporting `yaml:"items"`
+				}](context.WithValue(ctx, reportKey{}, err))
+
+				return derr
+			}
+		}
+
+		items := "name: api\nitems:\n  - from: 9\n    to: 3\n"
+
+		tcs := map[string]struct {
+			decode func(ctx context.Context, dd *niceyaml.Node) error
+			is     error
+			input  string
+			want   string
+			path   string
+		}{
+			"method that takes a decode function": {
+				input: "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Spans []span `yaml:"spans"`
+					}](ctx)
+
+					return err
+				},
+				is:   errSpan,
+				want: "4:9: $.spans[1].to: to is below from",
+				path: "$.spans[1].to",
+			},
+			"method that takes the node": {
+				input: "spans:\n  - from: 9\n    to: 3\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Spans []spanNode `yaml:"spans"`
+					}](ctx)
+
+					return err
+				},
+				is:   errSpan,
+				want: "3:9: $.spans[0].to: to is below from",
+				path: "$.spans[0].to",
+			},
+			"method that takes bytes": {
+				input: "spans:\n  - from: 9\n    to: 3\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Spans []spanBytes `yaml:"spans"`
+					}](ctx)
+
+					return err
+				},
+				is:   errSpan,
+				want: "3:9: $.spans[0].to: to is below from",
+				path: "$.spans[0].to",
+			},
+			"function of an option": {
+				input: "name: api\nvalue: {from: 9, to: 3}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Name  string        `yaml:"name"`
+						Value optionDecoded `yaml:"value"`
+					}](ctx, niceyaml.WithCustomUnmarshaler(
+						func(context.Context, *optionDecoded, []byte) error { return spanError() },
+					))
+
+					return err
+				},
+				is:   errSpan,
+				want: "2:22: $.value.to: to is below from",
+				path: "$.value.to",
+			},
+			"map value": {
+				input: "a: {from: 1, to: 2}\nb: {from: 9, to: 3}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[map[string]span](ctx)
+
+					return err
+				},
+				is:   errSpan,
+				want: "2:18: $.b.to: to is below from",
+				path: "$.b.to",
+			},
+			"pointer field": {
+				input: "span:\n  from: 9\n  to: 3\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Span *span `yaml:"span"`
+					}](ctx)
+
+					return err
+				},
+				is:   errSpan,
+				want: "3:7: $.span.to: to is below from",
+				path: "$.span.to",
+			},
+			// The path goes through the alias to the line that holds the
+			// value.
+			"value an alias holds": {
+				input: "base: &base {from: 9, to: 3}\nspans: [*base]\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Spans []span `yaml:"spans"`
+					}](ctx)
+
+					return err
+				},
+				is:   errSpan,
+				want: "1:27: $.spans[0].to: to is below from",
+				path: "$.spans[0].to",
+			},
+			"field a merge key brings in": {
+				input: "base: &base {to: 3}\nspans:\n  - <<: *base\n    from: 9\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Spans []span `yaml:"spans"`
+					}](ctx)
+
+					return err
+				},
+				is:   errSpan,
+				want: "1:18: $.spans[0].to: to is below from",
+				path: "$.spans[0].to",
+			},
+			"value below a scoped node": {
+				input: "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.DecodeAt[[]span](ctx, paths.Current().Child("spans"))
+
+					return err
+				},
+				is:   errSpan,
+				want: "4:9: $.spans[1].to: to is below from",
+				path: "$.spans[1].to",
+			},
+			// No value below the node reports the error, so the path reads
+			// from the node, which is the value.
+			"mapping the decode reads": {
+				input: "from: 9\nto: 3\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[span](ctx)
+
+					return err
+				},
+				is:   errSpan,
+				want: "2:5: $.to: to is below from",
+				path: "$.to",
+			},
+			"mapping a scoped decode reads": {
+				input: "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.DecodeAt[span](ctx, paths.Current().Child("spans").Index(1))
+
+					return err
+				},
+				is:   errSpan,
+				want: "4:9: $.spans[1].to: to is below from",
+				path: "$.spans[1].to",
+			},
+			// The span wrote the path, so the path goes under the span and
+			// not under the value that handed its error on.
+			"value that returns the error of a field": {
+				input: "mirrors:\n  - name: a\n    span: {from: 9, to: 3}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Mirrors []spanMirror `yaml:"mirrors"`
+					}](ctx)
+
+					return err
+				},
+				is:   errSpan,
+				want: "3:25: $.mirrors[0].span.to: to is below from",
+				path: "$.mirrors[0].span.to",
+			},
+			"value that adds text to the error of a field": {
+				input: "main:\n  span: {from: 9, to: 3}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Main spanWrapper `yaml:"main"`
+					}](ctx)
+
+					return err
+				},
+				is:   errSpan,
+				want: "2:23: $.main.span.to: wrapper: to is below from",
+				path: "$.main.span.to",
+			},
+			// The value wrote the path of its field, so the path goes
+			// under the value once, and not under the field too.
+			"value that rebases the error of a field": {
+				input: "main:\n  span: {from: 9, to: 3}\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Main spanRebaser `yaml:"main"`
+					}](ctx)
+
+					return err
+				},
+				is:   errSpan,
+				want: "2:23: $.main.span.to: to is below from",
+				path: "$.main.span.to",
+			},
+			"value that names a field in the error of that field": {
+				input: "main:\n  tier: mid\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						Main tierNamer `yaml:"main"`
+					}](ctx)
+
+					return err
+				},
+				is:   errUnknownTier,
+				want: `2:9: $.main.tier: unknown tier "mid"`,
+				path: "$.main.tier",
+			},
+			"path of the value itself": {
+				input:  items,
+				decode: reported(niceyaml.Invalid(errUnmarshal, niceyaml.AtPath(paths.Current()))),
+				is:     errUnmarshal,
+				want:   "3:5: $.items[0]: unmarshaler rejected the value",
+				path:   "$.items[0]",
+			},
+			"error with no location": {
+				input:  items,
+				decode: reported(niceyaml.Invalid(errUnmarshal)),
+				is:     errUnmarshal,
+				want:   "3:5: $.items[0]: unmarshaler rejected the value",
+				path:   "$.items[0]",
+			},
+			"rebased error with no location": {
+				input:  items,
+				decode: reported(niceyaml.Rebase(errUnmarshal, paths.Current().Child("to"))),
+				is:     errUnmarshal,
+				want:   "4:9: $.items[0].to: unmarshaler rejected the value",
+				path:   "$.items[0].to",
+			},
+			// A path from the root reads from no value, so it stays.
+			"path from the root": {
+				input:  items,
+				decode: reported(niceyaml.Invalid(errUnmarshal, niceyaml.AtPath(paths.Doc().Child("name")))),
+				is:     errUnmarshal,
+				want:   "1:7: $.name: unmarshaler rejected the value",
+				path:   "$.name",
+			},
+			// Each problem of a summary goes under the value on its own.
+			"summary": {
+				input: items,
+				decode: reported(niceyaml.NewSummary(
+					"2 problems in the span",
+					niceyaml.NewError("from is odd", niceyaml.AtPath(paths.Current().Child("from"))),
+					niceyaml.NewError("to is odd", niceyaml.AtPath(paths.Current().Child("to"))),
+				)),
+				want: stringtest.JoinLF(
+					"2 problems in the span",
+					"3:11: $.items[0].from: from is odd",
+					"4:9: $.items[0].to: to is odd",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, tc.input)
+
+				err := tc.decode(t.Context(), dd)
+				require.EqualError(t, err, tc.want)
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
+
+				if tc.is != nil {
+					require.ErrorIs(t, err, tc.is)
+				}
+
+				var srcErr *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &srcErr)
+
+				// A summary points at no value, so it carries no path.
+				path, ok := srcErr.Path()
+				require.Equal(t, tc.path != "", ok)
+
+				if ok {
+					assert.Equal(t, tc.path, path.String())
+				}
+			})
+		}
+	})
+
+	// An error that heads several problems names no place itself. The
+	// places of its problems tell the error a value rebased from the
+	// error of its field, so each path goes under the value once.
+	t.Run("puts the problems a value rebased under that value once", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			report error
+			want   string
+		}{
+			"summary": {
+				report: niceyaml.NewSummary(
+					"2 problems in the span",
+					niceyaml.NewError("from is odd", niceyaml.AtPath(paths.Current().Child("from"))),
+					niceyaml.NewError("to is odd", niceyaml.AtPath(paths.Current().Child("to"))),
+				),
+				want: stringtest.JoinLF(
+					"2 problems in the span",
+					"3:11: $.main.item.from: from is odd",
+					"4:9: $.main.item.to: to is odd",
+				),
+			},
+			"join": {
+				report: errors.Join(errors.New("from is odd"), errors.New("to is odd")),
+				want: stringtest.JoinLF(
+					"3:5: $.main.item: from is odd",
+					"3:5: $.main.item: to is odd",
+				),
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				dd := yamltest.FirstDocument(t, "main:\n  item:\n    from: 9\n    to: 3\n")
+
+				_, err := dd.Decode[struct {
+					Main rebasing `yaml:"main"`
+				}](context.WithValue(t.Context(), reportKey{}, tc.report))
+				require.EqualError(t, err, tc.want)
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
+			})
+		}
+	})
+
+	// The detail explains the error, so it points at nothing itself, and
+	// its path goes under the value all the same.
+	t.Run("puts the path of a detail under the value", func(t *testing.T) {
+		t.Parallel()
+
+		dd := yamltest.FirstDocument(t, "spans:\n  - from: 9\n    to: 3\n")
+		report := niceyaml.NewError("span is odd", niceyaml.WithDetails(
+			niceyaml.NewError("to set here", niceyaml.AtPath(paths.Current().Child("to"))),
+		))
+
+		_, err := dd.Decode[struct {
+			Spans []reporting `yaml:"spans"`
+		}](context.WithValue(t.Context(), reportKey{}, error(report)))
+		require.EqualError(t, err, "2:5: $.spans[0]: span is odd")
+
+		var srcErr *niceyaml.SourceError
+
+		require.ErrorAs(t, err, &srcErr)
+		require.Len(t, srcErr.Details(), 1)
+		assert.EqualError(t, srcErr.Details()[0], "3:9: $.spans[0].to: to set here")
 	})
 
 	t.Run("keeps the location the error carries", func(t *testing.T) {

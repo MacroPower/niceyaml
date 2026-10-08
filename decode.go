@@ -3018,13 +3018,27 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // To find the value, DecodeInto decodes each such value of v a second
 // time, from its own node into a new value, in the order the decoder
 // reads them. The first one whose decode fails with the same message
-// takes the error. DecodeInto then looks below that value the same way,
+// takes the error. An error that names a place has to name the same
+// place both times. DecodeInto then looks below that value the same way,
 // so a value that decodes itself through a second type with the same
 // fields, such as `type plain T`, hands the error to the field that
 // failed. The error of an unmarshaler stays in the chain, so it matches
-// what the unmarshaler returned beside [ErrDecode]. An error that
-// carries a location already keeps it, such as an [Error] with a
-// position that an UnmarshalYAML built from its node.
+// what the unmarshaler returned beside [ErrDecode].
+//
+// An unmarshaler holds no [Node], so an [*Error] it returns writes an
+// `@` path that reads from its own value, as the error of a
+// [SelfValidator] does. DecodeInto puts that path under the path of the
+// value. An UnmarshalYAML of the value at `$.ranges[1]` that returns an
+// Error at `@.to` thus reports the field it checked:
+//
+//	config.yaml:4:9: $.ranges[1].to: to is below from
+//
+// A `$` path stays as it is, and so does a position or a range, such as
+// a position that an UnmarshalYAML built from its node. A value that
+// returns the error of a value below it, with text of its own in front
+// or without, leaves the path to the value that wrote it. An error that
+// a source bound already keeps that binding, such as the error of a
+// decode an unmarshaler runs on a source of its own.
 //
 // The second decode runs only after a decode fails, and it calls the
 // unmarshaler of each value it reaches once more. The location is right
@@ -3032,7 +3046,8 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // unmarshaler that reads state an earlier call changed, such as a set
 // of the names it has seen, may fail at another value the second time,
 // and the error then binds there. An error that no value reproduces
-// comes back as it is, with no location. That holds for an unmarshaler
+// comes back as it is. It gains no location, and an `@` path it writes
+// reads from the node the decode read. That holds for an unmarshaler
 // that reads the value v held before the decode, for a value an alias
 // reads from a reference document, and for a type that only a function
 // from [yaml.RegisterCustomUnmarshaler] decodes, since the decoder never

@@ -681,8 +681,9 @@ func (c *problemCollector) entries(t reflect.Type, mapping *ast.MappingNode, at 
 // decoder, such as one for a tag that does not convert its value, the
 // error of a type that only a [yaml.RegisterCustomUnmarshaler] function
 // decodes, or a panic that [decodeWithRecover] placed. It is also an
-// error of an UnmarshalText method that [Node.locateDecodeError] would
-// return as it is, such as one that names a place already.
+// error of an UnmarshalText method that names a place of its own, as
+// [Node.lacksLocation] reports, since the position that marks a problem
+// is the one its path resolves to.
 func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, at place, in holder) {
 	err := c.decode(node, reflect.New(t).Interface())
 	if err == nil {

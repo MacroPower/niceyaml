@@ -237,14 +237,20 @@ func (n *Node) rejectionLocation(tk *token.Token) []ErrorOption {
 // from a method or from an option of cfg, as [reportsOwnError] lists
 // them. To find that value, locateDecodeError walks the type of v beside
 // node, as [errorLocator] describes, and decodes each such value again
-// from its own node. The first one whose decode fails with the message
-// of err reported it.
+// from its own node. The first one whose decode fails with err again, as
+// [errorLocator.same] compares the two, reported it.
 //
 // The result holds err under that path, as [Rebase] returns it, so the
 // [SourceError] that binds the result reports the path and marks the
 // value. The result matches [ErrDecode], and err stays in its chain, so
 // the error of a value's own unmarshaler matches what it matched before
 // too.
+//
+// An unmarshaler holds no [Node], so an [*Error] it returns writes an
+// `@` path that reads from its own value, as the error of a
+// [SelfValidator] does. The Rebase puts that path under the path of the
+// value. It leaves a `$` path, a position, and a range as they are, so
+// an err that carries one of those binds where it did before.
 //
 // The path of a value under the node the decode reads is never the root,
 // with two exceptions. When node holds a scalar and the type of v
@@ -256,11 +262,13 @@ func (n *Node) rejectionLocation(tk *token.Token) []ErrorOption {
 // the result then holds the rejection [textRejection] writes in place of
 // err.
 //
-// An err that names a place already comes back as it is. So does one
-// that holds a location or a binding anywhere in its tree, one of a
-// context that ended, and one no value reproduces. A decode of node into
-// any value reads no unmarshaler, so an err that such a decode returns
-// too is the decoder's own, and it comes back as it is as well.
+// An err that [Node.unplaced] reports false for comes back as it is,
+// such as one the decode placed already. So does a binding, as [isBound]
+// reports one, since it resolved its location in a source already. So
+// does an err no value reproduces, and an `@` path in it then reads from
+// node. A decode of node into any value reads no unmarshaler, so an err
+// that such a decode returns too is the decoder's own, and it comes back
+// as it is as well.
 func (n *Node) locateDecodeError(
 	ctx context.Context,
 	err error,
@@ -268,7 +276,7 @@ func (n *Node) locateDecodeError(
 	v any,
 	cfg decodeConfig,
 ) error {
-	if err == nil || !n.lacksLocation(err) {
+	if err == nil || !n.unplaced(err) || isBound(err) {
 		return err
 	}
 
@@ -277,6 +285,8 @@ func (n *Node) locateDecodeError(
 		node:    n,
 		decoder: yaml.NewDecoder(bytes.NewReader(nil), n.yamlOptions(cfg)...),
 		msg:     err.Error(),
+		anchor:  anchorOf(err),
+		places:  placesOf(err),
 		inlined: map[inlineVisit]bool{},
 
 		unmarshalers: cfg.unmarshalers,
@@ -310,25 +320,28 @@ func (n *Node) locateDecodeError(
 	return Rebase(cause, found.path())
 }
 
-// lacksLocation reports whether err names no place in the source, so the
-// decode has to find one. It reports false for an err that matches
-// [errPlaced], which [Node.rejection] or [decodeWithRecover] placed, for
-// the error of a context that ended, and for a [yaml.Error] at a token of
-// the source. It also reports false when an error in the tree of err is
-// a [*SourceError] or an [*Error] with a location, since those say where
-// they point.
-func (n *Node) lacksLocation(err error) bool {
+// unplaced reports whether the decode has yet to find the value err is
+// about. It reports false for an err that matches [errPlaced], which
+// [Node.rejection] or [decodeWithRecover] placed, for the error of a
+// context that ended, and for a [yaml.Error] at a token of the source.
+func (n *Node) unplaced(err error) bool {
 	if errors.Is(err, errPlaced) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
 
 	yamlErr, ok := err.(yaml.Error) //nolint:errorlint // A wrapped error is the unmarshaler's own.
-	if ok && n.holdsToken(yamlErr.GetToken()) {
-		return false
-	}
 
-	return !holdsLocation(err)
+	return !ok || !n.holdsToken(yamlErr.GetToken())
+}
+
+// lacksLocation reports whether err names no place at all, so it points
+// at the value that reported it and nowhere else. It reports false for
+// an err the decode placed, as [Node.unplaced] reports one. It also
+// reports false when an error in the tree of err is a [*SourceError] or
+// an [*Error] with a location, since those say where they point.
+func (n *Node) lacksLocation(err error) bool {
+	return n.unplaced(err) && !holdsLocation(err)
 }
 
 // holdsLocation reports whether err, or an error anywhere in the tree it
@@ -426,7 +439,7 @@ func isScalar(node ast.Node) bool {
 }
 
 // errorLocator finds the value that reported an error of a decode with
-// no location. It walks the type the decode filled beside the node the
+// no token. It walks the type the decode filled beside the node the
 // decode read, in the order the decoder reads them. The decoder reads
 // the fields of a struct in the order the struct declares them, the
 // elements of a sequence in order, and the entries of a mapping in
@@ -438,16 +451,16 @@ func isScalar(node ast.Node) bool {
 //
 // At each value whose type [reportsOwnError] names, the walk decodes the
 // node of the value into a new value of that type. A decode that fails
-// with the message the locator looks for reproduces the error. The walk
-// then reads the fields, elements, or entries of that value the same
-// way, as if they mirrored the document. A value that decodes itself
-// through a second type with the same fields, such as an UnmarshalYAML
-// that decodes into `type plain T`, returns the error of a field as it
-// is, so the walk narrows to that field. The walk stops at the first
-// value that reproduces the error with nothing below it that does. It
-// stops too at a value whose node the decoder refuses, as
-// [refusesForText] reports, since the decoder reads nothing below that
-// node.
+// with the error the locator looks for reproduces the error, as
+// [errorLocator.same] compares the two. The walk then reads the fields,
+// elements, or entries of that value the same way, as if they mirrored
+// the document. A value that decodes itself through a second type with
+// the same fields, such as an UnmarshalYAML that decodes into `type
+// plain T`, returns the error of a field as it is, so the walk narrows
+// to that field. The walk stops at the first value that reproduces the
+// error with nothing below it that does. It stops too at a value whose
+// node the decoder refuses, as [refusesForText] reports, since the
+// decoder reads nothing below that node.
 //
 // The second decode runs the unmarshaler of each value the walk reaches
 // again, on a value of its own, so the first decode keeps what it set.
@@ -473,8 +486,13 @@ type errorLocator struct {
 	// The rejection of the value the walk found, as [textRejection]
 	// writes it, or nil when that value reported the error itself.
 	refusal error
+	// The places the error to locate names, as [placesOf] lists them.
+	places []locus
 	// The types the options of the decode give an unmarshaler.
 	unmarshalers optionUnmarshalers
+	// The [*Error] in the error to locate that carries its location, and
+	// that location, or the zero anchor when the error names no place.
+	anchor anchor
 }
 
 // inlineVisit names an inline field the walk is inside of, by the type
@@ -787,10 +805,11 @@ func contentNode(resolver *paths.Resolver, node ast.Node) ast.Node {
 }
 
 // reproduces reports whether a decode of node into v, a pointer to a new
-// value, fails with the message the locator looks for. The decode reads
-// node as a decode of that node alone does, with the anchors outside it
-// that it refers to. A context that has ended reproduces nothing, so the
-// walk ends with no location.
+// value, fails with the error the locator looks for, as
+// [errorLocator.same] compares the two. The decode reads node as a
+// decode of that node alone does, with the anchors outside it that it
+// refers to. A context that has ended reproduces nothing, so the walk
+// ends with no location.
 func (l *errorLocator) reproduces(node ast.Node, v any) bool {
 	if l.ctx.Err() != nil {
 		return false
@@ -808,5 +827,60 @@ func (l *errorLocator) reproduces(node ast.Node, v any) bool {
 
 	err := decodeWithRecover(l.ctx, l.decoder, view, v)
 
-	return err != nil && err.Error() == l.msg
+	return err != nil && l.same(err)
+}
+
+// same reports whether again, the error of a second decode, is the error
+// the locator looks for. An error that names no place is the same when
+// it reads the same.
+//
+// An [*Error] an unmarshaler returns writes an `@` path that reads from
+// the value of that unmarshaler, so the path goes under the value that
+// wrote it and no other. Two errors that name a place are thus the same
+// only when they name the same places, as [placesOf] lists them. A value
+// that names one of its fields in an error of its own writes a path the
+// field never wrote, so the walk does not narrow to the field, and the
+// path goes under the value once.
+//
+// A value that puts text in front of the error of a value below it
+// leaves that path as it is, and the path still reads from the value
+// below. Two errors that name the same places are therefore the same too
+// when the Error that carries the place reads the same, whatever text a
+// wrapper puts around it. The walk then narrows through the wrapper to
+// the value that wrote the path.
+func (l *errorLocator) same(again error) bool {
+	if !slices.EqualFunc(placesOf(again), l.places, sameLocus) {
+		return false
+	}
+
+	if again.Error() == l.msg {
+		return true
+	}
+
+	found := anchorOf(again)
+
+	return found.err != nil && l.anchor.err != nil && found.err.Error() == l.anchor.err.Error()
+}
+
+// placesOf returns the place each error in the tree of err names: the
+// one of err, of each problem it heads, and of each detail, in the order
+// [ErrorTree.All] yields them. A place is the location [anchorOf] finds
+// for the error, with the base of every [Rebase] above it in front of
+// its path, and the zero locus for an error that names none. An error
+// that heads several problems, such as a join, names no place itself, so
+// the places of its problems tell it from another.
+func placesOf(err error) []locus {
+	var places []locus
+
+	for node := range NewErrorTree(err).All() {
+		places = append(places, anchorOf(node.Err).locus)
+	}
+
+	return places
+}
+
+// sameLocus reports whether a and b name the same place: the same path,
+// or none, and the same position or range, or none.
+func sameLocus(a, b locus) bool {
+	return a.hasPath == b.hasPath && a.path.Equal(b.path) && a.loc == b.loc && a.ambiguous == b.ambiguous
 }
