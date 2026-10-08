@@ -333,13 +333,11 @@ func (l *Layers) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) er
 		return doc.bindOwn(err)
 	}
 
-	cfg := newDecodeConfig(opts)
-
 	if layerErr != nil {
 		return layerErr
 	}
 
-	return doc.decodeInto(ctx, v, cfg)
+	return doc.decodeInto(ctx, v, newDecodeConfig(opts))
 }
 
 // Validate runs v on the merged document, as [Node.Validate] runs it on
