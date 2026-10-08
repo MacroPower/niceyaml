@@ -312,11 +312,7 @@ func (r *layerReader) anchor(alias *ast.AliasNode, ref bool) (*ast.AnchorNode, b
 		}
 	}
 
-	var name string
-
-	if !astnode.IsNil(alias.Value) {
-		name = alias.Value.GetToken().Value
-	}
+	name, _ := nodeName(alias.Value)
 
 	anchor, ok := r.references()[name]
 	if !ok {
@@ -361,9 +357,9 @@ type anchorCollector map[string]*ast.AnchorNode
 
 // Visit implements [ast.Visitor].
 func (c anchorCollector) Visit(node ast.Node) ast.Visitor {
-	if anchor, ok := node.(*ast.AnchorNode); ok && anchor != nil && !astnode.IsNil(anchor.Name) {
-		if tk := anchor.Name.GetToken(); tk != nil {
-			c[tk.Value] = anchor
+	if anchor, ok := node.(*ast.AnchorNode); ok && anchor != nil {
+		if name, ok := nodeName(anchor.Name); ok {
+			c[name] = anchor
 		}
 	}
 
