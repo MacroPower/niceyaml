@@ -132,6 +132,28 @@ if err != nil {
 kind, err := doc.DecodeAt[string](ctx, paths.Doc().Child("kind"))
 ```
 
+The environment and the flags of a program go in as one more layer. Encode a map of the keys they set with [`encoder.Marshal`][niceyaml/encoder] and pass its document above the files. The schema then checks those values too, and an error under one reports that layer:
+
+```go
+data, err := encoder.Marshal(ctx, map[string]any{"server": map[string]any{"port": port}})
+if err != nil {
+	return err
+}
+
+env, err := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment")).Document()
+if err != nil {
+	return err
+}
+
+cfg, err := niceyaml.NewLayers(base, prod, env).Decode[Config](ctx, niceyaml.WithValidator(schema))
+```
+
+```text
+environment:2:9: $.server.port: port must be at least 1
+```
+
+The docs of [`Layers`][niceyaml.Layers] say what such a layer cannot do, such as unset a value.
+
 ### Viewport
 
 See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pages, searches, diffs, and validates YAML documents.
