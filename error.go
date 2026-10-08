@@ -19,7 +19,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/internal/fault"
-	"go.jacobcolvin.com/niceyaml/internal/unplaced"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
@@ -170,6 +169,14 @@ var (
 	// does, and [ErrorTree.Invalid] reads it. The schema package matches
 	// the same value, so it comes from an internal package.
 	errInvalid = fault.ErrInvalid
+
+	// The source [BindValue] binds to. It holds no text and no name,
+	// since the value came from no file, so an error bound to it reads
+	// as its path and its message. Every call shares the one source,
+	// which never changes.
+	valueSource = sync.OnceValue(func() *Source {
+		return NewSourceFromString("")
+	})
 )
 
 // Error is an error that points at a location in a YAML document.
@@ -225,7 +232,9 @@ var (
 // prints an Error no binding holds yet reads it with [FormatError], as
 // FormatError(err, 0), which puts the path in front of the text the same
 // way through any wrapper, as the Error wrote it, such as
-// "@.path: msg". The errors a summary heads and the details of
+// "@.path: msg". A program that returns or logs such an Error binds it
+// with [BindValue], and the text of that error names each path. The
+// errors a summary heads and the details of
 // an Error are structure rather than text. [Error.Errors] and [Error.Details]
 // return them, [Error.Unwrap] exposes them to [errors.Is] and
 // [errors.As], and the [SourceError] that binds the Error binds each one
@@ -716,12 +725,12 @@ func (e *Error) With(opts ...ErrorOption) *Error {
 // heads errors, or holds details adds paths of its own, so Rebase puts
 // the base in front of those.
 //
-// One binding stands in no document, which is the error
-// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] returns for a
-// value that came from none. Rebase reads it as the errors it was made
-// from, so they take the base, and a Node then binds them in its
-// document. Each binding below that one, as [SourceError.Errors] and
-// [SourceError.Details] return them, rebases the same way on its own.
+// One binding stands in no document, which is the error [BindValue]
+// returns for a value that came from none. Rebase reads it as the error
+// it was made from, so each problem takes the base, and a Node then
+// binds them in its document. Each binding below that one, as
+// [SourceError.Errors] and [SourceError.Details] return them, rebases
+// the same way on its own.
 func Rebase(err error, base paths.Path) error {
 	return rebase(err, base, false, false)
 }
@@ -1065,7 +1074,9 @@ func WithDetails(errs ...error) ErrorOption {
 //
 // [FormatError] reads an Error that no binding holds yet. It puts the
 // path in front of the message, and the %+v verb and [Error.LogValue]
-// print the same tree.
+// print the same tree. [BindValue] binds such an Error to no document,
+// for a check on a value that came from none, and the message of that
+// binding holds each path.
 func (e *Error) Error() string {
 	if e == nil || e.err == nil {
 		return ""
@@ -1507,11 +1518,12 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 // binds, so [errors.Is] and [errors.As] see through it.
 //
 // Create instances with [Node.Bind] or [Source.Bind], or receive them
-// from the [Source] and [Node] methods.
+// from the [Source] and [Node] methods. [BindValue] creates one for a
+// value that came from no document.
 type SourceError struct {
 	err error
 	// The error the binding was made from when it stands in no document,
-	// as [unplacedError] finds one, and nil for every other binding. Each
+	// as [BindValue] builds one, and nil for every other binding. Each
 	// binding below such a binding holds the error it was made from too.
 	// [placeable] hands it to a later binding in place of this one.
 	free error
@@ -1621,9 +1633,9 @@ type boundTexts struct {
 // no location at that Node. A binder with a fallback binds each path in
 // the layer [fallback.layer] picks for it, which is its own Node or one
 // of the Nodes below it in a [Layers]. A binder that is unplaced binds
-// an error about a value that came from no document, as [unplacedError]
-// finds one, so each binding it builds keeps the error it was made from
-// for [placeable] and is bound to no node.
+// an error about a value that came from no document, as [BindValue]
+// does, so each binding it builds keeps the error it was made from for
+// [placeable] and is bound to no node.
 type binder struct {
 	src       *Source
 	node      *Node
@@ -1789,6 +1801,101 @@ func (b binder) nodeAt(idx int) *Node {
 	return nil
 }
 
+// BindValue binds err to no document. It serves a check on a value that
+// came from none, such as the body of a request or a value the program
+// built. [Error.Error] writes no path, so an error that nothing bound
+// reads as its message alone, and a summary from [NewSummary] reads as
+// its heading. A binding puts each path in the text, so the error
+// BindValue returns names every failing location through %v, inside a
+// wrapper from [fmt.Errorf], in a join from [errors.Join], and in a log:
+//
+//	2 violations
+//	$.port: 0 is less than 1
+//	$.name: name is required
+//
+// Each path starts at `$`, which here is the value the check ran on, and
+// an `@` path reads from that value too. No file and no position stand
+// in front of a line. [FormatError] prints the same errors as a tree.
+//
+// A validator of decoded data returns its errors through BindValue. An
+// adapter for a policy engine or for another schema language is one:
+//
+//	func (e *Engine) ValidateValue(data any) error {
+//		var errs []error
+//
+//		for _, finding := range e.check(data) {
+//			at := niceyaml.AtPath(paths.Current().Child(finding.Names...))
+//			errs = append(errs, niceyaml.Invalid(finding, at))
+//		}
+//
+//		return niceyaml.BindValue(niceyaml.NewSummary(fmt.Sprintf("%d violations", len(errs)), errs...))
+//	}
+//
+// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] returns its
+// violations this way. A caller that runs the Validate method of a type
+// outside a decode binds the result the same way before it prints it:
+//
+//	if err := niceyaml.BindValue(request.Validate()); err != nil {
+//		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+//	}
+//
+// The result stands in no document, so a document can still place it.
+// [Rebase] and every Bind return an error bound to a document as it is,
+// and they read this result as err, the error it was made from. A caller
+// that knows where the value stands in a document puts the errors under
+// that path, and a [Node] of the document then binds them:
+//
+//	err := engine.ValidateValue(cfg.Request)
+//
+//	return doc.Bind(niceyaml.Rebase(err, paths.Doc().Child("request")))
+//
+// The bound error reads "app.yaml:2:9: $.request.port: 0 is less than 1".
+// A decode places the result the same way, at the value it checked, when
+// a Validate method of a type or a [Validator] returns it. Each binding
+// below the result places on its own too, so a caller that drops some of
+// the problems places the rest. Those bindings are the ones
+// [SourceError.Errors] and [SourceError.Details] return for the result.
+//
+// A wrapper such as [fmt.Errorf] around the result keeps its text
+// through both calls, behind the position and the path, as in
+// "app.yaml:2:9: $.request.port: check: 0 is less than 1". A wrapper
+// whose text does not hold the text of the result once, such as one that
+// quotes it or writes a message of its own, places the errors too. It
+// keeps the text it wrote, with any path that text names from the value.
+//
+// An [*Error] around the result binds as it does around err. With no
+// option, the result places as it does alone. Details stay with the
+// Error. A location on the Error is the location of the bound error, as
+// it is above any error that carries a path. One problem thus reports at
+// that location, and several keep their own lines below it.
+//
+// Placing builds a new error and leaves the result as it is. A result
+// that no document places stays an error that names each path from the
+// value. A result placed twice, in one document or in two, gives two
+// errors, and each stands where its own call bound it. Rebase returns an
+// error that nothing bound, so a validator that checks one field with
+// another validator binds that result again under the path of the field:
+//
+//	return niceyaml.BindValue(niceyaml.Rebase(err, paths.Current().Child("request")))
+//
+// The result is a [*SourceError] bound to no [Node], and so is each
+// binding below it. [SourceError.Node] and [SourceError.Document] return
+// nil, and [SourceError.DocumentIndex], [SourceError.Position], and
+// [SourceError.Range] report false. [SourceError.Source] returns a
+// source with no name and no lines. For a binding with a path,
+// [SourceError.Unresolved] returns a reason that wraps
+// [go.jacobcolvin.com/niceyaml/paths.ErrNoDocument], which FormatError
+// leaves out. A position or a range has no line to resolve on, so its
+// reason is [ErrOutOfRange].
+//
+// BindValue returns nil for a nil err, and for a nil [*Error] or
+// [*SourceError] pointer. An error that is bound already, as [Node.Bind]
+// describes one, comes back as it is, whether a document bound it or
+// BindValue did.
+func BindValue(err error) error {
+	return bindTree(err, binder{src: valueSource(), route: true, unplaced: true})
+}
+
 // bindTree binds err to b. A nil err, or a nil [*Error] or [*SourceError]
 // pointer, carries nothing to bind and comes back as a nil error. A
 // caller thus compares the result against nil whatever the shape of the
@@ -1796,14 +1903,18 @@ func (b binder) nodeAt(idx int) *Node {
 // comes back as it is. Any other error, including an Error above a
 // binding that carries a location, heads errors, or holds details, binds
 // as a new SourceError.
+//
+// A binding that stands in no document is the exception. A binder of a
+// document binds the error [placeable] returns for it. A binder that is
+// unplaced has no document to place it in, so that binding is bound
+// already for it.
 func bindTree(err error, b binder) error {
 	if isNothing(err) {
 		return nil
 	}
 
-	free, marked := unplacedError(err)
-	if marked {
-		err = free
+	if b.unplaced && isBound(err) {
+		return err
 	}
 
 	err = placeable(err)
@@ -1815,35 +1926,17 @@ func bindTree(err error, b binder) error {
 		return err
 	}
 
-	b.unplaced = marked
-
 	bound := newSourceError(b.located(err), b)
-	if marked {
+	if b.unplaced {
 		bound.free = err
 	}
 
 	return bound
 }
 
-// unplacedError returns the error err wraps, and reports true, when err
-// itself matches [unplaced.Err] from an Is method. Such an err declares
-// that the error it wraps is about a value that came from no document.
-// Its binding reads as any other, and [placeable] hands the error to a
-// later binding that places it in a document. The bindings below it,
-// one per problem and detail, stand in no document either, so placeable
-// hands on the error of each the same way.
-func unplacedError(err error) (error, bool) {
-	x, ok := err.(interface{ Is(target error) bool }) //nolint:errorlint // The error itself, not a chain search.
-	if !ok || !x.Is(unplaced.Err) {
-		return nil, false
-	}
-
-	return errors.Unwrap(err), true
-}
-
 // placeable returns err with a binding that stands in no document, as
-// [unplacedError] describes one, replaced by the error the binding was
-// made from. Bind and [Rebase] thus place such an error in a document as
+// [BindValue] builds one, replaced by the error the binding was made
+// from. Bind and [Rebase] thus place such an error in a document as
 // they place an error that no source bound yet. Every other binding is a
 // binding of a document, and comes back as it is.
 //
@@ -2593,9 +2686,9 @@ func (e *SourceError) Source() *Source {
 // to another document or source. An error that [Layers] binds is bound
 // to the Node of the layer its path bound in.
 //
-// The error [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue]
-// returns is about a value that came from no document. It is bound to
-// none, and so is each binding below it, with a path or without.
+// The error [BindValue] returns is about a value that came from no
+// document. It is bound to none, and so is each binding below it, with a
+// path or without.
 // A nil SourceError is bound to none.
 func (e *SourceError) Node() *Node {
 	if e == nil {

@@ -8272,6 +8272,751 @@ func TestRebase_Anchors(t *testing.T) {
 	}
 }
 
+// valueRuleError is the error of a check that knows nothing of YAML, as a
+// policy engine reports one.
+type valueRuleError struct {
+	msg string
+}
+
+func (e *valueRuleError) Error() string {
+	return e.msg
+}
+
+// valueErrors returns the first n errors of a check on a request, under a
+// summary when n is 2. Each error carries a path that reads from the
+// value.
+func valueErrors(n int) error {
+	errs := []error{
+		niceyaml.Invalid(&valueRuleError{msg: "0 is less than 1"}, niceyaml.AtPath(paths.Current().Child("port"))),
+		niceyaml.NewError("name is required", niceyaml.AtPath(paths.Current().Child("name"))),
+	}
+
+	return niceyaml.NewSummary("2 violations", errs[:n]...)
+}
+
+// valueCheckError wraps the error of a check with a prefix, as a caller's
+// own error type does.
+type valueCheckError struct {
+	err error
+}
+
+func (e *valueCheckError) Error() string {
+	return "check: " + e.err.Error()
+}
+
+func (e *valueCheckError) Unwrap() error {
+	return e.err
+}
+
+// valueFixedError wraps an error under a message of its own, as an error
+// type that maps a failure to a status does.
+type valueFixedError struct {
+	err error
+}
+
+func (e valueFixedError) Error() string {
+	return "invalid body"
+}
+
+func (e valueFixedError) Unwrap() error {
+	return e.err
+}
+
+// valueIndentError wraps an error and indents each line of its text.
+type valueIndentError struct {
+	err error
+}
+
+func (e valueIndentError) Error() string {
+	return "validation:\n  " + strings.ReplaceAll(e.err.Error(), "\n", "\n  ")
+}
+
+func (e valueIndentError) Unwrap() error {
+	return e.err
+}
+
+// valueConfig holds a [valueRequest] under the key request.
+type valueConfig struct {
+	Request valueRequest `yaml:"request"`
+}
+
+// valueRequest is a [niceyaml.SelfValidator] whose Validate returns its
+// error through [niceyaml.BindValue], so a caller outside a decode
+// prints the path. With fixed, it returns that error inside a
+// [valueFixedError].
+type valueRequest struct {
+	Port int `yaml:"port"`
+
+	fixed bool
+}
+
+func (r valueRequest) Validate() error {
+	if r.Port >= 1 {
+		return nil
+	}
+
+	err := niceyaml.BindValue(niceyaml.NewError("0 is less than 1", niceyaml.AtPath(paths.Current().Child("port"))))
+	if r.fixed {
+		return valueFixedError{err: err}
+	}
+
+	//nolint:wrapcheck // The test checks where a decode places the result as it is.
+	return err
+}
+
+func TestBindValue(t *testing.T) {
+	t.Parallel()
+
+	port := niceyaml.NewError("0 is less than 1", niceyaml.AtPath(paths.Current().Child("port")))
+
+	// The value came from no document, so the binding names each path
+	// from the value, with no file and no position in front.
+	tcs := map[string]struct {
+		err        error
+		want       string
+		wantFormat string
+		wantPaths  []string
+	}{
+		"one problem": {
+			err:        valueErrors(1),
+			want:       "$.port: 0 is less than 1",
+			wantFormat: "$.port: 0 is less than 1",
+			wantPaths:  []string{"$.port"},
+		},
+		"summary of two problems": {
+			err: valueErrors(2),
+			want: stringtest.JoinLF(
+				"2 violations",
+				"$.port: 0 is less than 1",
+				"$.name: name is required",
+			),
+			wantFormat: stringtest.JoinLF(
+				"2 violations",
+				"|-- $.port: 0 is less than 1",
+				"`-- $.name: name is required",
+			),
+			wantPaths: []string{"$.port", "$.name"},
+		},
+		"join of two problems": {
+			err: errors.Join(
+				port,
+				niceyaml.NewError("name is required", niceyaml.AtPath(paths.Current().Child("name"))),
+			),
+			want: stringtest.JoinLF(
+				"$.port: 0 is less than 1",
+				"$.name: name is required",
+			),
+			wantFormat: stringtest.JoinLF(
+				"|-- $.port: 0 is less than 1",
+				"`-- $.name: name is required",
+			),
+			wantPaths: []string{"$.port", "$.name"},
+		},
+		"wrapper around a problem": {
+			err:        fmt.Errorf("check: %w", port),
+			want:       "$.port: check: 0 is less than 1",
+			wantFormat: "$.port: check: 0 is less than 1",
+			wantPaths:  []string{"$.port"},
+		},
+		"path from the root": {
+			err:        niceyaml.NewError("0 is less than 1", niceyaml.AtPath(paths.Doc().Child("port"))),
+			want:       "$.port: 0 is less than 1",
+			wantFormat: "$.port: 0 is less than 1",
+			wantPaths:  []string{"$.port"},
+		},
+		"no location": {
+			err:        errors.New("request refused"),
+			want:       "request refused",
+			wantFormat: "request refused",
+		},
+		"problem with a detail": {
+			err: niceyaml.NewError("ports conflict", niceyaml.WithDetails(
+				niceyaml.NewError("first declared here", niceyaml.AtPath(paths.Current().Child("port"))),
+			)),
+			want: "ports conflict",
+			wantFormat: stringtest.JoinLF(
+				"ports conflict",
+				"`-- $.port: first declared here",
+			),
+			wantPaths: []string{"$.port"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := niceyaml.BindValue(tc.err)
+			require.EqualError(t, got, tc.want)
+
+			// A wrapper and a join keep the text of the error they hold,
+			// so each path shows through both.
+			assert.Equal(t, tc.want, fmt.Sprintf("%v", got))
+			require.EqualError(t, fmt.Errorf("invalid request: %w", got), "invalid request: "+tc.want)
+			require.EqualError(t, errors.Join(errors.New("other failure"), got), "other failure\n"+tc.want)
+
+			// The source holds no line to excerpt, so the tree stands
+			// alone, with no line that says so.
+			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(got, 2))
+			assert.Equal(t, tc.wantFormat, fmt.Sprintf("%+v", got))
+
+			// No binding of the result names a Node, a document, or a
+			// position, and its source holds no name and no line.
+			var gotPaths []string
+
+			for b := range niceyaml.AllBindings(got) {
+				assert.Nil(t, b.Node())
+				assert.Nil(t, b.Document())
+				assert.Empty(t, b.Source().Name())
+				assert.Zero(t, b.Source().Lines().Len())
+
+				_, ok := b.DocumentIndex()
+				assert.False(t, ok)
+
+				_, ok = b.Position()
+				assert.False(t, ok)
+
+				_, ok = b.Range()
+				assert.False(t, ok)
+
+				path, ok := b.Path()
+				if !ok {
+					require.NoError(t, b.Unresolved())
+
+					continue
+				}
+
+				// The reason is the one of a document with no content,
+				// which FormatError leaves out.
+				require.ErrorIs(t, b.Unresolved(), paths.ErrNoDocument)
+
+				gotPaths = append(gotPaths, path.String())
+			}
+
+			assert.Equal(t, tc.wantPaths, gotPaths)
+		})
+	}
+
+	t.Run("nothing to bind", func(t *testing.T) {
+		t.Parallel()
+
+		var (
+			nilErr   *niceyaml.Error
+			nilBound *niceyaml.SourceError
+		)
+
+		require.NoError(t, niceyaml.BindValue(nil))
+		require.NoError(t, niceyaml.BindValue(nilErr))
+		require.NoError(t, niceyaml.BindValue(nilBound))
+	})
+
+	t.Run("a bound error comes back as it is", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "port: 0\n", niceyaml.WithName("app.yaml"))
+
+		inDocument := doc.Bind(port)
+		inNone := niceyaml.BindValue(port)
+		wrapped := fmt.Errorf("check: %w", inNone)
+
+		assert.Same(t, inDocument, niceyaml.BindValue(inDocument))
+		assert.Same(t, inNone, niceyaml.BindValue(inNone))
+		assert.Same(t, wrapped, niceyaml.BindValue(wrapped))
+		require.EqualError(t, wrapped, "check: $.port: 0 is less than 1")
+	})
+
+	t.Run("the result matches what its error matches", func(t *testing.T) {
+		t.Parallel()
+
+		errCheck := errors.New("check")
+
+		got := niceyaml.BindValue(fmt.Errorf("%w: %w", errCheck, valueErrors(2)))
+		require.ErrorIs(t, got, errCheck)
+		assert.True(t, niceyaml.IsInvalid(got))
+
+		var rule *valueRuleError
+
+		require.ErrorAs(t, got, &rule)
+		assert.Equal(t, "0 is less than 1", rule.msg)
+
+		// BindValue declares nothing about the error it binds.
+		assert.False(t, niceyaml.IsInvalid(niceyaml.BindValue(errors.New("request refused"))))
+	})
+
+	t.Run("a base moves the result before it binds again", func(t *testing.T) {
+		t.Parallel()
+
+		// Rebase reads the result as the error it was made from, which
+		// nothing bound, so the value of one check goes under a field of
+		// a larger value.
+		inner := niceyaml.BindValue(valueErrors(2))
+		outer := niceyaml.BindValue(niceyaml.Rebase(inner, paths.Current().Child("request")))
+
+		require.EqualError(t, outer, stringtest.JoinLF(
+			"2 violations",
+			"$.request.port: 0 is less than 1",
+			"$.request.name: name is required",
+		))
+		require.EqualError(t, inner, stringtest.JoinLF(
+			"2 violations",
+			"$.port: 0 is less than 1",
+			"$.name: name is required",
+		))
+	})
+
+	t.Run("an Error with a location binds around the result", func(t *testing.T) {
+		t.Parallel()
+
+		inner := niceyaml.BindValue(valueErrors(2))
+		at := niceyaml.AtPath(paths.Current().Child("request"))
+
+		require.EqualError(t, niceyaml.BindValue(niceyaml.Place(inner, at)), stringtest.JoinLF(
+			"$.request: 2 violations",
+			"$.port: 0 is less than 1",
+			"$.name: name is required",
+		))
+	})
+
+	t.Run("a position finds no line", func(t *testing.T) {
+		t.Parallel()
+
+		got := niceyaml.BindValue(niceyaml.NewError("bad indent", niceyaml.AtPosition(position.New(1, 2))))
+		require.EqualError(t, got, "bad indent")
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, got, &bound)
+		require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrOutOfRange)
+
+		// A document places the position as it places a path.
+		doc := yamltest.FirstDocument(t, "request:\n  port: 0\n", niceyaml.WithName("app.yaml"))
+		require.EqualError(t, doc.Bind(got), "app.yaml:2:3: bad indent")
+	})
+
+	t.Run("a caller binds what a Validate method returns", func(t *testing.T) {
+		t.Parallel()
+
+		hours := rebasedHours{Open: "17:00", Close: "09:00"}
+
+		require.EqualError(t, hours.Validate(), "closes before it opens")
+		require.EqualError(t, niceyaml.BindValue(hours.Validate()), "$.close: closes before it opens")
+		require.NoError(t, niceyaml.BindValue(rebasedHours{Open: "09:00", Close: "17:00"}.Validate()))
+	})
+}
+
+func TestBindValue_Place(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, "request:\n  port: 0\n", niceyaml.WithName("app.yaml"))
+	base := paths.Doc().Child("request")
+
+	// A sentinel a caller wraps beside the error of a check.
+	errCheck := errors.New("check")
+
+	// The result stands in no document, so Rebase and Bind place it as
+	// they place an error that no source bound yet. Each path then shows
+	// once, with or without a wrapper around the result.
+	tcs := map[string]struct {
+		err         error
+		wantValue   string
+		wantBound   string
+		wantWrapped string
+		// The result bound through the root with no Rebase, where each
+		// path reads from the root of the document.
+		wantRoot string
+	}{
+		"one problem": {
+			err:         valueErrors(1),
+			wantValue:   "$.port: 0 is less than 1",
+			wantBound:   "app.yaml:2:9: $.request.port: 0 is less than 1",
+			wantWrapped: "app.yaml:2:9: $.request.port: check: 0 is less than 1",
+			wantRoot:    "app.yaml:1:1: $.port: 0 is less than 1",
+		},
+		"two problems": {
+			err: valueErrors(2),
+			wantValue: stringtest.JoinLF(
+				"2 violations",
+				"$.port: 0 is less than 1",
+				"$.name: name is required",
+			),
+			wantBound: stringtest.JoinLF(
+				"app.yaml: 2 violations",
+				"app.yaml:1:1: $.request.name: name is required",
+				"app.yaml:2:9: $.request.port: 0 is less than 1",
+			),
+			wantWrapped: stringtest.JoinLF(
+				"app.yaml: check: 2 violations",
+				"app.yaml:1:1: $.request.name: name is required",
+				"app.yaml:2:9: $.request.port: 0 is less than 1",
+			),
+			wantRoot: stringtest.JoinLF(
+				"app.yaml: 2 violations",
+				"app.yaml:1:1: $.port: 0 is less than 1",
+				"app.yaml:1:1: $.name: name is required",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := niceyaml.BindValue(tc.err)
+			require.EqualError(t, err, tc.wantValue)
+
+			placed := doc.Bind(niceyaml.Rebase(err, base))
+			require.EqualError(t, placed, tc.wantBound)
+			assert.True(t, niceyaml.IsInvalid(placed))
+
+			var rule *valueRuleError
+
+			require.ErrorAs(t, placed, &rule)
+
+			for b := range niceyaml.AllBindings(placed) {
+				assert.Same(t, doc.Source(), b.Source())
+				assert.Same(t, doc, b.Document())
+			}
+
+			// A plain error under the same base and the same Node binds
+			// to the same text.
+			require.EqualError(t, doc.Bind(niceyaml.Rebase(tc.err, base)), tc.wantBound)
+
+			require.EqualError(t,
+				doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", err), base)),
+				tc.wantWrapped,
+			)
+			require.EqualError(t,
+				doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", fmt.Errorf("body: %w", err)), base)),
+				strings.Replace(tc.wantWrapped, "check: ", "check: body: ", 1),
+			)
+
+			// A wrapper that names a sentinel beside the result reads as
+			// a wrapper around the result alone, and still matches the
+			// sentinel.
+			beside := doc.Bind(niceyaml.Rebase(fmt.Errorf("%w: %w", errCheck, err), base))
+			require.EqualError(t, beside, tc.wantWrapped)
+			require.ErrorIs(t, beside, errCheck)
+
+			// A Node scoped to the value puts its own path in front, and
+			// the root reads each path from the root of the document.
+			require.EqualError(t, yamltest.At(t, doc, base).Bind(err), tc.wantBound)
+			require.EqualError(t, doc.Bind(err), tc.wantRoot)
+			require.EqualError(t, doc.Source().Bind(err), tc.wantRoot)
+			require.EqualError(t, niceyaml.NewLayers(doc).Bind(nil, err), tc.wantRoot)
+
+			// A join places each result it holds.
+			require.EqualError(t, doc.Bind(niceyaml.Rebase(errors.Join(err), base)), tc.wantBound)
+
+			// Placing builds a new error and leaves the result as it was.
+			require.EqualError(t, err, tc.wantValue)
+
+			for b := range niceyaml.AllBindings(err) {
+				assert.NotSame(t, doc.Source(), b.Source())
+				assert.Nil(t, b.Document())
+			}
+		})
+	}
+
+	t.Run("a wrapper keeps what it matches", func(t *testing.T) {
+		t.Parallel()
+
+		wrapped := &valueCheckError{err: niceyaml.BindValue(valueErrors(1))}
+		require.EqualError(t, wrapped, "check: $.port: 0 is less than 1")
+
+		placed := doc.Bind(niceyaml.Rebase(wrapped, base))
+		require.EqualError(t, placed, "app.yaml:2:9: $.request.port: check: 0 is less than 1")
+		require.ErrorIs(t, placed, wrapped)
+
+		var got *valueCheckError
+
+		require.ErrorAs(t, placed, &got)
+		assert.Same(t, wrapped, got)
+	})
+
+	t.Run("a wrapper that rewrites the text keeps its text", func(t *testing.T) {
+		t.Parallel()
+
+		one := niceyaml.BindValue(valueErrors(1))
+		two := niceyaml.BindValue(valueErrors(2))
+
+		// The text of each wrapper holds the text of the result nowhere, or
+		// twice, so no path could leave it. The document places every
+		// problem all the same, and the wrapper keeps the text it wrote.
+		tcs := map[string]struct {
+			err  error
+			want string
+		}{
+			"message of its own": {
+				err:  valueFixedError{err: one},
+				want: "app.yaml:2:9: $.request.port: invalid body",
+			},
+			"message of its own above two problems": {
+				err: valueFixedError{err: two},
+				want: stringtest.JoinLF(
+					"app.yaml: invalid body",
+					"app.yaml:1:1: $.request.name: name is required",
+					"app.yaml:2:9: $.request.port: 0 is less than 1",
+				),
+			},
+			"message of its own beside a sentinel": {
+				err:  fmt.Errorf("%w: %w", errCheck, valueFixedError{err: one}),
+				want: "app.yaml:2:9: $.request.port: check: invalid body",
+			},
+			"indented lines": {
+				err: valueIndentError{err: two},
+				want: stringtest.JoinLF(
+					"app.yaml: validation:",
+					"  2 violations",
+					"  $.port: 0 is less than 1",
+					"  $.name: name is required",
+					"app.yaml:1:1: $.request.name: name is required",
+					"app.yaml:2:9: $.request.port: 0 is less than 1",
+				),
+			},
+			"text held twice": {
+				err:  fmt.Errorf("%w (again: %s)", one, one.Error()),
+				want: "app.yaml:2:9: $.request.port: $.port: 0 is less than 1 (again: $.port: 0 is less than 1)",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				placed := doc.Bind(niceyaml.Rebase(tc.err, base))
+				require.EqualError(t, placed, tc.want)
+				require.ErrorIs(t, placed, tc.err)
+				assert.True(t, niceyaml.IsInvalid(placed))
+
+				var rule *valueRuleError
+
+				require.ErrorAs(t, placed, &rule)
+
+				for b := range niceyaml.AllBindings(placed) {
+					assert.Same(t, doc.Source(), b.Source())
+				}
+			})
+		}
+	})
+
+	t.Run("an Error around the result binds as it does around the error", func(t *testing.T) {
+		t.Parallel()
+
+		at := niceyaml.AtPath(paths.Current())
+		why := niceyaml.WithDetails(errors.New("the body of the request"))
+
+		// An Error writes the message of the error it wraps, so it binds
+		// around the result as it binds around an error that no source
+		// bound yet. No line keeps a path from the value.
+		tcs := map[string]struct {
+			wrap        func(error) error
+			problems    int
+			want        string
+			wantDetails []string
+		}{
+			"Invalid with no option": {
+				wrap:     func(err error) error { return niceyaml.Invalid(err) },
+				problems: 1,
+				want:     "app.yaml:2:9: $.request.port: 0 is less than 1",
+			},
+			"Place with no option under a wrapper": {
+				wrap:     func(err error) error { return fmt.Errorf("check: %w", niceyaml.Place(err)) },
+				problems: 1,
+				want:     "app.yaml:2:9: $.request.port: check: 0 is less than 1",
+			},
+			"location above one problem": {
+				wrap:     func(err error) error { return niceyaml.Invalid(err, at) },
+				problems: 1,
+				want:     "app.yaml:2:3: $.request: 0 is less than 1",
+			},
+			"location above two problems": {
+				wrap:     func(err error) error { return niceyaml.Invalid(err, at) },
+				problems: 2,
+				want: stringtest.JoinLF(
+					"app.yaml:2:3: $.request: 2 violations",
+					"app.yaml:1:1: $.request.name: name is required",
+					"app.yaml:2:9: $.request.port: 0 is less than 1",
+				),
+			},
+			"wrapper around a location": {
+				wrap:     func(err error) error { return fmt.Errorf("check: %w", niceyaml.Place(err, at)) },
+				problems: 2,
+				want: stringtest.JoinLF(
+					"app.yaml:2:3: $.request: check: 2 violations",
+					"app.yaml:1:1: $.request.name: name is required",
+					"app.yaml:2:9: $.request.port: 0 is less than 1",
+				),
+			},
+			"details beside one problem": {
+				wrap:        func(err error) error { return niceyaml.Place(err, why) },
+				problems:    1,
+				want:        "app.yaml:2:9: $.request.port: 0 is less than 1",
+				wantDetails: []string{"the body of the request"},
+			},
+			"details beside two problems": {
+				wrap:     func(err error) error { return niceyaml.Invalid(err, why) },
+				problems: 2,
+				want: stringtest.JoinLF(
+					"app.yaml: 2 violations",
+					"app.yaml:1:1: $.request.name: name is required",
+					"app.yaml:2:9: $.request.port: 0 is less than 1",
+				),
+				wantDetails: []string{"the body of the request"},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				free := valueErrors(tc.problems)
+
+				placed := doc.Bind(niceyaml.Rebase(tc.wrap(niceyaml.BindValue(free)), base))
+				require.EqualError(t, placed, tc.want)
+				require.EqualError(t, doc.Bind(niceyaml.Rebase(tc.wrap(free), base)), tc.want)
+				assert.True(t, niceyaml.IsInvalid(placed))
+
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, placed, &bound)
+
+				var gotDetails []string
+
+				for _, detail := range bound.Details() {
+					gotDetails = append(gotDetails, detail.Message())
+				}
+
+				assert.Equal(t, tc.wantDetails, gotDetails)
+
+				for _, problem := range bound.Errors() {
+					assert.Same(t, doc.Source(), problem.Source())
+				}
+			})
+		}
+	})
+
+	t.Run("a Validate method returns the result", func(t *testing.T) {
+		t.Parallel()
+
+		// A call on the value alone prints the path, and a decode places
+		// the same error at the value.
+		require.EqualError(t, valueRequest{}.Validate(), "$.port: 0 is less than 1")
+
+		var cfg valueConfig
+
+		err := doc.DecodeInto(t.Context(), &cfg)
+		require.EqualError(t, err, "app.yaml:2:9: $.request.port: 0 is less than 1")
+		assert.True(t, niceyaml.IsInvalid(err))
+	})
+
+	t.Run("a Validate method returns the result under a message of its own", func(t *testing.T) {
+		t.Parallel()
+
+		cfg := valueConfig{Request: valueRequest{fixed: true}}
+
+		err := doc.DecodeInto(t.Context(), &cfg)
+		require.EqualError(t, err, "app.yaml:2:9: $.request.port: invalid body")
+		assert.True(t, niceyaml.IsInvalid(err))
+	})
+
+	t.Run("a Validator returns the result", func(t *testing.T) {
+		t.Parallel()
+
+		check := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+			return niceyaml.BindValue(valueErrors(1))
+		})
+
+		err := yamltest.At(t, doc, base).Validate(t.Context(), check)
+		require.EqualError(t, err, "app.yaml:2:9: $.request.port: 0 is less than 1")
+	})
+
+	t.Run("a summary and a detail place the results they hold", func(t *testing.T) {
+		t.Parallel()
+
+		port := niceyaml.BindValue(valueErrors(1))
+		name := niceyaml.BindValue(
+			niceyaml.NewError("name is required", niceyaml.AtPath(paths.Current().Child("name"))),
+		)
+
+		summary := niceyaml.NewSummary("request checks", port, name)
+		require.EqualError(t, doc.Bind(niceyaml.Rebase(summary, base)), stringtest.JoinLF(
+			"app.yaml: request checks",
+			"app.yaml:1:1: $.request.name: name is required",
+			"app.yaml:2:9: $.request.port: 0 is less than 1",
+		))
+
+		detailed := niceyaml.NewError(
+			"bad request",
+			niceyaml.AtPath(base),
+			niceyaml.WithDetails(niceyaml.Rebase(port, base)),
+		)
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, doc.Bind(detailed), &bound)
+		require.Len(t, bound.Details(), 1)
+		assert.Same(t, doc.Source(), bound.Details()[0].Source())
+		require.EqualError(t, bound.Details()[0], "app.yaml:2:9: $.request.port: 0 is less than 1")
+	})
+
+	t.Run("each problem places on its own", func(t *testing.T) {
+		t.Parallel()
+
+		var result *niceyaml.SourceError
+
+		require.ErrorAs(t, niceyaml.BindValue(valueErrors(2)), &result)
+		require.Len(t, result.Errors(), 2)
+
+		// A caller that keeps only some of the problems places the ones
+		// it keeps, and each stands in the document as it does when the
+		// caller places the whole result.
+		want := []string{
+			"app.yaml:2:9: $.request.port: 0 is less than 1",
+			"app.yaml:1:1: $.request.name: name is required",
+		}
+
+		for i, problem := range result.Errors() {
+			placed := doc.Bind(niceyaml.Rebase(problem, base))
+			require.EqualError(t, placed, want[i])
+			assert.True(t, niceyaml.IsInvalid(placed))
+
+			for b := range niceyaml.AllBindings(placed) {
+				assert.Same(t, doc.Source(), b.Source())
+			}
+
+			// The problem itself stays where the result put it.
+			assert.Nil(t, problem.Document())
+		}
+
+		kept := errors.Join(result.Errors()[1], result.Errors()[0])
+		require.EqualError(t, yamltest.At(t, doc, base).Bind(kept), stringtest.JoinLF(want[1], want[0]))
+	})
+
+	t.Run("a result placed twice gives two errors", func(t *testing.T) {
+		t.Parallel()
+
+		other := yamltest.FirstDocument(t, "port: 0\n", niceyaml.WithName("other.yaml"))
+
+		err := niceyaml.BindValue(valueErrors(1))
+
+		first := doc.Bind(niceyaml.Rebase(err, base))
+		again := doc.Bind(niceyaml.Rebase(err, base))
+		elsewhere := other.Bind(err)
+
+		require.EqualError(t, first, "app.yaml:2:9: $.request.port: 0 is less than 1")
+		require.EqualError(t, again, "app.yaml:2:9: $.request.port: 0 is less than 1")
+		require.EqualError(t, elsewhere, "other.yaml:1:7: $.port: 0 is less than 1")
+		assert.NotSame(t, first, again)
+
+		// A placed error is bound to its document, so a later Bind
+		// returns it as it is.
+		assert.Same(t, first, other.Bind(first))
+		assert.Same(t, first, niceyaml.BindValue(first))
+
+		require.EqualError(t, err, "$.port: 0 is less than 1")
+	})
+}
+
 func TestError_TokenAfterTrailingSpaces(t *testing.T) {
 	t.Parallel()
 

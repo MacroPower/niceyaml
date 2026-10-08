@@ -20,7 +20,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/aliaslimit"
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
-	"go.jacobcolvin.com/niceyaml/internal/unplaced"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -56,12 +55,6 @@ var (
 	// ErrCompile indicates a schema document that does not compile.
 	// [Compile] and [Registry.Lookup] return it.
 	ErrCompile = errors.New("compile schema")
-
-	// The source [Schema.ValidateValue] binds its errors to. It holds no
-	// text and no name, since the value came from no file, so an error
-	// bound to it reads as its path and its message. Every call shares
-	// the one source, which never changes.
-	noSource = niceyaml.NewSourceFromString("")
 )
 
 // CompileOption configures [Compile] and [MustCompile], and
@@ -425,12 +418,12 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // describes. Any other failure wraps [ErrValidate], including a $ref the
 // validator cannot resolve, since the value is not at fault for that.
 //
-// ValidateValue takes no document, so it binds every error to an empty
-// source with no name. The binding puts each path in the text of the
-// error, so the error names every failing location through %v, inside a
-// wrapper from [fmt.Errorf], in a join from [errors.Join], and in a log.
-// One violation reads "$.port: 0 is less than 1", and several read as
-// the summary with one violation per line:
+// ValidateValue takes no document, so it binds its errors to none, as
+// [niceyaml.BindValue] does. The binding puts each path in the text of
+// the error, so the error names every failing location through %v,
+// inside a wrapper from [fmt.Errorf], in a join from [errors.Join], and
+// in a log. One violation reads "$.port: 0 is less than 1", and several
+// read as the summary with one violation per line:
 //
 //	2 schema violations
 //	$.port: 0 is less than 1
@@ -442,12 +435,13 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // which is the first among several. [niceyaml.FormatError] prints the
 // same errors as a tree.
 //
-// The result stands in no document, so a document can still place it.
-// [niceyaml.Rebase] and every Bind return an error bound to a document
-// as it is, and they read this result as the errors it was made from,
-// whose paths start at `@`, the value data stands for. A caller that
-// knows where the value stands in a document puts the errors under that
-// path, and a [niceyaml.Node] of the document then binds them:
+// The result stands in no document, so a document can still place it,
+// as BindValue describes. [niceyaml.Rebase] and every Bind return an
+// error bound to a document as it is, and they read this result as the
+// errors it was made from, whose paths start at `@`, the value data
+// stands for. A caller that knows where the value stands in a document
+// puts the errors under that path, and a [niceyaml.Node] of the document
+// then binds them:
 //
 //	err := s.ValidateValue(ctx, data)
 //
@@ -458,19 +452,10 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // [niceyaml.Validator] returns, which a decode places at the value it
 // checked. A wrapper such as [fmt.Errorf] around the result keeps its
 // text through both calls, behind the position and the path, as in
-// "app.yaml:2:9: $.request.port: check: 0 is less than 1". A wrapper
-// whose text does not hold the text of the result once, such as one
-// that quotes it or writes a message of its own, places the violations
-// too. It keeps the text it wrote, with any path that text names from
-// the value.
-//
-// A result inside [niceyaml.Invalid] or [niceyaml.Place] places as the
-// errors it was made from place inside that Error. With no option, the
-// result places as it does alone. Details stay with the Error. A
-// location on the Error is the location of the bound error, as it is
-// above any error that carries a path. One violation thus reports at
-// that location, and several keep their own lines below it. The result
-// itself never changes.
+// "app.yaml:2:9: $.request.port: check: 0 is less than 1". BindValue
+// describes a wrapper that rewrites the text of the result, and a result
+// inside [niceyaml.Invalid] or [niceyaml.Place]. Both place the
+// violations too. The result itself never changes.
 //
 // Each violation the result heads places the same way on its own, so a
 // caller that drops some of them places the rest. The violations are
@@ -510,30 +495,7 @@ func (s *Schema) ValidateValue(ctx context.Context, data any) error {
 	}
 
 	//nolint:wrapcheck // Binding puts each path in the text; the error keeps its own context.
-	return noSource.Bind(valueError{err: err})
-}
-
-// valueError holds the errors of a value that came from no document, as
-// [Schema.ValidateValue] checks one. It matches [unplaced.Err], so the
-// binding of the errors it wraps stands in no document, and a later Bind
-// or [niceyaml.Rebase] places those errors.
-type valueError struct {
-	err error
-}
-
-// Error returns the message of the errors.
-func (e valueError) Error() string {
-	return e.err.Error()
-}
-
-// Unwrap returns the errors.
-func (e valueError) Unwrap() error {
-	return e.err
-}
-
-// Is reports whether target is [unplaced.Err].
-func (e valueError) Is(target error) bool {
-	return target == unplaced.Err
+	return niceyaml.BindValue(err)
 }
 
 // checkValue checks data against the schema and returns the errors

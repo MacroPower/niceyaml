@@ -131,6 +131,10 @@ import (
 //
 //	@.close: hours check: closes before it opens
 //
+// A caller that returns or logs the error binds it with [BindValue]
+// instead. The text of that error names each path wherever it prints,
+// and a document can still place it.
+//
 // Any value with a Validate method takes part, including one from a
 // package that names its own check that way, such as a generated
 // message type. A decode runs those checks too and reports their errors
@@ -342,7 +346,7 @@ type SelfValidator interface {
 // returns a bound error as it is, since the binding resolved its location
 // already. A check that reports under another path or in another document
 // starts from errors that stand in no document instead. A check of the
-// decoded data returns those, as
+// decoded data returns those through [BindValue], as
 // [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] does, and
 // Rebase puts them under that path before a Node binds them.
 //
@@ -2172,12 +2176,11 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 // resolved. An Error with details above a binding binds anew around it,
 // with those details as children. Bind never modifies err.
 //
-// One binding stands in no document, which is the error
-// [go.jacobcolvin.com/niceyaml/schema.Schema.ValidateValue] returns for a
-// value that came from none. Bind binds the errors it was made from, as
-// it binds an error that no source bound yet, so a validator that
-// returns such a result reports it in the document. Each binding below
-// that one binds the same way on its own.
+// One binding stands in no document, which is the error [BindValue]
+// returns for a value that came from none. Bind binds the error it was
+// made from, as it binds an error that no source bound yet, so a
+// validator that returns such a result reports it in the document. Each
+// binding below that one binds the same way on its own.
 //
 // A document that did not parse has no tree to resolve a path in, so a
 // path bound through its Node resolves nowhere. The bound error keeps

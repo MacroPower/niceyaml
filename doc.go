@@ -408,6 +408,12 @@
 // on a value after Decode returns under the path of that value the same
 // way.
 //
+// A check on a value that came from no document, such as the body of a
+// request, has no line to report. [BindValue] binds its error to no
+// document, so the text names each path, as in "$.close: closes before
+// it opens". A caller that later learns where the value stands in a
+// document places the same error there with Rebase and [Node.Bind].
+//
 // A value the go-yaml decoder rejects reports the same way. The error
 // matches [ErrDecode] and carries the path of the value, and its
 // message describes the document rather than the Go target:
