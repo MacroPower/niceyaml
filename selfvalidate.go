@@ -47,11 +47,10 @@ import (
 //
 //	return doc.SelfValidate(ctx, &cfg)
 //
-// A program that layers one file over another decodes each into the
-// value in turn. A SelfValidate through the Node of the last file then
-// binds every error in that Node, whichever file set the value.
-// [Layers.SelfValidate] binds each error in the file that set its value
-// instead:
+// A program that layers one file over another merges them through
+// [Layers]. [Layers.SelfValidate] then binds each error in the file that
+// holds its value, where a SelfValidate through the Node of one file
+// binds every error in that file:
 //
 //	return niceyaml.NewLayers(base, prod).SelfValidate(ctx, &cfg)
 //
@@ -107,16 +106,14 @@ import (
 // context that ended, and SelfValidate then returns that error alone, as
 // [SelfValidator] describes.
 func (n *Node) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
-	return n.selfValidate(ctx, v, newDecodeConfig(opts), nil)
+	return n.selfValidate(ctx, v, newDecodeConfig(opts))
 }
 
 // selfValidate is [Node.SelfValidate] with its settings resolved.
 // [Node.DecodeInto] runs it once the decode has filled v, so a decode and
 // a later call of SelfValidate on the same value return the same error.
-// It binds what the walk returns as [Node.Bind] does, through a binder
-// that also holds the Nodes below, the layers under n that [Layers]
-// names, nearest first.
-func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig, below []*Node) error {
+// It binds what the walk returns as [Node.Bind] does.
+func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error {
 	err := checkSelfValidateTarget(v)
 	if err != nil {
 		return n.bindOwn(err)
@@ -124,12 +121,7 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig, below 
 
 	walked := walkSelfValidators(ctx, v, n, n.yamlOptions(cfg.decodeOptions()))
 
-	return bindTree(walked, binder{
-		src:      n.source,
-		node:     n,
-		locate:   true,
-		fallback: newFallback(v, below),
-	})
+	return bindTree(walked, binder{src: n.source, node: n, locate: true})
 }
 
 // checkSelfValidateTarget returns [ErrSelfValidateTarget] when v is nil

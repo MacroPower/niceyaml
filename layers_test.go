@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"testing"
+	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,6 +15,8 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
+	"go.jacobcolvin.com/niceyaml/schema"
 )
 
 func ExampleLayers() {
@@ -43,13 +47,13 @@ func ExampleLayers() {
 	// |-- prod.yaml:4:5: $.servers[0].port: port must be at least 1
 	// `-- base.yaml:3:9: $.server.port: port must be at least 1
 	//
-	// prod.yaml
-	//    4 |   - host: cache.internal
-	//      |     ^^^^ port must be at least 1
-	//
 	// base.yaml
 	//    3 |   port: 0
 	//      |         ^ port must be at least 1
+	//
+	// prod.yaml
+	//    4 |   - host: cache.internal
+	//      |     ^^^^ port must be at least 1
 }
 
 func TestLayers_SelfValidate(t *testing.T) {
@@ -62,17 +66,13 @@ func TestLayers_SelfValidate(t *testing.T) {
 		badPort = "server:\n  host: example.com\n  port: 0\n"
 	)
 
-	// Each case decodes its layers into one value, lowest first, and
-	// validates the value through the last one, the top layer. The files
-	// are base.yaml and prod.yaml, with mid.yaml between them when the
-	// case has three.
+	// Each case decodes its layers into one value and validates the
+	// value through them. The files are base.yaml and prod.yaml, with
+	// mid.yaml between them when the case has three.
 	tcs := map[string]struct {
-		// Changes the value once every layer has set it, as the environment
-		// of a program does.
+		// Changes the value once the layers have set it, as the
+		// environment of a program does.
 		change func(cfg *layerConfig)
-		// The error of the top layer on its own, which binds every path in
-		// that layer.
-		without string
 		// The error of the layers.
 		err string
 		// The documents of the layers, lowest first.
@@ -81,62 +81,54 @@ func TestLayers_SelfValidate(t *testing.T) {
 		// values below it does.
 		odd []paths.Path
 	}{
-		"a struct field binds in the layer that sets it": {
-			layers:  []string{badPort, "server:\n  host: prod.example.com\n"},
-			without: "prod.yaml:1:1: $.server.port: " + portMessage,
-			err:     "base.yaml:3:9: $.server.port: " + portMessage,
+		"a field binds in the layer that sets it": {
+			layers: []string{badPort, "server:\n  host: prod.example.com\n"},
+			err:    "base.yaml:3:9: $.server.port: " + portMessage,
 		},
 		"the top layer keeps a field it sets": {
-			layers:  []string{"server:\n  host: example.com\n  port: 80\n", "server:\n  port: 0\n"},
-			without: "prod.yaml:2:9: $.server.port: " + portMessage,
-			err:     "prod.yaml:2:9: $.server.port: " + portMessage,
+			layers: []string{"server:\n  host: example.com\n  port: 80\n", "server:\n  port: 0\n"},
+			err:    "prod.yaml:2:9: $.server.port: " + portMessage,
 		},
-		"a slice element binds in the layer that holds the slice": {
-			layers:  []string{"servers:\n  - {host: a, port: 80}\n", "servers:\n  - {host: x}\n"},
-			without: "prod.yaml:2:6: $.servers[0].port: " + portMessage,
-			err:     "prod.yaml:2:6: $.servers[0].port: " + portMessage,
+		"an element binds in the layer that holds the sequence": {
+			layers: []string{"servers:\n  - {host: a, port: 80}\n", "servers:\n  - {host: x}\n"},
+			err:    "prod.yaml:2:6: $.servers[0].port: " + portMessage,
 		},
-		"an array element binds in the layer that holds the array": {
-			layers:  []string{"pair:\n  - {host: a, port: 80}\n", "pair:\n  - {host: x}\n"},
-			without: "prod.yaml:2:6: $.pair[0].port: " + portMessage,
-			err:     "prod.yaml:2:6: $.pair[0].port: " + portMessage,
+		"an element of an array binds in the layer that holds the sequence": {
+			layers: []string{"pair:\n  - {host: a, port: 80}\n", "pair:\n  - {host: x}\n"},
+			err:    "prod.yaml:2:6: $.pair[0].port: " + portMessage,
 		},
-		"a map entry binds in the layer that holds the map": {
-			layers:  []string{"backends:\n  a: {host: a, port: 80}\n", "backends:\n  a: {host: x}\n"},
-			without: "prod.yaml:2:3: $.backends.a.port: " + portMessage,
-			err:     "prod.yaml:2:3: $.backends.a.port: " + portMessage,
+		"a field of a map entry binds in the layer that sets it": {
+			layers: []string{
+				"backends:\n  a: {host: a, port: 0}\n",
+				"backends:\n  a: {host: x}\n  b: {host: b, port: 1}\n",
+			},
+			err: "base.yaml:2:22: $.backends.a.port: " + portMessage,
 		},
-		"a value of an interface type binds in the layer that holds it": {
-			layers:  []string{"extra: {k: v}\n", "extra: {z: y}\n"},
-			odd:     []paths.Path{paths.Current().Child("extra", "k")},
-			without: "prod.yaml:1:1: $.extra.k: odd value",
-			err:     "prod.yaml:1:1: $.extra.k: odd value",
+		"a key of an untyped mapping binds in the layer that sets it": {
+			layers: []string{"extra: {k: v}\n", "extra: {z: y}\n"},
+			odd:    []paths.Path{paths.Current().Child("extra", "k")},
+			err:    "base.yaml:1:12: $.extra.k: odd value",
 		},
-		"a value that decodes itself binds in the layer that holds it": {
-			layers:  []string{"switch: {on: true, mode: fast}\n", "switch: {on: false}\n"},
-			odd:     []paths.Path{paths.Current().Child("switch", "mode")},
-			without: "prod.yaml:1:1: $.switch.mode: odd value",
-			err:     "prod.yaml:1:1: $.switch.mode: odd value",
+		"a key of a value that decodes itself binds in the layer that sets it": {
+			layers: []string{"switch: {on: true, mode: fast}\n", "switch: {on: false}\n"},
+			odd:    []paths.Path{paths.Current().Child("switch", "mode")},
+			err:    "base.yaml:1:26: $.switch.mode: odd value",
 		},
 		"a null field keeps the value of the layer below": {
-			layers:  []string{badPort, "server:\n  host: x\n  port: null\n"},
-			without: "prod.yaml:3:9: $.server.port: " + portMessage,
-			err:     "base.yaml:3:9: $.server.port: " + portMessage,
+			layers: []string{badPort, "server:\n  host: x\n  port: null\n"},
+			err:    "base.yaml:3:9: $.server.port: " + portMessage,
 		},
-		"a null struct keeps the value of the layer below": {
-			layers:  []string{badPort, "server: null\n"},
-			without: "prod.yaml:1:1: $.server.port: " + portMessage,
-			err:     "base.yaml:3:9: $.server.port: " + portMessage,
+		"a null mapping keeps the value of the layer below": {
+			layers: []string{badPort, "server: null\n"},
+			err:    "base.yaml:3:9: $.server.port: " + portMessage,
 		},
 		"an empty mapping keeps the value of the layer below": {
-			layers:  []string{badPort, "server: {}\n"},
-			without: "prod.yaml:1:1: $.server.port: " + portMessage,
-			err:     "base.yaml:3:9: $.server.port: " + portMessage,
+			layers: []string{badPort, "server: {}\n"},
+			err:    "base.yaml:3:9: $.server.port: " + portMessage,
 		},
-		"a null sets a pointer field, so the error binds at the null": {
-			layers:  []string{"limits:\n  timeout: 5\n", "limits:\n  timeout: null\n"},
-			without: "prod.yaml:2:12: $.limits.timeout: timeout is required",
-			err:     "prod.yaml:2:12: $.limits.timeout: timeout is required",
+		"a null that no layer sets a value under binds in the highest layer": {
+			layers: []string{"limits:\n  timeout: null\n", "limits:\n  timeout: ~\n"},
+			err:    "prod.yaml:2:12: $.limits.timeout: timeout is required",
 		},
 		"the middle of three layers sets the value": {
 			layers: []string{
@@ -144,38 +136,31 @@ func TestLayers_SelfValidate(t *testing.T) {
 				"server:\n  port: 0\n",
 				"server:\n  host: prod.example.com\n",
 			},
-			without: "prod.yaml:1:1: $.server.port: " + portMessage,
-			err:     "mid.yaml:2:9: $.server.port: " + portMessage,
+			err: "mid.yaml:2:9: $.server.port: " + portMessage,
 		},
 		"the search passes over a null in a middle layer": {
-			layers:  []string{badPort, "name: mid\n", "server:\n  port: null\n"},
-			without: "prod.yaml:2:9: $.server.port: " + portMessage,
-			err:     "base.yaml:3:9: $.server.port: " + portMessage,
+			layers: []string{badPort, "name: mid\n", "server:\n  port: null\n"},
+			err:    "base.yaml:3:9: $.server.port: " + portMessage,
 		},
 		"an inline struct binds in the layer that sets its field": {
-			layers:  []string{"name: base\nregion: nowhere\n", "name: prod\n"},
-			without: "prod.yaml:1:1: $.region: unknown region",
-			err:     "base.yaml:2:9: $.region: unknown region",
+			layers: []string{"name: base\nregion: nowhere\n", "name: prod\n"},
+			err:    "base.yaml:2:9: $.region: unknown region",
 		},
 		"a pointer to a struct binds in the layer that sets its field": {
-			layers:  []string{"backup:\n  host: example.com\n  port: 0\n", "backup:\n  host: x\n"},
-			without: "prod.yaml:1:1: $.backup.port: " + portMessage,
-			err:     "base.yaml:3:9: $.backup.port: " + portMessage,
+			layers: []string{"backup:\n  host: example.com\n  port: 0\n", "backup:\n  host: x\n"},
+			err:    "base.yaml:3:9: $.backup.port: " + portMessage,
 		},
 		"a struct two fields down binds in the layer that sets its field": {
-			layers:  []string{"nested:\n  inner:\n    host: example.com\n    port: 0\n", "name: prod\n"},
-			without: "prod.yaml:1:1: $.nested.inner.port: " + portMessage,
-			err:     "base.yaml:4:11: $.nested.inner.port: " + portMessage,
+			layers: []string{"nested:\n  inner:\n    host: example.com\n    port: 0\n", "name: prod\n"},
+			err:    "base.yaml:4:11: $.nested.inner.port: " + portMessage,
 		},
-		"a slice that only a lower layer holds binds there": {
-			layers:  []string{"name: base\nservers:\n  - {host: a, port: 0}\n", "name: prod\n"},
-			without: "prod.yaml: $.servers[0].port: " + portMessage,
-			err:     "base.yaml:3:21: $.servers[0].port: " + portMessage,
+		"a sequence that only a lower layer holds binds there": {
+			layers: []string{"name: base\nservers:\n  - {host: a, port: 0}\n", "name: prod\n"},
+			err:    "base.yaml:3:21: $.servers[0].port: " + portMessage,
 		},
-		"a map that only a lower layer holds binds there": {
-			layers:  []string{"name: base\nbackends:\n  a: {host: a, port: 0}\n", "name: prod\n"},
-			without: "prod.yaml:1:1: $.backends.a.port: " + portMessage,
-			err:     "base.yaml:3:22: $.backends.a.port: " + portMessage,
+		"a mapping that only a lower layer holds binds there": {
+			layers: []string{"name: base\nbackends:\n  a: {host: a, port: 0}\n", "name: prod\n"},
+			err:    "base.yaml:3:22: $.backends.a.port: " + portMessage,
 		},
 		"each problem of a summary binds in its own layer": {
 			layers: []string{
@@ -186,55 +171,51 @@ func TestLayers_SelfValidate(t *testing.T) {
 				paths.Current().Child("server", "host"),
 				paths.Current().Child("backends", "a", "port"),
 			},
-			without: "prod.yaml: config checks\n" +
-				"prod.yaml:1:1: $.server.host: odd value\n" +
-				"prod.yaml:2:22: $.backends.a.port: odd value",
-			err: "prod.yaml: config checks\n" +
+			err: "base.yaml: config checks\n" +
 				"base.yaml:1:16: $.server.host: odd value\n" +
 				"prod.yaml:2:22: $.backends.a.port: odd value",
 		},
 		"a value no layer sets binds at the deepest mapping that lacks it": {
-			layers:  []string{"name: base\nserver:\n  host: example.com\n", "name: prod\n"},
-			without: "prod.yaml:1:1: $.server.port: " + portMessage,
-			err:     "base.yaml:2:1: $.server.port: " + portMessage,
+			layers: []string{"name: base\nserver:\n  host: example.com\n", "name: prod\n"},
+			err:    "base.yaml:2:1: $.server.port: " + portMessage,
 		},
 		"the top layer wins among mappings of one depth": {
-			layers:  []string{"name: base\n", "name: prod\n"},
-			odd:     []paths.Path{paths.Current().Child("server", "host")},
-			without: "prod.yaml:1:1: $.server.host: odd value",
-			err:     "prod.yaml:1:1: $.server.host: odd value",
+			layers: []string{"name: base\n", "name: prod\n"},
+			odd:    []paths.Path{paths.Current().Child("server", "host")},
+			err:    "prod.yaml:1:1: $.server.host: odd value",
 		},
-		"a name no field decodes stays in the top layer": {
-			layers:  []string{"unknown: {k: v}\n", "name: prod\n"},
-			odd:     []paths.Path{paths.Current().Child("unknown", "k")},
-			without: "prod.yaml:1:1: $.unknown.k: odd value",
-			err:     "prod.yaml:1:1: $.unknown.k: odd value",
+		"a key no field reads binds in the layer that sets it": {
+			layers: []string{"unknown: {k: v}\n", "name: prod\n"},
+			odd:    []paths.Path{paths.Current().Child("unknown", "k")},
+			err:    "base.yaml:1:14: $.unknown.k: odd value",
 		},
-		// The decoder hands the server the value the backup decoded for the
-		// anchor, whole, so the port 80 of the base file is gone.
-		"a field written as an alias binds in its layer": {
+		// The alias brings in a host and no port, so the port of the base
+		// file stays, and only the backup lacks one.
+		"a value an alias brings in merges as one written in its place": {
 			layers: []string{
 				"server:\n  host: example.com\n  port: 80\n",
 				"backup: &b {host: x}\nserver: *b\n",
 			},
-			without: "prod.yaml:1:1: $.backup.port: " + portMessage + "\n" +
-				"prod.yaml:2:1: $.server.port: " + portMessage,
-			err: "prod.yaml:1:1: $.backup.port: " + portMessage + "\n" +
-				"prod.yaml:2:1: $.server.port: " + portMessage,
+			err: "prod.yaml:1:1: $.backup.port: " + portMessage,
 		},
-		// Two limits that Layers documents.
+		"a value under an alias binds at the content of the anchor": {
+			layers: []string{
+				"server:\n  host: example.com\n  port: 80\n",
+				"extra: &s {host: x, port: 0}\nserver: *s\n",
+			},
+			err: "prod.yaml:1:27: $.server.port: " + portMessage,
+		},
+		"a key spelled unlike its Go value binds at its entry": {
+			layers: []string{"name: base\nrates:\n  1.50: {limit: 0}\n", "name: prod\n"},
+			err:    "base.yaml:3:17: $.rates.'1.50'.limit: limit must be at least 1",
+		},
+		// The limit that Layers documents.
 		"a value the caller set binds at what a file holds": {
 			layers: []string{"server:\n  host: example.com\n  port: 8080\n", "server:\n  host: x\n"},
 			change: func(cfg *layerConfig) {
 				cfg.Server.Port = 0
 			},
-			without: "prod.yaml:1:1: $.server.port: " + portMessage,
-			err:     "base.yaml:3:9: $.server.port: " + portMessage,
-		},
-		"a key a lower layer spells unlike its value binds at the key of its map": {
-			layers:  []string{"name: base\nrates:\n  1.50: {limit: 0}\n", "name: prod\n"},
-			without: "prod.yaml:1:1: $.rates.'1.5'.limit: limit must be at least 1",
-			err:     "base.yaml:2:1: $.rates.'1.5'.limit: limit must be at least 1",
+			err: "base.yaml:3:9: $.server.port: " + portMessage,
 		},
 	}
 
@@ -244,8 +225,7 @@ func TestLayers_SelfValidate(t *testing.T) {
 
 			var cfg layerConfig
 
-			nodes := layerNodes(t, tc.layers...)
-			layers := niceyaml.NewLayers(nodes...)
+			layers := niceyaml.NewLayers(layerNodes(t, tc.layers...)...)
 
 			err := layers.DecodeInto(t.Context(), &cfg, niceyaml.WithSelfValidation(false))
 			require.NoError(t, err)
@@ -255,9 +235,6 @@ func TestLayers_SelfValidate(t *testing.T) {
 			if tc.change != nil {
 				tc.change(&cfg)
 			}
-
-			err = nodes[len(nodes)-1].SelfValidate(t.Context(), &cfg)
-			require.EqualError(t, err, tc.without)
 
 			err = layers.SelfValidate(t.Context(), &cfg)
 			require.EqualError(t, err, tc.err)
@@ -289,8 +266,9 @@ func TestLayers_SelfValidate(t *testing.T) {
 		err = niceyaml.NewLayers(base, docs[0]).SelfValidate(t.Context(), &cfg)
 		require.EqualError(t, err, want)
 
-		err = niceyaml.NewLayers(base, docs[0]).Bind(&cfg,
-			niceyaml.NewError(portMessage, niceyaml.AtPath(paths.Doc().Child("server", "port"))))
+		err = niceyaml.NewLayers(base, docs[0]).Bind(
+			niceyaml.NewError(portMessage, niceyaml.AtPath(paths.Doc().Child("server", "port"))),
+		)
 		require.EqualError(t, err, want)
 
 		// On its own it resolves no path, so the error names the file
@@ -355,7 +333,7 @@ func TestLayers_DecodeInto(t *testing.T) {
 		t.Parallel()
 
 		// Both layers below the top one set the port, and the nearer one
-		// holds the value the decode kept.
+		// holds the value the merge kept.
 		nodes := layerNodes(t, "server:\n  port: 0\n", baseInput, prodInput)
 
 		_, err := niceyaml.NewLayers(nodes...).Decode[layerConfig](t.Context())
@@ -396,16 +374,67 @@ func TestLayers_DecodeInto(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("a decode stops at the first layer that fails", func(t *testing.T) {
+	t.Run("a null keeps the value below it in a pointer field too", func(t *testing.T) {
 		t.Parallel()
 
-		nodes := layerNodes(t, "server:\n  port: many\n", "name: prod\n")
+		nodes := layerNodes(t, "limits:\n  timeout: 5\n", "limits:\n  timeout: null\n")
+
+		cfg, err := niceyaml.NewLayers(nodes...).Decode[layerConfig](t.Context())
+		require.NoError(t, err)
+		require.NotNil(t, cfg.Limits)
+		require.NotNil(t, cfg.Limits.Timeout)
+		assert.Equal(t, 5, *cfg.Limits.Timeout)
+	})
+
+	t.Run("one decode reports the values every layer gets wrong", func(t *testing.T) {
+		t.Parallel()
+
+		nodes := layerNodes(t, "server:\n  port: many\n", "name: [prod]\n")
 
 		var cfg layerConfig
 
 		err := niceyaml.NewLayers(nodes...).DecodeInto(t.Context(), &cfg)
-		require.EqualError(t, err, "base.yaml:2:9: $.server.port: expected integer, got string")
-		assert.Empty(t, cfg.Name)
+		require.EqualError(t, err, "base.yaml: 2 problems\n"+
+			"base.yaml:2:9: $.server.port: expected integer, got string\n"+
+			"prod.yaml:1:8: $.name: expected string, got sequence")
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+	})
+
+	t.Run("a key no field reads reports in the layer that holds it", func(t *testing.T) {
+		t.Parallel()
+
+		nodes := layerNodes(t, "server:\n  prot: 80\n", "server:\n  host: x\n  port: 1\nzone: prod\n")
+
+		_, err := niceyaml.NewLayers(nodes...).Decode[layerConfig](
+			t.Context(), niceyaml.WithDisallowUnknownFields(true),
+		)
+		require.EqualError(t, err, "base.yaml: 2 unknown fields\n"+
+			"base.yaml:2:3: $.server.prot~: unknown field \"prot\"\n"+
+			"prod.yaml:4:1: $.zone~: unknown field \"zone\"")
+	})
+
+	t.Run("a value that holds defaults follows the rule of a decode", func(t *testing.T) {
+		t.Parallel()
+
+		nodes := layerNodes(t, "backends:\n  a: {host: a, port: 1}\n", "backends:\n  b: {host: b, port: 2}\n")
+
+		// A field the layers leave out keeps its default. The mapping of
+		// the merged document replaces the map the value holds, so the
+		// default entry is gone, where the entry of the base file stays.
+		cfg := layerConfig{
+			Name:     "default",
+			Backends: map[string]layerServer{"d": {Host: "d", Port: 9}},
+			Servers:  []layerServer{{Host: "s", Port: 9}},
+		}
+
+		err := niceyaml.NewLayers(nodes...).DecodeInto(t.Context(), &cfg)
+		require.NoError(t, err)
+		assert.Equal(t, "default", cfg.Name)
+		assert.Equal(t, []layerServer{{Host: "s", Port: 9}}, cfg.Servers)
+		assert.Equal(t, map[string]layerServer{
+			"a": {Host: "a", Port: 1},
+			"b": {Host: "b", Port: 2},
+		}, cfg.Backends)
 	})
 
 	t.Run("a layer that did not parse returns its syntax error", func(t *testing.T) {
@@ -421,7 +450,20 @@ func TestLayers_DecodeInto(t *testing.T) {
 		require.ErrorIs(t, err, docs[0].Err())
 	})
 
-	t.Run("scoped Nodes bind the path as the highest layer reads it", func(t *testing.T) {
+	t.Run("the lowest layer that fails returns its error", func(t *testing.T) {
+		t.Parallel()
+
+		nodes := layerNodes(t, "server: *missing\n", baseInput, "name: *gone\n")
+
+		_, err := niceyaml.NewLayers(nodes...).Decode[layerConfig](t.Context())
+		require.EqualError(t, err, "base.yaml:1:9: $.server: could not find alias \"missing\"")
+
+		// The layer fails as a decode of it alone does.
+		_, alone := nodes[0].Decode[any](t.Context())
+		require.EqualError(t, alone, err.Error())
+	})
+
+	t.Run("scoped Nodes bind in their files with the paths of those files", func(t *testing.T) {
 		t.Parallel()
 
 		base := yamltest.FirstDocument(t,
@@ -433,16 +475,84 @@ func TestLayers_DecodeInto(t *testing.T) {
 		baseServer := yamltest.At(t, base, paths.Current().Child("defaults", "server"))
 		prodServer := yamltest.At(t, prod, paths.Current().Child("server"))
 
-		_, err := niceyaml.NewLayers(baseServer, prodServer).Decode[layerServer](t.Context())
-		require.EqualError(t, err, "base.yaml:4:11: $.server.port: port must be at least 1")
+		layers := niceyaml.NewLayers(baseServer, prodServer)
+
+		server, err := layers.Decode[layerServer](t.Context(), niceyaml.WithSelfValidation(false))
+		require.NoError(t, err)
+		assert.Equal(t, layerServer{Host: "prod.example.com"}, server)
+
+		// The merged document holds the port at $.port, and the base
+		// file holds it under its own path.
+		_, err = layers.Decode[layerServer](t.Context())
+		require.EqualError(t, err, "base.yaml:4:11: $.defaults.server.port: port must be at least 1")
 
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, baseServer, bound.Node())
+		assert.Same(t, base, bound.Document())
+
+		path, ok := bound.Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.defaults.server.port", path.String())
+
+		var located *niceyaml.Error
+
+		require.ErrorAs(t, err, &located)
+
+		path, ok = located.Path()
+		require.True(t, ok)
+		assert.Equal(t, "$.defaults.server.port", path.String())
+
+		// A path reads from the merged value whether it starts at `$` or
+		// at `@`, and each error reports the path of its own file.
+		scoped := map[string]struct {
+			err  error
+			want string
+		}{
+			"a path from the root": {
+				err:  niceyaml.NewError("unknown host", niceyaml.AtPath(paths.Doc().Child("host"))),
+				want: "prod.yaml:2:9: $.server.host: unknown host",
+			},
+			"a path from the value": {
+				err:  niceyaml.NewError("unknown host", niceyaml.AtPath(paths.Current().Child("host"))),
+				want: "prod.yaml:2:9: $.server.host: unknown host",
+			},
+			"a key": {
+				err:  niceyaml.NewError("bad key", niceyaml.AtPath(paths.Doc().Child("port").Key())),
+				want: "base.yaml:4:5: $.defaults.server.port~: bad key",
+			},
+			"the value itself": {
+				err:  niceyaml.NewError("bad server", niceyaml.AtPath(paths.Doc())),
+				want: "prod.yaml:2:3: $.server: bad server",
+			},
+			"a key no layer holds": {
+				err:  niceyaml.NewError("tls is required", niceyaml.AtPath(paths.Doc().Child("tls"))),
+				want: "prod.yaml:1:1: $.server.tls: tls is required",
+			},
+			"a wrapped error": {
+				err: fmt.Errorf("check: %w",
+					niceyaml.NewError("unknown host", niceyaml.AtPath(paths.Current().Child("host")))),
+				want: "prod.yaml:2:9: $.server.host: check: unknown host",
+			},
+			"a rebased error": {
+				err: niceyaml.Rebase(
+					niceyaml.NewError("bad port", niceyaml.AtPath(paths.Current())), paths.Current().Child("port"),
+				),
+				want: "base.yaml:4:11: $.defaults.server.port: bad port",
+			},
+			"an error with no location": {
+				err:  errors.New("quota service: connection refused"),
+				want: "base.yaml: quota service: connection refused",
+			},
+		}
+
+		for name, tc := range scoped {
+			require.EqualError(t, layers.Bind(tc.err), tc.want, name)
+		}
 	})
 
-	t.Run("a validator runs on each layer and sees that layer alone", func(t *testing.T) {
+	t.Run("a validator runs once, on the merged document", func(t *testing.T) {
 		t.Parallel()
 
 		nodes := layerNodes(t, baseInput, "server:\n  port: 80\n")
@@ -457,7 +567,25 @@ func TestLayers_DecodeInto(t *testing.T) {
 
 		_, err := niceyaml.NewLayers(nodes...).Decode[layerConfig](t.Context(), niceyaml.WithValidator(record))
 		require.NoError(t, err)
-		assert.Equal(t, nodes, seen)
+		require.Len(t, seen, 1)
+		assert.NotContains(t, nodes, seen[0])
+		assert.Equal(t, "server:\n  host: example.com\n  port: 80", seen[0].View().Held().Content())
+	})
+
+	t.Run("a context that ended stops the decode", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		layers := niceyaml.NewLayers(layerNodes(t, baseInput, prodInput)...)
+
+		_, err := layers.Decode[layerConfig](ctx)
+		require.ErrorIs(t, err, context.Canceled)
+
+		// The layers merged all the same, so a later call decodes them.
+		_, err = layers.Decode[layerConfig](t.Context())
+		require.EqualError(t, err, want)
 	})
 
 	t.Run("a target that is no pointer returns an error", func(t *testing.T) {
@@ -470,6 +598,145 @@ func TestLayers_DecodeInto(t *testing.T) {
 
 		err = niceyaml.NewLayers().DecodeInto(t.Context(), nil)
 		require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
+	})
+}
+
+func TestLayers_Validate(t *testing.T) {
+	t.Parallel()
+
+	const (
+		baseInput = "# yaml-language-server: $schema=app.json\nname: shop\nserver:\n  host: example.com\n  port: 0\n"
+		prodInput = "server:\n  host: prod.example.com\n"
+	)
+
+	requires := schema.MustCompile([]byte(`{
+		"type": "object",
+		"required": ["name", "server"],
+		"properties": {
+			"server": {
+				"type": "object",
+				"required": ["host", "port", "tls"],
+				"properties": {"port": {"type": "integer", "minimum": 1}}
+			}
+		}
+	}`))
+
+	t.Run("a schema checks what the layers hold together", func(t *testing.T) {
+		t.Parallel()
+
+		nodes := layerNodes(t, baseInput, prodInput)
+
+		// The name is required, and prod.yaml leaves it to base.yaml.
+		err := nodes[1].Validate(t.Context(), requires)
+		require.ErrorContains(t, err, `prod.yaml:1:1: $.name: missing required property "name"`)
+
+		// Each violation binds in the layer that holds its value, and the
+		// key no layer holds in the highest layer that holds its mapping.
+		err = niceyaml.NewLayers(nodes...).Validate(t.Context(), requires)
+		require.EqualError(t, err, "base.yaml: 2 schema violations\n"+
+			"base.yaml:5:9: $.server.port: 0 is less than 1\n"+
+			"prod.yaml:1:1: $.server.tls: missing required property \"tls\"")
+		assert.True(t, niceyaml.IsInvalid(err))
+
+		_, err = niceyaml.NewLayers(nodes...).Decode[layerConfig](t.Context(), niceyaml.WithValidator(requires))
+		require.ErrorContains(t, err, "base.yaml:5:9: $.server.port: 0 is less than 1")
+	})
+
+	t.Run("the merged document takes the name and the preamble of the lowest layer", func(t *testing.T) {
+		t.Parallel()
+
+		fsys := fstest.MapFS{}
+		base := yamltest.FirstDocument(t, baseInput,
+			niceyaml.WithName("base"), niceyaml.WithFilePath("conf/base.yaml"), niceyaml.WithFS(fsys))
+		prod := yamltest.FirstDocument(t, "# yaml-language-server: $schema=other.json\n"+prodInput,
+			niceyaml.WithFilePath("conf/prod.yaml"))
+
+		var seen *niceyaml.Node
+
+		err := niceyaml.NewLayers(base, prod).Validate(t.Context(), niceyaml.ValidatorFunc(
+			func(_ context.Context, n *niceyaml.Node) error {
+				seen = n
+
+				return nil
+			},
+		))
+		require.NoError(t, err)
+		require.NotNil(t, seen)
+
+		assert.Equal(t, "base", seen.Source().Name())
+		assert.Equal(t, "conf/base.yaml", seen.FilePath())
+		assert.Equal(t, fsys, seen.FS())
+		assert.True(t, seen.Path().IsRoot())
+		assert.Equal(t, 0, seen.DocumentIndex())
+
+		directive := schema.ParseDocumentDirective(seen.Preamble())
+		require.NotNil(t, directive)
+		assert.Equal(t, "app.json", directive.Schema)
+
+		assert.Equal(t,
+			"# yaml-language-server: $schema=app.json\nname: shop\nserver:\n  host: prod.example.com\n  port: 0",
+			seen.Source().View().Held().Content())
+	})
+
+	t.Run("an error with a position in the merged text binds at the value there", func(t *testing.T) {
+		t.Parallel()
+
+		nodes := layerNodes(t, baseInput, prodInput)
+
+		// The validator reads the positions of the merged text, which is
+		// no file, and each binds in the file that holds the value.
+		byPosition := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+			port, err := n.Ranges(paths.Doc().Child("server", "port"))
+			require.NoError(t, err)
+
+			host, err := n.Ranges(paths.Doc().Child("server", "host").Key())
+			require.NoError(t, err)
+
+			return errors.Join(
+				niceyaml.NewError("at a position", niceyaml.AtPosition(port[0].Start)),
+				niceyaml.NewError("at a range", niceyaml.AtRange(port[0])),
+				niceyaml.NewError("at a key", niceyaml.AtPosition(host[0].Start)),
+				niceyaml.NewError("beside a path",
+					niceyaml.AtPath(paths.Doc().Child("server")), niceyaml.AtPosition(port[0].Start)),
+				niceyaml.NewError("in the preamble",
+					niceyaml.AtPath(paths.Doc().Child("name")), niceyaml.AtPosition(position.New(0, 2))),
+				niceyaml.NewError("in the preamble alone", niceyaml.AtPosition(position.New(0, 2))),
+				n.NewError("through the Node", niceyaml.AtPath(paths.Current().Child("server", "host"))),
+			)
+		})
+
+		err := niceyaml.NewLayers(nodes...).Validate(t.Context(), byPosition)
+		require.EqualError(t, err, "base.yaml:2:7: $.name: in the preamble\n"+
+			"base.yaml:5:9: at a position\n"+
+			"base.yaml:5:9: at a range\n"+
+			"base.yaml:5:9: $.server: beside a path\n"+
+			"prod.yaml:2:3: at a key\n"+
+			"prod.yaml:2:9: $.server.host: through the Node\n"+
+			"base.yaml: in the preamble alone")
+	})
+
+	t.Run("a layer that did not parse returns its error and nothing runs", func(t *testing.T) {
+		t.Parallel()
+
+		docs := niceyaml.NewSourceFromString("server: [\n", niceyaml.WithName("prod.yaml")).AllDocuments()
+		require.Len(t, docs, 1)
+
+		ran := false
+
+		err := niceyaml.NewLayers(layerNodes(t, baseInput)[0], docs[0]).Validate(t.Context(),
+			niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				ran = true
+
+				return nil
+			}))
+		require.ErrorIs(t, err, docs[0].Err())
+		assert.False(t, ran)
+	})
+
+	t.Run("a nil validator runs nothing", func(t *testing.T) {
+		t.Parallel()
+
+		require.NoError(t, niceyaml.NewLayers(layerNodes(t, baseInput, prodInput)...).Validate(t.Context(), nil))
 	})
 }
 
@@ -501,8 +768,23 @@ func TestLayers_Empty(t *testing.T) {
 			err = layers.SelfValidate(t.Context(), &cfg)
 			require.EqualError(t, err, want)
 
-			err = layers.Bind(&cfg, niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("server"))))
+			err = layers.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("server"))))
 			require.EqualError(t, err, "$.server: bad")
+
+			ran := false
+
+			err = layers.Validate(t.Context(), niceyaml.ValidatorFunc(
+				func(_ context.Context, n *niceyaml.Node) error {
+					ran = true
+
+					assert.Empty(t, n.Source().Name())
+					assert.True(t, n.IsEmpty())
+
+					return nil
+				},
+			))
+			require.NoError(t, err)
+			assert.True(t, ran)
 
 			cfg.Server.Port = 80
 
@@ -524,45 +806,57 @@ func TestLayers_Bind(t *testing.T) {
 	)
 	layers := niceyaml.NewLayers(nodes...)
 
-	var cfg layerConfig
-
-	err := layers.DecodeInto(t.Context(), &cfg)
-	require.NoError(t, err)
-
 	portPath := paths.Doc().Child("server", "port")
 
 	tcs := map[string]struct {
-		v    any
 		err  error
 		want string
 	}{
 		"a field binds in the layer that sets it": {
-			v:    &cfg,
-			err:  niceyaml.NewError("port is taken", niceyaml.AtPath(portPath)),
-			want: "base.yaml:3:9: $.server.port: port is taken",
-		},
-		"a value that is no pointer names the same type": {
-			v:    cfg,
 			err:  niceyaml.NewError("port is taken", niceyaml.AtPath(portPath)),
 			want: "base.yaml:3:9: $.server.port: port is taken",
 		},
 		"a field the top layer sets binds there": {
-			v:    &cfg,
 			err:  niceyaml.NewError("unknown host", niceyaml.AtPath(paths.Doc().Child("server", "host"))),
 			want: "prod.yaml:2:9: $.server.host: unknown host",
 		},
-		"an element binds in the layer that holds the slice": {
-			v:    &cfg,
+		"a path from the value reads as one from the root": {
+			err:  niceyaml.NewError("unknown host", niceyaml.AtPath(paths.Current().Child("server", "host"))),
+			want: "prod.yaml:2:9: $.server.host: unknown host",
+		},
+		"a mapping that both layers hold binds in the higher one": {
+			err:  niceyaml.NewError("bad server", niceyaml.AtPath(paths.Doc().Child("server"))),
+			want: "prod.yaml:2:3: $.server: bad server",
+		},
+		"a key binds in the layer of its value": {
+			err:  niceyaml.NewError("bad key", niceyaml.AtPath(portPath.Key())),
+			want: "base.yaml:3:3: $.server.port~: bad key",
+		},
+		"an element binds in the layer that holds the sequence": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("servers").Index(0).Child("port"))),
 			want: "base.yaml:5:21: $.servers[0].port: bad",
 		},
-		"a plain error binds with no location": {
-			v:    &cfg,
+		"an element the sequence lacks binds in its layer with no position": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("servers").Index(3).Child("port"))),
+			want: "base.yaml: $.servers[3].port: bad",
+		},
+		"a path below a scalar binds in the layer of the scalar": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(portPath.Child("unit"))),
+			want: "base.yaml: $.server.port.unit: bad",
+		},
+		"an entry binds in the layer that holds it": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("backends", "a", "port"))),
+			want: "prod.yaml:4:22: $.backends.a.port: bad",
+		},
+		"the root binds in the highest layer": {
+			err:  niceyaml.NewError("bad config", niceyaml.AtPath(paths.Doc())),
+			want: "prod.yaml:1:1: $: bad config",
+		},
+		"a plain error binds in the lowest layer with no position": {
 			err:  errors.New("quota service: connection refused"),
-			want: "prod.yaml: quota service: connection refused",
+			want: "base.yaml: quota service: connection refused",
 		},
 		"a join binds each branch in its layer": {
-			v: &cfg,
 			err: errors.Join(
 				niceyaml.NewError("port is taken", niceyaml.AtPath(portPath)),
 				niceyaml.NewError("unknown host", niceyaml.AtPath(paths.Doc().Child("server", "host"))),
@@ -570,49 +864,71 @@ func TestLayers_Bind(t *testing.T) {
 			want: "base.yaml:3:9: $.server.port: port is taken\n" +
 				"prod.yaml:2:9: $.server.host: unknown host",
 		},
-		"a nil value binds every path in the top layer": {
-			err:  niceyaml.NewError("port is taken", niceyaml.AtPath(portPath)),
-			want: "prod.yaml:1:1: $.server.port: port is taken",
-		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			require.EqualError(t, layers.Bind(tc.v, tc.err), tc.want)
+			require.EqualError(t, layers.Bind(tc.err), tc.want)
 		})
 	}
 
 	t.Run("a nil error stays nil", func(t *testing.T) {
 		t.Parallel()
 
-		require.NoError(t, layers.Bind(&cfg, nil))
+		require.NoError(t, layers.Bind(nil))
+	})
+
+	t.Run("no error binds in the merged document", func(t *testing.T) {
+		t.Parallel()
+
+		var bound *niceyaml.SourceError
+
+		// An error with no location belongs to the lowest layer.
+		err := layers.Bind(errors.New("quota service: connection refused"))
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, nodes[0], bound.Node())
+		assert.Same(t, nodes[0].Source(), bound.Source())
+
+		// A located one belongs to the layer that holds its value.
+		err = layers.Bind(niceyaml.NewError("unknown host", niceyaml.AtPath(paths.Doc().Child("server", "host"))))
+		require.ErrorAs(t, err, &bound)
+		assert.Same(t, nodes[1], bound.Node())
+		assert.Same(t, nodes[1].Source(), bound.Source())
 	})
 }
 
 func TestLayers_Alias(t *testing.T) {
 	t.Parallel()
 
-	shared := niceyaml.NewSourceFromString(
-		"shared: &shared {host: shared.example.com, port: 0}\n",
-		niceyaml.WithName("shared.yaml"),
-	)
+	const baseInput = "server:\n  host: example.com\n  port: 0\n"
 
 	// The top layer reads its server from a reference document, which a
-	// path cannot follow, and the base file sets a port of its own. Each
-	// error stays in the top layer, where the alias may bring the value in.
+	// path cannot follow. The merge reads it, so each error binds in the
+	// layer that holds its value.
 	tcs := map[string]struct {
-		prod string
-		err  string
+		shared string
+		prod   string
+		err    string
+		// Whether the path of the error enters the alias.
+		unresolved bool
 	}{
-		"an alias the top layer cannot follow binds at the alias": {
-			prod: "server: *shared\n",
-			err:  "prod.yaml:1:9: $.server.port: port must be at least 1",
+		"a value the reference document sets binds at the alias": {
+			shared:     "shared: &shared {host: shared.example.com, port: -1}\n",
+			prod:       "server: *shared\n",
+			err:        "prod.yaml:1:9: $.server.port: port must be at least 1",
+			unresolved: true,
 		},
-		"a merge key the top layer cannot follow binds in the top layer": {
-			prod: "server:\n  <<: *shared\n",
-			err:  "prod.yaml: $.server.port: port must be at least 1",
+		"a value a merge key reads from the reference document binds in its layer": {
+			shared: "shared: &shared {host: shared.example.com, port: -1}\n",
+			prod:   "server:\n  <<: *shared\n",
+			err:    "prod.yaml: $.server.port: port must be at least 1",
+		},
+		"a value the reference document leaves out binds in the layer below": {
+			shared: "shared: &shared {host: shared.example.com}\n",
+			prod:   "server: *shared\n",
+			err:    "base.yaml:3:9: $.server.port: port must be at least 1",
 		},
 	}
 
@@ -620,26 +936,56 @@ func TestLayers_Alias(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			base := yamltest.FirstDocument(
-				t,
-				"server:\n  host: example.com\n  port: 80\n",
-				niceyaml.WithName("base.yaml"),
-			)
+			shared := niceyaml.NewSourceFromString(tc.shared, niceyaml.WithName("shared.yaml"))
+			base := yamltest.FirstDocument(t, baseInput, niceyaml.WithName("base.yaml"))
 			prod := yamltest.FirstDocument(t, tc.prod, niceyaml.WithName("prod.yaml"), niceyaml.WithReferences(shared))
 
 			var cfg layerConfig
 
 			err := niceyaml.NewLayers(base, prod).DecodeInto(t.Context(), &cfg)
 			require.EqualError(t, err, tc.err)
-
-			err = prod.SelfValidate(t.Context(), &cfg)
-			require.EqualError(t, err, tc.err)
+			assert.Equal(t, "shared.example.com", cfg.Server.Host)
 
 			var bound *niceyaml.SourceError
 
 			require.ErrorAs(t, err, &bound)
-			require.ErrorIs(t, bound.Unresolved(), paths.ErrAlias)
+
+			if tc.unresolved {
+				require.ErrorIs(t, bound.Unresolved(), paths.ErrAlias)
+			}
 		})
+	}
+}
+
+func TestLayers_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	layers := niceyaml.NewLayers(layerNodes(t,
+		"server:\n  host: example.com\n  port: 0\n",
+		"server:\n  host: prod.example.com\n",
+	)...)
+
+	// The first calls race to merge the layers, and each reads the one
+	// merged document.
+	const calls = 8
+
+	var wg sync.WaitGroup
+
+	decoded, bound := make([]error, calls), make([]error, calls)
+
+	for i := range calls {
+		wg.Go(func() {
+			_, decoded[i] = layers.Decode[layerConfig](t.Context())
+
+			bound[i] = layers.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("server", "host"))))
+		})
+	}
+
+	wg.Wait()
+
+	for i := range calls {
+		require.EqualError(t, decoded[i], "base.yaml:3:9: $.server.port: port must be at least 1")
+		require.EqualError(t, bound[i], "prod.yaml:2:9: $.server.host: bad")
 	}
 }
 

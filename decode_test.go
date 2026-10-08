@@ -6167,8 +6167,8 @@ func TestNode_DecodeInto_Merge(t *testing.T) {
 	// value. The want func changes the value base filled into the value
 	// both leave, and a nil one says over changed nothing. A program that
 	// decodes one file over another relies on these results, and so does
-	// the rule [niceyaml.Layers] binds by, so a go-yaml release that
-	// changes one fails here first.
+	// a decode of [niceyaml.Layers] into a value that holds defaults, so
+	// a go-yaml release that changes one fails here first.
 	tcs := map[string]struct {
 		want func(v *mergeTarget)
 		over string

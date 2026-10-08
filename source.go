@@ -92,8 +92,13 @@ type Source struct {
 	// Indexes the counts in brackets the reference documents spell, which
 	// referenceSpellings fills on its first call.
 	refSpellings *spellings
-	docs         []*Node
-	decodeOpts   []yaml.DecodeOption
+	// Holds the layers the one document of the Source merges, for the
+	// Source [Layers] build, and nil for every other Source. An error
+	// bound in that document binds in a layer instead, as [layering]
+	// describes.
+	layers     *layering
+	docs       []*Node
+	decodeOpts []yaml.DecodeOption
 	sourceConfig
 	streamOnce       sync.Once
 	fileOnce         sync.Once

@@ -100,6 +100,27 @@ flowchart LR
 
 Types declare their constraints with `jsonschema` struct tags. The `gen` tool from [go.jacobcolvin.com/x/jsonschema](https://pkg.go.dev/go.jacobcolvin.com/x/jsonschema) turns them into [cafe.v1.json](examples/schemas/cafe/cafe.v1.json). Run `go run ./examples/schemas/cafe/demo` to validate a config against that schema and render any failures as source-annotated errors.
 
+### Layers
+
+[`niceyaml.Layers`][niceyaml.Layers] merges several files into one document, such as a base file with the file of one environment over it, and decodes that document once:
+
+```go
+cfg, err := niceyaml.NewLayers(base, prod).Decode[Config](ctx, niceyaml.WithValidator(schema))
+```
+
+- A mapping merges into the mapping of the file below it, key by key and at every depth, so `prod.yaml` changes one field of one entry of a map and keeps the rest of `base.yaml`.
+- A sequence or a scalar replaces what the file below holds.
+- A null keeps what the file below holds, so a key whose entries are all commented out changes nothing.
+- Each file resolves its own aliases and `<<` merge keys before it merges.
+
+Validators and self-validation run on the merged document, so a schema that requires a key passes when any file sets it. Each error reports the file and the line that hold its value:
+
+```text
+base.yaml:3:9: $.server.port: port must be at least 1
+```
+
+The decode fills the Go value from the merged document as any decode does, so defaults the value holds survive where the files leave a field out.
+
 ### Viewport
 
 See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pages, searches, diffs, and validates YAML documents.
@@ -111,6 +132,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [bubbletea]: https://github.com/charmbracelet/bubbletea
 [go.jacobcolvin.com/x/jsonschema]: https://github.com/MacroPower/x/tree/main/jsonschema
 [niceyaml.Error]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Error
+[niceyaml.Layers]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Layers
 [niceyaml.Node]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Node
 [niceyaml.Source]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Source
 [niceyaml/diff]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/diff

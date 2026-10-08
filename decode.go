@@ -2244,9 +2244,10 @@ func contextEnded(err error) bool {
 
 // DecodeOption configures [Node.Decode], [Node.DecodeInto],
 // [Node.DecodeAt], and [Node.DecodeIfPresent]. [Layers.Decode] and
-// [Layers.DecodeInto] apply them to the decode of every layer.
-// [Node.SelfValidate], [Source.SelfValidate], and [Layers.SelfValidate]
-// take them too, and read only the go-yaml options among them.
+// [Layers.DecodeInto] apply them to the one decode of the merged
+// document. [Node.SelfValidate], [Source.SelfValidate], and
+// [Layers.SelfValidate] take them too, and read only the go-yaml options
+// among them.
 //
 // Available options:
 //   - [WithValidator]
@@ -2497,9 +2498,10 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // merges the same way through a pointer to a struct and through an
 // inline field. The document replaces a slice, an array, a map, or a
 // value of an interface type whole, so no element or entry of the old
-// one remains. A program that decodes a second file over the first
-// decodes both through [Layers], so each error of the self-validation
-// step binds in the file that set its value. A null with
+// one remains. A program that layers one file over another merges both
+// through [Layers] instead of decoding each in turn. The files then
+// merge as documents, so a map keeps the entries of both, and each error
+// binds in the file that holds its value. A null with
 // no tag, anchored or not, leaves v as it is, unless v points to a
 // pointer or an interface.
 // A null with neither a tag nor an anchor leaves a struct field as it is
@@ -2779,7 +2781,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 		return nil
 	}
 
-	return n.selfValidate(ctx, v, cfg, nil)
+	return n.selfValidate(ctx, v, cfg)
 }
 
 // checkDecodeTarget returns [ErrDecodeTarget] unless v is a non-nil

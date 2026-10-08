@@ -459,15 +459,24 @@
 // error then reads as its path and its message, as in
 // "$.servers[1].port: port is required".
 //
-// A program that layers one file over another decodes both into one
-// value through [Layers], which holds the Node of each file in the order
-// they apply. The value validates once the last file has set it, and
-// each error binds in the file that set its value:
+// A program that layers one file over another merges them through
+// [Layers], which holds the Node of each file in the order they apply.
+// The files merge into one document. A mapping merges into the mapping
+// below it key by key, a sequence or a scalar replaces what lies below
+// it, and a null keeps it. Each file resolves its own aliases and merge
+// keys first. The pipeline runs once on the merged document, so a schema
+// that requires a key passes when any file sets it, and each error binds
+// in the file that holds its value:
 //
-//	cfg, err := niceyaml.NewLayers(base, prod).Decode[Config](ctx)
+//	cfg, err := niceyaml.NewLayers(base, prod).Decode[Config](ctx, niceyaml.WithValidator(schema))
 //	if err != nil {
 //		return err
 //	}
+//
+// A [Validator] gets the root Node of the merged document, which takes
+// its name and its preamble from the lowest file. The decode fills the
+// Go value from that document by the rule of [Node.DecodeInto], so
+// defaults the value holds survive where the files leave a field out.
 //
 // [Node.At] returns a Node scoped to the node a path selects, and the
 // same pipeline then runs on that node. Decode reads one value without

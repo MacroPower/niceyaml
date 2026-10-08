@@ -272,6 +272,10 @@ type Error struct {
 	// takes the base of the problem it explains, so it points nothing at
 	// its base.
 	movesOnly bool
+	// The Error comes from a binding in a layer of a [Layers], so its
+	// base stands in place of the root of a `$` path below it, where a
+	// Rebase leaves such a path as it is.
+	reroots bool
 	// The document is at fault for the Error, so it matches errInvalid.
 	// NewError sets it, Invalid sets it around any error but that of a
 	// context that ended, and so does the rebase of the self-validation
@@ -1170,6 +1174,22 @@ func (e *Error) locus() locus {
 	return locus{loc: e.loc, path: e.path, hasPath: e.hasPath}
 }
 
+// move returns l, the location of an error below e, with the base of e
+// applied, where e comes from [Rebase]. The base goes in front of an `@`
+// path, as [locus.rebase] puts it there. An Error that reroots puts it in
+// front of a `$` path too, in place of the root, since such a path reads
+// from the value [Layers] hold and the base is where a layer holds it.
+func (e *Error) move(l locus) locus {
+	if e.reroots && l.hasPath {
+		rel, _ := l.path.CutPrefix(paths.Doc())
+		l.path = e.base.Join(rel)
+
+		return l
+	}
+
+	return l.rebase(e.base)
+}
+
 // addsNothing reports whether e adds nothing to the error it wraps: e is
 // not nil, is not from [Rebase], carries no location of its own, is no
 // summary, and holds no details. Such an Error has the text and the
@@ -1343,6 +1363,9 @@ type location struct {
 	tk         *token.Token
 	near       *paths.Path
 	pos        position.Position
+	// The location resolved in a layer of the document [Layers] build,
+	// rather than in the document the error bound through.
+	layer bool
 }
 
 // locate resolves l, the location of an [Error], and returns the node it
@@ -1353,7 +1376,9 @@ type location struct {
 // scope of the binding there, so the path starts at `$` and locate
 // resolves it as it is. A path beside a range or a position names the
 // value in the message and is not resolved, so a range locates the error
-// whether or not the document holds the path. The node is the one b binds
+// whether or not the document holds the path. A range or a position in
+// the document [Layers] build resolves as [locateMerged] describes
+// instead. The node is the one b binds
 // with, or, when b routes, the root of the document [binder.route] picks
 // for the location. An empty l is errUnlocated, a path bound where no
 // document resolves it is [ErrPathNeedsDocument], and a path bound
@@ -1361,10 +1386,20 @@ type location struct {
 func locate(b binder, l locus) (location, *Node, error) {
 	switch loc := l.loc.(type) {
 	case position.Range:
-		return location{pos: loc.Start, rng: &loc}, b.nodeAt(loc.Start.Line), nil
+		node := b.nodeAt(loc.Start.Line)
+		if node.merges() {
+			return locateMerged(b, node, loc.Start, l)
+		}
+
+		return location{pos: loc.Start, rng: &loc}, node, nil
 
 	case position.Position:
-		return location{pos: loc}, b.nodeAt(loc.Line), nil
+		node := b.nodeAt(loc.Line)
+		if node.merges() {
+			return locateMerged(b, node, loc, l)
+		}
+
+		return location{pos: loc}, node, nil
 	}
 
 	if l.hasPath {
@@ -1391,9 +1426,10 @@ func locate(b binder, l locus) (location, *Node, error) {
 // document that did not parse has no tree to resolve the path in either,
 // so the location is ErrPathNeedsDocument wrapping its syntax error.
 //
-// When b holds a fallback, the path resolves in the document of the
-// layer [fallback.layer] picks, and that layer is the node locatePath
-// returns, so it can belong to another source than the one b binds to.
+// In the document [Layers] build, the path resolves in the document of
+// the layer [layering.layer] picks, and that layer is the node locatePath
+// returns, so it belongs to another source than the one b binds to. The
+// location then says so, whether or not the path resolved there.
 func locatePath(b binder, path paths.Path) (location, *Node, error) {
 	node := b.node
 
@@ -1410,28 +1446,64 @@ func locatePath(b binder, path paths.Path) (location, *Node, error) {
 		return location{}, nil, fmt.Errorf("%w: %s", ErrPathNeedsDocument, path)
 	}
 
-	node, path = b.fallback.layer(node, path)
+	layer, path := node.source.layers.layer(node, path)
 
-	root := node.doc.node
+	loc, err := layer.resolveLocation(path)
+	loc.layer = layer != node
+
+	return loc, layer, err
+}
+
+// resolveLocation resolves path, which starts at `$`, in the document of
+// n, as [locatePath] describes for the document an error binds in.
+func (n *Node) resolveLocation(path paths.Path) (location, error) {
+	root := n.doc.node
 
 	if root.doc.err != nil {
-		return location{}, node, fmt.Errorf("%w: %s: %w", ErrPathNeedsDocument, path, root.doc.err)
+		return location{}, fmt.Errorf("%w: %s: %w", ErrPathNeedsDocument, path, root.doc.err)
 	}
 
 	loc, err := root.pathLocation(path)
 	if err != nil {
 		if near, ok := root.nearestLocation(path, err); ok {
-			return near, node, nil
+			return near, nil
 		}
 
 		if alias, ok := root.aliasLocation(path, err); ok {
-			return alias, node, nil
+			return alias, nil
 		}
 
-		return location{}, node, err
+		return location{}, err
 	}
 
-	return loc, node, nil
+	return loc, nil
+}
+
+// merges reports whether n is a Node of the document [Layers] build,
+// whose errors bind in the layers. A nil n is none.
+func (n *Node) merges() bool {
+	return n != nil && n.source.layers != nil
+}
+
+// locateMerged resolves the position at in the document of node, which
+// [Layers] built, for an error with the location l. The text of that
+// document is no file of the caller. The error therefore binds at the
+// value that lies at the position, in the layer that holds it, as a path
+// to that value binds. Where no value lies at the position, such as in
+// the preamble, the path of l locates the error. An l with no path is
+// then errUnlocated, and its error binds in the lowest layer.
+func locateMerged(b binder, node *Node, at position.Position, l locus) (location, *Node, error) {
+	b.node = node
+
+	if path, ok := node.PathAt(at); ok {
+		return locatePath(b, path)
+	}
+
+	if l.hasPath && !b.ambiguous {
+		return locatePath(b, l.path)
+	}
+
+	return location{}, node, errUnlocated
 }
 
 // SourceError is an error bound to the [*Source] it occurred in.
@@ -1658,16 +1730,13 @@ type boundTexts struct {
 // resolves no path, for the reason [ErrAmbiguousPath]. It still locates
 // a position or a range. A binder that locates binds an error a caller or
 // a validator gave a Node, so [binder.located] points an error that holds
-// no location at that Node. A binder with a fallback binds each path in
-// the layer [fallback.layer] picks for it, which is its own Node or one
-// of the Nodes below it in a [Layers]. A binder that is unplaced binds
+// no location at that Node. A binder that is unplaced binds
 // an error about a value that came from no document, as [BindValue]
 // does, so each binding it builds keeps the error it was made from for
 // [placeable] and is bound to no node.
 type binder struct {
 	src       *Source
 	node      *Node
-	fallback  *fallback
 	route     bool
 	ambiguous bool
 	locate    bool
@@ -2503,7 +2572,7 @@ func findAnchor(err error) (anchor, bool) {
 		a, heading := findAnchor(x.err)
 		if a.err != nil {
 			if x.rebased {
-				a.locus = a.rebase(x.base)
+				a.locus = x.move(a.locus)
 			}
 
 			return a, false
@@ -2555,10 +2624,10 @@ func boundLocus(e *SourceError) locus {
 // `$` and reads from the root of the document. The children of err bind
 // the same way, each under the scope on its own, so a child that carries
 // no path stays as it is. A binding takes the source of the node its
-// location resolved in, which is the source of b unless b holds a
-// fallback and the path bound in a layer of another source. A binder
-// that is unplaced binds to no node, since its error stands in no
-// document.
+// location resolved in. That is the source of b, unless b binds in the
+// document [Layers] build, where a location resolves in a layer of
+// another source. A binder that is unplaced binds to no node, since its
+// error stands in no document.
 func newSourceError(err error, b binder) *SourceError {
 	scoped := b.scoped(err)
 	found := scoped.anchor
@@ -2579,6 +2648,13 @@ func newSourceError(err error, b binder) *SourceError {
 			e.source = e.node.source
 		}
 
+		// The path of the error reads from the value the layers hold.
+		// The binding reports it from the root of the document of the
+		// layer it bound in, as a bind through that layer would.
+		if e.loc.layer && found.hasPath && !e.node.base.IsRoot() {
+			e.err = &Error{err: e.err, base: e.node.base, rebased: true, movesOnly: true, reroots: true}
+		}
+
 	case *SourceError:
 		// The error wraps a binding, so it is that binding with more
 		// around it. It takes over the location and source the binding
@@ -2592,6 +2668,12 @@ func newSourceError(err error, b binder) *SourceError {
 	}
 
 	if !e.adopted {
+		// No error binds in the text [Layers] merged, which is no file of
+		// the caller. One that found no layer binds in the lowest.
+		if home := e.source.layers.home(); home != nil {
+			e.source, e.node = home.source, home
+		}
+
 		if e.locErr == nil {
 			e.locErr = checkInRange(e.loc, e.source.lines)
 		}
@@ -2711,8 +2793,9 @@ func (e *SourceError) Source() *Source {
 // that wraps a binding. Such an error keeps the node of the binding it
 // wraps, whether Node.Bind returns it as it is or binds it anew around
 // the binding with the details it holds, so its node can be nil or belong
-// to another document or source. An error that [Layers] binds is bound
-// to the Node of the layer its path bound in.
+// to another document or source. An error that [Layers] bind is bound
+// to the Node of the layer its location resolved in, or to the Node of
+// the lowest layer when it carries no location.
 //
 // The error [BindValue] returns is about a value that came from no
 // document. It is bound to none, and so is each binding below it, with a

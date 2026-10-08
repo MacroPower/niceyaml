@@ -3,35 +3,50 @@ package niceyaml
 import (
 	"context"
 	"errors"
-	"reflect"
-	"slices"
+	"fmt"
 	"sync"
-
-	"github.com/goccy/go-yaml/ast"
-
-	"go.jacobcolvin.com/niceyaml/internal/astnode"
-	"go.jacobcolvin.com/niceyaml/internal/yamlfield"
-	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// Layers holds the Nodes that fill one value in turn, in the order they
+var (
+	// ErrUnnamedKey indicates a mapping key that [Layers] cannot merge
+	// by. A key that is a sequence or a mapping has no name a path
+	// selects it by, as
+	// [go.jacobcolvin.com/niceyaml/paths.Resolver.KeyName] reports, so
+	// two layers cannot hold it as one key. The error binds at the key,
+	// in the layer that holds it.
+	ErrUnnamedKey = errors.New("mapping key has no name")
+
+	// The error of a layer that decodes only with the go-yaml options of
+	// a call, as [Layers.layerError] finds one.
+	errOptionReference = errors.New(
+		"layer reads a reference document from a decode option, which belongs in WithReferences",
+	)
+
+	// The Node that [Layers] with no Node validate and bind through: the
+	// one document of an empty [Source], which has no name. Every call
+	// shares the one Node, which never changes.
+	noLayers = sync.OnceValue(func() *Node {
+		return NewSourceFromString("").documents()[0]
+	})
+)
+
+// Layers holds the Nodes that merge into one document, in the order they
 // apply, such as a base file with the file of one environment over it:
 //
 //	layers := niceyaml.NewLayers(base, prod)
 //
 //	cfg, err := layers.Decode[Config](ctx)
 //
-// [Layers.Decode] and [Layers.DecodeInto] decode each Node into the value
-// in that order, and validate the value once the last Node has set it.
-// The self-validation step binds each error in the file that set the
-// value the error is about, so a port that only base.yaml sets reports
-// the line that sets it:
+// [Layers.Decode] and [Layers.DecodeInto] validate, decode, and
+// self-validate the merged document once. Each error binds in the file
+// that holds the value the error is about, so a port that only base.yaml
+// sets reports the line that sets it:
 //
 //	base.yaml:3:9: $.server.port: port must be at least 1
 //
 // A program that applies its environment or its flags after the last
-// file turns the step off for the decode, and runs it with
-// [Layers.SelfValidate] once the value is whole:
+// file turns the self-validation step off for the decode, and runs it
+// with [Layers.SelfValidate] once the value is whole:
 //
 //	var cfg Config
 //	if err := layers.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
@@ -42,61 +57,115 @@ import (
 //
 //	return layers.SelfValidate(ctx, &cfg)
 //
-// [Layers.Bind] binds the error of a check the program runs itself the
-// same way.
+// [Layers.Validate] runs a [Validator] on the merged document without a
+// decode, and [Layers.Bind] binds the error of a check the program runs
+// itself.
 //
-// The layers do not merge as documents. Each decode fills the value as
-// [Node.DecodeInto] fills a value that an earlier decode set. A mapping
-// merges into a struct field by field, so a field keeps the value of a
-// lower layer when the layers above leave its key out. A slice, an
-// array, a map, and a value of an interface type take what the highest
-// layer that holds one gives them, whole. A map in prod.yaml thus
-// replaces the map of base.yaml, and an entry that only base.yaml holds
-// is gone.
+// The layers merge as documents, whatever Go type the result decodes
+// into. A mapping in a higher layer merges into the mapping the layers
+// below hold at the same path, key by key and at every depth, so
+// prod.yaml changes one field of one service and keeps the rest of
+// base.yaml:
 //
-// An error binds in one of the layers by the same rule. Layers follows
-// the path of the error down the type of the value for as long as the
-// path names struct fields, through pointers to structs and inline
-// fields. The error binds in the highest layer whose document holds a
-// value at the end of that stretch, and the rest of the path resolves in
-// that document. A slice, an array, a map, and a value of an interface
-// type end the stretch, since the highest layer that holds one replaced
-// it whole. An error under an element or an entry thus binds in the
-// layer that holds the collection, and never in a layer below it, whose
-// elements the decode discarded. A type that decodes itself, through an
-// UnmarshalYAML or UnmarshalText method, ends the stretch the same way.
+//	# base.yaml                # prod.yaml
+//	services:                  services:
+//	  web: {image: nginx}        web: {replicas: 5}
+//	  db: {image: postgres}
 //
-// A null leaves a field as the layers below set it, so a layer that holds
-// a null there holds no value. A null in a pointer field sets the pointer
-// to nil instead, so an error at that field binds at the null. An alias
-// keeps the error in its layer, since the decoder can hand a field the
-// whole value of the anchor its alias names. An error at or under a field
-// that a layer writes as an alias thus binds in that layer, where the
-// path resolves through the alias. A path that enters an alias the layer
-// cannot follow, such as one to an anchor of a reference document, binds
-// at the alias, as [SourceError.Nearest] describes. A Node whose document
-// did not parse holds no value.
+// The merged document holds the service web with its image and its
+// replicas, and the service db. A sequence or a scalar in a higher layer
+// replaces what the layers below hold at its path, whole, and a mapping
+// replaces a sequence or a scalar the same way. A sequence never merges
+// element by element. An empty mapping holds no key to merge, so it
+// keeps the mapping below it as it is.
+//
+// A null in a higher layer keeps the value of the layers below, so a key
+// whose entries are all commented out changes nothing. That holds for
+// every Go type the value decodes into, a pointer field included, where
+// a null in one document sets the pointer to nil. A higher layer thus
+// has no way to unset a value that a lower layer sets. The merged
+// document holds a null only where no lower layer holds a value.
+//
+// Two keys are one key when a path selects them by the same name, as
+// [go.jacobcolvin.com/niceyaml/paths.Resolver.KeyName] gives it. The
+// keys 80 and "80" thus merge, and the merged document spells the key as
+// the highest layer that holds a value under it does. The keys 80 and
+// 0x50 have two names, so both stay, as they do in one file that holds
+// both. A key that is a sequence or a mapping has no name, and a layer
+// that holds one returns an error matching [ErrUnnamedKey], bound at
+// the key.
+//
+// Each layer resolves its own aliases and `<<` merge keys before it
+// merges, as a decode of that layer alone reads them, with the reference
+// documents of [WithReferences] and the other settings of its own
+// [Source]. An alias thus reads the anchor of its own file, whatever
+// anchors of that name the other layers define, and a value that an
+// alias or a merge key brings in merges as one written in its place
+// does. The merged document holds a copy of that value and no alias.
+// The merge writes each alias out in full, so a layer must pass the
+// alias limit of [WithAliasLimit] as a decode into a type that reads
+// text does.
+//
+// The go-yaml options of a decode reach the merged document and no
+// layer. An alias that only a reference from [WithYAMLDecodeOptions]
+// defines, such as [yaml.ReferenceFiles], [yaml.ReferenceDirs], or
+// [yaml.ReferenceReaders], thus does not resolve, and the error of the
+// decode names [WithReferences]. That option gives the reference
+// documents to the Source of the layer that reads them.
+//
+// The merged document belongs to a [Source] of its own, and a
+// [Validator] gets its root Node. The Source holds the merged value as
+// block-style YAML, below the preamble of the lowest layer, so a schema
+// directive in the comments of base.yaml names the schema of the merged
+// document. Every scalar keeps the text its layer spells, such as 0x10
+// or 1.50, and a string keeps its quotes, except that a block scalar or
+// a string of several lines reads as one double-quoted line. The Source
+// takes its [Source.Name], its [Source.FilePath], and its [Source.FS]
+// from the Source of the lowest layer, with what [WithAllowDuplicateKeys],
+// [WithAliasLimit], and [WithYAMLParserOptions] set there. A validator
+// that reads the lines or the positions of its Node thus reads the
+// merged text, which is no file of the program.
+//
+// An error never binds in that text. An error with a path binds in the
+// highest layer whose document holds the value at that path, and the
+// path resolves in the file of that layer, through its aliases and merge
+// keys as [Node.Bind] resolves it. A higher layer that holds a null
+// there holds no value. An error at a mapping that several layers hold
+// binds in the highest of them. An error under a sequence binds in the
+// layer that holds the sequence, and never in a layer below it, whose
+// elements the merge discarded. An error with a position or a range in
+// the merged text binds at the value that lies there, as a path to that
+// value does. An error with no location binds in the lowest layer with
+// no position, as in "base.yaml: quota service: connection refused".
 //
 // When no layer holds the value, the error binds at the key of the
 // mapping that lacks it, as [Node.Bind] binds the path of a missing key.
-// It binds in the layer whose mapping lies deepest along the path, and in
-// the highest of several such layers.
+// It binds in the layer whose mapping lies deepest along the path, and
+// in the highest of several such layers.
 //
-// Each Node must be the Node the value decodes from in its own file, so a
-// path below the value names the same field in every layer. That Node is
-// the root of each document for a value that holds a whole file, or the
-// Node [Node.At] returns for the value in each. The bound error reports
-// the [SourceError.Source] and the [SourceError.Node] of the layer it
-// binds in. Its message and [SourceError.Path] carry the path as the
-// highest layer reads it. [FormatError] prints one excerpt per file when
-// the errors of one call bind in several.
+// The bound error reports the [SourceError.Source] and the
+// [SourceError.Node] of the layer it binds in. Its message and
+// [SourceError.Path] carry the path from the root of the document of
+// that layer. A Node from [Node.At] holds the value at a path of its
+// own file, so an error at `$.server.port` of the merged document reads
+// `$.defaults.server.port` where it binds in a layer that holds the
+// value under defaults.
 //
-// Two limits remain. A value that the environment or a flag set binds at
+// The decode still fills the Go value by the rule of [Node.DecodeInto],
+// once, from the merged document. A value that holds defaults keeps each
+// field the merged document leaves out, and a mapping of the document
+// replaces a map the value holds, whole. Defaults that should merge key
+// by key go in a layer, such as an embedded file below the others.
+//
+// One limit remains. A value that the environment or a flag set binds at
 // whatever a file holds at its path, as [Node.SelfValidate] describes.
-// The walk reads the spelling of each map key from the highest layer, so
-// the keys of a map that only a lower layer holds take the text of their
-// Go values. An error under a key that the document spells another way,
-// such as 1.50, then binds at the key of the map.
+//
+// A layer whose document did not parse holds no value. Neither does a
+// layer that a decode of it alone into an any value rejects, as it
+// rejects an alias with no anchor. [Layers.Decode], [Layers.DecodeInto],
+// and [Layers.Validate] return the error of the lowest such layer,
+// bound in its file. [Layers.SelfValidate] and [Layers.Bind] go on
+// without that layer.
 //
 // Layers that hold no Node stand for a value that came from no file,
 // such as defaults with the environment over them. A decode then leaves
@@ -104,17 +173,18 @@ import (
 // "$.servers[1].port: port is required". A program whose files are
 // optional thus makes the same calls whichever of them exist.
 //
-// Layers never change after [NewLayers], so they are safe for concurrent
-// use.
+// Layers merge their Nodes once, on the first call that needs the merged
+// document, and never change after that, so they are safe for
+// concurrent use.
 //
 // Create instances with [NewLayers].
 type Layers struct {
-	// The Node of the highest layer, or nil when there are no layers.
-	top *Node
-	// The Nodes in the order they apply, lowest first, and the ones
-	// below top, nearest first. None is nil.
+	// What the Nodes merge into, which document fills on its first call.
+	merged mergedLayers
+	// The Nodes in the order they apply, lowest first. None is nil.
 	nodes []*Node
-	below []*Node
+	// Fills merged once.
+	once sync.Once
 }
 
 // NewLayers creates a new [*Layers] from the given Nodes, in the order
@@ -130,113 +200,126 @@ func NewLayers(nodes ...*Node) *Layers {
 		}
 	}
 
-	if len(l.nodes) == 0 {
-		return l
-	}
-
-	last := len(l.nodes) - 1
-
-	l.top = l.nodes[last]
-	l.below = slices.Clone(l.nodes[:last])
-	slices.Reverse(l.below)
-
 	return l
 }
 
-// noLayers returns the Node that [Layers] with no Node validate and bind
-// through: the one document of an empty [Source], which has no name.
-// Every call shares the one Node, which never changes.
-var noLayers = sync.OnceValue(func() *Node {
-	return NewSourceFromString("").documents()[0]
-})
-
-// split returns the Node the layers validate and bind through, and the
-// Nodes below it, nearest first. The Node is the highest layer, or the
-// one [noLayers] returns when l holds no layers.
-func (l *Layers) split() (*Node, []*Node) {
-	if l == nil || l.top == nil {
+// document returns the root Node of the merged document, as
+// [mergeLayers] builds it, and the error of the lowest layer that holds
+// no value a decode can read. It builds the document on the first call,
+// and every later call shares it, so the end of ctx does not stop the
+// merge. A nil l has no layers.
+func (l *Layers) document(ctx context.Context) (*Node, error) {
+	if l == nil {
 		return noLayers(), nil
 	}
 
-	return l.top, l.below
+	l.once.Do(func() {
+		l.merged = mergeLayers(context.WithoutCancel(ctx), l.nodes)
+	})
+
+	return l.merged.doc, l.merged.err
 }
 
-// DecodeInto validates and decodes each layer into v, lowest first, as
-// [Node.DecodeInto] decodes it with the same options, and stops at the
-// first layer that fails. It then runs the self-validation step once, on
-// the value every layer has set, as [Layers.SelfValidate] runs it. Any v
-// that is not a non-nil pointer returns an error wrapping
-// [ErrDecodeTarget] before anything runs.
+// layerError returns the error of the layer that holds no value, for a
+// decode with cfg. Where the go-yaml options of cfg let that layer
+// decode, the layer reads something those options alone define, such as
+// an anchor of a reference document. The options reach the decode of the
+// merged document and no layer, so the error then names the option that
+// reaches a layer.
+func (l *Layers) layerError(ctx context.Context, cfg decodeConfig) error {
+	failed, err := l.merged.failed, l.merged.err
+
+	if failed == nil || failed.doc.err != nil || len(cfg.yamlOpts) == 0 {
+		return err
+	}
+
+	var discard any
+
+	if failed.decodeInto(ctx, &discard, decodeConfig{yamlOpts: cfg.yamlOpts, skipSelfValidation: true}) != nil {
+		return err
+	}
+
+	return fmt.Errorf("%w: %w", errOptionReference, err)
+}
+
+// DecodeInto validates and decodes the merged document into v, as
+// [Node.DecodeInto] decodes a document with the same options. It then
+// runs the self-validation step on v, as [Layers.SelfValidate] runs it.
+// A layer that holds no value, as [Layers] describes, returns its error
+// before anything runs. Any v that is not a non-nil pointer returns an
+// error wrapping [ErrDecodeTarget] before that.
 //
-// The options apply to the decode of every layer. A [Validator] from
-// [WithValidator] therefore runs on each layer before that layer decodes,
-// and sees that layer alone. A validator that needs the whole
-// configuration, such as a schema that requires a key, rejects a layer
-// that leaves the key to another one. A program with such a schema
-// decodes each Node itself, with the validator that fits it, and then
-// calls Layers.SelfValidate.
-//
-// [WithSelfValidation] turns the one self-validation step off, for a
-// program that changes the value before it validates.
+// Every step runs once, on what the layers hold together. A [Validator]
+// from [WithValidator] gets the Node of the merged document, as
+// [Layers.Validate] hands it one, so a schema that requires a key passes
+// when any layer sets it. [WithSelfValidation] turns the self-validation
+// step off, for a program that changes the value before it validates.
 func (l *Layers) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
-	top, below := l.split()
+	doc, layerErr := l.document(ctx)
 
 	err := checkDecodeTarget(v)
 	if err != nil {
-		return top.bindOwn(err)
+		return doc.bindOwn(err)
 	}
 
 	cfg := newDecodeConfig(opts)
 
-	each := cfg
-	each.skipSelfValidation = true
-
-	if l != nil {
-		for _, n := range l.nodes {
-			err := n.decodeInto(ctx, v, each)
-			if err != nil {
-				return err
-			}
-		}
+	if layerErr != nil {
+		return l.layerError(ctx, cfg)
 	}
 
-	if cfg.skipSelfValidation {
-		return nil
+	return doc.decodeInto(ctx, v, cfg)
+}
+
+// Validate runs v on the merged document, as [Node.Validate] runs it on
+// a document. It is the validation step of [Layers.DecodeInto] on its
+// own, for a caller that checks the layers without decoding them. A layer
+// that holds no value, as [Layers] describes, returns its error, and v
+// does not run.
+//
+// The validator gets the root Node of the merged document, so its paths
+// read from the value the layers hold. An error it returns unbound binds
+// in the layer that holds the value the error is about, and so does an
+// error it binds through that Node.
+func (l *Layers) Validate(ctx context.Context, v Validator) error {
+	doc, err := l.document(ctx)
+	if err != nil {
+		return err
 	}
 
-	return top.selfValidate(ctx, v, cfg, below)
+	return doc.Validate(ctx, v)
 }
 
 // SelfValidate runs the self-validation step of [Layers.DecodeInto] on
-// its own, on v through the highest layer, as [Node.SelfValidate] runs
-// it. Each error binds in the layer that set its value, as [Layers]
+// its own, on v through the merged document, as [Node.SelfValidate] runs
+// it. Each error binds in the layer that holds its value, as [Layers]
 // describes. It runs whatever [WithSelfValidation] says, and reads only
-// the go-yaml options among opts.
+// the go-yaml options among opts. A layer that holds no value adds
+// nothing, and SelfValidate returns no error for it.
 func (l *Layers) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
-	top, below := l.split()
+	doc, _ := l.document(ctx) //nolint:errcheck // A layer that holds no value adds nothing.
 
-	return top.selfValidate(ctx, v, newDecodeConfig(opts), below)
+	return doc.selfValidate(ctx, v, newDecodeConfig(opts))
 }
 
-// Bind binds err as [Node.Bind] binds it through the highest layer, with
-// one difference. Each path binds in the layer that set the value it
-// names, as [Layers] describes, so a check the program runs on the value
-// reports the file a self-validation would report:
+// Bind binds err as [Node.Bind] binds it through the root of a document,
+// with one difference. Each path binds in the layer that holds the value
+// it names, as [Layers] describes, so a check the program runs on the
+// value reports the file a self-validation would report:
 //
-//	return layers.Bind(&cfg, checkQuota(&cfg))
+//	return layers.Bind(checkQuota(&cfg))
 //
-// The value v is the one the layers filled, or a pointer to it. Bind
-// reads its type alone, to learn which fields the layers merged and
-// which one layer replaced whole. With a nil v, every path binds in the
-// highest layer.
-func (l *Layers) Bind(v any, err error) error {
-	top, below := l.split()
+// A path in err reads from the value the layers hold, whether it starts
+// at `$` or at `@`, and the bound error reports it as the document of
+// its layer reads it.
+func (l *Layers) Bind(err error) error {
+	doc, _ := l.document(context.Background()) //nolint:errcheck // A layer that holds no value adds nothing.
 
-	return bindTree(err, binder{src: top.source, node: top, locate: true, fallback: newFallback(v, below)})
+	return doc.Bind(err)
 }
 
-// Decode validates and decodes each layer into a new T, as
-// [Layers.DecodeInto] decodes them into a value the caller holds. On
+// Decode validates and decodes the merged document into a new T, as
+// [Layers.DecodeInto] decodes it into a value the caller holds. On
 // error, the returned T is the zero value.
 func (l *Layers) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
 	var v T
@@ -249,234 +332,4 @@ func (l *Layers) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, er
 	}
 
 	return v, nil
-}
-
-// fallback holds what a binder needs to bind an error in a layer below
-// its Node, as [Layers] describes: the type of the value the layers
-// filled, and the Nodes below the Node of the binder, nearest first.
-type fallback struct {
-	typ   reflect.Type
-	below []*Node
-}
-
-// newFallback returns the [fallback] for v and the Nodes below, or nil
-// when v is nil or below is empty. A binder with a nil fallback binds
-// every path in its own Node.
-func newFallback(v any, below []*Node) *fallback {
-	if v == nil || len(below) == 0 {
-		return nil
-	}
-
-	return &fallback{typ: reflect.TypeOf(v), below: below}
-}
-
-// layer returns the Node an error at path binds in, and path as the
-// document of that Node reads it. The path starts at `$` and reads from
-// the root of the document of top, the Node of the binder. A nil f, and
-// a path that does not lie under top, bind in top with path as it is.
-//
-// The layers are top and then the Nodes below it. The result is the
-// highest one that [Node.sets] reports for the fields [mergedFields]
-// finds along path. When no layer sets the value, each layer answers
-// with the mapping that lacks a key of path, as [paths.Resolver.Nearest]
-// finds it. The result is then the layer whose mapping lies deepest
-// below its Node, and the highest of several such layers. It is top when
-// no layer holds such a mapping.
-func (f *fallback) layer(top *Node, path paths.Path) (*Node, paths.Path) {
-	if f == nil {
-		return top, path
-	}
-
-	rel, ok := path.CutPrefix(top.base)
-	if !ok {
-		return top, path
-	}
-
-	layers := make([]*Node, 0, len(f.below)+1)
-	layers = append(layers, top)
-	layers = append(layers, f.below...)
-
-	fields := mergedFields(f.typ, rel)
-
-	for _, layer := range layers {
-		if layer.sets(fields) {
-			return layer, layer.base.Join(rel)
-		}
-	}
-
-	best, depth := top, -1
-
-	for _, layer := range layers {
-		near, ok := layer.doc.pathResolver().Nearest(layer.base.Join(rel))
-		if !ok {
-			continue
-		}
-
-		// The depth counts from the Node, so layers at different paths of
-		// their documents compare alike.
-		if d := near.Len() - layer.base.Len(); d > depth {
-			best, depth = layer, d
-		}
-	}
-
-	return best, best.base.Join(rel)
-}
-
-// sets reports whether a decode of n set the value at the end of fields.
-// They are the struct fields [mergedFields] returns for a path, and the
-// search reads them down from the value of n. The document must hold a
-// value for n and for each field. A field it leaves out keeps what an
-// earlier decode set. So does a field that holds a null, unless the field
-// is a pointer, which the null sets to nil. A document that did not parse
-// holds no value.
-//
-// Two kinds of field end the search with n as the answer, since the
-// document cannot say what a decode left there. One is a field the
-// document writes as an alias. The go-yaml decoder hands such a field
-// the value of the anchor whole when an earlier field decoded that
-// anchor, and merges the content of the anchor otherwise. The other is a
-// field the document cannot read, such as one a `<<` merge key may bring
-// in through an alias with no anchor before it. A value of n that the
-// document cannot read ends the search the same way.
-func (n *Node) sets(fields []mergedField) bool {
-	resolver := n.doc.pathResolver()
-
-	node, err := resolver.Node(n.base)
-	if err != nil {
-		return !errors.Is(err, paths.ErrNotFound)
-	}
-
-	if isNull(node) {
-		return false
-	}
-
-	for _, field := range fields {
-		found, err := resolver.Entry(node, field.name)
-		if err != nil {
-			return !errors.Is(err, paths.ErrNotFound)
-		}
-
-		entry, ok := found.(*ast.MappingValueNode)
-		if !ok {
-			return true
-		}
-
-		if _, alias := astnode.Content(entry.Value).(*ast.AliasNode); alias {
-			return true
-		}
-
-		node, err = resolver.Deref(entry.Value)
-		if err != nil {
-			return true
-		}
-
-		if isNull(node) {
-			return field.pointer
-		}
-	}
-
-	return true
-}
-
-// isNull reports whether node holds no value: a nil node, or a null with
-// or without anchors and tags on it.
-func isNull(node ast.Node) bool {
-	content := astnode.Content(node)
-
-	return content == nil || content.Type() == ast.NullType
-}
-
-// mergedField is a struct field along a path that successive decodes
-// into one value merge.
-type mergedField struct {
-	// The name the go-yaml decoder reads the field under.
-	name string
-	// Whether the type of the field is a pointer.
-	pointer bool
-}
-
-// mergedFields returns the struct fields along rel, an `@` path from a
-// value of type t, that successive decodes into one value merge. Each is
-// a field of the struct the one before it holds, or of t for the first,
-// which the go-yaml decoder fills key by key and leaves as it is when the
-// document lacks its key. The fields end at the first selector that
-// names no such field. That selector reads a slice, an array, a map, or
-// a value of an interface type, which a decode replaces whole, or a value
-// of a type that decodes itself, or it is no `.name` selector.
-func mergedFields(t reflect.Type, rel paths.Path) []mergedField {
-	var fields []mergedField
-
-	for sel := range rel.Selectors() {
-		if sel.Kind != paths.SelectorChild {
-			break
-		}
-
-		field, ok := fieldType(t, sel.Name, map[reflect.Type]bool{})
-		if !ok {
-			break
-		}
-
-		fields = append(fields, mergedField{name: sel.Name, pointer: field.Kind() == reflect.Pointer})
-		t = field
-	}
-
-	return fields
-}
-
-// fieldType returns the type of the field that the go-yaml decoder
-// decodes the key name into for a value of type t, and reports whether t
-// has one. The type t is a struct that the decoder fills field by field,
-// or a pointer to one, as [fieldwiseStruct] finds it. A field of the
-// struct itself wins over a field of a struct it inlines, as
-// [yamlfield.OwnNames] describes, and the inline structs answer in the
-// order the struct declares them. A field that [yamlfield.ReadsAnchor]
-// reports reads no key. The seen set holds the structs the search has
-// read, so a struct that inlines a pointer to itself reads once.
-func fieldType(t reflect.Type, name string, seen map[reflect.Type]bool) (reflect.Type, bool) {
-	t, ok := fieldwiseStruct(t)
-	if !ok || seen[t] {
-		return nil, false
-	}
-
-	seen[t] = true
-
-	var inline []reflect.Type
-
-	for field := range t.Fields() {
-		fieldName, inlined, skip := yamlfield.Name(field)
-
-		switch {
-		case skip, yamlfield.ReadsAnchor(field):
-		case inlined:
-			inline = append(inline, field.Type)
-		case fieldName == name:
-			return field.Type, true
-		}
-	}
-
-	for _, inner := range inline {
-		if found, ok := fieldType(inner, name, seen); ok {
-			return found, true
-		}
-	}
-
-	return nil, false
-}
-
-// fieldwiseStruct returns the struct type t is or points to, and reports
-// whether the go-yaml decoder fills a value of it field by field. It
-// reports false for a type that is no struct, and for a struct that
-// decodes itself, as [decodesItself] reports. It reads through
-// [maxPointerDepth] pointers at most, so a pointer type that refers back
-// to itself ends the search.
-func fieldwiseStruct(t reflect.Type) (reflect.Type, bool) {
-	for range maxPointerDepth {
-		if t.Kind() != reflect.Pointer {
-			break
-		}
-
-		t = t.Elem()
-	}
-
-	return t, t.Kind() == reflect.Struct && !decodesItself(t)
 }

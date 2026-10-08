@@ -8751,7 +8751,7 @@ func TestBindValue_Place(t *testing.T) {
 			require.EqualError(t, yamltest.At(t, doc, base).Bind(err), tc.wantBound)
 			require.EqualError(t, doc.Bind(err), tc.wantRoot)
 			require.EqualError(t, doc.Source().Bind(err), tc.wantRoot)
-			require.EqualError(t, niceyaml.NewLayers(doc).Bind(nil, err), tc.wantRoot)
+			require.EqualError(t, niceyaml.NewLayers(doc).Bind(err), tc.wantRoot)
 
 			// A join places each result it holds.
 			require.EqualError(t, doc.Bind(niceyaml.Rebase(errors.Join(err), base)), tc.wantBound)
