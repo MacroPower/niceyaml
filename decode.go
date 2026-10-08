@@ -3210,6 +3210,8 @@ func (n *Node) yamlOptions(cfg decodeConfig) []yaml.DecodeOption {
 // that map when it starts, so a second decoder with the option would
 // drop what the first collected. A node that leaves v as it is starts no
 // decoder, so decodeNode empties the map itself before it reads node.
+// It empties the map again once that decoder has registered the anchors
+// a node below the body reads, since their comments lie outside node.
 //
 // The go-yaml decoder never checks the context, so a context that has
 // ended before the decode starts, or while it registers the anchors node
@@ -3243,6 +3245,10 @@ func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, cfg decodeC
 		if err != nil {
 			return n.bindDecodeError(err)
 		}
+
+		// The pass decoded anchors outside node with dec, which wrote
+		// their comments to the map.
+		clear(cfg.comments)
 	}
 
 	// The decoder tests an alias for null, rather than the anchor it

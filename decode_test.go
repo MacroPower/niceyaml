@@ -4639,6 +4639,26 @@ func TestWithYAMLComments(t *testing.T) {
 		assert.Equal(t, yaml.CommentMap{"$.items.a": want["$.items.a"]}, comments)
 	})
 
+	t.Run("leaves out an anchor outside the node of a scoped decode", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
+			shared: &shared
+			  size: 1 # small
+			items:
+			  a: *shared
+			  b: 2 # two
+		`))
+
+		comments := yaml.CommentMap{}
+		items := yamltest.At(t, doc, paths.Doc().Child("items"))
+
+		got, err := items.Decode[map[string]any](t.Context(), niceyaml.WithYAMLComments(comments))
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"a": map[string]any{"size": uint64(1)}, "b": uint64(2)}, got)
+		assert.Equal(t, yaml.CommentMap{"$.items.b": {yaml.LineComment(" two")}}, comments)
+	})
+
 	t.Run("empties the map before it reads the node", func(t *testing.T) {
 		t.Parallel()
 
