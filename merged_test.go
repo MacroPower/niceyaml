@@ -382,6 +382,18 @@ var mergedCorpus = map[string]struct {
 		input: "scalar: !custom value\nmapping: !custom {k: v}\nsequence: !custom [x, y]\n" +
 			"block: !custom\n  k: v\nitems:\n  - !custom {k: v}\n  - !custom\n    - x\n  - !custom 7\n",
 	},
+	"a local tag over no value": {
+		input: "first: 1\nlast: !custom\n",
+	},
+	"a mapping tag over no value": {
+		input: "first: 1\nlast: &anchored !!map\n",
+	},
+	"a sequence tag over no value": {
+		input: "first: 1\nlast:\n  - !!seq\n",
+	},
+	"a string tag over no value": {
+		input: "first: 1\nlast: !!str\n",
+	},
 	"literal block scalars": {
 		input: "clip: |\n  one\n  two\nstrip: |-\n  one\n  two\nkeep: |+\n  one\n  two\n\n" +
 			"indent: |2\n   lead\n  rest\nblank: |\n  one\n\n  two\nlast: |\n  end\n",

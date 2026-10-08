@@ -236,9 +236,11 @@ func (r *layerReader) value(node ast.Node, ref bool) (*mergedValue, error) {
 // behind every anchor, alias, tag, and `?` indicator on the way. It passes
 // the first tag it looks through, as the source spells it, and whether
 // the content lies in a reference document. The tag starts as outer, the
-// tag a caller found above node, or the empty string. Each anchor on the
-// way stays open while visit runs. The content of an alias inside the
-// anchor it refers to is nil, which reads as null.
+// tag a caller found above node, or the empty string. A tag over no
+// value that the decoder reads as null, as [isTaggedNull] reports, is no
+// tag to pass, since the text "null" behind it reads as another value.
+// Each anchor on the way stays open while visit runs. The content of an
+// alias inside the anchor it refers to is nil, which reads as null.
 func (r *layerReader) follow(
 	node ast.Node, ref bool, outer string, visit func(content ast.Node, tag string, ref bool) error,
 ) error {
@@ -266,7 +268,7 @@ func (r *layerReader) follow(
 		return r.follow(anchor, inRef, outer, visit)
 
 	case *ast.TagNode:
-		if outer == "" {
+		if outer == "" && !tagsNoValue(n) {
 			outer = n.GetToken().Value
 		}
 
@@ -279,6 +281,14 @@ func (r *layerReader) follow(
 	default:
 		return visit(node, outer, ref)
 	}
+}
+
+// tagsNoValue reports whether tag stands over no value and the go-yaml
+// decoder reads it as null, as [isTaggedNull] describes. The merged
+// document writes that null as text. Behind a local tag the text reads
+// as a string, and behind a tag such as "!!map" it does not parse.
+func tagsNoValue(tag *ast.TagNode) bool {
+	return isTaggedNull(tag) && (astnode.IsNil(tag.Value) || tag.Value.Type() == ast.NullType)
 }
 
 // anchor returns the anchor alias reads, and whether that anchor lies in
