@@ -1401,6 +1401,35 @@ func TestLayers_ExcerptsOff(t *testing.T) {
 				"     |         ^ 0 is less than 1",
 			),
 		},
+		// The decoder reads the merged text, which holds the password, and
+		// the go-yaml error it returns shows that text in an excerpt of its
+		// own. [errors.As] finds that error, and no error of the chain
+		// unwraps to it.
+		"a value of a file the decoder rejects keeps its excerpt": {
+			fail: func(t *testing.T) error {
+				t.Helper()
+
+				_, err := layers.Decode[struct {
+					DB struct {
+						Host int `yaml:"host"`
+					} `yaml:"db"`
+				}](t.Context())
+
+				yamlErr, ok := errors.AsType[yaml.Error](err)
+				require.True(t, ok, "errors.As finds no yaml.Error: %v", err)
+				require.Contains(t, yamlErr.Error(), excerptSecret)
+
+				return err
+			},
+			want: stringtest.JoinLF(
+				"base.yaml:2:9: $.db.host: expected integer, got string",
+				"",
+				"   1 | db:",
+				"   2 |   host: db.internal",
+				"     |         ^^^^^^^^^^^",
+				"   3 |   port: 0",
+			),
+		},
 		// The position names the password in the merged text, whose error
 		// binds at the value in its layer.
 		"a position in the merged text prints no line": {

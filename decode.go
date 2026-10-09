@@ -2704,8 +2704,9 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 //	}
 //
 // The path of a field resolves through an alias and a `<<` merge key to
-// the line that holds the field. A [yaml.Error] in the chain of a
-// rejection names a token of the text of the value, not of the document.
+// the line that holds the field. A [yaml.Error] that [errors.As] finds
+// in a rejection names a token of the text of the value, not of the
+// document.
 //
 // The decode reads T as a type that decodes itself, as it reads one with
 // an UnmarshalYAML method. The values below a value of T thus validate
@@ -2969,10 +2970,13 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // integer type reads "expected integer from 0 to 65535, got 70000". A
 // rejection of a key, such as an unknown field or a key that does not
 // read as the key type of a map, carries the path of the key, which ends
-// in `~`. The go-yaml error stays in the chain, so [errors.As] reaches a
-// [yaml.TypeError], a [yaml.OverflowError], a
-// [yaml.UnexpectedNodeTypeError], or a [yaml.UnknownFieldError] for a
-// caller that needs the Go types.
+// in `~`. [errors.As] reaches the go-yaml error of a rejection for a
+// caller that needs the Go types, as a [yaml.TypeError], a
+// [yaml.OverflowError], a [yaml.UnexpectedNodeTypeError], or a
+// [yaml.UnknownFieldError]. The text of a go-yaml error that names a
+// token holds an excerpt of the document, which go-yaml builds itself.
+// The chain of a rejection unwraps to no such error, so a reporter that
+// prints each error of a chain prints the message and not that excerpt.
 //
 // The path names the place where the document writes the value. A value
 // that an alias or a `<<` merge key brings in reports the path where its
@@ -3877,11 +3881,14 @@ func asDecodeError(err error) error {
 	return decodeError{err: err}
 }
 
-// yamlMessageError is a [yaml.Error] reduced to its message. The go-yaml text
-// carries its own position and excerpt, which the [SourceError] binding
-// the error renders itself, so the message alone goes in the chain, and
-// the original error stays reachable through [errors.As]. A msg that is
-// not empty stands in for the message of err.
+// yamlMessageError is a [yaml.Error] reduced to its message. The go-yaml
+// text carries its own position and excerpt, which the [SourceError]
+// binding the error renders itself, so the message alone goes in the
+// chain. A yamlMessageError unwraps to nothing, so a reporter that
+// prints each error of a chain never prints that excerpt, which holds
+// lines of a [Source] whatever [WithExcerpts] says of it. [errors.Is]
+// and [errors.As] still reach the go-yaml error. A msg that is not empty
+// stands in for the message of err.
 type yamlMessageError struct {
 	err yaml.Error
 	msg string
@@ -3895,8 +3902,15 @@ func (e yamlMessageError) Error() string {
 	return e.err.GetMessage()
 }
 
-func (e yamlMessageError) Unwrap() error {
-	return e.err
+// Is reports whether the go-yaml error e holds matches target.
+func (e yamlMessageError) Is(target error) bool {
+	return errors.Is(e.err, target)
+}
+
+// As sets target to the first error in the chain of the go-yaml error e
+// holds that matches it, as [errors.As] does.
+func (e yamlMessageError) As(target any) bool {
+	return errors.As(e.err, target)
 }
 
 // verbatimIntegerTag is the verbatim form of the !!int tag, which the

@@ -411,7 +411,9 @@ func TestDecode_GoYAMLErrorReachable(t *testing.T) {
 	t.Parallel()
 
 	// The binding renders the position itself, so the chain carries the
-	// go-yaml message alone, but the original error stays reachable.
+	// go-yaml message alone, but the original error stays reachable. The
+	// text of the go-yaml error holds an excerpt of the source, which no
+	// message of the chain may hold.
 	t.Run("decode error", func(t *testing.T) {
 		t.Parallel()
 
@@ -420,9 +422,13 @@ func TestDecode_GoYAMLErrorReachable(t *testing.T) {
 		_, err := dd.Decode[struct{ B int }](t.Context())
 		require.Error(t, err)
 
-		_, ok := errors.AsType[yaml.Error](err)
-		assert.True(t, ok, "yaml.Error is not in the chain: %v", err)
-		assert.NotContains(t, err.Error(), "\n", "the go-yaml excerpt leaked into the message")
+		yamlErr, ok := errors.AsType[yaml.Error](err)
+		require.True(t, ok, "errors.As finds no yaml.Error: %v", err)
+		require.Contains(t, yamlErr.Error(), "b: notanint")
+
+		for _, msg := range chainMessages(err) {
+			assert.NotContains(t, msg, "notanint", "the go-yaml excerpt leaked into the chain")
+		}
 	})
 
 	t.Run("parse error", func(t *testing.T) {
@@ -431,8 +437,13 @@ func TestDecode_GoYAMLErrorReachable(t *testing.T) {
 		_, err := niceyaml.NewSourceFromString("a: [\n").Documents()
 		require.Error(t, err)
 
-		_, ok := errors.AsType[yaml.Error](err)
-		assert.True(t, ok, "yaml.Error is not in the chain: %v", err)
+		yamlErr, ok := errors.AsType[yaml.Error](err)
+		require.True(t, ok, "errors.As finds no yaml.Error: %v", err)
+		require.Contains(t, yamlErr.Error(), "a: [")
+
+		for _, msg := range chainMessages(err) {
+			assert.NotContains(t, msg, "a: [", "the go-yaml excerpt leaked into the chain")
+		}
 	})
 }
 
@@ -10753,7 +10764,7 @@ func TestErrDecode(t *testing.T) {
 			require.ErrorAs(t, err, &srcErr, "the rejection is not bound to the source")
 
 			_, ok := errors.AsType[yaml.Error](err)
-			assert.True(t, ok, "the go-yaml error left the chain")
+			assert.True(t, ok, "errors.As no longer finds the go-yaml error")
 			assert.NotContains(t, err.Error(), "\n", "the go-yaml excerpt leaked into the message")
 		})
 	}
@@ -10971,7 +10982,7 @@ func TestErrDecode(t *testing.T) {
 				assert.NotContains(t, err.Error(), "base: &base", "go-yaml's excerpt leaked into the message")
 
 				_, ok := errors.AsType[yaml.Error](err)
-				assert.True(t, ok, "the go-yaml error left the chain")
+				assert.True(t, ok, "errors.As no longer finds the go-yaml error")
 
 				var srcErr *niceyaml.SourceError
 
@@ -11083,7 +11094,7 @@ func TestErrDecode(t *testing.T) {
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 				_, ok := errors.AsType[yaml.Error](err)
-				assert.True(t, ok, "the go-yaml error left the chain")
+				assert.True(t, ok, "errors.As no longer finds the go-yaml error")
 			})
 		}
 	})

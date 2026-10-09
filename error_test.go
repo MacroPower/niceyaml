@@ -7116,9 +7116,33 @@ func (c checkedSecretConfig) Validate() error {
 	return nil
 }
 
+// chainMessages returns the message of err and of each error below it in
+// its chain, as a reporter that follows Unwrap reads them. An error that
+// unwraps to several adds the chain of each in order.
+func chainMessages(err error) []string {
+	if err == nil {
+		return nil
+	}
+
+	msgs := []string{err.Error()}
+
+	switch x := err.(type) { //nolint:errorlint // The walk reads each error of the chain itself.
+	case interface{ Unwrap() error }:
+		msgs = append(msgs, chainMessages(x.Unwrap())...)
+
+	case interface{ Unwrap() []error }:
+		for _, inner := range x.Unwrap() {
+			msgs = append(msgs, chainMessages(inner)...)
+		}
+	}
+
+	return msgs
+}
+
 // renderings returns err as each renderer of an error prints it, under
 // the name of the renderer, so a test looks for a text in all of them.
-// Each excerpt keeps every line of its source.
+// Each excerpt keeps every line of its source. The entry "Unwrap" holds
+// what [chainMessages] returns, one message per row.
 func renderings(err error) map[string]string {
 	const whole = 1000
 
@@ -7156,6 +7180,7 @@ func renderings(err error) map[string]string {
 		"Excerpts":    strings.Join(excerpts, "\n"),
 		"ErrorTree":   strings.Join(rows, "\n"),
 		"slog":        logged.String(),
+		"Unwrap":      strings.Join(chainMessages(err), "\n"),
 	}
 }
 

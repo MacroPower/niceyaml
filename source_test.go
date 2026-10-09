@@ -1968,7 +1968,7 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 				_, decodeErr := doc.Decode[any](t.Context())
 				require.ErrorIs(t, decodeErr, niceyaml.ErrSyntax)
 
-				// The go-yaml error stays in the chain.
+				// [errors.As] still finds the go-yaml error.
 				var syntaxErr *yaml.SyntaxError
 
 				require.ErrorAs(t, doc.Err(), &syntaxErr)

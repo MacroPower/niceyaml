@@ -126,10 +126,10 @@ var (
 	// error comes back bound as a [SourceError] at the offending token. A
 	// panic binds at the first token with a position among the ones the
 	// parser was reading. The error of a file with several such documents
-	// is a join, which matches through each of them. The go-yaml error
-	// stays in the chain, so [errors.As] still finds it. The document is
-	// at fault for each problem the parse reports with ErrSyntax, as
-	// [IsInvalid] describes.
+	// is a join, which matches through each of them. [errors.As] still
+	// finds the go-yaml error, which no error of the chain unwraps to.
+	// The document is at fault for each problem the parse reports with
+	// ErrSyntax, as [IsInvalid] describes.
 	//
 	// [errors.Is] reports whether any problem of an error matches
 	// ErrSyntax, and the error can hold a problem of another kind beside

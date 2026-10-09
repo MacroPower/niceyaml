@@ -758,8 +758,8 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 func TestDocument_Decode_Rejection_GoYAMLError(t *testing.T) {
 	t.Parallel()
 
-	// The message reads in YAML terms, and the error the decoder returned
-	// stays in the chain with its Go types.
+	// The message reads in YAML terms, and [errors.As] still finds the
+	// error the decoder returned, with its Go types.
 	t.Run("type mismatch", func(t *testing.T) {
 		t.Parallel()
 

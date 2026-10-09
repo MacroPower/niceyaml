@@ -471,14 +471,15 @@ func WithReferences(refs ...*Source) SourceOption {
 //     below it, and in a message such as `unknown field
 //     "sk-live-abcdef"`. The name of an alias prints in the message for
 //     an anchor the document lacks.
-//   - The error of a document that did not parse unwraps to the go-yaml
-//     error, and so does the error of a value the go-yaml decoder
-//     rejects. The text of the go-yaml error holds an excerpt that
-//     go-yaml builds itself. A program that finds that error with
-//     [errors.As] and prints it shows lines of the Source, and so does a
-//     reporter that prints every error of a chain. An UnmarshalYAML
-//     method that returns the go-yaml error of a parse of its bytes puts
-//     that excerpt in the message.
+//   - [errors.As] finds the go-yaml error behind the error of a
+//     document that did not parse, and behind the error of a value the
+//     go-yaml decoder rejects. The text of the go-yaml error holds an
+//     excerpt that go-yaml builds itself, so a program that prints the
+//     error it found shows lines of the Source. Neither chain unwraps
+//     to a go-yaml error with an excerpt, so a reporter that prints
+//     every error of a chain prints the message of each and not that
+//     excerpt. An UnmarshalYAML method that returns the go-yaml error
+//     of a parse of its bytes puts that excerpt in the message.
 //
 // The fact follows the text into the document [Layers] merge, which
 // holds the values of every layer and of each reference document a
