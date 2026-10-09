@@ -211,7 +211,7 @@ func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
 //		}
 //
 //		if bound := problem.Bound; bound != nil {
-//			row.File = bound.Source().FilePath()
+//			row.File = bound.Source().Name()
 //
 //			if pos, ok := bound.Position(); ok {
 //				row.Line, row.Column = pos.Line+1, pos.Col+1

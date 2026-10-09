@@ -1149,3 +1149,31 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 		})
 	}
 }
+
+// A directive resolves beside the file its document came from, wherever
+// the process stands by the time the registry reads the schema, since
+// NewSourceFromFile gives the document the absolute path of the file.
+// The test changes the process's working directory, so it does not run
+// in parallel.
+//
+//nolint:paralleltest // See above.
+func TestDirective_ResolvesAfterChdir(t *testing.T) {
+	repo := t.TempDir()
+
+	writeFiles(t, repo, map[string]string{
+		"configs/schema.json": `{"properties": {"name": {"type": "string"}}}`,
+		"configs/app.yaml":    "# yaml-language-server: $schema=./schema.json\nname: 5\n",
+	})
+
+	t.Chdir(repo)
+
+	source, err := niceyaml.NewSourceFromFile("configs/app.yaml")
+	require.NoError(t, err)
+
+	t.Chdir(t.TempDir())
+
+	reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+
+	err = source.ValidateDocuments(t.Context(), reg)
+	require.ErrorContains(t, err, `configs/app.yaml:2:7: $.name: expected "string", got "integer"`)
+}

@@ -120,6 +120,16 @@ func (p Pattern) Match(path string) bool {
 	return matchAnyGlob(p.globs, CleanPath(path))
 }
 
+// Relative reports whether any pattern the braces expand to is relative,
+// which is one that does not open with a separator. A relative pattern
+// matches a path that leads from some directory, so a caller that holds
+// an absolute path needs that directory to match the two.
+func (p Pattern) Relative() bool {
+	return slices.ContainsFunc(p.globs, func(glob string) bool {
+		return !strings.HasPrefix(glob, "/")
+	})
+}
+
 // CleanPath returns path cleaned, with forward slashes as separators,
 // which is the form the patterns match against. Cleaning drops a leading
 // "./", collapses repeated separators, and resolves ".." elements, so the

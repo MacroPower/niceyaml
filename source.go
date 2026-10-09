@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -172,9 +173,10 @@ type sourceConfig struct {
 // WithName is a [SourceOption] that sets the name for the [Source], which
 // [SourceError.Error] puts in front of the position of every error bound
 // to it, as "name:line:col: msg". Without it, [Source.Name] returns the
-// file path. A message draws each control character of the name as its
-// picture, so a file name that holds a line feed stays on one line, and
-// Source.Name returns the name as given.
+// path [NewSourceFromFile] took, or else the file path. A message draws
+// each control character of the name as its picture, so a file name that
+// holds a line feed stays on one line, and Source.Name returns the name
+// as given.
 func WithName(name string) SourceOption {
 	return func(c *sourceConfig) {
 		c.name = name
@@ -183,10 +185,17 @@ func WithName(name string) SourceOption {
 
 // WithFilePath is a [SourceOption] that sets the file path for the [Source].
 // Each document of the Source reports it from [Node.FilePath], which
-// schema matchers route on.
+// schema matchers route on and a schema directive resolves beside.
 //
-// For file-based sources, [NewSourceFromFile] and [NewSourceFromFS] set
-// this automatically.
+// The Source keeps path as given. A relative path suits a document that
+// is no file on disk, such as a request body or a blob of a repository,
+// and a file path pattern matches it as written. For a file on disk,
+// pass an absolute path, since each later reader resolves a relative
+// one against the working directory it finds.
+//
+// [NewSourceFromFile] sets the absolute path of the file it reads, and
+// [NewSourceFromFS] sets the path in its file system, so neither needs
+// the option.
 func WithFilePath(path string) SourceOption {
 	return func(c *sourceConfig) {
 		c.filePath = path
@@ -559,9 +568,21 @@ func referenceReaders(docs [][]byte) yaml.DecodeOption {
 
 // NewSourceFromFile creates a new [*Source] by reading a file from disk.
 //
-// It sets the file path on the [Source], so each document reports it for
-// schema routing, and [Source.Name] returns it unless [WithName] sets a
-// name. [NewSourceFromFS] reads a file from an [fs.FS] the same way.
+// It names the [Source] by path as given, so [Source.Name] and every
+// message spell the file as the caller did. It sets the file path of
+// the Source to the absolute form of path, which [filepath.Abs] builds
+// from the working directory at the time of the read. Each document
+// reports that file path for schema routing, so the same schema applies
+// however the caller spelled the path, and a later change of working
+// directory moves neither the routing nor the directory a schema
+// directive resolves in. [WithName] and [WithFilePath] replace the two.
+// [NewSourceFromFS] reads a file from an [fs.FS] and keeps its path as
+// given.
+//
+// Abs drops a ".." element together with the element before it, as
+// text. For a path that steps up out of a symbolic link, the file path
+// then names a directory the read did not open, and WithFilePath sets
+// the path the program resolved itself.
 //
 // A schema registry reads from disk the schema file that a directive in
 // the document names, and resolves a relative name against that path.
@@ -576,19 +597,27 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
 
-	// Prepend file path option so user options can override if needed.
-	opts = append([]SourceOption{WithFilePath(path)}, opts...)
+	// Abs fails only when the working directory has no name, and the path
+	// as given is then the closest one left.
+	filePath, err := filepath.Abs(path)
+	if err != nil {
+		filePath = path
+	}
+
+	// Prepend the name and file path options so user options can
+	// override them if needed.
+	opts = append([]SourceOption{WithName(path), WithFilePath(filePath)}, opts...)
 
 	return NewSourceFromString(string(data), opts...), nil
 }
 
 // NewSourceFromFS creates a new [*Source] by reading the file at path
 // from fsys, such as an [embed.FS] that ships configuration with the
-// binary or an [fs.FS] a test builds. It sets the path on the [Source] as
-// [NewSourceFromFile] does, so each document reports it for schema
-// routing. It sets the file system too, as [WithFS] does, so a schema
-// directive in a document resolves beside the document in fsys, whatever
-// registry validates it:
+// binary or an [fs.FS] a test builds. It sets path on the [Source] as
+// given, which is the path from the root of fsys, so each document
+// reports it for schema routing. It sets the file system too, as
+// [WithFS] does, so a schema directive in a document resolves beside the
+// document in fsys, whatever registry validates it:
 //
 //	source, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
 //
@@ -685,8 +714,9 @@ func (s *Source) text() []byte {
 	return b.Bytes()
 }
 
-// Name returns the name of the [Source]: the one [WithName] set, or else
-// the file path. Returns an empty string when the Source has neither.
+// Name returns the name of the [Source]: the one [WithName] set, the
+// path [NewSourceFromFile] read as its caller gave it, or else the file
+// path. Returns an empty string when the Source has none of them.
 //
 // A nil Source has no name and no file path. [SourceError.Source] returns
 // nil for an error bound to no Source, so a report can print the name of
@@ -712,11 +742,14 @@ func (s *Source) label() string {
 	return escape.Control(escape.Tabs(s.Name()))
 }
 
-// FilePath returns the file path of the [Source].
+// FilePath returns the file path of the [Source], which schema routing
+// reads. It is the absolute path of the file [NewSourceFromFile] read,
+// the path in the file system [NewSourceFromFS] read from, or the path
+// [WithFilePath] set, as given. A message or a report names the file
+// with [Source.Name], which spells it as the caller did.
 //
-// Returns an empty string unless [WithFilePath], [NewSourceFromFile], or
-// [NewSourceFromFS] sets it. A nil Source has no file path, as
-// [Source.Name] describes.
+// Returns an empty string when none of the three set it. A nil Source
+// has no file path, as [Source.Name] describes.
 func (s *Source) FilePath() string {
 	if s == nil {
 		return ""

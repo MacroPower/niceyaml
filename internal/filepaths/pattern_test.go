@@ -448,6 +448,55 @@ func TestPattern_Match(t *testing.T) {
 	}
 }
 
+func TestPattern_Relative(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		pattern string
+		want    bool
+	}{
+		"relative": {
+			pattern: "configs/*.yaml",
+			want:    true,
+		},
+		"double star": {
+			pattern: "**/*.yaml",
+			want:    true,
+		},
+		"leading dot element": {
+			pattern: "./configs/*.yaml",
+			want:    true,
+		},
+		"rooted": {
+			pattern: "/etc/app/*.yaml",
+			want:    false,
+		},
+		"rooted with repeated separators": {
+			pattern: "//etc/app/*.yaml",
+			want:    false,
+		},
+		"braces around rooted patterns": {
+			pattern: "/{etc,opt}/app/*.yaml",
+			want:    false,
+		},
+		"braces around a rooted and a relative pattern": {
+			pattern: "{/etc,configs}/*.yaml",
+			want:    true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p, err := filepaths.NewPattern(tc.pattern)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.want, p.Relative())
+		})
+	}
+}
+
 func TestAnyDepthPatterns_Matching(t *testing.T) {
 	t.Parallel()
 

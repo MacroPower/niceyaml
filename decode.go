@@ -1813,7 +1813,9 @@ func (n *Node) Preamble() token.Tokens {
 }
 
 // FilePath returns the path of the file the document came from, which is
-// [Source.FilePath]. Returns an empty string when the source has none.
+// [Source.FilePath]. It is absolute for a document [NewSourceFromFile]
+// read, so a schema routes on the file and not on how the caller
+// spelled its path. Returns an empty string when the source has none.
 func (n *Node) FilePath() string {
 	return n.source.FilePath()
 }

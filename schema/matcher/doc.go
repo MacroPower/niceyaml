@@ -6,10 +6,11 @@
 // names its schema only for documents the matcher accepts and reports
 // [go.jacobcolvin.com/niceyaml/schema.ErrNoMatch] for the rest, so a
 // [go.jacobcolvin.com/niceyaml/schema.Registry] moves on to its
-// next resolver. A matcher that cannot decide, because its context ended
-// or the document holds an alias its path cannot follow, returns an
-// error. The registry then stops at that document rather than routing it
-// to a resolver further down.
+// next resolver. A matcher that cannot decide returns an error, because
+// its context ended, the document holds an alias its path cannot
+// follow, or its file path pattern has no base directory. The registry
+// then stops at that document rather than routing it to a resolver
+// further down.
 //
 // # Matching Strategies
 //
@@ -32,6 +33,19 @@
 // Match documents based on their source file using [FilePath], which tests
 // the document's file path against a glob pattern. This works well for
 // directory-based conventions where file location implies schema.
+//
+// A relative pattern such as "configs/*.yaml" applies under a base
+// directory. A file on disk carries its absolute path, so the pattern
+// matches it however the caller spelled that path:
+//
+//	m := matcher.MustFilePath("configs/*.yaml")
+//
+//	source, err := niceyaml.NewSourceFromFile("./configs/app.yaml")
+//
+// The base is the working directory at the time [FilePath] runs, and
+// [WithBaseDir] names the root of a project or the directory of a
+// configuration file in its place. A document that carries a relative
+// path, such as one from an [io/fs.FS], matches by that path as written.
 //
 // # Composing Matchers
 //

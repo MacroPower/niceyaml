@@ -4393,6 +4393,85 @@ func TestNewSourceFromReader(t *testing.T) {
 	})
 }
 
+// NewSourceFromFile names the Source by the path as given and gives it
+// the absolute path of the file, built from the working directory at
+// the time of the read. The test changes the process's working
+// directory, so it does not run in parallel.
+//
+//nolint:paralleltest // See above.
+func TestNewSourceFromFile(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "configs", "app.yaml")
+
+	require.NoError(t, os.Mkdir(filepath.Dir(file), 0o700))
+	require.NoError(t, os.WriteFile(file, []byte("key: value\n"), 0o600))
+
+	t.Chdir(dir)
+
+	tcs := map[string]struct {
+		path         string
+		wantName     string
+		wantFilePath string
+		opts         []niceyaml.SourceOption
+	}{
+		"relative path": {
+			path:         "configs/app.yaml",
+			wantName:     "configs/app.yaml",
+			wantFilePath: file,
+		},
+		"relative path with dot elements": {
+			path:         "./configs/../configs/app.yaml",
+			wantName:     "./configs/../configs/app.yaml",
+			wantFilePath: file,
+		},
+		"absolute path": {
+			path:         file,
+			wantName:     file,
+			wantFilePath: file,
+		},
+		"name option": {
+			path:         "configs/app.yaml",
+			opts:         []niceyaml.SourceOption{niceyaml.WithName("app")},
+			wantName:     "app",
+			wantFilePath: file,
+		},
+		"file path option": {
+			path:         "configs/app.yaml",
+			opts:         []niceyaml.SourceOption{niceyaml.WithFilePath("virtual/app.yaml")},
+			wantName:     "configs/app.yaml",
+			wantFilePath: "virtual/app.yaml",
+		},
+	}
+
+	for name, tc := range tcs {
+		//nolint:paralleltest // See above.
+		t.Run(name, func(t *testing.T) {
+			source, err := niceyaml.NewSourceFromFile(tc.path, tc.opts...)
+			require.NoError(t, err)
+
+			// The file path stays where the read found the file.
+			t.Chdir(t.TempDir())
+
+			assert.Equal(t, tc.wantName, source.Name())
+			assert.Equal(t, tc.wantFilePath, source.FilePath())
+
+			doc, err := source.Document()
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantFilePath, doc.FilePath())
+
+			got, err := doc.Decode[map[string]string](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, map[string]string{"key": "value"}, got)
+		})
+	}
+
+	//nolint:paralleltest // See above.
+	t.Run("reports a missing file", func(t *testing.T) {
+		_, err := niceyaml.NewSourceFromFile("configs/missing.yaml")
+		require.ErrorIs(t, err, fs.ErrNotExist)
+	})
+}
+
 func TestSource_FS(t *testing.T) {
 	t.Parallel()
 

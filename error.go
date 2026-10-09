@@ -3084,7 +3084,7 @@ func (e *SourceError) DocumentIndex() (int, bool) {
 //	for problem := range niceyaml.NewErrorTree(err).Problems() {
 //		path, _ := problem.Path()
 //		pos, _ := problem.Bound.Position()
-//		emit(problem.Bound.Source().FilePath(), pos, problem.Message(), path)
+//		emit(problem.Bound.Source().Name(), pos, problem.Message(), path)
 //	}
 //
 // A binding whose location did not resolve has no position but still
