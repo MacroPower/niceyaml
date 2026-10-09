@@ -486,7 +486,7 @@
 // "$.servers[1].port: port is required".
 //
 // A program that layers one file over another merges them through
-// [Layers], which holds the Node of each file in the order they apply.
+// [Layers], which holds the Source of each file in the order they apply.
 // The files merge into one document. A mapping merges into the mapping
 // below it key by key, a sequence or a scalar replaces what lies below
 // it, and a null keeps it. Each file resolves its own aliases and merge
@@ -522,10 +522,7 @@
 //		return err
 //	}
 //
-//	env, err := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment")).Document()
-//	if err != nil {
-//		return err
-//	}
+//	env := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment"))
 //
 //	cfg, err := niceyaml.NewLayers(base, prod, env).Decode[Config](ctx, niceyaml.WithValidator(schema))
 //

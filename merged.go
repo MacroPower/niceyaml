@@ -32,10 +32,10 @@ const (
 	mergedMapping
 )
 
-// mergedValue is a value of the document that [Layers] merge their Nodes
-// into. A [layerReader] reads one from each layer, with every alias and
-// `<<` merge key of the layer resolved, and [mergedValue.merge] puts the
-// value of a higher layer over it.
+// mergedValue is a value of the document that [Layers] merge their
+// layers into. A [layerReader] reads one from each layer, with every
+// alias and `<<` merge key of the layer resolved, and
+// [mergedValue.merge] puts the value of a higher layer over it.
 type mergedValue struct {
 	// The highest layer whose document holds the value. For a mapping
 	// that several layers hold, the entries can belong to lower layers.
@@ -723,8 +723,8 @@ func (w *mergedWriter) nested(v *mergedValue, indent int, compact bool) {
 	}
 }
 
-// layering is what the [Source] that [Layers] merge their Nodes into
-// knows of those Nodes: the merged value, which names the layer each
+// layering is what the [Source] that [Layers] merge their layers into
+// knows of those layers: the merged value, which names the layer each
 // value came from, and the lowest and the highest layer. An error bound
 // in the one document of that Source binds in one of the layers instead,
 // since the merged text is no file of the caller. An error with a
@@ -740,26 +740,27 @@ type layering struct {
 	// The merged value, or nil when no layer holds a value.
 	root *mergedValue
 	// The lowest and the highest layer.
-	lowest, top *Node
+	lowest, top resolvedLayer
 }
 
 // home returns the layer an error binds in when it found no layer of its
 // own, which is the lowest one. A lowest layer that other [Layers] built
-// gives the home of its own layers. A nil l has no home.
-func (l *layering) home() *Node {
+// gives the home of its own layers. A nil l has no home, and home then
+// returns the zero value.
+func (l *layering) home() resolvedLayer {
 	if l == nil {
-		return nil
+		return resolvedLayer{}
 	}
 
-	if home := l.lowest.source.layers.home(); home != nil {
+	if home := l.lowest.source.layers.home(); home.source != nil {
 		return home
 	}
 
 	return l.lowest
 }
 
-// layer returns the Node an error at path binds in, and two paths in
-// the document of that Node: the one of the value path reads from, and
+// layer returns the layer an error at path binds in, and two paths in
+// the document of that layer: the one of the value path reads from, and
 // path as that document reads it. The path starts at `$` and reads from
 // the root of doc, the merged document. A nil l binds in doc, where `$`
 // and path stay as they are.
@@ -770,13 +771,14 @@ func (l *layering) home() *Node {
 // merged value holds, that is the layer the value came from. For a path
 // that names a key a mapping leaves out, it is the highest layer that
 // holds the mapping. It is the highest layer of all when no layer holds a
-// value.
+// value. That layer can come from a [Source] that holds no one document,
+// and it then has no Node for the path to resolve in.
 //
 // A layer that other [Layers] built holds the value in a layer of its
 // own, so the search goes on there with the path as the layer reads it.
-func (l *layering) layer(doc *Node, path paths.Path) (*Node, paths.Path, paths.Path) {
+func (l *layering) layer(doc *Node, path paths.Path) (resolvedLayer, paths.Path, paths.Path) {
 	if l == nil {
-		return doc, paths.Doc(), path
+		return doc.resolveLayer(), paths.Doc(), path
 	}
 
 	// The merged value stands at the root of its document, so the rest of
@@ -795,14 +797,18 @@ func (l *layering) layer(doc *Node, path paths.Path) (*Node, paths.Path, paths.P
 			at = next
 		}
 
-		layer = at.layer
+		layer = at.layer.resolveLayer()
+	}
+
+	if layer.node == nil {
+		return layer, paths.Doc(), path
 	}
 
 	// The layer holds the merged value at its scope, and the search finds
 	// the root of the document of the layer at base.
-	scope, _ := layer.base.CutPrefix(paths.Doc())
+	scope, _ := layer.node.base.CutPrefix(paths.Doc())
 
-	holder, base, held := layer.source.layers.layer(layer, layer.base.Join(rel))
+	holder, base, held := layer.source.layers.layer(layer.node, layer.node.base.Join(rel))
 
 	return holder, base.Join(scope), held
 }
@@ -831,7 +837,75 @@ func (v *mergedValue) child(sel paths.Selector) *mergedValue {
 	return nil
 }
 
-// mergedLayers is what the Nodes of a [Layers] merge into.
+// resolvedLayer is one layer of a [Layers], as [Layer] resolves it. The
+// zero value is a layer that adds nothing.
+type resolvedLayer struct {
+	// The Source of the layer, where its errors bind.
+	source *Source
+	// The Node the layer merges, or nil for a Source that holds no one
+	// document.
+	node *Node
+	// The error [Source.Document] returns for a Source that holds no one
+	// document, or nil.
+	err error
+}
+
+// resolveLayer returns n as the layer it is. A nil n adds nothing.
+func (n *Node) resolveLayer() resolvedLayer {
+	if n == nil {
+		return resolvedLayer{}
+	}
+
+	return resolvedLayer{source: n.source, node: n}
+}
+
+// resolveLayer returns the one document of s as a layer, as
+// [Source.Document] returns it. A Source that holds no one document gives
+// a layer that holds no value and no Node, with the error Document
+// returns. A nil s adds nothing.
+func (s *Source) resolveLayer() resolvedLayer {
+	if s == nil {
+		return resolvedLayer{}
+	}
+
+	doc, err := s.Document()
+	if err != nil {
+		return resolvedLayer{source: s, err: err}
+	}
+
+	return resolvedLayer{source: s, node: doc}
+}
+
+// resolveLayers returns the layers of given that add a layer, in the
+// order of given.
+func resolveLayers(given []Layer) []resolvedLayer {
+	layers := make([]resolvedLayer, 0, len(given))
+
+	for _, layer := range given {
+		if layer == nil {
+			continue
+		}
+
+		if resolved := layer.resolveLayer(); resolved.source != nil {
+			layers = append(layers, resolved)
+		}
+	}
+
+	return layers
+}
+
+// read returns the value of the layer, as [layerReader.read] reads it
+// from the document of its Node. A layer from a [Source] that holds no
+// one document returns its error.
+func (l resolvedLayer) read(ctx context.Context) (*mergedValue, error) {
+	if l.node == nil {
+		return nil, l.err
+	}
+
+	return newLayerReader(l.node).read(ctx)
+}
+
+// mergedLayers is what the layers of a [Layers] merge into.
 type mergedLayers struct {
 	// The root Node of the merged document.
 	doc *Node
@@ -841,7 +915,7 @@ type mergedLayers struct {
 	err error
 }
 
-// mergeLayers returns what nodes merge into, lowest first. A layer that
+// mergeLayers returns what given merges into, lowest first. A layer that
 // holds no value a decode can read adds nothing to the merged document.
 // Every use of the [Layers] shares the result, so ctx must never end.
 //
@@ -852,14 +926,15 @@ type mergedLayers struct {
 // [WithAliasLimit], and [WithExcerptWidth] gave it. It takes no reference
 // documents, since the
 // merged value holds no alias. It has excerpts off when [showsLayers]
-// reports false, whatever [WithExcerpts] gave the lowest layer. With no
-// nodes, the Source is empty and has no name.
+// reports false, whatever [WithExcerpts] gave the lowest layer. When
+// given adds no layer, the Source is empty and has no name.
 //
 // A text that does not parse to one document gives that error, with the
 // Node [noLayers] returns, so the layers then bind every error with no
 // position.
-func mergeLayers(ctx context.Context, nodes []*Node) mergedLayers {
-	if len(nodes) == 0 {
+func mergeLayers(ctx context.Context, given []Layer) mergedLayers {
+	layers := resolveLayers(given)
+	if len(layers) == 0 {
 		return mergedLayers{doc: noLayers()}
 	}
 
@@ -868,8 +943,8 @@ func mergeLayers(ctx context.Context, nodes []*Node) mergedLayers {
 		merged mergedLayers
 	)
 
-	for _, n := range nodes {
-		v, err := newLayerReader(n).read(ctx)
+	for _, layer := range layers {
+		v, err := layer.read(ctx)
 		if err != nil {
 			if merged.err == nil {
 				merged.err = err
@@ -881,14 +956,18 @@ func mergeLayers(ctx context.Context, nodes []*Node) mergedLayers {
 		root = root.merge(v)
 	}
 
-	lowest := nodes[0]
+	lowest := layers[0]
 
 	var w mergedWriter
 
-	w.sb.WriteString(preambleText(lowest))
+	// A Source that holds no one document has no preamble to give.
+	if lowest.node != nil {
+		w.sb.WriteString(preambleText(lowest.node))
+	}
+
 	w.document(root)
 
-	doc, err := newMergedDocument(lowest.source, w.sb.String(), showsLayers(nodes))
+	doc, err := newMergedDocument(lowest.source, w.sb.String(), showsLayers(layers))
 	if err != nil {
 		if merged.err == nil {
 			merged.err = fmt.Errorf("merge layers: %w", err)
@@ -899,7 +978,7 @@ func mergeLayers(ctx context.Context, nodes []*Node) mergedLayers {
 		return merged
 	}
 
-	doc.source.layers = &layering{root: root, lowest: lowest, top: nodes[len(nodes)-1]}
+	doc.source.layers = &layering{root: root, lowest: lowest, top: layers[len(layers)-1]}
 	merged.doc = doc
 
 	return merged
@@ -927,14 +1006,14 @@ func preambleText(n *Node) string {
 	return text + "\n"
 }
 
-// showsLayers reports whether an error may show the text nodes merge
+// showsLayers reports whether an error may show the text layers merge
 // into, as [WithExcerpts] says it for the [Source] of each. That text
 // holds the values of every layer, and the values an alias of a layer
 // reads from a reference document. It is thus out of excerpts when the
 // text of any layer is, or the text of a reference document of one.
-func showsLayers(nodes []*Node) bool {
-	for _, n := range nodes {
-		if n.source.noExcerpts || n.source.noReferenceExcerpts {
+func showsLayers(layers []resolvedLayer) bool {
+	for _, layer := range layers {
+		if layer.source.noExcerpts || layer.source.noReferenceExcerpts {
 			return false
 		}
 	}

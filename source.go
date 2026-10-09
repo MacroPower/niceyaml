@@ -442,8 +442,8 @@ func WithReferences(refs ...*Source) SourceOption {
 // false for a Source whose text holds secrets, such as the values a
 // program read from its environment:
 //
-//	env, err := niceyaml.NewSourceFromBytes(data,
-//		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false)).Document()
+//	env := niceyaml.NewSourceFromBytes(data,
+//		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
 //
 // The option states a fact about the text. The code that loads the text
 // knows whether it holds a secret, and the code that prints an error
@@ -569,7 +569,7 @@ func referenceReaders(docs [][]byte) yaml.DecodeOption {
 // confines those reads to one directory. A document that NewSourceFromFS
 // opened resolves its directive in its own file system instead.
 //
-// Returns an error when it cannot read the file.
+// Returns a nil Source and an error when it cannot read the file.
 func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // User-provided file paths are intentional.
 	if err != nil {
@@ -596,7 +596,7 @@ func NewSourceFromFile(path string, opts ...SourceOption) (*Source, error) {
 // from bundle. A document that [NewSourceFromFile] opens resolves its
 // directive on disk, so one registry validates both.
 //
-// Returns an error when it cannot read the file.
+// Returns a nil Source and an error when it cannot read the file.
 func NewSourceFromFS(fsys fs.FS, path string, opts ...SourceOption) (*Source, error) {
 	data, err := fs.ReadFile(fsys, path)
 	if err != nil {

@@ -102,9 +102,19 @@ Types declare their constraints with `jsonschema` struct tags. The `gen` tool fr
 
 ### Layers
 
-[`niceyaml.Layers`][niceyaml.Layers] merges several files into one document, such as a base file with the file of one environment over it, and decodes that document once:
+[`niceyaml.Layers`][niceyaml.Layers] merges several files into one document, such as a base file with the file of one environment over it, and decodes that document once. Pass the [`Source`][niceyaml.Source] of each file, lowest first:
 
 ```go
+base, err := niceyaml.NewSourceFromFile("base.yaml")
+if err != nil {
+	return err
+}
+
+prod, err := niceyaml.NewSourceFromFile("prod.yaml")
+if err != nil {
+	return err
+}
+
 cfg, err := niceyaml.NewLayers(base, prod).Decode[Config](ctx, niceyaml.WithValidator(schema))
 ```
 
@@ -121,6 +131,19 @@ base.yaml:3:9: $.server.port: port must be at least 1
 
 The decode fills the Go value from the merged document as any decode does, so defaults the value holds survive where the files leave a field out.
 
+A nil layer adds nothing, so a file that may be missing goes in as it is:
+
+```go
+user, err := niceyaml.NewSourceFromFile(userPath)
+if err != nil && !errors.Is(err, fs.ErrNotExist) {
+	return err
+}
+
+cfg, err := niceyaml.NewLayers(base, prod, user).Decode[Config](ctx, niceyaml.WithValidator(schema))
+```
+
+A [`Node`][niceyaml.Node] is a layer too, for one document of a file that holds several, or for the part of a document that `Node.At` returns. A program that collects its layers in a loop holds them in a `[]niceyaml.Layer`, since Go spreads neither a `[]*Source` nor a `[]*Node` into `NewLayers`.
+
 `Layers.Document` returns the merged document as a [`Node`][niceyaml.Node], and its errors still report the file and the line that hold each value. One value of the files then decodes on its own, and the merged text prints as any document does:
 
 ```go
@@ -132,7 +155,7 @@ if err != nil {
 kind, err := doc.DecodeAt[string](ctx, paths.Doc().Child("kind"))
 ```
 
-The environment and the flags of a program go in as one more layer. Encode a map of the keys they set with [`encoder.Marshal`][niceyaml/encoder] and pass its document above the files. The schema then checks those values too, and an error under one reports that layer:
+The environment and the flags of a program go in as one more layer. Encode a map of the keys they set with [`encoder.Marshal`][niceyaml/encoder] and pass a `Source` of the result above the files. The schema then checks those values too, and an error under one reports that layer:
 
 ```go
 data, err := encoder.Marshal(ctx, map[string]any{"server": map[string]any{"port": port}})
@@ -140,11 +163,8 @@ if err != nil {
 	return err
 }
 
-env, err := niceyaml.NewSourceFromBytes(data,
-	niceyaml.WithName("environment"), niceyaml.WithExcerpts(false)).Document()
-if err != nil {
-	return err
-}
+env := niceyaml.NewSourceFromBytes(data,
+	niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
 
 cfg, err := niceyaml.NewLayers(base, prod, env).Decode[Config](ctx, niceyaml.WithValidator(schema))
 ```

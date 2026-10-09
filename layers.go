@@ -3,6 +3,7 @@ package niceyaml
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 )
 
@@ -15,7 +16,7 @@ var (
 	// in the layer that holds it.
 	ErrUnnamedKey = errors.New("mapping key has no name")
 
-	// The Node that [Layers] with no Node validate and bind through: the
+	// The Node that [Layers] with no layer validate and bind through: the
 	// one document of an empty [Source], which has no name. Every call
 	// shares the one Node, which never changes.
 	noLayers = sync.OnceValue(func() *Node {
@@ -23,8 +24,20 @@ var (
 	})
 )
 
-// Layers holds the Nodes that merge into one document, in the order they
-// apply, such as a base file with the file of one environment over it:
+// Layers holds the layers that merge into one document, in the order
+// they apply, such as a base file with the file of one environment over
+// it. Each layer is a [Layer], and a program passes the [Source] of each
+// file as it read it:
+//
+//	base, err := niceyaml.NewSourceFromFile("base.yaml")
+//	if err != nil {
+//		return err
+//	}
+//
+//	prod, err := niceyaml.NewSourceFromFile("prod.yaml")
+//	if err != nil {
+//		return err
+//	}
 //
 //	layers := niceyaml.NewLayers(base, prod)
 //
@@ -44,7 +57,7 @@ var (
 // of a variable first. The encoder quotes a string that reads as another
 // type, so a schema reads "8080" as a string, and a bool field rejects
 // "true". The program encodes the map with
-// [go.jacobcolvin.com/niceyaml/encoder.Marshal] and passes the Node of
+// [go.jacobcolvin.com/niceyaml/encoder.Marshal] and passes a Source of
 // the result:
 //
 //	overrides := map[string]any{
@@ -56,10 +69,7 @@ var (
 //		return err
 //	}
 //
-//	env, err := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment")).Document()
-//	if err != nil {
-//		return err
-//	}
+//	env := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment"))
 //
 //	cfg, err := niceyaml.NewLayers(base, prod, env).Decode[Config](ctx)
 //
@@ -202,8 +212,8 @@ var (
 // the context lines around it. A program builds a layer that holds
 // secrets from a [Source] with [WithExcerpts] set to false:
 //
-//	env, err := niceyaml.NewSourceFromBytes(data,
-//		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false)).Document()
+//	env := niceyaml.NewSourceFromBytes(data,
+//		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
 //
 // An error in that layer then prints its position, its path, and its
 // message, and no line of the layer. An error in another layer keeps its
@@ -212,48 +222,91 @@ var (
 // Source of any layer has.
 //
 // A layer whose document did not parse holds no value. Neither does a
-// layer that a decode of it alone into an any value rejects, as it
-// rejects an alias with no anchor. [Layers.Decode], [Layers.DecodeInto],
-// [Layers.Validate], and [Layers.Document] return the error of the
-// lowest such layer, bound in its file. [Layers.SelfValidate] and
-// [Layers.Bind] go on without that layer.
+// Source that holds several documents, which has no one document to
+// merge, nor a layer that a decode of it alone into an any value rejects,
+// as it rejects an alias with no anchor. [Layers.Decode],
+// [Layers.DecodeInto], [Layers.Validate], [Layers.SelfValidate], and
+// [Layers.Document] return the error of the lowest such layer, bound in
+// its file. [Layers.Bind] goes on without that layer.
+//
+// A nil layer adds nothing. [NewSourceFromFile] returns a nil Source for
+// a file it could not read, so a program with an optional file passes
+// the Source as it is once it has checked the error:
+//
+//	user, err := niceyaml.NewSourceFromFile(userPath)
+//	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+//		return err
+//	}
+//
+//	cfg, err := niceyaml.NewLayers(base, user).Decode[Config](ctx)
 //
 // A program whose optional files are all missing builds Layers that
-// hold no Node. A decode then leaves the value as it was, and each error
+// hold no layer. A decode then leaves the value as it was, and each error
 // binds with no position, as in "$.servers[1].port: port is required".
 // The program thus makes the same calls whichever of its files exist.
 // Each such error is bound to an empty document, so no other document
 // places it. A value that came from no document validates through
 // [SelfValidateValue] instead.
 //
-// Layers merge their Nodes once, on the first call that needs the merged
-// document, and never change after that, so they are safe for
+// The layers merge once, on the first call that needs the merged
+// document, and Layers never change after that, so they are safe for
 // concurrent use.
 //
 // Create instances with [NewLayers].
 type Layers struct {
-	// What the Nodes merge into, which document fills on its first call.
+	// What the layers merge into, which document fills on its first call.
 	merged mergedLayers
-	// The Nodes in the order they apply, lowest first. None is nil.
-	nodes []*Node
+	// The layers in the order they apply, lowest first.
+	layers []Layer
 	// Fills merged once.
 	once sync.Once
 }
 
-// NewLayers creates a new [*Layers] from the given Nodes, in the order
-// they apply: the lowest layer first and the highest last. A nil Node
-// adds nothing, so a program with an optional file passes its Node as it
-// is.
-func NewLayers(nodes ...*Node) *Layers {
-	l := &Layers{nodes: make([]*Node, 0, len(nodes))}
+// Layer is one layer of [Layers]: a document that merges with the layers
+// below it. A [*Source] and a [*Node] are each a Layer, and no type
+// outside this package is one.
+//
+// A Source stands for its one document, the one [Source.Document]
+// returns, so a program passes each file as it read it. A Source that
+// holds several documents, or a document that did not parse, is a layer
+// that holds no value, as [Layers] describes.
+//
+// A Node is the root of a document, or the value at a path of one for a
+// Node from [Node.At]. It serves a program that layers one document of a
+// file that holds several, a part of a document, or the document
+// [Layers.Document] returns.
+//
+// A nil Layer adds nothing, and neither does a nil Source or a nil Node.
+//
+// Go spreads neither a []*Source nor a []*Node into the parameter of
+// [NewLayers]. A program that collects its layers in a loop thus holds
+// them in a []Layer:
+//
+//	layers := make([]niceyaml.Layer, 0, len(names))
+//
+//	for _, name := range names {
+//		source, err := niceyaml.NewSourceFromFS(fsys, name)
+//		if err != nil {
+//			return err
+//		}
+//
+//		layers = append(layers, source)
+//	}
+//
+//	cfg, err := niceyaml.NewLayers(layers...).Decode[Config](ctx)
+//
+// See [*Source] and [*Node] for the implementations.
+type Layer interface {
+	// Resolves the layer as [Layers] merge it.
+	resolveLayer() resolvedLayer
+}
 
-	for _, n := range nodes {
-		if n != nil {
-			l.nodes = append(l.nodes, n)
-		}
-	}
-
-	return l
+// NewLayers creates a new [*Layers] from the given layers, in the order
+// they apply: the lowest layer first and the highest last. A nil [Layer]
+// adds nothing, and neither does a nil [*Source] or a nil [*Node], so a
+// program with an optional file passes its Source as it is.
+func NewLayers(layers ...Layer) *Layers {
+	return &Layers{layers: slices.Clone(layers)}
 }
 
 // Document returns the root [*Node] of the merged document, the Node a
@@ -269,7 +322,7 @@ func NewLayers(nodes ...*Node) *Layers {
 //	kind, err := doc.DecodeAt[string](ctx, paths.Doc().Child("kind"))
 //
 // A layer that holds no value, as [Layers] describes, returns its error
-// and no Node. Layers that hold no Node return the root of an empty
+// and no Node. Layers that hold no layer return the root of an empty
 // document with no name. Every call returns the same Node.
 //
 // The merged document belongs to a [Source] of its own. The Source holds
@@ -321,7 +374,7 @@ func (l *Layers) document(ctx context.Context) (*Node, error) {
 	}
 
 	l.once.Do(func() {
-		l.merged = mergeLayers(context.WithoutCancel(ctx), l.nodes)
+		l.merged = mergeLayers(context.WithoutCancel(ctx), l.layers)
 	})
 
 	return l.merged.doc, l.merged.err
@@ -377,10 +430,24 @@ func (l *Layers) Validate(ctx context.Context, v Validator) error {
 // its own, on v through the merged document, as [Node.SelfValidate] runs
 // it. Each error binds in the layer that holds its value, as [Layers]
 // describes. It runs whatever [WithSelfValidation] says, and reads the
-// options Node.SelfValidate reads among opts. A layer that holds no
-// value adds nothing, and SelfValidate returns no error for it.
+// options Node.SelfValidate reads among opts.
+//
+// A layer that holds no value, as [Layers] describes, returns its error
+// before the step runs, as it does in DecodeInto. A program that fills v
+// by other means thus learns of a file that did not parse. A v that is
+// nil or a nil pointer returns an error wrapping [ErrSelfValidateTarget]
+// before that.
 func (l *Layers) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
-	doc, _ := l.document(ctx) //nolint:errcheck // A layer that holds no value adds nothing.
+	doc, layerErr := l.document(ctx)
+
+	err := checkSelfValidateTarget(v)
+	if err != nil {
+		return doc.bindOwn(err)
+	}
+
+	if layerErr != nil {
+		return layerErr
+	}
 
 	return doc.selfValidate(ctx, v, newDecodeConfig(opts))
 }
@@ -395,6 +462,23 @@ func (l *Layers) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) 
 // A path in err reads from the value the layers hold, whether it starts
 // at `$` or at `@`, and the bound error reports it as the document of
 // its layer reads it.
+//
+// Bind returns err bound and no other error, so it goes on without a
+// layer that holds no value, as [Layers] describes. A path then binds in
+// the layers that hold one, and nothing reports the file that did not
+// parse. A program that ran no decode of the layers checks
+// [Layers.Document] first, which returns the error of such a layer:
+//
+//	layers := niceyaml.NewLayers(base, prod)
+//
+//	if _, err := layers.Document(); err != nil {
+//		return err
+//	}
+//
+//	return layers.Bind(checkQuota(&cfg))
+//
+// An error that binds in a Source with no one document names the Source
+// and no position, and [SourceError.Node] returns nil for it.
 func (l *Layers) Bind(err error) error {
 	// A check that passed has nothing to bind, so its call merges no
 	// layer.

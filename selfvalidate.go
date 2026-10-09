@@ -60,6 +60,9 @@ import (
 //
 //	return niceyaml.NewLayers(base, prod).SelfValidate(ctx, &cfg)
 //
+// Layers.SelfValidate returns the error of a file that did not parse,
+// and the walk does not run.
+//
 // On a value that no layer changed, SelfValidate returns what the decode
 // with the walk on returns. The walk spells the key of each map entry as
 // the document does, so an error under a key such as 1.50 keeps that
