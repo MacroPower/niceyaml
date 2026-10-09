@@ -915,6 +915,13 @@ type textIndex struct {
 // read.
 func newTextIndex(input string) textIndex {
 	text, marks := bom.Drop(input)
+
+	// A text that lost no mark equals input, which the Source holds
+	// already, so the index reads input and holds no copy of it.
+	if len(marks) == 0 {
+		text = input
+	}
+
 	x := textIndex{text: text, marks: marks}
 
 	at := 0
