@@ -7678,3 +7678,865 @@ func TestViewport_UnchangedModeKeepsPosition(t *testing.T) {
 	assert.Equal(t, 3, m.SearchIndex(), "hunk context without diff")
 	assert.Equal(t, 30, m.YOffset(), "hunk context without diff")
 }
+
+// hitMap returns one row for each row of the viewport, with one character
+// for each of its cells: the index of the revision [yamlviewport.Model.HitAt]
+// finds there, or "." for a cell it reports false for.
+func hitMap(m *yamlviewport.Model) string {
+	rows := make([]string, 0, m.Height())
+
+	for y := range m.Height() {
+		var sb strings.Builder
+
+		for x := range m.Width() {
+			if hit, ok := m.HitAt(x, y); ok {
+				fmt.Fprint(&sb, hit.Revision)
+			} else {
+				sb.WriteByte('.')
+			}
+		}
+
+		rows = append(rows, sb.String())
+	}
+
+	return strings.Join(rows, "\n")
+}
+
+// screenCells returns the grapheme cluster each cell of each row of screen
+// shows, a rendered view. A cluster two cells wide fills both of its cells.
+func screenCells(screen string) [][]string {
+	var cells [][]string
+
+	for row := range strings.SplitSeq(ansi.Strip(screen), "\n") {
+		var rowCells []string
+
+		for row != "" {
+			cluster, width := ansi.FirstGraphemeCluster(row, ansi.GraphemeWidth)
+			for range width {
+				rowCells = append(rowCells, cluster)
+			}
+
+			row = row[len(cluster):]
+		}
+
+		cells = append(cells, rowCells)
+	}
+
+	return cells
+}
+
+func TestViewport_HitAt_Screen(t *testing.T) {
+	t.Parallel()
+
+	const (
+		v1 = "a: 1\nb: 日本語 x\nc: 3\n"
+		v2 = "a: 1\nb: 日本 y\nnew: line here\nc: 3\n"
+	)
+
+	framed := printer.New(
+		printer.WithStyles(style.Styles{}),
+		printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1)),
+	)
+
+	// Each want holds the hit map of the screen above it, which the
+	// comments draw with "·" for a space.
+	tcs := map[string]struct {
+		setup     func(m *yamlviewport.Model)
+		printer   *printer.Printer
+		style     lipgloss.Style
+		want      string
+		revisions []string
+		clip      int
+		width     int
+		height    int
+	}{
+		"clipped lines": {
+			revisions: []string{v1},
+			clip:      4,
+			width:     16,
+			height:    3,
+			want: stringtest.JoinLF(
+				".0000...........", // ·a: 1
+				".00000..........", // ·b: 日...
+				".0000...........", // ·c: 3
+			),
+		},
+		"clipped lines scrolled sideways": {
+			revisions: []string{v1},
+			clip:      4,
+			width:     6,
+			height:    3,
+			setup: func(m *yamlviewport.Model) {
+				m.SetWordWrap(false)
+				m.SetXOffset(3)
+			},
+			want: stringtest.JoinLF(
+				"00....", // ·1
+				"000...", // ·日...
+				"00....", // ·3
+			),
+		},
+		"one revision": {
+			revisions: []string{v1},
+			width:     16,
+			height:    4,
+			want: stringtest.JoinLF(
+				".0000...........", // ·a: 1
+				".00000000000....", // ·b: 日本語 x
+				".0000...........", // ·c: 3
+				"................",
+			),
+		},
+		"wide character the right edge cuts": {
+			revisions: []string{v1},
+			width:     8,
+			height:    3,
+			setup: func(m *yamlviewport.Model) {
+				m.SetWordWrap(false)
+				m.SetXOffset(1)
+			},
+			want: stringtest.JoinLF(
+				"0000....", // a: 1
+				"0000000.", // b: 日本·
+				"0000....", // c: 3
+			),
+		},
+		"wide character the left edge cuts": {
+			revisions: []string{v1},
+			width:     6,
+			height:    3,
+			setup: func(m *yamlviewport.Model) {
+				m.SetWordWrap(false)
+				m.SetXOffset(5)
+			},
+			want: stringtest.JoinLF(
+				"......",
+				".00000", // ·本語·
+				"......",
+			),
+		},
+		"scrolled down": {
+			revisions: []string{v2},
+			width:     16,
+			height:    2,
+			setup: func(m *yamlviewport.Model) {
+				m.SetYOffset(2)
+			},
+			want: stringtest.JoinLF(
+				".00000000000000.", // ·new: line here
+				".0000...........", // ·c: 3
+			),
+		},
+		"wrapped": {
+			revisions: []string{v2},
+			width:     11,
+			height:    5,
+			want: stringtest.JoinLF(
+				".0000......", // ·a: 1
+				".000000000.", // ·b: 日本 y
+				".000000000.", // ·new: line
+				".0000......", // ·here
+				".0000......", // ·c: 3
+			),
+		},
+		"unified diff": {
+			revisions: []string{v1, v2},
+			width:     20,
+			height:    6,
+			want: stringtest.JoinLF(
+				".1111...............", // ·a: 1
+				".00000000000........", // -b: 日本語 x
+				".111111111..........", // +b: 日本 y
+				".11111111111111.....", // +new: line here
+				".1111...............", // ·c: 3
+				"....................",
+			),
+		},
+		"hunks": {
+			revisions: []string{v1, v2},
+			width:     20,
+			height:    5,
+			setup: func(m *yamlviewport.Model) {
+				m.SetViewMode(yamlviewport.ViewModeHunks)
+				m.SetHunkContext(0)
+			},
+			want: stringtest.JoinLF(
+				"....................", // ·@@ -2 +2,2 @@
+				".00000000000........", // -b: 日本語 x
+				".111111111..........", // +b: 日本 y
+				".11111111111111.....", // +new: line here
+				"....................",
+			),
+		},
+		"side by side": {
+			revisions: []string{v1, v2},
+			width:     31,
+			height:    6,
+			setup: func(m *yamlviewport.Model) {
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+			},
+			want: stringtest.JoinLF(
+				".0000.............1111.........", // ·a: 1          │  a: 1
+				".00000000000......111111111....", // -b: 日本語 x   │ +b: 日本 y
+				"..................111111111....", //                │ +new: line
+				"..................1111.........", //                │  here
+				".0000.............1111.........", // ·c: 3          │  c: 3
+				"...............................",
+			),
+		},
+		"side by side without a diff": {
+			revisions: []string{v1, v2},
+			width:     31,
+			height:    5,
+			setup: func(m *yamlviewport.Model) {
+				m.SetViewMode(yamlviewport.ViewModeSideBySide)
+				m.SetDiffMode(yamlviewport.DiffModeNone)
+			},
+			want: stringtest.JoinLF(
+				".1111.............1111.........", // ·a: 1          │  a: 1
+				".111111111........111111111....", // ·b: 日本 y     │  b: 日本 y
+				".111111111........111111111....", // ·new: line     │  new: line
+				".1111.............1111.........", // ·here          │  here
+				".1111.............1111.........", // ·c: 3          │  c: 3
+			),
+		},
+		"frames of both container styles": {
+			revisions: []string{v2},
+			printer:   framed,
+			style:     lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Margin(1, 2),
+			width:     30,
+			height:    10,
+			want: stringtest.JoinLF(
+				"..............................",
+				"..............................", // ··╭────────────────────────╮
+				"..............................", // ··│┌──────────────────────┐│
+				"...........0000...............", // ··││    1  a: 1           ││
+				"...........000000000..........", // ··││    2  b: 日本 y      ││
+				"...........00000000000000.....", // ··││    3  new: line here ││
+				"...........0000...............", // ··││    4  c: 3           ││
+				"..............................", // ··│└──────────────────────┘│
+				"..............................", // ··╰────────────────────────╯
+				"..............................",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := tc.printer
+			if p == nil {
+				p = testPrinter()
+			}
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(p), yamlviewport.WithContainerStyle(tc.style))
+			m.SetWidth(tc.width)
+			m.SetHeight(tc.height)
+
+			sources := make([]*niceyaml.Source, 0, len(tc.revisions))
+			for _, text := range tc.revisions {
+				source := niceyaml.NewSourceFromString(text)
+
+				sources = append(sources, source)
+
+				if tc.clip > 0 {
+					m.AddRevision(yamlviewport.NewRevision(source.Name(), source.View().Clip(tc.clip)))
+				} else {
+					m.AddRevision(source)
+				}
+			}
+
+			if tc.setup != nil {
+				tc.setup(&m)
+			}
+
+			screen := m.View()
+			require.Equal(t, tc.want, hitMap(&m), "screen:\n%s", ansi.Strip(screen))
+
+			// Every hit names the rune its cell shows.
+			cells := screenCells(screen)
+
+			for y := -1; y <= m.Height(); y++ {
+				for x := -1; x <= m.Width(); x++ {
+					hit, ok := m.HitAt(x, y)
+					if !ok {
+						continue
+					}
+
+					require.GreaterOrEqual(t, y, 0)
+					require.Less(t, y, len(cells))
+					require.GreaterOrEqual(t, x, 0)
+					require.Less(t, x, len(cells[y]))
+
+					var want string
+
+					for col, r := range sources[hit.Revision].Lines().Line(hit.Position.Line).Runes() {
+						if col == hit.Position.Col {
+							want = string(r)
+						}
+					}
+
+					require.Equal(t, want, cells[y][x], "cell %d,%d gives %s of revision %d",
+						x, y, hit.Position, hit.Revision)
+				}
+			}
+		})
+	}
+}
+
+func TestViewport_HitAt(t *testing.T) {
+	t.Parallel()
+
+	const (
+		v1 = "a: 1\nb: 日本語 x\nc: 3\n"
+		v2 = "a: 1\nb: 日本 y\nnew: line here\nc: 3\n"
+		v3 = "a: 1\nnew: line here\nc: 3\nd: 4\n"
+	)
+
+	source := func(text string) yamlviewport.Revision {
+		return niceyaml.NewSourceFromString(text)
+	}
+
+	sideBySide := func(m *yamlviewport.Model) {
+		m.SetViewMode(yamlviewport.ViewModeSideBySide)
+	}
+
+	hunks := func(m *yamlviewport.Model) {
+		m.SetViewMode(yamlviewport.ViewModeHunks)
+		m.SetHunkContext(0)
+	}
+
+	annotated := niceyaml.NewSourceFromString(v1).View()
+	annotated.Annotate(0, line.Annotation{Content: "bad", Placement: line.Below})
+
+	// The mark at column 20 centers the window of the long line, which
+	// shows as "...mnopqrstuv..." behind the gutter.
+	marked := niceyaml.NewSourceFromString("a: 1\nk: abcdefghijklmnopqrstuvwxyz\nc: 3\n").View()
+	marked.Annotate(1, line.Annotation{Content: "x", Placement: line.Below, Col: 20})
+
+	clipped := yamlviewport.NewRevision("clipped", marked.Clip(10))
+
+	brackets := lipgloss.NewStyle().Transform(func(s string) string { return "[" + s + "]" })
+	bracketed := printer.New(
+		printer.WithStyles(style.New(lipgloss.NewStyle(), style.Set(kind.GenericHighlight, brackets))),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.DiffGutter),
+	)
+
+	framed := printer.New(
+		printer.WithStyles(style.Styles{}),
+		printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1)),
+	)
+
+	// The default test printer draws a gutter one cell wide, so the
+	// content of a row starts at cell 1.
+	tcs := map[string]struct {
+		setup     func(m *yamlviewport.Model)
+		printer   *printer.Printer
+		style     lipgloss.Style
+		revisions []yamlviewport.Revision
+		width     int
+		height    int
+		x         int
+		y         int
+		want      yamlviewport.Hit
+		ok        bool
+	}{
+		"first column of a line": {
+			revisions: []yamlviewport.Revision{source(v1)},
+			width:     16,
+			height:    4,
+			x:         1,
+			y:         1,
+			want:      yamlviewport.Hit{Position: position.New(1, 0)},
+			ok:        true,
+		},
+		"second cell of a wide character": {
+			revisions: []yamlviewport.Revision{source(v1)},
+			width:     16,
+			height:    4,
+			x:         5,
+			y:         1,
+			want:      yamlviewport.Hit{Position: position.New(1, 3)},
+			ok:        true,
+		},
+		"gutter": {
+			revisions: []yamlviewport.Revision{source(v1)},
+			width:     16,
+			height:    4,
+			x:         0,
+			y:         1,
+		},
+		"past the end of a row": {
+			revisions: []yamlviewport.Revision{source(v1)},
+			width:     16,
+			height:    4,
+			x:         5,
+			y:         0,
+		},
+		"below the last row": {
+			revisions: []yamlviewport.Revision{source(v1)},
+			width:     16,
+			height:    4,
+			x:         1,
+			y:         3,
+		},
+		"left of the viewport": {
+			revisions: []yamlviewport.Revision{source(v1)},
+			width:     16,
+			height:    4,
+			x:         -1,
+			y:         1,
+		},
+		"right of the viewport": {
+			revisions: []yamlviewport.Revision{source(v1)},
+			width:     4,
+			height:    4,
+			x:         4,
+			y:         1,
+			setup:     func(m *yamlviewport.Model) { m.SetWordWrap(false) },
+		},
+		"above the viewport": {
+			revisions: []yamlviewport.Revision{source(v1)},
+			width:     16,
+			height:    4,
+			x:         1,
+			y:         -1,
+		},
+		"below the viewport": {
+			revisions: []yamlviewport.Revision{source(v1)},
+			width:     16,
+			height:    2,
+			x:         1,
+			y:         2,
+		},
+		"row a line wraps onto": {
+			revisions: []yamlviewport.Revision{source(v2)},
+			width:     11,
+			height:    5,
+			x:         1,
+			y:         3,
+			want:      yamlviewport.Hit{Position: position.New(2, 10)},
+			ok:        true,
+		},
+		"scrolled down": {
+			revisions: []yamlviewport.Revision{source(v2)},
+			width:     16,
+			height:    2,
+			x:         3,
+			y:         1,
+			setup:     func(m *yamlviewport.Model) { m.SetYOffset(2) },
+			want:      yamlviewport.Hit{Position: position.New(3, 2)},
+			ok:        true,
+		},
+		"scrolled sideways": {
+			revisions: []yamlviewport.Revision{source(v1)},
+			width:     8,
+			height:    3,
+			x:         0,
+			y:         1,
+			setup: func(m *yamlviewport.Model) {
+				m.SetWordWrap(false)
+				m.SetXOffset(4)
+			},
+			want: yamlviewport.Hit{Position: position.New(1, 3)},
+			ok:   true,
+		},
+		"frames of both container styles": {
+			revisions: []yamlviewport.Revision{source(v2)},
+			printer:   framed,
+			style:     lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Margin(1, 2),
+			width:     30,
+			height:    10,
+			x:         11,
+			y:         4,
+			want:      yamlviewport.Hit{Position: position.New(1, 0)},
+			ok:        true,
+		},
+		"frame of the printer": {
+			revisions: []yamlviewport.Revision{source(v2)},
+			printer:   framed,
+			style:     lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Margin(1, 2),
+			width:     30,
+			height:    10,
+			x:         11,
+			y:         2,
+		},
+		"deleted line of a diff": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			width:     20,
+			height:    6,
+			x:         10,
+			y:         1,
+			want:      yamlviewport.Hit{Revision: 0, Position: position.New(1, 6)},
+			ok:        true,
+		},
+		"inserted line of a diff": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			width:     20,
+			height:    6,
+			x:         1,
+			y:         3,
+			want:      yamlviewport.Hit{Revision: 1, Position: position.New(2, 0)},
+			ok:        true,
+		},
+		"line below the changes keeps the index of its revision": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			width:     20,
+			height:    6,
+			x:         1,
+			y:         4,
+			want:      yamlviewport.Hit{Revision: 1, Position: position.New(3, 0)},
+			ok:        true,
+		},
+		"deleted line of a diff with the first revision": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2), source(v3)},
+			width:     20,
+			height:    6,
+			x:         1,
+			y:         1,
+			setup:     func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeOrigin) },
+			want:      yamlviewport.Hit{Revision: 0, Position: position.New(1, 0)},
+			ok:        true,
+		},
+		"deleted line of a diff with the revision before": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2), source(v3)},
+			width:     20,
+			height:    6,
+			x:         1,
+			y:         1,
+			want:      yamlviewport.Hit{Revision: 1, Position: position.New(1, 0)},
+			ok:        true,
+		},
+		"later revision without a diff": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			width:     20,
+			height:    6,
+			x:         1,
+			y:         2,
+			setup:     func(m *yamlviewport.Model) { m.SetDiffMode(yamlviewport.DiffModeNone) },
+			want:      yamlviewport.Hit{Revision: 1, Position: position.New(2, 0)},
+			ok:        true,
+		},
+		"hunk header": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			width:     20,
+			height:    5,
+			x:         3,
+			y:         0,
+			setup:     hunks,
+		},
+		"line of a hunk": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			width:     20,
+			height:    5,
+			x:         1,
+			y:         3,
+			setup:     hunks,
+			want:      yamlviewport.Hit{Revision: 1, Position: position.New(2, 0)},
+			ok:        true,
+		},
+		"left pane holds the revision the diff compares with": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			width:     31,
+			height:    6,
+			x:         1,
+			y:         4,
+			setup:     sideBySide,
+			want:      yamlviewport.Hit{Revision: 0, Position: position.New(2, 0)},
+			ok:        true,
+		},
+		"right pane holds the current revision": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			width:     31,
+			height:    6,
+			x:         18,
+			y:         4,
+			setup:     sideBySide,
+			want:      yamlviewport.Hit{Revision: 1, Position: position.New(3, 0)},
+			ok:        true,
+		},
+		"row a line wraps onto in the right pane": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			width:     31,
+			height:    6,
+			x:         18,
+			y:         3,
+			setup:     sideBySide,
+			want:      yamlviewport.Hit{Revision: 1, Position: position.New(2, 10)},
+			ok:        true,
+		},
+		"filler beside a taller pane": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			width:     31,
+			height:    6,
+			x:         1,
+			y:         2,
+			setup:     sideBySide,
+		},
+		"separator between the panes": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			width:     31,
+			height:    6,
+			x:         15,
+			y:         0,
+			setup:     sideBySide,
+		},
+		"gutter of the right pane": {
+			revisions: []yamlviewport.Revision{source(v1), source(v2)},
+			width:     31,
+			height:    6,
+			x:         17,
+			y:         0,
+			setup:     sideBySide,
+		},
+		"right pane without a diff": {
+			revisions: []yamlviewport.Revision{source(v1)},
+			width:     31,
+			height:    6,
+			x:         22,
+			y:         1,
+			setup:     sideBySide,
+			want:      yamlviewport.Hit{Position: position.New(1, 3)},
+			ok:        true,
+		},
+		"line of a slice keeps its index in the content": {
+			revisions: []yamlviewport.Revision{
+				yamlviewport.NewRevision(
+					"slice",
+					niceyaml.NewSourceFromString(v2).View().Slice(position.NewSpan(2, 4)),
+				),
+			},
+			width:  20,
+			height: 4,
+			x:      1,
+			y:      0,
+			want:   yamlviewport.Hit{Position: position.New(2, 0)},
+			ok:     true,
+		},
+		"annotation row": {
+			revisions: []yamlviewport.Revision{yamlviewport.NewRevision("annotated", annotated)},
+			width:     16,
+			height:    5,
+			x:         1,
+			y:         1,
+		},
+		"line below an annotation row": {
+			revisions: []yamlviewport.Revision{yamlviewport.NewRevision("annotated", annotated)},
+			width:     16,
+			height:    5,
+			x:         1,
+			y:         2,
+			want:      yamlviewport.Hit{Position: position.New(1, 0)},
+			ok:        true,
+		},
+		"first column a clipped line shows": {
+			revisions: []yamlviewport.Revision{clipped},
+			width:     20,
+			height:    5,
+			x:         4,
+			y:         1,
+			want:      yamlviewport.Hit{Position: position.New(1, 15)},
+			ok:        true,
+		},
+		"last column a clipped line shows": {
+			revisions: []yamlviewport.Revision{clipped},
+			width:     20,
+			height:    5,
+			x:         13,
+			y:         1,
+			want:      yamlviewport.Hit{Position: position.New(1, 24)},
+			ok:        true,
+		},
+		"ellipsis at the start of a clipped line": {
+			revisions: []yamlviewport.Revision{clipped},
+			width:     20,
+			height:    5,
+			x:         3,
+			y:         1,
+		},
+		"ellipsis at the end of a clipped line": {
+			revisions: []yamlviewport.Revision{clipped},
+			width:     20,
+			height:    5,
+			x:         14,
+			y:         1,
+		},
+		"clipped line scrolled sideways": {
+			revisions: []yamlviewport.Revision{clipped},
+			width:     8,
+			height:    5,
+			x:         0,
+			y:         1,
+			setup: func(m *yamlviewport.Model) {
+				m.SetWordWrap(false)
+				m.SetXOffset(6)
+			},
+			want: yamlviewport.Hit{Position: position.New(1, 17)},
+			ok:   true,
+		},
+		"clipped line with a search match in another window": {
+			revisions: []yamlviewport.Revision{clipped},
+			width:     24,
+			height:    5,
+			x:         17,
+			y:         1,
+			setup:     func(m *yamlviewport.Model) { m.SetSearchTerm("yz") },
+			want:      yamlviewport.Hit{Position: position.New(1, 28)},
+			ok:        true,
+		},
+		"line below a clipped line": {
+			revisions: []yamlviewport.Revision{clipped},
+			width:     20,
+			height:    5,
+			x:         4,
+			y:         3,
+			want:      yamlviewport.Hit{Position: position.New(2, 3)},
+			ok:        true,
+		},
+		"bracket a highlight adds before a match": {
+			revisions: []yamlviewport.Revision{source("k: ab cd\n")},
+			printer:   bracketed,
+			width:     16,
+			height:    2,
+			x:         4,
+			y:         0,
+			setup:     func(m *yamlviewport.Model) { m.SetSearchTerm("ab") },
+			want:      yamlviewport.Hit{Position: position.New(0, 3)},
+			ok:        true,
+		},
+		"bracket a highlight adds after a match": {
+			revisions: []yamlviewport.Revision{source("k: ab cd\n")},
+			printer:   bracketed,
+			width:     16,
+			height:    2,
+			x:         7,
+			y:         0,
+			setup:     func(m *yamlviewport.Model) { m.SetSearchTerm("ab") },
+			want:      yamlviewport.Hit{Position: position.New(0, 4)},
+			ok:        true,
+		},
+		"column after a highlight that adds brackets": {
+			revisions: []yamlviewport.Revision{source("k: ab cd\n")},
+			printer:   bracketed,
+			width:     16,
+			height:    2,
+			x:         9,
+			y:         0,
+			setup:     func(m *yamlviewport.Model) { m.SetSearchTerm("ab") },
+			want:      yamlviewport.Hit{Position: position.New(0, 6)},
+			ok:        true,
+		},
+		"no revision": {
+			width:  16,
+			height: 4,
+			x:      1,
+			y:      0,
+		},
+		"no height": {
+			revisions: []yamlviewport.Revision{source(v1)},
+			width:     16,
+			height:    0,
+			x:         1,
+			y:         0,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := tc.printer
+			if p == nil {
+				p = testPrinter()
+			}
+
+			m := yamlviewport.New(yamlviewport.WithPrinter(p), yamlviewport.WithContainerStyle(tc.style))
+			m.SetWidth(tc.width)
+			m.SetHeight(tc.height)
+			m.AddRevisions(tc.revisions...)
+
+			if tc.setup != nil {
+				tc.setup(&m)
+			}
+
+			got, ok := m.HitAt(tc.x, tc.y)
+			assert.Equal(t, tc.ok, ok, "screen:\n%s", ansi.Strip(m.View()))
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestViewport_HitAt_ZeroModel(t *testing.T) {
+	t.Parallel()
+
+	var m yamlviewport.Model
+
+	_, ok := m.HitAt(0, 0)
+	assert.False(t, ok)
+}
+
+func TestViewport_HitAt_PathAt(t *testing.T) {
+	t.Parallel()
+
+	// A parent names the value under the pointer from the hit: the
+	// revision picks the document, and the position goes to PathAt as it
+	// is, whatever the diff shows around the line.
+	before := niceyaml.NewSourceFromString("spec:\n  replicas: 3\n  paused: false\n")
+	after := niceyaml.NewSourceFromString("spec:\n  replicas: 5\n  image: app\n  paused: false\n")
+
+	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
+	m.SetWidth(24)
+	m.SetHeight(6)
+	m.AddRevisions(before, after)
+
+	sources := []*niceyaml.Source{before, after}
+
+	tcs := map[string]struct {
+		want string
+		x    int
+		y    int
+	}{
+		"deleted value": {
+			x:    13,
+			y:    1,
+			want: "$.spec.replicas", // -  replicas: 3
+		},
+		"inserted value": {
+			x:    13,
+			y:    2,
+			want: "$.spec.replicas", // +  replicas: 5
+		},
+		"inserted key": {
+			x:    3,
+			y:    3,
+			want: "$.spec.image~", // +  image: app
+		},
+		"value below the changes": {
+			x:    11,
+			y:    4,
+			want: "$.spec.paused", //    paused: false
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			// Each subtest reads a copy, since HitAt fills the row
+			// counts of the Model it reads.
+			m := m
+
+			hit, ok := m.HitAt(tc.x, tc.y)
+			require.True(t, ok, "screen:\n%s", ansi.Strip(m.View()))
+
+			doc, err := sources[hit.Revision].Document()
+			require.NoError(t, err)
+
+			path, ok := doc.PathAt(hit.Position)
+			require.True(t, ok)
+			assert.Equal(t, tc.want, path.String())
+		})
+	}
+}

@@ -73,6 +73,20 @@
 // Configure these styles in your theme (see the
 // [go.jacobcolvin.com/niceyaml/style/theme] package).
 //
+// # Mouse
+//
+// The viewport scrolls with the mouse wheel and acts on no click.
+// [Model.HitAt] maps a cell of the viewport to a position in a revision,
+// so the parent model decides what a click or a hover does there:
+//
+//	case tea.MouseClickMsg:
+//		if hit, ok := m.viewport.HitAt(msg.X, msg.Y); ok {
+//			m.selected = hit
+//		}
+//
+// A diff shows lines of two revisions, so the [Hit] names the revision
+// that holds the line under the cell with the position in it.
+//
 // # Customization
 //
 // Provide a custom [printer.Printer] via [WithPrinter] to control syntax

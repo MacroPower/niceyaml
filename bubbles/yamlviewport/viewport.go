@@ -163,6 +163,20 @@ const (
 	ViewModeSideBySide
 )
 
+// Hit is a place in a revision that a cell of the viewport shows.
+// [Model.HitAt] returns one for the cell under a pointer.
+type Hit struct {
+	// Position is the position the cell shows, in the coordinates of the
+	// content of the view the revision hands out. For a
+	// [*niceyaml.Source] those are the coordinates of
+	// [niceyaml.Source.Lines], so the position goes to
+	// [niceyaml.Node.PathAt] or [niceyaml.Source.Offset] as it is.
+	Position position.Position
+	// Revision is the index in the history of the revision that holds
+	// the position, as [Model.RevisionIndex] counts.
+	Revision int
+}
+
 // Option configures a [Model].
 //
 // Available options:
@@ -290,6 +304,9 @@ type Model struct {
 	// Cached diff between the base and current revisions at the indexes in
 	// diffKey below.
 	diffResult *diff.Result
+	// The views of the base and current revisions that diffResult
+	// compares, which hold every line the diff shows.
+	diffViews [2]*line.View
 	// The content on display before search highlights, for the left pane or
 	// main content and for the right pane of a side-by-side diff.
 	// In ViewModeFull: the unified diff, or the view of the revision.
@@ -1334,7 +1351,8 @@ func (m *Model) getDiffResult() *diff.Result {
 		// A diff compares the lines each view holds, as the other view
 		// modes render them, rather than every line of the content the
 		// view is over.
-		m.diffResult = diff.Diff(m.revision(base).View().Held(), m.currentRevision().View().Held())
+		m.diffViews = [2]*line.View{m.revision(base).View(), m.currentRevision().View()}
+		m.diffResult = diff.Diff(m.diffViews[0].Held(), m.diffViews[1].Held())
 		m.diffKey = pair
 	}
 
@@ -1840,9 +1858,7 @@ func (m *Model) rowOffset(r int) int {
 // while the content between them scrolls. A wide character cut by the left
 // edge of the window shows as blank cells.
 func (m *Model) cutRow(row string, offset, width int) string {
-	frame := m.printer.ContainerStyle()
-	left := frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft()
-	right := frame.GetHorizontalFrameSize() - left
+	left, right := m.printerFrame()
 
 	inner := ansi.StringWidth(row) - left - right
 	if inner < 0 {
@@ -1852,20 +1868,7 @@ func (m *Model) cutRow(row string, offset, width int) string {
 	visible := max(0, width-left-right)
 	body := printer.Cut(row, left, left+inner)
 
-	// The cut drops a wide cluster that straddles offset. A cut that ends
-	// at a column inside a cluster comes up short of that column, so start
-	// moves to the next cluster boundary, and blank cells fill the columns
-	// of the dropped cluster.
-	start := offset
-	for start < min(inner, offset+visible) {
-		if _, w := printer.CutWidth(body, 0, start); w == start {
-			break
-		}
-
-		start++
-	}
-
-	content, contentWidth := printer.CutWidth(body, start, offset+visible)
+	content, start, contentWidth := cutWindow(body, inner, offset, visible)
 	if start > offset {
 		content = m.printer.Style(kind.Text).Render(strings.Repeat(" ", start-offset)) + content
 		contentWidth += start - offset
@@ -1880,6 +1883,39 @@ func (m *Model) cutRow(row string, offset, width int) string {
 	}
 
 	return printer.Cut(row, 0, left) + content + printer.Cut(row, left+inner, left+inner+right)
+}
+
+// printerFrame returns the cells the frame of the printer's container style
+// takes on the left and on the right of every row.
+func (m *Model) printerFrame() (int, int) {
+	frame := m.printer.ContainerStyle()
+	left := frame.GetMarginLeft() + frame.GetBorderLeftSize() + frame.GetPaddingLeft()
+
+	return left, frame.GetHorizontalFrameSize() - left
+}
+
+// cutWindow cuts body, the content columns of a rendered row, which take
+// inner cells, to the window of visible cells that starts at offset. It
+// returns the cut, the cell of body the cut starts at, and the cells it
+// takes.
+//
+// The cut drops a wide cluster that straddles either edge of the window. A
+// cut that ends at a column inside a cluster comes up short of that
+// column, so the start moves to the next cluster boundary, and the caller
+// fills the columns of the dropped cluster with blank cells.
+func cutWindow(body string, inner, offset, visible int) (string, int, int) {
+	start := offset
+	for start < min(inner, offset+visible) {
+		if _, w := printer.CutWidth(body, 0, start); w == start {
+			break
+		}
+
+		start++
+	}
+
+	content, width := printer.CutWidth(body, start, offset+visible)
+
+	return content, start, width
 }
 
 // SetYOffset sets the vertical offset, in rows, clamped to the scrollable
@@ -2025,6 +2061,185 @@ func (m *Model) VisibleRowCount() int {
 	}
 
 	return clamp(m.TotalRowCount()-m.YOffset(), 0, m.maxHeight())
+}
+
+// HitAt returns the place in a revision that the cell at column x of row y
+// of the viewport shows, and true. The cell counts from the top left
+// corner of what [Model.View] renders, the frame of the container style
+// included. A parent that draws the viewport elsewhere subtracts the cell
+// it draws that corner at from the cell of a mouse message:
+//
+//	case tea.MouseClickMsg:
+//		hit, ok := m.viewport.HitAt(msg.X-m.left, msg.Y-m.top)
+//		if !ok {
+//			break
+//		}
+//
+//		if path, ok := m.docs[hit.Revision].PathAt(hit.Position); ok {
+//			m.status = path.String()
+//		}
+//
+// A diff shows lines of two revisions, so the [Hit] names the revision
+// that holds the line under the cell. That is the revision the diff
+// compares with for a deleted line and for every line of the left pane of
+// [ViewModeSideBySide], and the current revision for any other line. The
+// position counts in the content of that revision, whatever the diff
+// shows around the line. Without a diff both panes of ViewModeSideBySide
+// show the current revision.
+//
+// HitAt reports false for a cell that shows no content of a revision. Such
+// a cell lies in the frame of either container style, in the gutter, in
+// the separator between two panes, or on an annotation row such as a hunk
+// header. The filler past the end of a row, beside a shorter pane, and
+// below the last row shows none either. A wide character that an edge of
+// the window cuts shows as blank cells, and HitAt reports false for those
+// too. It reports false for every cell of a zero Model.
+//
+// A revision whose view clips its lines, as [line.View.Clip] sets one
+// to, shows part of a long line with "..." for the rest. A cell of such
+// a line gives the column of the line it shows, and a cell of a "..."
+// reports false.
+func (m *Model) HitAt(x, y int) (Hit, bool) {
+	if m.printer == nil || !m.canRender() || !m.hasContent() {
+		return Hit{}, false
+	}
+
+	// The content area lies inside the frame of the viewport's container
+	// style.
+	x -= m.style.GetMarginLeft() + m.style.GetBorderLeftSize() + m.style.GetPaddingLeft()
+	y -= m.style.GetMarginTop() + m.style.GetBorderTopSize() + m.style.GetPaddingTop()
+
+	if x < 0 || x >= m.maxWidth() || y < 0 || y >= m.maxHeight() {
+		return Hit{}, false
+	}
+
+	m.ensureRows()
+
+	// No line owns a row of the printer's frame, above the first line or
+	// below the last, or a row that fills the height below the view.
+	row := m.yOffset + y
+	if row < m.rows.top || row >= m.rows.total()-m.rows.bottom {
+		return Hit{}, false
+	}
+
+	// The last line that starts at or above the row.
+	k := sort.SearchInts(m.rows.sums, row+1) - 1
+	row -= m.rows.sums[k]
+
+	width, right := m.paneWidth(), false
+
+	if m.viewMode == ViewModeSideBySide {
+		// The right pane ends at the edge of the content area, and the
+		// separator fills the cells between the panes.
+		switch second := m.maxWidth() - width; {
+		case x >= second:
+			x -= second
+			right = true
+
+		case x >= width:
+			return Hit{}, false
+		}
+	}
+
+	// A line that wraps taller in the other pane leaves blank rows below
+	// its own rows in this one.
+	count := m.rows.left[k]
+	if right && m.rows.right != nil {
+		count = m.rows.right[k]
+	}
+
+	if row >= count {
+		return Hit{}, false
+	}
+
+	// Without a diff, both panes show the left content.
+	right = right && m.baseRight != nil
+
+	pos, ok := m.paneHit(right, k, row, x, width)
+	if !ok {
+		return Hit{}, false
+	}
+
+	return m.revisionHit(right, pos)
+}
+
+// paneHit returns the position in the content of the left pane, or of the
+// right one when right is true, that a cell of the pane shows, and true.
+// The cell counts from the left edge of the pane, which is width cells
+// wide, on the given row of the k-th rendered line. It reports false for a
+// cell that shows no content, as [Model.HitAt] lists them.
+func (m *Model) paneHit(right bool, k, row, cell, width int) (position.Position, bool) {
+	left, rightFrame := m.printerFrame()
+	visible := max(0, width-left-rightFrame)
+
+	// The frame of the printer's container stays in place on either side,
+	// and the content between its sides scrolls.
+	cell -= left
+	if cell < 0 || cell >= visible {
+		return position.Position{}, false
+	}
+
+	i := m.rows.indices[k]
+	p := m.renderPrinter(width)
+	view := m.highlighted(right, position.NewSpan(i, i+1))
+	layout := p.Layout(view)
+
+	at := m.xOffset + cell
+
+	pos, ok := layout.PositionAt(row, at-layout.GutterWidth())
+	if !ok {
+		return position.Position{}, false
+	}
+
+	// Print frames the line it renders, so the rows of the line follow the
+	// top frame.
+	rows := splitLines(p.Print(view))
+	if m.rows.top+row >= len(rows) {
+		return position.Position{}, false
+	}
+
+	rendered := rows[m.rows.top+row]
+	inner := ansi.StringWidth(rendered) - left - rightFrame
+
+	// The window shows blank cells in place of a cluster that either of
+	// its edges cuts, as cutRow draws the row.
+	_, start, shown := cutWindow(printer.Cut(rendered, left, left+inner), inner, m.xOffset, visible)
+	if at < start || at >= start+shown {
+		return position.Position{}, false
+	}
+
+	return pos, true
+}
+
+// revisionHit returns the [Hit] of pos, a position in the content of the
+// left pane, or of the right one when right is true, and true. A diff
+// holds the lines of the two revisions it compares, so the hit names the
+// revision whose view holds the line and the index the line has there. It
+// reports false for a line neither revision holds.
+func (m *Model) revisionHit(right bool, pos position.Position) (Hit, bool) {
+	if !m.ShowingDiff() {
+		return Hit{Revision: m.revIndex, Position: pos}, true
+	}
+
+	pane := m.baseLeft
+	if right {
+		pane = m.baseRight
+	}
+
+	// The left pane of a side-by-side diff holds lines of the revision the
+	// diff compares with, and so does every deleted line of a unified
+	// diff. Every other line comes from the current revision.
+	index, view := m.revIndex, m.diffViews[1]
+	if pane.Flag(pos.Line) == line.FlagDeleted || (m.viewMode == ViewModeSideBySide && !right) {
+		index, view = m.diffBaseIndex(), m.diffViews[0]
+	}
+
+	i, ok := view.Index(pane.Lines().Line(pos.Line))
+	if !ok {
+		return Hit{}, false
+	}
+
+	return Hit{Revision: index, Position: position.New(i, pos.Col)}, true
 }
 
 // SetSearchTerm sets the search term and updates highlights.
