@@ -21,7 +21,8 @@ import (
 // rows of their own, which row a position in the view lands on, and how
 // wide the rows are. A viewer that scrolls by rendered row maps rows to
 // lines and back through it, and one that scrolls horizontally reads the
-// width of the widest row.
+// width of the widest row. A viewer that takes a pointer maps the cell
+// under it back to a position.
 //
 // A Layout styles and wraps each line as [Printer.Print] does, since a
 // style may transform the text it styles and change its width. It
@@ -34,9 +35,10 @@ import (
 // [line.View] method takes, so a viewer that finds the line at a row
 // reaches its decoration through the view with the same index.
 // [Layout.RowOf] and [Layout.CellOf] take a position in the content, as a
-// search yields one. On a line the view clips, as [line.View.Clip] sets
-// a view to, a column the row leaves out takes the row and the cell of
-// the "..." that stands for it.
+// search yields one, and [Layout.PositionAt] returns one. On a line the
+// view clips, as [line.View.Clip] sets a view to, a column the row leaves
+// out takes the row and the cell of the "..." that stands for it, and no
+// cell gives that column back.
 // A line the view does not hold takes no rows and starts nowhere. Rows
 // count from 0 at the first row of the first line and leave the container
 // style out. An empty view has no rows, though [Printer.Print] draws one
@@ -57,7 +59,7 @@ type Layout struct {
 // rows the line takes, annotation rows included, and the width of the
 // widest of them. Its shown text maps a column of the content to the cell
 // it takes on its row. For a line the view clips, the content is the text
-// of its row, and clip maps a column of the line to it.
+// of its row, and clip maps a column of the line to it and back.
 type lineLayout struct {
 	clip    *clip.Map
 	cols    []int
@@ -77,13 +79,26 @@ func (ll lineLayout) col(col int) int {
 	return ll.clip.Col(col)
 }
 
+// lineCol returns the column of the line that col, a column of the
+// content of the row, shows, and true. It reports false for a column of
+// a "..." on a line the view clips, which shows no column of the line.
+func (ll lineLayout) lineCol(col int) (int, bool) {
+	if ll.clip == nil {
+		return col, true
+	}
+
+	return ll.clip.LineCol(col)
+}
+
 // shownLine is the shown text of one line, the rendered line without its
-// escape sequences, with the runs it renders in and the offset in the
-// text at which each wrapped row begins.
+// escape sequences, with the runs it renders in. It holds the offset in
+// the text at which each wrapped row begins, and the offset just past the
+// last rune each row shows.
 type shownLine struct {
 	text       string
 	runs       []runSpan
 	starts     []int
+	ends       []int
 	contentLen int
 }
 
@@ -195,6 +210,7 @@ func mapRows(contentLen int, rendered string, runs []runSpan, pieces []string) w
 			text:       shownText,
 			runs:       runs,
 			starts:     offsets,
+			ends:       endOffsets,
 			contentLen: contentLen,
 		},
 	}
@@ -304,6 +320,22 @@ func sourceCol(runs []runSpan, shown []rune, offset, contentLen int) int {
 	}
 
 	return run.col + min(next, run.cols)
+}
+
+// shownCol returns the column of the content that the rune at offset in
+// shown, the shown text of a line, shows. It is the column [sourceCol]
+// returns, kept inside the run that shows the rune. A rune a transform
+// adds after the text of a run thus takes the last column of the run,
+// where sourceCol gives it the column past the run.
+func shownCol(runs []runSpan, shown []rune, offset, contentLen int) int {
+	col := sourceCol(runs, shown, offset, contentLen)
+	if len(runs) == 0 {
+		return col
+	}
+
+	run := runs[max(0, sort.Search(len(runs), func(i int) bool { return runs[i].shown > offset })-1)]
+
+	return max(run.col, min(col, run.col+run.cols-1))
 }
 
 // nbsp is the non-breaking space, the one Unicode space the wrapper keeps
@@ -534,6 +566,67 @@ func (l Layout) CellOf(pos position.Position) int {
 	past := max(0, col-sl.contentLen)
 
 	return cell + min(past, math.MaxInt-cell)
+}
+
+// PositionAt returns the position in the content of the column that
+// cell of row shows, and true. It inverts [Layout.LineAt],
+// [Layout.RowOf], and [Layout.CellOf], so a viewer finds the content
+// under a pointer with it. The cell counts from the start of the row with
+// the gutter left out, as [Layout.CellOf] counts it, so a viewer
+// subtracts [Layout.GutterWidth] from a cell of the rendered row.
+//
+// Any cell of a grapheme cluster gives the column where the cluster
+// starts, so the second cell of a wide rune gives the column of that
+// rune. A style's transform adds runes around the run it styles, such as
+// brackets. A cell that shows one gives a column of that run: the first
+// for a rune before the text of the run, and the last for a rune after
+// it.
+//
+// PositionAt reports false where a row shows no content, which is on a
+// row outside the layout, on an annotation row, and on a cell past the
+// last rune the row shows. A negative cell lies in the gutter and reports
+// false too. The line ending, the spaces the wrapper dropped at a break,
+// and a rune of no width, such as a zero-width space, take no cell, so no
+// cell gives their columns.
+//
+// On a line the view clips, a cell gives the column of the line it
+// shows, whatever the row leaves out before it. A cell of a "..." shows
+// no column of the line, so PositionAt reports false for it.
+// [line.View.Windows] returns the columns the row keeps.
+func (l Layout) PositionAt(row, cell int) (position.Position, bool) {
+	if row < 0 || row >= l.Rows() || cell < 0 {
+		return position.Position{}, false
+	}
+
+	k := rowIndex(l.starts[:len(l.lines)], row)
+	ll := l.lines[k]
+
+	// The content rows of the line sit at the offsets, and every other
+	// row of the line belongs to an annotation.
+	j, ok := slices.BinarySearch(ll.offsets, row-l.starts[k])
+	if !ok {
+		return position.Position{}, false
+	}
+
+	sl := ll.shown
+	shown := []rune(sl.text)
+	from, to := sl.starts[j], sl.ends[j]
+	cellsRow := cells.NewRow(string(shown[from:to]))
+
+	if cell >= cellsRow.Width(to-from) {
+		return position.Position{}, false
+	}
+
+	// The first rune whose cluster ends past the cell belongs to the
+	// cluster that covers it.
+	at := cellsRow.Start(sort.Search(to-from, func(i int) bool { return cellsRow.Width(i+1) > cell }))
+
+	col, ok := ll.lineCol(shownCol(sl.runs, shown, from+at, sl.contentLen))
+	if !ok {
+		return position.Position{}, false
+	}
+
+	return position.New(l.indices[k], col), true
 }
 
 // Width returns the width in cells of the widest row, gutter included,

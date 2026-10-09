@@ -94,7 +94,8 @@
 // it: how many rows each line takes, which row a position lands on, and
 // how wide the rows are. A viewer that scrolls by rendered row maps rows
 // to lines and back with it, and one that scrolls horizontally learns how
-// far the content reaches.
+// far the content reaches. A viewer that takes a pointer finds the
+// position a cell of a row shows with [Layout.PositionAt].
 //
 // A viewer that scrolls horizontally shows a window of each printed row.
 // [Layout.CellOf] gives the cell of a column, and [Cut] cuts a printed row

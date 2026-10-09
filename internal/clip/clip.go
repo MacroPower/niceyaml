@@ -6,7 +6,8 @@
 // left out. A [Map] holds that layout. It cuts the text of the row from
 // the text of the line. It also maps a column of the line to the column
 // of the row that shows it, so a renderer draws a caret or a style under
-// the rune it marks.
+// the rune it marks. It maps a column of the row back to the column of
+// the line it shows, so a viewer finds the rune under a pointer.
 //
 //	m := clip.New(26, []position.Span{position.NewSpan(0, 4), position.NewSpan(20, 26)})
 //	m.Content("abcdefghijklmnopqrstuvwxyz") // "abcd...uvwxyz"
@@ -140,6 +141,27 @@ func (m *Map) Col(col int) int {
 	}
 
 	return p.At + col - p.Cols.Start
+}
+
+// LineCol returns the column of the line that col, a column of the row,
+// shows, and true. It inverts [Map.Col] on the columns the row keeps. It
+// reports false for a column of an ellipsis, which shows no column of the
+// line, and for a column past the end of the row.
+func (m *Map) LineCol(col int) (int, bool) {
+	col = max(0, col)
+	if col >= m.shown {
+		return 0, false
+	}
+
+	// The last piece that starts at or before col, which holds it. Search
+	// finds the first piece that starts past col, and the first piece
+	// starts at column 0.
+	p := m.pieces[sort.Search(len(m.pieces), func(i int) bool { return m.pieces[i].At > col })-1]
+	if p.Gap {
+		return 0, false
+	}
+
+	return p.Cols.Start + col - p.At, true
 }
 
 // Spans returns the columns of the row that show cols, a run of columns
