@@ -9,7 +9,8 @@ import (
 	"github.com/goccy/go-yaml/token"
 )
 
-// Position represents a 0-indexed line and column location.
+// Position represents a 0-indexed line and column location. Col counts
+// runes, which are Unicode code points, and not bytes or terminal cells.
 //
 // Note that it is not an offset of [token.Position] values. Rather, it
 // represents the absolute line and column in a document, including in cases

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"testing/fstest"
 	"testing/iotest"
+	"unicode/utf8"
 
 	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml"
@@ -1436,12 +1437,392 @@ func TestNewSourceFromString_ByteOrderMarkLaterDocument(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, map[string]any{"b": uint64(2)}, got)
 
-			// The positions count in the text the Source holds, so an
+			// The positions count in the text without the marks, so an
 			// error at the value of b points at it.
 			err = docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
 			assert.EqualError(t, err, tc.err)
 		})
 	}
+}
+
+func TestSource_Text(t *testing.T) {
+	t.Parallel()
+
+	// The lines and the token Origins each change some of these texts,
+	// and Text returns every one as the Source read it.
+	tcs := map[string]string{
+		"empty":                     "",
+		"LF":                        "a: 1\nb: 2\n",
+		"no final line ending":      "a: 1\nb: 2",
+		"CRLF":                      "a: 1\r\nb: 2\r\n",
+		"bare CR":                   "a: 1\rb: 2\r",
+		"trailing blank lines":      "a: 1\n\n\n",
+		"byte order mark":           "\ufeffa: 1\n",
+		"mark at a document marker": "a: 1\n\ufeff---\nb: 2\n",
+		"invalid UTF-8":             "a: \"x\xffy\"\n",
+		"tag that ends its line":    "a: !t\nb: 1\n",
+		"tag that ends the file":    "a: 1\nb: !t",
+	}
+
+	for name, text := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, text, niceyaml.NewSourceFromString(text).Text())
+			assert.Equal(t, text, niceyaml.NewSourceFromBytes([]byte(text)).Text())
+
+			fromReader, err := niceyaml.NewSourceFromReader(strings.NewReader(text))
+			require.NoError(t, err)
+			assert.Equal(t, text, fromReader.Text())
+
+			fsys := fstest.MapFS{"a.yaml": &fstest.MapFile{Data: []byte(text)}}
+
+			fromFS, err := niceyaml.NewSourceFromFS(fsys, "a.yaml")
+			require.NoError(t, err)
+			assert.Equal(t, text, fromFS.Text())
+
+			path := filepath.Join(t.TempDir(), "a.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(text), 0o600))
+
+			fromFile, err := niceyaml.NewSourceFromFile(path)
+			require.NoError(t, err)
+			assert.Equal(t, text, fromFile.Text())
+		})
+	}
+}
+
+func TestSource_Offset(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		line  int
+		col   int
+		want  int
+		ok    bool
+	}{
+		"start of the text": {
+			input: "a: 1\nb: 2\n",
+			want:  0,
+			ok:    true,
+		},
+		"column of a later line": {
+			input: "a: 1\nb: 2\n",
+			line:  1,
+			col:   3,
+			want:  8,
+			ok:    true,
+		},
+		"rune of several bytes takes one column": {
+			input: "é: 日本\n",
+			line:  0,
+			col:   4,
+			want:  7,
+			ok:    true,
+		},
+		"LF takes the column after the content": {
+			input: "a: 1\nb: 2\n",
+			line:  0,
+			col:   4,
+			want:  4,
+			ok:    true,
+		},
+		"column past a LF is the next line": {
+			input: "a: 1\nb: 2\n",
+			line:  0,
+			col:   5,
+			want:  5,
+			ok:    true,
+		},
+		"CRLF takes one column": {
+			input: "a: 1\r\nb: 2\r\n",
+			line:  0,
+			col:   4,
+			want:  4,
+			ok:    true,
+		},
+		"column past a CRLF is the next line": {
+			input: "a: 1\r\nb: 2\r\n",
+			line:  0,
+			col:   5,
+			want:  6,
+			ok:    true,
+		},
+		"line after a CRLF": {
+			input: "a: 1\r\nb: 2\r\n",
+			line:  1,
+			col:   0,
+			want:  6,
+			ok:    true,
+		},
+		"line after a bare CR": {
+			input: "a: 1\rb: 2\r",
+			line:  1,
+			col:   0,
+			want:  5,
+			ok:    true,
+		},
+		"end of a text with no final line ending": {
+			input: "a: 1",
+			line:  0,
+			col:   4,
+			want:  4,
+			ok:    true,
+		},
+		"past the end of a text with no final line ending": {
+			input: "a: 1",
+			line:  0,
+			col:   5,
+		},
+		"line after a text with no final line ending": {
+			input: "a: 1",
+			line:  1,
+			col:   0,
+		},
+		"end of a text after its final line ending": {
+			input: "a: 1\n",
+			line:  1,
+			col:   0,
+			want:  5,
+			ok:    true,
+		},
+		"past the end of a text after its final line ending": {
+			input: "a: 1\n",
+			line:  1,
+			col:   1,
+		},
+		"line past the last": {
+			input: "a: 1\n",
+			line:  2,
+			col:   0,
+		},
+		"column past a line ending": {
+			input: "a: 1\nb: 2\n",
+			line:  0,
+			col:   6,
+		},
+		"empty text": {
+			input: "",
+			want:  0,
+			ok:    true,
+		},
+		"past the end of an empty text": {
+			input: "",
+			line:  0,
+			col:   1,
+		},
+		"negative line": {
+			input: "a: 1\n",
+			line:  -1,
+			col:   0,
+		},
+		"negative column": {
+			input: "a: 1\n",
+			line:  0,
+			col:   -1,
+		},
+		"byte order mark lies before column 0": {
+			input: "\ufeffa: 1\n",
+			want:  3,
+			ok:    true,
+		},
+		"column after a byte order mark": {
+			input: "\ufeffa: 1\n",
+			line:  0,
+			col:   3,
+			want:  6,
+			ok:    true,
+		},
+		"mark at a document marker lies before column 0": {
+			input: "a: 1\n\ufeff---\nb: 2\n",
+			line:  1,
+			col:   0,
+			want:  8,
+			ok:    true,
+		},
+		"line after a mark at a document marker": {
+			input: "a: 1\n\ufeff---\nb: 2\n",
+			line:  2,
+			col:   3,
+			want:  15,
+			ok:    true,
+		},
+		"mark between a bare CR and a LF": {
+			input: "\r\ufeff\na: 1\n",
+			line:  1,
+			col:   3,
+			want:  8,
+			ok:    true,
+		},
+		"line ending around a mark": {
+			input: "\r\ufeff\na: 1\n",
+			want:  0,
+			ok:    true,
+		},
+		"mark the tokenizer keeps takes one column": {
+			input: "a: 1\n\ufeffb: 2\n",
+			line:  1,
+			col:   1,
+			want:  8,
+			ok:    true,
+		},
+		"invalid UTF-8 byte takes one column": {
+			input: "a: \"x\xffy\"\n",
+			line:  0,
+			col:   6,
+			want:  6,
+			ok:    true,
+		},
+		"line after a tag that ends its line": {
+			input: "a: !t\nb: 1\n",
+			line:  1,
+			col:   3,
+			want:  9,
+			ok:    true,
+		},
+		"text the lexer drops": {
+			input: "a: 1\nb: !t",
+			line:  1,
+			col:   4,
+			want:  9,
+			ok:    true,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			got, ok := source.Offset(position.New(tc.line, tc.col))
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestSource_Offset_Runes(t *testing.T) {
+	t.Parallel()
+
+	full, err := os.ReadFile(filepath.Join("testdata", "full.yaml"))
+	require.NoError(t, err)
+
+	tcs := map[string]string{
+		"LF":                        "a: 1\nb:\n  - x\n  - y\n",
+		"CRLF":                      "a: 1\r\nb:\r\n  - x\r\n  - y\r\n",
+		"bare CR":                   "a: 1\rb: 2\r",
+		"no final line ending":      "a: 1\nb: 2",
+		"byte order mark":           "\ufeff# c\na: 1\n",
+		"mark at a document marker": "a: 1\n\ufeff---\nb: 2\n",
+		"wide runes":                "é: \"日本語\" # 😀\nb: 2\n",
+		"invalid UTF-8":             "a: \"x\xffy\"\nb: 2\n",
+		"block scalar":              "a: |\r\n  x\r\n\r\n  y\r\nb: 2\r\n",
+		"tag that ends its line":    "a: !t\n  - x\nb: 1\n",
+		"full.yaml":                 string(full),
+	}
+
+	for name, input := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(input)
+			text := source.Text()
+
+			var count int
+
+			for pos, want := range source.Lines().Runes() {
+				offset, ok := source.Offset(pos)
+				require.True(t, ok, "position %s", pos)
+				require.Less(t, offset, len(text), "position %s", pos)
+
+				got, _ := utf8.DecodeRuneInString(text[offset:])
+				if got == '\r' {
+					// The lines yield every line ending as "\n".
+					got = '\n'
+				}
+
+				require.Equal(t, string(want), string(got), "position %s", pos)
+
+				count++
+			}
+
+			assert.Positive(t, count)
+		})
+	}
+}
+
+func TestSource_Offset_Range(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input string
+		path  paths.Path
+		value string
+		want  string
+	}{
+		"plain scalar": {
+			input: "spec:\n  replicas: 3 # scaled\n  paused: false\n",
+			path:  paths.Doc().Child("spec", "replicas"),
+			value: "5",
+			want:  "spec:\n  replicas: 5 # scaled\n  paused: false\n",
+		},
+		"CRLF and a byte order mark": {
+			input: "\ufeffspec:\r\n  replicas: 3\r\n",
+			path:  paths.Doc().Child("spec", "replicas"),
+			value: "5",
+			want:  "\ufeffspec:\r\n  replicas: 5\r\n",
+		},
+		"after a tag that ends its line": {
+			input: "value: !Join\n  - a\n  - b\nreplicas: 3\n",
+			path:  paths.Doc().Child("replicas"),
+			value: "5",
+			want:  "value: !Join\n  - a\n  - b\nreplicas: 5\n",
+		},
+		"last value of a text with no final line ending": {
+			input: "name: é日本\nreplicas: 3",
+			path:  paths.Doc().Child("replicas"),
+			value: "5",
+			want:  "name: é日本\nreplicas: 5",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(tc.input)
+
+			doc, err := source.Document()
+			require.NoError(t, err)
+
+			ranges, err := doc.Ranges(tc.path)
+			require.NoError(t, err)
+			require.Len(t, ranges, 1)
+
+			start, ok := source.Offset(ranges[0].Start)
+			require.True(t, ok)
+
+			end, ok := source.Offset(ranges[0].End)
+			require.True(t, ok)
+
+			text := source.Text()
+			assert.Equal(t, tc.want, text[:start]+tc.value+text[end:])
+		})
+	}
+}
+
+func TestNewSourceFromTokens_Text(t *testing.T) {
+	t.Parallel()
+
+	// A Source built from tokens reads no text, so it has none to return
+	// and no offset to count in it.
+	source := niceyaml.NewSourceFromTokens(tokens.Tokenize("a: 1\n"))
+	assert.Equal(t, "a: 1", source.Lines().Content())
+	assert.Empty(t, source.Text())
+
+	_, ok := source.Offset(position.New(0, 0))
+	assert.False(t, ok)
 }
 
 func TestSource_Content(t *testing.T) {
@@ -3521,6 +3902,18 @@ func TestSource_NilReceiver(t *testing.T) {
 		"excerpts": {
 			read: func(s *niceyaml.Source) any { return s.Excerpts() },
 			want: true,
+		},
+		"text": {
+			read: func(s *niceyaml.Source) any { return s.Text() },
+			want: "",
+		},
+		"offset": {
+			read: func(s *niceyaml.Source) any {
+				_, ok := s.Offset(position.New(0, 0))
+
+				return ok
+			},
+			want: false,
 		},
 	}
 

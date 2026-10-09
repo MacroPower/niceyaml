@@ -42,7 +42,10 @@
 // [Node] of each YAML document in the file from [Source.Documents], and
 // binds the errors it and its Nodes produce to itself. [Node.Bind] binds
 // errors built elsewhere to that document, and [Source.Bind] binds one to
-// the document its location falls in.
+// the document its location falls in. The Source keeps the text it read.
+// [Source.Text] returns that text byte for byte, and [Source.Offset]
+// converts a position in its lines to a byte offset in the text, for a
+// program that edits the file in place.
 //
 // [line.Lines] is the content, the tokens organized into lines, and it never changes.
 // [line.View] is one rendering of that content. It shares the lines and carries the

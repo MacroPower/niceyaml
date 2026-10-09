@@ -576,7 +576,10 @@ func (ls Lines) ranges(
 }
 
 // Content returns the combined content of all lines as a string.
-// It joins the lines with newlines.
+// It joins the lines with newlines, so the result ends each line but the
+// last with "\n" whatever line endings the source used. A program that
+// needs the bytes of the source reads
+// [go.jacobcolvin.com/niceyaml.Source.Text].
 func (ls Lines) Content() string {
 	if len(ls.lines) == 0 {
 		return ""

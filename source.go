@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -19,19 +20,22 @@ import (
 	"github.com/goccy/go-yaml/token"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
+	"go.jacobcolvin.com/niceyaml/internal/bom"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
+	"go.jacobcolvin.com/niceyaml/internal/lineend"
 	"go.jacobcolvin.com/niceyaml/internal/preamble"
 	"go.jacobcolvin.com/niceyaml/line"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // Source is a YAML file, one stream of text that holds one or more YAML
-// documents. It holds the tokens lexed from the text, the [*ast.File]
-// they parse into, and the settings for parsing and for reporting
-// errors. [Source.Documents] returns the root [*Node] of each document in
-// the file but the empty ones a separator leaves, and [Source.Document]
-// returns the root of the one document of a file that holds one, which is
-// where decoding and validation live.
+// documents. It holds the text it read, the tokens lexed from the text,
+// the [*ast.File] they parse into, and the settings for parsing and for
+// reporting errors. [Source.Documents] returns the root [*Node] of each
+// document in the file but the empty ones a separator leaves, and
+// [Source.Document] returns the root of the one document of a file that
+// holds one, which is where decoding and validation live.
 //
 // Source separates two concerns. Parsing lives on Source itself, where [Source.File]
 // lazily parses the AST and [Source.Documents] builds the documents. Every error they
@@ -67,6 +71,12 @@ import (
 // [NewSourceFromTokens].
 type Source struct {
 	lines line.Lines
+	// Holds the text the Source read, which [Source.Text] returns. A
+	// Source built from tokens read none, and hasInput is false for it.
+	input string
+	// Maps a position to an offset in input, which [Source.Offset] fills
+	// on its first call.
+	inputIndex textIndex
 	// Holds the stream that [Source.Tokens] rebuilds from lines on its
 	// first call.
 	stream token.Tokens
@@ -106,6 +116,8 @@ type Source struct {
 	// [pickContentDocuments] picks them.
 	content []*Node
 	sourceConfig
+	hasInput         bool
+	inputIndexOnce   sync.Once
 	streamOnce       sync.Once
 	fileOnce         sync.Once
 	decodeFileOnce   sync.Once
@@ -437,7 +449,7 @@ func WithReferences(refs ...*Source) SourceOption {
 			}
 
 			c.references = append(c.references, ref.references...)
-			c.references = append(c.references, ref.text())
+			c.references = append(c.references, ref.tokenText())
 
 			if ref.noExcerpts || ref.noReferenceExcerpts {
 				c.noReferenceExcerpts = true
@@ -658,12 +670,15 @@ func NewSourceFromBytes(data []byte, opts ...SourceOption) *Source {
 }
 
 // NewSourceFromString creates a new [*Source] from a YAML string using
-// [tokens.Tokenize]. The Source holds the text without the byte order
-// marks Tokenize drops, so no key reads a mark as part of its text.
+// [tokens.Tokenize]. Tokenize drops the byte order marks YAML allows, so
+// the tokens and lines of the Source hold none and no key reads a mark
+// as part of its text. The Source keeps src as it is, and [Source.Text]
+// returns it with every mark.
 func NewSourceFromString(src string, opts ...SourceOption) *Source {
-	tks := tokens.Tokenize(src)
+	s := NewSourceFromTokens(tokens.Tokenize(src), opts...)
+	s.input, s.hasInput = src, true
 
-	return NewSourceFromTokens(tks, opts...)
+	return s
 }
 
 // NewSourceFromTokens creates a new [*Source] from [token.Tokens].
@@ -678,6 +693,9 @@ func NewSourceFromString(src string, opts ...SourceOption) *Source {
 // stream, as [Node.Tokens] hands out, from the first one. To render one
 // document of a file with the file's line numbers, print the file's view
 // with [Node.Span] instead.
+//
+// The Source reads no text, so [Source.Text] returns an empty string for
+// it and [Source.Offset] reports false.
 func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	t := &Source{}
 	for _, opt := range opts {
@@ -702,9 +720,11 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 	return t
 }
 
-// text returns the YAML text of the Source, as the Origins of its tokens
-// spell it.
-func (s *Source) text() []byte {
+// tokenText returns the YAML text of the Source as the Origins of its
+// tokens spell it, which a Source built from tokens has too. The lexer
+// drops and repeats some text in the Origins, so [Source.Text] returns
+// the text the Source read instead.
+func (s *Source) tokenText() []byte {
 	var b bytes.Buffer
 
 	for _, tk := range s.Tokens() {
@@ -792,6 +812,144 @@ func (s *Source) ExcerptWidth() int {
 	}
 
 	return s.excerptWidth
+}
+
+// Text returns the text the [Source] read, byte for byte. It keeps what
+// the lines of the Source drop or rewrite: a byte order mark, the "\r"
+// of a CRLF line ending, the final line ending, and a byte that is not
+// valid UTF-8. A program that edits a file in place cuts the text at the
+// offsets [Source.Offset] returns, here around a scalar on one line:
+//
+//	ranges, err := doc.Ranges(paths.Doc().Child("spec", "replicas"))
+//	if err != nil {
+//		return err
+//	}
+//
+//	start, _ := source.Offset(ranges[0].Start)
+//	end, _ := source.Offset(ranges[0].End)
+//
+//	text := source.Text()
+//	fixed := text[:start] + "5" + text[end:]
+//
+// A Source that [NewSourceFromTokens] built read no text, so Text returns
+// an empty string for it, as it does for a nil Source.
+func (s *Source) Text() string {
+	if s == nil {
+		return ""
+	}
+
+	return s.input
+}
+
+// Offset returns the byte offset in [Source.Text] of the rune at pos, a
+// position in the coordinates of [Source.Lines], and true. The offsets
+// of the Start and the End of a [position.Range] cut the text the range
+// covers out of Source.Text.
+//
+// A column counts runes, and a line ending takes one column whether it
+// is LF, CRLF, or a bare CR, as [line.Lines.Runes] yields it. A byte
+// that is not valid UTF-8 takes one column too. A byte order mark that
+// [tokens.Tokenize] dropped lies before column 0 of its line, so the
+// offset of column 0 is past the mark. Offset counts in the text, so it
+// counts text the lexer left out of the lines, as Tokenize describes.
+//
+// A position may name the end of a line or of the text, as the End of a
+// range does. The column past a line ending is where the next line
+// starts, and the column past the last rune of a text with no final
+// line ending is the length of the text. So is column 0 of the line
+// after a final line ending.
+//
+// Offset reports false for a position outside the text, which is one
+// with a negative line or column, a line past the last, or a column past
+// the end of its line. It also reports false for a Source that
+// [NewSourceFromTokens] built and for a nil Source, which hold no text.
+func (s *Source) Offset(pos position.Position) (int, bool) {
+	if s == nil || !s.hasInput || pos.Line < 0 || pos.Col < 0 {
+		return 0, false
+	}
+
+	s.inputIndexOnce.Do(func() {
+		s.inputIndex = newTextIndex(s.input)
+	})
+
+	return s.inputIndex.offset(pos)
+}
+
+// textIndex maps a position in the lines of a [Source] to a byte offset
+// in the text the Source read. The lexer counts its lines and columns in
+// the text without the byte order marks the tokenizer drops, so the index
+// counts in that text and then adds the marks back.
+//
+// Create instances with [newTextIndex].
+type textIndex struct {
+	// The text without the marks the tokenizer dropped.
+	text string
+	// The offset in text where each line starts, as the lexer cuts lines.
+	// The end of a text that is empty or ends with a line ending starts
+	// a last line that holds nothing.
+	starts []int
+	// The offset in text of each place the tokenizer dropped a mark, in
+	// ascending order.
+	marks []int
+}
+
+// newTextIndex creates a new [textIndex] of input, the text a [Source]
+// read.
+func newTextIndex(input string) textIndex {
+	text, marks := bom.Drop(input)
+	x := textIndex{text: text, marks: marks}
+
+	at := 0
+	for ln := range lineend.Lines(text) {
+		x.starts = append(x.starts, at)
+		at += len(ln)
+	}
+
+	if text == "" || tokens.TrimLineEnding(text) != text {
+		x.starts = append(x.starts, at)
+	}
+
+	return x
+}
+
+// offset returns the byte offset of pos in the text the [Source] read,
+// and true, as [Source.Offset] describes. It reports false for a line
+// the text does not hold and for a column past the end of its line.
+func (x textIndex) offset(pos position.Position) (int, bool) {
+	if pos.Line >= len(x.starts) {
+		return 0, false
+	}
+
+	start, end := x.starts[pos.Line], len(x.text)
+	if pos.Line+1 < len(x.starts) {
+		end = x.starts[pos.Line+1]
+	}
+
+	whole := x.text[start:end]
+	content := tokens.TrimLineEnding(whole)
+
+	at, col := 0, 0
+	for ; col < pos.Col && at < len(content); col++ {
+		_, size := utf8.DecodeRuneInString(content[at:])
+		at += size
+	}
+
+	switch {
+	case col == pos.Col:
+		at += start
+	case col+1 == pos.Col && len(content) < len(whole):
+		// The line ending takes the column after the content, so the
+		// column after that one is where the next line starts.
+		at = end
+	default:
+		return 0, false
+	}
+
+	// Every mark the tokenizer dropped at or before the offset lies in
+	// front of it in the text the Source read.
+	dropped, _ := slices.BinarySearch(x.marks, at+1)
+
+	return at + dropped*len(bom.Mark), true
 }
 
 // Tokens returns the full [token.Tokens] stream of the [Source]. The first

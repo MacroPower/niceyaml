@@ -9,6 +9,7 @@ import (
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/token"
 
+	"go.jacobcolvin.com/niceyaml/internal/bom"
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
 )
 
@@ -92,7 +93,7 @@ import (
 // holds a blank line with a tab in front of its text, so hand the parser
 // the stream [ForParser] returns.
 func Tokenize(src string) token.Tokens {
-	src = dropByteOrderMarks(src)
+	src, _ = bom.Drop(src)
 
 	tks, cut := tokenize(src)
 
@@ -499,61 +500,6 @@ func cutAtTab(tk *token.Token) bool {
 	last := tk.Origin[cut+1:]
 
 	return cut >= 0 && strings.HasSuffix(last, "\t") && strings.Trim(last, " \t") == ""
-}
-
-// byteOrderMark is the UTF-8 byte order mark.
-const byteOrderMark = "\ufeff"
-
-// dropByteOrderMarks returns src without the byte order marks that open
-// a line before the content of a document, or that stand in front of a
-// document marker. A document starts at the start of src and after a
-// marker line that holds nothing but the marker and a comment. Blank and
-// comment lines keep the document before its content. A line ends where
-// the lexer ends one, at "\n", "\r\n", or a bare "\r".
-func dropByteOrderMarks(src string) string {
-	var sb strings.Builder
-
-	sb.Grow(len(src))
-
-	prefix := true
-
-	for line := range lineend.Lines(src) {
-		if rest, ok := strings.CutPrefix(line, byteOrderMark); ok && (prefix || isDocumentMarker(rest)) {
-			line = rest
-		}
-
-		sb.WriteString(line)
-
-		switch {
-		case isDocumentMarker(line):
-			prefix = isBlankOrComment(line[len("---"):])
-		case isBlankOrComment(line):
-		default:
-			prefix = false
-		}
-	}
-
-	return sb.String()
-}
-
-// isDocumentMarker reports whether line opens with a "---" or "..."
-// marker followed by a space, a tab, or the end of the line.
-func isDocumentMarker(line string) bool {
-	if !strings.HasPrefix(line, "---") && !strings.HasPrefix(line, "...") {
-		return false
-	}
-
-	rest := line[len("---"):]
-
-	return rest == "" || strings.ContainsAny(rest[:1], " \t\r\n")
-}
-
-// isBlankOrComment reports whether line holds only whitespace, or a
-// comment after it.
-func isBlankOrComment(line string) bool {
-	text := strings.TrimLeft(line, " \t")
-
-	return strings.TrimRight(text, "\r\n") == "" || strings.HasPrefix(text, "#")
 }
 
 // advance returns the line and column reached by moving from line and col
