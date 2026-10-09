@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unsafe"
@@ -143,6 +144,19 @@ func (l *lockable) UnmarshalText(text []byte) error {
 	l.Text = string(text)
 
 	return nil
+}
+
+// rejectsOnce decodes itself by reporting errUnmarshal on the first call
+// that the counter in the context of the decode counts, and by panicking
+// on every call after it.
+type rejectsOnce struct{}
+
+func (*rejectsOnce) UnmarshalYAML(ctx context.Context, _ []byte) error {
+	if calls, ok := ctx.Value(panicCallsKey{}).(*atomic.Int32); ok && calls.Add(1) == 1 {
+		return errUnmarshal
+	}
+
+	panic("decoded twice")
 }
 
 // positioned decodes itself from its node and reports an error at the
@@ -1449,6 +1463,20 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					}{B: lockable{Locked: true}}
 
 					return dd.DecodeInto(ctx, &v)
+				},
+				want: "unmarshaler rejected the value",
+			},
+			// The second decode calls the unmarshaler again, and the panic
+			// of that call reproduces nothing and adds no problem.
+			"unmarshaler that panics in the second decode": {
+				input: "a: 1\nv: x\n",
+				decode: func(ctx context.Context, dd *niceyaml.Node) error {
+					_, err := dd.Decode[struct {
+						A int         `yaml:"a"`
+						V rejectsOnce `yaml:"v"`
+					}](context.WithValue(ctx, panicCallsKey{}, new(atomic.Int32)))
+
+					return err
 				},
 				want: "unmarshaler rejected the value",
 			},

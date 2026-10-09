@@ -59,7 +59,8 @@ const (
 
 	// The status of a run that met any other error, such as a file that
 	// does not read, a schema that does not load, a canceled run, or a
-	// flag that does not parse.
+	// flag that does not parse. A document that trips a panic in go-yaml
+	// exits with it too.
 	exitFailure = 2
 )
 

@@ -1347,6 +1347,10 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 // whether [Node.Err], [Source.File], or a method of the Node returned the
 // error.
 //
+// A panic in the parser fails the documents it was reading as a syntax
+// error does. Err then returns the error of that panic, which holds a
+// [PanicError] and does not match ErrSyntax.
+//
 // A document that did not parse has no tree. [Node.Decode],
 // [Node.DecodeInto], [Node.DecodeAt], [Node.DecodeIfPresent],
 // [Node.Validate], [Node.At], [Node.Nodes], and [Node.Ranges] return the
@@ -3067,8 +3071,9 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // itself. Fields absent from the document keep their existing values, so
 // a caller may fill v with defaults first. Each error comes back bound to
 // the source as a [SourceError], and an error of the decode itself
-// matches [ErrDecode]. The error for a value the decoder rejects carries
-// the position and the `$` path of that value, and a decode that fails
+// matches [ErrDecode], unless it is a panic, which comes back as a
+// [PanicError]. The error for a value the decoder rejects carries the
+// position and the `$` path of that value, and a decode that fails
 // reports the problems it finds together.
 //
 // A program that decodes many nodes with the same options states them
@@ -3124,11 +3129,11 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // YAML decoding errors, and [Error] values from the validators, come back
 // bound to the source as [SourceError] values, with an `@` path in them
 // resolving from the scope. Every error of the decode itself matches
-// [ErrDecode], which lists them. A value the go-yaml decoder rejects,
-// such as one that does not read as the target type, carries the `$`
-// path of that value, so [SourceError.Path] reports it and the message
-// names the value, as an error from a [Validator] or a [SelfValidator] at
-// that value does:
+// [ErrDecode], which lists them, apart from a panic. A value the go-yaml
+// decoder rejects, such as one that does not read as the target type,
+// carries the `$` path of that value, so [SourceError.Path] reports it
+// and the message names the value, as an error from a [Validator] or a
+// [SelfValidator] at that value does:
 //
 //	config.yaml:3:11: $.servers[0].port: expected integer, got string
 //
@@ -3269,20 +3274,37 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // no token either, and the next paragraphs describe where it binds.
 //
 // A few errors without a token bind where the document causes them. A
-// panic in the decoder or in a value's own UnmarshalYAML binds at the
-// first token of the node that is not a comment, and so does a value
-// nested deeper than the decoder allows. A `<<` merge key whose alias
-// names no anchor before it, or an anchor that holds the merge key,
-// binds at the alias. A rejection of a value that an alias reads from a
-// reference document from [WithReferences] binds at that alias when the
-// node holds one alias to a reference document, directly or inside an
-// anchor its aliases reach. When the node holds several, the error
-// carries no location, even if the target type reads only one of them.
-// The decoder reports two other errors as it reports that rejection, so
-// they bind the same way in such a node. One is an unwrapped go-yaml
-// error that an UnmarshalYAML returns from a parse of its own. The other
-// is a go-yaml error the decoder reports without a token, such as the one
-// for a key of an inline map[int]int.
+// value nested deeper than the decoder allows binds at the first token
+// of the node that is not a comment. A `<<` merge key whose alias names
+// no anchor before it, or an anchor that holds the merge key, binds at
+// the alias. A rejection of a value that an alias reads from a reference
+// document from [WithReferences] binds at that alias when the node holds
+// one alias to a reference document, directly or inside an anchor its
+// aliases reach. When the node holds several, the error carries no
+// location, even if the target type reads only one of them. The decoder
+// reports two other errors as it reports that rejection, so they bind
+// the same way in such a node. One is an unwrapped go-yaml error that an
+// UnmarshalYAML returns from a parse of its own. The other is a go-yaml
+// error the decoder reports without a token, such as the one for a key
+// of an inline map[int]int.
+//
+// # Panics
+//
+// DecodeInto recovers a panic in the go-yaml decoder and in the code the
+// decoder calls, which is an UnmarshalYAML or UnmarshalText method and a
+// function from [WithCustomUnmarshaler]. The panic comes back as an error
+// that holds a [PanicError], with the value of the panic and the stack.
+// The error binds at the first token of the node that is not a comment.
+// A panic below a value that a WithCustomUnmarshaler function decodes
+// through its decode callback binds at that value instead. The error
+// does not match [ErrDecode], and [IsInvalid] does not report it. It can
+// come back beside the other problems of the document, in a summary that
+// matches ErrDecode through them.
+//
+// The search for those problems and the second decode that the next
+// section describes call an unmarshaler again, and a panic in such a
+// call adds no problem. Nothing recovers a panic in a [Validator] or in
+// the Validate method of a [SelfValidator], as PanicError describes.
 //
 // # Self-Decoding Values
 //
@@ -3568,6 +3590,12 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 
 	doc, err := source.Document()
 	if err != nil {
+		// A panic of the parser stays a panic, so the decode that called
+		// the function passes it on.
+		if p, ok := errors.AsType[*PanicError](err); ok {
+			return fmt.Errorf("parse the text of the value: %w", recoveredError{err: p, in: "parser"})
+		}
+
 		// The decoder wrote the text from a node that parsed, and the
 		// positions of the error count the lines of that text.
 		//nolint:errorlint // The binding of the text is no binding of the document.
@@ -3589,8 +3617,8 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 // not, leaves v as it is too, unless v points to a pointer or an
 // interface, as [keepsNullTarget] describes. When v points to a pointer,
 // a null sets that pointer to nil, and so does an alias that reads as
-// null. A panic in the decoder comes back as an error that matches
-// [ErrDecode], bound at the first token of node that is not a
+// null. A panic in the decoder comes back as an error that holds a
+// [*PanicError], bound at the first token of node that is not a
 // comment. The decoder reads node in the [decodeTree] of the document,
 // and for a node below the body, a failure in an anchor outside node
 // that node reads comes back as its error. The error of a value that
@@ -3670,7 +3698,7 @@ func (n *Node) decodeUnbound(
 	}
 
 	// The recover turns a panic in the go-yaml decoder, or in a value's
-	// own UnmarshalYAML, into a rejection.
+	// own UnmarshalYAML, into an error that holds a PanicError.
 	err = decodeWithRecover(ctx, dec, view, decodeTarget(v, node))
 
 	// The decoder returns the error of a value that decodes itself with
@@ -4063,11 +4091,11 @@ func (e decodeError) Is(target error) bool {
 
 // asDecodeError returns err, an error the go-yaml decoder returned, as
 // one that matches [ErrDecode]. The error of a context that ended comes
-// back as it is, even when an unmarshaler wraps it, and so does an error
-// that matches already.
+// back as it is, even when an unmarshaler wraps it. So does an error that
+// holds a [*PanicError], as [holdsPanic] reports, and one that matches
+// already.
 func asDecodeError(err error) error {
-	if err == nil || errors.Is(err, ErrDecode) ||
-		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if err == nil || errors.Is(err, ErrDecode) || contextEnded(err) || holdsPanic(err) {
 		return err
 	}
 
@@ -4194,13 +4222,14 @@ func isTaggedNull(node ast.Node) bool {
 }
 
 // decodeWithRecover decodes node into v with dec. It turns a panic in the
-// decoder into an [*Error] that matches [ErrDecode] and [errPlaced], with
-// no [yaml.Error] behind it, located at the first token of node that is not
-// a comment, so a comment above the value does not take the location. The
-// panic is no fault of the document, so the Error declares nothing, and it
-// matches [errInvalid] only as every [decodeError] does. The error of a
-// [WithCustomUnmarshaler] function comes back as the function returned
-// it, out of the [shieldedError] the decoder carried it in.
+// decoder, or in the code of the caller that the decoder runs, into an
+// [*Error] that holds a [*PanicError] and matches [errPlaced]. The Error
+// points at the first token of node that is not a comment, so a comment
+// above the value does not take the location. The panic is no fault of
+// the document, so the Error declares nothing and matches neither
+// [ErrDecode] nor [errInvalid]. The error of a [WithCustomUnmarshaler]
+// function comes back as the function returned it, out of the
+// [shieldedError] the decoder carried it in.
 func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v any) (err error) {
 	defer func() {
 		p := recover()
@@ -4208,7 +4237,8 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 			return
 		}
 
-		panicked := decodeError{err: fmt.Errorf("decoder rejected the value: panic: %v", p), placed: true}
+		panicked := recovered("decoder", p)
+		panicked.placed = true
 
 		err = Place(panicked, atToken(contentStart(node)))
 	}()
@@ -4237,9 +4267,10 @@ func decodeWithRecover(ctx context.Context, dec *yaml.Decoder, node ast.Node, v 
 // the methods declared on the value, so both value and pointer
 // receivers participate. YAML decoding errors, and [Error] values from
 // the validators, come back bound to the source as [SourceError]
-// values, and every error of the decode itself matches [ErrDecode]. A
-// node whose document holds too many nested aliases returns an error
-// matching [ErrExcessiveAliasing], as [Node.DecodeInto] describes. An
+// values, and every error of the decode itself matches [ErrDecode],
+// apart from a panic, which comes back as a [PanicError]. A node whose
+// document holds too many nested aliases returns an error matching
+// [ErrExcessiveAliasing], as [Node.DecodeInto] describes. An
 // [ast.Node] in the result is part of a
 // tree the document shares, as [Node.DecodeInto] describes, so a caller
 // must not modify it. On error, the returned T is the zero value.

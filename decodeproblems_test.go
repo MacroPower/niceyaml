@@ -47,6 +47,9 @@ var (
 
 	// The calls of the UnmarshalJSON method of [problemEither].
 	eitherCalls callCounter
+
+	// The calls of the UnmarshalText method of [problemOnce], by text.
+	onceCalls callCounter
 )
 
 // problemServer is an element of [problemConfig].
@@ -267,8 +270,9 @@ type callCounter struct {
 	mu    sync.Mutex
 }
 
-// add counts one call under name.
-func (c *callCounter) add(name string) {
+// add counts one call under name and returns the calls counted under
+// that name since the last take.
+func (c *callCounter) add(name string) int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -277,6 +281,8 @@ func (c *callCounter) add(name string) {
 	}
 
 	c.calls[name]++
+
+	return c.calls[name]
 }
 
 // take returns the calls counted since the last take.
@@ -304,6 +310,20 @@ func (l *problemLevel) UnmarshalText(text []byte) error {
 	}
 
 	*l = problemLevel(level)
+
+	return nil
+}
+
+// problemOnce decodes itself from text, takes each text once, and panics
+// when it gets a text again. It counts its calls in onceCalls.
+type problemOnce string
+
+func (o *problemOnce) UnmarshalText(text []byte) error {
+	if onceCalls.add(string(text)) > 1 {
+		panic("text decoded twice")
+	}
+
+	*o = problemOnce(text)
 
 	return nil
 }
@@ -1567,6 +1587,24 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 		assert.Equal(t, map[string]int{"info": 3, "loud": 4, "quiet": 3}, levelCalls.take())
 	})
 
+	// The decode calls the method once and rejects the port. The search
+	// calls the method again, and the panic of that call adds no problem.
+	t.Run("UnmarshalText method that panics in the search", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := yamltest.FirstDocument(t, "port: x\nmode: fast\n").Decode[struct {
+			Port int         `yaml:"port"`
+			Mode problemOnce `yaml:"mode"`
+		}](t.Context())
+		require.EqualError(t, err, "1:7: $.port: expected integer, got string")
+		requireInvalid(t, err, 1)
+		assert.Equal(t, map[string]int{"fast": 2}, onceCalls.take())
+
+		var p *niceyaml.PanicError
+
+		assert.NotErrorAs(t, err, &p, "the error holds the panic of the search")
+	})
+
 	// The decoder hands the mapping to the UnmarshalJSON method of the
 	// type. The search hands a type with an UnmarshalText method a scalar
 	// alone, so it does not call the other method again.
@@ -1859,13 +1897,15 @@ func TestLayers_Decode_Problems(t *testing.T) {
 			),
 		},
 		// The panic binds at the first key of the mapping, so it stands
-		// for the unknown field the search finds there.
+		// for the unknown field the search finds there. The search still
+		// reports the duration, which matches ErrDecode beside the panic.
 		"unmarshaler that panics": {
 			input: "# prod\n\nextra: 1\nown: panic\ntimeout: soon\n",
 			opts:  []niceyaml.DecodeOption{strict},
+			err:   errBadServer,
 			want: stringtest.JoinLF(
 				"base.yaml: 2 problems",
-				"base.yaml:3:1: decoder rejected the value: panic: bad server",
+				"base.yaml:3:1: decoder panicked: bad server",
 				`base.yaml:5:10: $.timeout: time: invalid duration "soon"`,
 			),
 		},

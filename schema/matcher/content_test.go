@@ -1112,6 +1112,35 @@ func TestContent_UnmarshalerError(t *testing.T) {
 		require.NotErrorIs(t, err, niceyaml.ErrDecode)
 		assert.False(t, ok)
 	})
+
+	t.Run("panic in a value comes back", func(t *testing.T) {
+		t.Parallel()
+
+		// A panic is a bug in the method and no answer about the value,
+		// so the matcher cannot decide.
+		ok, err := matcher.Content(kindPath, panicking("")).Match(t.Context(), doc)
+		require.EqualError(t, err, "1:7: decoder panicked: kind registry is empty")
+		require.NotErrorIs(t, err, niceyaml.ErrDecode)
+		assert.False(t, ok)
+
+		var p *niceyaml.PanicError
+
+		require.ErrorAs(t, err, &p)
+	})
+
+	t.Run("panic beside a rejection comes back", func(t *testing.T) {
+		t.Parallel()
+
+		// The error matches niceyaml.ErrDecode through the rejection it
+		// holds beside the panic, and the panic still decides.
+		ok, err := matcher.Content(kindPath, nesting("")).Match(t.Context(), doc)
+		require.ErrorIs(t, err, niceyaml.ErrDecode)
+		assert.False(t, ok)
+
+		var p *niceyaml.PanicError
+
+		require.ErrorAs(t, err, &p)
+	})
 }
 
 func TestContent_UnparsableDuration(t *testing.T) {
@@ -1368,6 +1397,26 @@ type stopping string
 
 func (*stopping) UnmarshalYAML([]byte) error {
 	return fmt.Errorf("lookup stopped: %w", context.DeadlineExceeded)
+}
+
+// panicking decodes itself from text by panicking.
+type panicking string
+
+func (*panicking) UnmarshalText([]byte) error {
+	panic("kind registry is empty")
+}
+
+// nesting decodes itself with a decode of its own and returns the error
+// of that decode, which holds a panic beside a rejection.
+type nesting string
+
+func (*nesting) UnmarshalYAML(ctx context.Context, _ []byte) error {
+	_, err := niceyaml.NewSourceFromString("port: abc\nkind: x\n").Decode[struct {
+		Port int       `yaml:"port"`
+		Kind panicking `yaml:"kind"`
+	}](ctx)
+
+	return err
 }
 
 // evenInt is a plain integer that validates itself, and accepts only an

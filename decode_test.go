@@ -4643,10 +4643,6 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 				input: "boxes:\n  - name: a\n  - placed: [a, b]\n",
 				want:  "3:3: $.boxes[1]: unmarshaler rejected the value",
 			},
-			"panic": {
-				input: "boxes:\n  - name: a\n  - broken: 1\n",
-				want:  "3:3: $.boxes[1]: decoder rejected the value: panic: unmarshaler rejected the value",
-			},
 		}
 
 		for name, tc := range tcs {
@@ -4670,6 +4666,22 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 				assert.EqualError(t, srcErr.Details()[0], tc.detail)
 			})
 		}
+
+		// The decode of the value recovers the panic at the first token
+		// of the text, and the decode of the document binds it at the
+		// value in its place.
+		t.Run("panic", func(t *testing.T) {
+			t.Parallel()
+
+			_, err := yamltest.FirstDocument(t, "boxes:\n  - name: a\n  - broken: 1\n").Decode[struct {
+				Boxes []box `yaml:"boxes"`
+			}](t.Context(), boxes)
+			require.EqualError(t, err, "3:3: $.boxes[1]: decoder panicked: unmarshaler rejected the value")
+			require.NotErrorIs(t, err, niceyaml.ErrDecode)
+
+			value, _ := requirePanic(t, err)
+			assert.Equal(t, errUnmarshal, value)
+		})
 	})
 
 	// The error reaches the unmarshaler above the value inside a wrapper
@@ -6975,8 +6987,9 @@ func TestDocument_DecodeInto(t *testing.T) {
 				require.NotPanics(t, func() {
 					_, err = yamltest.At(t, dd, tc.path).Decode[listConfig](t.Context())
 				})
-				require.ErrorIs(t, err, niceyaml.ErrDecode)
-				require.ErrorContains(t, err, "panic: "+errUnmarshal.Error())
+				require.NotErrorIs(t, err, niceyaml.ErrDecode)
+				require.ErrorContains(t, err, "decoder panicked: "+errUnmarshal.Error())
+				requirePanic(t, err)
 
 				_, ok := errors.AsType[yaml.Error](err)
 				assert.False(t, ok, "a go-yaml error is in the chain")
@@ -11307,14 +11320,15 @@ func TestErrDecode(t *testing.T) {
 		assert.Equal(t, position.New(1, 3), rng.Start)
 	})
 
-	t.Run("panic matches", func(t *testing.T) {
+	t.Run("panic does not match", func(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, "# note\nvalue: 1\n")
 
 		_, err := dd.Decode[panickingUnmarshaler](t.Context())
-		require.ErrorIs(t, err, niceyaml.ErrDecode)
-		require.EqualError(t, err, "2:1: decoder rejected the value: panic: unmarshaler rejected the value")
+		require.NotErrorIs(t, err, niceyaml.ErrDecode)
+		require.EqualError(t, err, "2:1: decoder panicked: unmarshaler rejected the value")
+		requirePanic(t, err)
 	})
 
 	t.Run("decode inside a validator matches", func(t *testing.T) {

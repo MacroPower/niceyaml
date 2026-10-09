@@ -2,7 +2,6 @@ package matcher
 
 import (
 	"context"
-	"errors"
 	"reflect"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -62,7 +61,7 @@ func (m *textMatcher) Match(ctx context.Context, doc *niceyaml.Node) (bool, erro
 	// A decode that fails means the node holds no text, as a mapping or
 	// a sequence does not, which is a no rather than a failure.
 	decoded, err := decodeScalar[string](ctx, node)
-	if errors.Is(err, niceyaml.ErrDecode) {
+	if declines(err) {
 		return false, nil
 	}
 

@@ -316,7 +316,7 @@
 // and joins what they return. One pass thus names every syntax error,
 // beside what the validator reports for each document that parsed.
 // [Source.File], [Source.Documents], [Source.Document], and
-// [Source.Decode] need the whole file to parse. Every error of the parse
+// [Source.Decode] need the whole file to parse. Every syntax error
 // matches [ErrSyntax], whichever of these returns it.
 //
 // A file of several documents often holds empty ones, such as the one a
@@ -674,9 +674,10 @@
 // resolving a [paths.Path]. Positions, ranges, lines, errors, and styles are
 // niceyaml's own types, and [paths.Path.YAMLPath] converts to go-yaml's
 // path type when a caller needs it. Text the go-yaml parser rejects
-// matches [ErrSyntax], and a decode that fails on YAML that parsed
-// matches [ErrDecode]. A caller thus tells both cases apart without
-// naming go-yaml's error types.
+// matches [ErrSyntax], and YAML that parsed and does not decode matches
+// [ErrDecode]. A caller thus tells both cases apart without naming
+// go-yaml's error types. A panic in go-yaml, or in an unmarshaler it
+// calls, comes back as a [PanicError] that matches neither.
 //
 // The go-yaml settings niceyaml supports have named options, such as
 // [WithAllowDuplicateKeys], [WithCustomUnmarshaler], or

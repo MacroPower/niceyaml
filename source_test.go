@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -2176,10 +2177,18 @@ func TestSource_Parse(t *testing.T) {
 		source := niceyaml.NewSourceFromTokens(tks)
 
 		file, err := source.File()
-		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		require.NotErrorIs(t, err, niceyaml.ErrSyntax)
 		require.EqualError(t, err,
-			"1:1: parser rejected the tokens: panic: runtime error: invalid memory address or nil pointer dereference")
+			"1:1: parser panicked: runtime error: invalid memory address or nil pointer dereference")
 		assert.Nil(t, file)
+
+		// The panic is a fault of the code that built the tokens, so the
+		// error holds its stack and the document is not at fault.
+		value, stack := requirePanic(t, err)
+		assert.Contains(t, stack, "go-yaml/parser")
+
+		_, ok := value.(runtime.Error)
+		assert.True(t, ok, "got %T", value)
 
 		var bound *niceyaml.SourceError
 
@@ -2198,8 +2207,8 @@ func TestSource_Parse(t *testing.T) {
 		require.Len(t, docs, 1)
 		assert.Same(t, err, docs[0].Err())
 
-		_, err = source.Document()
-		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+		_, again = source.Document()
+		assert.Same(t, err, again)
 	})
 
 	t.Run("syntax error on a line the lexer dropped keeps its line", func(t *testing.T) {
@@ -2539,7 +2548,7 @@ func TestSource_AllDocuments(t *testing.T) {
 		}
 	})
 
-	t.Run("a syntax error with no location is bound to the first document it fails", func(t *testing.T) {
+	t.Run("a parser panic with no location is bound to the first document it fails", func(t *testing.T) {
 		t.Parallel()
 
 		// The parser panics on a token with no position, and no token of
@@ -2554,7 +2563,7 @@ func TestSource_AllDocuments(t *testing.T) {
 
 		all := source.AllDocuments()
 		require.Len(t, all, 2)
-		require.ErrorIs(t, all[0].Err(), niceyaml.ErrSyntax)
+		requirePanic(t, all[0].Err())
 		assert.Same(t, all[0].Err(), all[1].Err())
 
 		var bound *niceyaml.SourceError
@@ -2568,7 +2577,7 @@ func TestSource_AllDocuments(t *testing.T) {
 		// No position says which document the error is about, so the
 		// message names the document.
 		assert.True(t,
-			strings.HasPrefix(bound.Error(), "f.yaml: document 1: parser rejected the tokens:"),
+			strings.HasPrefix(bound.Error(), "f.yaml: document 1: parser panicked:"),
 			bound.Error(),
 		)
 	})

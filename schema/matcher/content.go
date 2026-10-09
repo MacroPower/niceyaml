@@ -69,7 +69,9 @@ type contentMatcher[T Scalar] struct {
 // registry stops at the document rather than routing it elsewhere. Such
 // a path holds a wildcard selector, or an alias that names no anchor
 // before it in the document. The error of a context that ended comes
-// back too.
+// back too, and so does the error of a panic in an UnmarshalYAML or
+// UnmarshalText method of the type of want, which holds a
+// [niceyaml.PanicError].
 //
 // Match also refuses a document whose aliases would make the read cost
 // far more than the document holds, unless [niceyaml.WithAliasLimit]
@@ -116,7 +118,7 @@ func (m *contentMatcher[T]) Match(ctx context.Context, doc *niceyaml.Node) (bool
 	// no rather than a failure. That holds for an error the value's own
 	// UnmarshalYAML returns too.
 	got, err := decodeScalar[T](ctx, node)
-	if errors.Is(err, niceyaml.ErrDecode) {
+	if declines(err) {
 		return false, nil
 	}
 
@@ -178,7 +180,7 @@ func readScalar(ctx context.Context, doc *niceyaml.Node, path paths.Path, t refl
 	// yields only the YAML built-in types, none of which validates itself,
 	// so the self-validation walk would find nothing.
 	raw, err := node.Decode[any](ctx, niceyaml.WithSelfValidation(false))
-	if errors.Is(err, niceyaml.ErrDecode) {
+	if declines(err) {
 		return nil, nil, nil
 	}
 
@@ -187,6 +189,18 @@ func readScalar(ctx context.Context, doc *niceyaml.Node, path paths.Path, t refl
 	}
 
 	return node, raw, nil
+}
+
+// declines reports whether err, the error of a decode a matcher ran,
+// says the value does not read as the type the matcher asked for, which
+// is a no rather than a failure. An error that matches
+// [niceyaml.ErrDecode] says so, unless it holds a
+// [*niceyaml.PanicError]. A panic is a bug in code and answers nothing
+// about the document, so a matcher returns its error.
+func declines(err error) bool {
+	var p *niceyaml.PanicError
+
+	return !errors.As(err, &p) && errors.Is(err, niceyaml.ErrDecode)
 }
 
 // decodeScalar returns the value node decodes to as a T, validated as a

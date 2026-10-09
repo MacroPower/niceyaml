@@ -341,7 +341,8 @@ func (t ErrorTree) IsInvalid() bool {
 // [*Error] to its cause and never to its details, which explain the
 // problem and decide nothing, and a wrapper to the error it wraps. A
 // wrapper with several %w verbs is one problem, so it declares the fault
-// when any of its branches does.
+// when any of its branches does. The chain ends at a [*PanicError], so
+// an error the code panicked with declares nothing.
 func declaresInvalid(err error) bool {
 	for cur := err; !isNothing(cur); {
 		if x, ok := cur.(interface{ Is(target error) bool }); ok && x.Is(errInvalid) {
@@ -351,6 +352,9 @@ func declaresInvalid(err error) bool {
 		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
 		case *Error:
 			cur = x.err
+
+		case *PanicError:
+			return false
 
 		case interface{ Unwrap() error }:
 			cur = x.Unwrap()

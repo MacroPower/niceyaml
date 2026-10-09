@@ -13187,8 +13187,55 @@ func TestIsInvalid(t *testing.T) {
 
 				return err
 			},
-			err:  niceyaml.ErrDecode,
-			want: true,
+			err: errUnmarshal,
+		},
+		"decoder panic a document trips": {
+			// The go-yaml decoder indexes the array past its end.
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				_, err := yamltest.FirstDocument(t, "pair: [a, b, c]\n").Decode[struct {
+					Pair [2]string `yaml:"pair"`
+				}](t.Context())
+
+				return err
+			},
+		},
+		"parser panic": {
+			// The go-yaml parser dereferences the position of this token.
+			build: func(*testing.T) error {
+				tks := lexer.Tokenize("a: 1\nb: 2\n")
+				tks[2].Position = nil
+
+				_, err := niceyaml.NewSourceFromTokens(tks).File()
+
+				return err
+			},
+		},
+		"panic beside a rejection": {
+			build: func(t *testing.T) error {
+				t.Helper()
+
+				_, err := yamltest.FirstDocument(t, "port: abc\nv: x\n").Decode[struct {
+					Port int                  `yaml:"port"`
+					V    panickingUnmarshaler `yaml:"v"`
+				}](t.Context())
+
+				return err
+			},
+			err: niceyaml.ErrDecode,
+		},
+		"PanicError around an Error from NewError": {
+			// The chain ends at the PanicError, so the Error the code
+			// panicked with declares nothing.
+			build: func(*testing.T) error {
+				return &niceyaml.PanicError{Value: niceyaml.NewError("name taken")}
+			},
+		},
+		"wrapper around a PanicError around an Error from NewError": {
+			build: func(*testing.T) error {
+				return fmt.Errorf("load: %w", &niceyaml.PanicError{Value: niceyaml.NewError("name taken")})
+			},
 		},
 		"target type the decoder refuses": {
 			build: func(t *testing.T) error {

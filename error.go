@@ -67,17 +67,17 @@ var (
 	//   - The error a value's own UnmarshalYAML or UnmarshalText returns.
 	//     That error stays in the chain, so it still matches what the
 	//     method returned.
-	//   - A panic in the decoder or in such a method.
 	//   - The error for a target type whose definition the decoder
 	//     refuses, such as a struct with two fields of one name.
 	//   - The error of a reference document from [WithReferences] that
 	//     does not parse.
 	//
 	// The error of a context that ended does not match, even when an
-	// unmarshaler wraps it. Neither does [ErrDecodeTarget] or
-	// [ErrExcessiveAliasing], which come back before the decoder runs, or
-	// an error that a [Validator] or a [SelfValidator] reports about the
-	// value it checks.
+	// unmarshaler wraps it. Neither does a panic in the decoder or in
+	// such a method, which comes back as a [PanicError]. Neither does
+	// [ErrDecodeTarget] or [ErrExcessiveAliasing], which come back before
+	// the decoder runs, or an error that a [Validator] or a
+	// [SelfValidator] reports about the value it checks.
 	//
 	// A document that matches parsed, since text the parser rejects
 	// matches [ErrSyntax] instead. The document is at fault for each
@@ -119,17 +119,19 @@ var (
 	// ErrSyntax indicates text the go-yaml parser rejects, such as a flow
 	// sequence with no closing bracket, a tab that indents a key, or a key
 	// a mapping holds twice without [WithAllowDuplicateKeys]. Every error
-	// of the parse matches it. So does a panic in the parser, such as one
-	// on a token with no position that [NewSourceFromTokens] received.
-	// [Source.File], [Source.Documents], and [Source.Document] return it,
-	// and [Node.Err] returns it for a document that did not parse. Each
-	// error comes back bound as a [SourceError] at the offending token. A
-	// panic binds at the first token with a position among the ones the
-	// parser was reading. The error of a file with several such documents
-	// is a join, which matches through each of them. [errors.As] still
-	// finds the go-yaml error, which no error of the chain unwraps to.
-	// The document is at fault for each problem the parse reports with
-	// ErrSyntax, as [IsInvalid] describes.
+	// the parser returns matches it. [Source.File], [Source.Documents],
+	// and [Source.Document] return it, and [Node.Err] returns it for a
+	// document that did not parse. Each error comes back bound as a
+	// [SourceError] at the offending token. The error of a file with
+	// several such documents is a join, which matches through each of
+	// them. [errors.As] still finds the go-yaml error, which no error of
+	// the chain unwraps to. The document is at fault for each problem the
+	// parse reports with ErrSyntax, as [IsInvalid] describes.
+	//
+	// A panic in the parser does not match, such as one on a token with
+	// no position that [NewSourceFromTokens] received. It comes back from
+	// the same calls as a [PanicError], bound at the first token with a
+	// position among the ones the parser was reading.
 	//
 	// [errors.Is] reports whether any problem of an error matches
 	// ErrSyntax, and the error can hold a problem of another kind beside
@@ -521,9 +523,9 @@ func (e *Error) Is(target error) bool {
 // # Document Faults
 //
 // A problem is the document's fault or a check that could not run, such
-// as a schema that does not load or a context that ended. The code that
-// builds an error declares which, and a location never decides it. The
-// document is at fault for these problems:
+// as a schema that does not load, a context that ended, or a panic. The
+// code that builds an error declares which, and a location never decides
+// it. The document is at fault for these problems:
 //
 //   - An [*Error] from [NewError] or [Invalid], with a location or
 //     without, and each problem such an Error heads, such as each branch
@@ -601,7 +603,7 @@ func (e *Error) Is(target error) bool {
 //	switch {
 //	case err == nil:
 //	case !niceyaml.IsInvalid(err):
-//		status = 500 // some problem is not the document's: schema load, canceled context, I/O
+//		status = 500 // some problem is not the document's: schema load, canceled context, I/O, panic
 //	case errors.Is(err, niceyaml.ErrSyntax):
 //		status = 400
 //	default:
@@ -612,16 +614,36 @@ func (e *Error) Is(target error) bool {
 // annotation does, asks [ErrorTree.IsInvalid] of each node
 // [ErrorTree.Problems] yields.
 //
+// # Panics
+//
+// A panic that the parse or a decode recovered comes back as a
+// [PanicError]. It is a bug in code, the caller's or go-yaml's, so the
+// document is not at fault for it, whatever error the code panicked
+// with, and the switch above answers 500. A document can still trip a
+// panic in go-yaml, as a sequence of three elements does in a decode
+// into a [2]string. A public endpoint that must answer such a document
+// with a 4xx status tests for the PanicError and adds one case ahead of
+// the IsInvalid case:
+//
+//	p, panicked := errors.AsType[*niceyaml.PanicError](err)
+//	switch {
+//	case err == nil:
+//	case panicked:
+//		slog.Error("decode panicked", "value", p.Value, "stack", string(p.Stack))
+//		status = 400
+//	case !niceyaml.IsInvalid(err):
+//		...
+//	}
+//
 // # Outside Causes
 //
-// The document is at fault for every problem of the parse and of a
-// decode. A few of them thus read invalid for a cause outside the
-// document:
+// The document is at fault for every problem the parse reports with
+// ErrSyntax and every one a decode reports with ErrDecode. A few of them
+// thus read invalid for a cause outside the document:
 //
 //   - The error an UnmarshalYAML or UnmarshalText method returns, such
 //     as an I/O error, since the decode cannot tell the I/O of the
 //     method from its check of the value.
-//   - A panic in the parser, in the decoder, or in such a method.
 //   - A target type the decoder refuses, and the error of a go-yaml
 //     option, such as one for a reference file the decoder cannot open.
 //

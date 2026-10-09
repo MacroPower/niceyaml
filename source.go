@@ -1504,9 +1504,16 @@ func (d *document) anchorToken() *token.Token {
 //
 // The message of a syntax error names each control character by its
 // Unicode Control Picture, so a tab the parser rejects reads as "␉" there
-// as it does in the excerpt. Every error of the parse matches
-// [ErrSyntax], and so does a panic in the parser, which comes back as a
-// [*SourceError] too. Every later call returns the same error.
+// as it does in the excerpt. Every error the parser returns matches
+// [ErrSyntax]. Every later call returns the same error.
+//
+// # Panics
+//
+// A panic in the parser comes back as a [*SourceError] too, bound at the
+// first token with a position among the ones the parser was reading. It
+// holds a [PanicError] and does not match ErrSyntax. The documents the
+// parser was reading have no tree, as the documents of a syntax error
+// have none, and every later call returns the same error.
 func (s *Source) File() (*ast.File, error) {
 	s.parseOnce()
 
@@ -1628,12 +1635,16 @@ func (s *Source) parse() parsed {
 		yamlErr, ok := errors.AsType[yaml.Error](err)
 
 		switch {
+		// A panic is no fault of the text, whatever value the parser
+		// panicked with, so its error stays as parseRun bound it.
+		case holdsPanic(err):
+
 		case ok:
 			msg := escape.Control(yamlErr.GetMessage())
 
 			err = Invalid(syntaxError{err: yamlMessageError{err: yamlErr, msg: msg}}, atToken(yamlErr.GetToken()))
 
-		case !errors.Is(err, ErrSyntax):
+		default:
 			err = syntaxError{err: err}
 		}
 
@@ -1748,10 +1759,10 @@ func (e syntaxError) Is(target error) bool {
 }
 
 // parseRun parses run, one run of [splitDocumentRuns]. It turns a panic
-// in the parser into a [*SourceError] bound to the Source that matches
-// [ErrSyntax], located at the first token of run that carries a
-// position. The Error around the panic declares nothing, so the binding
-// matches [errInvalid] only as every [syntaxError] does.
+// in the parser into a [*SourceError] bound to the Source that holds a
+// [*PanicError], located at the first token of run that carries a
+// position. The panic is no fault of the text, so the binding matches
+// neither [ErrSyntax] nor [errInvalid].
 func (s *Source) parseRun(run token.Tokens) (*ast.File, error) {
 	var (
 		f   *ast.File
@@ -1771,9 +1782,7 @@ func (s *Source) parseRun(run token.Tokens) (*ast.File, error) {
 				at = run[i]
 			}
 
-			panicked := syntaxError{err: fmt.Errorf("parser rejected the tokens: panic: %v", p)}
-
-			err = bindTree(Place(panicked, atToken(at)), binder{src: s})
+			err = bindTree(Place(recovered("parser", p), atToken(at)), binder{src: s})
 		}()
 
 		f, err = parser.Parse(run, parser.ParseComments, s.parserOpts...)

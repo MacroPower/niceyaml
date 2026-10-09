@@ -471,7 +471,12 @@ func valueProblem(problem error) error {
 	located := *x
 	located.loc = nil
 
-	if placed, ok := x.err.(decodeError); ok { //nolint:errorlint // The decode placed the error it built.
+	switch placed := x.err.(type) { //nolint:errorlint // The decode placed the error it built.
+	case decodeError:
+		placed.placed = false
+		located.err = placed
+
+	case recoveredError:
 		placed.placed = false
 		located.err = placed
 	}
