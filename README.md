@@ -155,6 +155,8 @@ if err != nil {
 kind, err := doc.DecodeAt[string](ctx, paths.Doc().Child("kind"))
 ```
 
+Every `Node` of the merged document has the file path of the lowest layer. `Node.Origin` returns the `Node` that holds a value in the file of its layer, so a validator that reads a path beside that file finds its directory.
+
 The environment and the flags of a program go in as one more layer. Encode a map of the keys they set with [`encoder.Marshal`][niceyaml/encoder] and pass a `Source` of the result above the files. The schema then checks those values too, and an error under one reports that layer:
 
 ```go

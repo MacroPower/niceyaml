@@ -507,9 +507,11 @@
 // through it, as [Node.DecodeAt] reads one of a document, or prints
 // what the files merge into. The document takes its name and its
 // preamble from the lowest file, and its text is no file, so each error
-// still binds in the file that holds its value. The decode fills the Go
-// value from that document by the rule of [Node.DecodeInto], so defaults
-// the value holds survive where the files leave a field out.
+// still binds in the file that holds its value. [Node.Origin] returns
+// the Node that holds a value of the document in its file, for a
+// validator that resolves a path beside that file. The decode fills the
+// Go value from that document by the rule of [Node.DecodeInto], so
+// defaults the value holds survive where the files leave a field out.
 //
 // The environment and the flags of a program go in as one more layer,
 // above the files. The program builds a map of the keys they set, under

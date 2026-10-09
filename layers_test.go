@@ -137,6 +137,52 @@ func ExampleLayers_environment() {
 	//      |         ^
 }
 
+func ExampleNode_Origin() {
+	base := niceyaml.NewSourceFromString(
+		"name: shop\nlicense: LICENSE\n",
+		niceyaml.WithFilePath("conf/base.yaml"),
+	)
+
+	prod := niceyaml.NewSourceFromString(
+		"# Production.\n\nlicense: LICENSE.prod\n",
+		niceyaml.WithFilePath("conf/prod/app.yaml"),
+	)
+
+	doc, err := niceyaml.NewLayers(base, prod).Document()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	license, err := doc.At(paths.Doc().Child("license"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// The Node reads the merged text, under the file path of base.yaml.
+	fmt.Printf("%s:%d\n", license.FilePath(), license.Span().Start+1)
+
+	// Its origin reads the file that sets the license.
+	origin, err := license.Origin()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Printf("%s:%d\n", origin.FilePath(), origin.Span().Start+1)
+
+	// A Node of a file is its own origin.
+	own, err := origin.Origin()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(own == origin)
+
+	// Output:
+	// conf/base.yaml:2
+	// conf/prod/app.yaml:3
+	// true
+}
+
 func TestNewLayers(t *testing.T) {
 	t.Parallel()
 
@@ -1386,6 +1432,441 @@ func TestLayers_Document(t *testing.T) {
 			err = doc.NewError("port is required", niceyaml.AtPath(port))
 			require.EqualError(t, err, "$.server.port: port is required", name)
 		}
+	})
+}
+
+func TestNode_Origin(t *testing.T) {
+	t.Parallel()
+
+	const baseInput = "name: shop\nserver:\n  host: example.com\n  port: 80\ntags: [a, b]\n"
+
+	var (
+		server = paths.Doc().Child("server")
+		host   = server.Child("host")
+		port   = server.Child("port")
+		tags   = paths.Doc().Child("tags")
+	)
+
+	// Each case reads the origin of the Node at path in the layers that
+	// inputs merge into, which [layerSources] names.
+	tcs := map[string]struct {
+		path paths.Path
+		// The name of the layer of the origin.
+		wantLayer string
+		// The path of the origin in the document of that layer.
+		wantPath string
+		// The lines of that document the origin covers.
+		want   string
+		inputs []string
+	}{
+		"a scalar comes from the highest layer that sets it": {
+			inputs:    []string{baseInput, "server:\n  port: 8080\n", "server:\n  port: 8443\n"},
+			path:      port,
+			wantLayer: "prod.yaml",
+			wantPath:  "$.server.port",
+			want:      "  port: 8443",
+		},
+		"a scalar no higher layer sets comes from the layer below": {
+			inputs:    []string{baseInput, "server:\n  host: mid.example.com\n", "server:\n  port: 8443\n"},
+			path:      host,
+			wantLayer: "mid.yaml",
+			wantPath:  "$.server.host",
+			want:      "  host: mid.example.com",
+		},
+		"a null in a higher layer holds no value": {
+			inputs:    []string{baseInput, "server:\n  port:\n"},
+			path:      port,
+			wantLayer: "base.yaml",
+			wantPath:  "$.server.port",
+			want:      "  port: 80",
+		},
+		"a mapping comes from the highest layer that holds it, with the keys of that layer alone": {
+			inputs:    []string{baseInput, "server:\n  port: 8443\n"},
+			path:      server,
+			wantLayer: "prod.yaml",
+			wantPath:  "$.server",
+			want:      "  port: 8443",
+		},
+		"a mapping one layer holds comes from that layer whole": {
+			inputs:    []string{baseInput, "name: prod\n"},
+			path:      server,
+			wantLayer: "base.yaml",
+			wantPath:  "$.server",
+			want:      "  host: example.com\n  port: 80",
+		},
+		"a sequence comes whole from the layer that replaces it": {
+			inputs:    []string{baseInput, "tags:\n  - c\n  - d\n"},
+			path:      tags,
+			wantLayer: "prod.yaml",
+			wantPath:  "$.tags",
+			want:      "  - c\n  - d",
+		},
+		"an element comes from the layer of its sequence": {
+			inputs:    []string{baseInput, "tags:\n  - c\n  - d\n"},
+			path:      tags.Index(1),
+			wantLayer: "prod.yaml",
+			wantPath:  "$.tags[1]",
+			want:      "  - d",
+		},
+		"a sequence no higher layer holds comes from the layer below": {
+			inputs:    []string{baseInput, "server:\n  port: 8443\n"},
+			path:      tags.Index(0),
+			wantLayer: "base.yaml",
+			wantPath:  "$.tags[0]",
+			want:      "tags: [a, b]",
+		},
+		"a value read through an alias comes from the content of the anchor": {
+			inputs:    []string{baseInput, "defaults: &defaults\n  port: 9\nserver: *defaults\n"},
+			path:      port,
+			wantLayer: "prod.yaml",
+			wantPath:  "$.server.port",
+			want:      "  port: 9",
+		},
+		"a mapping read through an alias comes from the content of the anchor": {
+			inputs:    []string{baseInput, "defaults: &defaults\n  port: 9\nserver: *defaults\n"},
+			path:      server,
+			wantLayer: "prod.yaml",
+			wantPath:  "$.server",
+			want:      "  port: 9",
+		},
+		"a value a merge key brings in comes from the content of the anchor": {
+			inputs: []string{
+				baseInput,
+				"defaults: &defaults\n  port: 9\nserver:\n  <<: *defaults\n  host: prod.example.com\n",
+			},
+			path:      port,
+			wantLayer: "prod.yaml",
+			wantPath:  "$.server.port",
+			want:      "  port: 9",
+		},
+		"a key comes from the layer of its value": {
+			inputs:    []string{baseInput, "server:\n  port: 8443\n"},
+			path:      port.Key(),
+			wantLayer: "prod.yaml",
+			wantPath:  "$.server.port~",
+			want:      "  port: 8443",
+		},
+		"the root comes from the highest layer that holds a value": {
+			inputs:    []string{baseInput, "server:\n  port: 8080\n", "server:\n  port: 8443\n"},
+			path:      paths.Doc(),
+			wantLayer: "prod.yaml",
+			wantPath:  "$",
+			want:      "server:\n  port: 8443",
+		},
+		"the root passes over a layer that holds no value": {
+			inputs:    []string{baseInput, "server:\n  port: 8080\n", "# nothing yet\n"},
+			path:      paths.Doc(),
+			wantLayer: "mid.yaml",
+			wantPath:  "$",
+			want:      "server:\n  port: 8080",
+		},
+		"the root of layers that hold no value comes from the highest layer": {
+			inputs:    []string{"# base\n", "# prod\n"},
+			path:      paths.Doc(),
+			wantLayer: "prod.yaml",
+			wantPath:  "$",
+			want:      "# prod",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc, err := niceyaml.NewLayers(layersOf(layerSources(t, tc.inputs...))...).Document()
+			require.NoError(t, err)
+
+			node := doc
+			if !tc.path.IsRoot() {
+				node = yamltest.At(t, doc, tc.path)
+			}
+
+			origin, err := node.Origin()
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.wantLayer, origin.Source().Name())
+			assert.Equal(t, tc.wantPath, origin.Path().String())
+			assert.Equal(t, tc.want, origin.View().Held().Content())
+
+			// An error at the Node binds in the layer of its origin.
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, node.NewError("bad value", niceyaml.AtPath(paths.Current())), &bound)
+			assert.Same(t, origin.Source(), bound.Source())
+
+			// The origin belongs to a file, so it is its own origin.
+			again, err := origin.Origin()
+			require.NoError(t, err)
+			assert.Same(t, origin, again)
+		})
+	}
+
+	t.Run("a Node of a plain file is its own origin", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, baseInput, niceyaml.WithName("base.yaml"))
+
+		origin, err := doc.Origin()
+		require.NoError(t, err)
+		assert.Same(t, doc, origin)
+
+		scoped := yamltest.At(t, doc, port)
+
+		origin, err = scoped.Origin()
+		require.NoError(t, err)
+		assert.Same(t, scoped, origin)
+
+		// A document that did not parse is no merged document either.
+		broken := niceyaml.NewSourceFromString("server: [\n").AllDocuments()[0]
+		require.Error(t, broken.Err())
+
+		origin, err = broken.Origin()
+		require.NoError(t, err)
+		assert.Same(t, broken, origin)
+	})
+
+	t.Run("layers that hold no layer return the Node itself", func(t *testing.T) {
+		t.Parallel()
+
+		doc, err := niceyaml.NewLayers().Document()
+		require.NoError(t, err)
+
+		origin, err := doc.Origin()
+		require.NoError(t, err)
+		assert.Same(t, doc, origin)
+	})
+
+	t.Run("the root returns the Node of its layer", func(t *testing.T) {
+		t.Parallel()
+
+		base := niceyaml.NewSourceFromString(baseInput, niceyaml.WithFilePath("conf/base.yaml"))
+		prod := niceyaml.NewSourceFromString("server:\n  port: 8443\n", niceyaml.WithFilePath("conf/prod.yaml"))
+
+		prodDoc, err := prod.Document()
+		require.NoError(t, err)
+
+		// A Source gives the Node its Document method returns, and a Node
+		// gives itself.
+		for name, top := range map[string]niceyaml.Layer{"source": prod, "node": prodDoc} {
+			doc, err := niceyaml.NewLayers(base, top).Document()
+			require.NoError(t, err, name)
+
+			origin, err := doc.Origin()
+			require.NoError(t, err, name)
+			assert.Same(t, prodDoc, origin, name)
+
+			// The merged document keeps the file path of the lowest layer.
+			assert.Equal(t, "conf/base.yaml", doc.FilePath(), name)
+			assert.Equal(t, "conf/prod.yaml", origin.FilePath(), name)
+		}
+	})
+
+	t.Run("a validator reads the file of a value from its origin", func(t *testing.T) {
+		t.Parallel()
+
+		license := paths.Current().Child("license")
+
+		baseFS := fstest.MapFS{"conf/base.yaml": &fstest.MapFile{}}
+		prodFS := fstest.MapFS{"conf/sub/prod.yaml": &fstest.MapFile{}}
+
+		base := niceyaml.NewSourceFromString("name: shop\nlicense: ./LICENSE\n",
+			niceyaml.WithFilePath("conf/base.yaml"), niceyaml.WithFS(baseFS))
+		prod := niceyaml.NewSourceFromString("license: ./LICENSE.prod\n",
+			niceyaml.WithFilePath("conf/sub/prod.yaml"), niceyaml.WithFS(prodFS))
+
+		var values, origins []*niceyaml.Node
+
+		beside := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+			value, err := n.At(license)
+			if err != nil {
+				return err //nolint:wrapcheck // The validator returns the error of the read as it is.
+			}
+
+			origin, err := value.Origin()
+			if err != nil {
+				return err //nolint:wrapcheck // The validator returns the error of the read as it is.
+			}
+
+			values = append(values, value)
+			origins = append(origins, origin)
+
+			return nil
+		})
+
+		// The same validator runs on the layers and on one file.
+		require.NoError(t, niceyaml.NewLayers(base, prod).Validate(t.Context(), beside))
+		require.NoError(t, base.ValidateDocuments(t.Context(), beside))
+		require.Len(t, origins, 2)
+
+		// Under the layers, the Node the validator read names the lowest
+		// layer, and its origin names the layer that sets the license.
+		assert.Equal(t, "conf/base.yaml", values[0].FilePath())
+		assert.Equal(t, baseFS, values[0].FS())
+		assert.Equal(t, "conf/sub/prod.yaml", origins[0].FilePath())
+		assert.Equal(t, prodFS, origins[0].FS())
+		assert.Equal(t, "license: ./LICENSE.prod", origins[0].View().Held().Content())
+
+		// On one file, that Node is its own origin.
+		assert.Same(t, values[1], origins[1])
+		assert.Equal(t, "conf/base.yaml", origins[1].FilePath())
+	})
+
+	t.Run("a scoped layer gives the path its file has for the value", func(t *testing.T) {
+		t.Parallel()
+
+		envs := yamltest.FirstDocument(t,
+			"defaults:\n  server:\n    host: example.com\n    port: 80\nprod:\n  server:\n    port: 8443\n",
+			niceyaml.WithName("envs.yaml"))
+
+		defaults := yamltest.At(t, envs, paths.Doc().Child("defaults"))
+		prod := yamltest.At(t, envs, paths.Doc().Child("prod"))
+
+		doc, err := niceyaml.NewLayers(defaults, prod).Document()
+		require.NoError(t, err)
+
+		origin, err := yamltest.At(t, doc, port).Origin()
+		require.NoError(t, err)
+		assert.Same(t, envs.Source(), origin.Source())
+		assert.Equal(t, "$.prod.server.port", origin.Path().String())
+		assert.Equal(t, "    port: 8443", origin.View().Held().Content())
+
+		origin, err = yamltest.At(t, doc, host).Origin()
+		require.NoError(t, err)
+		assert.Equal(t, "$.defaults.server.host", origin.Path().String())
+		assert.Equal(t, "    host: example.com", origin.View().Held().Content())
+
+		// The root of the merged document reads from the scoped Node.
+		origin, err = doc.Origin()
+		require.NoError(t, err)
+		assert.Same(t, prod, origin)
+	})
+
+	t.Run("a layer other Layers built gives a Node of a file", func(t *testing.T) {
+		t.Parallel()
+
+		sources := layerSources(t, baseInput, "server:\n  host: mid.example.com\n", "server:\n  port: 8443\n")
+
+		inner, err := niceyaml.NewLayers(sources[0], sources[1]).Document()
+		require.NoError(t, err)
+
+		below := []niceyaml.Layer{inner, sources[2]}
+		above := []niceyaml.Layer{sources[2], inner}
+
+		tcs := map[string]struct {
+			path      paths.Path
+			wantLayer string
+			want      string
+			layers    []niceyaml.Layer
+		}{
+			"below a file, a value of its lower layer": {
+				layers: below, path: tags, wantLayer: "base.yaml", want: "tags: [a, b]",
+			},
+			"below a file, a value of its higher layer": {
+				layers: below, path: host, wantLayer: "mid.yaml", want: "  host: mid.example.com",
+			},
+			"below a file, a value of the file": {
+				layers: below, path: port, wantLayer: "prod.yaml", want: "  port: 8443",
+			},
+			"below a file, the root": {
+				layers: below, path: paths.Doc(), wantLayer: "prod.yaml", want: "server:\n  port: 8443",
+			},
+			"above a file, a value of its lower layer": {
+				layers: above, path: tags, wantLayer: "base.yaml", want: "tags: [a, b]",
+			},
+			"above a file, a value of its higher layer": {
+				layers: above, path: host, wantLayer: "mid.yaml", want: "  host: mid.example.com",
+			},
+			"above a file, a value the file sets too": {
+				layers: above, path: port, wantLayer: "base.yaml", want: "  port: 80",
+			},
+			"above a file, the root": {
+				layers: above, path: paths.Doc(), wantLayer: "mid.yaml", want: "server:\n  host: mid.example.com",
+			},
+		}
+
+		for name, tc := range tcs {
+			doc, err := niceyaml.NewLayers(tc.layers...).Document()
+			require.NoError(t, err, name)
+
+			node := doc
+			if !tc.path.IsRoot() {
+				node = yamltest.At(t, doc, tc.path)
+			}
+
+			origin, err := node.Origin()
+			require.NoError(t, err, name)
+			assert.Equal(t, tc.wantLayer, origin.Source().Name(), name)
+			assert.Equal(t, tc.want, origin.View().Held().Content(), name)
+		}
+	})
+
+	t.Run("a value of a reference document has no Node in its layer", func(t *testing.T) {
+		t.Parallel()
+
+		shared := niceyaml.NewSourceFromString(
+			"shared: &shared {host: shared.example.com, port: 9}\n", niceyaml.WithName("shared.yaml"),
+		)
+		base := niceyaml.NewSourceFromString(baseInput, niceyaml.WithName("base.yaml"))
+
+		tcs := map[string]struct {
+			prod string
+			path paths.Path
+			err  string
+		}{
+			"the alias": {
+				prod: "server: *shared\n",
+				path: server,
+				err:  "prod.yaml: resolve $.server: alias does not resolve: *shared has no anchor before it",
+			},
+			"a value below the alias": {
+				prod: "server: *shared\n",
+				path: port,
+				err:  "prod.yaml: resolve $.server.port: alias does not resolve: *shared has no anchor before it",
+			},
+			"a value a merge key reads": {
+				prod: "server:\n  <<: *shared\n",
+				path: port,
+				err:  "prod.yaml: resolve $.server.port: alias does not resolve: *shared has no anchor before it",
+			},
+		}
+
+		for name, tc := range tcs {
+			prod := niceyaml.NewSourceFromString(
+				tc.prod,
+				niceyaml.WithName("prod.yaml"),
+				niceyaml.WithReferences(shared),
+			)
+
+			doc, err := niceyaml.NewLayers(base, prod).Document()
+			require.NoError(t, err, name)
+
+			// The merged document holds the value the alias reads.
+			node := yamltest.At(t, doc, tc.path)
+
+			origin, err := node.Origin()
+			require.EqualError(t, err, tc.err, name)
+			require.ErrorIs(t, err, paths.ErrAlias, name)
+			assert.Nil(t, origin, name)
+
+			// The error names the layer that holds the alias.
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound, name)
+			assert.Same(t, prod, bound.Source(), name)
+		}
+
+		// The mapping that holds the merge key has a Node in its layer.
+		prod := niceyaml.NewSourceFromString(
+			"server:\n  <<: *shared\n", niceyaml.WithName("prod.yaml"), niceyaml.WithReferences(shared),
+		)
+
+		doc, err := niceyaml.NewLayers(base, prod).Document()
+		require.NoError(t, err)
+
+		origin, err := yamltest.At(t, doc, server).Origin()
+		require.NoError(t, err)
+		assert.Same(t, prod, origin.Source())
+		assert.Equal(t, "  <<: *shared", origin.View().Held().Content())
 	})
 }
 

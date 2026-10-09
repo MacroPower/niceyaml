@@ -159,7 +159,8 @@ var (
 // [Validator] gets that Node. The document belongs to a [Source] of its
 // own, which holds the merged value as YAML text under the name of the
 // lowest layer. Document describes that text, which is no file of the
-// program.
+// program. [Node.Origin] returns the Node that holds a value of it in
+// the file of a layer.
 //
 // An error never binds in that text. An error with a path binds in the
 // highest layer whose document holds the value at that path, and the
@@ -345,6 +346,13 @@ func NewLayers(layers ...Layer) *Layers {
 // a range in an error bound through the Node. A position taken from the
 // file of a layer thus names whatever lies there in the merged text.
 //
+// Every Node of the document has the [Node.FilePath] and the [Node.FS]
+// of the lowest layer, whichever layer holds its value. A validator that
+// resolves a file beside a value thus reads [Node.Origin] of the Node of
+// that value, and not its FilePath. Origin returns the Node that holds
+// the value in the file of its layer, with the lines and the positions
+// of that file.
+//
 // An error bound through the Node binds in the file of a layer, as
 // [Layers] describes, and never in the merged text. Its position is thus
 // not the one [Node.Ranges] returns for its path. [Annotate] marks the
@@ -378,6 +386,89 @@ func (l *Layers) document(ctx context.Context) (*Node, error) {
 	})
 
 	return l.merged.doc, l.merged.err
+}
+
+// Origin returns the [*Node] that holds the value of n in the file of a
+// layer. A Node of the document [Layers] build reads the merged text,
+// and its [Node.FilePath] and its [Node.FS] are those of the lowest
+// layer, whichever layer holds its value. Its origin is the Node at the
+// path of n in the layer an error at that path binds in, as Layers
+// describes. A [Validator] that resolves a file beside a value thus
+// reads the directory from the origin of that value:
+//
+//	license, err := n.At(licensePath)
+//	if err != nil {
+//		return err
+//	}
+//
+//	origin, err := license.Origin()
+//	if err != nil {
+//		return err
+//	}
+//
+//	dir := filepath.Dir(origin.FilePath())
+//
+// A Node of any other document is its own origin, so Origin returns the
+// receiver for it. A validator thus makes the same calls whether it runs
+// on one file or on Layers.
+//
+// The layer is the highest one whose document holds a value at the path,
+// and a null there holds none. The origin has the lines, the positions,
+// and the [Node.Path] of the document of that layer. For a layer from
+// [Node.At], that path differs from the path of n, as
+// `$.prod.server.port` differs from `$.server.port`.
+//
+// A mapping that several layers hold has its origin in the highest of
+// them. That Node holds the keys its own layer sets, and none of the
+// keys the layers below add to the merged mapping. A caller thus decodes
+// the mapping through n, and asks for the origin of one key through the
+// Node of that key. A sequence comes whole from one layer, so its origin
+// holds every element.
+//
+// The root of the merged document follows the same rule. Its origin is
+// the highest layer that holds a value, or the highest layer of all when
+// none holds one. Origin returns the Node of that layer as [NewLayers]
+// got it, or the Node [Source.Document] returns for a [Source] it got.
+// An error with no location binds in the lowest layer instead, whose
+// name and file path the merged document has. Node.FilePath of the root
+// and of its origin thus name two files where a higher layer holds a
+// value.
+//
+// A layer can be a Node of a document that other Layers built. A value
+// of such a layer has the origin it has in that document, so every
+// origin belongs to a document that no Layers built.
+//
+// A value that a layer reads through an alias or a `<<` merge key has
+// its origin where Node.At resolves the path in that layer, which is the
+// content of the anchor. A path does not enter a reference document of
+// [WithReferences], so a value whose anchor lies in one has no Node in
+// its layer. Origin then returns the error Node.At returns for the path,
+// which wraps [go.jacobcolvin.com/niceyaml/paths.ErrAlias]. The error is
+// bound to the layer that holds the alias, so [SourceError.Source] names
+// the file of that layer.
+func (n *Node) Origin() (*Node, error) {
+	if !n.merges() {
+		return n, nil
+	}
+
+	layer, _, path := n.source.layers.layer(n, n.base)
+
+	// No call hands out a Node of a merged document one of whose layers
+	// has no Node, since [Layers.Document] returns the error of that
+	// layer instead.
+	if layer.node == nil {
+		return nil, layer.err
+	}
+
+	// The path names the Node of the layer itself, which needs no scope.
+	// The root of a document covers every line of it, where a Node that
+	// At scopes at `$` covers its content alone, and a document with no
+	// content has no node for At to select.
+	if path.Equal(layer.node.base) {
+		return layer.node, nil
+	}
+
+	return layer.node.At(path)
 }
 
 // DecodeInto validates and decodes the merged document into v, as

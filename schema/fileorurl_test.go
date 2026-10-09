@@ -18,6 +18,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -593,6 +594,41 @@ func TestRefBeside(t *testing.T) {
 			_, err = reg.Load(t.Context(), ref)
 			require.NoError(t, err)
 		}
+	})
+
+	t.Run("the origin of a layered value names a file beside its layer", func(t *testing.T) {
+		t.Parallel()
+
+		layered := fstest.MapFS{
+			"configs/prod/schema.json": &fstest.MapFile{Data: []byte(schemaData)},
+		}
+
+		base := niceyaml.NewSourceFromString("kind: App\n",
+			niceyaml.WithFilePath("configs/app.yaml"), niceyaml.WithFS(layered))
+		prod := niceyaml.NewSourceFromString("schema: ./schema.json\n",
+			niceyaml.WithFilePath("configs/prod/app.yaml"), niceyaml.WithFS(layered))
+
+		doc, err := niceyaml.NewLayers(base, prod).Document()
+		require.NoError(t, err)
+
+		field := yamltest.At(t, doc, paths.Doc().Child("schema"))
+
+		// The Node of the merged document has the file path of the lowest
+		// layer.
+		ref, err := schema.RefBeside(field, "./schema.json")
+		require.NoError(t, err)
+		assert.Equal(t, "file:///configs/schema.json", ref.Key())
+
+		origin, err := field.Origin()
+		require.NoError(t, err)
+
+		ref, err = schema.RefBeside(origin, "./schema.json")
+		require.NoError(t, err)
+		assert.Equal(t, "file:///configs/prod/schema.json", ref.Key())
+
+		data, err := reg.Load(t.Context(), ref)
+		require.NoError(t, err)
+		assert.JSONEq(t, schemaData, string(data))
 	})
 
 	t.Run("a relative path needs the path of the document", func(t *testing.T) {

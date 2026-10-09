@@ -398,6 +398,14 @@ type SelfValidator interface {
 // "c.yaml:3:12: $.spec.license: stat license: permission denied", and it
 // stays a check that could not run, which IsInvalid does not report.
 //
+// A validator that resolves such a file beside the file that names it
+// reads the directory from [Node.Origin] of the Node of the value, and
+// not from [Node.FilePath] of the Node it got. Under [Layers] that Node
+// belongs to the merged document, which has the file path of the lowest
+// layer, whichever layer holds the value. Origin returns the Node of the
+// value in the file of its layer, and the receiver where the validator
+// runs on one file.
+//
 // A bound error keeps its text. Context that a validator adds around the
 // error of another therefore stands in front of the position, as in
 // "config schema: svc.yaml:2:7: $.port: 0 is less than 1". [Rebase]
@@ -1816,13 +1824,20 @@ func (n *Node) Preamble() token.Tokens {
 // [Source.FilePath]. It is absolute for a document [NewSourceFromFile]
 // read, so a schema routes on the file and not on how the caller
 // spelled its path. Returns an empty string when the source has none.
+//
+// The document [Layers] build came from no file, and its Source has the
+// path of the lowest layer. Every Node of it returns that path, whichever
+// layer holds its value. [Node.Origin] returns the Node of the value in
+// the file of its layer, and FilePath of that Node names the file.
 func (n *Node) FilePath() string {
 	return n.source.FilePath()
 }
 
 // FS returns the file system the path of the file the document came from
 // names a file in, which is [Source.FS]. It returns nil when the source
-// has none, where a path names a file on disk.
+// has none, where a path names a file on disk. A Node of the document
+// [Layers] build returns the file system of the lowest layer, as
+// [Node.FilePath] describes.
 func (n *Node) FS() fs.FS {
 	return n.source.FS()
 }
