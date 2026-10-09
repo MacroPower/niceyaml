@@ -12,6 +12,7 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 )
@@ -128,4 +129,48 @@ func TestPrinter_PrintError_ExcerptsOff(t *testing.T) {
 			"   3  token: hunter2-token",
 		), p.PrintError(err))
 	})
+}
+
+func TestPrinter_PrintError_Report(t *testing.T) {
+	t.Parallel()
+
+	// The printer draws no color, so a test reads each row as text.
+	p := printer.New(
+		printer.WithStyles(style.New(lipgloss.NewStyle())),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithContextLines(1),
+	)
+
+	first := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("first.yaml"))
+	second := niceyaml.NewSourceFromString("c: 3\n", niceyaml.WithName("second.yaml"))
+
+	badB := yamltest.Bind(t, first, niceyaml.NewError("bad b", niceyaml.AtPath(paths.Doc().Child("b"))))
+	badC := yamltest.Bind(t, second, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Doc().Child("c"))))
+	far := yamltest.Bind(t, first, niceyaml.NewError("far", niceyaml.AtPosition(position.New(99, 0))))
+
+	err := errors.Join(badB, badC, far)
+
+	// PrintError draws the report built with the context lines of the
+	// printer: the tree, each excerpt below its name, then each reason.
+	rep := niceyaml.NewErrorReport(err, p.ContextLines())
+
+	require.Len(t, rep.Excerpts, 2)
+	require.Len(t, rep.Unresolved, 1)
+	require.Equal(t, 2, rep.Excerpts[0].View.Count())
+
+	want := stringtest.JoinLF(
+		"├── first.yaml:2:4: $.b: bad b",
+		"├── second.yaml:1:4: $.c: bad c",
+		"└── first.yaml: far",
+		"",
+		"first.yaml",
+		p.Print(rep.Excerpts[0].View),
+		"",
+		"second.yaml",
+		p.Print(rep.Excerpts[1].View),
+		"",
+		"no excerpt: "+rep.Unresolved[0].Unresolved().Error(),
+	)
+
+	assert.Equal(t, want, p.PrintError(err))
 }

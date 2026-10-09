@@ -232,11 +232,16 @@
 // A terminal gets color from
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which prints
 // the same tree and excerpts with the printer's styles, width, and
-// context lines. Both build the tree with [NewErrorTree], which a
-// renderer of its own reads too:
+// context lines:
 //
 //	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
 //	lipgloss.Fprintln(os.Stderr, p.PrintError(err))
+//
+// Both draw the [ErrorReport] that [NewErrorReport] builds for the error.
+// The report holds the tree, the excerpt of each source, and the bindings
+// that get a reason in place of an excerpt. A renderer of its own, such
+// as one that writes HTML, draws the same report and so shows the same
+// parts.
 //
 // This package knows nothing of the printer. The marks of an error decorate a
 // [line.View], so a caller renders them with any renderer and composes them with

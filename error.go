@@ -3882,43 +3882,49 @@ func (e *SourceError) LogValue() slog.Value {
 // as in "@.open: closes before it opens" for a check of a value. An
 // error whose tree and excerpts both render nothing, such as a bound join
 // of typed-nil errors, renders its message in their place, with control
-// characters as their pictures like any other.
-// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] renders the same
-// tree and excerpts with styles. A nil err renders as "".
+// characters as their pictures like any other. A nil err renders as "".
+//
+// FormatError draws the [ErrorReport] that [NewErrorReport] builds for
+// err, and [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draws
+// the same report with styles. A renderer of its own draws that report
+// too, so it shows the same tree, excerpts, and reasons.
 func FormatError(err error, context int) string {
 	return formatError(err, context, 0)
 }
 
-// formatError renders err as [FormatError] documents it. With a limit
-// above zero, the tree shows that many problems at most and counts the
-// rest, as [limitTree] cuts it, and the excerpts mark the problems the
-// tree shows.
+// formatError renders err as [FormatError] documents it, from the report
+// [newErrorReport] builds for err with context and limit. The tree comes
+// first, as [renderErrorTree] lays it out. Each excerpt follows as
+// [line.View.String] renders it, below the name of its source when the
+// excerpt has Named set. A line starting "no excerpt:" then gives the
+// reason of each unresolved binding.
 func formatError(err error, context, limit int) string {
-	if err == nil {
-		return ""
+	rep := newErrorReport(err, context, limit)
+
+	parts := make([]string, 0, 1+len(rep.Excerpts)+len(rep.Unresolved))
+	parts = append(parts, renderErrorTree(rep.Tree))
+
+	for _, excerpt := range rep.Excerpts {
+		part := excerpt.View.String()
+
+		// The name is the caller's text, so its control characters render
+		// as pictures like those of the tree.
+		if excerpt.Named {
+			part = excerpt.Source.label() + "\n" + part
+		}
+
+		parts = append(parts, part)
 	}
 
-	tree := NewErrorTree(err)
-
-	var skipped map[*SourceError]bool
-
-	if limit > 0 {
-		tree, skipped = limitTree(tree, limit)
+	for _, bound := range rep.Unresolved {
+		// The reason names the path, which a key of the document spells,
+		// so its control characters render as pictures like those of the
+		// tree. A tab in the key becomes four spaces, as it does in the
+		// tree.
+		parts = append(parts, "no excerpt: "+escape.Control(escape.Tabs(bound.Unresolved().Error())))
 	}
 
-	parts := []string{renderErrorTree(tree)}
-	parts = append(parts, errorDetails(err, context, skipped)...)
-
-	out := joinParts(parts...)
-
-	// A bound join whose branches all carry nothing renders as an empty
-	// tree, so the message stands in for it rather than nothing, laid out
-	// as the tree of one node that a plain error with that message gets.
-	if out == "" {
-		return renderErrorTree(ErrorTree{Text: err.Error()})
-	}
-
-	return out
+	return joinParts(parts...)
 }
 
 // renderErrorTree lays t out as plain text: the text of the root, then
@@ -3948,18 +3954,13 @@ func renderErrorTree(t ErrorTree) string {
 
 // logTree renders the tree of err as [renderErrorTree] lays it out, with
 // [ErrorListLimit] problems at most and a last row that counts the rest,
-// as [limitTree] cuts it. When that tree renders nothing, such as for a
-// bound join of typed-nil errors, it renders the tree of one node that
-// holds the message of err, as [FormatError] does when it has no excerpt
-// either.
+// as [limitTree] cuts it. When that tree has no row, such as for a bound
+// join of typed-nil errors, it renders the tree [messageTree] returns in
+// its place, as an [ErrorReport] with nothing else to draw holds it.
 func logTree(err error) string {
 	tree, _ := limitTree(NewErrorTree(err), ErrorListLimit)
 
-	if out := renderErrorTree(tree); out != "" {
-		return out
-	}
-
-	return renderErrorTree(ErrorTree{Text: err.Error()})
+	return renderErrorTree(messageTree(tree, err))
 }
 
 // writeErrorBranches writes children behind their connectors, indented
@@ -4074,7 +4075,9 @@ func (e *SourceError) Position() (position.Position, bool) {
 //
 // [FormatError] prints that line for every reason but one that wraps
 // [go.jacobcolvin.com/niceyaml/paths.ErrNoDocument], since no path
-// resolves in a document with no content.
+// resolves in a document with no content. The Unresolved field of an
+// [ErrorReport] holds the bindings that get the line, for a renderer
+// that draws a whole error.
 //
 // One binding has a reason and a position both. A path that enters an
 // alias the document cannot follow binds at that alias, as
@@ -4415,7 +4418,8 @@ func (e *SourceError) Excerpts(context int) iter.Seq2[*Source, *line.View] {
 // nothing, whatever resolves in it.
 // A source none of whose locations resolve yields nothing. [FormatError]
 // and [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] render
-// these excerpts under the tree of the error. A caller that wants one
+// these excerpts under the tree of the error, and an [ErrorReport] holds
+// them beside that tree. A caller that wants one
 // excerpt per binding, such as one section per document, takes
 // [SourceError.Excerpts] of each binding [Bindings] yields. An err with
 // no bindings, and a nil err, yield nothing.
@@ -4467,64 +4471,6 @@ func (s *Source) excerpt(positions []errorPosition, context int) (*line.View, bo
 	}
 
 	return view.Hunks(context).Clip(s.ExcerptWidth()), true
-}
-
-// errorDetails returns what the tree of err leaves out: each excerpt
-// [Excerpts] yields with context lines, which [line.View.String] renders
-// as plain text, then a line starting "no excerpt:" for each binding
-// [Bindings] finds whose tree marks nothing, with the reason
-// [SourceError.Unresolved] returns. A binding that carries no location
-// has nothing to explain, and neither has one whose reason wraps
-// [paths.ErrNoDocument], since no path resolves in a document with no
-// content. When the bindings touch more than one source, the name of its
-// source leads each excerpt on a row of its own, so the reader tells the
-// excerpts apart. Returns nothing when there is nothing to show. The
-// printer renders the same parts with its styles.
-//
-// The bindings in skipped mark nothing and get no "no excerpt:" line.
-// They are the ones [limitTree] returns for a tree that leaves problems
-// out, so the excerpts show the problems that tree shows. A nil skipped
-// leaves none out.
-func errorDetails(err error, context int, skipped map[*SourceError]bool) []string {
-	bindings := slices.Collect(Bindings(err))
-	sources, positions := treePositions(bindings, len(bindings) > 1, skipped)
-
-	var parts []string
-
-	yieldExcerpts(sources, positions, context, func(src *Source, excerpt *line.View) bool {
-		part := excerpt.String()
-
-		// The name is the caller's text, so its control characters render
-		// as pictures like those of the tree.
-		if len(sources) > 1 && src.Name() != "" {
-			part = src.label() + "\n" + part
-		}
-
-		parts = append(parts, part)
-
-		return true
-	})
-
-	for _, bound := range bindings {
-		if skipped[bound] || bound.marks() {
-			continue
-		}
-
-		// A document with no content has no line to show for any path, so
-		// that reason explains nothing the tree leaves out.
-		reason := bound.Unresolved()
-		if reason == nil || errors.Is(reason, paths.ErrNoDocument) {
-			continue
-		}
-
-		// The reason names the path, which a key of the document spells,
-		// so its control characters render as pictures like those of the
-		// tree. A tab in the key becomes four spaces, as it does in the
-		// tree.
-		parts = append(parts, "no excerpt: "+escape.Control(escape.Tabs(reason.Error())))
-	}
-
-	return parts
 }
 
 // marks reports whether the location of e, or of a binding below it,
