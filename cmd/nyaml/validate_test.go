@@ -531,6 +531,10 @@ func TestValidateCmdSchemaError(t *testing.T) {
 			content: `{"type": 12`,
 			err:     schema.ErrCompile,
 		},
+		"invalid YAML": {
+			content: "type: [object\n",
+			err:     schema.ErrCompile,
+		},
 		// One of the three documents sets no "a", so its validation would
 		// never reach the $ref.
 		"$ref names a missing file": {

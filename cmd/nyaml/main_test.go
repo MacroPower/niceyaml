@@ -247,6 +247,46 @@ func TestExitCode(t *testing.T) {
 			args: []string{"a.yaml", "b.yaml"},
 			want: exitFailure,
 		},
+		"valid document under a YAML schema": {
+			files: map[string]string{"schema.yaml": "required: [name]\n", "a.yaml": "name: a\n"},
+			args:  []string{"--schema", "schema.yaml", "a.yaml"},
+			want:  0,
+		},
+		"violation of a YAML schema": {
+			files: map[string]string{"schema.yaml": "required: [name]\n", "a.yaml": "value: 1\n"},
+			args:  []string{"--schema", "schema.yaml", "a.yaml"},
+			want:  exitInvalid,
+		},
+		"YAML schema that does not parse": {
+			files: map[string]string{"schema.yaml": "required: [name\n", "a.yaml": "name: a\n"},
+			args:  []string{"--schema", "schema.yaml", "a.yaml"},
+			want:  exitFailure,
+		},
+		"valid document under a directive that names a YAML schema": {
+			files: map[string]string{
+				"schema.yaml": "required: [name]\n",
+				"a.yaml":      "# yaml-language-server: $schema=./schema.yaml\nname: a\n",
+			},
+			args: []string{"a.yaml"},
+			want: 0,
+		},
+		"violation of a YAML schema that a directive names": {
+			files: map[string]string{
+				"schema.yaml": "required: [name]\n",
+				"a.yaml":      "# yaml-language-server: $schema=./schema.yaml\nvalue: 1\n",
+			},
+			args: []string{"a.yaml"},
+			want: exitInvalid,
+		},
+		"invalid document beside a directive whose YAML schema does not parse": {
+			files: map[string]string{
+				"schema.yaml": "required: [name\n",
+				"a.yaml":      "# yaml-language-server: $schema=./schema.json\nvalue: 1\n",
+				"b.yaml":      "# yaml-language-server: $schema=./schema.yaml\nname: b\n",
+			},
+			args: []string{"a.yaml", "b.yaml"},
+			want: exitFailure,
+		},
 		"no file argument": {
 			args: []string{"--schema", "schema.json"},
 			want: exitFailure,

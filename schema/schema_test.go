@@ -379,6 +379,258 @@ func TestCompile_RequireRefs(t *testing.T) {
 	}
 }
 
+func TestCompile_Document(t *testing.T) {
+	t.Parallel()
+
+	// Each schema that compiles requires a "name" key, unless the case
+	// says what it accepts.
+	tcs := map[string]struct {
+		// Wrapped by the compile error, if any.
+		err error
+		// The schema document, in JSON or YAML.
+		schema string
+		// Text the compile error holds, or empty for a schema that
+		// compiles.
+		want string
+		// A document the schema accepts and one it rejects, or empty for
+		// a schema with no such document.
+		valid   string
+		invalid string
+	}{
+		"JSON object": {
+			schema:  `{"required": ["name"]}`,
+			valid:   "name: a\n",
+			invalid: "value: 1\n",
+		},
+		"JSON object after white space": {
+			schema:  "\r\n\t {\"required\": [\"name\"]}",
+			valid:   "name: a\n",
+			invalid: "value: 1\n",
+		},
+		"YAML mapping": {
+			schema:  "type: object\nrequired: [name]\n",
+			valid:   "name: a\n",
+			invalid: "value: 1\n",
+		},
+		"YAML after a comment": {
+			schema:  "# Every document names itself.\nrequired: [name]\n",
+			valid:   "name: a\n",
+			invalid: "value: 1\n",
+		},
+		"YAML after a document start": {
+			schema:  "---\nrequired: [name]\n",
+			valid:   "name: a\n",
+			invalid: "value: 1\n",
+		},
+		"YAML with a merge key": {
+			schema:  "$defs:\n  named: &named\n    required: [name]\nallOf:\n  - <<: *named\n",
+			valid:   "name: a\n",
+			invalid: "value: 1\n",
+		},
+		"YAML with a $ref inside the schema": {
+			schema:  "$ref: '#/$defs/named'\n$defs:\n  named:\n    required: [name]\n",
+			valid:   "name: a\n",
+			invalid: "value: 1\n",
+		},
+		"true": {
+			schema: "true",
+			valid:  "value: 1\n",
+		},
+		"false": {
+			schema:  "false\n",
+			invalid: "value: 1\n",
+		},
+		// The first byte picks the JSON reader, and nothing reads the
+		// data as YAML after the JSON reader refuses it.
+		"YAML flow mapping": {
+			schema: "{required: [name]}",
+			want:   "compile schema: JSON decode: ",
+		},
+		"JSON with a trailing comma": {
+			schema: `{"required": ["name"],}`,
+			want:   "compile schema: JSON decode: ",
+		},
+		"JSON with single quotes": {
+			schema: `{'required': ['name']}`,
+			want:   "compile schema: JSON decode: ",
+		},
+		// Read as YAML, the member is null, and the schema would accept
+		// every document.
+		"JSON member with no value": {
+			schema: `{"required": }`,
+			want:   "compile schema: JSON decode: ",
+		},
+		"JSON cut short": {
+			schema: `{"required": ["name"]`,
+			want:   "compile schema: JSON decode: ",
+		},
+		"YAML that does not parse": {
+			schema: "properties:\n  name: {type: string\nrequired: [name]\n",
+			want:   "compile schema: YAML decode: 3:1: ",
+		},
+		"YAML duplicate key": {
+			schema: "type: object\ntype: string\n",
+			want:   `compile schema: YAML decode: 2:1: mapping key "type" already defined`,
+		},
+		"two YAML documents": {
+			schema: "type: object\n---\ntype: string\n",
+			want:   "compile schema: YAML decode: 2:1: multiple documents in source: 2 documents",
+		},
+		"YAML aliases past the limit": {
+			schema: yamltest.AliasLevels(7),
+			want:   "compile schema: YAML decode: 1:1: excessive aliasing",
+		},
+		"YAML infinity": {
+			schema: "maximum: .inf\n",
+			want:   "compile schema: encode schema document: ",
+		},
+		"YAML sequence": {
+			schema: "- required: [name]\n",
+			want:   "compile schema: schema document must be a JSON object or boolean",
+			err:    jsonschema.ErrInvalidSchemaDocument,
+		},
+		"text": {
+			schema: "Not Found",
+			want:   "compile schema: schema document must be a JSON object or boolean",
+			err:    jsonschema.ErrInvalidSchemaDocument,
+		},
+		"null": {
+			schema: "null",
+			want:   "compile schema: schema document must be a JSON object or boolean",
+			err:    jsonschema.ErrInvalidSchemaDocument,
+		},
+		"only a comment": {
+			schema: "# No schema yet.\n",
+			want:   "compile schema: schema document must be a JSON object or boolean",
+			err:    jsonschema.ErrInvalidSchemaDocument,
+		},
+		"empty": {
+			schema: "",
+			want:   "compile schema: schema document must be a JSON object or boolean",
+			err:    jsonschema.ErrInvalidSchemaDocument,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := schema.Compile(t.Context(), []byte(tc.schema))
+			if tc.want != "" {
+				require.ErrorIs(t, err, schema.ErrCompile)
+				require.ErrorContains(t, err, tc.want)
+				assert.Nil(t, s)
+
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err)
+				}
+
+				// The text of the schema is at fault, and no document is.
+				require.NotErrorIs(t, err, niceyaml.ErrSyntax)
+				require.NotErrorIs(t, err, schema.ErrExcessiveAliasing)
+				assert.False(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
+
+				assert.Panics(t, func() { schema.MustCompile([]byte(tc.schema)) })
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			if tc.valid != "" {
+				require.NoError(t, yamltest.FirstDocument(t, tc.valid).Validate(t.Context(), s))
+			}
+
+			if tc.invalid != "" {
+				err := yamltest.FirstDocument(t, tc.invalid).Validate(t.Context(), s)
+				require.Error(t, err)
+				assert.True(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
+			}
+		})
+	}
+}
+
+func TestCompile_YAMLNumbers(t *testing.T) {
+	t.Parallel()
+
+	// A schema in YAML reads each number as a decode into any reads it,
+	// and a document reads its numbers the same way.
+	tcs := map[string]struct {
+		// The schema document, in JSON or YAML.
+		schema string
+		// Text the compile error holds, or empty for a schema that
+		// compiles.
+		want string
+		// Documents the schema accepts and documents it rejects.
+		valid   []string
+		invalid []string
+	}{
+		"exponent without a point is text": {
+			schema:  "properties:\n  v:\n    const: 1e3\n",
+			valid:   []string{"v: 1e3\n", "v: '1e3'\n"},
+			invalid: []string{"v: 1000\n", "v: 1.0e3\n"},
+		},
+		"exponent with a point is a number": {
+			schema:  "properties:\n  v:\n    const: 1.0e3\n",
+			valid:   []string{"v: 1000\n", "v: 1.0e3\n"},
+			invalid: []string{"v: 1e3\n"},
+		},
+		"exponent in JSON is a number": {
+			schema:  `{"properties": {"v": {"const": 1e3}}}`,
+			valid:   []string{"v: 1000\n", "v: 1.0e3\n"},
+			invalid: []string{"v: 1e3\n"},
+		},
+		"leading zero is octal": {
+			schema:  "properties:\n  v:\n    const: 010\n",
+			valid:   []string{"v: 8\n", "v: 010\n"},
+			invalid: []string{"v: 10\n"},
+		},
+		"leading zero in a count is octal": {
+			schema:  "properties:\n  v:\n    maxLength: 010\n",
+			valid:   []string{"v: 12345678\n"},
+			invalid: []string{"v: '123456789'\n"},
+		},
+		"integer past 64 bits is text": {
+			schema:  "properties:\n  v:\n    const: 18446744073709551616\n",
+			valid:   []string{"v: 18446744073709551616\n", "v: '18446744073709551616'\n"},
+			invalid: []string{"v: 1.8446744073709551616e+19\n"},
+		},
+		"integer past 2^53 stays exact": {
+			schema:  "properties:\n  v:\n    const: 9007199254740993\n",
+			valid:   []string{"v: 9007199254740993\n"},
+			invalid: []string{"v: 9007199254740992\n"},
+		},
+		"text under a keyword that takes a number": {
+			schema: "maximum: 1e3\n",
+			want:   "compile schema: keyword value of a type the schema field cannot hold",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s, err := schema.Compile(t.Context(), []byte(tc.schema))
+			if tc.want != "" {
+				require.ErrorIs(t, err, schema.ErrCompile)
+				require.ErrorContains(t, err, tc.want)
+
+				return
+			}
+
+			require.NoError(t, err)
+
+			for _, doc := range tc.valid {
+				require.NoError(t, yamltest.FirstDocument(t, doc).Validate(t.Context(), s), doc)
+			}
+
+			for _, doc := range tc.invalid {
+				require.Error(t, yamltest.FirstDocument(t, doc).Validate(t.Context(), s), doc)
+			}
+		})
+	}
+}
+
 func TestSchema_UnresolvableRef(t *testing.T) {
 	t.Parallel()
 

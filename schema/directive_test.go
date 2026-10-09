@@ -547,6 +547,87 @@ func TestDirective(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, int32(1), requests.Load())
 	})
+
+	t.Run("registry loads a YAML schema beside the document", func(t *testing.T) {
+		t.Parallel()
+
+		// The schema reads the type of a name from the YAML document
+		// beside it.
+		dir := t.TempDir()
+		writeFiles(t, dir, map[string]string{
+			"schema.yaml": "required: [name]\nproperties:\n  name:\n    $ref: defs.yaml#/$defs/name\n",
+			"defs.yaml":   "$defs:\n  name:\n    type: string\n  kinded:\n    required: [kind]\n",
+		})
+
+		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
+
+		tcs := map[string]struct {
+			input string
+			// Text of the violation, or empty for a valid document.
+			want string
+		}{
+			"valid": {
+				input: "# yaml-language-server: $schema=./schema.yaml\nname: a\n",
+			},
+			"violates the schema": {
+				input: "# yaml-language-server: $schema=./schema.yaml\nkind: Deployment\n",
+				want:  `missing required property "name"`,
+			},
+			"violates the document the $ref names": {
+				input: "# yaml-language-server: $schema=./schema.yaml\nname: 1\n",
+				want:  `expected "string", got "integer"`,
+			},
+			"valid under a fragment": {
+				input: "# yaml-language-server: $schema=./defs.yaml#/$defs/kinded\nkind: Deployment\n",
+			},
+			"violates a fragment": {
+				input: "# yaml-language-server: $schema=./defs.yaml#/$defs/kinded\nname: a\n",
+				want:  `missing required property "kind"`,
+			},
+			"short form": {
+				input: "# $schema: schema.yaml\nname: 1\n",
+				want:  `expected "string", got "integer"`,
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				doc := yamltest.FirstDocumentWithPath(t, tc.input, filepath.Join(dir, "config.yaml"))
+
+				err := reg.Validate(t.Context(), doc)
+				if tc.want == "" {
+					require.NoError(t, err)
+
+					return
+				}
+
+				require.ErrorContains(t, err, tc.want)
+				assert.True(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
+			})
+		}
+	})
+
+	t.Run("a YAML schema that does not parse is no fault of the document", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		writeFiles(t, dir, map[string]string{"schema.yaml": "required: [name\n"})
+
+		doc := yamltest.FirstDocumentWithPath(t,
+			"# yaml-language-server: $schema=./schema.yaml\nname: a\n",
+			filepath.Join(dir, "config.yaml"),
+		)
+
+		err := schema.NewRegistry(schema.WithResolvers(schema.Directive())).Validate(t.Context(), doc)
+		require.ErrorIs(t, err, schema.ErrCompile)
+		assert.Contains(t, err.Error(), "schema.yaml")
+		assert.Contains(t, err.Error(), "YAML decode: 1:11: ")
+
+		require.NotErrorIs(t, err, niceyaml.ErrSyntax)
+		assert.False(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
+	})
 }
 
 func TestDirective_Resolve_Match(t *testing.T) {

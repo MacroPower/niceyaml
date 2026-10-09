@@ -3150,6 +3150,19 @@ func TestRegistry_Load(t *testing.T) {
 		assert.Equal(t, int32(1), requests.Load())
 	})
 
+	t.Run("a YAML schema comes back as the bytes of its file", func(t *testing.T) {
+		t.Parallel()
+
+		const schemaData = "# Every document names itself.\nrequired: [name]\n"
+
+		path := filepath.Join(t.TempDir(), "schema.yaml")
+		require.NoError(t, os.WriteFile(path, []byte(schemaData), 0o600))
+
+		data, err := schema.NewRegistry().Load(t.Context(), schema.File(path))
+		require.NoError(t, err)
+		assert.Equal(t, schemaData, string(data))
+	})
+
 	t.Run("a compiled schema and the zero ref have no bytes", func(t *testing.T) {
 		t.Parallel()
 
@@ -3997,8 +4010,19 @@ func TestRegistry_FragmentRefsDraft07(t *testing.T) {
 		}
 	}`)
 
+	// The first document again, written in YAML.
+	defsYAML := []byte(`$schema: http://json-schema.org/draft-07/schema#
+definitions:
+  Bar:
+    $ref: '#/definitions/Str'
+    type: integer
+  Str:
+    type: string
+`)
+
 	served := map[string][]byte{
 		"/defs.json":  defsSchema,
+		"/defs.yaml":  defsYAML,
 		"/tuple.json": tupleSchema,
 	}
 
@@ -4023,6 +4047,12 @@ func TestRegistry_FragmentRefsDraft07(t *testing.T) {
 	}{
 		"keywords beside a $ref": {
 			path:    "/defs.json#/definitions/Bar",
+			valid:   "x\n",
+			invalid: "5\n",
+			want:    `expected "string", got "integer"`,
+		},
+		"keywords beside a $ref in a YAML document": {
+			path:    "/defs.yaml#/definitions/Bar",
 			valid:   "x\n",
 			invalid: "5\n",
 			want:    `expected "string", got "integer"`,
@@ -4401,6 +4431,298 @@ func TestRegistry_RefDocuments(t *testing.T) {
 
 		// The file root took the document from the registry.
 		assert.Equal(t, int32(1), hits["/remote-names-file.json"].Load())
+	})
+}
+
+func TestRegistry_YAMLSchemas(t *testing.T) {
+	t.Parallel()
+
+	// The root takes the schema of a named document from the document
+	// beside it, which reads the type of a name through a $ref of its
+	// own. Each pair of files spells that in YAML, in JSON, or in both,
+	// under a name of either kind.
+	const (
+		defsYAML = `$defs:
+  name:
+    type: string
+  named:
+    properties:
+      name:
+        $ref: '#/$defs/name'
+`
+		defsJSON = `{
+			"$defs": {
+				"name": {"type": "string"},
+				"named": {"properties": {"name": {"$ref": "#/$defs/name"}}}
+			}
+		}`
+		// The schema of a named document, with no $ref.
+		namedYAML = "properties:\n  name:\n    type: string\n"
+	)
+
+	// A refFunc builds the Ref of a case and the options of its registry.
+	type refFunc func(t *testing.T) (schema.Ref, []schema.RegistryOption)
+
+	yamlFiles := map[string]string{
+		"root.yaml": "$ref: defs.yaml#/$defs/named\n",
+		"defs.yaml": defsYAML,
+	}
+
+	// The ref of each case names one of files. A name with a fragment
+	// goes in as a file URL, which is the form that carries one.
+	onDisk := func(files map[string]string, name string) refFunc {
+		return func(t *testing.T) (schema.Ref, []schema.RegistryOption) {
+			t.Helper()
+
+			dir := t.TempDir()
+			writeFiles(t, dir, files)
+
+			file, fragment, ok := strings.Cut(name, "#")
+			path := filepath.Join(dir, file)
+
+			if !ok {
+				return schema.File(path), nil
+			}
+
+			return fileOrURL(t, "", "file://"+filepath.ToSlash(path)+"#"+fragment), nil
+		}
+	}
+
+	inFS := func(files map[string]string, name string) refFunc {
+		return func(t *testing.T) (schema.Ref, []schema.RegistryOption) {
+			t.Helper()
+
+			fsys := fstest.MapFS{}
+			for file, data := range files {
+				fsys["schemas/"+file] = &fstest.MapFile{Data: []byte(data)}
+			}
+
+			return schema.FileFS(fsys, "schemas/"+name), nil
+		}
+	}
+
+	// Names under .test never resolve, so a fetch that bypasses the
+	// client fails.
+	served := func(files map[string]string, name string) refFunc {
+		return func(t *testing.T) (schema.Ref, []schema.RegistryOption) {
+			t.Helper()
+
+			client := &http.Client{
+				Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					rec := httptest.NewRecorder()
+
+					data, ok := files[strings.TrimPrefix(r.URL.Path, "/")]
+					if !ok {
+						http.NotFound(rec, r)
+
+						return rec.Result(), nil
+					}
+
+					//nolint:errcheck // Test helper.
+					rec.WriteString(data)
+
+					return rec.Result(), nil
+				}),
+			}
+
+			return schema.URL("http://schemas.test/" + name), []schema.RegistryOption{schema.WithHTTPClient(client)}
+		}
+	}
+
+	tcs := map[string]struct {
+		ref refFunc
+	}{
+		"file": {
+			ref: onDisk(yamlFiles, "root.yaml"),
+		},
+		"file url fragment": {
+			ref: onDisk(yamlFiles, "defs.yaml#/$defs/named"),
+		},
+		"file system": {
+			ref: inFS(yamlFiles, "root.yaml"),
+		},
+		"url": {
+			ref: served(yamlFiles, "root.yaml"),
+		},
+		"url fragment": {
+			ref: served(yamlFiles, "defs.yaml#/$defs/named"),
+		},
+		"url with no extension": {
+			ref: served(map[string]string{
+				"root": "$ref: defs#/$defs/named\n",
+				"defs": defsYAML,
+			}, "root"),
+		},
+		"YAML under a JSON name": {
+			ref: onDisk(map[string]string{
+				"root.json": "$ref: defs.json#/$defs/named\n",
+				"defs.json": defsYAML,
+			}, "root.json"),
+		},
+		"JSON under a YAML name": {
+			ref: onDisk(map[string]string{
+				"root.yaml": `{"$ref": "defs.yaml#/$defs/named"}`,
+				"defs.yaml": defsJSON,
+			}, "root.yaml"),
+		},
+		"JSON root and YAML target": {
+			ref: onDisk(map[string]string{
+				"root.json": `{"$ref": "defs.yaml#/$defs/named"}`,
+				"defs.yaml": defsYAML,
+			}, "root.json"),
+		},
+		"YAML root and JSON target": {
+			ref: onDisk(map[string]string{
+				"root.yaml": "$ref: defs.json#/$defs/named\n",
+				"defs.json": defsJSON,
+			}, "root.yaml"),
+		},
+		"loadable": {
+			ref: func(*testing.T) (schema.Ref, []schema.RegistryOption) {
+				return schema.Loadable("named", func(context.Context) ([]byte, error) {
+					return []byte(namedYAML), nil
+				}), nil
+			},
+		},
+		"embedded": {
+			ref: func(*testing.T) (schema.Ref, []schema.RegistryOption) {
+				return schema.Embedded([]byte(namedYAML)), nil
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ref, opts := tc.ref(t)
+
+			s, err := schema.NewRegistry(opts...).Schema(t.Context(), ref)
+			require.NoError(t, err)
+
+			require.NoError(t, yamltest.FirstDocument(t, "name: a\n").Validate(t.Context(), s))
+
+			err = yamltest.FirstDocument(t, "name: 1\n").Validate(t.Context(), s)
+			require.ErrorContains(t, err, `expected "string", got "integer"`)
+		})
+	}
+
+	t.Run("JSON under a YAML name reads its numbers as JSON", func(t *testing.T) {
+		t.Parallel()
+
+		ref, _ := onDisk(map[string]string{"schema.yaml": `{"properties": {"v": {"const": 1e3}}}`}, "schema.yaml")(t)
+
+		s, err := schema.NewRegistry().Schema(t.Context(), ref)
+		require.NoError(t, err)
+
+		require.NoError(t, yamltest.FirstDocument(t, "v: 1000\n").Validate(t.Context(), s))
+	})
+
+	// The schema is at fault for each of these, and the document it
+	// would validate is not.
+	broken := map[string]struct {
+		files map[string]string
+		// The file the ref names, which may end in a fragment.
+		name string
+		// The path the error names.
+		at string
+		// Wrapped by the error of a registry that requires every $ref
+		// to resolve.
+		err error
+	}{
+		"schema that does not parse": {
+			files: map[string]string{"root.yaml": "required: [name\n"},
+			name:  "root.yaml",
+			at:    "root.yaml",
+			err:   schema.ErrCompile,
+		},
+		"fragment of a schema that does not parse": {
+			files: map[string]string{"defs.yaml": "$defs:\n  named: {required: [name]\n"},
+			name:  "defs.yaml#/$defs/named",
+			at:    "defs.yaml",
+			err:   schema.ErrCompile,
+		},
+		"$ref target that does not parse": {
+			files: map[string]string{
+				"root.yaml": "$ref: defs.yaml#/$defs/named\n",
+				"defs.yaml": "$defs:\n  named: {required: [name]\n",
+			},
+			name: "root.yaml",
+			at:   "defs.yaml",
+			err:  schema.ErrLoad,
+		},
+		"schema with two documents": {
+			files: map[string]string{"root.yaml": "required: [name]\n---\nrequired: [kind]\n"},
+			name:  "root.yaml",
+			at:    "root.yaml",
+			err:   schema.ErrCompile,
+		},
+	}
+
+	for name, tc := range broken {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ref, _ := onDisk(tc.files, tc.name)(t)
+
+			err := schema.NewRegistry(schema.WithResolvers(ref)).
+				Validate(t.Context(), yamltest.FirstDocument(t, "name: a\n"))
+			require.ErrorIs(t, err, tc.err)
+			assert.Contains(t, err.Error(), tc.at)
+			assert.Contains(t, err.Error(), "YAML decode: ")
+
+			require.NotErrorIs(t, err, niceyaml.ErrSyntax)
+			assert.False(t, niceyaml.IsInvalid(err), "IsInvalid(%v)", err)
+		})
+	}
+
+	t.Run("a remote YAML document cannot name a local file", func(t *testing.T) {
+		t.Parallel()
+
+		dir := t.TempDir()
+		writeFiles(t, dir, map[string]string{"defs.json": `{"type": "string"}`})
+
+		defsURL := "file://" + filepath.ToSlash(filepath.Join(dir, "defs.json"))
+
+		// The second document spells the scheme with an escape, which
+		// only the decoded value shows.
+		remote := map[string]string{
+			"/names-file.yaml": "properties:\n  a:\n    $ref: " + defsURL + "\n",
+			"/escapes-file.yaml": "properties:\n  a:\n    $ref: \"\\x66ile" + strings.TrimPrefix(
+				defsURL,
+				"file",
+			) + "\"\n",
+		}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			data, ok := remote[r.URL.Path]
+			if !ok {
+				http.NotFound(w, r)
+
+				return
+			}
+
+			//nolint:errcheck // Test helper.
+			w.Write([]byte(data))
+		}))
+		t.Cleanup(server.Close)
+
+		for path := range remote {
+			for name, mode := range refModes {
+				t.Run(path+" "+name, func(t *testing.T) {
+					t.Parallel()
+
+					root := filepath.Join(t.TempDir(), "root.yaml")
+					require.NoError(t, os.WriteFile(root, []byte("$ref: "+server.URL+path+"\n"), 0o600))
+
+					reg := schema.NewRegistry(requireRefs(mode.require), schema.WithResolvers(schema.File(root)))
+
+					err := reg.Validate(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
+					require.ErrorIs(t, err, mode.err)
+					assert.Contains(t, err.Error(), "names local file")
+				})
+			}
+		}
 	})
 }
 

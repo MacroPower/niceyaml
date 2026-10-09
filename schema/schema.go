@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -89,7 +90,7 @@ func newCompileConfig(opts []CompileOption) compileConfig {
 
 // WithJSONSchemaOptions is a [CompileOption] that passes
 // [jsonschema.ValidateOption] values to the underlying
-// [jsonschema.CompileJSON]. It is the escape hatch for settings of the JSON
+// [jsonschema.Compile]. It is the escape hatch for settings of the JSON
 // Schema library that have no option of their own, such as format
 // assertions or a custom format validator:
 //
@@ -153,6 +154,27 @@ func WithRequireRefs(require bool) CompileOption {
 //
 //	v, err := schema.Compile(ctx, schemaJSON)
 //
+// The document holds JSON or YAML. Data whose first byte after white
+// space is '{' reads as JSON, and any other data reads as YAML:
+//
+//	//go:embed config.schema.yaml
+//	var schemaYAML []byte
+//
+//	v, err := schema.Compile(ctx, schemaYAML)
+//
+// That byte alone picks the reader. JSON that does not parse fails as
+// JSON, and Compile does not read it again as YAML. A YAML schema is one
+// document, and Compile refuses a duplicate key, a second document, and
+// aliases past the limit [niceyaml.WithAliasLimit] describes. Its error
+// for YAML that does not parse names the position in data:
+//
+//	compile schema: YAML decode: 3:9: ...
+//
+// The data is at fault for that error, so it wraps no error of the root
+// package, and [niceyaml.IsInvalid] does not report it. A YAML schema
+// holds the values a decode into any yields, and the package
+// documentation says how that reads numbers such as 1e3 and 010.
+//
 // A schema known valid at build time compiles with [MustCompile] at package
 // scope. A registry compiles the schemas its resolvers name as bytes the
 // same way, with the options [WithCompileOptions] gives it, and takes a
@@ -178,7 +200,7 @@ func WithRequireRefs(require bool) CompileOption {
 //
 //	v, err := schema.NewRegistry().Schema(ctx, schema.File("schemas/root.json"))
 func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Schema, error) {
-	compiled, err := compileJSON(ctx, data, opts)
+	compiled, err := compileDocument(ctx, data, opts)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrCompile, err)
 	}
@@ -186,8 +208,13 @@ func Compile(ctx context.Context, data []byte, opts ...CompileOption) (*Schema, 
 	return compiled, nil
 }
 
-// compileJSON is [Compile] before wrapping the error with [ErrCompile].
-func compileJSON(ctx context.Context, data []byte, opts []CompileOption) (*Schema, error) {
+// compileDocument is [Compile] before wrapping the error with [ErrCompile].
+func compileDocument(ctx context.Context, data []byte, opts []CompileOption) (*Schema, error) {
+	doc, err := parseDocument(ctx, data)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := newCompileConfig(opts)
 	jsonOpts := cfg.jsonOpts
 	rec := &refRecorder{}
@@ -204,7 +231,7 @@ func compileJSON(ctx context.Context, data []byte, opts []CompileOption) (*Schem
 		)
 	}
 
-	compiled, err := jsonschema.CompileJSON(ctx, data, jsonOpts...)
+	compiled, err := jsonschema.Compile(ctx, doc, jsonOpts...)
 	if err != nil {
 		//nolint:wrapcheck // Callers wrap the error with ErrCompile.
 		return nil, err
@@ -216,6 +243,59 @@ func compileJSON(ctx context.Context, data []byte, opts []CompileOption) (*Schem
 	}
 
 	return FromJSONSchema(compiled), nil
+}
+
+// parseDocument reads data as one schema document without compiling it.
+// Data that [isJSONObject] reports reads as JSON, and any other data reads
+// as YAML through [decodeYAML]. One byte picks the reader, so data never
+// goes to the second reader after the first refuses it. Malformed JSON
+// would otherwise compile as the YAML it also is, where a member with no
+// value is null and the schema library reads a null keyword as absent.
+func parseDocument(ctx context.Context, data []byte) (*jsonschema.Schema, error) {
+	if isJSONObject(data) {
+		//nolint:wrapcheck // Callers wrap the error with ErrCompile.
+		return jsonschema.ParseSchema(data)
+	}
+
+	doc, err := decodeYAML(ctx, data)
+	if err != nil {
+		return nil, err
+	}
+
+	// Normalize spells each integer as the schema library reads a JSON
+	// number, which keeps one past 2^53 exact.
+	//nolint:wrapcheck // Callers wrap the error with ErrCompile.
+	return jsonschema.ParseSchemaValue(jsonschema.Normalize(doc))
+}
+
+// isJSONObject reports whether the first byte of data after JSON white
+// space is '{'. A schema document in JSON is an object or a boolean, and
+// YAML reads a boolean as JSON does, so only an object needs the JSON
+// reader.
+func isJSONObject(data []byte) bool {
+	return bytes.HasPrefix(bytes.TrimLeft(data, " \t\r\n"), []byte("{"))
+}
+
+// decodeYAML decodes data, the text of a schema document in YAML, into
+// the value a decode into any yields. The text is one document, and the
+// decode refuses a duplicate key and aliases past the limit
+// [niceyaml.WithAliasLimit] describes.
+//
+// The error holds the text of the decode error and wraps nothing. The
+// schema is at fault for the decode error, and [niceyaml.IsInvalid]
+// would report it for the document the schema validates.
+//
+// The decode takes the context without its cancellation, because the
+// error of a context that has ended would become text here too. A JSON
+// read checks no context either, so a context that ends stops the
+// compile at the same step for JSON and for YAML.
+func decodeYAML(ctx context.Context, data []byte) (any, error) {
+	doc, err := niceyaml.NewSourceFromBytes(data).Decode[any](context.WithoutCancel(ctx))
+	if err != nil {
+		return nil, errors.New("YAML decode: " + err.Error())
+	}
+
+	return doc, nil
 }
 
 // noRefResolver is the ref resolver of a compile whose options hold none.
@@ -300,8 +380,8 @@ func MustCompile(data []byte, opts ...CompileOption) *Schema {
 
 // FromJSONSchema creates a new [*Schema] from a [*jsonschema.Validator]
 // compiled elsewhere, such as one built from a Go type with
-// [jsonschema.Compile]. A schema held as JSON compiles with [Compile] or
-// [MustCompile] instead.
+// [jsonschema.Compile]. A schema held as JSON or YAML text compiles with
+// [Compile] or [MustCompile] instead.
 //
 // Panics if v is nil.
 func FromJSONSchema(v *jsonschema.Validator) *Schema {

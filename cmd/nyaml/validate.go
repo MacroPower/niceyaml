@@ -42,6 +42,10 @@ func validateCmd() *cobra.Command {
 			"$schema=none comment in the same place turns validation off for its " +
 			"document and skips the lookup. A $ref in such a schema to a file or " +
 			"URL that does not load fails only the documents that reach it.\n\n" +
+			"A schema file or URL holds JSON or YAML, whatever its name. A " +
+			"schema that opens with { reads as JSON, and any other reads as " +
+			"YAML. A schema in YAML reads its numbers as a YAML document " +
+			"does, so 1e3 is text and 010 is 8.\n\n" +
 			"Supports glob patterns like *.yaml.\n\n" +
 			"Exits 0 when every document is valid. Exits 1 when the documents " +
 			"themselves are at fault for every error, such as a syntax error or " +
@@ -114,7 +118,7 @@ func validateCmd() *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&schemaRef, "schema", "s", "", "JSON schema file path or URL")
+	cmd.Flags().StringVarP(&schemaRef, "schema", "s", "", "File path or URL of a JSON schema, written in JSON or YAML")
 
 	return cmd
 }

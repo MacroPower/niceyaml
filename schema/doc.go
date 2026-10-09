@@ -34,10 +34,10 @@
 //
 // # Validation
 //
-// [Compile] turns a JSON schema document into a [*Schema], a
-// [go.jacobcolvin.com/niceyaml.Validator] whose errors carry the YAML path
-// to each failing location. [MustCompile] does the same at package scope
-// for an embedded schema:
+// [Compile] turns a JSON schema document, in JSON or YAML, into a
+// [*Schema], a [go.jacobcolvin.com/niceyaml.Validator] whose errors carry
+// the YAML path to each failing location. [MustCompile] does the same at
+// package scope for an embedded schema:
 //
 //	//go:embed config.schema.json
 //	var schemaBytes []byte
@@ -119,6 +119,48 @@
 // maintain, such as the ones a catalog names. Such a schema then
 // compiles, and validation fails with an error wrapping [ErrValidate]
 // for each document that reaches the $ref.
+//
+// # YAML Schemas
+//
+// A schema document holds JSON or YAML. [Compile] and a [Registry] read
+// data whose first byte after white space is '{' as JSON and any other
+// data as YAML, whatever the name of its file or URL. The rule covers the
+// schema a [Ref] names and each document a $ref names, so a directive
+// names a YAML schema as it does in yaml-language-server:
+//
+//	# yaml-language-server: $schema=./config.schema.yaml
+//	name: example
+//
+// That byte alone picks the reader. JSON that does not parse fails as
+// JSON, and nothing reads it again as YAML, where a trailing comma would
+// pass and a member with no value would be null.
+//
+// A YAML schema is one document. A duplicate key, a second document, and
+// aliases past the limit [go.jacobcolvin.com/niceyaml.WithAliasLimit]
+// describes each fail the compile. A YAML schema that does not parse
+// fails it too. The error names the position in the schema:
+//
+//	compile schema: "file:///etc/app/config.schema.yaml": YAML decode: 3:9: ...
+//
+// The schema is at fault for that error, so it wraps no error of the
+// root package. [go.jacobcolvin.com/niceyaml.IsInvalid] does not report
+// it for the document the schema would validate.
+//
+// A YAML schema holds the values a decode into any yields, and
+// [Schema.Validate] reads the numbers of a document the same way. The
+// go-yaml decoder reads three spellings of a number in its own way:
+//
+//   - A number with an exponent and no decimal point, such as 1e3, is
+//     the text "1e3". The number is 1.0e3.
+//   - An integer with a leading zero, such as 010, is octal, so it is 8.
+//   - An integer that does not fit in 64 bits, such as
+//     18446744073709551616, is text.
+//
+// Text under a keyword that takes a number, such as maximum, fails the
+// compile. Under const or enum, the schema compiles and accepts only
+// that text. The YAML 1.2 core schema reads 1e3 as 1000 and 010 as 10,
+// so an editor that follows it reads such a schema another way. The
+// numbers .inf and .nan fail the compile, since JSON has neither.
 //
 // # Resolution
 //

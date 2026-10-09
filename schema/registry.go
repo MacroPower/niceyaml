@@ -786,6 +786,10 @@ func (r *Registry) Schema(ctx context.Context, ref Ref) (*Schema, error) {
 // URL whose fragment selects a subschema, Load returns the bytes of the
 // whole document. An error wraps [ErrLoad].
 //
+// The bytes are the text the file, the URL, or the load holds, in JSON
+// or YAML. Load turns neither into the other, so a caller that parses
+// the bytes picks the reader by their first byte, as [Compile] does.
+//
 // The zero Ref names no bytes, and a Ref from [Schema.Ref] carries a
 // compiled schema rather than bytes, which [Ref.Schema] returns, so Load
 // returns an error for either.
@@ -835,7 +839,20 @@ func (r *Registry) load(ctx context.Context, ref Ref) ([]byte, error) {
 // "$REF" as $ref. The search covers every object in the document, not
 // only its subschemas, because a JSON pointer $ref can reach an object
 // under an unknown keyword and resolve the references there.
-func localFileURL(data []byte) (string, error) {
+//
+// It reads data as JSON or as YAML by the rule [parseDocument] follows.
+// For YAML, it searches the decoded value, where each alias, merge key,
+// and escape holds what it stands for.
+func localFileURL(ctx context.Context, data []byte) (string, error) {
+	if !isJSONObject(data) {
+		doc, err := decodeYAML(ctx, data)
+		if err != nil {
+			return "", fmt.Errorf("decode schema: %w", err)
+		}
+
+		return findFileURL(doc), nil
+	}
+
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 
@@ -849,7 +866,7 @@ func localFileURL(data []byte) (string, error) {
 	return findFileURL(doc), nil
 }
 
-// findFileURL is [localFileURL] for a decoded JSON value. It visits object
+// findFileURL is [localFileURL] for a decoded value. It visits object
 // members in sorted key order, so the result is the same on every call.
 func findFileURL(v any) string {
 	switch v := v.(type) {
@@ -908,7 +925,9 @@ type refDoc struct {
 // calling load. A load that fails and bytes that do not parse stay out of
 // the registry, so the next call loads again. When two calls load one
 // document at once, both return the document the first of them kept.
-func (r *Registry) refDocument(key, uri string, load func() ([]byte, error)) (refDoc, error) {
+func (r *Registry) refDocument(
+	ctx context.Context, key, uri string, load func() ([]byte, error),
+) (refDoc, error) {
 	if doc, ok := r.keptRefDoc(key); ok {
 		return doc, nil
 	}
@@ -918,14 +937,14 @@ func (r *Registry) refDocument(key, uri string, load func() ([]byte, error)) (re
 		return refDoc{}, err
 	}
 
-	s, err := jsonschema.ParseSchema(data)
+	s, err := parseDocument(ctx, data)
 	if err != nil {
 		return refDoc{}, fmt.Errorf("parse %s: %w", httpfetch.Redacted(uri), err)
 	}
 
 	doc := refDoc{schema: s}
 	if httpfetch.IsHTTPURL(uri) {
-		doc.fileURL, doc.fileURLErr = localFileURL(data)
+		doc.fileURL, doc.fileURLErr = localFileURL(ctx, data)
 	}
 
 	return r.keepRefDoc(key, doc), nil
@@ -1053,7 +1072,7 @@ func (r *Registry) refOptions(
 			return nil, fmt.Errorf("%w: %q", jsonschema.ErrNotResolved, httpfetch.Redacted(uri))
 		}
 
-		doc, err := r.refDocument(key, uri, load)
+		doc, err := r.refDocument(ctx, key, uri, load)
 		if err != nil {
 			return nil, err
 		}
@@ -1361,7 +1380,7 @@ func (r *Registry) compile(ctx context.Context, ref Ref, cacheKey string) (*Sche
 
 	_, fragment, _ := strings.Cut(base, "#")
 	if (ref.url || ref.file != "") && fragment != "" {
-		doc, err = jsonschema.ParseSchema(data)
+		doc, err = parseDocument(ctx, data)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %q: %w", ErrCompile, r.name(ref), err)
 		}
@@ -1386,7 +1405,7 @@ func (r *Registry) compile(ctx context.Context, ref Ref, cacheKey string) (*Sche
 		rec = &refRecorder{}
 	}
 
-	compiled, err := compileJSON(ctx, data, r.refOptions(ref, base, user, doc, rec))
+	compiled, err := compileDocument(ctx, data, r.refOptions(ref, base, user, doc, rec))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %q: %w", ErrCompile, r.name(ref), err)
 	}
