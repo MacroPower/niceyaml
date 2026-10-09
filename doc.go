@@ -672,14 +672,15 @@
 // [WithAllowDuplicateKeys], [WithCustomUnmarshaler], or
 // [go.jacobcolvin.com/niceyaml/encoder.WithIndent]. A parse and a decode
 // take named options alone, so niceyaml knows what each one changes and
-// applies it to every decoder a call runs. An option that takes or
-// yields a go-yaml value carries a YAML prefix, so a caller can tell at
-// the call site when the go-yaml dependency shows. [WithYAMLComments] and
-// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] take go-yaml's
-// comment map, and a decode under [WithYAMLOrderedMaps] yields its
-// ordered map. The encoder settings with no option of their own pass
-// through [go.jacobcolvin.com/niceyaml/encoder.WithYAMLOptions], which
-// takes go-yaml's own options. A test in this package checks every
+// applies it to every decoder a call runs. An option or a method that
+// takes or yields a go-yaml value carries a YAML prefix, so a caller can
+// tell at the call site when the go-yaml dependency shows.
+// [Node.YAMLComments] returns go-yaml's comment map,
+// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] takes it, and a
+// decode under [WithYAMLOrderedMaps] yields its ordered map. The encoder
+// settings with no option of their own pass through
+// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLOptions], which takes
+// go-yaml's own options. A test in this package checks every
 // exported declaration. It fails when a declaration names a go-yaml type
 // outside the test's allowlist, or names the encoder option type or the
 // comment map in an identifier without the YAML prefix.

@@ -4814,30 +4814,6 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 		require.EqualError(t, err, "2:8: $.level: unknown level: "+typeErr.Error())
 	})
 
-	// The decode of a value writes to no comment map, so the map of the
-	// decode keeps the comments it collected before the function ran.
-	t.Run("the decode of a value leaves the comment map alone", func(t *testing.T) {
-		t.Parallel()
-
-		type config struct {
-			Name  string     `yaml:"name"`
-			Level plainLevel `yaml:"level"`
-		}
-
-		doc := yamltest.FirstDocument(t, "name: api # the name\nlevel: high # the level\n")
-		want, got := yaml.CommentMap{}, yaml.CommentMap{}
-
-		_, err := doc.Decode[config](t.Context(), niceyaml.WithYAMLComments(want), niceyaml.WithCustomUnmarshaler(
-			func(context.Context, *plainLevel, func(any) error) error { return nil },
-		))
-		require.NoError(t, err)
-		require.NotEmpty(t, want)
-
-		_, err = doc.Decode[config](t.Context(), niceyaml.WithYAMLComments(got), levels)
-		require.NoError(t, err)
-		assert.Equal(t, want, got)
-	})
-
 	t.Run("a null leaves a pointer nil without a call", func(t *testing.T) {
 		t.Parallel()
 
@@ -5113,13 +5089,8 @@ func TestWithYAMLOrderedMaps(t *testing.T) {
 	})
 }
 
-func TestWithYAMLComments(t *testing.T) {
+func TestNode_YAMLComments(t *testing.T) {
 	t.Parallel()
-
-	type config struct {
-		Items map[string]plainValidated `yaml:"items"`
-		Name  string                    `yaml:"name"`
-	}
 
 	input := stringtest.Input(`
 		# The name of the service.
@@ -5137,31 +5108,65 @@ func TestWithYAMLComments(t *testing.T) {
 		"$.items.a": {yaml.HeadComment(" The first item.")},
 	}
 
-	t.Run("collects the comments of the node by path", func(t *testing.T) {
-		t.Parallel()
+	anchors := stringtest.Input(`
+		shared: &shared
+		  size: 1 # small
+		items:
+		  a: *shared
+		  b: 2 # two
+	`)
 
-		comments := yaml.CommentMap{}
+	tcs := map[string]struct {
+		want  yaml.CommentMap
+		input string
+		path  paths.Path
+	}{
+		"document": {
+			input: input,
+			want:  want,
+		},
+		"node below the root keeps the paths of the document": {
+			input: input,
+			path:  paths.Doc().Child("items"),
+			want:  yaml.CommentMap{"$.items.a": want["$.items.a"]},
+		},
+		"node below the root leaves out an anchor outside it": {
+			input: anchors,
+			path:  paths.Doc().Child("items"),
+			want:  yaml.CommentMap{"$.items.b": {yaml.LineComment(" two")}},
+		},
+		"document without comments": {
+			input: "name: api\n",
+			want:  yaml.CommentMap{},
+		},
+		"empty document": {
+			input: "",
+			want:  yaml.CommentMap{},
+		},
+		"document of comments": {
+			input: "# note\n",
+			want:  yaml.CommentMap{},
+		},
+		"null": {
+			input: "~ # none\n",
+			want:  yaml.CommentMap{"$": {yaml.LineComment(" none")}},
+		},
+	}
 
-		_, err := yamltest.FirstDocument(t, input).Decode[map[string]any](
-			t.Context(), niceyaml.WithYAMLComments(comments),
-		)
-		require.NoError(t, err)
-		assert.Equal(t, want, comments)
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	// The walk decodes the keys of the items with a decoder of its own,
-	// which gets no comment map to empty.
-	t.Run("keeps the comments through the self-validation step", func(t *testing.T) {
-		t.Parallel()
+			n := yamltest.FirstDocument(t, tc.input)
+			if tc.path.Len() > 0 {
+				n = yamltest.At(t, n, tc.path)
+			}
 
-		comments := yaml.CommentMap{}
-
-		_, err := yamltest.FirstDocument(t, input).Decode[config](
-			t.Context(), niceyaml.WithYAMLComments(comments),
-		)
-		require.ErrorIs(t, err, errPlainValidation)
-		assert.Equal(t, want, comments)
-	})
+			got, err := n.YAMLComments(t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+		})
+	}
 
 	t.Run("the encoder writes the comments back", func(t *testing.T) {
 		t.Parallel()
@@ -5171,11 +5176,12 @@ func TestWithYAMLComments(t *testing.T) {
 			Name  string                       `yaml:"name"`
 		}
 
-		comments := yaml.CommentMap{}
+		doc := yamltest.FirstDocument(t, input)
 
-		got, err := yamltest.FirstDocument(t, input).Decode[service](
-			t.Context(), niceyaml.WithYAMLComments(comments),
-		)
+		got, err := doc.Decode[service](t.Context())
+		require.NoError(t, err)
+
+		comments, err := doc.YAMLComments(t.Context())
 		require.NoError(t, err)
 
 		got.Name = "web"
@@ -5192,113 +5198,85 @@ func TestWithYAMLComments(t *testing.T) {
 		`)+"\n", string(out))
 	})
 
-	t.Run("keeps the paths of the document in a scoped decode", func(t *testing.T) {
-		t.Parallel()
-
-		comments := yaml.CommentMap{}
-		items := yamltest.At(t, yamltest.FirstDocument(t, input), paths.Doc().Child("items"))
-
-		_, err := items.Decode[map[string]any](t.Context(), niceyaml.WithYAMLComments(comments))
-		require.NoError(t, err)
-		assert.Equal(t, yaml.CommentMap{"$.items.a": want["$.items.a"]}, comments)
-	})
-
-	t.Run("leaves out an anchor outside the node of a scoped decode", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			shared: &shared
-			  size: 1 # small
-			items:
-			  a: *shared
-			  b: 2 # two
-		`))
-
-		comments := yaml.CommentMap{}
-		items := yamltest.At(t, doc, paths.Doc().Child("items"))
-
-		got, err := items.Decode[map[string]any](t.Context(), niceyaml.WithYAMLComments(comments))
-		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"a": map[string]any{"size": uint64(1)}, "b": uint64(2)}, got)
-		assert.Equal(t, yaml.CommentMap{"$.items.b": {yaml.LineComment(" two")}}, comments)
-	})
-
-	t.Run("empties the map before it reads the node", func(t *testing.T) {
-		t.Parallel()
-
-		comments := yaml.CommentMap{"$.stale": {yaml.LineComment(" old")}}
-
-		_, err := yamltest.FirstDocument(t, input).Decode[map[string]any](
-			t.Context(), niceyaml.WithYAMLComments(comments),
-		)
-		require.NoError(t, err)
-		assert.Equal(t, want, comments)
-	})
-
-	t.Run("empties the map for a node that leaves the target as it is", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]struct {
-			input string
-		}{
-			"empty document":       {input: ""},
-			"document of comments": {input: "# note\n"},
-			"null":                 {input: "~ # none\n"},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				comments := yaml.CommentMap{"$.stale": {yaml.LineComment(" old")}}
-
-				_, err := yamltest.FirstDocument(t, tc.input).Decode[map[string]any](
-					t.Context(), niceyaml.WithYAMLComments(comments),
-				)
-				require.NoError(t, err)
-				assert.Empty(t, comments)
-			})
-		}
-	})
-
-	t.Run("the last option replaces the earlier ones", func(t *testing.T) {
-		t.Parallel()
-
-		first, last := yaml.CommentMap{}, yaml.CommentMap{}
-
-		_, err := yamltest.FirstDocument(t, input).Decode[map[string]any](
-			t.Context(), niceyaml.WithYAMLComments(first), niceyaml.WithYAMLComments(last),
-		)
-		require.NoError(t, err)
-		assert.Empty(t, first)
-		assert.Equal(t, want, last)
-	})
-
-	t.Run("SelfValidate fills no comment map", func(t *testing.T) {
+	t.Run("each call returns a map of its own", func(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t, input)
 
-		got, err := doc.Decode[config](t.Context(), niceyaml.WithSelfValidation(false))
+		first, err := doc.YAMLComments(t.Context())
 		require.NoError(t, err)
 
-		comments := yaml.CommentMap{"$.stale": {yaml.LineComment(" old")}}
+		clear(first)
 
-		err = doc.SelfValidate(t.Context(), &got, niceyaml.WithYAMLComments(comments))
-		require.ErrorIs(t, err, errPlainValidation)
-		assert.Equal(t, yaml.CommentMap{"$.stale": {yaml.LineComment(" old")}}, comments)
+		second, err := doc.YAMLComments(t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, want, second)
 	})
 
-	t.Run("a nil map collects nothing", func(t *testing.T) {
+	t.Run("one Node serves several calls at once", func(t *testing.T) {
 		t.Parallel()
 
-		first := yaml.CommentMap{}
+		doc := yamltest.FirstDocument(t, input)
 
-		_, err := yamltest.FirstDocument(t, input).Decode[map[string]any](
-			t.Context(), niceyaml.WithYAMLComments(first), niceyaml.WithYAMLComments(nil),
-		)
-		require.NoError(t, err)
-		assert.Empty(t, first)
+		var wg sync.WaitGroup
+
+		for range 8 {
+			wg.Go(func() {
+				got, err := doc.YAMLComments(t.Context())
+				if assert.NoError(t, err) {
+					assert.Equal(t, want, got)
+				}
+			})
+		}
+
+		wg.Wait()
+	})
+}
+
+func TestNode_YAMLComments_Errors(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		err   error
+		input string
+	}{
+		"document that did not parse": {
+			input: "a: 1 # one\nb: [\n",
+			err:   niceyaml.ErrSyntax,
+		},
+		// The decoder collects the comment of a before it rejects b.
+		"alias with no anchor": {
+			input: "a: 1 # one\nb: *missing\n",
+			err:   niceyaml.ErrDecode,
+		},
+		"document past the alias limit": {
+			input: yamltest.AliasLevels(7),
+			err:   niceyaml.ErrExcessiveAliasing,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			docs := niceyaml.NewSourceFromString(tc.input).AllDocuments()
+			require.Len(t, docs, 1)
+
+			got, err := docs[0].YAMLComments(t.Context())
+			require.ErrorIs(t, err, tc.err)
+			assert.Nil(t, got)
+		})
+	}
+
+	t.Run("context that has ended", func(t *testing.T) {
+		t.Parallel()
+
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+
+		got, err := yamltest.FirstDocument(t, "a: 1 # one\n").YAMLComments(ctx)
+		require.ErrorIs(t, err, context.Canceled)
+		assert.Nil(t, got)
 	})
 }
 

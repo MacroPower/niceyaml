@@ -72,12 +72,11 @@ import (
 // opts that say how a value decodes: [WithCustomUnmarshaler],
 // [WithJSONUnmarshalers], [WithDisallowUnknownFields],
 // [WithAllowedFieldPrefixes], and [WithYAMLOrderedMaps]. It reads those
-// options and no other, so it fills no comment map. A caller passes the
-// options of the decode, and the walk then reads each type they give an
-// unmarshaler as the decode did. A key type that a
-// WithCustomUnmarshaler function decodes matches no key of the document
-// unless opts carry that option, and an error under such an entry then
-// binds at the key of the map.
+// options and no other. A caller passes the options of the decode, and
+// the walk then reads each type they give an unmarshaler as the decode
+// did. A key type that a WithCustomUnmarshaler function decodes matches
+// no key of the document unless opts carry that option, and an error
+// under such an entry then binds at the key of the map.
 //
 // The walk follows v rather than the document, so v need not mirror the
 // node, and each error binds where its path resolves in the document. An

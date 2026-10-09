@@ -2360,7 +2360,6 @@ func contextEnded(err error) bool {
 //   - [WithCustomUnmarshaler]
 //   - [WithJSONUnmarshalers]
 //   - [WithYAMLOrderedMaps]
-//   - [WithYAMLComments]
 //   - [DecodeOptions]
 //
 // A DecodeOption sets how one decode runs. A setting that describes the
@@ -2377,8 +2376,6 @@ type DecodeOption func(*decodeConfig)
 // decodeConfig holds the settings a [DecodeOption] configures. Its zero
 // value holds the defaults.
 type decodeConfig struct {
-	// Receives the comments of the decode, or nil for none.
-	comments             yaml.CommentMap
 	validators           []Validator
 	allowedFieldPrefixes []string
 	// The types the options hand to an unmarshaler that no method of the
@@ -2403,9 +2400,7 @@ func newDecodeConfig(opts []DecodeOption) decodeConfig {
 }
 
 // yamlOptions returns the go-yaml options the settings stand for, which
-// every go-yaml decoder of the call applies. They leave out the comment
-// map, which the decoder that fills the target gets alone, as
-// [Node.decodeNode] hands it over. The function of each
+// every go-yaml decoder of the call applies. The function of each
 // [WithCustomUnmarshaler] reads its value through decode.
 func (c decodeConfig) yamlOptions(decode valueDecoder) []yaml.DecodeOption {
 	opts := c.unmarshalers.yamlOptions(decode)
@@ -2705,8 +2700,7 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 // [WithDisallowUnknownFields] rejects an unknown field there. A scalar
 // reads the same however the document writes it, in quotes, in a block,
 // or with a comment on its line, and an alias reads as the content of
-// its anchor. No [Validator] runs on the value, and [WithYAMLComments]
-// collects no comment below it.
+// its anchor. No [Validator] runs on the value.
 //
 // A decode into T would call fn for the same value again, so the decode
 // function returns an error for a pointer to that type. A function that
@@ -2862,31 +2856,6 @@ func WithJSONUnmarshalers(enabled bool) DecodeOption {
 func WithYAMLOrderedMaps(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.orderedMaps = enabled
-	}
-}
-
-// WithYAMLComments is a [DecodeOption] that collects the comments of the
-// decoded node in cm, each under the YAML path of the value it belongs
-// to, as go-yaml's [yaml.CommentToMap] option does.
-// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] writes such a
-// map back, so a program that decodes a document, changes the value, and
-// encodes it again keeps the comments:
-//
-//	comments := yaml.CommentMap{}
-//
-//	cfg, err := doc.Decode[Config](ctx, niceyaml.WithYAMLComments(comments))
-//
-// The decode empties cm before it reads the node, so cm holds the
-// comments of one decode. Each path reads from the root of the document,
-// whatever node the decode reads. A decode that fails can leave comments
-// in cm. The last WithYAMLComments option replaces the earlier ones, and
-// a nil cm collects nothing.
-//
-// A decode writes to cm with no lock, so a [DecodeOptions] value that
-// holds the option serves one decode at a time.
-func WithYAMLComments(cm yaml.CommentMap) DecodeOption {
-	return func(c *decodeConfig) {
-		c.comments = cm
 	}
 }
 
@@ -3271,11 +3240,13 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // A program that decodes many nodes with the same options states them
 // once with [DecodeOptions].
 func (n *Node) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
-	return n.decodeInto(ctx, v, newDecodeConfig(opts))
+	return n.decodeInto(ctx, v, newDecodeConfig(opts), nil)
 }
 
-// decodeInto is [Node.DecodeInto] with its settings resolved.
-func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
+// decodeInto is [Node.DecodeInto] with its settings resolved. The decode
+// also collects the comments of the node in comments, as
+// [Node.decodeNode] describes, unless comments is nil.
+func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig, comments yaml.CommentMap) error {
 	err := checkDecodeTarget(v)
 	if err != nil {
 		return n.bindOwn(err)
@@ -3295,7 +3266,7 @@ func (n *Node) decodeInto(ctx context.Context, v any, cfg decodeConfig) error {
 		return n.Invalid(err, atToken(contentStart(n.AST())))
 	}
 
-	err = n.decodeNode(ctx, n.AST(), v, cfg)
+	err = n.decodeNode(ctx, n.AST(), v, cfg, comments)
 	if err != nil {
 		return err
 	}
@@ -3393,8 +3364,7 @@ func (n *Node) yamlOptions(cfg decodeConfig) []yaml.DecodeOption {
 // document of that Source as [Node.decodeNode] does. The settings of cfg
 // that say how a value decodes thus apply below the value too, and a
 // failed decode reports every problem of the value. A [Validator] checks
-// a document and the comment map of [WithYAMLComments] collects one, so
-// decodeValue applies neither.
+// a document, so decodeValue runs none.
 //
 // No Node binds the error of that decode. It names places in the text,
 // and decodeValue returns it as [valueError] writes it for the decode
@@ -3418,9 +3388,7 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 		return fmt.Errorf("parse the text of the value: %v", err)
 	}
 
-	cfg.comments = nil
-
-	return valueError(doc.decodeUnbound(ctx, doc.AST(), dst, cfg))
+	return valueError(doc.decodeUnbound(ctx, doc.AST(), dst, cfg, nil))
 }
 
 // decodeNode decodes node to v with cfg, and binds the error to the
@@ -3444,40 +3412,49 @@ func (n *Node) decodeValue(ctx context.Context, text []byte, dst any, cfg decode
 // that value. A rejection comes back with the other problems of the
 // document that [Node.decodeProblems] finds, bound as one error.
 //
-// The decoder that fills v is the one decoder of the call that writes to
-// the comment map of [WithYAMLComments]. The go-yaml decoder empties
-// that map when it starts, so a second decoder with the option would
-// drop what the first collected. A node that leaves v as it is starts no
-// decoder, so decodeNode empties the map itself before it reads node.
-// It empties the map again once that decoder has registered the anchors
-// a node below the body reads, since their comments lie outside node.
+// The decoder that fills v also collects the comments of node in
+// comments, as [yaml.CommentToMap] collects them, unless comments is
+// nil. [Node.YAMLComments] passes an empty map of its own. A node that
+// starts no decoder adds nothing to the map. DecodeNode empties the map
+// once the decoder has registered the anchors a node below the body
+// reads, since their comments lie outside node.
 //
 // The go-yaml decoder never checks the context, so a context that has
 // ended before the decode starts, or while it registers the anchors node
 // needs, stops the decode, and its error comes back as it is, whatever
 // node holds.
-func (n *Node) decodeNode(ctx context.Context, node ast.Node, v any, cfg decodeConfig) error {
-	return n.bindOwn(n.decodeUnbound(ctx, node, v, cfg))
+func (n *Node) decodeNode(
+	ctx context.Context,
+	node ast.Node,
+	v any,
+	cfg decodeConfig,
+	comments yaml.CommentMap,
+) error {
+	return n.bindOwn(n.decodeUnbound(ctx, node, v, cfg, comments))
 }
 
 // decodeUnbound decodes node to v with cfg, as [Node.decodeNode]
 // describes, and returns the error before the Node binds it.
 // [Node.decodeValue] writes that error for another document to bind.
-func (n *Node) decodeUnbound(ctx context.Context, node ast.Node, v any, cfg decodeConfig) error {
+func (n *Node) decodeUnbound(
+	ctx context.Context,
+	node ast.Node,
+	v any,
+	cfg decodeConfig,
+	comments yaml.CommentMap,
+) error {
 	err := ctx.Err()
 	if err != nil {
 		return err //nolint:wrapcheck // The caller binds the error.
 	}
-
-	clear(cfg.comments)
 
 	if !astnode.HasContent(node) || isTaggedNull(node) || keepsNullTarget(node, v) {
 		return nil
 	}
 
 	yamlOpts := n.yamlOptions(cfg)
-	if cfg.comments != nil {
-		yamlOpts = append(yamlOpts, yaml.CommentToMap(cfg.comments))
+	if comments != nil {
+		yamlOpts = append(yamlOpts, yaml.CommentToMap(comments))
 	}
 
 	dec := yaml.NewDecoder(bytes.NewReader(nil), yamlOpts...)
@@ -3494,7 +3471,7 @@ func (n *Node) decodeUnbound(ctx context.Context, node ast.Node, v any, cfg deco
 
 		// The pass decoded anchors outside node with dec, which wrote
 		// their comments to the map.
-		clear(cfg.comments)
+		clear(comments)
 	}
 
 	// The decoder tests an alias for null, rather than the anchor it
@@ -4120,4 +4097,52 @@ func (n *Node) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, erro
 	}
 
 	return v, nil
+}
+
+// YAMLComments returns the comments of the node in a new map, each under
+// the YAML path of the value it belongs to, as go-yaml's
+// [yaml.CommentToMap] option collects them.
+// [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] writes such a
+// map back, so a program that decodes a document, changes the value, and
+// encodes it again keeps the comments:
+//
+//	cfg, err := doc.Decode[Config](ctx)
+//	if err != nil {
+//		return err
+//	}
+//
+//	comments, err := doc.YAMLComments(ctx)
+//	if err != nil {
+//		return err
+//	}
+//
+//	cfg.Name = "web"
+//
+//	out, err := encoder.Marshal(ctx, cfg, encoder.WithYAMLComments(comments))
+//
+// The call runs a decode of the node, as [Node.DecodeInto] decodes it
+// into an any with no [DecodeOption], so a program that also decodes the
+// node reads it twice. A decode that fails returns its error, as
+// DecodeInto returns it, and a nil map. A document that did not parse
+// fails that way, and so does a node that holds an alias with no anchor.
+// A node that holds no value returns an empty map, as the body of an
+// empty document or of a document of comments alone does.
+//
+// Each key is a path from the root of the document, as go-yaml writes
+// it, whatever node the call reads. The encoder reads each key from the
+// root of the value it writes, so the map of a whole document pairs with
+// an encode of the value of that document. The map of a Node from
+// [Node.At] does not pair with an encode of the value of that node
+// alone.
+func (n *Node) YAMLComments(ctx context.Context) (yaml.CommentMap, error) {
+	var value any
+
+	comments := yaml.CommentMap{}
+
+	err := n.decodeInto(ctx, &value, decodeConfig{skipSelfValidation: true}, comments)
+	if err != nil {
+		return nil, err
+	}
+
+	return comments, nil
 }

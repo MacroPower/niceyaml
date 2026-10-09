@@ -187,7 +187,7 @@ func (r *layerReader) read(ctx context.Context) (*mergedValue, error) {
 
 	var discard any
 
-	err := n.decodeInto(ctx, &discard, decodeConfig{skipSelfValidation: true})
+	err := n.decodeInto(ctx, &discard, decodeConfig{skipSelfValidation: true}, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -67,7 +67,7 @@ var policies = []dependencyPolicy{
 		passThrough: []string{
 			// Escape hatch.
 			"yaml.EncodeOption",
-			// The comments WithYAMLComments collects in a decode and
+			// The comments Node.YAMLComments returns and
 			// encoder.WithYAMLComments adds. The encoder applies them
 			// itself, since go-yaml's own option for them works only when
 			// go-yaml writes the document.
