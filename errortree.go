@@ -1247,12 +1247,10 @@ type treeCut struct {
 // order [ErrorTree.Problems] yields them, each with its details, and a
 // last node below the root that counts the problems it leaves out, as
 // "and 490 more" does. A heading keeps its row while a problem below it
-// stays. The second result holds the bindings of the problems left out,
-// so an excerpt of the same error marks the problems the tree shows. A
-// binding that a node the tree keeps reaches as well is not among them.
-// A tree with limit problems or fewer comes back as it is, with no
-// bindings.
-func limitTree(t ErrorTree, limit int) (ErrorTree, map[*SourceError]bool) {
+// stays. The second result holds the problems left out, which
+// [skippedBindings] reads. A tree with limit problems or fewer comes back
+// as it is, with none left out.
+func limitTree(t ErrorTree, limit int) (ErrorTree, []ErrorTree) {
 	c := &treeCut{budget: limit}
 
 	cut, _ := c.cut(t)
@@ -1261,6 +1259,18 @@ func limitTree(t ErrorTree, limit int) (ErrorTree, map[*SourceError]bool) {
 	}
 
 	cut.Children = append(cut.Children, ErrorTree{Text: "and " + strconv.Itoa(len(c.left)) + " more"})
+
+	return cut, c.left
+}
+
+// skippedBindings returns the bindings of left, the problems [limitTree]
+// left out of cut, so an excerpt of the same error marks the problems the
+// tree shows. A binding that a node cut keeps reaches as well is not
+// among them. It returns nil when left holds no problem.
+func skippedBindings(cut ErrorTree, left []ErrorTree) map[*SourceError]bool {
+	if len(left) == 0 {
+		return nil
+	}
 
 	kept := make(map[*SourceError]bool)
 	every := func(*SourceError) bool { return true }
@@ -1280,7 +1290,7 @@ func limitTree(t ErrorTree, limit int) (ErrorTree, map[*SourceError]bool) {
 
 	skipped := make(map[*SourceError]bool)
 
-	for _, problem := range c.left {
+	for _, problem := range left {
 		for node := range problem.nodes() {
 			node.Bound.all(skipped, every)
 		}
@@ -1290,7 +1300,7 @@ func limitTree(t ErrorTree, limit int) (ErrorTree, map[*SourceError]bool) {
 		delete(skipped, bound)
 	}
 
-	return cut, skipped
+	return skipped
 }
 
 // cut returns t without the problems past the budget, and whether any of

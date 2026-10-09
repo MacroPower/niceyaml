@@ -96,8 +96,9 @@ func NewErrorReport(err error, context int) ErrorReport {
 // newErrorReport builds the report [NewErrorReport] documents. With a
 // limit above zero, the tree shows that many problems at most and counts
 // the rest, as [limitTree] cuts it. The bindings of the problems it
-// leaves out then mark no excerpt, count toward no source, and get no
-// reason, so the report shows the problems its tree shows.
+// leaves out, as [skippedBindings] finds them, then mark no excerpt,
+// count toward no source, and get no reason, so the report shows the
+// problems its tree shows.
 func newErrorReport(err error, context, limit int) ErrorReport {
 	if err == nil {
 		return ErrorReport{}
@@ -108,7 +109,10 @@ func newErrorReport(err error, context, limit int) ErrorReport {
 	var skipped map[*SourceError]bool
 
 	if limit > 0 {
-		tree, skipped = limitTree(tree, limit)
+		var left []ErrorTree
+
+		tree, left = limitTree(tree, limit)
+		skipped = skippedBindings(tree, left)
 	}
 
 	bindings := slices.Collect(Bindings(err))
