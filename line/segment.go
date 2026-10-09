@@ -58,6 +58,10 @@ type Segment struct {
 //		fmt.Fprintln(w)
 //	}
 //
+// Segments covers the whole line, whatever [View.Clip] set. A renderer
+// that shows a clipped line in part keeps the columns [View.Windows]
+// returns.
+//
 // An empty line has no segments. Panics if i is outside the content.
 func (v *View) Segments(i int) iter.Seq[Segment] {
 	ln := v.lines.lines[i]

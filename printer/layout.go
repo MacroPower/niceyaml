@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"go.jacobcolvin.com/niceyaml/internal/cells"
+	"go.jacobcolvin.com/niceyaml/internal/clip"
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -33,7 +34,9 @@ import (
 // [line.View] method takes, so a viewer that finds the line at a row
 // reaches its decoration through the view with the same index.
 // [Layout.RowOf] and [Layout.CellOf] take a position in the content, as a
-// search yields one.
+// search yields one. On a line the view clips, as [line.View.Clip] sets
+// a view to, a column the row leaves out takes the row and the cell of
+// the "..." that stands for it.
 // A line the view does not hold takes no rows and starts nowhere. Rows
 // count from 0 at the first row of the first line and leave the container
 // style out. An empty view has no rows, though [Printer.Print] draws one
@@ -53,13 +56,25 @@ type Layout struct {
 // content row takes among the line's rows. It also holds the number of
 // rows the line takes, annotation rows included, and the width of the
 // widest of them. Its shown text maps a column of the content to the cell
-// it takes on its row.
+// it takes on its row. For a line the view clips, the content is the text
+// of its row, and clip maps a column of the line to it.
 type lineLayout struct {
+	clip    *clip.Map
 	cols    []int
 	offsets []int
 	shown   shownLine
 	rows    int
 	width   int
+}
+
+// col returns the column of the content of the row that shows col, a
+// column of the line.
+func (ll lineLayout) col(col int) int {
+	if ll.clip == nil {
+		return col
+	}
+
+	return ll.clip.Col(col)
 }
 
 // shownLine is the shown text of one line, the rendered line without its
@@ -98,11 +113,14 @@ func (p *Printer) Layout(view *line.View) Layout {
 // layoutLine computes the row structure of line idx of view, which is ln,
 // as [Printer.renderLine] writes its rows.
 func (p *Printer) layoutLine(view *line.View, idx int, ln *line.Line, gutterWidth int) lineLayout {
-	w := p.wrapLine(view, idx, ln, gutterWidth)
-	above := p.annotationRows(view, ln, idx, gutterWidth, line.Above, w)
-	below := p.annotationRows(view, ln, idx, gutterWidth, line.Below, w)
+	vl := newViewLine(view, idx, ln)
+
+	w := p.wrapLine(vl, gutterWidth)
+	above := p.annotationRows(vl, gutterWidth, line.Above, w)
+	below := p.annotationRows(vl, gutterWidth, line.Below, w)
 
 	ll := lineLayout{
+		clip:    vl.clip,
 		shown:   w.shown,
 		cols:    w.starts,
 		offsets: make([]int, len(w.pieces)),
@@ -132,22 +150,22 @@ type wrappedLine struct {
 	shown  shownLine // The shown text of the line.
 }
 
-// wrapLine renders the content of line idx of view, which is ln, wraps it
-// to the printer width, and returns the pieces with the columns of the
-// content each one shows.
-func (p *Printer) wrapLine(view *line.View, idx int, ln *line.Line, gutterWidth int) wrappedLine {
+// wrapLine renders the content of vl, wraps it to the printer width, and
+// returns the pieces with the columns of the content each one shows.
+func (p *Printer) wrapLine(vl viewLine, gutterWidth int) wrappedLine {
 	// The content wraps as the rendered line does, styles included, since
 	// a style's transform may change the shown text. The wrap is
 	// ANSI-aware and measures the shown cells.
-	rendered, runs := p.renderRuns(view, idx)
+	rendered, runs := p.renderRuns(vl)
 
-	return mapRows(ln, rendered, runs, p.wrapContent(rendered, gutterWidth))
+	return mapRows(vl.width(), rendered, runs, p.wrapContent(rendered, gutterWidth))
 }
 
 // mapRows returns pieces, the rows the wrap cut from rendered, the
-// rendered content of ln, with the columns of the content each piece
-// shows. Runs holds the runs that style rendered.
-func mapRows(ln *line.Line, rendered string, runs []runSpan, pieces []string) wrappedLine {
+// rendered content of a line that holds contentLen columns, with the
+// columns of the content each piece shows. Runs holds the runs that style
+// rendered.
+func mapRows(contentLen int, rendered string, runs []runSpan, pieces []string) wrappedLine {
 	// The wrap cuts the pieces from the shown text of the line, so each
 	// piece matches the shown text at the offset where it begins. The
 	// runs then map each offset back to a column of the content, which
@@ -159,7 +177,6 @@ func mapRows(ln *line.Line, rendered string, runs []runSpan, pieces []string) wr
 
 	shownText := ansi.Strip(rendered)
 	shown := []rune(shownText)
-	contentLen := ln.Width()
 
 	offsets, endOffsets := rowBounds(shownText, plain)
 	starts := make([]int, len(offsets))
@@ -467,7 +484,9 @@ func (l Layout) LineAt(row int) int {
 // before it include those of the earlier wrapped rows and those above
 // it. A column in the spaces the wrapper dropped at a break belongs to
 // the row before the break, and one past the end of the content to the
-// last row. Returns -1 when the layout does not hold the line.
+// last row. A column a clipped line leaves out belongs to the row that
+// holds the "..." in its place. Returns -1 when the layout does not hold
+// the line.
 func (l Layout) RowOf(pos position.Position) int {
 	k, ok := l.position(pos.Line)
 	if !ok {
@@ -476,7 +495,7 @@ func (l Layout) RowOf(pos position.Position) int {
 
 	ll := l.lines[k]
 
-	return l.starts[k] + ll.offsets[rowIndex(ll.cols, pos.Col)]
+	return l.starts[k] + ll.offsets[rowIndex(ll.cols, ll.col(pos.Col))]
 }
 
 // CellOf returns the cell that column pos.Col of line pos.Line of the
@@ -489,8 +508,10 @@ func (l Layout) RowOf(pos position.Position) int {
 // transform adds before the text of the run, such as an opening
 // bracket. A column inside a grapheme cluster takes the cell where its
 // cluster starts. A column past the end of the content takes one cell
-// for every column past it, as [ColWidth] counts them. Returns -1 when
-// the layout does not hold the line.
+// for every column past it, as [ColWidth] counts them. On a clipped
+// line, the cell counts the row the line renders as, and a column the
+// row leaves out takes the cell where the "..." in its place begins.
+// Returns -1 when the layout does not hold the line.
 func (l Layout) CellOf(pos position.Position) int {
 	k, ok := l.position(pos.Line)
 	if !ok {
@@ -500,7 +521,7 @@ func (l Layout) CellOf(pos position.Position) int {
 	ll := l.lines[k]
 	sl := ll.shown
 	shown := []rune(sl.text)
-	col := max(0, pos.Col)
+	col := ll.col(max(0, pos.Col))
 
 	offset := shownOffset(sl.runs, shown, col, sl.contentLen)
 

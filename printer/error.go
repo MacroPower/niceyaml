@@ -21,7 +21,10 @@ const errorConnectorWidth = 4
 // PrintError renders err for a reader: its message as a tree, then one
 // excerpt per source the bindings in err touch, as [niceyaml.Excerpts]
 // yields them. Each excerpt keeps the context lines [WithContextLines]
-// sets on either side of each marked line. An error joined from one
+// sets on either side of each marked line. A line longer than the width
+// [niceyaml.WithExcerptWidth] sets for its source shows a window of that
+// many columns around each location on it, with "..." in place of the
+// rest. An error joined from one
 // bound error per document of a file therefore prints that file once,
 // with the errors of every document on it. A binding whose children point
 // into another file, such as a detail that names where a value was first

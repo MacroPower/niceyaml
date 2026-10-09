@@ -209,7 +209,8 @@ const (
 	// UIHunkHeader styles the header above each hunk of a diff, such as
 	// "@@ -1,3 +1,4 @@".
 	UIHunkHeader Kind = "uiHunkHeader"
-	// UISeparator styles the "..." between the hunks of an excerpt.
+	// UISeparator styles the "..." between the hunks of an excerpt, and
+	// the "..." in place of the columns a clipped line leaves out.
 	UISeparator Kind = "uiSeparator"
 )
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"go.jacobcolvin.com/niceyaml/internal/cells"
+	"go.jacobcolvin.com/niceyaml/internal/clip"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -35,7 +36,9 @@ import (
 // whole, and slicing before or after decorating renders the same.
 // [View.All] yields the lines the View holds with their indices,
 // [View.Contains] reports whether it holds a line, [View.Index] finds the
-// index of a line it holds, and [View.Count] is the number it holds.
+// index of a line it holds, and [View.Count] is the number it holds. A
+// View from [View.Clip] shows a long line in part, and the columns it
+// takes and yields are still those of the content.
 //
 // Index-taking methods panic when the index is outside the content, as
 // indexing a slice does. A View keeps decoration on a line it does not
@@ -55,6 +58,9 @@ type View struct {
 	lines       Lines
 	// The index in lines of each line the View holds, ascending.
 	held []int
+	// The number of columns each window of a clipped line holds, as
+	// [View.Clip] sets it, or 0 when the View shows every line whole.
+	clip int
 }
 
 // NewView creates a new [*View] over lines with no decoration. Without
@@ -343,7 +349,7 @@ func (v *View) Clone() *View {
 		return nil
 	}
 
-	c := &View{lines: v.lines, held: slices.Clone(v.held), flags: maps.Clone(v.flags)}
+	c := &View{lines: v.lines, held: slices.Clone(v.held), flags: maps.Clone(v.flags), clip: v.clip}
 
 	for i, o := range v.overlays {
 		c.AddLineOverlay(i, o...)
@@ -373,6 +379,8 @@ func (v *View) Slice(spans ...position.Span) *View {
 	if v == nil {
 		return out
 	}
+
+	out.clip = v.clip
 
 	for i := range v.All(spans...) {
 		out.held = append(out.held, i)
@@ -496,6 +504,168 @@ func isSeparator(a Annotation) bool {
 	return a.Kind == kind.UISeparator
 }
 
+// Clip returns a copy of the [View] that shows part of each line longer
+// than cols columns: a window of cols columns around each mark on the
+// line, with "..." in place of each run of columns it leaves out. Clip
+// cuts columns as [View.Hunks] cuts lines. A document minified onto one
+// line, or a long encoded value on the line an error marks, thus renders
+// as a row of bounded length.
+//
+// A mark is the first column of an [Overlay] or the column of an
+// [Annotation] of a kind other than [kind.UISeparator], and a line with
+// no mark keeps its first cols columns. A window centers on its mark and
+// moves to stay inside the line. An overlay longer than its window
+// therefore shows the columns from its start that the window holds.
+// Windows that overlap or lie three columns or fewer apart join into one,
+// and a window three columns or fewer from either end of the line reaches
+// that end, since "..." takes three columns itself. A window keeps each
+// grapheme cluster whole, so it grows to hold the rest of a cluster at
+// either edge.
+//
+// The copy holds the lines the View holds with their indices and their
+// decoration, so a range from the content still applies to it. It picks
+// the windows when it renders, from the decoration it carries then, so a
+// mark added after the clip gets a window too. [View.Windows] returns the
+// windows of a line, and [View.String] and the printer render them.
+// [View.Slice], [View.Hunks], and [View.Clone] keep the clip. A cols of
+// zero or less shows every line whole, so it undoes a clip.
+//
+// An error excerpt clips its hunks this way, and a caller that marks a
+// view of its own does the same:
+//
+//	lipgloss.Println(p.Print(view.Hunks(2).Clip(120)))
+func (v *View) Clip(cols int) *View {
+	c := v.Clone()
+	if c == nil {
+		c = &View{}
+	}
+
+	c.clip = max(0, cols)
+
+	return c
+}
+
+// Windows returns the runs of columns of line i that the [View] shows,
+// in order, as [View.Clip] picks them. It returns nil for a line the View
+// shows whole, which every line of a View with no clip is, and every
+// line no longer than the clip. The spans count columns of the content.
+// A renderer shows "..." for each run of columns between two of them,
+// before the first, and after the last.
+func (v *View) Windows(i int) position.Spans {
+	ln := v.lines.lines[i]
+
+	if v.clip <= 0 {
+		return nil
+	}
+
+	width := ln.Width()
+	if width <= v.clip {
+		return nil
+	}
+
+	marks := make([]int, 0, len(v.overlays[i])+len(v.annotations[i]))
+
+	for _, o := range v.overlays[i] {
+		marks = append(marks, o.Cols.Start)
+	}
+
+	for _, a := range v.annotations[i] {
+		if !isSeparator(a) {
+			marks = append(marks, a.Col)
+		}
+	}
+
+	if len(marks) == 0 {
+		marks = append(marks, 0)
+	}
+
+	slices.Sort(marks)
+
+	row := cells.NewRow(ln.Content())
+
+	var windows position.Spans
+
+	for _, mark := range marks {
+		// The window centers on the mark and moves to stay inside the
+		// line, which is longer than the window. A mark outside the line
+		// counts as one at the end it lies past.
+		mark = min(max(0, mark), width)
+		start := min(max(0, mark-v.clip/2), width-v.clip)
+		w := position.NewSpan(row.Start(start), row.Next(start+v.clip))
+
+		// The marks ascend, so the windows do too, and a window joins
+		// the one before it when the ellipsis between them would take as
+		// many columns as the cut saves.
+		if last := len(windows) - 1; last >= 0 && w.Start-windows[last].End <= clip.EllipsisCols {
+			windows[last].End = max(windows[last].End, w.End)
+
+			continue
+		}
+
+		windows = append(windows, w)
+	}
+
+	if windows[0].Start <= clip.EllipsisCols {
+		windows[0].Start = 0
+	}
+
+	if last := &windows[len(windows)-1]; width-last.End <= clip.EllipsisCols {
+		last.End = width
+	}
+
+	if len(windows) == 1 && windows[0] == position.NewSpan(0, width) {
+		return nil
+	}
+
+	return windows
+}
+
+// shownRow is one line as [View.String] renders it: the text of its row
+// and the decoration of the line in the columns of that text. They are
+// the content and the decoration of the line itself unless the View clips
+// the line.
+type shownRow struct {
+	content     string
+	annotations Annotations
+	overlays    Overlays
+	// The number of columns of content.
+	width int
+}
+
+// shown returns line i of the View, which is ln, as [View.String] renders
+// it. For a line the View clips, the content holds the windows
+// [View.Windows] returns with "..." in place of the columns between them.
+// Each annotation moves to the column of that text that shows its own, and
+// each overlay covers the columns of that text that show the ones it
+// covers, one overlay per window.
+func (v *View) shown(i int, ln *Line) shownRow {
+	windows := v.Windows(i)
+	if windows == nil {
+		return shownRow{
+			content:     ln.Content(),
+			annotations: v.Annotations(i),
+			overlays:    v.Overlays(i),
+			width:       ln.Width(),
+		}
+	}
+
+	m := clip.New(ln.Width(), windows)
+	row := shownRow{content: m.Content(ln.Content()), width: m.Width()}
+
+	for _, a := range v.Annotations(i) {
+		a.Col = m.Col(a.Col)
+		row.annotations = append(row.annotations, a)
+	}
+
+	for _, o := range v.Overlays(i) {
+		for _, cols := range m.Spans(o.Cols) {
+			row.overlays = append(row.overlays, Overlay{Kind: o.Kind, Cols: cols, Blend: o.Blend})
+		}
+	}
+
+	return row
+}
+
 // String renders the [View] as plain text: each line behind its number,
 // and the annotations above and below it on rows of their own, one row per
 // kind as [Annotations.ByKind] groups them. Each row below the line holds
@@ -522,6 +692,12 @@ func isSeparator(a Annotation) bool {
 // draws the overlay carets on the row of each kind below a line rather
 // than the first alone, and draws none for a blend overlay or for a line
 // with no annotation below it. An empty view renders as "".
+//
+// A line the View clips, as [View.Clip] sets a View to, renders the
+// windows [View.Windows] returns, with "..." in place of each run of
+// columns it leaves out. The carets and the annotations of the line sit
+// under the columns of that row. An annotation at a column the row
+// leaves out starts at the "..." that stands for the column.
 func (v *View) String() string {
 	width := 4
 	for _, ln := range v.All() {
@@ -533,7 +709,8 @@ func (v *View) String() string {
 	var rows []string
 
 	for i, ln := range v.All() {
-		anns := v.Annotations(i)
+		row := v.shown(i, ln)
+		anns := row.annotations
 
 		// Each kind of annotation above the line gets a row of its own,
 		// in the order the kinds first appear, as the printer renders
@@ -547,12 +724,12 @@ func (v *View) String() string {
 				continue
 			}
 
-			col := annotationCol(kept.Col(), ln.Width())
-			padding := strings.Repeat(" ", colWidth(ln, col))
+			col := annotationCol(kept.Col(), row.width)
+			padding := strings.Repeat(" ", cells.NewRow(row.content).Width(col))
 			rows = append(rows, blank+padding+escape.Control(strings.Join(kept.Contents(), "; ")))
 		}
 
-		rows = append(rows, contentRow(ln, width))
+		rows = append(rows, contentRow(ln.Number(), row.content, width))
 
 		// Each kind of annotation below the line gets a row of its own as
 		// well, in the order the kinds first appear. The overlays mark the
@@ -563,9 +740,9 @@ func (v *View) String() string {
 			groups = []Annotations{nil}
 		}
 
-		overlays := v.Overlays(i)
+		overlays := row.overlays
 		for _, group := range groups {
-			if marker := markerRow(ln, overlays, group); marker != "" {
+			if marker := markerRow(row.content, row.width, overlays, group); marker != "" {
 				rows = append(rows, blank+marker)
 			}
 
@@ -576,43 +753,38 @@ func (v *View) String() string {
 	return strings.Join(rows, "\n")
 }
 
-// contentRow returns the row that renders ln, with its number right-aligned
-// in a gutter width cells wide. A line with no number, such as the
-// placeholder a diff puts opposite an inserted or deleted line, gets a
-// blank gutter, as the printer gives it one.
-func contentRow(ln *Line, width int) string {
-	number := ""
-	if ln.Number() > 0 {
-		number = strconv.Itoa(ln.Number())
+// contentRow returns the row that renders content, the text of a line,
+// behind number, the number of the line, right-aligned in a gutter width
+// cells wide. A line with no number, such as the placeholder a diff puts
+// opposite an inserted or deleted line, gets a blank gutter, as the
+// printer gives it one.
+func contentRow(number int, content string, width int) string {
+	gutter := ""
+	if number > 0 {
+		gutter = strconv.Itoa(number)
 	}
 
-	return fmt.Sprintf("%*s | %s", width, number, escape.Control(ln.Content()))
+	return fmt.Sprintf("%*s | %s", width, gutter, escape.Control(content))
 }
 
-// colWidth returns the width in cells of the content of ln before col, as
-// the content row renders it. See [cells.Row.Width] for the rules it
-// measures by.
-func colWidth(ln *Line, col int) int {
-	return cells.NewRow(ln.Content()).Width(col)
-}
-
-// markerRow returns the row below ln that marks its overlays and carries
-// its annotations: a caret under every column an overlay covers within the
-// line, a caret at the column of the annotations, and their contents after
-// the last caret. Annotations without content set no column while one with
-// content remains. When none has content and the overlays cover no column,
-// such as an overlay of no width at the end of the line, the annotations
-// still get one caret at their column, so the row marks the spot. The
-// carets take the cells the content row gives each grapheme cluster, so
-// they stay under the runes they mark on a line holding wide, combining,
-// or control characters. The caret of the annotations sits no further
-// than [MaxColPastEnd] columns past the end of the content. Returns ""
-// when the line has neither.
-func markerRow(ln *Line, overlays Overlays, below Annotations) string {
-	marks := overlayMarks(overlays, ln.Width())
+// markerRow returns the row below a line that marks its overlays and
+// carries its annotations. Content is the text of the line, which is
+// width columns wide. The row holds a caret under every column an overlay
+// covers within the content, a caret at the column of the annotations,
+// and their contents after the last caret. Annotations without content
+// set no column while one with content remains. When none has content
+// and the overlays cover no column, such as an overlay of no width at the
+// end of the line, the annotations still get one caret at their column,
+// so the row marks the spot. The carets take the cells the content row
+// gives each grapheme cluster, so they stay under the runes they mark on
+// a line holding wide, combining, or control characters. The caret of the
+// annotations sits no further than [MaxColPastEnd] columns past the end
+// of the content. Returns "" when the line has neither.
+func markerRow(content string, width int, overlays Overlays, below Annotations) string {
+	marks := overlayMarks(overlays, width)
 
 	mark := func(col int) {
-		col = annotationCol(col, ln.Width())
+		col = annotationCol(col, width)
 		if col >= len(marks) {
 			marks = append(marks, make([]bool, col+1-len(marks))...)
 		}
@@ -635,7 +807,7 @@ func markerRow(ln *Line, overlays Overlays, below Annotations) string {
 
 	// Every mark lands on a column that takes a cell, so the trim is a
 	// safety net that keeps a row without a caret from rendering.
-	carets := strings.TrimRight(renderMarks(ln.Content(), marks), " ")
+	carets := strings.TrimRight(renderMarks(content, marks), " ")
 	if carets == "" && len(kept) == 0 {
 		return ""
 	}

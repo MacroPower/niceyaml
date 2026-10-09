@@ -280,8 +280,9 @@ func NewLayers(nodes ...*Node) *Layers {
 // and a string keeps its quotes, except that a block scalar or a string
 // of several lines reads as one double-quoted line. The Source takes its
 // [Source.Name], its [Source.FilePath], and its [Source.FS] from the
-// Source of the lowest layer, with what [WithAllowDuplicateKeys] and
-// [WithAliasLimit] set there. Its text holds values of every layer, so
+// Source of the lowest layer, with what [WithAllowDuplicateKeys],
+// [WithAliasLimit], and [WithExcerptWidth] set there. Its text holds
+// values of every layer, so
 // [Source.Excerpts] reports false for it when the Source of any layer
 // has excerpts off, as [WithExcerpts] describes.
 //

@@ -1612,6 +1612,7 @@ func TestView_OutOfRange(t *testing.T) {
 		"Annotate":       func(v *line.View, i int) { v.Annotate(i, line.Annotation{Content: "x"}) },
 		"Overlays":       func(v *line.View, i int) { v.Overlays(i) },
 		"AddLineOverlay": func(v *line.View, i int) { v.AddLineOverlay(i, line.Overlay{}) },
+		"Windows":        func(v *line.View, i int) { v.Windows(i) },
 	}
 
 	for name, call := range tcs {
@@ -2070,5 +2071,414 @@ func TestView_Hunks(t *testing.T) {
 			"   7 | g: 7",
 		)
 		assert.Equal(t, want, view.Hunks(0).String())
+	})
+}
+
+func TestView_Clip(t *testing.T) {
+	t.Parallel()
+
+	const (
+		letters = "key: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		couple  = "\U0001F468\u200d\U0001F469"
+	)
+
+	a := func(n int) string { return strings.Repeat("a", n) }
+	b := func(n int) string { return strings.Repeat("b", n) }
+
+	tcs := map[string]struct {
+		input       string
+		want        []string
+		windows     position.Spans
+		overlays    []position.Span
+		annotations []line.Annotation
+		cols        int
+	}{
+		"line that fits stays whole": {
+			input: "key: value",
+			cols:  10,
+			want:  []string{"   1 | key: value"},
+		},
+		"line with no mark keeps its first columns": {
+			input:   letters,
+			cols:    10,
+			windows: position.Spans{position.NewSpan(0, 10)},
+			want:    []string{"   1 | key: abcde..."},
+		},
+		"window centers on its mark": {
+			input:    letters,
+			cols:     10,
+			overlays: []position.Span{position.NewSpan(30, 32)},
+			windows:  position.Spans{position.NewSpan(25, 35)},
+			want: []string{
+				"   1 | ...uvwxyzABCD...",
+				"     |         ^^",
+			},
+		},
+		"window near the start stays inside the line": {
+			input:    letters,
+			cols:     10,
+			overlays: []position.Span{position.NewSpan(2, 3)},
+			windows:  position.Spans{position.NewSpan(0, 10)},
+			want: []string{
+				"   1 | key: abcde...",
+				"     |   ^",
+			},
+		},
+		"window near the end stays inside the line": {
+			input:    letters,
+			cols:     10,
+			overlays: []position.Span{position.NewSpan(55, 57)},
+			windows:  position.Spans{position.NewSpan(47, 57)},
+			want: []string{
+				"   1 | ...QRSTUVWXYZ",
+				"     |            ^^",
+			},
+		},
+		"two marks far apart get a window each": {
+			input:    letters,
+			cols:     10,
+			overlays: []position.Span{position.NewSpan(15, 16), position.NewSpan(45, 46)},
+			annotations: []line.Annotation{
+				{Content: "first", Placement: line.Below, Col: 15},
+				{Content: "second", Placement: line.Below, Col: 45},
+			},
+			windows: position.Spans{position.NewSpan(10, 20), position.NewSpan(40, 50)},
+			want: []string{
+				"   1 | ...fghijklmno...JKLMNOPQRS...",
+				"     |         ^            ^ first; second",
+			},
+		},
+		"windows three columns apart join": {
+			input:    letters,
+			cols:     10,
+			overlays: []position.Span{position.NewSpan(20, 21), position.NewSpan(33, 34)},
+			windows:  position.Spans{position.NewSpan(15, 38)},
+			want: []string{
+				"   1 | ...klmnopqrstuvwxyzABCDEFG...",
+				"     |         ^            ^",
+			},
+		},
+		"windows four columns apart stay apart": {
+			input:    letters,
+			cols:     10,
+			overlays: []position.Span{position.NewSpan(20, 21), position.NewSpan(34, 35)},
+			windows:  position.Spans{position.NewSpan(15, 25), position.NewSpan(29, 39)},
+			want: []string{
+				"   1 | ...klmnopqrst...yzABCDEFGH...",
+				"     |         ^            ^",
+			},
+		},
+		"window three columns from an end reaches it": {
+			input:    letters,
+			cols:     10,
+			overlays: []position.Span{position.NewSpan(8, 9), position.NewSpan(49, 50)},
+			windows:  position.Spans{position.NewSpan(0, 13), position.NewSpan(44, 57)},
+			want: []string{
+				"   1 | key: abcdefgh...NOPQRSTUVWXYZ",
+				"     |         ^            ^",
+			},
+		},
+		"line three columns longer than the clip stays whole": {
+			input:    "key: abcdefgh",
+			cols:     10,
+			overlays: []position.Span{position.NewSpan(5, 6)},
+			want: []string{
+				"   1 | key: abcdefgh",
+				"     |      ^",
+			},
+		},
+		"long overlay shows the columns from its start": {
+			input:    letters,
+			cols:     10,
+			overlays: []position.Span{position.NewSpan(20, 57)},
+			windows:  position.Spans{position.NewSpan(15, 25)},
+			want: []string{
+				"   1 | ...klmnopqrst...",
+				"     |         ^^^^^",
+			},
+		},
+		"overlay that spans two windows marks its part of each": {
+			input:    letters,
+			cols:     10,
+			overlays: []position.Span{position.NewSpan(15, 47), position.NewSpan(45, 46)},
+			windows:  position.Spans{position.NewSpan(10, 20), position.NewSpan(40, 50)},
+			want: []string{
+				"   1 | ...fghijklmno...JKLMNOPQRS...",
+				"     |         ^^^^^   ^^^^^^^",
+			},
+		},
+		"annotation alone marks its column": {
+			input:       letters,
+			cols:        10,
+			annotations: []line.Annotation{{Content: "here", Placement: line.Below, Col: 40}},
+			windows:     position.Spans{position.NewSpan(35, 45)},
+			want: []string{
+				"   1 | ...EFGHIJKLMN...",
+				"     |         ^ here",
+			},
+		},
+		"annotation above sits over its column": {
+			input:       letters,
+			cols:        10,
+			annotations: []line.Annotation{{Content: "above", Placement: line.Above, Col: 40}},
+			windows:     position.Spans{position.NewSpan(35, 45)},
+			want: []string{
+				"     |         above",
+				"   1 | ...EFGHIJKLMN...",
+			},
+		},
+		"annotation past the end marks the end": {
+			input:       letters,
+			cols:        10,
+			annotations: []line.Annotation{{Content: "end", Placement: line.Below, Col: 58}},
+			windows:     position.Spans{position.NewSpan(47, 57)},
+			want: []string{
+				"   1 | ...QRSTUVWXYZ",
+				"     |               ^ end",
+			},
+		},
+		"overlay of no width at the end marks the end": {
+			input:       letters,
+			cols:        10,
+			overlays:    []position.Span{position.NewSpan(57, 57)},
+			annotations: []line.Annotation{{Placement: line.Below, Col: 57}},
+			windows:     position.Spans{position.NewSpan(47, 57)},
+			want: []string{
+				"   1 | ...QRSTUVWXYZ",
+				"     |              ^",
+			},
+		},
+		"separator is no mark and starts at the ellipsis": {
+			input:    letters,
+			cols:     10,
+			overlays: []position.Span{position.NewSpan(40, 41)},
+			annotations: []line.Annotation{
+				{Content: "---", Kind: kind.UISeparator, Placement: line.Above, Col: 20},
+			},
+			windows: position.Spans{position.NewSpan(35, 45)},
+			want: []string{
+				"     | ---",
+				"   1 | ...EFGHIJKLMN...",
+				"     |         ^",
+			},
+		},
+		"wide runes count one column and take two cells": {
+			input:    "k: " + strings.Repeat("日本語", 8),
+			cols:     8,
+			overlays: []position.Span{position.NewSpan(15, 16)},
+			windows:  position.Spans{position.NewSpan(11, 19)},
+			want: []string{
+				"   1 | ...語日本語日本語日...",
+				"     |            ^^",
+			},
+		},
+		"tab counts one column and shows as its picture": {
+			input:    "k: a\tb\tc\td\te\tf\tg\th\ti\tj\tk\tl\tm",
+			cols:     8,
+			overlays: []position.Span{position.NewSpan(15, 16)},
+			windows:  position.Spans{position.NewSpan(11, 19)},
+			want: []string{
+				"   1 | ...e␉f␉g␉h␉...",
+				"     |        ^",
+			},
+		},
+		"mark inside a grapheme cluster shows the cluster": {
+			input:    "k: " + couple + a(12) + couple + b(24),
+			cols:     8,
+			overlays: []position.Span{position.NewSpan(20, 21)},
+			windows:  position.Spans{position.NewSpan(16, 24)},
+			want: []string{
+				"   1 | ...aa" + couple + "bbb...",
+				"     |      ^^",
+			},
+		},
+		"window grows to hold a grapheme cluster at its end": {
+			input:    "k: " + a(25) + couple + b(24),
+			cols:     8,
+			overlays: []position.Span{position.NewSpan(25, 26)},
+			windows:  position.Spans{position.NewSpan(21, 31)},
+			want: []string{
+				"   1 | ...aaaaaaa" + couple + "...",
+				"     |        ^",
+			},
+		},
+		"window grows to hold a grapheme cluster at its start": {
+			input:    "k: " + a(25) + couple + b(24),
+			cols:     8,
+			overlays: []position.Span{position.NewSpan(33, 34)},
+			windows:  position.Spans{position.NewSpan(28, 37)},
+			want: []string{
+				"   1 | ..." + couple + "bbbbbb...",
+				"     |        ^",
+			},
+		},
+		"combining marks stay with their letters": {
+			input:    "k: " + a(25) + strings.Repeat("e\u0301", 5) + b(24),
+			cols:     6,
+			overlays: []position.Span{position.NewSpan(31, 32)},
+			windows:  position.Spans{position.NewSpan(28, 34)},
+			want: []string{
+				"   1 | ..." + strings.Repeat("e\u0301", 3) + "...",
+				"     |     ^",
+			},
+		},
+		"clip of one column keeps the mark": {
+			input:    letters,
+			cols:     1,
+			overlays: []position.Span{position.NewSpan(30, 31)},
+			windows:  position.Spans{position.NewSpan(30, 31)},
+			want: []string{
+				"   1 | ...z...",
+				"     |    ^",
+			},
+		},
+		"clip of zero shows the whole line": {
+			input:    letters,
+			cols:     0,
+			overlays: []position.Span{position.NewSpan(30, 31)},
+			want: []string{
+				"   1 | " + letters,
+				"     | " + strings.Repeat(" ", 30) + "^",
+			},
+		},
+		"negative clip shows the whole line": {
+			input: letters,
+			cols:  -1,
+			want:  []string{"   1 | " + letters},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := newTestView(t, tc.input+"\n", 1)
+
+			for _, cols := range tc.overlays {
+				view.AddLineOverlay(0, line.Overlay{Kind: kind.GenericError, Cols: cols})
+			}
+
+			view.Annotate(0, tc.annotations...)
+
+			clipped := view.Clip(tc.cols)
+
+			assert.Equal(t, tc.windows, clipped.Windows(0))
+			assert.Equal(t, stringtest.JoinLF(tc.want...), clipped.String())
+
+			// The view the clip came from shows every line whole.
+			assert.Nil(t, view.Windows(0))
+		})
+	}
+}
+
+func TestView_Clip_KeepsView(t *testing.T) {
+	t.Parallel()
+
+	long := "key: " + strings.Repeat("x", 40)
+	input := stringtest.JoinLF("a: 1", long, "c: 3", "d: 4", "")
+
+	newMarked := func(t *testing.T) *line.View {
+		t.Helper()
+
+		view := newTestView(t, input, 4)
+		view.SetFlag(1, line.FlagInserted)
+		view.AddOverlay(kind.GenericError, position.NewRange(position.New(1, 30), position.New(1, 32)))
+		view.Annotate(1, line.Annotation{Content: "bad", Placement: line.Below, Col: 30})
+
+		return view
+	}
+
+	window := position.Spans{position.NewSpan(25, 35)}
+
+	t.Run("copy holds the lines and their decoration", func(t *testing.T) {
+		t.Parallel()
+
+		view := newMarked(t)
+		clipped := view.Clip(10)
+
+		require.NotSame(t, view, clipped)
+		assert.Equal(t, view.Count(), clipped.Count())
+		assert.Equal(t, line.FlagInserted, clipped.Flag(1))
+		assert.Equal(t, view.Overlays(1), clipped.Overlays(1))
+		assert.Equal(t, view.Annotations(1), clipped.Annotations(1))
+
+		for i, ln := range view.All() {
+			j, ok := clipped.Index(ln)
+			require.True(t, ok, "line %d", i)
+			assert.Equal(t, i, j)
+		}
+	})
+
+	t.Run("decorating the copy leaves the view as it was", func(t *testing.T) {
+		t.Parallel()
+
+		view := newMarked(t)
+		clipped := view.Clip(10)
+
+		clipped.Annotate(1, line.Annotation{Content: "more", Placement: line.Below, Col: 8})
+
+		assert.Len(t, view.Annotations(1), 1)
+		assert.Len(t, clipped.Annotations(1), 2)
+	})
+
+	t.Run("mark added after the clip gets a window", func(t *testing.T) {
+		t.Parallel()
+
+		clipped := newMarked(t).Clip(10)
+		require.Equal(t, window, clipped.Windows(1))
+
+		clipped.Annotate(1, line.Annotation{Content: "more", Placement: line.Below, Col: 12})
+
+		assert.Equal(t, position.Spans{position.NewSpan(7, 17), position.NewSpan(25, 35)}, clipped.Windows(1))
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | a: 1",
+			"   2 | ...xxxxxxxxxx...xxxxxxxxxx...",
+			"     |         ^            ^^ more; bad",
+			"   3 | c: 3",
+			"   4 | d: 4",
+		), clipped.String())
+	})
+
+	t.Run("clone, slice, and hunks keep the clip", func(t *testing.T) {
+		t.Parallel()
+
+		clipped := newMarked(t).Clip(10)
+
+		assert.Equal(t, window, clipped.Clone().Windows(1))
+		assert.Equal(t, window, clipped.Slice(position.NewSpan(1, 2)).Windows(1))
+		assert.Equal(t, stringtest.JoinLF(
+			"   2 | ...xxxxxxxxxx...",
+			"     |         ^^ bad",
+		), clipped.Hunks(0).String())
+	})
+
+	t.Run("clip of the hunks matches the hunks of the clip", func(t *testing.T) {
+		t.Parallel()
+
+		view := newMarked(t)
+
+		assert.Equal(t, view.Clip(10).Hunks(1).String(), view.Hunks(1).Clip(10).String())
+	})
+
+	t.Run("second clip replaces the first", func(t *testing.T) {
+		t.Parallel()
+
+		clipped := newMarked(t).Clip(10)
+
+		assert.Equal(t, position.Spans{position.NewSpan(20, 40)}, clipped.Clip(20).Windows(1))
+		assert.Nil(t, clipped.Clip(0).Windows(1))
+		assert.Equal(t, window, clipped.Windows(1))
+	})
+
+	t.Run("nil view clips to an empty view", func(t *testing.T) {
+		t.Parallel()
+
+		var view *line.View
+
+		clipped := view.Clip(10)
+
+		require.NotNil(t, clipped)
+		assert.Equal(t, 0, clipped.Count())
+		assert.Empty(t, clipped.String())
 	})
 }

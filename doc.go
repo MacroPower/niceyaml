@@ -200,6 +200,12 @@
 // set to false. Every renderer then prints the position, the path, and
 // the message of an error bound there, and no line of the text.
 //
+// An excerpt shows part of a line longer than [DefaultExcerptWidth]
+// columns: a window of that many columns around each location on it,
+// with "..." in place of the rest. A document minified onto one line
+// thus adds a row of bounded length to a log. [WithExcerptWidth] sets
+// another width for a [Source], or 0 for whole lines.
+//
 // A report a program reads, such as JSON lines, CI annotations, or editor
 // diagnostics, lists the problems of an error as rows.
 // [ErrorTree.Problems] yields one node per problem, by the roles the

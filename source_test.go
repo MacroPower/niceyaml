@@ -5439,6 +5439,93 @@ func TestWithExcerpts(t *testing.T) {
 	}
 }
 
+func TestWithExcerptWidth(t *testing.T) {
+	t.Parallel()
+
+	// The value is 200 columns long, so the line runs past the default
+	// width.
+	value := strings.Repeat("0123456789", 20)
+	input := "port: " + value + "\n"
+
+	// Rows returns the excerpt of an error at the port that shows the
+	// first shown columns of the value, with an ellipsis after them when
+	// cut is set.
+	rows := func(shown int, cut bool) string {
+		row := "   1 | port: " + value[:shown]
+		if cut {
+			row += "..."
+		}
+
+		return stringtest.JoinLF(row, "     |       "+strings.Repeat("^", shown))
+	}
+
+	tcs := map[string]struct {
+		excerpt string
+		opts    []niceyaml.SourceOption
+		want    int
+	}{
+		"no option": {
+			want:    niceyaml.DefaultExcerptWidth,
+			excerpt: rows(niceyaml.DefaultExcerptWidth-6, true),
+		},
+		"width": {
+			opts:    []niceyaml.SourceOption{niceyaml.WithExcerptWidth(20)},
+			want:    20,
+			excerpt: rows(14, true),
+		},
+		"width of the line shows it whole": {
+			opts:    []niceyaml.SourceOption{niceyaml.WithExcerptWidth(206)},
+			want:    206,
+			excerpt: rows(200, false),
+		},
+		"zero shows whole lines": {
+			opts:    []niceyaml.SourceOption{niceyaml.WithExcerptWidth(0)},
+			want:    0,
+			excerpt: rows(200, false),
+		},
+		"negative counts as zero": {
+			opts:    []niceyaml.SourceOption{niceyaml.WithExcerptWidth(-1)},
+			want:    0,
+			excerpt: rows(200, false),
+		},
+		"the last option wins": {
+			opts:    []niceyaml.SourceOption{niceyaml.WithExcerptWidth(0), niceyaml.WithExcerptWidth(20)},
+			want:    20,
+			excerpt: rows(14, true),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(input, tc.opts...)
+			assert.Equal(t, tc.want, source.ExcerptWidth())
+
+			err := yamltest.Bind(t, source, niceyaml.NewError("bad port", niceyaml.AtPath(paths.Doc().Child("port"))))
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			excerpt, ok := bound.Excerpt(0)
+			require.True(t, ok)
+			assert.Equal(t, tc.excerpt, excerpt.String())
+
+			// The excerpt keeps every column, so a caller shows it whole.
+			assert.Equal(t, rows(200, false), excerpt.Clip(0).String())
+		})
+	}
+
+	t.Run("nil source", func(t *testing.T) {
+		t.Parallel()
+
+		var source *niceyaml.Source
+
+		assert.Equal(t, niceyaml.DefaultExcerptWidth, source.ExcerptWidth())
+	})
+}
+
 func TestWithAliasLimit(t *testing.T) {
 	t.Parallel()
 

@@ -848,8 +848,9 @@ type mergedLayers struct {
 // The document belongs to a [Source] of its own, which holds the merged
 // value as YAML text below the preamble of the lowest layer. The Source
 // takes its name, its file path, and its file system from the Source of
-// that layer, with the settings [WithAllowDuplicateKeys] and
-// [WithAliasLimit] gave it. It takes no reference documents, since the
+// that layer, with the settings [WithAllowDuplicateKeys],
+// [WithAliasLimit], and [WithExcerptWidth] gave it. It takes no reference
+// documents, since the
 // merged value holds no alias. It has excerpts off when [showsLayers]
 // reports false, whatever [WithExcerpts] gave the lowest layer. With no
 // nodes, the Source is empty and has no name.

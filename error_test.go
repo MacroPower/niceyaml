@@ -7318,6 +7318,140 @@ func renderings(err error) map[string]string {
 	}
 }
 
+func TestFormatError_ExcerptWidth(t *testing.T) {
+	t.Parallel()
+
+	// One line holds every value, as a minified document does, and the
+	// lines beside the short one run long.
+	const (
+		flow  = `{name: shop, tags: [aa, bb, cc, dd, ee, ff, gg, hh, ii, jj], port: 0}`
+		note  = "this note runs well past the width of the excerpt"
+		block = "head: " + note + "\nport: 0\ntail: " + note + "\n"
+	)
+
+	narrow := niceyaml.WithExcerptWidth(20)
+	port := paths.Doc().Child("port")
+
+	badPort := niceyaml.NewError("port must be at least 1", niceyaml.AtPath(port))
+	badName := niceyaml.NewError("name is taken", niceyaml.AtPath(paths.Doc().Child("name")))
+
+	tcs := map[string]struct {
+		err  func(t *testing.T) error
+		want []string
+	}{
+		"location at the end of a long line": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				source := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"), narrow)
+
+				return yamltest.Bind(t, source, badPort)
+			},
+			want: []string{
+				"flow.yaml:1:68: $.port: port must be at least 1",
+				"",
+				"   1 | ...h, ii, jj], port: 0}",
+				"     |                      ^",
+			},
+		},
+		"two locations far apart on one line": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				source := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"), narrow)
+
+				return yamltest.Bind(t, source, niceyaml.NewSummary("2 violations", badPort, badName))
+			},
+			want: []string{
+				"flow.yaml: 2 violations",
+				"|-- 1:8: $.name: name is taken",
+				"`-- 1:68: $.port: port must be at least 1",
+				"",
+				"   1 | {name: shop, tags: [...h, ii, jj], port: 0}",
+				"     |        ^^^^                              ^ name is taken; port must be at least 1",
+			},
+		},
+		"context lines keep their first columns": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				source := niceyaml.NewSourceFromString(block, niceyaml.WithName("block.yaml"), narrow)
+
+				return yamltest.Bind(t, source, badPort)
+			},
+			want: []string{
+				"block.yaml:2:7: $.port: port must be at least 1",
+				"",
+				"   1 | head: this note runs...",
+				"   2 | port: 0",
+				"     |       ^",
+				"   3 | tail: this note runs...",
+			},
+		},
+		"whole lines": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				whole := niceyaml.WithExcerptWidth(0)
+				source := niceyaml.NewSourceFromString(block, niceyaml.WithName("block.yaml"), whole)
+
+				return yamltest.Bind(t, source, badPort)
+			},
+			want: []string{
+				"block.yaml:2:7: $.port: port must be at least 1",
+				"",
+				"   1 | head: " + note,
+				"   2 | port: 0",
+				"     |       ^",
+				"   3 | tail: " + note,
+			},
+		},
+		"each source keeps its own width": {
+			err: func(t *testing.T) error {
+				t.Helper()
+
+				clipped := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"), narrow)
+				wide := niceyaml.NewSourceFromString(flow, niceyaml.WithName("wide.yaml"))
+
+				return errors.Join(yamltest.Bind(t, clipped, badPort), yamltest.Bind(t, wide, badPort))
+			},
+			want: []string{
+				"|-- flow.yaml:1:68: $.port: port must be at least 1",
+				"`-- wide.yaml:1:68: $.port: port must be at least 1",
+				"",
+				"flow.yaml",
+				"   1 | ...h, ii, jj], port: 0}",
+				"     |                      ^ port must be at least 1",
+				"",
+				"wide.yaml",
+				"   1 | " + flow,
+				"     | " + strings.Repeat(" ", 67) + "^ port must be at least 1",
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, stringtest.JoinLF(tc.want...), niceyaml.FormatError(tc.err(t), 1))
+		})
+	}
+
+	t.Run("the %+v verb prints the clipped excerpt", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"), narrow)
+
+		assert.Equal(t, stringtest.JoinLF(
+			"flow.yaml:1:68: $.port: port must be at least 1",
+			"",
+			"   1 | ...h, ii, jj], port: 0}",
+			"     |                      ^",
+		), fmt.Sprintf("%+v", yamltest.Bind(t, source, badPort)))
+	})
+}
+
 func TestFormatError_ExcerptsOff(t *testing.T) {
 	t.Parallel()
 

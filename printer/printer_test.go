@@ -974,7 +974,8 @@ func TestPrinter_PrintError_MarksLongWrappedValue(t *testing.T) {
 	t.Parallel()
 
 	// A long base64 value wraps into many rows, and each gets a caret row
-	// below it as wide as the part of the value it shows.
+	// below it as wide as the part of the value it shows. The source
+	// shows whole lines, so the excerpt keeps the value whole.
 	tcs := map[string]struct {
 		value string
 		width int
@@ -993,7 +994,7 @@ func TestPrinter_PrintError_MarksLongWrappedValue(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString("data: " + tc.value + "\n")
+			source := niceyaml.NewSourceFromString("data: "+tc.value+"\n", niceyaml.WithExcerptWidth(0))
 			err := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("data"))))
 
 			p := printer.New(
@@ -6061,7 +6062,9 @@ func TestPrinter_PrintError_AnnotationOnWrappedRow(t *testing.T) {
 		items = append(items, fmt.Sprintf("item%02d", i))
 	}
 
-	source := niceyaml.NewSourceFromString("items: [" + strings.Join(items, ", ") + "]\n")
+	// The line is longer than the default excerpt width, so the source
+	// shows whole lines to keep every wrapped row of it.
+	source := niceyaml.NewSourceFromString("items: ["+strings.Join(items, ", ")+"]\n", niceyaml.WithExcerptWidth(0))
 
 	rows := []string{
 		"   1  items: [item00, item01, item02,",
@@ -7851,6 +7854,396 @@ func TestCut_LayoutCells(t *testing.T) {
 				assert.Equal(t, want, ansi.Strip(got), "column %d", col)
 				assert.Equal(t, wantWidth, width, "column %d", col)
 			}
+		})
+	}
+}
+
+// clipLetters is a line long enough for a clip of ten columns to cut it
+// at both ends and between two marks.
+const clipLetters = "key: abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+// newClippedView returns a view of input, one line, clipped to cols
+// columns, with an error overlay on each of overlays and the annotations
+// given.
+func newClippedView(input string, cols int, overlays []position.Span, annotations ...line.Annotation) *line.View {
+	view := niceyaml.NewSourceFromString(input + "\n").View()
+
+	for _, span := range overlays {
+		view.AddLineOverlay(0, line.Overlay{Kind: kind.GenericError, Cols: span})
+	}
+
+	view.Annotate(0, annotations...)
+
+	return view.Clip(cols)
+}
+
+func TestPrinter_Clip(t *testing.T) {
+	t.Parallel()
+
+	couple := "\U0001F468\u200d\U0001F469"
+
+	tcs := map[string]struct {
+		input       string
+		want        []string
+		overlays    []position.Span
+		annotations []line.Annotation
+		cols        int
+		wrap        int
+	}{
+		"line that fits stays whole": {
+			input: "key: value",
+			cols:  10,
+			want:  []string{"key: value"},
+		},
+		"line with no mark keeps its first columns": {
+			input: clipLetters,
+			cols:  10,
+			want:  []string{"key: abcde..."},
+		},
+		"two marks far apart get a window each": {
+			input:    clipLetters,
+			cols:     10,
+			overlays: []position.Span{position.NewSpan(15, 16), position.NewSpan(45, 46)},
+			annotations: []line.Annotation{
+				{Content: "first", Placement: line.Below, Col: 15},
+				{Content: "second", Placement: line.Below, Col: 45},
+			},
+			want: []string{
+				"...fghijklmno...JKLMNOPQRS...",
+				"        ^            ^ first; second",
+			},
+		},
+		"long overlay keeps its carets inside the window": {
+			input:       clipLetters,
+			cols:        10,
+			overlays:    []position.Span{position.NewSpan(20, 57)},
+			annotations: []line.Annotation{{Content: "long", Placement: line.Below, Col: 20}},
+			want: []string{
+				"...klmnopqrst...",
+				"        ^^^^^ long",
+			},
+		},
+		"annotation above sits over its column": {
+			input:       clipLetters,
+			cols:        10,
+			annotations: []line.Annotation{{Content: "above", Placement: line.Above, Col: 40}},
+			want: []string{
+				"        above",
+				"...EFGHIJKLMN...",
+			},
+		},
+		"annotation without content gets its caret": {
+			input:       clipLetters,
+			cols:        10,
+			overlays:    []position.Span{position.NewSpan(57, 57)},
+			annotations: []line.Annotation{{Placement: line.Below, Col: 57}},
+			want: []string{
+				"...QRSTUVWXYZ",
+				"             ^",
+			},
+		},
+		"wide runes take two cells each": {
+			input:       "k: " + strings.Repeat("日本語", 8),
+			cols:        8,
+			overlays:    []position.Span{position.NewSpan(15, 16)},
+			annotations: []line.Annotation{{Content: "wide", Placement: line.Below, Col: 15}},
+			want: []string{
+				"...語日本語日本語日...",
+				"           ^^ wide",
+			},
+		},
+		"tab shows as its picture": {
+			input:       "k: a\tb\tc\td\te\tf\tg\th\ti\tj\tk\tl\tm",
+			cols:        8,
+			overlays:    []position.Span{position.NewSpan(15, 16)},
+			annotations: []line.Annotation{{Content: "tab", Placement: line.Below, Col: 15}},
+			want: []string{
+				"...e␉f␉g␉h␉...",
+				"       ^ tab",
+			},
+		},
+		"mark inside a grapheme cluster shows the cluster": {
+			input:       "k: " + couple + strings.Repeat("a", 12) + couple + strings.Repeat("b", 24),
+			cols:        8,
+			overlays:    []position.Span{position.NewSpan(20, 21)},
+			annotations: []line.Annotation{{Content: "couple", Placement: line.Below, Col: 20}},
+			want: []string{
+				"...aa" + couple + "bbb...",
+				"     ^^ couple",
+			},
+		},
+		"clipped row wraps to the width": {
+			input:    clipLetters,
+			cols:     10,
+			wrap:     16,
+			overlays: []position.Span{position.NewSpan(15, 16), position.NewSpan(45, 46)},
+			annotations: []line.Annotation{
+				{Content: "first", Placement: line.Below, Col: 15},
+				{Content: "second", Placement: line.Below, Col: 45},
+			},
+			want: []string{
+				"...fghijklmno...",
+				"        ^ first;",
+				"          second",
+				"JKLMNOPQRS...",
+				"     ^",
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := newClippedView(tc.input, tc.cols, tc.overlays, tc.annotations...)
+			p := testPrinter().With(printer.WithWrap(tc.wrap))
+
+			assert.Equal(t, stringtest.JoinLF(tc.want...), p.Print(view))
+
+			// The layout counts the rows Print writes.
+			assert.Equal(t, len(tc.want), p.Layout(view).Rows())
+		})
+	}
+}
+
+func TestPrinter_Clip_Styles(t *testing.T) {
+	t.Parallel()
+
+	bracket := func(open, end string) lipgloss.Style {
+		return lipgloss.NewStyle().Transform(func(s string) string { return open + s + end })
+	}
+
+	// The ellipsis renders in kind.UISeparator, and an overlay keeps its
+	// style on the columns the window shows.
+	p := printer.New(
+		printer.WithStyles(style.New(
+			lipgloss.NewStyle(),
+			style.Set(kind.UISeparator, bracket("<", ">")),
+			style.Set(kind.GenericError, bracket("[", "]")),
+		)),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithAnnotation(printer.NoAnnotation),
+	)
+
+	tcs := map[string]struct {
+		want        string
+		overlays    []position.Span
+		annotations []line.Annotation
+		flag        line.Flag
+	}{
+		"ellipsis at the end": {
+			want: "key: abcde<...>",
+		},
+		"ellipsis at both ends of a marked window": {
+			overlays: []position.Span{position.NewSpan(30, 32)},
+			want:     "<...>uvwxy[zA]BCD<...>",
+		},
+		"overlay cut at the end of its window": {
+			overlays: []position.Span{position.NewSpan(20, 57)},
+			want:     "<...>klmno[pqrst]<...>",
+		},
+		"overlay across two windows styles its part of each": {
+			overlays:    []position.Span{position.NewSpan(15, 47)},
+			annotations: []line.Annotation{{Placement: line.Below, Col: 45}},
+			want:        "<...>fghij[klmno]<...>[JKLMNOP]QRS<...>",
+		},
+		"ellipsis of a deleted line takes its diff style": {
+			flag: line.FlagDeleted,
+			want: "key: abcde...",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := newClippedView(clipLetters, 10, tc.overlays, tc.annotations...)
+			view.SetFlag(0, tc.flag)
+
+			assert.Equal(t, tc.want, p.Print(view))
+		})
+	}
+}
+
+func TestPrinter_Clip_AnnotationContext(t *testing.T) {
+	t.Parallel()
+
+	// An annotation func gets the row of a clipped line as its content,
+	// with every column counted in that row.
+	var got []printer.AnnotationContext
+
+	p := testPrinter().With(printer.WithAnnotation(func(ctx printer.AnnotationContext) []printer.AnnotationRow {
+		got = append(got, ctx)
+
+		col := ctx.Annotations.Col()
+
+		return []printer.AnnotationRow{{Col: col, Marker: "^ ", Text: "at " + strconv.Itoa(ctx.ColWidth(col))}}
+	}))
+
+	view := newClippedView(clipLetters, 10,
+		[]position.Span{position.NewSpan(15, 47), position.NewSpan(45, 46)},
+		line.Annotation{Content: "first", Placement: line.Below, Col: 45},
+		line.Annotation{Content: "second", Placement: line.Below, Col: 15},
+	)
+
+	assert.Equal(t, stringtest.JoinLF(
+		"...fghijklmno...JKLMNOPQRS...",
+		"        ^ at 8",
+	), p.Print(view))
+
+	require.Len(t, got, 1)
+
+	ctx := got[0]
+
+	assert.Equal(t, "...fghijklmno...JKLMNOPQRS...", ctx.Content)
+	assert.Equal(t, []int{0}, ctx.RowStarts)
+	assert.Equal(t, []int{29}, ctx.RowEnds)
+	assert.Equal(t, line.Overlays{
+		{Kind: kind.GenericError, Cols: position.NewSpan(8, 13)},
+		{Kind: kind.GenericError, Cols: position.NewSpan(16, 23)},
+		{Kind: kind.GenericError, Cols: position.NewSpan(21, 22)},
+	}, ctx.Overlays)
+	assert.Equal(t, line.Annotations{
+		{Content: "first", Placement: line.Below, Col: 21},
+		{Content: "second", Placement: line.Below, Col: 8},
+	}, ctx.Annotations)
+
+	// The view keeps the columns of its content.
+	assert.Equal(t, 45, view.Annotations(0)[0].Col)
+	assert.Equal(t, position.NewSpan(15, 47), view.Overlays(0)[0].Cols)
+}
+
+func TestPrinter_Layout_Clip(t *testing.T) {
+	t.Parallel()
+
+	// The row reads "...fghijklmno...JKLMNOPQRS...", and with a width of
+	// 16 it wraps after the second ellipsis.
+	newView := func() *line.View {
+		return newClippedView(clipLetters, 10,
+			[]position.Span{position.NewSpan(15, 16), position.NewSpan(45, 46)},
+			line.Annotation{Content: "first", Placement: line.Below, Col: 15},
+			line.Annotation{Content: "second", Placement: line.Below, Col: 45},
+		)
+	}
+
+	tcs := map[string]struct {
+		col      int
+		wrap     int
+		wantRow  int
+		wantCell int
+	}{
+		"column before the first window takes the first ellipsis": {col: 0, wantCell: 0},
+		"start of the first window":                               {col: 10, wantCell: 3},
+		"first mark":                                              {col: 15, wantCell: 8},
+		"column between the windows takes the ellipsis there":     {col: 25, wantCell: 13},
+		"second mark":                                             {col: 45, wantCell: 21},
+		"column after the last window takes the last ellipsis":    {col: 52, wantCell: 26},
+		"end of the line is the end of the row":                   {col: 57, wantCell: 29},
+		"column past the end keeps its distance":                  {col: 60, wantCell: 32},
+		"negative column counts as the start":                     {col: -1, wantCell: 0},
+		"wrapped first mark":                                      {col: 15, wrap: 16, wantRow: 0, wantCell: 8},
+		"wrapped column between the windows":                      {col: 25, wrap: 16, wantRow: 0, wantCell: 13},
+		"wrapped second mark":                                     {col: 45, wrap: 16, wantRow: 3, wantCell: 5},
+		"wrapped column after the last window":                    {col: 52, wrap: 16, wantRow: 3, wantCell: 10},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			l := testPrinter().With(printer.WithWrap(tc.wrap)).Layout(newView())
+			pos := position.New(0, tc.col)
+
+			assert.Equal(t, tc.wantRow, l.RowOf(pos), "row")
+			assert.Equal(t, tc.wantCell, l.CellOf(pos), "cell")
+		})
+	}
+
+	t.Run("width is that of the clipped rows", func(t *testing.T) {
+		t.Parallel()
+
+		view := newView()
+		l := testPrinter().Layout(view)
+
+		// The annotation row is the widest: "        ^            ^
+		// first; second".
+		assert.Equal(t, 36, l.Width())
+		assert.Equal(t, 36, l.LineWidth(0))
+		assert.Equal(t, 29, testPrinter().With(printer.WithAnnotation(printer.NoAnnotation)).Layout(view).Width())
+	})
+
+	t.Run("cell of a mark cuts its rune from the printed row", func(t *testing.T) {
+		t.Parallel()
+
+		view := newView()
+		p := printer.New(printer.WithContainerStyle(lipgloss.NewStyle()))
+		l := p.Layout(view)
+		row, _, _ := strings.Cut(p.Print(view), "\n")
+
+		for col, want := range map[int]string{15: "k", 45: "O", 25: ".", 0: "."} {
+			cell := l.GutterWidth() + l.CellOf(position.New(0, col))
+
+			assert.Equal(t, want, ansi.Strip(printer.Cut(row, cell, cell+1)), "column %d", col)
+		}
+	})
+}
+
+func TestPrinter_PrintError_ClipsLongLine(t *testing.T) {
+	t.Parallel()
+
+	items := make([]string, 0, 40)
+	for i := range 40 {
+		items = append(items, fmt.Sprintf("item%02d", i))
+	}
+
+	input := "items: [" + strings.Join(items, ", ") + "]\n"
+	bad := niceyaml.NewError("expected number", niceyaml.AtPath(paths.Current().Child("items").Index(20)))
+
+	p := printer.New(
+		printer.WithStyles(style.Styles{}),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+	)
+
+	tcs := map[string]struct {
+		opts []niceyaml.SourceOption
+		want []string
+	}{
+		"default width": {
+			want: []string{
+				"1:169: $.items[20]: expected number",
+				"",
+				"   1  ..." + strings.Join(items[10:30], ", ") + ", ...",
+				strings.Repeat(" ", 6+3+80) + "^^^^^^",
+			},
+		},
+		"width from the source": {
+			opts: []niceyaml.SourceOption{niceyaml.WithExcerptWidth(24)},
+			want: []string{
+				"1:169: $.items[20]: expected number",
+				"",
+				"   1  ...18, item19, item20, item...",
+				strings.Repeat(" ", 6+3+12) + "^^^^^^",
+			},
+		},
+		"whole lines": {
+			opts: []niceyaml.SourceOption{niceyaml.WithExcerptWidth(0)},
+			want: []string{
+				"1:169: $.items[20]: expected number",
+				"",
+				"   1  " + strings.TrimSuffix(input, "\n"),
+				strings.Repeat(" ", 6+168) + "^^^^^^",
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			err := yamltest.Bind(t, niceyaml.NewSourceFromString(input, tc.opts...), bad)
+
+			assert.Equal(t, stringtest.JoinLF(tc.want...), p.PrintError(err))
 		})
 	}
 }

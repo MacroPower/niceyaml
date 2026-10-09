@@ -1123,6 +1123,54 @@ func TestLayers_Document_Excerpts(t *testing.T) {
 	}
 }
 
+func TestLayers_Document_ExcerptWidth(t *testing.T) {
+	t.Parallel()
+
+	layer := func(t *testing.T, input, name string, opts ...niceyaml.SourceOption) *niceyaml.Node {
+		t.Helper()
+
+		return yamltest.FirstDocument(t, input, append(opts, niceyaml.WithName(name))...)
+	}
+
+	// The merged document takes the width of the lowest layer, as it
+	// takes the other settings of that layer.
+	tcs := map[string]struct {
+		base []niceyaml.SourceOption
+		prod []niceyaml.SourceOption
+		want int
+	}{
+		"no layer sets a width": {
+			want: niceyaml.DefaultExcerptWidth,
+		},
+		"the lowest layer sets a width": {
+			base: []niceyaml.SourceOption{niceyaml.WithExcerptWidth(40)},
+			want: 40,
+		},
+		"the lowest layer shows whole lines": {
+			base: []niceyaml.SourceOption{niceyaml.WithExcerptWidth(0)},
+			prod: []niceyaml.SourceOption{niceyaml.WithExcerptWidth(40)},
+			want: 0,
+		},
+		"a higher layer sets a width": {
+			prod: []niceyaml.SourceOption{niceyaml.WithExcerptWidth(40)},
+			want: niceyaml.DefaultExcerptWidth,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			layers := niceyaml.NewLayers(
+				layer(t, "db:\n  host: db.internal\n", "base.yaml", tc.base...),
+				layer(t, "db:\n  port: 5432\n", "prod.yaml", tc.prod...),
+			)
+
+			assert.Equal(t, tc.want, mergedDocument(t, layers).Source().ExcerptWidth())
+		})
+	}
+}
+
 func TestLayers_MergedLayer(t *testing.T) {
 	t.Parallel()
 

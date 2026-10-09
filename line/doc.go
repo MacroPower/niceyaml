@@ -139,8 +139,9 @@
 // To render the same content two different ways, take two views of it.
 // [View.Clone] copies the decoration of one, [View.Slice] picks the
 // lines of a few spans, decoration included, and [View.Hunks] picks the
-// decorated lines with context around each. An error excerpt shows those
-// hunks.
+// decorated lines with context around each. [View.Clip] cuts a long line
+// the same way, to a window of columns around each mark on it. An error
+// excerpt shows those hunks, clipped.
 //
 // The finder and diff packages read a [Sequence], which Lines and a view
 // both are. A view yields the lines it holds with the indices they have in
@@ -150,7 +151,8 @@
 // [View.String] renders a view as plain text: each line behind its number,
 // the annotations above it on rows of their own, carets under the columns
 // its overlays cover, and the annotations below it beside the carets, with
-// no escape sequences. It is the rendering
+// no escape sequences. A line the view clips renders its windows with
+// "..." in place of the columns between them. It is the rendering
 // [go.jacobcolvin.com/niceyaml.FormatError] prints for the excerpt of a
 // bound error, and it suits a log or a golden file. A printer renders the same
 // view with styles.
