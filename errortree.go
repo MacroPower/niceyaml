@@ -77,7 +77,7 @@ type ErrorTree struct {
 //
 // For an error bound to a source, the root keeps the "name:line:col:"
 // position [SourceError.Error] gives it, and each child, a binding of its
-// own from [SourceError.Errors] or [SourceError.Details], carries the
+// own from [SourceError.Members] or [SourceError.Details], carries the
 // "line:col:" position its location resolved to without the name, since
 // the root names the source already. A child with no
 // position likewise drops the document its message names, unless it is

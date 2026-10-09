@@ -537,7 +537,7 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 				_, ok = srcErr.Range()
 				assert.False(t, ok)
 
-				fields := srcErr.Errors()
+				fields := srcErr.Members()
 				require.Len(t, fields, rows)
 
 				for _, field := range fields {
@@ -582,7 +582,7 @@ func TestDocument_Decode_UnknownFields_BesideValues(t *testing.T) {
 
 	require.ErrorAs(t, err, &srcErr)
 
-	problems := srcErr.Errors()
+	problems := srcErr.Members()
 	require.Len(t, problems, 3)
 
 	var mismatch *yaml.TypeError

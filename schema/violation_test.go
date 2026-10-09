@@ -202,7 +202,7 @@ func TestViolation_Binding(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
-		require.Len(t, bound.Errors(), 2)
+		require.Len(t, bound.Members(), 2)
 
 		// The summary counts the violations and is none itself, so its own
 		// cause is no Violation, while a search of the whole binding
@@ -215,7 +215,7 @@ func TestViolation_Binding(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "type", first.Keyword)
 
-		for _, child := range bound.Errors() {
+		for _, child := range bound.Members() {
 			got, ok := errors.AsType[*schema.Violation](child.Cause())
 			require.True(t, ok)
 			assert.Equal(t, "type", got.Keyword)
@@ -483,7 +483,7 @@ func TestViolation_Value(t *testing.T) {
 		assert.False(t, ok)
 		assert.Nil(t, own)
 
-		nested := summary.Errors()
+		nested := summary.Members()
 		require.Len(t, nested, 2)
 
 		for _, n := range nested {
@@ -784,7 +784,7 @@ func TestViolation_Forms(t *testing.T) {
 		// The value is one problem, so the binding heads none, and the
 		// forms are its details. Each form carries no location and wraps
 		// no Violation, and the violation of its branch carries both.
-		assert.Empty(t, bound.Errors())
+		assert.Empty(t, bound.Members())
 
 		forms := bound.Details()
 		require.Len(t, forms, 2)
@@ -849,7 +849,7 @@ func TestViolation_Forms(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "anyOf", got.Keyword)
 
-		assert.Empty(t, bound.Errors())
+		assert.Empty(t, bound.Members())
 
 		forms := bound.Details()
 		require.Len(t, forms, 2)

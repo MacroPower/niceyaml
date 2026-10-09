@@ -675,7 +675,7 @@ func schemaLocations(t *testing.T, doc *niceyaml.Node, v *jsonschema.Validator) 
 
 	for bound := range niceyaml.AllBindings(err) {
 		// The summary of several violations is no violation.
-		if len(bound.Errors()) == 0 {
+		if len(bound.Members()) == 0 {
 			got = append(got, describeLocation(bound))
 		}
 	}

@@ -575,7 +575,7 @@ func TestLayers_DecodeInto(t *testing.T) {
 			require.ErrorAs(t, err, &bound, name)
 			assert.Same(t, nodes[0], bound.Node(), name)
 
-			for _, problem := range bound.Errors() {
+			for _, problem := range bound.Members() {
 				assert.Contains(t, nodes, problem.Node(), name)
 			}
 		}

@@ -3811,9 +3811,9 @@ func TestDocument_BindChain(t *testing.T) {
 				require.ErrorAs(t, wrapped, &bound)
 				assert.Same(t, source, bound.Source())
 				require.ErrorIs(t, wrapped, pathErr)
-				require.Len(t, bound.Errors(), 1)
+				require.Len(t, bound.Members(), 1)
 
-				rng, ok := bound.Errors()[0].Range()
+				rng, ok := bound.Members()[0].Range()
 				require.True(t, ok)
 				assert.Equal(t, position.NewRange(position.New(0, 6), position.New(0, 11)), rng)
 
@@ -4252,7 +4252,7 @@ func TestSource_Bind(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 		assert.Nil(t, bound.Document())
 
-		children := bound.Errors()
+		children := bound.Members()
 		require.Len(t, children, 2)
 		assert.Same(t, docs[0], children[0].Document())
 		assert.Same(t, docs[1], children[1].Document())
@@ -4270,7 +4270,7 @@ func TestSource_Bind(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		for _, child := range bound.Errors() {
+		for _, child := range bound.Members() {
 			rangeErr := child.Unresolved()
 			require.ErrorIs(t, rangeErr, niceyaml.ErrPathNeedsDocument)
 		}

@@ -3354,7 +3354,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
-		assert.Empty(t, bound.Errors())
+		assert.Empty(t, bound.Members())
 
 		reasons := make([]string, 0, 2)
 		for _, detail := range bound.Details() {
@@ -3417,7 +3417,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
-		assert.Empty(t, bound.Errors())
+		assert.Empty(t, bound.Members())
 	})
 
 	t.Run("matches each reason, which is a detail the error does not unwrap to", func(t *testing.T) {

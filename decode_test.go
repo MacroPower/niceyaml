@@ -2824,7 +2824,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 				assert.Equal(t, tc.path, path.String())
 			}
 
-			assert.Equal(t, tc.children, errorTexts(bound.Errors()))
+			assert.Equal(t, tc.children, errorTexts(bound.Members()))
 			assert.Equal(t, tc.details, errorTexts(bound.Details()))
 
 			// A Rebase under the path of the scope binds the same way,
@@ -2838,7 +2838,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 
 			require.ErrorAs(t, doc.Bind(niceyaml.Rebase(tc.err, hoursPath)), &rebased)
 			assert.Equal(t, tc.want, rebased.Error())
-			assert.Equal(t, tc.children, errorTexts(rebased.Errors()))
+			assert.Equal(t, tc.children, errorTexts(rebased.Members()))
 			assert.Equal(t, tc.details, errorTexts(rebased.Details()))
 		})
 	}
@@ -10860,7 +10860,7 @@ func TestErrDecode(t *testing.T) {
 				rng, ok := srcErr.Range()
 				require.True(t, ok, "the rejection carries no location")
 				assert.Equal(t, tc.line, rng.Start.Line)
-				assert.Empty(t, srcErr.Errors(), "the rejection binds its own causes as children")
+				assert.Empty(t, srcErr.Members(), "the rejection binds its own causes as children")
 			})
 		}
 	})
@@ -11827,7 +11827,7 @@ func TestMultiValidator(t *testing.T) {
 
 		_, ok := serr.Range()
 		assert.True(t, ok)
-		assert.Empty(t, serr.Errors())
+		assert.Empty(t, serr.Members())
 
 		// A validator that binds its own error names the source once.
 		err = doc.Validate(t.Context(), niceyaml.MultiValidator(passing, badC))

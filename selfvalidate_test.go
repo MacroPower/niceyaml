@@ -390,12 +390,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &bound)
-		require.Len(t, bound.Errors(), 2)
+		require.Len(t, bound.Members(), 2)
 
-		assert.Equal(t, "cafe.yaml:2:9: $.schedule.open: open is empty", bound.Errors()[0].Error())
-		assert.Equal(t, "cafe.yaml:3:10: $.schedule.close: close is empty", bound.Errors()[1].Error())
+		assert.Equal(t, "cafe.yaml:2:9: $.schedule.open: open is empty", bound.Members()[0].Error())
+		assert.Equal(t, "cafe.yaml:3:10: $.schedule.close: close is empty", bound.Members()[1].Error())
 
-		p, ok := bound.Errors()[1].Path()
+		p, ok := bound.Members()[1].Path()
 		require.True(t, ok)
 		assert.Equal(t, "$.schedule.close", p.String())
 
@@ -479,7 +479,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		var got []string
 
-		for _, child := range bound.Errors() {
+		for _, child := range bound.Members() {
 			got = append(got, child.Error())
 		}
 
@@ -1323,7 +1323,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			require.ErrorAs(t, err, &bound)
 
 			got := make([]string, 0, len(want))
-			for _, child := range bound.Errors() {
+			for _, child := range bound.Members() {
 				got = append(got, child.Error())
 			}
 
@@ -1603,7 +1603,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		var got []string
 
-		for _, child := range bound.Errors() {
+		for _, child := range bound.Members() {
 			got = append(got, child.Error())
 		}
 
@@ -1646,7 +1646,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				var got []string
 
-				for _, child := range bound.Errors() {
+				for _, child := range bound.Members() {
 					got = append(got, child.Error())
 				}
 
@@ -1888,7 +1888,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				require.ErrorAs(t, err, &bound)
 
 				got := []string{err.Error()}
-				if children := bound.Errors(); len(children) > 0 {
+				if children := bound.Members(); len(children) > 0 {
 					got = got[:0]
 
 					for _, child := range children {
@@ -1931,7 +1931,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				var got []string
 
-				for _, child := range bound.Errors() {
+				for _, child := range bound.Members() {
 					got = append(got, child.Error())
 				}
 
@@ -1975,7 +1975,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 					var got []string
 
-					for _, child := range bound.Errors() {
+					for _, child := range bound.Members() {
 						got = append(got, child.Error())
 					}
 
@@ -2146,7 +2146,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		var got []string
 
-		for _, child := range bound.Errors() {
+		for _, child := range bound.Members() {
 			got = append(got, child.Error())
 		}
 
@@ -2301,7 +2301,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				require.ErrorAs(t, err, &bound)
 
 				got := []string{err.Error()}
-				if children := bound.Errors(); len(children) > 0 {
+				if children := bound.Members(); len(children) > 0 {
 					got = got[:0]
 
 					for _, child := range children {
@@ -3007,7 +3007,7 @@ func TestNode_Decode_SelfValidatorContext(t *testing.T) {
 
 			_, ok := bound.Position()
 			assert.False(t, ok)
-			assert.Empty(t, bound.Errors())
+			assert.Empty(t, bound.Members())
 		})
 	}
 }
@@ -3744,7 +3744,7 @@ func TestSelfValidateValue_SharedPath(t *testing.T) {
 
 				var got []string
 
-				for _, child := range bound.Errors() {
+				for _, child := range bound.Members() {
 					require.ErrorIs(t, child.Unresolved(), niceyaml.ErrAmbiguousPath)
 
 					got = append(got, child.Error())

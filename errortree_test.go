@@ -1341,7 +1341,7 @@ func TestErrorTree_Bound(t *testing.T) {
 				t.Helper()
 
 				bound := bind(t, niceyaml.NewSummary("2 problems", badB(), badA()))
-				kids := bound.Errors()
+				kids := bound.Members()
 				require.Len(t, kids, 2)
 
 				// The tree sorts the children by position, so the second
@@ -1358,7 +1358,7 @@ func TestErrorTree_Bound(t *testing.T) {
 				t.Helper()
 
 				bound := bind(t, errors.Join(badA(), badB()))
-				kids := bound.Errors()
+				kids := bound.Members()
 				require.Len(t, kids, 2)
 
 				return tree{err: bound, want: []node{

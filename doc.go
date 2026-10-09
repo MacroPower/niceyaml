@@ -128,7 +128,7 @@
 // [SourceError.Excerpt] returns the surrounding lines with the location
 // highlighted.
 // The errors a summary heads and the details of an Error are part of the
-// Error, and binding binds each of them too. [SourceError.Errors] returns
+// Error, and binding binds each of them too. [SourceError.Members] returns
 // one SourceError per problem a summary heads and [SourceError.Details]
 // one per detail, each with its own children, if any, and its own
 // location when its error carries one. A validator's report of several

@@ -587,9 +587,9 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 //
 // Each violation the result heads places the same way on its own, so a
 // caller that drops some of them places the rest. The violations are
-// the bindings [niceyaml.SourceError.Errors] returns for the result:
+// the bindings [niceyaml.SourceError.Members] returns for the result:
 //
-//	for _, violation := range bound.Errors() {
+//	for _, violation := range bound.Members() {
 //		errs = append(errs, doc.Bind(niceyaml.Rebase(violation, base)))
 //	}
 //

@@ -1626,7 +1626,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 				assert.Equal(t, tc.wantDetails, gotDetails)
 
-				for _, problem := range bound.Errors() {
+				for _, problem := range bound.Members() {
 					assert.Same(t, doc.Source(), problem.Source())
 				}
 			})
@@ -1679,7 +1679,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		var result *niceyaml.SourceError
 
 		require.ErrorAs(t, err, &result)
-		require.Len(t, result.Errors(), 2)
+		require.Len(t, result.Members(), 2)
 
 		// A caller that keeps only some of the violations places the
 		// ones it keeps, and each stands in the document as it does
@@ -1689,7 +1689,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			`app.yaml:1:1: $.request.name: missing required property "name"`,
 		}
 
-		for i, violation := range result.Errors() {
+		for i, violation := range result.Members() {
 			placed := doc.Bind(niceyaml.Rebase(violation, base))
 			require.EqualError(t, placed, want[i])
 			assert.True(t, niceyaml.IsInvalid(placed))
@@ -1702,7 +1702,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			assert.NotSame(t, doc.Source(), violation.Source())
 		}
 
-		kept := errors.Join(result.Errors()[1], result.Errors()[0])
+		kept := errors.Join(result.Members()[1], result.Members()[0])
 		require.EqualError(t, yamltest.At(t, doc, base).Bind(kept), stringtest.JoinLF(want[1], want[0]))
 	})
 
@@ -3868,7 +3868,7 @@ func TestSchema_SourcePath_HiddenKeyName(t *testing.T) {
 
 	var got []string
 
-	for _, child := range bound.Errors() {
+	for _, child := range bound.Members() {
 		got = append(got, child.Error())
 	}
 
@@ -3905,7 +3905,7 @@ func TestSchema_SourcePath_SeveralViolations(t *testing.T) {
 
 	var got []string
 
-	for _, child := range bound.Errors() {
+	for _, child := range bound.Members() {
 		path, ok := child.Path()
 		require.True(t, ok, "violation carries no path")
 
@@ -3975,7 +3975,7 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 
 			require.ErrorAs(t, err, &ve)
 
-			violations := ve.Errors()
+			violations := ve.Members()
 			require.Len(t, violations, tc.members)
 
 			spelled := 0
