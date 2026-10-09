@@ -368,6 +368,66 @@ func TestPattern_Match(t *testing.T) {
 			path:    "../../x.yaml",
 			want:    true,
 		},
+		"star matches no parent element": {
+			pattern: "*/x.yaml",
+			path:    "../x.yaml",
+			want:    false,
+		},
+		"stars match no parent elements": {
+			pattern: "*/*/x.yaml",
+			path:    "../a/x.yaml",
+			want:    false,
+		},
+		"question marks match no parent element": {
+			pattern: "??/x.yaml",
+			path:    "../x.yaml",
+			want:    false,
+		},
+		"classes match no parent element": {
+			pattern: "[.][.]/x.yaml",
+			path:    "../x.yaml",
+			want:    false,
+		},
+		"star after a parent matches a name": {
+			pattern: "../*/x.yaml",
+			path:    "../a/x.yaml",
+			want:    true,
+		},
+		"star after a parent matches no second parent": {
+			pattern: "../*/x.yaml",
+			path:    "../../x.yaml",
+			want:    false,
+		},
+		"double star matches parent elements": {
+			pattern: "**/x.yaml",
+			path:    "../../x.yaml",
+			want:    true,
+		},
+		"double star after a parent matches a second parent": {
+			pattern: "../**/x.yaml",
+			path:    "../../a/x.yaml",
+			want:    true,
+		},
+		"rooted double star matches no parent element": {
+			pattern: "/**/x.yaml",
+			path:    "../x.yaml",
+			want:    false,
+		},
+		"parent pattern matches the parent itself": {
+			pattern: "..",
+			path:    "..",
+			want:    true,
+		},
+		"star matches no parent itself": {
+			pattern: "*",
+			path:    "..",
+			want:    false,
+		},
+		"more parents than the pattern names": {
+			pattern: "../x.yaml",
+			path:    "../../x.yaml",
+			want:    false,
+		},
 		"repeated separators are collapsed": {
 			pattern: "deep/*.yaml",
 			path:    "deep//config.yaml",

@@ -112,12 +112,104 @@ func parentsMatchable(glob string) bool {
 // Match cleans the path and normalizes its separators to forward slashes
 // before matching, so "./config.yaml" and "config.yaml" both match the
 // root-only pattern "*.yaml".
+//
+// A cleaned path that leads out of the directory it starts in opens with
+// ".." elements. Each of them matches a ".." element of the pattern, or
+// counts among the directories a "**" matches. A "*", a "?", and a
+// character class match the name of a file or a directory, so "*/x.yaml"
+// matches "a/x.yaml" and not "../x.yaml".
 func (p Pattern) Match(path string) bool {
 	if path == "" {
 		return false
 	}
 
-	return matchAnyGlob(p.globs, CleanPath(path))
+	clean := CleanPath(path)
+
+	parents, rest := cutParents(clean)
+	if parents == 0 {
+		return matchAnyGlob(p.globs, clean)
+	}
+
+	return slices.ContainsFunc(p.globs, func(glob string) bool {
+		return matchParents(glob, parents, rest)
+	})
+}
+
+// cutParents returns the number of ".." elements that open path, a
+// cleaned path, and the path after them.
+func cutParents(path string) (int, string) {
+	parents := 0
+
+	for {
+		switch {
+		case path == "..":
+			return parents + 1, ""
+
+		case strings.HasPrefix(path, "../"):
+			parents++
+			path = path[len("../"):]
+
+		default:
+			return parents, path
+		}
+	}
+}
+
+// matchParents reports whether glob matches the cleaned path that opens
+// with parents ".." elements and goes on with rest, as [Pattern.Match]
+// describes. Doublestar matches a ".." of the path with any element that
+// matches its two dots, so matchParents pairs those elements with glob
+// itself and hands doublestar the rest of both.
+func matchParents(glob string, parents int, rest string) bool {
+	elems := splitElements(glob)
+
+	// Each entry says whether the elements before its index can match the
+	// ".." elements read so far.
+	at := make([]bool, len(elems)+1)
+	at[0] = true
+
+	for range parents {
+		skipDoubleStars(elems, at)
+
+		next := make([]bool, len(elems)+1)
+
+		for i, elem := range elems {
+			switch {
+			case !at[i]:
+			case elem == "..":
+				next[i+1] = true
+			case elem == "**":
+				next[i] = true
+			}
+		}
+
+		at = next
+	}
+
+	skipDoubleStars(elems, at)
+
+	// A path of ".." elements alone leaves no element for glob to match.
+	if rest == "" {
+		return at[len(elems)]
+	}
+
+	for i := range elems {
+		if at[i] && matchGlob(strings.Join(elems[i:], "/"), rest) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// skipDoubleStars marks the index after each "**" of elems that at
+// marks, since a "**" can match no directory at all.
+func skipDoubleStars(elems []string, at []bool) {
+	for i, elem := range elems {
+		if at[i] && elem == "**" {
+			at[i+1] = true
+		}
+	}
 }
 
 // Relative reports whether any pattern the braces expand to is relative,
@@ -163,8 +255,8 @@ func expandPattern(pattern string, rewrite func(string) string) ([]string, error
 // drops a ".." and the element before it when that element is a plain
 // name, and it drops a ".." right after the root of a rooted pattern. It
 // keeps a leading ".." and a ".." after a glob element. A glob cannot
-// name the one directory the ".." leaves, and doublestar matches a ".."
-// only against a literal ".." in the path.
+// name the one directory the ".." leaves, and [Pattern.Match] pairs a
+// ".." of the path with a ".." or a "**" of the pattern alone.
 //
 // It first writes each escaped "/" and "." bare, as
 // [unescapeSeparatorsAndDots] does, so these rules see the separators

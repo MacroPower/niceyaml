@@ -194,6 +194,24 @@ func TestFilePath_BaseDir(t *testing.T) {
 			filePath: filepath.Join(base, "configs", "app.yaml"),
 			want:     false,
 		},
+		"star pattern one directory below the base": {
+			pattern:  "*/app.yaml",
+			base:     base,
+			filePath: filepath.Join(base, "configs", "app.yaml"),
+			want:     true,
+		},
+		"star pattern above the base": {
+			pattern:  "*/app.yaml",
+			base:     base,
+			filePath: filepath.Join(root, "app.yaml"),
+			want:     false,
+		},
+		"star pattern beside the base": {
+			pattern:  "*/*/app.yaml",
+			base:     base,
+			filePath: filepath.Join(root, "other", "app.yaml"),
+			want:     false,
+		},
 		"double star outside the base": {
 			pattern:  "**/configs/*.yaml",
 			base:     base,

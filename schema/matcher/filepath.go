@@ -98,8 +98,10 @@ type filePathMatcher struct {
 // it in any directory. It also matches as the path that leads to it from
 // the base directory. Under the base "/repo", "configs/*.yaml" matches
 // "/repo/configs/app.yaml" however the caller spelled the file, and
-// "../shared/*.yaml" matches "/shared/app.yaml". Match compares the two
-// paths as text and follows no symbolic link.
+// "../shared/*.yaml" matches "/shared/app.yaml". A "*" matches a name and
+// never that "..", so "*/app.yaml" matches "/repo/configs/app.yaml" and
+// no file above "/repo". Match compares the two paths as text and
+// follows no symbolic link.
 //
 // The base directory is the working directory at the time FilePath
 // runs, and a later change of directory does not move it.
