@@ -3192,6 +3192,17 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // [WithAliasLimit] on the [Source] turns both counts off for every decode
 // of its documents.
 //
+// The decoder reads every token of the file each time it writes a value
+// out as text, whether or not the value holds an alias. The time of a
+// decode therefore grows with the number of such values times the length
+// of the file, where a decode that writes no text grows with the length
+// alone. A list of 2,000 entries that each hold one value with an
+// UnmarshalText method takes about a second to decode, and the same list
+// of strings takes a few milliseconds. No deadline of ctx stops that
+// decode. A [time.Time] or a [time.Duration] costs what a string does, and
+// so does a type whose UnmarshalYAML method takes the node or a decode
+// function.
+//
 // An alias inside the node resolves against the anchors of the whole
 // document, to the anchor of its name defined last before the alias,
 // inside the node or outside it, as a path through the alias resolves.
