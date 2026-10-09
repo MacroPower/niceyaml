@@ -16,12 +16,13 @@ import (
 
 // match is one node a path resolved to. The entry field holds the mapping
 // entry that holds the node when the last selector picked a mapping key.
-// The seq field holds the sequence that holds the node when a `..*`
-// selector found it as an element. The segs field holds the selectors
-// that name the node alone. Those are the ones applied so far, with a
-// `[*]` replaced by the index it matched, a `.*` by the name of the entry
-// it matched, and a `..name` or `..*` by the selectors down to the node it
-// found.
+// The seq field holds the sequence that holds the node when the last
+// selector picked an element, and the index field holds the index of the
+// node there. A `~` selector that selects the node the path before it
+// does keeps all three. The segs field holds the selectors that name the
+// node alone. Those are the ones applied so far, with a `[*]` replaced by
+// the index it matched, a `.*` by the name of the entry it matched, and a
+// `..name` or `..*` by the selectors down to the node it found.
 //
 // The order field holds one place for each step of the walk that reached
 // the node. A step into a mapping adds the index of the entry, a step into
@@ -36,6 +37,7 @@ type match struct {
 	seq   *ast.SequenceNode
 	segs  []segment
 	order []int
+	index int
 }
 
 // with returns the match at node that extends m, with seg appended to its
@@ -47,6 +49,21 @@ type match struct {
 // than writing past their end.
 func (m match) with(node ast.Node, entry *ast.MappingValueNode, seg segment, ord ...int) match {
 	return match{node: node, entry: entry, segs: append(m.segs, seg), order: append(m.order, ord...)}
+}
+
+// element returns the match at element i of seq that extends m, as
+// [match.with] extends it, with the `[n]` selector that names the
+// element.
+func (m match) element(seq *ast.SequenceNode, i int) match {
+	next := m.with(seq.Values[i], nil, segment{kind: segmentIndex, index: i}, i)
+	next.seq, next.index = seq, i
+
+	return next
+}
+
+// parent returns what holds the node of m, for [astnode.PathToken].
+func (m match) parent() astnode.Parent {
+	return astnode.Parent{Entry: m.entry, Sequence: m.seq, Index: m.index}
 }
 
 // key returns the match for the `~` selector applied to m. That is the key
@@ -63,7 +80,10 @@ func (m match) key() match {
 	seg := segment{kind: segmentKey}
 
 	if m.entry == nil {
-		return m.with(m.node, nil, seg)
+		next := m.with(m.node, nil, seg)
+		next.seq, next.index = m.seq, m.index
+
+		return next
 	}
 
 	if astnode.Content(m.entry.Key) == nil {
@@ -1021,7 +1041,7 @@ func uniqueMatches(matches []match) []match {
 	for _, m := range matches {
 		id := matchID{entry: m.entry}
 		if m.seq != nil {
-			id.seq, id.index = m.seq, m.segs[len(m.segs)-1].index
+			id.seq, id.index = m.seq, m.index
 		}
 
 		if seen[id] {
@@ -1087,7 +1107,7 @@ func (r *resolver) apply(seg segment, m match, reads *lookupReads) ([]match, err
 			return nil, nil
 		}
 
-		return []match{m.with(seq.Values[seg.index], nil, seg, seg.index)}, nil
+		return []match{m.element(seq, seg.index)}, nil
 
 	case segmentIndexAll:
 		seq, ok := content.(*ast.SequenceNode)
@@ -1100,8 +1120,8 @@ func (r *resolver) apply(seg segment, m match, reads *lookupReads) ([]match, err
 		m.segs, m.order = slices.Clip(m.segs), slices.Clip(m.order)
 
 		matches := make([]match, 0, len(seq.Values))
-		for i, v := range seq.Values {
-			matches = append(matches, m.with(v, nil, segment{kind: segmentIndex, index: i}, i))
+		for i := range seq.Values {
+			matches = append(matches, m.element(seq, i))
 		}
 
 		return matches, nil
@@ -1695,7 +1715,7 @@ func (w *recursiveWalk) descend(node ast.Node, sources bool) error {
 
 			if w.all && !sources {
 				segs, order := w.hold()
-				w.found = append(w.found, match{node: v, seq: n, segs: segs, order: order})
+				w.found = append(w.found, match{node: v, seq: n, index: i, segs: segs, order: order})
 			}
 
 			err := w.descend(v, false)

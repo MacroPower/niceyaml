@@ -400,7 +400,7 @@ func TestDataLocator_AtKey(t *testing.T) {
 		"element has no key": {
 			input: respelledDoc,
 			names: []string{"items", "0"},
-			want:  "f.yaml:5:5: $.items[0]~: x",
+			want:  "f.yaml:5:3: $.items[0]~: x",
 		},
 		"no names": {
 			input: respelledDoc,
@@ -463,7 +463,7 @@ func TestDataLocator_At_Options(t *testing.T) {
 		},
 		"a later path replaces it": {
 			opts: []niceyaml.ErrorOption{loc.At("user", "0x10"), niceyaml.AtPath(paths.Doc().Child("user"))},
-			want: "f.yaml:2:3: $.user: x",
+			want: "f.yaml:1:1: $.user: x",
 		},
 		"keeps a range set before it where the path selects the value": {
 			opts: []niceyaml.ErrorOption{marked, loc.At("user", "0x10")},
@@ -573,7 +573,7 @@ func TestDataLocator_Pointer(t *testing.T) {
 		},
 		"escaped slash and tilde": {
 			pointer: "/a~1b~0c",
-			want:    "f.yaml:2:3: $.'a/b~c': x",
+			want:    "f.yaml:1:1: $.'a/b~c': x",
 		},
 		"empty name": {
 			pointer: "/a~1b~0c/",
@@ -688,8 +688,9 @@ func schemaLocations(t *testing.T, doc *niceyaml.Node, v *jsonschema.Validator) 
 // locatorLocations returns where a [niceyaml.DataLocator] of doc binds an
 // error for each failure v finds in the data of doc. The locator takes
 // the instance location of the failure as names. A failure about a
-// missing member takes the name of that member too, and one about a key
-// goes through [niceyaml.DataLocator.AtKey].
+// missing member takes the name of that member too. One about a key,
+// which additionalProperties and propertyNames report, goes through
+// [niceyaml.DataLocator.AtKey].
 func locatorLocations(t *testing.T, doc *niceyaml.Node, v *jsonschema.Validator) []string {
 	t.Helper()
 
@@ -728,7 +729,8 @@ func locatorLocations(t *testing.T, doc *niceyaml.Node, v *jsonschema.Validator)
 
 			opt = loc.At(append(names, missing)...)
 
-		case leaf.TargetsKey():
+		case leaf.Keyword == jsonschema.KeywordAdditionalProperties,
+			leaf.Keyword == jsonschema.KeywordPropertyNames:
 			opt = loc.AtKey(names...)
 
 		default:

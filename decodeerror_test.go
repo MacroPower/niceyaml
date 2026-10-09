@@ -345,32 +345,32 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 		},
 		"block mapping for an integer": {
 			input: "top:\n  a: 1\n  b: 2\n",
-			want:  "2:3: $.top: expected integer, got mapping",
+			want:  "1:1: $.top: expected integer, got mapping",
 			path:  "$.top",
 		},
 		"block mapping for a string in a map": {
 			input: "labels:\n  a:\n    b: 1\n",
-			want:  "3:5: $.labels.a: expected string, got mapping",
+			want:  "2:3: $.labels.a: expected string, got mapping",
 			path:  "$.labels.a",
 		},
 		"block sequence for an integer": {
 			input: "top:\n  - 1\n  - 2\n",
-			want:  "2:5: $.top: expected integer, got sequence",
+			want:  "1:1: $.top: expected integer, got sequence",
 			path:  "$.top",
 		},
 		"flow sequence for a string": {
 			input: "name: [a, b]\n",
-			want:  "1:8: $.name: expected string, got sequence",
+			want:  "1:1: $.name: expected string, got sequence",
 			path:  "$.name",
 		},
 		"flow mapping for an integer": {
 			input: "top: {a: 1}\n",
-			want:  "1:7: $.top: expected integer, got mapping",
+			want:  "1:1: $.top: expected integer, got mapping",
 			path:  "$.top",
 		},
 		"empty flow sequence for an integer": {
 			input: "top: []\n",
-			want:  "1:6: $.top: expected integer, got sequence",
+			want:  "1:1: $.top: expected integer, got sequence",
 			path:  "$.top",
 		},
 		"string for a sequence": {
@@ -385,12 +385,12 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 		},
 		"block sequence for a mapping": {
 			input: "one:\n  - a\n",
-			want:  "2:5: $.one: expected mapping, got sequence",
+			want:  "1:1: $.one: expected mapping, got sequence",
 			path:  "$.one",
 		},
 		"sequence element for a mapping": {
 			input: "servers:\n  - - a\n",
-			want:  "2:7: $.servers[0]: expected mapping, got sequence",
+			want:  "2:3: $.servers[0]: expected mapping, got sequence",
 			path:  "$.servers[0]",
 		},
 		"integer for a sequence": {
@@ -445,7 +445,7 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 		},
 		"key a path quotes": {
 			input: "labels:\n  \"a.b\": [1]\n",
-			want:  "2:11: $.labels.'a.b': expected string, got sequence",
+			want:  "2:3: $.labels.'a.b': expected string, got sequence",
 			path:  "$.labels.'a.b'",
 		},
 		"overflow of a signed integer": {
@@ -480,17 +480,17 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 		},
 		"mapping for a float": {
 			input: "ratio: {a: 1}\n",
-			want:  "1:9: $.ratio: expected float, got mapping",
+			want:  "1:1: $.ratio: expected float, got mapping",
 			path:  "$.ratio",
 		},
 		"sequence for a timestamp": {
 			input: "when: [1]\n",
-			want:  "1:8: $.when: expected timestamp, got sequence",
+			want:  "1:1: $.when: expected timestamp, got sequence",
 			path:  "$.when",
 		},
 		"sequence for a duration": {
 			input: "wait: [1]\n",
-			want:  "1:8: $.wait: expected duration, got sequence",
+			want:  "1:1: $.wait: expected duration, got sequence",
 			path:  "$.wait",
 		},
 		"tagged null for an integer": {
@@ -511,7 +511,7 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 		"ordered mapping for an integer": {
 			input: "top: {a: 1}\n",
 			opts:  []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)},
-			want:  "1:7: $.top: expected integer, got mapping",
+			want:  "1:1: $.top: expected integer, got mapping",
 			path:  "$.top",
 		},
 		"unknown field": {
@@ -642,7 +642,7 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 				V *chan int `yaml:"v"`
 			}](),
 			input: "v: {a: 1}\n",
-			want:  "1:5: $.v: expected no value, got mapping",
+			want:  "1:1: $.v: expected no value, got mapping",
 		},
 		"function": {
 			decode: decodeInto[struct {
@@ -693,7 +693,7 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 				V    aliased `yaml:"v"`
 			}](),
 			input: merge,
-			want:  "2:3: $.defs: expected mapping, got value of another type",
+			want:  "1:1: $.defs: expected mapping, got value of another type",
 		},
 		"anchor read into another struct": {
 			decode: decodeInto[struct {
@@ -701,7 +701,7 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 				V    aliased `yaml:"v"`
 			}](),
 			input: merge,
-			want:  "2:3: $.defs: expected mapping, got mapping of another type",
+			want:  "1:1: $.defs: expected mapping, got mapping of another type",
 		},
 		"anchor read into a map": {
 			decode: decodeInto[struct {
@@ -709,14 +709,14 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 				V    aliased        `yaml:"v"`
 			}](),
 			input: merge,
-			want:  "2:3: $.defs: expected mapping, got mapping of another type",
+			want:  "1:1: $.defs: expected mapping, got mapping of another type",
 		},
 		"anchor read into no field": {
 			decode: decodeInto[struct {
 				V aliased `yaml:"v"`
 			}](),
 			input: merge,
-			want:  "2:3: $.defs: expected mapping, got mapping of another type",
+			want:  "1:1: $.defs: expected mapping, got mapping of another type",
 		},
 	}
 
@@ -1130,7 +1130,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 					return err
 				},
-				want: `2:3: $.main: server: unknown tier "mid"`,
+				want: `1:1: $.main: server: unknown tier "mid"`,
 				path: "$.main",
 			},
 			"value whose fields mirror nothing": {
@@ -1143,7 +1143,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 					return err
 				},
-				want: `3:3: $.value: unmarshaler rejected the value`,
+				want: `2:1: $.value: unmarshaler rejected the value`,
 				path: "$.value",
 			},
 			"json unmarshaler under its option": {
@@ -1156,7 +1156,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 					return err
 				},
-				want: `3:3: $.value: unmarshaler rejected the value`,
+				want: `2:1: $.value: unmarshaler rejected the value`,
 				path: "$.value",
 			},
 			"type an option decodes": {
@@ -1277,7 +1277,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 					return err
 				},
-				want: "3:6: $.addrs[1]: expected string, got sequence",
+				want: "3:3: $.addrs[1]: expected string, got sequence",
 				path: "$.addrs[1]",
 			},
 			"mapping field": {
@@ -1290,7 +1290,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 					return err
 				},
-				want: "2:8: $.addr: expected string, got mapping",
+				want: "2:1: $.addr: expected string, got mapping",
 				path: "$.addr",
 			},
 			"pointer field": {
@@ -1302,7 +1302,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 					return err
 				},
-				want: "2:3: $.tier: expected string, got mapping",
+				want: "1:1: $.tier: expected string, got mapping",
 				path: "$.tier",
 			},
 			"map value": {
@@ -1312,7 +1312,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 					return err
 				},
-				want: "2:5: $.b: expected string, got sequence",
+				want: "2:1: $.b: expected string, got sequence",
 				path: "$.b",
 			},
 			// The path of a value an alias holds points at the alias.
@@ -1339,7 +1339,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 					return err
 				},
-				want: "2:3: $.holder: expected string, got mapping",
+				want: "1:1: $.holder: expected string, got mapping",
 				path: "$.holder",
 			},
 			// The decoder calls the UnmarshalJSON method of the type only
@@ -1353,7 +1353,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 					return err
 				},
-				want: "1:10: $.either: expected string, got mapping",
+				want: "1:1: $.either: expected string, got mapping",
 				path: "$.either",
 			},
 			"sequence the decode reads": {
@@ -1363,7 +1363,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 					return err
 				},
-				want: "1:2: $: expected string, got sequence",
+				want: "1:1: $: expected string, got sequence",
 				path: "$",
 			},
 			"empty mapping the decode reads": {
@@ -1383,7 +1383,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 					return err
 				},
-				want: "2:8: $.tier: expected string, got mapping",
+				want: "2:1: $.tier: expected string, got mapping",
 				path: "$.tier",
 			},
 		}
@@ -1820,14 +1820,14 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				input:  items,
 				decode: reported(niceyaml.Invalid(errUnmarshal, niceyaml.AtPath(paths.Current()))),
 				is:     errUnmarshal,
-				want:   "3:5: $.items[0]: unmarshaler rejected the value",
+				want:   "3:3: $.items[0]: unmarshaler rejected the value",
 				path:   "$.items[0]",
 			},
 			"error with no location": {
 				input:  items,
 				decode: reported(niceyaml.Invalid(errUnmarshal)),
 				is:     errUnmarshal,
-				want:   "3:5: $.items[0]: unmarshaler rejected the value",
+				want:   "3:3: $.items[0]: unmarshaler rejected the value",
 				path:   "$.items[0]",
 			},
 			"rebased error with no location": {
@@ -1915,8 +1915,8 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			"join": {
 				report: errors.Join(errors.New("from is odd"), errors.New("to is odd")),
 				want: stringtest.JoinLF(
-					"3:5: $.main.item: from is odd",
-					"3:5: $.main.item: to is odd",
+					"2:3: $.main.item: from is odd",
+					"2:3: $.main.item: to is odd",
 				),
 			},
 		}
@@ -1949,7 +1949,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 		_, err := dd.Decode[struct {
 			Spans []reporting `yaml:"spans"`
 		}](context.WithValue(t.Context(), reportKey{}, error(report)))
-		require.EqualError(t, err, "2:5: $.spans[0]: span is odd")
+		require.EqualError(t, err, "2:3: $.spans[0]: span is odd")
 
 		var srcErr *niceyaml.SourceError
 

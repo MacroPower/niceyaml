@@ -2089,6 +2089,64 @@ func TestDocument_View(t *testing.T) {
 
 		assert.Contains(t, view.String(), "   7 | b: 2\n     |    ^")
 	})
+
+	t.Run("an error at the root of a scoped block mapping lies above its view", func(t *testing.T) {
+		t.Parallel()
+
+		source := niceyaml.NewSourceFromString(input)
+
+		docs, err := source.Documents()
+		require.NoError(t, err)
+		require.Len(t, docs, 2)
+
+		hours := yamltest.At(t, docs[1], paths.Current().Child("spec", "hours"))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, hours.Bind(errors.New("closed")), &bound)
+		require.EqualError(t, bound, "4:3: $.spec.hours: closed")
+
+		// The error points at the key, on the line above the lines the
+		// mapping covers.
+		pos, ok := bound.Position()
+		require.True(t, ok)
+		assert.Equal(t, position.New(3, 2), pos)
+		assert.Equal(t, position.NewSpan(4, 6), hours.Span())
+
+		view := hours.View()
+		require.False(t, bound.Annotate(view))
+		assert.Equal(t, hours.View().String(), view.String())
+
+		// A view from the line of the error holds the mark.
+		view = source.View().Slice(position.NewSpan(pos.Line, hours.Span().End))
+		require.True(t, bound.Annotate(view))
+		assert.Equal(t, stringtest.JoinLF(
+			"   4 |   hours:",
+			"     |   ^^^^^ closed",
+			`   5 |     open: "09:00"`,
+			`   6 |     close: "17:00"`,
+		), view.String())
+	})
+
+	t.Run("an error at the root of a scoped element lies in its view", func(t *testing.T) {
+		t.Parallel()
+
+		doc := yamltest.FirstDocument(t, "items:\n  - name: a\n    port: 1\n")
+		item := yamltest.At(t, doc, paths.Current().Child("items").Index(0))
+
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, item.Bind(errors.New("bad item")), &bound)
+		require.EqualError(t, bound, "2:3: $.items[0]: bad item")
+
+		view := item.View()
+		require.True(t, bound.Annotate(view))
+		assert.Equal(t, stringtest.JoinLF(
+			"   2 |   - name: a",
+			"     |   ^ bad item",
+			"   3 |     port: 1",
+		), view.String())
+	})
 }
 
 func TestDocument_View_Lines(t *testing.T) {
@@ -2529,7 +2587,7 @@ func TestNode_ErrorConstructors(t *testing.T) {
 		"NewError binds at the scope": {
 			got:     hours.NewError("bad hours"),
 			bound:   hours.Bind(niceyaml.NewError("bad hours")),
-			want:    "cfg.yaml:4:7: $.shops[0].hours: bad hours",
+			want:    "cfg.yaml:3:5: $.shops[0].hours: bad hours",
 			invalid: true,
 		},
 		"NewError resolves a path from the scope": {
@@ -2553,7 +2611,7 @@ func TestNode_ErrorConstructors(t *testing.T) {
 		"Invalid with no options binds at the scope": {
 			got:     hours.Invalid(errStat),
 			bound:   hours.Bind(niceyaml.Invalid(errStat)),
-			want:    "cfg.yaml:4:7: $.shops[0].hours: stat license: permission denied",
+			want:    "cfg.yaml:3:5: $.shops[0].hours: stat license: permission denied",
 			invalid: true,
 		},
 		"Place declares no fault": {
@@ -2630,7 +2688,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 		},
 		"the root path names the scope": {
 			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Current())),
-			want: "cfg.yaml:4:7: $.shops[0].hours: bad",
+			want: "cfg.yaml:3:5: $.shops[0].hours: bad",
 			path: "$.shops[0].hours",
 		},
 		"a key path joins the scope": {
@@ -2663,12 +2721,12 @@ func TestNode_Bind_Scope(t *testing.T) {
 		},
 		"an error with no location binds at the scope": {
 			err:  errors.New("bad"),
-			want: "cfg.yaml:4:7: $.shops[0].hours: bad",
+			want: "cfg.yaml:3:5: $.shops[0].hours: bad",
 			path: "$.shops[0].hours",
 		},
 		"a wrapped error with no location binds at the scope": {
 			err:  fmt.Errorf("check: %w", errors.New("bad")),
-			want: "cfg.yaml:4:7: $.shops[0].hours: check: bad",
+			want: "cfg.yaml:3:5: $.shops[0].hours: check: bad",
 			path: "$.shops[0].hours",
 		},
 		"the error of a context that ended gains no location": {
@@ -2731,25 +2789,25 @@ func TestNode_Bind_Scope(t *testing.T) {
 				niceyaml.NewError("late", niceyaml.AtPath(closePath)),
 			),
 			want: stringtest.JoinLF(
-				"cfg.yaml:4:7: $.shops[0].hours: plain",
+				"cfg.yaml:3:5: $.shops[0].hours: plain",
 				"cfg.yaml:4:13: $.shops[0].hours.open: early",
 				"cfg.yaml:5:14: $.shops[0].hours.close: late",
 			),
 			children: []string{
 				"cfg.yaml:4:13: $.shops[0].hours.open: early",
-				"cfg.yaml:4:7: $.shops[0].hours: plain",
+				"cfg.yaml:3:5: $.shops[0].hours: plain",
 				"cfg.yaml:5:14: $.shops[0].hours.close: late",
 			},
 		},
 		"each branch of a join with no location binds at the scope": {
 			err: errors.Join(errors.New("one"), errors.New("two")),
 			want: stringtest.JoinLF(
-				"cfg.yaml:4:7: $.shops[0].hours: one",
-				"cfg.yaml:4:7: $.shops[0].hours: two",
+				"cfg.yaml:3:5: $.shops[0].hours: one",
+				"cfg.yaml:3:5: $.shops[0].hours: two",
 			),
 			children: []string{
-				"cfg.yaml:4:7: $.shops[0].hours: one",
-				"cfg.yaml:4:7: $.shops[0].hours: two",
+				"cfg.yaml:3:5: $.shops[0].hours: one",
+				"cfg.yaml:3:5: $.shops[0].hours: two",
 			},
 		},
 		// A summary is a heading, so it takes no location, and each error
@@ -2761,12 +2819,12 @@ func TestNode_Bind_Scope(t *testing.T) {
 			),
 			want: stringtest.JoinLF(
 				"cfg.yaml: 2 problems",
-				"cfg.yaml:4:7: $.shops[0].hours: one",
-				"cfg.yaml:4:7: $.shops[0].hours: two",
+				"cfg.yaml:3:5: $.shops[0].hours: one",
+				"cfg.yaml:3:5: $.shops[0].hours: two",
 			),
 			children: []string{
-				"cfg.yaml:4:7: $.shops[0].hours: one",
-				"cfg.yaml:4:7: $.shops[0].hours: two",
+				"cfg.yaml:3:5: $.shops[0].hours: one",
+				"cfg.yaml:3:5: $.shops[0].hours: two",
 			},
 		},
 		"each error a summary heads joins the scope": {
@@ -2776,12 +2834,12 @@ func TestNode_Bind_Scope(t *testing.T) {
 			),
 			want: stringtest.JoinLF(
 				"cfg.yaml: 2 problems",
-				"cfg.yaml:4:7: $.shops[0].hours: plain",
+				"cfg.yaml:3:5: $.shops[0].hours: plain",
 				"cfg.yaml:4:13: $.shops[0].hours.open: early",
 			),
 			children: []string{
 				"cfg.yaml:4:13: $.shops[0].hours.open: early",
-				"cfg.yaml:4:7: $.shops[0].hours: plain",
+				"cfg.yaml:3:5: $.shops[0].hours: plain",
 			},
 		},
 		// A problem with no location binds at the scope whatever its
@@ -2791,7 +2849,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 				niceyaml.NewError("opens here", niceyaml.AtPath(openPath)),
 				niceyaml.NewError("closes here", niceyaml.AtPath(closePath)),
 			)),
-			want: "cfg.yaml:4:7: $.shops[0].hours: hours conflict",
+			want: "cfg.yaml:3:5: $.shops[0].hours: hours conflict",
 			path: "$.shops[0].hours",
 			details: []string{
 				"cfg.yaml:4:13: $.shops[0].hours.open: opens here",
@@ -2810,7 +2868,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 		},
 		"a detail with no location under a problem with none stays as it is": {
 			err:     niceyaml.NewError("bad", niceyaml.WithDetails(errors.New("reason"))),
-			want:    "cfg.yaml:4:7: $.shops[0].hours: bad",
+			want:    "cfg.yaml:3:5: $.shops[0].hours: bad",
 			path:    "$.shops[0].hours",
 			details: []string{"cfg.yaml: reason"},
 		},
@@ -2942,7 +3000,7 @@ func TestNode_Bind_Scope(t *testing.T) {
 		t.Parallel()
 
 		plain := errors.New("bad")
-		want := "cfg.yaml:4:7: $.shops[0].hours: bad"
+		want := "cfg.yaml:3:5: $.shops[0].hours: bad"
 
 		fn := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
 			return plain
@@ -2959,8 +3017,8 @@ func TestNode_Bind_Scope(t *testing.T) {
 
 		multi := niceyaml.MultiValidator(&fieldValidator{err: plain}, &fieldValidator{err: errors.New("worse")})
 		require.EqualError(t, hours.Validate(t.Context(), multi), stringtest.JoinLF(
-			"cfg.yaml:4:7: $.shops[0].hours: bad",
-			"cfg.yaml:4:7: $.shops[0].hours: worse",
+			"cfg.yaml:3:5: $.shops[0].hours: bad",
+			"cfg.yaml:3:5: $.shops[0].hours: worse",
 		))
 
 		// The same validators on the root of the document name the source
@@ -4434,11 +4492,11 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 		}{
 			"sequence where the function decodes a string": {
 				input: "nets:\n  - 10.0.0.0/8\n  - [1, 2]\n",
-				want:  "3:6: $.nets[1]: expected string, got sequence",
+				want:  "3:3: $.nets[1]: expected string, got sequence",
 			},
 			"mapping where the function decodes a string": {
 				input: "nets:\n  - 10.0.0.0/8\n  - {a: 1}\n",
-				want:  "3:6: $.nets[1]: expected string, got mapping",
+				want:  "3:3: $.nets[1]: expected string, got mapping",
 			},
 			"string the function rejects": {
 				input: "nets:\n  - 10.0.0.0/8\n  - 10.0.0.0/33\n",
@@ -4446,7 +4504,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			},
 			"map value": {
 				input: "by_name:\n  a: 10.0.0.0/8\n  b: [1]\n",
-				want:  "3:7: $.by_name.b: expected string, got sequence",
+				want:  "3:3: $.by_name.b: expected string, got sequence",
 			},
 			"map key": {
 				input: "by_level:\n  low: a\n  mid: b\n",
@@ -4462,7 +4520,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 				want: stringtest.JoinLF(
 					"2 problems",
 					"2:11: $.spans[0].from: expected integer, got string",
-					"3:10: $.spans[0].to: expected integer, got sequence",
+					"3:5: $.spans[0].to: expected integer, got sequence",
 				),
 			},
 			// The path the function writes reads from its value.
@@ -4515,7 +4573,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 				want: stringtest.JoinLF(
 					"2 problems",
 					"1:8: $.count: expected integer, got string",
-					"3:6: $.nets[0]: expected string, got sequence",
+					"3:3: $.nets[0]: expected string, got sequence",
 				),
 			},
 		}
@@ -4568,26 +4626,26 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 				report: niceyaml.NewError("span is odd", niceyaml.WithDetails(
 					niceyaml.NewError("to set here", niceyaml.AtPath(paths.Current().Child("to"))),
 				)),
-				want:   "2:12: $.boxes[0].item: span is odd",
+				want:   "2:5: $.boxes[0].item: span is odd",
 				detail: "2:25: $.boxes[0].item.to: to set here",
 			},
 			"join": {
 				input:  "boxes:\n  - item: {from: 9, to: 3}\n",
 				report: errors.Join(errors.New("from is odd"), errors.New("to is odd")),
 				want: stringtest.JoinLF(
-					"2:12: $.boxes[0].item: from is odd",
-					"2:12: $.boxes[0].item: to is odd",
+					"2:5: $.boxes[0].item: from is odd",
+					"2:5: $.boxes[0].item: to is odd",
 				),
 			},
 			// The position counts the lines of the text of the value, so
 			// the error binds at the value in its place.
 			"position an unmarshaler built from its node": {
 				input: "boxes:\n  - name: a\n  - placed: [a, b]\n",
-				want:  "3:5: $.boxes[1]: unmarshaler rejected the value",
+				want:  "3:3: $.boxes[1]: unmarshaler rejected the value",
 			},
 			"panic": {
 				input: "boxes:\n  - name: a\n  - broken: 1\n",
-				want:  "3:5: $.boxes[1]: decoder rejected the value: panic: unmarshaler rejected the value",
+				want:  "3:3: $.boxes[1]: decoder rejected the value: panic: unmarshaler rejected the value",
 			},
 		}
 
@@ -4628,12 +4686,12 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			"error of the function": {
 				input: "main:\n  level: mid\n",
 				is:    errUnknownLevel,
-				want:  `2:3: $.main: holder: unknown level "mid"`,
+				want:  `1:1: $.main: holder: unknown level "mid"`,
 			},
 			"rejection of the decode": {
 				input: "main:\n  level: [a]\n",
 				is:    niceyaml.ErrDecode,
-				want:  "2:3: $.main: holder: expected string, got sequence",
+				want:  "1:1: $.main: holder: expected string, got sequence",
 			},
 		}
 
@@ -4676,7 +4734,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 		_, err := doc.DecodeAt[[]net.IPNet](
 			t.Context(), paths.Current().Child("nets"), niceyaml.WithCustomUnmarshaler(decodeCIDR),
 		)
-		require.EqualError(t, err, "4:6: $.nets[1]: expected string, got mapping")
+		require.EqualError(t, err, "4:3: $.nets[1]: expected string, got mapping")
 	})
 
 	t.Run("the decode of a value allows the duplicate keys its source allows", func(t *testing.T) {
@@ -5262,6 +5320,9 @@ func TestDocument_Ranges(t *testing.T) {
 		  y: 2
 		tagged:
 		  !!str k: v
+		items:
+		  - name: a
+		flow: [{a: 1}]
 	`)
 
 	tcs := map[string]struct {
@@ -5284,9 +5345,9 @@ func TestDocument_Ranges(t *testing.T) {
 			key:  true,
 			want: position.Ranges{position.NewRange(position.New(8, 4), position.New(8, 5))},
 		},
-		"mapping with a tagged first key starts at the key": {
+		"mapping with a tagged first key covers the key of its entry": {
 			path: paths.Current().Child("tagged"),
-			want: position.Ranges{position.NewRange(position.New(13, 8), position.New(13, 9))},
+			want: position.Ranges{position.NewRange(position.New(12, 0), position.New(12, 6))},
 		},
 		"value across lines": {
 			path: paths.Current().Child("text"),
@@ -5299,13 +5360,30 @@ func TestDocument_Ranges(t *testing.T) {
 			path: paths.Current().Child("block"),
 			want: position.Ranges{position.NewRange(position.New(3, 7), position.New(3, 8))},
 		},
-		"mapping covers its first key": {
+		"mapping covers the key of its entry": {
 			path: paths.Current().Child("map"),
-			want: position.Ranges{position.NewRange(position.New(10, 2), position.New(10, 3))},
+			want: position.Ranges{position.NewRange(position.New(9, 0), position.New(9, 3))},
 		},
-		"sequence covers its first element": {
+		"sequence covers the key of its entry": {
 			path: paths.Current().Child("list"),
-			want: position.Ranges{position.NewRange(position.New(8, 4), position.New(8, 5))},
+			want: position.Ranges{position.NewRange(position.New(7, 0), position.New(7, 4))},
+		},
+		"mapping element covers its dash": {
+			path: paths.Current().Child("items").Index(0),
+			want: position.Ranges{position.NewRange(position.New(15, 2), position.New(15, 3))},
+		},
+		"key of a mapping element is the element": {
+			path: paths.Current().Child("items").Index(0),
+			key:  true,
+			want: position.Ranges{position.NewRange(position.New(15, 2), position.New(15, 3))},
+		},
+		"flow mapping in a flow sequence covers its brace": {
+			path: paths.Current().Child("flow").Index(0),
+			want: position.Ranges{position.NewRange(position.New(16, 7), position.New(16, 8))},
+		},
+		"block mapping at the root covers its first key": {
+			path: paths.Current(),
+			want: position.Ranges{position.NewRange(position.New(0, 0), position.New(0, 4))},
 		},
 		"missing path": {
 			path: paths.Current().Child("missing"),
@@ -6211,7 +6289,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			},
 			"unmarshaler text across tokens": {
 				input: "a: &x 1\nb: &x 2\nc: !x [1]\n",
-				err:   `3:8: $.c: unmarshaler rejected the value: "!x [1]\n"`,
+				err:   `3:1: $.c: unmarshaler rejected the value: "!x [1]\n"`,
 			},
 		}
 
@@ -8913,9 +8991,9 @@ func TestNode_At_NotFound(t *testing.T) {
 			wantPath: "$.zzz.yyy",
 			near:     "$",
 		},
-		"a key an element leaves out binds at the first key of the element": {
+		"a key an element leaves out binds at the dash of the element": {
 			path:     itemsPath.Index(1).Child("q"),
-			want:     "c.yaml:7:5: $.items[1].q: not found",
+			want:     "c.yaml:7:3: $.items[1].q: not found",
 			wantPath: "$.items[1].q",
 			near:     "$.items[1]",
 		},
@@ -12071,12 +12149,12 @@ func TestChainValidator(t *testing.T) {
 			"an unbound error with no location on a scoped Node": {
 				v:    &fieldValidator{err: niceyaml.Invalid(errFirst)},
 				node: meta,
-				want: "x.yaml:2:3: $.meta: first rule",
+				want: "x.yaml:1:1: $.meta: first rule",
 			},
 			"an unbound plain error on a scoped Node": {
 				v:    &fieldValidator{err: errFirst},
 				node: meta,
-				want: "x.yaml:2:3: $.meta: first rule",
+				want: "x.yaml:1:1: $.meta: first rule",
 			},
 			"an unbound plain error on the root": {
 				v:    &fieldValidator{err: errFirst},
@@ -12171,7 +12249,7 @@ func TestChainValidator(t *testing.T) {
 				a:      passing,
 				b:      &fieldValidator{err: errSecond},
 				scoped: true,
-				want:   "x.yaml:2:3: $.meta: second rule",
+				want:   "x.yaml:1:1: $.meta: second rule",
 			},
 			"neither fails": {
 				a: passing,

@@ -2247,7 +2247,7 @@ func TestErrorTree_Problems_WrappedJoin(t *testing.T) {
 
 				return hours.Bind(niceyaml.Invalid(errors.Join(early, late)))
 			},
-			want: []string{"f.yaml:2:3: $.hours: opens too early", "f.yaml:2:3: $.hours: closes too late"},
+			want: []string{"f.yaml:1:1: $.hours: opens too early", "f.yaml:1:1: $.hours: closes too late"},
 		},
 		"rebased": {
 			build: func(*testing.T) error {
@@ -2303,8 +2303,8 @@ func TestErrorTree_Problems_SelfValidator(t *testing.T) {
 	}
 
 	// The decode rebases the error and its reasons under $.hours, which
-	// locates the error at the value. The reasons explain it and take no
-	// location.
+	// locates the error at the value, a mapping that points at its key.
+	// The reasons explain it and take no location.
 	got := slices.Collect(niceyaml.NewErrorTree(doc.DecodeInto(t.Context(), &cfg)).Problems())
 	require.Len(t, got, 1)
 	require.NotNil(t, got[0].Bound)
@@ -2321,7 +2321,7 @@ func TestErrorTree_Problems_SelfValidator(t *testing.T) {
 
 	pos, ok := got[0].Bound.Position()
 	require.True(t, ok)
-	assert.Equal(t, position.New(1, 2), pos)
+	assert.Equal(t, position.New(0, 0), pos)
 }
 
 func TestErrorTree_Problems_Scope(t *testing.T) {

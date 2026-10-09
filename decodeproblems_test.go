@@ -640,7 +640,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				"1:10: $.timeout: expected integer, got string",
 				"2:11: $.replicas: expected integer, got string",
 				"4:11: $.servers[0].port: expected integer, got string",
-				"5:12: $.servers[1].name: expected string, got sequence",
+				"5:5: $.servers[1].name: expected string, got sequence",
 				"6:13: $.labels.a: expected integer, got string",
 				"6:25: $.labels.c: expected integer, got string",
 			),
@@ -652,11 +652,11 @@ func TestDocument_Decode_Problems(t *testing.T) {
 			input:  "timeout: {a: soon}\nreplicas: [x, y]\nservers:\n  - a\n  - [b]\nlabels: [c]\n",
 			want: stringtest.JoinLF(
 				"5 problems",
-				"1:11: $.timeout: expected integer, got mapping",
-				"2:12: $.replicas: expected integer, got sequence",
+				"1:1: $.timeout: expected integer, got mapping",
+				"2:1: $.replicas: expected integer, got sequence",
 				"4:5: $.servers[0]: expected mapping, got string",
-				"5:6: $.servers[1]: expected mapping, got sequence",
-				"6:10: $.labels: expected mapping, got sequence",
+				"5:3: $.servers[1]: expected mapping, got sequence",
+				"6:1: $.labels: expected mapping, got sequence",
 			),
 		},
 		"numbers out of range": {
@@ -684,7 +684,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				`2:24: $.servers[0].timeout: time: invalid duration "soon"`,
 				`3:24: $.servers[1].timeout: time: missing unit in duration "5"`,
 				"4:24: $.servers[2].timeout: expected duration, got integer",
-				"5:25: $.servers[3].timeout: expected duration, got sequence",
+				"5:15: $.servers[3].timeout: expected duration, got sequence",
 				"6:11: $.replicas: expected integer, got string",
 			),
 		},
@@ -763,7 +763,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				"3 problems",
 				"1:4: $.c: expected integer, got string",
 				"2:4: $.d: expected integer, got string",
-				"3:8: $.name: expected string, got sequence",
+				"3:1: $.name: expected string, got sequence",
 			),
 		},
 		// The decoder hands an inline map every entry of the mapping, in
@@ -827,7 +827,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				"6 problems",
 				"1:17: $.base.port: expected integer, got string",
 				`1:32: $.servers[0].timeout: time: invalid duration "soon"`,
-				"4:21: $.servers[1].name: expected string, got sequence",
+				"4:14: $.servers[1].name: expected string, got sequence",
 				"5:18: $.labels.<<.k: expected integer, got string",
 				"5:25: $.labels.j: expected integer, got string",
 				"6:11: $.replicas: expected integer, got string",
@@ -854,7 +854,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 			input: "v:\n  <<: [{a: x}]\n  b: bad\nn: z\n",
 			want: stringtest.JoinLF(
 				"2 problems",
-				"2:9: $.v.<<: expected mapping, got sequence",
+				"2:3: $.v.<<: expected mapping, got sequence",
 				"4:4: $.n: expected integer, got string",
 			),
 		},
@@ -906,7 +906,7 @@ func TestDocument_Decode_Problems(t *testing.T) {
 			want: stringtest.JoinLF(
 				"3 problems",
 				"1:17: $.base.port: expected integer, got string",
-				"4:21: $.servers[1].name: expected string, got sequence",
+				"4:14: $.servers[1].name: expected string, got sequence",
 				`4:34: $.servers[1].timeout: time: invalid duration "soon"`,
 			),
 		},
@@ -1018,7 +1018,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			}](),
 			input: "image: {pull: always}\n",
 			is:    errRepoRequired,
-			want:  "1:9: $.image: repo is required",
+			want:  "1:1: $.image: repo is required",
 		},
 		"unmarshaler error beside a value": {
 			decode: decodeInto[struct {
@@ -1029,7 +1029,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			is:    errRepoRequired,
 			want: stringtest.JoinLF(
 				"2 problems",
-				"1:9: $.image: repo is required",
+				"1:1: $.image: repo is required",
 				"2:11: $.replicas: expected integer, got string",
 			),
 		},
@@ -1068,7 +1068,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			is:    errRepoRequired,
 			want: stringtest.JoinLF(
 				"2 problems",
-				"1:9: $.image: repo is required",
+				"1:1: $.image: repo is required",
 				"2:11: $.replicas: expected integer, got string",
 			),
 		},
@@ -1126,7 +1126,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			want: stringtest.JoinLF(
 				"3 problems",
 				"1:11: $.replicas: expected integer, got string",
-				"2:16: $.image.repo: expected string, got sequence",
+				"2:9: $.image.repo: expected string, got sequence",
 				"2:26: $.image.pull: expected boolean, got string",
 			),
 		},
@@ -1142,7 +1142,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			is:    errBadServer,
 			want: stringtest.JoinLF(
 				"3 problems",
-				`1:10: $.server: bad server: time: invalid duration "soon"`,
+				`1:1: $.server: bad server: time: invalid duration "soon"`,
 				"2:11: $.replicas: expected integer, got string",
 				"3:8: $.limit: expected integer, got string",
 			),
@@ -1264,9 +1264,9 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			is:    errUnknownTier,
 			want: stringtest.JoinLF(
 				"4 problems",
-				"1:15: $.tiers[1]: expected string, got sequence",
+				"1:14: $.tiers[1]: expected string, got sequence",
 				`1:19: $.tiers[2]: unknown tier "mid"`,
-				"1:25: $.tiers[3]: expected string, got mapping",
+				"1:24: $.tiers[3]: expected string, got mapping",
 				"2:4: $.n: expected integer, got string",
 			),
 		},
@@ -1280,7 +1280,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			input: "tier: [a]\nport: x\n",
 			want: stringtest.JoinLF(
 				"2 problems",
-				"1:8: $.tier: expected string, got sequence",
+				"1:1: $.tier: expected string, got sequence",
 				"2:7: $.port: expected integer, got string",
 			),
 		},
@@ -1294,7 +1294,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			input: "tier: [a]\nport: x\n",
 			want: stringtest.JoinLF(
 				"2 problems",
-				"1:8: $.tier: expected string, got sequence",
+				"1:1: $.tier: expected string, got sequence",
 				"2:7: $.port: expected integer, got string",
 			),
 		},
@@ -1317,7 +1317,7 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			input: "either: {a: {b: 1}}\nport: x\n",
 			want: stringtest.JoinLF(
 				"2 problems",
-				"1:14: $.either.a: expected string, got mapping",
+				"1:10: $.either.a: expected string, got mapping",
 				"2:7: $.port: expected integer, got string",
 			),
 		},
@@ -1369,7 +1369,7 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 			want: stringtest.JoinLF(
 				"3 problems",
 				"1:17: $.base.port: expected integer, got string",
-				"4:21: $.servers[1].name: expected string, got sequence",
+				"4:14: $.servers[1].name: expected string, got sequence",
 				"5:11: $.replicas: expected integer, got string",
 			),
 		},
@@ -1382,7 +1382,7 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 			opts:   []niceyaml.DecodeOption{strict},
 			want: stringtest.JoinLF(
 				"6 problems",
-				"2:28: $.servers[0].name: expected string, got sequence",
+				"2:21: $.servers[0].name: expected string, got sequence",
 				`2:32: $.servers[0].prt~: unknown field "prt"`,
 				"3:12: $.servers[1].port: expected integer, got string",
 				`3:15: $.servers[1].nme~: unknown field "nme"`,
@@ -1429,7 +1429,7 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 			want: stringtest.JoinLF(
 				"2 problems",
 				"1:17: $.base.port: expected integer, got string",
-				"4:21: $.servers[1].name: expected string, got sequence",
+				"4:14: $.servers[1].name: expected string, got sequence",
 			),
 		},
 	}

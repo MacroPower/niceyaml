@@ -417,7 +417,7 @@ func newProblemCollector(ctx context.Context, n *Node, cfg decodeConfig) *proble
 // decoder rejects those.
 func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 	c.register(node)
-	c.walk(t, node, place{}, holder{})
+	c.walk(t, node, parentAt(c.resolver, c.node.base), place{}, holder{})
 
 	if !c.cfg.disallowUnknownFields {
 		return
@@ -432,6 +432,55 @@ func (c *problemCollector) collect(t reflect.Type, node ast.Node) {
 			unknownField: true,
 		})
 	}
+}
+
+// parentAt returns what holds the node path selects in the document of
+// resolver, for [astnode.PathToken]. That is the entry the last `.name`
+// selector of path picks, or the sequence and the index its last `[n]`
+// selector picks. A `~` selector picks the key of an entry, which nothing
+// holds. Where no entry with a key holds the node the path before the `~`
+// selects, the `~` selects that node, and what holds it stands. The root
+// of the document has no parent, and neither does a path that selects
+// nothing.
+func parentAt(resolver *paths.Resolver, path paths.Path) astnode.Parent {
+	last, ok := path.Last()
+	if !ok {
+		return astnode.Parent{}
+	}
+
+	above, _ := path.Parent()
+
+	if last.Kind == paths.SelectorKey {
+		in := parentAt(resolver, above)
+		if in.Entry != nil && astnode.Content(in.Entry.Key) != nil {
+			return astnode.Parent{}
+		}
+
+		return in
+	}
+
+	node, err := resolver.Node(above)
+	if err != nil {
+		return astnode.Parent{}
+	}
+
+	switch last.Kind {
+	case paths.SelectorChild:
+		entry, err := resolver.Entry(node, last.Name)
+		if found, ok := entry.(*ast.MappingValueNode); err == nil && ok {
+			return astnode.Parent{Entry: found}
+		}
+
+	case paths.SelectorIndex:
+		if seq, ok := contentNode(resolver, node).(*ast.SequenceNode); ok {
+			return astnode.Parent{Sequence: seq, Index: last.Index}
+		}
+
+	default:
+		// A selector that can pick several nodes names no one of them.
+	}
+
+	return astnode.Parent{}
 }
 
 // register has the decoder of the pass read the anchors of node, the
@@ -484,7 +533,8 @@ func (c *problemCollector) visit(t reflect.Type, node ast.Node) bool {
 }
 
 // walk reads held, the node the document holds for a value of type t at
-// the place at, and adds the problems at and below that value. The in
+// the place at, and adds the problems at and below that value. The from
+// argument names what holds that node in the document, and the in
 // argument names the struct that reads the value as a field, if any.
 // The decoder reads nothing from a null, as [readNode] describes, so the
 // walk stops there. It stops too at an alias the document cannot follow,
@@ -494,7 +544,7 @@ func (c *problemCollector) visit(t reflect.Type, node ast.Node) bool {
 // [decodesFromText] reports, each as a leaf. A mapping or a sequence the
 // decoder refuses for such a type, as [refusesForText] reports, is a
 // leaf as well.
-func (c *problemCollector) walk(t reflect.Type, held ast.Node, at place, in holder) {
+func (c *problemCollector) walk(t reflect.Type, held ast.Node, from astnode.Parent, at place, in holder) {
 	if c.ctx.Err() != nil {
 		return
 	}
@@ -507,7 +557,7 @@ func (c *problemCollector) walk(t reflect.Type, held ast.Node, at place, in hold
 	t = pointerBase(t)
 
 	if t == durationType || t == timeType {
-		c.leaf(t, held, node, at, in)
+		c.leaf(t, held, node, from, at, in)
 
 		return
 	}
@@ -520,7 +570,7 @@ func (c *problemCollector) walk(t reflect.Type, held ast.Node, at place, in hold
 		// type takes that node.
 		if refusesForText(t, c.cfg.unmarshalers, content) ||
 			isScalar(content) && decodesFromText(t, c.cfg.unmarshalers) {
-			c.leaf(t, held, node, at, in)
+			c.leaf(t, held, node, from, at, in)
 		}
 
 		return
@@ -552,7 +602,7 @@ func (c *problemCollector) walk(t reflect.Type, held ast.Node, at place, in hold
 		}
 	}
 
-	c.leaf(t, held, node, at, in)
+	c.leaf(t, held, node, from, at, in)
 }
 
 // fields walks the value of each field of t, a struct type that decodes
@@ -594,7 +644,7 @@ func (c *problemCollector) below(
 		if !inline {
 			if entry := c.finder.entry(mapping, name, merges); entry != nil {
 				in.entry = entry
-				c.walk(field.Type, entry.Value, at.child(name), in)
+				c.walk(field.Type, entry.Value, astnode.Parent{Entry: entry}, at.child(name), in)
 			}
 
 			continue
@@ -628,7 +678,7 @@ func (c *problemCollector) inlineMap(in holder, t reflect.Type, mapping *ast.Map
 		name, ok := c.resolver.KeyName(entry.Key)
 		if ok && c.finder.entry(mapping, name, merges) == entry {
 			in.entry = entry
-			c.walk(t.Elem(), entry.Value, at.child(name), in)
+			c.walk(t.Elem(), entry.Value, astnode.Parent{Entry: entry}, at.child(name), in)
 		}
 	})
 }
@@ -641,7 +691,7 @@ func (c *problemCollector) elements(t reflect.Type, seq *ast.SequenceNode, at pl
 	}
 
 	for i, element := range seq.Values {
-		c.walk(t.Elem(), element, at.index(i), holder{element: true})
+		c.walk(t.Elem(), element, astnode.Parent{Sequence: seq, Index: i}, at.index(i), holder{element: true})
 	}
 }
 
@@ -656,15 +706,16 @@ func (c *problemCollector) entries(t reflect.Type, mapping *ast.MappingNode, at 
 
 	c.finder.eachEntry(mapping, true, map[*ast.MappingNode]bool{}, func(entry *ast.MappingValueNode) {
 		if name, ok := c.resolver.KeyName(entry.Key); ok {
-			c.walk(t.Elem(), entry.Value, at.child(name), holder{element: true})
+			c.walk(t.Elem(), entry.Value, astnode.Parent{Entry: entry}, at.child(name), holder{element: true})
 		}
 	})
 }
 
 // leaf decodes node into a new value of type t and adds the rejection
 // the decoder builds for it as a problem. The walk reads nothing below
-// the value, and held is the node the document holds for it, which node
-// is the content of.
+// the value. The held argument is the node the document holds for the
+// value, which node is the content of, and from names what holds that
+// node in the document.
 //
 // A rejection at a token of the source takes the location of that token,
 // as [Node.tokenRejection] gives it. The error of a parse has no token.
@@ -673,9 +724,11 @@ func (c *problemCollector) entries(t reflect.Type, mapping *ast.MappingNode, at 
 // reports. It takes the path the walk reached the value by, as
 // [Node.locateDecodeError] puts one under the path of its value. It adds
 // a problem only when that path selects held, which the path of an entry
-// that a later one hides does not. The refusal of a mapping or a
-// sequence that [refusesForText] reports has no token either. It takes
-// that path the same way, and reads as [textRejection] writes it.
+// that a later one hides does not. The path selects held when it points
+// at the token [astnode.PathToken] gives held under from. The refusal of
+// a mapping or a sequence that [refusesForText] reports has no token
+// either. It takes that path the same way, and reads as [textRejection]
+// writes it.
 //
 // Any other error adds nothing. That is another rejection of the
 // decoder, such as one for a tag that does not convert its value, the
@@ -684,7 +737,7 @@ func (c *problemCollector) entries(t reflect.Type, mapping *ast.MappingNode, at 
 // error of an UnmarshalText method that names a place of its own, as
 // [Node.lacksLocation] reports, since the position that marks a problem
 // is the one its path resolves to.
-func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, at place, in holder) {
+func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, from astnode.Parent, at place, in holder) {
 	err := c.decode(node, reflect.New(t).Interface())
 	if err == nil {
 		return
@@ -725,7 +778,7 @@ func (c *problemCollector) leaf(t reflect.Type, held, node ast.Node, at place, i
 	path := at.path()
 
 	loc, lerr := c.node.pathLocation(path)
-	if lerr != nil || loc.tk != astnode.FirstToken(held) || !c.confirmed(err, t, held, in) {
+	if lerr != nil || loc.tk != astnode.PathToken(held, from) || !c.confirmed(err, t, held, in) {
 		return
 	}
 

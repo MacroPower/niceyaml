@@ -1039,16 +1039,17 @@ func TestSchema_PathTarget(t *testing.T) {
 			wantContains: "<genericError>True</genericError>",
 		},
 		"false subschema on a keyword-named property highlights value": {
-			// A property named like a key-targeting keyword ("contains") must
-			// still highlight the value, not the key.
+			// A property named like a keyword that constrains a key
+			// ("additionalProperties") must still highlight the value, not
+			// the key.
 			schema: `{
 				"type": "object",
 				"properties": {
-					"contains": false
+					"additionalProperties": false
 				}
 			}`,
 			input: stringtest.Input(`
-				contains: 5
+				additionalProperties: 5
 			`),
 			wantContains: "<genericError>5</genericError>",
 		},
@@ -1824,12 +1825,12 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		}{
 			"location above one violation": {
 				err:  niceyaml.Invalid(one, at),
-				want: "app.yaml:2:3: $.request: 0 is less than 1",
+				want: "app.yaml:1:1: $.request: 0 is less than 1",
 			},
 			"location above two violations": {
 				err: niceyaml.Invalid(two, at),
 				want: stringtest.JoinLF(
-					"app.yaml:2:3: $.request: 2 schema violations",
+					"app.yaml:1:1: $.request: 2 schema violations",
 					`app.yaml:1:1: $.request.name: missing required property "name"`,
 					"app.yaml:2:9: $.request.port: 0 is less than 1",
 				),
@@ -1837,7 +1838,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			"wrapper around a location": {
 				err: fmt.Errorf("check: %w", niceyaml.Place(two, at)),
 				want: stringtest.JoinLF(
-					"app.yaml:2:3: $.request: check: 2 schema violations",
+					"app.yaml:1:1: $.request: check: 2 schema violations",
 					`app.yaml:1:1: $.request.name: missing required property "name"`,
 					"app.yaml:2:9: $.request.port: 0 is less than 1",
 				),
@@ -2693,7 +2694,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			"node of aliases to a mapping of a reference document": {
 				path:  paths.Current().Child("items"),
 				input: "items: " + repeated(300) + "\n",
-				want:  "app.yaml:1:9: $.items: excessive aliasing",
+				want:  "app.yaml:1:1: $.items: excessive aliasing",
 			},
 			"aliases to an anchor on a tagged alias to a reference document": {
 				input: "local: &local !foo *defaults\nitems: " +
@@ -3793,7 +3794,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			}`,
 			input:    "a: &k 16\n0x10: hello\n*k : [1]\n",
 			wantPath: "$.16",
-			want:     "3:7: $.16: expected \"integer\", got \"array\"",
+			want:     "3:1: $.16: expected \"integer\", got \"array\"",
 		},
 		"block scalar key": {
 			schema: `{

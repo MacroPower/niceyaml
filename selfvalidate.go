@@ -178,7 +178,7 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 //	}
 //
 // A decode of a document that holds the Pool under pool then reports
-// "app.yaml:5:9: $.pool.spec.servers[1].port: port is required". A decode
+// "app.yaml:5:7: $.pool.spec.servers[1].port: port is required". A decode
 // reaches every field with any other tag itself, as [SelfValidator]
 // describes, so the Validate of such a struct leaves those fields to it.
 // A Validate must not pass its own receiver, since the walk then calls

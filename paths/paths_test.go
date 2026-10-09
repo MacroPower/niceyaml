@@ -2265,24 +2265,24 @@ explicit_first:
 			wantValue: "name",
 			wantType:  token.StringType,
 		},
-		"mapping value target returns its first key": {
+		"mapping value target returns the entry key": {
 			path:      paths.Doc().Child("metadata"),
-			wantValue: "labels",
+			wantValue: "metadata",
 			wantType:  token.StringType,
 		},
-		"mapping with a tagged first key starts at the key": {
+		"mapping with a tagged first key returns the entry key": {
 			path:      paths.Doc().Child("tag_first"),
-			wantValue: "inner",
+			wantValue: "tag_first",
 			wantType:  token.StringType,
 		},
-		"mapping with an anchored first key starts at the key": {
+		"mapping with an anchored first key returns the entry key": {
 			path:      paths.Doc().Child("anchor_first"),
-			wantValue: "inner",
+			wantValue: "anchor_first",
 			wantType:  token.StringType,
 		},
-		"mapping with an explicit first key starts at the key": {
+		"mapping with an explicit first key returns the entry key": {
 			path:      paths.Doc().Child("explicit_first"),
-			wantValue: "inner",
+			wantValue: "explicit_first",
 			wantType:  token.StringType,
 		},
 		"mapping key target returns the entry key": {
@@ -2291,9 +2291,9 @@ explicit_first:
 			wantValue: "metadata",
 			wantType:  token.StringType,
 		},
-		"sequence value target returns its first element": {
+		"sequence value target returns the entry key": {
 			path:      paths.Doc().Child("items"),
-			wantValue: "first",
+			wantValue: "items",
 			wantType:  token.StringType,
 		},
 		"sequence key target returns the entry key": {
@@ -2344,6 +2344,204 @@ explicit_first:
 			tk := resolveToken(t, tc.path, tc.key, file.Docs[0])
 			assert.Equal(t, tc.wantValue, tk.Value)
 			assert.Equal(t, tc.wantType, tk.Type)
+		})
+	}
+}
+
+func TestPath_Token_Collections(t *testing.T) {
+	t.Parallel()
+
+	// A mapping or a sequence points at the token that introduces it. Each
+	// want holds the text of the token and where it starts, counted from
+	// 1.
+	tcs := map[string]struct {
+		input string
+		path  string
+		want  string
+	}{
+		"block mapping at the root starts at its first key": {
+			input: "a: 1\n",
+			path:  "$",
+			want:  "a@1:1",
+		},
+		"block mapping at the root with a tagged first key": {
+			input: "!!str inner: 8\n",
+			path:  "$",
+			want:  "inner@1:7",
+		},
+		"block mapping at the root with an anchored first key": {
+			input: "&ka inner: 9\n",
+			path:  "$",
+			want:  "inner@1:5",
+		},
+		"block mapping at the root with an explicit first key": {
+			input: "? inner\n: 10\n",
+			path:  "$",
+			want:  "inner@1:3",
+		},
+		"block sequence at the root starts at its first element": {
+			input: "- x\n- y\n",
+			path:  "$",
+			want:  "x@1:3",
+		},
+		"block sequence of mappings at the root": {
+			input: "- k: v\n",
+			path:  "$",
+			want:  "k@1:3",
+		},
+		"flow mapping at the root": {
+			input: "{k: v}\n",
+			path:  "$",
+			want:  "{@1:1",
+		},
+		"flow sequence at the root": {
+			input: "[x, y]\n",
+			path:  "$",
+			want:  "[@1:1",
+		},
+		"key selector on a flow sequence at the root": {
+			input: "[x, y]\n",
+			path:  "$~",
+			want:  "[@1:1",
+		},
+		"block mapping under a key": {
+			input: "spec:\n  replicas: 3\n",
+			path:  "$.spec",
+			want:  "spec@1:1",
+		},
+		"key of a block mapping": {
+			input: "spec:\n  replicas: 3\n",
+			path:  "$.spec~",
+			want:  "spec@1:1",
+		},
+		"flow mapping under a key": {
+			input: "spec: {replicas: 3}\n",
+			path:  "$.spec",
+			want:  "spec@1:1",
+		},
+		"block sequence under a key": {
+			input: "items:\n  - a\n",
+			path:  "$.items",
+			want:  "items@1:1",
+		},
+		"flow sequence under a key": {
+			input: "items: [a, b]\n",
+			path:  "$.items",
+			want:  "items@1:1",
+		},
+		"tagged mapping under a key": {
+			input: "spec: !!map\n  k: v\n",
+			path:  "$.spec",
+			want:  "spec@1:1",
+		},
+		"mapping under an explicit key": {
+			input: "? spec\n: {k: v}\n",
+			path:  "$.spec",
+			want:  "spec@1:3",
+		},
+		"mapping under a nested key": {
+			input: "a:\n  b:\n    k: v\n",
+			path:  "$.a.b",
+			want:  "b@2:3",
+		},
+		"scalar under a key is its own token": {
+			input: "a: v\n",
+			path:  "$.a",
+			want:  "v@1:4",
+		},
+		"block mapping element": {
+			input: "items:\n  - name: a\n  - name: b\n",
+			path:  "$.items[1]",
+			want:  "-@3:3",
+		},
+		"key selector on a block mapping element": {
+			input: "items:\n  - name: a\n  - name: b\n",
+			path:  "$.items[1]~",
+			want:  "-@3:3",
+		},
+		"first key of a block mapping element": {
+			input: "items:\n  - name: a\n  - name: b\n",
+			path:  "$.items[1].name~",
+			want:  "name@3:5",
+		},
+		"block mapping element at the root": {
+			input: "- k: v\n",
+			path:  "$[0]",
+			want:  "-@1:1",
+		},
+		"anchored block mapping element": {
+			input: "items:\n  - &x\n    name: a\n",
+			path:  "$.items[0]",
+			want:  "-@2:3",
+		},
+		"flow mapping element of a block sequence": {
+			input: "items:\n  - {name: a}\n",
+			path:  "$.items[0]",
+			want:  "-@2:3",
+		},
+		"block sequence element of a block sequence": {
+			input: "- - x\n  - y\n",
+			path:  "$[0]",
+			want:  "-@1:1",
+		},
+		"scalar in a nested block sequence": {
+			input: "- - x\n  - y\n",
+			path:  "$[0][1]",
+			want:  "y@2:5",
+		},
+		"first flow mapping element of a flow sequence": {
+			input: "items: [{a: 1}, {b: 2}]\n",
+			path:  "$.items[0]",
+			want:  "{@1:9",
+		},
+		"later flow mapping element of a flow sequence": {
+			input: "items: [{a: 1}, {b: 2}]\n",
+			path:  "$.items[1]",
+			want:  "{@1:17",
+		},
+		"flow sequence element of a flow sequence": {
+			input: "m: [[x], [y]]\n",
+			path:  "$.m[1]",
+			want:  "[@1:10",
+		},
+		"alias to a mapping is its own token": {
+			input: "base: &b\n  sub:\n    k: v\nother: *b\n",
+			path:  "$.other",
+			want:  "*@4:8",
+		},
+		"mapping through an alias points at its key in the anchor": {
+			input: "base: &b\n  sub:\n    k: v\nother: *b\n",
+			path:  "$.other.sub",
+			want:  "sub@2:3",
+		},
+		"mapping a merge key brings in points at its key in the source": {
+			input: "base: &b\n  sub:\n    k: v\nm:\n  <<: *b\n",
+			path:  "$.m.sub",
+			want:  "sub@2:3",
+		},
+		"mapping element through an aliased sequence": {
+			input: "list: &l\n  - k: v\ncopy: *l\n",
+			path:  "$.copy[0]",
+			want:  "-@2:3",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			file, err := niceyaml.NewSourceFromString(tc.input).File()
+			require.NoError(t, err)
+
+			tk, err := paths.MustParse(tc.path).Token(file.Docs[0])
+			require.NoError(t, err)
+
+			got := fmt.Sprintf("%s@%d:%d", tk.Value, tk.Position.Line, tk.Position.Column)
+			assert.Equal(t, tc.want, got)
+
+			viaResolver, err := paths.NewResolver(file.Docs[0]).Token(paths.MustParse(tc.path))
+			require.NoError(t, err)
+			assert.Same(t, tk, viaResolver)
 		})
 	}
 }
@@ -2640,10 +2838,20 @@ late:
 			wantValue: "a",
 			wantLine:  3,
 		},
-		"anchored mapping value target skips the anchor": {
+		"anchored mapping value target is the entry key": {
 			path:      paths.Doc().Child("base"),
-			wantValue: "a",
-			wantLine:  3,
+			wantValue: "base",
+			wantLine:  2,
+		},
+		"anchored flow mapping value target is the entry key": {
+			path:      paths.Doc().Child("flow"),
+			wantValue: "flow",
+			wantLine:  5,
+		},
+		"anchored sequence value target is the entry key": {
+			path:      paths.Doc().Child("list"),
+			wantValue: "list",
+			wantLine:  7,
 		},
 		"child through alias lands in the anchor": {
 			path:      paths.Doc().Child("other", "b"),
@@ -4547,13 +4755,13 @@ base: &kk aliased_name
 			path:      paths.Doc().Child("block\n"),
 			wantValue: "9",
 		},
-		"empty flow mapping value target": {
+		"empty flow mapping value target is the entry key": {
 			path:      paths.Doc().Child("empty"),
-			wantValue: "{",
+			wantValue: "empty",
 		},
-		"empty flow sequence value target": {
+		"empty flow sequence value target is the entry key": {
 			path:      paths.Doc().Child("none"),
-			wantValue: "[",
+			wantValue: "none",
 		},
 	}
 

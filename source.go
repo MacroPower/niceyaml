@@ -1053,7 +1053,7 @@ func (s *Source) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) er
 // The decode of an empty Source leaves cfg as it was. Each error of the
 // walk then binds with no position, and its text names the path from v,
 // as in "$.servers[1].port: port is required". With the file, the same
-// error reads "app.yaml:3:5: $.servers[1].port: port is required".
+// error reads "app.yaml:3:3: $.servers[1].port: port is required".
 //
 // An error of an empty Source is bound to its document, so no other
 // document places it. [SelfValidateValue] validates a value that came

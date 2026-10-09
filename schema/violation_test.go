@@ -238,6 +238,91 @@ func TestViolation_Binding(t *testing.T) {
 	})
 }
 
+func TestViolation_Collection(t *testing.T) {
+	t.Parallel()
+
+	// A failure about a mapping or a sequence as a whole carries the path
+	// of that value, and binds at the token that introduces the value. A
+	// failure about the key of a member carries a path that ends in `~`.
+	tcs := map[string]struct {
+		schema string
+		input  string
+		want   string
+	}{
+		"maxItems of a flow sequence under a key": {
+			schema: `{"properties": {"tags": {"maxItems": 2}}}`,
+			input:  "name: x\ntags: [a, b, c]\n",
+			want:   `2:1: $.tags: array has 3 items, maximum is 2`,
+		},
+		"minItems of a block sequence under a nested key": {
+			schema: `{"properties": {"pool": {"properties": {"members": {"minItems": 2}}}}}`,
+			input:  "pool:\n  members:\n    - x\n",
+			want:   `2:3: $.pool.members: array has 1 items, minimum is 2`,
+		},
+		"uniqueItems of a block sequence under a key": {
+			schema: `{"properties": {"tags": {"uniqueItems": true}}}`,
+			input:  "tags:\n  - a\n  - a\n",
+			want:   `1:1: $.tags: array contains duplicate items`,
+		},
+		"contains of a flow sequence under a key": {
+			schema: `{"properties": {"tags": {"contains": {"const": "x"}}}}`,
+			input:  "tags: [a]\n",
+			want:   `1:1: $.tags: array has 0 matching items, minimum is 1`,
+		},
+		"maxProperties of a block mapping under a key": {
+			schema: `{"properties": {"hours": {"maxProperties": 1}}}`,
+			input:  "hours:\n  open: 9\n  close: 5\n",
+			want:   `1:1: $.hours: object has 2 properties, maximum is 1`,
+		},
+		"maxProperties of a block mapping element": {
+			schema: `{"properties": {"items": {"items": {"maxProperties": 1}}}}`,
+			input:  "items:\n  - a: 1\n    b: 2\n",
+			want:   `2:3: $.items[0]: object has 2 properties, maximum is 1`,
+		},
+		"maxProperties of a flow mapping in a flow sequence": {
+			schema: `{"properties": {"items": {"items": {"maxProperties": 1}}}}`,
+			input:  "items: [{a: 1, b: 2}]\n",
+			want:   `1:9: $.items[0]: object has 2 properties, maximum is 1`,
+		},
+		"maxProperties of a block mapping at the root": {
+			schema: `{"maxProperties": 1}`,
+			input:  "a: 1\nb: 2\n",
+			want:   `1:1: $: object has 2 properties, maximum is 1`,
+		},
+		"maxProperties of a flow mapping at the root": {
+			schema: `{"maxProperties": 1}`,
+			input:  "{a: 1, b: 2}\n",
+			want:   `1:1: $: object has 2 properties, maximum is 1`,
+		},
+		"type of a block mapping under a key": {
+			schema: `{"properties": {"name": {"type": "string"}}}`,
+			input:  "name:\n  first: Ada\n",
+			want:   `1:1: $.name: expected "string", got "object"`,
+		},
+		"additionalProperties points at the key of the member": {
+			schema: `{"properties": {"name": {}}, "additionalProperties": false}`,
+			input:  "name: x\nextra: [1]\n",
+			want:   `2:1: $.extra~: value is not allowed`,
+		},
+		"propertyNames points at the key of the member": {
+			schema: `{"propertyNames": {"pattern": "^[a-z]+$"}}`,
+			input:  "name: x\nBad: 1\n",
+			want:   `2:1: $.Bad~: property name "Bad" is invalid`,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			err := doc.Validate(t.Context(), compileSchema(t, []byte(tc.schema)))
+			require.EqualError(t, err, tc.want)
+		})
+	}
+}
+
 func TestViolation_MissingMember(t *testing.T) {
 	t.Parallel()
 
@@ -272,7 +357,7 @@ func TestViolation_MissingMember(t *testing.T) {
 		"element of a sequence": {
 			schema: `{"properties": {"items": {"items": {"required": ["name"]}}}}`,
 			input:  "items:\n  - name: a\n  - port: 1\n",
-			want:   []string{`3:5: $.items[1].name: missing required property "name"`},
+			want:   []string{`3:3: $.items[1].name: missing required property "name"`},
 			near:   []string{"$.items[1]"},
 		},
 		"empty mapping": {
@@ -598,13 +683,13 @@ func TestViolation_Alternatives(t *testing.T) {
 			schema: `{"properties": {"port": {"anyOf": [{"type": "integer"}, {"type": "string"}, {"type": "null"}]}}}`,
 			input:  "port: [1]\n",
 			want: []string{
-				`1:8: $.port: value matches none of the allowed forms`,
+				`1:1: $.port: value matches none of the allowed forms`,
 				`  form 1`,
-				`    1:8: $.port: expected "integer", got "array"`,
+				`    1:1: $.port: expected "integer", got "array"`,
 				`  form 2`,
-				`    1:8: $.port: expected "string", got "array"`,
+				`    1:1: $.port: expected "string", got "array"`,
 				`  form 3`,
-				`    1:8: $.port: expected "null", got "array"`,
+				`    1:1: $.port: expected "null", got "array"`,
 			},
 		},
 		"every branch fails by type at the root": {
@@ -624,7 +709,7 @@ func TestViolation_Alternatives(t *testing.T) {
 			schema: step,
 			input:  "step:\n  kind: copy\n  from: a\n  dest: b\n",
 			want: []string{
-				`2:3: $.step: value matches none of the allowed forms`,
+				`1:1: $.step: value matches none of the allowed forms`,
 				`  form 1`,
 				`    1:1: $.step.cmd: missing required property "cmd"`,
 				`    2:9: $.step.kind: value does not match const`,
@@ -641,13 +726,13 @@ func TestViolation_Alternatives(t *testing.T) {
 			schema: step,
 			input:  "step: [run]\n",
 			want: []string{
-				`1:8: $.step: value matches none of the allowed forms`,
+				`1:1: $.step: value matches none of the allowed forms`,
 				`  form 1`,
-				`    1:8: $.step: expected "object", got "array"`,
+				`    1:1: $.step: expected "object", got "array"`,
 				`  form 2`,
-				`    1:8: $.step: expected "object", got "array"`,
+				`    1:1: $.step: expected "object", got "array"`,
 				`  form 3`,
-				`    1:8: $.step: expected "string", got "array"`,
+				`    1:1: $.step: expected "string", got "array"`,
 			},
 		},
 		"forms keep their position in the schema": {
@@ -686,7 +771,7 @@ func TestViolation_Alternatives(t *testing.T) {
 			]}}}`,
 			input: "v:\n  a: x\n",
 			want: []string{
-				`2:3: $.v: value matches none of the allowed forms`,
+				`1:1: $.v: value matches none of the allowed forms`,
 				`  form 1`,
 				`    2:6: $.v.a: expected "integer", got "string"`,
 				`  form 2`,

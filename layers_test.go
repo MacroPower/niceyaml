@@ -47,7 +47,7 @@ func ExampleLayers() {
 	fmt.Println(niceyaml.FormatError(err, 0))
 
 	// Output:
-	// |-- prod.yaml:4:5: $.servers[0].port: port must be at least 1
+	// |-- prod.yaml:4:3: $.servers[0].port: port must be at least 1
 	// `-- base.yaml:3:9: $.server.port: port must be at least 1
 	//
 	// base.yaml
@@ -56,7 +56,7 @@ func ExampleLayers() {
 	//
 	// prod.yaml
 	//    4 |   - host: cache.internal
-	//      |     ^^^^ port must be at least 1
+	//      |   ^ port must be at least 1
 }
 
 func ExampleLayers_Document() {
@@ -189,11 +189,11 @@ func TestLayers_SelfValidate(t *testing.T) {
 		},
 		"an element binds in the layer that holds the sequence": {
 			layers: []string{"servers:\n  - {host: a, port: 80}\n", "servers:\n  - {host: x}\n"},
-			err:    "prod.yaml:2:6: $.servers[0].port: " + portMessage,
+			err:    "prod.yaml:2:3: $.servers[0].port: " + portMessage,
 		},
 		"an element of an array binds in the layer that holds the sequence": {
 			layers: []string{"pair:\n  - {host: a, port: 80}\n", "pair:\n  - {host: x}\n"},
-			err:    "prod.yaml:2:6: $.pair[0].port: " + portMessage,
+			err:    "prod.yaml:2:3: $.pair[0].port: " + portMessage,
 		},
 		"a field of a map entry binds in the layer that sets it": {
 			layers: []string{
@@ -494,7 +494,7 @@ func TestLayers_DecodeInto(t *testing.T) {
 		err := niceyaml.NewLayers(nodes...).DecodeInto(t.Context(), &cfg)
 		require.EqualError(t, err, "base.yaml: 2 problems\n"+
 			"base.yaml:2:9: $.server.port: expected integer, got string\n"+
-			"prod.yaml:1:8: $.name: expected string, got sequence")
+			"prod.yaml:1:1: $.name: expected string, got sequence")
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
 	})
 
@@ -705,7 +705,7 @@ func TestLayers_DecodeInto(t *testing.T) {
 			},
 			"the value itself": {
 				err:  niceyaml.NewError("bad server", niceyaml.AtPath(paths.Doc())),
-				want: "prod.yaml:2:3: $.server: bad server",
+				want: "prod.yaml:1:1: $.server: bad server",
 			},
 			"a key no layer holds": {
 				err:  niceyaml.NewError("tls is required", niceyaml.AtPath(paths.Doc().Child("tls"))),
@@ -1064,7 +1064,7 @@ func TestLayers_Document(t *testing.T) {
 			},
 			"at a scoped Node": {
 				err:  server.NewError("here"),
-				want: "prod.yaml:2:3: $.server: here",
+				want: "prod.yaml:1:1: $.server: here",
 			},
 			"of a decode of one value": {
 				err:  wrongType,
@@ -1257,7 +1257,7 @@ func TestLayers_Bind(t *testing.T) {
 		},
 		"a mapping that both layers hold binds in the higher one": {
 			err:  niceyaml.NewError("bad server", niceyaml.AtPath(paths.Doc().Child("server"))),
-			want: "prod.yaml:2:3: $.server: bad server",
+			want: "prod.yaml:1:1: $.server: bad server",
 		},
 		"a key binds in the layer of its value": {
 			err:  niceyaml.NewError("bad key", niceyaml.AtPath(portPath.Key())),

@@ -4677,6 +4677,140 @@ func TestSourceError_Range(t *testing.T) {
 	}
 }
 
+func TestSourceError_Range_Collection(t *testing.T) {
+	t.Parallel()
+
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		name: api
+		spec:
+		  ports:
+		    - name: web
+		      port: 80
+		    - {name: admin}
+		  tags: [a, b]
+		  matrix: [[1], {k: v}]
+		  empty: {}
+		base: &base
+		  x: 1
+		copy: *base
+	`), niceyaml.WithName("x.yaml"))
+
+	// An error at a mapping or a sequence points at the token that
+	// introduces it, and one at a scalar or an alias at its own token.
+	tcs := map[string]struct {
+		path string
+		want string
+		rng  position.Range
+	}{
+		"block mapping at the root covers its first key": {
+			path: "$",
+			want: "x.yaml:1:1: $: bad",
+			rng:  position.NewRange(position.New(0, 0), position.New(0, 4)),
+		},
+		"block mapping under a key covers the key": {
+			path: "$.spec",
+			want: "x.yaml:2:1: $.spec: bad",
+			rng:  position.NewRange(position.New(1, 0), position.New(1, 4)),
+		},
+		"block sequence under a key covers the key": {
+			path: "$.spec.ports",
+			want: "x.yaml:3:3: $.spec.ports: bad",
+			rng:  position.NewRange(position.New(2, 2), position.New(2, 7)),
+		},
+		"block mapping element covers its dash": {
+			path: "$.spec.ports[0]",
+			want: "x.yaml:4:5: $.spec.ports[0]: bad",
+			rng:  position.NewRange(position.New(3, 4), position.New(3, 5)),
+		},
+		"key selector on an element covers its dash": {
+			path: "$.spec.ports[0]~",
+			want: "x.yaml:4:5: $.spec.ports[0]~: bad",
+			rng:  position.NewRange(position.New(3, 4), position.New(3, 5)),
+		},
+		"flow mapping element of a block sequence covers its dash": {
+			path: "$.spec.ports[1]",
+			want: "x.yaml:6:5: $.spec.ports[1]: bad",
+			rng:  position.NewRange(position.New(5, 4), position.New(5, 5)),
+		},
+		"flow sequence under a key covers the key": {
+			path: "$.spec.tags",
+			want: "x.yaml:7:3: $.spec.tags: bad",
+			rng:  position.NewRange(position.New(6, 2), position.New(6, 6)),
+		},
+		"flow sequence in a flow sequence covers its bracket": {
+			path: "$.spec.matrix[0]",
+			want: "x.yaml:8:12: $.spec.matrix[0]: bad",
+			rng:  position.NewRange(position.New(7, 11), position.New(7, 12)),
+		},
+		"flow mapping in a flow sequence covers its brace": {
+			path: "$.spec.matrix[1]",
+			want: "x.yaml:8:17: $.spec.matrix[1]: bad",
+			rng:  position.NewRange(position.New(7, 16), position.New(7, 17)),
+		},
+		"empty mapping under a key covers the key": {
+			path: "$.spec.empty",
+			want: "x.yaml:9:3: $.spec.empty: bad",
+			rng:  position.NewRange(position.New(8, 2), position.New(8, 7)),
+		},
+		"anchored mapping under a key covers the key": {
+			path: "$.base",
+			want: "x.yaml:10:1: $.base: bad",
+			rng:  position.NewRange(position.New(9, 0), position.New(9, 4)),
+		},
+		"alias to a mapping covers the alias": {
+			path: "$.copy",
+			want: "x.yaml:12:7: $.copy: bad",
+			rng:  position.NewRange(position.New(11, 6), position.New(11, 7)),
+		},
+		"scalar under a key covers the scalar": {
+			path: "$.spec.ports[0].name",
+			want: "x.yaml:4:13: $.spec.ports[0].name: bad",
+			rng:  position.NewRange(position.New(3, 12), position.New(3, 15)),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			path := paths.MustParse(tc.path)
+
+			err := doc.Bind(niceyaml.NewError("bad", niceyaml.AtPath(path)))
+			require.EqualError(t, err, tc.want)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			got, ok := bound.Range()
+			require.True(t, ok)
+			assert.Equal(t, tc.rng, got)
+
+			// The path of the error still names the value.
+			kept, ok := bound.Path()
+			require.True(t, ok)
+			assert.Equal(t, path, kept)
+
+			ranges, err := doc.Ranges(path)
+			require.NoError(t, err)
+			assert.Equal(t, position.Ranges{tc.rng}, ranges)
+		})
+	}
+
+	t.Run("the excerpt marks the line that names the value", func(t *testing.T) {
+		t.Parallel()
+
+		err := doc.Bind(niceyaml.NewError("at most 1 port", niceyaml.AtPath(paths.Doc().Child("spec", "ports"))))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"x.yaml:3:3: $.spec.ports: at most 1 port",
+			"",
+			"   3 |   ports:",
+			"     |   ^^^^^",
+		), niceyaml.FormatError(err, 0))
+	})
+}
+
 func TestSourceError_Range_EmptyValue(t *testing.T) {
 	t.Parallel()
 
@@ -8328,7 +8462,7 @@ func TestRebase(t *testing.T) {
 
 		child := se.Members()[0]
 		assert.NotPanics(t, func() {
-			assert.Equal(t, "3:3: $.hours:", strings.TrimSpace(child.Error()))
+			assert.Equal(t, "2:1: $.hours:", strings.TrimSpace(child.Error()))
 			assert.Equal(t, "\n", child.Message())
 			assert.Contains(t, niceyaml.FormatError(bound, 1), "invalid hours\n")
 		})
@@ -8339,7 +8473,7 @@ func TestRebase(t *testing.T) {
 			rows = append(rows, strings.TrimSpace(problem.Text))
 		}
 
-		assert.Equal(t, []string{"3:3: $.hours:"}, rows)
+		assert.Equal(t, []string{"2:1: $.hours:"}, rows)
 	})
 
 	t.Run("path composes with the base", func(t *testing.T) {
@@ -8383,7 +8517,7 @@ func TestRebase(t *testing.T) {
 		dd := yamltest.FirstDocument(t, input)
 
 		err := dd.Bind(niceyaml.Rebase(errors.New("bad hours"), hours))
-		require.EqualError(t, err, "3:3: $.hours: bad hours")
+		require.EqualError(t, err, "2:1: $.hours: bad hours")
 
 		var e *niceyaml.Error
 
@@ -8459,9 +8593,9 @@ func TestRebase(t *testing.T) {
 		}
 
 		assert.Equal(t, []string{
-			"3:3: $.hours: bad hours\n3:9: $.hours.open: bad open",
+			"2:1: $.hours: bad hours\n3:9: $.hours.open: bad open",
 			"3:9: $.hours.open: bad open",
-			"3:3: $.hours: bad hours",
+			"2:1: $.hours: bad hours",
 		}, got)
 	})
 
@@ -8592,8 +8726,8 @@ func TestRebase(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 		require.Len(t, bound.Members(), 2)
-		assert.Equal(t, "3:3: $.hours: bad open", bound.Members()[0].Error())
-		assert.Equal(t, "3:3: $.hours: bad close", bound.Members()[1].Error())
+		assert.Equal(t, "2:1: $.hours: bad open", bound.Members()[0].Error())
+		assert.Equal(t, "2:1: $.hours: bad close", bound.Members()[1].Error())
 
 		_, ok := bound.Range()
 		assert.False(t, ok)
@@ -8607,7 +8741,7 @@ func TestRebase(t *testing.T) {
 		report := niceyaml.NewError("invalid hours", niceyaml.WithDetails(errors.New("bad hours")))
 
 		err := dd.Bind(niceyaml.Rebase(report, hours))
-		require.EqualError(t, err, "3:3: $.hours: invalid hours")
+		require.EqualError(t, err, "2:1: $.hours: invalid hours")
 
 		var bound *niceyaml.SourceError
 
@@ -8895,7 +9029,7 @@ func TestRebase_Anchors(t *testing.T) {
 			err:      func() error { return niceyaml.Rebase(errors.New("bad"), hoursPath) },
 			node:     doc,
 			wantPath: "$.spec.hours",
-			want:     `4:5: $.spec.hours: bad`,
+			want:     `3:3: $.spec.hours: bad`,
 		},
 		"absolute base stops the bases above it": {
 			err: func() error {
@@ -9508,13 +9642,13 @@ func TestBindValue_Place(t *testing.T) {
 			"location above one problem": {
 				wrap:     func(err error) error { return niceyaml.Invalid(err, at) },
 				problems: 1,
-				want:     "app.yaml:2:3: $.request: 0 is less than 1",
+				want:     "app.yaml:1:1: $.request: 0 is less than 1",
 			},
 			"location above two problems": {
 				wrap:     func(err error) error { return niceyaml.Invalid(err, at) },
 				problems: 2,
 				want: stringtest.JoinLF(
-					"app.yaml:2:3: $.request: 2 violations",
+					"app.yaml:1:1: $.request: 2 violations",
 					"app.yaml:1:1: $.request.name: name is required",
 					"app.yaml:2:9: $.request.port: 0 is less than 1",
 				),
@@ -9523,7 +9657,7 @@ func TestBindValue_Place(t *testing.T) {
 				wrap:     func(err error) error { return fmt.Errorf("check: %w", niceyaml.Place(err, at)) },
 				problems: 2,
 				want: stringtest.JoinLF(
-					"app.yaml:2:3: $.request: check: 2 violations",
+					"app.yaml:1:1: $.request: check: 2 violations",
 					"app.yaml:1:1: $.request.name: name is required",
 					"app.yaml:2:9: $.request.port: 0 is less than 1",
 				),
@@ -10539,9 +10673,9 @@ func TestSourceError_Nearest(t *testing.T) {
 	}{
 		"key an element of a sequence leaves out": {
 			err:  niceyaml.NewError("name is required", niceyaml.AtPath(name)),
-			want: "cfg.yaml:4:5: $.servers[1].name: name is required",
+			want: "cfg.yaml:4:3: $.servers[1].name: name is required",
 			near: "$.servers[1]",
-			rng:  position.NewRange(position.New(3, 4), position.New(3, 8)),
+			rng:  position.NewRange(position.New(3, 2), position.New(3, 3)),
 		},
 		"key the root leaves out": {
 			err:  niceyaml.NewError("owner is required", niceyaml.AtPath(paths.Current().Child("owner"))),
@@ -10560,9 +10694,9 @@ func TestSourceError_Nearest(t *testing.T) {
 				niceyaml.NewError("name is required", niceyaml.AtPath(paths.Current().Child("name"))),
 				second,
 			),
-			want: "cfg.yaml:4:5: $.servers[1].name: name is required",
+			want: "cfg.yaml:4:3: $.servers[1].name: name is required",
 			near: "$.servers[1]",
-			rng:  position.NewRange(position.New(3, 4), position.New(3, 8)),
+			rng:  position.NewRange(position.New(3, 2), position.New(3, 3)),
 		},
 		"key the document holds": {
 			err: niceyaml.NewError(
@@ -10640,11 +10774,11 @@ func TestSourceError_Nearest(t *testing.T) {
 		err := doc.Bind(niceyaml.NewError("name is required", niceyaml.AtPath(name)))
 
 		assert.Equal(t, stringtest.JoinLF(
-			"cfg.yaml:4:5: $.servers[1].name: name is required",
+			"cfg.yaml:4:3: $.servers[1].name: name is required",
 			"",
 			"   3 |     name: a",
 			"   4 |   - port: 81",
-			"     |     ^^^^",
+			"     |   ^",
 			"   5 | tls:",
 		), niceyaml.FormatError(err, 1))
 
@@ -10667,23 +10801,23 @@ func TestSourceError_Nearest(t *testing.T) {
 
 		assert.Equal(t, stringtest.JoinLF(
 			"cfg.yaml: 2 problems",
-			"|-- 4:5: $.servers[1].name: name is required",
+			"|-- 4:3: $.servers[1].name: name is required",
 			"`-- 5:1: $.tls.cert: cert is required",
 			"",
 			"   4 |   - port: 81",
-			"     |     ^^^^ name is required",
+			"     |   ^ name is required",
 			"   5 | tls:",
 			"     | ^^^ cert is required",
 		), niceyaml.FormatError(err, 0))
 	})
 
-	t.Run("a scoped Node binds a key it leaves out at its own first key", func(t *testing.T) {
+	t.Run("a scoped Node binds a key it leaves out at the dash of its element", func(t *testing.T) {
 		t.Parallel()
 
 		scoped := yamltest.At(t, doc, second)
 
 		err := scoped.Bind(niceyaml.NewError("name is required", niceyaml.AtPath(paths.Current().Child("name"))))
-		require.EqualError(t, err, "cfg.yaml:4:5: $.servers[1].name: name is required")
+		require.EqualError(t, err, "cfg.yaml:4:3: $.servers[1].name: name is required")
 
 		var bound *niceyaml.SourceError
 
@@ -10698,7 +10832,7 @@ func TestSourceError_Nearest(t *testing.T) {
 		t.Parallel()
 
 		_, err := doc.Decode[requiredNames](t.Context())
-		require.EqualError(t, err, "cfg.yaml:4:5: $.servers[1].name: name is required")
+		require.EqualError(t, err, "cfg.yaml:4:3: $.servers[1].name: name is required")
 	})
 
 	t.Run("a binding that wraps one bound at a mapping reports that mapping", func(t *testing.T) {
@@ -11375,7 +11509,7 @@ func TestInvalid(t *testing.T) {
 			},
 			"invalid value": {
 				check: func() error { return errors.New("closes before it opens") },
-				want:  "cfg.yaml:2:3: $.hours: closes before it opens",
+				want:  "cfg.yaml:1:1: $.hours: closes before it opens",
 			},
 		}
 
@@ -11724,7 +11858,7 @@ func TestPlace(t *testing.T) {
 		}{
 			"no location": {
 				err:  niceyaml.Place(errStat),
-				want: "cfg.yaml:2:3: $.hours: stat license: permission denied",
+				want: "cfg.yaml:1:1: $.hours: stat license: permission denied",
 			},
 			"path from the value": {
 				err:  niceyaml.Place(errStat, niceyaml.AtPath(paths.Current().Child("close"))),

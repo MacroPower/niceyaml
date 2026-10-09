@@ -961,12 +961,24 @@ type errorConfig struct {
 // AtPath is an [ErrorOption] that sets the YAML path of the value the
 // error is about. It replaces a path set before it. The error points at
 // the node the path selects, which for a mapping entry is its value, so
-// [SourceError.Excerpt] highlights the value, and for a mapping or
-// sequence it highlights the first key or element. [AtPosition] or
-// [AtRange] narrows the location to the characters at fault instead, and
-// the path then names the value in the message of the binding alone. A
-// path from [paths.Path.Key] points at the key of the entry instead,
-// which suits an error about the key itself, such as an unknown field:
+// [SourceError.Excerpt] highlights a scalar value. A mapping or a
+// sequence spans many lines, so the error points at the token that
+// introduces it, as [paths.Path.Token] describes. That is the key of the
+// entry that holds it, or the "-" of the element it is in a block
+// sequence. With neither, it is the "{" or "[" of a flow mapping or a
+// flow sequence, and the first key or element of a block mapping or a
+// block sequence at the root. An error about a sequence as a whole, such
+// as one with too many elements, thus carries the path of the sequence
+// and marks the line that names it:
+//
+//	niceyaml.NewError("at most 1 member", niceyaml.AtPath(paths.Current().Child("pool", "members")))
+//	// cfg.yaml:2:3: $.pool.members: at most 1 member
+//
+// [AtPosition] or [AtRange] narrows the location to the characters at
+// fault instead, and the path then names the value in the message of the
+// binding alone. A path from [paths.Path.Key] points at the key of the
+// entry whatever its value holds, which suits an error about the key
+// itself, such as an unknown field:
 //
 //	niceyaml.NewError("unknown field", niceyaml.AtPath(paths.Current().Child("spec", "foo").Key()))
 //
@@ -4028,8 +4040,10 @@ func (e *SourceError) Unresolved() error {
 // [SourceError.Range] then covers the key `server`, [SourceError.Path]
 // and the message keep the path as the error carries it, and
 // [SourceError.Unresolved] returns nil. A mapping that is an element of a
-// sequence, or the root of the document, has no key, so the range covers
-// its first key instead, as it does for an error at the mapping itself.
+// sequence, or the root of the document, has no key. The range then
+// covers the token an error at the mapping itself points at, as [AtPath]
+// describes: the "-" of an element of a block sequence, or the first key
+// of a block mapping at the root.
 //
 // [go.jacobcolvin.com/niceyaml/paths.Resolver.Nearest] finds the mapping
 // and says which paths have one. A path that misspells a name binds at

@@ -1836,16 +1836,40 @@ func (n *Node) FS() fs.FS {
 // under its node starts on through the one the last token ends on. The
 // node of a mapping entry is its value, so the line of the key is in the
 // span only when the value starts on it, and a scope from
-// [paths.Path.Key] covers the key. The node of a path that ends at an
-// alias, such as `$.c` in `c: *x`, is the content of the anchor, so the
-// span covers the lines of that content, which [Node.AST], [Node.Decode],
-// and [Node.Tokens] read. [Node.Ranges] of the scope and an error bound at
-// its root resolve to the alias, where the path points. They lie outside
-// the span unless the alias shares a line with that content, as it can in
-// a flow collection. A tag on the alias keeps the node at the tag, as
-// [paths.Path.Node] describes, so the node of `$.c` in `c: !t *x` is the
-// tag with the alias under it, and the span covers the line of the alias
-// instead. A scope that selects nothing covers no lines.
+// [paths.Path.Key] covers the key. A scope that selects nothing covers no
+// lines.
+//
+// [Node.Ranges] of the scope and an error bound at its root resolve to
+// the token the path of the scope points at, as [paths.Path.Token]
+// describes. For a mapping or a sequence that token is the key of its
+// entry or the "-" of its element. It lies on the line above the span
+// when the value starts below it, as a block mapping under a key does:
+//
+//	hours:      # an error at $.hours binds here
+//	  open: 9   # the span of $.hours starts here
+//	  close: 5
+//
+// [SourceError.Annotate] marks the lines a view holds, so it marks
+// nothing on [Node.View] for such an error and reports false. A caller
+// that shows the scope with that error slices a view from the line of
+// the error:
+//
+//	view := hours.View()
+//	if pos, ok := bound.Position(); ok && pos.Line < hours.Span().Start {
+//		view = hours.Source().View().Slice(position.NewSpan(pos.Line, hours.Span().End))
+//	}
+//
+//	bound.Annotate(view)
+//
+// The node of a path that ends at an alias, such as `$.c` in `c: *x`, is
+// the content of the anchor, so the span covers the lines of that
+// content, which [Node.AST], [Node.Decode], and [Node.Tokens] read.
+// Node.Ranges of the scope and an error bound at its root resolve to the
+// alias, where the path points. They lie outside the span unless the
+// alias shares a line with that content, as it can in a flow collection.
+// A tag on the alias keeps the node at the tag, as [paths.Path.Node]
+// describes, so the node of `$.c` in `c: !t *x` is the tag with the alias
+// under it, and the span covers the line of the alias instead.
 //
 // [Node.View] returns a view of the source sliced to the span, so a
 // caller that renders the node need not slice one itself. The span
@@ -1881,24 +1905,30 @@ func (n *Node) Span() position.Span {
 // nor another view. The view shares its lines with every view over the
 // source, so [SourceError.Annotate] marks a bound error on it as on a
 // view of the whole source when the location of the error lies in
-// [Node.Span]. An error outside the span, such as one bound at the root
-// of a scope whose path ends at an alias on a line below the content of
-// the anchor, marks nothing on the view.
+// [Node.Span]. An error outside the span marks nothing on the view, and
+// Annotate reports false for it. An error bound at the root of a scope
+// lies above the span when the scope is a block mapping or a block
+// sequence under a key. It lies below the span when the path of the scope
+// ends at an alias on a line below the content of the anchor. Node.Span
+// shows how to slice a view that holds the line of such an error.
 func (n *Node) View() *line.View {
 	return line.NewView(n.source.lines, n.span)
 }
 
-// Ranges returns the ranges of the token that starts the node at path, the
-// token [paths.Path.Token] resolves, one per line the token spans, without
-// the spaces around its content. They are the ranges [SourceError.Excerpt]
+// Ranges returns the ranges of the token path points at, the token
+// [paths.Path.Token] resolves, one per line the token spans, without the
+// spaces around its content. They are the ranges [SourceError.Excerpt]
 // highlights for an [Error] built with [AtPath] at that path, and the path
 // resolves as it does in such an Error: an `@` path from the scope of the
 // Node, and a `$` path, such as one from [SourceError.Path], from the root
-// of the document. A scalar covers every line of its text, a block scalar
-// its indicator, a mapping its first key, and a sequence its first
-// element. A path from
-// [paths.Path.Key] covers the key of the entry rather than its value.
-// The ranges mark where the value starts on a view of the source:
+// of the document. A scalar covers every line of its text, and a block
+// scalar its indicator. A mapping or a sequence covers the token that
+// introduces it: the key of the entry that holds it, the "-" of the
+// element it is in a block sequence, or else its own "{" or "[". A block
+// mapping or a block sequence at the root covers its first key or its
+// first element. A path from [paths.Path.Key] covers the key of the
+// entry whatever its value holds. The ranges mark the value on a view of
+// the source:
 //
 //	ranges, err := doc.Ranges(paths.Doc().Child("spec", "replicas"))
 //	if err != nil {
@@ -2693,7 +2723,7 @@ func WithAllowedFieldPrefixes(prefixes ...string) DecodeOption {
 // fn binds an error fn returns in the document, so fn returns the
 // rejection as it is:
 //
-//	config.yaml:3:6: $.nets[1]: expected string, got mapping
+//	config.yaml:3:3: $.nets[1]: expected string, got mapping
 //
 // An error of fn's own binds at the value. An [*Error] that fn returns
 // writes an `@` path that reads from the value, as the error of a
@@ -2983,8 +3013,8 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // anchor defines it, which can lie outside the scope of a Node from
 // [Node.At]. The error binds where that path resolves, so it marks the
 // token an error from a validator at the same path marks. For a mapping
-// or a sequence that is the first key or element, and for a value under
-// a tag it is the value.
+// or a sequence that is the token that introduces it, as [AtPath]
+// describes, and for a scalar under a tag it is the scalar.
 //
 // A path cannot select every value. The earlier of two entries with one
 // key is such a value, which a decode into a map reads when
@@ -3121,7 +3151,7 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // own, which names neither the value nor its kind. DecodeInto reports
 // that value as it reports one a string field rejects:
 //
-//	config.yaml:4:6: $.nets[1]: expected string, got sequence
+//	config.yaml:4:3: $.nets[1]: expected string, got sequence
 //
 // Under [WithJSONUnmarshalers], a type that has an UnmarshalJSON method
 // too takes the mapping or the sequence through that method instead.

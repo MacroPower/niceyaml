@@ -42,8 +42,9 @@ type Target struct {
 	// The node at the location, or nil when the walk could not follow the
 	// path to it.
 	Node ast.Node
-	// The entry that holds Node, when a member name reached it.
-	Entry *ast.MappingValueNode
+	// What holds Node: the entry of a member name that reached it, or the
+	// sequence and the index of an element step that did.
+	Parent astnode.Parent
 	// The path that names the location.
 	Path paths.Path
 	// Whether the walk wrote a decoded name it could not show to select
@@ -55,7 +56,7 @@ type Target struct {
 // location and wrote a path it could not show to select it. With key set,
 // the error is about the key of the member, as a path that ends in
 // [paths.Path.Key] is. The token is the one a path to the location would
-// resolve to: the token that starts the node, or the key of its entry.
+// resolve to, as [Target.Start] gives it.
 //
 // It returns nil when the path selects the location, and when the walk
 // did not reach the location, as it cannot through a mapping whose keys
@@ -71,35 +72,24 @@ func (t Target) Token(key bool) *token.Token {
 
 // Start returns the token a path to the location of t would resolve to,
 // whether or not the path of t selects the location. With key set, that
-// is the key of the entry that holds the node, and the token that starts
-// the node otherwise or where no entry holds it. It returns nil when the
-// walk did not reach the location.
+// is the key of the entry that holds the node, as [astnode.KeyToken]
+// gives it. Otherwise, and where no entry with a key holds the node, it
+// is the token [astnode.PathToken] gives the node: its own token for a
+// scalar, and the key of its entry or the "-" of its element for a
+// mapping or a sequence. It returns nil when the walk did not reach the
+// location.
 func (t Target) Start(key bool) *token.Token {
 	if astnode.IsNil(t.Node) {
 		return nil
 	}
 
-	if key && t.Entry != nil {
-		return keyToken(t.Entry)
+	if key {
+		if tk := astnode.KeyToken(t.Parent.Entry); tk != nil {
+			return tk
+		}
 	}
 
-	return astnode.FirstToken(t.Node)
-}
-
-// keyToken returns the token that starts the key of entry, without the `?`
-// of an explicit key, as a path that ends in [paths.Path.Key] resolves
-// it. An entry with no key gives the token that starts its value.
-func keyToken(entry *ast.MappingValueNode) *token.Token {
-	if astnode.Content(entry.Key) == nil {
-		return astnode.FirstToken(entry.Value)
-	}
-
-	key := ast.Node(entry.Key)
-	if explicit, ok := key.(*ast.MappingKeyNode); ok {
-		key = explicit.Value
-	}
-
-	return astnode.FirstToken(key)
+	return astnode.PathToken(t.Node, t.Parent)
 }
 
 // Index finds the members of the mappings of one document by the names a
@@ -195,7 +185,7 @@ func (idx *Index) Member(t Target, name string) Target {
 	}
 
 	t.Path = t.Path.Child(name)
-	t.Node, t.Entry = member.value, member.entry
+	t.Node, t.Parent = member.value, astnode.Parent{Entry: member.entry}
 
 	return t
 }
@@ -208,8 +198,14 @@ func (idx *Index) Member(t Target, name string) Target {
 //
 // Panics if index is below 0, as [paths.Path.Index] does.
 func (idx *Index) Element(t Target, index int) Target {
+	content := idx.Deref(t.Node)
+
 	t.Path = t.Path.Index(index)
-	t.Node, t.Entry = ElementNode(idx.Deref(t.Node), index), nil
+	t.Node, t.Parent = ElementNode(content, index), astnode.Parent{}
+
+	if seq, ok := content.(*ast.SequenceNode); ok && !astnode.IsNil(t.Node) {
+		t.Parent = astnode.Parent{Sequence: seq, Index: index}
+	}
 
 	return t
 }

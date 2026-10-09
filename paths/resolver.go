@@ -102,15 +102,15 @@ func (r *Resolver) nodeOf(p Path, m match) (ast.Node, error) {
 	return node, nil
 }
 
-// Token resolves the token that starts the node at p in the document of
-// the Resolver, as [Path.Token] does, with the same results and errors.
+// Token resolves the token p points at in the document of the Resolver,
+// as [Path.Token] does, with the same results and errors.
 func (r *Resolver) Token(p Path) (*token.Token, error) {
 	m, err := p.single(r.resolver, r.doc)
 	if err != nil {
 		return nil, err
 	}
 
-	return p.tokenOf(m.node)
+	return p.tokenOf(m)
 }
 
 // Nearest returns the path of the mapping that lacks a key p names, and

@@ -206,7 +206,7 @@ func TestIndex_Element(t *testing.T) {
 			input:     "items:\n  - name: x\n  - name: y\n",
 			steps:     []any{"items", 1},
 			want:      "@.items[1]",
-			wantStart: "3:5",
+			wantStart: "3:3",
 		},
 		"element behind an alias": {
 			input:     "base: &base [a, b]\nal: *base\n",
@@ -241,7 +241,7 @@ func TestIndex_Element(t *testing.T) {
 
 			assert.Equal(t, tc.want, got.Path.String())
 			assert.False(t, got.Unspelled)
-			assert.Nil(t, got.Entry)
+			assert.Nil(t, got.Parent.Entry)
 			assert.Equal(t, tc.wantStart, at(got.Start(false)))
 		})
 	}
@@ -278,6 +278,35 @@ func TestTarget_Start(t *testing.T) {
 		},
 		"root has no key": {
 			input:   "a: x\n",
+			want:    "1:1",
+			wantKey: "1:1",
+		},
+		"mapping under a key points at the key": {
+			input:   "ports:\n  0x10:\n    name: x\n",
+			steps:   []any{"ports", "16"},
+			want:    "2:3",
+			wantKey: "2:3",
+		},
+		"sequence under a key points at the key": {
+			input:   "items:\n  - x\n",
+			steps:   []any{"items"},
+			want:    "1:1",
+			wantKey: "1:1",
+		},
+		"mapping element points at its dash": {
+			input:   "items:\n  - name: x\n",
+			steps:   []any{"items", 0},
+			want:    "2:3",
+			wantKey: "2:3",
+		},
+		"flow mapping element of a flow sequence points at its brace": {
+			input:   "items: [{a: 1}, {b: 2}]\n",
+			steps:   []any{"items", 1},
+			want:    "1:17",
+			wantKey: "1:17",
+		},
+		"flow sequence at the root points at its bracket": {
+			input:   "[a, b]\n",
 			want:    "1:1",
 			wantKey: "1:1",
 		},

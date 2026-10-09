@@ -405,15 +405,17 @@ func (r *layerReader) content(content ast.Node, ref bool) (*mergedValue, error) 
 }
 
 // invalid returns err as the error of node, a node the layer cannot
-// merge, at the token that starts the content of node. A node of a
-// reference document has no position in the layer, so its error carries
-// none.
+// merge: an alias, a scalar, or the key of an entry. The error lies at
+// the token a path to such a node points at, as [astnode.PathToken] gives
+// it for a node with no parent. That is its own token, or the "{" or "["
+// of a key in flow style. A node of a reference document has no position
+// in the layer, so its error carries none.
 func (r *layerReader) invalid(err error, node ast.Node, ref bool) error {
 	if ref {
 		return Invalid(err)
 	}
 
-	return Invalid(err, atToken(astnode.FirstToken(astnode.Content(node))))
+	return Invalid(err, atToken(astnode.PathToken(astnode.Content(node), astnode.Parent{})))
 }
 
 // mappingEntries returns the entries of content, and reports whether

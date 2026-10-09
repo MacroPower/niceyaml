@@ -342,10 +342,13 @@ func (p Path) IndexAll() Path {
 // mapping, and [Path.Token] still gives the key text. Where the path
 // selects no entry, such as a sequence element or the root, the `~`
 // selects the node the path already does, so an error at such a path
-// highlights the same text with or without it.
+// highlights the same text with or without it. A path to a mapping or a
+// sequence under a key points at that key already, as [Path.Token]
+// describes, so the `~` there changes the node the path selects and
+// leaves the token it points at.
 //
 //	name := paths.Doc().Child("metadata", "name")
-//	value, err := name.Token(doc)       // the token that starts the value
+//	value, err := name.Token(doc)       // the token of the value
 //	key, err := name.Key().Token(doc)   // the key token "name"
 func (p Path) Key() Path {
 	return p.extend(segment{kind: segmentKey})
@@ -954,12 +957,26 @@ func (p Path) Node(doc *ast.DocumentNode) (ast.Node, error) {
 	return NewResolver(doc).Node(p)
 }
 
-// Token resolves the [*token.Token] that starts the node the path selects
-// in doc: a scalar's own token, the first key of a mapping, or the first
-// element of a sequence. For a mapping entry that is the token of its
-// value, and for a path ending in the `~` selector from [Path.Key] it is
-// the token of the key. An alias resolves to its own token rather than the
-// anchor's content, since that is where the path points in the source.
+// Token resolves the [*token.Token] the path points at in doc, where an
+// error at the path binds. A scalar is its own token. A mapping or a
+// sequence spans many lines, so it points at the token that introduces
+// it:
+//
+//   - The value of a mapping entry points at the key of the entry,
+//     whether the value is in block or flow style.
+//   - An element of a block sequence points at its "-".
+//   - Any other flow mapping or flow sequence points at its own "{" or
+//     "[", such as one at the root or an element of a flow sequence.
+//   - A block mapping or a block sequence at the root points at its
+//     first key or its first element.
+//
+// Token looks through the anchors and tags on a mapping or a sequence to
+// find that token. For a mapping or a sequence under a key, the token
+// lies outside the node [Path.Node] returns, and a path to the value
+// points where the same path ending in the `~` selector from [Path.Key]
+// does. A path ending in that selector points at the key of the entry.
+// An alias resolves to its own token rather than the anchor's content,
+// since that is where the path points in the source.
 //
 // The path resolves against the document body only, from its root whether
 // the path starts at `$` or `@`, so the same path resolves to different
@@ -974,11 +991,12 @@ func (p Path) Token(doc *ast.DocumentNode) (*token.Token, error) {
 	return NewResolver(doc).Token(p)
 }
 
-// tokenOf returns the token that starts node. A tree built by hand may hold
-// a typed nil where the parser always puts a node, and such a node has no
-// token to point at, which is [ErrNotFound].
-func (p Path) tokenOf(node ast.Node) (*token.Token, error) {
-	tk := astnode.FirstToken(node)
+// tokenOf returns the token p points at for m, a match of p, as
+// [astnode.PathToken] finds it. A tree built by hand may hold a typed nil
+// where the parser always puts a node, and such a node has no token to
+// point at, which is [ErrNotFound].
+func (p Path) tokenOf(m match) (*token.Token, error) {
+	tk := astnode.PathToken(m.node, m.parent())
 	if tk == nil {
 		return nil, fmt.Errorf("resolve %s: %w: node has no token", p, ErrNotFound)
 	}

@@ -56,6 +56,16 @@
 //	config.yaml:2:7: $.port: 0 is less than 1
 //	config.yaml:3:1: $.extra~: value is not allowed
 //
+// A violation carries the path of the value that breaks the schema. A
+// violation of additionalProperties or of propertyNames is about the key
+// of a member, so its path ends in `~`, as
+// [go.jacobcolvin.com/niceyaml/paths.Path.Key] writes one. A violation
+// about a mapping or a sequence as a whole, such as one of maxItems,
+// carries the path of that value and binds at the key that holds it, as
+// [go.jacobcolvin.com/niceyaml.AtPath] describes:
+//
+//	config.yaml:4:1: $.tags: array has 3 items, maximum is 2
+//
 // A member the schema requires and the document leaves out reports the
 // path it would have, such as $.server.name, and the error binds at the
 // key of the mapping that lacks it.

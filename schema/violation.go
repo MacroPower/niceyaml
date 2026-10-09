@@ -342,10 +342,15 @@ func (c converter) leaf(e *jsonschema.ValidationError) error {
 
 // at returns the options that give an error the location e fails at. The
 // first is the YAML path to that location. A failure that constrains the
-// key of a member, such as an additional property, points at the key
-// through [paths.Path.Key], and any other at the value. A failure about a
-// member the mapping leaves out, as [missingMember] finds one, has the
-// location [converter.atMissing] gives it instead.
+// key of a member, as [constrainsKey] reports, points at the key through
+// [paths.Path.Key], and any other at the value. A failure about a member
+// the mapping leaves out, as [missingMember] finds one, has the location
+// [converter.atMissing] gives it instead.
+//
+// A failure about the size or the elements of a mapping or a sequence,
+// such as one of maxItems, carries the path of that value. The error
+// binds at the key of the entry that holds the value, or at the "-" of
+// the element it is, as [niceyaml.AtPath] describes.
 //
 // The path spells each key as the source does, so a key the decoder
 // respells, such as 0x10 for the member name 16, still names its member.
@@ -364,18 +369,33 @@ func (c converter) at(e *jsonschema.ValidationError) []niceyaml.ErrorOption {
 		return c.atMissing(target, name)
 	}
 
+	key := constrainsKey(e)
+
 	path := target.Path
-	if e.TargetsKey() {
+	if key {
 		path = path.Key()
 	}
 
 	opts := []niceyaml.ErrorOption{niceyaml.AtPath(path)}
 
-	if tk := target.Token(e.TargetsKey()); tk != nil && tk.Position != nil {
+	if tk := target.Token(key); tk != nil && tk.Position != nil {
 		opts = append(opts, niceyaml.AtPosition(position.NewFromToken(tk)))
 	}
 
 	return opts
+}
+
+// constrainsKey reports whether e is a failure of a keyword that
+// constrains the key of the member at its instance location, rather than
+// the value. Those are additionalProperties, which allows no member of
+// that name, and propertyNames, which the name of the member breaks.
+func constrainsKey(e *jsonschema.ValidationError) bool {
+	switch e.Keyword {
+	case jsonschema.KeywordAdditionalProperties, jsonschema.KeywordPropertyNames:
+		return true
+	default:
+		return false
+	}
 }
 
 // atMissing returns the options that locate a failure about the member

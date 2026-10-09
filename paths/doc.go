@@ -12,8 +12,21 @@
 //
 //	p := paths.Doc().Child("metadata", "name")
 //	node, err := p.Node(doc)          // the value node
-//	value, err := p.Token(doc)        // the token that starts the value
+//	value, err := p.Token(doc)        // the token of the value
 //	key, err := p.Key().Token(doc)    // the key token "name"
+//
+// [Path.Token] gives the one token a path points at, where an error at
+// the path binds. A scalar is its own token. A mapping or a sequence
+// spans many lines, so its path points at the token that introduces it:
+// the key of the entry it is the value of, or the "-" of the block
+// sequence element it is. With neither, a flow mapping or a flow sequence
+// points at its own "{" or "[", and a block mapping or a block sequence
+// at the root points at its first key or its first element:
+//
+//	spec:            # $.spec points at "spec"
+//	  ports:         # $.spec.ports points at "ports"
+//	    - name: web  # $.spec.ports[0] points at "-"
+//	      port: 80   # $.spec.ports[0].port points at "80"
 //
 // Every method resolves within a single document, so callers working with
 // multi-document files pick the document first.

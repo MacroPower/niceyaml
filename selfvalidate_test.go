@@ -429,14 +429,14 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}](t.Context())
 
 		want := stringtest.JoinLF(
-			"cafe.yaml:2:3: $.schedule: schedule conflicts",
+			"cafe.yaml:1:1: $.schedule: schedule conflicts",
 			"|-- 2:9: $.schedule.open: opens here",
 			"`-- 3:10: $.schedule.close: closes here",
 		)
 
 		// The problem takes the location of the field whatever its details
 		// carry, and the details keep their own.
-		require.EqualError(t, err, "cafe.yaml:2:3: $.schedule: schedule conflicts")
+		require.EqualError(t, err, "cafe.yaml:1:1: $.schedule: schedule conflicts")
 		assert.Equal(t, want, report(err))
 
 		scoped := yamltest.At(t, doc, paths.Current().Child("schedule")).Bind(conflictingSchedule{}.Validate())
@@ -762,7 +762,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		`))
 
 		_, err := dd.Decode[parent](t.Context())
-		require.EqualError(t, err, "1:9: $.value: parent ran\n2:11: $.pointer: parent ran")
+		require.EqualError(t, err, "1:1: $.value: parent ran\n2:1: $.pointer: parent ran")
 	})
 
 	t.Run("an embedded field that decodes its struct validates at the struct", func(t *testing.T) {
@@ -1102,8 +1102,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err := dd.Decode[withRules](t.Context())
 		require.EqualError(t, err, stringtest.JoinLF(
-			"1:4: $.a: no rules",
-			"2:4: $.b: no rules",
+			"1:1: $.a: no rules",
+			"2:1: $.b: no rules",
 		))
 
 		type withFlags struct {
@@ -1115,8 +1115,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err = dd.Decode[withFlags](t.Context())
 		require.EqualError(t, err, stringtest.JoinLF(
-			"1:4: $.a: flag set",
-			"2:4: $.b: flag set",
+			"1:1: $.a: flag set",
+			"2:1: $.b: flag set",
 		))
 	})
 
@@ -3995,8 +3995,8 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 
 	// The stores report at the box when no tag says where the store sits.
 	boxErr := stringtest.JoinLF(
-		"app.yaml:2:5: $.stores[0].store.name: name is required",
-		"app.yaml:4:5: $.stores[1].store.limit.n: negative -3",
+		"app.yaml:2:3: $.stores[0].store.name: name is required",
+		"app.yaml:4:3: $.stores[1].store.limit.n: negative -3",
 	)
 
 	boxNearest := map[string]string{
@@ -4063,7 +4063,7 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 		"an element the method adds binds at its struct": {
 			target:  func() any { return new(withFleet) },
 			input:   "fleet:\n  servers:\n    - host: a\n",
-			err:     "app.yaml:2:3: $.fleet.servers[1].port: port out of range",
+			err:     "app.yaml:1:1: $.fleet.servers[1].port: port out of range",
 			nearest: map[string]string{"$.fleet.servers[1].port": "$.fleet"},
 		},
 		"an element the method moves reports at the element of its index": {
@@ -4091,33 +4091,33 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 		"a sorted list binds at the list": {
 			target:  func() any { return new(map[string]sortedLimits) },
 			input:   "limits:\n  - {n: 3}\n  - {n: -1}\n",
-			err:     "app.yaml:2:6: $.limits[0].n: negative -1",
+			err:     "app.yaml:1:1: $.limits[0].n: negative -1",
 			nearest: map[string]string{"$.limits[0].n": "$.limits"},
 		},
 		"a list with an element in front binds at the list": {
 			target:  func() any { return new(map[string]leadingLimits) },
 			input:   "limits:\n  - {n: 2}\n  - {n: -1}\n",
-			err:     "app.yaml:2:6: $.limits[2].n: negative -1",
+			err:     "app.yaml:1:1: $.limits[2].n: negative -1",
 			nearest: map[string]string{"$.limits[2].n": "$.limits"},
 		},
 		"a swapped array binds at the array": {
 			target:  func() any { return new(map[string]swappedLimits) },
 			input:   "limits: [{n: -1}, {n: 2}]\n",
-			err:     "app.yaml:1:11: $.limits[1].n: negative -1",
+			err:     "app.yaml:1:1: $.limits[1].n: negative -1",
 			nearest: map[string]string{"$.limits[1].n": "$.limits"},
 		},
 		"a map built from a list binds at the list": {
 			target:  func() any { return new(map[string]serversByHost) },
 			input:   "servers:\n  - {host: a, port: 70000}\n",
-			err:     "app.yaml:2:6: $.servers.a.port: port out of range",
+			err:     "app.yaml:1:1: $.servers.a.port: port out of range",
 			nearest: map[string]string{"$.servers.a.port": "$.servers"},
 		},
 		"keys that share a path below a map bind at the map": {
 			target: func() any { return new(map[string]limitsByAny) },
 			input:  "limits:\n  - {n: -1}\n  - {n: -2}\n",
 			err: stringtest.JoinLF(
-				"app.yaml:2:6: $.limits.1.n: negative -1",
-				"app.yaml:2:6: $.limits.1.n: negative -2",
+				"app.yaml:1:1: $.limits.1.n: negative -1",
+				"app.yaml:1:1: $.limits.1.n: negative -2",
 			),
 			nearest: map[string]string{"$.limits.1.n": "$.limits"},
 		},
@@ -4125,11 +4125,11 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 			target: func() any { return new(withShared) },
 			input:  "label: x\nhours:\n  - 17-09,-2\n",
 			err: stringtest.JoinLF(
-				"app.yaml:3:5: $.hours[0].1.n: negative -2",
+				"app.yaml:2:1: $.hours[0].1.n: negative -2",
 				"app.yaml: invalid hours",
 				"app.yaml:1:8: $.label: see the label",
-				"app.yaml:3:5: $.hours[0].1.open: opens late",
-				"app.yaml:3:5: $.hours[0].1: closes early",
+				"app.yaml:2:1: $.hours[0].1.open: opens late",
+				"app.yaml:2:1: $.hours[0].1: closes early",
 			),
 			nearest: map[string]string{
 				"$.hours[0].1":       "$.hours",

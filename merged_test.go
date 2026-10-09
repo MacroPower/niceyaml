@@ -44,9 +44,9 @@ func TestLayers_Decode_Merge(t *testing.T) {
 				"$.services.web.replicas": "prod.yaml:2:19",
 				"$.services.db.image":     "base.yaml:3:15",
 				"$.services.api.image":    "prod.yaml:4:12",
-				"$.services.web":          "prod.yaml:2:9",
-				"$.services.db":           "base.yaml:3:8",
-				"$.services":              "prod.yaml:2:3",
+				"$.services.web":          "prod.yaml:2:3",
+				"$.services.db":           "base.yaml:3:3",
+				"$.services":              "prod.yaml:1:1",
 				"$.services.web.port":     "prod.yaml:2:3",
 			},
 		},
@@ -69,7 +69,7 @@ func TestLayers_Decode_Merge(t *testing.T) {
 				"$.tags[0]":      "prod.yaml:1:8",
 				"$.tags[2]":      "prod.yaml",
 				"$.list[0].name": "prod.yaml:3:12",
-				"$.list[0].port": "prod.yaml:3:6",
+				"$.list[0].port": "prod.yaml:3:3",
 			},
 		},
 		"a mapping replaces a scalar and a sequence": {
@@ -100,9 +100,9 @@ func TestLayers_Decode_Merge(t *testing.T) {
 			layers: []string{"m: {a: 1}\ns: [x]\n", "m: {}\ns: []\n"},
 			want:   "m:\n  a: 1\ns: []\n",
 			binds: map[string]string{
-				"$.m":   "prod.yaml:1:4",
+				"$.m":   "prod.yaml:1:1",
 				"$.m.a": "base.yaml:1:8",
-				"$.s":   "prod.yaml:2:4",
+				"$.s":   "prod.yaml:2:1",
 			},
 		},
 		"empty collections stay where nothing fills them": {
@@ -782,7 +782,7 @@ func TestLayers_Decode_Unmarshaler(t *testing.T) {
 
 		// The layer on its own lacks the kind the type needs.
 		_, err := nodes[1].Decode[config](t.Context())
-		require.EqualError(t, err, "prod.yaml:1:9: $.store: store needs a kind")
+		require.EqualError(t, err, "prod.yaml:1:1: $.store: store needs a kind")
 
 		got, err := niceyaml.NewLayers(nodes...).Decode[config](t.Context())
 		require.NoError(t, err)
@@ -795,10 +795,10 @@ func TestLayers_Decode_Unmarshaler(t *testing.T) {
 		nodes := layerNodes(t, "name: base\nstore: {path: /a}\n", "store: {path: /b}\n")
 
 		_, err := niceyaml.NewLayers(nodes...).Decode[config](t.Context())
-		require.EqualError(t, err, "prod.yaml:1:9: $.store: store needs a kind")
+		require.EqualError(t, err, "prod.yaml:1:1: $.store: store needs a kind")
 
 		_, err = niceyaml.NewLayers(nodes[0], layerNodes(t, "name: prod\n")[0]).Decode[config](t.Context())
-		require.EqualError(t, err, "base.yaml:2:9: $.store: store needs a kind")
+		require.EqualError(t, err, "base.yaml:2:1: $.store: store needs a kind")
 	})
 }
 
@@ -1182,7 +1182,7 @@ func TestLayers_MergedLayer(t *testing.T) {
 		"$.server.port":     "base.yaml:6:9",
 		"$.server.host":     "mid.yaml:2:9",
 		"$.server.tls.cert": "prod.yaml:2:15",
-		"$.server":          "prod.yaml:2:3",
+		"$.server":          "prod.yaml:1:1",
 		"$.server.debug":    "prod.yaml:1:1",
 	}
 
