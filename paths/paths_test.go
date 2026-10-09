@@ -286,22 +286,29 @@ func TestPath_Build(t *testing.T) {
 func TestPath_Index_Negative(t *testing.T) {
 	t.Parallel()
 
-	// A negative index has no meaning of its own, so every rendering of the
-	// path agrees on element 0.
-	negative := paths.Doc().Child("items").Index(-1)
-	zero := paths.Doc().Child("items").Index(0)
+	tcs := map[string]struct {
+		want string
+		idx  []int
+	}{
+		"not-found sentinel": {
+			idx:  []int{slices.Index([]string{"a", "b"}, "c")},
+			want: "paths.Path.Index: index -1 is below 0",
+		},
+		"after a valid index": {
+			idx:  []int{0, -2},
+			want: "paths.Path.Index: index -2 is below 0",
+		},
+	}
 
-	assert.Equal(t, zero, negative)
-	assert.Equal(t, "$.items[0]", negative.String())
-	assert.Equal(t, "$.items[0]", yamlPath(t, negative).String())
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	source := niceyaml.NewSourceFromString("items: [a, b]\n")
-	file, err := source.File()
-	require.NoError(t, err)
-
-	tk, err := negative.Token(file.Docs[0])
-	require.NoError(t, err)
-	assert.Equal(t, "a", tk.Value)
+			assert.PanicsWithValue(t, tc.want, func() {
+				paths.Doc().Child("items").Index(tc.idx...)
+			})
+		})
+	}
 }
 
 func TestPath_ChildAll(t *testing.T) {
@@ -1063,11 +1070,6 @@ func TestPath_Equal(t *testing.T) {
 		"every selector kind": {
 			p:    paths.Doc().Child("a").ChildAll().Index(1).IndexAll().Recursive("b").Key(),
 			q:    paths.MustParse("$.a.*[1][*]..b~"),
-			want: true,
-		},
-		"negative index and zero": {
-			p:    paths.Doc().Index(-1),
-			q:    paths.Doc().Index(0),
 			want: true,
 		},
 		"joined and built": {

@@ -309,12 +309,20 @@ func (p Path) ChildAll() Path {
 }
 
 // Index returns a copy of the path with an `[idx]` selector appended for
-// each index. An index below zero selects element 0, so Index(-1) is the
-// same path as Index(0).
+// each index.
+//
+// Panics if an index is below 0, since no sequence has such an element
+// and [Parse] rejects the selector. A search such as [slices.Index]
+// returns -1 when it finds nothing, so a caller checks that result before
+// it builds the path.
 func (p Path) Index(idx ...int) Path {
 	segs := make([]segment, 0, len(idx))
 	for _, i := range idx {
-		segs = append(segs, segment{kind: segmentIndex, index: max(i, 0)})
+		if i < 0 {
+			panic(fmt.Sprintf("paths.Path.Index: index %d is below 0", i))
+		}
+
+		segs = append(segs, segment{kind: segmentIndex, index: i})
 	}
 
 	return p.extend(segs...)

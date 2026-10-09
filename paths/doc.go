@@ -206,6 +206,9 @@
 //	paths.Doc().Child("spec").Key()                    // $.spec~
 //	paths.Current().Child("name")                      // @.name
 //
+// [Path.Index] panics on an index below 0, such as the -1 of a search
+// that found nothing.
+//
 // A Path is a value that never changes, so callers can share a common
 // prefix safely:
 //

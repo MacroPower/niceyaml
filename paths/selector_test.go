@@ -257,7 +257,7 @@ func TestPath_Selectors(t *testing.T) {
 	t.Run("builders", func(t *testing.T) {
 		t.Parallel()
 
-		p := paths.Doc().Child("spec", "a.b").Index(-1, 2).ChildAll().IndexAll().Recursive("").RecursiveAll().Key()
+		p := paths.Doc().Child("spec", "a.b").Index(0, 2).ChildAll().IndexAll().Recursive("").RecursiveAll().Key()
 
 		assert.Equal(t, []paths.Selector{
 			{Kind: paths.SelectorChild, Name: "spec"},

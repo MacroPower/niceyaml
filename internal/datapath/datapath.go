@@ -205,6 +205,8 @@ func (idx *Index) Member(t Target, name string) Target {
 // follows each alias on the way to the sequence, as [Index.Member] does.
 // The Target holds no node when t holds no sequence, or one without that
 // index.
+//
+// Panics if index is below 0, as [paths.Path.Index] does.
 func (idx *Index) Element(t Target, index int) Target {
 	t.Path = t.Path.Index(index)
 	t.Node, t.Entry = ElementNode(idx.Deref(t.Node), index), nil
