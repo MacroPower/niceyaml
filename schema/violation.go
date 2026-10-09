@@ -31,7 +31,7 @@ const noFormMessage = "value matches none of the allowed forms"
 // reads the Violation of each:
 //
 //	for bound := range niceyaml.AllBindings(err) {
-//		v, ok := errors.AsType[*schema.Violation](bound.Cause())
+//		v, ok := errors.AsType[*schema.Violation](bound.Reported())
 //		if !ok {
 //			continue
 //		}
@@ -40,11 +40,12 @@ const noFormMessage = "value matches none of the allowed forms"
 //		emit(v.Keyword, v.SchemaPath, path, v.Message)
 //	}
 //
-// [niceyaml.SourceError.Cause] returns the error of one binding alone, so
-// the search above finds the Violation of that binding or none. Several
-// violations come back under a count summary from [niceyaml.NewSummary],
-// which wraps no Violation. [errors.As] on its binding searches the
-// violations it heads too and finds the Violation of the first.
+// [niceyaml.SourceError.Reported] returns the error of one binding
+// alone, so the search above finds the Violation of that binding or
+// none. Several violations come back under a count summary from
+// [niceyaml.NewSummary], which wraps no Violation. [errors.As] on its
+// binding searches the violations it heads too and finds the Violation
+// of the first.
 //
 // A value that matches no branch of an anyOf or oneOf fails every branch
 // at once, and the failures of a branch say what is wrong with the value

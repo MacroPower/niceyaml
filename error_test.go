@@ -1733,7 +1733,7 @@ func TestError_Unwrap(t *testing.T) {
 		got := err.Unwrap()
 
 		require.Len(t, got, 1)
-		assert.Equal(t, err.Cause(), got[0])
+		assert.Equal(t, err.Reported(), got[0])
 		require.EqualError(t, got[0], "")
 	})
 
@@ -1785,7 +1785,7 @@ func TestError_Unwrap(t *testing.T) {
 
 		err := niceyaml.NewError("", niceyaml.WithDetails(errors.New("nested error")))
 
-		assert.Equal(t, []error{err.Cause()}, err.Unwrap())
+		assert.Equal(t, []error{err.Reported()}, err.Unwrap())
 	})
 
 	t.Run("unwraps to the errors a summary heads", func(t *testing.T) {
@@ -1805,7 +1805,7 @@ func TestError_Unwrap(t *testing.T) {
 		got := summary.Unwrap()
 
 		require.Len(t, got, 3)
-		assert.Equal(t, summary.Cause(), got[0])
+		assert.Equal(t, summary.Reported(), got[0])
 		// Each error a summary heads is a problem, so the summary matches it.
 		require.ErrorIs(t, summary, nested1)
 		require.ErrorIs(t, summary, nested2)
@@ -2695,7 +2695,7 @@ func TestError_NilReceiver(t *testing.T) {
 	t.Parallel()
 
 	// A nil *Error carries no message and specializes to nothing, in line
-	// with Cause, Errors, Unwrap, and Path, which all accept nil.
+	// with Reported, Errors, Unwrap, and Path, which all accept nil.
 	var missing *niceyaml.Error
 
 	assert.Empty(t, missing.Error())
@@ -7682,7 +7682,7 @@ func TestError_Accessors(t *testing.T) {
 
 	err := wrapError(t, cause, niceyaml.WithDetails(nil, nested, nilNested))
 
-	assert.Equal(t, cause, err.Cause())
+	assert.Equal(t, cause, err.Reported())
 	assert.Equal(t, []error{nested}, err.Details())
 	assert.Empty(t, err.Members())
 	assert.Equal(t, []error{cause}, err.Unwrap())
@@ -7696,27 +7696,27 @@ func TestError_Accessors(t *testing.T) {
 	summary, ok := errors.AsType[*niceyaml.Error](niceyaml.NewSummary("2 problems", nil, nested, nilNested, other))
 	require.True(t, ok)
 
-	assert.Equal(t, "2 problems", summary.Cause().Error())
+	assert.Equal(t, "2 problems", summary.Reported().Error())
 	assert.Equal(t, []error{nested, other}, summary.Members())
 	assert.Empty(t, summary.Details())
-	assert.Equal(t, []error{summary.Cause(), nested, other}, summary.Unwrap())
+	assert.Equal(t, []error{summary.Reported(), nested, other}, summary.Unwrap())
 
 	// The slice of the errors a summary heads is a copy.
 	summary.Members()[0] = nil
 	assert.Equal(t, []error{nested, other}, summary.Members())
 
-	require.EqualError(t, niceyaml.NewError("plain").Cause(), "plain")
+	require.EqualError(t, niceyaml.NewError("plain").Reported(), "plain")
 	assert.Empty(t, niceyaml.NewError("plain").Members())
 	assert.Empty(t, niceyaml.NewError("plain").Details())
-	require.EqualError(t, niceyaml.NewError("").Cause(), "")
+	require.EqualError(t, niceyaml.NewError("").Reported(), "")
 
 	var (
 		zero   niceyaml.Error
 		nilErr *niceyaml.Error
 	)
 
-	assert.NoError(t, zero.Cause())
-	assert.NoError(t, nilErr.Cause())
+	assert.NoError(t, zero.Reported())
+	assert.NoError(t, nilErr.Reported())
 	assert.Empty(t, nilErr.Members())
 	assert.Empty(t, nilErr.Details())
 
@@ -7725,6 +7725,12 @@ func TestError_Accessors(t *testing.T) {
 	// read an Error that heads nothing as an empty list.
 	_, lists := any(other).(interface{ Errors() []error })
 	assert.False(t, lists)
+
+	// Github.com/pkg/errors and github.com/cockroachdb/errors read a
+	// method named Cause as the one error below an error. They would
+	// follow it past the errors a summary heads.
+	_, causes := any(other).(interface{ Cause() error })
+	assert.False(t, causes)
 }
 
 // ruleError is a cause of a type the caller defines.
@@ -7736,7 +7742,7 @@ func (e *ruleError) Error() string {
 	return "rule " + e.id
 }
 
-func TestSourceError_Cause(t *testing.T) {
+func TestSourceError_Reported(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("x:\n  a: 1\n  b: 2\n")
@@ -7792,7 +7798,7 @@ func TestSourceError_Cause(t *testing.T) {
 			var bound *niceyaml.SourceError
 
 			require.ErrorAs(t, yamltest.Bind(t, source, tc.err), &bound)
-			assert.Same(t, tc.want, bound.Cause())
+			assert.Same(t, tc.want, bound.Reported())
 		})
 	}
 
@@ -7802,7 +7808,7 @@ func TestSourceError_Cause(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(x))), &bound)
-		require.EqualError(t, bound.Cause(), "bad")
+		require.EqualError(t, bound.Reported(), "bad")
 	})
 
 	t.Run("empty message from NewError", func(t *testing.T) {
@@ -7811,7 +7817,7 @@ func TestSourceError_Cause(t *testing.T) {
 		var bound *niceyaml.SourceError
 
 		require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError("", niceyaml.AtPath(x.Child("a")))), &bound)
-		require.EqualError(t, bound.Cause(), "")
+		require.EqualError(t, bound.Reported(), "")
 	})
 
 	t.Run("the zero Error with a location", func(t *testing.T) {
@@ -7823,7 +7829,7 @@ func TestSourceError_Cause(t *testing.T) {
 		)
 
 		require.ErrorAs(t, yamltest.Bind(t, source, zero.With(niceyaml.AtPath(x.Child("a")))), &bound)
-		assert.NoError(t, bound.Cause())
+		assert.NoError(t, bound.Reported())
 	})
 
 	t.Run("a summary", func(t *testing.T) {
@@ -7831,7 +7837,7 @@ func TestSourceError_Cause(t *testing.T) {
 
 		// A summary heads one error per violation. [errors.As] on its
 		// binding descends into them and finds the rule of the first, and
-		// Cause returns the error of each binding alone.
+		// Reported returns the error of each binding alone.
 		ruleB := &ruleError{id: "b"}
 		summary := niceyaml.NewSummary("2 violations",
 			located,
@@ -7846,15 +7852,15 @@ func TestSourceError_Cause(t *testing.T) {
 		require.True(t, ok)
 		assert.Same(t, rule, found)
 
-		own, ok := errors.AsType[*ruleError](bound.Cause())
+		own, ok := errors.AsType[*ruleError](bound.Reported())
 		assert.False(t, ok)
 		assert.Nil(t, own)
-		require.EqualError(t, bound.Cause(), "2 violations")
+		require.EqualError(t, bound.Reported(), "2 violations")
 
 		children := bound.Members()
 		require.Len(t, children, 2)
-		assert.Same(t, rule, children[0].Cause())
-		assert.Same(t, ruleB, children[1].Cause())
+		assert.Same(t, rule, children[0].Reported())
+		assert.Same(t, ruleB, children[1].Reported())
 	})
 
 	t.Run("nil receiver", func(t *testing.T) {
@@ -7862,7 +7868,22 @@ func TestSourceError_Cause(t *testing.T) {
 
 		var nilErr *niceyaml.SourceError
 
-		assert.NoError(t, nilErr.Cause())
+		assert.NoError(t, nilErr.Reported())
+	})
+
+	t.Run("no Cause method", func(t *testing.T) {
+		t.Parallel()
+
+		// Github.com/cockroachdb/errors unwraps through a method named
+		// Cause before it tries Unwrap. Its Is and As would step from a
+		// binding to the error it reports, past the Error that holds the
+		// errors a summary heads.
+		var bound *niceyaml.SourceError
+
+		require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(x))), &bound)
+
+		_, causes := any(bound).(interface{ Cause() error })
+		assert.False(t, causes)
 	})
 }
 
@@ -11612,7 +11633,7 @@ func TestPlace(t *testing.T) {
 				got, ok := errors.AsType[*niceyaml.Error](placed)
 				require.True(t, ok)
 
-				assert.Same(t, errStat, got.Cause())
+				assert.Same(t, errStat, got.Reported())
 				assert.Equal(t, want.Details(), got.Details())
 
 				gotPath, gotOK := got.Path()

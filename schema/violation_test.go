@@ -22,7 +22,7 @@ func violations(err error) []schema.Violation {
 	var got []schema.Violation
 
 	for bound := range niceyaml.AllBindings(err) {
-		if v, ok := errors.AsType[*schema.Violation](bound.Cause()); ok {
+		if v, ok := errors.AsType[*schema.Violation](bound.Reported()); ok {
 			got = append(got, *v)
 		}
 	}
@@ -186,7 +186,7 @@ func TestViolation_Binding(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		got, ok := errors.AsType[*schema.Violation](bound.Cause())
+		got, ok := errors.AsType[*schema.Violation](bound.Reported())
 		require.True(t, ok)
 
 		// The violation gives the binding its message.
@@ -207,7 +207,7 @@ func TestViolation_Binding(t *testing.T) {
 		// The summary counts the violations and is none itself, so its own
 		// cause is no Violation, while a search of the whole binding
 		// descends into the first violation under it.
-		own, ok := errors.AsType[*schema.Violation](bound.Cause())
+		own, ok := errors.AsType[*schema.Violation](bound.Reported())
 		assert.False(t, ok)
 		assert.Nil(t, own)
 
@@ -216,7 +216,7 @@ func TestViolation_Binding(t *testing.T) {
 		assert.Equal(t, "type", first.Keyword)
 
 		for _, child := range bound.Members() {
-			got, ok := errors.AsType[*schema.Violation](child.Cause())
+			got, ok := errors.AsType[*schema.Violation](child.Reported())
 			require.True(t, ok)
 			assert.Equal(t, "type", got.Keyword)
 			assert.Equal(t, got.Message, child.Message())
@@ -369,7 +369,7 @@ func TestViolation_MissingMember(t *testing.T) {
 			var got, near []string
 
 			for bound := range niceyaml.AllBindings(err) {
-				v, ok := errors.AsType[*schema.Violation](bound.Cause())
+				v, ok := errors.AsType[*schema.Violation](bound.Reported())
 				if !ok {
 					continue
 				}
@@ -461,7 +461,7 @@ func TestViolation_Value(t *testing.T) {
 
 		require.ErrorAs(t, err, &located)
 
-		got, ok := errors.AsType[*schema.Violation](located.Cause())
+		got, ok := errors.AsType[*schema.Violation](located.Reported())
 		require.True(t, ok)
 		assert.Equal(t, schema.Violation{
 			Keyword:    "type",
@@ -479,7 +479,7 @@ func TestViolation_Value(t *testing.T) {
 
 		require.ErrorAs(t, err, &summary)
 
-		own, ok := errors.AsType[*schema.Violation](summary.Cause())
+		own, ok := errors.AsType[*schema.Violation](summary.Reported())
 		assert.False(t, ok)
 		assert.Nil(t, own)
 
@@ -491,7 +491,7 @@ func TestViolation_Value(t *testing.T) {
 
 			require.ErrorAs(t, n, &located)
 
-			got, ok := errors.AsType[*schema.Violation](located.Cause())
+			got, ok := errors.AsType[*schema.Violation](located.Reported())
 			require.True(t, ok)
 			assert.Equal(t, "type", got.Keyword)
 		}
@@ -773,7 +773,7 @@ func TestViolation_Forms(t *testing.T) {
 		_, ok = bound.Range()
 		assert.True(t, ok)
 
-		got, ok := errors.AsType[*schema.Violation](bound.Cause())
+		got, ok := errors.AsType[*schema.Violation](bound.Reported())
 		require.True(t, ok)
 		assert.Equal(t, schema.Violation{
 			Keyword:    "anyOf",
@@ -812,7 +812,7 @@ func TestViolation_Forms(t *testing.T) {
 			assert.False(t, ok)
 			require.NoError(t, form.Unresolved())
 
-			own, ok := errors.AsType[*schema.Violation](form.Cause())
+			own, ok := errors.AsType[*schema.Violation](form.Reported())
 			assert.False(t, ok)
 			assert.Nil(t, own)
 
@@ -823,7 +823,7 @@ func TestViolation_Forms(t *testing.T) {
 			require.True(t, ok)
 			assert.Equal(t, "$.v", path.String())
 
-			got, ok := errors.AsType[*schema.Violation](nested[0].Cause())
+			got, ok := errors.AsType[*schema.Violation](nested[0].Reported())
 			require.True(t, ok)
 			assert.Equal(t, want[i], *got)
 		}
@@ -845,7 +845,7 @@ func TestViolation_Forms(t *testing.T) {
 		_, ok = bound.Range()
 		assert.False(t, ok)
 
-		got, ok := errors.AsType[*schema.Violation](bound.Cause())
+		got, ok := errors.AsType[*schema.Violation](bound.Reported())
 		require.True(t, ok)
 		assert.Equal(t, "anyOf", got.Keyword)
 

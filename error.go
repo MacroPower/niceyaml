@@ -1326,12 +1326,12 @@ func (e *Error) Unwrap() []error {
 	return append(result, e.errors...)
 }
 
-// Cause returns the error the [Error] wraps: the error given to
+// Reported returns the error the [Error] reports: the error given to
 // [Invalid], or one holding the message given to [NewError]. An Error
-// that wraps another Error returns that Error, where [SourceError.Cause]
-// looks through it. It is nil for the zero Error, and a nil Error has no
-// cause.
-func (e *Error) Cause() error {
+// that wraps another Error returns that Error, where
+// [SourceError.Reported] looks through it. It is nil for the zero Error,
+// and a nil Error reports none.
+func (e *Error) Reported() error {
 	if e == nil {
 		return nil
 	}
@@ -3094,38 +3094,38 @@ func (e *SourceError) Unwrap() error {
 	return e.err
 }
 
-// Cause returns the error the binding reports, without the Errors that
-// locate it. For a bound [*Error] it is the error given to [Invalid],
-// or one holding the message given to [NewError]. Cause looks through
-// each Error that wraps another, such as the one [Rebase] puts around a
-// located Error, and through a binding the bound error wraps. It returns
-// the same error however many of them stand above it. A validator that
-// wraps an error of its own type hands that value to the caller of each
-// binding this way:
+// Reported returns the error the binding reports, without the Errors
+// that locate it. For a bound [*Error] it is the error given to
+// [Invalid], or one holding the message given to [NewError]. Reported
+// looks through each Error that wraps another, such as the one [Rebase]
+// puts around a located Error, and through a binding the bound error
+// wraps. It returns the same error however many of them stand above it.
+// A validator that wraps an error of its own type hands that value to
+// the caller of each binding this way:
 //
 //	for bound := range niceyaml.AllBindings(err) {
-//		if rule, ok := errors.AsType[*RuleError](bound.Cause()); ok {
+//		if rule, ok := errors.AsType[*RuleError](bound.Reported()); ok {
 //			report(bound, rule.ID)
 //		}
 //	}
 //
 // [errors.As] on the binding searches the problems it heads as well. On
-// a binding that reports several violations it finds the cause of the
-// first violation, where Cause returns the error of the binding alone. A
-// wrapper such as [fmt.Errorf] ends the walk and is the cause itself, so
-// the search above still finds a RuleError the wrapper holds. Cause is
-// nil for a binding of the zero [Error], and a nil SourceError has no
-// cause.
-func (e *SourceError) Cause() error {
+// a binding that reports several violations it finds the error of the
+// first violation, where Reported returns the error of the binding
+// alone. A wrapper such as [fmt.Errorf] ends the walk and is the
+// reported error itself, so the search above still finds a RuleError the
+// wrapper holds. Reported is nil for a binding of the zero [Error], and
+// a nil SourceError reports none.
+func (e *SourceError) Reported() error {
 	for e != nil {
-		cause := e.err
-		if x, ok := cause.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
-			cause = x.textCause()
+		reported := e.err
+		if x, ok := reported.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
+			reported = x.textCause()
 		}
 
-		inner, ok := cause.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
+		inner, ok := reported.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
 		if !ok {
-			return cause
+			return reported
 		}
 
 		e = inner
