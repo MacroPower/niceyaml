@@ -827,12 +827,17 @@ func (p Path) singleFrom(r *resolver, node ast.Node) (match, error) {
 // does. A node that several aliases or `<<` merge keys lead to appears
 // once for each, in the place of that alias or merge key. A `..name` or
 // `..*` selector lists each node once, even when chained `..` selectors
-// reach it more than once.
+// reach it more than once. An alias on the path that does not resolve
+// returns an error wrapping [ErrAlias].
 //
-// It looks through anchors and aliases, so each node is the content the
-// path names, and stops at a tag, as [Path.Node] does. The `.name`, `.*`,
-// `[n]`, and `[*]` selectors follow aliases to their anchor and see the
-// entries a `<<` merge key brings into a mapping.
+// # Aliases and Tags
+//
+// Nodes looks through anchors and aliases, so each node is the content
+// the path names, and stops at a tag, as [Path.Node] does. The `.name`,
+// `.*`, `[n]`, and `[*]` selectors follow aliases to their anchor and see
+// the entries a `<<` merge key brings into a mapping.
+//
+// # Wildcard Selectors
 //
 // The `.*` selector lists the value of each entry that a `.name` selector
 // resolves in a mapping, once for each name. It lists an entry a `<<`
@@ -843,6 +848,8 @@ func (p Path) singleFrom(r *resolver, node ast.Node) (match, error) {
 // value is a source of entries, and an entry whose key has no name, as
 // [Resolver.KeyName] reports it. On a node that is not a mapping it
 // selects nothing, as `[*]` does on a node that is not a sequence.
+//
+// # Recursive Selectors
 //
 // The `..name` selector looks through
 // an alias or tag on the node it starts from, as the other selectors do.
@@ -869,11 +876,15 @@ func (p Path) singleFrom(r *resolver, node ast.Node) (match, error) {
 // sequence that lists the sources of one, but lists the entries of a
 // mapping written inline there.
 //
+// # Empty Documents
+//
 // A document with no content, such as an empty one or one of comments
 // alone, holds no node for a selector to reach. Nodes returns an empty
 // result for a path with selectors there, as it does wherever a path
 // selects nothing. The root path selects the null at the "---" header of
 // such a document, and nothing when the document has no header.
+//
+// # Errors
 //
 // Wraps [ErrNoDocument], together with [ErrNotFound], when doc is nil,
 // and [ErrAlias] when an alias on the path does

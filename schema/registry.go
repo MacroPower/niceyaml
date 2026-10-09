@@ -146,6 +146,14 @@ type registryConfig struct {
 // [File] runs. It then reads the path relative to dir from fsys. A path
 // outside dir names no file and fails to load with [fs.ErrInvalid].
 //
+// A nil fsys leaves the registry as it is. Given more than once, the
+// last option wins. The registry reads only a regular file of at most
+// 10 MB, as [File] describes.
+//
+// Panics if dir is empty.
+//
+// # Untrusted Documents
+//
 // The option pairs with [niceyaml.NewSourceFromFile], whose documents
 // carry paths on disk. A program that validates documents from another
 // trust domain passes the file system of an [os.Root] and keeps the Root
@@ -171,6 +179,8 @@ type registryConfig struct {
 // anywhere on disk. The file system [os.Root.FS] returns refuses a link
 // that leads out of the tree.
 //
+// # Directory Paths
+//
 // A relative dir resolves against the working directory when
 // [NewRegistry] runs, so WithFSAt(".", fsys) confines the registry to
 // that directory. In a process without a working directory, a relative
@@ -182,19 +192,17 @@ type registryConfig struct {
 // that entered its working directory through a link therefore still
 // reads the files under a dir it names by its physical path.
 //
+// # Keys and URLs
+//
 // [Ref.Key], the cache, and the URL a $ref resolves against stay as they
 // are without a file system, and an error names the path on disk.
+//
+// # No Disk Access
 //
 // A registry that must read nothing from disk takes a file system that
 // holds no file, since every path on disk then names none:
 //
 //	schema.WithFSAt(".", fstest.MapFS{})
-//
-// A nil fsys leaves the registry as it is. Given more than once, the
-// last option wins. The registry reads only a regular file of at most
-// 10 MB, as [File] describes.
-//
-// Panics if dir is empty.
 func WithFSAt(dir string, fsys fs.FS) RegistryOption {
 	if dir == "" {
 		panic("schema.WithFSAt: dir is empty")
@@ -539,15 +547,19 @@ func (e reasonError) Unwrap() error {
 	return e.err
 }
 
-// Validate validates a document using the first matching schema.
-//
-// Validate combines schema lookup and validation into a single call. Use
+// Validate validates a document using the first matching schema. It
+// combines schema lookup and validation into a single call. Use
 // [Registry.Lookup] when you need the validator for custom processing.
-// Validate implements [niceyaml.Validator], so [niceyaml.WithValidator]
-// runs it before a decode and [niceyaml.Node.Validate] runs it on its
-// own:
+// Validate takes the root [niceyaml.Node] of a document. It returns the
+// violations of a document that does not conform to its schema, and
+// [ErrNoMatch] when no resolver applies to the document, unless
+// [WithRequireSchema] set false. Validate implements
+// [niceyaml.Validator], so [niceyaml.WithValidator] runs it before a
+// decode and [niceyaml.Node.Validate] runs it on its own:
 //
 //	config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(reg))
+//
+// # Scoped Nodes
 //
 // The resolvers pick a schema for a whole document, so n must be the
 // root [niceyaml.Node] of one, and a Node from [niceyaml.Node.At] fails
@@ -570,6 +582,8 @@ func (e reasonError) Unwrap() error {
 //		...
 //	}
 //
+// # Unmatched Documents
+//
 // Returns [ErrNoMatch] if no resolver applies to the document, unless
 // [WithRequireSchema] set false, in which case such a document passes.
 // [niceyaml.IsInvalid] reports that error, since the document names no
@@ -585,6 +599,8 @@ func (e reasonError) Unwrap() error {
 //	    return err
 //	}
 //
+// # Empty Documents
+//
 // An empty document validates as any other, so it fails with ErrNoMatch
 // when no resolver applies to it. [niceyaml.Source.Documents] and
 // [niceyaml.Source.ValidateDocuments] leave out the empty documents of a
@@ -594,6 +610,8 @@ func (e reasonError) Unwrap() error {
 // on a file that is empty as a whole:
 //
 //	err := source.ValidateDocuments(ctx, niceyaml.SkipEmpty(reg))
+//
+// # Errors
 //
 // Returns validation errors if the document doesn't conform to the schema.
 // Returns resolution, loading, or compilation errors if schema preparation
@@ -633,7 +651,8 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 // [WithCompileOptions] gave the registry, and serves the result from the
 // cache after that. The cache key is the [Ref.Key], and for a Ref from
 // [FileFS] the file system beside it, so one path in two file systems is
-// two schemas. [Registry.Lookup]
+// two schemas. A load that fails returns an error matching [ErrLoad], and
+// a compile that fails returns one matching [ErrCompile]. [Registry.Lookup]
 // takes the schema it validates with from here, so a caller that holds a
 // Ref of its own, such as one that checks a Go value with
 // [Schema.ValidateValue], shares the same load and compile:
@@ -651,11 +670,15 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 // caller that places the errors in a document binds the same result
 // there, as ValidateValue describes.
 //
+// # Errors
+//
 // The zero Ref names no schema, so it is [ErrResolve]. A load that fails
 // is [ErrLoad], and a compile that fails is [ErrCompile]. Schema caches
 // neither, so the next request for the cache key loads again. When ctx
 // ends before the schema loads, Schema returns [ErrLoad] wrapping the
 // context's error without waiting for the load to finish.
+//
+// # References
 //
 // A schema from [File], [FileFS], or [URL] loads only when each document
 // its $refs name loads too. The compile resolves every $ref in the
@@ -679,6 +702,8 @@ func (r *Registry) Validate(ctx context.Context, n *niceyaml.Node) error {
 // holds as bytes, such as one from [Embedded], has no location to
 // resolve a $ref against, so a $ref to another document fails its
 // compile with [ErrCompile], as it does in [Compile].
+//
+// # Concurrent Requests
 //
 // Concurrent requests for one cache key share a single load and compile,
 // and each caller waits for it only until its own context ends. The shared

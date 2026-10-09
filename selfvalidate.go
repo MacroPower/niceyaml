@@ -32,6 +32,8 @@ import (
 // filled its target, and returns nil when nothing failed. It runs the
 // walk whatever [WithSelfValidation] says, and runs no [Validator].
 //
+// # Environment and Flags
+//
 // A program that can list what its environment or its flags set passes
 // those values as a layer of [Layers], which validates them as it
 // validates a file. SelfValidate is for the program whose library writes
@@ -53,6 +55,8 @@ import (
 // leaves the value unchecked, and reports a key it requires as missing
 // when only the environment sets it.
 //
+// # Layers
+//
 // A program that layers one file over another merges them through
 // [Layers]. [Layers.SelfValidate] then binds each error in the file that
 // holds its value, where a SelfValidate through the Node of one file
@@ -62,6 +66,8 @@ import (
 //
 // Layers.SelfValidate returns the error of a file that did not parse,
 // and the walk does not run.
+//
+// # Decode Options
 //
 // On a value that no layer changed, SelfValidate returns what the decode
 // with the walk on returns. The walk spells the key of each map entry as
@@ -77,6 +83,8 @@ import (
 // did. A key type that a WithCustomUnmarshaler function decodes matches
 // no key of the document unless opts carry that option, and an error
 // under such an entry then binds at the key of the map.
+//
+// # Error Binding
 //
 // The walk follows v rather than the document, so v need not mirror the
 // node, and each error binds where its path resolves in the document. An
@@ -104,15 +112,21 @@ import (
 // WithCustomUnmarshaler or WithJSONUnmarshalers gives an unmarshaler in
 // opts.
 //
+// # Target
+//
 // Any v works but nil and a nil pointer, which each return an error
 // wrapping [ErrSelfValidateTarget], bound to the source. A v that is no
 // pointer validates as a copy, so a Validate with a pointer receiver
 // changes the copy and leaves v as it was.
 //
+// # Unparsed Documents
+//
 // A document that did not parse has no tree. Every key of v then takes
 // the text of its Go value, and each error binds with no position, as
 // [Node.Bind] describes. SelfValidate returns those errors rather than
 // the syntax error [Node.Err] returns.
+//
+// # Optional Files
 //
 // A program whose file is optional validates through an empty [Source]
 // when the file is missing. [Source.SelfValidate] runs the walk through
@@ -127,6 +141,8 @@ import (
 // value that came from no document, such as one a Validate walks,
 // validates through [SelfValidateValue], whose errors a document can
 // still place.
+//
+// # Cancellation
 //
 // The walk stops once ctx ends, or once a Validate returns the error of a
 // context that ended, and SelfValidate then returns that error alone, as
@@ -160,6 +176,8 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // "$.servers[1].port: port is required". It returns nil when nothing
 // failed.
 //
+// # Skipped Fields
+//
 // The result stands in no document, so a document can still place it,
 // as BindValue describes. A decode places the result a Validate returns
 // at the value that owns the method. A Validate holds no [Node], so one
@@ -186,6 +204,8 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // A Validate must not pass its own receiver, since the walk then calls
 // that Validate again, without end.
 //
+// # Field Names
+//
 // The walk names each value as a decode of YAML into v names it. A
 // field takes its yaml tag, its json tag when it has no yaml tag, and
 // its lowercased name when it has neither. A struct embedded with no
@@ -193,6 +213,8 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // A value that another format decoded, such as a JSON body, may thus
 // report paths that its own keys do not spell. A field that go-yaml
 // never decodes does not validate, as Node.SelfValidate describes.
+//
+// # Map Keys
 //
 // No document spells the key of a map entry, so each key takes the text
 // of its Go value. A document that spells a key another way, such as
@@ -214,11 +236,18 @@ func (n *Node) selfValidate(ctx context.Context, v any, cfg decodeConfig) error 
 // the reason [ErrAmbiguousPath]. Below a slice, an array, or a map that
 // decodes itself, it binds at that value, as every error there does.
 //
+// # Target
+//
 // Any v works but nil and a nil pointer, which each return an error
-// wrapping [ErrSelfValidateTarget], bound to no document too. The walk
-// stops once ctx ends, or once a Validate returns the error of a
+// wrapping [ErrSelfValidateTarget], bound to no document too.
+//
+// # Cancellation
+//
+// The walk stops once ctx ends, or once a Validate returns the error of a
 // context that ended, and SelfValidateValue then returns that error
 // alone, as [SelfValidator] describes.
+//
+// # Decode Options
 //
 // SelfValidateValue takes no [DecodeOption]. A walk through a document
 // reads those options to decode its keys, and to learn which types

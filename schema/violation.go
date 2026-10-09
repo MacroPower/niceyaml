@@ -47,6 +47,8 @@ const noFormMessage = "value matches none of the allowed forms"
 // binding searches the violations it heads too and finds the Violation
 // of the first.
 //
+// # Branches
+//
 // A value that matches no branch of an anyOf or oneOf fails every branch
 // at once, and the failures of a branch say what is wrong with the value
 // only when the value was meant for that branch. The report leaves out
@@ -77,6 +79,8 @@ const noFormMessage = "value matches none of the allowed forms"
 // per problem walks [niceyaml.ErrorTree.Problems] instead. It yields the
 // violation of the value once, with the forms as the Children of its
 // node, so the rows of a validation match the count its summary states.
+//
+// # Missing Members
 //
 // A mapping that leaves out a member the schema requires has no value to
 // point at. The violation of required, of dependentRequired, or of the

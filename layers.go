@@ -26,8 +26,12 @@ var (
 
 // Layers holds the layers that merge into one document, in the order
 // they apply, such as a base file with the file of one environment over
-// it. Each layer is a [Layer], and a program passes the [Source] of each
-// file as it read it:
+// it. A mapping in a higher layer merges into the mapping below it key
+// by key, a sequence or a scalar replaces what lies below it, and a null
+// keeps it. [Layers.Decode] and [Layers.DecodeInto] validate, decode,
+// and self-validate the merged document once, and each error binds in
+// the file that holds the value the error is about. Each layer is a
+// [Layer], and a program passes the [Source] of each file as it read it:
 //
 //	base, err := niceyaml.NewSourceFromFile("base.yaml")
 //	if err != nil {
@@ -43,12 +47,26 @@ var (
 //
 //	cfg, err := layers.Decode[Config](ctx)
 //
+// The layers merge once, on the first call that needs the merged
+// document, and Layers never change after that, so they are safe for
+// concurrent use.
+//
+// Create instances with [NewLayers].
+//
+// # Decoding
+//
 // [Layers.Decode] and [Layers.DecodeInto] validate, decode, and
 // self-validate the merged document once. Each error binds in the file
 // that holds the value the error is about, so a port that only base.yaml
 // sets reports the line that sets it:
 //
 //	base.yaml:3:9: $.server.port: port must be at least 1
+//
+// [Layers.Validate] runs a [Validator] on the merged document without a
+// decode, and [Layers.Bind] binds the error of a check the program runs
+// itself.
+//
+// # Environment and Flags
 //
 // A program that reads its environment or its flags passes what they set
 // as one more layer, above the files. It builds a map that holds the
@@ -106,9 +124,7 @@ var (
 // the library sets it. An error under such a value binds at whatever a
 // file holds at its path, as [Node.SelfValidate] describes.
 //
-// [Layers.Validate] runs a [Validator] on the merged document without a
-// decode, and [Layers.Bind] binds the error of a check the program runs
-// itself.
+// # Merge Rules
 //
 // The layers merge as documents, whatever Go type the result decodes
 // into. A mapping in a higher layer merges into the mapping the layers
@@ -135,6 +151,8 @@ var (
 // has no way to unset a value that a lower layer sets. The merged
 // document holds a null only where no lower layer holds a value.
 //
+// # Keys
+//
 // Two keys are one key when a path selects them by the same name, as
 // [go.jacobcolvin.com/niceyaml/paths.Resolver.KeyName] gives it. The
 // keys 80 and "80" thus merge, and the merged document spells the key as
@@ -143,6 +161,8 @@ var (
 // both. A key that is a sequence or a mapping has no name, and a layer
 // that holds one returns an error matching [ErrUnnamedKey], bound at
 // the key.
+//
+// # Aliases
 //
 // Each layer resolves its own aliases and `<<` merge keys before it
 // merges, as a decode of that layer alone reads them, with the reference
@@ -155,12 +175,16 @@ var (
 // alias limit of [WithAliasLimit] as a decode into a type that reads
 // text does.
 //
+// # Merged Document
+//
 // [Layers.Document] returns the root Node of the merged document, and a
 // [Validator] gets that Node. The document belongs to a [Source] of its
 // own, which holds the merged value as YAML text under the name of the
 // lowest layer. Document describes that text, which is no file of the
 // program. [Node.Origin] returns the Node that holds a value of it in
 // the file of a layer.
+//
+// # Error Binding
 //
 // An error never binds in that text. An error with a path binds in the
 // highest layer whose document holds the value at that path, and the
@@ -187,16 +211,22 @@ var (
 // `$.defaults.server.port` where it binds in a layer that holds the
 // value under defaults.
 //
+// # Nested Layers
+//
 // A Node from [Layers.Document] is a layer like any other. Layers that
 // hold one merge its value as they merge a file of the same text. Each
 // error still binds in the file that holds its value, with the path
 // that file has for it.
+//
+// # Defaults
 //
 // The decode still fills the Go value by the rule of [Node.DecodeInto],
 // once, from the merged document. A value that holds defaults keeps each
 // field the merged document leaves out, and a mapping of the document
 // replaces a map the value holds, whole. Defaults that should merge key
 // by key go in a layer, such as an embedded file below the others.
+//
+// # Override Limits
 //
 // A layer the program builds from its environment or its flags merges
 // and binds as a file does, and those rules set its limits. A null keeps
@@ -207,6 +237,8 @@ var (
 // binds in the highest layer that holds the mapping, and so does an
 // error for a key the mapping lacks. Both thus bind in such a layer once
 // it sets one key there, whichever layer the fix belongs in.
+//
+// # Secrets
 //
 // The excerpt of an error shows lines of its layer, so a secret the
 // environment set prints when it sits on the line of the error or among
@@ -222,6 +254,8 @@ var (
 // option says, so the Source of that document has excerpts off when the
 // Source of any layer has.
 //
+// # Layer Errors
+//
 // A layer whose document did not parse holds no value. Neither does a
 // Source that holds several documents, which has no one document to
 // merge, nor a layer that a decode of it alone into an any value rejects,
@@ -229,6 +263,8 @@ var (
 // [Layers.DecodeInto], [Layers.Validate], [Layers.SelfValidate], and
 // [Layers.Document] return the error of the lowest such layer, bound in
 // its file. [Layers.Bind] goes on without that layer.
+//
+// # Optional Files
 //
 // A nil layer adds nothing. [NewSourceFromFile] returns a nil Source for
 // a file it could not read, so a program with an optional file passes
@@ -248,12 +284,6 @@ var (
 // Each such error is bound to an empty document, so no other document
 // places it. A value that came from no document validates through
 // [SelfValidateValue] instead.
-//
-// The layers merge once, on the first call that needs the merged
-// document, and Layers never change after that, so they are safe for
-// concurrent use.
-//
-// Create instances with [NewLayers].
 type Layers struct {
 	// What the layers merge into, which document fills on its first call.
 	merged mergedLayers

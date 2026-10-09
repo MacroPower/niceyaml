@@ -52,6 +52,10 @@ import (
 //	cfg.yaml:3:11: $.ports.0x10.name: must not be empty
 //	cfg.yaml:5:11: $.items[0].name: must not be empty
 //
+// Create instances with [Node.DataLocator].
+//
+// # Names
+//
 // The names are those of the data from Decode[any] of the Node, as
 // [Node.Decode] yields it. A member has the name the decoder gives its
 // key. A string key gives its text, and any other key gives its Go value
@@ -68,6 +72,8 @@ import (
 // to the empty key of a map[string]string. A name from such a decode
 // names no member of the data, so it leads nowhere, as [DataLocator.At]
 // describes.
+//
+// # JSON Pointers
 //
 // A check that reports JSON Pointers splits each pointer into its names
 // and unescapes `~1` and `~0` in each:
@@ -89,6 +95,8 @@ import (
 //
 //	niceyaml.NewError(f.Msg, loc.At(names(f.Pointer)...))
 //
+// # Lifetime
+//
 // A DataLocator is safe for concurrent use. It reads each mapping once
 // however many locations pass through it, so a check creates one for all
 // the findings of a run. To tell which key a spelling selects, it reads
@@ -99,8 +107,6 @@ import (
 // names the member and each key below it as the decoder does. A check
 // therefore creates a DataLocator for each run and keeps none for the
 // life of the document.
-//
-// Create instances with [Node.DataLocator].
 type DataLocator struct {
 	// The node the names read from.
 	root ast.Node

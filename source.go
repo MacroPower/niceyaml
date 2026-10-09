@@ -330,7 +330,13 @@ func WithAliasLimit(enabled bool) SourceOption {
 
 // WithReferences is a [SourceOption] that lets an alias in the documents
 // of the [Source] name an anchor that the documents of refs define, such
-// as a file of shared defaults:
+// as a file of shared defaults. Every decode and every validation of
+// those documents reads the anchors. An alias reads an anchor of refs
+// only when no anchor of its name comes before it in its own document,
+// and an anchor of a later document of refs overrides one of the same
+// name in an earlier one. A path stops at an alias to a reference
+// document, so an error about a value of refs binds at that alias. A
+// program reads each reference file into a Source of its own:
 //
 //	defaults, err := niceyaml.NewSourceFromFile("defaults.yaml")
 //	if err != nil {
@@ -344,6 +350,8 @@ func WithAliasLimit(enabled bool) SourceOption {
 //
 //	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(reg))
 //
+// # Readers
+//
 // The references change what an alias means, so the Source applies them
 // wherever one of its documents decodes: [Node.Decode], [Node.Validate],
 // [Node.SelfValidate], [Source.ValidateDocuments], and the decode a
@@ -351,18 +359,14 @@ func WithAliasLimit(enabled bool) SourceOption {
 // `server: *base` as the decode does, and a check of the whole file
 // reports what a decode of each document reports.
 //
+// # Precedence
+//
 // An alias reads an anchor of refs only when no anchor of its name comes
 // before it in its own document, as [Node.DecodeInto] describes. Each
 // decode reads the documents of refs in the order given, so an anchor of
 // a later document overrides one of the same name in an earlier one. A
 // Source in refs brings its own references, ahead of its own documents,
-// so its aliases resolve as they do in its own decodes. It brings no
-// other setting, so [WithAliasLimit] on a Source in refs changes nothing,
-// and the alias limit counts no reference document, as WithAliasLimit
-// describes. WithReferences skips a nil Source. A reference document
-// that does not parse fails every decode of the Source.
-// [Layers] carry what [WithExcerpts] says of a Source in refs to the
-// document they merge, which holds the values an alias reads from it.
+// so its aliases resolve as they do in its own decodes.
 //
 // An alias inside refs reads the anchors of refs alone, whatever anchors
 // the document defines. Both files here define `base`:
@@ -386,6 +390,8 @@ func WithAliasLimit(enabled bool) SourceOption {
 // a struct or a []int, reads the second anchor. Give each anchor of refs
 // a name that no other anchor of refs has.
 //
+// # Paths
+//
 // The references reach the decoder alone, so a decode and a validation
 // read through an alias to a reference document. A path resolves in the
 // document itself and stops at that alias. [Node.At] and [Node.Nodes]
@@ -397,6 +403,8 @@ func WithAliasLimit(enabled bool) SourceOption {
 // [go.jacobcolvin.com/niceyaml/schema/matcher.Exists] matcher whose path
 // reaches the alias returns the error too, so a registry stops at that
 // document and routes it nowhere.
+//
+// # Error Binding
 //
 // An error whose path leads into a reference document binds at the alias
 // the path enters, since the document holds no line for the value:
@@ -411,6 +419,16 @@ func WithAliasLimit(enabled bool) SourceOption {
 // caller tells the position from one at the value itself. An error at a
 // key of a mapping that merges a reference document under a `<<` key
 // still binds with no position, as SourceError.Nearest describes.
+//
+// # Reference Sources
+//
+// A Source in refs brings no setting but its own references, so
+// [WithAliasLimit] on a Source in refs changes nothing, and the alias
+// limit counts no reference document, as WithAliasLimit describes.
+// WithReferences skips a nil Source. A reference document that does not
+// parse fails every decode of the Source. [Layers] carry what
+// [WithExcerpts] says of a Source in refs to the document they merge,
+// which holds the values an alias reads from it.
 //
 // A reference document comes from wherever a Source does.
 // [NewSourceFromFile] reads a file, [NewSourceFromFS] reads a file of a
@@ -1390,7 +1408,16 @@ func (d *document) anchorToken() *token.Token {
 	return nil
 }
 
-// File returns an [*ast.File] for the [Source] tokens.
+// File returns an [*ast.File] for the [Source] tokens. The first call
+// parses the file, and every later call returns the same tree or the same
+// error. Every [Node] of the Source shares the tree, so a caller must not
+// modify it. A file with a YAML syntax error has no tree, so File returns
+// nil and an error that matches [ErrSyntax]. File binds that error to
+// this Source, and it covers every document that did not parse. The tree
+// leaves out some comments that the go-yaml parser rejects or misreads,
+// and the tokens of the Source still hold them.
+//
+// # Parsing
 //
 // The first call parses the file with [parser.Parse], which accepts a
 // duplicate key when [WithAllowDuplicateKeys] allows one. Subsequent
@@ -1399,6 +1426,8 @@ func (d *document) anchorToken() *token.Token {
 // ends its document. [parser.Parse] alone drops the rest of the stream
 // after such a header, and it can reject what follows a marker or join
 // it to the document the marker ends.
+//
+// # Omitted Comments
 //
 // The tree leaves out a comment on a line of its own below a document whose
 // root is a scalar or a flow collection. Below a block mapping or a block
@@ -1443,11 +1472,15 @@ func (d *document) anchorToken() *token.Token {
 // the tree unless one starts left of the first key or "-" of the root, and
 // File returns the parser's error for that one.
 //
+// # Tokens
+//
 // The tokens of the file are copies of the Source's own, since the parser
 // relinks the tokens it receives. A copy matches the original by its type,
 // value, origin, and position, so a token taken from a node finds its
 // lines through [line.Lines.TokenRanges] and [line.Lines.ContentRanges] as
 // the original does.
+//
+// # Shared Tree
 //
 // Every [Node] of the Source shares the tree, and [Node.At],
 // [Node.Ranges], and every error binding resolve against it, so it is
@@ -1455,6 +1488,8 @@ func (d *document) anchorToken() *token.Token {
 // resolve to and races with any concurrent use of the Source. A caller
 // that edits a document parses a tree of its own, or edits the text and
 // builds a new Source from the result.
+//
+// # Syntax Errors
 //
 // A file with a YAML syntax error has no tree, so File returns nil and
 // the error. Each document parses on its own, so the error covers every

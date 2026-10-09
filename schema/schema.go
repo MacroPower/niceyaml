@@ -455,27 +455,33 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 
 // Validate implements [niceyaml.Validator]. It reads n as any through
 // [niceyaml.Node.Decode] and checks the result against the schema as
-// [Schema.ValidateValue] does. The decode applies the alias limit to the
-// document of n before it reads anything. Validate applies the limit to
-// the result as well only where the document holds an alias to a
-// reference document. [niceyaml.WithAliasLimit] on the source of n turns
-// both off. [niceyaml.WithValidator] runs the schema before a decode, and
-// [niceyaml.Node.Validate] runs it on its own. A Node from
-// [niceyaml.Node.At] decodes to the node it selects, so the schema checks
-// that node and a violation's `@` path resolves from it. Every error
-// comes back bound through n with [niceyaml.Node.Bind], so a call to
-// Validate returns the error [niceyaml.Node.Validate] returns for the
-// schema. A validator that runs the schema on each node of a list thus
-// reports each violation on its own lines. [Schema.ValidateValue] checks
-// data for a caller that reports the errors somewhere else.
+// [Schema.ValidateValue] does. [niceyaml.WithValidator] runs the schema
+// before a decode, and [niceyaml.Node.Validate] runs it on its own. A
+// Node from [niceyaml.Node.At] decodes to the node it selects, so the
+// schema checks that node and a violation's `@` path resolves from it.
+// Every error comes back bound through n with [niceyaml.Node.Bind], so a
+// call to Validate returns the error [niceyaml.Node.Validate] returns for
+// the schema. A validator that runs the schema on each node of a list
+// thus reports each violation on its own lines. A document past the alias
+// limit returns an error matching [ErrExcessiveAliasing].
+// [Schema.ValidateValue] checks data for a caller that reports the errors
+// somewhere else.
+//
+// # Unparsed Documents
 //
 // A document that did not parse has no data to check, so Validate returns
 // the syntax error [niceyaml.Node.Err] returns for it, whatever the
-// schema accepts. An empty document, such as an empty file, decodes to
-// null, so a schema that wants a mapping rejects it.
-// [niceyaml.Source.Documents] leaves out the empty document a trailing
-// "---" leaves beside one with content, and [niceyaml.SkipEmpty] wraps
-// the schema to pass an empty document wherever it runs.
+// schema accepts.
+//
+// # Empty Documents
+//
+// An empty document, such as an empty file, decodes to null, so a schema
+// that wants a mapping rejects it. [niceyaml.Source.Documents] leaves out
+// the empty document a trailing "---" leaves beside one with content, and
+// [niceyaml.SkipEmpty] wraps the schema to pass an empty document
+// wherever it runs.
+//
+// # Key Spelling
 //
 // Holding the node lets Validate spell each key in a violation's path as
 // the source does, so a key the decoder respells, such as the hexadecimal
@@ -502,6 +508,8 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // Validate still reports every violation, and a path through such a key
 // names the member and each key below it as the decoder does.
 //
+// # Timestamps
+//
 // The node also shows which !!timestamp values the source wrote as a bare
 // date. Validate hands the schema each of those as an RFC 3339 full-date,
 // so !!timestamp 2001-12-14 matches format "date" as the untagged
@@ -514,6 +522,13 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // after the member leading to the timestamp, since such a key may set a
 // member of the same name. A merge key whose sources do not resolve is
 // one such key.
+//
+// # Alias Limit
+//
+// The decode applies the alias limit to the document of n before it reads
+// anything. Validate applies the limit to the result as well only where
+// the document holds an alias to a reference document.
+// [niceyaml.WithAliasLimit] on the source of n turns both off.
 //
 // The decoder writes out the whole content of an alias it spells as text,
 // such as an alias used as a key. It also reads a mapping a merge key
@@ -601,7 +616,14 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // schema. The value is the shape a decode into any yields: maps with
 // string keys, slices, strings, bools, nil, and numbers, nested as the
 // document nests them. The validator does not accept a Go struct, since it
-// reads the data as JSON does.
+// reads the data as JSON does. ValidateValue returns nil when data
+// conforms. For a value that breaks a constraint, it returns a
+// [*niceyaml.SourceError] bound to no document, whose text names the path
+// of each violation, as in "$.port: 0 is less than 1". A check that could
+// not run, such as a $ref the validator cannot resolve, returns an error
+// wrapping [ErrValidate].
+//
+// # Conversions
 //
 // ValidateValue first converts the YAML-native values the JSON Schema
 // validator does not accept into the JSON spelling of the same data,
@@ -614,6 +636,8 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // with the same members, and where two items share a key, the later one
 // wins, as it does in a decode into a map.
 //
+// # Violations
+//
 // Returns nil when data conforms. On a constraint violation, returns a
 // [*niceyaml.SourceError]. A single violation carries its YAML path on
 // the error itself, and several violations become a count summary from
@@ -625,6 +649,8 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // of each branch the value could have been meant for, as [Violation]
 // describes. Any other failure wraps [ErrValidate], including a $ref the
 // validator cannot resolve, since the value is not at fault for that.
+//
+// # Error Text
 //
 // ValidateValue takes no document, so it binds its errors to none, as
 // [niceyaml.BindValue] does. The binding puts each path in the text of
@@ -642,6 +668,8 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // error of a violation, and [errors.As] finds the [*Violation] in it,
 // which is the first among several. [niceyaml.FormatError] prints the
 // same errors as a tree.
+//
+// # Placement
 //
 // The result stands in no document, so a document can still place it,
 // as BindValue describes. [niceyaml.Rebase] and every Bind return an
@@ -673,10 +701,14 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 //		errs = append(errs, doc.Bind(niceyaml.Rebase(violation, base)))
 //	}
 //
+// # Key Names
+//
 // ValidateValue holds no source, so each path names a key as the decoder
 // does, such as 16 for a key the document spells 0x10. A caller that
 // reports the errors in the document the data came from takes each
 // location from [niceyaml.Node.DataLocator].
+//
+// # Rejected Data
 //
 // ValidateValue rejects two shapes of data before checking anything. A
 // value whose shared maps, slices, or byte slices would expand past the
@@ -693,6 +725,8 @@ func (s *Schema) Validate(ctx context.Context, n *niceyaml.Node) error {
 // including one decoded from a source that [niceyaml.WithAliasLimit]
 // turned the limit off for. A map or slice that contains itself returns
 // an error wrapping [ErrValidate].
+//
+// # Context
 //
 // The context reaches the underlying [jsonschema.Validator], where remote
 // reference resolution honors its cancellation and deadlines.

@@ -32,6 +32,11 @@ const driveLen = 2
 // the file with [Registry.Load], with a relative path made absolute
 // against the working directory at the time File runs. A change of
 // working directory after File therefore leaves the Ref on the same file.
+// The registry reads the file when the Ref loads, once however many
+// documents name it, and it reads only a regular file of at most 10 MB.
+// File panics on an empty path.
+//
+// # File Systems
 //
 // A schema shipped in an [embed.FS], or in any other file system, takes
 // [FileFS] instead, which reads the path from that file system and never
@@ -39,6 +44,8 @@ const driveLen = 2
 // from disk through a file system that stands for one directory, so a
 // path outside that directory names no file. See that option for
 // details.
+//
+// # Cache Key
 //
 // File names the schema by the file:// URL of the path made absolute
 // against the working directory, such as file:///srv/schemas/config.json,
@@ -52,6 +59,8 @@ const driveLen = 2
 // document that names it. The registry reads the file when the Ref
 // loads, not when File runs.
 //
+// # References
+//
 // A $ref in the schema resolves against the URL of the file, so
 // "defs.json" names the file beside it. The registry reads each file or
 // HTTP URL a reference names the
@@ -59,6 +68,8 @@ const driveLen = 2
 // a reference fails to load, the schema fails to load, as
 // [Registry.Schema] describes. A remote schema that names a local file
 // fails to resolve, and the registry does not read that file.
+//
+// # File Limits
 //
 // The registry reads only a regular file of at most 10 MB, the limit it
 // sets on a response from a [URL], so a path that names a directory, a
@@ -73,6 +84,8 @@ const driveLen = 2
 // file to check it, so a named pipe already at the path blocks the read
 // as well.
 //
+// # No Working Directory
+//
 // A relative path has no absolute form in a process without a working
 // directory, such as one whose directory no longer exists or one that
 // runs in a browser. File then names the path by the URL of the same
@@ -80,6 +93,8 @@ const driveLen = 2
 // file:///schemas/config.json. The registry reports the missing
 // directory when it loads such a Ref. A Ref from [FileFS] needs no
 // working directory.
+//
+// # Document Paths
 //
 // File is for a path written in the program, so it panics on an empty
 // path, as [Loadable] panics on an empty key. A reference read from a

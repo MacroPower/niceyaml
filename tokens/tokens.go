@@ -13,12 +13,21 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
 )
 
-// Tokenize returns the token stream for the given YAML source.
+// Tokenize returns the token stream for the given YAML source. It runs
+// the go-yaml lexer and gives back the text the lexer drops from the
+// Origins. The joined Origins then match the source without its byte
+// order marks, except in a few places Tokenize leaves as the lexer made
+// them. Every token's Line, Column, and Offset name the rune where its
+// text starts, counted from 1. [SplitDocuments] cuts the stream into one
+// stream per document, and [ForParser] returns the stream to hand the
+// go-yaml parser.
 //
-// It and [IsPlaceholder] are the only places niceyaml calls the go-yaml
-// lexer, and every token stream the module works with comes through
-// Tokenize. The lexer drops some text from
-// the Origins, and Tokenize gives it back from the source. It restores the
+// # Restored Text
+//
+// Tokenize and [IsPlaceholder] are the only places niceyaml calls the
+// go-yaml lexer, and every token stream the module works with comes
+// through Tokenize. The lexer drops some text from the Origins, and
+// Tokenize gives it back from the source. It restores the
 // letter and hex digits of a "\x", "\u", or "\U" escape in a double-quoted
 // scalar. It restores them in the invalid token the lexer makes of such a
 // scalar too. The lexer makes one of a scalar that no quote closes, as when
@@ -34,11 +43,15 @@ import (
 // leaves it in the second alone. [SplitDocuments] cuts the stream into one
 // stream per document.
 //
+// # Byte Order Marks
+//
 // Tokenize drops a UTF-8 byte order mark where YAML allows one: at the
 // start of a line before the content of a document, and in front of a
 // "---" or "..." marker. The lexer would read the mark as text and put it
 // in the first key. Every position names a rune of the text without
 // those marks.
+//
+// # Unclosed Flow Collections
 //
 // The lexer counts the flow collections it has open, and a "---" or "..."
 // marker does not reset the counts. After a "{" or "[" that nothing
@@ -50,6 +63,8 @@ import (
 // that starts at that marker. The stream stays as the lexer made it at a
 // marker that follows text the lexer dropped or swallowed, such as a ":"
 // after a tab used as indentation.
+//
+// # Unrestored Text
 //
 // The joined Origins match that text, except in a few places Tokenize
 // leaves as the lexer made them. The lexer drops some text outright, such
@@ -74,6 +89,8 @@ import (
 // with no line ending, the lexer repeats the last rune of its text as a
 // token of its own instead, and Tokenize drops that token.
 //
+// # Positions
+//
 // Every token's Line, Column, and Offset name the rune where its text
 // starts, counting lines, columns, and offsets from 1 and offsets in runes.
 // The Origin may open with whitespace and line endings before that rune.
@@ -87,6 +104,8 @@ import (
 // a comment or a tag, and on the last line of a multi-line block scalar.
 // Tokenize moves each such token to where the source holds its text, and
 // the Origins hold the spaces the lexer dropped.
+//
+// # Parser Input
 //
 // The first token that holds text opens with all the whitespace ahead of
 // it, blank lines included. The go-yaml parser rejects a key whose Origin

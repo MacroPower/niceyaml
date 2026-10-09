@@ -18,40 +18,17 @@ const errorConnectorWidth = 4
 
 // PrintError renders err for a reader: its message as a tree, then one
 // excerpt per source the bindings in err touch, as [niceyaml.Excerpts]
-// yields them. Each excerpt keeps the context lines [WithContextLines]
-// sets on either side of each marked line. A line longer than the width
-// [niceyaml.WithExcerptWidth] sets for its source shows a window of that
-// many columns around each location on it, with "..." in place of the
-// rest. An error joined from one
-// bound error per document of a file therefore prints that file once,
-// with the errors of every document on it. A binding whose children point
-// into another file, such as a detail that names where a value was first
-// declared, prints an excerpt of that file too.
-// Each location gets a caret run under its range on the row below its
-// line, as [niceyaml.FormatError] draws one, so the range shows its
-// extent without color. A location that covers no column, such as a path
-// to an empty value, gets a single caret at its column instead. Among
-// several bindings, the message of each sits after the carets of its
-// line, and when they touch more than one source, the name of its source
-// leads each excerpt on a row of its own. A location with no message
-// beside it in the excerpt, such as the root of a lone bound error, gets
-// its carets alone. [niceyaml.SourceError.Excerpt] marks such a line with
-// an annotation without content, and [DefaultAnnotation] draws the carets
-// for it. Blank lines separate the parts. A line starting "no excerpt:"
-// follows the excerpts for each SourceError [niceyaml.Bindings] finds
-// whose tree resolves no location, with the reason the location of the
-// SourceError itself did not resolve. A SourceError that carries no
-// location of its own gets no such line. Neither does a SourceError that
-// carries a path into a document with no content, such as an empty file,
-// since no path resolves there and the tree names the path already. A
-// SourceError whose own location does not resolve but whose children do
-// gets their excerpts and no reason, and its message stays in the tree
-// without a position.
+// yields them. The tree puts a connector in front of each error below
+// another. Each excerpt keeps the context lines [WithContextLines] sets
+// on either side of each marked line and draws a caret run under each
+// location. PrintError draws both with the styles of the printer and
+// wraps them to the width [WithWrap] sets. A nil err prints as "". A
+// program configures one printer and prints its errors through it:
 //
-// A source with excerpts off, as [niceyaml.WithExcerpts] sets it for a
-// text that holds secrets, prints no excerpt and no line in its place.
-// The tree names the position, the path, and the message of each error
-// bound in that source.
+//	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
+//	lipgloss.Fprintln(os.Stderr, p.PrintError(err))
+//
+// # Tree
 //
 // PrintError draws the message as a tree with a connector in front of each
 // error below another, in the color of the gutter's line numbers. A
@@ -67,20 +44,68 @@ const errorConnectorWidth = 4
 //
 // An error with nothing below it prints as a tree of one node that holds
 // its whole message, so the context a wrapper added stays in front of the
-// position. PrintError draws every message of the tree, the root's
-// included, and each "no excerpt:" line with control characters as their
-// pictures, as an excerpt draws them. A line feed in a message of the
-// tree starts a new row instead. A tab becomes four spaces wherever it
-// falls, in the tree, in a "no excerpt:" line, and in the message an
-// excerpt carries beside its carets. PrintError wraps each message to the
-// width [WithWrap] sets less the connectors in front of it. Each excerpt
-// wraps to that width less the horizontal frame of the container style,
-// so an excerpt and its frame fit the width together.
+// position.
 //
-// A program configures one printer and prints its errors through it:
+// # Excerpts
 //
-//	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
-//	lipgloss.Fprintln(os.Stderr, p.PrintError(err))
+// Each excerpt keeps the context lines [WithContextLines] sets on either
+// side of each marked line. A line longer than the width
+// [niceyaml.WithExcerptWidth] sets for its source shows a window of that
+// many columns around each location on it, with "..." in place of the
+// rest. An error joined from one bound error per document of a file
+// therefore prints that file once, with the errors of every document on
+// it. A binding whose children point into another file, such as a detail
+// that names where a value was first declared, prints an excerpt of that
+// file too.
+//
+// # Carets
+//
+// Each location gets a caret run under its range on the row below its
+// line, as [niceyaml.FormatError] draws one, so the range shows its
+// extent without color. A location that covers no column, such as a path
+// to an empty value, gets a single caret at its column instead. Among
+// several bindings, the message of each sits after the carets of its
+// line, and when they touch more than one source, the name of its source
+// leads each excerpt on a row of its own. A location with no message
+// beside it in the excerpt, such as the root of a lone bound error, gets
+// its carets alone. [niceyaml.SourceError.Excerpt] marks such a line with
+// an annotation without content, and [DefaultAnnotation] draws the carets
+// for it. Blank lines separate the parts.
+//
+// # Missing Excerpts
+//
+// A line starting "no excerpt:" follows the excerpts for each SourceError
+// [niceyaml.Bindings] finds whose tree resolves no location, with the
+// reason the location of the SourceError itself did not resolve. A
+// SourceError that carries no location of its own gets no such line.
+// Neither does a SourceError that carries a path into a document with no
+// content, such as an empty file, since no path resolves there and the
+// tree names the path already. A SourceError whose own location does not
+// resolve but whose children do gets their excerpts and no reason, and
+// its message stays in the tree without a position.
+//
+// A source with excerpts off, as [niceyaml.WithExcerpts] sets it for a
+// text that holds secrets, prints no excerpt and no line in its place.
+// The tree names the position, the path, and the message of each error
+// bound in that source.
+//
+// # Control Characters
+//
+// PrintError draws every message of the tree, the root's included, and
+// each "no excerpt:" line with control characters as their pictures, as
+// an excerpt draws them. A line feed in a message of the tree starts a
+// new row instead. A tab becomes four spaces wherever it falls, in the
+// tree, in a "no excerpt:" line, and in the message an excerpt carries
+// beside its carets.
+//
+// # Wrapping
+//
+// PrintError wraps each message to the width [WithWrap] sets less the
+// connectors in front of it. Each excerpt wraps to that width less the
+// horizontal frame of the container style, so an excerpt and its frame
+// fit the width together.
+//
+// # Unbound Errors
 //
 // An error whose tree holds no SourceError prints as its tree alone,
 // which for an error with nothing below it is its message. So does an
@@ -89,6 +114,8 @@ const errorConnectorWidth = 4
 // whose tree and excerpts both render nothing, such as a bound join of
 // typed-nil errors, prints its message in their place, escaped and
 // wrapped like any other.
+//
+// # Other Renderers
 //
 // PrintError draws the [niceyaml.ErrorReport] that
 // [niceyaml.NewErrorReport] builds for err with the context lines of the

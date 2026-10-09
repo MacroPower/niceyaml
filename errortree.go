@@ -62,7 +62,16 @@ type ErrorTree struct {
 	Detail bool
 }
 
-// NewErrorTree creates a new [ErrorTree] from err.
+// NewErrorTree creates a new [ErrorTree] from err. The root holds the
+// message of err without the errors below it. Each problem err heads and
+// each of its details is a child, and a child with children of its own
+// is a subtree. For an error bound to a source, the root keeps the
+// "name:line:col:" position and each child carries the "line:col:"
+// position its own location resolved to. The children of a binding sort
+// by position within their source. Each node holds its error in Err and
+// its binding in Bound. A nil err yields the zero ErrorTree.
+//
+// # Root Text
 //
 // The root text is the message of err without the errors below it, so
 // context a wrapper added stays in front. The message of a wrapper around
@@ -75,6 +84,13 @@ type ErrorTree struct {
 // such as "load config:". A wrapper that rewrites the message it wraps
 // leaves nothing to tell apart, so its text stays whole above its
 // children.
+//
+// The children come from the errors rather than from the text of the
+// message, so a wrapper that rewrites the message it wraps keeps its
+// children. Only the text of a node reads the message, to leave out what
+// the children show.
+//
+// # Bound Errors
 //
 // For an error bound to a source, the root keeps the "name:line:col:"
 // position [SourceError.Error] gives it, and each child, a binding of its
@@ -93,12 +109,16 @@ type ErrorTree struct {
 // documents in the order [errors.Join] took them. A child with children
 // of its own is a subtree.
 //
+// # Unbound Errors
+//
 // An error bound to no source has no position to show. When its cause
 // chain reaches a located [*Error] that carries a path before any
 // binding, the text of its node has that path in front, as the Error
 // wrote it, such as "@.path: msg" for a check of a value. A binding puts
 // the path there the same way, as a `$` path from the root of the
 // document, so the row names the value whatever wraps the Error.
+//
+// # Joins
 //
 // An error that unwraps to several and whose message is theirs one per
 // line, such as one from [errors.Join], is a node with no text and one
@@ -112,16 +132,15 @@ type ErrorTree struct {
 // A node with no text adds nothing. Its children take its place in the
 // tree above it, and one with a single child is that child.
 //
+// # Other Multi-Errors
+//
 // Any other error that unwraps to several keeps its text and has a child
 // per branch. A wrapper that [fmt.Errorf] builds with several %w verbs
 // keeps only its branches that carry a location or errors below them,
 // since its text shows the rest already. With one such branch, its
 // children are the ones along the cause chain of that branch.
 //
-// The children come from the errors rather than from the text of the
-// message, so a wrapper that rewrites the message it wraps keeps its
-// children. Only the text of a node reads the message, to leave out what
-// the children show.
+// # Node Fields
 //
 // Each node holds its error in Err and its binding in Bound. The node of
 // a binding holds that binding in both. The node of a wrapper around a
@@ -173,7 +192,12 @@ func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
 // Problems returns an iterator over the nodes that each stand for one
 // problem, in the order [ErrorTree.All] yields them. It is the walk of a
 // report that lists the problems of an error as rows, such as JSON lines,
-// CI annotations, or editor diagnostics.
+// CI annotations, or editor diagnostics. A heading, such as a summary or
+// a join, yields no node of its own, and the walk goes on to the problems
+// below it. Every other node with text stands for one problem, and its
+// Children are the details of that problem.
+//
+// # Roles
 //
 // The errors declare which nodes are problems, so the walk reads no shape
 // of the tree:
@@ -195,6 +219,8 @@ func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
 // carries a location plays no part, so an error bound to no source, such
 // as a file that failed to read, yields by the same rule, and the report
 // holds every problem.
+//
+// # Rows
 //
 // A row reads its message from [ErrorTree.Message] and its path from
 // [ErrorTree.Path], which answer for a node bound to no source as well,
@@ -233,6 +259,8 @@ func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
 //	if rule, ok := errors.AsType[*RuleError](problem.Err); ok {
 //		row.Rule = rule.ID
 //	}
+//
+// # Fault
 //
 // A row tells a fault of the document from a check that could not run
 // with [ErrorTree.IsInvalid], and [IsInvalid] asks the same of every row.
