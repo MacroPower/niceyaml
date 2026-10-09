@@ -6,6 +6,7 @@ import (
 	"iter"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -1200,4 +1201,124 @@ func newTree(node ErrorTree, children []ErrorTree) ErrorTree {
 	}
 
 	return node
+}
+
+// treeCut cuts an [ErrorTree] down to its first problems, as
+// [limitTree] returns one. It holds how many more problems the walk may
+// keep, and every node the walk left out.
+type treeCut struct {
+	left   []ErrorTree
+	budget int
+}
+
+// limitTree returns t with the first limit problems it heads, in the
+// order [ErrorTree.Problems] yields them, each with its details, and a
+// last node below the root that counts the problems it leaves out, as
+// "and 490 more" does. A heading keeps its row while a problem below it
+// stays. The second result holds the bindings of the problems left out,
+// so an excerpt of the same error marks the problems the tree shows. A
+// binding that a node the tree keeps reaches as well is not among them.
+// A tree with limit problems or fewer comes back as it is, with no
+// bindings.
+func limitTree(t ErrorTree, limit int) (ErrorTree, map[*SourceError]bool) {
+	c := &treeCut{budget: limit}
+
+	cut, _ := c.cut(t)
+	if len(c.left) == 0 {
+		return t, nil
+	}
+
+	cut.Children = append(cut.Children, ErrorTree{Text: "and " + strconv.Itoa(len(c.left)) + " more"})
+
+	kept := make(map[*SourceError]bool)
+	every := func(*SourceError) bool { return true }
+
+	// A heading holds the binding that lists its problems, so its node
+	// keeps that binding alone, and every other node keeps the bindings
+	// below its own too, which are its details.
+	for node := range cut.nodes() {
+		switch {
+		case node.Bound == nil:
+		case node.heads():
+			kept[node.Bound] = true
+		default:
+			node.Bound.all(kept, every)
+		}
+	}
+
+	skipped := make(map[*SourceError]bool)
+
+	for _, problem := range c.left {
+		for node := range problem.nodes() {
+			node.Bound.all(skipped, every)
+		}
+	}
+
+	for bound := range kept {
+		delete(skipped, bound)
+	}
+
+	return cut, skipped
+}
+
+// cut returns t without the problems past the budget, and whether any of
+// t remains. A node that stands for one problem stays whole while the
+// budget lasts, and goes to c.left once it runs out. A heading keeps its
+// details and the problems below it that stay, and goes when none does.
+func (c *treeCut) cut(t ErrorTree) (ErrorTree, bool) {
+	if t.Text != "" && !t.heads() {
+		if c.budget == 0 {
+			c.left = append(c.left, t)
+
+			return ErrorTree{}, false
+		}
+
+		c.budget--
+
+		return t, true
+	}
+
+	out := t
+	out.Children = make([]ErrorTree, 0, len(t.Children))
+
+	stays := false
+
+	for _, child := range t.Children {
+		if child.Detail {
+			out.Children = append(out.Children, child)
+
+			continue
+		}
+
+		if kept, ok := c.cut(child); ok {
+			out.Children = append(out.Children, kept)
+			stays = true
+		}
+	}
+
+	return out, stays
+}
+
+// nodes returns an iterator over t and every node below it, each before
+// the nodes below it, whether or not it has text.
+func (t ErrorTree) nodes() iter.Seq[ErrorTree] {
+	return func(yield func(ErrorTree) bool) {
+		t.eachNode(yield)
+	}
+}
+
+// eachNode yields t, then every node below it, and reports whether the
+// caller wants more.
+func (t ErrorTree) eachNode(yield func(ErrorTree) bool) bool {
+	if !yield(t) {
+		return false
+	}
+
+	for _, child := range t.Children {
+		if !child.eachNode(yield) {
+			return false
+		}
+	}
+
+	return true
 }

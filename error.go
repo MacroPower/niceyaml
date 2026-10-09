@@ -1132,7 +1132,8 @@ func WithDetails(errs ...error) ErrorOption {
 //
 // [FormatError] reads an Error that no binding holds yet. It puts the
 // path in front of the message, and the %+v verb and [Error.LogValue]
-// print the same tree. [BindValue] binds such an Error to no document,
+// print the same tree with [ErrorListLimit] problems at most. [BindValue]
+// binds such an Error to no document,
 // for a check on a value that came from none, and the message of that
 // binding holds each path.
 func (e *Error) Error() string {
@@ -1149,14 +1150,21 @@ func (e *Error) Error() string {
 // %+v verb prints what [FormatError] renders for the error: its message
 // behind its path, as a tree with the errors a summary heads, or the
 // details from [WithDetails], under it. A log or a failing test that
-// prints an unbound Error that way shows its path and every error below
+// prints an unbound Error that way shows its path and the errors below
 // it, as it does for a [*SourceError]. Every other verb formats
 // [Error.Error] as it formats a string, with the width, precision, and
 // flags given, so %q quotes the message and %-20v pads it.
+//
+// The tree of the %+v verb shows [ErrorListLimit] problems at most, each
+// with its details. A last row counts the problems it leaves out, as
+// "and 490 more" does, and an excerpt marks the problems the tree
+// shows. A logger that formats every error this way thus writes a short
+// text for an Error that heads thousands of problems. FormatError
+// renders every problem.
 func (e *Error) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		writeString(f, FormatError(e, DefaultContextLines))
+		writeString(f, formatError(e, DefaultContextLines, ErrorListLimit))
 
 	default:
 		_, _ = fmt.Fprintf(f, fmt.FormatString(f, verb), e.Error()) //nolint:errcheck // Formatter has no error channel.
@@ -1168,13 +1176,15 @@ func (e *Error) Format(f fmt.State, verb rune) {
 // The value is the tree [FormatError] prints for the error, as a string:
 // its message behind its path, with the errors a summary heads, or the
 // details from [WithDetails], under it behind their paths, and no source
-// excerpt. A handler that logs an error by [Error.Error], as
-// [slog.JSONHandler] does, shows the path and every error below it this
+// excerpt. The tree shows [ErrorListLimit] problems at most, each with
+// its details, and a last row counts the problems it leaves out, as
+// "and 490 more" does. A handler that logs an error by [Error.Error], as
+// [slog.JSONHandler] does, shows the path and the errors below it this
 // way, and one that formats it with %+v, as [slog.TextHandler] does,
 // keeps the excerpt out of the attribute. A wrapper such as [fmt.Errorf]
 // around the Error logs as its own message, which holds no path. A
-// program that wants the path of any error, or the excerpt, logs
-// [FormatError] as a string.
+// program that wants the path of any error, every problem, or the
+// excerpt, logs [FormatError] as a string.
 func (e *Error) LogValue() slog.Value {
 	return slog.StringValue(logTree(e))
 }
@@ -1852,6 +1862,14 @@ const DefaultExcerptWidth = 160
 // ErrorListLimit is the number of errors [SourceError.Error] lists below
 // its first line. A message that holds more ends with a line that counts
 // the rest.
+//
+// It is also the number of problems the %+v verb and the LogValue method
+// of an [*Error] or a [*SourceError] show, each with its details, above
+// a last row that counts the rest. A logger calls those two for a
+// program, so an error with thousands of problems reaches a log as a
+// short text. [FormatError] and
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] show every
+// problem.
 const ErrorListLimit = 10
 
 // boundTexts holds the texts a [SourceError] gives out. The message of a
@@ -3252,10 +3270,11 @@ func (e *SourceError) Details() []*SourceError {
 // own, so its message is the list alone, and the text a wrapper put in
 // front of the join stays on a line above the list. The message lists
 // [ErrorListLimit] errors at most, and a last line then counts the rest,
-// as "cafe.yaml: and 490 more" does. [FormatError], the %+v verb,
-// [SourceError.LogValue], and
+// as "cafe.yaml: and 490 more" does. [FormatError] and
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draw every
-// error as the branches of a tree, details included.
+// error as the branches of a tree, details included. The %+v verb and
+// [SourceError.LogValue] draw that tree with [ErrorListLimit] problems
+// at most, each with its details.
 //
 // Any other error that unwraps to several keeps the message it wrote, and
 // its branches follow as lines. That message holds the text of a branch
@@ -3731,6 +3750,13 @@ func AllBindings(err error) iter.Seq[*SourceError] {
 // [SourceError.Error] as it formats a string, with the width, precision,
 // and flags given, so %q quotes the message and %-20v pads it.
 //
+// The tree of the %+v verb shows [ErrorListLimit] problems at most, each
+// with its details. A last row counts the problems it leaves out, as
+// "and 490 more" does, and the excerpt marks the problems the tree
+// shows. A logger that formats every error this way thus writes a short
+// text for a document with thousands of violations. FormatError renders
+// every problem.
+//
 // The excerpt shows lines of the source around the location, each cut
 // to the width [WithExcerptWidth] sets for the source, so a logger that
 // formats an error with %+v writes those lines into the log.
@@ -3743,7 +3769,7 @@ func AllBindings(err error) iter.Seq[*SourceError] {
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		writeString(f, FormatError(e, DefaultContextLines))
+		writeString(f, formatError(e, DefaultContextLines, ErrorListLimit))
 
 	default:
 		_, _ = fmt.Fprintf(f, fmt.FormatString(f, verb), e.Error()) //nolint:errcheck // Formatter has no error channel.
@@ -3755,15 +3781,16 @@ func (e *SourceError) Format(f fmt.State, verb rune) {
 // The value is the tree [FormatError] prints for the error, as a string:
 // its message behind the position its location resolved to, with each
 // error below it, problem or detail, behind its own position, and no
-// source excerpt. A handler that logs an error by [SourceError.Error], as
-// [slog.JSONHandler] does, shows the whole tree this way, where Error
-// lists [ErrorListLimit] problems at most and no details. A handler that
-// formats the error with %+v, as
-// [slog.TextHandler] does, keeps the excerpt out of the attribute. A
-// wrapper such as [fmt.Errorf] around a SourceError logs as its own
-// message, which holds the list Error returns. A program that wants the
-// whole tree of any error, or the excerpt, logs [FormatError] as a
-// string.
+// source excerpt. The tree shows [ErrorListLimit] problems at most, each
+// with its details, and a last row counts the problems it leaves out, as
+// "and 490 more" does. A handler that logs an error by
+// [SourceError.Error], as [slog.JSONHandler] does, shows the tree this
+// way, where Error lists the problems without their details. A handler
+// that formats the error with %+v, as [slog.TextHandler] does, keeps the
+// excerpt out of the attribute. A wrapper such as [fmt.Errorf] around a
+// SourceError logs as its own message, which holds the list Error
+// returns. A program that wants every problem of any error, or the
+// excerpt, logs [FormatError] as a string.
 func (e *SourceError) LogValue() slog.Value {
 	return slog.StringValue(logTree(e))
 }
@@ -3827,6 +3854,11 @@ func (e *SourceError) LogValue() slog.Value {
 //	err := fmt.Errorf("load %s: %w", name, doc.Bind(check(cfg)))
 //	log.Print(niceyaml.FormatError(err, 2))
 //
+// FormatError renders every problem of err, however many it holds. The
+// %+v verb and the LogValue method of an [*Error] or a [*SourceError],
+// which a logger calls for a program, render [ErrorListLimit] problems
+// and count the rest.
+//
 // An error that binds to no source renders as its tree alone. For an error
 // with nothing nested, that tree is its message behind the path the
 // [*Error] along its cause chain carries, where a binding would put it,
@@ -3837,12 +3869,28 @@ func (e *SourceError) LogValue() slog.Value {
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] renders the same
 // tree and excerpts with styles. A nil err renders as "".
 func FormatError(err error, context int) string {
+	return formatError(err, context, 0)
+}
+
+// formatError renders err as [FormatError] documents it. With a limit
+// above zero, the tree shows that many problems at most and counts the
+// rest, as [limitTree] cuts it, and the excerpts mark the problems the
+// tree shows.
+func formatError(err error, context, limit int) string {
 	if err == nil {
 		return ""
 	}
 
-	parts := []string{renderErrorTree(NewErrorTree(err))}
-	parts = append(parts, errorDetails(err, context)...)
+	tree := NewErrorTree(err)
+
+	var skipped map[*SourceError]bool
+
+	if limit > 0 {
+		tree, skipped = limitTree(tree, limit)
+	}
+
+	parts := []string{renderErrorTree(tree)}
+	parts = append(parts, errorDetails(err, context, skipped)...)
 
 	out := joinParts(parts...)
 
@@ -3881,12 +3929,16 @@ func renderErrorTree(t ErrorTree) string {
 	return sb.String()
 }
 
-// logTree renders the tree of err as [renderErrorTree] lays it out. When
-// that tree renders nothing, such as for a bound join of typed-nil
-// errors, it renders the tree of one node that holds the message of err,
-// as [FormatError] does when it has no excerpt either.
+// logTree renders the tree of err as [renderErrorTree] lays it out, with
+// [ErrorListLimit] problems at most and a last row that counts the rest,
+// as [limitTree] cuts it. When that tree renders nothing, such as for a
+// bound join of typed-nil errors, it renders the tree of one node that
+// holds the message of err, as [FormatError] does when it has no excerpt
+// either.
 func logTree(err error) string {
-	if out := renderErrorTree(NewErrorTree(err)); out != "" {
+	tree, _ := limitTree(NewErrorTree(err), ErrorListLimit)
+
+	if out := renderErrorTree(tree); out != "" {
 		return out
 	}
 
@@ -4221,7 +4273,7 @@ func (e *SourceError) Annotate(view *line.View) bool {
 // those of any other. The caller supplied the view and decides who sees
 // it, and [WithExcerpts] covers the excerpts this package builds.
 func Annotate(err error, view *line.View) bool {
-	sources, positions := treePositions(slices.Collect(Bindings(err)), true)
+	sources, positions := treePositions(slices.Collect(Bindings(err)), true, nil)
 
 	marked := false
 
@@ -4411,9 +4463,14 @@ func (s *Source) excerpt(positions []errorPosition, context int) (*line.View, bo
 // source leads each excerpt on a row of its own, so the reader tells the
 // excerpts apart. Returns nothing when there is nothing to show. The
 // printer renders the same parts with its styles.
-func errorDetails(err error, context int) []string {
+//
+// The bindings in skipped mark nothing and get no "no excerpt:" line.
+// They are the ones [limitTree] returns for a tree that leaves problems
+// out, so the excerpts show the problems that tree shows. A nil skipped
+// leaves none out.
+func errorDetails(err error, context int, skipped map[*SourceError]bool) []string {
 	bindings := slices.Collect(Bindings(err))
-	sources, positions := excerptPositions(bindings)
+	sources, positions := treePositions(bindings, len(bindings) > 1, skipped)
 
 	var parts []string
 
@@ -4432,7 +4489,7 @@ func errorDetails(err error, context int) []string {
 	})
 
 	for _, bound := range bindings {
-		if bound.marks() {
+		if skipped[bound] || bound.marks() {
 			continue
 		}
 
@@ -4628,7 +4685,7 @@ func highlightStart(at position.Position, segments []position.Range) (int, bool)
 // apart. The location of a lone binding carries none, so an excerpt gives
 // it a caret run alone, since the tree above the excerpt names it.
 func excerptPositions(bindings []*SourceError) ([]*Source, map[*Source][]errorPosition) {
-	return treePositions(bindings, len(bindings) > 1)
+	return treePositions(bindings, len(bindings) > 1, nil)
 }
 
 // treePositions returns the sources the trees of bindings touch, with the
@@ -4642,8 +4699,13 @@ func excerptPositions(bindings []*SourceError) ([]*Source, map[*Source][]errorPo
 //
 // Every node below a binding carries its message, and the own location of
 // each binding carries it when labeled is set. A nil binding touches no
-// source.
-func treePositions(bindings []*SourceError, labeled bool) ([]*Source, map[*Source][]errorPosition) {
+// source. A node in skipped touches no source and adds no location, and
+// a nil skipped holds none.
+func treePositions(
+	bindings []*SourceError,
+	labeled bool,
+	skipped map[*SourceError]bool,
+) ([]*Source, map[*Source][]errorPosition) {
 	var sources []*Source
 
 	touched := make(map[*Source]bool)
@@ -4652,6 +4714,10 @@ func treePositions(bindings []*SourceError, labeled bool) ([]*Source, map[*Sourc
 
 	for _, root := range bindings {
 		root.all(seen, func(n *SourceError) bool {
+			if skipped[n] {
+				return true
+			}
+
 			if !touched[n.source] {
 				touched[n.source] = true
 				sources = append(sources, n.source)

@@ -1164,6 +1164,261 @@ func TestSourceError_Error_ListLimit(t *testing.T) {
 	}
 }
 
+func TestSourceError_Format_ListLimit(t *testing.T) {
+	t.Parallel()
+
+	limit := niceyaml.ErrorListLimit
+
+	var input strings.Builder
+
+	for i := range 2 * limit {
+		fmt.Fprintf(&input, "k%02d: 0\n", i)
+	}
+
+	other := niceyaml.NewSourceFromString("port: 0\n", niceyaml.WithName("other.yaml"))
+
+	key := func(i int) string { return fmt.Sprintf("k%02d", i) }
+
+	// At returns an error at the key of line i of the input.
+	at := func(i int, msg string, opts ...niceyaml.ErrorOption) error {
+		return niceyaml.NewError(msg, append(opts, niceyaml.AtPath(paths.Current().Child(key(i))))...)
+	}
+
+	// Located returns n errors, one per key of the input from the key at
+	// first on.
+	located := func(first, n int) []error {
+		errs := make([]error, 0, n)
+		for i := first; i < first+n; i++ {
+			errs = append(errs, at(i, "bad "+key(i)))
+		}
+
+		return errs
+	}
+
+	// Rows returns the row of the tree for each of those errors, behind
+	// prefix.
+	rows := func(prefix string, first, n int) []string {
+		out := make([]string, 0, n)
+		for i := first; i < first+n; i++ {
+			out = append(out, fmt.Sprintf("%s%d:6: $.%s: bad %s", prefix, i+1, key(i), key(i)))
+		}
+
+		return out
+	}
+
+	// Lines returns the rows of an excerpt for lines first up to end of
+	// the input, with the message of each line that marks holds below
+	// it.
+	lines := func(first, end int, marks map[int]string) []string {
+		var out []string
+
+		for i := first; i < end; i++ {
+			out = append(out, fmt.Sprintf("%4d | %s: 0", i+1, key(i)))
+
+			if msg, ok := marks[i]; ok {
+				out = append(out, "     |      ^ "+msg)
+			}
+		}
+
+		return out
+	}
+
+	// The messages of the first limit problems, each on its own line.
+	firstMarks := make(map[int]string, limit)
+	for i := range limit {
+		firstMarks[i] = "bad " + key(i)
+	}
+
+	// The excerpt of the first limit problems, with two context lines
+	// after them.
+	firstLines := lines(0, limit+2, firstMarks)
+
+	tcs := map[string]struct {
+		err func(t *testing.T, source *niceyaml.Source) error
+		// The rows of the tree the %+v verb and LogValue draw.
+		tree []string
+		// The rows of the excerpts the %+v verb draws below the tree.
+		excerpt []string
+		// The number of problems FormatError draws.
+		problems int
+	}{
+		"problems at the limit are whole": {
+			err: func(*testing.T, *niceyaml.Source) error {
+				return niceyaml.NewSummary("summary", located(0, limit)...)
+			},
+			tree:     append([]string{"f.yaml: summary"}, branches(rows("", 0, limit)...)...),
+			excerpt:  firstLines,
+			problems: limit,
+		},
+		"problems past the limit count as more": {
+			err: func(*testing.T, *niceyaml.Source) error {
+				return niceyaml.NewSummary("summary", located(0, limit+2)...)
+			},
+			tree:     append([]string{"f.yaml: summary"}, branches(append(rows("", 0, limit), "and 2 more")...)...),
+			excerpt:  firstLines,
+			problems: limit + 2,
+		},
+		"join past the limit counts the rest": {
+			err: func(*testing.T, *niceyaml.Source) error {
+				return errors.Join(located(0, limit+1)...)
+			},
+			tree:     branches(append(rows("f.yaml:", 0, limit), "and 1 more")...),
+			excerpt:  firstLines,
+			problems: limit + 1,
+		},
+		"details stay with their problem and count as none": {
+			err: func(*testing.T, *niceyaml.Source) error {
+				first := at(0, "bad k00", niceyaml.WithDetails(
+					errors.New("reason one"),
+					errors.New("reason two"),
+					at(15, "declared here"),
+				))
+
+				return niceyaml.NewSummary("summary", append([]error{first}, located(1, limit+1)...)...)
+			},
+			tree: slices.Concat(
+				[]string{
+					"f.yaml: summary",
+					"|-- 1:6: $.k00: bad k00",
+					"|   |-- 16:6: $.k15: declared here",
+					"|   |-- reason one",
+					"|   `-- reason two",
+				},
+				branches(append(rows("", 1, limit-1), "and 2 more")...),
+			),
+			excerpt: slices.Concat(
+				firstLines,
+				[]string{"     | ..."},
+				lines(13, 18, map[int]string{15: "declared here"}),
+			),
+			problems: limit + 2,
+		},
+		"lists below a list share the limit": {
+			err: func(*testing.T, *niceyaml.Source) error {
+				return niceyaml.NewSummary("summary",
+					niceyaml.NewSummary("first", located(0, limit-2)...),
+					niceyaml.NewSummary("second", located(limit-2, limit)...),
+				)
+			},
+			tree: slices.Concat(
+				[]string{"f.yaml: summary", "|-- first"},
+				indent("|   ", branches(rows("", 0, limit-2)...)),
+				[]string{"|-- second"},
+				indent("|   ", branches(rows("", limit-2, 2)...)),
+				[]string{fmt.Sprintf("`-- and %d more", limit-2)},
+			),
+			excerpt:  firstLines,
+			problems: 2*limit - 2,
+		},
+		"heading with no problem left goes": {
+			err: func(*testing.T, *niceyaml.Source) error {
+				return niceyaml.NewSummary("summary",
+					niceyaml.NewSummary("first", located(0, limit)...),
+					niceyaml.NewSummary("second", located(limit, 3)...),
+				)
+			},
+			tree: slices.Concat(
+				[]string{"f.yaml: summary", "|-- first"},
+				indent("|   ", branches(rows("", 0, limit)...)),
+				[]string{"`-- and 3 more"},
+			),
+			excerpt:  firstLines,
+			problems: limit + 3,
+		},
+		"problem left out in another source shows no excerpt of it": {
+			err: func(t *testing.T, source *niceyaml.Source) error {
+				t.Helper()
+
+				bound := make([]error, 0, limit+1)
+				for _, err := range located(0, limit) {
+					bound = append(bound, yamltest.Bind(t, source, err))
+				}
+
+				port := niceyaml.NewError("bad port", niceyaml.AtPath(paths.Current().Child("port")))
+
+				return errors.Join(append(bound, yamltest.Bind(t, other, port))...)
+			},
+			tree:     branches(append(rows("f.yaml:", 0, limit), "and 1 more")...),
+			excerpt:  firstLines,
+			problems: limit + 1,
+		},
+		"binding a shown problem shares with one left out stays marked": {
+			err: func(t *testing.T, source *niceyaml.Source) error {
+				t.Helper()
+
+				declared := yamltest.Bind(t, source, at(15, "declared here"))
+				first := at(0, "bad k00", niceyaml.WithDetails(declared))
+				last := at(limit, "bad k10", niceyaml.WithDetails(declared))
+
+				problems := slices.Concat([]error{first}, located(1, limit-1), []error{last})
+
+				return niceyaml.NewSummary("summary", problems...)
+			},
+			tree: slices.Concat(
+				[]string{
+					"f.yaml: summary",
+					"|-- 1:6: $.k00: bad k00",
+					"|   `-- 16:6: $.k15: declared here",
+				},
+				branches(append(rows("", 1, limit-1), "and 1 more")...),
+			),
+			excerpt: slices.Concat(
+				firstLines,
+				[]string{"     | ..."},
+				lines(13, 18, map[int]string{15: "declared here"}),
+			),
+			problems: limit + 1,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(input.String(), niceyaml.WithName("f.yaml"))
+			err := yamltest.Bind(t, source, tc.err(t, source))
+
+			tree := stringtest.JoinLF(tc.tree...)
+
+			assert.Equal(t, tree+"\n\n"+stringtest.JoinLF(tc.excerpt...), fmt.Sprintf("%+v", err))
+			assert.Equal(t, tree, logged(t, err))
+
+			// FormatError draws every problem, however many there are.
+			all := niceyaml.FormatError(err, niceyaml.DefaultContextLines)
+
+			assert.Equal(t, tc.problems, strings.Count(all, ": bad "))
+			assert.NotContains(t, all, " more")
+		})
+	}
+}
+
+// branches returns rows as the branches of a tree, each behind its
+// connector.
+func branches(rows ...string) []string {
+	out := make([]string, 0, len(rows))
+
+	for i, row := range rows {
+		connector := "|-- "
+		if i == len(rows)-1 {
+			connector = "`-- "
+		}
+
+		out = append(out, connector+row)
+	}
+
+	return out
+}
+
+// indent returns rows with prefix in front of each.
+func indent(prefix string, rows []string) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, prefix+row)
+	}
+
+	return out
+}
+
 func TestDocument_BindRender(t *testing.T) {
 	t.Parallel()
 
@@ -11422,6 +11677,110 @@ func TestError_Format(t *testing.T) {
 		t.Parallel()
 
 		assert.Equal(t, "load: 2 violations", fmt.Errorf("load: %w", err).Error())
+	})
+}
+
+func TestError_Format_ListLimit(t *testing.T) {
+	t.Parallel()
+
+	limit := niceyaml.ErrorListLimit
+
+	// Located returns n errors, each at a key of its own.
+	located := func(n int) []error {
+		errs := make([]error, 0, n)
+		for i := range n {
+			key := fmt.Sprintf("k%02d", i)
+			errs = append(errs, niceyaml.NewError("bad "+key, niceyaml.AtPath(paths.Current().Child(key))))
+		}
+
+		return errs
+	}
+
+	// Rows returns the row of the tree for each of the first n of those
+	// errors.
+	rows := func(n int) []string {
+		out := make([]string, 0, n)
+		for i := range n {
+			out = append(out, fmt.Sprintf("@.k%02d: bad k%02d", i, i))
+		}
+
+		return out
+	}
+
+	tcs := map[string]struct {
+		err  error
+		want []string
+		// The number of rows FormatError draws below the root.
+		rows int
+	}{
+		"problems at the limit are whole": {
+			err:  niceyaml.NewSummary("summary", located(limit)...),
+			want: append([]string{"summary"}, branches(rows(limit)...)...),
+			rows: limit,
+		},
+		"problems past the limit count as more": {
+			err:  niceyaml.NewSummary("summary", located(limit+2)...),
+			want: append([]string{"summary"}, branches(append(rows(limit), "and 2 more")...)...),
+			rows: limit + 2,
+		},
+		"details of one problem all stay": {
+			err:  niceyaml.NewError("outer", niceyaml.WithDetails(located(limit+2)...)),
+			want: append([]string{"outer"}, branches(rows(limit+2)...)...),
+			rows: limit + 2,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			want := stringtest.JoinLF(tc.want...)
+
+			unbound, ok := errors.AsType[*niceyaml.Error](tc.err)
+			require.True(t, ok)
+
+			assert.Equal(t, want, fmt.Sprintf("%+v", tc.err))
+			assert.Equal(t, want, unbound.LogValue().String())
+			assert.Equal(t, want, logged(t, tc.err))
+
+			// FormatError draws every problem, however many there are.
+			all := niceyaml.FormatError(tc.err, niceyaml.DefaultContextLines)
+
+			assert.Equal(t, tc.rows, strings.Count(all, ": bad "))
+			assert.NotContains(t, all, " more")
+		})
+	}
+
+	t.Run("binding left out adds no line for its location", func(t *testing.T) {
+		t.Parallel()
+
+		var input strings.Builder
+
+		for i := range limit {
+			fmt.Fprintf(&input, "k%02d: 0\n", i)
+		}
+
+		source := niceyaml.NewSourceFromString(input.String(), niceyaml.WithName("f.yaml"))
+
+		// Each of the first limit problems is bound at a key of the
+		// source, and the last names a value the source lacks.
+		problems := make([]error, 0, limit+1)
+		for _, err := range located(limit) {
+			problems = append(problems, yamltest.Bind(t, source, err))
+		}
+
+		missing := niceyaml.NewError("bad port", niceyaml.AtPath(paths.Current().Child("port").Index(0)))
+		err := niceyaml.NewSummary("summary", append(problems, yamltest.Bind(t, source, missing))...)
+
+		const reason = "no excerpt: resolve $.port[0]: not found"
+
+		assert.Contains(t, niceyaml.FormatError(err, 0), reason)
+
+		got := fmt.Sprintf("%+v", err)
+
+		assert.Contains(t, got, "`-- and 1 more")
+		assert.Contains(t, got, "     |      ^ bad k09")
+		assert.NotContains(t, got, reason)
 	})
 }
 

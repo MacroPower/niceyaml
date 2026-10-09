@@ -191,8 +191,12 @@
 //
 // An [*Error] or a [*SourceError] logged as a [log/slog] attribute
 // logs the tree without the excerpt, through [Error.LogValue] and
-// [SourceError.LogValue], so a structured log names every error in the
-// tree in one attribute whichever handler writes it.
+// [SourceError.LogValue], so a structured log names the errors of the
+// tree in one attribute whichever handler writes it. A logger calls
+// LogValue and the %+v verb for a program, so both show [ErrorListLimit]
+// problems at most, each with its details, and count the rest. An error
+// with thousands of problems thus reaches a log as a short text, and
+// FormatError renders every one of them.
 //
 // An excerpt shows lines of the source to whoever reads the log or the
 // terminal. A program that loads a text with secrets in it, such as the
