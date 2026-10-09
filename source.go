@@ -211,9 +211,27 @@ func WithFS(fsys fs.FS) SourceOption {
 }
 
 // WithAllowDuplicateKeys is a [SourceOption] that sets whether a mapping may
-// hold the same key twice, both when [Source.File] parses the document and
-// when a [Node] decodes it. When allowed, the last value wins. The default
-// is false, and a duplicate key is then an error.
+// hold the same key twice when [Source.File] parses the document. When
+// allowed, the last value wins. The default is false, and a duplicate key
+// is then an error matching [ErrSyntax].
+//
+// The option reaches the parser alone. A decode keeps the later of two
+// entries it reads as one key, whatever the option says, so a mapping
+// overrides a key that a `<<` merge brings in:
+//
+//	defaults: &defaults {host: localhost, port: 80}
+//	server:
+//	  <<: *defaults
+//	  port: 8080
+//
+// The parser compares the keys of a mapping by their text, so it accepts
+// two keys of different text that a decode reads as one. `&k name` beside
+// `*k` is such a pair, and so is 1 beside 0x1 in a map with string keys.
+// The decode keeps the later entry of each.
+//
+// The decoder parses each reference document of [WithReferences] itself
+// and accepts a duplicate key there. A program that needs the check reads
+// the documents of that [Source] first.
 func WithAllowDuplicateKeys(allow bool) SourceOption {
 	return func(c *sourceConfig) {
 		c.allowDuplicateKeys = allow
@@ -588,8 +606,12 @@ func NewSourceFromTokens(tks token.Tokens, opts ...SourceOption) *Source {
 
 	if t.allowDuplicateKeys {
 		t.parserOpts = append(t.parserOpts, parser.AllowDuplicateMapKey())
-		t.decodeOpts = append(t.decodeOpts, yaml.AllowDuplicateMapKey())
 	}
+
+	// The decoder counts a key that a `<<` merge brings in beside the
+	// keys of the mapping, so its check rejects a mapping that overrides
+	// a merged key. The parser rejects a key a mapping holds twice.
+	t.decodeOpts = append(t.decodeOpts, yaml.AllowDuplicateMapKey())
 
 	if len(t.references) > 0 {
 		t.decodeOpts = append(t.decodeOpts, referenceReaders(t.references))

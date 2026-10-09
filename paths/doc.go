@@ -85,12 +85,9 @@
 // precedence instead. A token found through an alias or merge key sits
 // where the anchor defines it, which is where the offending text is.
 //
-// When the decoder fills a struct, it reports a key that both the mapping
-// and a merge define as a duplicate, unless
-// [go.jacobcolvin.com/niceyaml.WithAllowDuplicateKeys] allows it. It then
-// keeps the later entry, as it does for a map. A `..name` selector skips an
-// entry of the mapping when a `<<` after it brings in the same key, since a
-// path through that key selects the merged entry.
+// The decoder keeps the later entry when it fills a struct too. A `..name`
+// selector skips an entry of the mapping when a `<<` after it brings in the
+// same key, since a path through that key selects the merged entry.
 //
 // A mapping may also hold a merge key next to a real key with the text
 // `<<`, such as an alias key whose anchor holds that text. The decoder

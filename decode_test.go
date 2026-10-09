@@ -7530,6 +7530,97 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `mapping key "name" already defined`)
 	})
+
+	t.Run("without option a decode keeps the later of two keys it reads as one", func(t *testing.T) {
+		t.Parallel()
+
+		aliased := yamltest.FirstDocument(t, "&k name: first\n*k : second\n")
+
+		result, err := aliased.Decode[config](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "second", result.Name)
+
+		respelled := yamltest.FirstDocument(t, "1: first\n0x1: second\n")
+
+		got, err := respelled.Decode[map[string]string](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]string{"1": "second"}, got)
+	})
+
+	t.Run("without option a decode accepts a duplicate key of a reference document", func(t *testing.T) {
+		t.Parallel()
+
+		ref := niceyaml.NewSourceFromString("defaults: &defaults {name: first, name: second}\n")
+
+		_, err := ref.Documents()
+		require.ErrorIs(t, err, niceyaml.ErrSyntax)
+
+		doc := yamltest.FirstDocument(t, "server: *defaults\n", niceyaml.WithReferences(ref))
+
+		got, err := doc.Decode[map[string]config](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, map[string]config{"server": {Name: "second"}}, got)
+	})
+}
+
+func TestDocument_Decode_MergeOverride(t *testing.T) {
+	t.Parallel()
+
+	type server struct {
+		Host string `yaml:"host"`
+		Port int    `yaml:"port"`
+	}
+
+	// Each case decodes the server of input into a struct and into a map
+	// of a type, which are the targets the go-yaml decoder checks for a
+	// duplicate key.
+	tcs := map[string]struct {
+		input string
+		want  server
+	}{
+		"a key after the merge overrides it": {
+			input: "defaults: &defaults {host: h, port: 1}\nserver:\n  <<: *defaults\n  port: 2\n",
+			want:  server{Host: "h", Port: 2},
+		},
+		"a merge after the key overrides it": {
+			input: "defaults: &defaults {host: h, port: 1}\nserver:\n  port: 2\n  <<: *defaults\n",
+			want:  server{Host: "h", Port: 1},
+		},
+		"a key overrides a mapping the merge key holds": {
+			input: "server:\n  <<: {host: h, port: 1}\n  port: 2\n",
+			want:  server{Host: "h", Port: 2},
+		},
+		"a key overrides a merge in a flow mapping": {
+			input: "defaults: &defaults {host: h, port: 1}\nserver: {<<: *defaults, port: 2}\n",
+			want:  server{Host: "h", Port: 2},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			at := paths.Current().Child("server")
+			doc := yamltest.FirstDocument(t, tc.input)
+
+			got, err := doc.DecodeAt[server](t.Context(), at)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got)
+
+			whole, err := doc.Decode[map[string]server](t.Context())
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, whole["server"])
+
+			typed, err := doc.DecodeAt[map[string]any](t.Context(), at)
+			require.NoError(t, err)
+			assert.Equal(t, map[string]any{"host": tc.want.Host, "port": uint64(tc.want.Port)}, typed)
+
+			// A path reads the entry the decode keeps.
+			port, err := doc.DecodeAt[int](t.Context(), at.Child("port"))
+			require.NoError(t, err)
+			assert.Equal(t, tc.want.Port, port)
+		})
+	}
 }
 
 // plainValidated is a [niceyaml.SelfValidator] that returns an error with no
