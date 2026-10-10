@@ -122,26 +122,24 @@ func TestSegment_ContentSpan(t *testing.T) {
 
 	tcs := map[string]struct {
 		origin string
-		want   [2]int
+		want   position.Span
 	}{
-		"no spaces":          {origin: "value\n", want: [2]int{0, 5}},
-		"leading spaces":     {origin: "  value", want: [2]int{2, 7}},
-		"trailing spaces":    {origin: "value   \n", want: [2]int{0, 5}},
-		"both sides":         {origin: " value  \r\n", want: [2]int{1, 6}},
-		"spaces only":        {origin: "    \n", want: [2]int{4, 4}},
-		"leading tab":        {origin: "\tvalue", want: [2]int{1, 6}},
-		"trailing tab":       {origin: "value\t\n", want: [2]int{0, 5}},
-		"tab inside content": {origin: "a\tb", want: [2]int{0, 3}},
-		"multi-byte content": {origin: " 日本 ", want: [2]int{1, 3}},
+		"no spaces":          {origin: "value\n", want: position.NewSpan(0, 5)},
+		"leading spaces":     {origin: "  value", want: position.NewSpan(2, 7)},
+		"trailing spaces":    {origin: "value   \n", want: position.NewSpan(0, 5)},
+		"both sides":         {origin: " value  \r\n", want: position.NewSpan(1, 6)},
+		"spaces only":        {origin: "    \n", want: position.NewSpan(4, 4)},
+		"leading tab":        {origin: "\tvalue", want: position.NewSpan(1, 6)},
+		"trailing tab":       {origin: "value\t\n", want: position.NewSpan(0, 5)},
+		"tab inside content": {origin: "a\tb", want: position.NewSpan(0, 3)},
+		"multi-byte content": {origin: " 日本 ", want: position.NewSpan(1, 3)},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			span := segment.New(nil, &token.Token{Origin: tc.origin}).ContentSpan()
-			assert.Equal(t, tc.want[0], span.Start)
-			assert.Equal(t, tc.want[1], span.End)
+			assert.Equal(t, tc.want, segment.New(nil, &token.Token{Origin: tc.origin}).ContentSpan())
 		})
 	}
 }
