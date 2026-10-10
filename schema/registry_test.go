@@ -566,17 +566,7 @@ func TestRegistry_Check(t *testing.T) {
 			schema.Embedded(schemaData),
 		)))
 
-		doc := yamltest.FirstDocument(t, "kind: Deployment")
-		err := reg.Check(t.Context(), doc)
-		require.Error(t, err)
-
-		var validationErr *niceyaml.Error
-
-		require.ErrorAs(t, err, &validationErr)
-
-		gotPath, ok := validationErr.Path()
-		require.True(t, ok)
-		assert.Equal(t, "$.kind", gotPath.String())
+		requireRejects(t, reg, "kind: Deployment", `$.kind: expected "number", got "string"`)
 	})
 
 	t.Run("no match returns ErrNoMatch", func(t *testing.T) {
@@ -627,10 +617,7 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 	t.Run("still validates a document a resolver applies to", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "kind: Deployment")
-		err := newRegistry().Check(t.Context(), doc)
-		require.Error(t, err)
-		require.NotErrorIs(t, err, schema.ErrNoMatch)
+		requireRejects(t, newRegistry(), "kind: Deployment", `$.kind: expected "number", got "string"`)
 	})
 
 	t.Run("still reports other resolver errors", func(t *testing.T) {
@@ -1433,10 +1420,7 @@ func TestRegistry_CompileOptionsNotAliased(t *testing.T) {
 
 			opts[0] = schema.WithJSONSchemaOptions(jsonschema.WithFormats(false))
 
-			doc := yamltest.FirstDocument(t, "not-an-ip")
-			err := reg.Check(t.Context(), doc)
-			require.Error(t, err)
-			require.NotErrorIs(t, err, schema.ErrNoMatch)
+			requireRejects(t, reg, "not-an-ip", `string does not match format "ipv4"`)
 		})
 	}
 }
@@ -1451,13 +1435,7 @@ func TestRegistry_ResolversNotAliased(t *testing.T) {
 	opt := schema.WithResolvers(res...)
 	res[0] = nil
 
-	reg := schema.NewRegistry(opt)
-
-	doc := yamltest.FirstDocument(t, "key: value")
-	err := reg.Check(t.Context(), doc)
-	require.Error(t, err)
-	require.NotErrorIs(t, err, schema.ErrNoMatch)
-	assert.Contains(t, err.Error(), "string")
+	requireRejects(t, schema.NewRegistry(opt), "key: value", `expected "string", got "object"`)
 }
 
 func TestRegistry_JSONSchemaOptionsNotAliased(t *testing.T) {
@@ -1476,10 +1454,7 @@ func TestRegistry_JSONSchemaOptionsNotAliased(t *testing.T) {
 
 	jopts[0] = jsonschema.WithFormats(false)
 
-	doc := yamltest.FirstDocument(t, "not-an-ip")
-	err := reg.Check(t.Context(), doc)
-	require.Error(t, err)
-	require.NotErrorIs(t, err, schema.ErrNoMatch)
+	requireRejects(t, reg, "not-an-ip", `string does not match format "ipv4"`)
 }
 
 func TestRegistry_CompileOptionsAppend(t *testing.T) {
@@ -1493,10 +1468,7 @@ func TestRegistry_CompileOptionsAppend(t *testing.T) {
 		schema.WithResolvers(schema.Embedded([]byte(`{"type": "string", "format": "ipv4"}`))),
 	)
 
-	doc := yamltest.FirstDocument(t, "not-an-ip")
-	err := reg.Check(t.Context(), doc)
-	require.Error(t, err)
-	require.NotErrorIs(t, err, schema.ErrNoMatch)
+	requireRejects(t, reg, "not-an-ip", `string does not match format "ipv4"`)
 }
 
 func TestRegistry_ErrorCases(t *testing.T) {
@@ -1787,11 +1759,7 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 		assert.Same(t, service, got)
 		require.NoError(t, reg.Check(t.Context(), doc))
 
-		bad := yamltest.FirstDocument(t, "kind: Deployment\nport: 80\n")
-		err = reg.Check(t.Context(), bad)
-		require.Error(t, err)
-		require.NotErrorIs(t, err, schema.ErrNoMatch)
-		assert.Contains(t, err.Error(), "replicas")
+		requireRejects(t, reg, "kind: Deployment\nport: 80\n", `missing required property "replicas"`)
 	})
 
 	t.Run("a schema built from a Go type routes the same way", func(t *testing.T) {
@@ -1909,9 +1877,7 @@ func TestRegistry_FileFS(t *testing.T) {
 
 		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Pod\n")))
 
-		err = reg.Check(t.Context(), yamltest.FirstDocument(t, "name: x\n"))
-		require.Error(t, err)
-		require.NotErrorIs(t, err, schema.ErrNoMatch)
+		requireRejects(t, reg, "name: x\n", `missing required property "kind"`)
 	})
 
 	t.Run("a directive resolves beside its document", func(t *testing.T) {
