@@ -716,12 +716,15 @@ func TestMarshal(t *testing.T) {
 	}
 }
 
-func TestMarshal_errors(t *testing.T) {
+// TestEncoder_Encode_errors checks that Encode writes nothing and Marshal
+// returns nil bytes for a value or an option that does not encode.
+func TestEncoder_Encode_errors(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input any
-		err   error
+		input    any
+		err      error
+		comments yaml.CommentMap
 		// Holds the message of an error that has no sentinel.
 		msg  string
 		opts []encoder.Option
@@ -729,11 +732,6 @@ func TestMarshal_errors(t *testing.T) {
 		"value that encodes to no node": {
 			input: emptyMarshaler{},
 			err:   encoder.ErrNoNode,
-		},
-		"comment key that is not a path": {
-			input: map[string]int{"a": 1},
-			opts:  []encoder.Option{encoder.WithYAMLComments(yaml.CommentMap{"a": {yaml.LineComment(" x")}})},
-			err:   yaml.ErrInvalidPathString,
 		},
 		"value go-yaml cannot encode": {
 			input: make(chan int),
@@ -744,19 +742,73 @@ func TestMarshal_errors(t *testing.T) {
 			opts:  []encoder.Option{encoder.WithYAMLOptions(yaml.Indent(-2))},
 			msg:   "print YAML: strings: negative Repeat count",
 		},
+		"comment key that is not a path": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"a": {yaml.LineComment(" x")}},
+			err:      yaml.ErrInvalidPathString,
+		},
+		"empty comment key": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"": {yaml.LineComment(" x")}},
+			err:      yaml.ErrInvalidPathString,
+		},
+		"comment key that ends in an index number": {
+			input:    []int{1},
+			comments: yaml.CommentMap{"$[0": {yaml.LineComment(" x")}},
+			err:      yaml.ErrInvalidPathString,
+		},
+		"comment key that ends in an index number under a key": {
+			input:    map[string][]int{"a": {1, 2}},
+			comments: yaml.CommentMap{"$.a[1": {yaml.LineComment(" x")}},
+			err:      yaml.ErrInvalidPathString,
+		},
+		"comment key that ends in an index wildcard": {
+			input:    []int{1},
+			comments: yaml.CommentMap{"$[*": {yaml.LineComment(" x")}},
+			err:      yaml.ErrInvalidPathString,
+		},
+		"comment path that does not fit the document": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$.a[0]": {yaml.LineComment(" x")}},
+			err:      yaml.ErrInvalidQuery,
+		},
+		"unknown comment position": {
+			input:    map[string]int{"a": 1},
+			comments: yaml.CommentMap{"$.a": {{Texts: []string{" x"}, Position: 99}}},
+			err:      yaml.ErrUnknownCommentPositionType,
+		},
+		"head comment on a root scalar": {
+			input:    "x",
+			comments: yaml.CommentMap{"$": {yaml.HeadComment(" x")}},
+			msg:      "unsupported comment head position for String",
+		},
+		"head comment on an empty root sequence": {
+			input:    []string{},
+			comments: yaml.CommentMap{"$": {yaml.HeadComment(" x")}},
+			msg:      "unsupported comment head position for Sequence",
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := encoder.Marshal(t.Context(), tc.input, tc.opts...)
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-			} else {
-				require.EqualError(t, err, tc.msg)
+			opts := slices.Concat(tc.opts, []encoder.Option{encoder.WithYAMLComments(tc.comments)})
+			check := func(err error) {
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err)
+				} else {
+					require.EqualError(t, err, tc.msg)
+				}
 			}
 
+			var buf bytes.Buffer
+
+			check(encoder.New(&buf, opts...).Encode(t.Context(), tc.input))
+			assert.Empty(t, buf.String())
+
+			got, err := encoder.Marshal(t.Context(), tc.input, opts...)
+			check(err)
 			assert.Nil(t, got)
 		})
 	}
@@ -778,18 +830,6 @@ func TestWithIndent_panicsBelowOne(t *testing.T) {
 	for _, spaces := range []int{0, -1} {
 		assert.Panics(t, func() { encoder.WithIndent(spaces) }, "spaces=%d", spaces)
 	}
-}
-
-func TestWithYAMLOptions_negativeIndent(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-
-	enc := encoder.New(&buf, encoder.WithYAMLOptions(yaml.Indent(-2)))
-
-	err := enc.Encode(t.Context(), map[string]map[string]int{"a": {"b": 1}})
-	require.Error(t, err)
-	assert.Empty(t, buf.String())
 }
 
 func TestPretty(t *testing.T) {
@@ -1207,83 +1247,6 @@ func TestWithYAMLComments(t *testing.T) {
 
 			got := mustEncode(t, tc.input, append(tc.opts, encoder.WithYAMLComments(tc.comments))...)
 			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestWithYAMLComments_errors(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input    any
-		err      error
-		comments yaml.CommentMap
-		// Holds the message of an error that has no sentinel.
-		msg string
-	}{
-		"key that is not a path": {
-			input:    map[string]int{"a": 1},
-			comments: yaml.CommentMap{"a": {yaml.LineComment(" x")}},
-			err:      yaml.ErrInvalidPathString,
-		},
-		"empty key": {
-			input:    map[string]int{"a": 1},
-			comments: yaml.CommentMap{"": {yaml.LineComment(" x")}},
-			err:      yaml.ErrInvalidPathString,
-		},
-		"key that ends in an index number": {
-			input:    []int{1},
-			comments: yaml.CommentMap{"$[0": {yaml.LineComment(" x")}},
-			err:      yaml.ErrInvalidPathString,
-		},
-		"key that ends in an index number under a key": {
-			input:    map[string][]int{"a": {1, 2}},
-			comments: yaml.CommentMap{"$.a[1": {yaml.LineComment(" x")}},
-			err:      yaml.ErrInvalidPathString,
-		},
-		"key that ends in an index wildcard": {
-			input:    []int{1},
-			comments: yaml.CommentMap{"$[*": {yaml.LineComment(" x")}},
-			err:      yaml.ErrInvalidPathString,
-		},
-		"path that does not fit the document": {
-			input:    map[string]int{"a": 1},
-			comments: yaml.CommentMap{"$.a[0]": {yaml.LineComment(" x")}},
-			err:      yaml.ErrInvalidQuery,
-		},
-		"unknown position": {
-			input:    map[string]int{"a": 1},
-			comments: yaml.CommentMap{"$.a": {{Texts: []string{" x"}, Position: 99}}},
-			err:      yaml.ErrUnknownCommentPositionType,
-		},
-		"head comment on a root scalar": {
-			input:    "x",
-			comments: yaml.CommentMap{"$": {yaml.HeadComment(" x")}},
-			msg:      "unsupported comment head position for String",
-		},
-		"head comment on an empty root sequence": {
-			input:    []string{},
-			comments: yaml.CommentMap{"$": {yaml.HeadComment(" x")}},
-			msg:      "unsupported comment head position for Sequence",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			var buf bytes.Buffer
-
-			enc := encoder.New(&buf, encoder.WithYAMLComments(tc.comments))
-
-			err := enc.Encode(t.Context(), tc.input)
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-			} else {
-				require.EqualError(t, err, tc.msg)
-			}
-
-			assert.Empty(t, buf.String())
 		})
 	}
 }
