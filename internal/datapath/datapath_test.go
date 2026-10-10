@@ -45,6 +45,26 @@ func find(tb testing.TB, input string, steps ...any) (*datapath.Index, datapath.
 	return idx, walk(tb, idx, doc.AST(), steps...)
 }
 
+var (
+	// The key 0x10 of ports sets the member 16.
+	portsInput = stringtest.LinesLF("ports:", "  0x10: x")
+
+	// The key 3.10 of python sets the member 3.1.
+	pythonInput = stringtest.LinesLF("python:", "  3.10: a")
+
+	// The key 3.10 of python sets the member 3.1. The tagged alias key has no
+	// name the index can tell, so it may set a member of any name, and the
+	// index leaves out the members before it.
+	unnamedKeyInput = stringtest.LinesLF(
+		"k: &k 0x10",
+		"python:",
+		"  3.10: {image: a}",
+		"  a: 1",
+		"  !!str *k : v",
+		"  b: 2",
+	)
+)
+
 func TestIndex_Member(t *testing.T) {
 	t.Parallel()
 
@@ -72,7 +92,7 @@ func TestIndex_Member(t *testing.T) {
 			wantStart: "x@3:11",
 		},
 		"float key with a trailing zero": {
-			input:     stringtest.LinesLF("python:", "  3.10: a"),
+			input:     pythonInput,
 			steps:     []any{"python", "3.1"},
 			want:      "@.python.'3.10'",
 			wantStart: "a@2:9",
@@ -153,7 +173,7 @@ func TestIndex_Member(t *testing.T) {
 			unspelled: true,
 		},
 		"member the mapping lacks": {
-			input:     stringtest.LinesLF("ports:", "  0x10: x"),
+			input:     portsInput,
 			steps:     []any{"ports", "0x10"},
 			want:      "@.ports.0x10",
 			unspelled: true,
@@ -286,7 +306,7 @@ func TestTarget_Start(t *testing.T) {
 		wantKey string
 	}{
 		"entry of a mapping": {
-			input:   stringtest.LinesLF("ports:", "  0x10: x"),
+			input:   portsInput,
 			steps:   []any{"ports", "16"},
 			want:    "x@2:9",
 			wantKey: "0x10@2:3",
@@ -365,7 +385,7 @@ func TestTarget_Token(t *testing.T) {
 		wantKey string
 	}{
 		"path selects the member": {
-			input: stringtest.LinesLF("ports:", "  0x10: x"),
+			input: portsInput,
 			steps: []any{"ports", "16"},
 		},
 		"path selects another entry": {
@@ -579,13 +599,13 @@ func TestIndex_SelectsEntry(t *testing.T) {
 		want  bool
 	}{
 		"source spelling of a key": {
-			input: stringtest.LinesLF("python:", "  3.10: a"),
+			input: pythonInput,
 			steps: []any{"python"},
 			name:  "3.10",
 			want:  true,
 		},
 		"decoded name of a respelled key": {
-			input: stringtest.LinesLF("python:", "  3.10: a"),
+			input: pythonInput,
 			steps: []any{"python"},
 			name:  "3.1",
 		},
@@ -629,18 +649,6 @@ func TestIndex_SelectsEntry(t *testing.T) {
 	}
 }
 
-// The key 3.10 of python sets the member 3.1. The tagged alias key has no
-// name the index can tell, so it may set a member of any name, and the
-// index leaves out the members before it.
-var unnamedKeyInput = stringtest.LinesLF(
-	"k: &k 0x10",
-	"python:",
-	"  3.10: {image: a}",
-	"  a: 1",
-	"  !!str *k : v",
-	"  b: 2",
-)
-
 func TestIndex_Lacks(t *testing.T) {
 	t.Parallel()
 
@@ -651,18 +659,18 @@ func TestIndex_Lacks(t *testing.T) {
 		want  bool
 	}{
 		"member the mapping holds": {
-			input: stringtest.LinesLF("ports:", "  0x10: x"),
+			input: portsInput,
 			steps: []any{"ports"},
 			name:  "16",
 		},
 		"source spelling of a respelled key": {
-			input: stringtest.LinesLF("ports:", "  0x10: x"),
+			input: portsInput,
 			steps: []any{"ports"},
 			name:  "0x10",
 			want:  true,
 		},
 		"member of no key": {
-			input: stringtest.LinesLF("ports:", "  0x10: x"),
+			input: portsInput,
 			steps: []any{"ports"},
 			name:  "name",
 			want:  true,
@@ -749,18 +757,18 @@ func TestIndex_SelectsOther(t *testing.T) {
 		want  bool
 	}{
 		"spelling of a key with another name": {
-			input: stringtest.LinesLF("python:", "  3.10: a"),
+			input: pythonInput,
 			steps: []any{"python"},
 			name:  "3.10",
 			want:  true,
 		},
 		"name of a member": {
-			input: stringtest.LinesLF("python:", "  3.10: a"),
+			input: pythonInput,
 			steps: []any{"python"},
 			name:  "3.1",
 		},
 		"name no key spells": {
-			input: stringtest.LinesLF("python:", "  3.10: a"),
+			input: pythonInput,
 			steps: []any{"python"},
 			name:  "zz",
 		},
