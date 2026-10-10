@@ -48,98 +48,81 @@ func TestCharm(t *testing.T) {
 func TestCatalog_With(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
-		check func(t *testing.T)
-	}{
-		"added theme is returned by Get": {
-			check: func(t *testing.T) {
-				t.Helper()
+	t.Run("added theme is returned by Get", func(t *testing.T) {
+		t.Parallel()
 
-				c := theme.Builtin().With(theme.New("test-custom", theme.Dark, marked(kind.Comment)))
+		c := theme.Builtin().With(theme.New("test-custom", theme.Dark, marked(kind.Comment)))
 
-				got, ok := c.Get("test-custom")
-				require.True(t, ok)
-				assert.Equal(t, "test-custom", got.Name)
-				assert.Equal(t, theme.Dark, got.Mode)
-				assert.True(t, isMarked(got.Styles(), kind.Comment))
-			},
-		},
-		"added theme goes on the end": {
-			check: func(t *testing.T) {
-				t.Helper()
+		got, ok := c.Get("test-custom")
+		require.True(t, ok)
+		assert.Equal(t, "test-custom", got.Name)
+		assert.Equal(t, theme.Dark, got.Mode)
+		assert.True(t, isMarked(got.Styles(), kind.Comment))
+	})
 
-				c := theme.Builtin().With(theme.New("test-listed", theme.Light, empty))
+	t.Run("added theme goes on the end", func(t *testing.T) {
+		t.Parallel()
 
-				all := c.All()
-				assert.Len(t, all, theme.Builtin().Len()+1)
-				assert.Equal(t, "test-listed", all[len(all)-1].Name)
-				assert.Equal(t, theme.Light, all[len(all)-1].Mode)
-			},
-		},
-		"later theme of one name wins": {
-			check: func(t *testing.T) {
-				t.Helper()
+		c := theme.Builtin().With(theme.New("test-listed", theme.Light, empty))
 
-				c := theme.Catalog{}.With(
-					theme.New("test-replace", theme.Dark, marked(kind.Comment)),
-					theme.New("test-replace", theme.Light, marked(kind.NameTag)),
-				)
+		all := c.All()
+		assert.Len(t, all, theme.Builtin().Len()+1)
+		assert.Equal(t, "test-listed", all[len(all)-1].Name)
+		assert.Equal(t, theme.Light, all[len(all)-1].Mode)
+	})
 
-				got, ok := c.Get("test-replace")
-				require.True(t, ok)
-				assert.Equal(t, theme.Light, got.Mode)
-				assert.True(t, isMarked(got.Styles(), kind.NameTag))
-				assert.Equal(t, 1, c.Len())
-			},
-		},
-		"built-in theme is replaced in place": {
-			check: func(t *testing.T) {
-				t.Helper()
+	t.Run("later theme of one name wins", func(t *testing.T) {
+		t.Parallel()
 
-				c := theme.Builtin().With(theme.New("vulcan", theme.Dark, marked(kind.NameTag)))
+		c := theme.Catalog{}.With(
+			theme.New("test-replace", theme.Dark, marked(kind.Comment)),
+			theme.New("test-replace", theme.Light, marked(kind.NameTag)),
+		)
 
-				got, ok := c.Get("vulcan")
-				require.True(t, ok)
-				assert.True(t, isMarked(got.Styles(), kind.NameTag))
-				assert.Equal(t, theme.Builtin().Len(), c.Len())
+		got, ok := c.Get("test-replace")
+		require.True(t, ok)
+		assert.Equal(t, theme.Light, got.Mode)
+		assert.True(t, isMarked(got.Styles(), kind.NameTag))
+		assert.Equal(t, 1, c.Len())
+	})
 
-				names := make([]string, 0, c.Len())
-				for _, th := range c.All() {
-					names = append(names, th.Name)
-				}
+	t.Run("built-in theme is replaced in place", func(t *testing.T) {
+		t.Parallel()
 
-				assert.Equal(t, 1, countOf(names, "vulcan"))
-				assert.True(t, slices.IsSorted(names), "replacing keeps the position")
-			},
-		},
-		"receiver is unchanged": {
-			check: func(t *testing.T) {
-				t.Helper()
+		c := theme.Builtin().With(theme.New("vulcan", theme.Dark, marked(kind.NameTag)))
 
-				base := theme.Catalog{}.With(theme.New("test-base", theme.Dark, empty))
-				_ = base.With(
-					theme.New("test-extra", theme.Dark, empty),
-					theme.New("test-base", theme.Light, empty),
-				)
+		got, ok := c.Get("vulcan")
+		require.True(t, ok)
+		assert.True(t, isMarked(got.Styles(), kind.NameTag))
+		assert.Equal(t, theme.Builtin().Len(), c.Len())
 
-				assert.Equal(t, 1, base.Len())
+		names := make([]string, 0, c.Len())
+		for _, th := range c.All() {
+			names = append(names, th.Name)
+		}
 
-				got, ok := base.Get("test-base")
-				require.True(t, ok)
-				assert.Equal(t, theme.Dark, got.Mode)
+		assert.Equal(t, 1, countOf(names, "vulcan"))
+		assert.True(t, slices.IsSorted(names), "replacing keeps the position")
+	})
 
-				_, ok = base.Get("test-extra")
-				assert.False(t, ok)
-			},
-		},
-	}
+	t.Run("receiver is unchanged", func(t *testing.T) {
+		t.Parallel()
 
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			tt.check(t)
-		})
-	}
+		base := theme.Catalog{}.With(theme.New("test-base", theme.Dark, empty))
+		_ = base.With(
+			theme.New("test-extra", theme.Dark, empty),
+			theme.New("test-base", theme.Light, empty),
+		)
+
+		assert.Equal(t, 1, base.Len())
+
+		got, ok := base.Get("test-base")
+		require.True(t, ok)
+		assert.Equal(t, theme.Dark, got.Mode)
+
+		_, ok = base.Get("test-extra")
+		assert.False(t, ok)
+	})
 }
 
 func TestCatalog_Get(t *testing.T) {
