@@ -213,25 +213,6 @@ func TestGet_RedactsPasswordOnTransport(t *testing.T) {
 	assert.Equal(t, 1, strings.Count(err.Error(), "xxxxx"))
 }
 
-func TestGet_RedactsPasswordOnStatus(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
-
-	u, err := url.Parse(server.URL)
-	require.NoError(t, err)
-
-	u.User = url.UserPassword("user", "secret")
-
-	_, err = httpfetch.Get(t.Context(), server.Client(), u.String())
-	require.Error(t, err)
-	assert.NotContains(t, err.Error(), "secret")
-	assert.Contains(t, err.Error(), "xxxxx")
-}
-
 func TestGet_NamesURLAsRedacted(t *testing.T) {
 	t.Parallel()
 
@@ -248,6 +229,9 @@ func TestGet_NamesURLAsRedacted(t *testing.T) {
 	tcs := map[string]struct {
 		url string
 	}{
+		"password": {
+			url: u.String(),
+		},
 		"space in the path": {
 			url: server.URL + "/my schema.json",
 		},
