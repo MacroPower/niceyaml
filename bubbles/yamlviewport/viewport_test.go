@@ -5920,37 +5920,6 @@ func TestViewport_RevisionIgnoresLaterMarks(t *testing.T) {
 	}
 }
 
-func TestViewport_RevisionNavigationResetsSearch(t *testing.T) {
-	t.Parallel()
-
-	before, after := needleRevisions()
-
-	m := testModel(testPrinter(), 80, 5)
-	addRevisions(&m, before, after)
-
-	m.SetSearchTerm("needle")
-	m.SearchNext()
-	require.Equal(t, 1, m.SearchIndex())
-
-	// Moving to another revision starts over at the first match and
-	// scrolls to it rather than keeping an index into the old content.
-	m.PreviousRevision()
-	assert.Equal(t, 2, m.SearchCount())
-	assert.Equal(t, 0, m.SearchIndex())
-	assert.Equal(t, 20-2, m.YOffset())
-	assert.Contains(t, m.View(), "key20: needle")
-
-	m.SearchNext()
-	m.GotoRevision(1)
-	assert.Equal(t, 0, m.SearchIndex())
-	assert.Contains(t, m.View(), "key20: needle")
-
-	// Without a search term, navigation returns to the top.
-	m.ClearSearch()
-	m.PreviousRevision()
-	assert.Equal(t, 0, m.YOffset())
-}
-
 func TestViewport_ContentChangesResetSearch(t *testing.T) {
 	t.Parallel()
 
@@ -5974,6 +5943,16 @@ func TestViewport_ContentChangesResetSearch(t *testing.T) {
 		},
 		"view mode": {
 			change: func(m *yamlviewport.Model) { m.SetViewMode(yamlviewport.ViewModeSideBySide) },
+		},
+		"previous revision": {
+			change: func(m *yamlviewport.Model) { m.PreviousRevision() },
+		},
+		"goto revision": {
+			change: func(m *yamlviewport.Model) {
+				m.GotoRevision(0)
+				m.SearchNext()
+				m.GotoRevision(1)
+			},
 		},
 	}
 
@@ -6130,6 +6109,14 @@ func TestViewport_ContentChangesScrollToTop(t *testing.T) {
 				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
 			wantTop: "@@",
+		},
+		"previous revision": {
+			change: func(m *yamlviewport.Model) {
+				m.AddRevision(niceyaml.NewSourceFromString(after, niceyaml.WithName("v2")))
+				m.SetYOffset(50)
+				m.PreviousRevision()
+			},
+			wantTop: "key0: value",
 		},
 	}
 
