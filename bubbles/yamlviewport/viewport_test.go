@@ -603,11 +603,13 @@ func testModel(p *printer.Printer, width, height int, opts ...yamlviewport.Optio
 	return m
 }
 
-// addRevisions adds a revision of each document to m, named v1, v2, and so
+// addRevisions adds a revision of each document to m. It names each one
+// after its place in the history, so the first is v1, the second v2, and so
 // on.
 func addRevisions(m *yamlviewport.Model, docs ...string) {
-	for i, doc := range docs {
-		m.AddRevision(niceyaml.NewSourceFromString(doc, niceyaml.WithName(fmt.Sprintf("v%d", i+1))))
+	for _, doc := range docs {
+		name := fmt.Sprintf("v%d", m.RevisionCount()+1)
+		m.AddRevision(niceyaml.NewSourceFromString(doc, niceyaml.WithName(name)))
 	}
 }
 
@@ -3013,7 +3015,7 @@ func TestViewport_SameDiffBaseKeepsPosition(t *testing.T) {
 
 	// At revision index 2, origin compares against another revision than
 	// adjacent does, so the view shows other content and starts over.
-	m.AddRevision(niceyaml.NewSourceFromString(replaceLine(v1, 40, "k40: w"), niceyaml.WithName("v3")))
+	addRevisions(&m, replaceLine(v1, 40, "k40: w"))
 	m.SearchNext()
 	m.SetYOffset(30)
 
@@ -3095,7 +3097,7 @@ func TestViewport_ViewModeWithoutDiffKeepsPosition(t *testing.T) {
 			addRevisions(&m, v1)
 
 			if tc.diff {
-				m.AddRevision(niceyaml.NewSourceFromString(replaceLine(v1, 45, "k45: w"), niceyaml.WithName("v2")))
+				addRevisions(&m, replaceLine(v1, 45, "k45: w"))
 			}
 
 			m.SetSearchTerm("v")
@@ -5911,7 +5913,7 @@ func TestViewport_ContentChangesResetSearch(t *testing.T) {
 	}{
 		"add revision": {
 			change: func(m *yamlviewport.Model) {
-				m.AddRevision(niceyaml.NewSourceFromString(before, niceyaml.WithName("v3")))
+				addRevisions(m, before)
 			},
 		},
 		"set source": {
@@ -6067,7 +6069,7 @@ func TestViewport_ContentChangesScrollToTop(t *testing.T) {
 	}{
 		"add revision": {
 			change: func(m *yamlviewport.Model) {
-				m.AddRevision(niceyaml.NewSourceFromString(after, niceyaml.WithName("v2")))
+				addRevisions(m, after)
 			},
 			wantTop: "key0: value",
 		},
@@ -6079,7 +6081,7 @@ func TestViewport_ContentChangesScrollToTop(t *testing.T) {
 		},
 		"diff mode": {
 			change: func(m *yamlviewport.Model) {
-				m.AddRevision(niceyaml.NewSourceFromString(after, niceyaml.WithName("v2")))
+				addRevisions(m, after)
 				m.SetYOffset(50)
 				m.SetDiffMode(yamlviewport.DiffModeNone)
 			},
@@ -6087,7 +6089,7 @@ func TestViewport_ContentChangesScrollToTop(t *testing.T) {
 		},
 		"hunks": {
 			change: func(m *yamlviewport.Model) {
-				m.AddRevision(niceyaml.NewSourceFromString(after, niceyaml.WithName("v2")))
+				addRevisions(m, after)
 				m.SetYOffset(50)
 				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
@@ -6095,7 +6097,7 @@ func TestViewport_ContentChangesScrollToTop(t *testing.T) {
 		},
 		"previous revision": {
 			change: func(m *yamlviewport.Model) {
-				m.AddRevision(niceyaml.NewSourceFromString(after, niceyaml.WithName("v2")))
+				addRevisions(m, after)
 				m.SetYOffset(50)
 				m.PreviousRevision()
 			},
@@ -6134,7 +6136,7 @@ func TestViewport_SearchAcrossRevisions(t *testing.T) {
 
 	// A new revision changes the displayed content, so the viewport
 	// recomputes the matches against the diff rather than the stale index.
-	m.AddRevision(niceyaml.NewSourceFromString("key: alpha\nother: alpha\n", niceyaml.WithName("v2")))
+	addRevisions(&m, "key: alpha\nother: alpha\n")
 	assert.Equal(t, 2, m.SearchCount())
 
 	m.SetSearchTerm("other")
