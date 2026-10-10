@@ -998,16 +998,15 @@ func TestDocument_Decode_Problems_SecondDocument(t *testing.T) {
 	t.Parallel()
 
 	// A problem of a later document keeps its line in the file.
-	docs, err := niceyaml.NewSourceFromString(
+	docs := niceyaml.NewSourceFromString(
 		"replicas: 1\n---\nreplicas: x\ntimeout: soon\n",
 		niceyaml.WithName("app.yaml"),
 	).Documents()
-	require.NoError(t, err)
 	require.Len(t, docs, 2)
 
 	var cfg problemConfig
 
-	err = docs[1].DecodeInto(t.Context(), &cfg)
+	err := docs[1].DecodeInto(t.Context(), &cfg)
 	require.EqualError(t, err, stringtest.JoinLF(
 		"app.yaml: document 2: 2 problems",
 		"app.yaml:3:11: $.replicas: expected integer, got string",

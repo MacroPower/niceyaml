@@ -799,8 +799,7 @@ func TestFinder_Find_View(t *testing.T) {
 	// holds lines 2 through 4.
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n---\nname: x\nport: 80\n")
 
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 	require.Len(t, docs, 2)
 
 	// The view skips lines 1 and 2.
@@ -819,8 +818,7 @@ func TestFinder_Find_View(t *testing.T) {
 	require.Equal(t, 4, hunks.Count())
 
 	// The host shares line 2 of the file with the port beside it.
-	flow, err := niceyaml.NewSourceFromString("top: 1\n---\nserver: {host: h, port: 80}\nport: 1\n").Documents()
-	require.NoError(t, err)
+	flow := niceyaml.NewSourceFromString("top: 1\n---\nserver: {host: h, port: 80}\nport: 1\n").Documents()
 	require.Len(t, flow, 2)
 
 	host := yamltest.At(t, flow[1], paths.Doc().Child("server", "host"))
@@ -947,8 +945,7 @@ func TestFinder_Find_View(t *testing.T) {
 func TestFinder_Find_ViewMarksItself(t *testing.T) {
 	t.Parallel()
 
-	docs, err := niceyaml.NewSourceFromString("a: 1\nb: 2\n---\nname: x\nport: 80\n").Documents()
-	require.NoError(t, err)
+	docs := niceyaml.NewSourceFromString("a: 1\nb: 2\n---\nname: x\nport: 80\n").Documents()
 	require.Len(t, docs, 2)
 
 	// The matches of a view are in the coordinates of its content, so they

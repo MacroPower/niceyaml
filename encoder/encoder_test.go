@@ -500,8 +500,7 @@ func TestEncoder_Encode_documents(t *testing.T) {
 
 			assert.Equal(t, tc.want, buf.String())
 
-			docs, err := niceyaml.NewSourceFromString(buf.String()).Documents()
-			require.NoError(t, err)
+			docs := niceyaml.NewSourceFromString(buf.String()).Documents()
 
 			for i, doc := range docs {
 				var got any

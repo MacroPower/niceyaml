@@ -39,7 +39,7 @@ func TestPrinter_PrintError_ExcerptsOff(t *testing.T) {
 	openPort := yamltest.Bind(t, open, niceyaml.NewError("port must be at least 1", niceyaml.AtPath(port)))
 
 	_, syntaxErr := niceyaml.NewSourceFromString("password: hunter2\nlist: [1, 2\nport: 1\n",
-		niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false)).Documents()
+		niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false)).File()
 	require.Error(t, syntaxErr)
 
 	tcs := map[string]struct {

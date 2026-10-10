@@ -784,11 +784,10 @@ func TestSchema_ValidateWithDecoder(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			d, err := source.Documents()
-			require.NoError(t, err)
+			d := source.Documents()
 
 			for _, dd := range d {
-				err = dd.Validate(t.Context(), v)
+				err := dd.Validate(t.Context(), v)
 
 				if tc.wantErr {
 					require.Error(t, err)
@@ -1062,11 +1061,10 @@ func TestSchema_PathTarget(t *testing.T) {
 			v := compileSchema(t, []byte(tc.schema))
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			d, err := source.Documents()
-			require.NoError(t, err)
+			d := source.Documents()
 
 			for _, dd := range d {
-				err = dd.Validate(t.Context(), v)
+				err := dd.Validate(t.Context(), v)
 				require.Error(t, err)
 
 				var bound *niceyaml.SourceError
@@ -2934,11 +2932,10 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 			v := compileSchema(t, []byte(tc.schema))
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			d, err := source.Documents()
-			require.NoError(t, err)
+			d := source.Documents()
 
 			for _, dd := range d {
-				err = dd.Validate(t.Context(), v)
+				err := dd.Validate(t.Context(), v)
 				require.Error(t, err)
 
 				var bound *niceyaml.SourceError

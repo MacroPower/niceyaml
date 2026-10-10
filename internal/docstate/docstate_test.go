@@ -15,8 +15,7 @@ import (
 func TestOf(t *testing.T) {
 	t.Parallel()
 
-	docs, err := niceyaml.NewSourceFromString("a: [1, 2]\n---\nb: 3\n").Documents()
-	require.NoError(t, err)
+	docs := niceyaml.NewSourceFromString("a: [1, 2]\n---\nb: 3\n").Documents()
 	require.Len(t, docs, 2)
 
 	first := docstate.Of(docs[0])

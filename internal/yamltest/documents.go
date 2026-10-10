@@ -20,10 +20,9 @@ import (
 func FirstDocument(tb testing.TB, input string, opts ...niceyaml.SourceOption) *niceyaml.Node {
 	tb.Helper()
 
-	source := niceyaml.NewSourceFromString(input, opts...)
-	docs, err := source.Documents()
-	require.NoError(tb, err)
+	docs := niceyaml.NewSourceFromString(input, opts...).Documents()
 	require.NotEmpty(tb, docs, "no documents found in input")
+	require.NoError(tb, docs[0].Err())
 
 	return docs[0]
 }

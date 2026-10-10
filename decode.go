@@ -3029,12 +3029,7 @@ func WithYAMLOrderedMaps(enabled bool) DecodeOption {
 //	settings := niceyaml.DecodeOptions(niceyaml.WithDisallowUnknownFields(true))
 //	strict := niceyaml.DecodeOptions(niceyaml.WithValidator(reg), settings)
 //
-//	docs, err := source.Documents()
-//	if err != nil {
-//		return err
-//	}
-//
-//	for _, doc := range docs {
+//	for _, doc := range source.Documents() {
 //		manifest, err := doc.Decode[Manifest](ctx, strict)
 //		...
 //	}

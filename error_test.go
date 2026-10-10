@@ -569,10 +569,9 @@ func TestSourceError_Error_Document(t *testing.T) {
 
 			source := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml"))
 
-			docs, err := source.Documents()
-			require.NoError(t, err)
+			docs := source.Documents()
 
-			err = tc.bind(t, source, docs)
+			err := tc.bind(t, source, docs)
 			require.EqualError(t, err, tc.want)
 
 			var bound *niceyaml.SourceError
@@ -615,8 +614,7 @@ func TestSourceError_Error_Document(t *testing.T) {
 	t.Run("a source with no name leads with the document", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := niceyaml.NewSourceFromString(input).Documents()
-		require.NoError(t, err)
+		docs := niceyaml.NewSourceFromString(input).Documents()
 
 		require.EqualError(t, docs[1].Bind(errors.New("plain")), "document 2: plain")
 		require.EqualError(t,
@@ -628,8 +626,7 @@ func TestSourceError_Error_Document(t *testing.T) {
 	t.Run("a wrapper around a binding keeps the document the binding wrote", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml")).Documents()
-		require.NoError(t, err)
+		docs := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml")).Documents()
 
 		wrapped := fmt.Errorf("check: %w", docs[1].Bind(errors.New("plain")))
 		require.EqualError(t, wrapped, "check: m.yaml: document 2: plain")
@@ -642,8 +639,7 @@ func TestSourceError_Error_Document(t *testing.T) {
 	t.Run("a join of one binding per document names each", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml")).Documents()
-		require.NoError(t, err)
+		docs := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml")).Documents()
 
 		joined := errors.Join(
 			docs[0].Bind(errors.New("first")),
@@ -663,12 +659,11 @@ func TestSourceError_Error_Document(t *testing.T) {
 	t.Run("a row of the tree names a document its parent does not", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml")).Documents()
-		require.NoError(t, err)
+		docs := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml")).Documents()
 
 		// The first nested error is bound to the second document, and the
 		// other binds with its parent to the first.
-		err = docs[0].Bind(niceyaml.NewSummary("summary",
+		err := docs[0].Bind(niceyaml.NewSummary("summary",
 			docs[1].Bind(errors.New("elsewhere")),
 			errors.New("here"),
 		))
@@ -3972,8 +3967,7 @@ func TestError_BoundDocument(t *testing.T) {
 	source := xmlSource("name: first\n---\nname: second\n")
 	namePath := paths.Current().Child("name")
 
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 	require.Len(t, docs, 2)
 
 	t.Run("path resolves in the document that bound it", func(t *testing.T) {
@@ -4221,8 +4215,7 @@ func TestError_WrappedContext(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
 
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 	require.Len(t, docs, 2)
 
 	inner := niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name")))
@@ -4274,8 +4267,7 @@ func TestError_ContextAboveLocation(t *testing.T) {
 
 	source := xmlSource("name: first\n---\nname: second\n")
 
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 	require.Len(t, docs, 2)
 
 	// A producer that wraps its own Error with context, the way a SelfValidator
@@ -4515,8 +4507,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
 	namePath := paths.Current().Child("name")
 
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 	require.Len(t, docs, 2)
 
 	t.Run("nested wrappers keep their text behind the position", func(t *testing.T) {
@@ -4775,8 +4766,7 @@ func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
 	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
 	located := niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name")))
 
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 	require.Len(t, docs, 2)
 
 	// Error wrappers add no message text of their own, so the document
@@ -4829,8 +4819,7 @@ func TestSourceError_Range(t *testing.T) {
 		name: second
 	`))
 
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 	require.Len(t, docs, 2)
 
 	tcs := map[string]struct {
@@ -7064,8 +7053,7 @@ func TestBindings(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
 
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 	require.Len(t, docs, 2)
 
 	first := docs[0].Bind(niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a"))))
@@ -7866,10 +7854,19 @@ func TestFormatError_ExcerptsOff(t *testing.T) {
 func TestFormatError_ExcerptsOff_Documents(t *testing.T) {
 	t.Parallel()
 
-	documents := func(_ *testing.T, source *niceyaml.Source) error {
-		_, err := source.Documents()
+	// The error of the document that did not parse, among those
+	// Documents returns.
+	documents := func(t *testing.T, source *niceyaml.Source) error {
+		t.Helper()
 
-		return err
+		for _, doc := range source.Documents() {
+			err := doc.Err()
+			if err != nil {
+				return err //nolint:wrapcheck // The test reads the error as the document returns it.
+			}
+		}
+
+		return nil
 	}
 
 	file := func(_ *testing.T, source *niceyaml.Source) error {
@@ -8522,8 +8519,7 @@ func TestSourceError_Document(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 
 	// The second document of three does not parse.
 	broken := niceyaml.NewSourceFromString("a: 1\n---\nb: [\n---\nc: 3\n")
@@ -8612,8 +8608,7 @@ func TestSourceError_DocumentIndex(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 
 	// The second document of three does not parse.
 	broken := niceyaml.NewSourceFromString("a: 1\n---\nb: [\n---\nc: 3\n")
@@ -10406,8 +10401,7 @@ func TestFormat(t *testing.T) {
 			c: 3
 		`), niceyaml.WithName("multi.yaml"))
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		require.Len(t, docs, 4)
 
 		// One binding per document that fails, joined, as a caller that
@@ -10461,8 +10455,7 @@ func TestFormat(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n", niceyaml.WithName("f.yaml"))
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 
 		joined := errors.Join(
 			docs[0].Bind(niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").Index(0)))),
@@ -11497,8 +11490,7 @@ func TestAllBindings(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
 
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 	require.Len(t, docs, 2)
 
 	first := docs[0].Bind(niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a"))))

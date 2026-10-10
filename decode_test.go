@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/netip"
 	"regexp"
@@ -58,8 +57,7 @@ func TestSource_Decoder(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("key: value")
-		d, err := source.Documents()
-		require.NoError(t, err)
+		d := source.Documents()
 		require.NotNil(t, d)
 	})
 
@@ -67,8 +65,7 @@ func TestSource_Decoder(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("")
-		d, err := source.Documents()
-		require.NoError(t, err)
+		d := source.Documents()
 		assert.Len(t, d, 1)
 	})
 }
@@ -83,8 +80,7 @@ func TestSource_Documents(t *testing.T) {
 		b: 2
 	`), niceyaml.WithFilePath("two.yaml"))
 
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 	require.Len(t, docs, 2)
 
 	second := docs[1]
@@ -95,14 +91,12 @@ func TestSource_Documents(t *testing.T) {
 
 	// Every call hands out the same root Node for an index, in a slice of
 	// its own.
-	again, err := source.Documents()
-	require.NoError(t, err)
+	again := source.Documents()
 	assert.Same(t, second, again[1])
 
 	again[1] = nil
 
-	third, err := source.Documents()
-	require.NoError(t, err)
+	third := source.Documents()
 	assert.Same(t, second, third[1])
 }
 
@@ -117,8 +111,7 @@ func TestSource_Document(t *testing.T) {
 		doc, err := source.Document()
 		require.NoError(t, err)
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		assert.Same(t, docs[0], doc)
 	})
 
@@ -266,8 +259,7 @@ func TestSource_Document(t *testing.T) {
 		doc, err := source.Document()
 		require.NoError(t, err)
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		require.Len(t, docs, 1)
 		assert.Same(t, docs[0], doc)
 
@@ -321,8 +313,7 @@ func TestSource_Document(t *testing.T) {
 		doc, err := source.Document()
 		require.NoError(t, err)
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		assert.Same(t, docs[0], doc)
 
 		got, err := doc.Decode[map[string]int](t.Context())
@@ -369,8 +360,7 @@ func TestSource_Document(t *testing.T) {
 
 				source := niceyaml.NewSourceFromString(tc.input)
 
-				docs, err := source.Documents()
-				require.NoError(t, err)
+				docs := source.Documents()
 				require.Len(t, docs, 1)
 
 				doc, err := source.Document()
@@ -434,7 +424,7 @@ func TestDecode_GoYAMLErrorReachable(t *testing.T) {
 	t.Run("parse error", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := niceyaml.NewSourceFromString("a: [\n").Documents()
+		_, err := niceyaml.NewSourceFromString("a: [\n").File()
 		require.Error(t, err)
 
 		yamlErr, ok := errors.AsType[yaml.Error](err)
@@ -506,8 +496,7 @@ func TestDocument_Decode(t *testing.T) {
 			value: 2
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		d := source.Documents()
 
 		var results []testStruct
 
@@ -922,11 +911,12 @@ func TestDocument_Decode(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				docs, err := niceyaml.NewSourceFromString(tc.input).Documents()
-				require.NoError(t, err)
+				docs := niceyaml.NewSourceFromString(tc.input).Documents()
 
 				got := make([]any, len(docs))
 				for i, d := range docs {
+					var err error
+
 					got[i], err = d.Decode[any](t.Context())
 					require.NoError(t, err)
 				}
@@ -1305,8 +1295,7 @@ func TestDocument_Decode(t *testing.T) {
 					assert.Contains(t, file.String(), tc.kept)
 				}
 
-				docs, err := src.Documents()
-				require.NoError(t, err)
+				docs := src.Documents()
 
 				got := make([]any, len(docs))
 				for i, d := range docs {
@@ -1398,8 +1387,7 @@ func TestDocument_Decode(t *testing.T) {
 					assert.Contains(t, file.String(), tc.kept)
 				}
 
-				docs, err := src.Documents()
-				require.NoError(t, err)
+				docs := src.Documents()
 
 				got := make([]any, len(docs))
 				for i, d := range docs {
@@ -1990,8 +1978,7 @@ func TestDocument_Span(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\nc: 3\n")
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		require.Len(t, docs, 2)
 
 		p := printer.New(
@@ -2026,8 +2013,7 @@ func TestDocument_View(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString(input)
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		require.Len(t, docs, 2)
 
 		view := docs[1].View()
@@ -2043,8 +2029,7 @@ func TestDocument_View(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString(input)
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		require.Len(t, docs, 2)
 
 		hours := yamltest.At(t, docs[1], paths.Current().Child("spec", "hours"))
@@ -2072,8 +2057,7 @@ func TestDocument_View(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString(input)
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		require.Len(t, docs, 2)
 
 		var bound *niceyaml.SourceError
@@ -2095,8 +2079,7 @@ func TestDocument_View(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString(input)
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		require.Len(t, docs, 2)
 
 		hours := yamltest.At(t, docs[1], paths.Current().Child("spec", "hours"))
@@ -2167,8 +2150,7 @@ func TestDocument_View_Lines(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString(input)
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		require.Len(t, docs, 2)
 
 		view := docs[1].View()
@@ -2198,8 +2180,7 @@ func TestDocument_View_Lines(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString(input)
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 
 		hours := yamltest.At(t, docs[1], paths.Current().Child("spec", "hours"))
 		lines := hours.View().Held()
@@ -2215,8 +2196,7 @@ func TestDocument_View_Lines(t *testing.T) {
 		documents := func(t *testing.T, input string) []*niceyaml.Node {
 			t.Helper()
 
-			docs, err := niceyaml.NewSourceFromString(input).Documents()
-			require.NoError(t, err)
+			docs := niceyaml.NewSourceFromString(input).Documents()
 			require.Len(t, docs, 2)
 
 			return docs
@@ -2252,8 +2232,7 @@ func TestDocument_At_DirectiveBody(t *testing.T) {
 	// below it, so the path resolves in that document. A document that
 	// holds only the directive has no content to resolve in.
 	source := niceyaml.NewSourceFromString("%YAML 1.2\n---\nkey: value")
-	d, err := source.Documents()
-	require.NoError(t, err)
+	d := source.Documents()
 	require.Len(t, d, 1)
 
 	path := paths.Current().Child("key")
@@ -2416,8 +2395,7 @@ func TestNode_Resolver(t *testing.T) {
 	documents := func(t *testing.T) []*niceyaml.Node {
 		t.Helper()
 
-		docs, err := niceyaml.NewSourceFromString(input).Documents()
-		require.NoError(t, err)
+		docs := niceyaml.NewSourceFromString(input).Documents()
 		require.Len(t, docs, 2)
 
 		return docs
@@ -3393,8 +3371,7 @@ func TestDocument_Tokens(t *testing.T) {
 			b: 2
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		d := source.Documents()
 
 		var first, second [][]int
 
@@ -3439,8 +3416,7 @@ func TestDocument_Tokens(t *testing.T) {
 			kind: B
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		d := source.Documents()
 		require.Len(t, d, 2)
 
 		kindPath := paths.Current().Child("kind")
@@ -3475,8 +3451,7 @@ func TestDocument_Tokens(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
-		d, err := source.Documents()
-		require.NoError(t, err)
+		d := source.Documents()
 		require.Len(t, d, 1)
 
 		tks := d[0].Tokens()
@@ -3505,8 +3480,7 @@ func TestDocument_Tokens(t *testing.T) {
 			b: 2
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		d := source.Documents()
 		require.Len(t, d, 1)
 
 		var types [][]token.Type
@@ -3831,8 +3805,7 @@ func TestDocument_Err(t *testing.T) {
 
 		before := documents(t)
 
-		after, err := niceyaml.NewSourceFromString(strings.Replace(input, "d: [", "d: []", 1)).Documents()
-		require.NoError(t, err)
+		after := niceyaml.NewSourceFromString(strings.Replace(input, "d: [", "d: []", 1)).Documents()
 		require.Len(t, after, 3)
 
 		result := diff.Diff(before[1].View(), after[1].View())
@@ -3929,8 +3902,7 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		d := source.Documents()
 
 		validator := niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
 			return niceyaml.NewError("bad name", niceyaml.AtPath(namePath))
@@ -3949,8 +3921,7 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		d := source.Documents()
 
 		var errs []error
 
@@ -3966,8 +3937,7 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		d := source.Documents()
 
 		var errs []error
 
@@ -4157,8 +4127,7 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 			unknown2: b
 		`)
 		source := niceyaml.NewSourceFromString(input)
-		d, err := source.Documents()
-		require.NoError(t, err)
+		d := source.Documents()
 
 		var errCount int
 
@@ -6312,8 +6281,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		// so the second document is the third node of the file.
 		input := "a: 1\n...\n# note\n---\na: &x 1\nb:\n  - *x\n  - &x 2\n  - *x\n"
 
-		docs, err := niceyaml.NewSourceFromString(input).Documents()
-		require.NoError(t, err)
+		docs := niceyaml.NewSourceFromString(input).Documents()
 		require.Len(t, docs, 2)
 
 		got, err := yamltest.At(t, docs[1], paths.Current().Child("b")).Decode[[]int](t.Context())
@@ -6496,8 +6464,7 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			fmt.Fprintf(&sb, "---\na: &x %d\nt:\n  p: &x 2\n  q: *x\nr: *x\ns: &s {s: *s}\n", i)
 		}
 
-		docs, err := niceyaml.NewSourceFromString(sb.String()).Documents()
-		require.NoError(t, err)
+		docs := niceyaml.NewSourceFromString(sb.String()).Documents()
 
 		var wg sync.WaitGroup
 
@@ -7570,7 +7537,7 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 	t.Run("without option the parser rejects duplicate keys", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := niceyaml.NewSourceFromString(input).Documents()
+		_, err := niceyaml.NewSourceFromString(input).File()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `mapping key "name" already defined`)
 	})
@@ -7589,8 +7556,7 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 	t.Run("At resolves the value the decode keeps", func(t *testing.T) {
 		t.Parallel()
 
-		d, err := niceyaml.NewSourceFromString(input, niceyaml.WithAllowDuplicateKeys(true)).Documents()
-		require.NoError(t, err)
+		d := niceyaml.NewSourceFromString(input, niceyaml.WithAllowDuplicateKeys(true)).Documents()
 		require.Len(t, d, 1)
 
 		name := yamltest.At(t, d[0], paths.Current().Child("name"))
@@ -7606,7 +7572,7 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 		_, err := niceyaml.NewSourceFromString(input,
 			niceyaml.WithAllowDuplicateKeys(true),
 			niceyaml.WithAllowDuplicateKeys(false),
-		).Documents()
+		).File()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `mapping key "name" already defined`)
 	})
@@ -7632,7 +7598,7 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 
 		ref := niceyaml.NewSourceFromString("defaults: &defaults {name: first, name: second}\n")
 
-		_, err := ref.Documents()
+		_, err := ref.File()
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
 
 		doc := yamltest.FirstDocument(t, "server: *defaults\n", niceyaml.WithReferences(ref))
@@ -7722,8 +7688,7 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 		t.Helper()
 
 		source := niceyaml.NewSourceFromString(input)
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 
 		return source, docs[0]
 	}
@@ -7854,8 +7819,7 @@ func TestDocument_ValidatorErrorsResolveInDocument(t *testing.T) {
 	namePath := paths.Current().Child("name")
 
 	source := niceyaml.NewSourceFromString("name: a\n---\nname: b\n")
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 
 	second := docs[1]
 	require.NotNil(t, second)
@@ -8059,13 +8023,12 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		t.Parallel()
 
 		source := niceyaml.NewSourceFromString("name: a\n---\nname: b\n")
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 
 		dd := docs[1]
 		require.NotNil(t, dd)
 
-		_, err = dd.Decode[plainConfig](t.Context(),
+		_, err := dd.Decode[plainConfig](t.Context(),
 			niceyaml.WithValidator(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
 				return niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name")))
 			})),
@@ -8127,8 +8090,7 @@ func TestDocument_Bind(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("name: a\n---\nname: b\n")
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 
 	second := docs[1]
 	require.NotNil(t, second)
@@ -9477,13 +9439,10 @@ func ExampleDecodeOptions() {
 	settings := niceyaml.DecodeOptions(niceyaml.WithDisallowUnknownFields(true))
 	strict := niceyaml.DecodeOptions(niceyaml.WithValidator(manifests), settings)
 
-	docs, err := niceyaml.NewSourceFromString(
+	docs := niceyaml.NewSourceFromString(
 		"kind: Service\nname: web\n---\nkind: Deployment\nname: web\nreplicas: 3\n",
 		niceyaml.WithName("app.yaml"),
 	).Documents()
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	// Each whole document validates against the schema and decodes with
 	// the settings.
@@ -9502,7 +9461,7 @@ func ExampleDecodeOptions() {
 
 	// The validator checks the node the call decodes, and the schema of
 	// the document does not describe the value at $.kind.
-	_, err = docs[0].DecodeAt[string](ctx, kindPath, strict)
+	_, err := docs[0].DecodeAt[string](ctx, kindPath, strict)
 	fmt.Println(err)
 
 	// A decode of one value takes the settings without that schema.
@@ -9549,8 +9508,7 @@ func TestDecodeOptions(t *testing.T) {
 
 		opts := niceyaml.DecodeOptions(record(&order, "schema"), strict)
 
-		docs, err := niceyaml.NewSourceFromString(input).Documents()
-		require.NoError(t, err)
+		docs := niceyaml.NewSourceFromString(input).Documents()
 		require.Len(t, docs, 2)
 
 		for _, dd := range docs {
@@ -10134,10 +10092,9 @@ func TestNode_Validate(t *testing.T) {
 
 		var order []string
 
-		docs, err := niceyaml.NewSourceFromString("name: a\n---\nname: b\n").Documents()
-		require.NoError(t, err)
+		docs := niceyaml.NewSourceFromString("name: a\n---\nname: b\n").Documents()
 
-		_, err = docs[0].Decode[map[string]any](t.Context(), niceyaml.WithValidator(record(&order, "call")))
+		_, err := docs[0].Decode[map[string]any](t.Context(), niceyaml.WithValidator(record(&order, "call")))
 		require.NoError(t, err)
 
 		order = nil
@@ -11399,7 +11356,7 @@ func TestErrDecode(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString("a: [\n")
 
-		_, err := source.Documents()
+		_, err := source.File()
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
 		require.NotErrorIs(t, err, niceyaml.ErrDecode)
 

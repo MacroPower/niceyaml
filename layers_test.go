@@ -308,8 +308,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString(baseInput+"---\nserver:\n  port: 80\n", niceyaml.WithName("app.yaml"))
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		require.Len(t, docs, 2)
 
 		cfg, err := niceyaml.NewSourceFromLayers(layersOf(docs)...).Decode[layerConfig](t.Context())

@@ -343,8 +343,7 @@ func TestLimited(t *testing.T) {
 
 			// The source holds the setting, so every document of it and
 			// every node of a document answer alike.
-			docs, err := niceyaml.NewSourceFromString("a: [x]\n---\nb: 1\n", tc.opts...).Documents()
-			require.NoError(t, err)
+			docs := niceyaml.NewSourceFromString("a: [x]\n---\nb: 1\n", tc.opts...).Documents()
 			require.Len(t, docs, 2)
 
 			assert.Equal(t, tc.want, aliasing.Limited(docs[0]))

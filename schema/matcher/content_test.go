@@ -777,8 +777,7 @@ func TestContent(t *testing.T) {
 			kind: Pod
 			kind: Service
 		`), niceyaml.WithAllowDuplicateKeys(true))
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		require.Len(t, docs, 1)
 
 		assert.True(t, match(t, matcher.Content(kindPath, "Service"), docs[0]))

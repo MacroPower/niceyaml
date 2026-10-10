@@ -494,17 +494,18 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			// so several decodes show that the report does not depend on
 			// its pick.
 			for range 10 {
-				docs, err := niceyaml.NewSourceFromString(tc.input, tc.sourceOpts...).Documents()
-				require.NoError(t, err)
+				docs := niceyaml.NewSourceFromString(tc.input, tc.sourceOpts...).Documents()
 				require.Len(t, docs, 1)
 
 				node := docs[0]
 				if tc.scope != "" {
+					var err error
+
 					node, err = node.At(paths.MustParse(tc.scope))
 					require.NoError(t, err)
 				}
 
-				err = tc.decode(t.Context(), node, tc.opts...)
+				err := tc.decode(t.Context(), node, tc.opts...)
 				if tc.want == "" {
 					require.NoError(t, err)
 
@@ -806,8 +807,7 @@ func TestDocument_DecodeInto_UnknownFields_EachDocument(t *testing.T) {
 	// One value carries the option to the decode of every document.
 	strict := niceyaml.DecodeOptions(niceyaml.WithDisallowUnknownFields(true))
 
-	docs, err := niceyaml.NewSourceFromString("foo: 1\nbar: 2\n---\nname: x\n---\nbaz: 3\n").Documents()
-	require.NoError(t, err)
+	docs := niceyaml.NewSourceFromString("foo: 1\nbar: 2\n---\nname: x\n---\nbaz: 3\n").Documents()
 	require.Len(t, docs, 3)
 
 	want := []string{

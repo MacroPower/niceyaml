@@ -295,12 +295,7 @@
 //	source := niceyaml.NewSourceFromString(yamlContent)
 //	config, err := source.Decode[Config](ctx, niceyaml.WithValidator(validator))
 //
-//	docs, err := source.Documents()
-//	if err != nil {
-//		return err
-//	}
-//
-//	for _, doc := range docs {
+//	for _, doc := range source.Documents() {
 //		config, err := doc.Decode[Config](ctx, niceyaml.WithValidator(validator))
 //		if err != nil {
 //			return err
@@ -308,16 +303,18 @@
 //	}
 //
 // Each document parses on its own, so a YAML syntax error fails the
-// document that holds it and no other. [Source.AllDocuments] returns
-// every document of such a file, and the [Node] of a document that did
+// document that holds it and no other. The [Node] of a document that did
 // not parse returns its syntax error from [Node.Err], [Node.Decode], and
-// [Node.Validate]. A caller that reports on a whole file, as a linter
-// does, calls [Source.ValidateDocuments], which validates each document
-// and joins what they return. One pass thus names every syntax error,
-// beside what the validator reports for each document that parsed.
-// [Source.File], [Source.Documents], [Source.Document], and
-// [Source.Decode] need the whole file to parse. Every syntax error
-// matches [ErrSyntax], whichever of these returns it.
+// [Node.Validate], so the loop above meets it where it meets the errors
+// of the documents that parsed. A caller that reports on a whole file,
+// as a linter does, calls [Source.ValidateDocuments], which validates
+// each document and joins what they return. One pass thus names every
+// syntax error, beside what the validator reports for each document that
+// parsed. [Source.File] returns the syntax errors of the file as one
+// error, for a caller that needs the whole file to parse before it reads
+// any document, and [Source.Document] and [Source.Decode] return that
+// error too. Every syntax error matches [ErrSyntax], whichever of these
+// returns it.
 //
 // A file of several documents often holds empty ones, such as the one a
 // trailing "---" leaves at the end of a file, and [Node.IsEmpty] reports

@@ -166,8 +166,7 @@ func BenchmarkNode_DecodeRejectedStream(b *testing.B) {
 			fmt.Fprintf(&sb, "---\na: x%d\nb: y\nc: z\n", i)
 		}
 
-		docs, err := niceyaml.NewSourceFromString(sb.String()).Documents()
-		require.NoError(b, err)
+		docs := niceyaml.NewSourceFromString(sb.String()).Documents()
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -210,10 +209,7 @@ func BenchmarkNode_DecodeReusedAnchorStream(b *testing.B) {
 			for b.Loop() {
 				// Each document builds its decode tree once, so each
 				// iteration parses the stream anew.
-				docs, err := niceyaml.NewSourceFromString(input).Documents()
-				if err != nil {
-					b.Fatal(err)
-				}
+				docs := niceyaml.NewSourceFromString(input).Documents()
 
 				for _, doc := range docs {
 					_, err := doc.Decode[map[string]int](b.Context())
@@ -569,8 +565,7 @@ func BenchmarkSourceBind_ManyDocuments(b *testing.B) {
 		// finding per line, as a line-oriented lint reports them.
 		source := niceyaml.NewSourceFromString(strings.Repeat("---\na: 1\nb: 2\n", sz.docs))
 
-		_, err := source.Documents()
-		require.NoError(b, err)
+		source.Documents()
 
 		total := source.Lines().Len()
 		findings := make([]error, 0, total)

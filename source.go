@@ -1004,18 +1004,29 @@ func (s *Source) Tokens() token.Tokens {
 }
 
 // Documents returns the root [*Node] of each YAML document of this
-// [Source], in file order, for a caller that needs the whole file to
-// parse:
+// [Source] that holds content, in file order, for a caller that decodes
+// or validates each document of a file that holds several:
 //
-//	docs, err := source.Documents()
-//	if err != nil {
-//		return err
+//	for _, doc := range source.Documents() {
+//		manifest, err := doc.Decode[Manifest](ctx, strict)
+//		if err != nil {
+//			return err
+//		}
 //	}
 //
-// For a file with a YAML syntax error, Documents returns no documents and
-// the error [Source.File] returns, which names each syntax error of the
-// file. [Source.AllDocuments] returns the documents of such a file, for a
-// caller that reports on each document.
+// Each document parses on its own, so a YAML syntax error fails the
+// document that holds it and no other. The Node of a document that did
+// not parse sits in the slice at its place in the file. [Node.Err]
+// returns its syntax error, and so do the Node methods that read the
+// tree, such as [Node.Decode] and [Node.Validate], so the loop above
+// meets the syntax error where it meets the errors of the documents
+// that parsed. [Node.AST] and [Node.DocumentAST] return nil for such a
+// document. A "---" header that directly follows an anchor with no value
+// parses together with the document above it, as [Source.AllDocuments]
+// describes, so two documents can return one error. A caller that wants
+// every syntax error of the file once, before it reads any document,
+// calls [Source.File], and one that validates each document calls
+// [Source.ValidateDocuments], which reports a shared error once.
 //
 // The parser cuts the comments and %YAML or %TAG directives above a "---"
 // header, and the comments after a "..." marker, into a node of their own
@@ -1053,13 +1064,8 @@ func (s *Source) Tokens() token.Tokens {
 // It parses the source and builds each Node once, so every call returns
 // the same pointers. The slice itself is a copy, so reordering it reaches
 // nothing.
-func (s *Source) Documents() ([]*Node, error) {
-	_, err := s.File()
-	if err != nil {
-		return nil, err
-	}
-
-	return slices.Clone(s.contentDocuments()), nil
+func (s *Source) Documents() []*Node {
+	return slices.Clone(s.contentDocuments())
 }
 
 // AllDocuments returns the root [*Node] of every YAML document of this
@@ -1079,12 +1085,12 @@ func (s *Source) Documents() ([]*Node, error) {
 //
 // Each document parses on its own, so a YAML syntax error fails the
 // document that holds it and no other. The Node of a document that did
-// not parse sits in the slice at the index of the document. [Node.Err]
-// returns its syntax error, and so do the [Node] methods that read the
-// tree, such as [Node.Validate] and [Node.Decode]. A loop over the
-// documents thus meets each syntax error beside the errors of the
-// documents that parsed. [Source.File] returns those syntax errors as
-// one error.
+// not parse sits in the slice at the index of the document, as it does
+// in the slice [Source.Documents] returns. [Node.Err] returns its syntax
+// error, and so do the [Node] methods that read the tree, such as
+// [Node.Validate] and [Node.Decode]. A loop over the documents thus
+// meets each syntax error beside the errors of the documents that
+// parsed. [Source.File] returns those syntax errors as one error.
 //
 // A "---" header that directly follows an anchor with no value parses
 // together with the document above it. A syntax error in either of those

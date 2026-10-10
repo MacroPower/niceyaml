@@ -1130,12 +1130,10 @@ func TestDiffer_HunksOfPartOfASource(t *testing.T) {
 			before := niceyaml.NewSourceFromString(tc.beforeHead + "---\n" + tc.before)
 			after := niceyaml.NewSourceFromString(tc.afterHead + "---\n" + tc.after)
 
-			beforeDocs, err := before.Documents()
-			require.NoError(t, err)
+			beforeDocs := before.Documents()
 			require.Len(t, beforeDocs, 2)
 
-			afterDocs, err := after.Documents()
-			require.NoError(t, err)
+			afterDocs := after.Documents()
 			require.Len(t, afterDocs, 2)
 
 			got := diff.Diff(beforeDocs[1].View(), afterDocs[1].View()).Hunks(tc.context)

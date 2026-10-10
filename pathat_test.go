@@ -459,8 +459,7 @@ func TestNode_PathAt_File(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString(string(data))
 
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 	require.Len(t, docs, 2)
 
 	// A directive holds plain tokens after its "%", which belong to no

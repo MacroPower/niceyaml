@@ -839,8 +839,7 @@ func TestRegistry_Caching(t *testing.T) {
 			b: 2
 		`))
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		require.Len(t, docs, 2)
 
 		for _, doc := range docs {
@@ -1451,8 +1450,7 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 		source, err := niceyaml.NewSourceFromFile(yamlPath)
 		require.NoError(t, err)
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 
 		for _, doc := range docs {
 			err = reg.Validate(t.Context(), doc)
@@ -1654,8 +1652,7 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 	`)
 
 	source := niceyaml.NewSourceFromString(input)
-	docs, err := source.Documents()
-	require.NoError(t, err)
+	docs := source.Documents()
 
 	// Track validation results.
 	validated := make(map[string]bool)
@@ -3388,11 +3385,10 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n---\nkind: Wat\n", niceyaml.WithName("m.yaml"))
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		require.Len(t, docs, 3)
 
-		err = docs[2].Validate(t.Context(), reg)
+		err := docs[2].Validate(t.Context(), reg)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 		require.EqualError(t, err, "m.yaml: document 3: no matching schema")
 		assert.Equal(t,

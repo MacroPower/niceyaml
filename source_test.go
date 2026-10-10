@@ -508,8 +508,7 @@ func TestSource_Lines_Whitespace(t *testing.T) {
 				assert.Equal(t, want, lines.Line(i).Number(), "line %d", i)
 			}
 
-			docs, err := src.Documents()
-			require.NoError(t, err)
+			docs := src.Documents()
 			require.Len(t, docs, 1)
 			assert.Equal(t, tc.want, docs[0].Span())
 		})
@@ -769,7 +768,8 @@ func TestSource_Lines_DroppedWhitespace(t *testing.T) {
 				assert.Same(t, tk, source.Lines().TokenAt(position.NewFromToken(tk)), "token %q", tk.Origin)
 			}
 
-			_, err := source.Documents()
+			// The documents of the file parse.
+			_, err := source.File()
 			require.NoError(t, err)
 		})
 	}
@@ -796,8 +796,7 @@ func TestSource_File_BlankLineBeforeFirstKey(t *testing.T) {
 
 			source := niceyaml.NewSourceFromString(tc.input)
 
-			docs, err := source.Documents()
-			require.NoError(t, err)
+			docs := source.Documents()
 			require.Len(t, docs, 1)
 
 			doc := docs[0]
@@ -1232,8 +1231,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 	// Source renumbers them so its own text counts from line 1.
 	full := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\nc: 3\nd: 4\n")
 
-	docs, err := full.Documents()
-	require.NoError(t, err)
+	docs := full.Documents()
 	require.Len(t, docs, 2)
 
 	source := niceyaml.NewSourceFromTokens(docs[1].Tokens())
@@ -1430,8 +1428,7 @@ func TestNewSourceFromString_ByteOrderMarkLaterDocument(t *testing.T) {
 			source := niceyaml.NewSourceFromString(tc.input)
 			assert.Equal(t, tc.lines, source.Lines().Content())
 
-			docs, err := source.Documents()
-			require.NoError(t, err)
+			docs := source.Documents()
 			require.Len(t, docs, 2)
 
 			got, err := docs[1].Decode[map[string]any](t.Context())
@@ -2162,9 +2159,10 @@ func TestSource_Parse(t *testing.T) {
 		detail := newXMLPrinter().Print(excerpt)
 		assert.Contains(t, detail, "<genericError>b</genericError>", "the offending token is highlighted")
 
-		// Documents forwards the same bound error.
-		_, err = source.Documents()
-		assert.Same(t, bound, err)
+		// The document returns the same bound error.
+		docs := source.Documents()
+		require.Len(t, docs, 1)
+		assert.Same(t, bound, docs[0].Err())
 	})
 
 	t.Run("parser panic comes back as an error on every call", func(t *testing.T) {
@@ -2199,9 +2197,9 @@ func TestSource_Parse(t *testing.T) {
 		assert.Nil(t, file)
 		assert.Same(t, err, again)
 
-		docs, again := source.Documents()
-		assert.Nil(t, docs)
-		assert.Same(t, err, again)
+		docs := source.Documents()
+		require.Len(t, docs, 1)
+		assert.Same(t, err, docs[0].Err())
 
 		docs = source.AllDocuments()
 		require.Len(t, docs, 1)
@@ -2365,13 +2363,12 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			}
 
 			file, fileErr := source.File()
-			docs, err := source.Documents()
+			docs := source.Documents()
 
 			if !slices.Contains(tc.want, true) {
 				require.NoError(t, fileErr)
 				assert.NotNil(t, file)
 
-				require.NoError(t, err)
 				assert.Equal(t, all, docs)
 
 				return
@@ -2381,11 +2378,11 @@ func TestSource_File_ErrSyntax(t *testing.T) {
 			require.ErrorIs(t, fileErr, niceyaml.ErrSyntax)
 			assert.Nil(t, file)
 
-			// Documents needs the whole file to parse, as File does.
-			assert.Same(t, fileErr, err)
-			assert.Nil(t, docs)
+			// Documents returns every document with content, whether it
+			// parsed or not.
+			assert.Equal(t, all, docs)
 
-			_, err = source.Document()
+			_, err := source.Document()
 			require.ErrorIs(t, err, niceyaml.ErrSyntax)
 
 			_, err = source.Decode[any](t.Context())
@@ -2402,8 +2399,7 @@ func TestSource_AllDocuments(t *testing.T) {
 
 		source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n")
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 		require.Len(t, docs, 2)
 
 		all := source.AllDocuments()
@@ -2430,10 +2426,11 @@ func TestSource_AllDocuments(t *testing.T) {
 		_, fileErr := source.File()
 		require.EqualError(t, fileErr, "cfg.yaml:5:4: sequence end token ']' not found")
 
-		// Documents needs the whole file to parse, as File does.
-		docs, err := source.Documents()
-		assert.Nil(t, docs)
-		assert.Same(t, fileErr, err)
+		// Documents returns the document that did not parse beside the
+		// others, with its error on the Node.
+		docs := source.Documents()
+		require.Len(t, docs, 4)
+		assert.Same(t, fileErr, docs[2].Err())
 
 		all := source.AllDocuments()
 		require.Len(t, all, 4)
@@ -2624,19 +2621,19 @@ func TestSource_Documents_CollectErrors(t *testing.T) {
 
 	const unclosed = "sequence end token ']' not found"
 
-	// A caller that needs the whole file to parse collects the error of
-	// Documents, and then the error of each document it returned.
+	// A caller that needs the whole file to parse returns the error of
+	// File, and decodes each document Documents returns otherwise.
 	strict := func(t *testing.T, source *niceyaml.Source, wrap func(error) error) error {
 		t.Helper()
 
-		var errs []error
-
-		docs, err := source.Documents()
+		_, err := source.File()
 		if err != nil {
-			errs = append(errs, wrap(err))
+			return wrap(err)
 		}
 
-		for _, doc := range docs {
+		var errs []error
+
+		for _, doc := range source.Documents() {
 			_, err := doc.Decode[map[string]any](t.Context())
 			if err != nil {
 				errs = append(errs, wrap(err))
@@ -2647,13 +2644,13 @@ func TestSource_Documents_CollectErrors(t *testing.T) {
 	}
 
 	// A caller that reports on each document collects the error of every
-	// document, parsed or not.
+	// document Documents returns, parsed or not.
 	tolerant := func(t *testing.T, source *niceyaml.Source, wrap func(error) error) error {
 		t.Helper()
 
 		var errs []error
 
-		for _, doc := range source.AllDocuments() {
+		for _, doc := range source.Documents() {
 			_, err := doc.Decode[map[string]any](t.Context())
 			if err != nil {
 				errs = append(errs, wrap(err))
@@ -2670,9 +2667,9 @@ func TestSource_Documents_CollectErrors(t *testing.T) {
 
 	tcs := map[string]struct {
 		input string
-		// The message of each binding a loop over Documents collects.
+		// The message of each binding the strict caller collects.
 		strict []string
-		// The message of each binding a loop over AllDocuments collects.
+		// The message of each binding a loop over Documents collects.
 		tolerant []string
 	}{
 		"file that parses": {
@@ -2872,10 +2869,6 @@ func TestSource_AllDocuments_SyntaxError(t *testing.T) {
 
 			// The other methods that need the whole file to parse return
 			// the same error and nothing beside it.
-			strict, strictErr := source.Documents()
-			assert.Nil(t, strict)
-			assert.Same(t, err, strictErr)
-
 			doc, docErr := source.Document()
 			assert.Nil(t, doc)
 			assert.Same(t, err, docErr)
@@ -3177,8 +3170,7 @@ func TestSource_Documents_LeavesOutEmpty(t *testing.T) {
 			all := source.AllDocuments()
 			require.Len(t, all, tc.all)
 
-			docs, err := source.Documents()
-			require.NoError(t, err)
+			docs := source.Documents()
 
 			got := make([]int, 0, len(docs))
 			for _, doc := range docs {
@@ -3632,8 +3624,7 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 
 					source := niceyaml.NewSourceFromString(tc.input, niceyaml.WithName("f.yaml"))
 
-					docs, err := source.Documents()
-					require.NoError(t, err)
+					docs := source.Documents()
 
 					// A loop that validates each document reports what
 					// ValidateDocuments does, and a decode with the
@@ -4219,8 +4210,7 @@ func TestDocument_BindChain(t *testing.T) {
 				require.True(t, ok)
 				assert.Equal(t, position.NewRange(position.New(0, 6), position.New(0, 11)), rng)
 
-				docs, docsErr := source.Documents()
-				require.NoError(t, docsErr)
+				docs := source.Documents()
 
 				require.ErrorAs(t, docs[0].Bind(err), &bound)
 				assert.Same(t, source, bound.Source())
@@ -4297,11 +4287,10 @@ func TestSource_Bind(t *testing.T) {
 	t.Run("range error binds to the document its line falls in", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 
 		rng := position.NewRange(position.New(2, 3), position.New(2, 5))
-		err = source.Bind(niceyaml.NewError("too wide", niceyaml.AtRange(rng)))
+		err := source.Bind(niceyaml.NewError("too wide", niceyaml.AtRange(rng)))
 
 		var bound *niceyaml.SourceError
 
@@ -4327,10 +4316,9 @@ func TestSource_Bind(t *testing.T) {
 	t.Run("position error resolves to its token", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 
-		err = source.Bind(niceyaml.NewError("bad value", niceyaml.AtPosition(position.New(2, 3))))
+		err := source.Bind(niceyaml.NewError("bad value", niceyaml.AtPosition(position.New(2, 3))))
 
 		var bound *niceyaml.SourceError
 
@@ -4345,10 +4333,9 @@ func TestSource_Bind(t *testing.T) {
 	t.Run("position in the first document binds there", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 
-		err = source.Bind(niceyaml.NewError("bad value", niceyaml.AtPosition(position.New(0, 3))))
+		err := source.Bind(niceyaml.NewError("bad value", niceyaml.AtPosition(position.New(0, 3))))
 
 		var bound *niceyaml.SourceError
 
@@ -4374,10 +4361,9 @@ func TestSource_Bind(t *testing.T) {
 	t.Run("column before the first binds to the document holding the line", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 
-		err = source.Bind(niceyaml.NewError("far", niceyaml.AtPosition(position.New(2, -3))))
+		err := source.Bind(niceyaml.NewError("far", niceyaml.AtPosition(position.New(2, -3))))
 
 		var bound *niceyaml.SourceError
 
@@ -4641,10 +4627,9 @@ func TestSource_Bind(t *testing.T) {
 	t.Run("each location in a tree finds its own document", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 
-		err = source.Bind(errors.Join(
+		err := source.Bind(errors.Join(
 			niceyaml.NewError("bad a", niceyaml.AtPosition(position.New(0, 3))),
 			niceyaml.NewError("bad b", niceyaml.AtPosition(position.New(2, 3))),
 		))
@@ -4702,8 +4687,7 @@ func TestSource_Bind(t *testing.T) {
 
 		require.NoError(t, source.Bind(nil))
 
-		docs, err := source.Documents()
-		require.NoError(t, err)
+		docs := source.Documents()
 
 		bound := docs[1].Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
 		assert.Same(t, bound, source.Bind(bound))
@@ -5359,8 +5343,7 @@ func TestWithReferences(t *testing.T) {
 		err := src.ValidateDocuments(t.Context(), serverSchema)
 		assert.Equal(t, want, bindingMessages(err))
 
-		docs, err := src.Documents()
-		require.NoError(t, err)
+		docs := src.Documents()
 		require.Len(t, docs, 2)
 
 		_, err = docs[0].Decode[config](t.Context(), niceyaml.WithValidator(serverSchema))
@@ -5602,10 +5585,9 @@ func TestWithReferences(t *testing.T) {
 	t.Run("references serve every decode from any goroutine", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := niceyaml.NewSourceFromString("b: *x\n---\nc: *x\n",
+		docs := niceyaml.NewSourceFromString("b: *x\n---\nc: *x\n",
 			niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
 		).Documents()
-		require.NoError(t, err)
 		require.Len(t, docs, 2)
 
 		var wg sync.WaitGroup
@@ -6145,8 +6127,7 @@ func TestWithAliasLimit(t *testing.T) {
 	t.Run("every document of the source", func(t *testing.T) {
 		t.Parallel()
 
-		docs, err := niceyaml.NewSourceFromString(bomb+"---\n"+bomb, niceyaml.WithAliasLimit(false)).Documents()
-		require.NoError(t, err)
+		docs := niceyaml.NewSourceFromString(bomb+"---\n"+bomb, niceyaml.WithAliasLimit(false)).Documents()
 		require.Len(t, docs, 2)
 
 		for _, doc := range docs {

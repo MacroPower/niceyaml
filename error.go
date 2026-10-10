@@ -119,9 +119,9 @@ var (
 	// ErrSyntax indicates text the go-yaml parser rejects, such as a flow
 	// sequence with no closing bracket, a tab that indents a key, or a key
 	// a mapping holds twice without [WithAllowDuplicateKeys]. Every error
-	// the parser returns matches it. [Source.File], [Source.Documents],
-	// and [Source.Document] return it, and [Node.Err] returns it for a
-	// document that did not parse. Each error comes back bound as a
+	// the parser returns matches it. [Source.File] and [Source.Document]
+	// return it, and [Node.Err] returns it for a document that did not
+	// parse, among the documents [Source.Documents] returns. Each error comes back bound as a
 	// [SourceError] at the offending token. The error of a file with
 	// several such documents is a join, which matches through each of
 	// them. [errors.As] still finds the go-yaml error, which no error of
@@ -1795,7 +1795,7 @@ func locateMerged(b binder, node *Node, at position.Position, l locus) (location
 //
 // # Binding
 //
-// [Source.File], [Source.Documents], and the [Node] methods bind every
+// [Source.File], [Source.Document], and the [Node] methods bind every
 // error they return. [Node.Bind] binds an error built elsewhere to the
 // document the check ran against, and [Source.Bind] binds one to the
 // document its location falls in, or to the source alone when it carries
