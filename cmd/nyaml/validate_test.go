@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -29,6 +30,19 @@ var nameSchema = []byte(`{
 	"properties": {"name": {"type": "string"}},
 	"required": ["name"]
 }`)
+
+// quietValidateCmd returns nyaml validate set to run with args, to write
+// its output to out, and to print no error itself.
+func quietValidateCmd(out io.Writer, args ...string) *cobra.Command {
+	cmd := validateCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs(args)
+
+	return cmd
+}
 
 func TestValidateFile(t *testing.T) {
 	t.Parallel()
@@ -577,14 +591,7 @@ func TestValidateCmdSchemaError(t *testing.T) {
 
 			out := &bytes.Buffer{}
 
-			cmd := validateCmd()
-			cmd.SilenceErrors = true
-			cmd.SilenceUsage = true
-			cmd.SetOut(out)
-			cmd.SetErr(out)
-			cmd.SetArgs(append([]string{"--schema", ref}, yamlPaths...))
-
-			err := cmd.Execute()
+			err := quietValidateCmd(out, append([]string{"--schema", ref}, yamlPaths...)...).Execute()
 			require.ErrorIs(t, err, tc.err)
 
 			msg := err.Error()
@@ -661,14 +668,7 @@ func TestValidateCmdCanceled(t *testing.T) {
 
 			out := &bytes.Buffer{}
 
-			cmd := validateCmd()
-			cmd.SilenceErrors = true
-			cmd.SilenceUsage = true
-			cmd.SetOut(out)
-			cmd.SetErr(out)
-			cmd.SetArgs(args)
-
-			err := cmd.ExecuteContext(ctx)
+			err := quietValidateCmd(out, args...).ExecuteContext(ctx)
 			require.ErrorIs(t, err, context.Canceled)
 			assert.Equal(t, 1, strings.Count(err.Error(), context.Canceled.Error()), err.Error())
 			assert.Empty(t, out.String())
@@ -733,12 +733,7 @@ func TestValidateCmdOutput(t *testing.T) {
 
 			out := &bytes.Buffer{}
 
-			cmd := validateCmd()
-			cmd.SetOut(out)
-			cmd.SetErr(out)
-			cmd.SetArgs(args)
-
-			require.NoError(t, cmd.Execute())
+			require.NoError(t, quietValidateCmd(out, args...).Execute())
 			assert.Equal(t, want.String(), out.String())
 			assert.NotContains(t, out.String(), "\x1b")
 		})
@@ -804,14 +799,7 @@ func TestValidateCmdErrorNames(t *testing.T) {
 				out = closedWriter{}
 			}
 
-			cmd := validateCmd()
-			cmd.SilenceErrors = true
-			cmd.SilenceUsage = true
-			cmd.SetOut(out)
-			cmd.SetErr(io.Discard)
-			cmd.SetArgs([]string{"--schema", schemaPath, filepath.Join(dir, "evil*")})
-
-			err := cmd.Execute()
+			err := quietValidateCmd(out, "--schema", schemaPath, filepath.Join(dir, "evil*")).Execute()
 			require.Error(t, err)
 
 			if tc.err != nil {

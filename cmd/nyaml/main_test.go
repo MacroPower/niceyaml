@@ -321,14 +321,7 @@ func TestExitCode(t *testing.T) {
 				cancel()
 			}
 
-			cmd := validateCmd()
-			cmd.SilenceErrors = true
-			cmd.SilenceUsage = true
-			cmd.SetOut(io.Discard)
-			cmd.SetErr(io.Discard)
-			cmd.SetArgs(args)
-
-			assert.Equal(t, tc.want, exitCode(cmd.ExecuteContext(ctx)))
+			assert.Equal(t, tc.want, exitCode(quietValidateCmd(io.Discard, args...).ExecuteContext(ctx)))
 		})
 	}
 }
