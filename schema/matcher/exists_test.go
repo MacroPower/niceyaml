@@ -17,26 +17,46 @@ func TestExists(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
+		path  paths.Path
 		input string
 		want  bool
 	}{
-		"field exists with value":   {input: `kind: Deployment`, want: true},
-		"field missing":             {input: `apiVersion: v1`, want: false},
-		"field empty unquoted":      {input: `kind:`, want: true},
-		"field null":                {input: `kind: null`, want: true},
-		"field empty double quoted": {input: `kind: ""`, want: true},
-		"field empty single quoted": {input: `kind: ''`, want: true},
+		"field exists with value":   {path: kindPath, input: `kind: Deployment`, want: true},
+		"field missing":             {path: kindPath, input: `apiVersion: v1`, want: false},
+		"field empty unquoted":      {path: kindPath, input: `kind:`, want: true},
+		"field null":                {path: kindPath, input: `kind: null`, want: true},
+		"field empty double quoted": {path: kindPath, input: `kind: ""`, want: true},
+		"field empty single quoted": {path: kindPath, input: `kind: ''`, want: true},
 		"field with mapping value": {
+			path: kindPath,
 			input: stringtest.Input(`
 				kind:
 				  name: x
 			`),
 			want: true,
 		},
-		"document without content":    {input: `# only a comment`, want: false},
-		"field with whitespace value": {input: `kind: " "`, want: true},
-		"field with numeric value":    {input: `kind: 123`, want: true},
-		"field with boolean value":    {input: `kind: true`, want: true},
+		"document without content":    {path: kindPath, input: `# only a comment`, want: false},
+		"field with whitespace value": {path: kindPath, input: `kind: " "`, want: true},
+		"field with numeric value":    {path: kindPath, input: `kind: 123`, want: true},
+		"field with boolean value":    {path: kindPath, input: `kind: true`, want: true},
+		"nested path exists": {
+			path: metadataName,
+			input: stringtest.Input(`
+				kind: Deployment
+				metadata:
+				  name: my-app
+			`),
+			want: true,
+		},
+		"nested path missing": {
+			path: metadataName,
+			input: stringtest.Input(`
+				kind: Deployment
+				metadata:
+				  namespace: default
+			`),
+			want: false,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -45,33 +65,9 @@ func TestExists(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input)
 
-			assert.Equal(t, tc.want, match(t, matcher.Exists(kindPath), doc))
+			assert.Equal(t, tc.want, match(t, matcher.Exists(tc.path), doc))
 		})
 	}
-
-	t.Run("nested path exists", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			metadata:
-			  name: my-app
-		`))
-
-		assert.True(t, match(t, matcher.Exists(metadataName), doc))
-	})
-
-	t.Run("nested path missing", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			metadata:
-			  namespace: default
-		`))
-
-		assert.False(t, match(t, matcher.Exists(metadataName), doc))
-	})
 
 	t.Run("alias without an anchor is an error", func(t *testing.T) {
 		t.Parallel()
