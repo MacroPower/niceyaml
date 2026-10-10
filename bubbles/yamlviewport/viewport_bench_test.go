@@ -47,7 +47,7 @@ func BenchmarkViewport_SetSearchTerm(b *testing.B) {
 			src := yamltest.GenerateLines(n, "key%[1]d: value %[1]d") + "zebra: here\n"
 
 			m := testModel(printer.New(printer.WithStyles(theme.Charm.Styles())), 120, 40)
-			m.SetRevision(niceyaml.NewSourceFromString(src))
+			setRevision(&m, src)
 
 			_ = m.View()
 
