@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -81,7 +82,11 @@ func TestWhen(t *testing.T) {
 		// The matcher runs before any schema, so it refuses a document
 		// whose aliases would make its decode read 10^7 scalars, and the
 		// registry stops at the document.
-		input := yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n"
+		input := yamltest.AliasLevels(7) + stringtest.LinesLF(
+			"kind:",
+			"  ? *l7",
+			"  : v",
+		)
 
 		tcs := map[string]struct {
 			matcher matcher.Matcher
