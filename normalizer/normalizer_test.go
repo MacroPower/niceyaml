@@ -21,59 +21,23 @@ func TestNormalize(t *testing.T) {
 		in   string
 		want string
 	}{
-		"default removes diacritics and lowercases": {
-			in:   "Café",
-			want: "cafe",
-		},
-		"default handles umlaut": {
-			in:   "Ö",
-			want: "o",
-		},
-		"default handles uppercase with diacritics": {
-			in:   "ÜBER",
-			want: "uber",
-		},
-		"default keeps kana voicing mark": {
-			in:   "ガ",
-			want: "ガ",
-		},
-		"default keeps kana semi-voiced mark": {
-			in:   "パ",
-			want: "パ",
-		},
-		"default keeps Thai vowel sign": {
-			in:   "กิน",
-			want: "กิน",
-		},
-		"default keeps Devanagari vowel sign": {
-			in:   "कुम",
-			want: "कुम",
-		},
-		"default removes Vietnamese stacked diacritics": {
-			in:   "Việt",
-			want: "viet",
-		},
-		"default keeps keycap emoji": {
-			in:   "1\ufe0f\u20e3",
-			want: "1\ufe0f\u20e3",
-		},
+		"default removes diacritics and lowercases":     {in: "Café", want: "cafe"},
+		"default handles umlaut":                        {in: "Ö", want: "o"},
+		"default handles uppercase with diacritics":     {in: "ÜBER", want: "uber"},
+		"default keeps kana voicing mark":               {in: "ガ", want: "ガ"},
+		"default keeps kana semi-voiced mark":           {in: "パ", want: "パ"},
+		"default keeps Thai vowel sign":                 {in: "กิน", want: "กิน"},
+		"default keeps Devanagari vowel sign":           {in: "कुम", want: "कुम"},
+		"default removes Vietnamese stacked diacritics": {in: "Việt", want: "viet"},
+		"default keeps keycap emoji":                    {in: "1\ufe0f\u20e3", want: "1\ufe0f\u20e3"},
 		"case fold disabled preserves case": {
 			opts: []normalizer.Option{normalizer.WithCaseFold(false)},
 			in:   "Café",
 			want: "Cafe",
 		},
-		"case fold eszett": {
-			in:   "Straße",
-			want: "strasse",
-		},
-		"case fold cherokee uppercase": {
-			in:   "\u13a0\u13f0",
-			want: "\uab70\u13f8",
-		},
-		"case fold cherokee lowercase": {
-			in:   "\uab70\u13f8",
-			want: "\uab70\u13f8",
-		},
+		"case fold eszett":             {in: "Straße", want: "strasse"},
+		"case fold cherokee uppercase": {in: "\u13a0\u13f0", want: "\uab70\u13f8"},
+		"case fold cherokee lowercase": {in: "\uab70\u13f8", want: "\uab70\u13f8"},
 		"diacritics disabled preserves diacritics": {
 			opts: []normalizer.Option{normalizer.WithDiacriticFold(false)},
 			in:   "Café",
@@ -87,22 +51,10 @@ func TestNormalize(t *testing.T) {
 			in:   "Café",
 			want: "Café",
 		},
-		"empty string": {
-			in:   "",
-			want: "",
-		},
-		"ascii only": {
-			in:   "Hello World",
-			want: "hello world",
-		},
-		"cjk characters": {
-			in:   "日本語",
-			want: "日本語",
-		},
-		"emoji": {
-			in:   "hello 🌍",
-			want: "hello 🌍",
-		},
+		"empty string":   {in: "", want: ""},
+		"ascii only":     {in: "Hello World", want: "hello world"},
+		"cjk characters": {in: "日本語", want: "日本語"},
+		"emoji":          {in: "hello 🌍", want: "hello 🌍"},
 		"width fold fullwidth latin": {
 			opts: []normalizer.Option{normalizer.WithWidthFold(true)},
 			in:   "ａｂｃ",
@@ -156,9 +108,7 @@ func TestNormalize(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			n := normalizer.New(tc.opts...)
-			got := n.Normalize(tc.in)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, normalizer.New(tc.opts...).Normalize(tc.in))
 		})
 	}
 }
@@ -197,8 +147,7 @@ func TestNormalize_Concurrent(t *testing.T) {
 
 	for range 100 {
 		wg.Go(func() {
-			got := n.Normalize("Café")
-			assert.Equal(t, "cafe", got)
+			assert.Equal(t, "cafe", n.Normalize("Café"))
 		})
 	}
 
