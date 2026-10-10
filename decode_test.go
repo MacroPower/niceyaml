@@ -6640,9 +6640,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 				require.EqualError(t, err, tc.err)
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-				var srcErr *niceyaml.SourceError
-
-				require.ErrorAs(t, err, &srcErr, "the rejection is not bound to the source")
+				require.ErrorAs(t, err, new(*niceyaml.SourceError), "the rejection is not bound to the source")
 			})
 		}
 	})
@@ -10284,9 +10282,7 @@ func TestErrDecode(t *testing.T) {
 			err := tc.decode(t.Context(), dd)
 			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-			var srcErr *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &srcErr, "the rejection is not bound to the source")
+			require.ErrorAs(t, err, new(*niceyaml.SourceError), "the rejection is not bound to the source")
 
 			_, ok := errors.AsType[yaml.Error](err)
 			assert.True(t, ok, "errors.As no longer finds the go-yaml error")
