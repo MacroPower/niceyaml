@@ -7928,6 +7928,112 @@ func TestError_Accessors(t *testing.T) {
 	assert.False(t, causes)
 }
 
+func TestError_Accessors_Wrapped(t *testing.T) {
+	t.Parallel()
+
+	server := paths.Current().Child("server")
+	detail := niceyaml.NewError("must be below 65536", niceyaml.AtPath(paths.Current().Child("max")))
+	port := niceyaml.NewError("port out of range",
+		niceyaml.AtPath(paths.Current().Child("port")), niceyaml.WithDetails(detail))
+	tooLow := niceyaml.NewError("too low", niceyaml.AtPath(paths.Current().Child("a")))
+	tooHigh := niceyaml.NewError("too high", niceyaml.AtPath(paths.Current().Child("b")))
+	summary := niceyaml.NewSummary("2 violations", tooLow, tooHigh)
+
+	// The path of each error, as [niceyaml.Error.Path] reports it through
+	// the Rebase around it.
+	pathsOf := func(t *testing.T, errs []error) []string {
+		t.Helper()
+
+		var got []string
+
+		for _, err := range errs {
+			var located *niceyaml.Error
+
+			require.ErrorAs(t, err, &located)
+
+			path, ok := located.Path()
+			require.True(t, ok)
+
+			got = append(got, path.String())
+		}
+
+		return got
+	}
+
+	tcs := map[string]struct {
+		err         error
+		wantMembers []string
+		wantDetails []string
+	}{
+		"Rebase of a summary heads its members under the base": {
+			err:         niceyaml.Rebase(summary, server),
+			wantMembers: []string{"@.server.a", "@.server.b"},
+		},
+		"Rebase of a problem has its details under the base": {
+			err:         niceyaml.Rebase(port, server),
+			wantDetails: []string{"@.server.max"},
+		},
+		"two Rebases join both bases": {
+			err:         niceyaml.Rebase(niceyaml.Rebase(port, server), paths.Current().Child("spec")),
+			wantDetails: []string{"@.spec.server.max"},
+		},
+		"a wrapper between the Rebase and the problem": {
+			err:         niceyaml.Rebase(fmt.Errorf("check: %w", port), server),
+			wantDetails: []string{"@.server.max"},
+		},
+		"Invalid with a path of its own leaves the details as they are": {
+			err:         niceyaml.Invalid(port, niceyaml.AtPath(paths.Current().Child("cfg"))),
+			wantDetails: []string{"@.max"},
+		},
+		"Invalid with no options reads through to the details": {
+			err:         niceyaml.Invalid(port),
+			wantDetails: []string{"@.max"},
+		},
+		"the details of the outer Error come first": {
+			err: niceyaml.Invalid(niceyaml.Rebase(port, server),
+				niceyaml.WithDetails(niceyaml.NewError("see docs", niceyaml.AtPath(paths.Current().Child("docs"))))),
+			wantDetails: []string{"@.docs", "@.server.max"},
+		},
+		"an Error above a join heads none": {
+			err: niceyaml.Invalid(errors.Join(port, summary)),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := errors.AsType[*niceyaml.Error](tc.err)
+			require.True(t, ok)
+
+			members := got.Members()
+			require.Len(t, members, len(tc.wantMembers))
+			assert.Equal(t, tc.wantMembers, pathsOf(t, members))
+
+			details := got.Details()
+			require.Len(t, details, len(tc.wantDetails))
+			assert.Equal(t, tc.wantDetails, pathsOf(t, details))
+		})
+	}
+
+	t.Run("a rebased member still matches the error it came from", func(t *testing.T) {
+		t.Parallel()
+
+		got, ok := errors.AsType[*niceyaml.Error](niceyaml.Rebase(summary, server))
+		require.True(t, ok)
+
+		members := got.Members()
+		require.Len(t, members, 2)
+		require.ErrorIs(t, members[0], tooLow)
+		require.ErrorIs(t, members[1], tooHigh)
+
+		details, ok := errors.AsType[*niceyaml.Error](niceyaml.Rebase(port, server))
+		require.True(t, ok)
+		require.Len(t, details.Details(), 1)
+		require.ErrorIs(t, details.Details()[0], detail)
+	})
+}
+
 // ruleError is a cause of a type the caller defines.
 type ruleError struct {
 	id string

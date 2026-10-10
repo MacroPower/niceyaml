@@ -265,9 +265,11 @@ var (
 // returns or logs such an Error binds it with [BindValue], and the text
 // of that error names each path. The errors a summary heads and the
 // details of an Error are structure rather than text. [Error.Members]
-// and [Error.Details] return them, and the [SourceError] that binds the
-// Error binds each one as a child at the location its own error carries,
-// if any.
+// and [Error.Details] return them through any Error that wraps the
+// summary or the problem, such as one from [Rebase] or [Invalid], with
+// the base of every Rebase joined in front of their paths. The
+// [SourceError] that binds the Error binds each one as a child at the
+// location its own error carries, if any.
 // [Error.Format] prints them as a tree under the %+v verb.
 //
 // # Matching
@@ -1440,26 +1442,68 @@ func (e *Error) Unwrap() []error {
 
 // Members returns the errors the [Error] heads as a summary from
 // [NewSummary], in the order NewSummary received them and without the nil
-// ones. Any other Error, and a nil one, heads none. The slice is a copy,
-// so a caller may keep or sort it.
+// ones. Members looks through wrapping as [Error.Path] does, so an Error
+// from [Rebase], [Invalid], or a scoped [Node.Bind] around a summary
+// heads what the summary heads. Each member comes with the base of every
+// Rebase on the way joined in front of its paths, and marked as the
+// document's fault below an Error from Invalid, as the tree
+// [NewErrorTree] builds and a binding place it. The walk ends at the
+// first Error that heads any, at a [*SourceError], and at an error that
+// unwraps to several, so an Error above a join heads none, and
+// [Problems] lists the problems of a join. A nil Error heads none. The
+// slice is new, so a caller may keep or sort it.
 func (e *Error) Members() []error {
-	if e == nil {
-		return nil
+	var base childBase
+
+	for cur := error(e); !isNothing(cur); {
+		switch x := cur.(type) { //nolint:errorlint // Walks the chain one node at a time.
+		case *Error:
+			base = base.cross(x)
+
+			if len(x.errors) > 0 {
+				members := make([]error, 0, len(x.errors))
+				for _, n := range x.errors {
+					members = append(members, base.rebase(n, false))
+				}
+
+				return members
+			}
+
+			cur = x.err
+
+		case *SourceError:
+			return nil
+
+		case interface{ Unwrap() error }:
+			cur = x.Unwrap()
+
+		default:
+			return nil
+		}
 	}
 
-	return slices.Clone(e.errors)
+	return nil
 }
 
-// Details returns the errors that explain the [Error], the ones
-// [WithDetails] added, in the order it received them and without the nil
-// ones. A nil Error has none. The slice is a copy, so a caller may keep
-// or sort it.
+// Details returns the errors that explain the [Error]: the ones
+// [WithDetails] added to it and to each Error along its cause chain,
+// outermost first and in the order each received them, without the nil
+// ones. Each detail comes with the base of every [Rebase] above it
+// joined in front of its paths, and points nothing at that base, as the
+// tree [NewErrorTree] builds and a binding place it. The chain ends at a
+// [*SourceError], which holds its own details, and at an error that
+// unwraps to several. A nil Error has none. The slice is new, so a
+// caller may keep or sort it.
 func (e *Error) Details() []error {
-	if e == nil {
-		return nil
-	}
+	var details []error
 
-	return slices.Clone(e.details)
+	walkChildren(e, func(*SourceError) {}, func(n error, base childBase, detail bool) {
+		if detail {
+			details = append(details, base.rebase(n, true))
+		}
+	})
+
+	return details
 }
 
 // location returns the locus of the [Error]: a path from [AtPath], a
