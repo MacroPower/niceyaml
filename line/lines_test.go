@@ -1082,18 +1082,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				t.Parallel()
 
 				lines := requireRoundtrip(t, tc.input)
-
-				// The content is the string whose text crosses a line break.
-				var contentToken *token.Token
-
-				for _, tk := range tokens.Tokenize(tc.input) {
-					if tk.Type == token.StringType && strings.Contains(strings.TrimSpace(tk.Origin), "\n") {
-						contentToken = tk
-						break
-					}
-				}
-
-				require.NotNil(t, contentToken, "expected to find block scalar content token")
+				contentToken := multilineString(t, tc.input)
 
 				for i, want := range tc.want {
 					parts := lines.Line(tc.line - 1 + i).Tokens()
@@ -1231,11 +1220,13 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 	// A plain multiline string has one part on each line it spans, and that
 	// part is the last on its line. The first part keeps the string's Column
 	// and Offset and carries its Value, which block scalars put on their
-	// last content part instead.
+	// last content part instead. Every later part is alone on its line and
+	// starts with the indentation, at column 1.
 
 	tcs := map[string]struct {
 		input string
 		line  int      // Line of the string's first part.
+		col   int      // Column of the string's first part.
 		want  []string // Value of the string's part on each line from line on.
 	}{
 		"plain multiline two lines": {
@@ -1244,6 +1235,7 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 				  continued
 			`),
 			line: 1,
+			col:  6,
 			want: []string{"this is continued", ""},
 		},
 		"plain multiline three lines": {
@@ -1253,6 +1245,7 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 				  third
 			`),
 			line: 1,
+			col:  6,
 			want: []string{"first second third", "", ""},
 		},
 		"plain multiline with more indent": {
@@ -1262,6 +1255,7 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 				    continued line
 			`),
 			line: 2, // First line of the value.
+			col:  10,
 			want: []string{"line one continued line", ""},
 		},
 	}
@@ -1271,18 +1265,9 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 			t.Parallel()
 
 			lines := requireRoundtrip(t, tc.input)
+			require.Equal(t, tc.line-1+len(tc.want), lines.Len())
 
-			// The string is the one whose text crosses a line break.
-			var contentToken *token.Token
-
-			for _, tk := range tokens.Tokenize(tc.input) {
-				if tk.Type == token.StringType && strings.Contains(strings.TrimSpace(tk.Origin), "\n") {
-					contentToken = tk
-					break
-				}
-			}
-
-			require.NotNil(t, contentToken, "expected to find plain multiline string token")
+			contentToken := multilineString(t, tc.input)
 
 			for i, want := range tc.want {
 				parts := lines.Line(tc.line - 1 + i).Tokens()
@@ -1293,12 +1278,33 @@ func TestNewLines_PlainMultilinePositionSemantics(t *testing.T) {
 				assert.Equal(t, want, part.Value, "part %q", part.Origin)
 
 				if i == 0 {
+					assert.Equal(t, tc.col, part.Position.Column, "part %q", part.Origin)
 					assert.Equal(t, contentToken.Position.Column, part.Position.Column, "part %q", part.Origin)
 					assert.Equal(t, contentToken.Position.Offset, part.Position.Offset, "part %q", part.Origin)
+
+					continue
 				}
+
+				require.Len(t, parts, 1, "line %d", tc.line+i)
+				assert.Equal(t, 1, part.Position.Column, "part %q", part.Origin)
 			}
 		})
 	}
+}
+
+// multilineString returns the lexer's token for the first string of input
+// whose text crosses a line break.
+func multilineString(t *testing.T, input string) *token.Token {
+	t.Helper()
+
+	tks := tokens.Tokenize(input)
+
+	i := slices.IndexFunc(tks, func(tk *token.Token) bool {
+		return tk.Type == token.StringType && strings.Contains(strings.TrimSpace(tk.Origin), "\n")
+	})
+	require.GreaterOrEqual(t, i, 0, "expected a string whose text crosses a line break")
+
+	return tks[i]
 }
 
 func TestNewLines_QuotedMultilineActualNewlines(t *testing.T) {
@@ -1375,66 +1381,6 @@ func TestNewLines_QuotedMultilineActualNewlines(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestNewLines_ColumnPositionAfterSplit(t *testing.T) {
-	t.Parallel()
-
-	// Test that NewLines calculates Column positions correctly when it splits
-	// multiline tokens across lines.
-	//
-	// The first part of a block or plain multiline scalar keeps the token's
-	// Column, which names where the scalar's text starts. Every later part
-	// starts at column 1.
-
-	t.Run("block scalar column positions", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key: |
-			  line1
-			  line2
-		`)
-		lines := requireRoundtrip(t, input)
-
-		// The input holds three lines.
-		require.Equal(t, 3, lines.Len())
-
-		// The token sits where "line1" starts, past two spaces of
-		// indentation, and its first part carries that column. The second
-		// line's part starts with the indentation, at column 1.
-		first := lines.Line(1).Tokens()
-		require.NotEmpty(t, first)
-		assert.Equal(t, 3, first[0].Position.Column)
-
-		second := lines.Line(2).Tokens()
-		require.NotEmpty(t, second)
-		assert.Equal(t, 1, second[0].Position.Column)
-	})
-
-	t.Run("plain multiline column positions", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key: this is
-			  continued
-		`)
-		lines := requireRoundtrip(t, input)
-
-		// The input holds two lines.
-		require.Equal(t, 2, lines.Len())
-
-		// The scalar's first part follows "key: " and keeps the token's
-		// column. The continuation part starts with the indentation, at
-		// column 1.
-		first := lines.Line(0).Tokens()
-		require.Len(t, first, 3)
-		assert.Equal(t, 6, first[2].Position.Column)
-
-		second := lines.Line(1).Tokens()
-		require.NotEmpty(t, second)
-		assert.Equal(t, 1, second[0].Position.Column)
-	})
 }
 
 func TestEmptyAndZeroValues(t *testing.T) {
@@ -1548,6 +1494,7 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 			lines := requireRoundtrip(t, tc.input)
 
 			require.NoError(t, yamltest.ValidateLines(lines))
+			require.Equal(t, strings.Count(tc.input, "\n"), lines.Len())
 
 			for i := range lines.All() {
 				ln := lines.Line(i)
