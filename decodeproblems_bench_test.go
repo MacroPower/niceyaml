@@ -3,7 +3,6 @@ package niceyaml_test
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"testing"
 
 	"go.jacobcolvin.com/niceyaml"
@@ -44,6 +43,13 @@ func benchRejected[T any](b *testing.B, name string, doc *niceyaml.Node, count i
 	})
 }
 
+// benchServers returns a document that lists count servers. It writes
+// the last server with the format last and each one before it with the
+// format server, and each format takes the index of its server.
+func benchServers(count int, server, last string) string {
+	return "servers:\n" + yamltest.GenerateLines(count-1, server) + fmt.Sprintf(last+"\n", count-1)
+}
+
 // BenchmarkNode_Decode_ProblemsWide decodes a list of servers. In the
 // first layout the decoder rejects the last server alone, so the search
 // reads every server and finds nothing more. In the second it rejects
@@ -62,20 +68,12 @@ func BenchmarkNode_Decode_ProblemsWide(b *testing.B) {
 	}
 
 	for _, layout := range layouts {
-		var sb strings.Builder
-
-		sb.WriteString("servers:\n")
-
-		for i := range layout.servers {
-			port := "80"
-			if layout.every || i == layout.servers-1 {
-				port = "http"
-			}
-
-			fmt.Fprintf(&sb, "  - {name: n%d, port: %s}\n", i, port)
+		server, last := "  - {name: n%d, port: 80}", "  - {name: n%d, port: http}"
+		if layout.every {
+			server = last
 		}
 
-		doc := yamltest.FirstDocument(b, sb.String())
+		doc := yamltest.FirstDocument(b, benchServers(layout.servers, server, last))
 
 		benchRejected[problemConfig](b, layout.name, doc, layout.servers, "server")
 	}
@@ -102,24 +100,13 @@ func BenchmarkNode_Decode_ProblemsText(b *testing.B) {
 	}
 
 	for _, layout := range layouts {
-		var sb strings.Builder
-
-		sb.WriteString("servers:\n")
-
-		for i := range layout.servers {
-			tier, port := "low", "80"
-
-			switch {
-			case layout.every:
-				tier = "mid"
-			case i == layout.servers-1:
-				port = "http"
-			}
-
-			fmt.Fprintf(&sb, "  - {name: n%d, tier: %s, port: %s}\n", i, tier, port)
+		server, last := "  - {name: n%d, tier: low, port: 80}", "  - {name: n%d, tier: low, port: http}"
+		if layout.every {
+			server = "  - {name: n%d, tier: mid, port: 80}"
+			last = server
 		}
 
-		doc := yamltest.FirstDocument(b, sb.String())
+		doc := yamltest.FirstDocument(b, benchServers(layout.servers, server, last))
 
 		benchRejected[struct {
 			Servers []problemTiered `yaml:"servers"`
