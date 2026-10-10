@@ -18,289 +18,53 @@ import (
 func TestHirschberg_Diff(t *testing.T) {
 	t.Parallel()
 
+	// Each letter of before and after is one line. Each rune of want is the
+	// kind of one op: "=" keeps a line, "-" deletes one, and "+" inserts
+	// one. The kinds fix the indices of the ops, and requireValidOps checks
+	// those.
 	tests := map[string]struct {
-		before []string
-		after  []string
-		want   []lcs.Op
+		before string
+		after  string
+		want   string
 	}{
-		"empty_both": {
-			before: []string{},
-			after:  []string{},
-			want:   nil,
-		},
-		"empty_before": {
-			before: []string{},
-			after:  []string{"a", "b"},
-			want: []lcs.Op{
-				{Kind: lcs.OpInsert, Before: -1, After: 0},
-				{Kind: lcs.OpInsert, Before: -1, After: 1},
-			},
-		},
-		"empty_after": {
-			before: []string{"a", "b"},
-			after:  []string{},
-			want: []lcs.Op{
-				{Kind: lcs.OpDelete, Before: 0, After: -1},
-				{Kind: lcs.OpDelete, Before: 1, After: -1},
-			},
-		},
-		"identical": {
-			before: []string{"a", "b", "c"},
-			after:  []string{"a", "b", "c"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpEqual, Before: 1, After: 1},
-				{Kind: lcs.OpEqual, Before: 2, After: 2},
-			},
-		},
-		"all_different": {
-			before: []string{"a", "b"},
-			after:  []string{"c", "d"},
-			want: []lcs.Op{
-				{Kind: lcs.OpDelete, Before: 0, After: -1},
-				{Kind: lcs.OpDelete, Before: 1, After: -1},
-				{Kind: lcs.OpInsert, Before: -1, After: 0},
-				{Kind: lcs.OpInsert, Before: -1, After: 1},
-			},
-		},
-		"single_insert_at_start": {
-			before: []string{"b", "c"},
-			after:  []string{"a", "b", "c"},
-			want: []lcs.Op{
-				{Kind: lcs.OpInsert, Before: -1, After: 0},
-				{Kind: lcs.OpEqual, Before: 0, After: 1},
-				{Kind: lcs.OpEqual, Before: 1, After: 2},
-			},
-		},
-		"single_insert_at_end": {
-			before: []string{"a", "b"},
-			after:  []string{"a", "b", "c"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpEqual, Before: 1, After: 1},
-				{Kind: lcs.OpInsert, Before: -1, After: 2},
-			},
-		},
-		"single_delete_at_start": {
-			before: []string{"a", "b", "c"},
-			after:  []string{"b", "c"},
-			want: []lcs.Op{
-				{Kind: lcs.OpDelete, Before: 0, After: -1},
-				{Kind: lcs.OpEqual, Before: 1, After: 0},
-				{Kind: lcs.OpEqual, Before: 2, After: 1},
-			},
-		},
-		"single_delete_at_end": {
-			before: []string{"a", "b", "c"},
-			after:  []string{"a", "b"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpEqual, Before: 1, After: 1},
-				{Kind: lcs.OpDelete, Before: 2, After: -1},
-			},
-		},
-		"interleaved_changes": {
-			before: []string{"a", "b", "c", "d"},
-			after:  []string{"a", "x", "c", "y"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpDelete, Before: 1, After: -1},
-				{Kind: lcs.OpInsert, Before: -1, After: 1},
-				{Kind: lcs.OpEqual, Before: 2, After: 2},
-				{Kind: lcs.OpDelete, Before: 3, After: -1},
-				{Kind: lcs.OpInsert, Before: -1, After: 3},
-			},
-		},
-		"replace_in_middle": {
-			before: []string{"a", "b", "c"},
-			after:  []string{"a", "x", "c"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpDelete, Before: 1, After: -1},
-				{Kind: lcs.OpInsert, Before: -1, After: 1},
-				{Kind: lcs.OpEqual, Before: 2, After: 2},
-			},
-		},
-		"single_element_before_match": {
-			before: []string{"a"},
-			after:  []string{"x", "a", "y"},
-			want: []lcs.Op{
-				{Kind: lcs.OpInsert, Before: -1, After: 0},
-				{Kind: lcs.OpEqual, Before: 0, After: 1},
-				{Kind: lcs.OpInsert, Before: -1, After: 2},
-			},
-		},
-		"single_element_before_no_match": {
-			before: []string{"a"},
-			after:  []string{"x", "y", "z"},
-			want: []lcs.Op{
-				{Kind: lcs.OpDelete, Before: 0, After: -1},
-				{Kind: lcs.OpInsert, Before: -1, After: 0},
-				{Kind: lcs.OpInsert, Before: -1, After: 1},
-				{Kind: lcs.OpInsert, Before: -1, After: 2},
-			},
-		},
-		"lcs_non_contiguous": {
-			before: []string{"a", "x", "b", "y", "c"},
-			after:  []string{"a", "b", "c"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpDelete, Before: 1, After: -1},
-				{Kind: lcs.OpEqual, Before: 2, After: 1},
-				{Kind: lcs.OpDelete, Before: 3, After: -1},
-				{Kind: lcs.OpEqual, Before: 4, After: 2},
-			},
-		},
-		"complex_diff": {
-			before: []string{"a", "b", "c", "d", "e"},
-			after:  []string{"x", "b", "c", "y", "e"},
-			want: []lcs.Op{
-				{Kind: lcs.OpDelete, Before: 0, After: -1},
-				{Kind: lcs.OpInsert, Before: -1, After: 0},
-				{Kind: lcs.OpEqual, Before: 1, After: 1},
-				{Kind: lcs.OpEqual, Before: 2, After: 2},
-				{Kind: lcs.OpDelete, Before: 3, After: -1},
-				{Kind: lcs.OpInsert, Before: -1, After: 3},
-				{Kind: lcs.OpEqual, Before: 4, After: 4},
-			},
-		},
-		"repeated_block_delete": {
-			before: []string{"a", "b", "b", "a", "a", "b", "c"},
-			after:  []string{"a", "b", "b", "c"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpEqual, Before: 1, After: 1},
-				{Kind: lcs.OpEqual, Before: 2, After: 2},
-				{Kind: lcs.OpDelete, Before: 3, After: -1},
-				{Kind: lcs.OpDelete, Before: 4, After: -1},
-				{Kind: lcs.OpDelete, Before: 5, After: -1},
-				{Kind: lcs.OpEqual, Before: 6, After: 3},
-			},
-		},
-		"repeated_block_insert": {
-			before: []string{"a", "b", "b", "c"},
-			after:  []string{"a", "b", "b", "a", "a", "b", "c"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpEqual, Before: 1, After: 1},
-				{Kind: lcs.OpEqual, Before: 2, After: 2},
-				{Kind: lcs.OpInsert, Before: -1, After: 3},
-				{Kind: lcs.OpInsert, Before: -1, After: 4},
-				{Kind: lcs.OpInsert, Before: -1, After: 5},
-				{Kind: lcs.OpEqual, Before: 3, After: 6},
-			},
-		},
-		"trailing_repeated_block_delete": {
-			before: []string{"k", "a", "b", "a", "b"},
-			after:  []string{"k", "a", "b"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpEqual, Before: 1, After: 1},
-				{Kind: lcs.OpEqual, Before: 2, After: 2},
-				{Kind: lcs.OpDelete, Before: 3, After: -1},
-				{Kind: lcs.OpDelete, Before: 4, After: -1},
-			},
-		},
-		"trailing_repeated_block_insert": {
-			before: []string{"k", "a", "b"},
-			after:  []string{"k", "a", "b", "a", "b"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpEqual, Before: 1, After: 1},
-				{Kind: lcs.OpEqual, Before: 2, After: 2},
-				{Kind: lcs.OpInsert, Before: -1, After: 3},
-				{Kind: lcs.OpInsert, Before: -1, After: 4},
-			},
-		},
-		"repeated_line_around_deletion": {
-			before: []string{"a", "x", "a"},
-			after:  []string{"a"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpDelete, Before: 1, After: -1},
-				{Kind: lcs.OpDelete, Before: 2, After: -1},
-			},
-		},
-		"repeated_pair_deletion": {
-			before: []string{"a", "b", "a", "b"},
-			after:  []string{"a", "b"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpEqual, Before: 1, After: 1},
-				{Kind: lcs.OpDelete, Before: 2, After: -1},
-				{Kind: lcs.OpDelete, Before: 3, After: -1},
-			},
-		},
-		"repeated_line_deletion": {
-			before: []string{"a", "a"},
-			after:  []string{"a"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpDelete, Before: 1, After: -1},
-			},
-		},
-		"shared_start_and_end": {
-			before: []string{"a", "b", "c", "d", "e", "f"},
-			after:  []string{"a", "b", "x", "y", "e", "f"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpEqual, Before: 1, After: 1},
-				{Kind: lcs.OpDelete, Before: 2, After: -1},
-				{Kind: lcs.OpDelete, Before: 3, After: -1},
-				{Kind: lcs.OpInsert, Before: -1, After: 2},
-				{Kind: lcs.OpInsert, Before: -1, After: 3},
-				{Kind: lcs.OpEqual, Before: 4, After: 4},
-				{Kind: lcs.OpEqual, Before: 5, After: 5},
-			},
-		},
-		"shared_start_and_end_of_unequal_lengths": {
-			before: []string{"a", "b", "c", "e", "f"},
-			after:  []string{"a", "x", "y", "z", "e", "f"},
-			want: []lcs.Op{
-				{Kind: lcs.OpEqual, Before: 0, After: 0},
-				{Kind: lcs.OpDelete, Before: 1, After: -1},
-				{Kind: lcs.OpDelete, Before: 2, After: -1},
-				{Kind: lcs.OpInsert, Before: -1, After: 1},
-				{Kind: lcs.OpInsert, Before: -1, After: 2},
-				{Kind: lcs.OpInsert, Before: -1, After: 3},
-				{Kind: lcs.OpEqual, Before: 3, After: 4},
-				{Kind: lcs.OpEqual, Before: 4, After: 5},
-			},
-		},
-		"unique_lines_between_shared_lines": {
-			before: []string{"x", "a", "y", "b", "z"},
-			after:  []string{"p", "a", "q", "b", "r"},
-			want: []lcs.Op{
-				{Kind: lcs.OpDelete, Before: 0, After: -1},
-				{Kind: lcs.OpInsert, Before: -1, After: 0},
-				{Kind: lcs.OpEqual, Before: 1, After: 1},
-				{Kind: lcs.OpDelete, Before: 2, After: -1},
-				{Kind: lcs.OpInsert, Before: -1, After: 2},
-				{Kind: lcs.OpEqual, Before: 3, After: 3},
-				{Kind: lcs.OpDelete, Before: 4, After: -1},
-				{Kind: lcs.OpInsert, Before: -1, After: 4},
-			},
-		},
-		"replace_before_repeated_line": {
-			before: []string{"x", "x"},
-			after:  []string{"y", "x"},
-			want: []lcs.Op{
-				{Kind: lcs.OpDelete, Before: 0, After: -1},
-				{Kind: lcs.OpInsert, Before: -1, After: 0},
-				{Kind: lcs.OpEqual, Before: 1, After: 1},
-			},
-		},
+		"empty_both":                              {before: "", after: "", want: ""},
+		"empty_before":                            {before: "", after: "ab", want: "++"},
+		"empty_after":                             {before: "ab", after: "", want: "--"},
+		"identical":                               {before: "abc", after: "abc", want: "==="},
+		"all_different":                           {before: "ab", after: "cd", want: "--++"},
+		"single_insert_at_start":                  {before: "bc", after: "abc", want: "+=="},
+		"single_insert_at_end":                    {before: "ab", after: "abc", want: "==+"},
+		"single_delete_at_start":                  {before: "abc", after: "bc", want: "-=="},
+		"single_delete_at_end":                    {before: "abc", after: "ab", want: "==-"},
+		"interleaved_changes":                     {before: "abcd", after: "axcy", want: "=-+=-+"},
+		"replace_in_middle":                       {before: "abc", after: "axc", want: "=-+="},
+		"single_element_before_match":             {before: "a", after: "xay", want: "+=+"},
+		"single_element_before_no_match":          {before: "a", after: "xyz", want: "-+++"},
+		"lcs_non_contiguous":                      {before: "axbyc", after: "abc", want: "=-=-="},
+		"complex_diff":                            {before: "abcde", after: "xbcye", want: "-+==-+="},
+		"repeated_block_delete":                   {before: "abbaabc", after: "abbc", want: "===---="},
+		"repeated_block_insert":                   {before: "abbc", after: "abbaabc", want: "===+++="},
+		"trailing_repeated_block_delete":          {before: "kabab", after: "kab", want: "===--"},
+		"trailing_repeated_block_insert":          {before: "kab", after: "kabab", want: "===++"},
+		"repeated_line_around_deletion":           {before: "axa", after: "a", want: "=--"},
+		"repeated_pair_deletion":                  {before: "abab", after: "ab", want: "==--"},
+		"repeated_line_deletion":                  {before: "aa", after: "a", want: "=-"},
+		"shared_start_and_end":                    {before: "abcdef", after: "abxyef", want: "==--++=="},
+		"shared_start_and_end_of_unequal_lengths": {before: "abcef", after: "axyzef", want: "=--+++=="},
+		"unique_lines_between_shared_lines":       {before: "xaybz", after: "paqbr", want: "-+=-+=-+"},
+		"replace_before_repeated_line":            {before: "xx", after: "yx", want: "-+="},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			h := lcs.NewHirschberg()
+			before, after := strings.Split(tc.before, ""), strings.Split(tc.after, "")
+			got := lcs.NewHirschberg().Diff(before, after)
 
-			got := h.Diff(tc.before, tc.after)
-
-			assert.Equal(t, tc.want, got)
+			requireValidOps(t, before, after, got)
+			assert.Equal(t, tc.want, kindsOf(got))
+			assert.Equal(t, tc.want == "", got == nil, "only a diff of no lines is nil")
 		})
 	}
 }
@@ -607,6 +371,27 @@ func requireValidOps(t *testing.T, before, after []string, ops []lcs.Op) {
 
 	require.Equal(t, len(before), nextBefore, "before=%q after=%q ops=%v", before, after, ops)
 	require.Equal(t, len(after), nextAfter, "before=%q after=%q ops=%v", before, after, ops)
+}
+
+// kindsOf returns the kinds of ops as one rune each: "=" for [lcs.OpEqual],
+// "-" for [lcs.OpDelete], and "+" for [lcs.OpInsert].
+func kindsOf(ops []lcs.Op) string {
+	var sb strings.Builder
+
+	for _, op := range ops {
+		switch op.Kind {
+		case lcs.OpEqual:
+			sb.WriteByte('=')
+		case lcs.OpDelete:
+			sb.WriteByte('-')
+		case lcs.OpInsert:
+			sb.WriteByte('+')
+		default:
+			sb.WriteByte('?')
+		}
+	}
+
+	return sb.String()
 }
 
 // equalOps returns the number of [lcs.OpEqual] ops in ops.
