@@ -519,7 +519,15 @@ func TestSourceError_Error_NameControl(t *testing.T) {
 func TestSourceError_Error_Document(t *testing.T) {
 	t.Parallel()
 
-	const input = "a: 1\n---\nb: 2\n---\nkind: Wat\nitems:\n  - x\n"
+	input := stringtest.LinesLF(
+		"a: 1",
+		"---",
+		"b: 2",
+		"---",
+		"kind: Wat",
+		"items:",
+		"  - x",
+	)
 
 	kindPath := paths.Current().Child("kind")
 	itemsPath := paths.Current().Child("items")
@@ -1970,9 +1978,14 @@ func TestError_MultiError(t *testing.T) {
 			),
 			// Both nested errors are part of the message, and only the one that
 			// resolves annotates the excerpt.
-			wantPrefix: "validation failed\n├── 2:8: $.value: resolvable error\n└── $.nonexistent~: unresolvable error\n\n",
-			want:       []string{"^ resolvable error"},
-			wantNot:    []string{"^ unresolvable error", "\n\n$.nonexistent~"},
+			wantPrefix: stringtest.LinesLF(
+				"validation failed",
+				"├── 2:8: $.value: resolvable error",
+				"└── $.nonexistent~: unresolvable error",
+				"",
+			),
+			want:    []string{"^ resolvable error"},
+			wantNot: []string{"^ unresolvable error", "\n\n$.nonexistent~"},
 		},
 	}
 
@@ -6578,7 +6591,12 @@ func TestFormatError_ExcerptsOff(t *testing.T) {
 
 	// Every line but the one that holds the port holds a secret, so any
 	// excerpt of the source shows one.
-	const text = "db:\n  password: hunter2\n  port: 0\n  token: hunter2-token\n"
+	text := stringtest.LinesLF(
+		"db:",
+		"  password: hunter2",
+		"  port: 0",
+		"  token: hunter2-token",
+	)
 
 	secrets := niceyaml.NewSourceFromString(text, niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
 	open := niceyaml.NewSourceFromString("host: example.com\nport: 0\n", niceyaml.WithName("open.yaml"))
@@ -7277,7 +7295,13 @@ func TestSourceError_Document(t *testing.T) {
 	docs := source.Documents()
 
 	// The second document of three does not parse.
-	broken := niceyaml.NewSourceFromString("a: 1\n---\nb: [\n---\nc: 3\n")
+	broken := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"---",
+		"b: [",
+		"---",
+		"c: 3",
+	))
 	brokenDocs := broken.AllDocuments()
 	require.Len(t, brokenDocs, 3)
 
@@ -7487,6 +7511,14 @@ func TestRebase(t *testing.T) {
 	hours := paths.Current().Child("hours")
 	closePath := paths.Current().Child("close")
 	dd := yamltest.FirstDocument(t, input)
+
+	// A document that holds its hours one level down, under spec.
+	nested := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"spec:",
+		"  hours:",
+		"    open: 1",
+		"    close: 0",
+	))
 
 	t.Run("nil returns nil", func(t *testing.T) {
 		t.Parallel()
@@ -7811,8 +7843,6 @@ func TestRebase(t *testing.T) {
 	t.Run("rebases compose", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "spec:\n  hours:\n    open: 1\n    close: 0\n")
-
 		inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
 		err := niceyaml.Rebase(niceyaml.Rebase(inner, hours), paths.Current().Child("spec"))
 
@@ -7822,13 +7852,11 @@ func TestRebase(t *testing.T) {
 			"@.spec.hours.close: closes before it opens",
 			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
 		)
-		require.EqualError(t, dd.Bind(err), "4:12: $.spec.hours.close: closes before it opens")
+		require.EqualError(t, nested.Bind(err), "4:12: $.spec.hours.close: closes before it opens")
 	})
 
 	t.Run("wrappers between rebases add no paths", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "spec:\n  hours:\n    open: 1\n    close: 0\n")
 
 		// Each level wraps the result of the level below and rebases it, so
 		// the text holds every wrapper and binding names the joined path
@@ -7845,7 +7873,7 @@ func TestRebase(t *testing.T) {
 			niceyaml.FormatError(err, niceyaml.WithContextLines(-1)),
 		)
 
-		bound := dd.Bind(err)
+		bound := nested.Bind(err)
 		require.EqualError(t, bound, "4:12: $.spec.hours.close: check spec: check hours: closes before it opens")
 
 		se := yamltest.RequireSourceError(t, bound)
