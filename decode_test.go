@@ -1324,30 +1324,15 @@ func TestDocument_Decode_Schema(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "name: invalid")
 
-		var (
-			first, third bool
-			order        []string
-		)
-
-		record := func(name string, called *bool) niceyaml.Validator {
-			return niceyaml.ValidatorFunc(func(_ context.Context, _ *niceyaml.Node) error {
-				*called = true
-
-				order = append(order, name)
-
-				return nil
-			})
-		}
+		var order []string
 
 		_, err := dd.Decode[plainConfig](t.Context(),
-			niceyaml.WithValidator(record("first", &first)),
+			niceyaml.WithValidator(recordingValidator(&order, "first")),
 			niceyaml.WithValidator(nameSchema(nil)),
-			niceyaml.WithValidator(record("third", &third)),
+			niceyaml.WithValidator(recordingValidator(&order, "third")),
 		)
 		require.ErrorIs(t, err, errSchemaValidationFailed)
-		assert.True(t, first)
-		assert.False(t, third, "a failing schema stops the pipeline")
-		assert.Equal(t, []string{"first"}, order)
+		assert.Equal(t, []string{"first"}, order, "a failing schema stops the pipeline")
 	})
 }
 
