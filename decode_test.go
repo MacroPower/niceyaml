@@ -7810,26 +7810,16 @@ func TestDocument_Bind(t *testing.T) {
 
 	namePath := paths.Current().Child("name")
 
-	t.Run("nil comes back nil", func(t *testing.T) {
+	t.Run("a nil error comes back as a nil error", func(t *testing.T) {
 		t.Parallel()
 
-		require.NoError(t, second.Bind(nil))
-	})
-
-	t.Run("a nil Error pointer comes back as a nil error", func(t *testing.T) {
-		t.Parallel()
-
-		var typed *niceyaml.Error
-
-		require.NoError(t, second.Bind(typed))
-	})
-
-	t.Run("a nil SourceError pointer comes back as a nil error", func(t *testing.T) {
-		t.Parallel()
-
-		var typed *niceyaml.SourceError
-
-		require.NoError(t, second.Bind(typed))
+		for name, err := range map[string]error{
+			"nil":                       nil,
+			"a nil Error pointer":       (*niceyaml.Error)(nil),
+			"a nil SourceError pointer": (*niceyaml.SourceError)(nil),
+		} {
+			require.NoError(t, second.Bind(err), name)
+		}
 	})
 
 	t.Run("an error without a location names the source", func(t *testing.T) {
