@@ -2078,35 +2078,31 @@ func TestLines_TokenRanges(t *testing.T) {
 func TestLines_String(t *testing.T) {
 	t.Parallel()
 
-	t.Run("single line", func(t *testing.T) {
-		t.Parallel()
+	// Each row carries a line number prefix.
+	tcs := map[string]struct {
+		input string
+		want  string
+	}{
+		"single line": {
+			input: "key: value\n",
+			want:  "   1 | key: value",
+		},
+		"multiple lines": {
+			input: "key1: value1\nkey2: value2\n",
+			want: stringtest.JoinLF(
+				"   1 | key1: value1",
+				"   2 | key2: value2",
+			),
+		},
+	}
 
-		input := "key: value\n"
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		result := lines.String()
-		assert.Contains(t, result, "key: value")
-		// The row carries a line number prefix.
-		assert.Contains(t, result, "1 |")
-	})
-
-	t.Run("multiple lines", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key1: value1
-			key2: value2
-		`)
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
-
-		result := lines.String()
-		assert.Contains(t, result, "key1")
-		assert.Contains(t, result, "value1")
-		assert.Contains(t, result, "key2")
-		assert.Contains(t, result, "value2")
-	})
+			assert.Equal(t, tc.want, line.NewLines(tokens.Tokenize(tc.input)).String())
+		})
+	}
 }
 
 // TestNewLines_WhitespaceType verifies that NewLines assigns SpaceType to
