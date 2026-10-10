@@ -1010,16 +1010,7 @@ func TestContent_Kinds(t *testing.T) {
 func TestContent_ContextEnded(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-
-	doc := yamltest.FirstDocument(t, `kind: Deployment`)
-
-	// A matcher whose context ended cannot decide, so it returns the error
-	// rather than a match, and the registry stops at the document.
-	ok, err := matcher.Content(kindPath, "Deployment").Match(ctx, doc)
-	require.ErrorIs(t, err, context.Canceled)
-	assert.False(t, ok)
+	requireCanceled(t, matcher.Content(kindPath, "Deployment"))
 }
 
 func TestContent_UnmarshalerError(t *testing.T) {

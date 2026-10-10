@@ -65,6 +65,20 @@ func match(t *testing.T, m matcher.Matcher, doc *niceyaml.Node) bool {
 	return got
 }
 
+// requireCanceled runs m with a context that ended. Such a matcher cannot
+// decide, so it must return the error of the context rather than a match,
+// and the registry stops at the document.
+func requireCanceled(t *testing.T, m matcher.Matcher) {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	ok, err := m.Match(ctx, yamltest.FirstDocument(t, `kind: Deployment`))
+	require.ErrorIs(t, err, context.Canceled)
+	assert.False(t, ok)
+}
+
 func TestFunc(t *testing.T) {
 	t.Parallel()
 

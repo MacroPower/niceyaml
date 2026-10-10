@@ -1,7 +1,6 @@
 package matcher_test
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -90,14 +89,7 @@ func TestText(t *testing.T) {
 	t.Run("context that ended is an error", func(t *testing.T) {
 		t.Parallel()
 
-		ctx, cancel := context.WithCancel(t.Context())
-		cancel()
-
-		doc := yamltest.FirstDocument(t, `kind: Deployment`)
-
-		ok, err := matcher.Text(kindPath, acceptAll).Match(ctx, doc)
-		require.ErrorIs(t, err, context.Canceled)
-		assert.False(t, ok)
+		requireCanceled(t, matcher.Text(kindPath, acceptAll))
 	})
 
 	t.Run("alias that does not resolve is an error", func(t *testing.T) {
