@@ -227,8 +227,7 @@ func TestSource_Document(t *testing.T) {
 
 				source := niceyaml.NewSourceFromString(tc.input)
 
-				doc, err := source.Document()
-				require.NoError(t, err)
+				doc := yamltest.Document(t, source)
 				assert.Equal(t, tc.index, doc.DocumentIndex())
 				assert.Same(t, source.AllDocuments()[tc.index], doc)
 				assert.Equal(t, tc.want == nil, doc.IsEmpty())
@@ -286,8 +285,7 @@ func TestSource_Document(t *testing.T) {
 				docs := source.Documents()
 				require.Len(t, docs, 1)
 
-				doc, err := source.Document()
-				require.NoError(t, err)
+				doc := yamltest.Document(t, source)
 				assert.Same(t, docs[0], doc)
 
 				file, err := source.File()
@@ -4724,10 +4722,7 @@ func TestNode_YAMLComments(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			n := yamltest.FirstDocument(t, tc.input)
-			if tc.path.Len() > 0 {
-				n = yamltest.At(t, n, tc.path)
-			}
+			n := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.path)
 
 			got, err := n.YAMLComments(t.Context())
 			require.NoError(t, err)
@@ -9274,8 +9269,7 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 	document := func(t *testing.T, src *niceyaml.Source) *niceyaml.Node {
 		t.Helper()
 
-		doc, err := src.Document()
-		require.NoError(t, err)
+		doc := yamltest.Document(t, src)
 
 		return doc
 	}
@@ -12018,10 +12012,7 @@ func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
-			if tc.path.Len() > 0 {
-				doc = yamltest.At(t, doc, tc.path)
-			}
+			doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input, tc.opts...), tc.path)
 
 			var got any
 
@@ -12269,9 +12260,7 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, cmp.Or(tc.input, manyAliases), tc.opts...)
-			if tc.path.Len() > 0 {
-				doc = yamltest.At(t, doc, tc.path)
-			}
+			doc = yamltest.AtOrSelf(t, doc, tc.path)
 
 			err := doc.DecodeInto(t.Context(), tc.target(), tc.decode...)
 			if tc.err != nil {
