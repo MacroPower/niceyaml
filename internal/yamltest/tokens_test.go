@@ -65,113 +65,102 @@ func TestDumpTokenOrigins(t *testing.T) {
 func TestFormatTokenPosition(t *testing.T) {
 	t.Parallel()
 
-	t.Run("nil position", func(t *testing.T) {
-		t.Parallel()
+	tcs := map[string]struct {
+		input *token.Position
+		want  string
+	}{
+		"nil position": {
+			want: "<nil>",
+		},
+		"valid position": {
+			input: &token.Position{Line: 10, Column: 5, Offset: 100, IndentNum: 2, IndentLevel: 1},
+			want:  "Line=10 Col=5 Offset=100 IndentNum=2 IndentLevel=1",
+		},
+	}
 
-		got := yamltest.FormatTokenPosition(nil)
-		assert.Equal(t, "<nil>", got)
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("valid position", func(t *testing.T) {
-		t.Parallel()
-
-		pos := &token.Position{
-			Line:        10,
-			Column:      5,
-			Offset:      100,
-			IndentNum:   2,
-			IndentLevel: 1,
-		}
-		got := yamltest.FormatTokenPosition(pos)
-		assert.Equal(t, "Line=10 Col=5 Offset=100 IndentNum=2 IndentLevel=1", got)
-	})
+			assert.Equal(t, tc.want, yamltest.FormatTokenPosition(tc.input))
+		})
+	}
 }
 
 func TestFormatToken(t *testing.T) {
 	t.Parallel()
 
-	t.Run("nil token", func(t *testing.T) {
-		t.Parallel()
-
-		got := yamltest.FormatToken(nil)
-		assert.Equal(t, "<nil>", got)
-	})
-
-	t.Run("valid token", func(t *testing.T) {
-		t.Parallel()
-
-		tk := &token.Token{
-			Type:          token.StringType,
-			Value:         "hello",
-			Origin:        "hello\n",
-			Indicator:     token.NotIndicator,
-			CharacterType: token.CharacterTypeMiscellaneous,
-			Position: &token.Position{
-				Line:        1,
-				Column:      1,
-				Offset:      0,
-				IndentNum:   0,
-				IndentLevel: 0,
+	tcs := map[string]struct {
+		input *token.Token
+		want  string
+	}{
+		"nil token": {
+			want: "<nil>",
+		},
+		"valid token": {
+			input: &token.Token{
+				Type:          token.StringType,
+				Value:         "hello",
+				Origin:        "hello\n",
+				Indicator:     token.NotIndicator,
+				CharacterType: token.CharacterTypeMiscellaneous,
+				Position:      &token.Position{Line: 1, Column: 1},
 			},
-		}
-		got := yamltest.FormatToken(tk)
-		assert.Contains(t, got, "Type=String")
-		assert.Contains(t, got, `Value="hello"`)
-		assert.Contains(t, got, `Origin="hello\n"`)
-		assert.Contains(t, got, `Error=""`)
-		assert.Contains(t, got, "Line=1")
-		assert.Contains(t, got, "Col=1")
-	})
+			want: `Type=String Value="hello" Origin="hello\n" Indicator=NotIndicator ` +
+				`CharacterType=Miscellaneous Error="" ` +
+				`Position=(Line=1 Col=1 Offset=0 IndentNum=0 IndentLevel=0)`,
+		},
+		"token with error": {
+			input: yamltest.NewTokenBuilder().Error("bad").Build(),
+			want: `Type=Unknown Value="" Origin="" Indicator=NotIndicator ` +
+				`CharacterType=Indicator Error="bad" ` +
+				`Position=(Line=0 Col=0 Offset=0 IndentNum=0 IndentLevel=0)`,
+		},
+	}
 
-	t.Run("token with error", func(t *testing.T) {
-		t.Parallel()
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		got := yamltest.FormatToken(yamltest.NewTokenBuilder().Error("bad").Build())
-		assert.Contains(t, got, `Error="bad"`)
-	})
+			assert.Equal(t, tc.want, yamltest.FormatToken(tc.input))
+		})
+	}
 }
 
 func TestFormatTokens(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty slice", func(t *testing.T) {
-		t.Parallel()
+	first := &token.Token{Value: "first", Position: &token.Position{Line: 1}}
+	second := &token.Token{Value: "second", Position: &token.Position{Line: 2}}
 
-		got := yamltest.FormatTokens(token.Tokens{})
-		assert.Equal(t, "<empty>", got)
-	})
+	tcs := map[string]struct {
+		want  string
+		input token.Tokens
+	}{
+		"nil slice": {
+			want: "<empty>",
+		},
+		"empty slice": {
+			input: token.Tokens{},
+			want:  "<empty>",
+		},
+		"single token": {
+			input: token.Tokens{first},
+			want:  "[0]\n" + yamltest.FormatToken(first),
+		},
+		"multiple tokens": {
+			input: token.Tokens{first, second},
+			want:  "[0]\n" + yamltest.FormatToken(first) + "\n[1]\n" + yamltest.FormatToken(second),
+		},
+	}
 
-	t.Run("nil slice", func(t *testing.T) {
-		t.Parallel()
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		got := yamltest.FormatTokens(nil)
-		assert.Equal(t, "<empty>", got)
-	})
-
-	t.Run("single token", func(t *testing.T) {
-		t.Parallel()
-
-		tks := token.Tokens{
-			{Value: "test", Position: &token.Position{Line: 1}},
-		}
-		got := yamltest.FormatTokens(tks)
-		assert.Contains(t, got, "[0]")
-		assert.Contains(t, got, `Value="test"`)
-	})
-
-	t.Run("multiple tokens", func(t *testing.T) {
-		t.Parallel()
-
-		tks := token.Tokens{
-			{Value: "first", Position: &token.Position{Line: 1}},
-			{Value: "second", Position: &token.Position{Line: 2}},
-		}
-		got := yamltest.FormatTokens(tks)
-		assert.Contains(t, got, "[0]")
-		assert.Contains(t, got, "[1]")
-		assert.Contains(t, got, `Value="first"`)
-		assert.Contains(t, got, `Value="second"`)
-	})
+			assert.Equal(t, tc.want, yamltest.FormatTokens(tc.input))
+		})
+	}
 }
 
 func TestCompareContent(t *testing.T) {
