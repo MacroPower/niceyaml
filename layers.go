@@ -110,11 +110,15 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 //
 //	environment:2:9: $.server.port: port must be at least 1
 //
+// [WithExcerpts] set to false keeps the lines of the layer out of the
+// excerpt of such an error, as the Secrets section describes. A layer
+// of flags holds no secret and keeps its excerpts, and
 // [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] adds a comment
-// at a path of the encoded map, such as the name of the variable beside
-// the port, and the excerpt of the error then shows it. A program that
-// prints the configuration it runs with prints the view of the merged
-// Source, which holds what the files and the environment set together.
+// at a path of the encoded map, such as the name of the flag beside the
+// port, which the excerpt of an error in that layer then shows. A
+// program that prints the configuration it runs with prints the view of
+// the merged Source, which holds what the files and the environment set
+// together.
 //
 // A program whose library writes the environment or the flags into the
 // Go value holds no such map. It turns the self-validation step off for

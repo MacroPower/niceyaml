@@ -541,7 +541,8 @@
 //		return err
 //	}
 //
-//	env := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment"))
+//	env := niceyaml.NewSourceFromBytes(data,
+//		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
 //
 //	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod, env)
 //	if err != nil {
@@ -553,6 +554,8 @@
 // The schema then checks the port the environment set. An error under
 // the port binds in that layer, as in
 // "environment:2:9: $.server.port: port must be at least 1".
+// [WithExcerpts] set to false keeps the lines of that layer, and the
+// secrets they hold, out of the excerpt of such an error.
 // [NewSourceFromLayers] describes what such a layer cannot do, such as
 // unset a value.
 //
