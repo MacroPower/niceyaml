@@ -1750,7 +1750,7 @@ func TestDocument_Decode_Problems_BoundElsewhere(t *testing.T) {
 	require.EqualError(t, err, `inner.yaml:1:2: $.prt~: unknown field "prt"`)
 }
 
-func TestLayers_Decode_Problems(t *testing.T) {
+func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 	t.Parallel()
 
 	strict := niceyaml.WithDisallowUnknownFields(true)

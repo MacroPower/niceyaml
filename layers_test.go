@@ -2492,7 +2492,8 @@ func (c LayerCommon) Validate() error {
 // layerConfig holds a field of each kind that a second decode into
 // one value merges or replaces. The go-yaml decoder fills the fields in
 // the order the struct declares them, and the alias case of
-// [TestLayers_SelfValidate] needs Backup to decode before Server.
+// [TestNewSourceFromLayers_SelfValidate] needs Backup to decode before
+// Server.
 type layerConfig struct {
 	LayerCommon `yaml:",inline"`
 

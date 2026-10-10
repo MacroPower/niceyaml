@@ -17,7 +17,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-func TestLayers_Decode_Merge(t *testing.T) {
+func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 	t.Parallel()
 
 	// Each case merges its layers and reads the text of the merged
@@ -474,7 +474,7 @@ var mergedCorpus = map[string]struct {
 	},
 }
 
-func TestLayers_Decode_Equivalence(t *testing.T) {
+func TestNewSourceFromLayers_Decode_Equivalence(t *testing.T) {
 	t.Parallel()
 
 	// A value decodes from a document and from layers alike.
@@ -524,7 +524,7 @@ func TestLayers_Decode_Equivalence(t *testing.T) {
 	}
 }
 
-func TestLayers_Decode_Equivalence_Errors(t *testing.T) {
+func TestNewSourceFromLayers_Decode_Equivalence_Errors(t *testing.T) {
 	t.Parallel()
 
 	const input = "name: [shop]\nserver:\n  host: example.com\n  port: many\n  prot: 1\n" +
@@ -590,7 +590,7 @@ func TestLayers_Decode_Equivalence_Errors(t *testing.T) {
 	})
 }
 
-func TestLayers_Decode_Options(t *testing.T) {
+func TestNewSourceFromLayers_Decode_Options(t *testing.T) {
 	t.Parallel()
 
 	type config struct {
@@ -638,7 +638,7 @@ func TestLayers_Decode_Options(t *testing.T) {
 	}
 }
 
-func TestLayers_Decode_Maps(t *testing.T) {
+func TestNewSourceFromLayers_Decode_Maps(t *testing.T) {
 	t.Parallel()
 
 	type service struct {
@@ -712,7 +712,7 @@ func TestLayers_Decode_Maps(t *testing.T) {
 	})
 }
 
-func TestLayers_Decode_Scalars(t *testing.T) {
+func TestNewSourceFromLayers_Decode_Scalars(t *testing.T) {
 	t.Parallel()
 
 	type config struct {
@@ -777,7 +777,7 @@ func (s *mergedStore) UnmarshalYAML(data []byte) error {
 	return nil
 }
 
-func TestLayers_Decode_Unmarshaler(t *testing.T) {
+func TestNewSourceFromLayers_Decode_Unmarshaler(t *testing.T) {
 	t.Parallel()
 
 	type config struct {
@@ -811,7 +811,7 @@ func TestLayers_Decode_Unmarshaler(t *testing.T) {
 	})
 }
 
-func TestLayers_Decode_SourceSettings(t *testing.T) {
+func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 	t.Parallel()
 
 	t.Run("each layer reads its own reference documents", func(t *testing.T) {
@@ -995,7 +995,7 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 	})
 }
 
-func TestLayers_Document_Excerpts(t *testing.T) {
+func TestNewSourceFromLayers_Document_Excerpts(t *testing.T) {
 	t.Parallel()
 
 	const (
