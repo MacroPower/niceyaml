@@ -3356,113 +3356,47 @@ func TestPath_Wildcards(t *testing.T) {
 	`)).DocumentAST()
 
 	tcs := map[string]struct {
-		path paths.Path
+		path string
 		want []string
 	}{
-		"index all": {
-			path: paths.Doc().Child("items").IndexAll().Child("name"),
-			want: []string{"a", "b"},
-		},
-		"index all then index all": {
-			path: paths.Doc().Child("items").IndexAll().Child("tags").IndexAll(),
-			want: []string{"x", "y", "z"},
-		},
-		"index all on a mapping matches nothing": {
-			path: paths.Doc().Child("meta").IndexAll(),
-			want: []string{},
-		},
-		"child all": {
-			path: paths.Doc().Child("ref").ChildAll(),
-			want: []string{"e"},
-		},
-		"child all then child": {
-			path: paths.Doc().Child("meta").ChildAll().Child("name"),
-			want: []string{"d"},
-		},
-		"child all on a sequence matches nothing": {
-			path: paths.Doc().Child("items").ChildAll(),
-			want: []string{},
-		},
-		"child all on a scalar matches nothing": {
-			path: paths.Doc().Child("meta", "name").ChildAll(),
-			want: []string{},
-		},
-		"index all then child all then index all": {
-			path: paths.Doc().Child("items").IndexAll().ChildAll().IndexAll(),
-			want: []string{"x", "y", "z"},
-		},
-		"child all through an alias": {
-			path: paths.Doc().Child("alias").ChildAll(),
-			want: []string{"e"},
-		},
-		"child all sees a merged entry": {
-			path: paths.Doc().Child("merged").ChildAll(),
-			want: []string{"e"},
-		},
-		"child all through aliases repeats the anchor": {
-			path: paths.Doc().Child("refs").IndexAll().ChildAll(),
-			want: []string{"e", "e"},
-		},
-		"recursive then child all": {
-			path: paths.Doc().Recursive("nested").ChildAll(),
-			want: []string{"d"},
-		},
-		"recursive visits anchors once and skips aliases": {
-			path: paths.Doc().Recursive("name"),
-			want: []string{"a", "b", "c", "d", "e"},
-		},
-		"recursive below a child": {
-			path: paths.Doc().Child("meta").Recursive("name"),
-			want: []string{"c", "d"},
-		},
-		"recursive then index": {
-			path: paths.Doc().Recursive("tags").Index(0),
-			want: []string{"x", "z"},
-		},
-		"chained recursive yields each node once": {
-			// The inner ..a reaches the scalar 1 from two outer matches. The
-			// mapping {a: 1} prints as its ":" token.
-			path: paths.Doc().Child("chain").Recursive("a").Recursive("a"),
-			want: []string{":", "1"},
-		},
-		"recursive then child keeps document order": {
-			// The outer entry a comes first, but its c follows the c of
-			// the inner one in the source.
-			path: paths.Doc().Child("nest").Recursive("a").Child("c"),
-			want: []string{"1", "2"},
-		},
-		"recursive then index all keeps document order": {
-			// The mapping {a: [x, y]} prints as its ":" token.
-			path: paths.Doc().Child("nestseq").Recursive("a").IndexAll(),
-			want: []string{":", "x", "y", "z"},
-		},
+		"index all":                                       {path: "$.items[*].name", want: []string{"a", "b"}},
+		"index all then index all":                        {path: "$.items[*].tags[*]", want: []string{"x", "y", "z"}},
+		"index all on a mapping matches nothing":          {path: "$.meta[*]", want: []string{}},
+		"child all":                                       {path: "$.ref.*", want: []string{"e"}},
+		"child all then child":                            {path: "$.meta.*.name", want: []string{"d"}},
+		"child all on a sequence matches nothing":         {path: "$.items.*", want: []string{}},
+		"child all on a scalar matches nothing":           {path: "$.meta.name.*", want: []string{}},
+		"index all then child all then index all":         {path: "$.items[*].*[*]", want: []string{"x", "y", "z"}},
+		"child all through an alias":                      {path: "$.alias.*", want: []string{"e"}},
+		"child all sees a merged entry":                   {path: "$.merged.*", want: []string{"e"}},
+		"child all through aliases repeats the anchor":    {path: "$.refs[*].*", want: []string{"e", "e"}},
+		"recursive then child all":                        {path: "$..nested.*", want: []string{"d"}},
+		"recursive visits anchors once and skips aliases": {path: "$..name", want: []string{"a", "b", "c", "d", "e"}},
+		"recursive below a child":                         {path: "$.meta..name", want: []string{"c", "d"}},
+		"recursive then index":                            {path: "$..tags[0]", want: []string{"x", "z"}},
+		// The inner ..a reaches the scalar 1 from two outer matches. The
+		// mapping {a: 1} prints as its ":" token.
+		"chained recursive yields each node once": {path: "$.chain..a..a", want: []string{":", "1"}},
+		// The outer entry a comes first, but its c follows the c of
+		// the inner one in the source.
+		"recursive then child keeps document order": {path: "$.nest..a.c", want: []string{"1", "2"}},
+		// The mapping {a: [x, y]} prints as its ":" token.
+		"recursive then index all keeps document order": {path: "$.nestseq..a[*]", want: []string{":", "x", "y", "z"}},
 		"index all through an alias keeps path order": {
-			path: paths.Doc().Child("aliased").IndexAll().IndexAll(),
+			path: "$.aliased[*][*]",
 			want: []string{"p", "q", "r", "p", "q"},
 		},
-		"index all through aliases repeats the anchor": {
-			path: paths.Doc().Child("refs").IndexAll().Child("name"),
-			want: []string{"e", "e"},
-		},
-		"recursive looks through an alias at its start": {
-			path: paths.Doc().Child("alias").Recursive("name"),
-			want: []string{"e"},
-		},
-		"recursive skips alias merge sources": {
-			path: paths.Doc().Child("merged").Recursive("name"),
-			want: []string{},
-		},
-		"single match": {
-			path: paths.Doc().Child("meta", "name"),
-			want: []string{"c"},
-		},
+		"index all through aliases repeats the anchor":  {path: "$.refs[*].name", want: []string{"e", "e"}},
+		"recursive looks through an alias at its start": {path: "$.alias..name", want: []string{"e"}},
+		"recursive skips alias merge sources":           {path: "$.merged..name", want: []string{}},
+		"single match":                                  {path: "$.meta.name", want: []string{"c"}},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			nodes, err := paths.NewResolver(doc).Nodes(tc.path)
+			nodes, err := paths.NewResolver(doc).Nodes(paths.MustParse(tc.path))
 			require.NoError(t, err)
 
 			got := make([]string, 0, len(nodes))
@@ -4522,79 +4456,79 @@ func TestPath_Matches(t *testing.T) {
 	`)).DocumentAST()
 
 	tcs := map[string]struct {
-		path paths.Path
+		path string
 		want []string
 	}{
 		"index all": {
-			path: paths.Doc().Child("items").IndexAll(),
+			path: "$.items[*]",
 			want: []string{"$.items[0]", "$.items[1]"},
 		},
 		"index all gives each element its own path below a long prefix": {
-			path: paths.Doc().Child("levels", "one", "two").IndexAll(),
+			path: "$.levels.one.two[*]",
 			want: []string{"$.levels.one.two[0]", "$.levels.one.two[1]"},
 		},
 		"recursive": {
-			path: paths.Doc().Recursive("name"),
+			path: "$..name",
 			want: []string{"$.spec.name", "$.spec.deep[0].name", "$.base.name"},
 		},
 		"recursive below a child": {
-			path: paths.Doc().Child("spec").Recursive("name"),
+			path: "$.spec..name",
 			want: []string{"$.spec.name", "$.spec.deep[0].name"},
 		},
 		"recursive gives each sibling its own path": {
-			path: paths.Doc().Recursive("id"),
+			path: "$..id",
 			want: []string{"$.siblings.a.id", "$.siblings.a.x[0].id", "$.siblings.b.id"},
 		},
 		"recursive below a recursive match": {
-			path: paths.Doc().Recursive("a").Recursive("id"),
+			path: "$..a..id",
 			want: []string{"$.siblings.a.id", "$.siblings.a.x[0].id"},
 		},
 		"single": {
-			path: paths.Doc().Child("spec", "name"),
+			path: "$.spec.name",
 			want: []string{"$.spec.name"},
 		},
 		"key of an entry": {
-			path: paths.Doc().Child("spec").Recursive("name").Key(),
+			path: "$.spec..name~",
 			want: []string{"$.spec.name~", "$.spec.deep[0].name~"},
 		},
 		"through an alias keeps the path as written": {
-			path: paths.Doc().Child("ref", "name"),
+			path: "$.ref.name",
 			want: []string{"$.ref.name"},
 		},
 		"through a merge key keeps the path of the mapping": {
-			path: paths.Doc().Child("mixed", "name"),
+			path: "$.mixed.name",
 			want: []string{"$.mixed.name"},
 		},
 		"each alias to one anchor is its own match": {
-			path: paths.Doc().Child("twice").IndexAll(),
+			path: "$.twice[*]",
 			want: []string{"$.twice[0]", "$.twice[1]"},
 		},
 		"recursive then child keeps document order": {
-			path: paths.Doc().Child("nest").Recursive("a").Child("c"),
+			path: "$.nest..a.c",
 			want: []string{"$.nest.a.b.a.c", "$.nest.a.c"},
 		},
 		"quoted name": {
-			path: paths.Doc().Child("dot.key").IndexAll(),
+			path: "$.'dot.key'[*]",
 			want: []string{"$.'dot.key'[0]"},
 		},
 		"recursive finds an alias key by its anchor's content": {
-			path: paths.Doc().Recursive("tagline"),
+			path: "$..tagline",
 			want: []string{"$.keyed.tagline"},
 		},
 		"recursive finds a block scalar key by its content": {
-			path: paths.Doc().Recursive("folded text"),
+			path: "$..'folded text'",
 			want: []string{"$.keyed.'folded text'"},
 		},
 		"nothing": {
-			path: paths.Doc().Child("missing").IndexAll(),
+			path: "$.missing[*]",
 			want: nil,
 		},
 		"relative path reads from the root": {
-			path: paths.Current().Child("items").IndexAll(),
+			path: "@.items[*]",
 			want: []string{"$.items[0]", "$.items[1]"},
 		},
 		"relative path with no wildcard": {
-			path: paths.Current().Child("spec", "name"),
+			path: "@.spec.name",
 			want: []string{"$.spec.name"},
 		},
 	}
@@ -4603,7 +4537,7 @@ func TestPath_Matches(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, matchPaths(requireMatches(t, doc, tc.path)))
+			assert.Equal(t, tc.want, matchPaths(requireMatches(t, doc, paths.MustParse(tc.path))))
 		})
 	}
 }
