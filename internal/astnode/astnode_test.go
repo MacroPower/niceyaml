@@ -6,6 +6,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/astnode"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -280,12 +281,12 @@ func TestPathToken(t *testing.T) {
 			want:  "[@1:1",
 		},
 		"block mapping under a key": {
-			input: "a:\n  k: v\n",
+			input: stringtest.LinesLF("a:", "  k: v"),
 			steps: []any{"a"},
 			want:  "a@1:1",
 		},
 		"block sequence under a key": {
-			input: "a:\n  - x\n",
+			input: stringtest.LinesLF("a:", "  - x"),
 			steps: []any{"a"},
 			want:  "a@1:1",
 		},
@@ -300,12 +301,12 @@ func TestPathToken(t *testing.T) {
 			want:  "a@1:1",
 		},
 		"anchor on a mapping under a key": {
-			input: "a: &x\n  k: v\n",
+			input: stringtest.LinesLF("a: &x", "  k: v"),
 			steps: []any{"a"},
 			want:  "a@1:1",
 		},
 		"tag on a mapping under a key": {
-			input: "a: !!map\n  k: v\n",
+			input: stringtest.LinesLF("a: !!map", "  k: v"),
 			steps: []any{"a"},
 			want:  "a@1:1",
 		},
@@ -315,7 +316,7 @@ func TestPathToken(t *testing.T) {
 			want:  "a@1:3",
 		},
 		"mapping under a nested key": {
-			input: "a:\n  b:\n    k: v\n",
+			input: stringtest.LinesLF("a:", "  b:", "    k: v"),
 			steps: []any{"a", "b"},
 			want:  "b@2:3",
 		},
@@ -330,7 +331,7 @@ func TestPathToken(t *testing.T) {
 			want:  "-@1:1",
 		},
 		"anchor on a block mapping element": {
-			input: "- &x\n  k: v\n",
+			input: stringtest.LinesLF("- &x", "  k: v"),
 			steps: []any{0},
 			want:  "-@1:1",
 		},
@@ -360,7 +361,7 @@ func TestPathToken(t *testing.T) {
 			want:  "[@1:7",
 		},
 		"mapping element under a key": {
-			input: "a:\n  - k: v\n",
+			input: stringtest.LinesLF("a:", "  - k: v"),
 			steps: []any{"a", 0},
 			want:  "-@2:3",
 		},
@@ -379,7 +380,7 @@ func TestPathToken(t *testing.T) {
 	t.Run("alias is its own token", func(t *testing.T) {
 		t.Parallel()
 
-		root := yamltest.FirstDocument(t, "a: &x {k: v}\nb: *x\nc:\n  - *x\n").AST()
+		root := yamltest.FirstDocument(t, stringtest.LinesLF("a: &x {k: v}", "b: *x", "c:", "  - *x")).AST()
 
 		alias, in := step(t, root, "b")
 		assert.Same(t, alias.GetToken(), astnode.PathToken(alias, in))
