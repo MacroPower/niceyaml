@@ -44,7 +44,8 @@
 //
 // Tests of code that builds a [line.Lines] collection check its integrity
 // with [ValidateLines]. Tests of code that links tokens check the Prev and
-// Next of a stream with [ValidateTokenLinks].
+// Next of a stream with [ValidateTokenLinks]. A table that expects one
+// token names it as "value@line:column", which [TokenPlace] writes.
 //
 // Most ranges a test names sit on one line, and [LineRange] writes one
 // from the line and its two columns:
@@ -67,6 +68,9 @@
 //
 //	got := yamltest.NewXMLPrinter().Print(source.View())
 //
+// [NewPlainPrinter] creates the same printer with empty styles, for a test
+// that reads the bare text.
+//
 // Tests of a color theme compare colors of different types through
 // [ColorHex] and measure how well text reads on its background through
 // [Contrast].
@@ -79,6 +83,11 @@
 //
 //	doc := yamltest.FirstDocument(t, input)
 //	replicas := yamltest.At(t, doc, paths.Doc().Child("spec", "replicas"))
+//
+// [Document] returns the root of the single document of a
+// [*niceyaml.Source] the test built itself. [AtOrSelf] scopes like [At]
+// and returns its node for a path with no selector, so a table case names
+// a path only when it checks a scoped node.
 //
 // Tests that check how a bound error reads use [Bind]. It binds an error to
 // the single document of a [*niceyaml.Source] and fails the test unless the
@@ -106,6 +115,11 @@
 // of its keys, so a lookup of every key reads the whole list.
 // [FlowSequence] writes the flow sequence that repeats one item, for a
 // document that needs its own shape.
+//
+// Tests and benchmarks that need a long document write it with
+// [GenerateLines], from the format of one line:
+//
+//	input := yamltest.GenerateLines(200, "k%d: v")
 //
 // # Error Trees
 //
@@ -135,5 +149,10 @@
 // [RoundTripFunc] adapts a function to the transport of an [http.Client],
 // so a test answers each request itself:
 //
-//	client := &http.Client{Transport: yamltest.RoundTripFunc(respond)}
+//	client := yamltest.RoundTripFunc(respond).Client()
+//
+// [Respond] is such a function for one status and body, and
+// [CountingClient] counts the requests a transport receives:
+//
+//	client, requests := yamltest.CountingClient(yamltest.Respond(http.StatusOK, body))
 package yamltest
