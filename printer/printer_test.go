@@ -1789,10 +1789,10 @@ func TestPrinter_WordWrap_RowsFit(t *testing.T) {
 func TestPrinter_WordWrap_RowOfRunes(t *testing.T) {
 	t.Parallel()
 
-	// The layout must map the column of each wide rune of line 0 to the
-	// printed row that holds it. When the wrap drops a row that holds a
-	// rune of the content, the layout matches the rows after it to the
-	// wrong columns.
+	// The layout must map the column of each rune a case keeps, such as
+	// each wide rune of line 0, to the printed row that holds it. When
+	// the wrap drops a row that holds a rune of the content, the layout
+	// matches the rows after it to the wrong columns.
 	wide := func(r rune) bool { return lipgloss.Width(string(r)) >= 2 }
 
 	// A cluster two cells wide cannot fit in one column, so it takes a row
@@ -4680,6 +4680,7 @@ func TestPrinter_Annotation(t *testing.T) {
 		// The carets under a wrapped line take a row below each wrapped row
 		// they mark, padded from that row's start, so every caret sits under
 		// the column it marks.
+		//
 		// The wrap drops the indent when the first word does not fit
 		// beside it, so the first row starts at the word, and so does the
 		// padding of the marks under it.
