@@ -56,3 +56,17 @@ func CountingClient(rt http.RoundTripper) (*http.Client, *atomic.Int32) {
 
 	return client, &requests
 }
+
+// RespondBody returns a [RoundTripFunc] that answers a request with
+// status 200 and the bytes body reads, so a test serves a body that fails
+// partway or that runs past a limit. Every response reads from the one
+// body, so a second request gets what the first left unread.
+func RespondBody(body io.Reader) RoundTripFunc {
+	return func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(body),
+			Request:    r,
+		}, nil
+	}
+}

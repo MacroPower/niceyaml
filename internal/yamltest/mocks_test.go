@@ -1,9 +1,12 @@
 package yamltest_test
 
 import (
+	"errors"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -92,4 +95,38 @@ func get(t *testing.T, client *http.Client, url string) (int, string) {
 	require.NoError(t, resp.Body.Close())
 
 	return resp.StatusCode, string(body)
+}
+
+func TestRespondBody(t *testing.T) {
+	t.Parallel()
+
+	const url = "http://example.com/large.json"
+
+	t.Run("serves the bytes of the reader", func(t *testing.T) {
+		t.Parallel()
+
+		client := yamltest.RespondBody(strings.NewReader("{}")).Client()
+
+		status, body := get(t, client, url)
+		assert.Equal(t, http.StatusOK, status)
+		assert.Equal(t, "{}", body)
+	})
+
+	t.Run("passes the error of the reader on", func(t *testing.T) {
+		t.Parallel()
+
+		errRead := errors.New("read error")
+		client := yamltest.RespondBody(iotest.ErrReader(errRead)).Client()
+
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody)
+		require.NoError(t, err)
+
+		resp, err := client.Do(req)
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		_, err = io.ReadAll(resp.Body)
+		require.ErrorIs(t, err, errRead)
+		require.NoError(t, resp.Body.Close())
+	})
 }

@@ -157,4 +157,7 @@
 // [CountingClient] counts the requests a transport receives:
 //
 //	client, requests := yamltest.CountingClient(yamltest.Respond(http.StatusOK, body))
+//
+// [RespondBody] answers with the bytes of a reader, for a body that fails
+// while the client reads it or that runs past a size limit.
 package yamltest
