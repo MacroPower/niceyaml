@@ -292,7 +292,6 @@ func BenchmarkPrinterLayout_LongTransformedValue(b *testing.B) {
 			p := printer.New(printer.WithWrapWidth(80), printer.WithStyles(styles))
 
 			b.ReportAllocs()
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = p.Layout(view)
@@ -330,7 +329,6 @@ func BenchmarkPrinterPrintError_LongNestedMessage(b *testing.B) {
 			p := printer.New(printer.WithWrapWidth(80))
 
 			b.ReportAllocs()
-			b.ResetTimer()
 
 			for b.Loop() {
 				_ = p.PrintError(err)
