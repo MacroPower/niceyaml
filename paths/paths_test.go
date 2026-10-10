@@ -23,76 +23,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-func TestDoc(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		path paths.Path
-		want string
-	}{
-		"no selectors": {
-			path: paths.Doc(),
-			want: "$",
-		},
-		"single child": {
-			path: paths.Doc().Child("kind"),
-			want: "$.kind",
-		},
-		"multiple children": {
-			path: paths.Doc().Child("metadata", "name"),
-			want: "$.metadata.name",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, tc.path.String())
-			assert.True(t, tc.path.IsAbsolute())
-		})
-	}
-}
-
-func TestCurrent(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		path paths.Path
-		want string
-	}{
-		"no selectors": {
-			path: paths.Current(),
-			want: "@",
-		},
-		"zero value": {
-			path: paths.Path{},
-			want: "@",
-		},
-		"single child": {
-			path: paths.Current().Child("kind"),
-			want: "@.kind",
-		},
-		"zero value child": {
-			path: paths.Path{}.Child("kind"),
-			want: "@.kind",
-		},
-		"multiple children": {
-			path: paths.Current().Child("metadata", "name"),
-			want: "@.metadata.name",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, tc.path.String())
-			assert.False(t, tc.path.IsAbsolute())
-		})
-	}
-}
-
 // yamlPath returns the goccy/go-yaml form of p, for a path that has one.
 func yamlPath(t *testing.T, p paths.Path) *yaml.Path {
 	t.Helper()
@@ -125,6 +55,11 @@ func TestPath_Build(t *testing.T) {
 			path:     paths.Current().Child("items").Index(0).Key(),
 			want:     "@.items[0]~",
 			wantYAML: "$.items[0]",
+		},
+		"zero value with a child": {
+			path:     paths.Path{}.Child("kind"),
+			want:     "@.kind",
+			wantYAML: "$.kind",
 		},
 		"chained children": {
 			path: paths.Doc().Child("metadata", "labels"),
@@ -267,6 +202,7 @@ func TestPath_Build(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, tc.path.String())
+			assert.Equal(t, tc.want[0] == '$', tc.path.IsAbsolute())
 
 			// The goccy form only differs where goccy quotes a name
 			// differently or has no form for a selector.
