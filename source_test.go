@@ -253,43 +253,24 @@ func TestSource_Runes_DiffBuiltLines(t *testing.T) {
 	// When a diff builds Lines, Position.Line follows the visual line index
 	// within Lines, not the source token position.
 	// Finder maps its matches back onto those visual lines.
+	before := niceyaml.NewSourceFromString("key: old\n", niceyaml.WithName("before"))
+	after := niceyaml.NewSourceFromString("key: new\n", niceyaml.WithName("after"))
 
-	before := "key: old\n"
-	after := "key: new\n"
+	// The diff holds the deleted line above the inserted one. Both come
+	// from line 1 of their source, and each has a visual line of its own.
+	lines := diff.Diff(before.Lines(), after.Lines()).Unified()
+	require.Equal(t, 2, lines.Count())
 
-	beforeLines := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
-	afterLines := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
-
-	lines := diff.Diff(beforeLines.Lines(), afterLines.Lines()).Unified()
-
-	// Diff should produce two lines: deleted (old) and inserted (new).
-	// Both have the same source token line (1), but different visual indices (0, 1).
-	require.Equal(t, 2, lines.Count(), "diff should produce 2 lines")
-
-	var positions []struct {
-		line int
-		col  int
-	}
+	// The first character of each line.
+	var got []position.Position
 
 	for pos, r := range lines.Held().Runes() {
-		if r == 'k' { // First char of each line.
-			positions = append(positions, struct {
-				line int
-				col  int
-			}{line: pos.Line, col: pos.Col})
+		if r == 'k' {
+			got = append(got, pos)
 		}
 	}
 
-	// Should have 2 'k' characters, one on each visual line.
-	require.Len(t, positions, 2, "should have 2 lines starting with 'k'")
-
-	// First line should be at visual line 0.
-	assert.Equal(t, 0, positions[0].line, "first line should be at visual line 0")
-	assert.Equal(t, 0, positions[0].col, "first 'k' should be at column 0")
-
-	// Second line should be at visual line 1 (not 0, even though source token line is same).
-	assert.Equal(t, 1, positions[1].line, "second line should be at visual line 1")
-	assert.Equal(t, 0, positions[1].col, "second 'k' should be at column 0")
+	assert.Equal(t, []position.Position{position.New(0, 0), position.New(1, 0)}, got)
 }
 
 func TestSource_All_EarlyBreak(t *testing.T) {
