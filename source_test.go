@@ -1589,35 +1589,27 @@ func TestSource_Offset_Runes(t *testing.T) {
 func TestSource_Offset_Range(t *testing.T) {
 	t.Parallel()
 
+	// Each case writes 5 over the 3 of its replicas, between the offsets
+	// of the range the path resolves to.
 	tcs := map[string]struct {
 		input string
 		path  paths.Path
-		value string
-		want  string
 	}{
 		"plain scalar": {
 			input: "spec:\n  replicas: 3 # scaled\n  paused: false\n",
 			path:  paths.Doc().Child("spec", "replicas"),
-			value: "5",
-			want:  "spec:\n  replicas: 5 # scaled\n  paused: false\n",
 		},
 		"CRLF and a byte order mark": {
 			input: "\ufeffspec:\r\n  replicas: 3\r\n",
 			path:  paths.Doc().Child("spec", "replicas"),
-			value: "5",
-			want:  "\ufeffspec:\r\n  replicas: 5\r\n",
 		},
 		"after a tag that ends its line": {
 			input: "value: !Join\n  - a\n  - b\nreplicas: 3\n",
 			path:  paths.Doc().Child("replicas"),
-			value: "5",
-			want:  "value: !Join\n  - a\n  - b\nreplicas: 5\n",
 		},
 		"last value of a text with no final line ending": {
 			input: "name: é日本\nreplicas: 3",
 			path:  paths.Doc().Child("replicas"),
-			value: "5",
-			want:  "name: é日本\nreplicas: 5",
 		},
 	}
 
@@ -1641,7 +1633,8 @@ func TestSource_Offset_Range(t *testing.T) {
 			require.True(t, ok)
 
 			text := source.Text()
-			assert.Equal(t, tc.want, text[:start]+tc.value+text[end:])
+			want := strings.Replace(tc.input, "replicas: 3", "replicas: 5", 1)
+			assert.Equal(t, want, text[:start]+"5"+text[end:])
 		})
 	}
 }
