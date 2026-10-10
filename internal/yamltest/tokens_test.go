@@ -219,100 +219,54 @@ func TestCompareContent(t *testing.T) {
 func TestTokenBuilder(t *testing.T) {
 	t.Parallel()
 
-	t.Run("NewTokenBuilder creates builder with non-nil position", func(t *testing.T) {
+	t.Run("a new builder holds a zero position", func(t *testing.T) {
 		t.Parallel()
 
-		b := yamltest.NewTokenBuilder()
-		tk := b.Build()
-		require.NotNil(t, tk)
-		require.NotNil(t, tk.Position)
+		assert.Equal(t, &token.Token{Position: &token.Position{}}, yamltest.NewTokenBuilder().Build())
 	})
 
-	t.Run("Type setter", func(t *testing.T) {
+	t.Run("each setter sets its own field", func(t *testing.T) {
 		t.Parallel()
 
-		tk := yamltest.NewTokenBuilder().Type(token.StringType).Build()
-		assert.Equal(t, token.StringType, tk.Type)
+		got := yamltest.NewTokenBuilder().
+			Type(token.StringType).
+			CharacterType(token.CharacterTypeMiscellaneous).
+			Indicator(token.BlockStructureIndicator).
+			Value("test").
+			Origin("test\n").
+			Error("some error").
+			PositionLine(7).
+			PositionColumn(15).
+			PositionOffset(100).
+			PositionIndentNum(4).
+			PositionIndentLevel(2).
+			Build()
+
+		want := &token.Token{
+			Type:          token.StringType,
+			CharacterType: token.CharacterTypeMiscellaneous,
+			Indicator:     token.BlockStructureIndicator,
+			Value:         "test",
+			Origin:        "test\n",
+			Error:         "some error",
+			Position: &token.Position{
+				Line:        7,
+				Column:      15,
+				Offset:      100,
+				IndentNum:   4,
+				IndentLevel: 2,
+			},
+		}
+
+		assert.Equal(t, want, got)
 	})
 
-	t.Run("CharacterType setter", func(t *testing.T) {
+	t.Run("Position sets every position field", func(t *testing.T) {
 		t.Parallel()
 
-		tk := yamltest.NewTokenBuilder().CharacterType(token.CharacterTypeMiscellaneous).Build()
-		assert.Equal(t, token.CharacterTypeMiscellaneous, tk.CharacterType)
-	})
+		pos := token.Position{Line: 5, Column: 10, Offset: 50, IndentNum: 2, IndentLevel: 1}
 
-	t.Run("Indicator setter", func(t *testing.T) {
-		t.Parallel()
-
-		tk := yamltest.NewTokenBuilder().Indicator(token.BlockStructureIndicator).Build()
-		assert.Equal(t, token.BlockStructureIndicator, tk.Indicator)
-	})
-
-	t.Run("Value setter", func(t *testing.T) {
-		t.Parallel()
-
-		tk := yamltest.NewTokenBuilder().Value("test").Build()
-		assert.Equal(t, "test", tk.Value)
-	})
-
-	t.Run("Origin setter", func(t *testing.T) {
-		t.Parallel()
-
-		tk := yamltest.NewTokenBuilder().Origin("test\n").Build()
-		assert.Equal(t, "test\n", tk.Origin)
-	})
-
-	t.Run("Error setter", func(t *testing.T) {
-		t.Parallel()
-
-		tk := yamltest.NewTokenBuilder().Error("some error").Build()
-		assert.Equal(t, "some error", tk.Error)
-	})
-
-	t.Run("Position setter", func(t *testing.T) {
-		t.Parallel()
-
-		pos := token.Position{Line: 5, Column: 10, Offset: 50}
-		tk := yamltest.NewTokenBuilder().Position(pos).Build()
-		assert.Equal(t, 5, tk.Position.Line)
-		assert.Equal(t, 10, tk.Position.Column)
-		assert.Equal(t, 50, tk.Position.Offset)
-	})
-
-	t.Run("PositionLine setter", func(t *testing.T) {
-		t.Parallel()
-
-		tk := yamltest.NewTokenBuilder().PositionLine(7).Build()
-		assert.Equal(t, 7, tk.Position.Line)
-	})
-
-	t.Run("PositionColumn setter", func(t *testing.T) {
-		t.Parallel()
-
-		tk := yamltest.NewTokenBuilder().PositionColumn(15).Build()
-		assert.Equal(t, 15, tk.Position.Column)
-	})
-
-	t.Run("PositionOffset setter", func(t *testing.T) {
-		t.Parallel()
-
-		tk := yamltest.NewTokenBuilder().PositionOffset(100).Build()
-		assert.Equal(t, 100, tk.Position.Offset)
-	})
-
-	t.Run("PositionIndentNum setter", func(t *testing.T) {
-		t.Parallel()
-
-		tk := yamltest.NewTokenBuilder().PositionIndentNum(4).Build()
-		assert.Equal(t, 4, tk.Position.IndentNum)
-	})
-
-	t.Run("PositionIndentLevel setter", func(t *testing.T) {
-		t.Parallel()
-
-		tk := yamltest.NewTokenBuilder().PositionIndentLevel(2).Build()
-		assert.Equal(t, 2, tk.Position.IndentLevel)
+		assert.Equal(t, &pos, yamltest.NewTokenBuilder().Position(pos).Build().Position)
 	})
 
 	t.Run("chaining modifies builder", func(t *testing.T) {
