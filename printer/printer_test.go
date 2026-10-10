@@ -5978,6 +5978,76 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 	}
 }
 
+func TestPrinter_AnnotationWrap_ContainerFrame(t *testing.T) {
+	t.Parallel()
+
+	// The room beside a marker is what the frame of the container leaves
+	// of the width. A word that fits that room stays beside the marker,
+	// and a word one cell wider moves below it whole, whatever the frame.
+	beside := []string{
+		"key: value",
+		"        ^ abcdefg",
+	}
+	below := []string{
+		"key: value",
+		"        ^",
+		"abcdefg",
+	}
+
+	tcs := map[string]struct {
+		container lipgloss.Style
+		want      []string
+		width     int
+	}{
+		"no frame, word fits": {
+			container: lipgloss.NewStyle(),
+			width:     17,
+			want:      beside,
+		},
+		"no frame, word one cell too wide": {
+			container: lipgloss.NewStyle(),
+			width:     16,
+			want:      below,
+		},
+		"padding on the right, word fits": {
+			container: lipgloss.NewStyle().PaddingRight(1),
+			width:     18,
+			want:      beside,
+		},
+		"padding on the right, word one cell too wide": {
+			container: lipgloss.NewStyle().PaddingRight(1),
+			width:     17,
+			want:      below,
+		},
+		"border and padding, word fits": {
+			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1),
+			width:     21,
+			want:      beside,
+		},
+		"border and padding, word one cell too wide": {
+			container: lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1),
+			width:     20,
+			want:      below,
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString("key: value\n").View()
+			view.Annotate(0, line.Annotation{Content: "abcdefg", Placement: line.Below, Col: 8})
+
+			p := testPrinter().With(
+				printer.WithContainerStyle(tc.container),
+				printer.WithWrapWidth(tc.width),
+			)
+
+			assert.Equal(t, tc.container.Render(strings.Join(tc.want, "\n")), p.Print(view))
+		})
+	}
+}
+
 func TestPrinter_PrintError_WrappedAnnotation(t *testing.T) {
 	t.Parallel()
 
