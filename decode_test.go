@@ -64,14 +64,6 @@ func sourceErrorIn(t *testing.T, err error) *niceyaml.SourceError {
 func TestSource_Decoder(t *testing.T) {
 	t.Parallel()
 
-	t.Run("creates decoder from source", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("key: value")
-		d := source.Documents()
-		require.NotNil(t, d)
-	})
-
 	t.Run("creates decoder from empty source", func(t *testing.T) {
 		t.Parallel()
 
@@ -1445,34 +1437,6 @@ func TestDocument_Decode_Schema(t *testing.T) {
 		assert.True(t, first)
 		assert.False(t, third, "a failing schema stops the pipeline")
 		assert.Equal(t, []string{"first"}, order)
-	})
-
-	t.Run("schema validation fails - no decode", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			name: invalid
-			value: 42
-		`)
-		dd := yamltest.FirstDocument(t, input)
-
-		_, err := dd.Decode[plainConfig](t.Context(), niceyaml.WithValidator(nameSchema(nil)))
-		require.ErrorIs(t, err, errSchemaValidationFailed)
-	})
-
-	t.Run("decodes without a schema", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			name: test
-			value: 42
-		`)
-		dd := yamltest.FirstDocument(t, input)
-
-		result, err := dd.Decode[plainConfig](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, "test", result.Name)
-		assert.Equal(t, 42, result.Value)
 	})
 }
 
@@ -3166,21 +3130,6 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 		assert.Equal(t, "2:8: $.value: value is required", bound.Error())
 	})
 
-	t.Run("struct without SelfValidator decodes normally", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			name: test
-			value: 42
-		`)
-		dd := yamltest.FirstDocument(t, input)
-
-		result, err := dd.Decode[plainConfig](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, "test", result.Name)
-		assert.Equal(t, 42, result.Value)
-	})
-
 	t.Run("runs schema and Validate in order", func(t *testing.T) {
 		t.Parallel()
 
@@ -3978,37 +3927,6 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 		Name string `yaml:"name"`
 	}
 
-	t.Run("without option allows unknown fields", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			name: test
-			extra: field
-		`)
-		dd := yamltest.FirstDocument(t, input)
-
-		result, err := dd.Decode[strictConfig](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, "test", result.Name)
-	})
-
-	t.Run("option rejects unknown fields", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			name: test
-			extra: field
-		`)
-		dd := yamltest.FirstDocument(t, input)
-
-		_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
-		require.Error(t, err)
-
-		var yamlErr *niceyaml.Error
-
-		require.ErrorAs(t, err, &yamlErr)
-	})
-
 	t.Run("option applies per call", func(t *testing.T) {
 		t.Parallel()
 
@@ -4021,7 +3939,7 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 		// The same document decodes strictly on one call and loosely on the
 		// next, so the option belongs to the call rather than the Source.
 		_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
-		require.Error(t, err)
+		require.ErrorAs(t, err, new(*niceyaml.Error))
 
 		result, err := dd.Decode[strictConfig](t.Context())
 		require.NoError(t, err)
