@@ -67,6 +67,11 @@ func testPrinterWithStyles(opts ...style.Option) *printer.Printer {
 	return testPrinter().With(printer.WithStyles(style.New(lipgloss.NewStyle(), opts...)))
 }
 
+// colsRange returns the range of the columns of cols on line ln.
+func colsRange(ln int, cols position.Span) position.Range {
+	return position.NewRange(position.New(ln, cols.Start), position.New(ln, cols.End))
+}
+
 // layoutRows returns the rows each line of l takes, in layout order.
 func layoutRows(l printer.Layout) []int {
 	var rows []int
@@ -1204,10 +1209,7 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 
 			view := niceyaml.NewSourceFromString(tc.content).View()
 			for _, cols := range tc.cols {
-				view.AddOverlay(kind.GenericError, position.NewRange(
-					position.New(tc.line, cols.Start),
-					position.New(tc.line, cols.End),
-				))
+				view.AddOverlay(kind.GenericError, colsRange(tc.line, cols))
 			}
 
 			ann := line.Annotation{Placement: line.Below}
@@ -1277,10 +1279,7 @@ func TestPrinter_CRLF(t *testing.T) {
 
 			// Highlight every visible column of every line.
 			for i, ln := range view.All() {
-				view.AddOverlay(testOverlayHighlight, position.NewRange(
-					position.New(i, 0),
-					position.New(i, ln.Width()),
-				))
+				view.AddOverlay(testOverlayHighlight, colsRange(i, position.NewSpan(0, ln.Width())))
 			}
 
 			gotOverlay := p.Print(view)
@@ -2330,10 +2329,7 @@ func TestPrinter_Overlay_KeepsClusters(t *testing.T) {
 
 			plainView := niceyaml.NewSourceFromString(tc.input).View()
 			view := niceyaml.NewSourceFromString(tc.input).View()
-			view.AddOverlay(kind.GenericHighlight, position.NewRange(
-				position.New(0, tc.overlay.Start),
-				position.New(0, tc.overlay.End),
-			))
+			view.AddOverlay(kind.GenericHighlight, colsRange(0, tc.overlay))
 
 			got := p.Print(view)
 			plain := strings.Split(ansi.Strip(got), "\n")
@@ -6415,10 +6411,7 @@ func TestPrinter_Layout_CellOf(t *testing.T) {
 
 			view := niceyaml.NewSourceFromString(tc.content).View()
 			if tc.overlay != nil {
-				view.AddOverlay(testOverlayHighlight, position.NewRange(
-					position.New(0, tc.overlay.Start),
-					position.New(0, tc.overlay.End),
-				))
+				view.AddOverlay(testOverlayHighlight, colsRange(0, *tc.overlay))
 			}
 
 			p := testPrinter().With(printer.WithWrapWidth(tc.wrap))

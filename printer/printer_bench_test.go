@@ -45,10 +45,7 @@ var (
 func addBenchmarkOverlays(view *line.View, n int) {
 	for i := range n {
 		lineNum := (i * 5) % view.Count()
-		view.AddOverlay(benchmarkOverlayKind, position.NewRange(
-			position.New(lineNum, 0),
-			position.New(lineNum, 10),
-		))
+		view.AddOverlay(benchmarkOverlayKind, colsRange(lineNum, position.NewSpan(0, 10)))
 	}
 }
 
@@ -151,11 +148,7 @@ func BenchmarkPrinterPrint_OverlaysDensity(b *testing.B) {
 			for lineNum := range d.lines {
 				for o := range d.overlaysLine {
 					col := o * 5
-					rng := position.Range{
-						Start: position.New(lineNum, col),
-						End:   position.New(lineNum, col+3),
-					}
-					source.AddOverlay(benchmarkOverlayKind, rng)
+					source.AddOverlay(benchmarkOverlayKind, colsRange(lineNum, position.NewSpan(col, col+3)))
 				}
 			}
 
@@ -280,11 +273,7 @@ func BenchmarkLinesAddOverlay(b *testing.B) {
 		source := niceyaml.NewSourceFromString(yaml).View()
 
 		for i := range 100 {
-			r := position.Range{
-				Start: position.New(i, 0),
-				End:   position.New(i, 10),
-			}
-			source.AddOverlay(benchmarkOverlayKind, r)
+			source.AddOverlay(benchmarkOverlayKind, colsRange(i, position.NewSpan(0, 10)))
 		}
 	}
 }

@@ -325,10 +325,7 @@ func TestPrinter_Layout_PositionAt(t *testing.T) {
 
 			view := niceyaml.NewSourceFromString(tc.content).View()
 			if tc.overlay != nil {
-				view.AddOverlay(testOverlayHighlight, position.NewRange(
-					position.New(0, tc.overlay.Start),
-					position.New(0, tc.overlay.End),
-				))
+				view.AddOverlay(testOverlayHighlight, colsRange(0, *tc.overlay))
 			}
 
 			if tc.annotation != nil {
