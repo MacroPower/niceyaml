@@ -770,10 +770,8 @@ func TestSchemaStore_FetchPanicReachesCaller(t *testing.T) {
 	}{
 		"filter": {
 			transport: respondCatalog(t, testCatalog),
-			filter: func(schemastore.CatalogEntry) bool {
-				panic("filter bug")
-			},
-			want: "filter bug",
+			filter:    panicFilter,
+			want:      "filter bug",
 		},
 		"transport": {
 			transport: panicTransport,
@@ -937,25 +935,21 @@ func TestSchemaStore_ContextEndsAfterFetch(t *testing.T) {
 	// cases of the lookup's wait are ready at once. The fetch's outcome must
 	// count every time.
 	tcs := map[string]struct {
-		client    *http.Client
+		transport yamltest.RoundTripFunc
+		filter    func(schemastore.CatalogEntry) bool
 		wantPanic any
-		opts      []schemastore.Option
 		wantErr   bool
 	}{
 		"fetch succeeds": {
-			client: respondCatalog(t, testCatalog).Client(),
+			transport: respondCatalog(t, testCatalog),
 		},
 		"fetch fails": {
-			client:  serverError.Client(),
-			wantErr: true,
+			transport: serverError,
+			wantErr:   true,
 		},
 		"filter panics": {
-			client: respondCatalog(t, testCatalog).Client(),
-			opts: []schemastore.Option{
-				schemastore.WithFilter(func(schemastore.CatalogEntry) bool {
-					panic("filter bug")
-				}),
-			},
+			transport: respondCatalog(t, testCatalog),
+			filter:    panicFilter,
 			wantPanic: "filter bug",
 		},
 	}
@@ -967,7 +961,7 @@ func TestSchemaStore_ContextEndsAfterFetch(t *testing.T) {
 			// Go picks among ready select cases at random, so repeat the
 			// lookup to catch an outcome that depends on the pick.
 			for range 32 {
-				store := newStore(tc.client, tc.opts...)
+				store := newStore(tc.transport.Client(), schemastore.WithFilter(tc.filter))
 
 				ctx := &endsAfterFetchContext{
 					Context: t.Context(),
@@ -1564,6 +1558,11 @@ func respondCatalog(tb testing.TB, catalog schemastore.Catalog) yamltest.RoundTr
 // panicTransport is a transport function that panics.
 func panicTransport(*http.Request) (*http.Response, error) {
 	panic("transport bug")
+}
+
+// panicFilter is a catalog filter that panics.
+func panicFilter(schemastore.CatalogEntry) bool {
+	panic("filter bug")
 }
 
 // goexitTransport is a transport function that calls runtime.Goexit, as
