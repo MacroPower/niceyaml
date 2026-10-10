@@ -30,6 +30,17 @@ func violations(err error) []schema.Violation {
 	return got
 }
 
+// requireViolation returns the first [*schema.Violation] in the chain of
+// err. The test fails when err holds none.
+func requireViolation(t *testing.T, err error) *schema.Violation {
+	t.Helper()
+
+	v, ok := errors.AsType[*schema.Violation](err)
+	require.True(t, ok)
+
+	return v
+}
+
 // treeText returns the tree of err as text, one node per line, each two
 // spaces deeper than the node above it.
 func treeText(err error) string {
@@ -187,8 +198,7 @@ func TestViolation_Binding(t *testing.T) {
 
 		bound := yamltest.RequireSourceError(t, err)
 
-		got, ok := errors.AsType[*schema.Violation](bound)
-		require.True(t, ok)
+		got := requireViolation(t, bound)
 
 		// The violation gives the binding its message.
 		assert.Equal(t, got.Message, bound.Message())
@@ -205,13 +215,10 @@ func TestViolation_Binding(t *testing.T) {
 
 		// The summary counts the violations and is none itself, so a search
 		// of the whole binding descends into the first violation under it.
-		first, ok := errors.AsType[*schema.Violation](bound)
-		require.True(t, ok)
-		assert.Equal(t, "type", first.Keyword)
+		assert.Equal(t, "type", requireViolation(t, bound).Keyword)
 
 		for _, child := range yamltest.ProblemsOf(bound) {
-			got, ok := errors.AsType[*schema.Violation](child.Err)
-			require.True(t, ok)
+			got := requireViolation(t, child.Err)
 			assert.Equal(t, "type", got.Keyword)
 			assert.Equal(t, got.Message, child.Message())
 		}
@@ -603,13 +610,11 @@ func TestViolation_Value(t *testing.T) {
 
 		require.ErrorAs(t, err, &located)
 
-		got, ok := errors.AsType[*schema.Violation](located)
-		require.True(t, ok)
 		assert.Equal(t, schema.Violation{
 			Keyword:    "type",
 			SchemaPath: "/properties/name/type",
 			Message:    `expected "string", got "integer"`,
-		}, *got)
+		}, *requireViolation(t, located))
 	})
 
 	t.Run("several violations", func(t *testing.T) {
@@ -629,9 +634,7 @@ func TestViolation_Value(t *testing.T) {
 
 			require.ErrorAs(t, n.Err, &located)
 
-			got, ok := errors.AsType[*schema.Violation](located)
-			require.True(t, ok)
-			assert.Equal(t, "type", got.Keyword)
+			assert.Equal(t, "type", requireViolation(t, located).Keyword)
 		}
 	})
 }
@@ -928,13 +931,11 @@ func TestViolation_Forms(t *testing.T) {
 		_, ok = bound.Range()
 		assert.True(t, ok)
 
-		got, ok := errors.AsType[*schema.Violation](bound)
-		require.True(t, ok)
 		assert.Equal(t, schema.Violation{
 			Keyword:    "anyOf",
 			SchemaPath: "/properties/v/anyOf",
 			Message:    "value matches none of the allowed forms",
-		}, *got)
+		}, *requireViolation(t, bound))
 
 		// The value is one problem, so the binding heads none, and the
 		// forms are its details. Each form carries no location and wraps
@@ -978,9 +979,7 @@ func TestViolation_Forms(t *testing.T) {
 			require.True(t, ok)
 			assert.Equal(t, "$.v", path.String())
 
-			got, ok := errors.AsType[*schema.Violation](nested[0].Err)
-			require.True(t, ok)
-			assert.Equal(t, want[i], *got)
+			assert.Equal(t, want[i], *requireViolation(t, nested[0].Err))
 		}
 	})
 
@@ -998,9 +997,7 @@ func TestViolation_Forms(t *testing.T) {
 		_, ok = bound.Range()
 		assert.False(t, ok)
 
-		got, ok := errors.AsType[*schema.Violation](bound)
-		require.True(t, ok)
-		assert.Equal(t, "anyOf", got.Keyword)
+		assert.Equal(t, "anyOf", requireViolation(t, bound).Keyword)
 
 		assert.Empty(t, yamltest.ProblemsOf(bound))
 
