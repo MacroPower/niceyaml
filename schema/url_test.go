@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"crypto/rand"
@@ -10,11 +11,13 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"testing/synctest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
@@ -110,10 +113,12 @@ func nonceServer(t *testing.T) (string, *atomic.Int32) {
 	return server.URL + path, &requests
 }
 
-type errReader struct{}
-
-func (errReader) Read(_ []byte) (int, error) {
-	return 0, errors.New("read error")
+// respondBody returns a transport function that answers a request with
+// status 200 and the bytes body reads.
+func respondBody(body io.Reader) yamltest.RoundTripFunc {
+	return func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(body)}, nil
+	}
 }
 
 func TestURL(t *testing.T) {
@@ -225,22 +230,6 @@ func TestURL(t *testing.T) {
 		}
 	})
 
-	t.Run("not found", func(t *testing.T) {
-		t.Parallel()
-
-		// The client serves the 404 from memory. The default transport
-		// pools the connection of a response with no body before it hands
-		// the response over, and a sibling that closes its httptest server
-		// closes the idle connections of the default transport. A close at
-		// that moment would turn a 404 from a server into a broken
-		// connection.
-		client, _ := memoryClient(nil)
-
-		err := lookup(t, client, schema.URL("http://example.com/schema.json"))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorContains(t, err, "fetch http://example.com/schema.json: status 404")
-	})
-
 	t.Run("registry fetches with its client", func(t *testing.T) {
 		t.Parallel()
 
@@ -342,65 +331,48 @@ func TestURL(t *testing.T) {
 		require.ErrorContains(t, err, "not an HTTP or HTTPS URL")
 	})
 
-	t.Run("client error", func(t *testing.T) {
+	t.Run("failed fetch", func(t *testing.T) {
 		t.Parallel()
 
-		// The transport stands in for a refused connection.
-		client := &http.Client{
-			Transport: yamltest.RoundTripFunc(func(_ *http.Request) (*http.Response, error) {
-				return nil, errors.New("connection refused")
-			}),
+		tcs := map[string]struct {
+			transport yamltest.RoundTripFunc
+			want      string
+		}{
+			// The transport serves the 404 from memory. The default
+			// transport pools the connection of a response with no body
+			// before it hands the response over, and a sibling that closes
+			// its httptest server closes the idle connections of the default
+			// transport. A close at that moment would turn a 404 from a
+			// server into a broken connection.
+			"not found": {
+				transport: yamltest.Respond(http.StatusNotFound, ""),
+				want:      "fetch http://example.com/schema.json: status 404",
+			},
+			// The transport stands in for a refused connection.
+			"client error": {
+				transport: func(*http.Request) (*http.Response, error) {
+					return nil, errors.New("connection refused")
+				},
+				want: "fetch http://example.com/schema.json: connection refused",
+			},
+			"body read error": {
+				transport: respondBody(iotest.ErrReader(errors.New("read error"))),
+				want:      "read response from http://example.com/schema.json",
+			},
+			"schema exceeds size limit": {
+				transport: respondBody(bytes.NewReader(make([]byte, httpfetch.MaxSize+1))),
+				want:      "response exceeds",
+			},
 		}
 
-		err := lookup(t, client, schema.URL("http://example.com/schema.json"))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorContains(t, err, "fetch http://example.com/schema.json: connection refused")
-	})
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-	t.Run("body read error", func(t *testing.T) {
-		t.Parallel()
-
-		client := &http.Client{
-			Transport: yamltest.RoundTripFunc(func(_ *http.Request) (*http.Response, error) {
-				return &http.Response{
-					StatusCode: http.StatusOK,
-					Body:       io.NopCloser(errReader{}),
-				}, nil
-			}),
+				err := lookup(t, tc.transport.Client(), schema.URL("http://example.com/schema.json"))
+				require.ErrorIs(t, err, schema.ErrLoad)
+				require.ErrorContains(t, err, tc.want)
+			})
 		}
-
-		err := lookup(t, client, schema.URL("http://example.com/schema.json"))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorContains(t, err, "read response from http://example.com/schema.json")
 	})
-
-	t.Run("schema exceeds size limit", func(t *testing.T) {
-		t.Parallel()
-
-		const maxSchemaSize = 10 * 1024 * 1024 // Must match httpfetch.MaxSize.
-
-		// Create a reader that provides data beyond the limit.
-		client := &http.Client{
-			Transport: yamltest.RoundTripFunc(func(_ *http.Request) (*http.Response, error) {
-				// Return a reader that provides exactly maxSchemaSize + 1 bytes.
-				return &http.Response{
-					StatusCode: http.StatusOK,
-					Body:       io.NopCloser(io.LimitReader(infiniteReader{}, maxSchemaSize+1)),
-				}, nil
-			}),
-		}
-
-		err := lookup(t, client, schema.URL("http://example.com/schema.json"))
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorContains(t, err, "response exceeds")
-	})
-}
-
-// infiniteReader provides an unlimited stream of zeros.
-type infiniteReader struct{}
-
-func (infiniteReader) Read(p []byte) (int, error) {
-	clear(p)
-
-	return len(p), nil
 }
