@@ -1160,60 +1160,34 @@ func TestNewLines_BlockScalars(t *testing.T) {
 		}
 	})
 
-	t.Run("trailing blanks and chomping", func(t *testing.T) {
+	t.Run("values after chomping and folding", func(t *testing.T) {
 		t.Parallel()
 
-		// Test block scalars with trailing blank lines and different chomping indicators.
+		// The chomping indicator decides which trailing line breaks the
+		// Value keeps.
 		// - strip (-): Remove all trailing newlines.
 		// - clip (default): Keep single trailing newline.
 		// - keep (+): Keep all trailing newlines.
 
 		tcs := map[string]struct {
 			input string
-			want  string // Expected Value after chomping.
+			want  string // Value of the block scalar.
 		}{
-			"literal keep with trailing blanks": {
-				input: `key: |+
-  content
+			"literal keep with trailing blanks": {input: "key: |+\n  content\n\n", want: "content\n\n"},
+			"literal strip with content":        {input: "key: |-\n  content\n", want: "content"},
+			"literal clip default":              {input: "key: |\n  content\n", want: "content\n"},
+			"folded keep with trailing blanks":  {input: "key: >+\n  line1\n  line2\n\n", want: "line1 line2\n\n"},
+			"folded strip":                      {input: "key: >-\n  line1\n  line2\n", want: "line1 line2"},
+			"literal keep multiple trailing":    {input: "key: |+\n  content\n\n\n", want: "content\n\n\n"},
 
-`,
-				want: "content\n\n",
-			},
-			"literal strip with content": {
-				input: `key: |-
-  content
-`,
-				want: "content",
-			},
-			"literal clip default": {
-				input: `key: |
-  content
-`,
-				want: "content\n",
-			},
-			"folded keep with trailing blanks": {
-				input: `key: >+
-  line1
-  line2
-
-`,
-				want: "line1 line2\n\n",
-			},
-			"folded strip": {
-				input: `key: >-
-  line1
-  line2
-`,
-				want: "line1 line2",
-			},
-			"literal keep multiple trailing": {
-				input: `key: |+
-  content
-
-
-`,
-				want: "content\n\n\n",
-			},
+			// Adjacent lines of a folded scalar fold to a space. A blank
+			// line between them keeps a line break instead, and each blank
+			// line after the first keeps one more.
+			"folded without a blank line":      {input: "text: >\n  first\n  second\n", want: "first second\n"},
+			"folded with a blank line":         {input: "text: >\n  first\n\n  second\n", want: "first\nsecond\n"},
+			"folded with multiple blank lines": {input: "text: >\n  first\n\n\n  second\n", want: "first\n\nsecond\n"},
+			// A literal scalar keeps its blank lines as they are.
+			"literal with a blank line": {input: "text: |\n  first\n\n  second\n", want: "first\n\nsecond\n"},
 		}
 
 		for name, tc := range tcs {
@@ -1223,8 +1197,7 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				lines := requireRoundtrip(t, tc.input)
 
 				assert.Equal(t, strings.Count(tc.input, "\n"), lines.Len())
-				assert.Equal(t, tc.want, blockScalarValue(t, lines),
-					"block scalar Value should match chomping behavior")
+				assert.Equal(t, tc.want, blockScalarValue(t, lines))
 			})
 		}
 	})
@@ -1714,72 +1687,6 @@ func TestNewLines_TrailingBlankLines(t *testing.T) {
 			assert.Equal(t, tc.want, lines.Len())
 		})
 	}
-}
-
-// TestNewLines_FoldedBlockBlankLines verifies handling of blank lines within
-// folded block scalars.
-//
-// In folded scalars, a blank line preserves a line break instead of folding
-// to a space.
-func TestNewLines_FoldedBlockBlankLines(t *testing.T) {
-	t.Parallel()
-
-	t.Run("folded block with blank line preserves break", func(t *testing.T) {
-		t.Parallel()
-
-		// In folded blocks, blank lines cause a line break in the Value.
-		// A blank line separates "first" and "second", and it becomes a
-		// newline in the Value instead of a space.
-		input := "text: >\n  first\n\n  second\n"
-
-		lines := requireRoundtrip(t, input)
-
-		assert.Equal(t, 4, lines.Len())
-		// The blank line causes a paragraph break in folded output.
-		assert.Contains(t, blockScalarValue(t, lines), "\n",
-			"folded block with blank line should have newline in Value")
-	})
-
-	t.Run("folded block without blank line folds to space", func(t *testing.T) {
-		t.Parallel()
-
-		// Without blank lines, folded content joins with spaces.
-		input := "text: >\n  first\n  second\n"
-
-		lines := requireRoundtrip(t, input)
-
-		assert.Equal(t, 3, lines.Len())
-		// Adjacent lines fold to a space, so the Value is "first second\n".
-		assert.Equal(t, "first second\n", blockScalarValue(t, lines),
-			"folded block without blank line should have space-joined Value")
-	})
-
-	t.Run("literal block preserves all blank lines", func(t *testing.T) {
-		t.Parallel()
-
-		// Literal blocks preserve blank lines as-is.
-		input := "text: |\n  first\n\n  second\n"
-
-		lines := requireRoundtrip(t, input)
-
-		assert.Equal(t, 4, lines.Len())
-		// Literal preserves blank line as newline.
-		assert.Equal(t, "first\n\nsecond\n", blockScalarValue(t, lines),
-			"literal block should preserve blank line in Value")
-	})
-
-	t.Run("folded with multiple blank lines", func(t *testing.T) {
-		t.Parallel()
-
-		// Multiple blank lines in folded content.
-		input := "text: >\n  first\n\n\n  second\n"
-
-		lines := requireRoundtrip(t, input)
-
-		assert.Equal(t, 5, lines.Len())
-		// Folding drops the break after "first" and keeps one per blank line.
-		assert.Equal(t, "first\n\nsecond\n", blockScalarValue(t, lines))
-	})
 }
 
 func TestLines_TokenAt(t *testing.T) {
