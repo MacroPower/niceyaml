@@ -10,6 +10,7 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
@@ -18,6 +19,38 @@ import (
 )
 
 const benchmarkOverlayKind kind.Kind = "benchmarkOverlayKind"
+
+var (
+	// The overlay counts the overlay benchmarks run at.
+	benchmarkRangeCounts = []struct {
+		name   string
+		ranges int
+	}{
+		{"0_ranges", 0},
+		{"10_ranges", 10},
+		{"50_ranges", 50},
+		{"100_ranges", 100},
+		{"500_ranges", 500},
+	}
+
+	// Styles that give benchmarkOverlayKind a background color.
+	benchmarkOverlayStyles = style.New(
+		lipgloss.NewStyle(),
+		style.Set(benchmarkOverlayKind, lipgloss.NewStyle().Background(lipgloss.Color("3"))),
+	)
+)
+
+// addBenchmarkOverlays adds n overlays of ten columns to view, one on every
+// fifth line.
+func addBenchmarkOverlays(view *line.View, n int) {
+	for i := range n {
+		lineNum := (i * 5) % view.Count()
+		view.AddOverlay(benchmarkOverlayKind, position.NewRange(
+			position.New(lineNum, 0),
+			position.New(lineNum, 10),
+		))
+	}
+}
 
 func BenchmarkPrinterPrint(b *testing.B) {
 	sizes := []struct {
@@ -47,35 +80,15 @@ func BenchmarkPrinterPrint(b *testing.B) {
 }
 
 func BenchmarkPrinterPrint_WithOverlays(b *testing.B) {
-	rangeCounts := []struct {
-		name   string
-		ranges int
-	}{
-		{"0_ranges", 0},
-		{"10_ranges", 10},
-		{"50_ranges", 50},
-		{"100_ranges", 100},
-		{"500_ranges", 500},
-	}
-
 	yaml := yamltest.GenerateYAML(500)
-	highlightStyle := lipgloss.NewStyle().Background(lipgloss.Color("3"))
-	overlayStyler := style.New(lipgloss.NewStyle(), style.Set(benchmarkOverlayKind, highlightStyle))
 
-	for _, rc := range rangeCounts {
+	for _, rc := range benchmarkRangeCounts {
 		b.Run(rc.name, func(b *testing.B) {
 			source := niceyaml.NewSourceFromString(yaml).View()
-			p := printer.New(printer.WithStyles(overlayStyler))
+			p := printer.New(printer.WithStyles(benchmarkOverlayStyles))
 
 			// Pre-configure overlays before measurement.
-			for i := range rc.ranges {
-				lineNum := (i * 5) % source.Count()
-				r := position.Range{
-					Start: position.New(lineNum, 0),
-					End:   position.New(lineNum, 10),
-				}
-				source.AddOverlay(benchmarkOverlayKind, r)
-			}
+			addBenchmarkOverlays(source, rc.ranges)
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
@@ -88,39 +101,18 @@ func BenchmarkPrinterPrint_WithOverlays(b *testing.B) {
 }
 
 func BenchmarkPrinterPrint_WithOverlays_IncludingSetup(b *testing.B) {
-	rangeCounts := []struct {
-		name   string
-		ranges int
-	}{
-		{"0_ranges", 0},
-		{"10_ranges", 10},
-		{"50_ranges", 50},
-		{"100_ranges", 100},
-		{"500_ranges", 500},
-	}
-
 	yaml := yamltest.GenerateYAML(500)
-	highlightStyle := lipgloss.NewStyle().Background(lipgloss.Color("3"))
-	overlayStyler := style.New(lipgloss.NewStyle(), style.Set(benchmarkOverlayKind, highlightStyle))
 
-	for _, rc := range rangeCounts {
+	for _, rc := range benchmarkRangeCounts {
 		b.Run(rc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
 
 			for b.Loop() {
 				source := niceyaml.NewSourceFromString(yaml).View()
-				p := printer.New(printer.WithStyles(overlayStyler))
+				p := printer.New(printer.WithStyles(benchmarkOverlayStyles))
 
-				// Distribute overlays across lines.
-				for i := range rc.ranges {
-					lineNum := (i * 5) % source.Count()
-					r := position.Range{
-						Start: position.New(lineNum, 0),
-						End:   position.New(lineNum, 10),
-					}
-					source.AddOverlay(benchmarkOverlayKind, r)
-				}
+				addBenchmarkOverlays(source, rc.ranges)
 
 				_ = p.Print(source)
 			}
@@ -149,13 +141,11 @@ func BenchmarkPrinterPrint_OverlaysDensity(b *testing.B) {
 	}
 
 	yaml := sb.String()
-	highlightStyle := lipgloss.NewStyle().Background(lipgloss.Color("3"))
-	overlayStyler := style.New(lipgloss.NewStyle(), style.Set(benchmarkOverlayKind, highlightStyle))
 
 	for _, d := range densities {
 		b.Run(d.name, func(b *testing.B) {
 			source := niceyaml.NewSourceFromString(yaml).View()
-			p := printer.New(printer.WithStyles(overlayStyler))
+			p := printer.New(printer.WithStyles(benchmarkOverlayStyles))
 
 			// Pre-configure overlays before measurement.
 			for lineNum := range d.lines {
