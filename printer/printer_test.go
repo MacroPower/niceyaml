@@ -587,7 +587,11 @@ func TestPrinter_PrintError_Wrap(t *testing.T) {
 func TestPrinter_PrintError_WrapFitsExcerpts(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: " + strings.Repeat("x", 80) + "\nc: 3\n")
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"b: "+strings.Repeat("x", 80),
+		"c: 3",
+	))
 	bound := yamltest.Bind(t, source, errAt("bad", "b"))
 
 	tcs := map[string]struct {
@@ -5695,7 +5699,11 @@ func TestPrinter_Layout_Width(t *testing.T) {
 func TestPrinter_Layout_LineWidth(t *testing.T) {
 	t.Parallel()
 
-	view := niceyaml.NewSourceFromString("a: 1\nbb: " + strings.Repeat("日", 3) + "\nc: 3").View()
+	view := niceyaml.NewSourceFromString(stringtest.JoinLF(
+		"a: 1",
+		"bb: "+strings.Repeat("日", 3),
+		"c: 3",
+	)).View()
 	view.Annotate(2, line.Annotation{Content: "a note wider than the lines", Placement: line.Below})
 
 	tcs := map[string]struct {
