@@ -42,26 +42,11 @@ func TestParent(t *testing.T) {
 		kind kind.Kind
 		want kind.Kind
 	}{
-		"root": {
-			kind: kind.Text,
-			want: kind.Text,
-		},
-		"custom kind": {
-			kind: kind.Kind("custom"),
-			want: kind.Text,
-		},
-		"family under Text": {
-			kind: kind.Literal,
-			want: kind.Text,
-		},
-		"chrome under comments": {
-			kind: kind.UI,
-			want: kind.Comment,
-		},
-		"leaf": {
-			kind: kind.LiteralNumberFloat,
-			want: kind.LiteralNumber,
-		},
+		"root":                  {kind: kind.Text, want: kind.Text},
+		"custom kind":           {kind: kind.Kind("custom"), want: kind.Text},
+		"family under Text":     {kind: kind.Literal, want: kind.Text},
+		"chrome under comments": {kind: kind.UI, want: kind.Comment},
+		"leaf":                  {kind: kind.LiteralNumberFloat, want: kind.LiteralNumber},
 	}
 
 	for name, tc := range tests {

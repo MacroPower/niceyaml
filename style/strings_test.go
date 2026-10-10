@@ -50,58 +50,19 @@ func TestParse(t *testing.T) {
 		input string
 		want  styleAttrs
 	}{
-		"empty string": {
-			input: "",
-			want:  styleAttrs{},
-		},
-		"whitespace only": {
-			input: "   \t\n  ",
-			want:  styleAttrs{},
-		},
-		"foreground color": {
-			input: "#ff0000",
-			want:  styleAttrs{Fg: "#ff0000"},
-		},
-		"short foreground color": {
-			input: "#f00",
-			want:  styleAttrs{Fg: "#ff0000"},
-		},
-		"background color": {
-			input: "bg:#00ff00",
-			want:  styleAttrs{Bg: "#00ff00"},
-		},
-		"bold": {
-			input: "bold",
-			want:  styleAttrs{Bold: true},
-		},
-		"nobold": {
-			input: "nobold",
-			want:  styleAttrs{},
-		},
-		"italic": {
-			input: "italic",
-			want:  styleAttrs{Italic: true},
-		},
-		"noitalic": {
-			input: "noitalic",
-			want:  styleAttrs{},
-		},
-		"underline": {
-			input: "underline",
-			want:  styleAttrs{Underline: true},
-		},
-		"nounderline": {
-			input: "nounderline",
-			want:  styleAttrs{},
-		},
-		"noinherit ignored": {
-			input: "noinherit #ff0000",
-			want:  styleAttrs{Fg: "#ff0000"},
-		},
-		"border ignored": {
-			input: "border:#0000ff #ff0000",
-			want:  styleAttrs{Fg: "#ff0000"},
-		},
+		"empty string":           {input: "", want: styleAttrs{}},
+		"whitespace only":        {input: "   \t\n  ", want: styleAttrs{}},
+		"foreground color":       {input: "#ff0000", want: styleAttrs{Fg: "#ff0000"}},
+		"short foreground color": {input: "#f00", want: styleAttrs{Fg: "#ff0000"}},
+		"background color":       {input: "bg:#00ff00", want: styleAttrs{Bg: "#00ff00"}},
+		"bold":                   {input: "bold", want: styleAttrs{Bold: true}},
+		"nobold":                 {input: "nobold", want: styleAttrs{}},
+		"italic":                 {input: "italic", want: styleAttrs{Italic: true}},
+		"noitalic":               {input: "noitalic", want: styleAttrs{}},
+		"underline":              {input: "underline", want: styleAttrs{Underline: true}},
+		"nounderline":            {input: "nounderline", want: styleAttrs{}},
+		"noinherit ignored":      {input: "noinherit #ff0000", want: styleAttrs{Fg: "#ff0000"}},
+		"border ignored":         {input: "border:#0000ff #ff0000", want: styleAttrs{Fg: "#ff0000"}},
 		"combined style": {
 			input: "bold italic #c678dd bg:#282c34",
 			want:  styleAttrs{Bold: true, Italic: true, Fg: "#c678dd", Bg: "#282c34"},
@@ -110,38 +71,14 @@ func TestParse(t *testing.T) {
 			input: "BOLD Italic UnDeRlInE",
 			want:  styleAttrs{Bold: true, Italic: true, Underline: true},
 		},
-		"case insensitive prefixes": {
-			input: "BG:#ff0000",
-			want:  styleAttrs{Bg: "#ff0000"},
-		},
-		"invalid color - no hash": {
-			input: "ff0000",
-			err:   style.ErrUnknownKeyword,
-		},
-		"invalid color - wrong length": {
-			input: "#ff00",
-			err:   style.ErrInvalidColor,
-		},
-		"invalid color - invalid hex": {
-			input: "#gggggg",
-			err:   style.ErrInvalidColor,
-		},
-		"invalid bg color": {
-			input: "bg:#invalid",
-			err:   style.ErrInvalidColor,
-		},
-		"invalid border color": {
-			input: "border:garbage",
-			err:   style.ErrInvalidColor,
-		},
-		"empty border color": {
-			input: "border:",
-			err:   style.ErrInvalidColor,
-		},
-		"unknown keyword": {
-			input: "unknown",
-			err:   style.ErrUnknownKeyword,
-		},
+		"case insensitive prefixes":    {input: "BG:#ff0000", want: styleAttrs{Bg: "#ff0000"}},
+		"invalid color - no hash":      {input: "ff0000", err: style.ErrUnknownKeyword},
+		"invalid color - wrong length": {input: "#ff00", err: style.ErrInvalidColor},
+		"invalid color - invalid hex":  {input: "#gggggg", err: style.ErrInvalidColor},
+		"invalid bg color":             {input: "bg:#invalid", err: style.ErrInvalidColor},
+		"invalid border color":         {input: "border:garbage", err: style.ErrInvalidColor},
+		"empty border color":           {input: "border:", err: style.ErrInvalidColor},
+		"unknown keyword":              {input: "unknown", err: style.ErrUnknownKeyword},
 	}
 
 	for name, tt := range tests {
@@ -301,8 +238,7 @@ func TestEncode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := style.Encode(tt.style)
-			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.want, style.Encode(tt.style))
 		})
 	}
 }
@@ -330,20 +266,15 @@ func TestRoundTrip(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			// Parse the input.
 			style1, err := style.Parse(tt.input)
 			require.NoError(t, err)
 
-			// Encode back to string.
 			encoded := style.Encode(style1)
 
-			// Parse the encoded string.
 			style2, err := style.Parse(encoded)
 			require.NoError(t, err)
 
-			// Encode again and compare.
-			encoded2 := style.Encode(style2)
-			assert.Equal(t, encoded, encoded2, "round-trip should be stable")
+			assert.Equal(t, encoded, style.Encode(style2), "round-trip should be stable")
 
 			// The style parsed from the encoded string holds the same
 			// attributes.
