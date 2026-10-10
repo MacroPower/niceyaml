@@ -1870,7 +1870,11 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 				"",
 				"<<: *an",
 			),
-			"blank lines before the first key": "\n\nfoo: 1\n",
+			"blank lines before the first key": stringtest.LinesLF(
+				"",
+				"",
+				"foo: 1",
+			),
 			"quoted scalar of two lines": stringtest.LinesLF(
 				`"a`,
 				` b"`,
@@ -1990,10 +1994,17 @@ func TestNewLines_TrailingBlankLines(t *testing.T) {
 		input string
 		want  int
 	}{
-		"no trailing newline":      {input: "a: 1", want: 1},
-		"trailing newline":         {input: "a: 1\n", want: 1},
-		"one trailing blank line":  {input: "a: 1\n\n", want: 2},
-		"two trailing blank lines": {input: "a: 1\n\n\n", want: 3},
+		"no trailing newline":     {input: "a: 1", want: 1},
+		"trailing newline":        {input: "a: 1\n", want: 1},
+		"one trailing blank line": {input: "a: 1\n\n", want: 2},
+		"two trailing blank lines": {
+			input: stringtest.LinesLF(
+				"a: 1",
+				"",
+				"",
+			),
+			want: 3,
+		},
 		"crlf trailing blank line": {input: "a: 1\r\n\r\n", want: 2},
 		"comment then blank line": {
 			input: stringtest.LinesLF(
