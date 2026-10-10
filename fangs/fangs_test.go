@@ -149,83 +149,6 @@ func TestErrorHandler(t *testing.T) {
 				"",
 			),
 		},
-		"usage error flag needs argument": {
-			err: errors.New("flag needs an argument: --config"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  flag needs an argument: --config",
-				"",
-				"Try --help for usage.",
-				"",
-				"",
-			),
-		},
-		"usage error unknown flag": {
-			err: errors.New("unknown flag: --foo"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  unknown flag: --foo",
-				"",
-				"Try --help for usage.",
-				"",
-				"",
-			),
-		},
-		"usage error bad flag syntax": {
-			err: errors.New("bad flag syntax: ---flag"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  bad flag syntax: ---flag",
-				"",
-				"Try --help for usage.",
-				"",
-				"",
-			),
-		},
-		"usage error exclusive flag group": {
-			err: errors.New("if any flags in the group [a b] are set none of the others can be; [a b] were all set"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  if any flags in the group [a b] are set none of the others can be; [a b] were all set",
-				"",
-				"Try --help for usage.",
-				"",
-				"",
-			),
-		},
-		"usage error required flag group": {
-			err: errors.New("at least one of the flags in the group [a b] is required"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  at least one of the flags in the group [a b] is required",
-				"",
-				"Try --help for usage.",
-				"",
-				"",
-			),
-		},
-		"usage error unknown shorthand flag": {
-			err: errors.New("unknown shorthand flag: 'x' in -xyz"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  unknown shorthand flag: 'x' in -xyz",
-				"",
-				"Try --help for usage.",
-				"",
-				"",
-			),
-		},
-		"usage error unknown command": {
-			err: errors.New(`unknown command "foo" for "nyaml"`),
-			want: stringtest.JoinLF(
-				"Error",
-				`  unknown command "foo" for "nyaml"`,
-				"",
-				"Try --help for usage.",
-				"",
-				"",
-			),
-		},
 		// Cobra indents each suggestion with a tab and ends the list with a
 		// line break.
 		"usage error unknown command with a suggestion": {
@@ -263,126 +186,6 @@ func TestErrorHandler(t *testing.T) {
 				"  <textError>      ^^^^</textError>",
 				"  ",
 				"  ",
-				"",
-				"",
-			),
-		},
-		"usage error invalid argument": {
-			err: errors.New(`invalid argument "foo" for "--count"`),
-			want: stringtest.JoinLF(
-				"Error",
-				`  invalid argument "foo" for "--count"`,
-				"",
-				"Try --help for usage.",
-				"",
-				"",
-			),
-		},
-		"usage error requires at least": {
-			err: errors.New("requires at least 1 arg(s), only received 0"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  requires at least 1 arg(s), only received 0",
-				"",
-				"Try --help for usage.",
-				"",
-				"",
-			),
-		},
-		"usage error accepts at most": {
-			err: errors.New("accepts at most 2 arg(s), received 3"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  accepts at most 2 arg(s), received 3",
-				"",
-				"Try --help for usage.",
-				"",
-				"",
-			),
-		},
-		"usage error accepts exactly": {
-			err: errors.New("accepts 1 arg(s), received 2"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  accepts 1 arg(s), received 2",
-				"",
-				"Try --help for usage.",
-				"",
-				"",
-			),
-		},
-		"usage error accepts between": {
-			err: errors.New("accepts between 1 and 2 arg(s), received 3"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  accepts between 1 and 2 arg(s), received 3",
-				"",
-				"Try --help for usage.",
-				"",
-				"",
-			),
-		},
-		"usage error required flag not set": {
-			err: errors.New(`required flag(s) "schema" not set`),
-			want: stringtest.JoinLF(
-				"Error",
-				`  required flag(s) "schema" not set`,
-				"",
-				"Try --help for usage.",
-				"",
-				"",
-			),
-		},
-		"non-usage error opening with accepts": {
-			err: errors.New("accepts only .yaml files"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  accepts only .yaml files",
-				"",
-				"",
-			),
-		},
-		"non-usage error opening with invalid argument": {
-			err: errors.New("invalid argument: path must be absolute"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  invalid argument: path must be absolute",
-				"",
-				"",
-			),
-		},
-		"non-usage error opening with requires at least": {
-			err: errors.New("requires at least one schema"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  requires at least one schema",
-				"",
-				"",
-			),
-		},
-		"non-usage error opening with unknown commands": {
-			err: errors.New("unknown commands.yaml:1:4: bad"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  unknown commands.yaml:1:4: bad",
-				"",
-				"",
-			),
-		},
-		"non-usage error opening with unknown command-line": {
-			err: errors.New("unknown command-line option in config"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  unknown command-line option in config",
-				"",
-				"",
-			),
-		},
-		"non-usage error with flag word": {
-			err: errors.New("flagged as incorrect"),
-			want: stringtest.JoinLF(
-				"Error",
-				"  flagged as incorrect",
 				"",
 				"",
 			),
@@ -474,6 +277,106 @@ func TestErrorHandler(t *testing.T) {
 			fangs.NewErrorHandler(fangs.WithPrinter(xmlPrinter()))(&buf, styles, tc.err)
 
 			assert.Equal(t, tc.want, buf.String())
+		})
+	}
+}
+
+func TestErrorHandler_UsageHint(t *testing.T) {
+	t.Parallel()
+
+	// The handler ends the report of a Cobra usage error with a hint. It
+	// matches Cobra's exact wording, so an application error that opens
+	// with a word of that wording gets no hint.
+	tcs := map[string]struct {
+		msg      string
+		wantHint bool
+	}{
+		"flag needs argument": {
+			msg:      "flag needs an argument: --config",
+			wantHint: true,
+		},
+		"unknown flag": {
+			msg:      "unknown flag: --foo",
+			wantHint: true,
+		},
+		"bad flag syntax": {
+			msg:      "bad flag syntax: ---flag",
+			wantHint: true,
+		},
+		"exclusive flag group": {
+			msg:      "if any flags in the group [a b] are set none of the others can be; [a b] were all set",
+			wantHint: true,
+		},
+		"required flag group": {
+			msg:      "at least one of the flags in the group [a b] is required",
+			wantHint: true,
+		},
+		"unknown shorthand flag": {
+			msg:      "unknown shorthand flag: 'x' in -xyz",
+			wantHint: true,
+		},
+		"unknown command": {
+			msg:      `unknown command "foo" for "nyaml"`,
+			wantHint: true,
+		},
+		"invalid argument": {
+			msg:      `invalid argument "foo" for "--count"`,
+			wantHint: true,
+		},
+		"requires at least": {
+			msg:      "requires at least 1 arg(s), only received 0",
+			wantHint: true,
+		},
+		"accepts at most": {
+			msg:      "accepts at most 2 arg(s), received 3",
+			wantHint: true,
+		},
+		"accepts exactly": {
+			msg:      "accepts 1 arg(s), received 2",
+			wantHint: true,
+		},
+		"accepts between": {
+			msg:      "accepts between 1 and 2 arg(s), received 3",
+			wantHint: true,
+		},
+		"required flag not set": {
+			msg:      `required flag(s) "schema" not set`,
+			wantHint: true,
+		},
+		"opening with accepts": {
+			msg: "accepts only .yaml files",
+		},
+		"opening with invalid argument": {
+			msg: "invalid argument: path must be absolute",
+		},
+		"opening with requires at least": {
+			msg: "requires at least one schema",
+		},
+		"opening with unknown commands": {
+			msg: "unknown commands.yaml:1:4: bad",
+		},
+		"opening with unknown command-line": {
+			msg: "unknown command-line option in config",
+		},
+		"with flag word": {
+			msg: "flagged as incorrect",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			want := report(tc.msg)
+			if tc.wantHint {
+				want += "Try --help for usage.\n\n"
+			}
+
+			var buf bytes.Buffer
+
+			fangs.NewErrorHandler(fangs.WithPrinter(xmlPrinter()))(&buf, testStyles(), errors.New(tc.msg))
+
+			assert.Equal(t, want, buf.String())
 		})
 	}
 }
