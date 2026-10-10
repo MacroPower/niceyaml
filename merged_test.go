@@ -748,22 +748,10 @@ func TestNewSourceFromLayers_Decode_Equivalence(t *testing.T) {
 	// One layer merges into what it holds, and an empty mapping above or
 	// below it changes nothing, so every arrangement decodes as the
 	// document alone does.
-	arrangements := map[string]func(t *testing.T, doc, empty *niceyaml.Node) *niceyaml.Source{
-		"alone": func(t *testing.T, doc, _ *niceyaml.Node) *niceyaml.Source {
-			t.Helper()
-
-			return yamltest.Layers(t, doc)
-		},
-		"over an empty mapping": func(t *testing.T, doc, empty *niceyaml.Node) *niceyaml.Source {
-			t.Helper()
-
-			return yamltest.Layers(t, empty, doc)
-		},
-		"under an empty mapping": func(t *testing.T, doc, empty *niceyaml.Node) *niceyaml.Source {
-			t.Helper()
-
-			return yamltest.Layers(t, doc, empty)
-		},
+	arrangements := map[string]func(doc, empty *niceyaml.Node) []niceyaml.Layer{
+		"alone":                  func(doc, _ *niceyaml.Node) []niceyaml.Layer { return []niceyaml.Layer{doc} },
+		"over an empty mapping":  func(doc, empty *niceyaml.Node) []niceyaml.Layer { return []niceyaml.Layer{empty, doc} },
+		"under an empty mapping": func(doc, empty *niceyaml.Node) []niceyaml.Layer { return []niceyaml.Layer{doc, empty} },
 	}
 
 	for name, tc := range mergedCorpus {
@@ -777,13 +765,13 @@ func TestNewSourceFromLayers_Decode_Equivalence(t *testing.T) {
 			targets["a typed value"] = tc.typed
 		}
 
-		for arrangement, layer := range arrangements {
+		for arrangement, arrange := range arrangements {
 			t.Run(name+" "+arrangement, func(t *testing.T) {
 				t.Parallel()
 
 				doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("doc.yaml"))
 				empty := yamltest.FirstDocument(t, "{}\n", niceyaml.WithName("empty.yaml"))
-				layers := layer(t, doc, empty)
+				layers := yamltest.Layers(t, arrange(doc, empty)...)
 
 				for target, zero := range targets {
 					want, got := zero(), zero()
@@ -1441,45 +1429,31 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 	// Each case layers base.yaml, mid.yaml, and prod.yaml in that order,
 	// with some of them merged into one document first. Every error
 	// binds where it binds with no layer merged.
-	tcs := map[string]struct {
-		layers func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Source
-	}{
-		"no layer merged": {
-			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Source {
-				t.Helper()
-
-				return yamltest.Layers(t, base, mid, prod)
-			},
+	tcs := map[string]func(t *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer{
+		"no layer merged": func(_ *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer {
+			return []niceyaml.Layer{base, mid, prod}
 		},
-		"the lower two merged": {
-			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Source {
-				t.Helper()
+		"the lower two merged": func(t *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer {
+			t.Helper()
 
-				return yamltest.Layers(t, mergedDocument(t, yamltest.Layers(t, base, mid)), prod)
-			},
+			return []niceyaml.Layer{mergedDocument(t, yamltest.Layers(t, base, mid)), prod}
 		},
-		"the upper two merged": {
-			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Source {
-				t.Helper()
+		"the upper two merged": func(t *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer {
+			t.Helper()
 
-				return yamltest.Layers(t, base, mergedDocument(t, yamltest.Layers(t, mid, prod)))
-			},
+			return []niceyaml.Layer{base, mergedDocument(t, yamltest.Layers(t, mid, prod))}
 		},
-		"all three merged": {
-			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Source {
-				t.Helper()
+		"all three merged": func(t *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer {
+			t.Helper()
 
-				return yamltest.Layers(t, mergedDocument(t, yamltest.Layers(t, base, mid, prod)))
-			},
+			return []niceyaml.Layer{mergedDocument(t, yamltest.Layers(t, base, mid, prod))}
 		},
-		"the lower two merged twice": {
-			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Source {
-				t.Helper()
+		"the lower two merged twice": func(t *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer {
+			t.Helper()
 
-				lower := mergedDocument(t, yamltest.Layers(t, base, mid))
+			lower := mergedDocument(t, yamltest.Layers(t, base, mid))
 
-				return yamltest.Layers(t, mergedDocument(t, yamltest.Layers(t, lower)), prod)
-			},
+			return []niceyaml.Layer{mergedDocument(t, yamltest.Layers(t, lower)), prod}
 		},
 	}
 
@@ -1492,15 +1466,12 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 		"$.server.debug":    "prod.yaml:1:1",
 	}
 
-	for name, tc := range tcs {
+	for name, arrange := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			layers := tc.layers(t,
-				yamltest.FirstDocument(t, baseInput, niceyaml.WithName("base.yaml")),
-				yamltest.FirstDocument(t, midInput, niceyaml.WithName("mid.yaml")),
-				yamltest.FirstDocument(t, prodInput, niceyaml.WithName("prod.yaml")),
-			)
+			nodes := layerNodes(t, baseInput, midInput, prodInput)
+			layers := yamltest.Layers(t, arrange(t, nodes[0], nodes[1], nodes[2])...)
 
 			assert.Equal(t, "# base\nname: shop\nserver:\n  host: mid.example.com\n  port: 0\n  tls:\n    cert: 1\n",
 				mergedText(t, layers))
