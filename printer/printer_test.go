@@ -1594,10 +1594,9 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 		},
 		"simple addition": {
 			before: "key: value\n",
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"key: value",
 				"new: line",
-				"",
 			),
 			want: stringtest.JoinLF(
 				"   1  key: value",
@@ -1605,10 +1604,9 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"simple deletion": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"key: value",
 				"old: line",
-				"",
 			),
 			after: "key: value\n",
 			want: stringtest.JoinLF(
@@ -1625,16 +1623,14 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"addition with context": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"line1: a",
 				"line3: c",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"line1: a",
 				"line2: b",
 				"line3: c",
-				"",
 			),
 			want: stringtest.JoinLF(
 				"   1  line1: a",
@@ -1643,16 +1639,14 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"deletion with context": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"line1: a",
 				"line2: b",
 				"line3: c",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"line1: a",
 				"line3: c",
-				"",
 			),
 			want: stringtest.JoinLF(
 				"   1  line1: a",
@@ -1661,21 +1655,19 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"multiline yaml modification": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"apiVersion: v1",
 				"kind: Pod",
 				"metadata:",
 				"  name: test",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"apiVersion: v1",
 				"kind: Pod",
 				"metadata:",
 				"  name: modified",
 				"  labels:",
 				"    app: test",
-				"",
 			),
 			want: stringtest.JoinLF(
 				"   1  apiVersion: v1",
@@ -1688,20 +1680,18 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"multiple scattered changes": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
 				"d: 4",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"a: 1",
 				"b: changed",
 				"c: 3",
 				"d: 4",
 				"e: 5",
-				"",
 			),
 			want: stringtest.JoinLF(
 				"   1  a: 1",
@@ -1759,16 +1749,14 @@ func TestPrinter_PrintTokenDiff_Ordering(t *testing.T) {
 		want   []string
 	}{
 		"deleted lines appear inline": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"a: 1",
 				"c: 3",
-				"",
 			),
 			want: []string{" ", "-", " "},
 		},
@@ -2745,15 +2733,13 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 	}{
 		"modification shows correct line numbers": {
 			// Delete shows beforeLine (2), insert shows afterLine (2).
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"key: value",
 				"old: line",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"key: value",
 				"new: line",
-				"",
 			),
 			want: stringtest.JoinLF(
 				"   1  key: value",
@@ -2763,16 +2749,14 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 		},
 		"addition shows afterLine numbers": {
 			// Equal lines show afterLine, inserted line shows afterLine.
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"a: 1",
 				"c: 3",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
-				"",
 			),
 			want: stringtest.JoinLF(
 				"   1  a: 1",
@@ -2782,16 +2766,14 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 		},
 		"deletion shows beforeLine numbers": {
 			// Equal lines show afterLine, deleted line shows beforeLine.
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"a: 1",
 				"c: 3",
-				"",
 			),
 			want: stringtest.JoinLF(
 				"   1  a: 1",
@@ -2800,17 +2782,15 @@ func TestPrinter_PrintTokenDiff_WithLineNumbers(t *testing.T) {
 			),
 		},
 		"multiple changes track line numbers correctly": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"line1: a",
 				"line2: b",
 				"line3: c",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"line1: x",
 				"line2: b",
 				"line3: y",
-				"",
 			),
 			want: stringtest.JoinLF(
 				"   1 -line1: a",
@@ -2853,10 +2833,9 @@ func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 		"custom inserted prefix": {
 			gutterFunc: makeGutter(">>", "-", " "),
 			before:     "key: old\n",
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"key: old",
 				"new: line",
-				"",
 			),
 			want: stringtest.JoinLF(
 				"  key: old",
@@ -2865,10 +2844,9 @@ func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 		},
 		"custom deleted prefix": {
 			gutterFunc: makeGutter("+", "<<", " "),
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"key: old",
 				"old: line",
-				"",
 			),
 			after: "key: old\n",
 			want: stringtest.JoinLF(
@@ -2896,17 +2874,15 @@ func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 		},
 		"multi-character prefixes with context": {
 			gutterFunc: makeGutter("[+]", "[-]", "   "),
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"line1: a",
 				"line2: b",
 				"line3: c",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"line1: a",
 				"line2: x",
 				"line3: c",
-				"",
 			),
 			want: stringtest.JoinLF(
 				"   line1: a",
@@ -3931,17 +3907,15 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			context: 1,
 		},
 		"simple change no context": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"a: 1",
 				"b: changed",
 				"c: 3",
-				"",
 			),
 			context: 0,
 			want: stringtest.JoinLF(
@@ -3951,19 +3925,17 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			),
 		},
 		"simple change with context 1": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
 				"d: 4",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"a: 1",
 				"b: changed",
 				"c: 3",
 				"d: 4",
-				"",
 			),
 			context: 1,
 			want: stringtest.JoinLF(
@@ -3975,21 +3947,19 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			),
 		},
 		"multiple scattered changes with context": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
 				"d: 4",
 				"e: 5",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"a: X",
 				"b: 2",
 				"c: 3",
 				"d: 4",
 				"e: Y",
-				"",
 			),
 			context: 1,
 			want: stringtest.JoinLF(
@@ -4004,23 +3974,21 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			),
 		},
 		"gap separator between non-adjacent changes": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"line1: a",
 				"line2: b",
 				"line3: c",
 				"line4: d",
 				"line5: e",
 				"line6: f",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"line1: X",
 				"line2: b",
 				"line3: c",
 				"line4: d",
 				"line5: e",
 				"line6: Y",
-				"",
 			),
 			context: 0,
 			want: stringtest.JoinLF(
@@ -4033,16 +4001,14 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			),
 		},
 		"addition only": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"a: 1",
 				"c: 3",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
-				"",
 			),
 			context: 1,
 			want: stringtest.JoinLF(
@@ -4053,16 +4019,14 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			),
 		},
 		"deletion only": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"a: 1",
 				"c: 3",
-				"",
 			),
 			context: 1,
 			want: stringtest.JoinLF(
@@ -4078,17 +4042,15 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			context: 1,
 		},
 		"context larger than ops length includes all lines": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"a: 1",
 				"b: changed",
 				"c: 3",
-				"",
 			),
 			context: 100, // Much larger than 3 lines.
 			want: stringtest.JoinLF(
@@ -4100,21 +4062,19 @@ func TestPrinter_PrintTokenDiffSummary(t *testing.T) {
 			),
 		},
 		"line numbers with hunk alignment": {
-			before: stringtest.JoinLF(
+			before: stringtest.LinesLF(
 				"a: 1",
 				"b: 2",
 				"c: 3",
 				"d: 4",
 				"e: 5",
-				"",
 			),
-			after: stringtest.JoinLF(
+			after: stringtest.LinesLF(
 				"a: 1",
 				"b: changed",
 				"c: 3",
 				"d: 4",
 				"e: 5",
-				"",
 			),
 			context: 1,
 			want: stringtest.JoinLF(
