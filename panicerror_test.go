@@ -370,27 +370,28 @@ func TestPanicError_Validators(t *testing.T) {
 
 	// Nothing recovers a panic outside the decoder, so it reaches the
 	// caller as the panic it is.
-	t.Run("panic in a Validator reaches the caller", func(t *testing.T) {
-		t.Parallel()
+	tcs := map[string]struct {
+		decode func(context.Context, *niceyaml.Node) error
+	}{
+		"panic in a Validator": {
+			decode: decodeAs[any](niceyaml.WithValidator(niceyaml.ValidatorFunc(
+				func(context.Context, *niceyaml.Node) error { panic(errRegistry) },
+			))),
+		},
+		"panic in a Validate method": {
+			decode: decodeAs[panickingValidator](),
+		},
+	}
 
-		doc := yamltest.FirstDocument(t, "name: x\n")
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		panics := niceyaml.WithValidator(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-			panic(errRegistry)
-		}))
+			doc := yamltest.FirstDocument(t, "name: x\n")
 
-		require.PanicsWithValue(t, errRegistry, func() {
-			_, _ = doc.Decode[any](t.Context(), panics) //nolint:errcheck // The call panics before it returns.
+			require.PanicsWithValue(t, errRegistry, func() {
+				_ = tc.decode(t.Context(), doc) //nolint:errcheck // The call panics before it returns.
+			})
 		})
-	})
-
-	t.Run("panic in a Validate method reaches the caller", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, "name: x\n")
-
-		require.PanicsWithValue(t, errRegistry, func() {
-			_, _ = doc.Decode[panickingValidator](t.Context()) //nolint:errcheck // The call panics before it returns.
-		})
-	})
+	}
 }
