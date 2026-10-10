@@ -62,9 +62,7 @@ func BenchmarkResolver_Nodes_RecursiveChained(b *testing.B) {
 	path := paths.Doc().Recursive("a").Recursive("a")
 
 	for _, depth := range depths {
-		src := strings.Repeat("{a: ", depth) + "1" + strings.Repeat("}", depth)
-
-		doc := yamltest.FirstDocument(b, src).DocumentAST()
+		doc := yamltest.FirstDocument(b, nestedChain(depth)).DocumentAST()
 
 		r := paths.NewResolver(doc)
 
@@ -127,9 +125,7 @@ func BenchmarkResolver_Node_WideMapping(b *testing.B) {
 // stay flat as the chain grows.
 func BenchmarkResolver_Node_DeepPath(b *testing.B) {
 	for _, depth := range []int{1000, 2000, 4000} {
-		src := strings.Repeat("{a: ", depth) + "1" + strings.Repeat("}", depth)
-
-		doc := yamltest.FirstDocument(b, src).DocumentAST()
+		doc := yamltest.FirstDocument(b, nestedChain(depth)).DocumentAST()
 
 		r := paths.NewResolver(doc)
 		path := paths.Doc().Child(slices.Repeat([]string{"a"}, depth)...)
@@ -155,15 +151,7 @@ func BenchmarkResolver_Node_DeepPath(b *testing.B) {
 // grows.
 func BenchmarkNewResolver_NestedOpenMerges(b *testing.B) {
 	for _, links := range []int{1000, 2000, 4000, 8000} {
-		var sb strings.Builder
-
-		sb.WriteString("a: &a\n  b0: &b0 {<<: *a, k: &x one}\n  b1: &b1 {<<: [*b0, *a]}\n")
-
-		for i := 2; i < links; i++ {
-			fmt.Fprintf(&sb, "  b%d: &b%d {<<: [*b%d, *b%d]}\n", i, i, i-1, i-2)
-		}
-
-		doc := yamltest.FirstDocument(b, sb.String()).DocumentAST()
+		doc := yamltest.FirstDocument(b, openMerges(links)).DocumentAST()
 
 		b.Run(fmt.Sprintf("links_%d", links), func(b *testing.B) {
 			b.ReportAllocs()
@@ -186,17 +174,7 @@ func BenchmarkResolver_Matches_MissingMergeFirst(b *testing.B) {
 	path := paths.Doc().Recursive("nope")
 
 	for _, keys := range []int{8000, 16000, 32000, 64000} {
-		var sb strings.Builder
-
-		sb.WriteString("a: &a {z: 0}\nm:\n")
-
-		for i := range keys {
-			fmt.Fprintf(&sb, "  k%d: %d\n", i, i)
-		}
-
-		sb.WriteString("  <<: [*missing, " + strings.Join(slices.Repeat([]string{"*a"}, keys), ", ") + "]\n")
-
-		doc := yamltest.FirstDocument(b, sb.String()).DocumentAST()
+		doc := yamltest.FirstDocument(b, missingFirst(keys)).DocumentAST()
 
 		r := paths.NewResolver(doc)
 
@@ -224,30 +202,7 @@ func BenchmarkResolver_Matches_MergedRecords(b *testing.B) {
 	path := paths.Doc().Recursive("name")
 
 	for _, records := range []int{500, 1000, 2000, 4000} {
-		var (
-			sb      strings.Builder
-			sources []string
-		)
-
-		for i := range 10 {
-			fmt.Fprintf(&sb, "d%d: &d%d {p%d: 0}\n", i, i, i)
-
-			sources = append(sources, fmt.Sprintf("*d%d", i))
-		}
-
-		sb.WriteString("items:\n")
-
-		for i := range records {
-			fmt.Fprintf(&sb, "  - name: r%d\n", i)
-
-			for k := range 19 {
-				fmt.Fprintf(&sb, "    k%d: %d\n", k, k)
-			}
-
-			sb.WriteString("    <<: [" + strings.Join(sources, ", ") + "]\n")
-		}
-
-		doc := yamltest.FirstDocument(b, sb.String()).DocumentAST()
+		doc := yamltest.FirstDocument(b, mergedRecords(records, 10, 19)).DocumentAST()
 
 		resolver := paths.NewResolver(doc)
 

@@ -895,23 +895,28 @@ func TestResolver_NestedMerges(t *testing.T) {
 	}
 }
 
-func TestResolver_NestedOpenMerges(t *testing.T) {
-	t.Parallel()
-
-	// Each bN merges the two mappings before it, and b0 merges a. No merge
-	// of a bN is final while the walk is inside a. Reading every merge
-	// again would take about 1.6^60 reads.
+// openMerges returns a document whose mapping a holds, under an anchor of
+// its own, the mappings b0 and up, as many as links. Each bN merges the
+// two mappings before it, b1 merges b0 and a, and b0 merges a and holds
+// the anchor x.
+func openMerges(links int) string {
 	var sb strings.Builder
 
 	sb.WriteString("a: &a\n  b0: &b0 {<<: *a, k: &x one}\n  b1: &b1 {<<: [*b0, *a]}\n")
 
-	for i := 2; i < 60; i++ {
+	for i := 2; i < links; i++ {
 		fmt.Fprintf(&sb, "  b%d: &b%d {<<: [*b%d, *b%d]}\n", i, i, i-1, i-2)
 	}
 
-	sb.WriteString("  v: *x\n")
+	return sb.String()
+}
 
-	file, err := niceyaml.NewSourceFromString(sb.String()).File()
+func TestResolver_NestedOpenMerges(t *testing.T) {
+	t.Parallel()
+
+	// No merge of a bN is final while the walk is inside a. Reading every
+	// merge again would take about 1.6^60 reads.
+	file, err := niceyaml.NewSourceFromString(openMerges(60) + "  v: *x\n").File()
 	require.NoError(t, err)
 
 	nodes := make(chan ast.Node, 1)
@@ -1332,10 +1337,9 @@ func TestResolver_Entry(t *testing.T) {
 func TestEntryFinder_Entry(t *testing.T) {
 	t.Parallel()
 
-	// The mapping m of each document holds the keys k0 and up, then a merge
-	// key that lists as many aliases to one mapping, then the key last. A
-	// lookup of each of those keys reads the whole list, and a lookup of
-	// last reads no merge key.
+	// Each document is that of wideMerge with the key last after the merge
+	// key of the mapping m. A lookup of each key before the merge key reads
+	// its whole list, and a lookup of last reads no merge key.
 	tcs := map[string]struct {
 		err  error
 		keys int
@@ -1353,17 +1357,7 @@ func TestEntryFinder_Entry(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var sb strings.Builder
-
-			sb.WriteString("a: &a {z: 0}\nm:\n")
-
-			for i := range tc.keys {
-				fmt.Fprintf(&sb, "  k%d: %d\n", i, i)
-			}
-
-			sb.WriteString("  <<: [" + strings.Repeat("*a, ", tc.keys-1) + "*a]\n  last: x\n")
-
-			doc := yamltest.FirstDocument(t, sb.String()).DocumentAST()
+			doc := yamltest.FirstDocument(t, wideMerge(tc.keys, "*a")+"  last: x\n").DocumentAST()
 
 			r := paths.NewResolver(doc)
 
