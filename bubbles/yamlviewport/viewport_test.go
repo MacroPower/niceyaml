@@ -613,7 +613,7 @@ func addRevisions(m *yamlviewport.Model, docs ...string) {
 
 // Documents that several tests scroll through.
 var (
-	// VerticalYAML holds ten lines that each fit one row.
+	// Ten lines that each fit one row.
 	verticalYAML = stringtest.Input(`
 		line1: a
 		line2: b
@@ -627,15 +627,15 @@ var (
 		line10: j
 	`)
 
-	// WideYAML holds a line that runs past the width of the viewport.
+	// Three lines, the second of which runs past the width of the viewport.
 	wideYAML = stringtest.Input(`
 		short: x
 		very_long_key_name_that_requires_horizontal_scrolling: "This is a very long value that extends well beyond the viewport width and requires scrolling to see"
 		another: y
 	`)
 
-	// WrapYAML holds ten lines, the fifth of which wraps onto several rows
-	// of a narrow viewport.
+	// Ten lines, the fifth of which wraps onto several rows of a narrow
+	// viewport.
 	wrapYAML = stringtest.Input(`
 		line1: a
 		line2: b
