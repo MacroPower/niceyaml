@@ -91,18 +91,6 @@ func requireDocumentValues(t *testing.T, input, kept string, want []any) {
 	assert.Equal(t, want, got)
 }
 
-func TestSource_Decoder(t *testing.T) {
-	t.Parallel()
-
-	t.Run("creates decoder from empty source", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("")
-		d := source.Documents()
-		assert.Len(t, d, 1)
-	})
-}
-
 func TestSource_Documents(t *testing.T) {
 	t.Parallel()
 
@@ -135,18 +123,6 @@ func TestSource_Documents(t *testing.T) {
 
 func TestSource_Document(t *testing.T) {
 	t.Parallel()
-
-	t.Run("returns the single document", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("a: 1")
-
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		docs := source.Documents()
-		assert.Same(t, docs[0], doc)
-	})
 
 	t.Run("rejects several documents", func(t *testing.T) {
 		t.Parallel()
@@ -198,31 +174,57 @@ func TestSource_Document(t *testing.T) {
 		}
 	})
 
-	t.Run("returns the document with content beside the empty ones", func(t *testing.T) {
+	t.Run("returns the one document Documents lists", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
 			input string
-			// The index in the file of the document Document returns.
-			want int
+			// The index in the file of the document Document returns, and
+			// the value it decodes to.
+			index int
+			want  map[string]int
 		}{
+			"single document": {
+				input: "a: 1",
+				want:  map[string]int{"a": 1},
+			},
 			"trailing header": {
 				input: "b: 2\n---\n",
-				want:  0,
+				want:  map[string]int{"b": 2},
 			},
 			"comment below a trailing header": {
 				input: "b: 2\n---\n# Source: t.yaml\n",
-				want:  0,
+				want:  map[string]int{"b": 2},
 			},
 			// The first header holds an empty document, so the second
 			// header starts another one.
 			"header that follows another": {
 				input: "---\n---\nb: 2\n",
-				want:  1,
+				index: 1,
+				want:  map[string]int{"b": 2},
 			},
 			"empty documents on both sides": {
 				input: "--- # head\n---\nb: 2\n---\n---\n",
-				want:  1,
+				index: 1,
+				want:  map[string]int{"b": 2},
+			},
+			"comment block above the first header": {
+				input: "# Copyright notice.\n---\na: 1",
+				want:  map[string]int{"a": 1},
+			},
+			"directive above the first header": {
+				input: "%YAML 1.2\n---\na: 1",
+				want:  map[string]int{"a": 1},
+			},
+			// A file of empty documents alone reads as an empty file does.
+			"empty file": {
+				input: "",
+			},
+			"several empty documents": {
+				input: "---\n# a\n---\n# b",
+			},
+			"comments on both sides of a header": {
+				input: "# a\n---\n# b",
 			},
 		}
 
@@ -234,89 +236,19 @@ func TestSource_Document(t *testing.T) {
 
 				doc, err := source.Document()
 				require.NoError(t, err)
-				assert.Equal(t, tc.want, doc.DocumentIndex())
-				assert.Same(t, source.AllDocuments()[tc.want], doc)
+				assert.Equal(t, tc.index, doc.DocumentIndex())
+				assert.Same(t, source.AllDocuments()[tc.index], doc)
+				assert.Equal(t, tc.want == nil, doc.IsEmpty())
+
+				docs := source.Documents()
+				require.Len(t, docs, 1)
+				assert.Same(t, docs[0], doc)
 
 				got, err := source.Decode[map[string]int](t.Context())
 				require.NoError(t, err)
-				assert.Equal(t, map[string]int{"b": 2}, got)
+				assert.Equal(t, tc.want, got)
 			})
 		}
-	})
-
-	t.Run("returns the first of several empty documents", func(t *testing.T) {
-		t.Parallel()
-
-		// A file of empty documents alone reads as an empty file does.
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
-			---
-			# a
-			---
-			# b
-		`))
-
-		doc, err := source.Document()
-		require.NoError(t, err)
-		assert.True(t, doc.IsEmpty())
-		assert.Equal(t, 0, doc.DocumentIndex())
-	})
-
-	t.Run("folds a comment block above the first header", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
-			# Copyright notice.
-			---
-			a: 1
-		`))
-
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		docs := source.Documents()
-		require.Len(t, docs, 1)
-		assert.Same(t, docs[0], doc)
-
-		got, err := doc.Decode[map[string]int](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]int{"a": 1}, got)
-	})
-
-	t.Run("skips a directive above the first header", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
-			%YAML 1.2
-			---
-			a: 1
-		`))
-
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		got, err := doc.Decode[map[string]int](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]int{"a": 1}, got)
-	})
-
-	t.Run("returns the first document when none has content", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
-			# a
-			---
-			# b
-		`))
-
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		docs := source.Documents()
-		assert.Same(t, docs[0], doc)
-
-		got, err := doc.Decode[map[string]int](t.Context())
-		require.NoError(t, err)
-		assert.Nil(t, got)
 	})
 
 	t.Run("returns the empty document of a stream of markers alone", func(t *testing.T) {
