@@ -608,7 +608,7 @@ func TestRefBeside(t *testing.T) {
 		prod := niceyaml.NewSourceFromString("schema: ./schema.json\n",
 			niceyaml.WithFilePath("configs/prod/app.yaml"), niceyaml.WithFS(layered))
 
-		doc, err := niceyaml.NewLayers(base, prod).Document()
+		doc, err := niceyaml.NewSourceFromLayers(base, prod).Document()
 		require.NoError(t, err)
 
 		field := yamltest.At(t, doc, paths.Doc().Child("schema"))

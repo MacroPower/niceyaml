@@ -1940,7 +1940,7 @@ func TestLayers_Decode_Problems(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithName("base.yaml"))
 
-			_, fromLayers := niceyaml.NewLayers(doc).Decode[problemTimed](t.Context(), tc.opts...)
+			_, fromLayers := niceyaml.NewSourceFromLayers(doc).Decode[problemTimed](t.Context(), tc.opts...)
 			_, fromSource := doc.Source().Decode[problemTimed](t.Context(), tc.opts...)
 
 			for route, err := range map[string]error{"layers": fromLayers, "source": fromSource} {

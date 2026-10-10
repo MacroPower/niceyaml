@@ -120,7 +120,8 @@ func FileOrURL(baseDir, ref string) (Ref, error) {
 // path names a file beside the document. A document without a file path
 // has no such directory, and a relative path then reports [ErrNoBaseDir].
 //
-// A Node of the document [niceyaml.Layers] build has the file path of
+// A Node of the document [niceyaml.NewSourceFromLayers] builds has the
+// file path of
 // the lowest layer, whichever layer holds the reference. A resolver that
 // reads the reference from a field passes [niceyaml.Node.Origin] of the
 // Node of that field, and a relative path then names a file beside the

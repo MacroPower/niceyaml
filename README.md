@@ -53,8 +53,8 @@ Every part of `niceyaml` shares one consistent **positioning system**. It addres
 go get go.jacobcolvin.com/niceyaml@latest
 ```
 
-`niceyaml` requires Go 1.27 or later, since `Decode[T]` on `Source`,
-`Node`, and `Layers` is a generic method, which Go 1.27 introduced.
+`niceyaml` requires Go 1.27 or later, since `Decode[T]` on `Source` and
+`Node` is a generic method, which Go 1.27 introduced.
 
 ## Usage
 
@@ -102,7 +102,7 @@ Types declare their constraints with `jsonschema` struct tags. The `gen` tool fr
 
 ### Layers
 
-[`niceyaml.Layers`][niceyaml.Layers] merges several files into one document, such as a base file with the file of one environment over it, and decodes that document once. Pass the [`Source`][niceyaml.Source] of each file, lowest first:
+[`niceyaml.NewSourceFromLayers`][niceyaml.NewSourceFromLayers] merges several files into one document, such as a base file with the file of one environment over it, and returns a [`Source`][niceyaml.Source] that decodes that document once. Pass the `Source` of each file, lowest first:
 
 ```go
 base, err := niceyaml.NewSourceFromFile("base.yaml")
@@ -115,7 +115,7 @@ if err != nil {
 	return err
 }
 
-cfg, err := niceyaml.NewLayers(base, prod).Decode[Config](ctx, niceyaml.WithValidator(schema))
+cfg, err := niceyaml.NewSourceFromLayers(base, prod).Decode[Config](ctx, niceyaml.WithValidator(schema))
 ```
 
 - A mapping merges into the mapping of the file below it, key by key and at every depth, so `prod.yaml` changes one field of one entry of a map and keeps the rest of `base.yaml`.
@@ -139,15 +139,15 @@ if err != nil && !errors.Is(err, fs.ErrNotExist) {
 	return err
 }
 
-cfg, err := niceyaml.NewLayers(base, prod, user).Decode[Config](ctx, niceyaml.WithValidator(schema))
+cfg, err := niceyaml.NewSourceFromLayers(base, prod, user).Decode[Config](ctx, niceyaml.WithValidator(schema))
 ```
 
-A [`Node`][niceyaml.Node] is a layer too, for one document of a file that holds several, or for the part of a document that `Node.At` returns. A program that collects its layers in a loop holds them in a `[]niceyaml.Layer`, since Go spreads neither a `[]*Source` nor a `[]*Node` into `NewLayers`.
+A [`Node`][niceyaml.Node] is a layer too, for one document of a file that holds several, or for the part of a document that `Node.At` returns. A program that collects its layers in a loop holds them in a `[]niceyaml.Layer`, since Go spreads neither a `[]*Source` nor a `[]*Node` into `NewSourceFromLayers`.
 
-`Layers.Document` returns the merged document as a [`Node`][niceyaml.Node], and its errors still report the file and the line that hold each value. One value of the files then decodes on its own, and the merged text prints as any document does:
+The merged `Source` is a `Source` like any other. Its `Document` method returns the merged document as a [`Node`][niceyaml.Node], and its errors still report the file and the line that hold each value. One value of the files then decodes on its own, and the merged text prints as any document does:
 
 ```go
-doc, err := niceyaml.NewLayers(base, prod).Document()
+doc, err := niceyaml.NewSourceFromLayers(base, prod).Document()
 if err != nil {
 	return err
 }
@@ -168,7 +168,7 @@ if err != nil {
 env := niceyaml.NewSourceFromBytes(data,
 	niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
 
-cfg, err := niceyaml.NewLayers(base, prod, env).Decode[Config](ctx, niceyaml.WithValidator(schema))
+cfg, err := niceyaml.NewSourceFromLayers(base, prod, env).Decode[Config](ctx, niceyaml.WithValidator(schema))
 ```
 
 ```text
@@ -177,7 +177,7 @@ environment:2:9: $.server.port: port must be at least 1
 
 The environment holds secrets, and the excerpt of an error shows the lines around it. `WithExcerpts(false)` marks the text of that layer as one no error may show, so an error there prints its position, its path, and its message, and no line of the layer. An error in a file keeps its excerpt.
 
-The docs of [`Layers`][niceyaml.Layers] say what such a layer cannot do, such as unset a value.
+The docs of [`NewSourceFromLayers`][niceyaml.NewSourceFromLayers] say what such a layer cannot do, such as unset a value.
 
 ### Viewport
 
@@ -190,7 +190,7 @@ See [cmd/nyaml](cmd/nyaml) for a complete Bubble Tea application that loads, pag
 [bubbletea]: https://github.com/charmbracelet/bubbletea
 [go.jacobcolvin.com/x/jsonschema]: https://github.com/MacroPower/x/tree/main/jsonschema
 [niceyaml.Error]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Error
-[niceyaml.Layers]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Layers
+[niceyaml.NewSourceFromLayers]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#NewSourceFromLayers
 [niceyaml.Node]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Node
 [niceyaml.Source]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml#Source
 [niceyaml/diff]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/diff

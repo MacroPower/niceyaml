@@ -7433,7 +7433,7 @@ func TestNode_DecodeInto_Merge(t *testing.T) {
 	// value. The want func changes the value base filled into the value
 	// both leave, and a nil one says over changed nothing. A program that
 	// decodes one file over another relies on these results, and so does
-	// a decode of [niceyaml.Layers] into a value that holds defaults, so
+	// a decode of [niceyaml.NewSourceFromLayers] into a value that holds defaults, so
 	// a go-yaml release that changes one fails here first.
 	tcs := map[string]struct {
 		want func(v *mergeTarget)
@@ -9911,31 +9911,32 @@ func TestDecodeOptions_EntryPoints(t *testing.T) {
 			},
 			err: notHTTP,
 		},
-		"Layers.Decode": {
+		"merged Source.Decode": {
 			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
 				t.Helper()
 
-				_, err := niceyaml.NewLayers(document(t, src)).Decode[gradedConfig](t.Context(), opts...)
+				_, err := niceyaml.NewSourceFromLayers(document(t, src)).Decode[gradedConfig](t.Context(), opts...)
 
 				return err
 			},
 			err:  unknown,
 			runs: 1,
 		},
-		"Layers.DecodeInto": {
+		"merged Source.DecodeInto": {
 			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
 				t.Helper()
 
-				return niceyaml.NewLayers(document(t, src)).DecodeInto(t.Context(), new(gradedConfig), opts...)
+				return niceyaml.NewSourceFromLayers(document(t, src)).
+					DecodeInto(t.Context(), new(gradedConfig), opts...)
 			},
 			err:  unknown,
 			runs: 1,
 		},
-		"Layers.SelfValidate": {
+		"merged Source.SelfValidate": {
 			call: func(t *testing.T, src *niceyaml.Source, opts ...niceyaml.DecodeOption) error {
 				t.Helper()
 
-				return niceyaml.NewLayers(document(t, src)).SelfValidate(t.Context(), changed(), opts...)
+				return niceyaml.NewSourceFromLayers(document(t, src)).SelfValidate(t.Context(), changed(), opts...)
 			},
 			err: notHTTP,
 		},

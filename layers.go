@@ -3,35 +3,26 @@ package niceyaml
 import (
 	"context"
 	"errors"
-	"slices"
-	"sync"
 )
 
-var (
-	// ErrUnnamedKey indicates a mapping key that [Layers] cannot merge
-	// by. A key that is a sequence or a mapping has no name a path
-	// selects it by, as
-	// [go.jacobcolvin.com/niceyaml/paths.Resolver.KeyName] reports, so
-	// two layers cannot hold it as one key. The error binds at the key,
-	// in the layer that holds it.
-	ErrUnnamedKey = errors.New("mapping key has no name")
+// ErrUnnamedKey indicates a mapping key that [NewSourceFromLayers] cannot
+// merge by. A key that is a sequence or a mapping has no name a path
+// selects it by, as
+// [go.jacobcolvin.com/niceyaml/paths.Resolver.KeyName] reports, so two
+// layers cannot hold it as one key. The error binds at the key, in the
+// layer that holds it.
+var ErrUnnamedKey = errors.New("mapping key has no name")
 
-	// The Node that [Layers] with no layer validate and bind through: the
-	// one document of an empty [Source], which has no name. Every call
-	// shares the one Node, which never changes.
-	noLayers = sync.OnceValue(func() *Node {
-		return NewSourceFromString("").documents()[0]
-	})
-)
-
-// Layers holds the layers that merge into one document, in the order
-// they apply, such as a base file with the file of one environment over
-// it. A mapping in a higher layer merges into the mapping below it key
-// by key, a sequence or a scalar replaces what lies below it, and a null
-// keeps it. [Layers.Decode] and [Layers.DecodeInto] validate, decode,
-// and self-validate the merged document once, and each error binds in
-// the file that holds the value the error is about. Each layer is a
-// [Layer], and a program passes the [Source] of each file as it read it:
+// NewSourceFromLayers creates a new [*Source] that holds the one document
+// the given layers merge into, in the order they apply: the lowest layer
+// first and the highest last, such as a base file with the file of one
+// environment over it. A mapping in a higher layer merges into the
+// mapping below it key by key, a sequence or a scalar replaces what lies
+// below it, and a null keeps it. [Source.Decode] and [Source.DecodeInto]
+// then validate, decode, and self-validate the merged document once, and
+// each error binds in the file that holds the value the error is about.
+// Each layer is a [Layer], and a program passes the Source of each file
+// as it read it:
 //
 //	base, err := niceyaml.NewSourceFromFile("base.yaml")
 //	if err != nil {
@@ -43,28 +34,30 @@ var (
 //		return err
 //	}
 //
-//	layers := niceyaml.NewLayers(base, prod)
+//	cfg, err := niceyaml.NewSourceFromLayers(base, prod).Decode[Config](ctx)
 //
-//	cfg, err := layers.Decode[Config](ctx)
-//
-// The layers merge once, on the first call that needs the merged
-// document, and Layers never change after that, so they are safe for
-// concurrent use.
-//
-// Create instances with [NewLayers].
+// The layers merge in the call, which decodes each of them as a decode
+// of that layer alone reads it, and no deadline stops that decode. The
+// Source never changes after that, so it is safe for concurrent use. A
+// nil Layer adds nothing, and neither does a nil Source or a nil
+// [*Node], so a program with an optional file passes its Source as it
+// is.
 //
 // # Decoding
 //
-// [Layers.Decode] and [Layers.DecodeInto] validate, decode, and
+// [Source.Decode] and [Source.DecodeInto] validate, decode, and
 // self-validate the merged document once. Each error binds in the file
 // that holds the value the error is about, so a port that only base.yaml
 // sets reports the line that sets it:
 //
 //	base.yaml:3:9: $.server.port: port must be at least 1
 //
-// [Layers.Validate] runs a [Validator] on the merged document without a
-// decode, and [Layers.Bind] binds the error of a check the program runs
-// itself.
+// [Source.ValidateDocuments] runs a [Validator] on the merged document
+// without a decode, and [Source.Bind] binds the error of a check the
+// program runs itself, in the layer that holds the value the error
+// names:
+//
+//	return merged.Bind(checkQuota(&cfg))
 //
 // # Environment and Flags
 //
@@ -87,9 +80,10 @@ var (
 //		return err
 //	}
 //
-//	env := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment"))
+//	env := niceyaml.NewSourceFromBytes(data,
+//		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
 //
-//	cfg, err := niceyaml.NewLayers(base, prod, env).Decode[Config](ctx)
+//	cfg, err := niceyaml.NewSourceFromLayers(base, prod, env).Decode[Config](ctx)
 //
 // Every [Validator] and the self-validation step then check the port the
 // environment set, and a schema that requires a key passes when only the
@@ -101,23 +95,22 @@ var (
 // [go.jacobcolvin.com/niceyaml/encoder.WithYAMLComments] adds a comment
 // at a path of the encoded map, such as the name of the variable beside
 // the port, and the excerpt of the error then shows it. A program that
-// prints the configuration it runs with reads the text of
-// [Layers.Document], which holds what the files and the environment set
-// together.
+// prints the configuration it runs with prints the view of the merged
+// Source, which holds what the files and the environment set together.
 //
 // A program whose library writes the environment or the flags into the
 // Go value holds no such map. It turns the self-validation step off for
 // the decode, lets the library fill the value, and runs the step with
-// [Layers.SelfValidate] once the value is whole:
+// [Source.SelfValidate] once the value is whole:
 //
 //	var cfg Config
-//	if err := layers.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
+//	if err := merged.DecodeInto(ctx, &cfg, niceyaml.WithSelfValidation(false)); err != nil {
 //		return err
 //	}
 //
 //	applyEnv(&cfg)
 //
-//	return layers.SelfValidate(ctx, &cfg)
+//	return merged.SelfValidate(ctx, &cfg)
 //
 // No [Validator] sees a value set this way. A schema thus leaves the
 // value unchecked, and reports a key it requires as missing when only
@@ -167,7 +160,7 @@ var (
 // Each layer resolves its own aliases and `<<` merge keys before it
 // merges, as a decode of that layer alone reads them, with the reference
 // documents of [WithReferences] and the other settings of its own
-// [Source]. An alias thus reads the anchor of its own file, whatever
+// Source. An alias thus reads the anchor of its own file, whatever
 // anchors of that name the other layers define, and a value that an
 // alias or a merge key brings in merges as one written in its place
 // does. The merged document holds a copy of that value and no alias.
@@ -177,17 +170,49 @@ var (
 //
 // # Merged Document
 //
-// [Layers.Document] returns the root Node of the merged document, and a
-// [Validator] gets that Node. The document belongs to a [Source] of its
-// own, which holds the merged value as YAML text under the name of the
-// lowest layer. Document describes that text, which is no file of the
-// program. [Node.Origin] returns the Node that holds a value of it in
-// the file of a layer.
+// The Source holds the merged value as block-style YAML, below the
+// preamble of the lowest layer, so a schema directive in the comments of
+// base.yaml names the schema of the merged document. It keeps no other
+// comment of a layer. Every scalar keeps the text its layer spells, such
+// as 0x10 or 1.50, and a string keeps its quotes, except that a block
+// scalar or a string of several lines reads as one double-quoted line.
+// The Source takes its [Source.Name], its [Source.FilePath], and its
+// [Source.FS] from the Source of the lowest layer, with what
+// [WithAllowDuplicateKeys], [WithAliasLimit], and [WithExcerptWidth] set
+// there. Its text holds values of every layer, so [Source.Excerpts]
+// reports false for it when the Source of any layer has excerpts off, as
+// [WithExcerpts] describes. A call with no layer gives an empty Source
+// with no name.
+//
+// [Source.Document] returns the root Node of the merged document, the
+// Node a [Validator] gets. A caller reads one value of the layers
+// through it without a decode of the rest, or prints what they hold
+// together:
+//
+//	doc, err := merged.Document()
+//	if err != nil {
+//		return err
+//	}
+//
+//	kind, err := doc.DecodeAt[string](ctx, paths.Doc().Child("kind"))
+//
+// That text is no file of the program, though it has the name of one.
+// [Node.View], [Node.Span], [Node.Tokens], [Node.Ranges], and
+// [Node.PathAt] read its lines and its positions. So does a position or
+// a range in an error bound through the Node. A position taken from the
+// file of a layer thus names whatever lies there in the merged text.
+//
+// Every Node of the document has the [Node.FilePath] and the [Node.FS]
+// of the lowest layer, whichever layer holds its value. A validator that
+// resolves a file beside a value thus reads [Node.Origin] of the Node of
+// that value, and not its FilePath. Origin returns the Node that holds
+// the value in the file of its layer, with the lines and the positions
+// of that file.
 //
 // # Error Binding
 //
-// An error never binds in that text. An error with a path binds in the
-// highest layer whose document holds the value at that path, and the
+// An error never binds in the merged text. An error with a path binds in
+// the highest layer whose document holds the value at that path, and the
 // path resolves in the file of that layer, through its aliases and merge
 // keys as [Node.Bind] resolves it. A higher layer that holds a null
 // there holds no value. An error at a mapping that several layers hold
@@ -211,12 +236,18 @@ var (
 // `$.defaults.server.port` where it binds in a layer that holds the
 // value under defaults.
 //
+// Its position is thus not the one [Node.Ranges] returns for its path in
+// the merged document. [Annotate] marks the error on a view of the layer
+// and marks nothing on the view of the merged Source, and
+// [SourceError.Excerpt] shows the lines of the layer. [SourceError.Node]
+// and [SourceError.Document] return the Node of the layer.
+//
 // # Nested Layers
 //
-// A Node from [Layers.Document] is a layer like any other. Layers that
-// hold one merge its value as they merge a file of the same text. Each
-// error still binds in the file that holds its value, with the path
-// that file has for it.
+// The merged Source is a layer like any other, and so is the Node its
+// Document method returns. A merge that holds one reads its value as it
+// reads a file of the same text. Each error still binds in the file that
+// holds its value, with the path that file has for it.
 //
 // # Defaults
 //
@@ -243,26 +274,32 @@ var (
 // The excerpt of an error shows lines of its layer, so a secret the
 // environment set prints when it sits on the line of the error or among
 // the context lines around it. A program builds a layer that holds
-// secrets from a [Source] with [WithExcerpts] set to false:
+// secrets from a Source with [WithExcerpts] set to false:
 //
 //	env := niceyaml.NewSourceFromBytes(data,
 //		niceyaml.WithName("environment"), niceyaml.WithExcerpts(false))
 //
 // An error in that layer then prints its position, its path, and its
 // message, and no line of the layer. An error in another layer keeps its
-// excerpt. The text of [Layers.Document] holds the secret whatever the
-// option says, so the Source of that document has excerpts off when the
-// Source of any layer has.
+// excerpt. The merged text holds the secret whatever the option says, so
+// the merged Source has excerpts off when the Source of any layer has.
 //
 // # Layer Errors
 //
 // A layer whose document did not parse holds no value. Neither does a
 // Source that holds several documents, which has no one document to
 // merge, nor a layer that a decode of it alone into an any value rejects,
-// as it rejects an alias with no anchor. [Layers.Decode],
-// [Layers.DecodeInto], [Layers.Validate], [Layers.SelfValidate], and
-// [Layers.Document] return the error of the lowest such layer, bound in
-// its file. [Layers.Bind] goes on without that layer.
+// as it rejects an alias with no anchor. The merged Source then holds
+// the error of the lowest such layer, bound in its file, as a Source
+// holds the syntax error of a file that did not parse. [Source.File],
+// [Source.Document], [Source.Documents], [Source.Decode],
+// [Source.DecodeInto], and [Source.SelfValidate] return that error, and
+// so do [Node.Err] and the Node methods that read the tree, such as
+// [Node.Validate]. A path in an error that [Source.Bind] or [Node.Bind]
+// binds resolves nowhere then, as in a file that did not parse. The
+// bound error names the lowest layer and no position, and
+// [SourceError.Unresolved] returns [ErrPathNeedsDocument] wrapping the
+// error of the layer.
 //
 // # Optional Files
 //
@@ -275,43 +312,37 @@ var (
 //		return err
 //	}
 //
-//	cfg, err := niceyaml.NewLayers(base, user).Decode[Config](ctx)
+//	cfg, err := niceyaml.NewSourceFromLayers(base, user).Decode[Config](ctx)
 //
-// A program whose optional files are all missing builds Layers that
-// hold no layer. A decode then leaves the value as it was, and each error
-// binds with no position, as in "$.servers[1].port: port is required".
-// The program thus makes the same calls whichever of its files exist.
-// Each such error is bound to an empty document, so no other document
-// places it. A value that came from no document validates through
+// A program whose optional files are all missing merges no layer. A
+// decode then leaves the value as it was, and each error binds with no
+// position, as in "$.servers[1].port: port is required". The program
+// thus makes the same calls whichever of its files exist. Each such
+// error is bound to an empty document, so no other document places it.
+// A value that came from no document validates through
 // [SelfValidateValue] instead.
-type Layers struct {
-	// What the layers merge into, which document fills on its first call.
-	merged mergedLayers
-	// The layers in the order they apply, lowest first.
-	layers []Layer
-	// Fills merged once.
-	once sync.Once
+func NewSourceFromLayers(layers ...Layer) *Source {
+	return mergeLayers(context.Background(), layers)
 }
 
-// Layer is one layer of [Layers]: a document that merges with the layers
-// below it. A [*Source] and a [*Node] are each a Layer, and no type
-// outside this package is one.
+// Layer is one layer of the Source [NewSourceFromLayers] builds: a
+// document that merges with the layers below it. A [*Source] and a
+// [*Node] are each a Layer, and no type outside this package is one.
 //
 // A Source stands for its one document, the one [Source.Document]
 // returns, so a program passes each file as it read it. A Source that
 // holds several documents, or a document that did not parse, is a layer
-// that holds no value, as [Layers] describes.
+// that holds no value, as [NewSourceFromLayers] describes.
 //
 // A Node is the root of a document, or the value at a path of one for a
 // Node from [Node.At]. It serves a program that layers one document of a
-// file that holds several, a part of a document, or the document
-// [Layers.Document] returns.
+// file that holds several, or a part of a document.
 //
 // A nil Layer adds nothing, and neither does a nil Source or a nil Node.
 //
 // Go spreads neither a []*Source nor a []*Node into the parameter of
-// [NewLayers]. A program that collects its layers in a loop thus holds
-// them in a []Layer:
+// [NewSourceFromLayers]. A program that collects its layers in a loop
+// thus holds them in a []Layer:
 //
 //	layers := make([]niceyaml.Layer, 0, len(names))
 //
@@ -324,107 +355,21 @@ type Layers struct {
 //		layers = append(layers, source)
 //	}
 //
-//	cfg, err := niceyaml.NewLayers(layers...).Decode[Config](ctx)
+//	cfg, err := niceyaml.NewSourceFromLayers(layers...).Decode[Config](ctx)
 //
 // See [*Source] and [*Node] for the implementations.
 type Layer interface {
-	// Resolves the layer as [Layers] merge it.
+	// Resolves the layer as [NewSourceFromLayers] merges it.
 	resolveLayer() resolvedLayer
 }
 
-// NewLayers creates a new [*Layers] from the given layers, in the order
-// they apply: the lowest layer first and the highest last. A nil [Layer]
-// adds nothing, and neither does a nil [*Source] or a nil [*Node], so a
-// program with an optional file passes its Source as it is.
-func NewLayers(layers ...Layer) *Layers {
-	return &Layers{layers: slices.Clone(layers)}
-}
-
-// Document returns the root [*Node] of the merged document, the Node a
-// [Validator] gets from [Layers.Validate]. A caller reads one value of
-// the layers through it without a decode of the rest, or prints what
-// they hold together:
-//
-//	doc, err := layers.Document()
-//	if err != nil {
-//		return err
-//	}
-//
-//	kind, err := doc.DecodeAt[string](ctx, paths.Doc().Child("kind"))
-//
-// A layer that holds no value, as [Layers] describes, returns its error
-// and no Node. Layers that hold no layer return the root of an empty
-// document with no name. Every call returns the same Node.
-//
-// The merged document belongs to a [Source] of its own. The Source holds
-// the merged value as block-style YAML, below the preamble of the lowest
-// layer, so a schema directive in the comments of base.yaml names the
-// schema of the merged document. It keeps no other comment of a layer.
-// Every scalar keeps the text its layer spells, such as 0x10 or 1.50,
-// and a string keeps its quotes, except that a block scalar or a string
-// of several lines reads as one double-quoted line. The Source takes its
-// [Source.Name], its [Source.FilePath], and its [Source.FS] from the
-// Source of the lowest layer, with what [WithAllowDuplicateKeys],
-// [WithAliasLimit], and [WithExcerptWidth] set there. Its text holds
-// values of every layer, so
-// [Source.Excerpts] reports false for it when the Source of any layer
-// has excerpts off, as [WithExcerpts] describes.
-//
-// That text is no file of the program, though it has the name of one.
-// [Node.View], [Node.Span], [Node.Tokens], [Node.Ranges], and
-// [Node.PathAt] read its lines and its positions. So does a position or
-// a range in an error bound through the Node. A position taken from the
-// file of a layer thus names whatever lies there in the merged text.
-//
-// Every Node of the document has the [Node.FilePath] and the [Node.FS]
-// of the lowest layer, whichever layer holds its value. A validator that
-// resolves a file beside a value thus reads [Node.Origin] of the Node of
-// that value, and not its FilePath. Origin returns the Node that holds
-// the value in the file of its layer, with the lines and the positions
-// of that file.
-//
-// An error bound through the Node binds in the file of a layer, as
-// [Layers] describes, and never in the merged text. Its position is thus
-// not the one [Node.Ranges] returns for its path. [Annotate] marks the
-// error on a view of the layer and marks nothing on [Node.View], and
-// [SourceError.Excerpt] shows the lines of the layer. [SourceError.Node]
-// and [SourceError.Document] return the Node of the layer, and
-// [SourceError.Path] is the path of the value in its file. For a layer
-// from [Node.At], that path differs from the path in the merged
-// document.
-func (l *Layers) Document() (*Node, error) {
-	doc, err := l.document(context.Background())
-	if err != nil {
-		return nil, err
-	}
-
-	return doc, nil
-}
-
-// document returns the root Node of the merged document, as
-// [mergeLayers] builds it, and the error of the lowest layer that holds
-// no value a decode can read. It builds the document on the first call,
-// and every later call shares it, so the end of ctx does not stop the
-// merge. A nil l has no layers.
-func (l *Layers) document(ctx context.Context) (*Node, error) {
-	if l == nil {
-		return noLayers(), nil
-	}
-
-	l.once.Do(func() {
-		l.merged = mergeLayers(context.WithoutCancel(ctx), l.layers)
-	})
-
-	return l.merged.doc, l.merged.err
-}
-
 // Origin returns the [*Node] that holds the value of n in the file of a
-// layer. A Node of the document [Layers] build reads the merged text,
-// and its [Node.FilePath] and its [Node.FS] are those of the lowest
-// layer, whichever layer holds its value. Its origin is the Node at the
-// path of n in the layer an error at that path binds in, as Layers
-// describes. A [Validator] that resolves a file beside a value thus
-// reads the directory from the origin of that value:
+// layer. A Node of the document [NewSourceFromLayers] builds reads the
+// merged text, and its [Node.FilePath] and its [Node.FS] are those of
+// the lowest layer, whichever layer holds its value. Its origin is the
+// Node at the path of n in the layer an error at that path binds in, as
+// NewSourceFromLayers describes. A [Validator] that resolves a file
+// beside a value thus reads the directory from the origin of that value:
 //
 //	license, err := n.At(licensePath)
 //	if err != nil {
@@ -440,7 +385,7 @@ func (l *Layers) document(ctx context.Context) (*Node, error) {
 //
 // A Node of any other document is its own origin, so Origin returns the
 // receiver for it. A validator thus makes the same calls whether it runs
-// on one file or on Layers.
+// on one file or on a merged Source.
 //
 // The layer is the highest one whose document holds a value at the path,
 // and a null there holds none. The origin has the lines, the positions,
@@ -457,16 +402,16 @@ func (l *Layers) document(ctx context.Context) (*Node, error) {
 //
 // The root of the merged document follows the same rule. Its origin is
 // the highest layer that holds a value, or the highest layer of all when
-// none holds one. Origin returns the Node of that layer as [NewLayers]
-// got it, or the Node [Source.Document] returns for a [Source] it got.
-// An error with no location binds in the lowest layer instead, whose
-// name and file path the merged document has. Node.FilePath of the root
-// and of its origin thus name two files where a higher layer holds a
-// value.
+// none holds one. Origin returns the Node of that layer as
+// [NewSourceFromLayers] got it, or the Node [Source.Document] returns
+// for a [Source] it got. An error with no location binds in the lowest
+// layer instead, whose name and file path the merged document has.
+// Node.FilePath of the root and of its origin thus name two files where
+// a higher layer holds a value.
 //
-// A layer can be a Node of a document that other Layers built. A value
-// of such a layer has the origin it has in that document, so every
-// origin belongs to a document that no Layers built.
+// A layer can be a merged Source, or a Node of its document. A value of
+// such a layer has the origin it has in that document, so every origin
+// belongs to a document that no merge built.
 //
 // A value that a layer reads through an alias or a `<<` merge key has
 // its origin where Node.At resolves the path in that layer, which is the
@@ -476,6 +421,10 @@ func (l *Layers) document(ctx context.Context) (*Node, error) {
 // which wraps [go.jacobcolvin.com/niceyaml/paths.ErrAlias]. The error is
 // bound to the layer that holds the alias, so [SourceError.Source] names
 // the file of that layer.
+//
+// A layer that holds no value, as NewSourceFromLayers describes, has no
+// Node, so the origin of a value that lies in it is the error of that
+// layer.
 func (n *Node) Origin() (*Node, error) {
 	if !n.merges() {
 		return n, nil
@@ -483,9 +432,6 @@ func (n *Node) Origin() (*Node, error) {
 
 	layer, _, path := n.source.layers.layer(n, n.base)
 
-	// No call hands out a Node of a merged document one of whose layers
-	// has no Node, since [Layers.Document] returns the error of that
-	// layer instead.
 	if layer.node == nil {
 		return nil, layer.err
 	}
@@ -499,131 +445,4 @@ func (n *Node) Origin() (*Node, error) {
 	}
 
 	return layer.node.At(path)
-}
-
-// DecodeInto validates and decodes the merged document into v, as
-// [Node.DecodeInto] decodes a document with the same options. It then
-// runs the self-validation step on v, as [Layers.SelfValidate] runs it.
-// A layer that holds no value, as [Layers] describes, returns its error
-// before anything runs. Any v that is not a non-nil pointer returns an
-// error wrapping [ErrDecodeTarget] before that.
-//
-// Every step runs once, on what the layers hold together. A [Validator]
-// from [WithValidator] gets the Node of the merged document, as
-// [Layers.Validate] hands it one, so a schema that requires a key passes
-// when any layer sets it. [WithSelfValidation] turns the self-validation
-// step off, for a program that changes the value before it validates.
-func (l *Layers) DecodeInto(ctx context.Context, v any, opts ...DecodeOption) error {
-	doc, layerErr := l.document(ctx)
-
-	err := checkDecodeTarget(v)
-	if err != nil {
-		return doc.bindOwn(err)
-	}
-
-	if layerErr != nil {
-		return layerErr
-	}
-
-	return doc.decodeInto(ctx, v, newDecodeConfig(opts), nil)
-}
-
-// Validate runs v on the merged document, as [Node.Validate] runs it on
-// a document. It is the validation step of [Layers.DecodeInto] on its
-// own, for a caller that checks the layers without decoding them. A layer
-// that holds no value, as [Layers] describes, returns its error, and v
-// does not run.
-//
-// The validator gets the root Node of the merged document, so its paths
-// read from the value the layers hold. An error it returns unbound binds
-// in the layer that holds the value the error is about, and so does an
-// error it binds through that Node.
-func (l *Layers) Validate(ctx context.Context, v Validator) error {
-	doc, err := l.document(ctx)
-	if err != nil {
-		return err
-	}
-
-	return doc.Validate(ctx, v)
-}
-
-// SelfValidate runs the self-validation step of [Layers.DecodeInto] on
-// its own, on v through the merged document, as [Node.SelfValidate] runs
-// it. Each error binds in the layer that holds its value, as [Layers]
-// describes. It runs whatever [WithSelfValidation] says, and reads the
-// options Node.SelfValidate reads among opts.
-//
-// A layer that holds no value, as [Layers] describes, returns its error
-// before the step runs, as it does in DecodeInto. A program that fills v
-// by other means thus learns of a file that did not parse. A v that is
-// nil or a nil pointer returns an error wrapping [ErrSelfValidateTarget]
-// before that.
-func (l *Layers) SelfValidate(ctx context.Context, v any, opts ...DecodeOption) error {
-	doc, layerErr := l.document(ctx)
-
-	err := checkSelfValidateTarget(v)
-	if err != nil {
-		return doc.bindOwn(err)
-	}
-
-	if layerErr != nil {
-		return layerErr
-	}
-
-	return doc.selfValidate(ctx, v, newDecodeConfig(opts))
-}
-
-// Bind binds err as [Node.Bind] binds it through the root of a document,
-// with one difference. Each path binds in the layer that holds the value
-// it names, as [Layers] describes, so a check the program runs on the
-// value reports the file a self-validation would report:
-//
-//	return layers.Bind(checkQuota(&cfg))
-//
-// A path in err reads from the value the layers hold, whether it starts
-// at `$` or at `@`, and the bound error reports it as the document of
-// its layer reads it.
-//
-// Bind returns err bound and no other error, so it goes on without a
-// layer that holds no value, as [Layers] describes. A path then binds in
-// the layers that hold one, and nothing reports the file that did not
-// parse. A program that ran no decode of the layers checks
-// [Layers.Document] first, which returns the error of such a layer:
-//
-//	layers := niceyaml.NewLayers(base, prod)
-//
-//	if _, err := layers.Document(); err != nil {
-//		return err
-//	}
-//
-//	return layers.Bind(checkQuota(&cfg))
-//
-// An error that binds in a Source with no one document names the Source
-// and no position, and [SourceError.Node] returns nil for it.
-func (l *Layers) Bind(err error) error {
-	// A check that passed has nothing to bind, so its call merges no
-	// layer.
-	if isNothing(err) {
-		return nil
-	}
-
-	doc, _ := l.document(context.Background()) //nolint:errcheck // A layer that holds no value adds nothing.
-
-	return doc.Bind(err)
-}
-
-// Decode validates and decodes the merged document into a new T, as
-// [Layers.DecodeInto] decodes it into a value the caller holds. On
-// error, the returned T is the zero value.
-func (l *Layers) Decode[T any](ctx context.Context, opts ...DecodeOption) (T, error) {
-	var v T
-
-	err := l.DecodeInto(ctx, &v, opts...)
-	if err != nil {
-		var zero T
-
-		return zero, err
-	}
-
-	return v, nil
 }

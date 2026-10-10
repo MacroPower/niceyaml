@@ -325,7 +325,7 @@ func TestLayers_Decode_Merge(t *testing.T) {
 			t.Parallel()
 
 			nodes := layerNodes(t, tc.layers...)
-			layers := niceyaml.NewLayers(layersOf(nodes)...)
+			layers := niceyaml.NewSourceFromLayers(layersOf(nodes)...)
 
 			assert.Equal(t, tc.want, mergedText(t, layers))
 
@@ -485,10 +485,10 @@ func TestLayers_Decode_Equivalence(t *testing.T) {
 	// One layer merges into what it holds, and an empty mapping above or
 	// below it changes nothing, so every arrangement decodes as the
 	// document alone does.
-	arrangements := map[string]func(doc, empty *niceyaml.Node) *niceyaml.Layers{
-		"alone":                  func(doc, _ *niceyaml.Node) *niceyaml.Layers { return niceyaml.NewLayers(doc) },
-		"over an empty mapping":  func(doc, empty *niceyaml.Node) *niceyaml.Layers { return niceyaml.NewLayers(empty, doc) },
-		"under an empty mapping": func(doc, empty *niceyaml.Node) *niceyaml.Layers { return niceyaml.NewLayers(doc, empty) },
+	arrangements := map[string]func(doc, empty *niceyaml.Node) *niceyaml.Source{
+		"alone":                  func(doc, _ *niceyaml.Node) *niceyaml.Source { return niceyaml.NewSourceFromLayers(doc) },
+		"over an empty mapping":  func(doc, empty *niceyaml.Node) *niceyaml.Source { return niceyaml.NewSourceFromLayers(empty, doc) },
+		"under an empty mapping": func(doc, empty *niceyaml.Node) *niceyaml.Source { return niceyaml.NewSourceFromLayers(doc, empty) },
 	}
 
 	for name, tc := range mergedCorpus {
@@ -562,7 +562,7 @@ func TestLayers_Decode_Equivalence_Errors(t *testing.T) {
 			_, want := doc.Decode[strict](t.Context(), opts...)
 			require.Error(t, want)
 
-			_, got := niceyaml.NewLayers(doc).Decode[strict](t.Context(), opts...)
+			_, got := niceyaml.NewSourceFromLayers(doc).Decode[strict](t.Context(), opts...)
 			require.EqualError(t, got, want.Error())
 			assert.Equal(t, niceyaml.FormatError(want, 0), niceyaml.FormatError(got, 0))
 		})
@@ -578,7 +578,7 @@ func TestLayers_Decode_Equivalence_Errors(t *testing.T) {
 		_, want := doc.Decode[layerConfig](t.Context())
 		require.Error(t, want)
 
-		_, got := niceyaml.NewLayers(doc).Decode[layerConfig](t.Context())
+		_, got := niceyaml.NewSourceFromLayers(doc).Decode[layerConfig](t.Context())
 		require.EqualError(t, got, want.Error())
 	})
 }
@@ -615,7 +615,7 @@ func TestLayers_Decode_Options(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			layers := niceyaml.NewLayers(layersOf(layerSources(t, tc.base, "level: high\n"))...)
+			layers := niceyaml.NewSourceFromLayers(layersOf(layerSources(t, tc.base, "level: high\n"))...)
 
 			got, err := layers.Decode[config](t.Context(), levels)
 			if tc.err != "" {
@@ -644,7 +644,7 @@ func TestLayers_Decode_Maps(t *testing.T) {
 		Extra    map[string]any     `yaml:"extra"`
 	}
 
-	layers := niceyaml.NewLayers(layersOf(layerSources(t,
+	layers := niceyaml.NewSourceFromLayers(layersOf(layerSources(t,
 		"services:\n  web: {image: nginx, replicas: 1}\n  db: {image: postgres, replicas: 1}\n"+
 			"extra: {a: {b: 1, c: 2}, z: 1}\n",
 		"services:\n  web: {replicas: 5}\nextra: {a: {b: 9}}\n",
@@ -691,7 +691,7 @@ func TestLayers_Decode_Maps(t *testing.T) {
 			Ports map[string]string `yaml:"ports"`
 		}
 
-		got, err := niceyaml.NewLayers(layersOf(nodes)...).Decode[ports](t.Context())
+		got, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[ports](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, map[string]string{"80": "proxy", "443": "https"}, got.Ports)
 
@@ -699,7 +699,7 @@ func TestLayers_Decode_Maps(t *testing.T) {
 			Ports map[int]string `yaml:"ports"`
 		}
 
-		byNumber, err := niceyaml.NewLayers(layersOf(nodes)...).Decode[numbered](t.Context())
+		byNumber, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[numbered](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, map[int]string{80: "proxy", 443: "https"}, byNumber.Ports)
 	})
@@ -730,7 +730,9 @@ func TestLayers_Decode_Scalars(t *testing.T) {
 	want, err := yamltest.FirstDocument(t, baseInput+prodInput).Decode[config](t.Context())
 	require.NoError(t, err)
 
-	got, err := niceyaml.NewLayers(layersOf(layerSources(t, baseInput, prodInput))...).Decode[config](t.Context())
+	got, err := niceyaml.NewSourceFromLayers(layersOf(layerSources(t, baseInput, prodInput))...).Decode[config](
+		t.Context(),
+	)
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
 
@@ -784,7 +786,7 @@ func TestLayers_Decode_Unmarshaler(t *testing.T) {
 		_, err := nodes[1].Decode[config](t.Context())
 		require.EqualError(t, err, "prod.yaml:1:1: $.store: store needs a kind")
 
-		got, err := niceyaml.NewLayers(layersOf(nodes)...).Decode[config](t.Context())
+		got, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[config](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, mergedStore{Kind: "disk", Path: "/b"}, got.Store)
 	})
@@ -794,10 +796,10 @@ func TestLayers_Decode_Unmarshaler(t *testing.T) {
 
 		nodes := layerNodes(t, "name: base\nstore: {path: /a}\n", "store: {path: /b}\n")
 
-		_, err := niceyaml.NewLayers(layersOf(nodes)...).Decode[config](t.Context())
+		_, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[config](t.Context())
 		require.EqualError(t, err, "prod.yaml:1:1: $.store: store needs a kind")
 
-		_, err = niceyaml.NewLayers(nodes[0], layerNodes(t, "name: prod\n")[0]).Decode[config](t.Context())
+		_, err = niceyaml.NewSourceFromLayers(nodes[0], layerNodes(t, "name: prod\n")[0]).Decode[config](t.Context())
 		require.EqualError(t, err, "base.yaml:2:1: $.store: store needs a kind")
 	})
 }
@@ -824,7 +826,7 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 			niceyaml.WithReferences(shared),
 		)
 
-		layers := niceyaml.NewLayers(base, prod)
+		layers := niceyaml.NewSourceFromLayers(base, prod)
 
 		assert.Equal(t, "db:\n  port: 1\n  host: x\n"+
 			"web:\n  port: 9\n  host: shared\n  tls: true\n"+
@@ -856,7 +858,7 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 			niceyaml.WithName("base.yaml"), niceyaml.WithAllowDuplicateKeys(true))
 		prod := yamltest.FirstDocument(t, "e: 5\n", niceyaml.WithName("prod.yaml"))
 
-		layers := niceyaml.NewLayers(base, prod)
+		layers := niceyaml.NewSourceFromLayers(base, prod)
 
 		assert.Equal(t, "a: 2\nb:\n  d: 2\ne: 5\n", mergedText(t, layers))
 
@@ -867,7 +869,7 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 		strict := niceyaml.NewSourceFromString("a: 1\na: 2\n", niceyaml.WithName("prod.yaml")).AllDocuments()
 		require.Len(t, strict, 1)
 
-		_, err = niceyaml.NewLayers(base, strict[0]).Decode[any](t.Context())
+		_, err = niceyaml.NewSourceFromLayers(base, strict[0]).Decode[any](t.Context())
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
 		require.ErrorIs(t, err, strict[0].Err())
 	})
@@ -883,15 +885,16 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 		_, alone := prod.Decode[any](t.Context())
 		require.ErrorIs(t, alone, niceyaml.ErrExcessiveAliasing)
 
-		layers := niceyaml.NewLayers(base, prod)
+		layers := niceyaml.NewSourceFromLayers(base, prod)
 
 		_, err := layers.Decode[any](t.Context())
 		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
 		require.EqualError(t, err, alone.Error())
 
-		// The layer holds no value, so the layers bind without it.
+		// The layer holds no value, so no path resolves in the merged
+		// document.
 		err = layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.Doc().Child("a"))))
-		require.EqualError(t, err, "base.yaml:1:4: $.a: here")
+		require.EqualError(t, err, "base.yaml: $.a: here")
 	})
 
 	t.Run("a layer must pass the alias limit as text", func(t *testing.T) {
@@ -906,14 +909,14 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 		_, err := limited.Decode[any](t.Context())
 		require.NoError(t, err)
 
-		_, err = niceyaml.NewLayers(limited).Decode[any](t.Context())
+		_, err = niceyaml.NewSourceFromLayers(limited).Decode[any](t.Context())
 		require.ErrorIs(t, err, niceyaml.ErrExcessiveAliasing)
 		require.EqualError(t, err, "prod.yaml:1:1: excessive aliasing")
 		assert.True(t, niceyaml.IsInvalid(err))
 
 		trusted := yamltest.FirstDocument(t, input, niceyaml.WithAliasLimit(false))
 
-		got, err := niceyaml.NewLayers(trusted).Decode[map[string]any](t.Context())
+		got, err := niceyaml.NewSourceFromLayers(trusted).Decode[map[string]any](t.Context())
 		require.NoError(t, err)
 		assert.Len(t, got["list"], 150)
 	})
@@ -927,7 +930,7 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 		_, alone := nodes[1].Decode[any](t.Context())
 		require.NoError(t, alone)
 
-		_, err := niceyaml.NewLayers(layersOf(nodes)...).Decode[any](t.Context())
+		_, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[any](t.Context())
 		require.EqualError(t, err, "prod.yaml:2:3: mapping key has no name")
 		require.ErrorIs(t, err, niceyaml.ErrUnnamedKey)
 		assert.True(t, niceyaml.IsInvalid(err))
@@ -951,7 +954,7 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 
 		// A layer whose Source holds no reference document fails as it
 		// does alone.
-		_, err := niceyaml.NewLayers(layersOf(nodes)...).Decode[any](t.Context())
+		_, err := niceyaml.NewSourceFromLayers(layersOf(nodes)...).Decode[any](t.Context())
 		require.EqualError(t, err, "prod.yaml:1:9: $.server: could not find alias \"shared\"")
 
 		var bound *niceyaml.SourceError
@@ -963,7 +966,7 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 		prod := yamltest.FirstDocument(t, prodInput, niceyaml.WithName("prod.yaml"),
 			niceyaml.WithReferences(niceyaml.NewSourceFromString(shared)))
 
-		got, err := niceyaml.NewLayers(nodes[0], prod).Decode[map[string]any](t.Context())
+		got, err := niceyaml.NewSourceFromLayers(nodes[0], prod).Decode[map[string]any](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, map[string]any{
 			"server": map[string]any{"host": "shared.example.com", "port": uint64(80)},
@@ -976,7 +979,7 @@ func TestLayers_Decode_SourceSettings(t *testing.T) {
 		doc := yamltest.FirstDocument(t, "a:\n  ---: 1\n  ...: 2\n", niceyaml.WithName("base.yaml"))
 		scoped := yamltest.At(t, doc, paths.Doc().Child("a"))
 
-		layers := niceyaml.NewLayers(scoped)
+		layers := niceyaml.NewSourceFromLayers(scoped)
 
 		assert.Equal(t, "\"---\": 1\n\"...\": 2\n", mergedText(t, layers))
 
@@ -1087,7 +1090,7 @@ func TestLayers_Document_Excerpts(t *testing.T) {
 			layers: func(t *testing.T) []*niceyaml.Node {
 				t.Helper()
 
-				inner := niceyaml.NewLayers(shown(t, baseInput, "base.yaml"), off(t, envInput, "environment"))
+				inner := niceyaml.NewSourceFromLayers(shown(t, baseInput, "base.yaml"), off(t, envInput, "environment"))
 
 				return []*niceyaml.Node{mergedDocument(t, inner), shown(t, prodInput, "prod.yaml")}
 			},
@@ -1096,7 +1099,10 @@ func TestLayers_Document_Excerpts(t *testing.T) {
 			layers: func(t *testing.T) []*niceyaml.Node {
 				t.Helper()
 
-				inner := niceyaml.NewLayers(shown(t, baseInput, "base.yaml"), shown(t, prodInput, "prod.yaml"))
+				inner := niceyaml.NewSourceFromLayers(
+					shown(t, baseInput, "base.yaml"),
+					shown(t, prodInput, "prod.yaml"),
+				)
 
 				return []*niceyaml.Node{mergedDocument(t, inner), shown(t, "db:\n  name: app\n", "local.yaml")}
 			},
@@ -1112,7 +1118,7 @@ func TestLayers_Document_Excerpts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			layers := niceyaml.NewLayers(layersOf(tc.layers(t))...)
+			layers := niceyaml.NewSourceFromLayers(layersOf(tc.layers(t))...)
 
 			assert.Equal(t, tc.want, mergedDocument(t, layers).Source().Excerpts())
 
@@ -1161,7 +1167,7 @@ func TestLayers_Document_ExcerptWidth(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			layers := niceyaml.NewLayers(
+			layers := niceyaml.NewSourceFromLayers(
 				layer(t, "db:\n  host: db.internal\n", "base.yaml", tc.base...),
 				layer(t, "db:\n  port: 5432\n", "prod.yaml", tc.prod...),
 			)
@@ -1171,7 +1177,7 @@ func TestLayers_Document_ExcerptWidth(t *testing.T) {
 	}
 }
 
-func TestLayers_MergedLayer(t *testing.T) {
+func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 	t.Parallel()
 
 	// The blank line keeps the lines of base.yaml apart from the lines of
@@ -1186,41 +1192,41 @@ func TestLayers_MergedLayer(t *testing.T) {
 	// with some of them merged into one document first. Every error
 	// binds where it binds with no layer merged.
 	tcs := map[string]struct {
-		layers func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Layers
+		layers func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Source
 	}{
 		"no layer merged": {
-			layers: func(_ *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Layers {
-				return niceyaml.NewLayers(base, mid, prod)
+			layers: func(_ *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Source {
+				return niceyaml.NewSourceFromLayers(base, mid, prod)
 			},
 		},
 		"the lower two merged": {
-			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Layers {
+			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Source {
 				t.Helper()
 
-				return niceyaml.NewLayers(mergedDocument(t, niceyaml.NewLayers(base, mid)), prod)
+				return niceyaml.NewSourceFromLayers(mergedDocument(t, niceyaml.NewSourceFromLayers(base, mid)), prod)
 			},
 		},
 		"the upper two merged": {
-			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Layers {
+			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Source {
 				t.Helper()
 
-				return niceyaml.NewLayers(base, mergedDocument(t, niceyaml.NewLayers(mid, prod)))
+				return niceyaml.NewSourceFromLayers(base, mergedDocument(t, niceyaml.NewSourceFromLayers(mid, prod)))
 			},
 		},
 		"all three merged": {
-			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Layers {
+			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Source {
 				t.Helper()
 
-				return niceyaml.NewLayers(mergedDocument(t, niceyaml.NewLayers(base, mid, prod)))
+				return niceyaml.NewSourceFromLayers(mergedDocument(t, niceyaml.NewSourceFromLayers(base, mid, prod)))
 			},
 		},
 		"the lower two merged twice": {
-			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Layers {
+			layers: func(t *testing.T, base, mid, prod *niceyaml.Node) *niceyaml.Source {
 				t.Helper()
 
-				lower := mergedDocument(t, niceyaml.NewLayers(base, mid))
+				lower := mergedDocument(t, niceyaml.NewSourceFromLayers(base, mid))
 
-				return niceyaml.NewLayers(mergedDocument(t, niceyaml.NewLayers(lower)), prod)
+				return niceyaml.NewSourceFromLayers(mergedDocument(t, niceyaml.NewSourceFromLayers(lower)), prod)
 			},
 		},
 	}
@@ -1259,7 +1265,7 @@ func TestLayers_MergedLayer(t *testing.T) {
 
 			// The validator reads a position of the merged text, which is
 			// no line of base.yaml.
-			err = layers.Validate(t.Context(), niceyaml.ValidatorFunc(
+			err = layers.ValidateDocuments(t.Context(), niceyaml.ValidatorFunc(
 				func(_ context.Context, n *niceyaml.Node) error {
 					port, err := n.Ranges(paths.Doc().Child("server", "port"))
 					require.NoError(t, err)
@@ -1292,8 +1298,8 @@ func TestLayers_MergedLayer(t *testing.T) {
 		mid := yamltest.FirstDocument(t, midInput, niceyaml.WithName("mid.yaml"))
 		prod := yamltest.FirstDocument(t, "tls: {cert: 1}\n", niceyaml.WithName("prod.yaml"))
 
-		lower := mergedDocument(t, niceyaml.NewLayers(defaults, mid))
-		layers := niceyaml.NewLayers(yamltest.At(t, lower, paths.Doc().Child("server")), prod)
+		lower := mergedDocument(t, niceyaml.NewSourceFromLayers(defaults, mid))
+		layers := niceyaml.NewSourceFromLayers(yamltest.At(t, lower, paths.Doc().Child("server")), prod)
 
 		assert.Equal(t, "host: mid.example.com\nport: 0\ntls:\n  cert: 1\n", mergedText(t, layers))
 
@@ -1350,12 +1356,12 @@ func TestLayers_MergedLayer(t *testing.T) {
 
 		// The scalar of mid.yaml replaces the mapping of base.yaml, and
 		// the mapping of prod.yaml replaces the scalar.
-		assert.Equal(t, "x:\n  q: 2\n", mergedText(t, niceyaml.NewLayers(layersOf(nodes)...)))
+		assert.Equal(t, "x:\n  q: 2\n", mergedText(t, niceyaml.NewSourceFromLayers(layersOf(nodes)...)))
 
 		// The document of mid.yaml and prod.yaml holds a mapping, which
 		// merges into the mapping of base.yaml.
-		upper := mergedDocument(t, niceyaml.NewLayers(nodes[1], nodes[2]))
-		layers := niceyaml.NewLayers(nodes[0], upper)
+		upper := mergedDocument(t, niceyaml.NewSourceFromLayers(nodes[1], nodes[2]))
+		layers := niceyaml.NewSourceFromLayers(nodes[0], upper)
 
 		assert.Equal(t, "x:\n  p: 1\n  q: 2\n", mergedText(t, layers))
 
@@ -1369,7 +1375,7 @@ func TestLayers_MergedLayer(t *testing.T) {
 
 // mergedDocument returns the root Node of the document layers merge
 // into.
-func mergedDocument(t *testing.T, layers *niceyaml.Layers) *niceyaml.Node {
+func mergedDocument(t *testing.T, layers *niceyaml.Source) *niceyaml.Node {
 	t.Helper()
 
 	doc, err := layers.Document()
@@ -1380,7 +1386,7 @@ func mergedDocument(t *testing.T, layers *niceyaml.Layers) *niceyaml.Node {
 
 // mergedText returns the text of the document layers merge into, with a
 // line break behind each line.
-func mergedText(t *testing.T, layers *niceyaml.Layers) string {
+func mergedText(t *testing.T, layers *niceyaml.Source) string {
 	t.Helper()
 
 	text := mergedDocument(t, layers).Source().View().Held().Content()

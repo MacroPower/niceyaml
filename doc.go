@@ -465,7 +465,8 @@
 // such as one pre-populated with defaults.
 //
 // A program that reads its environment or its flags passes what they set
-// as one more layer of [Layers], as described below, and the whole
+// as one more layer of [NewSourceFromLayers], as described below, and
+// the whole
 // pipeline then checks those values. [Node.SelfValidate] runs the last
 // step on its own, for a program whose library writes them into the
 // value instead. The program decodes the file with [WithSelfValidation]
@@ -494,23 +495,24 @@
 // "$.servers[1].port: port is required".
 //
 // A program that layers one file over another merges them through
-// [Layers], which holds the Source of each file in the order they apply.
-// The files merge into one document. A mapping merges into the mapping
-// below it key by key, a sequence or a scalar replaces what lies below
-// it, and a null keeps it. Each file resolves its own aliases and merge
+// [NewSourceFromLayers], which takes the Source of each file in the
+// order they apply and returns a Source of the one document the files
+// merge into. A mapping merges into the mapping below it key by key, a
+// sequence or a scalar replaces what lies below it, and a null keeps
+// it. Each file resolves its own aliases and merge
 // keys first. The pipeline runs once on the merged document, so a schema
 // that requires a key passes when any file sets it, and each error binds
 // in the file that holds its value:
 //
-//	cfg, err := niceyaml.NewLayers(base, prod).Decode[Config](ctx, niceyaml.WithValidator(schema))
+//	cfg, err := niceyaml.NewSourceFromLayers(base, prod).Decode[Config](ctx, niceyaml.WithValidator(schema))
 //	if err != nil {
 //		return err
 //	}
 //
-// [Layers.Document] returns the root Node of the merged document, and a
-// [Validator] gets that Node. A caller reads one value of the files
-// through it, as [Node.DecodeAt] reads one of a document, or prints
-// what the files merge into. The document takes its name and its
+// [Source.Document] of the merged Source returns the root Node of the
+// merged document, and a [Validator] gets that Node. A caller reads one
+// value of the files through it, as [Node.DecodeAt] reads one of a
+// document, or prints what the files merge into. The document takes its name and its
 // preamble from the lowest file, and its text is no file, so each error
 // still binds in the file that holds its value. [Node.Origin] returns
 // the Node that holds a value of the document in its file, for a
@@ -534,12 +536,13 @@
 //
 //	env := niceyaml.NewSourceFromBytes(data, niceyaml.WithName("environment"))
 //
-//	cfg, err := niceyaml.NewLayers(base, prod, env).Decode[Config](ctx, niceyaml.WithValidator(schema))
+//	cfg, err := niceyaml.NewSourceFromLayers(base, prod, env).Decode[Config](ctx, niceyaml.WithValidator(schema))
 //
 // The schema then checks the port the environment set. An error under
 // the port binds in that layer, as in
-// "environment:2:9: $.server.port: port must be at least 1". [Layers]
-// describes what such a layer cannot do, such as unset a value.
+// "environment:2:9: $.server.port: port must be at least 1".
+// [NewSourceFromLayers] describes what such a layer cannot do, such as
+// unset a value.
 //
 // [Node.At] returns a Node scoped to the node a path selects, and the
 // same pipeline then runs on that node. Decode reads one value without

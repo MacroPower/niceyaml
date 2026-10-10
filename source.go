@@ -105,7 +105,7 @@ type Source struct {
 	// referenceSpellings fills on its first call.
 	refSpellings *spellings
 	// Holds the layers the one document of the Source merges, for the
-	// Source [Layers] build, and nil for every other Source. An error
+	// Source [NewSourceFromLayers] builds, and nil for every other Source. An error
 	// bound in that document binds in a layer instead, as [layering]
 	// describes.
 	layers     *layering
@@ -176,7 +176,8 @@ type sourceConfig struct {
 	// Source.
 	noExcerpts bool
 	// Says the same of the text of a reference document, which the lines
-	// of the Source do not hold and the document [Layers] merge does.
+	// of the Source do not hold and the document [NewSourceFromLayers]
+	// builds does.
 	noReferenceExcerpts bool
 	// Says [WithExcerptWidth] set excerptWidth.
 	hasExcerptWidth bool
@@ -426,9 +427,9 @@ func WithAliasLimit(enabled bool) SourceOption {
 // [WithAliasLimit] on a Source in refs changes nothing, and the alias
 // limit counts no reference document, as WithAliasLimit describes.
 // WithReferences skips a nil Source. A reference document that does not
-// parse fails every decode of the Source. [Layers] carry what
-// [WithExcerpts] says of a Source in refs to the document they merge,
-// which holds the values an alias reads from it.
+// parse fails every decode of the Source. [NewSourceFromLayers] carries
+// what [WithExcerpts] says of a Source in refs to the document it
+// builds, which holds the values an alias reads from it.
 //
 // A reference document comes from wherever a Source does.
 // [NewSourceFromFile] reads a file, [NewSourceFromFS] reads a file of a
@@ -529,7 +530,8 @@ func WithReferences(refs ...*Source) SourceOption {
 //     excerpt. An UnmarshalYAML method that returns the go-yaml error
 //     of a parse of its bytes puts that excerpt in the message.
 //
-// The fact follows the text into the document [Layers] merge, which
+// The fact follows the text into the document [NewSourceFromLayers]
+// builds, which
 // holds the values of every layer and of each reference document a
 // layer reads through [WithReferences]. The Source of that document has
 // excerpts off when the Source of any of them has. A Source that reads a
@@ -573,8 +575,8 @@ func WithExcerpts(enabled bool) SourceOption {
 // with the printer option
 // [go.jacobcolvin.com/niceyaml/printer.WithWrap].
 //
-// The document [Layers] merge takes the width from the lowest layer, as
-// it takes its other settings.
+// The document [NewSourceFromLayers] builds takes the width from the
+// lowest layer, as it takes its other settings.
 func WithExcerptWidth(cols int) SourceOption {
 	return func(c *sourceConfig) {
 		c.excerptWidth = max(0, cols)
@@ -1521,6 +1523,12 @@ func (d *document) anchorToken() *token.Token {
 // holds a [PanicError] and does not match ErrSyntax. The documents the
 // parser was reading have no tree, as the documents of a syntax error
 // have none, and every later call returns the same error.
+//
+// # Merged Documents
+//
+// The Source [NewSourceFromLayers] builds holds the error of a layer
+// that holds no value, as NewSourceFromLayers describes, and File
+// returns that error as it returns a syntax error.
 func (s *Source) File() (*ast.File, error) {
 	s.parseOnce()
 

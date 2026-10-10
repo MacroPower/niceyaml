@@ -17,7 +17,7 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
-// errNoScalarText is the error of a node that [Layers] cannot write into
+// errNoScalarText is the error of a node that [mergeLayers] cannot write into
 // the merged document, since it is no collection and holds no text.
 var errNoScalarText = errors.New("node has no text to merge")
 
@@ -32,7 +32,7 @@ const (
 	mergedMapping
 )
 
-// mergedValue is a value of the document that [Layers] merge their
+// mergedValue is a value of the document that [mergeLayers] merges its
 // layers into. A [layerReader] reads one from each layer, with every
 // alias and `<<` merge key of the layer resolved, and
 // [mergedValue.merge] puts the value of a higher layer over it.
@@ -141,7 +141,7 @@ func (v *mergedValue) inline() string {
 	return v.tag + " " + text
 }
 
-// layerReader reads the value of one layer of a [Layers] as the go-yaml
+// layerReader reads the value of one layer of a merged [Source] as the go-yaml
 // decoder reads it, into a [mergedValue] that holds no alias and no `<<`
 // merge key.
 //
@@ -723,19 +723,19 @@ func (w *mergedWriter) nested(v *mergedValue, indent int, compact bool) {
 	}
 }
 
-// layering is what the [Source] that [Layers] merge their layers into
-// knows of those layers: the merged value, which names the layer each
+// layering is what the [Source] that [NewSourceFromLayers] builds knows
+// of its layers: the merged value, which names the layer each
 // value came from, and the lowest and the highest layer. An error bound
 // in the one document of that Source binds in one of the layers instead,
 // since the merged text is no file of the caller. An error with a
 // location binds in the layer [layering.layer] picks, and any other
 // error in the lowest layer, whose name the Source has.
 //
-// A layer can be a Node of a document that other [Layers] built, whose
-// text is no file of the caller either. An error that reaches such a
-// layer binds in a layer of that document instead, as an error bound
-// through that Node does. Every error thus binds in a document that no
-// Layers built.
+// A layer can be a merged Source, or a Node of its document, whose text
+// is no file of the caller either. An error that reaches such a layer
+// binds in a layer of that document instead, as an error bound through
+// that Node does. Every error thus binds in a document that no merge
+// built.
 type layering struct {
 	// The merged value, or nil when no layer holds a value.
 	root *mergedValue
@@ -744,7 +744,7 @@ type layering struct {
 }
 
 // home returns the layer an error binds in when it found no layer of its
-// own, which is the lowest one. A lowest layer that other [Layers] built
+// own, which is the lowest one. A lowest layer that a merge built
 // gives the home of its own layers. A nil l has no home, and home then
 // returns the zero value.
 func (l *layering) home() resolvedLayer {
@@ -774,7 +774,7 @@ func (l *layering) home() resolvedLayer {
 // value. That layer can come from a [Source] that holds no one document,
 // and it then has no Node for the path to resolve in.
 //
-// A layer that other [Layers] built holds the value in a layer of its
+// A layer that a merge built holds the value in a layer of its
 // own, so the search goes on there with the path as the layer reads it.
 func (l *layering) layer(doc *Node, path paths.Path) (resolvedLayer, paths.Path, paths.Path) {
 	if l == nil {
@@ -837,7 +837,7 @@ func (v *mergedValue) child(sel paths.Selector) *mergedValue {
 	return nil
 }
 
-// resolvedLayer is one layer of a [Layers], as [Layer] resolves it. The
+// resolvedLayer is one layer of a merged [Source], as [Layer] resolves it. The
 // zero value is a layer that adds nothing.
 type resolvedLayer struct {
 	// The Source of the layer, where its errors bind.
@@ -905,49 +905,37 @@ func (l resolvedLayer) read(ctx context.Context) (*mergedValue, error) {
 	return newLayerReader(l.node).read(ctx)
 }
 
-// mergedLayers is what the layers of a [Layers] merge into.
-type mergedLayers struct {
-	// The root Node of the merged document.
-	doc *Node
-	// The error of the lowest layer that holds no value a decode can
-	// read, such as one that did not parse, or nil when every layer holds
-	// one.
-	err error
-}
-
-// mergeLayers returns what given merges into, lowest first. A layer that
-// holds no value a decode can read adds nothing to the merged document.
-// Every use of the [Layers] shares the result, so ctx must never end.
+// mergeLayers returns the [*Source] that given merge into, lowest first,
+// as [NewSourceFromLayers] describes. A layer that holds no value a
+// decode can read adds nothing to the merged document, and the Source
+// holds the error of the lowest such layer as the error of its one
+// document, as it holds the syntax error of a file that did not parse.
+// The merge decodes each layer with ctx.
 //
-// The document belongs to a [Source] of its own, which holds the merged
-// value as YAML text below the preamble of the lowest layer. The Source
-// takes its name, its file path, and its file system from the Source of
-// that layer, with the settings [WithAllowDuplicateKeys],
-// [WithAliasLimit], and [WithExcerptWidth] gave it. It takes no reference
-// documents, since the
-// merged value holds no alias. It has excerpts off when [showsLayers]
-// reports false, whatever [WithExcerpts] gave the lowest layer. When
-// given adds no layer, the Source is empty and has no name.
-//
-// A text that does not parse to one document gives that error, with the
-// Node [noLayers] returns, so the layers then bind every error with no
-// position.
-func mergeLayers(ctx context.Context, given []Layer) mergedLayers {
+// The Source holds the merged value as YAML text below the preamble of
+// the lowest layer. It takes its name, its file path, and its file system
+// from the Source of that layer, with the settings
+// [WithAllowDuplicateKeys], [WithAliasLimit], and [WithExcerptWidth] gave
+// it. It takes no reference documents, since the merged value holds no
+// alias. It has excerpts off when [showsLayers] reports false, whatever
+// [WithExcerpts] gave the lowest layer. When given adds no layer, the
+// Source is empty and has no name, and its errors bind with no position.
+func mergeLayers(ctx context.Context, given []Layer) *Source {
 	layers := resolveLayers(given)
 	if len(layers) == 0 {
-		return mergedLayers{doc: noLayers()}
+		return NewSourceFromString("")
 	}
 
 	var (
-		root   *mergedValue
-		merged mergedLayers
+		root     *mergedValue
+		layerErr error
 	)
 
 	for _, layer := range layers {
 		v, err := layer.read(ctx)
 		if err != nil {
-			if merged.err == nil {
-				merged.err = err
+			if layerErr == nil {
+				layerErr = err
 			}
 
 			continue
@@ -967,21 +955,14 @@ func mergeLayers(ctx context.Context, given []Layer) mergedLayers {
 
 	w.document(root)
 
-	doc, err := newMergedDocument(lowest.source, w.sb.String(), showsLayers(layers))
-	if err != nil {
-		if merged.err == nil {
-			merged.err = fmt.Errorf("merge layers: %w", err)
-		}
+	src := newMergedSource(lowest.source, w.sb.String(), showsLayers(layers))
+	src.layers = &layering{root: root, lowest: lowest, top: layers[len(layers)-1]}
 
-		merged.doc = noLayers()
-
-		return merged
+	if layerErr != nil {
+		src.failDocuments(layerErr)
 	}
 
-	doc.source.layers = &layering{root: root, lowest: lowest, top: layers[len(layers)-1]}
-	merged.doc = doc
-
-	return merged
+	return src
 }
 
 // preambleText returns the text of the preamble of the document of n, as
@@ -1021,12 +1002,13 @@ func showsLayers(layers []resolvedLayer) bool {
 	return true
 }
 
-// newMergedDocument returns the root Node of the one document of a new
-// [Source] that holds text, with the name, the file, and the settings of
-// from, as [mergeLayers] lists them. An error may show the text in an
-// excerpt when excerpts is set, whatever [WithExcerpts] says of from. It
-// returns an error when text does not parse to one document.
-func newMergedDocument(from *Source, text string, excerpts bool) (*Node, error) {
+// newMergedSource returns a new [*Source] that holds text, with the name,
+// the file, and the settings of from, as [mergeLayers] lists them. An
+// error may show the text in an excerpt when excerpts is set, whatever
+// [WithExcerpts] says of from. The Source parses in the call, so it
+// binds any syntax error of the text before the merge marks it as one
+// that merges layers.
+func newMergedSource(from *Source, text string, excerpts bool) *Source {
 	src := NewSourceFromString(text, func(c *sourceConfig) {
 		*c = from.sourceConfig
 
@@ -1038,15 +1020,19 @@ func newMergedDocument(from *Source, text string, excerpts bool) (*Node, error) 
 		c.noExcerpts = !excerpts
 	})
 
-	docs := src.documents()
+	src.parseOnce()
 
-	if len(docs) != 1 {
-		return nil, src.Bind(fmt.Errorf("%w: merged layers", ErrMultipleDocuments))
+	return src
+}
+
+// failDocuments gives every document of the Source err as the error its
+// Node returns, and gives the Source err as the error [Source.File]
+// returns, so the Source reads as one whose file did not parse. The
+// Source has parsed already, and no caller holds it yet.
+func (s *Source) failDocuments(err error) {
+	s.fileErr = err
+
+	for _, doc := range s.docs {
+		doc.doc.err = err
 	}
-
-	if docs[0].doc.err != nil {
-		return nil, docs[0].doc.err
-	}
-
-	return docs[0], nil
 }

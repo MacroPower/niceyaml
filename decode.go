@@ -462,11 +462,11 @@ type SelfValidator interface {
 //
 // A validator that resolves such a file beside the file that names it
 // reads the directory from [Node.Origin] of the Node of the value, and
-// not from [Node.FilePath] of the Node it got. Under [Layers] that Node
-// belongs to the merged document, which has the file path of the lowest
-// layer, whichever layer holds the value. Origin returns the Node of the
-// value in the file of its layer, and the receiver where the validator
-// runs on one file.
+// not from [Node.FilePath] of the Node it got. In the Source
+// [NewSourceFromLayers] builds, that Node belongs to the merged
+// document, which has the file path of the lowest layer, whichever layer
+// holds the value. Origin returns the Node of the value in the file of
+// its layer, and the receiver where the validator runs on one file.
 //
 // # Added Context
 //
@@ -1215,7 +1215,7 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 //
 // Receive instances from [Source.Documents], [Source.AllDocuments],
 // [Source.Document], [Node.At], [Node.Nodes], [Node.Document],
-// [Layers.Document], [SourceError.Node], or [SourceError.Document].
+// [SourceError.Node], or [SourceError.Document].
 //
 // # Decoding
 //
@@ -1286,10 +1286,10 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 //
 // # Merged Documents
 //
-// A Node from [Layers.Document] is the root of the document that
-// [Layers] merge their files into. Its Source holds the merged text,
+// A Node of the Source [NewSourceFromLayers] builds belongs to the
+// document its layers merge into. Its Source holds the merged text,
 // which is no file, so each error it returns binds in the file of a
-// layer instead, as Layers.Document describes.
+// layer instead, as NewSourceFromLayers describes.
 type Node struct {
 	// The node the scope selects, which At or Nodes resolves once when it
 	// scopes the Node. The root of a document leaves it unset, since its
@@ -1363,6 +1363,13 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 // together with the document above it, as [Source.AllDocuments]
 // describes. Both documents then return the same error, which is bound to
 // the one of the two that holds its location. A nil Node has none.
+//
+// # Merged Documents
+//
+// The document [NewSourceFromLayers] builds holds the error of a layer
+// that holds no value, as NewSourceFromLayers describes, bound in the
+// file of that layer. Err returns it as it returns a syntax error, and
+// the methods that read the tree return it too.
 func (n *Node) Err() error {
 	if n == nil {
 		return nil
@@ -1913,8 +1920,8 @@ func (n *Node) Preamble() token.Tokens {
 // read, so a schema routes on the file and not on how the caller
 // spelled its path. Returns an empty string when the source has none.
 //
-// The document [Layers] build came from no file, and its Source has the
-// path of the lowest layer. Every Node of it returns that path, whichever
+// The document [NewSourceFromLayers] builds came from no file, and its
+// Source has the path of the lowest layer. Every Node of it returns that path, whichever
 // layer holds its value. [Node.Origin] returns the Node of the value in
 // the file of its layer, and FilePath of that Node names the file.
 func (n *Node) FilePath() string {
@@ -1924,7 +1931,8 @@ func (n *Node) FilePath() string {
 // FS returns the file system the path of the file the document came from
 // names a file in, which is [Source.FS]. It returns nil when the source
 // has none, where a path names a file on disk. A Node of the document
-// [Layers] build returns the file system of the lowest layer, as
+// [NewSourceFromLayers] builds returns the file system of the lowest
+// layer, as
 // [Node.FilePath] describes.
 func (n *Node) FS() fs.FS {
 	return n.source.FS()
@@ -2470,11 +2478,12 @@ func contextEnded(err error) bool {
 }
 
 // DecodeOption configures [Node.Decode], [Node.DecodeInto],
-// [Node.DecodeAt], and [Node.DecodeIfPresent]. [Layers.Decode] and
-// [Layers.DecodeInto] apply them to the one decode of the merged
-// document. [Node.SelfValidate], [Source.SelfValidate], and
-// [Layers.SelfValidate] take them too, and read only the options that
-// say how a value decodes, as Node.SelfValidate lists them.
+// [Node.DecodeAt], and [Node.DecodeIfPresent]. [Source.Decode] and
+// [Source.DecodeInto] apply them to the one decode of the document of a
+// Source, such as the merged document of [NewSourceFromLayers].
+// [Node.SelfValidate] and [Source.SelfValidate] take them too, and read
+// only the options that say how a value decodes, as Node.SelfValidate
+// lists them.
 //
 // Available options:
 //   - [WithValidator]
@@ -2691,10 +2700,9 @@ func WithValidator(dv Validator) DecodeOption {
 // WithSelfValidation is a [DecodeOption] that sets whether the values
 // in a decoded value that implement [SelfValidator] validate themselves
 // after decoding. The default is true. Validators given with
-// [WithValidator] run either way. [Node.SelfValidate],
-// [Source.SelfValidate], and [Layers.SelfValidate] run the walk
-// whatever the option says, so a caller that turns it off for the decode
-// validates the value later.
+// [WithValidator] run either way. [Node.SelfValidate] and
+// [Source.SelfValidate] run the walk whatever the option says, so a
+// caller that turns it off for the decode validates the value later.
 func WithSelfValidation(enabled bool) DecodeOption {
 	return func(c *decodeConfig) {
 		c.skipSelfValidation = !enabled
@@ -3102,10 +3110,10 @@ func DecodeOptions(opts ...DecodeOption) DecodeOption {
 // same way through a pointer to a struct and through an inline field. The
 // document replaces a slice, an array, a map, or a value of an interface
 // type whole, so no element or entry of the old one remains. A program
-// that layers one file over another merges both through [Layers] instead
-// of decoding each in turn. The files then merge as documents, so a map
-// keeps the entries of both, and each error binds in the file that holds
-// its value.
+// that layers one file over another merges both through
+// [NewSourceFromLayers] instead of decoding each in turn. The files then
+// merge as documents, so a map keeps the entries of both, and each error
+// binds in the file that holds its value.
 //
 // # Nulls and Tags
 //

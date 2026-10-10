@@ -114,7 +114,7 @@ func (n *Node) decodeProblems(
 // where [Node.bindDecodeError] resolves it, which is where the collector
 // marks a problem that takes a path.
 //
-// The binding of a rejection in the document [Layers] build resolves in
+// The binding of a rejection in the document [NewSourceFromLayers] builds resolves in
 // the file of a layer, and the collector reads the merged text. Such a
 // rejection lies where [Node.mergedPosition] finds it in that text.
 //
@@ -142,9 +142,9 @@ func (n *Node) rejectedAt(err, rejection error) (position.Position, bool) {
 }
 
 // mergedPosition returns the position of rejection in the text of the
-// document of n, which [Layers] built, where rejection is a rejection as
+// document of n, which [NewSourceFromLayers] built, where rejection is a rejection as
 // [Node.decodeRejection] returns it. That is the position the binding of
-// the rejection reports in a document no Layers built. A position stands
+// the rejection reports in a document no merge built. A position stands
 // as it is, and so does the start of a range. A path that starts at `@`
 // reads from the scope of n. Every path resolves as
 // [Node.resolveLocation] resolves it.

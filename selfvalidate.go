@@ -35,7 +35,7 @@ import (
 // # Environment and Flags
 //
 // A program that can list what its environment or its flags set passes
-// those values as a layer of [Layers], which validates them as it
+// those values as a layer of [NewSourceFromLayers], which validates them as it
 // validates a file. SelfValidate is for the program whose library writes
 // them into the value instead, or that applies its defaults there. That
 // program decodes the file with the walk off, sets the rest of the
@@ -58,14 +58,15 @@ import (
 // # Layers
 //
 // A program that layers one file over another merges them through
-// [Layers]. [Layers.SelfValidate] then binds each error in the file that
-// holds its value, where a SelfValidate through the Node of one file
-// binds every error in that file:
+// [NewSourceFromLayers]. [Source.SelfValidate] on the merged Source then
+// binds each error in the file that holds its value, where a
+// SelfValidate through the Node of one file binds every error in that
+// file:
 //
-//	return niceyaml.NewLayers(base, prod).SelfValidate(ctx, &cfg)
+//	return niceyaml.NewSourceFromLayers(base, prod).SelfValidate(ctx, &cfg)
 //
-// Layers.SelfValidate returns the error of a file that did not parse,
-// and the walk does not run.
+// The merged Source holds the error of a layer that did not parse, so
+// Source.SelfValidate returns that error and the walk does not run.
 //
 // # Decode Options
 //
