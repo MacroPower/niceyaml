@@ -549,10 +549,7 @@ func TestDiffer_Full(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
-			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
-
-			result := diff.Diff(beforeTokens.Lines(), afterTokens.Lines())
+			result := diffStrings(tc.before, tc.after)
 
 			got := result.Unified()
 			assert.Equal(t, tc.want, got.String())
@@ -619,10 +616,7 @@ func TestDiffer_Full_Flags(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
-			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
-
-			result := diff.Diff(beforeTokens.Lines(), afterTokens.Lines())
+			result := diffStrings(tc.before, tc.after)
 
 			got := result.Unified()
 
@@ -959,10 +953,7 @@ func TestDiffer_Hunks(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
-			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
-
-			result := diff.Diff(beforeTokens.Lines(), afterTokens.Lines())
+			result := diffStrings(tc.before, tc.after)
 			got := result.Hunks(tc.context)
 
 			// The hunks keep the indices of the unified view.
@@ -1023,9 +1014,7 @@ func TestDiffResult_HunksKeepUnifiedIndices(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			before := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
-			after := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
-			result := diff.Diff(before.Lines(), after.Lines())
+			result := diffStrings(tc.before, tc.after)
 
 			unified := result.Unified()
 			got := result.Hunks(1)
@@ -1474,10 +1463,7 @@ func TestDiffer_IsEmpty(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			beforeTokens := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
-			afterTokens := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
-
-			result := diff.Diff(beforeTokens.Lines(), afterTokens.Lines())
+			result := diffStrings(tc.before, tc.after)
 
 			assert.Equal(t, tc.want, result.IsEmpty())
 		})
@@ -1529,13 +1515,7 @@ func TestDiffResult_Stats(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			beforeSrc := niceyaml.NewSourceFromString(tt.before, niceyaml.WithName("a"))
-			afterSrc := niceyaml.NewSourceFromString(tt.after, niceyaml.WithName("b"))
-
-			result := diff.Diff(
-				beforeSrc.Lines(),
-				afterSrc.Lines(),
-			)
+			result := diffStrings(tt.before, tt.after)
 			got := result.Stats()
 			assert.Equal(t, diff.Stats{Added: tt.wantAdded, Removed: tt.wantRemoved}, got)
 			assert.Equal(t, tt.wantAdded > 0 || tt.wantRemoved > 0, got.Changed())
@@ -1751,13 +1731,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			beforeSrc := niceyaml.NewSourceFromString(tc.before, niceyaml.WithName("a"))
-			afterSrc := niceyaml.NewSourceFromString(tc.after, niceyaml.WithName("b"))
-
-			result := diff.Diff(
-				beforeSrc.Lines(),
-				afterSrc.Lines(),
-			)
+			result := diffStrings(tc.before, tc.after)
 
 			beforeView := result.Before()
 			afterView := result.After()
@@ -1993,10 +1967,7 @@ func TestDiffer_MultipleRenders(t *testing.T) {
 		line5: 5
 	`)
 
-	beforeTokens := niceyaml.NewSourceFromString(before, niceyaml.WithName("a"))
-	afterTokens := niceyaml.NewSourceFromString(after, niceyaml.WithName("b"))
-
-	result := diff.Diff(beforeTokens.Lines(), afterTokens.Lines())
+	result := diffStrings(before, after)
 
 	// Call Unified multiple times.
 	full1 := result.Unified()
@@ -2057,6 +2028,14 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 		require.NotNil(t, hunks)
 		assert.Equal(t, 0, hunks.Count())
 	})
+}
+
+// diffStrings diffs the lines of two YAML inputs.
+func diffStrings(before, after string) *diff.Result {
+	return diff.Diff(
+		niceyaml.NewSourceFromString(before).Lines(),
+		niceyaml.NewSourceFromString(after).Lines(),
+	)
 }
 
 // hunkHeaders returns the hunk headers of a view from [diff.Result.Hunks]
