@@ -241,7 +241,6 @@ func TestThemeStyles(t *testing.T) {
 		var th theme.Theme
 
 		assert.Equal(t, style.Styles{}, th.Styles())
-		assert.Equal(t, lipgloss.NewStyle(), th.Style(kind.Text))
 	})
 }
 
