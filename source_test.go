@@ -742,8 +742,7 @@ func TestSource_File_BlankBlockScalarContent(t *testing.T) {
 				assert.True(t, matches, "copy %s matches no token of the Source", yamltest.FormatToken(tk))
 			}
 
-			doc, err := source.Document()
-			require.NoError(t, err)
+			doc := yamltest.Document(t, source)
 
 			yamltest.RequireTokensEqual(t,
 				source.Tokens()[2:4],
@@ -1619,8 +1618,7 @@ func TestSource_Offset_Range(t *testing.T) {
 
 			source := niceyaml.NewSourceFromString(tc.input)
 
-			doc, err := source.Document()
-			require.NoError(t, err)
+			doc := yamltest.Document(t, source)
 
 			ranges, err := doc.Ranges(tc.path)
 			require.NoError(t, err)
@@ -4036,10 +4034,9 @@ func TestSource_Bind(t *testing.T) {
 		// A path resolves in the document Source.Document returns, so a
 		// caller holding a configuration file binds through the source.
 		one := niceyaml.NewSourceFromString("# header\na: 1\nb: 22\n", niceyaml.WithName("one.yaml"))
-		doc, err := one.Document()
-		require.NoError(t, err)
+		doc := yamltest.Document(t, one)
 
-		err = one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
+		err := one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
 
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, "one.yaml:3:4: $.b: bad", err.Error())
@@ -4063,10 +4060,9 @@ func TestSource_Bind(t *testing.T) {
 		t.Parallel()
 
 		one := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("one.yaml"))
-		doc, err := one.Document()
-		require.NoError(t, err)
+		doc := yamltest.Document(t, one)
 
-		err = one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("zz").Index(0))))
+		err := one.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("zz").Index(0))))
 
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, "one.yaml: $.zz[0]: bad", err.Error())
@@ -4150,8 +4146,7 @@ func TestSource_Bind(t *testing.T) {
 			src := niceyaml.NewSourceFromString(input, niceyaml.WithName("one.yaml"))
 			err := src.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
 
-			doc, docErr := src.Document()
-			require.NoError(t, docErr)
+			doc := yamltest.Document(t, src)
 
 			bound := yamltest.RequireSourceError(t, err)
 			assert.Equal(t, want, err.Error())
@@ -4170,8 +4165,7 @@ func TestSource_Bind(t *testing.T) {
 			src := niceyaml.NewSourceFromString(input, niceyaml.WithName("none.yaml"))
 			err := src.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
 
-			doc, docErr := src.Document()
-			require.NoError(t, docErr)
+			doc := yamltest.Document(t, src)
 
 			bound := yamltest.RequireSourceError(t, err)
 			assert.Same(t, doc, bound.Document(), input)
@@ -4330,8 +4324,7 @@ func TestNewSourceFromReader(t *testing.T) {
 		assert.Equal(t, "<stdin>", source.Name())
 		assert.Empty(t, source.FilePath())
 
-		doc, err := source.Document()
-		require.NoError(t, err)
+		doc := yamltest.Document(t, source)
 
 		got, err := doc.Decode[map[string]string](t.Context())
 		require.NoError(t, err)
@@ -4408,8 +4401,7 @@ func TestNewSourceFromFile(t *testing.T) {
 			assert.Equal(t, tc.wantName, source.Name())
 			assert.Equal(t, tc.wantFilePath, source.FilePath())
 
-			doc, err := source.Document()
-			require.NoError(t, err)
+			doc := yamltest.Document(t, source)
 			assert.Equal(t, tc.wantFilePath, doc.FilePath())
 
 			got, err := doc.Decode[map[string]string](t.Context())
@@ -4483,8 +4475,7 @@ func TestSource_FS(t *testing.T) {
 				return
 			}
 
-			doc, err := tc.source.Document()
-			require.NoError(t, err)
+			doc := yamltest.Document(t, tc.source)
 
 			if tc.want == nil {
 				assert.Nil(t, doc.FS())
@@ -4510,8 +4501,7 @@ func TestNewSourceFromFS(t *testing.T) {
 		assert.Equal(t, "configs/app.yaml", source.FilePath())
 		assert.Equal(t, "configs/app.yaml", source.Name())
 
-		doc, err := source.Document()
-		require.NoError(t, err)
+		doc := yamltest.Document(t, source)
 		assert.Equal(t, "configs/app.yaml", doc.FilePath())
 	})
 
@@ -4683,8 +4673,7 @@ func TestSource_SelfValidate(t *testing.T) {
 			assert.Equal(t, tc.located, ok)
 
 			// The root Node of the document returns the same error.
-			doc, err := source.Document()
-			require.NoError(t, err)
+			doc := yamltest.Document(t, source)
 			require.EqualError(t, doc.SelfValidate(t.Context(), failing()), tc.want)
 
 			// The walk runs whatever WithSelfValidation says.
@@ -4855,8 +4844,7 @@ func TestWithReferences(t *testing.T) {
 						niceyaml.WithReferences(tc.refs...),
 					)
 
-					doc, err := src.Document()
-					require.NoError(t, err)
+					doc := yamltest.Document(t, src)
 
 					// The validator records the Node each run gets.
 					var seen []*niceyaml.Node
@@ -4867,7 +4855,7 @@ func TestWithReferences(t *testing.T) {
 						return n.Validate(ctx, serverSchema)
 					})
 
-					err = check(t.Context(), src, doc, v)
+					err := check(t.Context(), src, doc, v)
 					assert.Equal(t, tc.want, bindingMessages(err))
 
 					require.Len(t, seen, 1)
@@ -5162,8 +5150,7 @@ func TestWithReferences(t *testing.T) {
 			niceyaml.WithReferences(defaults),
 		)
 
-		doc, err := src.Document()
-		require.NoError(t, err)
+		doc := yamltest.Document(t, src)
 
 		alias := paths.Current().Child("server")
 		port := alias.Child("port")

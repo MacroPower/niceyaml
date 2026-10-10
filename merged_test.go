@@ -1441,13 +1441,13 @@ func TestNewSourceFromLayers_Document_Excerpts(t *testing.T) {
 		},
 		"a merged layer holds a layer with excerpts off": {
 			layers: []*niceyaml.Node{
-				mergedDocument(t, yamltest.Layers(t, shown(baseInput, "base.yaml"), off(envInput, "environment"))),
+				yamltest.Document(t, yamltest.Layers(t, shown(baseInput, "base.yaml"), off(envInput, "environment"))),
 				shown(prodInput, "prod.yaml"),
 			},
 		},
 		"a merged layer holds layers with excerpts on": {
 			layers: []*niceyaml.Node{
-				mergedDocument(t, yamltest.Layers(t, shown(baseInput, "base.yaml"), shown(prodInput, "prod.yaml"))),
+				yamltest.Document(t, yamltest.Layers(t, shown(baseInput, "base.yaml"), shown(prodInput, "prod.yaml"))),
 				shown("db:\n  name: app\n", "local.yaml"),
 			},
 			want: true,
@@ -1461,7 +1461,7 @@ func TestNewSourceFromLayers_Document_Excerpts(t *testing.T) {
 
 			layers := yamltest.Layers(t, layersOf(tc.layers)...)
 
-			assert.Equal(t, tc.want, mergedDocument(t, layers).Source().ShowsExcerpts())
+			assert.Equal(t, tc.want, yamltest.Document(t, layers).Source().ShowsExcerpts())
 
 			// The Source has excerpts off for each merged text that holds
 			// the secret.
@@ -1491,24 +1491,24 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 		"the lower two merged": func(t *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer {
 			t.Helper()
 
-			return []niceyaml.Layer{mergedDocument(t, yamltest.Layers(t, base, mid)), prod}
+			return []niceyaml.Layer{yamltest.Document(t, yamltest.Layers(t, base, mid)), prod}
 		},
 		"the upper two merged": func(t *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer {
 			t.Helper()
 
-			return []niceyaml.Layer{base, mergedDocument(t, yamltest.Layers(t, mid, prod))}
+			return []niceyaml.Layer{base, yamltest.Document(t, yamltest.Layers(t, mid, prod))}
 		},
 		"all three merged": func(t *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer {
 			t.Helper()
 
-			return []niceyaml.Layer{mergedDocument(t, yamltest.Layers(t, base, mid, prod))}
+			return []niceyaml.Layer{yamltest.Document(t, yamltest.Layers(t, base, mid, prod))}
 		},
 		"the lower two merged twice": func(t *testing.T, base, mid, prod *niceyaml.Node) []niceyaml.Layer {
 			t.Helper()
 
-			lower := mergedDocument(t, yamltest.Layers(t, base, mid))
+			lower := yamltest.Document(t, yamltest.Layers(t, base, mid))
 
-			return []niceyaml.Layer{mergedDocument(t, yamltest.Layers(t, lower)), prod}
+			return []niceyaml.Layer{yamltest.Document(t, yamltest.Layers(t, lower)), prod}
 		},
 	}
 
@@ -1584,7 +1584,7 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 		mid := yamltest.FirstDocument(t, midInput, niceyaml.WithName("mid.yaml"))
 		prod := yamltest.FirstDocument(t, "tls: {cert: 1}\n", niceyaml.WithName("prod.yaml"))
 
-		lower := mergedDocument(t, yamltest.Layers(t, defaults, mid))
+		lower := yamltest.Document(t, yamltest.Layers(t, defaults, mid))
 		layers := yamltest.Layers(t, yamltest.At(t, lower, paths.Doc().Child("server")), prod)
 
 		assert.Equal(t, "host: mid.example.com\nport: 0\ntls:\n  cert: 1\n", mergedText(t, layers))
@@ -1644,7 +1644,7 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 
 		// The document of mid.yaml and prod.yaml holds a mapping, which
 		// merges into the mapping of base.yaml.
-		upper := mergedDocument(t, yamltest.Layers(t, nodes[1], nodes[2]))
+		upper := yamltest.Document(t, yamltest.Layers(t, nodes[1], nodes[2]))
 		layers := yamltest.Layers(t, nodes[0], upper)
 
 		assert.Equal(t, "x:\n  p: 1\n  q: 2\n", mergedText(t, layers))
@@ -1742,23 +1742,12 @@ func requireLayerBinds(t *testing.T, layers *niceyaml.Source, binds map[string]s
 	}
 }
 
-// mergedDocument returns the root Node of the document layers merge
-// into.
-func mergedDocument(t *testing.T, layers *niceyaml.Source) *niceyaml.Node {
-	t.Helper()
-
-	doc, err := layers.Document()
-	require.NoError(t, err)
-
-	return doc
-}
-
 // mergedText returns the text of the document layers merge into, with a
 // line break behind each line.
 func mergedText(t *testing.T, layers *niceyaml.Source) string {
 	t.Helper()
 
-	text := mergedDocument(t, layers).Source().View().Held().Content()
+	text := yamltest.Document(t, layers).Source().View().Held().Content()
 	if text == "" {
 		return ""
 	}
