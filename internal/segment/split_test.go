@@ -54,6 +54,65 @@ func part(t *testing.T, lines []segment.Line, li, idx int) *token.Token {
 	return lines[li].Segments[idx].Part()
 }
 
+// assertPartLines checks that every part on a line reports that line's
+// number.
+func assertPartLines(t *testing.T, lines []segment.Line) {
+	t.Helper()
+
+	for _, l := range lines {
+		for _, seg := range l.Segments {
+			assert.Equal(t, l.Number, seg.Part().Position.Line, "part %q line", seg.Part().Origin)
+		}
+	}
+}
+
+// assertOffsetsIncrease checks that the offsets grow from part to part
+// through lines.
+func assertOffsetsIncrease(t *testing.T, lines []segment.Line) {
+	t.Helper()
+
+	prev := 0
+
+	for _, l := range lines {
+		for _, seg := range l.Segments {
+			p := seg.Part()
+
+			// The newline a tag repeats holds no new rune, so it may
+			// share an offset.
+			if p.Origin == "\n" || p.Origin == "\r\n" || p.Origin == "\r" {
+				assert.GreaterOrEqual(t, p.Position.Offset, prev, "part %q on line %d", p.Origin, l.Number)
+			} else {
+				assert.Greater(t, p.Position.Offset, prev, "part %q on line %d", p.Origin, l.Number)
+			}
+
+			prev = p.Position.Offset
+		}
+	}
+}
+
+// assertFirstTextParts checks that the first part of each token that
+// holds text carries the token's own Line, Column, and Offset.
+func assertFirstTextParts(t *testing.T, lines []segment.Line) {
+	t.Helper()
+
+	seen := map[*token.Token]bool{}
+
+	for _, l := range lines {
+		for _, seg := range l.Segments {
+			src, p := seg.Source(), seg.Part()
+			if seen[src] || strings.TrimSpace(p.Origin) == "" {
+				continue
+			}
+
+			seen[src] = true
+
+			assert.Equal(t, src.Position.Line, p.Position.Line, "part %q line", p.Origin)
+			assert.Equal(t, src.Position.Column, p.Position.Column, "part %q column", p.Origin)
+			assert.Equal(t, src.Position.Offset, p.Position.Offset, "part %q offset", p.Origin)
+		}
+	}
+}
+
 func TestSplit_Lines(t *testing.T) {
 	t.Parallel()
 
@@ -288,11 +347,9 @@ func TestSplit_Lines(t *testing.T) {
 			// belongs to.
 			for i, l := range lines {
 				assert.Equal(t, i+1, l.Number)
-
-				for _, seg := range l.Segments {
-					assert.Equal(t, l.Number, seg.Part().Position.Line, "part %q", seg.Part().Origin)
-				}
 			}
+
+			assertPartLines(t, lines)
 		})
 	}
 }
@@ -524,29 +581,9 @@ func TestSplit_OffsetsIncrease(t *testing.T) {
 			lines := segment.Split(tokens.Tokenize(input))
 			require.NotEmpty(t, lines)
 
-			prev := 0
-
-			for _, l := range lines {
-				for _, seg := range l.Segments {
-					p := seg.Part()
-
-					// The newline a tag repeats holds no new rune, so it may
-					// share an offset.
-					if isPureNewline(p.Origin) {
-						assert.GreaterOrEqual(t, p.Position.Offset, prev, "part %q on line %d", p.Origin, l.Number)
-					} else {
-						assert.Greater(t, p.Position.Offset, prev, "part %q on line %d", p.Origin, l.Number)
-					}
-
-					prev = p.Position.Offset
-				}
-			}
+			assertOffsetsIncrease(t, lines)
 		})
 	}
-}
-
-func isPureNewline(s string) bool {
-	return s == "\n" || s == "\r\n" || s == "\r"
 }
 
 func TestSplit_FirstTextPartKeepsPosition(t *testing.T) {
@@ -570,22 +607,7 @@ func TestSplit_FirstTextPartKeepsPosition(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			seen := map[*token.Token]bool{}
-
-			for _, l := range segment.Split(tokens.Tokenize(input)) {
-				for _, seg := range l.Segments {
-					src, p := seg.Source(), seg.Part()
-					if seen[src] || strings.TrimSpace(p.Origin) == "" {
-						continue
-					}
-
-					seen[src] = true
-
-					assert.Equal(t, src.Position.Line, p.Position.Line, "part %q line", p.Origin)
-					assert.Equal(t, src.Position.Column, p.Position.Column, "part %q column", p.Origin)
-					assert.Equal(t, src.Position.Offset, p.Position.Offset, "part %q offset", p.Origin)
-				}
-			}
+			assertFirstTextParts(t, segment.Split(tokens.Tokenize(input)))
 		})
 	}
 }
@@ -632,33 +654,9 @@ func TestSplit_ResetDocument(t *testing.T) {
 			assert.Equal(t, tc.wantContent, lineContents(lines))
 			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
 
-			seen := map[*token.Token]bool{}
-			prev := 0
-
-			for _, l := range lines {
-				for _, seg := range l.Segments {
-					src, p := seg.Source(), seg.Part()
-
-					assert.Equal(t, l.Number, p.Position.Line, "part %q line", p.Origin)
-
-					if isPureNewline(p.Origin) {
-						assert.GreaterOrEqual(t, p.Position.Offset, prev, "part %q offset", p.Origin)
-					} else {
-						assert.Greater(t, p.Position.Offset, prev, "part %q offset", p.Origin)
-					}
-
-					prev = p.Position.Offset
-
-					if seen[src] || strings.TrimSpace(p.Origin) == "" {
-						continue
-					}
-
-					seen[src] = true
-
-					assert.Equal(t, src.Position.Line, p.Position.Line, "part %q token line", p.Origin)
-					assert.Equal(t, src.Position.Offset, p.Position.Offset, "part %q token offset", p.Origin)
-				}
-			}
+			assertPartLines(t, lines)
+			assertOffsetsIncrease(t, lines)
+			assertFirstTextParts(t, lines)
 		})
 	}
 }
