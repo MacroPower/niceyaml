@@ -27,12 +27,6 @@ import (
 // like generated message types, shows what the walk spends on types
 // with many methods. The time per item should stay flat as each grows.
 func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
-	decodeAny := func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
-		_, err := doc.Decode[any](ctx, opts...)
-
-		return err
-	}
-
 	shapes := []struct {
 		decode func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error
 		item   func(i int) string
@@ -43,30 +37,22 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 			name:   "list",
 			header: "items:\n",
 			item:   func(int) string { return "  - {name: x, value: 1, tags: {a: 1}}\n" },
-			decode: decodeAny,
+			decode: benchDecode[any],
 		},
 		{
 			name:   "wide_map",
 			item:   func(i int) string { return fmt.Sprintf("k%d: {a: 1}\n", i) },
-			decode: decodeAny,
+			decode: benchDecode[any],
 		},
 		{
-			name: "string_map",
-			item: func(i int) string { return fmt.Sprintf("k%d: v%d\n", i, i) },
-			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
-				_, err := doc.Decode[map[string]string](ctx, opts...)
-
-				return err
-			},
+			name:   "string_map",
+			item:   func(i int) string { return fmt.Sprintf("k%d: v%d\n", i, i) },
+			decode: benchDecode[map[string]string],
 		},
 		{
-			name: "validated_string_map",
-			item: func(i int) string { return fmt.Sprintf("k%d: v%d\n", i, i) },
-			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
-				_, err := doc.Decode[labels](ctx, opts...)
-
-				return err
-			},
+			name:   "validated_string_map",
+			item:   func(i int) string { return fmt.Sprintf("k%d: v%d\n", i, i) },
+			decode: benchDecode[labels],
 		},
 		{
 			name: "wide_rows",
@@ -76,40 +62,24 @@ func BenchmarkNode_Decode_SelfValidation(b *testing.B) {
 					i,
 				)
 			},
-			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
-				_, err := doc.Decode[[]wideRow](ctx, opts...)
-
-				return err
-			},
+			decode: benchDecode[[]wideRow],
 		},
 		{
-			name: "inline_rows",
-			item: func(i int) string { return fmt.Sprintf("- {name: n%d, port: 80}\n", i) },
-			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
-				_, err := doc.Decode[[]inlineRow](ctx, opts...)
-
-				return err
-			},
+			name:   "inline_rows",
+			item:   func(i int) string { return fmt.Sprintf("- {name: n%d, port: 80}\n", i) },
+			decode: benchDecode[[]inlineRow],
 		},
 		{
 			name: "method_rows",
 			item: func(i int) string {
 				return fmt.Sprintf("- {a: a%d, b: b, c: c, d: d, e: 1, f: 2, g: 3, h: true}\n", i)
 			},
-			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
-				_, err := doc.Decode[[]methodRow](ctx, opts...)
-
-				return err
-			},
+			decode: benchDecode[[]methodRow],
 		},
 		{
-			name: "int_list",
-			item: func(i int) string { return fmt.Sprintf("- %d\n", i) },
-			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
-				_, err := doc.Decode[[]int](ctx, opts...)
-
-				return err
-			},
+			name:   "int_list",
+			item:   func(i int) string { return fmt.Sprintf("- %d\n", i) },
+			decode: benchDecode[[]int],
 		},
 	}
 
@@ -170,15 +140,7 @@ func BenchmarkNode_Decode_FirstDecode(b *testing.B) {
 
 	yaml := sb.String()
 
-	modes := []struct {
-		name string
-		opts []niceyaml.DecodeOption
-	}{
-		{"self_validation", nil},
-		{"no_self_validation", []niceyaml.DecodeOption{niceyaml.WithSelfValidation(false)}},
-	}
-
-	for _, mode := range modes {
+	for _, mode := range selfValidationModes {
 		b.Run(mode.name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
@@ -216,34 +178,22 @@ func BenchmarkNode_Decode_SelfValidation_Nested(b *testing.B) {
 		open, close string
 	}{
 		{
-			name:  "map_tree",
-			open:  "{kids: {a: ",
-			close: "}}",
-			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
-				_, err := doc.Decode[branch](ctx, opts...)
-
-				return err
-			},
+			name:   "map_tree",
+			open:   "{kids: {a: ",
+			close:  "}}",
+			decode: benchDecode[branch],
 		},
 		{
-			name:  "struct_chain",
-			open:  "{ports: {a: 80}, next: ",
-			close: "}",
-			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
-				_, err := doc.Decode[structLink](ctx, opts...)
-
-				return err
-			},
+			name:   "struct_chain",
+			open:   "{ports: {a: 80}, next: ",
+			close:  "}",
+			decode: benchDecode[structLink],
 		},
 		{
-			name:  "list_chain",
-			open:  "{ports: {a: 80}, next: [",
-			close: "]}",
-			decode: func(ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
-				_, err := doc.Decode[listLink](ctx, opts...)
-
-				return err
-			},
+			name:   "list_chain",
+			open:   "{ports: {a: 80}, next: [",
+			close:  "]}",
+			decode: benchDecode[listLink],
 		},
 	}
 
@@ -270,6 +220,14 @@ func BenchmarkNode_Decode_SelfValidation_Nested(b *testing.B) {
 			}
 		}
 	}
+}
+
+// benchDecode decodes doc into a new T and returns the error of the
+// decode.
+func benchDecode[T any](ctx context.Context, doc *niceyaml.Node, opts []niceyaml.DecodeOption) error {
+	_, err := doc.Decode[T](ctx, opts...)
+
+	return err
 }
 
 // selfValidationModes holds the options that decode with and without
