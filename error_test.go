@@ -61,8 +61,9 @@ func wrapError(tb testing.TB, err error, opts ...niceyaml.ErrorOption) *niceyaml
 
 // render formats err the way %+v does, which prints the annotated source
 // when the error resolves to a location and the plain message otherwise. A
-// [*niceyaml.SourceError] renders with [newXMLPrinter] and two lines of
-// context, so tests can assert on styled text without escape sequences.
+// [*niceyaml.SourceError] renders with [yamltest.NewXMLPrinter] and two
+// lines of context, so tests can assert on styled text without escape
+// sequences.
 func render(err error) string {
 	return renderContext(err, 2)
 }
@@ -77,7 +78,7 @@ func report(err error) string {
 
 // renderContext is [render] with the given number of context lines.
 func renderContext(err error, lines int) string {
-	return renderWith(err, newXMLPrinter(), lines)
+	return renderWith(err, yamltest.NewXMLPrinter(), lines)
 }
 
 // renderWith is [render] with the given printer and number of context
@@ -90,18 +91,8 @@ func renderWith(err error, p *printer.Printer, lines int) string {
 	return fmt.Sprintf("%+v", err)
 }
 
-// newXMLPrinter creates a [*printer.Printer] that marks styles with XML
-// tags and renders no gutter or container, so tests can assert on plain text.
-func newXMLPrinter() *printer.Printer {
-	return printer.New(
-		printer.WithStyles(yamltest.NewXMLStyles()),
-		printer.WithGutter(printer.NoGutter),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
-}
-
 // xmlSource creates a [*niceyaml.Source] for input. Render its errors with
-// [render], which uses [newXMLPrinter].
+// [render], which uses [yamltest.NewXMLPrinter].
 func xmlSource(input string) *niceyaml.Source {
 	return niceyaml.NewSourceFromString(input)
 }
@@ -1859,11 +1850,7 @@ func TestWithPrinter(t *testing.T) {
 	`)
 	tokens := lexer.Tokenize(source)
 
-	customPrinter := printer.New(
-		printer.WithStyles(yamltest.NewXMLStyles()),
-		printer.WithGutter(printer.NoGutter),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
+	customPrinter := yamltest.NewXMLPrinter()
 
 	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 		"test error",
@@ -3672,11 +3659,7 @@ func TestError_Width_WithCustomPrinter(t *testing.T) {
 
 	// Width comes from the printer, which wraps only at the width
 	// [printer.WithWrapWidth] sets.
-	customPrinter := printer.New(
-		printer.WithStyles(yamltest.NewXMLStyles()),
-		printer.WithGutter(printer.NoGutter),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
+	customPrinter := yamltest.NewXMLPrinter()
 
 	errPrinter := customPrinter.With(printer.WithWrapWidth(30))
 
@@ -4247,7 +4230,7 @@ func TestError_WrappedContext(t *testing.T) {
 	excerpt, ok := bound.Excerpt()
 	require.True(t, ok)
 
-	detail := newXMLPrinter().Print(excerpt)
+	detail := yamltest.NewXMLPrinter().Print(excerpt)
 	assert.Contains(t, detail, "second")
 	assert.Contains(t, detail, "^^^^^^", "the range shows its extent")
 	assert.NotContains(t, detail, "^ ", "the wrapper's text is no annotation")
@@ -4287,7 +4270,7 @@ func TestError_ContextAboveLocation(t *testing.T) {
 	excerpt, ok := bound.Excerpt()
 	require.True(t, ok)
 
-	detail := newXMLPrinter().Print(excerpt)
+	detail := yamltest.NewXMLPrinter().Print(excerpt)
 	assert.Contains(t, detail, "<genericError>second</genericError>")
 	assert.NotContains(t, detail, "<genericError>first</genericError>")
 }
@@ -4368,7 +4351,7 @@ func TestError_NestedErrorChains(t *testing.T) {
 		excerpt, ok := bound.Excerpt()
 		require.True(t, ok)
 
-		got := trimLines(newXMLPrinter().Print(excerpt))
+		got := trimLines(yamltest.NewXMLPrinter().Print(excerpt))
 		assert.Contains(t, got, "<genericError>2</genericError>")
 		assert.Contains(t, got, "^ ctx: bad")
 
@@ -5433,7 +5416,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 		excerpt, ok := bound.Excerpt()
 		require.True(t, ok)
 
-		got := newXMLPrinter().Print(excerpt)
+		got := yamltest.NewXMLPrinter().Print(excerpt)
 		assert.Contains(t, got, "^ second")
 		assert.NotContains(t, got, "first")
 	})
@@ -5745,7 +5728,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 			"<nameTag>i</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>9</literalNumberInteger>",
 		)
 
-		got := trimLines(newXMLPrinter().Print(excerpt))
+		got := trimLines(yamltest.NewXMLPrinter().Print(excerpt))
 		assert.Equal(t, want, got)
 
 		assert.Equal(t, "2:4: $.b: bad b\n└── 8:4: $.h: bad h\n\n"+want, trimLines(renderContext(bound, 1)))
@@ -5764,7 +5747,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 
 		assert.Equal(t, []int{2, 8}, lineNumbers(zero))
 		assert.Equal(t, lineNumbers(zero), lineNumbers(negative))
-		assert.Equal(t, newXMLPrinter().Print(zero), newXMLPrinter().Print(negative))
+		assert.Equal(t, yamltest.NewXMLPrinter().Print(zero), yamltest.NewXMLPrinter().Print(negative))
 	})
 
 	t.Run("no location", func(t *testing.T) {
@@ -6697,7 +6680,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		assert.Equal(t, "|-- 1:4: $.a: bad a\n`-- 2:4: $.b: bad b", report(err))
 		require.Len(t, slices.Collect(niceyaml.Bindings(err)), 1)
 
-		got := trimLines(newXMLPrinter().PrintError(err))
+		got := trimLines(yamltest.NewXMLPrinter().PrintError(err))
 		assert.Equal(t, "├── 1:4: $.a: bad a\n└── 2:4: $.b: bad b", strings.SplitN(got, "\n\n", 2)[0])
 		assert.Contains(t, got, "<genericError>1</genericError>")
 		assert.Contains(t, got, "<genericError>2</genericError>")
@@ -7042,7 +7025,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, 1, excerpt.Count())
 
-		got := trimLines(newXMLPrinter().PrintError(err))
+		got := trimLines(yamltest.NewXMLPrinter().PrintError(err))
 		assert.Contains(t, got, "<genericError>1</genericError>")
 		assert.Contains(t, got, "<genericError>9</genericError>")
 	})

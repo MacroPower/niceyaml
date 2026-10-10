@@ -206,11 +206,7 @@ func TestPrinter_AddStyleToRange(t *testing.T) {
 func TestPrinter_PrintError(t *testing.T) {
 	t.Parallel()
 
-	p := printer.New(
-		printer.WithStyles(yamltest.NewXMLStyles()),
-		printer.WithGutter(printer.NoGutter),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
+	p := yamltest.NewXMLPrinter()
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
 	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))))
@@ -3966,11 +3962,7 @@ func TestPrinter_TokenTypes_XMLStyler(t *testing.T) {
 			t.Parallel()
 
 			tks := lexer.Tokenize(tc.input)
-			p := printer.New(
-				printer.WithStyles(yamltest.NewXMLStyles()),
-				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithGutter(printer.NoGutter),
-			)
+			p := yamltest.NewXMLPrinter()
 
 			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
 			assert.Equal(t, tc.want, got)
@@ -5455,11 +5447,7 @@ func TestPrinter_AnnotationKind(t *testing.T) {
 		line.Annotation{Content: "hint", Kind: kind.UIAnnotation, Placement: line.Below, Col: 5},
 	)
 
-	p := printer.New(
-		printer.WithStyles(yamltest.NewXMLStyles()),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.NoGutter),
-	)
+	p := yamltest.NewXMLPrinter()
 
 	want := stringtest.JoinLF(
 		"<uiAnnotation>hunk</uiAnnotation>",

@@ -6,6 +6,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/lucasb-eyer/go-colorful"
 
+	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
@@ -76,6 +77,20 @@ func (x *XMLStyles) Style(s kind.Kind) lipgloss.Style {
 	return lipgloss.NewStyle().Transform(func(content string) string {
 		return "<" + tag + ">" + content + "</" + tag + ">"
 	})
+}
+
+// NewXMLPrinter creates a new [*printer.Printer] that renders through
+// [XMLStyles], with no gutter and an empty container style, so its
+// output holds only the tagged text. Options in opts apply after these
+// defaults.
+func NewXMLPrinter(opts ...printer.Option) *printer.Printer {
+	defaults := []printer.Option{
+		printer.WithStyles(NewXMLStyles()),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+	}
+
+	return printer.New(append(defaults, opts...)...)
 }
 
 // ColorHex returns c as a hex string, so colors of different types

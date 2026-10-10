@@ -7,7 +7,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 
+	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
+	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
@@ -72,6 +74,34 @@ func TestXMLStyles_Style(t *testing.T) {
 
 			got := yamltest.NewXMLStyles(tc.opts...).Style(tc.input).Render(tc.content)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestNewXMLPrinter(t *testing.T) {
+	t.Parallel()
+
+	view := niceyaml.NewSourceFromString("a: 1\n").View()
+
+	tcs := map[string]struct {
+		want string
+		opts []printer.Option
+	}{
+		"defaults": {
+			want: "<nameTag>a</nameTag><punctuationMappingValue>:</punctuationMappingValue>" +
+				"<text> </text><literalNumberInteger>1</literalNumberInteger>",
+		},
+		"option after the defaults": {
+			opts: []printer.Option{printer.WithStyles(style.Styles{})},
+			want: "a: 1",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, yamltest.NewXMLPrinter(tc.opts...).Print(view))
 		})
 	}
 }

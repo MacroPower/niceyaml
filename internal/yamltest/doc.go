@@ -55,6 +55,12 @@
 //	// <nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue>\
 //	// <text> </text><literalString>value</literalString>
 //
+// [NewXMLPrinter] creates a printer that renders through those styles with
+// no gutter and an empty container style, so a test compares the tagged
+// text alone:
+//
+//	got := yamltest.NewXMLPrinter().Print(source.View())
+//
 // Tests of a color theme compare colors of different types through
 // [ColorHex] and measure how well text reads on its background through
 // [Contrast].

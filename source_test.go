@@ -2156,7 +2156,7 @@ func TestSource_Parse(t *testing.T) {
 		excerpt, ok := bound.Excerpt()
 		require.True(t, ok)
 
-		detail := newXMLPrinter().Print(excerpt)
+		detail := yamltest.NewXMLPrinter().Print(excerpt)
 		assert.Contains(t, detail, "<genericError>b</genericError>", "the offending token is highlighted")
 
 		// The document returns the same bound error.

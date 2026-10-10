@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/token"
@@ -1982,11 +1981,7 @@ func TestDocument_Span(t *testing.T) {
 		docs := source.Documents()
 		require.Len(t, docs, 2)
 
-		p := printer.New(
-			printer.WithStyles(yamltest.NewXMLStyles()),
-			printer.WithGutter(printer.LineNumberGutter),
-			printer.WithContainerStyle(lipgloss.NewStyle()),
-		)
+		p := yamltest.NewXMLPrinter(printer.WithGutter(printer.LineNumberGutter))
 
 		got := p.Print(source.View().Slice(docs[1].Span()))
 		assert.NotContains(t, got, "a</nameTag>")
