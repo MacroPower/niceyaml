@@ -9359,16 +9359,116 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		return yamltest.RequireSourceError(t, yamltest.Bind(t, src, err))
 	}
 
-	t.Run("a path error", func(t *testing.T) {
-		t.Parallel()
+	// The key "b" on line 2, not the value the path selects, which is the
+	// range below.
+	keyRange := yamltest.LineRange(1, 2, 3)
+	valueRange := yamltest.LineRange(1, 5, 6)
 
-		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(bPath)))
+	tcs := map[string]struct {
+		err error
+		// The text of Error, and of Message, which holds no location.
+		want    string
+		message string
+		// The path and the range the binding reports, each nil when it
+		// reports none.
+		path any
+		rng  any
+	}{
+		"a path error": {
+			err:     niceyaml.NewError("bad", niceyaml.AtPath(bPath)),
+			want:    "x.yaml:2:6: $.a.b: bad",
+			message: "bad",
+			path:    wantB,
+			rng:     valueRange,
+		},
+		"a position error has no path": {
+			err:     niceyaml.NewError("bad", niceyaml.AtPosition(position.New(1, 5))),
+			want:    "x.yaml:2:6: bad",
+			message: "bad",
+			rng:     valueRange,
+		},
+		"a path beside a range names the value and binds at the range": {
+			err:     niceyaml.NewError("bad", niceyaml.AtPath(bPath), niceyaml.AtRange(keyRange)),
+			want:    "x.yaml:2:3: $.a.b: bad",
+			message: "bad",
+			path:    wantB,
+			rng:     keyRange,
+		},
+		"a path beside a position binds at the position": {
+			err:     niceyaml.NewError("bad", niceyaml.AtPath(bPath), niceyaml.AtPosition(position.New(1, 2))),
+			want:    "x.yaml:2:3: $.a.b: bad",
+			message: "bad",
+			path:    wantB,
+			rng:     keyRange,
+		},
+		"a range locates the error whether or not the path resolves": {
+			err: niceyaml.NewError("bad",
+				niceyaml.AtPath(paths.Current().Child("nope")),
+				niceyaml.AtRange(keyRange),
+			),
+			want:    "x.yaml:2:3: $.nope: bad",
+			message: "bad",
+			path:    paths.Doc().Child("nope"),
+			rng:     keyRange,
+		},
+		"a rebased path beside a range joins the base and keeps the range": {
+			err: niceyaml.Rebase(
+				niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")), niceyaml.AtRange(keyRange)),
+				paths.Current().Child("a"),
+			),
+			want:    "x.yaml:2:3: $.a.b: bad",
+			message: "bad",
+			path:    wantB,
+			rng:     keyRange,
+		},
+		"a rebased path joins the base": {
+			err: niceyaml.Rebase(
+				niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b"))),
+				paths.Current().Child("a"),
+			),
+			want:    "x.yaml:2:6: $.a.b: bad",
+			message: "bad",
+			path:    wantB,
+			rng:     valueRange,
+		},
+		"text a wrapper added stays without the path": {
+			err:     fmt.Errorf("ctx: %w", niceyaml.NewError("bad", niceyaml.AtPath(bPath))),
+			want:    "x.yaml:2:6: $.a.b: ctx: bad",
+			message: "ctx: bad",
+			path:    wantB,
+			rng:     valueRange,
+		},
+		"an error without a location has neither": {
+			err:     errors.New("plain"),
+			want:    "x.yaml: plain",
+			message: "plain",
+		},
+	}
 
-		assert.Equal(t, "x.yaml:2:6: $.a.b: bad", bound.Error())
-		assert.Equal(t, "bad", bound.Message())
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		assert.Equal(t, wantB, errorPath(t, bound))
-	})
+			bound := bind(t, tc.err)
+
+			assert.Equal(t, tc.want, bound.Error())
+			assert.Equal(t, tc.message, bound.Message())
+			require.NoError(t, bound.Unresolved())
+
+			var gotPath, gotRange any
+
+			if path, ok := bound.Path(); ok {
+				gotPath = path
+			}
+
+			if rng, ok := bound.Range(); ok {
+				gotRange = rng
+			}
+
+			assert.Equal(t, tc.path, gotPath)
+			assert.Equal(t, tc.rng, gotRange)
+		})
+	}
 
 	t.Run("a summary keeps the errors it lists out of its message", func(t *testing.T) {
 		t.Parallel()
@@ -9412,32 +9512,10 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		assert.Equal(t, "spec check: x.yaml: 2 problems", children[0].Bound.Message())
 	})
 
-	t.Run("a position error has no path", func(t *testing.T) {
+	t.Run("the excerpt marks a range beside a path", func(t *testing.T) {
 		t.Parallel()
 
-		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPosition(position.New(1, 5))))
-
-		assert.Equal(t, "bad", bound.Message())
-
-		_, ok := bound.Path()
-		assert.False(t, ok)
-	})
-
-	t.Run("a path beside a range names the value and binds at the range", func(t *testing.T) {
-		t.Parallel()
-
-		// The key "b" on line 2, not the value the path selects.
-		rng := yamltest.LineRange(1, 2, 3)
-		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(bPath), niceyaml.AtRange(rng)))
-
-		assert.Equal(t, "x.yaml:2:3: $.a.b: bad", bound.Error())
-		assert.Equal(t, "bad", bound.Message())
-
-		assert.Equal(t, wantB, errorPath(t, bound))
-
-		got, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, rng, got)
+		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(bPath), niceyaml.AtRange(keyRange)))
 
 		// The excerpt marks the one character of the range, not the
 		// whole value the path selects.
@@ -9447,64 +9525,6 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 			"   2 |   b: 1",
 			"     |   ^",
 		), excerpt.String())
-	})
-
-	t.Run("a path beside a position binds at the position", func(t *testing.T) {
-		t.Parallel()
-
-		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(bPath), niceyaml.AtPosition(position.New(1, 2))))
-
-		assert.Equal(t, "x.yaml:2:3: $.a.b: bad", bound.Error())
-
-		assert.Equal(t, wantB, errorPath(t, bound))
-
-		got, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, position.New(1, 2), got.Start)
-	})
-
-	t.Run("a range locates the error whether or not the path resolves", func(t *testing.T) {
-		t.Parallel()
-
-		rng := yamltest.LineRange(1, 2, 3)
-		nope := paths.Current().Child("nope")
-		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(nope), niceyaml.AtRange(rng)))
-
-		require.NoError(t, bound.Unresolved())
-		assert.Equal(t, "x.yaml:2:3: $.nope: bad", bound.Error())
-
-		assert.Equal(t, paths.Doc().Child("nope"), errorPath(t, bound))
-
-		got, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, rng, got)
-	})
-
-	t.Run("a rebased path beside a range joins the base and keeps the range", func(t *testing.T) {
-		t.Parallel()
-
-		rng := yamltest.LineRange(1, 2, 3)
-		inner := niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")), niceyaml.AtRange(rng))
-		bound := bind(t, niceyaml.Rebase(inner, paths.Current().Child("a")))
-
-		assert.Equal(t, "x.yaml:2:3: $.a.b: bad", bound.Error())
-
-		assert.Equal(t, wantB, errorPath(t, bound))
-
-		got, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, rng, got)
-	})
-
-	t.Run("a rebased path joins the base", func(t *testing.T) {
-		t.Parallel()
-
-		inner := niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")))
-		bound := bind(t, niceyaml.Rebase(inner, paths.Current().Child("a")))
-
-		assert.Equal(t, "bad", bound.Message())
-
-		assert.Equal(t, wantB, errorPath(t, bound))
 	})
 
 	t.Run("a path from a scoped document reads from the document root", func(t *testing.T) {
@@ -9528,17 +9548,6 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		rng, ok := bound.Range()
 		require.True(t, ok)
 		assert.Equal(t, 1, rng.Start.Line)
-	})
-
-	t.Run("text a wrapper added stays without the path", func(t *testing.T) {
-		t.Parallel()
-
-		bound := bind(t, fmt.Errorf("ctx: %w", niceyaml.NewError("bad", niceyaml.AtPath(bPath))))
-
-		assert.Equal(t, "ctx: bad", bound.Message())
-		assert.Equal(t, "x.yaml:2:6: $.a.b: ctx: bad", bound.Error())
-
-		assert.Equal(t, wantB, errorPath(t, bound))
 	})
 
 	t.Run("a binding that wraps a binding reports the path of the inner one", func(t *testing.T) {
@@ -9579,17 +9588,6 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		got := niceyaml.FormatError(outer, niceyaml.WithContextLines(0))
 		assert.Contains(t, got, "^ bad")
 		assert.NotContains(t, got, "^ x.yaml:")
-	})
-
-	t.Run("an error without a location has neither", func(t *testing.T) {
-		t.Parallel()
-
-		bound := bind(t, errors.New("plain"))
-
-		assert.Equal(t, "plain", bound.Message())
-
-		_, ok := bound.Path()
-		assert.False(t, ok)
 	})
 
 	t.Run("nil has neither", func(t *testing.T) {
