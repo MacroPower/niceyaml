@@ -12,10 +12,10 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-// BenchmarkSchema_Validate checks a list of small mappings against a
+// BenchmarkSchema_Check checks a list of small mappings against a
 // schema that matches it, so the time goes to reading the document and
 // to the schema check.
-func BenchmarkSchema_Validate(b *testing.B) {
+func BenchmarkSchema_Check(b *testing.B) {
 	sizes := []struct {
 		name  string
 		items int
@@ -70,11 +70,11 @@ func BenchmarkSchema_Validate(b *testing.B) {
 	}
 }
 
-// BenchmarkSchema_Validate_AliasedItems decodes each item of a list with
+// BenchmarkSchema_Check_AliasedItems decodes each item of a list with
 // the schema as its validator, where every item holds an alias. The
 // alias count covers the whole document, so each item should reuse the
 // count of the first instead of walking the document again.
-func BenchmarkSchema_Validate_AliasedItems(b *testing.B) {
+func BenchmarkSchema_Check_AliasedItems(b *testing.B) {
 	s := schema.MustCompile([]byte(`{"type": "object", "properties": {"name": {"type": "string"}}}`))
 
 	for _, items := range []int{1000, 4000} {
@@ -109,7 +109,7 @@ func BenchmarkSchema_Validate_AliasedItems(b *testing.B) {
 	}
 }
 
-func BenchmarkSchema_Validate_ManyViolations(b *testing.B) {
+func BenchmarkSchema_Check_ManyViolations(b *testing.B) {
 	// Every member breaks the schema, so each violation's path steps
 	// through the same mapping.
 	v := schema.MustCompile([]byte(`{"additionalProperties": {"type": "integer"}}`))
@@ -137,12 +137,12 @@ func BenchmarkSchema_Validate_ManyViolations(b *testing.B) {
 	}
 }
 
-// BenchmarkSchema_Validate_WideMerge breaks the schema at every member
+// BenchmarkSchema_Check_WideMerge breaks the schema at every member
 // of a mapping that ends in a merge key with as many sources. The path
 // of each violation reads those sources to spell its key, until the
 // violations reach the limit on those reads, so the time should grow
 // with the document and not with its square.
-func BenchmarkSchema_Validate_WideMerge(b *testing.B) {
+func BenchmarkSchema_Check_WideMerge(b *testing.B) {
 	v := schema.MustCompile([]byte(`{
 		"type": "object",
 		"properties": {
