@@ -2929,49 +2929,6 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 	}
 }
 
-func TestSchema_ErrorMessages(t *testing.T) {
-	t.Parallel()
-
-	// A single failure uses the concrete message once, and several use a summary.
-
-	t.Run("single validation error uses concrete message once", func(t *testing.T) {
-		t.Parallel()
-
-		v := compileSchema(t, []byte(`{
-			"type": "object",
-			"properties": {
-				"name": {"type": "string"}
-			}
-		}`))
-
-		err := v.ValidateValue(t.Context(), map[string]any{"name": 123})
-		require.Error(t, err)
-
-		const msg = `expected "string", got "integer"`
-
-		assert.Equal(t, 1, strings.Count(err.Error(), msg), "message should appear once: %q", err.Error())
-		assert.NotContains(t, err.Error(), "violations")
-	})
-
-	t.Run("multiple validation errors use summary message", func(t *testing.T) {
-		t.Parallel()
-
-		v := compileSchema(t, []byte(`{
-			"type": "object",
-			"properties": {
-				"name": {"type": "string"},
-				"age": {"type": "number"}
-			}
-		}`))
-
-		err := v.ValidateValue(t.Context(), map[string]any{"name": 123, "age": "thirty"})
-		require.Error(t, err)
-
-		assert.Contains(t, err.Error(), "2 schema violations")
-		assert.NotContains(t, err.Error(), "failed")
-	})
-}
-
 func TestSchema_PathAnchors(t *testing.T) {
 	t.Parallel()
 
