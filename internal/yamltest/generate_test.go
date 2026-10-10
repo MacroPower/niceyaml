@@ -25,8 +25,11 @@ func TestAliasBombs(t *testing.T) {
 		"one alias level": {
 			generate: yamltest.AliasLevels,
 			levels:   1,
-			want: "a:\n  - &l0 [x]\n" +
-				"  - &l1 [*l0, *l0, *l0, *l0, *l0, *l0, *l0, *l0, *l0, *l0]\n",
+			want: stringtest.LinesLF(
+				"a:",
+				"  - &l0 [x]",
+				"  - &l1 [*l0, *l0, *l0, *l0, *l0, *l0, *l0, *l0, *l0, *l0]",
+			),
 		},
 		"merge levels without merges": {
 			generate: yamltest.MergeLevels,
@@ -36,8 +39,11 @@ func TestAliasBombs(t *testing.T) {
 		"one merge level": {
 			generate: yamltest.MergeLevels,
 			levels:   1,
-			want: "m0: &m0 {a: x}\n" +
-				"m1: &m1\n  <<: [*m0, *m0, *m0, *m0, *m0, *m0, *m0, *m0, *m0, *m0]\n",
+			want: stringtest.LinesLF(
+				"m0: &m0 {a: x}",
+				"m1: &m1",
+				"  <<: [*m0, *m0, *m0, *m0, *m0, *m0, *m0, *m0, *m0, *m0]",
+			),
 		},
 		"wide merge of one member": {
 			generate: yamltest.WideMerge,
