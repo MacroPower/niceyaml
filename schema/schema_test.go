@@ -25,10 +25,10 @@ import (
 
 // compileSchema compiles schemaData into a [*schema.Schema] with opts and
 // fails the test if the schema does not compile.
-func compileSchema(t *testing.T, schemaData []byte, opts ...schema.CompileOption) *schema.Schema {
+func compileSchema(t *testing.T, schemaData string, opts ...schema.CompileOption) *schema.Schema {
 	t.Helper()
 
-	v, err := schema.Compile(t.Context(), schemaData, opts...)
+	v, err := schema.Compile(t.Context(), []byte(schemaData), opts...)
 	require.NoError(t, err)
 
 	return v
@@ -49,7 +49,7 @@ func requireExcessiveAliasing(t *testing.T, err error) {
 func TestSchema_Check(t *testing.T) {
 	t.Parallel()
 
-	schemaData := []byte(`{
+	v := compileSchema(t, `{
 		"type": "object",
 		"properties": {
 			"name": {"type": "string"},
@@ -102,8 +102,6 @@ func TestSchema_Check(t *testing.T) {
 		"required": ["name"],
 		"additionalProperties": false
 	}`)
-
-	v := compileSchema(t, schemaData)
 
 	tcs := map[string]struct {
 		input   any
@@ -711,7 +709,7 @@ func TestSchema_UnresolvableRef(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := compileSchema(t, []byte(tc.schema), tc.opts...)
+			v := compileSchema(t, tc.schema, tc.opts...)
 
 			err := v.ValidateValue(t.Context(), tc.data)
 			require.ErrorIs(t, err, schema.ErrValidate)
@@ -965,7 +963,7 @@ func TestSchema_PathTarget(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := compileSchema(t, []byte(tc.schema))
+			v := compileSchema(t, tc.schema)
 
 			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
 			bound := yamltest.RequireSourceError(t, err)
@@ -982,10 +980,10 @@ func TestSchema_NonFiniteFloats(t *testing.T) {
 	// YAML decodes .nan/.inf into non-finite float64 values. These are not
 	// JSON-encodable, but the validator treats them as numbers rather than
 	// surfacing an opaque marshaling error.
-	v := compileSchema(t, []byte(`{
+	v := compileSchema(t, `{
 		"type": "object",
 		"properties": {"x": {"type": "number"}}
-	}`))
+	}`)
 
 	for name, value := range map[string]float64{
 		"NaN":          math.NaN(),
@@ -1223,7 +1221,7 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := compileSchema(t, []byte(tc.schema),
+			v := compileSchema(t, tc.schema,
 				schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)))
 
 			err := yamltest.FirstDocument(t, tc.input, tc.opts...).Validate(t.Context(), v)
@@ -1254,7 +1252,7 @@ const requestSchema = `{
 func TestSchema_ValidateValue(t *testing.T) {
 	t.Parallel()
 
-	v := compileSchema(t, []byte(requestSchema))
+	v := compileSchema(t, requestSchema)
 
 	// The value came from no document, so the error is bound to a source
 	// with no text and no name. Its text then names the path of each
@@ -1386,7 +1384,7 @@ func TestSchema_ValidateValue(t *testing.T) {
 func TestSchema_ValidateValue_Place(t *testing.T) {
 	t.Parallel()
 
-	v := compileSchema(t, []byte(requestSchema))
+	v := compileSchema(t, requestSchema)
 
 	doc := yamltest.FirstDocument(t, "request:\n  port: 0\n", niceyaml.WithName("app.yaml"))
 	base := paths.Doc().Child("request")
@@ -1788,7 +1786,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 	t.Run("path names a key as the decoder does", func(t *testing.T) {
 		t.Parallel()
 
-		ports := compileSchema(t, []byte(`{"properties": {"ports": {"additionalProperties": {"minimum": 1}}}}`))
+		ports := compileSchema(t, `{"properties": {"ports": {"additionalProperties": {"minimum": 1}}}}`)
 		hex := yamltest.FirstDocument(t, "ports:\n  0x10: 0\n", niceyaml.WithName("app.yaml"))
 
 		data, err := hex.Decode[any](t.Context())
@@ -2002,7 +2000,7 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := compileSchema(t, []byte(tc.schema))
+			v := compileSchema(t, tc.schema)
 
 			// The source turns the alias limit off, so the bomb decodes.
 			// ValidateValue takes no source and applies the limit to the
@@ -2037,7 +2035,7 @@ func TestSchema_Check_OrderedMapDates(t *testing.T) {
 	// plain maps, and a date-only timestamp under a key the decoder
 	// respells keeps its full-date spelling.
 	v := compileSchema(t,
-		[]byte(`{"additionalProperties": {"type": "string", "format": "date"}}`),
+		`{"additionalProperties": {"type": "string", "format": "date"}}`,
 		schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)))
 
 	tcs := map[string]struct {
@@ -2166,7 +2164,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				v := compileSchema(t, []byte(tc.schema))
+				v := compileSchema(t, tc.schema)
 				doc := yamltest.FirstDocument(t, tc.input)
 
 				// A source with the alias limit off decodes the value
@@ -2217,7 +2215,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			"k: &k "+yamltest.FlowSequence("*a", 500),
 		)
 
-		v := compileSchema(t, []byte(`{"maxProperties": 5}`))
+		v := compileSchema(t, `{"maxProperties": 5}`)
 
 		tcs := map[string]struct {
 			path      paths.Path
@@ -2412,7 +2410,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 	t.Run("sources with the limit off", func(t *testing.T) {
 		t.Parallel()
 
-		v := compileSchema(t, []byte(`{"type": ["object", "array"]}`))
+		v := compileSchema(t, `{"type": ["object", "array"]}`)
 
 		tcs := map[string]struct {
 			path  paths.Path
@@ -2462,7 +2460,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		}
 
 		refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("defaults: &defaults\n" + entries.String()))
-		v := compileSchema(t, []byte(`{"maxProperties": 5}`))
+		v := compileSchema(t, `{"maxProperties": 5}`)
 
 		// The refusal carries no location, so each case names where the
 		// node that binds it puts it.
@@ -2522,12 +2520,12 @@ func TestSchema_AliasExpansion(t *testing.T) {
 	t.Run("values", func(t *testing.T) {
 		t.Parallel()
 
-		v := compileSchema(t, []byte(`{
+		v := compileSchema(t, `{
 			"properties": {
 				"a": {"type": "string"},
 				"b": {"type": "string"}
 			}
-		}`))
+		}`)
 
 		selfMap := map[string]any{}
 		selfMap["self"] = selfMap
@@ -2614,14 +2612,14 @@ func TestSchema_BooleanSchema(t *testing.T) {
 	// Boolean schemas are valid in JSON Schema. A true schema accepts
 	// everything, and a false schema rejects everything.
 	tcs := map[string]struct {
-		input          []byte
+		input          string
 		wantAcceptsAll bool
 	}{
 		"true schema accepts all data": {
-			input:          []byte(`true`),
+			input:          `true`,
 			wantAcceptsAll: true,
 		},
-		"false schema rejects all data": {input: []byte(`false`)},
+		"false schema rejects all data": {input: `false`},
 	}
 
 	testData := []any{"anything", 42, map[string]any{"key": "value"}}
@@ -2702,7 +2700,7 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := compileSchema(t, []byte(tc.schema))
+			v := compileSchema(t, tc.schema)
 
 			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
 
@@ -2725,8 +2723,8 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 func TestSchema_PathAnchors(t *testing.T) {
 	t.Parallel()
 
-	whole := compileSchema(t, []byte(`{"properties": {"server": {"properties": {"port": {"minimum": 1}}}}}`))
-	server := compileSchema(t, []byte(`{"properties": {"port": {"minimum": 1}}}`))
+	whole := compileSchema(t, `{"properties": {"server": {"properties": {"port": {"minimum": 1}}}}}`)
+	server := compileSchema(t, `{"properties": {"port": {"minimum": 1}}}`)
 
 	doc := yamltest.FirstDocument(t, "server:\n  port: 0\n")
 	serverNode := yamltest.At(t, doc, paths.Doc().Child("server"))
@@ -2819,7 +2817,7 @@ func TestSchema_ErrorPaths(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := compileSchema(t, []byte(tc.schema))
+			v := compileSchema(t, tc.schema)
 
 			err := v.ValidateValue(t.Context(), tc.input)
 			require.Error(t, err)
@@ -2849,21 +2847,21 @@ func TestSchema_ErrorPaths(t *testing.T) {
 func TestSchema_Check_Scope(t *testing.T) {
 	t.Parallel()
 
-	v := compileSchema(t, []byte(`{
+	v := compileSchema(t, `{
 		"type": "object",
 		"properties": {
 			"replicas": {"type": "integer"},
 			"16": {"type": "integer"}
 		},
 		"additionalProperties": false
-	}`))
+	}`)
 
-	aliased := compileSchema(t, []byte(`{
+	aliased := compileSchema(t, `{
 		"type": "object",
 		"properties": {
 			"c": {"additionalProperties": {"type": "string"}}
 		}
-	}`))
+	}`)
 
 	spec := paths.Current().Child("spec")
 
@@ -2954,10 +2952,10 @@ func TestSchema_Check_Scope(t *testing.T) {
 		`))
 
 		require.Error(t, yamltest.At(t, dd, spec).Validate(t.Context(), v))
-		require.NoError(t, dd.Validate(t.Context(), compileSchema(t, []byte(`{
+		require.NoError(t, dd.Validate(t.Context(), compileSchema(t, `{
 			"type": "object",
 			"properties": {"replicas": {"type": "integer"}}
-		}`))))
+		}`)))
 	})
 }
 
@@ -2980,7 +2978,7 @@ func TestSchema_Check_SyntaxError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := compileSchema(t, []byte(tc.schema))
+			v := compileSchema(t, tc.schema)
 
 			docs := niceyaml.NewSourceFromString(stringtest.Input(`
 				a: 1
@@ -3009,13 +3007,13 @@ func TestSchema_Check_SyntaxError(t *testing.T) {
 func TestSchema_Check_Bound(t *testing.T) {
 	t.Parallel()
 
-	v := compileSchema(t, []byte(`{
+	v := compileSchema(t, `{
 		"type": "object",
 		"properties": {
 			"name": {"type": "string"},
 			"price": {"type": "number", "minimum": 0}
 		}
-	}`))
+	}`)
 
 	menu := stringtest.Input(`
 		price: 5
@@ -3542,7 +3540,7 @@ func TestSchema_SourcePath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := compileSchema(t, []byte(tc.schema))
+			v := compileSchema(t, tc.schema)
 			dd := yamltest.FirstDocument(t, tc.input)
 
 			err := dd.Validate(t.Context(), v)
@@ -3605,7 +3603,7 @@ func TestSchema_SourcePath_ReferenceAlias(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := compileSchema(t, []byte(tc.schema))
+			v := compileSchema(t, tc.schema)
 			doc := yamltest.FirstDocument(t, tc.input, refs)
 
 			_, err := doc.Decode[any](t.Context(), niceyaml.WithValidator(v))
@@ -3631,12 +3629,12 @@ func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 	// and the error binds at the x rather than at the valid 1. The quoted
 	// "0x10" decodes to the member 0x10, as does an alias key whose anchor
 	// holds it.
-	v := compileSchema(t, []byte(`{
+	v := compileSchema(t, `{
 		"type": "object",
 		"properties": {
 			"user": {"additionalProperties": {"type": "integer"}}
 		}
-	}`))
+	}`)
 
 	tcs := map[string]struct {
 		input string
@@ -3733,7 +3731,7 @@ func TestSchema_SourcePath_BelowHiddenKey(t *testing.T) {
 	// selects another entry, which holds a valid value under the spelling
 	// 0x11, so the keys below keep their decoded names too. The path
 	// selects nothing, and the error binds at the x.
-	v := compileSchema(t, []byte(`{
+	v := compileSchema(t, `{
 		"type": "object",
 		"properties": {
 			"user": {
@@ -3742,7 +3740,7 @@ func TestSchema_SourcePath_BelowHiddenKey(t *testing.T) {
 				}
 			}
 		}
-	}`))
+	}`)
 
 	tcs := map[string]struct {
 		input string
@@ -3804,10 +3802,10 @@ func TestSchema_SourcePath_HiddenKeyName(t *testing.T) {
 	// key. The merge brings in 0x10 as the member 16, and the quoted key
 	// "0x10" wins a path through 0x10. The path of the member 16 keeps its
 	// decoded name, and its error binds at the key the merge brings in.
-	v := compileSchema(t, []byte(`{
+	v := compileSchema(t, `{
 		"type": "object",
 		"properties": {"user": {"additionalProperties": false}}
-	}`))
+	}`)
 
 	dd := yamltest.FirstDocument(t, stringtest.Input(`
 		user:
@@ -3838,7 +3836,7 @@ func TestSchema_SourcePath_SeveralViolations(t *testing.T) {
 	// key of the member the decode keeps. The cases cover the later of two
 	// keys that decode to 1, an explicit key written before a merge key, and
 	// an alias key, which the path spells by the content of its anchor.
-	v := compileSchema(t, []byte(`{"additionalProperties": {"type": "integer"}}`))
+	v := compileSchema(t, `{"additionalProperties": {"type": "integer"}}`)
 
 	dd := yamltest.FirstDocument(t, stringtest.Input(`
 		base: &b {m: 1}
@@ -3876,12 +3874,12 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 	// Check share one limit on the nodes they read under the merge key.
 	// Check reports each violation past that limit too, with a path
 	// that keeps the decoded name of its key, which selects no entry.
-	v := compileSchema(t, []byte(`{
+	v := compileSchema(t, `{
 		"type": "object",
 		"properties": {
 			"m": {"additionalProperties": {"type": "integer"}}
 		}
-	}`))
+	}`)
 
 	tcs := map[string]struct {
 		members int
@@ -3956,7 +3954,7 @@ func TestSchema_RefToRejectingSchema(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := compileSchema(t, []byte(schemaData))
+			v := compileSchema(t, schemaData)
 
 			err := v.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
 			require.NotErrorIs(t, err, schema.ErrValidate)

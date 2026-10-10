@@ -169,7 +169,7 @@ func TestViolation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := compileSchema(t, []byte(tc.schema))
+			v := compileSchema(t, tc.schema)
 
 			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
 			require.Error(t, err)
@@ -184,12 +184,12 @@ func TestViolation(t *testing.T) {
 func TestViolation_Binding(t *testing.T) {
 	t.Parallel()
 
-	v := compileSchema(t, []byte(`{
+	v := compileSchema(t, `{
 		"properties": {
 			"name": {"type": "string"},
 			"age": {"type": "integer"}
 		}
-	}`))
+	}`)
 
 	t.Run("single violation", func(t *testing.T) {
 		t.Parallel()
@@ -340,7 +340,7 @@ func TestViolation_Collection(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input)
 
-			err := doc.Validate(t.Context(), compileSchema(t, []byte(tc.schema)))
+			err := doc.Validate(t.Context(), compileSchema(t, tc.schema))
 			require.EqualError(t, err, tc.want)
 		})
 	}
@@ -509,7 +509,7 @@ func TestViolation_MissingMember(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input)
 
-			err := doc.Validate(t.Context(), compileSchema(t, []byte(tc.schema)))
+			err := doc.Validate(t.Context(), compileSchema(t, tc.schema))
 			require.Error(t, err)
 
 			var got, near []string
@@ -558,7 +558,7 @@ func TestViolation_MissingMember(t *testing.T) {
 			server:
 			  port: 1
 		`))
-		v := compileSchema(t, []byte(`{"required": ["name"]}`))
+		v := compileSchema(t, `{"required": ["name"]}`)
 
 		err := yamltest.At(t, doc, paths.Current().Child("server")).Validate(t.Context(), v)
 
@@ -573,7 +573,7 @@ func TestViolation_MissingMember(t *testing.T) {
 	t.Run("value", func(t *testing.T) {
 		t.Parallel()
 
-		v := compileSchema(t, []byte(server))
+		v := compileSchema(t, server)
 
 		err := v.ValidateValue(t.Context(), map[string]any{"server": map[string]any{"port": 1}})
 
@@ -594,12 +594,12 @@ func TestViolation_MissingMember(t *testing.T) {
 func TestViolation_Value(t *testing.T) {
 	t.Parallel()
 
-	v := compileSchema(t, []byte(`{
+	v := compileSchema(t, `{
 		"properties": {
 			"name": {"type": "string"},
 			"age": {"type": "integer"}
 		}
-	}`))
+	}`)
 
 	t.Run("single violation", func(t *testing.T) {
 		t.Parallel()
@@ -897,7 +897,7 @@ func TestViolation_Alternatives(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v := compileSchema(t, []byte(tc.schema))
+			v := compileSchema(t, tc.schema)
 
 			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
 			require.Error(t, err)
@@ -910,10 +910,10 @@ func TestViolation_Alternatives(t *testing.T) {
 func TestViolation_Forms(t *testing.T) {
 	t.Parallel()
 
-	v := compileSchema(t, []byte(`{"properties": {"v": {"anyOf": [
+	v := compileSchema(t, `{"properties": {"v": {"anyOf": [
 		{"type": "string", "minLength": 3},
 		{"type": "string", "pattern": "^x"}
-	]}}}`))
+	]}}}`)
 
 	t.Run("bound", func(t *testing.T) {
 		t.Parallel()
@@ -1026,7 +1026,7 @@ func TestViolation_Forms(t *testing.T) {
 func TestViolation_Problems(t *testing.T) {
 	t.Parallel()
 
-	v := compileSchema(t, []byte(`{
+	v := compileSchema(t, `{
 		"properties": {
 			"v": {"anyOf": [
 				{"type": "string", "minLength": 3},
@@ -1035,7 +1035,7 @@ func TestViolation_Problems(t *testing.T) {
 			"port": {"type": "integer", "minimum": 1}
 		},
 		"additionalProperties": false
-	}`))
+	}`)
 
 	// Each row is the message of a problem and the number of nodes below
 	// it, which are its details.
@@ -1148,7 +1148,7 @@ func TestViolation_Is(t *testing.T) {
 	t.Run("every violation of a validation is invalid", func(t *testing.T) {
 		t.Parallel()
 
-		s := schema.MustCompile([]byte(`{"properties": {"a": {"type": "string"}, "b": {"maximum": 1}}}`))
+		s := compileSchema(t, `{"properties": {"a": {"type": "string"}, "b": {"maximum": 1}}}`)
 
 		err := s.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\nb: 2\n"))
 		require.Error(t, err)
@@ -1162,8 +1162,8 @@ func TestViolation_Is(t *testing.T) {
 	t.Run("a validation that could not run is not invalid", func(t *testing.T) {
 		t.Parallel()
 
-		s := schema.MustCompile(
-			[]byte(`{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`),
+		s := compileSchema(t,
+			`{"properties": {"a": {"$ref": "https://example.invalid/nope.json"}}}`,
 			schema.WithRequireRefs(false),
 		)
 
