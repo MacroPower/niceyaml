@@ -566,43 +566,27 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 
 		tcs := map[string]struct {
-			decode func(*niceyaml.Node) error
+			target any
 			input  string
 			err    string
 		}{
 			"struct": {
-				input: "host: a\nport: 8080\n",
-				decode: func(n *niceyaml.Node) error {
-					_, err := n.Decode[server](t.Context())
-
-					return err
-				},
+				input:  "host: a\nport: 8080\n",
+				target: new(server),
 			},
 			"pointer": {
-				input: "host: a\nport: 8080\n",
-				decode: func(n *niceyaml.Node) error {
-					_, err := n.Decode[pointer](t.Context())
-
-					return err
-				},
+				input:  "host: a\nport: 8080\n",
+				target: new(pointer),
 			},
 			"parent field still validates": {
-				input: "host: a\nport: 0\n",
-				err:   "2:7: $.port: must be positive",
-				decode: func(n *niceyaml.Node) error {
-					_, err := n.Decode[server](t.Context())
-
-					return err
-				},
+				input:  "host: a\nport: 0\n",
+				err:    "2:7: $.port: must be positive",
+				target: new(server),
 			},
 			"a field below a deeper inline struct validates": {
-				input: "host: a\nport: 0\n",
-				err:   "2:7: $.port: must be positive\n2:7: $.port: must be positive",
-				decode: func(n *niceyaml.Node) error {
-					_, err := n.Decode[deep](t.Context())
-
-					return err
-				},
+				input:  "host: a\nport: 0\n",
+				err:    "2:7: $.port: must be positive\n2:7: $.port: must be positive",
+				target: new(deep),
 			},
 		}
 
@@ -610,7 +594,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				err := tc.decode(yamltest.FirstDocument(t, tc.input))
+				err := yamltest.FirstDocument(t, tc.input).DecodeInto(t.Context(), tc.target)
 				if tc.err != "" {
 					require.EqualError(t, err, tc.err)
 
@@ -655,24 +639,16 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 
 		tcs := map[string]struct {
-			decode func(*niceyaml.Node) error
+			target any
 			input  string
 		}{
 			"inline": {
-				input: "# empty\n",
-				decode: func(n *niceyaml.Node) error {
-					_, err := n.Decode[inline](t.Context())
-
-					return err
-				},
+				input:  "# empty\n",
+				target: new(inline),
 			},
 			"named": {
-				input: "spec: x\n",
-				decode: func(n *niceyaml.Node) error {
-					_, err := n.Decode[named](t.Context())
-
-					return err
-				},
+				input:  "spec: x\n",
+				target: new(named),
 			},
 		}
 
@@ -680,7 +656,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				require.NoError(t, tc.decode(yamltest.FirstDocument(t, tc.input)))
+				require.NoError(t, yamltest.FirstDocument(t, tc.input).DecodeInto(t.Context(), tc.target))
 			})
 		}
 	})
@@ -1764,35 +1740,23 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 
 		tcs := map[string]struct {
-			decode func(ctx context.Context, dd *niceyaml.Node) error
+			target any
 			input  string
 			want   []string
 		}{
 			"top-level map": {
-				input: "70000: x\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[map[port]string](ctx)
-
-					return err
-				},
-				want: []string{"1:1: $.70000~: port out of range"},
+				input:  "70000: x\n",
+				target: new(map[port]string),
+				want:   []string{"1:1: $.70000~: port out of range"},
 			},
 			"map in a field": {
-				input: "m:\n  70000: x\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[byPort](ctx)
-
-					return err
-				},
-				want: []string{"2:3: $.m.70000~: port out of range"},
+				input:  "m:\n  70000: x\n",
+				target: new(byPort),
+				want:   []string{"2:3: $.m.70000~: port out of range"},
 			},
 			"key and value both fail": {
-				input: "m:\n  70001: 70002\n  70000: 1\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[portsByPort](ctx)
-
-					return err
-				},
+				input:  "m:\n  70001: 70002\n  70000: 1\n",
+				target: new(portsByPort),
 				want: []string{
 					"2:3: $.m.70001~: port out of range",
 					"2:10: $.m.70001: port out of range",
@@ -1800,12 +1764,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				},
 			},
 			"valid key": {
-				input: "80: x\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[map[port]string](ctx)
-
-					return err
-				},
+				input:  "80: x\n",
+				target: new(map[port]string),
 			},
 		}
 
@@ -1815,7 +1775,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				dd := yamltest.FirstDocument(t, tc.input)
 
-				err := tc.decode(t.Context(), dd)
+				err := dd.DecodeInto(t.Context(), tc.target)
 				if tc.want == nil {
 					require.NoError(t, err)
 
@@ -2104,30 +2064,22 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		deepChain := strings.Repeat("{next: ", depth) + "{items: {0x10: {price: -1}}}" + strings.Repeat("}", depth)
 
 		tcs := map[string]struct {
-			decode func(ctx context.Context, dd *niceyaml.Node) error
+			target any
 			input  string
 			at     paths.Path
 			want   []string
 		}{
 			"deep chain": {
-				input: deep,
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[link](ctx)
-
-					return err
-				},
+				input:  deep,
+				target: new(link),
 				want: []string{fmt.Sprintf(
 					"1:%d: $%s.items.0x10.price: negative price",
 					strings.Index(deep, "-1")+1, strings.Repeat(".next.a", depth),
 				)},
 			},
 			"deep struct chain": {
-				input: deepChain,
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[chain](ctx)
-
-					return err
-				},
+				input:  deepChain,
+				target: new(chain),
 				want: []string{fmt.Sprintf(
 					"1:%d: $%s.items.0x10.price: negative price",
 					strings.Index(deepChain, "-1")+1, strings.Repeat(".next", depth),
@@ -2141,11 +2093,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 					"  next:",
 					"    items: {0x10: {price: -3}}",
 				),
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[chain](ctx)
-
-					return err
-				},
+				target: new(chain),
 				want: []string{
 					"1:23: $.items.0x10.price: negative price",
 					"3:25: $.next.items.0x10.price: negative price",
@@ -2153,44 +2101,28 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				},
 			},
 			"key below list elements": {
-				input: "list:\n  - {}\n  - list:\n      - ports: {70000: x}\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[chain](ctx)
-
-					return err
-				},
-				want: []string{"4:17: $.list[1].list[0].ports.70000~: port out of range"},
+				input:  "list:\n  - {}\n  - list:\n      - ports: {70000: x}\n",
+				target: new(chain),
+				want:   []string{"4:17: $.list[1].list[0].ports.70000~: port out of range"},
 			},
 			"key below two maps": {
-				input: "a:\n  b:\n    70000: x\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[map[string]map[string]map[port]string](ctx)
-
-					return err
-				},
-				want: []string{"3:5: $.a.b.70000~: port out of range"},
+				input:  "a:\n  b:\n    70000: x\n",
+				target: new(map[string]map[string]map[port]string),
+				want:   []string{"3:5: $.a.b.70000~: port out of range"},
 			},
 			"merge below a map": {
-				input: "defs: {base: &b {0x10: {price: -1}}}\nm: {n: {<<: *b}}\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[map[string]map[string]map[float64]item](ctx)
-
-					return err
-				},
+				input:  "defs: {base: &b {0x10: {price: -1}}}\nm: {n: {<<: *b}}\n",
+				target: new(map[string]map[string]map[float64]item),
 				want: []string{
 					"1:32: $.defs.base.0x10.price: negative price",
 					"1:32: $.m.n.0x10.price: negative price",
 				},
 			},
 			"maps below a node at a path": {
-				input: "spec:\n  a:\n    0x10: {price: -1}\n",
-				at:    paths.Current().Child("spec"),
-				decode: func(ctx context.Context, dd *niceyaml.Node) error {
-					_, err := dd.Decode[map[string]map[float64]item](ctx)
-
-					return err
-				},
-				want: []string{"3:19: $.spec.a.0x10.price: negative price"},
+				input:  "spec:\n  a:\n    0x10: {price: -1}\n",
+				at:     paths.Current().Child("spec"),
+				target: new(map[string]map[float64]item),
+				want:   []string{"3:19: $.spec.a.0x10.price: negative price"},
 			},
 		}
 
@@ -2200,7 +2132,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				dd := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.at)
 
-				err := tc.decode(t.Context(), dd)
+				err := dd.DecodeInto(t.Context(), tc.target)
 
 				assert.Equal(t, tc.want, validationTexts(sourceErrorOf(t, err)))
 			})
@@ -2295,46 +2227,30 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		// No entry below the map can fail, so no error needs the key of an
 		// entry.
 		tcs := map[string]struct {
-			decode func(ctx context.Context, dd *niceyaml.Node, opts ...niceyaml.DecodeOption) error
+			target func() any
 			input  string
 		}{
 			// The map validates itself, and its type holds no validator
 			// below it.
 			"map that validates itself": {
-				input: "a: x\nb: y\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
-					_, err := dd.Decode[labels](ctx, opts...)
-
-					return err
-				},
+				input:  "a: x\nb: y\n",
+				target: func() any { return new(labels) },
 			},
 			// Each map validates itself, and the values go-yaml decodes into
 			// its interface values hold no validator.
 			"list of maps that validate themselves": {
-				input: "- {a: 1}\n- {b: {c: 1}}\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
-					_, err := dd.Decode[[]anyLabels](ctx, opts...)
-
-					return err
-				},
+				input:  "- {a: 1}\n- {b: {c: 1}}\n",
+				target: func() any { return new([]anyLabels) },
 			},
 			// The type of the values may hold a validator, but the values
 			// go-yaml decodes into an interface hold none.
 			"map of any": {
-				input: "a: {b: 1}\nc: [{d: 1}]\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
-					_, err := dd.Decode[map[string]any](ctx, opts...)
-
-					return err
-				},
+				input:  "a: {b: 1}\nc: [{d: 1}]\n",
+				target: func() any { return new(map[string]any) },
 			},
 			"any": {
-				input: "- {a: 1}\n- {b: {c: 1}}\n",
-				decode: func(ctx context.Context, dd *niceyaml.Node, opts ...niceyaml.DecodeOption) error {
-					_, err := dd.Decode[any](ctx, opts...)
-
-					return err
-				},
+				input:  "- {a: 1}\n- {b: {c: 1}}\n",
+				target: func() any { return new(any) },
 			},
 		}
 
@@ -2347,12 +2263,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				decoded := 0
 				count := countStrings(&decoded)
 
-				require.NoError(t, tc.decode(t.Context(), dd, count, niceyaml.WithSelfValidation(false)))
+				require.NoError(t, dd.DecodeInto(t.Context(), tc.target(), count, niceyaml.WithSelfValidation(false)))
 
 				want := decoded
 				decoded = 0
 
-				require.NoError(t, tc.decode(t.Context(), dd, count))
+				require.NoError(t, dd.DecodeInto(t.Context(), tc.target(), count))
 
 				// The decode reads each key, and the walk reads none again.
 				assert.Equal(t, want, decoded)
