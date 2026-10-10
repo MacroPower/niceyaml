@@ -162,51 +162,38 @@ func TestWhen(t *testing.T) {
 		assert.False(t, called)
 	})
 
-	t.Run("nil matcher panics", func(t *testing.T) {
+	t.Run("nil argument panics", func(t *testing.T) {
 		t.Parallel()
 
-		assert.PanicsWithValue(t, "schema.When: matcher is nil", func() {
-			schema.When(nil, schema.Embedded(schemaData))
-		})
-	})
+		const (
+			noMatcher  = "schema.When: matcher is nil"
+			noResolver = "schema.When: resolver is nil"
+		)
 
-	t.Run("nil resolver panics", func(t *testing.T) {
-		t.Parallel()
+		byKind := matcher.Content(kindPath, "x")
+		embedded := schema.Embedded(schemaData)
 
-		assert.PanicsWithValue(t, "schema.When: resolver is nil", func() {
-			schema.When(matcher.Content(kindPath, "x"), nil)
-		})
-	})
+		tcs := map[string]struct {
+			matcher  matcher.Matcher
+			resolver schema.Resolver
+			want     string
+		}{
+			"nil matcher":          {matcher: nil, resolver: embedded, want: noMatcher},
+			"nil Func matcher":     {matcher: matcher.Func(nil), resolver: embedded, want: noMatcher},
+			"nil pointer matcher":  {matcher: (*pointerMatcher)(nil), resolver: embedded, want: noMatcher},
+			"nil resolver":         {matcher: byKind, resolver: nil, want: noResolver},
+			"nil ResolverFunc":     {matcher: byKind, resolver: schema.ResolverFunc(nil), want: noResolver},
+			"nil pointer resolver": {matcher: byKind, resolver: (*schema.Schema)(nil), want: noResolver},
+		}
 
-	t.Run("nil Func matcher panics", func(t *testing.T) {
-		t.Parallel()
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		assert.PanicsWithValue(t, "schema.When: matcher is nil", func() {
-			schema.When(matcher.Func(nil), schema.Embedded(schemaData))
-		})
-	})
-
-	t.Run("nil ResolverFunc panics", func(t *testing.T) {
-		t.Parallel()
-
-		assert.PanicsWithValue(t, "schema.When: resolver is nil", func() {
-			schema.When(matcher.Content(kindPath, "x"), schema.ResolverFunc(nil))
-		})
-	})
-
-	t.Run("nil pointer matcher panics", func(t *testing.T) {
-		t.Parallel()
-
-		assert.PanicsWithValue(t, "schema.When: matcher is nil", func() {
-			schema.When((*pointerMatcher)(nil), schema.Embedded(schemaData))
-		})
-	})
-
-	t.Run("nil pointer resolver panics", func(t *testing.T) {
-		t.Parallel()
-
-		assert.PanicsWithValue(t, "schema.When: resolver is nil", func() {
-			schema.When(matcher.Content(kindPath, "x"), (*schema.Schema)(nil))
-		})
+				assert.PanicsWithValue(t, tc.want, func() {
+					schema.When(tc.matcher, tc.resolver)
+				})
+			})
+		}
 	})
 }
