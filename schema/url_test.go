@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/rand"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -91,14 +90,6 @@ func nonceServer(t *testing.T) (string, *atomic.Int32) {
 	t.Cleanup(server.Close)
 
 	return server.URL + path, &requests
-}
-
-// respondBody returns a transport function that answers a request with
-// status 200 and the bytes body reads.
-func respondBody(body io.Reader) yamltest.RoundTripFunc {
-	return func(*http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(body)}, nil
-	}
 }
 
 func TestURL(t *testing.T) {
@@ -314,11 +305,11 @@ func TestURL(t *testing.T) {
 				want: "fetch http://example.com/schema.json: connection refused",
 			},
 			"body read error": {
-				transport: respondBody(iotest.ErrReader(errors.New("read error"))),
+				transport: yamltest.RespondBody(iotest.ErrReader(errors.New("read error"))),
 				want:      "read response from http://example.com/schema.json",
 			},
 			"schema exceeds size limit": {
-				transport: respondBody(bytes.NewReader(make([]byte, httpfetch.MaxSize+1))),
+				transport: yamltest.RespondBody(bytes.NewReader(make([]byte, httpfetch.MaxSize+1))),
 				want:      "response exceeds",
 			},
 		}

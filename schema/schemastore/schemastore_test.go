@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1088,12 +1087,7 @@ func TestSchemaStore_FetchError(t *testing.T) {
 		// Port 1 is a privileged port that won't be listening.
 		"connection refused": schemastore.New(schemastore.WithCatalogURL("http://localhost:1")),
 
-		"read body error": newStore(yamltest.RoundTripFunc(func(*http.Request) (*http.Response, error) {
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(iotest.ErrReader(errors.New("read error"))),
-			}, nil
-		}).Client()),
+		"read body error": newStore(yamltest.RespondBody(iotest.ErrReader(errors.New("read error"))).Client()),
 	}
 
 	for name, store := range tcs {
