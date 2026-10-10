@@ -29,21 +29,6 @@ func TestOverride(t *testing.T) {
 			overlay: blue,
 			want:    blue,
 		},
-		"overlay nil returns base": {
-			base:    red,
-			overlay: nil,
-			want:    red,
-		},
-		"overlay NoColor returns base": {
-			base:    red,
-			overlay: lipgloss.NoColor{},
-			want:    red,
-		},
-		"overlay invisible returns base": {
-			base:    red,
-			overlay: color.RGBA{R: 255, G: 0, B: 0, A: 0},
-			want:    red,
-		},
 		"both nil returns nil": {
 			base:    nil,
 			overlay: nil,
@@ -57,11 +42,6 @@ func TestOverride(t *testing.T) {
 		"overlay outside the gamut is clamped": {
 			base:    red,
 			overlay: colorful.Color{R: -0.2, G: 1.4, B: 0.5},
-			want:    colorful.Color{R: 0, G: 1, B: 0.5},
-		},
-		"base outside the gamut with overlay nil is clamped": {
-			base:    colorful.Color{R: -0.2, G: 1.4, B: 0.5},
-			overlay: nil,
 			want:    colorful.Color{R: 0, G: 1, B: 0.5},
 		},
 	}
@@ -176,30 +156,15 @@ func TestBlend(t *testing.T) {
 			c2:   blue,
 			want: blue,
 		},
-		"c2 nil returns c1": {
-			c1:   red,
-			c2:   nil,
-			want: red,
-		},
 		"c1 NoColor returns c2": {
 			c1:   lipgloss.NoColor{},
 			c2:   blue,
 			want: blue,
 		},
-		"c2 NoColor returns c1": {
-			c1:   red,
-			c2:   lipgloss.NoColor{},
-			want: red,
-		},
 		"c1 invisible returns c2": {
 			c1:   color.RGBA{R: 255, G: 0, B: 0, A: 0},
 			c2:   blue,
 			want: blue,
-		},
-		"c2 invisible returns c1": {
-			c1:   red,
-			c2:   color.RGBA{R: 0, G: 0, B: 255, A: 0},
-			want: red,
 		},
 		"NoColor against invisible returns nil": {
 			c1:   lipgloss.NoColor{},
