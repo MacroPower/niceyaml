@@ -2272,8 +2272,8 @@ func TestNewSourceFromLayers_Concurrent(t *testing.T) {
 		"server:\n  host: prod.example.com\n",
 	))...)
 
-	// Every call reads the one merged document, and the first calls race
-	// to parse it.
+	// NewSourceFromLayers merged and parsed the layers already, so
+	// every call reads the one merged document.
 	const calls = 8
 
 	var wg sync.WaitGroup
