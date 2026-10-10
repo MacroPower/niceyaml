@@ -66,22 +66,14 @@ func serve(t *testing.T, files map[string]string) string {
 // listens on a port, so a connection that another process opens cannot
 // add to the count.
 func memoryClient(files map[string]string) (*http.Client, *atomic.Int32) {
-	var requests atomic.Int32
-
 	handler := schemaHandler(files)
 
-	client := &http.Client{
-		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-			requests.Add(1)
+	return yamltest.CountingClient(yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, r)
 
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, r)
-
-			return rec.Result(), nil
-		}),
-	}
-
-	return client, &requests
+		return rec.Result(), nil
+	}))
 }
 
 // nonceServer starts a server that answers one path with a schema and
@@ -234,10 +226,9 @@ func TestURL(t *testing.T) {
 		t.Parallel()
 
 		base := serve(t, map[string]string{"/schema.json": `{"type": "object"}`})
+		client, requests := yamltest.CountingClient(http.DefaultTransport)
 
-		var requests atomic.Int32
-
-		err := lookup(t, countingClient(&requests), schema.URL(base+"/schema.json"))
+		err := lookup(t, client, schema.URL(base+"/schema.json"))
 		require.NoError(t, err)
 		assert.Equal(t, int32(1), requests.Load())
 	})

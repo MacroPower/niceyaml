@@ -3,11 +3,11 @@ package schema_test
 import (
 	"context"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -189,12 +189,10 @@ func TestFileOrURL(t *testing.T) {
 
 		base := serve(t, map[string]string{"/schema.json": `{"type": "object"}`})
 
-		var requests atomic.Int32
-
-		r := fileOrURL(t, "/dir", base+"/schema.json")
+		client, requests := yamltest.CountingClient(http.DefaultTransport)
 
 		// The registry fetches the URL with its own client.
-		err := lookup(t, countingClient(&requests), r)
+		err := lookup(t, client, fileOrURL(t, "/dir", base+"/schema.json"))
 		require.NoError(t, err)
 		assert.Equal(t, int32(1), requests.Load())
 	})

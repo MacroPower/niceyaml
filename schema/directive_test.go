@@ -2,9 +2,9 @@ package schema_test
 
 import (
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 
 	"github.com/goccy/go-yaml/lexer"
@@ -483,10 +483,10 @@ func TestDirective(t *testing.T) {
 			filepath.Join(t.TempDir(), "config.yaml"),
 		)
 
-		var requests atomic.Int32
+		client, requests := yamltest.CountingClient(http.DefaultTransport)
 
 		reg := schema.NewRegistry(
-			schema.WithHTTPClient(countingClient(&requests)),
+			schema.WithHTTPClient(client),
 			schema.WithResolvers(schema.Directive()),
 		)
 
