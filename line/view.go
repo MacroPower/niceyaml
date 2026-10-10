@@ -85,7 +85,10 @@ func NewView(lines Lines, spans ...position.Span) *View {
 // Lines returns the content of the [View], every line of the [Lines] it is
 // over, whether or not the View holds it. A search of the content, such as
 // one a [finder.Finder] loads, yields ranges in the coordinates every View
-// method takes.
+// method takes. The text of the lines the View holds comes from
+// [View.Held], which returns those lines alone:
+//
+//	text := doc.View().Held().Content()
 //
 // [finder.Finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/finder#Finder
 func (v *View) Lines() Lines {
