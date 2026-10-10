@@ -112,7 +112,7 @@ func TestErrorHandler(t *testing.T) {
 
 	// A source that ends with blank lines, which an excerpt of its last
 	// key shows as context below the caret.
-	spaced := niceyaml.NewSourceFromString("name: test\n\n\n")
+	spaced := niceyaml.NewSourceFromString(stringtest.LinesLF("name: test", "", ""))
 	spacedErr := yamltest.Bind(t, spaced, errAt("bad name", "$.name"))
 
 	// The excerpt of a lone error at the name key, behind the indent of the
@@ -146,7 +146,7 @@ func TestErrorHandler(t *testing.T) {
 			),
 		},
 		"multi-line error": {
-			err: errors.New("line1\nline2\nline3"),
+			err: errors.New(stringtest.JoinLF("line1", "line2", "line3")),
 			want: stringtest.JoinLF(
 				"Error",
 				"  line1",
@@ -479,7 +479,9 @@ func TestNewErrorHandler_WithExcerptOptions(t *testing.T) {
 
 	// The marked line sits in the middle of a source with more lines on
 	// each side than the default shows, so the count changes the excerpt.
-	src := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nh: 8\ni: 9\n")
+	src := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1", "b: 2", "c: 3", "d: 4", "e: 5", "f: 6", "g: 7", "h: 8", "i: 9",
+	))
 	err := yamltest.Bind(t, src, errAt("bad", "$.e"))
 
 	p := xmlPrinter()
