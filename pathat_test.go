@@ -386,9 +386,7 @@ func TestNode_PathAt(t *testing.T) {
 				"0:0 -",
 			),
 		},
-		"empty source": {
-			input: "",
-		},
+		"empty source": {input: ""},
 		"whitespace alone": {
 			input: "   ",
 			want: stringtest.JoinLF(

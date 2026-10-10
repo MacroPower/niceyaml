@@ -303,42 +303,18 @@ func TestNode_IsEmpty(t *testing.T) {
 			input: "...\n",
 			want:  true,
 		},
-		"null": {
-			input: "null\n",
-		},
-		"tilde": {
-			input: "~\n",
-		},
-		"null below a header": {
-			input: "--- null\n",
-		},
-		"tagged null": {
-			input: "!!null\n",
-		},
-		"empty mapping": {
-			input: "{}\n",
-		},
-		"empty sequence": {
-			input: "[]\n",
-		},
-		"empty single-quoted string": {
-			input: "''\n",
-		},
-		"empty double-quoted string": {
-			input: "\"\"\n",
-		},
-		"empty block scalar": {
-			input: "--- |\n",
-		},
-		"alias with no anchor": {
-			input: "*nope\n",
-		},
-		"alias with no anchor below a header": {
-			input: "--- *nope\n",
-		},
-		"mapping": {
-			input: "a: 1\n",
-		},
+		"null":                                {input: "null\n"},
+		"tilde":                               {input: "~\n"},
+		"null below a header":                 {input: "--- null\n"},
+		"tagged null":                         {input: "!!null\n"},
+		"empty mapping":                       {input: "{}\n"},
+		"empty sequence":                      {input: "[]\n"},
+		"empty single-quoted string":          {input: "''\n"},
+		"empty double-quoted string":          {input: "\"\"\n"},
+		"empty block scalar":                  {input: "--- |\n"},
+		"alias with no anchor":                {input: "*nope\n"},
+		"alias with no anchor below a header": {input: "--- *nope\n"},
+		"mapping":                             {input: "a: 1\n"},
 		"value left out": {
 			input: "a:\n",
 			path:  "$.a",

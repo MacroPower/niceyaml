@@ -361,9 +361,7 @@ func TestSource_Lines(t *testing.T) {
 			input: "a: 1\nb: 2\nc: 3\n",
 			want:  []string{"a: 1", "b: 2", "c: 3"},
 		},
-		"empty": {
-			input: "",
-		},
+		"empty": {input: ""},
 		"nested yaml": {
 			input: "parent:\n  child: value\n",
 			want:  []string{"parent:", "  child: value"},
@@ -411,18 +409,10 @@ func TestSource_Tokens(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 	}{
-		"mapping": {
-			input: "key: value\nfoo: bar\n",
-		},
-		"block scalar": {
-			input: "key: |\n  one\n  two\nfoo: bar\n",
-		},
-		"documents": {
-			input: "a: 1\n---\nb: 2\n",
-		},
-		"empty": {
-			input: "",
-		},
+		"mapping":      {input: "key: value\nfoo: bar\n"},
+		"block scalar": {input: "key: |\n  one\n  two\nfoo: bar\n"},
+		"documents":    {input: "a: 1\n---\nb: 2\n"},
+		"empty":        {input: ""},
 	}
 
 	for name, tc := range tcs {
@@ -2418,9 +2408,7 @@ func TestSource_Documents_CollectErrors(t *testing.T) {
 		// The message of each binding a loop over Documents collects.
 		tolerant []string
 	}{
-		"file that parses": {
-			input: "a: 1\n---\nb: 2\n",
-		},
+		"file that parses": {input: "a: 1\n---\nb: 2\n"},
 		"one syntax error": {
 			input:    "a: 1\n---\nb: 2\n---\na: [\n---\nc: 3\n",
 			strict:   []string{"cfg.yaml:5:4: " + unclosed},
@@ -2953,9 +2941,7 @@ func TestSource_ValidateDocuments(t *testing.T) {
 		// The message of each binding the result holds, in file order.
 		want []string
 	}{
-		"every document valid": {
-			input: "name: a\n---\nname: b\n",
-		},
+		"every document valid": {input: "name: a\n---\nname: b\n"},
 		"one document": {
 			input: "value: 1\n",
 			want:  []string{"f.yaml:1:1: $: name is required"},
@@ -2986,9 +2972,7 @@ func TestSource_ValidateDocuments(t *testing.T) {
 			input: "name: &x\n---\nname: [\n---\nvalue: 5\n",
 			want:  []string{"f.yaml:3:7: " + unclosed, "f.yaml:5:1: $: name is required"},
 		},
-		"empty document beside one with content": {
-			input: "name: x\n---\n",
-		},
+		"empty document beside one with content": {input: "name: x\n---\n"},
 		"empty documents alone": {
 			input: "---\n---\n",
 			want:  []string{"f.yaml:1:1: $: name is required"},

@@ -497,18 +497,10 @@ var mergedCorpus = map[string]struct {
 			"  - !custom 7",
 		),
 	},
-	"a local tag over no value": {
-		input: "first: 1\nlast: !custom\n",
-	},
-	"a mapping tag over no value": {
-		input: "first: 1\nlast: &anchored !!map\n",
-	},
-	"a sequence tag over no value": {
-		input: "first: 1\nlast:\n  - !!seq\n",
-	},
-	"a string tag over no value": {
-		input: "first: 1\nlast: !!str\n",
-	},
+	"a local tag over no value":    {input: "first: 1\nlast: !custom\n"},
+	"a mapping tag over no value":  {input: "first: 1\nlast: &anchored !!map\n"},
+	"a sequence tag over no value": {input: "first: 1\nlast:\n  - !!seq\n"},
+	"a string tag over no value":   {input: "first: 1\nlast: !!str\n"},
 	"literal block scalars": {
 		input: stringtest.LinesLF(
 			"clip: |",
@@ -732,9 +724,7 @@ var mergedCorpus = map[string]struct {
 		),
 		typed: func() any { return new(map[string]string) },
 	},
-	"comments": {
-		input: "# head\na: 1 # trailing\n\n# middle\nb:\n  # inner\n  c: 2\n# tail\n",
-	},
+	"comments": {input: "# head\na: 1 # trailing\n\n# middle\nb:\n  # inner\n  c: 2\n# tail\n"},
 }
 
 func TestNewSourceFromLayers_Decode_Equivalence(t *testing.T) {
