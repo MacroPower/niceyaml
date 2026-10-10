@@ -307,16 +307,13 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("a nested field reports its path", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			hours:
 			  open: "09:00"
 			  close: "08:00"
 		`), niceyaml.WithName("cafe.yaml"))
 
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		_, err = doc.Decode[nested](t.Context())
+		_, err := doc.Decode[nested](t.Context())
 		require.EqualError(t, err, "cafe.yaml:3:10: $.hours.close: closes before it opens")
 
 		var e *niceyaml.Error
@@ -331,16 +328,13 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("context a Validate adds around a located error follows the path", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			hours:
 			  open: "09:00"
 			  close: "08:00"
 		`), niceyaml.WithName("cafe.yaml"))
 
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		_, err = doc.Decode[struct {
+		_, err := doc.Decode[struct {
 			Hours wrappedHours `yaml:"hours"`
 		}](t.Context())
 
@@ -369,16 +363,13 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("the errors a summary under a field heads report the joined path", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			schedule:
 			  open: ""
 			  close: ""
 		`), niceyaml.WithName("cafe.yaml"))
 
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		_, err = doc.Decode[struct {
+		_, err := doc.Decode[struct {
 			Schedule schedule `yaml:"schedule"`
 		}](t.Context())
 		// The summary is a heading, so the decode rebases it under the field
@@ -415,16 +406,13 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("a problem with no location under a field binds as a scoped bind does", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			schedule:
 			  open: "09:00"
 			  close: "08:00"
 		`), niceyaml.WithName("cafe.yaml"))
 
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		_, err = doc.Decode[struct {
+		_, err := doc.Decode[struct {
 			Schedule conflictingSchedule `yaml:"schedule"`
 		}](t.Context())
 
@@ -451,7 +439,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("elements and entries report their index or key", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			items:
 			  - name: tea
 			    price: 1
@@ -471,10 +459,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			    - {price: -5}
 		`), niceyaml.WithName("cafe.yaml"))
 
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		_, err = doc.Decode[nested](t.Context())
+		_, err := doc.Decode[nested](t.Context())
 		require.Error(t, err)
 
 		bound := sourceErrorOf(t, err)
@@ -986,15 +971,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("every value that fails is reported", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			hours: {open: "09:00", close: "08:00"}
 			backup: {open: "09:00", close: "08:00"}
 		`), niceyaml.WithName("cafe.yaml"))
 
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		_, err = doc.Decode[nested](t.Context())
+		_, err := doc.Decode[nested](t.Context())
 		require.Error(t, err)
 
 		assert.Equal(t, stringtest.JoinLF(
@@ -1022,17 +1004,14 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("a scoped decode reports paths from the document root", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
+		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			spec:
 			  items:
 			    - price: 1
 			    - price: -1
 		`), niceyaml.WithName("cafe.yaml"))
 
-		doc, err := source.Document()
-		require.NoError(t, err)
-
-		_, err = yamltest.At(t, doc, paths.Current().Child("spec")).Decode[nested](t.Context())
+		_, err := yamltest.At(t, doc, paths.Current().Child("spec")).Decode[nested](t.Context())
 		require.EqualError(t, err, "cafe.yaml:4:14: $.spec.items[1].price: negative price")
 	})
 
@@ -1335,10 +1314,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("keys of one text order by the types they hold", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("1: {n: -1}\n\"1\": {n: -2}\n", niceyaml.WithAllowDuplicateKeys(true))
-
-		dd, err := source.Document()
-		require.NoError(t, err)
+		dd := yamltest.FirstDocument(t, "1: {n: -1}\n\"1\": {n: -2}\n", niceyaml.WithAllowDuplicateKeys(true))
 
 		// The string key sorts before the uint64 key.
 		want := stringtest.JoinLF(
@@ -1347,7 +1323,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		)
 
 		for range 20 {
-			_, err = dd.Decode[map[any]signed](t.Context())
+			_, err := dd.Decode[map[any]signed](t.Context())
 			require.EqualError(t, err, want)
 		}
 	})
@@ -1394,10 +1370,9 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).Document()
-				require.NoError(t, err)
+				dd := yamltest.FirstDocument(t, tc.input, tc.opts...)
 
-				_, err = dd.Decode[merged](t.Context())
+				_, err := dd.Decode[merged](t.Context())
 				require.Error(t, err)
 
 				var got []string
@@ -1634,10 +1609,9 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).Document()
-				require.NoError(t, err)
+				dd := yamltest.FirstDocument(t, tc.input, tc.opts...)
 
-				_, err = dd.Decode[merged](t.Context())
+				_, err := dd.Decode[merged](t.Context())
 
 				bound := sourceErrorOf(t, err)
 
@@ -1728,13 +1702,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd, err := niceyaml.NewSourceFromString(tc.input,
+				dd := yamltest.FirstDocument(t, tc.input,
 					niceyaml.WithAllowDuplicateKeys(true),
 					niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.references)),
-				).Document()
-				require.NoError(t, err)
+				)
 
-				_, err = dd.Decode[merged](t.Context())
+				_, err := dd.Decode[merged](t.Context())
 				require.EqualError(t, err, tc.want)
 			})
 		}
@@ -2887,18 +2860,15 @@ func TestDocument_Decode_SelfValidatorAnchors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString(
+			doc := yamltest.FirstDocument(t,
 				"spec:\n  hours:\n    open: "+tc.open+"\nname: x\n",
 				niceyaml.WithName("c.yaml"),
 			)
 
-			doc, err := source.Document()
-			require.NoError(t, err)
-
 			unbound := anchoredOpen{Open: tc.open}.Validate()
 			assert.Equal(t, tc.wantUnbound, niceyaml.FormatError(unbound, niceyaml.WithContextLines(0)))
 
-			_, err = doc.Decode[config](t.Context())
+			_, err := doc.Decode[config](t.Context())
 			require.EqualError(t, err, tc.want)
 
 			// A decode of the hours alone reports the same place.
@@ -2974,8 +2944,7 @@ func TestNode_Decode_SelfValidatorContext(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc, err := niceyaml.NewSourceFromString("- a\n- b\n- c\n- d\n", niceyaml.WithName("cfg.yaml")).Document()
-			require.NoError(t, err)
+			doc := yamltest.FirstDocument(t, "- a\n- b\n- c\n- d\n", niceyaml.WithName("cfg.yaml"))
 
 			ctx, cancel := context.WithCancel(t.Context())
 			t.Cleanup(cancel)
@@ -2987,7 +2956,7 @@ func TestNode_Decode_SelfValidatorContext(t *testing.T) {
 				cancel()
 			}
 
-			_, err = doc.Decode[[]probed](ctx)
+			_, err := doc.Decode[[]probed](ctx)
 			require.ErrorIs(t, err, tc.is)
 			require.EqualError(t, err, tc.err)
 			assert.Equal(t, tc.calls, p.calls.Load())
@@ -3124,12 +3093,11 @@ func TestNode_SelfValidate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("app.yaml")).Document()
-			require.NoError(t, err)
+			doc := yamltest.FirstDocument(t, input, niceyaml.WithName("app.yaml"))
 
 			var cfg layeredConfig
 
-			err = doc.DecodeInto(t.Context(), &cfg, niceyaml.WithSelfValidation(false))
+			err := doc.DecodeInto(t.Context(), &cfg, niceyaml.WithSelfValidation(false))
 			require.NoError(t, err)
 
 			if tc.layer != nil {
@@ -3182,10 +3150,9 @@ func TestNode_SelfValidate_Target(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc, err := niceyaml.NewSourceFromString("port: 80\n", niceyaml.WithName("app.yaml")).Document()
-			require.NoError(t, err)
+			doc := yamltest.FirstDocument(t, "port: 80\n", niceyaml.WithName("app.yaml"))
 
-			err = doc.SelfValidate(t.Context(), tc.v)
+			err := doc.SelfValidate(t.Context(), tc.v)
 			require.ErrorIs(t, err, niceyaml.ErrSelfValidateTarget)
 			require.EqualError(t, err, tc.err)
 
@@ -3218,8 +3185,7 @@ func TestNode_SelfValidate_Node(t *testing.T) {
 			node: func(t *testing.T) *niceyaml.Node {
 				t.Helper()
 
-				doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("app.yaml")).Document()
-				require.NoError(t, err)
+				doc := yamltest.FirstDocument(t, input, niceyaml.WithName("app.yaml"))
 
 				return yamltest.At(t, doc, paths.Current().Child("db"))
 			},
@@ -3230,8 +3196,7 @@ func TestNode_SelfValidate_Node(t *testing.T) {
 			node: func(t *testing.T) *niceyaml.Node {
 				t.Helper()
 
-				doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("app.yaml")).Document()
-				require.NoError(t, err)
+				doc := yamltest.FirstDocument(t, input, niceyaml.WithName("app.yaml"))
 
 				return yamltest.At(t, doc, paths.Current().Child("upstreams"))
 			},
@@ -3245,10 +3210,7 @@ func TestNode_SelfValidate_Node(t *testing.T) {
 			node: func(t *testing.T) *niceyaml.Node {
 				t.Helper()
 
-				doc, err := niceyaml.NewSourceFromString("", niceyaml.WithName("env")).Document()
-				require.NoError(t, err)
-
-				return doc
+				return yamltest.FirstDocument(t, "", niceyaml.WithName("env"))
 			},
 			v:          &layeredConfig{},
 			unresolved: paths.ErrNotFound,
@@ -3317,12 +3279,11 @@ func TestNode_SelfValidate_KeyOptions(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc, err := niceyaml.NewSourceFromString(input, niceyaml.WithName("app.yaml")).Document()
-			require.NoError(t, err)
+			doc := yamltest.FirstDocument(t, input, niceyaml.WithName("app.yaml"))
 
 			var cfg gradedConfig
 
-			err = doc.DecodeInto(t.Context(), &cfg, gradeNames, niceyaml.WithSelfValidation(false))
+			err := doc.DecodeInto(t.Context(), &cfg, gradeNames, niceyaml.WithSelfValidation(false))
 			require.NoError(t, err)
 
 			cfg.ByGrade[gradeHigh] = upstream{URL: "ftp://h"}
