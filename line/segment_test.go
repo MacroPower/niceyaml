@@ -147,15 +147,67 @@ func flowMappingView(n int, highlight bool) *line.View {
 func TestView_Segments(t *testing.T) {
 	t.Parallel()
 
-	t.Run("one segment per token with its whitespace in Text", func(t *testing.T) {
+	t.Run("splits a line into segments", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, "  key: value # note\n", 1)
+		tcs := map[string]struct {
+			input    string
+			want     string
+			overlays line.Overlays
+			line     int
+		}{
+			"one segment per token with its whitespace in Text": {
+				input: "  key: value # note\n",
+				want: "text(  ) nameTag(key) punctuationMappingValue(:) text( ) " +
+					"literalString(value) text( ) comment(# note)",
+			},
+			"an overlay splits the segment it starts or ends inside": {
+				input:    "key: value\n",
+				overlays: line.Overlays{{Kind: "hl", Cols: position.NewSpan(3, 7)}},
+				want: "nameTag(key) punctuationMappingValue(:)[hl] text( )[hl] " +
+					"literalString(va)[hl] literalString(lue)",
+			},
+			"overlapping overlays keep added order across many edges": {
+				input: "abcdefgh\n",
+				overlays: line.Overlays{
+					{Kind: "w", Cols: position.NewSpan(0, 8)},
+					{Kind: "b", Cols: position.NewSpan(2, 5), Blend: true},
+					{Kind: "a", Cols: position.NewSpan(4, 6)},
+				},
+				want: "literalString(ab)[w] literalString(cd)[w,b] literalString(e)[w,b,a] " +
+					"literalString(f)[w,a] literalString(gh)[w]",
+			},
+			"a zero-width overlay still splits but covers nothing": {
+				input:    "abcdef\n",
+				overlays: line.Overlays{{Kind: "z", Cols: position.NewSpan(3, 3)}},
+				want:     "literalString(abc) literalString(def)",
+			},
+			"the indentation before a comment is Text": {
+				input: "a: 1\n   # c\n",
+				line:  1,
+				want:  "text(   ) comment(# c)",
+			},
+			"a line of only spaces in a block scalar is Text": {
+				input: "k: |\n  a\n    \n  b\n",
+				line:  2,
+				want:  "text(    )",
+			},
+			"the line ending is not part of any segment": {
+				input: "a: 1\r\nb: 2\r\n",
+				want:  "nameTag(a) punctuationMappingValue(:) text( ) literalNumberInteger(1)",
+			},
+		}
 
-		assert.Equal(t,
-			"text(  ) nameTag(key) punctuationMappingValue(:) text( ) literalString(value) text( ) comment(# note)",
-			segmentText(view, 0),
-		)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				view := newTestView(t, tc.input, strings.Count(tc.input, "\n"))
+				view.AddLineOverlay(tc.line, tc.overlays...)
+
+				assert.Equal(t, tc.want, segmentText(view, tc.line))
+			})
+		}
 	})
 
 	t.Run("segments cover the content once in column order", func(t *testing.T) {
@@ -182,18 +234,6 @@ func TestView_Segments(t *testing.T) {
 			assert.Equal(t, ln.Content(), text, "line %d", i)
 			assert.Equal(t, ln.Width(), col, "line %d", i)
 		}
-	})
-
-	t.Run("an overlay splits the segment it starts or ends inside", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.AddOverlay("hl", lineRange(0, 3, 7))
-
-		assert.Equal(t,
-			"nameTag(key) punctuationMappingValue(:)[hl] text( )[hl] literalString(va)[hl] literalString(lue)",
-			segmentText(view, 0),
-		)
 	})
 
 	t.Run("overlays come in the order they were added", func(t *testing.T) {
@@ -230,30 +270,6 @@ func TestView_Segments(t *testing.T) {
 
 		assert.Equal(t, want, view.Overlays(0))
 		assert.Equal(t, kind.Kind("w"), segs[1].Overlays[0].Kind)
-	})
-
-	t.Run("overlapping overlays keep added order across many edges", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "abcdefgh\n", 1)
-		view.AddOverlay("w", lineRange(0, 0, 8))
-		view.BlendOverlay("b", lineRange(0, 2, 5))
-		view.AddOverlay("a", lineRange(0, 4, 6))
-
-		assert.Equal(
-			t,
-			"literalString(ab)[w] literalString(cd)[w,b] literalString(e)[w,b,a] literalString(f)[w,a] literalString(gh)[w]",
-			segmentText(view, 0),
-		)
-	})
-
-	t.Run("a zero-width overlay still splits but covers nothing", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "abcdef\n", 1)
-		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(3, 3), Kind: "z"})
-
-		assert.Equal(t, "literalString(abc) literalString(def)", segmentText(view, 0))
 	})
 
 	t.Run("many overlays on one long line", func(t *testing.T) {
@@ -300,36 +316,12 @@ func TestView_Segments(t *testing.T) {
 		)
 	})
 
-	t.Run("the indentation before a comment is Text", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "a: 1\n   # c\n", 2)
-
-		assert.Equal(t, "text(   ) comment(# c)", segmentText(view, 1))
-	})
-
-	t.Run("a line of only spaces in a block scalar is Text", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "k: |\n  a\n    \n  b\n", 4)
-
-		assert.Equal(t, "text(    )", segmentText(view, 2))
-	})
-
 	t.Run("an empty line has no segments", func(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "a: 1\n\nb: 2\n", 3)
 
 		assert.Empty(t, slices.Collect(view.Segments(1)))
-	})
-
-	t.Run("the line ending is not part of any segment", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "a: 1\r\nb: 2\r\n", 2)
-
-		assert.Equal(t, "nameTag(a) punctuationMappingValue(:) text( ) literalNumberInteger(1)", segmentText(view, 0))
 	})
 
 	t.Run("stops when the caller does", func(t *testing.T) {
