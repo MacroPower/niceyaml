@@ -4638,13 +4638,16 @@ func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
 	t.Parallel()
 
 	// A program may pass the current width on every window size message,
-	// or restyle the frame on every focus change. A change that leaves the
-	// printer and the pane width as they are keeps the row counts, so the
-	// next read lays out nothing. Without a diff, the full and hunks view
-	// modes show the same lines at the same pane width.
+	// restyle the frame on every focus change, or push the value of its
+	// search input on every update. A change that leaves the printer, the
+	// pane width, and the search matches as they are keeps the row counts,
+	// so the next read lays out nothing. Without a diff, the full and hunks
+	// view modes show the same lines at the same pane width.
 	frame := normalBorder().Width(30)
 
 	tcs := map[string]struct {
+		// Steps that run before the row counts fill, if any.
+		setup  func(*yamlviewport.Model)
 		change func(*yamlviewport.Model, *printer.Printer)
 	}{
 		"same width": {
@@ -4673,26 +4676,46 @@ func TestViewport_UnchangedLayoutKeepsRowCache(t *testing.T) {
 		"toggled view mode without diff": {
 			change: func(m *yamlviewport.Model, _ *printer.Printer) { m.ToggleViewMode() },
 		},
+		"same search term": {
+			setup: func(m *yamlviewport.Model) {
+				m.SetSearchTerm("value")
+				m.SearchNext()
+			},
+			change: func(m *yamlviewport.Model, _ *printer.Printer) { m.SetSearchTerm("value") },
+		},
+		"clear without search term": {
+			change: func(m *yamlviewport.Model, _ *printer.Printer) { m.ClearSearch() },
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
+			// The base style counts every piece of text the printer styles,
+			// which a layout of the view does for each line.
 			renders := 0
 			p := barePrinter(style.New(countingStyle(&renders)))
 
 			m := testModel(p, 40, 10, yamlviewport.WithContainerStyle(frame))
 			m.SetRevision(niceyaml.NewSourceFromString(yamltest.GenerateYAML(50)))
+
+			if tc.setup != nil {
+				tc.setup(&m)
+			}
+
 			m.SetYOffset(20)
 			m.TotalRowCount()
+			require.Positive(t, renders)
 
+			index := m.SearchIndex()
 			renders = 0
 
 			tc.change(&m, p)
 			m.TotalRowCount()
 
 			assert.Zero(t, renders, "the row counts should come from the cache")
+			assert.Equal(t, index, m.SearchIndex())
 			assert.Equal(t, 20, m.YOffset())
 		})
 	}
@@ -6194,67 +6217,6 @@ func TestViewport_NewSearchTermStartsAtFirstMatch(t *testing.T) {
 	assert.Equal(t, 0, m.SearchIndex())
 	assert.Contains(t, m.View(), "k1: needle")
 	assert.NotContains(t, m.View(), "k16: needle")
-}
-
-func TestViewport_UnchangedSearchKeepsLayout(t *testing.T) {
-	t.Parallel()
-
-	src := yamltest.GenerateLines(50, "k%[1]d: v%[1]d")
-
-	tcs := map[string]struct {
-		setup func(m *yamlviewport.Model)
-		act   func(m *yamlviewport.Model)
-	}{
-		"same term": {
-			setup: func(m *yamlviewport.Model) {
-				m.SetSearchTerm("v")
-				m.SearchNext()
-			},
-			act: func(m *yamlviewport.Model) {
-				m.SetSearchTerm("v")
-			},
-		},
-		"clear without term": {
-			setup: func(*yamlviewport.Model) {},
-			act: func(m *yamlviewport.Model) {
-				m.ClearSearch()
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			// The base style counts every piece of text the printer styles,
-			// which a layout of the view does for each line.
-			renders := 0
-			p := barePrinter(style.New(countingStyle(&renders)))
-
-			m := testModel(p, 40, 10)
-			m.SetRevision(niceyaml.NewSourceFromString(src))
-
-			tc.setup(&m)
-			m.SetYOffset(20)
-			m.TotalRowCount()
-
-			index := m.SearchIndex()
-			offset := m.YOffset()
-
-			require.Positive(t, renders)
-
-			renders = 0
-
-			// The call changes no match, highlight, or content, so the
-			// cached layout still holds and nothing renders again.
-			tc.act(&m)
-			m.TotalRowCount()
-
-			assert.Zero(t, renders)
-			assert.Equal(t, index, m.SearchIndex())
-			assert.Equal(t, offset, m.YOffset())
-		})
-	}
 }
 
 func TestViewport_SideBySideSearchOrder(t *testing.T) {
