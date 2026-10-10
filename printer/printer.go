@@ -144,6 +144,7 @@ func (p *Printer) apply(opts []Option) {
 //   - [WithWrap]
 //   - [WithMaxNumber]
 //   - [WithContextLines]
+//   - [WithExcerptWidth]
 type Option func(*config)
 
 // config holds the settings an [Option] configures, and the cache of
