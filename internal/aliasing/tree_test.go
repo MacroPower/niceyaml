@@ -49,25 +49,13 @@ func anchoredInMapping() string {
 	return "base: &base\n  name: &n " + strings.Repeat("x", 2000) + "\n  x: 1\n"
 }
 
-// blockEntries returns count entries of a block mapping, each indented
+// thousandEntries returns 1000 entries of a block mapping, each indented
 // under a key.
-func blockEntries(count int) string {
+func thousandEntries() string {
 	var sb strings.Builder
 
-	for i := range count {
+	for i := range 1000 {
 		fmt.Fprintf(&sb, "  k%d: v\n", i)
-	}
-
-	return sb.String()
-}
-
-// aliasEntries returns count entries of a block mapping, each indented
-// under a key and holding item under a key of its own.
-func aliasEntries(item string, count int) string {
-	var sb strings.Builder
-
-	for i := range count {
-		fmt.Fprintf(&sb, "  s%d: %s\n", i, item)
 	}
 
 	return sb.String()
@@ -97,11 +85,11 @@ func TestCheckDecode(t *testing.T) {
 			) + "\n",
 		},
 		"aliases to a mapping of 200 keys under keys of their own": {
-			input: "defaults: &d\n" + blockEntries(200) + "services:\n" + aliasEntries("*d", 150),
+			input: yamltest.AliasedMapping(200, 150),
 		},
 		"aliases to a mapping of 1000 keys under keys of their own": {
 			// The aliases still repeat far more than the document holds.
-			input: "defaults: &d\n" + blockEntries(1000) + "services:\n" + aliasEntries("*d", 300),
+			input: yamltest.AliasedMapping(1000, 300),
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias bomb as mapping key": {
@@ -133,22 +121,18 @@ func TestCheckDecode(t *testing.T) {
 		"aliases to an anchor holding an alias to the anchor around it": {
 			// The decoder reads *A inside A as null, so each *B reads
 			// {c: null}.
-			input: "a: &A\n  b: &B {c: *A}\n" + blockEntries(1000) + "d: " + yamltest.FlowSequence("*B", 300) + "\n",
+			input: "a: &A\n  b: &B {c: *A}\n" + thousandEntries() + "d: " + yamltest.FlowSequence("*B", 300) + "\n",
 		},
 		"same aliases after one inside the anchor around it": {
 			// The count does not depend on which alias to B comes first.
-			input: "a: &A\n  b: &B {c: *A}\n" + blockEntries(
-				1000,
-			) + "  e: *B\nd: " + yamltest.FlowSequence(
+			input: "a: &A\n  b: &B {c: *A}\n" + thousandEntries() + "  e: *B\nd: " + yamltest.FlowSequence(
 				"*B",
 				300,
 			) + "\n",
 		},
 		"aliases to an anchor on an alias to the anchor around it": {
 			// P reads null, so each *Q reads [null].
-			input: "a: &A\n  p: &P\n    *A\n  q: &Q [*P]\n" + blockEntries(
-				1000,
-			) + "d: " + yamltest.FlowSequence(
+			input: "a: &A\n  p: &P\n    *A\n  q: &Q [*P]\n" + thousandEntries() + "d: " + yamltest.FlowSequence(
 				"*Q",
 				300,
 			) + "\n",
@@ -164,17 +148,15 @@ func TestCheckDecode(t *testing.T) {
 		},
 		"aliases to a tag over an alias to a mapping": {
 			// Each *s reads all of k through the alias under the tag.
-			input: "k: &k\n" + blockEntries(1000) + "s: &s !foo *k\nl: " + yamltest.FlowSequence("*s", 300) + "\n",
+			input: "k: &k\n" + thousandEntries() + "s: &s !foo *k\nl: " + yamltest.FlowSequence("*s", 300) + "\n",
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"a few aliases to a tag over an alias to a mapping": {
-			input: "k: &k\n" + blockEntries(1000) + "s: &s !foo *k\nl: " + yamltest.FlowSequence("*s", 2) + "\n",
+			input: "k: &k\n" + thousandEntries() + "s: &s !foo *k\nl: " + yamltest.FlowSequence("*s", 2) + "\n",
 		},
 		"aliases to chained tags over an alias to a mapping": {
 			// Each *t reads all of k through *s and then *k.
-			input: "k: &k\n" + blockEntries(
-				1000,
-			) + "s: &s !foo *k\nt: &t !bar *s\nl: " + yamltest.FlowSequence(
+			input: "k: &k\n" + thousandEntries() + "s: &s !foo *k\nt: &t !bar *s\nl: " + yamltest.FlowSequence(
 				"*t",
 				300,
 			) + "\n",
