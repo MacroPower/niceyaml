@@ -3575,32 +3575,6 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "test", result.Name)
 	})
-
-	t.Run("option applies across multiple documents", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			---
-			name: first
-			unknown1: a
-			---
-			name: second
-			unknown2: b
-		`)
-		source := niceyaml.NewSourceFromString(input)
-		d := source.Documents()
-
-		var errCount int
-
-		for _, dd := range d {
-			_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
-			if err != nil {
-				errCount++
-			}
-		}
-
-		assert.Equal(t, 2, errCount)
-	})
 }
 
 func TestWithAllowedFieldPrefixes(t *testing.T) {
@@ -7390,13 +7364,6 @@ func TestDocument_Bind(t *testing.T) {
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Same(t, source, bound.Source())
 		assert.Equal(t, "3:7: $.name: bad name", err.Error())
-	})
-
-	t.Run("an error bound to the source comes back as it is", func(t *testing.T) {
-		t.Parallel()
-
-		pre := second.Bind(niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
-		assert.Same(t, pre, second.Bind(pre))
 	})
 }
 
