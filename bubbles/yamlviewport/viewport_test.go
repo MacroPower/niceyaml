@@ -655,6 +655,49 @@ var (
 	threeYAML        = stringtest.LinesLF("a: 1", "b: 2", "c: 3")
 	threeChangedYAML = stringtest.LinesLF("a: 1", "b: 9", "c: 3")
 
+	// Revisions the golden tests of the view modes diff. The second changes
+	// lines throughout the first.
+	modeRev1YAML = stringtest.Input(`
+		name: original
+		count: 10
+		enabled: true
+		description: "This is the original description"
+		tags:
+		  - alpha
+		  - beta
+		settings:
+		  timeout: 30
+		  retries: 3
+	`)
+
+	modeRev2YAML = stringtest.Input(`
+		name: modified
+		count: 20
+		enabled: true
+		description: "This is the updated description"
+		tags:
+		  - alpha
+		  - gamma
+		settings:
+		  timeout: 60
+		  retries: 5
+	`)
+
+	// The third revision changes more lines and adds a list item.
+	modeRev3YAML = stringtest.Input(`
+		name: final
+		count: 30
+		enabled: false
+		description: "This is the final description"
+		tags:
+		  - alpha
+		  - gamma
+		  - delta
+		settings:
+		  timeout: 90
+		  retries: 10
+	`)
+
 	// Revisions the [yamlviewport.Model.HitAt] tests point into. The second
 	// line of the first two holds wide characters, and each later revision
 	// changes the lines between the first and the last.
@@ -3723,52 +3766,9 @@ func TestViewport_RevisionDeduplication(t *testing.T) {
 func TestViewModeHunks_Golden(t *testing.T) {
 	t.Parallel()
 
-	// Base revision with multiple lines for context testing.
-	rev1YAML := stringtest.Input(`
-		name: original
-		count: 10
-		enabled: true
-		description: "This is the original description"
-		tags:
-		  - alpha
-		  - beta
-		settings:
-		  timeout: 30
-		  retries: 3
-	`)
-
-	// Modified revision with changes in middle.
-	rev2YAML := stringtest.Input(`
-		name: modified
-		count: 20
-		enabled: true
-		description: "This is the updated description"
-		tags:
-		  - alpha
-		  - gamma
-		settings:
-		  timeout: 60
-		  retries: 5
-	`)
-
-	// Third revision with additional changes.
-	rev3YAML := stringtest.Input(`
-		name: final
-		count: 30
-		enabled: false
-		description: "This is the final description"
-		tags:
-		  - alpha
-		  - gamma
-		  - delta
-		settings:
-		  timeout: 90
-		  retries: 10
-	`)
-
 	// The hunks closure shows the diff of the first two revisions as hunks.
 	hunks := func(m *yamlviewport.Model) {
-		addRevisions(m, rev1YAML, rev2YAML)
+		addRevisions(m, modeRev1YAML, modeRev2YAML)
 		m.GotoRevision(1)
 		m.SetViewMode(yamlviewport.ViewModeHunks)
 	}
@@ -3787,7 +3787,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 		},
 		"AtFirstRevision": {
 			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
+				addRevisions(m, modeRev1YAML, modeRev2YAML)
 				m.GotoRevision(0)
 				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
@@ -3796,7 +3796,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 		},
 		"AtLatestRevision": {
 			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
+				addRevisions(m, modeRev1YAML, modeRev2YAML)
 				m.SetViewMode(yamlviewport.ViewModeHunks)
 
 				// Default is at latest (index 1).
@@ -3806,7 +3806,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 		},
 		"DiffModeOrigin": {
 			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML, rev3YAML)
+				addRevisions(m, modeRev1YAML, modeRev2YAML, modeRev3YAML)
 				m.GotoRevision(2)
 				m.SetDiffMode(yamlviewport.DiffModeOrigin)
 				m.SetViewMode(yamlviewport.ViewModeHunks)
@@ -3816,7 +3816,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 		},
 		"DiffModeNone": {
 			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
+				addRevisions(m, modeRev1YAML, modeRev2YAML)
 				m.GotoRevision(1)
 				m.SetDiffMode(yamlviewport.DiffModeNone)
 				m.SetViewMode(yamlviewport.ViewModeHunks)
@@ -3826,7 +3826,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 		},
 		"MultipleRevisions": {
 			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML, rev3YAML)
+				addRevisions(m, modeRev1YAML, modeRev2YAML, modeRev3YAML)
 				m.GotoRevision(2)
 				m.SetViewMode(yamlviewport.ViewModeHunks)
 			},
@@ -3886,54 +3886,10 @@ func TestViewModeHunks_Golden(t *testing.T) {
 func TestViewModeSideBySide_Golden(t *testing.T) {
 	t.Parallel()
 
-	// Base revision with multiple lines for testing.
-	rev1YAML := stringtest.Input(`
-		name: original
-		count: 10
-		enabled: true
-		description: "This is the original description"
-		tags:
-		  - alpha
-		  - beta
-		settings:
-		  timeout: 30
-		  retries: 3
-		extra:
-		  key1: value1
-		  key2: value2
-	`)
-
-	// Modified revision with changes.
-	rev2YAML := stringtest.Input(`
-		name: modified
-		count: 20
-		enabled: true
-		description: "This is the updated description"
-		tags:
-		  - alpha
-		  - gamma
-		settings:
-		  timeout: 60
-		  retries: 5
-		extra:
-		  key1: changed1
-		  key2: changed2
-	`)
-
-	// Third revision with additional changes.
-	rev3YAML := stringtest.Input(`
-		name: final
-		count: 30
-		enabled: false
-		description: "This is the final description"
-		tags:
-		  - alpha
-		  - gamma
-		  - delta
-		settings:
-		  timeout: 90
-		  retries: 10
-	`)
+	// The first two revisions end in a block that the second changes on
+	// every line, and the third revision leaves the block out.
+	rev1YAML := stringtest.JoinLF(modeRev1YAML, "extra:", "  key1: value1", "  key2: value2")
+	rev2YAML := stringtest.JoinLF(modeRev2YAML, "extra:", "  key1: changed1", "  key2: changed2")
 
 	// The sideBySide closure shows the diff of the first two revisions in two
 	// panes.
@@ -4004,7 +3960,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 		"SideBySideDiffModeOrigin": {
 			// Side-by-side with origin diff mode (compares to first revision).
 			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML, rev3YAML)
+				addRevisions(m, rev1YAML, rev2YAML, modeRev3YAML)
 				m.GotoRevision(2)
 				m.SetDiffMode(yamlviewport.DiffModeOrigin)
 				m.SetViewMode(yamlviewport.ViewModeSideBySide)
