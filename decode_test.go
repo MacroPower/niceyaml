@@ -8961,7 +8961,14 @@ func ExampleDecodeOptions() {
 	strict := niceyaml.DecodeOptions(niceyaml.WithValidator(manifests), settings)
 
 	docs := niceyaml.NewSourceFromString(
-		"kind: Service\nname: web\n---\nkind: Deployment\nname: web\nreplicas: 3\n",
+		stringtest.LinesLF(
+			"kind: Service",
+			"name: web",
+			"---",
+			"kind: Deployment",
+			"name: web",
+			"replicas: 3",
+		),
 		niceyaml.WithName("app.yaml"),
 	).Documents()
 
@@ -9445,7 +9452,7 @@ func TestNode_Validate(t *testing.T) {
 	t.Run("runs the validator on the receiver", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "meta:\n  name: test\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF("meta:", "  name: test"))
 		scoped := yamltest.At(t, dd, paths.Current().Child("meta"))
 
 		var got []*niceyaml.Node
@@ -9465,7 +9472,7 @@ func TestNode_Validate(t *testing.T) {
 
 		var order []string
 
-		doc := yamltest.FirstDocument(t, "meta:\n  name: test\n", niceyaml.WithName("x.yaml"))
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("meta:", "  name: test"), niceyaml.WithName("x.yaml"))
 
 		scoped := yamltest.At(t, doc, paths.Current().Child("meta"))
 
@@ -9516,7 +9523,7 @@ func TestNode_Validate(t *testing.T) {
 	t.Run("binds the error a validator leaves unbound", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "meta:\n  name: test\n", niceyaml.WithName("x.yaml"))
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("meta:", "  name: test"), niceyaml.WithName("x.yaml"))
 
 		scoped := yamltest.At(t, doc, paths.Current().Child("meta"))
 		unbound := &fieldValidator{
@@ -9537,7 +9544,7 @@ func TestNode_Validate(t *testing.T) {
 	t.Run("returns a bound error as it is", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "meta:\n  name: test\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF("meta:", "  name: test"))
 		scoped := yamltest.At(t, dd, paths.Current().Child("meta"))
 
 		want := scoped.Bind(niceyaml.Invalid(errNameRequired, niceyaml.AtPath(paths.Current().Child("name"))))
@@ -10211,7 +10218,7 @@ func TestErrDecode(t *testing.T) {
 			},
 		},
 		"sequence item with only a tag": {
-			input: "items:\n  - !!int\n",
+			input: stringtest.LinesLF("items:", "  - !!int"),
 			decode: func(ctx context.Context, dd *niceyaml.Node) error {
 				items, err := dd.Nodes(paths.Current().Child("items").IndexAll())
 				if err != nil {
@@ -11841,7 +11848,7 @@ func TestSkipEmpty(t *testing.T) {
 	t.Run("runs the validator and the Node binds its error", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "a:\n  b: 1\n", niceyaml.WithFilePath("x.yaml"))
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("a:", "  b: 1"), niceyaml.WithFilePath("x.yaml"))
 
 		located := niceyaml.Invalid(errBad, niceyaml.AtPath(paths.Current().Child("a", "b")))
 		want := "x.yaml:2:6: $.a.b: bad"
