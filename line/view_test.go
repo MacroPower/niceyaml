@@ -146,12 +146,7 @@ func TestNewView_Spans(t *testing.T) {
 
 			view := line.NewView(lines, tc.spans...)
 
-			var got []int
-
-			for i := range view.All() {
-				got = append(got, i)
-			}
-
+			got := indicesOf(view.All())
 			assert.Equal(t, tc.want, got)
 
 			for i := range lines.Len() {
@@ -159,13 +154,7 @@ func TestNewView_Spans(t *testing.T) {
 			}
 
 			// The view holds what a slice of a view over every line holds.
-			var sliced []int
-
-			for i := range line.NewView(lines).Slice(tc.spans...).All() {
-				sliced = append(sliced, i)
-			}
-
-			assert.Equal(t, sliced, got)
+			assert.Equal(t, indicesOf(line.NewView(lines).Slice(tc.spans...).All()), got)
 		})
 	}
 }
@@ -232,20 +221,6 @@ func TestView_All(t *testing.T) {
 		assert.Equal(t, []string{"key: value", "list:", "  - one"}, contents)
 	})
 
-	t.Run("clamps spans", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, input, 3)
-
-		var indices []int
-
-		for i := range view.All(position.NewSpan(1, 99)) {
-			indices = append(indices, i)
-		}
-
-		assert.Equal(t, []int{1, 2}, indices)
-	})
-
 	t.Run("spans select held lines in content order", func(t *testing.T) {
 		t.Parallel()
 
@@ -290,6 +265,10 @@ func TestView_All(t *testing.T) {
 				spans: []position.Span{position.NewSpan(-3, 2)},
 				want:  []int{0, 1},
 			},
+			"end past the content": {
+				spans: []position.Span{position.NewSpan(4, 99)},
+				want:  []int{4, 5},
+			},
 			"sparse view": {
 				held:  sparse,
 				spans: []position.Span{position.NewSpan(1, 5)},
@@ -310,18 +289,10 @@ func TestView_All(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				view := newTestView(t, six, 6)
-				if tc.held != nil {
-					view = view.Slice(tc.held...)
-				}
+				// A slice with no spans holds every line.
+				view := newTestView(t, six, 6).Slice(tc.held...)
 
-				var got []int
-
-				for i := range view.All(tc.spans...) {
-					got = append(got, i)
-				}
-
-				assert.Equal(t, tc.want, got)
+				assert.Equal(t, tc.want, indicesOf(view.All(tc.spans...)))
 			})
 		}
 	})
@@ -1011,16 +982,6 @@ func TestView_Slice(t *testing.T) {
 		return view
 	}
 
-	contents := func(v *line.View) []string {
-		var out []string
-
-		for _, ln := range v.All() {
-			out = append(out, ln.Content())
-		}
-
-		return out
-	}
-
 	t.Run("no spans yields every line", func(t *testing.T) {
 		t.Parallel()
 
@@ -1028,7 +989,7 @@ func TestView_Slice(t *testing.T) {
 		got := view.Slice()
 
 		require.NotSame(t, view, got)
-		assert.Equal(t, []string{"a: 1", "b: 2", "c: 3", "d: 4"}, contents(got))
+		assert.Equal(t, []string{"a: 1", "b: 2", "c: 3", "d: 4"}, contentsOf(got.All()))
 	})
 
 	t.Run("single span", func(t *testing.T) {
@@ -1037,7 +998,7 @@ func TestView_Slice(t *testing.T) {
 		view := decorated(t)
 		got := view.Slice(position.NewSpan(1, 3))
 
-		assert.Equal(t, []string{"b: 2", "c: 3"}, contents(got))
+		assert.Equal(t, []string{"b: 2", "c: 3"}, contentsOf(got.All()))
 	})
 
 	t.Run("spans in any order yield content order", func(t *testing.T) {
@@ -1046,7 +1007,7 @@ func TestView_Slice(t *testing.T) {
 		view := decorated(t)
 		got := view.Slice(position.NewSpan(3, 4), position.NewSpan(0, 2))
 
-		assert.Equal(t, []string{"a: 1", "b: 2", "d: 4"}, contents(got))
+		assert.Equal(t, []string{"a: 1", "b: 2", "d: 4"}, contentsOf(got.All()))
 	})
 
 	t.Run("overlapping spans hold each line once", func(t *testing.T) {
@@ -1055,7 +1016,7 @@ func TestView_Slice(t *testing.T) {
 		view := decorated(t)
 		got := view.Slice(position.NewSpan(0, 2), position.NewSpan(1, 3))
 
-		assert.Equal(t, []string{"a: 1", "b: 2", "c: 3"}, contents(got))
+		assert.Equal(t, []string{"a: 1", "b: 2", "c: 3"}, contentsOf(got.All()))
 		assert.Equal(t, 3, got.Count())
 	})
 
@@ -1065,7 +1026,7 @@ func TestView_Slice(t *testing.T) {
 		view := decorated(t)
 		got := view.Slice(position.NewSpan(-5, 1), position.NewSpan(3, 99))
 
-		assert.Equal(t, []string{"a: 1", "d: 4"}, contents(got))
+		assert.Equal(t, []string{"a: 1", "d: 4"}, contentsOf(got.All()))
 	})
 
 	t.Run("empty and out of range spans yield nothing", func(t *testing.T) {
@@ -1177,7 +1138,7 @@ func TestView_Slice(t *testing.T) {
 		view := newTestView(t, input, 4)
 		got := view.Slice(position.NewSpan(1, 4)).Slice(position.NewSpan(0, 3))
 
-		assert.Equal(t, []string{"b: 2", "c: 3"}, contents(got))
+		assert.Equal(t, []string{"b: 2", "c: 3"}, contentsOf(got.All()))
 		assert.True(t, got.Contains(1))
 		assert.False(t, got.Contains(0))
 		assert.False(t, got.Contains(3))
@@ -1824,16 +1785,6 @@ func TestView_Hunks(t *testing.T) {
 		h: 8
 	`)
 
-	contents := func(v *line.View) []string {
-		var out []string
-
-		for _, ln := range v.All() {
-			out = append(out, ln.Content())
-		}
-
-		return out
-	}
-
 	separators := func(v *line.View) []int {
 		var out []int
 
@@ -1858,7 +1809,7 @@ func TestView_Hunks(t *testing.T) {
 
 		got := view.Hunks(1)
 
-		assert.Equal(t, []string{"a: 1", "b: 2", "d: 4", "e: 5", "f: 6", "g: 7", "h: 8"}, contents(got))
+		assert.Equal(t, []string{"a: 1", "b: 2", "d: 4", "e: 5", "f: 6", "g: 7", "h: 8"}, contentsOf(got.All()))
 		assert.Equal(t, []int{3}, separators(got), "one separator, above the second hunk")
 		assert.Equal(t, line.FlagInserted, got.Flag(0))
 		assert.Len(t, got.Overlays(7), 1)
@@ -1874,7 +1825,7 @@ func TestView_Hunks(t *testing.T) {
 
 		got := view.Hunks(2)
 
-		assert.Equal(t, []string{"a: 1", "b: 2", "c: 3", "d: 4", "e: 5", "f: 6", "g: 7", "h: 8"}, contents(got))
+		assert.Equal(t, []string{"a: 1", "b: 2", "c: 3", "d: 4", "e: 5", "f: 6", "g: 7", "h: 8"}, contentsOf(got.All()))
 		assert.Empty(t, separators(got))
 	})
 
@@ -1887,7 +1838,7 @@ func TestView_Hunks(t *testing.T) {
 
 		got := view.Hunks(-1)
 
-		assert.Equal(t, []string{"b: 2", "g: 7"}, contents(got))
+		assert.Equal(t, []string{"b: 2", "g: 7"}, contentsOf(got.All()))
 		assert.Equal(t, []int{6}, separators(got))
 	})
 
@@ -1924,7 +1875,7 @@ func TestView_Hunks(t *testing.T) {
 
 		got := view.Hunks(1)
 
-		assert.Equal(t, []string{"c: 3", "d: 4", "g: 7", "h: 8"}, contents(got))
+		assert.Equal(t, []string{"c: 3", "d: 4", "g: 7", "h: 8"}, contentsOf(got.All()))
 		assert.Equal(t, []int{6}, separators(got))
 	})
 
@@ -1939,7 +1890,7 @@ func TestView_Hunks(t *testing.T) {
 
 		got := view.Hunks(1)
 
-		assert.Equal(t, []string{"a: 1", "b: 2", "e: 5", "f: 6"}, contents(got))
+		assert.Equal(t, []string{"a: 1", "b: 2", "e: 5", "f: 6"}, contentsOf(got.All()))
 		assert.Equal(t, []int{4}, separators(got))
 	})
 
@@ -1954,7 +1905,7 @@ func TestView_Hunks(t *testing.T) {
 
 		got := view.Hunks(1)
 
-		assert.Equal(t, []string{"b: 2", "c: 3", "e: 5", "f: 6"}, contents(got))
+		assert.Equal(t, []string{"b: 2", "c: 3", "e: 5", "f: 6"}, contentsOf(got.All()))
 		assert.Equal(t, []int{4}, separators(got))
 		assert.Equal(t, stringtest.JoinLF(
 			"   2 | b: 2",
@@ -1980,7 +1931,7 @@ func TestView_Hunks(t *testing.T) {
 		for _, context := range []int{1, 3} {
 			got := view.Hunks(context)
 
-			assert.Equal(t, []string{"a: 1", "b: 2", "g: 7", "h: 8"}, contents(got), "context %d", context)
+			assert.Equal(t, []string{"a: 1", "b: 2", "g: 7", "h: 8"}, contentsOf(got.All()), "context %d", context)
 			assert.Equal(t, []int{6}, separators(got), "context %d", context)
 		}
 	})

@@ -2,6 +2,7 @@ package line_test
 
 import (
 	"fmt"
+	"iter"
 	"math"
 	"os"
 	"path/filepath"
@@ -1585,6 +1586,28 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 	})
 }
 
+// indicesOf returns the index of each line seq yields.
+func indicesOf(seq iter.Seq2[int, *line.Line]) []int {
+	var got []int
+
+	for i := range seq {
+		got = append(got, i)
+	}
+
+	return got
+}
+
+// contentsOf returns the content of each line seq yields.
+func contentsOf(seq iter.Seq2[int, *line.Line]) []string {
+	var got []string
+
+	for _, ln := range seq {
+		got = append(got, ln.Content())
+	}
+
+	return got
+}
+
 // lineNumbers returns the number of each line of lines.
 func lineNumbers(lines line.Lines) []int {
 	got := make([]int, 0, lines.Len())
@@ -2109,10 +2132,10 @@ func TestLines_View(t *testing.T) {
 		  - one
 	`)
 
+	lines := line.NewLines(tokens.Tokenize(input))
+
 	t.Run("Len and IsEmpty", func(t *testing.T) {
 		t.Parallel()
-
-		lines := line.NewLines(tokens.Tokenize(input))
 
 		assert.Equal(t, 3, lines.Len())
 		assert.False(t, lines.IsEmpty())
@@ -2121,42 +2144,14 @@ func TestLines_View(t *testing.T) {
 	t.Run("Width is the widest line", func(t *testing.T) {
 		t.Parallel()
 
-		lines := line.NewLines(tokens.Tokenize(input))
-
 		assert.Equal(t, len("key: value"), lines.Width())
 	})
 
 	t.Run("All yields every index and line", func(t *testing.T) {
 		t.Parallel()
 
-		lines := line.NewLines(tokens.Tokenize(input))
-
-		var (
-			indices  []int
-			contents []string
-		)
-
-		for i, ln := range lines.All() {
-			indices = append(indices, i)
-			contents = append(contents, ln.Content())
-		}
-
-		assert.Equal(t, []int{0, 1, 2}, indices)
-		assert.Equal(t, []string{"key: value", "list:", "  - one"}, contents)
-	})
-
-	t.Run("All clamps spans", func(t *testing.T) {
-		t.Parallel()
-
-		lines := line.NewLines(tokens.Tokenize(input))
-
-		var indices []int
-
-		for i := range lines.All(position.NewSpan(1, 99)) {
-			indices = append(indices, i)
-		}
-
-		assert.Equal(t, []int{1, 2}, indices)
+		assert.Equal(t, []int{0, 1, 2}, indicesOf(lines.All()))
+		assert.Equal(t, []string{"key: value", "list:", "  - one"}, contentsOf(lines.All()))
 	})
 
 	t.Run("All yields each line once in content order", func(t *testing.T) {
@@ -2166,6 +2161,10 @@ func TestLines_View(t *testing.T) {
 			spans []position.Span
 			want  []int
 		}{
+			"clamped": {
+				spans: []position.Span{position.NewSpan(1, 99)},
+				want:  []int{1, 2},
+			},
 			"overlapping": {
 				spans: []position.Span{position.NewSpan(0, 2), position.NewSpan(1, 3)},
 				want:  []int{0, 1, 2},
@@ -2187,28 +2186,16 @@ func TestLines_View(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				lines := line.NewLines(tokens.Tokenize(input))
-
-				var got, fromView []int
-
-				for i := range lines.All(tc.spans...) {
-					got = append(got, i)
-				}
-
-				for i := range line.NewView(lines).All(tc.spans...) {
-					fromView = append(fromView, i)
-				}
+				got := indicesOf(lines.All(tc.spans...))
 
 				assert.Equal(t, tc.want, got)
-				assert.Equal(t, fromView, got)
+				assert.Equal(t, indicesOf(line.NewView(lines).All(tc.spans...)), got)
 			})
 		}
 	})
 
 	t.Run("All yields the lines of the collection", func(t *testing.T) {
 		t.Parallel()
-
-		lines := line.NewLines(tokens.Tokenize(input))
 
 		for i, ln := range lines.All() {
 			assert.Same(t, lines.Line(i), ln)
@@ -2217,8 +2204,6 @@ func TestLines_View(t *testing.T) {
 
 	t.Run("Runes round-trips the input", func(t *testing.T) {
 		t.Parallel()
-
-		lines := line.NewLines(tokens.Tokenize(input))
 
 		var sb strings.Builder
 
@@ -2299,8 +2284,6 @@ func TestLines_View(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				lines := line.NewLines(tokens.Tokenize(input))
-
 				var got []position.Position
 
 				for pos := range lines.Runes(tc.ranges...) {
@@ -2314,8 +2297,6 @@ func TestLines_View(t *testing.T) {
 
 	t.Run("Runes with ranges yields the runes they contain", func(t *testing.T) {
 		t.Parallel()
-
-		lines := line.NewLines(tokens.Tokenize(input))
 
 		// Every range of the content, from every start to every end in
 		// both orders, one at a time and all together.
