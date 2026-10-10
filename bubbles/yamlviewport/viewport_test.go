@@ -3409,91 +3409,6 @@ func TestViewport_Update(t *testing.T) {
 			golden: true,
 		},
 		// Behavior tests (verify state changes).
-		"Behavior/MouseWheelDownWithShift": {
-			msg:    tea.MouseWheelMsg{Button: tea.MouseWheelDown, Mod: tea.ModShift},
-			yaml:   wideYAML,
-			width:  40,
-			height: 10,
-			setup: func(m *yamlviewport.Model) {
-				m.ToggleWordWrap() // Disable wrap.
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Positive(t, m.XOffset())
-				assert.Equal(t, 0, m.YOffset()) // Y should not change.
-			},
-		},
-		"Behavior/MouseWheelUpWithShift": {
-			msg:   tea.MouseWheelMsg{Button: tea.MouseWheelUp, Mod: tea.ModShift},
-			yaml:  wideYAML,
-			width: 40,
-			setup: func(m *yamlviewport.Model) {
-				m.ToggleWordWrap() // Disable wrap.
-				m.SetXOffset(20)
-			},
-			height: 10,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Less(t, m.XOffset(), 20)
-			},
-		},
-		"Behavior/MouseWheelLeft": {
-			msg:    tea.MouseWheelMsg{Button: tea.MouseWheelLeft},
-			yaml:   wideYAML,
-			width:  40,
-			height: 10,
-			setup: func(m *yamlviewport.Model) {
-				m.ToggleWordWrap() // Disable wrap.
-				m.SetXOffset(20)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Less(t, m.XOffset(), 20)
-			},
-		},
-		"Behavior/MouseWheelRight": {
-			msg:    tea.MouseWheelMsg{Button: tea.MouseWheelRight},
-			yaml:   wideYAML,
-			width:  40,
-			height: 10,
-			setup: func(m *yamlviewport.Model) {
-				m.ToggleWordWrap() // Disable wrap.
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Positive(t, m.XOffset())
-			},
-		},
-		// Shift remaps the vertical wheel alone, so a horizontal wheel
-		// with Shift held scrolls as it does without it.
-		"Behavior/MouseWheelLeftWithShift": {
-			msg:    tea.MouseWheelMsg{Button: tea.MouseWheelLeft, Mod: tea.ModShift},
-			yaml:   wideYAML,
-			width:  40,
-			height: 10,
-			setup: func(m *yamlviewport.Model) {
-				m.ToggleWordWrap() // Disable wrap.
-				m.SetXOffset(20)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Less(t, m.XOffset(), 20)
-			},
-		},
-		"Behavior/MouseWheelRightWithShift": {
-			msg:    tea.MouseWheelMsg{Button: tea.MouseWheelRight, Mod: tea.ModShift},
-			yaml:   wideYAML,
-			width:  40,
-			height: 10,
-			setup: func(m *yamlviewport.Model) {
-				m.ToggleWordWrap() // Disable wrap.
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Positive(t, m.XOffset())
-				assert.Equal(t, 0, m.YOffset()) // Y should not change.
-			},
-		},
 		"Behavior/MouseWheelDisabled": {
 			msg:    tea.MouseWheelMsg{Button: tea.MouseWheelDown},
 			yaml:   verticalYAML,
@@ -3591,6 +3506,42 @@ func TestViewport_Update(t *testing.T) {
 			if tc.test != nil {
 				tc.test(t, &updated)
 			}
+		})
+	}
+}
+
+func TestViewport_UpdateHorizontalWheel(t *testing.T) {
+	t.Parallel()
+
+	// A horizontal wheel scrolls sideways by the horizontal step, which is
+	// 6 columns by default, and so does a vertical wheel with Shift held.
+	// Shift remaps the vertical wheel alone, so a horizontal wheel with
+	// Shift held scrolls as it does without it.
+	tcs := map[string]struct {
+		msg  tea.MouseWheelMsg
+		want int
+	}{
+		"down with shift":  {msg: tea.MouseWheelMsg{Button: tea.MouseWheelDown, Mod: tea.ModShift}, want: 26},
+		"up with shift":    {msg: tea.MouseWheelMsg{Button: tea.MouseWheelUp, Mod: tea.ModShift}, want: 14},
+		"left":             {msg: tea.MouseWheelMsg{Button: tea.MouseWheelLeft}, want: 14},
+		"right":            {msg: tea.MouseWheelMsg{Button: tea.MouseWheelRight}, want: 26},
+		"left with shift":  {msg: tea.MouseWheelMsg{Button: tea.MouseWheelLeft, Mod: tea.ModShift}, want: 14},
+		"right with shift": {msg: tea.MouseWheelMsg{Button: tea.MouseWheelRight, Mod: tea.ModShift}, want: 26},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			m := testModel(testPrinter(), 40, 10)
+			m.SetWordWrap(false)
+			m.SetRevision(niceyaml.NewSourceFromString(wideYAML))
+			m.SetXOffset(20)
+
+			m, _ = m.Update(tc.msg)
+
+			assert.Equal(t, tc.want, m.XOffset())
+			assert.Equal(t, 0, m.YOffset())
 		})
 	}
 }
