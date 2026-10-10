@@ -307,7 +307,7 @@ func TestViewport_SearchHighlightsMatchAcrossLines(t *testing.T) {
 	// line, including when the window starts on the second of them. The
 	// last line differs between the revisions, so every other line sits at
 	// the same index in each view mode.
-	before := yamltest.GenerateLines(30, "k%[1]d: v%[1]d")
+	before := numbered(30, "k%[1]d: v%[1]d")
 	after := replaceLine(before, 29, "k29: changed")
 
 	tcs := map[string]struct {
@@ -535,6 +535,20 @@ func framedRows(t *testing.T, m *yamlviewport.Model, n int) []string {
 	return rows
 }
 
+// numbered returns a document of n lines. Each line is format with the
+// index of the line in place of its verb. Yamltest.GenerateLines writes the
+// same document, but the niceyaml version this module requires predates
+// it, and the tests must build against that version.
+func numbered(n int, format string) string {
+	var sb strings.Builder
+
+	for i := range n {
+		fmt.Fprintf(&sb, format+"\n", i)
+	}
+
+	return sb.String()
+}
+
 // replaceLine returns doc with the line at index i replaced by text.
 func replaceLine(doc string, i int, text string) string {
 	lines := strings.SplitAfter(doc, "\n")
@@ -559,7 +573,7 @@ func termRevisions() (string, string) {
 // lines 20 and 30, and a second revision that changes line 5 and keeps both
 // matches.
 func needleRevisions() (string, string) {
-	before := yamltest.GenerateLines(40, "key%d: value")
+	before := numbered(40, "key%d: value")
 	before = replaceLine(before, 20, "key20: needle")
 	before = replaceLine(before, 30, "key30: needle")
 
@@ -1664,7 +1678,7 @@ func TestViewport_ContainerStyleKeepsTopLine(t *testing.T) {
 	// at the top.
 	m := testModel(testPrinter(), 40, 13)
 	m.SetContainerStyle(lipgloss.NewStyle().PaddingTop(3))
-	setRevision(&m, yamltest.GenerateLines(30, "k%02d: word word word word"))
+	setRevision(&m, numbered(30, "k%02d: word word word word"))
 	m.GotoBottom()
 	require.Equal(t, 20, m.YOffset())
 
@@ -1813,7 +1827,7 @@ func TestViewport_SearchBeforeSize(t *testing.T) {
 
 	// A program sets the search term before its first window size message.
 	// The match stays on screen once the lines wrap to that size.
-	src := yamltest.GenerateLines(60, "k%d: "+strings.TrimSpace(strings.Repeat("word ", 8))) + "needle: here\n"
+	src := numbered(60, "k%d: "+strings.TrimSpace(strings.Repeat("word ", 8))) + "needle: here\n"
 
 	m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
 	setRevision(&m, src)
@@ -1828,7 +1842,7 @@ func TestViewport_SearchBeforeSize(t *testing.T) {
 func TestViewport_ContainerFrame(t *testing.T) {
 	t.Parallel()
 
-	src := yamltest.GenerateLines(10, "line%d: v")
+	src := numbered(10, "line%d: v")
 
 	// The frame of the printer's container style adds rows above the first
 	// line and below the last. Each offset shows the frame and line rows it
@@ -2435,7 +2449,7 @@ func TestViewport_MaxSizeContainerStyle(t *testing.T) {
 			t.Parallel()
 
 			m := testModel(testPrinter(), 20, 12, yamlviewport.WithContainerStyle(tc.style))
-			setRevision(&m, yamltest.GenerateLines(50, "k%d: v"))
+			setRevision(&m, numbered(50, "k%d: v"))
 
 			view := m.View()
 			assert.Equal(t, tc.wantWidth, lipgloss.Width(view))
@@ -2509,7 +2523,7 @@ func TestViewport_PrinterContainerSizeIgnored(t *testing.T) {
 
 			m := testModel(framedPrinter(tc.container), tc.width, tc.height)
 			m.SetWordWrap(true)
-			setRevision(&m, yamltest.GenerateLines(tc.lines, tc.line))
+			setRevision(&m, numbered(tc.lines, tc.line))
 
 			assert.Equal(t, tc.wantTotal, m.TotalRowCount())
 
@@ -3091,7 +3105,7 @@ func TestViewport_SameDiffBaseKeepsPosition(t *testing.T) {
 	// At revision index 1, adjacent and origin both compare against the
 	// first revision, so a change between them shows the same diff and
 	// leaves the scroll offset and the selected match where they are.
-	v1 := yamltest.GenerateLines(50, "k%d: v")
+	v1 := numbered(50, "k%d: v")
 
 	m := testModel(testPrinter(), 40, 10)
 	addRevisions(&m, v1, replaceLine(v1, 20, "k20: w"))
@@ -3185,7 +3199,7 @@ func TestViewport_ViewModeWithoutDiffKeepsPosition(t *testing.T) {
 		},
 	}
 
-	v1 := yamltest.GenerateLines(50, "k%d: v")
+	v1 := numbered(50, "k%d: v")
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
@@ -4970,7 +4984,7 @@ func TestViewport_SearchOrdersIndexMatches(t *testing.T) {
 
 	// The first and last lines hold a match, and the second revision
 	// changes a line between them.
-	before := yamltest.GenerateLines(40, "k%d: x")
+	before := numbered(40, "k%d: x")
 	before = replaceLine(before, 0, "k0: needle")
 	before = replaceLine(before, 39, "k39: needle")
 	after := replaceLine(before, 20, "k20: y")
@@ -5565,7 +5579,7 @@ func TestViewport_SideBySidePanesShareGutterWidth(t *testing.T) {
 	//
 	// A first line long enough to scroll past the widest gutter.
 	first := "k0: " + strings.Repeat("0123456789", 4)
-	before := replaceLine(yamltest.GenerateLines(10005, "k%d: v"), 0, first)
+	before := replaceLine(numbered(10005, "k%d: v"), 0, first)
 
 	m := testModel(testPrinterWithLineNumbers(), 60, 5)
 	m.SetWordWrap(false)
@@ -6009,7 +6023,7 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 func TestViewport_ContentChangesScrollToTop(t *testing.T) {
 	t.Parallel()
 
-	before := yamltest.GenerateLines(100, "key%d: value")
+	before := numbered(100, "key%d: value")
 	after := replaceLine(before, 60, "key60: changed")
 
 	tcs := map[string]struct {
@@ -6096,7 +6110,7 @@ func TestViewport_NewSearchTermStartsAtFirstMatch(t *testing.T) {
 	t.Parallel()
 
 	m := testModel(testPrinter(), 80, 5)
-	setRevision(&m, yamltest.GenerateLines(40, "k%d: needle"))
+	setRevision(&m, numbered(40, "k%d: needle"))
 
 	m.SetSearchTerm("needle")
 	searchNext(&m, 7)
@@ -6132,7 +6146,7 @@ func TestViewport_SideBySideSearchOrder(t *testing.T) {
 	// Every line changes, so each line holds a deleted match in the left pane
 	// and an inserted match at the same position in the right pane.
 	m := testModel(testPrinterWithSearch(), 160, 3)
-	addRevisions(&m, yamltest.GenerateLines(20, "k%02d: needle a"), yamltest.GenerateLines(20, "k%02d: needle b"))
+	addRevisions(&m, numbered(20, "k%02d: needle a"), numbered(20, "k%02d: needle b"))
 	m.SetViewMode(yamlviewport.ViewModeSideBySide)
 
 	m.SetSearchTerm("needle")
@@ -6374,7 +6388,7 @@ func TestViewport_UnchangedModeKeepsPosition(t *testing.T) {
 	// and the selected match where they are, as the Model doc promises
 	// for anything but a change of content.
 	m := testModel(testPrinter(), 40, 10)
-	m.AddRevision(niceyaml.NewSourceFromString(yamltest.GenerateLines(50, "k%d: v")))
+	m.AddRevision(niceyaml.NewSourceFromString(numbered(50, "k%d: v")))
 	m.SetSearchTerm("v")
 	searchNext(&m, 3)
 	m.SetYOffset(30)
