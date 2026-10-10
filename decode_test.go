@@ -2472,33 +2472,6 @@ func TestDocument_View(t *testing.T) {
 	})
 }
 
-func TestDocument_At_DirectiveBody(t *testing.T) {
-	t.Parallel()
-
-	// A %YAML directive above the header is the preamble of the document
-	// below it, so the path resolves in that document. A document that
-	// holds only the directive has no content to resolve in.
-	source := niceyaml.NewSourceFromString(stringtest.JoinLF(
-		"%YAML 1.2",
-		"---",
-		"key: value",
-	))
-	d := source.Documents()
-	require.Len(t, d, 1)
-
-	path := paths.Current().Child("key")
-
-	v, err := yamltest.At(t, d[0], path).Decode[string](t.Context())
-	require.NoError(t, err)
-	assert.Equal(t, "value", v)
-
-	empty := yamltest.FirstDocument(t, "%YAML 1.2\n---\n")
-
-	_, err = empty.At(path)
-	require.ErrorIs(t, err, paths.ErrNotFound)
-	require.ErrorIs(t, err, paths.ErrNoDocument)
-}
-
 func TestDocument_Node(t *testing.T) {
 	t.Parallel()
 
@@ -5655,6 +5628,15 @@ func TestDocument_At(t *testing.T) {
 				isNot:    paths.ErrAlias,
 				contains: "$.key",
 			},
+			// A document that holds only a directive has no content to
+			// resolve in.
+			"directive alone": {
+				input:    "%YAML 1.2\n---\n",
+				path:     paths.Current().Child("key"),
+				is:       []error{paths.ErrNotFound, paths.ErrNoDocument},
+				isNot:    paths.ErrAlias,
+				contains: "$.key",
+			},
 			"alias without anchor": {
 				input:    "kind: *nope",
 				path:     paths.Current().Child("kind"),
@@ -5702,6 +5684,23 @@ func TestDocument_At(t *testing.T) {
 				assert.Same(t, dd.Source(), yamltest.RequireSourceError(t, err).Source())
 			})
 		}
+	})
+
+	t.Run("resolves in the document below a directive", func(t *testing.T) {
+		t.Parallel()
+
+		// A %YAML directive above the header is the preamble of the
+		// document below it, so the path resolves in that document.
+		d := niceyaml.NewSourceFromString(stringtest.JoinLF(
+			"%YAML 1.2",
+			"---",
+			"key: value",
+		)).Documents()
+		require.Len(t, d, 1)
+
+		v, err := yamltest.At(t, d[0], paths.Current().Child("key")).Decode[string](t.Context())
+		require.NoError(t, err)
+		assert.Equal(t, "value", v)
 	})
 
 	t.Run("type mismatch returns Error", func(t *testing.T) {
