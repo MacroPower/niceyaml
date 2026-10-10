@@ -709,12 +709,7 @@ func TestDataLocator_Scope(t *testing.T) {
 func TestDataLocator_SyntaxError(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: [1\n", niceyaml.WithName("f.yaml"))
-
-	docs := source.AllDocuments()
-	require.Len(t, docs, 1)
-
-	doc := docs[0]
+	doc := yamltest.UnparsedDocument(t, "a: [1\n", niceyaml.WithName("f.yaml"))
 	require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
 
 	bound := yamltest.RequireSourceError(t, doc.Bind(niceyaml.NewError("x", doc.DataLocator().At("a", "0"))))

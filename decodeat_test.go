@@ -354,13 +354,11 @@ func TestNode_DecodeAt(t *testing.T) {
 	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
 		t.Parallel()
 
-		docs := niceyaml.NewSourceFromString("kind: [\n", niceyaml.WithFilePath("cfg.yaml")).AllDocuments()
-		require.Len(t, docs, 1)
-		require.Error(t, docs[0].Err())
+		doc := yamltest.UnparsedDocument(t, "kind: [\n", niceyaml.WithFilePath("cfg.yaml"))
 
-		got, err := docs[0].DecodeAt[string](t.Context(), paths.Current().Child("kind"))
+		got, err := doc.DecodeAt[string](t.Context(), paths.Current().Child("kind"))
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
-		require.ErrorIs(t, err, docs[0].Err())
+		require.ErrorIs(t, err, doc.Err())
 		assert.Empty(t, got)
 	})
 }
@@ -729,15 +727,13 @@ func TestNode_DecodeIfPresent(t *testing.T) {
 	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
 		t.Parallel()
 
-		docs := niceyaml.NewSourceFromString("version: [\n", niceyaml.WithFilePath("cfg.yaml")).AllDocuments()
-		require.Len(t, docs, 1)
-		require.Error(t, docs[0].Err())
+		doc := yamltest.UnparsedDocument(t, "version: [\n", niceyaml.WithFilePath("cfg.yaml"))
 
 		version := 1
 
-		found, err := docs[0].DecodeIfPresent(t.Context(), versionPath, &version)
+		found, err := doc.DecodeIfPresent(t.Context(), versionPath, &version)
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
-		require.ErrorIs(t, err, docs[0].Err())
+		require.ErrorIs(t, err, doc.Err())
 		assert.False(t, found)
 		assert.Equal(t, 1, version)
 	})

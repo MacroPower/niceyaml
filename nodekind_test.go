@@ -208,11 +208,10 @@ func TestNode_Kind(t *testing.T) {
 	t.Run("document that did not parse", func(t *testing.T) {
 		t.Parallel()
 
-		docs := niceyaml.NewSourceFromString("a: [\n").AllDocuments()
-		require.Len(t, docs, 1)
+		doc := yamltest.UnparsedDocument(t, "a: [\n")
 
-		assert.Equal(t, niceyaml.NodeNone, docs[0].Kind())
-		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
+		assert.Equal(t, niceyaml.NodeNone, doc.Kind())
+		require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
 	})
 
 	t.Run("each document", func(t *testing.T) {
@@ -369,11 +368,10 @@ func TestNode_IsEmpty(t *testing.T) {
 		// The Node of such a document holds no body, with a header above
 		// it or without, and the document is not empty.
 		for _, input := range []string{"a: [\n", "---\na: [\n"} {
-			docs := niceyaml.NewSourceFromString(input).AllDocuments()
-			require.Len(t, docs, 1)
+			doc := yamltest.UnparsedDocument(t, input)
 
-			assert.False(t, docs[0].IsEmpty(), input)
-			require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
+			assert.False(t, doc.IsEmpty(), input)
+			require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
 		}
 	})
 
