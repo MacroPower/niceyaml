@@ -51,6 +51,9 @@ const (
 	// The tagged alias key of python has no name the locator can tell, so
 	// it may set a member of any name, such as one a key before it sets.
 	unnamedKeyDoc = "k: &k 0x10\npython:\n  3.10: {image: a}\n  a: 1\n  !!str *k : v\n  b: 2\n"
+	// The key a/b~c holds both characters a JSON Pointer escapes, and the
+	// empty key takes an empty name.
+	pointerDoc = "\"a/b~c\":\n  \"\": x\nitems:\n  - 0x10: y\n"
 )
 
 // locatorDoc returns the first document of input, from a source named
@@ -354,6 +357,29 @@ func TestDataLocator_At(t *testing.T) {
 			names: []string{"a"},
 			want:  "f.yaml: $.a: x",
 		},
+
+		// The names of a JSON Pointer.
+		"pointer with an escaped slash and tilde": {
+			input: pointerDoc,
+			names: pointerNames("/a~1b~0c"),
+			want:  "f.yaml:1:1: $.'a/b~c': x",
+		},
+		"pointer with an empty name": {
+			input: pointerDoc,
+			names: pointerNames("/a~1b~0c/"),
+			want:  "f.yaml:2:7: $.'a/b~c'.'': x",
+		},
+		"pointer with an index and a respelled key": {
+			input: pointerDoc,
+			names: pointerNames("/items/0/16"),
+			want:  "f.yaml:4:11: $.items[0].0x10: x",
+		},
+		"pointer with an escape of an escape": {
+			input:    pointerDoc,
+			names:    pointerNames("/~01"),
+			want:     "f.yaml:1:1: $.'~1': x",
+			wantNear: "$",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -545,51 +571,6 @@ func TestDataLocator_Names(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, map[string]string{"": "a"}, texts)
 	})
-}
-
-func TestDataLocator_Pointer(t *testing.T) {
-	t.Parallel()
-
-	// The key a/b~c holds both characters a JSON Pointer escapes, and the
-	// empty key takes an empty name.
-	doc := locatorDoc(t, "\"a/b~c\":\n  \"\": x\nitems:\n  - 0x10: y\n")
-	loc := doc.DataLocator()
-
-	tcs := map[string]struct {
-		pointer string
-		want    string
-	}{
-		"whole document": {
-			pointer: "",
-			want:    "f.yaml:1:1: $: x",
-		},
-		"escaped slash and tilde": {
-			pointer: "/a~1b~0c",
-			want:    "f.yaml:1:1: $.'a/b~c': x",
-		},
-		"empty name": {
-			pointer: "/a~1b~0c/",
-			want:    "f.yaml:2:7: $.'a/b~c'.'': x",
-		},
-		"index and respelled key": {
-			pointer: "/items/0/16",
-			want:    "f.yaml:4:11: $.items[0].0x10: x",
-		},
-		"escape of an escape": {
-			pointer: "/~01",
-			want:    "f.yaml:1:1: $.'~1': x",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got, _ := located(t, doc, loc.At(pointerNames(tc.pointer)...))
-
-			assert.Equal(t, tc.want, got)
-		})
-	}
 }
 
 func TestDataLocator_Scope(t *testing.T) {
