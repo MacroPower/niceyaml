@@ -51,59 +51,23 @@ func TestGet_RedactsPassword(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client := &http.Client{Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-				t.Errorf("Get sent a request to host %q", r.URL.Host)
-
-				return nil, errors.New("unexpected request")
-			})}
-
-			_, err := httpfetch.Get(t.Context(), client, tc.url)
+			_, err := httpfetch.Get(t.Context(), refusingClient(t), tc.url)
 			require.ErrorContains(t, err, "parse URL "+strconv.Quote(httpfetch.Redacted(tc.url))+": ")
 			assert.NotContains(t, err.Error(), "secret")
 		})
 	}
 }
 
-func TestGet_RedactsSchemeRelativePassword(t *testing.T) {
-	t.Parallel()
+// refusingClient returns a client that fails the test when a request
+// goes out through it.
+func refusingClient(t *testing.T) *http.Client {
+	t.Helper()
 
-	// The parser reads an authority after a leading "//", so Get refuses
-	// a password in a scheme-relative URL wherever it refuses one after
-	// "://". Get names only an http or https URL in a parse error.
-	tcs := map[string]struct {
-		url  string
-		want string
-	}{
-		"password starting with a slash": {
-			url:  "//user:/secret@example.com/x",
-			want: `parse URL: empty port and a later "@" suggest`,
-		},
-		"password starting with a question mark": {
-			url:  "//user:?secret@example.com/x",
-			want: `parse URL: empty port and a later "@" suggest`,
-		},
-		"password with a slash": {
-			url:  "//user:s3/cret@example.com/x",
-			want: "parse URL: reason withheld",
-		},
-	}
+	return &http.Client{Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Errorf("Get sent a request to host %q", r.URL.Host)
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			client := &http.Client{Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-				t.Errorf("Get sent a request to host %q", r.URL.Host)
-
-				return nil, errors.New("unexpected request")
-			})}
-
-			_, err := httpfetch.Get(t.Context(), client, tc.url)
-			require.ErrorContains(t, err, tc.want)
-			assert.NotContains(t, err.Error(), "s3")
-			assert.NotContains(t, err.Error(), "cret")
-		})
-	}
+		return nil, errors.New("unexpected request")
+	})}
 }
 
 func TestGet_RedactsPasswordWithAtSign(t *testing.T) {
@@ -178,15 +142,34 @@ func TestGet_ParseReason(t *testing.T) {
 			url:  "//user:secret@example.com/%zz",
 			want: "parse URL: reason withheld",
 		},
+		// The parser reads an authority after a leading "//", so Get
+		// refuses a password in a scheme-relative URL wherever it refuses
+		// one after "://".
+		"scheme-relative password starting with a slash": {
+			url:  "//user:/secret@example.com/x",
+			want: `parse URL: empty port and a later "@" suggest`,
+		},
+		"scheme-relative password starting with a question mark": {
+			url:  "//user:?secret@example.com/x",
+			want: `parse URL: empty port and a later "@" suggest`,
+		},
+		"scheme-relative password with a slash": {
+			url:  "//user:s3/cret@example.com/x",
+			want: "parse URL: reason withheld",
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := httpfetch.Get(t.Context(), http.DefaultClient, tc.url)
+			_, err := httpfetch.Get(t.Context(), refusingClient(t), tc.url)
 			require.ErrorContains(t, err, tc.want)
-			assert.NotContains(t, err.Error(), "secret")
+
+			// The password is "secret" or "s3/cret", and no half of it
+			// reaches the error.
+			assert.NotContains(t, err.Error(), "s3")
+			assert.NotContains(t, err.Error(), "cret")
 		})
 	}
 }
