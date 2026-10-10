@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -171,7 +172,7 @@ func TestURL(t *testing.T) {
 		assert.Equal(t, int32(1), requests.Load())
 	})
 
-	t.Run("scheme is lowercased", func(t *testing.T) {
+	t.Run("key", func(t *testing.T) {
 		t.Parallel()
 
 		// Every entry point shares one cache key, so URL lowercases the
@@ -179,8 +180,13 @@ func TestURL(t *testing.T) {
 		// leaves the rest of the URL alone. URL leaves any other reference
 		// as written, such as one with no scheme and "://" in its query, or
 		// an opaque mailto: URL.
+		//
+		// Each fragment names a subschema of its own, so the key keeps it.
+		// An empty fragment names the whole document, and the key drops
+		// it, so both spellings share one cache entry.
 		tcs := map[string]struct {
-			ref  string
+			ref string
+			// The key, or empty for a key that is the reference as written.
 			want string
 		}{
 			"uppercase http scheme": {
@@ -199,49 +205,11 @@ func TestURL(t *testing.T) {
 				ref:  "S3://Bucket/Key",
 				want: "s3://Bucket/Key",
 			},
-			"no scheme with :// in query": {
-				ref:  "Example.com/Path?u=http://x",
-				want: "Example.com/Path?u=http://x",
-			},
-			"scheme-relative with :// in query": {
-				ref:  "//Example.com/Path?u=http://x",
-				want: "//Example.com/Path?u=http://x",
-			},
-			"opaque scheme with :// in query": {
-				ref:  "Mailto:User@Example.com?Body=http://x",
-				want: "Mailto:User@Example.com?Body=http://x",
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				ref, err := schema.URL(tc.ref).Resolve(t.Context(), document(t))
-				require.NoError(t, err)
-				assert.Equal(t, tc.want, ref.Key())
-			})
-		}
-	})
-
-	t.Run("fragment kept in key", func(t *testing.T) {
-		t.Parallel()
-
-		// Each fragment names a subschema of its own, so the key keeps it.
-		// An empty fragment names the whole document, and the key drops
-		// it, so both spellings share one cache entry.
-		tcs := map[string]struct {
-			ref  string
-			want string
-		}{
-			"json pointer": {
-				ref:  "https://example.com/s.json#/$defs/tasks",
-				want: "https://example.com/s.json#/$defs/tasks",
-			},
-			"anchor": {
-				ref:  "https://example.com/s.json#tasks",
-				want: "https://example.com/s.json#tasks",
-			},
+			"no scheme with :// in query":       {ref: "Example.com/Path?u=http://x"},
+			"scheme-relative with :// in query": {ref: "//Example.com/Path?u=http://x"},
+			"opaque scheme with :// in query":   {ref: "Mailto:User@Example.com?Body=http://x"},
+			"json pointer fragment":             {ref: "https://example.com/s.json#/$defs/tasks"},
+			"anchor fragment":                   {ref: "https://example.com/s.json#tasks"},
 			"empty fragment": {
 				ref:  "https://example.com/s.json#",
 				want: "https://example.com/s.json",
@@ -252,7 +220,7 @@ func TestURL(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				assert.Equal(t, tc.want, schema.URL(tc.ref).Key())
+				assert.Equal(t, cmp.Or(tc.want, tc.ref), schema.URL(tc.ref).Key())
 			})
 		}
 	})
