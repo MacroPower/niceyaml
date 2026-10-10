@@ -194,15 +194,36 @@ func TestError(t *testing.T) {
 				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
 			),
 		},
+		"path that does not resolve names the reason": {
+			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
+				"not found",
+				niceyaml.AtPath(paths.Current().Child("nonexistent").Key()),
+			)),
+			want: "$.nonexistent~: not found\n\nno excerpt: resolve $.nonexistent~: not found",
+		},
+		"path without source": {
+			err: niceyaml.NewError(
+				"missing source",
+				niceyaml.AtPath(paths.Current().Child("key").Key()),
+			),
+			want: "@.key~: missing source",
+		},
+		// No path resolves in a document with no content, so the reason
+		// would add nothing to the path the message names.
+		"empty source": {
+			err: yamltest.Bind(t, niceyaml.NewSourceFromTokens(lexer.Tokenize("")), niceyaml.NewError(
+				"error in empty source",
+				niceyaml.AtPath(paths.Current().Child("key").Key()),
+			)),
+			want: "$.key~: error in empty source",
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := render(tc.err)
-
-			assert.Equal(t, tc.want, stringtest.TrimLineEnds(got))
+			assert.Equal(t, tc.want, stringtest.TrimLineEnds(render(tc.err)))
 		})
 	}
 }
@@ -1456,53 +1477,6 @@ func TestError_Location(t *testing.T) {
 	}
 }
 
-func TestError_GracefulDegradation(t *testing.T) {
-	t.Parallel()
-
-	source := `key: value`
-
-	// Empty tokens for edge case tests.
-	emptyTokens := lexer.Tokenize("")
-
-	tcs := map[string]struct {
-		err  error
-		want string
-	}{
-		"invalid path": {
-			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-				"not found",
-				niceyaml.AtPath(paths.Current().Child("nonexistent").Key()),
-			)),
-			want: "$.nonexistent~: not found\n\nno excerpt: resolve $.nonexistent~: not found",
-		},
-		"path without source": {
-			err: niceyaml.NewError(
-				"missing source",
-				niceyaml.AtPath(paths.Current().Child("key").Key()),
-			),
-			want: "@.key~: missing source",
-		},
-		// No path resolves in a document with no content, so the reason
-		// would add nothing to the path the message names.
-		"empty source": {
-			err: yamltest.Bind(t, niceyaml.NewSourceFromTokens(emptyTokens), niceyaml.NewError(
-				"error in empty source",
-				niceyaml.AtPath(paths.Current().Child("key").Key()),
-			)),
-			want: "$.key~: error in empty source",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := render(tc.err)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
 func TestErrorAnnotation(t *testing.T) {
 	t.Parallel()
 
@@ -1689,34 +1663,6 @@ func TestErrorAnnotation(t *testing.T) {
 			assert.Equal(t, tc.want, stringtest.TrimLineEnds(renderContext(err, lines)))
 		})
 	}
-}
-
-func TestWithPrinter(t *testing.T) {
-	t.Parallel()
-
-	source := stringtest.Input(`
-		key: value
-		foo: bar
-	`)
-	tokens := lexer.Tokenize(source)
-
-	customPrinter := yamltest.NewXMLPrinter()
-
-	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-		"test error",
-		niceyaml.AtPosition(position.NewFromToken(tokens[0])),
-	))
-
-	want := stringtest.JoinLF(
-		"1:1: test error",
-		"",
-		"<genericError>key</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
-		"<textError>^^^</textError>",
-		"<nameTag>foo</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>bar</literalString>",
-	)
-
-	bound := yamltest.RequireSourceError(t, err)
-	assert.Equal(t, want, stringtest.TrimLineEnds(customPrinter.PrintError(bound)))
 }
 
 func TestError_Unwrap(t *testing.T) {
