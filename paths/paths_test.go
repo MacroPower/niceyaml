@@ -3040,27 +3040,35 @@ func TestPath_TaggedAlias(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			dd := yamltest.FirstDocument(t, tc.input)
-			doc := dd.DocumentAST()
-
-			node, err := paths.NewResolver(doc).Node(tc.path)
-			_, nodesErr := paths.NewResolver(doc).Nodes(tc.path)
-			_, atErr := dd.At(tc.path)
-
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-				require.ErrorIs(t, nodesErr, tc.err)
-				require.ErrorIs(t, atErr, tc.err)
-
-				return
-			}
-
-			require.NoError(t, err)
-			require.NoError(t, nodesErr)
-			require.NoError(t, atErr)
-			assert.Equal(t, tc.want, node.String())
+			assertNodeText(t, yamltest.FirstDocument(t, tc.input), tc.path, tc.want, tc.err)
 		})
 	}
+}
+
+// assertNodeText asserts that path selects the node with the text want in
+// the document of dd, or that it fails with wantErr when wantErr is set.
+// Node, Nodes, and [niceyaml.Node.At] must agree on which.
+func assertNodeText(t *testing.T, dd *niceyaml.Node, path paths.Path, want string, wantErr error) {
+	t.Helper()
+
+	doc := dd.DocumentAST()
+
+	node, err := paths.NewResolver(doc).Node(path)
+	_, nodesErr := paths.NewResolver(doc).Nodes(path)
+	_, atErr := dd.At(path)
+
+	if wantErr != nil {
+		require.ErrorIs(t, err, wantErr)
+		require.ErrorIs(t, nodesErr, wantErr)
+		require.ErrorIs(t, atErr, wantErr)
+
+		return
+	}
+
+	require.NoError(t, err)
+	require.NoError(t, nodesErr)
+	require.NoError(t, atErr)
+	assert.Equal(t, want, node.String())
 }
 
 func TestPath_UnknownAliasKey(t *testing.T) {
@@ -3292,28 +3300,12 @@ func TestPath_AliasInsideOwnAnchor(t *testing.T) {
 			t.Parallel()
 
 			dd := yamltest.FirstDocument(t, tc.input)
-			doc := dd.DocumentAST()
 
-			tk, err := paths.NewResolver(doc).Token(tc.path)
+			tk, err := paths.NewResolver(dd.DocumentAST()).Token(tc.path)
 			require.NoError(t, err)
 			assert.Equal(t, "*", tk.Value)
 
-			node, err := paths.NewResolver(doc).Node(tc.path)
-			_, nodesErr := paths.NewResolver(doc).Nodes(tc.path)
-			_, atErr := dd.At(tc.path)
-
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-				require.ErrorIs(t, nodesErr, tc.err)
-				require.ErrorIs(t, atErr, tc.err)
-
-				return
-			}
-
-			require.NoError(t, err)
-			require.NoError(t, nodesErr)
-			require.NoError(t, atErr)
-			assert.Equal(t, tc.want, node.String())
+			assertNodeText(t, dd, tc.path, tc.want, tc.err)
 		})
 	}
 }
