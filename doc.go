@@ -326,8 +326,8 @@
 // manifests and the output of a Helm chart thus decode and validate as
 // they are, and a configuration file that ends in "---" holds one
 // document. Source.AllDocuments returns the empty documents too. A file
-// with no content holds empty documents alone, so the loop above meets
-// one. A schema that wants a mapping rejects it, and a decode with no
+// with no content holds one empty document, so the loop above meets
+// it. A schema that wants a mapping rejects it, and a decode with no
 // such schema returns the zero value. [SkipEmpty] wraps a validator so
 // that it passes an empty document, for a caller whose file may be empty
 // as a whole:

@@ -3133,7 +3133,7 @@ func TestSource_Documents_LeavesOutEmpty(t *testing.T) {
 			want:  []int{0, 1},
 			all:   2,
 		},
-		// A file with no content keeps each of its documents.
+		// A file with no content holds its first document alone.
 		"empty file": {
 			input: "",
 			want:  []int{0},
@@ -3151,12 +3151,12 @@ func TestSource_Documents_LeavesOutEmpty(t *testing.T) {
 		},
 		"headers alone": {
 			input: "---\n---\n",
-			want:  []int{0, 1},
+			want:  []int{0},
 			all:   2,
 		},
 		"comments below headers alone": {
 			input: "---\n# a\n---\n# b\n",
-			want:  []int{0, 1},
+			want:  []int{0},
 			all:   2,
 		},
 	}
@@ -3245,7 +3245,7 @@ func TestSource_ValidateDocuments(t *testing.T) {
 		},
 		"empty documents alone": {
 			input: "---\n---\n",
-			want:  []string{"f.yaml:1:1: $: name is required", "f.yaml:2:1: $: name is required"},
+			want:  []string{"f.yaml:1:1: $: name is required"},
 		},
 		"empty file": {
 			input: "",
@@ -3279,14 +3279,19 @@ func TestSource_ValidateDocuments(t *testing.T) {
 			}
 
 			// Every document that parsed runs the validator, but an empty
-			// one in a file that holds a document with content.
+			// one in a file that holds a document with content, and every
+			// empty one past the first in a file of empty documents alone.
 			docs := source.AllDocuments()
 			content := slices.ContainsFunc(docs, func(doc *niceyaml.Node) bool { return !doc.IsEmpty() })
 
 			var ran int32
 
-			for _, doc := range docs {
-				if doc.Err() == nil && (!content || !doc.IsEmpty()) {
+			for i, doc := range docs {
+				switch {
+				case doc.Err() != nil:
+				case content && doc.IsEmpty():
+				case !content && i > 0:
+				default:
 					ran++
 				}
 			}
@@ -3488,17 +3493,17 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 			v:     registry,
 			input: helm,
 		},
-		// A file that holds empty documents alone validates each with v
-		// alone.
+		// A file that holds empty documents alone validates the first of
+		// them with v alone.
 		"schema, headers alone": {
 			v:      manifest,
 			input:  "---\n---\n",
-			strict: []string{"f.yaml:1:1: " + notNull, "f.yaml:2:1: " + notNull},
+			strict: []string{"f.yaml:1:1: " + notNull},
 		},
 		"registry, headers alone": {
 			v:      registry,
 			input:  "---\n---\n",
-			strict: []string{"f.yaml: document 1: " + noMatch, "f.yaml: document 2: " + noMatch},
+			strict: []string{"f.yaml: document 1: " + noMatch},
 		},
 		"schema, template that renders a comment alone": {
 			v:      manifest,
@@ -3609,7 +3614,7 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 			"comment after a manifest":    {input: "kind: A\n---\n# Source: t.yaml\n", want: []string{"A"}},
 			"chart output":                {input: helm, want: []string{"ConfigMap", "Service"}},
 			"document below an empty one": {input: "kind: A\n---\n---\nkind: B\n", want: []string{"A", "B"}},
-			"headers alone":               {input: "---\n---\n", want: []string{"", ""}},
+			"headers alone":               {input: "---\n---\n", want: []string{""}},
 			"template that renders no content": {
 				input: "---\n# Source: demo/templates/ingress.yaml\n",
 				want:  []string{""},

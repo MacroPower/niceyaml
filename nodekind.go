@@ -101,7 +101,7 @@ func (n *Node) Kind() NodeKind {
 // one, and so does a Helm template that renders to a comment alone.
 // [Source.Documents] leaves those out of a file that holds a document
 // with content, and [Source.AllDocuments] returns them. A file with no
-// content holds empty documents alone, so Documents returns them. A loop
+// content holds one empty document, which Documents returns. A loop
 // that reads the documents with content passes over the ones IsEmpty
 // reports:
 //

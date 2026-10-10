@@ -213,10 +213,10 @@ func TestSource_Document(t *testing.T) {
 		assert.Equal(t, "3:1: multiple documents in source: 2 documents", err.Error())
 	})
 
-	t.Run("rejects several empty documents", func(t *testing.T) {
+	t.Run("returns the first of several empty documents", func(t *testing.T) {
 		t.Parallel()
 
-		// A file of empty documents alone keeps each of them.
+		// A file of empty documents alone reads as an empty file does.
 		source := niceyaml.NewSourceFromString(stringtest.Input(`
 			---
 			# a
@@ -224,9 +224,10 @@ func TestSource_Document(t *testing.T) {
 			# b
 		`))
 
-		_, err := source.Document()
-		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
-		assert.Equal(t, "3:1: multiple documents in source: 2 documents", err.Error())
+		doc, err := source.Document()
+		require.NoError(t, err)
+		assert.True(t, doc.IsEmpty())
+		assert.Equal(t, 0, doc.DocumentIndex())
 	})
 
 	t.Run("rejects several documents past the comments above the second", func(t *testing.T) {

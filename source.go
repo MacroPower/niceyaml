@@ -992,11 +992,13 @@ func (s *Source) Tokens() token.Tokens {
 // hold one empty document, which decodes to the zero value. The YAML spec
 // finds no document in a stream of markers alone. Documents departs from
 // it on purpose, so such a file reads as an empty file does. A file of
-// empty documents alone, such as `---\n---\n`, keeps each of them. A loop
-// over the documents of a file with no content therefore meets an empty
-// document. A schema that wants a mapping rejects that document, and a
-// decode with no such schema returns the zero value for it. A caller that
-// wants neither passes over the documents IsEmpty reports.
+// empty documents alone, such as `---\n---\n`, reads the same way, so
+// Documents returns the first of them alone, and AllDocuments returns
+// each. A loop over the documents of a file with no content therefore
+// meets one empty document. A schema that wants a mapping rejects that
+// document, and a decode with no such schema returns the zero value for
+// it. A caller that wants neither passes over the documents IsEmpty
+// reports.
 //
 // It parses the source and builds each Node once, so every call returns
 // the same pointers. The slice itself is a copy, so reordering it reaches
@@ -1082,7 +1084,7 @@ func (s *Source) AllDocuments() []*Node {
 // For a file with no syntax error, the result thus holds what a loop that
 // calls [Node.Validate] on each document Documents returns collects. A
 // document that did not parse is not empty. A file that holds empty
-// documents alone validates each of them, so a schema that wants a
+// documents alone validates the first of them, so a schema that wants a
 // mapping still rejects an empty file. A caller whose file may be empty
 // as a whole wraps its validator in [SkipEmpty], which takes either
 // composition:
@@ -1170,13 +1172,14 @@ func (s *Source) contentDocuments() []*Node {
 }
 
 // pickContentDocuments returns the documents among docs that are not
-// empty, in file order, or docs itself when every one of them is empty.
-// An empty document beside one that is not empty is what a separator
-// left, and a file of empty documents alone keeps each of them. A document
-// that did not parse is not empty, as [Node.IsEmpty] reports it.
+// empty, in file order, or the first of docs when every one of them is
+// empty. An empty document beside one that is not empty is what a
+// separator left, and a file of empty documents alone reads as an empty
+// file does, which holds one empty document. A document that did not
+// parse is not empty, as [Node.IsEmpty] reports it.
 func pickContentDocuments(docs []*Node) []*Node {
 	if !slices.ContainsFunc(docs, func(doc *Node) bool { return !doc.IsEmpty() }) {
-		return docs
+		return docs[:1]
 	}
 
 	return slices.DeleteFunc(slices.Clone(docs), (*Node).IsEmpty)
@@ -1213,12 +1216,11 @@ func pickContentDocuments(docs []*Node) []*Node {
 // error wrapping [ErrMultipleDocuments], bound to the Source. The error
 // points at the header of the second of them, or at the first token of
 // its content when a "..." marker rather than a header opens it. A file
-// of several empty documents alone returns that error too, since each
-// "---" header is a document, and only a document with content leaves
-// the empty ones out. A file with a document that does not parse
-// returns the error [Source.File] returns, however many of its other
-// documents parse. Use [Source.Documents] for a file that may hold
-// several.
+// of several empty documents alone, such as `---\n---\n`, holds a single
+// document, the first of them, as Source.Documents describes. A file
+// with a document that does not parse returns the error [Source.File]
+// returns, however many of its other documents parse. Use
+// [Source.Documents] for a file that may hold several.
 func (s *Source) Document() (*Node, error) {
 	// The parse bound each syntax error already, and binding the join of
 	// several anew would return another error than File does.
