@@ -5320,55 +5320,37 @@ func TestPath_EmptyDocument(t *testing.T) {
 		}
 	})
 
-	t.Run("a path with segments reaches nothing", func(t *testing.T) {
+	t.Run("a path with segments selects nothing", func(t *testing.T) {
 		t.Parallel()
 
 		doc := emptyDocument(t, "a: 1\n---\n")
 
-		tcs := map[string]struct {
-			path paths.Path
-		}{
-			"child": {path: paths.Doc().Child("a")},
-			"index": {path: paths.Doc().Index(0)},
+		tcs := map[string]paths.Path{
+			"child":         paths.Doc().Child("a"),
+			"index":         paths.Doc().Index(0),
+			"every element": paths.Doc().Child("items").IndexAll(),
+			"every entry":   paths.Doc().ChildAll(),
+			"every node":    paths.Doc().RecursiveAll(),
 		}
 
-		for name, tc := range tcs {
+		for name, path := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				_, err := paths.NewResolver(doc).Node(tc.path)
-				require.ErrorIs(t, err, paths.ErrNoDocument)
-				require.ErrorIs(t, err, paths.ErrNotFound)
-			})
-		}
-	})
-
-	t.Run("a path with segments lists nothing", func(t *testing.T) {
-		t.Parallel()
-
-		doc := emptyDocument(t, "a: 1\n---\n")
-
-		tcs := map[string]struct {
-			path paths.Path
-		}{
-			"child":         {path: paths.Doc().Child("a")},
-			"index":         {path: paths.Doc().Index(0)},
-			"every element": {path: paths.Doc().Child("items").IndexAll()},
-			"every entry":   {path: paths.Doc().ChildAll()},
-			"every node":    {path: paths.Doc().RecursiveAll()},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				nodes, err := paths.NewResolver(doc).Nodes(tc.path)
+				nodes, err := paths.NewResolver(doc).Nodes(path)
 				require.NoError(t, err)
 				assert.Empty(t, nodes)
 
-				matches, err := paths.NewResolver(doc).Matches(tc.path)
+				matches, err := paths.NewResolver(doc).Matches(path)
 				require.NoError(t, err)
 				assert.Empty(t, matches)
+
+				// Node takes only a path without a wildcard.
+				_, err = paths.NewResolver(doc).Node(path)
+				if !errors.Is(err, paths.ErrWildcard) {
+					require.ErrorIs(t, err, paths.ErrNoDocument)
+					require.ErrorIs(t, err, paths.ErrNotFound)
+				}
 			})
 		}
 	})
