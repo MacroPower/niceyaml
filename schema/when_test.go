@@ -27,45 +27,19 @@ func TestWhen(t *testing.T) {
 
 	schemaData := []byte(`{"type": "object"}`)
 
-	tcs := map[string]struct {
-		input   string
-		wantErr error
-	}{
-		"matcher accepts": {
-			input: `kind: Deployment`,
-		},
-		"matcher rejects": {
-			input:   `kind: Service`,
-			wantErr: schema.ErrNoMatch,
-		},
-	}
+	t.Run("matcher accepts", func(t *testing.T) {
+		t.Parallel()
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+		r := schema.When(
+			matcher.Content(kindPath, "Deployment"),
+			schema.Embedded(schemaData),
+		)
 
-			r := schema.When(
-				matcher.Content(kindPath, "Deployment"),
-				schema.Embedded(schemaData),
-			)
-
-			doc := yamltest.FirstDocument(t, tc.input)
-			ref, err := r.Resolve(t.Context(), doc)
-
-			if tc.wantErr != nil {
-				require.ErrorIs(t, err, tc.wantErr)
-
-				return
-			}
-
-			require.NoError(t, err)
-			assert.NotEmpty(t, ref.Key())
-
-			data, err := schema.NewRegistry().Load(t.Context(), ref)
-			require.NoError(t, err)
-			assert.Equal(t, schemaData, data)
-		})
-	}
+		key, data, err := loadFor(t, r, yamltest.FirstDocument(t, "kind: Deployment"))
+		require.NoError(t, err)
+		assert.NotEmpty(t, key)
+		assert.Equal(t, schemaData, data)
+	})
 
 	t.Run("guarded resolver errors pass through", func(t *testing.T) {
 		t.Parallel()
@@ -143,7 +117,7 @@ func TestWhen(t *testing.T) {
 		}
 	})
 
-	t.Run("guarded resolver is not consulted on reject", func(t *testing.T) {
+	t.Run("matcher rejects without consulting the guarded resolver", func(t *testing.T) {
 		t.Parallel()
 
 		called := false
