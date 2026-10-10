@@ -409,15 +409,8 @@ func TestNewErrorHandler_Width(t *testing.T) {
 
 			fangs.NewErrorHandler(fangs.WithPrinter(p))(&buf, testStyles(), err)
 
-			widest := 0
-
-			for row := range strings.SplitSeq(buf.String(), "\n") {
-				assert.LessOrEqual(t, lipgloss.Width(row), tc.width, "row %q", row)
-
-				widest = max(widest, lipgloss.Width(row))
-			}
-
-			assert.Equal(t, tc.width, widest)
+			// The widest row fills the width, so no row runs past it.
+			assert.Equal(t, tc.width, lipgloss.Width(buf.String()))
 		})
 	}
 }
