@@ -7345,12 +7345,26 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 		name: second
 	`)
 
-	t.Run("without option the parser rejects duplicate keys", func(t *testing.T) {
+	t.Run("the parser rejects duplicate keys", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := niceyaml.NewSourceFromString(input).File()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), `mapping key "name" already defined`)
+		tcs := map[string][]niceyaml.SourceOption{
+			"without option": nil,
+			"a later false turns the option off": {
+				niceyaml.WithAllowDuplicateKeys(true),
+				niceyaml.WithAllowDuplicateKeys(false),
+			},
+		}
+
+		for name, opts := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				_, err := niceyaml.NewSourceFromString(input, opts...).File()
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), `mapping key "name" already defined`)
+			})
+		}
 	})
 
 	t.Run("with option the last value wins", func(t *testing.T) {
@@ -7375,17 +7389,6 @@ func TestWithAllowDuplicateKeys(t *testing.T) {
 		got, err := name.Decode[string](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, "second", got)
-	})
-
-	t.Run("a later false turns the option off", func(t *testing.T) {
-		t.Parallel()
-
-		_, err := niceyaml.NewSourceFromString(input,
-			niceyaml.WithAllowDuplicateKeys(true),
-			niceyaml.WithAllowDuplicateKeys(false),
-		).File()
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), `mapping key "name" already defined`)
 	})
 
 	t.Run("without option a decode keeps the later of two keys it reads as one", func(t *testing.T) {
