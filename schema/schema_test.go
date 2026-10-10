@@ -422,12 +422,23 @@ func TestCompile_Document(t *testing.T) {
 			invalid: "value: 1\n",
 		},
 		"YAML with a merge key": {
-			schema:  "$defs:\n  named: &named\n    required: [name]\nallOf:\n  - <<: *named\n",
+			schema: stringtest.Input(`
+				$defs:
+				  named: &named
+				    required: [name]
+				allOf:
+				  - <<: *named
+			`),
 			valid:   "name: a\n",
 			invalid: "value: 1\n",
 		},
 		"YAML with a $ref inside the schema": {
-			schema:  "$ref: '#/$defs/named'\n$defs:\n  named:\n    required: [name]\n",
+			schema: stringtest.Input(`
+				$ref: '#/$defs/named'
+				$defs:
+				  named:
+				    required: [name]
+			`),
 			valid:   "name: a\n",
 			invalid: "value: 1\n",
 		},
@@ -464,16 +475,24 @@ func TestCompile_Document(t *testing.T) {
 			want:   "compile schema: JSON decode: ",
 		},
 		"YAML that does not parse": {
-			schema: "properties:\n  name: {type: string\nrequired: [name]\n",
-			want:   "compile schema: YAML decode: 3:1: ",
+			schema: stringtest.Input(`
+				properties:
+				  name: {type: string
+				required: [name]
+			`),
+			want: "compile schema: YAML decode: 3:1: ",
 		},
 		"YAML duplicate key": {
 			schema: "type: object\ntype: string\n",
 			want:   `compile schema: YAML decode: 2:1: mapping key "type" already defined`,
 		},
 		"two YAML documents": {
-			schema: "type: object\n---\ntype: string\n",
-			want:   "compile schema: YAML decode: 2:1: multiple documents in source: 2 documents",
+			schema: stringtest.Input(`
+				type: object
+				---
+				type: string
+			`),
+			want: "compile schema: YAML decode: 2:1: multiple documents in source: 2 documents",
 		},
 		"YAML aliases past the limit": {
 			schema: yamltest.AliasLevels(7),
@@ -2209,7 +2228,11 @@ func TestSchema_AliasExpansion(t *testing.T) {
 						"base": {"properties": {"health": {"type": "integer"}}}
 					}
 				}`,
-				input: "base: &b\n  port: &p 80\n  health: *p\n",
+				input: stringtest.Input(`
+					base: &b
+					  port: &p 80
+					  health: *p
+				`),
 			},
 			"merge keys": {
 				schema: `{
@@ -3094,7 +3117,11 @@ func TestSchema_Check_SyntaxError(t *testing.T) {
 
 			v := compileSchema(t, []byte(tc.schema))
 
-			docs := niceyaml.NewSourceFromString("a: 1\n---\nb: [\n").AllDocuments()
+			docs := niceyaml.NewSourceFromString(stringtest.Input(`
+				a: 1
+				---
+				b: [
+			`)).AllDocuments()
 			require.Len(t, docs, 2)
 			require.ErrorIs(t, docs[1].Err(), niceyaml.ErrSyntax)
 
@@ -3162,8 +3189,12 @@ func TestSchema_Check_Bound(t *testing.T) {
 		// The summary stands above violations that say where they point,
 		// so the scoped node gives it no location.
 		"several violations in a scoped node": {
-			input: "items:\n  - name: 1\n    price: -2\n",
-			path:  paths.Current().Child("items").Index(0),
+			input: stringtest.Input(`
+				items:
+				  - name: 1
+				    price: -2
+			`),
+			path: paths.Current().Child("items").Index(0),
 			want: stringtest.JoinLF(
 				"menu.yaml: 2 schema violations",
 				`menu.yaml:2:11: $.items[0].name: expected "string", got "integer"`,
@@ -3352,22 +3383,33 @@ func TestSchema_SourcePath(t *testing.T) {
 				"type": "object",
 				"additionalProperties": {"type": ["string", "object"]}
 			}`,
-			input: "<<: {a: x}\n\"\": 5\n",
-			want:  `2:5: $.'': expected ["string", "object"], got "integer"`,
+			input: stringtest.Input(`
+				<<: {a: x}
+				"": 5
+			`),
+			want: `2:5: $.'': expected ["string", "object"], got "integer"`,
 		},
 		"merge key overrides an earlier respelled key": {
 			// The decoder applies the merge after 0x10: 1, so the member
 			// 16 holds x, and the path names the key the merge brings in.
 			schema: integersInUser,
-			input:  "user:\n  0x10: 1\n  <<: {16: x}\n",
-			want:   `3:12: $.user.16: expected "integer", got "string"`,
+			input: stringtest.Input(`
+				user:
+				  0x10: 1
+				  <<: {16: x}
+			`),
+			want: `3:12: $.user.16: expected "integer", got "string"`,
 		},
 		"merge key overrides an earlier key of the same spelling": {
 			// A path through 0x10 selects the later entry, which the
 			// merge brings in.
 			schema: integersInUser,
-			input:  "user:\n  0x10: 1\n  <<: {0x10: x}\n",
-			want:   `3:14: $.user.0x10: expected "integer", got "string"`,
+			input: stringtest.Input(`
+				user:
+				  0x10: 1
+				  <<: {0x10: x}
+			`),
+			want: `3:14: $.user.0x10: expected "integer", got "string"`,
 		},
 		"respelled key a merge key brings in": {
 			schema: integersInUser,
@@ -3402,8 +3444,12 @@ func TestSchema_SourcePath(t *testing.T) {
 			// A key of the merge source may decode to any name, so the
 			// key 0x10 before the merge cannot name the member 16.
 			schema: integersInM,
-			input:  "a: &k 16\nb: &b {? !!str *k : x}\nm: {0x10: 5, <<: *b}\n",
-			want:   `2:21: $.m.16: expected "integer", got "string"`,
+			input: stringtest.Input(`
+				a: &k 16
+				b: &b {? !!str *k : x}
+				m: {0x10: 5, <<: *b}
+			`),
+			want: `2:21: $.m.16: expected "integer", got "string"`,
 		},
 		"unnameable alias key hides earlier keys": {
 			// The alias key refers to a sequence, which the walk cannot
@@ -3503,8 +3549,12 @@ func TestSchema_SourcePath(t *testing.T) {
 					}
 				}
 			}`,
-			input: "items:\n  - 0x10: 1\n  - 0x10: hello\n",
-			want:  `3:11: $.items[1].0x10: expected "integer", got "string"`,
+			input: stringtest.Input(`
+				items:
+				  - 0x10: 1
+				  - 0x10: hello
+			`),
+			want: `3:11: $.items[1].0x10: expected "integer", got "string"`,
 		},
 		"alias key": {
 			schema: stringMembers,
@@ -3518,8 +3568,12 @@ func TestSchema_SourcePath(t *testing.T) {
 				"type": "object",
 				"properties": {"k": {"type": "string"}}
 			}`,
-			input: "a: &k name\nk: 1\n*k : v\n",
-			want:  `2:4: $.k: expected "string", got "integer"`,
+			input: stringtest.Input(`
+				a: &k name
+				k: 1
+				*k : v
+			`),
+			want: `2:4: $.k: expected "string", got "integer"`,
 		},
 		"alias key overrides an earlier key": {
 			// The decoder keeps the member the alias key sets, so the
@@ -3530,21 +3584,33 @@ func TestSchema_SourcePath(t *testing.T) {
 					"name": {"additionalProperties": {"type": "integer"}}
 				}
 			}`,
-			input: "a: &k name\nname: {16: x}\n*k : {0x10: y}\n",
-			want:  `3:13: $.name.0x10: expected "integer", got "string"`,
+			input: stringtest.Input(`
+				a: &k name
+				name: {16: x}
+				*k : {0x10: y}
+			`),
+			want: `3:13: $.name.0x10: expected "integer", got "string"`,
 		},
 		"alias key overrides a respelled key": {
 			schema: `{
 				"type": "object",
 				"properties": {"16": {"type": "integer"}}
 			}`,
-			input: "a: &k 16\n0x10: hello\n*k : [1]\n",
-			want:  `3:1: $.16: expected "integer", got "array"`,
+			input: stringtest.Input(`
+				a: &k 16
+				0x10: hello
+				*k : [1]
+			`),
+			want: `3:1: $.16: expected "integer", got "array"`,
 		},
 		"block scalar key": {
 			schema: stringMembers,
-			input:  "? |-\n  n\n: 5\n",
-			want:   `3:3: $.n: expected "string", got "integer"`,
+			input: stringtest.Input(`
+				? |-
+				  n
+				: 5
+			`),
+			want: `3:3: $.n: expected "string", got "integer"`,
 		},
 		"respelled key behind an alias": {
 			schema: `{
@@ -3563,8 +3629,12 @@ func TestSchema_SourcePath(t *testing.T) {
 					"b": {"additionalProperties": {"type": "string"}}
 				}
 			}`,
-			input: "a: &a\n  0x10: 1\nb: *a\n",
-			want:  `2:9: $.b.0x10: expected "string", got "integer"`,
+			input: stringtest.Input(`
+				a: &a
+				  0x10: 1
+				b: *a
+			`),
+			want: `2:9: $.b.0x10: expected "string", got "integer"`,
 		},
 		"respelled key behind a redefined anchor": {
 			// The alias refers to the last anchor of its name before it.
@@ -3574,8 +3644,12 @@ func TestSchema_SourcePath(t *testing.T) {
 					"c": {"additionalProperties": {"type": "string"}}
 				}
 			}`,
-			input: "a: &a {16: x}\nb: &a {0x10: 1}\nc: *a\n",
-			want:  `2:14: $.c.0x10: expected "string", got "integer"`,
+			input: stringtest.Input(`
+				a: &a {16: x}
+				b: &a {0x10: 1}
+				c: *a
+			`),
+			want: `2:14: $.c.0x10: expected "string", got "integer"`,
 		},
 		"respelled key behind an anchor a merge brings in again": {
 			// The decoder reads the anchors of a merged mapping again at
@@ -3590,8 +3664,15 @@ func TestSchema_SourcePath(t *testing.T) {
 					}
 				}
 			}`,
-			input: "base: &b\n  k: &x {0x10: 1}\nother: &x {16: x}\nm:\n  <<: *b\n  v: *x\n",
-			want:  `2:16: $.m.v.0x10: expected "string", got "integer"`,
+			input: stringtest.Input(`
+				base: &b
+				  k: &x {0x10: 1}
+				other: &x {16: x}
+				m:
+				  <<: *b
+				  v: *x
+			`),
+			want: `2:16: $.m.v.0x10: expected "string", got "integer"`,
 		},
 	}
 
@@ -3702,34 +3783,63 @@ func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 		opts []niceyaml.SourceOption
 	}{
 		"own key after the merge key": {
-			input: "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n",
-			want:  "2:14",
+			input: stringtest.Input(`
+				user:
+				  <<: {0x10: x}
+				  "0x10": 1
+			`),
+			want: "2:14",
 		},
 		"merge key after the own key": {
-			input: "user:\n  0x10: x\n  <<: {\"0x10\": 1}\n",
-			want:  "2:9",
+			input: stringtest.Input(`
+				user:
+				  0x10: x
+				  <<: {"0x10": 1}
+			`),
+			want: "2:9",
 		},
 		"later source of one merge key": {
-			input: "user:\n  <<: [{0x10: x}, {\"0x10\": 1}]\n",
-			want:  "2:15",
+			input: stringtest.Input(`
+				user:
+				  <<: [{0x10: x}, {"0x10": 1}]
+			`),
+			want: "2:15",
 		},
 		"later aliased source of one merge key": {
-			input: "a: &a {0x10: x}\nb: &b {\"0x10\": 1}\nuser:\n  <<: [*a, *b]\n",
-			want:  "1:14",
+			input: stringtest.Input(`
+				a: &a {0x10: x}
+				b: &b {"0x10": 1}
+				user:
+				  <<: [*a, *b]
+			`),
+			want: "1:14",
 		},
 		"later merge key": {
-			input: "user:\n  <<: {0x10: x}\n  <<: {\"0x10\": 1}\n",
-			want:  "2:14",
-			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			input: stringtest.Input(`
+				user:
+				  <<: {0x10: x}
+				  <<: {"0x10": 1}
+			`),
+			want: "2:14",
+			opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 		},
 		"later own key": {
-			input: "user:\n  0x10: x\n  \"0x10\": 1\n",
-			want:  "2:9",
-			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			input: stringtest.Input(`
+				user:
+				  0x10: x
+				  "0x10": 1
+			`),
+			want: "2:9",
+			opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 		},
 		"later alias key": {
-			input: "k: &k \"0x10\"\nuser:\n  0x10: x\n  *k : 1\n",
-			want:  "3:9",
+			input: stringtest.Input(`
+				k: &k "0x10"
+				user:
+				  0x10: x
+				  *k : 1
+			`),
+			want: "3:9",
 		},
 	}
 
@@ -3837,7 +3947,11 @@ func TestSchema_SourcePath_HiddenKeyName(t *testing.T) {
 		"properties": {"user": {"additionalProperties": false}}
 	}`))
 
-	dd := yamltest.FirstDocument(t, "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n")
+	dd := yamltest.FirstDocument(t, stringtest.Input(`
+		user:
+		  <<: {0x10: x}
+		  "0x10": 1
+	`))
 
 	err := dd.Validate(t.Context(), v)
 
