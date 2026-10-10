@@ -2195,8 +2195,11 @@ func (e notFoundError) Unwrap() error {
 // Validate is thus the way to run a validator, the caller's own or one
 // it did not write, and the way a validator runs another on a Node of
 // its choosing. A direct call to the Check method of a validator returns
-// the error as the validator wrote it, with no source and with its `@`
-// paths unresolved.
+// the error as the validator wrote it. A validator that binds what it
+// returns, as a [ValidatorFunc] and the validators of
+// [go.jacobcolvin.com/niceyaml/schema] do, gives the error Validate
+// returns. Any other gives an error that names no source, with its `@`
+// paths as the validator wrote them.
 //
 // A document that did not parse fails before v runs, with the syntax
 // error [Node.Err] returns, even when v is nil. A caller that validates
