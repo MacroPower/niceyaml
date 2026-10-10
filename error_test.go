@@ -1073,7 +1073,7 @@ func TestSourceError_Error_ListLimit(t *testing.T) {
 			err := yamltest.Bind(t, source, tc.err)
 
 			require.Error(t, err)
-			assert.Equal(t, strings.Join(tc.want, "\n"), err.Error())
+			assert.Equal(t, stringtest.JoinLF(tc.want...), err.Error())
 
 			// The tree holds every error, whatever the message leaves out.
 			assert.Len(t, slices.Collect(niceyaml.NewErrorTree(err).Problems()), tc.problems)
@@ -6583,10 +6583,10 @@ func renderings(err error) map[string]string {
 		"%+v":         fmt.Sprintf("%+v", err),
 		"FormatError": niceyaml.FormatError(err, niceyaml.WithContextLines(whole)),
 		"PrintError":  printer.New().PrintError(err, niceyaml.WithContextLines(whole)),
-		"Excerpts":    strings.Join(excerpts, "\n"),
-		"ErrorTree":   strings.Join(rows, "\n"),
+		"Excerpts":    stringtest.JoinLF(excerpts...),
+		"ErrorTree":   stringtest.JoinLF(rows...),
 		"slog":        logged.String(),
-		"Unwrap":      strings.Join(chainMessages(err), "\n"),
+		"Unwrap":      stringtest.JoinLF(chainMessages(err)...),
 	}
 }
 
@@ -7902,11 +7902,9 @@ func TestRebase(t *testing.T) {
 	t.Run("a decode rebases a nested self validator the same way", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("cafe.yaml"))
-		doc, err := source.Document()
-		require.NoError(t, err)
+		doc := yamltest.FirstDocument(t, input, niceyaml.WithName("cafe.yaml"))
 
-		_, err = doc.Decode[rebasedConfig](t.Context())
+		_, err := doc.Decode[rebasedConfig](t.Context())
 		require.EqualError(t, err, "cafe.yaml:4:10: $.hours.close: closes before it opens")
 		assert.Equal(t, stringtest.JoinLF(
 			"cafe.yaml:4:10: $.hours.close: closes before it opens",
@@ -9944,8 +9942,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		doc, err := src.Document()
 		require.NoError(t, err)
 
-		scoped, err := doc.At(paths.Current().Child("a"))
-		require.NoError(t, err)
+		scoped := yamltest.At(t, doc, paths.Current().Child("a"))
 
 		bound := errorBinding(t, scoped.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("b")))))
 
@@ -10043,7 +10040,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 func TestSourceError_Nearest(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString(stringtest.Input(`
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
 		servers:
 		  - port: 80
 		    name: a
@@ -10051,9 +10048,6 @@ func TestSourceError_Nearest(t *testing.T) {
 		tls:
 		note: hello
 	`), niceyaml.WithName("cfg.yaml"))
-
-	doc, err := source.Document()
-	require.NoError(t, err)
 
 	second := paths.Doc().Child("servers").Index(1)
 	name := second.Child("name")
