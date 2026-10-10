@@ -2436,73 +2436,154 @@ func TestSourceError_Format(t *testing.T) {
 func TestSourceError_Format_Plain(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n")
+	const lines = "a: 1\nb: 2\nc: 3\n"
 
-	t.Run("marks the location without escape sequences", func(t *testing.T) {
-		t.Parallel()
+	namePath := paths.Current().Child("名前")
 
-		err := yamltest.Bind(t, source, niceyaml.NewError("bad value", niceyaml.AtPath(paths.Current().Child("b"))))
-
-		got := fmt.Sprintf("%+v", err)
-
-		assert.Equal(t, stringtest.JoinLF(
-			"2:4: $.b: bad value",
-			"",
-			"   1 | a: 1",
-			"   2 | b: 2",
-			"     |    ^",
-			"   3 | c: 3",
-		), got)
-		assert.NotContains(t, got, "\x1b")
-	})
-
-	t.Run("carets sit under wide runes", func(t *testing.T) {
-		t.Parallel()
-
+	tcs := map[string]struct {
+		err   error
+		input string
+		want  string
+	}{
+		"marks the location": {
+			input: lines,
+			err:   niceyaml.NewError("bad value", niceyaml.AtPath(paths.Current().Child("b"))),
+			want: stringtest.JoinLF(
+				"2:4: $.b: bad value",
+				"",
+				"   1 | a: 1",
+				"   2 | b: 2",
+				"     |    ^",
+				"   3 | c: 3",
+			),
+		},
 		// Each CJK rune renders two cells wide, so the columns before the
 		// marked ones are worth two carets each.
-		wide := niceyaml.NewSourceFromString("名前: value\n")
-		namePath := paths.Current().Child("名前")
+		"carets sit under a value behind wide runes": {
+			input: "名前: value\n",
+			err:   niceyaml.NewError("bad value", niceyaml.AtPath(namePath)),
+			want: stringtest.JoinLF(
+				"1:5: $.名前: bad value",
+				"",
+				"   1 | 名前: value",
+				"     |       ^^^^^",
+			),
+		},
+		"carets sit under a key of wide runes": {
+			input: "名前: value\n",
+			err:   niceyaml.NewError("bad key", niceyaml.AtPath(namePath.Key())),
+			want: stringtest.JoinLF(
+				"1:1: $.名前~: bad key",
+				"",
+				"   1 | 名前: value",
+				"     | ^^^^",
+			),
+		},
+		"nested errors annotate their lines": {
+			input: lines,
+			err: niceyaml.NewSummary("2 problems",
+				niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a").Key())),
+				niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c"))),
+			),
+			want: stringtest.JoinLF(
+				"2 problems",
+				"|-- 1:1: $.a~: bad a",
+				"`-- 3:4: $.c: bad c",
+				"",
+				"   1 | a: 1",
+				"     | ^ bad a",
+				"   2 | b: 2",
+				"   3 | c: 3",
+				"     |    ^ bad c",
+			),
+		},
+		"names why no excerpt resolves": {
+			input: "a: 1\n",
+			err:   niceyaml.NewError("bad value", niceyaml.AtPath(paths.Current().Child("b").Index(0))),
+			want:  "$.b[0]: bad value\n\nno excerpt: resolve $.b[0]: not found",
+		},
+		"control characters render as pictures": {
+			input: "a: \"x\\ty\"\n",
+			err: niceyaml.NewError("bad", niceyaml.AtRange(
+				position.NewRange(position.New(0, 3), position.New(0, 9)),
+			)),
+			want: stringtest.JoinLF(
+				"1:4: bad",
+				"",
+				"   1 | a: \"x\\ty\"",
+				"     |    ^^^^^^",
+			),
+		},
+		// The root carries no message in the excerpt, so the caret alone
+		// marks where a location with nothing to highlight sits.
+		"path to an empty value": {
+			input: "a:\nb: 2\n",
+			err:   niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a"))),
+			want: stringtest.JoinLF(
+				"1:3: $.a: bad",
+				"",
+				"   1 | a:",
+				"     |   ^",
+				"   2 | b: 2",
+			),
+		},
+		"path to an empty value before a comment": {
+			input: "a: # c\nb: 2\n",
+			err:   niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a"))),
+			want: stringtest.JoinLF(
+				"1:3: $.a: bad",
+				"",
+				"   1 | a: # c",
+				"     |   ^",
+				"   2 | b: 2",
+			),
+		},
+		"path to an empty value before spaces": {
+			input: "a:   \nb: 2\n",
+			err:   niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a"))),
+			want: stringtest.JoinLF(
+				"1:3: $.a: bad",
+				"",
+				"   1 | a:   ",
+				"     |   ^",
+				"   2 | b: 2",
+			),
+		},
+		"path to an empty element before a comment": {
+			input: "- # c\n- 1\n",
+			err:   niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Index(0))),
+			want: stringtest.JoinLF(
+				"1:2: $[0]: bad",
+				"",
+				"   1 | - # c",
+				"     |  ^",
+				"   2 | - 1",
+			),
+		},
+		"position past the end of its line": {
+			input: "a: 1\n",
+			err:   niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 500))),
+			want: stringtest.JoinLF(
+				"1:501: bad",
+				"",
+				"   1 | a: 1",
+				"     |     ^",
+			),
+		},
+	}
 
-		value := yamltest.Bind(t, wide, niceyaml.NewError("bad value", niceyaml.AtPath(namePath)))
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		assert.Equal(t, stringtest.JoinLF(
-			"1:5: $.名前: bad value",
-			"",
-			"   1 | 名前: value",
-			"     |       ^^^^^",
-		), fmt.Sprintf("%+v", value))
+			err := yamltest.Bind(t, niceyaml.NewSourceFromString(tc.input), tc.err)
 
-		key := yamltest.Bind(t, wide, niceyaml.NewError("bad key", niceyaml.AtPath(namePath.Key())))
+			got := fmt.Sprintf("%+v", err)
 
-		assert.Equal(t, stringtest.JoinLF(
-			"1:1: $.名前~: bad key",
-			"",
-			"   1 | 名前: value",
-			"     | ^^^^",
-		), fmt.Sprintf("%+v", key))
-	})
-
-	t.Run("nested errors annotate their lines", func(t *testing.T) {
-		t.Parallel()
-
-		err := yamltest.Bind(t, source, niceyaml.NewSummary("2 problems",
-			niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a").Key())),
-			niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c"))),
-		))
-
-		assert.Equal(t, stringtest.JoinLF(
-			"2 problems",
-			"|-- 1:1: $.a~: bad a",
-			"`-- 3:4: $.c: bad c",
-			"",
-			"   1 | a: 1",
-			"     | ^ bad a",
-			"   2 | b: 2",
-			"   3 | c: 3",
-			"     |    ^ bad c",
-		), fmt.Sprintf("%+v", err))
-	})
+			assert.Equal(t, tc.want, got)
+			assert.NotContains(t, got, "\x1b")
+		})
+	}
 
 	t.Run("distant locations render as hunks", func(t *testing.T) {
 		t.Parallel()
@@ -2526,22 +2607,6 @@ func TestSourceError_Format_Plain(t *testing.T) {
 		), fmt.Sprintf("%+v", excerptError(t)))
 	})
 
-	t.Run("names why no excerpt resolves", func(t *testing.T) {
-		t.Parallel()
-
-		src := niceyaml.NewSourceFromString("a: 1\n")
-		err := yamltest.Bind(
-			t,
-			src,
-			niceyaml.NewError("bad value", niceyaml.AtPath(paths.Current().Child("b").Index(0))),
-		)
-
-		assert.Equal(t,
-			"$.b[0]: bad value\n\nno excerpt: resolve $.b[0]: not found",
-			fmt.Sprintf("%+v", err),
-		)
-	})
-
 	t.Run("control characters in the tree and the reason render as pictures", func(t *testing.T) {
 		t.Parallel()
 
@@ -2559,100 +2624,6 @@ func TestSourceError_Format_Plain(t *testing.T) {
 		assert.NotContains(t, got, "\x1b")
 		assert.Contains(t, got, "m\u241b[31mX")
 		assert.Contains(t, got, `no excerpt: resolve $.'k\u001b[31mY'`)
-	})
-
-	t.Run("control characters render as pictures", func(t *testing.T) {
-		t.Parallel()
-
-		src := niceyaml.NewSourceFromString("a: \"x\\ty\"\n")
-		err := yamltest.Bind(t, src, niceyaml.NewError("bad", niceyaml.AtRange(
-			position.NewRange(position.New(0, 3), position.New(0, 9)),
-		)))
-
-		assert.Equal(t, stringtest.JoinLF(
-			"1:4: bad",
-			"",
-			"   1 | a: \"x\\ty\"",
-			"     |    ^^^^^^",
-		), fmt.Sprintf("%+v", err))
-	})
-
-	t.Run("a location with no token under it gets a caret", func(t *testing.T) {
-		t.Parallel()
-
-		// The root carries no message in the excerpt, so the caret alone
-		// marks where a location with nothing to highlight sits.
-		tcs := map[string]struct {
-			input string
-			opt   niceyaml.ErrorOption
-			want  string
-		}{
-			"path to an empty value": {
-				input: "a:\nb: 2\n",
-				opt:   niceyaml.AtPath(paths.Current().Child("a")),
-				want: stringtest.JoinLF(
-					"1:3: $.a: bad",
-					"",
-					"   1 | a:",
-					"     |   ^",
-					"   2 | b: 2",
-				),
-			},
-			"path to an empty value before a comment": {
-				input: "a: # c\nb: 2\n",
-				opt:   niceyaml.AtPath(paths.Current().Child("a")),
-				want: stringtest.JoinLF(
-					"1:3: $.a: bad",
-					"",
-					"   1 | a: # c",
-					"     |   ^",
-					"   2 | b: 2",
-				),
-			},
-			"path to an empty value before spaces": {
-				input: "a:   \nb: 2\n",
-				opt:   niceyaml.AtPath(paths.Current().Child("a")),
-				want: stringtest.JoinLF(
-					"1:3: $.a: bad",
-					"",
-					"   1 | a:   ",
-					"     |   ^",
-					"   2 | b: 2",
-				),
-			},
-			"path to an empty element before a comment": {
-				input: "- # c\n- 1\n",
-				opt:   niceyaml.AtPath(paths.Current().Index(0)),
-				want: stringtest.JoinLF(
-					"1:2: $[0]: bad",
-					"",
-					"   1 | - # c",
-					"     |  ^",
-					"   2 | - 1",
-				),
-			},
-			"position past the end of its line": {
-				input: "a: 1\n",
-				opt:   niceyaml.AtPosition(position.New(0, 500)),
-				want: stringtest.JoinLF(
-					"1:501: bad",
-					"",
-					"   1 | a: 1",
-					"     |     ^",
-				),
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				src := niceyaml.NewSourceFromString(tc.input)
-				err := yamltest.Bind(t, src, niceyaml.NewError("bad", tc.opt))
-
-				assert.Equal(t, tc.want, fmt.Sprintf("%+v", err))
-			})
-		}
 	})
 }
 
