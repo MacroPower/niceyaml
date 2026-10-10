@@ -933,6 +933,27 @@ func TestResolver_NestedMerges(t *testing.T) {
 	}
 }
 
+// valueOfV returns the value of the entry v in the mapping at the root of
+// doc, as the parser left it, so an alias there is still an alias.
+func valueOfV(t *testing.T, doc *ast.DocumentNode) ast.Node {
+	t.Helper()
+
+	mapping, ok := doc.Body.(*ast.MappingNode)
+	require.True(t, ok, "body is a %T", doc.Body)
+
+	var value ast.Node
+
+	for _, entry := range mapping.Values {
+		if entry.Key.GetToken().Value == "v" {
+			value = entry.Value
+		}
+	}
+
+	require.NotNil(t, value, "no entry v")
+
+	return value
+}
+
 func TestResolver_Deref(t *testing.T) {
 	t.Parallel()
 
@@ -990,20 +1011,7 @@ func TestResolver_Deref(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
-			mapping, ok := doc.Body.(*ast.MappingNode)
-			require.True(t, ok, "body is a %T", doc.Body)
-
-			var value ast.Node
-
-			for _, entry := range mapping.Values {
-				if entry.Key.GetToken().Value == "v" {
-					value = entry.Value
-				}
-			}
-
-			require.NotNil(t, value, "no entry v")
-
-			got, err := paths.NewResolver(doc).Deref(value)
+			got, err := paths.NewResolver(doc).Deref(valueOfV(t, doc))
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 
@@ -1455,20 +1463,7 @@ func TestResolver_Anchor(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
-			mapping, ok := doc.Body.(*ast.MappingNode)
-			require.True(t, ok, "body is a %T", doc.Body)
-
-			var value ast.Node
-
-			for _, entry := range mapping.Values {
-				if entry.Key.GetToken().Value == "v" {
-					value = entry.Value
-				}
-			}
-
-			require.NotNil(t, value, "no entry v")
-
-			got, err := paths.NewResolver(doc).Anchor(value)
+			got, err := paths.NewResolver(doc).Anchor(valueOfV(t, doc))
 			if tc.err != nil {
 				require.ErrorIs(t, err, tc.err)
 
