@@ -462,13 +462,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		_, err := doc.Decode[nested](t.Context())
 		require.Error(t, err)
 
-		bound := sourceErrorOf(t, err)
-
-		var got []string
-
-		for _, child := range yamltest.ProblemsOf(bound) {
-			got = append(got, child.Bound.Error())
-		}
+		got := errorTexts(yamltest.ProblemsOf(err))
 
 		// The deep any holds maps and slices of any, which hold no item.
 		assert.ElementsMatch(t, []string{
@@ -1293,21 +1287,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		for range 20 {
 			_, err := dd.Decode[map[string]item](t.Context())
-			require.EqualError(t, err, stringtest.JoinLF(
-				"1:12: $.d.price: negative price",
-				"2:12: $.b.price: negative price",
-				"3:12: $.c.price: negative price",
-				"4:12: $.a.price: negative price",
-			))
-
-			bound := sourceErrorOf(t, err)
-
-			got := make([]string, 0, len(want))
-			for _, child := range yamltest.ProblemsOf(bound) {
-				got = append(got, child.Bound.Error())
-			}
-
-			assert.Equal(t, want, got)
+			require.EqualError(t, err, stringtest.JoinLF(want...))
+			assert.Equal(t, want, errorTexts(yamltest.ProblemsOf(err)))
 		}
 	})
 
@@ -1573,13 +1554,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err := dd.Decode[map[string]map[float64]item](t.Context())
 
-		bound := sourceErrorOf(t, err)
-
-		var got []string
-
-		for _, child := range yamltest.ProblemsOf(bound) {
-			got = append(got, child.Bound.Error())
-		}
+		got := errorTexts(yamltest.ProblemsOf(err))
 
 		assert.Equal(t, []string{
 			"1:25: $.base.0x10.price: negative price",
@@ -1613,13 +1588,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				_, err := dd.Decode[merged](t.Context())
 
-				bound := sourceErrorOf(t, err)
-
-				var got []string
-
-				for _, child := range yamltest.ProblemsOf(bound) {
-					got = append(got, child.Bound.Error())
-				}
+				got := errorTexts(yamltest.ProblemsOf(err))
 
 				assert.Equal(t, []string{
 					"1:22: $.m.0x10.price: negative price",
@@ -1853,18 +1822,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 					return
 				}
 
-				bound := sourceErrorOf(t, err)
-
-				got := []string{err.Error()}
-				if children := yamltest.ProblemsOf(bound); len(children) > 0 {
-					got = got[:0]
-
-					for _, child := range children {
-						got = append(got, child.Bound.Error())
-					}
-				}
-
-				assert.Equal(t, tc.want, got)
+				assert.Equal(t, tc.want, validationTexts(sourceErrorOf(t, err)))
 			})
 		}
 	})
@@ -1893,13 +1851,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				err := dd.DecodeInto(t.Context(), tc.target)
 
-				bound := sourceErrorOf(t, err)
-
-				var got []string
-
-				for _, child := range yamltest.ProblemsOf(bound) {
-					got = append(got, child.Bound.Error())
-				}
+				got := errorTexts(yamltest.ProblemsOf(err))
 
 				assert.Equal(t, []string{
 					"1:15: $.'.nan'.price: negative price",
@@ -1935,13 +1887,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				for range 20 {
 					err := dd.DecodeInto(t.Context(), tc.target())
 
-					bound := sourceErrorOf(t, err)
-
-					var got []string
-
-					for _, child := range yamltest.ProblemsOf(bound) {
-						got = append(got, child.Bound.Error())
-					}
+					got := errorTexts(yamltest.ProblemsOf(err))
 
 					assert.Equal(t, []string{
 						"$.NaN.n: negative -1",
@@ -2106,13 +2052,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err := dd.Decode[map[time.Time]item](t.Context())
 
-		bound := sourceErrorOf(t, err)
-
-		var got []string
-
-		for _, child := range yamltest.ProblemsOf(bound) {
-			got = append(got, child.Bound.Error())
-		}
+		got := errorTexts(yamltest.ProblemsOf(err))
 
 		assert.Equal(t, []string{
 			"$.'2024-01-01 00:00:00 +0530 +0530'.price: negative price",
@@ -2262,18 +2202,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				err := tc.decode(t.Context(), dd)
 
-				bound := sourceErrorOf(t, err)
-
-				got := []string{err.Error()}
-				if children := yamltest.ProblemsOf(bound); len(children) > 0 {
-					got = got[:0]
-
-					for _, child := range children {
-						got = append(got, child.Bound.Error())
-					}
-				}
-
-				assert.Equal(t, tc.want, got)
+				assert.Equal(t, tc.want, validationTexts(sourceErrorOf(t, err)))
 			})
 		}
 	})
@@ -4342,6 +4271,16 @@ func (r *ring) Validate() error {
 type mesh struct {
 	Next []*mesh `yaml:"next"`
 	Port *port   `yaml:"port"`
+}
+
+// validationTexts returns the message of each problem that err heads, or
+// the message of err when it heads none.
+func validationTexts(err error) []string {
+	if texts := errorTexts(yamltest.ProblemsOf(err)); texts != nil {
+		return texts
+	}
+
+	return []string{err.Error()}
 }
 
 // meshChain returns the meshes n0 to nk, where each mesh links to the
