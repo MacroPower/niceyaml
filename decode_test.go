@@ -2020,24 +2020,20 @@ func TestDocument_At_DirectiveBody(t *testing.T) {
 func TestDocument_Node(t *testing.T) {
 	t.Parallel()
 
-	input := stringtest.Input(`
+	dd := yamltest.FirstDocument(t, stringtest.Input(`
 		kind: Deployment
 		meta:
 		  name: app
-	`)
+	`))
 
 	t.Run("root scope is the body", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		assert.Same(t, dd.DocumentAST().Body, dd.AST())
 	})
 
 	t.Run("scope is the node the path selects", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		node := yamltest.At(t, dd, paths.Current().Child("meta")).AST()
 		assert.Equal(t, "  name: app", node.String())
@@ -2050,26 +2046,28 @@ func TestDocument_Node(t *testing.T) {
 	t.Run("nested scopes join", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-
 		node := yamltest.At(t, yamltest.At(t, dd, paths.Current().Child("meta")), paths.Current().Child("name")).AST()
 		assert.Equal(t, "app", node.String())
 	})
 
-	t.Run("file of whitespace decodes to nothing", func(t *testing.T) {
+	t.Run("file of whitespace holds a placeholder that decodes to nothing", func(t *testing.T) {
 		t.Parallel()
 
 		// The lexer emits nothing for the text, so the document holds no
 		// value, and the decode leaves its target as it is rather than
 		// reading the placeholder token as a string.
-		for _, input := range []string{"\n", "  \n", "\t\n", "!"} {
-			dd := yamltest.FirstDocument(t, input)
+		for _, input := range []string{"\n", "  \n", "\t\n", "\n\n", "!"} {
+			blank := yamltest.FirstDocument(t, input)
+
+			scalar, ok := blank.AST().(*ast.StringNode)
+			require.True(t, ok, "%q: %T", input, blank.AST())
+			assert.True(t, tokens.IsPlaceholder(scalar.Token), "%q", input)
 
 			got := map[string]int{"kept": 1}
-			require.NoError(t, dd.DecodeInto(t.Context(), &got), "%q", input)
+			require.NoError(t, blank.DecodeInto(t.Context(), &got), "%q", input)
 			assert.Equal(t, map[string]int{"kept": 1}, got, "%q", input)
 
-			v, err := dd.Decode[any](t.Context())
+			v, err := blank.Decode[any](t.Context())
 			require.NoError(t, err, "%q", input)
 			assert.Nil(t, v, "%q", input)
 		}
@@ -2078,29 +2076,13 @@ func TestDocument_Node(t *testing.T) {
 	t.Run("empty document has no body", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "---\n")
-
-		assert.Nil(t, dd.AST())
+		assert.Nil(t, yamltest.FirstDocument(t, "---\n").AST())
 	})
 
 	t.Run("document of comments has its comment group", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "# only a comment\n")
-
-		assert.IsType(t, &ast.CommentGroupNode{}, dd.AST())
-	})
-
-	t.Run("file of whitespace has the placeholder scalar", func(t *testing.T) {
-		t.Parallel()
-
-		for _, input := range []string{"\n", "  \n", "\n\n", "!"} {
-			dd := yamltest.FirstDocument(t, input)
-
-			scalar, ok := dd.AST().(*ast.StringNode)
-			require.True(t, ok, "%q: %T", input, dd.AST())
-			assert.True(t, tokens.IsPlaceholder(scalar.Token), "%q", input)
-		}
+		assert.IsType(t, &ast.CommentGroupNode{}, yamltest.FirstDocument(t, "# only a comment\n").AST())
 	})
 
 	t.Run("document of whitespace below a header has no body", func(t *testing.T) {
@@ -2116,7 +2098,6 @@ func TestDocument_Node(t *testing.T) {
 	t.Run("a scoped node reaches the whole document", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
 		meta := yamltest.At(t, dd, paths.Current().Child("meta"))
 
 		assert.Same(t, dd, meta.Document())
