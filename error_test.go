@@ -4666,6 +4666,13 @@ func excerptError(t *testing.T) *niceyaml.SourceError {
 	return yamltest.RequireSourceError(t, err)
 }
 
+// caretAt returns the annotation the binding of an error leaves below the
+// line it marks: a caret at col with msg beside it, or the caret alone
+// when msg is empty.
+func caretAt(col int, msg string) line.Annotation {
+	return line.Annotation{Content: msg, Kind: kind.TextError, Placement: line.Below, Col: col}
+}
+
 // lineNumbers returns the source line number of every line in view.
 func lineNumbers(view *line.View) []int {
 	numbers := make([]int, 0, view.Count())
@@ -4725,8 +4732,8 @@ func TestSourceError_Excerpt(t *testing.T) {
 		require.True(t, ok)
 
 		assert.Equal(t, line.Annotations{
-			{Content: "about value", Kind: kind.TextError, Placement: line.Below, Col: 5},
-			{Content: "about key", Kind: kind.TextError, Placement: line.Below, Col: 0},
+			caretAt(5, "about value"),
+			caretAt(0, "about key"),
 		}, excerpt.Annotations(0))
 		assert.Equal(t, line.Overlays{
 			{Kind: kind.GenericError, Cols: position.NewSpan(5, 10)},
@@ -4827,7 +4834,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 				err: niceyaml.NewError("top", niceyaml.WithDetails(
 					niceyaml.NewError("far", niceyaml.AtPosition(far)),
 				)),
-				want:    line.Annotations{{Content: "far", Kind: kind.TextError, Placement: line.Below, Col: 4}},
+				want:    line.Annotations{caretAt(4, "far")},
 				row:     "     |     ^ far",
 				printed: "<textError>    ^ far</textError>",
 			},
@@ -4835,13 +4842,13 @@ func TestSourceError_Excerpt(t *testing.T) {
 				err: niceyaml.NewError("top", niceyaml.WithDetails(
 					niceyaml.NewError("far", niceyaml.AtRange(position.NewRange(far, position.New(0, far.Col+2)))),
 				)),
-				want:    line.Annotations{{Content: "far", Kind: kind.TextError, Placement: line.Below, Col: 4}},
+				want:    line.Annotations{caretAt(4, "far")},
 				row:     "     |     ^ far",
 				printed: "<textError>    ^ far</textError>",
 			},
 			"root position": {
 				err:     niceyaml.NewError("far", niceyaml.AtPosition(far)),
-				want:    line.Annotations{{Kind: kind.TextError, Placement: line.Below, Col: 4}},
+				want:    line.Annotations{caretAt(4, "")},
 				row:     "     |     ^",
 				printed: "<textError>    ^</textError>",
 			},
@@ -4874,12 +4881,13 @@ func TestSourceError_Excerpt(t *testing.T) {
 		excerpt, ok := excerptError(t).Excerpt(niceyaml.WithContextLines(1))
 		require.True(t, ok)
 
-		assert.Equal(t, line.Annotations{
-			{Content: "bad h", Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, excerpt.Annotations(7).Filter(line.Below))
-		assert.Equal(t, line.Annotations{
-			{Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, excerpt.Annotations(1), "the main error has no message of its own, so its line carries a marker alone")
+		assert.Equal(t, line.Annotations{caretAt(3, "bad h")}, excerpt.Annotations(7).Filter(line.Below))
+		assert.Equal(
+			t,
+			line.Annotations{caretAt(3, "")},
+			excerpt.Annotations(1),
+			"the main error has no message of its own, so its line carries a marker alone",
+		)
 	})
 
 	t.Run("separates hunks after the first with an ellipsis", func(t *testing.T) {
@@ -4976,12 +4984,8 @@ func TestSourceError_Annotate(t *testing.T) {
 		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
 		assert.Equal(t, want, view.Overlays(1))
 		assert.Equal(t, want, view.Overlays(7))
-		assert.Equal(t, line.Annotations{
-			{Content: "bad b", Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, view.Annotations(1))
-		assert.Equal(t, line.Annotations{
-			{Content: "bad h", Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, view.Annotations(7))
+		assert.Equal(t, line.Annotations{caretAt(3, "bad b")}, view.Annotations(1))
+		assert.Equal(t, line.Annotations{caretAt(3, "bad h")}, view.Annotations(7))
 
 		unmarked(t, view, 1, 7)
 
@@ -4992,9 +4996,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, view.Overlays(1), excerpt.Overlays(1))
 		assert.Equal(t, view.Overlays(7), excerpt.Overlays(7))
-		assert.Equal(t, line.Annotations{
-			{Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, excerpt.Annotations(1).Filter(line.Below))
+		assert.Equal(t, line.Annotations{caretAt(3, "")}, excerpt.Annotations(1).Filter(line.Below))
 		assert.Equal(t, view.Annotations(7), excerpt.Annotations(7).Filter(line.Below))
 	})
 
@@ -5015,9 +5017,7 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		// The annotation keeps the other control characters, which a
 		// renderer draws as their pictures.
-		assert.Equal(t, line.Annotations{
-			{Content: "did you mean:\n    b\x1b", Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, view.Annotations(0))
+		assert.Equal(t, line.Annotations{caretAt(3, "did you mean:\n    b\x1b")}, view.Annotations(0))
 		assert.Contains(t, view.String(), "^ did you mean:\u240a    b\u241b")
 	})
 
@@ -5088,9 +5088,7 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 		require.True(t, ok)
-		assert.Equal(t, line.Annotations{
-			{Content: "bad a", Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, excerpt.Annotations(0).Filter(line.Below))
+		assert.Equal(t, line.Annotations{caretAt(3, "bad a")}, excerpt.Annotations(0).Filter(line.Below))
 	})
 
 	t.Run("two errors annotate one view", func(t *testing.T) {
@@ -5113,12 +5111,8 @@ func TestSourceError_Annotate(t *testing.T) {
 		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
 		assert.Equal(t, want, view.Overlays(1))
 		assert.Equal(t, want, view.Overlays(3))
-		assert.Equal(t, line.Annotations{
-			{Content: "bad b", Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, view.Annotations(1))
-		assert.Equal(t, line.Annotations{
-			{Content: "too big", Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, view.Annotations(3))
+		assert.Equal(t, line.Annotations{caretAt(3, "bad b")}, view.Annotations(1))
+		assert.Equal(t, line.Annotations{caretAt(3, "too big")}, view.Annotations(3))
 	})
 
 	t.Run("two errors on one line each add an annotation", func(t *testing.T) {
@@ -5135,8 +5129,8 @@ func TestSourceError_Annotate(t *testing.T) {
 		}
 
 		assert.Equal(t, line.Annotations{
-			{Content: "bad b", Kind: kind.TextError, Placement: line.Below, Col: 3},
-			{Content: "too big", Kind: kind.TextError, Placement: line.Below, Col: 3},
+			caretAt(3, "bad b"),
+			caretAt(3, "too big"),
 		}, view.Annotations(1))
 		assert.Equal(t, stringtest.JoinLF(
 			"   2 | b: 2",
@@ -5160,9 +5154,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		}
 
 		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(1))
-		assert.Equal(t, line.Annotations{
-			{Content: "bad b", Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, view.Annotations(1))
+		assert.Equal(t, line.Annotations{caretAt(3, "bad b")}, view.Annotations(1))
 	})
 
 	t.Run("marking a view twice leaves it as marking it once does", func(t *testing.T) {
@@ -5256,9 +5248,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		)))
 		require.True(t, bound.Annotate(view))
 
-		assert.Equal(t, line.Annotations{
-			{Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, view.Annotations(1))
+		assert.Equal(t, line.Annotations{caretAt(3, "")}, view.Annotations(1))
 	})
 
 	t.Run("a position past the end of its line marks the column after the last rune", func(t *testing.T) {
@@ -5273,9 +5263,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		require.True(t, bound.Annotate(view))
 
 		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(4, 4)}}, view.Overlays(0))
-		assert.Equal(t, line.Annotations{
-			{Content: "far", Kind: kind.TextError, Placement: line.Below, Col: 4},
-		}, view.Annotations(0))
+		assert.Equal(t, line.Annotations{caretAt(4, "far")}, view.Annotations(0))
 		assert.Equal(t, stringtest.JoinLF(
 			"   1 | a: 1",
 			"     |     ^ far",
@@ -5294,9 +5282,7 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		assert.Equal(t, []int{7, 8, 9, 10}, lineNumbers(view))
 		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}, view.Overlays(7))
-		assert.Equal(t, line.Annotations{
-			{Content: "bad h", Kind: kind.TextError, Placement: line.Below, Col: 3},
-		}, view.Annotations(7))
+		assert.Equal(t, line.Annotations{caretAt(3, "bad h")}, view.Annotations(7))
 
 		unmarked(t, view, 7)
 
