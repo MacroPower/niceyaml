@@ -8979,6 +8979,148 @@ func TestSourceError_MessageAtHighlightStart(t *testing.T) {
 func TestFormat(t *testing.T) {
 	t.Parallel()
 
+	first := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml"))
+	second := niceyaml.NewSourceFromString("b: 2\n", niceyaml.WithName("b.yaml"))
+	docs := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n", niceyaml.WithName("f.yaml")).Documents()
+
+	tcs := map[string]struct {
+		err  error
+		want string
+	}{
+		"nil renders as nothing": {},
+		"an error bound to no source renders as its message": {
+			err:  errors.New("plain"),
+			want: "plain",
+		},
+		"a located error bound to no source renders behind its path": {
+			err:  niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a"))),
+			want: "@.a: bad",
+		},
+		"lists the nodes below a wrapped binding": {
+			err: fmt.Errorf("checking: %w", excerptError(t)),
+			want: stringtest.JoinLF(
+				"checking: 2:4: $.b: bad b",
+				"`-- 8:4: $.h: bad h",
+				"",
+				"   1 | a: 1",
+				"   2 | b: 2",
+				"     |    ^",
+				"   3 | c: 3",
+				"   4 | d: 4",
+				"     | ...",
+				"   6 | f: 6",
+				"   7 | g: 7",
+				"   8 | h: 8",
+				"     |    ^ bad h",
+				"   9 | i: 9",
+				"  10 | j: 10",
+			),
+		},
+		"renders one excerpt per source of a join under its name": {
+			err: errors.Join(
+				yamltest.Bind(t, first, niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a")))),
+				yamltest.Bind(t, second, niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b")))),
+			),
+			want: stringtest.JoinLF(
+				"|-- a.yaml:1:4: $.a: bad a",
+				"`-- b.yaml:1:4: $.b: bad b",
+				"",
+				"a.yaml",
+				"   1 | a: 1",
+				"     |    ^ bad a",
+				"",
+				"b.yaml",
+				"   1 | b: 2",
+				"     |    ^ bad b",
+			),
+		},
+		"names why a binding of a join marks nothing after the excerpts": {
+			err: errors.Join(
+				docs[0].Bind(niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").Index(0)))),
+				docs[1].Bind(niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b")))),
+				docs[1].Bind(errors.New("plain")),
+			),
+			want: stringtest.JoinLF(
+				"|-- f.yaml: document 1: $.x[0]: gone",
+				"|-- f.yaml:3:4: $.b: bad b",
+				"`-- f.yaml: document 2: plain",
+				"",
+				"   1 | a: 1",
+				"   2 | ---",
+				"   3 | b: 2",
+				"     |    ^ bad b",
+				"",
+				"no excerpt: resolve $.x[0]: not found",
+			),
+		},
+		// Each tab becomes four spaces, wherever it falls in its row.
+		"a tab in a message with no nested errors": {
+			err:  errors.New("Did you mean this?\n\tvalidate"),
+			want: "Did you mean this?\n    validate",
+		},
+		"a tab in the branches of a join": {
+			err: errors.Join(errors.New("a\tb"), errors.New("Did you mean this?\n\tvalidate")),
+			want: stringtest.JoinLF(
+				"|-- a    b",
+				"`-- Did you mean this?",
+				"        validate",
+			),
+		},
+		// A path writes a tab in a key as an escape, so the tree and
+		// the reason a location did not resolve spell the key alike
+		// and neither lays out a tab.
+		"a tab in the key of a path that does not resolve": {
+			err: yamltest.Bind(t,
+				niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml")),
+				niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("ab\tc").Index(0))),
+			),
+			want: stringtest.JoinLF(
+				`cfg.yaml: $.'ab\tc'[0]: bad`,
+				"",
+				`no excerpt: resolve $.'ab\tc'[0]: not found`,
+			),
+		},
+		// A line feed in the key is an escape too, so the key starts
+		// no row of its own in the tree or in the reason.
+		"a line feed and a tab in a key": {
+			err: yamltest.Bind(t,
+				niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml")),
+				niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("x\ny\tz").Index(0))),
+			),
+			want: stringtest.JoinLF(
+				`cfg.yaml: $.'x\ny\tz'[0]: bad`,
+				"",
+				`no excerpt: resolve $.'x\ny\tz'[0]: not found`,
+			),
+		},
+		// The excerpt spells the message beside the caret as the tree
+		// spells it.
+		"a tab in a message beside a caret": {
+			err: yamltest.Bind(t,
+				niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("cfg.yaml")),
+				niceyaml.NewError("invalid", niceyaml.WithDetails(
+					niceyaml.NewError("bad\ta", niceyaml.AtPath(paths.Current().Child("a"))),
+				)),
+			),
+			want: stringtest.JoinLF(
+				"cfg.yaml: invalid",
+				"`-- 1:4: $.a: bad    a",
+				"",
+				"   1 | a: 1",
+				"     |    ^ bad    a",
+				"   2 | b: 2",
+			),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, niceyaml.FormatError(tc.err))
+		})
+	}
+
 	t.Run("a bare binding renders as the %+v verb does", func(t *testing.T) {
 		t.Parallel()
 
@@ -9003,55 +9145,6 @@ func TestFormat(t *testing.T) {
 			"   1 | a: 1",
 			"   2 | b: 2",
 			"     |    ^",
-		), niceyaml.FormatError(err))
-	})
-
-	t.Run("lists the nodes below a wrapped binding", func(t *testing.T) {
-		t.Parallel()
-
-		err := fmt.Errorf("checking: %w", excerptError(t))
-
-		assert.Equal(t, stringtest.JoinLF(
-			"checking: 2:4: $.b: bad b",
-			"`-- 8:4: $.h: bad h",
-			"",
-			"   1 | a: 1",
-			"   2 | b: 2",
-			"     |    ^",
-			"   3 | c: 3",
-			"   4 | d: 4",
-			"     | ...",
-			"   6 | f: 6",
-			"   7 | g: 7",
-			"   8 | h: 8",
-			"     |    ^ bad h",
-			"   9 | i: 9",
-			"  10 | j: 10",
-		), niceyaml.FormatError(err))
-	})
-
-	t.Run("renders one excerpt per source of a join under its name", func(t *testing.T) {
-		t.Parallel()
-
-		first := niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml"))
-		second := niceyaml.NewSourceFromString("b: 2\n", niceyaml.WithName("b.yaml"))
-
-		err := errors.Join(
-			yamltest.Bind(t, first, niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a")))),
-			yamltest.Bind(t, second, niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b")))),
-		)
-
-		assert.Equal(t, stringtest.JoinLF(
-			"|-- a.yaml:1:4: $.a: bad a",
-			"`-- b.yaml:1:4: $.b: bad b",
-			"",
-			"a.yaml",
-			"   1 | a: 1",
-			"     |    ^ bad a",
-			"",
-			"b.yaml",
-			"   1 | b: 2",
-			"     |    ^ bad b",
 		), niceyaml.FormatError(err))
 	})
 
@@ -9117,125 +9210,6 @@ func TestFormat(t *testing.T) {
 			"   3 | a: y",
 			"     |    ^",
 		), niceyaml.FormatError(bound, niceyaml.WithContextLines(0)))
-	})
-
-	t.Run("names why a binding of a join marks nothing after the excerpts", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n", niceyaml.WithName("f.yaml"))
-
-		docs := source.Documents()
-
-		joined := errors.Join(
-			docs[0].Bind(niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").Index(0)))),
-			docs[1].Bind(niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b")))),
-			docs[1].Bind(errors.New("plain")),
-		)
-
-		assert.Equal(t, stringtest.JoinLF(
-			"|-- f.yaml: document 1: $.x[0]: gone",
-			"|-- f.yaml:3:4: $.b: bad b",
-			"`-- f.yaml: document 2: plain",
-			"",
-			"   1 | a: 1",
-			"   2 | ---",
-			"   3 | b: 2",
-			"     |    ^ bad b",
-			"",
-			"no excerpt: resolve $.x[0]: not found",
-		), niceyaml.FormatError(joined))
-	})
-
-	t.Run("an error bound to no source renders as its message", func(t *testing.T) {
-		t.Parallel()
-
-		assert.Equal(t, "plain", niceyaml.FormatError(errors.New("plain")))
-
-		located := niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a")))
-
-		assert.Equal(t, "@.a: bad", niceyaml.FormatError(located))
-	})
-
-	t.Run("a tab in a message expands to spaces", func(t *testing.T) {
-		t.Parallel()
-
-		// Each tab becomes four spaces, wherever it falls in its row.
-		tcs := map[string]struct {
-			err  error
-			want string
-		}{
-			"message with no nested errors": {
-				err:  errors.New("Did you mean this?\n\tvalidate"),
-				want: "Did you mean this?\n    validate",
-			},
-			"branches of a join": {
-				err: errors.Join(errors.New("a\tb"), errors.New("Did you mean this?\n\tvalidate")),
-				want: stringtest.JoinLF(
-					"|-- a    b",
-					"`-- Did you mean this?",
-					"        validate",
-				),
-			},
-			// A path writes a tab in a key as an escape, so the tree and
-			// the reason a location did not resolve spell the key alike
-			// and neither lays out a tab.
-			"key of a path that does not resolve": {
-				err: yamltest.Bind(t,
-					niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml")),
-					niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("ab\tc").Index(0))),
-				),
-				want: stringtest.JoinLF(
-					`cfg.yaml: $.'ab\tc'[0]: bad`,
-					"",
-					`no excerpt: resolve $.'ab\tc'[0]: not found`,
-				),
-			},
-			// A line feed in the key is an escape too, so the key starts
-			// no row of its own in the tree or in the reason.
-			"key with a line feed and a tab": {
-				err: yamltest.Bind(t,
-					niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("cfg.yaml")),
-					niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("x\ny\tz").Index(0))),
-				),
-				want: stringtest.JoinLF(
-					`cfg.yaml: $.'x\ny\tz'[0]: bad`,
-					"",
-					`no excerpt: resolve $.'x\ny\tz'[0]: not found`,
-				),
-			},
-			// The excerpt spells the message beside the caret as the tree
-			// spells it.
-			"message beside a caret": {
-				err: yamltest.Bind(t,
-					niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("cfg.yaml")),
-					niceyaml.NewError("invalid", niceyaml.WithDetails(
-						niceyaml.NewError("bad\ta", niceyaml.AtPath(paths.Current().Child("a"))),
-					)),
-				),
-				want: stringtest.JoinLF(
-					"cfg.yaml: invalid",
-					"`-- 1:4: $.a: bad    a",
-					"",
-					"   1 | a: 1",
-					"     |    ^ bad    a",
-					"   2 | b: 2",
-				),
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				assert.Equal(t, tc.want, niceyaml.FormatError(tc.err))
-			})
-		}
-	})
-
-	t.Run("nil renders as nothing", func(t *testing.T) {
-		t.Parallel()
-
-		assert.Empty(t, niceyaml.FormatError(nil))
 	})
 }
 
