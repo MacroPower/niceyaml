@@ -14,7 +14,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
-	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -32,7 +31,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 	"go.jacobcolvin.com/niceyaml/style/theme"
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
@@ -657,7 +655,7 @@ func TestViewport_Golden(t *testing.T) {
 	t.Parallel()
 
 	type goldenTest struct {
-		setupFunc func(m *yamlviewport.Model, tokens token.Tokens)
+		setupFunc func(m *yamlviewport.Model)
 		// The printer of the model, [testPrinter] when nil.
 		printer *printer.Printer
 		style   lipgloss.Style
@@ -700,7 +698,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:   wrapYAML,
 			width:  30,
 			height: 5,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.GotoBottom()
 			},
 		},
@@ -710,7 +708,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:   wrapYAML,
 			width:  30,
 			height: 5,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.SetYOffset(6)
 			},
 		},
@@ -741,13 +739,13 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:    simpleYAML,
 			width:   80,
 			height:  24,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("item")
 			},
 		},
 		"DiffMode": {
 			yaml: diffAfterYAML,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.ClearRevisions()
 				addRevisions(m, diffBeforeYAML, diffAfterYAML)
 				m.GotoRevision(1) // Show diff between revision 0 and 1.
@@ -759,7 +757,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:   string(fullYAML),
 			width:  80,
 			height: 10,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.SetYOffset(15) // Scroll down to middle of content.
 			},
 		},
@@ -767,7 +765,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:   wideYAML,
 			width:  40,
 			height: 10,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.ToggleWordWrap() // Disable wrap (default is true).
 				m.SetXOffset(20)   // Scroll right.
 			},
@@ -776,7 +774,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:   wideYAML,
 			width:  40,
 			height: 10,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.ToggleWordWrap() // Disable wrap (default is true).
 
 				// XOffset stays at 0 to verify the viewport truncates the
@@ -806,7 +804,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:    simpleYAML,
 			width:   80,
 			height:  24,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("i")
 				m.SearchNext() // Move to the second match, in item1.
 			},
@@ -816,7 +814,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:    simpleYAML,
 			width:   80,
 			height:  24,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("nonexistent")
 			},
 		},
@@ -825,7 +823,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:    simpleYAML,
 			width:   80,
 			height:  24,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("i")
 				m.SearchPrevious() // Wrap from the first match to the last, in child.
 			},
@@ -835,7 +833,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:    simpleYAML,
 			width:   80,
 			height:  24,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("i")
 				m.SearchNext() // Second match, in item1.
 				m.SearchNext() // Third match, in item2.
@@ -848,7 +846,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:    simpleYAML,
 			width:   80,
 			height:  24,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("i")
 				m.SearchPrevious() // Wrap to the last match, in child.
 				m.SearchPrevious() // Move back to the third match, in item2.
@@ -865,7 +863,7 @@ func TestViewport_Golden(t *testing.T) {
 			`),
 			width:  120,
 			height: 24,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("item") // Matches twice on the same line.
 			},
 		},
@@ -874,7 +872,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:    simpleYAML,
 			width:   80,
 			height:  24,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("item")
 				m.ClearSearch() // Clearing the search removes the highlights.
 			},
@@ -886,7 +884,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:    string(fullYAML),
 			width:   80,
 			height:  10,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("timeout") // First match is on line 36.
 			},
 		},
@@ -897,7 +895,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:    string(fullYAML),
 			width:   80,
 			height:  10,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("timeout")
 				m.SearchNext() // Navigate to second match on line 41.
 			},
@@ -909,7 +907,7 @@ func TestViewport_Golden(t *testing.T) {
 			yaml:    string(fullYAML),
 			width:   80,
 			height:  10,
-			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
+			setupFunc: func(m *yamlviewport.Model) {
 				m.SetSearchTerm("timeout")
 				m.SearchNext()     // Move to second match.
 				m.SearchPrevious() // Move back to first match.
@@ -921,13 +919,11 @@ func TestViewport_Golden(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := tokens.Tokenize(tc.yaml)
-
 			m := testModel(tc.printer, tc.width, tc.height, yamlviewport.WithContainerStyle(tc.style))
-			m.SetRevision(niceyaml.NewSourceFromTokens(tks))
+			m.SetRevision(niceyaml.NewSourceFromString(tc.yaml))
 
 			if tc.setupFunc != nil {
-				tc.setupFunc(&m, tks)
+				tc.setupFunc(&m)
 			}
 
 			golden.RequireEqual(t, m.View())
@@ -1232,7 +1228,7 @@ func TestViewport_Scrolling(t *testing.T) {
 
 			// A case without YAML scrolls a model that holds no revision.
 			if tc.yaml != "" {
-				m.SetRevision(niceyaml.NewSourceFromTokens(tokens.Tokenize(tc.yaml)))
+				m.SetRevision(niceyaml.NewSourceFromString(tc.yaml))
 			}
 
 			if tc.setup != nil {
@@ -3293,7 +3289,7 @@ func TestViewport_State(t *testing.T) {
 			m := testModel(testPrinter(), tc.width, tc.height)
 
 			if tc.yaml != "" {
-				m.SetRevision(niceyaml.NewSourceFromTokens(tokens.Tokenize(tc.yaml)))
+				m.SetRevision(niceyaml.NewSourceFromString(tc.yaml))
 			}
 
 			if tc.setup != nil {
@@ -3579,10 +3575,8 @@ func TestViewport_Update(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := tokens.Tokenize(tc.yaml)
-
 			m := testModel(testPrinter(), tc.width, tc.height)
-			m.SetRevision(niceyaml.NewSourceFromTokens(tks))
+			m.SetRevision(niceyaml.NewSourceFromString(tc.yaml))
 
 			if tc.setup != nil {
 				tc.setup(&m)
