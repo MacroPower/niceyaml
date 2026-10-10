@@ -1944,91 +1944,35 @@ func TestPath_Token(t *testing.T) {
 
 	// Each path points at a string token.
 	tcs := map[string]struct {
-		path paths.Path
+		path string
 		want string
-		key  bool
 	}{
-		"root value returns the first key": {
-			path: paths.Doc(),
-			want: "name",
-		},
-		"root key returns the first key": {
-			path: paths.Doc(),
-			key:  true,
-			want: "name",
-		},
-		"mapping value target returns the entry key": {
-			path: paths.Doc().Child("metadata"),
-			want: "metadata",
-		},
-		"mapping with a tagged first key returns the entry key": {
-			path: paths.Doc().Child("tag_first"),
-			want: "tag_first",
-		},
-		"mapping with an anchored first key returns the entry key": {
-			path: paths.Doc().Child("anchor_first"),
-			want: "anchor_first",
-		},
+		"root value returns the first key":                         {path: "$", want: "name"},
+		"root key returns the first key":                           {path: "$~", want: "name"},
+		"mapping value target returns the entry key":               {path: "$.metadata", want: "metadata"},
+		"mapping with a tagged first key returns the entry key":    {path: "$.tag_first", want: "tag_first"},
+		"mapping with an anchored first key returns the entry key": {path: "$.anchor_first", want: "anchor_first"},
 		"mapping with an explicit first key returns the entry key": {
-			path: paths.Doc().Child("explicit_first"),
+			path: "$.explicit_first",
 			want: "explicit_first",
 		},
-		"mapping key target returns the entry key": {
-			path: paths.Doc().Child("metadata"),
-			key:  true,
-			want: "metadata",
-		},
-		"sequence value target returns the entry key": {
-			path: paths.Doc().Child("items"),
-			want: "items",
-		},
-		"sequence key target returns the entry key": {
-			path: paths.Doc().Child("items"),
-			key:  true,
-			want: "items",
-		},
-		"simple key target returns key token": {
-			path: paths.Doc().Child("name"),
-			key:  true,
-			want: "name",
-		},
-		"simple value target returns value token": {
-			path: paths.Doc().Child("name"),
-			want: "test",
-		},
-		"nested key target": {
-			path: paths.Doc().Child("metadata", "labels", "app"),
-			key:  true,
-			want: "app",
-		},
-		"nested value target": {
-			path: paths.Doc().Child("metadata", "labels", "app"),
-			want: "myapp",
-		},
-		"array element value target": {
-			path: paths.Doc().Child("items").Index(0),
-			want: "first",
-		},
-		"array element key target returns value (no parent mapping)": {
-			path: paths.Doc().Child("items").Index(1),
-			key:  true,
-			want: "second",
-		},
-		"nested array first element name": {
-			path: paths.Doc().Child("list").Index(0).Child("name"),
-			want: "first",
-		},
-		"nested array second element items first": {
-			path: paths.Doc().Child("list").Index(1).Child("items").Index(0),
-			want: "c",
-		},
+		"mapping key target returns the entry key":                   {path: "$.metadata~", want: "metadata"},
+		"sequence value target returns the entry key":                {path: "$.items", want: "items"},
+		"sequence key target returns the entry key":                  {path: "$.items~", want: "items"},
+		"simple key target returns key token":                        {path: "$.name~", want: "name"},
+		"simple value target returns value token":                    {path: "$.name", want: "test"},
+		"nested key target":                                          {path: "$.metadata.labels.app~", want: "app"},
+		"nested value target":                                        {path: "$.metadata.labels.app", want: "myapp"},
+		"array element value target":                                 {path: "$.items[0]", want: "first"},
+		"array element key target returns value (no parent mapping)": {path: "$.items[1]~", want: "second"},
+		"nested array first element name":                            {path: "$.list[0].name", want: "first"},
+		"nested array second element items first":                    {path: "$.list[1].items[0]", want: "c"},
 		"deeply nested value": {
-			path: paths.Doc().Child("nested", "deep", "deeper", "value"),
+			path: "$.nested.deep.deeper.value",
 			want: "found",
 		},
 		"deeply nested key": {
-			path: paths.Doc().Child("nested", "deep", "deeper", "value"),
-			key:  true,
+			path: "$.nested.deep.deeper.value~",
 			want: "value",
 		},
 	}
@@ -2037,7 +1981,7 @@ func TestPath_Token(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk := resolveToken(t, tc.path, tc.key, doc)
+			tk := resolveToken(t, doc, tc.path)
 			assert.Equal(t, tc.want, tk.Value)
 			assert.Equal(t, token.StringType, tk.Type)
 		})
@@ -2388,145 +2332,43 @@ func TestPath_Token_Anchors(t *testing.T) {
 	`)).DocumentAST()
 
 	tcs := map[string]struct {
-		path      paths.Path
-		wantValue string
-		key       bool
-		wantLine  int
+		path string
+		want string
+		line int
 	}{
-		"child of anchored mapping": {
-			path:      paths.Doc().Child("base", "a"),
-			wantValue: "1",
-			wantLine:  2,
-		},
-		"key of anchored mapping entry": {
-			path:      paths.Doc().Child("base", "a"),
-			key:       true,
-			wantValue: "a",
-			wantLine:  2,
-		},
-		"anchored mapping value target is the entry key": {
-			path:      paths.Doc().Child("base"),
-			wantValue: "base",
-			wantLine:  1,
-		},
-		"anchored flow mapping value target is the entry key": {
-			path:      paths.Doc().Child("flow"),
-			wantValue: "flow",
-			wantLine:  4,
-		},
-		"anchored sequence value target is the entry key": {
-			path:      paths.Doc().Child("list"),
-			wantValue: "list",
-			wantLine:  6,
-		},
-		"child through alias lands in the anchor": {
-			path:      paths.Doc().Child("other", "b"),
-			wantValue: "2",
-			wantLine:  3,
-		},
-		"alias value target is the alias token": {
-			path:      paths.Doc().Child("other"),
-			wantValue: "*",
-			wantLine:  5,
-		},
-		"alias key target is its key": {
-			path:      paths.Doc().Child("other"),
-			key:       true,
-			wantValue: "other",
-			wantLine:  5,
-		},
-		"index through anchored sequence": {
-			path:      paths.Doc().Child("list").Index(1),
-			wantValue: "two",
-			wantLine:  8,
-		},
-		"index through aliased sequence": {
-			path:      paths.Doc().Child("copy").Index(0),
-			wantValue: "one",
-			wantLine:  7,
-		},
-		"tagged scalar value target skips the tag": {
-			path:      paths.Doc().Child("tagged"),
-			wantValue: "5",
-			wantLine:  10,
-		},
-		"merged key resolves to the anchor": {
-			path:      paths.Doc().Child("merged", "a"),
-			wantValue: "1",
-			wantLine:  2,
-		},
-		"merged key target resolves to the anchor key": {
-			path:      paths.Doc().Child("merged", "a"),
-			key:       true,
-			wantValue: "a",
-			wantLine:  2,
-		},
-		"own key after merge wins": {
-			path:      paths.Doc().Child("merged", "b"),
-			wantValue: "20",
-			wantLine:  13,
-		},
-		"merge after own key wins": {
-			path:      paths.Doc().Child("late", "b"),
-			wantValue: "2",
-			wantLine:  3,
-		},
-		"merge after own key wins at the key": {
-			path:      paths.Doc().Child("late", "b"),
-			key:       true,
-			wantValue: "b",
-			wantLine:  3,
-		},
-		"own key before merge without that key": {
-			path:      paths.Doc().Child("late", "c"),
-			wantValue: "31",
-			wantLine:  24,
-		},
-		"own key next to merge": {
-			path:      paths.Doc().Child("merged", "c"),
-			wantValue: "3",
-			wantLine:  14,
-		},
-		"merge sequence first source": {
-			path:      paths.Doc().Child("multi", "a"),
-			wantValue: "1",
-			wantLine:  2,
-		},
-		"merge sequence second source": {
-			path:      paths.Doc().Child("multi", "x"),
-			wantValue: "10",
-			wantLine:  4,
-		},
-		"merge sequence later source wins": {
-			path:      paths.Doc().Child("multi", "b"),
-			wantValue: "200",
-			wantLine:  4,
-		},
-		"merge of a merged mapping": {
-			path:      paths.Doc().Child("chain", "a"),
-			wantValue: "1",
-			wantLine:  2,
-		},
-		"merge of a merged mapping own key": {
-			path:      paths.Doc().Child("chain", "d"),
-			wantValue: "4",
-			wantLine:  19,
-		},
-		"merge key entry itself is addressable": {
-			path:      paths.Doc().Child("merged", "<<"),
-			key:       true,
-			wantValue: "<<",
-			wantLine:  12,
-		},
+		"child of anchored mapping":                           {path: "$.base.a", want: "1", line: 2},
+		"key of anchored mapping entry":                       {path: "$.base.a~", want: "a", line: 2},
+		"anchored mapping value target is the entry key":      {path: "$.base", want: "base", line: 1},
+		"anchored flow mapping value target is the entry key": {path: "$.flow", want: "flow", line: 4},
+		"anchored sequence value target is the entry key":     {path: "$.list", want: "list", line: 6},
+		"child through alias lands in the anchor":             {path: "$.other.b", want: "2", line: 3},
+		"alias value target is the alias token":               {path: "$.other", want: "*", line: 5},
+		"alias key target is its key":                         {path: "$.other~", want: "other", line: 5},
+		"index through anchored sequence":                     {path: "$.list[1]", want: "two", line: 8},
+		"index through aliased sequence":                      {path: "$.copy[0]", want: "one", line: 7},
+		"tagged scalar value target skips the tag":            {path: "$.tagged", want: "5", line: 10},
+		"merged key resolves to the anchor":                   {path: "$.merged.a", want: "1", line: 2},
+		"merged key target resolves to the anchor key":        {path: "$.merged.a~", want: "a", line: 2},
+		"own key after merge wins":                            {path: "$.merged.b", want: "20", line: 13},
+		"merge after own key wins":                            {path: "$.late.b", want: "2", line: 3},
+		"merge after own key wins at the key":                 {path: "$.late.b~", want: "b", line: 3},
+		"own key before merge without that key":               {path: "$.late.c", want: "31", line: 24},
+		"own key next to merge":                               {path: "$.merged.c", want: "3", line: 14},
+		"merge sequence first source":                         {path: "$.multi.a", want: "1", line: 2},
+		"merge sequence second source":                        {path: "$.multi.x", want: "10", line: 4},
+		"merge sequence later source wins":                    {path: "$.multi.b", want: "200", line: 4},
+		"merge of a merged mapping":                           {path: "$.chain.a", want: "1", line: 2},
+		"merge of a merged mapping own key":                   {path: "$.chain.d", want: "4", line: 19},
+		"merge key entry itself is addressable":               {path: "$.merged.<<~", want: "<<", line: 12},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk := resolveToken(t, tc.path, tc.key, doc)
-			assert.Equal(t, tc.wantValue, tk.Value)
-			assert.Equal(t, tc.wantLine, tk.Position.Line)
+			tk := resolveToken(t, doc, tc.path)
+			assert.Equal(t, tc.want, tk.Value)
+			assert.Equal(t, tc.line, tk.Position.Line)
 		})
 	}
 
@@ -4100,82 +3942,31 @@ func TestPath_Token_Keys(t *testing.T) {
 	`)).DocumentAST()
 
 	tcs := map[string]struct {
-		path      paths.Path
-		wantValue string
-		key       bool
+		path string
+		want string
 	}{
-		"double quoted key": {
-			path:      paths.Doc().Child("quoted key"),
-			wantValue: "1",
-		},
-		"single quoted key": {
-			path:      paths.Doc().Child("single"),
-			wantValue: "2",
-		},
-		"dotted key": {
-			path:      paths.Doc().Child("plain.dotted"),
-			wantValue: "3",
-		},
-		"integer key": {
-			path:      paths.Doc().Child("7"),
-			wantValue: "4",
-		},
-		"explicit key": {
-			path:      paths.Doc().Child("complex"),
-			wantValue: "5",
-		},
-		"explicit key target is the key itself, not the indicator": {
-			path:      paths.Doc().Child("complex"),
-			key:       true,
-			wantValue: "complex",
-		},
-		"tagged key matches by content": {
-			path:      paths.Doc().Child("tagged"),
-			wantValue: "6",
-		},
-		"tagged key target skips the tag": {
-			path:      paths.Doc().Child("tagged"),
-			key:       true,
-			wantValue: "tagged",
-		},
-		"anchored key matches by content": {
-			path:      paths.Doc().Child("anchored"),
-			wantValue: "7",
-		},
-		"anchored key target skips the anchor": {
-			path:      paths.Doc().Child("anchored"),
-			key:       true,
-			wantValue: "anchored",
-		},
-		"alias key matches by its anchor's content": {
-			path:      paths.Doc().Child("aliased_name"),
-			wantValue: "8",
-		},
-		"alias key target is the alias": {
-			path:      paths.Doc().Child("aliased_name"),
-			key:       true,
-			wantValue: "*",
-		},
-		"block scalar key matches by its content": {
-			path:      paths.Doc().Child("block\n"),
-			wantValue: "9",
-		},
-		"empty flow mapping value target is the entry key": {
-			path:      paths.Doc().Child("empty"),
-			wantValue: "empty",
-		},
-		"empty flow sequence value target is the entry key": {
-			path:      paths.Doc().Child("none"),
-			wantValue: "none",
-		},
+		"double quoted key": {path: "$.'quoted key'", want: "1"},
+		"single quoted key": {path: "$.single", want: "2"},
+		"dotted key":        {path: "$.'plain.dotted'", want: "3"},
+		"integer key":       {path: "$.7", want: "4"},
+		"explicit key":      {path: "$.complex", want: "5"},
+		"explicit key target is the key itself, not the indicator": {path: "$.complex~", want: "complex"},
+		"tagged key matches by content":                            {path: "$.tagged", want: "6"},
+		"tagged key target skips the tag":                          {path: "$.tagged~", want: "tagged"},
+		"anchored key matches by content":                          {path: "$.anchored", want: "7"},
+		"anchored key target skips the anchor":                     {path: "$.anchored~", want: "anchored"},
+		"alias key matches by its anchor's content":                {path: "$.aliased_name", want: "8"},
+		"alias key target is the alias":                            {path: "$.aliased_name~", want: "*"},
+		"block scalar key matches by its content":                  {path: `$.'block\n'`, want: "9"},
+		"empty flow mapping value target is the entry key":         {path: "$.empty", want: "empty"},
+		"empty flow sequence value target is the entry key":        {path: "$.none", want: "none"},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk := resolveToken(t, tc.path, tc.key, doc)
-			assert.Equal(t, tc.wantValue, tk.Value)
+			assert.Equal(t, tc.want, resolveToken(t, doc, tc.path).Value)
 		})
 	}
 
@@ -4189,17 +3980,12 @@ func TestPath_Token_Keys(t *testing.T) {
 	})
 }
 
-// resolveToken returns the token path selects in doc, the key of the entry
-// when key is set and the value otherwise. It fails the test when the path
-// does not resolve.
-func resolveToken(t *testing.T, path paths.Path, key bool, doc *ast.DocumentNode) *token.Token {
+// resolveToken returns the token the path expression expr selects in doc.
+// It fails the test when the path does not resolve.
+func resolveToken(t *testing.T, doc *ast.DocumentNode, expr string) *token.Token {
 	t.Helper()
 
-	if key {
-		path = path.Key()
-	}
-
-	tk, err := paths.NewResolver(doc).Token(path)
+	tk, err := paths.NewResolver(doc).Token(paths.MustParse(expr))
 	require.NoError(t, err)
 	require.NotNil(t, tk)
 
