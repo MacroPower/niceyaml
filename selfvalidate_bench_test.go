@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.jacobcolvin.com/x/stringtest"
+
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
@@ -132,15 +134,11 @@ func BenchmarkNode_Decode_FirstDecode(b *testing.B) {
 		Items []item          `yaml:"items"`
 	}
 
-	var sb strings.Builder
-
-	sb.WriteString("m:\n  k: {name: a, price: 1}\nitems:\n")
-
-	for i := range 1000 {
-		fmt.Fprintf(&sb, "  - {name: n%d, price: %d}\n", i, i)
-	}
-
-	yaml := sb.String()
+	yaml := stringtest.LinesLF(
+		"m:",
+		"  k: {name: a, price: 1}",
+		"items:",
+	) + yamltest.GenerateLines(1000, "  - {name: n%[1]d, price: %[1]d}")
 
 	for _, mode := range selfValidationModes {
 		b.Run(mode.name, func(b *testing.B) {
