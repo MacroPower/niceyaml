@@ -106,6 +106,33 @@ func TestNewXMLPrinter(t *testing.T) {
 	}
 }
 
+func TestNewPlainPrinter(t *testing.T) {
+	t.Parallel()
+
+	view := niceyaml.NewSourceFromString("a: 1\n").View()
+
+	tcs := map[string]struct {
+		want string
+		opts []printer.Option
+	}{
+		"defaults": {
+			want: "a: 1",
+		},
+		"option after the defaults": {
+			opts: []printer.Option{printer.WithGutter(printer.LineNumberGutter)},
+			want: "   1 a: 1",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, yamltest.NewPlainPrinter(tc.opts...).Print(view))
+		})
+	}
+}
+
 func TestColorHex(t *testing.T) {
 	t.Parallel()
 

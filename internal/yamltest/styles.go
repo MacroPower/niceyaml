@@ -7,6 +7,7 @@ import (
 	"github.com/lucasb-eyer/go-colorful"
 
 	"go.jacobcolvin.com/niceyaml/printer"
+	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
@@ -86,6 +87,19 @@ func (x *XMLStyles) Style(s kind.Kind) lipgloss.Style {
 func NewXMLPrinter(opts ...printer.Option) *printer.Printer {
 	defaults := []printer.Option{
 		printer.WithStyles(NewXMLStyles()),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+	}
+
+	return printer.New(append(defaults, opts...)...)
+}
+
+// NewPlainPrinter creates a new [*printer.Printer] with empty styles, no
+// gutter, and an empty container style, so its output holds only the text
+// of the lines. Options in opts apply after these defaults.
+func NewPlainPrinter(opts ...printer.Option) *printer.Printer {
+	defaults := []printer.Option{
+		printer.WithStyles(style.Styles{}),
 		printer.WithGutter(printer.NoGutter),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 	}
