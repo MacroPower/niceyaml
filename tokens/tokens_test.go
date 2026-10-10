@@ -927,18 +927,7 @@ func TestTokenize_RestoresDroppedLineBreaks(t *testing.T) {
 
 					// The position names the rune of the source where the
 					// text starts.
-					at := tk.Position.Offset - 1
-					require.GreaterOrEqual(t, at, 0, "token %d %q", i, tk.Origin)
-					require.LessOrEqual(t, at, len(runes), "token %d %q", i, tk.Origin)
-
-					before := string(runes[:at])
-					lastBreak := strings.LastIndexAny(before, "\r\n")
-
-					assert.Equal(t, 1+countLineBreaks(before), tk.Position.Line, "token %d %q line", i, tk.Origin)
-
-					wantCol := utf8.RuneCountInString(before[lastBreak+1:]) + 1
-					assert.Equal(t, wantCol, tk.Position.Column, "token %d %q column", i, tk.Origin)
-					assert.True(t, strings.HasPrefix(string(runes[at:]), text), "token %d %q at %d", i, tk.Origin, at)
+					assertLocates(t, runes, i, tk, text)
 				}
 
 				joined.WriteString(tk.Origin)
@@ -2169,21 +2158,6 @@ func TestTokenize_PositionsLocateText(t *testing.T) {
 			for i, tk := range tokens.Tokenize(input) {
 				require.NotNil(t, tk.Position, "token %d", i)
 
-				at := tk.Position.Offset - 1
-				require.GreaterOrEqual(t, at, 0, "token %d %q", i, tk.Origin)
-				require.LessOrEqual(t, at, len(runes), "token %d %q", i, tk.Origin)
-
-				// Line and Column follow from Offset: one more line per
-				// line break before the rune, and the runes since the
-				// last break.
-				before := string(runes[:at])
-				lastBreak := strings.LastIndexAny(before, "\r\n")
-
-				assert.Equal(t, 1+countLineBreaks(before), tk.Position.Line, "token %d %q line", i, tk.Origin)
-
-				wantCol := utf8.RuneCountInString(before[lastBreak+1:]) + 1
-				assert.Equal(t, wantCol, tk.Position.Column, "token %d %q column", i, tk.Origin)
-
 				// The first line of text in the Origin is in the source at
 				// Offset. Tokenize restores the Origin of a double-quoted
 				// scalar from the source, so all of its text is there.
@@ -2192,22 +2166,38 @@ func TestTokenize_PositionsLocateText(t *testing.T) {
 					text = strings.Trim(tk.Origin, " \t\r\n")
 				}
 
-				if text == "" {
-					continue
-				}
-
-				assert.True(
-					t,
-					strings.HasPrefix(string(runes[at:]), text),
-					"token %d %q at %d: %q",
-					i,
-					tk.Origin,
-					at,
-					string(runes[at:]),
-				)
+				assertLocates(t, runes, i, tk, text)
 			}
 		})
 	}
+}
+
+// assertLocates asserts that the position of tk, the token at index i of
+// the stream for the source runes, names one rune of the source. Line and
+// Column follow from Offset: one more line per line break before the rune,
+// and the runes since the last break. When text is not empty, the source
+// holds it at Offset.
+func assertLocates(t *testing.T, runes []rune, i int, tk *token.Token, text string) {
+	t.Helper()
+
+	at := tk.Position.Offset - 1
+	require.GreaterOrEqual(t, at, 0, "token %d %q", i, tk.Origin)
+	require.LessOrEqual(t, at, len(runes), "token %d %q", i, tk.Origin)
+
+	before := string(runes[:at])
+	lastBreak := strings.LastIndexAny(before, "\r\n")
+
+	assert.Equal(t, 1+countLineBreaks(before), tk.Position.Line, "token %d %q line", i, tk.Origin)
+
+	wantCol := utf8.RuneCountInString(before[lastBreak+1:]) + 1
+	assert.Equal(t, wantCol, tk.Position.Column, "token %d %q column", i, tk.Origin)
+
+	if text == "" {
+		return
+	}
+
+	rest := string(runes[at:])
+	assert.True(t, strings.HasPrefix(rest, text), "token %d %q at %d: %q", i, tk.Origin, at, rest)
 }
 
 // countLineBreaks counts "\r\n", "\n", and a bare "\r" as one break each.
