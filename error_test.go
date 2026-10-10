@@ -3811,20 +3811,76 @@ func TestSourceError_NestedPositionsBehindWrappers(t *testing.T) {
 func TestSourceError_KeepsWrappedText(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
+	docs := nameDocuments(t)
 	namePath := paths.Current().Child("name")
+	badName := niceyaml.NewError("bad name", niceyaml.AtPath(namePath))
 
-	docs := source.Documents()
-	require.Len(t, docs, 2)
+	// The token of the name of the second document.
+	tk := docs[0].Source().Lines().TokenAt(position.New(2, 6))
+	badToken := niceyaml.NewError("bad token", niceyaml.AtPosition(position.NewFromToken(tk)))
 
-	t.Run("nested wrappers keep their text behind the position", func(t *testing.T) {
-		t.Parallel()
+	// The first document binds each error. The position and the path come
+	// from the Error in the chain, not from its text, and go in front of
+	// the whole message.
+	tcs := map[string]struct {
+		err error
+		// The Error in the chain, which the binding still matches.
+		is error
+		// The message before the binding and after it.
+		unbound string
+		bound   string
+	}{
+		"nested wrappers keep their text behind the position": {
+			err:     fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", badName)),
+			is:      badName,
+			unbound: "outer: inner: bad name",
+			bound:   "1:7: $.name: outer: inner: bad name",
+		},
+		// The binding puts the position and the path in front of the
+		// empty text, so the line still says where the problem is.
+		"a wrapper that blanks the message still gets the position": {
+			err:     blankError{err: badName},
+			is:      badName,
+			unbound: "",
+			bound:   "1:7: $.name:",
+		},
+		// A wrapper that hides the text of the Error hides neither its
+		// position nor its path.
+		"a wrapper that rewrites the message still gets the position": {
+			err:     fmt.Errorf("outer: %w", yamltest.RewriteError{Err: badName}),
+			is:      badName,
+			unbound: "outer: rewritten",
+			bound:   "1:7: $.name: outer: rewritten",
+		},
+		// The Error carries no position in its text, and binding puts the
+		// token's in front of the whole message, as it does for a path.
+		"a token error gets its position in front of the wrapper's text": {
+			err:     fmt.Errorf("document 1: %w", badToken),
+			is:      badToken,
+			unbound: "document 1: bad token",
+			bound:   "3:7: document 1: bad token",
+		},
+		// The path anchor resolves in the first document, and the message
+		// carries that one position, which agrees with the highlight.
+		"a path anchor resolves its path rather than the error it wraps": {
+			err:     niceyaml.Invalid(badToken, niceyaml.AtPath(namePath)),
+			is:      badToken,
+			unbound: "bad token",
+			bound:   "1:7: $.name: bad token",
+		},
+	}
 
-		inner := niceyaml.NewError("bad name", niceyaml.AtPath(namePath))
-		wrapped := docs[0].Bind(fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", inner)))
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		assert.Equal(t, "1:7: $.name: outer: inner: bad name", wrapped.Error())
-	})
+			assert.Equal(t, tc.unbound, tc.err.Error())
+
+			bound := docs[0].Bind(tc.err)
+			require.EqualError(t, bound, tc.bound)
+			require.ErrorIs(t, bound, tc.is)
+		})
+	}
 
 	t.Run("a bound join binds each branch as a child", func(t *testing.T) {
 		t.Parallel()
@@ -3864,47 +3920,9 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		assert.Equal(t, "a: 1:7: $.name: bad first\nb: 3:7: $.name: bad second", joined.Error())
 	})
 
-	t.Run("a wrapper that blanks the message still gets the position", func(t *testing.T) {
-		t.Parallel()
-
-		inner := niceyaml.NewError("bad name", niceyaml.AtPath(namePath))
-		wrapped := docs[0].Bind(blankError{err: inner})
-
-		// The binding puts the position and the path in front of the
-		// empty text, so the line still says where the problem is.
-		assert.Equal(t, "1:7: $.name:", wrapped.Error())
-		require.ErrorIs(t, wrapped, inner)
-	})
-
-	t.Run("a wrapper that rewrites the message still gets the position", func(t *testing.T) {
-		t.Parallel()
-
-		inner := niceyaml.NewError("bad name", niceyaml.AtPath(namePath))
-		wrapped := docs[0].Bind(fmt.Errorf("outer: %w", yamltest.RewriteError{Err: inner}))
-
-		// The position and the path come from the Error in the chain, not
-		// from its text, so a wrapper that hides the text hides neither.
-		assert.Equal(t, "1:7: $.name: outer: rewritten", wrapped.Error())
-		require.ErrorIs(t, wrapped, inner)
-	})
-
-	t.Run("a token error gets its position in front of the wrapper's text", func(t *testing.T) {
-		t.Parallel()
-
-		tk := source.Lines().TokenAt(position.New(2, 6))
-		inner := niceyaml.NewError("bad token", niceyaml.AtPosition(position.NewFromToken(tk)))
-		wrapped := docs[0].Bind(fmt.Errorf("document 1: %w", inner))
-
-		// The Error carries no position in its text, and binding puts the
-		// token's in front of the whole message, as it does for a path.
-		assert.Equal(t, "bad token", inner.Error())
-		assert.Equal(t, "3:7: document 1: bad token", wrapped.Error())
-	})
-
 	t.Run("an anchor with details takes the position of the error it wraps", func(t *testing.T) {
 		t.Parallel()
 
-		tk := source.Lines().TokenAt(position.New(2, 6))
 		nested := niceyaml.NewError("bad name", niceyaml.AtPath(namePath))
 
 		tcs := map[string]struct {
@@ -3955,19 +3973,6 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 				assert.Equal(t, tc.bound+"\n`-- 1:7: $.name: bad name", report(docs[0].Bind(tc.err)))
 			})
 		}
-	})
-
-	t.Run("a path anchor resolves its path rather than the error it wraps", func(t *testing.T) {
-		t.Parallel()
-
-		tk := source.Lines().TokenAt(position.New(2, 6))
-		inner := niceyaml.NewError("bad token", niceyaml.AtPosition(position.NewFromToken(tk)))
-		outer := niceyaml.Invalid(inner, niceyaml.AtPath(namePath))
-
-		// The path anchor resolves in the first document, and the message
-		// carries that one position, which agrees with the highlight.
-		assert.Equal(t, "bad token", outer.Error())
-		assert.Equal(t, "1:7: $.name: bad token", docs[0].Bind(outer).Error())
 	})
 
 	t.Run("a path anchor replaces the path of the error it wraps", func(t *testing.T) {
