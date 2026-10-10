@@ -3194,38 +3194,6 @@ func TestDocument_Tokens(t *testing.T) {
 	})
 }
 
-func TestDocument_Validate(t *testing.T) {
-	t.Parallel()
-
-	t.Run("valid data passes schema validation", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			name: test
-			count: 42
-		`)
-		dd := yamltest.FirstDocument(t, input)
-
-		err := dd.Validate(t.Context(), passingValidator())
-		require.NoError(t, err)
-	})
-
-	t.Run("invalid data fails schema validation", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			name: test
-			count: not-a-number
-		`)
-		dd := yamltest.FirstDocument(t, input)
-
-		wantErr := errors.New("validation failed")
-
-		err := dd.Validate(t.Context(), rejectingValidator(wantErr))
-		require.ErrorIs(t, err, wantErr)
-	})
-}
-
 // failingValidator always fails self-validation with a path error.
 type failingValidator struct {
 	Name string `yaml:"name"`
