@@ -80,6 +80,35 @@ func memoryClient(files map[string]string) (*http.Client, *atomic.Int32) {
 	return client, &requests
 }
 
+// nonceServer starts a server that answers one path with a schema and
+// returns the URL of that path and the count of the requests for it. The
+// path holds a random nonce, so a fetch of the URL counts whatever client
+// or context sends it, and a stray request that another process sends to
+// a reused port gets 404 and leaves the count alone. The handler never
+// blocks, and the server closes each connection after one response and
+// closes itself when the test ends.
+func nonceServer(t *testing.T) (string, *atomic.Int32) {
+	t.Helper()
+
+	path := "/" + rand.Text() + "/schema.json"
+	handler := schemaHandler(map[string]string{path: `{"type": "object"}`})
+
+	var requests atomic.Int32
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == path {
+			requests.Add(1)
+		}
+
+		handler.ServeHTTP(w, r)
+	}))
+	server.Config.SetKeepAlivesEnabled(false)
+	server.Start()
+	t.Cleanup(server.Close)
+
+	return server.URL + path, &requests
+}
+
 type errReader struct{}
 
 func (errReader) Read(_ []byte) (int, error) {
@@ -112,35 +141,10 @@ func TestURL(t *testing.T) {
 	t.Run("resolve does not fetch", func(t *testing.T) {
 		t.Parallel()
 
-		// The server counts only requests for a path that holds a random
-		// nonce. A fetch of the schema URL counts whatever client or context
-		// sends it, and a stray request that another process sends to a
-		// reused port gets 404 and leaves the count alone. The server closes
-		// each connection after one response, so a fetch from the bubble
-		// below leaves no idle connection whose reader the bubble would wait
-		// on forever.
-		path := "/" + rand.Text() + "/schema.json"
-
-		var requests atomic.Int32
-
-		server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != path {
-				w.WriteHeader(http.StatusNotFound)
-
-				return
-			}
-
-			requests.Add(1)
-
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{}`))
-		}))
-		server.Config.SetKeepAlivesEnabled(false)
-		server.Start()
-
-		defer server.Close()
-
-		schemaURL := server.URL + path
+		// The server closes each connection after one response, so a fetch
+		// from the bubble below leaves no idle connection whose reader the
+		// bubble would wait on forever.
+		schemaURL, requests := nonceServer(t)
 
 		// Resolve runs in a bubble. A goroutine that waits on the network is
 		// not durably blocked, so Wait returns only after a fetch that
@@ -294,36 +298,14 @@ func TestURL(t *testing.T) {
 	t.Run("context cancellation", func(t *testing.T) {
 		t.Parallel()
 
-		// The handler never blocks. Close waits for every active handler
-		// to return, so a stray request that another process sends to a
-		// reused port gets an answer, and Close never waits on a client
-		// the test does not control. The handler counts only requests for
-		// a path that holds a random nonce, and a stray request gets 404
-		// and leaves the count alone. A Load that ignores its context
-		// fetches a valid schema and returns no error, so the checks
-		// below fail at once rather than hang.
-		path := "/" + rand.Text() + "/schema.json"
-
-		var requests atomic.Int32
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != path {
-				w.WriteHeader(http.StatusNotFound)
-
-				return
-			}
-
-			requests.Add(1)
-
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{"type": "object"}`))
-		}))
-		defer server.Close()
+		// A Load that ignores its context fetches a valid schema and returns
+		// no error, so the checks below fail at once rather than hang.
+		schemaURL, requests := nonceServer(t)
 
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel() // Cancel immediately.
 
-		ref, err := schema.URL(server.URL+path).Resolve(ctx, document(t))
+		ref, err := schema.URL(schemaURL).Resolve(ctx, document(t))
 		require.NoError(t, err)
 
 		_, err = schema.NewRegistry().Load(ctx, ref)
