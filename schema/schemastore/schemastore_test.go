@@ -504,16 +504,14 @@ func TestSchemaStore_CacheTTL(t *testing.T) {
 	store := newStore(client, schemastore.WithCacheTTL(10*time.Millisecond))
 
 	// First lookup fetches.
-	_, err := store.FindMatch(t.Context(), "config.yaml")
-	require.NoError(t, err)
+	requireEntry(t, store, "Test")
 	assert.Equal(t, int32(1), fetchCount.Load())
 
 	// Wait for cache to expire.
 	time.Sleep(20 * time.Millisecond)
 
 	// Lookup triggers refetch due to expired cache.
-	_, err = store.FindMatch(t.Context(), "config.yaml")
-	require.NoError(t, err)
+	requireEntry(t, store, "Test")
 	assert.Equal(t, int32(2), fetchCount.Load())
 }
 
@@ -571,9 +569,7 @@ func TestSchemaStore_SlowFetch(t *testing.T) {
 
 			store := newStore(client, schemastore.WithCacheTTL(10*time.Millisecond))
 
-			entry, err := store.FindMatch(t.Context(), "config.yaml")
-			require.NoError(t, err)
-			require.Equal(t, "Catalog 1", entry.Name)
+			requireEntry(t, store, "Catalog 1")
 
 			// Let the cache expire.
 			time.Sleep(20 * time.Millisecond)
@@ -664,9 +660,7 @@ func TestSchemaStore_SlowFetch(t *testing.T) {
 			release()
 			synctest.Wait()
 
-			entry, err := store.FindMatch(t.Context(), "config.yaml")
-			require.NoError(t, err)
-			assert.Equal(t, "Catalog 1", entry.Name)
+			requireEntry(t, store, "Catalog 1")
 			assert.Equal(t, int32(1), requests.Load())
 		})
 	})
@@ -1082,9 +1076,7 @@ func TestSchemaStore_HTTPClient(t *testing.T) {
 		schemastore.WithHTTPClient(client),
 	)
 
-	entry, err := store.FindMatch(t.Context(), "config.yaml")
-	require.NoError(t, err)
-	assert.Equal(t, "Test", entry.Name)
+	requireEntry(t, store, "Test")
 	assert.Equal(t, int32(1), fetchCount.Load())
 }
 
@@ -1095,9 +1087,7 @@ func TestSchemaStore_ZeroRefreshTimeout(t *testing.T) {
 	// before it starts.
 	store := newStore(respondCatalog(t, testCatalog).Client(), schemastore.WithRefreshTimeout(0))
 
-	entry, err := store.FindMatch(t.Context(), "config.yaml")
-	require.NoError(t, err)
-	assert.Equal(t, "Test", entry.Name)
+	requireEntry(t, store, "Test")
 }
 
 func TestSchemaStore_NilHTTPClient(t *testing.T) {
@@ -1120,9 +1110,7 @@ func TestSchemaStore_NilHTTPClient(t *testing.T) {
 		schemastore.WithHTTPClient(nil),
 	)
 
-	entry, err := store.FindMatch(t.Context(), "config.yaml")
-	require.NoError(t, err)
-	assert.Equal(t, "Test", entry.Name)
+	requireEntry(t, store, "Test")
 }
 
 func TestSchemaStore_FetchError(t *testing.T) {
@@ -1263,8 +1251,7 @@ func TestSchemaStore_CanceledContext(t *testing.T) {
 			// Use short TTL so cache expires quickly.
 			store := newStore(client, schemastore.WithCacheTTL(10*time.Millisecond))
 
-			_, err := store.FindMatch(t.Context(), "config.yaml")
-			require.NoError(t, err)
+			requireEntry(t, store, "Test")
 
 			// Wait for cache to expire.
 			time.Sleep(20 * time.Millisecond)
@@ -1304,9 +1291,7 @@ func TestSchemaStore_CanceledContext(t *testing.T) {
 
 			// A cancellation is not a failed attempt, so the next lookup
 			// fetches.
-			entry, err := store.FindMatch(t.Context(), "config.yaml")
-			require.NoError(t, err)
-			assert.Equal(t, "Test", entry.Name)
+			requireEntry(t, store, "Test")
 
 			synctest.Wait()
 			assert.Equal(t, int32(1), fetchCount.Load())
@@ -1359,8 +1344,7 @@ func TestSchemaStore_RefetchFails(t *testing.T) {
 				store := newStore(client, schemastore.WithCacheTTL(10*time.Millisecond))
 
 				// First fetch succeeds.
-				_, err := store.FindMatch(t.Context(), "config.yaml")
-				require.NoError(t, err)
+				requireEntry(t, store, "Test")
 				assert.Equal(t, int32(1), requestCount.Load())
 
 				// Wait for cache to expire.
@@ -1368,18 +1352,14 @@ func TestSchemaStore_RefetchFails(t *testing.T) {
 
 				// FindMatch triggers a refetch which fails, but still
 				// returns cached data.
-				entry, err := store.FindMatch(t.Context(), "config.yaml")
-				require.NoError(t, err)
-				assert.Equal(t, "Test", entry.Name)
+				requireEntry(t, store, "Test")
 
 				// Verify the store attempted the refetch.
 				assert.Equal(t, int32(2), requestCount.Load())
 
 				// Inside the retry interval the store serves stale data
 				// without a request.
-				entry, err = store.FindMatch(t.Context(), "config.yaml")
-				require.NoError(t, err)
-				assert.Equal(t, "Test", entry.Name)
+				requireEntry(t, store, "Test")
 				assert.Equal(t, int32(2), requestCount.Load())
 			})
 		})
@@ -1703,6 +1683,16 @@ func newHeldCatalogClient(t *testing.T, immediate int32) (*http.Client, *atomic.
 	}).Client()
 
 	return client, &requests, release
+}
+
+// requireEntry looks config.yaml up in store and requires the entry
+// named want.
+func requireEntry(t *testing.T, store *schemastore.Store, want string) {
+	t.Helper()
+
+	entry, err := store.FindMatch(t.Context(), "config.yaml")
+	require.NoError(t, err)
+	assert.Equal(t, want, entry.Name)
 }
 
 // findMatchResult holds what a FindMatch call started by findMatchAsync
