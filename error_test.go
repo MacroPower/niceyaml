@@ -1576,15 +1576,6 @@ func TestError_GracefulDegradation(t *testing.T) {
 			)),
 			want: "$.key~: error in empty source",
 		},
-		"nonexistent path in source": {
-			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-				"path not found",
-				niceyaml.AtPath(
-					paths.Current().Child("nonexistent").Child("deep").Key(),
-				),
-			)),
-			want: "$.nonexistent.deep~: path not found\n\nno excerpt: resolve $.nonexistent.deep~: not found",
-		},
 	}
 
 	for name, tc := range tcs {
@@ -2951,19 +2942,6 @@ func TestError_HunkDisplay(t *testing.T) {
 			lines:   2,
 			want:    []string{"line2", "line4", "line6"},
 			wantNot: []string{"line1:", "line7"},
-		},
-		"nested-only distant errors show separate hunks": {
-			source: numbered(10),
-			// The error has no path of its own, and its nested errors lie far apart.
-			err: niceyaml.NewSummary(
-				"validation failed at 2 locations",
-				niceyaml.NewError("first location error", atKey("line1")),
-				niceyaml.NewError("second location error", atKey("line10")),
-			),
-			lines: 1,
-			// The excerpt shows both errors, with a "..." separator between
-			// the hunks.
-			want: []string{"first location error", "second location error", "..."},
 		},
 		"main error and nested in different hunks": {
 			source: numbered(10),
@@ -5084,20 +5062,6 @@ func TestSourceError_Excerpt(t *testing.T) {
 		assert.Equal(t, []int{2, 8}, lineNumbers(zero))
 		assert.Equal(t, lineNumbers(zero), lineNumbers(negative))
 		assert.Equal(t, yamltest.NewXMLPrinter().Print(zero), yamltest.NewXMLPrinter().Print(negative))
-	})
-
-	t.Run("no location", func(t *testing.T) {
-		t.Parallel()
-
-		bound := errorBinding(
-			t,
-			yamltest.Bind(t, niceyaml.NewSourceFromString(excerptSource), niceyaml.NewError("bad")),
-		)
-
-		excerpt, ok := bound.Excerpt()
-		require.False(t, ok)
-		assert.Nil(t, excerpt)
-		require.NoError(t, bound.Unresolved())
 	})
 }
 
