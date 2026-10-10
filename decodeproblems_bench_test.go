@@ -43,10 +43,10 @@ func benchRejected[T any](b *testing.B, name string, doc *niceyaml.Node, count i
 	})
 }
 
-// benchServers returns a document that lists count servers. It writes
-// the last server with the format last and each one before it with the
-// format server, and each format takes the index of its server.
-func benchServers(count int, server, last string) string {
+// benchProblemServers returns a document that lists count servers. It
+// writes the last server with the format last and each one before it
+// with the format server, and each format takes the index of its server.
+func benchProblemServers(count int, server, last string) string {
 	return "servers:\n" + yamltest.GenerateLines(count-1, server) + fmt.Sprintf(last+"\n", count-1)
 }
 
@@ -73,7 +73,7 @@ func BenchmarkNode_Decode_ProblemsWide(b *testing.B) {
 			server = last
 		}
 
-		doc := yamltest.FirstDocument(b, benchServers(layout.servers, server, last))
+		doc := yamltest.FirstDocument(b, benchProblemServers(layout.servers, server, last))
 
 		benchRejected[problemConfig](b, layout.name, doc, layout.servers, "server")
 	}
@@ -106,7 +106,7 @@ func BenchmarkNode_Decode_ProblemsText(b *testing.B) {
 			last = server
 		}
 
-		doc := yamltest.FirstDocument(b, benchServers(layout.servers, server, last))
+		doc := yamltest.FirstDocument(b, benchProblemServers(layout.servers, server, last))
 
 		benchRejected[struct {
 			Servers []problemTiered `yaml:"servers"`
