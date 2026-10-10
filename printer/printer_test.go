@@ -1295,59 +1295,12 @@ func TestPrinter_CRLF(t *testing.T) {
 func TestNewPrinter(t *testing.T) {
 	t.Parallel()
 
-	tcs := map[string]struct {
-		input string
-		want  string
-		opts  []printer.Option
-	}{
-		"custom styles": {
-			input: "key: value",
-			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
-			opts: []printer.Option{
-				printer.WithStyles(yamltest.NewXMLStyles()),
-				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithGutter(printer.NoGutter),
-			},
-		},
-		"xml styles with token types": {
-			input: stringtest.Input(`
-				key: value
-				number: 42
-				bool: true
-				# comment
-			`),
-			want: stringtest.JoinLF(
-				"<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
-				"<nameTag>number</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>42</literalNumberInteger>",
-				"<nameTag>bool</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalBoolean>true</literalBoolean>",
-				"<comment># comment</comment>",
-			),
-			opts: []printer.Option{
-				printer.WithStyles(yamltest.NewXMLStyles()),
-				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithGutter(printer.NoGutter),
-			},
-		},
-		"empty styles": {
-			input: "key: value",
-			want:  "   1  key: value ",
-			// The default gutter adds line numbers, and the default style
-			// adds trailing padding.
-			opts: []printer.Option{printer.WithStyles(style.Styles{})},
-		},
-	}
+	// The default gutter adds line numbers, and the default style adds
+	// trailing padding.
+	p := printer.New(printer.WithStyles(style.Styles{}))
+	view := niceyaml.NewSourceFromTokens(lexer.Tokenize("key: value")).View()
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			tks := lexer.Tokenize(tc.input)
-			p := printer.New(tc.opts...)
-			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
-
-			assert.Equal(t, tc.want, got)
-		})
-	}
+	assert.Equal(t, "   1  key: value ", p.Print(view))
 }
 
 func TestPrinter_LineNumbers(t *testing.T) {
@@ -3598,6 +3551,16 @@ func TestPrinter_TokenTypes_XMLStyler(t *testing.T) {
 		"comment": {
 			input: "key: value # comment",
 			want:  "<nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString><text> </text><comment># comment</comment>",
+		},
+		"comment line": {
+			input: stringtest.JoinLF(
+				"bool: true",
+				"# comment",
+			),
+			want: stringtest.JoinLF(
+				"<nameTag>bool</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalBoolean>true</literalBoolean>",
+				"<comment># comment</comment>",
+			),
 		},
 		"tag": {
 			input: "tagged: !custom value",
