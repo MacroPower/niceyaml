@@ -36,11 +36,10 @@ import (
 // testOverlayHighlight is a custom kind.Kind constant for test highlights.
 const testOverlayHighlight kind.Kind = "testOverlayHighlight"
 
-// testHighlightStyle returns a style that wraps content in brackets for easy verification.
-func testHighlightStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Transform(func(str string) string {
-		return "[" + str + "]"
-	})
+// bracketStyle returns a style that wraps content in open and end for
+// easy verification.
+func bracketStyle(open, end string) lipgloss.Style {
+	return lipgloss.NewStyle().Transform(func(s string) string { return open + s + end })
 }
 
 // testPrinter returns a printer without styles or padding for predictable output.
@@ -53,7 +52,7 @@ func testPrinterWithGutter(gutter printer.Gutter) *printer.Printer {
 	return yamltest.NewPlainPrinter(
 		printer.WithStyles(style.New(
 			lipgloss.NewStyle(),
-			style.Set(testOverlayHighlight, testHighlightStyle()),
+			style.Set(testOverlayHighlight, bracketStyle("[", "]")),
 		)),
 		printer.WithGutter(gutter),
 	)
@@ -5393,9 +5392,9 @@ func TestPrinter_SeparatorStyle(t *testing.T) {
 	// whatever kind of token follows it. Brackets mark the styled tokens.
 	styles := style.New(
 		lipgloss.NewStyle(),
-		style.Set(kind.LiteralString, testHighlightStyle()),
-		style.Set(kind.LiteralStringDouble, testHighlightStyle()),
-		style.Set(kind.Comment, testHighlightStyle()),
+		style.Set(kind.LiteralString, bracketStyle("[", "]")),
+		style.Set(kind.LiteralStringDouble, bracketStyle("[", "]")),
+		style.Set(kind.Comment, bracketStyle("[", "]")),
 	)
 
 	tcs := map[string]struct {
@@ -6237,8 +6236,6 @@ func TestPrinter_Layout(t *testing.T) {
 		// strings.ToUpper does, or add text of its own, as brackets do.
 		// Either way, each row still starts at the column of the content
 		// it shows, and an annotation indents from the start of its row.
-		brackets := func(s string) string { return "<" + s + ">" }
-
 		tcs := map[string]struct {
 			styles style.Styles
 			below  []line.Annotation
@@ -6262,7 +6259,7 @@ func TestPrinter_Layout(t *testing.T) {
 			"value style adds brackets": {
 				styles: style.New(
 					lipgloss.NewStyle(),
-					style.Set(kind.LiteralString, lipgloss.NewStyle().Transform(brackets)),
+					style.Set(kind.LiteralString, bracketStyle("<", ">")),
 				),
 				want: stringtest.JoinLF("key: <aaaa", "bbbb cccc", "dddd>"),
 				rows: map[int]int{0: 0, 10: 1, 20: 2},
@@ -6928,15 +6925,11 @@ func TestPrinter_Clip(t *testing.T) {
 func TestPrinter_Clip_Styles(t *testing.T) {
 	t.Parallel()
 
-	bracket := func(open, end string) lipgloss.Style {
-		return lipgloss.NewStyle().Transform(func(s string) string { return open + s + end })
-	}
-
 	// The ellipsis renders in kind.UISeparator, and an overlay keeps its
 	// style on the columns the window shows.
 	p := testPrinterWithStyles(
-		style.Set(kind.UISeparator, bracket("<", ">")),
-		style.Set(kind.GenericError, bracket("[", "]")),
+		style.Set(kind.UISeparator, bracketStyle("<", ">")),
+		style.Set(kind.GenericError, bracketStyle("[", "]")),
 	).With(printer.WithAnnotation(printer.NoAnnotation))
 
 	tcs := map[string]struct {

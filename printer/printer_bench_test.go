@@ -280,8 +280,7 @@ func BenchmarkPrinterLayout_LongTransformedValue(b *testing.B) {
 	// A transform that adds runes around a long value makes the shown text
 	// of its run longer than the content, and the value wraps into many
 	// rows that each map back to a column of the content.
-	brackets := lipgloss.NewStyle().Transform(func(s string) string { return "[" + s + "]" })
-	styles := style.New(lipgloss.NewStyle(), style.Set(kind.LiteralString, brackets))
+	styles := style.New(lipgloss.NewStyle(), style.Set(kind.LiteralString, bracketStyle("[", "]")))
 
 	for _, n := range []int{8000, 32000} {
 		view := niceyaml.NewSourceFromString("data: " + strings.Repeat("QUJD", n/4) + "\n").View()
