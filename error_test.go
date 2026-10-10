@@ -2861,247 +2861,260 @@ func TestError_NestedLocationWithoutMessage(t *testing.T) {
 	assert.NotContains(t, got, "^ ")
 }
 
-func TestError_NestedErrorExcerpt(t *testing.T) {
-	t.Parallel()
-
-	// These subtests check which source lines the excerpt shows for
-	// nested errors.
-
-	t.Run("single nested error shows correct context lines", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			line1: a
-			line2: b
-			line3: c
-			line4: d
-			line5: e
-			line6: f
-		`)
-
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-			"validation error",
-			niceyaml.WithDetails(
-				niceyaml.NewError(
-					"error at line3",
-					niceyaml.AtPath(paths.Current().Child("line3").Key()),
-				),
-			),
-		))
-
-		got := stringtest.TrimLineEnds(renderContext(err, 1))
-
-		// The excerpt shows context around line3.
-		assert.Contains(t, got, "line2")
-		assert.Contains(t, got, "line3")
-		assert.Contains(t, got, "line4")
-		assert.NotContains(t, got, "line1")
-		assert.NotContains(t, got, "line5")
-	})
-
-	t.Run("nested errors on distant lines show separate hunks", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			line1: a
-			line2: b
-			line3: c
-			line4: d
-			line5: e
-			line6: f
-		`)
-
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-			"validation error", // No extra context.
-			niceyaml.WithDetails(
-				niceyaml.NewError(
-					"error at line1",
-					niceyaml.AtPath(paths.Current().Child("line1").Key()),
-				),
-				niceyaml.NewError(
-					"error at line6",
-					niceyaml.AtPath(paths.Current().Child("line6").Key()),
-				),
-			),
-		))
-
-		assert.Equal(t, stringtest.JoinLF(
-			"validation error",
-			"├── 1:1: $.line1~: error at line1",
-			"└── 6:1: $.line6~: error at line6",
-			"",
-			"<genericError>line1</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
-			"<textError>^^^^^ error at line1</textError>",
-			"<uiSeparator>...</uiSeparator>",
-			"<genericError>line6</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>f</literalString>",
-			"<textError>^^^^^ error at line6</textError>",
-		), stringtest.TrimLineEnds(renderContext(err, 0)))
-	})
-
-	t.Run("nested errors on one line share an annotation", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			line1: a
-			line2: b
-			line3: c
-		`)
-
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
-			"validation error",
-			niceyaml.NewError(
-				"error 1",
-				niceyaml.AtPath(paths.Current().Child("line2").Key()),
-			),
-			niceyaml.NewError(
-				"error 2",
-				niceyaml.AtPath(paths.Current().Child("line2")),
-			),
-		))
-
-		got := stringtest.TrimLineEnds(renderContext(err, 0))
-
-		// The excerpt shows line2 with both errors.
-		assert.Contains(t, got, "line2")
-		assert.Contains(t, got, "error 1; error 2")
-	})
-}
-
 func TestError_HunkDisplay(t *testing.T) {
 	t.Parallel()
 
-	t.Run("distant errors show separate hunks with separator", func(t *testing.T) {
-		t.Parallel()
+	// Numbered returns a source of n lines, "line1: a" first, each with the
+	// next number and letter.
+	numbered := func(n int) string {
+		rows := make([]string, 0, n)
+		for i := range n {
+			rows = append(rows, fmt.Sprintf("line%d: %c", i+1, 'a'+rune(i)))
+		}
 
-		// The source has many lines.
-		source := stringtest.Input(`
-			line1: a
-			line2: b
-			line3: c
-			line4: d
-			line5: e
-			line6: f
-			line7: g
-			line8: h
-			line9: i
-			line10: j
-		`)
+		return stringtest.JoinLF(rows...)
+	}
 
-		// Errors at line1 and line10 with contextLines=1 fall in separate hunks.
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
-			"validation error",
-			niceyaml.NewError(
-				"error at start",
-				niceyaml.AtPath(paths.Current().Child("line1").Key()),
+	// AtKey locates an error at the key of a line of the source.
+	atKey := func(key string) niceyaml.ErrorOption {
+		return niceyaml.AtPath(paths.Current().Child(key).Key())
+	}
+
+	// These cases check which source lines the excerpt shows, by the text
+	// the rendering holds and the text it leaves out.
+	shown := map[string]struct {
+		source  string
+		err     error
+		want    []string
+		wantNot []string
+		lines   int
+	}{
+		"single nested error shows correct context lines": {
+			source: numbered(6),
+			err: niceyaml.NewError("validation error", niceyaml.WithDetails(
+				niceyaml.NewError("error at line3", atKey("line3")),
+			)),
+			lines: 1,
+			// The excerpt shows context around line3.
+			want:    []string{"line2", "line3", "line4"},
+			wantNot: []string{"line1", "line5"},
+		},
+		"nested errors on one line share an annotation": {
+			source: numbered(3),
+			err: niceyaml.NewSummary(
+				"validation error",
+				niceyaml.NewError("error 1", atKey("line2")),
+				niceyaml.NewError("error 2", niceyaml.AtPath(paths.Current().Child("line2"))),
 			),
-			niceyaml.NewError(
-				"error at end",
-				niceyaml.AtPath(paths.Current().Child("line10").Key()),
+			lines: 0,
+			// The excerpt shows line2 with both errors.
+			want: []string{"line2", "error 1; error 2"},
+		},
+		"distant errors show separate hunks with separator": {
+			source: numbered(10),
+			// Errors at line1 and line10 with contextLines=1 fall in separate hunks.
+			err: niceyaml.NewSummary(
+				"validation error",
+				niceyaml.NewError("error at start", atKey("line1")),
+				niceyaml.NewError("error at end", atKey("line10")),
 			),
-		))
+			lines: 1,
+			// The excerpt shows both errors, a "..." separator between the
+			// hunks, and the context lines around the errors.
+			want: []string{"error at start", "error at end", "...", "line1", "line2", "line9", "line10"},
+			// The excerpt leaves out lines 3-8.
+			wantNot: []string{"line5"},
+		},
+		"position with no token under it still picks its excerpt": {
+			source: numbered(10),
+			// The position points past the end of line 5, where the view holds
+			// no token, so there is nothing to highlight.
+			err:   niceyaml.NewError("boom", niceyaml.AtPosition(position.New(4, 49))),
+			lines: 2,
+			// The excerpt still centers on line 5 with the default two lines of
+			// context on either side.
+			want:    []string{"line3", "line5", "line7"},
+			wantNot: []string{"line2:", "line8", "genericError"},
+		},
+		"path to an empty value still picks its excerpt": {
+			source:  strings.Replace(numbered(10), "line4: d", "line4:", 1),
+			err:     niceyaml.NewError("missing", niceyaml.AtPath(paths.Current().Child("line4"))),
+			lines:   2,
+			want:    []string{"line2", "line4", "line6"},
+			wantNot: []string{"line1:", "line7"},
+		},
+		"nested-only distant errors show separate hunks": {
+			source: numbered(10),
+			// The error has no path of its own, and its nested errors lie far apart.
+			err: niceyaml.NewSummary(
+				"validation failed at 2 locations",
+				niceyaml.NewError("first location error", atKey("line1")),
+				niceyaml.NewError("second location error", atKey("line10")),
+			),
+			lines: 1,
+			// The excerpt shows both errors, with a "..." separator between
+			// the hunks.
+			want: []string{"first location error", "second location error", "..."},
+		},
+		"main error and nested in different hunks": {
+			source: numbered(10),
+			// The main error sits at line1 and the nested error at line10.
+			err: niceyaml.NewError("main error", atKey("line1"), niceyaml.WithDetails(
+				niceyaml.NewError("nested error", atKey("line10")),
+			)),
+			lines: 1,
+			// The excerpt shows both locations, the annotation of the nested
+			// error, and a "..." separator between the hunks.
+			want: []string{
+				"<genericError>line1</genericError>",
+				"<genericError>line10</genericError>",
+				"nested error",
+				"...",
+			},
+		},
+	}
 
-		got := stringtest.TrimLineEnds(renderContext(err, 1))
+	for name, tc := range shown {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		// The excerpt shows both errors.
-		assert.Contains(t, got, "error at start")
-		assert.Contains(t, got, "error at end")
-		// A "..." separator sits between the hunks.
-		assert.Contains(t, got, "...")
-		// The excerpt shows context lines around the errors.
-		assert.Contains(t, got, "line1")
-		assert.Contains(t, got, "line2")
-		assert.Contains(t, got, "line9")
-		assert.Contains(t, got, "line10")
-		// The excerpt leaves out lines 3-8.
-		assert.NotContains(t, got, "line5")
-	})
+			err := yamltest.Bind(t, niceyaml.NewSourceFromString(tc.source), tc.err)
 
-	t.Run("position with no token under it still picks its excerpt", func(t *testing.T) {
-		t.Parallel()
+			got := stringtest.TrimLineEnds(renderContext(err, tc.lines))
 
-		source := stringtest.Input(`
-			line1: a
-			line2: b
-			line3: c
-			line4: d
-			line5: e
-			line6: f
-			line7: g
-			line8: h
-			line9: i
-			line10: j
-		`)
+			for _, want := range tc.want {
+				assert.Contains(t, got, want)
+			}
 
-		// The position points past the end of line 5, where the view holds
-		// no token, so there is nothing to highlight.
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-			"boom",
-			niceyaml.AtPosition(position.New(4, 49)),
-		))
+			for _, wantNot := range tc.wantNot {
+				assert.NotContains(t, got, wantNot)
+			}
+		})
+	}
 
-		got := stringtest.TrimLineEnds(render(err))
+	tcs := map[string]struct {
+		source string
+		err    error
+		want   string
+		lines  int
+	}{
+		"nested errors on distant lines show separate hunks": {
+			source: numbered(6),
+			err: niceyaml.NewError("validation error", niceyaml.WithDetails(
+				niceyaml.NewError("error at line1", atKey("line1")),
+				niceyaml.NewError("error at line6", atKey("line6")),
+			)),
+			lines: 0,
+			want: stringtest.JoinLF(
+				"validation error",
+				"├── 1:1: $.line1~: error at line1",
+				"└── 6:1: $.line6~: error at line6",
+				"",
+				"<genericError>line1</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
+				"<textError>^^^^^ error at line1</textError>",
+				"<uiSeparator>...</uiSeparator>",
+				"<genericError>line6</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>f</literalString>",
+				"<textError>^^^^^ error at line6</textError>",
+			),
+		},
+		"close errors merge into single hunk": {
+			source: numbered(5),
+			// Errors at line1 and line3 with contextLines=1 merge into one hunk,
+			// since they lie within 2*contextLines of each other.
+			err: niceyaml.NewSummary(
+				"validation error",
+				niceyaml.NewError("first error", atKey("line1")),
+				niceyaml.NewError("second error", atKey("line3")),
+			),
+			lines: 1,
+			// The hunk runs from line1 through line4 with no separator.
+			want: stringtest.JoinLF(
+				"validation error",
+				"├── 1:1: $.line1~: first error",
+				"└── 3:1: $.line3~: second error",
+				"",
+				"<genericError>line1</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
+				"<textError>^^^^^ first error</textError>",
+				"<nameTag>line2</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
+				"<genericError>line3</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>c</literalString>",
+				"<textError>^^^^^ second error</textError>",
+				"<nameTag>line4</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>d</literalString>",
+			),
+		},
+		"errors at start and end of file": {
+			source: stringtest.Input(`
+				first: value
+				middle1: a
+				middle2: b
+				middle3: c
+				middle4: d
+				middle5: e
+				last: value
+			`),
+			// The errors sit on the first and last lines.
+			err: niceyaml.NewSummary(
+				"validation error",
+				niceyaml.NewError("error at first", atKey("first")),
+				niceyaml.NewError("error at last", atKey("last")),
+			),
+			lines: 1,
+			// The context clips to the file, so the excerpt starts at first and
+			// ends at last, with a separator between the two hunks.
+			want: stringtest.JoinLF(
+				"validation error",
+				"├── 1:1: $.first~: error at first",
+				"└── 7:1: $.last~: error at last",
+				"",
+				"<genericError>first</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+				"<textError>^^^^^ error at first</textError>",
+				"<nameTag>middle1</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
+				"<uiSeparator>...</uiSeparator>",
+				"<nameTag>middle5</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>e</literalString>",
+				"<genericError>last</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
+				"<textError>^^^^ error at last</textError>",
+			),
+		},
+		"adjacent errors with no context merge into single hunk": {
+			source: numbered(3),
+			// With contextLines=0, errors at line1 and line2 merge because they
+			// lie within the threshold (2*0+1=1) of each other.
+			err: niceyaml.NewSummary(
+				"validation error",
+				niceyaml.NewError("error at line1", atKey("line1")),
+				niceyaml.NewError("error at line2", atKey("line2")),
+			),
+			lines: 0,
+			// The hunk holds line1 and line2 with no separator between them.
+			want: stringtest.JoinLF(
+				"validation error",
+				"├── 1:1: $.line1~: error at line1",
+				"└── 2:1: $.line2~: error at line2",
+				"",
+				"<genericError>line1</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
+				"<textError>^^^^^ error at line1</textError>",
+				"<genericError>line2</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
+				"<textError>^^^^^ error at line2</textError>",
+			),
+		},
+	}
 
-		// The excerpt still centers on line 5 with the default two lines of
-		// context on either side.
-		assert.Contains(t, got, "line3")
-		assert.Contains(t, got, "line5")
-		assert.Contains(t, got, "line7")
-		assert.NotContains(t, got, "line2:")
-		assert.NotContains(t, got, "line8")
-		assert.NotContains(t, got, "genericError")
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("path to an empty value still picks its excerpt", func(t *testing.T) {
-		t.Parallel()
+			err := yamltest.Bind(t, niceyaml.NewSourceFromString(tc.source), tc.err)
 
-		source := stringtest.Input(`
-			line1: a
-			line2: b
-			line3: c
-			line4:
-			line5: e
-			line6: f
-			line7: g
-			line8: h
-			line9: i
-			line10: j
-		`)
-
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-			"missing",
-			niceyaml.AtPath(paths.Current().Child("line4")),
-		))
-
-		got := stringtest.TrimLineEnds(render(err))
-
-		assert.Contains(t, got, "line2")
-		assert.Contains(t, got, "line4")
-		assert.Contains(t, got, "line6")
-		assert.NotContains(t, got, "line1:")
-		assert.NotContains(t, got, "line7")
-	})
+			assert.Equal(t, tc.want, stringtest.TrimLineEnds(renderContext(err, tc.lines)))
+		})
+	}
 
 	t.Run("negative context lines show the error lines alone", func(t *testing.T) {
 		t.Parallel()
 
-		source := stringtest.Input(`
-			line1: a
-			line2: b
-			line3: c
-			line4: d
-			line5: e
-			line6: f
-		`)
-
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
+		err := yamltest.Bind(t, niceyaml.NewSourceFromString(numbered(6)), niceyaml.NewError(
 			"validation error",
-			niceyaml.AtPath(paths.Current().Child("line1").Key()),
-			niceyaml.WithDetails(
-				niceyaml.NewError(
-					"error at end",
-					niceyaml.AtPath(paths.Current().Child("line6").Key()),
-				),
-			),
+			atKey("line1"),
+			niceyaml.WithDetails(niceyaml.NewError("error at end", atKey("line6"))),
 		))
 
 		// A negative count renders as 0 does, so each error line is a hunk
@@ -3115,202 +3128,6 @@ func TestError_HunkDisplay(t *testing.T) {
 		assert.Contains(t, got, "...")
 		assert.NotContains(t, got, "line2")
 		assert.NotContains(t, got, "line5")
-	})
-
-	t.Run("close errors merge into single hunk", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			line1: a
-			line2: b
-			line3: c
-			line4: d
-			line5: e
-		`)
-
-		// Errors at line1 and line3 with contextLines=1 merge into one hunk,
-		// since they lie within 2*contextLines of each other.
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
-			"validation error",
-			niceyaml.NewError(
-				"first error",
-				niceyaml.AtPath(paths.Current().Child("line1").Key()),
-			),
-			niceyaml.NewError(
-				"second error",
-				niceyaml.AtPath(paths.Current().Child("line3").Key()),
-			),
-		))
-
-		// The hunk runs from line1 through line4 with no separator.
-		assert.Equal(t, stringtest.JoinLF(
-			"validation error",
-			"├── 1:1: $.line1~: first error",
-			"└── 3:1: $.line3~: second error",
-			"",
-			"<genericError>line1</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
-			"<textError>^^^^^ first error</textError>",
-			"<nameTag>line2</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
-			"<genericError>line3</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>c</literalString>",
-			"<textError>^^^^^ second error</textError>",
-			"<nameTag>line4</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>d</literalString>",
-		), stringtest.TrimLineEnds(renderContext(err, 1)))
-	})
-
-	t.Run("nested-only distant errors show separate hunks", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			line1: a
-			line2: b
-			line3: c
-			line4: d
-			line5: e
-			line6: f
-			line7: g
-			line8: h
-			line9: i
-			line10: j
-		`)
-
-		// The error has no path of its own, and its nested errors lie far apart.
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
-			"validation failed at 2 locations",
-			niceyaml.NewError(
-				"first location error",
-				niceyaml.AtPath(paths.Current().Child("line1").Key()),
-			),
-			niceyaml.NewError(
-				"second location error",
-				niceyaml.AtPath(paths.Current().Child("line10").Key()),
-			),
-		))
-
-		got := stringtest.TrimLineEnds(renderContext(err, 1))
-
-		// The excerpt shows both errors.
-		assert.Contains(t, got, "first location error")
-		assert.Contains(t, got, "second location error")
-		// A "..." separator sits between the hunks.
-		assert.Contains(t, got, "...")
-	})
-
-	t.Run("errors at start and end of file", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			first: value
-			middle1: a
-			middle2: b
-			middle3: c
-			middle4: d
-			middle5: e
-			last: value
-		`)
-
-		// The errors sit on the first and last lines.
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
-			"validation error",
-			niceyaml.NewError(
-				"error at first",
-				niceyaml.AtPath(paths.Current().Child("first").Key()),
-			),
-			niceyaml.NewError(
-				"error at last",
-				niceyaml.AtPath(paths.Current().Child("last").Key()),
-			),
-		))
-
-		// The context clips to the file, so the excerpt starts at first and
-		// ends at last, with a separator between the two hunks.
-		assert.Equal(t, stringtest.JoinLF(
-			"validation error",
-			"├── 1:1: $.first~: error at first",
-			"└── 7:1: $.last~: error at last",
-			"",
-			"<genericError>first</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
-			"<textError>^^^^^ error at first</textError>",
-			"<nameTag>middle1</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
-			"<uiSeparator>...</uiSeparator>",
-			"<nameTag>middle5</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>e</literalString>",
-			"<genericError>last</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>value</literalString>",
-			"<textError>^^^^ error at last</textError>",
-		), stringtest.TrimLineEnds(renderContext(err, 1)))
-	})
-
-	t.Run("main error and nested in different hunks", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			line1: a
-			line2: b
-			line3: c
-			line4: d
-			line5: e
-			line6: f
-			line7: g
-			line8: h
-			line9: i
-			line10: j
-		`)
-
-		// The main error sits at line1 and the nested error at line10.
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-			"main error",
-			niceyaml.AtPath(paths.Current().Child("line1").Key()),
-			niceyaml.WithDetails(
-				niceyaml.NewError(
-					"nested error",
-					niceyaml.AtPath(paths.Current().Child("line10").Key()),
-				),
-			),
-		))
-
-		got := stringtest.TrimLineEnds(renderContext(err, 1))
-
-		// The excerpt shows both locations.
-		assert.Contains(t, got, "<genericError>line1</genericError>")
-		assert.Contains(t, got, "<genericError>line10</genericError>")
-		// The excerpt shows the annotation of the nested error.
-		assert.Contains(t, got, "nested error")
-		// A "..." separator sits between the hunks.
-		assert.Contains(t, got, "...")
-	})
-
-	t.Run("adjacent errors with no context merge into single hunk", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			line1: a
-			line2: b
-			line3: c
-		`)
-
-		// With contextLines=0, errors at line1 and line2 merge because they
-		// lie within the threshold (2*0+1=1) of each other.
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
-			"validation error",
-			niceyaml.NewError(
-				"error at line1",
-				niceyaml.AtPath(paths.Current().Child("line1").Key()),
-			),
-			niceyaml.NewError(
-				"error at line2",
-				niceyaml.AtPath(paths.Current().Child("line2").Key()),
-			),
-		))
-
-		// The hunk holds line1 and line2 with no separator between them.
-		assert.Equal(t, stringtest.JoinLF(
-			"validation error",
-			"├── 1:1: $.line1~: error at line1",
-			"└── 2:1: $.line2~: error at line2",
-			"",
-			"<genericError>line1</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>a</literalString>",
-			"<textError>^^^^^ error at line1</textError>",
-			"<genericError>line2</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>b</literalString>",
-			"<textError>^^^^^ error at line2</textError>",
-		), stringtest.TrimLineEnds(renderContext(err, 0)))
 	})
 }
 
