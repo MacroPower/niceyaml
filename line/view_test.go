@@ -945,51 +945,46 @@ func TestView_Slice(t *testing.T) {
 		return view
 	}
 
-	t.Run("no spans yields every line", func(t *testing.T) {
+	t.Run("holds the lines the spans select", func(t *testing.T) {
 		t.Parallel()
 
-		view := decorated(t)
-		got := view.Slice()
+		tcs := map[string]struct {
+			spans []position.Span
+			want  []string
+		}{
+			"no spans yields every line": {
+				want: []string{"a: 1", "b: 2", "c: 3", "d: 4"},
+			},
+			"single span": {
+				spans: []position.Span{position.NewSpan(1, 3)},
+				want:  []string{"b: 2", "c: 3"},
+			},
+			"spans in any order yield content order": {
+				spans: []position.Span{position.NewSpan(3, 4), position.NewSpan(0, 2)},
+				want:  []string{"a: 1", "b: 2", "d: 4"},
+			},
+			"overlapping spans hold each line once": {
+				spans: []position.Span{position.NewSpan(0, 2), position.NewSpan(1, 3)},
+				want:  []string{"a: 1", "b: 2", "c: 3"},
+			},
+			"spans are clamped": {
+				spans: []position.Span{position.NewSpan(-5, 1), position.NewSpan(3, 99)},
+				want:  []string{"a: 1", "d: 4"},
+			},
+		}
 
-		require.NotSame(t, view, got)
-		assert.Equal(t, []string{"a: 1", "b: 2", "c: 3", "d: 4"}, contentsOf(got.All()))
-	})
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-	t.Run("single span", func(t *testing.T) {
-		t.Parallel()
+				view := decorated(t)
+				got := view.Slice(tc.spans...)
 
-		view := decorated(t)
-		got := view.Slice(position.NewSpan(1, 3))
-
-		assert.Equal(t, []string{"b: 2", "c: 3"}, contentsOf(got.All()))
-	})
-
-	t.Run("spans in any order yield content order", func(t *testing.T) {
-		t.Parallel()
-
-		view := decorated(t)
-		got := view.Slice(position.NewSpan(3, 4), position.NewSpan(0, 2))
-
-		assert.Equal(t, []string{"a: 1", "b: 2", "d: 4"}, contentsOf(got.All()))
-	})
-
-	t.Run("overlapping spans hold each line once", func(t *testing.T) {
-		t.Parallel()
-
-		view := decorated(t)
-		got := view.Slice(position.NewSpan(0, 2), position.NewSpan(1, 3))
-
-		assert.Equal(t, []string{"a: 1", "b: 2", "c: 3"}, contentsOf(got.All()))
-		assert.Equal(t, 3, got.Count())
-	})
-
-	t.Run("spans are clamped", func(t *testing.T) {
-		t.Parallel()
-
-		view := decorated(t)
-		got := view.Slice(position.NewSpan(-5, 1), position.NewSpan(3, 99))
-
-		assert.Equal(t, []string{"a: 1", "d: 4"}, contentsOf(got.All()))
+				require.NotSame(t, view, got)
+				assert.Equal(t, tc.want, contentsOf(got.All()))
+				assert.Equal(t, len(tc.want), got.Count())
+			})
+		}
 	})
 
 	t.Run("empty and out of range spans yield nothing", func(t *testing.T) {
