@@ -2651,7 +2651,7 @@ func TestPath_UnnamedKey(t *testing.T) {
 				assert.Equal(t, tc.want, node.String())
 			}
 
-			matches := requireMatches(t, doc, paths.MustParse(tc.recursive))
+			matches := requireMatches(t, doc, tc.recursive)
 			assert.Equal(t, tc.matches, matchValues(matches))
 		})
 	}
@@ -4035,7 +4035,7 @@ func TestPath_Node_TwoMergeKeys(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, node.String())
 
-			matches := requireMatches(t, doc, paths.MustParse("$.t..k"))
+			matches := requireMatches(t, doc, "$.t..k")
 			assert.Equal(t, tc.found, matchPaths(matches))
 		})
 	}
@@ -4050,8 +4050,8 @@ func TestPath_Matches_RepeatedMergeKey(t *testing.T) {
 
 	doc := yamltest.FirstDocument(t, src, niceyaml.WithAllowDuplicateKeys(true)).DocumentAST()
 
-	assert.Empty(t, requireMatches(t, doc, paths.MustParse("$..a")))
-	assert.Equal(t, []string{"$.t.<<.b"}, matchPaths(requireMatches(t, doc, paths.MustParse("$..b"))))
+	assert.Empty(t, requireMatches(t, doc, "$..a"))
+	assert.Equal(t, []string{"$.t.<<.b"}, matchPaths(requireMatches(t, doc, "$..b")))
 
 	node, err := paths.NewResolver(doc).Node(paths.MustParse("$.t.a"))
 	require.NoError(t, err)
@@ -4104,7 +4104,7 @@ func TestPath_Matches_InlineMergeSource(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
-			matches := requireMatches(t, doc, paths.MustParse("$.m..name"))
+			matches := requireMatches(t, doc, "$.m..name")
 			assert.Equal(t, tc.want, matchPaths(matches))
 
 			node, err := paths.NewResolver(doc).Node(paths.MustParse("$.m.name"))
@@ -4148,7 +4148,7 @@ func TestPath_MergeKeyAndLiteralMergeName(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, "2", node.String())
 
-			matches := requireMatches(t, doc, paths.MustParse("$.m..k"))
+			matches := requireMatches(t, doc, "$.m..k")
 			assert.Equal(t, []string{"$.m.<<.k=1"}, matchValues(matches))
 		})
 	}
@@ -4218,7 +4218,7 @@ func TestPath_MergeBringsInLiteralMergeName(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, "real", node.String())
 
-			matches := requireMatches(t, doc, paths.MustParse("$..'<<'"))
+			matches := requireMatches(t, doc, "$..'<<'")
 			assert.Equal(t, tc.want, matchPaths(matches))
 		})
 	}
@@ -4242,7 +4242,7 @@ func TestPath_Node_LaterDuplicateKeyWins(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, key.Position.Line)
 
-	assert.Equal(t, []string{"$.m.a"}, matchPaths(requireMatches(t, doc, paths.MustParse("$..a"))))
+	assert.Equal(t, []string{"$.m.a"}, matchPaths(requireMatches(t, doc, "$..a")))
 }
 
 // nestedChain returns depth flow mappings nested in one another, each with
@@ -4351,7 +4351,7 @@ func TestPath_Matches_RecursiveReachedTwice(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
-			matches := requireMatches(t, doc, paths.MustParse(tc.path))
+			matches := requireMatches(t, doc, tc.path)
 
 			assert.Equal(t, tc.want, matchPaths(matches))
 		})
@@ -4382,12 +4382,14 @@ func matchValues(matches []paths.Match) []string {
 	return got
 }
 
-// requireMatches returns the matches of path in doc. The test fails
-// unless Nodes lists the node of each match in the same order, and unless
-// the path of each match selects the node of that match alone and reads
-// back from its text.
-func requireMatches(t *testing.T, doc *ast.DocumentNode, path paths.Path) []paths.Match {
+// requireMatches returns the matches of the path expression expr in doc.
+// The test fails unless Nodes lists the node of each match in the same
+// order, and unless the path of each match selects the node of that match
+// alone and reads back from its text.
+func requireMatches(t *testing.T, doc *ast.DocumentNode, expr string) []paths.Match {
 	t.Helper()
+
+	path := paths.MustParse(expr)
 
 	matches, err := paths.NewResolver(doc).Matches(path)
 	require.NoError(t, err)
@@ -4539,7 +4541,7 @@ func TestPath_Matches(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, matchPaths(requireMatches(t, doc, paths.MustParse(tc.path))))
+			assert.Equal(t, tc.want, matchPaths(requireMatches(t, doc, tc.path)))
 		})
 	}
 }
@@ -4821,7 +4823,7 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, tc.input, tc.opts...).DocumentAST()
-			matches := requireMatches(t, doc, paths.MustParse(tc.path))
+			matches := requireMatches(t, doc, tc.path)
 
 			assert.Equal(t, tc.want, matchValues(matches))
 		})
@@ -4971,7 +4973,7 @@ func TestPath_Matches_RecursiveAll(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, tc.input, tc.opts...).DocumentAST()
-			matches := requireMatches(t, doc, paths.MustParse(tc.path))
+			matches := requireMatches(t, doc, tc.path)
 
 			assert.Equal(t, tc.want, matchValues(matches))
 		})
@@ -5047,7 +5049,7 @@ func TestPath_Matches_WildcardErrors(t *testing.T) {
 				return
 			}
 
-			named := requireMatches(t, doc, paths.MustParse(tc.named))
+			named := requireMatches(t, doc, tc.named)
 			require.Len(t, named, 1)
 			assert.Equal(t, "1", named[0].Node.String())
 		})
