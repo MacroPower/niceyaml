@@ -39,8 +39,11 @@ const (
 	workflowSchemaURL = "https://example.com/github-workflow.json"
 )
 
-// The catalogs that tests share.
+// The catalogs and the transport that tests share.
 var (
+	// A transport function that answers every URL with status 500.
+	serverError = yamltest.Respond(http.StatusInternalServerError, "")
+
 	// A one-entry catalog whose pattern matches every YAML file.
 	testCatalog = schemastore.Catalog{
 		Schemas: []schemastore.CatalogEntry{
@@ -972,7 +975,7 @@ func TestSchemaStore_ContextEndsAfterFetch(t *testing.T) {
 			client: respondCatalog(t, testCatalog).Client(),
 		},
 		"fetch fails": {
-			client:  yamltest.Respond(http.StatusInternalServerError, "").Client(),
+			client:  serverError.Client(),
 			wantErr: true,
 		},
 		"filter panics": {
@@ -1115,7 +1118,7 @@ func TestSchemaStore_FetchError(t *testing.T) {
 
 	// With no catalog ever loaded, a failed fetch surfaces from the lookup.
 	tcs := map[string]*schemastore.Store{
-		"server error": newStore(yamltest.Respond(http.StatusInternalServerError, "").Client()),
+		"server error": newStore(serverError.Client()),
 		"invalid json": newStore(yamltest.Respond(http.StatusOK, "not json").Client()),
 
 		// A JSON body with no schemas array is not a catalog, so the store
@@ -1164,7 +1167,7 @@ func TestSchemaStore_RetryAfter(t *testing.T) {
 	// lookup lands inside the retry interval however slowly the first one
 	// returns.
 	synctest.Test(t, func(t *testing.T) {
-		client, fetchCount := yamltest.CountingClient(yamltest.Respond(http.StatusInternalServerError, ""))
+		client, fetchCount := yamltest.CountingClient(serverError)
 
 		store := newStore(client, schemastore.WithRetryAfter(20*time.Millisecond))
 
@@ -1200,7 +1203,7 @@ func TestSchemaStore_NonPositiveRetryAfter(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client, fetchCount := yamltest.CountingClient(yamltest.Respond(http.StatusInternalServerError, ""))
+			client, fetchCount := yamltest.CountingClient(serverError)
 
 			// A non-positive interval keeps the default rather than
 			// retrying on every lookup, which costs one refresh timeout
