@@ -2456,28 +2456,6 @@ func TestSource_Documents_CollectErrors(t *testing.T) {
 
 	const unclosed = "sequence end token ']' not found"
 
-	// A caller that needs the whole file to parse returns the error of
-	// File, and decodes each document Documents returns otherwise.
-	strict := func(t *testing.T, source *niceyaml.Source, wrap func(error) error) error {
-		t.Helper()
-
-		_, err := source.File()
-		if err != nil {
-			return wrap(err)
-		}
-
-		var errs []error
-
-		for _, doc := range source.Documents() {
-			_, err := doc.Decode[map[string]any](t.Context())
-			if err != nil {
-				errs = append(errs, wrap(err))
-			}
-		}
-
-		return errors.Join(errs...)
-	}
-
 	// A caller that reports on each document collects the error of every
 	// document Documents returns, parsed or not.
 	tolerant := func(t *testing.T, source *niceyaml.Source, wrap func(error) error) error {
@@ -2493,6 +2471,19 @@ func TestSource_Documents_CollectErrors(t *testing.T) {
 		}
 
 		return errors.Join(errs...)
+	}
+
+	// A caller that needs the whole file to parse returns the error of
+	// File, and decodes each document Documents returns otherwise.
+	strict := func(t *testing.T, source *niceyaml.Source, wrap func(error) error) error {
+		t.Helper()
+
+		_, err := source.File()
+		if err != nil {
+			return wrap(err)
+		}
+
+		return tolerant(t, source, wrap)
 	}
 
 	wraps := map[string]func(error) error{
