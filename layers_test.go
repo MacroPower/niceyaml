@@ -26,15 +26,16 @@ import (
 func ExampleNewSourceFromLayers() {
 	ctx := context.Background()
 
-	base := niceyaml.NewSourceFromString(
-		"server:\n  host: example.com\n  port: 0\n",
-		niceyaml.WithName("base.yaml"),
-	)
+	base := niceyaml.NewSourceFromString(`server:
+  host: example.com
+  port: 0
+`, niceyaml.WithName("base.yaml"))
 
-	prod := niceyaml.NewSourceFromString(
-		"server:\n  host: prod.example.com\nservers:\n  - host: cache.internal\n",
-		niceyaml.WithName("prod.yaml"),
-	)
+	prod := niceyaml.NewSourceFromString(`server:
+  host: prod.example.com
+servers:
+  - host: cache.internal
+`, niceyaml.WithName("prod.yaml"))
 
 	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
 	if err != nil {
@@ -62,15 +63,16 @@ func ExampleNewSourceFromLayers() {
 func ExampleNewSourceFromLayers_document() {
 	ctx := context.Background()
 
-	base := niceyaml.NewSourceFromString(
-		"kind: Service\n\nserver:\n  host: example.com\n  port: 0\n",
-		niceyaml.WithName("base.yaml"),
-	)
+	base := niceyaml.NewSourceFromString(`kind: Service
 
-	prod := niceyaml.NewSourceFromString(
-		"server:\n  host: prod.example.com\n",
-		niceyaml.WithName("prod.yaml"),
-	)
+server:
+  host: example.com
+  port: 0
+`, niceyaml.WithName("base.yaml"))
+
+	prod := niceyaml.NewSourceFromString(`server:
+  host: prod.example.com
+`, niceyaml.WithName("prod.yaml"))
 
 	merged, err := niceyaml.NewSourceFromLayers(ctx, base, prod)
 	if err != nil {
@@ -111,10 +113,9 @@ func ExampleNewSourceFromLayers_environment() {
 	ctx := context.Background()
 
 	// The file leaves the port to the environment.
-	base := niceyaml.NewSourceFromString(
-		"server:\n  host: example.com\n",
-		niceyaml.WithName("base.yaml"),
-	)
+	base := niceyaml.NewSourceFromString(`server:
+  host: example.com
+`, niceyaml.WithName("base.yaml"))
 
 	// The program read APP_SERVER_PORT=0. The map holds the keys the
 	// environment set and no other, under the names the YAML uses, and the
@@ -160,10 +161,10 @@ func ExampleNode_Origin() {
 		niceyaml.WithFilePath("conf/base.yaml"),
 	)
 
-	prod := niceyaml.NewSourceFromString(
-		"# Production.\n\nlicense: LICENSE.prod\n",
-		niceyaml.WithFilePath("conf/prod/app.yaml"),
-	)
+	prod := niceyaml.NewSourceFromString(`# Production.
+
+license: LICENSE.prod
+`, niceyaml.WithFilePath("conf/prod/app.yaml"))
 
 	merged, err := niceyaml.NewSourceFromLayers(context.Background(), base, prod)
 	if err != nil {
