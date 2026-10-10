@@ -3974,7 +3974,12 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 		name: second
 	`)
 
-	validator := rejectingValidator(niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name"))))
+	badName := niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name")))
+	validator := rejectingValidator(badName)
+	// A validator that binds its own error, through the Node it gets.
+	binding := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Node) error {
+		return doc.Bind(badName)
+	})
 
 	tcs := map[string]struct {
 		// Returns the error of one document.
@@ -3986,6 +3991,14 @@ func TestDocument_ErrorsResolveInDocument(t *testing.T) {
 			call: func(ctx context.Context, doc *niceyaml.Node) error {
 				return doc.Validate(ctx, validator)
 			},
+			want: []string{"1:7: $.name: bad name", "3:7: $.name: bad name"},
+		},
+		"validator errors of a decode": {
+			call: decodeAs[map[string]string](niceyaml.WithValidator(validator)),
+			want: []string{"1:7: $.name: bad name", "3:7: $.name: bad name"},
+		},
+		"errors a validator binds itself": {
+			call: decodeAs[map[string]string](niceyaml.WithValidator(binding)),
 			want: []string{"1:7: $.name: bad name", "3:7: $.name: bad name"},
 		},
 		"self validation errors": {
@@ -7961,51 +7974,6 @@ func TestDocument_ErrorsBindToSource(t *testing.T) {
 		assert.Same(t, pre, err)
 		requireBound(t, doc, err)
 	})
-}
-
-func TestDocument_ValidatorErrorsResolveInDocument(t *testing.T) {
-	t.Parallel()
-
-	namePath := paths.Current().Child("name")
-
-	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
-		"name: a",
-		"---",
-		"name: b",
-	))
-	docs := source.Documents()
-
-	second := docs[1]
-	require.NotNil(t, second)
-
-	tcs := map[string]struct {
-		validate func(doc *niceyaml.Node) error
-	}{
-		"an unbound path error takes the document's index": {
-			validate: func(*niceyaml.Node) error {
-				return niceyaml.NewError("bad name", niceyaml.AtPath(namePath))
-			},
-		},
-		"a validator that binds its own error binds through the document": {
-			validate: func(doc *niceyaml.Node) error {
-				return doc.Bind(niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			validator := niceyaml.ValidatorFunc(func(_ context.Context, doc *niceyaml.Node) error {
-				return tc.validate(doc)
-			})
-
-			_, err := second.Decode[map[string]string](t.Context(), niceyaml.WithValidator(validator))
-			require.Error(t, err)
-			assert.Equal(t, "3:7: $.name: bad name", err.Error())
-		})
-	}
 }
 
 func TestDocument_Decode_Validator(t *testing.T) {
