@@ -14,8 +14,41 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/bubbles/yamlviewport"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
+
+// sourcesOf returns a source for each input, named a.yaml, b.yaml, and so
+// on.
+func sourcesOf(inputs ...string) []*niceyaml.Source {
+	sources := make([]*niceyaml.Source, 0, len(inputs))
+	for i, input := range inputs {
+		name := string(rune('a'+i)) + ".yaml"
+		sources = append(sources, niceyaml.NewSourceFromString(input, niceyaml.WithName(name)))
+	}
+
+	return sources
+}
+
+// press returns the press of the key that types r.
+func press(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
+}
+
+// update sends msgs to m in order and returns the model after the last
+// one.
+func update(t *testing.T, m tea.Model, msgs ...tea.Msg) model {
+	t.Helper()
+
+	for _, msg := range msgs {
+		m, _ = m.Update(msg)
+	}
+
+	got, ok := m.(model)
+	require.True(t, ok)
+
+	return got
+}
 
 func TestUpdateSearchInputBackspace(t *testing.T) {
 	t.Parallel()
@@ -77,18 +110,14 @@ func TestUpdatePasteIntoSearch(t *testing.T) {
 	m.searching = true
 	m.searchInput = "a"
 
-	updated, _ := m.Update(tea.PasteMsg{Content: "bc"})
-	got, ok := updated.(model)
-	require.True(t, ok)
+	got := update(t, m, tea.PasteMsg{Content: "bc"})
 	assert.Equal(t, "abc", got.searchInput)
 	assert.True(t, got.searching)
 
 	// A paste outside the prompt changes nothing.
 	m.searching = false
 
-	updated, _ = m.Update(tea.PasteMsg{Content: "xyz"})
-	got, ok = updated.(model)
-	require.True(t, ok)
+	got = update(t, m, tea.PasteMsg{Content: "xyz"})
 	assert.Equal(t, "a", got.searchInput)
 }
 
@@ -133,9 +162,7 @@ func TestUpdatePasteControlCharacters(t *testing.T) {
 			m.searching = true
 			m.searchInput = "a"
 
-			updated, _ := m.Update(tea.PasteMsg{Content: tc.content})
-			got, ok := updated.(model)
-			require.True(t, ok)
+			got := update(t, m, tea.PasteMsg{Content: tc.content})
 			assert.Equal(t, tc.want, got.searchInput)
 		})
 	}
@@ -144,11 +171,7 @@ func TestUpdatePasteControlCharacters(t *testing.T) {
 func TestRevisionLabel(t *testing.T) {
 	t.Parallel()
 
-	three := []*niceyaml.Source{
-		niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml")),
-		niceyaml.NewSourceFromString("a: 2\n", niceyaml.WithName("b.yaml")),
-		niceyaml.NewSourceFromString("a: 3\n", niceyaml.WithName("c.yaml")),
-	}
+	three := sourcesOf("a: 1\n", "a: 2\n", "a: 3\n")
 
 	tcs := map[string]struct {
 		sources  []*niceyaml.Source
@@ -262,9 +285,7 @@ func TestNewModelDefaultTheme(t *testing.T) {
 			t.Parallel()
 
 			m := newModel(&modelOptions{
-				sources: []*niceyaml.Source{
-					niceyaml.NewSourceFromString("a: 1\nb: [2, 3]\n", niceyaml.WithName("a.yaml")),
-				},
+				sources:     sourcesOf("a: 1\nb: [2, 3]\n"),
 				lineNumbers: tc.lineNumbers,
 			})
 
@@ -273,10 +294,7 @@ func TestNewModelDefaultTheme(t *testing.T) {
 
 			// The first frame renders as the theme picker would after
 			// switching to the default theme.
-			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
-
-			got, ok := updated.(model)
-			require.True(t, ok)
+			got := update(t, m, tea.WindowSizeMsg{Width: 80, Height: 10})
 
 			want := got
 			want.selectTheme(want.themeIndex)
@@ -332,12 +350,8 @@ func TestUpdateWindowSizeViewportHeight(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := newModel(&modelOptions{})
+			got := update(t, newModel(&modelOptions{}), tea.WindowSizeMsg{Width: 80, Height: tc.height})
 
-			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: tc.height})
-
-			got, ok := updated.(model)
-			require.True(t, ok)
 			assert.Equal(t, tc.want, got.viewport.Height())
 		})
 	}
@@ -350,27 +364,15 @@ func TestInitialSearchScrollsLikeALaterOne(t *testing.T) {
 	// before the first window size message, so a term applied at
 	// construction would land near the top of the view instead of its
 	// center.
-	lines := &strings.Builder{}
-	for i := 1; i <= 40; i++ {
-		fmt.Fprintf(lines, "k%d: v\n", i)
-	}
-
-	sources := []*niceyaml.Source{
-		niceyaml.NewSourceFromString(lines.String(), niceyaml.WithName("a.yaml")),
-	}
+	sources := sourcesOf(yamltest.GenerateYAML(40))
 	size := tea.WindowSizeMsg{Width: 40, Height: 14}
 
-	sized, _ := newModel(&modelOptions{sources: sources, search: "k30"}).Update(size)
-	got, ok := sized.(model)
-	require.True(t, ok)
+	got := update(t, newModel(&modelOptions{sources: sources, search: "key_30"}), size)
 
-	sized, _ = newModel(&modelOptions{sources: sources}).Update(size)
-	want, ok := sized.(model)
-	require.True(t, ok)
+	want := update(t, newModel(&modelOptions{sources: sources}), size)
+	want.applySearch("key_30")
 
-	want.applySearch("k30")
-
-	assert.Equal(t, "k30", got.viewport.SearchTerm())
+	assert.Equal(t, "key_30", got.viewport.SearchTerm())
 	assert.Equal(t, 1, got.viewport.SearchCount())
 	assert.Positive(t, want.viewport.YOffset())
 	assert.Equal(t, want.viewport.YOffset(), got.viewport.YOffset())
@@ -379,50 +381,25 @@ func TestInitialSearchScrollsLikeALaterOne(t *testing.T) {
 func TestResubmittedSearchScrollsToMatch(t *testing.T) {
 	t.Parallel()
 
-	lines := &strings.Builder{}
-	for i := 1; i <= 40; i++ {
-		fmt.Fprintf(lines, "k%d: v\n", i)
+	search := []tea.Msg{press('/')}
+	for _, r := range "key_30" {
+		search = append(search, press(r))
 	}
 
-	var m tea.Model = newModel(&modelOptions{
-		sources: []*niceyaml.Source{
-			niceyaml.NewSourceFromString(lines.String(), niceyaml.WithName("a.yaml")),
-		},
-	})
+	search = append(search, tea.KeyPressMsg{Code: tea.KeyEnter})
 
-	press := func(keys ...tea.KeyPressMsg) model {
-		t.Helper()
+	m := newModel(&modelOptions{sources: sourcesOf(yamltest.GenerateYAML(40))})
 
-		for _, k := range keys {
-			m, _ = m.Update(k)
-		}
-
-		got, ok := m.(model)
-		require.True(t, ok)
-
-		return got
-	}
-
-	search := []tea.KeyPressMsg{
-		{Code: '/', Text: "/"},
-		{Code: 'k', Text: "k"},
-		{Code: '3', Text: "3"},
-		{Code: '0', Text: "0"},
-		{Code: tea.KeyEnter},
-	}
-
-	m, _ = m.Update(tea.WindowSizeMsg{Width: 40, Height: 14})
-
-	got := press(search...)
+	got := update(t, m, append([]tea.Msg{tea.WindowSizeMsg{Width: 40, Height: 14}}, search...)...)
 	matched := got.viewport.YOffset()
 	require.Positive(t, matched)
 
-	got = press(tea.KeyPressMsg{Code: 'g', Text: "g"})
+	got = update(t, got, press('g'))
 	require.Zero(t, got.viewport.YOffset())
 
 	// Submitting the active term again brings its match back into view.
-	got = press(search...)
-	assert.Equal(t, "k30", got.viewport.SearchTerm())
+	got = update(t, got, search...)
+	assert.Equal(t, "key_30", got.viewport.SearchTerm())
 	assert.Equal(t, matched, got.viewport.YOffset())
 }
 
@@ -435,16 +412,9 @@ func TestBaseViewHeight(t *testing.T) {
 		t.Run(fmt.Sprintf("height %d", height), func(t *testing.T) {
 			t.Parallel()
 
-			m := newModel(&modelOptions{
-				sources: []*niceyaml.Source{
-					niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n", niceyaml.WithName("a.yaml")),
-				},
-			})
+			m := newModel(&modelOptions{sources: sourcesOf("a: 1\nb: 2\nc: 3\n")})
 
-			updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: height})
-
-			got, ok := updated.(model)
-			require.True(t, ok)
+			got := update(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
 			assert.LessOrEqual(t, lipgloss.Height(got.baseView()), height)
 		})
 	}
@@ -455,18 +425,11 @@ func TestBaseViewNoRows(t *testing.T) {
 
 	// A terminal with no rows, as before the first window size arrives,
 	// renders nothing rather than a status bar that takes up rows.
-	m := newModel(&modelOptions{
-		sources: []*niceyaml.Source{
-			niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml")),
-		},
-	})
+	m := newModel(&modelOptions{sources: sourcesOf("a: 1\n")})
 
 	assert.Empty(t, m.baseView())
 
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 0})
-
-	got, ok := updated.(model)
-	require.True(t, ok)
+	got := update(t, m, tea.WindowSizeMsg{Width: 80, Height: 0})
 	assert.Empty(t, got.baseView())
 }
 
@@ -497,16 +460,9 @@ func TestBaseViewFillsTerminal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := newModel(&modelOptions{
-				sources: []*niceyaml.Source{
-					niceyaml.NewSourceFromString("a: 1\nb: [2, 3]\nc:\n  d: 4\n", niceyaml.WithName("a.yaml")),
-				},
-			})
+			m := newModel(&modelOptions{sources: sourcesOf("a: 1\nb: [2, 3]\nc:\n  d: 4\n")})
 
-			updated, _ := m.Update(tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
-
-			got, ok := updated.(model)
-			require.True(t, ok)
+			got := update(t, m, tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
 
 			rows := strings.Split(got.baseView(), "\n")
 			require.Len(t, rows, tc.height)
@@ -551,18 +507,10 @@ func TestBaseViewNoColumns(t *testing.T) {
 
 			const height = 10
 
-			m := newModel(&modelOptions{
-				sources: []*niceyaml.Source{
-					niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml")),
-					niceyaml.NewSourceFromString("a: 2\n", niceyaml.WithName("b.yaml")),
-				},
-			})
+			m := newModel(&modelOptions{sources: sourcesOf("a: 1\n", "a: 2\n")})
 			m.viewport.SetViewMode(tc.mode)
 
-			updated, _ := m.Update(tea.WindowSizeMsg{Width: tc.width, Height: height})
-
-			got, ok := updated.(model)
-			require.True(t, ok)
+			got := update(t, m, tea.WindowSizeMsg{Width: tc.width, Height: height})
 
 			rows := strings.Split(got.baseView(), "\n")
 			require.Len(t, rows, height)
@@ -644,12 +592,8 @@ func TestStatusBarWidth(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := newModel(&modelOptions{})
+			got := update(t, newModel(&modelOptions{}), tea.WindowSizeMsg{Width: tc.width, Height: 24})
 
-			updated, _ := m.Update(tea.WindowSizeMsg{Width: tc.width, Height: 24})
-
-			got, ok := updated.(model)
-			require.True(t, ok)
 			assert.Equal(t, tc.width, lipgloss.Width(got.titleLine()), "title line")
 			assert.Equal(t, tc.width, lipgloss.Width(got.textLine()), "text line")
 
@@ -669,14 +613,14 @@ func TestTitleLinePosition(t *testing.T) {
 	src := "a: " + long + "\nb: " + long + "\nc: " + long + "\n"
 
 	tcs := map[string]struct {
-		keys []tea.KeyPressMsg
+		keys []tea.Msg
 		want string
 	}{
 		"top": {
 			want: " [1] ",
 		},
 		"bottom": {
-			keys: []tea.KeyPressMsg{{Code: 'G', Text: "G"}},
+			keys: []tea.Msg{press('G')},
 			want: " [3] ",
 		},
 	}
@@ -685,20 +629,9 @@ func TestTitleLinePosition(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := newModel(&modelOptions{
-				sources: []*niceyaml.Source{
-					niceyaml.NewSourceFromString(src, niceyaml.WithName("x.yaml")),
-				},
-			})
+			m := newModel(&modelOptions{sources: sourcesOf(src)})
 
-			updated, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 8})
-
-			for _, key := range tc.keys {
-				updated, _ = updated.Update(key)
-			}
-
-			got, ok := updated.(model)
-			require.True(t, ok)
+			got := update(t, update(t, m, tea.WindowSizeMsg{Width: 60, Height: 8}), tc.keys...)
 			require.Equal(t, 3, got.viewport.TotalLineCount())
 
 			title := got.titleLine()
@@ -731,19 +664,10 @@ func TestTitleLinePositionEmpty(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			sources := make([]*niceyaml.Source, 0, len(tc.srcs))
-			for i, src := range tc.srcs {
-				sources = append(sources, niceyaml.NewSourceFromString(src,
-					niceyaml.WithName(fmt.Sprintf("%d.yaml", i))))
-			}
-
-			m := newModel(&modelOptions{sources: sources})
+			m := newModel(&modelOptions{sources: sourcesOf(tc.srcs...)})
 			m.viewport.SetViewMode(tc.mode)
 
-			updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 10})
-
-			got, ok := updated.(model)
-			require.True(t, ok)
+			got := update(t, m, tea.WindowSizeMsg{Width: 120, Height: 10})
 			require.Equal(t, 0, got.viewport.TotalLineCount())
 
 			title := got.titleLine()
@@ -783,10 +707,7 @@ func TestTextLineEscapesRevisionName(t *testing.T) {
 				},
 			})
 
-			updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
-
-			got, ok := updated.(model)
-			require.True(t, ok)
+			got := update(t, m, tea.WindowSizeMsg{Width: 120, Height: 24})
 
 			line := got.textLine()
 			assert.Contains(t, line, tc.want)
@@ -852,30 +773,14 @@ func TestThemePickerMouseWheel(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := &strings.Builder{}
-			for i := 1; i <= 100; i++ {
-				fmt.Fprintf(lines, "k%d: v\n", i)
-			}
+			m := newModel(&modelOptions{sources: sourcesOf(yamltest.GenerateYAML(100))})
 
-			var m tea.Model = newModel(&modelOptions{
-				sources: []*niceyaml.Source{
-					niceyaml.NewSourceFromString(lines.String(), niceyaml.WithName("a.yaml")),
-				},
-			})
-
-			m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-			m, _ = m.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
-
-			before, ok := m.(model)
-			require.True(t, ok)
+			before := update(t, m, tea.WindowSizeMsg{Width: 80, Height: 24}, press('t'))
 			require.True(t, before.themePicking)
 			require.Positive(t, before.themeIndex)
 			require.Less(t, before.themeIndex, len(before.themeList)-1)
 
-			m, _ = m.Update(tea.MouseWheelMsg{Button: tc.button})
-
-			got, ok := m.(model)
-			require.True(t, ok)
+			got := update(t, before, tea.MouseWheelMsg{Button: tc.button})
 
 			assert.True(t, got.themePicking)
 			assert.Zero(t, got.viewport.YOffset())
@@ -907,25 +812,12 @@ func TestThemePickerClose(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var m tea.Model = newModel(&modelOptions{
-				sources: []*niceyaml.Source{
-					niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("a.yaml")),
-				},
-			})
+			m := newModel(&modelOptions{sources: sourcesOf("a: 1\n")})
 
-			m, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-
-			before, ok := m.(model)
-			require.True(t, ok)
+			before := update(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 			require.Less(t, before.themeIndex, len(before.themeList)-2)
 
-			m, _ = m.Update(tea.KeyPressMsg{Code: 't', Text: "t"})
-			m, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-			m, _ = m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-			m, _ = m.Update(tc.key)
-
-			got, ok := m.(model)
-			require.True(t, ok)
+			got := update(t, before, press('t'), press('j'), press('j'), tc.key)
 
 			assert.False(t, got.themePicking)
 			assert.Equal(t, before.themeIndex+tc.want, got.themeIndex)
