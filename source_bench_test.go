@@ -263,8 +263,7 @@ func BenchmarkNode_DecodeReferenceAliases(b *testing.B) {
 
 		sb.WriteString("]\nitem: *base\n")
 
-		doc, err := niceyaml.NewSourceFromString(sb.String(), ref).Document()
-		require.NoError(b, err)
+		doc := yamltest.Document(b, niceyaml.NewSourceFromString(sb.String(), ref))
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -439,8 +438,7 @@ func BenchmarkNode_BindManyPaths(b *testing.B) {
 				niceyaml.AtPath(paths.Current().Child(fmt.Sprintf("k%d", i)))))
 		}
 
-		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()
-		require.NoError(b, err)
+		doc := yamltest.Document(b, niceyaml.NewSourceFromString(sb.String()))
 
 		joined := errors.Join(errs...)
 

@@ -474,8 +474,7 @@ func TestSourceError_Error_NameControl(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName(name))
 
-	doc, err := source.Document()
-	require.NoError(t, err)
+	doc := yamltest.Document(t, source)
 
 	atA := niceyaml.NewError("x", niceyaml.AtPath(paths.Doc().Child("a")))
 	atB := niceyaml.NewError("y", niceyaml.AtPath(paths.Doc().Child("b")))
@@ -9506,8 +9505,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 	t.Run("a path from a scoped document reads from the document root", func(t *testing.T) {
 		t.Parallel()
 
-		doc, err := src.Document()
-		require.NoError(t, err)
+		doc := yamltest.Document(t, src)
 
 		scoped := yamltest.At(t, doc, paths.Current().Child("a"))
 

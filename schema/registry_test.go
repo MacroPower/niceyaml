@@ -1760,8 +1760,7 @@ func TestRegistry_FileFS(t *testing.T) {
 		source, err := niceyaml.NewSourceFromFS(bundle, "configs/app.yaml")
 		require.NoError(t, err)
 
-		doc, err := source.Document()
-		require.NoError(t, err)
+		doc := yamltest.Document(t, source)
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 

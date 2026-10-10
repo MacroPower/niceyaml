@@ -325,8 +325,7 @@ func TestFilePath_FileOnDisk(t *testing.T) {
 			source, err := niceyaml.NewSourceFromFile(tc.path)
 			require.NoError(t, err)
 
-			doc, err := source.Document()
-			require.NoError(t, err)
+			doc := yamltest.Document(t, source)
 
 			assert.True(t, match(t, under, doc))
 			assert.True(t, match(t, anyDepth, doc))
