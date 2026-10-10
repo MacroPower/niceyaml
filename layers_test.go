@@ -457,13 +457,12 @@ func TestNewSourceFromLayers(t *testing.T) {
 	t.Run("a Node whose document did not parse returns its error", func(t *testing.T) {
 		t.Parallel()
 
-		docs := niceyaml.NewSourceFromString("server: [\n", niceyaml.WithName("prod.yaml")).AllDocuments()
-		require.Len(t, docs, 1)
-		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
+		broken := yamltest.UnparsedDocument(t, "server: [\n", niceyaml.WithName("prod.yaml"))
+		require.ErrorIs(t, broken.Err(), niceyaml.ErrSyntax)
 
-		merged, err := niceyaml.NewSourceFromLayers(t.Context(), layerNodes(t, layerBadPort)[0], docs[0])
+		merged, err := niceyaml.NewSourceFromLayers(t.Context(), layerNodes(t, layerBadPort)[0], broken)
 		require.EqualError(t, err, "prod.yaml:1:9: "+unclosedSequence)
-		require.ErrorIs(t, err, docs[0].Err())
+		require.ErrorIs(t, err, broken.Err())
 		assert.Nil(t, merged)
 	})
 
@@ -1682,8 +1681,7 @@ func TestNode_Origin(t *testing.T) {
 		assert.Same(t, scoped, origin)
 
 		// A document that did not parse is no merged document either.
-		broken := niceyaml.NewSourceFromString("server: [\n").AllDocuments()[0]
-		require.Error(t, broken.Err())
+		broken := yamltest.UnparsedDocument(t, "server: [\n")
 
 		origin, err = broken.Origin()
 		require.NoError(t, err)

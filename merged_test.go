@@ -1308,12 +1308,11 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 		requireLayerBinds(t, layers, map[string]string{"$.a": "base.yaml:2:4"})
 
 		// A layer that does not allow one fails as it does alone.
-		strict := niceyaml.NewSourceFromString("a: 1\na: 2\n", niceyaml.WithName("prod.yaml")).AllDocuments()
-		require.Len(t, strict, 1)
+		strict := yamltest.UnparsedDocument(t, "a: 1\na: 2\n", niceyaml.WithName("prod.yaml"))
 
-		_, err := niceyaml.NewSourceFromLayers(t.Context(), base, strict[0])
+		_, err := niceyaml.NewSourceFromLayers(t.Context(), base, strict)
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
-		require.ErrorIs(t, err, strict[0].Err())
+		require.ErrorIs(t, err, strict.Err())
 	})
 
 	t.Run("a layer past the alias limit returns the error of its decode", func(t *testing.T) {

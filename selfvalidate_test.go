@@ -3084,11 +3084,10 @@ func TestNode_SelfValidate_Node(t *testing.T) {
 			node: func(t *testing.T) *niceyaml.Node {
 				t.Helper()
 
-				docs := niceyaml.NewSourceFromString("db: [\n", niceyaml.WithName("bad.yaml")).AllDocuments()
-				require.Len(t, docs, 1)
-				require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
+				broken := yamltest.UnparsedDocument(t, "db: [\n", niceyaml.WithName("bad.yaml"))
+				require.ErrorIs(t, broken.Err(), niceyaml.ErrSyntax)
 
-				return docs[0]
+				return broken
 			},
 			v:          &layeredConfig{},
 			unresolved: niceyaml.ErrPathNeedsDocument,
