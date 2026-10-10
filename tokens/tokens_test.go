@@ -43,21 +43,6 @@ func collectReset(seq iter.Seq2[int, token.Tokens]) []token.Tokens {
 	return result
 }
 
-// assertLinked asserts that Prev and Next link each of tks to its neighbors
-// in order and that the chain stops at both ends.
-func assertLinked(t *testing.T, tks token.Tokens) {
-	t.Helper()
-
-	require.NotEmpty(t, tks)
-	assert.Nil(t, tks[0].Prev, "first Prev")
-	assert.Nil(t, tks[len(tks)-1].Next, "last Next")
-
-	for i := 1; i < len(tks); i++ {
-		assert.Same(t, tks[i-1], tks[i].Prev, "token %d %q Prev", i, tks[i].Origin)
-		assert.Same(t, tks[i], tks[i-1].Next, "token %d %q Next", i-1, tks[i-1].Origin)
-	}
-}
-
 func TestTokenize_TabIndentation(t *testing.T) {
 	t.Parallel()
 
@@ -176,7 +161,7 @@ func TestTokenize_TabIndentsQuotedLine(t *testing.T) {
 			assert.Equal(t, cmp.Or(tc.want, tc.input), yamltest.DumpTokenOrigins(tks))
 			require.NoError(t, yamltest.ValidateLines(line.NewLines(tks)))
 
-			assertLinked(t, tks)
+			require.NoError(t, yamltest.ValidateTokenLinks(tks))
 		})
 	}
 }
@@ -665,7 +650,7 @@ func TestTokenize_OpenFlowAtMarker(t *testing.T) {
 			}
 
 			// The tokens on both sides of the marker link to each other.
-			assertLinked(t, got)
+			require.NoError(t, yamltest.ValidateTokenLinks(got))
 		})
 	}
 }
@@ -1224,7 +1209,7 @@ func TestForParser_Links(t *testing.T) {
 	got := tokens.ForParser(append(token.Tokens{nil}, docs[1]...))
 	require.Len(t, got, len(docs[1]))
 
-	assertLinked(t, got)
+	require.NoError(t, yamltest.ValidateTokenLinks(got))
 }
 
 func TestSplitDocuments(t *testing.T) {
@@ -1729,8 +1714,8 @@ func TestResetPositions_Text(t *testing.T) {
 
 		// The clones link to each other inside a document, and the chain
 		// of each document stops at both of its ends.
-		assertLinked(t, docs[0])
-		assertLinked(t, docs[1])
+		require.NoError(t, yamltest.ValidateTokenLinks(docs[0]))
+		require.NoError(t, yamltest.ValidateTokenLinks(docs[1]))
 
 		// The originals keep their links across the boundary.
 		assert.Same(t, orig[4], orig[3].Next)

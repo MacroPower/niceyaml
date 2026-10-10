@@ -1,7 +1,6 @@
 package line_test
 
 import (
-	"fmt"
 	"iter"
 	"math"
 	"os"
@@ -502,7 +501,7 @@ func TestNewLines_LineNumbers(t *testing.T) {
 			// them across the gaps.
 			gotTokens := lines.Tokens()
 			assert.Equal(t, yamltest.DumpTokenOrigins(tc.tks), yamltest.DumpTokenOrigins(gotTokens))
-			assertLinked(t, "tokens", gotTokens)
+			require.NoError(t, yamltest.ValidateTokenLinks(gotTokens))
 		})
 	}
 }
@@ -527,25 +526,6 @@ func joinTokens(streams ...token.Tokens) token.Tokens {
 	}
 
 	return joined
-}
-
-// assertLinked asserts that Prev and Next link each of tks to its neighbors
-// in order and that the chain stops at both ends. The what argument names
-// tks in the failure messages.
-func assertLinked(t *testing.T, what string, tks token.Tokens) {
-	t.Helper()
-
-	if len(tks) == 0 {
-		return
-	}
-
-	assert.Nil(t, tks[0].Prev, "%s: first Prev", what)
-	assert.Nil(t, tks[len(tks)-1].Next, "%s: last Next", what)
-
-	for i := range len(tks) - 1 {
-		assert.Same(t, tks[i+1], tks[i].Next, "%s: token %d Next", what, i)
-		assert.Same(t, tks[i], tks[i+1].Prev, "%s: token %d Prev", what, i+1)
-	}
 }
 
 func TestNewLines_DroppedNewline(t *testing.T) {
@@ -727,7 +707,7 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 				parts := ln.Tokens()
 				require.NotEmpty(t, parts, "line %d", ln.Number())
 
-				assertLinked(t, fmt.Sprintf("line %d", ln.Number()), parts)
+				require.NoError(t, yamltest.ValidateTokenLinks(parts), "line %d", ln.Number())
 			}
 		})
 	}
