@@ -970,7 +970,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			P2 sharedParent `yaml:"p2"`
 		}
 
-		dd := yamltest.FirstDocument(t, "p1: {x: &x {name: n, price: -1}}\np2: {x: *x}\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"p1: {x: &x {name: n, price: -1}}",
+			"p2: {x: *x}",
+		))
 
 		var got shared
 
@@ -1242,7 +1245,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("keys of one text order by the types they hold", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "1: {n: -1}\n\"1\": {n: -2}\n", niceyaml.WithAllowDuplicateKeys(true))
+		dd := yamltest.FirstDocument(
+			t,
+			stringtest.LinesLF("1: {n: -1}", `"1": {n: -2}`),
+			niceyaml.WithAllowDuplicateKeys(true),
+		)
 
 		// The string key sorts before the uint64 key.
 		want := stringtest.JoinLF(
@@ -1500,12 +1507,18 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:    "4:13: $.m.n.price: negative price",
 			},
 			"time with an offset of whole hours": {
-				input:   "t:\n  2024-01-01T00:00:00+05:00: {price: -1}\n",
+				input: stringtest.LinesLF(
+					"t:",
+					"  2024-01-01T00:00:00+05:00: {price: -1}",
+				),
 				targets: []any{new(named)},
 				want:    "2:38: $.t.'2024-01-01T00:00:00+05:00'.price: negative price",
 			},
 			"time with an offset of part of an hour": {
-				input:   "t:\n  2024-01-01T00:00:00+05:30: {price: -1}\n",
+				input: stringtest.LinesLF(
+					"t:",
+					"  2024-01-01T00:00:00+05:30: {price: -1}",
+				),
 				targets: []any{new(named)},
 				want:    "2:38: $.t.'2024-01-01T00:00:00+05:30'.price: negative price",
 			},
@@ -1513,22 +1526,34 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			// value, the later entry holds the value the decode keeps, and
 			// the error reports its text.
 			"merge after a key of the mapping": {
-				input:   "b: &b {0x10: {price: -1}}\nm: {16: {price: 1}, <<: *b}\n",
+				input: stringtest.LinesLF(
+					"b: &b {0x10: {price: -1}}",
+					"m: {16: {price: 1}, <<: *b}",
+				),
 				targets: []any{new(merged)},
 				want:    "1:22: $.m.0x10.price: negative price",
 			},
 			"key of the mapping after a merge": {
-				input:   "b: &b {0x10: {price: 1}}\nm: {<<: *b, 16: {price: -1}}\n",
+				input: stringtest.LinesLF(
+					"b: &b {0x10: {price: 1}}",
+					"m: {<<: *b, 16: {price: -1}}",
+				),
 				targets: []any{new(merged)},
 				want:    "2:25: $.m.16.price: negative price",
 			},
 			"merge after a key of the mapping with the same spelling": {
-				input:   "b: &b {16: {price: -1}}\nm: {16: {price: 1}, <<: *b}\n",
+				input: stringtest.LinesLF(
+					"b: &b {16: {price: -1}}",
+					"m: {16: {price: 1}, <<: *b}",
+				),
 				targets: []any{new(merged)},
 				want:    "1:20: $.m.16.price: negative price",
 			},
 			"key of the mapping with the same spelling after a merge": {
-				input:   "b: &b {16: {price: 1}}\nm: {<<: *b, 16: {price: -1}}\n",
+				input: stringtest.LinesLF(
+					"b: &b {16: {price: 1}}",
+					"m: {<<: *b, 16: {price: -1}}",
+				),
 				targets: []any{new(merged)},
 				want:    "2:25: $.m.16.price: negative price",
 			},
@@ -1557,13 +1582,13 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:       "1:27: $.m.0x10.price: negative price",
 			},
 			"merge inside a source": {
-				input:      "s: &s {<<: *r}\nm: {0x10: {price: 1}, <<: *s}\n",
+				input:      stringtest.LinesLF("s: &s {<<: *r}", "m: {0x10: {price: 1}, <<: *s}"),
 				targets:    []any{new(merged)},
 				references: "r: &r {16: {price: -1}}\n",
 				want:       "$.m.16.price: negative price",
 			},
 			"resolvable merge after the merge": {
-				input:      "b: &b {0x10: {price: -1}}\nm: {<<: *r, <<: *b}\n",
+				input:      stringtest.LinesLF("b: &b {0x10: {price: -1}}", "m: {<<: *r, <<: *b}"),
 				targets:    []any{new(merged)},
 				references: "r: &r {16: {price: 1}}\n",
 				want:       "1:22: $.m.0x10.price: negative price",
@@ -1593,7 +1618,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		// A key a merge brings in reports the text of the mapping it
 		// comes from.
-		dd := yamltest.FirstDocument(t, "base: &b {0x10: {price: -1}}\nm: {<<: *b}\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"base: &b {0x10: {price: -1}}",
+			"m: {<<: *b}",
+		))
 
 		_, err := dd.Decode[map[string]map[float64]item](t.Context())
 
@@ -1667,12 +1695,18 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				},
 			},
 			"hexadecimal int": {
-				input: "i:\n  0x10: {n: -1}\n",
-				want:  []string{"2:13: $.i.0x10.n: negative -1"},
+				input: stringtest.LinesLF(
+					"i:",
+					"  0x10: {n: -1}",
+				),
+				want: []string{"2:13: $.i.0x10.n: negative -1"},
 			},
 			"NaN": {
-				input: "f:\n  .nan: {n: -1}\n",
-				want:  []string{"2:13: $.f.'.nan'.n: negative -1"},
+				input: stringtest.LinesLF(
+					"f:",
+					"  .nan: {n: -1}",
+				),
+				want: []string{"2:13: $.f.'.nan'.n: negative -1"},
 			},
 			"null beside a string": {
 				input: stringtest.LinesLF(
@@ -1686,8 +1720,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				},
 			},
 			"anchored null": {
-				input: "s:\n  &k ~: {n: -1}\n",
-				want:  []string{"2:13: $.s.'~'.n: negative -1"},
+				input: stringtest.LinesLF(
+					"s:",
+					"  &k ~: {n: -1}",
+				),
+				want: []string{"2:13: $.s.'~'.n: negative -1"},
 			},
 			"keys of one value": {
 				input: stringtest.LinesLF(
@@ -1738,7 +1775,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:   []string{"1:1: $.70000~: port out of range"},
 			},
 			"map in a field": {
-				input:  "m:\n  70000: x\n",
+				input: stringtest.LinesLF(
+					"m:",
+					"  70000: x",
+				),
 				target: new(byPort),
 				want:   []string{"2:3: $.m.70000~: port out of range"},
 			},
@@ -2087,7 +2127,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:   []string{"3:5: $.a.b.70000~: port out of range"},
 			},
 			"merge below a map": {
-				input:  "defs: {base: &b {0x10: {price: -1}}}\nm: {n: {<<: *b}}\n",
+				input: stringtest.LinesLF(
+					"defs: {base: &b {0x10: {price: -1}}}",
+					"m: {n: {<<: *b}}",
+				),
 				target: new(map[string]map[string]map[float64]item),
 				want: []string{
 					"1:32: $.defs.base.0x10.price: negative price",
@@ -2156,8 +2199,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			err   string
 		}{
 			"passes": {
-				input: "m:\n  web: {price: 1}\n",
-				want:  map[spacedKey]item{"prod/web": {Price: 1}},
+				input: stringtest.LinesLF(
+					"m:",
+					"  web: {price: 1}",
+				),
+				want: map[spacedKey]item{"prod/web": {Price: 1}},
 			},
 			"fails": {
 				input: stringtest.LinesLF(
@@ -2357,12 +2403,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}{
 			"map of strings": {
 				target: &labels{},
-				input:  "a: x\nb: \"\"\n",
+				input:  stringtest.LinesLF("a: x", `b: ""`),
 				want:   "2:4: $.b: empty label",
 			},
 			"map of strings behind a field": {
 				target: &withLabels{},
-				input:  "labels: {a: x, b: \"\"}\n",
+				input:  `labels: {a: x, b: ""}` + "\n",
 				want:   "1:19: $.labels.b: empty label",
 			},
 			"map of strings in a map of any the caller filled": {
@@ -2422,7 +2468,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		_, err := dd.Decode[nothingJoined](t.Context())
 		require.Error(t, err)
 
-		dd = yamltest.FirstDocument(t, "hours:\n  open: x\n")
+		dd = yamltest.FirstDocument(t, stringtest.LinesLF(
+			"hours:",
+			"  open: x",
+		))
 
 		_, err = dd.Decode[withNothingJoined](t.Context())
 		require.Error(t, err)
@@ -2573,8 +2622,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		// Go-yaml sets an ast.Node to the node itself, whose tokens link to
 		// every other token of the file, so the walk stops at the node
 		// rather than read the keys after it.
-		input := "hours: {open: \"09:00\", close: \"17:00\"}\nspec:\n  a: 1\n" + yamltest.GenerateLines(200, "k%d: v")
-		dd := yamltest.FirstDocument(t, input)
+		opened := `hours: {open: "09:00", close: "17:00"}` + "\n"
+		dd := yamltest.FirstDocument(t, opened+stringtest.LinesLF(
+			"spec:",
+			"  a: 1",
+		)+yamltest.GenerateLines(200, "k%d: v"))
 
 		got, err := dd.Decode[withSpec](t.Context())
 		require.NoError(t, err)
@@ -2584,7 +2636,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		// The walk reaches no value below a node, such as a validator a
 		// tree built by hand holds.
-		dd = yamltest.FirstDocument(t, "hours: {open: \"09:00\", close: \"17:00\"}\n")
+		dd = yamltest.FirstDocument(t, opened)
 
 		built := withSpec{Spec: &ast.MappingNode{
 			Values: []*ast.MappingValueNode{{Value: walkedNode{}}},
@@ -2621,11 +2673,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			err   string
 		}{
 			"embedded ast.Node": {
-				input: "node: {hours: {open: \"17:00\", close: \"09:00\"}}\n",
+				input: `node: {hours: {open: "17:00", close: "09:00"}}` + "\n",
 				err:   "1:38: $.node.hours.close: closes before it opens",
 			},
 			"embedded *ast.StringNode": {
-				input: "string: {hours: {open: \"17:00\", close: \"09:00\"}}\n",
+				input: `string: {hours: {open: "17:00", close: "09:00"}}` + "\n",
 				err:   "1:40: $.string.hours.close: closes before it opens",
 			},
 		}
@@ -3191,7 +3243,10 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 		},
 		"key an alias reads from a reference document": {
 			value: func() any { return new(nested) },
-			input: "by_id:\n  *k : {price: -1}\n",
+			input: stringtest.LinesLF(
+				"by_id:",
+				"  *k : {price: -1}",
+			),
 			source: []niceyaml.SourceOption{
 				niceyaml.WithReferences(niceyaml.NewSourceFromString("k: &k 0x10\n")),
 			},
@@ -3218,7 +3273,7 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 		},
 		"nothing fails": {
 			value: func() any { return new(nested) },
-			input: "hours: {open: \"09:00\", close: \"17:00\"}\n",
+			input: `hours: {open: "09:00", close: "17:00"}` + "\n",
 		},
 	}
 
@@ -3812,7 +3867,10 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 		},
 		"values that pass": {
 			target: func() any { return new(nestedFleet) },
-			input:  "servers:\n  - {host: a, limit: {n: 1}}\n",
+			input: stringtest.LinesLF(
+				"servers:",
+				"  - {host: a, limit: {n: 1}}",
+			),
 		},
 		"a struct parsed from text reports its own error at the text": {
 			target:  func() any { return new(withAddr) },
@@ -3896,8 +3954,11 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 			nearest: map[string]string{"$.limits[1].n": "$.limits"},
 		},
 		"a map built from a list binds at the list": {
-			target:  func() any { return new(map[string]serversByHost) },
-			input:   "servers:\n  - {host: a, port: 70000}\n",
+			target: func() any { return new(map[string]serversByHost) },
+			input: stringtest.LinesLF(
+				"servers:",
+				"  - {host: a, port: 70000}",
+			),
 			err:     "app.yaml:1:1: $.servers.a.port: port out of range",
 			nearest: map[string]string{"$.servers.a.port": "$.servers"},
 		},
@@ -3957,7 +4018,7 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 					Values: []*ast.MappingValueNode{{Value: walkedNode{}}},
 				}}}
 			},
-			input: "spec: {hours: {open: \"09:00\", close: \"17:00\"}}\n",
+			input: `spec: {hours: {open: "09:00", close: "17:00"}}` + "\n",
 		},
 	}
 
