@@ -460,104 +460,6 @@ func TestErrorTree_New_MultiErrorCalls(t *testing.T) {
 	}
 }
 
-func TestErrorTree_New_MultiWrap(t *testing.T) {
-	t.Parallel()
-
-	errA := errors.New("first")
-	errB := errors.New("second")
-
-	tcs := map[string]struct {
-		err  error
-		want niceyaml.ErrorTree
-	}{
-		"wrapper with two verbs over plain errors is one node": {
-			err:  fmt.Errorf("parse path: %w: %w", errA, errB),
-			want: niceyaml.ErrorTree{Label: "parse path: first: second"},
-		},
-		"wrapper with two verbs goes on through its one branch with children": {
-			err: fmt.Errorf("%w: %w", errA, niceyaml.NewError("parent", niceyaml.WithDetails(errB))),
-			want: niceyaml.ErrorTree{
-				Label:    "first: parent",
-				Children: []niceyaml.ErrorTree{{Label: "second"}},
-			},
-		},
-		"wrapper with two verbs keeps its own text": {
-			err: fmt.Errorf("parse path: %w; %w",
-				niceyaml.NewError("x", niceyaml.WithDetails(errA)),
-				niceyaml.NewError("y", niceyaml.WithDetails(errB)),
-			),
-			want: niceyaml.ErrorTree{
-				Label: "parse path: x; y",
-				Children: []niceyaml.ErrorTree{
-					{Label: "x", Children: []niceyaml.ErrorTree{{Label: "first"}}},
-					{Label: "y", Children: []niceyaml.ErrorTree{{Label: "second"}}},
-				},
-			},
-		},
-		"multi-error of its own type keeps each branch": {
-			err: violationsError{errA, errB},
-			want: niceyaml.ErrorTree{
-				Label: "2 violations",
-				Children: []niceyaml.ErrorTree{
-					{Label: "first"},
-					{Label: "second"},
-				},
-			},
-		},
-		"bound multi-error of its own type keeps each branch": {
-			err: yamltest.Bind(t, niceyaml.NewSourceFromString("a: 1\n", niceyaml.WithName("f.yaml")),
-				violationsError{errA, errB}),
-			want: niceyaml.ErrorTree{
-				Label: "f.yaml: 2 violations",
-				Children: []niceyaml.ErrorTree{
-					{Label: "first"},
-					{Label: "second"},
-				},
-			},
-		},
-		"join below a wrapper yields one child per branch": {
-			err: fmt.Errorf("while checking: %w", errors.Join(errA, errB)),
-			want: niceyaml.ErrorTree{
-				Label: "while checking:",
-				Children: []niceyaml.ErrorTree{
-					{Label: "first"},
-					{Label: "second"},
-				},
-			},
-		},
-		"children that add nothing leave no children": {
-			err:  niceyaml.NewError("outer", niceyaml.WithDetails(niceyaml.NewError(""))),
-			want: niceyaml.ErrorTree{Label: "outer"},
-		},
-		"join at the root is textless": {
-			err: errors.Join(errA, errB),
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "first"},
-					{Label: "second"},
-				},
-			},
-		},
-		"join with a leading nil branch is textless": {
-			err: sparseJoinError{errs: []error{nil, errA, errB}},
-			want: niceyaml.ErrorTree{
-				Children: []niceyaml.ErrorTree{
-					{Label: "first"},
-					{Label: "second"},
-				},
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, textTree(niceyaml.NewErrorTree(tc.err)))
-		})
-	}
-}
-
 func TestErrorTree_New(t *testing.T) {
 	t.Parallel()
 
@@ -566,6 +468,9 @@ func TestErrorTree_New(t *testing.T) {
 	wide := niceyaml.NewSourceFromString("a: hello world\nb: 2\n", niceyaml.WithName("f.yaml"))
 
 	badA, badB, badC := badKeyError("a"), badKeyError("b"), badKeyError("c")
+
+	errA := errors.New("first")
+	errB := errors.New("second")
 
 	tcs := map[string]struct {
 		err  error
@@ -1158,6 +1063,82 @@ func TestErrorTree_New(t *testing.T) {
 				},
 			},
 			multiLine: true,
+		},
+		"wrapper with two verbs over plain errors is one node": {
+			err:  fmt.Errorf("parse path: %w: %w", errA, errB),
+			want: niceyaml.ErrorTree{Label: "parse path: first: second"},
+		},
+		"wrapper with two verbs goes on through its one branch with children": {
+			err: fmt.Errorf("%w: %w", errA, niceyaml.NewError("parent", niceyaml.WithDetails(errB))),
+			want: niceyaml.ErrorTree{
+				Label:    "first: parent",
+				Children: []niceyaml.ErrorTree{{Label: "second"}},
+			},
+		},
+		"wrapper with two verbs keeps its own text": {
+			err: fmt.Errorf("parse path: %w; %w",
+				niceyaml.NewError("x", niceyaml.WithDetails(errA)),
+				niceyaml.NewError("y", niceyaml.WithDetails(errB)),
+			),
+			want: niceyaml.ErrorTree{
+				Label: "parse path: x; y",
+				Children: []niceyaml.ErrorTree{
+					{Label: "x", Children: []niceyaml.ErrorTree{{Label: "first"}}},
+					{Label: "y", Children: []niceyaml.ErrorTree{{Label: "second"}}},
+				},
+			},
+		},
+		"multi-error of its own type keeps each branch": {
+			err: violationsError{errA, errB},
+			want: niceyaml.ErrorTree{
+				Label: "2 violations",
+				Children: []niceyaml.ErrorTree{
+					{Label: "first"},
+					{Label: "second"},
+				},
+			},
+		},
+		"bound multi-error of its own type keeps each branch": {
+			err: yamltest.Bind(t, source, violationsError{errA, errB}),
+			want: niceyaml.ErrorTree{
+				Label: "f.yaml: 2 violations",
+				Children: []niceyaml.ErrorTree{
+					{Label: "first"},
+					{Label: "second"},
+				},
+			},
+		},
+		"join below a wrapper yields one child per branch": {
+			err: fmt.Errorf("while checking: %w", errors.Join(errA, errB)),
+			want: niceyaml.ErrorTree{
+				Label: "while checking:",
+				Children: []niceyaml.ErrorTree{
+					{Label: "first"},
+					{Label: "second"},
+				},
+			},
+		},
+		"children that add nothing leave no children": {
+			err:  niceyaml.NewError("outer", niceyaml.WithDetails(niceyaml.NewError(""))),
+			want: niceyaml.ErrorTree{Label: "outer"},
+		},
+		"join at the root is textless": {
+			err: errors.Join(errA, errB),
+			want: niceyaml.ErrorTree{
+				Children: []niceyaml.ErrorTree{
+					{Label: "first"},
+					{Label: "second"},
+				},
+			},
+		},
+		"join with a leading nil branch is textless": {
+			err: sparseJoinError{errs: []error{nil, errA, errB}},
+			want: niceyaml.ErrorTree{
+				Children: []niceyaml.ErrorTree{
+					{Label: "first"},
+					{Label: "second"},
+				},
+			},
 		},
 	}
 
