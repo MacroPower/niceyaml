@@ -5129,16 +5129,6 @@ func TestDocument_At(t *testing.T) {
 		}
 	})
 
-	t.Run("key below a comment under an anchor with no value", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "a: &x\n# c\nb: 1\n")
-
-		got, err := yamltest.At(t, dd, paths.Current().Child("b")).Decode[int](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, 1, got)
-	})
-
 	t.Run("missing path returns ErrNotFound", func(t *testing.T) {
 		t.Parallel()
 
@@ -5228,60 +5218,6 @@ func TestDocument_At(t *testing.T) {
 		assert.Zero(t, got)
 	})
 
-	t.Run("alias to an anchor outside the value resolves", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, stringtest.Input(`
-			base: &b
-			  x: 1
-			item:
-			  ref: *b
-			list:
-			  - *b
-		`))
-
-		got, err := yamltest.At(t, dd, paths.Current().Child("item")).Decode[map[string]any](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"ref": map[string]any{"x": uint64(1)}}, got)
-
-		list, err := yamltest.At(t, dd, paths.Current().Child("list")).Decode[[]map[string]int](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, []map[string]int{{"x": 1}}, list)
-	})
-
-	t.Run("a failure elsewhere in the document does not break Get", func(t *testing.T) {
-		t.Parallel()
-
-		// Resolving the alias under $.sub first decodes the anchors of the
-		// document. The undefined alias under $.bad fails to decode, and
-		// the value the caller asked for still comes back.
-		tcs := map[string]struct {
-			input string
-		}{
-			"failure after the anchor": {
-				input: "a: &x 1\nsub: {k: *x}\nbad: *nope\n",
-			},
-			"failure before the anchor": {
-				input: "bad: *nope\na: &x 1\nsub: {k: *x}\n",
-			},
-			"failure inside another anchor": {
-				input: "b: &y [*nope]\na: &x 1\nsub: {k: *x}\n",
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				dd := yamltest.FirstDocument(t, tc.input)
-
-				got, err := yamltest.At(t, dd, paths.Current().Child("sub")).Decode[map[string]any](t.Context())
-				require.NoError(t, err)
-				assert.Equal(t, map[string]any{"k": uint64(1)}, got)
-			})
-		}
-	})
-
 	t.Run("alias resolves to the anchor before it when a later anchor reuses the name", func(t *testing.T) {
 		t.Parallel()
 
@@ -5341,6 +5277,38 @@ func TestDocument_At(t *testing.T) {
 			path  paths.Path
 			want  any
 		}{
+			"alias in a mapping to an anchor outside it": {
+				input: "base: &b\n  x: 1\nitem:\n  ref: *b\nlist:\n  - *b\n",
+				path:  paths.Current().Child("item"),
+				want:  map[string]any{"ref": map[string]any{"x": uint64(1)}},
+			},
+			"alias in a sequence to an anchor outside it": {
+				input: "base: &b\n  x: 1\nitem:\n  ref: *b\nlist:\n  - *b\n",
+				path:  paths.Current().Child("list"),
+				want:  []any{map[string]any{"x": uint64(1)}},
+			},
+			"key below a comment under an anchor with no value": {
+				input: "a: &x\n# c\nb: 1\n",
+				path:  paths.Current().Child("b"),
+				want:  uint64(1),
+			},
+			// The undefined alias under $.bad fails to decode, and the
+			// value the caller asked for still comes back.
+			"undefined alias after the anchor": {
+				input: "a: &x 1\nsub: {k: *x}\nbad: *nope\n",
+				path:  paths.Current().Child("sub"),
+				want:  map[string]any{"k": uint64(1)},
+			},
+			"undefined alias before the anchor": {
+				input: "bad: *nope\na: &x 1\nsub: {k: *x}\n",
+				path:  paths.Current().Child("sub"),
+				want:  map[string]any{"k": uint64(1)},
+			},
+			"undefined alias inside another anchor": {
+				input: "b: &y [*nope]\na: &x 1\nsub: {k: *x}\n",
+				path:  paths.Current().Child("sub"),
+				want:  map[string]any{"k": uint64(1)},
+			},
 			"merge key in each list entry": {
 				input: "defaults: &d\n  a: 1\nitems:\n  - <<: *d\n    name: x\n  - <<: *d\n    name: y\n",
 				path:  paths.Current().Child("items").Index(1),
