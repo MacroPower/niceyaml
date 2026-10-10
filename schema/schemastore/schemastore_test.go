@@ -63,6 +63,15 @@ var (
 			},
 		},
 	}
+
+	// A catalog whose first entry matches every YAML file and whose second
+	// matches one file name.
+	layeredCatalog = schemastore.Catalog{
+		Schemas: []schemastore.CatalogEntry{
+			{Name: "Generic", URL: "https://example.com/generic.json", FileMatch: []string{"*.yaml"}},
+			{Name: "Specific", URL: "https://example.com/specific.json", FileMatch: []string{"myapp.yaml"}},
+		},
+	}
 )
 
 func TestSchemaStore_FindMatch(t *testing.T) {
@@ -332,28 +341,13 @@ func TestSchemaStore_FindMatchDoesNotAliasCatalog(t *testing.T) {
 
 	// The returned entry must not share its pattern slice with the cached
 	// catalog, or a caller writing to it changes which entry matches next.
-	catalog := schemastore.Catalog{
-		Schemas: []schemastore.CatalogEntry{
-			{
-				Name:      "Generic",
-				URL:       "https://example.com/generic.json",
-				FileMatch: []string{"*.yaml"},
-			},
-			{
-				Name:      "Specific",
-				URL:       "https://example.com/specific.json",
-				FileMatch: []string{"myapp.yaml"},
-			},
-		},
-	}
-
-	store := newStore(respondCatalog(t, catalog).Client())
+	store := newStore(respondCatalog(t, layeredCatalog).Client())
 
 	entry, err := store.FindMatch(t.Context(), "/x/other.yaml")
 	require.NoError(t, err)
 	// The entry equals the catalog's, so no state the store keeps for
 	// matching reaches the caller.
-	require.Equal(t, catalog.Schemas[0], entry)
+	require.Equal(t, layeredCatalog.Schemas[0], entry)
 
 	entry.FileMatch[0] = "*.json"
 
@@ -369,13 +363,6 @@ func TestSchemaStore_FindMatchRepeatedPath(t *testing.T) {
 	// A registry looks up a file's path once per document, so each lookup
 	// must give what a first lookup of its path gives, whatever lookups
 	// came before it.
-	catalog := schemastore.Catalog{
-		Schemas: []schemastore.CatalogEntry{
-			{Name: "Generic", URL: "https://example.com/generic.json", FileMatch: []string{"*.yaml"}},
-			{Name: "Specific", URL: "https://example.com/specific.json", FileMatch: []string{"myapp.yaml"}},
-		},
-	}
-
 	wd, err := os.Getwd()
 	require.NoError(t, err)
 
@@ -406,7 +393,7 @@ func TestSchemaStore_FindMatchRepeatedPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			store := newStore(respondCatalog(t, catalog).Client())
+			store := newStore(respondCatalog(t, layeredCatalog).Client())
 
 			for i, path := range tc.paths {
 				entry, err := store.FindMatch(t.Context(), path)
