@@ -581,7 +581,7 @@ func TestSchemaStore_ConcurrentFirstFetch(t *testing.T) {
 		// durably blocked inside the bubble, so a stub transport stands in
 		// for the server.
 		client := &http.Client{
-			Transport: &roundTripperFunc{fn: func(r *http.Request) (*http.Response, error) {
+			Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 				fetchCount.Add(1)
 				<-release // Hold the fetch open until every caller waits on it.
 
@@ -590,7 +590,7 @@ func TestSchemaStore_ConcurrentFirstFetch(t *testing.T) {
 					Body:       io.NopCloser(bytes.NewReader(data)),
 					Request:    r,
 				}, nil
-			}},
+			}),
 		}
 
 		store := schemastore.New(
@@ -910,11 +910,11 @@ func TestSchemaStore_FetchPanicReachesCaller(t *testing.T) {
 				var fetchCount atomic.Int32
 
 				client := &http.Client{
-					Transport: &roundTripperFunc{fn: func(*http.Request) (*http.Response, error) {
+					Transport: yamltest.RoundTripFunc(func(*http.Request) (*http.Response, error) {
 						fetchCount.Add(1)
 
 						panic("transport bug")
-					}},
+					}),
 				}
 
 				return []schemastore.Option{
@@ -980,12 +980,12 @@ func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
 				var fetchCount atomic.Int32
 
 				client := &http.Client{
-					Transport: &roundTripperFunc{fn: func(*http.Request) (*http.Response, error) {
+					Transport: yamltest.RoundTripFunc(func(*http.Request) (*http.Response, error) {
 						fetchCount.Add(1)
 						runtime.Goexit()
 
 						panic("unreachable")
-					}},
+					}),
 				}
 
 				return []schemastore.Option{
@@ -1064,7 +1064,7 @@ func TestSchemaStore_RecordedFetchPanicLoadsAsError(t *testing.T) {
 
 			store := schemastore.New(
 				schemastore.WithCatalogURL("http://example.com/catalog.json"),
-				schemastore.WithHTTPClient(&http.Client{Transport: &roundTripperFunc{fn: tc.fn}}),
+				schemastore.WithHTTPClient(&http.Client{Transport: yamltest.RoundTripFunc(tc.fn)}),
 			)
 
 			// The first lookup waits on the fetch and raises its panic or
@@ -1340,12 +1340,12 @@ func TestSchemaStore_FetchError(t *testing.T) {
 				t.Helper()
 
 				client := &http.Client{
-					Transport: &roundTripperFunc{fn: func(_ *http.Request) (*http.Response, error) {
+					Transport: yamltest.RoundTripFunc(func(_ *http.Request) (*http.Response, error) {
 						return &http.Response{
 							StatusCode: http.StatusOK,
 							Body:       io.NopCloser(&errorReader{}),
 						}, nil
-					}},
+					}),
 				}
 
 				return []schemastore.Option{
@@ -1544,7 +1544,7 @@ func TestSchemaStore_RefetchFails(t *testing.T) {
 
 	// The transport succeeds the first time and fails on later requests.
 	client := &http.Client{
-		Transport: &roundTripperFunc{fn: func(r *http.Request) (*http.Response, error) {
+		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 			if requestCount.Add(1) > 1 {
 				return &http.Response{
 					StatusCode: http.StatusInternalServerError,
@@ -1558,7 +1558,7 @@ func TestSchemaStore_RefetchFails(t *testing.T) {
 				Body:       io.NopCloser(bytes.NewReader(data)),
 				Request:    r,
 			}, nil
-		}},
+		}),
 	}
 
 	// Use short TTL so cache expires quickly.
@@ -1644,7 +1644,7 @@ func TestSchemaStore_CatalogWithoutSchemas(t *testing.T) {
 					// after. It opens no socket, so it counts only the
 					// store's own requests.
 					client := &http.Client{
-						Transport: &roundTripperFunc{fn: func(r *http.Request) (*http.Response, error) {
+						Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 							data := catalog
 							if requestCount.Add(1) > 1 {
 								data = []byte(tc.body)
@@ -1655,7 +1655,7 @@ func TestSchemaStore_CatalogWithoutSchemas(t *testing.T) {
 								Body:       io.NopCloser(bytes.NewReader(data)),
 								Request:    r,
 							}, nil
-						}},
+						}),
 					}
 
 					store := schemastore.New(
@@ -2099,7 +2099,7 @@ func newCountingClient(status int, body []byte) (*http.Client, *atomic.Int32) {
 	var requests atomic.Int32
 
 	client := &http.Client{
-		Transport: &roundTripperFunc{fn: func(r *http.Request) (*http.Response, error) {
+		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 			requests.Add(1)
 
 			return &http.Response{
@@ -2107,7 +2107,7 @@ func newCountingClient(status int, body []byte) (*http.Client, *atomic.Int32) {
 				Body:       io.NopCloser(bytes.NewReader(body)),
 				Request:    r,
 			}, nil
-		}},
+		}),
 	}
 
 	return client, &requests
@@ -2139,7 +2139,7 @@ func newCatalogClient(tb testing.TB, catalog schemastore.Catalog) *http.Client {
 // newCountingClient, it opens no socket.
 func newRoutingClient(routes map[string][]byte) *http.Client {
 	return &http.Client{
-		Transport: &roundTripperFunc{fn: func(r *http.Request) (*http.Response, error) {
+		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 			body, ok := routes[r.URL.String()]
 			if !ok {
 				return &http.Response{
@@ -2154,7 +2154,7 @@ func newRoutingClient(routes map[string][]byte) *http.Client {
 				Body:       io.NopCloser(bytes.NewReader(body)),
 				Request:    r,
 			}, nil
-		}},
+		}),
 	}
 }
 
@@ -2189,7 +2189,7 @@ func newHeldCatalogClient(t *testing.T, immediate int32) (*http.Client, *atomic.
 	t.Cleanup(release)
 
 	client := &http.Client{
-		Transport: &roundTripperFunc{fn: func(r *http.Request) (*http.Response, error) {
+		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 			n := requests.Add(1)
 			if n > immediate {
 				select {
@@ -2215,7 +2215,7 @@ func newHeldCatalogClient(t *testing.T, immediate int32) (*http.Client, *atomic.
 				Body:       io.NopCloser(bytes.NewReader(data)),
 				Request:    r,
 			}, nil
-		}},
+		}),
 	}
 
 	return client, &requests, release
@@ -2259,14 +2259,6 @@ func receive[T any](t *testing.T, ch <-chan T) T {
 
 		return zero
 	}
-}
-
-type roundTripperFunc struct {
-	fn func(*http.Request) (*http.Response, error)
-}
-
-func (f *roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
-	return f.fn(r)
 }
 
 type errorReader struct{}

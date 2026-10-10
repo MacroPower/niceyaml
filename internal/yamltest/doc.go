@@ -108,4 +108,9 @@
 //	normalizer := yamltest.NormalizerFunc(strings.ToLower)
 //
 // A [niceyaml.ValidatorFunc] stands in for a validator.
+//
+// [RoundTripFunc] adapts a function to the transport of an [http.Client],
+// so a test answers each request itself:
+//
+//	client := &http.Client{Transport: yamltest.RoundTripFunc(respond)}
 package yamltest

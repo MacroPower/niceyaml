@@ -809,7 +809,7 @@ func TestRegistry_Caching(t *testing.T) {
 		var fetches atomic.Int32
 
 		client := &http.Client{
-			Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			Transport: yamltest.RoundTripFunc(func(_ *http.Request) (*http.Response, error) {
 				fetches.Add(1)
 
 				rec := httptest.NewRecorder()
@@ -3808,7 +3808,7 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		var requests atomic.Int32
 
 		client := &http.Client{
-			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 				requests.Add(1)
 
 				rec := httptest.NewRecorder()
@@ -4520,7 +4520,7 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 			t.Helper()
 
 			client := &http.Client{
-				Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 					rec := httptest.NewRecorder()
 
 					data, ok := files[strings.TrimPrefix(r.URL.Path, "/")]

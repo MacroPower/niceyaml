@@ -16,20 +16,15 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
-	return f(r)
-}
 
 // countingClient returns a client that counts the requests it sends and
 // sends them through the default transport.
 func countingClient(requests *atomic.Int32) *http.Client {
 	return &http.Client{
-		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 			requests.Add(1)
 
 			return http.DefaultTransport.RoundTrip(r) //nolint:wrapcheck // Test helper.
@@ -225,7 +220,7 @@ func TestURL(t *testing.T) {
 		// that moment would turn a 404 from a server into a broken
 		// connection.
 		client := &http.Client{
-			Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 				return &http.Response{
 					StatusCode: http.StatusNotFound,
 					Body:       http.NoBody,
@@ -382,7 +377,7 @@ func TestURL(t *testing.T) {
 
 		// The transport stands in for a refused connection.
 		client := &http.Client{
-			Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			Transport: yamltest.RoundTripFunc(func(_ *http.Request) (*http.Response, error) {
 				return nil, errors.New("connection refused")
 			}),
 		}
@@ -396,7 +391,7 @@ func TestURL(t *testing.T) {
 		t.Parallel()
 
 		client := &http.Client{
-			Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			Transport: yamltest.RoundTripFunc(func(_ *http.Request) (*http.Response, error) {
 				return &http.Response{
 					StatusCode: http.StatusOK,
 					Body:       io.NopCloser(errReader{}),
@@ -416,7 +411,7 @@ func TestURL(t *testing.T) {
 
 		// Create a reader that provides data beyond the limit.
 		client := &http.Client{
-			Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+			Transport: yamltest.RoundTripFunc(func(_ *http.Request) (*http.Response, error) {
 				// Return a reader that provides exactly maxSchemaSize + 1 bytes.
 				return &http.Response{
 					StatusCode: http.StatusOK,

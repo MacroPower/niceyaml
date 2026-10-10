@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
 func TestGet_RedactsPassword(t *testing.T) {
@@ -50,7 +51,7 @@ func TestGet_RedactsPassword(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			client := &http.Client{Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 				t.Errorf("Get sent a request to host %q", r.URL.Host)
 
 				return nil, errors.New("unexpected request")
@@ -91,7 +92,7 @@ func TestGet_RedactsSchemeRelativePassword(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			client := &http.Client{Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 				t.Errorf("Get sent a request to host %q", r.URL.Host)
 
 				return nil, errors.New("unexpected request")
@@ -103,14 +104,6 @@ func TestGet_RedactsSchemeRelativePassword(t *testing.T) {
 			assert.NotContains(t, err.Error(), "cret")
 		})
 	}
-}
-
-// roundTripFunc adapts a function to [http.RoundTripper].
-type roundTripFunc func(r *http.Request) (*http.Response, error)
-
-// RoundTrip implements [http.RoundTripper].
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
-	return f(r)
 }
 
 func TestGet_RedactsPasswordWithAtSign(t *testing.T) {
@@ -135,7 +128,7 @@ func TestGet_RedactsPasswordWithAtSign(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			client := &http.Client{Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 				return nil, errors.New("lookup " + r.URL.Host + ": no such host")
 			})}
 
@@ -153,7 +146,7 @@ func TestGet_PasswordWithAtSignKeepsContextError(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("lookup %s: %w", r.URL.Host, r.Context().Err())
 	})}
 
