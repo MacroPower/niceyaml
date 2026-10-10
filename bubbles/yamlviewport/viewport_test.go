@@ -614,8 +614,13 @@ func maxXOffset(m yamlviewport.Model) int {
 	return m.XOffset()
 }
 
-// testModel returns a model of the given size that prints with p.
+// testModel returns a model of the given size that prints with p, or with
+// [testPrinter] when p is nil.
 func testModel(p *printer.Printer, width, height int, opts ...yamlviewport.Option) yamlviewport.Model {
+	if p == nil {
+		p = testPrinter()
+	}
+
 	m := yamlviewport.New(append([]yamlviewport.Option{yamlviewport.WithPrinter(p)}, opts...)...)
 	m.SetWidth(width)
 	m.SetHeight(height)
@@ -636,10 +641,12 @@ func TestViewport_Golden(t *testing.T) {
 
 	type goldenTest struct {
 		setupFunc func(m *yamlviewport.Model, tokens token.Tokens)
-		yaml      string
-		opts      []yamlviewport.Option
-		width     int
-		height    int
+		// The printer of the model, [testPrinter] when nil.
+		printer *printer.Printer
+		style   lipgloss.Style
+		yaml    string
+		width   int
+		height  int
 	}
 
 	fullYAML, err := os.ReadFile("testdata/full.yaml")
@@ -692,7 +699,6 @@ func TestViewport_Golden(t *testing.T) {
 		"WrapScrolledToBottom": {
 			// Line 5 wraps to several rows. Scrolling by row reaches the
 			// last line, which line-based scrolling pushed off the bottom.
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   wrapYAML,
 			width:  30,
 			height: 5,
@@ -703,7 +709,6 @@ func TestViewport_Golden(t *testing.T) {
 		"WrapScrolledIntoLine": {
 			// An offset inside the wrapped line starts the view on one of its
 			// continuation rows.
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   wrapYAML,
 			width:  30,
 			height: 5,
@@ -712,42 +717,37 @@ func TestViewport_Golden(t *testing.T) {
 			},
 		},
 		"BasicView": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   simpleYAML,
 			width:  80,
 			height: 24,
 		},
 		"WithLineNumbers": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinterWithLineNumbers())},
-			yaml:   simpleYAML,
-			width:  80,
-			height: 24,
+			printer: testPrinterWithLineNumbers(),
+			yaml:    simpleYAML,
+			width:   80,
+			height:  24,
 		},
 		"DefaultColors": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinterWithColors())},
-			yaml:   simpleYAML,
-			width:  80,
-			height: 24,
+			printer: testPrinterWithColors(),
+			yaml:    simpleYAML,
+			width:   80,
+			height:  24,
 		},
 		"FullYAML": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   string(fullYAML),
 			width:  80,
 			height: 24,
 		},
 		"SearchHighlight": {
-			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinterWithSearch()),
-			},
-			yaml:   simpleYAML,
-			width:  80,
-			height: 24,
+			printer: testPrinterWithSearch(),
+			yaml:    simpleYAML,
+			width:   80,
+			height:  24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.SetSearchTerm("item")
 			},
 		},
 		"DiffMode": {
-			opts: []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml: diffAfterYAML,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.ClearRevisions()
@@ -758,7 +758,6 @@ func TestViewport_Golden(t *testing.T) {
 			height: 24,
 		},
 		"ScrolledContent": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   string(fullYAML),
 			width:  80,
 			height: 10,
@@ -767,7 +766,6 @@ func TestViewport_Golden(t *testing.T) {
 			},
 		},
 		"HorizontalScroll": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   wideYAML,
 			width:  40,
 			height: 10,
@@ -777,7 +775,6 @@ func TestViewport_Golden(t *testing.T) {
 			},
 		},
 		"HorizontalScrollNoOffset": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   wideYAML,
 			width:  40,
 			height: 10,
@@ -789,22 +786,17 @@ func TestViewport_Golden(t *testing.T) {
 			},
 		},
 		"EmptyContent": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   "",
 			width:  80,
 			height: 24,
 		},
 		"StyledContainer": {
-			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinter()),
-				yamlviewport.WithContainerStyle(normalBorder().Padding(1)),
-			},
+			style:  normalBorder().Padding(1),
 			yaml:   simpleYAML,
 			width:  80,
 			height: 24,
 		},
 		"SmallViewport": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   simpleYAML,
 			width:  20,
 			height: 5,
@@ -812,47 +804,39 @@ func TestViewport_Golden(t *testing.T) {
 		"SearchNavigateNext": {
 			// "i" matches four times, in list, item1, item2, and child, so
 			// each navigation case selects a different match.
-			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinterWithSearch()),
-			},
-			yaml:   simpleYAML,
-			width:  80,
-			height: 24,
+			printer: testPrinterWithSearch(),
+			yaml:    simpleYAML,
+			width:   80,
+			height:  24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.SetSearchTerm("i")
 				m.SearchNext() // Move to the second match, in item1.
 			},
 		},
 		"SearchNoMatches": {
-			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinterWithSearch()),
-			},
-			yaml:   simpleYAML,
-			width:  80,
-			height: 24,
+			printer: testPrinterWithSearch(),
+			yaml:    simpleYAML,
+			width:   80,
+			height:  24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.SetSearchTerm("nonexistent")
 			},
 		},
 		"SearchNavigatePrevious": {
-			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinterWithSearch()),
-			},
-			yaml:   simpleYAML,
-			width:  80,
-			height: 24,
+			printer: testPrinterWithSearch(),
+			yaml:    simpleYAML,
+			width:   80,
+			height:  24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.SetSearchTerm("i")
 				m.SearchPrevious() // Wrap from the first match to the last, in child.
 			},
 		},
 		"SearchWrapAroundNext": {
-			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinterWithSearch()),
-			},
-			yaml:   simpleYAML,
-			width:  80,
-			height: 24,
+			printer: testPrinterWithSearch(),
+			yaml:    simpleYAML,
+			width:   80,
+			height:  24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.SetSearchTerm("i")
 				m.SearchNext() // Second match, in item1.
@@ -862,12 +846,10 @@ func TestViewport_Golden(t *testing.T) {
 			},
 		},
 		"SearchWrapAroundPrevious": {
-			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinterWithSearch()),
-			},
-			yaml:   simpleYAML,
-			width:  80,
-			height: 24,
+			printer: testPrinterWithSearch(),
+			yaml:    simpleYAML,
+			width:   80,
+			height:  24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.SetSearchTerm("i")
 				m.SearchPrevious() // Wrap to the last match, in child.
@@ -878,9 +860,7 @@ func TestViewport_Golden(t *testing.T) {
 			// The XML tags of the test styles take up columns, so the
 			// viewport is wide enough that the highlighted line fits on
 			// one row.
-			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinterWithSearch()),
-			},
+			printer: testPrinterWithSearch(),
 			yaml: stringtest.Input(`
 				item: item_value
 				another: data
@@ -892,12 +872,10 @@ func TestViewport_Golden(t *testing.T) {
 			},
 		},
 		"SearchClear": {
-			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinterWithSearch()),
-			},
-			yaml:   simpleYAML,
-			width:  80,
-			height: 24,
+			printer: testPrinterWithSearch(),
+			yaml:    simpleYAML,
+			width:   80,
+			height:  24,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.SetSearchTerm("item")
 				m.ClearSearch() // Clearing the search removes the highlights.
@@ -906,12 +884,10 @@ func TestViewport_Golden(t *testing.T) {
 		"SearchScrollsToFirstMatch": {
 			// With a small viewport, setting a search term scrolls to the first match.
 			// "timeout" first appears on line 36 in full.yaml.
-			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinterWithSearch()),
-			},
-			yaml:   string(fullYAML),
-			width:  80,
-			height: 10,
+			printer: testPrinterWithSearch(),
+			yaml:    string(fullYAML),
+			width:   80,
+			height:  10,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.SetSearchTerm("timeout") // First match is on line 36.
 			},
@@ -919,12 +895,10 @@ func TestViewport_Golden(t *testing.T) {
 		"SearchScrollsToNextMatch": {
 			// Navigating to the next match scrolls the viewport.
 			// "timeout" appears on lines 36 and 41 in full.yaml.
-			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinterWithSearch()),
-			},
-			yaml:   string(fullYAML),
-			width:  80,
-			height: 10,
+			printer: testPrinterWithSearch(),
+			yaml:    string(fullYAML),
+			width:   80,
+			height:  10,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.SetSearchTerm("timeout")
 				m.SearchNext() // Navigate to second match on line 41.
@@ -933,12 +907,10 @@ func TestViewport_Golden(t *testing.T) {
 		"SearchScrollsToPreviousMatch": {
 			// Navigating backwards scrolls to the previous match.
 			// Start at the second "timeout" match, go back to the first.
-			opts: []yamlviewport.Option{
-				yamlviewport.WithPrinter(testPrinterWithSearch()),
-			},
-			yaml:   string(fullYAML),
-			width:  80,
-			height: 10,
+			printer: testPrinterWithSearch(),
+			yaml:    string(fullYAML),
+			width:   80,
+			height:  10,
 			setupFunc: func(m *yamlviewport.Model, _ token.Tokens) {
 				m.SetSearchTerm("timeout")
 				m.SearchNext()     // Move to second match.
@@ -953,17 +925,14 @@ func TestViewport_Golden(t *testing.T) {
 
 			tks := tokens.Tokenize(tc.yaml)
 
-			m := yamlviewport.New(tc.opts...)
-			m.SetWidth(tc.width)
-			m.SetHeight(tc.height)
+			m := testModel(tc.printer, tc.width, tc.height, yamlviewport.WithContainerStyle(tc.style))
 			m.SetRevision(niceyaml.NewSourceFromTokens(tks))
 
 			if tc.setupFunc != nil {
 				tc.setupFunc(&m, tks)
 			}
 
-			output := m.View()
-			golden.RequireEqual(t, output)
+			golden.RequireEqual(t, m.View())
 		})
 	}
 }
@@ -2590,8 +2559,7 @@ func TestViewport_Search(t *testing.T) {
 		item3: fourth
 	`)
 
-	tks := tokens.Tokenize(yaml)
-	lines := niceyaml.NewSourceFromTokens(tks)
+	lines := niceyaml.NewSourceFromString(yaml)
 
 	tcs := map[string]struct {
 		test       func(t *testing.T, m *yamlviewport.Model)
@@ -3291,7 +3259,6 @@ func TestViewport_State(t *testing.T) {
 		setup  func(m *yamlviewport.Model)
 		test   func(t *testing.T, m *yamlviewport.Model)
 		yaml   string
-		opts   []yamlviewport.Option
 		width  int
 		height int
 	}{
@@ -3310,7 +3277,6 @@ func TestViewport_State(t *testing.T) {
 			},
 		},
 		"Dimensions/ZeroDimensions": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   "key: value",
 			width:  0,
 			height: 0,
@@ -3321,7 +3287,6 @@ func TestViewport_State(t *testing.T) {
 			},
 		},
 		"LineCounts/TotalLineCount": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   lineCountYAML,
 			width:  80,
 			height: 24,
@@ -3331,7 +3296,6 @@ func TestViewport_State(t *testing.T) {
 			},
 		},
 		"LineCounts/VisibleLineCount": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   lineCountYAML,
 			width:  80,
 			height: 3,
@@ -3341,7 +3305,6 @@ func TestViewport_State(t *testing.T) {
 			},
 		},
 		"LineCounts/EmptyContent": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   "",
 			width:  80,
 			height: 24,
@@ -3352,7 +3315,6 @@ func TestViewport_State(t *testing.T) {
 			},
 		},
 		"Init/ReturnsNil": {
-			opts: []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 
@@ -3361,7 +3323,6 @@ func TestViewport_State(t *testing.T) {
 			},
 		},
 		"AtBottom/GotoBottom": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   threeLineYAML,
 			width:  80,
 			height: 2,
@@ -3374,7 +3335,6 @@ func TestViewport_State(t *testing.T) {
 			},
 		},
 		"AtBottom/SetHeightReclamps": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   lineCountYAML,
 			width:  80,
 			height: 3,
@@ -3396,7 +3356,6 @@ func TestViewport_State(t *testing.T) {
 			},
 		},
 		"Search/ClearRevisionsResetsMatches": {
-			opts:   []yamlviewport.Option{yamlviewport.WithPrinter(testPrinter())},
 			yaml:   lineCountYAML,
 			width:  80,
 			height: 24,
@@ -3425,14 +3384,7 @@ func TestViewport_State(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(tc.opts...)
-			if tc.width > 0 {
-				m.SetWidth(tc.width)
-			}
-
-			if tc.height > 0 {
-				m.SetHeight(tc.height)
-			}
+			m := testModel(testPrinter(), tc.width, tc.height)
 
 			if tc.yaml != "" {
 				m.SetRevision(niceyaml.NewSourceFromTokens(tokens.Tokenize(tc.yaml)))
@@ -3468,6 +3420,11 @@ func TestViewport_Update(t *testing.T) {
 		very_long_key_name_that_requires_horizontal_scrolling: "This is a very long value that extends well beyond the viewport width and requires scrolling to see"
 		another: y
 	`)
+
+	// The change closure returns a second revision of verticalYAML.
+	change := func() *niceyaml.Source {
+		return niceyaml.NewSourceFromString("line1: modified\nline2: changed", niceyaml.WithName("change"))
+	}
 
 	tcs := map[string]struct {
 		msg    tea.Msg
@@ -3687,8 +3644,7 @@ func TestViewport_Update(t *testing.T) {
 			height: 5,
 			setup: func(m *yamlviewport.Model) {
 				// Add a second revision and go to revision 0.
-				second := tokens.Tokenize("line1: modified\nline2: changed")
-				m.AddRevision(niceyaml.NewSourceFromTokens(second, niceyaml.WithName("change")))
+				m.AddRevision(change())
 				m.GotoRevision(0)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
@@ -3705,8 +3661,7 @@ func TestViewport_Update(t *testing.T) {
 			height: 5,
 			setup: func(m *yamlviewport.Model) {
 				// Add a second revision (starts at latest index 1).
-				second := tokens.Tokenize("line1: modified\nline2: changed")
-				m.AddRevision(niceyaml.NewSourceFromTokens(second, niceyaml.WithName("change")))
+				m.AddRevision(change())
 
 				// Now at index 1 (latest).
 			},
@@ -3724,8 +3679,7 @@ func TestViewport_Update(t *testing.T) {
 			width:  80,
 			height: 5,
 			setup: func(m *yamlviewport.Model) {
-				second := tokens.Tokenize("line1: modified\nline2: changed")
-				m.AddRevision(niceyaml.NewSourceFromTokens(second, niceyaml.WithName("change")))
+				m.AddRevision(change())
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
@@ -3763,8 +3717,7 @@ func TestViewport_Update(t *testing.T) {
 func TestViewport_KeyMap(t *testing.T) {
 	t.Parallel()
 
-	tks := tokens.Tokenize("key: value\nkey2: value2\nkey3: value3")
-	lines := niceyaml.NewSourceFromTokens(tks)
+	lines := niceyaml.NewSourceFromString("key: value\nkey2: value2\nkey3: value3")
 
 	tcs := map[string]struct {
 		setup func(m *yamlviewport.Model)
@@ -4093,8 +4046,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 				tc.setupFunc(&m)
 			}
 
-			output := m.View()
-			golden.RequireEqual(t, output)
+			golden.RequireEqual(t, m.View())
 		})
 	}
 }
@@ -4419,8 +4371,7 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 				tc.setupFunc(&m)
 			}
 
-			output := m.View()
-			golden.RequireEqual(t, output)
+			golden.RequireEqual(t, m.View())
 		})
 	}
 }
@@ -4642,14 +4593,7 @@ func TestViewMode_Behavior(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New(yamlviewport.WithPrinter(testPrinter()))
-			if tc.width > 0 {
-				m.SetWidth(tc.width)
-			}
-
-			if tc.height > 0 {
-				m.SetHeight(tc.height)
-			}
+			m := testModel(testPrinter(), tc.width, tc.height)
 
 			if tc.setup != nil {
 				tc.setup(&m)
@@ -5217,8 +5161,7 @@ func TestViewport_WithSearcher(t *testing.T) {
 		searcher := &countingSearcher{finder: finder.New()}
 		m := testModel(testPrinter(), 80, 10, yamlviewport.WithSearcher(searcher))
 
-		tks := tokens.Tokenize("key: value\n")
-		m.SetRevision(niceyaml.NewSourceFromTokens(tks))
+		m.SetRevision(niceyaml.NewSourceFromString("key: value\n"))
 
 		m.SetSearchTerm("value")
 
@@ -5722,8 +5665,7 @@ func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
 
 	m := testModel(testPrinter(), 20, 10)
 
-	tks := tokens.Tokenize("key: very long value that exceeds width\n")
-	m.SetRevision(niceyaml.NewSourceFromTokens(tks))
+	m.SetRevision(niceyaml.NewSourceFromString("key: very long value that exceeds width\n"))
 
 	// Disable wrapping first.
 	m.ToggleWordWrap()
@@ -6403,12 +6345,7 @@ func TestViewport_SearchScrollsToWrappedRow(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := tc.printer
-			if p == nil {
-				p = testPrinter()
-			}
-
-			m := testModel(p, 20, 4)
+			m := testModel(tc.printer, 20, 4)
 			tc.setup(&m)
 
 			m.SetSearchTerm("needle")
@@ -7134,12 +7071,7 @@ func TestViewport_HitAt_Screen(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := tc.printer
-			if p == nil {
-				p = testPrinter()
-			}
-
-			m := testModel(p, tc.width, tc.height, yamlviewport.WithContainerStyle(tc.style))
+			m := testModel(tc.printer, tc.width, tc.height, yamlviewport.WithContainerStyle(tc.style))
 
 			sources := make([]*niceyaml.Source, 0, len(tc.revisions))
 			for _, text := range tc.revisions {
@@ -7648,12 +7580,7 @@ func TestViewport_HitAt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := tc.printer
-			if p == nil {
-				p = testPrinter()
-			}
-
-			m := testModel(p, tc.width, tc.height, yamlviewport.WithContainerStyle(tc.style))
+			m := testModel(tc.printer, tc.width, tc.height, yamlviewport.WithContainerStyle(tc.style))
 			m.AddRevisions(tc.revisions...)
 
 			if tc.setup != nil {
