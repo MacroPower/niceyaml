@@ -84,6 +84,15 @@ func errorPath(tb testing.TB, err interface{ Path() (paths.Path, bool) }) paths.
 	return path
 }
 
+// requireBound binds err to the single document of source, as
+// [yamltest.Bind] does, and returns the binding. It fails the test when
+// the result holds none.
+func requireBound(tb testing.TB, source *niceyaml.Source, err error) *niceyaml.SourceError {
+	tb.Helper()
+
+	return yamltest.RequireSourceError(tb, yamltest.Bind(tb, source, err))
+}
+
 // errOf returns the error of a call that returns a value beside it, so a
 // table case holds the error of such a call in one expression.
 func errOf[T any](_ T, err error) error {
@@ -4033,7 +4042,7 @@ func TestSourceError_Range_Inverted(t *testing.T) {
 
 			err := niceyaml.NewError("inverted", niceyaml.AtRange(tc.rng))
 
-			bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, err))
+			bound := requireBound(t, source, err)
 
 			rng, ok := bound.Range()
 			require.True(t, ok)
@@ -4358,7 +4367,7 @@ func TestSourceError_Range_Tokens(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewError("bad", tc.at)))
+			bound := requireBound(t, source, niceyaml.NewError("bad", tc.at))
 
 			got, ok := bound.Range()
 			require.True(t, ok)
@@ -4469,7 +4478,7 @@ func TestSourceError_Position(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, tc.err))
+			bound := requireBound(t, source, tc.err)
 
 			got, ok := bound.Position()
 			assert.Equal(t, tc.ok, ok)
@@ -4574,7 +4583,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, tc.err))
+			bound := requireBound(t, source, tc.err)
 
 			got, ok := bound.Excerpt()
 			require.False(t, ok)
@@ -4593,10 +4602,10 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 	t.Run("one resolved location renders without error", func(t *testing.T) {
 		t.Parallel()
 
-		bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewSummary("bad",
+		bound := requireBound(t, source, niceyaml.NewSummary("bad",
 			niceyaml.NewError("first", niceyaml.AtPath(paths.Current().Child("missing").Index(0))),
 			niceyaml.NewError("second", niceyaml.AtPath(paths.Current().Child("value"))),
-		)))
+		))
 
 		excerpt, ok := bound.Excerpt()
 		require.True(t, ok)
@@ -4609,10 +4618,10 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 	t.Run("unresolved root with a resolved child prints no reason", func(t *testing.T) {
 		t.Parallel()
 
-		bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewError("bad",
+		bound := requireBound(t, source, niceyaml.NewError("bad",
 			niceyaml.AtPath(paths.Current().Child("missing").Index(0)),
 			niceyaml.WithDetails(niceyaml.NewError("first", niceyaml.AtPath(paths.Current().Child("name")))),
-		)))
+		))
 
 		requireUnresolved(t, bound, paths.ErrNotFound)
 
@@ -4726,11 +4735,11 @@ func TestSourceError_Excerpt(t *testing.T) {
 
 		// The second and third problems say the same of one value, as two
 		// branches of an anyOf do.
-		bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewSummary("3 problems",
+		bound := requireBound(t, source, niceyaml.NewSummary("3 problems",
 			niceyaml.NewError("about value", niceyaml.AtPath(value)),
 			niceyaml.NewError("about value", niceyaml.AtPath(value)),
 			niceyaml.NewError("about key", niceyaml.AtPosition(position.New(0, 0))),
-		)))
+		))
 
 		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 		require.True(t, ok)
@@ -4808,7 +4817,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 				t.Parallel()
 
 				src := niceyaml.NewSourceFromString(tc.src)
-				bound := yamltest.RequireSourceError(t, yamltest.Bind(t, src, niceyaml.NewError("bad", tc.opt)))
+				bound := requireBound(t, src, niceyaml.NewError("bad", tc.opt))
 
 				excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 				require.True(t, ok)
@@ -4862,10 +4871,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				bound := yamltest.RequireSourceError(
-					t,
-					yamltest.Bind(t, niceyaml.NewSourceFromString("a: 1\n"), tc.err),
-				)
+				bound := requireBound(t, niceyaml.NewSourceFromString("a: 1\n"), tc.err)
 
 				excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 				require.True(t, ok)
@@ -5101,13 +5107,13 @@ func TestSourceError_Annotate(t *testing.T) {
 		source := excerptSource()
 		view := source.View()
 
-		first := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewError(
+		first := requireBound(t, source, niceyaml.NewError(
 			"bad b", niceyaml.AtPath(paths.Current().Child("b")),
-		)))
-		second := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewError(
+		))
+		second := requireBound(t, source, niceyaml.NewError(
 			"bad d",
 			niceyaml.WithDetails(niceyaml.NewError("too big", niceyaml.AtPath(paths.Current().Child("d")))),
-		)))
+		))
 
 		require.True(t, first.Annotate(view))
 		require.True(t, second.Annotate(view), "the detail marks its line for an error with no location of its own")
@@ -5126,9 +5132,9 @@ func TestSourceError_Annotate(t *testing.T) {
 		view := source.View()
 
 		for _, msg := range []string{"bad b", "too big"} {
-			bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewError(
+			bound := requireBound(t, source, niceyaml.NewError(
 				msg, niceyaml.AtPath(paths.Current().Child("b")),
-			)))
+			))
 			require.True(t, bound.Annotate(view))
 		}
 
@@ -5151,9 +5157,9 @@ func TestSourceError_Annotate(t *testing.T) {
 		// Two bindings say the same of one value, as two branches of an
 		// anyOf do.
 		for range 2 {
-			bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewError(
+			bound := requireBound(t, source, niceyaml.NewError(
 				"bad b", niceyaml.AtPath(paths.Current().Child("b")),
-			)))
+			))
 			require.True(t, bound.Annotate(view), "the view holds the line, marked or not")
 		}
 
@@ -5247,9 +5253,9 @@ func TestSourceError_Annotate(t *testing.T) {
 		source := excerptSource()
 		view := source.View()
 
-		bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewError(
+		bound := requireBound(t, source, niceyaml.NewError(
 			"", niceyaml.AtPath(paths.Current().Child("b")),
-		)))
+		))
 		require.True(t, bound.Annotate(view))
 
 		assert.Equal(t, line.Annotations{caretAt(3, "")}, view.Annotations(1))
@@ -5261,9 +5267,9 @@ func TestSourceError_Annotate(t *testing.T) {
 		source := niceyaml.NewSourceFromString("a: 1\n")
 		view := source.View()
 
-		bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewError(
+		bound := requireBound(t, source, niceyaml.NewError(
 			"far", niceyaml.AtPosition(position.New(0, math.MaxInt/2)),
-		)))
+		))
 		require.True(t, bound.Annotate(view))
 
 		assert.Equal(t, line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(4, 4)}}, view.Overlays(0))
@@ -5317,9 +5323,9 @@ func TestSourceError_Annotate(t *testing.T) {
 		before := niceyaml.NewSourceFromString("a: 1\nb: 3\n")
 		after := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
 
-		bound := yamltest.RequireSourceError(t, yamltest.Bind(t, after, niceyaml.NewError(
+		bound := requireBound(t, after, niceyaml.NewError(
 			"bad b", niceyaml.AtPath(paths.Current().Child("b")),
-		)))
+		))
 
 		// The unified view holds a from after, then b from before as a
 		// deleted line, then b from after as an inserted one.
@@ -5383,9 +5389,9 @@ func TestSourceError_Annotate(t *testing.T) {
 				before := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 2", "c: 3"))
 				after := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: 9", "c: 3"))
 
-				bound := yamltest.RequireSourceError(t, yamltest.Bind(t, before, niceyaml.NewError(
+				bound := requireBound(t, before, niceyaml.NewError(
 					"bad "+tc.key, niceyaml.AtPath(paths.Current().Child(tc.key)),
-				)))
+				))
 
 				view := tc.view(diff.Diff(before.Lines(), after.Lines()))
 				require.Equal(t, tc.want, bound.Annotate(view))
@@ -5464,7 +5470,7 @@ func TestSourceError_Annotate(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, tc.err))
+				bound := requireBound(t, source, tc.err)
 
 				view := source.View()
 
@@ -7175,7 +7181,7 @@ func TestSourceError_As(t *testing.T) {
 			niceyaml.Invalid(ruleB, niceyaml.AtPath(paths.Current().Child("b"))),
 		)
 
-		bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.Rebase(summary, x)))
+		bound := requireBound(t, source, niceyaml.Rebase(summary, x))
 
 		found, ok := errors.AsType[*ruleError](bound)
 		require.True(t, ok)
@@ -7200,7 +7206,7 @@ func TestSourceError_As(t *testing.T) {
 		// Cause before it tries Unwrap. Its Is and As would step from a
 		// binding to the error it reports, past the Error that holds the
 		// errors a summary heads.
-		bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(x))))
+		bound := requireBound(t, source, niceyaml.NewError("bad", niceyaml.AtPath(x)))
 
 		_, causes := any(bound).(interface{ Cause() error })
 		assert.False(t, causes)
@@ -7216,7 +7222,7 @@ func TestSourceError_Errors(t *testing.T) {
 	deep := niceyaml.NewError("deep", niceyaml.AtPath(paths.Current().Child("b")))
 	mid := niceyaml.NewError("mid", niceyaml.WithDetails(deep))
 
-	bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewSummary("main", badA, badX, nil, mid)))
+	bound := requireBound(t, source, niceyaml.NewSummary("main", badA, badX, nil, mid))
 
 	// One child per nested error, each bound to the same source and
 	// unwrapping to the error it binds. The one with a position comes
@@ -7258,7 +7264,7 @@ func TestSourceError_Errors(t *testing.T) {
 
 	// Every branch of a join is a child, and a branch that carries no
 	// location binds without one.
-	joined := yamltest.RequireSourceError(t, yamltest.Bind(t, source, errors.Join(badA, errors.New("plain"))))
+	joined := requireBound(t, source, errors.Join(badA, errors.New("plain")))
 
 	branches := yamltest.ProblemsOf(joined)
 	require.Len(t, branches, 2)
@@ -8909,9 +8915,9 @@ func TestSourceError_MessageAtHighlightStart(t *testing.T) {
 			assert.Contains(t, niceyaml.FormatError(nested, niceyaml.WithContextLines(0)), "\n"+tc.want)
 			assert.Contains(t, stringtest.TrimLineEnds(renderContext(nested, 0)), "\n"+tc.wantXML)
 
-			bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewError(
+			bound := requireBound(t, source, niceyaml.NewError(
 				"bad", niceyaml.AtPosition(tc.at),
-			)))
+			))
 
 			view := source.View()
 			require.True(t, bound.Annotate(view))
@@ -9353,12 +9359,6 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 	// A binding reports the path from the root of the document.
 	wantB := paths.Doc().Child("a", "b")
 
-	bind := func(t *testing.T, err error) *niceyaml.SourceError {
-		t.Helper()
-
-		return yamltest.RequireSourceError(t, yamltest.Bind(t, src, err))
-	}
-
 	// The key "b" on line 2, not the value the path selects, which is the
 	// range below.
 	keyRange := yamltest.LineRange(1, 2, 3)
@@ -9449,7 +9449,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			bound := bind(t, tc.err)
+			bound := requireBound(t, src, tc.err)
 
 			assert.Equal(t, tc.want, bound.Error())
 			assert.Equal(t, tc.message, bound.Message())
@@ -9473,7 +9473,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 	t.Run("a summary keeps the errors it lists out of its message", func(t *testing.T) {
 		t.Parallel()
 
-		bound := bind(t, niceyaml.NewSummary("2 problems",
+		bound := requireBound(t, src, niceyaml.NewSummary("2 problems",
 			niceyaml.NewError("bad", niceyaml.AtPath(bPath)),
 			niceyaml.NewError("worse", niceyaml.AtPath(bPath)),
 		))
@@ -9493,7 +9493,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 			niceyaml.NewError("bad", niceyaml.AtPath(bPath)),
 			niceyaml.NewError("worse", niceyaml.AtPath(bPath)),
 		))
-		bound := bind(t, niceyaml.NewSummary("2 checks",
+		bound := requireBound(t, src, niceyaml.NewSummary("2 checks",
 			fmt.Errorf("spec check: %w", summary),
 			errors.New("lint check"),
 		))
@@ -9515,7 +9515,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 	t.Run("the excerpt marks a range beside a path", func(t *testing.T) {
 		t.Parallel()
 
-		bound := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(bPath), niceyaml.AtRange(keyRange)))
+		bound := requireBound(t, src, niceyaml.NewError("bad", niceyaml.AtPath(bPath), niceyaml.AtRange(keyRange)))
 
 		// The excerpt marks the one character of the range, not the
 		// whole value the path selects.
@@ -9553,11 +9553,11 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 	t.Run("a binding that wraps a binding reports the path of the inner one", func(t *testing.T) {
 		t.Parallel()
 
-		inner := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(bPath)))
+		inner := requireBound(t, src, niceyaml.NewError("bad", niceyaml.AtPath(bPath)))
 
 		// A detail that wraps a binding binds as a detail that takes over
 		// the inner binding, rather than as the inner binding itself.
-		outer := bind(t, niceyaml.NewError("outer", niceyaml.WithDetails(fmt.Errorf("ctx: %w", inner))))
+		outer := requireBound(t, src, niceyaml.NewError("outer", niceyaml.WithDetails(fmt.Errorf("ctx: %w", inner))))
 		require.Len(t, yamltest.DetailsOf(outer), 1)
 
 		child := yamltest.DetailsOf(outer)[0].Bound
@@ -9570,16 +9570,16 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 	t.Run("an Error with details around a binding keeps the inner message", func(t *testing.T) {
 		t.Parallel()
 
-		inner := bind(t, niceyaml.NewError("bad", niceyaml.AtPath(bPath)))
+		inner := requireBound(t, src, niceyaml.NewError("bad", niceyaml.AtPath(bPath)))
 
 		// The Error adds no text of its own, so the message is the one the
 		// inner binding annotates with, and Error still reports the
 		// position and path in front of it.
-		wrapped := bind(t, niceyaml.Invalid(inner, niceyaml.WithDetails(errors.New("zz"))))
+		wrapped := requireBound(t, src, niceyaml.Invalid(inner, niceyaml.WithDetails(errors.New("zz"))))
 		assert.Equal(t, "bad", wrapped.Message())
 		assert.Equal(t, "x.yaml:2:6: $.a.b: bad", wrapped.Error())
 
-		outer := bind(t, niceyaml.NewError("outer", niceyaml.WithDetails(
+		outer := requireBound(t, src, niceyaml.NewError("outer", niceyaml.WithDetails(
 			niceyaml.Invalid(inner, niceyaml.WithDetails(errors.New("zz"))),
 		)))
 		require.NotEmpty(t, yamltest.DetailsOf(outer))
