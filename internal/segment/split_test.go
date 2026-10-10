@@ -54,314 +54,212 @@ func part(t *testing.T, lines []segment.Line, li, idx int) *token.Token {
 	return lines[li].Segments[idx].Part()
 }
 
-func TestSplit_DuplicateNewline(t *testing.T) {
+func TestSplit_Lines(t *testing.T) {
 	t.Parallel()
 
-	// The lexer repeats the newline that ends a tag at the start of the next
-	// token. Split must attach the repeat to the finished line and still keep
-	// one line per source line, including real blank lines that follow it.
-	// A line that holds a tab alone becomes a token that shares the position
-	// of the text after it, and the repeat can open that token too. The lone
-	// newline an empty block scalar holds is no such repeat, so it opens a
-	// line of its own.
 	tcs := map[string]struct {
-		input       string
-		wantContent []string
-		wantNumbers []int
+		input string
+		want  []string // The content of each line.
 	}{
+		// The cases down to the next comment cover the newline the lexer
+		// repeats. It repeats the newline that ends a tag at the start of
+		// the next token. Split must attach the repeat to the finished line
+		// and still keep one line per source line, including real blank
+		// lines that follow it. A line that holds a tab alone becomes a
+		// token that shares the position of the text after it, and the
+		// repeat can open that token too. The lone newline an empty block
+		// scalar holds is no such repeat, so it opens a line of its own.
 		"tag then indented key": {
-			input:       "a: !t\n  b: 1\n",
-			wantContent: []string{"a: !t", "  b: 1"},
-			wantNumbers: []int{1, 2},
+			input: "a: !t\n  b: 1\n",
+			want:  []string{"a: !t", "  b: 1"},
 		},
 		"tag then blank line then sequence": {
-			input:       "a: !!seq\n\n  - b\n",
-			wantContent: []string{"a: !!seq", "", "  - b"},
-			wantNumbers: []int{1, 2, 3},
+			input: "a: !!seq\n\n  - b\n",
+			want:  []string{"a: !!seq", "", "  - b"},
 		},
 		"document header tag then blank line": {
-			input:       "--- !!map\n\na: 1\n",
-			wantContent: []string{"--- !!map", "", "a: 1"},
-			wantNumbers: []int{1, 2, 3},
+			input: "--- !!map\n\na: 1\n",
+			want:  []string{"--- !!map", "", "a: 1"},
 		},
 		"nested tag then blank line": {
-			input:       "a:\n  t: !custom!i18n\n\n    en: x\n",
-			wantContent: []string{"a:", "  t: !custom!i18n", "", "    en: x"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "a:\n  t: !custom!i18n\n\n    en: x\n",
+			want:  []string{"a:", "  t: !custom!i18n", "", "    en: x"},
 		},
 		"two blank lines after tag": {
-			input:       "a: !t\n\n\n  b: 1\n",
-			wantContent: []string{"a: !t", "", "", "  b: 1"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "a: !t\n\n\n  b: 1\n",
+			want:  []string{"a: !t", "", "", "  b: 1"},
 		},
 		"tab line after tag": {
-			input:       "a: !!map\n\t\n  b: 1\n",
-			wantContent: []string{"a: !!map", "\t", "  b: 1"},
-			wantNumbers: []int{1, 2, 3},
+			input: "a: !!map\n\t\n  b: 1\n",
+			want:  []string{"a: !!map", "\t", "  b: 1"},
 		},
 		"tab line after tag with crlf": {
-			input:       "a: !!map\r\n\t\r\n  b: 1\r\n",
-			wantContent: []string{"a: !!map", "\t", "  b: 1"},
-			wantNumbers: []int{1, 2, 3},
+			input: "a: !!map\r\n\t\r\n  b: 1\r\n",
+			want:  []string{"a: !!map", "\t", "  b: 1"},
 		},
 		"tab line after tag with bare cr": {
-			input:       "a: !!map\r\t\r  b: 1\r",
-			wantContent: []string{"a: !!map", "\t", "  b: 1"},
-			wantNumbers: []int{1, 2, 3},
+			input: "a: !!map\r\t\r  b: 1\r",
+			want:  []string{"a: !!map", "\t", "  b: 1"},
 		},
 		"tab line after tag in sequence": {
-			input:       "- !t\n\t\n- b\n",
-			wantContent: []string{"- !t", "\t", "- b"},
-			wantNumbers: []int{1, 2, 3},
+			input: "- !t\n\t\n- b\n",
+			want:  []string{"- !t", "\t", "- b"},
 		},
 		"two tab lines after tag": {
-			input:       "a: !!map\n\t\n\t\n  b: 1\n",
-			wantContent: []string{"a: !!map", "\t", "\t", "  b: 1"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "a: !!map\n\t\n\t\n  b: 1\n",
+			want:  []string{"a: !!map", "\t", "\t", "  b: 1"},
 		},
 		"tab lines around blank line after tag": {
-			input:       "a: !!map\n\t\n\n\t\n  b: 1\n",
-			wantContent: []string{"a: !!map", "\t", "", "\t", "  b: 1"},
-			wantNumbers: []int{1, 2, 3, 4, 5},
+			input: "a: !!map\n\t\n\n\t\n  b: 1\n",
+			want:  []string{"a: !!map", "\t", "", "\t", "  b: 1"},
 		},
 		"tab line after invalid block scalar header": {
-			input:       "a: |x\n\t\n  b\n",
-			wantContent: []string{"a: |x", "\t", "  b"},
-			wantNumbers: []int{1, 2, 3},
+			input: "a: |x\n\t\n  b\n",
+			want:  []string{"a: |x", "\t", "  b"},
 		},
 		"tab line and blank lines at end after tag": {
-			input:       "a: !t\n\n\t\n\n",
-			wantContent: []string{"a: !t", "", "\t", ""},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "a: !t\n\n\t\n\n",
+			want:  []string{"a: !t", "", "\t", ""},
 		},
 		"comment, blank line, tab lines at end": {
-			input:       "a: 1 # c\n\n\t\n\t\n",
-			wantContent: []string{"a: 1 # c", "", "\t", "\t"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "a: 1 # c\n\n\t\n\t\n",
+			want:  []string{"a: 1 # c", "", "\t", "\t"},
 		},
 		"comment line, blank line, tab lines at end": {
-			input:       "a: 1\n# c\n\n\t\n\t\n",
-			wantContent: []string{"a: 1", "# c", "", "\t", "\t"},
-			wantNumbers: []int{1, 2, 3, 4, 5},
+			input: "a: 1\n# c\n\n\t\n\t\n",
+			want:  []string{"a: 1", "# c", "", "\t", "\t"},
 		},
 		"comment, blank line, tab lines at end with bare cr": {
-			input:       "a: 1 # c\r\r\t\r\t\r",
-			wantContent: []string{"a: 1 # c", "", "\t", "\t"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "a: 1 # c\r\r\t\r\t\r",
+			want:  []string{"a: 1 # c", "", "\t", "\t"},
 		},
 		"folded scalar with content after it": {
-			input:       "a: >-\n  long\n  folded\nb: 2\n",
-			wantContent: []string{"a: >-", "  long", "  folded", "b: 2"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "a: >-\n  long\n  folded\nb: 2\n",
+			want:  []string{"a: >-", "  long", "  folded", "b: 2"},
 		},
 		"literal scalar at the end": {
-			input:       "a: |-\n  x\n  y\n",
-			wantContent: []string{"a: |-", "  x", "  y"},
-			wantNumbers: []int{1, 2, 3},
+			input: "a: |-\n  x\n  y\n",
+			want:  []string{"a: |-", "  x", "  y"},
 		},
 		"empty literal scalar": {
-			input:       "a: |\n\n",
-			wantContent: []string{"a: |", ""},
-			wantNumbers: []int{1, 2},
+			input: "a: |\n\n",
+			want:  []string{"a: |", ""},
 		},
 		"empty strip literal scalar": {
-			input:       "a: |-\n\n\n",
-			wantContent: []string{"a: |-", "", ""},
-			wantNumbers: []int{1, 2, 3},
+			input: "a: |-\n\n\n",
+			want:  []string{"a: |-", "", ""},
 		},
 		"empty folded scalar": {
-			input:       "a: >\n\n",
-			wantContent: []string{"a: >", ""},
-			wantNumbers: []int{1, 2},
+			input: "a: >\n\n",
+			want:  []string{"a: >", ""},
 		},
 		"empty literal scalar with indentation indicator": {
-			input:       "a: |2\n\n\n",
-			wantContent: []string{"a: |2", "", ""},
-			wantNumbers: []int{1, 2, 3},
+			input: "a: |2\n\n\n",
+			want:  []string{"a: |2", "", ""},
 		},
 		"empty strip literal scalar with indentation indicator": {
-			input:       "- |1-\n\n",
-			wantContent: []string{"- |1-", ""},
-			wantNumbers: []int{1, 2},
+			input: "- |1-\n\n",
+			want:  []string{"- |1-", ""},
 		},
 		"empty literal scalar with indentation indicator and crlf": {
-			input:       ":\n|1\r\n\r\n",
-			wantContent: []string{":", "|1", ""},
-			wantNumbers: []int{1, 2, 3},
+			input: ":\n|1\r\n\r\n",
+			want:  []string{":", "|1", ""},
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := segment.Split(tokens.Tokenize(tc.input))
-
-			assert.Equal(t, tc.wantContent, lineContents(lines))
-			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
-
-			// Every part on a line reports that line's number, so the repeated
-			// newline landed on the line it belongs to.
-			for _, l := range lines {
-				for _, seg := range l.Segments {
-					assert.Equal(t, l.Number, seg.Part().Position.Line, "part %q", seg.Part().Origin)
-				}
-			}
-		})
-	}
-}
-
-func TestSplit_LineEndings(t *testing.T) {
-	t.Parallel()
-
-	// The lexer advances Position.Line on "\n", "\r\n", and a bare "\r", and
-	// Split cuts lines at the same three endings. Where the lexer spreads one
-	// CRLF over two tokens, the two halves stay on one line, and the line
-	// the lexer skipped there stays out of every later line number, however
-	// many such splits a file holds.
-	tcs := map[string]struct {
-		input       string
-		wantContent []string
-		wantNumbers []int
-	}{
+		// The cases down to the next comment cover the line endings. The
+		// lexer advances Position.Line on "\n", "\r\n", and a bare "\r",
+		// and Split cuts lines at the same three endings. Where the lexer
+		// spreads one CRLF over two tokens, the two halves stay on one line,
+		// and the line the lexer skipped there stays out of every later
+		// line number, however many such splits a file holds.
 		"bare cr between keys": {
-			input:       "a: 1\rb: 2\r",
-			wantContent: []string{"a: 1", "b: 2"},
-			wantNumbers: []int{1, 2},
+			input: "a: 1\rb: 2\r",
+			want:  []string{"a: 1", "b: 2"},
 		},
 		"bare cr blank line": {
-			input:       "a: 1\r\rb: 2\r",
-			wantContent: []string{"a: 1", "", "b: 2"},
-			wantNumbers: []int{1, 2, 3},
+			input: "a: 1\r\rb: 2\r",
+			want:  []string{"a: 1", "", "b: 2"},
 		},
 		"bare cr block scalar": {
-			input:       "k: |\r  a\r  b\rz: 1\r",
-			wantContent: []string{"k: |", "  a", "  b", "z: 1"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "k: |\r  a\r  b\rz: 1\r",
+			want:  []string{"k: |", "  a", "  b", "z: 1"},
 		},
 		"bare cr after comment": {
-			input:       "# c\rk: v\r",
-			wantContent: []string{"# c", "k: v"},
-			wantNumbers: []int{1, 2},
+			input: "# c\rk: v\r",
+			want:  []string{"# c", "k: v"},
 		},
 		"crlf split after comment": {
-			input:       "a: b # c\r\nd: e\r\n",
-			wantContent: []string{"a: b # c", "d: e"},
-			wantNumbers: []int{1, 2},
+			input: "a: b # c\r\nd: e\r\n",
+			want:  []string{"a: b # c", "d: e"},
 		},
 		"crlf between two comments": {
-			input:       "# a\r\n# b\r\nc: 1\r\n",
-			wantContent: []string{"# a", "# b", "c: 1"},
-			wantNumbers: []int{1, 2, 3},
+			input: "# a\r\n# b\r\nc: 1\r\n",
+			want:  []string{"# a", "# b", "c: 1"},
 		},
 		"crlf between three comments": {
-			input:       "# a\r\n# b\r\n# c\r\nd: 1\r\n",
-			wantContent: []string{"# a", "# b", "# c", "d: 1"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "# a\r\n# b\r\n# c\r\nd: 1\r\n",
+			want:  []string{"# a", "# b", "# c", "d: 1"},
 		},
 		"crlf blank line between comments": {
-			input:       "# a\r\n\r\n# b\r\nc: 1\r\n",
-			wantContent: []string{"# a", "", "# b", "c: 1"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "# a\r\n\r\n# b\r\nc: 1\r\n",
+			want:  []string{"# a", "", "# b", "c: 1"},
 		},
 		"crlf repeated after tag": {
-			input:       "a: !t\r\n  b: 1\r\n",
-			wantContent: []string{"a: !t", "  b: 1"},
-			wantNumbers: []int{1, 2},
+			input: "a: !t\r\n  b: 1\r\n",
+			want:  []string{"a: !t", "  b: 1"},
 		},
 		"crlf blank line": {
-			input:       "key: value\r\n\r\nnext: data\r\n",
-			wantContent: []string{"key: value", "", "next: data"},
-			wantNumbers: []int{1, 2, 3},
+			input: "key: value\r\n\r\nnext: data\r\n",
+			want:  []string{"key: value", "", "next: data"},
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := segment.Split(tokens.Tokenize(tc.input))
-
-			assert.Equal(t, tc.wantContent, lineContents(lines))
-			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
-
-			// Every part on a line reports that line's number.
-			for _, l := range lines {
-				for _, seg := range l.Segments {
-					assert.Equal(t, l.Number, seg.Part().Position.Line, "part %q", seg.Part().Origin)
-				}
-			}
-		})
-	}
-}
-
-func TestSplit_BlankLinesBeforeExplicitKey(t *testing.T) {
-	t.Parallel()
-
-	// The lexer drops the blank lines between a comment, a quoted scalar,
-	// or a flow collection and a "?" or ":" indicator after it, and a
-	// blank line from a run of them after a double-quoted scalar that
-	// holds a tab. Tokenize gives them back with the spaces they hold, so
-	// Split keeps every line, its number, and its content.
-	tcs := map[string]struct {
-		input       string
-		wantContent []string
-		wantNumbers []int
-	}{
+		// The remaining cases cover the blank lines the lexer drops. It
+		// drops the blank lines between a comment, a quoted scalar, or a
+		// flow collection and a "?" or ":" indicator after it, and a blank
+		// line from a run of them after a double-quoted scalar that holds a
+		// tab. Tokenize gives them back with the spaces they hold, so Split
+		// keeps every line, its number, and its content.
 		"key after a comment": {
-			input:       "# c\n\n? b\n: c\n",
-			wantContent: []string{"# c", "", "? b", ": c"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "# c\n\n? b\n: c\n",
+			want:  []string{"# c", "", "? b", ": c"},
 		},
 		"key after a quoted scalar": {
-			input:       "a: 'x'\n\n? b\n: c\n",
-			wantContent: []string{"a: 'x'", "", "? b", ": c"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "a: 'x'\n\n? b\n: c\n",
+			want:  []string{"a: 'x'", "", "? b", ": c"},
 		},
 		"key after a flow sequence": {
-			input:       "tags: [a, b]\n\n? key\n: value\n",
-			wantContent: []string{"tags: [a, b]", "", "? key", ": value"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "tags: [a, b]\n\n? key\n: value\n",
+			want:  []string{"tags: [a, b]", "", "? key", ": value"},
 		},
 		"nested key after a flow sequence": {
-			input:       "a:\n  b: [x]\n\n  ? k\n  : v\n",
-			wantContent: []string{"a:", "  b: [x]", "", "  ? k", "  : v"},
-			wantNumbers: []int{1, 2, 3, 4, 5},
+			input: "a:\n  b: [x]\n\n  ? k\n  : v\n",
+			want:  []string{"a:", "  b: [x]", "", "  ? k", "  : v"},
 		},
 		"key after blank lines": {
-			input:       "\n\n? b\n: c\n",
-			wantContent: []string{"", "", "? b", ": c"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "\n\n? b\n: c\n",
+			want:  []string{"", "", "? b", ": c"},
 		},
 		"crlf key after a comment": {
-			input:       "# c\r\n\r\n? b\r\n",
-			wantContent: []string{"# c", "", "? b"},
-			wantNumbers: []int{1, 2, 3},
+			input: "# c\r\n\r\n? b\r\n",
+			want:  []string{"# c", "", "? b"},
 		},
 		"crlf key after a blank line the lexer rewrites": {
-			input:       "x:\r\n  a: \"t\tb\"\r\n \t\r\n  \r\n? b\r\n",
-			wantContent: []string{"x:", "  a: \"t\tb\"", " \t", "", "? b"},
-			wantNumbers: []int{1, 2, 3, 4, 5},
+			input: "x:\r\n  a: \"t\tb\"\r\n \t\r\n  \r\n? b\r\n",
+			want:  []string{"x:", "  a: \"t\tb\"", " \t", "", "? b"},
 		},
 		"plain scalar after a blank line of spaces": {
-			input:       "t: \"a\tb\"\n  \n  r'\n- e\n",
-			wantContent: []string{"t: \"a\tb\"", "  ", "  r'", "- e"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "t: \"a\tb\"\n  \n  r'\n- e\n",
+			want:  []string{"t: \"a\tb\"", "  ", "  r'", "- e"},
 		},
 		"plain scalar after blank lines of spaces": {
-			input:       "t: \"a\tb\"\n  \n  \n  r'\n- e\n",
-			wantContent: []string{"t: \"a\tb\"", "  ", "  ", "  r'", "- e"},
-			wantNumbers: []int{1, 2, 3, 4, 5},
+			input: "t: \"a\tb\"\n  \n  \n  r'\n- e\n",
+			want:  []string{"t: \"a\tb\"", "  ", "  ", "  r'", "- e"},
 		},
 		"key after blank lines of spaces": {
-			input:       "a: \"t\tb\"\n  \n  \nc: 1\n",
-			wantContent: []string{"a: \"t\tb\"", "  ", "  ", "c: 1"},
-			wantNumbers: []int{1, 2, 3, 4},
+			input: "a: \"t\tb\"\n  \n  \nc: 1\n",
+			want:  []string{"a: \"t\tb\"", "  ", "  ", "c: 1"},
 		},
 		"comment after blank lines of spaces": {
-			input:       "a: \"t\tb\"\n  \n  \n# c\nd: 1\ne: 2\n",
-			wantContent: []string{"a: \"t\tb\"", "  ", "  ", "# c", "d: 1", "e: 2"},
-			wantNumbers: []int{1, 2, 3, 4, 5, 6},
+			input: "a: \"t\tb\"\n  \n  \n# c\nd: 1\ne: 2\n",
+			want:  []string{"a: \"t\tb\"", "  ", "  ", "# c", "d: 1", "e: 2"},
 		},
 	}
 
@@ -371,11 +269,14 @@ func TestSplit_BlankLinesBeforeExplicitKey(t *testing.T) {
 
 			lines := segment.Split(tokens.Tokenize(tc.input))
 
-			assert.Equal(t, tc.wantContent, lineContents(lines))
-			assert.Equal(t, tc.wantNumbers, lineNumbers(lines))
+			assert.Equal(t, tc.want, lineContents(lines))
 
-			// Every part on a line reports that line's number.
-			for _, l := range lines {
+			// The lines number from 1, and every part on a line reports that
+			// line's number, so a repeated newline landed on the line it
+			// belongs to.
+			for i, l := range lines {
+				assert.Equal(t, i+1, l.Number)
+
 				for _, seg := range l.Segments {
 					assert.Equal(t, l.Number, seg.Part().Position.Line, "part %q", seg.Part().Origin)
 				}
