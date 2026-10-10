@@ -34,6 +34,31 @@ func compileSchema(tb testing.TB, schemaData string, opts ...schema.CompileOptio
 	return v
 }
 
+// assertBoundTo fails the test unless every binding in the tree of err
+// names source.
+func assertBoundTo(t *testing.T, source *niceyaml.Source, err error) {
+	t.Helper()
+
+	for _, b := range yamltest.BoundIn(err) {
+		assert.Same(t, source, b.Source())
+	}
+}
+
+// requireUnresolved returns the path of bound, which selects nothing in
+// doc. The test fails when bound carries no path or when the path
+// resolves.
+func requireUnresolved(t *testing.T, doc *niceyaml.Node, bound *niceyaml.SourceError) paths.Path {
+	t.Helper()
+
+	path, ok := bound.Path()
+	require.True(t, ok, "bound error carries no path")
+
+	_, err := doc.At(path)
+	require.Error(t, err, "path from the error resolves")
+
+	return path
+}
+
 // requireExcessiveAliasing fails the test unless err is a refusal of the
 // alias limit. Such an error matches [schema.ErrExcessiveAliasing], the
 // document or the value is at fault for it, and it does not wrap
@@ -1324,10 +1349,7 @@ func TestSchema_ValidateValue(t *testing.T) {
 			assert.True(t, niceyaml.IsInvalid(err))
 			require.NotErrorIs(t, err, schema.ErrValidate)
 
-			var violation *schema.Violation
-
-			require.ErrorAs(t, err, &violation)
-			assert.Equal(t, jsonschema.KeywordMinimum, violation.Keyword)
+			assert.Equal(t, jsonschema.KeywordMinimum, requireViolation(t, err).Keyword)
 
 			// The source holds no line to excerpt, so the tree stands
 			// alone, with no line that says so.
@@ -1466,10 +1488,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			var violation *schema.Violation
 
 			require.ErrorAs(t, placed, &violation)
-
-			for _, b := range yamltest.BoundIn(placed) {
-				assert.Same(t, doc.Source(), b.Source())
-			}
+			assertBoundTo(t, doc.Source(), placed)
 
 			require.EqualError(t,
 				doc.Bind(niceyaml.Rebase(fmt.Errorf("check: %w", err), base)),
@@ -1595,10 +1614,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 				var violation *schema.Violation
 
 				require.ErrorAs(t, placed, &violation)
-
-				for _, b := range yamltest.BoundIn(placed) {
-					assert.Same(t, doc.Source(), b.Source())
-				}
+				assertBoundTo(t, doc.Source(), placed)
 			})
 		}
 	})
@@ -1658,9 +1674,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			"app.yaml:2:9: $.request.port: check: 0 is less than 1",
 		)
 
-		for _, b := range yamltest.BoundIn(request.Bind(niceyaml.Invalid(one))) {
-			assert.Same(t, doc.Source(), b.Source())
-		}
+		assertBoundTo(t, doc.Source(), request.Bind(niceyaml.Invalid(one)))
 	})
 
 	t.Run("an Error with a location or details places the result", func(t *testing.T) {
@@ -1792,10 +1806,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 			placed := doc.Bind(niceyaml.Rebase(violation.Err, base))
 			require.EqualError(t, placed, want[i])
 			assert.True(t, niceyaml.IsInvalid(placed))
-
-			for _, b := range yamltest.BoundIn(placed) {
-				assert.Same(t, doc.Source(), b.Source())
-			}
+			assertBoundTo(t, doc.Source(), placed)
 
 			// The violation itself stays where the result put it.
 			assert.NotSame(t, doc.Source(), violation.Source())
@@ -3202,10 +3213,7 @@ func TestSchema_Check_Bound(t *testing.T) {
 		err := doc.Validate(t.Context(), each)
 		require.EqualError(t, err, "menu.yaml:4:12: $.items[1].price: -2 is less than 0")
 
-		var violation *schema.Violation
-
-		require.ErrorAs(t, err, &violation)
-		assert.Equal(t, "minimum", violation.Keyword)
+		assert.Equal(t, "minimum", requireViolation(t, err).Keyword)
 	})
 
 	t.Run("a validator that checks another document names that document", func(t *testing.T) {
@@ -3633,13 +3641,7 @@ func TestSchema_SourcePath_ReferenceAlias(t *testing.T) {
 			_, err := doc.Decode[any](t.Context(), niceyaml.WithValidator(v))
 
 			bound := yamltest.RequireSourceError(t, err)
-
-			gotPath, ok := bound.Path()
-			require.True(t, ok, "bound error carries no path")
-			assert.Equal(t, tc.want, gotPath.String())
-
-			_, err = doc.At(gotPath)
-			require.Error(t, err, "path from the error resolves")
+			assert.Equal(t, tc.want, requireUnresolved(t, doc, bound).String())
 		})
 	}
 }
@@ -3732,12 +3734,7 @@ func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 
 			bound := yamltest.RequireSourceError(t, err)
 			assert.Equal(t, tc.want+`: $.user.16: expected "integer", got "string"`, bound.Error())
-
-			path, ok := bound.Path()
-			require.True(t, ok, "bound error carries no path")
-
-			_, err = doc.At(path)
-			require.Error(t, err, "path from the error resolves")
+			requireUnresolved(t, doc, bound)
 		})
 	}
 }
@@ -3804,12 +3801,7 @@ func TestSchema_SourcePath_BelowHiddenKey(t *testing.T) {
 
 			bound := yamltest.RequireSourceError(t, err)
 			assert.Equal(t, tc.want, bound.Error())
-
-			path, ok := bound.Path()
-			require.True(t, ok, "bound error carries no path")
-
-			_, err = dd.At(path)
-			require.Error(t, err, "path from the error resolves")
+			requireUnresolved(t, dd, bound)
 		})
 	}
 }
