@@ -2741,6 +2741,19 @@ func TestViewport_Revisions(t *testing.T) {
 
 	revs := []string{rev1, rev2, rev3}
 
+	same := stringtest.Input(`
+		name: same
+		value: 10
+	`)
+
+	different := stringtest.Input(`
+		name: different
+		value: 20
+	`)
+
+	// The first two revisions hold identical content.
+	dupes := []string{same, same, different}
+
 	// The rev closure returns revision n under the name addRevisions gives
 	// it.
 	rev := func(n int) *niceyaml.Source {
@@ -2750,8 +2763,8 @@ func TestViewport_Revisions(t *testing.T) {
 	tcs := map[string]struct {
 		setup func(m *yamlviewport.Model)
 		test  func(t *testing.T, m *yamlviewport.Model)
-		// How many of the revisions the model holds before setup runs.
-		revisions int
+		// The documents the model holds a revision of before setup runs.
+		docs []string
 	}{
 		"ClearRevisions/Empty": {
 			setup: func(m *yamlviewport.Model) {
@@ -2775,7 +2788,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"AtFirstRevision/Multiple": {
-			revisions: 2,
+			docs: revs[:2],
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				// At the latest revision, not at the first.
@@ -2788,7 +2801,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"AddRevision/Single": {
-			revisions: 1,
+			docs: revs[:1],
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Equal(t, 1, m.RevisionCount())
@@ -2800,7 +2813,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"AddRevision/Multiple": {
-			revisions: 3,
+			docs: revs[:3],
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				assert.Equal(t, 3, m.RevisionCount())
@@ -2837,7 +2850,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"AddRevisions/Empty": {
-			revisions: 2,
+			docs: revs[:2],
 			setup: func(m *yamlviewport.Model) {
 				m.GotoRevision(0)
 				m.AddRevisions()
@@ -2851,7 +2864,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"ClearRevisions": {
-			revisions: 2,
+			docs: revs[:2],
 			setup: func(m *yamlviewport.Model) {
 				m.ClearRevisions()
 			},
@@ -2863,7 +2876,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"GotoRevision/EachIndex": {
-			revisions: 3,
+			docs: revs[:3],
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				// Index 2 is the latest, so the view shows a diff in the
@@ -2888,7 +2901,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"GotoRevision/Clamped": {
-			revisions: 2,
+			docs: revs[:2],
 			setup: func(m *yamlviewport.Model) {
 				m.GotoRevision(100) // Should clamp to max (N-1).
 			},
@@ -2900,7 +2913,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"NextRevision": {
-			revisions: 3,
+			docs: revs[:3],
 			setup: func(m *yamlviewport.Model) {
 				m.GotoRevision(0)
 			},
@@ -2914,7 +2927,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"NextRevision/AtLatest": {
-			revisions: 2, // Already at latest (index 1).
+			docs: revs[:2], // Already at latest (index 1).
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				m.NextRevision()
@@ -2923,7 +2936,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"PreviousRevision": {
-			revisions: 3,
+			docs: revs[:3],
 			setup: func(m *yamlviewport.Model) {
 				m.GotoRevision(2)
 			},
@@ -2936,7 +2949,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"PreviousRevision/AtFirst": {
-			revisions: 2,
+			docs: revs[:2],
 			setup: func(m *yamlviewport.Model) {
 				m.GotoRevision(0)
 			},
@@ -2959,7 +2972,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"SetRevision/ReplacesRevisions": {
-			revisions: 2,
+			docs: revs[:2],
 			setup: func(m *yamlviewport.Model) {
 				setRevision(m, rev3) // SetRevision uses the Source's name.
 			},
@@ -2974,7 +2987,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"ToggleDiffMode/FullCycle": {
-			revisions: 2,
+			docs: revs[:2],
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 				// Start: Adjacent.
@@ -2991,7 +3004,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"SetDiffMode/OutOfRange": {
-			revisions: 2,
+			docs: revs[:2],
 			setup: func(m *yamlviewport.Model) {
 				m.SetDiffMode(yamlviewport.DiffMode(3))
 			},
@@ -3004,7 +3017,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"ToggleDiffMode/FromOutOfRange": {
-			revisions: 2,
+			docs: revs[:2],
 			setup: func(m *yamlviewport.Model) {
 				m.SetDiffMode(yamlviewport.DiffMode(-1))
 				m.ToggleDiffMode()
@@ -3015,7 +3028,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"DiffModeNone/NotShowingDiff": {
-			revisions: 3,
+			docs: revs[:3],
 			setup: func(m *yamlviewport.Model) {
 				m.GotoRevision(1)
 				m.SetDiffMode(yamlviewport.DiffModeNone)
@@ -3028,7 +3041,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"DiffModeAtIndex0/NoEffect": {
-			revisions: 3,
+			docs: revs[:3],
 			setup: func(m *yamlviewport.Model) {
 				m.GotoRevision(0)
 				m.SetDiffMode(yamlviewport.DiffModeOrigin)
@@ -3041,7 +3054,7 @@ func TestViewport_Revisions(t *testing.T) {
 			},
 		},
 		"DiffModeAtLatest/ShowsDiff": {
-			revisions: 2,
+			docs: revs[:2],
 			setup: func(m *yamlviewport.Model) {
 				// Already at latest (index 1).
 				m.SetDiffMode(yamlviewport.DiffModeOrigin)
@@ -3053,6 +3066,64 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
 			},
 		},
+		"DuplicateRevisions/CountIsCorrect": {
+			docs: dupes[:2],
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// Should still report 2 revisions (the logical count).
+				assert.Equal(t, 2, m.RevisionCount())
+				assert.True(t, m.AtLatestRevision())
+				// At latest (index 1), RevisionName returns the current revision name.
+				assert.Equal(t, "v2", m.RevisionName())
+			},
+		},
+		"DuplicateRevisions/NavigationWorks": {
+			docs: dupes[:2],
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// Should be able to navigate through all revisions.
+				m.GotoRevision(0)
+				assert.Equal(t, 0, m.RevisionIndex())
+				assert.True(t, m.AtFirstRevision())
+				assert.Equal(t, "v1", m.RevisionName())
+
+				m.NextRevision()
+				assert.Equal(t, 1, m.RevisionIndex())
+				assert.Equal(t, "v2", m.RevisionName())
+				assert.True(t, m.AtLatestRevision())
+
+				// Already at latest, NextRevision does nothing.
+				m.NextRevision()
+				assert.Equal(t, 1, m.RevisionIndex())
+				assert.Equal(t, "v2", m.RevisionName())
+			},
+		},
+		"DuplicateRevisions/ContentRendersCorrectly": {
+			docs: dupes[:2],
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				m.GotoRevision(0)
+
+				// Content should render (not crash).
+				view := m.View()
+				assert.Contains(t, view, "name")
+				assert.Contains(t, view, "same")
+				assert.Equal(t, "v1", m.RevisionName())
+			},
+		},
+		"MixedRevisions/Works": {
+			docs: dupes[:3], // Two identical + one different.
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, 3, m.RevisionCount())
+
+				// At latest (index 2).
+				assert.True(t, m.AtLatestRevision())
+				assert.Equal(t, "v3", m.RevisionName())
+				assert.True(t, m.ShowingDiff()) // Index > 0 shows a diff.
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -3060,7 +3131,7 @@ func TestViewport_Revisions(t *testing.T) {
 			t.Parallel()
 
 			m := testModel(testPrinter(), 80, 24)
-			addRevisions(&m, revs[:tc.revisions]...)
+			addRevisions(&m, tc.docs...)
 
 			if tc.setup != nil {
 				tc.setup(&m)
@@ -3685,99 +3756,6 @@ func TestViewport_KeyMap(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(&m)
 			}
-
-			tc.test(t, &m)
-		})
-	}
-}
-
-func TestViewport_RevisionDeduplication(t *testing.T) {
-	t.Parallel()
-
-	same := stringtest.Input(`
-		name: same
-		value: 10
-	`)
-
-	different := stringtest.Input(`
-		name: different
-		value: 20
-	`)
-
-	// The first two revisions hold identical content.
-	revs := []string{same, same, different}
-
-	tcs := map[string]struct {
-		test func(t *testing.T, m *yamlviewport.Model)
-		// How many of the revisions the model holds.
-		revisions int
-	}{
-		"DuplicateRevisions/CountIsCorrect": {
-			revisions: 2,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				// Should still report 2 revisions (the logical count).
-				assert.Equal(t, 2, m.RevisionCount())
-				assert.True(t, m.AtLatestRevision())
-				// At latest (index 1), RevisionName returns the current revision name.
-				assert.Equal(t, "v2", m.RevisionName())
-			},
-		},
-		"DuplicateRevisions/NavigationWorks": {
-			revisions: 2,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				// Should be able to navigate through all revisions.
-				m.GotoRevision(0)
-				assert.Equal(t, 0, m.RevisionIndex())
-				assert.True(t, m.AtFirstRevision())
-				assert.Equal(t, "v1", m.RevisionName())
-
-				m.NextRevision()
-				assert.Equal(t, 1, m.RevisionIndex())
-				assert.Equal(t, "v2", m.RevisionName())
-				assert.True(t, m.AtLatestRevision())
-
-				// Already at latest, NextRevision does nothing.
-				m.NextRevision()
-				assert.Equal(t, 1, m.RevisionIndex())
-				assert.Equal(t, "v2", m.RevisionName())
-			},
-		},
-		"DuplicateRevisions/ContentRendersCorrectly": {
-			revisions: 2,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-
-				m.GotoRevision(0)
-
-				// Content should render (not crash).
-				view := m.View()
-				assert.Contains(t, view, "name")
-				assert.Contains(t, view, "same")
-				assert.Equal(t, "v1", m.RevisionName())
-			},
-		},
-		"MixedRevisions/Works": {
-			revisions: 3, // Two identical + one different.
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, 3, m.RevisionCount())
-
-				// At latest (index 2).
-				assert.True(t, m.AtLatestRevision())
-				assert.Equal(t, "v3", m.RevisionName())
-				assert.True(t, m.ShowingDiff()) // Index > 0 shows a diff.
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			m := testModel(testPrinter(), 80, 24)
-			addRevisions(&m, revs[:tc.revisions]...)
 
 			tc.test(t, &m)
 		})
