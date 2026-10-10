@@ -5183,18 +5183,27 @@ func TestDocument_At(t *testing.T) {
 	t.Run("scoped decode reads the anchors its aliases need", func(t *testing.T) {
 		t.Parallel()
 
+		outside := stringtest.Input(`
+			base: &b
+			  x: 1
+			item:
+			  ref: *b
+			list:
+			  - *b
+		`)
+
 		tcs := map[string]struct {
 			input string
 			path  paths.Path
 			want  any
 		}{
 			"alias in a mapping to an anchor outside it": {
-				input: "base: &b\n  x: 1\nitem:\n  ref: *b\nlist:\n  - *b\n",
+				input: outside,
 				path:  paths.Current().Child("item"),
 				want:  map[string]any{"ref": map[string]any{"x": uint64(1)}},
 			},
 			"alias in a sequence to an anchor outside it": {
-				input: "base: &b\n  x: 1\nitem:\n  ref: *b\nlist:\n  - *b\n",
+				input: outside,
 				path:  paths.Current().Child("list"),
 				want:  []any{map[string]any{"x": uint64(1)}},
 			},
