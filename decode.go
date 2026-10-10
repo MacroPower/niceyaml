@@ -595,21 +595,7 @@ func ChainValidator(validators ...Validator) Validator {
 	validators = slices.Clone(validators)
 
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
-		for _, dv := range validators {
-			if nilness.IsNil(dv) {
-				continue
-			}
-
-			// A typed nil pointer is no failure, as [Node.Bind] reads it.
-			err := dv.Check(ctx, n)
-			if isNothing(err) {
-				continue
-			}
-
-			return err //nolint:wrapcheck // The validator's own error, which the Node that runs the validator binds.
-		}
-
-		return nil
+		return n.firstFailure(ctx, validators)
 	})
 }
 
@@ -2212,6 +2198,13 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 		return n.doc.err
 	}
 
+	return n.Bind(n.firstFailure(ctx, validators))
+}
+
+// firstFailure runs validators in order on n and returns the first
+// failure as the validator wrote it, or nil when each of them passes. It
+// skips a nil validator, and one that holds a nil pointer or func.
+func (n *Node) firstFailure(ctx context.Context, validators []Validator) error {
 	for _, dv := range validators {
 		if nilness.IsNil(dv) {
 			continue
@@ -2223,7 +2216,7 @@ func (n *Node) validate(ctx context.Context, validators []Validator) error {
 			continue
 		}
 
-		return n.Bind(err)
+		return err //nolint:wrapcheck // The validator's own error, which the Node that runs the validator binds.
 	}
 
 	return nil
