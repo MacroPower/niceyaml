@@ -400,9 +400,7 @@ func TestSchemaStore_FindMatchAfterRefresh(t *testing.T) {
 	// whose entry takes its name from the request count. A lookup matches
 	// against the catalog it fetched, not the one an earlier lookup of the
 	// same path read.
-	client, requests, _ := newHeldCatalogClient(t, 3)
-
-	store := newStore(client, schemastore.WithCacheTTL(0))
+	store, requests, _ := newHeldStore(t, 3, schemastore.WithCacheTTL(0))
 
 	for _, want := range []string{"Catalog 1", "Catalog 2", "Catalog 3"} {
 		entry, err := store.FindMatch(t.Context(), "/x/config.yaml")
@@ -526,9 +524,7 @@ func TestSchemaStore_ConcurrentFirstFetch(t *testing.T) {
 
 		// The transport holds the fetch open until every caller waits on
 		// it.
-		client, fetchCount, release := newHeldCatalogClient(t, 0)
-
-		store := newStore(client)
+		store, fetchCount, release := newHeldStore(t, 0)
 
 		entries := make([]schemastore.CatalogEntry, goroutines)
 		errs := make([]error, goroutines)
@@ -567,9 +563,7 @@ func TestSchemaStore_SlowFetch(t *testing.T) {
 		t.Parallel()
 
 		synctest.Test(t, func(t *testing.T) {
-			client, requests, release := newHeldCatalogClient(t, 1)
-
-			store := newStore(client, schemastore.WithCacheTTL(10*time.Millisecond))
+			store, requests, release := newHeldStore(t, 1, schemastore.WithCacheTTL(10*time.Millisecond))
 
 			requireEntry(t, store, "Catalog 1")
 
@@ -601,9 +595,7 @@ func TestSchemaStore_SlowFetch(t *testing.T) {
 		t.Parallel()
 
 		synctest.Test(t, func(t *testing.T) {
-			client, requests, release := newHeldCatalogClient(t, 0)
-
-			store := newStore(client)
+			store, requests, release := newHeldStore(t, 0)
 
 			// This lookup starts the first fetch, which the transport holds.
 			first := findMatchAsync(t.Context(), store)
@@ -638,9 +630,7 @@ func TestSchemaStore_SlowFetch(t *testing.T) {
 		t.Parallel()
 
 		synctest.Test(t, func(t *testing.T) {
-			client, requests, release := newHeldCatalogClient(t, 0)
-
-			store := newStore(client)
+			store, requests, release := newHeldStore(t, 0)
 
 			ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 			defer cancel()
@@ -671,13 +661,11 @@ func TestSchemaStore_SlowFetch(t *testing.T) {
 		t.Parallel()
 
 		synctest.Test(t, func(t *testing.T) {
-			client, requests, _ := newHeldCatalogClient(t, 0)
-
 			// The timeout stays below the five seconds receive waits, which
 			// the default would exceed.
 			const timeout = 50 * time.Millisecond
 
-			store := newStore(client, schemastore.WithRefreshTimeout(timeout))
+			store, requests, _ := newHeldStore(t, 0, schemastore.WithRefreshTimeout(timeout))
 
 			start := time.Now()
 
@@ -1647,18 +1635,23 @@ func marshalCatalog(tb testing.TB, catalog schemastore.Catalog) string {
 	return string(data)
 }
 
-// newHeldCatalogClient returns a client whose transport answers every URL
-// with a one-entry catalog whose pattern matches every YAML file. The entry
-// takes its name from the request count, so the first reads "Catalog 1".
-// The transport answers the first immediate requests at once and holds
-// each later one until the caller calls release or the request's context
-// ends. The returned counter reports the requests the transport has
-// received. Cleanup releases held requests.
+// newHeldStore creates a [*schemastore.Store] whose transport answers
+// every URL with a one-entry catalog whose pattern matches every YAML file,
+// with opts applied after. The entry takes its name from the request
+// count, so the first reads "Catalog 1". The transport answers the first
+// immediate requests at once and holds each later one until the caller
+// calls release or the request's context ends. The returned counter
+// reports the requests the transport has received. Cleanup releases held
+// requests.
 //
-// The transport stands in for a test server so the client works inside a
+// The transport stands in for a test server so the store works inside a
 // synctest bubble, where a goroutine waiting on a socket does not count as
 // durably blocked.
-func newHeldCatalogClient(t *testing.T, immediate int32) (*http.Client, *atomic.Int32, func()) {
+func newHeldStore(
+	t *testing.T,
+	immediate int32,
+	opts ...schemastore.Option,
+) (*schemastore.Store, *atomic.Int32, func()) {
 	t.Helper()
 
 	var requests atomic.Int32
@@ -1691,7 +1684,7 @@ func newHeldCatalogClient(t *testing.T, immediate int32) (*http.Client, *atomic.
 		return yamltest.Respond(http.StatusOK, string(data))(r)
 	}).Client()
 
-	return client, &requests, release
+	return newStore(client, opts...), &requests, release
 }
 
 // requireEntry looks config.yaml up in store and requires the entry
