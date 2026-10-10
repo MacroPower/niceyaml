@@ -19,6 +19,28 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
+var (
+	// A merge key gives the mapping m the key k of base.
+	mergedKeyDoc = stringtest.LinesLF(
+		"base: &b {k: x}",
+		"m:",
+		"  <<: *b",
+		"  own: 1",
+	)
+
+	// Two anchors hold the name x. The decoder reads the anchors of a
+	// merged mapping again at the merge key, so the alias under v refers
+	// to the x of base.
+	mergedAnchorDoc = stringtest.LinesLF(
+		"base: &b",
+		"  k: &x one",
+		"other: &x two",
+		"m:",
+		"  <<: *b",
+		"v: *x",
+	)
+)
+
 // documentOf returns the first document of input. A table case that
 // resolves in no document leaves its input empty, and documentOf returns
 // a nil document for it.
@@ -62,14 +84,9 @@ func TestResolver_Node(t *testing.T) {
 			want:  "x",
 		},
 		"key a merge brings in": {
-			input: stringtest.LinesLF(
-				"base: &b {k: x}",
-				"m:",
-				"  <<: *b",
-				"  own: 1",
-			),
-			path: "$.m.k",
-			want: "x",
+			input: mergedKeyDoc,
+			path:  "$.m.k",
+			want:  "x",
 		},
 		"anchor a merge brings in again": {
 			// The decoder reads the anchors of a merged mapping again at
@@ -86,16 +103,9 @@ func TestResolver_Node(t *testing.T) {
 			want: "one",
 		},
 		"anchor a merge brings in again for a later mapping": {
-			input: stringtest.LinesLF(
-				"base: &b",
-				"  k: &x one",
-				"other: &x two",
-				"m:",
-				"  <<: *b",
-				"v: *x",
-			),
-			path: "$.v",
-			want: "one",
+			input: mergedAnchorDoc,
+			path:  "$.v",
+			want:  "one",
 		},
 		"anchor a nested merge brings in again": {
 			input: stringtest.LinesLF(
@@ -276,6 +286,8 @@ func TestResolver_Node(t *testing.T) {
 func TestResolver_NodeFrom(t *testing.T) {
 	t.Parallel()
 
+	nested := stringtest.LinesLF("a:", "  b: x")
+
 	tcs := map[string]struct {
 		err   error
 		input string
@@ -296,7 +308,7 @@ func TestResolver_NodeFrom(t *testing.T) {
 			want:  "y",
 		},
 		"current path selects the node itself": {
-			input: stringtest.LinesLF("a:", "  b: x"),
+			input: nested,
 			from:  "$.a.b",
 			path:  "@",
 			want:  "x",
@@ -308,15 +320,10 @@ func TestResolver_NodeFrom(t *testing.T) {
 			want:  "x",
 		},
 		"key a merge brings in": {
-			input: stringtest.LinesLF(
-				"base: &b {k: x}",
-				"m:",
-				"  <<: *b",
-				"  own: 1",
-			),
-			from: "$.m",
-			path: "@.k",
-			want: "x",
+			input: mergedKeyDoc,
+			from:  "$.m",
+			path:  "@.k",
+			want:  "x",
 		},
 		"from a tagged mapping": {
 			input: "a: !!map {b: x}\n",
@@ -325,13 +332,13 @@ func TestResolver_NodeFrom(t *testing.T) {
 			want:  "x",
 		},
 		"key of an entry": {
-			input: stringtest.LinesLF("a:", "  b: x"),
+			input: nested,
 			from:  "$.a",
 			path:  "@.b~",
 			want:  "b",
 		},
 		"leading key selects the node itself": {
-			input: stringtest.LinesLF("a:", "  b: x"),
+			input: nested,
 			from:  "$.a.b",
 			path:  "@~",
 			want:  "x",
@@ -361,7 +368,7 @@ func TestResolver_NodeFrom(t *testing.T) {
 			err:   paths.ErrWildcard,
 		},
 		"missing path": {
-			input: stringtest.LinesLF("a:", "  b: x"),
+			input: nested,
 			from:  "$.a",
 			path:  "@.c",
 			err:   paths.ErrNotFound,
@@ -373,7 +380,7 @@ func TestResolver_NodeFrom(t *testing.T) {
 			want:  "y",
 		},
 		"absolute path misses where the node holds the key": {
-			input: stringtest.LinesLF("a:", "  b: x"),
+			input: nested,
 			from:  "$.a",
 			path:  "$.b",
 			err:   paths.ErrNotFound,
@@ -474,12 +481,7 @@ func TestResolver_Token(t *testing.T) {
 			wantLine: 2,
 		},
 		"key a merge brings in": {
-			input: stringtest.LinesLF(
-				"base: &b {k: x}",
-				"m:",
-				"  <<: *b",
-				"  own: 1",
-			),
+			input:    mergedKeyDoc,
 			path:     "$.m.k",
 			want:     "x",
 			wantLine: 1,
@@ -534,6 +536,10 @@ func TestResolver_Token(t *testing.T) {
 func TestResolver_Nearest(t *testing.T) {
 	t.Parallel()
 
+	// Most cases look up a path in one of these two documents.
+	server := stringtest.LinesLF("server:", "  port: 81")
+	servers := stringtest.LinesLF("servers:", "  web:", "    port: 80")
+
 	tcs := map[string]struct {
 		input string
 		path  string
@@ -542,12 +548,12 @@ func TestResolver_Nearest(t *testing.T) {
 		want string
 	}{
 		"key a mapping leaves out": {
-			input: stringtest.LinesLF("server:", "  port: 81"),
+			input: server,
 			path:  "$.server.name",
 			want:  "$.server",
 		},
 		"key the root leaves out": {
-			input: stringtest.LinesLF("server:", "  port: 81"),
+			input: server,
 			path:  "$.name",
 			want:  "$",
 		},
@@ -562,7 +568,7 @@ func TestResolver_Nearest(t *testing.T) {
 			want: "$.servers[1]",
 		},
 		"several names below the mapping": {
-			input: stringtest.LinesLF("server:", "  port: 81"),
+			input: server,
 			path:  "$.server.tls.cert.file",
 			want:  "$.server",
 		},
@@ -601,7 +607,7 @@ func TestResolver_Nearest(t *testing.T) {
 			want: "$.server",
 		},
 		"path that resolves": {
-			input: stringtest.LinesLF("server:", "  port: 81"),
+			input: server,
 			path:  "$.server.port",
 		},
 		"key a merge brings in": {
@@ -613,7 +619,7 @@ func TestResolver_Nearest(t *testing.T) {
 			path: "$.server.port",
 		},
 		"root": {
-			input: stringtest.LinesLF("server:", "  port: 81"),
+			input: server,
 			path:  "$",
 		},
 		"name in a scalar": {
@@ -633,11 +639,11 @@ func TestResolver_Nearest(t *testing.T) {
 			path:  "$.servers[5].name",
 		},
 		"index below the missing key": {
-			input: stringtest.LinesLF("server:", "  port: 81"),
+			input: server,
 			path:  "$.server.names[0]",
 		},
 		"key selector on the missing key": {
-			input: stringtest.LinesLF("server:", "  port: 81"),
+			input: server,
 			path:  "$.server.name~",
 		},
 		"wildcard": {
@@ -645,19 +651,19 @@ func TestResolver_Nearest(t *testing.T) {
 			path:  "$.servers[*].name",
 		},
 		"mapping wildcard": {
-			input: stringtest.LinesLF("servers:", "  web:", "    port: 80"),
+			input: servers,
 			path:  "$.servers.*.name",
 		},
 		"mapping wildcard before the missing key": {
-			input: stringtest.LinesLF("servers:", "  web:", "    port: 80"),
+			input: servers,
 			path:  "$.*.web.name",
 		},
 		"recursive wildcard before the missing key": {
-			input: stringtest.LinesLF("servers:", "  web:", "    port: 80"),
+			input: servers,
 			path:  "$..*.name",
 		},
 		"recursive selector": {
-			input: stringtest.LinesLF("server:", "  port: 81"),
+			input: server,
 			path:  "$..name",
 		},
 		"alias that does not resolve": {
@@ -716,7 +722,7 @@ func TestResolver_Nearest(t *testing.T) {
 	t.Run("leaves the path as it was", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, stringtest.LinesLF("server:", "  port: 81")).DocumentAST()
+		doc := yamltest.FirstDocument(t, server).DocumentAST()
 		path := paths.Doc().Child("server", "tls", "cert")
 
 		near, ok := paths.NewResolver(doc).Nearest(path)
@@ -753,14 +759,9 @@ func TestResolver_Matches(t *testing.T) {
 			want:  []string{"$.refs[0].k=x", "$.refs[1].k=x"},
 		},
 		"key a merge brings in": {
-			input: stringtest.LinesLF(
-				"base: &b {k: x}",
-				"m:",
-				"  <<: *b",
-				"  own: 1",
-			),
-			path: "$.m.k",
-			want: []string{"$.m.k=x"},
+			input: mergedKeyDoc,
+			path:  "$.m.k",
+			want:  []string{"$.m.k=x"},
 		},
 		"key of each entry": {
 			input: "a: {name: x}\nb: {name: y}\n",
@@ -1091,15 +1092,8 @@ func TestResolver_Deref(t *testing.T) {
 			want:  "two",
 		},
 		"anchor a merge brings in again": {
-			input: stringtest.LinesLF(
-				"base: &b",
-				"  k: &x one",
-				"other: &x two",
-				"m:",
-				"  <<: *b",
-				"v: *x",
-			),
-			want: "one",
+			input: mergedAnchorDoc,
+			want:  "one",
 		},
 		"anchor": {
 			input: "v: &a {k: x}\n",
@@ -1533,16 +1527,9 @@ func TestResolver_Anchor(t *testing.T) {
 			line:  2,
 		},
 		"anchor a merge brings in again": {
-			input: stringtest.LinesLF(
-				"base: &b",
-				"  k: &x one",
-				"other: &x two",
-				"m:",
-				"  <<: *b",
-				"v: *x",
-			),
-			want: "&x one",
-			line: 2,
+			input: mergedAnchorDoc,
+			want:  "&x one",
+			line:  2,
 		},
 		"anchor that holds an alias": {
 			// Deref goes on to the content of b, while Anchor stops at a.
