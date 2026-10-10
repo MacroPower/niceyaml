@@ -3467,10 +3467,9 @@ func TestFinderPrinter_Integration(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		input        string
-		search       string
-		want         string
-		wantNoRanges bool // If true, assert no ranges found.
+		input  string
+		search string
+		want   string
 	}{
 		"simple match": {
 			input:  "key: value",
@@ -3585,22 +3584,19 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			want:   "a: [日本]\nb: [日本]酒",
 		},
 		"no match": {
-			input:        "key: value",
-			search:       "notfound",
-			want:         "key: value",
-			wantNoRanges: true,
+			input:  "key: value",
+			search: "notfound",
+			want:   "key: value",
 		},
 		"empty search": {
-			input:        "key: value",
-			search:       "",
-			want:         "key: value",
-			wantNoRanges: true,
+			input:  "key: value",
+			search: "",
+			want:   "key: value",
 		},
 		"empty file": {
-			input:        "",
-			search:       "test",
-			want:         "",
-			wantNoRanges: true,
+			input:  "",
+			search: "test",
+			want:   "",
 		},
 	}
 
@@ -3611,9 +3607,9 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			source := niceyaml.NewSourceFromString(tc.input)
 			ranges := finder.New().Load(source.Lines()).Find(tc.search)
 
-			if tc.wantNoRanges {
-				assert.Empty(t, ranges)
-			}
+			// A search finds no range exactly when the print leaves the
+			// input as it was.
+			assert.Equal(t, tc.want == tc.input, len(ranges) == 0, "ranges: %v", ranges)
 
 			view := source.View()
 			view.AddOverlay(testOverlayHighlight, ranges...)
