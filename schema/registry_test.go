@@ -799,23 +799,9 @@ func TestRegistry_Caching(t *testing.T) {
 		t.Parallel()
 
 		// The client serves the schema from memory and counts every request
-		// it sends. No server listens on a port, so a connection that
-		// another process opens cannot add to the count. Names under .test
-		// never resolve, so a fetch that bypasses the client fails rather
-		// than going uncounted.
-		var fetches atomic.Int32
-
-		client := &http.Client{
-			Transport: yamltest.RoundTripFunc(func(_ *http.Request) (*http.Response, error) {
-				fetches.Add(1)
-
-				rec := httptest.NewRecorder()
-				//nolint:errcheck // Test helper.
-				rec.WriteString(`{"type": "object"}`)
-
-				return rec.Result(), nil
-			}),
-		}
+		// it sends. Names under .test never resolve, so a fetch that
+		// bypasses the client fails rather than going uncounted.
+		client, fetches := memoryClient(map[string]string{"/schema.json": `{"type": "object"}`})
 
 		resolve := schema.ResolverFunc(func(_ context.Context, doc *niceyaml.Node) (schema.Ref, error) {
 			// Each document names the same schema with a different scheme
@@ -1923,18 +1909,14 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 func TestRegistry_WithHTTPClient(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		//nolint:errcheck // Test helper.
-		w.Write([]byte(`{"type": "object"}`))
-	}))
-	t.Cleanup(server.Close)
+	schemaURL := serve(t, map[string]string{"/schema.json": `{"type": "object"}`}) + "/schema.json"
 
 	t.Run("a nil client keeps the default", func(t *testing.T) {
 		t.Parallel()
 
 		reg := schema.NewRegistry(
 			schema.WithHTTPClient(nil),
-			schema.WithResolvers(schema.URL(server.URL+"/schema.json")),
+			schema.WithResolvers(schema.URL(schemaURL)),
 		)
 
 		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\n")))
@@ -1945,7 +1927,7 @@ func TestRegistry_WithHTTPClient(t *testing.T) {
 
 		var requests atomic.Int32
 
-		err := lookup(t, countingClient(&requests), schema.URL(server.URL+"/schema.json"))
+		err := lookup(t, countingClient(&requests), schema.URL(schemaURL))
 		require.NoError(t, err)
 		assert.Equal(t, int32(1), requests.Load())
 	})
@@ -3128,17 +3110,13 @@ func TestRegistry_Load(t *testing.T) {
 	t.Run("a URL ref fetches with the client", func(t *testing.T) {
 		t.Parallel()
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{"type": "object"}`))
-		}))
-		defer server.Close()
+		base := serve(t, map[string]string{"/schema.json": `{"type": "object"}`})
 
 		var requests atomic.Int32
 
 		reg := schema.NewRegistry(schema.WithHTTPClient(countingClient(&requests)))
 
-		data, err := reg.Load(t.Context(), schema.URL(server.URL+"/schema.json"))
+		data, err := reg.Load(t.Context(), schema.URL(base+"/schema.json"))
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"type": "object"}`, string(data))
 		assert.Equal(t, int32(1), requests.Load())
@@ -3527,17 +3505,7 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 		"schemas/two.json":  &fstest.MapFile{Data: []byte(twoSchema)},
 	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/s/root.json" {
-			http.NotFound(w, r)
-
-			return
-		}
-
-		//nolint:errcheck // Test helper.
-		w.Write([]byte(rootSchema))
-	}))
-	t.Cleanup(server.Close)
+	base := serve(t, map[string]string{"/s/root.json": rootSchema})
 
 	// A file URL takes a fragment, which a plain path does not.
 	rootURL := "file://" + filepath.ToSlash(filepath.Join(tmpDir, "root.json"))
@@ -3575,7 +3543,7 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 				`read schemas/defs.json: open schemas/defs.json: file does not exist`,
 		},
 		"url": {
-			ref:  schema.URL(server.URL + "/s/root.json"),
+			ref:  schema.URL(base + "/s/root.json"),
 			err:  schema.ErrLoad,
 			want: `/s/root.json": cannot resolve $ref: `,
 		},
@@ -3770,7 +3738,7 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 	// The root takes any object, and each subschema requires a member.
 	// Foo reaches Name through a pointer $ref, which resolves against the
 	// root of the document rather than against Foo.
-	defsSchema := []byte(`{
+	const defsSchema = `{
 		"type": "object",
 		"$defs": {
 			"Foo": {"$ref": "#/$defs/Name"},
@@ -3778,44 +3746,21 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			"Bar": {"required": ["id"]},
 			"Named": {"$anchor": "named", "required": ["name"]}
 		}
-	}`)
+	}`
 
 	// Names under .test never resolve, so a fetch that bypasses the
 	// registry's client fails rather than going uncounted.
 	const baseURL = "http://schemas.test"
 
-	// The handler also answers a spelling of the path with dot segments,
-	// as a server that removes them does.
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/defs.json" && r.URL.Path != "/x/../defs.json" {
-			http.NotFound(w, r)
-
-			return
-		}
-
-		//nolint:errcheck // Test helper.
-		w.Write(defsSchema)
-	})
-
 	// Each subtest takes a client of its own, which serves defs.json from
 	// memory and counts every request it sends, whatever the path or host.
-	// No server listens on a port, so a connection that another process
-	// opens cannot add to the count.
-	serve := func() (*http.Client, *atomic.Int32) {
-		var requests atomic.Int32
-
-		client := &http.Client{
-			Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-				requests.Add(1)
-
-				rec := httptest.NewRecorder()
-				handler.ServeHTTP(rec, r)
-
-				return rec.Result(), nil
-			}),
-		}
-
-		return client, &requests
+	// The client also answers a spelling of the path with dot segments, as
+	// a server that removes them does.
+	newClient := func() (*http.Client, *atomic.Int32) {
+		return memoryClient(map[string]string{
+			"/defs.json":      defsSchema,
+			"/x/../defs.json": defsSchema,
+		})
 	}
 
 	// A file subtest writes defs.json to a directory of its own.
@@ -3823,7 +3768,7 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		t.Helper()
 
 		path := filepath.Join(t.TempDir(), "defs.json")
-		require.NoError(t, os.WriteFile(path, defsSchema, 0o600))
+		require.NoError(t, os.WriteFile(path, []byte(defsSchema), 0o600))
 
 		return path
 	}
@@ -3945,7 +3890,7 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client, requests := serve()
+			client, requests := newClient()
 			opts := append([]schema.RegistryOption{
 				schema.WithHTTPClient(client),
 				schema.WithResolvers(tc.ref(t)),
@@ -3966,7 +3911,7 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 	t.Run("fragments of one document apply their own subschemas", func(t *testing.T) {
 		t.Parallel()
 
-		client, requests := serve()
+		client, requests := newClient()
 		reg := schema.NewRegistry(schema.WithHTTPClient(client))
 
 		foo, err := reg.Schema(t.Context(), schema.URL(baseURL+"/defs.json#/$defs/Foo"))
@@ -3990,7 +3935,7 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 	t.Run("a pointer that names nothing does not compile", func(t *testing.T) {
 		t.Parallel()
 
-		client, _ := serve()
+		client, _ := newClient()
 		reg := schema.NewRegistry(schema.WithHTTPClient(client))
 
 		_, err := reg.Schema(t.Context(), schema.URL(baseURL+"/defs.json#/$defs/Missing"))
@@ -4004,49 +3949,32 @@ func TestRegistry_FragmentRefsDraft07(t *testing.T) {
 	// Draft-07 ignores the keywords beside a $ref, so Bar takes any
 	// string. The tuple document also holds array-form items, which only
 	// draft-07 accepts, and a draft-07 fragment $id that names an anchor.
-	defsSchema := []byte(`{
-		"$schema": "http://json-schema.org/draft-07/schema#",
-		"definitions": {
-			"Bar": {"$ref": "#/definitions/Str", "type": "integer"},
-			"Str": {"type": "string"}
-		}
-	}`)
-	tupleSchema := []byte(`{
-		"$schema": "http://json-schema.org/draft-07/schema#",
-		"definitions": {
-			"Str": {"type": "string"},
-			"T": {"$id": "#tuple", "items": [{"type": "string"}]}
-		}
-	}`)
-
-	// The first document again, written in YAML.
-	defsYAML := []byte(`$schema: http://json-schema.org/draft-07/schema#
-definitions:
-  Bar:
-    $ref: '#/definitions/Str'
-    type: integer
-  Str:
-    type: string
-`)
-
-	served := map[string][]byte{
-		"/defs.json":  defsSchema,
-		"/defs.yaml":  defsYAML,
-		"/tuple.json": tupleSchema,
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, ok := served[r.URL.Path]
-		if !ok {
-			http.NotFound(w, r)
-
-			return
-		}
-
-		//nolint:errcheck // Test helper.
-		w.Write(data)
-	}))
-	t.Cleanup(server.Close)
+	base := serve(t, map[string]string{
+		"/defs.json": `{
+			"$schema": "http://json-schema.org/draft-07/schema#",
+			"definitions": {
+				"Bar": {"$ref": "#/definitions/Str", "type": "integer"},
+				"Str": {"type": "string"}
+			}
+		}`,
+		// The first document again, written in YAML.
+		"/defs.yaml": stringtest.Input(`
+			$schema: http://json-schema.org/draft-07/schema#
+			definitions:
+			  Bar:
+			    $ref: '#/definitions/Str'
+			    type: integer
+			  Str:
+			    type: string
+		`),
+		"/tuple.json": `{
+			"$schema": "http://json-schema.org/draft-07/schema#",
+			"definitions": {
+				"Str": {"type": "string"},
+				"T": {"$id": "#tuple", "items": [{"type": "string"}]}
+			}
+		}`,
+	})
 
 	tcs := map[string]struct {
 		path    string
@@ -4084,7 +4012,7 @@ definitions:
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			reg := schema.NewRegistry(schema.WithResolvers(schema.URL(server.URL + tc.path)))
+			reg := schema.NewRegistry(schema.WithResolvers(schema.URL(base + tc.path)))
 
 			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, tc.valid)))
 
@@ -4099,60 +4027,42 @@ definitions:
 func TestRegistry_RelativeRefs(t *testing.T) {
 	t.Parallel()
 
-	mainSchema := []byte(`{"properties": {"a": {"$ref": "defs.json"}}}`)
-	defsSchema := []byte(`{"type": "string"}`)
+	const (
+		mainSchema = `{"properties": {"a": {"$ref": "defs.json"}}}`
+		defsSchema = `{"type": "string"}`
+	)
 
 	tmpDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "main.json"), mainSchema, 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "defs.json"), defsSchema, 0o600))
+	writeFiles(t, tmpDir, map[string]string{"main.json": mainSchema, "defs.json": defsSchema})
 
 	bundle := fstest.MapFS{
-		"schemas/main.json": &fstest.MapFile{Data: mainSchema},
-		"schemas/defs.json": &fstest.MapFile{Data: defsSchema},
+		"schemas/main.json": &fstest.MapFile{Data: []byte(mainSchema)},
+		"schemas/defs.json": &fstest.MapFile{Data: []byte(defsSchema)},
 	}
 
-	// A schema served over HTTP that names the defs file on disk.
+	// The defs file on disk, and the directory that holds it as a base.
 	defsURL := "file://" + filepath.ToSlash(filepath.Join(tmpDir, "defs.json"))
-	localSchema := fmt.Appendf(nil, `{"properties": {"a": {"$ref": %q}}}`, defsURL)
+	dirURL := "file://" + filepath.ToSlash(tmpDir) + "/"
 
-	// A schema served over HTTP whose $id moves its base to the directory
-	// on disk, so "defs.json" names the defs file there.
-	idBaseSchema := fmt.Appendf(nil, `{"$id": %q, "properties": {"a": {"$ref": "defs.json"}}}`,
-		"file://"+filepath.ToSlash(tmpDir)+"/")
-
-	// A schema served over HTTP that names the defs file on disk from an
-	// unknown keyword, which a JSON pointer $ref reaches.
-	keywordSchema := fmt.Appendf(nil,
-		`{"properties": {"a": {"$ref": "#/x-local"}}, "x-local": {"$ref": %q}}`, defsURL)
-
-	// Schemas served over HTTP that spell the keyword in upper case. The
-	// schema decoder reads "$REF" as $ref and "$ID" as $id.
-	upperRefSchema := fmt.Appendf(nil, `{"properties": {"a": {"$REF": %q}}}`, defsURL)
-	upperIDSchema := fmt.Appendf(nil, `{"$ID": %q, "properties": {"a": {"$ref": "defs.json"}}}`,
-		"file://"+filepath.ToSlash(tmpDir)+"/")
-
-	served := map[string][]byte{
-		"/s/main.json":     mainSchema,
-		"/s/defs.json":     defsSchema,
-		"/s/local.json":    localSchema,
-		"/s/idbase.json":   idBaseSchema,
-		"/s/keyword.json":  keywordSchema,
-		"/s/upperref.json": upperRefSchema,
-		"/s/upperid.json":  upperIDSchema,
-	}
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, ok := served[r.URL.Path]
-		if !ok {
-			http.NotFound(w, r)
-
-			return
-		}
-
-		//nolint:errcheck // Test helper.
-		w.Write(data)
-	}))
-	t.Cleanup(server.Close)
+	base := serve(t, map[string]string{
+		"/s/main.json": mainSchema,
+		"/s/defs.json": defsSchema,
+		// A schema that names the defs file on disk.
+		"/s/local.json": fmt.Sprintf(`{"properties": {"a": {"$ref": %q}}}`, defsURL),
+		// A schema whose $id moves its base to the directory on disk, so
+		// "defs.json" names the defs file there.
+		"/s/idbase.json": fmt.Sprintf(`{"$id": %q, "properties": {"a": {"$ref": "defs.json"}}}`, dirURL),
+		// A schema that names the defs file on disk from an unknown
+		// keyword, which a JSON pointer $ref reaches.
+		"/s/keyword.json": fmt.Sprintf(
+			`{"properties": {"a": {"$ref": "#/x-local"}}, "x-local": {"$ref": %q}}`,
+			defsURL,
+		),
+		// Schemas that spell the keyword in upper case. The schema decoder
+		// reads "$REF" as $ref and "$ID" as $id.
+		"/s/upperref.json": fmt.Sprintf(`{"properties": {"a": {"$REF": %q}}}`, defsURL),
+		"/s/upperid.json":  fmt.Sprintf(`{"$ID": %q, "properties": {"a": {"$ref": "defs.json"}}}`, dirURL),
+	})
 
 	tcs := map[string]struct {
 		ref  schema.Ref
@@ -4165,7 +4075,7 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 			ref: schema.FileFS(bundle, "schemas/main.json"),
 		},
 		"url": {
-			ref: schema.URL(server.URL + "/s/main.json"),
+			ref: schema.URL(base + "/s/main.json"),
 		},
 	}
 
@@ -4193,7 +4103,7 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 
 				reg := schema.NewRegistry(
 					requireRefs(mode.require),
-					schema.WithResolvers(schema.URL(server.URL+"/s/local.json")),
+					schema.WithResolvers(schema.URL(base+"/s/local.json")),
 				)
 
 				err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
@@ -4231,7 +4141,7 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 				t.Parallel()
 
 				root := filepath.Join(t.TempDir(), "root.json")
-				rootSchema := fmt.Appendf(nil, `{"$ref": %q}`, server.URL+tc.remote)
+				rootSchema := fmt.Appendf(nil, `{"$ref": %q}`, base+tc.remote)
 				require.NoError(t, os.WriteFile(root, rootSchema, 0o600))
 
 				for name, mode := range refModes {
@@ -4516,23 +4426,12 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 		return func(t *testing.T) (schema.Ref, []schema.RegistryOption) {
 			t.Helper()
 
-			client := &http.Client{
-				Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-					rec := httptest.NewRecorder()
-
-					data, ok := files[strings.TrimPrefix(r.URL.Path, "/")]
-					if !ok {
-						http.NotFound(rec, r)
-
-						return rec.Result(), nil
-					}
-
-					//nolint:errcheck // Test helper.
-					rec.WriteString(data)
-
-					return rec.Result(), nil
-				}),
+			remote := make(map[string]string, len(files))
+			for file, data := range files {
+				remote["/"+file] = data
 			}
+
+			client, _ := memoryClient(remote)
 
 			return schema.URL("http://schemas.test/" + name), []schema.RegistryOption{schema.WithHTTPClient(client)}
 		}
@@ -4703,18 +4602,7 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 			) + "\"\n",
 		}
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			data, ok := remote[r.URL.Path]
-			if !ok {
-				http.NotFound(w, r)
-
-				return
-			}
-
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(data))
-		}))
-		t.Cleanup(server.Close)
+		base := serve(t, remote)
 
 		for path := range remote {
 			for name, mode := range refModes {
@@ -4722,7 +4610,7 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 					t.Parallel()
 
 					root := filepath.Join(t.TempDir(), "root.yaml")
-					require.NoError(t, os.WriteFile(root, []byte("$ref: "+server.URL+path+"\n"), 0o600))
+					require.NoError(t, os.WriteFile(root, []byte("$ref: "+base+path+"\n"), 0o600))
 
 					reg := schema.NewRegistry(requireRefs(mode.require), schema.WithResolvers(schema.File(root)))
 
@@ -4738,39 +4626,16 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/bad.json":
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{"type": 5}`))
+	base := serve(t, map[string]string{
+		"/bad.json":     `{"type": 5}`,
+		"/defs.json":    `{"$defs": {"Foo": {}}}`,
+		"/garbled.json": `not json`,
+		"/d/root.json":  `{"properties": {"a": {"$ref": "../anchor.json"}}}`,
+		"/anchor.json":  `{"$defs": {"a": {"$anchor": "1bad"}}}`,
+		"/d/lost.json":  `{"properties": {"a": {"$ref": "../gone.json"}}}`,
+	})
 
-		case "/defs.json":
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{"$defs": {"Foo": {}}}`))
-
-		case "/garbled.json":
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`not json`))
-
-		case "/d/root.json":
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{"properties": {"a": {"$ref": "../anchor.json"}}}`))
-
-		case "/anchor.json":
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{"$defs": {"a": {"$anchor": "1bad"}}}`))
-
-		case "/d/lost.json":
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(`{"properties": {"a": {"$ref": "../gone.json"}}}`))
-
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(server.Close)
-
-	withPassword := strings.Replace(server.URL, "://", "://user:secret@", 1)
+	withPassword := strings.Replace(base, "://", "://user:secret@", 1)
 
 	tcs := map[string]struct {
 		err error
@@ -4941,13 +4806,11 @@ func TestRegistry_RefCredentials(t *testing.T) {
 		}))
 		t.Cleanup(other.Close)
 
-		root := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			fmt.Fprintf(w, `{"properties": {"a": {"$ref": %q}}}`, other.URL+"/defs.json")
-		}))
-		t.Cleanup(root.Close)
+		root := serve(t, map[string]string{
+			"/root.json": fmt.Sprintf(`{"properties": {"a": {"$ref": %q}}}`, other.URL+"/defs.json"),
+		})
 
-		ref := schema.URL(strings.Replace(root.URL, "://", "://user:secret@", 1) + "/root.json")
+		ref := schema.URL(strings.Replace(root, "://", "://user:secret@", 1) + "/root.json")
 		reg := schema.NewRegistry(schema.WithResolvers(ref))
 
 		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))

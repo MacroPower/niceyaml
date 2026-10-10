@@ -3,8 +3,6 @@ package schema_test
 import (
 	"context"
 	"io/fs"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -107,61 +105,41 @@ func TestFileOrURL(t *testing.T) {
 	t.Run("URL schema", func(t *testing.T) {
 		t.Parallel()
 
-		schemaData := `{"type": "object"}`
+		schemaData := []byte(`{"type": "object"}`)
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		defer server.Close()
+		// A URL ignores baseDir and needs none.
+		tcs := map[string]struct {
+			baseDir string
+			scheme  string
+		}{
+			"with a base directory": {
+				baseDir: "/some/dir",
+				scheme:  "http",
+			},
+			"without a base directory": {
+				scheme: "http",
+			},
+			// The resolved URL keys the registry cache, so the scheme comes
+			// back in lower case however the reference spelled it.
+			"scheme in upper case": {
+				baseDir: "/some/dir",
+				scheme:  "HTTP",
+			},
+		}
 
-		schemaURL := server.URL + "/schema.json"
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		// A URL ignores baseDir.
-		url, data, err := load(t, fileOrURL(t, "/some/dir", schemaURL))
-		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), data)
-		assert.Equal(t, schemaURL, url)
-	})
+				schemaURL := serve(t, map[string]string{"/schema.json": string(schemaData)}) + "/schema.json"
+				ref := tc.scheme + strings.TrimPrefix(schemaURL, "http")
 
-	t.Run("URL without base directory", func(t *testing.T) {
-		t.Parallel()
-
-		schemaData := `{"type": "object"}`
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		defer server.Close()
-
-		schemaURL := server.URL + "/schema.json"
-
-		url, data, err := load(t, fileOrURL(t, "", schemaURL))
-		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), data)
-		assert.Equal(t, schemaURL, url)
-	})
-
-	t.Run("URL scheme in upper case", func(t *testing.T) {
-		t.Parallel()
-
-		schemaData := `{"type": "object"}`
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		defer server.Close()
-
-		schemaURL := "HTTP://" + strings.TrimPrefix(server.URL, "http://") + "/schema.json"
-
-		// The resolved URL keys the registry cache, so the scheme comes
-		// back in lower case however the reference spelled it.
-		url, data, err := load(t, fileOrURL(t, "/some/dir", schemaURL))
-		require.NoError(t, err)
-		assert.Equal(t, []byte(schemaData), data)
-		assert.Equal(t, server.URL+"/schema.json", url)
+				url, data, err := load(t, fileOrURL(t, tc.baseDir, ref))
+				require.NoError(t, err)
+				assert.Equal(t, schemaData, data)
+				assert.Equal(t, schemaURL, url)
+			})
+		}
 	})
 
 	t.Run("file URL", func(t *testing.T) {
@@ -248,17 +226,11 @@ func TestFileOrURL(t *testing.T) {
 	t.Run("URL with custom client", func(t *testing.T) {
 		t.Parallel()
 
-		schemaData := `{"type": "object"}`
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		defer server.Close()
+		base := serve(t, map[string]string{"/schema.json": `{"type": "object"}`})
 
 		var requests atomic.Int32
 
-		r := fileOrURL(t, "/dir", server.URL+"/schema.json")
+		r := fileOrURL(t, "/dir", base+"/schema.json")
 
 		// The registry fetches the URL with its own client.
 		err := lookup(t, countingClient(&requests), r)

@@ -2,8 +2,6 @@ package schema_test
 
 import (
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -523,16 +521,10 @@ func TestDirective(t *testing.T) {
 	t.Run("registry fetches a directive URL with its client", func(t *testing.T) {
 		t.Parallel()
 
-		schemaData := `{"type": "object"}`
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		defer server.Close()
+		base := serve(t, map[string]string{"/schema.json": `{"type": "object"}`})
 
 		doc := yamltest.FirstDocumentWithPath(t,
-			"# yaml-language-server: $schema="+server.URL+"/schema.json\nkind: Deployment\n",
+			"# yaml-language-server: $schema="+base+"/schema.json\nkind: Deployment\n",
 			filepath.Join(t.TempDir(), "config.yaml"),
 		)
 
@@ -715,39 +707,45 @@ func TestDirective_Resolve(t *testing.T) {
 	t.Run("successfully loads schema from URL directive", func(t *testing.T) {
 		t.Parallel()
 
-		schemaData := `{"type": "object"}`
+		schemaData := []byte(`{"type": "object"}`)
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		defer server.Close()
+		// A URL needs no directory to resolve against.
+		tcs := map[string]struct {
+			opts []niceyaml.SourceOption
+		}{
+			"document with a file path": {
+				opts: []niceyaml.SourceOption{niceyaml.WithFilePath(filepath.Join(t.TempDir(), "config.yaml"))},
+			},
+			"document without a file path": {},
+		}
 
-		doc := yamltest.FirstDocumentWithPath(t,
-			"# yaml-language-server: $schema="+server.URL+"/schema.json\nkind: Deployment\n",
-			filepath.Join(t.TempDir(), "config.yaml"),
-		)
-		url, data := resolveAndLoad(t, schema.Directive(), doc)
-		assert.Equal(t, []byte(schemaData), data)
-		assert.Equal(t, server.URL+"/schema.json", url)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				schemaURL := serve(t, map[string]string{"/schema.json": string(schemaData)}) + "/schema.json"
+
+				doc := yamltest.FirstDocument(t,
+					"# yaml-language-server: $schema="+schemaURL+"\nkind: Deployment\n",
+					tc.opts...,
+				)
+				url, data := resolveAndLoad(t, schema.Directive(), doc)
+				assert.Equal(t, schemaData, data)
+				assert.Equal(t, schemaURL, url)
+			})
+		}
 	})
 
 	t.Run("validates against the subschema a URL fragment names", func(t *testing.T) {
 		t.Parallel()
 
 		// The root takes any document, and Foo requires a name.
-		schemaData := `{
+		base := serve(t, map[string]string{"/defs.json": `{
 			"$schema": "http://json-schema.org/draft-07/schema#",
 			"definitions": {"Foo": {"type": "object", "required": ["name"]}}
-		}`
+		}`})
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		defer server.Close()
-
-		directive := "# yaml-language-server: $schema=" + server.URL + "/defs.json#/definitions/Foo\n"
+		directive := "# yaml-language-server: $schema=" + base + "/defs.json#/definitions/Foo\n"
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
 		err := reg.Check(t.Context(), yamltest.FirstDocument(t, directive+"name: x\n"))
@@ -844,25 +842,6 @@ func TestDirective_Resolve(t *testing.T) {
 		require.ErrorIs(t, err, schema.ErrNoFilePath)
 		require.ErrorIs(t, err, schema.ErrNoBaseDir)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)
-	})
-
-	t.Run("resolves a URL without a file path", func(t *testing.T) {
-		t.Parallel()
-
-		schemaData := `{"type": "object"}`
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		defer server.Close()
-
-		input := "# yaml-language-server: $schema=" + server.URL + "/schema.json\nkind: Deployment\n"
-
-		doc := yamltest.FirstDocument(t, input)
-		url, data := resolveAndLoad(t, schema.Directive(), doc)
-		assert.Equal(t, server.URL+"/schema.json", url)
-		assert.Equal(t, []byte(schemaData), data)
 	})
 
 	t.Run("resolves an absolute path without a file path", func(t *testing.T) {

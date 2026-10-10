@@ -32,6 +32,56 @@ func countingClient(requests *atomic.Int32) *http.Client {
 	}
 }
 
+// schemaHandler answers each request with the body files holds for the
+// path of its URL, and with 404 for any other path.
+func schemaHandler(files map[string]string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, ok := files[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+
+			return
+		}
+
+		//nolint:errcheck // Test helper.
+		w.Write([]byte(data))
+	})
+}
+
+// serve starts a server that answers through [schemaHandler] and returns
+// its URL. The server closes when the test ends.
+func serve(t *testing.T, files map[string]string) string {
+	t.Helper()
+
+	server := httptest.NewServer(schemaHandler(files))
+	t.Cleanup(server.Close)
+
+	return server.URL
+}
+
+// memoryClient returns a client that answers through [schemaHandler]
+// from memory, and the count of the requests it answered. No server
+// listens on a port, so a connection that another process opens cannot
+// add to the count.
+func memoryClient(files map[string]string) (*http.Client, *atomic.Int32) {
+	var requests atomic.Int32
+
+	handler := schemaHandler(files)
+
+	client := &http.Client{
+		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			requests.Add(1)
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, r)
+
+			return rec.Result(), nil
+		}),
+	}
+
+	return client, &requests
+}
+
 type errReader struct{}
 
 func (errReader) Read(_ []byte) (int, error) {
@@ -53,17 +103,12 @@ func TestURL(t *testing.T) {
 		t.Parallel()
 
 		schemaData := `{"type": "object"}`
+		schemaURL := serve(t, map[string]string{"/schema.json": schemaData}) + "/schema.json"
 
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		defer server.Close()
-
-		url, data, err := load(t, schema.URL(server.URL+"/schema.json"))
+		url, data, err := load(t, schema.URL(schemaURL))
 		require.NoError(t, err)
 		assert.Equal(t, []byte(schemaData), data)
-		assert.Equal(t, server.URL+"/schema.json", url)
+		assert.Equal(t, schemaURL, url)
 	})
 
 	t.Run("resolve does not fetch", func(t *testing.T) {
@@ -213,21 +258,13 @@ func TestURL(t *testing.T) {
 	t.Run("not found", func(t *testing.T) {
 		t.Parallel()
 
-		// The transport serves the 404 from memory. The default transport
+		// The client serves the 404 from memory. The default transport
 		// pools the connection of a response with no body before it hands
 		// the response over, and a sibling that closes its httptest server
 		// closes the idle connections of the default transport. A close at
 		// that moment would turn a 404 from a server into a broken
 		// connection.
-		client := &http.Client{
-			Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-				return &http.Response{
-					StatusCode: http.StatusNotFound,
-					Body:       http.NoBody,
-					Request:    r,
-				}, nil
-			}),
-		}
+		client, _ := memoryClient(nil)
 
 		err := lookup(t, client, schema.URL("http://example.com/schema.json"))
 		require.ErrorIs(t, err, schema.ErrLoad)
@@ -237,17 +274,11 @@ func TestURL(t *testing.T) {
 	t.Run("registry fetches with its client", func(t *testing.T) {
 		t.Parallel()
 
-		schemaData := `{"type": "object"}`
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		defer server.Close()
+		base := serve(t, map[string]string{"/schema.json": `{"type": "object"}`})
 
 		var requests atomic.Int32
 
-		err := lookup(t, countingClient(&requests), schema.URL(server.URL+"/schema.json"))
+		err := lookup(t, countingClient(&requests), schema.URL(base+"/schema.json"))
 		require.NoError(t, err)
 		assert.Equal(t, int32(1), requests.Load())
 	})
@@ -255,16 +286,10 @@ func TestURL(t *testing.T) {
 	t.Run("registry with nil client", func(t *testing.T) {
 		t.Parallel()
 
-		schemaData := `{"type": "object"}`
-
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			//nolint:errcheck // Test helper.
-			w.Write([]byte(schemaData))
-		}))
-		defer server.Close()
+		base := serve(t, map[string]string{"/schema.json": `{"type": "object"}`})
 
 		// A nil client keeps the default rather than panicking on the fetch.
-		err := lookup(t, nil, schema.URL(server.URL+"/schema.json"))
+		err := lookup(t, nil, schema.URL(base+"/schema.json"))
 		require.NoError(t, err)
 	})
 
