@@ -21,51 +21,36 @@ func BenchmarkFinderFind(b *testing.B) {
 		{"large_5000", 5000},
 	}
 
+	searches := []struct {
+		name   string
+		search string
+	}{
+		// Appears rarely.
+		{"few_matches", "key_0:"},
+		// Appears on every line.
+		{"many_matches", "value_"},
+		// Does not exist.
+		{"no_matches", "ZZZZZ_NOT_FOUND"},
+	}
+
 	for _, sz := range sizes {
 		yaml := yamltest.GenerateYAML(sz.lines)
 		source := niceyaml.NewSourceFromString(yaml)
 
-		b.Run(sz.name+"/few_matches", func(b *testing.B) {
-			// Create finder once (preprocesses source).
-			f := finder.New()
-			idx := f.Load(source.Lines())
+		for _, tc := range searches {
+			b.Run(sz.name+"/"+tc.name, func(b *testing.B) {
+				// Create finder once (preprocesses source).
+				f := finder.New()
+				idx := f.Load(source.Lines())
 
-			b.ReportAllocs()
-			b.SetBytes(int64(len(yaml)))
+				b.ReportAllocs()
+				b.SetBytes(int64(len(yaml)))
 
-			for b.Loop() {
-				// Search for something that appears rarely.
-				_ = idx.Find("key_0:")
-			}
-		})
-
-		b.Run(sz.name+"/many_matches", func(b *testing.B) {
-			// Create finder once (preprocesses source).
-			f := finder.New()
-			idx := f.Load(source.Lines())
-
-			b.ReportAllocs()
-			b.SetBytes(int64(len(yaml)))
-
-			for b.Loop() {
-				// Search for something that appears on every line.
-				_ = idx.Find("value_")
-			}
-		})
-
-		b.Run(sz.name+"/no_matches", func(b *testing.B) {
-			// Create finder once (preprocesses source).
-			f := finder.New()
-			idx := f.Load(source.Lines())
-
-			b.ReportAllocs()
-			b.SetBytes(int64(len(yaml)))
-
-			for b.Loop() {
-				// Search for something that doesn't exist.
-				_ = idx.Find("ZZZZZ_NOT_FOUND")
-			}
-		})
+				for b.Loop() {
+					_ = idx.Find(tc.search)
+				}
+			})
+		}
 	}
 }
 
