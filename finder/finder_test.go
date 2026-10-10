@@ -638,25 +638,21 @@ func TestFinder_Find_View(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
-}
 
-func TestFinder_Find_ViewMarksItself(t *testing.T) {
-	t.Parallel()
+	t.Run("matches mark the view they came from", func(t *testing.T) {
+		t.Parallel()
 
-	docs := niceyaml.NewSourceFromString("a: 1\nb: 2\n---\nname: x\nport: 80\n").Documents()
-	require.Len(t, docs, 2)
+		// The matches of a view are in the coordinates of its content.
+		view := docs[1].View()
+		view.AddOverlay(kind.GenericHighlight, finder.New().Load(view).Find("port")...)
 
-	// The matches of a view are in the coordinates of its content, so they
-	// mark the view they came from.
-	view := docs[1].View()
-	view.AddOverlay(kind.GenericHighlight, finder.New().Load(view).Find("port")...)
-
-	assert.Equal(t, stringtest.JoinLF(
-		"   3 | ---",
-		"   4 | name: x",
-		"   5 | port: 80",
-		"     | ^^^^",
-	), view.String())
+		assert.Equal(t, stringtest.JoinLF(
+			"   3 | ---",
+			"   4 | name: x",
+			"   5 | port: 80",
+			"     | ^^^^",
+		), view.String())
+	})
 }
 
 func TestFinder_Find_LineWithoutEnding(t *testing.T) {
