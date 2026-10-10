@@ -2079,26 +2079,6 @@ func TestError_MultiError(t *testing.T) {
 		assert.Equal(t, "validation failed", err.Error())
 		assert.Equal(t, "validation failed\n`-- @.value: nested error", render(err))
 	})
-
-	t.Run("nested-only error with nested error that has no path or token", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			name: test
-			value: 123
-		`)
-
-		// No nested error has a location, so nothing annotates the source
-		// and the message is the whole output.
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-			"validation failed",
-			niceyaml.WithDetails(
-				niceyaml.NewError("nested without location"),
-			),
-		))
-
-		assert.Equal(t, "validation failed\n└── nested without location", render(err))
-	})
 }
 
 func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
@@ -2130,6 +2110,15 @@ func TestSourceError_Excerpt_NestedLocations(t *testing.T) {
 				"main error",
 				"├── nested 1",
 				"└── nested 2",
+			),
+		},
+		"detail without a location": {
+			err: niceyaml.NewError("main error", niceyaml.WithDetails(
+				niceyaml.NewError("nested without location"),
+			)),
+			want: stringtest.JoinLF(
+				"main error",
+				"└── nested without location",
 			),
 		},
 		"nested error with path": {
