@@ -1349,7 +1349,7 @@ func (m *Model) getDiffResult() *diff.Result {
 		// modes render them, rather than every line of the content the
 		// view is over.
 		m.diffViews = [2]*line.View{m.revision(base).View(), m.currentRevision().View()}
-		m.diffResult = diff.Diff(m.diffViews[0].Held(), m.diffViews[1].Held())
+		m.diffResult = diff.Diff(m.diffViews[0], m.diffViews[1])
 		m.diffKey = pair
 	}
 
