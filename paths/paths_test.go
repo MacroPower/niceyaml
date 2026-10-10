@@ -2279,9 +2279,15 @@ func TestPath_Token_Collections(t *testing.T) {
 			want:  "sub@2:3",
 		},
 		"mapping a merge key brings in points at its key in the source": {
-			input: "base: &b\n  sub:\n    k: v\nm:\n  <<: *b\n",
-			path:  "$.m.sub",
-			want:  "sub@2:3",
+			input: stringtest.LinesLF(
+				"base: &b",
+				"  sub:",
+				"    k: v",
+				"m:",
+				"  <<: *b",
+			),
+			path: "$.m.sub",
+			want: "sub@2:3",
 		},
 		"mapping element through an aliased sequence": {
 			input: "list: &l\n  - k: v\ncopy: *l\n",
@@ -3387,7 +3393,14 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 
 	// An alias refers to the last anchor of its name before it, so the *x on
 	// line 3 reaches `v: 1` and the *x on line 6 reaches `v: 2`.
-	doc := yamltest.FirstDocument(t, "a: &x\n  v: 1\nb: *x\nc: &x\n  v: 2\nd: *x\n").DocumentAST()
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"a: &x",
+		"  v: 1",
+		"b: *x",
+		"c: &x",
+		"  v: 2",
+		"d: *x",
+	)).DocumentAST()
 
 	tcs := map[string]struct {
 		key       string
@@ -4316,17 +4329,37 @@ func TestPath_Node_TwoMergeKeys(t *testing.T) {
 		found []string
 	}{
 		"later merge key wins over the earlier one": {
-			input: "p: &p {k: P}\nq: &q {k: Q}\nt:\n  <<: *p\n  <<: *q\n",
-			want:  "Q",
+			input: stringtest.LinesLF(
+				"p: &p {k: P}",
+				"q: &q {k: Q}",
+				"t:",
+				"  <<: *p",
+				"  <<: *q",
+			),
+			want: "Q",
 		},
 		"own key wins over an earlier merge key": {
-			input: "p: &p {k: P}\nq: &q {j: Q}\nt:\n  <<: *p\n  k: own\n  <<: *q\n",
+			input: stringtest.LinesLF(
+				"p: &p {k: P}",
+				"q: &q {j: Q}",
+				"t:",
+				"  <<: *p",
+				"  k: own",
+				"  <<: *q",
+			),
 			want:  "own",
 			found: []string{"$.t.k"},
 		},
 		"later merge key wins over the own key": {
-			input: "p: &p {k: P}\nq: &q {k: Q}\nt:\n  <<: *p\n  k: own\n  <<: *q\n",
-			want:  "Q",
+			input: stringtest.LinesLF(
+				"p: &p {k: P}",
+				"q: &q {k: Q}",
+				"t:",
+				"  <<: *p",
+				"  k: own",
+				"  <<: *q",
+			),
+			want: "Q",
 		},
 	}
 
@@ -4438,8 +4471,13 @@ func TestPath_MergeKeyAndLiteralMergeName(t *testing.T) {
 	tcs := map[string]string{
 		"alias key first": "a: {? &x \"<<\" : 1}\nm:\n  *x : {k: 1}\n  <<: {k: 2}\n",
 		"merge key first": "a: {? &x \"<<\" : 1}\nm:\n  <<: {k: 2}\n  *x : {k: 1}\n",
-		"alias key before a source with a merge key": "a: {? &x \"<<\" : 1}\nb: &b {j: 3}\n" +
-			"m:\n  *x : {k: 1}\n  <<: {<<: *b, k: 2}\n",
+		"alias key before a source with a merge key": stringtest.LinesLF(
+			`a: {? &x "<<" : 1}`,
+			"b: &b {j: 3}",
+			"m:",
+			"  *x : {k: 1}",
+			"  <<: {<<: *b, k: 2}",
+		),
 	}
 
 	for name, input := range tcs {
@@ -4475,19 +4513,37 @@ func TestPath_MergeBringsInLiteralMergeName(t *testing.T) {
 		want  []string
 	}{
 		"block source": {
-			input: "k: &k \"<<\"\ninner: &inner\n  *k : real\ntop:\n  <<: *inner\n",
-			want:  []string{"$.inner.<<"},
+			input: stringtest.LinesLF(
+				`k: &k "<<"`,
+				"inner: &inner",
+				"  *k : real",
+				"top:",
+				"  <<: *inner",
+			),
+			want: []string{"$.inner.<<"},
 		},
 		"inline source": {
 			input: "k: &k \"<<\"\ntop:\n  <<: {*k : real}\n",
 		},
 		"sequence source": {
-			input: "k: &k \"<<\"\ninner: &inner\n  *k : real\ntop:\n  <<: [*inner]\n",
-			want:  []string{"$.inner.<<"},
+			input: stringtest.LinesLF(
+				`k: &k "<<"`,
+				"inner: &inner",
+				"  *k : real",
+				"top:",
+				"  <<: [*inner]",
+			),
+			want: []string{"$.inner.<<"},
 		},
 		"source that merges the key": {
-			input: "k: &k \"<<\"\nbase: &base {*k : real}\nmid: &mid {<<: *base}\ntop:\n  <<: *mid\n",
-			want:  []string{"$.base.<<"},
+			input: stringtest.LinesLF(
+				`k: &k "<<"`,
+				"base: &base {*k : real}",
+				"mid: &mid {<<: *base}",
+				"top:",
+				"  <<: *mid",
+			),
+			want: []string{"$.base.<<"},
 		},
 		"earlier merge key": {
 			input: "k: &k \"<<\"\ntop:\n  <<: {*k : real}\n  <<: {a: 1}\n",
@@ -4597,14 +4653,26 @@ func TestPath_Matches_RecursiveReachedTwice(t *testing.T) {
 			// the entry again, and resolve would keep only the copy that
 			// sorts first, so the output alone does not show that the
 			// walk stopped.
-			input: "a: &x\n  k:\n    name: 1\nb:\n  k: *x\n",
-			path:  "$..k..name",
-			want:  []string{"$.a.k.name"},
+			input: stringtest.LinesLF(
+				"a: &x",
+				"  k:",
+				"    name: 1",
+				"b:",
+				"  k: *x",
+			),
+			path: "$..k..name",
+			want: []string{"$.a.k.name"},
 		},
 		"later walk stops at an earlier match in a sequence": {
-			input: "a: &x\n  k:\n    - name: 1\nb:\n  k: *x\n",
-			path:  "$..k..name",
-			want:  []string{"$.a.k[0].name"},
+			input: stringtest.LinesLF(
+				"a: &x",
+				"  k:",
+				"    - name: 1",
+				"b:",
+				"  k: *x",
+			),
+			path: "$..k..name",
+			want: []string{"$.a.k[0].name"},
 		},
 		"walk that extends an earlier match keeps its own path": {
 			// The merged $.a.k.v takes the place of the `<<` key, so
@@ -4851,19 +4919,43 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 			want:  []string{"$.a=1", "$.b=2"},
 		},
 		"child of each entry": {
-			input: "jobs:\n  build:\n    runs-on: linux\n  docs:\n    uses: x\n  test:\n    runs-on: mac\n",
-			path:  "$.jobs.*.runs-on",
-			want:  []string{"$.jobs.build.runs-on=linux", "$.jobs.test.runs-on=mac"},
+			input: stringtest.LinesLF(
+				"jobs:",
+				"  build:",
+				"    runs-on: linux",
+				"  docs:",
+				"    uses: x",
+				"  test:",
+				"    runs-on: mac",
+			),
+			path: "$.jobs.*.runs-on",
+			want: []string{"$.jobs.build.runs-on=linux", "$.jobs.test.runs-on=mac"},
 		},
 		"element of a sequence in each entry": {
-			input: "jobs:\n  a:\n    steps:\n      - uses: x\n      - run: y\n  b:\n    steps:\n      - uses: z\n",
-			path:  "$.jobs.*.steps[*].uses",
-			want:  []string{"$.jobs.a.steps[0].uses=x", "$.jobs.b.steps[0].uses=z"},
+			input: stringtest.LinesLF(
+				"jobs:",
+				"  a:",
+				"    steps:",
+				"      - uses: x",
+				"      - run: y",
+				"  b:",
+				"    steps:",
+				"      - uses: z",
+			),
+			path: "$.jobs.*.steps[*].uses",
+			want: []string{"$.jobs.a.steps[0].uses=x", "$.jobs.b.steps[0].uses=z"},
 		},
 		"entries of each entry": {
-			input: "paths:\n  /a:\n    get: 1\n    post: 2\n  /b:\n    get: 3\n",
-			path:  "$.paths.*.*",
-			want:  []string{"$.paths./a.get=1", "$.paths./a.post=2", "$.paths./b.get=3"},
+			input: stringtest.LinesLF(
+				"paths:",
+				"  /a:",
+				"    get: 1",
+				"    post: 2",
+				"  /b:",
+				"    get: 3",
+			),
+			path: "$.paths.*.*",
+			want: []string{"$.paths./a.get=1", "$.paths./a.post=2", "$.paths./b.get=3"},
 		},
 		"key of each entry": {
 			input: "jobs:\n  build: 1\n  test: 2\n",
@@ -4876,13 +4968,29 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 			want:  []string{"$.x.env.A=1", "$.y.env.B=2"},
 		},
 		"recursive below each entry": {
-			input: "jobs:\n  a:\n    steps:\n      - uses: x\n  b:\n    uses: y\n",
-			path:  "$.jobs.*..uses",
-			want:  []string{"$.jobs.a.steps[0].uses=x", "$.jobs.b.uses=y"},
+			input: stringtest.LinesLF(
+				"jobs:",
+				"  a:",
+				"    steps:",
+				"      - uses: x",
+				"  b:",
+				"    uses: y",
+			),
+			path: "$.jobs.*..uses",
+			want: []string{"$.jobs.a.steps[0].uses=x", "$.jobs.b.uses=y"},
 		},
 		"keys the decoder respells keep their source text": {
-			input: "ports:\n  0x10: a\n  3.10: b\n  ~: c\n  yes: d\n  \"\": e\n  a.b: f\n  1_000: g\n",
-			path:  "$.ports.*",
+			input: stringtest.LinesLF(
+				"ports:",
+				"  0x10: a",
+				"  3.10: b",
+				"  ~: c",
+				"  yes: d",
+				`  "": e`,
+				"  a.b: f",
+				"  1_000: g",
+			),
+			path: "$.ports.*",
 			want: []string{
 				"$.ports.0x10=a", "$.ports.'3.10'=b", "$.ports.'~'=c", "$.ports.yes=d",
 				"$.ports.''=e", "$.ports.'a.b'=f", "$.ports.1_000=g",
@@ -4944,26 +5052,54 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 			want:  []string{"$.l[0].a=1", "$.l[1].a=1"},
 		},
 		"merged entries take the place of a merge key before the own keys": {
-			input: "base: &base\n  lint: a\n  build: old\njobs:\n  <<: *base\n  build: b\n  test: c\n",
-			path:  "$.jobs.*",
-			want:  []string{"$.jobs.lint=a", "$.jobs.build=b", "$.jobs.test=c"},
-			opts:  dups,
+			input: stringtest.LinesLF(
+				"base: &base",
+				"  lint: a",
+				"  build: old",
+				"jobs:",
+				"  <<: *base",
+				"  build: b",
+				"  test: c",
+			),
+			path: "$.jobs.*",
+			want: []string{"$.jobs.lint=a", "$.jobs.build=b", "$.jobs.test=c"},
+			opts: dups,
 		},
 		"merged entries take the place of a merge key after the own keys": {
-			input: "base: &base\n  lint: a\n  build: old\njobs:\n  build: b\n  test: c\n  <<: *base\n",
-			path:  "$.jobs.*",
-			want:  []string{"$.jobs.test=c", "$.jobs.lint=a", "$.jobs.build=old"},
-			opts:  dups,
+			input: stringtest.LinesLF(
+				"base: &base",
+				"  lint: a",
+				"  build: old",
+				"jobs:",
+				"  build: b",
+				"  test: c",
+				"  <<: *base",
+			),
+			path: "$.jobs.*",
+			want: []string{"$.jobs.test=c", "$.jobs.lint=a", "$.jobs.build=old"},
+			opts: dups,
 		},
 		"later source of a merge list wins": {
-			input: "a: &a {x: 1, y: 1}\nb: &b {y: 2, z: 2}\nm:\n  <<: [*a, *b]\n  w: 0\n",
-			path:  "$.m.*",
-			want:  []string{"$.m.x=1", "$.m.y=2", "$.m.z=2", "$.m.w=0"},
+			input: stringtest.LinesLF(
+				"a: &a {x: 1, y: 1}",
+				"b: &b {y: 2, z: 2}",
+				"m:",
+				"  <<: [*a, *b]",
+				"  w: 0",
+			),
+			path: "$.m.*",
+			want: []string{"$.m.x=1", "$.m.y=2", "$.m.z=2", "$.m.w=0"},
 		},
 		"merge of a mapping that merges another": {
-			input: "base: &base {a: 1}\nmid: &mid {<<: *base, b: 2}\nm:\n  <<: *mid\n  c: 3\n",
-			path:  "$.m.*",
-			want:  []string{"$.m.a=1", "$.m.b=2", "$.m.c=3"},
+			input: stringtest.LinesLF(
+				"base: &base {a: 1}",
+				"mid: &mid {<<: *base, b: 2}",
+				"m:",
+				"  <<: *mid",
+				"  c: 3",
+			),
+			path: "$.m.*",
+			want: []string{"$.m.a=1", "$.m.b=2", "$.m.c=3"},
 		},
 		"inline merge source": {
 			input: "m:\n  <<: {a: 1}\n  b: 2\n",
@@ -4976,16 +5112,29 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 			want:  []string{"$.m.a~=a", "$.m.b~=b"},
 		},
 		"each merge key holds the entries it wins": {
-			input: "a: &a {x: 1, y: 1}\nb: &b {y: 2}\nm:\n  <<: *a\n  k: 0\n  <<: *b\n",
-			path:  "$.m.*",
-			want:  []string{"$.m.x=1", "$.m.k=0", "$.m.y=2"},
-			opts:  dups,
+			input: stringtest.LinesLF(
+				"a: &a {x: 1, y: 1}",
+				"b: &b {y: 2}",
+				"m:",
+				"  <<: *a",
+				"  k: 0",
+				"  <<: *b",
+			),
+			path: "$.m.*",
+			want: []string{"$.m.x=1", "$.m.k=0", "$.m.y=2"},
+			opts: dups,
 		},
 		"one source under two merge keys counts at the later": {
-			input: "a: &a {x: 1}\nm:\n  <<: *a\n  k: 0\n  <<: *a\n",
-			path:  "$.m.*",
-			want:  []string{"$.m.k=0", "$.m.x=1"},
-			opts:  dups,
+			input: stringtest.LinesLF(
+				"a: &a {x: 1}",
+				"m:",
+				"  <<: *a",
+				"  k: 0",
+				"  <<: *a",
+			),
+			path: "$.m.*",
+			want: []string{"$.m.k=0", "$.m.x=1"},
+			opts: dups,
 		},
 		"merge that leads back to its own mapping": {
 			input: "a: &a\n  x: 1\n  <<: *a\n",
@@ -5004,9 +5153,16 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 			want:  []string{"$.m.k=2", "$.m.<<=real"},
 		},
 		"merge brings in a real key with the text of a merge key": {
-			input: "k: &k \"<<\"\ninner: &inner\n  j: 1\n  *k : real\ntop:\n  <<: *inner\n",
-			path:  "$.top.*",
-			want:  []string{"$.top.j=1", "$.top.<<=real"},
+			input: stringtest.LinesLF(
+				`k: &k "<<"`,
+				"inner: &inner",
+				"  j: 1",
+				"  *k : real",
+				"top:",
+				"  <<: *inner",
+			),
+			path: "$.top.*",
+			want: []string{"$.top.j=1", "$.top.<<=real"},
 		},
 	}
 

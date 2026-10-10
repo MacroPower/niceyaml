@@ -69,29 +69,63 @@ func TestResolver_Node(t *testing.T) {
 		"anchor a merge brings in again": {
 			// The decoder reads the anchors of a merged mapping again at
 			// the merge key, so &x one is the last &x before *x.
-			input: "base: &b\n  k: &x one\nother: &x two\nm:\n  <<: *b\n  v: *x\n",
-			path:  "$.m.v",
-			want:  "one",
+			input: stringtest.LinesLF(
+				"base: &b",
+				"  k: &x one",
+				"other: &x two",
+				"m:",
+				"  <<: *b",
+				"  v: *x",
+			),
+			path: "$.m.v",
+			want: "one",
 		},
 		"anchor a merge brings in again for a later mapping": {
-			input: "base: &b\n  k: &x one\nother: &x two\nm:\n  <<: *b\nv: *x\n",
-			path:  "$.v",
-			want:  "one",
+			input: stringtest.LinesLF(
+				"base: &b",
+				"  k: &x one",
+				"other: &x two",
+				"m:",
+				"  <<: *b",
+				"v: *x",
+			),
+			path: "$.v",
+			want: "one",
 		},
 		"anchor a nested merge brings in again": {
-			input: "b1: &b1 {k: &x one}\nb2: &b2 {<<: *b1}\nother: &x two\nm:\n  <<: *b2\n  v: *x\n",
-			path:  "$.m.v",
-			want:  "one",
+			input: stringtest.LinesLF(
+				"b1: &b1 {k: &x one}",
+				"b2: &b2 {<<: *b1}",
+				"other: &x two",
+				"m:",
+				"  <<: *b2",
+				"  v: *x",
+			),
+			path: "$.m.v",
+			want: "one",
 		},
 		"anchor of the later merge source": {
-			input: "a: &a {k: &x one}\nb: &b {k: &x two}\nother: &x three\nm:\n  <<: [*b, *a]\n  v: *x\n",
-			path:  "$.m.v",
-			want:  "one",
+			input: stringtest.LinesLF(
+				"a: &a {k: &x one}",
+				"b: &b {k: &x two}",
+				"other: &x three",
+				"m:",
+				"  <<: [*b, *a]",
+				"  v: *x",
+			),
+			path: "$.m.v",
+			want: "one",
 		},
 		"anchor of a later inline merge source": {
-			input: "base: &b {k: &x one}\nother: &x two\nm:\n  <<: [*b, {j: &x three}]\n  v: *x\n",
-			path:  "$.m.v",
-			want:  "three",
+			input: stringtest.LinesLF(
+				"base: &b {k: &x one}",
+				"other: &x two",
+				"m:",
+				"  <<: [*b, {j: &x three}]",
+				"  v: *x",
+			),
+			path: "$.m.v",
+			want: "three",
 		},
 		"earlier anchor over the anchor of an inline merge source": {
 			// The decoder records an anchor on a merge value only for the
@@ -106,9 +140,15 @@ func TestResolver_Node(t *testing.T) {
 			want:  "1",
 		},
 		"earlier anchor over the anchor of a block merge source": {
-			input: "a: &m 1\nb:\n  <<: &m\n    k: 2\nc: *m\n",
-			path:  "$.c",
-			want:  "1",
+			input: stringtest.LinesLF(
+				"a: &m 1",
+				"b:",
+				"  <<: &m",
+				"    k: 2",
+				"c: *m",
+			),
+			path: "$.c",
+			want: "1",
 		},
 		"earlier anchor over the anchor of a merge source a merge brings in again": {
 			input: "base: &b {x: {<<: &m {k: 2}}}\na: &m 1\nd: {<<: *b}\nc: *m\n",
@@ -133,16 +173,33 @@ func TestResolver_Node(t *testing.T) {
 		"anchor of a merge source that merges itself": {
 			// The decoder rejects the merge of a mapping into itself. The
 			// binding stops at the cycle and still counts &x one again.
-			input: "a: &a {k: &x one, i: {<<: *a}}\nother: &x two\nm:\n  <<: *a\n  v: *x\n",
-			path:  "$.m.v",
-			want:  "one",
+			input: stringtest.LinesLF(
+				"a: &a {k: &x one, i: {<<: *a}}",
+				"other: &x two",
+				"m:",
+				"  <<: *a",
+				"  v: *x",
+			),
+			path: "$.m.v",
+			want: "one",
 		},
 		"anchor of a merge source after a merge alias in it binds": {
 			// The first merge of *B reads &B before the walk binds its *C,
 			// so a later merge of *B must read &B again to count &N cval.
-			input: "c: &C {x: &N cval}\nm:\n  <<:\n    - <<: *B\n    - &B\n      <<: *C\nn: &N other\nv:\n  <<: *B\n  w: *N\n",
-			path:  "$.v.w",
-			want:  "cval",
+			input: stringtest.LinesLF(
+				"c: &C {x: &N cval}",
+				"m:",
+				"  <<:",
+				"    - <<: *B",
+				"    - &B",
+				"      <<: *C",
+				"n: &N other",
+				"v:",
+				"  <<: *B",
+				"  w: *N",
+			),
+			path: "$.v.w",
+			want: "cval",
 		},
 		"unknown alias": {
 			input: "a: *nope\n",
@@ -970,8 +1027,15 @@ func TestResolver_Deref(t *testing.T) {
 			want:  "two",
 		},
 		"anchor a merge brings in again": {
-			input: "base: &b\n  k: &x one\nother: &x two\nm:\n  <<: *b\nv: *x\n",
-			want:  "one",
+			input: stringtest.LinesLF(
+				"base: &b",
+				"  k: &x one",
+				"other: &x two",
+				"m:",
+				"  <<: *b",
+				"v: *x",
+			),
+			want: "one",
 		},
 		"anchor": {
 			input: "v: &a {k: x}\n",
@@ -1410,9 +1474,16 @@ func TestResolver_Anchor(t *testing.T) {
 			line:  2,
 		},
 		"anchor a merge brings in again": {
-			input: "base: &b\n  k: &x one\nother: &x two\nm:\n  <<: *b\nv: *x\n",
-			want:  "&x one",
-			line:  2,
+			input: stringtest.LinesLF(
+				"base: &b",
+				"  k: &x one",
+				"other: &x two",
+				"m:",
+				"  <<: *b",
+				"v: *x",
+			),
+			want: "&x one",
+			line: 2,
 		},
 		"anchor that holds an alias": {
 			// Deref goes on to the content of b, while Anchor stops at a.
