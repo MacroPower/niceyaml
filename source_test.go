@@ -3214,7 +3214,7 @@ func TestSource_Documents_LeavesOutEmpty(t *testing.T) {
 		all int
 	}{
 		"no empty document": {
-			input: "a: 1\n---\nb: 2\n",
+			input: stringtest.LinesLF("a: 1", "---", "b: 2"),
 			want:  []int{0, 1},
 			all:   2,
 		},
@@ -3224,29 +3224,35 @@ func TestSource_Documents_LeavesOutEmpty(t *testing.T) {
 			all:   2,
 		},
 		"comment below a trailing header": {
-			input: "a: 1\n---\n# Source: t.yaml\n",
+			input: stringtest.LinesLF("a: 1", "---", "# Source: t.yaml"),
 			want:  []int{0},
 			all:   2,
 		},
 		"header that follows another": {
-			input: "---\n---\nb: 2\n",
+			input: stringtest.LinesLF("---", "---", "b: 2"),
 			want:  []int{1},
 			all:   2,
 		},
 		"directive above an empty document": {
-			input: "%YAML 1.2\n---\n---\nb: 2\n",
+			input: stringtest.LinesLF("%YAML 1.2", "---", "---", "b: 2"),
 			want:  []int{1},
 			all:   2,
 		},
 		"empty document between two": {
-			input: "a: 1\n---\n---\nb: 2\n",
+			input: stringtest.LinesLF("a: 1", "---", "---", "b: 2"),
 			want:  []int{0, 2},
 			all:   3,
 		},
 		"empty documents on both sides": {
-			input: "--- # head\n---\na: 1\n---\n---\n",
-			want:  []int{1},
-			all:   4,
+			input: stringtest.LinesLF(
+				"--- # head",
+				"---",
+				"a: 1",
+				"---",
+				"---",
+			),
+			want: []int{1},
+			all:  4,
 		},
 		// A document that holds a value is not empty, whatever the value.
 		"explicit null": {
@@ -3255,12 +3261,12 @@ func TestSource_Documents_LeavesOutEmpty(t *testing.T) {
 			all:   2,
 		},
 		"empty mapping": {
-			input: "a: 1\n---\n{}\n",
+			input: stringtest.LinesLF("a: 1", "---", "{}"),
 			want:  []int{0, 1},
 			all:   2,
 		},
 		"empty string": {
-			input: "a: 1\n---\n\"\"\n",
+			input: stringtest.LinesLF("a: 1", "---", `""`),
 			want:  []int{0, 1},
 			all:   2,
 		},
@@ -3286,7 +3292,7 @@ func TestSource_Documents_LeavesOutEmpty(t *testing.T) {
 			all:   2,
 		},
 		"comments below headers alone": {
-			input: "---\n# a\n---\n# b\n",
+			input: stringtest.LinesLF("---", "# a", "---", "# b"),
 			want:  []int{0},
 			all:   2,
 		},
@@ -3336,17 +3342,29 @@ func TestSource_ValidateDocuments(t *testing.T) {
 		// The message of each binding the result holds, in file order.
 		want []string
 	}{
-		"every document valid": {input: "name: a\n---\nname: b\n"},
+		"every document valid": {input: stringtest.LinesLF("name: a", "---", "name: b")},
 		"one document": {
 			input: "value: 1\n",
 			want:  []string{"f.yaml:1:1: $: name is required"},
 		},
 		"first and last document invalid": {
-			input: "value: 1\n---\nname: b\n---\nvalue: 3\n",
-			want:  []string{"f.yaml:1:1: $: name is required", "f.yaml:5:1: $: name is required"},
+			input: stringtest.LinesLF(
+				"value: 1",
+				"---",
+				"name: b",
+				"---",
+				"value: 3",
+			),
+			want: []string{"f.yaml:1:1: $: name is required", "f.yaml:5:1: $: name is required"},
 		},
 		"syntax error beside violations": {
-			input: "value: 1\n---\nname: [\n---\nvalue: 3\n",
+			input: stringtest.LinesLF(
+				"value: 1",
+				"---",
+				"name: [",
+				"---",
+				"value: 3",
+			),
 			want: []string{
 				"f.yaml:1:1: $: name is required",
 				"f.yaml:3:7: " + unclosedSequence,
@@ -3354,18 +3372,30 @@ func TestSource_ValidateDocuments(t *testing.T) {
 			},
 		},
 		"two syntax errors": {
-			input: "a: [\n---\nname: b\n---\nc: [\n",
-			want:  []string{"f.yaml:1:4: " + unclosedSequence, "f.yaml:5:4: " + unclosedSequence},
+			input: stringtest.LinesLF(
+				"a: [",
+				"---",
+				"name: b",
+				"---",
+				"c: [",
+			),
+			want: []string{"f.yaml:1:4: " + unclosedSequence, "f.yaml:5:4: " + unclosedSequence},
 		},
 		"syntax errors of adjacent documents": {
-			input: "a: [\n---\nb: [\n",
+			input: stringtest.LinesLF("a: [", "---", "b: ["),
 			want:  []string{"f.yaml:1:4: " + unclosedSequence, "f.yaml:3:4: " + unclosedSequence},
 		},
 		// The header parses together with the document above it, so both
 		// documents carry the one error.
 		"syntax error two documents share": {
-			input: "name: &x\n---\nname: [\n---\nvalue: 5\n",
-			want:  []string{"f.yaml:3:7: " + unclosedSequence, "f.yaml:5:1: $: name is required"},
+			input: stringtest.LinesLF(
+				"name: &x",
+				"---",
+				"name: [",
+				"---",
+				"value: 5",
+			),
+			want: []string{"f.yaml:3:7: " + unclosedSequence, "f.yaml:5:1: $: name is required"},
 		},
 		"empty document beside one with content": {input: "name: x\n---\n"},
 		"empty documents alone": {
@@ -3429,11 +3459,25 @@ func TestSource_ValidateDocuments(t *testing.T) {
 		t.Parallel()
 
 		for _, input := range []string{
-			"name: a\n---\nname: b\n",
+			stringtest.LinesLF("name: a", "---", "name: b"),
 			"a: [\n",
-			"a: [\n---\nb: 1\n---\nc: [\n",
-			"a: &x\n---\nb: [\n",
-			"a: &x\n---\nb: [\n---\nc: 1\n---\nd: @x\n",
+			stringtest.LinesLF(
+				"a: [",
+				"---",
+				"b: 1",
+				"---",
+				"c: [",
+			),
+			stringtest.LinesLF("a: &x", "---", "b: ["),
+			stringtest.LinesLF(
+				"a: &x",
+				"---",
+				"b: [",
+				"---",
+				"c: 1",
+				"---",
+				"d: @x",
+			),
 			"...\n",
 		} {
 			source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
@@ -3472,7 +3516,15 @@ func TestSource_ValidateDocuments(t *testing.T) {
 
 		// The first document breaks both rules, and the last breaks the
 		// second alone.
-		const input = "name: root\n---\nname: [\n---\nname: ok\n---\nname: admin\n"
+		input := stringtest.LinesLF(
+			"name: root",
+			"---",
+			"name: [",
+			"---",
+			"name: ok",
+			"---",
+			"name: admin",
+		)
 
 		reserved := rejects("reserved name", "root")
 		privileged := rejects("privileged name", "root", "admin")
@@ -3502,7 +3554,10 @@ func TestSource_ValidateDocuments(t *testing.T) {
 			"MultiValidator reports every failure of each document": {
 				v: niceyaml.MultiValidator(reserved, privileged),
 				want: []string{
-					"f.yaml:1:7: $.name: reserved name\nf.yaml:1:7: $.name: privileged name",
+					stringtest.JoinLF(
+						"f.yaml:1:7: $.name: reserved name",
+						"f.yaml:1:7: $.name: privileged name",
+					),
 					"f.yaml:3:7: " + unclosedSequence,
 					"f.yaml:7:7: $.name: privileged name",
 				},
@@ -3564,6 +3619,13 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		"kind: Service",
 	)
 
+	// A manifest above a template that renders the comment that names it
+	// and nothing else.
+	sourced := stringtest.LinesLF("kind: A", "---", "# Source: t.yaml")
+
+	// Two manifests with an empty document between them.
+	spaced := stringtest.LinesLF("kind: A", "---", "---", "kind: B")
+
 	// The output of a chart whose one template renders a comment alone.
 	commentAlone := stringtest.LinesLF(
 		"---",
@@ -3601,11 +3663,11 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		},
 		"schema, comment after a manifest": {
 			v:     manifest,
-			input: "kind: A\n---\n# Source: t.yaml\n",
+			input: sourced,
 		},
 		"registry, comment after a manifest": {
 			v:     registry,
-			input: "kind: A\n---\n# Source: t.yaml\n",
+			input: sourced,
 		},
 		"schema, chart output": {
 			v:     manifest,
@@ -3670,13 +3732,20 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		// an empty document keeps its number.
 		"registry, document below an empty one": {
 			v:      registry,
-			input:  "kind: A\n---\n---\nkind: B\n",
+			input:  spaced,
 			strict: []string{"f.yaml: document 3: " + noMatch},
 			want:   []string{"f.yaml: document 3: " + noMatch},
 		},
 		"registry, syntax error beside an empty document": {
-			v:      registry,
-			input:  "kind: A\n---\nkind: [\n---\n---\nkind: B\n",
+			v: registry,
+			input: stringtest.LinesLF(
+				"kind: A",
+				"---",
+				"kind: [",
+				"---",
+				"---",
+				"kind: B",
+			),
 			strict: []string{"f.yaml:3:7: " + unclosedSequence, "f.yaml: document 4: " + noMatch},
 			want:   []string{"f.yaml:3:7: " + unclosedSequence, "f.yaml: document 4: " + noMatch},
 		},
@@ -3691,8 +3760,15 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		// The header parses together with the document above it, so both
 		// documents carry the one error, which the result holds once.
 		"schema, syntax error two documents share": {
-			v:      manifest,
-			input:  "name: &x\n---\nname: [\n---\n---\nvalue: 5\n",
+			v: manifest,
+			input: stringtest.LinesLF(
+				"name: &x",
+				"---",
+				"name: [",
+				"---",
+				"---",
+				"value: 5",
+			),
 			strict: []string{"f.yaml:3:7: " + unclosedSequence, `f.yaml:6:1: $.kind: missing required property "kind"`},
 			want:   []string{"f.yaml:3:7: " + unclosedSequence, `f.yaml:6:1: $.kind: missing required property "kind"`},
 		},
@@ -3733,12 +3809,12 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 			want []string
 		}{
 			"trailing header":             {input: "kind: Pod\n---\n", want: []string{"Pod"}},
-			"comment after a manifest":    {input: "kind: A\n---\n# Source: t.yaml\n", want: []string{"A"}},
+			"comment after a manifest":    {input: sourced, want: []string{"A"}},
 			"chart output":                {input: helm, want: []string{"ConfigMap", "Service"}},
-			"document below an empty one": {input: "kind: A\n---\n---\nkind: B\n", want: []string{"A", "B"}},
+			"document below an empty one": {input: spaced, want: []string{"A", "B"}},
 			"headers alone":               {input: "---\n---\n", want: []string{""}},
 			"template that renders no content": {
-				input: "---\n# Source: demo/templates/ingress.yaml\n",
+				input: stringtest.LinesLF("---", "# Source: demo/templates/ingress.yaml"),
 				want:  []string{""},
 			},
 			"empty file": {input: "", want: []string{""}},
@@ -3793,7 +3869,7 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				source := niceyaml.NewSourceFromString("kind: A\n---\n# Source: t.yaml\n", niceyaml.WithName("f.yaml"))
+				source := niceyaml.NewSourceFromString(sourced, niceyaml.WithName("f.yaml"))
 
 				docs := source.AllDocuments()
 				require.Len(t, docs, 2)
