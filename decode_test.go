@@ -125,31 +125,37 @@ func TestSource_Document(t *testing.T) {
 			want  string
 		}{
 			"at the second header": {
-				input: "a: 1\n---\nb: 2",
+				input: stringtest.JoinLF("a: 1", "---", "b: 2"),
 				want:  "2:1: multiple documents in source: 2 documents",
 			},
 			// A "..." marker ends the first document, so the second has no
 			// header, and the error points at its first token instead.
 			"at a second document without a header": {
-				input: "a: 1\n...\nb: 2",
+				input: stringtest.JoinLF("a: 1", "...", "b: 2"),
 				want:  "3:1: multiple documents in source: 2 documents",
 			},
 			// The empty document between the two does not count, and the
 			// error points at the header of the second document with content.
 			"past an empty one between them": {
-				input: "a: 1\n---\n---\nb: 2",
+				input: stringtest.JoinLF("a: 1", "---", "---", "b: 2"),
 				want:  "3:1: multiple documents in source: 2 documents",
 			},
 			// The comments after a "..." marker fold into the document below
 			// them as its preamble, and the error points past them at the
 			// first token of its content.
 			"past the comments above the second": {
-				input: "a: 1\n...\n# tail\nb: 2",
+				input: stringtest.JoinLF("a: 1", "...", "# tail", "b: 2"),
 				want:  "4:1: multiple documents in source: 2 documents",
 			},
 			"below a comment block": {
-				input: "# Copyright notice.\n---\na: 1\n---\nb: 2",
-				want:  "4:1: multiple documents in source: 2 documents",
+				input: stringtest.JoinLF(
+					"# Copyright notice.",
+					"---",
+					"a: 1",
+					"---",
+					"b: 2",
+				),
+				want: "4:1: multiple documents in source: 2 documents",
 			},
 		}
 
@@ -186,27 +192,33 @@ func TestSource_Document(t *testing.T) {
 				want:  map[string]int{"b": 2},
 			},
 			"comment below a trailing header": {
-				input: "b: 2\n---\n# Source: t.yaml\n",
+				input: stringtest.LinesLF("b: 2", "---", "# Source: t.yaml"),
 				want:  map[string]int{"b": 2},
 			},
 			// The first header holds an empty document, so the second
 			// header starts another one.
 			"header that follows another": {
-				input: "---\n---\nb: 2\n",
+				input: stringtest.LinesLF("---", "---", "b: 2"),
 				index: 1,
 				want:  map[string]int{"b": 2},
 			},
 			"empty documents on both sides": {
-				input: "--- # head\n---\nb: 2\n---\n---\n",
+				input: stringtest.LinesLF(
+					"--- # head",
+					"---",
+					"b: 2",
+					"---",
+					"---",
+				),
 				index: 1,
 				want:  map[string]int{"b": 2},
 			},
 			"comment block above the first header": {
-				input: "# Copyright notice.\n---\na: 1",
+				input: stringtest.JoinLF("# Copyright notice.", "---", "a: 1"),
 				want:  map[string]int{"a": 1},
 			},
 			"directive above the first header": {
-				input: "%YAML 1.2\n---\na: 1",
+				input: stringtest.JoinLF("%YAML 1.2", "---", "a: 1"),
 				want:  map[string]int{"a": 1},
 			},
 			// A file of empty documents alone reads as an empty file does.
@@ -214,10 +226,10 @@ func TestSource_Document(t *testing.T) {
 				input: "",
 			},
 			"several empty documents": {
-				input: "---\n# a\n---\n# b",
+				input: stringtest.JoinLF("---", "# a", "---", "# b"),
 			},
 			"comments on both sides of a header": {
-				input: "# a\n---\n# b",
+				input: stringtest.JoinLF("# a", "---", "# b"),
 			},
 		}
 
