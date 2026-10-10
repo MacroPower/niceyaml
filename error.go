@@ -3122,13 +3122,13 @@ func (e *SourceError) heads() bool {
 	return slices.ContainsFunc(e.below, func(c boundChild) bool { return !c.detail })
 }
 
-// filtered returns the bound children of e that are details when detail
-// is set, and the problems e heads otherwise, in their order.
-func filtered(below []boundChild, detail bool) []*SourceError {
+// problemsBelow returns the bound children among below that are problems
+// their binding heads, in their order, without its details.
+func problemsBelow(below []boundChild) []*SourceError {
 	var out []*SourceError
 
 	for _, c := range below {
-		if c.detail == detail {
+		if !c.detail {
 			out = append(out, c.bound)
 		}
 	}
@@ -3655,7 +3655,7 @@ func appendPlaced(kids []positioned, children []*SourceError) []positioned {
 	for _, child := range children {
 		joined := joinBinding(child)
 		if joined != nil {
-			kids = appendPlaced(kids, filtered(joined.below, false))
+			kids = appendPlaced(kids, problemsBelow(joined.below))
 
 			continue
 		}
