@@ -292,29 +292,24 @@ func TestNewErrorReport_SeveralSources(t *testing.T) {
 	t.Run("one excerpt per source, the binding's source first", func(t *testing.T) {
 		t.Parallel()
 
-		var (
-			sources  []string
-			excerpts []string
-		)
-
-		for _, excerpt := range niceyaml.NewErrorReport(bound, niceyaml.WithContextLines(0)).Excerpts {
-			sources = append(sources, excerpt.Source.Name())
-			excerpts = append(excerpts, excerpt.View.String())
-		}
-
-		assert.Equal(t, []string{"manifest.yaml", "values.yaml"}, sources)
-		require.Len(t, excerpts, 2)
-
-		assert.Equal(t, "   2 | values: values.yaml\n     |         ^^^^^^^^^^^", excerpts[0])
+		rep := niceyaml.NewErrorReport(bound, niceyaml.WithContextLines(0))
 
 		// The sibling children bound to the other source share one
 		// excerpt of it, each with its message beside its line.
-		assert.Equal(t, stringtest.JoinLF(
-			"   1 | port: many",
-			"     |       ^^^^ not a number",
-			"   2 | host: 7",
-			"     |       ^ not a name",
-		), excerpts[1])
+		assert.Equal(t, []string{
+			stringtest.JoinLF(
+				"manifest.yaml",
+				"   2 | values: values.yaml",
+				"     |         ^^^^^^^^^^^",
+			),
+			stringtest.JoinLF(
+				"values.yaml",
+				"   1 | port: many",
+				"     |       ^^^^ not a number",
+				"   2 | host: 7",
+				"     |       ^ not a name",
+			),
+		}, reportSourceExcerpts(rep))
 	})
 
 	t.Run("Excerpt keeps to the source of the binding", func(t *testing.T) {
@@ -390,44 +385,36 @@ func TestNewErrorReport_SeveralSources(t *testing.T) {
 			}
 		}
 
-		var mixed *niceyaml.SourceError
-
-		require.ErrorAs(t, yamltest.Bind(t, srcs[1], niceyaml.NewError(
+		mixed := yamltest.RequireSourceError(t, yamltest.Bind(t, srcs[1], niceyaml.NewError(
 			"root",
 			niceyaml.AtPath(paths.Current().Child("b")),
 			niceyaml.WithDetails(children...),
-		)), &mixed)
+		)))
 
-		got := map[string]string{}
-
-		var names []string
-
-		for _, excerpt := range niceyaml.NewErrorReport(mixed, niceyaml.WithContextLines(0)).Excerpts {
-			names = append(names, excerpt.Source.Name())
-			got[excerpt.Source.Name()] = excerpt.View.String()
-		}
-
-		assert.Equal(t, []string{"s1.yaml", "s0.yaml", "s2.yaml"}, names)
-		assert.Equal(t, map[string]string{
-			"s0.yaml": stringtest.JoinLF(
-				"   1 | a: 1",
-				"     |    ^ first 0; second 0",
-				"   2 | b: 2",
-				"     |    ^ third 0",
-			),
-			"s1.yaml": stringtest.JoinLF(
+		// The source of the binding comes first.
+		assert.Equal(t, []string{
+			stringtest.JoinLF(
+				"s1.yaml",
 				"   1 | a: 1",
 				"     |    ^ first 1; second 1",
 				"   2 | b: 2",
 				"     |    ^ third 1",
 			),
-			"s2.yaml": stringtest.JoinLF(
+			stringtest.JoinLF(
+				"s0.yaml",
+				"   1 | a: 1",
+				"     |    ^ first 0; second 0",
+				"   2 | b: 2",
+				"     |    ^ third 0",
+			),
+			stringtest.JoinLF(
+				"s2.yaml",
 				"   1 | a: 1",
 				"     |    ^ first 2; second 2",
 				"   2 | b: 2",
 				"     |    ^ third 2",
 			),
-		}, got)
+		}, reportSourceExcerpts(niceyaml.NewErrorReport(mixed, niceyaml.WithContextLines(0))))
 	})
 
 	t.Run("a tree in one source yields one excerpt", func(t *testing.T) {
