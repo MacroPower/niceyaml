@@ -605,8 +605,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				target: new(server),
 			},
 			"a field below a deeper inline struct validates": {
-				input:  "host: a\nport: 0\n",
-				err:    "2:7: $.port: must be positive\n2:7: $.port: must be positive",
+				input: "host: a\nport: 0\n",
+				err: stringtest.JoinLF(
+					"2:7: $.port: must be positive",
+					"2:7: $.port: must be positive",
+				),
 				target: new(deep),
 			},
 		}
@@ -695,7 +698,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		`))
 
 		_, err := dd.Decode[parent](t.Context())
-		require.EqualError(t, err, "1:1: $.value: parent ran\n2:1: $.pointer: parent ran")
+		require.EqualError(t, err, stringtest.JoinLF(
+			"1:1: $.value: parent ran",
+			"2:1: $.pointer: parent ran",
+		))
 	})
 
 	t.Run("an embedded field that decodes its struct validates at the struct", func(t *testing.T) {
@@ -1218,7 +1224,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("map entries report by position", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "d: {price: -1}\nb: {price: -1}\nc: {price: -1}\na: {price: -1}\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"d: {price: -1}",
+			"b: {price: -1}",
+			"c: {price: -1}",
+			"a: {price: -1}",
+		))
 
 		// The message and the tree both list the errors by position,
 		// whatever order the walk reports them in, so every decode reads
@@ -1270,25 +1281,53 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			want  []string
 		}{
 			"merged int beside a string that passes": {
-				input: "base: &b\n  1: {n: -1}\nm:\n  <<: *b\n  \"1\": {n: 5}\n",
-				want:  []string{"$.m.1.n: negative -1"},
+				input: stringtest.LinesLF(
+					"base: &b",
+					"  1: {n: -1}",
+					"m:",
+					"  <<: *b",
+					`  "1": {n: 5}`,
+				),
+				want: []string{"$.m.1.n: negative -1"},
 			},
 			"merged int beside a string": {
-				input: "base: &b\n  1: {n: -1}\nm:\n  <<: *b\n  \"1\": {n: -2}\n",
-				want:  []string{"$.m.1.n: negative -2", "$.m.1.n: negative -1"},
+				input: stringtest.LinesLF(
+					"base: &b",
+					"  1: {n: -1}",
+					"m:",
+					"  <<: *b",
+					`  "1": {n: -2}`,
+				),
+				want: []string{"$.m.1.n: negative -2", "$.m.1.n: negative -1"},
 			},
 			"merged null beside a string": {
-				input: "base: &b\n  null: {n: -1}\nm:\n  <<: *b\n  \"null\": {n: -2}\n",
-				want:  []string{"$.m.null.n: negative -1", "$.m.null.n: negative -2"},
+				input: stringtest.LinesLF(
+					"base: &b",
+					"  null: {n: -1}",
+					"m:",
+					"  <<: *b",
+					`  "null": {n: -2}`,
+				),
+				want: []string{"$.m.null.n: negative -1", "$.m.null.n: negative -2"},
 			},
 			"merged bool beside a string": {
-				input: "base: &b\n  true: {n: -1}\nm:\n  <<: *b\n  \"true\": {n: -2}\n",
-				want:  []string{"$.m.true.n: negative -1", "$.m.true.n: negative -2"},
+				input: stringtest.LinesLF(
+					"base: &b",
+					"  true: {n: -1}",
+					"m:",
+					"  <<: *b",
+					`  "true": {n: -2}`,
+				),
+				want: []string{"$.m.true.n: negative -1", "$.m.true.n: negative -2"},
 			},
 			"duplicate keys": {
-				input: "m:\n  1: {n: -1}\n  \"1\": {n: -2}\n",
-				opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
-				want:  []string{"$.m.1.n: negative -2", "$.m.1.n: negative -1"},
+				input: stringtest.LinesLF(
+					"m:",
+					"  1: {n: -1}",
+					`  "1": {n: -2}`,
+				),
+				opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+				want: []string{"$.m.1.n: negative -2", "$.m.1.n: negative -1"},
 			},
 		}
 
@@ -1377,42 +1416,75 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			// An alias key reports the content of its anchor, and a block
 			// scalar key reports its content rather than its indicator.
 			"alias": {
-				input:   "base: &k n\nm:\n  *k : {price: -1}\n",
+				input: stringtest.LinesLF(
+					"base: &k n",
+					"m:",
+					"  *k : {price: -1}",
+				),
 				targets: []any{new(named)},
 				want:    "3:16: $.m.n.price: negative price",
 			},
 			"alias to a hexadecimal int": {
-				input:   "base: &k 0x10\nf:\n  *k : {price: -1}\n",
+				input: stringtest.LinesLF(
+					"base: &k 0x10",
+					"f:",
+					"  *k : {price: -1}",
+				),
 				targets: []any{new(named)},
 				want:    "3:16: $.f.0x10.price: negative price",
 			},
 			"alias to an int-tagged hexadecimal int": {
-				input:   "base: &k !!int 0x10\ni:\n  *k : {price: -1}\n",
+				input: stringtest.LinesLF(
+					"base: &k !!int 0x10",
+					"i:",
+					"  *k : {price: -1}",
+				),
 				targets: []any{new(named)},
 				want:    "3:16: $.i.0x10.price: negative price",
 			},
 			"bytes alias to an int-tagged hexadecimal int": {
-				input:   "base: &k !!int 0x10\nbytes:\n  *k : {price: -1}\n",
+				input: stringtest.LinesLF(
+					"base: &k !!int 0x10",
+					"bytes:",
+					"  *k : {price: -1}",
+				),
 				targets: []any{new(named)},
 				want:    "3:16: $.bytes.0x10.price: negative price",
 			},
 			"alias to a float with a trailing zero": {
-				input:   "base: &k 1.50\nf:\n  *k : {price: -1}\n",
+				input: stringtest.LinesLF(
+					"base: &k 1.50",
+					"f:",
+					"  *k : {price: -1}",
+				),
 				targets: []any{new(named)},
 				want:    "3:16: $.f.'1.50'.price: negative price",
 			},
 			"string alias to a hexadecimal int": {
-				input:   "base: &k 0x10\nm:\n  *k : {price: -1}\n",
+				input: stringtest.LinesLF(
+					"base: &k 0x10",
+					"m:",
+					"  *k : {price: -1}",
+				),
 				targets: []any{new(named)},
 				want:    "3:16: $.m.0x10.price: negative price",
 			},
 			"tagged alias": {
-				input:   "base: &k 0x10\nm:\n  !!int *k : {price: -1}\n",
+				input: stringtest.LinesLF(
+					"base: &k 0x10",
+					"m:",
+					"  !!int *k : {price: -1}",
+				),
 				targets: []any{new(named)},
 				want:    "3:22: $.m.0x10.price: negative price",
 			},
 			"alias to a tagged alias": {
-				input:   "base: &k 0x10\nb: &j !!int *k\nm:\n  *j : {price: -1}\n",
+				input: stringtest.LinesLF(
+					"base: &k 0x10",
+					"b: &j !!int *k",
+					"m:",
+					"  *j : {price: -1}",
+				),
 				targets: []any{new(named)},
 				want:    "4:16: $.m.0x10.price: negative price",
 			},
@@ -1427,7 +1499,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:    "1:25: $.f.0x10.price: negative price",
 			},
 			"block scalar": {
-				input:   "m:\n  ? |-\n    n\n  : {price: -1}\n",
+				input: stringtest.LinesLF(
+					"m:",
+					"  ? |-",
+					"    n",
+					"  : {price: -1}",
+				),
 				targets: []any{new(named)},
 				want:    "4:13: $.m.n.price: negative price",
 			},
@@ -1465,7 +1542,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:    "2:25: $.m.16.price: negative price",
 			},
 			"merge source repeated after a source that merges it": {
-				input:   "a: &a {16: {price: -1}}\nb: &b {<<: *a, 0x10: {price: 1}}\nm: {<<: [*b, *a]}\n",
+				input: stringtest.LinesLF(
+					"a: &a {16: {price: -1}}",
+					"b: &b {<<: *a, 0x10: {price: 1}}",
+					"m: {<<: [*b, *a]}",
+				),
 				targets: []any{new(merged)},
 				want:    "1:20: $.m.16.price: negative price",
 			},
@@ -1537,11 +1618,20 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			opts  []niceyaml.SourceOption
 		}{
 			"alias to a sequence": {
-				input: "a: &a {0x10: {price: -1}}\nb: &b {0x20: {price: -1}}\nl: &l [*a, *b]\nm: {<<: *l}\n",
+				input: stringtest.LinesLF(
+					"a: &a {0x10: {price: -1}}",
+					"b: &b {0x20: {price: -1}}",
+					"l: &l [*a, *b]",
+					"m: {<<: *l}",
+				),
 			},
 			"repeated merge keys": {
-				input: "a: &a {0x10: {price: -1}}\nb: &b {0x20: {price: -1}}\nm: {<<: *a, <<: *b}\n",
-				opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+				input: stringtest.LinesLF(
+					"a: &a {0x10: {price: -1}}",
+					"b: &b {0x20: {price: -1}}",
+					"m: {<<: *a, <<: *b}",
+				),
+				opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 			},
 		}
 
@@ -1575,7 +1665,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			want  []string
 		}{
 			"strings by position": {
-				input: "s:\n  b: {n: -2}\n  a: {n: -1}\n",
+				input: stringtest.LinesLF(
+					"s:",
+					"  b: {n: -2}",
+					"  a: {n: -1}",
+				),
 				want: []string{
 					"2:10: $.s.b.n: negative -2",
 					"3:10: $.s.a.n: negative -1",
@@ -1590,7 +1684,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:  []string{"2:13: $.f.'.nan'.n: negative -1"},
 			},
 			"null beside a string": {
-				input: "s:\n  ~: {n: -1}\n  b: {n: -2}\n",
+				input: stringtest.LinesLF(
+					"s:",
+					"  ~: {n: -1}",
+					"  b: {n: -2}",
+				),
 				want: []string{
 					"2:10: $.s.'~'.n: negative -1",
 					"3:10: $.s.b.n: negative -2",
@@ -1601,7 +1699,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:  []string{"2:13: $.s.'~'.n: negative -1"},
 			},
 			"keys of one value": {
-				input: "i:\n  0x10: {n: -1}\n  16: {n: -2}\n",
+				input: stringtest.LinesLF(
+					"i:",
+					"  0x10: {n: -1}",
+					"  16: {n: -2}",
+				),
 				want: []string{
 					"$.i.16.n: negative -1",
 					"$.i.16.n: negative -2",
@@ -1650,7 +1752,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:   []string{"2:3: $.m.70000~: port out of range"},
 			},
 			"key and value both fail": {
-				input:  "m:\n  70001: 70002\n  70000: 1\n",
+				input: stringtest.LinesLF(
+					"m:",
+					"  70001: 70002",
+					"  70000: 1",
+				),
 				target: new(portsByPort),
 				want: []string{
 					"2:3: $.m.70001~: port out of range",
@@ -1984,12 +2090,21 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				},
 			},
 			"key below list elements": {
-				input:  "list:\n  - {}\n  - list:\n      - ports: {70000: x}\n",
+				input: stringtest.LinesLF(
+					"list:",
+					"  - {}",
+					"  - list:",
+					"      - ports: {70000: x}",
+				),
 				target: new(chain),
 				want:   []string{"4:17: $.list[1].list[0].ports.70000~: port out of range"},
 			},
 			"key below two maps": {
-				input:  "a:\n  b:\n    70000: x\n",
+				input: stringtest.LinesLF(
+					"a:",
+					"  b:",
+					"    70000: x",
+				),
 				target: new(map[string]map[string]map[port]string),
 				want:   []string{"3:5: $.a.b.70000~: port out of range"},
 			},
@@ -2002,7 +2117,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				},
 			},
 			"maps below a node at a path": {
-				input:  "spec:\n  a:\n    0x10: {price: -1}\n",
+				input: stringtest.LinesLF(
+					"spec:",
+					"  a:",
+					"    0x10: {price: -1}",
+				),
 				at:     paths.Current().Child("spec"),
 				target: new(map[string]map[float64]item),
 				want:   []string{"3:19: $.spec.a.0x10.price: negative price"},
@@ -2069,8 +2188,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				want:  map[spacedKey]item{"prod/web": {Price: 1}},
 			},
 			"fails": {
-				input: "m:\n  web: {price: 1}\n  db: {price: -1}\n",
-				err:   "3:15: $.m.db.price: negative price",
+				input: stringtest.LinesLF(
+					"m:",
+					"  web: {price: 1}",
+					"  db: {price: -1}",
+				),
+				err: "3:15: $.m.db.price: negative price",
 			},
 		}
 
@@ -2295,8 +2418,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			},
 			"type that holds itself": {
 				target: &tree{},
-				input:  "kids:\n  - port: 70000\nport: 1\n",
-				want:   "2:11: $.kids[0].port: port out of range",
+				input: stringtest.LinesLF(
+					"kids:",
+					"  - port: 70000",
+					"port: 1",
+				),
+				want: "2:11: $.kids[0].port: port out of range",
 			},
 		}
 
@@ -2665,7 +2792,12 @@ func TestNode_Decode_SelfValidatorContext(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, "- a\n- b\n- c\n- d\n", niceyaml.WithName("cfg.yaml"))
+			doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+				"- a",
+				"- b",
+				"- c",
+				"- d",
+			), niceyaml.WithName("cfg.yaml"))
 
 			ctx, cancel := context.WithCancel(t.Context())
 			t.Cleanup(cancel)
@@ -3429,28 +3561,52 @@ func TestSelfValidateValue_Place(t *testing.T) {
 		shared  bool
 	}{
 		"an element places at its line": {
-			input: "request:\n  items:\n    - url: http://x\n    - url: ftp://y\n",
+			input: stringtest.LinesLF(
+				"request:",
+				"  items:",
+				"    - url: http://x",
+				"    - url: ftp://y",
+			),
 			value: request{Items: []upstream{{URL: "http://x"}, {URL: "ftp://y"}}},
 			want:  `app.yaml:4:12: $.request.items[1].url: url "ftp://y" is not http`,
 		},
 		"an element the document lacks places with no position": {
-			input: "request:\n  items:\n    - url: http://x\n",
+			input: stringtest.LinesLF(
+				"request:",
+				"  items:",
+				"    - url: http://x",
+			),
 			value: request{Items: []upstream{{URL: "http://x"}, {URL: "ftp://y"}}},
 			want:  `app.yaml: $.request.items[1].url: url "ftp://y" is not http`,
 		},
 		"a key the document spells as the Go value places at its line": {
-			input: "request:\n  by_port:\n    16:\n      url: ftp://y\n",
+			input: stringtest.LinesLF(
+				"request:",
+				"  by_port:",
+				"    16:",
+				"      url: ftp://y",
+			),
 			value: request{ByPort: map[int]upstream{16: {URL: "ftp://y"}}},
 			want:  `app.yaml:4:12: $.request.by_port.16.url: url "ftp://y" is not http`,
 		},
 		"a key the document spells another way places at the key of its map": {
-			input:   "request:\n  by_port:\n    0x10:\n      url: ftp://y\n",
+			input: stringtest.LinesLF(
+				"request:",
+				"  by_port:",
+				"    0x10:",
+				"      url: ftp://y",
+			),
 			value:   request{ByPort: map[int]upstream{16: {URL: "ftp://y"}}},
 			want:    `app.yaml:2:3: $.request.by_port.16.url: url "ftp://y" is not http`,
 			through: `app.yaml:4:12: $.request.by_port.0x10.url: url "ftp://y" is not http`,
 		},
 		"keys that share a path place with no position": {
-			input: "request:\n  by_any:\n    1: {n: -1}\n    \"1\": {n: -2}\n",
+			input: stringtest.LinesLF(
+				"request:",
+				"  by_any:",
+				"    1: {n: -1}",
+				`    "1": {n: -2}`,
+			),
 			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 			value: request{ByAny: map[any]signed{1: {N: -1}, "1": {N: -2}}},
 			want: stringtest.JoinLF(
@@ -3712,15 +3868,24 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 			nearest: map[string]string{"$.peers.addrs[1].port": "$.peers"},
 		},
 		"an element the method adds binds at its struct": {
-			target:  func() any { return new(withFleet) },
-			input:   "fleet:\n  servers:\n    - host: a\n",
+			target: func() any { return new(withFleet) },
+			input: stringtest.LinesLF(
+				"fleet:",
+				"  servers:",
+				"    - host: a",
+			),
 			err:     "app.yaml:1:1: $.fleet.servers[1].port: port out of range",
 			nearest: map[string]string{"$.fleet.servers[1].port": "$.fleet"},
 		},
 		"an element the method moves reports at the element of its index": {
 			target: func() any { return new(withReversed) },
-			input:  "fleet:\n  servers:\n    - {host: a, port: 80}\n    - {host: b, port: 70000}\n",
-			err:    "app.yaml:3:23: $.fleet.servers[0].port: port out of range",
+			input: stringtest.LinesLF(
+				"fleet:",
+				"  servers:",
+				"    - {host: a, port: 80}",
+				"    - {host: b, port: 70000}",
+			),
+			err: "app.yaml:3:23: $.fleet.servers[0].port: port out of range",
 		},
 		"a field the method leaves unset validates": {
 			target:  func() any { return new(withLazy) },
@@ -3740,14 +3905,22 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 			nearest: map[string]string{"$.hours.open": "$.hours", "$.hours.close": "$.hours"},
 		},
 		"a sorted list binds at the list": {
-			target:  func() any { return new(map[string]sortedLimits) },
-			input:   "limits:\n  - {n: 3}\n  - {n: -1}\n",
+			target: func() any { return new(map[string]sortedLimits) },
+			input: stringtest.LinesLF(
+				"limits:",
+				"  - {n: 3}",
+				"  - {n: -1}",
+			),
 			err:     "app.yaml:1:1: $.limits[0].n: negative -1",
 			nearest: map[string]string{"$.limits[0].n": "$.limits"},
 		},
 		"a list with an element in front binds at the list": {
-			target:  func() any { return new(map[string]leadingLimits) },
-			input:   "limits:\n  - {n: 2}\n  - {n: -1}\n",
+			target: func() any { return new(map[string]leadingLimits) },
+			input: stringtest.LinesLF(
+				"limits:",
+				"  - {n: 2}",
+				"  - {n: -1}",
+			),
 			err:     "app.yaml:1:1: $.limits[2].n: negative -1",
 			nearest: map[string]string{"$.limits[2].n": "$.limits"},
 		},
@@ -3765,7 +3938,11 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 		},
 		"keys that share a path below a map bind at the map": {
 			target: func() any { return new(map[string]limitsByAny) },
-			input:  "limits:\n  - {n: -1}\n  - {n: -2}\n",
+			input: stringtest.LinesLF(
+				"limits:",
+				"  - {n: -1}",
+				"  - {n: -2}",
+			),
 			err: stringtest.JoinLF(
 				"app.yaml:1:1: $.limits.1.n: negative -1",
 				"app.yaml:1:1: $.limits.1.n: negative -2",
@@ -3774,7 +3951,11 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 		},
 		"keys that share a path below a Validate of a list bind at the list": {
 			target: func() any { return new(withShared) },
-			input:  "label: x\nhours:\n  - 17-09,-2\n",
+			input: stringtest.LinesLF(
+				"label: x",
+				"hours:",
+				"  - 17-09,-2",
+			),
 			err: stringtest.JoinLF(
 				"app.yaml:2:1: $.hours[0].1.n: negative -2",
 				"app.yaml: invalid hours",

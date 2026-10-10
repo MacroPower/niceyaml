@@ -364,20 +364,36 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 		opts  []niceyaml.DecodeOption
 	}{
 		"scalar in an element": {
-			input: "servers:\n  - host: h\n    port: abc\n",
-			want:  "3:11: $.servers[0].port: expected integer, got string",
+			input: stringtest.LinesLF(
+				"servers:",
+				"  - host: h",
+				"    port: abc",
+			),
+			want: "3:11: $.servers[0].port: expected integer, got string",
 		},
 		"block mapping for an integer": {
-			input: "top:\n  a: 1\n  b: 2\n",
-			want:  "1:1: $.top: expected integer, got mapping",
+			input: stringtest.LinesLF(
+				"top:",
+				"  a: 1",
+				"  b: 2",
+			),
+			want: "1:1: $.top: expected integer, got mapping",
 		},
 		"block mapping for a string in a map": {
-			input: "labels:\n  a:\n    b: 1\n",
-			want:  "2:3: $.labels.a: expected string, got mapping",
+			input: stringtest.LinesLF(
+				"labels:",
+				"  a:",
+				"    b: 1",
+			),
+			want: "2:3: $.labels.a: expected string, got mapping",
 		},
 		"block sequence for an integer": {
-			input: "top:\n  - 1\n  - 2\n",
-			want:  "1:1: $.top: expected integer, got sequence",
+			input: stringtest.LinesLF(
+				"top:",
+				"  - 1",
+				"  - 2",
+			),
+			want: "1:1: $.top: expected integer, got sequence",
 		},
 		"flow sequence for a string": {
 			input: "name: [a, b]\n",
@@ -428,20 +444,35 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			want:  "1:12: $.top: expected integer, got string",
 		},
 		"value an alias reads": {
-			input: "defs:\n  p: &p abc\nservers:\n  - port: *p\n",
-			want:  "2:9: $.defs.p: expected integer, got string",
+			input: stringtest.LinesLF(
+				"defs:",
+				"  p: &p abc",
+				"servers:",
+				"  - port: *p",
+			),
+			want: "2:9: $.defs.p: expected integer, got string",
 		},
 		"value a merge key brings in": {
-			input: "defs: &d\n  port: abc\nservers:\n  - <<: *d\n    host: h\n",
-			want:  "2:9: $.defs.port: expected integer, got string",
+			input: stringtest.LinesLF(
+				"defs: &d",
+				"  port: abc",
+				"servers:",
+				"  - <<: *d",
+				"    host: h",
+			),
+			want: "2:9: $.defs.port: expected integer, got string",
 		},
 		"map key": {
 			input: "counts:\n  x: 1\n",
 			want:  "2:3: $.counts.x~: expected integer, got string",
 		},
 		"explicit map key": {
-			input: "counts:\n  ? x\n  : 1\n",
-			want:  "2:5: $.counts.x~: expected integer, got string",
+			input: stringtest.LinesLF(
+				"counts:",
+				"  ? x",
+				"  : 1",
+			),
+			want: "2:5: $.counts.x~: expected integer, got string",
 		},
 		"map value": {
 			input: "counts:\n  1: x\n",
@@ -515,17 +546,26 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			want:  "2:5: $.servers[0].zzz~: unknown field \"zzz\"",
 		},
 		"unknown field a merge key brings in": {
-			input: "labels: &d\n  zzz: 1\none:\n  <<: *d\n",
-			opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
-			want:  "2:3: $.labels.zzz~: unknown field \"zzz\"",
+			input: stringtest.LinesLF(
+				"labels: &d",
+				"  zzz: 1",
+				"one:",
+				"  <<: *d",
+			),
+			opts: []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
+			want: "2:3: $.labels.zzz~: unknown field \"zzz\"",
 		},
 		"alias with no anchor": {
 			input: "top: *nope\n",
 			want:  "1:6: $.top: could not find alias \"nope\"",
 		},
 		"value under renamed anchors": {
-			input: "a: &x 1\nb: &x 2\ntop: abc\n",
-			want:  "3:6: $.top: expected integer, got string",
+			input: stringtest.LinesLF(
+				"a: &x 1",
+				"b: &x 2",
+				"top: abc",
+			),
+			want: "3:6: $.top: expected integer, got string",
 		},
 	}
 
@@ -602,7 +642,13 @@ func TestDocument_Decode_Rejection_GoTypes(t *testing.T) {
 		A int `yaml:"a"`
 	}
 
-	merge := "defs: &d\n  a: 1\nv:\n  <<: *d\n  b: 1\n"
+	merge := stringtest.LinesLF(
+		"defs: &d",
+		"  a: 1",
+		"v:",
+		"  <<: *d",
+		"  b: 1",
+	)
 
 	tcs := map[string]struct {
 		decode func(context.Context, *niceyaml.Node) error
@@ -865,7 +911,11 @@ func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
 		// second. A path through the key selects the third, so the error
 		// binds at the token the decoder reported, and the path names
 		// the value in the message.
-		doc := yamltest.FirstDocument(t, "name: 1\nname: y\nname: 3\n", niceyaml.WithAllowDuplicateKeys(true))
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"name: 1",
+			"name: y",
+			"name: 3",
+		), niceyaml.WithAllowDuplicateKeys(true))
 
 		_, err := doc.Decode[map[string]int](t.Context())
 		require.EqualError(t, err, "2:7: $.name: expected integer, got string")
@@ -930,7 +980,12 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want:   `2:10: $.timeout: time: invalid duration "soon"`,
 			},
 			"text unmarshaler in a sequence of structs": {
-				input:  "- name: a\n  tier: low\n- name: b\n  tier: mid\n",
+				input: stringtest.LinesLF(
+					"- name: a",
+					"  tier: low",
+					"- name: b",
+					"  tier: mid",
+				),
 				decode: decodeAs[[]tierServer](),
 				want:   `4:9: $[1].tier: unknown tier "mid"`,
 			},
@@ -942,7 +997,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: `1:14: $.tiers[1]: unknown tier "mid"`,
 			},
 			"map key": {
-				input: "hosts:\n  10.0.0.1: a\n  nope: b\n",
+				input: stringtest.LinesLF(
+					"hosts:",
+					"  10.0.0.1: a",
+					"  nope: b",
+				),
 				decode: decodeAs[struct {
 					Hosts map[netip.Addr]string `yaml:"hosts"`
 				}](),
@@ -956,14 +1015,26 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// The path through a merge key resolves to the entry of the
 			// mapping the key brings in.
 			"map value a merge key brings in": {
-				input: "base: &base\n  timeout: soon\nservers:\n  api:\n    <<: *base\n",
+				input: stringtest.LinesLF(
+					"base: &base",
+					"  timeout: soon",
+					"servers:",
+					"  api:",
+					"    <<: *base",
+				),
 				decode: decodeAs[struct {
 					Servers map[string]tierServer `yaml:"servers"`
 				}](),
 				want: `2:12: $.servers.api.timeout: time: invalid duration "soon"`,
 			},
 			"map entry a merge key brings in": {
-				input: "base: &base\n  b: mid\ntiers:\n  a: low\n  <<: *base\n",
+				input: stringtest.LinesLF(
+					"base: &base",
+					"  b: mid",
+					"tiers:",
+					"  a: low",
+					"  <<: *base",
+				),
 				decode: decodeAs[struct {
 					Tiers map[string]tier `yaml:"tiers"`
 				}](),
@@ -979,7 +1050,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: `2:14: $.tiers[1]: unknown tier "mid"`,
 			},
 			"inline struct": {
-				input: "id: 1\nname: api\ntier: mid\n",
+				input: stringtest.LinesLF(
+					"id: 1",
+					"name: api",
+					"tier: mid",
+				),
 				decode: decodeAs[struct {
 					Server tierServer `yaml:",inline"`
 					ID     int        `yaml:"id"`
@@ -1008,12 +1083,23 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: `2:10: $.timeout: time: invalid duration "soon"`,
 			},
 			"value that decodes through a second type": {
-				input:  "name: prod\nservers:\n  - name: a\n    tier: low\n  - name: b\n    tier: mid\n",
+				input: stringtest.LinesLF(
+					"name: prod",
+					"servers:",
+					"  - name: a",
+					"    tier: low",
+					"  - name: b",
+					"    tier: mid",
+				),
 				decode: decodeAs[mirrored](),
 				want:   `6:11: $.servers[1].tier: unknown tier "mid"`,
 			},
 			"field that decodes through a second type": {
-				input: "prod:\n  servers:\n    - timeout: soon\n",
+				input: stringtest.LinesLF(
+					"prod:",
+					"  servers:",
+					"    - timeout: soon",
+				),
 				decode: decodeAs[struct {
 					Prod mirrored `yaml:"prod"`
 				}](),
@@ -1022,14 +1108,23 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// No field below the value reports the message with the text
 			// the value put in front, so the error points at the value.
 			"value that adds text to the error of a field": {
-				input: "main:\n  name: api\n  tier: mid\n",
+				input: stringtest.LinesLF(
+					"main:",
+					"  name: api",
+					"  tier: mid",
+				),
 				decode: decodeAs[struct {
 					Main prefixing `yaml:"main"`
 				}](),
 				want: `1:1: $.main: server: unknown tier "mid"`,
 			},
 			"value whose fields mirror nothing": {
-				input: "name: api\nvalue:\n  a: 1\n  b: bad\n",
+				input: stringtest.LinesLF(
+					"name: api",
+					"value:",
+					"  a: 1",
+					"  b: bad",
+				),
 				decode: decodeAs[struct {
 					Name  string      `yaml:"name"`
 					Value opaqueValue `yaml:"value"`
@@ -1037,7 +1132,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: `2:1: $.value: unmarshaler rejected the value`,
 			},
 			"json unmarshaler under its option": {
-				input: "name: api\nvalue:\n  v: 1\n",
+				input: stringtest.LinesLF(
+					"name: api",
+					"value:",
+					"  v: 1",
+				),
 				decode: decodeAs[struct {
 					Name  string      `yaml:"name"`
 					Value jsonDecoded `yaml:"value"`
@@ -1057,7 +1156,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// The decoder reads the value field by field, so the field
 			// reported the error.
 			"json unmarshaler without its option": {
-				input: "name: api\nvalue:\n  tier: mid\n",
+				input: stringtest.LinesLF(
+					"name: api",
+					"value:",
+					"  tier: mid",
+				),
 				decode: decodeAs[struct {
 					Name  string      `yaml:"name"`
 					Value jsonFielded `yaml:"value"`
@@ -1082,7 +1185,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: `2:7: $.tier: unknown tier "mid"`,
 			},
 			"value below a scoped node": {
-				input: "servers:\n  - name: a\n    tier: mid\n",
+				input: stringtest.LinesLF(
+					"servers:",
+					"  - name: a",
+					"    tier: mid",
+				),
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
 					node, err := dd.At(paths.Current().Child("servers").Index(0))
 					if err != nil {
@@ -1136,7 +1243,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			want   string
 		}{
 			"sequence element": {
-				input: "addrs:\n  - 10.0.0.1\n  - [a, b]\n",
+				input: stringtest.LinesLF(
+					"addrs:",
+					"  - 10.0.0.1",
+					"  - [a, b]",
+				),
 				decode: decodeAs[struct {
 					Addrs []netip.Addr `yaml:"addrs"`
 				}](),
@@ -1306,7 +1417,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					niceyaml.WithReferences(niceyaml.NewSourceFromString("limit: [\n")),
 				},
 				decode: decodeAs[tierServer](),
-				want:   "[1:8] sequence end token ']' not found\n>  1 | limit: [\n              ^\n",
+				want: stringtest.LinesLF(
+					"[1:8] sequence end token ']' not found",
+					">  1 | limit: [",
+					"              ^",
+				),
 			},
 			// The walk decodes nothing once the context has ended.
 			"context an unmarshaler ends": {
@@ -1408,9 +1523,23 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			}
 		}
 
-		items := "name: api\nitems:\n  - from: 9\n    to: 3\n"
-		oneSpan := "spans:\n  - from: 9\n    to: 3\n"
-		twoSpans := "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n"
+		items := stringtest.LinesLF(
+			"name: api",
+			"items:",
+			"  - from: 9",
+			"    to: 3",
+		)
+		oneSpan := stringtest.LinesLF(
+			"spans:",
+			"  - from: 9",
+			"    to: 3",
+		)
+		twoSpans := stringtest.LinesLF(
+			"spans:",
+			"  - {from: 1, to: 5}",
+			"  - from: 9",
+			"    to: 3",
+		)
 
 		tcs := map[string]struct {
 			decode func(ctx context.Context, dd *niceyaml.Node) error
@@ -1460,7 +1589,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want:   "2:18: $.b.to: to is below from",
 			},
 			"pointer field": {
-				input: "span:\n  from: 9\n  to: 3\n",
+				input: stringtest.LinesLF(
+					"span:",
+					"  from: 9",
+					"  to: 3",
+				),
 				decode: decodeAs[struct {
 					Span *span `yaml:"span"`
 				}](),
@@ -1478,7 +1611,12 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: "1:27: $.spans[0].to: to is below from",
 			},
 			"field a merge key brings in": {
-				input: "base: &base {to: 3}\nspans:\n  - <<: *base\n    from: 9\n",
+				input: stringtest.LinesLF(
+					"base: &base {to: 3}",
+					"spans:",
+					"  - <<: *base",
+					"    from: 9",
+				),
 				decode: decodeAs[struct {
 					Spans []span `yaml:"spans"`
 				}](),
@@ -1516,7 +1654,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// The span wrote the path, so the path goes under the span and
 			// not under the value that handed its error on.
 			"value that returns the error of a field": {
-				input: "mirrors:\n  - name: a\n    span: {from: 9, to: 3}\n",
+				input: stringtest.LinesLF(
+					"mirrors:",
+					"  - name: a",
+					"    span: {from: 9, to: 3}",
+				),
 				decode: decodeAs[struct {
 					Mirrors []spanMirror `yaml:"mirrors"`
 				}](),
@@ -1654,7 +1796,12 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, "main:\n  item:\n    from: 9\n    to: 3\n")
+				dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+					"main:",
+					"  item:",
+					"    from: 9",
+					"    to: 3",
+				))
 
 				_, err := dd.Decode[struct {
 					Main rebasing `yaml:"main"`
@@ -1670,7 +1817,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 	t.Run("puts the path of a detail under the value", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "spans:\n  - from: 9\n    to: 3\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"spans:",
+			"  - from: 9",
+			"    to: 3",
+		))
 		report := niceyaml.NewError("span is odd", niceyaml.WithDetails(
 			niceyaml.NewError("to set here", niceyaml.AtPath(paths.Current().Child("to"))),
 		))
@@ -1707,7 +1858,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 	t.Run("leaves the decoded value alone", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "a: x\nb: y\nc: z\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: x",
+			"b: y",
+			"c: z",
+		))
 
 		// The second decode fills values of its own, so the value the
 		// caller holds keeps what the first decode set.

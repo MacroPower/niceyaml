@@ -1709,7 +1709,11 @@ func TestErrorTree_Problems(t *testing.T) {
 func TestErrorTree_Problems_Lines(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\n", niceyaml.WithName("f.yaml"))
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+	), niceyaml.WithName("f.yaml"))
 
 	at := func(msg, key string, opts ...niceyaml.ErrorOption) *niceyaml.Error {
 		return niceyaml.NewError(
@@ -2597,7 +2601,11 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 func TestErrorTree_Accessors(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"---",
+		"b: 2",
+	), niceyaml.WithName("f.yaml"))
 	docs := source.Documents()
 	require.Len(t, docs, 2)
 

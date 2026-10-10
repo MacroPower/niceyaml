@@ -80,8 +80,16 @@ func TestNewErrorReport(t *testing.T) {
 	farC := yamltest.Bind(t, second, niceyaml.NewError("far c", outside))
 
 	// The excerpt of each source among several, below its name.
-	namedA := "first.yaml\n   1 | a: 1\n     |    ^ bad a"
-	namedC := "second.yaml\n   1 | c: 3\n     |    ^ bad c"
+	namedA := stringtest.JoinLF(
+		"first.yaml",
+		"   1 | a: 1",
+		"     |    ^ bad a",
+	)
+	namedC := stringtest.JoinLF(
+		"second.yaml",
+		"   1 | c: 3",
+		"     |    ^ bad c",
+	)
 
 	tcs := map[string]struct {
 		err            error
@@ -89,8 +97,11 @@ func TestNewErrorReport(t *testing.T) {
 		wantUnresolved []string
 	}{
 		"a lone binding has one excerpt with no name": {
-			err:  fmt.Errorf("check: %w", badA),
-			want: []string{"   1 | a: 1\n     |    ^"},
+			err: fmt.Errorf("check: %w", badA),
+			want: []string{stringtest.JoinLF(
+				"   1 | a: 1",
+				"     |    ^",
+			)},
 		},
 		"bindings of one source share an excerpt with no name": {
 			err: errors.Join(badA, badB),
@@ -106,8 +117,11 @@ func TestNewErrorReport(t *testing.T) {
 			want: []string{namedC, namedA},
 		},
 		"a source with no name is not named": {
-			err:  errors.Join(badA, badD),
-			want: []string{namedA, "   1 | d: 4\n     |    ^ bad d"},
+			err: errors.Join(badA, badD),
+			want: []string{namedA, stringtest.JoinLF(
+				"   1 | d: 4",
+				"     |    ^ bad d",
+			)},
 		},
 		"a source where nothing resolves still names the other": {
 			err:            errors.Join(badA, farC),
@@ -136,7 +150,10 @@ func TestNewErrorReport(t *testing.T) {
 			err: yamltest.Bind(t, first, niceyaml.NewError("far", outside,
 				niceyaml.WithDetails(niceyaml.NewError("see a", at("a"))),
 			)),
-			want: []string{"   1 | a: 1\n     |    ^ see a"},
+			want: []string{stringtest.JoinLF(
+				"   1 | a: 1",
+				"     |    ^ see a",
+			)},
 		},
 		"an error bound to no source has a tree alone": {
 			err: errors.New("plain"),
@@ -453,7 +470,11 @@ func TestNewErrorReport_Excerpts(t *testing.T) {
 	gone := yamltest.Bind(t, second, niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").Index(0))))
 
 	// The excerpt of the first source with a mark at a alone.
-	markedA := "first.yaml\n   1 | a: 1\n     |    ^ bad a"
+	markedA := stringtest.JoinLF(
+		"first.yaml",
+		"   1 | a: 1",
+		"     |    ^ bad a",
+	)
 
 	tcs := map[string]struct {
 		err  error
@@ -472,7 +493,11 @@ func TestNewErrorReport_Excerpts(t *testing.T) {
 		"sources come in the order the bindings reach them": {
 			err: errors.Join(badC, badA, badB),
 			want: []string{
-				"second.yaml\n   1 | c: 3\n     |    ^ bad c",
+				stringtest.JoinLF(
+					"second.yaml",
+					"   1 | c: 3",
+					"     |    ^ bad c",
+				),
 				stringtest.JoinLF(
 					"first.yaml",
 					"   1 | a: 1",
@@ -483,8 +508,12 @@ func TestNewErrorReport_Excerpts(t *testing.T) {
 			},
 		},
 		"a lone binding keeps its caret bare": {
-			err:  fmt.Errorf("check: %w", badA),
-			want: []string{"first.yaml\n   1 | a: 1\n     |    ^"},
+			err: fmt.Errorf("check: %w", badA),
+			want: []string{stringtest.JoinLF(
+				"first.yaml",
+				"   1 | a: 1",
+				"     |    ^",
+			)},
 		},
 		"a binding the error reaches twice marks its line once": {
 			err:  errors.Join(badA, fmt.Errorf("again: %w", badA)),
@@ -520,7 +549,10 @@ func TestNewErrorReport_Excerpts(t *testing.T) {
 		require.Len(t, rep.Excerpts, 1)
 
 		// The source keeps no decoration from the excerpt.
-		assert.Equal(t, "   1 | a: 1\n   2 | b: 2", first.View().String())
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | a: 1",
+			"   2 | b: 2",
+		), first.View().String())
 	})
 }
 
@@ -538,8 +570,16 @@ func TestNewErrorReport_ExcerptsOff(t *testing.T) {
 
 	// The excerpt of the open source, with the message of the error at
 	// its port and without it.
-	marked := "open.yaml\n   1 | port: 0\n     |       ^ open port"
-	bare := "open.yaml\n   1 | port: 0\n     |       ^"
+	marked := stringtest.JoinLF(
+		"open.yaml",
+		"   1 | port: 0",
+		"     |       ^ open port",
+	)
+	bare := stringtest.JoinLF(
+		"open.yaml",
+		"   1 | port: 0",
+		"     |       ^",
+	)
 
 	tcs := map[string]struct {
 		err error

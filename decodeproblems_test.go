@@ -554,7 +554,13 @@ func TestSource_Decode_Problems(t *testing.T) {
 	// A user fixed one report for each run of this document: the timeout,
 	// then the port, then the unknown field.
 	source := niceyaml.NewSourceFromString(
-		"replcas: 3\ntimeout: soon\nservers:\n  - port: http\n  - port: 80\n",
+		stringtest.LinesLF(
+			"replcas: 3",
+			"timeout: soon",
+			"servers:",
+			"  - port: http",
+			"  - port: 80",
+		),
 		niceyaml.WithName("app.yaml"),
 	)
 
@@ -657,7 +663,14 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// target declares its fields in.
 		"scalars of the wrong kind": {
 			decode: decodeAs[problemConfig](),
-			input:  "timeout: soon\nreplicas: 1.5x\nservers:\n  - port: http\n  - name: [a]\nlabels: {a: x, b: 2, c: y}\n",
+			input: stringtest.LinesLF(
+				"timeout: soon",
+				"replicas: 1.5x",
+				"servers:",
+				"  - port: http",
+				"  - name: [a]",
+				"labels: {a: x, b: 2, c: y}",
+			),
 			want: stringtest.JoinLF(
 				"6 problems",
 				"1:10: $.timeout: expected integer, got string",
@@ -672,7 +685,14 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// one problem, and the walk reads nothing below it.
 		"mappings and sequences of the wrong kind": {
 			decode: decodeAs[problemConfig](),
-			input:  "timeout: {a: soon}\nreplicas: [x, y]\nservers:\n  - a\n  - [b]\nlabels: [c]\n",
+			input: stringtest.LinesLF(
+				"timeout: {a: soon}",
+				"replicas: [x, y]",
+				"servers:",
+				"  - a",
+				"  - [b]",
+				"labels: [c]",
+			),
 			want: stringtest.JoinLF(
 				"5 problems",
 				"1:1: $.timeout: expected integer, got mapping",
@@ -688,7 +708,11 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				Wide  uint16 `yaml:"wide"`
 				Count uint   `yaml:"count"`
 			}](),
-			input: "small: 300\nwide: 70000\ncount: -1\n",
+			input: stringtest.LinesLF(
+				"small: 300",
+				"wide: 70000",
+				"count: -1",
+			),
 			want: stringtest.JoinLF(
 				"3 problems",
 				"1:8: $.small: expected integer from -128 to 127, got 300",
@@ -725,7 +749,11 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				Until time.Time `yaml:"until"`
 				N     int       `yaml:"n"`
 			}](),
-			input: "when: later\nuntil: 5\nn: x\n",
+			input: stringtest.LinesLF(
+				"when: later",
+				"until: 5",
+				"n: x",
+			),
 			want: stringtest.JoinLF(
 				"2 problems",
 				"2:8: $.until: expected timestamp, got integer",
@@ -734,7 +762,13 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		},
 		"unknown fields beside values": {
 			decode: decodeAs[problemConfig](strict),
-			input:  "timeout: soon\nservers:\n  - {name: a, timeout: soon, prt: 1}\nlabels: {a: x}\nreplcas: 2\n",
+			input: stringtest.LinesLF(
+				"timeout: soon",
+				"servers:",
+				"  - {name: a, timeout: soon, prt: 1}",
+				"labels: {a: x}",
+				"replcas: 2",
+			),
 			want: stringtest.JoinLF(
 				"5 problems",
 				"1:10: $.timeout: expected integer, got string",
@@ -748,8 +782,15 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// for any type.
 		"nulls": {
 			decode: decodeAs[problemConfig](),
-			input:  "timeout: soon\nreplicas: ~\nservers:\n  - ~\n  - {port: ~, timeout: null}\nlabels: {a: ~}\n",
-			want:   "1:10: $.timeout: expected integer, got string",
+			input: stringtest.LinesLF(
+				"timeout: soon",
+				"replicas: ~",
+				"servers:",
+				"  - ~",
+				"  - {port: ~, timeout: null}",
+				"labels: {a: ~}",
+			),
+			want: "1:10: $.timeout: expected integer, got string",
 		},
 		"pointers and arrays": {
 			decode: decodeAs[struct {
@@ -758,7 +799,12 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				PP  **int          `yaml:"pp"`
 				Arr [2]int         `yaml:"arr"`
 			}](),
-			input: "p: x\nps: {port: y}\npp: z\narr: [1, w]\n",
+			input: stringtest.LinesLF(
+				"p: x",
+				"ps: {port: y}",
+				"pp: z",
+				"arr: [1, w]",
+			),
 			want: stringtest.JoinLF(
 				"4 problems",
 				"1:4: $.p: expected integer, got string",
@@ -776,8 +822,13 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				L []any          `yaml:"l"`
 				N int            `yaml:"n"`
 			}](),
-			input: "a: {port: [http]}\nm: {k: {port: http}}\nl: [x, {y: z}]\nn: w\n",
-			want:  "4:4: $.n: expected integer, got string",
+			input: stringtest.LinesLF(
+				"a: {port: [http]}",
+				"m: {k: {port: http}}",
+				"l: [x, {y: z}]",
+				"n: w",
+			),
+			want: "4:4: $.n: expected integer, got string",
 		},
 		// The fields of an inline struct read the mapping of the struct
 		// that holds it.
@@ -786,7 +837,11 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				Name         string `yaml:"name"`
 				StrictNested `yaml:",inline"`
 			}](),
-			input: "c: x\nd: y\nname: [n]\n",
+			input: stringtest.LinesLF(
+				"c: x",
+				"d: y",
+				"name: [n]",
+			),
 			want: stringtest.JoinLF(
 				"3 problems",
 				"1:4: $.c: expected integer, got string",
@@ -803,7 +858,12 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				A    bool           `yaml:"a"`
 				B    bool           `yaml:"b"`
 			}](),
-			input: "x: bad\na: 1\ny: worse\nb: 2\n",
+			input: stringtest.LinesLF(
+				"x: bad",
+				"a: 1",
+				"y: worse",
+				"b: 2",
+			),
 			want: stringtest.JoinLF(
 				"4 problems",
 				"1:4: $.x: expected integer, got string",
@@ -821,7 +881,12 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				C int `yaml:"c"`
 				D int `yaml:"d"`
 			}](),
-			input: "a: &x soon\nb: *x\nc: *x\nd: bad\n",
+			input: stringtest.LinesLF(
+				"a: &x soon",
+				"b: *x",
+				"c: *x",
+				"d: bad",
+			),
 			want: stringtest.JoinLF(
 				"2 problems",
 				"1:7: $.a: expected integer, got string",
@@ -837,7 +902,12 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				C time.Duration `yaml:"c"`
 				D int           `yaml:"d"`
 			}](),
-			input: "a: &x soon\nb: *x\nc: *x\nd: bad\n",
+			input: stringtest.LinesLF(
+				"a: &x soon",
+				"b: *x",
+				"c: *x",
+				"d: bad",
+			),
 			want: stringtest.JoinLF(
 				"3 problems",
 				`2:4: $.b: time: invalid duration "soon"`,
@@ -874,8 +944,12 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				Defs *StrictBase   `yaml:"defs"`
 				V    strictAliased `yaml:"v"`
 			}](),
-			input: "v:\n  <<: {b: bad, in: {a: worse}}\n  in: {b: x}\n",
-			want:  "3:11: $.v.in.b: expected integer, got string",
+			input: stringtest.LinesLF(
+				"v:",
+				"  <<: {b: bad, in: {a: worse}}",
+				"  in: {b: x}",
+			),
+			want: "3:11: $.v.in.b: expected integer, got string",
 		},
 		// The decoder refuses a sequence of sources for a struct and
 		// decodes none of its fields, so b is no problem beside the
@@ -885,7 +959,12 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				V strictInner `yaml:"v"`
 				N int         `yaml:"n"`
 			}](),
-			input: "v:\n  <<: [{a: x}]\n  b: bad\nn: z\n",
+			input: stringtest.LinesLF(
+				"v:",
+				"  <<: [{a: x}]",
+				"  b: bad",
+				"n: z",
+			),
 			want: stringtest.JoinLF(
 				"2 problems",
 				"2:3: $.v.<<: expected mapping, got sequence",
@@ -901,7 +980,15 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				W strictInner `yaml:"w"`
 				N int         `yaml:"n"`
 			}](),
-			input: "v:\n  1: q\n  a: bad\nw:\n  <<: {true: q, a: bad}\n  b: worse\nn: z\n",
+			input: stringtest.LinesLF(
+				"v:",
+				"  1: q",
+				"  a: bad",
+				"w:",
+				"  <<: {true: q, a: bad}",
+				"  b: worse",
+				"n: z",
+			),
 			want: stringtest.JoinLF(
 				"2 problems",
 				"6:6: $.w.b: expected integer, got string",
@@ -918,8 +1005,13 @@ func TestDocument_Decode_Problems(t *testing.T) {
 				X    int   `yaml:"x"`
 				N    int   `yaml:"n"`
 			}](),
-			input: "defs: {a: &a !!int 1.5}\nl: [*a, 2]\nx: *a\nn: z\n",
-			want:  "4:4: $.n: expected integer, got string",
+			input: stringtest.LinesLF(
+				"defs: {a: &a !!int 1.5}",
+				"l: [*a, 2]",
+				"x: *a",
+				"n: z",
+			),
+			want: "4:4: $.n: expected integer, got string",
 		},
 		// The decoder rejects a tag that does not convert its value
 		// before it decodes any value, and the others still report.
@@ -935,8 +1027,13 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// The paths read from the root of the document.
 		"scoped decode": {
 			decode: decodeAs[problemServer](),
-			input:  "base: &b {port: http}\nservers:\n  - {name: a, port: 1}\n  - {<<: *b, name: [b], timeout: soon}\n",
-			scope:  "$.servers[1]",
+			input: stringtest.LinesLF(
+				"base: &b {port: http}",
+				"servers:",
+				"  - {name: a, port: 1}",
+				"  - {<<: *b, name: [b], timeout: soon}",
+			),
+			scope: "$.servers[1]",
 			want: stringtest.JoinLF(
 				"3 problems",
 				"1:17: $.base.port: expected integer, got string",
@@ -961,7 +1058,11 @@ func TestDocument_Decode_Problems(t *testing.T) {
 
 				if i%2 == 1 {
 					srcOpts = append(srcOpts, niceyaml.WithReferences(
-						niceyaml.NewSourceFromString("a: &a 2\nb: &b {port: 1}\nx: &x 1\n"),
+						niceyaml.NewSourceFromString(stringtest.LinesLF(
+							"a: &a 2",
+							"b: &b {port: 1}",
+							"x: &x 1",
+						)),
 					))
 				}
 
@@ -1011,7 +1112,12 @@ func TestDocument_Decode_Problems_SecondDocument(t *testing.T) {
 
 	// A problem of a later document keeps its line in the file.
 	docs := niceyaml.NewSourceFromString(
-		"replicas: 1\n---\nreplicas: x\ntimeout: soon\n",
+		stringtest.LinesLF(
+			"replicas: 1",
+			"---",
+			"replicas: x",
+			"timeout: soon",
+		),
 		niceyaml.WithName("app.yaml"),
 	).Documents()
 	require.Len(t, docs, 2)
@@ -1064,8 +1170,12 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 				Spans    []span `yaml:"spans"`
 				Replicas int    `yaml:"replicas"`
 			}](),
-			input: "spans:\n  - {from: 9, to: 3}\nreplicas: x\n",
-			is:    errSpan,
+			input: stringtest.LinesLF(
+				"spans:",
+				"  - {from: 9, to: 3}",
+				"replicas: x",
+			),
+			is: errSpan,
 			want: stringtest.JoinLF(
 				"2 problems",
 				"2:19: $.spans[0].to: to is below from",
@@ -1138,8 +1248,12 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 				Replicas int            `yaml:"replicas"`
 				Limit    int            `yaml:"limit"`
 			}](),
-			input: "server: {timeout: soon}\nreplicas: x\nlimit: y\n",
-			is:    errBadServer,
+			input: stringtest.LinesLF(
+				"server: {timeout: soon}",
+				"replicas: x",
+				"limit: y",
+			),
+			is: errBadServer,
 			want: stringtest.JoinLF(
 				"3 problems",
 				`1:1: $.server: bad server: time: invalid duration "soon"`,
@@ -1225,8 +1339,13 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			decode: decodeAs[struct {
 				Servers []problemTiered `yaml:"servers"`
 			}](),
-			input: "base: &b {tier: mid}\nservers:\n  - {<<: *b, name: a}\n  - {<<: *b, name: b, port: x}\n",
-			is:    errUnknownTier,
+			input: stringtest.LinesLF(
+				"base: &b {tier: mid}",
+				"servers:",
+				"  - {<<: *b, name: a}",
+				"  - {<<: *b, name: b, port: x}",
+			),
+			is: errUnknownTier,
 			want: stringtest.JoinLF(
 				"2 problems",
 				`1:17: $.servers[0].tier: unknown tier "mid"`,
@@ -1344,7 +1463,11 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 	strict := niceyaml.WithDisallowUnknownFields(true)
 
 	// The reference document defines b, as some of the documents do.
-	references := "defaults: &defaults {port: http}\nlimit: &limit soon\nb: &b {port: 1}\n"
+	references := stringtest.LinesLF(
+		"defaults: &defaults {port: http}",
+		"limit: &limit soon",
+		"b: &b {port: 1}",
+	)
 
 	// The decoder reads the timeout before any other field.
 	type timeoutFirst struct {
@@ -1363,7 +1486,13 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		// the reference document is no part of the report.
 		"anchor name the reference document defines too": {
 			decode: decodeAs[problemConfig](),
-			input:  "base: &b {port: bad}\nservers:\n  - *b\n  - {<<: *b, name: [a]}\nreplicas: x\n",
+			input: stringtest.LinesLF(
+				"base: &b {port: bad}",
+				"servers:",
+				"  - *b",
+				"  - {<<: *b, name: [a]}",
+				"replicas: x",
+			),
 			want: stringtest.JoinLF(
 				"3 problems",
 				"1:17: $.base.port: expected integer, got string",
@@ -1376,7 +1505,13 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		// merge key brings in reports in a later decode.
 		"mapping that merges a reference document": {
 			decode: decodeAs[problemConfig](strict),
-			input:  "servers:\n  - {<<: *defaults, name: [a], prt: 1}\n  - {port: y, nme: 2}\nreplicas: x\nrplicas: 2\n",
+			input: stringtest.LinesLF(
+				"servers:",
+				"  - {<<: *defaults, name: [a], prt: 1}",
+				"  - {port: y, nme: 2}",
+				"replicas: x",
+				"rplicas: 2",
+			),
 			want: stringtest.JoinLF(
 				"6 problems",
 				"2:21: $.servers[0].name: expected string, got sequence",
@@ -1392,7 +1527,12 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		// it.
 		"rejection inside a reference document": {
 			decode: decodeAs[timeoutFirst](),
-			input:  "replicas: x\ntimeout: *limit\nservers:\n  - {port: y}\n",
+			input: stringtest.LinesLF(
+				"replicas: x",
+				"timeout: *limit",
+				"servers:",
+				"  - {port: y}",
+			),
 			want: stringtest.JoinLF(
 				"3 problems",
 				"1:11: $.replicas: expected integer, got string",
@@ -1404,7 +1544,12 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		// behind the alias, so the timeout reports in a later decode.
 		"value of a reference document beside a rejection": {
 			decode: decodeAs[problemConfig](),
-			input:  "replicas: x\ntimeout: *limit\nservers:\n  - {port: y}\n",
+			input: stringtest.LinesLF(
+				"replicas: x",
+				"timeout: *limit",
+				"servers:",
+				"  - {port: y}",
+			),
 			want: stringtest.JoinLF(
 				"2 problems",
 				"1:11: $.replicas: expected integer, got string",
@@ -1416,13 +1561,24 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 		// comes back alone.
 		"rejection with no position": {
 			decode: decodeAs[problemConfig](),
-			input:  "replicas: x\ntimeout: *limit\nservers:\n  - *defaults\n  - {port: y}\n",
-			want:   "expected integer, got string",
+			input: stringtest.LinesLF(
+				"replicas: x",
+				"timeout: *limit",
+				"servers:",
+				"  - *defaults",
+				"  - {port: y}",
+			),
+			want: "expected integer, got string",
 		},
 		"scoped decode": {
 			decode: decodeAs[problemServer](),
-			input:  "base: &b {port: bad}\nservers:\n  - {name: a}\n  - {<<: *b, name: [b], timeout: *limit}\n",
-			scope:  "$.servers[1]",
+			input: stringtest.LinesLF(
+				"base: &b {port: bad}",
+				"servers:",
+				"  - {name: a}",
+				"  - {<<: *b, name: [b], timeout: *limit}",
+			),
+			scope: "$.servers[1]",
 			want: stringtest.JoinLF(
 				"2 problems",
 				"1:17: $.base.port: expected integer, got string",
@@ -1511,7 +1667,11 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 			calls := &problemCalls{seen: map[string]bool{}}
 			ctx := context.WithValue(t.Context(), callsKey{}, calls)
 
-			err := tc.decode(ctx, yamltest.FirstDocument(t, "names: [a, b, c]\ntimeout: soon\nreplicas: x\n"))
+			err := tc.decode(ctx, yamltest.FirstDocument(t, stringtest.LinesLF(
+				"names: [a, b, c]",
+				"timeout: soon",
+				"replicas: x",
+			)))
 			require.EqualError(t, err, stringtest.JoinLF(
 				"2 problems",
 				"2:10: $.timeout: expected integer, got string",
@@ -1592,7 +1752,12 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 		calls := &problemCalls{}
 		ctx := context.WithValue(t.Context(), callsKey{}, calls)
 
-		_, err := yamltest.FirstDocument(t, "name: a\nport: http\nlimit: x\nrest: {port: y}\n").Decode[struct {
+		_, err := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"name: a",
+			"port: http",
+			"limit: x",
+			"rest: {port: y}",
+		)).Decode[struct {
 			Meta  problemCounted `yaml:",inline"`
 			Port  int            `yaml:"port"`
 			Rest  problemServer  `yaml:"rest"`
@@ -1616,8 +1781,16 @@ func TestDocument_Decode_Problems_Context(t *testing.T) {
 		Timeout  int           `yaml:"timeout"`
 	}
 
-	input := "ending: now\nreplicas: x\ntimeout: soon\n"
-	imageInput := "replicas: x\ntimeout: soon\nimage: {pull: always}\n"
+	input := stringtest.LinesLF(
+		"ending: now",
+		"replicas: x",
+		"timeout: soon",
+	)
+	imageInput := stringtest.LinesLF(
+		"replicas: x",
+		"timeout: soon",
+		"image: {pull: always}",
+	)
 
 	t.Run("context that goes on", func(t *testing.T) {
 		t.Parallel()
@@ -1761,9 +1934,14 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 		// The rows come in the order of the file, with the rejection of
 		// the decoder among them.
 		"rejection after the other problems": {
-			input: "extra: 1\nport: 70000\ntier: mid\ntimeout: soon\n",
-			opts:  []niceyaml.DecodeOption{strict},
-			err:   errUnknownTier,
+			input: stringtest.LinesLF(
+				"extra: 1",
+				"port: 70000",
+				"tier: mid",
+				"timeout: soon",
+			),
+			opts: []niceyaml.DecodeOption{strict},
+			err:  errUnknownTier,
 			want: stringtest.JoinLF(
 				"base.yaml: 4 problems",
 				`base.yaml:1:1: $.extra~: unknown field "extra"`,
@@ -1786,8 +1964,12 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 			),
 		},
 		"flow mapping below a comment": {
-			input: "# prod\n\n{tier: mid, port: 70000, timeout: soon}\n",
-			err:   errUnknownTier,
+			input: stringtest.LinesLF(
+				"# prod",
+				"",
+				"{tier: mid, port: 70000, timeout: soon}",
+			),
+			err: errUnknownTier,
 			want: stringtest.JoinLF(
 				"base.yaml: 3 problems",
 				`base.yaml:3:8: $.tier: unknown tier "mid"`,
@@ -1796,7 +1978,11 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 			),
 		},
 		"alias to a duration": {
-			input: "wait: &wait soon\ntimeout: *wait\nport: 70000\n",
+			input: stringtest.LinesLF(
+				"wait: &wait soon",
+				"timeout: *wait",
+				"port: 70000",
+			),
 			want: stringtest.JoinLF(
 				"base.yaml: 2 problems",
 				`base.yaml:2:10: $.timeout: time: invalid duration "soon"`,
@@ -1871,9 +2057,15 @@ func TestNewSourceFromLayers_Decode_Problems(t *testing.T) {
 		// for the unknown field the search finds there. The search still
 		// reports the duration, which matches ErrDecode beside the panic.
 		"unmarshaler that panics": {
-			input: "# prod\n\nextra: 1\nown: panic\ntimeout: soon\n",
-			opts:  []niceyaml.DecodeOption{strict},
-			err:   errBadServer,
+			input: stringtest.LinesLF(
+				"# prod",
+				"",
+				"extra: 1",
+				"own: panic",
+				"timeout: soon",
+			),
+			opts: []niceyaml.DecodeOption{strict},
+			err:  errBadServer,
 			want: stringtest.JoinLF(
 				"base.yaml: 2 problems",
 				"base.yaml:3:1: decoder panicked: bad server",

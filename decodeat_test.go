@@ -241,7 +241,11 @@ func TestNode_DecodeAt(t *testing.T) {
 	t.Run("a validator that reads a required key reports not found for a present node", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocumentWithPath(t, "spec:\n  hours:\n    open: 9\n", "cfg.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, stringtest.LinesLF(
+			"spec:",
+			"  hours:",
+			"    open: 9",
+		), "cfg.yaml")
 
 		_, err := doc.At(hoursPath)
 		require.NoError(t, err)
