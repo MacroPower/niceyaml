@@ -413,12 +413,7 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			},
 		},
 		"prefix a transform adds": {
-			printer: printer.New(
-				printer.WithGutter(printer.NoGutter),
-				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithWrapWidth(5),
-				printer.WithStyles(prefixed),
-			),
+			printer: testPrinter().With(printer.WithWrapWidth(5), printer.WithStyles(prefixed)),
 			view: func() *line.View {
 				return niceyaml.NewSourceFromString("k: value\nb: other words\n").View()
 			},

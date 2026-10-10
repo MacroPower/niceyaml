@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/stringtest"
@@ -15,17 +14,13 @@ import (
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
-	"go.jacobcolvin.com/niceyaml/style"
 )
 
 func TestPrinter_PrintError_ExcerptsOff(t *testing.T) {
 	t.Parallel()
 
 	// The printer draws no color, so a test reads each row as text.
-	p := printer.New(
-		printer.WithStyles(style.New(lipgloss.NewStyle())),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
+	p := testPrinterWithGutter(printer.DefaultGutter)
 
 	// Every line but the one that holds the port holds a secret, so any
 	// excerpt of the source shows one.
@@ -135,10 +130,7 @@ func TestPrinter_PrintError_Report(t *testing.T) {
 	t.Parallel()
 
 	// The printer draws no color, so a test reads each row as text.
-	p := printer.New(
-		printer.WithStyles(style.New(lipgloss.NewStyle())),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
+	p := testPrinterWithGutter(printer.DefaultGutter)
 
 	first := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("first.yaml"))
 	second := niceyaml.NewSourceFromString("c: 3\n", niceyaml.WithName("second.yaml"))
@@ -180,11 +172,7 @@ func TestPrinter_PrintError_ExcerptOptions(t *testing.T) {
 
 	// The printer draws no color and no gutter, so a test reads each row
 	// as the text of the source.
-	p := printer.New(
-		printer.WithStyles(style.New(lipgloss.NewStyle())),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.NoGutter),
-	)
+	p := testPrinter()
 
 	// The marked line sits in the middle of a source with more lines on
 	// each side than the default shows, so the count changes the excerpt.
@@ -265,10 +253,7 @@ func TestPrinter_PrintReport(t *testing.T) {
 	t.Parallel()
 
 	// The printer draws no color, so a test reads each row as text.
-	p := printer.New(
-		printer.WithStyles(style.New(lipgloss.NewStyle())),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
+	p := testPrinterWithGutter(printer.DefaultGutter)
 
 	first := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("first.yaml"))
 	badB := yamltest.Bind(t, first, niceyaml.NewError("bad b", niceyaml.AtPath(paths.Doc().Child("b"))))
