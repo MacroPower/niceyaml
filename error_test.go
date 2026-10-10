@@ -5165,11 +5165,16 @@ func TestSourceError_Excerpt(t *testing.T) {
 func TestSourceError_Annotate(t *testing.T) {
 	t.Parallel()
 
-	// Assert that no line of view carries an overlay or annotation.
-	unmarked := func(t *testing.T, view *line.View) {
+	// Assert that no line of view carries an overlay or annotation. The
+	// check skips the lines at the indices in except.
+	unmarked := func(t *testing.T, view *line.View, except ...int) {
 		t.Helper()
 
 		for i := range view.All() {
+			if slices.Contains(except, i) {
+				continue
+			}
+
 			assert.Empty(t, view.Overlays(i), "line %d carries no overlay", i)
 			assert.Empty(t, view.Annotations(i), "line %d carries no annotation", i)
 		}
@@ -5195,14 +5200,7 @@ func TestSourceError_Annotate(t *testing.T) {
 			{Content: "bad h", Kind: kind.TextError, Placement: line.Below, Col: 3},
 		}, view.Annotations(7))
 
-		for i := range view.All() {
-			if i == 1 || i == 7 {
-				continue
-			}
-
-			assert.Empty(t, view.Overlays(i), "line %d carries no overlay", i)
-			assert.Empty(t, view.Annotations(i), "line %d carries no annotation", i)
-		}
+		unmarked(t, view, 1, 7)
 
 		// The excerpt is the same view cut down to its hunks, with the
 		// indices of the source, except that the root's line carries a
@@ -5517,14 +5515,7 @@ func TestSourceError_Annotate(t *testing.T) {
 			{Content: "bad h", Kind: kind.TextError, Placement: line.Below, Col: 3},
 		}, view.Annotations(7))
 
-		for i := range view.All() {
-			if i == 7 {
-				continue
-			}
-
-			assert.Empty(t, view.Overlays(i), "line %d carries no overlay", i)
-			assert.Empty(t, view.Annotations(i), "line %d carries no annotation", i)
-		}
+		unmarked(t, view, 7)
 
 		// The line of b is outside the slice, so its mark never renders.
 		assert.False(t, view.Contains(1))
