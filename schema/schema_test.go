@@ -750,7 +750,7 @@ func TestSchema_ValidateWithDecoder(t *testing.T) {
 			`),
 		},
 		"missing required field": {
-			input:   stringtest.Input(`age: 30`),
+			input:   "age: 30",
 			wantErr: true,
 		},
 		"wrong type for name": {
@@ -814,9 +814,7 @@ func TestSchema_PathTarget(t *testing.T) {
 					"name": {"type": "string"}
 				}
 			}`,
-			input: stringtest.Input(`
-				name: 123
-			`),
+			input:        "name: 123",
 			wantContains: "<genericError>123</genericError>",
 		},
 		"additional property highlights key": {
@@ -882,9 +880,7 @@ func TestSchema_PathTarget(t *testing.T) {
 				"type": "object",
 				"required": ["name"]
 			}`,
-			input: stringtest.Input(`
-				other: x
-			`),
+			input:        "other: x",
 			wantContains: "<genericError>other</genericError>",
 		},
 		"enum error highlights value": {
@@ -894,9 +890,7 @@ func TestSchema_PathTarget(t *testing.T) {
 					"status": {"enum": ["active", "inactive"]}
 				}
 			}`,
-			input: stringtest.Input(`
-				status: unknown
-			`),
+			input:        "status: unknown",
 			wantContains: "<genericError>unknown</genericError>",
 		},
 		"minimum error highlights value": {
@@ -906,9 +900,7 @@ func TestSchema_PathTarget(t *testing.T) {
 					"age": {"type": "integer", "minimum": 0}
 				}
 			}`,
-			input: stringtest.Input(`
-				age: -5
-			`),
+			input:        "age: -5",
 			wantContains: "<genericError>-5</genericError>",
 		},
 		"pattern error highlights value": {
@@ -918,9 +910,7 @@ func TestSchema_PathTarget(t *testing.T) {
 					"email": {"type": "string", "pattern": "^[a-z]+@[a-z]+\\.[a-z]+$"}
 				}
 			}`,
-			input: stringtest.Input(`
-				email: notanemail
-			`),
+			input:        "email: notanemail",
 			wantContains: "<genericError>notanemail</genericError>",
 		},
 		"minItems error highlights key": {
@@ -982,9 +972,7 @@ func TestSchema_PathTarget(t *testing.T) {
 					"16": {"type": "integer"}
 				}
 			}`,
-			input: stringtest.Input(`
-				0x10: hello
-			`),
+			input:        "0x10: hello",
 			wantContains: "<genericError>hello</genericError>",
 		},
 		"tilde null key highlights value": {
@@ -994,9 +982,7 @@ func TestSchema_PathTarget(t *testing.T) {
 				"type": "object",
 				"additionalProperties": {"type": "string"}
 			}`,
-			input: stringtest.Input(`
-				~: 5
-			`),
+			input:        "~: 5",
 			wantContains: "<genericError>5</genericError>",
 		},
 		"spelled-out null key highlights value": {
@@ -1004,9 +990,7 @@ func TestSchema_PathTarget(t *testing.T) {
 				"type": "object",
 				"additionalProperties": {"type": "string"}
 			}`,
-			input: stringtest.Input(`
-				NULL: 5
-			`),
+			input:        "NULL: 5",
 			wantContains: "<genericError>5</genericError>",
 		},
 		"boolean key highlights the key": {
@@ -1017,9 +1001,7 @@ func TestSchema_PathTarget(t *testing.T) {
 				},
 				"additionalProperties": false
 			}`,
-			input: stringtest.Input(`
-				True: nope
-			`),
+			input:        "True: nope",
 			wantContains: "<genericError>True</genericError>",
 		},
 		"false subschema on a keyword-named property highlights value": {
@@ -1032,9 +1014,7 @@ func TestSchema_PathTarget(t *testing.T) {
 					"additionalProperties": false
 				}
 			}`,
-			input: stringtest.Input(`
-				additionalProperties: 5
-			`),
+			input:        "additionalProperties: 5",
 			wantContains: "<genericError>5</genericError>",
 		},
 	}
@@ -1125,37 +1105,27 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 				"type": "object",
 				"properties": {"b": {"type": "string"}}
 			}`,
-			input: stringtest.Input(`
-				b: !!binary aGk=
-			`),
+			input: "b: !!binary aGk=",
 		},
 		"timestamp scalar": {
 			schema: `{
 				"type": "object",
 				"properties": {"d": {"type": "string"}}
 			}`,
-			input: stringtest.Input(`
-				d: !!timestamp 2024-01-01T00:00:00Z
-			`),
+			input: "d: !!timestamp 2024-01-01T00:00:00Z",
 		},
 		"date-only timestamp matches format date": {
 			schema: date,
-			input: stringtest.Input(`
-				d: !!timestamp 2001-12-14
-			`),
+			input:  "d: !!timestamp 2001-12-14",
 		},
 		"date-only timestamp is no date-time": {
 			schema: dateTime,
-			input: stringtest.Input(`
-				d: !!timestamp 2001-12-14
-			`),
-			err: `1:16: $.d: string does not match format "date-time"`,
+			input:  "d: !!timestamp 2001-12-14",
+			err:    `1:16: $.d: string does not match format "date-time"`,
 		},
 		"midnight date-time timestamp keeps its time": {
 			schema: dateTime,
-			input: stringtest.Input(`
-				d: !!timestamp 2001-12-14T00:00:00Z
-			`),
+			input:  "d: !!timestamp 2001-12-14T00:00:00Z",
 		},
 		"date-only timestamp in a sequence": {
 			schema: `{
@@ -1167,9 +1137,7 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 					}
 				}
 			}`,
-			input: stringtest.Input(`
-				d: [!!timestamp 2001-12-14]
-			`),
+			input: "d: [!!timestamp 2001-12-14]",
 		},
 		"date-only block scalar timestamp matches format date": {
 			schema: date,
@@ -1263,9 +1231,7 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 					}
 				}
 			}`,
-			input: stringtest.Input(`
-				m: {<<: {0x10: !!timestamp 2001-12-14}, "0x10": 5}
-			`),
+			input: `m: {<<: {0x10: !!timestamp 2001-12-14}, "0x10": 5}`,
 		},
 		"merge sequence keeps the later source's date": {
 			// A later merge source sets d over an earlier one.
@@ -1300,9 +1266,7 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 			// The !!int tag hands the !!timestamp tag a number rather than
 			// the text, so the decode yields the zero time.
 			schema: dateTime,
-			input: stringtest.Input(`
-				d: !!timestamp !!int 2001-12-14
-			`),
+			input:  "d: !!timestamp !!int 2001-12-14",
 		},
 		"binary scalar violating a constraint": {
 			schema: `{
@@ -2051,19 +2015,15 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 				"type": "object",
 				"properties": {"a": {"type": "string"}}
 			}`,
-			input: stringtest.Input(`
-				a: x
-			`),
+			input: "a: x",
 		},
 		"top-level violation": {
 			schema: `{
 				"type": "object",
 				"properties": {"a": {"type": "string"}}
 			}`,
-			input: stringtest.Input(`
-				a: 1
-			`),
-			err: `$.a: expected "string", got "integer"`,
+			input: "a: 1",
+			err:   `$.a: expected "string", got "integer"`,
 		},
 		"nested ordered mapping": {
 			schema: `{
@@ -2075,10 +2035,8 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 					}
 				}
 			}`,
-			input: stringtest.Input(`
-				n: {b: notint}
-			`),
-			err: `$.n.b: expected "integer", got "string"`,
+			input: "n: {b: notint}",
+			err:   `$.n.b: expected "integer", got "string"`,
 		},
 		"ordered mapping inside a sequence": {
 			schema: `{
@@ -2093,19 +2051,15 @@ func TestSchema_ValidateValue_OrderedMap(t *testing.T) {
 					}
 				}
 			}`,
-			input: stringtest.Input(`
-				items: [{b: notint}]
-			`),
-			err: `$.items[0].b: expected "integer", got "string"`,
+			input: "items: [{b: notint}]",
+			err:   `$.items[0].b: expected "integer", got "string"`,
 		},
 		"binary scalar inside ordered mapping": {
 			schema: `{
 				"type": "object",
 				"properties": {"b": {"type": "string"}}
 			}`,
-			input: stringtest.Input(`
-				b: !!binary aGk=
-			`),
+			input: "b: !!binary aGk=",
 		},
 		"alias bomb of ordered mappings": {
 			schema:    `{"type": "object"}`,
@@ -2806,9 +2760,7 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 					"name": {"type": "string"}
 				}
 			}`,
-			input: stringtest.Input(`
-				name: 123
-			`),
+			input:            "name: 123",
 			wantAnnotations:  []string{`expected "string", got "integer"`},
 			wantNestedErrors: 0,
 		},
@@ -2821,9 +2773,7 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 				},
 				"required": ["first", "second"]
 			}`,
-			input: stringtest.Input(`
-				other: value
-			`),
+			input:            "other: value",
 			wantAnnotations:  []string{"missing required property", "first", "second"},
 			wantNestedErrors: 2,
 		},
