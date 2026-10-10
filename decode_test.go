@@ -5318,24 +5318,37 @@ func TestDocument_At(t *testing.T) {
 		  name: app
 	`)
 
-	t.Run("string", func(t *testing.T) {
+	t.Run("decodes the value the path selects", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
+		type meta struct {
+			Name string `yaml:"name"`
+		}
 
-		got, err := yamltest.At(t, dd, paths.Current().Child("kind")).Decode[string](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, "Deployment", got)
-	})
+		tcs := map[string]struct {
+			decode func(t *testing.T, n *niceyaml.Node) (any, error)
+			want   any
+			key    string
+		}{
+			"string":                     {key: "kind", decode: decodedAs[string], want: "Deployment"},
+			"int":                        {key: "version", decode: decodedAs[int], want: 2},
+			"bool":                       {key: "enabled", decode: decodedAs[bool], want: true},
+			"null decodes to zero value": {key: "empty", decode: decodedAs[string], want: ""},
+			"slice":                      {key: "tags", decode: decodedAs[[]string], want: []string{"a", "b"}},
+			"struct":                     {key: "meta", decode: decodedAs[meta], want: meta{Name: "app"}},
+		}
 
-	t.Run("int", func(t *testing.T) {
-		t.Parallel()
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
+				dd := yamltest.FirstDocument(t, input)
 
-		got, err := yamltest.At(t, dd, paths.Current().Child("version")).Decode[int](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, 2, got)
+				got, err := tc.decode(t, yamltest.At(t, dd, paths.Current().Child(tc.key)))
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
 	})
 
 	t.Run("key decodes as the mapping reads it", func(t *testing.T) {
@@ -5382,50 +5395,6 @@ func TestDocument_At(t *testing.T) {
 				assert.Equal(t, tc.want, got)
 			})
 		}
-	})
-
-	t.Run("bool", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
-
-		got, err := yamltest.At(t, dd, paths.Current().Child("enabled")).Decode[bool](t.Context())
-		require.NoError(t, err)
-		assert.True(t, got)
-	})
-
-	t.Run("null decodes to zero value", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
-
-		got, err := yamltest.At(t, dd, paths.Current().Child("empty")).Decode[string](t.Context())
-		require.NoError(t, err)
-		assert.Empty(t, got)
-	})
-
-	t.Run("slice", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
-
-		got, err := yamltest.At(t, dd, paths.Current().Child("tags")).Decode[[]string](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, []string{"a", "b"}, got)
-	})
-
-	t.Run("struct", func(t *testing.T) {
-		t.Parallel()
-
-		type meta struct {
-			Name string `yaml:"name"`
-		}
-
-		dd := yamltest.FirstDocument(t, input)
-
-		got, err := yamltest.At(t, dd, paths.Current().Child("meta")).Decode[meta](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, meta{Name: "app"}, got)
 	})
 
 	t.Run("key below a comment under an anchor with no value", func(t *testing.T) {
