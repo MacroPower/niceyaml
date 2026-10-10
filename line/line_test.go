@@ -288,6 +288,8 @@ func TestLine_String(t *testing.T) {
 			line: newTestView(t, "a: \"x\ty\"\n", 1).Line(0),
 			want: "   1 | a: \"x\u2409y\"",
 		},
+		// A zero Line, which a diff puts opposite an inserted or deleted
+		// line, has no number, and its gutter is blank rather than 0.
 		"placeholder": {
 			line: &line.Line{},
 			want: "     | ",

@@ -1380,16 +1380,6 @@ func TestView_OutOfRange(t *testing.T) {
 	}
 }
 
-func TestView_String_PlaceholderLine(t *testing.T) {
-	t.Parallel()
-
-	// A zero Line, which a diff puts opposite an inserted or deleted line,
-	// has no number, and its gutter is blank rather than 0.
-	view := line.NewView(line.Collect(&line.Line{}))
-
-	assert.Equal(t, "     | ", view.String())
-}
-
 func TestView_String_FarAnnotationColumn(t *testing.T) {
 	t.Parallel()
 
