@@ -3811,43 +3811,10 @@ func TestSource_Len(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString(tc.input)
-			got := source.Lines().Len()
+			lines := niceyaml.NewSourceFromString(tc.input).Lines()
 
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestSource_IsEmpty(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-		want  bool
-	}{
-		"empty string": {
-			input: "",
-			want:  true,
-		},
-		"single line": {
-			input: "key: value\n",
-			want:  false,
-		},
-		"multiple lines": {
-			input: "a: 1\nb: 2\n",
-			want:  false,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			source := niceyaml.NewSourceFromString(tc.input)
-			got := source.Lines().IsEmpty()
-
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, lines.Len())
+			assert.Equal(t, tc.want == 0, lines.IsEmpty())
 		})
 	}
 }
