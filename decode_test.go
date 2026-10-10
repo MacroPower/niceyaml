@@ -3009,7 +3009,7 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 
 		var called bool
 
-		result, err := dd.Decode[bothValidatorConfig](
+		result, err := dd.Decode[validatorConfig](
 			t.Context(),
 			niceyaml.WithValidator(nameSchema(&called)),
 		)
@@ -3027,7 +3027,7 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 		`)
 		dd := yamltest.FirstDocument(t, input)
 
-		_, err := dd.Decode[bothValidatorConfig](t.Context())
+		_, err := dd.Decode[validatorConfig](t.Context())
 		require.ErrorIs(t, err, errNameRequired)
 	})
 }
@@ -3081,27 +3081,6 @@ func nameSchema(called *bool) niceyaml.Validator {
 
 		return nil
 	})
-}
-
-// bothValidatorConfig implements niceyaml.SelfValidator, and tests of the full
-// pipeline decode it with a schema.
-type bothValidatorConfig struct {
-	Name      string `yaml:"name"`
-	Value     int    `yaml:"value"`
-	validated bool
-}
-
-func (c *bothValidatorConfig) Validate() error {
-	c.validated = true
-
-	if c.Name == "" {
-		return niceyaml.Invalid(
-			errNameRequired,
-			niceyaml.AtPath(paths.Current().Child("name").Key()),
-		)
-	}
-
-	return nil
 }
 
 // strictValueConfig has a typed field, so decoding a mismatched value fails
@@ -6814,7 +6793,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, "name: test")
 
-		result := bothValidatorConfig{Value: 7}
+		result := validatorConfig{Value: 7}
 
 		var called bool
 
@@ -6843,7 +6822,7 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 		dd := yamltest.FirstDocument(t, `name: ""`)
 
-		var result bothValidatorConfig
+		var result validatorConfig
 
 		err := dd.DecodeInto(t.Context(), &result)
 		require.ErrorIs(t, err, errNameRequired)
