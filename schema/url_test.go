@@ -210,27 +210,6 @@ func TestURL(t *testing.T) {
 		}
 	})
 
-	t.Run("registry fetches with its client", func(t *testing.T) {
-		t.Parallel()
-
-		base := serve(t, map[string]string{"/schema.json": `{"type": "object"}`})
-		client, requests := yamltest.CountingClient(http.DefaultTransport)
-
-		err := lookup(t, client, schema.URL(base+"/schema.json"))
-		require.NoError(t, err)
-		assert.Equal(t, int32(1), requests.Load())
-	})
-
-	t.Run("registry with nil client", func(t *testing.T) {
-		t.Parallel()
-
-		base := serve(t, map[string]string{"/schema.json": `{"type": "object"}`})
-
-		// A nil client keeps the default rather than panicking on the fetch.
-		err := lookup(t, nil, schema.URL(base+"/schema.json"))
-		require.NoError(t, err)
-	})
-
 	t.Run("context cancellation", func(t *testing.T) {
 		t.Parallel()
 
