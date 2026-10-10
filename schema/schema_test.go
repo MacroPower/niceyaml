@@ -360,7 +360,10 @@ func TestCompile_RequireRefs(t *testing.T) {
 		},
 		"refs to two documents": {
 			schema: `{"allOf": [{"$ref": "a.json"}, {"$ref": "b.json"}]}`,
-			want:   "compile schema: " + unresolved("a.json") + "\n" + unresolved("b.json"),
+			want: stringtest.JoinLF(
+				"compile schema: "+unresolved("a.json"),
+				unresolved("b.json"),
+			),
 		},
 		"password in the ref": {
 			schema: `{"$ref": "https://user:secret@example.invalid/nope.json"}`,

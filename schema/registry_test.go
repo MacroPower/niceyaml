@@ -3237,9 +3237,11 @@ func TestRegistry_Schema_RequireRefs(t *testing.T) {
 			ref:   schema.FileFS(bundle, "schemas/two.json"),
 			err:   schema.ErrLoad,
 			cause: fs.ErrNotExist,
-			want: `load schema: "schemas/two.json": cannot resolve $ref: ` +
-				"read schemas/one.json: open schemas/one.json: file does not exist\n" +
+			want: stringtest.JoinLF(
+				`load schema: "schemas/two.json": cannot resolve $ref: `+
+					"read schemas/one.json: open schemas/one.json: file does not exist",
 				"read schemas/other.json: open schemas/other.json: file does not exist",
+			),
 		},
 		// The registry resolves no $ref of a schema it holds as bytes, so
 		// the schema does not compile, as it does not in Compile.
