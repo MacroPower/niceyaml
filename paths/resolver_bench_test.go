@@ -5,6 +5,8 @@ import (
 	"slices"
 	"testing"
 
+	"go.jacobcolvin.com/x/stringtest"
+
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -12,7 +14,11 @@ import (
 // generateItemsYAML creates a sequence of count items, each a mapping with
 // a nested mapping below it.
 func generateItemsYAML(count int) string {
-	return "items:\n" + yamltest.GenerateLines(count, "  - name: item_%[1]d\n    spec:\n      value: %[1]d")
+	return "items:\n" + yamltest.GenerateLines(count, stringtest.JoinLF(
+		"  - name: item_%[1]d",
+		"    spec:",
+		"      value: %[1]d",
+	))
 }
 
 func BenchmarkResolver_Nodes_Recursive(b *testing.B) {
