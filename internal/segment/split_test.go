@@ -10,6 +10,7 @@ import (
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/segment"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -129,31 +130,36 @@ func TestSplit_Lines(t *testing.T) {
 		// repeat can open that token too. The lone newline an empty block
 		// scalar holds is no such repeat, so it opens a line of its own.
 		"tag then indented key": {
-			input: "a: !t\n  b: 1\n",
+			input: stringtest.LinesLF("a: !t", "  b: 1"),
 			want:  []string{"a: !t", "  b: 1"},
 		},
 		"tag then blank line then sequence": {
-			input: "a: !!seq\n\n  - b\n",
+			input: stringtest.LinesLF("a: !!seq", "", "  - b"),
 			want:  []string{"a: !!seq", "", "  - b"},
 		},
 		"document header tag then blank line": {
-			input: "--- !!map\n\na: 1\n",
+			input: stringtest.LinesLF("--- !!map", "", "a: 1"),
 			want:  []string{"--- !!map", "", "a: 1"},
 		},
 		"nested tag then blank line": {
-			input: "a:\n  t: !custom!i18n\n\n    en: x\n",
-			want:  []string{"a:", "  t: !custom!i18n", "", "    en: x"},
+			input: stringtest.LinesLF(
+				"a:",
+				"  t: !custom!i18n",
+				"",
+				"    en: x",
+			),
+			want: []string{"a:", "  t: !custom!i18n", "", "    en: x"},
 		},
 		"two blank lines after tag": {
-			input: "a: !t\n\n\n  b: 1\n",
+			input: stringtest.LinesLF("a: !t", "", "", "  b: 1"),
 			want:  []string{"a: !t", "", "", "  b: 1"},
 		},
 		"tab line after tag": {
-			input: "a: !!map\n\t\n  b: 1\n",
+			input: stringtest.LinesLF("a: !!map", "\t", "  b: 1"),
 			want:  []string{"a: !!map", "\t", "  b: 1"},
 		},
 		"tab line after tag with crlf": {
-			input: "a: !!map\r\n\t\r\n  b: 1\r\n",
+			input: stringtest.LinesCRLF("a: !!map", "\t", "  b: 1"),
 			want:  []string{"a: !!map", "\t", "  b: 1"},
 		},
 		"tab line after tag with bare cr": {
@@ -161,43 +167,55 @@ func TestSplit_Lines(t *testing.T) {
 			want:  []string{"a: !!map", "\t", "  b: 1"},
 		},
 		"tab line after tag in sequence": {
-			input: "- !t\n\t\n- b\n",
+			input: stringtest.LinesLF("- !t", "\t", "- b"),
 			want:  []string{"- !t", "\t", "- b"},
 		},
 		"two tab lines after tag": {
-			input: "a: !!map\n\t\n\t\n  b: 1\n",
+			input: stringtest.LinesLF("a: !!map", "\t", "\t", "  b: 1"),
 			want:  []string{"a: !!map", "\t", "\t", "  b: 1"},
 		},
 		"tab lines around blank line after tag": {
-			input: "a: !!map\n\t\n\n\t\n  b: 1\n",
-			want:  []string{"a: !!map", "\t", "", "\t", "  b: 1"},
+			input: stringtest.LinesLF(
+				"a: !!map",
+				"\t",
+				"",
+				"\t",
+				"  b: 1",
+			),
+			want: []string{"a: !!map", "\t", "", "\t", "  b: 1"},
 		},
 		"tab line after invalid block scalar header": {
-			input: "a: |x\n\t\n  b\n",
+			input: stringtest.LinesLF("a: |x", "\t", "  b"),
 			want:  []string{"a: |x", "\t", "  b"},
 		},
 		"tab line and blank lines at end after tag": {
-			input: "a: !t\n\n\t\n\n",
+			input: stringtest.LinesLF("a: !t", "", "\t", ""),
 			want:  []string{"a: !t", "", "\t", ""},
 		},
 		"comment, blank line, tab lines at end": {
-			input: "a: 1 # c\n\n\t\n\t\n",
+			input: stringtest.LinesLF("a: 1 # c", "", "\t", "\t"),
 			want:  []string{"a: 1 # c", "", "\t", "\t"},
 		},
 		"comment line, blank line, tab lines at end": {
-			input: "a: 1\n# c\n\n\t\n\t\n",
-			want:  []string{"a: 1", "# c", "", "\t", "\t"},
+			input: stringtest.LinesLF(
+				"a: 1",
+				"# c",
+				"",
+				"\t",
+				"\t",
+			),
+			want: []string{"a: 1", "# c", "", "\t", "\t"},
 		},
 		"comment, blank line, tab lines at end with bare cr": {
 			input: "a: 1 # c\r\r\t\r\t\r",
 			want:  []string{"a: 1 # c", "", "\t", "\t"},
 		},
 		"folded scalar with content after it": {
-			input: "a: >-\n  long\n  folded\nb: 2\n",
+			input: stringtest.LinesLF("a: >-", "  long", "  folded", "b: 2"),
 			want:  []string{"a: >-", "  long", "  folded", "b: 2"},
 		},
 		"literal scalar at the end": {
-			input: "a: |-\n  x\n  y\n",
+			input: stringtest.LinesLF("a: |-", "  x", "  y"),
 			want:  []string{"a: |-", "  x", "  y"},
 		},
 		"empty literal scalar": {
@@ -205,7 +223,7 @@ func TestSplit_Lines(t *testing.T) {
 			want:  []string{"a: |", ""},
 		},
 		"empty strip literal scalar": {
-			input: "a: |-\n\n\n",
+			input: stringtest.LinesLF("a: |-", "", ""),
 			want:  []string{"a: |-", "", ""},
 		},
 		"empty folded scalar": {
@@ -213,7 +231,7 @@ func TestSplit_Lines(t *testing.T) {
 			want:  []string{"a: >", ""},
 		},
 		"empty literal scalar with indentation indicator": {
-			input: "a: |2\n\n\n",
+			input: stringtest.LinesLF("a: |2", "", ""),
 			want:  []string{"a: |2", "", ""},
 		},
 		"empty strip literal scalar with indentation indicator": {
@@ -221,7 +239,7 @@ func TestSplit_Lines(t *testing.T) {
 			want:  []string{"- |1-", ""},
 		},
 		"empty literal scalar with indentation indicator and crlf": {
-			input: ":\n|1\r\n\r\n",
+			input: stringtest.LinesLF(":", "|1\r", "\r"),
 			want:  []string{":", "|1", ""},
 		},
 		// The cases down to the next comment cover the line endings. The
@@ -251,23 +269,23 @@ func TestSplit_Lines(t *testing.T) {
 			want:  []string{"a: b # c", "d: e"},
 		},
 		"crlf between two comments": {
-			input: "# a\r\n# b\r\nc: 1\r\n",
+			input: stringtest.LinesCRLF("# a", "# b", "c: 1"),
 			want:  []string{"# a", "# b", "c: 1"},
 		},
 		"crlf between three comments": {
-			input: "# a\r\n# b\r\n# c\r\nd: 1\r\n",
+			input: stringtest.LinesCRLF("# a", "# b", "# c", "d: 1"),
 			want:  []string{"# a", "# b", "# c", "d: 1"},
 		},
 		"crlf blank line between comments": {
-			input: "# a\r\n\r\n# b\r\nc: 1\r\n",
+			input: stringtest.LinesCRLF("# a", "", "# b", "c: 1"),
 			want:  []string{"# a", "", "# b", "c: 1"},
 		},
 		"crlf repeated after tag": {
-			input: "a: !t\r\n  b: 1\r\n",
+			input: stringtest.LinesCRLF("a: !t", "  b: 1"),
 			want:  []string{"a: !t", "  b: 1"},
 		},
 		"crlf blank line": {
-			input: "key: value\r\n\r\nnext: data\r\n",
+			input: stringtest.LinesCRLF("key: value", "", "next: data"),
 			want:  []string{"key: value", "", "next: data"},
 		},
 		"crlf after a comment line": {
@@ -275,11 +293,17 @@ func TestSplit_Lines(t *testing.T) {
 			want:  []string{"# c", "k: v"},
 		},
 		"quoted scalar continued after a tag": {
-			input: "a: !t\n  b: 1\nc: \"x\n  y\"\nd: 1\n",
-			want:  []string{"a: !t", "  b: 1", "c: \"x", "  y\"", "d: 1"},
+			input: stringtest.LinesLF(
+				"a: !t",
+				"  b: 1",
+				"c: \"x",
+				"  y\"",
+				"d: 1",
+			),
+			want: []string{"a: !t", "  b: 1", "c: \"x", "  y\"", "d: 1"},
 		},
 		"crlf quoted scalar continued after a tag": {
-			input: "a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n",
+			input: stringtest.LinesCRLF("a: !t", "  b: 1", "c: 'x", "  y'"),
 			want:  []string{"a: !t", "  b: 1", "c: 'x", "  y'"},
 		},
 		// The remaining cases cover the blank lines the lexer drops. It
@@ -289,48 +313,73 @@ func TestSplit_Lines(t *testing.T) {
 		// tab. Tokenize gives them back with the spaces they hold, so Split
 		// keeps every line, its number, and its content.
 		"key after a comment": {
-			input: "# c\n\n? b\n: c\n",
+			input: stringtest.LinesLF("# c", "", "? b", ": c"),
 			want:  []string{"# c", "", "? b", ": c"},
 		},
 		"key after a quoted scalar": {
-			input: "a: 'x'\n\n? b\n: c\n",
+			input: stringtest.LinesLF("a: 'x'", "", "? b", ": c"),
 			want:  []string{"a: 'x'", "", "? b", ": c"},
 		},
 		"key after a flow sequence": {
-			input: "tags: [a, b]\n\n? key\n: value\n",
+			input: stringtest.LinesLF("tags: [a, b]", "", "? key", ": value"),
 			want:  []string{"tags: [a, b]", "", "? key", ": value"},
 		},
 		"nested key after a flow sequence": {
-			input: "a:\n  b: [x]\n\n  ? k\n  : v\n",
-			want:  []string{"a:", "  b: [x]", "", "  ? k", "  : v"},
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: [x]",
+				"",
+				"  ? k",
+				"  : v",
+			),
+			want: []string{"a:", "  b: [x]", "", "  ? k", "  : v"},
 		},
 		"key after blank lines": {
-			input: "\n\n? b\n: c\n",
+			input: stringtest.LinesLF("", "", "? b", ": c"),
 			want:  []string{"", "", "? b", ": c"},
 		},
 		"crlf key after a comment": {
-			input: "# c\r\n\r\n? b\r\n",
+			input: stringtest.LinesCRLF("# c", "", "? b"),
 			want:  []string{"# c", "", "? b"},
 		},
 		"crlf key after a blank line the lexer rewrites": {
-			input: "x:\r\n  a: \"t\tb\"\r\n \t\r\n  \r\n? b\r\n",
-			want:  []string{"x:", "  a: \"t\tb\"", " \t", "", "? b"},
+			input: stringtest.LinesCRLF(
+				"x:",
+				"  a: \"t\tb\"",
+				" \t",
+				"  ",
+				"? b",
+			),
+			want: []string{"x:", "  a: \"t\tb\"", " \t", "", "? b"},
 		},
 		"plain scalar after a blank line of spaces": {
-			input: "t: \"a\tb\"\n  \n  r'\n- e\n",
+			input: stringtest.LinesLF("t: \"a\tb\"", "  ", "  r'", "- e"),
 			want:  []string{"t: \"a\tb\"", "  ", "  r'", "- e"},
 		},
 		"plain scalar after blank lines of spaces": {
-			input: "t: \"a\tb\"\n  \n  \n  r'\n- e\n",
-			want:  []string{"t: \"a\tb\"", "  ", "  ", "  r'", "- e"},
+			input: stringtest.LinesLF(
+				"t: \"a\tb\"",
+				"  ",
+				"  ",
+				"  r'",
+				"- e",
+			),
+			want: []string{"t: \"a\tb\"", "  ", "  ", "  r'", "- e"},
 		},
 		"key after blank lines of spaces": {
-			input: "a: \"t\tb\"\n  \n  \nc: 1\n",
+			input: stringtest.LinesLF("a: \"t\tb\"", "  ", "  ", "c: 1"),
 			want:  []string{"a: \"t\tb\"", "  ", "  ", "c: 1"},
 		},
 		"comment after blank lines of spaces": {
-			input: "a: \"t\tb\"\n  \n  \n# c\nd: 1\ne: 2\n",
-			want:  []string{"a: \"t\tb\"", "  ", "  ", "# c", "d: 1", "e: 2"},
+			input: stringtest.LinesLF(
+				"a: \"t\tb\"",
+				"  ",
+				"  ",
+				"# c",
+				"d: 1",
+				"e: 2",
+			),
+			want: []string{"a: \"t\tb\"", "  ", "  ", "# c", "d: 1", "e: 2"},
 		},
 	}
 
@@ -369,7 +418,7 @@ func TestSplit_PartPosition(t *testing.T) {
 		// the newline a tag repeats sits one column past the tag, or in
 		// column 1 on a blank line.
 		"repeated newline after a tag": {
-			input:      "a: !t\n  b: 1\n",
+			input:      stringtest.LinesLF("a: !t", "  b: 1"),
 			origin:     "\n",
 			line:       0,
 			idx:        3,
@@ -377,7 +426,7 @@ func TestSplit_PartPosition(t *testing.T) {
 			wantOffset: 6,
 		},
 		"repeated newline after a long tag": {
-			input:      "a: !!map\n  b: 1\n",
+			input:      stringtest.LinesLF("a: !!map", "  b: 1"),
 			origin:     "\n",
 			line:       0,
 			idx:        3,
@@ -385,7 +434,13 @@ func TestSplit_PartPosition(t *testing.T) {
 			wantOffset: 9,
 		},
 		"blank line inside a block scalar": {
-			input:      "k: |\n  a\n\n  b\nz: 1\n",
+			input: stringtest.LinesLF(
+				"k: |",
+				"  a",
+				"",
+				"  b",
+				"z: 1",
+			),
 			origin:     "\n",
 			line:       2,
 			idx:        0,
@@ -393,7 +448,7 @@ func TestSplit_PartPosition(t *testing.T) {
 			wantOffset: 10,
 		},
 		"blank line after a tag": {
-			input:      "a: !!seq\n\n  - b\n",
+			input:      stringtest.LinesLF("a: !!seq", "", "  - b"),
 			origin:     "\n",
 			line:       1,
 			idx:        0,
@@ -405,7 +460,7 @@ func TestSplit_PartPosition(t *testing.T) {
 		// the previous token already counted that rune. The parts after it
 		// keep the offsets the source gives them.
 		"repeated newline ahead of blank lines": {
-			input:      "a: !t\n\n\n  b: 1\n",
+			input:      stringtest.LinesLF("a: !t", "", "", "  b: 1"),
 			origin:     "\n",
 			line:       0,
 			idx:        3,
@@ -413,7 +468,7 @@ func TestSplit_PartPosition(t *testing.T) {
 			wantOffset: 6,
 		},
 		"blank line after a repeated newline": {
-			input:      "a: !t\n\n\n  b: 1\n",
+			input:      stringtest.LinesLF("a: !t", "", "", "  b: 1"),
 			origin:     "\n",
 			line:       1,
 			idx:        0,
@@ -421,7 +476,7 @@ func TestSplit_PartPosition(t *testing.T) {
 			wantOffset: 7,
 		},
 		"crlf repeated after a tag": {
-			input:      "a: !t\r\n  b: 1\r\n",
+			input:      stringtest.LinesCRLF("a: !t", "  b: 1"),
 			origin:     "\r\n",
 			line:       0,
 			idx:        3,
@@ -449,7 +504,7 @@ func TestSplit_PartPosition(t *testing.T) {
 			wantOffset: 5,
 		},
 		"newline of a crlf cut between comments": {
-			input:      "# a\r\n# b\r\nc: 1\r\n",
+			input:      stringtest.LinesCRLF("# a", "# b", "c: 1"),
 			origin:     "\n",
 			line:       1,
 			idx:        1,
@@ -461,7 +516,13 @@ func TestSplit_PartPosition(t *testing.T) {
 		// (6) + "  b: 1\n" (7) + "c: \"x\n" (6) puts the continuation at
 		// 1-indexed offset 20.
 		"quoted continuation after a repeated newline": {
-			input:      "a: !t\n  b: 1\nc: \"x\n  y\"\nd: 1\n",
+			input: stringtest.LinesLF(
+				"a: !t",
+				"  b: 1",
+				"c: \"x",
+				"  y\"",
+				"d: 1",
+			),
 			origin:     "  y\"",
 			line:       3,
 			idx:        0,
@@ -472,7 +533,7 @@ func TestSplit_PartPosition(t *testing.T) {
 		// continuation at 1-indexed offset 23. Tokenize gives the final
 		// line ending back to the last token, so the part carries it.
 		"quoted continuation after a repeated crlf": {
-			input:      "a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n",
+			input:      stringtest.LinesCRLF("a: !t", "  b: 1", "c: 'x", "  y'"),
 			origin:     "  y'\r\n",
 			line:       3,
 			idx:        0,
@@ -512,31 +573,43 @@ func TestSplit_BlockScalarOffsets(t *testing.T) {
 		want  []int // Offset of the first part on each block scalar line.
 	}{
 		"blank line inside, content follows": {
-			input: "k: |\n  a\n\n  b\nz: 1\n",
-			want:  []int{8, 10, 11},
+			input: stringtest.LinesLF(
+				"k: |",
+				"  a",
+				"",
+				"  b",
+				"z: 1",
+			),
+			want: []int{8, 10, 11},
 		},
 		"content follows": {
-			input: "k: |\n  a\n  b\nz: 1\n",
+			input: stringtest.LinesLF("k: |", "  a", "  b", "z: 1"),
 			want:  []int{8, 10},
 		},
 		"at end of input": {
-			input: "k: |\n  a\n  b\n",
+			input: stringtest.LinesLF("k: |", "  a", "  b"),
 			want:  []int{8, 10},
 		},
 		"three lines at end of input": {
-			input: "k: |\n  a\n  b\n  c\n",
+			input: stringtest.LinesLF("k: |", "  a", "  b", "  c"),
 			want:  []int{8, 10, 14},
 		},
 		"three lines, content follows": {
-			input: "k: |\n  a\n  b\n  c\nz: 1\n",
-			want:  []int{8, 10, 14},
+			input: stringtest.LinesLF(
+				"k: |",
+				"  a",
+				"  b",
+				"  c",
+				"z: 1",
+			),
+			want: []int{8, 10, 14},
 		},
 		"quoted, three lines": {
-			input: "k: \"a\n  b\n  c\"\n",
+			input: stringtest.LinesLF("k: \"a", "  b", "  c\""),
 			want:  []int{7, 11},
 		},
 		"plain, three lines": {
-			input: "k: a\n  b\n  c\n",
+			input: stringtest.LinesLF("k: a", "  b", "  c"),
 			want:  []int{6, 10},
 		},
 	}
@@ -565,13 +638,33 @@ func TestSplit_OffsetsIncrease(t *testing.T) {
 	// tokens the lexer positions short, such as those after a comment or a
 	// tag, and across a CRLF it cuts between two tokens.
 	tcs := map[string]string{
-		"comments":          "# head\na: 1 # line\n# foot\nb: 2\n",
-		"tags":              "t: !!str s\nu: !t\n  v: 1\nw: !!seq\n\n  - x\n",
-		"crlf":              "key: value\r\n# c\r\nnext: 1\r\n",
-		"crlf tag":          "a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n",
-		"block scalars":     "k: |\n  a\n\n  b\nz: >\n  c\n  d\n",
+		"comments": stringtest.LinesLF(
+			"# head",
+			"a: 1 # line",
+			"# foot",
+			"b: 2",
+		),
+		"tags": stringtest.LinesLF(
+			"t: !!str s",
+			"u: !t",
+			"  v: 1",
+			"w: !!seq",
+			"",
+			"  - x",
+		),
+		"crlf":     stringtest.LinesCRLF("key: value", "# c", "next: 1"),
+		"crlf tag": stringtest.LinesCRLF("a: !t", "  b: 1", "c: 'x", "  y'"),
+		"block scalars": stringtest.LinesLF(
+			"k: |",
+			"  a",
+			"",
+			"  b",
+			"z: >",
+			"  c",
+			"  d",
+		),
 		"trailing spaces":   "a: 1   \nb: 2  \n",
-		"folded blank line": "a:\n   \n  b: 1\n",
+		"folded blank line": stringtest.LinesLF("a:", "   ", "  b: 1"),
 	}
 
 	for name, input := range tcs {
@@ -594,13 +687,13 @@ func TestSplit_FirstTextPartKeepsPosition(t *testing.T) {
 	// Origin opens with and whatever the lexer dropped before it.
 	tcs := map[string]string{
 		"trailing spaces":      "a: 1   \nb: 2\n",
-		"comment then header":  "# comment\n---\nb: two\n",
-		"tag":                  "t: !!str s\nu: !t\n  v: 1\n",
-		"block scalar":         "k: |\n    hello\n    world\nz: 1\n",
-		"leading blank line":   "k: |\n\n  b\nz: 1\n",
-		"collapsed blank line": "a:\n   \n  b: 1\n",
-		"crlf":                 "key: value\r\n# c\r\nnext: 1\r\n",
-		"quoted multi-line":    "a: 'x\n\n  y'\nb: 1\n",
+		"comment then header":  stringtest.LinesLF("# comment", "---", "b: two"),
+		"tag":                  stringtest.LinesLF("t: !!str s", "u: !t", "  v: 1"),
+		"block scalar":         stringtest.LinesLF("k: |", "    hello", "    world", "z: 1"),
+		"leading blank line":   stringtest.LinesLF("k: |", "", "  b", "z: 1"),
+		"collapsed blank line": stringtest.LinesLF("a:", "   ", "  b: 1"),
+		"crlf":                 stringtest.LinesCRLF("key: value", "# c", "next: 1"),
+		"quoted multi-line":    stringtest.LinesLF("a: 'x", "", "  y'", "b: 1"),
 	}
 
 	for name, input := range tcs {
@@ -626,12 +719,18 @@ func TestSplit_ResetDocument(t *testing.T) {
 		wantNumbers []int
 	}{
 		"tab line after document end": {
-			input:       "a: 1\n...\n\t\nb: 2\n",
+			input:       stringtest.LinesLF("a: 1", "...", "\t", "b: 2"),
 			wantContent: []string{"", "\t", "b: 2"},
 			wantNumbers: []int{1, 2, 3},
 		},
 		"tab line and blank line after document end": {
-			input:       "a: 1\n...\n\t\n\nb: 2\n",
+			input: stringtest.LinesLF(
+				"a: 1",
+				"...",
+				"\t",
+				"",
+				"b: 2",
+			),
 			wantContent: []string{"", "\t", "", "b: 2"},
 			wantNumbers: []int{1, 2, 3, 4},
 		},
@@ -670,7 +769,7 @@ func TestSplit_PartsKeepTokenFields(t *testing.T) {
 	// that opens a line.
 	tcs := map[string]string{
 		"tab after a comment cut from its crlf": "a: 1 # c\r\n\tb: 1\r\n",
-		"tab line after a tag":                  "a: !!map\n\t\n  b: 1\n",
+		"tab line after a tag":                  stringtest.LinesLF("a: !!map", "\t", "  b: 1"),
 		"tab that opens a line":                 "a: 1\n\tb: 2\n",
 	}
 
@@ -715,28 +814,28 @@ func TestSplit_PartsTakeLineIndent(t *testing.T) {
 		"comment after multiline quoted scalar": {
 			// The lexer gives the comment an IndentNum of 1 and an
 			// IndentLevel of 0, which match no line of the source.
-			input:           "a:\n  k: 'a\n    b' # c\n  z: 1\n",
+			input:           stringtest.LinesLF("a:", "  k: 'a", "    b' # c", "  z: 1"),
 			line:            2,
 			wantOrigins:     []string{"    b'", " # c\n"},
 			wantIndentNum:   4,
 			wantIndentLevel: 2,
 		},
 		"empty block scalar before key": {
-			input:           "x:\n  a: |\n  b: 1\n",
+			input:           stringtest.LinesLF("x:", "  a: |", "  b: 1"),
 			line:            2,
 			wantOrigins:     []string{"", "  b", ":", " 1\n"},
 			wantIndentNum:   2,
 			wantIndentLevel: 1,
 		},
 		"empty block scalar before comment": {
-			input:           "x:\n  a: |\n  # c\n  b: 1\n",
+			input:           stringtest.LinesLF("x:", "  a: |", "  # c", "  b: 1"),
 			line:            2,
 			wantOrigins:     []string{"", "  # c\n"},
 			wantIndentNum:   2,
 			wantIndentLevel: 1,
 		},
 		"empty block scalar before sequence entry": {
-			input:           "x:\n  - a: |-\n  - b\n",
+			input:           stringtest.LinesLF("x:", "  - a: |-", "  - b"),
 			line:            2,
 			wantOrigins:     []string{"", "  -", " b\n"},
 			wantIndentNum:   2,
@@ -744,7 +843,7 @@ func TestSplit_PartsTakeLineIndent(t *testing.T) {
 		},
 		"empty block scalar past end of source": {
 			// The empty content joins the last line of the source.
-			input:           "x:\n  a: |+\n",
+			input:           stringtest.LinesLF("x:", "  a: |+"),
 			line:            1,
 			wantOrigins:     []string{"  a", ":", " |+\n", ""},
 			wantIndentNum:   2,
@@ -753,14 +852,14 @@ func TestSplit_PartsTakeLineIndent(t *testing.T) {
 		"single-line block scalar under explicit key": {
 			// The lexer gives the content the IndentNum of the line
 			// after it, which starts at column 1.
-			input:           "? |\n  k\n: v\n",
+			input:           stringtest.LinesLF("? |", "  k", ": v"),
 			line:            1,
 			wantOrigins:     []string{"  k\n"},
 			wantIndentNum:   2,
 			wantIndentLevel: 1,
 		},
 		"single-line block scalar in sequence": {
-			input:           "- |\n  a\n- b\n",
+			input:           stringtest.LinesLF("- |", "  a", "- b"),
 			line:            1,
 			wantOrigins:     []string{"  a\n"},
 			wantIndentNum:   2,
@@ -795,7 +894,14 @@ func TestSplit_BlockScalarTrailingIndent(t *testing.T) {
 	// The lexer bundles the indentation of the line after a block scalar into
 	// the scalar's Origin ("    x\n\n  "). That fragment is not content, so the
 	// Value and the original Position stay on the last content line.
-	lines := segment.Split(tokens.Tokenize("a:\n  k: |\n    x\n\n  # c\n  z: 1\n"))
+	lines := segment.Split(tokens.Tokenize(stringtest.LinesLF(
+		"a:",
+		"  k: |",
+		"    x",
+		"",
+		"  # c",
+		"  z: 1",
+	)))
 	require.Equal(t, []string{"a:", "  k: |", "    x", "", "  # c", "  z: 1"}, lineContents(lines))
 
 	content := part(t, lines, 2, 0)
@@ -863,7 +969,7 @@ func TestSplit_HandBuiltStream(t *testing.T) {
 			wantNumbers: []int{-5},
 		},
 		"unlinked empty block scalar with indentation indicator": {
-			input:       unlinked(tokens.Tokenize("a: |2\n\n\n")),
+			input:       unlinked(tokens.Tokenize(stringtest.LinesLF("a: |2", "", ""))),
 			wantContent: []string{"a: |2", "", ""},
 			wantNumbers: []int{1, 2, 3},
 		},
@@ -906,11 +1012,17 @@ func TestSplit_UnlinkedStream(t *testing.T) {
 	// sets, so Split finds block scalar content from the stream order and
 	// gives such a stream the same parts as the linked one.
 	tcs := map[string]string{
-		"empty literal scalar with indentation indicator": "a: |2\n\n\n",
-		"literal scalar at the end":                       "a: |\n  x\n  y\n",
-		"literal scalar with blank line":                  "a: |\n  x\n\n  y\nb: 1\n",
-		"folded scalar with less indented line":           "a: >\n   x\n  y\n",
-		"comment after header":                            "a: | # c\n  x\n  y\nb: 1\n",
+		"empty literal scalar with indentation indicator": stringtest.LinesLF("a: |2", "", ""),
+		"literal scalar at the end":                       stringtest.LinesLF("a: |", "  x", "  y"),
+		"literal scalar with blank line": stringtest.LinesLF(
+			"a: |",
+			"  x",
+			"",
+			"  y",
+			"b: 1",
+		),
+		"folded scalar with less indented line": stringtest.LinesLF("a: >", "   x", "  y"),
+		"comment after header":                  stringtest.LinesLF("a: | # c", "  x", "  y", "b: 1"),
 	}
 
 	for name, input := range tcs {
