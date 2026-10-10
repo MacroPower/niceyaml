@@ -58,6 +58,15 @@ func textTree(t niceyaml.ErrorTree) niceyaml.ErrorTree {
 	return out
 }
 
+// badKeyError returns a function that builds an error with the message
+// "bad <key>" at the path of key under the value in scope. Each call
+// builds an error of its own.
+func badKeyError(key string) func() *niceyaml.Error {
+	return func() *niceyaml.Error {
+		return niceyaml.NewError("bad "+key, niceyaml.AtPath(paths.Current().Child(key)))
+	}
+}
+
 // sparseJoinError is an error joined from several, the way [errors.Join]
 // builds one, except that it keeps a nil branch instead of dropping it.
 // Its message is the messages of the branches that are not nil, one per
@@ -556,12 +565,7 @@ func TestErrorTree_New(t *testing.T) {
 	other := niceyaml.NewSourceFromString("c: 3\n", niceyaml.WithName("g.yaml"))
 	wide := niceyaml.NewSourceFromString("a: hello world\nb: 2\n", niceyaml.WithName("f.yaml"))
 
-	badA := func() *niceyaml.Error {
-		return niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a")))
-	}
-	badB := func() *niceyaml.Error {
-		return niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b")))
-	}
+	badA, badB, badC := badKeyError("a"), badKeyError("b"), badKeyError("c")
 
 	tcs := map[string]struct {
 		err  error
@@ -734,11 +738,7 @@ func TestErrorTree_New(t *testing.T) {
 		},
 		"nested error bound to another source keeps its own positions": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
-				niceyaml.Invalid(yamltest.Bind(t, other,
-					niceyaml.NewError("inner", niceyaml.WithDetails(
-						niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c"))),
-					)),
-				)),
+				niceyaml.Invalid(yamltest.Bind(t, other, niceyaml.NewError("inner", niceyaml.WithDetails(badC())))),
 			))),
 			want: niceyaml.ErrorTree{
 				Label: "f.yaml: outer",
@@ -753,11 +753,9 @@ func TestErrorTree_New(t *testing.T) {
 			},
 		},
 		"binding rebound to another binding keeps the inner positions": {
-			err: yamltest.Bind(t, source, fmt.Errorf("outer: %w", yamltest.Bind(t, other,
-				niceyaml.NewError("inner", niceyaml.WithDetails(
-					niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c"))),
-				)),
-			))),
+			err: yamltest.Bind(t, source, fmt.Errorf("outer: %w",
+				yamltest.Bind(t, other, niceyaml.NewError("inner", niceyaml.WithDetails(badC()))),
+			)),
 			want: niceyaml.ErrorTree{
 				Label: "outer: g.yaml: inner",
 				Children: []niceyaml.ErrorTree{
@@ -767,9 +765,7 @@ func TestErrorTree_New(t *testing.T) {
 		},
 		"located error above an inner binding positions its own nested errors": {
 			err: yamltest.Bind(t, source, niceyaml.Invalid(
-				yamltest.Bind(t, other, niceyaml.NewError("inner", niceyaml.WithDetails(
-					niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c"))),
-				))),
+				yamltest.Bind(t, other, niceyaml.NewError("inner", niceyaml.WithDetails(badC()))),
 				niceyaml.AtPath(paths.Current().Child("a")),
 				niceyaml.WithDetails(badB()),
 			)),
@@ -784,7 +780,7 @@ func TestErrorTree_New(t *testing.T) {
 		"joined errors form a forest": {
 			err: errors.Join(
 				yamltest.Bind(t, source, badA()),
-				yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c")))),
+				yamltest.Bind(t, other, badC()),
 			),
 			want: niceyaml.ErrorTree{
 				Children: []niceyaml.ErrorTree{
@@ -796,7 +792,7 @@ func TestErrorTree_New(t *testing.T) {
 		"joined errors with nested errors are subtrees": {
 			err: errors.Join(
 				yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", badA(), badB())),
-				yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c")))),
+				yamltest.Bind(t, other, badC()),
 			),
 			want: niceyaml.ErrorTree{
 				Children: []niceyaml.ErrorTree{
@@ -839,7 +835,7 @@ func TestErrorTree_New(t *testing.T) {
 		"bound join of two sources keeps the order it was given": {
 			err: yamltest.Bind(t, source, errors.Join(
 				yamltest.Bind(t, source, badB()),
-				yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c")))),
+				yamltest.Bind(t, other, badC()),
 			)),
 			want: niceyaml.ErrorTree{
 				Children: []niceyaml.ErrorTree{
@@ -884,7 +880,7 @@ func TestErrorTree_New(t *testing.T) {
 			err: yamltest.Bind(t, source, niceyaml.NewSummary("outer",
 				badA(),
 				yamltest.Bind(t, other, errors.Join(
-					niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c"))),
+					badC(),
 					niceyaml.NewError("start", niceyaml.AtPosition(position.New(0, 0))),
 				)),
 			)),
@@ -972,7 +968,7 @@ func TestErrorTree_New(t *testing.T) {
 		},
 		"bound join that leads with another source names the root": {
 			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", errors.Join(
-				yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c")))),
+				yamltest.Bind(t, other, badC()),
 				badB(),
 			))),
 			want: niceyaml.ErrorTree{
@@ -985,9 +981,7 @@ func TestErrorTree_New(t *testing.T) {
 		},
 		"bound join that leads with a same-source binding of another source names the root": {
 			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", errors.Join(
-				yamltest.Bind(t, source, errors.Join(
-					yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c")))),
-				)),
+				yamltest.Bind(t, source, errors.Join(yamltest.Bind(t, other, badC()))),
 				badB(),
 			))),
 			want: niceyaml.ErrorTree{
@@ -1000,9 +994,7 @@ func TestErrorTree_New(t *testing.T) {
 		},
 		"Error with details around a same-source binding of another source names the root": {
 			err: yamltest.Bind(t, source, fmt.Errorf("ctx: %w", niceyaml.Invalid(
-				yamltest.Bind(t, source, errors.Join(
-					yamltest.Bind(t, other, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c")))),
-				)),
+				yamltest.Bind(t, source, errors.Join(yamltest.Bind(t, other, badC()))),
 				niceyaml.WithDetails(badB()),
 			))),
 			want: niceyaml.ErrorTree{
@@ -1017,13 +1009,7 @@ func TestErrorTree_New(t *testing.T) {
 			err: yamltest.Bind(t, other, niceyaml.NewError("root",
 				niceyaml.AtPath(paths.Current().Child("c")),
 				niceyaml.WithDetails(yamltest.Bind(t, source, niceyaml.Invalid(
-					yamltest.Bind(t, source, errors.Join(
-						yamltest.Bind(
-							t,
-							other,
-							niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c"))),
-						),
-					)),
+					yamltest.Bind(t, source, errors.Join(yamltest.Bind(t, other, badC()))),
 					niceyaml.WithDetails(badB()),
 				))),
 			)),
@@ -1038,13 +1024,7 @@ func TestErrorTree_New(t *testing.T) {
 		"branch with details around a bound join gives its place to its named children": {
 			err: yamltest.Bind(t, source, errors.Join(
 				yamltest.Bind(t, source, niceyaml.Invalid(
-					yamltest.Bind(t, source, errors.Join(
-						yamltest.Bind(
-							t,
-							other,
-							niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c"))),
-						),
-					)),
+					yamltest.Bind(t, source, errors.Join(yamltest.Bind(t, other, badC()))),
 					niceyaml.WithDetails(badB()),
 				)),
 				badA(),
@@ -1281,12 +1261,7 @@ func TestErrorTree_Bound(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
 
-	badA := func() *niceyaml.Error {
-		return niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a")))
-	}
-	badB := func() *niceyaml.Error {
-		return niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b")))
-	}
+	badA, badB := badKeyError("a"), badKeyError("b")
 
 	bind := func(t *testing.T, err error) *niceyaml.SourceError {
 		t.Helper()
@@ -1597,12 +1572,7 @@ func TestErrorTree_Problems(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
 
-	badA := func() *niceyaml.Error {
-		return niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a")))
-	}
-	badB := func() *niceyaml.Error {
-		return niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b")))
-	}
+	badA, badB := badKeyError("a"), badKeyError("b")
 
 	errNoMatch := errors.New("no matching schema")
 	errRead := errors.New("read g.yaml: no such file")
@@ -2420,12 +2390,7 @@ func TestErrorTree_IsInvalid(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
 
-	badA := func() *niceyaml.Error {
-		return niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a")))
-	}
-	badB := func() *niceyaml.Error {
-		return niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b")))
-	}
+	badA, badB := badKeyError("a"), badKeyError("b")
 
 	errRead := fmt.Errorf("read g.yaml: %w", fs.ErrPermission)
 
@@ -2526,12 +2491,7 @@ func TestErrorTree_IsInvalid_Nodes(t *testing.T) {
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
 
-	badA := func() *niceyaml.Error {
-		return niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a")))
-	}
-	badB := func() *niceyaml.Error {
-		return niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b")))
-	}
+	badA, badB := badKeyError("a"), badKeyError("b")
 
 	errRead := fmt.Errorf("read g.yaml: %w", fs.ErrPermission)
 
@@ -2705,12 +2665,7 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 	pathA := paths.Current().Child("a")
 	pathB := paths.Current().Child("b")
 
-	badA := func() *niceyaml.Error {
-		return niceyaml.NewError("bad a", niceyaml.AtPath(pathA))
-	}
-	badB := func() *niceyaml.Error {
-		return niceyaml.NewError("bad b", niceyaml.AtPath(pathB))
-	}
+	badA, badB := badKeyError("a"), badKeyError("b")
 	withDetail := func() *niceyaml.Error {
 		return badA().With(niceyaml.WithDetails(niceyaml.NewError("see b", niceyaml.AtPath(pathB))))
 	}
