@@ -121,7 +121,7 @@ func TestExpand(t *testing.T) {
 
 	strayFile := writeFile(t, strayDir, "report[2024.txt", "test")
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		args      []string
 		wantNames []string
 		err       error
@@ -216,7 +216,7 @@ func TestExpand(t *testing.T) {
 		},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
