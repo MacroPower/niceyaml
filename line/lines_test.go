@@ -870,74 +870,6 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 	}
 }
 
-func TestNewLines_LeadingNewlineTokens(t *testing.T) {
-	t.Parallel()
-
-	// Test cases for tokens with leading newlines, which NewLines must handle
-	// without creating invalid column ordering.
-	tcs := map[string]struct {
-		input string
-		want  []int
-	}{
-		"inline comment followed by next line": {
-			input: stringtest.Input(`
-				items:
-				  - key: value # inline comment
-				    next: data
-			`),
-			want: []int{1, 2, 3},
-		},
-		"sequence entry with merge key and comment": {
-			input: stringtest.Input(`
-				items:
-				  - <<: *anchor # comment
-				    key: value
-			`),
-			want: []int{1, 2, 3},
-		},
-		"nested map with trailing comment": {
-			input: stringtest.Input(`
-				parent:
-				  child: value # note
-				  sibling: other
-			`),
-			want: []int{1, 2, 3},
-		},
-		"multiple inline comments": {
-			input: stringtest.Input(`
-				a: 1 # first
-				b: 2 # second
-				c: 3 # third
-			`),
-			want: []int{1, 2, 3},
-		},
-		"comment block after content": {
-			input: stringtest.Input(`
-				key: value
-
-				# Comment block
-				# More comments
-				next: data
-			`),
-			want: []int{1, 2, 3, 4, 5},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := newLines(tc.input)
-
-			// The line numbers increase strictly.
-			require.NoError(t, yamltest.ValidateLines(lines), "tokens should be valid")
-
-			// Each line carries its expected number.
-			assert.Equal(t, tc.want, lineNumbers(lines))
-		})
-	}
-}
-
 func TestNewLines_PartPositionsMatchLexer(t *testing.T) {
 	t.Parallel()
 
@@ -1934,20 +1866,76 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 				"",
 				"!!str s: 1",
 			),
+
+			// A file that ends in blank lines yields one line for each text
+			// line, the blank ones too.
+			"no trailing newline":     "a: 1",
+			"trailing newline":        "a: 1\n",
+			"one trailing blank line": "a: 1\n\n",
+			"two trailing blank lines": stringtest.LinesLF(
+				"a: 1",
+				"",
+				"",
+			),
+			"crlf trailing blank line": "a: 1\r\n\r\n",
+			"comment then blank line": stringtest.LinesLF(
+				"a: 1",
+				"# c",
+				"",
+			),
+
+			// The lexer starts the token after a comment with the line
+			// ending, which NewLines must handle without putting the columns
+			// of a line out of order.
+			"inline comment followed by next line": stringtest.Input(`
+				items:
+				  - key: value # inline comment
+				    next: data
+			`),
+			"sequence entry with merge key and comment": stringtest.Input(`
+				items:
+				  - <<: *anchor # comment
+				    key: value
+			`),
+			"nested map with trailing comment": stringtest.Input(`
+				parent:
+				  child: value # note
+				  sibling: other
+			`),
+			"multiple inline comments": stringtest.Input(`
+				a: 1 # first
+				b: 2 # second
+				c: 3 # third
+			`),
+			"comment block after content": stringtest.Input(`
+				key: value
+
+				# Comment block
+				# More comments
+				next: data
+			`),
 		}
 
 		for name, input := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				// Every input ends with a line break, so it holds one line
-				// for each break.
-				want := make([]int, strings.Count(input, "\n"))
+				// An input holds one line for each line break, and one
+				// more when text follows the last.
+				n := strings.Count(input, "\n")
+				if !strings.HasSuffix(input, "\n") {
+					n++
+				}
+
+				want := make([]int, n)
 				for i := range want {
 					want[i] = i + 1
 				}
 
-				assert.Equal(t, want, lineNumbers(newLines(input)))
+				lines := newLines(input)
+
+				require.NoError(t, yamltest.ValidateLines(lines))
+				assert.Equal(t, want, lineNumbers(lines))
 			})
 		}
 	})
@@ -1983,48 +1971,6 @@ func lineNumbers(lines line.Lines) []int {
 	}
 
 	return got
-}
-
-// TestNewLines_TrailingBlankLines verifies that a file ending in blank lines
-// yields one Line per text line, including the blank ones.
-func TestNewLines_TrailingBlankLines(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-		want  int
-	}{
-		"no trailing newline":     {input: "a: 1", want: 1},
-		"trailing newline":        {input: "a: 1\n", want: 1},
-		"one trailing blank line": {input: "a: 1\n\n", want: 2},
-		"two trailing blank lines": {
-			input: stringtest.LinesLF(
-				"a: 1",
-				"",
-				"",
-			),
-			want: 3,
-		},
-		"crlf trailing blank line": {input: "a: 1\r\n\r\n", want: 2},
-		"comment then blank line": {
-			input: stringtest.LinesLF(
-				"a: 1",
-				"# c",
-				"",
-			),
-			want: 3,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := newLines(tc.input)
-
-			assert.Equal(t, tc.want, lines.Len())
-		})
-	}
 }
 
 func TestLines_TokenAt(t *testing.T) {
