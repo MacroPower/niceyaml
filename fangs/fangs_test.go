@@ -45,6 +45,26 @@ func testStyles() fang.Styles {
 	}
 }
 
+// nameValueYAML is the document most handler tests report errors in.
+var nameValueYAML = stringtest.Input(`
+	name: test
+	value: 123
+`)
+
+// nameValueSource returns a new source of [nameValueYAML].
+func nameValueSource(opts ...niceyaml.SourceOption) *niceyaml.Source {
+	return niceyaml.NewSourceFromTokens(tokens.Tokenize(nameValueYAML), opts...)
+}
+
+// twoProblems returns an error that heads two problems in [nameValueYAML],
+// one at the name key and one at the value.
+func twoProblems() error {
+	return fmt.Errorf("two problems: %w", errors.Join(
+		errAt("bad name", "$.name~"),
+		errAt("bad value", "$.value"),
+	))
+}
+
 // xmlPrinter returns a printer that renders styles as XML tags, with no
 // gutter and no container frame.
 func xmlPrinter() *printer.Printer {
@@ -75,29 +95,21 @@ func report(msg string) string {
 func TestErrorHandler(t *testing.T) {
 	t.Parallel()
 
-	source := stringtest.Input(`
-		name: test
-		value: 123
-	`)
-
-	src := niceyaml.NewSourceFromTokens(tokens.Tokenize(source))
+	src := nameValueSource()
 
 	niceyamlErr := yamltest.Bind(t, src, errAt("invalid name", "$.name~"))
 
 	// Two named sources with the same content, so a joined error names the
 	// file each branch came from and renders one excerpt per file.
-	fileA := niceyaml.NewSourceFromTokens(tokens.Tokenize(source), niceyaml.WithName("a.yaml"))
-	fileB := niceyaml.NewSourceFromTokens(tokens.Tokenize(source), niceyaml.WithName("b.yaml"))
+	fileA := nameValueSource(niceyaml.WithName("a.yaml"))
+	fileB := nameValueSource(niceyaml.WithName("b.yaml"))
 
 	badName := yamltest.Bind(t, fileA, errAt("bad name", "$.name~"))
 	badValue := yamltest.Bind(t, fileB, errAt("bad value", "$.value"))
 
 	// A source whose name opens with Cobra's wording for an unknown flag,
 	// so the message of an error bound to it does too.
-	flagLikeFile := niceyaml.NewSourceFromTokens(
-		tokens.Tokenize(source),
-		niceyaml.WithName("unknown flag: a.yaml"),
-	)
+	flagLikeFile := nameValueSource(niceyaml.WithName("unknown flag: a.yaml"))
 
 	flagLikeNameErr := yamltest.Bind(t, flagLikeFile, errAt("bad name", "$.name~"))
 
@@ -105,10 +117,7 @@ func TestErrorHandler(t *testing.T) {
 
 	// A wrapper around a join heads the problems of the join, here and in
 	// the niceyaml version the go.mod of this module requires.
-	nestedErr := yamltest.Bind(t, src, fmt.Errorf("two problems: %w", errors.Join(
-		errAt("bad name", "$.name~"),
-		errAt("bad value", "$.value"),
-	)))
+	nestedErr := yamltest.Bind(t, src, twoProblems())
 
 	// A source that ends with blank lines, which an excerpt of its last
 	// key shows as context below the caret.
@@ -411,15 +420,7 @@ func TestNewErrorHandler_Width(t *testing.T) {
 func TestErrorHandler_ColorProfile(t *testing.T) {
 	t.Parallel()
 
-	src := niceyaml.NewSourceFromTokens(tokens.Tokenize(stringtest.Input(`
-		name: test
-		value: 123
-	`)))
-
-	err := yamltest.Bind(t, src, fmt.Errorf("two problems: %w", errors.Join(
-		errAt("bad name", "$.name~"),
-		errAt("bad value", "$.value"),
-	)))
+	err := yamltest.Bind(t, nameValueSource(), twoProblems())
 
 	p := xmlPrinter()
 
