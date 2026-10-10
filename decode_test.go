@@ -126,39 +126,54 @@ func TestSource_Document(t *testing.T) {
 		assert.Same(t, docs[0], doc)
 	})
 
-	t.Run("rejects several documents at the second header", func(t *testing.T) {
+	t.Run("rejects several documents", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
-			a: 1
-			---
-			b: 2
-		`))
+		tcs := map[string]struct {
+			input string
+			want  string
+		}{
+			"at the second header": {
+				input: "a: 1\n---\nb: 2",
+				want:  "2:1: multiple documents in source: 2 documents",
+			},
+			// A "..." marker ends the first document, so the second has no
+			// header, and the error points at its first token instead.
+			"at a second document without a header": {
+				input: "a: 1\n...\nb: 2",
+				want:  "3:1: multiple documents in source: 2 documents",
+			},
+			// The empty document between the two does not count, and the
+			// error points at the header of the second document with content.
+			"past an empty one between them": {
+				input: "a: 1\n---\n---\nb: 2",
+				want:  "3:1: multiple documents in source: 2 documents",
+			},
+			// The comments after a "..." marker fold into the document below
+			// them as its preamble, and the error points past them at the
+			// first token of its content.
+			"past the comments above the second": {
+				input: "a: 1\n...\n# tail\nb: 2",
+				want:  "4:1: multiple documents in source: 2 documents",
+			},
+			"below a comment block": {
+				input: "# Copyright notice.\n---\na: 1\n---\nb: 2",
+				want:  "4:1: multiple documents in source: 2 documents",
+			},
+		}
 
-		_, err := source.Document()
-		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
-		assert.Equal(t, "2:1: multiple documents in source: 2 documents", err.Error())
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		var bound *niceyaml.SourceError
+				source := niceyaml.NewSourceFromString(tc.input)
 
-		require.ErrorAs(t, err, &bound)
-		assert.Same(t, source, bound.Source())
-	})
-
-	t.Run("rejects several documents at a second document without a header", func(t *testing.T) {
-		t.Parallel()
-
-		// A "..." marker ends the first document, so the second has no
-		// header, and the error points at its first token instead.
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
-			a: 1
-			...
-			b: 2
-		`))
-
-		_, err := source.Document()
-		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
-		assert.Equal(t, "3:1: multiple documents in source: 2 documents", err.Error())
+				_, err := source.Document()
+				require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
+				require.EqualError(t, err, tc.want)
+				assert.Same(t, source, sourceErrorIn(t, err).Source())
+			})
+		}
 	})
 
 	t.Run("returns the document with content beside the empty ones", func(t *testing.T) {
@@ -207,23 +222,6 @@ func TestSource_Document(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects several documents past an empty one between them", func(t *testing.T) {
-		t.Parallel()
-
-		// The empty document between the two does not count, and the
-		// error points at the header of the second document with content.
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
-			a: 1
-			---
-			---
-			b: 2
-		`))
-
-		_, err := source.Document()
-		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
-		assert.Equal(t, "3:1: multiple documents in source: 2 documents", err.Error())
-	})
-
 	t.Run("returns the first of several empty documents", func(t *testing.T) {
 		t.Parallel()
 
@@ -239,24 +237,6 @@ func TestSource_Document(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, doc.IsEmpty())
 		assert.Equal(t, 0, doc.DocumentIndex())
-	})
-
-	t.Run("rejects several documents past the comments above the second", func(t *testing.T) {
-		t.Parallel()
-
-		// The comments after a "..." marker fold into the document below
-		// them as its preamble, and the error points past them at the
-		// first token of its content.
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
-			a: 1
-			...
-			# tail
-			b: 2
-		`))
-
-		_, err := source.Document()
-		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
-		assert.Equal(t, "4:1: multiple documents in source: 2 documents", err.Error())
 	})
 
 	t.Run("folds a comment block above the first header", func(t *testing.T) {
@@ -295,22 +275,6 @@ func TestSource_Document(t *testing.T) {
 		got, err := doc.Decode[map[string]int](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, map[string]int{"a": 1}, got)
-	})
-
-	t.Run("counts the documents below a comment block", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
-			# Copyright notice.
-			---
-			a: 1
-			---
-			b: 2
-		`))
-
-		_, err := source.Document()
-		require.ErrorIs(t, err, niceyaml.ErrMultipleDocuments)
-		assert.Equal(t, "4:1: multiple documents in source: 2 documents", err.Error())
 	})
 
 	t.Run("returns the first document when none has content", func(t *testing.T) {
