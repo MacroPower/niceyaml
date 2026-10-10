@@ -57,3 +57,21 @@ func MergeLevels(levels int) string {
 
 	return sb.String()
 }
+
+// WideMerge creates YAML content whose mapping m holds members keys,
+// each spelled in hexadecimal over the value x, and then a merge key that
+// lists as many aliases to the mapping a. To tell which entry the
+// spelling of one of those keys selects, a lookup reads that whole list.
+func WideMerge(members int) string {
+	var sb strings.Builder
+
+	sb.WriteString("a: &a {z: 0}\nm:\n")
+
+	for i := range members {
+		fmt.Fprintf(&sb, "  %#x: x\n", 0x1000+i)
+	}
+
+	sb.WriteString("  <<: [" + strings.Repeat("*a, ", members-1) + "*a]\n")
+
+	return sb.String()
+}

@@ -86,6 +86,9 @@
 //
 //	input := yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n"
 //
+// [WideMerge] builds a mapping whose merge key lists one alias for each
+// of its keys, so a lookup of every key reads the whole list.
+//
 // # Error Trees
 //
 // Tests that read the structure of an error read the tree

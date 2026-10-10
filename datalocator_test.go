@@ -767,24 +767,6 @@ func describeLocation(bound *niceyaml.SourceError) string {
 	return fmt.Sprintf("%s %s near %s", at, path, near)
 }
 
-// wideMergeDoc returns a document whose mapping m holds members keys,
-// each spelled in hexadecimal, and then a merge key that lists as many
-// aliases to one mapping. To tell which entry the spelling of one of
-// those keys selects, a lookup reads that whole list.
-func wideMergeDoc(members int) string {
-	var sb strings.Builder
-
-	sb.WriteString("a: &a {z: 0}\nm:\n")
-
-	for i := range members {
-		fmt.Fprintf(&sb, "  %#x: x\n", 0x1000+i)
-	}
-
-	sb.WriteString("  <<: [" + strings.Repeat("*a, ", members-1) + "*a]\n")
-
-	return sb.String()
-}
-
 func TestDataLocator_Schema(t *testing.T) {
 	t.Parallel()
 
@@ -839,7 +821,7 @@ func TestDataLocator_Schema(t *testing.T) {
 		"null and bool keys":             "~: a\nnull: b\nTrue: {true: c}\nfalse: [d]\n",
 		// The lookups of both runs pass the limit on the merge sources they
 		// read, so each writes the same names past it.
-		"more merge reads than the limit allows": wideMergeDoc(2000),
+		"more merge reads than the limit allows": yamltest.WideMerge(2000),
 	}
 
 	for schemaName, schemaJSON := range schemas {
@@ -963,7 +945,7 @@ func TestDataLocator_MergeReads(t *testing.T) {
 	// error still binds at the value, by its position.
 	const members = 2000
 
-	doc := locatorDoc(t, wideMergeDoc(members))
+	doc := locatorDoc(t, yamltest.WideMerge(members))
 	loc := doc.DataLocator()
 
 	spelled := 0

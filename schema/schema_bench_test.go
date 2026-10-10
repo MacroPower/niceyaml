@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
@@ -151,7 +152,7 @@ func BenchmarkSchema_Check_WideMerge(b *testing.B) {
 	}`))
 
 	for _, members := range []int{1000, 4000} {
-		doc, err := niceyaml.NewSourceFromString(wideMerge(members)).Document()
+		doc, err := niceyaml.NewSourceFromString(yamltest.WideMerge(members)).Document()
 		require.NoError(b, err)
 
 		b.Run(fmt.Sprintf("members_%d", members), func(b *testing.B) {

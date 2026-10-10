@@ -38,6 +38,16 @@ func TestAliasBombs(t *testing.T) {
 			want: "m0: &m0 {a: x}\n" +
 				"m1: &m1\n  <<: [*m0, *m0, *m0, *m0, *m0, *m0, *m0, *m0, *m0, *m0]\n",
 		},
+		"wide merge of one member": {
+			generate: yamltest.WideMerge,
+			levels:   1,
+			want:     "a: &a {z: 0}\nm:\n  0x1000: x\n  <<: [*a]\n",
+		},
+		"wide merge of two members": {
+			generate: yamltest.WideMerge,
+			levels:   2,
+			want:     "a: &a {z: 0}\nm:\n  0x1000: x\n  0x1001: x\n  <<: [*a, *a]\n",
+		},
 	}
 
 	for name, tc := range tcs {

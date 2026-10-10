@@ -4196,24 +4196,6 @@ func TestSchema_SourcePath_SeveralViolations(t *testing.T) {
 	assert.ElementsMatch(t, []string{"$.base", "$.0x10", "$.1", "$.a", "$.name"}, got)
 }
 
-// wideMerge returns a document whose mapping m holds members keys, each
-// spelled in hexadecimal over the value x, and then a merge key that
-// lists as many aliases to one mapping. To tell which entry the spelling
-// of one of those keys selects, a lookup reads that whole list.
-func wideMerge(members int) string {
-	var sb strings.Builder
-
-	sb.WriteString("a: &a {z: 0}\nm:\n")
-
-	for i := range members {
-		fmt.Fprintf(&sb, "  %#x: x\n", 0x1000+i)
-	}
-
-	sb.WriteString("  <<: [" + strings.Repeat("*a, ", members-1) + "*a]\n")
-
-	return sb.String()
-}
-
 func TestSchema_SourcePath_MergeReads(t *testing.T) {
 	t.Parallel()
 
@@ -4245,7 +4227,7 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			dd := yamltest.FirstDocument(t, wideMerge(tc.members))
+			dd := yamltest.FirstDocument(t, yamltest.WideMerge(tc.members))
 
 			err := v.Check(t.Context(), dd)
 
