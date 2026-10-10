@@ -4735,6 +4735,8 @@ func TestNode_YAMLComments(t *testing.T) {
 		})
 	}
 
+	doc := yamltest.FirstDocument(t, input)
+
 	t.Run("the encoder writes the comments back", func(t *testing.T) {
 		t.Parallel()
 
@@ -4742,8 +4744,6 @@ func TestNode_YAMLComments(t *testing.T) {
 			Items map[string]map[string]string `yaml:"items"`
 			Name  string                       `yaml:"name"`
 		}
-
-		doc := yamltest.FirstDocument(t, input)
 
 		got, err := doc.Decode[service](t.Context())
 		require.NoError(t, err)
@@ -4755,20 +4755,18 @@ func TestNode_YAMLComments(t *testing.T) {
 
 		out, err := encoder.Marshal(t.Context(), got, encoder.WithYAMLComments(comments))
 		require.NoError(t, err)
-		assert.Equal(t, stringtest.Input(`
-			items:
-			  # The first item.
-			  a:
-			    name: x
-			# The name of the service.
-			name: web # short
-		`)+"\n", string(out))
+		assert.Equal(t, stringtest.LinesLF(
+			"items:",
+			"  # The first item.",
+			"  a:",
+			"    name: x",
+			"# The name of the service.",
+			"name: web # short",
+		), string(out))
 	})
 
 	t.Run("each call returns a map of its own", func(t *testing.T) {
 		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, input)
 
 		first, err := doc.YAMLComments(t.Context())
 		require.NoError(t, err)
@@ -4782,8 +4780,6 @@ func TestNode_YAMLComments(t *testing.T) {
 
 	t.Run("one Node serves several calls at once", func(t *testing.T) {
 		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, input)
 
 		var wg sync.WaitGroup
 
