@@ -1301,19 +1301,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				_, err := dd.Decode[merged](t.Context())
 				require.Error(t, err)
 
-				var got []string
-
-				for _, bound := range yamltest.BoundIn(err) {
-					if _, ok := bound.Path(); !ok {
-						continue
-					}
-
-					require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrAmbiguousPath)
-
-					got = append(got, bound.Error())
-				}
-
-				assert.Equal(t, tc.want, got)
+				assert.Equal(t, tc.want, ambiguousTexts(t, err))
 			})
 		}
 	})
@@ -1630,15 +1618,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				_, err := dd.Decode[pointers](t.Context())
 				require.Error(t, err)
 
-				var got []string
-
-				for _, bound := range yamltest.BoundIn(err) {
-					if _, ok := bound.Path(); ok {
-						got = append(got, bound.Error())
-					}
-				}
-
-				assert.Equal(t, tc.want, got)
+				assert.Equal(t, tc.want, validationTexts(err))
 			})
 		}
 	})
@@ -1783,22 +1763,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		_, err := dd.Decode[map[float64]signed](t.Context())
 		require.Error(t, err)
 
-		var got []string
-
-		for _, bound := range yamltest.BoundIn(err) {
-			if _, ok := bound.Path(); !ok {
-				continue
-			}
-
-			require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrAmbiguousPath)
-
-			got = append(got, bound.Error())
-		}
-
 		assert.Equal(t, []string{
 			"$.NaN.n: negative -1",
 			"$.NaN.n: negative -2",
-		}, got)
+		}, ambiguousTexts(t, err))
 	})
 
 	t.Run("several NaN keys order a value that refers to itself", func(t *testing.T) {
@@ -3432,18 +3400,8 @@ func TestSelfValidateValue_SharedPath(t *testing.T) {
 			// The map iterates in a new order on each walk.
 			for range 20 {
 				err := niceyaml.SelfValidateValue(t.Context(), tc.value())
-
-				bound := yamltest.RequireSourceError(t, err)
-
-				var got []string
-
-				for _, child := range yamltest.ProblemsOf(bound) {
-					require.ErrorIs(t, child.Bound.Unresolved(), niceyaml.ErrAmbiguousPath)
-
-					got = append(got, child.Bound.Error())
-				}
-
-				assert.Equal(t, tc.want, got)
+				require.Error(t, err)
+				assert.Equal(t, tc.want, ambiguousTexts(t, err))
 			}
 		})
 	}
@@ -4113,6 +4071,26 @@ func validationTexts(err error) []string {
 	}
 
 	return []string{err.Error()}
+}
+
+// ambiguousTexts returns the message of each binding in the tree of err
+// that carries a path, and requires that no path selects one node alone.
+func ambiguousTexts(t *testing.T, err error) []string {
+	t.Helper()
+
+	var texts []string
+
+	for _, bound := range yamltest.BoundIn(err) {
+		if _, ok := bound.Path(); !ok {
+			continue
+		}
+
+		require.ErrorIs(t, bound.Unresolved(), niceyaml.ErrAmbiguousPath)
+
+		texts = append(texts, bound.Error())
+	}
+
+	return texts
 }
 
 // meshChain returns the meshes n0 to nk, where each mesh links to the
