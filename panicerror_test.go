@@ -244,7 +244,10 @@ func TestPanicError_Recovered(t *testing.T) {
 		ctx := context.WithValue(t.Context(), panicCallsKey{}, &calls)
 		ctx = context.WithValue(ctx, panicValueKey{}, errRegistry)
 
-		_, err := yamltest.FirstDocument(t, "items:\n  - v: 1\n").Decode[struct {
+		_, err := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"items:",
+			"  - v: 1",
+		)).Decode[struct {
 			Items []struct {
 				V panicsWith `yaml:"v"`
 			} `yaml:"items"`

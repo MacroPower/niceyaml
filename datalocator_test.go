@@ -169,7 +169,13 @@ func pointerNames(pointer string) []string {
 
 func ExampleDataLocator() {
 	doc, err := niceyaml.NewSourceFromString(
-		"ports:\n  0x10:\n    name: \"\"\nitems:\n  - name: \"\"\n",
+		stringtest.LinesLF(
+			"ports:",
+			"  0x10:",
+			`    name: ""`,
+			"items:",
+			`  - name: ""`,
+		),
 		niceyaml.WithName("cfg.yaml"),
 	).Document()
 	if err != nil {
@@ -303,13 +309,21 @@ func TestDataLocator_At(t *testing.T) {
 			want:  "f.yaml:2:8: $.user.16.name: x",
 		},
 		"name of a decode into map[int]": {
-			input:    "m:\n  1e3:\n    n: \"\"\n",
+			input: stringtest.LinesLF(
+				"m:",
+				"  1e3:",
+				`    n: ""`,
+			),
 			names:    []string{"m", "1000", "n"},
 			want:     "f.yaml:1:1: $.m.1000.n: x",
 			wantNear: "$.m",
 		},
 		"name of a decode into map[string]": {
-			input:    "m:\n  ~:\n    n: \"\"\n",
+			input: stringtest.LinesLF(
+				"m:",
+				"  ~:",
+				`    n: ""`,
+			),
 			names:    []string{"m", "", "n"},
 			want:     "f.yaml:1:1: $.m.''.n: x",
 			wantNear: "$.m",

@@ -575,7 +575,10 @@ func TestNode_DecodeIfPresent(t *testing.T) {
 				found: true,
 			},
 			"a null": {
-				input: "spec:\n  hours: ~\n",
+				input: stringtest.LinesLF(
+					"spec:",
+					"  hours: ~",
+				),
 				want:  openHours{Open: 8, Close: 17},
 				found: true,
 			},

@@ -73,8 +73,11 @@ func TestNode_Kind(t *testing.T) {
 			want:  niceyaml.NodeScalar,
 		},
 		"block scalar": {
-			input: "|\n  text\n",
-			want:  niceyaml.NodeScalar,
+			input: stringtest.LinesLF(
+				"|",
+				"  text",
+			),
+			want: niceyaml.NodeScalar,
 		},
 		"empty source": {
 			input: "",
@@ -101,9 +104,12 @@ func TestNode_Kind(t *testing.T) {
 			want:  niceyaml.NodeNone,
 		},
 		"value mapping": {
-			input: "a:\n  b: 1\n",
-			path:  "$.a",
-			want:  niceyaml.NodeMapping,
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: 1",
+			),
+			path: "$.a",
+			want: niceyaml.NodeMapping,
 		},
 		"value sequence": {
 			input: "a: [1]\n",
@@ -212,7 +218,14 @@ func TestNode_Kind(t *testing.T) {
 	t.Run("each document", func(t *testing.T) {
 		t.Parallel()
 
-		docs := niceyaml.NewSourceFromString("a: 1\n---\n- b\n---\nc\n---\n").AllDocuments()
+		docs := niceyaml.NewSourceFromString(stringtest.LinesLF(
+			"a: 1",
+			"---",
+			"- b",
+			"---",
+			"c",
+			"---",
+		)).AllDocuments()
 
 		got := make([]niceyaml.NodeKind, 0, len(docs))
 		for _, doc := range docs {
