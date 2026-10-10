@@ -79,10 +79,8 @@ func TestCheckDecode(t *testing.T) {
 			// Each alias is a node of the document as well as a read of
 			// its anchor, so the 150 aliases add 150 nodes to the 13 the
 			// document holds without them.
-			input: "base: &b {os: linux, arch: amd64, go: stable, cgo: false}\nmatrix: " + yamltest.FlowSequence(
-				"*b",
-				150,
-			) + "\n",
+			input: "base: &b {os: linux, arch: amd64, go: stable, cgo: false}\n" +
+				"matrix: " + yamltest.FlowSequence("*b", 150) + "\n",
 		},
 		"aliases to a mapping of 200 keys under keys of their own": {
 			input: yamltest.AliasedMapping(200, 150),
@@ -125,17 +123,13 @@ func TestCheckDecode(t *testing.T) {
 		},
 		"same aliases after one inside the anchor around it": {
 			// The count does not depend on which alias to B comes first.
-			input: "a: &A\n  b: &B {c: *A}\n" + thousandEntries() + "  e: *B\nd: " + yamltest.FlowSequence(
-				"*B",
-				300,
-			) + "\n",
+			input: "a: &A\n  b: &B {c: *A}\n" +
+				thousandEntries() + "  e: *B\nd: " + yamltest.FlowSequence("*B", 300) + "\n",
 		},
 		"aliases to an anchor on an alias to the anchor around it": {
 			// P reads null, so each *Q reads [null].
-			input: "a: &A\n  p: &P\n    *A\n  q: &Q [*P]\n" + thousandEntries() + "d: " + yamltest.FlowSequence(
-				"*Q",
-				300,
-			) + "\n",
+			input: "a: &A\n  p: &P\n    *A\n  q: &Q [*P]\n" +
+				thousandEntries() + "d: " + yamltest.FlowSequence("*Q", 300) + "\n",
 		},
 		"scalar aliases written out in a key": {
 			// The decoder spells the key as text, with a copy of the
@@ -156,21 +150,14 @@ func TestCheckDecode(t *testing.T) {
 		},
 		"aliases to chained tags over an alias to a mapping": {
 			// Each *t reads all of k through *s and then *k.
-			input: "k: &k\n" + thousandEntries() + "s: &s !foo *k\nt: &t !bar *s\nl: " + yamltest.FlowSequence(
-				"*t",
-				300,
-			) + "\n",
+			input: "k: &k\n" + thousandEntries() + "s: &s !foo *k\nt: &t !bar *s\n" +
+				"l: " + yamltest.FlowSequence("*t", 300) + "\n",
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"aliases to a string tag over an alias to scalar aliases": {
 			// Each *s writes out k as text, with a copy of a for each *a.
-			input: longScalar + "k: &k " + yamltest.FlowSequence(
-				"*a",
-				50,
-			) + "\ns: &s !!str *k\nl: " + yamltest.FlowSequence(
-				"*s",
-				300,
-			) + "\n",
+			input: longScalar + "k: &k " + yamltest.FlowSequence("*a", 50) + "\ns: &s !!str *k\n" +
+				"l: " + yamltest.FlowSequence("*s", 300) + "\n",
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias key to a tag over an alias to scalar aliases": {
@@ -212,13 +199,8 @@ func TestCheckDecode(t *testing.T) {
 		},
 		"aliases to a custom tag over a string-tagged scalar": {
 			// The decoder shares the value of s at each *t.
-			input: "s: &s !!str " + strings.Repeat(
-				"x",
-				2000,
-			) + "\nt: &t !foo *s\nl: " + yamltest.FlowSequence(
-				"*t",
-				500,
-			) + "\n",
+			input: "s: &s !!str " + strings.Repeat("x", 2000) + "\nt: &t !foo *s\n" +
+				"l: " + yamltest.FlowSequence("*t", 500) + "\n",
 		},
 		"alias keys to a binary scalar": {
 			input: "b: &b " + binaryScalar + "\n" +
