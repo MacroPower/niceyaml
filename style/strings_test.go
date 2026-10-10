@@ -9,159 +9,110 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/style"
 )
 
-// isColorSet checks if a color is set (not NoColor).
-func isColorSet(c color.Color) bool {
-	_, isNoColor := c.(lipgloss.NoColor)
-	return !isNoColor
+// styleAttrs holds the attributes of a [lipgloss.Style] that [style.Parse]
+// reads from its input. A color is a hex string, or empty when unset.
+type styleAttrs struct {
+	Fg, Bg, Border          string
+	Bold, Italic, Underline bool
+}
+
+// attrsOf returns the [styleAttrs] of s.
+//
+//nolint:gocritic // hugeParam: value semantics match lipgloss.
+func attrsOf(s lipgloss.Style) styleAttrs {
+	hex := func(c color.Color) string {
+		if _, unset := c.(lipgloss.NoColor); unset {
+			return ""
+		}
+
+		return yamltest.ColorHex(c)
+	}
+
+	return styleAttrs{
+		Fg:        hex(s.GetForeground()),
+		Bg:        hex(s.GetBackground()),
+		Border:    hex(s.GetBorderTopForeground()),
+		Bold:      s.GetBold(),
+		Italic:    s.GetItalic(),
+		Underline: s.GetUnderline(),
+	}
 }
 
 func TestParse(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
-		input string
-		check func(t *testing.T, s lipgloss.Style)
 		err   error
+		input string
+		want  styleAttrs
 	}{
 		"empty string": {
 			input: "",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				assert.False(t, s.GetBold())
-				assert.False(t, s.GetItalic())
-				assert.False(t, s.GetUnderline())
-				assert.False(t, isColorSet(s.GetForeground()))
-				assert.False(t, isColorSet(s.GetBackground()))
-			},
+			want:  styleAttrs{},
 		},
 		"whitespace only": {
 			input: "   \t\n  ",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				assert.False(t, isColorSet(s.GetForeground()))
-			},
+			want:  styleAttrs{},
 		},
 		"foreground color": {
 			input: "#ff0000",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				require.True(t, isColorSet(s.GetForeground()))
-
-				r, g, b, _ := s.GetForeground().RGBA()
-				assert.Equal(t, uint32(0xffff), r)
-				assert.Equal(t, uint32(0), g)
-				assert.Equal(t, uint32(0), b)
-			},
+			want:  styleAttrs{Fg: "#ff0000"},
 		},
 		"short foreground color": {
 			input: "#f00",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				require.True(t, isColorSet(s.GetForeground()))
-
-				r, g, b, _ := s.GetForeground().RGBA()
-				assert.Equal(t, uint32(0xffff), r)
-				assert.Equal(t, uint32(0), g)
-				assert.Equal(t, uint32(0), b)
-			},
+			want:  styleAttrs{Fg: "#ff0000"},
 		},
 		"background color": {
 			input: "bg:#00ff00",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				require.True(t, isColorSet(s.GetBackground()))
-
-				r, g, b, _ := s.GetBackground().RGBA()
-				assert.Equal(t, uint32(0), r)
-				assert.Equal(t, uint32(0xffff), g)
-				assert.Equal(t, uint32(0), b)
-			},
+			want:  styleAttrs{Bg: "#00ff00"},
 		},
 		"bold": {
 			input: "bold",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				assert.True(t, s.GetBold())
-			},
+			want:  styleAttrs{Bold: true},
 		},
 		"nobold": {
 			input: "nobold",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				assert.False(t, s.GetBold())
-			},
+			want:  styleAttrs{},
 		},
 		"italic": {
 			input: "italic",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				assert.True(t, s.GetItalic())
-			},
+			want:  styleAttrs{Italic: true},
 		},
 		"noitalic": {
 			input: "noitalic",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				assert.False(t, s.GetItalic())
-			},
+			want:  styleAttrs{},
 		},
 		"underline": {
 			input: "underline",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				assert.True(t, s.GetUnderline())
-			},
+			want:  styleAttrs{Underline: true},
 		},
 		"nounderline": {
 			input: "nounderline",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				assert.False(t, s.GetUnderline())
-			},
+			want:  styleAttrs{},
 		},
 		"noinherit ignored": {
 			input: "noinherit #ff0000",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				require.True(t, isColorSet(s.GetForeground()))
-			},
+			want:  styleAttrs{Fg: "#ff0000"},
 		},
 		"border ignored": {
 			input: "border:#0000ff #ff0000",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				require.True(t, isColorSet(s.GetForeground()))
-				assert.False(t, isColorSet(s.GetBorderTopForeground()))
-			},
+			want:  styleAttrs{Fg: "#ff0000"},
 		},
 		"combined style": {
 			input: "bold italic #c678dd bg:#282c34",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				assert.True(t, s.GetBold())
-				assert.True(t, s.GetItalic())
-				require.True(t, isColorSet(s.GetForeground()))
-				require.True(t, isColorSet(s.GetBackground()))
-			},
+			want:  styleAttrs{Bold: true, Italic: true, Fg: "#c678dd", Bg: "#282c34"},
 		},
 		"case insensitive keywords": {
 			input: "BOLD Italic UnDeRlInE",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				assert.True(t, s.GetBold())
-				assert.True(t, s.GetItalic())
-				assert.True(t, s.GetUnderline())
-			},
+			want:  styleAttrs{Bold: true, Italic: true, Underline: true},
 		},
 		"case insensitive prefixes": {
 			input: "BG:#ff0000",
-			check: func(t *testing.T, s lipgloss.Style) {
-				t.Helper()
-				require.True(t, isColorSet(s.GetBackground()))
-			},
+			want:  styleAttrs{Bg: "#ff0000"},
 		},
 		"invalid color - no hash": {
 			input: "ff0000",
@@ -197,7 +148,7 @@ func TestParse(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			s, err := style.Parse(tt.input)
+			got, err := style.Parse(tt.input)
 			if tt.err != nil {
 				require.ErrorIs(t, err, tt.err)
 
@@ -205,10 +156,7 @@ func TestParse(t *testing.T) {
 			}
 
 			require.NoError(t, err)
-
-			if tt.check != nil {
-				tt.check(t, s)
-			}
+			assert.Equal(t, tt.want, attrsOf(got))
 		})
 	}
 }
@@ -273,8 +221,7 @@ func TestMustParse(t *testing.T) {
 		t.Parallel()
 
 		s := style.MustParse("bold #ff0000")
-		assert.True(t, s.GetBold())
-		assert.True(t, isColorSet(s.GetForeground()))
+		assert.Equal(t, styleAttrs{Bold: true, Fg: "#ff0000"}, attrsOf(s))
 	})
 
 	t.Run("invalid input panics", func(t *testing.T) {
@@ -398,30 +345,9 @@ func TestRoundTrip(t *testing.T) {
 			encoded2 := style.Encode(style2)
 			assert.Equal(t, encoded, encoded2, "round-trip should be stable")
 
-			// Verify properties match.
-			assert.Equal(t, style1.GetBold(), style2.GetBold())
-			assert.Equal(t, style1.GetItalic(), style2.GetItalic())
-			assert.Equal(t, style1.GetUnderline(), style2.GetUnderline())
-
-			if isColorSet(style1.GetForeground()) {
-				require.True(t, isColorSet(style2.GetForeground()))
-
-				r1, g1, b1, _ := style1.GetForeground().RGBA()
-				r2, g2, b2, _ := style2.GetForeground().RGBA()
-				assert.Equal(t, r1, r2)
-				assert.Equal(t, g1, g2)
-				assert.Equal(t, b1, b2)
-			}
-
-			if isColorSet(style1.GetBackground()) {
-				require.True(t, isColorSet(style2.GetBackground()))
-
-				r1, g1, b1, _ := style1.GetBackground().RGBA()
-				r2, g2, b2, _ := style2.GetBackground().RGBA()
-				assert.Equal(t, r1, r2)
-				assert.Equal(t, g1, g2)
-				assert.Equal(t, b1, b2)
-			}
+			// The style parsed from the encoded string holds the same
+			// attributes.
+			assert.Equal(t, attrsOf(style1), attrsOf(style2))
 		})
 	}
 }
