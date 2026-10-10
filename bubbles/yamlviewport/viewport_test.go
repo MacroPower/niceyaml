@@ -5022,18 +5022,27 @@ func TestViewport_SearchOrdersIndexMatches(t *testing.T) {
 	}
 }
 
-// fixedSearcher is a [yamlviewport.Searcher] whose Index finds the same
-// ranges for every term.
-type fixedSearcher struct {
+// indexSearcher is a [yamlviewport.Searcher] whose Load returns index,
+// which may be nil or hold a nil pointer. It counts its Load calls.
+type indexSearcher struct {
+	index yamlviewport.Index
+	loads int
+}
+
+func (s *indexSearcher) Load(line.Sequence) yamlviewport.Index {
+	s.loads++
+
+	return s.index
+}
+
+// ptrIndex is a [yamlviewport.Index] that finds the same ranges for every
+// term. Find reads its receiver, so a call through a nil *ptrIndex panics.
+type ptrIndex struct {
 	matches position.Ranges
 }
 
-func (s fixedSearcher) Load(line.Sequence) yamlviewport.Index {
-	return s
-}
-
-func (s fixedSearcher) Find(string) position.Ranges {
-	return s.matches
+func (i *ptrIndex) Find(string) position.Ranges {
+	return i.matches
 }
 
 func TestViewport_SearchLaysOutOnlyHighlightedLines(t *testing.T) {
@@ -5074,7 +5083,7 @@ func TestViewport_SearchLaysOutOnlyHighlightedLines(t *testing.T) {
 			style.Set(kind.GenericHighlightDim, base.Italic(true)),
 		))
 
-		m := testModel(p, 40, 10, yamlviewport.WithSearcher(fixedSearcher{matches: matches}))
+		m := testModel(p, 40, 10, yamlviewport.WithSearcher(&indexSearcher{index: &ptrIndex{matches: matches}}))
 		m.SetRevision(niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\n"))
 		m.TotalRowCount()
 
@@ -5114,29 +5123,6 @@ func TestViewport_SearchLaysOutOnlyHighlightedLines(t *testing.T) {
 	}
 }
 
-// nilSearcher is a [yamlviewport.Searcher] whose Load returns index, which
-// is nil or holds a nil pointer. It counts its Load calls.
-type nilSearcher struct {
-	index yamlviewport.Index
-	loads int
-}
-
-func (s *nilSearcher) Load(line.Sequence) yamlviewport.Index {
-	s.loads++
-
-	return s.index
-}
-
-// ptrIndex is a [yamlviewport.Index] whose Find reads its receiver, so a
-// call through a nil *ptrIndex panics.
-type ptrIndex struct {
-	matches position.Ranges
-}
-
-func (i *ptrIndex) Find(string) position.Ranges {
-	return i.matches
-}
-
 func TestViewport_NilIndexFindsNothing(t *testing.T) {
 	t.Parallel()
 
@@ -5172,7 +5158,7 @@ func TestViewport_NilIndexFindsNothing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			searcher := &nilSearcher{index: tc.index}
+			searcher := &indexSearcher{index: tc.index}
 			m := testModel(testPrinter(), 80, 10, yamlviewport.WithSearcher(searcher))
 			addRevisions(&m, "a: 1\n", "a: 2\n")
 			m.SetViewMode(tc.viewMode)
