@@ -5952,46 +5952,6 @@ func TestPrinter_Layout_GutterWidth(t *testing.T) {
 	}
 }
 
-func TestAnnotationContext_ColWidth(t *testing.T) {
-	t.Parallel()
-
-	// The rendered row shows a control character as a one-cell picture, so
-	// the width counts it as one cell rather than the zero lipgloss gives
-	// the raw character.
-	ctx := printer.AnnotationContext{Content: "a: \"tab\there\""}
-
-	tcs := map[string]struct {
-		col  int
-		want int
-	}{
-		"before the control":       {col: 3, want: 3},
-		"just past the control":    {col: 8, want: 8},
-		"end of the content":       {col: 13, want: 13},
-		"past the end":             {col: 20, want: 20},
-		"negative clamps to start": {col: -1, want: 0},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, ctx.ColWidth(tc.col))
-		})
-	}
-}
-
-func TestAnnotationContext_ColWidth_CombiningMark(t *testing.T) {
-	t.Parallel()
-
-	// The accent is a combining mark that renders on the "e" before it, so
-	// a marker at its column lands under that cell rather than the next.
-	ctx := printer.AnnotationContext{Content: "k: éx"}
-
-	assert.Equal(t, 3, ctx.ColWidth(3), "the base rune")
-	assert.Equal(t, 3, ctx.ColWidth(4), "the combining mark")
-	assert.Equal(t, 4, ctx.ColWidth(5), "the rune after the mark")
-}
-
 func TestPrinter_Layout_MultiLineAnnotation(t *testing.T) {
 	t.Parallel()
 
@@ -7215,7 +7175,8 @@ func TestColWidth(t *testing.T) {
 
 	// The width is that of the rendered row. A control character shows as
 	// a one-cell picture, a wide rune takes two cells, and every rune of a
-	// grapheme cluster after its first renders within the first.
+	// grapheme cluster after its first renders within the first. An
+	// AnnotationContext measures its content the same way.
 	tcs := map[string]struct {
 		content string
 		col     int
@@ -7225,7 +7186,10 @@ func TestColWidth(t *testing.T) {
 		"negative clamps to start":   {content: "a: b", col: -1, want: 0},
 		"before a control character": {content: "a: \"tab\there\"", col: 3, want: 3},
 		"past a control character":   {content: "a: \"tab\there\"", col: 8, want: 8},
+		"end after a control":        {content: "a: \"tab\there\"", col: 13, want: 13},
 		"past the end":               {content: "a: b", col: 10, want: 10},
+		"past end after a control":   {content: "a: \"tab\there\"", col: 20, want: 20},
+		"base of a combining mark":   {content: "k: e\u0301x", col: 3, want: 3},
 		"after wide runes":           {content: "k: 日本 x", col: 5, want: 7},
 		"at a wide rune":             {content: "k: 日本 x", col: 4, want: 5},
 		"at a combining mark":        {content: "k: éx", col: 4, want: 3},
@@ -7242,6 +7206,7 @@ func TestColWidth(t *testing.T) {
 			t.Parallel()
 
 			assert.Equal(t, tc.want, printer.ColWidth(tc.content, tc.col))
+			assert.Equal(t, tc.want, printer.AnnotationContext{Content: tc.content}.ColWidth(tc.col))
 		})
 	}
 }
