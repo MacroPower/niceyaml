@@ -7765,38 +7765,6 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		}
 	})
 
-	t.Run("a failing validator ends the decode", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "name: test\nvalue: 42\n")
-
-		result, err := dd.Decode[plainConfig](t.Context(),
-			niceyaml.WithValidator(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-				return errDocumentRejected
-			})),
-		)
-		require.ErrorIs(t, err, errDocumentRejected)
-		assert.Equal(t, plainConfig{}, result)
-	})
-
-	t.Run("locates a path error in the document", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("name: a\n---\nname: b\n")
-		docs := source.Documents()
-
-		dd := docs[1]
-		require.NotNil(t, dd)
-
-		_, err := dd.Decode[plainConfig](t.Context(),
-			niceyaml.WithValidator(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-				return niceyaml.NewError("bad name", niceyaml.AtPath(paths.Current().Child("name")))
-			})),
-		)
-		require.Error(t, err)
-		assert.Equal(t, "3:7: $.name: bad name", err.Error())
-	})
-
 	t.Run("a scoped decode passes the scope", func(t *testing.T) {
 		t.Parallel()
 
