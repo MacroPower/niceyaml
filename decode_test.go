@@ -8644,7 +8644,7 @@ func TestDocument_At_Scope(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		excerpt, ok := bound.Excerpt(0)
+		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 		require.True(t, ok)
 		assert.Equal(t, "   4 |     open: \"17:00\"\n     |           ^^^^^^^", excerpt.String())
 	})
@@ -9039,7 +9039,7 @@ func TestNode_At_NotFound(t *testing.T) {
 			"   3 | hours:",
 			"     | ^^^^^",
 			"   4 |   open: 9",
-		), niceyaml.FormatError(err, 1))
+		), niceyaml.FormatError(err, niceyaml.WithContextLines(1)))
 	})
 
 	t.Run("a document with no content has no mapping to bind at", func(t *testing.T) {
@@ -12127,7 +12127,7 @@ func TestChainValidator(t *testing.T) {
 				} {
 					require.EqualError(t, err, tc.want)
 					assert.Equal(t, niceyaml.IsInvalid(alone), niceyaml.IsInvalid(err))
-					assert.Equal(t, niceyaml.FormatError(alone, 2), niceyaml.FormatError(err, 2))
+					assert.Equal(t, niceyaml.FormatError(alone), niceyaml.FormatError(err))
 
 					var bound *niceyaml.SourceError
 
@@ -12239,7 +12239,7 @@ func TestChainValidator(t *testing.T) {
 
 					require.EqualError(t, want, tc.want, step)
 					require.EqualError(t, got, tc.want, step)
-					assert.Equal(t, niceyaml.FormatError(want, 2), niceyaml.FormatError(got, 2), step)
+					assert.Equal(t, niceyaml.FormatError(want), niceyaml.FormatError(got), step)
 					assert.Equal(t, fmt.Sprintf("%+v", want), fmt.Sprintf("%+v", got), step)
 					assert.Equal(t, niceyaml.IsInvalid(want), niceyaml.IsInvalid(got), step)
 

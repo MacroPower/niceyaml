@@ -135,7 +135,7 @@ func TestNewErrorReport(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			rep := niceyaml.NewErrorReport(tc.err, 0)
+			rep := niceyaml.NewErrorReport(tc.err, niceyaml.WithContextLines(0))
 
 			assert.Equal(t, tc.want, reportExcerpts(rep))
 			assert.Equal(t, tc.wantUnresolved, reportUnresolved(rep))
@@ -146,7 +146,7 @@ func TestNewErrorReport(t *testing.T) {
 	t.Run("an excerpt holds its source", func(t *testing.T) {
 		t.Parallel()
 
-		rep := niceyaml.NewErrorReport(errors.Join(badA, badC), 0)
+		rep := niceyaml.NewErrorReport(errors.Join(badA, badC), niceyaml.WithContextLines(0))
 
 		require.Len(t, rep.Excerpts, 2)
 		assert.Same(t, first, rep.Excerpts[0].Source)
@@ -156,7 +156,7 @@ func TestNewErrorReport(t *testing.T) {
 	t.Run("an unresolved binding gives its reason", func(t *testing.T) {
 		t.Parallel()
 
-		rep := niceyaml.NewErrorReport(errors.Join(badA, farC), 0)
+		rep := niceyaml.NewErrorReport(errors.Join(badA, farC), niceyaml.WithContextLines(0))
 
 		require.Len(t, rep.Unresolved, 1)
 		require.ErrorIs(t, rep.Unresolved[0], farC)
@@ -166,7 +166,7 @@ func TestNewErrorReport(t *testing.T) {
 	t.Run("context keeps lines around each mark", func(t *testing.T) {
 		t.Parallel()
 
-		rep := niceyaml.NewErrorReport(badB, 1)
+		rep := niceyaml.NewErrorReport(badB, niceyaml.WithContextLines(1))
 
 		want := []string{stringtest.JoinLF(
 			"   1 | a: 1",
@@ -177,8 +177,8 @@ func TestNewErrorReport(t *testing.T) {
 		assert.Equal(t, want, reportExcerpts(rep))
 		assert.Equal(
 			t,
-			reportExcerpts(niceyaml.NewErrorReport(badB, 0)),
-			reportExcerpts(niceyaml.NewErrorReport(badB, -1)),
+			reportExcerpts(niceyaml.NewErrorReport(badB, niceyaml.WithContextLines(0))),
+			reportExcerpts(niceyaml.NewErrorReport(badB, niceyaml.WithContextLines(-1))),
 		)
 	})
 
@@ -186,7 +186,7 @@ func TestNewErrorReport(t *testing.T) {
 		t.Parallel()
 
 		err := errors.Join(badA, badC, farA)
-		rep := niceyaml.NewErrorReport(err, 0)
+		rep := niceyaml.NewErrorReport(err, niceyaml.WithContextLines(0))
 
 		want := stringtest.JoinLF(
 			"|-- first.yaml:1:4: $.a: bad a",
@@ -202,7 +202,7 @@ func TestNewErrorReport(t *testing.T) {
 			"no excerpt: "+rep.Unresolved[0].Unresolved().Error(),
 		)
 
-		assert.Equal(t, want, niceyaml.FormatError(err, 0))
+		assert.Equal(t, want, niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 	})
 }
 
@@ -247,7 +247,7 @@ func TestNewErrorReport_JoinOfNothing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			rep := niceyaml.NewErrorReport(tc.err, 2)
+			rep := niceyaml.NewErrorReport(tc.err)
 
 			// The tree of the error itself stays empty, so a report of its
 			// problems lists none.

@@ -208,9 +208,8 @@ import (
 //
 // A caller that calls Validate itself holds an error that no binding
 // holds yet, and its message names no path. Such a caller reads it with
-// [FormatError], as FormatError(err, 0), which puts the path in front of
-// the text the same way. That path is the one the value wrote, so it
-// reads from the value:
+// [FormatError], which puts the path in front of the text the same way.
+// That path is the one the value wrote, so it reads from the value:
 //
 //	@.close: hours check: closes before it opens
 //
@@ -1285,7 +1284,7 @@ func (n *Node) DocumentAST() *ast.DocumentNode {
 //
 //	for _, doc := range source.AllDocuments() {
 //		if err := doc.Err(); err != nil {
-//			log.Print(niceyaml.FormatError(err, 2))
+//			log.Print(niceyaml.FormatError(err))
 //
 //			continue
 //		}

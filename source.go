@@ -134,7 +134,6 @@ type Source struct {
 //   - [WithAliasLimit]
 //   - [WithReferences]
 //   - [WithExcerpts]
-//   - [WithExcerptWidth]
 //
 // [WithAllowDuplicateKeys] and [WithReferences] change what the documents
 // mean, and [WithAliasLimit] says whether the program trusts their
@@ -147,9 +146,8 @@ type Source struct {
 // [WithExcerpts] says whether the text holds something an error must not
 // show, such as a secret. The code that loads the text knows that, and
 // the code that prints an error does not, so the Source carries the
-// answer to every renderer of its errors. [WithExcerptWidth] says how
-// much of a long line an excerpt shows, and reaches every renderer the
-// same way.
+// answer to every renderer of its errors. How much of a line an excerpt
+// shows is a choice of the renderer, which [ExcerptOption] configures.
 type SourceOption func(*sourceConfig)
 
 // sourceConfig holds the settings a [SourceOption] configures. An option
@@ -164,10 +162,6 @@ type sourceConfig struct {
 	// Holds the text of each reference document from WithReferences, in
 	// the order every decode reads them.
 	references [][]byte
-	// The columns an excerpt shows around each mark on a long line, where
-	// 0 shows every line whole. It counts once hasExcerptWidth is set,
-	// and the width is [DefaultExcerptWidth] until then.
-	excerptWidth int
 	// Accepts a mapping with the same key twice when parsing and decoding.
 	allowDuplicateKeys bool
 	// Turns off the alias limit for every reader of the documents.
@@ -179,8 +173,6 @@ type sourceConfig struct {
 	// of the Source do not hold and the document [NewSourceFromLayers]
 	// builds does.
 	noReferenceExcerpts bool
-	// Says [WithExcerptWidth] set excerptWidth.
-	hasExcerptWidth bool
 }
 
 // WithName is a [SourceOption] that sets the name for the [Source], which
@@ -543,47 +535,6 @@ func WithExcerpts(enabled bool) SourceOption {
 	}
 }
 
-// WithExcerptWidth is a [SourceOption] that sets how many columns of a
-// long line an error excerpt shows around each location it marks. The
-// default is [DefaultExcerptWidth]. A line of cols columns or fewer
-// prints whole. A longer line prints a window of cols columns around
-// each mark, with "..." in place of the columns the windows leave out,
-// as [line.View.Clip] cuts a view. An error at the end of a document
-// minified onto one line reads this way at a width of 48:
-//
-//	min.json:1:657817: $.items[20000].port: 0 is less than 1
-//
-//	   1 | ...m19999","port":20000},{"name":"last","port":0}]}
-//	     |                                                ^
-//
-// Such a document, or a long encoded value on a line near an error, thus
-// adds a row of bounded length to a log. A context line with no mark
-// keeps its first cols columns. Pass 0 for a Source whose excerpts show
-// every line whole, and a negative cols counts as 0:
-//
-//	source := niceyaml.NewSourceFromString(text, niceyaml.WithExcerptWidth(0))
-//
-// The option covers the excerpts this module builds, the views
-// [SourceError.Excerpt], [SourceError.Excerpts], and [Excerpts] return.
-// [FormatError], the %+v verb, and
-// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] render those
-// views. A caller that holds one shows its lines whole with
-// excerpt.Clip(0). [Annotate] marks a view the caller supplies and clips
-// nothing, so the caller clips that view to [Source.ExcerptWidth] with
-// [line.View.Clip]. The width counts columns of the text, so it bounds
-// what an excerpt adds to a log. To fit rows to a terminal, wrap them
-// with the printer option
-// [go.jacobcolvin.com/niceyaml/printer.WithWrap].
-//
-// The document [NewSourceFromLayers] builds takes the width from the
-// lowest layer, as it takes its other settings.
-func WithExcerptWidth(cols int) SourceOption {
-	return func(c *sourceConfig) {
-		c.excerptWidth = max(0, cols)
-		c.hasExcerptWidth = true
-	}
-}
-
 // referenceReaders returns a go-yaml option that hands the decoder a new
 // reader over each of docs, so every decode reads the documents from the
 // start.
@@ -818,20 +769,6 @@ func (s *Source) FS() fs.FS {
 // it does for a Source with no option.
 func (s *Source) Excerpts() bool {
 	return s == nil || !s.noExcerpts
-}
-
-// ExcerptWidth returns the number of columns an error excerpt of the
-// [Source] shows around each location it marks on a long line, which
-// [WithExcerptWidth] sets. It returns [DefaultExcerptWidth] for a Source
-// with no option and for a nil Source, and 0 for one whose excerpts show
-// every line whole. A renderer that builds an excerpt of its own, from
-// [Source.View] and [Annotate], passes it to [line.View.Clip].
-func (s *Source) ExcerptWidth() int {
-	if s == nil || !s.hasExcerptWidth {
-		return DefaultExcerptWidth
-	}
-
-	return s.excerptWidth
 }
 
 // Text returns the text the [Source] read, byte for byte. It keeps what
@@ -1075,7 +1012,7 @@ func (s *Source) Documents() []*Node {
 //
 //	for _, doc := range source.AllDocuments() {
 //		if err := doc.Err(); err != nil {
-//			log.Print(niceyaml.FormatError(err, 2))
+//			log.Print(niceyaml.FormatError(err))
 //
 //			continue
 //		}
@@ -1122,7 +1059,7 @@ func (s *Source) AllDocuments() []*Node {
 //
 //	err := source.ValidateDocuments(ctx, reg)
 //	if err != nil {
-//		log.Print(niceyaml.FormatError(err, 2))
+//		log.Print(niceyaml.FormatError(err))
 //	}
 //
 // Each document runs v as [Node.Validate] runs it. ValidateDocuments

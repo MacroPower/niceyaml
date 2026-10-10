@@ -50,13 +50,12 @@ const errorConnectorWidth = 4
 //
 // Each excerpt keeps the context lines [WithContextLines] sets on either
 // side of each marked line. A line longer than the width
-// [niceyaml.WithExcerptWidth] sets for its source shows a window of that
-// many columns around each location on it, with "..." in place of the
-// rest. An error joined from one bound error per document of a file
-// therefore prints that file once, with the errors of every document on
-// it. A binding whose children point into another file, such as a detail
-// that names where a value was first declared, prints an excerpt of that
-// file too.
+// [WithExcerptWidth] sets shows a window of that many columns around
+// each location on it, with "..." in place of the rest. An error joined
+// from one bound error per document of a file therefore prints that file
+// once, with the errors of every document on it. A binding whose
+// children point into another file, such as a detail that names where a
+// value was first declared, prints an excerpt of that file too.
 //
 // # Carets
 //
@@ -118,11 +117,12 @@ const errorConnectorWidth = 4
 // # Other Renderers
 //
 // PrintError draws the [niceyaml.ErrorReport] that
-// [niceyaml.NewErrorReport] builds for err with the context lines of the
-// printer, and [niceyaml.FormatError] draws the same report as plain
-// text.
+// [niceyaml.NewErrorReport] builds for err with the context lines and
+// the excerpt width of the printer, and [niceyaml.FormatError] draws the
+// same report as plain text.
 func (p *Printer) PrintError(err error) string {
-	rep := niceyaml.NewErrorReport(err, p.contextLines)
+	rep := niceyaml.NewErrorReport(err,
+		niceyaml.WithContextLines(p.contextLines), niceyaml.WithExcerptWidth(p.excerptWidth))
 
 	parts := make([]string, 0, 1+len(rep.Excerpts)+len(rep.Unresolved))
 

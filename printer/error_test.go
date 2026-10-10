@@ -152,7 +152,8 @@ func TestPrinter_PrintError_Report(t *testing.T) {
 
 	// PrintError draws the report built with the context lines of the
 	// printer: the tree, each excerpt below its name, then each reason.
-	rep := niceyaml.NewErrorReport(err, p.ContextLines())
+	rep := niceyaml.NewErrorReport(err,
+		niceyaml.WithContextLines(p.ContextLines()), niceyaml.WithExcerptWidth(p.ExcerptWidth()))
 
 	require.Len(t, rep.Excerpts, 2)
 	require.Len(t, rep.Unresolved, 1)

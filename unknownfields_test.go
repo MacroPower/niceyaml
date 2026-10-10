@@ -798,7 +798,7 @@ func TestDocument_Decode_UnknownFields_Source(t *testing.T) {
 		"     | ...",
 		"   3 | bar: 2",
 		`     | ^^^ unknown field "bar"`,
-	), strings.TrimRight(niceyaml.FormatError(err, 0), "\n"))
+	), strings.TrimRight(niceyaml.FormatError(err, niceyaml.WithContextLines(0)), "\n"))
 }
 
 func TestDocument_DecodeInto_UnknownFields_EachDocument(t *testing.T) {

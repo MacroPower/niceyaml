@@ -39,7 +39,7 @@ func ExampleNewSourceFromLayers() {
 	// The port of the server comes from base.yaml, and the list of servers
 	// from prod.yaml.
 	_, err := niceyaml.NewSourceFromLayers(base, prod).Decode[layerConfig](ctx)
-	fmt.Println(niceyaml.FormatError(err, 0))
+	fmt.Println(niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 	// Output:
 	// |-- prod.yaml:4:3: $.servers[0].port: port must be at least 1
@@ -130,7 +130,7 @@ func ExampleNewSourceFromLayers_environment() {
 	// The schema finds the port it requires in the environment, and the
 	// check of the server reports the port in that layer.
 	_, err = niceyaml.NewSourceFromLayers(base, env).Decode[layerConfig](ctx, niceyaml.WithValidator(requires))
-	fmt.Println(niceyaml.FormatError(err, 0))
+	fmt.Println(niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 	// Output:
 	// environment:2:9: $.server.port: port must be at least 1
@@ -1310,7 +1310,11 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 
 		_, got := doc.DecodeAt[problemTimed](t.Context(), server)
 		require.EqualError(t, got, want.Error())
-		assert.Equal(t, niceyaml.FormatError(want, 0), niceyaml.FormatError(got, 0))
+		assert.Equal(
+			t,
+			niceyaml.FormatError(want, niceyaml.WithContextLines(0)),
+			niceyaml.FormatError(got, niceyaml.WithContextLines(0)),
+		)
 	})
 
 	t.Run("an error binds in the file of a layer", func(t *testing.T) {
@@ -2187,7 +2191,7 @@ func TestNewSourceFromLayers_ExcerptsOff(t *testing.T) {
 			err := tc.fail(t)
 			require.Error(t, err)
 
-			assert.Equal(t, tc.want, niceyaml.FormatError(err, niceyaml.DefaultContextLines))
+			assert.Equal(t, tc.want, niceyaml.FormatError(err))
 
 			for renderer, got := range renderings(err) {
 				assert.NotContains(t, got, excerptSecret, renderer)

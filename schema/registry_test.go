@@ -3354,7 +3354,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		require.EqualError(t, err, "app.yaml: no matching schema")
 		assert.Equal(t,
 			"app.yaml: no matching schema\n|-- no schema directive\n`-- no kind",
-			niceyaml.FormatError(err, 0),
+			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
 		)
 		assert.Equal(t,
 			"app.yaml: no matching schema\n|-- no schema directive\n`-- no kind",
@@ -3393,7 +3393,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		require.EqualError(t, err, "m.yaml: document 3: no matching schema")
 		assert.Equal(t,
 			"m.yaml: document 3: no matching schema\n`-- no schema directive",
-			niceyaml.FormatError(err, 0),
+			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
 		)
 		assert.Equal(t,
 			"m.yaml: document 3: no matching schema\n`-- no schema directive",

@@ -915,11 +915,11 @@ func (l resolvedLayer) read(ctx context.Context) (*mergedValue, error) {
 // The Source holds the merged value as YAML text below the preamble of
 // the lowest layer. It takes its name, its file path, and its file system
 // from the Source of that layer, with the settings
-// [WithAllowDuplicateKeys], [WithAliasLimit], and [WithExcerptWidth] gave
-// it. It takes no reference documents, since the merged value holds no
-// alias. It has excerpts off when [showsLayers] reports false, whatever
-// [WithExcerpts] gave the lowest layer. When given adds no layer, the
-// Source is empty and has no name, and its errors bind with no position.
+// [WithAllowDuplicateKeys] and [WithAliasLimit] gave it. It takes no
+// reference documents, since the merged value holds no alias. It has
+// excerpts off when [showsLayers] reports false, whatever [WithExcerpts]
+// gave the lowest layer. When given adds no layer, the Source is empty
+// and has no name, and its errors bind with no position.
 func mergeLayers(ctx context.Context, given []Layer) *Source {
 	layers := resolveLayers(given)
 	if len(layers) == 0 {

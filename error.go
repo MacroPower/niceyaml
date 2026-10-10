@@ -259,15 +259,15 @@ var (
 // Error puts the resolved position and the path in front of the whole
 // text, the context included, so a bound error reads
 // "name:line:col: $.path: msg" or "name:line:col: msg". A program that
-// prints an Error no binding holds yet reads it with [FormatError], as
-// FormatError(err, 0), which puts the path in front of the text the same
-// way through any wrapper, as the Error wrote it, such as
-// "@.path: msg". A program that returns or logs such an Error binds it
-// with [BindValue], and the text of that error names each path. The
-// errors a summary heads and the details of
-// an Error are structure rather than text. [Error.Members] and [Error.Details]
-// return them, and the [SourceError] that binds the Error binds each one
-// as a child at the location its own error carries, if any.
+// prints an Error no binding holds yet reads it with [FormatError],
+// which puts the path in front of the text the same way through any
+// wrapper, as the Error wrote it, such as "@.path: msg". A program that
+// returns or logs such an Error binds it with [BindValue], and the text
+// of that error names each path. The errors a summary heads and the
+// details of an Error are structure rather than text. [Error.Members]
+// and [Error.Details] return them, and the [SourceError] that binds the
+// Error binds each one as a child at the location its own error carries,
+// if any.
 // [Error.Format] prints them as a tree under the %+v verb.
 //
 // # Matching
@@ -1254,7 +1254,7 @@ func (e *Error) Error() string {
 func (e *Error) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		writeString(f, formatError(e, DefaultContextLines, ErrorListLimit))
+		writeString(f, formatError(e, defaultExcerptConfig(), ErrorListLimit))
 
 	default:
 		_, _ = fmt.Fprintf(f, fmt.FormatString(f, verb), e.Error()) //nolint:errcheck // Formatter has no error channel.
@@ -1812,7 +1812,7 @@ func locateMerged(b binder, node *Node, at position.Position, l locus) (location
 // joined the error:
 //
 //	if _, err := source.File(); err != nil {
-//		log.Print(niceyaml.FormatError(err, 2))
+//		log.Print(niceyaml.FormatError(err))
 //	}
 //
 // # Paths
@@ -1981,8 +1981,106 @@ const DefaultContextLines = 2
 
 // DefaultExcerptWidth is the number of columns an error excerpt shows
 // around each location it marks on a line longer than that, unless
-// [WithExcerptWidth] sets another for the [Source].
+// [WithExcerptWidth] sets another for the excerpt.
 const DefaultExcerptWidth = 160
+
+// ExcerptOption configures the excerpts of an error, which [FormatError],
+// [NewErrorReport], [Excerpts], [SourceError.Excerpt], and
+// [SourceError.Excerpts] build. An excerpt is a view of the lines of a
+// source around the locations an error marks in it, and the options say
+// how many lines it keeps around each one and how much of a long line it
+// shows. The renderer of an error chooses both, so one program renders
+// the same error with whole lines in a terminal and with bounded rows in
+// a log.
+//
+// Available options:
+//   - [WithContextLines]
+//   - [WithExcerptWidth]
+//
+// [go.jacobcolvin.com/niceyaml/printer.Printer] takes the same settings
+// through its own options, [go.jacobcolvin.com/niceyaml/printer.WithContextLines]
+// and [go.jacobcolvin.com/niceyaml/printer.WithExcerptWidth], for the
+// excerpts [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draws.
+type ExcerptOption func(*excerptConfig)
+
+// excerptConfig holds the settings an [ExcerptOption] configures.
+type excerptConfig struct {
+	// The lines of unchanged content an excerpt keeps on either side of
+	// each marked line.
+	context int
+	// The columns an excerpt shows around each mark on a long line, where
+	// 0 shows every line whole.
+	width int
+}
+
+// defaultExcerptConfig returns the settings an excerpt has when no
+// [ExcerptOption] changes them: [DefaultContextLines] lines of context
+// and [DefaultExcerptWidth] columns of width.
+func defaultExcerptConfig() excerptConfig {
+	return excerptConfig{context: DefaultContextLines, width: DefaultExcerptWidth}
+}
+
+// newExcerptConfig returns the settings of opts applied in order over
+// [defaultExcerptConfig].
+func newExcerptConfig(opts []ExcerptOption) excerptConfig {
+	cfg := defaultExcerptConfig()
+
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+
+	return cfg
+}
+
+// WithContextLines is an [ExcerptOption] that sets how many lines of
+// unchanged content an excerpt keeps on either side of each marked line,
+// as [line.View.Hunks] keeps them. The default is [DefaultContextLines].
+// A count of 0 shows the marked lines alone, and a negative count counts
+// as 0:
+//
+//	log.Print(niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
+func WithContextLines(n int) ExcerptOption {
+	return func(c *excerptConfig) {
+		c.context = max(0, n)
+	}
+}
+
+// WithExcerptWidth is an [ExcerptOption] that sets how many columns of a
+// long line an excerpt shows around each location it marks. The default
+// is [DefaultExcerptWidth]. A line of cols columns or fewer prints whole.
+// A longer line prints a window of cols columns around each mark, with
+// "..." in place of the columns the windows leave out, as
+// [line.View.Clip] cuts a view. An error at the end of a document
+// minified onto one line reads this way at a width of 48:
+//
+//	min.json:1:657817: $.items[20000].port: 0 is less than 1
+//
+//	   1 | ...m19999","port":20000},{"name":"last","port":0}]}
+//	     |                                                ^
+//
+// Such a document, or a long encoded value on a line near an error, thus
+// adds a row of bounded length to a log. A context line with no mark
+// keeps its first cols columns. Pass 0 for excerpts that show every line
+// whole, and a negative cols counts as 0:
+//
+//	fmt.Print(niceyaml.FormatError(err, niceyaml.WithExcerptWidth(0)))
+//
+// The width counts columns of the text and drops the columns outside
+// each window, so it bounds what an excerpt adds to a log. To fit rows
+// to a terminal, which folds a row and keeps every column, wrap them
+// with the printer option [go.jacobcolvin.com/niceyaml/printer.WithWrap].
+// The %+v verb of an [*Error] or a [*SourceError] renders at the default
+// width, since a verb takes no option. A program that logs its errors
+// with %+v and needs another width renders them with [FormatError].
+// [Annotate] marks a view the caller supplies and clips nothing, so the
+// caller clips that view with [line.View.Clip].
+func WithExcerptWidth(cols int) ExcerptOption {
+	return func(c *excerptConfig) {
+		c.width = max(0, cols)
+	}
+}
 
 // ErrorListLimit is the number of errors [SourceError.Error] lists below
 // its first line. A message that holds more ends with a line that counts
@@ -3813,7 +3911,7 @@ func (e *SourceError) all(seen map[*SourceError]bool, yield func(*SourceError) b
 // such as one section per document of a file, walks it:
 //
 //	for bound := range niceyaml.Bindings(err) {
-//		fmt.Println(niceyaml.FormatError(bound, 2))
+//		fmt.Println(niceyaml.FormatError(bound))
 //	}
 //
 // [FormatError] renders the whole error instead, as one tree and one
@@ -3923,8 +4021,10 @@ func AllBindings(err error) iter.Seq[*SourceError] {
 // every problem.
 //
 // The excerpt shows lines of the source around the location, each cut
-// to the width [WithExcerptWidth] sets for the source, so a logger that
-// formats an error with %+v writes those lines into the log.
+// to [DefaultExcerptWidth] columns around the location, so a logger that
+// formats an error with %+v writes rows of bounded length into the log.
+// A program that needs another width or more context renders the error
+// with [FormatError] and its options.
 // Zap does so for every error that implements [fmt.Formatter]. Its
 // zap.Error field holds [SourceError.Error] under the key "error" and
 // the %+v output under "errorVerbose". The handlers of [log/slog] read
@@ -3934,7 +4034,7 @@ func AllBindings(err error) iter.Seq[*SourceError] {
 func (e *SourceError) Format(f fmt.State, verb rune) {
 	switch {
 	case verb == 'v' && f.Flag('+'):
-		writeString(f, formatError(e, DefaultContextLines, ErrorListLimit))
+		writeString(f, formatError(e, defaultExcerptConfig(), ErrorListLimit))
 
 	default:
 		_, _ = fmt.Fprintf(f, fmt.FormatString(f, verb), e.Error()) //nolint:errcheck // Formatter has no error channel.
@@ -3985,10 +4085,10 @@ func (e *SourceError) LogValue() slog.Value {
 // detail that names where a value was first declared, shows an excerpt of
 // that file too. Each excerpt keeps context lines of
 // unchanged content on either side of each marked line and renders as
-// [line.View.String] renders a view. A line longer than the excerpt width
-// of its source, which is [DefaultExcerptWidth] columns unless
-// [WithExcerptWidth] set another, shows a window of that many columns
-// around each location on it, with "..." in place of the rest. Each line
+// [line.View.String] renders a view. A line longer than the excerpt
+// width, which is [DefaultExcerptWidth] columns unless [WithExcerptWidth]
+// among opts sets another, shows a window of that many columns around
+// each location on it, with "..." in place of the rest. Each line
 // sits behind its number,
 // with carets under the columns of every location on the row below and
 // the message of each error below the binding beside its caret. Among
@@ -4029,7 +4129,7 @@ func (e *SourceError) LogValue() slog.Value {
 // wrapped, and it is what a program logs when it holds any error:
 //
 //	err := fmt.Errorf("load %s: %w", name, doc.Bind(check(cfg)))
-//	log.Print(niceyaml.FormatError(err, 2))
+//	log.Print(niceyaml.FormatError(err))
 //
 // # Problem Count
 //
@@ -4054,18 +4154,18 @@ func (e *SourceError) LogValue() slog.Value {
 // err, and [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draws
 // the same report with styles. A renderer of its own draws that report
 // too, so it shows the same tree, excerpts, and reasons.
-func FormatError(err error, context int) string {
-	return formatError(err, context, 0)
+func FormatError(err error, opts ...ExcerptOption) string {
+	return formatError(err, newExcerptConfig(opts), 0)
 }
 
 // formatError renders err as [FormatError] documents it, from the report
-// [newErrorReport] builds for err with context and limit. The tree comes
+// [newErrorReport] builds for err with the excerpt settings and limit. The tree comes
 // first, as [renderErrorTree] lays it out. Each excerpt follows as
 // [line.View.String] renders it, below the name of its source when the
 // excerpt has Named set. A line starting "no excerpt:" then gives the
 // reason of each unresolved binding.
-func formatError(err error, context, limit int) string {
-	rep := newErrorReport(err, context, limit)
+func formatError(err error, cfg excerptConfig, limit int) string {
+	rep := newErrorReport(err, cfg, limit)
 
 	parts := make([]string, 0, 1+len(rep.Excerpts)+len(rep.Unresolved))
 	parts = append(parts, renderErrorTree(rep.Tree))
@@ -4233,7 +4333,7 @@ func (e *SourceError) Position() (position.Position, bool) {
 // is [ErrAmbiguousPath]. A renderer names the reason in place of the
 // excerpt:
 //
-//	if excerpt, ok := bound.Excerpt(2); ok {
+//	if excerpt, ok := bound.Excerpt(); ok {
 //		fmt.Println(excerpt)
 //	} else if reason := bound.Unresolved(); reason != nil {
 //		fmt.Println("no excerpt:", reason)
@@ -4501,16 +4601,15 @@ func Annotate(err error, view *line.View) bool {
 // Distant locations become separate hunks, and the first line of each hunk
 // after the first carries a "..." annotation above it.
 // [line.View.Clip] then cuts each line longer than the width
-// [Source.ExcerptWidth] returns to a window of that many columns around
-// each location on it, with "..." in place of the rest. The view shows
-// whole lines for a Source that [WithExcerptWidth] set to 0, and
-// excerpt.Clip(0) returns a view that does for any Source. The lines keep
-// the numbers they have in the source, so any
+// [WithExcerptWidth] sets to a window of that many columns around each
+// location on it, with "..." in place of the rest. The context lines and
+// the width come from opts, as [ExcerptOption] describes, and the view
+// shows whole lines at a width of 0. The lines keep the numbers they
+// have in the source, so any
 // [go.jacobcolvin.com/niceyaml/printer.Printer] renders the excerpt
 // with the file's line numbers, as it renders the hunks of a diff. A
-// negative context shows the marked lines alone, as 0 does. A caller
-// that marks several errors on one view, or adds search matches to it,
-// takes the hunks of that view the same way.
+// caller that marks several errors on one view, or adds search matches
+// to it, takes the hunks of that view the same way.
 //
 // Excerpt reports false, with no view, when no location in the tree
 // resolves in the source the error is bound to, even when a node bound
@@ -4524,14 +4623,14 @@ func Annotate(err error, view *line.View) bool {
 //
 // Excerpt also reports false for an error bound to a source with
 // excerpts off, as [WithExcerpts] describes, whatever resolves there.
-func (e *SourceError) Excerpt(context int) (*line.View, bool) {
+func (e *SourceError) Excerpt(opts ...ExcerptOption) (*line.View, bool) {
 	if e == nil {
 		return nil, false
 	}
 
 	_, positions := excerptPositions([]*SourceError{e})
 
-	return e.source.excerpt(positions[e.source], context)
+	return e.source.excerpt(positions[e.source], newExcerptConfig(opts))
 }
 
 // Excerpts returns an iterator over one excerpt per source the tree of
@@ -4545,7 +4644,7 @@ func (e *SourceError) Excerpt(context int) (*line.View, bool) {
 // names the lines of a template beside it renders as one excerpt of
 // each file:
 //
-//	for src, excerpt := range bound.Excerpts(2) {
+//	for src, excerpt := range bound.Excerpts() {
 //		fmt.Println(src.Name())
 //		fmt.Println(excerpt)
 //	}
@@ -4556,7 +4655,7 @@ func (e *SourceError) Excerpt(context int) (*line.View, bool) {
 //
 // A source with excerpts off, as [WithExcerpts] describes, yields
 // nothing either, and the other sources of the tree yield theirs.
-func (e *SourceError) Excerpts(context int) iter.Seq2[*Source, *line.View] {
+func (e *SourceError) Excerpts(opts ...ExcerptOption) iter.Seq2[*Source, *line.View] {
 	return func(yield func(*Source, *line.View) bool) {
 		if e == nil {
 			return
@@ -4564,7 +4663,7 @@ func (e *SourceError) Excerpts(context int) iter.Seq2[*Source, *line.View] {
 
 		sources, positions := excerptPositions([]*SourceError{e})
 
-		yieldExcerpts(sources, positions, context, yield)
+		yieldExcerpts(sources, positions, newExcerptConfig(opts), yield)
 	}
 }
 
@@ -4573,10 +4672,9 @@ func (e *SourceError) Excerpts(context int) iter.Seq2[*Source, *line.View] {
 // below each one. The sources come in the order the bindings reach them.
 // Each excerpt is a fresh [Source.View] with the location of every one of
 // those bindings marked on it, cut to the hunks around them and clipped
-// to the excerpt width of its source, as [SourceError.Excerpt] cuts one.
-// An error joined from one binding per
-// document of a file thus yields one excerpt of that file with every
-// document's errors on it:
+// to the width opts set, as [SourceError.Excerpt] cuts one. An error
+// joined from one binding per document of a file thus yields one excerpt
+// of that file with every document's errors on it:
 //
 //	for _, doc := range docs {
 //		errs = append(errs, doc.Validate(ctx, schema))
@@ -4603,24 +4701,25 @@ func (e *SourceError) Excerpts(context int) iter.Seq2[*Source, *line.View] {
 // excerpt per binding, such as one section per document, takes
 // [SourceError.Excerpts] of each binding [Bindings] yields. An err with
 // no bindings, and a nil err, yield nothing.
-func Excerpts(err error, context int) iter.Seq2[*Source, *line.View] {
+func Excerpts(err error, opts ...ExcerptOption) iter.Seq2[*Source, *line.View] {
 	return func(yield func(*Source, *line.View) bool) {
 		sources, positions := excerptPositions(slices.Collect(Bindings(err)))
 
-		yieldExcerpts(sources, positions, context, yield)
+		yieldExcerpts(sources, positions, newExcerptConfig(opts), yield)
 	}
 }
 
 // yieldExcerpts yields the excerpt of each of sources that has one, in
-// order, as [Source.excerpt] builds it from the positions of that source.
+// order, as [Source.excerpt] builds it from the positions of that source
+// with the settings of cfg.
 func yieldExcerpts(
 	sources []*Source,
 	positions map[*Source][]errorPosition,
-	context int,
+	cfg excerptConfig,
 	yield func(*Source, *line.View) bool,
 ) {
 	for _, src := range sources {
-		excerpt, ok := src.excerpt(positions[src], context)
+		excerpt, ok := src.excerpt(positions[src], cfg)
 		if !ok {
 			continue
 		}
@@ -4633,13 +4732,13 @@ func yieldExcerpts(
 
 // excerpt returns the excerpt of s for positions, the resolved locations
 // of the nodes bound to s: a fresh view of the source with the positions
-// marked, cut to the hunks around them with context lines. The view
-// clips its lines to the width [Source.ExcerptWidth] returns. Every
-// excerpt of an error comes from here, so the check of [WithExcerpts]
-// and the clip of [WithExcerptWidth] each stand in one place. It reports
-// false, with no view, when positions mark no line of s, and for a
-// Source whose text WithExcerpts keeps out of excerpts.
-func (s *Source) excerpt(positions []errorPosition, context int) (*line.View, bool) {
+// marked, cut to the hunks around them with the context lines of cfg and
+// clipped to its width. Every excerpt of an error comes from here, so
+// the check of [WithExcerpts] and the clip of [WithExcerptWidth] each
+// stand in one place. It reports false, with no view, when positions
+// mark no line of s, and for a Source whose text WithExcerpts keeps out
+// of excerpts.
+func (s *Source) excerpt(positions []errorPosition, cfg excerptConfig) (*line.View, bool) {
 	if !s.Excerpts() {
 		return nil, false
 	}
@@ -4650,7 +4749,7 @@ func (s *Source) excerpt(positions []errorPosition, context int) (*line.View, bo
 		return nil, false
 	}
 
-	return view.Hunks(context).Clip(s.ExcerptWidth()), true
+	return view.Hunks(cfg.context).Clip(cfg.width), true
 }
 
 // marks reports whether the location of e, or of a binding below it,

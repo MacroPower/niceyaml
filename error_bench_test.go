@@ -51,7 +51,7 @@ func BenchmarkSourceError_ExcerptOneLine(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				_, _ = bound.Excerpt(2)
+				_, _ = bound.Excerpt()
 			}
 		})
 	}
@@ -90,7 +90,7 @@ func BenchmarkSourceError_Excerpts(b *testing.B) {
 			b.ReportAllocs()
 
 			for b.Loop() {
-				for range bound.Excerpts(2) {
+				for range bound.Excerpts() {
 				}
 			}
 		})

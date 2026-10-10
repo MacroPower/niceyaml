@@ -178,11 +178,10 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 // scalar or a string of several lines reads as one double-quoted line.
 // The Source takes its [Source.Name], its [Source.FilePath], and its
 // [Source.FS] from the Source of the lowest layer, with what
-// [WithAllowDuplicateKeys], [WithAliasLimit], and [WithExcerptWidth] set
-// there. Its text holds values of every layer, so [Source.Excerpts]
-// reports false for it when the Source of any layer has excerpts off, as
-// [WithExcerpts] describes. A call with no layer gives an empty Source
-// with no name.
+// [WithAllowDuplicateKeys] and [WithAliasLimit] set there. Its text
+// holds values of every layer, so [Source.Excerpts] reports false for it
+// when the Source of any layer has excerpts off, as [WithExcerpts]
+// describes. A call with no layer gives an empty Source with no name.
 //
 // [Source.Document] returns the root Node of the merged document, the
 // Node a [Validator] gets. A caller reads one value of the layers

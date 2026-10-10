@@ -83,6 +83,13 @@ type Printer struct {
 // context by default.
 const DefaultContextLines = niceyaml.DefaultContextLines
 
+// DefaultExcerptWidth is the number of columns an excerpt of
+// [Printer.PrintError] shows around each error location on a long line
+// unless [WithExcerptWidth] sets another. It is
+// [niceyaml.DefaultExcerptWidth], the width [niceyaml.FormatError] uses
+// by default.
+const DefaultExcerptWidth = niceyaml.DefaultExcerptWidth
+
 // New creates a new [*Printer].
 // By default it uses [style.Default], [DefaultGutter], and [DefaultAnnotation].
 func New(opts ...Option) *Printer {
@@ -92,6 +99,7 @@ func New(opts ...Option) *Printer {
 		annotationFunc: DefaultAnnotation,
 		blends:         newBlendCache(),
 		contextLines:   DefaultContextLines,
+		excerptWidth:   DefaultExcerptWidth,
 	}
 
 	p.apply(opts)
@@ -154,6 +162,7 @@ type config struct {
 	containerWidth int
 	maxNumber      int
 	contextLines   int
+	excerptWidth   int
 	hasCustomStyle bool
 }
 
@@ -905,6 +914,19 @@ func WithContextLines(n int) Option {
 	}
 }
 
+// WithExcerptWidth is an [Option] that sets how many columns of a long
+// line an excerpt of [Printer.PrintError] shows around each error
+// location, as [niceyaml.WithExcerptWidth] sets it for
+// [niceyaml.FormatError]. The default is [DefaultExcerptWidth], a width
+// of 0 shows every line whole, and a negative width counts as 0. The
+// width drops the columns outside each window, where [WithWrap] folds a
+// row and keeps every column, so the two settings are independent.
+func WithExcerptWidth(cols int) Option {
+	return func(c *config) {
+		c.excerptWidth = max(0, cols)
+	}
+}
+
 // Wrap returns the width the printer wraps words at, or 0 when the
 // printer does not wrap.
 func (p *Printer) Wrap() int {
@@ -921,6 +943,12 @@ func (p *Printer) ContainerWidth() int {
 // shows around each error location.
 func (p *Printer) ContextLines() int {
 	return p.contextLines
+}
+
+// ExcerptWidth returns the number of columns an excerpt of
+// [Printer.PrintError] shows around each error location on a long line.
+func (p *Printer) ExcerptWidth() int {
+	return p.excerptWidth
 }
 
 // MaxNumber returns the line number the gutter sizes itself for when

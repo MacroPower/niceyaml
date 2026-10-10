@@ -17,7 +17,7 @@ import (
 // same parts, so it shows the excerpts, the names, and the reasons they
 // show:
 //
-//	rep := niceyaml.NewErrorReport(err, 2)
+//	rep := niceyaml.NewErrorReport(err)
 //
 //	drawTree(rep.Tree)
 //
@@ -86,11 +86,10 @@ type ErrorExcerpt struct {
 }
 
 // NewErrorReport creates a new [ErrorReport] from err. Each excerpt keeps
-// context lines of unchanged content on either side of each marked line,
-// and a negative context keeps the marked lines alone, as 0 does. A nil
-// err yields the zero ErrorReport.
-func NewErrorReport(err error, context int) ErrorReport {
-	return newErrorReport(err, context, 0)
+// the context lines and the width the options set, as [ExcerptOption]
+// describes. A nil err yields the zero ErrorReport.
+func NewErrorReport(err error, opts ...ExcerptOption) ErrorReport {
+	return newErrorReport(err, newExcerptConfig(opts), 0)
 }
 
 // newErrorReport builds the report [NewErrorReport] documents. With a
@@ -99,7 +98,7 @@ func NewErrorReport(err error, context int) ErrorReport {
 // leaves out, as [skippedBindings] finds them, then mark no excerpt,
 // count toward no source, and get no reason, so the report shows the
 // problems its tree shows.
-func newErrorReport(err error, context, limit int) ErrorReport {
+func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 	if err == nil {
 		return ErrorReport{}
 	}
@@ -120,7 +119,7 @@ func newErrorReport(err error, context, limit int) ErrorReport {
 
 	var rep ErrorReport
 
-	yieldExcerpts(sources, positions, context, func(src *Source, view *line.View) bool {
+	yieldExcerpts(sources, positions, cfg, func(src *Source, view *line.View) bool {
 		rep.Excerpts = append(rep.Excerpts, ErrorExcerpt{
 			Source: src,
 			View:   view,

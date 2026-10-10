@@ -1258,7 +1258,7 @@ func TestErrorTree_New_ExcerptsOff(t *testing.T) {
 				require.NotNil(t, node.Bound)
 				assert.False(t, node.Bound.Source().Excerpts())
 
-				_, ok := node.Bound.Excerpt(0)
+				_, ok := node.Bound.Excerpt(niceyaml.WithContextLines(0))
 				assert.False(t, ok)
 			}
 		})
@@ -1529,7 +1529,7 @@ func TestErrorTree_All_PrintedOrder(t *testing.T) {
 
 	// The tree [niceyaml.FormatError] prints holds one row per node, in the
 	// same order, each behind its connector.
-	tree, _, _ := strings.Cut(niceyaml.FormatError(err, 0), "\n\n")
+	tree, _, _ := strings.Cut(niceyaml.FormatError(err, niceyaml.WithContextLines(0)), "\n\n")
 	printed := strings.Split(tree, "\n")
 	require.Len(t, printed, len(rows))
 

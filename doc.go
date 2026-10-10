@@ -29,7 +29,7 @@
 //		// FormatError prints the message and a plain-text excerpt of
 //		// the YAML with the problematic location marked and two lines
 //		// of context. err.Error() is the message and position alone.
-//		log.Print(niceyaml.FormatError(err, 2))
+//		log.Print(niceyaml.FormatError(err))
 //	}
 //
 // # Architecture
@@ -190,7 +190,7 @@
 // search matches, renders the same way. The output holds no escape
 // sequences, so it goes into a log as it is:
 //
-//	log.Print(niceyaml.FormatError(err, 2))
+//	log.Print(niceyaml.FormatError(err))
 //
 // An [*Error] or a [*SourceError] logged as a [log/slog] attribute
 // logs the tree without the excerpt, through [Error.LogValue] and
@@ -210,8 +210,10 @@
 // An excerpt shows part of a line longer than [DefaultExcerptWidth]
 // columns: a window of that many columns around each location on it,
 // with "..." in place of the rest. A document minified onto one line
-// thus adds a row of bounded length to a log. [WithExcerptWidth] sets
-// another width for a [Source], or 0 for whole lines.
+// thus adds a row of bounded length to a log. [WithExcerptWidth] and
+// [WithContextLines] set the width and the context lines of the excerpts
+// a renderer builds, as [ExcerptOption] describes, so a log and a
+// terminal render one error each their own way.
 //
 // A report a program reads, such as JSON lines, CI annotations, or editor
 // diagnostics, lists the problems of an error as rows.

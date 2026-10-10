@@ -553,7 +553,7 @@ func TestErrorHandler_ColorProfile(t *testing.T) {
 	}
 
 	styled := output(p.PrintError(err))
-	plain := output(niceyaml.FormatError(err, 0))
+	plain := output(niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 	// The plain form holds no style and draws a caret run under each range.
 	assert.NotContains(t, plain, "<")

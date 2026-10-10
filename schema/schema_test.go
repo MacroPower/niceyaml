@@ -704,7 +704,7 @@ func TestSchema_UnresolvableRef(t *testing.T) {
 
 			// The failure states the error of the resolver, so the tree
 			// shows the two in one row.
-			assert.Equal(t, 1, strings.Count(niceyaml.FormatError(err, 0), tc.want))
+			assert.Equal(t, 1, strings.Count(niceyaml.FormatError(err, niceyaml.WithContextLines(0)), tc.want))
 
 			var failure *jsonschema.ValidationError
 
@@ -1466,7 +1466,7 @@ func TestSchema_ValidateValue(t *testing.T) {
 
 			// The source holds no line to excerpt, so the tree stands
 			// alone, with no line that says so.
-			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(err, 2))
+			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(err))
 			assert.Equal(t, tc.wantFormat, fmt.Sprintf("%+v", err))
 
 			var bound *niceyaml.SourceError
@@ -3068,7 +3068,11 @@ func TestSchema_PathAnchors(t *testing.T) {
 			err := tc.validate(t)
 			require.Error(t, err)
 
-			assert.Equal(t, tc.want, strings.SplitN(niceyaml.FormatError(err, 0), "\n", 2)[0])
+			assert.Equal(
+				t,
+				tc.want,
+				strings.SplitN(niceyaml.FormatError(err, niceyaml.WithContextLines(0)), "\n", 2)[0],
+			)
 
 			path, ok := niceyaml.NewErrorTree(err).Path()
 			require.True(t, ok)

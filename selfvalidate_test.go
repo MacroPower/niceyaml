@@ -361,7 +361,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		// FormatError reads the path from the Error it wraps.
 		unbound := wrappedHours{Open: "09:00", Close: "08:00"}.Validate()
 		require.EqualError(t, unbound, "hours check: closes before it opens")
-		assert.Equal(t, "@.close: hours check: closes before it opens", niceyaml.FormatError(unbound, 0))
+		assert.Equal(
+			t,
+			"@.close: hours check: closes before it opens",
+			niceyaml.FormatError(unbound, niceyaml.WithContextLines(0)),
+		)
 	})
 
 	t.Run("the errors a summary under a field heads report the joined path", func(t *testing.T) {
@@ -409,7 +413,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"     |         ^^ open is empty",
 			`   3 |   close: ""`,
 			"     |          ^^ close is empty",
-		), niceyaml.FormatError(err, 2))
+		), niceyaml.FormatError(err))
 	})
 
 	t.Run("a problem with no location under a field binds as a scoped bind does", func(t *testing.T) {
@@ -441,7 +445,11 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		scoped := yamltest.At(t, doc, paths.Current().Child("schedule")).Bind(conflictingSchedule{}.Validate())
 		require.EqualError(t, scoped, err.Error())
-		assert.Equal(t, niceyaml.FormatError(err, 1), niceyaml.FormatError(scoped, 1))
+		assert.Equal(
+			t,
+			niceyaml.FormatError(err, niceyaml.WithContextLines(1)),
+			niceyaml.FormatError(scoped, niceyaml.WithContextLines(1)),
+		)
 	})
 
 	t.Run("elements and entries report their index or key", func(t *testing.T) {
@@ -1003,7 +1011,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			"     |                               ^^^^^^^ closes before it opens",
 			`   2 | backup: {open: "09:00", close: "08:00"}`,
 			"     |                                ^^^^^^^ closes before it opens",
-		), niceyaml.FormatError(err, 2))
+		), niceyaml.FormatError(err))
 	})
 
 	t.Run("WithSelfValidation false switches the walk off", func(t *testing.T) {
@@ -2905,7 +2913,7 @@ func TestDocument_Decode_SelfValidatorAnchors(t *testing.T) {
 			require.NoError(t, err)
 
 			unbound := anchoredOpen{Open: tc.open}.Validate()
-			assert.Equal(t, tc.wantUnbound, niceyaml.FormatError(unbound, 0))
+			assert.Equal(t, tc.wantUnbound, niceyaml.FormatError(unbound, niceyaml.WithContextLines(0)))
 
 			_, err = doc.Decode[config](t.Context())
 			require.EqualError(t, err, tc.want)
@@ -3490,7 +3498,11 @@ func TestNode_SelfValidate_MatchesDecode(t *testing.T) {
 			require.EqualError(t, decoded, tc.err)
 			require.Error(t, validated)
 			assert.Equal(t, decoded.Error(), validated.Error())
-			assert.Equal(t, niceyaml.FormatError(decoded, 1), niceyaml.FormatError(validated, 1))
+			assert.Equal(
+				t,
+				niceyaml.FormatError(decoded, niceyaml.WithContextLines(1)),
+				niceyaml.FormatError(validated, niceyaml.WithContextLines(1)),
+			)
 		})
 	}
 }

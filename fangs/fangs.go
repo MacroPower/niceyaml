@@ -154,7 +154,8 @@ func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 // otherwise.
 func render(w io.Writer, err error, p *printer.Printer) string {
 	if cw, ok := w.(*colorprofile.Writer); ok && cw.Profile <= colorprofile.ASCII {
-		return niceyaml.FormatError(err, p.ContextLines())
+		return niceyaml.FormatError(err,
+			niceyaml.WithContextLines(p.ContextLines()), niceyaml.WithExcerptWidth(p.ExcerptWidth()))
 	}
 
 	return p.PrintError(err)

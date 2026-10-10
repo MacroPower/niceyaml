@@ -273,7 +273,7 @@ func TestError_Error(t *testing.T) {
 			assert.Equal(t, tc.want, fmt.Sprint(tc.err))
 			assert.Equal(t, tc.want, fmt.Sprintf("%v", tc.err))
 			assert.Equal(t, tc.wantPlus, fmt.Sprintf("%+v", tc.err))
-			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(tc.err, 0))
+			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(tc.err, niceyaml.WithContextLines(0)))
 		})
 	}
 }
@@ -469,7 +469,7 @@ func TestSourceError_Error_NameControl(t *testing.T) {
 
 			require.EqualError(t, tc.err, tc.want)
 			assert.NotContains(t, tc.err.Error(), "\x1b")
-			assert.Contains(t, niceyaml.FormatError(tc.err, 0), shown)
+			assert.Contains(t, niceyaml.FormatError(tc.err, niceyaml.WithContextLines(0)), shown)
 		})
 	}
 
@@ -653,7 +653,7 @@ func TestSourceError_Error_Document(t *testing.T) {
 		assert.Equal(t, stringtest.JoinLF(
 			"|-- m.yaml: document 1: first",
 			"`-- m.yaml: document 3: third",
-		), niceyaml.FormatError(joined, 2))
+		), niceyaml.FormatError(joined))
 	})
 
 	t.Run("a row of the tree names a document its parent does not", func(t *testing.T) {
@@ -677,7 +677,7 @@ func TestSourceError_Error_Document(t *testing.T) {
 			"m.yaml: document 1: summary",
 			"|-- document 2: elsewhere",
 			"`-- here",
-		), niceyaml.FormatError(err, 2))
+		), niceyaml.FormatError(err))
 	})
 }
 
@@ -1379,7 +1379,7 @@ func TestSourceError_Format_ListLimit(t *testing.T) {
 			assert.Equal(t, tree, logged(t, err))
 
 			// FormatError draws every problem, however many there are.
-			all := niceyaml.FormatError(err, niceyaml.DefaultContextLines)
+			all := niceyaml.FormatError(err)
 
 			assert.Equal(t, tc.problems, strings.Count(all, ": bad "))
 			assert.NotContains(t, all, " more")
@@ -2653,7 +2653,7 @@ func TestSourceError_UnresolvedNestedInTree(t *testing.T) {
 
 	require.ErrorAs(t, err, &bound)
 
-	_, ok := bound.Excerpt(2)
+	_, ok := bound.Excerpt()
 	assert.False(t, ok)
 	require.NoError(t, bound.Unresolved())
 
@@ -2840,7 +2840,7 @@ func TestSourceError_Format_Plain(t *testing.T) {
 			niceyaml.AtPath(paths.Current().Child("k\x1b[31mY").Index(0)),
 		))
 
-		got := niceyaml.FormatError(err, 0)
+		got := niceyaml.FormatError(err, niceyaml.WithContextLines(0))
 		assert.NotContains(t, got, "\x1b")
 		assert.Contains(t, got, "m\u241b[31mX")
 		assert.Contains(t, got, `no excerpt: resolve $.'k\u001b[31mY'`)
@@ -2976,7 +2976,7 @@ func TestSourceError_NilReceiver(t *testing.T) {
 	require.False(t, resolved)
 	require.NoError(t, missing.Unresolved())
 
-	_, excerpted := missing.Excerpt(2)
+	_, excerpted := missing.Excerpt()
 	require.False(t, excerpted)
 
 	require.False(t, missing.Annotate(src.View()))
@@ -3088,7 +3088,7 @@ func TestError_EmptyMessageWithLocation(t *testing.T) {
 			t.Parallel()
 
 			assert.Empty(t, tc.err.Error())
-			assert.Equal(t, tc.wantTree, niceyaml.FormatError(tc.err, 0))
+			assert.Equal(t, tc.wantTree, niceyaml.FormatError(tc.err, niceyaml.WithContextLines(0)))
 
 			bound := yamltest.Bind(t, source, tc.err)
 			assert.Equal(t, tc.wantBound, bound.Error())
@@ -4050,7 +4050,7 @@ func TestError_With(t *testing.T) {
 	// The path stays out of the message, and FormatError names it.
 	assert.Equal(t, "bad key", base.Error())
 	assert.Equal(t, "bad key", located.Error())
-	assert.Equal(t, "@.key~: bad key", niceyaml.FormatError(located, 0))
+	assert.Equal(t, "@.key~: bad key", niceyaml.FormatError(located, niceyaml.WithContextLines(0)))
 
 	// The details of the copy are its own too.
 	reason := errors.New("reason")
@@ -4136,7 +4136,7 @@ func TestWithDetails(t *testing.T) {
 			"     |      ^^ first declared here",
 			"   3 |   b: 80",
 			"     |      ^^",
-		), niceyaml.FormatError(err, 0))
+		), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 		problems := slices.Collect(niceyaml.NewErrorTree(err).Problems())
 		require.Len(t, problems, 1)
@@ -4176,7 +4176,7 @@ func TestWithDetails(t *testing.T) {
 			"base.yaml",
 			"   2 |   port: 80",
 			"     |         ^^ first declared here",
-		), niceyaml.FormatError(err, 0))
+		), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 		problems := slices.Collect(niceyaml.NewErrorTree(err).Problems())
 		require.Len(t, problems, 1)
@@ -4244,7 +4244,7 @@ func TestError_WrappedContext(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &bound)
 
-	excerpt, ok := bound.Excerpt(2)
+	excerpt, ok := bound.Excerpt()
 	require.True(t, ok)
 
 	detail := newXMLPrinter().Print(excerpt)
@@ -4284,7 +4284,7 @@ func TestError_ContextAboveLocation(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &bound)
 
-	excerpt, ok := bound.Excerpt(2)
+	excerpt, ok := bound.Excerpt()
 	require.True(t, ok)
 
 	detail := newXMLPrinter().Print(excerpt)
@@ -4365,7 +4365,7 @@ func TestError_NestedErrorChains(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		excerpt, ok := bound.Excerpt(2)
+		excerpt, ok := bound.Excerpt()
 		require.True(t, ok)
 
 		got := trimLines(newXMLPrinter().Print(excerpt))
@@ -4677,7 +4677,7 @@ func TestSourceError_KeepsWrappedText(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, namePath, p)
 		assert.Equal(t, "bad token", outer.Error())
-		assert.Equal(t, "@.name: bad token", niceyaml.FormatError(outer, 0))
+		assert.Equal(t, "@.name: bad token", niceyaml.FormatError(outer, niceyaml.WithContextLines(0)))
 		assert.Equal(t, "1:7: $.name: bad token", docs[0].Bind(outer).Error())
 	})
 
@@ -4753,7 +4753,7 @@ func TestSourceError_Range_Inverted(t *testing.T) {
 			require.True(t, ok)
 			assert.Equal(t, tc.want, rng)
 
-			excerpt, ok := bound.Excerpt(0)
+			excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 			require.True(t, ok)
 			assert.Equal(t, []int{tc.want.Start.Line + 1}, lineNumbers(excerpt))
 		})
@@ -4779,7 +4779,7 @@ func TestError_ResolvesThroughErrorWrappers(t *testing.T) {
 
 	require.ErrorAs(t, wrapped, &got)
 
-	excerpt, ok := got.Excerpt(2)
+	excerpt, ok := got.Excerpt()
 	require.True(t, ok)
 	require.NotNil(t, excerpt)
 	assert.Positive(t, excerpt.Count())
@@ -5051,7 +5051,7 @@ func TestSourceError_Range_Collection(t *testing.T) {
 			"",
 			"   3 |   ports:",
 			"     |   ^^^^^",
-		), niceyaml.FormatError(err, 0))
+		), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 	})
 }
 
@@ -5406,7 +5406,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 
 			require.ErrorAs(t, yamltest.Bind(t, source, tc.err), &bound)
 
-			got, ok := bound.Excerpt(2)
+			got, ok := bound.Excerpt()
 			require.False(t, ok)
 			assert.Nil(t, got)
 			requireUnresolved(t, bound, tc.is)
@@ -5430,7 +5430,7 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 			niceyaml.NewError("second", niceyaml.AtPath(paths.Current().Child("value"))),
 		)), &bound)
 
-		excerpt, ok := bound.Excerpt(2)
+		excerpt, ok := bound.Excerpt()
 		require.True(t, ok)
 
 		got := newXMLPrinter().Print(excerpt)
@@ -5450,14 +5450,14 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 
 		requireUnresolved(t, bound, paths.ErrNotFound)
 
-		_, ok := bound.Excerpt(0)
+		_, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 		require.True(t, ok)
 
 		// The child resolves, so the excerpt marks it, and the root keeps
 		// its message in the tree without a position or a reason.
 		assert.Equal(t,
 			"$.missing[0]: bad\n`-- 1:7: $.name: first\n\n   1 | name: test\n     |       ^^^^ first",
-			niceyaml.FormatError(bound, 0),
+			niceyaml.FormatError(bound, niceyaml.WithContextLines(0)),
 		)
 		assert.NotContains(t, render(bound), "no excerpt:")
 	})
@@ -5504,7 +5504,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 	t.Run("holds only the hunk lines with their source numbers", func(t *testing.T) {
 		t.Parallel()
 
-		excerpt, ok := excerptError(t).Excerpt(1)
+		excerpt, ok := excerptError(t).Excerpt(niceyaml.WithContextLines(1))
 		require.True(t, ok)
 
 		assert.Equal(t, []int{1, 2, 3, 7, 8, 9}, lineNumbers(excerpt))
@@ -5517,7 +5517,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 	t.Run("overlays the error ranges with the error style", func(t *testing.T) {
 		t.Parallel()
 
-		excerpt, ok := excerptError(t).Excerpt(1)
+		excerpt, ok := excerptError(t).Excerpt(niceyaml.WithContextLines(1))
 		require.True(t, ok)
 
 		want := line.Overlays{{Kind: kind.GenericError, Cols: position.NewSpan(3, 4)}}
@@ -5545,7 +5545,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 			niceyaml.NewError("about key", niceyaml.AtPosition(position.New(0, 0))),
 		)), &bound)
 
-		excerpt, ok := bound.Excerpt(0)
+		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 		require.True(t, ok)
 
 		assert.Equal(t, line.Annotations{
@@ -5588,7 +5588,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 
 				require.ErrorAs(t, dd.Bind(niceyaml.NewError("bad", niceyaml.AtRange(tc.rng))), &bound)
 
-				excerpt, ok := bound.Excerpt(0)
+				excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 				require.True(t, ok)
 				assert.Equal(t, []int{2}, lineNumbers(excerpt))
 			})
@@ -5627,11 +5627,11 @@ func TestSourceError_Excerpt(t *testing.T) {
 				src := niceyaml.NewSourceFromString(tc.src)
 				require.ErrorAs(t, yamltest.Bind(t, src, niceyaml.NewError("bad", tc.opt)), &bound)
 
-				excerpt, ok := bound.Excerpt(0)
+				excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 				require.True(t, ok)
 				assert.Equal(t, tc.want, lineNumbers(excerpt))
 
-				formatted := niceyaml.FormatError(bound, 0)
+				formatted := niceyaml.FormatError(bound, niceyaml.WithContextLines(0))
 				assert.Contains(t, formatted, tc.row)
 				assert.NotContains(t, formatted, "...")
 			})
@@ -5683,11 +5683,11 @@ func TestSourceError_Excerpt(t *testing.T) {
 
 				require.ErrorAs(t, yamltest.Bind(t, niceyaml.NewSourceFromString("a: 1\n"), tc.err), &bound)
 
-				excerpt, ok := bound.Excerpt(0)
+				excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 				require.True(t, ok)
 				assert.Equal(t, tc.want, excerpt.Annotations(0))
 
-				formatted := niceyaml.FormatError(bound, 0)
+				formatted := niceyaml.FormatError(bound, niceyaml.WithContextLines(0))
 				assert.Contains(t, formatted, fmt.Sprintf("1:%d: far", far.Col+1), "the tree keeps the column as given")
 				assert.True(t, strings.HasSuffix(formatted, "\n"+tc.row), formatted)
 				assert.True(t, strings.HasSuffix(renderContext(bound, 0), tc.printed))
@@ -5698,7 +5698,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 	t.Run("annotates nested messages below their lines", func(t *testing.T) {
 		t.Parallel()
 
-		excerpt, ok := excerptError(t).Excerpt(1)
+		excerpt, ok := excerptError(t).Excerpt(niceyaml.WithContextLines(1))
 		require.True(t, ok)
 
 		assert.Equal(t, line.Annotations{
@@ -5712,7 +5712,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 	t.Run("separates hunks after the first with an ellipsis", func(t *testing.T) {
 		t.Parallel()
 
-		excerpt, ok := excerptError(t).Excerpt(1)
+		excerpt, ok := excerptError(t).Excerpt(niceyaml.WithContextLines(1))
 		require.True(t, ok)
 
 		assert.Equal(t, line.Annotations{
@@ -5730,7 +5730,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 
 		bound := excerptError(t)
 
-		excerpt, ok := bound.Excerpt(1)
+		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(1))
 		require.True(t, ok)
 
 		want := stringtest.JoinLF(
@@ -5756,10 +5756,10 @@ func TestSourceError_Excerpt(t *testing.T) {
 
 		bound := excerptError(t)
 
-		zero, ok := bound.Excerpt(0)
+		zero, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 		require.True(t, ok)
 
-		negative, ok := bound.Excerpt(-1)
+		negative, ok := bound.Excerpt(niceyaml.WithContextLines(-1))
 		require.True(t, ok)
 
 		assert.Equal(t, []int{2, 8}, lineNumbers(zero))
@@ -5778,7 +5778,7 @@ func TestSourceError_Excerpt(t *testing.T) {
 			&bound,
 		)
 
-		excerpt, ok := bound.Excerpt(2)
+		excerpt, ok := bound.Excerpt()
 		require.False(t, ok)
 		assert.Nil(t, excerpt)
 		require.NoError(t, bound.Unresolved())
@@ -5830,7 +5830,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		// The excerpt is the same view cut down to its hunks, with the
 		// indices of the source, except that the root's line carries a
 		// caret run alone since the tree above the excerpt names it.
-		excerpt, ok := bound.Excerpt(0)
+		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 		require.True(t, ok)
 		assert.Equal(t, view.Overlays(1), excerpt.Overlays(1))
 		assert.Equal(t, view.Overlays(7), excerpt.Overlays(7))
@@ -5880,7 +5880,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		require.True(t, niceyaml.Annotate(err, view))
 
 		assert.Contains(t, view.String(), "^^^  ^^^^^ about key; about value")
-		assert.Contains(t, niceyaml.FormatError(err, 0), "^^^  ^^^^^ about key; about value")
+		assert.Contains(t, niceyaml.FormatError(err, niceyaml.WithContextLines(0)), "^^^  ^^^^^ about key; about value")
 	})
 
 	t.Run("a binding the tree reaches twice marks its line once", func(t *testing.T) {
@@ -5891,7 +5891,7 @@ func TestSourceError_Annotate(t *testing.T) {
 		parent := yamltest.Bind(t, source, niceyaml.NewError("parent", niceyaml.WithDetails(badA)))
 		err := yamltest.Bind(t, source, errors.Join(parent, badA))
 
-		got := niceyaml.FormatError(err, 1)
+		got := niceyaml.FormatError(err, niceyaml.WithContextLines(1))
 		assert.Contains(t, got, "^ bad a")
 		assert.NotContains(t, got, "bad a; bad a")
 
@@ -5903,7 +5903,7 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		excerpt, ok := bound.Excerpt(0)
+		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 		require.True(t, ok)
 		assert.Equal(t, view.Annotations(0), excerpt.Annotations(0))
 
@@ -5934,7 +5934,7 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		require.ErrorAs(t, err, &bound)
 
-		excerpt, ok := bound.Excerpt(0)
+		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 		require.True(t, ok)
 		assert.Equal(t, line.Annotations{
 			{Content: "bad a", Kind: kind.TextError, Placement: line.Below, Col: 3},
@@ -7038,7 +7038,7 @@ func TestSourceError_TreeBranches(t *testing.T) {
 
 		// The outer binding marks its own branch, and the inner keeps its
 		// excerpt from the other source.
-		excerpt, ok := bound.Excerpt(0)
+		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 		require.True(t, ok)
 		assert.Equal(t, 1, excerpt.Count())
 
@@ -7168,7 +7168,7 @@ func TestSourceError_Excerpts(t *testing.T) {
 			excerpts []string
 		)
 
-		for src, excerpt := range bound.Excerpts(0) {
+		for src, excerpt := range bound.Excerpts(niceyaml.WithContextLines(0)) {
 			sources = append(sources, src.Name())
 			excerpts = append(excerpts, excerpt.String())
 		}
@@ -7191,7 +7191,7 @@ func TestSourceError_Excerpts(t *testing.T) {
 	t.Run("Excerpt keeps to the source of the binding", func(t *testing.T) {
 		t.Parallel()
 
-		excerpt, ok := bound.Excerpt(0)
+		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 		require.True(t, ok)
 		assert.Equal(t, 1, excerpt.Count())
 	})
@@ -7219,7 +7219,7 @@ func TestSourceError_Excerpts(t *testing.T) {
 	t.Run("FormatError renders every excerpt", func(t *testing.T) {
 		t.Parallel()
 
-		got := niceyaml.FormatError(bound, 0)
+		got := niceyaml.FormatError(bound, niceyaml.WithContextLines(0))
 		assert.Equal(t, stringtest.JoinLF(
 			"manifest.yaml:2:9: $.values: bad values",
 			"|-- values.yaml:1:7: $.port: not a number",
@@ -7273,7 +7273,7 @@ func TestSourceError_Excerpts(t *testing.T) {
 
 		var names []string
 
-		for src, excerpt := range mixed.Excerpts(0) {
+		for src, excerpt := range mixed.Excerpts(niceyaml.WithContextLines(0)) {
 			names = append(names, src.Name())
 			got[src.Name()] = excerpt.String()
 		}
@@ -7310,7 +7310,7 @@ func TestSourceError_Excerpts(t *testing.T) {
 			niceyaml.NewError("not a number", niceyaml.AtPath(paths.Current().Child("port"))),
 		))), &one)
 
-		assert.Len(t, maps.Collect(one.Excerpts(0)), 1)
+		assert.Len(t, maps.Collect(one.Excerpts(niceyaml.WithContextLines(0))), 1)
 	})
 
 	t.Run("nothing resolved yields nothing", func(t *testing.T) {
@@ -7328,13 +7328,13 @@ func TestSourceError_Excerpts(t *testing.T) {
 			&none,
 		)
 
-		for range none.Excerpts(0) {
+		for range none.Excerpts(niceyaml.WithContextLines(0)) {
 			t.Fatal("no excerpt expected")
 		}
 
 		var nilErr *niceyaml.SourceError
 
-		for range nilErr.Excerpts(0) {
+		for range nilErr.Excerpts(niceyaml.WithContextLines(0)) {
 			t.Fatal("no excerpt expected")
 		}
 	})
@@ -7418,7 +7418,7 @@ func TestExcerpts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, collect(niceyaml.Excerpts(tc.err, 0)))
+			assert.Equal(t, tc.want, collect(niceyaml.Excerpts(tc.err, niceyaml.WithContextLines(0))))
 		})
 	}
 
@@ -7433,10 +7433,10 @@ func TestExcerpts(t *testing.T) {
 			niceyaml.WithDetails(badC),
 		)), &bound)
 
-		want := collect(bound.Excerpts(0))
+		want := collect(bound.Excerpts(niceyaml.WithContextLines(0)))
 
 		require.Len(t, want, 2)
-		assert.Equal(t, want, collect(niceyaml.Excerpts(bound, 0)))
+		assert.Equal(t, want, collect(niceyaml.Excerpts(bound, niceyaml.WithContextLines(0))))
 	})
 
 	t.Run("stops when the caller does", func(t *testing.T) {
@@ -7444,7 +7444,7 @@ func TestExcerpts(t *testing.T) {
 
 		count := 0
 
-		for range niceyaml.Excerpts(errors.Join(badA, badC), 0) {
+		for range niceyaml.Excerpts(errors.Join(badA, badC), niceyaml.WithContextLines(0)) {
 			count++
 
 			break
@@ -7456,7 +7456,7 @@ func TestExcerpts(t *testing.T) {
 	t.Run("each excerpt is a view of its own", func(t *testing.T) {
 		t.Parallel()
 
-		views := maps.Collect(niceyaml.Excerpts(errors.Join(badA, badB), 0))
+		views := maps.Collect(niceyaml.Excerpts(errors.Join(badA, badB), niceyaml.WithContextLines(0)))
 		require.Len(t, views, 1)
 
 		// The source keeps no decoration from the excerpt.
@@ -7530,16 +7530,16 @@ func renderings(err error) map[string]string {
 
 	var excerpts, rows []string
 
-	for _, excerpt := range niceyaml.Excerpts(err, whole) {
+	for _, excerpt := range niceyaml.Excerpts(err, niceyaml.WithContextLines(whole)) {
 		excerpts = append(excerpts, excerpt.String())
 	}
 
 	for bound := range niceyaml.AllBindings(err) {
-		if excerpt, ok := bound.Excerpt(whole); ok {
+		if excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(whole)); ok {
 			excerpts = append(excerpts, excerpt.String())
 		}
 
-		for _, excerpt := range bound.Excerpts(whole) {
+		for _, excerpt := range bound.Excerpts(niceyaml.WithContextLines(whole)) {
 			excerpts = append(excerpts, excerpt.String())
 		}
 	}
@@ -7552,12 +7552,103 @@ func renderings(err error) map[string]string {
 		"Error":       err.Error(),
 		"%v":          fmt.Sprintf("%v", err),
 		"%+v":         fmt.Sprintf("%+v", err),
-		"FormatError": niceyaml.FormatError(err, whole),
+		"FormatError": niceyaml.FormatError(err, niceyaml.WithContextLines(whole)),
 		"PrintError":  printer.New(printer.WithContextLines(whole)).PrintError(err),
 		"Excerpts":    strings.Join(excerpts, "\n"),
 		"ErrorTree":   strings.Join(rows, "\n"),
 		"slog":        logged.String(),
 		"Unwrap":      strings.Join(chainMessages(err), "\n"),
+	}
+}
+
+func TestWithExcerptWidth(t *testing.T) {
+	t.Parallel()
+
+	// The value is 200 columns long, so the line runs past the default
+	// width.
+	value := strings.Repeat("0123456789", 20)
+	input := "port: " + value + "\n"
+
+	// Rows returns the excerpt of an error at the port that shows the
+	// first shown columns of the value, with an ellipsis after them when
+	// cut is set.
+	rows := func(shown int, cut bool) string {
+		row := "   1 | port: " + value[:shown]
+		if cut {
+			row += "..."
+		}
+
+		return stringtest.JoinLF(row, "     |       "+strings.Repeat("^", shown))
+	}
+
+	tcs := map[string]struct {
+		excerpt string
+		opts    []niceyaml.ExcerptOption
+	}{
+		"no option": {
+			excerpt: rows(niceyaml.DefaultExcerptWidth-6, true),
+		},
+		"width": {
+			opts:    []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(20)},
+			excerpt: rows(14, true),
+		},
+		"width of the line shows it whole": {
+			opts:    []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(206)},
+			excerpt: rows(200, false),
+		},
+		"zero shows whole lines": {
+			opts:    []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0)},
+			excerpt: rows(200, false),
+		},
+		"negative counts as zero": {
+			opts:    []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(-1)},
+			excerpt: rows(200, false),
+		},
+		"the last option wins": {
+			opts:    []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0), niceyaml.WithExcerptWidth(20)},
+			excerpt: rows(14, true),
+		},
+		"a nil option changes nothing": {
+			opts:    []niceyaml.ExcerptOption{nil, niceyaml.WithExcerptWidth(20), nil},
+			excerpt: rows(14, true),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			source := niceyaml.NewSourceFromString(input)
+			err := yamltest.Bind(t, source, niceyaml.NewError("bad port", niceyaml.AtPath(paths.Doc().Child("port"))))
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			opts := append([]niceyaml.ExcerptOption{niceyaml.WithContextLines(0)}, tc.opts...)
+
+			excerpt, ok := bound.Excerpt(opts...)
+			require.True(t, ok)
+			assert.Equal(t, tc.excerpt, excerpt.String())
+
+			// The excerpt keeps every column, so a caller shows it whole.
+			assert.Equal(t, rows(200, false), excerpt.Clip(0).String())
+
+			// Every renderer takes the same options.
+			assert.Equal(t, "1:7: $.port: bad port\n\n"+tc.excerpt, niceyaml.FormatError(err, opts...))
+
+			rep := niceyaml.NewErrorReport(err, opts...)
+			require.Len(t, rep.Excerpts, 1)
+			assert.Equal(t, tc.excerpt, rep.Excerpts[0].View.String())
+
+			for _, view := range niceyaml.Excerpts(err, opts...) {
+				assert.Equal(t, tc.excerpt, view.String())
+			}
+
+			for _, view := range bound.Excerpts(opts...) {
+				assert.Equal(t, tc.excerpt, view.String())
+			}
+		})
 	}
 }
 
@@ -7580,16 +7671,18 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 
 	tcs := map[string]struct {
 		err  func(t *testing.T) error
+		opts []niceyaml.ExcerptOption
 		want []string
 	}{
 		"location at the end of a long line": {
 			err: func(t *testing.T) error {
 				t.Helper()
 
-				source := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"), narrow)
+				source := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"))
 
 				return yamltest.Bind(t, source, badPort)
 			},
+			opts: []niceyaml.ExcerptOption{narrow},
 			want: []string{
 				"flow.yaml:1:68: $.port: port must be at least 1",
 				"",
@@ -7601,10 +7694,11 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 			err: func(t *testing.T) error {
 				t.Helper()
 
-				source := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"), narrow)
+				source := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"))
 
 				return yamltest.Bind(t, source, niceyaml.NewSummary("2 violations", badPort, badName))
 			},
+			opts: []niceyaml.ExcerptOption{narrow},
 			want: []string{
 				"flow.yaml: 2 violations",
 				"|-- 1:8: $.name: name is taken",
@@ -7618,10 +7712,11 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 			err: func(t *testing.T) error {
 				t.Helper()
 
-				source := niceyaml.NewSourceFromString(block, niceyaml.WithName("block.yaml"), narrow)
+				source := niceyaml.NewSourceFromString(block, niceyaml.WithName("block.yaml"))
 
 				return yamltest.Bind(t, source, badPort)
 			},
+			opts: []niceyaml.ExcerptOption{narrow},
 			want: []string{
 				"block.yaml:2:7: $.port: port must be at least 1",
 				"",
@@ -7635,11 +7730,11 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 			err: func(t *testing.T) error {
 				t.Helper()
 
-				whole := niceyaml.WithExcerptWidth(0)
-				source := niceyaml.NewSourceFromString(block, niceyaml.WithName("block.yaml"), whole)
+				source := niceyaml.NewSourceFromString(block, niceyaml.WithName("block.yaml"))
 
 				return yamltest.Bind(t, source, badPort)
 			},
+			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0)},
 			want: []string{
 				"block.yaml:2:7: $.port: port must be at least 1",
 				"",
@@ -7649,26 +7744,29 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 				"   3 | tail: " + note,
 			},
 		},
-		"each source keeps its own width": {
+		"one width clips every source": {
 			err: func(t *testing.T) error {
 				t.Helper()
 
-				clipped := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"), narrow)
-				wide := niceyaml.NewSourceFromString(flow, niceyaml.WithName("wide.yaml"))
+				flowSrc := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"))
+				blockSrc := niceyaml.NewSourceFromString(block, niceyaml.WithName("block.yaml"))
 
-				return errors.Join(yamltest.Bind(t, clipped, badPort), yamltest.Bind(t, wide, badPort))
+				return errors.Join(yamltest.Bind(t, flowSrc, badPort), yamltest.Bind(t, blockSrc, badPort))
 			},
+			opts: []niceyaml.ExcerptOption{narrow},
 			want: []string{
 				"|-- flow.yaml:1:68: $.port: port must be at least 1",
-				"`-- wide.yaml:1:68: $.port: port must be at least 1",
+				"`-- block.yaml:2:7: $.port: port must be at least 1",
 				"",
 				"flow.yaml",
 				"   1 | ...h, ii, jj], port: 0}",
 				"     |                      ^ port must be at least 1",
 				"",
-				"wide.yaml",
-				"   1 | " + flow,
-				"     | " + strings.Repeat(" ", 67) + "^ port must be at least 1",
+				"block.yaml",
+				"   1 | head: this note runs...",
+				"   2 | port: 0",
+				"     |       ^ port must be at least 1",
+				"   3 | tail: this note runs...",
 			},
 		},
 	}
@@ -7677,21 +7775,36 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, stringtest.JoinLF(tc.want...), niceyaml.FormatError(tc.err(t), 1))
+			opts := append([]niceyaml.ExcerptOption{niceyaml.WithContextLines(1)}, tc.opts...)
+
+			assert.Equal(t, stringtest.JoinLF(tc.want...), niceyaml.FormatError(tc.err(t), opts...))
 		})
 	}
 
-	t.Run("the %+v verb prints the clipped excerpt", func(t *testing.T) {
+	t.Run("the %+v verb prints at the default width", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"), narrow)
+		// The line is 69 columns, which is under the default width, so
+		// the verb shows it whole.
+		source := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"))
 
 		assert.Equal(t, stringtest.JoinLF(
 			"flow.yaml:1:68: $.port: port must be at least 1",
 			"",
-			"   1 | ...h, ii, jj], port: 0}",
-			"     |                      ^",
+			"   1 | "+flow,
+			"     | "+strings.Repeat(" ", 67)+"^",
 		), fmt.Sprintf("%+v", yamltest.Bind(t, source, badPort)))
+
+		// A line past the default width clips there.
+		long := strings.Repeat("0123456789", 20)
+		wide := niceyaml.NewSourceFromString("port: "+long+"\n", niceyaml.WithName("wide.yaml"))
+
+		assert.Equal(t, stringtest.JoinLF(
+			"wide.yaml:1:7: $.port: port must be at least 1",
+			"",
+			"   1 | port: "+long[:niceyaml.DefaultExcerptWidth-6]+"...",
+			"     |       "+strings.Repeat("^", niceyaml.DefaultExcerptWidth-6),
+		), fmt.Sprintf("%+v", yamltest.Bind(t, wide, badPort)))
 	})
 }
 
@@ -7817,7 +7930,7 @@ func TestFormatError_ExcerptsOff(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, niceyaml.FormatError(tc.err, niceyaml.DefaultContextLines))
+			assert.Equal(t, tc.want, niceyaml.FormatError(tc.err))
 
 			for renderer, got := range renderings(tc.err) {
 				assert.NotContains(t, got, excerptSecret, renderer)
@@ -7839,7 +7952,7 @@ func TestFormatError_ExcerptsOff(t *testing.T) {
 			"   3 |   port: 0",
 			"     |         ^",
 			"   4 |   token: hunter2-token",
-		), niceyaml.FormatError(err, niceyaml.DefaultContextLines))
+		), niceyaml.FormatError(err))
 
 		// The renderers that print an excerpt are the ones the option
 		// changes.
@@ -7968,7 +8081,7 @@ func TestFormatError_ExcerptsOff_Documents(t *testing.T) {
 			err := tc.fail(t, source)
 			require.Error(t, err)
 
-			assert.Equal(t, tc.want, niceyaml.FormatError(err, niceyaml.DefaultContextLines))
+			assert.Equal(t, tc.want, niceyaml.FormatError(err))
 
 			for renderer, got := range renderings(err) {
 				assert.NotContains(t, got, excerptSecret, renderer)
@@ -8028,9 +8141,9 @@ func TestFormatError_ExcerptsOff_EchoedText(t *testing.T) {
 			_, err := source.Decode[secretConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
 			require.Error(t, err)
 
-			assert.Equal(t, tc.want, niceyaml.FormatError(err, niceyaml.DefaultContextLines))
+			assert.Equal(t, tc.want, niceyaml.FormatError(err))
 			assert.Equal(t, tc.want, fmt.Sprintf("%+v", err))
-			assert.Empty(t, maps.Collect(niceyaml.Excerpts(err, 0)))
+			assert.Empty(t, maps.Collect(niceyaml.Excerpts(err, niceyaml.WithContextLines(0))))
 		})
 	}
 }
@@ -8150,12 +8263,12 @@ func TestExcerpts_ExcerptsOff(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, collect(niceyaml.Excerpts(tc.err, 2)))
+			assert.Equal(t, tc.want, collect(niceyaml.Excerpts(tc.err)))
 
 			var bound *niceyaml.SourceError
 
 			require.ErrorAs(t, tc.err, &bound)
-			assert.Equal(t, tc.wantOwn, collect(bound.Excerpts(2)))
+			assert.Equal(t, tc.wantOwn, collect(bound.Excerpts()))
 		})
 	}
 
@@ -8166,7 +8279,7 @@ func TestExcerpts_ExcerptsOff(t *testing.T) {
 
 		require.ErrorAs(t, badPort, &bound)
 
-		excerpt, ok := bound.Excerpt(2)
+		excerpt, ok := bound.Excerpt()
 		assert.False(t, ok)
 		assert.Nil(t, excerpt)
 
@@ -8848,7 +8961,7 @@ func TestRebase(t *testing.T) {
 		assert.NotPanics(t, func() {
 			assert.Equal(t, "2:1: $.hours:", strings.TrimSpace(child.Error()))
 			assert.Equal(t, "\n", child.Message())
-			assert.Contains(t, niceyaml.FormatError(bound, 1), "invalid hours\n")
+			assert.Contains(t, niceyaml.FormatError(bound, niceyaml.WithContextLines(1)), "invalid hours\n")
 		})
 
 		var rows []string
@@ -8873,7 +8986,11 @@ func TestRebase(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "@.hours.close", p.String())
 		assert.Equal(t, "closes before it opens", err.Error())
-		assert.Equal(t, "@.hours.close: closes before it opens", niceyaml.FormatError(err, 0))
+		assert.Equal(
+			t,
+			"@.hours.close: closes before it opens",
+			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
+		)
 	})
 
 	t.Run("a decode rebases a nested self validator the same way", func(t *testing.T) {
@@ -8967,7 +9084,11 @@ func TestRebase(t *testing.T) {
 
 		err := niceyaml.Rebase(errors.Join(open, other), hours)
 		require.EqualError(t, err, "bad open\nbad hours")
-		assert.Equal(t, "|-- @.hours.open: bad open\n`-- @.hours: bad hours", niceyaml.FormatError(err, 0))
+		assert.Equal(
+			t,
+			"|-- @.hours.open: bad open\n`-- @.hours: bad hours",
+			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
+		)
 		require.ErrorIs(t, err, open)
 		require.ErrorIs(t, err, other)
 
@@ -9012,7 +9133,11 @@ func TestRebase(t *testing.T) {
 		}, got)
 
 		bare := dd.Bind(niceyaml.Rebase(errors.Join(open, closeErr), hours))
-		assert.Equal(t, niceyaml.FormatError(bare, -1), niceyaml.FormatError(dd.Bind(err), -1))
+		assert.Equal(
+			t,
+			niceyaml.FormatError(bare, niceyaml.WithContextLines(-1)),
+			niceyaml.FormatError(dd.Bind(err), niceyaml.WithContextLines(-1)),
+		)
 	})
 
 	t.Run("a join of the caller's own type keeps its type", func(t *testing.T) {
@@ -9061,7 +9186,11 @@ func TestRebase(t *testing.T) {
 				assert.Equal(t, joined, got)
 
 				assert.Equal(t, bindings(bare), bindings(err))
-				assert.Equal(t, niceyaml.FormatError(dd.Bind(bare), -1), niceyaml.FormatError(dd.Bind(err), -1))
+				assert.Equal(
+					t,
+					niceyaml.FormatError(dd.Bind(bare), niceyaml.WithContextLines(-1)),
+					niceyaml.FormatError(dd.Bind(err), niceyaml.WithContextLines(-1)),
+				)
 			})
 		}
 	})
@@ -9179,7 +9308,11 @@ func TestRebase(t *testing.T) {
 		err := niceyaml.Rebase(niceyaml.Rebase(inner, hours), paths.Current().Child("spec"))
 
 		assert.Equal(t, "closes before it opens", err.Error())
-		assert.Equal(t, "@.spec.hours.close: closes before it opens", niceyaml.FormatError(err, 0))
+		assert.Equal(
+			t,
+			"@.spec.hours.close: closes before it opens",
+			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
+		)
 		require.EqualError(t, dd.Bind(err), "4:12: $.spec.hours.close: closes before it opens")
 	})
 
@@ -9200,7 +9333,7 @@ func TestRebase(t *testing.T) {
 		assert.Equal(t, "check spec: check hours: closes before it opens", err.Error())
 		assert.Equal(t,
 			"@.spec.hours.close: check spec: check hours: closes before it opens",
-			niceyaml.FormatError(err, -1),
+			niceyaml.FormatError(err, niceyaml.WithContextLines(-1)),
 		)
 
 		bound := dd.Bind(err)
@@ -9315,7 +9448,11 @@ func TestRebase(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, hours.Child("open"), p)
 		assert.Equal(t, "closes before it opens", moved.Error())
-		assert.Equal(t, "@.hours.open: closes before it opens", niceyaml.FormatError(moved, 0))
+		assert.Equal(
+			t,
+			"@.hours.open: closes before it opens",
+			niceyaml.FormatError(moved, niceyaml.WithContextLines(0)),
+		)
 		require.EqualError(t, dd.Bind(moved), `3:9: $.hours.open: closes before it opens`)
 	})
 
@@ -9331,7 +9468,11 @@ func TestRebase(t *testing.T) {
 		// path once, in front of the text the wrapper added.
 		require.ErrorIs(t, err, inner)
 		assert.Equal(t, "checking hours: closes before it opens", err.Error())
-		assert.Equal(t, "@.hours.close: checking hours: closes before it opens", niceyaml.FormatError(err, 0))
+		assert.Equal(
+			t,
+			"@.hours.close: checking hours: closes before it opens",
+			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
+		)
 		require.EqualError(t, dd.Bind(err), "4:10: $.hours.close: checking hours: closes before it opens")
 
 		var se *niceyaml.SourceError
@@ -9656,7 +9797,7 @@ func TestBindValue(t *testing.T) {
 
 			// The source holds no line to excerpt, so the tree stands
 			// alone, with no line that says so.
-			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(got, 2))
+			assert.Equal(t, tc.wantFormat, niceyaml.FormatError(got))
 			assert.Equal(t, tc.wantFormat, fmt.Sprintf("%+v", got))
 
 			// No binding of the result names a Node, a document, or a
@@ -10288,7 +10429,7 @@ func TestSourceError_MessageAtHighlightStart(t *testing.T) {
 				"parent",
 				niceyaml.WithDetails(niceyaml.NewError("bad", niceyaml.AtPosition(tc.at))),
 			))
-			assert.Contains(t, niceyaml.FormatError(nested, 0), "\n"+tc.want)
+			assert.Contains(t, niceyaml.FormatError(nested, niceyaml.WithContextLines(0)), "\n"+tc.want)
 			assert.Contains(t, trimLines(renderContext(nested, 0)), "\n"+tc.wantXML)
 
 			var bound *niceyaml.SourceError
@@ -10315,7 +10456,7 @@ func TestFormat(t *testing.T) {
 		t.Parallel()
 
 		err := excerptError(t)
-		assert.Equal(t, fmt.Sprintf("%+v", err), niceyaml.FormatError(err, 2))
+		assert.Equal(t, fmt.Sprintf("%+v", err), niceyaml.FormatError(err))
 	})
 
 	t.Run("looks through a wrapper for the excerpt", func(t *testing.T) {
@@ -10335,7 +10476,7 @@ func TestFormat(t *testing.T) {
 			"   1 | a: 1",
 			"   2 | b: 2",
 			"     |    ^",
-		), niceyaml.FormatError(err, 2))
+		), niceyaml.FormatError(err))
 	})
 
 	t.Run("lists the nodes below a wrapped binding", func(t *testing.T) {
@@ -10359,7 +10500,7 @@ func TestFormat(t *testing.T) {
 			"     |    ^ bad h",
 			"   9 | i: 9",
 			"  10 | j: 10",
-		), niceyaml.FormatError(err, 2))
+		), niceyaml.FormatError(err))
 	})
 
 	t.Run("renders one excerpt per source of a join under its name", func(t *testing.T) {
@@ -10384,7 +10525,7 @@ func TestFormat(t *testing.T) {
 			"b.yaml",
 			"   1 | b: 2",
 			"     |    ^ bad b",
-		), niceyaml.FormatError(err, 2))
+		), niceyaml.FormatError(err))
 	})
 
 	t.Run("renders the documents of one file as one excerpt", func(t *testing.T) {
@@ -10434,7 +10575,7 @@ func TestFormat(t *testing.T) {
 			"   7 | ---",
 			"   8 | c: 3",
 			"     | ^ not allowed",
-		), niceyaml.FormatError(joined, 2))
+		), niceyaml.FormatError(joined))
 
 		// Each binding still renders on its own, for a caller that wants
 		// one section per document.
@@ -10447,7 +10588,7 @@ func TestFormat(t *testing.T) {
 			"",
 			"   3 | a: y",
 			"     |    ^",
-		), niceyaml.FormatError(bound, 0))
+		), niceyaml.FormatError(bound, niceyaml.WithContextLines(0)))
 	})
 
 	t.Run("names why a binding of a join marks nothing after the excerpts", func(t *testing.T) {
@@ -10474,17 +10615,17 @@ func TestFormat(t *testing.T) {
 			"     |    ^ bad b",
 			"",
 			"no excerpt: resolve $.x[0]: not found",
-		), niceyaml.FormatError(joined, 2))
+		), niceyaml.FormatError(joined))
 	})
 
 	t.Run("an error bound to no source renders as its message", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Equal(t, "plain", niceyaml.FormatError(errors.New("plain"), 2))
+		assert.Equal(t, "plain", niceyaml.FormatError(errors.New("plain")))
 
 		located := niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("a")))
 
-		assert.Equal(t, "@.a: bad", niceyaml.FormatError(located, 2))
+		assert.Equal(t, "@.a: bad", niceyaml.FormatError(located))
 	})
 
 	t.Run("a tab in a message expands to spaces", func(t *testing.T) {
@@ -10558,7 +10699,7 @@ func TestFormat(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				assert.Equal(t, tc.want, niceyaml.FormatError(tc.err, 2))
+				assert.Equal(t, tc.want, niceyaml.FormatError(tc.err))
 			})
 		}
 	})
@@ -10566,7 +10707,7 @@ func TestFormat(t *testing.T) {
 	t.Run("nil renders as nothing", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Empty(t, niceyaml.FormatError(nil, 2))
+		assert.Empty(t, niceyaml.FormatError(nil))
 	})
 }
 
@@ -10616,7 +10757,11 @@ func TestFormatError_WrappedJoin(t *testing.T) {
 
 			err := fmt.Errorf("load config: %w", tc.err)
 
-			assert.Equal(t, stringtest.JoinLF(append(tc.want, excerpt...)...), niceyaml.FormatError(err, 0))
+			assert.Equal(
+				t,
+				stringtest.JoinLF(append(tc.want, excerpt...)...),
+				niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
+			)
 		})
 	}
 }
@@ -10653,10 +10798,10 @@ func TestFormatError_JoinOfNothing(t *testing.T) {
 			err := source.Bind(errors.Join(nilErr, nilErr))
 			require.Error(t, err)
 
-			got := niceyaml.FormatError(err, 2)
+			got := niceyaml.FormatError(err)
 
 			assert.Equal(t, tc.want, got)
-			assert.Equal(t, niceyaml.FormatError(errors.New(err.Error()), 2), got)
+			assert.Equal(t, niceyaml.FormatError(errors.New(err.Error())), got)
 			assert.Equal(t, got, fmt.Sprintf("%+v", err))
 			assert.NotContains(t, got, "\x1b")
 		})
@@ -10745,7 +10890,7 @@ func TestFormatError_NoContent(t *testing.T) {
 				require.ErrorIs(t, bound.Unresolved(), tc.reason)
 			}
 
-			assert.Equal(t, tc.want, niceyaml.FormatError(err, 2))
+			assert.Equal(t, tc.want, niceyaml.FormatError(err))
 			assert.Equal(t, tc.want, fmt.Sprintf("%+v", err))
 		})
 	}
@@ -10847,7 +10992,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 
 		// The excerpt marks the one character of the range, not the
 		// whole value the path selects.
-		excerpt, ok := bound.Excerpt(0)
+		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 		require.True(t, ok)
 		assert.Equal(t, stringtest.JoinLF(
 			"   2 |   b: 1",
@@ -10997,7 +11142,7 @@ func TestSourceError_MessageAndPath(t *testing.T) {
 		require.NotEmpty(t, outer.Details())
 		assert.Equal(t, "bad", outer.Details()[0].Message())
 
-		got := niceyaml.FormatError(outer, 0)
+		got := niceyaml.FormatError(outer, niceyaml.WithContextLines(0))
 		assert.Contains(t, got, "^ bad")
 		assert.NotContains(t, got, "^ x.yaml:")
 	})
@@ -11162,7 +11307,7 @@ func TestSourceError_Nearest(t *testing.T) {
 			"   4 |   - port: 81",
 			"     |   ^",
 			"   5 | tls:",
-		), niceyaml.FormatError(err, 1))
+		), niceyaml.FormatError(err, niceyaml.WithContextLines(1)))
 
 		var bound *niceyaml.SourceError
 
@@ -11190,7 +11335,7 @@ func TestSourceError_Nearest(t *testing.T) {
 			"     |   ^ name is required",
 			"   5 | tls:",
 			"     | ^^^ cert is required",
-		), niceyaml.FormatError(err, 0))
+		), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 	})
 
 	t.Run("a scoped Node binds a key it leaves out at the dash of its element", func(t *testing.T) {
@@ -11398,7 +11543,7 @@ func TestSourceError_Nearest(t *testing.T) {
 				"   1 | server: *server",
 				"     |         ^",
 				"   2 | servers:",
-			), niceyaml.FormatError(err, 1))
+			), niceyaml.FormatError(err, niceyaml.WithContextLines(1)))
 
 			var bound *niceyaml.SourceError
 
@@ -11662,7 +11807,7 @@ func TestError_Format(t *testing.T) {
 	t.Run("plus v matches FormatError", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Equal(t, niceyaml.FormatError(err, 2), fmt.Sprintf("%+v", err))
+		assert.Equal(t, niceyaml.FormatError(err), fmt.Sprintf("%+v", err))
 	})
 
 	t.Run("a wrapper prints the message alone", func(t *testing.T) {
@@ -11736,7 +11881,7 @@ func TestError_Format_ListLimit(t *testing.T) {
 			assert.Equal(t, want, logged(t, tc.err))
 
 			// FormatError draws every problem, however many there are.
-			all := niceyaml.FormatError(tc.err, niceyaml.DefaultContextLines)
+			all := niceyaml.FormatError(tc.err)
 
 			assert.Equal(t, tc.rows, strings.Count(all, ": bad "))
 			assert.NotContains(t, all, " more")
@@ -11766,7 +11911,7 @@ func TestError_Format_ListLimit(t *testing.T) {
 
 		const reason = "no excerpt: resolve $.port[0]: not found"
 
-		assert.Contains(t, niceyaml.FormatError(err, 0), reason)
+		assert.Contains(t, niceyaml.FormatError(err, niceyaml.WithContextLines(0)), reason)
 
 		got := fmt.Sprintf("%+v", err)
 
@@ -11850,7 +11995,7 @@ func TestError_LogValue(t *testing.T) {
 		err := wrapError(t, errors.Join(nilErr, nilErr))
 
 		assert.Equal(t, "\n", err.LogValue().String())
-		assert.Equal(t, niceyaml.FormatError(err, 2), err.LogValue().String())
+		assert.Equal(t, niceyaml.FormatError(err), err.LogValue().String())
 	})
 
 	t.Run("a nil error logs nothing", func(t *testing.T) {
@@ -11910,7 +12055,7 @@ func TestSourceError_LogValue(t *testing.T) {
 		require.Error(t, err)
 
 		assert.Equal(t, "cfg.yaml: \n", logged(t, err))
-		assert.Equal(t, niceyaml.FormatError(err, 2), logged(t, err))
+		assert.Equal(t, niceyaml.FormatError(err), logged(t, err))
 
 		var buf bytes.Buffer
 

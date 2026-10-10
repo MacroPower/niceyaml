@@ -734,7 +734,10 @@ func TestPrinter_PrintError_MarksBindingsWithoutStyles(t *testing.T) {
 			_, gotExcerpt, ok := strings.Cut(got, "\n\n")
 			require.True(t, ok)
 
-			_, formatted, ok := strings.Cut(niceyaml.FormatError(tc.err, p.ContextLines()), "\n\n")
+			_, formatted, ok := strings.Cut(
+				niceyaml.FormatError(tc.err, niceyaml.WithContextLines(p.ContextLines())),
+				"\n\n",
+			)
 			require.True(t, ok)
 
 			rows := strings.Split(formatted, "\n")
@@ -974,7 +977,7 @@ func TestPrinter_PrintError_MarksLongWrappedValue(t *testing.T) {
 	t.Parallel()
 
 	// A long base64 value wraps into many rows, and each gets a caret row
-	// below it as wide as the part of the value it shows. The source
+	// below it as wide as the part of the value it shows. The printer
 	// shows whole lines, so the excerpt keeps the value whole.
 	tcs := map[string]struct {
 		value string
@@ -994,7 +997,7 @@ func TestPrinter_PrintError_MarksLongWrappedValue(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString("data: "+tc.value+"\n", niceyaml.WithExcerptWidth(0))
+			source := niceyaml.NewSourceFromString("data: " + tc.value + "\n")
 			err := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("data"))))
 
 			p := printer.New(
@@ -1002,6 +1005,7 @@ func TestPrinter_PrintError_MarksLongWrappedValue(t *testing.T) {
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithGutter(printer.NoGutter),
 				printer.WithWrap(tc.width),
+				printer.WithExcerptWidth(0),
 			)
 
 			rows := strings.Split(p.PrintError(err), "\n")[2:]
@@ -6062,9 +6066,9 @@ func TestPrinter_PrintError_AnnotationOnWrappedRow(t *testing.T) {
 		items = append(items, fmt.Sprintf("item%02d", i))
 	}
 
-	// The line is longer than the default excerpt width, so the source
+	// The line is longer than the default excerpt width, so the printer
 	// shows whole lines to keep every wrapped row of it.
-	source := niceyaml.NewSourceFromString("items: ["+strings.Join(items, ", ")+"]\n", niceyaml.WithExcerptWidth(0))
+	source := niceyaml.NewSourceFromString("items: [" + strings.Join(items, ", ") + "]\n")
 
 	rows := []string{
 		"   1  items: [item00, item01, item02,",
@@ -6118,6 +6122,7 @@ func TestPrinter_PrintError_AnnotationOnWrappedRow(t *testing.T) {
 				printer.WithStyles(style.Styles{}),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithWrap(40),
+				printer.WithExcerptWidth(0),
 			)
 
 			assert.Equal(t, stringtest.JoinLF(tc.want...), p.PrintError(err))
@@ -7609,6 +7614,12 @@ func TestPrinter_ContainerWidth_Accessor(t *testing.T) {
 	assert.Equal(t, printer.DefaultContextLines, testPrinter().ContextLines())
 	assert.Equal(t, 3, testPrinter().With(printer.WithContextLines(3)).ContextLines())
 	assert.Equal(t, 0, testPrinter().With(printer.WithContextLines(-3)).ContextLines())
+
+	// A negative width shows whole lines, as 0 does, so it reads back as
+	// 0.
+	assert.Equal(t, printer.DefaultExcerptWidth, testPrinter().ExcerptWidth())
+	assert.Equal(t, 24, testPrinter().With(printer.WithExcerptWidth(24)).ExcerptWidth())
+	assert.Equal(t, 0, testPrinter().With(printer.WithExcerptWidth(-1)).ExcerptWidth())
 }
 
 func TestPrinter_DefaultContextLines(t *testing.T) {
@@ -7621,8 +7632,8 @@ func TestPrinter_DefaultContextLines(t *testing.T) {
 
 	got := fmt.Sprintf("%+v", bound)
 
-	assert.Equal(t, niceyaml.FormatError(bound, printer.DefaultContextLines), got)
-	assert.NotEqual(t, niceyaml.FormatError(bound, printer.DefaultContextLines+1), got)
+	assert.Equal(t, niceyaml.FormatError(bound), got)
+	assert.NotEqual(t, niceyaml.FormatError(bound, niceyaml.WithContextLines(printer.DefaultContextLines+1)), got)
 }
 
 func TestPrinter_PrintError_JoinOfNothing(t *testing.T) {
@@ -8200,13 +8211,8 @@ func TestPrinter_PrintError_ClipsLongLine(t *testing.T) {
 	input := "items: [" + strings.Join(items, ", ") + "]\n"
 	bad := niceyaml.NewError("expected number", niceyaml.AtPath(paths.Current().Child("items").Index(20)))
 
-	p := printer.New(
-		printer.WithStyles(style.Styles{}),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
-
 	tcs := map[string]struct {
-		opts []niceyaml.SourceOption
+		opts []printer.Option
 		want []string
 	}{
 		"default width": {
@@ -8217,8 +8223,8 @@ func TestPrinter_PrintError_ClipsLongLine(t *testing.T) {
 				strings.Repeat(" ", 6+3+80) + "^^^^^^",
 			},
 		},
-		"width from the source": {
-			opts: []niceyaml.SourceOption{niceyaml.WithExcerptWidth(24)},
+		"width from the printer": {
+			opts: []printer.Option{printer.WithExcerptWidth(24)},
 			want: []string{
 				"1:169: $.items[20]: expected number",
 				"",
@@ -8227,7 +8233,7 @@ func TestPrinter_PrintError_ClipsLongLine(t *testing.T) {
 			},
 		},
 		"whole lines": {
-			opts: []niceyaml.SourceOption{niceyaml.WithExcerptWidth(0)},
+			opts: []printer.Option{printer.WithExcerptWidth(0)},
 			want: []string{
 				"1:169: $.items[20]: expected number",
 				"",
@@ -8241,7 +8247,12 @@ func TestPrinter_PrintError_ClipsLongLine(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := yamltest.Bind(t, niceyaml.NewSourceFromString(input, tc.opts...), bad)
+			err := yamltest.Bind(t, niceyaml.NewSourceFromString(input), bad)
+
+			p := printer.New(append([]printer.Option{
+				printer.WithStyles(style.Styles{}),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+			}, tc.opts...)...)
 
 			assert.Equal(t, stringtest.JoinLF(tc.want...), p.PrintError(err))
 		})
