@@ -627,16 +627,18 @@ func TestSource_Lines_DroppedText(t *testing.T) {
 	// space in front of a ":" after a quoted key, and the code of an escape
 	// in a double-quoted scalar. The lines still hold the whole source, the
 	// position of each token leads back to it, and a blank line with a tab
-	// before the first key still parses.
+	// before the first key still parses. The key after an escaped scalar
+	// keeps its own line, so the parser reads the mapping the source holds.
 	tcs := map[string]struct {
 		input string
 	}{
 		"code of an escape in a double-quoted scalar": {input: "m: {a: \"\\u00e9\", b: xx, c: yy}\n"},
+		"code of an escape after a tag":               {input: "name: !!str \"Caf\\u00e9\"\nage: 3\n"},
 		"blank line with a tab before the first key":  {input: " \t\na: 1\n"},
 		"blank line of a tab before the first key":    {input: "\t\na: 1\n"},
 		"space before a colon after a quoted key":     {input: "{\"a\" : 1, \"b\" : \"x\"}\n"},
-		"trailing spaces":      {input: "a: 1   \nb: 2\n"},
-		"blank line of spaces": {input: "a: 1\n   \nb: 2\n"},
+		"trailing spaces":                             {input: "a: 1   \nb: 2\n"},
+		"blank line of spaces":                        {input: "a: 1\n   \nb: 2\n"},
 	}
 
 	for name, tc := range tcs {
@@ -1002,15 +1004,6 @@ func (c tokenCollector) Visit(node ast.Node) ast.Visitor {
 	}
 
 	return c
-}
-
-func TestSource_Document_EscapeAfterTag(t *testing.T) {
-	t.Parallel()
-
-	// The key after the escaped scalar keeps its own line, so the parser
-	// reads the mapping the source holds.
-	_, err := niceyaml.NewSourceFromString("name: !!str \"Caf\\u00e9\"\nage: 3\n").Document()
-	require.NoError(t, err)
 }
 
 func TestSource_File_TokensFindLines(t *testing.T) {
