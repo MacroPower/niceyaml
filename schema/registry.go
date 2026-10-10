@@ -22,7 +22,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/capture"
-	"go.jacobcolvin.com/niceyaml/internal/fault"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
 	"go.jacobcolvin.com/niceyaml/internal/nilness"
 )
@@ -500,7 +499,7 @@ func noMatch(reasons []error) error {
 // declined. Its message is the message of ErrNoMatch. The reasons the
 // resolvers gave show as details of the [*niceyaml.Error] around it, and
 // [errors.Is] and [errors.As] pass over details, so this error matches
-// each reason itself.
+// each reason itself, as its Is and As methods describe.
 type noMatchError struct {
 	// The error each resolver declined with, in lookup order.
 	reasons []error
@@ -511,18 +510,17 @@ func (e noMatchError) Error() string {
 }
 
 // Is reports whether target is [ErrNoMatch], or whether a reason matches
-// target, as [errors.Is] reports it. A lookup thus matches a reason such
-// as [ErrNoDirective].
-//
-// It also matches the mark of a problem the document is at fault for. A
-// reason can wrap the error of a context that ended, as one from a
-// resolver with a deadline of its own does, and [niceyaml.Invalid]
-// declares no fault for an error that matches one. A lookup whose own
-// context ended never reports a no-match, so the no-match declares the
-// fault itself.
+// a target that wraps ErrNoMatch, as [errors.Is] reports it. A lookup
+// thus matches a decline sentinel such as [ErrNoDirective]. A reason can
+// also wrap an error that is no decline, such as the error of a context
+// that ended inside a resolver with a deadline of its own. The no-match
+// does not match that error, since the lookup went on past the resolver,
+// and [niceyaml.Invalid] declares the document at fault for every
+// no-match.
 func (e noMatchError) Is(target error) bool {
-	return target == ErrNoMatch || target == fault.ErrInvalid ||
-		slices.ContainsFunc(e.reasons, func(reason error) bool { return errors.Is(reason, target) })
+	return target == ErrNoMatch ||
+		(errors.Is(target, ErrNoMatch) &&
+			slices.ContainsFunc(e.reasons, func(reason error) bool { return errors.Is(reason, target) }))
 }
 
 // As reports whether [errors.As] finds target in a reason, and sets
@@ -584,15 +582,22 @@ func (e reasonError) Unwrap() error {
 //
 // # Unmatched Documents
 //
-// Returns [ErrNoMatch] if no resolver applies to the document, unless
-// [WithRequireSchema] set false, in which case such a document passes.
+// Returns [ErrNoMatch] if no resolver applies to the document.
 // [niceyaml.IsInvalid] reports that error, since the document names no
-// schema the registry knows.
+// schema the registry knows. A caller that wants such a document to pass
+// builds the registry with [WithRequireSchema] set false, and Check then
+// accepts it:
+//
+//	reg := schema.NewRegistry(
+//	    schema.WithResolvers(schema.Directive()),
+//	    schema.WithRequireSchema(false),
+//	)
+//
 // A document a resolver applies to never passes that way, even when the
-// load error of its schema wraps ErrNoMatch. Callers of a registry that
-// requires a schema can check for the error to allow unmatched documents
-// at one call site. Such a load error matches both [ErrLoad] and
-// ErrNoMatch, so the check tests for ErrLoad first:
+// load error of its schema wraps ErrNoMatch. A caller that holds a
+// registry someone else built to require a schema checks for the error
+// at its own call site instead. Such a load error matches both [ErrLoad]
+// and ErrNoMatch, so the check tests for ErrLoad first:
 //
 //	err := doc.Validate(ctx, reg)
 //	if err != nil && (errors.Is(err, ErrLoad) || !errors.Is(err, ErrNoMatch)) {

@@ -3464,7 +3464,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		assert.Equal(t, "no schema for kind Service", problems[0].Children[1].Message())
 	})
 
-	t.Run("a reason that wraps the error of a context leaves the document at fault", func(t *testing.T) {
+	t.Run("matches a reason only through a target that wraps ErrNoMatch", func(t *testing.T) {
 		t.Parallel()
 
 		// The resolver gave up under a deadline of its own, and the
@@ -3472,14 +3472,27 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		timedOut := schema.ResolverFunc(func(context.Context, *niceyaml.Node) (schema.Ref, error) {
 			return schema.Ref{}, fmt.Errorf("%w: read catalog: %w", schema.ErrNoMatch, context.DeadlineExceeded)
 		})
-		reg := schema.NewRegistry(schema.WithResolvers(timedOut))
+		errNoLabel := fmt.Errorf("%w: no label", schema.ErrNoMatch)
+		byLabel := schema.ResolverFunc(func(context.Context, *niceyaml.Node) (schema.Ref, error) {
+			return schema.Ref{}, errNoLabel
+		})
+		reg := schema.NewRegistry(schema.WithResolvers(timedOut, byLabel))
 
 		doc := yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml")
 
 		_, err := reg.Lookup(t.Context(), doc)
 		require.EqualError(t, err, "app.yaml: no matching schema")
-		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.ErrorIs(t, err, schema.ErrNoMatch)
+		// The sentinel of a decline wraps ErrNoMatch, so the no-match
+		// matches it. The error of the resolver's own context does not,
+		// so the no-match keeps it as a detail and matches nothing more.
+		require.ErrorIs(t, err, errNoLabel)
+		require.NotErrorIs(t, err, context.DeadlineExceeded)
 		assert.True(t, niceyaml.IsInvalid(err))
+		assert.Equal(t,
+			"app.yaml: no matching schema\n|-- read catalog: context deadline exceeded\n`-- no label",
+			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
+		)
 	})
 
 	t.Run("Check passes the reasons through when it requires a schema", func(t *testing.T) {

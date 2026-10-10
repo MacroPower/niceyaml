@@ -13,7 +13,9 @@ import (
 // registry moves on to its next resolver when Resolve returns an error
 // wrapping ErrNoMatch, and reports it to the caller when no resolver
 // applies. The document then names no schema the registry knows, so
-// [niceyaml.IsInvalid] reports the error the registry returns.
+// [niceyaml.IsInvalid] reports the error the registry returns. A sentinel
+// a resolver declines with, as [ErrNoDirective] is, must wrap ErrNoMatch
+// for the error the registry reports to match it.
 var ErrNoMatch = errors.New("no matching schema")
 
 // Ref is the schema a [Resolver] names for a document. A Ref from
