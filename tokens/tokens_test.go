@@ -1487,38 +1487,126 @@ func TestForParser_Links(t *testing.T) {
 func TestSplitDocuments(t *testing.T) {
 	t.Parallel()
 
-	t.Run("nil input", func(t *testing.T) {
-		t.Parallel()
+	tkb := yamltest.NewTokenBuilder()
+	str := func(value string) *token.Token {
+		return tkb.Clone().Type(token.StringType).Value(value).Build()
+	}
+	colon := func() *token.Token {
+		return tkb.Clone().Type(token.MappingValueType).Value(":").Build()
+	}
+	header := func() *token.Token {
+		return tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
+	}
+	end := func() *token.Token {
+		return tkb.Clone().Type(token.DocumentEndType).Value("...").Build()
+	}
 
-		got := collectDocs(tokens.SplitDocuments(nil))
+	// RequireDocs requires each of docs to hold the next tokens of input,
+	// as many as want gives for it, and returns the tokens of input after
+	// them.
+	requireDocs := func(t *testing.T, input token.Tokens, want []int, docs []token.Tokens) token.Tokens {
+		t.Helper()
 
-		assert.Empty(t, got)
-	})
+		require.Len(t, docs, len(want))
 
-	t.Run("empty slice", func(t *testing.T) {
-		t.Parallel()
+		for i, n := range want {
+			yamltest.RequireTokensEqual(t, input[:n], docs[i])
 
-		got := collectDocs(tokens.SplitDocuments(token.Tokens{}))
-
-		assert.Empty(t, got)
-	})
-
-	t.Run("single doc no header", func(t *testing.T) {
-		t.Parallel()
-
-		tkb := yamltest.NewTokenBuilder()
-		input := token.Tokens{
-			tkb.Clone().Type(token.StringType).Value("key").Build(),
-			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
-			tkb.Clone().Type(token.StringType).Value("value").Build(),
+			input = input[n:]
 		}
 
-		got := collectDocs(tokens.SplitDocuments(input))
+		return input
+	}
 
-		require.Len(t, got, 1)
-		require.Len(t, got[0], 3)
+	tcs := map[string]struct {
+		input token.Tokens
+		want  []int // Number of tokens in each document.
+	}{
+		"nil input": {
+			input: nil,
+		},
+		"empty slice": {
+			input: token.Tokens{},
+		},
+		"single doc no header": {
+			input: token.Tokens{str("key"), colon(), str("value")},
+			want:  []int{3},
+		},
+		"single doc with header": {
+			input: token.Tokens{header(), str("key"), colon(), str("value")},
+			want:  []int{4},
+		},
+		"doc with end marker": {
+			input: token.Tokens{str("key"), colon(), str("value"), end()},
+			want:  []int{4},
+		},
+		"end marker closes a document": {
+			input: token.Tokens{str("a"), colon(), str("1"), end(), str("b"), colon(), str("2")},
+			want:  []int{4, 3},
+		},
+		"end marker followed by header": {
+			input: token.Tokens{str("a"), end(), header(), str("b")},
+			want:  []int{2, 2},
+		},
+		"two docs": {
+			input: token.Tokens{str("key1"), colon(), str("v1"), header(), str("key2"), colon(), str("v2")},
+			want:  []int{3, 4},
+		},
+		"three docs with headers": {
+			input: token.Tokens{header(), str("doc1"), header(), str("doc2"), header(), str("doc3")},
+			want:  []int{2, 2, 2},
+		},
+	}
 
-		yamltest.RequireTokensEqual(t, input, got[0])
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := collectDocs(tokens.SplitDocuments(tc.input))
+
+			rest := requireDocs(t, tc.input, tc.want, got)
+			assert.Empty(t, rest, "every token belongs to a document")
+		})
+	}
+
+	t.Run("stops when the caller does", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]struct {
+			input token.Tokens
+			want  []int // Number of tokens in each document the caller reads.
+		}{
+			"at the first doc": {
+				input: token.Tokens{str("doc1"), header(), str("doc2")},
+				want:  []int{1},
+			},
+			"at the second doc": {
+				input: token.Tokens{str("doc1"), header(), str("doc2"), header(), str("doc3")},
+				want:  []int{1, 2},
+			},
+			"single doc": {
+				input: token.Tokens{str("only")},
+				want:  []int{1},
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var got []token.Tokens
+
+				for _, tks := range tokens.SplitDocuments(tc.input) {
+					got = append(got, tks)
+
+					if len(got) == len(tc.want) {
+						break
+					}
+				}
+
+				requireDocs(t, tc.input, tc.want, got)
+			})
+		}
 	})
 
 	t.Run("nil tokens are skipped", func(t *testing.T) {
@@ -1549,228 +1637,23 @@ func TestSplitDocuments(t *testing.T) {
 		}
 	})
 
-	t.Run("single doc with header", func(t *testing.T) {
+	t.Run("yields the tokens passed in as they are", func(t *testing.T) {
 		t.Parallel()
 
-		tkb := yamltest.NewTokenBuilder()
 		input := token.Tokens{
-			tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build(),
-			tkb.Clone().Type(token.StringType).Value("key").Build(),
-			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
-			tkb.Clone().Type(token.StringType).Value("value").Build(),
+			tkb.Clone().Type(token.StringType).Value("key").
+				PositionLine(5).PositionColumn(3).PositionOffset(100).Build(),
 		}
 
 		got := collectDocs(tokens.SplitDocuments(input))
-
-		require.Len(t, got, 1)
-		require.Len(t, got[0], 4)
-
-		yamltest.RequireTokensEqual(t, input, got[0])
-	})
-
-	t.Run("end marker closes a document", func(t *testing.T) {
-		t.Parallel()
-
-		tkb := yamltest.NewTokenBuilder()
-		input := token.Tokens{
-			tkb.Clone().Type(token.StringType).Value("a").Build(),
-			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
-			tkb.Clone().Type(token.StringType).Value("1").Build(),
-			tkb.Clone().Type(token.DocumentEndType).Value("...").Build(),
-			tkb.Clone().Type(token.StringType).Value("b").Build(),
-			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
-			tkb.Clone().Type(token.StringType).Value("2").Build(),
-		}
-
-		got := collectDocs(tokens.SplitDocuments(input))
-
-		require.Len(t, got, 2)
-		require.Len(t, got[0], 4)
-		require.Len(t, got[1], 3)
-
-		yamltest.RequireTokensEqual(t, input[:4], got[0])
-
-		yamltest.RequireTokensEqual(t, input[4:], got[1])
-	})
-
-	t.Run("end marker followed by header", func(t *testing.T) {
-		t.Parallel()
-
-		tkb := yamltest.NewTokenBuilder()
-		input := token.Tokens{
-			tkb.Clone().Type(token.StringType).Value("a").Build(),
-			tkb.Clone().Type(token.DocumentEndType).Value("...").Build(),
-			tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build(),
-			tkb.Clone().Type(token.StringType).Value("b").Build(),
-		}
-
-		got := collectDocs(tokens.SplitDocuments(input))
-
-		require.Len(t, got, 2)
-		require.Len(t, got[0], 2)
-		require.Len(t, got[1], 2)
-		assert.Equal(t, token.DocumentHeaderType, got[1][0].Type)
-	})
-
-	t.Run("two docs", func(t *testing.T) {
-		t.Parallel()
-
-		tkb := yamltest.NewTokenBuilder()
-		key1 := tkb.Clone().Type(token.StringType).Value("key1").Build()
-		colon1 := tkb.Clone().Type(token.MappingValueType).Value(":").Build()
-		value1 := tkb.Clone().Type(token.StringType).Value("v1").Build()
-		header := tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
-		key2 := tkb.Clone().Type(token.StringType).Value("key2").Build()
-		colon2 := tkb.Clone().Type(token.MappingValueType).Value(":").Build()
-		value2 := tkb.Clone().Type(token.StringType).Value("v2").Build()
-
-		input := token.Tokens{key1, colon1, value1, header, key2, colon2, value2}
-
-		got := collectDocs(tokens.SplitDocuments(input))
-
-		require.Len(t, got, 2)
-		require.Len(t, got[0], 3)
-		require.Len(t, got[1], 4)
-
-		yamltest.RequireTokensEqual(t, token.Tokens{key1, colon1, value1}, got[0])
-
-		yamltest.RequireTokensEqual(t, token.Tokens{header, key2, colon2, value2}, got[1])
-	})
-
-	t.Run("three docs with headers", func(t *testing.T) {
-		t.Parallel()
-
-		tkb := yamltest.NewTokenBuilder()
-		header1 := tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
-		doc1 := tkb.Clone().Type(token.StringType).Value("doc1").Build()
-		header2 := tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
-		doc2 := tkb.Clone().Type(token.StringType).Value("doc2").Build()
-		header3 := tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
-		doc3 := tkb.Clone().Type(token.StringType).Value("doc3").Build()
-
-		input := token.Tokens{header1, doc1, header2, doc2, header3, doc3}
-
-		got := collectDocs(tokens.SplitDocuments(input))
-
-		require.Len(t, got, 3)
-
-		yamltest.RequireTokensEqual(t, token.Tokens{header1, doc1}, got[0])
-
-		yamltest.RequireTokensEqual(t, token.Tokens{header2, doc2}, got[1])
-
-		yamltest.RequireTokensEqual(t, token.Tokens{header3, doc3}, got[2])
-	})
-
-	t.Run("doc with end marker", func(t *testing.T) {
-		t.Parallel()
-
-		tkb := yamltest.NewTokenBuilder()
-		input := token.Tokens{
-			tkb.Clone().Type(token.StringType).Value("key").Build(),
-			tkb.Clone().Type(token.MappingValueType).Value(":").Build(),
-			tkb.Clone().Type(token.StringType).Value("value").Build(),
-			tkb.Clone().Type(token.DocumentEndType).Value("...").Build(),
-		}
-
-		got := collectDocs(tokens.SplitDocuments(input))
-
-		require.Len(t, got, 1)
-		require.Len(t, got[0], 4)
-
-		yamltest.RequireTokensEqual(t, input, got[0])
-	})
-
-	t.Run("doc end followed by new doc", func(t *testing.T) {
-		t.Parallel()
-
-		tkb := yamltest.NewTokenBuilder()
-		doc1 := tkb.Clone().Type(token.StringType).Value("doc1").Build()
-		docEnd := tkb.Clone().Type(token.DocumentEndType).Value("...").Build()
-		header := tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
-		doc2 := tkb.Clone().Type(token.StringType).Value("doc2").Build()
-
-		input := token.Tokens{doc1, docEnd, header, doc2}
-
-		got := collectDocs(tokens.SplitDocuments(input))
-
-		require.Len(t, got, 2)
-
-		yamltest.RequireTokensEqual(t, token.Tokens{doc1, docEnd}, got[0])
-
-		yamltest.RequireTokensEqual(t, token.Tokens{header, doc2}, got[1])
-	})
-
-	t.Run("early termination at first doc", func(t *testing.T) {
-		t.Parallel()
-
-		tkb := yamltest.NewTokenBuilder()
-		doc1 := tkb.Clone().Type(token.StringType).Value("doc1").Build()
-		header := tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
-		doc2 := tkb.Clone().Type(token.StringType).Value("doc2").Build()
-
-		input := token.Tokens{doc1, header, doc2}
-
-		var got []token.Tokens
-
-		for _, tks := range tokens.SplitDocuments(input) {
-			got = append(got, tks)
-
-			break // Early termination after first document.
-		}
-
-		require.Len(t, got, 1)
-
-		yamltest.RequireTokensEqual(t, token.Tokens{doc1}, got[0])
-	})
-
-	t.Run("early termination at second doc", func(t *testing.T) {
-		t.Parallel()
-
-		tkb := yamltest.NewTokenBuilder()
-		doc1 := tkb.Clone().Type(token.StringType).Value("doc1").Build()
-		header1 := tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
-		doc2 := tkb.Clone().Type(token.StringType).Value("doc2").Build()
-		header2 := tkb.Clone().Type(token.DocumentHeaderType).Value("---").Build()
-		doc3 := tkb.Clone().Type(token.StringType).Value("doc3").Build()
-
-		input := token.Tokens{doc1, header1, doc2, header2, doc3}
-
-		var got []token.Tokens
-
-		count := 0
-		for _, tks := range tokens.SplitDocuments(input) {
-			got = append(got, tks)
-			count++
-			if count == 2 {
-				break // Early termination after second document.
-			}
-		}
-
-		require.Len(t, got, 2)
-
-		yamltest.RequireTokensEqual(t, token.Tokens{doc1}, got[0])
-
-		yamltest.RequireTokensEqual(t, token.Tokens{header1, doc2}, got[1])
-	})
-
-	t.Run("early termination single doc", func(t *testing.T) {
-		t.Parallel()
-
-		tkb := yamltest.NewTokenBuilder()
-		input := token.Tokens{
-			tkb.Clone().Type(token.StringType).Value("only").Build(),
-		}
-
-		var got []token.Tokens
-
-		for _, tks := range tokens.SplitDocuments(input) {
-			got = append(got, tks)
-
-			break // Early termination on single document.
-		}
 
 		require.Len(t, got, 1)
 		require.Len(t, got[0], 1)
+
+		// The document holds the same pointer, not a clone, and the
+		// token keeps its position.
+		assert.Same(t, input[0], got[0][0])
+		assert.Equal(t, []string{"5:3:100"}, positionsOf(got[0]))
 	})
 }
 
@@ -1856,29 +1739,6 @@ func TestResetPositions(t *testing.T) {
 				assert.Equal(t, before, positionsOf(tc.input))
 			})
 		}
-	})
-
-	t.Run("preserves original tokens when option not used", func(t *testing.T) {
-		t.Parallel()
-
-		tkb := yamltest.NewTokenBuilder()
-		input := token.Tokens{
-			tkb.Clone().Type(token.StringType).Value("key").
-				PositionLine(5).PositionColumn(3).PositionOffset(100).Build(),
-		}
-
-		got := collectDocs(tokens.SplitDocuments(input))
-
-		require.Len(t, got, 1)
-		require.Len(t, got[0], 1)
-
-		// Position should be unchanged.
-		assert.Equal(t, 5, got[0][0].Position.Line)
-		assert.Equal(t, 3, got[0][0].Position.Column)
-		assert.Equal(t, 100, got[0][0].Position.Offset)
-
-		// Should be the same pointer (not cloned).
-		assert.Same(t, input[0], got[0][0])
 	})
 
 	t.Run("keeps a blank line with a tab before the first key", func(t *testing.T) {
