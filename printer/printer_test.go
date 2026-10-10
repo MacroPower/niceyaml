@@ -584,52 +584,6 @@ func TestPrinter_PrintError_Wrap(t *testing.T) {
 	assert.NotContains(t, got, " \n")
 }
 
-func TestPrinter_PrintError_WrapFitsExcerpts(t *testing.T) {
-	t.Parallel()
-
-	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
-		"a: 1",
-		"b: "+strings.Repeat("x", 80),
-		"c: 3",
-	))
-	bound := yamltest.Bind(t, source, errAt("bad", "b"))
-
-	tcs := map[string]struct {
-		opts  []printer.Option
-		width int
-	}{
-		"default container": {width: 30},
-		"bordered container": {
-			opts: []printer.Option{
-				printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
-			},
-			width: 30,
-		},
-		"gutterless": {
-			opts:  []printer.Option{printer.WithGutter(printer.NoGutter)},
-			width: 40,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			p := printer.New(append(tc.opts, printer.WithWrapWidth(tc.width))...)
-
-			got := p.PrintError(bound)
-
-			// The tree, the blank row after it, the three source lines, and
-			// the caret row would fit in six rows without wrapping.
-			require.Greater(t, lipgloss.Height(got), 6, "the excerpt wraps")
-
-			// The container's frame counts toward the width, so every row of
-			// the excerpt fits it.
-			assertRowsFit(t, got, tc.width)
-		})
-	}
-}
-
 func TestPrinter_PrintError_MarksBindingsWithoutStyles(t *testing.T) {
 	t.Parallel()
 
@@ -6590,26 +6544,48 @@ func TestPrinter_WrapWidth_FitsFrame(t *testing.T) {
 	// and of PrintError fits it whatever the container draws around the
 	// content. The default container pads each row on the right, and a
 	// border adds a column on each side.
-	const width = 40
-
-	src := niceyaml.NewSourceFromString(
+	named := niceyaml.NewSourceFromString(
 		"name: a-very-long-name-that-will-wrap-around-the-width-for-sure\n",
 		niceyaml.WithName("long.yaml"),
 	)
-	err := yamltest.Bind(t, src, niceyaml.NewError(
+	longMessage := yamltest.Bind(t, named, niceyaml.NewError(
 		"a message long enough to wrap around the width of the printer too",
 		niceyaml.AtPath(paths.Doc().Child("name")),
 	))
 
+	// A marked line longer than every width, between two short lines.
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"b: "+strings.Repeat("x", 80),
+		"c: 3",
+	))
+	longLine := yamltest.Bind(t, source, errAt("bad", "b"))
+
 	tcs := map[string]struct {
-		opts []printer.Option
+		opts  []printer.Option
+		width int
 	}{
-		"default container": {},
-		"no container":      {opts: []printer.Option{printer.WithContainerStyle(lipgloss.NewStyle())}},
+		"default container":        {width: 40},
+		"narrow default container": {width: 30},
+		"no container": {
+			opts:  []printer.Option{printer.WithContainerStyle(lipgloss.NewStyle())},
+			width: 40,
+		},
+		"bordered container": {
+			opts: []printer.Option{
+				printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
+			},
+			width: 30,
+		},
 		"bordered and padded container": {
 			opts: []printer.Option{printer.WithContainerStyle(
 				lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1),
 			)},
+			width: 40,
+		},
+		"gutterless": {
+			opts:  []printer.Option{printer.WithGutter(printer.NoGutter)},
+			width: 40,
 		},
 	}
 
@@ -6617,10 +6593,17 @@ func TestPrinter_WrapWidth_FitsFrame(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := printer.New(printer.WithWrapWidth(width)).With(tc.opts...)
+			p := printer.New(printer.WithWrapWidth(tc.width)).With(tc.opts...)
 
-			assertRowsFit(t, p.Print(src.View()), width)
-			assertRowsFit(t, p.PrintError(err), width)
+			assertRowsFit(t, p.Print(named.View()), tc.width)
+			assertRowsFit(t, p.PrintError(longMessage), tc.width)
+
+			got := p.PrintError(longLine)
+
+			// The tree, the blank row after it, the three source lines, and
+			// the caret row would fit in six rows without wrapping.
+			require.Greater(t, lipgloss.Height(got), 6, "the excerpt wraps")
+			assertRowsFit(t, got, tc.width)
 		})
 	}
 }
