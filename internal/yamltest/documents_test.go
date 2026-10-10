@@ -63,6 +63,21 @@ func TestDocumentHelpers(t *testing.T) {
 		assert.Equal(t, 1, got)
 	})
 
+	t.Run("AtOrSelf", func(t *testing.T) {
+		t.Parallel()
+
+		var tb testing.TB = t
+
+		doc := yamltest.FirstDocument(tb, "a: 1\n")
+		assert.Same(t, doc, yamltest.AtOrSelf(tb, doc, paths.Path{}))
+		assert.Same(t, doc, yamltest.AtOrSelf(tb, doc, paths.Current()))
+
+		got, err := yamltest.AtOrSelf(tb, doc, paths.Current().Child("a")).Decode[int](t.Context())
+		require.NoError(t, err)
+
+		assert.Equal(t, 1, got)
+	})
+
 	t.Run("Bind", func(t *testing.T) {
 		t.Parallel()
 

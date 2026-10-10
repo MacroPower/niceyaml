@@ -37,6 +37,19 @@ func At(tb testing.TB, n *niceyaml.Node, path paths.Path) *niceyaml.Node {
 	return scoped
 }
 
+// AtOrSelf returns n for a path with no selector, and the
+// [*niceyaml.Node] that [At] scopes to path for any other. A table case
+// then names a path only when it checks a scoped Node.
+func AtOrSelf(tb testing.TB, n *niceyaml.Node, path paths.Path) *niceyaml.Node {
+	tb.Helper()
+
+	if path.Len() == 0 {
+		return n
+	}
+
+	return At(tb, n, path)
+}
+
 // Bind binds err to the single document of source through
 // [niceyaml.Node.Bind]. The test fails when the source does not hold
 // exactly one document.
