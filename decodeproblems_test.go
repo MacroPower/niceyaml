@@ -697,8 +697,14 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// the parse with no token.
 		"durations": {
 			decode: decodeInto[problemConfig](),
-			input: "servers:\n  - {name: a, timeout: soon}\n  - {name: b, timeout: \"5\"}\n" +
-				"  - {name: c, timeout: 5}\n  - {name: d, timeout: [1]}\nreplicas: x\n",
+			input: stringtest.LinesLF(
+				"servers:",
+				"  - {name: a, timeout: soon}",
+				`  - {name: b, timeout: "5"}`,
+				"  - {name: c, timeout: 5}",
+				"  - {name: d, timeout: [1]}",
+				"replicas: x",
+			),
 			want: stringtest.JoinLF(
 				"5 problems",
 				`2:24: $.servers[0].timeout: time: invalid duration "soon"`,
@@ -841,8 +847,14 @@ func TestDocument_Decode_Problems(t *testing.T) {
 		// key, which is one value and one problem.
 		"values a merge key brings in": {
 			decode: decodeInto[problemConfig](),
-			input: "base: &b {port: http, timeout: soon}\nservers:\n  - *b\n  - {<<: *b, name: [a]}\n" +
-				"labels: {<<: {k: x}, j: y}\nreplicas: z\n",
+			input: stringtest.LinesLF(
+				"base: &b {port: http, timeout: soon}",
+				"servers:",
+				"  - *b",
+				"  - {<<: *b, name: [a]}",
+				"labels: {<<: {k: x}, j: y}",
+				"replicas: z",
+			),
 			want: stringtest.JoinLF(
 				"6 problems",
 				"1:17: $.base.port: expected integer, got string",
@@ -1562,12 +1574,11 @@ func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
 	t.Run("UnmarshalText method", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := yamltest.FirstDocument(t, stringtest.JoinLF(
+		_, err := yamltest.FirstDocument(t, stringtest.LinesLF(
 			"services:",
 			"  - {name: a, level: info, port: 1}",
 			"  - {name: b, level: loud, port: x}",
 			"  - {name: c, level: quiet, port: y}",
-			"",
 		)).Decode[struct {
 			Services []struct {
 				Name  string       `yaml:"name"`

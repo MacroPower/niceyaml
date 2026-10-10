@@ -391,7 +391,7 @@ func TestNode_IsEmpty(t *testing.T) {
 	t.Run("each document", func(t *testing.T) {
 		t.Parallel()
 
-		docs := niceyaml.NewSourceFromString(stringtest.JoinLF(
+		docs := niceyaml.NewSourceFromString(stringtest.LinesLF(
 			"a: 1",
 			"---",
 			"# Source: chart/templates/empty.yaml",
@@ -401,7 +401,6 @@ func TestNode_IsEmpty(t *testing.T) {
 			"---",
 			"b: 2",
 			"---",
-			"",
 		)).AllDocuments()
 
 		got := make([]bool, 0, len(docs))

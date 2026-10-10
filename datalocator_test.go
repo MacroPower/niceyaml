@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.jacobcolvin.com/x/jsonschema"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -813,8 +814,14 @@ func TestDataLocator_Schema(t *testing.T) {
 		"sequences and scalars":    shapesDoc,
 		"key with no name":         unnamedKeyDoc,
 		"alias key":                "k: &k 0x10\nm:\n  *k : {0x20: v}\n  \"16\": w\n",
-		"merge sources in a list": "a: &a {0x10: 1, b: 2}\nb: &b {16: 3, 0x10: 4}\n" +
-			"m:\n  <<: [*a, *b]\n  b: 5\n  <<: *a\n",
+		"merge sources in a list": stringtest.LinesLF(
+			"a: &a {0x10: 1, b: 2}",
+			"b: &b {16: 3, 0x10: 4}",
+			"m:",
+			"  <<: [*a, *b]",
+			"  b: 5",
+			"  <<: *a",
+		),
 		"merge key after its keys":       "base: &base {0x10: {a: 1}}\nm:\n  0x10: {b: 2}\n  0o20: {c: 3}\n  <<: *base\n",
 		"keys below one no path selects": "user:\n  <<: {0x10: {0x20: [x, {0x30: y}]}}\n  \"0x10\": 1\n",
 		"aliased mapping in a sequence":  "base: &base {0x10: x, 3.10: y}\nseq:\n  - *base\n  - [*base, {True: z}]\n",
