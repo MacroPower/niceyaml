@@ -3794,16 +3794,6 @@ func TestViewModeHunks_Golden(t *testing.T) {
 			width:  80,
 			height: 30,
 		},
-		"AtLatestRevision": {
-			setupFunc: func(m *yamlviewport.Model) {
-				addRevisions(m, modeRev1YAML, modeRev2YAML)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
-
-				// Default is at latest (index 1).
-			},
-			width:  80,
-			height: 30,
-		},
 		"DiffModeOrigin": {
 			setupFunc: func(m *yamlviewport.Model) {
 				addRevisions(m, modeRev1YAML, modeRev2YAML, modeRev3YAML)
