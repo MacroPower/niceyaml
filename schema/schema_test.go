@@ -3318,7 +3318,6 @@ func TestSchema_SourcePath(t *testing.T) {
 	tcs := map[string]struct {
 		schema     string
 		input      string
-		wantPath   string
 		want       string
 		unresolved bool
 	}{
@@ -3327,63 +3326,55 @@ func TestSchema_SourcePath(t *testing.T) {
 				"type": "object",
 				"properties": {"16": {"type": "integer"}}
 			}`,
-			input:    "0x10: hello\n",
-			wantPath: "$.0x10",
-			want:     `1:7: $.0x10: expected "integer", got "string"`,
+			input: "0x10: hello\n",
+			want:  `1:7: $.0x10: expected "integer", got "string"`,
 		},
 		"tilde null key": {
-			schema:   stringMembers,
-			input:    "~: 5\n",
-			wantPath: "$.'~'",
-			want:     `1:4: $.'~': expected "string", got "integer"`,
+			schema: stringMembers,
+			input:  "~: 5\n",
+			want:   `1:4: $.'~': expected "string", got "integer"`,
 		},
 		"merge key ahead of a null key": {
 			schema: `{
 				"type": "object",
 				"additionalProperties": {"type": ["string", "object"]}
 			}`,
-			input:    "<<: {a: x}\n~: 5\n",
-			wantPath: "$.'~'",
-			want:     `2:4: $.'~': expected ["string", "object"], got "integer"`,
+			input: "<<: {a: x}\n~: 5\n",
+			want:  `2:4: $.'~': expected ["string", "object"], got "integer"`,
 		},
 		"merge key ahead of an empty key": {
 			schema: `{
 				"type": "object",
 				"additionalProperties": {"type": ["string", "object"]}
 			}`,
-			input:    "<<: {a: x}\n\"\": 5\n",
-			wantPath: "$.''",
-			want:     `2:5: $.'': expected ["string", "object"], got "integer"`,
+			input: "<<: {a: x}\n\"\": 5\n",
+			want:  `2:5: $.'': expected ["string", "object"], got "integer"`,
 		},
 		"merge key overrides an earlier respelled key": {
 			// The decoder applies the merge after 0x10: 1, so the member
 			// 16 holds x, and the path names the key the merge brings in.
-			schema:   integersInUser,
-			input:    "user:\n  0x10: 1\n  <<: {16: x}\n",
-			wantPath: "$.user.16",
-			want:     `3:12: $.user.16: expected "integer", got "string"`,
+			schema: integersInUser,
+			input:  "user:\n  0x10: 1\n  <<: {16: x}\n",
+			want:   `3:12: $.user.16: expected "integer", got "string"`,
 		},
 		"merge key overrides an earlier key of the same spelling": {
 			// A path through 0x10 selects the later entry, which the
 			// merge brings in.
-			schema:   integersInUser,
-			input:    "user:\n  0x10: 1\n  <<: {0x10: x}\n",
-			wantPath: "$.user.0x10",
-			want:     `3:14: $.user.0x10: expected "integer", got "string"`,
+			schema: integersInUser,
+			input:  "user:\n  0x10: 1\n  <<: {0x10: x}\n",
+			want:   `3:14: $.user.0x10: expected "integer", got "string"`,
 		},
 		"respelled key a merge key brings in": {
-			schema:   integersInUser,
-			input:    "user:\n  <<: {0x10: x}\n",
-			wantPath: "$.user.0x10",
-			want:     `2:14: $.user.0x10: expected "integer", got "string"`,
+			schema: integersInUser,
+			input:  "user:\n  <<: {0x10: x}\n",
+			want:   `2:14: $.user.0x10: expected "integer", got "string"`,
 		},
 		"later key shadows a merged member": {
 			// The decoder sets 0x10: x after the merge, so the member 16
 			// holds x rather than the 5 the merge brings in.
-			schema:   integersInM,
-			input:    "b: &b {16: 5}\nm: {<<: *b, 0x10: x}\n",
-			wantPath: "$.m.0x10",
-			want:     `2:19: $.m.0x10: expected "integer", got "string"`,
+			schema: integersInM,
+			input:  "b: &b {16: 5}\nm: {<<: *b, 0x10: x}\n",
+			want:   `2:19: $.m.0x10: expected "integer", got "string"`,
 		},
 		"merged member hidden by a same-spelled key": {
 			// The merge brings in 0x10: x as the member 16. The quoted key
@@ -3392,25 +3383,22 @@ func TestSchema_SourcePath(t *testing.T) {
 			// name 16 and the error binds at the x.
 			schema:     integersInM,
 			input:      "m: {<<: {0x10: x}, \"0x10\": 5}\n",
-			wantPath:   "$.m.16",
 			want:       `1:16: $.m.16: expected "integer", got "string"`,
 			unresolved: true,
 		},
 		"tagged alias key replaces an earlier key": {
 			// The tag may change the name the alias key decodes to, so the
 			// key 0x10 before it cannot name the member 16.
-			schema:   integersInM,
-			input:    "a: &k 16\nm: {0x10: 5, ? !!str *k : x}\n",
-			wantPath: "$.m.16",
-			want:     `2:27: $.m.16: expected "integer", got "string"`,
+			schema: integersInM,
+			input:  "a: &k 16\nm: {0x10: 5, ? !!str *k : x}\n",
+			want:   `2:27: $.m.16: expected "integer", got "string"`,
 		},
 		"merge source with a tagged alias key": {
 			// A key of the merge source may decode to any name, so the
 			// key 0x10 before the merge cannot name the member 16.
-			schema:   integersInM,
-			input:    "a: &k 16\nb: &b {? !!str *k : x}\nm: {0x10: 5, <<: *b}\n",
-			wantPath: "$.m.16",
-			want:     `2:21: $.m.16: expected "integer", got "string"`,
+			schema: integersInM,
+			input:  "a: &k 16\nb: &b {? !!str *k : x}\nm: {0x10: 5, <<: *b}\n",
+			want:   `2:21: $.m.16: expected "integer", got "string"`,
 		},
 		"unnameable alias key hides earlier keys": {
 			// The alias key refers to a sequence, which the walk cannot
@@ -3418,15 +3406,13 @@ func TestSchema_SourcePath(t *testing.T) {
 			// The walk finds no member there, so the error binds at m.
 			schema:     integersInM,
 			input:      "s: &s [a]\nm: {0x10: x, ? *s : 1}\n",
-			wantPath:   "$.m.16",
 			want:       `2:1: $.m.16: expected "integer", got "string"`,
 			unresolved: true,
 		},
 		"spelled-out null key": {
-			schema:   stringMembers,
-			input:    "NULL: 5\n",
-			wantPath: "$.NULL",
-			want:     `1:7: $.NULL: expected "string", got "integer"`,
+			schema: stringMembers,
+			input:  "NULL: 5\n",
+			want:   `1:7: $.NULL: expected "string", got "integer"`,
 		},
 		"boolean key targeted by the failure": {
 			schema: `{
@@ -3434,67 +3420,57 @@ func TestSchema_SourcePath(t *testing.T) {
 				"properties": {"name": {"type": "string"}},
 				"additionalProperties": false
 			}`,
-			input:    "True: nope\n",
-			wantPath: "$.True~",
-			want:     "1:1: $.True~: value is not allowed",
+			input: "True: nope\n",
+			want:  "1:1: $.True~: value is not allowed",
 		},
 		"bool-tagged key": {
-			schema:   stringMembers,
-			input:    "!!bool yes: 5\n",
-			wantPath: "$.yes",
-			want:     `1:13: $.yes: expected "string", got "integer"`,
+			schema: stringMembers,
+			input:  "!!bool yes: 5\n",
+			want:   `1:13: $.yes: expected "string", got "integer"`,
 		},
 		"null-tagged key": {
-			schema:   stringMembers,
-			input:    "!!null x: 5\n",
-			wantPath: "$.x",
-			want:     `1:11: $.x: expected "string", got "integer"`,
+			schema: stringMembers,
+			input:  "!!null x: 5\n",
+			want:   `1:11: $.x: expected "string", got "integer"`,
 		},
 		"null-tagged empty key": {
 			// The key decodes to null, and the path spells it as the
 			// empty key the source writes.
-			schema:   stringMembers,
-			input:    "!!null \"\": 5\n",
-			wantPath: "$.''",
-			want:     `1:12: $.'': expected "string", got "integer"`,
+			schema: stringMembers,
+			input:  "!!null \"\": 5\n",
+			want:   `1:12: $.'': expected "string", got "integer"`,
 		},
 		"int-tagged quoted key": {
-			schema:   stringMembers,
-			input:    "!!int \"0x10\": 5\n",
-			wantPath: "$.0x10",
-			want:     `1:15: $.0x10: expected "string", got "integer"`,
+			schema: stringMembers,
+			input:  "!!int \"0x10\": 5\n",
+			want:   `1:15: $.0x10: expected "string", got "integer"`,
 		},
 		"timestamp-tagged key": {
-			schema:   stringMembers,
-			input:    "? !!timestamp 2001-01-01\n: 5\n",
-			wantPath: "$.2001-01-01",
-			want:     `2:3: $.2001-01-01: expected "string", got "integer"`,
+			schema: stringMembers,
+			input:  "? !!timestamp 2001-01-01\n: 5\n",
+			want:   `2:3: $.2001-01-01: expected "string", got "integer"`,
 		},
 		"float key": {
-			schema:   stringMembers,
-			input:    "1.5: 5\n",
-			wantPath: "$.'1.5'",
-			want:     `1:6: $.'1.5': expected "string", got "integer"`,
+			schema: stringMembers,
+			input:  "1.5: 5\n",
+			want:   `1:6: $.'1.5': expected "string", got "integer"`,
 		},
 		"two keys decoding to one name": {
 			// Both keys decode to 1, and the decoder keeps the later
 			// member, so the path names the later key.
-			schema:   stringMembers,
-			input:    "1.0: x\n1: 2\n",
-			wantPath: "$.1",
-			want:     `2:4: $.1: expected "string", got "integer"`,
+			schema: stringMembers,
+			input:  "1.0: x\n1: 2\n",
+			want:   `2:4: $.1: expected "string", got "integer"`,
 		},
 		"key with a dot": {
-			schema:   stringMembers,
-			input:    "a.b: 5\n",
-			wantPath: "$.'a.b'",
-			want:     `1:6: $.'a.b': expected "string", got "integer"`,
+			schema: stringMembers,
+			input:  "a.b: 5\n",
+			want:   `1:6: $.'a.b': expected "string", got "integer"`,
 		},
 		"key with a space": {
-			schema:   stringMembers,
-			input:    "a b: 5\n",
-			wantPath: "$.'a b'",
-			want:     `1:6: $.'a b': expected "string", got "integer"`,
+			schema: stringMembers,
+			input:  "a b: 5\n",
+			want:   `1:6: $.'a b': expected "string", got "integer"`,
 		},
 		"nested respelled key": {
 			schema: `{
@@ -3506,9 +3482,8 @@ func TestSchema_SourcePath(t *testing.T) {
 					}
 				}
 			}`,
-			input:    "spec:\n  0x10: hello\n",
-			wantPath: "$.spec.0x10",
-			want:     `2:9: $.spec.0x10: expected "integer", got "string"`,
+			input: "spec:\n  0x10: hello\n",
+			want:  `2:9: $.spec.0x10: expected "integer", got "string"`,
 		},
 		"respelled key inside a sequence": {
 			schema: `{
@@ -3523,15 +3498,13 @@ func TestSchema_SourcePath(t *testing.T) {
 					}
 				}
 			}`,
-			input:    "items:\n  - 0x10: 1\n  - 0x10: hello\n",
-			wantPath: "$.items[1].0x10",
-			want:     `3:11: $.items[1].0x10: expected "integer", got "string"`,
+			input: "items:\n  - 0x10: 1\n  - 0x10: hello\n",
+			want:  `3:11: $.items[1].0x10: expected "integer", got "string"`,
 		},
 		"alias key": {
-			schema:   stringMembers,
-			input:    "a: &k name\n*k : 5\n",
-			wantPath: "$.name",
-			want:     `2:6: $.name: expected "string", got "integer"`,
+			schema: stringMembers,
+			input:  "a: &k name\n*k : 5\n",
+			want:   `2:6: $.name: expected "string", got "integer"`,
 		},
 		"key named like an alias": {
 			// The alias *k decodes to the key name, so the member k is
@@ -3540,9 +3513,8 @@ func TestSchema_SourcePath(t *testing.T) {
 				"type": "object",
 				"properties": {"k": {"type": "string"}}
 			}`,
-			input:    "a: &k name\nk: 1\n*k : v\n",
-			wantPath: "$.k",
-			want:     `2:4: $.k: expected "string", got "integer"`,
+			input: "a: &k name\nk: 1\n*k : v\n",
+			want:  `2:4: $.k: expected "string", got "integer"`,
 		},
 		"alias key overrides an earlier key": {
 			// The decoder keeps the member the alias key sets, so the
@@ -3553,24 +3525,21 @@ func TestSchema_SourcePath(t *testing.T) {
 					"name": {"additionalProperties": {"type": "integer"}}
 				}
 			}`,
-			input:    "a: &k name\nname: {16: x}\n*k : {0x10: y}\n",
-			wantPath: "$.name.0x10",
-			want:     `3:13: $.name.0x10: expected "integer", got "string"`,
+			input: "a: &k name\nname: {16: x}\n*k : {0x10: y}\n",
+			want:  `3:13: $.name.0x10: expected "integer", got "string"`,
 		},
 		"alias key overrides a respelled key": {
 			schema: `{
 				"type": "object",
 				"properties": {"16": {"type": "integer"}}
 			}`,
-			input:    "a: &k 16\n0x10: hello\n*k : [1]\n",
-			wantPath: "$.16",
-			want:     `3:1: $.16: expected "integer", got "array"`,
+			input: "a: &k 16\n0x10: hello\n*k : [1]\n",
+			want:  `3:1: $.16: expected "integer", got "array"`,
 		},
 		"block scalar key": {
-			schema:   stringMembers,
-			input:    "? |-\n  n\n: 5\n",
-			wantPath: "$.n",
-			want:     `3:3: $.n: expected "string", got "integer"`,
+			schema: stringMembers,
+			input:  "? |-\n  n\n: 5\n",
+			want:   `3:3: $.n: expected "string", got "integer"`,
 		},
 		"respelled key behind an alias": {
 			schema: `{
@@ -3579,9 +3548,8 @@ func TestSchema_SourcePath(t *testing.T) {
 					"b": {"additionalProperties": {"type": "string"}}
 				}
 			}`,
-			input:    "a: &a {0x10: 1}\nb: *a\n",
-			wantPath: "$.b.0x10",
-			want:     `1:14: $.b.0x10: expected "string", got "integer"`,
+			input: "a: &a {0x10: 1}\nb: *a\n",
+			want:  `1:14: $.b.0x10: expected "string", got "integer"`,
 		},
 		"respelled key behind an alias to a block mapping": {
 			schema: `{
@@ -3590,9 +3558,8 @@ func TestSchema_SourcePath(t *testing.T) {
 					"b": {"additionalProperties": {"type": "string"}}
 				}
 			}`,
-			input:    "a: &a\n  0x10: 1\nb: *a\n",
-			wantPath: "$.b.0x10",
-			want:     `2:9: $.b.0x10: expected "string", got "integer"`,
+			input: "a: &a\n  0x10: 1\nb: *a\n",
+			want:  `2:9: $.b.0x10: expected "string", got "integer"`,
 		},
 		"respelled key behind a redefined anchor": {
 			// The alias refers to the last anchor of its name before it.
@@ -3602,9 +3569,8 @@ func TestSchema_SourcePath(t *testing.T) {
 					"c": {"additionalProperties": {"type": "string"}}
 				}
 			}`,
-			input:    "a: &a {16: x}\nb: &a {0x10: 1}\nc: *a\n",
-			wantPath: "$.c.0x10",
-			want:     `2:14: $.c.0x10: expected "string", got "integer"`,
+			input: "a: &a {16: x}\nb: &a {0x10: 1}\nc: *a\n",
+			want:  `2:14: $.c.0x10: expected "string", got "integer"`,
 		},
 		"respelled key behind an anchor a merge brings in again": {
 			// The decoder reads the anchors of a merged mapping again at
@@ -3619,9 +3585,8 @@ func TestSchema_SourcePath(t *testing.T) {
 					}
 				}
 			}`,
-			input:    "base: &b\n  k: &x {0x10: 1}\nother: &x {16: x}\nm:\n  <<: *b\n  v: *x\n",
-			wantPath: "$.m.v.0x10",
-			want:     `2:16: $.m.v.0x10: expected "string", got "integer"`,
+			input: "base: &b\n  k: &x {0x10: 1}\nother: &x {16: x}\nm:\n  <<: *b\n  v: *x\n",
+			want:  `2:16: $.m.v.0x10: expected "string", got "integer"`,
 		},
 	}
 
@@ -3638,8 +3603,8 @@ func TestSchema_SourcePath(t *testing.T) {
 
 			gotPath, ok := bound.Path()
 			require.True(t, ok, "bound error carries no path")
-			assert.Equal(t, tc.wantPath, gotPath.String())
 			assert.Equal(t, tc.want, bound.Error())
+			assert.Contains(t, tc.want, ": "+gotPath.String()+": ", "the message spells another path")
 
 			_, err = dd.At(gotPath)
 			if tc.unresolved {
