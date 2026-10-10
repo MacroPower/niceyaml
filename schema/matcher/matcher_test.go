@@ -14,7 +14,8 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
-// Compile-time interface satisfaction check and path helpers for tests.
+// Compile-time interface satisfaction check, path helpers, and a matcher
+// for tests.
 var (
 	_ matcher.Matcher = matcher.Func(nil)
 
@@ -26,6 +27,14 @@ var (
 	twoKeyPath     = paths.Current().Child("2").Key()
 	enabledPath    = paths.Current().Child("enabled")
 	timeoutPath    = paths.Current().Child("timeout")
+
+	// The error undecided reports.
+	errUndecided = errors.New("undecided")
+
+	// A matcher that cannot decide, and reports errUndecided.
+	undecided = matcher.Func(func(context.Context, *niceyaml.Node) (bool, error) {
+		return false, errUndecided
+	})
 )
 
 // pointerMatcher is a [matcher.Matcher] with a pointer receiver, so a nil
@@ -34,6 +43,16 @@ type pointerMatcher struct{}
 
 func (*pointerMatcher) Match(context.Context, *niceyaml.Node) (bool, error) {
 	return true, nil
+}
+
+// recording returns a [matcher.Matcher] that matches every document and
+// sets called when it runs.
+func recording(called *bool) matcher.Matcher {
+	return matcher.Func(func(context.Context, *niceyaml.Node) (bool, error) {
+		*called = true
+
+		return true, nil
+	})
 }
 
 // match runs m on doc and fails the test when the matcher cannot decide.
@@ -69,14 +88,13 @@ func TestFunc(t *testing.T) {
 	t.Run("passes the error of the function through", func(t *testing.T) {
 		t.Parallel()
 
-		undecided := errors.New("undecided")
 		m := matcher.Func(func(_ context.Context, _ *niceyaml.Node) (bool, error) {
-			return false, undecided
+			return false, errUndecided
 		})
 
 		doc := yamltest.FirstDocument(t, "kind: Test")
 		_, err := m.Match(t.Context(), doc)
-		require.ErrorIs(t, err, undecided)
+		require.ErrorIs(t, err, errUndecided)
 	})
 }
 

@@ -1,14 +1,11 @@
 package matcher_test
 
 import (
-	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
@@ -45,22 +42,12 @@ func TestAny(t *testing.T) {
 	t.Run("error ends the evaluation", func(t *testing.T) {
 		t.Parallel()
 
-		undecided := errors.New("undecided")
 		called := false
-		m := matcher.Any(
-			matcher.Func(func(_ context.Context, _ *niceyaml.Node) (bool, error) {
-				return false, undecided
-			}),
-			matcher.Func(func(_ context.Context, _ *niceyaml.Node) (bool, error) {
-				called = true
-
-				return true, nil
-			}),
-		)
+		m := matcher.Any(undecided, recording(&called))
 		doc := yamltest.FirstDocument(t, `kind: Deployment`)
 
 		_, err := m.Match(t.Context(), doc)
-		require.ErrorIs(t, err, undecided)
+		require.ErrorIs(t, err, errUndecided)
 		assert.False(t, called)
 	})
 
