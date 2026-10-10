@@ -577,16 +577,12 @@ func TestSchemaStore_SlowFetch(t *testing.T) {
 			require.Equal(t, int32(2), requests.Load())
 
 			// A lookup during the refresh gets the previous catalog at once.
-			result := receive(t, findMatchAsync(t.Context(), store))
-			require.NoError(t, result.err)
-			assert.Equal(t, "Catalog 1", result.entry.Name)
+			requireFound(t, findMatchAsync(t.Context(), store), "Catalog 1")
 
 			// The lookup that started the refresh waits for it.
 			release()
 
-			result = receive(t, refreshing)
-			require.NoError(t, result.err)
-			assert.Equal(t, "Catalog 2", result.entry.Name)
+			requireFound(t, refreshing, "Catalog 2")
 			assert.Equal(t, int32(2), requests.Load())
 		})
 	})
@@ -612,16 +608,12 @@ func TestSchemaStore_SlowFetch(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), timeout)
 			defer cancel()
 
-			result := receive(t, findMatchAsync(ctx, store))
-			require.ErrorIs(t, result.err, schemastore.ErrFetchCatalog)
-			require.ErrorIs(t, result.err, context.DeadlineExceeded)
+			requireDeadlineExceeded(t, findMatchAsync(ctx, store))
 			assert.Equal(t, timeout, time.Since(start), "lookup should wait for the fetch until its deadline")
 
 			release()
 
-			result = receive(t, first)
-			require.NoError(t, result.err)
-			assert.Equal(t, "Catalog 1", result.entry.Name)
+			requireFound(t, first, "Catalog 1")
 			assert.Equal(t, int32(1), requests.Load())
 		})
 	})
@@ -642,9 +634,7 @@ func TestSchemaStore_SlowFetch(t *testing.T) {
 			synctest.Wait()
 			require.Equal(t, int32(1), requests.Load())
 
-			result := receive(t, abandoned)
-			require.ErrorIs(t, result.err, schemastore.ErrFetchCatalog)
-			require.ErrorIs(t, result.err, context.DeadlineExceeded)
+			requireDeadlineExceeded(t, abandoned)
 
 			// The fetch outlives the lookup that started it and records its
 			// catalog, so the next lookup gets that catalog rather than
@@ -671,9 +661,7 @@ func TestSchemaStore_SlowFetch(t *testing.T) {
 
 			// The lookup context has no deadline, so only the refresh timeout
 			// can end the fetch the transport holds.
-			result := receive(t, findMatchAsync(t.Context(), store))
-			require.ErrorIs(t, result.err, schemastore.ErrFetchCatalog)
-			require.ErrorIs(t, result.err, context.DeadlineExceeded)
+			requireDeadlineExceeded(t, findMatchAsync(t.Context(), store))
 			assert.Equal(t, timeout, time.Since(start), "fetch should end at the refresh timeout")
 			assert.Equal(t, int32(1), requests.Load())
 		})
@@ -1711,6 +1699,27 @@ func findMatchAsync(ctx context.Context, store *schemastore.Store) <-chan findMa
 	}()
 
 	return results
+}
+
+// requireFound receives the result of a lookup that findMatchAsync started
+// and requires the entry named want.
+func requireFound(t *testing.T, results <-chan findMatchResult, want string) {
+	t.Helper()
+
+	result := receive(t, results)
+	require.NoError(t, result.err)
+	assert.Equal(t, want, result.entry.Name)
+}
+
+// requireDeadlineExceeded receives the result of a lookup that
+// findMatchAsync started and requires the error of a fetch whose context
+// passed its deadline.
+func requireDeadlineExceeded(t *testing.T, results <-chan findMatchResult) {
+	t.Helper()
+
+	result := receive(t, results)
+	require.ErrorIs(t, result.err, schemastore.ErrFetchCatalog)
+	require.ErrorIs(t, result.err, context.DeadlineExceeded)
 }
 
 // receive returns the next value from ch and fails the test if none arrives
