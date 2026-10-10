@@ -149,9 +149,7 @@ func TestColorScheme_NilStyler(t *testing.T) {
 	tcs := map[string]struct {
 		scheme func(styles style.Styler) fang.ColorScheme
 	}{
-		"ColorScheme": {
-			scheme: fangs.ColorScheme,
-		},
+		"ColorScheme": {scheme: fangs.ColorScheme},
 		"ColorSchemeFunc": {
 			scheme: func(styles style.Styler) fang.ColorScheme {
 				return fangs.ColorSchemeFunc(styles)(nil)

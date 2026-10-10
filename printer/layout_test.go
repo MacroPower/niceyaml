@@ -205,9 +205,7 @@ func TestPrinter_Layout_PositionAt(t *testing.T) {
 			want:    position.New(2, 3),
 			ok:      true,
 		},
-		"empty view": {
-			content: "",
-		},
+		"empty view": {content: ""},
 		// A clip of 10 columns shows this line as "k: abcdefg...".
 		"last column a clipped line keeps": {
 			content: "k: abcdefghijklmnopqrstuvwxyz",

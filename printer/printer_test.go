@@ -549,9 +549,7 @@ func TestPrinter_PrintError_WrapFitsExcerpts(t *testing.T) {
 		opts  []printer.Option
 		width int
 	}{
-		"default container": {
-			width: 30,
-		},
+		"default container": {width: 30},
 		"bordered container": {
 			opts: []printer.Option{
 				printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
@@ -3369,9 +3367,7 @@ func TestPrinter_Print_Tokens(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 	}{
-		"empty file": {
-			input: "",
-		},
+		"empty file": {input: ""},
 		"anchor and alias": {
 			input: stringtest.JoinLF(
 				"anchor: &x 1",
@@ -5611,9 +5607,7 @@ func TestPrinter_Layout_LineWidth(t *testing.T) {
 		spans []position.Span
 		want  []int
 	}{
-		"every line": {
-			want: []int{10, 16, 35},
-		},
+		"every line": {want: []int{10, 16, 35}},
 		"lines the view does not hold": {
 			spans: []position.Span{position.NewSpan(1, 2)},
 			want:  []int{0, 16, 0},
@@ -5677,18 +5671,10 @@ func TestPrinter_Layout_StyledAnnotationRows(t *testing.T) {
 		wrap   int
 		col    int
 	}{
-		"width": {
-			style: lipgloss.NewStyle().Width(6),
-		},
-		"vertical padding": {
-			style: lipgloss.NewStyle().PaddingTop(1),
-		},
-		"margin": {
-			style: lipgloss.NewStyle().MarginBottom(1),
-		},
-		"border": {
-			style: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
-		},
+		"width":            {style: lipgloss.NewStyle().Width(6)},
+		"vertical padding": {style: lipgloss.NewStyle().PaddingTop(1)},
+		"margin":           {style: lipgloss.NewStyle().MarginBottom(1)},
+		"border":           {style: lipgloss.NewStyle().Border(lipgloss.NormalBorder())},
 		"continuation rows": {
 			style: lipgloss.NewStyle().PaddingLeft(2),
 			wrap:  12,
@@ -5818,15 +5804,9 @@ func TestPrinter_WithGutter_Nil(t *testing.T) {
 	tcs := map[string]struct {
 		gutter printer.Gutter
 	}{
-		"nil": {
-			gutter: nil,
-		},
-		"nil GutterFunc": {
-			gutter: printer.GutterFunc(nil),
-		},
-		"nil pointer": {
-			gutter: (*fixedGutter)(nil),
-		},
+		"nil":            {gutter: nil},
+		"nil GutterFunc": {gutter: printer.GutterFunc(nil)},
+		"nil pointer":    {gutter: (*fixedGutter)(nil)},
 	}
 
 	for name, tc := range tcs {
@@ -5855,15 +5835,9 @@ func TestPrinter_WithStyles_Nil(t *testing.T) {
 	tcs := map[string]struct {
 		styles style.Styler
 	}{
-		"nil": {
-			styles: nil,
-		},
-		"nil *style.Styles": {
-			styles: (*style.Styles)(nil),
-		},
-		"nil *theme.Theme": {
-			styles: (*theme.Theme)(nil),
-		},
+		"nil":               {styles: nil},
+		"nil *style.Styles": {styles: (*style.Styles)(nil)},
+		"nil *theme.Theme":  {styles: (*theme.Theme)(nil)},
 	}
 
 	for name, tc := range tcs {
@@ -6508,9 +6482,7 @@ func TestPrinter_WrapWidth_FitsFrame(t *testing.T) {
 		opts []printer.Option
 	}{
 		"default container": {},
-		"no container": {
-			opts: []printer.Option{printer.WithContainerStyle(lipgloss.NewStyle())},
-		},
+		"no container":      {opts: []printer.Option{printer.WithContainerStyle(lipgloss.NewStyle())}},
 		"bordered and padded container": {
 			opts: []printer.Option{printer.WithContainerStyle(
 				lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1),
@@ -6946,9 +6918,7 @@ func TestPrinter_Clip_Styles(t *testing.T) {
 		annotations []line.Annotation
 		flag        line.Flag
 	}{
-		"ellipsis at the end": {
-			want: "key: abcde<...>",
-		},
+		"ellipsis at the end": {want: "key: abcde<...>"},
 		"ellipsis at both ends of a marked window": {
 			overlays: []position.Span{position.NewSpan(30, 32)},
 			want:     "<...>uvwxy[zA]BCD<...>",

@@ -344,24 +344,12 @@ func TestErrorHandler_UsageHint(t *testing.T) {
 			msg:      `required flag(s) "schema" not set`,
 			wantHint: true,
 		},
-		"opening with accepts": {
-			msg: "accepts only .yaml files",
-		},
-		"opening with invalid argument": {
-			msg: "invalid argument: path must be absolute",
-		},
-		"opening with requires at least": {
-			msg: "requires at least one schema",
-		},
-		"opening with unknown commands": {
-			msg: "unknown commands.yaml:1:4: bad",
-		},
-		"opening with unknown command-line": {
-			msg: "unknown command-line option in config",
-		},
-		"with flag word": {
-			msg: "flagged as incorrect",
-		},
+		"opening with accepts":              {msg: "accepts only .yaml files"},
+		"opening with invalid argument":     {msg: "invalid argument: path must be absolute"},
+		"opening with requires at least":    {msg: "requires at least one schema"},
+		"opening with unknown commands":     {msg: "unknown commands.yaml:1:4: bad"},
+		"opening with unknown command-line": {msg: "unknown command-line option in config"},
+		"with flag word":                    {msg: "flagged as incorrect"},
 	}
 
 	for name, tc := range tcs {
@@ -577,12 +565,8 @@ func TestErrorHandler_UnwritableWriter(t *testing.T) {
 	tcs := map[string]struct {
 		err error
 	}{
-		"plain error": {
-			err: errors.New("something went wrong"),
-		},
-		"usage error, which writes the help hint too": {
-			err: errors.New("unknown flag: --foo"),
-		},
+		"plain error": {err: errors.New("something went wrong")},
+		"usage error, which writes the help hint too": {err: errors.New("unknown flag: --foo")},
 	}
 
 	for name, tc := range tcs {
