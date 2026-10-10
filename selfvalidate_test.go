@@ -622,7 +622,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
-	t.Run("an embedded field that is nil or ignored does not validate", func(t *testing.T) {
+	t.Run("a field that is nil or ignored does not validate", func(t *testing.T) {
 		t.Parallel()
 
 		type inline struct {
@@ -647,17 +647,21 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			target any
 			input  string
 		}{
-			"nil inline pointer": {
+			"nil inline embedded pointer": {
 				input:  "# empty\n",
 				target: new(inline),
 			},
-			"nil named pointer": {
+			"nil named embedded pointer": {
 				input:  "spec: x\n",
 				target: new(named),
 			},
-			"ignored": {
+			"ignored embedded field": {
 				input:  "name: hello",
 				target: new(ignored),
+			},
+			"ignored field the caller set": {
+				input:  `hours: {open: "09:00", close: "17:00"}`,
+				target: &nested{Ignored: hours{Open: "09:00", Close: "08:00"}},
 			},
 		}
 
@@ -871,17 +875,6 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				requireValidation(t, err, tc.err)
 			})
 		}
-	})
-
-	t.Run("an ignored field does not validate", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, stringtest.Input(`
-			hours: {open: "09:00", close: "17:00"}
-		`))
-
-		cfg := nested{Ignored: hours{Open: "09:00", Close: "08:00"}}
-		require.NoError(t, dd.DecodeInto(t.Context(), &cfg))
 	})
 
 	t.Run("children validate before the parent, which runs only when they pass", func(t *testing.T) {
