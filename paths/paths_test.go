@@ -2361,26 +2361,24 @@ func TestPath_NoContentDocument(t *testing.T) {
 
 	// No single node resolves in a document that holds no content, and a
 	// path lists no nodes there.
-	tcs := map[string]struct {
-		input string
-	}{
+	tcs := map[string]string{
 		// A parse that keeps comments makes the comment group the body of
 		// a document that holds nothing else.
-		"comment": {input: "# just a comment\n"},
+		"comment": "# just a comment\n",
 		// The tokenizer gives a source the lexer emits nothing for one
 		// placeholder token, which the parser reads as a plain scalar.
 		// That scalar is not content.
-		"newline":     {input: "\n"},
-		"blank lines": {input: "\n\n"},
-		"spaces":      {input: "   "},
-		"lone bang":   {input: "!"},
+		"newline":     "\n",
+		"blank lines": "\n\n",
+		"spaces":      "   ",
+		"lone bang":   "!",
 	}
 
-	for name, tc := range tcs {
+	for name, input := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			file, err := niceyaml.NewSourceFromString(tc.input).File()
+			file, err := niceyaml.NewSourceFromString(input).File()
 			require.NoError(t, err)
 			require.Len(t, file.Docs, 1)
 
@@ -4437,25 +4435,18 @@ func TestPath_MergeKeyAndLiteralMergeName(t *testing.T) {
 	// through `<<` selects the real key in either order, so `..k` lists
 	// only the entry under the real key, and the path of each match
 	// selects that match's node.
-	tcs := map[string]struct {
-		input string
-	}{
-		"alias key first": {
-			input: "a: {? &x \"<<\" : 1}\nm:\n  *x : {k: 1}\n  <<: {k: 2}\n",
-		},
-		"merge key first": {
-			input: "a: {? &x \"<<\" : 1}\nm:\n  <<: {k: 2}\n  *x : {k: 1}\n",
-		},
-		"alias key before a source with a merge key": {
-			input: "a: {? &x \"<<\" : 1}\nb: &b {j: 3}\nm:\n  *x : {k: 1}\n  <<: {<<: *b, k: 2}\n",
-		},
+	tcs := map[string]string{
+		"alias key first": "a: {? &x \"<<\" : 1}\nm:\n  *x : {k: 1}\n  <<: {k: 2}\n",
+		"merge key first": "a: {? &x \"<<\" : 1}\nm:\n  <<: {k: 2}\n  *x : {k: 1}\n",
+		"alias key before a source with a merge key": "a: {? &x \"<<\" : 1}\nb: &b {j: 3}\n" +
+			"m:\n  *x : {k: 1}\n  <<: {<<: *b, k: 2}\n",
 	}
 
-	for name, tc := range tcs {
+	for name, input := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
+			doc := yamltest.FirstDocument(t, input).DocumentAST()
 
 			node, err := paths.NewResolver(doc).Node(paths.MustParse("$.m.'<<'.k"))
 			require.NoError(t, err)

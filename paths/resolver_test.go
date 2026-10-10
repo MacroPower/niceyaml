@@ -1195,29 +1195,19 @@ func TestResolver_KeyName(t *testing.T) {
 
 	// The parser rejects a sequence or mapping key, but a tree built by
 	// hand may hold one.
-	handBuilt := map[string]struct {
-		key ast.Node
-	}{
-		"nil": {},
-		"typed nil": {
-			key: (*ast.StringNode)(nil),
-		},
-		"sequence": {
-			key: &ast.SequenceNode{BaseNode: &ast.BaseNode{}},
-		},
-		"explicit sequence": {
-			key: &ast.MappingKeyNode{Value: &ast.SequenceNode{BaseNode: &ast.BaseNode{}}},
-		},
-		"mapping": {
-			key: &ast.MappingNode{BaseNode: &ast.BaseNode{}},
-		},
+	handBuilt := map[string]ast.Node{
+		"nil":               nil,
+		"typed nil":         (*ast.StringNode)(nil),
+		"sequence":          &ast.SequenceNode{BaseNode: &ast.BaseNode{}},
+		"explicit sequence": &ast.MappingKeyNode{Value: &ast.SequenceNode{BaseNode: &ast.BaseNode{}}},
+		"mapping":           &ast.MappingNode{BaseNode: &ast.BaseNode{}},
 	}
 
-	for name, tc := range handBuilt {
+	for name, key := range handBuilt {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, ok := paths.NewResolver(nil).KeyName(tc.key)
+			got, ok := paths.NewResolver(nil).KeyName(key)
 			assert.False(t, ok)
 			assert.Empty(t, got)
 		})
