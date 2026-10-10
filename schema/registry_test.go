@@ -110,6 +110,14 @@ var (
 	}
 )
 
+// loading returns a ref that names key and whose Load returns data and
+// err.
+func loading(key string, data []byte, err error) schema.Ref {
+	return schema.Loadable(key, func(context.Context) ([]byte, error) {
+		return data, err
+	})
+}
+
 // countingLoader returns a ref that names key, serves data, and counts
 // how many times its Load runs.
 func countingLoader(key string, data []byte) (schema.Ref, *atomic.Int32) {
@@ -458,24 +466,15 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 	t.Run("resolver cancels and names a schema", func(t *testing.T) {
 		t.Parallel()
 
-		load := func(context.Context) ([]byte, error) {
-			return []byte(`{"type":"object"}`), nil
-		}
+		data := []byte(`{"type":"object"}`)
 
 		tcs := map[string]struct {
 			ref  schema.Ref
 			warm bool
 		}{
-			"loadable": {
-				ref: schema.Loadable("cancel.json", load),
-			},
-			"cached loadable": {
-				ref:  schema.Loadable("cancel.json", load),
-				warm: true,
-			},
-			"embedded": {
-				ref: schema.Embedded([]byte(`{"type":"object"}`)),
-			},
+			"loadable":        {ref: loading("cancel.json", data, nil)},
+			"cached loadable": {ref: loading("cancel.json", data, nil), warm: true},
+			"embedded":        {ref: schema.Embedded(data)},
 		}
 
 		for name, tc := range tcs {
@@ -642,9 +641,7 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 		// The resolver applies, so the failed load is no unmatched
 		// document, whatever the load error wraps.
 		reg := schema.NewRegistry(
-			schema.WithResolvers(schema.Loadable("k", func(_ context.Context) ([]byte, error) {
-				return nil, fmt.Errorf("upstream lookup: %w", schema.ErrNoMatch)
-			})),
+			schema.WithResolvers(loading("k", nil, fmt.Errorf("upstream lookup: %w", schema.ErrNoMatch))),
 			schema.WithRequireSchema(false),
 		)
 
@@ -1488,11 +1485,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 	t.Run("load error propagates through Check", func(t *testing.T) {
 		t.Parallel()
 
-		reg := schema.NewRegistry(
-			schema.WithResolvers(schema.Loadable("broken.json", func(_ context.Context) ([]byte, error) {
-				return nil, errors.New("disk on fire")
-			})),
-		)
+		reg := schema.NewRegistry(schema.WithResolvers(loading("broken.json", nil, errors.New("disk on fire"))))
 
 		doc := document(t)
 		err := reg.Check(t.Context(), doc)
@@ -1504,8 +1497,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 	t.Run("compile error propagates", func(t *testing.T) {
 		t.Parallel()
 
-		broken, _ := countingLoader("bad.json", []byte(`{not valid json`))
-		reg := schema.NewRegistry(schema.WithResolvers(broken))
+		reg := schema.NewRegistry(schema.WithResolvers(loading("bad.json", []byte(`{not valid json`), nil)))
 
 		doc := document(t)
 		_, err := reg.Lookup(t.Context(), doc)
@@ -2048,9 +2040,7 @@ func TestRegistry_FileFS(t *testing.T) {
 		fsys := mapFS(map[string]string{"s.json": `{"type": "string"}`})
 
 		file := schema.FileFS(fsys, "s.json")
-		loadable := schema.Loadable("s.json", func(context.Context) ([]byte, error) {
-			return []byte(`{"type": "integer"}`), nil
-		})
+		loadable := loading("s.json", []byte(`{"type": "integer"}`), nil)
 
 		assert.NotEqual(t, loadable.Key(), file.Key())
 
@@ -2989,11 +2979,7 @@ func TestRegistry_Load(t *testing.T) {
 	t.Run("a loadable ref returns its bytes", func(t *testing.T) {
 		t.Parallel()
 
-		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
-			return []byte(`{}`), nil
-		})
-
-		data, err := schema.NewRegistry().Load(t.Context(), ref)
+		data, err := schema.NewRegistry().Load(t.Context(), loading("k", []byte(`{}`), nil))
 		require.NoError(t, err)
 		assert.Equal(t, []byte(`{}`), data)
 	})
@@ -3080,9 +3066,7 @@ func TestRegistry_Schema(t *testing.T) {
 	t.Run("compiles with the registry's compile options", func(t *testing.T) {
 		t.Parallel()
 
-		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
-			return []byte(`{"type": "string", "format": "email"}`), nil
-		})
+		ref := loading("k", []byte(`{"type": "string", "format": "email"}`), nil)
 
 		plain, err := schema.NewRegistry().Schema(t.Context(), ref)
 		require.NoError(t, err)
@@ -3119,11 +3103,7 @@ func TestRegistry_Schema(t *testing.T) {
 	t.Run("a load that fails is ErrLoad", func(t *testing.T) {
 		t.Parallel()
 
-		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
-			return nil, errors.New("boom")
-		})
-
-		_, err := schema.NewRegistry().Schema(t.Context(), ref)
+		_, err := schema.NewRegistry().Schema(t.Context(), loading("k", nil, errors.New("boom")))
 		require.ErrorIs(t, err, schema.ErrLoad)
 		assert.True(t, strings.HasPrefix(err.Error(), `load schema: "k": `), err.Error())
 	})
@@ -3131,11 +3111,7 @@ func TestRegistry_Schema(t *testing.T) {
 	t.Run("bytes that do not compile are ErrCompile", func(t *testing.T) {
 		t.Parallel()
 
-		ref := schema.Loadable("k", func(_ context.Context) ([]byte, error) {
-			return []byte(`{"type": 42}`), nil
-		})
-
-		_, err := schema.NewRegistry().Schema(t.Context(), ref)
+		_, err := schema.NewRegistry().Schema(t.Context(), loading("k", []byte(`{"type": 42}`), nil))
 		require.ErrorIs(t, err, schema.ErrCompile)
 		assert.True(t, strings.HasPrefix(err.Error(), `compile schema: "k": `), err.Error())
 	})
@@ -4308,9 +4284,7 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 		},
 		"loadable": {
 			ref: func(*testing.T) (schema.Ref, []schema.RegistryOption) {
-				return schema.Loadable("named", func(context.Context) ([]byte, error) {
-					return []byte(namedYAML), nil
-				}), nil
+				return loading("named", []byte(namedYAML), nil), nil
 			},
 		},
 		"embedded": {
