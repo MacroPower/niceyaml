@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/aliasing"
@@ -22,7 +23,7 @@ import (
 func anchoredAliasLevels() string {
 	var sb strings.Builder
 
-	sb.WriteString("a:\n  - &l0 [x]\n")
+	sb.WriteString(stringtest.LinesLF("a:", "  - &l0 [x]"))
 
 	for level := 1; level <= 7; level++ {
 		fmt.Fprintf(&sb, "  - &l%d\n", level)
@@ -37,28 +38,26 @@ func anchoredAliasLevels() string {
 
 var (
 	// A line that anchors a scalar of 2000 bytes as a.
-	longScalar = "a: &a " + strings.Repeat("x", 2000) + "\n"
+	longScalar = "a: &a " + strings.Repeat("x", 2000)
 
 	// A binary scalar of 2000 bytes under its tag.
 	binaryScalar = "!!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000))
 )
 
-// anchoredInMapping returns a mapping anchored as base that holds a
-// scalar of 2000 bytes under an anchor of its own.
+// anchoredInMapping returns the lines of a mapping anchored as base that
+// holds a scalar of 2000 bytes under an anchor of its own.
 func anchoredInMapping() string {
-	return "base: &base\n  name: &n " + strings.Repeat("x", 2000) + "\n  x: 1\n"
+	return stringtest.JoinLF(
+		"base: &base",
+		"  name: &n "+strings.Repeat("x", 2000),
+		"  x: 1",
+	)
 }
 
-// thousandEntries returns 1000 entries of a block mapping, each indented
-// under a key.
+// thousandEntries returns the lines of 1000 entries of a block mapping,
+// each indented under a key.
 func thousandEntries() string {
-	var sb strings.Builder
-
-	for i := range 1000 {
-		fmt.Fprintf(&sb, "  k%d: v\n", i)
-	}
-
-	return sb.String()
+	return strings.TrimSuffix(yamltest.GenerateLines(1000, "  k%d: v"), "\n")
 }
 
 func TestCheckDecode(t *testing.T) {
@@ -75,8 +74,10 @@ func TestCheckDecode(t *testing.T) {
 			// Each alias is a node of the document as well as a read of
 			// its anchor, so the 150 aliases add 150 nodes to the 13 the
 			// document holds without them.
-			input: "base: &b {os: linux, arch: amd64, go: stable, cgo: false}\n" +
-				"matrix: " + yamltest.FlowSequence("*b", 150) + "\n",
+			input: stringtest.LinesLF(
+				"base: &b {os: linux, arch: amd64, go: stable, cgo: false}",
+				"matrix: "+yamltest.FlowSequence("*b", 150),
+			),
 		},
 		"aliases to a mapping of 200 keys under keys of their own": {
 			input: yamltest.AliasedMapping(200, 150),
@@ -87,11 +88,11 @@ func TestCheckDecode(t *testing.T) {
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias bomb as mapping key": {
-			input: yamltest.AliasLevels(7) + "kind:\n  ? *l7\n  : v\n",
+			input: yamltest.AliasLevels(7) + stringtest.LinesLF("kind:", "  ? *l7", "  : v"),
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"anchored alias bomb as mapping key": {
-			input: anchoredAliasLevels() + "kind:\n  ? *l7\n  : v\n",
+			input: anchoredAliasLevels() + stringtest.LinesLF("kind:", "  ? *l7", "  : v"),
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"merge key bomb": {
@@ -101,12 +102,12 @@ func TestCheckDecode(t *testing.T) {
 		"node holding an alias with a bomb outside it": {
 			// The limit applies to the whole document, even where a
 			// decode of the node would read only the anchor it needs.
-			input: "k: &k a\n" + yamltest.AliasLevels(7) + "b:\n  ? *l7\n  : v\nc: [*k]\n",
+			input: "k: &k a\n" + yamltest.AliasLevels(7) + stringtest.LinesLF("b:", "  ? *l7", "  : v", "c: [*k]"),
 			path:  paths.Current().Child("c"),
 			err:   aliaslimit.ErrExcessiveAliasing,
 		},
 		"node without an alias beside a bomb": {
-			input: yamltest.AliasLevels(7) + "b:\n  ? *l7\n  : v\nc: [x]\n",
+			input: yamltest.AliasLevels(7) + stringtest.LinesLF("b:", "  ? *l7", "  : v", "c: [x]"),
 			path:  paths.Current().Child("c"),
 		},
 		"aliases inside their own anchor": {
@@ -115,160 +116,273 @@ func TestCheckDecode(t *testing.T) {
 		"aliases to an anchor holding an alias to the anchor around it": {
 			// The decoder reads *A inside A as null, so each *B reads
 			// {c: null}.
-			input: "a: &A\n  b: &B {c: *A}\n" + thousandEntries() + "d: " + yamltest.FlowSequence("*B", 300) + "\n",
+			input: stringtest.LinesLF(
+				"a: &A",
+				"  b: &B {c: *A}",
+				thousandEntries(),
+				"d: "+yamltest.FlowSequence("*B", 300),
+			),
 		},
 		"same aliases after one inside the anchor around it": {
 			// The count does not depend on which alias to B comes first.
-			input: "a: &A\n  b: &B {c: *A}\n" +
-				thousandEntries() + "  e: *B\nd: " + yamltest.FlowSequence("*B", 300) + "\n",
+			input: stringtest.LinesLF(
+				"a: &A",
+				"  b: &B {c: *A}",
+				thousandEntries(),
+				"  e: *B",
+				"d: "+yamltest.FlowSequence("*B", 300),
+			),
 		},
 		"aliases to an anchor on an alias to the anchor around it": {
 			// P reads null, so each *Q reads [null].
-			input: "a: &A\n  p: &P\n    *A\n  q: &Q [*P]\n" +
-				thousandEntries() + "d: " + yamltest.FlowSequence("*Q", 300) + "\n",
+			input: stringtest.LinesLF(
+				"a: &A",
+				"  p: &P",
+				"    *A",
+				"  q: &Q [*P]",
+				thousandEntries(),
+				"d: "+yamltest.FlowSequence("*Q", 300),
+			),
 		},
 		"scalar aliases written out in a key": {
 			// The decoder spells the key as text, with a copy of the
 			// scalar for each alias.
-			input: longScalar + "k: &k " + yamltest.FlowSequence("*a", 500) + "\nm: {? *k : 1}\n",
-			err:   aliaslimit.ErrExcessiveAliasing,
+			input: stringtest.LinesLF(
+				longScalar,
+				"k: &k "+yamltest.FlowSequence("*a", 500),
+				"m: {? *k : 1}",
+			),
+			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"scalar aliases in a value": {
-			input: longScalar + "k: &k " + yamltest.FlowSequence("*a", 500) + "\nm: {n: *k}\n",
+			input: stringtest.LinesLF(
+				longScalar,
+				"k: &k "+yamltest.FlowSequence("*a", 500),
+				"m: {n: *k}",
+			),
 		},
 		"aliases to a tag over an alias to a mapping": {
 			// Each *s reads all of k through the alias under the tag.
-			input: "k: &k\n" + thousandEntries() + "s: &s !foo *k\nl: " + yamltest.FlowSequence("*s", 300) + "\n",
-			err:   aliaslimit.ErrExcessiveAliasing,
+			input: stringtest.LinesLF(
+				"k: &k",
+				thousandEntries(),
+				"s: &s !foo *k",
+				"l: "+yamltest.FlowSequence("*s", 300),
+			),
+			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"a few aliases to a tag over an alias to a mapping": {
-			input: "k: &k\n" + thousandEntries() + "s: &s !foo *k\nl: " + yamltest.FlowSequence("*s", 2) + "\n",
+			input: stringtest.LinesLF(
+				"k: &k",
+				thousandEntries(),
+				"s: &s !foo *k",
+				"l: "+yamltest.FlowSequence("*s", 2),
+			),
 		},
 		"aliases to chained tags over an alias to a mapping": {
 			// Each *t reads all of k through *s and then *k.
-			input: "k: &k\n" + thousandEntries() + "s: &s !foo *k\nt: &t !bar *s\n" +
-				"l: " + yamltest.FlowSequence("*t", 300) + "\n",
+			input: stringtest.LinesLF(
+				"k: &k",
+				thousandEntries(),
+				"s: &s !foo *k",
+				"t: &t !bar *s",
+				"l: "+yamltest.FlowSequence("*t", 300),
+			),
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"aliases to a string tag over an alias to scalar aliases": {
 			// Each *s writes out k as text, with a copy of a for each *a.
-			input: longScalar + "k: &k " + yamltest.FlowSequence("*a", 50) + "\ns: &s !!str *k\n" +
-				"l: " + yamltest.FlowSequence("*s", 300) + "\n",
+			input: stringtest.LinesLF(
+				longScalar,
+				"k: &k "+yamltest.FlowSequence("*a", 50),
+				"s: &s !!str *k",
+				"l: "+yamltest.FlowSequence("*s", 300),
+			),
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias key to a tag over an alias to scalar aliases": {
 			// The key decodes to a sequence, so the decoder spells it as
 			// text, with a copy of the scalar for each *a.
-			input: longScalar + "k: &k " + yamltest.FlowSequence("*a", 500) + "\ns: &s !foo *k\nm: {? *s : 1}\n",
-			err:   aliaslimit.ErrExcessiveAliasing,
+			input: stringtest.LinesLF(
+				longScalar,
+				"k: &k "+yamltest.FlowSequence("*a", 500),
+				"s: &s !foo *k",
+				"m: {? *s : 1}",
+			),
+			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"scalar aliases under a string tag": {
-			input: longScalar + "k: &k " + yamltest.FlowSequence("*a", 500) + "\nm: !!str *k\n",
-			err:   aliaslimit.ErrExcessiveAliasing,
+			input: stringtest.LinesLF(
+				longScalar,
+				"k: &k "+yamltest.FlowSequence("*a", 500),
+				"m: !!str *k",
+			),
+			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"aliases to a string-tagged scalar": {
 			// A decode into a named string type converts the scalar
 			// again at each *s, so each *s copies its text.
-			input: "s: &s !!str " + strings.Repeat("x", 2000) + "\nl: " + yamltest.FlowSequence("*s", 500) + "\n",
-			err:   aliaslimit.ErrExcessiveAliasing,
+			input: stringtest.LinesLF(
+				"s: &s !!str "+strings.Repeat("x", 2000),
+				"l: "+yamltest.FlowSequence("*s", 500),
+			),
+			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"aliases to an int-tagged scalar": {
-			input: "s: &s !!int " + strings.Repeat("1", 2000) + "\nl: " + yamltest.FlowSequence("*s", 500) + "\n",
-			err:   aliaslimit.ErrExcessiveAliasing,
+			input: stringtest.LinesLF(
+				"s: &s !!int "+strings.Repeat("1", 2000),
+				"l: "+yamltest.FlowSequence("*s", 500),
+			),
+			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"aliases to a string tag over an alias to a scalar": {
 			// The decoder converts a again at each *s, so each *s
 			// copies its text.
-			input: longScalar + "s: &s !!str *a\nl: " + yamltest.FlowSequence("*s", 500) + "\n",
-			err:   aliaslimit.ErrExcessiveAliasing,
+			input: stringtest.LinesLF(
+				longScalar,
+				"s: &s !!str *a",
+				"l: "+yamltest.FlowSequence("*s", 500),
+			),
+			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"aliases to a custom tag under a secondary tag directive": {
 			// After a %TAG directive that redefines the "!!" handle, the
 			// decoder writes out the value under every tag as text, so
 			// each *s copies its text.
-			input: "%TAG !! tag:example.com,2000:\n---\ns: &s !foo " + strings.Repeat("x", 2000) +
-				"\nl: " + yamltest.FlowSequence("*s", 500) + "\n",
+			input: stringtest.LinesLF(
+				"%TAG !! tag:example.com,2000:",
+				"---",
+				"s: &s !foo "+strings.Repeat("x", 2000),
+				"l: "+yamltest.FlowSequence("*s", 500),
+			),
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"a few aliases to a string-tagged scalar": {
-			input: "s: &s !!str " + strings.Repeat("x", 2000) + "\nl: " + yamltest.FlowSequence("*s", 2) + "\n",
+			input: stringtest.LinesLF(
+				"s: &s !!str "+strings.Repeat("x", 2000),
+				"l: "+yamltest.FlowSequence("*s", 2),
+			),
 		},
 		"aliases to a custom tag over a string-tagged scalar": {
 			// The decoder shares the value of s at each *t.
-			input: "s: &s !!str " + strings.Repeat("x", 2000) + "\nt: &t !foo *s\n" +
-				"l: " + yamltest.FlowSequence("*t", 500) + "\n",
+			input: stringtest.LinesLF(
+				"s: &s !!str "+strings.Repeat("x", 2000),
+				"t: &t !foo *s",
+				"l: "+yamltest.FlowSequence("*t", 500),
+			),
 		},
 		"alias keys to a binary scalar": {
-			input: "b: &b " + binaryScalar + "\n" +
-				"l: " + yamltest.FlowSequence("{? *b : 1}", 500) + "\n",
+			input: stringtest.LinesLF(
+				"b: &b "+binaryScalar,
+				"l: "+yamltest.FlowSequence("{? *b : 1}", 500),
+			),
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias keys to a tag over an alias to a binary scalar": {
 			// Each key decodes to the bytes under b, so the decoder
 			// spells it as text.
-			input: "b: &b " + binaryScalar + "\n" +
-				"s: &s !foo *b\nl: " + yamltest.FlowSequence("{? *s : 1}", 500) + "\n",
+			input: stringtest.LinesLF(
+				"b: &b "+binaryScalar,
+				"s: &s !foo *b",
+				"l: "+yamltest.FlowSequence("{? *s : 1}", 500),
+			),
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias keys to a string tag over an alias to a binary scalar": {
 			// The decoder spells the bytes under b as text at each key.
-			input: "b: &b " + binaryScalar + "\n" +
-				"s: &s !!str *b\nl: " + yamltest.FlowSequence("{? *s : 1}", 500) + "\n",
+			input: stringtest.LinesLF(
+				"b: &b "+binaryScalar,
+				"s: &s !!str *b",
+				"l: "+yamltest.FlowSequence("{? *s : 1}", 500),
+			),
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"a few alias keys to a tag over an alias to a binary scalar": {
-			input: "b: &b " + binaryScalar + "\n" +
-				"s: &s !foo *b\nl: " + yamltest.FlowSequence("{? *s : 1}", 2) + "\n",
+			input: stringtest.LinesLF(
+				"b: &b "+binaryScalar,
+				"s: &s !foo *b",
+				"l: "+yamltest.FlowSequence("{? *s : 1}", 2),
+			),
 		},
 		"aliases to a tag over an alias to a binary scalar": {
 			// A decode shares the bytes under b between the aliases to
 			// s, and the schema validator spells them as text at each.
-			input: "b: &b " + binaryScalar + "\n" +
-				"s: &s !foo *b\nl: " + yamltest.FlowSequence("*s", 500) + "\n",
+			input: stringtest.LinesLF(
+				"b: &b "+binaryScalar,
+				"s: &s !foo *b",
+				"l: "+yamltest.FlowSequence("*s", 500),
+			),
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"aliases to chained tags over an alias to a binary scalar": {
-			input: "b: &b " + binaryScalar + "\n" +
-				"s: &s !foo *b\nt: &t ! *s\nl: " + yamltest.FlowSequence("*t", 500) + "\n",
+			input: stringtest.LinesLF(
+				"b: &b "+binaryScalar,
+				"s: &s !foo *b",
+				"t: &t ! *s",
+				"l: "+yamltest.FlowSequence("*t", 500),
+			),
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"aliases to a binary scalar under another tag and anchor": {
-			input: "s: &s !foo &b " + binaryScalar + "\n" +
-				"l: " + yamltest.FlowSequence("*s", 500) + "\n",
+			input: stringtest.LinesLF(
+				"s: &s !foo &b "+binaryScalar,
+				"l: "+yamltest.FlowSequence("*s", 500),
+			),
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"a few aliases to a tag over an alias to a binary scalar": {
-			input: "b: &b " + binaryScalar + "\n" +
-				"s: &s !foo *b\nl: " + yamltest.FlowSequence("*s", 2) + "\n",
+			input: stringtest.LinesLF(
+				"b: &b "+binaryScalar,
+				"s: &s !foo *b",
+				"l: "+yamltest.FlowSequence("*s", 2),
+			),
 		},
 		"alias keys to a binary scalar under another tag and anchor": {
 			// Each key decodes to the bytes under b, so the decoder
 			// spells it as text.
-			input: "s: &s !foo &b " + binaryScalar + "\n" +
-				"l: " + yamltest.FlowSequence("{? *s : 1}", 500) + "\n",
+			input: stringtest.LinesLF(
+				"s: &s !foo &b "+binaryScalar,
+				"l: "+yamltest.FlowSequence("{? *s : 1}", 500),
+			),
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias keys to a plain scalar": {
-			input: longScalar + "l: " + yamltest.FlowSequence("{? *a : 1}", 500) + "\n",
+			input: stringtest.LinesLF(
+				longScalar,
+				"l: "+yamltest.FlowSequence("{? *a : 1}", 500),
+			),
 		},
 		"one scalar alias written out in a key": {
-			input: longScalar + "k: &k [*a]\nm: {? *k : 1}\n",
+			input: stringtest.LinesLF(
+				longScalar,
+				"k: &k [*a]",
+				"m: {? *k : 1}",
+			),
 		},
 		"aliases to a mapping holding an anchored scalar": {
 			// The decoder shares the scalar under n at each *base.
-			input: anchoredInMapping() + "items: " + yamltest.FlowSequence("*base", 300) + "\n",
+			input: stringtest.LinesLF(
+				anchoredInMapping(),
+				"items: "+yamltest.FlowSequence("*base", 300),
+			),
 		},
 		"aliases to a mapping holding an anchored scalar under a string tag": {
 			// Each *base writes out the mapping as text, with a copy
 			// of the scalar under n.
-			input: anchoredInMapping() + "items: " + yamltest.FlowSequence("!!str *base", 300) + "\n",
-			err:   aliaslimit.ErrExcessiveAliasing,
+			input: stringtest.LinesLF(
+				anchoredInMapping(),
+				"items: "+yamltest.FlowSequence("!!str *base", 300),
+			),
+			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias keys to a mapping holding an anchored scalar": {
 			// Each key decodes to a mapping, so the decoder spells it
 			// as text, with a copy of the scalar under n.
-			input: anchoredInMapping() + "items: " + yamltest.FlowSequence("{? *base : 1}", 300) + "\n",
-			err:   aliaslimit.ErrExcessiveAliasing,
+			input: stringtest.LinesLF(
+				anchoredInMapping(),
+				"items: "+yamltest.FlowSequence("{? *base : 1}", 300),
+			),
+			err: aliaslimit.ErrExcessiveAliasing,
 		},
 	}
 
@@ -326,7 +440,7 @@ func TestLimited(t *testing.T) {
 
 			// The source holds the setting, so every document of it and
 			// every node of a document answer alike.
-			docs := niceyaml.NewSourceFromString("a: [x]\n---\nb: 1\n", tc.opts...).Documents()
+			docs := niceyaml.NewSourceFromString(stringtest.LinesLF("a: [x]", "---", "b: 1"), tc.opts...).Documents()
 			require.Len(t, docs, 2)
 
 			assert.Equal(t, tc.want, aliasing.Limited(docs[0]))
@@ -370,7 +484,7 @@ func TestHoldsReferenceAlias(t *testing.T) {
 			want:  true,
 		},
 		"merge key alias with no anchor": {
-			input: "t:\n  <<: *s\n",
+			input: stringtest.LinesLF("t:", "  <<: *s"),
 			want:  true,
 		},
 		"alias with no anchor inside an anchor": {
@@ -411,13 +525,19 @@ func TestCheckDecodeText(t *testing.T) {
 		err   error
 		input string
 	}{
-		"no alias": {input: longScalar + "kind: x\n"},
+		"no alias": {input: stringtest.LinesLF(longScalar, "kind: x")},
 		"many aliases to a long scalar": {
-			input: longScalar + "kind: " + yamltest.FlowSequence("*a", 500) + "\n",
-			err:   aliaslimit.ErrExcessiveAliasing,
+			input: stringtest.LinesLF(
+				longScalar,
+				"kind: "+yamltest.FlowSequence("*a", 500),
+			),
+			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"a few aliases to a long scalar": {
-			input: longScalar + "kind: " + yamltest.FlowSequence("*a", 2) + "\n",
+			input: stringtest.LinesLF(
+				longScalar,
+				"kind: "+yamltest.FlowSequence("*a", 2),
+			),
 		},
 	}
 
@@ -447,7 +567,10 @@ func TestCheckDecodeText(t *testing.T) {
 	t.Run("source with the limit off", func(t *testing.T) {
 		t.Parallel()
 
-		input := longScalar + "kind: " + yamltest.FlowSequence("*a", 500) + "\n"
+		input := stringtest.LinesLF(
+			longScalar,
+			"kind: "+yamltest.FlowSequence("*a", 500),
+		)
 		doc := yamltest.FirstDocument(t, input, niceyaml.WithAliasLimit(false))
 
 		require.NoError(t, aliasing.CheckDecodeText(yamltest.At(t, doc, paths.Current().Child("kind"))))
