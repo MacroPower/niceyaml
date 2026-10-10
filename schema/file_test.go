@@ -26,18 +26,25 @@ func fileURL(t *testing.T, path string) string {
 	return schema.File(path).Key()
 }
 
+// writeSchema writes data to a file called name in a new temporary
+// directory and returns the path of the file.
+func writeSchema(t *testing.T, name string, data []byte) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), name)
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+
+	return path
+}
+
 func TestFile(t *testing.T) {
 	t.Parallel()
 
 	t.Run("existing file", func(t *testing.T) {
 		t.Parallel()
 
-		// Create temp file with schema.
-		tmpDir := t.TempDir()
-		schemaPath := filepath.Join(tmpDir, "schema.json")
 		schemaData := []byte(`{"type": "object"}`)
-		err := os.WriteFile(schemaPath, schemaData, 0o600)
-		require.NoError(t, err)
+		schemaPath := writeSchema(t, "schema.json", schemaData)
 
 		_, data, err := load(t, schema.File(schemaPath))
 		require.NoError(t, err)
@@ -197,9 +204,8 @@ func TestFile_HashInName(t *testing.T) {
 
 	const data = `{"type": "string"}`
 
-	dir := t.TempDir()
-	path := filepath.Join(dir, "a#b.json")
-	require.NoError(t, os.WriteFile(path, []byte(data), 0o600))
+	path := writeSchema(t, "a#b.json", []byte(data))
+	dir := filepath.Dir(path)
 
 	tcs := map[string]struct {
 		ref  schema.Ref
@@ -241,8 +247,7 @@ func TestFile_HashInName(t *testing.T) {
 //
 //nolint:paralleltest // See above.
 func TestFile_NoWorkingDirectory(t *testing.T) {
-	schemaPath := filepath.Join(t.TempDir(), "s.json")
-	require.NoError(t, os.WriteFile(schemaPath, []byte(`{"type": "object"}`), 0o600))
+	schemaPath := writeSchema(t, "s.json", []byte(`{"type": "object"}`))
 
 	elsewhere := t.TempDir()
 
@@ -364,10 +369,7 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 //
 //nolint:paralleltest // See above.
 func TestFile_ReadsAfterChdir(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "s.json"), []byte(`{"type": "object"}`), 0o600))
-
-	t.Chdir(dir)
+	t.Chdir(filepath.Dir(writeSchema(t, "s.json", []byte(`{"type": "object"}`))))
 
 	ref := schema.File("s.json")
 

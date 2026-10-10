@@ -746,14 +746,10 @@ func TestDirective_Resolve(t *testing.T) {
 	t.Run("validates against the subschema a path fragment names", func(t *testing.T) {
 		t.Parallel()
 
-		tmpDir := t.TempDir()
-		schemaPath := filepath.Join(tmpDir, "schema.json")
 		// The root takes any document, and Foo requires a name.
 		schemaData := []byte(`{"definitions": {"Foo": {"type": "object", "required": ["name"]}}}`)
-		err := os.WriteFile(schemaPath, schemaData, 0o600)
-		require.NoError(t, err)
-
-		yamlPath := filepath.Join(tmpDir, "config.yaml")
+		schemaPath := writeSchema(t, "schema.json", schemaData)
+		yamlPath := filepath.Join(filepath.Dir(schemaPath), "config.yaml")
 
 		tests := map[string]struct {
 			ref string
@@ -837,11 +833,8 @@ func TestDirective_Resolve(t *testing.T) {
 	t.Run("resolves an absolute path without a file path", func(t *testing.T) {
 		t.Parallel()
 
-		tmpDir := t.TempDir()
-		schemaPath := filepath.Join(tmpDir, "schema.json")
 		schemaData := []byte(`{"type": "object"}`)
-		err := os.WriteFile(schemaPath, schemaData, 0o600)
-		require.NoError(t, err)
+		schemaPath := writeSchema(t, "schema.json", schemaData)
 
 		doc := yamltest.FirstDocument(t, "# yaml-language-server: $schema="+schemaPath+"\nkind: Deployment\n")
 		url, data, err := loadFor(t, schema.Directive(), doc)
@@ -1088,15 +1081,12 @@ func TestDirective_LeadingCommentDocument(t *testing.T) {
 			t.Parallel()
 
 			tmpDir := t.TempDir()
-			schemaData := []byte(`{"type": "object", "required": ["b"]}`)
-			err := os.WriteFile(filepath.Join(tmpDir, "schema.json"), schemaData, 0o600)
-			require.NoError(t, err)
+			writeFiles(t, tmpDir, map[string]string{
+				"schema.json": `{"type": "object", "required": ["b"]}`,
+				"config.yaml": tc.input,
+			})
 
-			yamlPath := filepath.Join(tmpDir, "config.yaml")
-			err = os.WriteFile(yamlPath, []byte(tc.input), 0o600)
-			require.NoError(t, err)
-
-			source, err := niceyaml.NewSourceFromFile(yamlPath)
+			source, err := niceyaml.NewSourceFromFile(filepath.Join(tmpDir, "config.yaml"))
 			require.NoError(t, err)
 
 			docs := source.AllDocuments()

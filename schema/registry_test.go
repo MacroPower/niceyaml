@@ -1372,14 +1372,12 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 	t.Run("ResolverFunc for dynamic schema", func(t *testing.T) {
 		t.Parallel()
 
-		tmpDir := t.TempDir()
-
 		// Create schema files for different kinds.
-		for _, kind := range []string{"Deployment", "Service"} {
-			schemaData := []byte(`{"type": "object", "properties": {"kind": {"const": "` + kind + `"}}}`)
-			err := os.WriteFile(filepath.Join(tmpDir, kind+".json"), schemaData, 0o600)
-			require.NoError(t, err)
-		}
+		tmpDir := t.TempDir()
+		writeFiles(t, tmpDir, map[string]string{
+			"Deployment.json": `{"type": "object", "properties": {"kind": {"const": "Deployment"}}}`,
+			"Service.json":    `{"type": "object", "properties": {"kind": {"const": "Service"}}}`,
+		})
 
 		reg := schema.NewRegistry(
 			schema.WithResolvers(
@@ -1419,26 +1417,16 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 		t.Parallel()
 
 		tmpDir := t.TempDir()
-		schemaData := []byte(`{"type": "object", "properties": {"kind": {"type": "string"}}}`)
-		err := os.WriteFile(filepath.Join(tmpDir, "test.json"), schemaData, 0o600)
-		require.NoError(t, err)
-
-		yamlPath := filepath.Join(tmpDir, "config.yaml")
-		yamlData := []byte("# yaml-language-server: $schema=test.json\nkind: Deployment\n")
-		err = os.WriteFile(yamlPath, yamlData, 0o600)
-		require.NoError(t, err)
+		writeFiles(t, tmpDir, map[string]string{
+			"test.json":   `{"type": "object", "properties": {"kind": {"type": "string"}}}`,
+			"config.yaml": "# yaml-language-server: $schema=test.json\nkind: Deployment\n",
+		})
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
-		source, err := niceyaml.NewSourceFromFile(yamlPath)
+		source, err := niceyaml.NewSourceFromFile(filepath.Join(tmpDir, "config.yaml"))
 		require.NoError(t, err)
-
-		docs := source.Documents()
-
-		for _, doc := range docs {
-			err = reg.Check(t.Context(), doc)
-			require.NoError(t, err)
-		}
+		require.NoError(t, source.ValidateDocuments(t.Context(), reg))
 	})
 }
 
@@ -2204,12 +2192,9 @@ func TestRegistry_FileFS(t *testing.T) {
 	t.Run("an os.Root refuses a symlink out of its tree", func(t *testing.T) {
 		t.Parallel()
 
-		outside := t.TempDir()
-		require.NoError(t, os.WriteFile(filepath.Join(outside, "s.json"), schemaData, 0o600))
-
 		root := t.TempDir()
 
-		err := os.Symlink(filepath.Join(outside, "s.json"), filepath.Join(root, "s.json"))
+		err := os.Symlink(writeSchema(t, "s.json", schemaData), filepath.Join(root, "s.json"))
 		if err != nil {
 			t.Skipf("create symlink: %v", err)
 		}
@@ -3127,8 +3112,7 @@ func TestRegistry_Load(t *testing.T) {
 
 		const schemaData = "# Every document names itself.\nrequired: [name]\n"
 
-		path := filepath.Join(t.TempDir(), "schema.yaml")
-		require.NoError(t, os.WriteFile(path, []byte(schemaData), 0o600))
+		path := writeSchema(t, "schema.yaml", []byte(schemaData))
 
 		data, err := schema.NewRegistry().Load(t.Context(), schema.File(path))
 		require.NoError(t, err)
@@ -3767,10 +3751,7 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 	defsFile := func(t *testing.T) string {
 		t.Helper()
 
-		path := filepath.Join(t.TempDir(), "defs.json")
-		require.NoError(t, os.WriteFile(path, []byte(defsSchema), 0o600))
-
-		return path
+		return writeSchema(t, "defs.json", []byte(defsSchema))
 	}
 
 	// A caller's resolver that serves an unrelated URN. The registry
@@ -4140,9 +4121,7 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				root := filepath.Join(t.TempDir(), "root.json")
-				rootSchema := fmt.Appendf(nil, `{"$ref": %q}`, base+tc.remote)
-				require.NoError(t, os.WriteFile(root, rootSchema, 0o600))
+				root := writeSchema(t, "root.json", fmt.Appendf(nil, `{"$ref": %q}`, base+tc.remote))
 
 				for name, mode := range refModes {
 					t.Run(name, func(t *testing.T) {
@@ -4169,8 +4148,7 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 func TestRegistry_RefDocuments(t *testing.T) {
 	t.Parallel()
 
-	defsFile := filepath.Join(t.TempDir(), "defs.json")
-	require.NoError(t, os.WriteFile(defsFile, []byte(`{"type": "string"}`), 0o600))
+	defsFile := writeSchema(t, "defs.json", []byte(`{"type": "string"}`))
 
 	defsURL := "file://" + filepath.ToSlash(defsFile)
 	namesFile := fmt.Appendf(nil, `{"properties": {"a": {"$ref": %q}}}`, defsURL)
@@ -4301,8 +4279,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 	t.Run("a url schema still reads no local file after a file schema loaded it", func(t *testing.T) {
 		t.Parallel()
 
-		root := filepath.Join(t.TempDir(), "root.json")
-		require.NoError(t, os.WriteFile(root, namesFile, 0o600))
+		root := writeSchema(t, "root.json", namesFile)
 
 		for name, mode := range refModes {
 			t.Run(name, func(t *testing.T) {
@@ -4329,9 +4306,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 	t.Run("a cached remote document still cannot name a local file", func(t *testing.T) {
 		t.Parallel()
 
-		root := filepath.Join(t.TempDir(), "root.json")
-		rootSchema := fmt.Appendf(nil, `{"$ref": %q}`, server.URL+"/remote-names-file.json")
-		require.NoError(t, os.WriteFile(root, rootSchema, 0o600))
+		root := writeSchema(t, "root.json", fmt.Appendf(nil, `{"$ref": %q}`, server.URL+"/remote-names-file.json"))
 
 		// The url root compiles only in a registry that does not require
 		// refs, since it cannot reach the file its document names.
@@ -4609,8 +4584,7 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 				t.Run(path+" "+name, func(t *testing.T) {
 					t.Parallel()
 
-					root := filepath.Join(t.TempDir(), "root.yaml")
-					require.NoError(t, os.WriteFile(root, []byte("$ref: "+base+path+"\n"), 0o600))
+					root := writeSchema(t, "root.yaml", []byte("$ref: "+base+path+"\n"))
 
 					reg := schema.NewRegistry(requireRefs(mode.require), schema.WithResolvers(schema.File(root)))
 

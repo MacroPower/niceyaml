@@ -7,8 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -380,12 +378,9 @@ func TestURL(t *testing.T) {
 		// A File Ref caches its schema under a file:// URL. A URL Ref with
 		// the same key loads nothing, whatever the registry has cached, so
 		// a warm registry reports what a cold one does.
-		path := filepath.Join(t.TempDir(), "s.json")
-		require.NoError(t, os.WriteFile(path, []byte(`{"type": "object"}`), 0o600))
-
 		reg := schema.NewRegistry()
 
-		file := schema.File(path)
+		file := schema.File(writeSchema(t, "s.json", []byte(`{"type": "object"}`)))
 		_, err := reg.Schema(t.Context(), file)
 		require.NoError(t, err)
 

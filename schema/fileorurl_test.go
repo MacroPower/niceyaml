@@ -487,8 +487,7 @@ func TestRefBeside(t *testing.T) {
 		"configs/schema.json": &fstest.MapFile{Data: []byte(schemaData)},
 	}
 
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "schema.json"), []byte(schemaData), 0o600))
+	dir := filepath.Dir(writeSchema(t, "schema.json", []byte(schemaData)))
 
 	inBundle := yamltest.FirstDocument(t, "kind: App\n",
 		niceyaml.WithFilePath("configs/app.yaml"), niceyaml.WithFS(bundle))
