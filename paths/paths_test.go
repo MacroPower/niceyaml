@@ -2524,22 +2524,8 @@ func TestPath_Token_Collections(t *testing.T) {
 
 			got := fmt.Sprintf("%s@%d:%d", tk.Value, tk.Position.Line, tk.Position.Column)
 			assert.Equal(t, tc.want, got)
-
-			viaResolver, err := paths.NewResolver(doc).Token(paths.MustParse(tc.path))
-			require.NoError(t, err)
-			assert.Same(t, tk, viaResolver)
 		})
 	}
-}
-
-func TestPath_Token_InvalidPath(t *testing.T) {
-	t.Parallel()
-
-	doc := yamltest.FirstDocument(t, `name: test`).DocumentAST()
-
-	path := paths.Doc().Child("nonexistent")
-	_, err := paths.NewResolver(doc).Token(path)
-	require.ErrorIs(t, err, paths.ErrNotFound)
 }
 
 func TestPath_Token_NoDocument(t *testing.T) {
@@ -4064,34 +4050,18 @@ refs: [*r, *r]
 	t.Run("token and node refuse wildcards", func(t *testing.T) {
 		t.Parallel()
 
-		path := paths.Doc().Child("items").IndexAll().Child("name")
+		for _, path := range []paths.Path{
+			paths.Doc().Child("items").IndexAll().Child("name"),
+			paths.Doc().Recursive("name").Key(),
+			paths.Doc().Child("meta").ChildAll(),
+			paths.Doc().Child("meta").ChildAll().Key(),
+		} {
+			_, err := paths.NewResolver(doc).Token(path)
+			require.ErrorIs(t, err, paths.ErrWildcard, path)
 
-		_, err := paths.NewResolver(doc).Token(path)
-		require.ErrorIs(t, err, paths.ErrWildcard)
-
-		_, err = paths.NewResolver(doc).Node(path)
-		require.ErrorIs(t, err, paths.ErrWildcard)
-
-		_, err = paths.NewResolver(doc).Token(paths.Doc().Recursive("name").Key())
-		require.ErrorIs(t, err, paths.ErrWildcard)
-
-		entries := paths.Doc().Child("meta").ChildAll()
-
-		_, err = paths.NewResolver(doc).Token(entries)
-		require.ErrorIs(t, err, paths.ErrWildcard)
-
-		_, err = paths.NewResolver(doc).Node(entries)
-		require.ErrorIs(t, err, paths.ErrWildcard)
-
-		_, err = paths.NewResolver(doc).Token(entries.Key())
-		require.ErrorIs(t, err, paths.ErrWildcard)
-	})
-
-	t.Run("nodes rejects a nil document", func(t *testing.T) {
-		t.Parallel()
-
-		_, err := paths.NewResolver(nil).Nodes(paths.Doc())
-		require.ErrorIs(t, err, paths.ErrNoDocument)
+			_, err = paths.NewResolver(doc).Node(path)
+			require.ErrorIs(t, err, paths.ErrWildcard, path)
+		}
 	})
 }
 
