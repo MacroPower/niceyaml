@@ -9352,7 +9352,7 @@ func TestFormatError_NoContent(t *testing.T) {
 func TestSourceError_MessageAndPath(t *testing.T) {
 	t.Parallel()
 
-	src := niceyaml.NewSourceFromString("a:\n  b: 1\n", niceyaml.WithName("x.yaml"))
+	src := niceyaml.NewSourceFromString(stringtest.LinesLF("a:", "  b: 1"), niceyaml.WithName("x.yaml"))
 	bPath := paths.Current().Child("a", "b")
 	// A binding reports the path from the root of the document.
 	wantB := paths.Doc().Child("a", "b")
