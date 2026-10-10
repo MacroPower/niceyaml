@@ -494,130 +494,93 @@ func TestView_AddLineOverlay(t *testing.T) {
 func TestView_AddOverlay(t *testing.T) {
 	t.Parallel()
 
-	t.Run("out of range lines are skipped", func(t *testing.T) {
-		t.Parallel()
+	three := stringtest.Input(`
+		key1: value1
+		key2: value2
+		key3: value3
+	`)
 
-		view := newTestView(t, "a: 1\nb: 2\n", 2)
-
+	tcs := map[string]struct {
+		input  string
+		ranges []position.Range
+		want   []position.Spans // Columns of the overlays on each line.
+	}{
+		"single line range": {
+			input:  "key: value\n",
+			ranges: []position.Range{lineRange(0, 0, 5)},
+			want:   []position.Spans{{position.NewSpan(0, 5)}},
+		},
+		"columns are clamped to the line": {
+			input:  "key: value\n",
+			ranges: []position.Range{lineRange(0, -3, 99)},
+			want:   []position.Spans{{position.NewSpan(0, len("key: value"))}},
+		},
+		// Empty at a column inside the line, and a range starting past the
+		// end.
+		"range covering no columns adds nothing": {
+			input:  "key: value\n",
+			ranges: []position.Range{lineRange(0, 3, 3), lineRange(0, 50, 60)},
+			want:   []position.Spans{nil},
+		},
+		// The first line takes column 3 to its end, the middle line all of
+		// its columns, and the last line its start to column 5.
+		"multi-line range splits across lines": {
+			input:  three,
+			ranges: []position.Range{position.NewRange(position.New(0, 3), position.New(2, 5))},
+			want: []position.Spans{
+				{position.NewSpan(3, len("key1: value1"))},
+				{position.NewSpan(0, len("key2: value2"))},
+				{position.NewSpan(0, 5)},
+			},
+		},
+		"multiple ranges": {
+			input:  three,
+			ranges: []position.Range{lineRange(0, 0, 4), lineRange(1, 0, 4)},
+			want:   []position.Spans{{position.NewSpan(0, 4)}, {position.NewSpan(0, 4)}, nil},
+		},
 		// A range that starts before the first line and ends past the last
-		// applies only to the lines that exist.
-		view.AddOverlay("test1", position.NewRange(
-			position.New(-1, 0),
-			position.New(5, 3),
-		))
+		// applies only to the lines that exist, and a range entirely
+		// outside the view adds nothing.
+		"out of range lines are skipped": {
+			input: "a: 1\nb: 2\n",
+			ranges: []position.Range{
+				position.NewRange(position.New(-1, 0), position.New(5, 3)),
+				lineRange(7, 0, 3),
+			},
+			want: []position.Spans{{position.NewSpan(0, 4)}, {position.NewSpan(0, 4)}},
+		},
+		// Both ranges end on the line before they start, one at column 0
+		// and one past it.
+		"inverted ranges add nothing": {
+			input: "a: 1\nb: 2\nc: 3\n",
+			ranges: []position.Range{
+				position.NewRange(position.New(2, 0), position.New(1, 0)),
+				position.NewRange(position.New(2, 0), position.New(1, 3)),
+			},
+			want: []position.Spans{nil, nil, nil},
+		},
+	}
 
-		require.Len(t, view.Overlays(0), 1)
-		require.Len(t, view.Overlays(1), 1)
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		// A range entirely outside the view is a no-op.
-		view.AddOverlay("test2", lineRange(7, 0, 3))
+			view := newTestView(t, tc.input, len(tc.want))
+			view.AddOverlay("test1", tc.ranges...)
 
-		assert.Len(t, view.Overlays(0), 1)
-		assert.Len(t, view.Overlays(1), 1)
-	})
+			for i, cols := range tc.want {
+				// Each overlay carries the kind and replaces the style
+				// under it.
+				var want line.Overlays
 
-	t.Run("single line range", func(t *testing.T) {
-		t.Parallel()
+				for _, span := range cols {
+					want = append(want, line.Overlay{Kind: "test1", Cols: span})
+				}
 
-		view := newTestView(t, "key: value\n", 1)
-		view.AddOverlay("test1", lineRange(0, 0, 5))
-
-		require.Len(t, view.Overlays(0), 1)
-		assert.Equal(t, position.NewSpan(0, 5), view.Overlays(0)[0].Cols)
-		assert.Equal(t, kind.Kind("test1"), view.Overlays(0)[0].Kind)
-		assert.False(t, view.Overlays(0)[0].Blend)
-	})
-
-	t.Run("columns are clamped to the line", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.AddOverlay("test1", lineRange(0, -3, 99))
-
-		require.Len(t, view.Overlays(0), 1)
-		assert.Equal(t, position.NewSpan(0, len("key: value")), view.Overlays(0)[0].Cols)
-	})
-
-	t.Run("range covering no columns adds nothing", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-
-		// Empty at a column inside the line, and a range starting past the end.
-		view.AddOverlay("test1",
-			lineRange(0, 3, 3),
-			lineRange(0, 50, 60),
-		)
-
-		assert.Empty(t, view.Overlays(0))
-	})
-
-	t.Run("multi-line range splits across lines", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key1: value1
-			key2: value2
-			key3: value3
-		`)
-		view := newTestView(t, input, 3)
-
-		// Add overlay spanning all three lines.
-		view.AddOverlay("test2", position.NewRange(
-			position.New(0, 3),
-			position.New(2, 5),
-		))
-
-		// First line: col 3 to end of line.
-		require.Len(t, view.Overlays(0), 1)
-		assert.Equal(t, position.NewSpan(3, len("key1: value1")), view.Overlays(0)[0].Cols)
-		assert.Equal(t, kind.Kind("test2"), view.Overlays(0)[0].Kind)
-
-		// Middle line: full line.
-		require.Len(t, view.Overlays(1), 1)
-		assert.Equal(t, position.NewSpan(0, len("key2: value2")), view.Overlays(1)[0].Cols)
-		assert.Equal(t, kind.Kind("test2"), view.Overlays(1)[0].Kind)
-
-		// Last line: start to col 5.
-		require.Len(t, view.Overlays(2), 1)
-		assert.Equal(t, position.NewSpan(0, 5), view.Overlays(2)[0].Cols)
-		assert.Equal(t, kind.Kind("test2"), view.Overlays(2)[0].Kind)
-	})
-
-	t.Run("multiple ranges", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key1: value1
-			key2: value2
-		`)
-		view := newTestView(t, input, 2)
-
-		view.AddOverlay("test1",
-			lineRange(0, 0, 4),
-			lineRange(1, 0, 4),
-		)
-
-		require.Len(t, view.Overlays(0), 1)
-		require.Len(t, view.Overlays(1), 1)
-	})
-
-	t.Run("inverted ranges add nothing", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "a: 1\nb: 2\nc: 3\n", 3)
-
-		// Both ranges end on the line before they start, one at column 0 and
-		// one past it.
-		view.AddOverlay("test1",
-			position.NewRange(position.New(2, 0), position.New(1, 0)),
-			position.NewRange(position.New(2, 0), position.New(1, 3)),
-		)
-
-		for i := range view.All() {
-			assert.Empty(t, view.Overlays(i), "line %d", i)
-		}
-	})
+				assert.Equal(t, want, view.Overlays(i), "line %d", i)
+			}
+		})
+	}
 
 	t.Run("empty view no-op", func(t *testing.T) {
 		t.Parallel()
