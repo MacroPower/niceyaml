@@ -71,14 +71,15 @@ func TestPrinter_PrintError_ExcerptsOff(t *testing.T) {
 
 	// Every line but the one that holds the port holds a secret, so any
 	// excerpt of the source shows one.
-	secrets := niceyaml.NewSourceFromString("password: hunter2\nport: 0\ntoken: hunter2-token\n",
-		niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
+	input := stringtest.LinesLF("password: hunter2", "port: 0", "token: hunter2-token")
+	secrets := niceyaml.NewSourceFromString(input, niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false))
 	open := niceyaml.NewSourceFromString("host: example.com\nport: 0\n", niceyaml.WithName("open.yaml"))
 
 	port := paths.Doc().Child("port")
+	lowPort := niceyaml.NewError("port must be at least 1", niceyaml.AtPath(port))
 
-	badPort := yamltest.Bind(t, secrets, niceyaml.NewError("port must be at least 1", niceyaml.AtPath(port)))
-	openPort := yamltest.Bind(t, open, niceyaml.NewError("port must be at least 1", niceyaml.AtPath(port)))
+	badPort := yamltest.Bind(t, secrets, lowPort)
+	openPort := yamltest.Bind(t, open, lowPort)
 
 	_, syntaxErr := niceyaml.NewSourceFromString("password: hunter2\nlist: [1, 2\nport: 1\n",
 		niceyaml.WithName("secrets.yaml"), niceyaml.WithExcerpts(false)).File()
@@ -94,7 +95,7 @@ func TestPrinter_PrintError_ExcerptsOff(t *testing.T) {
 		},
 		"a summary prints its tree alone": {
 			err: yamltest.Bind(t, secrets, niceyaml.NewSummary("2 problems",
-				niceyaml.NewError("port must be at least 1", niceyaml.AtPath(port)),
+				lowPort,
 				niceyaml.NewError("too short", niceyaml.AtPath(paths.Doc().Child("password"))),
 			)),
 			want: stringtest.JoinLF(
@@ -158,9 +159,8 @@ func TestPrinter_PrintError_ExcerptsOff(t *testing.T) {
 	t.Run("the same error shows the secret with excerpts on", func(t *testing.T) {
 		t.Parallel()
 
-		shown := niceyaml.NewSourceFromString("password: hunter2\nport: 0\ntoken: hunter2-token\n",
-			niceyaml.WithName("secrets.yaml"))
-		err := yamltest.Bind(t, shown, niceyaml.NewError("port must be at least 1", niceyaml.AtPath(port)))
+		shown := niceyaml.NewSourceFromString(input, niceyaml.WithName("secrets.yaml"))
+		err := yamltest.Bind(t, shown, lowPort)
 
 		assert.Equal(t, stringtest.JoinLF(
 			"secrets.yaml:2:7: $.port: port must be at least 1",
