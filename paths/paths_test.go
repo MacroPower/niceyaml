@@ -4573,31 +4573,24 @@ func TestPath_Token_HandBuiltMapping(t *testing.T) {
 	}
 }
 
-func TestPath_Node_LaterMergeKeyWins(t *testing.T) {
+func TestPath_Node_TwoMergeKeys(t *testing.T) {
 	t.Parallel()
 
 	// A mapping may hold two merge keys when the parser allows duplicates.
-	// The decoder takes the value of the later one, so the path does too.
-	src := "p: &p {k: P}\nq: &q {k: Q}\nt:\n  <<: *p\n  <<: *q\n"
-
-	doc := yamltest.FirstDocument(t, src, niceyaml.WithAllowDuplicateKeys(true)).DocumentAST()
-
-	node, err := paths.NewResolver(doc).Node(paths.MustParse("$.t.k"))
-	require.NoError(t, err)
-	assert.Equal(t, "Q", node.String())
-}
-
-func TestPath_OwnKeyBetweenMergeKeys(t *testing.T) {
-	t.Parallel()
-
-	// The decoder sets each entry in document order, so a key of the
-	// mapping between two merge keys wins over the earlier merge key and
-	// loses to the later one when that one brings in the same key.
+	// The decoder sets each entry in document order. It thus takes the
+	// value of the later merge key, and a key of the mapping between the
+	// two wins over the earlier merge key and loses to the later one when
+	// that one brings in the same key. The path selects what the decoder
+	// takes.
 	tcs := map[string]struct {
 		input string
 		want  string
 		found []string
 	}{
+		"later merge key wins over the earlier one": {
+			input: "p: &p {k: P}\nq: &q {k: Q}\nt:\n  <<: *p\n  <<: *q\n",
+			want:  "Q",
+		},
 		"own key wins over an earlier merge key": {
 			input: "p: &p {k: P}\nq: &q {j: Q}\nt:\n  <<: *p\n  k: own\n  <<: *q\n",
 			want:  "own",
