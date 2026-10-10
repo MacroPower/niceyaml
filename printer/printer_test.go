@@ -5483,9 +5483,13 @@ func TestPrinter_Layout_Width(t *testing.T) {
 	annotated := niceyaml.NewSourceFromString("a: 1\nb: 2").View()
 	annotated.Annotate(0, line.Annotation{Content: "a note wider than the lines", Placement: line.Above})
 
+	noted := niceyaml.NewSourceFromString("key: value\n").View()
+	noted.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Col: 5})
+
 	tcs := map[string]struct {
 		view   *line.View
 		gutter printer.Gutter // Nil for no gutter.
+		opts   []printer.Option
 		spans  []position.Span
 		wrap   int
 		want   int
@@ -5515,6 +5519,16 @@ func TestPrinter_Layout_Width(t *testing.T) {
 			view: annotated,
 			want: 27,
 		},
+		// The style pads the annotation row past the content, and the layout
+		// measures that row styled, as Print renders it.
+		"annotation row its style pads": {
+			view: noted,
+			opts: []printer.Option{printer.WithStyles(style.New(
+				lipgloss.NewStyle(),
+				style.Set(kind.UIAnnotation, lipgloss.NewStyle().PaddingLeft(6)),
+			))},
+			want: 17,
+		},
 		"span selects the lines measured": {
 			view:  niceyaml.NewSourceFromString("a: 1\nbb: 222").View(),
 			spans: []position.Span{position.NewSpan(0, 1)},
@@ -5531,7 +5545,7 @@ func TestPrinter_Layout_Width(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.wrap))
+			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.wrap)).With(tc.opts...)
 			view := tc.view.Slice(tc.spans...)
 			got := p.Layout(view).Width()
 
@@ -5592,22 +5606,6 @@ func TestPrinter_Layout_LineWidth(t *testing.T) {
 			assert.Equal(t, 0, l.LineWidth(len(tc.want)))
 		})
 	}
-}
-
-func TestPrinter_Layout_Width_StyledAnnotation(t *testing.T) {
-	t.Parallel()
-
-	view := niceyaml.NewSourceFromString("key: value\n").View()
-	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Col: 5})
-
-	p := testPrinterWithStyles(style.Set(kind.UIAnnotation, lipgloss.NewStyle().PaddingLeft(6)))
-
-	widest := lipgloss.Width(p.Print(view))
-
-	// The style pads the annotation row past the content, and the layout
-	// measures that row styled, as Print renders it.
-	assert.Greater(t, widest, lipgloss.Width("key: value"))
-	assert.Equal(t, widest, p.Layout(view).Width())
 }
 
 func TestPrinter_Layout_StyledAnnotationRows(t *testing.T) {
