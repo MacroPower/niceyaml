@@ -7954,13 +7954,13 @@ func TestError_Accessors_Wrapped(t *testing.T) {
 	}
 
 	tcs := map[string]struct {
-		err         error
-		wantMembers []string
-		wantDetails []string
+		err          error
+		wantProblems []string
+		wantDetails  []string
 	}{
-		"Rebase of a summary heads its members under the base": {
-			err:         niceyaml.Rebase(summary, server),
-			wantMembers: []string{"@.server.a", "@.server.b"},
+		"Rebase of a summary heads its problems under the base": {
+			err:          niceyaml.Rebase(summary, server),
+			wantProblems: []string{"@.server.a", "@.server.b"},
 		},
 		"Rebase of a problem has its details under the base": {
 			err:         niceyaml.Rebase(port, server),
@@ -7988,8 +7988,8 @@ func TestError_Accessors_Wrapped(t *testing.T) {
 			wantDetails: []string{"@.docs", "@.server.max"},
 		},
 		"a wrapper with several %w verbs keeps the summary as its one branch": {
-			err:         niceyaml.Invalid(fmt.Errorf("%w: %w", errCheck, summary)),
-			wantMembers: []string{"@.a", "@.b"},
+			err:          niceyaml.Invalid(fmt.Errorf("%w: %w", errCheck, summary)),
+			wantProblems: []string{"@.a", "@.b"},
 		},
 		"a wrapper with several %w verbs keeps the problem as its one branch": {
 			err:         niceyaml.Invalid(fmt.Errorf("%w: %w", errCheck, port)),
@@ -8004,9 +8004,9 @@ func TestError_Accessors_Wrapped(t *testing.T) {
 			got, ok := errors.AsType[*niceyaml.Error](tc.err)
 			require.True(t, ok)
 
-			members := errsOf(yamltest.ProblemsOf(got))
-			require.Len(t, members, len(tc.wantMembers))
-			assert.Equal(t, tc.wantMembers, pathsOf(t, members))
+			problems := errsOf(yamltest.ProblemsOf(got))
+			require.Len(t, problems, len(tc.wantProblems))
+			assert.Equal(t, tc.wantProblems, pathsOf(t, problems))
 
 			details := errsOf(yamltest.DetailsOf(got))
 			require.Len(t, details, len(tc.wantDetails))
@@ -8014,16 +8014,16 @@ func TestError_Accessors_Wrapped(t *testing.T) {
 		})
 	}
 
-	t.Run("a rebased member still matches the error it came from", func(t *testing.T) {
+	t.Run("a rebased problem still matches the error it came from", func(t *testing.T) {
 		t.Parallel()
 
 		got, ok := errors.AsType[*niceyaml.Error](niceyaml.Rebase(summary, server))
 		require.True(t, ok)
 
-		members := errsOf(yamltest.ProblemsOf(got))
-		require.Len(t, members, 2)
-		require.ErrorIs(t, members[0], tooLow)
-		require.ErrorIs(t, members[1], tooHigh)
+		problems := errsOf(yamltest.ProblemsOf(got))
+		require.Len(t, problems, 2)
+		require.ErrorIs(t, problems[0], tooLow)
+		require.ErrorIs(t, problems[1], tooHigh)
 
 		details, ok := errors.AsType[*niceyaml.Error](niceyaml.Rebase(port, server))
 		require.True(t, ok)
