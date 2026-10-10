@@ -144,88 +144,67 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 
 	tcs := map[string]struct {
 		filePath string
-		wantName string
-		err      error
+		want     string // Name of the matching entry, or "" for no match.
 	}{
-		"no match for an entry with a file URL": {
-			filePath: "repo/local/config.yaml",
-			err:      schemastore.ErrNoCatalogMatch,
-		},
-		"no match for an entry without a URL": {
-			filePath: "repo/no-url/config.yaml",
-			err:      schemastore.ErrNoCatalogMatch,
-		},
+		"no match for an entry with a file URL": {filePath: "repo/local/config.yaml"},
+		"no match for an entry without a URL":   {filePath: "repo/no-url/config.yaml"},
 		"matches an entry with an uppercase HTTPS scheme": {
 			filePath: "repo/upper/config.yaml",
-			wantName: "Uppercase Scheme",
+			want:     "Uppercase Scheme",
 		},
 		"matches brace alternative yml": {
 			filePath: ".circleci/config.yml",
-			wantName: "CircleCI",
+			want:     "CircleCI",
 		},
 		"matches brace alternative yaml": {
 			filePath: "repo/.circleci/config.yaml",
-			wantName: "CircleCI",
+			want:     "CircleCI",
 		},
-		"no match for brace alternatives without a yaml extension": {
-			filePath: "settings.toml",
-			err:      schemastore.ErrNoCatalogMatch,
-		},
+		"no match for brace alternatives without a yaml extension": {filePath: "settings.toml"},
 		"matches github workflow yaml": {
 			filePath: ".github/workflows/ci.yaml",
-			wantName: "GitHub Workflow",
+			want:     "GitHub Workflow",
 		},
 		"matches github workflow yml": {
 			filePath: ".github/workflows/build.yml",
-			wantName: "GitHub Workflow",
+			want:     "GitHub Workflow",
 		},
 		"matches github workflow under an absolute repo path": {
 			filePath: "/home/user/repo/.github/workflows/ci.yaml",
-			wantName: "GitHub Workflow",
+			want:     "GitHub Workflow",
 		},
 		"matches dependabot yaml": {
 			filePath: ".github/dependabot.yaml",
-			wantName: "Dependabot",
+			want:     "Dependabot",
 		},
 		"matches dependabot yml": {
 			filePath: ".github/dependabot.yml",
-			wantName: "Dependabot",
+			want:     "Dependabot",
 		},
 		"matches json file": {
 			filePath: "schema.json",
-			wantName: "JSON Schema Draft 7",
+			want:     "JSON Schema Draft 7",
 		},
 		"no match for an extglob pattern": {
 			// The matcher implements no extglob, so the store drops the
 			// pattern rather than keeping it as something only a literally
 			// named file could match.
 			filePath: ".github/ISSUE_TEMPLATE/bug.yml",
-			err:      schemastore.ErrNoCatalogMatch,
 		},
 		"no match for the literal spelling of an extglob pattern": {
 			filePath: ".github/ISSUE_TEMPLATE/!(config).yml",
-			err:      schemastore.ErrNoCatalogMatch,
 		},
 		"matches the supported pattern beside an extglob one": {
 			filePath: "repo/mixed/config.yaml",
-			wantName: "Mixed Patterns",
+			want:     "Mixed Patterns",
 		},
 		"matches a pattern beside an exclusion": {
 			filePath: "repo/compose/override.yml",
-			wantName: "Compose Overrides",
+			want:     "Compose Overrides",
 		},
-		"no match for an excluded file": {
-			filePath: "repo/compose/docker-compose.yml",
-			err:      schemastore.ErrNoCatalogMatch,
-		},
-		"no match for unrelated file": {
-			filePath: "config.yaml",
-			err:      schemastore.ErrNoCatalogMatch,
-		},
-		"empty file path": {
-			filePath: "",
-			err:      schemastore.ErrNoCatalogMatch,
-		},
+		"no match for an excluded file": {filePath: "repo/compose/docker-compose.yml"},
+		"no match for unrelated file":   {filePath: "config.yaml"},
+		"empty file path":               {filePath: ""},
 	}
 
 	for name, tc := range tcs {
@@ -235,16 +214,15 @@ func TestSchemaStore_FindMatch(t *testing.T) {
 			store := newStore(respondCatalog(t, catalog).Client())
 
 			entry, err := store.FindMatch(t.Context(), tc.filePath)
-
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
+			if tc.want == "" {
+				require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
 				require.ErrorIs(t, err, schema.ErrNoMatch)
 
 				return
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, tc.wantName, entry.Name)
+			assert.Equal(t, tc.want, entry.Name)
 		})
 	}
 }
@@ -1882,86 +1860,72 @@ func TestStore_FindMatch_SupportedPatterns(t *testing.T) {
 	store := newStore(respondCatalog(t, catalog).Client())
 
 	tcs := map[string]struct {
-		file      string
-		name      string
-		fileMatch []string
-		err       error
+		file string
+		// The name and the kept patterns of the matching entry, or empty
+		// for no match.
+		want          string
+		wantFileMatch []string
 	}{
 		"wildcard extension": {
-			file:      "ci/azure-pipelines.yaml",
-			name:      "Azure Pipelines",
-			fileMatch: []string{"**/azure-pipelines*.y*ml"},
+			file:          "ci/azure-pipelines.yaml",
+			want:          "Azure Pipelines",
+			wantFileMatch: []string{"**/azure-pipelines*.y*ml"},
 		},
-		"unsupported extension beside a wildcard one": {
-			file: "ci/azure.toml",
-			err:  schemastore.ErrNoCatalogMatch,
-		},
+		"unsupported extension beside a wildcard one": {file: "ci/azure.toml"},
 		"hidden file without an extension": {
-			file:      "/repo/.clang-format",
-			name:      "clang-format",
-			fileMatch: []string{".clang-format"},
+			file:          "/repo/.clang-format",
+			want:          "clang-format",
+			wantFileMatch: []string{".clang-format"},
 		},
 		"extensionless pattern beside YAML patterns": {
-			file:      "/repo/.yamllint",
-			name:      "yamllint",
-			fileMatch: []string{"**/.yamllint", "**/.yamllint.yaml", "**/.yamllint.yml"},
+			file:          "/repo/.yamllint",
+			want:          "yamllint",
+			wantFileMatch: []string{"**/.yamllint", "**/.yamllint.yaml", "**/.yamllint.yml"},
 		},
 		"YAML pattern of the same entry": {
-			file:      "/repo/.yamllint.yml",
-			name:      "yamllint",
-			fileMatch: []string{"**/.yamllint", "**/.yamllint.yaml", "**/.yamllint.yml"},
+			file:          "/repo/.yamllint.yml",
+			want:          "yamllint",
+			wantFileMatch: []string{"**/.yamllint", "**/.yamllint.yaml", "**/.yamllint.yml"},
 		},
 		"plain name without an extension": {
-			file:      "/repo/jobs/web/spec",
-			name:      "BOSH job spec",
-			fileMatch: []string{"**/jobs/*/spec"},
+			file:          "/repo/jobs/web/spec",
+			want:          "BOSH job spec",
+			wantFileMatch: []string{"**/jobs/*/spec"},
 		},
-		"unsupported extension": {
-			file: "/repo/.yamllint.toml",
-			err:  schemastore.ErrNoCatalogMatch,
-		},
+		"unsupported extension": {file: "/repo/.yamllint.toml"},
 		"cff extension": {
-			file:      "/repo/CITATION.cff",
-			name:      "Citation File Format",
-			fileMatch: []string{"CITATION.cff"},
+			file:          "/repo/CITATION.cff",
+			want:          "Citation File Format",
+			wantFileMatch: []string{"CITATION.cff"},
 		},
 		"lock extension": {
-			file:      "/repo/charts/app/Chart.lock",
-			name:      "Helm Chart.lock",
-			fileMatch: []string{"Chart.lock"},
+			file:          "/repo/charts/app/Chart.lock",
+			want:          "Helm Chart.lock",
+			wantFileMatch: []string{"Chart.lock"},
 		},
 		"hyphenated extension": {
-			file:      "/repo/x.sublime-syntax",
-			name:      "Sublime Syntax",
-			fileMatch: []string{"*.sublime-syntax"},
+			file:          "/repo/x.sublime-syntax",
+			want:          "Sublime Syntax",
+			wantFileMatch: []string{"*.sublime-syntax"},
 		},
 		"JSON pattern beside a JSONC pattern": {
-			file:      "/repo/biome.json",
-			name:      "Biome",
-			fileMatch: []string{"biome.json"},
+			file:          "/repo/biome.json",
+			want:          "Biome",
+			wantFileMatch: []string{"biome.json"},
 		},
-		"jsonc extension": {
-			file: "/repo/biome.jsonc",
-			err:  schemastore.ErrNoCatalogMatch,
-		},
+		"jsonc extension": {file: "/repo/biome.jsonc"},
 		"pattern beside one past the limit": {
-			file:      "/repo/mixed/x.yaml",
-			name:      "Mixed",
-			fileMatch: []string{"**/mixed/*.yaml"},
+			file:          "/repo/mixed/x.yaml",
+			want:          "Mixed",
+			wantFileMatch: []string{"**/mixed/*.yaml"},
 		},
-		"pattern past the limit": {
-			file: "/repo/braces/" + strings.Repeat("a", 11) + ".yaml",
-			err:  schemastore.ErrNoCatalogMatch,
-		},
+		"pattern past the limit": {file: "/repo/braces/" + strings.Repeat("a", 11) + ".yaml"},
 		"pattern beside an exclusion at the limit": {
-			file:      "/repo/exclude/x.yaml",
-			name:      "Exclusion",
-			fileMatch: []string{"**/exclude/*.yaml", exclusion},
+			file:          "/repo/exclude/x.yaml",
+			want:          "Exclusion",
+			wantFileMatch: []string{"**/exclude/*.yaml", exclusion},
 		},
-		"file an exclusion at the limit excludes": {
-			file: "/repo/exclude/" + excludeName,
-			err:  schemastore.ErrNoCatalogMatch,
-		},
+		"file an exclusion at the limit excludes": {file: "/repo/exclude/" + excludeName},
 	}
 
 	for name, tc := range tcs {
@@ -1969,15 +1933,15 @@ func TestStore_FindMatch_SupportedPatterns(t *testing.T) {
 			t.Parallel()
 
 			entry, err := store.FindMatch(t.Context(), tc.file)
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
+			if tc.want == "" {
+				require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
 
 				return
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, tc.name, entry.Name)
-			assert.Equal(t, tc.fileMatch, entry.FileMatch)
+			assert.Equal(t, tc.want, entry.Name)
+			assert.Equal(t, tc.wantFileMatch, entry.FileMatch)
 		})
 	}
 }
