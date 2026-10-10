@@ -1,11 +1,9 @@
 package astnode_test
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -222,16 +220,6 @@ func step(t *testing.T, node ast.Node, steps ...any) (ast.Node, astnode.Parent) 
 	return node, in
 }
 
-// place returns the text of tk and where it starts, as "text@line:col",
-// counting from 1 as the token does.
-func place(tk *token.Token) string {
-	if tk == nil || tk.Position == nil {
-		return ""
-	}
-
-	return fmt.Sprintf("%s@%d:%d", tk.Value, tk.Position.Line, tk.Position.Column)
-}
-
 func TestPathToken(t *testing.T) {
 	t.Parallel()
 
@@ -392,7 +380,7 @@ func TestPathToken(t *testing.T) {
 
 			node, in := step(t, yamltest.FirstDocument(t, tc.input).AST(), tc.steps...)
 
-			assert.Equal(t, tc.want, place(astnode.PathToken(node, in)))
+			assert.Equal(t, tc.want, yamltest.TokenPlace(astnode.PathToken(node, in)))
 		})
 	}
 
@@ -414,7 +402,7 @@ func TestPathToken(t *testing.T) {
 		mapping := yamltest.FirstDocument(t, "{k: v}\n").AST()
 		entry := &ast.MappingValueNode{Value: mapping}
 
-		assert.Equal(t, "{@1:1", place(astnode.PathToken(mapping, astnode.Parent{Entry: entry})))
+		assert.Equal(t, "{@1:1", yamltest.TokenPlace(astnode.PathToken(mapping, astnode.Parent{Entry: entry})))
 	})
 
 	t.Run("sequence with no entries introduces nothing", func(t *testing.T) {
@@ -423,7 +411,7 @@ func TestPathToken(t *testing.T) {
 		element, in := step(t, yamltest.FirstDocument(t, "- k: v\n").AST(), 0)
 		in.Sequence = &ast.SequenceNode{Values: in.Sequence.Values}
 
-		assert.Equal(t, "k@1:3", place(astnode.PathToken(element, in)))
+		assert.Equal(t, "k@1:3", yamltest.TokenPlace(astnode.PathToken(element, in)))
 	})
 
 	t.Run("index outside the sequence introduces nothing", func(t *testing.T) {
@@ -432,10 +420,10 @@ func TestPathToken(t *testing.T) {
 		element, in := step(t, yamltest.FirstDocument(t, "- k: v\n").AST(), 0)
 
 		in.Index = 1
-		assert.Equal(t, "k@1:3", place(astnode.PathToken(element, in)))
+		assert.Equal(t, "k@1:3", yamltest.TokenPlace(astnode.PathToken(element, in)))
 
 		in.Index = -1
-		assert.Equal(t, "k@1:3", place(astnode.PathToken(element, in)))
+		assert.Equal(t, "k@1:3", yamltest.TokenPlace(astnode.PathToken(element, in)))
 	})
 
 	t.Run("nil node has no token", func(t *testing.T) {
@@ -479,7 +467,7 @@ func TestKeyToken(t *testing.T) {
 			require.True(t, ok)
 			require.Len(t, mapping.Values, 1)
 
-			assert.Equal(t, tc.want, place(astnode.KeyToken(mapping.Values[0])))
+			assert.Equal(t, tc.want, yamltest.TokenPlace(astnode.KeyToken(mapping.Values[0])))
 		})
 	}
 

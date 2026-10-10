@@ -1,11 +1,9 @@
 package datapath_test
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -46,16 +44,6 @@ func find(tb testing.TB, input string, steps ...any) (*datapath.Index, datapath.
 	return idx, walk(tb, idx, doc.AST(), steps...)
 }
 
-// at returns the line and column of tk, counted from 1, or the empty
-// string for no token.
-func at(tk *token.Token) string {
-	if tk == nil || tk.Position == nil {
-		return ""
-	}
-
-	return fmt.Sprintf("%d:%d", tk.Position.Line, tk.Position.Column)
-}
-
 func TestIndex_Member(t *testing.T) {
 	t.Parallel()
 
@@ -74,76 +62,76 @@ func TestIndex_Member(t *testing.T) {
 			input:     "name: x\n",
 			steps:     []any{"name"},
 			want:      "@.name",
-			wantStart: "1:7",
+			wantStart: "x@1:7",
 		},
 		"hexadecimal key": {
 			input:     "ports:\n  0x10:\n    name: x\n",
 			steps:     []any{"ports", "16", "name"},
 			want:      "@.ports.0x10.name",
-			wantStart: "3:11",
+			wantStart: "x@3:11",
 		},
 		"float key with a trailing zero": {
 			input:     "python:\n  3.10: a\n",
 			steps:     []any{"python", "3.1"},
 			want:      "@.python.'3.10'",
-			wantStart: "2:9",
+			wantStart: "a@2:9",
 		},
 		"bool and null keys": {
 			input:     "True: a\n~: b\n",
 			steps:     []any{"null"},
 			want:      "@.'~'",
-			wantStart: "2:4",
+			wantStart: "b@2:4",
 		},
 		"quoted key": {
 			input:     "\"a b\": x\n",
 			steps:     []any{"a b"},
 			want:      "@.'a b'",
-			wantStart: "1:8",
+			wantStart: "x@1:8",
 		},
 		"later key sets the member again": {
 			input:     "m:\n  16: aaaa\n  0x10: b\n",
 			steps:     []any{"m", "16"},
 			want:      "@.m.0x10",
-			wantStart: "3:9",
+			wantStart: "b@3:9",
 		},
 		"member of a merge source": {
 			input:     "base: &base\n  0x10: x\nm:\n  <<: *base\n",
 			steps:     []any{"m", "16"},
 			want:      "@.m.0x10",
-			wantStart: "2:9",
+			wantStart: "x@2:9",
 		},
 		"later merge source wins": {
 			input:     "b0: &b0 {True: xxxx}\nb1: &b1 {<<: *b0, true: aaaa, True: b}\nm: {<<: *b1}\n",
 			steps:     []any{"m", "true"},
 			want:      "@.m.True",
-			wantStart: "2:37",
+			wantStart: "b@2:37",
 		},
 		"member behind an alias": {
 			input:     "base: &base\n  0x10: x\nal: *base\n",
 			steps:     []any{"al", "16"},
 			want:      "@.al.0x10",
-			wantStart: "2:9",
+			wantStart: "x@2:9",
 		},
 		"alias key": {
 			input:     "k: &k 0x10\nm:\n  *k : v\n",
 			steps:     []any{"m", "16"},
 			want:      "@.m.0x10",
-			wantStart: "3:8",
+			wantStart: "v@3:8",
 		},
 		"spelling a later key repeats": {
 			input:     "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n",
 			steps:     []any{"user", "16"},
 			want:      "@.user.16",
-			wantStart: "2:14",
-			wantToken: "2:14",
+			wantStart: "x@2:14",
+			wantToken: "x@2:14",
 			unspelled: true,
 		},
 		"names below an unspelled name stay decoded": {
 			input:     "user:\n  <<: {0x10: {0x20: x}}\n  \"0x10\": 1\n",
 			steps:     []any{"user", "16", "32"},
 			want:      "@.user.16.32",
-			wantStart: "2:21",
-			wantToken: "2:21",
+			wantStart: "x@2:21",
+			wantToken: "x@2:21",
 			unspelled: true,
 		},
 		"member the mapping lacks": {
@@ -162,13 +150,13 @@ func TestIndex_Member(t *testing.T) {
 			input:     "k: &k {x: y}\nm:\n  a: 1\n  *k : 2\n  b: 3\n",
 			steps:     []any{"m", "b"},
 			want:      "@.m.b",
-			wantStart: "5:6",
+			wantStart: "3@5:6",
 		},
 		"member of an element": {
 			input:     "items:\n  - name: x\n  - 0x10: y\n",
 			steps:     []any{"items", 1, "16"},
 			want:      "@.items[1].0x10",
-			wantStart: "3:11",
+			wantStart: "y@3:11",
 		},
 		"name below a scalar": {
 			input:     "a: 1\n",
@@ -186,8 +174,8 @@ func TestIndex_Member(t *testing.T) {
 
 			assert.Equal(t, tc.want, got.Path.String())
 			assert.Equal(t, tc.unspelled, got.Unspelled)
-			assert.Equal(t, tc.wantStart, at(got.Start(false)))
-			assert.Equal(t, tc.wantToken, at(got.Token(false)))
+			assert.Equal(t, tc.wantStart, yamltest.TokenPlace(got.Start(false)))
+			assert.Equal(t, tc.wantToken, yamltest.TokenPlace(got.Token(false)))
 		})
 	}
 
@@ -216,19 +204,19 @@ func TestIndex_Element(t *testing.T) {
 			input:     "items:\n  - name: x\n  - name: y\n",
 			steps:     []any{"items", 1},
 			want:      "@.items[1]",
-			wantStart: "3:3",
+			wantStart: "-@3:3",
 		},
 		"element behind an alias": {
 			input:     "base: &base [a, b]\nal: *base\n",
 			steps:     []any{"al", 1},
 			want:      "@.al[1]",
-			wantStart: "1:17",
+			wantStart: "b@1:17",
 		},
 		"root sequence": {
 			input:     "- x\n",
 			steps:     []any{0},
 			want:      "@[0]",
-			wantStart: "1:3",
+			wantStart: "x@1:3",
 		},
 		"index past the end": {
 			input: "items: [a]\n",
@@ -251,7 +239,7 @@ func TestIndex_Element(t *testing.T) {
 			assert.Equal(t, tc.want, got.Path.String())
 			assert.False(t, got.Unspelled)
 			assert.Nil(t, got.Parent.Entry)
-			assert.Equal(t, tc.wantStart, at(got.Start(false)))
+			assert.Equal(t, tc.wantStart, yamltest.TokenPlace(got.Start(false)))
 		})
 	}
 }
@@ -270,54 +258,54 @@ func TestTarget_Start(t *testing.T) {
 		"entry of a mapping": {
 			input:   "ports:\n  0x10: x\n",
 			steps:   []any{"ports", "16"},
-			want:    "2:9",
-			wantKey: "2:3",
+			want:    "x@2:9",
+			wantKey: "0x10@2:3",
 		},
 		"explicit key": {
 			input:   "? 0x10\n: x\n",
 			steps:   []any{"16"},
-			want:    "2:3",
-			wantKey: "1:3",
+			want:    "x@2:3",
+			wantKey: "0x10@1:3",
 		},
 		"element has no key": {
 			input:   "- x\n",
 			steps:   []any{0},
-			want:    "1:3",
-			wantKey: "1:3",
+			want:    "x@1:3",
+			wantKey: "x@1:3",
 		},
 		"root has no key": {
 			input:   "a: x\n",
-			want:    "1:1",
-			wantKey: "1:1",
+			want:    "a@1:1",
+			wantKey: "a@1:1",
 		},
 		"mapping under a key points at the key": {
 			input:   "ports:\n  0x10:\n    name: x\n",
 			steps:   []any{"ports", "16"},
-			want:    "2:3",
-			wantKey: "2:3",
+			want:    "0x10@2:3",
+			wantKey: "0x10@2:3",
 		},
 		"sequence under a key points at the key": {
 			input:   "items:\n  - x\n",
 			steps:   []any{"items"},
-			want:    "1:1",
-			wantKey: "1:1",
+			want:    "items@1:1",
+			wantKey: "items@1:1",
 		},
 		"mapping element points at its dash": {
 			input:   "items:\n  - name: x\n",
 			steps:   []any{"items", 0},
-			want:    "2:3",
-			wantKey: "2:3",
+			want:    "-@2:3",
+			wantKey: "-@2:3",
 		},
 		"flow mapping element of a flow sequence points at its brace": {
 			input:   "items: [{a: 1}, {b: 2}]\n",
 			steps:   []any{"items", 1},
-			want:    "1:17",
-			wantKey: "1:17",
+			want:    "{@1:17",
+			wantKey: "{@1:17",
 		},
 		"flow sequence at the root points at its bracket": {
 			input:   "[a, b]\n",
-			want:    "1:1",
-			wantKey: "1:1",
+			want:    "[@1:1",
+			wantKey: "[@1:1",
 		},
 		"member the mapping lacks": {
 			input: "a: x\n",
@@ -331,8 +319,8 @@ func TestTarget_Start(t *testing.T) {
 
 			_, got := find(t, tc.input, tc.steps...)
 
-			assert.Equal(t, tc.want, at(got.Start(false)))
-			assert.Equal(t, tc.wantKey, at(got.Start(true)))
+			assert.Equal(t, tc.want, yamltest.TokenPlace(got.Start(false)))
+			assert.Equal(t, tc.wantKey, yamltest.TokenPlace(got.Start(true)))
 		})
 	}
 }
@@ -353,8 +341,8 @@ func TestTarget_Token(t *testing.T) {
 		"path selects another entry": {
 			input:   "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n",
 			steps:   []any{"user", "16"},
-			want:    "2:14",
-			wantKey: "2:8",
+			want:    "x@2:14",
+			wantKey: "0x10@2:8",
 		},
 		"walk reached no node": {
 			input: "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n",
@@ -368,8 +356,8 @@ func TestTarget_Token(t *testing.T) {
 
 			_, got := find(t, tc.input, tc.steps...)
 
-			assert.Equal(t, tc.want, at(got.Token(false)))
-			assert.Equal(t, tc.wantKey, at(got.Token(true)))
+			assert.Equal(t, tc.want, yamltest.TokenPlace(got.Token(false)))
+			assert.Equal(t, tc.wantKey, yamltest.TokenPlace(got.Token(true)))
 		})
 	}
 }
