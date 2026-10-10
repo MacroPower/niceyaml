@@ -3884,6 +3884,21 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 		m.SetViewMode(yamlviewport.ViewModeSideBySide)
 	}
 
+	// The search closure returns a setup func that shows the same diff with
+	// tagged search highlights, searches for term, and moves the selection
+	// next matches ahead.
+	search := func(term string, next int) func(m *yamlviewport.Model) {
+		return func(m *yamlviewport.Model) {
+			m.SetPrinter(testPrinterWithSearch())
+			sideBySide(m)
+			m.SetSearchTerm(term)
+
+			for range next {
+				m.SearchNext()
+			}
+		}
+	}
+
 	type goldenTest struct {
 		setupFunc func(m *yamlviewport.Model)
 		width     int
@@ -4021,62 +4036,38 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 			// The XML tags of the test styles take up columns, so this
 			// case and the search cases below use a viewport wide enough
 			// that highlighted lines fit on one row.
-			setupFunc: func(m *yamlviewport.Model) {
-				m.SetPrinter(testPrinterWithSearch())
-				sideBySide(m)
-				m.SetSearchTerm("modified")
-			},
-			width:  190,
-			height: 24,
+			setupFunc: search("modified", 0),
+			width:     190,
+			height:    24,
 		},
 		"SideBySideSearchNavigate": {
 			// Verifies search navigation moves the selection in side-by-side
 			// mode. "key" matches on the changed key1 and key2 lines of both
 			// panes. The matches run in row order, and the before pane comes
-			// first within a row.
-			setupFunc: func(m *yamlviewport.Model) {
-				m.SetPrinter(testPrinterWithSearch())
-				sideBySide(m)
-				m.SetSearchTerm("key")
-				m.SearchNext() // Second match, key1 in the after pane.
-				m.SearchNext() // Third match, key2 in the before pane.
-			},
-			width:  190,
-			height: 24,
+			// first within a row, so the third match is key2 in the before
+			// pane.
+			setupFunc: search("key", 2),
+			width:     190,
+			height:    24,
 		},
 		"SideBySideSearchDeletedLine": {
 			// Verifies SearchSelected appears on deleted line (before pane only).
-			setupFunc: func(m *yamlviewport.Model) {
-				m.SetPrinter(testPrinterWithSearch())
-				sideBySide(m)
-				m.SetSearchTerm("original") // Only in deleted line.
-			},
-			width:  190,
-			height: 24,
+			setupFunc: search("original", 0),
+			width:     190,
+			height:    24,
 		},
 		"SideBySideSearchInsertedLine": {
 			// Verifies SearchSelected appears on inserted line (after pane only).
-			setupFunc: func(m *yamlviewport.Model) {
-				m.SetPrinter(testPrinterWithSearch())
-				sideBySide(m)
-				m.SetSearchTerm("modified") // Only in inserted line.
-			},
-			width:  190,
-			height: 24,
+			setupFunc: search("modified", 0),
+			width:     190,
+			height:    24,
 		},
 		"SideBySideSearchBothSidesFirstSelected": {
 			// The search term appears on both deleted and inserted lines.
 			// The selection sits on the first match, in the before pane.
-			setupFunc: func(m *yamlviewport.Model) {
-				m.SetPrinter(testPrinterWithSearch())
-				sideBySide(m)
-				m.SetSearchTerm("name") // Appears on both deleted and inserted lines.
-
-				// The search selects the first match by default, on the
-				// deleted line in the before pane.
-			},
-			width:  190,
-			height: 24,
+			setupFunc: search("name", 0),
+			width:     190,
+			height:    24,
 		},
 		"SideBySideWrapAligned": {
 			// The before pane wraps a long line that the after pane replaced
@@ -4101,14 +4092,9 @@ func TestViewModeSideBySide_Golden(t *testing.T) {
 		"SideBySideSearchBothSidesSecondSelected": {
 			// The search term appears on both deleted and inserted lines.
 			// The selection sits on the second match, in the after pane.
-			setupFunc: func(m *yamlviewport.Model) {
-				m.SetPrinter(testPrinterWithSearch())
-				sideBySide(m)
-				m.SetSearchTerm("name") // Appears on both deleted and inserted lines.
-				m.SearchNext()          // Move to second match (after/inserted line).
-			},
-			width:  190,
-			height: 24,
+			setupFunc: search("name", 1),
+			width:     190,
+			height:    24,
 		},
 	}
 
