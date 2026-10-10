@@ -824,117 +824,228 @@ func TestSource_File_CommentBelowAnchor(t *testing.T) {
 		kept  bool
 	}{
 		"comment left of the key above the next entry of an outer sequence": {
-			input: "- a: &x\n# c\n- 1\n",
-			want:  []any{map[string]any{"a": nil}, uint64(1)},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"- a: &x",
+				"# c",
+				"- 1",
+			),
+			want: []any{map[string]any{"a": nil}, uint64(1)},
+			kept: true,
 		},
 		"comment left of the key above the next key": {
-			input: "a:\n  b: &x\n# c\n  d: 1\n",
-			want:  map[string]any{"a": map[string]any{"b": nil, "d": uint64(1)}},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: &x",
+				"# c",
+				"  d: 1",
+			),
+			want: map[string]any{"a": map[string]any{"b": nil, "d": uint64(1)}},
+			kept: true,
 		},
 		"comment left of the entry above a key of an outer mapping": {
-			input: "a:\n  - &x\n# c\nb: 1\n",
-			want:  map[string]any{"a": []any{nil}, "b": uint64(1)},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"a:",
+				"  - &x",
+				"# c",
+				"b: 1",
+			),
+			want: map[string]any{"a": []any{nil}, "b": uint64(1)},
+			kept: true,
 		},
 		"comment left of the entry above a key in its column": {
-			input: "p:\n  q:\n  - &x\n# c\n  n: 1\n",
-			want:  map[string]any{"p": map[string]any{"q": []any{nil}, "n": uint64(1)}},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"p:",
+				"  q:",
+				"  - &x",
+				"# c",
+				"  n: 1",
+			),
+			want: map[string]any{"p": map[string]any{"q": []any{nil}, "n": uint64(1)}},
+			kept: true,
 		},
 		"comment left of the key above the value": {
-			input: "a:\n  b: &x\n# c\n    d: 1\n",
-			want:  map[string]any{"a": map[string]any{"b": map[string]any{"d": uint64(1)}}},
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: &x",
+				"# c",
+				"    d: 1",
+			),
+			want: map[string]any{"a": map[string]any{"b": map[string]any{"d": uint64(1)}}},
 		},
 		"comment left of the key above a sequence in the column of the key": {
-			input: "a:\n  b: &x\n# c\n  - 1\n",
-			want:  map[string]any{"a": map[string]any{"b": []any{uint64(1)}}},
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: &x",
+				"# c",
+				"  - 1",
+			),
+			want: map[string]any{"a": map[string]any{"b": []any{uint64(1)}}},
 		},
 		"comment left of the entry above the value": {
-			input: "- - &x\n# c\n    - 1\n",
-			want:  []any{[]any{[]any{uint64(1)}}},
+			input: stringtest.LinesLF(
+				"- - &x",
+				"# c",
+				"    - 1",
+			),
+			want: []any{[]any{[]any{uint64(1)}}},
 		},
 		"comment in the column of the key above the value": {
-			input: "a: &x\n# c\n  b: 1\n",
-			want:  map[string]any{"a": map[string]any{"b": uint64(1)}},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"a: &x",
+				"# c",
+				"  b: 1",
+			),
+			want: map[string]any{"a": map[string]any{"b": uint64(1)}},
+			kept: true,
 		},
 		"comment in the column of the key above a sequence in that column": {
-			input: "a: &x\n# c\n- 1\n",
-			want:  map[string]any{"a": []any{uint64(1)}},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"a: &x",
+				"# c",
+				"- 1",
+			),
+			want: map[string]any{"a": []any{uint64(1)}},
+			kept: true,
 		},
 		"comment right of the entry above the value": {
-			input: "- &x\n    # c\n  b: 1\n",
-			want:  []any{map[string]any{"b": uint64(1)}},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"- &x",
+				"    # c",
+				"  b: 1",
+			),
+			want: []any{map[string]any{"b": uint64(1)}},
+			kept: true,
 		},
 		"comment in the column of the key above the next key": {
-			input: "a: &x\n# c\nb: 1\n",
-			want:  map[string]any{"a": nil, "b": uint64(1)},
+			input: stringtest.LinesLF(
+				"a: &x",
+				"# c",
+				"b: 1",
+			),
+			want: map[string]any{"a": nil, "b": uint64(1)},
 		},
 		"comment in the column of the entry above the next entry": {
-			input: "- &x\n# c\n- 1\n",
-			want:  []any{nil, uint64(1)},
+			input: stringtest.LinesLF(
+				"- &x",
+				"# c",
+				"- 1",
+			),
+			want: []any{nil, uint64(1)},
 		},
 		"comment right of the key above a key of an outer mapping": {
-			input: "a:\n  b: &x\n    # c\nd: 1\n",
-			want:  map[string]any{"a": map[string]any{"b": nil}, "d": uint64(1)},
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: &x",
+				"    # c",
+				"d: 1",
+			),
+			want: map[string]any{"a": map[string]any{"b": nil}, "d": uint64(1)},
 		},
 		"comment right of the entry above an entry of an outer sequence": {
-			input: "- - &x\n    # c\n- 1\n",
-			want:  []any{[]any{nil}, uint64(1)},
+			input: stringtest.LinesLF(
+				"- - &x",
+				"    # c",
+				"- 1",
+			),
+			want: []any{[]any{nil}, uint64(1)},
 		},
 		// An explicit key starts at its "?".
 		"comment in the column of the ? above the next key": {
-			input: "? a: &x\n# c\nb: 1\n",
-			want:  map[string]any{"a": nil, "b": uint64(1)},
+			input: stringtest.LinesLF(
+				"? a: &x",
+				"# c",
+				"b: 1",
+			),
+			want: map[string]any{"a": nil, "b": uint64(1)},
 		},
 		"comment between the ? and its key above the next key": {
-			input: "p:\n  ? a: &x\n   # c\n  b: 1\n",
-			want:  map[string]any{"p": map[string]any{"a": nil, "b": uint64(1)}},
+			input: stringtest.LinesLF(
+				"p:",
+				"  ? a: &x",
+				"   # c",
+				"  b: 1",
+			),
+			want: map[string]any{"p": map[string]any{"a": nil, "b": uint64(1)}},
 		},
 		"comment in the column of the ? above the next key of a sequence entry": {
-			input: "- ? a: &x\n  # c\n  b: 1\n",
-			want:  []any{map[string]any{"a": nil, "b": uint64(1)}},
+			input: stringtest.LinesLF(
+				"- ? a: &x",
+				"  # c",
+				"  b: 1",
+			),
+			want: []any{map[string]any{"a": nil, "b": uint64(1)}},
 		},
 		"comment in the column of the ? above the value": {
-			input: "? a: &x\n# c\n    b: 1\n",
-			want:  map[string]any{"a": map[string]any{"b": uint64(1)}},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"? a: &x",
+				"# c",
+				"    b: 1",
+			),
+			want: map[string]any{"a": map[string]any{"b": uint64(1)}},
+			kept: true,
 		},
 		"comment right of the ? above a value left of its key": {
-			input: "p:\n  ? a: &x\n    # c\n   b: 1\n",
-			want:  map[string]any{"p": map[string]any{"a": map[string]any{"b": uint64(1)}}},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"p:",
+				"  ? a: &x",
+				"    # c",
+				"   b: 1",
+			),
+			want: map[string]any{"p": map[string]any{"a": map[string]any{"b": uint64(1)}}},
+			kept: true,
 		},
 		"comment left of the ? above the value": {
-			input: "p:\n  ? a: &x\n# c\n   b: 1\n",
-			want:  map[string]any{"p": map[string]any{"a": map[string]any{"b": uint64(1)}}},
+			input: stringtest.LinesLF(
+				"p:",
+				"  ? a: &x",
+				"# c",
+				"   b: 1",
+			),
+			want: map[string]any{"p": map[string]any{"a": map[string]any{"b": uint64(1)}}},
 		},
 		// The parser reads any other anchor the same way with the comment
 		// as without it.
 		"comment below an anchor after a key whose ? is on the line above": {
-			input: "? \n a: &x\n  # c\n b: 1\n",
-			want:  map[string]any{"a": map[string]any{"b": uint64(1)}},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"? ",
+				" a: &x",
+				"  # c",
+				" b: 1",
+			),
+			want: map[string]any{"a": map[string]any{"b": uint64(1)}},
+			kept: true,
 		},
 		// The tree holds a null in place of a comment that closes the
 		// document below the anchor.
 		"closing comment below an anchor after a key whose ? is on the line above": {
-			input: "  ? \n    a: &x\n# c\n---\n",
-			want:  map[string]any{"a": nil},
+			input: stringtest.LinesLF(
+				"  ? ",
+				"    a: &x",
+				"# c",
+				"---",
+			),
+			want: map[string]any{"a": nil},
 		},
 		"comment left of the key below an anchor after a tag": {
-			input: "a:\n  b: !t &x\n# c\n    d: 1\n",
-			want:  map[string]any{"a": map[string]any{"b": map[string]any{"d": uint64(1)}}},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: !t &x",
+				"# c",
+				"    d: 1",
+			),
+			want: map[string]any{"a": map[string]any{"b": map[string]any{"d": uint64(1)}}},
+			kept: true,
 		},
 		"comment left of the key below an anchor on a line of its own": {
-			input: "a:\n  b:\n    &x\n# c\n    d: 1\n",
-			want:  map[string]any{"a": map[string]any{"b": map[string]any{"d": uint64(1)}}},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"a:",
+				"  b:",
+				"    &x",
+				"# c",
+				"    d: 1",
+			),
+			want: map[string]any{"a": map[string]any{"b": map[string]any{"d": uint64(1)}}},
+			kept: true,
 		},
 		// Above a comment left of its key that closes the document, the
 		// parser itself gives the anchor a null value. The comment stays in
@@ -942,17 +1053,28 @@ func TestSource_File_CommentBelowAnchor(t *testing.T) {
 		// key, the tree leaves it out above a header, and the parser
 		// rejects it at the end of the source.
 		"closing comment left of the key": {
-			input: "a:\n  b: &x\n# c\n",
-			want:  map[string]any{"a": map[string]any{"b": nil}},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: &x",
+				"# c",
+			),
+			want: map[string]any{"a": map[string]any{"b": nil}},
+			kept: true,
 		},
 		"closing comment left of the root above a header": {
-			input: "  a: &x\n# c\n---\n",
-			want:  map[string]any{"a": nil},
+			input: stringtest.LinesLF(
+				"  a: &x",
+				"# c",
+				"---",
+			),
+			want: map[string]any{"a": nil},
 		},
 		"closing comment left of the root": {
-			input: "  a: &x\n# c\n",
-			err:   "2:1: value is not allowed in this context",
+			input: stringtest.LinesLF(
+				"  a: &x",
+				"# c",
+			),
+			err: "2:1: value is not allowed in this context",
 		},
 		// Above a header, the tree first leaves out the comments left of
 		// the root, and the first comment that remains decides. Left of the
@@ -960,19 +1082,33 @@ func TestSource_File_CommentBelowAnchor(t *testing.T) {
 		// key, the parser takes it as the value of the anchor, and the tree
 		// holds a null in its place.
 		"closing comment left of the key below one left of the root": {
-			input: "  - a: &x\n# d\n  # c\n---\n",
-			want:  []any{map[string]any{"a": nil}},
-			kept:  true,
+			input: stringtest.LinesLF(
+				"  - a: &x",
+				"# d",
+				"  # c",
+				"---",
+			),
+			want: []any{map[string]any{"a": nil}},
+			kept: true,
 		},
 		"closing comment in the column of the key below one left of the root": {
-			input: "  a: &x\n# d\n  # c\n---\n",
-			want:  map[string]any{"a": nil},
+			input: stringtest.LinesLF(
+				"  a: &x",
+				"# d",
+				"  # c",
+				"---",
+			),
+			want: map[string]any{"a": nil},
 		},
 		// At the end of the source, the tree leaves none of the comments
 		// out first, so the parser rejects the one left of the root.
 		"closing comments in and left of the column of the root": {
-			input: "  a: &x\n# d\n  # c\n",
-			err:   "2:1: value is not allowed in this context",
+			input: stringtest.LinesLF(
+				"  a: &x",
+				"# d",
+				"  # c",
+			),
+			err: "2:1: value is not allowed in this context",
 		},
 		// The go-yaml parser takes the token after a "&" as the name of the
 		// anchor, so it rejects a "&" with no name above a comment. The
@@ -980,32 +1116,66 @@ func TestSource_File_CommentBelowAnchor(t *testing.T) {
 		// Without the comment, the parser would name the anchor after the
 		// token below it.
 		"no name, comment left of the key above a scalar": {
-			input: "p:\n  a: &\n# c\n   1\n",
-			err:   "3:1: unexpected scalar value type",
+			input: stringtest.LinesLF(
+				"p:",
+				"  a: &",
+				"# c",
+				"   1",
+			),
+			err: "3:1: unexpected scalar value type",
 		},
 		"no name, comment left of the key above a scalar and the next key": {
-			input: "p:\n  a: &\n# c\n   1\nz: 2\n",
-			err:   "3:1: unexpected scalar value type",
+			input: stringtest.LinesLF(
+				"p:",
+				"  a: &",
+				"# c",
+				"   1",
+				"z: 2",
+			),
+			err: "3:1: unexpected scalar value type",
 		},
 		"no name, comment in the column of the key above a tagged scalar left of it": {
-			input: "p:\n   q: 1\n   a: &\n   # c\n!t 1\n",
-			err:   "4:4: unexpected scalar value type",
+			input: stringtest.LinesLF(
+				"p:",
+				"   q: 1",
+				"   a: &",
+				"   # c",
+				"!t 1",
+			),
+			err: "4:4: unexpected scalar value type",
 		},
 		"no name, comment left of the entry above a scalar and the next entry": {
-			input: "- - &\n# c\n    1\n- 2\n",
-			err:   "2:1: unexpected scalar value type",
+			input: stringtest.LinesLF(
+				"- - &",
+				"# c",
+				"    1",
+				"- 2",
+			),
+			err: "2:1: unexpected scalar value type",
 		},
 		"no name, comment above the end of a flow sequence": {
-			input: "[&\n# c\n]\n",
-			err:   "2:1: unexpected scalar value type",
+			input: stringtest.LinesLF(
+				"[&",
+				"# c",
+				"]",
+			),
+			err: "2:1: unexpected scalar value type",
 		},
 		"no name, comment above a colon": {
-			input: "a: &\n# c\n: 1\n",
-			err:   "1:4: mapping value is not allowed in this context",
+			input: stringtest.LinesLF(
+				"a: &",
+				"# c",
+				": 1",
+			),
+			err: "1:4: mapping value is not allowed in this context",
 		},
 		"no name, closing comment left of the root above a header": {
-			input: "  a: &\n# c\n---\n",
-			err:   "2:1: unexpected scalar value type",
+			input: stringtest.LinesLF(
+				"  a: &",
+				"# c",
+				"---",
+			),
+			err: "2:1: unexpected scalar value type",
 		},
 	}
 
