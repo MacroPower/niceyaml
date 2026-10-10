@@ -1752,297 +1752,180 @@ func TestLines_TokenAt(t *testing.T) {
 func TestLines_TokenRanges(t *testing.T) {
 	t.Parallel()
 
-	t.Run("single token range", func(t *testing.T) {
-		t.Parallel()
+	// One line, where each token has one range. A position resolves to
+	// the lexer's own token.
+	singleTks := tokens.Tokenize("key: value\n")
+	single := line.NewLines(singleTks)
+	require.Same(t, singleTks[0], single.TokenAt(position.New(0, 0)))
 
-		tks := tokens.Tokenize("key: value\n")
-		lines := line.NewLines(tks)
+	// A block scalar whose content is one lexer token on lines 1 and 2,
+	// and the same two lines collected in reverse order. A position inside
+	// the content resolves to the whole token.
+	srcTks := tokens.Tokenize("key: |\n  line1\n  line2\n")
+	src := line.NewLines(srcTks)
+	reversed := line.Collect(src.Line(2), src.Line(1))
 
+	block := src.TokenAt(position.New(1, 2))
+	require.Same(t, srcTks[len(srcTks)-1], block)
+	require.Contains(t, block.Origin, "line1")
+
+	// Two sections whose line numbers jump from 11 to 40, so the line
+	// numbers of the tokens differ from the indices of their lines.
+	gapped := line.NewLines(joinTokens(
+		tokenizeAt("key1: value1\nkey2: value2\n", 10),
+		tokenizeAt("key3: |\n  a\n  b\n", 40),
+	))
+	require.Equal(t, 5, gapped.Len())
+	require.Equal(t, 40, gapped.Line(2).Number())
+
+	// Two revisions interleaved as a diff shows them, where the deleted
+	// and inserted lines each hold a "b" key at the same position.
+	before := line.NewLines(tokens.Tokenize("a: 1\nb: 2\n"))
+	after := line.NewLines(tokens.Tokenize("a: 1\nb: 3\n"))
+	revisions := line.Collect(after.Line(0), before.Line(1), after.Line(1))
+
+	// The ranges name indices in the collection, whatever the line numbers
+	// of the tokens.
+	tcs := map[string]struct {
+		lines       line.Lines
+		tk          *token.Token
+		wantToken   position.Ranges
+		wantContent position.Ranges
+	}{
 		// The lexer's own token matches by pointer identity.
-		ranges := lines.TokenRanges(tks[0])
-		assert.Equal(t, position.Ranges{
-			position.NewRange(position.New(0, 0), position.New(0, 3)),
-		}, ranges)
-	})
-
-	t.Run("multiline token returns one range per line", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key: |
-			  line1
-			  line2
-		`)
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
-
-		var tk *token.Token
-
-		for _, lexTk := range tks {
-			if lexTk.Type == token.StringType && strings.Contains(lexTk.Origin, "line1") {
-				tk = lexTk
-				break
-			}
-		}
-
-		require.NotNil(t, tk)
-
-		ranges := lines.TokenRanges(tk)
-		require.Len(t, ranges, 2)
-		assert.Equal(t, 1, ranges[0].Start.Line)
-		assert.Equal(t, 2, ranges[1].Start.Line)
-	})
-
-	t.Run("token from TokenAt round-trips", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key: |
-			  line1
-			  line2
-		`)
-		lines := line.NewLines(tokens.Tokenize(input))
-
-		// A position inside the block content resolves to the whole token.
-		tk := lines.TokenAt(position.New(1, 2))
-		require.NotNil(t, tk)
-
-		ranges := lines.TokenRanges(tk)
-		require.Len(t, ranges, 2)
-		assert.Equal(t, 1, ranges[0].Start.Line)
-		assert.Equal(t, 2, ranges[1].Start.Line)
-	})
-
-	t.Run("part token from Line.Tokens matches its own line", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key: |
-			  line1
-			  line2
-		`)
-		lines := line.NewLines(tokens.Tokenize(input))
-
-		part := lines.Line(2).Token(0)
-
-		ranges := lines.TokenRanges(part)
-		assert.Equal(t, position.Ranges{
-			position.NewRange(position.New(2, 0), position.New(2, 7)),
-		}, ranges)
-	})
-
-	t.Run("value token starts after the key", func(t *testing.T) {
-		t.Parallel()
-
-		lines := line.NewLines(tokens.Tokenize("key: value\n"))
-
-		ranges := lines.TokenRanges(lines.TokenAt(position.New(0, 5)))
-		require.Len(t, ranges, 1)
-		assert.Equal(t, 4, ranges[0].Start.Col)
-	})
-
-	t.Run("nil token returns nil", func(t *testing.T) {
-		t.Parallel()
-
-		lines := line.NewLines(tokens.Tokenize("key: value\n"))
-
-		assert.Nil(t, lines.TokenRanges(nil))
-		assert.Nil(t, lines.TokenRanges(lines.TokenAt(position.New(0, 100))))
-	})
-
-	t.Run("token not in lines returns nil", func(t *testing.T) {
-		t.Parallel()
-
-		lines := line.NewLines(tokens.Tokenize("key: value\n"))
-		other := tokens.Tokenize("other: data\n")
-
-		assert.Nil(t, lines.TokenRanges(other[0]))
-	})
-
-	t.Run("a copy of a token matches by its fields", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key: |
-			  line1
-			  line2
-		`)
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
-
+		"lexer token": {
+			lines:       single,
+			tk:          singleTks[0],
+			wantToken:   position.Ranges{lineRange(0, 0, 3)},
+			wantContent: position.Ranges{lineRange(0, 0, 3)},
+		},
+		// The range of the value starts after the key, with the space
+		// between them.
+		"value token": {
+			lines:       single,
+			tk:          single.TokenAt(position.New(0, 5)),
+			wantToken:   position.Ranges{lineRange(0, 4, 10)},
+			wantContent: position.Ranges{lineRange(0, 5, 10)},
+		},
+		"multiline token has one range per line": {
+			lines:       src,
+			tk:          block,
+			wantToken:   position.Ranges{lineRange(1, 0, 7), lineRange(2, 0, 7)},
+			wantContent: position.Ranges{lineRange(1, 2, 7), lineRange(2, 2, 7)},
+		},
+		"part token from Line.Tokens matches its own line": {
+			lines:       src,
+			tk:          src.Line(2).Token(0),
+			wantToken:   position.Ranges{lineRange(2, 0, 7)},
+			wantContent: position.Ranges{lineRange(2, 2, 7)},
+		},
 		// A parser hands out copies of the tokens the caller gave it, and a
 		// copy finds the same ranges as the original.
-		var tk *token.Token
+		"copy of a multiline token matches by its fields": {
+			lines:       src,
+			tk:          block.Clone(),
+			wantToken:   position.Ranges{lineRange(1, 0, 7), lineRange(2, 0, 7)},
+			wantContent: position.Ranges{lineRange(1, 2, 7), lineRange(2, 2, 7)},
+		},
+		"copy of a part token matches by its fields": {
+			lines:       src,
+			tk:          src.Line(1).Token(0).Clone(),
+			wantToken:   position.Ranges{lineRange(1, 0, 7)},
+			wantContent: position.Ranges{lineRange(1, 2, 7)},
+		},
+		"collected lexer token": {
+			lines:       reversed,
+			tk:          block,
+			wantToken:   position.Ranges{lineRange(0, 0, 7), lineRange(1, 0, 7)},
+			wantContent: position.Ranges{lineRange(0, 2, 7), lineRange(1, 2, 7)},
+		},
+		"collected part token": {
+			lines:       reversed,
+			tk:          src.Line(1).Token(0),
+			wantToken:   position.Ranges{lineRange(1, 0, 7)},
+			wantContent: position.Ranges{lineRange(1, 2, 7)},
+		},
+		"collected copy of a token": {
+			lines:       reversed,
+			tk:          block.Clone(),
+			wantToken:   position.Ranges{lineRange(0, 0, 7), lineRange(1, 0, 7)},
+			wantContent: position.Ranges{lineRange(0, 2, 7), lineRange(1, 2, 7)},
+		},
+		"gapped lexer token": {
+			lines:       gapped,
+			tk:          gapped.TokenAt(position.New(3, 2)),
+			wantToken:   position.Ranges{lineRange(3, 0, 3), lineRange(4, 0, 3)},
+			wantContent: position.Ranges{lineRange(3, 2, 3), lineRange(4, 2, 3)},
+		},
+		"gapped part token": {
+			lines:       gapped,
+			tk:          gapped.Line(4).Token(0),
+			wantToken:   position.Ranges{lineRange(4, 0, 3)},
+			wantContent: position.Ranges{lineRange(4, 2, 3)},
+		},
+		"gapped copy of a token": {
+			lines:       gapped,
+			tk:          gapped.TokenAt(position.New(1, 6)).Clone(),
+			wantToken:   position.Ranges{lineRange(1, 5, 12)},
+			wantContent: position.Ranges{lineRange(1, 6, 12)},
+		},
+		"inserted revision token": {
+			lines:       revisions,
+			tk:          revisions.TokenAt(position.New(2, 0)),
+			wantToken:   position.Ranges{lineRange(2, 0, 1)},
+			wantContent: position.Ranges{lineRange(2, 0, 1)},
+		},
+		"deleted revision token": {
+			lines:       revisions,
+			tk:          revisions.TokenAt(position.New(1, 0)),
+			wantToken:   position.Ranges{lineRange(1, 0, 1)},
+			wantContent: position.Ranges{lineRange(1, 0, 1)},
+		},
+		"revision part token": {
+			lines:       revisions,
+			tk:          revisions.Line(2).Token(0),
+			wantToken:   position.Ranges{lineRange(2, 0, 1)},
+			wantContent: position.Ranges{lineRange(2, 0, 1)},
+		},
+		"copy of a revision token": {
+			// A copy holds no pointer to tell the revisions apart, so it
+			// matches the token of each.
+			lines:       revisions,
+			tk:          revisions.TokenAt(position.New(2, 0)).Clone(),
+			wantToken:   position.Ranges{lineRange(1, 0, 1), lineRange(2, 0, 1)},
+			wantContent: position.Ranges{lineRange(1, 0, 1), lineRange(2, 0, 1)},
+		},
+	}
 
-		for _, lexTk := range tks {
-			if lexTk.Type == token.StringType && strings.Contains(lexTk.Origin, "line1") {
-				tk = lexTk
-			}
-		}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		require.NotNil(t, tk)
-		assert.Equal(t, lines.TokenRanges(tk), lines.TokenRanges(tk.Clone()))
-		assert.Equal(t, lines.ContentRanges(tk), lines.ContentRanges(tk.Clone()))
-		assert.Equal(t, lines.TokenRanges(lines.Line(1).Token(0)), lines.TokenRanges(lines.Line(1).Token(0).Clone()))
+			require.NotNil(t, tc.tk)
+			assert.Equal(t, tc.wantToken, tc.lines.TokenRanges(tc.tk))
+			assert.Equal(t, tc.wantContent, tc.lines.ContentRanges(tc.tk))
+		})
+	}
 
-		// This token from another stream sits at the same position but
-		// differs in its text, so it matches nothing.
-		other := tokens.Tokenize("key: |\n  other\n  lines\n")
-		assert.Nil(t, lines.TokenRanges(other[len(other)-1]))
-	})
-
-	t.Run("ranges name indices in the collection", func(t *testing.T) {
+	t.Run("a token the lines do not hold has no ranges", func(t *testing.T) {
 		t.Parallel()
 
-		// The two content lines of a block scalar, collected in reverse
-		// order.
-		src := line.NewLines(tokens.Tokenize("key: |\n  line1\n  line2\n"))
-		reversed := line.Collect(src.Line(2), src.Line(1))
-		block := src.TokenAt(position.New(1, 2))
+		assert.Nil(t, single.TokenRanges(nil))
+		assert.Nil(t, single.TokenRanges(single.TokenAt(position.New(0, 100))))
+		assert.Nil(t, single.TokenRanges(tokens.Tokenize("other: data\n")[0]))
 
-		// Two sections whose line numbers jump from 11 to 40, so the line
-		// numbers of the tokens differ from the indices of their lines.
-		gapped := line.NewLines(joinTokens(
-			tokenizeAt("key1: value1\nkey2: value2\n", 10),
-			tokenizeAt("key3: |\n  a\n  b\n", 40),
-		))
-		require.Equal(t, 5, gapped.Len())
-		require.Equal(t, 40, gapped.Line(2).Number())
-
-		// Two revisions interleaved as a diff shows them, where the deleted
-		// and inserted lines each hold a "b" key at the same position.
-		before := line.NewLines(tokens.Tokenize("a: 1\nb: 2\n"))
-		after := line.NewLines(tokens.Tokenize("a: 1\nb: 3\n"))
-		revisions := line.Collect(after.Line(0), before.Line(1), after.Line(1))
-
-		tcs := map[string]struct {
-			lines       line.Lines
-			tk          *token.Token
-			wantToken   position.Ranges
-			wantContent position.Ranges
-		}{
-			"collected lexer token": {
-				lines: reversed,
-				tk:    block,
-				wantToken: position.Ranges{
-					position.NewRange(position.New(0, 0), position.New(0, 7)),
-					position.NewRange(position.New(1, 0), position.New(1, 7)),
-				},
-				wantContent: position.Ranges{
-					position.NewRange(position.New(0, 2), position.New(0, 7)),
-					position.NewRange(position.New(1, 2), position.New(1, 7)),
-				},
-			},
-			"collected part token": {
-				lines: reversed,
-				tk:    src.Line(1).Token(0),
-				wantToken: position.Ranges{
-					position.NewRange(position.New(1, 0), position.New(1, 7)),
-				},
-				wantContent: position.Ranges{
-					position.NewRange(position.New(1, 2), position.New(1, 7)),
-				},
-			},
-			"collected copy of a token": {
-				lines: reversed,
-				tk:    block.Clone(),
-				wantToken: position.Ranges{
-					position.NewRange(position.New(0, 0), position.New(0, 7)),
-					position.NewRange(position.New(1, 0), position.New(1, 7)),
-				},
-				wantContent: position.Ranges{
-					position.NewRange(position.New(0, 2), position.New(0, 7)),
-					position.NewRange(position.New(1, 2), position.New(1, 7)),
-				},
-			},
-			"gapped lexer token": {
-				lines: gapped,
-				tk:    gapped.TokenAt(position.New(3, 2)),
-				wantToken: position.Ranges{
-					position.NewRange(position.New(3, 0), position.New(3, 3)),
-					position.NewRange(position.New(4, 0), position.New(4, 3)),
-				},
-				wantContent: position.Ranges{
-					position.NewRange(position.New(3, 2), position.New(3, 3)),
-					position.NewRange(position.New(4, 2), position.New(4, 3)),
-				},
-			},
-			"gapped part token": {
-				lines: gapped,
-				tk:    gapped.Line(4).Token(0),
-				wantToken: position.Ranges{
-					position.NewRange(position.New(4, 0), position.New(4, 3)),
-				},
-				wantContent: position.Ranges{
-					position.NewRange(position.New(4, 2), position.New(4, 3)),
-				},
-			},
-			"gapped copy of a token": {
-				lines: gapped,
-				tk:    gapped.TokenAt(position.New(1, 6)).Clone(),
-				wantToken: position.Ranges{
-					position.NewRange(position.New(1, 5), position.New(1, 12)),
-				},
-				wantContent: position.Ranges{
-					position.NewRange(position.New(1, 6), position.New(1, 12)),
-				},
-			},
-			"inserted revision token": {
-				lines: revisions,
-				tk:    revisions.TokenAt(position.New(2, 0)),
-				wantToken: position.Ranges{
-					position.NewRange(position.New(2, 0), position.New(2, 1)),
-				},
-				wantContent: position.Ranges{
-					position.NewRange(position.New(2, 0), position.New(2, 1)),
-				},
-			},
-			"deleted revision token": {
-				lines: revisions,
-				tk:    revisions.TokenAt(position.New(1, 0)),
-				wantToken: position.Ranges{
-					position.NewRange(position.New(1, 0), position.New(1, 1)),
-				},
-				wantContent: position.Ranges{
-					position.NewRange(position.New(1, 0), position.New(1, 1)),
-				},
-			},
-			"revision part token": {
-				lines: revisions,
-				tk:    revisions.Line(2).Token(0),
-				wantToken: position.Ranges{
-					position.NewRange(position.New(2, 0), position.New(2, 1)),
-				},
-				wantContent: position.Ranges{
-					position.NewRange(position.New(2, 0), position.New(2, 1)),
-				},
-			},
-			"copy of a revision token": {
-				// A copy holds no pointer to tell the revisions apart, so it
-				// matches the token of each.
-				lines: revisions,
-				tk:    revisions.TokenAt(position.New(2, 0)).Clone(),
-				wantToken: position.Ranges{
-					position.NewRange(position.New(1, 0), position.New(1, 1)),
-					position.NewRange(position.New(2, 0), position.New(2, 1)),
-				},
-				wantContent: position.Ranges{
-					position.NewRange(position.New(1, 0), position.New(1, 1)),
-					position.NewRange(position.New(2, 0), position.New(2, 1)),
-				},
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				require.NotNil(t, tc.tk)
-				assert.Equal(t, tc.wantToken, tc.lines.TokenRanges(tc.tk))
-				assert.Equal(t, tc.wantContent, tc.lines.ContentRanges(tc.tk))
-			})
-		}
+		// This token from another stream sits at the same position as the
+		// block scalar content but differs in its text, so it matches
+		// nothing.
+		other := tokens.Tokenize("key: |\n  other\n  lines\n")
+		assert.Nil(t, src.TokenRanges(other[len(other)-1]))
 	})
+}
+
+// lineRange returns the range of the columns from start to end on the line
+// at index i.
+func lineRange(i, start, end int) position.Range {
+	return position.NewRange(position.New(i, start), position.New(i, end))
 }
 
 func TestLines_String(t *testing.T) {
@@ -2159,33 +2042,8 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 func TestLines_ContentRanges(t *testing.T) {
 	t.Parallel()
 
-	t.Run("single line token", func(t *testing.T) {
-		t.Parallel()
-
-		lines := line.NewLines(tokens.Tokenize("key: value\n"))
-
-		ranges := lines.ContentRanges(lines.TokenAt(position.New(0, 0)))
-		assert.Equal(t, position.Ranges{
-			position.NewRange(position.New(0, 0), position.New(0, 3)),
-		}, ranges)
-	})
-
-	t.Run("multiline token returns one range per line", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key: |
-			  line1
-			  line2
-		`)
-		lines := line.NewLines(tokens.Tokenize(input))
-
-		ranges := lines.ContentRanges(lines.TokenAt(position.New(1, 2)))
-		assert.Equal(t, position.Ranges{
-			position.NewRange(position.New(1, 2), position.New(1, 7)),
-			position.NewRange(position.New(2, 2), position.New(2, 7)),
-		}, ranges)
-	})
+	// The table of TestLines_TokenRanges also holds the content ranges of
+	// each token it looks up.
 
 	t.Run("excludes leading and trailing spaces", func(t *testing.T) {
 		t.Parallel()
@@ -2197,9 +2055,7 @@ func TestLines_ContentRanges(t *testing.T) {
 		tk := lines.TokenAt(position.New(0, 6))
 		require.Same(t, tks[2], tk)
 
-		assert.Equal(t, position.Ranges{
-			position.NewRange(position.New(0, 7), position.New(0, 12)),
-		}, lines.ContentRanges(tk))
+		assert.Equal(t, position.Ranges{lineRange(0, 7, 12)}, lines.ContentRanges(tk))
 	})
 
 	t.Run("excludes leading and trailing tabs", func(t *testing.T) {
@@ -2211,12 +2067,8 @@ func TestLines_ContentRanges(t *testing.T) {
 		require.NotNil(t, tk)
 		require.Equal(t, "\tb\t", tk.Origin)
 
-		assert.Equal(t, position.Ranges{
-			position.NewRange(position.New(0, 2), position.New(0, 5)),
-		}, lines.TokenRanges(tk))
-		assert.Equal(t, position.Ranges{
-			position.NewRange(position.New(0, 3), position.New(0, 4)),
-		}, lines.ContentRanges(tk))
+		assert.Equal(t, position.Ranges{lineRange(0, 2, 5)}, lines.TokenRanges(tk))
+		assert.Equal(t, position.Ranges{lineRange(0, 3, 4)}, lines.ContentRanges(tk))
 	})
 
 	t.Run("space-only part contributes no range", func(t *testing.T) {
@@ -2229,12 +2081,8 @@ func TestLines_ContentRanges(t *testing.T) {
 		tk := lines.TokenAt(position.New(1, 0))
 		require.Same(t, tks[2], tk)
 
-		assert.Contains(t, lines.TokenRanges(tk),
-			position.NewRange(position.New(1, 0), position.New(1, 3)))
-		assert.Equal(t, position.Ranges{
-			position.NewRange(position.New(0, 3), position.New(0, 5)),
-			position.NewRange(position.New(2, 2), position.New(2, 4)),
-		}, lines.ContentRanges(tk))
+		assert.Contains(t, lines.TokenRanges(tk), lineRange(1, 0, 3))
+		assert.Equal(t, position.Ranges{lineRange(0, 3, 5), lineRange(2, 2, 4)}, lines.ContentRanges(tk))
 	})
 
 	t.Run("nil and missing tokens return nil", func(t *testing.T) {
