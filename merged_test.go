@@ -431,12 +431,7 @@ func TestNewSourceFromLayers_Decode_Merge(t *testing.T) {
 
 			assert.Equal(t, tc.want, mergedText(t, layers))
 
-			for expr, at := range tc.binds {
-				path := paths.MustParse(expr)
-
-				err := layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(path)))
-				require.EqualError(t, err, fmt.Sprintf("%s: %s: here", at, path), expr)
-			}
+			requireLayerBinds(t, layers, tc.binds)
 
 			// A decode of the merged document reads what a decode of its
 			// text reads.
@@ -1156,11 +1151,10 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 
 		// A value from a reference document has no line in the layer, so
 		// an error under it binds at the alias.
-		err = layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.Doc().Child("web", "port"))))
-		require.EqualError(t, err, "prod.yaml:1:6: $.web.port: here")
-
-		err = layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.Doc().Child("db", "port"))))
-		require.EqualError(t, err, "base.yaml:1:5: $.db.port: here")
+		requireLayerBinds(t, layers, map[string]string{
+			"$.web.port": "prod.yaml:1:6",
+			"$.db.port":  "base.yaml:1:5",
+		})
 	})
 
 	t.Run("a layer that allows a duplicate key keeps the last one", func(t *testing.T) {
@@ -1174,14 +1168,13 @@ func TestNewSourceFromLayers_Decode_SourceSettings(t *testing.T) {
 
 		assert.Equal(t, "a: 2\nb:\n  d: 2\ne: 5\n", mergedText(t, layers))
 
-		err := layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.Doc().Child("a"))))
-		require.EqualError(t, err, "base.yaml:2:4: $.a: here")
+		requireLayerBinds(t, layers, map[string]string{"$.a": "base.yaml:2:4"})
 
 		// A layer that does not allow one fails as it does alone.
 		strict := niceyaml.NewSourceFromString("a: 1\na: 2\n", niceyaml.WithName("prod.yaml")).AllDocuments()
 		require.Len(t, strict, 1)
 
-		_, err = niceyaml.NewSourceFromLayers(t.Context(), base, strict[0])
+		_, err := niceyaml.NewSourceFromLayers(t.Context(), base, strict[0])
 		require.ErrorIs(t, err, niceyaml.ErrSyntax)
 		require.ErrorIs(t, err, strict[0].Err())
 	})
@@ -1512,12 +1505,7 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 			assert.Equal(t, "# base\nname: shop\nserver:\n  host: mid.example.com\n  port: 0\n  tls:\n    cert: 1\n",
 				mergedText(t, layers))
 
-			for expr, at := range binds {
-				path := paths.MustParse(expr)
-
-				err := layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(path)))
-				require.EqualError(t, err, fmt.Sprintf("%s: %s: here", at, path), expr)
-			}
+			requireLayerBinds(t, layers, binds)
 
 			err := layers.Bind(errors.New("quota service: connection refused"))
 			require.EqualError(t, err, "base.yaml: quota service: connection refused")
@@ -1624,11 +1612,10 @@ func TestNewSourceFromLayers_MergedLayer(t *testing.T) {
 
 		assert.Equal(t, "x:\n  p: 1\n  q: 2\n", mergedText(t, layers))
 
-		err := layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.Doc().Child("x", "p"))))
-		require.EqualError(t, err, "base.yaml:1:8: $.x.p: here")
-
-		err = layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(paths.Doc().Child("x", "q"))))
-		require.EqualError(t, err, "prod.yaml:1:8: $.x.q: here")
+		requireLayerBinds(t, layers, map[string]string{
+			"$.x.p": "base.yaml:1:8",
+			"$.x.q": "prod.yaml:1:8",
+		})
 	})
 }
 
@@ -1706,6 +1693,20 @@ func TestNewSourceFromLayers_Context(t *testing.T) {
 		require.ErrorAs(t, err, &bound)
 		assert.Same(t, base, bound.Source())
 	})
+}
+
+// requireLayerBinds requires an error at each path of binds to bind in
+// layers at the place the path maps to. A place is "file:line:col", or
+// the name of the file for an error that binds with no position.
+func requireLayerBinds(t *testing.T, layers *niceyaml.Source, binds map[string]string) {
+	t.Helper()
+
+	for expr, at := range binds {
+		path := paths.MustParse(expr)
+
+		err := layers.Bind(niceyaml.NewError("here", niceyaml.AtPath(path)))
+		require.EqualError(t, err, fmt.Sprintf("%s: %s: here", at, path), expr)
+	}
 }
 
 // mergedDocument returns the root Node of the document layers merge
