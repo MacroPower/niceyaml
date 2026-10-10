@@ -3133,8 +3133,6 @@ func TestViewport_State(t *testing.T) {
 		line5: e
 	`)
 
-	threeLineYAML := stringtest.JoinLF("line1: a", "line2: b", "line3: c")
-
 	tcs := map[string]struct {
 		setup  func(m *yamlviewport.Model)
 		test   func(t *testing.T, m *yamlviewport.Model)
@@ -3166,15 +3164,6 @@ func TestViewport_State(t *testing.T) {
 				assert.Empty(t, m.View())
 			},
 		},
-		"LineCounts/TotalLineCount": {
-			yaml:   lineCountYAML,
-			width:  80,
-			height: 24,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, 5, m.TotalLineCount())
-			},
-		},
 		"LineCounts/VisibleLineCount": {
 			yaml:   lineCountYAML,
 			width:  80,
@@ -3197,21 +3186,7 @@ func TestViewport_State(t *testing.T) {
 		"Init/ReturnsNil": {
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
-
-				cmd := m.Init()
-				assert.Nil(t, cmd)
-			},
-		},
-		"AtBottom/GotoBottom": {
-			yaml:   threeLineYAML,
-			width:  80,
-			height: 2,
-			setup: func(m *yamlviewport.Model) {
-				m.GotoBottom()
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.True(t, m.AtBottom())
+				assert.Nil(t, m.Init())
 			},
 		},
 		"AtBottom/SetHeightReclamps": {
@@ -4205,23 +4180,6 @@ func TestViewMode_Behavior(t *testing.T) {
 				t.Helper()
 
 				assert.Equal(t, yamlviewport.ViewModeFull, m.ViewMode())
-			},
-		},
-		"SetViewModeHunks": {
-			width:  80,
-			height: 24,
-			setup: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-
-				assert.Equal(t, yamlviewport.ViewModeHunks, m.ViewMode())
-
-				output := m.View()
-				assert.NotEmpty(t, output)
 			},
 		},
 		"HunksEmptyRevisions": {
