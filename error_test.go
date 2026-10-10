@@ -10922,30 +10922,21 @@ func TestIsInvalid(t *testing.T) {
 	ioErr := &fs.PathError{Op: "open", Path: "names.db", Err: fs.ErrNotExist}
 	portSchema := schema.MustCompile([]byte(`{"properties": {"port": {"maximum": 10}}}`))
 
-	unknownName := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return niceyaml.NewError("unknown name", niceyaml.AtPath(namePath))
-	})
-	failing := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return ioErr
-	})
-	unlocated := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return errors.New("closes before it opens")
-	})
-	declared := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return niceyaml.NewError("closes before it opens")
-	})
-	joined := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return niceyaml.Invalid(errors.Join(errors.New("opens too late"), errors.New("closes too early")))
-	})
-	rebased := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return niceyaml.Rebase(fmt.Errorf("stat license: %w", fs.ErrPermission), namePath)
-	})
+	// Fails returns a validator that reports err for any node.
+	fails := func(err error) niceyaml.Validator {
+		return niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error { return err })
+	}
+
+	unknownName := fails(niceyaml.NewError("unknown name", niceyaml.AtPath(namePath)))
+	failing := fails(ioErr)
+	unlocated := fails(errors.New("closes before it opens"))
+	declared := fails(niceyaml.NewError("closes before it opens"))
+	joined := fails(niceyaml.Invalid(errors.Join(errors.New("opens too late"), errors.New("closes too early"))))
+	rebased := fails(niceyaml.Rebase(fmt.Errorf("stat license: %w", fs.ErrPermission), namePath))
 	contextual := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
 		return ctx.Err()
 	})
-	denied := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return fmt.Errorf("read names.db: %w", fs.ErrPermission)
-	})
+	denied := fails(fmt.Errorf("read names.db: %w", fs.ErrPermission))
 	decoding := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 		var target struct {
 			Port []int `yaml:"port"`
@@ -10954,9 +10945,7 @@ func TestIsInvalid(t *testing.T) {
 		return n.DecodeInto(ctx, &target)
 	})
 
-	placed := niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-		return niceyaml.Place(fmt.Errorf("stat license: %w", fs.ErrPermission), niceyaml.AtPath(namePath))
-	})
+	placed := fails(niceyaml.Place(fmt.Errorf("stat license: %w", fs.ErrPermission), niceyaml.AtPath(namePath)))
 
 	// The explained error is an I/O error placed at the name, with a
 	// located detail the document is at fault for.
@@ -11035,9 +11024,7 @@ func TestIsInvalid(t *testing.T) {
 			want: true,
 		},
 		"schema violation with no location": {
-			err: validated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-				return &schema.Violation{Keyword: "type", Message: `expected "object", got "string"`}
-			})),
+			err:  validated(fails(&schema.Violation{Keyword: "type", Message: `expected "object", got "string"`})),
 			want: true,
 		},
 		"SelfValidator NewError with AtPath": {
@@ -11088,9 +11075,7 @@ func TestIsInvalid(t *testing.T) {
 			want: true,
 		},
 		"Validator NewError with AtPath of the root": {
-			err: scopedValidated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-				return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Current()))
-			})),
+			err:  scopedValidated(fails(niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Current())))),
 			want: true,
 		},
 		"Validator NewError with AtPath bound through Bind": {
@@ -11116,9 +11101,7 @@ func TestIsInvalid(t *testing.T) {
 			want: true,
 		},
 		"Validator join of errors.New": {
-			err: validated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-				return errors.Join(errors.New("opens too late"), errors.New("closes too early"))
-			})),
+			err: validated(fails(errors.Join(errors.New("opens too late"), errors.New("closes too early")))),
 		},
 		"Validator errors.New at the root": {
 			err: validated(unlocated),
@@ -11140,16 +11123,12 @@ func TestIsInvalid(t *testing.T) {
 			is:  fs.ErrPermission,
 		},
 		"Validator Place of an I/O error on a scoped Node": {
-			err: scopedValidated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-				return niceyaml.Place(ioErr)
-			})),
-			is: fs.ErrNotExist,
+			err: scopedValidated(fails(niceyaml.Place(ioErr))),
+			is:  fs.ErrNotExist,
 		},
 		"Validator Place of NewError": {
 			// Place declares nothing and clears nothing.
-			err: validated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-				return niceyaml.Place(niceyaml.NewError("unknown name"), niceyaml.AtPath(namePath))
-			})),
+			err:  validated(fails(niceyaml.Place(niceyaml.NewError("unknown name"), niceyaml.AtPath(namePath)))),
 			want: true,
 		},
 		"SelfValidator Place of an I/O error": {
@@ -11159,10 +11138,8 @@ func TestIsInvalid(t *testing.T) {
 			want: true,
 		},
 		"Validator error with no location and a located detail": {
-			err: validated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-				return niceyaml.NewError("name taken",
-					niceyaml.WithDetails(niceyaml.NewError("first used here", niceyaml.AtPath(namePath))))
-			})),
+			err: validated(fails(niceyaml.NewError("name taken",
+				niceyaml.WithDetails(niceyaml.NewError("first used here", niceyaml.AtPath(namePath)))))),
 			want: true,
 		},
 		"schema that does not load": {
@@ -11230,9 +11207,7 @@ func TestIsInvalid(t *testing.T) {
 			is:  fs.ErrNotExist,
 		},
 		"Validator Invalid of an I/O error": {
-			err: validated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-				return niceyaml.Invalid(ioErr, niceyaml.AtPath(namePath))
-			})),
+			err:  validated(fails(niceyaml.Invalid(ioErr, niceyaml.AtPath(namePath)))),
 			is:   fs.ErrNotExist,
 			want: true,
 		},
@@ -11544,10 +11519,8 @@ func TestIsInvalid(t *testing.T) {
 		},
 		"Validator I/O error with a located detail": {
 			// The detail explains the I/O error and decides nothing.
-			err: validated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-				return explained
-			})),
-			is: fs.ErrPermission,
+			err: validated(fails(explained)),
+			is:  fs.ErrPermission,
 		},
 		"unbound I/O error with a located detail": {
 			err: explained,
@@ -11633,9 +11606,7 @@ func TestIsInvalid(t *testing.T) {
 				detail: context.DeadlineExceeded,
 			},
 			"Validator error with a hint on a scoped Node": {
-				err: scopedValidated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-					return niceyaml.NewError("closes before it opens", hinted)
-				})),
+				err:    scopedValidated(fails(niceyaml.NewError("closes before it opens", hinted))),
 				detail: context.DeadlineExceeded,
 				path:   "$.hours",
 				want:   true,
