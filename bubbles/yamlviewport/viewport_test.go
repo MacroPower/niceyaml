@@ -4779,7 +4779,7 @@ func TestViewport_ViewModeReusesDiff(t *testing.T) {
 		"a: 10\nb: 20\nc: 3\nd: 4\n",
 	}
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		// Steps that run on a viewport that holds a revision of each doc
 		// and shows the diff at revision index 1.
 		change func(m *yamlviewport.Model, revs []*countingRevision)
@@ -4825,7 +4825,7 @@ func TestViewport_ViewModeReusesDiff(t *testing.T) {
 		},
 	}
 
-	for name, tc := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -4833,9 +4833,7 @@ func TestViewport_ViewModeReusesDiff(t *testing.T) {
 
 			revs := make([]*countingRevision, len(docs))
 			for i, doc := range docs {
-				revs[i] = &countingRevision{
-					Revision: niceyaml.NewSourceFromString(doc, niceyaml.WithName(fmt.Sprintf("v%d", i+1))),
-				}
+				revs[i] = &countingRevision{Revision: niceyaml.NewSourceFromString(doc)}
 				m.AddRevision(revs[i])
 			}
 
@@ -4859,7 +4857,7 @@ func TestViewport_ViewModeReusesDiff(t *testing.T) {
 			want := testModel(testPrinter(), 80, 10)
 
 			for _, i := range tc.history {
-				want.AddRevision(niceyaml.NewSourceFromString(docs[i], niceyaml.WithName(fmt.Sprintf("v%d", i+1))))
+				want.AddRevision(niceyaml.NewSourceFromString(docs[i]))
 			}
 
 			want.GotoRevision(m.RevisionIndex())
@@ -4878,13 +4876,14 @@ func TestViewport_AddRevisionsDiffsOnce(t *testing.T) {
 
 	m := testModel(testPrinter(), 80, 10)
 
-	revs := make([]*countingRevision, 5)
-	batch := make([]yamlviewport.Revision, len(revs))
+	docs := make([]string, 5)
+	revs := make([]*countingRevision, len(docs))
+	batch := make([]yamlviewport.Revision, len(docs))
 
-	for i := range revs {
-		doc := fmt.Sprintf("a: %d\nb: 2\n", i)
+	for i := range docs {
+		docs[i] = fmt.Sprintf("a: %d\nb: 2\n", i)
 		revs[i] = &countingRevision{
-			Revision: niceyaml.NewSourceFromString(doc, niceyaml.WithName(fmt.Sprintf("v%d", i+1))),
+			Revision: niceyaml.NewSourceFromString(docs[i], niceyaml.WithName(fmt.Sprintf("v%d", i+1))),
 		}
 		batch[i] = revs[i]
 	}
@@ -4901,11 +4900,7 @@ func TestViewport_AddRevisionsDiffsOnce(t *testing.T) {
 	assert.Positive(t, revs[4].views)
 
 	want := testModel(testPrinter(), 80, 10)
-
-	for i := range revs {
-		doc := fmt.Sprintf("a: %d\nb: 2\n", i)
-		want.AddRevision(niceyaml.NewSourceFromString(doc, niceyaml.WithName(fmt.Sprintf("v%d", i+1))))
-	}
+	addRevisions(&want, docs...)
 
 	assert.Equal(t, want.RevisionNames(), m.RevisionNames())
 	assert.Equal(t, want.DiffStats(), m.DiffStats())
