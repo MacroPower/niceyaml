@@ -6584,16 +6584,7 @@ func TestPrinter_AnnotationGutterSoftAcrossKinds(t *testing.T) {
 
 	p := printer.New(
 		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.GutterFunc(func(ctx printer.GutterContext) string {
-			switch {
-			case !ctx.Annotation:
-				return "L "
-			case ctx.Soft:
-				return "S "
-			default:
-				return "F "
-			}
-		})),
+		printer.WithGutter(printer.GutterFunc(rowLetterGutter)),
 	)
 
 	rows := strings.Split(p.Print(view), "\n")
@@ -6601,6 +6592,22 @@ func TestPrinter_AnnotationGutterSoftAcrossKinds(t *testing.T) {
 	assert.True(t, strings.HasPrefix(rows[0], "L "), rows[0])
 	assert.True(t, strings.HasPrefix(rows[1], "F "), rows[1])
 	assert.True(t, strings.HasPrefix(rows[2], "S "), rows[2])
+}
+
+// rowLetterGutter is a gutter func that names each row by a letter. The
+// first row of a line gets L, and a row the line wraps onto gets C. The
+// first row of an annotation block gets F, and a later one gets S.
+func rowLetterGutter(ctx printer.GutterContext) string {
+	switch {
+	case !ctx.Annotation && ctx.Soft:
+		return "C "
+	case !ctx.Annotation:
+		return "L "
+	case ctx.Soft:
+		return "S "
+	default:
+		return "F "
+	}
 }
 
 func TestPrinter_AnnotationGutterSoftPerWrappedRow(t *testing.T) {
@@ -6616,18 +6623,7 @@ func TestPrinter_AnnotationGutterSoftPerWrappedRow(t *testing.T) {
 		line.Annotation{Content: "n", Placement: line.Below, Kind: kind.TextError, Col: 5},
 	)
 
-	p := testPrinterWithGutter(printer.GutterFunc(func(ctx printer.GutterContext) string {
-		switch {
-		case !ctx.Annotation && ctx.Soft:
-			return "C "
-		case !ctx.Annotation:
-			return "L "
-		case ctx.Soft:
-			return "S "
-		default:
-			return "F "
-		}
-	})).With(printer.WithWrapWidth(12))
+	p := testPrinterWithGutter(printer.GutterFunc(rowLetterGutter)).With(printer.WithWrapWidth(12))
 
 	var gutters []string
 
