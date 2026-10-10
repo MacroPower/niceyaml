@@ -3017,276 +3017,6 @@ func TestGutterFunctions(t *testing.T) {
 	}
 }
 
-func TestPrinter_WithAnnotation(t *testing.T) {
-	t.Parallel()
-
-	// A func that draws a marker of its own for each placement.
-	custom := func(ctx printer.AnnotationContext) []printer.AnnotationRow {
-		row := printer.AnnotationRow{
-			Col:    ctx.Annotations.Col(),
-			Marker: "=== ",
-			Text:   strings.Join(ctx.Annotations.Contents(), ", "),
-		}
-
-		if ctx.Placement == line.Below {
-			row.Marker = ">>> "
-		}
-
-		return []printer.AnnotationRow{row}
-	}
-
-	tcs := map[string]struct {
-		fn         printer.AnnotationFunc
-		want       string
-		annotation line.Annotation
-	}{
-		// With annotations disabled, the printer renders only the content.
-		"NoAnnotation hides one above": {
-			fn:         printer.NoAnnotation,
-			annotation: line.Annotation{Content: "# hidden above", Placement: line.Above},
-			want:       "key: value",
-		},
-		"NoAnnotation hides one below": {
-			fn:         printer.NoAnnotation,
-			annotation: line.Annotation{Content: "# hidden below", Placement: line.Below, Col: 5},
-			want:       "key: value",
-		},
-		"DefaultAnnotation shows them": {
-			fn:         printer.DefaultAnnotation,
-			annotation: line.Annotation{Content: "@@ -1 +1 @@"},
-			want:       "@@ -1 +1 @@\nkey: value",
-		},
-		// A nil func selects DefaultAnnotation rather than panicking on the
-		// first annotated line.
-		"nil shows them as DefaultAnnotation does": {
-			annotation: line.Annotation{Content: "note", Placement: line.Below, Col: 5},
-			want: stringtest.JoinLF(
-				"key: value",
-				"     ^ note",
-			),
-		},
-		"custom func marks one below": {
-			fn:         custom,
-			annotation: line.Annotation{Content: "custom error", Placement: line.Below},
-			want:       "key: value\n>>> custom error",
-		},
-		"custom func marks one above": {
-			fn:         custom,
-			annotation: line.Annotation{Content: "custom header", Placement: line.Above},
-			want:       "=== custom header\nkey: value",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := niceyaml.NewSourceFromString("key: value\n").View()
-			view.Annotate(0, tc.annotation)
-
-			p := testPrinter().With(printer.WithAnnotation(tc.fn))
-
-			assert.Equal(t, tc.want, p.Print(view))
-		})
-	}
-}
-
-func TestPrinter_AnnotationPosition(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		gutter     printer.Gutter // Nil for no gutter.
-		input      string
-		annotation line.Annotation
-		lineIndex  int
-		want       string
-	}{
-		"above annotation at col 0": {
-			input:      "key: value",
-			annotation: line.Annotation{Content: "# comment", Placement: line.Above},
-			want:       "# comment\nkey: value",
-		},
-		"above annotation with col padding": {
-			input:      "key: value",
-			annotation: line.Annotation{Content: "^-- error here", Placement: line.Above, Col: 5},
-			want: stringtest.JoinLF(
-				"     ^-- error here",
-				"key: value",
-			),
-		},
-		"below annotation at col 0": {
-			input:      "key: value",
-			annotation: line.Annotation{Content: "comment below", Placement: line.Below},
-			want:       "key: value\n^ comment below",
-		},
-		"below annotation with col padding": {
-			input:      "key: value",
-			annotation: line.Annotation{Content: "error here", Placement: line.Below, Col: 5},
-			want: stringtest.JoinLF(
-				"key: value",
-				"     ^ error here",
-			),
-		},
-		"below annotation under wide runes": {
-			input:      "日本語: 値",
-			annotation: line.Annotation{Content: "bad value", Placement: line.Below, Col: 5},
-			// The three wide runes take six cells, so the marker sits eight
-			// cells in, under the value.
-			want: stringtest.JoinLF(
-				"日本語: 値",
-				"        ^ bad value",
-			),
-		},
-		"below annotation past the end of wide runes": {
-			input:      "日本",
-			annotation: line.Annotation{Content: "after", Placement: line.Below, Col: 4},
-			want: stringtest.JoinLF(
-				"日本",
-				"      ^ after",
-			),
-		},
-		"below annotation on second line": {
-			input: stringtest.JoinLF(
-				"first: 1",
-				"second: 2",
-			),
-			lineIndex:  1,
-			annotation: line.Annotation{Content: "note", Placement: line.Below, Col: 8},
-			want: stringtest.JoinLF(
-				"first: 1",
-				"second: 2",
-				"        ^ note",
-			),
-		},
-		"above annotation on second line": {
-			input: stringtest.JoinLF(
-				"first: 1",
-				"second: 2",
-			),
-			lineIndex:  1,
-			annotation: line.Annotation{Content: "@@ -1 +1 @@", Placement: line.Above},
-			want: stringtest.JoinLF(
-				"first: 1",
-				"@@ -1 +1 @@",
-				"second: 2",
-			),
-		},
-		"below annotation with empty content marks its column": {
-			input:      "key: value",
-			annotation: line.Annotation{Placement: line.Below, Col: 2},
-			want: stringtest.JoinLF(
-				"key: value",
-				"  ^",
-			),
-		},
-		"above annotation with line numbers": {
-			gutter:     printer.LineNumberGutter,
-			input:      "key: value",
-			annotation: line.Annotation{Content: "@@ -1 +1 @@", Placement: line.Above},
-			want: stringtest.JoinLF(
-				"     @@ -1 +1 @@",
-				"   1 key: value",
-			),
-		},
-		"below annotation with line numbers": {
-			gutter:     printer.LineNumberGutter,
-			input:      "key: value",
-			annotation: line.Annotation{Content: "error", Placement: line.Below, Col: 5},
-			want: stringtest.JoinLF(
-				"   1 key: value",
-				"          ^ error",
-			),
-		},
-		"below annotation with col padding and line numbers": {
-			gutter: printer.LineNumberGutter,
-			input: stringtest.JoinLF(
-				"first: 1",
-				"second: 2",
-			),
-			annotation: line.Annotation{Content: "note", Placement: line.Below, Col: 7},
-			want: stringtest.JoinLF(
-				"   1 first: 1",
-				"            ^ note",
-				"   2 second: 2",
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := niceyaml.NewSourceFromString(tc.input).View()
-			view.Annotate(tc.lineIndex, tc.annotation)
-
-			assert.Equal(t, tc.want, testPrinterWithGutter(tc.gutter).Print(view))
-		})
-	}
-}
-
-func TestPrinter_AnnotationFarColumn(t *testing.T) {
-	t.Parallel()
-
-	// A column more than 1024 columns past the end of the content starts
-	// 1024 columns past it, after every cell of the content.
-	tcs := map[string]struct {
-		input string
-		want  string
-		col   int
-		width int
-	}{
-		"max column": {
-			input: "k: v",
-			col:   math.MaxInt,
-			want:  strings.Repeat(" ", 4+1024) + "^ x",
-		},
-		"max column after wide runes": {
-			input: "k: 日本語",
-			col:   math.MaxInt,
-			want:  strings.Repeat(" ", 9+1024) + "^ x",
-		},
-		"max column when wrapping": {
-			// The column leaves the text no room within the width, so the
-			// text moves below the marker.
-			input: "k: v",
-			col:   math.MaxInt,
-			width: 10,
-			want:  stringtest.JoinLF(strings.Repeat(" ", 4+1024)+"^", "x"),
-		},
-		"column past the bound": {
-			input: "k: v",
-			col:   1 << 32,
-			want:  strings.Repeat(" ", 4+1024) + "^ x",
-		},
-		"column at the bound": {
-			input: "k: v",
-			col:   4 + 1024,
-			want:  strings.Repeat(" ", 4+1024) + "^ x",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := niceyaml.NewSourceFromString(tc.input).View()
-			view.Annotate(0, line.Annotation{Content: "x", Placement: line.Below, Col: tc.col})
-
-			p := testPrinter().With(printer.WithWrapWidth(tc.width))
-
-			var got string
-
-			require.NotPanics(t, func() { got = p.Print(view) })
-			assert.Equal(t, stringtest.JoinLF(tc.input, tc.want), got)
-
-			var l printer.Layout
-
-			require.NotPanics(t, func() { l = p.Layout(view) })
-			assertLayoutMeasures(t, l, got)
-		})
-	}
-}
-
 func TestPrinter_Style(t *testing.T) {
 	t.Parallel()
 
@@ -4772,7 +4502,7 @@ func TestPrinter_AnnotationFuncKind(t *testing.T) {
 	assert.NotContains(t, got, "\x1b[31m")
 }
 
-func TestPrinter_AnnotationWrap(t *testing.T) {
+func TestPrinter_Annotation(t *testing.T) {
 	t.Parallel()
 
 	// Joins the contents with no column and no marker, so continuation
@@ -4790,12 +4520,28 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 		}}
 	}
 
+	// A func that draws a marker of its own for each placement.
+	custom := func(ctx printer.AnnotationContext) []printer.AnnotationRow {
+		row := printer.AnnotationRow{
+			Col:    ctx.Annotations.Col(),
+			Marker: "=== ",
+			Text:   strings.Join(ctx.Annotations.Contents(), ", "),
+		}
+
+		if ctx.Placement == line.Below {
+			row.Marker = ">>> "
+		}
+
+		return []printer.AnnotationRow{row}
+	}
+
 	tcs := map[string]struct {
 		annFunc    printer.AnnotationFunc
 		gutter     printer.Gutter // Nil for no gutter.
 		input      string
 		want       string
 		annotation line.Annotation
+		line       int // Index of the line the annotation is on.
 		width      int
 	}{
 		"below rows align under the marker within the width": {
@@ -5088,6 +4834,186 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 				"        epsilon",
 			),
 		},
+		"above annotation at col 0": {
+			input:      "key: value",
+			annotation: line.Annotation{Content: "# comment", Placement: line.Above},
+			want:       "# comment\nkey: value",
+		},
+		"above annotation with col padding": {
+			input:      "key: value",
+			annotation: line.Annotation{Content: "^-- error here", Placement: line.Above, Col: 5},
+			want: stringtest.JoinLF(
+				"     ^-- error here",
+				"key: value",
+			),
+		},
+		"below annotation at col 0": {
+			input:      "key: value",
+			annotation: line.Annotation{Content: "comment below", Placement: line.Below},
+			want:       "key: value\n^ comment below",
+		},
+		"below annotation with col padding": {
+			input:      "key: value",
+			annotation: line.Annotation{Content: "error here", Placement: line.Below, Col: 5},
+			want: stringtest.JoinLF(
+				"key: value",
+				"     ^ error here",
+			),
+		},
+		"below annotation under wide runes": {
+			input:      "日本語: 値",
+			annotation: line.Annotation{Content: "bad value", Placement: line.Below, Col: 5},
+			// The three wide runes take six cells, so the marker sits eight
+			// cells in, under the value.
+			want: stringtest.JoinLF(
+				"日本語: 値",
+				"        ^ bad value",
+			),
+		},
+		"below annotation past the end of wide runes": {
+			input:      "日本",
+			annotation: line.Annotation{Content: "after", Placement: line.Below, Col: 4},
+			want: stringtest.JoinLF(
+				"日本",
+				"      ^ after",
+			),
+		},
+		"below annotation on second line": {
+			input: stringtest.JoinLF(
+				"first: 1",
+				"second: 2",
+			),
+			line:       1,
+			annotation: line.Annotation{Content: "note", Placement: line.Below, Col: 8},
+			want: stringtest.JoinLF(
+				"first: 1",
+				"second: 2",
+				"        ^ note",
+			),
+		},
+		"above annotation on second line": {
+			input: stringtest.JoinLF(
+				"first: 1",
+				"second: 2",
+			),
+			line:       1,
+			annotation: line.Annotation{Content: "@@ -1 +1 @@", Placement: line.Above},
+			want: stringtest.JoinLF(
+				"first: 1",
+				"@@ -1 +1 @@",
+				"second: 2",
+			),
+		},
+		"below annotation with empty content marks its column": {
+			input:      "key: value",
+			annotation: line.Annotation{Placement: line.Below, Col: 2},
+			want: stringtest.JoinLF(
+				"key: value",
+				"  ^",
+			),
+		},
+		"above annotation with line numbers": {
+			gutter:     printer.LineNumberGutter,
+			input:      "key: value",
+			annotation: line.Annotation{Content: "@@ -1 +1 @@", Placement: line.Above},
+			want: stringtest.JoinLF(
+				"     @@ -1 +1 @@",
+				"   1 key: value",
+			),
+		},
+		"below annotation with line numbers": {
+			gutter:     printer.LineNumberGutter,
+			input:      "key: value",
+			annotation: line.Annotation{Content: "error", Placement: line.Below, Col: 5},
+			want: stringtest.JoinLF(
+				"   1 key: value",
+				"          ^ error",
+			),
+		},
+		"below annotation with col padding and line numbers": {
+			gutter: printer.LineNumberGutter,
+			input: stringtest.JoinLF(
+				"first: 1",
+				"second: 2",
+			),
+			annotation: line.Annotation{Content: "note", Placement: line.Below, Col: 7},
+			want: stringtest.JoinLF(
+				"   1 first: 1",
+				"            ^ note",
+				"   2 second: 2",
+			),
+		},
+		// With annotations disabled, the printer renders only the content.
+		"NoAnnotation hides one above": {
+			input:      "key: value\n",
+			annFunc:    printer.NoAnnotation,
+			annotation: line.Annotation{Content: "# hidden above", Placement: line.Above},
+			want:       "key: value",
+		},
+		"NoAnnotation hides one below": {
+			input:      "key: value\n",
+			annFunc:    printer.NoAnnotation,
+			annotation: line.Annotation{Content: "# hidden below", Placement: line.Below, Col: 5},
+			want:       "key: value",
+		},
+		"DefaultAnnotation shows them": {
+			input:      "key: value\n",
+			annFunc:    printer.DefaultAnnotation,
+			annotation: line.Annotation{Content: "@@ -1 +1 @@"},
+			want:       "@@ -1 +1 @@\nkey: value",
+		},
+		// A nil func selects DefaultAnnotation rather than panicking on the
+		// first annotated line.
+		"nil shows them as DefaultAnnotation does": {
+			input:      "key: value\n",
+			annotation: line.Annotation{Content: "note", Placement: line.Below, Col: 5},
+			want: stringtest.JoinLF(
+				"key: value",
+				"     ^ note",
+			),
+		},
+		"custom func marks one below": {
+			input:      "key: value\n",
+			annFunc:    custom,
+			annotation: line.Annotation{Content: "custom error", Placement: line.Below},
+			want:       "key: value\n>>> custom error",
+		},
+		"custom func marks one above": {
+			input:      "key: value\n",
+			annFunc:    custom,
+			annotation: line.Annotation{Content: "custom header", Placement: line.Above},
+			want:       "=== custom header\nkey: value",
+		},
+		// A column more than 1024 columns past the end of the content starts
+		// 1024 columns past it, after every cell of the content.
+		"max column": {
+			input:      "k: v",
+			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: math.MaxInt},
+			want:       stringtest.JoinLF("k: v", strings.Repeat(" ", 4+1024)+"^ x"),
+		},
+		"max column after wide runes": {
+			input:      "k: 日本語",
+			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: math.MaxInt},
+			want:       stringtest.JoinLF("k: 日本語", strings.Repeat(" ", 9+1024)+"^ x"),
+		},
+		"max column when wrapping": {
+			// The column leaves the text no room within the width, so the
+			// text moves below the marker.
+			input:      "k: v",
+			width:      10,
+			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: math.MaxInt},
+			want:       stringtest.JoinLF("k: v", strings.Repeat(" ", 4+1024)+"^", "x"),
+		},
+		"column past the bound": {
+			input:      "k: v",
+			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: 1 << 32},
+			want:       stringtest.JoinLF("k: v", strings.Repeat(" ", 4+1024)+"^ x"),
+		},
+		"column at the bound": {
+			input:      "k: v",
+			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: 4 + 1024},
+			want:       stringtest.JoinLF("k: v", strings.Repeat(" ", 4+1024)+"^ x"),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -5095,12 +5021,13 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString(tc.input).View()
-			view.Annotate(0, tc.annotation)
+			view.Annotate(tc.line, tc.annotation)
 
-			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.width))
-			if tc.annFunc != nil {
-				p = p.With(printer.WithAnnotation(tc.annFunc))
-			}
+			// A nil func selects DefaultAnnotation.
+			p := testPrinterWithGutter(tc.gutter).With(
+				printer.WithWrapWidth(tc.width),
+				printer.WithAnnotation(tc.annFunc),
+			)
 
 			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
