@@ -1034,11 +1034,7 @@ func TestSourceError_Error_List(t *testing.T) {
 func TestSourceError_Error_ListLimit(t *testing.T) {
 	t.Parallel()
 
-	var input strings.Builder
-
-	for i := range 2 * niceyaml.ErrorListLimit {
-		fmt.Fprintf(&input, "k%d: 0\n", i)
-	}
+	input := yamltest.GenerateLines(2*niceyaml.ErrorListLimit, "k%d: 0")
 
 	// Located returns n errors, one per key of the input from the key at
 	// first on.
@@ -1113,7 +1109,7 @@ func TestSourceError_Error_ListLimit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString(input.String(), niceyaml.WithName(tc.name))
+			source := niceyaml.NewSourceFromString(input, niceyaml.WithName(tc.name))
 			err := yamltest.Bind(t, source, tc.err)
 
 			require.Error(t, err)
@@ -1130,13 +1126,8 @@ func TestSourceError_Format_ListLimit(t *testing.T) {
 
 	limit := niceyaml.ErrorListLimit
 
-	var input strings.Builder
-
-	for i := range 2 * limit {
-		fmt.Fprintf(&input, "k%02d: 0\n", i)
-	}
-
-	source := niceyaml.NewSourceFromString(input.String(), niceyaml.WithName("f.yaml"))
+	input := yamltest.GenerateLines(2*limit, "k%02d: 0")
+	source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
 	other := niceyaml.NewSourceFromString("port: 0\n", niceyaml.WithName("other.yaml"))
 
 	key := func(i int) string { return fmt.Sprintf("k%02d", i) }
@@ -10170,13 +10161,8 @@ func TestError_Format_ListLimit(t *testing.T) {
 	t.Run("binding left out adds no line for its location", func(t *testing.T) {
 		t.Parallel()
 
-		var input strings.Builder
-
-		for i := range limit {
-			fmt.Fprintf(&input, "k%02d: 0\n", i)
-		}
-
-		source := niceyaml.NewSourceFromString(input.String(), niceyaml.WithName("f.yaml"))
+		input := yamltest.GenerateLines(limit, "k%02d: 0")
+		source := niceyaml.NewSourceFromString(input, niceyaml.WithName("f.yaml"))
 
 		// Each of the first limit problems is bound at a key of the
 		// source, and the last names a value the source lacks.

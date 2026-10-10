@@ -1999,15 +1999,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		// The walk reads the keys of every map below the wide one from the
 		// document, and each of those maps sits among 2000 siblings.
-		var sb strings.Builder
-
-		for i := range 2000 {
-			fmt.Fprintf(&sb, "k%d: {1: {price: 1}}\n", i)
-		}
-
-		sb.WriteString("last: {0x10: {price: -1}}\n")
-
-		dd := yamltest.FirstDocument(t, sb.String())
+		input := yamltest.GenerateLines(2000, "k%d: {1: {price: 1}}") + "last: {0x10: {price: -1}}\n"
+		dd := yamltest.FirstDocument(t, input)
 
 		_, err := dd.Decode[map[string]map[float64]item](t.Context())
 		require.EqualError(t, err, "2001:22: $.last.0x10.price: negative price")
@@ -2129,13 +2122,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("the walk decodes each key once", func(t *testing.T) {
 		t.Parallel()
 
-		var sb strings.Builder
-
-		for i := range 50 {
-			fmt.Fprintf(&sb, "k%d: {1: {price: 1}}\n", i)
-		}
-
-		dd := yamltest.FirstDocument(t, sb.String())
+		dd := yamltest.FirstDocument(t, yamltest.GenerateLines(50, "k%d: {1: {price: 1}}"))
 
 		keys := 0
 		count := countStrings(&keys)
@@ -2586,15 +2573,8 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		// Go-yaml sets an ast.Node to the node itself, whose tokens link to
 		// every other token of the file, so the walk stops at the node
 		// rather than read the keys after it.
-		var sb strings.Builder
-
-		sb.WriteString("hours: {open: \"09:00\", close: \"17:00\"}\nspec:\n  a: 1\n")
-
-		for i := range 200 {
-			fmt.Fprintf(&sb, "k%d: v\n", i)
-		}
-
-		dd := yamltest.FirstDocument(t, sb.String())
+		input := "hours: {open: \"09:00\", close: \"17:00\"}\nspec:\n  a: 1\n" + yamltest.GenerateLines(200, "k%d: v")
+		dd := yamltest.FirstDocument(t, input)
 
 		got, err := dd.Decode[withSpec](t.Context())
 		require.NoError(t, err)
