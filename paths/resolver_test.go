@@ -1337,9 +1337,10 @@ func TestResolver_Entry(t *testing.T) {
 func TestEntryFinder_Entry(t *testing.T) {
 	t.Parallel()
 
-	// Each document is that of wideMerge with the key last after the merge
-	// key of the mapping m. A lookup of each key before the merge key reads
-	// its whole list, and a lookup of last reads no merge key.
+	// Each document is that of [yamltest.WideMerge] with the key last
+	// after the merge key of the mapping m. A lookup of each key before the
+	// merge key reads its whole list, and a lookup of last reads no merge
+	// key.
 	tcs := map[string]struct {
 		err  error
 		keys int
@@ -1357,7 +1358,7 @@ func TestEntryFinder_Entry(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, wideMerge(tc.keys, "*a")+"  last: x\n").DocumentAST()
+			doc := yamltest.FirstDocument(t, yamltest.WideMerge(tc.keys)+"  last: x\n").DocumentAST()
 
 			r := paths.NewResolver(doc)
 
@@ -1371,7 +1372,7 @@ func TestEntryFinder_Entry(t *testing.T) {
 			found := 0
 
 			for i := range tc.keys {
-				entry, err := finder.Entry(m, fmt.Sprintf("k%d", i))
+				entry, err := finder.Entry(m, fmt.Sprintf("%#x", 0x1000+i))
 				if err != nil {
 					require.ErrorIs(t, err, tc.err)
 					assert.Nil(t, entry)
@@ -1379,7 +1380,7 @@ func TestEntryFinder_Entry(t *testing.T) {
 					continue
 				}
 
-				require.Equal(t, i, found, "lookup of k%d found its entry past the limit", i)
+				require.Equal(t, i, found, "lookup of key %d found its entry past the limit", i)
 
 				found++
 			}
@@ -1402,7 +1403,7 @@ func TestEntryFinder_Entry(t *testing.T) {
 
 			// A call on the resolver and a new finder each count their
 			// own reads.
-			key := fmt.Sprintf("k%d", tc.keys-1)
+			key := fmt.Sprintf("%#x", 0x1000+tc.keys-1)
 
 			_, err = r.Entry(m, key)
 			require.NoError(t, err)

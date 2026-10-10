@@ -3690,30 +3690,11 @@ func TestPath_Wildcards(t *testing.T) {
 	}
 }
 
-// wideMerge returns a document that holds the mapping a, and the mapping m
-// with n keys and then a merge key whose value lists elem n times and then
-// each element of tail. A lookup of each key of m reads that whole list.
-// [yamltest.WideMerge] writes the document of wideMerge(n, "*a") with
-// other keys.
-func wideMerge(n int, elem string, tail ...string) string {
-	var sb strings.Builder
-
-	sb.WriteString("a: &a {z: 0}\nm:\n")
-
-	for i := range n {
-		fmt.Fprintf(&sb, "  k%d: %d\n", i, i)
-	}
-
-	sb.WriteString("  <<: " + yamltest.FlowSequence(elem, n, tail...) + "\n")
-
-	return sb.String()
-}
-
-// missingFirst returns the document of wideMerge(n, "*a"), except that
+// missingFirst returns the document of [yamltest.WideMerge], except that
 // its merge list starts with an alias that does not resolve. A lookup of
 // each key of m stops at that alias.
 func missingFirst(n int) string {
-	return strings.Replace(wideMerge(n, "*a"), "<<: [", "<<: [*missing, ", 1)
+	return strings.Replace(yamltest.WideMerge(n), "<<: [", "<<: [*missing, ", 1)
 }
 
 // mergedRecords returns a document that holds as many mappings as
@@ -3936,27 +3917,27 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many aliases": {
-			input: wideMerge(2000, "*a"),
+			input: yamltest.WideMerge(2000),
 			path:  paths.Doc().Recursive("nope"),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many scalars": {
-			input: wideMerge(2000, "0"),
+			input: yamltest.WideMergeOf(2000, "0"),
 			path:  paths.Doc().Recursive("nope"),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many aliases and a missing one": {
-			input: wideMerge(2000, "*a", "*missing"),
+			input: yamltest.WideMergeOf(2000, "*a", "*missing"),
 			path:  paths.Doc().Recursive("nope"),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many aliases and a later anchor": {
-			input: wideMerge(2000, "*a", "*late") + "late: &late {y: 1}\n",
+			input: yamltest.WideMergeOf(2000, "*a", "*late") + "late: &late {y: 1}\n",
 			path:  paths.Doc().Recursive("nope"),
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many scalars and a missing alias": {
-			input: wideMerge(2000, "0", "*missing"),
+			input: yamltest.WideMergeOf(2000, "0", "*missing"),
 			path:  paths.Doc().Recursive("nope"),
 			err:   paths.ErrExcessiveMerging,
 		},
@@ -3976,7 +3957,7 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 			err:   paths.ErrExcessiveMerging,
 		},
 		"every entry over a merge of many aliases": {
-			input: wideMerge(2000, "*a"),
+			input: yamltest.WideMerge(2000),
 			path:  paths.MustParse("$.m.*"),
 			err:   paths.ErrExcessiveMerging,
 		},
@@ -3996,7 +3977,7 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 			err:   paths.ErrExcessiveMerging,
 		},
 		"every node over a merge of many aliases": {
-			input: wideMerge(2000, "*a"),
+			input: yamltest.WideMerge(2000),
 			path:  paths.Doc().RecursiveAll(),
 			err:   paths.ErrExcessiveMerging,
 		},
@@ -4006,7 +3987,7 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 			want:  20,
 		},
 		"every node over a merge of a few aliases": {
-			input: wideMerge(10, "*a"),
+			input: yamltest.WideMerge(10),
 			path:  paths.Doc().RecursiveAll(),
 			want:  13,
 		},
@@ -4023,7 +4004,7 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 			want:  10,
 		},
 		"every entry over a merge of a few aliases": {
-			input: wideMerge(10, "*a"),
+			input: yamltest.WideMerge(10),
 			path:  paths.MustParse("$.m.*"),
 			want:  11,
 		},
@@ -4043,18 +4024,18 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 			want:  10,
 		},
 		"recursive key over a merge of a few aliases": {
-			input: wideMerge(10, "*a"),
-			path:  paths.Doc().Recursive("k5"),
+			input: yamltest.WideMerge(10),
+			path:  paths.Doc().Recursive("0x1005"),
 			want:  1,
 		},
 		"recursive key over a merge of a few aliases and a missing one": {
-			input: wideMerge(10, "*a", "*missing"),
-			path:  paths.Doc().Recursive("k5"),
+			input: yamltest.WideMergeOf(10, "*a", "*missing"),
+			path:  paths.Doc().Recursive("0x1005"),
 			want:  0,
 		},
 		"recursive key over a merge that lists a missing alias first": {
 			input: missingFirst(10),
-			path:  paths.Doc().Recursive("k5"),
+			path:  paths.Doc().Recursive("0x1005"),
 			want:  0,
 		},
 		"recursive key over a wide merge that lists a missing alias first": {
