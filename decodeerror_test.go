@@ -479,7 +479,7 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			want:  "2:6: $.counts.1: expected integer, got string",
 		},
 		"key a path quotes": {
-			input: stringtest.LinesLF("labels:", "  \"a.b\": [1]"),
+			input: stringtest.LinesLF("labels:", `  "a.b": [1]`),
 			want:  "2:3: $.labels.'a.b': expected string, got sequence",
 		},
 		"overflow of a signed integer": {
@@ -538,12 +538,12 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 		"unknown field": {
 			input: "name: x\nfoo: 1\n",
 			opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
-			want:  "2:1: $.foo~: unknown field \"foo\"",
+			want:  `2:1: $.foo~: unknown field "foo"`,
 		},
 		"unknown field in an element": {
 			input: stringtest.LinesLF("servers:", "  - zzz: 1"),
 			opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
-			want:  "2:5: $.servers[0].zzz~: unknown field \"zzz\"",
+			want:  `2:5: $.servers[0].zzz~: unknown field "zzz"`,
 		},
 		"unknown field a merge key brings in": {
 			input: stringtest.LinesLF(
@@ -553,11 +553,11 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 				"  <<: *d",
 			),
 			opts: []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
-			want: "2:3: $.labels.zzz~: unknown field \"zzz\"",
+			want: `2:3: $.labels.zzz~: unknown field "zzz"`,
 		},
 		"alias with no anchor": {
 			input: "top: *nope\n",
-			want:  "1:6: $.top: could not find alias \"nope\"",
+			want:  `1:6: $.top: could not find alias "nope"`,
 		},
 		"value under renamed anchors": {
 			input: stringtest.LinesLF(
