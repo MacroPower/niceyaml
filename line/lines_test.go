@@ -230,6 +230,11 @@ func TestNewLines_Roundtrip(t *testing.T) {
 	}
 }
 
+// newLines creates [line.Lines] from the tokens of input.
+func newLines(input string) line.Lines {
+	return line.NewLines(tokens.Tokenize(input))
+}
+
 // requireRoundtrip creates [line.Lines] from the tokens of input and
 // requires [line.Lines.Tokens] to return tokens equal to those of a second
 // tokenization of input. The lines hold the tokens passed to
@@ -239,7 +244,7 @@ func requireRoundtrip(t *testing.T, input string) line.Lines {
 	t.Helper()
 
 	want := tokens.Tokenize(input)
-	lines := line.NewLines(tokens.Tokenize(input))
+	lines := newLines(input)
 
 	yamltest.RequireTokensEqual(t, want, lines.Tokens())
 
@@ -362,8 +367,7 @@ func TestNewLines_PerLine(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			input := tokens.Tokenize(tc.input)
-			lines := line.NewLines(input)
+			lines := newLines(tc.input)
 
 			require.Equal(t, len(tc.want), lines.Len(), "wrong number of lines")
 
@@ -573,7 +577,7 @@ func TestNewLines_DroppedNewline(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := line.NewLines(tokens.Tokenize(tc.input))
+			lines := newLines(tc.input)
 			require.Equal(t, len(tc.want), lines.Len())
 
 			for i, want := range tc.want {
@@ -719,7 +723,7 @@ func TestNewLines_Value_PrevNextLinking(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := line.NewLines(tokens.Tokenize(tc.input))
+			lines := newLines(tc.input)
 
 			// The parts on each line link to their neighbors in column
 			// order, and the chain stops at both ends of the line.
@@ -790,8 +794,7 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := tokens.Tokenize(tc.input)
-			lines := line.NewLines(tks)
+			lines := newLines(tc.input)
 
 			// The line numbers increase strictly.
 			require.NoError(t, yamltest.ValidateLines(lines), "tokens should be valid")
@@ -825,7 +828,7 @@ func TestNewLines_PartPositionsMatchLexer(t *testing.T) {
 			// The lines hold the tokens passed to NewLines, so the lexer's
 			// positions come from a second tokenization.
 			originalTks := tokens.Tokenize(input)
-			lines := line.NewLines(tokens.Tokenize(input))
+			lines := newLines(input)
 
 			// Index the lexer's positions by the (Line, Column) where the
 			// text of each token starts.
@@ -884,7 +887,7 @@ func TestNewLines_SplitTokenOffsets(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := line.NewLines(tokens.Tokenize(input))
+			lines := newLines(input)
 
 			var prevOffset int
 
@@ -957,7 +960,7 @@ func TestNewLines_OffsetRuneCount_Continuation(t *testing.T) {
 	// builder's running count, which must advance by runes like the lexer.
 	// "key: héllo\n" is 11 runes, so the continuation starts at offset 12.
 	input := "key: h\u00e9llo\n  w\u00f6rld\nnext: v\n"
-	lines := line.NewLines(tokens.Tokenize(input))
+	lines := newLines(input)
 	require.Equal(t, 3, lines.Len())
 
 	continuation := lines.Line(1).Token(0)
@@ -981,7 +984,7 @@ func TestNewLines_IndentLevelProgression(t *testing.T) {
 		  back1: val
 		end: val
 	`)
-	lines := line.NewLines(tokens.Tokenize(input))
+	lines := newLines(input)
 
 	// Expected indent levels per line (based on go-yaml scanner behavior):
 	// Line 1: root: -> level 0.
@@ -1390,8 +1393,7 @@ func TestEmptyAndZeroValues(t *testing.T) {
 	t.Run("Line/with tokens not empty", func(t *testing.T) {
 		t.Parallel()
 
-		tks := tokens.Tokenize("key: value\n")
-		lines := line.NewLines(tks)
+		lines := newLines("key: value\n")
 
 		require.Equal(t, 1, lines.Len())
 		assert.False(t, lines.Line(0).IsEmpty())
@@ -1401,7 +1403,7 @@ func TestEmptyAndZeroValues(t *testing.T) {
 	tcs := map[string]line.Lines{
 		"Lines/zero value":                 {},
 		"Lines/NewLines with nil tokens":   line.NewLines(nil),
-		"Lines/NewLines with empty tokens": line.NewLines(tokens.Tokenize("")),
+		"Lines/NewLines with empty tokens": newLines(""),
 		"Lines/Collect with no lines":      line.Collect(),
 	}
 
@@ -1580,7 +1582,7 @@ func TestNewLines_BlankLineAbsorption(t *testing.T) {
 					want[i] = i + 1
 				}
 
-				assert.Equal(t, want, lineNumbers(line.NewLines(tokens.Tokenize(input))))
+				assert.Equal(t, want, lineNumbers(newLines(input)))
 			})
 		}
 	})
@@ -1639,7 +1641,7 @@ func TestNewLines_TrailingBlankLines(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := line.NewLines(tokens.Tokenize(tc.input))
+			lines := newLines(tc.input)
 
 			assert.Equal(t, tc.want, lines.Len())
 		})
@@ -1652,7 +1654,7 @@ func TestLines_TokenAt(t *testing.T) {
 	t.Run("returns the token that holds the position", func(t *testing.T) {
 		t.Parallel()
 
-		lines := line.NewLines(tokens.Tokenize("key: value\n"))
+		lines := newLines("key: value\n")
 
 		tcs := map[string]struct {
 			pos  position.Position
@@ -1682,8 +1684,7 @@ func TestLines_TokenAt(t *testing.T) {
 			  line1
 			  line2
 		`)
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
+		lines := newLines(input)
 
 		// Get source token from different lines of the literal block.
 		tk1 := lines.TokenAt(position.New(1, 0))
@@ -1725,7 +1726,7 @@ func TestLines_TokenAt(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				lines := line.NewLines(tokens.Tokenize(tc.input))
+				lines := newLines(tc.input)
 
 				for col := range 2 {
 					tk := lines.TokenAt(position.New(tc.line, col))
@@ -1764,7 +1765,7 @@ func TestLines_TokenAt(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				lines := line.NewLines(tokens.Tokenize(tc.input))
+				lines := newLines(tc.input)
 
 				assert.Nil(t, lines.TokenAt(tc.pos))
 			})
@@ -1803,8 +1804,8 @@ func TestLines_TokenRanges(t *testing.T) {
 
 	// Two revisions interleaved as a diff shows them, where the deleted
 	// and inserted lines each hold a "b" key at the same position.
-	before := line.NewLines(tokens.Tokenize("a: 1\nb: 2\n"))
-	after := line.NewLines(tokens.Tokenize("a: 1\nb: 3\n"))
+	before := newLines("a: 1\nb: 2\n")
+	after := newLines("a: 1\nb: 3\n")
 	revisions := line.Collect(after.Line(0), before.Line(1), after.Line(1))
 
 	// The ranges name indices in the collection, whatever the line numbers
@@ -1976,7 +1977,7 @@ func TestLines_String(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, line.NewLines(tokens.Tokenize(tc.input)).String())
+			assert.Equal(t, tc.want, newLines(tc.input).String())
 		})
 	}
 }
@@ -2000,7 +2001,7 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 			  child: true
 			  other: 1
 		`)
-		lines := line.NewLines(tokens.Tokenize(input))
+		lines := newLines(input)
 		require.Greater(t, lines.Len(), 2)
 
 		parts := lines.Line(2).Tokens()
@@ -2021,7 +2022,7 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 			    a
 			  next: x
 		`)
-		lines := line.NewLines(tokens.Tokenize(input))
+		lines := newLines(input)
 		require.Greater(t, lines.Len(), 3)
 
 		parts := lines.Line(3).Tokens()
@@ -2040,8 +2041,7 @@ func TestNewLines_WhitespaceType(t *testing.T) {
 			    enabled: true
 			    disabled: false
 		`)
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
+		lines := newLines(input)
 
 		// Every pure horizontal whitespace part is SpaceType.
 		checked := 0
@@ -2084,7 +2084,7 @@ func TestLines_ContentRanges(t *testing.T) {
 	t.Run("excludes leading and trailing tabs", func(t *testing.T) {
 		t.Parallel()
 
-		lines := line.NewLines(tokens.Tokenize("a:\tb\t# c\n"))
+		lines := newLines("a:\tb\t# c\n")
 
 		tk := lines.TokenAt(position.New(0, 3))
 		require.NotNil(t, tk)
@@ -2111,7 +2111,7 @@ func TestLines_ContentRanges(t *testing.T) {
 	t.Run("nil and missing tokens return nil", func(t *testing.T) {
 		t.Parallel()
 
-		lines := line.NewLines(tokens.Tokenize("key: value\n"))
+		lines := newLines("key: value\n")
 
 		assert.Nil(t, lines.ContentRanges(nil))
 		assert.Nil(t, lines.ContentRanges(lines.TokenAt(position.New(0, 100))))
@@ -2132,7 +2132,7 @@ func TestLines_View(t *testing.T) {
 		  - one
 	`)
 
-	lines := line.NewLines(tokens.Tokenize(input))
+	lines := newLines(input)
 
 	t.Run("Len and IsEmpty", func(t *testing.T) {
 		t.Parallel()
@@ -2347,7 +2347,7 @@ func TestLines_View(t *testing.T) {
 	t.Run("CRLF endings do not count toward width or runes", func(t *testing.T) {
 		t.Parallel()
 
-		lines := line.NewLines(tokens.Tokenize("key: value\r\nother: data\r\n"))
+		lines := newLines("key: value\r\nother: data\r\n")
 
 		assert.Equal(t, len("other: data"), lines.Width())
 
@@ -2368,8 +2368,8 @@ func TestLines_View(t *testing.T) {
 func TestCollect(t *testing.T) {
 	t.Parallel()
 
-	before := line.NewLines(tokens.Tokenize("a: 1\nb: 2\n"))
-	after := line.NewLines(tokens.Tokenize("a: 1\nc: 3\n"))
+	before := newLines("a: 1\nb: 2\n")
+	after := newLines("a: 1\nc: 3\n")
 
 	t.Run("holds the lines in the order given", func(t *testing.T) {
 		t.Parallel()
@@ -2416,7 +2416,7 @@ func TestCollect(t *testing.T) {
 func TestLines_Line(t *testing.T) {
 	t.Parallel()
 
-	lines := line.NewLines(tokens.Tokenize("a: 1\nb: 2\n"))
+	lines := newLines("a: 1\nb: 2\n")
 
 	assert.Equal(t, "a: 1", lines.Line(0).Content())
 	assert.Equal(t, "b: 2", lines.Line(1).Content())
@@ -2428,7 +2428,7 @@ func TestLines_SliceLines(t *testing.T) {
 	t.Parallel()
 
 	// Widths 4, 6, and 8.
-	lines := line.NewLines(tokens.Tokenize("a: 1\nbb: 22\nccc: 333\n"))
+	lines := newLines("a: 1\nbb: 22\nccc: 333\n")
 
 	tcs := map[string]struct {
 		input position.Range

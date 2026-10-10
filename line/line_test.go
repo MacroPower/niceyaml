@@ -39,7 +39,7 @@ func TestSplit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := line.NewLines(tokens.Tokenize(tc.input))
+			lines := newLines(tc.input)
 			require.Equal(t, len(tc.wantContent), lines.Len())
 
 			for i, l := range lines.All() {
@@ -94,7 +94,7 @@ func TestLine_Runes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := line.NewLines(tokens.Tokenize(tc.input))
+			lines := newLines(tc.input)
 			require.Equal(t, len(tc.want), lines.Len())
 
 			for i, l := range lines.All() {
@@ -121,7 +121,7 @@ func TestLine_Runes(t *testing.T) {
 	t.Run("stops when yield returns false", func(t *testing.T) {
 		t.Parallel()
 
-		lines := line.NewLines(tokens.Tokenize("abc: def\n"))
+		lines := newLines("abc: def\n")
 		require.Equal(t, 1, lines.Len())
 
 		count := 0
@@ -195,8 +195,7 @@ func TestLine_Tokens(t *testing.T) {
 func TestLine_TokenSpan(t *testing.T) {
 	t.Parallel()
 
-	src := tokens.Tokenize("foo: |-\n  hello\n  world\nbar:   baz\n")
-	lines := line.NewLines(src)
+	lines := newLines("foo: |-\n  hello\n  world\nbar:   baz\n")
 	require.Equal(t, 4, lines.Len())
 
 	content := lines.Line(1).TokenAt(2)

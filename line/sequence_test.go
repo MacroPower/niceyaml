@@ -9,18 +9,17 @@ import (
 
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 func TestSequence(t *testing.T) {
 	t.Parallel()
 
-	lines := line.NewLines(tokens.Tokenize(stringtest.Input(`
+	lines := newLines(stringtest.Input(`
 		a: 1
 		b: 2
 		c: 3
 		d: 4
-	`)))
+	`))
 	require.Equal(t, 4, lines.Len())
 
 	view := line.NewView(lines)

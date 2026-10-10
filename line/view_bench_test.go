@@ -7,7 +7,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 func BenchmarkViewIndex(b *testing.B) {
@@ -21,7 +20,7 @@ func BenchmarkViewIndex(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		lines := line.NewLines(tokens.Tokenize(yamltest.GenerateYAML(sz.lines)))
+		lines := newLines(yamltest.GenerateYAML(sz.lines))
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -46,7 +45,7 @@ func BenchmarkViewHunks(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		lines := line.NewLines(tokens.Tokenize(yamltest.GenerateYAML(sz.lines)))
+		lines := newLines(yamltest.GenerateYAML(sz.lines))
 
 		// An overlay on every third line gives Hunks(0) one span per
 		// overlay, as a search with many matches does.
@@ -75,7 +74,7 @@ func BenchmarkViewSlice(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		lines := line.NewLines(tokens.Tokenize(yamltest.GenerateYAML(sz.lines)))
+		lines := newLines(yamltest.GenerateYAML(sz.lines))
 
 		// A viewport slices the same 50-line window of a decorated view on
 		// every frame, whatever the length of the content.

@@ -12,7 +12,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 func TestLine_Kind(t *testing.T) {
@@ -73,7 +72,7 @@ func TestLine_Kind(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := line.NewLines(tokens.Tokenize(tc.input))
+			lines := newLines(tc.input)
 			ln := lines.Line(tc.line)
 
 			got := make([]kind.Kind, 0, len(ln.Tokens()))
@@ -136,7 +135,7 @@ func flowMappingView(n int, highlight bool) *line.View {
 
 	sb.WriteString("}\n")
 
-	view := line.NewView(line.NewLines(tokens.Tokenize(sb.String())))
+	view := line.NewView(newLines(sb.String()))
 	if highlight {
 		view.BlendOverlay("hl", ranges...)
 	}

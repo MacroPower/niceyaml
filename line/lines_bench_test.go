@@ -46,7 +46,7 @@ func BenchmarkLinesRunes(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		lines := line.NewLines(tokens.Tokenize(yamltest.GenerateYAML(sz.lines)))
+		lines := newLines(yamltest.GenerateYAML(sz.lines))
 
 		// One short range per line, as a search yields a match on each.
 		ranges := make([]position.Range, 0, lines.Len())

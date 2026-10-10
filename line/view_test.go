@@ -14,14 +14,13 @@ import (
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/style/kind"
-	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
 // newTestView creates a view over the lines of input.
 func newTestView(t *testing.T, input string, wantLen int) *line.View {
 	t.Helper()
 
-	lines := line.NewLines(tokens.Tokenize(input))
+	lines := newLines(input)
 	require.Equal(t, wantLen, lines.Len())
 
 	return line.NewView(lines)
@@ -33,7 +32,7 @@ func TestNewView(t *testing.T) {
 	t.Run("over lines", func(t *testing.T) {
 		t.Parallel()
 
-		lines := line.NewLines(tokens.Tokenize("key: value\nother: data\n"))
+		lines := newLines("key: value\nother: data\n")
 		view := line.NewView(lines)
 
 		assert.Equal(t, 2, view.Count())
@@ -51,7 +50,7 @@ func TestNewView(t *testing.T) {
 			lines line.Lines
 		}{
 			"zero Lines":            {lines: line.Lines{}},
-			"NewLines of no tokens": {lines: line.NewLines(tokens.Tokenize(""))},
+			"NewLines of no tokens": {lines: newLines("")},
 			"Collect of no lines":   {lines: line.Collect()},
 		}
 
@@ -105,7 +104,7 @@ func TestNewView(t *testing.T) {
 func TestNewView_Spans(t *testing.T) {
 	t.Parallel()
 
-	lines := line.NewLines(tokens.Tokenize("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n"))
+	lines := newLines("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\n")
 
 	tcs := map[string]struct {
 		spans []position.Span
@@ -1144,7 +1143,7 @@ func TestView_Slice_CostIndependentOfContent(t *testing.T) {
 	sliceBytes := func(t *testing.T, n int) int64 {
 		t.Helper()
 
-		view := line.NewView(line.NewLines(tokens.Tokenize(yamltest.GenerateYAML(n))))
+		view := line.NewView(newLines(yamltest.GenerateYAML(n)))
 		view.SetFlag(110, line.FlagInserted)
 		view.AddLineOverlay(120, line.Overlay{Cols: position.NewSpan(0, 3), Kind: kind.GenericHighlight})
 		view.Annotate(130, line.Annotation{Content: "note", Placement: line.Below})
