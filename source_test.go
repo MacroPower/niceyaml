@@ -5460,41 +5460,20 @@ func TestWithReferences(t *testing.T) {
 		tcs := map[string]struct {
 			reference string
 			validator niceyaml.Validator
-			// The message of the error and the tree and excerpt FormatError
-			// prints for it.
-			want   string
-			format string
+			want      string
 		}{
 			"error of a SelfValidator": {
 				reference: "base: &base\n  port: 0\n",
 				want:      "app.yaml:2:9: $.server.port: port must be at least 1",
-				format: stringtest.JoinLF(
-					"app.yaml:2:9: $.server.port: port must be at least 1",
-					"",
-					"   2 | server: *base",
-					"     |         ^",
-				),
 			},
 			"key the reference leaves out": {
 				reference: "base: &base\n  host: localhost\n",
 				want:      "app.yaml:2:9: $.server.port: port must be at least 1",
-				format: stringtest.JoinLF(
-					"app.yaml:2:9: $.server.port: port must be at least 1",
-					"",
-					"   2 | server: *base",
-					"     |         ^",
-				),
 			},
 			"violation of a schema": {
 				reference: "base: &base\n  port: oops\n",
 				validator: serverSchema,
 				want:      `app.yaml:2:9: $.server.port: expected "integer", got "string"`,
-				format: stringtest.JoinLF(
-					`app.yaml:2:9: $.server.port: expected "integer", got "string"`,
-					"",
-					"   2 | server: *base",
-					"     |         ^",
-				),
 			},
 		}
 
@@ -5510,7 +5489,14 @@ func TestWithReferences(t *testing.T) {
 				_, err := doc.Decode[target](t.Context(), niceyaml.WithValidator(tc.validator))
 				require.EqualError(t, err, tc.want)
 				assert.True(t, niceyaml.IsInvalid(err))
-				assert.Equal(t, tc.format, niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
+
+				// The excerpt marks the alias under every message.
+				assert.Equal(t, stringtest.JoinLF(
+					tc.want,
+					"",
+					"   2 | server: *base",
+					"     |         ^",
+				), niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 				var bound *niceyaml.SourceError
 
