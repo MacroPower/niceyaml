@@ -4167,6 +4167,15 @@ func TestViewMode_Behavior(t *testing.T) {
 		fifth: changed
 	`)
 
+	// The hunks closure returns a setup func that shows the diff of two
+	// revisions as hunks.
+	hunks := func(before, after string) func(m *yamlviewport.Model) {
+		return func(m *yamlviewport.Model) {
+			addRevisions(m, before, after)
+			m.SetViewMode(yamlviewport.ViewModeHunks)
+		}
+	}
+
 	tcs := map[string]struct {
 		setup  func(m *yamlviewport.Model)
 		test   func(t *testing.T, m *yamlviewport.Model)
@@ -4191,35 +4200,25 @@ func TestViewMode_Behavior(t *testing.T) {
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 
-				output := m.View()
 				// Viewport returns blank lines for empty content, not empty string.
 				// Check that no YAML keys are present.
-				assert.NotContains(t, output, ":")
+				assert.NotContains(t, m.View(), ":")
 			},
 		},
 		"HunksZeroDimensions": {
 			width:  0,
 			height: 0,
-			setup: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
-			},
+			setup:  hunks(rev1YAML, rev2YAML),
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 
-				output := m.View()
-				assert.Empty(t, output)
+				assert.Empty(t, m.View())
 			},
 		},
 		"HunksScrollingApplied": {
 			width:  80,
 			height: 3,
-			setup: func(m *yamlviewport.Model) {
-				addRevisions(m, rev1YAML, rev2YAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
-			},
+			setup:  hunks(rev1YAML, rev2YAML),
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 
@@ -4284,11 +4283,7 @@ func TestViewMode_Behavior(t *testing.T) {
 		"SetHunkContextRebuildsHunks": {
 			width:  80,
 			height: 24,
-			setup: func(m *yamlviewport.Model) {
-				addRevisions(m, fiveYAML, fiveChangedYAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
-			},
+			setup:  hunks(fiveYAML, fiveChangedYAML),
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
 
@@ -4309,9 +4304,7 @@ func TestViewMode_Behavior(t *testing.T) {
 			height: 5,
 			setup: func(m *yamlviewport.Model) {
 				m.SetHunkContext(1)
-				addRevisions(m, fiveYAML, fiveChangedYAML)
-				m.GotoRevision(1)
-				m.SetViewMode(yamlviewport.ViewModeHunks)
+				hunks(fiveYAML, fiveChangedYAML)(m)
 			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
