@@ -21,49 +21,27 @@ func TestFile_FIFO(t *testing.T) {
 	t.Parallel()
 
 	// Opening a FIFO blocks until a writer opens the other end, which no
-	// one does here, so the loader must refuse the path before it opens it.
-	path := filepath.Join(t.TempDir(), "schema.json")
-	require.NoError(t, syscall.Mkfifo(path, 0o600))
-
-	errc := make(chan error, 1)
-
-	go func() {
-		_, err := schema.NewRegistry().Load(t.Context(), schema.File(path))
-		errc <- err
-	}()
-
-	select {
-	case err := <-errc:
-		require.ErrorIs(t, err, schema.ErrLoad)
-		require.ErrorIs(t, err, fs.ErrInvalid)
-
-	case <-time.After(5 * time.Second):
-		t.Fatal("Load blocked on a FIFO")
-	}
-}
-
-func TestFileFS_FIFO(t *testing.T) {
-	t.Parallel()
-
-	// A file system that implements fs.StatFS stats the path without
-	// opening it, so the loader refuses a FIFO there before the open.
+	// one does here, so the loader must refuse the path before it opens
+	// it. A file system that implements fs.StatFS stats the path without
+	// opening it, so the loader refuses a FIFO there before the open too.
 	tcs := map[string]struct {
-		fsys func(t *testing.T, dir string) fs.FS
+		ref func(t *testing.T, dir string) schema.Ref
 	}{
+		"on disk": {
+			ref: func(_ *testing.T, dir string) schema.Ref {
+				return schema.File(filepath.Join(dir, "schema.json"))
+			},
+		},
 		"os.DirFS": {
-			fsys: func(_ *testing.T, dir string) fs.FS {
-				return os.DirFS(dir)
+			ref: func(_ *testing.T, dir string) schema.Ref {
+				return schema.FileFS(os.DirFS(dir), "schema.json")
 			},
 		},
 		"os.Root.FS": {
-			fsys: func(t *testing.T, dir string) fs.FS {
+			ref: func(t *testing.T, dir string) schema.Ref {
 				t.Helper()
 
-				root, err := os.OpenRoot(dir)
-				require.NoError(t, err)
-				t.Cleanup(func() { require.NoError(t, root.Close()) })
-
-				return root.FS()
+				return schema.FileFS(rootFS(t, dir), "schema.json")
 			},
 		},
 	}
@@ -75,12 +53,11 @@ func TestFileFS_FIFO(t *testing.T) {
 			dir := t.TempDir()
 			require.NoError(t, syscall.Mkfifo(filepath.Join(dir, "schema.json"), 0o600))
 
-			reg := schema.NewRegistry()
-			ref := schema.FileFS(tc.fsys(t, dir), "schema.json")
+			ref := tc.ref(t, dir)
 			errc := make(chan error, 1)
 
 			go func() {
-				_, err := reg.Load(t.Context(), ref)
+				_, err := schema.NewRegistry().Load(t.Context(), ref)
 				errc <- err
 			}()
 
