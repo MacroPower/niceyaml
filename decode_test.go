@@ -12001,26 +12001,6 @@ func TestSkipEmpty(t *testing.T) {
 	})
 }
 
-// manyKeyAliases returns a document that anchors a mapping of keys
-// entries as d and lists aliases keys under services, each an alias to d.
-func manyKeyAliases(keys, aliases int) string {
-	var sb strings.Builder
-
-	sb.WriteString("defaults: &d\n")
-
-	for i := range keys {
-		fmt.Fprintf(&sb, "  k%d: v%d\n", i, i)
-	}
-
-	sb.WriteString("services:\n")
-
-	for i := range aliases {
-		fmt.Fprintf(&sb, "  s%d: *d\n", i)
-	}
-
-	return sb.String()
-}
-
 func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 	t.Parallel()
 
@@ -12082,10 +12062,10 @@ func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 				strings.Repeat("  - *b\n", 150),
 		},
 		"a mapping of 200 keys aliased under 150 keys": {
-			input: manyKeyAliases(200, 150),
+			input: yamltest.AliasedMapping(200, 150),
 		},
 		"a mapping of 1000 keys aliased under 300 keys": {
-			input: manyKeyAliases(1000, 300),
+			input: yamltest.AliasedMapping(1000, 300),
 			err:   niceyaml.ErrExcessiveAliasing,
 		},
 	}
