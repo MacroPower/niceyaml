@@ -2925,6 +2925,86 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Equal(t, 3, m.TotalLineCount())
 			},
 		},
+		"ToggleDiffMode/FullCycle": {
+			revisions: 2,
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// Start: Adjacent.
+				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
+
+				m.ToggleDiffMode()
+				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
+
+				m.ToggleDiffMode()
+				assert.Equal(t, yamlviewport.DiffModeNone, m.DiffMode())
+
+				m.ToggleDiffMode()
+				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
+			},
+		},
+		"SetDiffMode/OutOfRange": {
+			revisions: 2,
+			setup: func(m *yamlviewport.Model) {
+				m.SetDiffMode(yamlviewport.DiffMode(3))
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// An undefined mode falls back to the default.
+				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
+				assert.True(t, m.ShowingDiff())
+				assert.Equal(t, diff.Stats{Added: 2, Removed: 2}, m.DiffStats())
+			},
+		},
+		"ToggleDiffMode/FromOutOfRange": {
+			revisions: 2,
+			setup: func(m *yamlviewport.Model) {
+				m.SetDiffMode(yamlviewport.DiffMode(-1))
+				m.ToggleDiffMode()
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
+			},
+		},
+		"DiffModeNone/NotShowingDiff": {
+			revisions: 3,
+			setup: func(m *yamlviewport.Model) {
+				m.GotoRevision(1)
+				m.SetDiffMode(yamlviewport.DiffModeNone)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// At index 1 with None mode, ShowingDiff should be false.
+				assert.False(t, m.ShowingDiff())
+				assert.Equal(t, yamlviewport.DiffModeNone, m.DiffMode())
+			},
+		},
+		"DiffModeAtIndex0/NoEffect": {
+			revisions: 3,
+			setup: func(m *yamlviewport.Model) {
+				m.GotoRevision(0)
+				m.SetDiffMode(yamlviewport.DiffModeOrigin)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// At index 0, both modes show plain view (no diff).
+				assert.False(t, m.ShowingDiff())
+				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
+			},
+		},
+		"DiffModeAtLatest/ShowsDiff": {
+			revisions: 2,
+			setup: func(m *yamlviewport.Model) {
+				// Already at latest (index 1).
+				m.SetDiffMode(yamlviewport.DiffModeOrigin)
+			},
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				// The latest revision has index > 0, so the view shows a diff.
+				assert.True(t, m.ShowingDiff())
+				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2967,131 +3047,6 @@ func TestViewport_NilRevision(t *testing.T) {
 			assert.Equal(t, 0, m.RevisionCount())
 			assert.Empty(t, m.RevisionName())
 			assert.Empty(t, m.RevisionNames())
-		})
-	}
-}
-
-func TestViewport_DiffMode(t *testing.T) {
-	t.Parallel()
-
-	rev1 := stringtest.Input(`
-		name: original
-		value: 10
-	`)
-
-	rev2 := stringtest.Input(`
-		name: modified
-		value: 20
-	`)
-
-	rev3 := stringtest.Input(`
-		name: final
-		value: 30
-		new: added
-	`)
-
-	revs := []string{rev1, rev2, rev3}
-
-	tcs := map[string]struct {
-		setup func(m *yamlviewport.Model)
-		test  func(t *testing.T, m *yamlviewport.Model)
-		// How many of the revisions the model holds before setup runs.
-		revisions int
-	}{
-		"ToggleDiffMode/FullCycle": {
-			revisions: 2,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				// Start: Adjacent.
-				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
-
-				m.ToggleDiffMode()
-				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
-
-				m.ToggleDiffMode()
-				assert.Equal(t, yamlviewport.DiffModeNone, m.DiffMode())
-
-				m.ToggleDiffMode()
-				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
-			},
-		},
-		"SetDiffMode/OutOfRange": {
-			revisions: 2,
-			setup: func(m *yamlviewport.Model) {
-				m.SetDiffMode(yamlviewport.DiffMode(3))
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				// An undefined mode falls back to the default.
-				assert.Equal(t, yamlviewport.DiffModeAdjacent, m.DiffMode())
-				assert.True(t, m.ShowingDiff())
-				assert.Equal(t, diff.Stats{Added: 2, Removed: 2}, m.DiffStats())
-			},
-		},
-		"ToggleDiffMode/FromOutOfRange": {
-			revisions: 2,
-			setup: func(m *yamlviewport.Model) {
-				m.SetDiffMode(yamlviewport.DiffMode(-1))
-				m.ToggleDiffMode()
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
-			},
-		},
-		"ModeNone/NotShowingDiff": {
-			revisions: 3,
-			setup: func(m *yamlviewport.Model) {
-				m.GotoRevision(1)
-				m.SetDiffMode(yamlviewport.DiffModeNone)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				// At index 1 with None mode, ShowingDiff should be false.
-				assert.False(t, m.ShowingDiff())
-				assert.Equal(t, yamlviewport.DiffModeNone, m.DiffMode())
-			},
-		},
-		"ModeAtIndex0/NoEffect": {
-			revisions: 3,
-			setup: func(m *yamlviewport.Model) {
-				m.GotoRevision(0)
-				m.SetDiffMode(yamlviewport.DiffModeOrigin)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				// At index 0, both modes show plain view (no diff).
-				assert.False(t, m.ShowingDiff())
-				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
-			},
-		},
-		"ModeAtLatest/ShowsDiff": {
-			revisions: 2,
-			setup: func(m *yamlviewport.Model) {
-				// Already at latest (index 1).
-				m.SetDiffMode(yamlviewport.DiffModeOrigin)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				// The latest revision has index > 0, so the view shows a diff.
-				assert.True(t, m.ShowingDiff())
-				assert.Equal(t, yamlviewport.DiffModeOrigin, m.DiffMode())
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			m := testModel(testPrinter(), 80, 24)
-			addRevisions(&m, revs[:tc.revisions]...)
-
-			if tc.setup != nil {
-				tc.setup(&m)
-			}
-
-			tc.test(t, &m)
 		})
 	}
 }
