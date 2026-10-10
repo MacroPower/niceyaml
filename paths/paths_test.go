@@ -2592,39 +2592,20 @@ func TestPath_DirectiveDocument(t *testing.T) {
 	assert.Equal(t, "v", node.String())
 }
 
-func TestPath_CommentDocument(t *testing.T) {
+func TestPath_NoContentDocument(t *testing.T) {
 	t.Parallel()
 
-	// A parse that keeps comments makes the comment group the body of a
-	// document that holds nothing else. No single node resolves in it, and
-	// a path lists no nodes.
-	source := niceyaml.NewSourceFromString("# just a comment\n")
-	file, err := source.File()
-	require.NoError(t, err)
-	require.Len(t, file.Docs, 1)
-
-	_, err = paths.NewResolver(file.Docs[0]).Node(paths.Doc())
-	require.ErrorIs(t, err, paths.ErrNoDocument)
-	require.ErrorIs(t, err, paths.ErrNotFound)
-
-	_, err = paths.NewResolver(file.Docs[0]).Token(paths.Doc())
-	require.ErrorIs(t, err, paths.ErrNoDocument)
-
-	nodes, err := paths.NewResolver(file.Docs[0]).Nodes(paths.Doc())
-	require.NoError(t, err)
-	assert.Empty(t, nodes)
-}
-
-func TestPath_WhitespaceDocument(t *testing.T) {
-	t.Parallel()
-
-	// The tokenizer gives a source the lexer emits nothing for one
-	// placeholder token, which the parser reads as a plain scalar. That
-	// scalar is not content, so no single node resolves in the document
-	// and a path lists no nodes.
+	// No single node resolves in a document that holds no content, and a
+	// path lists no nodes there.
 	tcs := map[string]struct {
 		input string
 	}{
+		// A parse that keeps comments makes the comment group the body of
+		// a document that holds nothing else.
+		"comment": {input: "# just a comment\n"},
+		// The tokenizer gives a source the lexer emits nothing for one
+		// placeholder token, which the parser reads as a plain scalar.
+		// That scalar is not content.
 		"newline":     {input: "\n"},
 		"blank lines": {input: "\n\n"},
 		"spaces":      {input: "   "},
@@ -2643,9 +2624,11 @@ func TestPath_WhitespaceDocument(t *testing.T) {
 			require.ErrorIs(t, err, paths.ErrNoDocument)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 
-			_, err = paths.NewResolver(file.Docs[0]).Token(paths.Doc().Child("a"))
-			require.ErrorIs(t, err, paths.ErrNoDocument)
-			require.ErrorIs(t, err, paths.ErrNotFound)
+			for _, path := range []paths.Path{paths.Doc(), paths.Doc().Child("a")} {
+				_, err = paths.NewResolver(file.Docs[0]).Token(path)
+				require.ErrorIs(t, err, paths.ErrNoDocument, path)
+				require.ErrorIs(t, err, paths.ErrNotFound, path)
+			}
 
 			nodes, err := paths.NewResolver(file.Docs[0]).Nodes(paths.Doc())
 			require.NoError(t, err)
