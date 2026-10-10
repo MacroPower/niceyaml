@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -400,23 +399,19 @@ func TestPathToken(t *testing.T) {
 	t.Run("alias is its own token", func(t *testing.T) {
 		t.Parallel()
 
-		file, err := parser.ParseBytes([]byte("a: &x {k: v}\nb: *x\nc:\n  - *x\n"), 0)
-		require.NoError(t, err)
+		root := yamltest.FirstDocument(t, "a: &x {k: v}\nb: *x\nc:\n  - *x\n").AST()
 
-		alias, in := step(t, file.Docs[0].Body, "b")
+		alias, in := step(t, root, "b")
 		assert.Same(t, alias.GetToken(), astnode.PathToken(alias, in))
 
-		alias, in = step(t, file.Docs[0].Body, "c", 0)
+		alias, in = step(t, root, "c", 0)
 		assert.Same(t, alias.GetToken(), astnode.PathToken(alias, in))
 	})
 
 	t.Run("entry with no key introduces nothing", func(t *testing.T) {
 		t.Parallel()
 
-		file, err := parser.ParseBytes([]byte("{k: v}\n"), 0)
-		require.NoError(t, err)
-
-		mapping := file.Docs[0].Body
+		mapping := yamltest.FirstDocument(t, "{k: v}\n").AST()
 		entry := &ast.MappingValueNode{Value: mapping}
 
 		assert.Equal(t, "{@1:1", place(astnode.PathToken(mapping, astnode.Parent{Entry: entry})))
@@ -425,10 +420,7 @@ func TestPathToken(t *testing.T) {
 	t.Run("sequence with no entries introduces nothing", func(t *testing.T) {
 		t.Parallel()
 
-		file, err := parser.ParseBytes([]byte("- k: v\n"), 0)
-		require.NoError(t, err)
-
-		element, in := step(t, file.Docs[0].Body, 0)
+		element, in := step(t, yamltest.FirstDocument(t, "- k: v\n").AST(), 0)
 		in.Sequence = &ast.SequenceNode{Values: in.Sequence.Values}
 
 		assert.Equal(t, "k@1:3", place(astnode.PathToken(element, in)))
@@ -437,10 +429,7 @@ func TestPathToken(t *testing.T) {
 	t.Run("index outside the sequence introduces nothing", func(t *testing.T) {
 		t.Parallel()
 
-		file, err := parser.ParseBytes([]byte("- k: v\n"), 0)
-		require.NoError(t, err)
-
-		element, in := step(t, file.Docs[0].Body, 0)
+		element, in := step(t, yamltest.FirstDocument(t, "- k: v\n").AST(), 0)
 
 		in.Index = 1
 		assert.Equal(t, "k@1:3", place(astnode.PathToken(element, in)))
