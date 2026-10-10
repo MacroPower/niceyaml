@@ -30,33 +30,33 @@ func TestText(t *testing.T) {
 	}{
 		"prefix of a plain string": {
 			matcher: matcher.Text(apiVersionPath, isApps),
-			input:   stringtest.Input(`apiVersion: apps/v1`),
+			input:   `apiVersion: apps/v1`,
 			want:    true,
 		},
 		"prefix a plain string lacks": {
 			matcher: matcher.Text(apiVersionPath, isApps),
-			input:   stringtest.Input(`apiVersion: batch/v1`),
+			input:   `apiVersion: batch/v1`,
 			want:    false,
 		},
 		"prefix of a plain float": {
 			// A decode into a string reads 2.0 as "2".
 			matcher: matcher.Text(swaggerPath, isTwo),
-			input:   stringtest.Input(`swagger: 2.0`),
+			input:   `swagger: 2.0`,
 			want:    true,
 		},
 		"prefix of a quoted float": {
 			matcher: matcher.Text(swaggerPath, isTwo),
-			input:   stringtest.Input(`swagger: "2.0"`),
+			input:   `swagger: "2.0"`,
 			want:    true,
 		},
 		"prefix a plain float lacks": {
 			matcher: matcher.Text(swaggerPath, isTwo),
-			input:   stringtest.Input(`swagger: 3.0`),
+			input:   `swagger: 3.0`,
 			want:    false,
 		},
 		"prefix a plain integer lacks": {
 			matcher: matcher.Text(swaggerPath, isTwo),
-			input:   stringtest.Input(`swagger: 2`),
+			input:   `swagger: 2`,
 			want:    false,
 		},
 		"nested path": {
@@ -93,7 +93,7 @@ func TestText(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+		doc := yamltest.FirstDocument(t, `kind: Deployment`)
 
 		ok, err := matcher.Text(kindPath, acceptAll).Match(ctx, doc)
 		require.ErrorIs(t, err, context.Canceled)
@@ -114,7 +114,7 @@ func TestText(t *testing.T) {
 		t.Parallel()
 
 		m := matcher.Text(paths.Current().Child("items").IndexAll(), acceptAll)
-		doc := yamltest.FirstDocument(t, stringtest.Input(`items: [x]`))
+		doc := yamltest.FirstDocument(t, `items: [x]`)
 
 		_, err := m.Match(t.Context(), doc)
 		require.ErrorIs(t, err, paths.ErrWildcard)
@@ -167,35 +167,35 @@ func TestText_Reads(t *testing.T) {
 		want  string
 	}{
 		"plain string": {
-			input: stringtest.Input(`version: apps/v1`),
+			input: `version: apps/v1`,
 			want:  "apps/v1",
 		},
 		"plain float with a trailing zero": {
-			input: stringtest.Input(`version: 2.0`),
+			input: `version: 2.0`,
 			want:  "2.0",
 		},
 		"plain float with a zero after its fraction": {
-			input: stringtest.Input(`version: 3.10`),
+			input: `version: 3.10`,
 			want:  "3.10",
 		},
 		"plain hex integer": {
-			input: stringtest.Input(`version: 0x10`),
+			input: `version: 0x10`,
 			want:  "0x10",
 		},
 		"plain exponent": {
-			input: stringtest.Input(`version: 1e3`),
+			input: `version: 1e3`,
 			want:  "1e3",
 		},
 		"plain infinity": {
-			input: stringtest.Input(`version: .inf`),
+			input: `version: .inf`,
 			want:  ".inf",
 		},
 		"plain capitalized bool": {
-			input: stringtest.Input(`version: True`),
+			input: `version: True`,
 			want:  "True",
 		},
 		"plain date": {
-			input: stringtest.Input(`version: 2001-12-14`),
+			input: `version: 2001-12-14`,
 			want:  "2001-12-14",
 		},
 		"plain scalar over two lines": {
@@ -203,19 +203,19 @@ func TestText_Reads(t *testing.T) {
 			want:  "a b",
 		},
 		"double-quoted number": {
-			input: stringtest.Input(`version: "2.0"`),
+			input: `version: "2.0"`,
 			want:  "2.0",
 		},
 		"double-quoted escape": {
-			input: stringtest.Input(`version: "a\tb"`),
+			input: `version: "a\tb"`,
 			want:  "a\tb",
 		},
 		"single-quoted quote": {
-			input: stringtest.Input(`version: 'it''s'`),
+			input: `version: 'it''s'`,
 			want:  "it's",
 		},
 		"empty string": {
-			input: stringtest.Input(`version: ""`),
+			input: `version: ""`,
 			want:  "",
 		},
 		"literal block": {
@@ -231,7 +231,7 @@ func TestText_Reads(t *testing.T) {
 			want:  "a b\n",
 		},
 		"anchored float": {
-			input: stringtest.Input(`version: &v 1.10`),
+			input: `version: &v 1.10`,
 			want:  "1.10",
 		},
 		"aliased float": {
@@ -249,25 +249,25 @@ func TestText_Reads(t *testing.T) {
 			want: "1.10",
 		},
 		"str-tagged float": {
-			input: stringtest.Input(`version: !!str 1.10`),
+			input: `version: !!str 1.10`,
 			want:  "1.10",
 		},
 		"float-tagged float": {
-			input: stringtest.Input(`version: !!float 1.10`),
+			input: `version: !!float 1.10`,
 			want:  "1.10",
 		},
 		"custom-tagged float": {
-			input: stringtest.Input(`version: !custom 1.10`),
+			input: `version: !custom 1.10`,
 			want:  "1.10",
 		},
 		"float-tagged quoted scalar": {
 			// The tag makes the quoted text a float, which the decoder
 			// respells.
-			input: stringtest.Input(`version: !!float "1.10"`),
+			input: `version: !!float "1.10"`,
 			want:  "1.1",
 		},
 		"bool-tagged quoted scalar": {
-			input: stringtest.Input(`version: !!bool "True"`),
+			input: `version: !!bool "True"`,
 			want:  "true",
 		},
 	}

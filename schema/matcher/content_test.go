@@ -32,62 +32,62 @@ func TestContent(t *testing.T) {
 	}{
 		"string match": {
 			matcher: matcher.Content(kindPath, "Deployment"),
-			input:   stringtest.Input(`kind: Deployment`),
+			input:   `kind: Deployment`,
 			want:    true,
 		},
 		"string no match": {
 			matcher: matcher.Content(kindPath, "Deployment"),
-			input:   stringtest.Input(`kind: Service`),
+			input:   `kind: Service`,
 			want:    false,
 		},
 		"missing field": {
 			matcher: matcher.Content(missingPath, "value"),
-			input:   stringtest.Input(`kind: Deployment`),
+			input:   `kind: Deployment`,
 			want:    false,
 		},
 		"string matches float text as written": {
 			matcher: matcher.Content(versionPath, "1.10"),
-			input:   stringtest.Input(`version: 1.10`),
+			input:   `version: 1.10`,
 			want:    true,
 		},
 		"string does not match respelled float text": {
 			matcher: matcher.Content(versionPath, "1.1"),
-			input:   stringtest.Input(`version: 1.10`),
+			input:   `version: 1.10`,
 			want:    false,
 		},
 		"string matches trailing zero as written": {
 			matcher: matcher.Content(versionPath, "1.0"),
-			input:   stringtest.Input(`version: 1.0`),
+			input:   `version: 1.0`,
 			want:    true,
 		},
 		"string does not match respelled float": {
 			matcher: matcher.Content(versionPath, "1"),
-			input:   stringtest.Input(`version: 1.0`),
+			input:   `version: 1.0`,
 			want:    false,
 		},
 		"string matches hex text as written": {
 			matcher: matcher.Content(versionPath, "0x10"),
-			input:   stringtest.Input(`version: 0x10`),
+			input:   `version: 0x10`,
 			want:    true,
 		},
 		"string does not match decoded hex": {
 			matcher: matcher.Content(versionPath, "16"),
-			input:   stringtest.Input(`version: 0x10`),
+			input:   `version: 0x10`,
 			want:    false,
 		},
 		"string matches anchored float text": {
 			matcher: matcher.Content(versionPath, "1.10"),
-			input:   stringtest.Input(`version: &v 1.10`),
+			input:   `version: &v 1.10`,
 			want:    true,
 		},
 		"string matches tagged float text": {
 			matcher: matcher.Content(versionPath, "1.10"),
-			input:   stringtest.Input(`version: !!float 1.10`),
+			input:   `version: !!float 1.10`,
 			want:    true,
 		},
 		"string matches anchored tagged hex text": {
 			matcher: matcher.Content(versionPath, "0x10"),
-			input:   stringtest.Input(`version: &v !!int 0x10`),
+			input:   `version: &v !!int 0x10`,
 			want:    true,
 		},
 		"string matches aliased float text": {
@@ -116,17 +116,17 @@ func TestContent(t *testing.T) {
 		},
 		"string matches quoted text": {
 			matcher: matcher.Content(versionPath, "1.10"),
-			input:   stringtest.Input(`version: "1.10"`),
+			input:   `version: "1.10"`,
 			want:    true,
 		},
 		"string matches quoted number text": {
 			matcher: matcher.Content(versionPath, "2"),
-			input:   stringtest.Input(`version: "2"`),
+			input:   `version: "2"`,
 			want:    true,
 		},
 		"string matches the character a quoted escape names": {
 			matcher: matcher.Content(versionPath, "a\tb"),
-			input:   stringtest.Input(`version: "a\tb"`),
+			input:   `version: "a\tb"`,
 			want:    true,
 		},
 		"string matches a block scalar with its newline": {
@@ -138,129 +138,129 @@ func TestContent(t *testing.T) {
 			// The tag makes the quoted text a float, which the decoder
 			// respells.
 			matcher: matcher.Content(versionPath, "1.1"),
-			input:   stringtest.Input(`version: !!float "1.10"`),
+			input:   `version: !!float "1.10"`,
 			want:    true,
 		},
 		"string does not match the text of a float-tagged quoted scalar": {
 			matcher: matcher.Content(versionPath, "1.10"),
-			input:   stringtest.Input(`version: !!float "1.10"`),
+			input:   `version: !!float "1.10"`,
 			want:    false,
 		},
 		"string matches infinity text as written": {
 			matcher: matcher.Content(versionPath, ".inf"),
-			input:   stringtest.Input(`version: .inf`),
+			input:   `version: .inf`,
 			want:    true,
 		},
 		"string does not match respelled infinity": {
 			matcher: matcher.Content(versionPath, "+Inf"),
-			input:   stringtest.Input(`version: .inf`),
+			input:   `version: .inf`,
 			want:    false,
 		},
 		"string matches nan text as written": {
 			matcher: matcher.Content(versionPath, ".nan"),
-			input:   stringtest.Input(`version: .nan`),
+			input:   `version: .nan`,
 			want:    true,
 		},
 		"string matches bool text as written": {
 			matcher: matcher.Content(versionPath, "True"),
-			input:   stringtest.Input(`version: True`),
+			input:   `version: True`,
 			want:    true,
 		},
 		"string does not match respelled bool": {
 			matcher: matcher.Content(versionPath, "true"),
-			input:   stringtest.Input(`version: True`),
+			input:   `version: True`,
 			want:    false,
 		},
 		"named string with a method matches float text as written": {
 			matcher: matcher.Content(versionPath, methodString("1.10")),
-			input:   stringtest.Input(`version: 1.10`),
+			input:   `version: 1.10`,
 			want:    true,
 		},
 		"named string with a method does not match respelled float": {
 			matcher: matcher.Content(versionPath, methodString("1.1")),
-			input:   stringtest.Input(`version: 1.10`),
+			input:   `version: 1.10`,
 			want:    false,
 		},
 		"named string with a method matches hex text as written": {
 			matcher: matcher.Content(versionPath, methodString("0x10")),
-			input:   stringtest.Input(`version: 0x10`),
+			input:   `version: 0x10`,
 			want:    true,
 		},
 		"self-decoding string matches its own decode": {
 			matcher: matcher.Content(versionPath, prefixedString("v1.1")),
-			input:   stringtest.Input(`version: 1.10`),
+			input:   `version: 1.10`,
 			want:    true,
 		},
 		"self-decoding string does not match text as written": {
 			matcher: matcher.Content(versionPath, prefixedString("v1.10")),
-			input:   stringtest.Input(`version: 1.10`),
+			input:   `version: 1.10`,
 			want:    false,
 		},
 		"self-decoding string matches text its decode changes": {
 			matcher: matcher.Content(kindPath, lowerString("deployment")),
-			input:   stringtest.Input(`kind: Deployment`),
+			input:   `kind: Deployment`,
 			want:    true,
 		},
 		"self-decoding integer matches the name it decodes from": {
 			matcher: matcher.Content(versionPath, slog.LevelInfo),
-			input:   stringtest.Input(`version: INFO`),
+			input:   `version: INFO`,
 			want:    true,
 		},
 		"self-decoding integer does not match the number it holds": {
 			// A slog.Level decodes from the name of a level, and 0 names
 			// none.
 			matcher: matcher.Content(versionPath, slog.LevelInfo),
-			input:   stringtest.Input(`version: 0`),
+			input:   `version: 0`,
 			want:    false,
 		},
 		"float matches unquoted float": {
 			matcher: matcher.Content(versionPath, 1.0),
-			input:   stringtest.Input(`version: 1.0`),
+			input:   `version: 1.0`,
 			want:    true,
 		},
 		"float matches integer spelling": {
 			matcher: matcher.Content(versionPath, 1.0),
-			input:   stringtest.Input(`version: 1`),
+			input:   `version: 1`,
 			want:    true,
 		},
 		"int no match": {
 			matcher: matcher.Content(versionPath, 2),
-			input:   stringtest.Input(`version: 3`),
+			input:   `version: 3`,
 			want:    false,
 		},
 		"int matches float spelling": {
 			matcher: matcher.Content(versionPath, 1),
-			input:   stringtest.Input(`version: 1.0`),
+			input:   `version: 1.0`,
 			want:    true,
 		},
 		"int matches hex spelling": {
 			matcher: matcher.Content(versionPath, 16),
-			input:   stringtest.Input(`version: 0x10`),
+			input:   `version: 0x10`,
 			want:    true,
 		},
 		"int matches an int-tagged integer": {
 			matcher: matcher.Content(versionPath, 16),
-			input:   stringtest.Input(`version: !!int 16`),
+			input:   `version: !!int 16`,
 			want:    true,
 		},
 		"int does not match other int-tagged integer": {
 			matcher: matcher.Content(versionPath, 16),
-			input:   stringtest.Input(`version: !!int 17`),
+			input:   `version: !!int 17`,
 			want:    false,
 		},
 		"int64 matches an int-tagged hex integer": {
 			matcher: matcher.Content(versionPath, int64(16)),
-			input:   stringtest.Input(`version: !!int 0x10`),
+			input:   `version: !!int 0x10`,
 			want:    true,
 		},
 		"uint64 matches an int-tagged integer": {
 			matcher: matcher.Content(versionPath, uint64(16)),
-			input:   stringtest.Input(`version: !!int 16`),
+			input:   `version: !!int 16`,
 			want:    true,
 		},
 		"int matches an anchored int-tagged integer": {
 			matcher: matcher.Content(versionPath, 16),
-			input:   stringtest.Input(`version: &v !!int 0x10`),
+			input:   `version: &v !!int 0x10`,
 			want:    true,
 		},
 		"int matches an alias to an int-tagged integer": {
@@ -273,38 +273,38 @@ func TestContent(t *testing.T) {
 		},
 		"int does not match a fraction": {
 			matcher: matcher.Content(versionPath, 1),
-			input:   stringtest.Input(`version: 1.5`),
+			input:   `version: 1.5`,
 			want:    false,
 		},
 		"int does not match a plain exponent fraction": {
 			// The decoder reads 25e-1 as a string and truncates it to 2.
 			matcher: matcher.Content(versionPath, 2),
-			input:   stringtest.Input(`version: 25e-1`),
+			input:   `version: 25e-1`,
 			want:    false,
 		},
 		"int does not match a quoted fraction": {
 			matcher: matcher.Content(versionPath, 2),
-			input:   stringtest.Input(`version: "2.5"`),
+			input:   `version: "2.5"`,
 			want:    false,
 		},
 		"int does not match a double-quoted integer": {
 			matcher: matcher.Content(versionPath, 2),
-			input:   stringtest.Input(`version: "2"`),
+			input:   `version: "2"`,
 			want:    false,
 		},
 		"int does not match a single-quoted integer": {
 			matcher: matcher.Content(versionPath, 2),
-			input:   stringtest.Input(`version: '2'`),
+			input:   `version: '2'`,
 			want:    false,
 		},
 		"int does not match a str-tagged integer": {
 			matcher: matcher.Content(versionPath, 2),
-			input:   stringtest.Input(`version: !!str 2`),
+			input:   `version: !!str 2`,
 			want:    false,
 		},
 		"int does not match an anchored str-tagged integer": {
 			matcher: matcher.Content(versionPath, 2),
-			input:   stringtest.Input(`version: &v !!str 2`),
+			input:   `version: &v !!str 2`,
 			want:    false,
 		},
 		"int does not match an aliased quoted integer": {
@@ -333,17 +333,17 @@ func TestContent(t *testing.T) {
 		},
 		"int matches a plain integer key": {
 			matcher: matcher.Content(twoKeyPath, 2),
-			input:   stringtest.Input(`2: x`),
+			input:   `2: x`,
 			want:    true,
 		},
 		"int does not match a quoted integer key": {
 			matcher: matcher.Content(twoKeyPath, 2),
-			input:   stringtest.Input(`"2": x`),
+			input:   `"2": x`,
 			want:    false,
 		},
 		"int does not match a str-tagged integer key": {
 			matcher: matcher.Content(twoKeyPath, 2),
-			input:   stringtest.Input(`!!str 2: x`),
+			input:   `!!str 2: x`,
 			want:    false,
 		},
 		"int does not match an explicit str-tagged integer key": {
@@ -356,22 +356,22 @@ func TestContent(t *testing.T) {
 		},
 		"int does not match an anchored str-tagged integer key": {
 			matcher: matcher.Content(twoKeyPath, 2),
-			input:   stringtest.Input(`&k !!str 2: x`),
+			input:   `&k !!str 2: x`,
 			want:    false,
 		},
 		"float does not match a str-tagged integer key": {
 			matcher: matcher.Content(twoKeyPath, 2.0),
-			input:   stringtest.Input(`!!str 2: x`),
+			input:   `!!str 2: x`,
 			want:    false,
 		},
 		"string matches a str-tagged integer key": {
 			matcher: matcher.Content(twoKeyPath, "2"),
-			input:   stringtest.Input(`!!str 2: x`),
+			input:   `!!str 2: x`,
 			want:    true,
 		},
 		"int does not match a verbatim str-tagged integer": {
 			matcher: matcher.Content(versionPath, 2),
-			input:   stringtest.Input(`version: !<tag:yaml.org,2002:str> 2`),
+			input:   `version: !<tag:yaml.org,2002:str> 2`,
 			want:    false,
 		},
 		"int does not match a block scalar": {
@@ -384,210 +384,210 @@ func TestContent(t *testing.T) {
 		},
 		"int does not match a quoted exponent": {
 			matcher: matcher.Content(versionPath, 1000),
-			input:   stringtest.Input(`version: "1e3"`),
+			input:   `version: "1e3"`,
 			want:    false,
 		},
 		"float does not match a quoted integer": {
 			matcher: matcher.Content(versionPath, 2.0),
-			input:   stringtest.Input(`version: '2'`),
+			input:   `version: '2'`,
 			want:    false,
 		},
 		"float does not match a str-tagged integer": {
 			matcher: matcher.Content(versionPath, 2.0),
-			input:   stringtest.Input(`version: !!str 2`),
+			input:   `version: !!str 2`,
 			want:    false,
 		},
 		"float matches a float-tagged quoted integer": {
 			matcher: matcher.Content(versionPath, 2.0),
-			input:   stringtest.Input(`version: !!float '2'`),
+			input:   `version: !!float '2'`,
 			want:    true,
 		},
 		"int matches a plain exponent spelling": {
 			matcher: matcher.Content(versionPath, 1000),
-			input:   stringtest.Input(`version: 1e3`),
+			input:   `version: 1e3`,
 			want:    true,
 		},
 		"float NaN matches nan": {
 			matcher: matcher.Content(versionPath, math.NaN()),
-			input:   stringtest.Input(`version: .nan`),
+			input:   `version: .nan`,
 			want:    true,
 		},
 		"float NaN matches NaN spelling": {
 			matcher: matcher.Content(versionPath, math.NaN()),
-			input:   stringtest.Input(`version: .NaN`),
+			input:   `version: .NaN`,
 			want:    true,
 		},
 		"float NaN does not match number": {
 			matcher: matcher.Content(versionPath, math.NaN()),
-			input:   stringtest.Input(`version: 1.5`),
+			input:   `version: 1.5`,
 			want:    false,
 		},
 		"float NaN does not match quoted nan": {
 			matcher: matcher.Content(versionPath, math.NaN()),
-			input:   stringtest.Input(`version: ".nan"`),
+			input:   `version: ".nan"`,
 			want:    false,
 		},
 		"float does not match nan": {
 			matcher: matcher.Content(versionPath, 1.5),
-			input:   stringtest.Input(`version: .nan`),
+			input:   `version: .nan`,
 			want:    false,
 		},
 		"float does not match plain inf": {
 			matcher: matcher.Content(versionPath, math.Inf(1)),
-			input:   stringtest.Input(`version: inf`),
+			input:   `version: inf`,
 			want:    false,
 		},
 		"float does not match Infinity": {
 			matcher: matcher.Content(versionPath, math.Inf(1)),
-			input:   stringtest.Input(`version: Infinity`),
+			input:   `version: Infinity`,
 			want:    false,
 		},
 		"float NaN does not match plain nan": {
 			matcher: matcher.Content(versionPath, math.NaN()),
-			input:   stringtest.Input(`version: nan`),
+			input:   `version: nan`,
 			want:    false,
 		},
 		"float does not match a hex float": {
 			matcher: matcher.Content(versionPath, 0.25),
-			input:   stringtest.Input(`version: 0x1p-2`),
+			input:   `version: 0x1p-2`,
 			want:    false,
 		},
 		"int does not match a hex float": {
 			matcher: matcher.Content(versionPath, 1),
-			input:   stringtest.Input(`version: 0x1p0`),
+			input:   `version: 0x1p0`,
 			want:    false,
 		},
 		"float matches a signed plain exponent": {
 			matcher: matcher.Content(versionPath, -1000.0),
-			input:   stringtest.Input(`version: -1e3`),
+			input:   `version: -1e3`,
 			want:    true,
 		},
 		"float32 inf does not match an overflowing plain exponent": {
 			// The decoder reads 1e39 as a string and narrows it to +Inf.
 			matcher: matcher.Content(versionPath, float32(math.Inf(1))),
-			input:   stringtest.Input(`version: 1e39`),
+			input:   `version: 1e39`,
 			want:    false,
 		},
 		"float32 inf does not match an overflowing float": {
 			matcher: matcher.Content(versionPath, float32(math.Inf(1))),
-			input:   stringtest.Input(`version: 4.0e+38`),
+			input:   `version: 4.0e+38`,
 			want:    false,
 		},
 		"float32 negative inf does not match an overflowing float": {
 			matcher: matcher.Content(versionPath, float32(math.Inf(-1))),
-			input:   stringtest.Input(`version: -1.0e+39`),
+			input:   `version: -1.0e+39`,
 			want:    false,
 		},
 		"float32 inf matches inf": {
 			matcher: matcher.Content(versionPath, float32(math.Inf(1))),
-			input:   stringtest.Input(`version: .inf`),
+			input:   `version: .inf`,
 			want:    true,
 		},
 		"float32 negative inf matches negative inf": {
 			matcher: matcher.Content(versionPath, float32(math.Inf(-1))),
-			input:   stringtest.Input(`version: -.inf`),
+			input:   `version: -.inf`,
 			want:    true,
 		},
 		"empty string does not match null": {
 			matcher: matcher.Content(kindPath, ""),
-			input:   stringtest.Input(`kind:`),
+			input:   `kind:`,
 			want:    false,
 		},
 		"false does not match null": {
 			matcher: matcher.Content(enabledPath, false),
-			input:   stringtest.Input(`enabled: null`),
+			input:   `enabled: null`,
 			want:    false,
 		},
 		"large int does not match a rounded float": {
 			matcher: matcher.Content(versionPath, int64(9007199254740993)),
-			input:   stringtest.Input(`version: 9007199254740992.0`),
+			input:   `version: 9007199254740992.0`,
 			want:    false,
 		},
 		"large int matches its float spelling": {
 			matcher: matcher.Content(versionPath, int64(9007199254740992)),
-			input:   stringtest.Input(`version: 9007199254740992.0`),
+			input:   `version: 9007199254740992.0`,
 			want:    true,
 		},
 		"negative int does not match unsigned": {
 			matcher: matcher.Content(versionPath, -1),
-			input:   stringtest.Input(`version: 18446744073709551615`),
+			input:   `version: 18446744073709551615`,
 			want:    false,
 		},
 		"float matches a plain exponent": {
 			matcher: matcher.Content(versionPath, 1000.0),
-			input:   stringtest.Input(`version: 1e3`),
+			input:   `version: 1e3`,
 			want:    true,
 		},
 		"float matches a plain exponent fraction": {
 			matcher: matcher.Content(versionPath, 2.5),
-			input:   stringtest.Input(`version: 25e-1`),
+			input:   `version: 25e-1`,
 			want:    true,
 		},
 		"float matches a large plain exponent": {
 			matcher: matcher.Content(versionPath, 1e19),
-			input:   stringtest.Input(`version: 1e19`),
+			input:   `version: 1e19`,
 			want:    true,
 		},
 		"float does not match a quoted exponent": {
 			matcher: matcher.Content(versionPath, 1000.0),
-			input:   stringtest.Input(`version: "1e3"`),
+			input:   `version: "1e3"`,
 			want:    false,
 		},
 		"float NaN does not match plain NaN": {
 			matcher: matcher.Content(versionPath, math.NaN()),
-			input:   stringtest.Input(`version: NaN`),
+			input:   `version: NaN`,
 			want:    false,
 		},
 		"string matches plain inf": {
 			matcher: matcher.Content(versionPath, "inf"),
-			input:   stringtest.Input(`version: inf`),
+			input:   `version: inf`,
 			want:    true,
 		},
 		"string matches a plain exponent": {
 			matcher: matcher.Content(versionPath, "1e3"),
-			input:   stringtest.Input(`version: 1e3`),
+			input:   `version: 1e3`,
 			want:    true,
 		},
 		"named int does not match other integer": {
 			matcher: matcher.Content(versionPath, namedInt(1)),
-			input:   stringtest.Input(`version: 2`),
+			input:   `version: 2`,
 			want:    false,
 		},
 		"named float matches a plain exponent": {
 			// The decoder reads 1e3 as a string, which go-yaml cannot set
 			// a named float from.
 			matcher: matcher.Content(versionPath, namedFloat(1000)),
-			input:   stringtest.Input(`version: 1e3`),
+			input:   `version: 1e3`,
 			want:    true,
 		},
 		"named float32 matches a plain exponent": {
 			matcher: matcher.Content(versionPath, namedFloat32(1000)),
-			input:   stringtest.Input(`version: 1e3`),
+			input:   `version: 1e3`,
 			want:    true,
 		},
 		"named float matches a plain exponent fraction": {
 			matcher: matcher.Content(versionPath, namedFloat(2.5)),
-			input:   stringtest.Input(`version: 25e-1`),
+			input:   `version: 25e-1`,
 			want:    true,
 		},
 		"named float does not match a quoted exponent": {
 			matcher: matcher.Content(versionPath, namedFloat(1000)),
-			input:   stringtest.Input(`version: "1e3"`),
+			input:   `version: "1e3"`,
 			want:    false,
 		},
 		"duration matches plain": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
-			input:   stringtest.Input(`timeout: 5s`),
+			input:   `timeout: 5s`,
 			want:    true,
 		},
 		"duration matches double-quoted": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
-			input:   stringtest.Input(`timeout: "5s"`),
+			input:   `timeout: "5s"`,
 			want:    true,
 		},
 		"duration matches single-quoted": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
-			input:   stringtest.Input(`timeout: '5s'`),
+			input:   `timeout: '5s'`,
 			want:    true,
 		},
 		"duration matches block scalar": {
@@ -597,47 +597,47 @@ func TestContent(t *testing.T) {
 		},
 		"duration matches str tag": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
-			input:   stringtest.Input(`timeout: !!str 5s`),
+			input:   `timeout: !!str 5s`,
 			want:    true,
 		},
 		"duration does not match other duration": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
-			input:   stringtest.Input(`timeout: "6s"`),
+			input:   `timeout: "6s"`,
 			want:    false,
 		},
 		"duration does not match an integer of nanoseconds": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
-			input:   stringtest.Input(`timeout: 5000000000`),
+			input:   `timeout: 5000000000`,
 			want:    false,
 		},
 		"duration does not match plain float": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
-			input:   stringtest.Input(`timeout: 1.5e3`),
+			input:   `timeout: 1.5e3`,
 			want:    false,
 		},
 		"duration does not match plain exponent": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
-			input:   stringtest.Input(`timeout: 1e3`),
+			input:   `timeout: 1e3`,
 			want:    false,
 		},
 		"duration does not match negative plain exponent": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
-			input:   stringtest.Input(`timeout: -1e3`),
+			input:   `timeout: -1e3`,
 			want:    false,
 		},
 		"duration does not match anchored plain exponent": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
-			input:   stringtest.Input(`timeout: &a 2E+3`),
+			input:   `timeout: &a 2E+3`,
 			want:    false,
 		},
 		"duration does not match overflowing plain exponent": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
-			input:   stringtest.Input(`timeout: 1e999`),
+			input:   `timeout: 1e999`,
 			want:    false,
 		},
 		"duration does not match overflowing plain float": {
 			matcher: matcher.Content(timeoutPath, 5*time.Second),
-			input:   stringtest.Input(`timeout: 1.5e999`),
+			input:   `timeout: 1.5e999`,
 			want:    false,
 		},
 		"duration does not match plain words": {
@@ -646,42 +646,42 @@ func TestContent(t *testing.T) {
 			// niceyaml.ErrDecode, so the matcher answers no rather than
 			// returning the error. A quoted float is such a string.
 			matcher: matcher.Content(timeoutPath, time.Minute),
-			input:   stringtest.Input(`timeout: 5 minutes`),
+			input:   `timeout: 5 minutes`,
 			want:    false,
 		},
 		"duration does not match a quoted exponent": {
 			matcher: matcher.Content(timeoutPath, time.Minute),
-			input:   stringtest.Input(`timeout: "1e3"`),
+			input:   `timeout: "1e3"`,
 			want:    false,
 		},
 		"duration does not match a str-tagged exponent": {
 			matcher: matcher.Content(timeoutPath, time.Minute),
-			input:   stringtest.Input(`timeout: !!str 1e3`),
+			input:   `timeout: !!str 1e3`,
 			want:    false,
 		},
 		"duration does not match plain inf": {
 			matcher: matcher.Content(timeoutPath, time.Minute),
-			input:   stringtest.Input(`timeout: inf`),
+			input:   `timeout: inf`,
 			want:    false,
 		},
 		"bool no match": {
 			matcher: matcher.Content(enabledPath, true),
-			input:   stringtest.Input(`enabled: false`),
+			input:   `enabled: false`,
 			want:    false,
 		},
 		"bool matches a capitalized spelling": {
 			matcher: matcher.Content(enabledPath, true),
-			input:   stringtest.Input(`enabled: True`),
+			input:   `enabled: True`,
 			want:    true,
 		},
 		"bool matches a bool-tagged quoted scalar": {
 			matcher: matcher.Content(enabledPath, true),
-			input:   stringtest.Input(`enabled: !!bool "true"`),
+			input:   `enabled: !!bool "true"`,
 			want:    true,
 		},
 		"bool does not match string": {
 			matcher: matcher.Content(enabledPath, true),
-			input:   stringtest.Input(`enabled: "true"`),
+			input:   `enabled: "true"`,
 			want:    false,
 		},
 		"bool does not match a tag over no value": {
@@ -691,37 +691,37 @@ func TestContent(t *testing.T) {
 		},
 		"lowest int64 does not match negative infinity": {
 			matcher: matcher.Content(versionPath, int64(math.MinInt64)),
-			input:   stringtest.Input(`version: -.inf`),
+			input:   `version: -.inf`,
 			want:    false,
 		},
 		"highest int64 does not match a larger plain exponent": {
 			matcher: matcher.Content(versionPath, int64(math.MaxInt64)),
-			input:   stringtest.Input(`version: 1e19`),
+			input:   `version: 1e19`,
 			want:    false,
 		},
 		"lowest int64 does not match a smaller float": {
 			matcher: matcher.Content(versionPath, int64(math.MinInt64)),
-			input:   stringtest.Input(`version: -1.0e+19`),
+			input:   `version: -1.0e+19`,
 			want:    false,
 		},
 		"highest uint64 does not match 2^64": {
 			matcher: matcher.Content(versionPath, uint64(math.MaxUint64)),
-			input:   stringtest.Input(`version: 18446744073709551616.0`),
+			input:   `version: 18446744073709551616.0`,
 			want:    false,
 		},
 		"self-decoding integer reads a float its own way": {
 			matcher: matcher.Content(versionPath, millis(2000)),
-			input:   stringtest.Input(`version: 2.0`),
+			input:   `version: 2.0`,
 			want:    true,
 		},
 		"self-decoding integer never matches a fraction": {
 			matcher: matcher.Content(versionPath, millis(2500)),
-			input:   stringtest.Input(`version: 2.5`),
+			input:   `version: 2.5`,
 			want:    false,
 		},
 		"value that does not decode": {
 			matcher: matcher.Content(versionPath, 1),
-			input:   stringtest.Input(`version: abc`),
+			input:   `version: abc`,
 			want:    false,
 		},
 		"mapping does not decode into scalar": {
@@ -734,7 +734,7 @@ func TestContent(t *testing.T) {
 		},
 		"sequence does not decode into scalar": {
 			matcher: matcher.Content(kindPath, "Deployment"),
-			input:   stringtest.Input(`kind: [Deployment]`),
+			input:   `kind: [Deployment]`,
 			want:    false,
 		},
 		"nested path match": {
@@ -863,7 +863,7 @@ func TestContent(t *testing.T) {
 		t.Parallel()
 
 		m := matcher.Content(paths.Current().Child("items").IndexAll(), "x")
-		doc := yamltest.FirstDocument(t, stringtest.Input(`items: [x]`))
+		doc := yamltest.FirstDocument(t, `items: [x]`)
 
 		_, err := m.Match(t.Context(), doc)
 		require.ErrorIs(t, err, paths.ErrWildcard)
@@ -1017,7 +1017,7 @@ func TestContent_ContextEnded(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+	doc := yamltest.FirstDocument(t, `kind: Deployment`)
 
 	// A matcher whose context ended cannot decide, so it returns the error
 	// rather than a match, and the registry stops at the document.
@@ -1029,7 +1029,7 @@ func TestContent_ContextEnded(t *testing.T) {
 func TestContent_UnmarshalerError(t *testing.T) {
 	t.Parallel()
 
-	doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+	doc := yamltest.FirstDocument(t, `kind: Deployment`)
 
 	t.Run("value that rejects itself does not match", func(t *testing.T) {
 		t.Parallel()

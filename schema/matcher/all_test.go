@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -84,7 +83,7 @@ func TestAll(t *testing.T) {
 				return true, nil
 			}),
 		)
-		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+		doc := yamltest.FirstDocument(t, `kind: Deployment`)
 
 		_, err := m.Match(t.Context(), doc)
 		require.ErrorIs(t, err, undecided)
@@ -111,7 +110,7 @@ func TestAll(t *testing.T) {
 		ms := []matcher.Matcher{matcher.Content(kindPath, "Deployment")}
 		m := matcher.All(ms...)
 		ms[0] = matcher.Content(kindPath, "Service")
-		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
+		doc := yamltest.FirstDocument(t, `kind: Service`)
 
 		got := match(t, m, doc)
 		assert.False(t, got)

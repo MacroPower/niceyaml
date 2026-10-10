@@ -21,27 +21,27 @@ func TestExists(t *testing.T) {
 		want  bool
 	}{
 		"field exists with value": {
-			input: stringtest.Input(`kind: Deployment`),
+			input: `kind: Deployment`,
 			want:  true,
 		},
 		"field missing": {
-			input: stringtest.Input(`apiVersion: v1`),
+			input: `apiVersion: v1`,
 			want:  false,
 		},
 		"field empty unquoted": {
-			input: stringtest.Input(`kind:`),
+			input: `kind:`,
 			want:  true,
 		},
 		"field null": {
-			input: stringtest.Input(`kind: null`),
+			input: `kind: null`,
 			want:  true,
 		},
 		"field empty double quoted": {
-			input: stringtest.Input(`kind: ""`),
+			input: `kind: ""`,
 			want:  true,
 		},
 		"field empty single quoted": {
-			input: stringtest.Input(`kind: ''`),
+			input: `kind: ''`,
 			want:  true,
 		},
 		"field with mapping value": {
@@ -52,19 +52,19 @@ func TestExists(t *testing.T) {
 			want: true,
 		},
 		"document without content": {
-			input: stringtest.Input(`# only a comment`),
+			input: `# only a comment`,
 			want:  false,
 		},
 		"field with whitespace value": {
-			input: stringtest.Input(`kind: " "`),
+			input: `kind: " "`,
 			want:  true,
 		},
 		"field with numeric value": {
-			input: stringtest.Input(`kind: 123`),
+			input: `kind: 123`,
 			want:  true,
 		},
 		"field with boolean value": {
-			input: stringtest.Input(`kind: true`),
+			input: `kind: true`,
 			want:  true,
 		},
 	}
@@ -113,7 +113,7 @@ func TestExists(t *testing.T) {
 		t.Parallel()
 
 		m := matcher.Exists(metadataName)
-		doc := yamltest.FirstDocument(t, stringtest.Input(`metadata: *missing`))
+		doc := yamltest.FirstDocument(t, `metadata: *missing`)
 
 		_, err := m.Match(t.Context(), doc)
 		require.ErrorIs(t, err, paths.ErrAlias)
@@ -142,7 +142,7 @@ func TestExists_ContextEnded(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
+	doc := yamltest.FirstDocument(t, `kind: Deployment`)
 
 	// A matcher whose context ended cannot decide, so it returns the error
 	// rather than a match, and the registry stops at the document.

@@ -1199,7 +1199,7 @@ func TestSchemaStore_FetchError(t *testing.T) {
 			require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
 			require.NotErrorIs(t, err, schema.ErrNoMatch)
 
-			doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
+			doc := yamltest.FirstDocumentWithPath(t, `key: value`, "config.yaml")
 			_, err = store.Resolve(t.Context(), doc)
 			require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
 			require.NotErrorIs(t, err, schema.ErrNoMatch)
@@ -1431,7 +1431,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		store := newStore(respondCatalog(t, workflowCatalog).Client())
 
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/ci.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, `on: push`, ".github/workflows/ci.yaml")
 		ref, err := store.Resolve(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Equal(t, workflowSchemaURL, ref.Key())
@@ -1442,7 +1442,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		store := newStore(respondCatalog(t, workflowCatalog).Client())
 
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "random.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, `key: value`, "random.yaml")
 		_, err := store.Resolve(t.Context(), doc)
 		require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
@@ -1471,7 +1471,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		store := newStore(respondCatalog(t, catalog).Client())
 
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), "ci.yml")
+		doc := yamltest.FirstDocumentWithPath(t, `on: push`, "ci.yml")
 		ref, err := store.Resolve(t.Context(), doc)
 		require.NoError(t, err)
 		assert.Equal(t, "https://example.com/local.json", ref.Key())
@@ -1497,7 +1497,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		store := newStore(client)
 
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, `key: value`, "config.yaml")
 
 		ref, err := store.Resolve(t.Context(), doc)
 		require.NoError(t, err)
@@ -1519,7 +1519,7 @@ func TestSchemaStore_Resolve(t *testing.T) {
 
 		store := newStore(client)
 
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, `key: value`, "config.yaml")
 
 		// The path matches, so Resolve names the schema. Only the load fails,
 		// and a failed load is not a no-match.
@@ -1595,7 +1595,7 @@ func TestIntegration(t *testing.T) {
 		)
 
 		for _, name := range []string{"ci.yaml", "release.yaml", "lint.yaml"} {
-			doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`on: push`), ".github/workflows/"+name)
+			doc := yamltest.FirstDocumentWithPath(t, `on: push`, ".github/workflows/"+name)
 
 			err := reg.Check(t.Context(), doc)
 			require.NoError(t, err)
@@ -1611,7 +1611,7 @@ func TestIntegration(t *testing.T) {
 		store := schemastore.New(schemastore.WithCatalogURL("http://localhost:1"))
 		reg := schema.NewRegistry(schema.WithResolvers(store))
 
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, `key: value`, "config.yaml")
 
 		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
@@ -1634,7 +1634,7 @@ func TestIntegration(t *testing.T) {
 			schema.WithResolvers(schemastore.New(schemastore.WithCatalogURL("http://localhost:1")), fallback),
 		)
 
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`key: value`), "config.yaml")
+		doc := yamltest.FirstDocumentWithPath(t, `key: value`, "config.yaml")
 
 		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
