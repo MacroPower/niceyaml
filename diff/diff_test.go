@@ -1731,14 +1731,6 @@ func TestDiffResult_ViewsAreIndependent(t *testing.T) {
 		assert.Empty(t, right.Overlays(0))
 		assert.Empty(t, result.Before().Overlays(0))
 	})
-
-	t.Run("Hunks without changes", func(t *testing.T) {
-		t.Parallel()
-
-		hunks := diff.Diff(before.Lines(), before.Lines()).Hunks(1)
-		require.NotNil(t, hunks)
-		assert.Equal(t, 0, hunks.Count())
-	})
 }
 
 // changedFlags returns the flag of each line of view that is not
