@@ -35,7 +35,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/schema"
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
-	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
@@ -3171,12 +3170,7 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			errPrinter := printer.New(
-				printer.WithStyles(&style.Styles{}),
-				printer.WithGutter(printer.NoGutter),
-				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithWrapWidth(tc.width),
-			)
+			errPrinter := yamltest.NewPlainPrinter(printer.WithWrapWidth(tc.width))
 
 			err := yamltest.Bind(t, niceyaml.NewSourceFromString(tc.source), tc.err)
 
@@ -3553,11 +3547,7 @@ func TestError_NestedErrorsRenderAsAnnotations(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n")
-	plain := printer.New(
-		printer.WithStyles(style.Styles{}),
-		printer.WithGutter(printer.NoGutter),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
+	plain := yamltest.NewPlainPrinter()
 	badA := niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a")))
 	badB := niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b")))
 	inner := niceyaml.NewSummary(
