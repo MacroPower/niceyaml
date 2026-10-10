@@ -3566,28 +3566,53 @@ func TestDocument_Tokens(t *testing.T) {
 		assert.Equal(t, map[string]int{"b": 2}, got)
 	})
 
-	t.Run("keeps every document after consecutive headers", func(t *testing.T) {
+	t.Run("keeps every document of a stream that holds an empty one", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(stringtest.Input(`
-			a: 1
-			---
-			---
-			b: 2
-			---
-			c: 3
-		`))
-
-		var got []map[string]int
-
-		for _, dd := range source.AllDocuments() {
-			v, err := dd.Decode[map[string]int](t.Context())
-			require.NoError(t, err)
-
-			got = append(got, v)
+		tcs := map[string]struct {
+			input string
+			// The value of each document, with nil for an empty one.
+			want []map[string]int
+		}{
+			"consecutive headers": {
+				input: stringtest.JoinLF(
+					"a: 1",
+					"---",
+					"---",
+					"b: 2",
+					"---",
+					"c: 3",
+				),
+				want: []map[string]int{{"a": 1}, nil, {"b": 2}, {"c": 3}},
+			},
+			"comment-only document": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"---",
+					"# placeholder",
+					"---",
+					"b: 2",
+				),
+				want: []map[string]int{{"a": 1}, nil, {"b": 2}},
+			},
 		}
 
-		assert.Equal(t, []map[string]int{{"a": 1}, nil, {"b": 2}, {"c": 3}}, got)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				var got []map[string]int
+
+				for _, dd := range niceyaml.NewSourceFromString(tc.input).AllDocuments() {
+					v, err := dd.Decode[map[string]int](t.Context())
+					require.NoError(t, err)
+
+					got = append(got, v)
+				}
+
+				assert.Equal(t, tc.want, got)
+			})
+		}
 	})
 
 	t.Run("splits consecutive headers past a comment on the first", func(t *testing.T) {
@@ -7190,29 +7215,6 @@ func TestDocument_DecodeInto(t *testing.T) {
 				require.True(t, ok, "the rejection has no location")
 				assert.Equal(t, tc.want, rng.Start)
 			})
-		}
-	})
-
-	t.Run("decodes every document of a stream with a comment-only document", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString(stringtest.LinesLF(
-			"a: 1",
-			"---",
-			"# placeholder",
-			"---",
-			"b: 2",
-		))
-
-		docs := source.AllDocuments()
-		require.Len(t, docs, 3)
-
-		want := []map[string]int{{"a": 1}, nil, {"b": 2}}
-
-		for i, dd := range docs {
-			got, err := dd.Decode[map[string]int](t.Context())
-			require.NoError(t, err, "document %d", i)
-			assert.Equal(t, want[i], got, "document %d", i)
 		}
 	})
 
