@@ -20,59 +20,26 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
+// TestRootCmdProfileFlags checks that each profile flag writes its profile.
+// It also checks that a run samples blocking events only when it writes a
+// block profile, and contention events only when it writes a mutex profile.
+//
 // The profiler configures process-wide runtime settings, so these tests do
 // not run in parallel.
 //
 //nolint:paralleltest // See above.
 func TestRootCmdProfileFlags(t *testing.T) {
 	tcs := map[string]struct {
-		flag string
-	}{
-		"heap profile":   {flag: "--heap-profile"},
-		"allocs profile": {flag: "--allocs-profile"},
-		"cpu profile":    {flag: "--cpu-profile"},
-	}
-
-	for name, tc := range tcs {
-		//nolint:paralleltest // See above.
-		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-
-			yamlPath := writeFile(t, dir, "doc.yaml", "name: a\n")
-
-			// An explicit schema keeps validate from fetching the SchemaStore catalog.
-			schemaPath := writeFile(t, dir, "schema.json", `{"type": "object"}`)
-
-			profilePath := filepath.Join(dir, "out.prof")
-
-			rootCmd, stopProfiler := newRootCmd()
-			rootCmd.SetOut(io.Discard)
-			rootCmd.SetErr(io.Discard)
-			rootCmd.SetArgs([]string{"validate", "--schema", schemaPath, yamlPath, tc.flag, profilePath})
-
-			require.NoError(t, rootCmd.Execute())
-			require.NoError(t, stopProfiler())
-
-			assert.FileExists(t, profilePath)
-		})
-	}
-}
-
-// TestRootCmdProfileRates checks that a run samples blocking events only
-// when it writes a block profile, and contention events only when it writes
-// a mutex profile.
-//
-//nolint:paralleltest // See above.
-func TestRootCmdProfileRates(t *testing.T) {
-	tcs := map[string]struct {
 		flag      string
 		wantMutex int
 		wantBlock bool
 	}{
-		"no profile flags":  {},
-		"heap profile only": {flag: "--heap-profile"},
-		"block profile":     {flag: "--block-profile", wantBlock: true},
-		"mutex profile":     {flag: "--mutex-profile", wantMutex: 1},
+		"no profile flags": {},
+		"heap profile":     {flag: "--heap-profile"},
+		"allocs profile":   {flag: "--allocs-profile"},
+		"cpu profile":      {flag: "--cpu-profile"},
+		"block profile":    {flag: "--block-profile", wantBlock: true},
+		"mutex profile":    {flag: "--mutex-profile", wantMutex: 1},
 	}
 
 	for name, tc := range tcs {
@@ -92,9 +59,11 @@ func TestRootCmdProfileRates(t *testing.T) {
 			// An explicit schema keeps validate from fetching the SchemaStore catalog.
 			schemaPath := writeFile(t, dir, "schema.json", `{"type": "object"}`)
 
+			profilePath := filepath.Join(dir, "out.prof")
+
 			args := []string{"validate", "--schema", schemaPath, yamlPath}
 			if tc.flag != "" {
-				args = append(args, tc.flag, filepath.Join(dir, "out.prof"))
+				args = append(args, tc.flag, profilePath)
 			}
 
 			rootCmd, stopProfiler := newRootCmd()
@@ -133,6 +102,10 @@ func TestRootCmdProfileRates(t *testing.T) {
 			require.NoError(t, stopProfiler())
 			assert.Equal(t, tc.wantMutex, gotMutex)
 			assert.Equal(t, tc.wantBlock, gotBlock)
+
+			if tc.flag != "" {
+				assert.FileExists(t, profilePath)
+			}
 		})
 	}
 }
