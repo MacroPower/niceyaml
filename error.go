@@ -3078,9 +3078,8 @@ func boundLocus(e *SourceError) locus {
 // no path stays as it is. A binding takes the source of the node its
 // location resolved in. That is the source of b, unless b binds in the
 // document [NewSourceFromLayers] builds, where a location resolves in a
-// layer of another source. A layer whose source holds no one document gives the
-// binding that source and no node. A binder that is unplaced binds to no
-// node, since its error stands in no document.
+// layer of another source. A binder that is unplaced binds to no node,
+// since its error stands in no document.
 func newSourceError(err error, b binder) *SourceError {
 	scoped := b.scoped(err)
 	found := scoped.anchor
@@ -3248,9 +3247,7 @@ func (e *SourceError) Source() *Source {
 // the binding with the details it holds, so its node can be nil or belong
 // to another document or source. An error bound in a merged [Source] is bound
 // to the Node of the layer its location resolved in, or to the Node of
-// the lowest layer when it carries no location. A layer from a Source
-// that holds no one document has no Node, so an error that binds in that
-// layer is bound to none.
+// the lowest layer when it carries no location.
 //
 // The error [BindValue] returns is about a value that came from no
 // document. It is bound to none, and so is each binding below it, with a
