@@ -6388,27 +6388,63 @@ func TestPrinter_PrintError_JoinOfNothing(t *testing.T) {
 	}
 }
 
-func TestPrinter_AnnotationGutterSoftAcrossKinds(t *testing.T) {
+func TestPrinter_AnnotationGutterSoft(t *testing.T) {
 	t.Parallel()
 
-	// Every row after the first of a line's annotation block is a
-	// continuation, whichever kind group it belongs to.
-	view := niceyaml.NewSourceFromString("key: value\n").View()
-	view.Annotate(0,
-		line.Annotation{Content: "one", Placement: line.Below, Kind: kind.UIAnnotation},
-		line.Annotation{Content: "two", Placement: line.Below, Kind: kind.TextError},
-	)
+	gutter := printer.WithGutter(printer.GutterFunc(rowLetterGutter))
 
-	p := printer.New(
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithGutter(printer.GutterFunc(rowLetterGutter)),
-	)
+	tcs := map[string]struct {
+		p           *printer.Printer
+		input       string
+		overlays    []position.Range
+		annotations []line.Annotation
+		want        []string // Gutter of each row.
+	}{
+		// Every row after the first of a line's annotation block is a
+		// continuation, whichever kind group it belongs to.
+		"across kinds": {
+			p:     printer.New(printer.WithContainerStyle(lipgloss.NewStyle()), gutter),
+			input: "key: value\n",
+			annotations: []line.Annotation{
+				{Content: "one", Placement: line.Below, Kind: kind.UIAnnotation},
+				{Content: "two", Placement: line.Below, Kind: kind.TextError},
+			},
+			want: []string{"L ", "F ", "S "},
+		},
+		// The annotation rows below each wrapped row form a block of their
+		// own, so the first row of each block is not a continuation. Each
+		// kind draws the carets of the overlays below each row they cover,
+		// and the message of the second kind moves to a row of its own,
+		// since its carets leave it no room.
+		"per wrapped row": {
+			p:        testPrinter().With(gutter, printer.WithWrapWidth(12)),
+			input:    "key: aaaa bbbb cccc dddd\n",
+			overlays: []position.Range{yamltest.LineRange(0, 5, 9), yamltest.LineRange(0, 17, 19)},
+			annotations: []line.Annotation{
+				{Placement: line.Below},
+				{Content: "n", Placement: line.Below, Kind: kind.TextError, Col: 5},
+			},
+			want: []string{"L ", "F ", "S ", "S ", "C ", "F ", "S ", "C "},
+		},
+	}
 
-	rows := strings.Split(p.Print(view), "\n")
-	require.Len(t, rows, 3)
-	assert.True(t, strings.HasPrefix(rows[0], "L "), rows[0])
-	assert.True(t, strings.HasPrefix(rows[1], "F "), rows[1])
-	assert.True(t, strings.HasPrefix(rows[2], "S "), rows[2])
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			view := niceyaml.NewSourceFromString(tc.input).View()
+			view.AddOverlay(kind.GenericError, tc.overlays...)
+			view.Annotate(0, tc.annotations...)
+
+			var gutters []string
+
+			for row := range strings.SplitSeq(tc.p.Print(view), "\n") {
+				gutters = append(gutters, row[:2])
+			}
+
+			assert.Equal(t, tc.want, gutters)
+		})
+	}
 }
 
 // rowLetterGutter is a gutter func that names each row by a letter. The
@@ -6425,33 +6461,6 @@ func rowLetterGutter(ctx printer.GutterContext) string {
 	default:
 		return "F "
 	}
-}
-
-func TestPrinter_AnnotationGutterSoftPerWrappedRow(t *testing.T) {
-	t.Parallel()
-
-	// The annotation rows below each wrapped row form a block of their
-	// own, so the first row of each block is not a continuation.
-	view := niceyaml.NewSourceFromString("key: aaaa bbbb cccc dddd\n").View()
-	view.AddOverlay(kind.GenericError, yamltest.LineRange(0, 5, 9))
-	view.AddOverlay(kind.GenericError, yamltest.LineRange(0, 17, 19))
-	view.Annotate(0,
-		line.Annotation{Placement: line.Below},
-		line.Annotation{Content: "n", Placement: line.Below, Kind: kind.TextError, Col: 5},
-	)
-
-	p := testPrinterWithGutter(printer.GutterFunc(rowLetterGutter)).With(printer.WithWrapWidth(12))
-
-	var gutters []string
-
-	for row := range strings.SplitSeq(p.Print(view), "\n") {
-		gutters = append(gutters, row[:1])
-	}
-
-	// Each kind draws the carets of the overlays below each row they
-	// cover, and the message of the second kind moves to a row of its own,
-	// since its carets leave it no room.
-	assert.Equal(t, []string{"L", "F", "S", "S", "C", "F", "S", "C"}, gutters)
 }
 
 func TestColWidth(t *testing.T) {
