@@ -3654,20 +3654,31 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 	t.Run("option applies per call", func(t *testing.T) {
 		t.Parallel()
 
-		input := stringtest.Input(`
-			name: test
-			extra: field
-		`)
-		dd := yamltest.FirstDocument(t, input)
+		tcs := map[string]struct {
+			input string
+			path  paths.Path
+		}{
+			"root":        {input: "name: test\nextra: field", path: paths.Current()},
+			"scoped node": {input: "inner:\n  name: test\n  extra: field", path: paths.Current().Child("inner")},
+		}
 
-		// The same document decodes strictly on one call and loosely on the
-		// next, so the option belongs to the call rather than the Source.
-		_, err := dd.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
-		require.ErrorAs(t, err, new(*niceyaml.Error))
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		result, err := dd.Decode[strictConfig](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, "test", result.Name)
+				node := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.path)
+
+				// The same node decodes strictly on one call and loosely on
+				// the next, so the option belongs to the call rather than
+				// the Source.
+				_, err := node.Decode[strictConfig](t.Context(), niceyaml.WithDisallowUnknownFields(true))
+				require.ErrorAs(t, err, new(*niceyaml.Error))
+
+				result, err := node.Decode[strictConfig](t.Context())
+				require.NoError(t, err)
+				assert.Equal(t, "test", result.Name)
+			})
+		}
 	})
 
 	t.Run("a later false turns the option off", func(t *testing.T) {
@@ -3679,29 +3690,6 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 			niceyaml.WithDisallowUnknownFields(true),
 			niceyaml.WithDisallowUnknownFields(false),
 		)
-		require.NoError(t, err)
-		assert.Equal(t, "test", result.Name)
-	})
-
-	t.Run("option applies to Get", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			inner:
-			  name: test
-			  extra: field
-		`)
-		dd := yamltest.FirstDocument(t, input)
-
-		innerPath := paths.Current().Child("inner")
-
-		_, err := yamltest.At(t, dd, innerPath).Decode[strictConfig](
-			t.Context(),
-			niceyaml.WithDisallowUnknownFields(true),
-		)
-		require.ErrorAs(t, err, new(*niceyaml.Error))
-
-		result, err := yamltest.At(t, dd, innerPath).Decode[strictConfig](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, "test", result.Name)
 	})
