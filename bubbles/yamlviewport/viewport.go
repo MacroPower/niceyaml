@@ -557,8 +557,9 @@ func (m *Model) anchorTop() {
 
 // renderPrinter returns the printer to render with. It specializes the
 // configured printer to the viewport's word wrap setting and to the given
-// content width less the horizontal frame of the printer's container style,
-// so a wrapped line and the frame around it together fit the content area.
+// content width. The printer counts the horizontal frame of its container
+// style in that width, so a wrapped line and the frame around it together
+// fit the content area.
 //
 // Pinning the printer's container to the given width makes the box it draws
 // cover the same columns for every window. Without the pin it would shrink
