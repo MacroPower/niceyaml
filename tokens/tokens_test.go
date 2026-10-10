@@ -833,24 +833,22 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 	// and reads again. A line the lexer dropped, such as a lone "!", still
 	// exists, and the token stays on it.
 	tcs := map[string]struct {
-		input  string
-		line   int
-		col    int
-		offset int
+		input string
+		want  string // Position of the token, as positionsOf gives it.
 	}{
-		"header ends the file":      {input: "a: |+\n", line: 1, col: 6, offset: 6},
-		"header ends the file crlf": {input: "a: |+\r\n", line: 1, col: 6, offset: 6},
-		"header ends the file cr":   {input: "a: |+\r", line: 1, col: 6, offset: 6},
-		"sequence entry":            {input: "- >+\n", line: 1, col: 5, offset: 5},
-		"second header ends it":     {input: "x: \"\u00e9\"\nk: |+\n", line: 2, col: 6, offset: 13},
-		"dropped line follows":      {input: "a: |+\n!", line: 2, col: 1, offset: 7},
-		"blank line ends the file":  {input: "a: |+\n\n", line: 2, col: 1, offset: 7},
-		"blank lines end the file":  {input: "a: |+\n\n\n", line: 3, col: 1, offset: 8},
-		"blank crlf line ends it":   {input: "a: |+\r\n\r\n", line: 2, col: 1, offset: 8},
-		"spaces end the file":       {input: "a: >+\n  \n", line: 2, col: 3, offset: 9},
-		"clipped blank line ends":   {input: "a: |\n\n", line: 2, col: 1, offset: 6},
-		"key follows":               {input: "a: |+\nb: 1\n", line: 2, col: 1, offset: 7},
-		"header after a cut escape": {input: "\"\\u>+: |\n\n", line: 2, col: 1, offset: 10},
+		"header ends the file":      {input: "a: |+\n", want: "1:6:6"},
+		"header ends the file crlf": {input: "a: |+\r\n", want: "1:6:6"},
+		"header ends the file cr":   {input: "a: |+\r", want: "1:6:6"},
+		"sequence entry":            {input: "- >+\n", want: "1:5:5"},
+		"second header ends it":     {input: "x: \"\u00e9\"\nk: |+\n", want: "2:6:13"},
+		"dropped line follows":      {input: "a: |+\n!", want: "2:1:7"},
+		"blank line ends the file":  {input: "a: |+\n\n", want: "2:1:7"},
+		"blank lines end the file":  {input: "a: |+\n\n\n", want: "3:1:8"},
+		"blank crlf line ends it":   {input: "a: |+\r\n\r\n", want: "2:1:8"},
+		"spaces end the file":       {input: "a: >+\n  \n", want: "2:3:9"},
+		"clipped blank line ends":   {input: "a: |\n\n", want: "2:1:6"},
+		"key follows":               {input: "a: |+\nb: 1\n", want: "2:1:7"},
+		"header after a cut escape": {input: "\"\\u>+: |\n\n", want: "2:1:10"},
 	}
 
 	for name, tc := range tcs {
@@ -866,9 +864,7 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 			}
 
 			require.NotNil(t, empty)
-			assert.Equal(t, tc.line, empty.Position.Line)
-			assert.Equal(t, tc.col, empty.Position.Column)
-			assert.Equal(t, tc.offset, empty.Position.Offset)
+			assert.Equal(t, []string{tc.want}, positionsOf(token.Tokens{empty}))
 		})
 	}
 }
@@ -880,21 +876,19 @@ func TestTokenize_PlaceholderPosition(t *testing.T) {
 	// and at 1:1:1 when the source holds whitespace alone. A fresh stream
 	// already counts from 1, so ResetPositions keeps its position.
 	tcs := map[string]struct {
-		input  string
-		line   int
-		col    int
-		offset int
+		input string
+		want  string // Position of the token, as positionsOf gives it.
 	}{
-		"lone tag marker":            {input: "!", line: 1, col: 1, offset: 1},
-		"spaces before":              {input: "  !", line: 1, col: 3, offset: 3},
-		"tab before":                 {input: "\t!", line: 1, col: 2, offset: 2},
-		"line break before":          {input: "\n!", line: 2, col: 1, offset: 2},
-		"indented after a break":     {input: "\n  !", line: 2, col: 3, offset: 4},
-		"indented after two breaks":  {input: "\n\n  !", line: 3, col: 3, offset: 5},
-		"tab after two breaks":       {input: "\n\n\t!", line: 3, col: 2, offset: 4},
-		"whitespace alone":           {input: "  \n", line: 1, col: 1, offset: 1},
-		"line breaks alone":          {input: "\n\n", line: 1, col: 1, offset: 1},
-		"byte order mark is dropped": {input: "\ufeff  !", line: 1, col: 3, offset: 3},
+		"lone tag marker":            {input: "!", want: "1:1:1"},
+		"spaces before":              {input: "  !", want: "1:3:3"},
+		"tab before":                 {input: "\t!", want: "1:2:2"},
+		"line break before":          {input: "\n!", want: "2:1:2"},
+		"indented after a break":     {input: "\n  !", want: "2:3:4"},
+		"indented after two breaks":  {input: "\n\n  !", want: "3:3:5"},
+		"tab after two breaks":       {input: "\n\n\t!", want: "3:2:4"},
+		"whitespace alone":           {input: "  \n", want: "1:1:1"},
+		"line breaks alone":          {input: "\n\n", want: "1:1:1"},
+		"byte order mark is dropped": {input: "\ufeff  !", want: "1:3:3"},
 	}
 
 	for name, tc := range tcs {
@@ -905,9 +899,7 @@ func TestTokenize_PlaceholderPosition(t *testing.T) {
 			require.Len(t, tks, 1)
 			require.True(t, tokens.IsPlaceholder(tks[0]))
 
-			assert.Equal(t, tc.line, tks[0].Position.Line)
-			assert.Equal(t, tc.col, tks[0].Position.Column)
-			assert.Equal(t, tc.offset, tks[0].Position.Offset)
+			assert.Equal(t, []string{tc.want}, positionsOf(tks))
 
 			reset := tokens.ResetPositions(tks)
 			require.Len(t, reset, 1)
@@ -1921,9 +1913,7 @@ func TestResetPositions(t *testing.T) {
 
 		require.NotEmpty(t, got)
 		assert.Equal(t, " \t\na", got[0].Origin)
-		assert.Equal(t, 2, got[0].Position.Line)
-		assert.Equal(t, 1, got[0].Position.Column)
-		assert.Equal(t, 4, got[0].Position.Offset)
+		assert.Equal(t, "2:1:4", positionsOf(got)[0])
 	})
 
 	t.Run("counts from the joined Origins after a swallowed indicator", func(t *testing.T) {
@@ -2019,14 +2009,8 @@ func TestResetPositions_Text(t *testing.T) {
 					doc = tokens.ResetPositions(doc)
 					// A document's text is the Origins of its tokens.
 					fresh := lexer.Tokenize(yamltest.DumpTokenOrigins(doc))
-					require.Len(t, doc, len(fresh), "document %d", i)
 
-					for j, want := range fresh {
-						got := doc[j].Position
-						assert.Equal(t, want.Position.Line, got.Line, "document %d token %d line", i, j)
-						assert.Equal(t, want.Position.Column, got.Column, "document %d token %d column", i, j)
-						assert.Equal(t, want.Position.Offset, got.Offset, "document %d token %d offset", i, j)
-					}
+					assert.Equal(t, positionsOf(fresh), positionsOf(doc), "document %d", i)
 				}
 			})
 		}
@@ -2062,15 +2046,8 @@ func TestResetPositions_Text(t *testing.T) {
 				for i, doc := range tokens.SplitDocuments(tokens.Tokenize(tc.input)) {
 					doc = tokens.ResetPositions(doc)
 					fresh := withText(tokens.Tokenize(yamltest.DumpTokenOrigins(doc)))
-					text := withText(doc)
-					require.Len(t, text, len(fresh), "document %d", i)
 
-					for j, want := range fresh {
-						got := text[j].Position
-						assert.Equal(t, want.Position.Line, got.Line, "document %d token %d line", i, j)
-						assert.Equal(t, want.Position.Column, got.Column, "document %d token %d column", i, j)
-						assert.Equal(t, want.Position.Offset, got.Offset, "document %d token %d offset", i, j)
-					}
+					assert.Equal(t, positionsOf(fresh), positionsOf(withText(doc)), "document %d", i)
 				}
 			})
 		}
@@ -2144,12 +2121,6 @@ func TestResetPositions_Text(t *testing.T) {
 			"indented key after it":  {input: "a:\n  k: |\n\n  b: 1\n"},
 		}
 
-		// ResetPositions leaves IndentNum and IndentLevel as they are, so
-		// compare the line, column, and offset alone.
-		lco := func(tk *token.Token) [3]int {
-			return [3]int{tk.Position.Line, tk.Position.Column, tk.Position.Offset}
-		}
-
 		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
@@ -2158,16 +2129,17 @@ func TestResetPositions_Text(t *testing.T) {
 				cut := slices.IndexFunc(tks, func(tk *token.Token) bool { return tk.Origin == "" })
 				require.GreaterOrEqual(t, cut, 0)
 
-				got := tokens.ResetPositions(tks[cut:])
-				fresh := tokens.Tokenize(yamltest.DumpTokenOrigins(got))
-				require.Len(t, got, len(fresh)+1)
+				reset := tokens.ResetPositions(tks[cut:])
+				fresh := tokens.Tokenize(yamltest.DumpTokenOrigins(reset))
+				require.Len(t, reset, len(fresh)+1)
+
+				// ResetPositions leaves IndentNum and IndentLevel as they
+				// are, so compare the line, column, and offset alone.
+				got := positionsOf(reset)
 
 				// The empty token shares the position of the token after it.
-				assert.Equal(t, lco(got[1]), lco(got[0]))
-
-				for j, want := range fresh {
-					assert.Equal(t, lco(want), lco(got[j+1]), "token %d %q", j+1, got[j+1].Origin)
-				}
+				assert.Equal(t, got[1], got[0])
+				assert.Equal(t, positionsOf(fresh), got[1:])
 			})
 		}
 	})
@@ -2234,10 +2206,8 @@ func TestResetPositions_Text(t *testing.T) {
 
 				require.Len(t, got, tc.want)
 
-				for _, tk := range got {
-					assert.Equal(t, 1, tk.Position.Line)
-					assert.Equal(t, 1, tk.Position.Column)
-					assert.Equal(t, 1, tk.Position.Offset)
+				for i, pos := range positionsOf(got) {
+					assert.Equal(t, "1:1:1", pos, "token %d", i)
 				}
 			})
 		}
@@ -2268,9 +2238,7 @@ func TestResetPositions_Text(t *testing.T) {
 		assert.Nil(t, got[0].Position)
 
 		// ResetPositions moves the second token to line 1.
-		assert.Equal(t, 1, got[1].Position.Line)
-		assert.Equal(t, 1, got[1].Position.Column)
-		assert.Equal(t, 1, got[1].Position.Offset)
+		assert.Equal(t, []string{"1:1:1"}, positionsOf(got[1:]))
 	})
 
 	t.Run("preserves token values", func(t *testing.T) {
