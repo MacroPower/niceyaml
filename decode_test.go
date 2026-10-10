@@ -11099,23 +11099,7 @@ func TestValidatorFunc_Check(t *testing.T) {
 	t.Run("a validator that runs another on each element reports the element", func(t *testing.T) {
 		t.Parallel()
 
-		perItem := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-			node, err := n.At(pricePath)
-			if err != nil {
-				return err //nolint:wrapcheck // The test inspects the error as it is.
-			}
-
-			price, err := node.Decode[int](ctx)
-			if err != nil {
-				return err
-			}
-
-			if price < 0 {
-				return negative
-			}
-
-			return nil
-		})
+		perItem := niceyaml.ValidatorFunc(negativePrice{}.Check)
 		each := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
 			items, err := n.Nodes(paths.Current().Child("items").IndexAll())
 			if err != nil {
