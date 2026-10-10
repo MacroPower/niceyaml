@@ -1213,10 +1213,12 @@ func pickContentDocuments(docs []*Node) []*Node {
 // error wrapping [ErrMultipleDocuments], bound to the Source. The error
 // points at the header of the second of them, or at the first token of
 // its content when a "..." marker rather than a header opens it. A file
-// of several empty documents and no other returns that error too. A file
-// with a document that does not parse returns the error [Source.File]
-// returns, however many of its other documents parse. Use
-// [Source.Documents] for a file that may hold several.
+// of several empty documents alone returns that error too, since each
+// "---" header is a document, and only a document with content leaves
+// the empty ones out. A file with a document that does not parse
+// returns the error [Source.File] returns, however many of its other
+// documents parse. Use [Source.Documents] for a file that may hold
+// several.
 func (s *Source) Document() (*Node, error) {
 	// The parse bound each syntax error already, and binding the join of
 	// several anew would return another error than File does.
