@@ -87,6 +87,12 @@ func requireRefs(required bool) schema.RegistryOption {
 	return schema.WithCompileOptions(schema.WithRequireRefs(required))
 }
 
+// addPassword returns rawURL with the user "user" and the password
+// "secret" in front of its host.
+func addPassword(rawURL string) string {
+	return strings.Replace(rawURL, "://", "://user:secret@", 1)
+}
+
 // rootFS returns the file system of an [os.Root] opened on dir. The Root
 // stays open until the test ends.
 func rootFS(t *testing.T, dir string) fs.FS {
@@ -4238,7 +4244,7 @@ func TestRegistry_Schema_RedactsPassword(t *testing.T) {
 		"/d/lost.json":  `{"properties": {"a": {"$ref": "../gone.json"}}}`,
 	})
 
-	withPassword := strings.Replace(base, "://", "://user:secret@", 1)
+	withPassword := addPassword(base)
 
 	tcs := map[string]struct {
 		err error
@@ -4326,7 +4332,7 @@ func TestRegistry_Check_RedactsPassword(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	ref := schema.URL(strings.Replace(server.URL, "://", "://user:secret@", 1) + "/d/root.json")
+	ref := schema.URL(addPassword(server.URL) + "/d/root.json")
 	reg := schema.NewRegistry(requireRefs(false), schema.WithResolvers(ref))
 
 	_, err := reg.Schema(t.Context(), ref)
@@ -4365,7 +4371,7 @@ func TestRegistry_RefCredentials(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	withPassword := strings.Replace(server.URL, "://", "://user:secret@", 1)
+	withPassword := addPassword(server.URL)
 
 	tcs := map[string]struct {
 		url   string
@@ -4410,7 +4416,7 @@ func TestRegistry_RefCredentials(t *testing.T) {
 			"/root.json": fmt.Sprintf(`{"properties": {"a": {"$ref": %q}}}`, other.URL+"/defs.json"),
 		})
 
-		ref := schema.URL(strings.Replace(root, "://", "://user:secret@", 1) + "/root.json")
+		ref := schema.URL(addPassword(root) + "/root.json")
 		reg := schema.NewRegistry(schema.WithResolvers(ref))
 
 		requireRejects(t, reg, "a: 5\n", `expected "string", got "integer"`)
