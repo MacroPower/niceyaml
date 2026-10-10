@@ -857,44 +857,6 @@ func assertSameError(t *testing.T, wantErr, err error, expr string) bool {
 	return true
 }
 
-func TestResolver_NestedMerges(t *testing.T) {
-	t.Parallel()
-
-	// Each mapping merges the one before it four times, so reading every
-	// merge again would take 4^39 reads. The anchors of each mapping count
-	// once per merge all the same.
-	var sb strings.Builder
-
-	sb.WriteString("l0: &l0 {k: &x one}\nother: &x two\n")
-
-	for i := 1; i < 40; i++ {
-		fmt.Fprintf(&sb, "l%d: &l%d {<<: [*l%d, *l%d, *l%d, *l%d]}\n", i, i, i-1, i-1, i-1, i-1)
-	}
-
-	sb.WriteString("v: *x\n")
-
-	file, err := niceyaml.NewSourceFromString(sb.String()).File()
-	require.NoError(t, err)
-
-	nodes := make(chan ast.Node, 1)
-
-	go func() {
-		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("v"))
-		assert.NoError(t, err)
-
-		nodes <- node
-	}()
-
-	select {
-	case node := <-nodes:
-		require.NotNil(t, node)
-		assert.Equal(t, "one", node.String())
-
-	case <-time.After(10 * time.Second):
-		require.FailNow(t, "binding the aliases did not return within 10s")
-	}
-}
-
 // openMerges returns a document whose mapping a holds, under an anchor of
 // its own, the mappings b0 and up, as many as links. Each bN merges the
 // two mappings before it, b1 merges b0 and a, and b0 merges a and holds
@@ -911,30 +873,63 @@ func openMerges(links int) string {
 	return sb.String()
 }
 
-func TestResolver_NestedOpenMerges(t *testing.T) {
+func TestResolver_NestedMerges(t *testing.T) {
 	t.Parallel()
 
-	// No merge of a bN is final while the walk is inside a. Reading every
-	// merge again would take about 1.6^60 reads.
-	file, err := niceyaml.NewSourceFromString(openMerges(60) + "  v: *x\n").File()
-	require.NoError(t, err)
+	// The mappings l0 through l39, where each later one merges the one
+	// before it four times.
+	var repeated strings.Builder
 
-	nodes := make(chan ast.Node, 1)
+	repeated.WriteString("l0: &l0 {k: &x one}\nother: &x two\n")
 
-	go func() {
-		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("a", "v"))
-		assert.NoError(t, err)
+	for i := 1; i < 40; i++ {
+		fmt.Fprintf(&repeated, "l%d: &l%d {<<: [*l%d, *l%d, *l%d, *l%d]}\n", i, i, i-1, i-1, i-1, i-1)
+	}
 
-		nodes <- node
-	}()
+	repeated.WriteString("v: *x\n")
 
-	select {
-	case node := <-nodes:
-		require.NotNil(t, node)
-		assert.Equal(t, "one", node.String())
+	// The alias at each path refers to the anchor &x one.
+	tcs := map[string]struct {
+		input string
+		path  paths.Path
+	}{
+		// Reading every merge again would take 4^39 reads. The anchors of
+		// each mapping count once per merge all the same.
+		"merges of one mapping": {
+			input: repeated.String(),
+			path:  paths.Doc().Child("v"),
+		},
+		// No merge of a bN is final while the walk is inside a. Reading
+		// every merge again would take about 1.6^60 reads.
+		"merges inside an open anchor": {
+			input: openMerges(60) + "  v: *x\n",
+			path:  paths.Doc().Child("a", "v"),
+		},
+	}
 
-	case <-time.After(10 * time.Second):
-		require.FailNow(t, "binding the aliases did not return within 10s")
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
+			nodes := make(chan ast.Node, 1)
+
+			go func() {
+				node, err := paths.NewResolver(doc).Node(tc.path)
+				assert.NoError(t, err)
+
+				nodes <- node
+			}()
+
+			select {
+			case node := <-nodes:
+				require.NotNil(t, node)
+				assert.Equal(t, "one", node.String())
+
+			case <-time.After(10 * time.Second):
+				require.FailNow(t, "binding the aliases did not return within 10s")
+			}
+		})
 	}
 }
 
