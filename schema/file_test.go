@@ -1,7 +1,6 @@
 package schema_test
 
 import (
-	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -339,9 +338,7 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 	//nolint:paralleltest // See above.
 	t.Run("a relative path never takes the schema of the path under the root", func(t *testing.T) {
 		// The two Refs share a key, and only the absolute one names a file.
-		rooted := schema.Loadable(schema.File("/schemas/root.json").Key(), func(context.Context) ([]byte, error) {
-			return []byte(`{"type": "object"}`), nil
-		})
+		rooted := loading(schema.File("/schemas/root.json").Key(), []byte(`{"type": "object"}`), nil)
 
 		reg := schema.NewRegistry()
 

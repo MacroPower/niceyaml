@@ -61,9 +61,7 @@ func TestRef_Resolve(t *testing.T) {
 	t.Run("names itself for every document", func(t *testing.T) {
 		t.Parallel()
 
-		ref := schema.Loadable("config.json", func(_ context.Context) ([]byte, error) {
-			return []byte(`{"type": "object"}`), nil
-		})
+		ref := loading("config.json", []byte(`{"type": "object"}`), nil)
 
 		got, err := ref.Resolve(t.Context(), document(t))
 		require.NoError(t, err)
@@ -101,9 +99,7 @@ func TestResolverFunc(t *testing.T) {
 			return schema.Ref{}, schema.ErrNoMatch
 		}
 
-		return schema.Loadable(kind+".json", func(_ context.Context) ([]byte, error) {
-			return []byte(`{"title": "` + kind + `"}`), nil
-		}), nil
+		return loading(kind+".json", []byte(`{"title": "`+kind+`"}`), nil), nil
 	})
 
 	tcs := map[string]struct {
