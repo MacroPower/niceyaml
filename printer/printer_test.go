@@ -5915,32 +5915,83 @@ func TestPrinter_Layout(t *testing.T) {
 		return view
 	}
 
-	want := stringtest.JoinLF(
-		"     a note above",
-		"     that wraps too",
-		"   1 key: this is a",
-		"          ^ below",
-		"   - long value that",
-		"   - wraps",
-		"   2 b: 2",
-		"   3 c: 3",
-		"        ^ last",
-	)
-
 	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(20))
 
 	t.Run("rows match print", func(t *testing.T) {
 		t.Parallel()
 
-		view := newView()
-		got := p.Print(view)
-		require.Equal(t, want, got)
+		tcs := map[string]struct {
+			opts     []printer.Option
+			rowOf    map[position.Position]int // Position to the row that shows it.
+			want     string
+			wantRows []int
+		}{
+			"wrapped with annotations": {
+				want: stringtest.JoinLF(
+					"     a note above",
+					"     that wraps too",
+					"   1 key: this is a",
+					"          ^ below",
+					"   - long value that",
+					"   - wraps",
+					"   2 b: 2",
+					"   3 c: 3",
+					"        ^ last",
+				),
+				wantRows: []int{6, 1, 2},
+			},
+			"wrapping off gives one content row per line": {
+				opts: []printer.Option{printer.WithWrapWidth(0)},
+				want: stringtest.JoinLF(
+					"     a note above that wraps too",
+					"   1 key: this is a long value that wraps",
+					"          ^ below",
+					"   2 b: 2",
+					"   3 c: 3",
+					"        ^ last",
+				),
+				wantRows: []int{3, 1, 2},
+				rowOf:    map[position.Position]int{position.New(0, 0): 1, position.New(0, 1000): 1},
+			},
+			"annotations off counts no annotation rows": {
+				opts: []printer.Option{printer.WithAnnotation(printer.NoAnnotation)},
+				want: stringtest.JoinLF(
+					"   1 key: this is a",
+					"   - long value that",
+					"   - wraps",
+					"   2 b: 2",
+					"   3 c: 3",
+				),
+				wantRows: []int{3, 1, 1},
+				rowOf: map[position.Position]int{
+					position.New(0, 0):  0,
+					position.New(0, 15): 1,
+					position.New(1, 0):  3,
+				},
+			},
+		}
 
-		l := p.Layout(view)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		assertLayoutMeasures(t, l, got)
-		assert.Equal(t, 3, l.Count())
-		assert.Equal(t, []int{6, 1, 2}, layoutRows(l))
+				view := newView()
+				p := p.With(tc.opts...)
+
+				got := p.Print(view)
+				require.Equal(t, tc.want, got)
+
+				l := p.Layout(view)
+
+				assertLayoutMeasures(t, l, got)
+				assert.Equal(t, 3, l.Count())
+				assert.Equal(t, tc.wantRows, layoutRows(l))
+
+				for pos, row := range tc.rowOf {
+					assert.Equal(t, row, l.RowOf(pos), "position %s", pos)
+				}
+			})
+		}
 	})
 
 	t.Run("line start is the prefix sum of line rows", func(t *testing.T) {
@@ -6077,97 +6128,85 @@ func TestPrinter_Layout(t *testing.T) {
 		assert.Equal(t, -1, l.RowOf(position.New(1, 0)))
 	})
 
-	t.Run("a style that rewrites runes keeps columns aligned", func(t *testing.T) {
+	t.Run("a style that changes the text keeps columns aligned", func(t *testing.T) {
 		t.Parallel()
 
 		// A transform may rewrite every rune of the text it styles, as
 		// strings.ToUpper does, or add text of its own, as brackets do.
 		// Either way, each row still starts at the column of the content
 		// it shows, and an annotation indents from the start of its row.
+		//
+		// The runes a transform adds may equal runes of the text it
+		// styles, as the "v" and "a" of a "val=" prefix do for "value".
+		// They still count as added runes, so every column of the text
+		// maps to the rune it shows.
+		const words = "key: aaaa bbbb cccc dddd"
+
+		// Literal returns styles whose string values go through transform.
+		literal := func(transform func(string) string) style.Styles {
+			return style.New(
+				lipgloss.NewStyle(),
+				style.Set(kind.LiteralString, lipgloss.NewStyle().Transform(transform)),
+			)
+		}
+		prefixed := literal(func(s string) string { return "val=" + s })
+
 		tcs := map[string]struct {
-			styles style.Styles
-			below  []line.Annotation
-			want   string
-			rows   map[int]int // Column to row.
+			styles  style.Styles
+			below   []line.Annotation
+			content string
+			want    string
+			rows    map[int]int // Column to row.
+			cells   map[int]int // Column to cell.
+			wrap    int
 		}{
 			"base style uppercases every run": {
-				styles: style.New(lipgloss.NewStyle().Transform(strings.ToUpper)),
-				want:   stringtest.JoinLF("KEY: AAAA", "BBBB CCCC", "DDDD"),
-				rows:   map[int]int{0: 0, 8: 0, 9: 0, 10: 1, 19: 1, 20: 2, 1000: 2},
+				styles:  style.New(lipgloss.NewStyle().Transform(strings.ToUpper)),
+				content: words,
+				wrap:    10,
+				want:    stringtest.JoinLF("KEY: AAAA", "BBBB CCCC", "DDDD"),
+				rows:    map[int]int{0: 0, 8: 0, 9: 0, 10: 1, 19: 1, 20: 2, 1000: 2},
 			},
 			"key style uppercases the first run": {
 				styles: style.New(
 					lipgloss.NewStyle(),
 					style.Set(kind.NameTag, lipgloss.NewStyle().Transform(strings.ToUpper)),
 				),
-				below: []line.Annotation{{Content: "x", Placement: line.Below, Col: 20}},
-				want:  stringtest.JoinLF("KEY: aaaa", "bbbb cccc", "dddd", "^ x"),
-				rows:  map[int]int{0: 0, 8: 0, 9: 0, 10: 1, 19: 1, 20: 2, 1000: 2},
+				below:   []line.Annotation{{Content: "x", Placement: line.Below, Col: 20}},
+				content: words,
+				wrap:    10,
+				want:    stringtest.JoinLF("KEY: aaaa", "bbbb cccc", "dddd", "^ x"),
+				rows:    map[int]int{0: 0, 8: 0, 9: 0, 10: 1, 19: 1, 20: 2, 1000: 2},
 			},
 			"value style adds brackets": {
 				styles: style.New(
 					lipgloss.NewStyle(),
 					style.Set(kind.LiteralString, bracketStyle("<", ">")),
 				),
-				want: stringtest.JoinLF("key: <aaaa", "bbbb cccc", "dddd>"),
-				rows: map[int]int{0: 0, 10: 1, 20: 2},
+				content: words,
+				wrap:    10,
+				want:    stringtest.JoinLF("key: <aaaa", "bbbb cccc", "dddd>"),
+				rows:    map[int]int{0: 0, 10: 1, 20: 2},
 			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				view := niceyaml.NewSourceFromString("key: aaaa bbbb cccc dddd").View()
-				view.Annotate(0, tc.below...)
-
-				p := testPrinter().With(printer.WithWrapWidth(10), printer.WithStyles(tc.styles))
-
-				require.Equal(t, tc.want, p.Print(view))
-
-				l := p.Layout(view)
-
-				for col, row := range tc.rows {
-					assert.Equal(t, row, l.RowOf(position.New(0, col)), "column %d", col)
-				}
-			})
-		}
-	})
-
-	t.Run("a transform that adds runes of the text keeps columns aligned", func(t *testing.T) {
-		t.Parallel()
-
-		// The runes a transform adds may equal runes of the text it
-		// styles, as the "v" and "a" of a "val=" prefix do for "value".
-		// They still count as added runes, so every column of the text
-		// maps to the rune it shows.
-		tcs := map[string]struct {
-			transform func(string) string
-			content   string
-			want      string
-			rows      map[int]int // Column to row.
-			cells     map[int]int // Column to cell.
-			wrap      int
-		}{
 			"prefix that wraps": {
-				transform: func(s string) string { return "val=" + s },
-				content:   "k: value",
-				wrap:      5,
-				want:      stringtest.JoinLF("k:", "val=v", "alue"),
-				rows:      map[int]int{0: 0, 3: 1, 4: 2, 7: 2},
-				cells:     map[int]int{3: 0, 4: 0, 5: 1},
+				styles:  prefixed,
+				content: "k: value",
+				wrap:    5,
+				want:    stringtest.JoinLF("k:", "val=v", "alue"),
+				rows:    map[int]int{0: 0, 3: 1, 4: 2, 7: 2},
+				cells:   map[int]int{3: 0, 4: 0, 5: 1},
 			},
 			"prefix": {
-				transform: func(s string) string { return "val=" + s },
-				content:   "k: value",
-				want:      "k: val=value",
-				cells:     map[int]int{3: 3, 4: 8, 5: 9, 7: 11, 8: 12},
+				styles:  prefixed,
+				content: "k: value",
+				want:    "k: val=value",
+				cells:   map[int]int{3: 3, 4: 8, 5: 9, 7: 11, 8: 12},
 			},
 			"quotes around a quoted string": {
-				transform: func(s string) string { return `"` + s + `"` },
-				content:   `k: "abc"`,
-				want:      `k: ""abc""`,
-				cells:     map[int]int{3: 3, 4: 5, 5: 6, 7: 8, 8: 10},
+				styles:  literal(func(s string) string { return `"` + s + `"` }),
+				content: `k: "abc"`,
+				want:    `k: ""abc""`,
+				cells:   map[int]int{3: 3, 4: 5, 5: 6, 7: 8, 8: 10},
 			},
 		}
 
@@ -6176,10 +6215,9 @@ func TestPrinter_Layout(t *testing.T) {
 				t.Parallel()
 
 				view := niceyaml.NewSourceFromString(tc.content).View()
+				view.Annotate(0, tc.below...)
 
-				p := testPrinterWithStyles(
-					style.Set(kind.LiteralString, lipgloss.NewStyle().Transform(tc.transform)),
-				).With(printer.WithWrapWidth(tc.wrap))
+				p := testPrinter().With(printer.WithWrapWidth(tc.wrap), printer.WithStyles(tc.styles))
 
 				require.Equal(t, tc.want, p.Print(view))
 
@@ -6211,55 +6249,6 @@ func TestPrinter_Layout(t *testing.T) {
 		assert.LessOrEqual(t, l.Width(), 20)
 		assert.Equal(t, 5, l.GutterWidth())
 		assert.Equal(t, lipgloss.Width("   1 "), l.GutterWidth())
-	})
-
-	t.Run("wrapping off gives one content row per line", func(t *testing.T) {
-		t.Parallel()
-
-		view := newView()
-		p := p.With(printer.WithWrapWidth(0))
-
-		got := p.Print(view)
-		require.Equal(t, stringtest.JoinLF(
-			"     a note above that wraps too",
-			"   1 key: this is a long value that wraps",
-			"          ^ below",
-			"   2 b: 2",
-			"   3 c: 3",
-			"        ^ last",
-		), got)
-
-		l := p.Layout(view)
-
-		assertLayoutMeasures(t, l, got)
-		assert.Equal(t, []int{3, 1, 2}, layoutRows(l))
-		assert.Equal(t, 1, l.RowOf(position.New(0, 0)))
-		assert.Equal(t, 1, l.RowOf(position.New(0, 1000)))
-		assert.Equal(t, lipgloss.Width("   1 key: this is a long value that wraps"), l.Width())
-	})
-
-	t.Run("annotations off counts no annotation rows", func(t *testing.T) {
-		t.Parallel()
-
-		view := newView()
-		p := p.With(printer.WithAnnotation(printer.NoAnnotation))
-
-		got := p.Print(view)
-		require.Equal(t, stringtest.JoinLF(
-			"   1 key: this is a",
-			"   - long value that",
-			"   - wraps",
-			"   2 b: 2",
-			"   3 c: 3",
-		), got)
-
-		l := p.Layout(view)
-
-		assertLayoutMeasures(t, l, got)
-		assert.Equal(t, []int{3, 1, 1}, layoutRows(l))
-		assert.Equal(t, 0, l.RowOf(position.New(0, 0)))
-		assert.Equal(t, 1, l.RowOf(position.New(0, 15)))
-		assert.Equal(t, 3, l.RowOf(position.New(1, 0)))
 	})
 }
 
