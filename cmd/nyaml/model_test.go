@@ -591,54 +591,44 @@ func TestStatusBarWidth(t *testing.T) {
 func TestTitleLinePosition(t *testing.T) {
 	t.Parallel()
 
-	// Each line wraps onto several rows, and the bracket shows the line at
-	// the top of the view, in the same unit as the line count beside it.
+	// The bracket shows the line at the top of the view, in the same unit as
+	// the line count beside it. Each line of the first two cases wraps onto
+	// several rows.
 	long := strings.Repeat("word ", 60)
-	src := stringtest.LinesLF("a: "+long, "b: "+long, "c: "+long)
+	wrapped := []string{stringtest.LinesLF("a: "+long, "b: "+long, "c: "+long)}
 
 	tcs := map[string]struct {
-		keys []tea.Msg
 		want string
-	}{
-		"top": {want: " [1] "},
-		"bottom": {
-			keys: []tea.Msg{press('G')},
-			want: " [3] ",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			m := newModel(&modelOptions{sources: sourcesOf(src)})
-
-			got := update(t, update(t, m, tea.WindowSizeMsg{Width: 60, Height: 8}), tc.keys...)
-			require.Equal(t, 3, got.viewport.TotalLineCount())
-
-			title := got.titleLine()
-			assert.Contains(t, title, " 3 lines ")
-			assert.Contains(t, title, tc.want)
-		})
-	}
-}
-
-func TestTitleLinePositionEmpty(t *testing.T) {
-	t.Parallel()
-
-	// A view with no lines has no top line, so the bracket shows 0 to match
-	// the line count beside it.
-	tcs := map[string]struct {
 		srcs []string
+		keys []tea.Msg
 		mode yamlviewport.ViewMode
+		// The line count the title shows beside the bracket.
+		lines int
 	}{
+		"top": {
+			srcs:  wrapped,
+			lines: 3,
+			want:  " [1] ",
+		},
+		"bottom": {
+			srcs:  wrapped,
+			keys:  []tea.Msg{press('G')},
+			lines: 3,
+			want:  " [3] ",
+		},
+		// A view with no lines has no top line, so the bracket shows 0 to
+		// match the line count beside it.
 		"empty file": {
-			srcs: []string{""},
-			mode: yamlviewport.ViewModeFull,
+			srcs:  []string{""},
+			mode:  yamlviewport.ViewModeFull,
+			lines: 0,
+			want:  " [0] ",
 		},
 		"hunks of identical revisions": {
-			srcs: []string{"a: 1\n", "a: 1\n"},
-			mode: yamlviewport.ViewModeHunks,
+			srcs:  []string{"a: 1\n", "a: 1\n"},
+			mode:  yamlviewport.ViewModeHunks,
+			lines: 0,
+			want:  " [0] ",
 		},
 	}
 
@@ -649,12 +639,12 @@ func TestTitleLinePositionEmpty(t *testing.T) {
 			m := newModel(&modelOptions{sources: sourcesOf(tc.srcs...)})
 			m.viewport.SetViewMode(tc.mode)
 
-			got := update(t, m, tea.WindowSizeMsg{Width: 120, Height: 10})
-			require.Equal(t, 0, got.viewport.TotalLineCount())
+			got := update(t, update(t, m, tea.WindowSizeMsg{Width: 60, Height: 8}), tc.keys...)
+			require.Equal(t, tc.lines, got.viewport.TotalLineCount())
 
 			title := got.titleLine()
-			assert.Contains(t, title, " 0 lines ")
-			assert.Contains(t, title, " [0] ")
+			assert.Contains(t, title, fmt.Sprintf(" %d lines ", tc.lines))
+			assert.Contains(t, title, tc.want)
 		})
 	}
 }
