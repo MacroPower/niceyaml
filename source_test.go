@@ -3102,15 +3102,18 @@ func TestSource_AllDocuments_SyntaxErrorTokens(t *testing.T) {
 	// A document that did not parse keeps the tokens a document in its
 	// place has when the file parses, and so do the documents around it.
 	tcs := map[string]struct {
-		input string
-		// The text of each document, as its lines hold it.
-		want []string
+		// The lines of each document, which together are the lines of the
+		// file.
+		want [][]string
 		// The values of the tokens in the preamble of each document.
 		preambles [][]string
 	}{
 		"comment above the header": {
-			input: "a: 1\n# lifted\n---\nb: [\n---\nc: 3\n",
-			want:  []string{"a: 1", "# lifted\n---\nb: [", "---\nc: 3"},
+			want: [][]string{
+				{"a: 1"},
+				{"# lifted", "---", "b: ["},
+				{"---", "c: 3"},
+			},
 			preambles: [][]string{
 				nil,
 				{" lifted", "---"},
@@ -3118,24 +3121,31 @@ func TestSource_AllDocuments_SyntaxErrorTokens(t *testing.T) {
 			},
 		},
 		"comments around an end marker": {
-			input: "a: 1\n... # same\n# below\n---\nb: [\n...\n# after\n",
-			want:  []string{"a: 1\n... # same", "# below\n---\nb: [\n...\n# after"},
+			want: [][]string{
+				{"a: 1", "... # same"},
+				{"# below", "---", "b: [", "...", "# after"},
+			},
 			preambles: [][]string{
 				nil,
 				{" below", "---"},
 			},
 		},
 		"directive above the header": {
-			input: "%YAML 1.2\n---\na: [\n---\nb: 1\n",
-			want:  []string{"%YAML 1.2\n---\na: [", "---\nb: 1"},
+			want: [][]string{
+				{"%YAML 1.2", "---", "a: ["},
+				{"---", "b: 1"},
+			},
 			preambles: [][]string{
 				{"%", "YAML", "1.2", "---"},
 				{"---"},
 			},
 		},
 		"comment-only document after the failure": {
-			input: "# top\n---\na: [\n---\n# mid\n---\nb: 1\n",
-			want:  []string{"# top\n---\na: [", "---\n# mid", "---\nb: 1"},
+			want: [][]string{
+				{"# top", "---", "a: ["},
+				{"---", "# mid"},
+				{"---", "b: 1"},
+			},
 			preambles: [][]string{
 				{" top", "---"},
 				{"---", " mid"},
@@ -3148,7 +3158,7 @@ func TestSource_AllDocuments_SyntaxErrorTokens(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString(tc.input)
+			source := niceyaml.NewSourceFromString(stringtest.LinesLF(slices.Concat(tc.want...)...))
 
 			_, err := source.File()
 			require.Error(t, err)
@@ -3159,7 +3169,7 @@ func TestSource_AllDocuments_SyntaxErrorTokens(t *testing.T) {
 			var all token.Tokens
 
 			for i, doc := range docs {
-				assert.Equal(t, tc.want[i], doc.View().Held().Content())
+				assert.Equal(t, stringtest.JoinLF(tc.want[i]...), doc.View().Held().Content())
 
 				var preamble []string
 
