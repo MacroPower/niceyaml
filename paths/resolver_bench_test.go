@@ -3,7 +3,6 @@ package paths_test
 import (
 	"fmt"
 	"slices"
-	"strings"
 	"testing"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -13,15 +12,7 @@ import (
 // generateItemsYAML creates a sequence of count items, each a mapping with
 // a nested mapping below it.
 func generateItemsYAML(count int) string {
-	var sb strings.Builder
-
-	sb.WriteString("items:\n")
-
-	for i := range count {
-		fmt.Fprintf(&sb, "  - name: item_%d\n    spec:\n      value: %d\n", i, i)
-	}
-
-	return sb.String()
+	return "items:\n" + yamltest.GenerateLines(count, "  - name: item_%[1]d\n    spec:\n      value: %[1]d")
 }
 
 func BenchmarkResolver_Nodes_Recursive(b *testing.B) {
