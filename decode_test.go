@@ -5361,6 +5361,16 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			path  paths.Path
 			want  any
 		}{
+			"alias beside text spelled like a renamed anchor": {
+				input: "a: &x 1\nb: &x 2\nc: x [1]\nd: *x\n",
+				path:  paths.Current(),
+				want:  map[string]any{"a": uint64(1), "b": uint64(2), "c": "x [1]", "d": uint64(2)},
+			},
+			"failure in an anchor a later one hides": {
+				input: "a: &x !!bool nope\nb: &x 1\nc:\n  d: *x\n",
+				path:  paths.Current().Child("c"),
+				want:  map[string]any{"d": uint64(1)},
+			},
 			"sequence redefines the name after the alias": {
 				input: "x0: &x 1\nl:\n  - *x\n  - &x 2\n",
 				path:  paths.Current().Child("l"),
@@ -5633,16 +5643,6 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		}
 	})
 
-	t.Run("alias beside text spelled like a renamed anchor", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "a: &x 1\nb: &x 2\nc: x [1]\nd: *x\n")
-
-		got, err := dd.Decode[any](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"a": uint64(1), "b": uint64(2), "c": "x [1]", "d": uint64(2)}, got)
-	})
-
 	t.Run("later document after a folded node", func(t *testing.T) {
 		t.Parallel()
 
@@ -5656,16 +5656,6 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		got, err := yamltest.At(t, docs[1], paths.Current().Child("b")).Decode[[]int](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, []int{1, 2, 2}, got)
-	})
-
-	t.Run("failure in an anchor a later one hides decodes", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, "a: &x !!bool nope\nb: &x 1\nc:\n  d: *x\n")
-
-		got, err := yamltest.At(t, dd, paths.Current().Child("c")).Decode[any](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"d": uint64(1)}, got)
 	})
 
 	t.Run("unmarshaler text spells the anchors of the document", func(t *testing.T) {
