@@ -86,7 +86,7 @@ func renderContext(err error, lines int) string {
 // lines. An error that is not a [*niceyaml.SourceError] formats with %+v.
 func renderWith(err error, p *printer.Printer, lines int) string {
 	if bound, ok := err.(*niceyaml.SourceError); ok { //nolint:errorlint // Mirrors %+v, which formats the top-level value.
-		return p.With(printer.WithContextLines(lines)).PrintError(bound)
+		return p.PrintError(bound, niceyaml.WithContextLines(lines))
 	}
 
 	return fmt.Sprintf("%+v", err)
@@ -7553,7 +7553,7 @@ func renderings(err error) map[string]string {
 		"%v":          fmt.Sprintf("%v", err),
 		"%+v":         fmt.Sprintf("%+v", err),
 		"FormatError": niceyaml.FormatError(err, niceyaml.WithContextLines(whole)),
-		"PrintError":  printer.New(printer.WithContextLines(whole)).PrintError(err),
+		"PrintError":  printer.New().PrintError(err, niceyaml.WithContextLines(whole)),
 		"Excerpts":    strings.Join(excerpts, "\n"),
 		"ErrorTree":   strings.Join(rows, "\n"),
 		"slog":        logged.String(),

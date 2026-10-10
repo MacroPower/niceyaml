@@ -2,6 +2,7 @@ package printer_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -24,7 +25,6 @@ func TestPrinter_PrintError_ExcerptsOff(t *testing.T) {
 	p := printer.New(
 		printer.WithStyles(style.New(lipgloss.NewStyle())),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithContextLines(2),
 	)
 
 	// Every line but the one that holds the port holds a secret, so any
@@ -138,7 +138,6 @@ func TestPrinter_PrintError_Report(t *testing.T) {
 	p := printer.New(
 		printer.WithStyles(style.New(lipgloss.NewStyle())),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithContextLines(1),
 	)
 
 	first := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("first.yaml"))
@@ -150,10 +149,9 @@ func TestPrinter_PrintError_Report(t *testing.T) {
 
 	err := errors.Join(badB, badC, far)
 
-	// PrintError draws the report built with the context lines of the
-	// printer: the tree, each excerpt below its name, then each reason.
-	rep := niceyaml.NewErrorReport(err,
-		niceyaml.WithContextLines(p.ContextLines()), niceyaml.WithExcerptWidth(p.ExcerptWidth()))
+	// PrintError draws the report built with the same options: the tree,
+	// each excerpt below its name, then each reason.
+	rep := niceyaml.NewErrorReport(err, niceyaml.WithContextLines(1))
 
 	require.Len(t, rep.Excerpts, 2)
 	require.Len(t, rep.Unresolved, 1)
@@ -173,5 +171,152 @@ func TestPrinter_PrintError_Report(t *testing.T) {
 		"no excerpt: "+rep.Unresolved[0].Unresolved().Error(),
 	)
 
-	assert.Equal(t, want, p.PrintError(err))
+	assert.Equal(t, want, p.PrintError(err, niceyaml.WithContextLines(1)))
+	assert.Equal(t, want, p.PrintReport(rep))
+}
+
+func TestPrinter_PrintError_ExcerptOptions(t *testing.T) {
+	t.Parallel()
+
+	// The printer draws no color and no gutter, so a test reads each row
+	// as the text of the source.
+	p := printer.New(
+		printer.WithStyles(style.New(lipgloss.NewStyle())),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+		printer.WithGutter(printer.NoGutter),
+	)
+
+	// The marked line sits in the middle of a source with more lines on
+	// each side than the default shows, so the count changes the excerpt.
+	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nh: 8\ni: 9\n")
+	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("e"))))
+
+	excerpt := func(s string) string {
+		_, excerpt, ok := strings.Cut(s, "\n\n")
+		require.True(t, ok)
+
+		return excerpt
+	}
+
+	tcs := map[string]struct {
+		opts []niceyaml.ExcerptOption
+		want []string
+	}{
+		"default": {
+			want: []string{
+				"c: 3",
+				"d: 4",
+				"e: 5",
+				"   ^",
+				"f: 6",
+				"g: 7",
+			},
+		},
+		"no context": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithContextLines(0)},
+			want: []string{
+				"e: 5",
+				"   ^",
+			},
+		},
+		"more context": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithContextLines(3)},
+			want: []string{
+				"b: 2",
+				"c: 3",
+				"d: 4",
+				"e: 5",
+				"   ^",
+				"f: 6",
+				"g: 7",
+				"h: 8",
+			},
+		},
+		"last option wins": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithContextLines(3), niceyaml.WithContextLines(0)},
+			want: []string{
+				"e: 5",
+				"   ^",
+			},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := p.PrintError(bound, tc.opts...)
+
+			assert.Equal(t, stringtest.JoinLF(tc.want...), excerpt(got))
+
+			// PrintError and FormatError draw the same report, so the
+			// excerpt of FormatError shows the same lines behind its gutter.
+			plain := strings.Split(excerpt(niceyaml.FormatError(bound, tc.opts...)), "\n")
+			for i, row := range plain {
+				_, plain[i], _ = strings.Cut(row, " | ")
+			}
+
+			assert.Equal(t, strings.Join(plain, "\n"), excerpt(got))
+		})
+	}
+}
+
+func TestPrinter_PrintReport(t *testing.T) {
+	t.Parallel()
+
+	// The printer draws no color, so a test reads each row as text.
+	p := printer.New(
+		printer.WithStyles(style.New(lipgloss.NewStyle())),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+	)
+
+	first := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("first.yaml"))
+	badB := yamltest.Bind(t, first, niceyaml.NewError("bad b", niceyaml.AtPath(paths.Doc().Child("b"))))
+	far := yamltest.Bind(t, first, niceyaml.NewError("far", niceyaml.AtPosition(position.New(99, 0))))
+
+	t.Run("zero report", func(t *testing.T) {
+		t.Parallel()
+
+		assert.Empty(t, p.PrintReport(niceyaml.ErrorReport{}))
+		assert.Equal(t, p.PrintError(nil), p.PrintReport(niceyaml.NewErrorReport(nil)))
+	})
+
+	t.Run("report of an error", func(t *testing.T) {
+		t.Parallel()
+
+		rep := niceyaml.NewErrorReport(errors.Join(badB, far), niceyaml.WithContextLines(0))
+
+		require.Len(t, rep.Excerpts, 1)
+		require.Len(t, rep.Unresolved, 1)
+
+		want := stringtest.JoinLF(
+			"├── first.yaml:2:4: $.b: bad b",
+			"└── first.yaml: far",
+			"",
+			"   2  b: 2",
+			"         ^ bad b",
+			"",
+			"no excerpt: "+rep.Unresolved[0].Unresolved().Error(),
+		)
+
+		assert.Equal(t, want, p.PrintReport(rep))
+		assert.Equal(t, want, p.PrintError(errors.Join(badB, far), niceyaml.WithContextLines(0)))
+	})
+
+	t.Run("report the caller trimmed", func(t *testing.T) {
+		t.Parallel()
+
+		// PrintReport draws the parts the report holds, so a caller that
+		// drops the unresolved bindings prints no reason for them.
+		rep := niceyaml.NewErrorReport(errors.Join(badB, far), niceyaml.WithContextLines(0))
+		rep.Unresolved = nil
+
+		assert.Equal(t, stringtest.JoinLF(
+			"├── first.yaml:2:4: $.b: bad b",
+			"└── first.yaml: far",
+			"",
+			"   2  b: 2",
+			"         ^ bad b",
+		), p.PrintReport(rep))
+	})
 }

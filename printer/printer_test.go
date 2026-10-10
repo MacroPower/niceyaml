@@ -734,10 +734,7 @@ func TestPrinter_PrintError_MarksBindingsWithoutStyles(t *testing.T) {
 			_, gotExcerpt, ok := strings.Cut(got, "\n\n")
 			require.True(t, ok)
 
-			_, formatted, ok := strings.Cut(
-				niceyaml.FormatError(tc.err, niceyaml.WithContextLines(p.ContextLines())),
-				"\n\n",
-			)
+			_, formatted, ok := strings.Cut(niceyaml.FormatError(tc.err), "\n\n")
 			require.True(t, ok)
 
 			rows := strings.Split(formatted, "\n")
@@ -1005,10 +1002,9 @@ func TestPrinter_PrintError_MarksLongWrappedValue(t *testing.T) {
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithGutter(printer.NoGutter),
 				printer.WithWrap(tc.width),
-				printer.WithExcerptWidth(0),
 			)
 
-			rows := strings.Split(p.PrintError(err), "\n")[2:]
+			rows := strings.Split(p.PrintError(err, niceyaml.WithExcerptWidth(0)), "\n")[2:]
 			carets := 0
 
 			// A caret row follows every row that shows part of the value,
@@ -6122,10 +6118,9 @@ func TestPrinter_PrintError_AnnotationOnWrappedRow(t *testing.T) {
 				printer.WithStyles(style.Styles{}),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithWrap(40),
-				printer.WithExcerptWidth(0),
 			)
 
-			assert.Equal(t, stringtest.JoinLF(tc.want...), p.PrintError(err))
+			assert.Equal(t, stringtest.JoinLF(tc.want...), p.PrintError(err, niceyaml.WithExcerptWidth(0)))
 		})
 	}
 }
@@ -7608,32 +7603,6 @@ func TestPrinter_ContainerWidth_Accessor(t *testing.T) {
 	assert.Equal(t, 0, testPrinter().ContainerWidth())
 	assert.Equal(t, 40, testPrinter().With(printer.WithContainerWidth(40)).ContainerWidth())
 	assert.Equal(t, 0, testPrinter().With(printer.WithContainerWidth(-1)).ContainerWidth())
-
-	// A negative count shows the error lines alone, as 0 does, so it
-	// reads back as 0.
-	assert.Equal(t, printer.DefaultContextLines, testPrinter().ContextLines())
-	assert.Equal(t, 3, testPrinter().With(printer.WithContextLines(3)).ContextLines())
-	assert.Equal(t, 0, testPrinter().With(printer.WithContextLines(-3)).ContextLines())
-
-	// A negative width shows whole lines, as 0 does, so it reads back as
-	// 0.
-	assert.Equal(t, printer.DefaultExcerptWidth, testPrinter().ExcerptWidth())
-	assert.Equal(t, 24, testPrinter().With(printer.WithExcerptWidth(24)).ExcerptWidth())
-	assert.Equal(t, 0, testPrinter().With(printer.WithExcerptWidth(-1)).ExcerptWidth())
-}
-
-func TestPrinter_DefaultContextLines(t *testing.T) {
-	t.Parallel()
-
-	// The marked line sits in the middle of a source with more lines on
-	// each side than the default shows, so the count changes the excerpt.
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nh: 8\ni: 9\n")
-	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("e"))))
-
-	got := fmt.Sprintf("%+v", bound)
-
-	assert.Equal(t, niceyaml.FormatError(bound), got)
-	assert.NotEqual(t, niceyaml.FormatError(bound, niceyaml.WithContextLines(printer.DefaultContextLines+1)), got)
 }
 
 func TestPrinter_PrintError_JoinOfNothing(t *testing.T) {
@@ -8212,7 +8181,7 @@ func TestPrinter_PrintError_ClipsLongLine(t *testing.T) {
 	bad := niceyaml.NewError("expected number", niceyaml.AtPath(paths.Current().Child("items").Index(20)))
 
 	tcs := map[string]struct {
-		opts []printer.Option
+		opts []niceyaml.ExcerptOption
 		want []string
 	}{
 		"default width": {
@@ -8223,8 +8192,8 @@ func TestPrinter_PrintError_ClipsLongLine(t *testing.T) {
 				strings.Repeat(" ", 6+3+80) + "^^^^^^",
 			},
 		},
-		"width from the printer": {
-			opts: []printer.Option{printer.WithExcerptWidth(24)},
+		"width from the options": {
+			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(24)},
 			want: []string{
 				"1:169: $.items[20]: expected number",
 				"",
@@ -8233,7 +8202,7 @@ func TestPrinter_PrintError_ClipsLongLine(t *testing.T) {
 			},
 		},
 		"whole lines": {
-			opts: []printer.Option{printer.WithExcerptWidth(0)},
+			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0)},
 			want: []string{
 				"1:169: $.items[20]: expected number",
 				"",
@@ -8249,12 +8218,12 @@ func TestPrinter_PrintError_ClipsLongLine(t *testing.T) {
 
 			err := yamltest.Bind(t, niceyaml.NewSourceFromString(input), bad)
 
-			p := printer.New(append([]printer.Option{
+			p := printer.New(
 				printer.WithStyles(style.Styles{}),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
-			}, tc.opts...)...)
+			)
 
-			assert.Equal(t, stringtest.JoinLF(tc.want...), p.PrintError(err))
+			assert.Equal(t, stringtest.JoinLF(tc.want...), p.PrintError(err, tc.opts...))
 		})
 	}
 }

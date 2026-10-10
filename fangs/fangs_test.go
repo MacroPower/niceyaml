@@ -537,7 +537,6 @@ func TestErrorHandler_ColorProfile(t *testing.T) {
 		printer.WithStyles(yamltest.NewXMLStyles()),
 		printer.WithGutter(printer.NoGutter),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithContextLines(0),
 	)
 
 	// The handler writes the header, each line of the message behind the
@@ -552,7 +551,7 @@ func TestErrorHandler_ColorProfile(t *testing.T) {
 		return stringtest.JoinLF(append(rows, "", "")...)
 	}
 
-	styled := output(p.PrintError(err))
+	styled := output(p.PrintError(err, niceyaml.WithContextLines(0)))
 	plain := output(niceyaml.FormatError(err, niceyaml.WithContextLines(0)))
 
 	// The plain form holds no style and draws a caret run under each range.
@@ -593,9 +592,100 @@ func TestErrorHandler_ColorProfile(t *testing.T) {
 			var buf bytes.Buffer
 
 			w := &colorprofile.Writer{Forward: &buf, Profile: tc.profile}
-			fangs.NewErrorHandler(fangs.WithPrinter(p))(w, testStyles(), err)
+			fangs.NewErrorHandler(
+				fangs.WithPrinter(p),
+				fangs.WithExcerptOptions(niceyaml.WithContextLines(0)),
+			)(w, testStyles(), err)
 
 			assert.Equal(t, tc.want, buf.String())
+		})
+	}
+}
+
+func TestNewErrorHandler_WithExcerptOptions(t *testing.T) {
+	t.Parallel()
+
+	// The marked line sits in the middle of a source with more lines on
+	// each side than the default shows, so the count changes the excerpt.
+	src := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nh: 8\ni: 9\n")
+	err := yamltest.Bind(t, src, niceyaml.NewError("bad", niceyaml.AtPath(paths.MustParse("$.e"))))
+
+	p := printer.New(
+		printer.WithStyles(yamltest.NewXMLStyles()),
+		printer.WithGutter(printer.NoGutter),
+		printer.WithContainerStyle(lipgloss.NewStyle()),
+	)
+
+	// The handler writes the header, each line of the message behind the
+	// indent, and a blank line.
+	output := func(msg string) string {
+		rows := []string{"Error"}
+
+		for row := range strings.SplitSeq(msg, "\n") {
+			rows = append(rows, strings.Repeat(" ", fangs.Indent)+row)
+		}
+
+		return stringtest.JoinLF(append(rows, "", "")...)
+	}
+
+	tcs := map[string]struct {
+		opts   []fangs.Option
+		want   []niceyaml.ExcerptOption
+		shown  []string
+		hidden []string
+	}{
+		"default": {
+			shown:  []string{"c: 3", "g: 7"},
+			hidden: []string{"b: 2", "h: 8"},
+		},
+		"no context": {
+			opts:   []fangs.Option{fangs.WithExcerptOptions(niceyaml.WithContextLines(0))},
+			want:   []niceyaml.ExcerptOption{niceyaml.WithContextLines(0)},
+			shown:  []string{"e: 5"},
+			hidden: []string{"d: 4", "f: 6"},
+		},
+		"more context": {
+			opts:   []fangs.Option{fangs.WithExcerptOptions(niceyaml.WithContextLines(3))},
+			want:   []niceyaml.ExcerptOption{niceyaml.WithContextLines(3)},
+			shown:  []string{"b: 2", "h: 8"},
+			hidden: []string{"a: 1", "i: 9"},
+		},
+		"later call replaces the earlier": {
+			opts: []fangs.Option{
+				fangs.WithExcerptOptions(niceyaml.WithContextLines(3)),
+				fangs.WithExcerptOptions(niceyaml.WithContextLines(0)),
+			},
+			want:   []niceyaml.ExcerptOption{niceyaml.WithContextLines(0)},
+			shown:  []string{"e: 5"},
+			hidden: []string{"d: 4", "f: 6"},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			handler := fangs.NewErrorHandler(append([]fangs.Option{fangs.WithPrinter(p)}, tc.opts...)...)
+
+			var styled, plain bytes.Buffer
+
+			handler(&colorprofile.Writer{Forward: &styled, Profile: colorprofile.TrueColor}, testStyles(), err)
+			handler(&colorprofile.Writer{Forward: &plain, Profile: colorprofile.ASCII}, testStyles(), err)
+
+			// Both paths draw the report the options build, so each shows
+			// the lines of its renderer at those settings.
+			assert.Equal(t, output(p.PrintError(err, tc.want...)), styled.String())
+			assert.Equal(t, output(niceyaml.FormatError(err, tc.want...)), plain.String())
+
+			// The plain output holds each line of the source as text, where
+			// the styled output splits it into tags.
+			for _, line := range tc.shown {
+				assert.Contains(t, plain.String(), line)
+			}
+
+			for _, line := range tc.hidden {
+				assert.NotContains(t, plain.String(), line)
+			}
 		})
 	}
 }

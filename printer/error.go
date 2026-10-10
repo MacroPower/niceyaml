@@ -19,14 +19,15 @@ const errorConnectorWidth = 4
 // PrintError renders err for a reader: its message as a tree, then one
 // excerpt per source the bindings in err touch, as [niceyaml.Excerpts]
 // yields them. The tree puts a connector in front of each error below
-// another. Each excerpt keeps the context lines [WithContextLines] sets
-// on either side of each marked line and draws a caret run under each
-// location. PrintError draws both with the styles of the printer and
-// wraps them to the width [WithWrap] sets. A nil err prints as "". A
-// program configures one printer and prints its errors through it:
+// another. Each excerpt keeps the context lines opts set on either side
+// of each marked line, as [niceyaml.ExcerptOption] describes, and draws
+// a caret run under each location. PrintError draws both with the styles
+// of the printer and wraps them to the width [WithWrap] sets. A nil err
+// prints as "". A program configures one printer and prints its errors
+// through it:
 //
-//	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
-//	lipgloss.Fprintln(os.Stderr, p.PrintError(err))
+//	p := printer.New(printer.WithWrap(width))
+//	lipgloss.Fprintln(os.Stderr, p.PrintError(err, niceyaml.WithContextLines(3)))
 //
 // # Tree
 //
@@ -48,10 +49,10 @@ const errorConnectorWidth = 4
 //
 // # Excerpts
 //
-// Each excerpt keeps the context lines [WithContextLines] sets on either
-// side of each marked line. A line longer than the width
-// [WithExcerptWidth] sets shows a window of that many columns around
-// each location on it, with "..." in place of the rest. An error joined
+// Each excerpt keeps the context lines [niceyaml.WithContextLines] sets
+// on either side of each marked line. A line longer than the width
+// [niceyaml.WithExcerptWidth] sets shows a window of that many columns
+// around each location on it, with "..." in place of the rest. An error joined
 // from one bound error per document of a file therefore prints that file
 // once, with the errors of every document on it. A binding whose
 // children point into another file, such as a detail that names where a
@@ -117,13 +118,22 @@ const errorConnectorWidth = 4
 // # Other Renderers
 //
 // PrintError draws the [niceyaml.ErrorReport] that
-// [niceyaml.NewErrorReport] builds for err with the context lines and
-// the excerpt width of the printer, and [niceyaml.FormatError] draws the
+// [niceyaml.NewErrorReport] builds for err with opts, as
+// [Printer.PrintReport] draws one, and [niceyaml.FormatError] draws the
 // same report as plain text.
-func (p *Printer) PrintError(err error) string {
-	rep := niceyaml.NewErrorReport(err,
-		niceyaml.WithContextLines(p.contextLines), niceyaml.WithExcerptWidth(p.excerptWidth))
+func (p *Printer) PrintError(err error, opts ...niceyaml.ExcerptOption) string {
+	return p.PrintReport(niceyaml.NewErrorReport(err, opts...))
+}
 
+// PrintReport renders rep as [Printer.PrintError] renders the report it
+// builds for an error. The tree comes first, then each excerpt below the
+// name of its source when the report names it, then each "no excerpt:"
+// line. PrintReport draws them with the styles and the width of the
+// printer and puts a blank line between the parts. A program that builds
+// a report once with [niceyaml.NewErrorReport], such as one that reads
+// its parts or renders it as plain text too, prints that same report
+// here. The zero ErrorReport prints as "".
+func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 	parts := make([]string, 0, 1+len(rep.Excerpts)+len(rep.Unresolved))
 
 	if msg := p.renderErrorTree(rep.Tree); msg != "" {

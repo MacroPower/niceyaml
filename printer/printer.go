@@ -12,7 +12,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/cells"
 	"go.jacobcolvin.com/niceyaml/internal/clip"
 	"go.jacobcolvin.com/niceyaml/internal/colors"
@@ -69,26 +68,13 @@ const wrapOnCharacters = " " + breakpoints
 //
 // [Printer.PrintError] renders any error as a tree, with a connector in
 // front of each error below another, and the source excerpt of every
-// [niceyaml.SourceError] in it, with the printer's styles, width, and the
-// context lines [WithContextLines] sets. A program configures one printer
-// with its terminal width and theme and prints its errors through it.
+// [niceyaml.SourceError] in it, with the printer's styles and width and
+// the context lines a [niceyaml.ExcerptOption] sets. A program configures
+// one printer with its terminal width and theme and prints its errors
+// through it.
 type Printer struct {
 	config
 }
-
-// DefaultContextLines is the number of context lines [Printer.PrintError]
-// shows around each error location unless [WithContextLines] sets another.
-// It is [niceyaml.DefaultContextLines], the count the %+v verb of a
-// [*niceyaml.SourceError] uses, so PrintError and %+v show the same
-// context by default.
-const DefaultContextLines = niceyaml.DefaultContextLines
-
-// DefaultExcerptWidth is the number of columns an excerpt of
-// [Printer.PrintError] shows around each error location on a long line
-// unless [WithExcerptWidth] sets another. It is
-// [niceyaml.DefaultExcerptWidth], the width [niceyaml.FormatError] uses
-// by default.
-const DefaultExcerptWidth = niceyaml.DefaultExcerptWidth
 
 // New creates a new [*Printer].
 // By default it uses [style.Default], [DefaultGutter], and [DefaultAnnotation].
@@ -98,8 +84,6 @@ func New(opts ...Option) *Printer {
 		gutter:         DefaultGutter,
 		annotationFunc: DefaultAnnotation,
 		blends:         newBlendCache(),
-		contextLines:   DefaultContextLines,
-		excerptWidth:   DefaultExcerptWidth,
 	}
 
 	p.apply(opts)
@@ -143,8 +127,6 @@ func (p *Printer) apply(opts []Option) {
 //   - [WithAnnotation]
 //   - [WithWrap]
 //   - [WithMaxNumber]
-//   - [WithContextLines]
-//   - [WithExcerptWidth]
 type Option func(*config)
 
 // config holds the settings an [Option] configures, and the cache of
@@ -162,8 +144,6 @@ type config struct {
 	wrap           int
 	containerWidth int
 	maxNumber      int
-	contextLines   int
-	excerptWidth   int
 	hasCustomStyle bool
 }
 
@@ -905,29 +885,6 @@ func WithMaxNumber(n int) Option {
 	}
 }
 
-// WithContextLines is an [Option] that sets the number of context lines
-// [Printer.PrintError] shows around each error location. The default is
-// [DefaultContextLines], and a negative count shows the error lines alone,
-// as 0 does.
-func WithContextLines(n int) Option {
-	return func(c *config) {
-		c.contextLines = max(0, n)
-	}
-}
-
-// WithExcerptWidth is an [Option] that sets how many columns of a long
-// line an excerpt of [Printer.PrintError] shows around each error
-// location, as [niceyaml.WithExcerptWidth] sets it for
-// [niceyaml.FormatError]. The default is [DefaultExcerptWidth], a width
-// of 0 shows every line whole, and a negative width counts as 0. The
-// width drops the columns outside each window, where [WithWrap] folds a
-// row and keeps every column, so the two settings are independent.
-func WithExcerptWidth(cols int) Option {
-	return func(c *config) {
-		c.excerptWidth = max(0, cols)
-	}
-}
-
 // Wrap returns the width the printer wraps words at, or 0 when the
 // printer does not wrap.
 func (p *Printer) Wrap() int {
@@ -938,18 +895,6 @@ func (p *Printer) Wrap() int {
 // or 0 when it shrinks to the widest row. See [WithContainerWidth].
 func (p *Printer) ContainerWidth() int {
 	return p.containerWidth
-}
-
-// ContextLines returns the number of context lines [Printer.PrintError]
-// shows around each error location.
-func (p *Printer) ContextLines() int {
-	return p.contextLines
-}
-
-// ExcerptWidth returns the number of columns an excerpt of
-// [Printer.PrintError] shows around each error location on a long line.
-func (p *Printer) ExcerptWidth() int {
-	return p.excerptWidth
 }
 
 // MaxNumber returns the line number the gutter sizes itself for when

@@ -1912,8 +1912,7 @@ func locateMerged(b binder, node *Node, at position.Position, l locus) (location
 // it, or a diff against another revision. [FormatError] renders the
 // message as a tree and the excerpt as plain text, and
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] prints the
-// same tree and excerpt with color and the context lines the printer is
-// configured with:
+// same tree and excerpt with color:
 //
 //	lipgloss.Fprintln(os.Stderr, p.PrintError(err))
 type SourceError struct {
@@ -1997,10 +1996,10 @@ const DefaultExcerptWidth = 160
 //   - [WithContextLines]
 //   - [WithExcerptWidth]
 //
-// [go.jacobcolvin.com/niceyaml/printer.Printer] takes the same settings
-// through its own options, [go.jacobcolvin.com/niceyaml/printer.WithContextLines]
-// and [go.jacobcolvin.com/niceyaml/printer.WithExcerptWidth], for the
-// excerpts [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] draws.
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] takes the
+// same options for the excerpts it draws with styles, and
+// [go.jacobcolvin.com/niceyaml/printer.Printer.PrintReport] draws the
+// report [NewErrorReport] builds with them.
 type ExcerptOption func(*excerptConfig)
 
 // excerptConfig holds the settings an [ExcerptOption] configures.

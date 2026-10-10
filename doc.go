@@ -233,11 +233,11 @@
 //
 // A terminal gets color from
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which prints
-// the same tree and excerpts with the printer's styles, width, and
-// context lines:
+// the same tree and excerpts with the printer's styles and width, and
+// takes the same [ExcerptOption] values:
 //
-//	p := printer.New(printer.WithWrap(width), printer.WithContextLines(3))
-//	lipgloss.Fprintln(os.Stderr, p.PrintError(err))
+//	p := printer.New(printer.WithWrap(width))
+//	lipgloss.Fprintln(os.Stderr, p.PrintError(err, niceyaml.WithContextLines(3)))
 //
 // Both draw the [ErrorReport] that [NewErrorReport] builds for the error.
 // The report holds the tree, the excerpt of each source, and the bindings

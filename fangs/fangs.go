@@ -24,18 +24,20 @@ func ErrorHandler(w io.Writer, styles fang.Styles, err error) {
 }
 
 // Indent is the number of columns [NewErrorHandler] puts in front of every
-// line [printer.Printer.PrintError] renders.
+// line [printer.Printer.PrintReport] renders.
 const Indent = 2
 
 // Option configures the [fang.ErrorHandler] that [NewErrorHandler] returns.
 //
 // Available options:
 //   - [WithPrinter]
+//   - [WithExcerptOptions]
 type Option func(*config)
 
 // config holds the settings an [Option] configures.
 type config struct {
 	printer *printer.Printer
+	excerpt []niceyaml.ExcerptOption
 }
 
 // newConfig applies opts over the defaults: a [printer.Printer] from
@@ -55,19 +57,31 @@ func newConfig(opts []Option) config {
 }
 
 // WithPrinter is an [Option] that sets the [*printer.Printer] that renders
-// errors through [printer.Printer.PrintError]. The printer's width, set
-// with [printer.WithWrap], controls word wrapping. Its styles color the
-// highlighted locations, [printer.WithContextLines] sets the context
-// lines around each one, and [printer.WithExcerptWidth] sets how much of
-// a long line an excerpt shows.
+// errors through [printer.Printer.PrintReport]. The printer's width, set
+// with [printer.WithWrap], controls word wrapping, and its styles color
+// the highlighted locations. [WithExcerptOptions] sets the context lines
+// around each location and how much of a long line an excerpt shows.
 //
 // The handler indents every line by [Indent] columns, and
-// [printer.Printer.PrintError] fits each excerpt and the frame of its
+// [printer.Printer.PrintReport] fits each excerpt and the frame of its
 // container within the width. To fit a terminal w columns wide, set the
 // width to w - [Indent], as the [NewErrorHandler] example does.
 func WithPrinter(p *printer.Printer) Option {
 	return func(cfg *config) {
 		cfg.printer = p
+	}
+}
+
+// WithExcerptOptions is an [Option] that sets the [niceyaml.ExcerptOption]
+// values the handler builds the report of each error with:
+// [niceyaml.WithContextLines] sets the context lines around each
+// location, and [niceyaml.WithExcerptWidth] sets how much of a long line
+// an excerpt shows. The styled output and the plain output of the
+// handler draw one report, so both show the same lines. A later call
+// replaces the options of an earlier one.
+func WithExcerptOptions(opts ...niceyaml.ExcerptOption) Option {
+	return func(cfg *config) {
+		cfg.excerpt = opts
 	}
 }
 
@@ -84,24 +98,25 @@ func WithPrinter(p *printer.Printer) Option {
 //	)
 //
 // The handler writes the error header, then what
-// [printer.Printer.PrintError] renders for err. That output starts with the
-// message as a tree, with the context its wrappers added in front and a
-// connector before each error below another. The excerpt of each
-// [*go.jacobcolvin.com/niceyaml.SourceError] in the error's tree follows,
-// so a joined error annotates each failure it holds. The handler indents
-// each line by [Indent] columns and ends the output with a blank line. An
-// error with no SourceError in its tree renders as that tree alone, and
-// the handler drops the line breaks that end it, such as the one after
-// the suggestions Cobra lists for an unknown command.
+// [printer.Printer.PrintReport] renders for the [niceyaml.ErrorReport] of
+// err, which the handler builds with the options [WithExcerptOptions]
+// sets. That output starts with the message as a tree, with the context
+// its wrappers added in front and a connector before each error below
+// another. The excerpt of each [*go.jacobcolvin.com/niceyaml.SourceError]
+// in the error's tree follows, so a joined error annotates each failure
+// it holds. The handler indents each line by [Indent] columns and ends
+// the output with a blank line. An error with no SourceError in its tree
+// renders as that tree alone, and the handler drops the line breaks that
+// end it, such as the one after the suggestions Cobra lists for an
+// unknown command.
 //
 // Fang hands the handler a [*colorprofile.Writer] that holds the color
 // profile of the error stream. When that profile has no color, as in a
 // pipe, a file, or a terminal with NO_COLOR set, the handler writes what
-// [niceyaml.FormatError] renders in place of the PrintError output, with
-// the context lines and the excerpt width of the printer. The carets of
-// FormatError then mark each range that color marks in a terminal, and
-// its lines do not wrap.
-// A writer of any other type gets the PrintError output.
+// [niceyaml.FormatError] renders with the same options in place of the
+// PrintReport output. The carets of FormatError then mark each range
+// that color marks in a terminal, and its lines do not wrap.
+// A writer of any other type gets the PrintReport output.
 //
 // Unlike [fang.DefaultErrorHandler], which wraps errors in a lipgloss style
 // that can break multi-line output, this handler styles only the error
@@ -122,7 +137,7 @@ func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 
 	indent := strings.Repeat(" ", Indent)
 
-	msg := render(w, err, cfg.printer)
+	msg := render(w, err, cfg)
 
 	// A blank line of the handler's own follows the message, so the line
 	// breaks that end a message, such as the one after the suggestions
@@ -152,20 +167,19 @@ func handleError(w io.Writer, styles fang.Styles, err error, cfg config) {
 
 // render returns err as the handler writes it to w: what
 // [niceyaml.FormatError] renders when w is a [*colorprofile.Writer] whose
-// profile has no color, and what [printer.Printer.PrintError] renders
-// otherwise.
-func render(w io.Writer, err error, p *printer.Printer) string {
+// profile has no color, and what [printer.Printer.PrintReport] renders
+// otherwise. Both draw the report the excerpt options of cfg build.
+func render(w io.Writer, err error, cfg config) string {
 	if cw, ok := w.(*colorprofile.Writer); ok && cw.Profile <= colorprofile.ASCII {
-		return niceyaml.FormatError(err,
-			niceyaml.WithContextLines(p.ContextLines()), niceyaml.WithExcerptWidth(p.ExcerptWidth()))
+		return niceyaml.FormatError(err, cfg.excerpt...)
 	}
 
-	return p.PrintError(err)
+	return cfg.printer.PrintReport(niceyaml.NewErrorReport(err, cfg.excerpt...))
 }
 
 // isBound reports whether the tree of err holds an error bound to a
-// source, for which [printer.Printer.PrintError] renders an excerpt after
-// the tree.
+// source, for which [printer.Printer.PrintReport] renders an excerpt
+// after the tree.
 func isBound(err error) bool {
 	for range niceyaml.Bindings(err) {
 		return true
