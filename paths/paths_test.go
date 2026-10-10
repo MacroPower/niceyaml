@@ -12,7 +12,6 @@ import (
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
-	"github.com/goccy/go-yaml/parser"
 	"github.com/goccy/go-yaml/token"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1902,9 +1901,7 @@ func TestParse_RoundTrip_EmptyName(t *testing.T) {
 
 	// The goccy parser rejects $.'' so the empty name stays out of the table
 	// above, but Parse reads back what String writes.
-	source := niceyaml.NewSourceFromString("'': v\n")
-	file, err := source.File()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, "'': v\n").DocumentAST()
 
 	tcs := map[string]paths.Path{
 		"child":     paths.Doc().Child(""),
@@ -1919,7 +1916,7 @@ func TestParse_RoundTrip_EmptyName(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, want, got)
 
-			nodes, err := paths.NewResolver(file.Docs[0]).Nodes(got)
+			nodes, err := paths.NewResolver(doc).Nodes(got)
 			require.NoError(t, err)
 			require.Len(t, nodes, 1)
 			assert.Equal(t, "v", nodes[0].GetToken().Value)
@@ -1950,12 +1947,17 @@ func TestMustParse(t *testing.T) {
 func TestPath_YAMLPath(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString(
-		"a:\n  'b.c': [x, y]\n  don't: 1\n  a\\.b: 2\n  a.b'c: 3\n" +
-			"'':\n  a'.b: 4\n  a'*b: 5\n  a.b: 6\n",
-	)
-	file, err := source.File()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		a:
+		  'b.c': [x, y]
+		  don't: 1
+		  a\.b: 2
+		  a.b'c: 3
+		'':
+		  a'.b: 4
+		  a'*b: 5
+		  a.b: 6
+	`)).DocumentAST()
 
 	tcs := map[string]struct {
 		path       paths.Path
@@ -2016,7 +2018,7 @@ func TestPath_YAMLPath(t *testing.T) {
 			yp := yamlPath(t, tc.path)
 			assert.Equal(t, tc.wantString, yp.String())
 
-			node, err := yp.FilterNode(file.Docs[0].Body)
+			node, err := yp.FilterNode(doc.Body)
 			require.NoError(t, err)
 			require.NotNil(t, node, "node not found")
 			assert.Equal(t, tc.want, node.GetToken().Value)
@@ -2068,14 +2070,12 @@ func TestPath_YAMLPath_Replace(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			file, err := parser.ParseBytes([]byte(tc.src), 0)
+			file, err := niceyaml.NewSourceFromString(tc.src).File()
 			require.NoError(t, err)
 
-			replacement, err := parser.ParseBytes([]byte("9"), 0)
-			require.NoError(t, err)
+			replacement := yamltest.FirstDocument(t, "9").DocumentAST().Body
 
-			err = yamlPath(t, tc.path).ReplaceWithNode(file, replacement.Docs[0].Body)
-			require.NoError(t, err)
+			require.NoError(t, yamlPath(t, tc.path).ReplaceWithNode(file, replacement))
 			assert.Equal(t, tc.want, file.String())
 		})
 	}
@@ -2087,10 +2087,9 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 	t.Run("goccy strips single quotes from a name", func(t *testing.T) {
 		t.Parallel()
 
-		file, err := parser.ParseBytes([]byte("x: plain\n\"'x'\": quoted\n"), 0)
-		require.NoError(t, err)
+		doc := yamltest.FirstDocument(t, "x: plain\n\"'x'\": quoted\n").DocumentAST()
 
-		node, err := yamlPath(t, paths.Doc().Child("'x'")).FilterNode(file.Docs[0].Body)
+		node, err := yamlPath(t, paths.Doc().Child("'x'")).FilterNode(doc.Body)
 		require.NoError(t, err)
 		require.NotNil(t, node, "node not found")
 		assert.Equal(t, "plain", node.GetToken().Value)
@@ -2099,17 +2098,15 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 	t.Run("goccy drops a key selector mid-path", func(t *testing.T) {
 		t.Parallel()
 
-		file, err := parser.ParseBytes([]byte("a:\n  b: 1\n"), 0)
-		require.NoError(t, err)
-
+		doc := yamltest.FirstDocument(t, "a:\n  b: 1\n").DocumentAST()
 		path := paths.Doc().Child("a").Key().Child("b")
 
-		node, err := yamlPath(t, path).FilterNode(file.Docs[0].Body)
+		node, err := yamlPath(t, path).FilterNode(doc.Body)
 		require.NoError(t, err)
 		require.NotNil(t, node, "node not found")
 		assert.Equal(t, "1", node.GetToken().Value)
 
-		_, err = paths.NewResolver(file.Docs[0]).Node(path)
+		_, err = paths.NewResolver(doc).Node(path)
 		require.ErrorIs(t, err, paths.ErrNotFound)
 	})
 
@@ -2150,11 +2147,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				file, err := parser.ParseBytes([]byte(tc.input), 0)
-				require.NoError(t, err)
-
-				doc := file.Docs[0]
-
+				doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 				byName := paths.Doc().Child("m", "k")
 
 				node, err := paths.NewResolver(doc).Node(byName)
@@ -2181,16 +2174,14 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 	t.Run("goccy skips merged entries", func(t *testing.T) {
 		t.Parallel()
 
-		file, err := parser.ParseBytes([]byte("base: &b\n  k: v\nm:\n  <<: *b\n"), 0)
-		require.NoError(t, err)
-
+		doc := yamltest.FirstDocument(t, "base: &b\n  k: v\nm:\n  <<: *b\n").DocumentAST()
 		path := paths.Doc().Child("m", "k")
 
-		node, err := paths.NewResolver(file.Docs[0]).Node(path)
+		node, err := paths.NewResolver(doc).Node(path)
 		require.NoError(t, err)
 		assert.Equal(t, "v", node.GetToken().Value)
 
-		node, err = yamlPath(t, path).FilterNode(file.Docs[0].Body)
+		node, err = yamlPath(t, path).FilterNode(doc.Body)
 		require.NoError(t, err)
 		assert.Nil(t, node)
 	})
@@ -2200,7 +2191,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 
 		input := "m:\n  k: first\n  k: last\n"
 
-		file, err := parser.ParseBytes([]byte(input), 0, parser.AllowDuplicateMapKey())
+		file, err := niceyaml.NewSourceFromString(input, niceyaml.WithAllowDuplicateKeys(true)).File()
 		require.NoError(t, err)
 
 		path := paths.Doc().Child("m", "k")
@@ -2214,11 +2205,9 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		require.NotNil(t, node, "node not found")
 		assert.Equal(t, "first", node.GetToken().Value)
 
-		replacement, err := parser.ParseBytes([]byte("new\n"), 0)
-		require.NoError(t, err)
+		replacement := yamltest.FirstDocument(t, "new\n").DocumentAST().Body
 
-		err = yamlPath(t, path).ReplaceWithNode(file, replacement.Docs[0].Body)
-		require.NoError(t, err)
+		require.NoError(t, yamlPath(t, path).ReplaceWithNode(file, replacement))
 		assert.Equal(t, "m:\n  k: new\n  k: new\n", file.String())
 	})
 }
@@ -2244,9 +2233,7 @@ explicit_first:
   : 10
 `
 
-	source := niceyaml.NewSourceFromString(input)
-	file, err := source.File()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, input).DocumentAST()
 
 	tcs := map[string]struct {
 		path      paths.Path
@@ -2341,7 +2328,7 @@ explicit_first:
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk := resolveToken(t, tc.path, tc.key, file.Docs[0])
+			tk := resolveToken(t, tc.path, tc.key, doc)
 			assert.Equal(t, tc.wantValue, tk.Value)
 			assert.Equal(t, tc.wantType, tk.Type)
 		})
@@ -2530,16 +2517,15 @@ func TestPath_Token_Collections(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			file, err := niceyaml.NewSourceFromString(tc.input).File()
-			require.NoError(t, err)
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
-			tk, err := paths.NewResolver(file.Docs[0]).Token(paths.MustParse(tc.path))
+			tk, err := paths.NewResolver(doc).Token(paths.MustParse(tc.path))
 			require.NoError(t, err)
 
 			got := fmt.Sprintf("%s@%d:%d", tk.Value, tk.Position.Line, tk.Position.Column)
 			assert.Equal(t, tc.want, got)
 
-			viaResolver, err := paths.NewResolver(file.Docs[0]).Token(paths.MustParse(tc.path))
+			viaResolver, err := paths.NewResolver(doc).Token(paths.MustParse(tc.path))
 			require.NoError(t, err)
 			assert.Same(t, tk, viaResolver)
 		})
@@ -2549,12 +2535,10 @@ func TestPath_Token_Collections(t *testing.T) {
 func TestPath_Token_InvalidPath(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString(`name: test`)
-	file, err := source.File()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, `name: test`).DocumentAST()
 
 	path := paths.Doc().Child("nonexistent")
-	_, err = paths.NewResolver(file.Docs[0]).Token(path)
+	_, err := paths.NewResolver(doc).Token(path)
 	require.ErrorIs(t, err, paths.ErrNotFound)
 }
 
@@ -2676,15 +2660,12 @@ func TestPath_Token_UnresolvableAlias(t *testing.T) {
 
 	// Node looks through the alias and reports that it names no anchor, while
 	// Token returns the alias's own token.
-	source := niceyaml.NewSourceFromString("a: *x\nb: &x 1\n")
-	file, err := source.File()
-	require.NoError(t, err)
-	require.Len(t, file.Docs, 1)
+	doc := yamltest.FirstDocument(t, "a: *x\nb: &x 1\n").DocumentAST()
 
-	_, err = paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("a"))
+	_, err := paths.NewResolver(doc).Node(paths.Doc().Child("a"))
 	require.ErrorIs(t, err, paths.ErrAlias)
 
-	tk, err := paths.NewResolver(file.Docs[0]).Token(paths.Doc().Child("a"))
+	tk, err := paths.NewResolver(doc).Token(paths.Doc().Child("a"))
 	require.NoError(t, err)
 	assert.Equal(t, token.AliasType, tk.Type)
 }
@@ -2727,9 +2708,7 @@ nested:
       value: found
 `
 
-	source := niceyaml.NewSourceFromString(input)
-	file, err := source.File()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, input).DocumentAST()
 
 	tcs := map[string]struct {
 		path      paths.Path
@@ -2764,7 +2743,7 @@ nested:
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk := resolveToken(t, tc.path, tc.key, file.Docs[0])
+			tk := resolveToken(t, tc.path, tc.key, doc)
 			assert.Equal(t, tc.wantValue, tk.Value)
 			assert.Equal(t, tc.wantType, tk.Type)
 		})
@@ -2774,11 +2753,9 @@ nested:
 func TestPath_Node(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a:\n  b: [1, 2]\n")
-	file, err := source.File()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, "a:\n  b: [1, 2]\n").DocumentAST()
 
-	node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("a", "b"))
+	node, err := paths.NewResolver(doc).Node(paths.Doc().Child("a", "b"))
 	require.NoError(t, err)
 
 	seq, ok := node.(*ast.SequenceNode)
@@ -2817,9 +2794,7 @@ late:
   <<: *b
 `
 
-	source := niceyaml.NewSourceFromString(input)
-	file, err := source.File()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, input).DocumentAST()
 
 	tcs := map[string]struct {
 		path      paths.Path
@@ -2952,7 +2927,7 @@ late:
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk := resolveToken(t, tc.path, tc.key, file.Docs[0])
+			tk := resolveToken(t, tc.path, tc.key, doc)
 			assert.Equal(t, tc.wantValue, tk.Value)
 			assert.Equal(t, tc.wantLine, tk.Position.Line)
 		})
@@ -2961,14 +2936,14 @@ late:
 	t.Run("merged key not present", func(t *testing.T) {
 		t.Parallel()
 
-		_, err := paths.NewResolver(file.Docs[0]).Token(paths.Doc().Child("merged", "zzz"))
+		_, err := paths.NewResolver(doc).Token(paths.Doc().Child("merged", "zzz"))
 		require.ErrorIs(t, err, paths.ErrNotFound)
 	})
 
 	t.Run("merge key entry itself is addressable", func(t *testing.T) {
 		t.Parallel()
 
-		tk, err := paths.NewResolver(file.Docs[0]).Token(paths.Doc().Child("merged", "<<").Key())
+		tk, err := paths.NewResolver(doc).Token(paths.Doc().Child("merged", "<<").Key())
 		require.NoError(t, err)
 		assert.Equal(t, "<<", tk.Value)
 	})
@@ -2977,14 +2952,12 @@ late:
 func TestPath_Node_Anchors(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("base: &b {a: 1}\nother: *b\ntagged: !!str 5\n")
-	file, err := source.File()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, "base: &b {a: 1}\nother: *b\ntagged: !!str 5\n").DocumentAST()
 
 	t.Run("anchor is looked through", func(t *testing.T) {
 		t.Parallel()
 
-		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("base"))
+		node, err := paths.NewResolver(doc).Node(paths.Doc().Child("base"))
 		require.NoError(t, err)
 		assert.IsType(t, &ast.MappingNode{}, node)
 	})
@@ -2992,7 +2965,7 @@ func TestPath_Node_Anchors(t *testing.T) {
 	t.Run("alias is looked through", func(t *testing.T) {
 		t.Parallel()
 
-		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("other"))
+		node, err := paths.NewResolver(doc).Node(paths.Doc().Child("other"))
 		require.NoError(t, err)
 		assert.IsType(t, &ast.MappingNode{}, node)
 	})
@@ -3000,7 +2973,7 @@ func TestPath_Node_Anchors(t *testing.T) {
 	t.Run("tag is kept", func(t *testing.T) {
 		t.Parallel()
 
-		node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("tagged"))
+		node, err := paths.NewResolver(doc).Node(paths.Doc().Child("tagged"))
 		require.NoError(t, err)
 		assert.IsType(t, &ast.TagNode{}, node)
 	})
@@ -3069,16 +3042,14 @@ func TestPath_Node_TaggedKey(t *testing.T) {
 func TestPath_UnknownAlias(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("base: &b {a: 1}\nother: *nope\n")
-	file, err := source.File()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, "base: &b {a: 1}\nother: *nope\n").DocumentAST()
 
-	_, err = paths.NewResolver(file.Docs[0]).Token(paths.Doc().Child("other", "a"))
+	_, err := paths.NewResolver(doc).Token(paths.Doc().Child("other", "a"))
 	require.ErrorIs(t, err, paths.ErrAlias)
 	require.NotErrorIs(t, err, paths.ErrNotFound)
 	assert.Contains(t, err.Error(), "*nope")
 
-	_, err = paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child("other"))
+	_, err = paths.NewResolver(doc).Node(paths.Doc().Child("other"))
 	require.ErrorIs(t, err, paths.ErrAlias)
 }
 
@@ -3148,11 +3119,7 @@ func TestPath_UnknownAliasKey(t *testing.T) {
 	// An alias key that names no anchor has no name, so no selector
 	// matches it, and a lookup that passes it on the way to another key
 	// still resolves.
-	source := niceyaml.NewSourceFromString("b: 2\n*nope : 1\n")
-	file, err := source.File()
-	require.NoError(t, err)
-
-	doc := file.Docs[0]
+	doc := yamltest.FirstDocument(t, "b: 2\n*nope : 1\n").DocumentAST()
 
 	node, err := paths.NewResolver(doc).Node(paths.Doc().Child("b"))
 	require.NoError(t, err)
@@ -3232,10 +3199,7 @@ func TestPath_UnnamedKey(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			file, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).File()
-			require.NoError(t, err)
-
-			doc := file.Docs[0]
+			doc := yamltest.FirstDocument(t, tc.input, tc.opts...).DocumentAST()
 
 			node, err := paths.NewResolver(doc).Node(paths.MustParse(tc.path))
 			if tc.err != nil {
@@ -3305,11 +3269,7 @@ func TestPath_AliasCycle(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString(tc.input)
-			file, err := source.File()
-			require.NoError(t, err)
-
-			doc := file.Docs[0]
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
 			// Resolve in a goroutine so a loop that never returns fails this
 			// test instead of stalling the run.
@@ -3828,9 +3788,7 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 
 	// An alias refers to the last anchor of its name before it, so the *x on
 	// line 3 reaches `v: 1` and the *x on line 6 reaches `v: 2`.
-	source := niceyaml.NewSourceFromString("a: &x\n  v: 1\nb: *x\nc: &x\n  v: 2\nd: *x\n")
-	file, err := source.File()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, "a: &x\n  v: 1\nb: *x\nc: &x\n  v: 2\nd: *x\n").DocumentAST()
 
 	tcs := map[string]struct {
 		key       string
@@ -3853,12 +3811,12 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk, err := paths.NewResolver(file.Docs[0]).Token(paths.Doc().Child(tc.key, "v"))
+			tk, err := paths.NewResolver(doc).Token(paths.Doc().Child(tc.key, "v"))
 			require.NoError(t, err)
 			assert.Equal(t, tc.wantValue, tk.Value)
 			assert.Equal(t, tc.wantLine, tk.Position.Line)
 
-			node, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child(tc.key))
+			node, err := paths.NewResolver(doc).Node(paths.Doc().Child(tc.key))
 			require.NoError(t, err)
 
 			mapping, ok := node.(*ast.MappingNode)
@@ -3939,16 +3897,14 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 	t.Run("alias before any anchor of its name", func(t *testing.T) {
 		t.Parallel()
 
-		forward := niceyaml.NewSourceFromString("b: *x\na: &x\n  v: 1\n")
-		forwardFile, err := forward.File()
-		require.NoError(t, err)
+		forward := yamltest.FirstDocument(t, "b: *x\na: &x\n  v: 1\n").DocumentAST()
 
-		_, err = paths.NewResolver(forwardFile.Docs[0]).Token(paths.Doc().Child("b", "v"))
+		_, err := paths.NewResolver(forward).Token(paths.Doc().Child("b", "v"))
 		require.ErrorIs(t, err, paths.ErrAlias)
 		require.NotErrorIs(t, err, paths.ErrNotFound)
 		assert.Contains(t, err.Error(), "*x has no anchor before it")
 
-		_, err = paths.NewResolver(forwardFile.Docs[0]).Node(paths.Doc().Child("b"))
+		_, err = paths.NewResolver(forward).Node(paths.Doc().Child("b"))
 		require.ErrorIs(t, err, paths.ErrAlias)
 	})
 }
@@ -3956,9 +3912,7 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 func TestPath_Token_NotFound(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("name: test\nitems: [a, b]\n")
-	file, err := source.File()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, "name: test\nitems: [a, b]\n").DocumentAST()
 
 	tcs := map[string]paths.Path{
 		"missing key":              paths.Doc().Child("nope"),
@@ -3976,17 +3930,17 @@ func TestPath_Token_NotFound(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := paths.NewResolver(file.Docs[0]).Token(path)
+			_, err := paths.NewResolver(doc).Token(path)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 			assert.Contains(t, err.Error(), path.String())
 
-			_, err = paths.NewResolver(file.Docs[0]).Token(path.Key())
+			_, err = paths.NewResolver(doc).Token(path.Key())
 			require.ErrorIs(t, err, paths.ErrNotFound)
 
-			_, err = paths.NewResolver(file.Docs[0]).Node(path)
+			_, err = paths.NewResolver(doc).Node(path)
 			require.ErrorIs(t, err, paths.ErrNotFound)
 
-			nodes, err := paths.NewResolver(file.Docs[0]).Nodes(path)
+			nodes, err := paths.NewResolver(doc).Nodes(path)
 			require.NoError(t, err)
 			assert.Empty(t, nodes)
 		})
@@ -4029,9 +3983,7 @@ aliased: [&s [p, q], [r], *s]
 refs: [*r, *r]
 `
 
-	source := niceyaml.NewSourceFromString(input)
-	file, err := source.File()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, input).DocumentAST()
 
 	tcs := map[string]struct {
 		path paths.Path
@@ -4140,7 +4092,7 @@ refs: [*r, *r]
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			nodes, err := paths.NewResolver(file.Docs[0]).Nodes(tc.path)
+			nodes, err := paths.NewResolver(doc).Nodes(tc.path)
 			require.NoError(t, err)
 
 			got := make([]string, 0, len(nodes))
@@ -4157,24 +4109,24 @@ refs: [*r, *r]
 
 		path := paths.Doc().Child("items").IndexAll().Child("name")
 
-		_, err := paths.NewResolver(file.Docs[0]).Token(path)
+		_, err := paths.NewResolver(doc).Token(path)
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
-		_, err = paths.NewResolver(file.Docs[0]).Node(path)
+		_, err = paths.NewResolver(doc).Node(path)
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
-		_, err = paths.NewResolver(file.Docs[0]).Token(paths.Doc().Recursive("name").Key())
+		_, err = paths.NewResolver(doc).Token(paths.Doc().Recursive("name").Key())
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
 		entries := paths.Doc().Child("meta").ChildAll()
 
-		_, err = paths.NewResolver(file.Docs[0]).Token(entries)
+		_, err = paths.NewResolver(doc).Token(entries)
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
-		_, err = paths.NewResolver(file.Docs[0]).Node(entries)
+		_, err = paths.NewResolver(doc).Node(entries)
 		require.ErrorIs(t, err, paths.ErrWildcard)
 
-		_, err = paths.NewResolver(file.Docs[0]).Token(entries.Key())
+		_, err = paths.NewResolver(doc).Token(entries.Key())
 		require.ErrorIs(t, err, paths.ErrWildcard)
 	})
 
@@ -4690,9 +4642,7 @@ base: &kk aliased_name
 : 9
 `
 
-	source := niceyaml.NewSourceFromString(input)
-	file, err := source.File()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, input).DocumentAST()
 
 	tcs := map[string]struct {
 		path      paths.Path
@@ -4769,7 +4719,7 @@ base: &kk aliased_name
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tk := resolveToken(t, tc.path, tc.key, file.Docs[0])
+			tk := resolveToken(t, tc.path, tc.key, doc)
 			assert.Equal(t, tc.wantValue, tk.Value)
 		})
 	}
@@ -4778,7 +4728,7 @@ base: &kk aliased_name
 		t.Parallel()
 
 		for _, name := range []string{"!!str", "&k", "k", "&", "?", "*", "kk", "|"} {
-			_, err := paths.NewResolver(file.Docs[0]).Node(paths.Doc().Child(name))
+			_, err := paths.NewResolver(doc).Node(paths.Doc().Child(name))
 			require.ErrorIs(t, err, paths.ErrNotFound, "Child(%q)", name)
 		}
 	})
@@ -4848,10 +4798,9 @@ func TestPath_Node_LaterMergeKeyWins(t *testing.T) {
 	// The decoder takes the value of the later one, so the path does too.
 	src := "p: &p {k: P}\nq: &q {k: Q}\nt:\n  <<: *p\n  <<: *q\n"
 
-	f, err := parser.ParseBytes([]byte(src), 0, parser.AllowDuplicateMapKey())
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, src, niceyaml.WithAllowDuplicateKeys(true)).DocumentAST()
 
-	node, err := paths.NewResolver(f.Docs[0]).Node(paths.MustParse("$.t.k"))
+	node, err := paths.NewResolver(doc).Node(paths.MustParse("$.t.k"))
 	require.NoError(t, err)
 	assert.Equal(t, "Q", node.String())
 }
@@ -4882,16 +4831,13 @@ func TestPath_OwnKeyBetweenMergeKeys(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			f, err := parser.ParseBytes([]byte(tc.input), 0, parser.AllowDuplicateMapKey())
-			require.NoError(t, err)
-
-			doc := f.Docs[0]
+			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithAllowDuplicateKeys(true)).DocumentAST()
 
 			var decoded struct {
 				T map[string]string `yaml:"t"`
 			}
 
-			err = yaml.UnmarshalWithOptions([]byte(tc.input), &decoded, yaml.AllowDuplicateMapKey())
+			err := yaml.UnmarshalWithOptions([]byte(tc.input), &decoded, yaml.AllowDuplicateMapKey())
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, decoded.T["k"])
 
@@ -4920,10 +4866,7 @@ func TestPath_Matches_RepeatedMergeKey(t *testing.T) {
 	// selects the later one, so `..` visits only that mapping.
 	src := "t:\n  <<: {a: 1}\n  <<: {b: 2}\n"
 
-	f, err := parser.ParseBytes([]byte(src), 0, parser.AllowDuplicateMapKey())
-	require.NoError(t, err)
-
-	doc := f.Docs[0]
+	doc := yamltest.FirstDocument(t, src, niceyaml.WithAllowDuplicateKeys(true)).DocumentAST()
 
 	matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$..a"))
 	require.NoError(t, err)
@@ -4987,10 +4930,7 @@ func TestPath_Matches_InlineMergeSource(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			file, err := niceyaml.NewSourceFromString(tc.input).File()
-			require.NoError(t, err)
-
-			doc := file.Docs[0]
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
 			matches, err := paths.NewResolver(doc).Matches(paths.MustParse("$.m..name"))
 			require.NoError(t, err)
@@ -5040,10 +4980,7 @@ func TestPath_MergeKeyAndLiteralMergeName(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			file, err := niceyaml.NewSourceFromString(tc.input).File()
-			require.NoError(t, err)
-
-			doc := file.Docs[0]
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
 			node, err := paths.NewResolver(doc).Node(paths.MustParse("$.m.'<<'.k"))
 			require.NoError(t, err)
@@ -5110,10 +5047,7 @@ func TestPath_MergeBringsInLiteralMergeName(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "real", decoded.Top["<<"])
 
-			f, err := parser.ParseBytes([]byte(tc.input), 0, parser.AllowDuplicateMapKey())
-			require.NoError(t, err)
-
-			doc := f.Docs[0]
+			doc := yamltest.FirstDocument(t, tc.input, niceyaml.WithAllowDuplicateKeys(true)).DocumentAST()
 
 			node, err := paths.NewResolver(doc).Node(paths.MustParse("$.top.'<<'"))
 			require.NoError(t, err)
@@ -5145,10 +5079,7 @@ func TestPath_Node_LaterDuplicateKeyWins(t *testing.T) {
 	// it, and `..a` lists that entry alone.
 	src := "m:\n  a: 1\n  a: 2\n"
 
-	f, err := parser.ParseBytes([]byte(src), 0, parser.AllowDuplicateMapKey())
-	require.NoError(t, err)
-
-	doc := f.Docs[0]
+	doc := yamltest.FirstDocument(t, src, niceyaml.WithAllowDuplicateKeys(true)).DocumentAST()
 
 	node, err := paths.NewResolver(doc).Node(paths.MustParse("$.m.a"))
 	require.NoError(t, err)
@@ -5260,10 +5191,7 @@ func TestPath_Matches_RecursiveReachedTwice(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			file, err := niceyaml.NewSourceFromString(tc.input).File()
-			require.NoError(t, err)
-
-			doc := file.Docs[0]
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
 			matches, err := paths.NewResolver(doc).Matches(paths.MustParse(tc.path))
 			require.NoError(t, err)
@@ -5289,7 +5217,7 @@ func TestPath_Matches_RecursiveReachedTwice(t *testing.T) {
 func TestPath_Matches(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString(stringtest.Input(`
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
 		items:
 		  - a
 		  - b
@@ -5330,11 +5258,7 @@ func TestPath_Matches(t *testing.T) {
 		levels:
 		  one:
 		    two: [p, q]
-	`))
-	file, err := source.File()
-	require.NoError(t, err)
-
-	doc := file.Docs[0]
+	`)).DocumentAST()
 
 	tcs := map[string]struct {
 		path paths.Path
@@ -5633,10 +5557,8 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			file, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).File()
-			require.NoError(t, err)
+			doc := yamltest.FirstDocument(t, tc.input, tc.opts...).DocumentAST()
 
-			doc := file.Docs[0]
 			path := paths.MustParse(tc.path)
 
 			matches, err := paths.NewResolver(doc).Matches(path)
@@ -5705,13 +5627,11 @@ func TestPath_Matches_ChildAll_Errors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			file, err := niceyaml.NewSourceFromString(tc.input).File()
-			require.NoError(t, err)
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
-			doc := file.Docs[0]
 			path := paths.MustParse(tc.path)
 
-			_, err = paths.NewResolver(doc).Matches(path)
+			_, err := paths.NewResolver(doc).Matches(path)
 			require.ErrorIs(t, err, paths.ErrAlias)
 
 			_, err = paths.NewResolver(doc).Nodes(path)
@@ -5870,10 +5790,8 @@ func TestPath_Matches_RecursiveAll(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			file, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).File()
-			require.NoError(t, err)
+			doc := yamltest.FirstDocument(t, tc.input, tc.opts...).DocumentAST()
 
-			doc := file.Docs[0]
 			path := paths.MustParse(tc.path)
 
 			matches, err := paths.NewResolver(doc).Matches(path)
@@ -5937,13 +5855,11 @@ func TestPath_Matches_RecursiveAll_Errors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			file, err := niceyaml.NewSourceFromString(tc.input).File()
-			require.NoError(t, err)
+			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
 
-			doc := file.Docs[0]
 			path := paths.MustParse(tc.path)
 
-			_, err = paths.NewResolver(doc).Matches(path)
+			_, err := paths.NewResolver(doc).Matches(path)
 			require.ErrorIs(t, err, paths.ErrAlias)
 
 			_, err = paths.NewResolver(doc).Nodes(path)

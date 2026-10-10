@@ -6,9 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
@@ -40,10 +37,9 @@ func BenchmarkResolver_Nodes_Recursive(b *testing.B) {
 	path := paths.Doc().Recursive("zzz")
 
 	for _, in := range inputs {
-		file, err := niceyaml.NewSourceFromString(in.yaml).File()
-		require.NoError(b, err)
+		doc := yamltest.FirstDocument(b, in.yaml).DocumentAST()
 
-		r := paths.NewResolver(file.Docs[0])
+		r := paths.NewResolver(doc)
 
 		b.Run(in.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -68,10 +64,9 @@ func BenchmarkResolver_Nodes_RecursiveChained(b *testing.B) {
 	for _, depth := range depths {
 		src := strings.Repeat("{a: ", depth) + "1" + strings.Repeat("}", depth)
 
-		file, err := niceyaml.NewSourceFromString(src).File()
-		require.NoError(b, err)
+		doc := yamltest.FirstDocument(b, src).DocumentAST()
 
-		r := paths.NewResolver(file.Docs[0])
+		r := paths.NewResolver(doc)
 
 		b.Run(fmt.Sprintf("depth_%d", depth), func(b *testing.B) {
 			b.ReportAllocs()
@@ -101,10 +96,7 @@ func BenchmarkResolver_Node_WideMapping(b *testing.B) {
 			fmt.Fprintf(&sb, "k%d: %d\n", i, i)
 		}
 
-		file, err := niceyaml.NewSourceFromString(sb.String()).File()
-		require.NoError(b, err)
-
-		doc := file.Docs[0]
+		doc := yamltest.FirstDocument(b, sb.String()).DocumentAST()
 
 		ps := make([]paths.Path, keys)
 		for i := range keys {
@@ -137,10 +129,9 @@ func BenchmarkResolver_Node_DeepPath(b *testing.B) {
 	for _, depth := range []int{1000, 2000, 4000} {
 		src := strings.Repeat("{a: ", depth) + "1" + strings.Repeat("}", depth)
 
-		file, err := niceyaml.NewSourceFromString(src).File()
-		require.NoError(b, err)
+		doc := yamltest.FirstDocument(b, src).DocumentAST()
 
-		r := paths.NewResolver(file.Docs[0])
+		r := paths.NewResolver(doc)
 		path := paths.Doc().Child(slices.Repeat([]string{"a"}, depth)...)
 
 		b.Run(fmt.Sprintf("depth_%d", depth), func(b *testing.B) {
@@ -172,10 +163,7 @@ func BenchmarkNewResolver_NestedOpenMerges(b *testing.B) {
 			fmt.Fprintf(&sb, "  b%d: &b%d {<<: [*b%d, *b%d]}\n", i, i, i-1, i-2)
 		}
 
-		file, err := niceyaml.NewSourceFromString(sb.String()).File()
-		require.NoError(b, err)
-
-		doc := file.Docs[0]
+		doc := yamltest.FirstDocument(b, sb.String()).DocumentAST()
 
 		b.Run(fmt.Sprintf("links_%d", links), func(b *testing.B) {
 			b.ReportAllocs()
@@ -208,10 +196,9 @@ func BenchmarkResolver_Matches_MissingMergeFirst(b *testing.B) {
 
 		sb.WriteString("  <<: [*missing, " + strings.Join(slices.Repeat([]string{"*a"}, keys), ", ") + "]\n")
 
-		file, err := niceyaml.NewSourceFromString(sb.String()).File()
-		require.NoError(b, err)
+		doc := yamltest.FirstDocument(b, sb.String()).DocumentAST()
 
-		r := paths.NewResolver(file.Docs[0])
+		r := paths.NewResolver(doc)
 
 		b.Run(fmt.Sprintf("keys_%d", keys), func(b *testing.B) {
 			b.ReportAllocs()
@@ -260,10 +247,9 @@ func BenchmarkResolver_Matches_MergedRecords(b *testing.B) {
 			sb.WriteString("    <<: [" + strings.Join(sources, ", ") + "]\n")
 		}
 
-		file, err := niceyaml.NewSourceFromString(sb.String()).File()
-		require.NoError(b, err)
+		doc := yamltest.FirstDocument(b, sb.String()).DocumentAST()
 
-		resolver := paths.NewResolver(file.Docs[0])
+		resolver := paths.NewResolver(doc)
 
 		b.Run(fmt.Sprintf("records_%d", records), func(b *testing.B) {
 			b.ReportAllocs()
