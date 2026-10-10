@@ -2314,17 +2314,13 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				input:     lists + "b:\n  ? *l7\n  : v\nc: [*k]\n",
 				excessive: true,
 			},
-			"alias to a small sequence as mapping key": {
-				input: "s: &s [a, b]\n*s : v\n",
-			},
+			"alias to a small sequence as mapping key": {input: "s: &s [a, b]\n*s : v\n"},
 			// The key holds a copy of the long scalar for each alias.
 			"scalar aliases written out in a key": {
 				input:     scalarAliases + "m: {? *k : v}\n",
 				excessive: true,
 			},
-			"scalar aliases in a value": {
-				input: scalarAliases + "m: {n: *k}\n",
-			},
+			"scalar aliases in a value": {input: scalarAliases + "m: {n: *k}\n"},
 			// The decoder reads an alias inside the content of its own
 			// anchor as null, so each such alias reads one node.
 			"aliases inside their own anchor": {
@@ -2424,9 +2420,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 					doc:  bomb,
 					path: paths.Current().Child("e"),
 				},
-				"document diluting its aliases": {
-					doc: diluted,
-				},
+				"document diluting its aliases": {doc: diluted},
 				"node of a document diluting its aliases": {
 					doc:  diluted,
 					path: paths.Current().Child("list"),
@@ -2497,19 +2491,13 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			path  paths.Path
 			input string
 		}{
-			"alias bomb": {
-				input: yamltest.AliasLevels(4),
-			},
+			"alias bomb": {input: yamltest.AliasLevels(4)},
 			"node of an alias bomb": {
 				path:  paths.Current().Child("a").Index(4),
 				input: yamltest.AliasLevels(4),
 			},
-			"merge key bomb": {
-				input: yamltest.MergeLevels(4),
-			},
-			"alias bomb as mapping key": {
-				input: yamltest.AliasLevels(4) + "b:\n  ? *l4\n  : v\n",
-			},
+			"merge key bomb":            {input: yamltest.MergeLevels(4)},
+			"alias bomb as mapping key": {input: yamltest.AliasLevels(4) + "b:\n  ? *l4\n  : v\n"},
 		}
 
 		for name, tc := range tcs {
@@ -2664,9 +2652,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				data: outerMap,
 				err:  schema.ErrValidate,
 			},
-			"bytes under two keys": {
-				data: map[string]any{"a": bin, "b": bin},
-			},
+			"bytes under two keys": {data: map[string]any{"a": bin, "b": bin}},
 			// A key that is no string prints in full as the member name,
 			// so it counts as a value does.
 			"ordered mapping key containing itself": {
@@ -2717,9 +2703,7 @@ func TestSchema_BooleanSchema(t *testing.T) {
 			input:          []byte(`true`),
 			wantAcceptsAll: true,
 		},
-		"false schema rejects all data": {
-			input: []byte(`false`),
-		},
+		"false schema rejects all data": {input: []byte(`false`)},
 	}
 
 	testData := []any{"anything", 42, map[string]any{"key": "value"}}
@@ -3096,9 +3080,7 @@ func TestSchema_Check_SyntaxError(t *testing.T) {
 			schema: `{"type": "string"}`,
 			err:    `1:1: $: expected "string", got "object"`,
 		},
-		"schema that accepts all data": {
-			schema: `true`,
-		},
+		"schema that accepts all data": {schema: `true`},
 	}
 
 	for name, tc := range tcs {
@@ -3154,9 +3136,7 @@ func TestSchema_Check_Bound(t *testing.T) {
 		// The error is the refusal of the alias limit.
 		excessive bool
 	}{
-		"a document that conforms": {
-			input: menu,
-		},
+		"a document that conforms": {input: menu},
 		"a violation at the root": {
 			input: "price: -1\n",
 			want:  "menu.yaml:1:8: $.price: -1 is less than 0",
@@ -3961,9 +3941,7 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 		members int
 		decoded bool
 	}{
-		"few merge sources": {
-			members: 10,
-		},
+		"few merge sources": {members: 10},
 		"many merge sources": {
 			members: 2000,
 			decoded: true,

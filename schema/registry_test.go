@@ -269,9 +269,7 @@ func TestRegistry_Check_ScopedNode(t *testing.T) {
 		tcs := map[string]struct {
 			check func(ctx context.Context, n *niceyaml.Node) error
 		}{
-			"Check": {
-				check: reg.Check,
-			},
+			"Check": {check: reg.Check},
 			"Lookup": {
 				check: func(ctx context.Context, n *niceyaml.Node) error {
 					_, err := reg.Lookup(ctx, n)
@@ -552,9 +550,7 @@ func TestRegistry_Check(t *testing.T) {
 		// The text of the violation, if any.
 		want string
 	}{
-		"document the schema accepts": {
-			input: "kind: Deployment\nreplicas: 3\n",
-		},
+		"document the schema accepts": {input: "kind: Deployment\nreplicas: 3\n"},
 		"document the schema rejects": {
 			input: "kind: Deployment\nreplicas: many\n",
 			want:  `$.replicas: expected "integer", got "string"`,
@@ -1222,12 +1218,8 @@ func TestRegistry_SharedLoad(t *testing.T) {
 			data []byte
 			err  error
 		}{
-			"schema": {
-				data: schemaData,
-			},
-			"failure": {
-				err: errBroken,
-			},
+			"schema":  {data: schemaData},
+			"failure": {err: errBroken},
 		}
 
 		for name, tc := range tcs {
@@ -1886,24 +1878,12 @@ func TestRegistry_FileFS(t *testing.T) {
 		tcs := map[string]struct {
 			path string
 		}{
-			"absolute path under the working directory": {
-				path: filepath.Join(wd, "schemas", "pod.json"),
-			},
-			"absolute path elsewhere": {
-				path: filepath.Join(t.TempDir(), "pod.json"),
-			},
-			"rooted path": {
-				path: "/schemas/pod.json",
-			},
-			"drive-letter path": {
-				path: "C:/schemas/pod.json",
-			},
-			"relative path through the parent": {
-				path: "../schemas/pod.json",
-			},
-			"relative path out of the root and back": {
-				path: "../" + filepath.Base(wd) + "/schemas/pod.json",
-			},
+			"absolute path under the working directory": {path: filepath.Join(wd, "schemas", "pod.json")},
+			"absolute path elsewhere":                   {path: filepath.Join(t.TempDir(), "pod.json")},
+			"rooted path":                               {path: "/schemas/pod.json"},
+			"drive-letter path":                         {path: "C:/schemas/pod.json"},
+			"relative path through the parent":          {path: "../schemas/pod.json"},
+			"relative path out of the root and back":    {path: "../" + filepath.Base(wd) + "/schemas/pod.json"},
 		}
 
 		for name, tc := range tcs {
@@ -2569,9 +2549,7 @@ func TestRegistry_DocumentOutsideFileSystem(t *testing.T) {
 			err:  fs.ErrInvalid,
 			want: "not under " + tenant,
 		},
-		"no file system": {
-			want: `expected "string", got "integer"`,
-		},
+		"no file system": {want: `expected "string", got "integer"`},
 	}
 
 	for name, tc := range tcs {
@@ -3496,26 +3474,16 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		want    string
 		opts    []schema.RegistryOption
 	}{
-		"url pointer": {
-			url: baseURL + "/defs.json#/$defs/Foo",
-		},
-		"url pointer with an escaped unreserved character": {
-			url: baseURL + "/%64efs.json#/$defs/Foo",
-		},
-		"url pointer with a dot segment": {
-			url: baseURL + "/x/../defs.json#/$defs/Foo",
-		},
+		"url pointer": {url: baseURL + "/defs.json#/$defs/Foo"},
+		"url pointer with an escaped unreserved character": {url: baseURL + "/%64efs.json#/$defs/Foo"},
+		"url pointer with a dot segment":                   {url: baseURL + "/x/../defs.json#/$defs/Foo"},
 		"url pointer with an upper-case host": {
 			url: "http://Schemas.Test/defs.json#/$defs/Foo",
 		},
 		// The registry decodes the unreserved %7e and spells the reserved
 		// %2f in upper-case hex, as the compiler does.
-		"url pointer with escapes in the query": {
-			url: baseURL + "/defs.json?v=%7e1&q=%2f#/$defs/Foo",
-		},
-		"url anchor": {
-			url: baseURL + "/defs.json#named",
-		},
+		"url pointer with escapes in the query": {url: baseURL + "/defs.json?v=%7e1&q=%2f#/$defs/Foo"},
+		"url anchor":                            {url: baseURL + "/defs.json#named"},
 		"empty fragment names the root": {
 			url:     baseURL + "/defs.json#",
 			valid:   "other: 1\n",
@@ -3779,21 +3747,11 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 		tcs := map[string]struct {
 			remote string
 		}{
-			"$ref names the file": {
-				remote: "/s/local.json",
-			},
-			"$id names a file base": {
-				remote: "/s/idbase.json",
-			},
-			"an unknown keyword names the file": {
-				remote: "/s/keyword.json",
-			},
-			"$REF names the file": {
-				remote: "/s/upperref.json",
-			},
-			"$ID names a file base": {
-				remote: "/s/upperid.json",
-			},
+			"$ref names the file":               {remote: "/s/local.json"},
+			"$id names a file base":             {remote: "/s/idbase.json"},
+			"an unknown keyword names the file": {remote: "/s/keyword.json"},
+			"$REF names the file":               {remote: "/s/upperref.json"},
+			"$ID names a file base":             {remote: "/s/upperid.json"},
 		}
 
 		for name, tc := range tcs {
@@ -4098,21 +4056,11 @@ func TestRegistry_YAMLSchemas(t *testing.T) {
 	tcs := map[string]struct {
 		ref refFunc
 	}{
-		"file": {
-			ref: onDisk(yamlFiles, "root.yaml"),
-		},
-		"file url fragment": {
-			ref: onDisk(yamlFiles, "defs.yaml#/$defs/named"),
-		},
-		"file system": {
-			ref: inFS(yamlFiles, "root.yaml"),
-		},
-		"url": {
-			ref: served(yamlFiles, "root.yaml"),
-		},
-		"url fragment": {
-			ref: served(yamlFiles, "defs.yaml#/$defs/named"),
-		},
+		"file":              {ref: onDisk(yamlFiles, "root.yaml")},
+		"file url fragment": {ref: onDisk(yamlFiles, "defs.yaml#/$defs/named")},
+		"file system":       {ref: inFS(yamlFiles, "root.yaml")},
+		"url":               {ref: served(yamlFiles, "root.yaml")},
+		"url fragment":      {ref: served(yamlFiles, "defs.yaml#/$defs/named")},
 		"url with no extension": {
 			ref: served(map[string]string{
 				"root": "$ref: defs#/$defs/named\n",
