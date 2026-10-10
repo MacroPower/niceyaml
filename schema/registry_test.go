@@ -61,6 +61,18 @@ func writeFiles(t *testing.T, dir string, files map[string]string) {
 	}
 }
 
+// requireRejects fails the test unless reg rejects the document input
+// with a violation whose text holds want. The document is at fault for a
+// violation, so the error does not wrap [schema.ErrValidate].
+func requireRejects(t *testing.T, reg *schema.Registry, input, want string) {
+	t.Helper()
+
+	err := reg.Check(t.Context(), yamltest.FirstDocument(t, input))
+	require.Error(t, err)
+	require.NotErrorIs(t, err, schema.ErrValidate)
+	assert.Contains(t, err.Error(), want)
+}
+
 // requireRefs returns the option that sets whether a registry compiles a
 // schema only when each $ref to another document resolves, as
 // [schema.WithRequireRefs] sets it for one compile.
@@ -1970,8 +1982,7 @@ func TestRegistry_FileFS(t *testing.T) {
 
 		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
 
-		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
-		require.ErrorContains(t, err, `$.a: expected "string", got "integer"`)
+		requireRejects(t, reg, "a: 5\n", `$.a: expected "string", got "integer"`)
 	})
 
 	t.Run("a missing file reports the path in the file system", func(t *testing.T) {
@@ -2510,10 +2521,7 @@ func TestRegistry_WithFSAt(t *testing.T) {
 			schema.WithResolvers(schema.File(filepath.Join(tenant, "in.json"))),
 		)
 
-		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "in: 5\n"))
-		require.Error(t, err)
-		require.NotErrorIs(t, err, schema.ErrValidate)
-		assert.Contains(t, err.Error(), `$.in: expected "string", got "integer"`)
+		requireRejects(t, reg, "in: 5\n", `$.in: expected "string", got "integer"`)
 
 		for name, mode := range refModes {
 			t.Run(name, func(t *testing.T) {
@@ -2533,10 +2541,7 @@ func TestRegistry_WithFSAt(t *testing.T) {
 
 		// Without the file system, the same schema reads the file outside.
 		disk := schema.NewRegistry(schema.WithResolvers(schema.File(filepath.Join(tenant, "out.json"))))
-		err = disk.Check(t.Context(), yamltest.FirstDocument(t, "out: 5\n"))
-		require.Error(t, err)
-		require.NotErrorIs(t, err, schema.ErrValidate)
-		assert.Contains(t, err.Error(), `$.out: expected "string", got "integer"`)
+		requireRejects(t, disk, "out: 5\n", `$.out: expected "string", got "integer"`)
 	})
 
 	t.Run("a fragment selects a subschema", func(t *testing.T) {
@@ -2552,8 +2557,7 @@ func TestRegistry_WithFSAt(t *testing.T) {
 
 		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "name: x\n")))
 
-		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "other: 1\n"))
-		require.ErrorContains(t, err, `missing required property "name"`)
+		requireRejects(t, reg, "other: 1\n", `missing required property "name"`)
 	})
 
 	t.Run("a file system stands for the working directory", func(t *testing.T) {
@@ -2811,10 +2815,7 @@ func TestRegistry_FileSystemAfterChdir(t *testing.T) {
 
 			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
 
-			err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
-			require.Error(t, err)
-			require.NotErrorIs(t, err, schema.ErrValidate)
-			assert.Contains(t, err.Error(), `$.a: expected "string", got "integer"`)
+			requireRejects(t, reg, "a: 5\n", `$.a: expected "string", got "integer"`)
 		})
 	}
 }
@@ -3814,10 +3815,7 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 
 			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, tc.valid)))
 
-			err := reg.Check(t.Context(), yamltest.FirstDocument(t, tc.invalid))
-			require.Error(t, err)
-			require.NotErrorIs(t, err, schema.ErrValidate)
-			assert.Contains(t, err.Error(), tc.want)
+			requireRejects(t, reg, tc.invalid, tc.want)
 
 			assert.Equal(t, tc.requests, requests.Load())
 		})
@@ -3931,10 +3929,7 @@ func TestRegistry_FragmentRefsDraft07(t *testing.T) {
 
 			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, tc.valid)))
 
-			err := reg.Check(t.Context(), yamltest.FirstDocument(t, tc.invalid))
-			require.Error(t, err)
-			require.NotErrorIs(t, err, schema.ErrValidate)
-			assert.Contains(t, err.Error(), tc.want)
+			requireRejects(t, reg, tc.invalid, tc.want)
 		})
 	}
 }
@@ -4002,10 +3997,7 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 
 			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
 
-			err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
-			require.Error(t, err)
-			require.NotErrorIs(t, err, schema.ErrValidate)
-			assert.Contains(t, err.Error(), `$.a: expected "string", got "integer"`)
+			requireRejects(t, reg, "a: 5\n", `$.a: expected "string", got "integer"`)
 		})
 	}
 
@@ -4164,8 +4156,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		// it for every validation after.
 		assert.Equal(t, int32(2), hits["/flaky.json"].Load())
 
-		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "b: x\n"))
-		require.ErrorContains(t, err, `expected "integer"`)
+		requireRejects(t, reg, "b: x\n", `expected "integer"`)
 	})
 
 	t.Run("a required document that missed at compile is not fetched again", func(t *testing.T) {
@@ -4692,10 +4683,7 @@ func TestRegistry_RefCredentials(t *testing.T) {
 
 			reg := schema.NewRegistry(schema.WithResolvers(schema.URL(tc.url)))
 
-			err := reg.Check(t.Context(), yamltest.FirstDocument(t, tc.input))
-			require.Error(t, err)
-			require.NotErrorIs(t, err, schema.ErrValidate)
-			assert.Contains(t, err.Error(), `expected "string", got "integer"`)
+			requireRejects(t, reg, tc.input, `expected "string", got "integer"`)
 		})
 	}
 
@@ -4721,8 +4709,7 @@ func TestRegistry_RefCredentials(t *testing.T) {
 		ref := schema.URL(strings.Replace(root, "://", "://user:secret@", 1) + "/root.json")
 		reg := schema.NewRegistry(schema.WithResolvers(ref))
 
-		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 5\n"))
-		require.ErrorContains(t, err, `expected "string", got "integer"`)
+		requireRejects(t, reg, "a: 5\n", `expected "string", got "integer"`)
 		assert.False(t, sawAuth.Load())
 	})
 }

@@ -764,8 +764,7 @@ func TestDirective_Resolve(t *testing.T) {
 		err := reg.Check(t.Context(), yamltest.FirstDocument(t, directive+"name: x\n"))
 		require.NoError(t, err)
 
-		err = reg.Check(t.Context(), yamltest.FirstDocument(t, directive+"kind: Deployment\n"))
-		require.ErrorContains(t, err, `missing required property "name"`)
+		requireRejects(t, reg, directive+"kind: Deployment\n", `missing required property "name"`)
 	})
 
 	t.Run("validates against the subschema a path fragment names", func(t *testing.T) {

@@ -296,8 +296,7 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 
 		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "name: cafe\n")))
 
-		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "name: 5\n"))
-		require.ErrorContains(t, err, `$.name: expected "string", got "integer"`)
+		requireRejects(t, reg, "name: 5\n", `$.name: expected "string", got "integer"`)
 	})
 
 	//nolint:paralleltest // See above.
