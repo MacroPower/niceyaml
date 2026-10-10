@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/line"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -32,10 +31,6 @@ func TestAnnotation_String(t *testing.T) {
 			ann:  line.Annotation{Content: "note", Col: 5},
 			want: "     note",
 		},
-		"large column padding": {
-			ann:  line.Annotation{Content: "x", Col: 10},
-			want: "          x",
-		},
 		"max column pads to the bound": {
 			ann:  line.Annotation{Content: "x", Col: math.MaxInt},
 			want: strings.Repeat(" ", 1024) + "x",
@@ -50,10 +45,7 @@ func TestAnnotation_String(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var got string
-
-			require.NotPanics(t, func() { got = tc.ann.String() })
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.ann.String())
 		})
 	}
 }
@@ -65,18 +57,9 @@ func TestAnnotation_RenderKind(t *testing.T) {
 		kind kind.Kind
 		want kind.Kind
 	}{
-		"zero kind renders as annotation": {
-			kind: "",
-			want: kind.UIAnnotation,
-		},
-		"annotation kind": {
-			kind: kind.UIAnnotation,
-			want: kind.UIAnnotation,
-		},
-		"own kind": {
-			kind: kind.TextError,
-			want: kind.TextError,
-		},
+		"zero kind renders as annotation": {kind: "", want: kind.UIAnnotation},
+		"annotation kind":                 {kind: kind.UIAnnotation, want: kind.UIAnnotation},
+		"own kind":                        {kind: kind.TextError, want: kind.TextError},
 	}
 
 	for name, tc := range tcs {
@@ -113,18 +96,11 @@ func TestAnnotations_Col(t *testing.T) {
 			want: 3,
 		},
 		"all same column": {
-			anns: line.Annotations{
-				{Content: "a", Col: 4},
-				{Content: "b", Col: 4},
-			},
+			anns: line.Annotations{{Content: "a", Col: 4}, {Content: "b", Col: 4}},
 			want: 4,
 		},
 		"zero is minimum": {
-			anns: line.Annotations{
-				{Content: "a", Col: 5},
-				{Content: "b", Col: 0},
-				{Content: "c", Col: 3},
-			},
+			anns: line.Annotations{{Content: "a", Col: 5}, {Content: "b", Col: 0}, {Content: "c", Col: 3}},
 			want: 0,
 		},
 	}
@@ -133,8 +109,7 @@ func TestAnnotations_Col(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.anns.Col()
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.anns.Col())
 		})
 	}
 }
@@ -155,19 +130,11 @@ func TestAnnotations_Contents(t *testing.T) {
 			want: []string{"message"},
 		},
 		"multiple annotations": {
-			anns: line.Annotations{
-				{Content: "first"},
-				{Content: "second"},
-				{Content: "third"},
-			},
+			anns: line.Annotations{{Content: "first"}, {Content: "second"}, {Content: "third"}},
 			want: []string{"first", "second", "third"},
 		},
 		"with empty content": {
-			anns: line.Annotations{
-				{Content: "a"},
-				{Content: ""},
-				{Content: "b"},
-			},
+			anns: line.Annotations{{Content: "a"}, {Content: ""}, {Content: "b"}},
 			want: []string{"a", "", "b"},
 		},
 	}
@@ -176,8 +143,7 @@ func TestAnnotations_Contents(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.anns.Contents()
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.anns.Contents())
 		})
 	}
 }
@@ -243,13 +209,8 @@ func TestAnnotations_ByKind(t *testing.T) {
 			want: nil,
 		},
 		"one kind stays one group": {
-			anns: line.Annotations{
-				{Content: "a"},
-				{Content: "b"},
-			},
-			want: []line.Annotations{
-				{{Content: "a"}, {Content: "b"}},
-			},
+			anns: line.Annotations{{Content: "a"}, {Content: "b"}},
+			want: []line.Annotations{{{Content: "a"}, {Content: "b"}}},
 		},
 		"groups in order of first appearance": {
 			anns: line.Annotations{
@@ -324,22 +285,14 @@ func TestAnnotations_FilterPosition(t *testing.T) {
 			},
 		},
 		"no matches": {
-			anns: line.Annotations{
-				{Content: "below", Placement: line.Below},
-			},
+			anns:     line.Annotations{{Content: "below", Placement: line.Below}},
 			position: line.Above,
 			want:     nil,
 		},
 		"all match": {
-			anns: line.Annotations{
-				{Content: "a", Placement: line.Above},
-				{Content: "b", Placement: line.Above},
-			},
+			anns:     line.Annotations{{Content: "a", Placement: line.Above}, {Content: "b", Placement: line.Above}},
 			position: line.Above,
-			want: line.Annotations{
-				{Content: "a", Placement: line.Above},
-				{Content: "b", Placement: line.Above},
-			},
+			want:     line.Annotations{{Content: "a", Placement: line.Above}, {Content: "b", Placement: line.Above}},
 		},
 	}
 
@@ -347,8 +300,7 @@ func TestAnnotations_FilterPosition(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := tc.anns.Filter(tc.position)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.anns.Filter(tc.position))
 		})
 	}
 }
@@ -369,10 +321,7 @@ func TestAnnotations_String(t *testing.T) {
 			want: "   message",
 		},
 		"multiple annotations joined": {
-			anns: line.Annotations{
-				{Content: "first", Col: 5},
-				{Content: "second", Col: 10},
-			},
+			anns: line.Annotations{{Content: "first", Col: 5}, {Content: "second", Col: 10}},
 			want: "     first; second",
 		},
 		"joined in column order": {
@@ -384,39 +333,23 @@ func TestAnnotations_String(t *testing.T) {
 			want: "     first; second; third",
 		},
 		"annotations without content add nothing": {
-			anns: line.Annotations{
-				{Content: "", Col: 5},
-				{Content: "second", Col: 10},
-			},
+			anns: line.Annotations{{Content: "", Col: 5}, {Content: "second", Col: 10}},
 			want: "          second",
 		},
 		"empty content at column zero does not pull the column left": {
-			anns: line.Annotations{
-				{Content: "", Col: 0},
-				{Content: "boom", Col: 5},
-			},
+			anns: line.Annotations{{Content: "", Col: 0}, {Content: "boom", Col: 5}},
 			want: "     boom",
 		},
 		"no content at all is empty": {
-			anns: line.Annotations{
-				{Content: "", Col: 5},
-				{Content: "", Col: 10},
-			},
+			anns: line.Annotations{{Content: "", Col: 5}, {Content: "", Col: 10}},
 			want: "",
 		},
 		"uses minimum column": {
-			anns: line.Annotations{
-				{Content: "a", Col: 8},
-				{Content: "b", Col: 2},
-				{Content: "c", Col: 5},
-			},
+			anns: line.Annotations{{Content: "a", Col: 8}, {Content: "b", Col: 2}, {Content: "c", Col: 5}},
 			want: "  b; c; a",
 		},
 		"zero column no padding": {
-			anns: line.Annotations{
-				{Content: "x", Col: 0},
-				{Content: "y", Col: 5},
-			},
+			anns: line.Annotations{{Content: "x", Col: 0}, {Content: "y", Col: 5}},
 			want: "x; y",
 		},
 		"max column pads to the bound": {
@@ -433,10 +366,7 @@ func TestAnnotations_String(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var got string
-
-			require.NotPanics(t, func() { got = tc.anns.String() })
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, tc.anns.String())
 		})
 	}
 }
