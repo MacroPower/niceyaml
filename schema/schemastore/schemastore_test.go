@@ -1153,72 +1153,38 @@ func TestSchemaStore_FetchError(t *testing.T) {
 	t.Parallel()
 
 	// With no catalog ever loaded, a failed fetch surfaces from the lookup.
-	tcs := map[string]struct {
-		setup func(t *testing.T) []schemastore.Option
-	}{
-		"server error": {
-			setup: func(t *testing.T) []schemastore.Option {
-				t.Helper()
+	tcs := map[string]*schemastore.Store{
+		"server error": newStore(newClient(http.StatusInternalServerError, nil)),
+		"invalid json": newStore(newClient(http.StatusOK, []byte("not json"))),
 
-				return []schemastore.Option{
-					schemastore.WithCatalogURL("https://example.com/catalog.json"),
-					schemastore.WithHTTPClient(newClient(http.StatusInternalServerError, nil)),
-				}
-			},
-		},
-		"invalid json": {
-			setup: func(t *testing.T) []schemastore.Option {
-				t.Helper()
+		// A JSON body with no schemas array is not a catalog, so the store
+		// treats it as a failed fetch rather than as a catalog with no
+		// entries.
+		"null":         newStore(newClient(http.StatusOK, []byte(`null`))),
+		"empty object": newStore(newClient(http.StatusOK, []byte(`{}`))),
+		"null schemas": newStore(newClient(http.StatusOK, []byte(`{"schemas": null}`))),
+		"error object": newStore(newClient(http.StatusOK, []byte(`{"message": "rate limited"}`))),
 
-				return []schemastore.Option{
-					schemastore.WithCatalogURL("https://example.com/catalog.json"),
-					schemastore.WithHTTPClient(newClient(http.StatusOK, []byte("not json"))),
-				}
-			},
-		},
-		"invalid URL": {
-			setup: func(t *testing.T) []schemastore.Option {
-				t.Helper()
+		// The control character makes url.Parse reject the URL, so the
+		// fetch sends no request.
+		"invalid URL": schemastore.New(schemastore.WithCatalogURL("http://\x00invalid")),
 
-				// The control character makes url.Parse reject the URL, so the
-				// fetch sends no request.
-				return []schemastore.Option{schemastore.WithCatalogURL("http://\x00invalid")}
-			},
-		},
-		"connection refused": {
-			setup: func(t *testing.T) []schemastore.Option {
-				t.Helper()
+		// Port 1 is a privileged port that won't be listening.
+		"connection refused": schemastore.New(schemastore.WithCatalogURL("http://localhost:1")),
 
-				// Port 1 is a privileged port that won't be listening.
-				return []schemastore.Option{schemastore.WithCatalogURL("http://localhost:1")}
-			},
-		},
-		"read body error": {
-			setup: func(t *testing.T) []schemastore.Option {
-				t.Helper()
-
-				client := &http.Client{
-					Transport: yamltest.RoundTripFunc(func(_ *http.Request) (*http.Response, error) {
-						return &http.Response{
-							StatusCode: http.StatusOK,
-							Body:       io.NopCloser(&errorReader{}),
-						}, nil
-					}),
-				}
-
-				return []schemastore.Option{
-					schemastore.WithCatalogURL("http://example.com/catalog.json"),
-					schemastore.WithHTTPClient(client),
-				}
-			},
-		},
+		"read body error": newStore(&http.Client{
+			Transport: yamltest.RoundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(&errorReader{}),
+				}, nil
+			}),
+		}),
 	}
 
-	for name, tc := range tcs {
+	for name, store := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-
-			store := schemastore.New(tc.setup(t)...)
 
 			_, err := store.FindMatch(t.Context(), "config.yaml")
 			require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
@@ -1377,134 +1343,72 @@ func TestSchemaStore_CanceledContext(t *testing.T) {
 func TestSchemaStore_RefetchFails(t *testing.T) {
 	t.Parallel()
 
-	data, err := json.Marshal(testCatalog)
-	require.NoError(t, err)
-
-	var requestCount atomic.Int32
-
-	// The transport succeeds the first time and fails on later requests.
-	client := &http.Client{
-		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-			if requestCount.Add(1) > 1 {
-				return &http.Response{
-					StatusCode: http.StatusInternalServerError,
-					Body:       http.NoBody,
-					Request:    r,
-				}, nil
-			}
-
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Body:       io.NopCloser(bytes.NewReader(data)),
-				Request:    r,
-			}, nil
-		}),
-	}
-
-	// Use short TTL so cache expires quickly.
-	store := newStore(client, schemastore.WithCacheTTL(10*time.Millisecond))
-
-	// First fetch succeeds.
-	_, err = store.FindMatch(t.Context(), "config.yaml")
-	require.NoError(t, err)
-	assert.Equal(t, int32(1), requestCount.Load())
-
-	// Wait for cache to expire.
-	time.Sleep(20 * time.Millisecond)
-
-	// FindMatch triggers a refetch which fails, but still returns cached data.
-	entry, err := store.FindMatch(t.Context(), "config.yaml")
-	require.NoError(t, err)
-	assert.Equal(t, "Test", entry.Name)
-
-	// Verify the store attempted the refetch.
-	assert.Equal(t, int32(2), requestCount.Load())
-
-	// Inside the retry interval the store serves stale data without a request.
-	entry, err = store.FindMatch(t.Context(), "config.yaml")
-	require.NoError(t, err)
-	assert.Equal(t, "Test", entry.Name)
-	assert.Equal(t, int32(2), requestCount.Load())
-}
-
-func TestSchemaStore_CatalogWithoutSchemas(t *testing.T) {
-	t.Parallel()
-
-	// A JSON body with no schemas array is not a catalog, so the store
-	// treats it as a failed fetch rather than as a catalog with no entries.
+	// A refresh that fails leaves the previous catalog in use.
 	tcs := map[string]struct {
-		body string
+		body   string
+		status int
 	}{
-		"null": {
-			body: `null`,
-		},
-		"empty object": {
-			body: `{}`,
-		},
-		"null schemas": {
-			body: `{"schemas": null}`,
-		},
-		"error object": {
-			body: `{"message": "rate limited"}`,
-		},
+		"server error": {status: http.StatusInternalServerError},
+
+		// A JSON body with no schemas array is not a catalog, so the store
+		// keeps the previous catalog rather than replacing it with one
+		// that has no entries.
+		"null":         {status: http.StatusOK, body: `null`},
+		"empty object": {status: http.StatusOK, body: `{}`},
+		"null schemas": {status: http.StatusOK, body: `{"schemas": null}`},
+		"error object": {status: http.StatusOK, body: `{"message": "rate limited"}`},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			t.Run("without a cached catalog", func(t *testing.T) {
-				t.Parallel()
+			// Inside the bubble, the sleep below moves the fake clock past
+			// the cache TTL without waiting in real time.
+			synctest.Test(t, func(t *testing.T) {
+				catalog := marshalCatalog(t, testCatalog)
 
-				store := newStore(newClient(http.StatusOK, []byte(tc.body)))
+				var requestCount atomic.Int32
 
+				// The transport serves the catalog first and the response
+				// of the case after. It opens no socket, so it counts only
+				// the store's own requests.
+				client := &http.Client{
+					Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+						if requestCount.Add(1) > 1 {
+							return response(r, tc.status, []byte(tc.body)), nil
+						}
+
+						return response(r, http.StatusOK, catalog), nil
+					}),
+				}
+
+				// Use short TTL so cache expires quickly.
+				store := newStore(client, schemastore.WithCacheTTL(10*time.Millisecond))
+
+				// First fetch succeeds.
 				_, err := store.FindMatch(t.Context(), "config.yaml")
-				require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
-				require.NotErrorIs(t, err, schema.ErrNoMatch)
-			})
+				require.NoError(t, err)
+				assert.Equal(t, int32(1), requestCount.Load())
 
-			t.Run("with a cached catalog", func(t *testing.T) {
-				t.Parallel()
+				// Wait for cache to expire.
+				time.Sleep(20 * time.Millisecond)
 
-				// Inside the bubble, the sleep below moves the fake clock
-				// past the cache TTL without waiting in real time.
-				synctest.Test(t, func(t *testing.T) {
-					catalog := marshalCatalog(t, testCatalog)
+				// FindMatch triggers a refetch which fails, but still
+				// returns cached data.
+				entry, err := store.FindMatch(t.Context(), "config.yaml")
+				require.NoError(t, err)
+				assert.Equal(t, "Test", entry.Name)
 
-					var requestCount atomic.Int32
+				// Verify the store attempted the refetch.
+				assert.Equal(t, int32(2), requestCount.Load())
 
-					// The transport serves the catalog first and the body
-					// after. It opens no socket, so it counts only the
-					// store's own requests.
-					client := &http.Client{
-						Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-							data := catalog
-							if requestCount.Add(1) > 1 {
-								data = []byte(tc.body)
-							}
-
-							return &http.Response{
-								StatusCode: http.StatusOK,
-								Body:       io.NopCloser(bytes.NewReader(data)),
-								Request:    r,
-							}, nil
-						}),
-					}
-
-					store := newStore(client, schemastore.WithCacheTTL(10*time.Millisecond))
-
-					_, err := store.FindMatch(t.Context(), "config.yaml")
-					require.NoError(t, err)
-
-					// Wait for cache to expire.
-					time.Sleep(20 * time.Millisecond)
-
-					// The refresh fails, so the store keeps the cached catalog.
-					entry, err := store.FindMatch(t.Context(), "config.yaml")
-					require.NoError(t, err)
-					assert.Equal(t, "Test", entry.Name)
-					assert.Equal(t, int32(2), requestCount.Load())
-				})
+				// Inside the retry interval the store serves stale data
+				// without a request.
+				entry, err = store.FindMatch(t.Context(), "config.yaml")
+				require.NoError(t, err)
+				assert.Equal(t, "Test", entry.Name)
+				assert.Equal(t, int32(2), requestCount.Load())
 			})
 		})
 	}
