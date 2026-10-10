@@ -3482,37 +3482,37 @@ func TestPath_Matches_AliasFanOut(t *testing.T) {
 	tcs := map[string]struct {
 		err   error
 		input string
-		path  paths.Path
+		path  string
 		want  int
 	}{
 		"wide mapping of aliases": {
 			input: aliasMap(1000),
-			path:  paths.MustParse("$.b.*.*"),
+			path:  "$.b.*.*",
 			err:   paths.ErrExcessiveAliasing,
 		},
 		"small mapping of aliases": {
 			input: aliasMap(10),
-			path:  paths.MustParse("$.b.*.*"),
+			path:  "$.b.*.*",
 			want:  100,
 		},
 		"nested alias levels": {
 			input: yamltest.AliasLevels(5),
-			path:  paths.MustParse("$.a[5][*][*][*][*][*]"),
+			path:  "$.a[5][*][*][*][*][*]",
 			err:   paths.ErrExcessiveAliasing,
 		},
 		"wide list of aliases": {
 			input: aliasList(500),
-			path:  paths.MustParse("$.b[*][*]"),
+			path:  "$.b[*][*]",
 			err:   paths.ErrExcessiveAliasing,
 		},
 		"few alias levels": {
 			input: yamltest.AliasLevels(2),
-			path:  paths.MustParse("$.a[2][*][*]"),
+			path:  "$.a[2][*][*]",
 			want:  100,
 		},
 		"short list of aliases": {
 			input: aliasList(10),
-			path:  paths.MustParse("$.b[*][*]"),
+			path:  "$.b[*][*]",
 			want:  100,
 		},
 	}
@@ -3526,13 +3526,15 @@ func TestPath_Matches_AliasFanOut(t *testing.T) {
 	}
 }
 
-// assertMatchCount asserts that path selects want nodes in the first
-// document of input. When wantErr is set, it asserts instead that Matches
-// and Nodes fail with it, as Node does for a path without a wildcard.
-func assertMatchCount(t *testing.T, input string, path paths.Path, want int, wantErr error) {
+// assertMatchCount asserts that the path expression expr selects want
+// nodes in the first document of input. When wantErr is set, it asserts
+// instead that Matches and Nodes fail with it, as Node does for a path
+// without a wildcard.
+func assertMatchCount(t *testing.T, input, expr string, want int, wantErr error) {
 	t.Helper()
 
 	doc := yamltest.FirstDocument(t, input).DocumentAST()
+	path := paths.MustParse(expr)
 
 	matches, err := paths.NewResolver(doc).Matches(path)
 	if wantErr == nil {
@@ -3619,166 +3621,166 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 	tcs := map[string]struct {
 		err   error
 		input string
-		path  paths.Path
+		path  string
 		want  int
 	}{
 		"recursive key over a merge chain": {
 			input: mergeChain(2000),
-			path:  paths.Doc().Recursive("nope"),
+			path:  "$..nope",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over an inline merge chain": {
 			input: inlineChain(2000),
-			path:  paths.Doc().Recursive("nope"),
+			path:  "$..nope",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"child key of each alias to a merge chain": {
 			input: aliasChain(2000),
-			path:  paths.MustParse("$.l[*].nope"),
+			path:  "$.l[*].nope",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many aliases": {
 			input: yamltest.WideMerge(2000),
-			path:  paths.Doc().Recursive("nope"),
+			path:  "$..nope",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many scalars": {
 			input: yamltest.WideMergeOf(2000, "0"),
-			path:  paths.Doc().Recursive("nope"),
+			path:  "$..nope",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many aliases and a missing one": {
 			input: yamltest.WideMergeOf(2000, "*a", "*missing"),
-			path:  paths.Doc().Recursive("nope"),
+			path:  "$..nope",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many aliases and a later anchor": {
 			input: yamltest.WideMergeOf(2000, "*a", "*late") + "late: &late {y: 1}\n",
-			path:  paths.Doc().Recursive("nope"),
+			path:  "$..nope",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"recursive key over a merge of many scalars and a missing alias": {
 			input: yamltest.WideMergeOf(2000, "0", "*missing"),
-			path:  paths.Doc().Recursive("nope"),
+			path:  "$..nope",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"child key of each alias to a wide merge": {
 			input: aliasWideMerge(2000),
-			path:  paths.MustParse("$.l[*].nope"),
+			path:  "$.l[*].nope",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"child key over many merges of one sequence": {
 			input: sharedMerge(1000),
-			path:  paths.MustParse("$.d.nope"),
+			path:  "$.d.nope",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"every entry over a merge chain": {
 			input: mergeChain(2000),
-			path:  paths.MustParse("$.b1999.*"),
+			path:  "$.b1999.*",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"every entry over a merge of many aliases": {
 			input: yamltest.WideMerge(2000),
-			path:  paths.MustParse("$.m.*"),
+			path:  "$.m.*",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"every entry of each alias to a wide merge": {
 			input: aliasWideMerge(2000),
-			path:  paths.MustParse("$.l[*].*"),
+			path:  "$.l[*].*",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"every node over a merge chain": {
 			input: mergeChain(2000),
-			path:  paths.Doc().RecursiveAll(),
+			path:  "$..*",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"every node over an inline merge chain": {
 			input: inlineChain(2000),
-			path:  paths.Doc().RecursiveAll(),
+			path:  "$..*",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"every node over a merge of many aliases": {
 			input: yamltest.WideMerge(2000),
-			path:  paths.Doc().RecursiveAll(),
+			path:  "$..*",
 			err:   paths.ErrExcessiveMerging,
 		},
 		"every node over a short merge chain": {
 			input: mergeChain(10),
-			path:  paths.Doc().RecursiveAll(),
+			path:  "$..*",
 			want:  20,
 		},
 		"every node over a merge of a few aliases": {
 			input: yamltest.WideMerge(10),
-			path:  paths.Doc().RecursiveAll(),
+			path:  "$..*",
 			want:  13,
 		},
 		// The lookups of this walk read as many nodes under merge keys as
 		// those of a `..name` walk do.
 		"every node over many records that merge one list": {
 			input: mergedRecords(400, 100, 100),
-			path:  paths.Doc().RecursiveAll(),
+			path:  "$..*",
 			want:  41001,
 		},
 		"every entry over a short merge chain": {
 			input: mergeChain(10),
-			path:  paths.MustParse("$.b9.*"),
+			path:  "$.b9.*",
 			want:  10,
 		},
 		"every entry over a merge of a few aliases": {
 			input: yamltest.WideMerge(10),
-			path:  paths.MustParse("$.m.*"),
+			path:  "$.m.*",
 			want:  11,
 		},
 		"every entry of each alias to a narrow merge": {
 			input: aliasWideMerge(10),
-			path:  paths.MustParse("$.l[*].*"),
+			path:  "$.l[*].*",
 			want:  10,
 		},
 		"recursive key over a short merge chain": {
 			input: mergeChain(10),
-			path:  paths.Doc().Recursive("x5"),
+			path:  "$..x5",
 			want:  1,
 		},
 		"child key of each alias to a short merge chain": {
 			input: aliasChain(10),
-			path:  paths.MustParse("$.l[*].x0"),
+			path:  "$.l[*].x0",
 			want:  10,
 		},
 		"recursive key over a merge of a few aliases": {
 			input: yamltest.WideMerge(10),
-			path:  paths.Doc().Recursive("0x1005"),
+			path:  "$..0x1005",
 			want:  1,
 		},
 		"recursive key over a merge of a few aliases and a missing one": {
 			input: yamltest.WideMergeOf(10, "*a", "*missing"),
-			path:  paths.Doc().Recursive("0x1005"),
+			path:  "$..0x1005",
 			want:  0,
 		},
 		"recursive key over a merge that lists a missing alias first": {
 			input: missingFirst(10),
-			path:  paths.Doc().Recursive("0x1005"),
+			path:  "$..0x1005",
 			want:  0,
 		},
 		"recursive key over a wide merge that lists a missing alias first": {
 			input: missingFirst(2000),
-			path:  paths.Doc().Recursive("nope"),
+			path:  "$..nope",
 			want:  0,
 		},
 		"child key of each alias to a narrow merge": {
 			input: aliasWideMerge(10),
-			path:  paths.MustParse("$.l[*].z"),
+			path:  "$.l[*].z",
 			want:  10,
 		},
 		"child key over a few merges of one sequence": {
 			input: sharedMerge(10),
-			path:  paths.MustParse("$.d.z"),
+			path:  "$.d.z",
 			want:  1,
 		},
 		// The lookups of this walk read over 4 million nodes under merge
 		// keys, which is about 20 times the nodes of the document.
 		"recursive key over many records that merge one list": {
 			input: mergedRecords(400, 100, 100),
-			path:  paths.Doc().Recursive("name"),
+			path:  "$..name",
 			want:  400,
 		},
 	}
