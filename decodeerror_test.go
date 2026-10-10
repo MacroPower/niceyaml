@@ -343,218 +343,189 @@ type rejectionConfig struct {
 	On      bool              `yaml:"on"`
 }
 
+// requireNamedPath returns the path srcErr carries, after checking that
+// want, the message of the error, names that path behind its position.
+func requireNamedPath(t *testing.T, srcErr *niceyaml.SourceError, want string) paths.Path {
+	t.Helper()
+
+	path, ok := srcErr.Path()
+	require.True(t, ok, "the error carries no path")
+	assert.Contains(t, want, ": "+path.String()+": ")
+
+	return path
+}
+
 func TestDocument_Decode_Rejection(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
 		input string
 		want  string
-		path  string
 		opts  []niceyaml.DecodeOption
 	}{
 		"scalar in an element": {
 			input: "servers:\n  - host: h\n    port: abc\n",
 			want:  "3:11: $.servers[0].port: expected integer, got string",
-			path:  "$.servers[0].port",
 		},
 		"block mapping for an integer": {
 			input: "top:\n  a: 1\n  b: 2\n",
 			want:  "1:1: $.top: expected integer, got mapping",
-			path:  "$.top",
 		},
 		"block mapping for a string in a map": {
 			input: "labels:\n  a:\n    b: 1\n",
 			want:  "2:3: $.labels.a: expected string, got mapping",
-			path:  "$.labels.a",
 		},
 		"block sequence for an integer": {
 			input: "top:\n  - 1\n  - 2\n",
 			want:  "1:1: $.top: expected integer, got sequence",
-			path:  "$.top",
 		},
 		"flow sequence for a string": {
 			input: "name: [a, b]\n",
 			want:  "1:1: $.name: expected string, got sequence",
-			path:  "$.name",
 		},
 		"flow mapping for an integer": {
 			input: "top: {a: 1}\n",
 			want:  "1:1: $.top: expected integer, got mapping",
-			path:  "$.top",
 		},
 		"empty flow sequence for an integer": {
 			input: "top: []\n",
 			want:  "1:1: $.top: expected integer, got sequence",
-			path:  "$.top",
 		},
 		"string for a sequence": {
 			input: "servers: abc\n",
 			want:  "1:10: $.servers: expected sequence, got string",
-			path:  "$.servers",
 		},
 		"string for a mapping": {
 			input: "one: abc\n",
 			want:  "1:6: $.one: expected mapping, got string",
-			path:  "$.one",
 		},
 		"block sequence for a mapping": {
 			input: "one:\n  - a\n",
 			want:  "1:1: $.one: expected mapping, got sequence",
-			path:  "$.one",
 		},
 		"sequence element for a mapping": {
 			input: "servers:\n  - - a\n",
 			want:  "2:3: $.servers[0]: expected mapping, got sequence",
-			path:  "$.servers[0]",
 		},
 		"integer for a sequence": {
 			input: "servers: 5\n",
 			want:  "1:10: $.servers: expected sequence, got integer",
-			path:  "$.servers",
 		},
 		"boolean for a mapping": {
 			input: "one: true\n",
 			want:  "1:6: $.one: expected mapping, got boolean",
-			path:  "$.one",
 		},
 		"block scalar for a mapping": {
 			input: "one: |\n  abc\n",
 			want:  "1:6: $.one: expected mapping, got string",
-			path:  "$.one",
 		},
 		"anchored scalar": {
 			input: "top: &t abc\n",
 			want:  "1:9: $.top: expected integer, got string",
-			path:  "$.top",
 		},
 		"tagged scalar": {
 			input: "top: !!str abc\n",
 			want:  "1:12: $.top: expected integer, got string",
-			path:  "$.top",
 		},
 		"value an alias reads": {
 			input: "defs:\n  p: &p abc\nservers:\n  - port: *p\n",
 			want:  "2:9: $.defs.p: expected integer, got string",
-			path:  "$.defs.p",
 		},
 		"value a merge key brings in": {
 			input: "defs: &d\n  port: abc\nservers:\n  - <<: *d\n    host: h\n",
 			want:  "2:9: $.defs.port: expected integer, got string",
-			path:  "$.defs.port",
 		},
 		"map key": {
 			input: "counts:\n  x: 1\n",
 			want:  "2:3: $.counts.x~: expected integer, got string",
-			path:  "$.counts.x~",
 		},
 		"explicit map key": {
 			input: "counts:\n  ? x\n  : 1\n",
 			want:  "2:5: $.counts.x~: expected integer, got string",
-			path:  "$.counts.x~",
 		},
 		"map value": {
 			input: "counts:\n  1: x\n",
 			want:  "2:6: $.counts.1: expected integer, got string",
-			path:  "$.counts.1",
 		},
 		"key a path quotes": {
 			input: "labels:\n  \"a.b\": [1]\n",
 			want:  "2:3: $.labels.'a.b': expected string, got sequence",
-			path:  "$.labels.'a.b'",
 		},
 		"overflow of a signed integer": {
 			input: "servers:\n  - small: 300\n",
 			want:  "2:12: $.servers[0].small: expected integer from -128 to 127, got 300",
-			path:  "$.servers[0].small",
 		},
 		"negative for an unsigned integer": {
 			input: "servers:\n  - wide: -1\n",
 			want:  "2:11: $.servers[0].wide: expected integer from 0 to 65535, got -1",
-			path:  "$.servers[0].wide",
 		},
 		"overflow of an unsigned integer": {
 			input: "one: {wide: 70000}\n",
 			want:  "1:13: $.one.wide: expected integer from 0 to 65535, got 70000",
-			path:  "$.one.wide",
 		},
 		"float past an integer": {
 			input: "one: {small: 1e10}\n",
 			want:  "1:14: $.one.small: expected integer from -128 to 127, got 1e10",
-			path:  "$.one.small",
 		},
 		"boolean for an integer": {
 			input: "top: true\n",
 			want:  "1:6: $.top: expected integer, got boolean",
-			path:  "$.top",
 		},
 		"integer for a boolean": {
 			input: "on: 5\n",
 			want:  "1:5: $.on: expected boolean, got integer",
-			path:  "$.on",
 		},
 		"mapping for a float": {
 			input: "ratio: {a: 1}\n",
 			want:  "1:1: $.ratio: expected float, got mapping",
-			path:  "$.ratio",
 		},
 		"sequence for a timestamp": {
 			input: "when: [1]\n",
 			want:  "1:1: $.when: expected timestamp, got sequence",
-			path:  "$.when",
 		},
 		"sequence for a duration": {
 			input: "wait: [1]\n",
 			want:  "1:1: $.wait: expected duration, got sequence",
-			path:  "$.wait",
 		},
 		"tagged null for an integer": {
 			input: "top: !!null x\n",
 			want:  "1:13: $.top: expected integer, got null",
-			path:  "$.top",
 		},
 		"binary for an integer": {
 			input: "top: !!binary YWJj\n",
 			want:  "1:15: $.top: expected integer, got binary",
-			path:  "$.top",
 		},
 		"timestamp for an integer": {
 			input: "top: !!timestamp 2020-01-01\n",
 			want:  "1:18: $.top: expected integer, got timestamp",
-			path:  "$.top",
 		},
 		"ordered mapping for an integer": {
 			input: "top: {a: 1}\n",
 			opts:  []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)},
 			want:  "1:1: $.top: expected integer, got mapping",
-			path:  "$.top",
 		},
 		"unknown field": {
 			input: "name: x\nfoo: 1\n",
 			opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
 			want:  "2:1: $.foo~: unknown field \"foo\"",
-			path:  "$.foo~",
 		},
 		"unknown field in an element": {
 			input: "servers:\n  - zzz: 1\n",
 			opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
 			want:  "2:5: $.servers[0].zzz~: unknown field \"zzz\"",
-			path:  "$.servers[0].zzz~",
 		},
 		"unknown field a merge key brings in": {
 			input: "labels: &d\n  zzz: 1\none:\n  <<: *d\n",
 			opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
 			want:  "2:3: $.labels.zzz~: unknown field \"zzz\"",
-			path:  "$.labels.zzz~",
 		},
 		"alias with no anchor": {
 			input: "top: *nope\n",
 			want:  "1:6: $.top: could not find alias \"nope\"",
-			path:  "$.top",
 		},
 		"value under renamed anchors": {
 			input: "a: &x 1\nb: &x 2\ntop: abc\n",
 			want:  "3:6: $.top: expected integer, got string",
-			path:  "$.top",
 		},
 	}
 
@@ -573,9 +544,7 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			srcErr := yamltest.RequireSourceError(t, err)
 			require.NoError(t, srcErr.Unresolved())
 
-			path, ok := srcErr.Path()
-			require.True(t, ok, "the rejection carries no path")
-			assert.Equal(t, tc.path, path.String())
+			path := requireNamedPath(t, srcErr, tc.want)
 
 			// The message names no Go type or field.
 			for _, word := range []string{"unmarshal", "Go ", "struct", "interface"} {
@@ -605,8 +574,8 @@ func TestDocument_Decode_Rejection(t *testing.T) {
 			under, ok := dd.PathAt(pos)
 			require.True(t, ok)
 
-			if strings.HasSuffix(tc.path, "~") {
-				assert.Equal(t, tc.path, under.String())
+			if strings.HasSuffix(path.String(), "~") {
+				assert.Equal(t, path, under)
 
 				return
 			}
@@ -840,21 +809,18 @@ func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
 	tcs := map[string]struct {
 		scope string
 		want  string
-		path  string
 	}{
 		// The path starts at `$`, so the scope of the Node does not go
 		// in front of it a second time.
 		"value inside the scope": {
 			scope: "$.servers[0]",
 			want:  "s.yaml:5:11: $.servers[0].port: expected integer, got string",
-			path:  "$.servers[0].port",
 		},
 		// The merge key brings the value in from outside the scope,
 		// and the path names the place where the anchor defines it.
 		"value a merge key brings in from outside the scope": {
 			scope: "$.servers[1]",
 			want:  "s.yaml:2:9: $.defs.port: expected integer, got string",
-			path:  "$.defs.port",
 		},
 	}
 
@@ -870,9 +836,7 @@ func TestDocument_Decode_Rejection_Scoped(t *testing.T) {
 
 			srcErr := yamltest.RequireSourceError(t, err)
 
-			path, ok := srcErr.Path()
-			require.True(t, ok)
-			assert.Equal(t, tc.path, path.String())
+			path := requireNamedPath(t, srcErr, tc.want)
 
 			// The error stays bound to the Node that decoded, and its
 			// path resolves from the root of the document.
@@ -959,19 +923,16 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			decode func(ctx context.Context, dd *niceyaml.Node) error
 			input  string
 			want   string
-			path   string
 		}{
 			"duration field": {
 				input:  "name: api\ntimeout: soon\n",
 				decode: decodeAs[tierServer](),
 				want:   `2:10: $.timeout: time: invalid duration "soon"`,
-				path:   "$.timeout",
 			},
 			"text unmarshaler in a sequence of structs": {
 				input:  "- name: a\n  tier: low\n- name: b\n  tier: mid\n",
 				decode: decodeAs[[]tierServer](),
 				want:   `4:9: $[1].tier: unknown tier "mid"`,
-				path:   "$[1].tier",
 			},
 			"pointer element": {
 				input: "tiers: [low, mid]\n",
@@ -979,7 +940,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Tiers []*tier `yaml:"tiers"`
 				}](),
 				want: `1:14: $.tiers[1]: unknown tier "mid"`,
-				path: "$.tiers[1]",
 			},
 			"map key": {
 				input: "hosts:\n  10.0.0.1: a\n  nope: b\n",
@@ -987,13 +947,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Hosts map[netip.Addr]string `yaml:"hosts"`
 				}](),
 				want: `3:3: $.hosts.nope~: ParseAddr("nope"): unable to parse IP`,
-				path: "$.hosts.nope~",
 			},
 			"map value": {
 				input:  "a: low\nb: mid\n",
 				decode: decodeAs[map[string]tier](),
 				want:   `2:4: $.b: unknown tier "mid"`,
-				path:   "$.b",
 			},
 			// The path through a merge key resolves to the entry of the
 			// mapping the key brings in.
@@ -1003,7 +961,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Servers map[string]tierServer `yaml:"servers"`
 				}](),
 				want: `2:12: $.servers.api.timeout: time: invalid duration "soon"`,
-				path: "$.servers.api.timeout",
 			},
 			"map entry a merge key brings in": {
 				input: "base: &base\n  b: mid\ntiers:\n  a: low\n  <<: *base\n",
@@ -1011,7 +968,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Tiers map[string]tier `yaml:"tiers"`
 				}](),
 				want: `2:6: $.tiers.b: unknown tier "mid"`,
-				path: "$.tiers.b",
 			},
 			// The path of a value an alias holds points at the alias.
 			"alias": {
@@ -1021,7 +977,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Tiers []tier `yaml:"tiers"`
 				}](),
 				want: `2:14: $.tiers[1]: unknown tier "mid"`,
-				path: "$.tiers[1]",
 			},
 			"inline struct": {
 				input: "id: 1\nname: api\ntier: mid\n",
@@ -1030,7 +985,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					ID     int        `yaml:"id"`
 				}](),
 				want: `3:7: $.tier: unknown tier "mid"`,
-				path: "$.tier",
 			},
 			"inline map": {
 				input: "id: low\nextra: mid\n",
@@ -1039,7 +993,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					ID    string          `yaml:"id"`
 				}](),
 				want: `2:8: $.extra: unknown tier "mid"`,
-				path: "$.extra",
 			},
 			// The decoder reads the fields of a struct in the order the
 			// struct declares them, so the first field that fails reports
@@ -1053,13 +1006,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Value   opaqueValue   `yaml:"value"`
 				}](),
 				want: `2:10: $.timeout: time: invalid duration "soon"`,
-				path: "$.timeout",
 			},
 			"value that decodes through a second type": {
 				input:  "name: prod\nservers:\n  - name: a\n    tier: low\n  - name: b\n    tier: mid\n",
 				decode: decodeAs[mirrored](),
 				want:   `6:11: $.servers[1].tier: unknown tier "mid"`,
-				path:   "$.servers[1].tier",
 			},
 			"field that decodes through a second type": {
 				input: "prod:\n  servers:\n    - timeout: soon\n",
@@ -1067,7 +1018,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Prod mirrored `yaml:"prod"`
 				}](),
 				want: `3:16: $.prod.servers[0].timeout: time: invalid duration "soon"`,
-				path: "$.prod.servers[0].timeout",
 			},
 			// No field below the value reports the message with the text
 			// the value put in front, so the error points at the value.
@@ -1077,7 +1027,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Main prefixing `yaml:"main"`
 				}](),
 				want: `1:1: $.main: server: unknown tier "mid"`,
-				path: "$.main",
 			},
 			"value whose fields mirror nothing": {
 				input: "name: api\nvalue:\n  a: 1\n  b: bad\n",
@@ -1086,7 +1035,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Value opaqueValue `yaml:"value"`
 				}](),
 				want: `2:1: $.value: unmarshaler rejected the value`,
-				path: "$.value",
 			},
 			"json unmarshaler under its option": {
 				input: "name: api\nvalue:\n  v: 1\n",
@@ -1095,7 +1043,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Value jsonDecoded `yaml:"value"`
 				}](niceyaml.WithJSONUnmarshalers(true)),
 				want: `2:1: $.value: unmarshaler rejected the value`,
-				path: "$.value",
 			},
 			"type an option decodes": {
 				input: "name: api\nvalue: bad\n",
@@ -1106,7 +1053,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					func(context.Context, *optionDecoded, func(any) error) error { return errUnmarshal },
 				)),
 				want: `2:8: $.value: unmarshaler rejected the value`,
-				path: "$.value",
 			},
 			// The decoder reads the value field by field, so the field
 			// reported the error.
@@ -1117,7 +1063,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Value jsonFielded `yaml:"value"`
 				}](),
 				want: `3:9: $.value.tier: unknown tier "mid"`,
-				path: "$.value.tier",
 			},
 			// The scalar the decode reads is the value, so the error
 			// points at the node itself, which the path names from the
@@ -1135,7 +1080,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					return err
 				},
 				want: `2:7: $.tier: unknown tier "mid"`,
-				path: "$.tier",
 			},
 			"value below a scoped node": {
 				input: "servers:\n  - name: a\n    tier: mid\n",
@@ -1150,7 +1094,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					return err
 				},
 				want: `3:11: $.servers[0].tier: unknown tier "mid"`,
-				path: "$.servers[0].tier",
 			},
 			"DecodeInto": {
 				input: "name: api\ntier: mid\n",
@@ -1160,7 +1103,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					return dd.DecodeInto(ctx, &v)
 				},
 				want: `2:7: $.tier: unknown tier "mid"`,
-				path: "$.tier",
 			},
 		}
 
@@ -1175,11 +1117,9 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 				srcErr := yamltest.RequireSourceError(t, err)
 
-				path, ok := srcErr.Path()
-				require.True(t, ok, "the error carries no path")
-				assert.Equal(t, tc.path, path.String())
+				requireNamedPath(t, srcErr, tc.want)
 
-				_, ok = srcErr.Range()
+				_, ok := srcErr.Range()
 				assert.True(t, ok, "the error carries no location")
 			})
 		}
@@ -1194,7 +1134,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			decode func(ctx context.Context, dd *niceyaml.Node) error
 			input  string
 			want   string
-			path   string
 		}{
 			"sequence element": {
 				input: "addrs:\n  - 10.0.0.1\n  - [a, b]\n",
@@ -1202,7 +1141,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Addrs []netip.Addr `yaml:"addrs"`
 				}](),
 				want: "3:3: $.addrs[1]: expected string, got sequence",
-				path: "$.addrs[1]",
 			},
 			"mapping field": {
 				input: "name: api\naddr: {a: b}\n",
@@ -1211,7 +1149,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Addr netip.Addr `yaml:"addr"`
 				}](),
 				want: "2:1: $.addr: expected string, got mapping",
-				path: "$.addr",
 			},
 			"pointer field": {
 				input: "tier:\n  a: b\n",
@@ -1219,13 +1156,11 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Tier *tier `yaml:"tier"`
 				}](),
 				want: "1:1: $.tier: expected string, got mapping",
-				path: "$.tier",
 			},
 			"map value": {
 				input:  "a: low\nb: [mid]\n",
 				decode: decodeAs[map[string]tier](),
 				want:   "2:1: $.b: expected string, got sequence",
-				path:   "$.b",
 			},
 			// The path of a value an alias holds points at the alias.
 			"alias to a sequence": {
@@ -1234,7 +1169,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Tier tier `yaml:"tier"`
 				}](),
 				want: "2:7: $.tier: expected string, got sequence",
-				path: "$.tier",
 			},
 			// The decoder reads nothing below the mapping, so the tier in
 			// it reports nothing.
@@ -1244,7 +1178,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Holder tierHolder `yaml:"holder"`
 				}](),
 				want: "1:1: $.holder: expected string, got mapping",
-				path: "$.holder",
 			},
 			// The decoder calls the UnmarshalJSON method of the type only
 			// under its option.
@@ -1254,19 +1187,16 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					Either problemTextual `yaml:"either"`
 				}](),
 				want: "1:1: $.either: expected string, got mapping",
-				path: "$.either",
 			},
 			"sequence the decode reads": {
 				input:  "[a, b]\n",
 				decode: decodeAs[tier](),
 				want:   "1:1: $: expected string, got sequence",
-				path:   "$",
 			},
 			"empty mapping the decode reads": {
 				input:  "{}\n",
 				decode: decodeAs[*tier](),
 				want:   "1:1: $: expected string, got mapping",
-				path:   "$",
 			},
 			"mapping a scoped decode reads": {
 				input: "name: api\ntier: {a: b}\n",
@@ -1276,7 +1206,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 					return err
 				},
 				want: "2:1: $.tier: expected string, got mapping",
-				path: "$.tier",
 			},
 		}
 
@@ -1291,11 +1220,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				require.ErrorIs(t, err, niceyaml.ErrDecode)
 				assert.True(t, niceyaml.IsInvalid(err))
 
-				srcErr := yamltest.RequireSourceError(t, err)
-
-				path, ok := srcErr.Path()
-				require.True(t, ok, "the error carries no path")
-				assert.Equal(t, tc.path, path.String())
+				requireNamedPath(t, yamltest.RequireSourceError(t, err), tc.want)
 			})
 		}
 	})
@@ -1490,7 +1415,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			is     error
 			input  string
 			want   string
-			path   string
 		}{
 			"method that takes a decode function": {
 				input: "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n",
@@ -1499,7 +1423,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				}](),
 				is:   errSpan,
 				want: "4:9: $.spans[1].to: to is below from",
-				path: "$.spans[1].to",
 			},
 			"method that takes the node": {
 				input: "spans:\n  - from: 9\n    to: 3\n",
@@ -1508,7 +1431,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				}](),
 				is:   errSpan,
 				want: "3:9: $.spans[0].to: to is below from",
-				path: "$.spans[0].to",
 			},
 			"method that takes bytes": {
 				input: "spans:\n  - from: 9\n    to: 3\n",
@@ -1517,7 +1439,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				}](),
 				is:   errSpan,
 				want: "3:9: $.spans[0].to: to is below from",
-				path: "$.spans[0].to",
 			},
 			"function of an option": {
 				input: "name: api\nvalue: {from: 9, to: 3}\n",
@@ -1529,14 +1450,12 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				)),
 				is:   errSpan,
 				want: "2:22: $.value.to: to is below from",
-				path: "$.value.to",
 			},
 			"map value": {
 				input:  "a: {from: 1, to: 2}\nb: {from: 9, to: 3}\n",
 				decode: decodeAs[map[string]span](),
 				is:     errSpan,
 				want:   "2:18: $.b.to: to is below from",
-				path:   "$.b.to",
 			},
 			"pointer field": {
 				input: "span:\n  from: 9\n  to: 3\n",
@@ -1545,7 +1464,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				}](),
 				is:   errSpan,
 				want: "3:7: $.span.to: to is below from",
-				path: "$.span.to",
 			},
 			// The path goes through the alias to the line that holds the
 			// value.
@@ -1556,7 +1474,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				}](),
 				is:   errSpan,
 				want: "1:27: $.spans[0].to: to is below from",
-				path: "$.spans[0].to",
 			},
 			"field a merge key brings in": {
 				input: "base: &base {to: 3}\nspans:\n  - <<: *base\n    from: 9\n",
@@ -1565,7 +1482,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				}](),
 				is:   errSpan,
 				want: "1:18: $.spans[0].to: to is below from",
-				path: "$.spans[0].to",
 			},
 			"value below a scoped node": {
 				input: "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n",
@@ -1576,7 +1492,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				},
 				is:   errSpan,
 				want: "4:9: $.spans[1].to: to is below from",
-				path: "$.spans[1].to",
 			},
 			// No value below the node reports the error, so the path reads
 			// from the node, which is the value.
@@ -1585,7 +1500,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				decode: decodeAs[span](),
 				is:     errSpan,
 				want:   "2:5: $.to: to is below from",
-				path:   "$.to",
 			},
 			"mapping a scoped decode reads": {
 				input: "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n",
@@ -1596,7 +1510,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				},
 				is:   errSpan,
 				want: "4:9: $.spans[1].to: to is below from",
-				path: "$.spans[1].to",
 			},
 			// The span wrote the path, so the path goes under the span and
 			// not under the value that handed its error on.
@@ -1607,7 +1520,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				}](),
 				is:   errSpan,
 				want: "3:25: $.mirrors[0].span.to: to is below from",
-				path: "$.mirrors[0].span.to",
 			},
 			"value that adds text to the error of a field": {
 				input: "main:\n  span: {from: 9, to: 3}\n",
@@ -1616,7 +1528,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				}](),
 				is:   errSpan,
 				want: "2:23: $.main.span.to: wrapper: to is below from",
-				path: "$.main.span.to",
 			},
 			// The value wrote the path of its field, so the path goes
 			// under the value once, and not under the field too.
@@ -1627,7 +1538,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				}](),
 				is:   errSpan,
 				want: "2:23: $.main.span.to: to is below from",
-				path: "$.main.span.to",
 			},
 			"value that names a field in the error of that field": {
 				input: "main:\n  tier: mid\n",
@@ -1636,28 +1546,24 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				}](),
 				is:   errUnknownTier,
 				want: `2:9: $.main.tier: unknown tier "mid"`,
-				path: "$.main.tier",
 			},
 			"path of the value itself": {
 				input:  items,
 				decode: reported(niceyaml.Invalid(errUnmarshal, niceyaml.AtPath(paths.Current()))),
 				is:     errUnmarshal,
 				want:   "3:3: $.items[0]: unmarshaler rejected the value",
-				path:   "$.items[0]",
 			},
 			"error with no location": {
 				input:  items,
 				decode: reported(niceyaml.Invalid(errUnmarshal)),
 				is:     errUnmarshal,
 				want:   "3:3: $.items[0]: unmarshaler rejected the value",
-				path:   "$.items[0]",
 			},
 			"rebased error with no location": {
 				input:  items,
 				decode: reported(niceyaml.Rebase(errUnmarshal, paths.Current().Child("to"))),
 				is:     errUnmarshal,
 				want:   "4:9: $.items[0].to: unmarshaler rejected the value",
-				path:   "$.items[0].to",
 			},
 			// A path from the root reads from no value, so it stays.
 			"path from the root": {
@@ -1665,7 +1571,6 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				decode: reported(niceyaml.Invalid(errUnmarshal, niceyaml.AtPath(paths.Doc().Child("name")))),
 				is:     errUnmarshal,
 				want:   "1:7: $.name: unmarshaler rejected the value",
-				path:   "$.name",
 			},
 			// Each problem of a summary goes under the value on its own.
 			"summary": {
@@ -1700,12 +1605,14 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				srcErr := yamltest.RequireSourceError(t, err)
 
 				// A summary points at no value, so it carries no path.
-				path, ok := srcErr.Path()
-				require.Equal(t, tc.path != "", ok)
+				if len(yamltest.ProblemsOf(srcErr)) > 0 {
+					_, ok := srcErr.Path()
+					assert.False(t, ok)
 
-				if ok {
-					assert.Equal(t, tc.path, path.String())
+					return
 				}
+
+				requireNamedPath(t, srcErr, tc.want)
 			})
 		}
 	})
