@@ -2193,7 +2193,7 @@ func TestRegistry_FileSystems(t *testing.T) {
 func TestRegistry_FileSystemIdentity(t *testing.T) {
 	t.Parallel()
 
-	files := map[string][]byte{"s.json": []byte(`{"type": "string"}`)}
+	files := mapFS(map[string]string{"s.json": `{"type": "string"}`})
 
 	t.Run("a value Go cannot compare names no file system", func(t *testing.T) {
 		t.Parallel()
@@ -2206,57 +2206,50 @@ func TestRegistry_FileSystemIdentity(t *testing.T) {
 		require.ErrorContains(t, err, "pass a pointer to it")
 	})
 
-	t.Run("a pointer to it does", func(t *testing.T) {
-		t.Parallel()
+	// Another pointer or another map is another file system, whatever it
+	// holds.
+	tcs := map[string]struct {
+		fsys  fs.FS
+		other fs.FS
+	}{
+		"a pointer to it does": {
+			fsys:  &sliceFS{files: files},
+			other: &sliceFS{files: files},
+		},
+		"a map is known by the map itself": {
+			fsys:  files,
+			other: maps.Clone(files),
+		},
+	}
 
-		reg := schema.NewRegistry()
-		fsys := &sliceFS{files: files}
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		first, err := reg.Schema(t.Context(), schema.FileFS(fsys, "s.json"))
-		require.NoError(t, err)
+			reg := schema.NewRegistry()
 
-		second, err := reg.Schema(t.Context(), schema.FileFS(fsys, "s.json"))
-		require.NoError(t, err)
-		assert.Same(t, first, second)
+			first, err := reg.Schema(t.Context(), schema.FileFS(tc.fsys, "s.json"))
+			require.NoError(t, err)
 
-		// Another pointer is another file system, whatever it holds.
-		other, err := reg.Schema(t.Context(), schema.FileFS(&sliceFS{files: files}, "s.json"))
-		require.NoError(t, err)
-		assert.NotSame(t, first, other)
-	})
+			second, err := reg.Schema(t.Context(), schema.FileFS(tc.fsys, "s.json"))
+			require.NoError(t, err)
+			assert.Same(t, first, second)
 
-	t.Run("a map is known by the map itself", func(t *testing.T) {
-		t.Parallel()
-
-		reg := schema.NewRegistry()
-		fsys := fstest.MapFS{"s.json": &fstest.MapFile{Data: files["s.json"]}}
-
-		first, err := reg.Schema(t.Context(), schema.FileFS(fsys, "s.json"))
-		require.NoError(t, err)
-
-		second, err := reg.Schema(t.Context(), schema.FileFS(fsys, "s.json"))
-		require.NoError(t, err)
-		assert.Same(t, first, second)
-
-		other, err := reg.Schema(t.Context(), schema.FileFS(maps.Clone(fsys), "s.json"))
-		require.NoError(t, err)
-		assert.NotSame(t, first, other)
-	})
+			other, err := reg.Schema(t.Context(), schema.FileFS(tc.other, "s.json"))
+			require.NoError(t, err)
+			assert.NotSame(t, first, other)
+		})
+	}
 }
 
 // sliceFS is a file system whose value Go cannot compare, since it holds
 // a map by value.
 type sliceFS struct {
-	files map[string][]byte
+	files fstest.MapFS
 }
 
 func (f sliceFS) Open(name string) (fs.File, error) {
-	fsys := fstest.MapFS{}
-	for path, data := range f.files {
-		fsys[path] = &fstest.MapFile{Data: data}
-	}
-
-	return fsys.Open(name) //nolint:wrapcheck // The test file system returns the error of the one it wraps.
+	return f.files.Open(name) //nolint:wrapcheck // The test file system returns the error of the one it wraps.
 }
 
 func TestRegistry_WithFSAt(t *testing.T) {
