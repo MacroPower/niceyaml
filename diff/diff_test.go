@@ -1290,7 +1290,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			after:  "a: 1\nb: 2\n",
 			wantBefore: []wantLine{
 				{content: "a: 1", flag: line.FlagDefault},
-				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
+				placeholder,
 			},
 			wantAfter: []wantLine{
 				{content: "a: 1", flag: line.FlagDefault},
@@ -1306,7 +1306,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			},
 			wantAfter: []wantLine{
 				{content: "a: 1", flag: line.FlagDefault},
-				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
+				placeholder,
 			},
 		},
 		"modification": {
@@ -1332,8 +1332,8 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			`),
 			wantBefore: []wantLine{
 				{content: "before: 1", flag: line.FlagDefault},
-				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder for new1.
-				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder for new2.
+				placeholder,
+				placeholder,
 				{content: "after: 2", flag: line.FlagDefault},
 			},
 			wantAfter: []wantLine{
@@ -1362,8 +1362,8 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			},
 			wantAfter: []wantLine{
 				{content: "before: 1", flag: line.FlagDefault},
-				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder for old1.
-				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder for old2.
+				placeholder,
+				placeholder,
 				{content: "after: 2", flag: line.FlagDefault},
 			},
 		},
@@ -1417,8 +1417,8 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			wantAfter: []wantLine{
 				{content: "keep: 1", flag: line.FlagDefault},
 				{content: "ins1: x", flag: line.FlagInserted},
-				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
-				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
+				placeholder,
+				placeholder,
 				{content: "end: 2", flag: line.FlagDefault},
 			},
 		},
@@ -1439,8 +1439,8 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			wantBefore: []wantLine{
 				{content: "keep: 1", flag: line.FlagDefault},
 				{content: "del1: a", flag: line.FlagDeleted},
-				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
-				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
+				placeholder,
+				placeholder,
 				{content: "end: 2", flag: line.FlagDefault},
 			},
 			wantAfter: []wantLine{
@@ -1547,7 +1547,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			wantBefore: []wantLine{
 				{content: "a: 1", flag: line.FlagDefault},
 				{content: "b: 2", flag: line.FlagDeleted},
-				{content: "", flag: line.FlagDefault, empty: true}, // Placeholder.
+				placeholder,
 			},
 			wantAfter: []wantLine{
 				{content: "a: 1", flag: line.FlagDefault},
@@ -1574,10 +1574,7 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			beforeView := result.Before()
 			afterView := result.After()
 
-			// Both views should have the same length.
 			assert.Equal(t, beforeView.Count(), afterView.Count())
-
-			// Check IsEmpty.
 			assert.Equal(t, len(tc.wantBefore) == 0, beforeView.Held().IsEmpty(), "Before IsEmpty()")
 			assert.Equal(t, len(tc.wantAfter) == 0, afterView.Held().IsEmpty(), "After IsEmpty()")
 
@@ -1593,6 +1590,10 @@ type wantLine struct {
 	flag    line.Flag
 	empty   bool // True if this should be an empty placeholder (zero tokens).
 }
+
+// placeholder is the line a side holds opposite a line that only the other
+// side has.
+var placeholder = wantLine{empty: true}
 
 // verifyLines checks that the lines of a view match expected lines.
 func verifyLines(t *testing.T, side string, actual *line.View, want []wantLine) {
