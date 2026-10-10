@@ -1395,27 +1395,6 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 		err = doc.Bind(niceyaml.NewError("here", niceyaml.AtPosition(inBase[0].Start)))
 		require.EqualError(t, err, "base.yaml: here")
 	})
-
-	t.Run("a merge of no layer returns an empty document", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]*niceyaml.Source{
-			"no layers":       yamltest.Layers(t),
-			"only nil layers": yamltest.Layers(t, nil, (*niceyaml.Source)(nil), (*niceyaml.Node)(nil)),
-		}
-
-		for name, layers := range tcs {
-			doc, err := layers.Document()
-			require.NoError(t, err, name)
-			require.NotNil(t, doc, name)
-
-			assert.True(t, doc.IsEmpty(), name)
-			assert.Empty(t, doc.Source().Name(), name)
-
-			err = doc.Bind(niceyaml.NewError("port is required", niceyaml.AtPath(port)))
-			require.EqualError(t, err, "$.server.port: port is required", name)
-		}
-	})
 }
 
 func TestNode_Origin(t *testing.T) {
@@ -1872,6 +1851,16 @@ func TestNewSourceFromLayers_Empty(t *testing.T) {
 
 			err = layers.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Doc().Child("server"))))
 			require.EqualError(t, err, "$.server: bad")
+
+			// The layers merge into an empty document with no name.
+			doc, err := layers.Document()
+			require.NoError(t, err)
+			require.NotNil(t, doc)
+			assert.True(t, doc.IsEmpty())
+			assert.Empty(t, doc.Source().Name())
+
+			err = doc.Bind(niceyaml.NewError("port is required", niceyaml.AtPath(paths.Doc().Child("server", "port"))))
+			require.EqualError(t, err, "$.server.port: port is required")
 
 			ran := false
 
