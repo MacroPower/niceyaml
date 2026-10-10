@@ -627,7 +627,11 @@ func TestPrinter_PrintError_MarksBindingsWithoutStyles(t *testing.T) {
 	// Among several bindings, each message sits beside the carets of its
 	// line, so without color the carets still show the extent of each
 	// range, as FormatError draws them.
-	source := niceyaml.NewSourceFromString("ports: {http: eighty, https: ninety}\nname: Web-App\nport: 8\n")
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"ports: {http: eighty, https: ninety}",
+		"name: Web-App",
+		"port: 8",
+	))
 
 	tcs := map[string]struct {
 		err  error
@@ -693,7 +697,7 @@ func TestPrinter_PrintError_MarksWithoutStyles(t *testing.T) {
 
 	// A childless bound error has no message beside its range, so without
 	// color the carets on the row below are all that shows its extent.
-	sla := niceyaml.NewSourceFromString("spec:\n  sla: 99\n  hours:\n")
+	sla := niceyaml.NewSourceFromString(stringtest.LinesLF("spec:", "  sla: 99", "  hours:"))
 	badSLA := yamltest.Bind(t, sla, errAt("bad", "spec", "sla"))
 
 	tcs := map[string]struct {
@@ -3747,9 +3751,9 @@ func TestFinderPrinter_Integration(t *testing.T) {
 			want:   "status: ✓ [done]",
 		},
 		"complex yaml with utf8": {
-			input:  "metadata:\n  name: Thaïs\n  namespace: über",
+			input:  stringtest.JoinLF("metadata:", "  name: Thaïs", "  namespace: über"),
 			search: "name",
-			want:   "metadata:\n  [name]: Thaïs\n  [name]space: über",
+			want:   stringtest.JoinLF("metadata:", "  [name]: Thaïs", "  [name]space: über"),
 		},
 		"utf8 - japanese partial match": {
 			input:  "key: 日本酒",
@@ -6429,7 +6433,7 @@ func TestPrinter_ContainerWidth(t *testing.T) {
 	// Without a container width the border box shrinks to the widest row, so
 	// a window of short lines draws a narrower box than a window of long
 	// ones. A container width pins the box to the same columns for both.
-	src := niceyaml.NewSourceFromString("a: 1\nb: this value is much longer\nc: 3\n")
+	src := niceyaml.NewSourceFromString(stringtest.LinesLF("a: 1", "b: this value is much longer", "c: 3"))
 
 	border := printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder()))
 

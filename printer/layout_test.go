@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -381,7 +382,9 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 		"plain": {
 			printer: testPrinter(),
 			view: func() *line.View {
-				return niceyaml.NewSourceFromString("a: 1\nb:\n  - x\n\n  - y # c\n").View()
+				return niceyaml.NewSourceFromString(
+					stringtest.LinesLF("a: 1", "b:", "  - x", "", "  - y # c"),
+				).View()
 			},
 		},
 		"wide runes and clusters": {

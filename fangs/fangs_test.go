@@ -159,7 +159,12 @@ func TestErrorHandler(t *testing.T) {
 		// Cobra indents each suggestion with a tab and ends the list with a
 		// line break.
 		"usage error unknown command with a suggestion": {
-			err: errors.New("unknown command \"valdate\" for \"nyaml\"\n\nDid you mean this?\n\tvalidate\n"),
+			err: errors.New(stringtest.LinesLF(
+				`unknown command "valdate" for "nyaml"`,
+				"",
+				"Did you mean this?",
+				"\tvalidate",
+			)),
 			want: stringtest.JoinLF(
 				"Error",
 				`  unknown command "valdate" for "nyaml"`,
