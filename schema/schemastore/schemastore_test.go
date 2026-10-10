@@ -472,10 +472,8 @@ func TestSchemaStore_LazyLoading(t *testing.T) {
 	// synctest.Wait lets every such fetch reach the transport before the
 	// test reads the count.
 	synctest.Test(t, func(t *testing.T) {
-		client, fetchCount := yamltest.CountingClient(respondCatalog(t, testCatalog))
-
 		// New performs no I/O.
-		store := newStore(client)
+		store, fetchCount := newCountingStore(respondCatalog(t, testCatalog))
 
 		synctest.Wait()
 		assert.Equal(t, int32(0), fetchCount.Load())
@@ -501,10 +499,11 @@ func TestSchemaStore_LazyLoading(t *testing.T) {
 func TestSchemaStore_CacheTTL(t *testing.T) {
 	t.Parallel()
 
-	client, fetchCount := yamltest.CountingClient(respondCatalog(t, testCatalog))
-
 	// Use a very short TTL for testing.
-	store := newStore(client, schemastore.WithCacheTTL(10*time.Millisecond))
+	store, fetchCount := newCountingStore(
+		respondCatalog(t, testCatalog),
+		schemastore.WithCacheTTL(10*time.Millisecond),
+	)
 
 	// First lookup fetches.
 	requireEntry(t, store, "Test")
@@ -812,8 +811,7 @@ func TestSchemaStore_FetchPanicReachesCaller(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client, fetchCount := yamltest.CountingClient(tc.transport)
-			store := newStore(client, schemastore.WithFilter(tc.filter))
+			store, fetchCount := newCountingStore(tc.transport, schemastore.WithFilter(tc.filter))
 
 			assert.PanicsWithValue(t, tc.want, func() {
 				_, err := store.FindMatch(t.Context(), "config.yaml")
@@ -856,8 +854,7 @@ func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client, fetchCount := yamltest.CountingClient(tc.transport)
-			store := newStore(client, schemastore.WithFilter(tc.filter))
+			store, fetchCount := newCountingStore(tc.transport, schemastore.WithFilter(tc.filter))
 
 			var returned bool
 
@@ -1167,9 +1164,7 @@ func TestSchemaStore_RetryAfter(t *testing.T) {
 	// lookup lands inside the retry interval however slowly the first one
 	// returns.
 	synctest.Test(t, func(t *testing.T) {
-		client, fetchCount := yamltest.CountingClient(serverError)
-
-		store := newStore(client, schemastore.WithRetryAfter(20*time.Millisecond))
+		store, fetchCount := newCountingStore(serverError, schemastore.WithRetryAfter(20*time.Millisecond))
 
 		// The first lookup fetches and fails.
 		_, err := store.FindMatch(t.Context(), "config.yaml")
@@ -1203,12 +1198,10 @@ func TestSchemaStore_NonPositiveRetryAfter(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client, fetchCount := yamltest.CountingClient(serverError)
-
 			// A non-positive interval keeps the default rather than
 			// retrying on every lookup, which costs one refresh timeout
 			// each.
-			store := newStore(client, schemastore.WithRetryAfter(interval))
+			store, fetchCount := newCountingStore(serverError, schemastore.WithRetryAfter(interval))
 
 			for range 5 {
 				_, err := store.FindMatch(t.Context(), "config.yaml")
@@ -1246,10 +1239,11 @@ func TestSchemaStore_CanceledContext(t *testing.T) {
 		t.Parallel()
 
 		synctest.Test(t, func(t *testing.T) {
-			client, fetchCount := yamltest.CountingClient(respondCatalog(t, testCatalog))
-
 			// Use short TTL so cache expires quickly.
-			store := newStore(client, schemastore.WithCacheTTL(10*time.Millisecond))
+			store, fetchCount := newCountingStore(
+				respondCatalog(t, testCatalog),
+				schemastore.WithCacheTTL(10*time.Millisecond),
+			)
 
 			requireEntry(t, store, "Test")
 
@@ -1275,9 +1269,7 @@ func TestSchemaStore_CanceledContext(t *testing.T) {
 		t.Parallel()
 
 		synctest.Test(t, func(t *testing.T) {
-			client, fetchCount := yamltest.CountingClient(respondCatalog(t, testCatalog))
-
-			store := newStore(client)
+			store, fetchCount := newCountingStore(respondCatalog(t, testCatalog))
 
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
@@ -1592,6 +1584,15 @@ func newCatalogStore(tb testing.TB, catalog schemastore.Catalog, opts ...schemas
 	tb.Helper()
 
 	return newStore(respondCatalog(tb, catalog).Client(), opts...)
+}
+
+// newCountingStore creates a [*schemastore.Store] that fetches its catalog
+// through rt, with opts applied after. It also returns a count of the
+// requests the store has sent.
+func newCountingStore(rt http.RoundTripper, opts ...schemastore.Option) (*schemastore.Store, *atomic.Int32) {
+	client, requests := yamltest.CountingClient(rt)
+
+	return newStore(client, opts...), requests
 }
 
 // respondCatalog returns a transport function that answers every URL
