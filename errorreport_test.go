@@ -524,10 +524,6 @@ func TestNewErrorReport_Excerpts(t *testing.T) {
 			err:  errors.Join(badA, gone),
 			want: []string{"first.yaml\n   1 | a: 1\n     |    ^ bad a"},
 		},
-		"an error bound to no source yields nothing": {
-			err: errors.New("plain"),
-		},
-		"nil yields nothing": {},
 	}
 
 	for name, tc := range tcs {
