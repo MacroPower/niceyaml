@@ -1451,8 +1451,9 @@ func (d *document) anchorToken() *token.Token {
 // each a SourceError of its own in file order, and FormatError marks them
 // all. [Bindings] iterates over them. Each is bound to the document it
 // belongs to, which [SourceError.Document] returns. [Source.Documents]
-// returns that error too, and [Source.AllDocuments] returns the documents
-// of such a file, for a caller that reads the ones that parsed.
+// returns the documents of such a file, for a caller that reads the ones
+// that parsed, and [Node.Err] returns the syntax error of each one that
+// did not.
 //
 // The message of a syntax error names each control character by its
 // Unicode Control Picture, so a tab the parser rejects reads as "␉" there

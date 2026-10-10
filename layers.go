@@ -291,9 +291,10 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 // as it rejects an alias with no anchor. The merged Source then holds
 // the error of the lowest such layer, bound in its file, as a Source
 // holds the syntax error of a file that did not parse. [Source.File],
-// [Source.Document], [Source.Documents], [Source.Decode],
-// [Source.DecodeInto], and [Source.SelfValidate] return that error, and
-// so do [Node.Err] and the Node methods that read the tree, such as
+// [Source.Document], [Source.Decode], [Source.DecodeInto], and
+// [Source.SelfValidate] return that error. [Source.Documents] still
+// returns the one document of the merged Source, and [Node.Err] returns
+// the error for it, as do the Node methods that read the tree, such as
 // [Node.Validate]. A path in an error that [Source.Bind] or [Node.Bind]
 // binds resolves nowhere then, as in a file that did not parse. The
 // bound error names the lowest layer and no position, and
