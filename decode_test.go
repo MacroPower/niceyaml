@@ -390,12 +390,19 @@ func TestDocument_Decode(t *testing.T) {
 				want:   map[string]string{"key": "value"},
 			},
 			"struct": {
-				input:  "name: test\nvalue: 42",
+				input: stringtest.JoinLF(
+					"name: test",
+					"value: 42",
+				),
 				decode: decodedAs[testStruct],
 				want:   testStruct{Name: "test", Value: 42},
 			},
 			"slice": {
-				input:  "- one\n- two\n- three",
+				input: stringtest.JoinLF(
+					"- one",
+					"- two",
+					"- three",
+				),
 				decode: decodedAs[[]string],
 				want:   []string{"one", "two", "three"},
 			},
@@ -464,13 +471,22 @@ func TestDocument_Decode(t *testing.T) {
 				comment: "# c",
 			},
 			"scoped node": {
-				input:   "base: &x 1\nsub:\n  ref: *x # same as base\n",
+				input: stringtest.LinesLF(
+					"base: &x 1",
+					"sub:",
+					"  ref: *x # same as base",
+				),
 				path:    paths.Current().Child("sub"),
 				want:    map[string]any{"ref": uint64(1)},
 				comment: "# same as base",
 			},
 			"scoped node through an anchor": {
-				input:   "a: &a 1\nb: &b\n  - *a # c\nsub: {k: *b}\n",
+				input: stringtest.LinesLF(
+					"a: &a 1",
+					"b: &b",
+					"  - *a # c",
+					"sub: {k: *b}",
+				),
 				path:    paths.Current().Child("sub"),
 				want:    map[string]any{"k": []any{uint64(1)}},
 				comment: "# c",
@@ -984,17 +1000,30 @@ func TestDocument_Decode(t *testing.T) {
 				wantAny: uint64(16),
 			},
 			"after a reused anchor name": {
-				input:   "a: &x 1\nb: &x 2\nversion: !!int 16\n",
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x 2",
+					"version: !!int 16",
+				),
 				want:    16,
 				wantAny: uint64(16),
 			},
 			"alias to a tagged anchor of a reused name": {
-				input:   "a: &x 1\nb: &x !!int 16\nversion: *x\n",
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x !!int 16",
+					"version: *x",
+				),
 				want:    16,
 				wantAny: uint64(16),
 			},
 			"after nested collections": {
-				input:   "spec:\n  name: x\n  ports: [80, {n: !!str 1}]\nversion: !!int 0x10\n",
+				input: stringtest.LinesLF(
+					"spec:",
+					"  name: x",
+					"  ports: [80, {n: !!str 1}]",
+					"version: !!int 0x10",
+				),
 				want:    16,
 				wantAny: uint64(16),
 			},
@@ -1049,8 +1078,13 @@ func TestDocument_Decode(t *testing.T) {
 				want:  "version: &x !!int &y 16\n",
 			},
 			"after a reused anchor name": {
-				input: "a: &x 1\nb: &x 2\nspec:\n  version: !!int 16\n",
-				want:  "version: !!int 16\n",
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x 2",
+					"spec:",
+					"  version: !!int 16",
+				),
+				want: "version: !!int 16\n",
 			},
 		}
 
@@ -1799,7 +1833,12 @@ func TestDocument_Span(t *testing.T) {
 	t.Run("prints one document with the file's line numbers", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\nc: 3\n")
+		source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+			"a: 1",
+			"---",
+			"b: 2",
+			"c: 3",
+		))
 
 		docs := source.Documents()
 		require.Len(t, docs, 2)
@@ -1875,7 +1914,10 @@ func TestDocument_View(t *testing.T) {
 		view := second.View()
 		require.True(t, bound.Annotate(view))
 
-		assert.Contains(t, view.String(), "   7 | b: 2\n     |    ^")
+		assert.Contains(t, view.String(), stringtest.JoinLF(
+			"   7 | b: 2",
+			"     |    ^",
+		))
 	})
 
 	t.Run("an error at the root of a scoped block mapping lies above its view", func(t *testing.T) {
@@ -1909,7 +1951,11 @@ func TestDocument_View(t *testing.T) {
 	t.Run("an error at the root of a scoped element lies in its view", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "items:\n  - name: a\n    port: 1\n")
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"items:",
+			"  - name: a",
+			"    port: 1",
+		))
 		item := yamltest.At(t, doc, paths.Current().Child("items").Index(0))
 
 		bound := yamltest.RequireSourceError(t, item.Bind(errors.New("bad item")))
@@ -2000,7 +2046,11 @@ func TestDocument_At_DirectiveBody(t *testing.T) {
 	// A %YAML directive above the header is the preamble of the document
 	// below it, so the path resolves in that document. A document that
 	// holds only the directive has no content to resolve in.
-	source := niceyaml.NewSourceFromString("%YAML 1.2\n---\nkey: value")
+	source := niceyaml.NewSourceFromString(stringtest.JoinLF(
+		"%YAML 1.2",
+		"---",
+		"key: value",
+	))
 	d := source.Documents()
 	require.Len(t, d, 1)
 
@@ -2090,7 +2140,11 @@ func TestDocument_Node(t *testing.T) {
 
 		assert.Nil(t, yamltest.FirstDocument(t, "---\n  \n").AST())
 
-		docs := niceyaml.NewSourceFromString("a: 1\n---\n  \n").AllDocuments()
+		docs := niceyaml.NewSourceFromString(stringtest.LinesLF(
+			"a: 1",
+			"---",
+			"  ",
+		)).AllDocuments()
 		require.Len(t, docs, 2)
 		assert.Nil(t, docs[1].AST())
 	})
@@ -2828,12 +2882,18 @@ func TestDocument_Decode_SelfValidator(t *testing.T) {
 			validated bool
 		}{
 			"no option": {
-				input:     "name: test\nvalue: 42",
+				input: stringtest.JoinLF(
+					"name: test",
+					"value: 42",
+				),
 				validated: true,
 			},
 			"no option returns the error of Validate": {
-				input: "name: \"\"\nvalue: 42",
-				err:   errNameRequired,
+				input: stringtest.JoinLF(
+					`name: ""`,
+					"value: 42",
+				),
+				err: errNameRequired,
 			},
 			"false skips Validate": {
 				input: `name: ""`,
@@ -3335,7 +3395,10 @@ func TestDocument_Err(t *testing.T) {
 
 		assert.Equal(t, 1, doc.DocumentIndex())
 		assert.Equal(t, position.NewSpan(3, 5), doc.Span())
-		assert.Equal(t, "---\nd: [", doc.View().Held().Content())
+		assert.Equal(t, stringtest.JoinLF(
+			"---",
+			"d: [",
+		), doc.View().Held().Content())
 		assert.Equal(t, 4, doc.View().Held().Line(0).Number())
 
 		assert.Equal(t, []string{"---", "d", ":", "["}, valuesOfTokens(doc.Tokens()))
@@ -3490,7 +3553,11 @@ func TestWithDisallowUnknownFields_ControlCharacters(t *testing.T) {
 			want:  `f.yaml:2:1: $.'a\u001b[31mb'~: ` + "unknown field \"a\u241b[31mb\"",
 		},
 		"two keys": {
-			input: "name: x\n\"a\\nb\": 1\n\"c\\td\": 2\n",
+			input: stringtest.LinesLF(
+				"name: x",
+				`"a\nb": 1`,
+				`"c\td": 2`,
+			),
 			want: stringtest.JoinLF(
 				"f.yaml: 2 unknown fields",
 				`f.yaml:2:1: $.'a\nb'~: `+"unknown field \"a\u240ab\"",
@@ -3596,12 +3663,21 @@ func TestWithAllowedFieldPrefixes(t *testing.T) {
 			opts:  []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFieldPrefixes("x-")},
 		},
 		"rejects a key under no prefix": {
-			input: "name: a\nx-note: b\nnote: c\n",
-			opts:  []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFieldPrefixes("x-")},
-			err:   `3:1: $.note~: unknown field "note"`,
+			input: stringtest.LinesLF(
+				"name: a",
+				"x-note: b",
+				"note: c",
+			),
+			opts: []niceyaml.DecodeOption{strict, niceyaml.WithAllowedFieldPrefixes("x-")},
+			err:  `3:1: $.note~: unknown field "note"`,
 		},
 		"each option adds to the prefixes before it": {
-			input: "name: a\nx-note: b\ny-note: c\nz-note: d\n",
+			input: stringtest.LinesLF(
+				"name: a",
+				"x-note: b",
+				"y-note: c",
+				"z-note: d",
+			),
 			opts: []niceyaml.DecodeOption{
 				strict,
 				niceyaml.WithAllowedFieldPrefixes("x-"),
@@ -3799,7 +3875,12 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 
 		// The decode reads an alias as the content of its anchor, and a
 		// scalar without its quotes and the comment on its line.
-		doc := yamltest.FirstDocument(t, "a: &a low\nlevels:\n  - *a\n  - \"high\" # top\n")
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &a low",
+			"levels:",
+			"  - *a",
+			`  - "high" # top`,
+		))
 
 		_, err := doc.Decode[struct {
 			Levels []plainLevel `yaml:"levels"`
@@ -3860,7 +3941,13 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 
 		// The text spells an alias as the content of its anchor, and keeps
 		// the quotes and the comment of a scalar.
-		doc := yamltest.FirstDocument(t, "a: &a low\nlevels:\n  - *a\n  - \"high\" # top\n  - {a: 1}\n")
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &a low",
+			"levels:",
+			"  - *a",
+			`  - "high" # top`,
+			"  - {a: 1}",
+		))
 
 		_, err := doc.Decode[struct {
 			Levels []plainLevel `yaml:"levels"`
@@ -3895,32 +3982,61 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			opts  []niceyaml.DecodeOption
 		}{
 			"sequence where the function decodes a string": {
-				input: "nets:\n  - 10.0.0.0/8\n  - [1, 2]\n",
-				want:  "3:3: $.nets[1]: expected string, got sequence",
+				input: stringtest.LinesLF(
+					"nets:",
+					"  - 10.0.0.0/8",
+					"  - [1, 2]",
+				),
+				want: "3:3: $.nets[1]: expected string, got sequence",
 			},
 			"mapping where the function decodes a string": {
-				input: "nets:\n  - 10.0.0.0/8\n  - {a: 1}\n",
-				want:  "3:3: $.nets[1]: expected string, got mapping",
+				input: stringtest.LinesLF(
+					"nets:",
+					"  - 10.0.0.0/8",
+					"  - {a: 1}",
+				),
+				want: "3:3: $.nets[1]: expected string, got mapping",
 			},
 			"string the function rejects": {
-				input: "nets:\n  - 10.0.0.0/8\n  - 10.0.0.0/33\n",
-				want:  "3:5: $.nets[1]: invalid CIDR address: 10.0.0.0/33",
+				input: stringtest.LinesLF(
+					"nets:",
+					"  - 10.0.0.0/8",
+					"  - 10.0.0.0/33",
+				),
+				want: "3:5: $.nets[1]: invalid CIDR address: 10.0.0.0/33",
 			},
 			"map value": {
-				input: "by_name:\n  a: 10.0.0.0/8\n  b: [1]\n",
-				want:  "3:3: $.by_name.b: expected string, got sequence",
+				input: stringtest.LinesLF(
+					"by_name:",
+					"  a: 10.0.0.0/8",
+					"  b: [1]",
+				),
+				want: "3:3: $.by_name.b: expected string, got sequence",
 			},
 			"map key": {
-				input: "by_level:\n  low: a\n  mid: b\n",
-				want:  `3:3: $.by_level.mid~: unknown level "mid"`,
+				input: stringtest.LinesLF(
+					"by_level:",
+					"  low: a",
+					"  mid: b",
+				),
+				want: `3:3: $.by_level.mid~: unknown level "mid"`,
 			},
 			"field of the value": {
-				input: "spans:\n  - {from: 1, to: 5}\n  - from: nine\n    to: 3\n",
-				want:  "3:11: $.spans[1].from: expected integer, got string",
+				input: stringtest.LinesLF(
+					"spans:",
+					"  - {from: 1, to: 5}",
+					"  - from: nine",
+					"    to: 3",
+				),
+				want: "3:11: $.spans[1].from: expected integer, got string",
 			},
 			// The decode of a value reports every problem of that value.
 			"two fields of the value": {
-				input: "spans:\n  - from: nine\n    to: [3]\n",
+				input: stringtest.LinesLF(
+					"spans:",
+					"  - from: nine",
+					"    to: [3]",
+				),
 				want: stringtest.JoinLF(
 					"2 problems",
 					"2:11: $.spans[0].from: expected integer, got string",
@@ -3929,28 +4045,51 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			},
 			// The path the function writes reads from its value.
 			"path the function writes": {
-				input: "spans:\n  - {from: 1, to: 5}\n  - from: 9\n    to: 3\n",
-				want:  "4:9: $.spans[1].to: to is below from",
+				input: stringtest.LinesLF(
+					"spans:",
+					"  - {from: 1, to: 5}",
+					"  - from: 9",
+					"    to: 3",
+				),
+				want: "4:9: $.spans[1].to: to is below from",
 			},
 			// A path goes through an alias to the line that holds the
 			// value.
 			"path in a value an alias holds": {
-				input: "base: &base {from: 9, to: 3}\nspans:\n  - *base\n",
-				want:  "1:27: $.spans[0].to: to is below from",
+				input: stringtest.LinesLF(
+					"base: &base {from: 9, to: 3}",
+					"spans:",
+					"  - *base",
+				),
+				want: "1:27: $.spans[0].to: to is below from",
 			},
 			"field of a value an alias holds": {
-				input: "base: &base {from: nine}\nspans:\n  - *base\n",
-				want:  "1:20: $.spans[0].from: expected integer, got string",
+				input: stringtest.LinesLF(
+					"base: &base {from: nine}",
+					"spans:",
+					"  - *base",
+				),
+				want: "1:20: $.spans[0].from: expected integer, got string",
 			},
 			// The text of the value writes out what a merge key brings in,
 			// so the path names the merge key, and resolves through it.
 			"field a merge key brings in": {
-				input: "base: &base {from: nine}\nspans:\n  - <<: *base\n    to: 3\n",
-				want:  "1:20: $.spans[0].<<.from: expected integer, got string",
+				input: stringtest.LinesLF(
+					"base: &base {from: nine}",
+					"spans:",
+					"  - <<: *base",
+					"    to: 3",
+				),
+				want: "1:20: $.spans[0].<<.from: expected integer, got string",
 			},
 			"field that holds an alias": {
-				input: "base: &base [1]\nspans:\n  - from: *base\n    to: 3\n",
-				want:  "3:11: $.spans[0].from: expected integer, got sequence",
+				input: stringtest.LinesLF(
+					"base: &base [1]",
+					"spans:",
+					"  - from: *base",
+					"    to: 3",
+				),
+				want: "3:11: $.spans[0].from: expected integer, got sequence",
 			},
 			// The decode of a value takes the options of the decode that
 			// called the function, so another function decodes the level.
@@ -3959,21 +4098,34 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 				want:  `2:29: $.spans[0].level: unknown level "mid"`,
 			},
 			"unknown field of the value": {
-				input: "spans:\n  - from: 1\n    until: 2\n",
-				opts:  []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
-				want:  `3:5: $.spans[0].until~: unknown field "until"`,
+				input: stringtest.LinesLF(
+					"spans:",
+					"  - from: 1",
+					"    until: 2",
+				),
+				opts: []niceyaml.DecodeOption{niceyaml.WithDisallowUnknownFields(true)},
+				want: `3:5: $.spans[0].until~: unknown field "until"`,
 			},
 			// The decoder stops at the first value a function rejects, and
 			// the search for the other problems of the decode calls no
 			// function again. One decode thus reports the first network
 			// alone.
 			"second value a function rejects": {
-				input: "nets:\n  - 10.0.0.0/33\n  - [1, 2]\n",
-				want:  "2:5: $.nets[0]: invalid CIDR address: 10.0.0.0/33",
+				input: stringtest.LinesLF(
+					"nets:",
+					"  - 10.0.0.0/33",
+					"  - [1, 2]",
+				),
+				want: "2:5: $.nets[0]: invalid CIDR address: 10.0.0.0/33",
 			},
 			// The search still finds the count, which no function decodes.
 			"second value a function rejects beside another problem": {
-				input: "count: x\nnets:\n  - [1, 2]\n  - {a: 1}\n",
+				input: stringtest.LinesLF(
+					"count: x",
+					"nets:",
+					"  - [1, 2]",
+					"  - {a: 1}",
+				),
 				want: stringtest.JoinLF(
 					"2 problems",
 					"1:8: $.count: expected integer, got string",
@@ -4044,8 +4196,12 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			// The position counts the lines of the text of the value, so
 			// the error binds at the value in its place.
 			"position an unmarshaler built from its node": {
-				input: "boxes:\n  - name: a\n  - placed: [a, b]\n",
-				want:  "3:3: $.boxes[1]: unmarshaler rejected the value",
+				input: stringtest.LinesLF(
+					"boxes:",
+					"  - name: a",
+					"  - placed: [a, b]",
+				),
+				want: "3:3: $.boxes[1]: unmarshaler rejected the value",
 			},
 		}
 
@@ -4075,7 +4231,11 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 		t.Run("panic", func(t *testing.T) {
 			t.Parallel()
 
-			_, err := yamltest.FirstDocument(t, "boxes:\n  - name: a\n  - broken: 1\n").Decode[struct {
+			_, err := yamltest.FirstDocument(t, stringtest.LinesLF(
+				"boxes:",
+				"  - name: a",
+				"  - broken: 1",
+			)).Decode[struct {
 				Boxes []box `yaml:"boxes"`
 			}](t.Context(), boxes)
 			require.EqualError(t, err, "3:3: $.boxes[1]: decoder panicked: unmarshaler rejected the value")
@@ -4143,7 +4303,12 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 	t.Run("the decode of a value below a scoped node binds in the document", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "name: api\nnets:\n  - 10.0.0.0/8\n  - {a: 1}\n")
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"name: api",
+			"nets:",
+			"  - 10.0.0.0/8",
+			"  - {a: 1}",
+		))
 
 		_, err := doc.DecodeAt[[]net.IPNet](
 			t.Context(), paths.Current().Child("nets"), niceyaml.WithCustomUnmarshaler(decodeCIDR),
@@ -5085,20 +5250,44 @@ func TestDocument_At(t *testing.T) {
 			path  paths.Path
 		}{
 			"later anchor after the node": {
-				input: "a: &x v1\nm:\n  k: *x\nc: &x v2\n",
-				path:  paths.Current().Child("m"),
+				input: stringtest.LinesLF(
+					"a: &x v1",
+					"m:",
+					"  k: *x",
+					"c: &x v2",
+				),
+				path: paths.Current().Child("m"),
 			},
 			"later anchor inside an enclosing mapping": {
-				input: "a: &x v1\nm:\n  s:\n    k: *x\n  c: &x v2\n",
-				path:  paths.Current().Child("m", "s"),
+				input: stringtest.LinesLF(
+					"a: &x v1",
+					"m:",
+					"  s:",
+					"    k: *x",
+					"  c: &x v2",
+				),
+				path: paths.Current().Child("m", "s"),
 			},
 			"later anchor inside an enclosing anchor": {
-				input: "m: &m\n  a: &x v1\n  s:\n    k: *x\n  c: &x v2\n",
-				path:  paths.Current().Child("m", "s"),
+				input: stringtest.LinesLF(
+					"m: &m",
+					"  a: &x v1",
+					"  s:",
+					"    k: *x",
+					"  c: &x v2",
+				),
+				path: paths.Current().Child("m", "s"),
 			},
 			"later anchor inside an enclosing merge": {
-				input: "a: &x v1\nm:\n  <<:\n    s:\n      k: *x\n    c: &x v2\n",
-				path:  paths.Current().Child("m", "s"),
+				input: stringtest.LinesLF(
+					"a: &x v1",
+					"m:",
+					"  <<:",
+					"    s:",
+					"      k: *x",
+					"    c: &x v2",
+				),
+				path: paths.Current().Child("m", "s"),
 			},
 		}
 
@@ -5153,51 +5342,92 @@ func TestDocument_At(t *testing.T) {
 				want:  []any{map[string]any{"x": uint64(1)}},
 			},
 			"key below a comment under an anchor with no value": {
-				input: "a: &x\n# c\nb: 1\n",
-				path:  paths.Current().Child("b"),
-				want:  uint64(1),
+				input: stringtest.LinesLF(
+					"a: &x",
+					"# c",
+					"b: 1",
+				),
+				path: paths.Current().Child("b"),
+				want: uint64(1),
 			},
 			// The undefined alias under $.bad fails to decode, and the
 			// value the caller asked for still comes back.
 			"undefined alias after the anchor": {
-				input: "a: &x 1\nsub: {k: *x}\nbad: *nope\n",
-				path:  paths.Current().Child("sub"),
-				want:  map[string]any{"k": uint64(1)},
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"sub: {k: *x}",
+					"bad: *nope",
+				),
+				path: paths.Current().Child("sub"),
+				want: map[string]any{"k": uint64(1)},
 			},
 			"undefined alias before the anchor": {
-				input: "bad: *nope\na: &x 1\nsub: {k: *x}\n",
-				path:  paths.Current().Child("sub"),
-				want:  map[string]any{"k": uint64(1)},
+				input: stringtest.LinesLF(
+					"bad: *nope",
+					"a: &x 1",
+					"sub: {k: *x}",
+				),
+				path: paths.Current().Child("sub"),
+				want: map[string]any{"k": uint64(1)},
 			},
 			"undefined alias inside another anchor": {
-				input: "b: &y [*nope]\na: &x 1\nsub: {k: *x}\n",
-				path:  paths.Current().Child("sub"),
-				want:  map[string]any{"k": uint64(1)},
+				input: stringtest.LinesLF(
+					"b: &y [*nope]",
+					"a: &x 1",
+					"sub: {k: *x}",
+				),
+				path: paths.Current().Child("sub"),
+				want: map[string]any{"k": uint64(1)},
 			},
 			"merge key in each list entry": {
-				input: "defaults: &d\n  a: 1\nitems:\n  - <<: *d\n    name: x\n  - <<: *d\n    name: y\n",
-				path:  paths.Current().Child("items").Index(1),
-				want:  map[string]any{"a": uint64(1), "name": "y"},
+				input: stringtest.LinesLF(
+					"defaults: &d",
+					"  a: 1",
+					"items:",
+					"  - <<: *d",
+					"    name: x",
+					"  - <<: *d",
+					"    name: y",
+				),
+				path: paths.Current().Child("items").Index(1),
+				want: map[string]any{"a": uint64(1), "name": "y"},
 			},
 			"anchor inside another anchor": {
-				input: "outer: &o\n  inner: &i 1\nsub: {k: *i}\n",
-				path:  paths.Current().Child("sub"),
-				want:  map[string]any{"k": uint64(1)},
+				input: stringtest.LinesLF(
+					"outer: &o",
+					"  inner: &i 1",
+					"sub: {k: *i}",
+				),
+				path: paths.Current().Child("sub"),
+				want: map[string]any{"k": uint64(1)},
 			},
 			"anchor inside an anchor that holds the node": {
-				input: "outer: &o\n  inner: &i 1\n  sub: {k: *i, s: *o}\n",
-				path:  paths.Current().Child("outer", "sub"),
-				want:  map[string]any{"k": uint64(1), "s": nil},
+				input: stringtest.LinesLF(
+					"outer: &o",
+					"  inner: &i 1",
+					"  sub: {k: *i, s: *o}",
+				),
+				path: paths.Current().Child("outer", "sub"),
+				want: map[string]any{"k": uint64(1), "s": nil},
 			},
 			"anchor that refers to another anchor": {
-				input: "a: &a 1\nb: &b [*a]\nsub: {k: *b}\n",
-				path:  paths.Current().Child("sub"),
-				want:  map[string]any{"k": []any{uint64(1)}},
+				input: stringtest.LinesLF(
+					"a: &a 1",
+					"b: &b [*a]",
+					"sub: {k: *b}",
+				),
+				path: paths.Current().Child("sub"),
+				want: map[string]any{"k": []any{uint64(1)}},
 			},
 			"anchor inside the node": {
-				input: "a: &x 1\nsub:\n  b: &x 2\n  k: *x\n",
-				path:  paths.Current().Child("sub"),
-				want:  map[string]any{"b": uint64(2), "k": uint64(2)},
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"sub:",
+					"  b: &x 2",
+					"  k: *x",
+				),
+				path: paths.Current().Child("sub"),
+				want: map[string]any{"b": uint64(2), "k": uint64(2)},
 			},
 			"merge key that records an anchor again": {
 				// The merge under q records the anchor b of m again, so p
@@ -5220,14 +5450,22 @@ func TestDocument_At(t *testing.T) {
 			// The decoder reads an alias inside the value of its own anchor as
 			// null, as a decode of the whole document does.
 			"alias to the anchor the node is the value of": {
-				input: "a: &a\n  - 1\n  - *a\n",
-				path:  paths.Current().Child("a"),
-				want:  []any{uint64(1), nil},
+				input: stringtest.LinesLF(
+					"a: &a",
+					"  - 1",
+					"  - *a",
+				),
+				path: paths.Current().Child("a"),
+				want: []any{uint64(1), nil},
 			},
 			"alias to an anchor that holds the node": {
-				input: "a: &a\n  b:\n    c: *a\n",
-				path:  paths.Current().Child("a", "b"),
-				want:  map[string]any{"c": nil},
+				input: stringtest.LinesLF(
+					"a: &a",
+					"  b:",
+					"    c: *a",
+				),
+				path: paths.Current().Child("a", "b"),
+				want: map[string]any{"c": nil},
 			},
 		}
 
@@ -5262,12 +5500,24 @@ func TestDocument_At(t *testing.T) {
 				want:  "[1, null]",
 			},
 			"block sequence": {
-				input: "a: &a\n  - 1\n  - *a\nkind: {x: *a}\n",
-				want:  "- 1\n- null",
+				input: stringtest.LinesLF(
+					"a: &a",
+					"  - 1",
+					"  - *a",
+					"kind: {x: *a}",
+				),
+				want: stringtest.JoinLF(
+					"- 1",
+					"- null",
+				),
 			},
 			"anchor name used again later": {
-				input: "a: &a {k: *a}\nkind: {x: *a}\nb: &a 1\n",
-				want:  "{k: null}",
+				input: stringtest.LinesLF(
+					"a: &a {k: *a}",
+					"kind: {x: *a}",
+					"b: &a 1",
+				),
+				want: "{k: null}",
 			},
 		}
 
@@ -5327,6 +5577,14 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 	t.Run("alias reads the anchor it refers to", func(t *testing.T) {
 		t.Parallel()
 
+		sibling := stringtest.LinesLF(
+			"outer: &o",
+			"  one: &y 1",
+			"  two: &x {d: *y}",
+			"use:",
+			"  v: *x",
+		)
+
 		// Each alias reads the anchor of its name defined last before it,
 		// as a path through the alias resolves, even when the node defines
 		// the name again after the alias.
@@ -5336,47 +5594,92 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			want  any
 		}{
 			"alias beside text spelled like a renamed anchor": {
-				input: "a: &x 1\nb: &x 2\nc: x [1]\nd: *x\n",
-				path:  paths.Current(),
-				want:  map[string]any{"a": uint64(1), "b": uint64(2), "c": "x [1]", "d": uint64(2)},
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x 2",
+					"c: x [1]",
+					"d: *x",
+				),
+				path: paths.Current(),
+				want: map[string]any{"a": uint64(1), "b": uint64(2), "c": "x [1]", "d": uint64(2)},
 			},
 			"failure in an anchor a later one hides": {
-				input: "a: &x !!bool nope\nb: &x 1\nc:\n  d: *x\n",
-				path:  paths.Current().Child("c"),
-				want:  map[string]any{"d": uint64(1)},
+				input: stringtest.LinesLF(
+					"a: &x !!bool nope",
+					"b: &x 1",
+					"c:",
+					"  d: *x",
+				),
+				path: paths.Current().Child("c"),
+				want: map[string]any{"d": uint64(1)},
 			},
 			"sequence redefines the name after the alias": {
-				input: "x0: &x 1\nl:\n  - *x\n  - &x 2\n",
-				path:  paths.Current().Child("l"),
-				want:  []any{uint64(1), uint64(2)},
+				input: stringtest.LinesLF(
+					"x0: &x 1",
+					"l:",
+					"  - *x",
+					"  - &x 2",
+				),
+				path: paths.Current().Child("l"),
+				want: []any{uint64(1), uint64(2)},
 			},
 			"mapping redefines the name after the alias": {
-				input: "b: &x 2\nd:\n  e: *x\n  f: &x 3\n",
-				path:  paths.Current().Child("d"),
-				want:  map[string]any{"e": uint64(2), "f": uint64(3)},
+				input: stringtest.LinesLF(
+					"b: &x 2",
+					"d:",
+					"  e: *x",
+					"  f: &x 3",
+				),
+				path: paths.Current().Child("d"),
+				want: map[string]any{"e": uint64(2), "f": uint64(3)},
 			},
 			"aliases before and after the redefinition": {
-				input: "a: &x 1\nb:\n  c: *x\n  d: &x 2\n  e: *x\n",
-				path:  paths.Current().Child("b"),
-				want:  map[string]any{"c": uint64(1), "d": uint64(2), "e": uint64(2)},
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b:",
+					"  c: *x",
+					"  d: &x 2",
+					"  e: *x",
+				),
+				path: paths.Current().Child("b"),
+				want: map[string]any{"c": uint64(1), "d": uint64(2), "e": uint64(2)},
 			},
 			"sequence aliases before and after the redefinition": {
-				input: "a: &x 1\nb:\n  - *x\n  - &x 2\n  - *x\n",
-				path:  paths.Current().Child("b"),
-				want:  []any{uint64(1), uint64(2), uint64(2)},
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b:",
+					"  - *x",
+					"  - &x 2",
+					"  - *x",
+				),
+				path: paths.Current().Child("b"),
+				want: []any{uint64(1), uint64(2), uint64(2)},
 			},
 			"each element reads the anchor before it": {
-				input: "items:\n  - &x {a: 1}\n  - {b: *x}\n  - &x {a: 2}\n  - {b: *x}\n",
-				path:  paths.Current().Child("items").Index(1),
-				want:  map[string]any{"b": map[string]any{"a": uint64(1)}},
+				input: stringtest.LinesLF(
+					"items:",
+					"  - &x {a: 1}",
+					"  - {b: *x}",
+					"  - &x {a: 2}",
+					"  - {b: *x}",
+				),
+				path: paths.Current().Child("items").Index(1),
+				want: map[string]any{"b": map[string]any{"a": uint64(1)}},
 			},
 			"merge key that records an anchor again": {
-				input: "m: &m {k: &b 1}\nb: &b 2\nq: {<<: *m}\nnode:\n  p: *b\n  r: *b\n",
-				path:  paths.Current().Child("node"),
-				want:  map[string]any{"p": uint64(1), "r": uint64(1)},
+				input: stringtest.LinesLF(
+					"m: &m {k: &b 1}",
+					"b: &b 2",
+					"q: {<<: *m}",
+					"node:",
+					"  p: *b",
+					"  r: *b",
+				),
+				path: paths.Current().Child("node"),
+				want: map[string]any{"p": uint64(1), "r": uint64(1)},
 			},
 			"whole document with an alias to a sibling in an anchor": {
-				input: "outer: &o\n  one: &y 1\n  two: &x {d: *y}\nuse:\n  v: *x\n",
+				input: sibling,
 				path:  paths.Current(),
 				want: map[string]any{
 					"outer": map[string]any{
@@ -5387,13 +5690,23 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 				},
 			},
 			"node with an alias to a sibling in an anchor": {
-				input: "outer: &o\n  one: &y 1\n  two: &x {d: *y}\nuse:\n  v: *x\n",
+				input: sibling,
 				path:  paths.Current().Child("use"),
 				want:  map[string]any{"v": map[string]any{"d": uint64(1)}},
 			},
 			"node with an alias to a redefined sibling in an anchor": {
-				input: "d: &x\n  &y b: &x {q: *x}\n  a: &x\n    d: *y\nc:\n  <<: *x\n  b: *x\na:\n  a: [*y, &y 5, *x]\n",
-				path:  paths.Current().Child("a"),
+				input: stringtest.LinesLF(
+					"d: &x",
+					"  &y b: &x {q: *x}",
+					"  a: &x",
+					"    d: *y",
+					"c:",
+					"  <<: *x",
+					"  b: *x",
+					"a:",
+					"  a: [*y, &y 5, *x]",
+				),
+				path: paths.Current().Child("a"),
 				want: map[string]any{
 					"a": []any{"b", uint64(5), map[string]any{"d": "b"}},
 				},
@@ -5422,7 +5735,12 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 	t.Run("typed decode reads the anchor the alias refers to", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "x0: &x 1\nl:\n  - *x\n  - &x 2\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"x0: &x 1",
+			"l:",
+			"  - *x",
+			"  - &x 2",
+		))
 
 		list, err := yamltest.At(t, dd, paths.Current().Child("l")).Decode[[]int](t.Context())
 		require.NoError(t, err)
@@ -5439,7 +5757,12 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 
 		// The struct has no field for b, so the decode reads the anchor of
 		// b only for the alias under d.
-		dd = yamltest.FirstDocument(t, "b: &x 2\nd:\n  e: *x\n  f: &x 3\n")
+		dd = yamltest.FirstDocument(t, stringtest.LinesLF(
+			"b: &x 2",
+			"d:",
+			"  e: *x",
+			"  f: &x 3",
+		))
 
 		got, err := dd.Decode[outer](t.Context())
 		require.NoError(t, err)
@@ -5483,24 +5806,54 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			err   string
 		}{
 			"anchor the node reads": {
-				input: "a: &x 1\nb: &x !!bool nope\nc:\n  d: *x\n",
-				err:   `2:14: $.b: cannot convert "nope" to boolean`,
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x !!bool nope",
+					"c:",
+					"  d: *x",
+				),
+				err: `2:14: $.b: cannot convert "nope" to boolean`,
 			},
 			"anchor another anchor reads": {
-				input: "a: &x 1\nm: &m {k: *x}\nb: &x !!bool nope\nc:\n  d: *x\n  e: *m\n",
-				err:   `3:14: $.b: cannot convert "nope" to boolean`,
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"m: &m {k: *x}",
+					"b: &x !!bool nope",
+					"c:",
+					"  d: *x",
+					"  e: *m",
+				),
+				err: `3:14: $.b: cannot convert "nope" to boolean`,
 			},
 			"anchor read before a later redefinition": {
-				input: "a: &x 1\nb: &x !!bool nope\nm: &m {k: *x}\nz: &x 2\nc:\n  e: *m\n  f: *x\n",
-				err:   `2:14: $.b: cannot convert "nope" to boolean`,
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x !!bool nope",
+					"m: &m {k: *x}",
+					"z: &x 2",
+					"c:",
+					"  e: *m",
+					"  f: *x",
+				),
+				err: `2:14: $.b: cannot convert "nope" to boolean`,
 			},
 			"anchor inside a failing anchor": {
-				input: "q: &i 0\no: &o {bad: !!bool nope, i: &i 1}\nc:\n  d: *i\n",
-				err:   `2:20: $.o.bad: cannot convert "nope" to boolean`,
+				input: stringtest.LinesLF(
+					"q: &i 0",
+					"o: &o {bad: !!bool nope, i: &i 1}",
+					"c:",
+					"  d: *i",
+				),
+				err: `2:20: $.o.bad: cannot convert "nope" to boolean`,
 			},
 			"anchor with an alias to nothing": {
-				input: "a: &x 1\nb: &x [*nope]\nc:\n  d: *x\n",
-				err:   `2:8: $.b[0]: could not find alias "nope"`,
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x [*nope]",
+					"c:",
+					"  d: *x",
+				),
+				err: `2:8: $.b[0]: could not find alias "nope"`,
 			},
 		}
 
@@ -5529,7 +5882,12 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			err   string
 		}{
 			"alias reads the anchor it refers to": {
-				input: "b: &x {q: 2}\na: &\"x [1]\" {p: 1}\ne: *x\nc: &x {q: 3}\n",
+				input: stringtest.LinesLF(
+					"b: &x {q: 2}",
+					`a: &"x [1]" {p: 1}`,
+					"e: *x",
+					"c: &x {q: 3}",
+				),
 				want: map[string]any{
 					"a": map[string]any{"p": uint64(1)},
 					"b": map[string]any{"q": uint64(2)},
@@ -5538,8 +5896,13 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 				},
 			},
 			"error keeps the name the alias spells": {
-				input: "a: &\"x [1]\" 1\nb: &x 2\nc: &x 3\nd: *\"x [1]\"\n",
-				err:   `4:4: $.d: could not find alias "\"x [1]\""`,
+				input: stringtest.LinesLF(
+					`a: &"x [1]" 1`,
+					"b: &x 2",
+					"c: &x 3",
+					`d: *"x [1]"`,
+				),
+				err: `4:4: $.d: could not find alias "\"x [1]\""`,
 			},
 		}
 
@@ -5580,28 +5943,53 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			err   string
 		}{
 			"unknown key": {
-				input: "a: &x 1\nb: &x 2\n\"x [1]\": 3\n",
-				err:   `3:1: $.'x [1]'~: unknown field "x [1]"`,
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x 2",
+					`"x [1]": 3`,
+				),
+				err: `3:1: $.'x [1]'~: unknown field "x [1]"`,
 			},
 			"invalid duration": {
-				input: "a: &x 1\nb: &x 2\nd: x [2]\n",
-				err:   `3:4: $.d: time: invalid duration "x [2]"`,
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x 2",
+					"d: x [2]",
+				),
+				err: `3:4: $.d: time: invalid duration "x [2]"`,
 			},
 			"escaped value": {
-				input: "a: &x 1\nb: &x 2\nd: \"x\\x20[1]\"\n",
-				err:   `3:4: $.d: time: invalid duration "x [1]"`,
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x 2",
+					`d: "x\x20[1]"`,
+				),
+				err: `3:4: $.d: time: invalid duration "x [1]"`,
 			},
 			"folded value": {
-				input: "a: &x 1\nb: &x 2\nd: x\n  [1]\n",
-				err:   `3:4: $.d: time: invalid duration "x [1]"`,
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x 2",
+					"d: x",
+					"  [1]",
+				),
+				err: `3:4: $.d: time: invalid duration "x [1]"`,
 			},
 			"unmarshaler text": {
-				input: "a: &x 1\nb: &x 2\nc: x [1]\n",
-				err:   `3:4: $.c: unmarshaler rejected the value: "x [1]\n"`,
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x 2",
+					"c: x [1]",
+				),
+				err: `3:4: $.c: unmarshaler rejected the value: "x [1]\n"`,
 			},
 			"unmarshaler text across tokens": {
-				input: "a: &x 1\nb: &x 2\nc: !x [1]\n",
-				err:   `3:1: $.c: unmarshaler rejected the value: "!x [1]\n"`,
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x 2",
+					"c: !x [1]",
+				),
+				err: `3:1: $.c: unmarshaler rejected the value: "!x [1]\n"`,
 			},
 		}
 
@@ -5622,7 +6010,17 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 
 		// The comment after the "..." marker parses to a node of its own,
 		// so the second document is the third node of the file.
-		input := "a: 1\n...\n# note\n---\na: &x 1\nb:\n  - *x\n  - &x 2\n  - *x\n"
+		input := stringtest.LinesLF(
+			"a: 1",
+			"...",
+			"# note",
+			"---",
+			"a: &x 1",
+			"b:",
+			"  - *x",
+			"  - &x 2",
+			"  - *x",
+		)
 
 		docs := niceyaml.NewSourceFromString(input).Documents()
 		require.Len(t, docs, 2)
@@ -5639,7 +6037,12 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			T rawText `yaml:"t"`
 		}
 
-		input := "a: &x 1\nt:\n  p: &x 2\n  q: *x\n"
+		input := stringtest.LinesLF(
+			"a: &x 1",
+			"t:",
+			"  p: &x 2",
+			"  q: *x",
+		)
 
 		var want wrapper
 
@@ -5659,7 +6062,12 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			D ast.Node `yaml:"d"`
 		}
 
-		dd := yamltest.FirstDocument(t, "a: &x 1\nb: &x 2\nc: [*x, 3]\nd: {p: &x 4, q: *x}\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &x 1",
+			"b: &x 2",
+			"c: [*x, 3]",
+			"d: {p: &x 4, q: *x}",
+		))
 
 		got, err := dd.Decode[wrapper](t.Context())
 		require.NoError(t, err)
@@ -5681,16 +6089,32 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 			want  string
 		}{
 			"nothing spelled": {
-				input: "a: &x 1\nb: &x 2\nc: [*x]\n",
-				want:  "[*x [2]]",
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x 2",
+					"c: [*x]",
+				),
+				want: "[*x [2]]",
 			},
 			"several counts spelled": {
-				input: "a: &\"x [1]\" 1\nb: &x 2 # x [2]\nd: a x [3] b\ne: &x 4\nc: [*x]\n",
-				want:  "[*x [5]]",
+				input: stringtest.LinesLF(
+					`a: &"x [1]" 1`,
+					"b: &x 2 # x [2]",
+					"d: a x [3] b",
+					"e: &x 4",
+					"c: [*x]",
+				),
+				want: "[*x [5]]",
 			},
 			"name and count in separate values": {
-				input: "a: &x 1\nb: &x 2\nd: \"z [x\"\ne: \" [2] z\"\nc: [*x]\n",
-				want:  "[*x [2]]",
+				input: stringtest.LinesLF(
+					"a: &x 1",
+					"b: &x 2",
+					`d: "z [x"`,
+					`e: " [2] z"`,
+					"c: [*x]",
+				),
+				want: "[*x [2]]",
 			},
 		}
 
@@ -5740,8 +6164,12 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 				want:      "[*x [2]]",
 			},
 			"second reference": {
-				reference: "r: x [1]\n---\nr: x [2] # x [3]\n",
-				want:      "[*x [4]]",
+				reference: stringtest.LinesLF(
+					"r: x [1]",
+					"---",
+					"r: x [2] # x [3]",
+				),
+				want: "[*x [4]]",
 			},
 		}
 
@@ -5838,7 +6266,11 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 	t.Run("error binds at the source", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "a: &x 1\nb: &x 2\nc: {k: !!bool nope}\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &x 1",
+			"b: &x 2",
+			"c: {k: !!bool nope}",
+		))
 
 		_, err := yamltest.At(t, dd, paths.Current().Child("c")).Decode[any](t.Context())
 		require.EqualError(t, err, `3:15: $.c.k: cannot convert "nope" to boolean`)
@@ -5868,8 +6300,13 @@ func TestDocument_Decode_ForwardAlias(t *testing.T) {
 		err    string
 	}{
 		"merge key before the anchor": {
-			input: "service:\n  <<: *defaults\ndefaults: &defaults\n  port: 8080\n",
-			path:  paths.Current().Child("service"),
+			input: stringtest.LinesLF(
+				"service:",
+				"  <<: *defaults",
+				"defaults: &defaults",
+				"  port: 8080",
+			),
+			path: paths.Current().Child("service"),
 			want: map[string]any{
 				"service":  map[string]any{"port": uint64(80)},
 				"defaults": map[string]any{"port": uint64(8080)},
@@ -5878,8 +6315,15 @@ func TestDocument_Decode_ForwardAlias(t *testing.T) {
 			err:    "2:7: decoder rejected the value: cannot find anchor by alias name defaults",
 		},
 		"merge key before two anchors": {
-			input: "service:\n  <<: *defaults\ndefaults: &defaults\n  port: 8080\nother: &defaults\n  port: 9090\n",
-			path:  paths.Current().Child("service"),
+			input: stringtest.LinesLF(
+				"service:",
+				"  <<: *defaults",
+				"defaults: &defaults",
+				"  port: 8080",
+				"other: &defaults",
+				"  port: 9090",
+			),
+			path: paths.Current().Child("service"),
 			want: map[string]any{
 				"service":  map[string]any{"port": uint64(80)},
 				"defaults": map[string]any{"port": uint64(8080)},
@@ -5896,7 +6340,11 @@ func TestDocument_Decode_ForwardAlias(t *testing.T) {
 			err:    `1:5: $.p[0]: could not find alias "x"`,
 		},
 		"mapping alias before the anchor": {
-			input:  "p:\n  a: *x\n  b: &x 2\n",
+			input: stringtest.LinesLF(
+				"p:",
+				"  a: *x",
+				"  b: &x 2",
+			),
 			path:   paths.Current().Child("p"),
 			want:   map[string]any{"p": map[string]any{"a": uint64(1), "b": uint64(2)}},
 			scoped: map[string]any{"a": uint64(1), "b": uint64(2)},
@@ -6253,14 +6701,24 @@ func TestDocument_DecodeInto(t *testing.T) {
 			want  position.Position
 		}{
 			"whole document": {
-				input: "# about the file\n\nname: x\nitems: [a]\n",
-				path:  paths.Current(),
-				want:  position.New(2, 0),
+				input: stringtest.LinesLF(
+					"# about the file",
+					"",
+					"name: x",
+					"items: [a]",
+				),
+				path: paths.Current(),
+				want: position.New(2, 0),
 			},
 			"scoped node": {
-				input: "a: 1\nwrap:\n  # the list\n  items: [a]\n",
-				path:  paths.Current().Child("wrap"),
-				want:  position.New(3, 2),
+				input: stringtest.LinesLF(
+					"a: 1",
+					"wrap:",
+					"  # the list",
+					"  items: [a]",
+				),
+				path: paths.Current().Child("wrap"),
+				want: position.New(3, 2),
 			},
 		}
 
@@ -6294,7 +6752,13 @@ func TestDocument_DecodeInto(t *testing.T) {
 	t.Run("decodes every document of a stream with a comment-only document", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("a: 1\n---\n# placeholder\n---\nb: 2\n")
+		source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+			"a: 1",
+			"---",
+			"# placeholder",
+			"---",
+			"b: 2",
+		))
 
 		docs := source.AllDocuments()
 		require.Len(t, docs, 3)
@@ -6680,7 +7144,11 @@ func TestNode_DecodeInto_Merge(t *testing.T) {
 			want: func(v *mergeTarget) { v.Pointer.A = 9 },
 		},
 		"an empty mapping keeps a struct": {
-			over: "struct: {}\nnested: {leaf: {}}\npointer: {}\n",
+			over: stringtest.LinesLF(
+				"struct: {}",
+				"nested: {leaf: {}}",
+				"pointer: {}",
+			),
 		},
 		"a slice replaces": {
 			over: "slice: [{a: 9}]\n",
@@ -6707,7 +7175,14 @@ func TestNode_DecodeInto_Merge(t *testing.T) {
 			want: func(v *mergeTarget) { v.Any = map[string]any{"z": "y"} },
 		},
 		"a null keeps every kind but a pointer": {
-			over: "struct: {a: null}\nnested: null\nslice: null\narray: null\nmap: null\nany: null\n",
+			over: stringtest.LinesLF(
+				"struct: {a: null}",
+				"nested: null",
+				"slice: null",
+				"array: null",
+				"map: null",
+				"any: null",
+			),
 		},
 		"a null sets a pointer to nil": {
 			over: "pointer: null\nnumber: null\n",
@@ -6878,16 +7353,30 @@ func TestDocument_Decode_MergeOverride(t *testing.T) {
 		want  server
 	}{
 		"a key after the merge overrides it": {
-			input: "defaults: &defaults {host: h, port: 1}\nserver:\n  <<: *defaults\n  port: 2\n",
-			want:  server{Host: "h", Port: 2},
+			input: stringtest.LinesLF(
+				"defaults: &defaults {host: h, port: 1}",
+				"server:",
+				"  <<: *defaults",
+				"  port: 2",
+			),
+			want: server{Host: "h", Port: 2},
 		},
 		"a merge after the key overrides it": {
-			input: "defaults: &defaults {host: h, port: 1}\nserver:\n  port: 2\n  <<: *defaults\n",
-			want:  server{Host: "h", Port: 1},
+			input: stringtest.LinesLF(
+				"defaults: &defaults {host: h, port: 1}",
+				"server:",
+				"  port: 2",
+				"  <<: *defaults",
+			),
+			want: server{Host: "h", Port: 1},
 		},
 		"a key overrides a mapping the merge key holds": {
-			input: "server:\n  <<: {host: h, port: 1}\n  port: 2\n",
-			want:  server{Host: "h", Port: 2},
+			input: stringtest.LinesLF(
+				"server:",
+				"  <<: {host: h, port: 1}",
+				"  port: 2",
+			),
+			want: server{Host: "h", Port: 2},
 		},
 		"a key overrides a merge in a flow mapping": {
 			input: "defaults: &defaults {host: h, port: 1}\nserver: {<<: *defaults, port: 2}\n",
@@ -7048,7 +7537,11 @@ func TestDocument_ValidatorErrorsResolveInDocument(t *testing.T) {
 
 	namePath := paths.Current().Child("name")
 
-	source := niceyaml.NewSourceFromString("name: a\n---\nname: b\n")
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"name: a",
+		"---",
+		"name: b",
+	))
 	docs := source.Documents()
 
 	second := docs[1]
@@ -7297,7 +7790,11 @@ func typedNilValidator() niceyaml.Validator {
 func TestDocument_Bind(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("name: a\n---\nname: b\n")
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"name: a",
+		"---",
+		"name: b",
+	))
 	docs := source.Documents()
 
 	second := docs[1]
@@ -7577,14 +8074,22 @@ func TestDocument_At_Scope(t *testing.T) {
 			span  position.Span
 		}{
 			"alias": {
-				input: "x: &x {k: 1}\nmid: 2\nc: *x\n",
-				want:  "{k: 1}",
-				span:  position.NewSpan(0, 1),
+				input: stringtest.LinesLF(
+					"x: &x {k: 1}",
+					"mid: 2",
+					"c: *x",
+				),
+				want: "{k: 1}",
+				span: position.NewSpan(0, 1),
 			},
 			"tagged alias": {
-				input: "x: &x {k: 1}\nmid: 2\nc: !t *x\n",
-				want:  "!t *x",
-				span:  position.NewSpan(2, 3),
+				input: stringtest.LinesLF(
+					"x: &x {k: 1}",
+					"mid: 2",
+					"c: !t *x",
+				),
+				want: "!t *x",
+				span: position.NewSpan(2, 3),
 			},
 		}
 
@@ -7908,7 +8413,12 @@ func TestDocument_Decode_ScopedValidatorErrorDocument(t *testing.T) {
 					return scoped.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("x"))))
 				})
 
-				dd := yamltest.FirstDocument(t, "x: 0\nitems:\n  - x: 1\n  - x: 2\n", tc.source...)
+				dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+					"x: 0",
+					"items:",
+					"  - x: 1",
+					"  - x: 2",
+				), tc.source...)
 
 				opts := append(slices.Clone(tc.opts), niceyaml.WithValidator(scoping))
 
@@ -9073,7 +9583,11 @@ func TestNode_Validate(t *testing.T) {
 	t.Run("a nil validator returns what Err returns", func(t *testing.T) {
 		t.Parallel()
 
-		docs := niceyaml.NewSourceFromString("name: test\n---\nname: [\n", niceyaml.WithName("f.yaml")).AllDocuments()
+		docs := niceyaml.NewSourceFromString(stringtest.LinesLF(
+			"name: test",
+			"---",
+			"name: [",
+		), niceyaml.WithName("f.yaml")).AllDocuments()
 		require.Len(t, docs, 2)
 		require.NoError(t, docs[0].Err())
 		require.EqualError(t, docs[1].Err(), "f.yaml:3:7: sequence end token ']' not found")
@@ -9100,7 +9614,11 @@ func TestNode_Validate(t *testing.T) {
 
 		var order []string
 
-		docs := niceyaml.NewSourceFromString("name: a\n---\nname: b\n").Documents()
+		docs := niceyaml.NewSourceFromString(stringtest.LinesLF(
+			"name: a",
+			"---",
+			"name: b",
+		)).Documents()
 
 		_, err := docs[0].Decode[map[string]any](
 			t.Context(),
@@ -9351,7 +9869,11 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("a merge key that does not resolve is an error bound to the source", func(t *testing.T) {
 		t.Parallel()
 
-		broken := yamltest.FirstDocument(t, "jobs:\n  <<: *missing\n  build: 1\n")
+		broken := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"jobs:",
+			"  <<: *missing",
+			"  build: 1",
+		))
 
 		_, err := broken.Nodes(paths.Current().Child("jobs").ChildAll())
 		require.ErrorIs(t, err, paths.ErrAlias)
@@ -9363,7 +9885,13 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("keeps document order for nested recursive matches", func(t *testing.T) {
 		t.Parallel()
 
-		nested := yamltest.FirstDocument(t, "a:\n  b:\n    a:\n      c: 1\n  c: 2\n")
+		nested := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a:",
+			"  b:",
+			"    a:",
+			"      c: 1",
+			"  c: 2",
+		))
 
 		// The outer entry a comes first, but its c follows the c of the
 		// inner one in the source.
@@ -9392,7 +9920,11 @@ func TestNode_Nodes(t *testing.T) {
 	t.Run("an empty block scalar stays off the line of its sibling", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "x:\n  a: |\n  b: 1\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"x:",
+			"  a: |",
+			"  b: 1",
+		))
 
 		nodes, err := dd.Nodes(paths.Current().Child("x", "a"))
 		require.NoError(t, err)
@@ -9696,7 +10228,10 @@ func TestErrDecode(t *testing.T) {
 			},
 		},
 		"mapping into scalar": {
-			input:  "value:\n  a: 1",
+			input: stringtest.JoinLF(
+				"value:",
+				"  a: 1",
+			),
 			decode: decodeErrorAs[struct{ Value string }],
 		},
 		"DecodeInto": {
@@ -9766,6 +10301,12 @@ func TestErrDecode(t *testing.T) {
 		// decode binds them where the document causes them.
 		refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {x: 1}\n"))
 
+		noAnchor := stringtest.LinesLF(
+			"a:",
+			"  <<: *nope",
+			"  b: 1",
+		)
+
 		tcs := map[string]struct {
 			input  string
 			path   paths.Path
@@ -9774,36 +10315,51 @@ func TestErrDecode(t *testing.T) {
 			msg    string
 		}{
 			"merge alias the references leave unbound": {
-				input:  "a:\n  <<: *nope\n  b: 1\n",
+				input:  noAnchor,
 				path:   paths.Current(),
 				source: []niceyaml.SourceOption{refs},
 				line:   1,
 				msg:    "cannot find anchor by alias name nope",
 			},
 			"merge alias after one the references bind": {
-				input:  "a:\n  <<: *base\n  b:\n    <<: *nope\n",
+				input: stringtest.LinesLF(
+					"a:",
+					"  <<: *base",
+					"  b:",
+					"    <<: *nope",
+				),
 				path:   paths.Current(),
 				source: []niceyaml.SourceOption{refs},
 				line:   3,
 				msg:    "cannot find anchor by alias name nope",
 			},
 			"merge of the mapping that holds it": {
-				input: "a: &x\n  <<: *x\n  b: 1\n",
-				path:  paths.Current(),
-				line:  1,
-				msg:   "cannot find anchor by alias name x",
+				input: stringtest.LinesLF(
+					"a: &x",
+					"  <<: *x",
+					"  b: 1",
+				),
+				path: paths.Current(),
+				line: 1,
+				msg:  "cannot find anchor by alias name x",
 			},
 			"merge alias with no anchor": {
-				input: "a:\n  <<: *nope\n  b: 1\n",
+				input: noAnchor,
 				path:  paths.Current(),
 				line:  1,
 				msg:   "cannot find anchor by alias name nope",
 			},
 			"merge alias before its anchor": {
-				input: "a:\n  <<: *y\n  b: 1\nc: &y\n  d: 1\n",
-				path:  paths.Current(),
-				line:  1,
-				msg:   "cannot find anchor by alias name y",
+				input: stringtest.LinesLF(
+					"a:",
+					"  <<: *y",
+					"  b: 1",
+					"c: &y",
+					"  d: 1",
+				),
+				path: paths.Current(),
+				line: 1,
+				msg:  "cannot find anchor by alias name y",
 			},
 			"merge alias in a list of sources": {
 				input: "a: {<<: [{b: 1}, *nope]}\n",
@@ -9812,7 +10368,7 @@ func TestErrDecode(t *testing.T) {
 				msg:   "cannot find anchor by alias name nope",
 			},
 			"merge alias with no anchor in a scoped decode": {
-				input: "a:\n  <<: *nope\n  b: 1\n",
+				input: noAnchor,
 				path:  paths.Current().Child("a"),
 				line:  1,
 				msg:   "cannot find anchor by alias name nope",
@@ -9824,16 +10380,25 @@ func TestErrDecode(t *testing.T) {
 				msg:   "cannot find anchor by alias name nope",
 			},
 			"merge of an anchor that holds the node": {
-				input: "a: &x\n  m:\n    <<: *x\n",
-				path:  paths.Current().Child("a", "m"),
-				line:  2,
-				msg:   "cannot find anchor by alias name x",
+				input: stringtest.LinesLF(
+					"a: &x",
+					"  m:",
+					"    <<: *x",
+				),
+				path: paths.Current().Child("a", "m"),
+				line: 2,
+				msg:  "cannot find anchor by alias name x",
 			},
 			"merge of an anchor that holds the node after one of the same name": {
-				input: "a: &x {k: 1}\nb: &x\n  j: 2\n  <<: *x\n",
-				path:  paths.Current().Child("b"),
-				line:  3,
-				msg:   "cannot find anchor by alias name x",
+				input: stringtest.LinesLF(
+					"a: &x {k: 1}",
+					"b: &x",
+					"  j: 2",
+					"  <<: *x",
+				),
+				path: paths.Current().Child("b"),
+				line: 3,
+				msg:  "cannot find anchor by alias name x",
 			},
 			"depth limit": {
 				input: "a: " + strings.Repeat("[", 10005) + strings.Repeat("]", 10005) + "\n",
@@ -9892,7 +10457,11 @@ func TestErrDecode(t *testing.T) {
 			line   int
 		}{
 			"merge from a reference": {
-				input:  "item:\n  <<: *base\ny: 1\n",
+				input: stringtest.LinesLF(
+					"item:",
+					"  <<: *base",
+					"y: 1",
+				),
 				decode: decodeErrorAs[cfg],
 				line:   1,
 			},
@@ -9902,14 +10471,22 @@ func TestErrDecode(t *testing.T) {
 				line:   1,
 			},
 			"alias to a reference in a scoped decode": {
-				input:  "a: 1\nouter:\n  item: *base\n",
+				input: stringtest.LinesLF(
+					"a: 1",
+					"outer:",
+					"  item: *base",
+				),
 				decode: scoped,
 				line:   2,
 			},
 			// The decode reads the reference through an anchor outside
 			// the node, so it binds at the alias in that anchor.
 			"alias to a reference through an anchor in a scoped decode": {
-				input:  "m: &m {<<: *base}\nouter:\n  item: *m\n",
+				input: stringtest.LinesLF(
+					"m: &m {<<: *base}",
+					"outer:",
+					"  item: *m",
+				),
 				decode: scoped,
 				line:   0,
 			},
@@ -9987,7 +10564,11 @@ func TestErrDecode(t *testing.T) {
 			// The document's resolver binds no anchor for the alias, which
 			// the reference document defines for the decoder.
 			"merge the references resolve": {
-				input: "item:\n  <<: *base\n  when: x\n",
+				input: stringtest.LinesLF(
+					"item:",
+					"  <<: *base",
+					"  when: x",
+				),
 				source: []niceyaml.SourceOption{
 					niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &base {x: 1}\n")),
 				},
@@ -10051,7 +10632,13 @@ func TestErrDecode(t *testing.T) {
 		// The error of the value's own parse carries a token of the bytes
 		// it parsed, not of the source, so it comes back as the value's
 		// own error rather than as a rejection at the wrong line.
-		dd := yamltest.FirstDocument(t, "a: 1\nb: x\nc: y\nz:\n  n: notanumber\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: 1",
+			"b: x",
+			"c: y",
+			"z:",
+			"  n: notanumber",
+		))
 
 		_, err := dd.Decode[struct{ Z reparsingUnmarshaler }](t.Context())
 		require.ErrorIs(t, err, niceyaml.ErrDecode)
@@ -10067,7 +10654,11 @@ func TestErrDecode(t *testing.T) {
 
 		// The item's own parse fails at "abc" on its line 1, where the
 		// source holds the same token at the same position.
-		dd := yamltest.FirstDocument(t, "name: [abc]\nitems:\n  - name: [abc]\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"name: [abc]",
+			"items:",
+			"  - name: [abc]",
+		))
 
 		_, err := dd.Decode[struct {
 			Name  []string
@@ -10320,7 +10911,11 @@ func TestErrDecode(t *testing.T) {
 
 		// The alias under b needs the anchor under a, which the decode
 		// would otherwise skip and report as missing.
-		dd := yamltest.FirstDocument(t, "a: &x 1\nb:\n  c: *x\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+			"a: &x 1",
+			"b:",
+			"  c: *x",
+		))
 
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
@@ -10621,9 +11216,14 @@ func TestMultiValidator(t *testing.T) {
 	// A validator of a type of its own that leaves its error unbound.
 	unboundB := &fieldValidator{err: niceyaml.Invalid(errB, niceyaml.AtPath(paths.Current().Child("a", "b")))}
 	passing := passingValidator()
-	dd := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n")
+	input := stringtest.LinesLF(
+		"a:",
+		"  b: 1",
+		"  c: 2",
+	)
+	dd := yamltest.FirstDocument(t, input)
 	// The same document under a file path.
-	doc := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
+	doc := yamltest.FirstDocument(t, input, niceyaml.WithFilePath("x.yaml"))
 
 	t.Run("runs every validator and reports every failure in order", func(t *testing.T) {
 		t.Parallel()
@@ -10659,7 +11259,10 @@ func TestMultiValidator(t *testing.T) {
 		err := dd.Validate(t.Context(), niceyaml.MultiValidator(badB, badC))
 		require.Error(t, err)
 
-		assert.Equal(t, "|-- 2:6: $.a.b: bad b\n`-- 3:6: $.a.c: bad c", report(err))
+		assert.Equal(t, stringtest.JoinLF(
+			"|-- 2:6: $.a.b: bad b",
+			"`-- 3:6: $.a.c: bad c",
+		), report(err))
 	})
 
 	t.Run("no failure is no error", func(t *testing.T) {
@@ -10716,7 +11319,10 @@ func TestMultiValidator(t *testing.T) {
 	t.Run("each line of the message carries its source and position", func(t *testing.T) {
 		t.Parallel()
 
-		want := "x.yaml:2:6: $.a.b: bad b\nx.yaml:3:6: $.a.c: bad c"
+		want := stringtest.JoinLF(
+			"x.yaml:2:6: $.a.b: bad b",
+			"x.yaml:3:6: $.a.c: bad c",
+		)
 
 		tcs := map[string]struct {
 			first niceyaml.Validator
@@ -10736,7 +11342,10 @@ func TestMultiValidator(t *testing.T) {
 				// A direct call joins the failures as the validators wrote
 				// them, so the one badC bound keeps its position and the
 				// other has none.
-				require.EqualError(t, multi.Check(t.Context(), doc), "bad b\nx.yaml:3:6: $.a.c: bad c")
+				require.EqualError(t, multi.Check(t.Context(), doc), stringtest.JoinLF(
+					"bad b",
+					"x.yaml:3:6: $.a.c: bad c",
+				))
 			})
 		}
 	})
@@ -10775,7 +11384,10 @@ func TestMultiValidator(t *testing.T) {
 
 		err := doc.Validate(t.Context(), niceyaml.MultiValidator(classified, badB))
 		require.ErrorIs(t, err, errInvalid)
-		assert.Equal(t, "x.yaml:2:6: $.a.b: bad b\ninvalid: x.yaml:3:6: $.a.c: bad c", err.Error())
+		assert.Equal(t, stringtest.JoinLF(
+			"x.yaml:2:6: $.a.b: bad b",
+			"invalid: x.yaml:3:6: $.a.c: bad c",
+		), err.Error())
 	})
 
 	t.Run("a context that ends stops the run", func(t *testing.T) {
@@ -10815,7 +11427,17 @@ func TestChainValidator(t *testing.T) {
 	first := rejectingValidator(niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath)))
 	second := rejectingValidator(niceyaml.Invalid(errSecond, niceyaml.AtPath(namePath)))
 	passing := passingValidator()
-	doc := yamltest.FirstDocument(t, "meta:\n  name: 5\nname: 7\n", niceyaml.WithName("x.yaml"))
+
+	// The message of both failures, as a MultiValidator joins them.
+	both := stringtest.JoinLF(
+		"x.yaml:3:7: $.name: first rule",
+		"x.yaml:3:7: $.name: second rule",
+	)
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"meta:",
+		"  name: 5",
+		"name: 7",
+	), niceyaml.WithName("x.yaml"))
 	meta := yamltest.At(t, doc, paths.Current().Child("meta"))
 
 	t.Run("runs the validators in order and stops at the first that fails", func(t *testing.T) {
@@ -10846,7 +11468,7 @@ func TestChainValidator(t *testing.T) {
 		require.EqualError(t, err, "x.yaml:3:7: $.name: second rule")
 
 		err = doc.Validate(t.Context(), niceyaml.MultiValidator(first, second))
-		require.EqualError(t, err, "x.yaml:3:7: $.name: first rule\nx.yaml:3:7: $.name: second rule")
+		require.EqualError(t, err, both)
 	})
 
 	t.Run("a later validator runs once the ones before it pass", func(t *testing.T) {
@@ -11113,8 +11735,7 @@ func TestChainValidator(t *testing.T) {
 		// Inside a MultiValidator, the chain reports its first failure
 		// beside the failures of the validators around it.
 		multi := niceyaml.MultiValidator(niceyaml.ChainValidator(first, second), second)
-		require.EqualError(t, doc.Validate(t.Context(), multi),
-			"x.yaml:3:7: $.name: first rule\nx.yaml:3:7: $.name: second rule")
+		require.EqualError(t, doc.Validate(t.Context(), multi), both)
 
 		// Around one, the chain stops once the MultiValidator fails.
 		var order []string
@@ -11123,8 +11744,7 @@ func TestChainValidator(t *testing.T) {
 			niceyaml.MultiValidator(first, second),
 			recordingValidator(&order, "unreached"),
 		)
-		require.EqualError(t, doc.Validate(t.Context(), chain),
-			"x.yaml:3:7: $.name: first rule\nx.yaml:3:7: $.name: second rule")
+		require.EqualError(t, doc.Validate(t.Context(), chain), both)
 		assert.Empty(t, order)
 
 		// A chain inside a chain runs as one chain.
@@ -11448,7 +12068,12 @@ func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 			err: niceyaml.ErrExcessiveAliasing,
 		},
 		"a few aliases": {
-			input: "base: &b {a: 1, b: 2}\nx:\n  <<: *b\ny: [*b, *b]\n",
+			input: stringtest.LinesLF(
+				"base: &b {a: 1, b: 2}",
+				"x:",
+				"  <<: *b",
+				"y: [*b, *b]",
+			),
 		},
 		"a small mapping aliased in each item of a long list": {
 			// Each alias counts as a node of the document, so the 150
