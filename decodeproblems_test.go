@@ -69,6 +69,13 @@ type problemConfig struct {
 	Timeout  int             `yaml:"timeout"`
 }
 
+// problemImaged is the target of a document that holds an image of the
+// type I beside its replicas.
+type problemImaged[I any] struct {
+	Image    I   `yaml:"image"`
+	Replicas int `yaml:"replicas"`
+}
+
 // problemTiered is a server whose tier decodes itself from text.
 type problemTiered struct {
 	Name string `yaml:"name"`
@@ -1035,21 +1042,15 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The unmarshaler reads pull as text, so the boolean field of
 		// the type is no problem, and its own error stays the report.
 		"unmarshaler whose fields do not mirror the document": {
-			decode: decodeAs[struct {
-				Image    problemImage `yaml:"image"`
-				Replicas int          `yaml:"replicas"`
-			}](),
-			input: "image: {pull: always}\n",
-			is:    errRepoRequired,
-			want:  "1:1: $.image: repo is required",
+			decode: decodeAs[problemImaged[problemImage]](),
+			input:  "image: {pull: always}\n",
+			is:     errRepoRequired,
+			want:   "1:1: $.image: repo is required",
 		},
 		"unmarshaler error beside a value": {
-			decode: decodeAs[struct {
-				Image    problemImage `yaml:"image"`
-				Replicas int          `yaml:"replicas"`
-			}](),
-			input: "image: {pull: always}\nreplicas: x\n",
-			is:    errRepoRequired,
+			decode: decodeAs[problemImaged[problemImage]](),
+			input:  "image: {pull: always}\nreplicas: x\n",
+			is:     errRepoRequired,
 			want: stringtest.JoinLF(
 				"2 problems",
 				"1:1: $.image: repo is required",
@@ -1072,22 +1073,16 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 			),
 		},
 		"value beside an unmarshaler that passes": {
-			decode: decodeAs[struct {
-				Image    problemImage `yaml:"image"`
-				Replicas int          `yaml:"replicas"`
-			}](),
-			input: "replicas: x\nimage: {repo: r, pull: always}\n",
-			want:  "1:11: $.replicas: expected integer, got string",
+			decode: decodeAs[problemImaged[problemImage]](),
+			input:  "replicas: x\nimage: {repo: r, pull: always}\n",
+			want:   "1:11: $.replicas: expected integer, got string",
 		},
 		// The option names the type its function decodes, so the error
 		// of the function binds at the value, beside the other problem.
 		"custom unmarshaler function": {
-			decode: decodeAs[struct {
-				Image    problemPulled `yaml:"image"`
-				Replicas int           `yaml:"replicas"`
-			}](custom),
-			input: "image: {pull: always}\nreplicas: x\n",
-			is:    errRepoRequired,
+			decode: decodeAs[problemImaged[problemPulled]](custom),
+			input:  "image: {pull: always}\nreplicas: x\n",
+			is:     errRepoRequired,
 			want: stringtest.JoinLF(
 				"2 problems",
 				"1:1: $.image: repo is required",
@@ -1097,52 +1092,37 @@ func TestDocument_Decode_Problems_Unmarshalers(t *testing.T) {
 		// The search leaves the image to the function, which takes pull
 		// as text, so the boolean field of the type is no problem.
 		"value beside a custom unmarshaler function that passes": {
-			decode: decodeAs[struct {
-				Image    problemPulled `yaml:"image"`
-				Replicas int           `yaml:"replicas"`
-			}](custom),
-			input: "replicas: x\nimage: {repo: r, pull: always}\n",
-			want:  "1:11: $.replicas: expected integer, got string",
+			decode: decodeAs[problemImaged[problemPulled]](custom),
+			input:  "replicas: x\nimage: {repo: r, pull: always}\n",
+			want:   "1:11: $.replicas: expected integer, got string",
 		},
 		// Nothing shows which type a registered function decodes, so the
 		// error of the function has no location and comes back alone.
 		"registered unmarshaler function": {
-			decode: decodeAs[struct {
-				Image    problemRegistered `yaml:"image"`
-				Replicas int               `yaml:"replicas"`
-			}](),
-			input: "image: {pull: always}\nreplicas: x\n",
-			is:    errRepoRequired,
-			want:  "repo is required",
+			decode: decodeAs[problemImaged[problemRegistered]](),
+			input:  "image: {pull: always}\nreplicas: x\n",
+			is:     errRepoRequired,
+			want:   "repo is required",
 		},
 		// The struct the function decodes confirms each of its fields,
 		// so the function, which takes pull as text, has the last word.
 		"value beside a registered unmarshaler function that passes": {
-			decode: decodeAs[struct {
-				Image    problemRegistered `yaml:"image"`
-				Replicas int               `yaml:"replicas"`
-			}](),
-			input: "replicas: x\nimage: {repo: r, pull: always}\n",
-			want:  "1:11: $.replicas: expected integer, got string",
+			decode: decodeAs[problemImaged[problemRegistered]](),
+			input:  "replicas: x\nimage: {repo: r, pull: always}\n",
+			want:   "1:11: $.replicas: expected integer, got string",
 		},
 		// The option turns the method on, so the search leaves the image
 		// to the method, which accepts it.
 		"json unmarshaler under its option": {
-			decode: decodeAs[struct {
-				Image    problemJSON `yaml:"image"`
-				Replicas int         `yaml:"replicas"`
-			}](niceyaml.WithJSONUnmarshalers(true)),
-			input: "replicas: x\nimage: {repo: [r], pull: always}\n",
-			want:  "1:11: $.replicas: expected integer, got string",
+			decode: decodeAs[problemImaged[problemJSON]](niceyaml.WithJSONUnmarshalers(true)),
+			input:  "replicas: x\nimage: {repo: [r], pull: always}\n",
+			want:   "1:11: $.replicas: expected integer, got string",
 		},
 		// The decoder reads the fields of the type, so the search reads
 		// them too.
 		"json unmarshaler without its option": {
-			decode: decodeAs[struct {
-				Image    problemJSON `yaml:"image"`
-				Replicas int         `yaml:"replicas"`
-			}](),
-			input: "replicas: x\nimage: {repo: [r], pull: always}\n",
+			decode: decodeAs[problemImaged[problemJSON]](),
+			input:  "replicas: x\nimage: {repo: [r], pull: always}\n",
 			want: stringtest.JoinLF(
 				"3 problems",
 				"1:11: $.replicas: expected integer, got string",
