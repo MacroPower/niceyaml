@@ -2245,54 +2245,30 @@ func TestNode_Resolver(t *testing.T) {
 func TestDocument_Bind_Check(t *testing.T) {
 	t.Parallel()
 
-	input := stringtest.Input(`
+	dd := yamltest.FirstDocument(t, stringtest.Input(`
 		kind: Deployment
 		spec:
 		  hours:
 		    open: "09:00"
 		    close: "17:00"
-	`)
+	`))
+	hours := yamltest.At(t, dd, paths.Doc().Child("spec", "hours"))
 
-	hoursPath := paths.Doc().Child("spec", "hours")
+	h, err := hours.Decode[checkHours](t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "09:00", h.Open)
 
-	t.Run("path in a check error resolves from the scope", func(t *testing.T) {
-		t.Parallel()
+	// A check that runs after the decode writes its path from the value,
+	// and the scoped Node resolves it.
+	err = hours.Bind(niceyaml.NewError("closes too early", niceyaml.AtPath(paths.Current().Child("close"))))
 
-		dd := yamltest.FirstDocument(t, input)
-		hours := yamltest.At(t, dd, hoursPath)
+	bound := yamltest.RequireSourceError(t, err)
+	assert.Same(t, dd.Source(), bound.Source())
 
-		h, err := hours.Decode[checkHours](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, "09:00", h.Open)
-
-		check := func(_ *checkHours) error {
-			return niceyaml.NewError("closes too early", niceyaml.AtPath(paths.Current().Child("close")))
-		}
-
-		err = hours.Bind(check(&h))
-
-		bound := yamltest.RequireSourceError(t, err)
-		assert.Same(t, dd.Source(), bound.Source())
-
-		rng, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, yamltest.LineRange(4, 11, 18), rng)
-		assert.Equal(t, "5:12: $.spec.hours.close: closes too early", err.Error())
-	})
-
-	t.Run("a passing check binds to nothing", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
-		hours := yamltest.At(t, dd, hoursPath)
-
-		h, err := hours.Decode[checkHours](t.Context())
-		require.NoError(t, err)
-
-		check := func(_ *checkHours) error { return nil }
-
-		require.NoError(t, hours.Bind(check(&h)))
-	})
+	rng, ok := bound.Range()
+	require.True(t, ok)
+	assert.Equal(t, yamltest.LineRange(4, 11, 18), rng)
+	assert.Equal(t, "5:12: $.spec.hours.close: closes too early", err.Error())
 }
 
 // checkHours is a value for the tests of a check bound after a decode.
