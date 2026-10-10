@@ -9601,16 +9601,57 @@ func TestSourceError_Nearest(t *testing.T) {
 	second := paths.Doc().Child("servers").Index(1)
 	name := second.Child("name")
 
-	tcs := map[string]struct {
+	// NearCase is an error and what its binding to a document reports.
+	type nearCase struct {
 		err error
-		// The message, the path of the mapping the error is bound at,
-		// when it is bound at one, and the range it covers, or the
-		// reason it has none.
+		// The message, the path of the mapping or the alias the error is
+		// bound at, when it is bound at one, the range it covers, if any,
+		// and the reason it keeps.
 		want   string
 		near   string
 		rng    position.Range
 		reason error
-	}{
+	}
+
+	// Check binds the error of each case to node and compares what the
+	// binding reports.
+	check := func(t *testing.T, node *niceyaml.Node, tcs map[string]nearCase) {
+		t.Helper()
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := node.Bind(tc.err)
+				require.EqualError(t, err, tc.want)
+
+				bound := yamltest.RequireSourceError(t, err)
+
+				near, ok := bound.Nearest()
+				assert.Equal(t, tc.near != "", ok)
+
+				if ok {
+					assert.Equal(t, tc.near, near.String())
+				} else {
+					assert.Equal(t, paths.Current(), near)
+				}
+
+				rng, located := bound.Range()
+				assert.Equal(t, tc.rng != position.Range{}, located)
+				assert.Equal(t, tc.rng, rng)
+
+				if tc.reason == nil {
+					require.NoError(t, bound.Unresolved())
+
+					return
+				}
+
+				require.ErrorIs(t, bound.Unresolved(), tc.reason)
+			})
+		}
+	}
+
+	tcs := map[string]nearCase{
 		"key an element of a sequence leaves out": {
 			err:  niceyaml.NewError("name is required", niceyaml.AtPath(name)),
 			want: "cfg.yaml:4:3: $.servers[1].name: name is required",
@@ -9675,36 +9716,7 @@ func TestSourceError_Nearest(t *testing.T) {
 		},
 	}
 
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			err := doc.Bind(tc.err)
-			require.EqualError(t, err, tc.want)
-
-			bound := yamltest.RequireSourceError(t, err)
-
-			near, ok := bound.Nearest()
-			assert.Equal(t, tc.near != "", ok)
-
-			if ok {
-				assert.Equal(t, tc.near, near.String())
-			} else {
-				assert.Equal(t, paths.Current(), near)
-			}
-
-			rng, located := bound.Range()
-			if !located {
-				requireUnresolved(t, bound, tc.reason)
-				assert.Equal(t, position.Range{}, tc.rng, "case expects a range")
-
-				return
-			}
-
-			assert.Equal(t, tc.rng, rng)
-			require.NoError(t, bound.Unresolved())
-		})
-	}
+	check(t, doc, tcs)
 
 	t.Run("the message keeps the path and the excerpt marks the mapping", func(t *testing.T) {
 		t.Parallel()
@@ -9817,16 +9829,7 @@ func TestSourceError_Nearest(t *testing.T) {
 		server := paths.Doc().Child("server")
 		star := yamltest.LineRange(0, 8, 9)
 
-		tcs := map[string]struct {
-			err error
-			// The message, the path of the alias the error is bound at,
-			// when it is bound at one, the range it covers, if any, and
-			// the reason it keeps.
-			want   string
-			near   string
-			rng    position.Range
-			reason error
-		}{
+		tcs := map[string]nearCase{
 			"value below the alias": {
 				err:    niceyaml.NewError("bad", niceyaml.AtPath(server.Child("port"))),
 				want:   "app.yaml:1:9: $.server.port: bad",
@@ -9903,35 +9906,7 @@ func TestSourceError_Nearest(t *testing.T) {
 			},
 		}
 
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				err := aliased.Bind(tc.err)
-				require.EqualError(t, err, tc.want)
-
-				bound := yamltest.RequireSourceError(t, err)
-
-				near, ok := bound.Nearest()
-				assert.Equal(t, tc.near != "", ok)
-
-				if ok {
-					assert.Equal(t, tc.near, near.String())
-				}
-
-				rng, located := bound.Range()
-				assert.Equal(t, tc.rng != position.Range{}, located)
-				assert.Equal(t, tc.rng, rng)
-
-				if tc.reason == nil {
-					require.NoError(t, bound.Unresolved())
-
-					return
-				}
-
-				require.ErrorIs(t, bound.Unresolved(), tc.reason)
-			})
-		}
+		check(t, aliased, tcs)
 
 		t.Run("the message keeps the path and the excerpt marks the alias", func(t *testing.T) {
 			t.Parallel()
