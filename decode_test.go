@@ -2128,7 +2128,7 @@ func TestDocument_Node(t *testing.T) {
 	t.Run("document of whitespace below a header has no body", func(t *testing.T) {
 		t.Parallel()
 
-		assert.Nil(t, yamltest.FirstDocument(t, "---\n  \n").AST())
+		assert.Nil(t, yamltest.FirstDocument(t, stringtest.LinesLF("---", "  ")).AST())
 
 		docs := niceyaml.NewSourceFromString(stringtest.LinesLF(
 			"a: 1",
@@ -3597,8 +3597,14 @@ func TestWithDisallowUnknownFields(t *testing.T) {
 			input string
 			path  paths.Path
 		}{
-			"root":        {input: "name: test\nextra: field", path: paths.Current()},
-			"scoped node": {input: "inner:\n  name: test\n  extra: field", path: paths.Current().Child("inner")},
+			"root": {
+				input: "name: test\nextra: field",
+				path:  paths.Current(),
+			},
+			"scoped node": {
+				input: stringtest.JoinLF("inner:", "  name: test", "  extra: field"),
+				path:  paths.Current().Child("inner"),
+			},
 		}
 
 		for name, tc := range tcs {
@@ -3889,8 +3895,8 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			"double quoted":  {input: "office: \"10.0.0.0/8\"\n"},
 			"single quoted":  {input: "office: '10.0.0.0/8'\n"},
 			"with a comment": {input: "office: 10.0.0.0/8 # the office\n"},
-			"block":          {input: "office: |-\n  10.0.0.0/8\n"},
-			"folded":         {input: "office: >-\n  10.0.0.0/8\n"},
+			"block":          {input: stringtest.LinesLF("office: |-", "  10.0.0.0/8")},
+			"folded":         {input: stringtest.LinesLF("office: >-", "  10.0.0.0/8")},
 			"tagged":         {input: "office: !!str 10.0.0.0/8\n"},
 			"anchored":       {input: "office: &net 10.0.0.0/8\n"},
 			"alias":          {input: "net: &net 10.0.0.0/8\noffice: *net\n"},
@@ -4084,7 +4090,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			// The decode of a value takes the options of the decode that
 			// called the function, so another function decodes the level.
 			"value another function decodes below the value": {
-				input: "spans:\n  - {from: 1, to: 2, level: mid}\n",
+				input: stringtest.LinesLF("spans:", "  - {from: 1, to: 2, level: mid}"),
 				want:  `2:29: $.spans[0].level: unknown level "mid"`,
 			},
 			"unknown field of the value": {
@@ -4163,12 +4169,12 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			detail string
 		}{
 			"path": {
-				input:  "boxes:\n  - item: {from: 9, to: 3}\n",
+				input:  stringtest.LinesLF("boxes:", "  - item: {from: 9, to: 3}"),
 				report: spanError(),
 				want:   "2:25: $.boxes[0].item.to: to is below from",
 			},
 			"path of a detail": {
-				input: "boxes:\n  - item: {from: 9, to: 3}\n",
+				input: stringtest.LinesLF("boxes:", "  - item: {from: 9, to: 3}"),
 				report: niceyaml.NewError("span is odd", niceyaml.WithDetails(
 					niceyaml.NewError("to set here", niceyaml.AtPath(paths.Current().Child("to"))),
 				)),
@@ -4176,7 +4182,7 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 				detail: "2:25: $.boxes[0].item.to: to set here",
 			},
 			"join": {
-				input:  "boxes:\n  - item: {from: 9, to: 3}\n",
+				input:  stringtest.LinesLF("boxes:", "  - item: {from: 9, to: 3}"),
 				report: errors.Join(errors.New("from is odd"), errors.New("to is odd")),
 				want: stringtest.JoinLF(
 					"2:5: $.boxes[0].item: from is odd",
@@ -4248,12 +4254,12 @@ func TestWithCustomUnmarshaler(t *testing.T) {
 			want  string
 		}{
 			"error of the function": {
-				input: "main:\n  level: mid\n",
+				input: stringtest.LinesLF("main:", "  level: mid"),
 				is:    errUnknownLevel,
 				want:  `1:1: $.main: holder: unknown level "mid"`,
 			},
 			"rejection of the decode": {
-				input: "main:\n  level: [a]\n",
+				input: stringtest.LinesLF("main:", "  level: [a]"),
 				is:    niceyaml.ErrDecode,
 				want:  "1:1: $.main: holder: expected string, got sequence",
 			},
@@ -5187,11 +5193,11 @@ func TestDocument_At(t *testing.T) {
 				path:  paths.Current().Child("tags").IndexAll(),
 			},
 			"mapping wildcard": {
-				input: "jobs:\n  build: 1\n",
+				input: stringtest.LinesLF("jobs:", "  build: 1"),
 				path:  paths.Current().Child("jobs").ChildAll(),
 			},
 			"recursive wildcard": {
-				input: "jobs:\n  build: 1\n",
+				input: stringtest.LinesLF("jobs:", "  build: 1"),
 				path:  paths.Current().RecursiveAll(),
 			},
 		}
@@ -6201,7 +6207,15 @@ func TestDocument_Decode_ReusedAnchorNames(t *testing.T) {
 		var sb strings.Builder
 
 		for i := range 8 {
-			fmt.Fprintf(&sb, "---\na: &x %d\nt:\n  p: &x 2\n  q: *x\nr: *x\ns: &s {s: *s}\n", i)
+			fmt.Fprintf(&sb, stringtest.LinesLF(
+				"---",
+				"a: &x %d",
+				"t:",
+				"  p: &x 2",
+				"  q: *x",
+				"r: *x",
+				"s: &s {s: *s}",
+			), i)
 		}
 
 		docs := niceyaml.NewSourceFromString(sb.String()).Documents()
@@ -6481,9 +6495,36 @@ func TestDocument_DecodeInto(t *testing.T) {
 		tcs := map[string]struct {
 			input string
 		}{
-			"no value": {input: "int:\nuint:\nmap:\nconfig:\nitems:\n  -\n"},
-			"null":     {input: "int: null\nuint: null\nmap: null\nconfig: null\nitems:\n  - null\n"},
-			"tilde":    {input: "int: ~\nuint: ~\nmap: ~\nconfig: ~\nitems:\n  - ~\n"},
+			"no value": {
+				input: stringtest.LinesLF(
+					"int:",
+					"uint:",
+					"map:",
+					"config:",
+					"items:",
+					"  -",
+				),
+			},
+			"null": {
+				input: stringtest.LinesLF(
+					"int: null",
+					"uint: null",
+					"map: null",
+					"config: null",
+					"items:",
+					"  - null",
+				),
+			},
+			"tilde": {
+				input: stringtest.LinesLF(
+					"int: ~",
+					"uint: ~",
+					"map: ~",
+					"config: ~",
+					"items:",
+					"  - ~",
+				),
+			},
 		}
 
 		for name, tc := range tcs {
@@ -7583,7 +7624,7 @@ func TestDocument_Decode_Validator(t *testing.T) {
 		// holds. The ordered map option reaches the decode that gets it and
 		// no decode the validator runs.
 		refs := niceyaml.NewSourceFromString("base: &x 1\n")
-		dd := yamltest.FirstDocument(t, "b:\n  c: *x\n", niceyaml.WithReferences(refs))
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF("b:", "  c: *x"), niceyaml.WithReferences(refs))
 		ordered := niceyaml.WithYAMLOrderedMaps(true)
 
 		var (
