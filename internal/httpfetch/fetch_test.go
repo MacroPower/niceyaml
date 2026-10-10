@@ -29,30 +29,28 @@ func TestGet_RedactsPassword(t *testing.T) {
 	// or fragment, so Get refuses it too. A third slash after the scheme
 	// empties the host and turns the userinfo into a path, so Get refuses
 	// that URL as well.
-	tcs := map[string]struct {
-		url string
-	}{
-		"invalid port":                           {url: "https://user:secret@example.com:port/x"},
-		"invalid percent escape":                 {url: "https://user:secret@example.com/%zz"},
-		"control character":                      {url: "https://user:secret@example.com/\x7f"},
-		"password with a slash":                  {url: "https://user:secret/x@example.com/x"},
-		"password with a question mark":          {url: "https://user:secret?x@example.com/x"},
-		"password with a hash":                   {url: "https://user:secret#x@example.com/x"},
-		"password starting with a slash":         {url: "https://user:/secret@example.com/x"},
-		"password starting with a question mark": {url: "https://user:?secret@example.com/x"},
-		"password starting with a hash":          {url: "https://user:#secret@example.com/x"},
-		"username with an at sign":               {url: "https://jane@corp.com:/secret@example.com/x"},
-		"empty authority":                        {url: "https:///user:secret@example.com/x"},
-		"upper-case scheme and empty authority":  {url: "HTTPS:////user:secret@example.com/x"},
-		"password and an empty host":             {url: "http://user:secret@/x"},
+	tcs := map[string]string{
+		"invalid port":                           "https://user:secret@example.com:port/x",
+		"invalid percent escape":                 "https://user:secret@example.com/%zz",
+		"control character":                      "https://user:secret@example.com/\x7f",
+		"password with a slash":                  "https://user:secret/x@example.com/x",
+		"password with a question mark":          "https://user:secret?x@example.com/x",
+		"password with a hash":                   "https://user:secret#x@example.com/x",
+		"password starting with a slash":         "https://user:/secret@example.com/x",
+		"password starting with a question mark": "https://user:?secret@example.com/x",
+		"password starting with a hash":          "https://user:#secret@example.com/x",
+		"username with an at sign":               "https://jane@corp.com:/secret@example.com/x",
+		"empty authority":                        "https:///user:secret@example.com/x",
+		"upper-case scheme and empty authority":  "HTTPS:////user:secret@example.com/x",
+		"password and an empty host":             "http://user:secret@/x",
 	}
 
-	for name, tc := range tcs {
+	for name, rawURL := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := httpfetch.Get(t.Context(), refusingClient(t), tc.url)
-			require.ErrorContains(t, err, "parse URL "+strconv.Quote(httpfetch.Redacted(tc.url))+": ")
+			_, err := httpfetch.Get(t.Context(), refusingClient(t), rawURL)
+			require.ErrorContains(t, err, "parse URL "+strconv.Quote(httpfetch.Redacted(rawURL))+": ")
 			assert.NotContains(t, err.Error(), "secret")
 		})
 	}
@@ -77,18 +75,14 @@ func TestGet_RedactsPasswordWithAtSign(t *testing.T) {
 	// password and a host named after the text between them. Get sends
 	// the request as parsed. The transport error names that host, as a
 	// dialer or a DNS lookup does, so Get leaves the error out.
-	tcs := map[string]struct {
-		url string
-	}{
-		"slash":         {url: "https://user:p@host.invalid/tail@example.com/s.json"},
-		"question mark": {url: "https://user:p@host.invalid?tail@example.com/s.json"},
-		"hash":          {url: "https://user:p@host.invalid#tail@example.com/s.json"},
-		"scheme-relative url": {
-			url: "//user:p@host.invalid/tail@example.com/s.json",
-		},
+	tcs := map[string]string{
+		"slash":               "https://user:p@host.invalid/tail@example.com/s.json",
+		"question mark":       "https://user:p@host.invalid?tail@example.com/s.json",
+		"hash":                "https://user:p@host.invalid#tail@example.com/s.json",
+		"scheme-relative url": "//user:p@host.invalid/tail@example.com/s.json",
 	}
 
-	for name, tc := range tcs {
+	for name, rawURL := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -96,8 +90,8 @@ func TestGet_RedactsPasswordWithAtSign(t *testing.T) {
 				return nil, errors.New("lookup " + r.URL.Host + ": no such host")
 			}).Client()
 
-			_, err := httpfetch.Get(t.Context(), client, tc.url)
-			require.ErrorContains(t, err, "fetch "+httpfetch.Redacted(tc.url)+": reason withheld")
+			_, err := httpfetch.Get(t.Context(), client, rawURL)
+			require.ErrorContains(t, err, "fetch "+httpfetch.Redacted(rawURL)+": reason withheld")
 			assert.NotContains(t, err.Error(), "host.invalid")
 			assert.NotContains(t, err.Error(), "tail")
 		})
@@ -209,20 +203,18 @@ func TestGet_NamesURLAsRedacted(t *testing.T) {
 
 	u.User = url.UserPassword("user", "secret")
 
-	tcs := map[string]struct {
-		url string
-	}{
-		"password":                         {url: u.String()},
-		"space in the path":                {url: server.URL + "/my schema.json"},
-		"password and a space in the path": {url: u.String() + "/my schema.json"},
+	tcs := map[string]string{
+		"password":                         u.String(),
+		"space in the path":                server.URL + "/my schema.json",
+		"password and a space in the path": u.String() + "/my schema.json",
 	}
 
-	for name, tc := range tcs {
+	for name, rawURL := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := httpfetch.Get(t.Context(), server.Client(), tc.url)
-			require.ErrorContains(t, err, "fetch "+httpfetch.Redacted(tc.url)+": status 404")
+			_, err := httpfetch.Get(t.Context(), server.Client(), rawURL)
+			require.ErrorContains(t, err, "fetch "+httpfetch.Redacted(rawURL)+": status 404")
 			assert.NotContains(t, err.Error(), "secret")
 		})
 	}

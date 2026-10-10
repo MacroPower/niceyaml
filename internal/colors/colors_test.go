@@ -321,19 +321,17 @@ func TestBlend_ClampsInputs(t *testing.T) {
 	// mixing, the way the paths that hand one color back do.
 	black := color.RGBA{A: 255}
 
-	tcs := map[string]struct {
-		bad colorful.Color
-	}{
-		"negative channel":  {bad: colorful.Color{R: 0.5, G: -0.2, B: 0.5}},
-		"channel above one": {bad: colorful.Color{R: 1.8, G: 0.2, B: 0.5}},
+	tcs := map[string]colorful.Color{
+		"negative channel":  {R: 0.5, G: -0.2, B: 0.5},
+		"channel above one": {R: 1.8, G: 0.2, B: 0.5},
 	}
 
-	for name, tc := range tcs {
+	for name, bad := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, colors.Blend(tc.bad.Clamped(), black), colors.Blend(tc.bad, black))
-			assert.Equal(t, colors.Blend(black, tc.bad.Clamped()), colors.Blend(black, tc.bad))
+			assert.Equal(t, colors.Blend(bad.Clamped(), black), colors.Blend(bad, black))
+			assert.Equal(t, colors.Blend(black, bad.Clamped()), colors.Blend(black, bad))
 		})
 	}
 }
