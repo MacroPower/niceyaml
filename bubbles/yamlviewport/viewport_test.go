@@ -614,6 +614,45 @@ func addRevisions(m *yamlviewport.Model, docs ...string) {
 	}
 }
 
+// Documents that several tests scroll through.
+var (
+	// VerticalYAML holds ten lines that each fit one row.
+	verticalYAML = stringtest.Input(`
+		line1: a
+		line2: b
+		line3: c
+		line4: d
+		line5: e
+		line6: f
+		line7: g
+		line8: h
+		line9: i
+		line10: j
+	`)
+
+	// WideYAML holds a line that runs past the width of the viewport.
+	wideYAML = stringtest.Input(`
+		short: x
+		very_long_key_name_that_requires_horizontal_scrolling: "This is a very long value that extends well beyond the viewport width and requires scrolling to see"
+		another: y
+	`)
+
+	// WrapYAML holds ten lines, the fifth of which wraps onto several rows
+	// of a narrow viewport.
+	wrapYAML = stringtest.Input(`
+		line1: a
+		line2: b
+		line3: c
+		line4: d
+		line5: "a value long enough to wrap onto several rows of a narrow viewport"
+		line6: f
+		line7: g
+		line8: h
+		line9: i
+		line10: j
+	`)
+)
+
 func TestViewport_Golden(t *testing.T) {
 	t.Parallel()
 
@@ -652,25 +691,6 @@ func TestViewport_Golden(t *testing.T) {
 		count: 20
 		enabled: true
 		new_field: added
-	`)
-
-	wideYAML := stringtest.Input(`
-		short: x
-		very_long_key_name_that_requires_horizontal_scrolling: "This is a very long value that extends well beyond the viewport width and requires scrolling to see"
-		another: y
-	`)
-
-	wrapYAML := stringtest.Input(`
-		line1: a
-		line2: b
-		line3: c
-		line4: d
-		line5: "a value long enough to wrap onto several rows of a narrow viewport"
-		line6: f
-		line7: g
-		line8: h
-		line9: i
-		line10: j
 	`)
 
 	tcs := map[string]goldenTest{
@@ -917,19 +937,6 @@ func TestViewport_Golden(t *testing.T) {
 
 func TestViewport_Scrolling(t *testing.T) {
 	t.Parallel()
-
-	verticalYAML := stringtest.Input(`
-		line1: a
-		line2: b
-		line3: c
-		line4: d
-		line5: e
-		line6: f
-		line7: g
-		line8: h
-		line9: i
-		line10: j
-	`)
 
 	horizontalYAML := stringtest.Input(`
 		short: x
@@ -1239,19 +1246,6 @@ func TestViewport_Scrolling(t *testing.T) {
 
 func TestViewport_RowScrolling(t *testing.T) {
 	t.Parallel()
-
-	wrapYAML := stringtest.Input(`
-		line1: a
-		line2: b
-		line3: c
-		line4: d
-		line5: "a value long enough to wrap onto several rows of a narrow viewport"
-		line6: f
-		line7: g
-		line8: h
-		line9: i
-		line10: j
-	`)
 
 	newModel := func(t *testing.T) *yamlviewport.Model {
 		t.Helper()
@@ -3313,25 +3307,6 @@ func TestViewport_State(t *testing.T) {
 
 func TestViewport_Update(t *testing.T) {
 	t.Parallel()
-
-	verticalYAML := stringtest.Input(`
-		line1: a
-		line2: b
-		line3: c
-		line4: d
-		line5: e
-		line6: f
-		line7: g
-		line8: h
-		line9: i
-		line10: j
-	`)
-
-	wideYAML := stringtest.Input(`
-		short: x
-		very_long_key_name_that_requires_horizontal_scrolling: "This is a very long value that extends well beyond the viewport width and requires scrolling to see"
-		another: y
-	`)
 
 	// The change closure returns a second revision of verticalYAML.
 	change := func() *niceyaml.Source {
