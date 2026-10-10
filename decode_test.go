@@ -7016,17 +7016,15 @@ func TestDocument_DecodeInto(t *testing.T) {
 
 				scoped := defaults()
 
-				err = yamltest.At(t, dd, paths.Current().Child("int")).DecodeInto(t.Context(), &scoped.Int)
-				require.NoError(t, err)
-
-				err = yamltest.At(t, dd, paths.Current().Child("uint")).DecodeInto(t.Context(), &scoped.Uint)
-				require.NoError(t, err)
-
-				err = yamltest.At(t, dd, paths.Current().Child("map")).DecodeInto(t.Context(), &scoped.Map)
-				require.NoError(t, err)
-
-				err = yamltest.At(t, dd, paths.Current().Child("config")).DecodeInto(t.Context(), &scoped.Config)
-				require.NoError(t, err)
+				for key, target := range map[string]any{
+					"int":    &scoped.Int,
+					"uint":   &scoped.Uint,
+					"map":    &scoped.Map,
+					"config": &scoped.Config,
+				} {
+					err = yamltest.At(t, dd, paths.Current().Child(key)).DecodeInto(t.Context(), target)
+					require.NoError(t, err, key)
+				}
 
 				items, err := dd.Nodes(paths.Current().Child("items").IndexAll())
 				require.NoError(t, err)
