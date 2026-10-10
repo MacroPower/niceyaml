@@ -495,12 +495,7 @@ func TestNewLines_LineNumbers(t *testing.T) {
 			// Every part carries the number of its line.
 			require.NoError(t, yamltest.ValidateLines(lines))
 
-			got := make([]int, 0, lines.Len())
-			for _, ln := range lines.All() {
-				got = append(got, ln.Number())
-			}
-
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, lineNumbers(lines))
 
 			// The tokens come back whole, and Prev and Next still link
 			// them across the gaps.
@@ -801,11 +796,7 @@ func TestNewLines_LeadingNewlineTokens(t *testing.T) {
 			require.NoError(t, yamltest.ValidateLines(lines), "tokens should be valid")
 
 			// Each line carries its expected number.
-			require.Equal(t, len(tc.want), lines.Len(), "wrong number of lines")
-
-			for i, wantNum := range tc.want {
-				assert.Equal(t, wantNum, lines.Line(i).Number(), "line %d has wrong number", i)
-			}
+			assert.Equal(t, tc.want, lineNumbers(lines))
 		})
 	}
 }
@@ -1611,146 +1602,90 @@ func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
 func TestNewLines_BlankLineAbsorption(t *testing.T) {
 	t.Parallel()
 
-	t.Run("single blank line absorbed into previous token", func(t *testing.T) {
+	t.Run("blank lines join the Origin of the token before them", func(t *testing.T) {
 		t.Parallel()
 
-		// Blank line between two key-value pairs.
-		// The lexer absorbs the blank line into the first value's Origin.
-		input := "key: value\n\nnext: data\n"
-
-		lines := requireRoundtrip(t, input)
-
-		// The value token's Origin holds the blank line, so it is
-		// " value\n\n" with two newlines.
-		var valueToken *token.Token
-
-		for _, tk := range lines.Tokens() {
-			if tk.Value == "value" {
-				valueToken = tk
-				break
-			}
-		}
-
-		require.NotNil(t, valueToken, "expected to find value token")
-		assert.Contains(t, valueToken.Origin, "\n\n",
-			"value token Origin should contain absorbed blank line")
-	})
-
-	t.Run("multiple blank lines absorbed", func(t *testing.T) {
-		t.Parallel()
-
-		// Multiple blank lines between key-value pairs.
-		input := "key: value\n\n\nnext: data\n"
-
-		lines := requireRoundtrip(t, input)
-
-		var valueToken *token.Token
-
-		for _, tk := range lines.Tokens() {
-			if tk.Value == "value" {
-				valueToken = tk
-				break
-			}
-		}
-
-		require.NotNil(t, valueToken, "expected to find value token")
-		assert.Contains(t, valueToken.Origin, "\n\n\n",
-			"value token Origin should contain multiple absorbed blank lines")
-	})
-
-	t.Run("line numbers jump across blank lines", func(t *testing.T) {
-		t.Parallel()
-
-		// Lines tracks line numbers across gaps.
-		input := "key: value\n\nnext: data\n"
-
-		original := tokens.Tokenize(input)
-		lines := line.NewLines(original)
-
-		// The lines sit at positions 1, 2 (blank absorbed), and 3.
-		require.Equal(t, 3, lines.Len(), "expected 3 lines including blank")
-
-		// The line numbers are 1, 2, 3.
-		assert.Equal(t, 1, lines.Line(0).Number(), "first line should be 1")
-		assert.Equal(t, 2, lines.Line(1).Number(), "second line (blank) should be 2")
-		assert.Equal(t, 3, lines.Line(2).Number(), "third line should be 3")
-	})
-
-	t.Run("a first token whose text opens on an earlier line starts there", func(t *testing.T) {
-		t.Parallel()
-
-		// The lexer folds the lines before a merge key into its token and
-		// positions the token on the line of the key, so the lines start
-		// that many lines earlier.
-		for _, input := range []string{
-			"x\nx\n<<: *an\n",
-			"  text\n<<: *an\n",
-			"x\n*a\n\n<<: *an\n",
-			"\n\nfoo: 1\n",
-			"\"a\n b\"\n",
-			"|\n  a\n  b\n",
-			"# c\nk: v\n",
-		} {
-			lines := line.NewLines(tokens.Tokenize(input))
-			want := strings.Count(input, "\n")
-
-			require.Equal(t, want, lines.Len(), "input %q", input)
-
-			for i := range want {
-				assert.Equal(t, i+1, lines.Line(i).Number(), "input %q line %d", input, i)
-			}
-		}
-	})
-
-	t.Run("a blank line after a bare block scalar header stays a line", func(t *testing.T) {
-		t.Parallel()
-
-		// The lexer emits the blank line as a token that is a line ending
-		// alone, positioned on its own line. It ends the header's line
-		// rather than syncing past it, so the blank line keeps its row.
-		for _, input := range []string{">\n\na: 1\n", "|\n\nr\n", "\n>\n\n>\n# c\n"} {
-			lines := line.NewLines(tokens.Tokenize(input))
-			want := strings.Count(input, "\n")
-
-			require.Equal(t, want, lines.Len(), "input %q", input)
-
-			for i := range want {
-				assert.Equal(t, i+1, lines.Line(i).Number(), "input %q line %d", input, i)
-			}
-		}
-	})
-
-	t.Run("line numbers stay contiguous after block scalar content", func(t *testing.T) {
-		t.Parallel()
-
-		// The lexer reports a block scalar content token at the line of its
-		// last content line, so the builder must not treat that line as a
-		// gap to sync forward to.
 		tcs := map[string]struct {
 			input string
-			want  []int
+			want  string // Origin of the token for "value".
 		}{
-			"blank content then key":    {input: "b: |\n  \nlast: 1\n# c\n", want: []int{1, 2, 3, 4}},
-			"blank content then marker": {input: "b: |\n  \n---\n", want: []int{1, 2, 3}},
-			"content then marker":       {input: "b: |\n   y\n---\n---\nlast: 1\n", want: []int{1, 2, 3, 4, 5}},
-			"blank content then tagged": {input: "b: |\n\n!!str s: 1\n", want: []int{1, 2, 3}},
+			"single blank line":    {input: "key: value\n\nnext: data\n", want: " value\n\n"},
+			"multiple blank lines": {input: "key: value\n\n\nnext: data\n", want: " value\n\n\n"},
 		}
 
 		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				lines := line.NewLines(tokens.Tokenize(tc.input))
+				tks := requireRoundtrip(t, tc.input).Tokens()
 
-				got := make([]int, 0, lines.Len())
-				for _, ln := range lines.All() {
-					got = append(got, ln.Number())
-				}
-
-				assert.Equal(t, tc.want, got)
+				i := slices.IndexFunc(tks, func(tk *token.Token) bool { return tk.Value == "value" })
+				require.GreaterOrEqual(t, i, 0, "expected to find value token")
+				assert.Equal(t, tc.want, tks[i].Origin)
 			})
 		}
 	})
+
+	t.Run("every source line keeps its number", func(t *testing.T) {
+		t.Parallel()
+
+		tcs := map[string]string{
+			"blank line between keys": "key: value\n\nnext: data\n",
+
+			// The lexer folds the lines before a merge key into its token and
+			// positions the token on the line of the key, so the lines start
+			// that many lines earlier. Other first tokens open on an earlier
+			// line the same way.
+			"plain lines before a merge key":          "x\nx\n<<: *an\n",
+			"indented text before a merge key":        "  text\n<<: *an\n",
+			"alias and blank line before a merge key": "x\n*a\n\n<<: *an\n",
+			"blank lines before the first key":        "\n\nfoo: 1\n",
+			"quoted scalar of two lines":              "\"a\n b\"\n",
+			"bare literal block":                      "|\n  a\n  b\n",
+			"comment before the first key":            "# c\nk: v\n",
+
+			// The lexer emits the blank line after a bare block scalar header
+			// as a token that is a line ending alone, positioned on its own
+			// line. It ends the header's line rather than syncing past it, so
+			// the blank line keeps its row.
+			"blank line after a bare folded header":  ">\n\na: 1\n",
+			"blank line after a bare literal header": "|\n\nr\n",
+			"blank lines after bare folded headers":  "\n>\n\n>\n# c\n",
+
+			// The lexer reports a block scalar content token at the line of
+			// its last content line, so the builder must not treat that line
+			// as a gap to sync forward to.
+			"blank content then key":    "b: |\n  \nlast: 1\n# c\n",
+			"blank content then marker": "b: |\n  \n---\n",
+			"content then marker":       "b: |\n   y\n---\n---\nlast: 1\n",
+			"blank content then tagged": "b: |\n\n!!str s: 1\n",
+		}
+
+		for name, input := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				// Every input ends with a line break, so it holds one line
+				// for each break.
+				want := make([]int, strings.Count(input, "\n"))
+				for i := range want {
+					want[i] = i + 1
+				}
+
+				assert.Equal(t, want, lineNumbers(line.NewLines(tokens.Tokenize(input))))
+			})
+		}
+	})
+}
+
+// lineNumbers returns the number of each line of lines.
+func lineNumbers(lines line.Lines) []int {
+	got := make([]int, 0, lines.Len())
+	for _, ln := range lines.All() {
+		got = append(got, ln.Number())
+	}
+
+	return got
 }
 
 // TestNewLines_TrailingBlankLines verifies that a file ending in blank lines
