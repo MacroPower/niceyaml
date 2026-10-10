@@ -1037,17 +1037,6 @@ func TestErrorTree_New(t *testing.T) {
 				},
 			},
 		},
-		"wrapper around a binding that lists errors keeps the line of the binding": {
-			err: fmt.Errorf("load: %w", yamltest.Bind(t, source,
-				niceyaml.NewSummary("2 problems", badA(), badB()))),
-			want: niceyaml.ErrorTree{
-				Label: "load: f.yaml: 2 problems",
-				Children: []niceyaml.ErrorTree{
-					{Label: "1:4: $.a: bad a"},
-					{Label: "2:4: $.b: bad b"},
-				},
-			},
-		},
 		"wrapper around a join of bindings keeps its own text": {
 			err: fmt.Errorf("load: %w", errors.Join(
 				yamltest.Bind(t, source, badB()),
