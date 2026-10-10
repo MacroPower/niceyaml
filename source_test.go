@@ -51,6 +51,10 @@ var (
 		"d: 4",
 		"e: 5",
 	)
+
+	// Two documents with a byte order mark in front of the header
+	// between them.
+	sourceMarkedHeader = stringtest.LinesLF("a: 1", "\ufeff---", "b: 2")
 )
 
 func TestTokens_String_Annotation(t *testing.T) {
@@ -1294,7 +1298,13 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 
 	// The second document's tokens start at line 2 of the stream, and the
 	// Source renumbers them so its own text counts from line 1.
-	full := niceyaml.NewSourceFromString("a: 1\n---\nb: 2\nc: 3\nd: 4\n")
+	full := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"---",
+		"b: 2",
+		"c: 3",
+		"d: 4",
+	))
 
 	docs := full.Documents()
 	require.Len(t, docs, 2)
@@ -1303,7 +1313,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 	view := source.Lines()
 	require.Equal(t, 4, view.Len())
 	assert.Equal(t, 1, view.Line(0).Number())
-	assert.Equal(t, "---\nb: 2\nc: 3\nd: 4", view.Content())
+	assert.Equal(t, stringtest.JoinLF("---", "b: 2", "c: 3", "d: 4"), view.Content())
 
 	t.Run("the caller's tokens keep their positions", func(t *testing.T) {
 		t.Parallel()
@@ -1373,8 +1383,14 @@ func TestNewSourceFromTokens_WhitespaceDocument(t *testing.T) {
 	// A document of whitespace alone cut after "..." counts its lines from
 	// 1, as a document with text does.
 	tcs := map[string]string{
-		"between document end and header": "a: 1\n...\n\t\n---\nb: 2\n",
-		"after document end at the end":   "a: 1\n...\n\t\n",
+		"between document end and header": stringtest.LinesLF(
+			"a: 1",
+			"...",
+			"\t",
+			"---",
+			"b: 2",
+		),
+		"after document end at the end": stringtest.LinesLF("a: 1", "...", "\t"),
 	}
 
 	for name, input := range tcs {
@@ -1420,9 +1436,9 @@ func TestNewSourceFromString_ByteOrderMark(t *testing.T) {
 		lines string
 	}{
 		"before a comment": {
-			input: "\ufeff# yaml-language-server: $schema=foo.json\na: 1\n",
+			input: stringtest.LinesLF("\ufeff# yaml-language-server: $schema=foo.json", "a: 1"),
 			want:  map[string]any{"a": uint64(1)},
-			lines: "# yaml-language-server: $schema=foo.json\na: 1",
+			lines: stringtest.JoinLF("# yaml-language-server: $schema=foo.json", "a: 1"),
 		},
 		"before a key": {
 			input: "\ufeffa: 1\n",
@@ -1459,13 +1475,13 @@ func TestNewSourceFromString_ByteOrderMarkLaterDocument(t *testing.T) {
 		err   string
 	}{
 		"after a document marker": {
-			input: "a: 1\n---\n\ufeffb: 2\n",
-			lines: "a: 1\n---\nb: 2",
+			input: stringtest.LinesLF("a: 1", "---", "\ufeffb: 2"),
+			lines: stringtest.JoinLF("a: 1", "---", "b: 2"),
 			err:   "3:4: $.b: bad",
 		},
 		"before each document marker": {
-			input: "\ufeff---\na: 1\n\ufeff---\nb: 2\n",
-			lines: "---\na: 1\n---\nb: 2",
+			input: stringtest.LinesLF("\ufeff---", "a: 1", "\ufeff---", "b: 2"),
+			lines: stringtest.JoinLF("---", "a: 1", "---", "b: 2"),
 			err:   "4:4: $.b: bad",
 		},
 	}
@@ -1503,9 +1519,9 @@ func TestSource_Text(t *testing.T) {
 		"no final line ending":      "a: 1\nb: 2",
 		"CRLF":                      "a: 1\r\nb: 2\r\n",
 		"bare CR":                   "a: 1\rb: 2\r",
-		"trailing blank lines":      "a: 1\n\n\n",
+		"trailing blank lines":      stringtest.LinesLF("a: 1", "", ""),
 		"byte order mark":           "\ufeffa: 1\n",
-		"mark at a document marker": "a: 1\n\ufeff---\nb: 2\n",
+		"mark at a document marker": sourceMarkedHeader,
 		"invalid UTF-8":             "a: \"x\xffy\"\n",
 		"tag that ends its line":    "a: !t\nb: 1\n",
 		"tag that ends the file":    "a: 1\nb: !t",
@@ -1681,14 +1697,14 @@ func TestSource_Offset(t *testing.T) {
 			ok:    true,
 		},
 		"mark at a document marker lies before column 0": {
-			input: "a: 1\n\ufeff---\nb: 2\n",
+			input: sourceMarkedHeader,
 			line:  1,
 			col:   0,
 			want:  8,
 			ok:    true,
 		},
 		"line after a mark at a document marker": {
-			input: "a: 1\n\ufeff---\nb: 2\n",
+			input: sourceMarkedHeader,
 			line:  2,
 			col:   3,
 			want:  15,
@@ -1756,17 +1772,37 @@ func TestSource_Offset_Runes(t *testing.T) {
 	require.NoError(t, err)
 
 	tcs := map[string]string{
-		"LF":                        "a: 1\nb:\n  - x\n  - y\n",
-		"CRLF":                      "a: 1\r\nb:\r\n  - x\r\n  - y\r\n",
+		"LF": stringtest.LinesLF(
+			"a: 1",
+			"b:",
+			"  - x",
+			"  - y",
+		),
+		"CRLF": stringtest.LinesCRLF(
+			"a: 1",
+			"b:",
+			"  - x",
+			"  - y",
+		),
 		"bare CR":                   "a: 1\rb: 2\r",
 		"no final line ending":      "a: 1\nb: 2",
 		"byte order mark":           "\ufeff# c\na: 1\n",
-		"mark at a document marker": "a: 1\n\ufeff---\nb: 2\n",
+		"mark at a document marker": sourceMarkedHeader,
 		"wide runes":                "é: \"日本語\" # 😀\nb: 2\n",
 		"invalid UTF-8":             "a: \"x\xffy\"\nb: 2\n",
-		"block scalar":              "a: |\r\n  x\r\n\r\n  y\r\nb: 2\r\n",
-		"tag that ends its line":    "a: !t\n  - x\nb: 1\n",
-		"full.yaml":                 string(full),
+		"block scalar": stringtest.LinesCRLF(
+			"a: |",
+			"  x",
+			"",
+			"  y",
+			"b: 2",
+		),
+		"tag that ends its line": stringtest.LinesLF(
+			"a: !t",
+			"  - x",
+			"b: 1",
+		),
+		"full.yaml": string(full),
 	}
 
 	for name, input := range tcs {
@@ -1809,16 +1845,28 @@ func TestSource_Offset_Range(t *testing.T) {
 		path  paths.Path
 	}{
 		"plain scalar": {
-			input: "spec:\n  replicas: 3 # scaled\n  paused: false\n",
-			path:  paths.Doc().Child("spec", "replicas"),
+			input: stringtest.LinesLF(
+				"spec:",
+				"  replicas: 3 # scaled",
+				"  paused: false",
+			),
+			path: paths.Doc().Child("spec", "replicas"),
 		},
 		"CRLF and a byte order mark": {
-			input: "\ufeffspec:\r\n  replicas: 3\r\n",
-			path:  paths.Doc().Child("spec", "replicas"),
+			input: stringtest.LinesCRLF(
+				"\ufeffspec:",
+				"  replicas: 3",
+			),
+			path: paths.Doc().Child("spec", "replicas"),
 		},
 		"after a tag that ends its line": {
-			input: "value: !Join\n  - a\n  - b\nreplicas: 3\n",
-			path:  paths.Doc().Child("replicas"),
+			input: stringtest.LinesLF(
+				"value: !Join",
+				"  - a",
+				"  - b",
+				"replicas: 3",
+			),
+			path: paths.Doc().Child("replicas"),
 		},
 		"last value of a text with no final line ending": {
 			input: "name: é日本\nreplicas: 3",
