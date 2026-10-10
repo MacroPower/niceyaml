@@ -1328,101 +1328,6 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 	t.Run("a map key reports the text the document spells it with", func(t *testing.T) {
 		t.Parallel()
 
-		tcs := map[string]struct {
-			input string
-			want  string
-		}{
-			"float with a trailing zero": {
-				input: "1.50: {price: -1}\n",
-				want:  "1:15: $.'1.50'.price: negative price",
-			},
-			"hexadecimal int": {
-				input: "0x10: {price: -1}\n",
-				want:  "1:15: $.0x10.price: negative price",
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				dd := yamltest.FirstDocument(t, tc.input)
-
-				_, err := dd.Decode[map[float64]item](t.Context())
-				require.EqualError(t, err, tc.want)
-			})
-		}
-
-		// An integer key under a !!int tag decodes into an integer type as
-		// the integer alone does.
-		intTcs := map[string]struct {
-			input string
-			want  string
-		}{
-			"int-tagged hexadecimal int": {
-				input: "!!int 0x10: {price: -1}\n",
-				want:  "1:21: $.0x10.price: negative price",
-			},
-			"anchored int-tagged hexadecimal int": {
-				input: "&a !!int 0x10: {price: -1}\n",
-				want:  "1:24: $.0x10.price: negative price",
-			},
-			"int tag on an anchored hexadecimal int": {
-				input: "!!int &a 0x10: {price: -1}\n",
-				want:  "1:24: $.0x10.price: negative price",
-			},
-			"int-tagged hexadecimal int after another key": {
-				input: "1: {price: 1}\n!!int 0x10: {price: -1}\n",
-				want:  "2:21: $.0x10.price: negative price",
-			},
-		}
-
-		for name, tc := range intTcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				dd := yamltest.FirstDocument(t, tc.input)
-
-				_, err := dd.Decode[map[int]item](t.Context())
-				require.EqualError(t, err, tc.want)
-
-				_, err = dd.Decode[map[uint64]item](t.Context())
-				require.EqualError(t, err, tc.want)
-			})
-		}
-
-		// A key type that reads YAML bytes or a node takes the !!int tag
-		// with the integer, as it does in the decode.
-		unmarshalTcs := map[string]struct {
-			input string
-			want  string
-		}{
-			"unmarshaled int-tagged hexadecimal int": {
-				input: "!!int 0x10: {price: -1}\n",
-				want:  "1:21: $.0x10.price: negative price",
-			},
-			"unmarshaled int tag with spaces after it": {
-				input: "!!int   0x10: {price: -1}\n",
-				want:  "1:23: $.0x10.price: negative price",
-			},
-		}
-
-		for name, tc := range unmarshalTcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				dd := yamltest.FirstDocument(t, tc.input)
-
-				_, err := dd.Decode[map[bytesKey]item](t.Context())
-				require.EqualError(t, err, tc.want)
-
-				_, err = dd.Decode[map[nodeKey]item](t.Context())
-				require.EqualError(t, err, tc.want)
-			})
-		}
-
-		// An alias key reports the content of its anchor, and a block
-		// scalar key reports its content rather than its indicator.
 		type named struct {
 			M map[string]item    `yaml:"m"`
 			F map[float64]item   `yaml:"f"`
@@ -1431,72 +1336,205 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			T map[time.Time]item `yaml:"t"`
 		}
 
-		namedTcs := map[string]struct {
+		type merged struct {
+			M map[float64]item `yaml:"m"`
+		}
+
+		tcs := map[string]struct {
 			input string
 			want  string
+			// A reference document for the source, which may hold a key
+			// twice beside it.
+			references string
+			// A decode into each target reports want.
+			targets []any
 		}{
+			"float with a trailing zero": {
+				input:   "1.50: {price: -1}\n",
+				targets: []any{new(map[float64]item)},
+				want:    "1:15: $.'1.50'.price: negative price",
+			},
+			"hexadecimal int": {
+				input:   "0x10: {price: -1}\n",
+				targets: []any{new(map[float64]item)},
+				want:    "1:15: $.0x10.price: negative price",
+			},
+			// An integer key under a !!int tag decodes into an integer type as
+			// the integer alone does.
+			"int-tagged hexadecimal int": {
+				input:   "!!int 0x10: {price: -1}\n",
+				targets: []any{new(map[int]item), new(map[uint64]item)},
+				want:    "1:21: $.0x10.price: negative price",
+			},
+			"anchored int-tagged hexadecimal int": {
+				input:   "&a !!int 0x10: {price: -1}\n",
+				targets: []any{new(map[int]item), new(map[uint64]item)},
+				want:    "1:24: $.0x10.price: negative price",
+			},
+			"int tag on an anchored hexadecimal int": {
+				input:   "!!int &a 0x10: {price: -1}\n",
+				targets: []any{new(map[int]item), new(map[uint64]item)},
+				want:    "1:24: $.0x10.price: negative price",
+			},
+			"int-tagged hexadecimal int after another key": {
+				input:   "1: {price: 1}\n!!int 0x10: {price: -1}\n",
+				targets: []any{new(map[int]item), new(map[uint64]item)},
+				want:    "2:21: $.0x10.price: negative price",
+			},
+			// A key type that reads YAML bytes or a node takes the !!int tag
+			// with the integer, as it does in the decode.
+			"unmarshaled int-tagged hexadecimal int": {
+				input:   "!!int 0x10: {price: -1}\n",
+				targets: []any{new(map[bytesKey]item), new(map[nodeKey]item)},
+				want:    "1:21: $.0x10.price: negative price",
+			},
+			"unmarshaled int tag with spaces after it": {
+				input:   "!!int   0x10: {price: -1}\n",
+				targets: []any{new(map[bytesKey]item), new(map[nodeKey]item)},
+				want:    "1:23: $.0x10.price: negative price",
+			},
+			// An alias key reports the content of its anchor, and a block
+			// scalar key reports its content rather than its indicator.
 			"alias": {
-				input: "base: &k n\nm:\n  *k : {price: -1}\n",
-				want:  "3:16: $.m.n.price: negative price",
+				input:   "base: &k n\nm:\n  *k : {price: -1}\n",
+				targets: []any{new(named)},
+				want:    "3:16: $.m.n.price: negative price",
 			},
 			"alias to a hexadecimal int": {
-				input: "base: &k 0x10\nf:\n  *k : {price: -1}\n",
-				want:  "3:16: $.f.0x10.price: negative price",
+				input:   "base: &k 0x10\nf:\n  *k : {price: -1}\n",
+				targets: []any{new(named)},
+				want:    "3:16: $.f.0x10.price: negative price",
 			},
 			"alias to an int-tagged hexadecimal int": {
-				input: "base: &k !!int 0x10\ni:\n  *k : {price: -1}\n",
-				want:  "3:16: $.i.0x10.price: negative price",
+				input:   "base: &k !!int 0x10\ni:\n  *k : {price: -1}\n",
+				targets: []any{new(named)},
+				want:    "3:16: $.i.0x10.price: negative price",
 			},
 			"bytes alias to an int-tagged hexadecimal int": {
-				input: "base: &k !!int 0x10\nbytes:\n  *k : {price: -1}\n",
-				want:  "3:16: $.bytes.0x10.price: negative price",
+				input:   "base: &k !!int 0x10\nbytes:\n  *k : {price: -1}\n",
+				targets: []any{new(named)},
+				want:    "3:16: $.bytes.0x10.price: negative price",
 			},
 			"alias to a float with a trailing zero": {
-				input: "base: &k 1.50\nf:\n  *k : {price: -1}\n",
-				want:  "3:16: $.f.'1.50'.price: negative price",
+				input:   "base: &k 1.50\nf:\n  *k : {price: -1}\n",
+				targets: []any{new(named)},
+				want:    "3:16: $.f.'1.50'.price: negative price",
 			},
 			"string alias to a hexadecimal int": {
-				input: "base: &k 0x10\nm:\n  *k : {price: -1}\n",
-				want:  "3:16: $.m.0x10.price: negative price",
+				input:   "base: &k 0x10\nm:\n  *k : {price: -1}\n",
+				targets: []any{new(named)},
+				want:    "3:16: $.m.0x10.price: negative price",
 			},
 			"tagged alias": {
-				input: "base: &k 0x10\nm:\n  !!int *k : {price: -1}\n",
-				want:  "3:22: $.m.0x10.price: negative price",
+				input:   "base: &k 0x10\nm:\n  !!int *k : {price: -1}\n",
+				targets: []any{new(named)},
+				want:    "3:22: $.m.0x10.price: negative price",
 			},
 			"alias to a tagged alias": {
-				input: "base: &k 0x10\nb: &j !!int *k\nm:\n  *j : {price: -1}\n",
-				want:  "4:16: $.m.0x10.price: negative price",
+				input:   "base: &k 0x10\nb: &j !!int *k\nm:\n  *j : {price: -1}\n",
+				targets: []any{new(named)},
+				want:    "4:16: $.m.0x10.price: negative price",
 			},
 			"key of a mapping behind an alias": {
-				input: "base: &b {0x10: {price: -1}}\nf: *b\n",
-				want:  "1:25: $.f.0x10.price: negative price",
+				input:   "base: &b {0x10: {price: -1}}\nf: *b\n",
+				targets: []any{new(named)},
+				want:    "1:25: $.f.0x10.price: negative price",
 			},
 			"key of a mapping behind a tagged alias": {
-				input: "base: &b {0x10: {price: -1}}\nf: !t *b\n",
-				want:  "1:25: $.f.0x10.price: negative price",
+				input:   "base: &b {0x10: {price: -1}}\nf: !t *b\n",
+				targets: []any{new(named)},
+				want:    "1:25: $.f.0x10.price: negative price",
 			},
 			"block scalar": {
-				input: "m:\n  ? |-\n    n\n  : {price: -1}\n",
-				want:  "4:13: $.m.n.price: negative price",
+				input:   "m:\n  ? |-\n    n\n  : {price: -1}\n",
+				targets: []any{new(named)},
+				want:    "4:13: $.m.n.price: negative price",
 			},
 			"time with an offset of whole hours": {
-				input: "t:\n  2024-01-01T00:00:00+05:00: {price: -1}\n",
-				want:  "2:38: $.t.'2024-01-01T00:00:00+05:00'.price: negative price",
+				input:   "t:\n  2024-01-01T00:00:00+05:00: {price: -1}\n",
+				targets: []any{new(named)},
+				want:    "2:38: $.t.'2024-01-01T00:00:00+05:00'.price: negative price",
 			},
 			"time with an offset of part of an hour": {
-				input: "t:\n  2024-01-01T00:00:00+05:30: {price: -1}\n",
-				want:  "2:38: $.t.'2024-01-01T00:00:00+05:30'.price: negative price",
+				input:   "t:\n  2024-01-01T00:00:00+05:30: {price: -1}\n",
+				targets: []any{new(named)},
+				want:    "2:38: $.t.'2024-01-01T00:00:00+05:30'.price: negative price",
+			},
+			// Where a key of the mapping and a merged key decode to the same
+			// value, the later entry holds the value the decode keeps, and
+			// the error reports its text.
+			"merge after a key of the mapping": {
+				input:   "b: &b {0x10: {price: -1}}\nm: {16: {price: 1}, <<: *b}\n",
+				targets: []any{new(merged)},
+				want:    "1:22: $.m.0x10.price: negative price",
+			},
+			"key of the mapping after a merge": {
+				input:   "b: &b {0x10: {price: 1}}\nm: {<<: *b, 16: {price: -1}}\n",
+				targets: []any{new(merged)},
+				want:    "2:25: $.m.16.price: negative price",
+			},
+			"merge after a key of the mapping with the same spelling": {
+				input:   "b: &b {16: {price: -1}}\nm: {16: {price: 1}, <<: *b}\n",
+				targets: []any{new(merged)},
+				want:    "1:20: $.m.16.price: negative price",
+			},
+			"key of the mapping with the same spelling after a merge": {
+				input:   "b: &b {16: {price: 1}}\nm: {<<: *b, 16: {price: -1}}\n",
+				targets: []any{new(merged)},
+				want:    "2:25: $.m.16.price: negative price",
+			},
+			"merge source repeated after a source that merges it": {
+				input:   "a: &a {16: {price: -1}}\nb: &b {<<: *a, 0x10: {price: 1}}\nm: {<<: [*b, *a]}\n",
+				targets: []any{new(merged)},
+				want:    "1:20: $.m.16.price: negative price",
+			},
+			// A merge whose alias does not resolve in the document, as one to
+			// an anchor of WithReferences, may set any key. No entry before it
+			// names a key, so the error reports the decoded value instead.
+			"key of the mapping before the merge": {
+				input:      "m: {0x10: {price: 1}, <<: *r}\n",
+				targets:    []any{new(merged)},
+				references: "r: &r {16: {price: -1}}\n",
+				want:       "$.m.16.price: negative price",
+			},
+			"key of the mapping after the merge": {
+				input:      "m: {<<: *r, 0x10: {price: -1}}\n",
+				targets:    []any{new(merged)},
+				references: "r: &r {16: {price: 1}}\n",
+				want:       "1:27: $.m.0x10.price: negative price",
+			},
+			"merge inside a source": {
+				input:      "s: &s {<<: *r}\nm: {0x10: {price: 1}, <<: *s}\n",
+				targets:    []any{new(merged)},
+				references: "r: &r {16: {price: -1}}\n",
+				want:       "$.m.16.price: negative price",
+			},
+			"resolvable merge after the merge": {
+				input:      "b: &b {0x10: {price: -1}}\nm: {<<: *r, <<: *b}\n",
+				targets:    []any{new(merged)},
+				references: "r: &r {16: {price: 1}}\n",
+				want:       "1:22: $.m.0x10.price: negative price",
 			},
 		}
 
-		for name, tc := range namedTcs {
+		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
+				var opts []niceyaml.SourceOption
 
-				_, err := dd.Decode[named](t.Context())
-				require.EqualError(t, err, tc.want)
+				if tc.references != "" {
+					opts = []niceyaml.SourceOption{
+						niceyaml.WithAllowDuplicateKeys(true),
+						niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.references)),
+					}
+				}
+
+				dd := yamltest.FirstDocument(t, tc.input, opts...)
+
+				for _, target := range tc.targets {
+					require.EqualError(t, dd.DecodeInto(t.Context(), target), tc.want)
+				}
 			})
 		}
 
@@ -1506,19 +1544,13 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err := dd.Decode[map[string]map[float64]item](t.Context())
 
-		got := errorTexts(yamltest.ProblemsOf(err))
-
 		assert.Equal(t, []string{
 			"1:25: $.base.0x10.price: negative price",
 			"1:25: $.m.0x10.price: negative price",
-		}, got)
+		}, errorTexts(yamltest.ProblemsOf(err)))
 
 		// Keys an alias to a list of sources or a second merge key brings
 		// in report the text of their own mappings too.
-		type merged struct {
-			M map[float64]item `yaml:"m"`
-		}
-
 		mergeTcs := map[string]struct {
 			input string
 			opts  []niceyaml.SourceOption
@@ -1540,96 +1572,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				_, err := dd.Decode[merged](t.Context())
 
-				got := errorTexts(yamltest.ProblemsOf(err))
-
 				assert.Equal(t, []string{
 					"1:22: $.m.0x10.price: negative price",
 					"2:22: $.m.0x20.price: negative price",
-				}, got)
-			})
-		}
-
-		// Where a key of the mapping and a merged key decode to the same
-		// value, the later entry holds the value the decode keeps, and
-		// the error reports its text.
-		precedenceTcs := map[string]struct {
-			input string
-			want  string
-		}{
-			"merge after a key of the mapping": {
-				input: "b: &b {0x10: {price: -1}}\nm: {16: {price: 1}, <<: *b}\n",
-				want:  "1:22: $.m.0x10.price: negative price",
-			},
-			"key of the mapping after a merge": {
-				input: "b: &b {0x10: {price: 1}}\nm: {<<: *b, 16: {price: -1}}\n",
-				want:  "2:25: $.m.16.price: negative price",
-			},
-			"merge after a key of the mapping with the same spelling": {
-				input: "b: &b {16: {price: -1}}\nm: {16: {price: 1}, <<: *b}\n",
-				want:  "1:20: $.m.16.price: negative price",
-			},
-			"key of the mapping with the same spelling after a merge": {
-				input: "b: &b {16: {price: 1}}\nm: {<<: *b, 16: {price: -1}}\n",
-				want:  "2:25: $.m.16.price: negative price",
-			},
-			"merge source repeated after a source that merges it": {
-				input: "a: &a {16: {price: -1}}\nb: &b {<<: *a, 0x10: {price: 1}}\nm: {<<: [*b, *a]}\n",
-				want:  "1:20: $.m.16.price: negative price",
-			},
-		}
-
-		for name, tc := range precedenceTcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				dd := yamltest.FirstDocument(t, tc.input)
-
-				_, err := dd.Decode[merged](t.Context())
-				require.EqualError(t, err, tc.want)
-			})
-		}
-
-		// A merge whose alias does not resolve in the document, as one to
-		// an anchor of WithReferences, may set any key. No entry before it
-		// names a key, so the error reports the decoded value instead.
-		unresolvedTcs := map[string]struct {
-			input      string
-			references string
-			want       string
-		}{
-			"key of the mapping before the merge": {
-				input:      "m: {0x10: {price: 1}, <<: *r}\n",
-				references: "r: &r {16: {price: -1}}\n",
-				want:       "$.m.16.price: negative price",
-			},
-			"key of the mapping after the merge": {
-				input:      "m: {<<: *r, 0x10: {price: -1}}\n",
-				references: "r: &r {16: {price: 1}}\n",
-				want:       "1:27: $.m.0x10.price: negative price",
-			},
-			"merge inside a source": {
-				input:      "s: &s {<<: *r}\nm: {0x10: {price: 1}, <<: *s}\n",
-				references: "r: &r {16: {price: -1}}\n",
-				want:       "$.m.16.price: negative price",
-			},
-			"resolvable merge after the merge": {
-				input:      "b: &b {0x10: {price: -1}}\nm: {<<: *r, <<: *b}\n",
-				references: "r: &r {16: {price: 1}}\n",
-				want:       "1:22: $.m.0x10.price: negative price",
-			},
-		}
-
-		for name, tc := range unresolvedTcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				dd := yamltest.FirstDocument(t, tc.input,
-					niceyaml.WithAllowDuplicateKeys(true),
-					niceyaml.WithReferences(niceyaml.NewSourceFromString(tc.references)),
-				)
-
-				_, err := dd.Decode[merged](t.Context())
-				require.EqualError(t, err, tc.want)
+				}, errorTexts(yamltest.ProblemsOf(err)))
 			})
 		}
 	})
