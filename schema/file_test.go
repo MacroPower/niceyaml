@@ -14,7 +14,6 @@ import (
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/httpfetch"
-	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
@@ -292,7 +291,7 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 	t.Run("a relative path loads from a file system", func(t *testing.T) {
 		reg := schema.NewRegistry(schema.WithResolvers(schema.FileFS(bundle, "schemas/root.json")))
 
-		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "name: cafe\n")))
+		requireAccepts(t, reg, "name: cafe\n")
 
 		requireRejects(t, reg, "name: 5\n", `$.name: expected "string", got "integer"`)
 	})

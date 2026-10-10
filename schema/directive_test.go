@@ -721,9 +721,7 @@ func TestDirective_Resolve(t *testing.T) {
 		ref := base + "/defs.json#/definitions/Foo"
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
-		err := reg.Check(t.Context(), yamltest.FirstDocument(t, withDirective(ref, "name: x\n")))
-		require.NoError(t, err)
-
+		requireAccepts(t, reg, withDirective(ref, "name: x\n"))
 		requireRejects(t, reg, withDirective(ref, "kind: Deployment\n"), `missing required property "name"`)
 	})
 

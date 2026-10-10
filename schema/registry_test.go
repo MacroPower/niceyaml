@@ -62,6 +62,13 @@ func writeFiles(t *testing.T, dir string, files map[string]string) {
 	}
 }
 
+// requireAccepts fails the test unless reg accepts the document input.
+func requireAccepts(t *testing.T, reg *schema.Registry, input string) {
+	t.Helper()
+
+	require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, input)))
+}
+
 // requireRejects fails the test unless reg rejects the document input
 // with a violation whose text holds want. The document is at fault for a
 // violation, so the error does not wrap [schema.ErrValidate].
@@ -593,13 +600,13 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 	t.Run("accepts a document no resolver applies to", func(t *testing.T) {
 		t.Parallel()
 
-		require.NoError(t, newRegistry().Check(t.Context(), yamltest.FirstDocument(t, "kind: Service")))
+		requireAccepts(t, newRegistry(), "kind: Service")
 	})
 
 	t.Run("accepts a document without content", func(t *testing.T) {
 		t.Parallel()
 
-		require.NoError(t, newRegistry().Check(t.Context(), yamltest.FirstDocument(t, "# only a comment\n")))
+		requireAccepts(t, newRegistry(), "# only a comment\n")
 	})
 
 	t.Run("still validates a document a resolver applies to", func(t *testing.T) {
@@ -794,7 +801,7 @@ func TestRegistry_Caching(t *testing.T) {
 		))
 
 		for _, input := range []string{`kind: Deployment`, `kind: Service`, `kind: Deployment`, `kind: Service`} {
-			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, input)))
+			requireAccepts(t, reg, input)
 		}
 
 		assert.Equal(t, int32(1), deploymentLoads.Load())
@@ -1323,8 +1330,8 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 			),
 		)
 
-		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Deployment")))
-		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Service")))
+		requireAccepts(t, reg, "kind: Deployment")
+		requireAccepts(t, reg, "kind: Service")
 
 		// ConfigMap has no schema.
 		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: ConfigMap"))
@@ -1694,7 +1701,7 @@ func TestRegistry_CompiledSchema(t *testing.T) {
 			schema.WithResolvers(lax),
 		)
 
-		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "not-an-ip")))
+		requireAccepts(t, reg, "not-an-ip")
 	})
 }
 
@@ -1711,7 +1718,7 @@ func TestRegistry_WithHTTPClient(t *testing.T) {
 			schema.WithResolvers(schema.URL(schemaURL)),
 		)
 
-		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\n")))
+		requireAccepts(t, reg, "a: 1\n")
 	})
 
 	t.Run("a client replaces the default", func(t *testing.T) {
@@ -1749,7 +1756,7 @@ func TestRegistry_FileFS(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
 
-		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Pod\n")))
+		requireAccepts(t, reg, "kind: Pod\n")
 
 		requireRejects(t, reg, "name: x\n", `missing required property "kind"`)
 	})
@@ -1815,7 +1822,7 @@ func TestRegistry_FileFS(t *testing.T) {
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.FileFS(fsys, "schemas/app/main.json")))
 
-		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
+		requireAccepts(t, reg, "a: x\n")
 
 		requireRejects(t, reg, "a: 5\n", `$.a: expected "string", got "integer"`)
 	})
@@ -2346,7 +2353,7 @@ func TestRegistry_WithFSAt(t *testing.T) {
 		ref := fileOrURL(t, "", "file://"+filepath.ToSlash(filepath.Join(tenant, "defs.json"))+"#/$defs/Foo")
 		reg := schema.NewRegistry(schema.WithFSAt(tenant, os.DirFS(tenant)), schema.WithResolvers(ref))
 
-		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "name: x\n")))
+		requireAccepts(t, reg, "name: x\n")
 
 		requireRejects(t, reg, "other: 1\n", `missing required property "name"`)
 	})
@@ -2602,7 +2609,7 @@ func TestRegistry_FileSystemAfterChdir(t *testing.T) {
 
 			reg := schema.NewRegistry(append(tc.opts(wd), schema.WithResolvers(ref))...)
 
-			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
+			requireAccepts(t, reg, "a: x\n")
 
 			requireRejects(t, reg, "a: 5\n", `$.a: expected "string", got "integer"`)
 		})
@@ -3492,7 +3499,7 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			}, tc.opts...)
 			reg := schema.NewRegistry(opts...)
 
-			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, cmp.Or(tc.valid, "name: x\n"))))
+			requireAccepts(t, reg, cmp.Or(tc.valid, "name: x\n"))
 
 			requireRejects(t, reg,
 				cmp.Or(tc.invalid, "other: 1\n"),
@@ -3528,7 +3535,7 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 				}, tc.opts...)
 				reg := schema.NewRegistry(opts...)
 
-				require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "name: x\n")))
+				requireAccepts(t, reg, "name: x\n")
 
 				requireRejects(t, reg, "other: 1\n", `missing required property "name"`)
 
@@ -3640,7 +3647,7 @@ func TestRegistry_FragmentRefsDraft07(t *testing.T) {
 
 			reg := schema.NewRegistry(schema.WithResolvers(schema.URL(base + tc.path)))
 
-			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, tc.valid)))
+			requireAccepts(t, reg, tc.valid)
 
 			requireRejects(t, reg, tc.invalid, `expected "string", got "integer"`)
 		})
@@ -3701,7 +3708,7 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 
 			reg := schema.NewRegistry(schema.WithResolvers(tc.ref))
 
-			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
+			requireAccepts(t, reg, "a: x\n")
 
 			requireRejects(t, reg, "a: 5\n", `$.a: expected "string", got "integer"`)
 		})
@@ -3845,7 +3852,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 		reg := schema.NewRegistry(requireRefs(false), schema.WithResolvers(schema.URL(server.URL+"/f.json")))
 
 		for range 5 {
-			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n")))
+			requireAccepts(t, reg, "b: 2\n")
 		}
 
 		// The compile missed the document, and the first validation loaded
@@ -3877,7 +3884,7 @@ func TestRegistry_RefDocuments(t *testing.T) {
 
 		// A new registry fetches both and compiles the schema.
 		fresh := schema.NewRegistry(schema.WithResolvers(ref))
-		require.NoError(t, fresh.Check(t.Context(), yamltest.FirstDocument(t, "b: 2\n")))
+		requireAccepts(t, fresh, "b: 2\n")
 	})
 
 	t.Run("a document that fails to load is fetched again", func(t *testing.T) {
