@@ -580,27 +580,29 @@ func TestNode_PathAt_File(t *testing.T) {
 	assert.Greater(t, found, 1000)
 }
 
-func TestNode_PathAt_OutsideLines(t *testing.T) {
+func TestNode_PathAt_NoPath(t *testing.T) {
 	t.Parallel()
 
 	doc := yamltest.FirstDocument(t, "a: 1\nb: 2\n")
 
 	tcs := map[string]struct {
+		node *niceyaml.Node
 		line int
 		col  int
 	}{
-		"negative line":        {line: -1, col: 0},
-		"negative column":      {line: 0, col: -1},
-		"line past the last":   {line: 2, col: 0},
-		"line far past":        {line: 100, col: 0},
-		"column past the line": {line: 0, col: 100},
+		"negative line":        {node: doc, line: -1},
+		"negative column":      {node: doc, col: -1},
+		"line past the last":   {node: doc, line: 2},
+		"line far past":        {node: doc, line: 100},
+		"column past the line": {node: doc, col: 100},
+		"nil node":             {},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got, ok := doc.PathAt(position.New(tc.line, tc.col))
+			got, ok := tc.node.PathAt(position.New(tc.line, tc.col))
 			assert.False(t, ok)
 			assert.Equal(t, paths.Current(), got)
 		})
@@ -742,16 +744,6 @@ func TestNode_PathAt_ScopedNode(t *testing.T) {
 		assert.Equal(t, hours.Span(), self.Span())
 		assert.Same(t, hours.AST(), self.AST())
 	})
-}
-
-func TestNode_PathAt_NilNode(t *testing.T) {
-	t.Parallel()
-
-	var n *niceyaml.Node
-
-	got, ok := n.PathAt(position.New(0, 0))
-	assert.False(t, ok)
-	assert.Equal(t, paths.Current(), got)
 }
 
 func TestNode_PathAt_Concurrent(t *testing.T) {
