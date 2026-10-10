@@ -3691,13 +3691,7 @@ func TestDocument_Err(t *testing.T) {
 		assert.Equal(t, "---\nd: [", doc.View().Held().Content())
 		assert.Equal(t, 4, doc.View().Held().Line(0).Number())
 
-		var values []string
-
-		for _, tk := range doc.Tokens() {
-			values = append(values, tk.Value)
-		}
-
-		assert.Equal(t, []string{"---", "d", ":", "["}, values)
+		assert.Equal(t, []string{"---", "d", ":", "["}, valuesOfTokens(doc.Tokens()))
 		require.Len(t, doc.Preamble(), 1)
 		assert.Equal(t, token.DocumentHeaderType, doc.Preamble()[0].Type)
 	})
@@ -7904,6 +7898,29 @@ func (h hoursConfig) Validate() error {
 	return nil
 }
 
+// valuesOfTokens returns the value of each token of tks, or nil for no
+// tokens.
+func valuesOfTokens(tks token.Tokens) []string {
+	var values []string
+
+	for _, tk := range tks {
+		values = append(values, tk.Value)
+	}
+
+	return values
+}
+
+// requireNodeExtent checks the span and the token values of the Node that
+// path selects in doc.
+func requireNodeExtent(t *testing.T, doc *niceyaml.Node, path paths.Path, span position.Span, values []string) {
+	t.Helper()
+
+	scoped := yamltest.At(t, doc, path)
+
+	assert.Equal(t, span, scoped.Span())
+	assert.Equal(t, values, valuesOfTokens(scoped.Tokens()))
+}
+
 func TestDocument_At_Scope(t *testing.T) {
 	t.Parallel()
 
@@ -8095,17 +8112,7 @@ func TestDocument_At_Scope(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				scoped := yamltest.At(t, dd, tc.path)
-
-				assert.Equal(t, tc.span, scoped.Span())
-
-				var got []string
-
-				for _, tk := range scoped.Tokens() {
-					got = append(got, tk.Value)
-				}
-
-				assert.Equal(t, tc.tokens, got)
+				requireNodeExtent(t, dd, tc.path, tc.span, tc.tokens)
 			})
 		}
 	})
@@ -8211,17 +8218,7 @@ func TestDocument_At_Scope(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				scoped := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.path)
-
-				assert.Equal(t, tc.span, scoped.Span())
-
-				var got []string
-
-				for _, tk := range scoped.Tokens() {
-					got = append(got, tk.Value)
-				}
-
-				assert.Equal(t, tc.tokens, got)
+				requireNodeExtent(t, yamltest.FirstDocument(t, tc.input), tc.path, tc.span, tc.tokens)
 			})
 		}
 	})
@@ -9013,17 +9010,7 @@ func TestDocument_At_FlowCollectionSpan(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			scoped := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.path)
-
-			assert.Equal(t, tc.span, scoped.Span())
-
-			var got []string
-
-			for _, tk := range scoped.Tokens() {
-				got = append(got, tk.Value)
-			}
-
-			assert.Equal(t, tc.tokens, got)
+			requireNodeExtent(t, yamltest.FirstDocument(t, tc.input), tc.path, tc.span, tc.tokens)
 		})
 	}
 }
@@ -9094,17 +9081,7 @@ func TestDocument_At_ZeroWidthBoundary(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			scoped := yamltest.At(t, yamltest.FirstDocument(t, tc.input), tc.path)
-
-			assert.Equal(t, tc.span, scoped.Span())
-
-			var got []string
-
-			for _, tk := range scoped.Tokens() {
-				got = append(got, tk.Value)
-			}
-
-			assert.Equal(t, tc.tokens, got)
+			requireNodeExtent(t, yamltest.FirstDocument(t, tc.input), tc.path, tc.span, tc.tokens)
 		})
 	}
 }
