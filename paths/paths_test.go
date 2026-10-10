@@ -2002,6 +2002,8 @@ func TestPath_Token(t *testing.T) {
 func TestPath_Token_Collections(t *testing.T) {
 	t.Parallel()
 
+	items := stringtest.LinesLF("items:", "  - name: a", "  - name: b")
+
 	// A mapping or a sequence points at the token that introduces it. Each
 	// want holds the text of the token and where it starts, counted from
 	// 1.
@@ -2101,17 +2103,17 @@ func TestPath_Token_Collections(t *testing.T) {
 			want:  "v@1:4",
 		},
 		"block mapping element": {
-			input: stringtest.LinesLF("items:", "  - name: a", "  - name: b"),
+			input: items,
 			path:  "$.items[1]",
 			want:  "-@3:3",
 		},
 		"key selector on a block mapping element": {
-			input: stringtest.LinesLF("items:", "  - name: a", "  - name: b"),
+			input: items,
 			path:  "$.items[1]~",
 			want:  "-@3:3",
 		},
 		"first key of a block mapping element": {
-			input: stringtest.LinesLF("items:", "  - name: a", "  - name: b"),
+			input: items,
 			path:  "$.items[1].name~",
 			want:  "name@3:5",
 		},
