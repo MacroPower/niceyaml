@@ -433,6 +433,19 @@ func TestPalette_KindStyles(t *testing.T) {
 			want:  "#7f7f7f bg:#000000",
 		},
 		"ui token reaches children": {theme: "vim", kind: kind.UILineNumber, want: "#7f7f7f bg:#000000"},
+
+		// Storm and Night share every syntax color and part ways on their
+		// surfaces, so Storm renders on #24283b with #1f2335 behind the diff
+		// marks, where Night renders on #1a1b26.
+		"night text":     {theme: "tokyonight-night", kind: kind.Text, want: "#c0caf5 bg:#1a1b26"},
+		"storm text":     {theme: "tokyonight-storm", kind: kind.Text, want: "#c0caf5 bg:#24283b"},
+		"storm deleted":  {theme: "tokyonight-storm", kind: kind.GenericDeleted, want: "#db4b4b bg:#1f2335"},
+		"storm inserted": {theme: "tokyonight-storm", kind: kind.GenericInserted, want: "#9ece6a bg:#1f2335"},
+		"storm OK heading": {
+			theme: "tokyonight-storm",
+			kind:  kind.GenericHeadingOK,
+			want:  "bold #24283b bg:#9ece6a",
+		},
 	}
 
 	for name, tc := range tests {
@@ -614,52 +627,6 @@ func TestPalette_DiffAndErrorKindsUpright(t *testing.T) {
 			for _, k := range []kind.Kind{kind.GenericDeleted, kind.GenericInserted} {
 				assert.False(t, th.Style(k).GetBold(), "%s renders bold", k)
 			}
-		})
-	}
-}
-
-func TestPalette_TokyonightStormSurface(t *testing.T) {
-	t.Parallel()
-
-	// Storm and Night share every syntax color and part ways on their
-	// surfaces, so Storm renders on #24283b with #1f2335 behind the diff
-	// marks.
-	night := builtin(t, "tokyonight-night")
-	storm := builtin(t, "tokyonight-storm")
-
-	assert.NotEqual(t,
-		night.Style(kind.Text).GetBackground(),
-		storm.Style(kind.Text).GetBackground(),
-		"Storm renders on Night's background",
-	)
-
-	tests := map[string]struct {
-		got  color.Color
-		want color.Color
-	}{
-		"text background": {
-			got:  storm.Style(kind.Text).GetBackground(),
-			want: lipgloss.Color("#24283b"),
-		},
-		"deleted background": {
-			got:  storm.Style(kind.GenericDeleted).GetBackground(),
-			want: lipgloss.Color("#1f2335"),
-		},
-		"inserted background": {
-			got:  storm.Style(kind.GenericInserted).GetBackground(),
-			want: lipgloss.Color("#1f2335"),
-		},
-		"OK heading foreground": {
-			got:  storm.Style(kind.GenericHeadingOK).GetForeground(),
-			want: lipgloss.Color("#24283b"),
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			assert.Equal(t, tc.want, tc.got)
 		})
 	}
 }
