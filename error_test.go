@@ -162,6 +162,10 @@ func TestError(t *testing.T) {
 			err:  niceyaml.NewError("something went wrong"),
 			want: "something went wrong",
 		},
+		"plain error bound to a source stays plain": {
+			err:  yamltest.Bind(t, niceyaml.NewSourceFromString(source), errors.New("plain error")),
+			want: "plain error",
+		},
 		"with path and source shows annotated source": {
 			err: yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 				"invalid value",
@@ -1334,68 +1338,6 @@ func indent(prefix string, rows []string) []string {
 	}
 
 	return out
-}
-
-func TestDocument_BindRender(t *testing.T) {
-	t.Parallel()
-
-	sourceInput := stringtest.Input(`
-		name: test
-		value: 123
-	`)
-
-	tcs := map[string]struct {
-		inputErr  func() error
-		wantExact string
-		wantNil   bool
-	}{
-		"wrap nil returns nil": {
-			inputErr: func() error { return nil },
-			wantNil:  true,
-		},
-		"wrap non-error type names the source alone": {
-			inputErr:  func() error { return errors.New("plain error") },
-			wantExact: "plain error",
-		},
-		"wrap error renders with source": {
-			inputErr: func() error {
-				return niceyaml.NewError(
-					"test error",
-					niceyaml.AtPath(paths.Current().Child("name").Key()),
-				)
-			},
-			wantExact: stringtest.JoinLF(
-				"1:1: $.name~: test error",
-				"",
-				"<genericError>name</genericError><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalString>test</literalString>",
-				"<textError>^^^^</textError>",
-				"<nameTag>value</nameTag><punctuationMappingValue>:</punctuationMappingValue><text> </text><literalNumberInteger>123</literalNumberInteger>",
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			source := niceyaml.NewSourceFromString(sourceInput)
-			inputErr := tc.inputErr()
-
-			got := yamltest.Bind(t, source, inputErr)
-
-			if tc.wantNil {
-				assert.NoError(t, got)
-
-				return
-			}
-
-			require.Error(t, got)
-
-			if tc.wantExact != "" {
-				assert.Equal(t, tc.wantExact, stringtest.TrimLineEnds(render(got)))
-			}
-		})
-	}
 }
 
 func TestError_Location(t *testing.T) {
