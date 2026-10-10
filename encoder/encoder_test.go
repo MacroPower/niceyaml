@@ -18,6 +18,18 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
 
+// mustEncode returns what an encoder created with opts writes for input.
+// The test fails when the encoder returns an error.
+func mustEncode(t *testing.T, input any, opts ...encoder.Option) string {
+	t.Helper()
+
+	var buf bytes.Buffer
+
+	require.NoError(t, encoder.New(&buf, opts...).Encode(t.Context(), input))
+
+	return buf.String()
+}
+
 func TestEncoder_Encode(t *testing.T) {
 	t.Parallel()
 
@@ -48,15 +60,7 @@ func TestEncoder_Encode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var buf bytes.Buffer
-
-			enc := encoder.New(&buf)
-
-			err := enc.Encode(t.Context(), tc.input)
-			require.NoError(t, err)
-
-			got := buf.String()
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, mustEncode(t, tc.input))
 		})
 	}
 }
@@ -375,12 +379,8 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var buf bytes.Buffer
-
-			enc := encoder.New(&buf, tc.opts...)
-
-			require.NoError(t, enc.Encode(t.Context(), tc.input))
-			assert.Equal(t, tc.want, buf.String())
+			encoded := mustEncode(t, tc.input, tc.opts...)
+			assert.Equal(t, tc.want, encoded)
 
 			decoded := tc.decoded
 			if decoded == nil {
@@ -388,7 +388,7 @@ func TestEncoder_Encode_quoting(t *testing.T) {
 			}
 
 			got := reflect.New(reflect.TypeOf(decoded))
-			doc := yamltest.FirstDocument(t, buf.String())
+			doc := yamltest.FirstDocument(t, encoded)
 
 			require.NoError(t, doc.DecodeInto(t.Context(), got.Interface()))
 			assert.Equal(t, decoded, got.Elem().Interface())
@@ -706,10 +706,7 @@ func TestMarshal(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, string(got))
 
-			var buf bytes.Buffer
-
-			require.NoError(t, encoder.New(&buf, tc.opts...).Encode(t.Context(), tc.input))
-			assert.Equal(t, buf.String(), string(got), "Marshal returns what Encode writes")
+			assert.Equal(t, mustEncode(t, tc.input, tc.opts...), string(got), "Marshal returns what Encode writes")
 		})
 	}
 }
@@ -922,12 +919,8 @@ func TestPretty_order(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var buf bytes.Buffer
-
-			enc := encoder.New(&buf, tc.opts...)
-
-			require.NoError(t, enc.Encode(t.Context(), map[string]map[string][]string{"k": {"items": {"one"}}}))
-			assert.Equal(t, tc.want, buf.String())
+			got := mustEncode(t, map[string]map[string][]string{"k": {"items": {"one"}}}, tc.opts...)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -938,13 +931,11 @@ func TestPretty_reuse(t *testing.T) {
 	pretty := encoder.Pretty()
 	input := map[string][]string{"items": {"one"}}
 
-	var wide, plain bytes.Buffer
+	wide := mustEncode(t, input, pretty, encoder.WithIndent(4))
+	plain := mustEncode(t, input, pretty)
 
-	require.NoError(t, encoder.New(&wide, pretty, encoder.WithIndent(4)).Encode(t.Context(), input))
-	require.NoError(t, encoder.New(&plain, pretty).Encode(t.Context(), input))
-
-	assert.Equal(t, "items:\n    - one\n", wide.String())
-	assert.Equal(t, "items:\n  - one\n", plain.String(), "an option after Pretty in one call reaches no other call")
+	assert.Equal(t, "items:\n    - one\n", wide)
+	assert.Equal(t, "items:\n  - one\n", plain, "an option after Pretty in one call reaches no other call")
 }
 
 // TestPretty_indentOptions checks that Pretty writes what WithIndent(2) and
@@ -1099,12 +1090,8 @@ func TestWithIndentSequence(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var buf bytes.Buffer
-
-			enc := encoder.New(&buf, encoder.WithIndent(tc.indent), encoder.WithIndentSequence(tc.seq))
-
-			require.NoError(t, enc.Encode(t.Context(), tc.input))
-			assert.Equal(t, tc.want, buf.String())
+			got := mustEncode(t, tc.input, encoder.WithIndent(tc.indent), encoder.WithIndentSequence(tc.seq))
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -1188,12 +1175,8 @@ func TestWithYAMLComments(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var buf bytes.Buffer
-
-			enc := encoder.New(&buf, append(tc.opts, encoder.WithYAMLComments(tc.comments))...)
-
-			require.NoError(t, enc.Encode(t.Context(), tc.input))
-			assert.Equal(t, tc.want, buf.String())
+			got := mustEncode(t, tc.input, append(tc.opts, encoder.WithYAMLComments(tc.comments))...)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -1298,10 +1281,6 @@ func TestWithYAMLOptions(t *testing.T) {
 		Items []string `yaml:"items"`
 	}
 
-	var buf bytes.Buffer
-
-	enc := encoder.New(&buf, encoder.WithYAMLOptions(yaml.Flow(true)))
-
-	require.NoError(t, enc.Encode(t.Context(), config{Items: []string{"one", "two"}}))
-	assert.Equal(t, "{items: [one, two]}\n", buf.String())
+	got := mustEncode(t, config{Items: []string{"one", "two"}}, encoder.WithYAMLOptions(yaml.Flow(true)))
+	assert.Equal(t, "{items: [one, two]}\n", got)
 }
