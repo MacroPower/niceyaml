@@ -3551,23 +3551,7 @@ func TestPath_Node_HandBuiltTree(t *testing.T) {
 	}
 }
 
-func TestPath_Nodes_HandBuiltTreeRecursive(t *testing.T) {
-	t.Parallel()
-
-	doc := &ast.DocumentNode{Body: mapNode(
-		nil,
-		mapEntry(&ast.IntegerNode{}, mapNode(
-			nil,
-			mapEntry(&ast.IntegerNode{}, &ast.StringNode{Value: "1"}),
-		)),
-	)}
-
-	nodes, err := paths.NewResolver(doc).Nodes(paths.Doc().Recursive("b"))
-	require.NoError(t, err)
-	assert.Empty(t, nodes)
-}
-
-func TestPath_Matches_HandBuiltTreeRecursive(t *testing.T) {
+func TestPath_Matches_HandBuiltTree(t *testing.T) {
 	t.Parallel()
 
 	shared := &ast.StringNode{Value: "1"}
@@ -3579,7 +3563,7 @@ func TestPath_Matches_HandBuiltTreeRecursive(t *testing.T) {
 		path string
 		want []string
 	}{
-		"keys of entries without a value": {
+		"recursive keys of entries without a value": {
 			body: mapNode(
 				mapEntry(&ast.StringNode{Value: "a"}, nil),
 				mapEntry(&ast.StringNode{Value: "b"}, mapNode(
@@ -3638,29 +3622,17 @@ func TestPath_Matches_HandBuiltTreeRecursive(t *testing.T) {
 			path: "$..*",
 			want: []string{"$.c", "$.c[0]", "$.d"},
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			doc := &ast.DocumentNode{Body: tc.body}
-
-			matches, err := paths.NewResolver(doc).Matches(paths.MustParse(tc.path))
-			require.NoError(t, err)
-			assert.Equal(t, tc.want, matchPaths(matches))
-		})
-	}
-}
-
-func TestPath_Matches_HandBuiltTreeChildAll(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		body ast.Node
-		path string
-		want []string
-	}{
+		// A `..name` selector passes the entries it cannot name.
+		"recursive name past nil entries and keys with no name": {
+			body: mapNode(
+				nil,
+				mapEntry(&ast.IntegerNode{}, mapNode(
+					nil,
+					mapEntry(&ast.IntegerNode{}, &ast.StringNode{Value: "1"}),
+				)),
+			),
+			path: "$..b",
+		},
 		"nil entry and keys with no name": {
 			body: mapNode(
 				nil,
@@ -3681,7 +3653,7 @@ func TestPath_Matches_HandBuiltTreeChildAll(t *testing.T) {
 			path: "$.*",
 			want: []string{"$.b"},
 		},
-		"keys of entries without a value": {
+		"keys of every entry without a value": {
 			body: mapNode(
 				mapEntry(&ast.StringNode{Value: "a"}, nil),
 				mapEntry(&ast.StringNode{Value: "b"}, nil),
@@ -3726,10 +3698,15 @@ func TestPath_Matches_HandBuiltTreeChildAll(t *testing.T) {
 			t.Parallel()
 
 			doc := &ast.DocumentNode{Body: tc.body}
+			path := paths.MustParse(tc.path)
 
-			matches, err := paths.NewResolver(doc).Matches(paths.MustParse(tc.path))
+			matches, err := paths.NewResolver(doc).Matches(path)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, matchPaths(matches))
+
+			nodes, err := paths.NewResolver(doc).Nodes(path)
+			require.NoError(t, err)
+			assert.Len(t, nodes, len(tc.want))
 		})
 	}
 }
