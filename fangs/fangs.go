@@ -57,8 +57,9 @@ func newConfig(opts []Option) config {
 // WithPrinter is an [Option] that sets the [*printer.Printer] that renders
 // errors through [printer.Printer.PrintError]. The printer's width, set
 // with [printer.WithWrap], controls word wrapping. Its styles color the
-// highlighted locations, and [printer.WithContextLines] sets the context
-// lines around each one.
+// highlighted locations, [printer.WithContextLines] sets the context
+// lines around each one, and [printer.WithExcerptWidth] sets how much of
+// a long line an excerpt shows.
 //
 // The handler indents every line by [Indent] columns, and
 // [printer.Printer.PrintError] fits each excerpt and the frame of its
@@ -97,8 +98,9 @@ func WithPrinter(p *printer.Printer) Option {
 // profile of the error stream. When that profile has no color, as in a
 // pipe, a file, or a terminal with NO_COLOR set, the handler writes what
 // [niceyaml.FormatError] renders in place of the PrintError output, with
-// the context lines of the printer. The carets of FormatError then mark
-// each range that color marks in a terminal, and its lines do not wrap.
+// the context lines and the excerpt width of the printer. The carets of
+// FormatError then mark each range that color marks in a terminal, and
+// its lines do not wrap.
 // A writer of any other type gets the PrintError output.
 //
 // Unlike [fang.DefaultErrorHandler], which wraps errors in a lipgloss style
