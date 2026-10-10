@@ -552,6 +552,11 @@ func TestCompile_Document(t *testing.T) {
 func TestCompile_YAMLNumbers(t *testing.T) {
 	t.Parallel()
 
+	// The schema of each YAML case holds one keyword for the member v.
+	forV := func(keyword string) string {
+		return stringtest.LinesLF("properties:", "  v:", "    "+keyword)
+	}
+
 	// A schema in YAML reads each number as a decode into any reads it,
 	// and a document reads its numbers the same way.
 	tcs := map[string]struct {
@@ -565,12 +570,12 @@ func TestCompile_YAMLNumbers(t *testing.T) {
 		invalid []string
 	}{
 		"exponent without a point is text": {
-			schema:  "properties:\n  v:\n    const: 1e3\n",
+			schema:  forV("const: 1e3"),
 			valid:   []string{"v: 1e3\n", "v: '1e3'\n"},
 			invalid: []string{"v: 1000\n", "v: 1.0e3\n"},
 		},
 		"exponent with a point is a number": {
-			schema:  "properties:\n  v:\n    const: 1.0e3\n",
+			schema:  forV("const: 1.0e3"),
 			valid:   []string{"v: 1000\n", "v: 1.0e3\n"},
 			invalid: []string{"v: 1e3\n"},
 		},
@@ -580,22 +585,22 @@ func TestCompile_YAMLNumbers(t *testing.T) {
 			invalid: []string{"v: 1e3\n"},
 		},
 		"leading zero is octal": {
-			schema:  "properties:\n  v:\n    const: 010\n",
+			schema:  forV("const: 010"),
 			valid:   []string{"v: 8\n", "v: 010\n"},
 			invalid: []string{"v: 10\n"},
 		},
 		"leading zero in a count is octal": {
-			schema:  "properties:\n  v:\n    maxLength: 010\n",
+			schema:  forV("maxLength: 010"),
 			valid:   []string{"v: 12345678\n"},
 			invalid: []string{"v: '123456789'\n"},
 		},
 		"integer past 64 bits is text": {
-			schema:  "properties:\n  v:\n    const: 18446744073709551616\n",
+			schema:  forV("const: 18446744073709551616"),
 			valid:   []string{"v: 18446744073709551616\n", "v: '18446744073709551616'\n"},
 			invalid: []string{"v: 1.8446744073709551616e+19\n"},
 		},
 		"integer past 2^53 stays exact": {
-			schema:  "properties:\n  v:\n    const: 9007199254740993\n",
+			schema:  forV("const: 9007199254740993"),
 			valid:   []string{"v: 9007199254740993\n"},
 			invalid: []string{"v: 9007199254740992\n"},
 		},
