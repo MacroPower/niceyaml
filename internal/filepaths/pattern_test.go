@@ -869,37 +869,6 @@ func TestExpandBraces_Budget(t *testing.T) {
 	assert.Nil(t, got)
 }
 
-func TestExpandBraces_Work(t *testing.T) {
-	t.Parallel()
-
-	// Each pattern expands to few patterns, but ExpandBraces would rebuild
-	// a long pattern once per brace group to get there, so it reports the
-	// limit.
-	tcs := map[string]struct {
-		pattern string
-	}{
-		"many single-alternative groups": {
-			pattern: strings.Repeat("{a}", 20000) + ".yaml",
-		},
-		"deeply nested group": {
-			pattern: strings.Repeat("{", 20000) + "a" + strings.Repeat("}", 20000) + ".yaml",
-		},
-		"long chain after branching groups": {
-			pattern: strings.Repeat("{a,b}", 10) + strings.Repeat("{a}", 1300) + ".yaml",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got, err := filepaths.ExpandBraces(tc.pattern)
-			require.ErrorIs(t, err, filepaths.ErrBraceLimit)
-			assert.Nil(t, got)
-		})
-	}
-}
-
 func TestUnclosedClasses(t *testing.T) {
 	t.Parallel()
 
@@ -945,6 +914,7 @@ func TestExpandBraces(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
+		err     error
 		pattern string
 		want    []string
 	}{
@@ -1012,6 +982,21 @@ func TestExpandBraces(t *testing.T) {
 			pattern: "a[{b,c}",
 			want:    []string{"a[b", "a[c"},
 		},
+		// Each of the next three patterns expands to few patterns, but
+		// ExpandBraces would rebuild a long pattern once per brace group
+		// to get there, so it reports the limit.
+		"many single-alternative groups": {
+			pattern: strings.Repeat("{a}", 20000) + ".yaml",
+			err:     filepaths.ErrBraceLimit,
+		},
+		"deeply nested group": {
+			pattern: strings.Repeat("{", 20000) + "a" + strings.Repeat("}", 20000) + ".yaml",
+			err:     filepaths.ErrBraceLimit,
+		},
+		"long chain after branching groups": {
+			pattern: strings.Repeat("{a,b}", 10) + strings.Repeat("{a}", 1300) + ".yaml",
+			err:     filepaths.ErrBraceLimit,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1019,6 +1004,13 @@ func TestExpandBraces(t *testing.T) {
 			t.Parallel()
 
 			got, err := filepaths.ExpandBraces(tc.pattern)
+			if tc.err != nil {
+				require.ErrorIs(t, err, tc.err)
+				assert.Nil(t, got)
+
+				return
+			}
+
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, got)
 		})
