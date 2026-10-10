@@ -482,7 +482,7 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 //
 // # Key Spelling
 //
-// Holding the node lets Validate spell each key in a violation's path as
+// Holding the node lets Check spell each key in a violation's path as
 // the source does, so a key the decoder respells, such as the hexadecimal
 // 0x10 for the member name 16, still names its member. Where a later key
 // in the mapping or its merge sources has the same spelling, a path
@@ -504,20 +504,20 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // each `<<` merge key that brings the key in or stands after it. The
 // violations of one call may read as many nodes that way as
 // [paths.ErrExcessiveMerging] allows one path selector. Past that limit
-// Validate still reports every violation, and a path through such a key
+// Check still reports every violation, and a path through such a key
 // names the member and each key below it as the decoder does.
 //
 // # Timestamps
 //
 // The node also shows which !!timestamp values the source wrote as a bare
-// date. Validate hands the schema each of those as an RFC 3339 full-date,
+// date. Check hands the schema each of those as an RFC 3339 full-date,
 // so !!timestamp 2001-12-14 matches format "date" as the untagged
-// 2001-12-14 does. Validate finds that scalar behind an alias or a merge
-// key as it finds the key it spells in a violation's path. Where Validate
+// 2001-12-14 does. Check finds that scalar behind an alias or a merge
+// key as it finds the key it spells in a violation's path. Where Check
 // cannot tell which scalar a timestamp came from, the timestamp keeps the
 // date-time spelling that [Schema.ValidateValue] gives it. That holds
 // behind an alias that does not resolve. It also holds under a mapping,
-// at any depth, with a key whose member name Validate cannot tell at or
+// at any depth, with a key whose member name Check cannot tell at or
 // after the member leading to the timestamp, since such a key may set a
 // member of the same name. A merge key whose sources do not resolve is
 // one such key.
@@ -525,14 +525,14 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // # Alias Limit
 //
 // The decode applies the alias limit to the document of n before it reads
-// anything. Validate applies the limit to the result as well only where
+// anything. Check applies the limit to the result as well only where
 // the document holds an alias to a reference document.
 // [niceyaml.WithAliasLimit] on the source of n turns both off.
 //
 // The decoder writes out the whole content of an alias it spells as text,
 // such as an alias used as a key. It also reads a mapping a merge key
 // brings in again at every merge. A small document can therefore cost far
-// more to decode than the decoded value shows. The decode Validate runs
+// more to decode than the decoded value shows. The decode Check runs
 // therefore counts before it reads. For a node that holds an alias, it
 // counts the nodes a decode of the whole document reads, with each alias
 // reading its content in full, as [niceyaml.Node.DecodeInto] describes.
@@ -561,7 +561,7 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // is the exception. A decode resolves such an alias against a reference
 // document, such as one of [niceyaml.WithReferences]. The count cannot
 // see a reference document, so it takes the alias as one node. For such
-// a document Validate also applies the limit to the result of the
+// a document Check also applies the limit to the result of the
 // decode, as [Schema.ValidateValue] does. A node below the root can then
 // exceed the limit where its document passes. That error matches
 // ErrExcessiveAliasing as well, and IsInvalid reports it. It carries no

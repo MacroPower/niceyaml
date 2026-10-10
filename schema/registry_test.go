@@ -230,7 +230,7 @@ func TestRegistry_Check_ScopedNode(t *testing.T) {
 	t.Parallel()
 
 	// The resolvers read the file path, the preamble, and the content of a
-	// whole document, so Validate and Lookup both refuse a scoped Node
+	// whole document, so Check and Lookup both refuse a scoped Node
 	// rather than check the document around it or return its schema for a
 	// single node.
 	schemaData := []byte(`{
@@ -242,7 +242,7 @@ func TestRegistry_Check_ScopedNode(t *testing.T) {
 	}`)
 	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaData)))
 
-	t.Run("Validate refuses a scoped node", func(t *testing.T) {
+	t.Run("Check refuses a scoped node", func(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`
@@ -604,7 +604,7 @@ func TestRegistry_Check(t *testing.T) {
 			schema.Embedded(schemaData),
 		)))
 
-		// Service matches no resolver, so Validate returns ErrNoMatch.
+		// Service matches no resolver, so Check returns ErrNoMatch.
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Service`))
 		err := reg.Check(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
@@ -1577,7 +1577,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 		assert.Contains(t, err.Error(), "cannot decide")
 	})
 
-	t.Run("load error propagates through Validate", func(t *testing.T) {
+	t.Run("load error propagates through Check", func(t *testing.T) {
 		t.Parallel()
 
 		reg := schema.NewRegistry(
@@ -1667,7 +1667,7 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 
 			validated[kind] = true
 		} else {
-			// ConfigMap has no matching schema, so Validate returns ErrNoMatch.
+			// ConfigMap has no matching schema, so Check returns ErrNoMatch.
 			require.ErrorIs(t, err, schema.ErrNoMatch)
 		}
 	}
@@ -3482,7 +3482,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		assert.True(t, niceyaml.IsInvalid(err))
 	})
 
-	t.Run("Validate passes the reasons through when it requires a schema", func(t *testing.T) {
+	t.Run("Check passes the reasons through when it requires a schema", func(t *testing.T) {
 		t.Parallel()
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))

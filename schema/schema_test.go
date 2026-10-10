@@ -2385,7 +2385,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 	// a merge key brings in again at every merge. Such a document costs
 	// its expanded size while it decodes, and the decoded value may share
 	// nothing, as when a later key replaces the member that held the
-	// anchors. Each case runs Validate alone, since a decode of the
+	// anchors. Each case runs Check alone, since a decode of the
 	// document would pay that cost.
 	t.Run("decoded aliases", func(t *testing.T) {
 		t.Parallel()
@@ -2657,7 +2657,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 	})
 
 	// The count of a document cannot see the anchors of a reference
-	// document, so it takes each alias to one as one node. Validate then
+	// document, so it takes each alias to one as one node. Check then
 	// applies the limit to the value the decode shares between them.
 	t.Run("reference aliases", func(t *testing.T) {
 		t.Parallel()
@@ -4194,8 +4194,8 @@ func TestSchema_SourcePath_MergeReads(t *testing.T) {
 	t.Parallel()
 
 	// Every member of m breaks the schema, and the violations of one
-	// Validate share one limit on the nodes they read under the merge key.
-	// Validate reports each violation past that limit too, with a path
+	// Check share one limit on the nodes they read under the merge key.
+	// Check reports each violation past that limit too, with a path
 	// that keeps the decoded name of its key, which selects no entry.
 	v := compileSchema(t, []byte(`{
 		"type": "object",

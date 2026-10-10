@@ -23,7 +23,7 @@ const noFormMessage = "value matches none of the allowed forms"
 // [Schema.Check] and [Schema.ValidateValue] report each one as a
 // [*niceyaml.Error] that wraps a Violation and carries the YAML path to
 // the failing location. A binding reports that path from `$`. For
-// Validate, `$` is the root of the document. For ValidateValue, it is
+// Check, `$` is the root of the document. For ValidateValue, it is
 // the value, which came from no document. A
 // caller reads the constraint from the Violation instead of matching on
 // the text of the message. A report that suppresses a rule, rewords a

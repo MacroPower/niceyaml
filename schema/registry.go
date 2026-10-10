@@ -128,7 +128,7 @@ type registryConfig struct {
 	fsAt        *fsDir       // the directory on disk the root of fsys stands for; nil when it stands for none
 	resolvers   []Resolver
 	compileOpts []CompileOption
-	// Makes Validate report ErrNoMatch when no resolver applies.
+	// Makes Check report ErrNoMatch when no resolver applies.
 	requireSchema bool
 }
 
@@ -279,7 +279,7 @@ func WithResolvers(res ...Resolver) RegistryOption {
 // WithRequireSchema is a [RegistryOption] that sets whether
 // [Registry.Check] reports a document no resolver applies to. The
 // default is true, and such a document then fails with [ErrNoMatch]. With
-// false, Validate accepts it, so a registry that validates what it
+// false, Check accepts it, so a registry that validates what it
 // recognizes and passes the rest runs inside a decode through
 // [niceyaml.WithValidator]:
 //
