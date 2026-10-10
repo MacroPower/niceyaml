@@ -2780,36 +2780,14 @@ func assertNodeText(t *testing.T, dd *niceyaml.Node, path paths.Path, want strin
 	assert.Equal(t, want, node.String())
 }
 
-func TestPath_UnknownAliasKey(t *testing.T) {
-	t.Parallel()
-
-	// An alias key that names no anchor has no name, so no selector
-	// matches it, and a lookup that passes it on the way to another key
-	// still resolves.
-	doc := yamltest.FirstDocument(t, "b: 2\n*nope : 1\n").DocumentAST()
-
-	node, err := paths.NewResolver(doc).Node(paths.Doc().Child("b"))
-	require.NoError(t, err)
-	assert.Equal(t, "2", node.String())
-
-	matches, err := paths.NewResolver(doc).Matches(paths.Doc().Recursive("b"))
-	require.NoError(t, err)
-	require.Len(t, matches, 1)
-	assert.Equal(t, "$.b", matches[0].Path.String())
-
-	for _, name := range []string{"nope", "*"} {
-		_, err := paths.NewResolver(doc).Node(paths.Doc().Child(name))
-		require.ErrorIs(t, err, paths.ErrNotFound, "Child(%q)", name)
-	}
-}
-
 func TestPath_UnnamedKey(t *testing.T) {
 	t.Parallel()
 
 	// A key with no name has no text a selector can match, so neither a
 	// `.''` nor a `..name` selector reaches its entry, and the entry never
 	// hides a real empty key. The decoder never reads such a key as the
-	// empty key.
+	// empty key. A lookup that passes the entry on the way to another key
+	// still resolves.
 	tcs := map[string]struct {
 		err       error
 		input     string
@@ -2824,6 +2802,25 @@ func TestPath_UnnamedKey(t *testing.T) {
 			path:      "$.''",
 			err:       paths.ErrNotFound,
 			recursive: "$..''",
+		},
+		"name of an alias key with no anchor": {
+			input:     "b: 2\n*nope : 1\n",
+			path:      "$.nope",
+			err:       paths.ErrNotFound,
+			recursive: "$..nope",
+		},
+		"indicator of an alias key with no anchor": {
+			input:     "b: 2\n*nope : 1\n",
+			path:      "$.'*'",
+			err:       paths.ErrNotFound,
+			recursive: "$..'*'",
+		},
+		"key beside an alias key with no anchor": {
+			input:     "b: 2\n*nope : 1\n",
+			path:      "$.b",
+			want:      "2",
+			recursive: "$..b",
+			matches:   []string{"$.b=2"},
 		},
 		"alias key inside its own anchor": {
 			input:     "x: &x\n  *x : v\n",
