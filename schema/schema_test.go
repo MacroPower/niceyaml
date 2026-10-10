@@ -20,16 +20,15 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
-	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-// compileSchema compiles schemaData into a [*schema.Schema] and fails the
-// test if the schema does not compile.
-func compileSchema(t *testing.T, schemaData []byte) *schema.Schema {
+// compileSchema compiles schemaData into a [*schema.Schema] with opts and
+// fails the test if the schema does not compile.
+func compileSchema(t *testing.T, schemaData []byte, opts ...schema.CompileOption) *schema.Schema {
 	t.Helper()
 
-	v, err := schema.Compile(t.Context(), schemaData)
+	v, err := schema.Compile(t.Context(), schemaData, opts...)
 	require.NoError(t, err)
 
 	return v
@@ -690,10 +689,9 @@ func TestSchema_UnresolvableRef(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v, err := schema.Compile(t.Context(), []byte(tc.schema), tc.opts...)
-			require.NoError(t, err)
+			v := compileSchema(t, []byte(tc.schema), tc.opts...)
 
-			err = v.ValidateValue(t.Context(), tc.data)
+			err := v.ValidateValue(t.Context(), tc.data)
 			require.ErrorIs(t, err, schema.ErrValidate)
 			assert.Contains(t, err.Error(), tc.want)
 
@@ -783,21 +781,16 @@ func TestSchema_ValidateWithDecoder(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString(tc.input)
-			d := source.Documents()
+			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
 
-			for _, dd := range d {
-				err := dd.Validate(t.Context(), v)
+			if tc.wantErr {
+				require.Error(t, err)
 
-				if tc.wantErr {
-					require.Error(t, err)
+				var validationErr *niceyaml.Error
 
-					var validationErr *niceyaml.Error
-
-					require.ErrorAs(t, err, &validationErr)
-				} else {
-					require.NoError(t, err)
-				}
+				require.ErrorAs(t, err, &validationErr)
+			} else {
+				require.NoError(t, err)
 			}
 		})
 	}
@@ -809,14 +802,6 @@ func TestSchema_PathTarget(t *testing.T) {
 	// The validator chooses key vs value highlighting based on the type of
 	// validation error. Each case checks which part of the YAML the error
 	// overlay style wraps.
-
-	newXMLPrinter := func() *printer.Printer {
-		return printer.New(
-			printer.WithStyles(yamltest.NewXMLStyles()),
-			printer.WithGutter(printer.NoGutter),
-		)
-	}
-
 	tcs := map[string]struct {
 		schema       string
 		input        string
@@ -1060,20 +1045,15 @@ func TestSchema_PathTarget(t *testing.T) {
 
 			v := compileSchema(t, []byte(tc.schema))
 
-			source := niceyaml.NewSourceFromString(tc.input)
-			d := source.Documents()
+			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
+			require.Error(t, err)
 
-			for _, dd := range d {
-				err := dd.Validate(t.Context(), v)
-				require.Error(t, err)
+			var bound *niceyaml.SourceError
 
-				var bound *niceyaml.SourceError
+			require.ErrorAs(t, err, &bound)
 
-				require.ErrorAs(t, err, &bound)
-
-				assert.Contains(t, newXMLPrinter().PrintError(bound), tc.wantContains,
-					"expected error output to contain specific highlighting pattern")
-			}
+			assert.Contains(t, yamltest.NewXMLPrinter().PrintError(bound), tc.wantContains,
+				"expected error output to contain specific highlighting pattern")
 		})
 	}
 }
@@ -1371,16 +1351,10 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v, err := schema.Compile(t.Context(), []byte(tc.schema),
+			v := compileSchema(t, []byte(tc.schema),
 				schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)))
-			require.NoError(t, err)
 
-			// FirstDocument takes no source options, and a repeated key
-			// needs one.
-			doc, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).Document()
-			require.NoError(t, err)
-
-			err = doc.Validate(t.Context(), v)
+			err := yamltest.FirstDocument(t, tc.input, tc.opts...).Validate(t.Context(), v)
 			if tc.err == "" {
 				require.NoError(t, err)
 
@@ -2222,10 +2196,9 @@ func TestSchema_Check_OrderedMapDates(t *testing.T) {
 	// gets it and not the decode the schema runs, so the schema reads
 	// plain maps, and a date-only timestamp under a key the decoder
 	// respells keeps its full-date spelling.
-	v, err := schema.Compile(t.Context(),
+	v := compileSchema(t,
 		[]byte(`{"additionalProperties": {"type": "string", "format": "date"}}`),
 		schema.WithJSONSchemaOptions(jsonschema.WithFormats(true)))
-	require.NoError(t, err)
 
 	tcs := map[string]struct {
 		input string
@@ -2933,34 +2906,29 @@ func TestSchema_SubErrorAnnotations(t *testing.T) {
 
 			v := compileSchema(t, []byte(tc.schema))
 
-			source := niceyaml.NewSourceFromString(tc.input)
-			d := source.Documents()
+			err := yamltest.FirstDocument(t, tc.input).Validate(t.Context(), v)
+			require.Error(t, err)
 
-			for _, dd := range d {
-				err := dd.Validate(t.Context(), v)
-				require.Error(t, err)
+			var bound *niceyaml.SourceError
 
-				var bound *niceyaml.SourceError
+			require.ErrorAs(t, err, &bound)
 
-				require.ErrorAs(t, err, &bound)
+			errOutput := fmt.Sprintf("%+v", bound)
 
-				errOutput := fmt.Sprintf("%+v", bound)
-
-				for _, annotation := range tc.wantAnnotations {
-					assert.Contains(t, errOutput, annotation,
-						"expected error output to contain annotation text")
-				}
-
-				var validationErr *niceyaml.Error
-
-				require.ErrorAs(t, err, &validationErr)
-
-				// Unwrap includes the main error plus its nested errors.
-				unwrapped := validationErr.Unwrap()
-				nestedCount := len(unwrapped) - 1
-				assert.Equal(t, tc.wantNestedErrors, nestedCount,
-					"expected %d nested errors, got %d", tc.wantNestedErrors, nestedCount)
+			for _, annotation := range tc.wantAnnotations {
+				assert.Contains(t, errOutput, annotation,
+					"expected error output to contain annotation text")
 			}
+
+			var validationErr *niceyaml.Error
+
+			require.ErrorAs(t, err, &validationErr)
+
+			// Unwrap includes the main error plus its nested errors.
+			unwrapped := validationErr.Unwrap()
+			nestedCount := len(unwrapped) - 1
+			assert.Equal(t, tc.wantNestedErrors, nestedCount,
+				"expected %d nested errors, got %d", tc.wantNestedErrors, nestedCount)
 		})
 	}
 }
@@ -4029,12 +3997,9 @@ func TestSchema_SourcePath_HiddenKey(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			// FirstDocument takes no source options, and a repeated key
-			// needs one.
-			doc, err := niceyaml.NewSourceFromString(tc.input, tc.opts...).Document()
-			require.NoError(t, err)
+			doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
 
-			err = doc.Validate(t.Context(), v)
+			err := doc.Validate(t.Context(), v)
 
 			var bound *niceyaml.SourceError
 
@@ -4285,10 +4250,9 @@ func TestSchema_RefToRejectingSchema(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			v, err := schema.Compile(t.Context(), []byte(schemaData))
-			require.NoError(t, err)
+			v := compileSchema(t, []byte(schemaData))
 
-			err = v.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
+			err := v.Check(t.Context(), yamltest.FirstDocument(t, "a: 1\n"))
 			require.NotErrorIs(t, err, schema.ErrValidate)
 
 			var nerr *niceyaml.Error

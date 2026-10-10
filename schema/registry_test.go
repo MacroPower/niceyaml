@@ -370,13 +370,10 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 		// cancellation itself rather than name the schema.
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded([]byte(`{"type":"object"}`))))
 
-		doc, err := niceyaml.NewSourceFromString("kind: Deployment\n").Document()
-		require.NoError(t, err)
-
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		_, err = reg.Lookup(ctx, doc)
+		_, err := reg.Lookup(ctx, document(t))
 		require.ErrorIs(t, err, context.Canceled)
 		require.ErrorIs(t, err, schema.ErrResolve)
 		require.NotErrorIs(t, err, schema.ErrNoMatch)

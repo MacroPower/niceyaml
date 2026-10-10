@@ -25,7 +25,7 @@ func BenchmarkSchema_Check(b *testing.B) {
 		{"items_4000", 4000},
 	}
 
-	s, err := schema.Compile(b.Context(), []byte(`{
+	s := schema.MustCompile([]byte(`{
 		"type": "object",
 		"properties": {
 			"items": {
@@ -41,7 +41,6 @@ func BenchmarkSchema_Check(b *testing.B) {
 			}
 		}
 	}`))
-	require.NoError(b, err)
 
 	for _, sz := range sizes {
 		var sb strings.Builder
@@ -54,8 +53,7 @@ func BenchmarkSchema_Check(b *testing.B) {
 
 		yaml := sb.String()
 
-		doc, err := niceyaml.NewSourceFromString(yaml).Document()
-		require.NoError(b, err)
+		doc := yamltest.FirstDocument(b, yaml)
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -87,8 +85,7 @@ func BenchmarkSchema_Check_AliasedItems(b *testing.B) {
 			fmt.Fprintf(&sb, "  - {name: n%d, tags: *t}\n", i)
 		}
 
-		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()
-		require.NoError(b, err)
+		doc := yamltest.FirstDocument(b, sb.String())
 
 		nodes, err := doc.Nodes(paths.Current().Child("items").IndexAll())
 		require.NoError(b, err)
@@ -122,8 +119,7 @@ func BenchmarkSchema_Check_ManyViolations(b *testing.B) {
 			fmt.Fprintf(&sb, "k%d: x\n", i)
 		}
 
-		doc, err := niceyaml.NewSourceFromString(sb.String()).Document()
-		require.NoError(b, err)
+		doc := yamltest.FirstDocument(b, sb.String())
 
 		b.Run(fmt.Sprintf("members_%d", members), func(b *testing.B) {
 			b.ReportAllocs()
@@ -152,8 +148,7 @@ func BenchmarkSchema_Check_WideMerge(b *testing.B) {
 	}`))
 
 	for _, members := range []int{1000, 4000} {
-		doc, err := niceyaml.NewSourceFromString(yamltest.WideMerge(members)).Document()
-		require.NoError(b, err)
+		doc := yamltest.FirstDocument(b, yamltest.WideMerge(members))
 
 		b.Run(fmt.Sprintf("members_%d", members), func(b *testing.B) {
 			b.ReportAllocs()
