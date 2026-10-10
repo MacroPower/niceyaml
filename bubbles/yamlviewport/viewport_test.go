@@ -55,11 +55,9 @@ func TestViewport_SearchDecorationRefreshesRowCounts(t *testing.T) {
 	m.SetSearchTerm("aaaa")
 
 	cached := m.TotalRowCount()
+	fresh := remeasured(m)
 
-	// A width round trip drops every cached count, so this is the true total.
-	m.SetWidth(25)
-	m.SetWidth(24)
-	assert.Equal(t, m.TotalRowCount(), cached)
+	assert.Equal(t, fresh.TotalRowCount(), cached)
 	assert.Greater(t, cached, before, "the widened highlights should wrap more rows")
 }
 
@@ -113,12 +111,6 @@ func TestViewport_SearchNextRefreshesRowCounts(t *testing.T) {
 			m.SetSearchTerm("term")
 			require.Positive(t, m.SearchCount())
 
-			maxXOffset := func(m yamlviewport.Model) int {
-				m.SetXOffset(1 << 30)
-
-				return m.XOffset()
-			}
-
 			check := func(step int) {
 				t.Helper()
 
@@ -131,11 +123,7 @@ func TestViewport_SearchNextRefreshesRowCounts(t *testing.T) {
 					assert.Equal(t, (height-1)/2, at, "step %d", step)
 				}
 
-				// A width round trip on a copy drops every cached count, so
-				// the copy measures every line with the current decoration.
-				fresh := m
-				fresh.SetWidth(tc.width + 1)
-				fresh.SetWidth(tc.width)
+				fresh := remeasured(m)
 
 				assert.Equal(t, fresh.TotalRowCount(), m.TotalRowCount(), "step %d", step)
 				assert.Equal(t, maxXOffset(fresh), maxXOffset(m), "step %d", step)
@@ -294,20 +282,10 @@ func TestViewport_SearchTermRefreshesRowCounts(t *testing.T) {
 
 			_ = m.View()
 
-			maxXOffset := func(m yamlviewport.Model) int {
-				m.SetXOffset(1 << 30)
-
-				return m.XOffset()
-			}
-
 			check := func(step string) {
 				t.Helper()
 
-				// A width round trip on a copy drops every cached count, so
-				// the copy measures every line with the current decoration.
-				fresh := m
-				fresh.SetWidth(tc.width + 1)
-				fresh.SetWidth(tc.width)
+				fresh := remeasured(m)
 
 				assert.Equal(t, fresh.TotalRowCount(), m.TotalRowCount(), step)
 				assert.Equal(t, maxXOffset(fresh), maxXOffset(m), step)
@@ -376,11 +354,7 @@ func TestViewport_SearchHighlightsMatchAcrossLines(t *testing.T) {
 			top := firstRow(m.View())
 			assert.Equal(t, tc.panes, strings.Count(top, tc.want), top)
 
-			// A width round trip on a copy drops every cached count, so the
-			// copy measures every line with the current decoration.
-			fresh := m
-			fresh.SetWidth(161)
-			fresh.SetWidth(160)
+			fresh := remeasured(m)
 			assert.Equal(t, fresh.TotalRowCount(), m.TotalRowCount())
 			assert.Equal(t, fresh.View(), m.View())
 		})
@@ -615,6 +589,29 @@ func needleRevisions() (string, string) {
 	before = replaceLine(before, 30, "key30: needle")
 
 	return before, replaceLine(before, 5, "key5: changed")
+}
+
+// remeasured returns a copy of m that has dropped every cached row count
+// through a width round trip, so it measures every line with the current
+// decoration.
+//
+//nolint:gocritic // hugeParam: the helper changes a copy.
+func remeasured(m yamlviewport.Model) yamlviewport.Model {
+	width := m.Width()
+	m.SetWidth(width + 1)
+	m.SetWidth(width)
+
+	return m
+}
+
+// maxXOffset returns the horizontal offset at which m stops scrolling
+// right.
+//
+//nolint:gocritic // hugeParam: the helper scrolls a copy.
+func maxXOffset(m yamlviewport.Model) int {
+	m.SetXOffset(1 << 30)
+
+	return m.XOffset()
 }
 
 // testModel returns a model of the given size that prints with p.
