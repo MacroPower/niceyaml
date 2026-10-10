@@ -21,18 +21,25 @@ func document(t *testing.T) *niceyaml.Node {
 	return yamltest.FirstDocument(t, "key: value\n")
 }
 
-// load resolves r and loads the schema it names. It returns the ref's Key
-// alongside the loaded bytes. Resolve itself must succeed, and load
-// returns only the Load error.
-func load(t *testing.T, r schema.Resolver) (string, []byte, error) {
+// loadFor resolves r for doc and loads the schema it names. It returns
+// the ref's Key alongside the loaded bytes. Resolve itself must succeed,
+// and loadFor returns only the Load error.
+func loadFor(t *testing.T, r schema.Resolver, doc *niceyaml.Node) (string, []byte, error) {
 	t.Helper()
 
-	ref, err := r.Resolve(t.Context(), document(t))
+	ref, err := r.Resolve(t.Context(), doc)
 	require.NoError(t, err)
 
 	data, err := schema.NewRegistry().Load(t.Context(), ref)
 
 	return ref.Key(), data, err //nolint:wrapcheck // Tests inspect the loader's own error.
+}
+
+// load is [loadFor] with a document that r never reads.
+func load(t *testing.T, r schema.Resolver) (string, []byte, error) {
+	t.Helper()
+
+	return loadFor(t, r, document(t))
 }
 
 // Compile-time interface satisfaction checks.

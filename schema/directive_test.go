@@ -500,21 +500,6 @@ func TestParseDocumentDirective_AfterDocumentEnd(t *testing.T) {
 	}
 }
 
-// resolveAndLoad resolves doc through res and loads the schema it names.
-// It returns the ref's Key alongside the loaded bytes. Both steps must
-// succeed.
-func resolveAndLoad(t *testing.T, res schema.Resolver, doc *niceyaml.Node) (string, []byte) {
-	t.Helper()
-
-	ref, err := res.Resolve(t.Context(), doc)
-	require.NoError(t, err)
-
-	data, err := schema.NewRegistry().Load(t.Context(), ref)
-	require.NoError(t, err)
-
-	return ref.Key(), data
-}
-
 func TestDirective(t *testing.T) {
 	t.Parallel()
 
@@ -682,7 +667,8 @@ func TestDirective_Resolve(t *testing.T) {
 			"# yaml-language-server: $schema=schema.json\nkind: Deployment\n",
 			filepath.Join(tmpDir, "config.yaml"),
 		)
-		url, data := resolveAndLoad(t, schema.Directive(), doc)
+		url, data, err := loadFor(t, schema.Directive(), doc)
+		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
 		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "schema.json")), url)
 	})
@@ -699,7 +685,8 @@ func TestDirective_Resolve(t *testing.T) {
 			"# yaml-language-server: $schema=./schema.json   \nkind: Deployment\n",
 			filepath.Join(tmpDir, "config.yaml"),
 		)
-		url, data := resolveAndLoad(t, schema.Directive(), doc)
+		url, data, err := loadFor(t, schema.Directive(), doc)
+		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
 		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "schema.json")), url)
 	})
@@ -729,7 +716,8 @@ func TestDirective_Resolve(t *testing.T) {
 					"# yaml-language-server: $schema="+schemaURL+"\nkind: Deployment\n",
 					tc.opts...,
 				)
-				url, data := resolveAndLoad(t, schema.Directive(), doc)
+				url, data, err := loadFor(t, schema.Directive(), doc)
+				require.NoError(t, err)
 				assert.Equal(t, schemaData, data)
 				assert.Equal(t, schemaURL, url)
 			})
@@ -783,13 +771,14 @@ func TestDirective_Resolve(t *testing.T) {
 				// The key keeps the fragment, and the load reads the whole
 				// file.
 				doc := yamltest.FirstDocumentWithPath(t, directive+"name: x\n", yamlPath)
-				url, data := resolveAndLoad(t, schema.Directive(), doc)
+				url, data, err := loadFor(t, schema.Directive(), doc)
+				require.NoError(t, err)
 				assert.Equal(t, fileURL(t, schemaPath)+"#/definitions/Foo", url)
 				assert.Equal(t, schemaData, data)
 
 				reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
-				err := reg.Check(t.Context(), doc)
+				err = reg.Check(t.Context(), doc)
 				require.NoError(t, err)
 
 				doc = yamltest.FirstDocumentWithPath(t, directive+"kind: Deployment\n", yamlPath)
@@ -814,7 +803,8 @@ func TestDirective_Resolve(t *testing.T) {
 			"# yaml-language-server: $schema=#schema.json\nkind: Deployment\n",
 			filepath.Join(tmpDir, "config.yaml"),
 		)
-		url, data := resolveAndLoad(t, schema.Directive(), doc)
+		url, data, err := loadFor(t, schema.Directive(), doc)
+		require.NoError(t, err)
 		assert.Equal(t, fileURL(t, schemaPath), url)
 		assert.Equal(t, schemaData, data)
 	})
@@ -854,7 +844,8 @@ func TestDirective_Resolve(t *testing.T) {
 		require.NoError(t, err)
 
 		doc := yamltest.FirstDocument(t, "# yaml-language-server: $schema="+schemaPath+"\nkind: Deployment\n")
-		url, data := resolveAndLoad(t, schema.Directive(), doc)
+		url, data, err := loadFor(t, schema.Directive(), doc)
+		require.NoError(t, err)
 		assert.Equal(t, fileURL(t, schemaPath), url)
 		assert.Equal(t, schemaData, data)
 	})
@@ -924,7 +915,8 @@ func TestDirective_Resolve(t *testing.T) {
 			"# yaml-language-server: $schema=./none\nkind: Deployment\n",
 			filepath.Join(tmpDir, "config.yaml"),
 		)
-		url, data := resolveAndLoad(t, schema.Directive(), doc)
+		url, data, err := loadFor(t, schema.Directive(), doc)
+		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
 		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "none")), url)
 	})
@@ -946,7 +938,8 @@ func TestDirective_Resolve(t *testing.T) {
 			"# yaml-language-server: $schema=../schemas/schema.json\nkind: Deployment\n",
 			filepath.Join(tmpDir, "configs", "config.yaml"),
 		)
-		_, data := resolveAndLoad(t, schema.Directive(), doc)
+		_, data, err := loadFor(t, schema.Directive(), doc)
+		require.NoError(t, err)
 		assert.Equal(t, schemaData, data)
 	})
 
