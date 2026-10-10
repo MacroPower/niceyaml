@@ -15,32 +15,19 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 )
 
-// reportExcerpts returns each excerpt of rep as a renderer draws it: its
-// view as plain text, below the name of its source when the excerpt has
-// Named set.
+// reportExcerpts returns each excerpt of rep: its view as plain text,
+// below the name of its source. The name stands in parentheses when the
+// excerpt has Named unset, which has a renderer leave the name out.
 func reportExcerpts(rep niceyaml.ErrorReport) []string {
 	var got []string
 
 	for _, excerpt := range rep.Excerpts {
-		part := excerpt.View.String()
-		if excerpt.Named {
-			part = excerpt.Source.Name() + "\n" + part
+		name := excerpt.Source.Name()
+		if !excerpt.Named {
+			name = "(" + name + ")"
 		}
 
-		got = append(got, part)
-	}
-
-	return got
-}
-
-// reportSourceExcerpts returns each excerpt of rep as its view as plain
-// text below the name of its source, whether or not the excerpt has
-// Named set.
-func reportSourceExcerpts(rep niceyaml.ErrorReport) []string {
-	var got []string
-
-	for _, excerpt := range rep.Excerpts {
-		got = append(got, excerpt.Source.Name()+"\n"+excerpt.View.String())
+		got = append(got, name+"\n"+excerpt.View.String())
 	}
 
 	return got
@@ -78,6 +65,7 @@ func TestNewErrorReport(t *testing.T) {
 	badE := yamltest.Bind(t, secret, niceyaml.NewError("bad e", at("e")))
 	farA := yamltest.Bind(t, first, niceyaml.NewError("far a", outside))
 	farC := yamltest.Bind(t, second, niceyaml.NewError("far c", outside))
+	gone := yamltest.Bind(t, second, niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").Index(0))))
 
 	// The excerpt of each source among several, below its name.
 	namedA := stringtest.JoinLF(
@@ -90,6 +78,12 @@ func TestNewErrorReport(t *testing.T) {
 		"   1 | c: 3",
 		"     |    ^ bad c",
 	)
+	// The excerpt of the first source alone, with a mark at a.
+	aloneA := stringtest.JoinLF(
+		"(first.yaml)",
+		"   1 | a: 1",
+		"     |    ^ bad a",
+	)
 
 	tcs := map[string]struct {
 		err            error
@@ -99,6 +93,7 @@ func TestNewErrorReport(t *testing.T) {
 		"a lone binding has one excerpt with no name": {
 			err: fmt.Errorf("check: %w", badA),
 			want: []string{stringtest.JoinLF(
+				"(first.yaml)",
 				"   1 | a: 1",
 				"     |    ^",
 			)},
@@ -106,6 +101,7 @@ func TestNewErrorReport(t *testing.T) {
 		"bindings of one source share an excerpt with no name": {
 			err: errors.Join(badA, badB),
 			want: []string{stringtest.JoinLF(
+				"(first.yaml)",
 				"   1 | a: 1",
 				"     |    ^ bad a",
 				"   2 | b: 2",
@@ -116,9 +112,36 @@ func TestNewErrorReport(t *testing.T) {
 			err:  errors.Join(badC, badA),
 			want: []string{namedC, namedA},
 		},
+		"sources come in the order the bindings reach them": {
+			err: errors.Join(badC, badA, badB),
+			want: []string{namedC, stringtest.JoinLF(
+				"first.yaml",
+				"   1 | a: 1",
+				"     |    ^ bad a",
+				"   2 | b: 2",
+				"     |    ^ bad b",
+			)},
+		},
+		"a binding the error reaches twice marks its line once": {
+			err:  errors.Join(badA, fmt.Errorf("again: %w", badA)),
+			want: []string{aloneA},
+		},
+		"a nested binding joined beside its parent marks its line once": {
+			err: errors.Join(
+				yamltest.Bind(t, first, niceyaml.NewError("parent", niceyaml.WithDetails(badA))),
+				badA,
+			),
+			want: []string{aloneA},
+		},
+		"a source with a path that selects nothing still names the other": {
+			err:            errors.Join(badA, gone),
+			want:           []string{namedA},
+			wantUnresolved: []string{"second.yaml: $.x[0]: gone"},
+		},
 		"a source with no name is not named": {
 			err: errors.Join(badA, badD),
 			want: []string{namedA, stringtest.JoinLF(
+				"()",
 				"   1 | d: 4",
 				"     |    ^ bad d",
 			)},
@@ -151,6 +174,7 @@ func TestNewErrorReport(t *testing.T) {
 				niceyaml.WithDetails(niceyaml.NewError("see a", at("a"))),
 			)),
 			want: []string{stringtest.JoinLF(
+				"(first.yaml)",
 				"   1 | a: 1",
 				"     |    ^ see a",
 			)},
@@ -183,6 +207,19 @@ func TestNewErrorReport(t *testing.T) {
 		assert.Same(t, second, rep.Excerpts[1].Source)
 	})
 
+	t.Run("each excerpt is a view of its own", func(t *testing.T) {
+		t.Parallel()
+
+		rep := niceyaml.NewErrorReport(errors.Join(badA, badB), niceyaml.WithContextLines(0))
+		require.Len(t, rep.Excerpts, 1)
+
+		// The source keeps no decoration from the excerpt.
+		assert.Equal(t, stringtest.JoinLF(
+			"   1 | a: 1",
+			"   2 | b: 2",
+		), first.View().String())
+	})
+
 	t.Run("an unresolved binding gives its reason", func(t *testing.T) {
 		t.Parallel()
 
@@ -199,6 +236,7 @@ func TestNewErrorReport(t *testing.T) {
 		rep := niceyaml.NewErrorReport(badB, niceyaml.WithContextLines(1))
 
 		want := []string{stringtest.JoinLF(
+			"(first.yaml)",
 			"   1 | a: 1",
 			"   2 | b: 2",
 			"     |    ^",
@@ -326,7 +364,7 @@ func TestNewErrorReport_SeveralSources(t *testing.T) {
 				"   2 | host: 7",
 				"     |       ^ not a name",
 			),
-		}, reportSourceExcerpts(rep))
+		}, reportExcerpts(rep))
 	})
 
 	t.Run("Excerpt keeps to the source of the binding", func(t *testing.T) {
@@ -431,7 +469,7 @@ func TestNewErrorReport_SeveralSources(t *testing.T) {
 				"   2 | b: 2",
 				"     |    ^ third 2",
 			),
-		}, reportSourceExcerpts(niceyaml.NewErrorReport(mixed, niceyaml.WithContextLines(0))))
+		}, reportExcerpts(niceyaml.NewErrorReport(mixed, niceyaml.WithContextLines(0))))
 	})
 
 	t.Run("a tree in one source yields one excerpt", func(t *testing.T) {
@@ -455,104 +493,6 @@ func TestNewErrorReport_SeveralSources(t *testing.T) {
 		var nilErr *niceyaml.SourceError
 
 		assert.Empty(t, niceyaml.NewErrorReport(nilErr, niceyaml.WithContextLines(0)).Excerpts)
-	})
-}
-
-func TestNewErrorReport_Excerpts(t *testing.T) {
-	t.Parallel()
-
-	first := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("first.yaml"))
-	second := niceyaml.NewSourceFromString("c: 3\n", niceyaml.WithName("second.yaml"))
-
-	badA := yamltest.Bind(t, first, niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a"))))
-	badB := yamltest.Bind(t, first, niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b"))))
-	badC := yamltest.Bind(t, second, niceyaml.NewError("bad c", niceyaml.AtPath(paths.Current().Child("c"))))
-	gone := yamltest.Bind(t, second, niceyaml.NewError("gone", niceyaml.AtPath(paths.Current().Child("x").Index(0))))
-
-	// The excerpt of the first source with a mark at a alone.
-	markedA := stringtest.JoinLF(
-		"first.yaml",
-		"   1 | a: 1",
-		"     |    ^ bad a",
-	)
-
-	tcs := map[string]struct {
-		err  error
-		want []string
-	}{
-		"bindings of one source share an excerpt": {
-			err: errors.Join(badA, badB),
-			want: []string{stringtest.JoinLF(
-				"first.yaml",
-				"   1 | a: 1",
-				"     |    ^ bad a",
-				"   2 | b: 2",
-				"     |    ^ bad b",
-			)},
-		},
-		"sources come in the order the bindings reach them": {
-			err: errors.Join(badC, badA, badB),
-			want: []string{
-				stringtest.JoinLF(
-					"second.yaml",
-					"   1 | c: 3",
-					"     |    ^ bad c",
-				),
-				stringtest.JoinLF(
-					"first.yaml",
-					"   1 | a: 1",
-					"     |    ^ bad a",
-					"   2 | b: 2",
-					"     |    ^ bad b",
-				),
-			},
-		},
-		"a lone binding keeps its caret bare": {
-			err: fmt.Errorf("check: %w", badA),
-			want: []string{stringtest.JoinLF(
-				"first.yaml",
-				"   1 | a: 1",
-				"     |    ^",
-			)},
-		},
-		"a binding the error reaches twice marks its line once": {
-			err:  errors.Join(badA, fmt.Errorf("again: %w", badA)),
-			want: []string{markedA},
-		},
-		"a nested binding joined beside its parent marks its line once": {
-			err: errors.Join(
-				yamltest.Bind(t, first, niceyaml.NewError("parent", niceyaml.WithDetails(badA))),
-				badA,
-			),
-			want: []string{markedA},
-		},
-		"a source with nothing resolved yields nothing": {
-			err:  errors.Join(badA, gone),
-			want: []string{markedA},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			rep := niceyaml.NewErrorReport(tc.err, niceyaml.WithContextLines(0))
-
-			assert.Equal(t, tc.want, reportSourceExcerpts(rep))
-		})
-	}
-
-	t.Run("each excerpt is a view of its own", func(t *testing.T) {
-		t.Parallel()
-
-		rep := niceyaml.NewErrorReport(errors.Join(badA, badB), niceyaml.WithContextLines(0))
-		require.Len(t, rep.Excerpts, 1)
-
-		// The source keeps no decoration from the excerpt.
-		assert.Equal(t, stringtest.JoinLF(
-			"   1 | a: 1",
-			"   2 | b: 2",
-		), first.View().String())
 	})
 }
 
@@ -619,10 +559,10 @@ func TestNewErrorReport_ExcerptsOff(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			assert.Equal(t, tc.want, reportSourceExcerpts(niceyaml.NewErrorReport(tc.err)))
+			assert.Equal(t, tc.want, reportExcerpts(niceyaml.NewErrorReport(tc.err)))
 
 			bound := yamltest.RequireSourceError(t, tc.err)
-			assert.Equal(t, tc.wantOwn, reportSourceExcerpts(niceyaml.NewErrorReport(bound)))
+			assert.Equal(t, tc.wantOwn, reportExcerpts(niceyaml.NewErrorReport(bound)))
 		})
 	}
 
