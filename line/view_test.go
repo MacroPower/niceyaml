@@ -450,16 +450,22 @@ func TestView_AddOverlay(t *testing.T) {
 			view := newTestView(t, tc.input, len(tc.want))
 			view.AddOverlay("test1", tc.ranges...)
 
+			blended := newTestView(t, tc.input, len(tc.want))
+			blended.BlendOverlay("test1", tc.ranges...)
+
 			for i, cols := range tc.want {
-				// Each overlay carries the kind and replaces the style
-				// under it.
-				var want line.Overlays
+				// Each overlay carries the kind. One from AddOverlay
+				// replaces the style under it, and one from BlendOverlay
+				// blends with it.
+				var want, wantBlended line.Overlays
 
 				for _, span := range cols {
 					want = append(want, line.Overlay{Kind: "test1", Cols: span})
+					wantBlended = append(wantBlended, line.Overlay{Kind: "test1", Cols: span, Blend: true})
 				}
 
 				assert.Equal(t, want, view.Overlays(i), "line %d", i)
+				assert.Equal(t, wantBlended, blended.Overlays(i), "line %d blended", i)
 			}
 		})
 	}
@@ -479,46 +485,16 @@ func TestView_AddOverlay(t *testing.T) {
 func TestView_BlendOverlay(t *testing.T) {
 	t.Parallel()
 
-	t.Run("marks overlays as blended", func(t *testing.T) {
-		t.Parallel()
+	// TestView_AddOverlay runs its ranges through BlendOverlay too. The two
+	// kinds of overlay mix on one line in the order of the calls.
+	view := newTestView(t, "key: value\n", 1)
+	view.AddOverlay("test1", yamltest.LineRange(0, 0, 3))
+	view.BlendOverlay("test2", yamltest.LineRange(0, 0, 3))
 
-		view := newTestView(t, "a: 1\nb: 2\n", 2)
-		view.BlendOverlay("test1", position.NewRange(
-			position.New(0, 0),
-			position.New(1, 2),
-		))
-
-		require.Len(t, view.Overlays(0), 1)
-		require.Len(t, view.Overlays(1), 1)
-		assert.True(t, view.Overlays(0)[0].Blend)
-		assert.True(t, view.Overlays(1)[0].Blend)
-		assert.Equal(t, kind.Kind("test1"), view.Overlays(0)[0].Kind)
-	})
-
-	t.Run("clamps like AddOverlay", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.BlendOverlay("test1",
-			position.NewRange(position.New(-1, -5), position.New(9, 99)),
-			yamltest.LineRange(0, 50, 60),
-		)
-
-		require.Len(t, view.Overlays(0), 1)
-		assert.Equal(t, position.NewSpan(0, len("key: value")), view.Overlays(0)[0].Cols)
-	})
-
-	t.Run("mixes with replacing overlays in order", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.AddOverlay("test1", yamltest.LineRange(0, 0, 3))
-		view.BlendOverlay("test2", yamltest.LineRange(0, 0, 3))
-
-		require.Len(t, view.Overlays(0), 2)
-		assert.False(t, view.Overlays(0)[0].Blend)
-		assert.True(t, view.Overlays(0)[1].Blend)
-	})
+	assert.Equal(t, line.Overlays{
+		{Kind: "test1", Cols: position.NewSpan(0, 3)},
+		{Kind: "test2", Cols: position.NewSpan(0, 3), Blend: true},
+	}, view.Overlays(0))
 }
 
 func TestView_Clone(t *testing.T) {
