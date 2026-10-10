@@ -25,8 +25,24 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
 
+// noSpace returns a normalizer that drops whitespace.
+func noSpace() *normalizer.Normalizer {
+	return normalizer.New(normalizer.WithTransformer(func() transform.Transformer {
+		return runes.Remove(runes.In(unicode.White_Space))
+	}))
+}
+
 func TestFinder_Find(t *testing.T) {
 	t.Parallel()
+
+	// Title casing depends on the preceding character.
+	titleCase := normalizer.New(
+		normalizer.WithCaseFold(false),
+		normalizer.WithDiacriticFold(false),
+		normalizer.WithTransformer(func() transform.Transformer {
+			return cases.Title(language.Und)
+		}),
+	)
 
 	tcs := map[string]struct {
 		input      string
@@ -269,11 +285,9 @@ func TestFinder_Find(t *testing.T) {
 			},
 		},
 		"normalizer dropping whitespace joins lines": {
-			input:  "a: 1\nb: 2\n",
-			search: "1b",
-			normalizer: normalizer.New(normalizer.WithTransformer(func() transform.Transformer {
-				return runes.Remove(runes.In(unicode.White_Space))
-			})),
+			input:      "a: 1\nb: 2\n",
+			search:     "1b",
+			normalizer: noSpace(),
 			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 3),
@@ -282,11 +296,9 @@ func TestFinder_Find(t *testing.T) {
 			},
 		},
 		"normalizer dropping whitespace covers the dropped space": {
-			input:  "k: ab cd",
-			search: "ab",
-			normalizer: normalizer.New(normalizer.WithTransformer(func() transform.Transformer {
-				return runes.Remove(runes.In(unicode.White_Space))
-			})),
+			input:      "k: ab cd",
+			search:     "ab",
+			normalizer: noSpace(),
 			want: position.Ranges{
 				position.NewRange(
 					position.New(0, 3),
@@ -474,52 +486,10 @@ func TestFinder_Find(t *testing.T) {
 				),
 			},
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := niceyaml.NewSourceFromString(tc.input)
-
-			var opts []finder.Option
-
-			if tc.normalizer != nil || tc.exact {
-				opts = append(opts, finder.WithNormalizer(tc.normalizer))
-			}
-
-			f := finder.New(opts...)
-
-			idx := f.Load(lines.Lines())
-
-			got := idx.Find(tc.search)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestFinder_Find_EdgeCases(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input  string
-		search string
-		want   position.Ranges
-	}{
-		"empty lines": {
+		"empty input": {
 			input:  "",
 			search: "test",
 			want:   nil,
-		},
-		"first character": {
-			input:  "key: value",
-			search: "k",
-			want: position.Ranges{
-				position.NewRange(
-					position.New(0, 0),
-					position.New(0, 1),
-				),
-			},
 		},
 		"last character": {
 			input:  "key: value",
@@ -535,138 +505,122 @@ func TestFinder_Find_EdgeCases(t *testing.T) {
 				),
 			},
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := niceyaml.NewSourceFromString(tc.input)
-			f := finder.New()
-			idx := f.Load(lines.Lines())
-
-			got := idx.Find(tc.search)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestFinder_Find_Expansion(t *testing.T) {
-	t.Parallel()
-
-	// Case folding turns one source rune into two normalized chars, so a
-	// one-char needle could match twice inside it and report the same range
-	// twice. Only the match that begins at the source rune counts.
-	tcs := map[string]struct {
-		input  string
-		search string
-		want   position.Ranges
-	}{
+		// The loaded text reads every line ending as "\n", so a search string
+		// copied out of a CRLF file, line ending included, still matches.
+		"CRLF source - CRLF search": {
+			input:  "a: 1\r\nb: 2\r\n",
+			search: "1\r\nb",
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(1, 1)),
+			},
+		},
+		"CRLF source - LF search": {
+			input:  "a: 1\r\nb: 2\r\n",
+			search: "1\nb",
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(1, 1)),
+			},
+		},
+		// A search of only combining marks normalizes to an empty string, which
+		// must yield no matches rather than match at every offset.
+		"search that normalizes to empty": {
+			input:      "key: value\n",
+			search:     "́",
+			normalizer: normalizer.New(),
+			want:       nil,
+		},
+		// The accent is a combining mark that belongs to the "e" before it, and
+		// the normalizer drops it. A match ending at that "e" covers the accent,
+		// as a match ending inside an expansion covers the whole character, so
+		// the highlight ends where the next character begins.
+		"match ending at a dropped combining mark": {
+			input:      "k: caféx\n",
+			search:     "café",
+			normalizer: normalizer.New(),
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(0, 8)),
+			},
+		},
+		"match starting at a character with a dropped combining mark": {
+			input:      "k: caféx\n",
+			search:     "ex",
+			normalizer: normalizer.New(),
+			want: position.Ranges{
+				position.NewRange(position.New(0, 6), position.New(0, 9)),
+			},
+		},
+		// Title casing would produce "Abc" for a whole string but "ABC" rune
+		// by rune. Both sides go through the normalizer the same way, so the
+		// search still finds the text.
+		"context-sensitive normalizer - lowercase search": {
+			input:      "k: abc\n",
+			search:     "abc",
+			normalizer: titleCase,
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(0, 6)),
+			},
+		},
+		"context-sensitive normalizer - uppercase search": {
+			input:      "k: abc\n",
+			search:     "ABC",
+			normalizer: titleCase,
+			want: position.Ranges{
+				position.NewRange(position.New(0, 3), position.New(0, 6)),
+			},
+		},
+		// Case folding turns one source rune into two normalized chars, so a
+		// one-char needle could match twice inside it and report the same range
+		// twice. Only the match that begins at the source rune counts.
 		"needle inside an expansion matches once": {
-			input:  "x: ß",
-			search: "s",
+			input:      "x: ß",
+			search:     "s",
+			normalizer: normalizer.New(),
 			want: position.Ranges{
 				position.NewRange(position.New(0, 3), position.New(0, 4)),
 			},
 		},
 		"needle covering the expansion": {
-			input:  "x: ß",
-			search: "ss",
+			input:      "x: ß",
+			search:     "ss",
+			normalizer: normalizer.New(),
 			want: position.Ranges{
 				position.NewRange(position.New(0, 3), position.New(0, 4)),
 			},
 		},
 		"needle ending inside an expansion covers the rune": {
-			input:  "x: aß",
-			search: "as",
+			input:      "x: aß",
+			search:     "as",
+			normalizer: normalizer.New(),
 			want: position.Ranges{
 				position.NewRange(position.New(0, 3), position.New(0, 5)),
 			},
 		},
 		"needle starting inside an expansion does not match": {
-			input:  "x: ßa",
-			search: "sa",
-			want:   nil,
+			input:      "x: ßa",
+			search:     "sa",
+			normalizer: normalizer.New(),
+			want:       nil,
 		},
 		"expansion next to a plain match": {
-			input:  "x: ßs",
-			search: "s",
+			input:      "x: ßs",
+			search:     "s",
+			normalizer: normalizer.New(),
 			want: position.Ranges{
 				position.NewRange(position.New(0, 3), position.New(0, 4)),
 				position.NewRange(position.New(0, 4), position.New(0, 5)),
 			},
 		},
 		"multibyte character between expansions": {
-			input:  "x: ß日 ß",
-			search: "ss",
+			input:      "x: ß日 ß",
+			search:     "ss",
+			normalizer: normalizer.New(),
 			want: position.Ranges{
 				position.NewRange(position.New(0, 3), position.New(0, 4)),
 				position.NewRange(position.New(0, 6), position.New(0, 7)),
 			},
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			f := finder.New(finder.WithNormalizer(normalizer.New()))
-			idx := f.Load(niceyaml.NewSourceFromString(tc.input).Lines())
-
-			assert.Equal(t, tc.want, idx.Find(tc.search))
-		})
-	}
-}
-
-func TestFinder_Find_NormalizesToEmpty(t *testing.T) {
-	t.Parallel()
-
-	// A search of only combining marks normalizes to an empty string, which
-	// must yield no matches rather than match at every offset.
-	f := finder.New(finder.WithNormalizer(normalizer.New()))
-	idx := f.Load(niceyaml.NewSourceFromString("key: value\n").Lines())
-
-	got := idx.Find("́")
-	assert.Nil(t, got)
-}
-
-func TestFinder_Find_ContextSensitiveNormalizer(t *testing.T) {
-	t.Parallel()
-
-	// Title casing depends on the preceding character, so it would produce
-	// "Abc" for a whole string but "ABC" rune by rune. Both sides go through
-	// the normalizer the same way, so the search still finds the text.
-	n := normalizer.New(
-		normalizer.WithCaseFold(false),
-		normalizer.WithDiacriticFold(false),
-		normalizer.WithTransformer(func() transform.Transformer {
-			return cases.Title(language.Und)
-		}),
-	)
-	f := finder.New(finder.WithNormalizer(n))
-	idx := f.Load(niceyaml.NewSourceFromString("k: abc\n").Lines())
-
-	want := position.Ranges{
-		position.NewRange(position.New(0, 3), position.New(0, 6)),
-	}
-
-	assert.Equal(t, want, idx.Find("abc"))
-	assert.Equal(t, want, idx.Find("ABC"))
-}
-
-func TestFinder_Find_InvalidUTF8(t *testing.T) {
-	t.Parallel()
-
-	// A stray continuation byte must not match inside a multi-byte rune and
-	// then report the position of an unrelated rune.
-	tcs := map[string]struct {
-		input      string
-		search     string
-		normalizer finder.Normalizer
-		// Matches characters exactly, with no normalizer at all.
-		exact bool
-		want  position.Ranges
-	}{
+		// A stray continuation byte must not match inside a multi-byte rune and
+		// then report the position of an unrelated rune.
 		"continuation byte without normalizer": {
 			input:  "x: a\u00e9",
 			search: "\xa9",
@@ -730,32 +684,22 @@ func TestFinder_Find_InvalidUTF8(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
+			lines := niceyaml.NewSourceFromString(tc.input)
+
 			var opts []finder.Option
 
 			if tc.normalizer != nil || tc.exact {
 				opts = append(opts, finder.WithNormalizer(tc.normalizer))
 			}
 
-			idx := finder.New(opts...).Load(niceyaml.NewSourceFromString(tc.input).Lines())
+			f := finder.New(opts...)
 
-			assert.Equal(t, tc.want, idx.Find(tc.search))
+			idx := f.Load(lines.Lines())
+
+			got := idx.Find(tc.search)
+			assert.Equal(t, tc.want, got)
 		})
 	}
-}
-
-func TestFinder_Find_CRLF(t *testing.T) {
-	t.Parallel()
-
-	// The loaded text reads every line ending as "\n", so a search string
-	// copied out of a CRLF file, line ending included, still matches.
-	idx := finder.New().Load(niceyaml.NewSourceFromString("a: 1\r\nb: 2\r\n").Lines())
-
-	want := position.Ranges{
-		position.NewRange(position.New(0, 3), position.New(1, 1)),
-	}
-
-	assert.Equal(t, want, idx.Find("1\r\nb"))
-	assert.Equal(t, want, idx.Find("1\nb"))
 }
 
 func TestFinder_Find_NilLines(t *testing.T) {
@@ -823,9 +767,12 @@ func TestFinder_Find_View(t *testing.T) {
 
 	host := yamltest.At(t, flow[1], paths.Doc().Child("server", "host"))
 
-	noSpace := normalizer.New(normalizer.WithTransformer(func() transform.Transformer {
-		return runes.Remove(runes.In(unicode.White_Space))
-	}))
+	// The unified diff holds "key: old" on row 0 and "key: new" on row 1.
+	// Both lines are line 1 of their revision, and a match names the row.
+	unified := diff.Diff(
+		niceyaml.NewSourceFromString("key: old\n").Lines(),
+		niceyaml.NewSourceFromString("key: new\n").Lines(),
+	).Unified()
 
 	tcs := map[string]struct {
 		view       *line.View
@@ -879,7 +826,7 @@ func TestFinder_Find_View(t *testing.T) {
 		},
 		"normalizer dropping whitespace joins held lines in a row": {
 			view:       gapped,
-			normalizer: noSpace,
+			normalizer: noSpace(),
 			search:     "xport",
 			want: position.Ranges{
 				position.NewRange(position.New(3, 6), position.New(4, 4)),
@@ -887,7 +834,7 @@ func TestFinder_Find_View(t *testing.T) {
 		},
 		"normalizer dropping whitespace does not join text across a gap": {
 			view:       gapped,
-			normalizer: noSpace,
+			normalizer: noSpace(),
 			search:     "1name",
 		},
 		"match that overlaps one crossing a gap": {
@@ -903,6 +850,28 @@ func TestFinder_Find_View(t *testing.T) {
 			want: position.Ranges{
 				position.NewRange(position.New(7, 0), position.New(7, 2)),
 				position.NewRange(position.New(8, 0), position.New(8, 2)),
+			},
+		},
+		"unified diff reports the row of a deleted line": {
+			view:   unified,
+			search: "old",
+			want: position.Ranges{
+				position.NewRange(position.New(0, 5), position.New(0, 8)),
+			},
+		},
+		"unified diff reports the row of an inserted line": {
+			view:   unified,
+			search: "new",
+			want: position.Ranges{
+				position.NewRange(position.New(1, 5), position.New(1, 8)),
+			},
+		},
+		"unified diff reports both rows of a change": {
+			view:   unified,
+			search: "key",
+			want: position.Ranges{
+				position.NewRange(position.New(0, 0), position.New(0, 3)),
+				position.NewRange(position.New(1, 0), position.New(1, 3)),
 			},
 		},
 		"match spans the rows of one hunk": {
@@ -959,64 +928,6 @@ func TestFinder_Find_ViewMarksItself(t *testing.T) {
 		"   5 | port: 80",
 		"     | ^^^^",
 	), view.String())
-}
-
-func TestFinder_Find_DiffBuiltLines(t *testing.T) {
-	t.Parallel()
-
-	// When a search runs over Lines built from a diff, matches land at the
-	// visual line positions rather than the original source Position.Line.
-	//
-	// Diff produces:
-	// Line 0 (idx=0): "key: old" (deleted, Position.Line=1)
-	// Line 1 (idx=1): "key: new" (inserted, Position.Line=1)
-	// Both lines share a source Position.Line but have different visual indices.
-
-	before := "key: old\n"
-	after := "key: new\n"
-
-	beforeLines := niceyaml.NewSourceFromString(before, niceyaml.WithName("before"))
-	afterLines := niceyaml.NewSourceFromString(after, niceyaml.WithName("after"))
-
-	lines := diff.Diff(beforeLines.Lines(), afterLines.Lines()).Unified()
-
-	tcs := map[string]struct {
-		search string
-		want   position.Ranges
-	}{
-		"search for 'old' finds match at visual line 0": {
-			search: "old",
-			want: position.Ranges{
-				position.NewRange(position.New(0, 5), position.New(0, 8)),
-			},
-		},
-		"search for 'new' finds match at visual line 1": {
-			search: "new",
-			want: position.Ranges{
-				position.NewRange(position.New(1, 5), position.New(1, 8)),
-			},
-		},
-		"search for 'key' finds matches at both visual lines": {
-			search: "key",
-			want: position.Ranges{
-				position.NewRange(position.New(0, 0), position.New(0, 3)),
-				position.NewRange(position.New(1, 0), position.New(1, 3)),
-			},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			f := finder.New()
-			idx := f.Load(lines)
-
-			got := idx.Find(tc.search)
-
-			assert.Equal(t, tc.want, got)
-		})
-	}
 }
 
 func TestFinder_Find_LineWithoutEnding(t *testing.T) {
@@ -1189,18 +1100,4 @@ func TestIndex_Find_Concurrent(t *testing.T) {
 	}
 
 	wg.Wait()
-}
-
-func TestIndex_Find_CoversDroppedTrailingRune(t *testing.T) {
-	t.Parallel()
-
-	// The accent is a combining mark that belongs to the "e" before it, and
-	// the normalizer drops it. A match ending at that "e" covers the accent,
-	// as a match ending inside an expansion covers the whole character, so
-	// the highlight ends where the next character begins.
-	source := niceyaml.NewSourceFromString("k: caféx\n")
-	idx := finder.New(finder.WithNormalizer(normalizer.New())).Load(source.Lines())
-
-	assert.Equal(t, position.Ranges{position.NewRange(position.New(0, 3), position.New(0, 8))}, idx.Find("café"))
-	assert.Equal(t, position.Ranges{position.NewRange(position.New(0, 6), position.New(0, 9))}, idx.Find("ex"))
 }
