@@ -3124,9 +3124,95 @@ func TestSchema_Check_Scope(t *testing.T) {
 		"additionalProperties": false
 	}`))
 
+	aliased := compileSchema(t, []byte(`{
+		"type": "object",
+		"properties": {
+			"c": {"additionalProperties": {"type": "string"}}
+		}
+	}`))
+
 	spec := paths.Current().Child("spec")
 
-	t.Run("violation resolves from the node", func(t *testing.T) {
+	// Each case validates the node at path, and the violation resolves
+	// from that node.
+	tcs := map[string]struct {
+		schema *schema.Schema
+		path   paths.Path
+		input  string
+		want   string
+		// Where the range of the error starts, counted from 0.
+		wantStart position.Position
+	}{
+		"violation": {
+			schema: v,
+			path:   spec,
+			input: stringtest.Input(`
+				replicas: 1
+				spec:
+				  replicas: many
+			`),
+			want:      `3:13: $.spec.replicas: expected "integer", got "string"`,
+			wantStart: position.New(2, 12),
+		},
+		// The key decodes to the member name 16, which the source spells
+		// 0x10, so the path names the member by its source spelling.
+		"decoded key": {
+			schema: v,
+			path:   spec,
+			input: stringtest.Input(`
+				0x10: 1
+				spec:
+				  0x10: hello
+			`),
+			want:      `3:9: $.spec.0x10: expected "integer", got "string"`,
+			wantStart: position.New(2, 8),
+		},
+		// The alias inside the node refers to an anchor outside it, and
+		// the path still names the member by its source spelling.
+		"decoded key behind an alias": {
+			schema: aliased,
+			path:   paths.Current().Child("b"),
+			input: stringtest.Input(`
+				a: &a {0x10: 1}
+				b:
+				  c: *a
+			`),
+			want:      `1:14: $.b.c.0x10: expected "string", got "integer"`,
+			wantStart: position.New(0, 13),
+		},
+		"additional property": {
+			schema: v,
+			path:   spec,
+			input: stringtest.Input(`
+				extra: 1
+				spec:
+				  extra: 1
+			`),
+			want:      `3:3: $.spec.extra~: value is not allowed`,
+			wantStart: position.New(2, 2),
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			dd := yamltest.FirstDocument(t, tc.input)
+
+			err := yamltest.At(t, dd, tc.path).Validate(t.Context(), tc.schema)
+
+			var bound *niceyaml.SourceError
+
+			require.ErrorAs(t, err, &bound)
+
+			rng, ok := bound.Range()
+			require.True(t, ok)
+			assert.Equal(t, tc.wantStart, rng.Start)
+			assert.Equal(t, tc.want, bound.Error())
+		})
+	}
+
+	t.Run("the whole document conforms where the node does not", func(t *testing.T) {
 		t.Parallel()
 
 		dd := yamltest.FirstDocument(t, stringtest.Input(`
@@ -3135,96 +3221,11 @@ func TestSchema_Check_Scope(t *testing.T) {
 			  replicas: many
 		`))
 
-		err := yamltest.At(t, dd, spec).Validate(t.Context(), v)
-
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
-
-		rng, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, position.New(2, 12), rng.Start)
-		assert.Equal(t, "3:13: $.spec.replicas: expected \"integer\", got \"string\"", bound.Error())
-
-		// The whole document conforms where the node does not.
+		require.Error(t, yamltest.At(t, dd, spec).Validate(t.Context(), v))
 		require.NoError(t, dd.Validate(t.Context(), compileSchema(t, []byte(`{
 			"type": "object",
 			"properties": {"replicas": {"type": "integer"}}
 		}`))))
-	})
-
-	t.Run("decoded key resolves from the node", func(t *testing.T) {
-		t.Parallel()
-
-		// The key decodes to the member name 16, which the source spells
-		// 0x10, so the path names the member by its source spelling and
-		// resolves from the node.
-		dd := yamltest.FirstDocument(t, stringtest.Input(`
-			0x10: 1
-			spec:
-			  0x10: hello
-		`))
-
-		err := yamltest.At(t, dd, spec).Validate(t.Context(), v)
-
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
-
-		rng, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, position.New(2, 8), rng.Start)
-		assert.Equal(t, "3:9: $.spec.0x10: expected \"integer\", got \"string\"", bound.Error())
-	})
-
-	t.Run("decoded key behind an alias resolves from the node", func(t *testing.T) {
-		t.Parallel()
-
-		// The alias inside the node refers to an anchor outside it, and
-		// the path still names the member by its source spelling.
-		dd := yamltest.FirstDocument(t, stringtest.Input(`
-			a: &a {0x10: 1}
-			b:
-			  c: *a
-		`))
-
-		aliased := compileSchema(t, []byte(`{
-			"type": "object",
-			"properties": {
-				"c": {"additionalProperties": {"type": "string"}}
-			}
-		}`))
-
-		err := yamltest.At(t, dd, paths.Current().Child("b")).Validate(t.Context(), aliased)
-
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
-
-		rng, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, position.New(0, 13), rng.Start)
-		assert.Equal(t, "1:14: $.b.c.0x10: expected \"string\", got \"integer\"", bound.Error())
-	})
-
-	t.Run("additional property resolves from the node", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, stringtest.Input(`
-			extra: 1
-			spec:
-			  extra: 1
-		`))
-
-		err := yamltest.At(t, dd, spec).Validate(t.Context(), v)
-
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
-
-		rng, ok := bound.Range()
-		require.True(t, ok)
-		assert.Equal(t, position.New(2, 2), rng.Start)
 	})
 }
 
