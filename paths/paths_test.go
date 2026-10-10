@@ -1501,24 +1501,12 @@ func TestParse_Invalid(t *testing.T) {
 		expr string
 		want string
 	}{
-		"empty": {
-			expr: "",
-		},
-		"no anchor": {
-			expr: "foo",
-		},
-		"anchor after a selector": {
-			expr: ".foo$",
-		},
-		"two anchors": {
-			expr: "$@",
-		},
-		"two anchors the other way": {
-			expr: "@$",
-		},
-		"trailing dot after current": {
-			expr: "@.",
-		},
+		"empty":                      {expr: ""},
+		"no anchor":                  {expr: "foo"},
+		"anchor after a selector":    {expr: ".foo$"},
+		"two anchors":                {expr: "$@"},
+		"two anchors the other way":  {expr: "@$"},
+		"trailing dot after current": {expr: "@."},
 		"bare text after current": {
 			expr: "@foo",
 			want: `parse path "@foo": invalid path: unexpected 'f' at 1`,
@@ -1527,31 +1515,17 @@ func TestParse_Invalid(t *testing.T) {
 			expr: ".foo",
 			want: `parse path ".foo": invalid path: expression must start with $ or @`,
 		},
-		"trailing dot": {
-			expr: "$.",
-		},
-		"unclosed bracket": {
-			expr: "$[",
-		},
-		"empty index": {
-			expr: "$[]",
-		},
-		"negative index": {
-			expr: "$[-1]",
-		},
-		"negative zero index": {
-			expr: "$[-0]",
-		},
+		"trailing dot":        {expr: "$."},
+		"unclosed bracket":    {expr: "$["},
+		"empty index":         {expr: "$[]"},
+		"negative index":      {expr: "$[-1]"},
+		"negative zero index": {expr: "$[-0]"},
 		"index with a leading zero": {
 			expr: "$[01]",
 			want: `parse path "$[01]": invalid path: index "01": not a canonical non-negative integer`,
 		},
-		"index with a plus sign": {
-			expr: "$[+1]",
-		},
-		"non-numeric index": {
-			expr: "$[a]",
-		},
+		"index with a plus sign": {expr: "$[+1]"},
+		"non-numeric index":      {expr: "$[a]"},
 		"index overflows int": {
 			expr: "$[99999999999999999999]",
 			want: `parse path "$[99999999999999999999]": invalid path: ` +
@@ -1561,45 +1535,25 @@ func TestParse_Invalid(t *testing.T) {
 			expr: "$.*a",
 			want: `parse path "$.*a": invalid path: unexpected '*' in selector "*a"`,
 		},
-		"star after a name": {
-			expr: "$.a*",
-		},
-		"two stars": {
-			expr: "$.**",
-		},
+		"star after a name": {expr: "$.a*"},
+		"two stars":         {expr: "$.**"},
 		"recursive star before a name": {
 			expr: "$..*a",
 			want: `parse path "$..*a": invalid path: unexpected '*' in selector "*a"`,
 		},
-		"recursive star after a name": {
-			expr: "$..a*",
-		},
-		"two recursive stars": {
-			expr: "$..**",
-		},
-		"recursive star before a quoted name": {
-			expr: "$..*'a'",
-		},
-		"star before a quoted name": {
-			expr: "$.*'a'",
-		},
-		"unterminated quote": {
-			expr: "$.'foo",
-		},
-		"unterminated escape": {
-			expr: `$.'a\`,
-		},
+		"recursive star after a name":         {expr: "$..a*"},
+		"two recursive stars":                 {expr: "$..**"},
+		"recursive star before a quoted name": {expr: "$..*'a'"},
+		"star before a quoted name":           {expr: "$.*'a'"},
+		"unterminated quote":                  {expr: "$.'foo"},
+		"unterminated escape":                 {expr: `$.'a\`},
 		"unicode escape with too few digits": {
 			expr: `$.'a\u00'`,
 			want: `parse path "$.'a\\u00'": invalid path: ` +
 				`\u escape in quoted selector needs four hexadecimal digits`,
 		},
-		"unicode escape at the end": {
-			expr: `$.'a\u`,
-		},
-		"unicode escape with a digit that is not hexadecimal": {
-			expr: `$.'a\u00zz'`,
-		},
+		"unicode escape at the end":                           {expr: `$.'a\u`},
+		"unicode escape with a digit that is not hexadecimal": {expr: `$.'a\u00zz'`},
 		"unicode escape of a surrogate half": {
 			expr: `$.'a\ud800'`,
 			want: `parse path "$.'a\\ud800'": invalid path: ` +
@@ -1609,9 +1563,7 @@ func TestParse_Invalid(t *testing.T) {
 			expr: "$foo",
 			want: `parse path "$foo": invalid path: unexpected 'f' at 1`,
 		},
-		"bare text after key selector": {
-			expr: "$.a~b",
-		},
+		"bare text after key selector": {expr: "$.a~b"},
 		"non-ASCII after root": {
 			expr: "$é",
 			want: `parse path "$é": invalid path: unexpected 'é' at 1`,
@@ -4244,34 +4196,13 @@ func TestPath_Node_NestedMergeLists(t *testing.T) {
 		name string
 		want string
 	}{
-		"key of the last source": {
-			name: "g",
-			want: "G",
-		},
-		"key of the longest list": {
-			name: "k",
-			want: "A",
-		},
-		"key of a source before the longest list": {
-			name: "i",
-			want: "I",
-		},
-		"key of the first source of the middle list": {
-			name: "j",
-			want: "J",
-		},
-		"key of the first source": {
-			name: "h",
-			want: "H",
-		},
-		"key of the mapping itself": {
-			name: "own",
-			want: "C",
-		},
-		"key that no source holds": {
-			name: "nope",
-			err:  paths.ErrNotFound,
-		},
+		"key of the last source":                     {name: "g", want: "G"},
+		"key of the longest list":                    {name: "k", want: "A"},
+		"key of a source before the longest list":    {name: "i", want: "I"},
+		"key of the first source of the middle list": {name: "j", want: "J"},
+		"key of the first source":                    {name: "h", want: "H"},
+		"key of the mapping itself":                  {name: "own", want: "C"},
+		"key that no source holds":                   {name: "nope", err: paths.ErrNotFound},
 	}
 
 	for name, tc := range tcs {
