@@ -1373,52 +1373,6 @@ func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
 	assert.Empty(t, got)
 }
 
-func TestPrinter_Fprint(t *testing.T) {
-	t.Parallel()
-
-	t.Run("writes same output as Print", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key: value
-			list:
-			  - one
-			  - two
-		`)
-		source := niceyaml.NewSourceFromString(input)
-		p := testPrinter()
-
-		var sb strings.Builder
-
-		n, err := p.Fprint(&sb, source.View())
-
-		require.NoError(t, err)
-		assert.Equal(t, p.Print(source.View()), sb.String())
-		assert.Equal(t, len(sb.String()), n)
-	})
-
-	t.Run("returns write errors", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("key: value")
-		p := testPrinter()
-
-		_, err := p.Fprint(failingWriter{}, source.View())
-
-		require.ErrorIs(t, err, errWriteFailed)
-	})
-}
-
-// errWriteFailed is the sentinel failingWriter returns.
-var errWriteFailed = errors.New("write failed")
-
-// failingWriter always fails, so tests can reach the error paths of Fprint.
-type failingWriter struct{}
-
-func (failingWriter) Write([]byte) (int, error) {
-	return 0, errWriteFailed
-}
-
 func TestNewPrinter(t *testing.T) {
 	t.Parallel()
 

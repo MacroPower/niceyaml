@@ -2,7 +2,6 @@ package printer
 
 import (
 	"fmt"
-	"io"
 	"slices"
 	"strconv"
 	"strings"
@@ -55,14 +54,9 @@ const wrapOnCharacters = " " + breakpoints
 //	p.Print(view)                       // All lines.
 //	p.Print(view.Slice(span1, span2))   // The lines of two spans.
 //
-// Use [Printer.Fprint] to write the rendered output to an [io.Writer] instead
-// of returning it as a string:
-//
-//	p.Fprint(w, view)
-//
-// The output holds 24-bit color escape sequences whatever w supports. The
-// package documentation covers the writers that fit them to a terminal, a
-// pipe, or a file.
+// The output holds 24-bit color escape sequences whatever the destination
+// supports. The package documentation covers the functions that fit them
+// to a terminal, a pipe, or a file.
 //
 // # Errors
 //
@@ -914,21 +908,6 @@ func (p *Printer) ContainerStyle() lipgloss.Style {
 // printer's [style.Styler].
 func (p *Printer) Style(s kind.Kind) lipgloss.Style {
 	return p.styles.Style(s)
-}
-
-// Fprint renders view to w as [Printer.Print] does. It writes the escape
-// sequences of the output unchanged, whatever w supports, so a program
-// that prints to a terminal passes a writer that fits them to it, as the
-// package documentation describes.
-//
-// It returns the number of bytes written and any write error encountered.
-func (p *Printer) Fprint(w io.Writer, view *line.View) (int, error) {
-	n, err := io.WriteString(w, p.Print(view))
-	if err != nil {
-		return n, fmt.Errorf("write rendered output: %w", err)
-	}
-
-	return n, nil
 }
 
 // Print renders each line of view as one row for each wrapped piece of its

@@ -3,7 +3,7 @@
 // A [Printer] takes a [line.View], such as the view of a niceyaml Source,
 // and renders it with syntax highlighting through [lipgloss.Style] values
 // from a [style.Styler]. Create one with [New] and render with
-// [Printer.Print] or [Printer.Fprint]:
+// [Printer.Print]:
 //
 //	p := printer.New(printer.WithStyles(theme.Charm))
 //	lipgloss.Println(p.Print(source.View()))
@@ -15,9 +15,9 @@
 //
 // A Printer writes every color as a 24-bit escape sequence, whatever the
 // output supports. [Printer.Print] and [Printer.PrintError] return those
-// sequences, and [Printer.Fprint] writes them to its writer unchanged, so
-// [fmt.Println] sends them to a pipe, to a file, and to a terminal that
-// has NO_COLOR set. The lipgloss print functions fit the sequences to
+// sequences unchanged, so [fmt.Println] sends them to a pipe, to a file,
+// and to a terminal that has NO_COLOR set. The lipgloss print functions
+// fit the sequences to
 // their destination instead. They convert each color to one the terminal
 // supports, drop the colors under NO_COLOR, and drop every sequence when
 // the output is not a terminal:
@@ -39,7 +39,7 @@
 //	if forceColor {
 //		w.Profile = colorprofile.TrueColor
 //	}
-//	p.Fprint(w, view)
+//	fmt.Fprintln(w, p.Print(view))
 //
 // NewWriter and [lipgloss.Fprintln] detect the profile on every call,
 // which inside tmux starts a process, so a program that prints many views
