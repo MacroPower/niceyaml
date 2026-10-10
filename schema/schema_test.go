@@ -3295,7 +3295,7 @@ func TestSchema_Check_SyntaxError(t *testing.T) {
 			assert.Same(t, docs[1].Err(), docs[1].Validate(t.Context(), v))
 
 			// The first document parsed, so the schema checks it.
-			err := v.Check(t.Context(), docs[0])
+			err := docs[0].Validate(t.Context(), v)
 			if tc.err == "" {
 				require.NoError(t, err)
 			} else {
@@ -3393,7 +3393,7 @@ func TestSchema_Check_Bound(t *testing.T) {
 				node = yamltest.At(t, node, tc.path)
 			}
 
-			err := v.Check(t.Context(), node)
+			err := node.Validate(t.Context(), v)
 			if tc.want == "" {
 				require.NoError(t, err)
 
@@ -3410,11 +3410,33 @@ func TestSchema_Check_Bound(t *testing.T) {
 
 			require.ErrorAs(t, err, &bound)
 			assert.Same(t, node, bound.Node())
-
-			// The node returns the same error for the schema.
-			require.EqualError(t, node.Validate(t.Context(), v), tc.want)
 		})
 	}
+
+	t.Run("a direct call returns a violation as the schema wrote it", func(t *testing.T) {
+		t.Parallel()
+
+		item := yamltest.At(t, yamltest.FirstDocumentWithPath(t, menu, "menu.yaml"), itemPath)
+
+		err := v.Check(t.Context(), item)
+		require.EqualError(t, err, "-2 is less than 0")
+
+		var bound *niceyaml.SourceError
+
+		require.NotErrorAs(t, err, &bound)
+
+		// The path reads from the node the schema got, and the node
+		// resolves it when it binds the error.
+		var violation *niceyaml.Error
+
+		require.ErrorAs(t, err, &violation)
+
+		path, ok := violation.Path()
+		require.True(t, ok)
+		assert.Equal(t, "@.price", path.String())
+
+		require.EqualError(t, item.Validate(t.Context(), v), "menu.yaml:4:12: $.items[1].price: -2 is less than 0")
+	})
 
 	t.Run("a validator that runs the schema on each element reports the element", func(t *testing.T) {
 		t.Parallel()
@@ -3426,7 +3448,7 @@ func TestSchema_Check_Bound(t *testing.T) {
 			}
 
 			for _, item := range items {
-				err := v.Check(ctx, item)
+				err := item.Validate(ctx, v)
 				if err != nil {
 					return err //nolint:wrapcheck // The test inspects the error as it is.
 				}
@@ -3451,7 +3473,7 @@ func TestSchema_Check_Bound(t *testing.T) {
 
 		other := yamltest.FirstDocumentWithPath(t, "# other\nprice: -1\n", "other.yaml")
 		include := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
-			return v.Check(ctx, other)
+			return other.Validate(ctx, v)
 		})
 
 		err := yamltest.FirstDocumentWithPath(t, menu, "menu.yaml").Validate(t.Context(), include)
@@ -4289,9 +4311,10 @@ func TestSchema_RefToRejectingSchema(t *testing.T) {
 
 			require.ErrorAs(t, err, &nerr)
 
+			// Check writes the path from the node it got.
 			path, ok := nerr.Path()
 			require.True(t, ok)
-			assert.Equal(t, "$.a", path.String())
+			assert.Equal(t, "@.a", path.String())
 		})
 	}
 }

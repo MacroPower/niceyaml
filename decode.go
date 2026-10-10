@@ -265,14 +265,15 @@ type SelfValidator interface {
 // or file path. Pass one to [Node.Decode] with [WithValidator], or run
 // one on its own with [Node.Validate]. Check checks the Node it gets,
 // which is the root of a document or a Node from [Node.At], and returns
-// its errors relative to that Node: an [*Error] whose `@` path reads
-// from the Node, a plain error, or an error a Node bound already. The
-// Node that runs the validator binds what it returns, as [Node.Bind]
-// binds an error, so the error names the source the validator read and
-// its `@` paths resolve from the Node. An Error from [NewError] or
-// [Invalid] says what is wrong with the document, and any other error
-// says the check could not run. A document that did not parse never
-// reaches a validator that a decode or Node.Validate runs.
+// its errors as it wrote them from that Node: an [*Error] whose `@` path
+// reads from the Node, a plain error, or an error a Node bound already.
+// Check is the raw step, and the validators this module ships return
+// their errors that way too. Node.Validate and a decode bind what Check
+// returns, as [Node.Bind] binds an error, so the error names the source
+// the validator read and its `@` paths resolve from the Node. An Error
+// from [NewError] or [Invalid] says what is wrong with the document, and
+// any other error says the check could not run. A document that did not
+// parse never reaches a validator that a decode or Node.Validate runs.
 //
 // See [ValidatorFunc], [MultiValidator], [ChainValidator], [SkipEmpty],
 // [go.jacobcolvin.com/niceyaml/schema.Schema], and
@@ -363,22 +364,17 @@ type SelfValidator interface {
 // each element of a list, runs it through [Node.Validate] and returns
 // the error as it is:
 //
-//	items, err := n.Nodes(itemsPath)
-//	if err != nil {
-//		return err
-//	}
-//
 //	for _, item := range items {
 //		if err := item.Validate(ctx, inner); err != nil {
 //			return err // bound at $.items[i]
 //		}
 //	}
 //
-// A call to inner.Check(ctx, item) returns the error as inner wrote it
-// instead, relative to item. The Node that runs the outer validator then
-// binds it, and its `@` paths resolve from that Node rather than from
-// item. In the c.yaml below, a rule that reserves the name admin rejects
-// the second item:
+// A call to inner.Check(ctx, item) returns the error as inner wrote it,
+// with its `@` paths reading from item. The Node that runs the outer
+// validator then binds it and resolves those paths from itself. In the
+// c.yaml below, a rule that reserves the name admin rejects the second
+// item:
 //
 //	name: lunch
 //	items:
@@ -467,10 +463,9 @@ type Validator interface {
 //	})
 //
 // The function writes its errors from the Node it got, as [Validator]
-// asks, so its body is also right as the Check method of a type. Check
-// binds through n the error the function returns, and leaves a bound
-// error as it is, so a direct call to Check returns what [Node.Validate]
-// returns for the function.
+// asks, and Check returns what the function returns. The body of a
+// ValidatorFunc is thus also right as the Check method of a type, and
+// the two return the same error for the same Node.
 //
 // A check that knows nothing of YAML returns a plain error, which
 // declares no fault. The function declares the document at fault for
@@ -480,16 +475,17 @@ type Validator interface {
 //	return niceyaml.Invalid(check(v))
 type ValidatorFunc func(ctx context.Context, n *Node) error
 
-// Check implements [Validator]. It calls f and binds the error f
-// returns through n, so a nil [*Error] or [*SourceError] pointer from f
-// comes back as a nil error. For a document that did not parse, it
-// returns the syntax error [Node.Err] returns without calling f.
+// Check implements [Validator]. It returns what f returns, as f wrote
+// it, so a nil [*Error] or [*SourceError] pointer from f comes back as
+// that pointer, which [Node.Validate] reads as no failure. For a
+// document that did not parse, it returns the syntax error [Node.Err]
+// returns without calling f.
 func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 	if n.doc.err != nil {
 		return n.doc.err
 	}
 
-	return n.Bind(f(ctx, n))
+	return f(ctx, n)
 }
 
 // MultiValidator returns a [Validator] that runs every validator in
@@ -506,17 +502,17 @@ func (f ValidatorFunc) Check(ctx context.Context, n *Node) error {
 // one to have passed goes in a ChainValidator instead. The run skips a
 // nil validator, and one that holds a nil pointer or func.
 //
-// MultiValidator binds each failure through the node, whether or not the
-// validator that returned it did. Two or more failures come back joined
-// in the order given, so [errors.Is] matches any one of them and the
-// decode renders them as one tree. Each line of the message carries the
-// source and the position of its own failure:
+// Two or more failures come back joined in the order given, each as the
+// validator wrote it, so [errors.Is] matches any one of them. The Node
+// that runs the MultiValidator binds the join as one tree, as [Node.Bind]
+// describes, so each failure binds at its own location and each line of
+// the message carries the source and the position of its own failure:
 //
 //	svc.yaml:1:7: $.name: reserved name
 //	svc.yaml:2:7: $.port: 0 is less than 1
 //
-// A decode binds the join, and the message of that binding lists the
-// failures in the order of their positions, as the tree shows them.
+// The message of that binding lists the failures in the order of their
+// positions, as the tree shows them.
 //
 // A lone failure comes back as it would if that validator ran alone. No
 // failure is no error. A context that ends stops the run, and the error
@@ -538,7 +534,7 @@ func MultiValidator(validators ...Validator) Validator {
 
 			err := ctx.Err()
 			if err != nil {
-				return err //nolint:wrapcheck // The context names the reason, and ValidatorFunc binds it.
+				return err //nolint:wrapcheck // The context names the reason, and the Node that runs the validator binds it.
 			}
 
 			// A typed nil pointer is no failure, as [Node.Bind] reads it.
@@ -548,12 +544,10 @@ func MultiValidator(validators ...Validator) Validator {
 			}
 
 			if ctx.Err() != nil {
-				return err //nolint:wrapcheck // The validator's own error, which ValidatorFunc binds.
+				return err //nolint:wrapcheck // The validator's own error, which the Node that runs the validator binds.
 			}
 
-			// Each failure binds on its own, so each line of the joined
-			// message carries its own position.
-			errs = append(errs, n.Bind(err))
+			errs = append(errs, err)
 		}
 
 		switch len(errs) {
@@ -589,9 +583,9 @@ func MultiValidator(validators ...Validator) Validator {
 //	doc.Decode[Config](ctx, niceyaml.WithValidator(niceyaml.ChainValidator(schema, refs)))
 //	doc.Decode[Config](ctx, niceyaml.WithValidator(schema), niceyaml.WithValidator(refs))
 //
-// ChainValidator binds the failure through the node when the validator
-// left it unbound and returns a bound error as it is, so the failure
-// comes back as it would if that validator ran alone.
+// The failure comes back as the validator wrote it, so the Node that
+// runs the ChainValidator binds it as it binds the failure of that
+// validator alone.
 //
 // ChainValidator copies the validators it gets, so a caller that edits
 // the slice it passed changes nothing in the Validator.
@@ -599,7 +593,21 @@ func ChainValidator(validators ...Validator) Validator {
 	validators = slices.Clone(validators)
 
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
-		return n.validate(ctx, validators)
+		for _, dv := range validators {
+			if nilness.IsNil(dv) {
+				continue
+			}
+
+			// A typed nil pointer is no failure, as [Node.Bind] reads it.
+			err := dv.Check(ctx, n)
+			if isNothing(err) {
+				continue
+			}
+
+			return err //nolint:wrapcheck // The validator's own error, which the Node that runs the validator binds.
+		}
+
+		return nil
 	})
 }
 
@@ -633,17 +641,17 @@ func ChainValidator(validators ...Validator) Validator {
 // that [Node.At] or [Node.Nodes] scopes below the root is not a
 // document, so v runs on it.
 //
-// SkipEmpty runs v as [Node.Validate] runs it. The error of v comes
-// back bound through the Node whether or not v bound it, and a nil v
-// passes every Node. SkipEmpty takes one validator, and it wraps the one
-// that [MultiValidator] or [ChainValidator] makes of several.
+// SkipEmpty returns the error of v as v wrote it, and a nil v passes
+// every Node. SkipEmpty takes one validator, and it wraps the one that
+// [MultiValidator] or [ChainValidator] makes of several.
 func SkipEmpty(v Validator) Validator {
 	return ValidatorFunc(func(ctx context.Context, n *Node) error {
-		if n.IsEmpty() {
+		if n.IsEmpty() || nilness.IsNil(v) {
 			return nil
 		}
 
-		return n.Validate(ctx, v)
+		//nolint:wrapcheck // The validator's own error, which the Node that runs the validator binds.
+		return v.Check(ctx, n)
 	})
 }
 
@@ -2192,14 +2200,14 @@ func (e notFoundError) Unwrap() error {
 // error names the source. A Node from [Node.At] or [Node.Nodes] also
 // points an error with no location at its own value, as Node.Bind
 // describes. An error the validator bound itself comes back as it is.
-// Validate is thus the way to run a validator, the caller's own or one
-// it did not write, and the way a validator runs another on a Node of
-// its choosing. A direct call to the Check method of a validator returns
-// the error as the validator wrote it. A validator that binds what it
-// returns, as a [ValidatorFunc] and the validators of
-// [go.jacobcolvin.com/niceyaml/schema] do, gives the error Validate
-// returns. Any other gives an error that names no source, with its `@`
-// paths as the validator wrote them.
+// A direct call to the Check method of a validator is the raw step. It
+// returns the error as the validator wrote it, whichever validator it
+// is: an unbound error names no source and its `@` paths read from the
+// Node the validator got, and an error the validator bound itself is
+// bound already. Validate is thus the way to run a validator, the
+// caller's own or one it did not write, and the way a validator runs
+// another on a Node of its choosing, as item.Validate(ctx, inner) runs
+// inner on an element.
 //
 // A document that did not parse fails before v runs, with the syntax
 // error [Node.Err] returns, even when v is nil. A caller that validates

@@ -2973,7 +2973,9 @@ func TestNode_Bind_Scope(t *testing.T) {
 			return plain
 		})
 
-		require.EqualError(t, fn.Check(t.Context(), hours), want)
+		// A direct call returns the error as the function wrote it, and
+		// the Node binds it at the scope.
+		require.Same(t, plain, fn.Check(t.Context(), hours))
 		require.EqualError(t, hours.Validate(t.Context(), fn), want)
 
 		// Validate binds the error a validator leaves unbound.
@@ -3613,6 +3615,30 @@ type fieldValidator struct {
 
 func (v *fieldValidator) Check(context.Context, *niceyaml.Node) error {
 	return v.err
+}
+
+// negativePrice rejects a price below zero. It is a validator of a type
+// of its own, with a body a [niceyaml.ValidatorFunc] can hold as it is.
+type negativePrice struct{}
+
+func (negativePrice) Check(ctx context.Context, n *niceyaml.Node) error {
+	pricePath := paths.Current().Child("price")
+
+	node, err := n.At(pricePath)
+	if err != nil {
+		return err //nolint:wrapcheck // The test inspects the error as it is.
+	}
+
+	price, err := node.Decode[int](ctx)
+	if err != nil {
+		return err
+	}
+
+	if price < 0 {
+		return niceyaml.NewError("negative price", niceyaml.AtPath(pricePath))
+	}
+
+	return nil
 }
 
 func TestDocument_Err(t *testing.T) {
@@ -11441,15 +11467,18 @@ func TestErrDecode(t *testing.T) {
 }
 
 // TestValidator_DirectCall calls the Check method of every validator the
-// library ships, which binds the error of the validator it wraps as
-// [niceyaml.Node.Validate] would.
+// library ships. Each returns the error as the validator it wraps wrote
+// it, and [niceyaml.Node.Validate] binds it. A Registry binds the error
+// of its lookup through the root of the document itself and runs the
+// schema it finds through Node.Validate, so a direct call to it returns
+// what Node.Validate returns.
 func TestValidator_DirectCall(t *testing.T) {
 	t.Parallel()
 
 	itemPath := paths.Doc().Child("items").Index(1)
 
-	// A rule of a type of its own that leaves its error unbound, so the
-	// validator around it has an error to bind.
+	// A rule of a type of its own that leaves its error unbound, as
+	// [niceyaml.Validator] asks.
 	rule := &fieldValidator{
 		err: niceyaml.NewError("reserved name", niceyaml.AtPath(paths.Current().Child("name"))),
 	}
@@ -11464,42 +11493,52 @@ func TestValidator_DirectCall(t *testing.T) {
 		v niceyaml.Validator
 		// The Node the validator runs on.
 		path paths.Path
+		// The message of the error a direct call to Check returns.
+		raw string
+		// The message of the error Node.Validate returns.
 		want string
 	}{
 		"Schema": {
 			v:    nameSchema,
 			path: itemPath,
+			raw:  "should not validate against the schema",
 			want: "c.yaml:4:11: $.items[1].name: should not validate against the schema",
 		},
 		"Registry refuses a scoped Node": {
 			v:    reg,
 			path: itemPath,
+			raw:  "c.yaml: registry needs a whole document: node is scoped to $.items[1]",
 			want: "c.yaml: registry needs a whole document: node is scoped to $.items[1]",
 		},
 		"Registry at the root": {
 			v:    reg,
 			path: paths.Doc(),
+			raw:  "c.yaml:1:7: $.name: should not validate against the schema",
 			want: "c.yaml:1:7: $.name: should not validate against the schema",
 		},
 		"ValidatorFunc": {
 			v:    niceyaml.ValidatorFunc(rule.Check),
 			path: itemPath,
+			raw:  "reserved name",
 			want: "c.yaml:4:11: $.items[1].name: reserved name",
 		},
 		"MultiValidator": {
 			v:    niceyaml.MultiValidator(rule, nameSchema),
 			path: itemPath,
+			raw:  "reserved name\nshould not validate against the schema",
 			want: "c.yaml:4:11: $.items[1].name: reserved name\n" +
 				"c.yaml:4:11: $.items[1].name: should not validate against the schema",
 		},
 		"ChainValidator": {
 			v:    niceyaml.ChainValidator(rule, nameSchema),
 			path: itemPath,
+			raw:  "reserved name",
 			want: "c.yaml:4:11: $.items[1].name: reserved name",
 		},
 		"SkipEmpty": {
 			v:    niceyaml.SkipEmpty(rule),
 			path: itemPath,
+			raw:  "reserved name",
 			want: "c.yaml:4:11: $.items[1].name: reserved name",
 		},
 	}
@@ -11516,8 +11555,8 @@ func TestValidator_DirectCall(t *testing.T) {
 			`), niceyaml.WithName("c.yaml"))
 			node := yamltest.At(t, doc, tc.path)
 
-			err := tc.v.Check(t.Context(), node)
-			require.EqualError(t, err, tc.want)
+			require.EqualError(t, tc.v.Check(t.Context(), node), tc.raw)
+			require.EqualError(t, node.Validate(t.Context(), tc.v), tc.want)
 		})
 	}
 }
@@ -11598,10 +11637,12 @@ func TestValidatorFunc_Check(t *testing.T) {
 
 			validator := rejectingValidator(tc.returns)
 
-			err := validator.Check(t.Context(), tc.node)
+			// A direct call returns the error as the function wrote it.
+			assert.Equal(t, tc.returns, validator.Check(t.Context(), tc.node))
+
+			err := tc.node.Validate(t.Context(), validator)
 			if tc.want == "" {
 				require.NoError(t, err)
-				require.NoError(t, tc.node.Validate(t.Context(), validator))
 
 				return
 			}
@@ -11611,11 +11652,32 @@ func TestValidatorFunc_Check(t *testing.T) {
 			var bound *niceyaml.SourceError
 
 			require.ErrorAs(t, err, &bound)
-
-			// The node returns the same error for the validator.
-			require.EqualError(t, tc.node.Validate(t.Context(), validator), tc.want)
 		})
 	}
+
+	t.Run("returns what the same body returns as the method of a type", func(t *testing.T) {
+		t.Parallel()
+
+		method := negativePrice{}
+		fn := niceyaml.ValidatorFunc(method.Check)
+
+		tcs := map[string]struct {
+			node *niceyaml.Node
+		}{
+			"a value the rule accepts":     {node: doc},
+			"a value the rule rejects":     {node: item},
+			"a value that does not decode": {node: yamltest.FirstDocument(t, "price: high\n")},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				assert.Equal(t, method.Check(t.Context(), tc.node), fn.Check(t.Context(), tc.node))
+				assert.Equal(t, tc.node.Validate(t.Context(), method), tc.node.Validate(t.Context(), fn))
+			})
+		}
+	})
 
 	t.Run("a validator that runs another on each element reports the element", func(t *testing.T) {
 		t.Parallel()
@@ -11644,7 +11706,7 @@ func TestValidatorFunc_Check(t *testing.T) {
 			}
 
 			for _, it := range items {
-				err := perItem.Check(ctx, it)
+				err := it.Validate(ctx, perItem)
 				if err != nil {
 					return err //nolint:wrapcheck // The test inspects the error as it is.
 				}
@@ -11668,7 +11730,7 @@ func TestValidatorFunc_Check(t *testing.T) {
 			return niceyaml.NewError("no price", niceyaml.AtPath(pricePath))
 		})
 		include := niceyaml.ValidatorFunc(func(ctx context.Context, _ *niceyaml.Node) error {
-			return zero.Check(ctx, other)
+			return other.Validate(ctx, zero)
 		})
 
 		require.EqualError(t, doc.Validate(t.Context(), include), "other.yaml:2:8: $.price: no price")
@@ -11678,7 +11740,7 @@ func TestValidatorFunc_Check(t *testing.T) {
 		t.Parallel()
 
 		wrapped := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
-			return fmt.Errorf("menu check: %w", rejectingValidator(negative).Check(ctx, n))
+			return fmt.Errorf("menu check: %w", n.Validate(ctx, rejectingValidator(negative)))
 		})
 
 		err := doc.Validate(t.Context(), wrapped)
@@ -11701,7 +11763,7 @@ func TestMultiValidator(t *testing.T) {
 		return niceyaml.Invalid(errB, niceyaml.AtPath(paths.Current().Child("a", "b")))
 	})
 	badC := niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
-		// A validator that binds its own error, as a schema does.
+		// A validator that binds its own error, as [niceyaml.Validator] allows.
 		return n.Bind(niceyaml.Invalid(errC, niceyaml.AtPath(paths.Current().Child("a", "c"))))
 	})
 	// A validator of a type of its own that leaves its error unbound.
@@ -11819,8 +11881,8 @@ func TestMultiValidator(t *testing.T) {
 		tcs := map[string]struct {
 			first niceyaml.Validator
 		}{
-			"a validator that binds its error":          {first: badB},
-			"a validator that leaves its error unbound": {first: unboundB},
+			"a ValidatorFunc that leaves its error unbound":   {first: badB},
+			"a type of its own that leaves its error unbound": {first: unboundB},
 		}
 
 		for name, tc := range tcs {
@@ -11830,7 +11892,11 @@ func TestMultiValidator(t *testing.T) {
 				multi := niceyaml.MultiValidator(tc.first, badC)
 
 				require.EqualError(t, doc.Validate(t.Context(), multi), want)
-				require.EqualError(t, multi.Check(t.Context(), doc), want)
+
+				// A direct call joins the failures as the validators wrote
+				// them, so the one badC bound keeps its position and the
+				// other has none.
+				require.EqualError(t, multi.Check(t.Context(), doc), "bad b\nx.yaml:3:6: $.a.c: bad c")
 			})
 		}
 	})
@@ -12056,7 +12122,7 @@ func TestChainValidator(t *testing.T) {
 		assert.Empty(t, order)
 	})
 
-	t.Run("binds the failure as Node.Validate binds it", func(t *testing.T) {
+	t.Run("returns the failure as the validator wrote it", func(t *testing.T) {
 		t.Parallel()
 
 		doc := newDoc(t)
@@ -12068,7 +12134,7 @@ func TestChainValidator(t *testing.T) {
 			node *niceyaml.Node
 			want string
 		}{
-			"a validator that binds its error": {
+			"a ValidatorFunc that leaves its error unbound": {
 				v:    first,
 				node: doc,
 				want: "x.yaml:3:7: $.name: first rule",
@@ -12109,20 +12175,18 @@ func TestChainValidator(t *testing.T) {
 
 				chain := niceyaml.ChainValidator(passing, tc.v, second)
 
-				// A direct call returns the error Node.Validate returns.
-				for _, err := range []error{
-					tc.node.Validate(t.Context(), chain),
-					chain.Check(t.Context(), tc.node),
-				} {
-					require.EqualError(t, err, tc.want)
-					assert.Equal(t, niceyaml.IsInvalid(alone), niceyaml.IsInvalid(err))
-					assert.Equal(t, niceyaml.FormatError(alone), niceyaml.FormatError(err))
+				// A direct call returns the error as the validator wrote it.
+				assert.Equal(t, tc.v.Check(t.Context(), tc.node), chain.Check(t.Context(), tc.node))
 
-					var bound *niceyaml.SourceError
+				err := tc.node.Validate(t.Context(), chain)
+				require.EqualError(t, err, tc.want)
+				assert.Equal(t, niceyaml.IsInvalid(alone), niceyaml.IsInvalid(err))
+				assert.Equal(t, niceyaml.FormatError(alone), niceyaml.FormatError(err))
 
-					require.ErrorAs(t, err, &bound)
-					assert.Same(t, tc.node, bound.Node())
-				}
+				var bound *niceyaml.SourceError
+
+				require.ErrorAs(t, err, &bound)
+				assert.Same(t, tc.node, bound.Node())
 			})
 		}
 	})
@@ -12420,7 +12484,7 @@ func TestSkipEmpty(t *testing.T) {
 		}
 	})
 
-	t.Run("binds the error of the validator through the Node", func(t *testing.T) {
+	t.Run("runs the validator and the Node binds its error", func(t *testing.T) {
 		t.Parallel()
 
 		src := niceyaml.NewSourceFromString("a:\n  b: 1\n", niceyaml.WithFilePath("x.yaml"))
@@ -12434,8 +12498,8 @@ func TestSkipEmpty(t *testing.T) {
 		tcs := map[string]struct {
 			v niceyaml.Validator
 		}{
-			"a validator that leaves its error unbound": {v: &fieldValidator{err: located}},
-			"a validator that binds its error": {
+			"a type of its own": {v: &fieldValidator{err: located}},
+			"a ValidatorFunc": {
 				v: niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
 					return located
 				}),
@@ -12448,8 +12512,8 @@ func TestSkipEmpty(t *testing.T) {
 
 				skip := niceyaml.SkipEmpty(tc.v)
 
-				// A direct call returns the error Node.Validate returns.
-				require.EqualError(t, skip.Check(t.Context(), doc), want)
+				// A direct call returns the error as the validator wrote it.
+				require.Same(t, located, skip.Check(t.Context(), doc))
 				require.EqualError(t, doc.Validate(t.Context(), skip), want)
 			})
 		}
@@ -12468,7 +12532,7 @@ func TestSkipEmpty(t *testing.T) {
 		// validator given alone.
 		typedNil := &fieldValidator{err: (*niceyaml.Error)(nil)}
 
-		require.NoError(t, niceyaml.SkipEmpty(typedNil).Check(t.Context(), doc))
+		require.NoError(t, doc.Validate(t.Context(), niceyaml.SkipEmpty(typedNil)))
 	})
 
 	t.Run("a decode of an empty document returns the zero value", func(t *testing.T) {

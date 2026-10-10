@@ -458,11 +458,10 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // [Schema.ValidateValue] does. [niceyaml.WithValidator] runs the schema
 // before a decode, and [niceyaml.Node.Validate] runs it on its own. A
 // Node from [niceyaml.Node.At] decodes to the node it selects, so the
-// schema checks that node and a violation's `@` path resolves from it.
-// Every error comes back bound through n with [niceyaml.Node.Bind], so a
-// direct call to Check returns the error [niceyaml.Node.Validate] returns
-// for the schema. A document past the alias limit returns an error
-// matching [ErrExcessiveAliasing].
+// schema checks that node and a violation's `@` path reads from it.
+// Check returns each violation as it wrote it, and Node.Validate binds
+// it through n, as [niceyaml.Validator] describes. A document past the
+// alias limit returns an error matching [ErrExcessiveAliasing].
 // [Schema.ValidateValue] checks data for a caller that reports the errors
 // somewhere else.
 //
@@ -565,9 +564,9 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 // decode, as [Schema.ValidateValue] does. A node below the root can then
 // exceed the limit where its document passes. That error matches
 // ErrExcessiveAliasing as well, and IsInvalid reports it. It carries no
-// location, so it binds through n as any such error does. A node below
-// the root binds it at the node, under its path, and a root binds it
-// with no position.
+// location, so the Node that runs the schema binds it as any such
+// error. A node below the root binds it at the node, under its path,
+// and a root binds it with no position.
 //
 // [niceyaml.WithAliasLimit] on the source of n turns the limit off for
 // the decode and for the result. Check then reads every use of every
@@ -602,13 +601,11 @@ func (s *Schema) Check(ctx context.Context, n *niceyaml.Node) error {
 	if aliasing.Limited(n) && aliasing.HoldsReferenceAlias(n) {
 		err = checkExpansion(data)
 		if err != nil {
-			//nolint:wrapcheck // Binding names the document; the error keeps its own context.
-			return n.Bind(err)
+			return err
 		}
 	}
 
-	//nolint:wrapcheck // Binding resolves the violations; each keeps its own context.
-	return n.Bind(s.validate(ctx, data, n))
+	return s.validate(ctx, data, n)
 }
 
 // ValidateValue checks data, the decoded form of a YAML value, against the
