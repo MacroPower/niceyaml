@@ -2536,7 +2536,7 @@ type checkHours struct {
 	Close string `yaml:"close"`
 }
 
-func TestNode_ErrorConstructors(t *testing.T) {
+func TestNode_Bind_Constructors(t *testing.T) {
 	t.Parallel()
 
 	source := niceyaml.NewSourceFromString(stringtest.Input(`
@@ -2555,51 +2555,42 @@ func TestNode_ErrorConstructors(t *testing.T) {
 	errStat := errors.New("stat license: permission denied")
 
 	tcs := map[string]struct {
-		// The error the method of the Node returns, and the error Bind
-		// returns for the package function with the same arguments.
+		// The error Bind returns for what the package function builds.
 		got     error
-		bound   error
 		want    string
 		invalid bool
 	}{
 		"NewError binds at the scope": {
 			got:     hours.Bind(niceyaml.NewError("bad hours")),
-			bound:   hours.Bind(niceyaml.NewError("bad hours")),
 			want:    "cfg.yaml:3:5: $.shops[0].hours: bad hours",
 			invalid: true,
 		},
 		"NewError resolves a path from the scope": {
 			got:     hours.Bind(niceyaml.NewError("bad", niceyaml.AtPath(closePath))),
-			bound:   hours.Bind(niceyaml.NewError("bad", niceyaml.AtPath(closePath))),
 			want:    "cfg.yaml:5:14: $.shops[0].hours.close: bad",
 			invalid: true,
 		},
 		"NewError through the root gains no location": {
 			got:     doc.Bind(niceyaml.NewError("bad")),
-			bound:   doc.Bind(niceyaml.NewError("bad")),
 			want:    "cfg.yaml: bad",
 			invalid: true,
 		},
 		"Invalid declares the document at fault": {
 			got:     hours.Bind(niceyaml.Invalid(errStat, niceyaml.AtPath(closePath))),
-			bound:   hours.Bind(niceyaml.Invalid(errStat, niceyaml.AtPath(closePath))),
 			want:    "cfg.yaml:5:14: $.shops[0].hours.close: stat license: permission denied",
 			invalid: true,
 		},
 		"Invalid with no options binds at the scope": {
 			got:     hours.Bind(niceyaml.Invalid(errStat)),
-			bound:   hours.Bind(niceyaml.Invalid(errStat)),
 			want:    "cfg.yaml:3:5: $.shops[0].hours: stat license: permission denied",
 			invalid: true,
 		},
 		"Place declares no fault": {
-			got:   hours.Bind(niceyaml.Place(errStat, niceyaml.AtPath(closePath))),
-			bound: hours.Bind(niceyaml.Place(errStat, niceyaml.AtPath(closePath))),
-			want:  "cfg.yaml:5:14: $.shops[0].hours.close: stat license: permission denied",
+			got:  hours.Bind(niceyaml.Place(errStat, niceyaml.AtPath(closePath))),
+			want: "cfg.yaml:5:14: $.shops[0].hours.close: stat license: permission denied",
 		},
 		"Place keeps the fault of the error it places": {
 			got:     hours.Bind(niceyaml.Place(niceyaml.NewError("bad"), niceyaml.AtPath(closePath))),
-			bound:   hours.Bind(niceyaml.Place(niceyaml.NewError("bad"), niceyaml.AtPath(closePath))),
 			want:    "cfg.yaml:5:14: $.shops[0].hours.close: bad",
 			invalid: true,
 		},
@@ -2610,9 +2601,7 @@ func TestNode_ErrorConstructors(t *testing.T) {
 			t.Parallel()
 
 			require.EqualError(t, tc.got, tc.want)
-			require.EqualError(t, tc.bound, tc.want)
 			assert.Equal(t, tc.invalid, niceyaml.IsInvalid(tc.got))
-			assert.Equal(t, tc.invalid, niceyaml.IsInvalid(tc.bound))
 		})
 	}
 
