@@ -1,6 +1,7 @@
 package schema_test
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -3603,7 +3604,10 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		jsonschema.WithRefResolver(jsonschema.SchemaMap{"urn:x": {}}),
 	))
 
-	// The registry fetches the document of each URL once.
+	// The registry fetches the document of each URL once. Every fragment
+	// but the empty one names a subschema that requires a name. A case
+	// that sets no document takes "name: x" as the valid one and "other: 1"
+	// as the invalid one, and wants the message of the missing name.
 	tcs := map[string]struct {
 		url     string
 		valid   string
@@ -3612,42 +3616,24 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 		opts    []schema.RegistryOption
 	}{
 		"url pointer": {
-			url:     baseURL + "/defs.json#/$defs/Foo",
-			valid:   "name: x\n",
-			invalid: "other: 1\n",
-			want:    `missing required property "name"`,
+			url: baseURL + "/defs.json#/$defs/Foo",
 		},
 		"url pointer with an escaped unreserved character": {
-			url:     baseURL + "/%64efs.json#/$defs/Foo",
-			valid:   "name: x\n",
-			invalid: "other: 1\n",
-			want:    `missing required property "name"`,
+			url: baseURL + "/%64efs.json#/$defs/Foo",
 		},
 		"url pointer with a dot segment": {
-			url:     baseURL + "/x/../defs.json#/$defs/Foo",
-			valid:   "name: x\n",
-			invalid: "other: 1\n",
-			want:    `missing required property "name"`,
+			url: baseURL + "/x/../defs.json#/$defs/Foo",
 		},
 		"url pointer with an upper-case host": {
-			url:     "http://Schemas.Test/defs.json#/$defs/Foo",
-			valid:   "name: x\n",
-			invalid: "other: 1\n",
-			want:    `missing required property "name"`,
+			url: "http://Schemas.Test/defs.json#/$defs/Foo",
 		},
 		// The registry decodes the unreserved %7e and spells the reserved
 		// %2f in upper-case hex, as the compiler does.
 		"url pointer with escapes in the query": {
-			url:     baseURL + "/defs.json?v=%7e1&q=%2f#/$defs/Foo",
-			valid:   "name: x\n",
-			invalid: "other: 1\n",
-			want:    `missing required property "name"`,
+			url: baseURL + "/defs.json?v=%7e1&q=%2f#/$defs/Foo",
 		},
 		"url anchor": {
-			url:     baseURL + "/defs.json#named",
-			valid:   "name: x\n",
-			invalid: "other: 1\n",
-			want:    `missing required property "name"`,
+			url: baseURL + "/defs.json#named",
 		},
 		"empty fragment names the root": {
 			url:     baseURL + "/defs.json#",
@@ -3656,11 +3642,8 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			want:    `expected "object", got "array"`,
 		},
 		"url pointer with a caller's ref resolver": {
-			url:     baseURL + "/defs.json#/$defs/Foo",
-			valid:   "name: x\n",
-			invalid: "other: 1\n",
-			want:    `missing required property "name"`,
-			opts:    []schema.RegistryOption{urnResolver},
+			url:  baseURL + "/defs.json#/$defs/Foo",
+			opts: []schema.RegistryOption{urnResolver},
 		},
 	}
 
@@ -3675,9 +3658,11 @@ func TestRegistry_FragmentRefs(t *testing.T) {
 			}, tc.opts...)
 			reg := schema.NewRegistry(opts...)
 
-			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, tc.valid)))
+			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, cmp.Or(tc.valid, "name: x\n"))))
 
-			requireRejects(t, reg, tc.invalid, tc.want)
+			requireRejects(t, reg,
+				cmp.Or(tc.invalid, "other: 1\n"),
+				cmp.Or(tc.want, `missing required property "name"`))
 
 			assert.Equal(t, int32(1), requests.Load())
 		})
@@ -3786,35 +3771,32 @@ func TestRegistry_FragmentRefsDraft07(t *testing.T) {
 		}`,
 	})
 
+	// Each subschema takes a string, so the invalid document of each case
+	// holds an integer in its place.
 	tcs := map[string]struct {
 		path    string
 		valid   string
 		invalid string
-		want    string
 	}{
 		"keywords beside a $ref": {
 			path:    "/defs.json#/definitions/Bar",
 			valid:   "x\n",
 			invalid: "5\n",
-			want:    `expected "string", got "integer"`,
 		},
 		"keywords beside a $ref in a YAML document": {
 			path:    "/defs.yaml#/definitions/Bar",
 			valid:   "x\n",
 			invalid: "5\n",
-			want:    `expected "string", got "integer"`,
 		},
 		"a pointer into a document with array-form items": {
 			path:    "/tuple.json#/definitions/Str",
 			valid:   "x\n",
 			invalid: "5\n",
-			want:    `expected "string", got "integer"`,
 		},
 		"a draft-07 anchor with array-form items": {
 			path:    "/tuple.json#tuple",
 			valid:   "- x\n- 5\n",
 			invalid: "- 5\n",
-			want:    `expected "string", got "integer"`,
 		},
 	}
 
@@ -3826,7 +3808,7 @@ func TestRegistry_FragmentRefsDraft07(t *testing.T) {
 
 			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, tc.valid)))
 
-			requireRejects(t, reg, tc.invalid, tc.want)
+			requireRejects(t, reg, tc.invalid, `expected "string", got "integer"`)
 		})
 	}
 }
@@ -3872,25 +3854,18 @@ func TestRegistry_RelativeRefs(t *testing.T) {
 	})
 
 	tcs := map[string]struct {
-		ref  schema.Ref
-		opts []schema.RegistryOption
+		ref schema.Ref
 	}{
-		"file on disk": {
-			ref: schema.File(filepath.Join(tmpDir, "main.json")),
-		},
-		"file in a file system": {
-			ref: schema.FileFS(bundle, "schemas/main.json"),
-		},
-		"url": {
-			ref: schema.URL(base + "/s/main.json"),
-		},
+		"file on disk":          {ref: schema.File(filepath.Join(tmpDir, "main.json"))},
+		"file in a file system": {ref: schema.FileFS(bundle, "schemas/main.json")},
+		"url":                   {ref: schema.URL(base + "/s/main.json")},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			reg := schema.NewRegistry(append(tc.opts, schema.WithResolvers(tc.ref))...)
+			reg := schema.NewRegistry(schema.WithResolvers(tc.ref))
 
 			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "a: x\n")))
 
