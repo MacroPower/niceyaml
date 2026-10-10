@@ -63,11 +63,11 @@ func TestGet_RedactsPassword(t *testing.T) {
 func refusingClient(t *testing.T) *http.Client {
 	t.Helper()
 
-	return &http.Client{Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+	return yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		t.Errorf("Get sent a request to host %q", r.URL.Host)
 
 		return nil, errors.New("unexpected request")
-	})}
+	}).Client()
 }
 
 func TestGet_RedactsPasswordWithAtSign(t *testing.T) {
@@ -92,9 +92,9 @@ func TestGet_RedactsPasswordWithAtSign(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			client := &http.Client{Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			client := yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 				return nil, errors.New("lookup " + r.URL.Host + ": no such host")
-			})}
+			}).Client()
 
 			_, err := httpfetch.Get(t.Context(), client, tc.url)
 			require.ErrorContains(t, err, "fetch "+httpfetch.Redacted(tc.url)+": reason withheld")
@@ -110,9 +110,9 @@ func TestGet_PasswordWithAtSignKeepsContextError(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	client := &http.Client{Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+	client := yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("lookup %s: %w", r.URL.Host, r.Context().Err())
-	})}
+	}).Client()
 
 	_, err := httpfetch.Get(ctx, client, "https://user:p@host.invalid/tail@example.com/s.json")
 	require.ErrorIs(t, err, context.Canceled)
