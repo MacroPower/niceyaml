@@ -3002,6 +3002,9 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 	byKind := failing(errNoKind)
 
+	// A document no resolver of these subtests has a schema for.
+	doc := yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml")
+
 	t.Run("gives the reason of each resolver that gave one as a detail", func(t *testing.T) {
 		t.Parallel()
 
@@ -3010,8 +3013,6 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 			schema.When(matcher.Content(kindPath, "Deployment"), schema.Embedded([]byte(`{}`))),
 			byKind,
 		))
-
-		doc := yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml")
 
 		_, err := reg.Lookup(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
@@ -3090,8 +3091,6 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 			schema.When(matcher.Content(kindPath, "Deployment"), schema.Embedded([]byte(`{}`))),
 		))
 
-		doc := yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml")
-
 		_, err := reg.Lookup(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 		assert.Equal(t, "app.yaml: no matching schema", err.Error())
@@ -3106,8 +3105,6 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		typed := failing(&kindError{kind: "Service"})
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive(), typed, byKind))
-
-		doc := yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml")
 
 		_, err := reg.Lookup(t.Context(), doc)
 		require.ErrorIs(t, err, schema.ErrNoMatch)
@@ -3142,8 +3139,6 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 		timedOut := failing(fmt.Errorf("%w: read catalog: %w", schema.ErrNoMatch, context.DeadlineExceeded))
 		errNoLabel := fmt.Errorf("%w: no label", schema.ErrNoMatch)
 		reg := schema.NewRegistry(schema.WithResolvers(timedOut, failing(errNoLabel)))
-
-		doc := yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml")
 
 		_, err := reg.Lookup(t.Context(), doc)
 		require.EqualError(t, err, "app.yaml: no matching schema")
