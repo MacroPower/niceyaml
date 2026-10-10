@@ -2,6 +2,7 @@ package niceyaml_test
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1659,16 +1660,11 @@ func TestErrorAnnotation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			lines := 2
-			if tc.contextLines > 0 {
-				lines = tc.contextLines
-			}
-
 			err := yamltest.Bind(t, niceyaml.NewSourceFromString(tc.source),
 				niceyaml.NewError(tc.errMsg, tc.loc),
 			)
 
-			assert.Equal(t, tc.want, stringtest.TrimLineEnds(renderContext(err, lines)))
+			assert.Equal(t, tc.want, stringtest.TrimLineEnds(renderContext(err, cmp.Or(tc.contextLines, 2))))
 		})
 	}
 }
@@ -7097,13 +7093,8 @@ func TestError_Accessors_Wrapped(t *testing.T) {
 
 			got := errorIn(t, tc.err)
 
-			problems := yamltest.ErrsOf(yamltest.ProblemsOf(got))
-			require.Len(t, problems, len(tc.wantProblems))
-			assert.Equal(t, tc.wantProblems, pathsOf(t, problems))
-
-			details := yamltest.ErrsOf(yamltest.DetailsOf(got))
-			require.Len(t, details, len(tc.wantDetails))
-			assert.Equal(t, tc.wantDetails, pathsOf(t, details))
+			assert.Equal(t, tc.wantProblems, pathsOf(t, yamltest.ErrsOf(yamltest.ProblemsOf(got))))
+			assert.Equal(t, tc.wantDetails, pathsOf(t, yamltest.ErrsOf(yamltest.DetailsOf(got))))
 		})
 	}
 
