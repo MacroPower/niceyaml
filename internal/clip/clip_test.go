@@ -13,6 +13,10 @@ import (
 
 const alphabet = "abcdefghijklmnopqrstuvwxyz"
 
+// twoWindows cut a line of 26 columns to a row that reads
+// "...efgh...uvwx...", with the windows at columns 3 and 10 of it.
+var twoWindows = []position.Span{position.NewSpan(4, 8), position.NewSpan(20, 24)}
+
 func TestMap_Content(t *testing.T) {
 	t.Parallel()
 
@@ -101,10 +105,6 @@ func TestMap_Content(t *testing.T) {
 func TestMap_Col(t *testing.T) {
 	t.Parallel()
 
-	// The row reads "...efgh...uvwx...", with the windows at columns 3
-	// and 10 of it.
-	windows := []position.Span{position.NewSpan(4, 8), position.NewSpan(20, 24)}
-
 	tcs := map[string]struct {
 		col  int
 		want int
@@ -128,7 +128,7 @@ func TestMap_Col(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := clip.New(26, windows)
+			m := clip.New(26, twoWindows)
 
 			assert.Equal(t, tc.want, m.Col(tc.col))
 		})
@@ -147,10 +147,6 @@ func TestMap_Col_EmptyLine(t *testing.T) {
 
 func TestMap_LineCol(t *testing.T) {
 	t.Parallel()
-
-	// The row reads "...efgh...uvwx...", with the windows at columns 3
-	// and 10 of it.
-	windows := []position.Span{position.NewSpan(4, 8), position.NewSpan(20, 24)}
 
 	tcs := map[string]struct {
 		col  int
@@ -178,7 +174,7 @@ func TestMap_LineCol(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := clip.New(26, windows)
+			m := clip.New(26, twoWindows)
 
 			got, ok := m.LineCol(tc.col)
 			assert.Equal(t, tc.ok, ok)
@@ -245,10 +241,6 @@ func TestMap_LineCol_InvertsCol(t *testing.T) {
 func TestMap_Spans(t *testing.T) {
 	t.Parallel()
 
-	// The row reads "...efgh...uvwx...", with the windows at columns 3
-	// and 10 of it.
-	windows := []position.Span{position.NewSpan(4, 8), position.NewSpan(20, 24)}
-
 	tcs := map[string]struct {
 		want position.Spans
 		cols position.Span
@@ -279,7 +271,7 @@ func TestMap_Spans(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := clip.New(26, windows)
+			m := clip.New(26, twoWindows)
 
 			assert.Equal(t, tc.want, m.Spans(tc.cols))
 		})
@@ -289,7 +281,7 @@ func TestMap_Spans(t *testing.T) {
 func TestMap_Pieces(t *testing.T) {
 	t.Parallel()
 
-	m := clip.New(26, []position.Span{position.NewSpan(4, 8), position.NewSpan(20, 24)})
+	m := clip.New(26, twoWindows)
 
 	want := []clip.Piece{
 		{Cols: position.NewSpan(0, 4), At: 0, Gap: true},

@@ -35,8 +35,13 @@ func anchoredAliasLevels() string {
 	return sb.String()
 }
 
-// longScalar anchors a scalar of 2000 bytes as a.
-var longScalar = "a: &a " + strings.Repeat("x", 2000) + "\n"
+var (
+	// A line that anchors a scalar of 2000 bytes as a.
+	longScalar = "a: &a " + strings.Repeat("x", 2000) + "\n"
+
+	// A binary scalar of 2000 bytes under its tag.
+	binaryScalar = "!!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000))
+)
 
 // anchoredInMapping returns a mapping anchored as base that holds a
 // scalar of 2000 bytes under an anchor of its own.
@@ -209,52 +214,52 @@ func TestCheckDecode(t *testing.T) {
 			input: "s: &s !!str " + strings.Repeat("x", 2000) + "\nt: &t !foo *s\nl: " + flowList("*t", 500) + "\n",
 		},
 		"alias keys to a binary scalar": {
-			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+			input: "b: &b " + binaryScalar + "\n" +
 				"l: " + flowList("{? *b : 1}", 500) + "\n",
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias keys to a tag over an alias to a binary scalar": {
 			// Each key decodes to the bytes under b, so the decoder
 			// spells it as text.
-			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+			input: "b: &b " + binaryScalar + "\n" +
 				"s: &s !foo *b\nl: " + flowList("{? *s : 1}", 500) + "\n",
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"alias keys to a string tag over an alias to a binary scalar": {
 			// The decoder spells the bytes under b as text at each key.
-			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+			input: "b: &b " + binaryScalar + "\n" +
 				"s: &s !!str *b\nl: " + flowList("{? *s : 1}", 500) + "\n",
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"a few alias keys to a tag over an alias to a binary scalar": {
-			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+			input: "b: &b " + binaryScalar + "\n" +
 				"s: &s !foo *b\nl: " + flowList("{? *s : 1}", 2) + "\n",
 		},
 		"aliases to a tag over an alias to a binary scalar": {
 			// A decode shares the bytes under b between the aliases to
 			// s, and the schema validator spells them as text at each.
-			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+			input: "b: &b " + binaryScalar + "\n" +
 				"s: &s !foo *b\nl: " + flowList("*s", 500) + "\n",
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"aliases to chained tags over an alias to a binary scalar": {
-			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+			input: "b: &b " + binaryScalar + "\n" +
 				"s: &s !foo *b\nt: &t ! *s\nl: " + flowList("*t", 500) + "\n",
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"aliases to a binary scalar under another tag and anchor": {
-			input: "s: &s !foo &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+			input: "s: &s !foo &b " + binaryScalar + "\n" +
 				"l: " + flowList("*s", 500) + "\n",
 			err: aliaslimit.ErrExcessiveAliasing,
 		},
 		"a few aliases to a tag over an alias to a binary scalar": {
-			input: "b: &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+			input: "b: &b " + binaryScalar + "\n" +
 				"s: &s !foo *b\nl: " + flowList("*s", 2) + "\n",
 		},
 		"alias keys to a binary scalar under another tag and anchor": {
 			// Each key decodes to the bytes under b, so the decoder
 			// spells it as text.
-			input: "s: &s !foo &b !!binary " + base64.StdEncoding.EncodeToString(make([]byte, 2000)) + "\n" +
+			input: "s: &s !foo &b " + binaryScalar + "\n" +
 				"l: " + flowList("{? *s : 1}", 500) + "\n",
 			err: aliaslimit.ErrExcessiveAliasing,
 		},

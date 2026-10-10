@@ -13,11 +13,21 @@ import (
 	"go.jacobcolvin.com/niceyaml/internal/colors"
 )
 
+var (
+	red    = lipgloss.Color("#FF0000")
+	green  = lipgloss.Color("#00FF00")
+	blue   = lipgloss.Color("#0000FF")
+	yellow = lipgloss.Color("#FFFF00")
+
+	// The two functions that lay one style over another.
+	layers = map[string]func(base, overlay lipgloss.Style) lipgloss.Style{
+		"blend":    colors.BlendStyles,
+		"override": colors.OverrideStyles,
+	}
+)
+
 func TestOverride(t *testing.T) {
 	t.Parallel()
-
-	red := lipgloss.Color("#FF0000")
-	blue := lipgloss.Color("#0000FF")
 
 	tcs := map[string]struct {
 		base    color.Color
@@ -68,19 +78,19 @@ func TestAbsentOverlay(t *testing.T) {
 		want    color.Color
 	}{
 		"nil": {
-			base:    lipgloss.Color("#FF0000"),
+			base:    red,
 			overlay: nil,
-			want:    lipgloss.Color("#FF0000"),
+			want:    red,
 		},
 		"NoColor": {
-			base:    lipgloss.Color("#FF0000"),
+			base:    red,
 			overlay: lipgloss.NoColor{},
-			want:    lipgloss.Color("#FF0000"),
+			want:    red,
 		},
 		"invisible": {
-			base:    lipgloss.Color("#FF0000"),
+			base:    red,
 			overlay: color.RGBA{A: 0},
-			want:    lipgloss.Color("#FF0000"),
+			want:    red,
 		},
 		"nil with base outside the gamut": {
 			base:    colorful.Color{R: -0.2, G: 1.4, B: 0.5},
@@ -127,9 +137,6 @@ func labMidpoint(t *testing.T, c1, c2 color.Color) color.Color {
 
 func TestBlend(t *testing.T) {
 	t.Parallel()
-
-	red := lipgloss.Color("#FF0000")
-	blue := lipgloss.Color("#0000FF")
 
 	tcs := map[string]struct {
 		c1   color.Color
@@ -199,12 +206,12 @@ func TestBlend_Symmetric(t *testing.T) {
 		c2 color.Color
 	}{
 		"red and blue": {
-			c1: lipgloss.Color("#FF0000"),
-			c2: lipgloss.Color("#0000FF"),
+			c1: red,
+			c2: blue,
 		},
 		"green and yellow": {
-			c1: lipgloss.Color("#00FF00"),
-			c2: lipgloss.Color("#FFFF00"),
+			c1: green,
+			c2: yellow,
 		},
 		"gray and orange": {
 			c1: lipgloss.Color("#808080"),
@@ -335,11 +342,6 @@ func TestBlend_ClampsInputs(t *testing.T) {
 func TestBlendStyles(t *testing.T) {
 	t.Parallel()
 
-	red := lipgloss.Color("#FF0000")
-	blue := lipgloss.Color("#0000FF")
-	green := lipgloss.Color("#00FF00")
-	yellow := lipgloss.Color("#FFFF00")
-
 	upperTransform := strings.ToUpper
 	lowerTransform := strings.ToLower
 
@@ -446,13 +448,6 @@ func TestBlendStyles(t *testing.T) {
 func TestStyles_Attributes(t *testing.T) {
 	t.Parallel()
 
-	layer := map[string]func(base, overlay lipgloss.Style) lipgloss.Style{
-		"blend":    colors.BlendStyles,
-		"override": colors.OverrideStyles,
-	}
-
-	red := lipgloss.Color("#FF0000")
-
 	tcs := map[string]struct {
 		base    lipgloss.Style
 		overlay lipgloss.Style
@@ -465,8 +460,8 @@ func TestStyles_Attributes(t *testing.T) {
 		},
 		"base attributes survive an overlay without any": {
 			base:    lipgloss.NewStyle().Italic(true),
-			overlay: lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")),
-			want:    lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("#0000FF")),
+			overlay: lipgloss.NewStyle().Foreground(blue),
+			want:    lipgloss.NewStyle().Italic(true).Foreground(blue),
 		},
 		"attributes from both sides combine": {
 			base:    lipgloss.NewStyle().Bold(true),
@@ -501,7 +496,7 @@ func TestStyles_Attributes(t *testing.T) {
 		},
 	}
 
-	for layerName, fn := range layer {
+	for layerName, fn := range layers {
 		for name, tc := range tcs {
 			t.Run(layerName+"/"+name, func(t *testing.T) {
 				t.Parallel()
@@ -531,14 +526,6 @@ func TestStyles_Attributes(t *testing.T) {
 func TestStyles_UnsetColors(t *testing.T) {
 	t.Parallel()
 
-	layer := map[string]func(base, overlay lipgloss.Style) lipgloss.Style{
-		"blend":    colors.BlendStyles,
-		"override": colors.OverrideStyles,
-	}
-
-	red := lipgloss.Color("#FF0000")
-	green := lipgloss.Color("#00FF00")
-	blue := lipgloss.Color("#0000FF")
 	parent := lipgloss.NewStyle().Foreground(red).Background(green).UnderlineColor(blue)
 
 	tcs := map[string]struct {
@@ -558,7 +545,7 @@ func TestStyles_UnsetColors(t *testing.T) {
 		},
 	}
 
-	for layerName, fn := range layer {
+	for layerName, fn := range layers {
 		for name, tc := range tcs {
 			t.Run(layerName+"/"+name, func(t *testing.T) {
 				t.Parallel()
@@ -577,11 +564,6 @@ func TestStyles_UnsetColors(t *testing.T) {
 
 func TestOverrideStyles(t *testing.T) {
 	t.Parallel()
-
-	red := lipgloss.Color("#FF0000")
-	blue := lipgloss.Color("#0000FF")
-	green := lipgloss.Color("#00FF00")
-	yellow := lipgloss.Color("#FFFF00")
 
 	upperTransform := strings.ToUpper
 	lowerTransform := strings.ToLower
