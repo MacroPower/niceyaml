@@ -536,9 +536,9 @@ func framedRows(t *testing.T, m *yamlviewport.Model, n int) []string {
 }
 
 // numbered returns a document of n lines. Each line is format with the
-// index of the line in place of its verb. Yamltest.GenerateLines writes the
-// same document, but the niceyaml version this module requires predates
-// it, and the tests must build against that version.
+// index of the line in place of its verb. GenerateLines in yamltest writes
+// the same document, but the niceyaml version this module requires
+// predates it, and the tests must build against that version.
 func numbered(n int, format string) string {
 	var sb strings.Builder
 
