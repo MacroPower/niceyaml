@@ -462,15 +462,13 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		_, err := doc.Decode[nested](t.Context())
 		require.Error(t, err)
 
-		got := errorTexts(yamltest.ProblemsOf(err))
-
 		// The deep any holds maps and slices of any, which hold no item.
 		assert.ElementsMatch(t, []string{
 			"cafe.yaml:5:12: $.items[1].price: negative price",
 			"cafe.yaml:8:12: $.by_name.scone.price: negative price",
 			"cafe.yaml:11:12: $.by_id.7.price: negative price",
 			"cafe.yaml:14:12: $.fixed[1].price: negative price",
-		}, got)
+		}, errorTexts(yamltest.ProblemsOf(err)))
 	})
 
 	t.Run("a field reports at the path its tags give it", func(t *testing.T) {
@@ -1812,12 +1810,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 				err := dd.DecodeInto(t.Context(), tc.target)
 
-				got := errorTexts(yamltest.ProblemsOf(err))
-
 				assert.Equal(t, []string{
 					"1:15: $.'.nan'.price: negative price",
 					"2:14: $.'1.5'.price: negative price",
-				}, got)
+				}, errorTexts(yamltest.ProblemsOf(err)))
 			})
 		}
 	})
@@ -1848,12 +1844,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 				for range 20 {
 					err := dd.DecodeInto(t.Context(), tc.target())
 
-					got := errorTexts(yamltest.ProblemsOf(err))
-
 					assert.Equal(t, []string{
 						"$.NaN.n: negative -1",
 						"$.NaN.n: negative -2",
-					}, got)
+					}, errorTexts(yamltest.ProblemsOf(err)))
 				}
 			})
 		}
@@ -2001,12 +1995,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 
 		_, err := dd.Decode[map[time.Time]item](t.Context())
 
-		got := errorTexts(yamltest.ProblemsOf(err))
-
 		assert.Equal(t, []string{
 			"$.'2024-01-01 00:00:00 +0530 +0530'.price: negative price",
 			"$.'2024-01-01 00:00:00 +0530 +0530'.price: negative price",
-		}, got)
+		}, errorTexts(yamltest.ProblemsOf(err)))
 	})
 
 	t.Run("a key below a wide map reports the text the document spells it with", func(t *testing.T) {
