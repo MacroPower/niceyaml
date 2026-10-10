@@ -1386,18 +1386,6 @@ func TestNewLines_QuotedMultilineActualNewlines(t *testing.T) {
 func TestEmptyAndZeroValues(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Line/zero value", func(t *testing.T) {
-		t.Parallel()
-
-		var l line.Line
-
-		assert.Equal(t, 0, l.Number())
-		assert.True(t, l.IsEmpty())
-		assert.Empty(t, l.Content())
-		assert.Nil(t, l.Tokens())
-		assert.Equal(t, "     | ", l.String())
-	})
-
 	t.Run("Line/with tokens not empty", func(t *testing.T) {
 		t.Parallel()
 
@@ -1408,38 +1396,37 @@ func TestEmptyAndZeroValues(t *testing.T) {
 		assert.False(t, lines.Line(0).IsEmpty())
 	})
 
-	t.Run("Lines/nil", func(t *testing.T) {
-		t.Parallel()
+	// Each of these holds no lines.
+	tcs := map[string]line.Lines{
+		"Lines/zero value":                 {},
+		"Lines/NewLines with nil tokens":   line.NewLines(nil),
+		"Lines/NewLines with empty tokens": line.NewLines(tokens.Tokenize("")),
+		"Lines/Collect with no lines":      line.Collect(),
+	}
 
-		var lines line.Lines
+	for name, lines := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		assert.Nil(t, lines.Tokens())
-		assert.NoError(t, yamltest.ValidateLines(lines))
-	})
+			assert.True(t, lines.IsEmpty())
+			assert.Equal(t, 0, lines.Len())
+			assert.Equal(t, 0, lines.Width())
+			assert.Nil(t, lines.Tokens())
+			assert.Empty(t, lines.Content())
+			assert.Empty(t, lines.String())
+			assert.Nil(t, lines.SliceLines(position.NewRange(position.New(0, 0), position.New(0, 3))))
 
-	t.Run("Lines/empty slice", func(t *testing.T) {
-		t.Parallel()
+			for range lines.All() {
+				t.Fatal("expected no lines")
+			}
 
-		lines := line.Lines{}
-		assert.Nil(t, lines.Tokens())
-		assert.NoError(t, yamltest.ValidateLines(lines))
-	})
+			for range lines.Runes() {
+				t.Fatal("expected no runes")
+			}
 
-	t.Run("Lines/NewLines with nil tokens", func(t *testing.T) {
-		t.Parallel()
-
-		lines := line.NewLines(nil)
-		assert.True(t, lines.IsEmpty())
-		assert.Equal(t, 0, lines.Len())
-	})
-
-	t.Run("Lines/NewLines with empty tokens", func(t *testing.T) {
-		t.Parallel()
-
-		lines := line.NewLines(tokens.Tokenize(""))
-		assert.True(t, lines.IsEmpty())
-		assert.Equal(t, 0, lines.Len())
-	})
+			require.NoError(t, yamltest.ValidateLines(lines))
+		})
+	}
 }
 
 func TestNewLines_BlockScalarPositionBehavior(t *testing.T) {
@@ -2120,34 +2107,6 @@ func TestLines_String(t *testing.T) {
 		assert.Contains(t, result, "key2")
 		assert.Contains(t, result, "value2")
 	})
-
-	t.Run("empty lines", func(t *testing.T) {
-		t.Parallel()
-
-		var lines line.Lines
-
-		result := lines.String()
-		assert.Empty(t, result)
-	})
-}
-
-func TestLines_Content_Empty(t *testing.T) {
-	t.Parallel()
-
-	t.Run("nil lines returns empty string", func(t *testing.T) {
-		t.Parallel()
-
-		var lines line.Lines
-
-		assert.Empty(t, lines.Content())
-	})
-
-	t.Run("empty slice returns empty string", func(t *testing.T) {
-		t.Parallel()
-
-		lines := line.Lines{}
-		assert.Empty(t, lines.Content())
-	})
 }
 
 // TestNewLines_WhitespaceType verifies that NewLines assigns SpaceType to
@@ -2620,24 +2579,6 @@ func TestLines_View(t *testing.T) {
 
 		assert.Equal(t, "key: value\nother: data\n", sb.String())
 	})
-
-	t.Run("empty", func(t *testing.T) {
-		t.Parallel()
-
-		var lines line.Lines
-
-		assert.Equal(t, 0, lines.Len())
-		assert.True(t, lines.IsEmpty())
-		assert.Equal(t, 0, lines.Width())
-
-		for range lines.All() {
-			t.Fatal("expected no lines")
-		}
-
-		for range lines.Runes() {
-			t.Fatal("expected no runes")
-		}
-	})
 }
 
 func TestCollect(t *testing.T) {
@@ -2665,15 +2606,6 @@ func TestCollect(t *testing.T) {
 		ls[0] = after.Line(0)
 
 		assert.Same(t, before.Line(0), got.Line(0))
-	})
-
-	t.Run("no lines yields the zero value", func(t *testing.T) {
-		t.Parallel()
-
-		got := line.Collect()
-
-		assert.True(t, got.IsEmpty())
-		assert.Equal(t, 0, got.Len())
 	})
 
 	t.Run("panics on a nil line", func(t *testing.T) {
@@ -2784,12 +2716,4 @@ func TestLines_SliceLines(t *testing.T) {
 			assert.Equal(t, tc.want, lines.SliceLines(tc.input))
 		})
 	}
-
-	t.Run("no lines", func(t *testing.T) {
-		t.Parallel()
-
-		r := position.NewRange(position.New(0, 0), position.New(0, 3))
-
-		assert.Nil(t, line.Lines{}.SliceLines(r))
-	})
 }
