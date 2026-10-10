@@ -1270,7 +1270,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, position.NewRange(position.New(1, 3), position.New(1, 4)), rng)
 
-		got := trimLines(render(bound))
+		got := stringtest.TrimLineEnds(render(bound))
 		assert.Contains(t, got, "<genericError>2</genericError>")
 		assert.NotContains(t, got, "<genericError>3</genericError>")
 	})
@@ -1284,7 +1284,7 @@ func TestNewSourceFromTokens_LaterDocument(t *testing.T) {
 		err := yamltest.Bind(t, source, niceyaml.NewError("bad c", niceyaml.AtPosition(position.NewFromToken(tk))))
 		assert.Equal(t, "3:1: bad c", err.Error())
 
-		got := trimLines(render(err))
+		got := stringtest.TrimLineEnds(render(err))
 		assert.Contains(t, got, "<genericError>c</genericError>")
 		assert.NotContains(t, got, "<genericError>b</genericError>")
 	})
