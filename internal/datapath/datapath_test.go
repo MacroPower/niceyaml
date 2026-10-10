@@ -132,7 +132,7 @@ func TestIndex_Member(t *testing.T) {
 			input: stringtest.LinesLF(
 				"user:",
 				"  <<: {0x10: x}",
-				"  \"0x10\": 1",
+				`  "0x10": 1`,
 			),
 			steps:     []any{"user", "16"},
 			want:      "@.user.16",
@@ -144,7 +144,7 @@ func TestIndex_Member(t *testing.T) {
 			input: stringtest.LinesLF(
 				"user:",
 				"  <<: {0x10: {0x20: x}}",
-				"  \"0x10\": 1",
+				`  "0x10": 1`,
 			),
 			steps:     []any{"user", "16", "32"},
 			want:      "@.user.16.32",
@@ -372,7 +372,7 @@ func TestTarget_Token(t *testing.T) {
 			input: stringtest.LinesLF(
 				"user:",
 				"  <<: {0x10: x}",
-				"  \"0x10\": 1",
+				`  "0x10": 1`,
 			),
 			steps:   []any{"user", "16"},
 			want:    "x@2:14",
@@ -382,7 +382,7 @@ func TestTarget_Token(t *testing.T) {
 			input: stringtest.LinesLF(
 				"user:",
 				"  <<: {0x10: x}",
-				"  \"0x10\": 1",
+				`  "0x10": 1`,
 			),
 			steps: []any{"user", "16", "name"},
 		},

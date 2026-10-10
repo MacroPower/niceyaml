@@ -296,11 +296,11 @@ func TestSplit_Lines(t *testing.T) {
 			input: stringtest.LinesLF(
 				"a: !t",
 				"  b: 1",
-				"c: \"x",
-				"  y\"",
+				`c: "x`,
+				`  y"`,
 				"d: 1",
 			),
-			want: []string{"a: !t", "  b: 1", "c: \"x", "  y\"", "d: 1"},
+			want: []string{"a: !t", "  b: 1", `c: "x`, `  y"`, "d: 1"},
 		},
 		"crlf quoted scalar continued after a tag": {
 			input: stringtest.LinesCRLF("a: !t", "  b: 1", "c: 'x", "  y'"),
@@ -519,11 +519,11 @@ func TestSplit_PartPosition(t *testing.T) {
 			input: stringtest.LinesLF(
 				"a: !t",
 				"  b: 1",
-				"c: \"x",
-				"  y\"",
+				`c: "x`,
+				`  y"`,
 				"d: 1",
 			),
-			origin:     "  y\"",
+			origin:     `  y"`,
 			line:       3,
 			idx:        0,
 			wantColumn: 1,
@@ -605,7 +605,7 @@ func TestSplit_BlockScalarOffsets(t *testing.T) {
 			want: []int{8, 10, 14},
 		},
 		"quoted, three lines": {
-			input: stringtest.LinesLF("k: \"a", "  b", "  c\""),
+			input: stringtest.LinesLF(`k: "a`, "  b", `  c"`),
 			want:  []int{7, 11},
 		},
 		"plain, three lines": {
