@@ -2004,112 +2004,10 @@ func TestStore_ParseErrorRedactsCredentials(t *testing.T) {
 	assert.NotContains(t, err.Error(), "hunter2")
 }
 
-func TestStore_FindMatch_WildcardExtension(t *testing.T) {
+func TestStore_FindMatch_SupportedPatterns(t *testing.T) {
 	t.Parallel()
 
-	// A pattern whose extension holds a wildcard can match a YAML file, so
-	// the store keeps it. The store drops a pattern whose literal extension
-	// it does not support.
-	catalog := schemastore.Catalog{Schemas: []schemastore.CatalogEntry{{
-		Name:      "Azure Pipelines",
-		URL:       "https://example.com/azure.json",
-		FileMatch: []string{"**/azure-pipelines*.y*ml", "*.toml"},
-	}}}
-
-	store := newStore(newCatalogClient(t, catalog))
-
-	entry, err := store.FindMatch(t.Context(), "ci/azure-pipelines.yaml")
-	require.NoError(t, err)
-	assert.Equal(t, "Azure Pipelines", entry.Name)
-	assert.Equal(t, []string{"**/azure-pipelines*.y*ml"}, entry.FileMatch)
-
-	_, err = store.FindMatch(t.Context(), "ci/azure.toml")
-	require.ErrorIs(t, err, schemastore.ErrNoCatalogMatch)
-}
-
-func TestStore_FindMatch_NoExtension(t *testing.T) {
-	t.Parallel()
-
-	// A file name without an extension can belong to a YAML file, as
-	// .clang-format and .yamllint do, so the store keeps such a pattern
-	// beside the patterns with a YAML extension. It still drops a pattern
-	// with an extension it does not support.
-	catalog := schemastore.Catalog{Schemas: []schemastore.CatalogEntry{
-		{
-			Name:      "clang-format",
-			URL:       "https://example.com/clang-format.json",
-			FileMatch: []string{".clang-format"},
-		},
-		{
-			Name:      "yamllint",
-			URL:       "https://example.com/yamllint.json",
-			FileMatch: []string{"**/.yamllint", "**/.yamllint.yaml", "**/.yamllint.yml", "**/.yamllint.toml"},
-		},
-		{
-			Name:      "BOSH job spec",
-			URL:       "https://example.com/bosh.json",
-			FileMatch: []string{"**/jobs/*/spec"},
-		},
-	}}
-
-	store := newStore(newCatalogClient(t, catalog))
-
-	tcs := map[string]struct {
-		file      string
-		name      string
-		fileMatch []string
-		err       error
-	}{
-		"hidden file without an extension": {
-			file:      "/repo/.clang-format",
-			name:      "clang-format",
-			fileMatch: []string{".clang-format"},
-		},
-		"extensionless pattern beside YAML patterns": {
-			file:      "/repo/.yamllint",
-			name:      "yamllint",
-			fileMatch: []string{"**/.yamllint", "**/.yamllint.yaml", "**/.yamllint.yml"},
-		},
-		"YAML pattern of the same entry": {
-			file:      "/repo/.yamllint.yml",
-			name:      "yamllint",
-			fileMatch: []string{"**/.yamllint", "**/.yamllint.yaml", "**/.yamllint.yml"},
-		},
-		"plain name without an extension": {
-			file:      "/repo/jobs/web/spec",
-			name:      "BOSH job spec",
-			fileMatch: []string{"**/jobs/*/spec"},
-		},
-		"unsupported extension": {
-			file: "/repo/.yamllint.toml",
-			err:  schemastore.ErrNoCatalogMatch,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			entry, err := store.FindMatch(t.Context(), tc.file)
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-
-				return
-			}
-
-			require.NoError(t, err)
-			assert.Equal(t, tc.name, entry.Name)
-			assert.Equal(t, tc.fileMatch, entry.FileMatch)
-		})
-	}
-}
-
-func TestStore_FindMatch_BraceLimit(t *testing.T) {
-	t.Parallel()
-
-	// A pattern whose braces expand past the limit matches no file, so the
-	// store drops it from the entry, as it drops a pattern for a format
-	// that is not YAML. An entry left with no pattern matches nothing.
+	// A pattern whose braces expand past the limit matches no file.
 	braces := strings.Repeat("{a,b}", 11) + ".yaml"
 
 	// Expanding this exclusion takes all the work the limit allows. The
@@ -2125,7 +2023,65 @@ func TestStore_FindMatch_BraceLimit(t *testing.T) {
 	_, err = filepaths.ExpandBraces(exclusion)
 	require.ErrorIs(t, err, filepaths.ErrBraceLimit)
 
+	// The store keeps the patterns of an entry that can match a YAML file
+	// and drops the rest, and FindMatch returns the patterns it kept.
 	catalog := schemastore.Catalog{Schemas: []schemastore.CatalogEntry{
+		// A pattern whose extension holds a wildcard can match a YAML
+		// file, so the store keeps it. The store drops a pattern whose
+		// literal extension it does not support.
+		{
+			Name:      "Azure Pipelines",
+			URL:       "https://example.com/azure.json",
+			FileMatch: []string{"**/azure-pipelines*.y*ml", "*.toml"},
+		},
+
+		// A file name without an extension can belong to a YAML file, as
+		// .clang-format and .yamllint do, so the store keeps such a
+		// pattern beside the patterns with a YAML extension. It still
+		// drops a pattern with an extension it does not support.
+		{
+			Name:      "clang-format",
+			URL:       "https://example.com/clang-format.json",
+			FileMatch: []string{".clang-format"},
+		},
+		{
+			Name:      "yamllint",
+			URL:       "https://example.com/yamllint.json",
+			FileMatch: []string{"**/.yamllint", "**/.yamllint.yaml", "**/.yamllint.yml", "**/.yamllint.toml"},
+		},
+		{
+			Name:      "BOSH job spec",
+			URL:       "https://example.com/bosh.json",
+			FileMatch: []string{"**/jobs/*/spec"},
+		},
+
+		// Many YAML formats use an extension of their own, so the store
+		// keeps their patterns. It drops only the patterns for formats
+		// known not to be YAML, such as TOML and JSON with comments.
+		{
+			Name:      "Citation File Format",
+			URL:       "https://example.com/cff.json",
+			FileMatch: []string{"CITATION.cff"},
+		},
+		{
+			Name:      "Helm Chart.lock",
+			URL:       "https://example.com/chart-lock.json",
+			FileMatch: []string{"Chart.lock"},
+		},
+		{
+			Name:      "Sublime Syntax",
+			URL:       "https://example.com/sublime-syntax.json",
+			FileMatch: []string{"*.sublime-syntax"},
+		},
+		{
+			Name:      "Biome",
+			URL:       "https://example.com/biome.json",
+			FileMatch: []string{"biome.json", "biome.jsonc"},
+		},
+
+		// The store drops a pattern whose braces expand past the limit
+		// from the entry, as it drops a pattern for a format that is not
+		// YAML. An entry left with no pattern matches nothing.
 		{
 			Name:      "Mixed",
 			URL:       "https://example.com/mixed.json",
@@ -2151,81 +2107,39 @@ func TestStore_FindMatch_BraceLimit(t *testing.T) {
 		fileMatch []string
 		err       error
 	}{
-		"pattern beside one past the limit": {
-			file:      "/repo/mixed/x.yaml",
-			name:      "Mixed",
-			fileMatch: []string{"**/mixed/*.yaml"},
+		"wildcard extension": {
+			file:      "ci/azure-pipelines.yaml",
+			name:      "Azure Pipelines",
+			fileMatch: []string{"**/azure-pipelines*.y*ml"},
 		},
-		"pattern past the limit": {
-			file: "/repo/braces/" + strings.Repeat("a", 11) + ".yaml",
+		"unsupported extension beside a wildcard one": {
+			file: "ci/azure.toml",
 			err:  schemastore.ErrNoCatalogMatch,
 		},
-		"pattern beside an exclusion at the limit": {
-			file:      "/repo/exclude/x.yaml",
-			name:      "Exclusion",
-			fileMatch: []string{"**/exclude/*.yaml", exclusion},
+		"hidden file without an extension": {
+			file:      "/repo/.clang-format",
+			name:      "clang-format",
+			fileMatch: []string{".clang-format"},
 		},
-		"file an exclusion at the limit excludes": {
-			file: "/repo/exclude/" + excludeName,
+		"extensionless pattern beside YAML patterns": {
+			file:      "/repo/.yamllint",
+			name:      "yamllint",
+			fileMatch: []string{"**/.yamllint", "**/.yamllint.yaml", "**/.yamllint.yml"},
+		},
+		"YAML pattern of the same entry": {
+			file:      "/repo/.yamllint.yml",
+			name:      "yamllint",
+			fileMatch: []string{"**/.yamllint", "**/.yamllint.yaml", "**/.yamllint.yml"},
+		},
+		"plain name without an extension": {
+			file:      "/repo/jobs/web/spec",
+			name:      "BOSH job spec",
+			fileMatch: []string{"**/jobs/*/spec"},
+		},
+		"unsupported extension": {
+			file: "/repo/.yamllint.toml",
 			err:  schemastore.ErrNoCatalogMatch,
 		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			entry, err := store.FindMatch(t.Context(), tc.file)
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-
-				return
-			}
-
-			require.NoError(t, err)
-			assert.Equal(t, tc.name, entry.Name)
-			assert.Equal(t, tc.fileMatch, entry.FileMatch)
-		})
-	}
-}
-
-func TestStore_FindMatch_OtherYAMLExtension(t *testing.T) {
-	t.Parallel()
-
-	// Many YAML formats use an extension of their own, so the store keeps
-	// their patterns. It drops only the patterns for formats known not to
-	// be YAML, such as TOML and JSON with comments.
-	catalog := schemastore.Catalog{Schemas: []schemastore.CatalogEntry{
-		{
-			Name:      "Citation File Format",
-			URL:       "https://example.com/cff.json",
-			FileMatch: []string{"CITATION.cff"},
-		},
-		{
-			Name:      "Helm Chart.lock",
-			URL:       "https://example.com/chart-lock.json",
-			FileMatch: []string{"Chart.lock"},
-		},
-		{
-			Name:      "Sublime Syntax",
-			URL:       "https://example.com/sublime-syntax.json",
-			FileMatch: []string{"*.sublime-syntax"},
-		},
-		{
-			Name:      "Biome",
-			URL:       "https://example.com/biome.json",
-			FileMatch: []string{"biome.json", "biome.jsonc"},
-		},
-	}}
-
-	store := newStore(newCatalogClient(t, catalog))
-
-	tcs := map[string]struct {
-		file      string
-		name      string
-		fileMatch []string
-		err       error
-	}{
 		"cff extension": {
 			file:      "/repo/CITATION.cff",
 			name:      "Citation File Format",
@@ -2248,6 +2162,24 @@ func TestStore_FindMatch_OtherYAMLExtension(t *testing.T) {
 		},
 		"jsonc extension": {
 			file: "/repo/biome.jsonc",
+			err:  schemastore.ErrNoCatalogMatch,
+		},
+		"pattern beside one past the limit": {
+			file:      "/repo/mixed/x.yaml",
+			name:      "Mixed",
+			fileMatch: []string{"**/mixed/*.yaml"},
+		},
+		"pattern past the limit": {
+			file: "/repo/braces/" + strings.Repeat("a", 11) + ".yaml",
+			err:  schemastore.ErrNoCatalogMatch,
+		},
+		"pattern beside an exclusion at the limit": {
+			file:      "/repo/exclude/x.yaml",
+			name:      "Exclusion",
+			fileMatch: []string{"**/exclude/*.yaml", exclusion},
+		},
+		"file an exclusion at the limit excludes": {
+			file: "/repo/exclude/" + excludeName,
 			err:  schemastore.ErrNoCatalogMatch,
 		},
 	}
