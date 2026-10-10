@@ -50,6 +50,11 @@ func TestResolver_Node(t *testing.T) {
 			path:  "$.a[1]",
 			want:  "y",
 		},
+		"sequence": {
+			input: "a:\n  b: [1, 2]\n",
+			path:  "$.a.b",
+			want:  "[1, 2]",
+		},
 		"alias": {
 			input: "base: &b {k: x}\nref: *b\n",
 			path:  "$.ref.k",

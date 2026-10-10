@@ -2420,19 +2420,6 @@ func TestPath_Token_MultipleDocuments(t *testing.T) {
 	assert.Equal(t, "second", tk.Value)
 }
 
-func TestPath_Node(t *testing.T) {
-	t.Parallel()
-
-	doc := yamltest.FirstDocument(t, "a:\n  b: [1, 2]\n").DocumentAST()
-
-	node, err := paths.NewResolver(doc).Node(paths.Doc().Child("a", "b"))
-	require.NoError(t, err)
-
-	seq, ok := node.(*ast.SequenceNode)
-	require.True(t, ok, "want *ast.SequenceNode, got %T", node)
-	assert.Len(t, seq.Values, 2)
-}
-
 func TestPath_Token_Anchors(t *testing.T) {
 	t.Parallel()
 
