@@ -2367,10 +2367,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, tc.input)
-				if tc.path.Len() > 0 {
-					doc = yamltest.At(t, doc, tc.path)
-				}
+				doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.path)
 
 				err := doc.Validate(t.Context(), v)
 				if !tc.excessive {
@@ -2487,10 +2484,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				t.Run(name, func(t *testing.T) {
 					t.Parallel()
 
-					node := tc.doc
-					if tc.path.Len() > 0 {
-						node = yamltest.At(t, node, tc.path)
-					}
+					node := yamltest.AtOrSelf(t, tc.doc, tc.path)
 
 					for range 2 {
 						err := node.Validate(t.Context(), v)
@@ -2532,17 +2526,12 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, tc.input)
-				if tc.path.Len() > 0 {
-					doc = yamltest.At(t, doc, tc.path)
-				}
+				doc := yamltest.AtOrSelf(t, yamltest.FirstDocument(t, tc.input), tc.path)
 
 				requireExcessiveAliasing(t, doc.Validate(t.Context(), v))
 
 				trusted := yamltest.FirstDocument(t, tc.input, niceyaml.WithAliasLimit(false))
-				if tc.path.Len() > 0 {
-					trusted = yamltest.At(t, trusted, tc.path)
-				}
+				trusted = yamltest.AtOrSelf(t, trusted, tc.path)
 
 				require.NoError(t, trusted.Validate(t.Context(), v))
 
@@ -2602,9 +2591,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				t.Parallel()
 
 				doc := yamltest.FirstDocument(t, tc.input, refs, niceyaml.WithName("app.yaml"))
-				if tc.path.Len() > 0 {
-					doc = yamltest.At(t, doc, tc.path)
-				}
+				doc = yamltest.AtOrSelf(t, doc, tc.path)
 
 				_, err := doc.Decode[any](t.Context(), niceyaml.WithValidator(v))
 				if tc.want == "" {
@@ -2619,9 +2606,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				// With the alias limit off, the schema reads every use of
 				// the mapping and the document conforms.
 				trusted := yamltest.FirstDocument(t, tc.input, refs, niceyaml.WithAliasLimit(false))
-				if tc.path.Len() > 0 {
-					trusted = yamltest.At(t, trusted, tc.path)
-				}
+				trusted = yamltest.AtOrSelf(t, trusted, tc.path)
 
 				_, err = trusted.Decode[any](t.Context(), niceyaml.WithValidator(v))
 				require.NoError(t, err)
@@ -3226,10 +3211,7 @@ func TestSchema_Check_Bound(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			node := yamltest.FirstDocumentWithPath(t, tc.input, "menu.yaml")
-			if tc.path.Len() > 0 {
-				node = yamltest.At(t, node, tc.path)
-			}
+			node := yamltest.AtOrSelf(t, yamltest.FirstDocumentWithPath(t, tc.input, "menu.yaml"), tc.path)
 
 			err := node.Validate(t.Context(), v)
 			if tc.want == "" {
