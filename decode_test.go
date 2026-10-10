@@ -6877,45 +6877,24 @@ func TestDocument_DecodeInto(t *testing.T) {
 		assert.Equal(t, plainConfig{Name: "test", Value: 7}, result)
 	})
 
-	t.Run("leaves the value as it is for a document without content", func(t *testing.T) {
+	t.Run("leaves the value as it is for a document that holds no value", func(t *testing.T) {
 		t.Parallel()
 
-		// Each input parses to a document whose body holds no value:
-		// nothing, only comments, or only a directive above an empty
-		// document.
-		tcs := map[string]string{
-			"empty":        "",
-			"comment only": "# just a comment\n",
-			"directive":    "%YAML 1.2\n---\n",
-		}
-
-		for name, input := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				dd := yamltest.FirstDocument(t, input)
-
-				result := plainConfig{Name: "default", Value: 7}
-
-				err := dd.DecodeInto(t.Context(), &result)
-				require.NoError(t, err)
-				assert.Equal(t, plainConfig{Name: "default", Value: 7}, result)
-
-				got, err := dd.Decode[map[string]any](t.Context())
-				require.NoError(t, err)
-				assert.Nil(t, got)
-			})
-		}
-	})
-
-	t.Run("leaves the value as it is for a tagged null", func(t *testing.T) {
-		t.Parallel()
-
-		// Each input tags a value it leaves out, which the go-yaml decoder
-		// reads as null.
 		tcs := map[string]struct {
 			input string
 		}{
+			// The body of each of these documents holds nothing, only
+			// comments, or only a directive above an empty document.
+			"empty":        {input: ""},
+			"comment only": {input: "# just a comment\n"},
+			"directive":    {input: "%YAML 1.2\n---\n"},
+			// Each of these holds a null.
+			"null":           {input: "null\n"},
+			"tilde":          {input: "~\n"},
+			"anchored null":  {input: "&a null\n"},
+			"anchored tilde": {input: "&a ~\n"},
+			// Each of these tags a value it leaves out, which the go-yaml
+			// decoder reads as null.
 			"map tag after a header": {input: "--- !!map\n"},
 			"seq tag":                {input: "!!seq\n"},
 			"null tag":               {input: "!!null\n"},
@@ -6946,6 +6925,16 @@ func TestDocument_DecodeInto(t *testing.T) {
 				err = dd.DecodeInto(t.Context(), &config)
 				require.NoError(t, err)
 				assert.Equal(t, plainConfig{Name: "default", Value: 7}, config)
+
+				value := 1
+
+				err = dd.DecodeInto(t.Context(), &value)
+				require.NoError(t, err)
+				assert.Equal(t, 1, value)
+
+				got, err := dd.Decode[map[string]any](t.Context())
+				require.NoError(t, err)
+				assert.Nil(t, got)
 			})
 		}
 	})
@@ -7037,39 +7026,6 @@ func TestDocument_DecodeInto(t *testing.T) {
 				}
 
 				assert.Equal(t, want, scoped)
-			})
-		}
-	})
-
-	t.Run("leaves the value as it is for a null document", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]struct {
-			input string
-		}{
-			"null":           {input: "null\n"},
-			"tilde":          {input: "~\n"},
-			"anchored null":  {input: "&a null\n"},
-			"anchored tilde": {input: "&a ~\n"},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				dd := yamltest.FirstDocument(t, tc.input)
-
-				config := plainConfig{Name: "default", Value: 7}
-
-				err := dd.DecodeInto(t.Context(), &config)
-				require.NoError(t, err)
-				assert.Equal(t, plainConfig{Name: "default", Value: 7}, config)
-
-				value := 1
-
-				err = dd.DecodeInto(t.Context(), &value)
-				require.NoError(t, err)
-				assert.Equal(t, 1, value)
 			})
 		}
 	})
