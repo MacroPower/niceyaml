@@ -1039,118 +1039,6 @@ func TestView_Slice_CostIndependentOfContent(t *testing.T) {
 func TestView_String(t *testing.T) {
 	t.Parallel()
 
-	t.Run("annotation rendering", func(t *testing.T) {
-		t.Parallel()
-
-		tcs := map[string]struct {
-			want        string
-			annotations []line.Annotation
-		}{
-			"no annotation": {
-				annotations: nil,
-				want:        "   1 | key: value",
-			},
-			"annotation below at start": {
-				annotations: []line.Annotation{{Content: "error here", Placement: line.Below}},
-				want:        stringtest.JoinLF("   1 | key: value", "     | ^ error here"),
-			},
-			"annotation below with padding": {
-				annotations: []line.Annotation{{Content: "note", Placement: line.Below, Col: 4}},
-				want:        stringtest.JoinLF("   1 | key: value", "     |     ^ note"),
-			},
-			"annotation above": {
-				annotations: []line.Annotation{{Content: "@@ hunk header @@", Placement: line.Above}},
-				want:        stringtest.JoinLF("     | @@ hunk header @@", "   1 | key: value"),
-			},
-			"annotation above without content adds no row": {
-				annotations: []line.Annotation{{Content: "", Placement: line.Above, Col: 2}},
-				want:        "   1 | key: value",
-			},
-			"annotations below without content get one caret": {
-				annotations: []line.Annotation{
-					{Content: "", Placement: line.Below, Col: 4},
-					{Content: "", Placement: line.Below, Col: 2},
-				},
-				want: stringtest.JoinLF("   1 | key: value", "     |   ^"),
-			},
-			"annotations above of each kind get a row of their own": {
-				annotations: []line.Annotation{
-					{Content: "@@ hunk header @@", Kind: kind.UIHunkHeader, Placement: line.Above},
-					{Content: "first", Placement: line.Above, Col: 5},
-					{Content: "", Kind: kind.UISeparator, Placement: line.Above},
-					{Content: "second", Kind: kind.UIAnnotation, Placement: line.Above, Col: 2},
-				},
-				want: stringtest.JoinLF(
-					"     | @@ hunk header @@",
-					"     |   second; first",
-					"   1 | key: value",
-				),
-			},
-			"annotations above and below": {
-				annotations: []line.Annotation{
-					{Content: "@@ hunk header @@", Placement: line.Above},
-					{Content: "note", Placement: line.Below, Col: 2},
-				},
-				want: stringtest.JoinLF(
-					"     | @@ hunk header @@",
-					"   1 | key: value",
-					"     |   ^ note",
-				),
-			},
-			"multiple annotations below join in column order at the minimum column": {
-				annotations: []line.Annotation{
-					{Content: "first", Placement: line.Below, Col: 5},
-					{Content: "second", Placement: line.Below, Col: 2},
-				},
-				want: stringtest.JoinLF("   1 | key: value", "     |   ^ second; first"),
-			},
-			"an annotation without content does not set the column": {
-				annotations: []line.Annotation{
-					{Content: "", Placement: line.Below, Col: 0},
-					{Content: "boom", Placement: line.Below, Col: 5},
-				},
-				want: stringtest.JoinLF("   1 | key: value", "     |      ^ boom"),
-			},
-			"annotations below of each kind get a row of their own": {
-				annotations: []line.Annotation{
-					{Content: "hint", Placement: line.Below, Col: 0},
-					{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Col: 5},
-				},
-				want: stringtest.JoinLF(
-					"   1 | key: value",
-					"     | ^ hint",
-					"     |      ^ bad value",
-				),
-			},
-			"a kind below without content keeps its caret beside another kind": {
-				annotations: []line.Annotation{
-					{Content: "", Placement: line.Below, Col: 2},
-					{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Col: 5},
-				},
-				want: stringtest.JoinLF(
-					"   1 | key: value",
-					"     |   ^",
-					"     |      ^ bad value",
-				),
-			},
-			"negative column is not padded": {
-				annotations: []line.Annotation{{Content: "note", Placement: line.Below, Col: -3}},
-				want:        stringtest.JoinLF("   1 | key: value", "     | ^ note"),
-			},
-		}
-
-		for name, tc := range tcs {
-			t.Run(name, func(t *testing.T) {
-				t.Parallel()
-
-				view := newTestView(t, "key: value\n", 1)
-				view.Annotate(0, tc.annotations...)
-
-				assert.Equal(t, tc.want, view.String())
-			})
-		}
-	})
-
 	t.Run("multiple lines", func(t *testing.T) {
 		t.Parallel()
 
@@ -1244,7 +1132,7 @@ func TestView_String(t *testing.T) {
 		assert.Equal(t, stringtest.JoinLF("   1 | key: value", "     |         ^^"), view.String())
 	})
 
-	t.Run("marks on one line", func(t *testing.T) {
+	t.Run("annotations and marks on one line", func(t *testing.T) {
 		t.Parallel()
 
 		tcs := map[string]struct {
@@ -1350,6 +1238,149 @@ func TestView_String(t *testing.T) {
 					"     |    ^^^^^^",
 				),
 			},
+			"no annotation": {
+				input:       "key: value",
+				annotations: nil,
+				want:        "   1 | key: value",
+			},
+			"annotation below at start": {
+				input:       "key: value",
+				annotations: []line.Annotation{{Content: "error here", Placement: line.Below}},
+				want:        stringtest.JoinLF("   1 | key: value", "     | ^ error here"),
+			},
+			"annotation below with padding": {
+				input:       "key: value",
+				annotations: []line.Annotation{{Content: "note", Placement: line.Below, Col: 4}},
+				want:        stringtest.JoinLF("   1 | key: value", "     |     ^ note"),
+			},
+			"annotation above": {
+				input:       "key: value",
+				annotations: []line.Annotation{{Content: "@@ hunk header @@", Placement: line.Above}},
+				want:        stringtest.JoinLF("     | @@ hunk header @@", "   1 | key: value"),
+			},
+			"annotation above without content adds no row": {
+				input:       "key: value",
+				annotations: []line.Annotation{{Content: "", Placement: line.Above, Col: 2}},
+				want:        "   1 | key: value",
+			},
+			"annotations below without content get one caret": {
+				input: "key: value",
+				annotations: []line.Annotation{
+					{Content: "", Placement: line.Below, Col: 4},
+					{Content: "", Placement: line.Below, Col: 2},
+				},
+				want: stringtest.JoinLF("   1 | key: value", "     |   ^"),
+			},
+			"annotations above of each kind get a row of their own": {
+				input: "key: value",
+				annotations: []line.Annotation{
+					{Content: "@@ hunk header @@", Kind: kind.UIHunkHeader, Placement: line.Above},
+					{Content: "first", Placement: line.Above, Col: 5},
+					{Content: "", Kind: kind.UISeparator, Placement: line.Above},
+					{Content: "second", Kind: kind.UIAnnotation, Placement: line.Above, Col: 2},
+				},
+				want: stringtest.JoinLF(
+					"     | @@ hunk header @@",
+					"     |   second; first",
+					"   1 | key: value",
+				),
+			},
+			"annotations above and below": {
+				input: "key: value",
+				annotations: []line.Annotation{
+					{Content: "@@ hunk header @@", Placement: line.Above},
+					{Content: "note", Placement: line.Below, Col: 2},
+				},
+				want: stringtest.JoinLF(
+					"     | @@ hunk header @@",
+					"   1 | key: value",
+					"     |   ^ note",
+				),
+			},
+			"multiple annotations below join in column order at the minimum column": {
+				input: "key: value",
+				annotations: []line.Annotation{
+					{Content: "first", Placement: line.Below, Col: 5},
+					{Content: "second", Placement: line.Below, Col: 2},
+				},
+				want: stringtest.JoinLF("   1 | key: value", "     |   ^ second; first"),
+			},
+			"an annotation without content does not set the column": {
+				input: "key: value",
+				annotations: []line.Annotation{
+					{Content: "", Placement: line.Below, Col: 0},
+					{Content: "boom", Placement: line.Below, Col: 5},
+				},
+				want: stringtest.JoinLF("   1 | key: value", "     |      ^ boom"),
+			},
+			"annotations below of each kind get a row of their own": {
+				input: "key: value",
+				annotations: []line.Annotation{
+					{Content: "hint", Placement: line.Below, Col: 0},
+					{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Col: 5},
+				},
+				want: stringtest.JoinLF(
+					"   1 | key: value",
+					"     | ^ hint",
+					"     |      ^ bad value",
+				),
+			},
+			"a kind below without content keeps its caret beside another kind": {
+				input: "key: value",
+				annotations: []line.Annotation{
+					{Content: "", Placement: line.Below, Col: 2},
+					{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Col: 5},
+				},
+				want: stringtest.JoinLF(
+					"   1 | key: value",
+					"     |   ^",
+					"     |      ^ bad value",
+				),
+			},
+			"negative column is not padded": {
+				input:       "key: value",
+				annotations: []line.Annotation{{Content: "note", Placement: line.Below, Col: -3}},
+				want:        stringtest.JoinLF("   1 | key: value", "     | ^ note"),
+			},
+
+			// A column more than 1024 columns past the end of the content
+			// starts 1024 columns past it, after every cell of the content,
+			// as the printer starts it.
+			"below at the max column": {
+				input:       "a: 1",
+				annotations: []line.Annotation{{Content: "msg", Placement: line.Below, Col: math.MaxInt}},
+				want:        stringtest.JoinLF("   1 | a: 1", "     | "+strings.Repeat(" ", 4+1024)+"^ msg"),
+			},
+			"above at the max column": {
+				input:       "a: 1",
+				annotations: []line.Annotation{{Content: "msg", Placement: line.Above, Col: math.MaxInt}},
+				want:        stringtest.JoinLF("     | "+strings.Repeat(" ", 4+1024)+"msg", "   1 | a: 1"),
+			},
+			"below past the bound": {
+				input:       "a: 1",
+				annotations: []line.Annotation{{Content: "msg", Placement: line.Below, Col: 1 << 32}},
+				want:        stringtest.JoinLF("   1 | a: 1", "     | "+strings.Repeat(" ", 4+1024)+"^ msg"),
+			},
+			"above past the bound": {
+				input:       "a: 1",
+				annotations: []line.Annotation{{Content: "msg", Placement: line.Above, Col: 1 << 32}},
+				want:        stringtest.JoinLF("     | "+strings.Repeat(" ", 4+1024)+"msg", "   1 | a: 1"),
+			},
+			"below at the bound": {
+				input:       "a: 1",
+				annotations: []line.Annotation{{Content: "msg", Placement: line.Below, Col: 4 + 1024}},
+				want:        stringtest.JoinLF("   1 | a: 1", "     | "+strings.Repeat(" ", 4+1024)+"^ msg"),
+			},
+			"below at the max column after wide runes": {
+				input:       "k: 日本語",
+				annotations: []line.Annotation{{Content: "msg", Placement: line.Below, Col: math.MaxInt}},
+				want:        stringtest.JoinLF("   1 | k: 日本語", "     | "+strings.Repeat(" ", 9+1024)+"^ msg"),
+			},
+			"above at the max column after wide runes": {
+				input:       "k: 日本語",
+				annotations: []line.Annotation{{Content: "msg", Placement: line.Above, Col: math.MaxInt}},
+				want:        stringtest.JoinLF("     | "+strings.Repeat(" ", 9+1024)+"msg", "   1 | k: 日本語"),
+			},
 		}
 
 		for name, tc := range tcs {
@@ -1398,74 +1429,6 @@ func TestView_OutOfRange(t *testing.T) {
 			}
 
 			assert.Panics(t, func() { call(line.NewView(line.Lines{}), 0) }, "index 0 on empty view")
-		})
-	}
-}
-
-func TestView_String_FarAnnotationColumn(t *testing.T) {
-	t.Parallel()
-
-	// A column more than 1024 columns past the end of the content starts
-	// 1024 columns past it, after every cell of the content, as the
-	// printer starts it.
-	tcs := map[string]struct {
-		input     string
-		want      string
-		col       int
-		placement line.Placement
-	}{
-		"below at the max column": {
-			input:     "a: 1",
-			col:       math.MaxInt,
-			placement: line.Below,
-			want:      stringtest.JoinLF("   1 | a: 1", "     | "+strings.Repeat(" ", 4+1024)+"^ msg"),
-		},
-		"above at the max column": {
-			input:     "a: 1",
-			col:       math.MaxInt,
-			placement: line.Above,
-			want:      stringtest.JoinLF("     | "+strings.Repeat(" ", 4+1024)+"msg", "   1 | a: 1"),
-		},
-		"below past the bound": {
-			input:     "a: 1",
-			col:       1 << 32,
-			placement: line.Below,
-			want:      stringtest.JoinLF("   1 | a: 1", "     | "+strings.Repeat(" ", 4+1024)+"^ msg"),
-		},
-		"above past the bound": {
-			input:     "a: 1",
-			col:       1 << 32,
-			placement: line.Above,
-			want:      stringtest.JoinLF("     | "+strings.Repeat(" ", 4+1024)+"msg", "   1 | a: 1"),
-		},
-		"below at the bound": {
-			input:     "a: 1",
-			col:       4 + 1024,
-			placement: line.Below,
-			want:      stringtest.JoinLF("   1 | a: 1", "     | "+strings.Repeat(" ", 4+1024)+"^ msg"),
-		},
-		"below at the max column after wide runes": {
-			input:     "k: 日本語",
-			col:       math.MaxInt,
-			placement: line.Below,
-			want:      stringtest.JoinLF("   1 | k: 日本語", "     | "+strings.Repeat(" ", 9+1024)+"^ msg"),
-		},
-		"above at the max column after wide runes": {
-			input:     "k: 日本語",
-			col:       math.MaxInt,
-			placement: line.Above,
-			want:      stringtest.JoinLF("     | "+strings.Repeat(" ", 9+1024)+"msg", "   1 | k: 日本語"),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := newTestView(t, tc.input+"\n", 1)
-			view.Annotate(0, line.Annotation{Content: "msg", Placement: tc.placement, Col: tc.col})
-
-			assert.Equal(t, tc.want, view.String())
 		})
 	}
 }
