@@ -1554,37 +1554,20 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 		schema.When(matcher.Content(kindPath, "Service"), schema.Embedded(serviceSchema)),
 	))
 
-	input := stringtest.Input(`
+	docs := niceyaml.NewSourceFromString(stringtest.Input(`
 		kind: Deployment
 		---
 		kind: Service
 		---
 		kind: ConfigMap
-	`)
+	`)).Documents()
+	require.Len(t, docs, 3)
 
-	source := niceyaml.NewSourceFromString(input)
-	docs := source.Documents()
-
-	// Track validation results.
-	validated := make(map[string]bool)
-	for _, doc := range docs {
-		kind, err := yamltest.At(t, doc, kindPath).Decode[string](t.Context())
-		require.NoError(t, err)
-
-		err = reg.Check(t.Context(), doc)
-
-		if kind == "Deployment" || kind == "Service" {
-			require.NoError(t, err, "expected %s to validate", kind)
-
-			validated[kind] = true
-		} else {
-			// ConfigMap has no matching schema, so Check returns ErrNoMatch.
-			require.ErrorIs(t, err, schema.ErrNoMatch)
-		}
-	}
-
-	assert.True(t, validated["Deployment"])
-	assert.True(t, validated["Service"])
+	// Each schema takes one kind alone, so a document passes only the
+	// schema of its own resolver. No resolver applies to the ConfigMap.
+	require.NoError(t, reg.Check(t.Context(), docs[0]))
+	require.NoError(t, reg.Check(t.Context(), docs[1]))
+	require.ErrorIs(t, reg.Check(t.Context(), docs[2]), schema.ErrNoMatch)
 }
 
 func TestRegistry_Validator_ErrorBoundToReceiver(t *testing.T) {
