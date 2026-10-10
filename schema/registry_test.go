@@ -240,45 +240,61 @@ func TestRegistry_Check_ScopedNode(t *testing.T) {
 	}`)
 	reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaData)))
 
-	t.Run("Check refuses a scoped node", func(t *testing.T) {
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		kind: Deployment
+		spec:
+		  replicas: 1
+	`))
+	spec := yamltest.At(t, doc, paths.Current().Child("spec"))
+
+	t.Run("refuses a scoped node", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			spec:
-			  replicas: 1
-		`))
-		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
+		tcs := map[string]struct {
+			check func(ctx context.Context, n *niceyaml.Node) error
+		}{
+			"Check": {
+				check: reg.Check,
+			},
+			"Lookup": {
+				check: func(ctx context.Context, n *niceyaml.Node) error {
+					_, err := reg.Lookup(ctx, n)
 
-		err := reg.Check(t.Context(), spec)
-		require.ErrorIs(t, err, schema.ErrScopedDocument)
-		require.EqualError(t, err, "registry needs a whole document: node is scoped to $.spec")
+					return err //nolint:wrapcheck // The test inspects the registry's own error.
+				},
+			},
+			"Validate": {
+				check: func(ctx context.Context, n *niceyaml.Node) error {
+					return n.Validate(ctx, reg)
+				},
+			},
+		}
 
-		var bound *niceyaml.SourceError
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		require.ErrorAs(t, err, &bound)
-		assert.Same(t, doc.Source(), bound.Source())
+				err := tc.check(t.Context(), spec)
+				require.ErrorIs(t, err, schema.ErrScopedDocument)
+				require.EqualError(t, err, "registry needs a whole document: node is scoped to $.spec")
 
-		// The refusal is about the call, so it binds to the root of the
-		// document and points at no value.
-		assert.Same(t, doc, bound.Node())
+				var bound *niceyaml.SourceError
 
-		_, ok := bound.Range()
-		assert.False(t, ok)
+				require.ErrorAs(t, err, &bound)
+				assert.Same(t, doc.Source(), bound.Source())
 
-		err = spec.Validate(t.Context(), reg)
-		require.ErrorIs(t, err, schema.ErrScopedDocument)
+				// The refusal is about the call, so it binds to the root
+				// of the document and points at no value.
+				assert.Same(t, doc, bound.Node())
+
+				_, ok := bound.Range()
+				assert.False(t, ok)
+			})
+		}
 	})
 
 	t.Run("a scoped decode under a registry fails before it decodes", func(t *testing.T) {
 		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			spec:
-			  replicas: 1
-		`))
-		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
 
 		var v struct {
 			Replicas int `yaml:"replicas"`
@@ -294,28 +310,13 @@ func TestRegistry_Check_ScopedNode(t *testing.T) {
 
 		lax := schema.NewRegistry(schema.WithRequireSchema(false))
 
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			spec:
-			  replicas: 1
-		`))
-		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
-
 		require.ErrorIs(t, lax.Check(t.Context(), spec), schema.ErrScopedDocument)
 	})
 
 	t.Run("the root validates once and the nodes decode without it", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			spec:
-			  replicas: 1
-		`))
-
 		require.NoError(t, doc.Validate(t.Context(), reg))
-
-		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
 
 		var v struct {
 			Replicas int `yaml:"replicas"`
@@ -325,32 +326,10 @@ func TestRegistry_Check_ScopedNode(t *testing.T) {
 		assert.Equal(t, 1, v.Replicas)
 	})
 
-	t.Run("Lookup refuses a scoped node", func(t *testing.T) {
+	t.Run("Lookup resolves the whole document, whichever Node of it reaches the root", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			spec:
-			  replicas: 1
-		`))
-		spec := yamltest.At(t, doc, paths.Current().Child("spec"))
-
-		_, err := reg.Lookup(t.Context(), spec)
-		require.ErrorIs(t, err, schema.ErrScopedDocument)
-		require.EqualError(t, err, "registry needs a whole document: node is scoped to $.spec")
-
-		var bound *niceyaml.SourceError
-
-		require.ErrorAs(t, err, &bound)
-		assert.Same(t, doc.Source(), bound.Source())
-		assert.Same(t, doc, bound.Node())
-
-		_, ok := bound.Range()
-		assert.False(t, ok)
-
-		// The whole document resolves, whichever Node of it reaches the
-		// root.
-		_, err = reg.Lookup(t.Context(), doc)
+		_, err := reg.Lookup(t.Context(), doc)
 		require.NoError(t, err)
 
 		_, err = reg.Lookup(t.Context(), spec.Document())
