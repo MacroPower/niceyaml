@@ -187,8 +187,7 @@ func TestRegistry_Lookup(t *testing.T) {
 			fallback,
 		))
 
-		doc := yamltest.FirstDocument(t, "kind: Deployment")
-		v, err := reg.Lookup(t.Context(), doc)
+		v, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Deployment"))
 		require.NoError(t, err)
 		require.NotNil(t, v)
 		assert.Equal(t, int32(0), fallbackLoads.Load())
@@ -200,8 +199,7 @@ func TestRegistry_Lookup(t *testing.T) {
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(schemaData)))
 
 		for _, input := range []string{`kind: Deployment`, `kind: Service`, `other: value`} {
-			doc := yamltest.FirstDocument(t, input)
-			_, err := reg.Lookup(t.Context(), doc)
+			_, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, input))
 			require.NoError(t, err)
 		}
 	})
@@ -214,8 +212,7 @@ func TestRegistry_Lookup(t *testing.T) {
 			schema.Embedded(schemaData),
 		)))
 
-		doc := yamltest.FirstDocument(t, "kind: Service")
-		_, err := reg.Lookup(t.Context(), doc)
+		_, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Service"))
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 
@@ -224,8 +221,7 @@ func TestRegistry_Lookup(t *testing.T) {
 
 		reg := schema.NewRegistry()
 
-		doc := yamltest.FirstDocument(t, "kind: Service")
-		_, err := reg.Lookup(t.Context(), doc)
+		_, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Service"))
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 
@@ -237,8 +233,7 @@ func TestRegistry_Lookup(t *testing.T) {
 
 		reg := schema.NewRegistry(schema.WithResolvers(first, second))
 
-		doc := yamltest.FirstDocument(t, "kind: Deployment")
-		_, err := reg.Lookup(t.Context(), doc)
+		_, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Deployment"))
 		require.NoError(t, err)
 		assert.Equal(t, int32(1), firstLoads.Load())
 		assert.Equal(t, int32(0), secondLoads.Load())
@@ -615,15 +610,13 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 	t.Run("accepts a document no resolver applies to", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "kind: Service")
-		require.NoError(t, newRegistry().Check(t.Context(), doc))
+		require.NoError(t, newRegistry().Check(t.Context(), yamltest.FirstDocument(t, "kind: Service")))
 	})
 
 	t.Run("accepts a document without content", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "# only a comment\n")
-		require.NoError(t, newRegistry().Check(t.Context(), doc))
+		require.NoError(t, newRegistry().Check(t.Context(), yamltest.FirstDocument(t, "# only a comment\n")))
 	})
 
 	t.Run("still validates a document a resolver applies to", func(t *testing.T) {
@@ -642,8 +635,7 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 			schema.WithRequireSchema(false),
 		)
 
-		doc := yamltest.FirstDocument(t, "kind: Service")
-		err := reg.Check(t.Context(), doc)
+		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Service"))
 		require.ErrorIs(t, err, schema.ErrResolve)
 		require.ErrorIs(t, err, cannotDecide)
 	})
@@ -658,16 +650,14 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 			schema.WithRequireSchema(false),
 		)
 
-		doc := yamltest.FirstDocument(t, "kind: Service")
-		err := reg.Check(t.Context(), doc)
+		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Service"))
 		require.ErrorIs(t, err, schema.ErrLoad)
 	})
 
 	t.Run("Lookup still reports ErrNoMatch", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "kind: Service")
-		_, err := newRegistry().Lookup(t.Context(), doc)
+		_, err := newRegistry().Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Service"))
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 
@@ -740,24 +730,20 @@ func TestRegistry_Caching(t *testing.T) {
 	t.Run("validators are cached by URL", func(t *testing.T) {
 		t.Parallel()
 
-		schemaData := []byte(`{"type": "object"}`)
-
 		reg := schema.NewRegistry(schema.WithResolvers(schema.When(
 			matcher.Content(kindPath, "Deployment"),
-			schema.Embedded(schemaData),
+			schema.Embedded([]byte(`{"type": "object"}`)),
 		)))
 
-		// First lookup compiles and caches.
-		doc1 := yamltest.FirstDocument(t, "kind: Deployment")
-		v1, err := reg.Lookup(t.Context(), doc1)
+		// The first lookup compiles the schema, and the second finds it
+		// in the cache.
+		v1, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Deployment"))
 		require.NoError(t, err)
 
-		// Second lookup uses cache.
-		doc2 := yamltest.FirstDocument(t, "kind: Deployment")
-		v2, err := reg.Lookup(t.Context(), doc2)
+		v2, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Deployment"))
 		require.NoError(t, err)
 
-		assert.Same(t, v1, v2, "validators should be the same instance")
+		assert.Same(t, v1, v2)
 	})
 
 	t.Run("loader runs once per URL", func(t *testing.T) {
@@ -770,8 +756,7 @@ func TestRegistry_Caching(t *testing.T) {
 		doc := yamltest.FirstDocument(t, "kind: Deployment")
 
 		for range 5 {
-			err := reg.Check(t.Context(), doc)
-			require.NoError(t, err)
+			require.NoError(t, reg.Check(t.Context(), doc))
 		}
 
 		assert.Equal(t, int32(1), loads.Load(), "the cache should be checked before loading")
@@ -826,9 +811,7 @@ func TestRegistry_Caching(t *testing.T) {
 		))
 
 		for _, input := range []string{`kind: Deployment`, `kind: Service`, `kind: Deployment`, `kind: Service`} {
-			doc := yamltest.FirstDocument(t, input)
-			err := reg.Check(t.Context(), doc)
-			require.NoError(t, err)
+			require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, input)))
 		}
 
 		assert.Equal(t, int32(1), deploymentLoads.Load())
@@ -844,8 +827,7 @@ func TestRegistry_Caching(t *testing.T) {
 			}),
 		))
 
-		doc := document(t)
-		_, err := reg.Lookup(t.Context(), doc)
+		_, err := reg.Lookup(t.Context(), document(t))
 		require.ErrorIs(t, err, schema.ErrResolve)
 		require.ErrorContains(t, err, "names no schema")
 	})
@@ -861,8 +843,7 @@ func TestRegistry_Caching(t *testing.T) {
 			}),
 		))
 
-		doc := document(t)
-		_, err := reg.Lookup(t.Context(), doc)
+		_, err := reg.Lookup(t.Context(), document(t))
 		require.ErrorIs(t, err, schema.ErrResolve)
 		require.ErrorIs(t, err, schema.ErrEmptyPath)
 	})
@@ -1363,19 +1344,11 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 			),
 		)
 
-		// Deployment should validate.
-		doc := yamltest.FirstDocument(t, "kind: Deployment")
-		err := reg.Check(t.Context(), doc)
-		require.NoError(t, err)
-
-		// Service should validate.
-		doc = yamltest.FirstDocument(t, "kind: Service")
-		err = reg.Check(t.Context(), doc)
-		require.NoError(t, err)
+		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Deployment")))
+		require.NoError(t, reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: Service")))
 
 		// ConfigMap has no schema.
-		doc = yamltest.FirstDocument(t, "kind: ConfigMap")
-		err = reg.Check(t.Context(), doc)
+		err := reg.Check(t.Context(), yamltest.FirstDocument(t, "kind: ConfigMap"))
 		require.ErrorIs(t, err, schema.ErrNoMatch)
 	})
 
@@ -1489,8 +1462,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 
 		reg := schema.NewRegistry(schema.WithResolvers(failing(errors.New("cannot decide"))))
 
-		doc := document(t)
-		err := reg.Check(t.Context(), doc)
+		err := reg.Check(t.Context(), document(t))
 		require.ErrorIs(t, err, schema.ErrResolve)
 		assert.Contains(t, err.Error(), "cannot decide")
 	})
@@ -1500,8 +1472,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 
 		reg := schema.NewRegistry(schema.WithResolvers(loading("broken.json", nil, errors.New("disk on fire"))))
 
-		doc := document(t)
-		err := reg.Check(t.Context(), doc)
+		err := reg.Check(t.Context(), document(t))
 		require.ErrorIs(t, err, schema.ErrLoad)
 		assert.Contains(t, err.Error(), "disk on fire")
 		assert.Contains(t, err.Error(), "broken.json")
@@ -1512,8 +1483,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 
 		reg := schema.NewRegistry(schema.WithResolvers(loading("bad.json", []byte(`{not valid json`), nil)))
 
-		doc := document(t)
-		_, err := reg.Lookup(t.Context(), doc)
+		_, err := reg.Lookup(t.Context(), document(t))
 		require.ErrorIs(t, err, schema.ErrCompile)
 		assert.Contains(t, err.Error(), "bad.json")
 	})
@@ -1770,8 +1740,7 @@ func TestRegistry_WithHTTPClient(t *testing.T) {
 
 		var requests atomic.Int32
 
-		err := lookup(t, countingClient(&requests), schema.URL(schemaURL))
-		require.NoError(t, err)
+		require.NoError(t, lookup(t, countingClient(&requests), schema.URL(schemaURL)))
 		assert.Equal(t, int32(1), requests.Load())
 	})
 }
