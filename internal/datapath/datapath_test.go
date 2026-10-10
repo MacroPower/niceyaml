@@ -6,6 +6,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/datapath"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -65,13 +66,13 @@ func TestIndex_Member(t *testing.T) {
 			wantStart: "x@1:7",
 		},
 		"hexadecimal key": {
-			input:     "ports:\n  0x10:\n    name: x\n",
+			input:     stringtest.LinesLF("ports:", "  0x10:", "    name: x"),
 			steps:     []any{"ports", "16", "name"},
 			want:      "@.ports.0x10.name",
 			wantStart: "x@3:11",
 		},
 		"float key with a trailing zero": {
-			input:     "python:\n  3.10: a\n",
+			input:     stringtest.LinesLF("python:", "  3.10: a"),
 			steps:     []any{"python", "3.1"},
 			want:      "@.python.'3.10'",
 			wantStart: "a@2:9",
@@ -89,37 +90,50 @@ func TestIndex_Member(t *testing.T) {
 			wantStart: "x@1:8",
 		},
 		"later key sets the member again": {
-			input:     "m:\n  16: aaaa\n  0x10: b\n",
+			input:     stringtest.LinesLF("m:", "  16: aaaa", "  0x10: b"),
 			steps:     []any{"m", "16"},
 			want:      "@.m.0x10",
 			wantStart: "b@3:9",
 		},
 		"member of a merge source": {
-			input:     "base: &base\n  0x10: x\nm:\n  <<: *base\n",
+			input: stringtest.LinesLF(
+				"base: &base",
+				"  0x10: x",
+				"m:",
+				"  <<: *base",
+			),
 			steps:     []any{"m", "16"},
 			want:      "@.m.0x10",
 			wantStart: "x@2:9",
 		},
 		"later merge source wins": {
-			input:     "b0: &b0 {True: xxxx}\nb1: &b1 {<<: *b0, true: aaaa, True: b}\nm: {<<: *b1}\n",
+			input: stringtest.LinesLF(
+				"b0: &b0 {True: xxxx}",
+				"b1: &b1 {<<: *b0, true: aaaa, True: b}",
+				"m: {<<: *b1}",
+			),
 			steps:     []any{"m", "true"},
 			want:      "@.m.True",
 			wantStart: "b@2:37",
 		},
 		"member behind an alias": {
-			input:     "base: &base\n  0x10: x\nal: *base\n",
+			input:     stringtest.LinesLF("base: &base", "  0x10: x", "al: *base"),
 			steps:     []any{"al", "16"},
 			want:      "@.al.0x10",
 			wantStart: "x@2:9",
 		},
 		"alias key": {
-			input:     "k: &k 0x10\nm:\n  *k : v\n",
+			input:     stringtest.LinesLF("k: &k 0x10", "m:", "  *k : v"),
 			steps:     []any{"m", "16"},
 			want:      "@.m.0x10",
 			wantStart: "v@3:8",
 		},
 		"spelling a later key repeats": {
-			input:     "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n",
+			input: stringtest.LinesLF(
+				"user:",
+				"  <<: {0x10: x}",
+				"  \"0x10\": 1",
+			),
 			steps:     []any{"user", "16"},
 			want:      "@.user.16",
 			wantStart: "x@2:14",
@@ -127,7 +141,11 @@ func TestIndex_Member(t *testing.T) {
 			unspelled: true,
 		},
 		"names below an unspelled name stay decoded": {
-			input:     "user:\n  <<: {0x10: {0x20: x}}\n  \"0x10\": 1\n",
+			input: stringtest.LinesLF(
+				"user:",
+				"  <<: {0x10: {0x20: x}}",
+				"  \"0x10\": 1",
+			),
 			steps:     []any{"user", "16", "32"},
 			want:      "@.user.16.32",
 			wantStart: "x@2:21",
@@ -135,25 +153,37 @@ func TestIndex_Member(t *testing.T) {
 			unspelled: true,
 		},
 		"member the mapping lacks": {
-			input:     "ports:\n  0x10: x\n",
+			input:     stringtest.LinesLF("ports:", "  0x10: x"),
 			steps:     []any{"ports", "0x10"},
 			want:      "@.ports.0x10",
 			unspelled: true,
 		},
 		"member before a key with no name": {
-			input:     "k: &k {x: y}\nm:\n  a: 1\n  *k : 2\n  b: 3\n",
+			input: stringtest.LinesLF(
+				"k: &k {x: y}",
+				"m:",
+				"  a: 1",
+				"  *k : 2",
+				"  b: 3",
+			),
 			steps:     []any{"m", "a"},
 			want:      "@.m.a",
 			unspelled: true,
 		},
 		"member after a key with no name": {
-			input:     "k: &k {x: y}\nm:\n  a: 1\n  *k : 2\n  b: 3\n",
+			input: stringtest.LinesLF(
+				"k: &k {x: y}",
+				"m:",
+				"  a: 1",
+				"  *k : 2",
+				"  b: 3",
+			),
 			steps:     []any{"m", "b"},
 			want:      "@.m.b",
 			wantStart: "3@5:6",
 		},
 		"member of an element": {
-			input:     "items:\n  - name: x\n  - 0x10: y\n",
+			input:     stringtest.LinesLF("items:", "  - name: x", "  - 0x10: y"),
 			steps:     []any{"items", 1, "16"},
 			want:      "@.items[1].0x10",
 			wantStart: "y@3:11",
@@ -201,7 +231,7 @@ func TestIndex_Element(t *testing.T) {
 		wantStart string
 	}{
 		"element of a sequence": {
-			input:     "items:\n  - name: x\n  - name: y\n",
+			input:     stringtest.LinesLF("items:", "  - name: x", "  - name: y"),
 			steps:     []any{"items", 1},
 			want:      "@.items[1]",
 			wantStart: "-@3:3",
@@ -256,7 +286,7 @@ func TestTarget_Start(t *testing.T) {
 		wantKey string
 	}{
 		"entry of a mapping": {
-			input:   "ports:\n  0x10: x\n",
+			input:   stringtest.LinesLF("ports:", "  0x10: x"),
 			steps:   []any{"ports", "16"},
 			want:    "x@2:9",
 			wantKey: "0x10@2:3",
@@ -279,19 +309,19 @@ func TestTarget_Start(t *testing.T) {
 			wantKey: "a@1:1",
 		},
 		"mapping under a key points at the key": {
-			input:   "ports:\n  0x10:\n    name: x\n",
+			input:   stringtest.LinesLF("ports:", "  0x10:", "    name: x"),
 			steps:   []any{"ports", "16"},
 			want:    "0x10@2:3",
 			wantKey: "0x10@2:3",
 		},
 		"sequence under a key points at the key": {
-			input:   "items:\n  - x\n",
+			input:   stringtest.LinesLF("items:", "  - x"),
 			steps:   []any{"items"},
 			want:    "items@1:1",
 			wantKey: "items@1:1",
 		},
 		"mapping element points at its dash": {
-			input:   "items:\n  - name: x\n",
+			input:   stringtest.LinesLF("items:", "  - name: x"),
 			steps:   []any{"items", 0},
 			want:    "-@2:3",
 			wantKey: "-@2:3",
@@ -335,17 +365,25 @@ func TestTarget_Token(t *testing.T) {
 		wantKey string
 	}{
 		"path selects the member": {
-			input: "ports:\n  0x10: x\n",
+			input: stringtest.LinesLF("ports:", "  0x10: x"),
 			steps: []any{"ports", "16"},
 		},
 		"path selects another entry": {
-			input:   "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n",
+			input: stringtest.LinesLF(
+				"user:",
+				"  <<: {0x10: x}",
+				"  \"0x10\": 1",
+			),
 			steps:   []any{"user", "16"},
 			want:    "x@2:14",
 			wantKey: "0x10@2:8",
 		},
 		"walk reached no node": {
-			input: "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n",
+			input: stringtest.LinesLF(
+				"user:",
+				"  <<: {0x10: x}",
+				"  \"0x10\": 1",
+			),
 			steps: []any{"user", "16", "name"},
 		},
 	}
@@ -541,18 +579,18 @@ func TestIndex_SelectsEntry(t *testing.T) {
 		want  bool
 	}{
 		"source spelling of a key": {
-			input: "python:\n  3.10: a\n",
+			input: stringtest.LinesLF("python:", "  3.10: a"),
 			steps: []any{"python"},
 			name:  "3.10",
 			want:  true,
 		},
 		"decoded name of a respelled key": {
-			input: "python:\n  3.10: a\n",
+			input: stringtest.LinesLF("python:", "  3.10: a"),
 			steps: []any{"python"},
 			name:  "3.1",
 		},
 		"key of a merge source": {
-			input: "m:\n  <<: {0x10: x}\n",
+			input: stringtest.LinesLF("m:", "  <<: {0x10: x}"),
 			steps: []any{"m"},
 			name:  "0x10",
 			want:  true,
@@ -594,7 +632,14 @@ func TestIndex_SelectsEntry(t *testing.T) {
 // The key 3.10 of python sets the member 3.1. The tagged alias key has no
 // name the index can tell, so it may set a member of any name, and the
 // index leaves out the members before it.
-const unnamedKeyInput = "k: &k 0x10\npython:\n  3.10: {image: a}\n  a: 1\n  !!str *k : v\n  b: 2\n"
+var unnamedKeyInput = stringtest.LinesLF(
+	"k: &k 0x10",
+	"python:",
+	"  3.10: {image: a}",
+	"  a: 1",
+	"  !!str *k : v",
+	"  b: 2",
+)
 
 func TestIndex_Lacks(t *testing.T) {
 	t.Parallel()
@@ -606,24 +651,24 @@ func TestIndex_Lacks(t *testing.T) {
 		want  bool
 	}{
 		"member the mapping holds": {
-			input: "ports:\n  0x10: x\n",
+			input: stringtest.LinesLF("ports:", "  0x10: x"),
 			steps: []any{"ports"},
 			name:  "16",
 		},
 		"source spelling of a respelled key": {
-			input: "ports:\n  0x10: x\n",
+			input: stringtest.LinesLF("ports:", "  0x10: x"),
 			steps: []any{"ports"},
 			name:  "0x10",
 			want:  true,
 		},
 		"member of no key": {
-			input: "ports:\n  0x10: x\n",
+			input: stringtest.LinesLF("ports:", "  0x10: x"),
 			steps: []any{"ports"},
 			name:  "name",
 			want:  true,
 		},
 		"member a merge source holds": {
-			input: "m:\n  <<: {0x10: x}\n",
+			input: stringtest.LinesLF("m:", "  <<: {0x10: x}"),
 			steps: []any{"m"},
 			name:  "16",
 		},
@@ -667,7 +712,7 @@ func TestIndex_Lacks(t *testing.T) {
 			name:  "zz",
 		},
 		"member beside a merge key that does not resolve": {
-			input: "m:\n  a: 1\n  <<: *missing\n",
+			input: stringtest.LinesLF("m:", "  a: 1", "  <<: *missing"),
 			steps: []any{"m"},
 			name:  "zz",
 		},
@@ -704,23 +749,23 @@ func TestIndex_SelectsOther(t *testing.T) {
 		want  bool
 	}{
 		"spelling of a key with another name": {
-			input: "python:\n  3.10: a\n",
+			input: stringtest.LinesLF("python:", "  3.10: a"),
 			steps: []any{"python"},
 			name:  "3.10",
 			want:  true,
 		},
 		"name of a member": {
-			input: "python:\n  3.10: a\n",
+			input: stringtest.LinesLF("python:", "  3.10: a"),
 			steps: []any{"python"},
 			name:  "3.1",
 		},
 		"name no key spells": {
-			input: "python:\n  3.10: a\n",
+			input: stringtest.LinesLF("python:", "  3.10: a"),
 			steps: []any{"python"},
 			name:  "zz",
 		},
 		"spelling a merge source gives a key with another name": {
-			input: "m:\n  <<: {0x10: x}\n",
+			input: stringtest.LinesLF("m:", "  <<: {0x10: x}"),
 			steps: []any{"m"},
 			name:  "0x10",
 			want:  true,
@@ -743,7 +788,7 @@ func TestIndex_SelectsOther(t *testing.T) {
 			want:  true,
 		},
 		"merge key that does not resolve": {
-			input: "m:\n  3.10: a\n  <<: *missing\n",
+			input: stringtest.LinesLF("m:", "  3.10: a", "  <<: *missing"),
 			steps: []any{"m"},
 			name:  "3.10",
 		},
