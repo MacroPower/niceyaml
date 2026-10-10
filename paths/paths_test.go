@@ -852,9 +852,7 @@ func TestPath_Parent(t *testing.T) {
 			p:    paths.Doc(),
 			want: "$",
 		},
-		"zero value": {
-			want: "@",
-		},
+		"zero value": {want: "@"},
 		"current": {
 			p:    paths.Current(),
 			want: "@",
@@ -1159,9 +1157,7 @@ func TestPath_MarshalText(t *testing.T) {
 			p:    paths.Doc(),
 			want: "$",
 		},
-		"zero value": {
-			want: "@",
-		},
+		"zero value": {want: "@"},
 		"current": {
 			p:    paths.Current(),
 			want: "@",
@@ -4522,9 +4518,7 @@ func TestPath_MergeBringsInLiteralMergeName(t *testing.T) {
 			),
 			want: []string{"$.inner.<<"},
 		},
-		"inline source": {
-			input: "k: &k \"<<\"\ntop:\n  <<: {*k : real}\n",
-		},
+		"inline source": {input: "k: &k \"<<\"\ntop:\n  <<: {*k : real}\n"},
 		"sequence source": {
 			input: stringtest.LinesLF(
 				`k: &k "<<"`,
@@ -4545,9 +4539,7 @@ func TestPath_MergeBringsInLiteralMergeName(t *testing.T) {
 			),
 			want: []string{"$.base.<<"},
 		},
-		"earlier merge key": {
-			input: "k: &k \"<<\"\ntop:\n  <<: {*k : real}\n  <<: {a: 1}\n",
-		},
+		"earlier merge key": {input: "k: &k \"<<\"\ntop:\n  <<: {*k : real}\n  <<: {a: 1}\n"},
 	}
 
 	for name, tc := range tcs {

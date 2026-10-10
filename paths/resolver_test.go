@@ -625,9 +625,7 @@ func TestResolver_Nearest(t *testing.T) {
 			input: "---\n",
 			path:  "$.name",
 		},
-		"nil document": {
-			path: "$.name",
-		},
+		"nil document": {path: "$.name"},
 	}
 
 	for name, tc := range tcs {
@@ -1117,15 +1115,9 @@ func TestResolver_Deref(t *testing.T) {
 			doc  *ast.DocumentNode
 			node ast.Node
 		}{
-			"nil node": {
-				node: nil,
-			},
-			"typed nil": {
-				node: (*ast.StringNode)(nil),
-			},
-			"anchor over a typed nil": {
-				node: &ast.AnchorNode{Value: (*ast.MappingNode)(nil)},
-			},
+			"nil node":                {node: nil},
+			"typed nil":               {node: (*ast.StringNode)(nil)},
+			"anchor over a typed nil": {node: &ast.AnchorNode{Value: (*ast.MappingNode)(nil)}},
 			"alias to an anchor over a typed nil": {
 				doc:  doc,
 				node: alias,
@@ -1199,9 +1191,7 @@ func TestResolver_KeyName(t *testing.T) {
 			want:  "0x10",
 			ok:    true,
 		},
-		"alias with no anchor before it": {
-			input: "m:\n  *k : v\nbase: &k n\n",
-		},
+		"alias with no anchor before it": {input: "m:\n  *k : v\nbase: &k n\n"},
 		"key a later merge key brings in": {
 			// The merge comes after the entry, so the selector selects
 			// the value the merge brings in.
@@ -1384,9 +1374,7 @@ func TestEntryFinder_Entry(t *testing.T) {
 		err  error
 		keys int
 	}{
-		"few merge sources": {
-			keys: 10,
-		},
+		"few merge sources": {keys: 10},
 		"many merge sources": {
 			keys: 2000,
 			err:  paths.ErrExcessiveMerging,
@@ -1576,12 +1564,8 @@ func TestResolver_MergeSources(t *testing.T) {
 			opts:  []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 			want:  []string{"y", "x"},
 		},
-		"no merge key": {
-			input: "m: {k: x}\n",
-		},
-		"not a mapping": {
-			input: "m: [x, y]\n",
-		},
+		"no merge key":  {input: "m: {k: x}\n"},
+		"not a mapping": {input: "m: [x, y]\n"},
 		"unknown alias": {
 			input: "m: {<<: *nope}\n",
 			err:   paths.ErrAlias,
@@ -1634,15 +1618,9 @@ func TestResolver_MergeSources_HandBuilt(t *testing.T) {
 		key  ast.MapKeyNode
 		want int
 	}{
-		"explicit key wrapping a typed nil anchor": {
-			key: &ast.MappingKeyNode{Value: (*ast.AnchorNode)(nil)},
-		},
-		"anchor key wrapping a typed nil tag": {
-			key: &ast.AnchorNode{Value: (*ast.TagNode)(nil)},
-		},
-		"typed nil explicit key": {
-			key: (*ast.MappingKeyNode)(nil),
-		},
+		"explicit key wrapping a typed nil anchor": {key: &ast.MappingKeyNode{Value: (*ast.AnchorNode)(nil)}},
+		"anchor key wrapping a typed nil tag":      {key: &ast.AnchorNode{Value: (*ast.TagNode)(nil)}},
+		"typed nil explicit key":                   {key: (*ast.MappingKeyNode)(nil)},
 		"explicit merge key": {
 			key:  &ast.MappingKeyNode{Value: &ast.MergeKeyNode{}},
 			want: 1,

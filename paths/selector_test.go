@@ -73,9 +73,7 @@ func TestSelector_String(t *testing.T) {
 			sel:  paths.Selector{Kind: paths.SelectorKey},
 			want: "~",
 		},
-		"zero selector": {
-			want: "",
-		},
+		"zero selector": {want: ""},
 		"unknown kind": {
 			sel:  paths.Selector{Kind: paths.SelectorKind(-1), Name: "a"},
 			want: "",
@@ -98,9 +96,7 @@ func TestPath_Selectors(t *testing.T) {
 		expr string
 		want []paths.Selector
 	}{
-		"root": {
-			expr: "$",
-		},
+		"root": {expr: "$"},
 		"child": {
 			expr: "$.metadata.name",
 			want: []paths.Selector{
@@ -312,9 +308,7 @@ func TestPath_Last(t *testing.T) {
 		want paths.Selector
 		ok   bool
 	}{
-		"root": {
-			p: paths.Doc(),
-		},
+		"root":       {p: paths.Doc()},
 		"zero value": {},
 		"child": {
 			p:    paths.Doc().Child("spec", "replicas"),
