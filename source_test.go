@@ -1873,6 +1873,12 @@ func TestSource_Parse(t *testing.T) {
 				`),
 				want: 1,
 			},
+			// The go-yaml parser returns one empty document for an empty
+			// input.
+			"empty source": {
+				input: "",
+				want:  1,
+			},
 		}
 
 		for name, tc := range tcs {
@@ -1947,18 +1953,6 @@ func TestSource_Parse(t *testing.T) {
 				assert.Len(t, source.AllDocuments(), tc.want)
 			})
 		}
-	})
-
-	t.Run("empty source", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("")
-		file, err := source.File()
-
-		require.NoError(t, err)
-		require.NotNil(t, file)
-		// Go-yaml parser returns 1 doc for empty input (empty document).
-		assert.Len(t, file.Docs, 1)
 	})
 
 	t.Run("invalid YAML returns Error", func(t *testing.T) {
