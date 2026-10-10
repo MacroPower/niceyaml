@@ -375,43 +375,40 @@ func TestDocument_Decode(t *testing.T) {
 		Value int    `yaml:"value"`
 	}
 
-	t.Run("decode to map", func(t *testing.T) {
+	t.Run("decodes the root into a type", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "key: value")
+		tcs := map[string]struct {
+			decode func(t *testing.T, n *niceyaml.Node) (any, error)
+			want   any
+			input  string
+		}{
+			"map": {
+				input:  "key: value",
+				decode: decodedAs[map[string]string],
+				want:   map[string]string{"key": "value"},
+			},
+			"struct": {
+				input:  "name: test\nvalue: 42",
+				decode: decodedAs[testStruct],
+				want:   testStruct{Name: "test", Value: 42},
+			},
+			"slice": {
+				input:  "- one\n- two\n- three",
+				decode: decodedAs[[]string],
+				want:   []string{"one", "two", "three"},
+			},
+		}
 
-		result, err := dd.Decode[map[string]string](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, map[string]string{"key": "value"}, result)
-	})
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-	t.Run("decode to struct", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			name: test
-			value: 42
-		`)
-		dd := yamltest.FirstDocument(t, input)
-
-		result, err := dd.Decode[testStruct](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, testStruct{Name: "test", Value: 42}, result)
-	})
-
-	t.Run("decode to slice", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			- one
-			- two
-			- three
-		`)
-		dd := yamltest.FirstDocument(t, input)
-
-		result, err := dd.Decode[[]string](t.Context())
-		require.NoError(t, err)
-		assert.Equal(t, []string{"one", "two", "three"}, result)
+				got, err := tc.decode(t, yamltest.FirstDocument(t, tc.input))
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, got)
+			})
+		}
 	})
 
 	t.Run("decode multiple documents", func(t *testing.T) {
