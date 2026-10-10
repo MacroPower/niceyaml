@@ -7938,6 +7938,7 @@ func TestError_Accessors_Wrapped(t *testing.T) {
 	tooLow := niceyaml.NewError("too low", niceyaml.AtPath(paths.Current().Child("a")))
 	tooHigh := niceyaml.NewError("too high", niceyaml.AtPath(paths.Current().Child("b")))
 	summary := niceyaml.NewSummary("2 violations", tooLow, tooHigh)
+	errCheck := errors.New("check")
 
 	// The path of each error, as [niceyaml.Error.Path] reports it through
 	// the Rebase around it.
@@ -7996,6 +7997,10 @@ func TestError_Accessors_Wrapped(t *testing.T) {
 		},
 		"an Error above a join heads none": {
 			err: niceyaml.Invalid(errors.Join(port, summary)),
+		},
+		"a wrapper with several %w verbs keeps the summary as its one branch": {
+			err:         niceyaml.Invalid(fmt.Errorf("%w: %w", errCheck, summary)),
+			wantMembers: []string{"@.a", "@.b"},
 		},
 	}
 

@@ -1447,11 +1447,13 @@ func (e *Error) Unwrap() []error {
 // heads what the summary heads. Each member comes with the base of every
 // Rebase on the way joined in front of its paths, and marked as the
 // document's fault below an Error from Invalid, as the tree
-// [NewErrorTree] builds and a binding place it. The walk ends at the
-// first Error that heads any, at a [*SourceError], and at an error that
-// unwraps to several, so an Error above a join heads none, and
-// [Problems] lists the problems of a join. A nil Error heads none. The
-// slice is new, so a caller may keep or sort it.
+// [NewErrorTree] builds and a binding place it. The walk follows a
+// wrapper that [fmt.Errorf] builds with several %w verbs to the one
+// branch it keeps, as Error.Path does. It ends at the first Error that
+// heads any, at a [*SourceError], and at any other error that unwraps to
+// several, so an Error above a join heads none, and [Problems] lists the
+// problems of a join. A nil Error heads none. The slice is new, so a
+// caller may keep or sort it.
 func (e *Error) Members() []error {
 	var base childBase
 
@@ -1476,6 +1478,11 @@ func (e *Error) Members() []error {
 
 		case interface{ Unwrap() error }:
 			cur = x.Unwrap()
+
+		case interface{ Unwrap() []error }:
+			// The one branch a wrapper keeps goes on as the chain, as
+			// [walkChildren] follows it.
+			_, cur = followBranches(cur, x.Unwrap())
 
 		default:
 			return nil
