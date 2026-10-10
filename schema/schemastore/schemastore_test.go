@@ -1121,12 +1121,10 @@ func TestSchemaStore_FetchError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := store.FindMatch(t.Context(), "config.yaml")
-			require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
-			require.NotErrorIs(t, err, schema.ErrNoMatch)
+			requireFetchError(t, store)
 
 			doc := yamltest.FirstDocumentWithPath(t, `key: value`, "config.yaml")
-			_, err = store.Resolve(t.Context(), doc)
+			_, err := store.Resolve(t.Context(), doc)
 			require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
 			require.NotErrorIs(t, err, schema.ErrNoMatch)
 		})
@@ -1143,21 +1141,18 @@ func TestSchemaStore_RetryAfter(t *testing.T) {
 		store, fetchCount := newCountingStore(serverError, schemastore.WithRetryAfter(20*time.Millisecond))
 
 		// The first lookup fetches and fails.
-		_, err := store.FindMatch(t.Context(), "config.yaml")
-		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+		requireFetchError(t, store)
 		assert.Equal(t, int32(1), fetchCount.Load())
 
 		// A lookup inside the retry interval reports the same failure
 		// without contacting the server again.
-		_, err = store.FindMatch(t.Context(), "config.yaml")
-		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+		requireFetchError(t, store)
 		assert.Equal(t, int32(1), fetchCount.Load())
 
 		// Once the interval passes, the next lookup tries again.
 		time.Sleep(30 * time.Millisecond)
 
-		_, err = store.FindMatch(t.Context(), "config.yaml")
-		require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+		requireFetchError(t, store)
 		assert.Equal(t, int32(2), fetchCount.Load())
 	})
 }
@@ -1180,8 +1175,7 @@ func TestSchemaStore_NonPositiveRetryAfter(t *testing.T) {
 			store, fetchCount := newCountingStore(serverError, schemastore.WithRetryAfter(interval))
 
 			for range 5 {
-				_, err := store.FindMatch(t.Context(), "config.yaml")
-				require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+				requireFetchError(t, store)
 			}
 
 			assert.Equal(t, int32(1), fetchCount.Load())
@@ -1665,6 +1659,16 @@ func requireEntry(t *testing.T, store *schemastore.Store, want string) {
 	entry, err := store.FindMatch(t.Context(), "config.yaml")
 	require.NoError(t, err)
 	assert.Equal(t, want, entry.Name)
+}
+
+// requireFetchError looks config.yaml up in store and requires the error
+// of a failed catalog fetch, which is not a no-match.
+func requireFetchError(t *testing.T, store *schemastore.Store) {
+	t.Helper()
+
+	_, err := store.FindMatch(t.Context(), "config.yaml")
+	require.ErrorIs(t, err, schemastore.ErrFetchCatalog)
+	require.NotErrorIs(t, err, schema.ErrNoMatch)
 }
 
 // requireRef resolves a document at filePath through store and returns its
