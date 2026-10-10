@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"go.jacobcolvin.com/x/stringtest"
+
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
@@ -14,7 +16,10 @@ import (
 // of those repeats.
 func BenchmarkTokenize_TabRepeats(b *testing.B) {
 	for _, scalars := range []int{100, 1000, 10000} {
-		src := strings.Repeat("k: \"x\n\ty\"\n", scalars)
+		src := strings.Repeat(stringtest.LinesLF(
+			`k: "x`,
+			"\ty\"",
+		), scalars)
 
 		b.Run(strconv.Itoa(scalars), func(b *testing.B) {
 			b.ReportAllocs()
