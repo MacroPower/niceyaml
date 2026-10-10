@@ -16,6 +16,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"testing/synctest"
 	"time"
 
@@ -912,12 +913,8 @@ func TestSchemaStore_FetchGoexitReachesCaller(t *testing.T) {
 				returned = true
 			}()
 
-			select {
-			case <-done:
-			case <-time.After(5 * time.Second):
-				require.FailNow(t, "FindMatch hung after the fetch called runtime.Goexit")
-			}
-
+			// A lookup that hangs on the fetch never closes done.
+			receive(t, done)
 			assert.False(t, returned)
 
 			// The fetch that called runtime.Goexit counts as a failed one, so
@@ -1192,7 +1189,7 @@ func TestSchemaStore_FetchError(t *testing.T) {
 			Transport: yamltest.RoundTripFunc(func(*http.Request) (*http.Response, error) {
 				return &http.Response{
 					StatusCode: http.StatusOK,
-					Body:       io.NopCloser(&errorReader{}),
+					Body:       io.NopCloser(iotest.ErrReader(errors.New("read error"))),
 				}, nil
 			}),
 		}),
@@ -1858,12 +1855,6 @@ func receive[T any](t *testing.T, ch <-chan T) T {
 
 		return zero
 	}
-}
-
-type errorReader struct{}
-
-func (e *errorReader) Read(_ []byte) (int, error) {
-	return 0, errors.New("read error")
 }
 
 func TestStore_ParseErrorRedactsCredentials(t *testing.T) {
