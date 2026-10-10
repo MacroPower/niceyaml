@@ -504,15 +504,9 @@ func TestDocument_Decode_UnknownFields(t *testing.T) {
 			// so several decodes show that the report does not depend on
 			// its pick.
 			for range 10 {
-				docs := niceyaml.NewSourceFromString(tc.input, tc.sourceOpts...).Documents()
-				require.Len(t, docs, 1)
-
-				node := docs[0]
+				node := yamltest.FirstDocument(t, tc.input, tc.sourceOpts...)
 				if tc.scope != "" {
-					var err error
-
-					node, err = node.At(paths.MustParse(tc.scope))
-					require.NoError(t, err)
+					node = yamltest.At(t, node, paths.MustParse(tc.scope))
 				}
 
 				err := tc.decode(t.Context(), node, tc.opts...)
@@ -674,12 +668,9 @@ func TestDocument_Decode_UnknownFields_KeyKinds(t *testing.T) {
 
 			// The decoder alone says whether it rejects www beside the
 			// key.
-			alone, err := niceyaml.NewSourceFromString(anchors + b).Document()
-			require.NoError(t, err)
-
 			var v keyKinds
 
-			err = alone.DecodeInto(t.Context(), &v, strict)
+			err := yamltest.FirstDocument(t, anchors+b).DecodeInto(t.Context(), &v, strict)
 			if tc.want {
 				require.ErrorContains(t, err, `unknown field`)
 			} else {
@@ -687,12 +678,9 @@ func TestDocument_Decode_UnknownFields_KeyKinds(t *testing.T) {
 			}
 
 			// The report agrees with it.
-			both, err := niceyaml.NewSourceFromString(anchors + "a:\n  zzz: 1\n" + b).Document()
-			require.NoError(t, err)
-
 			var w keyKinds
 
-			err = both.DecodeInto(t.Context(), &w, strict)
+			err = yamltest.FirstDocument(t, anchors+"a:\n  zzz: 1\n"+b).DecodeInto(t.Context(), &w, strict)
 			require.ErrorIs(t, err, niceyaml.ErrDecode)
 
 			rows := rejectionRows(err)
@@ -740,10 +728,7 @@ func TestDocument_Decode_UnknownFields_IgnoredMerges(t *testing.T) {
 			t.Parallel()
 
 			decode := func(input string, v any) error {
-				doc, err := niceyaml.NewSourceFromString(input).Document()
-				require.NoError(t, err)
-
-				return doc.DecodeInto(t.Context(), v, strict)
+				return yamltest.FirstDocument(t, input).DecodeInto(t.Context(), v, strict)
 			}
 
 			// The decoder alone rejects no key the merge brings in for

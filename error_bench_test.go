@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
 )
 
@@ -32,10 +33,7 @@ func BenchmarkSourceError_ExcerptOneLine(b *testing.B) {
 		// A flow sequence on one line, with a violation at each item, puts
 		// every location of the tree on line 0.
 		items := strings.TrimSuffix(strings.Repeat("0,", n), ",")
-		source := niceyaml.NewSourceFromString("[" + items + "]\n")
-
-		doc, err := source.Document()
-		require.NoError(b, err)
+		doc := yamltest.FirstDocument(b, "["+items+"]\n")
 
 		errs := make([]error, 0, n)
 		for i := range n {

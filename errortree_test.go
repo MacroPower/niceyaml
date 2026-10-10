@@ -2159,10 +2159,7 @@ func TestErrorTree_Problems_Err(t *testing.T) {
 func TestErrorTree_Problems_WrappedJoin(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("hours:\n  open: a\n", niceyaml.WithName("f.yaml"))
-
-	doc, err := source.Document()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, "hours:\n  open: a\n", niceyaml.WithName("f.yaml"))
 
 	hours := yamltest.At(t, doc, paths.Current().Child("hours"))
 
@@ -2227,10 +2224,7 @@ func (reasonedHours) Validate() error {
 func TestErrorTree_Problems_SelfValidator(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("hours:\n  open: a\n", niceyaml.WithName("f.yaml"))
-
-	doc, err := source.Document()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, "hours:\n  open: a\n", niceyaml.WithName("f.yaml"))
 
 	var cfg struct {
 		Hours reasonedHours `yaml:"hours"`
@@ -2261,10 +2255,7 @@ func TestErrorTree_Problems_SelfValidator(t *testing.T) {
 func TestErrorTree_Problems_Scope(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("hours:\n  open: a\n", niceyaml.WithName("f.yaml"))
-
-	doc, err := source.Document()
-	require.NoError(t, err)
+	doc := yamltest.FirstDocument(t, "hours:\n  open: a\n", niceyaml.WithName("f.yaml"))
 
 	hours := yamltest.At(t, doc, paths.Current().Child("hours"))
 

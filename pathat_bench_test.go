@@ -5,7 +5,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/position"
 )
@@ -31,8 +30,7 @@ func BenchmarkNode_PathAt(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
 
-				doc, err := niceyaml.NewSourceFromString(yaml).Document()
-				require.NoError(b, err)
+				doc := yamltest.FirstDocument(b, yaml)
 
 				b.StartTimer()
 
@@ -42,8 +40,7 @@ func BenchmarkNode_PathAt(b *testing.B) {
 		})
 
 		b.Run(sz.name+"/later", func(b *testing.B) {
-			doc, err := niceyaml.NewSourceFromString(yaml).Document()
-			require.NoError(b, err)
+			doc := yamltest.FirstDocument(b, yaml)
 
 			_, ok := doc.PathAt(last)
 			require.True(b, ok)
