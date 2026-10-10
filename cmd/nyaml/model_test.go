@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -403,7 +404,7 @@ func TestBaseViewHeight(t *testing.T) {
 		t.Run(fmt.Sprintf("height %d", height), func(t *testing.T) {
 			t.Parallel()
 
-			m := newModel(&modelOptions{sources: sourcesOf("a: 1\nb: 2\nc: 3\n")})
+			m := newModel(&modelOptions{sources: sourcesOf(stringtest.LinesLF("a: 1", "b: 2", "c: 3"))})
 
 			got := update(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
 			assert.LessOrEqual(t, lipgloss.Height(got.baseView()), height)
@@ -451,7 +452,7 @@ func TestBaseViewFillsTerminal(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := newModel(&modelOptions{sources: sourcesOf("a: 1\nb: [2, 3]\nc:\n  d: 4\n")})
+			m := newModel(&modelOptions{sources: sourcesOf(stringtest.LinesLF("a: 1", "b: [2, 3]", "c:", "  d: 4"))})
 
 			got := update(t, m, tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
 
@@ -593,7 +594,7 @@ func TestTitleLinePosition(t *testing.T) {
 	// Each line wraps onto several rows, and the bracket shows the line at
 	// the top of the view, in the same unit as the line count beside it.
 	long := strings.Repeat("word ", 60)
-	src := "a: " + long + "\nb: " + long + "\nc: " + long + "\n"
+	src := stringtest.LinesLF("a: "+long, "b: "+long, "c: "+long)
 
 	tcs := map[string]struct {
 		keys []tea.Msg

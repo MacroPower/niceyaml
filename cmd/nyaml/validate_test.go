@@ -17,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/escape"
@@ -77,28 +78,28 @@ func TestValidateFile(t *testing.T) {
 		// documents have no entry, and a valid file has none.
 		want []string
 	}{
-		"every document valid": {content: "name: a\n---\nname: b\n---\nname: c\n"},
+		"every document valid": {content: stringtest.LinesLF("name: a", "---", "name: b", "---", "name: c")},
 		"first and last document invalid": {
-			content: "value: 1\n---\nname: b\n---\nvalue: 3\n",
+			content: stringtest.LinesLF("value: 1", "---", "name: b", "---", "value: 3"),
 			want:    []string{"1:1:", "5:1:"},
 		},
 		"first two documents invalid": {
-			content: "value: 1\n---\nvalue: 2\n---\nname: c\n",
+			content: stringtest.LinesLF("value: 1", "---", "value: 2", "---", "name: c"),
 			want:    []string{"1:1:", "3:1:"},
 		},
 		"middle document invalid": {
-			content: "name: a\n---\nvalue: 2\n---\nname: c\n",
+			content: stringtest.LinesLF("name: a", "---", "value: 2", "---", "name: c"),
 			want:    []string{"3:1:"},
 		},
 		"comment above the first header": {
-			content: "# yaml-language-server: $schema=./s.json\n---\nname: a\n",
+			content: stringtest.LinesLF("# yaml-language-server: $schema=./s.json", "---", "name: a"),
 		},
 		"comment above an invalid document": {
-			content: "# a preamble\n---\nvalue: 1\n",
+			content: stringtest.LinesLF("# a preamble", "---", "value: 1"),
 			want:    []string{"3:1:"},
 		},
 		"invalid document after consecutive headers": {
-			content: "name: a\n---\n---\nvalue: 1\n",
+			content: stringtest.LinesLF("name: a", "---", "---", "value: 1"),
 			want:    []string{"4:1:"},
 		},
 		"only document does not parse": {
@@ -106,17 +107,27 @@ func TestValidateFile(t *testing.T) {
 			want:    []string{"1:7:"},
 		},
 		"syntax errors beside violations": {
-			content: "name: a\n---\nname: [\n---\nvalue: 3\n---\nname: @x\n---\nvalue: 5\n",
-			want:    []string{"3:7:", "5:1:", "7:7:", "9:1:"},
+			content: stringtest.LinesLF(
+				"name: a",
+				"---",
+				"name: [",
+				"---",
+				"value: 3",
+				"---",
+				"name: @x",
+				"---",
+				"value: 5",
+			),
+			want: []string{"3:7:", "5:1:", "7:7:", "9:1:"},
 		},
 		"valid documents around one that does not parse": {
-			content: "name: a\n---\nname: [\n---\nname: c\n",
+			content: stringtest.LinesLF("name: a", "---", "name: [", "---", "name: c"),
 			want:    []string{"3:7:"},
 		},
 		// The header parses together with the document above it, so both
 		// documents carry the one error, and the file reports it once.
 		"header after an anchor with no value": {
-			content: "name: &x\n---\nname: [\n---\nvalue: 5\n",
+			content: stringtest.LinesLF("name: &x", "---", "name: [", "---", "value: 5"),
 			want:    []string{"3:7:", "5:1:"},
 		},
 	}
@@ -549,7 +560,7 @@ func TestValidateCmdSchemaError(t *testing.T) {
 			// document would report three times.
 			yamlPaths := []string{
 				writeFile(t, dir, "one.yaml", "a: 1\n"),
-				writeFile(t, dir, "two.yaml", "a: 1\n---\nb: 2\n"),
+				writeFile(t, dir, "two.yaml", stringtest.LinesLF("a: 1", "---", "b: 2")),
 			}
 
 			out := &bytes.Buffer{}

@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/fangs"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -160,7 +161,11 @@ func TestExitCode(t *testing.T) {
 		},
 		"valid document of many aliases to a small mapping": {
 			files: map[string]string{
-				"a.yaml": "name: a\nbase: &b {os: linux, arch: amd64}\nmatrix:\n" + strings.Repeat("  - *b\n", 400),
+				"a.yaml": stringtest.LinesLF(
+					"name: a",
+					"base: &b {os: linux, arch: amd64}",
+					"matrix:",
+				) + strings.Repeat("  - *b\n", 400),
 			},
 			args: []string{"--schema", "schema.json", "a.yaml"},
 			want: 0,
