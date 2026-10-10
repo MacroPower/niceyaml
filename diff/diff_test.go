@@ -1287,11 +1287,8 @@ func TestDiffer_WithNilAlgorithm(t *testing.T) {
 			})
 
 			assert.Equal(t, want.String(), got.String())
-			require.Equal(t, want.Count(), got.Count())
-
-			for i := range want.Count() {
-				assert.Equal(t, want.Flag(i), got.Flag(i), "flag mismatch at line %d", i)
-			}
+			assert.Equal(t, want.Count(), got.Count())
+			assert.Equal(t, changedFlags(want), changedFlags(got))
 		})
 	}
 }
@@ -1302,6 +1299,7 @@ func TestDiff_Concurrent(t *testing.T) {
 	before := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\n").Lines()
 	after := niceyaml.NewSourceFromString("a: 1\nb: 5\nc: 3\ne: 6\nd: 4\n").Lines()
 	want := diff.New().Diff(before, after).Unified()
+	wantFlags := changedFlags(want)
 
 	var wg sync.WaitGroup
 
@@ -1314,10 +1312,7 @@ func TestDiff_Concurrent(t *testing.T) {
 				}
 
 				assert.Equal(t, want.String(), got.String())
-
-				for i := range want.Count() {
-					assert.Equal(t, want.Flag(i), got.Flag(i), "flag mismatch at line %d", i)
-				}
+				assert.Equal(t, wantFlags, changedFlags(got))
 			}
 		})
 	}
