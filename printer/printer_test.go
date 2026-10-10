@@ -1513,16 +1513,19 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
+		gutter printer.Gutter
 		before string
 		after  string
 		want   string
 	}{
 		"no changes": {
+			gutter: printer.DefaultGutter,
 			before: "key: value\n",
 			after:  "key: value\n",
 			want:   "   1  key: value",
 		},
 		"simple addition": {
+			gutter: printer.DefaultGutter,
 			before: "key: value\n",
 			after: stringtest.LinesLF(
 				"key: value",
@@ -1534,6 +1537,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"simple deletion": {
+			gutter: printer.DefaultGutter,
 			before: stringtest.LinesLF(
 				"key: value",
 				"old: line",
@@ -1545,6 +1549,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"modification": {
+			gutter: printer.DefaultGutter,
 			before: "key: old\n",
 			after:  "key: new\n",
 			want: stringtest.JoinLF(
@@ -1553,6 +1558,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"addition with context": {
+			gutter: printer.DefaultGutter,
 			// Equal lines show afterLine, inserted line shows afterLine.
 			before: stringtest.LinesLF(
 				"line1: a",
@@ -1570,6 +1576,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"deletion with context": {
+			gutter: printer.DefaultGutter,
 			// Equal lines show afterLine, deleted line shows beforeLine.
 			before: stringtest.LinesLF(
 				"line1: a",
@@ -1587,6 +1594,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"modifications around an equal line": {
+			gutter: printer.DefaultGutter,
 			before: stringtest.LinesLF(
 				"line1: a",
 				"line2: b",
@@ -1606,6 +1614,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"multiline yaml modification": {
+			gutter: printer.DefaultGutter,
 			before: stringtest.LinesLF(
 				"apiVersion: v1",
 				"kind: Pod",
@@ -1631,6 +1640,7 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"multiple scattered changes": {
+			gutter: printer.DefaultGutter,
 			// Delete shows beforeLine (2), insert shows afterLine (2).
 			before: stringtest.LinesLF(
 				"a: 1",
@@ -1655,21 +1665,25 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 			),
 		},
 		"both empty": {
+			gutter: printer.DefaultGutter,
 			before: "",
 			after:  "",
 			want:   "",
 		},
 		"empty before, content after": {
+			gutter: printer.DefaultGutter,
 			before: "",
 			after:  "key: value\n",
 			want:   "   1 +key: value",
 		},
 		"content before, empty after": {
+			gutter: printer.DefaultGutter,
 			before: "key: value\n",
 			after:  "",
 			want:   "   1 -key: value",
 		},
 		"CRLF line endings": {
+			gutter: printer.DefaultGutter,
 			before: "key: value\r\nold: line\r\n",
 			after:  "key: value\r\nnew: line\r\n",
 			want: stringtest.JoinLF(
@@ -1678,13 +1692,102 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 				"   2 +new: line",
 			),
 		},
+		// A prefixGutter declares the width of its widest prefix, so the
+		// printer pads the narrower ones.
+		"custom inserted prefix": {
+			gutter: prefixGutter{inserted: ">>", deleted: "-", equal: " "},
+			before: "key: old\n",
+			after: stringtest.LinesLF(
+				"key: old",
+				"new: line",
+			),
+			want: stringtest.JoinLF(
+				"  key: old",
+				">>new: line",
+			),
+		},
+		"custom deleted prefix": {
+			gutter: prefixGutter{inserted: "+", deleted: "<<", equal: " "},
+			before: stringtest.LinesLF(
+				"key: old",
+				"old: line",
+			),
+			after: "key: old\n",
+			want: stringtest.JoinLF(
+				"  key: old",
+				"<<old: line",
+			),
+		},
+		"both custom prefixes": {
+			gutter: prefixGutter{inserted: "ADD:", deleted: "DEL:", equal: "    "},
+			before: "key: old\n",
+			after:  "key: new\n",
+			want: stringtest.JoinLF(
+				"DEL:key: old",
+				"ADD:key: new",
+			),
+		},
+		"no gutter": {
+			gutter: printer.NoGutter,
+			before: "a: 1\n",
+			after:  "a: 2\n",
+			want: stringtest.JoinLF(
+				"a: 1",
+				"a: 2",
+			),
+		},
+		"diff gutter keeps a deleted line inline": {
+			gutter: printer.DiffGutter,
+			before: stringtest.LinesLF(
+				"a: 1",
+				"b: 2",
+				"c: 3",
+			),
+			after: stringtest.LinesLF(
+				"a: 1",
+				"c: 3",
+			),
+			want: stringtest.JoinLF(
+				" a: 1",
+				"-b: 2",
+				" c: 3",
+			),
+		},
+		"diff gutter shows the delete before the insert": {
+			gutter: printer.DiffGutter,
+			before: "key: old\n",
+			after:  "key: new\n",
+			want: stringtest.JoinLF(
+				"-key: old",
+				"+key: new",
+			),
+		},
+		"multi-character prefixes with context": {
+			gutter: prefixGutter{inserted: "[+]", deleted: "[-]", equal: "   "},
+			before: stringtest.LinesLF(
+				"line1: a",
+				"line2: b",
+				"line3: c",
+			),
+			after: stringtest.LinesLF(
+				"line1: a",
+				"line2: x",
+				"line3: c",
+			),
+			want: stringtest.JoinLF(
+				"   line1: a",
+				"[-]line2: b",
+				"[+]line2: x",
+				"   line3: c",
+			),
+		},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(printer.DefaultGutter)
+			p := testPrinterWithGutter(tc.gutter)
 
 			assert.Equal(t, tc.want, p.Print(diffOf(tc.before, tc.after).Unified()))
 		})
@@ -2550,121 +2653,6 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 			got := p.Print(view)
 			assertRowsFit(t, got, tc.width)
 			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestPrinter_PrintTokenDiff_Gutter(t *testing.T) {
-	t.Parallel()
-
-	// The helper creates a gutter with custom prefixes that declares the
-	// width of the widest of them, so the printer pads the narrower ones.
-	makeGutter := func(inserted, deleted, equal string) printer.Gutter {
-		return prefixGutter{inserted: inserted, deleted: deleted, equal: equal}
-	}
-
-	tcs := map[string]struct {
-		gutterFunc printer.Gutter
-		before     string
-		after      string
-		want       string
-	}{
-		"custom inserted prefix": {
-			gutterFunc: makeGutter(">>", "-", " "),
-			before:     "key: old\n",
-			after: stringtest.LinesLF(
-				"key: old",
-				"new: line",
-			),
-			want: stringtest.JoinLF(
-				"  key: old",
-				">>new: line",
-			),
-		},
-		"custom deleted prefix": {
-			gutterFunc: makeGutter("+", "<<", " "),
-			before: stringtest.LinesLF(
-				"key: old",
-				"old: line",
-			),
-			after: "key: old\n",
-			want: stringtest.JoinLF(
-				"  key: old",
-				"<<old: line",
-			),
-		},
-		"both custom prefixes": {
-			gutterFunc: makeGutter("ADD:", "DEL:", "    "),
-			before:     "key: old\n",
-			after:      "key: new\n",
-			want: stringtest.JoinLF(
-				"DEL:key: old",
-				"ADD:key: new",
-			),
-		},
-		"no gutter": {
-			gutterFunc: printer.NoGutter,
-			before:     "a: 1\n",
-			after:      "a: 2\n",
-			want: stringtest.JoinLF(
-				"a: 1",
-				"a: 2",
-			),
-		},
-		"diff gutter keeps a deleted line inline": {
-			gutterFunc: printer.DiffGutter,
-			before: stringtest.LinesLF(
-				"a: 1",
-				"b: 2",
-				"c: 3",
-			),
-			after: stringtest.LinesLF(
-				"a: 1",
-				"c: 3",
-			),
-			want: stringtest.JoinLF(
-				" a: 1",
-				"-b: 2",
-				" c: 3",
-			),
-		},
-		"diff gutter shows the delete before the insert": {
-			gutterFunc: printer.DiffGutter,
-			before:     "key: old\n",
-			after:      "key: new\n",
-			want: stringtest.JoinLF(
-				"-key: old",
-				"+key: new",
-			),
-		},
-		"multi-character prefixes with context": {
-			gutterFunc: makeGutter("[+]", "[-]", "   "),
-			before: stringtest.LinesLF(
-				"line1: a",
-				"line2: b",
-				"line3: c",
-			),
-			after: stringtest.LinesLF(
-				"line1: a",
-				"line2: x",
-				"line3: c",
-			),
-			want: stringtest.JoinLF(
-				"   line1: a",
-				"[-]line2: b",
-				"[+]line2: x",
-				"   line3: c",
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			p := testPrinterWithGutter(tc.gutterFunc)
-
-			assert.Equal(t, tc.want, p.Print(diffOf(tc.before, tc.after).Unified()))
 		})
 	}
 }
