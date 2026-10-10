@@ -7450,6 +7450,7 @@ func TestRebase(t *testing.T) {
 	`)
 	hours := paths.Current().Child("hours")
 	closePath := paths.Current().Child("close")
+	dd := yamltest.FirstDocument(t, input)
 
 	t.Run("nil returns nil", func(t *testing.T) {
 		t.Parallel()
@@ -7478,8 +7479,6 @@ func TestRebase(t *testing.T) {
 		// The join heads no error, so it is one problem rather than a
 		// heading, and a problem with no location takes the base, as a
 		// member of a summary as well.
-		dd := yamltest.FirstDocument(t, input)
-
 		report := niceyaml.NewSummary("invalid hours", joined, errors.New("bad open"))
 		bound := dd.Bind(niceyaml.Rebase(report, hours))
 
@@ -7538,8 +7537,6 @@ func TestRebase(t *testing.T) {
 	t.Run("an error without a location points at the base", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-
 		err := dd.Bind(niceyaml.Rebase(errors.New("bad hours"), hours))
 		require.EqualError(t, err, "2:1: $.hours: bad hours")
 
@@ -7550,8 +7547,6 @@ func TestRebase(t *testing.T) {
 
 	t.Run("the errors a summary heads compose too", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		report := niceyaml.NewSummary("invalid hours",
 			niceyaml.NewError("bad open", niceyaml.AtPath(paths.Current().Child("open"))),
@@ -7592,8 +7587,6 @@ func TestRebase(t *testing.T) {
 	t.Run("a join rebases branch by branch", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-
 		open := niceyaml.NewError("bad open", niceyaml.AtPath(paths.Current().Child("open")))
 		other := errors.New("bad hours")
 
@@ -7617,8 +7610,6 @@ func TestRebase(t *testing.T) {
 
 	t.Run("an error that only wraps a join rebases as the join", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		open := niceyaml.NewError("bad open", niceyaml.AtPath(paths.Current().Child("open")))
 		closeErr := niceyaml.NewError("bad close", niceyaml.AtPath(closePath))
@@ -7647,8 +7638,6 @@ func TestRebase(t *testing.T) {
 
 	t.Run("a join of the caller's own type keeps its type", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		open := niceyaml.NewError("bad open", niceyaml.AtPath(paths.Current().Child("open")))
 		closeErr := niceyaml.NewError("bad close", niceyaml.AtPath(closePath))
@@ -7712,8 +7701,6 @@ func TestRebase(t *testing.T) {
 	t.Run("a decode keeps the type of a join a self validator returns", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-
 		_, err := dd.Decode[joinedConfig](t.Context())
 		require.EqualError(t, err, "3:9: $.hours.open: bad open\n4:10: $.hours.close: bad close")
 
@@ -7724,8 +7711,6 @@ func TestRebase(t *testing.T) {
 
 	t.Run("a problem without a location in a summary points at the base", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		report := niceyaml.NewSummary("invalid hours", errors.New("bad open"), errors.New("bad close"))
 
@@ -7742,8 +7727,6 @@ func TestRebase(t *testing.T) {
 
 	t.Run("a detail without a location takes none from the base", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		report := niceyaml.NewError("invalid hours", niceyaml.WithDetails(errors.New("bad hours")))
 
@@ -7763,8 +7746,6 @@ func TestRebase(t *testing.T) {
 
 	t.Run("an unlocated problem in a summary under a root base points at the root", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		report := niceyaml.NewSummary("invalid", errors.New("bad child"), errors.New("bad sibling"))
 		rebased := niceyaml.Rebase(report, paths.Current())
@@ -7834,16 +7815,12 @@ func TestRebase(t *testing.T) {
 	t.Run("a position stays as it is", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-
 		err := dd.Bind(niceyaml.Rebase(niceyaml.NewError("bad", niceyaml.AtPosition(position.New(0, 6))), hours))
 		require.EqualError(t, err, "1:7: bad")
 	})
 
 	t.Run("a bound error comes back as it is", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		bound := dd.Bind(niceyaml.NewError("bad", niceyaml.AtPath(closePath)))
 		require.Error(t, bound)
@@ -7856,8 +7833,6 @@ func TestRebase(t *testing.T) {
 
 	t.Run("details above a binding join the base", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		namePath := paths.Current().Child("name")
 		bound := dd.Bind(niceyaml.NewError("bad name", niceyaml.AtPath(namePath)))
@@ -7885,8 +7860,6 @@ func TestRebase(t *testing.T) {
 	t.Run("an unlocated binding under the base keeps no path", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-
 		bound := dd.Bind(errors.New("plain"))
 		wrapped := niceyaml.Invalid(bound, niceyaml.WithDetails(
 			niceyaml.NewError("bad open", niceyaml.AtPath(paths.Current().Child("open"))),
@@ -7909,8 +7882,6 @@ func TestRebase(t *testing.T) {
 	t.Run("a location set on the rebased error is under the base", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, input)
-
 		var e *niceyaml.Error
 
 		inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
@@ -7930,8 +7901,6 @@ func TestRebase(t *testing.T) {
 
 	t.Run("a wrapper between the check and the rebase adds no path", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
 		err := niceyaml.Rebase(fmt.Errorf("checking hours: %w", inner), hours)
@@ -7953,8 +7922,6 @@ func TestRebase(t *testing.T) {
 
 	t.Run("a check runs under the scope it is written for", func(t *testing.T) {
 		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
 
 		checkHours := func(h *rebasedHours) error {
 			return h.Validate()
@@ -10381,11 +10348,7 @@ func TestInvalid(t *testing.T) {
 
 	errStat := fmt.Errorf("stat license: %w", fs.ErrPermission)
 
-	document := func(t *testing.T) *niceyaml.Node {
-		t.Helper()
-
-		return yamltest.FirstDocument(t, input, niceyaml.WithName("cfg.yaml"))
-	}
+	doc := yamltest.FirstDocument(t, input, niceyaml.WithName("cfg.yaml"))
 
 	t.Run("nothing to wrap returns nil", func(t *testing.T) {
 		t.Parallel()
@@ -10439,7 +10402,7 @@ func TestInvalid(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				hours := yamltest.At(t, document(t), hoursPath)
+				hours := yamltest.At(t, doc, hoursPath)
 				err := hours.Bind(niceyaml.Invalid(tc.check()))
 
 				if tc.want == "" {
@@ -10493,7 +10456,7 @@ func TestInvalid(t *testing.T) {
 
 				require.ErrorIs(t, wrapped, tc.is)
 				assert.Equal(t, tc.want, niceyaml.IsInvalid(wrapped), "unbound")
-				assert.Equal(t, tc.want, niceyaml.IsInvalid(document(t).Bind(wrapped)), "bound")
+				assert.Equal(t, tc.want, niceyaml.IsInvalid(doc.Bind(wrapped)), "bound")
 			})
 		}
 	})
@@ -10542,7 +10505,7 @@ func TestInvalid(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				err := document(t).Bind(tc.err)
+				err := doc.Bind(tc.err)
 
 				require.EqualError(t, err, tc.want)
 				assert.True(t, niceyaml.IsInvalid(err))
@@ -10569,11 +10532,7 @@ func TestPlace(t *testing.T) {
 
 	errStat := fmt.Errorf("stat license: %w", fs.ErrPermission)
 
-	document := func(t *testing.T) *niceyaml.Node {
-		t.Helper()
-
-		return yamltest.FirstDocument(t, input, niceyaml.WithName("cfg.yaml"))
-	}
+	doc := yamltest.FirstDocument(t, input, niceyaml.WithName("cfg.yaml"))
 
 	t.Run("nothing to place returns nil", func(t *testing.T) {
 		t.Parallel()
@@ -10632,7 +10591,7 @@ func TestPlace(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				err := document(t).Bind(tc.err)
+				err := doc.Bind(tc.err)
 
 				require.EqualError(t, err, "cfg.yaml:4:10: $.license: stat license: permission denied")
 				require.ErrorIs(t, err, fs.ErrPermission)
@@ -10704,7 +10663,7 @@ func TestPlace(t *testing.T) {
 				assert.Equal(t, wantOK, gotOK)
 				assert.Equal(t, wantRange, gotRange)
 
-				err := document(t).Bind(placed)
+				err := doc.Bind(placed)
 
 				require.EqualError(t, err, tc.want)
 				assert.False(t, niceyaml.IsInvalid(placed), "unbound")
@@ -10761,7 +10720,7 @@ func TestPlace(t *testing.T) {
 				t.Parallel()
 
 				assert.Equal(t, tc.want, niceyaml.IsInvalid(tc.err), "unbound")
-				assert.Equal(t, tc.want, niceyaml.IsInvalid(document(t).Bind(tc.err)), "bound")
+				assert.Equal(t, tc.want, niceyaml.IsInvalid(doc.Bind(tc.err)), "bound")
 			})
 		}
 	})
@@ -10769,7 +10728,7 @@ func TestPlace(t *testing.T) {
 	t.Run("a scoped Node binds a placed error at its value", func(t *testing.T) {
 		t.Parallel()
 
-		hours := yamltest.At(t, document(t), hoursPath)
+		hours := yamltest.At(t, doc, hoursPath)
 
 		tcs := map[string]struct {
 			err  error
@@ -10804,7 +10763,7 @@ func TestPlace(t *testing.T) {
 			return niceyaml.Place(errStat, niceyaml.AtPath(paths.Current().Child("close")))
 		}}}
 
-		err := document(t).DecodeInto(t.Context(), &cfg)
+		err := doc.DecodeInto(t.Context(), &cfg)
 
 		require.EqualError(t, err, "cfg.yaml:3:10: $.hours.close: stat license: permission denied")
 		require.ErrorIs(t, err, fs.ErrPermission)
@@ -10879,7 +10838,7 @@ func TestPlace(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				err := document(t).Bind(tc.err)
+				err := doc.Bind(tc.err)
 
 				require.EqualError(t, err, tc.want)
 				assert.False(t, niceyaml.IsInvalid(err))
