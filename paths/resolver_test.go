@@ -1589,7 +1589,7 @@ func TestResolver_MergeSources_HandBuilt(t *testing.T) {
 
 	// The parser never produces these keys, but MergeSources accepts any
 	// node, so a mutated tree must return no sources rather than panic.
-	source := mapNode(mapEntry(&ast.StringNode{Value: "k"}, &ast.StringNode{Value: "x"}))
+	source := mapNode(mapEntry(strNode("k"), strNode("x")))
 
 	tcs := map[string]struct {
 		key  ast.MapKeyNode

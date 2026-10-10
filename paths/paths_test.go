@@ -3075,6 +3075,11 @@ func mapEntry(key ast.MapKeyNode, value ast.Node) *ast.MappingValueNode {
 	return &ast.MappingValueNode{Key: key, Value: value}
 }
 
+// strNode builds a string node with the text value and no token.
+func strNode(value string) *ast.StringNode {
+	return &ast.StringNode{Value: value}
+}
+
 func TestPath_Node_HandBuiltTree(t *testing.T) {
 	t.Parallel()
 
@@ -3089,91 +3094,82 @@ func TestPath_Node_HandBuiltTree(t *testing.T) {
 			err:  paths.ErrNotFound,
 		},
 		"nil entry beside a real one": {
-			body: mapNode(nil, mapEntry(&ast.StringNode{Value: "a"}, &ast.StringNode{Value: "1"})),
+			body: mapNode(nil, mapEntry(strNode("a"), strNode("1"))),
 			path: paths.Doc().Child("b"),
 			err:  paths.ErrNotFound,
 		},
 		"key without a token": {
-			body: mapNode(mapEntry(&ast.IntegerNode{}, &ast.StringNode{Value: "1"})),
+			body: mapNode(mapEntry(&ast.IntegerNode{}, strNode("1"))),
 			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"alias name holding a typed nil": {
-			body: mapNode(mapEntry(
-				&ast.StringNode{Value: "a"},
-				&ast.AliasNode{Value: (*ast.StringNode)(nil)},
-			)),
+			body: mapNode(mapEntry(strNode("a"), &ast.AliasNode{Value: (*ast.StringNode)(nil)})),
 			path: paths.Doc().Child("a"),
 			err:  paths.ErrAlias,
 		},
 		"anchor name without a token": {
-			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, &ast.AnchorNode{
-				Name:  &ast.StringNode{},
-				Value: &ast.StringNode{Value: "1"},
-			})),
+			body: mapNode(mapEntry(strNode("a"), &ast.AnchorNode{Name: &ast.StringNode{}, Value: strNode("1")})),
 			path: paths.Doc().Child("a", "b"),
 			err:  paths.ErrNotFound,
 		},
 		"entry without a value": {
-			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, nil)),
+			body: mapNode(mapEntry(strNode("a"), nil)),
 			path: paths.Doc().Child("a", "b"),
 			err:  paths.ErrNotFound,
 		},
 		"path ending at an entry without a value": {
-			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, nil)),
+			body: mapNode(mapEntry(strNode("a"), nil)),
 			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"key holding a typed nil": {
-			body: mapNode(mapEntry((*ast.StringNode)(nil), &ast.StringNode{Value: "1"})),
+			body: mapNode(mapEntry((*ast.StringNode)(nil), strNode("1"))),
 			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"key holding a typed nil anchor": {
-			body: mapNode(mapEntry((*ast.AnchorNode)(nil), &ast.StringNode{Value: "1"})),
+			body: mapNode(mapEntry((*ast.AnchorNode)(nil), strNode("1"))),
 			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"key holding a typed nil tag": {
-			body: mapNode(mapEntry((*ast.TagNode)(nil), &ast.StringNode{Value: "1"})),
+			body: mapNode(mapEntry((*ast.TagNode)(nil), strNode("1"))),
 			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"key holding a typed nil explicit key": {
-			body: mapNode(mapEntry((*ast.MappingKeyNode)(nil), &ast.StringNode{Value: "1"})),
+			body: mapNode(mapEntry((*ast.MappingKeyNode)(nil), strNode("1"))),
 			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"explicit key wrapping a typed nil anchor": {
-			body: mapNode(mapEntry(
-				&ast.MappingKeyNode{Value: (*ast.AnchorNode)(nil)},
-				&ast.StringNode{Value: "1"},
-			)),
+			body: mapNode(mapEntry(&ast.MappingKeyNode{Value: (*ast.AnchorNode)(nil)}, strNode("1"))),
 			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"child of a typed nil mapping": {
-			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.MappingNode)(nil))),
+			body: mapNode(mapEntry(strNode("a"), (*ast.MappingNode)(nil))),
 			path: paths.Doc().Child("a", "b"),
 			err:  paths.ErrNotFound,
 		},
 		"index of a typed nil sequence": {
-			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.SequenceNode)(nil))),
+			body: mapNode(mapEntry(strNode("a"), (*ast.SequenceNode)(nil))),
 			path: paths.Doc().Child("a").Index(0),
 			err:  paths.ErrNotFound,
 		},
 		"path ending at a typed nil anchor": {
-			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.AnchorNode)(nil))),
+			body: mapNode(mapEntry(strNode("a"), (*ast.AnchorNode)(nil))),
 			path: paths.Doc().Child("a"),
 			err:  paths.ErrNotFound,
 		},
 		"child of a typed nil anchor": {
-			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.AnchorNode)(nil))),
+			body: mapNode(mapEntry(strNode("a"), (*ast.AnchorNode)(nil))),
 			path: paths.Doc().Child("a", "b"),
 			err:  paths.ErrNotFound,
 		},
 		"child of a typed nil tag": {
-			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.TagNode)(nil))),
+			body: mapNode(mapEntry(strNode("a"), (*ast.TagNode)(nil))),
 			path: paths.Doc().Child("a", "b"),
 			err:  paths.ErrNotFound,
 		},
@@ -3202,8 +3198,8 @@ func TestPath_Node_HandBuiltTree(t *testing.T) {
 func TestPath_Matches_HandBuiltTree(t *testing.T) {
 	t.Parallel()
 
-	shared := &ast.StringNode{Value: "1"}
-	sharedMap := mapNode(mapEntry(&ast.StringNode{Value: "x"}, shared))
+	shared := strNode("1")
+	sharedMap := mapNode(mapEntry(strNode("x"), shared))
 	sharedSeq := &ast.SequenceNode{Values: []ast.Node{shared}}
 
 	tcs := map[string]struct {
@@ -3213,9 +3209,9 @@ func TestPath_Matches_HandBuiltTree(t *testing.T) {
 	}{
 		"recursive keys of entries without a value": {
 			body: mapNode(
-				mapEntry(&ast.StringNode{Value: "a"}, nil),
-				mapEntry(&ast.StringNode{Value: "b"}, mapNode(
-					mapEntry(&ast.StringNode{Value: "a"}, nil),
+				mapEntry(strNode("a"), nil),
+				mapEntry(strNode("b"), mapNode(
+					mapEntry(strNode("a"), nil),
 				)),
 			),
 			path: "$..a~",
@@ -3223,31 +3219,31 @@ func TestPath_Matches_HandBuiltTree(t *testing.T) {
 		},
 		"entries sharing a value node": {
 			body: mapNode(
-				mapEntry(&ast.StringNode{Value: "c"}, mapNode(mapEntry(&ast.StringNode{Value: "x"}, shared))),
-				mapEntry(&ast.StringNode{Value: "d"}, mapNode(mapEntry(&ast.StringNode{Value: "x"}, shared))),
+				mapEntry(strNode("c"), mapNode(mapEntry(strNode("x"), shared))),
+				mapEntry(strNode("d"), mapNode(mapEntry(strNode("x"), shared))),
 			),
 			path: "$..x",
 			want: []string{"$.c.x", "$.d.x"},
 		},
 		"keys of entries sharing a value node": {
 			body: mapNode(
-				mapEntry(&ast.StringNode{Value: "c"}, mapNode(mapEntry(&ast.StringNode{Value: "x"}, shared))),
-				mapEntry(&ast.StringNode{Value: "d"}, mapNode(mapEntry(&ast.StringNode{Value: "x"}, shared))),
+				mapEntry(strNode("c"), mapNode(mapEntry(strNode("x"), shared))),
+				mapEntry(strNode("d"), mapNode(mapEntry(strNode("x"), shared))),
 			),
 			path: "$..x~",
 			want: []string{"$.c.x~", "$.d.x~"},
 		},
 		"every entry sharing a value node": {
 			body: mapNode(
-				mapEntry(&ast.StringNode{Value: "c"}, shared),
-				mapEntry(&ast.StringNode{Value: "d"}, shared),
+				mapEntry(strNode("c"), shared),
+				mapEntry(strNode("d"), shared),
 			),
 			path: "$..*",
 			want: []string{"$.c", "$.d"},
 		},
 		"elements sharing a value node": {
 			body: mapNode(
-				mapEntry(&ast.StringNode{Value: "s"}, &ast.SequenceNode{Values: []ast.Node{shared, shared}}),
+				mapEntry(strNode("s"), &ast.SequenceNode{Values: []ast.Node{shared, shared}}),
 			),
 			path: "$..*",
 			want: []string{"$.s", "$.s[0]", "$.s[1]"},
@@ -3256,16 +3252,16 @@ func TestPath_Matches_HandBuiltTree(t *testing.T) {
 		// at the first place it reaches them.
 		"entries of a mapping two entries share": {
 			body: mapNode(
-				mapEntry(&ast.StringNode{Value: "c"}, sharedMap),
-				mapEntry(&ast.StringNode{Value: "d"}, sharedMap),
+				mapEntry(strNode("c"), sharedMap),
+				mapEntry(strNode("d"), sharedMap),
 			),
 			path: "$..*",
 			want: []string{"$.c", "$.c.x", "$.d"},
 		},
 		"elements of a sequence two entries share": {
 			body: mapNode(
-				mapEntry(&ast.StringNode{Value: "c"}, sharedSeq),
-				mapEntry(&ast.StringNode{Value: "d"}, sharedSeq),
+				mapEntry(strNode("c"), sharedSeq),
+				mapEntry(strNode("d"), sharedSeq),
 			),
 			path: "$..*",
 			want: []string{"$.c", "$.c[0]", "$.d"},
@@ -3276,7 +3272,7 @@ func TestPath_Matches_HandBuiltTree(t *testing.T) {
 				nil,
 				mapEntry(&ast.IntegerNode{}, mapNode(
 					nil,
-					mapEntry(&ast.IntegerNode{}, &ast.StringNode{Value: "1"}),
+					mapEntry(&ast.IntegerNode{}, strNode("1")),
 				)),
 			),
 			path: "$..b",
@@ -3284,27 +3280,27 @@ func TestPath_Matches_HandBuiltTree(t *testing.T) {
 		"nil entry and keys with no name": {
 			body: mapNode(
 				nil,
-				mapEntry(nil, &ast.StringNode{Value: "1"}),
-				mapEntry(&ast.IntegerNode{}, &ast.StringNode{Value: "2"}),
-				mapEntry((*ast.StringNode)(nil), &ast.StringNode{Value: "3"}),
-				mapEntry(&ast.MappingKeyNode{Value: (*ast.AnchorNode)(nil)}, &ast.StringNode{Value: "4"}),
-				mapEntry(&ast.StringNode{Value: "a"}, &ast.StringNode{Value: "5"}),
+				mapEntry(nil, strNode("1")),
+				mapEntry(&ast.IntegerNode{}, strNode("2")),
+				mapEntry((*ast.StringNode)(nil), strNode("3")),
+				mapEntry(&ast.MappingKeyNode{Value: (*ast.AnchorNode)(nil)}, strNode("4")),
+				mapEntry(strNode("a"), strNode("5")),
 			),
 			path: "$.*",
 			want: []string{"$.a"},
 		},
 		"entries without a value hold no node to list": {
 			body: mapNode(
-				mapEntry(&ast.StringNode{Value: "a"}, nil),
-				mapEntry(&ast.StringNode{Value: "b"}, &ast.StringNode{Value: "1"}),
+				mapEntry(strNode("a"), nil),
+				mapEntry(strNode("b"), strNode("1")),
 			),
 			path: "$.*",
 			want: []string{"$.b"},
 		},
 		"keys of every entry without a value": {
 			body: mapNode(
-				mapEntry(&ast.StringNode{Value: "a"}, nil),
-				mapEntry(&ast.StringNode{Value: "b"}, nil),
+				mapEntry(strNode("a"), nil),
+				mapEntry(strNode("b"), nil),
 			),
 			path: "$.*~",
 			want: []string{"$.a~", "$.b~"},
@@ -3315,7 +3311,7 @@ func TestPath_Matches_HandBuiltTree(t *testing.T) {
 					&ast.MergeKeyNode{},
 					&ast.SequenceNode{BaseNode: &ast.BaseNode{}, Values: []ast.Node{(*ast.MappingNode)(nil)}},
 				),
-				mapEntry(&ast.StringNode{Value: "a"}, &ast.StringNode{Value: "1"}),
+				mapEntry(strNode("a"), strNode("1")),
 			),
 			path: "$.*",
 			want: []string{"$.a"},
@@ -3323,7 +3319,7 @@ func TestPath_Matches_HandBuiltTree(t *testing.T) {
 		"merge key without a value": {
 			body: mapNode(
 				mapEntry(&ast.MergeKeyNode{}, nil),
-				mapEntry(&ast.StringNode{Value: "a"}, &ast.StringNode{Value: "1"}),
+				mapEntry(strNode("a"), strNode("1")),
 			),
 			path: "$.*",
 			want: []string{"$.a"},
@@ -3332,9 +3328,9 @@ func TestPath_Matches_HandBuiltTree(t *testing.T) {
 			body: mapNode(
 				mapEntry(&ast.MergeKeyNode{}, mapNode(
 					nil,
-					mapEntry(&ast.StringNode{Value: "b"}, &ast.StringNode{Value: "1"}),
+					mapEntry(strNode("b"), strNode("1")),
 				)),
-				mapEntry(&ast.StringNode{Value: "a"}, &ast.StringNode{Value: "2"}),
+				mapEntry(strNode("a"), strNode("2")),
 			),
 			path: "$.*",
 			want: []string{"$.b", "$.a"},
@@ -3363,10 +3359,10 @@ func TestPath_Nodes_HandBuiltTreeTypedNil(t *testing.T) {
 	t.Parallel()
 
 	doc := &ast.DocumentNode{Body: mapNode(
-		mapEntry(&ast.StringNode{Value: "m"}, (*ast.MappingNode)(nil)),
-		mapEntry(&ast.StringNode{Value: "s"}, (*ast.SequenceNode)(nil)),
-		mapEntry(&ast.StringNode{Value: "a"}, (*ast.AnchorNode)(nil)),
-		mapEntry(&ast.StringNode{Value: "t"}, (*ast.TagNode)(nil)),
+		mapEntry(strNode("m"), (*ast.MappingNode)(nil)),
+		mapEntry(strNode("s"), (*ast.SequenceNode)(nil)),
+		mapEntry(strNode("a"), (*ast.AnchorNode)(nil)),
+		mapEntry(strNode("t"), (*ast.TagNode)(nil)),
 	)}
 
 	tcs := map[string]paths.Path{
@@ -4314,17 +4310,17 @@ func TestPath_Token_HandBuiltMapping(t *testing.T) {
 		want string
 	}{
 		"key holding a typed nil": {
-			body: mapNode(mapEntry((*ast.StringNode)(nil), &ast.StringNode{Value: "1"})),
+			body: mapNode(mapEntry((*ast.StringNode)(nil), strNode("1"))),
 			path: paths.Doc(),
 			want: "resolve $: not found: node has no token",
 		},
 		"nil entry": {
-			body: &ast.MappingNode{Values: []*ast.MappingValueNode{nil}},
+			body: mapNode(nil),
 			path: paths.Doc(),
 			want: "resolve $: not found: node has no token",
 		},
 		"value holding a typed nil": {
-			body: mapNode(mapEntry(&ast.StringNode{Value: "a"}, (*ast.StringNode)(nil))),
+			body: mapNode(mapEntry(strNode("a"), (*ast.StringNode)(nil))),
 			path: paths.Doc().Child("a"),
 			want: "resolve $.a: not found: node has no token",
 		},
