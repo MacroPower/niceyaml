@@ -651,7 +651,7 @@ func TestNewSourceFromLayers_SelfValidate(t *testing.T) {
 
 			var cfg layerConfig
 
-			layers := yamltest.Layers(t, layersOf(layerSources(t, tc.layers...))...)
+			layers := layerFiles(t, tc.layers...)
 
 			err := layers.DecodeInto(t.Context(), &cfg, niceyaml.WithSelfValidation(false))
 			require.NoError(t, err)
@@ -734,7 +734,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 	t.Run("self-validation off leaves the value to the caller", func(t *testing.T) {
 		t.Parallel()
 
-		layers := yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...)
+		layers := layerFiles(t, baseInput, prodInput)
 
 		var cfg layerConfig
 
@@ -1026,7 +1026,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 
-		layers := yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...)
+		layers := layerFiles(t, baseInput, prodInput)
 
 		_, err := layers.Decode[layerConfig](ctx)
 		require.ErrorIs(t, err, context.Canceled)
@@ -1039,7 +1039,7 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 	t.Run("a target that is no pointer returns an error", func(t *testing.T) {
 		t.Parallel()
 
-		layers := yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...)
+		layers := layerFiles(t, baseInput, prodInput)
 
 		err := layers.DecodeInto(t.Context(), layerConfig{})
 		require.ErrorIs(t, err, niceyaml.ErrDecodeTarget)
@@ -1173,11 +1173,7 @@ func TestNewSourceFromLayers_Validate(t *testing.T) {
 	t.Run("a nil validator runs nothing", func(t *testing.T) {
 		t.Parallel()
 
-		require.NoError(
-			t,
-			yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...).
-				ValidateDocuments(t.Context(), nil),
-		)
+		require.NoError(t, layerFiles(t, baseInput, prodInput).ValidateDocuments(t.Context(), nil))
 	})
 }
 
@@ -1236,7 +1232,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 	t.Run("a caller reads one value of the layers", func(t *testing.T) {
 		t.Parallel()
 
-		doc := mergedDocument(t, yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...))
+		doc := mergedDocument(t, layerFiles(t, baseInput, prodInput))
 
 		got, err := doc.DecodeAt[string](t.Context(), host)
 		require.NoError(t, err)
@@ -1305,7 +1301,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 	t.Run("an error binds in the file of a layer", func(t *testing.T) {
 		t.Parallel()
 
-		doc := mergedDocument(t, yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...))
+		doc := mergedDocument(t, layerFiles(t, baseInput, prodInput))
 		server := yamltest.At(t, doc, paths.Doc().Child("server"))
 
 		_, wrongType := doc.DecodeAt[int](t.Context(), host)
@@ -1525,7 +1521,7 @@ func TestNode_Origin(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := mergedDocument(t, yamltest.Layers(t, layersOf(layerSources(t, tc.inputs...))...))
+			doc := mergedDocument(t, layerFiles(t, tc.inputs...))
 
 			node := doc
 			if !tc.path.IsRoot() {
@@ -2217,10 +2213,10 @@ func TestNewSourceFromLayers_Alias(t *testing.T) {
 func TestNewSourceFromLayers_Concurrent(t *testing.T) {
 	t.Parallel()
 
-	layers := yamltest.Layers(t, layersOf(layerSources(t,
+	layers := layerFiles(t,
 		"server:\n  host: example.com\n  port: 0\n",
 		"server:\n  host: prod.example.com\n",
-	))...)
+	)
 
 	// NewSourceFromLayers merged and parsed the layers already, so
 	// every call reads the one merged document.
@@ -2288,6 +2284,14 @@ func layerSources(t *testing.T, inputs ...string) []*niceyaml.Source {
 	}
 
 	return sources
+}
+
+// layerFiles merges a Source of each of inputs, in the order they apply
+// and under the names [layerNodes] gives them.
+func layerFiles(t *testing.T, inputs ...string) *niceyaml.Source {
+	t.Helper()
+
+	return yamltest.Layers(t, layersOf(layerSources(t, inputs...))...)
 }
 
 // layersOf returns given as the layers [niceyaml.NewSourceFromLayers] takes, since

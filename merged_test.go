@@ -896,7 +896,7 @@ func TestNewSourceFromLayers_Decode_Options(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			layers := yamltest.Layers(t, layersOf(layerSources(t, tc.base, "level: high\n"))...)
+			layers := layerFiles(t, tc.base, "level: high\n")
 
 			got, err := layers.Decode[config](t.Context(), levels)
 			if tc.err != "" {
@@ -925,7 +925,7 @@ func TestNewSourceFromLayers_Decode_Maps(t *testing.T) {
 		Extra    map[string]any     `yaml:"extra"`
 	}
 
-	layers := yamltest.Layers(t, layersOf(layerSources(t,
+	layers := layerFiles(t,
 		stringtest.LinesLF(
 			"services:",
 			"  web: {image: nginx, replicas: 1}",
@@ -933,7 +933,7 @@ func TestNewSourceFromLayers_Decode_Maps(t *testing.T) {
 			"extra: {a: {b: 1, c: 2}, z: 1}",
 		),
 		"services:\n  web: {replicas: 5}\nextra: {a: {b: 9}}\n",
-	))...)
+	)
 
 	t.Run("a map field keeps the entries of every layer", func(t *testing.T) {
 		t.Parallel()
@@ -1015,9 +1015,7 @@ func TestNewSourceFromLayers_Decode_Scalars(t *testing.T) {
 	want, err := yamltest.FirstDocument(t, baseInput+prodInput).Decode[config](t.Context())
 	require.NoError(t, err)
 
-	got, err := yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...).Decode[config](
-		t.Context(),
-	)
+	got, err := layerFiles(t, baseInput, prodInput).Decode[config](t.Context())
 	require.NoError(t, err)
 	assert.Equal(t, want, got)
 
