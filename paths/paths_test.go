@@ -4063,21 +4063,36 @@ func TestPath_Matches_AliasFanOut(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
-
-			matches, err := paths.NewResolver(doc).Matches(tc.path)
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-
-				_, err = paths.NewResolver(doc).Nodes(tc.path)
-				require.ErrorIs(t, err, tc.err)
-
-				return
-			}
-
-			require.NoError(t, err)
-			assert.Len(t, matches, tc.want)
+			assertMatchCount(t, tc.input, tc.path, tc.want, tc.err)
 		})
+	}
+}
+
+// assertMatchCount asserts that path selects want nodes in the first
+// document of input. When wantErr is set, it asserts instead that Matches
+// and Nodes fail with it, as Node does for a path without a wildcard.
+func assertMatchCount(t *testing.T, input string, path paths.Path, want int, wantErr error) {
+	t.Helper()
+
+	doc := yamltest.FirstDocument(t, input).DocumentAST()
+
+	matches, err := paths.NewResolver(doc).Matches(path)
+	if wantErr == nil {
+		require.NoError(t, err)
+		assert.Len(t, matches, want)
+
+		return
+	}
+
+	require.ErrorIs(t, err, wantErr)
+
+	_, err = paths.NewResolver(doc).Nodes(path)
+	require.ErrorIs(t, err, wantErr)
+
+	// Node takes only a path without a wildcard.
+	_, err = paths.NewResolver(doc).Node(path)
+	if !errors.Is(err, paths.ErrWildcard) {
+		require.ErrorIs(t, err, wantErr)
 	}
 }
 
@@ -4306,26 +4321,7 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
-
-			matches, err := paths.NewResolver(doc).Matches(tc.path)
-			if tc.err != nil {
-				require.ErrorIs(t, err, tc.err)
-
-				_, err = paths.NewResolver(doc).Nodes(tc.path)
-				require.ErrorIs(t, err, tc.err)
-
-				// Path.Node takes only a path without a wildcard.
-				_, err = paths.NewResolver(doc).Node(tc.path)
-				if !errors.Is(err, paths.ErrWildcard) {
-					require.ErrorIs(t, err, tc.err)
-				}
-
-				return
-			}
-
-			require.NoError(t, err)
-			assert.Len(t, matches, tc.want)
+			assertMatchCount(t, tc.input, tc.path, tc.want, tc.err)
 		})
 	}
 }
