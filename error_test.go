@@ -4642,17 +4642,31 @@ func TestSourceError_Excerpt_Errors(t *testing.T) {
 	})
 }
 
-// excerptSource is a ten-line source whose second and eighth lines are far
-// enough apart that an excerpt with one line of context shows them as two
-// hunks.
-const excerptSource = "a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nh: 8\ni: 9\nj: 10\n"
+// excerptSource returns a new ten-line source whose second and eighth
+// lines are far enough apart that an excerpt with one line of context
+// shows them as two hunks.
+func excerptSource() *niceyaml.Source {
+	return niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"c: 3",
+		"d: 4",
+		"e: 5",
+		"f: 6",
+		"g: 7",
+		"h: 8",
+		"i: 9",
+		"j: 10",
+	))
+}
 
 // excerptError binds an error on the value of b with a nested error on the
-// value of h to a source of [excerptSource], and returns the bound error.
+// value of h to the source [excerptSource] returns, and returns the bound
+// error.
 func excerptError(t *testing.T) *niceyaml.SourceError {
 	t.Helper()
 
-	err := yamltest.Bind(t, niceyaml.NewSourceFromString(excerptSource), niceyaml.NewError(
+	err := yamltest.Bind(t, excerptSource(), niceyaml.NewError(
 		"bad b",
 		niceyaml.AtPath(paths.Current().Child("b")),
 		niceyaml.WithDetails(
@@ -5091,7 +5105,7 @@ func TestSourceError_Annotate(t *testing.T) {
 	t.Run("two errors annotate one view", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(excerptSource)
+		source := excerptSource()
 		view := source.View()
 
 		first := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewError(
@@ -5115,7 +5129,7 @@ func TestSourceError_Annotate(t *testing.T) {
 	t.Run("two errors on one line each add an annotation", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(excerptSource)
+		source := excerptSource()
 		view := source.View()
 
 		for _, msg := range []string{"bad b", "too big"} {
@@ -5138,7 +5152,7 @@ func TestSourceError_Annotate(t *testing.T) {
 	t.Run("a message that repeats at one column reads once", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(excerptSource)
+		source := excerptSource()
 		view := source.View()
 
 		// Two bindings say the same of one value, as two branches of an
@@ -5161,7 +5175,7 @@ func TestSourceError_Annotate(t *testing.T) {
 
 		tcs := map[string]struct {
 			err error
-			// The lines of excerptSource the error marks, by index.
+			// The lines of the source the error marks, by index.
 			want []int
 		}{
 			"error at a path": {
@@ -5201,7 +5215,7 @@ func TestSourceError_Annotate(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				source := niceyaml.NewSourceFromString(excerptSource)
+				source := excerptSource()
 				err := yamltest.Bind(t, source, tc.err)
 
 				once, twice := source.View(), source.View()
@@ -5237,7 +5251,7 @@ func TestSourceError_Annotate(t *testing.T) {
 	t.Run("an error with no message marks a caret run alone", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(excerptSource)
+		source := excerptSource()
 		view := source.View()
 
 		bound := yamltest.RequireSourceError(t, yamltest.Bind(t, source, niceyaml.NewError(
@@ -5410,7 +5424,7 @@ func TestSourceError_Annotate(t *testing.T) {
 				view: bound.Source().View().Slice(position.NewSpan(3, 6)),
 			},
 			"view of another source with the same text": {
-				view: niceyaml.NewSourceFromString(excerptSource).View(),
+				view: excerptSource().View(),
 			},
 			"empty view": {
 				view: line.NewView(line.Lines{}),
@@ -5432,7 +5446,7 @@ func TestSourceError_Annotate(t *testing.T) {
 	t.Run("leaves the view unmarked when nothing resolves", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString(excerptSource)
+		source := excerptSource()
 
 		tcs := map[string]struct {
 			err *niceyaml.Error
