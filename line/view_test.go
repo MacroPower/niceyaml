@@ -1314,13 +1314,13 @@ func TestView_String(t *testing.T) {
 		view.Annotate(0, line.Annotation{Content: "top", Placement: line.Above})
 		view.Annotate(2, line.Annotation{Content: "bottom", Placement: line.Below, Col: 3})
 
-		want := strings.Join([]string{
+		want := stringtest.JoinLF(
 			"     | top",
 			"   1 | a: 1",
 			"   2 | b: 2",
 			"   3 | c: 3",
 			"     |    ^ bottom",
-		}, "\n")
+		)
 
 		assert.Equal(t, want, view.String())
 	})
@@ -1334,16 +1334,6 @@ func TestView_String(t *testing.T) {
 		view.BlendOverlay("test2", lineRange(0, 5, 7))
 
 		assert.Equal(t, "   1 | key: value\n     | ^^^  ^^", view.String())
-	})
-
-	t.Run("overlay and annotation share the marker row", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.AddOverlay("test1", lineRange(0, 5, 10))
-		view.Annotate(0, line.Annotation{Content: "bad value", Placement: line.Below, Col: 5})
-
-		assert.Equal(t, "   1 | key: value\n     |      ^^^^^ bad value", view.String())
 	})
 
 	t.Run("annotation without content marks an overlay of no width", func(t *testing.T) {
@@ -1393,59 +1383,110 @@ func TestView_String(t *testing.T) {
 		assert.Equal(t, "   1 | key: value\n     |         ^^", view.String())
 	})
 
-	t.Run("carets sit under wide runes", func(t *testing.T) {
+	t.Run("marks on one line", func(t *testing.T) {
 		t.Parallel()
 
-		// Each CJK rune renders two cells wide, so the columns before the
-		// marked ones are worth two carets each.
-		view := newTestView(t, "名前: value\n", 1)
-		view.AddOverlay("test1", lineRange(0, 4, 9))
-		view.Annotate(0, line.Annotation{Content: "bad", Placement: line.Below, Col: 4})
-
-		assert.Equal(t, "   1 | 名前: value\n     |       ^^^^^ bad", view.String())
-	})
-
-	t.Run("carets on a combining mark sit under its base", func(t *testing.T) {
-		t.Parallel()
-
-		// The acute accent renders on the e before it, so a mark on the
-		// accent's column lands under the e, and an annotation at that
-		// column starts there too.
-		view := newTestView(t, "k: e\u0301x\n", 1)
-		view.AddOverlay("test1", lineRange(0, 4, 5))
-		view.Annotate(0, line.Annotation{Content: "here", Placement: line.Below, Col: 4})
-
-		assert.Equal(t, "   1 | k: e\u0301x\n     |    ^ here", view.String())
-	})
-
-	t.Run("carets sit under grapheme clusters", func(t *testing.T) {
-		t.Parallel()
-
-		// The content row renders a ZWJ sequence or a keycap as one
-		// cluster of two cells, so the columns before x are worth that
-		// much and no more, and the caret lands under x as the row above
-		// starts there.
 		tcs := map[string]struct {
-			content string
-			col     int
-			want    string
+			input       string
+			want        string
+			ranges      []position.Range
+			annotations []line.Annotation
 		}{
-			"zwj sequence": {
-				content: "a: \"\U0001F468\u200d\U0001F469\" x",
-				col:     9,
+			"overlay and annotation share the marker row": {
+				input:       "key: value",
+				ranges:      []position.Range{lineRange(0, 5, 10)},
+				annotations: []line.Annotation{{Content: "bad value", Placement: line.Below, Col: 5}},
+				want: stringtest.JoinLF(
+					"   1 | key: value",
+					"     |      ^^^^^ bad value",
+				),
+			},
+			// Each CJK rune renders two cells wide, so the columns before
+			// the marked ones are worth two carets each.
+			"carets sit under wide runes": {
+				input:       "名前: value",
+				ranges:      []position.Range{lineRange(0, 4, 9)},
+				annotations: []line.Annotation{{Content: "bad", Placement: line.Below, Col: 4}},
+				want: stringtest.JoinLF(
+					"   1 | 名前: value",
+					"     |       ^^^^^ bad",
+				),
+			},
+			// The row above starts at the column of the annotation as the
+			// content row renders it, so on wide characters it takes their
+			// cells, as the marker row below does.
+			"annotation above sits over wide runes": {
+				input: "名前: v",
+				annotations: []line.Annotation{
+					{Content: "above", Placement: line.Above, Col: 2},
+					{Content: "below", Placement: line.Below, Col: 2},
+				},
+				want: stringtest.JoinLF(
+					"     |     above",
+					"   1 | 名前: v",
+					"     |     ^ below",
+				),
+			},
+			// The acute accent renders on the e before it, so a mark on the
+			// accent's column lands under the e, and an annotation at that
+			// column starts there too.
+			"carets on a combining mark sit under its base": {
+				input:       "k: e\u0301x",
+				ranges:      []position.Range{lineRange(0, 4, 5)},
+				annotations: []line.Annotation{{Content: "here", Placement: line.Below, Col: 4}},
+				want: stringtest.JoinLF(
+					"   1 | k: e\u0301x",
+					"     |    ^ here",
+				),
+			},
+			// The content row renders a ZWJ sequence or a keycap as one
+			// cluster of two cells, so the columns before x are worth that
+			// much and no more, and the caret lands under x as the row
+			// above starts there.
+			"carets sit under a zwj sequence": {
+				input:  "a: \"\U0001F468\u200d\U0001F469\" x",
+				ranges: []position.Range{lineRange(0, 9, 10)},
+				annotations: []line.Annotation{
+					{Content: "above", Placement: line.Above, Col: 9},
+					{Content: "below", Placement: line.Below, Col: 9},
+				},
 				want: stringtest.JoinLF(
 					"     |         above",
 					"   1 | a: \"\U0001F468\u200d\U0001F469\" x",
 					"     |         ^ below",
 				),
 			},
-			"keycap": {
-				content: "a: 1\ufe0f\u20e3 x",
-				col:     7,
+			"carets sit under a keycap": {
+				input:  "a: 1\ufe0f\u20e3 x",
+				ranges: []position.Range{lineRange(0, 7, 8)},
+				annotations: []line.Annotation{
+					{Content: "above", Placement: line.Above, Col: 7},
+					{Content: "below", Placement: line.Below, Col: 7},
+				},
 				want: stringtest.JoinLF(
 					"     |       above",
 					"   1 | a: 1\ufe0f\u20e3 x",
 					"     |       ^ below",
+				),
+			},
+			// The joiner and the second emoji render as part of the cluster
+			// the first emoji starts, so a mark on either lands under it.
+			"a mark inside a grapheme cluster sits under its first rune": {
+				input:  "a: \U0001F468\u200d\U0001F469 x",
+				ranges: []position.Range{lineRange(0, 5, 6)},
+				want: stringtest.JoinLF(
+					"   1 | a: \U0001F468\u200d\U0001F469 x",
+					"     |    ^^",
+				),
+			},
+			"control characters render as pictures": {
+				input:       "a: \"x\ty\x1b\"",
+				ranges:      []position.Range{lineRange(0, 3, 9)},
+				annotations: []line.Annotation{{Content: "tab\x1bhere", Placement: line.Above}},
+				want: stringtest.JoinLF(
+					"     | tab\u241bhere",
+					"   1 | a: \"x\u2409y\u241b\"",
+					"     |    ^^^^^^",
 				),
 			},
 		}
@@ -1454,44 +1495,13 @@ func TestView_String(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				view := newTestView(t, tc.content+"\n", 1)
-				view.AddOverlay("test1", lineRange(0, tc.col, tc.col+1))
-				view.Annotate(0,
-					line.Annotation{Content: "above", Placement: line.Above, Col: tc.col},
-					line.Annotation{Content: "below", Placement: line.Below, Col: tc.col},
-				)
+				view := newTestView(t, tc.input+"\n", 1)
+				view.AddOverlay("test1", tc.ranges...)
+				view.Annotate(0, tc.annotations...)
 
 				assert.Equal(t, tc.want, view.String())
 			})
 		}
-	})
-
-	t.Run("a mark inside a grapheme cluster sits under its first rune", func(t *testing.T) {
-		t.Parallel()
-
-		// The joiner and the second emoji render as part of the cluster
-		// the first emoji starts, so a mark on either lands under it.
-		view := newTestView(t, "a: \U0001F468\u200d\U0001F469 x\n", 1)
-		view.AddOverlay("test1", lineRange(0, 5, 6))
-
-		assert.Equal(t, stringtest.JoinLF(
-			"   1 | a: \U0001F468\u200d\U0001F469 x",
-			"     |    ^^",
-		), view.String())
-	})
-
-	t.Run("control characters render as pictures", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "a: \"x\ty\x1b\"\n", 1)
-		view.AddOverlay("test1", lineRange(0, 3, 9))
-		view.Annotate(0, line.Annotation{Content: "tab\x1bhere", Placement: line.Above})
-
-		assert.Equal(t, stringtest.JoinLF(
-			"     | tab\u241bhere",
-			"   1 | a: \"x\u2409y\u241b\"",
-			"     |    ^^^^^^",
-		), view.String())
 	})
 
 	t.Run("empty", func(t *testing.T) {
@@ -1535,25 +1545,6 @@ func TestView_OutOfRange(t *testing.T) {
 			assert.Panics(t, func() { call(line.NewView(line.Lines{}), 0) }, "index 0 on empty view")
 		})
 	}
-}
-
-func TestView_String_AboveAnnotationOnWideContent(t *testing.T) {
-	t.Parallel()
-
-	// The row above starts at the column of the annotation as the content
-	// row renders it, so on wide characters it takes their cells, as the
-	// marker row below does.
-	view := newTestView(t, "名前: v\n", 1)
-	view.Annotate(0,
-		line.Annotation{Content: "above", Placement: line.Above, Col: 2},
-		line.Annotation{Content: "below", Placement: line.Below, Col: 2},
-	)
-
-	assert.Equal(t, stringtest.JoinLF(
-		"     |     above",
-		"   1 | 名前: v",
-		"     |     ^ below",
-	), view.String())
 }
 
 func TestView_String_PlaceholderLine(t *testing.T) {
