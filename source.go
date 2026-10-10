@@ -1179,7 +1179,9 @@ func (s *Source) contentDocuments() []*Node {
 // parse is not empty, as [Node.IsEmpty] reports it.
 func pickContentDocuments(docs []*Node) []*Node {
 	if !slices.ContainsFunc(docs, func(doc *Node) bool { return !doc.IsEmpty() }) {
-		return docs[:1]
+		// The result takes none of the capacity of docs, so an append to
+		// it replaces no document of docs.
+		return docs[:1:1]
 	}
 
 	return slices.DeleteFunc(slices.Clone(docs), (*Node).IsEmpty)
