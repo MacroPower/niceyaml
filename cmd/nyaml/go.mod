@@ -22,6 +22,7 @@ require (
 	go.jacobcolvin.com/niceyaml/bubbles v0.0.0-00010101000000-000000000000
 	go.jacobcolvin.com/niceyaml/fangs v0.0.0-00010101000000-000000000000
 	go.jacobcolvin.com/x/cobras v0.1.0
+	go.jacobcolvin.com/x/stringtest v0.2.0
 )
 
 require (
