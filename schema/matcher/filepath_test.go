@@ -13,6 +13,13 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema/matcher"
 )
 
+// matchPath runs m on a document whose file path is filePath.
+func matchPath(t *testing.T, m matcher.Matcher, filePath string) bool {
+	t.Helper()
+
+	return match(t, m, yamltest.FirstDocumentWithPath(t, "kind: Test", filePath))
+}
+
 func TestFilePath(t *testing.T) {
 	t.Parallel()
 
@@ -50,11 +57,7 @@ func TestFilePath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := matcher.MustFilePath(tc.pattern)
-			doc := yamltest.FirstDocumentWithPath(t, "kind: Test", tc.filePath)
-
-			got := match(t, m, doc)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, matchPath(t, matcher.MustFilePath(tc.pattern), tc.filePath))
 		})
 	}
 }
@@ -223,9 +226,8 @@ func TestFilePath_BaseDir(t *testing.T) {
 			t.Parallel()
 
 			m := matcher.MustFilePath(tc.pattern, matcher.WithBaseDir(tc.base))
-			doc := yamltest.FirstDocumentWithPath(t, "kind: Test", tc.filePath)
 
-			assert.Equal(t, tc.want, match(t, m, doc))
+			assert.Equal(t, tc.want, matchPath(t, m, tc.filePath))
 		})
 	}
 }
@@ -242,8 +244,8 @@ func TestWithBaseDir(t *testing.T) {
 		m, err := matcher.FilePath("*.yaml", matcher.WithBaseDir(first), matcher.WithBaseDir(last))
 		require.NoError(t, err)
 
-		assert.True(t, match(t, m, yamltest.FirstDocumentWithPath(t, "kind: Test", filepath.Join(last, "app.yaml"))))
-		assert.False(t, match(t, m, yamltest.FirstDocumentWithPath(t, "kind: Test", filepath.Join(first, "app.yaml"))))
+		assert.True(t, matchPath(t, m, filepath.Join(last, "app.yaml")))
+		assert.False(t, matchPath(t, m, filepath.Join(first, "app.yaml")))
 	})
 
 	t.Run("panics on an empty directory", func(t *testing.T) {
@@ -276,11 +278,8 @@ func TestFilePath_WorkingDirectory(t *testing.T) {
 	for name, m := range matchers {
 		//nolint:paralleltest // See above.
 		t.Run(name, func(t *testing.T) {
-			under := yamltest.FirstDocumentWithPath(t, "kind: Test", filepath.Join(at, "configs", "app.yaml"))
-			assert.True(t, match(t, m, under))
-
-			moved := yamltest.FirstDocumentWithPath(t, "kind: Test", filepath.Join(after, "configs", "app.yaml"))
-			assert.False(t, match(t, m, moved))
+			assert.True(t, matchPath(t, m, filepath.Join(at, "configs", "app.yaml")))
+			assert.False(t, matchPath(t, m, filepath.Join(after, "configs", "app.yaml")))
 		})
 	}
 }
