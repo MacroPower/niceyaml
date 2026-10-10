@@ -3028,8 +3028,23 @@ func TestDiffGutter_Styles(t *testing.T) {
 	}
 }
 
-func TestPrinter_NoAnnotation(t *testing.T) {
+func TestPrinter_WithAnnotation(t *testing.T) {
 	t.Parallel()
+
+	// A func that draws a marker of its own for each placement.
+	custom := func(ctx printer.AnnotationContext) []printer.AnnotationRow {
+		row := printer.AnnotationRow{
+			Col:    ctx.Annotations.Col(),
+			Marker: "=== ",
+			Text:   strings.Join(ctx.Annotations.Contents(), ", "),
+		}
+
+		if ctx.Placement == line.Below {
+			row.Marker = ">>> "
+		}
+
+		return []printer.AnnotationRow{row}
+	}
 
 	tcs := map[string]struct {
 		fn         printer.AnnotationFunc
@@ -3051,6 +3066,22 @@ func TestPrinter_NoAnnotation(t *testing.T) {
 			fn:         printer.DefaultAnnotation,
 			annotation: line.Annotation{Content: "@@ -1 +1 @@"},
 			want:       "@@ -1 +1 @@\nkey: value",
+		},
+		// A nil func selects DefaultAnnotation rather than panicking on the
+		// first annotated line.
+		"nil shows them as DefaultAnnotation does": {
+			annotation: line.Annotation{Content: "note", Placement: line.Below, Col: 5},
+			want:       "key: value\n     ^ note",
+		},
+		"custom func marks one below": {
+			fn:         custom,
+			annotation: line.Annotation{Content: "custom error", Placement: line.Below},
+			want:       "key: value\n>>> custom error",
+		},
+		"custom func marks one above": {
+			fn:         custom,
+			annotation: line.Annotation{Content: "custom header", Placement: line.Above},
+			want:       "=== custom header\nkey: value",
 		},
 	}
 
@@ -4712,68 +4743,6 @@ func TestDefaultAnnotation(t *testing.T) {
 	}
 }
 
-func TestPrinter_WithAnnotation(t *testing.T) {
-	t.Parallel()
-
-	// Custom annotation function that uses different markers.
-	customAnnotation := func(ctx printer.AnnotationContext) []printer.AnnotationRow {
-		if len(ctx.Annotations) == 0 {
-			return nil
-		}
-
-		row := printer.AnnotationRow{
-			Col:    ctx.Annotations.Col(),
-			Marker: "=== ",
-			Text:   strings.Join(ctx.Annotations.Contents(), ", "),
-		}
-
-		if ctx.Placement == line.Below {
-			row.Marker = ">>> "
-		}
-
-		return []printer.AnnotationRow{row}
-	}
-
-	tcs := map[string]struct {
-		annotation line.Annotation
-		lineIndex  int
-		want       string
-	}{
-		"custom below annotation": {
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "custom error",
-				Placement: line.Below,
-				Col:       0,
-			},
-			want: "key: value\n>>> custom error",
-		},
-		"custom above annotation": {
-			lineIndex: 0,
-			annotation: line.Annotation{
-				Content:   "custom header",
-				Placement: line.Above,
-				Col:       0,
-			},
-			want: "=== custom header\nkey: value",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := niceyaml.NewSourceFromString("key: value").View()
-			view.Annotate(tc.lineIndex, tc.annotation)
-
-			p := testPrinter().With(printer.WithAnnotation(customAnnotation))
-
-			got := p.Print(view)
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
 func TestPrinter_AnnotationFuncOverlays(t *testing.T) {
 	t.Parallel()
 
@@ -6244,19 +6213,6 @@ func TestPrinter_WithStyles_Nil(t *testing.T) {
 			assert.Equal(t, want, got)
 		})
 	}
-}
-
-func TestPrinter_WithAnnotation_Nil(t *testing.T) {
-	t.Parallel()
-
-	view := niceyaml.NewSourceFromString("key: value").View()
-	view.Annotate(0, line.Annotation{Content: "note", Placement: line.Below, Col: 5})
-
-	// A nil AnnotationFunc selects DefaultAnnotation rather than panicking
-	// on the first annotated line.
-	p := testPrinterWithGutter(nil).With(printer.WithAnnotation(nil))
-
-	assert.Equal(t, "key: value\n     ^ note", p.Print(view))
 }
 
 func TestPrinter_Layout_CellOf(t *testing.T) {
