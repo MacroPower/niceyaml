@@ -548,8 +548,8 @@ func framedRows(t *testing.T, m *yamlviewport.Model, n int) []string {
 	return rows
 }
 
-// numbered returns a document of n lines, each one format with the index of
-// its line in place of the verb.
+// numbered returns a document of n lines. Each line is format with the
+// index of the line in place of its verb.
 func numbered(n int, format string) string {
 	var sb strings.Builder
 
@@ -3914,7 +3914,7 @@ func TestViewModeHunks_Golden(t *testing.T) {
 				addRevisions(m, rev1YAML, rev2YAML)
 				m.SetViewMode(yamlviewport.ViewModeHunks)
 
-				// Default is at latest (index 2).
+				// Default is at latest (index 1).
 			},
 			width:  80,
 			height: 30,
