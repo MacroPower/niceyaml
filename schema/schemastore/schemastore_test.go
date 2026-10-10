@@ -477,17 +477,15 @@ func TestSchemaStore_LazyLoading(t *testing.T) {
 		assert.Equal(t, int32(0), fetchCount.Load())
 
 		// First lookup fetches.
-		entry, err := store.FindMatch(t.Context(), "config.yaml")
-		require.NoError(t, err)
-		assert.NotEmpty(t, entry.Name)
+		requireEntry(t, store, "Test")
 
 		synctest.Wait()
 		assert.Equal(t, int32(1), fetchCount.Load())
 
 		// Second lookup uses cache.
-		entry, err = store.FindMatch(t.Context(), "other.yaml")
+		entry, err := store.FindMatch(t.Context(), "other.yaml")
 		require.NoError(t, err)
-		assert.NotEmpty(t, entry.Name)
+		assert.Equal(t, "Test", entry.Name)
 
 		synctest.Wait()
 		assert.Equal(t, int32(1), fetchCount.Load())
@@ -1475,12 +1473,12 @@ func TestIntegration(t *testing.T) {
 	t.Run("fetches each schema once", func(t *testing.T) {
 		t.Parallel()
 
-		catalogClient, catalogFetches := yamltest.CountingClient(respondCatalog(t, workflowCatalog))
+		store, catalogFetches := newCountingStore(respondCatalog(t, workflowCatalog))
 		schemaClient, schemaFetches := yamltest.CountingClient(yamltest.Respond(http.StatusOK, schemaData))
 
 		reg := schema.NewRegistry(
 			schema.WithHTTPClient(schemaClient),
-			schema.WithResolvers(newStore(catalogClient)),
+			schema.WithResolvers(store),
 		)
 
 		for _, name := range []string{"ci.yaml", "release.yaml", "lint.yaml"} {
