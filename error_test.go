@@ -505,8 +505,11 @@ func TestSourceError_Error_Document(t *testing.T) {
 	kindPath := paths.Current().Child("kind")
 	itemsPath := paths.Current().Child("items")
 
+	source := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml"))
+	docs := source.Documents()
+
 	tcs := map[string]struct {
-		bind func(t *testing.T, source *niceyaml.Source, docs []*niceyaml.Node) error
+		err  error
 		want string
 		// The message of the binding, which carries no document.
 		message string
@@ -514,41 +517,31 @@ func TestSourceError_Error_Document(t *testing.T) {
 		located bool
 	}{
 		"a plain error names its document": {
-			bind: func(_ *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
-				return docs[2].Bind(errors.New("plain"))
-			},
+			err:     docs[2].Bind(errors.New("plain")),
 			want:    "m.yaml: document 3: plain",
 			message: "plain",
 		},
 		"an Error without a location names its document": {
-			bind: func(_ *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
-				return docs[0].Bind(niceyaml.NewError("bad"))
-			},
+			err:     docs[0].Bind(niceyaml.NewError("bad")),
 			want:    "m.yaml: document 1: bad",
 			message: "bad",
 		},
 		"a path that does not resolve names its document": {
-			bind: func(_ *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
-				return docs[2].Bind(niceyaml.NewError("required", niceyaml.AtPath(itemsPath.Index(7))))
-			},
+			err:     docs[2].Bind(niceyaml.NewError("required", niceyaml.AtPath(itemsPath.Index(7)))),
 			want:    "m.yaml: document 3: $.items[7]: required",
 			message: "required",
 		},
 		"a position says which document, so no document goes beside it": {
-			bind: func(_ *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
-				return docs[2].Bind(niceyaml.NewError("bad", niceyaml.AtPath(kindPath)))
-			},
+			err:     docs[2].Bind(niceyaml.NewError("bad", niceyaml.AtPath(kindPath))),
 			want:    "m.yaml:5:7: $.kind: bad",
 			message: "bad",
 			located: true,
 		},
 		"each listed line without a position names its document": {
-			bind: func(_ *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
-				return docs[2].Bind(niceyaml.NewSummary("2 problems",
-					niceyaml.NewError("bad", niceyaml.AtPath(kindPath)),
-					errors.New("plain"),
-				))
-			},
+			err: docs[2].Bind(niceyaml.NewSummary("2 problems",
+				niceyaml.NewError("bad", niceyaml.AtPath(kindPath)),
+				errors.New("plain"),
+			)),
 			want: stringtest.JoinLF(
 				"m.yaml: document 3: 2 problems",
 				"m.yaml:5:7: $.kind: bad",
@@ -557,27 +550,21 @@ func TestSourceError_Error_Document(t *testing.T) {
 			message: "2 problems",
 		},
 		"a scoped Node names its document for an error that gains no location": {
-			bind: func(t *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
-				t.Helper()
-
-				return yamltest.At(t, docs[2], itemsPath).DecodeInto(t.Context(), nil)
-			},
+			err:     yamltest.At(t, docs[2], itemsPath).DecodeInto(t.Context(), nil),
 			want:    "m.yaml: document 3: decode target is not a non-nil pointer: got nil",
 			message: "decode target is not a non-nil pointer: got nil",
 		},
 		"an error of a Node's own operation names its document": {
-			bind: func(_ *testing.T, _ *niceyaml.Source, docs []*niceyaml.Node) error {
+			err: func() error {
 				_, err := docs[1].At(paths.Current().ChildAll())
 
 				return err //nolint:wrapcheck // The test inspects the error of the call.
-			},
+			}(),
 			want:    "m.yaml: document 2: resolve $.*: wildcard path matches any number of nodes",
 			message: "resolve $.*: wildcard path matches any number of nodes",
 		},
 		"the source binds an error with no location to no document": {
-			bind: func(_ *testing.T, source *niceyaml.Source, _ []*niceyaml.Node) error {
-				return source.Bind(errors.New("plain"))
-			},
+			err:     source.Bind(errors.New("plain")),
 			want:    "m.yaml: plain",
 			message: "plain",
 		},
@@ -587,14 +574,9 @@ func TestSourceError_Error_Document(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			source := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml"))
+			require.EqualError(t, tc.err, tc.want)
 
-			docs := source.Documents()
-
-			err := tc.bind(t, source, docs)
-			require.EqualError(t, err, tc.want)
-
-			bound := errorBinding(t, err)
+			bound := errorBinding(t, tc.err)
 			assert.Equal(t, tc.message, bound.Message())
 
 			_, ok := bound.Range()
@@ -642,8 +624,6 @@ func TestSourceError_Error_Document(t *testing.T) {
 	t.Run("a wrapper around a binding keeps the document the binding wrote", func(t *testing.T) {
 		t.Parallel()
 
-		docs := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml")).Documents()
-
 		wrapped := fmt.Errorf("check: %w", docs[1].Bind(errors.New("plain")))
 		require.EqualError(t, wrapped, "check: m.yaml: document 2: plain")
 
@@ -654,8 +634,6 @@ func TestSourceError_Error_Document(t *testing.T) {
 
 	t.Run("a join of one binding per document names each", func(t *testing.T) {
 		t.Parallel()
-
-		docs := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml")).Documents()
 
 		joined := errors.Join(
 			docs[0].Bind(errors.New("first")),
@@ -674,8 +652,6 @@ func TestSourceError_Error_Document(t *testing.T) {
 
 	t.Run("a row of the tree names a document its parent does not", func(t *testing.T) {
 		t.Parallel()
-
-		docs := niceyaml.NewSourceFromString(input, niceyaml.WithName("m.yaml")).Documents()
 
 		// The first nested error is bound to the second document, and the
 		// other binds with its parent to the first.
@@ -6646,19 +6622,16 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 	badPort := niceyaml.NewError("port must be at least 1", niceyaml.AtPath(port))
 	badName := niceyaml.NewError("name is taken", niceyaml.AtPath(paths.Doc().Child("name")))
 
+	flowSrc := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"))
+	blockSrc := niceyaml.NewSourceFromString(block, niceyaml.WithName("block.yaml"))
+
 	tcs := map[string]struct {
-		err  func(t *testing.T) error
+		err  error
 		opts []niceyaml.ExcerptOption
 		want []string
 	}{
 		"location at the end of a long line": {
-			err: func(t *testing.T) error {
-				t.Helper()
-
-				source := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"))
-
-				return yamltest.Bind(t, source, badPort)
-			},
+			err:  yamltest.Bind(t, flowSrc, badPort),
 			opts: []niceyaml.ExcerptOption{narrow},
 			want: []string{
 				"flow.yaml:1:68: $.port: port must be at least 1",
@@ -6668,13 +6641,7 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 			},
 		},
 		"two locations far apart on one line": {
-			err: func(t *testing.T) error {
-				t.Helper()
-
-				source := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"))
-
-				return yamltest.Bind(t, source, niceyaml.NewSummary("2 violations", badPort, badName))
-			},
+			err:  yamltest.Bind(t, flowSrc, niceyaml.NewSummary("2 violations", badPort, badName)),
 			opts: []niceyaml.ExcerptOption{narrow},
 			want: []string{
 				"flow.yaml: 2 violations",
@@ -6686,13 +6653,7 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 			},
 		},
 		"context lines keep their first columns": {
-			err: func(t *testing.T) error {
-				t.Helper()
-
-				source := niceyaml.NewSourceFromString(block, niceyaml.WithName("block.yaml"))
-
-				return yamltest.Bind(t, source, badPort)
-			},
+			err:  yamltest.Bind(t, blockSrc, badPort),
 			opts: []niceyaml.ExcerptOption{narrow},
 			want: []string{
 				"block.yaml:2:7: $.port: port must be at least 1",
@@ -6704,13 +6665,7 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 			},
 		},
 		"whole lines": {
-			err: func(t *testing.T) error {
-				t.Helper()
-
-				source := niceyaml.NewSourceFromString(block, niceyaml.WithName("block.yaml"))
-
-				return yamltest.Bind(t, source, badPort)
-			},
+			err:  yamltest.Bind(t, blockSrc, badPort),
 			opts: []niceyaml.ExcerptOption{niceyaml.WithExcerptWidth(0)},
 			want: []string{
 				"block.yaml:2:7: $.port: port must be at least 1",
@@ -6722,14 +6677,7 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 			},
 		},
 		"one width clips every source": {
-			err: func(t *testing.T) error {
-				t.Helper()
-
-				flowSrc := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"))
-				blockSrc := niceyaml.NewSourceFromString(block, niceyaml.WithName("block.yaml"))
-
-				return errors.Join(yamltest.Bind(t, flowSrc, badPort), yamltest.Bind(t, blockSrc, badPort))
-			},
+			err:  errors.Join(yamltest.Bind(t, flowSrc, badPort), yamltest.Bind(t, blockSrc, badPort)),
 			opts: []niceyaml.ExcerptOption{narrow},
 			want: []string{
 				"|-- flow.yaml:1:68: $.port: port must be at least 1",
@@ -6754,7 +6702,7 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 
 			opts := append([]niceyaml.ExcerptOption{niceyaml.WithContextLines(1)}, tc.opts...)
 
-			assert.Equal(t, stringtest.JoinLF(tc.want...), niceyaml.FormatError(tc.err(t), opts...))
+			assert.Equal(t, stringtest.JoinLF(tc.want...), niceyaml.FormatError(tc.err, opts...))
 		})
 	}
 
@@ -6763,14 +6711,12 @@ func TestFormatError_ExcerptWidth(t *testing.T) {
 
 		// The line is 69 columns, which is under the default width, so
 		// the verb shows it whole.
-		source := niceyaml.NewSourceFromString(flow, niceyaml.WithName("flow.yaml"))
-
 		assert.Equal(t, stringtest.JoinLF(
 			"flow.yaml:1:68: $.port: port must be at least 1",
 			"",
 			"   1 | "+flow,
 			"     | "+strings.Repeat(" ", 67)+"^",
-		), fmt.Sprintf("%+v", yamltest.Bind(t, source, badPort)))
+		), fmt.Sprintf("%+v", yamltest.Bind(t, flowSrc, badPort)))
 
 		// A line past the default width clips there.
 		long := strings.Repeat("0123456789", 20)
