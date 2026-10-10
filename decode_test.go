@@ -1,6 +1,7 @@
 package niceyaml_test
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11666,67 +11667,58 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 	tcs := map[string]struct {
 		err    error
 		target func() any
+		// The document, or none for manyAliases.
 		input  string
 		path   paths.Path
 		opts   []niceyaml.SourceOption
 		decode []niceyaml.DecodeOption
 	}{
 		"custom unmarshaler elements": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new([]aliasPlain) },
 			decode: []niceyaml.DecodeOption{plainText},
 			err:    niceyaml.ErrExcessiveAliasing,
 		},
 		"elements no custom unmarshaler decodes": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new([]aliasPlain) },
 		},
 		"custom unmarshaler of a type the target does not reach": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new([]string) },
 			decode: []niceyaml.DecodeOption{plainText},
 		},
 		"custom unmarshaler of a pointer type, which names no type": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new([]*aliasPlain) },
 			decode: []niceyaml.DecodeOption{pointerText},
 		},
 		"json unmarshaler elements under their option": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new([]aliasJSON) },
 			decode: []niceyaml.DecodeOption{niceyaml.WithJSONUnmarshalers(true)},
 			err:    niceyaml.ErrExcessiveAliasing,
 		},
 		"json unmarshaler elements without their option": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new([]aliasJSON) },
 		},
 		"text unmarshaler elements": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new([]aliasText) },
 			err:    niceyaml.ErrExcessiveAliasing,
 		},
 		"bytes unmarshaler": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new(rawText) },
 			err:    niceyaml.ErrExcessiveAliasing,
 		},
 		"pointer to a bytes unmarshaler": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new(*rawText) },
 			err:    niceyaml.ErrExcessiveAliasing,
 		},
 		"struct field text unmarshaler": {
-			input: manyAliases,
 			target: func() any {
 				return new(struct {
 					Kind aliasText `yaml:"kind"`
@@ -11735,7 +11727,6 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 			err: niceyaml.ErrExcessiveAliasing,
 		},
 		"struct field of a standard library text type": {
-			input: manyAliases,
 			target: func() any {
 				return new(struct {
 					Kind netip.Prefix `yaml:"kind"`
@@ -11744,24 +11735,20 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 			err: niceyaml.ErrExcessiveAliasing,
 		},
 		"map value bytes unmarshaler": {
-			input:  manyAliases,
 			target: func() any { return new(map[string]rawText) },
 			err:    niceyaml.ErrExcessiveAliasing,
 		},
 		"unmarshaler that decodes into text unmarshalers": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new(forwardText) },
 			err:    niceyaml.ErrExcessiveAliasing,
 		},
 		"unmarshaler with a context that decodes into text unmarshalers": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new(forwardTextContext) },
 			err:    niceyaml.ErrExcessiveAliasing,
 		},
 		"struct field unmarshaler that decodes into text unmarshalers": {
-			input: manyAliases,
 			target: func() any {
 				return new(struct {
 					Kind forwardText `yaml:"kind"`
@@ -11770,12 +11757,10 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 			err: niceyaml.ErrExcessiveAliasing,
 		},
 		"node unmarshaler": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new(nodeDecoded) },
 		},
 		"struct field node unmarshaler": {
-			input: manyAliases,
 			target: func() any {
 				return new(struct {
 					Kind nodeDecoded `yaml:"kind"`
@@ -11783,12 +11768,10 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 			},
 		},
 		"string elements": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new([]string) },
 		},
 		"struct with a time field": {
-			input: manyAliases,
 			target: func() any {
 				return new(struct {
 					At   time.Time `yaml:"at"`
@@ -11797,7 +11780,6 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 			},
 		},
 		"struct with text fields the decoder skips": {
-			input: manyAliases,
 			target: func() any {
 				return new(struct {
 					hidden netip.Prefix
@@ -11813,7 +11795,6 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 			target: func() any { return new([]aliasText) },
 		},
 		"text unmarshaler elements with the limit off": {
-			input:  manyAliases,
 			path:   kind,
 			target: func() any { return new([]aliasText) },
 			opts:   []niceyaml.SourceOption{niceyaml.WithAliasLimit(false)},
@@ -11824,7 +11805,7 @@ func TestDocument_Decode_ExcessiveTextAliasing(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.FirstDocument(t, tc.input, tc.opts...)
+			doc := yamltest.FirstDocument(t, cmp.Or(tc.input, manyAliases), tc.opts...)
 			if tc.path.Len() > 0 {
 				doc = yamltest.At(t, doc, tc.path)
 			}
