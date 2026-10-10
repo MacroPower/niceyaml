@@ -10707,6 +10707,8 @@ func TestMultiValidator(t *testing.T) {
 	unboundB := &fieldValidator{err: niceyaml.Invalid(errB, niceyaml.AtPath(paths.Current().Child("a", "b")))}
 	passing := passingValidator()
 	dd := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n")
+	// The same document under a file path.
+	doc := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
 
 	t.Run("runs every validator and reports every failure in order", func(t *testing.T) {
 		t.Parallel()
@@ -10799,8 +10801,6 @@ func TestMultiValidator(t *testing.T) {
 	t.Run("each line of the message carries its source and position", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
-
 		want := "x.yaml:2:6: $.a.b: bad b\nx.yaml:3:6: $.a.c: bad c"
 
 		tcs := map[string]struct {
@@ -10829,8 +10829,6 @@ func TestMultiValidator(t *testing.T) {
 	t.Run("a lone failure keeps its position", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
-
 		err := doc.Validate(t.Context(), niceyaml.MultiValidator(badB, passing))
 		require.ErrorIs(t, err, errB)
 		assert.Equal(t, "x.yaml:2:6: $.a.b: bad b", err.Error())
@@ -10854,8 +10852,6 @@ func TestMultiValidator(t *testing.T) {
 
 	t.Run("a sentinel around a binding stands in front of its position", func(t *testing.T) {
 		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, "a:\n  b: 1\n  c: 2\n", niceyaml.WithFilePath("x.yaml"))
 
 		errInvalid := errors.New("invalid")
 		classified := niceyaml.ValidatorFunc(func(ctx context.Context, n *niceyaml.Node) error {
@@ -10904,13 +10900,8 @@ func TestChainValidator(t *testing.T) {
 	first := rejectingValidator(niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath)))
 	second := rejectingValidator(niceyaml.Invalid(errSecond, niceyaml.AtPath(namePath)))
 	passing := passingValidator()
-	newDoc := func(t *testing.T) *niceyaml.Node {
-		t.Helper()
-
-		doc := yamltest.FirstDocument(t, "meta:\n  name: 5\nname: 7\n", niceyaml.WithName("x.yaml"))
-
-		return doc
-	}
+	doc := yamltest.FirstDocument(t, "meta:\n  name: 5\nname: 7\n", niceyaml.WithName("x.yaml"))
+	meta := yamltest.At(t, doc, paths.Current().Child("meta"))
 
 	t.Run("runs the validators in order and stops at the first that fails", func(t *testing.T) {
 		t.Parallel()
@@ -10924,7 +10915,7 @@ func TestChainValidator(t *testing.T) {
 			second,
 		)
 
-		err := newDoc(t).Validate(t.Context(), chain)
+		err := doc.Validate(t.Context(), chain)
 		require.EqualError(t, err, "x.yaml:3:7: $.name: first rule")
 		require.NotErrorIs(t, err, errSecond)
 		assert.Equal(t, []string{"before"}, order)
@@ -10932,8 +10923,6 @@ func TestChainValidator(t *testing.T) {
 
 	t.Run("reports the first of two failures where MultiValidator reports both", func(t *testing.T) {
 		t.Parallel()
-
-		doc := newDoc(t)
 
 		err := doc.Validate(t.Context(), niceyaml.ChainValidator(first, second))
 		require.EqualError(t, err, "x.yaml:3:7: $.name: first rule")
@@ -10951,7 +10940,7 @@ func TestChainValidator(t *testing.T) {
 		var order []string
 
 		// A typed nil pointer is no failure, so the chain goes on.
-		err := newDoc(t).Validate(t.Context(), niceyaml.ChainValidator(
+		err := doc.Validate(t.Context(), niceyaml.ChainValidator(
 			recordingValidator(&order, "before"),
 			typedNilValidator(),
 			niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
@@ -10969,8 +10958,6 @@ func TestChainValidator(t *testing.T) {
 	t.Run("no failure is no error", func(t *testing.T) {
 		t.Parallel()
 
-		doc := newDoc(t)
-
 		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator()))
 		require.NoError(t, niceyaml.ChainValidator().Check(t.Context(), doc))
 		require.NoError(t, doc.Validate(t.Context(), niceyaml.ChainValidator(passing, passing)))
@@ -10981,8 +10968,6 @@ func TestChainValidator(t *testing.T) {
 		t.Parallel()
 
 		var order []string
-
-		doc := newDoc(t)
 
 		err := doc.Validate(t.Context(), niceyaml.ChainValidator(
 			recordingValidator(&order, "before"),
@@ -11005,7 +10990,7 @@ func TestChainValidator(t *testing.T) {
 		chain := niceyaml.ChainValidator(vs...)
 		vs[0] = passing
 
-		require.ErrorIs(t, newDoc(t).Validate(t.Context(), chain), errFirst)
+		require.ErrorIs(t, doc.Validate(t.Context(), chain), errFirst)
 	})
 
 	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
@@ -11027,8 +11012,6 @@ func TestChainValidator(t *testing.T) {
 	t.Run("returns the failure as the validator wrote it", func(t *testing.T) {
 		t.Parallel()
 
-		doc := newDoc(t)
-		meta := yamltest.At(t, doc, paths.Current().Child("meta"))
 		located := niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath))
 
 		tcs := map[string]struct {
@@ -11093,9 +11076,6 @@ func TestChainValidator(t *testing.T) {
 
 	t.Run("returns a bound error as it is", func(t *testing.T) {
 		t.Parallel()
-
-		doc := newDoc(t)
-		meta := yamltest.At(t, doc, paths.Current().Child("meta"))
 
 		want := meta.Bind(niceyaml.Invalid(errFirst, niceyaml.AtPath(namePath)))
 
@@ -11162,9 +11142,9 @@ func TestChainValidator(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				node := newDoc(t)
+				node := doc
 				if tc.scoped {
-					node = yamltest.At(t, node, paths.Current().Child("meta"))
+					node = meta
 				}
 
 				chain := niceyaml.ChainValidator(tc.a, tc.b)
@@ -11214,8 +11194,6 @@ func TestChainValidator(t *testing.T) {
 
 	t.Run("takes its place inside MultiValidator and SkipEmpty", func(t *testing.T) {
 		t.Parallel()
-
-		doc := newDoc(t)
 
 		// Inside a MultiValidator, the chain reports its first failure
 		// beside the failures of the validators around it.
@@ -11268,7 +11246,7 @@ func TestChainValidator(t *testing.T) {
 			return ctx.Err()
 		})
 
-		err := newDoc(t).Validate(ctx, niceyaml.ChainValidator(canceling, recordingValidator(&order, "unreached")))
+		err := doc.Validate(ctx, niceyaml.ChainValidator(canceling, recordingValidator(&order, "unreached")))
 		require.ErrorIs(t, err, context.Canceled)
 		assert.Empty(t, order)
 	})
