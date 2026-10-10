@@ -1099,6 +1099,29 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 	// suppress every other constraint in the document. A !!timestamp the
 	// source wrote as a bare date becomes a full-date, the spelling the same
 	// date has without the tag, also behind an alias or a merge key.
+	//
+	// Several cases share a schema, which takes a date-time or a date for
+	// d, or a date for the d of the mapping under m.
+	const (
+		dateTime = `{
+			"type": "object",
+			"properties": {"d": {"type": "string", "format": "date-time"}}
+		}`
+		date = `{
+			"type": "object",
+			"properties": {"d": {"type": "string", "format": "date"}}
+		}`
+		dateInM = `{
+			"type": "object",
+			"properties": {
+				"m": {
+					"type": "object",
+					"properties": {"d": {"type": "string", "format": "date"}}
+				}
+			}
+		}`
+	)
+
 	tcs := map[string]struct {
 		schema string
 		input  string
@@ -1124,29 +1147,20 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 			`),
 		},
 		"date-only timestamp matches format date": {
-			schema: `{
-				"type": "object",
-				"properties": {"d": {"type": "string", "format": "date"}}
-			}`,
+			schema: date,
 			input: stringtest.Input(`
 				d: !!timestamp 2001-12-14
 			`),
 		},
 		"date-only timestamp is no date-time": {
-			schema: `{
-				"type": "object",
-				"properties": {"d": {"type": "string", "format": "date-time"}}
-			}`,
+			schema: dateTime,
 			input: stringtest.Input(`
 				d: !!timestamp 2001-12-14
 			`),
 			err: `1:16: $.d: string does not match format "date-time"`,
 		},
 		"midnight date-time timestamp keeps its time": {
-			schema: `{
-				"type": "object",
-				"properties": {"d": {"type": "string", "format": "date-time"}}
-			}`,
+			schema: dateTime,
 			input: stringtest.Input(`
 				d: !!timestamp 2001-12-14T00:00:00Z
 			`),
@@ -1166,20 +1180,14 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 			`),
 		},
 		"date-only block scalar timestamp matches format date": {
-			schema: `{
-				"type": "object",
-				"properties": {"d": {"type": "string", "format": "date"}}
-			}`,
+			schema: date,
 			input: stringtest.Input(`
 				d: !!timestamp >-
 				  2001-12-14
 			`),
 		},
 		"repeated key keeps the later midnight date-time": {
-			schema: `{
-				"type": "object",
-				"properties": {"d": {"type": "string", "format": "date-time"}}
-			}`,
+			schema: dateTime,
 			input: stringtest.Input(`
 				d: !!timestamp 2001-12-14
 				d: !!timestamp 2001-12-14T00:00:00Z
@@ -1187,10 +1195,7 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 			opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
 		},
 		"repeated key keeps the later date": {
-			schema: `{
-				"type": "object",
-				"properties": {"d": {"type": "string", "format": "date"}}
-			}`,
+			schema: date,
 			input: stringtest.Input(`
 				d: !!timestamp 2001-12-14T00:00:00Z
 				d: !!timestamp 2001-12-14
@@ -1210,10 +1215,7 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 		},
 		"alias key keeps the later midnight date-time": {
 			// The alias key names the member d, as its anchored value does.
-			schema: `{
-				"type": "object",
-				"properties": {"d": {"type": "string", "format": "date-time"}}
-			}`,
+			schema: dateTime,
 			input: stringtest.Input(`
 				a: &k d
 				d: !!timestamp 2001-12-14
@@ -1222,10 +1224,7 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 		},
 		"merge key keeps the merged midnight date-time": {
 			// The merge key sets d after the member written before it.
-			schema: `{
-				"type": "object",
-				"properties": {"d": {"type": "string", "format": "date-time"}}
-			}`,
+			schema: dateTime,
 			input: stringtest.Input(`
 				base: &base
 				  d: !!timestamp 2001-12-14T00:00:00Z
@@ -1247,30 +1246,14 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 			`),
 		},
 		"date-only timestamp in an aliased mapping matches format date": {
-			schema: `{
-				"type": "object",
-				"properties": {
-					"m": {
-						"type": "object",
-						"properties": {"d": {"type": "string", "format": "date"}}
-					}
-				}
-			}`,
+			schema: dateInM,
 			input: stringtest.Input(`
 				base: &b {d: !!timestamp 2001-12-14}
 				m: *b
 			`),
 		},
 		"merged date-only timestamp matches format date": {
-			schema: `{
-				"type": "object",
-				"properties": {
-					"m": {
-						"type": "object",
-						"properties": {"d": {"type": "string", "format": "date"}}
-					}
-				}
-			}`,
+			schema: dateInM,
 			input: stringtest.Input(`
 				base: &b {d: !!timestamp 2001-12-14}
 				m: {<<: *b}
@@ -1294,15 +1277,7 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 		},
 		"merge sequence keeps the later source's date": {
 			// A later merge source sets d over an earlier one.
-			schema: `{
-				"type": "object",
-				"properties": {
-					"m": {
-						"type": "object",
-						"properties": {"d": {"type": "string", "format": "date"}}
-					}
-				}
-			}`,
+			schema: dateInM,
 			input: stringtest.Input(`
 				b1: &b1
 				  d: !!timestamp 2001-12-14T00:00:00Z
@@ -1332,10 +1307,7 @@ func TestSchema_YAMLNativeTypes(t *testing.T) {
 		"date under a second tag keeps the date-time": {
 			// The !!int tag hands the !!timestamp tag a number rather than
 			// the text, so the decode yields the zero time.
-			schema: `{
-				"type": "object",
-				"properties": {"d": {"type": "string", "format": "date-time"}}
-			}`,
+			schema: dateTime,
 			input: stringtest.Input(`
 				d: !!timestamp !!int 2001-12-14
 			`),
@@ -3416,6 +3388,29 @@ func TestSchema_SourcePath(t *testing.T) {
 	// error binds at the node of the member where the walk reached it, and
 	// at the key of the mapping that holds the member where the walk did
 	// not. Such a case sets unresolved.
+	//
+	// Several cases share a schema, which takes strings for the members of
+	// the document, or integers for the members of the mapping under m or
+	// under user.
+	const (
+		stringMembers = `{
+			"type": "object",
+			"additionalProperties": {"type": "string"}
+		}`
+		integersInM = `{
+			"type": "object",
+			"properties": {
+				"m": {"additionalProperties": {"type": "integer"}}
+			}
+		}`
+		integersInUser = `{
+			"type": "object",
+			"properties": {
+				"user": {"additionalProperties": {"type": "integer"}}
+			}
+		}`
+	)
+
 	tcs := map[string]struct {
 		schema     string
 		input      string
@@ -3433,10 +3428,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			want:     "1:7: $.0x10: expected \"integer\", got \"string\"",
 		},
 		"tilde null key": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
+			schema:   stringMembers,
 			input:    "~: 5\n",
 			wantPath: "$.'~'",
 			want:     "1:4: $.'~': expected \"string\", got \"integer\"",
@@ -3462,12 +3454,7 @@ func TestSchema_SourcePath(t *testing.T) {
 		"merge key overrides an earlier respelled key": {
 			// The decoder applies the merge after 0x10: 1, so the member
 			// 16 holds x, and the path names the key the merge brings in.
-			schema: `{
-				"type": "object",
-				"properties": {
-					"user": {"additionalProperties": {"type": "integer"}}
-				}
-			}`,
+			schema:   integersInUser,
 			input:    "user:\n  0x10: 1\n  <<: {16: x}\n",
 			wantPath: "$.user.16",
 			want:     "3:12: $.user.16: expected \"integer\", got \"string\"",
@@ -3475,23 +3462,13 @@ func TestSchema_SourcePath(t *testing.T) {
 		"merge key overrides an earlier key of the same spelling": {
 			// A path through 0x10 selects the later entry, which the
 			// merge brings in.
-			schema: `{
-				"type": "object",
-				"properties": {
-					"user": {"additionalProperties": {"type": "integer"}}
-				}
-			}`,
+			schema:   integersInUser,
 			input:    "user:\n  0x10: 1\n  <<: {0x10: x}\n",
 			wantPath: "$.user.0x10",
 			want:     "3:14: $.user.0x10: expected \"integer\", got \"string\"",
 		},
 		"respelled key a merge key brings in": {
-			schema: `{
-				"type": "object",
-				"properties": {
-					"user": {"additionalProperties": {"type": "integer"}}
-				}
-			}`,
+			schema:   integersInUser,
 			input:    "user:\n  <<: {0x10: x}\n",
 			wantPath: "$.user.0x10",
 			want:     "2:14: $.user.0x10: expected \"integer\", got \"string\"",
@@ -3499,12 +3476,7 @@ func TestSchema_SourcePath(t *testing.T) {
 		"later key shadows a merged member": {
 			// The decoder sets 0x10: x after the merge, so the member 16
 			// holds x rather than the 5 the merge brings in.
-			schema: `{
-				"type": "object",
-				"properties": {
-					"m": {"additionalProperties": {"type": "integer"}}
-				}
-			}`,
+			schema:   integersInM,
 			input:    "b: &b {16: 5}\nm: {<<: *b, 0x10: x}\n",
 			wantPath: "$.m.0x10",
 			want:     "2:19: $.m.0x10: expected \"integer\", got \"string\"",
@@ -3514,12 +3486,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			// "0x10" of m names a separate member with the same spelling,
 			// and a path selector matches that key, so the path keeps the
 			// name 16 and the error binds at the x.
-			schema: `{
-				"type": "object",
-				"properties": {
-					"m": {"additionalProperties": {"type": "integer"}}
-				}
-			}`,
+			schema:     integersInM,
 			input:      "m: {<<: {0x10: x}, \"0x10\": 5}\n",
 			wantPath:   "$.m.16",
 			want:       "1:16: $.m.16: expected \"integer\", got \"string\"",
@@ -3528,12 +3495,7 @@ func TestSchema_SourcePath(t *testing.T) {
 		"tagged alias key replaces an earlier key": {
 			// The tag may change the name the alias key decodes to, so the
 			// key 0x10 before it cannot name the member 16.
-			schema: `{
-				"type": "object",
-				"properties": {
-					"m": {"additionalProperties": {"type": "integer"}}
-				}
-			}`,
+			schema:   integersInM,
 			input:    "a: &k 16\nm: {0x10: 5, ? !!str *k : x}\n",
 			wantPath: "$.m.16",
 			want:     "2:27: $.m.16: expected \"integer\", got \"string\"",
@@ -3541,12 +3503,7 @@ func TestSchema_SourcePath(t *testing.T) {
 		"merge source with a tagged alias key": {
 			// A key of the merge source may decode to any name, so the
 			// key 0x10 before the merge cannot name the member 16.
-			schema: `{
-				"type": "object",
-				"properties": {
-					"m": {"additionalProperties": {"type": "integer"}}
-				}
-			}`,
+			schema:   integersInM,
 			input:    "a: &k 16\nb: &b {? !!str *k : x}\nm: {0x10: 5, <<: *b}\n",
 			wantPath: "$.m.16",
 			want:     "2:21: $.m.16: expected \"integer\", got \"string\"",
@@ -3555,22 +3512,14 @@ func TestSchema_SourcePath(t *testing.T) {
 			// The alias key refers to a sequence, which the walk cannot
 			// name, so the key 0x10 before it cannot name the member 16.
 			// The walk finds no member there, so the error binds at m.
-			schema: `{
-				"type": "object",
-				"properties": {
-					"m": {"additionalProperties": {"type": "integer"}}
-				}
-			}`,
+			schema:     integersInM,
 			input:      "s: &s [a]\nm: {0x10: x, ? *s : 1}\n",
 			wantPath:   "$.m.16",
 			want:       "2:1: $.m.16: expected \"integer\", got \"string\"",
 			unresolved: true,
 		},
 		"spelled-out null key": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
+			schema:   stringMembers,
 			input:    "NULL: 5\n",
 			wantPath: "$.NULL",
 			want:     "1:7: $.NULL: expected \"string\", got \"integer\"",
@@ -3586,19 +3535,13 @@ func TestSchema_SourcePath(t *testing.T) {
 			want:     "1:1: $.True~: value is not allowed",
 		},
 		"bool-tagged key": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
+			schema:   stringMembers,
 			input:    "!!bool yes: 5\n",
 			wantPath: "$.yes",
 			want:     "1:13: $.yes: expected \"string\", got \"integer\"",
 		},
 		"null-tagged key": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
+			schema:   stringMembers,
 			input:    "!!null x: 5\n",
 			wantPath: "$.x",
 			want:     "1:11: $.x: expected \"string\", got \"integer\"",
@@ -3606,37 +3549,25 @@ func TestSchema_SourcePath(t *testing.T) {
 		"null-tagged empty key": {
 			// The key decodes to null, and the path spells it as the
 			// empty key the source writes.
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
+			schema:   stringMembers,
 			input:    "!!null \"\": 5\n",
 			wantPath: "$.''",
 			want:     "1:12: $.'': expected \"string\", got \"integer\"",
 		},
 		"int-tagged quoted key": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
+			schema:   stringMembers,
 			input:    "!!int \"0x10\": 5\n",
 			wantPath: "$.0x10",
 			want:     "1:15: $.0x10: expected \"string\", got \"integer\"",
 		},
 		"timestamp-tagged key": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
+			schema:   stringMembers,
 			input:    "? !!timestamp 2001-01-01\n: 5\n",
 			wantPath: "$.2001-01-01",
 			want:     "2:3: $.2001-01-01: expected \"string\", got \"integer\"",
 		},
 		"float key": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
+			schema:   stringMembers,
 			input:    "1.5: 5\n",
 			wantPath: "$.'1.5'",
 			want:     "1:6: $.'1.5': expected \"string\", got \"integer\"",
@@ -3644,28 +3575,19 @@ func TestSchema_SourcePath(t *testing.T) {
 		"two keys decoding to one name": {
 			// Both keys decode to 1, and the decoder keeps the later
 			// member, so the path names the later key.
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
+			schema:   stringMembers,
 			input:    "1.0: x\n1: 2\n",
 			wantPath: "$.1",
 			want:     "2:4: $.1: expected \"string\", got \"integer\"",
 		},
 		"key with a dot": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
+			schema:   stringMembers,
 			input:    "a.b: 5\n",
 			wantPath: "$.'a.b'",
 			want:     "1:6: $.'a.b': expected \"string\", got \"integer\"",
 		},
 		"key with a space": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
+			schema:   stringMembers,
 			input:    "a b: 5\n",
 			wantPath: "$.'a b'",
 			want:     "1:6: $.'a b': expected \"string\", got \"integer\"",
@@ -3702,10 +3624,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			want:     "3:11: $.items[1].0x10: expected \"integer\", got \"string\"",
 		},
 		"alias key": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
+			schema:   stringMembers,
 			input:    "a: &k name\n*k : 5\n",
 			wantPath: "$.name",
 			want:     "2:6: $.name: expected \"string\", got \"integer\"",
@@ -3744,10 +3663,7 @@ func TestSchema_SourcePath(t *testing.T) {
 			want:     "3:1: $.16: expected \"integer\", got \"array\"",
 		},
 		"block scalar key": {
-			schema: `{
-				"type": "object",
-				"additionalProperties": {"type": "string"}
-			}`,
+			schema:   stringMembers,
 			input:    "? |-\n  n\n: 5\n",
 			wantPath: "$.n",
 			want:     "3:3: $.n: expected \"string\", got \"integer\"",
