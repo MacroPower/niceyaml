@@ -685,8 +685,12 @@ func TestMarshal(t *testing.T) {
 			want:  "a: 1\n",
 		},
 		"marshaled YAML of two documents": {
-			input: rawYAML("a: 1\n---\nb: 2\n"),
-			want:  "a: 1\n",
+			input: rawYAML(stringtest.LinesLF(
+				"a: 1",
+				"---",
+				"b: 2",
+			)),
+			want: "a: 1\n",
 		},
 		"options": {
 			input: map[string]map[string][]string{"k": {"items": {"one"}}},
