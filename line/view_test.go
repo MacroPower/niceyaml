@@ -1774,30 +1774,79 @@ func TestView_Hunks(t *testing.T) {
 		assert.Len(t, got.Annotations(4), 1)
 	})
 
-	t.Run("touching windows share a hunk", func(t *testing.T) {
+	t.Run("holds the context around each annotated line", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, input, 8)
-		view.Annotate(1, line.Annotation{Content: "one", Placement: line.Below})
-		view.Annotate(5, line.Annotation{Content: "two", Placement: line.Below})
+		tcs := map[string]struct {
+			held           []position.Span // Spans the view holds, or none for every line.
+			annotated      []int           // Lines that get an annotation.
+			want           []string
+			wantSeparators []int
+			context        int
+		}{
+			"touching windows share a hunk": {
+				annotated: []int{1, 5},
+				context:   2,
+				want:      []string{"a: 1", "b: 2", "c: 3", "d: 4", "e: 5", "f: 6", "g: 7", "h: 8"},
+			},
+			"a negative context shows the decorated lines alone": {
+				annotated:      []int{1, 6},
+				context:        -1,
+				want:           []string{"b: 2", "g: 7"},
+				wantSeparators: []int{6},
+			},
+			"a slice yields hunks within the slice": {
+				held:           []position.Span{position.NewSpan(2, 8)},
+				annotated:      []int{2, 7},
+				context:        1,
+				want:           []string{"c: 3", "d: 4", "g: 7", "h: 8"},
+				wantSeparators: []int{6},
+			},
+			// The view skips line d, so the second hunk's window starts on
+			// a line the view does not hold.
+			"the separator goes above the first line the hunk holds": {
+				held:           []position.Span{position.NewSpan(0, 3), position.NewSpan(4, 8)},
+				annotated:      []int{0, 4},
+				context:        1,
+				want:           []string{"a: 1", "b: 2", "e: 5", "f: 6"},
+				wantSeparators: []int{4},
+			},
+			// The view skips lines c through f, so both contexts hold lines
+			// a, b, g, and h. A context of 1 keeps two hunks, and a context
+			// of 3 merges them into one across the gap. The same lines get
+			// the same separators at either context.
+			"two hunks beside a gap the view skips": {
+				held:           []position.Span{position.NewSpan(0, 2), position.NewSpan(6, 8)},
+				annotated:      []int{1, 6},
+				context:        1,
+				want:           []string{"a: 1", "b: 2", "g: 7", "h: 8"},
+				wantSeparators: []int{6},
+			},
+			"one hunk across a gap the view skips": {
+				held:           []position.Span{position.NewSpan(0, 2), position.NewSpan(6, 8)},
+				annotated:      []int{1, 6},
+				context:        3,
+				want:           []string{"a: 1", "b: 2", "g: 7", "h: 8"},
+				wantSeparators: []int{6},
+			},
+		}
 
-		got := view.Hunks(2)
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		assert.Equal(t, []string{"a: 1", "b: 2", "c: 3", "d: 4", "e: 5", "f: 6", "g: 7", "h: 8"}, contentsOf(got.All()))
-		assert.Empty(t, separators(got))
-	})
+				// A slice with no spans holds every line.
+				view := newTestView(t, input, 8).Slice(tc.held...)
+				for _, i := range tc.annotated {
+					view.Annotate(i, line.Annotation{Content: "note", Placement: line.Below})
+				}
 
-	t.Run("a negative context shows the decorated lines alone", func(t *testing.T) {
-		t.Parallel()
+				got := view.Hunks(tc.context)
 
-		view := newTestView(t, input, 8)
-		view.Annotate(1, line.Annotation{Content: "one", Placement: line.Below})
-		view.Annotate(6, line.Annotation{Content: "two", Placement: line.Below})
-
-		got := view.Hunks(-1)
-
-		assert.Equal(t, []string{"b: 2", "g: 7"}, contentsOf(got.All()))
-		assert.Equal(t, []int{6}, separators(got))
+				assert.Equal(t, tc.want, contentsOf(got.All()))
+				assert.Equal(t, tc.wantSeparators, separators(got))
+			})
+		}
 	})
 
 	t.Run("no decoration yields no line", func(t *testing.T) {
@@ -1824,34 +1873,6 @@ func TestView_Hunks(t *testing.T) {
 		assert.Empty(t, got.String())
 	})
 
-	t.Run("a slice yields hunks within the slice", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, input, 8).Slice(position.NewSpan(2, 8))
-		view.Annotate(2, line.Annotation{Content: "edge", Placement: line.Below})
-		view.Annotate(7, line.Annotation{Content: "end", Placement: line.Below})
-
-		got := view.Hunks(1)
-
-		assert.Equal(t, []string{"c: 3", "d: 4", "g: 7", "h: 8"}, contentsOf(got.All()))
-		assert.Equal(t, []int{6}, separators(got))
-	})
-
-	t.Run("the separator goes above the first line the hunk holds", func(t *testing.T) {
-		t.Parallel()
-
-		// The view skips line d, so the second hunk's window starts on a
-		// line the view does not hold.
-		view := newTestView(t, input, 8).Slice(position.NewSpan(0, 3), position.NewSpan(4, 8))
-		view.Annotate(0, line.Annotation{Content: "one", Placement: line.Below})
-		view.Annotate(4, line.Annotation{Content: "two", Placement: line.Below})
-
-		got := view.Hunks(1)
-
-		assert.Equal(t, []string{"a: 1", "b: 2", "e: 5", "f: 6"}, contentsOf(got.All()))
-		assert.Equal(t, []int{4}, separators(got))
-	})
-
 	t.Run("a gap the view skips inside a hunk gets a separator", func(t *testing.T) {
 		t.Parallel()
 
@@ -1874,24 +1895,6 @@ func TestView_Hunks(t *testing.T) {
 			"     | ^ two",
 			"   6 | f: 6",
 		), got.String())
-	})
-
-	t.Run("the same lines get the same separators at any context", func(t *testing.T) {
-		t.Parallel()
-
-		// The view skips lines c through f, so both contexts hold lines a,
-		// b, g, and h. A context of 1 keeps two hunks, and a context of 3
-		// merges them into one across the gap.
-		view := newTestView(t, input, 8).Slice(position.NewSpan(0, 2), position.NewSpan(6, 8))
-		view.Annotate(1, line.Annotation{Content: "one", Placement: line.Below})
-		view.Annotate(6, line.Annotation{Content: "two", Placement: line.Below})
-
-		for _, context := range []int{1, 3} {
-			got := view.Hunks(context)
-
-			assert.Equal(t, []string{"a: 1", "b: 2", "g: 7", "h: 8"}, contentsOf(got.All()), "context %d", context)
-			assert.Equal(t, []int{6}, separators(got), "context %d", context)
-		}
 	})
 
 	t.Run("hunks of hunks match hunks of the view", func(t *testing.T) {
