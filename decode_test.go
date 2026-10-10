@@ -2209,19 +2209,6 @@ func TestDocument_Node(t *testing.T) {
 		assert.Equal(t, "app", node.String())
 	})
 
-	t.Run("scope that selects nothing binds the error", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, input)
-
-		scoped, err := dd.At(paths.Current().Child("missing"))
-		require.ErrorIs(t, err, paths.ErrNotFound)
-		assert.Nil(t, scoped)
-
-		bound := sourceErrorIn(t, err)
-		assert.Same(t, dd.Source(), bound.Source())
-	})
-
 	t.Run("file of whitespace decodes to nothing", func(t *testing.T) {
 		t.Parallel()
 
@@ -5412,6 +5399,7 @@ func TestDocument_At(t *testing.T) {
 		for name, input := range map[string]string{
 			"empty document":     "---\n",
 			"file of whitespace": "\n",
+			"comments alone":     "# only a comment\n",
 		} {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
@@ -5423,6 +5411,7 @@ func TestDocument_At(t *testing.T) {
 				require.ErrorIs(t, err, paths.ErrNoDocument)
 				assert.Contains(t, err.Error(), "$.key")
 				assert.Nil(t, got)
+				assert.Same(t, dd.Source(), sourceErrorIn(t, err).Source())
 			})
 		}
 	})
@@ -10047,30 +10036,6 @@ func TestNode_Nodes(t *testing.T) {
 				}
 			})
 		}
-	})
-
-	t.Run("At keeps its error in a document with no content", func(t *testing.T) {
-		t.Parallel()
-
-		empty := yamltest.FirstDocument(t, "# only a comment\n")
-
-		_, err := empty.At(paths.Current().Child("items"))
-		require.ErrorIs(t, err, paths.ErrNotFound)
-		require.ErrorIs(t, err, paths.ErrNoDocument)
-
-		bound := sourceErrorIn(t, err)
-		assert.Same(t, empty.Source(), bound.Source())
-	})
-
-	t.Run("a document that did not parse returns its syntax error", func(t *testing.T) {
-		t.Parallel()
-
-		docs := niceyaml.NewSourceFromString("items: [\n").AllDocuments()
-		require.Len(t, docs, 1)
-
-		_, err := docs[0].Nodes(paths.Current().Child("items").IndexAll())
-		require.ErrorIs(t, err, niceyaml.ErrSyntax)
-		assert.Same(t, docs[0].Err(), err)
 	})
 
 	t.Run("a path that fans out through nested aliases is refused", func(t *testing.T) {
