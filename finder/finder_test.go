@@ -68,7 +68,11 @@ func TestFinder_Find(t *testing.T) {
 			want:   position.Ranges{yamltest.LineRange(0, 3, 5)},
 		},
 		"multiple matches": {
-			input:  "a: test\nb: test\nc: test",
+			input: stringtest.JoinLF(
+				"a: test",
+				"b: test",
+				"c: test",
+			),
 			search: "test",
 			want: position.Ranges{
 				yamltest.LineRange(0, 3, 7),
@@ -85,7 +89,11 @@ func TestFinder_Find(t *testing.T) {
 			search: "",
 		},
 		"multi-line value": {
-			input:  "text: |\n  line1\n  line2",
+			input: stringtest.JoinLF(
+				"text: |",
+				"  line1",
+				"  line2",
+			),
 			search: "line2",
 			want:   position.Ranges{yamltest.LineRange(2, 2, 7)},
 		},
@@ -496,7 +504,13 @@ func TestFinder_Find_View(t *testing.T) {
 
 	// The first document holds lines 0 and 1 of the file, and the second
 	// holds lines 2 through 4.
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n---\nname: x\nport: 80\n")
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a: 1",
+		"b: 2",
+		"---",
+		"name: x",
+		"port: 80",
+	))
 
 	docs := source.Documents()
 	require.Len(t, docs, 2)
@@ -505,19 +519,45 @@ func TestFinder_Find_View(t *testing.T) {
 	gapped := source.View().Slice(position.NewSpan(0, 1), position.NewSpan(3, 5))
 
 	// The view skips line 1, so "a\na" matches on lines 2 and 3 alone.
-	repeated := niceyaml.NewSourceFromString("a\nz\na\na\n").View().
+	repeated := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"a",
+		"z",
+		"a",
+		"a",
+	)).View().
 		Slice(position.NewSpan(0, 1), position.NewSpan(2, 4))
 
 	// The unified diff holds nine rows, and its hunks hold rows 0 and 1,
 	// where k1 changed, and rows 7 and 8, where k7 changed.
 	hunks := diff.Diff(
-		niceyaml.NewSourceFromString("k1: a\nk2: b\nk3: c\nk4: d\nk5: e\nk6: f\nk7: g\n").Lines(),
-		niceyaml.NewSourceFromString("k1: A\nk2: b\nk3: c\nk4: d\nk5: e\nk6: f\nk7: G\n").Lines(),
+		niceyaml.NewSourceFromString(stringtest.LinesLF(
+			"k1: a",
+			"k2: b",
+			"k3: c",
+			"k4: d",
+			"k5: e",
+			"k6: f",
+			"k7: g",
+		)).Lines(),
+		niceyaml.NewSourceFromString(stringtest.LinesLF(
+			"k1: A",
+			"k2: b",
+			"k3: c",
+			"k4: d",
+			"k5: e",
+			"k6: f",
+			"k7: G",
+		)).Lines(),
 	).Hunks(0)
 	require.Equal(t, 4, hunks.Count())
 
 	// The host shares line 2 of the file with the port beside it.
-	flow := niceyaml.NewSourceFromString("top: 1\n---\nserver: {host: h, port: 80}\nport: 1\n").Documents()
+	flow := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"top: 1",
+		"---",
+		"server: {host: h, port: 80}",
+		"port: 1",
+	)).Documents()
 	require.Len(t, flow, 2)
 
 	host := yamltest.At(t, flow[1], paths.Doc().Child("server", "host"))
@@ -668,7 +708,12 @@ func TestFinder_Find_LineWithoutEnding(t *testing.T) {
 	)
 	placeholders := diff.Diff(
 		niceyaml.NewSourceFromString("a: 1\nb: 2\n").Lines(),
-		niceyaml.NewSourceFromString("a: 1\nn: 1\nm: 1\nb: 2\n").Lines(),
+		niceyaml.NewSourceFromString(stringtest.LinesLF(
+			"a: 1",
+			"n: 1",
+			"m: 1",
+			"b: 2",
+		)).Lines(),
 	)
 
 	tcs := map[string]struct {
@@ -760,7 +805,11 @@ func TestIndex_Find_Concurrent(t *testing.T) {
 
 	// The default normalizer is safe for concurrent use, so goroutines that
 	// share one Index get the ranges a single goroutine gets.
-	source := niceyaml.NewSourceFromString("name: Café\nstreet: Straße\nnote: café au lait\n")
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF(
+		"name: Café",
+		"street: Straße",
+		"note: café au lait",
+	))
 	idx := finder.New().Load(source.Lines())
 
 	searches := []string{"cafe", "STRASSE", "note", "au"}
