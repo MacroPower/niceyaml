@@ -1789,15 +1789,25 @@ func TestPath_YAMLPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			yp := yamlPath(t, tc.path)
-			assert.Equal(t, tc.wantString, yp.String())
-
-			node, err := yp.FilterNode(doc.Body)
-			require.NoError(t, err)
-			require.NotNil(t, node, "node not found")
-			assert.Equal(t, tc.want, node.GetToken().Value)
+			assert.Equal(t, tc.wantString, yamlPath(t, tc.path).String())
+			assert.Equal(t, tc.want, goccyValue(t, tc.path, doc))
 		})
 	}
+}
+
+// goccyValue returns the text of the node that the goccy/go-yaml form of
+// path selects in doc, or "" when it selects none.
+func goccyValue(t *testing.T, path paths.Path, doc *ast.DocumentNode) string {
+	t.Helper()
+
+	node, err := yamlPath(t, path).FilterNode(doc.Body)
+	require.NoError(t, err)
+
+	if node == nil {
+		return ""
+	}
+
+	return node.GetToken().Value
 }
 
 func TestPath_YAMLPath_Replace(t *testing.T) {
@@ -1863,10 +1873,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 
 		doc := yamltest.FirstDocument(t, "x: plain\n\"'x'\": quoted\n").DocumentAST()
 
-		node, err := yamlPath(t, paths.Doc().Child("'x'")).FilterNode(doc.Body)
-		require.NoError(t, err)
-		require.NotNil(t, node, "node not found")
-		assert.Equal(t, "plain", node.GetToken().Value)
+		assert.Equal(t, "plain", goccyValue(t, paths.Doc().Child("'x'"), doc))
 	})
 
 	t.Run("goccy drops a key selector mid-path", func(t *testing.T) {
@@ -1875,12 +1882,9 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		doc := yamltest.FirstDocument(t, "a:\n  b: 1\n").DocumentAST()
 		path := paths.Doc().Child("a").Key().Child("b")
 
-		node, err := yamlPath(t, path).FilterNode(doc.Body)
-		require.NoError(t, err)
-		require.NotNil(t, node, "node not found")
-		assert.Equal(t, "1", node.GetToken().Value)
+		assert.Equal(t, "1", goccyValue(t, path, doc))
 
-		_, err = paths.NewResolver(doc).Node(path)
+		_, err := paths.NewResolver(doc).Node(path)
 		require.ErrorIs(t, err, paths.ErrNotFound)
 	})
 
@@ -1927,20 +1931,13 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 				node, err := paths.NewResolver(doc).Node(byName)
 				require.NoError(t, err)
 				assert.Equal(t, "v", node.GetToken().Value)
-
-				node, err = yamlPath(t, byName).FilterNode(doc.Body)
-				require.NoError(t, err)
-				assert.Nil(t, node)
+				assert.Empty(t, goccyValue(t, byName, doc))
 
 				byIndicator := paths.Doc().Child("m", tc.indicator)
 
 				_, err = paths.NewResolver(doc).Node(byIndicator)
 				require.ErrorIs(t, err, paths.ErrNotFound)
-
-				node, err = yamlPath(t, byIndicator).FilterNode(doc.Body)
-				require.NoError(t, err)
-				require.NotNil(t, node, "node not found")
-				assert.Equal(t, "v", node.GetToken().Value)
+				assert.Equal(t, "v", goccyValue(t, byIndicator, doc))
 			})
 		}
 	})
@@ -1954,10 +1951,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		node, err := paths.NewResolver(doc).Node(path)
 		require.NoError(t, err)
 		assert.Equal(t, "v", node.GetToken().Value)
-
-		node, err = yamlPath(t, path).FilterNode(doc.Body)
-		require.NoError(t, err)
-		assert.Nil(t, node)
+		assert.Empty(t, goccyValue(t, path, doc))
 	})
 
 	t.Run("goccy selects the first duplicate and replaces all", func(t *testing.T) {
@@ -1973,11 +1967,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		node, err := paths.NewResolver(file.Docs[0]).Node(path)
 		require.NoError(t, err)
 		assert.Equal(t, "last", node.GetToken().Value)
-
-		node, err = yamlPath(t, path).FilterNode(file.Docs[0].Body)
-		require.NoError(t, err)
-		require.NotNil(t, node, "node not found")
-		assert.Equal(t, "first", node.GetToken().Value)
+		assert.Equal(t, "first", goccyValue(t, path, file.Docs[0]))
 
 		replacement := yamltest.FirstDocument(t, "new\n").DocumentAST().Body
 
