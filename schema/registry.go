@@ -626,6 +626,14 @@ func (e reasonError) Unwrap() error {
 // [niceyaml.Node.Err] returns, even with [WithRequireSchema] set false, so
 // a loop that validates every document of a file reports each syntax
 // error beside the violations of the documents that parsed.
+//
+// Check binds every error it returns. It binds the error of the lookup
+// through the root of the document, as [Registry.Lookup] does, since
+// that error is about the schema and not a value of the document. It
+// runs the schema through [niceyaml.Node.Validate], which binds each
+// violation. A direct call thus returns the error Node.Validate returns
+// for the registry, where [Schema.Check] returns its violations as it
+// wrote them.
 func (r *Registry) Check(ctx context.Context, n *niceyaml.Node) error {
 	err := n.Err()
 	if err != nil {
