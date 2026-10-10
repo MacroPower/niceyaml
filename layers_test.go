@@ -1244,8 +1244,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 	t.Run("a caller reads one value of the layers", func(t *testing.T) {
 		t.Parallel()
 
-		doc, err := yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...).Document()
-		require.NoError(t, err)
+		doc := mergedDocument(t, yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...))
 
 		got, err := doc.DecodeAt[string](t.Context(), host)
 		require.NoError(t, err)
@@ -1277,12 +1276,11 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 
 		nodes := layerNodes(t, "server:\n  timeout: soon\n", "server:\n  port: 70000\nname: [prod]\n")
 
-		doc, err := yamltest.Layers(t, layersOf(nodes)...).Document()
-		require.NoError(t, err)
+		doc := mergedDocument(t, yamltest.Layers(t, layersOf(nodes)...))
 
 		// The decoder rejects the timeout first, with no token of the
 		// document, and the port lies in the other file.
-		_, err = doc.DecodeAt[problemTimed](t.Context(), server)
+		_, err := doc.DecodeAt[problemTimed](t.Context(), server)
 		require.EqualError(t, err, stringtest.JoinLF(
 			"base.yaml: 2 problems",
 			`base.yaml:2:12: $.server.timeout: time: invalid duration "soon"`,
@@ -1303,10 +1301,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 			`base.yaml:2:43: $.server.timeout: time: invalid duration "soon"`,
 		))
 
-		doc, err = yamltest.Layers(t, file).Document()
-		require.NoError(t, err)
-
-		_, got := doc.DecodeAt[problemTimed](t.Context(), server)
+		_, got := mergedDocument(t, yamltest.Layers(t, file)).DecodeAt[problemTimed](t.Context(), server)
 		require.EqualError(t, got, want.Error())
 		assert.Equal(
 			t,
@@ -1318,9 +1313,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 	t.Run("an error binds in the file of a layer", func(t *testing.T) {
 		t.Parallel()
 
-		doc, err := yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...).Document()
-		require.NoError(t, err)
-
+		doc := mergedDocument(t, yamltest.Layers(t, layersOf(layerSources(t, baseInput, prodInput))...))
 		server := yamltest.At(t, doc, paths.Doc().Child("server"))
 
 		_, wrongType := doc.DecodeAt[int](t.Context(), host)
@@ -1366,8 +1359,7 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 
 		nodes := layerNodes(t, baseInput, prodInput)
 
-		doc, err := yamltest.Layers(t, layersOf(nodes)...).Document()
-		require.NoError(t, err)
+		doc := mergedDocument(t, yamltest.Layers(t, layersOf(nodes)...))
 
 		merged, err := doc.Ranges(port)
 		require.NoError(t, err)
@@ -1564,8 +1556,7 @@ func TestNode_Origin(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc, err := yamltest.Layers(t, layersOf(layerSources(t, tc.inputs...))...).Document()
-			require.NoError(t, err)
+			doc := mergedDocument(t, yamltest.Layers(t, layersOf(layerSources(t, tc.inputs...))...))
 
 			node := doc
 			if !tc.path.IsRoot() {
@@ -1619,8 +1610,7 @@ func TestNode_Origin(t *testing.T) {
 	t.Run("layers that hold no layer return the Node itself", func(t *testing.T) {
 		t.Parallel()
 
-		doc, err := yamltest.Layers(t).Document()
-		require.NoError(t, err)
+		doc := mergedDocument(t, yamltest.Layers(t))
 
 		origin, err := doc.Origin()
 		require.NoError(t, err)
@@ -1712,8 +1702,7 @@ func TestNode_Origin(t *testing.T) {
 		defaults := yamltest.At(t, envs, paths.Doc().Child("defaults"))
 		prod := yamltest.At(t, envs, paths.Doc().Child("prod"))
 
-		doc, err := yamltest.Layers(t, defaults, prod).Document()
-		require.NoError(t, err)
+		doc := mergedDocument(t, yamltest.Layers(t, defaults, prod))
 
 		origin, err := yamltest.At(t, doc, port).Origin()
 		require.NoError(t, err)
@@ -1737,8 +1726,7 @@ func TestNode_Origin(t *testing.T) {
 
 		sources := layerSources(t, baseInput, "server:\n  host: mid.example.com\n", "server:\n  port: 8443\n")
 
-		inner, err := yamltest.Layers(t, sources[0], sources[1]).Document()
-		require.NoError(t, err)
+		inner := mergedDocument(t, yamltest.Layers(t, sources[0], sources[1]))
 
 		below := []niceyaml.Layer{inner, sources[2]}
 		above := []niceyaml.Layer{sources[2], inner}
@@ -1851,10 +1839,7 @@ func TestNode_Origin(t *testing.T) {
 			"server:\n  <<: *shared\n", niceyaml.WithName("prod.yaml"), niceyaml.WithReferences(shared),
 		)
 
-		doc, err := yamltest.Layers(t, base, prod).Document()
-		require.NoError(t, err)
-
-		origin, err := yamltest.At(t, doc, server).Origin()
+		origin, err := yamltest.At(t, mergedDocument(t, yamltest.Layers(t, base, prod)), server).Origin()
 		require.NoError(t, err)
 		assert.Same(t, prod, origin.Source())
 		assert.Equal(t, "  <<: *shared", origin.View().Held().Content())
@@ -2011,9 +1996,7 @@ func TestNewSourceFromLayers_Bind(t *testing.T) {
 		merged := yamltest.Layers(t, layersOf(long)...)
 		require.Equal(t, 3, merged.Lines().Len())
 
-		doc, err := merged.Document()
-		require.NoError(t, err)
-
+		doc := mergedDocument(t, merged)
 		inBase := position.New(4, 2)
 
 		tcs := map[string]struct {
@@ -2179,10 +2162,8 @@ func TestNewSourceFromLayers_ExcerptsOff(t *testing.T) {
 			fail: func(t *testing.T) error {
 				t.Helper()
 
-				doc, err := layers.Document()
-				require.NoError(t, err)
-
-				return doc.Bind(niceyaml.NewError("too short", niceyaml.AtPosition(position.New(3, 12))))
+				return mergedDocument(t, layers).
+					Bind(niceyaml.NewError("too short", niceyaml.AtPosition(position.New(3, 12))))
 			},
 			want: "environment:2:13: too short",
 		},
