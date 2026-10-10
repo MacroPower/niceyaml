@@ -523,64 +523,35 @@ func TestView_Clone(t *testing.T) {
 		}
 	})
 
-	t.Run("preserves annotations", func(t *testing.T) {
+	t.Run("carries decoration of its own", func(t *testing.T) {
 		t.Parallel()
 
-		view := newTestView(t, "key: value\n", 1)
-		view.Annotate(0, line.Annotation{Content: "original note", Placement: line.Below})
-
-		clone := view.Clone()
-
-		// The clone holds the annotations of the original.
-		require.Len(t, clone.Annotations(0), 1)
-		require.Len(t, view.Annotations(0), len(clone.Annotations(0)))
-		assert.Equal(t, view.Annotations(0)[0].Content, clone.Annotations(0)[0].Content)
-		assert.Len(t, clone.Annotations(0).Filter(line.Below), 1)
-
-		// Annotate the clone.
-		clone.Annotate(0, line.Annotation{Content: "modified", Placement: line.Above})
-
-		// The original keeps its own decoration.
-		require.Len(t, view.Annotations(0), 1)
-		assert.Equal(t, "original note", view.Annotations(0)[0].Content)
-		assert.Len(t, view.Annotations(0).Filter(line.Below), 1)
-	})
-
-	t.Run("preserves overlays", func(t *testing.T) {
-		t.Parallel()
-
-		view := newTestView(t, "key: value\n", 1)
-		view.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(0, 5), Kind: "test1"})
-
-		clone := view.Clone()
-
-		// The clone holds the overlays of the original.
-		require.Len(t, clone.Overlays(0), 1)
-		assert.Equal(t, view.Overlays(0)[0].Cols, clone.Overlays(0)[0].Cols)
-		assert.Equal(t, view.Overlays(0)[0].Kind, clone.Overlays(0)[0].Kind)
-
-		// Add an overlay to the clone.
-		clone.AddLineOverlay(0, line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"})
-
-		// The original keeps its own decoration.
-		require.Len(t, view.Overlays(0), 1)
-	})
-
-	t.Run("preserves flags", func(t *testing.T) {
-		t.Parallel()
+		overlay := line.Overlay{Cols: position.NewSpan(0, 5), Kind: "test1"}
+		note := line.Annotation{Content: "original note", Placement: line.Below}
 
 		view := newTestView(t, input, 3)
 		view.SetFlag(1, line.FlagDeleted)
+		view.AddLineOverlay(1, overlay)
+		view.Annotate(1, note)
 
 		clone := view.Clone()
 
-		assert.Equal(t, line.FlagDeleted, clone.Flag(1))
+		assert.Equal(t, flagsOf(view), flagsOf(clone))
+		assert.Equal(t, line.Overlays{overlay}, clone.Overlays(1))
+		assert.Equal(t, line.Annotations{note}, clone.Annotations(1))
 
+		// Decoration added to the clone, on a line that has some and on a
+		// line that has none, leaves the original as it was.
 		clone.SetFlag(1, line.FlagInserted)
 		clone.SetFlag(2, line.FlagInserted)
+		clone.AddLineOverlay(1, line.Overlay{Cols: position.NewSpan(5, 10), Kind: "test2"})
+		clone.Annotate(1, line.Annotation{Content: "modified", Placement: line.Above})
 
-		assert.Equal(t, line.FlagDeleted, view.Flag(1))
-		assert.Equal(t, line.FlagDefault, view.Flag(2))
+		assert.Equal(t, []line.Flag{line.FlagDefault, line.FlagDeleted, line.FlagDefault}, flagsOf(view))
+		assert.Equal(t, line.Overlays{overlay}, view.Overlays(1))
+		assert.Equal(t, line.Annotations{note}, view.Annotations(1))
+		assert.Len(t, clone.Overlays(1), 2)
+		assert.Len(t, clone.Annotations(1), 2)
 	})
 
 	t.Run("decoration is independent in both directions", func(t *testing.T) {
