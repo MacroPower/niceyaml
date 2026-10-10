@@ -363,12 +363,65 @@ func TestSource_All_WithSpans(t *testing.T) {
 func TestSource_Lines(t *testing.T) {
 	t.Parallel()
 
-	src := niceyaml.NewSourceFromString("key: value\nfoo: bar")
-	lines := src.Lines()
+	tcs := map[string]struct {
+		input string
+		// The content of each line.
+		want []string
+	}{
+		"single line": {
+			input: "key: value\n",
+			want:  []string{"key: value"},
+		},
+		"no final line ending": {
+			input: "key: value\nfoo: bar",
+			want:  []string{"key: value", "foo: bar"},
+		},
+		"multiple lines": {
+			input: "a: 1\nb: 2\nc: 3\n",
+			want:  []string{"a: 1", "b: 2", "c: 3"},
+		},
+		"empty": {
+			input: "",
+		},
+		"nested yaml": {
+			input: "parent:\n  child: value\n",
+			want:  []string{"parent:", "  child: value"},
+		},
+		"literal block": {
+			input: "key: |\n  line1\n  line2\n",
+			want:  []string{"key: |", "  line1", "  line2"},
+		},
+		"blank line before an explicit key": {
+			input: "tags: [a, b]\n\n? key\n: value\n",
+			want:  []string{"tags: [a, b]", "", "? key", ": value"},
+		},
+		"explicit key after a leading blank line": {
+			input: "\n? key\n: value\n",
+			want:  []string{"", "? key", ": value"},
+		},
+		"text after a block scalar header at the end": {
+			input: "key: |abc",
+			want:  []string{"key: |abc"},
+		},
+	}
 
-	require.Equal(t, 2, lines.Len())
-	assert.Equal(t, "key: value", lines.Line(0).Content())
-	assert.Equal(t, "foo: bar", lines.Line(1).Content())
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := niceyaml.NewSourceFromString(tc.input).Lines()
+
+			require.Equal(t, len(tc.want), lines.Len())
+			assert.Equal(t, len(tc.want) == 0, lines.IsEmpty())
+
+			for i, want := range tc.want {
+				assert.Equal(t, want, lines.Line(i).Content(), "line %d", i)
+			}
+
+			assert.Equal(t, stringtest.JoinLF(tc.want...), lines.Content())
+			require.NoError(t, yamltest.ValidateLines(lines))
+		})
+	}
 }
 
 func TestSource_Tokens(t *testing.T) {
@@ -1655,107 +1708,6 @@ func TestNewSourceFromTokens_Text(t *testing.T) {
 
 	_, ok := source.Offset(position.New(0, 0))
 	assert.False(t, ok)
-}
-
-func TestSource_Content(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-		want  string
-	}{
-		"single line": {
-			input: "key: value\n",
-			want:  "key: value",
-		},
-		"multiple lines": {
-			input: "a: 1\nb: 2\nc: 3\n",
-			want: stringtest.JoinLF(
-				"a: 1",
-				"b: 2",
-				"c: 3",
-			),
-		},
-		"empty": {
-			input: "",
-			want:  "",
-		},
-		"nested yaml": {
-			input: "parent:\n  child: value\n",
-			want: stringtest.JoinLF(
-				"parent:",
-				"  child: value",
-			),
-		},
-		"blank line before an explicit key": {
-			input: "tags: [a, b]\n\n? key\n: value\n",
-			want: stringtest.JoinLF(
-				"tags: [a, b]",
-				"",
-				"? key",
-				": value",
-			),
-		},
-		"explicit key after a leading blank line": {
-			input: "\n? key\n: value\n",
-			want: stringtest.JoinLF(
-				"",
-				"? key",
-				": value",
-			),
-		},
-		"text after a block scalar header at the end": {
-			input: "key: |abc",
-			want:  "key: |abc",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			source := niceyaml.NewSourceFromString(tc.input)
-			got := source.Lines().Content()
-
-			assert.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestSource_Validate(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-	}{
-		"valid source": {
-			input: "key: value\n",
-		},
-		"empty source": {
-			input: "",
-		},
-		"multi-line source": {
-			input: "a: 1\nb: 2\nc: 3\n",
-		},
-		"literal block source": {
-			input: stringtest.Input(`
-				key: |
-				  line1
-				  line2
-			`),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			source := niceyaml.NewSourceFromString(tc.input)
-			err := yamltest.ValidateLines(source.Lines())
-
-			assert.NoError(t, err)
-		})
-	}
 }
 
 func TestSource_Parse(t *testing.T) {
@@ -3735,47 +3687,6 @@ func TestSource_NilReceiver(t *testing.T) {
 			require.Nil(t, source)
 
 			assert.Equal(t, tc.want, tc.read(source))
-		})
-	}
-}
-
-func TestSource_Len(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		input string
-		want  int
-	}{
-		"single line": {
-			input: "key: value\n",
-			want:  1,
-		},
-		"multiple lines": {
-			input: "a: 1\nb: 2\nc: 3\n",
-			want:  3,
-		},
-		"empty": {
-			input: "",
-			want:  0,
-		},
-		"literal block": {
-			input: stringtest.Input(`
-				key: |
-				  line1
-				  line2
-			`),
-			want: 3,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := niceyaml.NewSourceFromString(tc.input).Lines()
-
-			assert.Equal(t, tc.want, lines.Len())
-			assert.Equal(t, tc.want == 0, lines.IsEmpty())
 		})
 	}
 }
