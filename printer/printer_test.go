@@ -137,21 +137,6 @@ func testFinder(norm finder.Normalizer) *finder.Finder {
 	return finder.New(opts...)
 }
 
-func TestPrinter_Anchor(t *testing.T) {
-	t.Parallel()
-
-	input := stringtest.Input(`
-		anchor: &x 1
-		alias: *x
-	`)
-	tks := lexer.Tokenize(input)
-
-	p := testPrinter()
-
-	got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
-	assert.Equal(t, input, got)
-}
-
 func TestPrinter_AddStyleToRange(t *testing.T) {
 	t.Parallel()
 
@@ -1305,19 +1290,6 @@ func TestPrinter_CRLF(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestPrinter_PrintTokens_EmptyFile(t *testing.T) {
-	t.Parallel()
-
-	// Tokenize an empty string to simulate an empty YAML file.
-	tks := lexer.Tokenize("")
-
-	p := testPrinter()
-	got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
-
-	// The printer renders an empty file as empty output.
-	assert.Empty(t, got)
 }
 
 func TestNewPrinter(t *testing.T) {
@@ -3702,20 +3674,24 @@ func TestPrinter_TokenTypes_XMLStyler(t *testing.T) {
 	}
 }
 
-func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
+func TestPrinter_Print_Tokens(t *testing.T) {
 	t.Parallel()
 
+	// A printer without styles prints the text of the tokens it gets.
 	tcs := map[string]struct {
 		input string
-		want  string
 	}{
+		"empty file": {
+			input: "",
+		},
+		"anchor and alias": {
+			input: stringtest.JoinLF(
+				"anchor: &x 1",
+				"alias: *x",
+			),
+		},
 		"two documents": {
 			input: stringtest.JoinLF(
-				"doc1: value1",
-				"---",
-				"doc2: value2",
-			),
-			want: stringtest.JoinLF(
 				"doc1: value1",
 				"---",
 				"doc2: value2",
@@ -3729,30 +3705,15 @@ func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 				"---",
 				"third: 3",
 			),
-			want: stringtest.JoinLF(
-				"first: 1",
-				"---",
-				"second: 2",
-				"---",
-				"third: 3",
-			),
 		},
 		"documents with header": {
 			input: stringtest.JoinLF(
 				"---",
 				"key: value",
 			),
-			want: stringtest.JoinLF(
-				"---",
-				"key: value",
-			),
 		},
 		"documents with footer": {
 			input: stringtest.JoinLF(
-				"key: value",
-				"...",
-			),
-			want: stringtest.JoinLF(
 				"key: value",
 				"...",
 			),
@@ -3763,22 +3724,9 @@ func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 				"key: value",
 				"...",
 			),
-			want: stringtest.JoinLF(
-				"---",
-				"key: value",
-				"...",
-			),
 		},
 		"multiple docs with headers and footers": {
 			input: stringtest.JoinLF(
-				"---",
-				"doc1: value1",
-				"...",
-				"---",
-				"doc2: value2",
-				"...",
-			),
-			want: stringtest.JoinLF(
 				"---",
 				"doc1: value1",
 				"...",
@@ -3797,7 +3745,7 @@ func TestPrinter_PrintFile_MultiDocument(t *testing.T) {
 			p := testPrinter()
 
 			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.input, got)
 		})
 	}
 }
