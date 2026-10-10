@@ -1,6 +1,7 @@
 package paths_test
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 	"sync"
@@ -1085,10 +1086,13 @@ func TestResolver_Deref(t *testing.T) {
 func TestResolver_KeyName(t *testing.T) {
 	t.Parallel()
 
-	// Each case names the key of the only entry of the mapping at $.m.
+	// Each case names the key of the first entry of the mapping at $.m. A
+	// child selector with that name selects the value v, or the value the
+	// case sets.
 	tcs := map[string]struct {
 		input string
 		want  string
+		value string
 		ok    bool
 	}{
 		"plain": {
@@ -1134,6 +1138,14 @@ func TestResolver_KeyName(t *testing.T) {
 		"alias with no anchor before it": {
 			input: "m:\n  *k : v\nbase: &k n\n",
 		},
+		"key a later merge key brings in": {
+			// The merge comes after the entry, so the selector selects
+			// the value the merge brings in.
+			input: "m:\n  k: own\n  <<: {k: merged}\n",
+			want:  "k",
+			ok:    true,
+			value: "merged",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1150,7 +1162,7 @@ func TestResolver_KeyName(t *testing.T) {
 
 			mapping, ok := node.(*ast.MappingNode)
 			require.True(t, ok, "m is a %T", node)
-			require.Len(t, mapping.Values, 1)
+			require.NotEmpty(t, mapping.Values)
 
 			got, ok := r.KeyName(mapping.Values[0].Key)
 			assert.Equal(t, tc.ok, ok)
@@ -1160,38 +1172,11 @@ func TestResolver_KeyName(t *testing.T) {
 				return
 			}
 
-			// A child selector with the name selects the value of the
-			// entry.
 			value, err := r.Node(m.Child(got))
 			require.NoError(t, err)
-			assert.Equal(t, "v", value.String())
+			assert.Equal(t, cmp.Or(tc.value, "v"), value.String())
 		})
 	}
-
-	t.Run("later merge key brings in the key", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, "m:\n  k: own\n  <<: {k: merged}\n").DocumentAST()
-
-		r := paths.NewResolver(doc)
-		m := paths.Doc().Child("m")
-
-		node, err := r.Node(m)
-		require.NoError(t, err)
-
-		mapping, ok := node.(*ast.MappingNode)
-		require.True(t, ok, "m is a %T", node)
-
-		got, ok := r.KeyName(mapping.Values[0].Key)
-		require.True(t, ok)
-		assert.Equal(t, "k", got)
-
-		// The merge comes after the entry, so a child selector with the
-		// name selects the value the merge brings in.
-		value, err := r.Node(m.Child(got))
-		require.NoError(t, err)
-		assert.Equal(t, "merged", value.String())
-	})
 
 	// The parser rejects a sequence or mapping key, but a tree built by
 	// hand may hold one.
