@@ -1426,6 +1426,12 @@ func TestNewSourceFromLayers_Document(t *testing.T) {
 		_, err = doc.At(port)
 		require.ErrorIs(t, err, docs[0].Err())
 
+		// The Node has no tree, as the Node of a document that did not
+		// parse has none.
+		assert.Nil(t, doc.AST())
+		assert.Nil(t, doc.DocumentAST())
+		assert.Equal(t, niceyaml.NodeNone, doc.Kind())
+
 		for name, bind := range map[string]func(error) error{"Source": layers.Bind, "Node": doc.Bind} {
 			err = bind(niceyaml.NewError("here", niceyaml.AtPath(port)))
 			require.EqualError(t, err, "base.yaml: $.server.port: here", name)

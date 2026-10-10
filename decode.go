@@ -1384,16 +1384,24 @@ func (n *Node) Document() *Node {
 // "---" header has a nil body. AST returns each of these bodies as it
 // is, as such a document decodes to nothing. [Node.IsEmpty] reports
 // each of these documents, so a caller need not tell the bodies apart.
-// A document that did not parse has no body either, and [Node.Err]
-// tells it apart from an empty document. The node is part of the tree
-// [Source.File] returns, which every Node of the Source shares and
-// resolves against, so a caller must not modify it.
+// A document that did not parse has no body either, and neither does
+// the document [NewSourceFromLayers] builds from a layer that holds no
+// value. [Node.Err] tells both apart from an empty document. The node is
+// part of the tree [Source.File] returns, which every Node of the Source
+// shares and resolves against, so a caller must not modify it.
 //
 // The node keeps the anchor or the tag written on it, so a type switch on
 // it can see an [*ast.AnchorNode] or an [*ast.TagNode] where the source
 // holds a mapping. [Node.Kind] looks through those and through an alias,
 // and reports whether the Node holds a mapping, a sequence, or a scalar.
 func (n *Node) AST() ast.Node {
+	// The parser leaves a document it rejected no body. A merged document
+	// that holds the error of a layer has the body of the other layers,
+	// and it reads as a document that did not parse.
+	if n.doc.err != nil {
+		return nil
+	}
+
 	if n.base.IsRoot() {
 		return n.doc.root.Body
 	}
