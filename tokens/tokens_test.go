@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"iter"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -42,6 +43,490 @@ func collectReset(seq iter.Seq2[int, token.Tokens]) []token.Tokens {
 
 	return result
 }
+
+var (
+	// Sources that both numericEscapes and positionCases hold.
+	openScalarAtHeader       = `a: "caf\u00e9` + "\n---\nb: 1\n"
+	cutEscapeAtHeader        = `a: "\x1"` + "\n---\nb: 1\n"
+	unknownEscapeOnLaterLine = `name: "caf\u00e9` + "\n" + `  x \d"` + "\nnext: 1\n"
+
+	// NumericEscapes holds sources with a "\x", "\u", or "\U" escape in a
+	// double-quoted scalar.
+	numericEscapes = map[string]string{
+		"hex escape":                                    `a: "x\x41"` + "\n",
+		"short unicode escape":                          `a: "x\u0041"` + "\n",
+		"long unicode escape":                           `a: "x\U00000041"` + "\n",
+		"text after the escape":                         `a: "x\x41 b"` + "\n",
+		"flow mapping":                                  `m: {a: "\u00e9", b: xx}` + "\n",
+		"trailing comment":                              `a: "\u00e9" # c` + "\n",
+		"multi-line scalar":                             `a: "x\x41` + "\n" + `  b c"` + "\n" + "c: 1\n",
+		"surrogate pair":                                `a: "\uD83D\uDE00"` + "\n",
+		"escaped quote before the escape":               `a: "\"\u00e9"` + "\n",
+		"hex escape over a quote":                       `a: "\x"b"` + "\n",
+		"escape the lexer keeps":                        `a: "x\ty"` + "\n",
+		"short unicode escape swallows the quote":       `a: "\u12"` + "\n" + "b: 1\nc: 2\nd: 3\n",
+		"hex escape swallows the quote":                 `a: "\x4"` + "\n" + "b: 1\n",
+		"unicode escape one digit short":                `name: "caf\u00e"` + "\n" + "age: 3\n",
+		"escape swallows the quote at the end":          `a: "\x4"`,
+		"escape swallows the quote and a cr":            `a: "\u12"` + "\r\nb: 1\r\n",
+		"escape swallows the quote before blank lines":  `a: "\u12"` + "\n" + "b: 1\n  \n\n",
+		"escape swallows the quote of the whole source": `"\x4"` + "\n",
+		"unicode escape cut short by the end":           `a: "\u: 1`,
+		"long unicode escape cut short by the end":      `"\U: \U`,
+		"unicode escape cut short before the quote":     `a: "\u1"` + "\n",
+		"high surrogate without a low one":              `a: "\uD83Dxx"` + "\n" + "b: 1\n",
+		"escape cut short on a later line":              `a: "x` + "\n" + `  \u1"` + "\n",
+		"escape cut short after an escaped backslash":   `a: "\\\u"`,
+		"open scalar cut at a header":                   openScalarAtHeader,
+		"open scalar cut at a document end":             `a: "x\x41` + "\n...\nb: 1\n",
+		"open scalar cut at a header after an escape code that holds its next rune": `a: "caf\u00e9e` + "\n---\nb: 1\n",
+		"open scalar cut at a header after a hex escape that holds its next rune":   `a: "x\x4ee` + "\n---\nb: 1\n",
+		"open scalar cut at a header after a surrogate pair":                        `a: "\uD83D\uDE00D` + "\n---\nb: 1\n",
+		"open scalar cut at a header in a CRLF file":                                `a: "caf\u00e9` + "\r\n---\r\nb: 1\r\n",
+		"open scalar cut at a header after a tag":                                   `a: !!str "caf\u00e9` + "\n---\nb: 1\n",
+		"open scalar cut at a header after trailing spaces":                         `a: "caf\u00e9   ` + "\n---\nb: 1\n",
+		"hex escape swallows the quote before a header":                             cutEscapeAtHeader,
+		"hex escape swallows the quote before a document end":                       `a: "\x1"` + "\n...\nb: 1\n",
+		"unicode escape swallows the quote and a cr before a header":                `a: "\u12"` + "\r\n---\r\nb: 1\r\n",
+		"hex escape swallows the quote and a space before a header":                 `a: "\x" ` + "\n---\nb: 1\n",
+		"unicode escape swallows a sequence entry before a header":                  `"\u` + "\n- b\n---\n",
+		"escaped backslash before a header":                                         `a: "\\` + "\n---\nb: 1\n",
+		"escaped backslashes on two lines before a header":                          `{a: "\\` + "\n\t" + `\\` + "\n---\n",
+		"escape cut short after a unicode escape":                                   `a: "\u00e9\u"`,
+		"long escape cut short after a hex escape and a tab":                        `k: "\x41` + "\t" + `\U12"` + "\n",
+		"escape cut short after an escaped backslash before hex digits":             `k: "\x41\\x41\u"` + "\n",
+		"high surrogate without a low one after a tab":                              `- ":` + "\t\t" + `\N\uD83D\u` + "\t" + `"` + "\nb: 1\n",
+		"long escape that takes a header before a second header":                    `k: "\U12\"` + "\n---\n\n---\n\nb: 1\n",
+		"unknown escape after an escape":                                            `a: "caf\u00e9 \d"` + "\n",
+		"unknown escape on a later line":                                            unknownEscapeOnLaterLine,
+		"unknown escape after a comment":                                            "a: # c\n" + `  "caf\u00e9 \d"` + "\nb: 1\n",
+		"escape cut short after an escape":                                          `a: "caf\u00e9 \u1"` + "\n",
+	}
+
+	// DroppedLineBreaks holds sources with line breaks the lexer drops. The want
+	// field holds the joined Origins of a source where they differ from it,
+	// around the invalid token the lexer makes for a tab on a blank line.
+	droppedLineBreaks = map[string]struct {
+		input string
+		want  string
+	}{
+		"key after a flow sequence":                 {input: "tags: [a, b]\n\n? key\n: value\n"},
+		"value after a flow mapping":                {input: "a: {x: y}\n\n: v\n"},
+		"key after a quoted scalar":                 {input: "a: 'x'\n\n? b\n: c\n"},
+		"key after an alias":                        {input: "a: *x\n\n? b\n"},
+		"key after an empty value":                  {input: "a:\n\n? b\n: c\n"},
+		"key after a document header":               {input: "---\n\n? b\n"},
+		"key after a line comment":                  {input: "a: 1 # note\n\n? k\n"},
+		"key after a comment":                       {input: "# c\n\n? k\n"},
+		"key after a blank line":                    {input: "\n? k\n: v\n"},
+		"key after blank lines":                     {input: "\n\n? b\n: c\n"},
+		"nested key after a flow sequence":          {input: "a:\n  b: [x]\n\n  ? k\n  : v\n"},
+		"crlf key after a comment":                  {input: "# c\r\n\r\n? k\r\n"},
+		"plain scalar after a blank line of spaces": {input: "t: \"a\tb\"\n  \n  r'\n- e\n"},
+		"plain scalar after blank lines of spaces":  {input: "t: \"a\tb\"\n  \n  \n  r'\n- e\n"},
+		"key after blank lines of spaces":           {input: "a: \"t\tb\"\n  \n  \nc: 1\n"},
+		"comment after blank lines of spaces":       {input: "a: \"t\tb\"\n  \n  \n# c\nd: 1\ne: 2\n"},
+		"crlf key after a blank line the lexer rewrites": {
+			// The lexer turns the CRLF in front of the invalid blank line
+			// into "\n".
+			input: "x:\r\n  a: \"t\tb\"\r\n \t\r\n  \r\n? b\r\n",
+			want:  "x:\r\n  a: \"t\tb\"\n \t\r\n\r\n? b\r\n",
+		},
+		"key after blank lines of spaces after bare crs":  {input: "k: \"\t\"\r \n\r \nc: 1\n"},
+		"document header after a cut scalar and bare crs": {input: "- \"\\u\\q\r\r \n---\n"},
+		"key after a blank line and blank lines of spaces after bare crs": {
+			// The lexer reads each "\r", space, and "\n" as one CRLF, so
+			// the breaks Tokenize puts back end with a bare "\r" in front
+			// of the "\n" that opens the Origin.
+			input: "\n\r \n\r \nkey: 1\n",
+		},
+		"document end after blank lines of spaces after bare crs": {input: "k:\n\r \n\r \n...\n"},
+		"key after blank lines of spaces after a comment that ends with a bare cr": {
+			// The comment's Origin ends with a bare "\r", so a "\n" that
+			// opens the breaks Tokenize puts back would join it into one
+			// CRLF.
+			input: "a: 1 # c\r \n\r \nb: 2",
+		},
+		"scalar after blank lines of spaces after a bare cr comment": {input: "#\r \n\r \n0"},
+		"key after a bare cr and a line of spaces between tab lines of a quoted scalar": {
+			// The lexer reads the "\r", the space, and the "\n" as one
+			// CRLF in a token of whitespace alone, so the key's Origin
+			// takes the line break the stream lacks.
+			input: "a: \"x\n\t\r \n\t\n\nb: 1\n",
+			want:  "a: \"x\n\t\r\n\t\n\n\nb: 1\n",
+		},
+		"closing quote after a bare cr and a line of spaces between tab lines": {
+			input: "a: \"x\n\t\r \n\t\"\nb: 1\n",
+			want:  "a: \"x\n\t\r\n\t\n\t\"\nb: 1\n",
+		},
+		"key after a bare cr and a line of spaces between tab lines of plain text": {
+			input: "a: x\n\t\r \n\t\n\nb: 1\n",
+			want:  "a: x\n\t\r\n\t\n\n\nb: 1\n",
+		},
+		"value after a comment that ends with a crlf the lexer cuts": {input: "#\r\n:"},
+		"value after a line of spaces after a bare cr comment":       {input: "#\r \n:"},
+		"key after a blank line with a tab": {
+			// The blank line goes to the end of the scalar's Origin. A
+			// tab in front of a line break in the key's Origin would
+			// make the parser reject the key.
+			input: "a: \"t\tb\"\n \t\nb: 1\n",
+		},
+		"key after trailing spaces the lexer drops": {
+			// The lexer drops the spaces after the flow mapping and makes
+			// an invalid token of the blank line, whose indentation must
+			// not repeat. Tokenize leaves the whitespace around that
+			// token as the lexer made it.
+			input: "{a: b}  \n \t\n? k\n",
+			want:  "{a: b}\n \t\n? k\n",
+		},
+	}
+
+	// DroppedWhitespace holds sources with whitespace the lexer drops. The want
+	// field holds the joined Origins of a source where they differ from it.
+	droppedWhitespace = map[string]struct {
+		input string
+		want  string
+	}{
+		"space before a colon after quoted flow keys":        {input: "{\"a\" : 1, \"b\" : \"x\"}\n"},
+		"space before a colon after an alias key":            {input: "&a a : 1\n*a : 2\n"},
+		"space before a colon after a single-quoted key":     {input: "'a' : 1\n"},
+		"nested explicit key":                                {input: "a:\n  ? zz\n  : x\n"},
+		"explicit key in a sequence entry":                   {input: "- ? earth\n  : blue\n"},
+		"explicit key after a document header":               {input: "x: 1\n---\n\n\n? a\n: b\n"},
+		"explicit key after a comment":                       {input: "# c\n\n? b\n: c\n"},
+		"crlf explicit key after a comment":                  {input: "# c\r\n\r\n? b\r\n"},
+		"trailing tab":                                       {input: "a: 1\t\nb: 2\n"},
+		"trailing spaces":                                    {input: "a: 1   \nb: 2\n"},
+		"trailing spaces after a quoted scalar":              {input: "a: 'x'   \nb: 1\n"},
+		"trailing spaces after an anchor":                    {input: "a: &k   \n  b: 1\n"},
+		"trailing spaces after a tag":                        {input: "a: !t   \n  b: 1\n"},
+		"trailing spaces after a flow sequence":              {input: "a: [1, 2]   \nb: 2\n"},
+		"blank line of spaces":                               {input: "a: 1\n   \nb: 2\n"},
+		"blank line of spaces after a document end":          {input: "a: 1\n...\n  \nb: 2\n"},
+		"blank line of spaces in a plain scalar":             {input: "a: plain\n   \n  multi\nb: 2\n"},
+		"blank line with a tab before the first key":         {input: " \t\na: 1\n"},
+		"blank line of spaces after a bare cr":               {input: "\r \na: 1\n"},
+		"blank lines of spaces after a bare cr in a mapping": {input: "a:\r  \r \n  b: 2\n"},
+		"line ending the lexer repeats after a tag": {
+			// The source holds one line break where the Origins hold two,
+			// so Tokenize keeps the Origins the lexer made.
+			input: "u: !t\n  v: 1\n",
+			want:  "u: !t\n\n  v: 1\n",
+		},
+		"blank line after a line ending the lexer repeats": {
+			// Tokenize keeps the Origins the lexer made around the
+			// repeat, so the blank line loses its spaces.
+			input: "a: !t\n  \n  b: 1\n",
+			want:  "a: !t\n\n\n  b: 1\n",
+		},
+		"line ending the lexer repeats after a block scalar header": {
+			// The lexer makes an invalid token of the header and the
+			// text after it, and repeats the line ending that closes it.
+			input: "a: | x\n  b\n",
+			want:  "a: | x\n\n  b\n",
+		},
+		"bad block header at the end": {
+			// The lexer repeats the header's last rune as a token of its
+			// own when no line ending follows, and Tokenize drops it.
+			input: "key: >foo",
+		},
+		"bad block header and comment at the end": {input: "k: |ab # c"},
+		"bad block header in a later entry": {
+			// The line ending after the first header repeats as well.
+			input: "- |ab\n- |ab",
+			want:  "- |ab\n\n- |ab",
+		},
+		"text after a block scalar header at the end": {
+			// The lexer reads the last rune of the text a second time,
+			// and Tokenize drops the token it makes of it.
+			input: "key: |abc",
+		},
+		"text after a folded scalar header at the end": {input: "a: >x y"},
+		"lone tag marker at the end": {
+			// The lexer drops the "!" and the spaces in front of it.
+			input: "a: !",
+			want:  "a:",
+		},
+		"lone tag marker on the last line": {
+			input: "a: b\n!",
+			want:  "a: b\n",
+		},
+		"named tag at the end": {
+			input: "a: !t",
+			want:  "a:",
+		},
+		"secondary tag at the end": {
+			input: "a: !!str",
+			want:  "a:",
+		},
+		"named tag on the last line": {
+			// The line break in front of the tag goes with it.
+			input: "a:\n!t",
+			want:  "a:",
+		},
+		"named tag on the line after a plain scalar": {
+			// The scalar in front of the tag keeps the line break.
+			input: "a: b\n!t",
+			want:  "a: b\n",
+		},
+		"tag holding a flow end at the end": {
+			// Only a space, a line break, or a "," in a flow collection
+			// closes a tag.
+			input: "[!t]",
+			want:  "[",
+		},
+		"tag holding a comma at the end": {
+			input: "a: !t,",
+			want:  "a:",
+		},
+		"tag before a comma in a flow collection": {input: "[!t,"},
+		"tag holding a brace at the end": {
+			// The lexer keeps the tag's text as an invalid token.
+			input: "a: !t}",
+		},
+		"named tag before a trailing space":            {input: "a: !t "},
+		"alias after a block scalar header at the end": {input: "|*x"},
+		"bad block header ending in a double quote": {
+			// The lexer makes an invalid token of the repeated quote.
+			input: "key: >\"quoted\"",
+		},
+		"bad block header ending in a single quote":    {input: "key: |'x'"},
+		"bad block header ending in an at sign":        {input: "k: |a@"},
+		"bad block header ending in a backtick":        {input: "k: |a`"},
+		"bad header ending in a quote after a comment": {input: "# c\nb: |ab'"},
+		"bad block header holding a quoted word":       {input: "key: |a\"b\""},
+		"reserved indicators in a row at the end": {
+			// Two invalid tokens that follow no block scalar header both
+			// hold text of the source.
+			input: ": @@",
+		},
+		"reserved indicators in a row in a sequence entry": {input: "- @@"},
+		"backticks in a row at the end":                    {input: "key: ``"},
+		"bad tags in a row after a document end":           {input: "...!}!}"},
+		"bad tags in a row after a document header":        {input: "--- !}!}"},
+		"bad tags in a row after a flow sequence":          {input: "[{:[]!}!}"},
+	}
+
+	// PositionCases holds sources and the position of each of their tokens.
+	positionCases = map[string]struct {
+		input string
+		want  []string
+	}{
+		"trailing spaces after a value": {
+			input: "a: 1   \nb: 2\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:9", "2:2:10", "2:4:12"},
+		},
+		"header after a comment": {
+			input: "# comment\n---\nb: two\n",
+			want:  []string{"1:1:1", "2:1:11", "3:1:15", "3:2:16", "3:4:18"},
+		},
+		"value after a tag": {
+			input: "t: !!str s\n...",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:10:10", "2:1:12"},
+		},
+		"value after a tag before a truncated last token": {
+			// The lexer places a token one rune short after a tag. When
+			// the last token's text is not in the source, every position
+			// must still move to where the source holds the text.
+			input: "a: !!str x\nname: \"Caf\\u00e9\"\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:10:10", "2:1:12", "2:5:16", "2:7:18"},
+		},
+		"block scalar at the end": {
+			input: "k: |\n    hello\n    world\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:5:10"},
+		},
+		"block scalar with repeated lines": {
+			input: "k: |\n  a\n  a\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8"},
+		},
+		"block scalar followed by content": {
+			input: "k: |\n  a\n  b\nz: 1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8", "4:1:14", "4:2:15", "4:4:17"},
+		},
+		"block scalar followed by a header": {
+			input: "k: |\n  a\n---\nz: 1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8", "3:1:10", "4:1:14", "4:2:15", "4:4:17"},
+		},
+		"block scalar holding a comment and a key": {
+			input: "k: |\n  a\n\n  # c\n  z: 1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8"},
+		},
+		"empty block scalar": {
+			input: "a: |\nb: 1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:6", "2:1:6", "2:2:7", "2:4:9"},
+		},
+		"comment in a CRLF file": {
+			input: "key: value\r\n# c\r\nnext: 1\r\n",
+			want:  []string{"1:1:1", "1:4:4", "1:6:6", "2:1:13", "3:1:18", "3:5:22", "3:7:24"},
+		},
+		"block scalar in a CRLF file": {
+			input: "a: 1\r\nb: |\r\n  x\r\n  y\r\nc: 3\r\n",
+			want: []string{
+				"1:1:1",
+				"1:2:2",
+				"1:4:4",
+				"2:1:7",
+				"2:2:8",
+				"2:4:10",
+				"3:3:15",
+				"5:1:23",
+				"5:2:24",
+				"5:4:26",
+			},
+		},
+		"sequence after a tag and a blank line": {
+			input: "a: !!seq\n\n  - b\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "3:3:13", "3:5:15"},
+		},
+		"tab between key and value": {
+			input: "a:\t1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4"},
+		},
+		"wide runes": {
+			input: "a: 日本 x\nb: é\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:9", "2:2:10", "2:4:12"},
+		},
+		"key after a truncated escape": {
+			// The lexer cuts "x41" out of the Origin, so the source does
+			// not hold the scalar's text. Tokenize must not place the key
+			// after it inside the scalar, where "c" also appears.
+			input: "a: \"x\\x41 b c\"\nc: 2\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:16", "2:2:17", "2:4:19"},
+		},
+		"escape after a tag": {
+			input: "name: !!str \"Caf\\u00e9\"\nage: 3\n",
+			want:  []string{"1:1:1", "1:5:5", "1:7:7", "1:13:13", "2:1:25", "2:4:28", "2:6:30"},
+		},
+		"escape after a tag in a CRLF file": {
+			input: "name: !!str \"Caf\\u00e9\"\r\nage: 3\r\n",
+			want:  []string{"1:1:1", "1:5:5", "1:7:7", "1:13:13", "2:1:26", "2:4:29", "2:6:31"},
+		},
+		"escaped key after an escaped value": {
+			input: "a: \"\\u00e9\"\n\"\\u00e8\": 1\n",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:13", "2:9:21", "2:11:23"},
+		},
+		"escape after a comment": {
+			input: "m:\n  # c\n  \"\\u00e9\": 1\n  b: 2\n",
+			want:  []string{"1:1:1", "1:2:2", "2:3:6", "3:3:12", "3:11:20", "3:13:22", "4:3:26", "4:4:27", "4:6:29"},
+		},
+		"tab indentation": {
+			// The lexer drops the ":" after the tab, so the value's text
+			// sits further on than the cursor.
+			input: "\ta: 1\nb: 2\nc: 3\n",
+			want:  []string{"1:2:2", "1:5:5", "2:2:8", "2:4:10", "3:1:12", "3:2:13", "3:4:15"},
+		},
+		"escape cut short by the end": {
+			// The lexer reads the backslash into the invalid token for the
+			// scalar and again into the token after it.
+			input: "a: \"\\u: 1",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:5:5", "1:7:7", "1:9:9"},
+		},
+		"long escape cut short by the end": {
+			input: "\"\\U: \\U",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:6:6"},
+		},
+		"open scalar cut at a header": {
+			// The lexer drops "u00e9" and places the scalar at the header,
+			// so the tokens after it must not land inside the escape.
+			input: openScalarAtHeader,
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:15", "3:1:19", "3:2:20", "3:4:22"},
+		},
+		"unknown escape on a later line": {
+			input: unknownEscapeOnLaterLine,
+			want:  []string{"1:1:1", "1:5:5", "1:7:7", "2:6:23", "3:1:26", "3:5:30", "3:7:32"},
+		},
+		"header after a cut escape": {
+			// The lexer places the cut scalar at the fault, so its Offset
+			// says nothing about where the tokens after it start.
+			input: cutEscapeAtHeader,
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:10", "3:1:14", "3:2:15", "3:4:17"},
+		},
+		"comment after a header the lexer shortened": {
+			// The lexer reads "---" as "--" one rune on, so the shift
+			// taken from it misses the comment by one rune.
+			input: "\"\t1\n---\n# c\n",
+			want:  []string{"1:1:1", "2:1:5", "3:1:9"},
+		},
+		"escaped line break before a tab line that opens with a backslash": {
+			input: "b: \"\\\n\t\t\\",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9"},
+		},
+		"text on the line after a tab line that swallows its indicator": {
+			// The token the lexer makes of the second tab swallows the ":"
+			// that ends the line, and the tokens of whitespace alone sit on
+			// that ":". The text of the next token opens the line after it.
+			input: "a: \"x\n\t\t:\n\t,,\n\t",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "2:3:9", "3:2:12"},
+		},
+		"quote on the line after a tab line that swallows its indicator": {
+			input: "a: \"x\n\t\t-\n\t\"\r\n\t",
+			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "2:3:9", "3:2:12", "4:2:16"},
+		},
+	}
+
+	// PositionCorpus holds sources whose tokens exercise the positions the lexer
+	// places oddly. The tests of those positions read [positionSources], which
+	// adds the sources of [positionCases], [droppedWhitespace],
+	// [droppedLineBreaks], and [numericEscapes].
+	positionCorpus = map[string]string{
+		"mapping":                                              "a: 1\nb: two\n",
+		"trailing spaces on each line":                         "a: 1   \nb: 2  \n",
+		"trailing spaces before a comment":                     "a: 1   # c\nb: 2\n",
+		"comments":                                             "# head\na: 1 # line\n# foot\nb: 2\n",
+		"tag on a value":                                       "t: !!str s\nu: !!int 1\n",
+		"tag before a nested map":                              "a: !t\n  b: 1\nc: 2\n",
+		"anchor and alias":                                     "a: &x 1\nb: *x\n",
+		"literal with blank lines":                             "k: |\n  a\n\n  b\n\nz: 1\n",
+		"literal with a blank line of spaces":                  "k: |\n  a\n   \n  b\nz: 1\n",
+		"literal with a leading blank line":                    "k: |\n\n  b\nz: 1\n",
+		"literal with keep":                                    "k: |+\n  a\n\n\nz: 1\n",
+		"literal with an indent indicator":                     "k: |2\n   a\n  b\n",
+		"literal with a comment after":                         "k: |\n  a\n# c\nz: 1\n",
+		"nested literal with a comment after":                  "a:\n  k: |\n    x\n\n  # c\n  z: 1\n",
+		"folded":                                               "k: >\n  a\n\n  b\n\nz: 1\n",
+		"empty literal with keep":                              "a: |+\n\nb: 1\n",
+		"literal of spaces before a comment":                   "a: |+\n  \n# c\nb: 1\n",
+		"folded of spaces before a comment":                    "a: >+\n  \n# c\nb: 1\n",
+		"literal of a tab before a comment":                    "a: |\n \t\n# c\nb: 1\n",
+		"literal of spaces after a header comment":             "a: |+ # h\n  \n# c\nb: 1\n",
+		"nested literal of spaces before a comment":            "items:\n  - script: |+\n      \n    # next\n  - b\n",
+		"literal of blank lines before a comment":              "a: |+\n  \n\n  \n# c\nb: 1\n",
+		"crlf literal of spaces before a comment":              "a: |+\r\n  \r\n# c\r\nb: 1\r\n",
+		"tagged literal of spaces before a comment":            "a: !t |+\n  \n# c\nb: 1\n",
+		"empty folded before a comment":                        "x:\n  a: >\n  # c\n  b: 1\n",
+		"empty folded before spaces and a comment":             "x:\n  a: >\n    \n  # c\n  b: 1\n",
+		"quoted multi-line":                                    "a: 'x\n\n  y'\nb: 1\n",
+		"double-quoted multi-line":                             "c: \"x\n  y\"\nd: 1\n",
+		"escape in a flow sequence":                            "[!!str \"\\u00e9\", b]\n",
+		"escape in a sequence":                                 "- !!str \"\\u00e9\"\n- b\n",
+		"escaped scalars in a row":                             "a: \"\\u00e9\"\n\"\\u00e8\": \"\\x41 b\"\nc: 1\n",
+		"escape that swallows the quote":                       "a: \"\\u12\"\nb: 1\nc: 2\n",
+		"plain multi-line":                                     "a: plain\n  multi\nb: 2\n",
+		"flow collections":                                     "{a: 1, b: [1, 2]}\n",
+		"flow sequence over lines":                             "a: [\n  1,\n  2\n]\n",
+		"sequences":                                            "- a\n- b # c\n- - c\n  - d\n",
+		"complex key":                                          "? k\n: v\n",
+		"directive":                                            "%YAML 1.2\n---\na: 1\n",
+		"several documents":                                    "a: 1\n---\nb: 2\n...\n# tail\nc: 3\n",
+		"blank lines":                                          "a: 1\n\n\nb: 2\n",
+		"key with trailing spaces":                             "a  : 1\n",
+		"wide runes in a key":                                  "a: 日本 x\nb: é\n日: 1\n",
+		"crlf tag and quoted":                                  "a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n",
+		"bare cr":                                              "a: 1\rb: 2\r",
+		"no final line ending":                                 "a: 1\nb: 2",
+		"colon after trailing spaces on a quoted key":          "\"q\" \n: 1\n",
+		"colon after a trailing tab on a quoted key":           "\"q\"\t\n: 1\n",
+		"colon after a blank line of spaces":                   "\"q\"\n  \n: 1\n",
+		"colon after trailing spaces crlf":                     "'q' \r\n: 1\r\n",
+		"nested colon after trailing spaces":                   "- \"q\" \n  : 1\n",
+		"colon after trailing spaces on a later key":           "a: 1\n'q'  \n: 2\n",
+		"blank line of a tab before the first key":             "\t\nb: 1\n",
+		"blank line of a space and a tab before the first key": " \t\nb: 1\n",
+		"blank line of a tab before a quoted first key":        "\t\n\"b\": 1\n",
+		"crlf blank line of a tab before the first key":        "\t\r\nb: 1\r\n",
+		"text after a block scalar header in a sequence":       "- |ab\n- |cd",
+	}
+)
 
 func TestTokenize_TabIndentation(t *testing.T) {
 	t.Parallel()
@@ -209,77 +694,12 @@ func TestTokenize_NumericEscape(t *testing.T) {
 	// escape it rejects. When
 	// the lexer gives up on a "\u" or "\U" escape, it reads the backslash
 	// into two tokens, and Tokenize leaves it in the second alone.
-	tcs := map[string]struct {
-		input string
-	}{
-		"hex escape":                                    {input: `a: "x\x41"` + "\n"},
-		"short unicode escape":                          {input: `a: "x\u0041"` + "\n"},
-		"long unicode escape":                           {input: `a: "x\U00000041"` + "\n"},
-		"text after the escape":                         {input: `a: "x\x41 b"` + "\n"},
-		"flow mapping":                                  {input: `m: {a: "\u00e9", b: xx}` + "\n"},
-		"trailing comment":                              {input: `a: "\u00e9" # c` + "\n"},
-		"multi-line scalar":                             {input: `a: "x\x41` + "\n" + `  b c"` + "\n" + "c: 1\n"},
-		"surrogate pair":                                {input: `a: "\uD83D\uDE00"` + "\n"},
-		"escaped quote before the escape":               {input: `a: "\"\u00e9"` + "\n"},
-		"hex escape over a quote":                       {input: `a: "\x"b"` + "\n"},
-		"escape the lexer keeps":                        {input: `a: "x\ty"` + "\n"},
-		"short unicode escape swallows the quote":       {input: `a: "\u12"` + "\n" + "b: 1\nc: 2\nd: 3\n"},
-		"hex escape swallows the quote":                 {input: `a: "\x4"` + "\n" + "b: 1\n"},
-		"unicode escape one digit short":                {input: `name: "caf\u00e"` + "\n" + "age: 3\n"},
-		"escape swallows the quote at the end":          {input: `a: "\x4"`},
-		"escape swallows the quote and a cr":            {input: `a: "\u12"` + "\r\nb: 1\r\n"},
-		"escape swallows the quote before blank lines":  {input: `a: "\u12"` + "\n" + "b: 1\n  \n\n"},
-		"escape swallows the quote of the whole source": {input: `"\x4"` + "\n"},
-		"unicode escape cut short by the end":           {input: `a: "\u: 1`},
-		"long unicode escape cut short by the end":      {input: `"\U: \U`},
-		"unicode escape cut short before the quote":     {input: `a: "\u1"` + "\n"},
-		"high surrogate without a low one":              {input: `a: "\uD83Dxx"` + "\n" + "b: 1\n"},
-		"escape cut short on a later line":              {input: `a: "x` + "\n" + `  \u1"` + "\n"},
-		"escape cut short after an escaped backslash":   {input: `a: "\\\u"`},
-		"open scalar cut at a header":                   {input: `a: "caf\u00e9` + "\n---\nb: 1\n"},
-		"open scalar cut at a document end":             {input: `a: "x\x41` + "\n...\nb: 1\n"},
-		"open scalar cut at a header after an escape code that holds its next rune": {
-			input: `a: "caf\u00e9e` + "\n---\nb: 1\n",
-		},
-		"open scalar cut at a header after a hex escape that holds its next rune": {
-			input: `a: "x\x4ee` + "\n---\nb: 1\n",
-		},
-		"open scalar cut at a header after a surrogate pair": {input: `a: "\uD83D\uDE00D` + "\n---\nb: 1\n"},
-		"open scalar cut at a header in a CRLF file": {
-			input: `a: "caf\u00e9` + "\r\n---\r\nb: 1\r\n",
-		},
-		"open scalar cut at a header after a tag": {
-			input: `a: !!str "caf\u00e9` + "\n---\nb: 1\n",
-		},
-		"open scalar cut at a header after trailing spaces":             {input: `a: "caf\u00e9   ` + "\n---\nb: 1\n"},
-		"hex escape swallows the quote before a header":                 {input: `a: "\x1"` + "\n---\nb: 1\n"},
-		"hex escape swallows the quote before a document end":           {input: `a: "\x1"` + "\n...\nb: 1\n"},
-		"unicode escape swallows the quote and a cr before a header":    {input: `a: "\u12"` + "\r\n---\r\nb: 1\r\n"},
-		"hex escape swallows the quote and a space before a header":     {input: `a: "\x" ` + "\n---\nb: 1\n"},
-		"unicode escape swallows a sequence entry before a header":      {input: `"\u` + "\n- b\n---\n"},
-		"escaped backslash before a header":                             {input: `a: "\\` + "\n---\nb: 1\n"},
-		"escaped backslashes on two lines before a header":              {input: `{a: "\\` + "\n\t" + `\\` + "\n---\n"},
-		"escape cut short after a unicode escape":                       {input: `a: "\u00e9\u"`},
-		"long escape cut short after a hex escape and a tab":            {input: `k: "\x41` + "\t" + `\U12"` + "\n"},
-		"escape cut short after an escaped backslash before hex digits": {input: `k: "\x41\\x41\u"` + "\n"},
-		"high surrogate without a low one after a tab": {
-			input: `- ":` + "\t\t" + `\N\uD83D\u` + "\t" + `"` + "\nb: 1\n",
-		},
-		"long escape that takes a header before a second header": {input: `k: "\U12\"` + "\n---\n\n---\n\nb: 1\n"},
-		"unknown escape after an escape":                         {input: `a: "caf\u00e9 \d"` + "\n"},
-		"unknown escape on a later line": {
-			input: `name: "caf\u00e9` + "\n" + `  x \d"` + "\nnext: 1\n",
-		},
-		"unknown escape after a comment":   {input: "a: # c\n" + `  "caf\u00e9 \d"` + "\nb: 1\n"},
-		"escape cut short after an escape": {input: `a: "caf\u00e9 \u1"` + "\n"},
-	}
-
-	for name, tc := range tcs {
+	for name, input := range numericEscapes {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := yamltest.DumpTokenOrigins(tokens.Tokenize(tc.input))
-			assert.Equal(t, tc.input, got)
+			got := yamltest.DumpTokenOrigins(tokens.Tokenize(input))
+			assert.Equal(t, input, got)
 		})
 	}
 }
@@ -802,85 +1222,8 @@ func TestTokenize_RestoresDroppedLineBreaks(t *testing.T) {
 	// and a "?" or ":" indicator that follows them, and a blank line from
 	// a run of them after a double-quoted scalar that holds a tab.
 	// Tokenize puts them back, so the Origins ahead of each token's text
-	// hold as many line breaks as the source does. The want field holds
-	// the joined Origins where they differ from the input, around the
-	// invalid token the lexer makes for a tab on a blank line.
-	tcs := map[string]struct {
-		input string
-		want  string
-	}{
-		"key after a flow sequence":                 {input: "tags: [a, b]\n\n? key\n: value\n"},
-		"value after a flow mapping":                {input: "a: {x: y}\n\n: v\n"},
-		"key after a quoted scalar":                 {input: "a: 'x'\n\n? b\n: c\n"},
-		"key after an alias":                        {input: "a: *x\n\n? b\n"},
-		"key after an empty value":                  {input: "a:\n\n? b\n: c\n"},
-		"key after a document header":               {input: "---\n\n? b\n"},
-		"key after a line comment":                  {input: "a: 1 # note\n\n? k\n"},
-		"key after a comment":                       {input: "# c\n\n? k\n"},
-		"key after a blank line":                    {input: "\n? k\n: v\n"},
-		"key after blank lines":                     {input: "\n\n? b\n: c\n"},
-		"nested key after a flow sequence":          {input: "a:\n  b: [x]\n\n  ? k\n  : v\n"},
-		"crlf key after a comment":                  {input: "# c\r\n\r\n? k\r\n"},
-		"plain scalar after a blank line of spaces": {input: "t: \"a\tb\"\n  \n  r'\n- e\n"},
-		"plain scalar after blank lines of spaces":  {input: "t: \"a\tb\"\n  \n  \n  r'\n- e\n"},
-		"key after blank lines of spaces":           {input: "a: \"t\tb\"\n  \n  \nc: 1\n"},
-		"comment after blank lines of spaces":       {input: "a: \"t\tb\"\n  \n  \n# c\nd: 1\ne: 2\n"},
-		"crlf key after a blank line the lexer rewrites": {
-			// The lexer turns the CRLF in front of the invalid blank line
-			// into "\n".
-			input: "x:\r\n  a: \"t\tb\"\r\n \t\r\n  \r\n? b\r\n",
-			want:  "x:\r\n  a: \"t\tb\"\n \t\r\n\r\n? b\r\n",
-		},
-		"key after blank lines of spaces after bare crs":  {input: "k: \"\t\"\r \n\r \nc: 1\n"},
-		"document header after a cut scalar and bare crs": {input: "- \"\\u\\q\r\r \n---\n"},
-		"key after a blank line and blank lines of spaces after bare crs": {
-			// The lexer reads each "\r", space, and "\n" as one CRLF, so
-			// the breaks Tokenize puts back end with a bare "\r" in front
-			// of the "\n" that opens the Origin.
-			input: "\n\r \n\r \nkey: 1\n",
-		},
-		"document end after blank lines of spaces after bare crs": {input: "k:\n\r \n\r \n...\n"},
-		"key after blank lines of spaces after a comment that ends with a bare cr": {
-			// The comment's Origin ends with a bare "\r", so a "\n" that
-			// opens the breaks Tokenize puts back would join it into one
-			// CRLF.
-			input: "a: 1 # c\r \n\r \nb: 2",
-		},
-		"scalar after blank lines of spaces after a bare cr comment": {input: "#\r \n\r \n0"},
-		"key after a bare cr and a line of spaces between tab lines of a quoted scalar": {
-			// The lexer reads the "\r", the space, and the "\n" as one
-			// CRLF in a token of whitespace alone, so the key's Origin
-			// takes the line break the stream lacks.
-			input: "a: \"x\n\t\r \n\t\n\nb: 1\n",
-			want:  "a: \"x\n\t\r\n\t\n\n\nb: 1\n",
-		},
-		"closing quote after a bare cr and a line of spaces between tab lines": {
-			input: "a: \"x\n\t\r \n\t\"\nb: 1\n",
-			want:  "a: \"x\n\t\r\n\t\n\t\"\nb: 1\n",
-		},
-		"key after a bare cr and a line of spaces between tab lines of plain text": {
-			input: "a: x\n\t\r \n\t\n\nb: 1\n",
-			want:  "a: x\n\t\r\n\t\n\n\nb: 1\n",
-		},
-		"value after a comment that ends with a crlf the lexer cuts": {input: "#\r\n:"},
-		"value after a line of spaces after a bare cr comment":       {input: "#\r \n:"},
-		"key after a blank line with a tab": {
-			// The blank line goes to the end of the scalar's Origin. A
-			// tab in front of a line break in the key's Origin would
-			// make the parser reject the key.
-			input: "a: \"t\tb\"\n \t\nb: 1\n",
-		},
-		"key after trailing spaces the lexer drops": {
-			// The lexer drops the spaces after the flow mapping and makes
-			// an invalid token of the blank line, whose indentation must
-			// not repeat. Tokenize leaves the whitespace around that
-			// token as the lexer made it.
-			input: "{a: b}  \n \t\n? k\n",
-			want:  "{a: b}\n \t\n? k\n",
-		},
-	}
-
-	for name, tc := range tcs {
+	// hold as many line breaks as the source does.
+	for name, tc := range droppedLineBreaks {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -948,6 +1291,10 @@ func TestTokenize(t *testing.T) {
 		"crlf trailing blank line":      {input: "key: value\r\n\r\n"},
 		"trailing blank line of spaces": {input: "key: value\n   \n\n"},
 		"trailing line of spaces":       {input: "key: value\n  \n"},
+		// The lexer drops a tag that holds the whole source, and the
+		// placeholder token holds it.
+		"lone tag marker": {input: "!"},
+		"named tag alone": {input: "!t"},
 		"list": {
 			input: stringtest.JoinLF(
 				"items:",
@@ -1003,138 +1350,8 @@ func TestTokenize_RestoresDroppedWhitespace(t *testing.T) {
 	// blank line, the space in front of a ":" after a quoted or alias key,
 	// the space between a "-" and a "?", and the line breaks in front of a
 	// "?" key. Tokenize gives them back, so the joined Origins equal the
-	// input. The want field holds the joined Origins where they differ
-	// from the input.
-	tcs := map[string]struct {
-		input string
-		want  string
-	}{
-		"space before a colon after quoted flow keys":        {input: "{\"a\" : 1, \"b\" : \"x\"}\n"},
-		"space before a colon after an alias key":            {input: "&a a : 1\n*a : 2\n"},
-		"space before a colon after a single-quoted key":     {input: "'a' : 1\n"},
-		"nested explicit key":                                {input: "a:\n  ? zz\n  : x\n"},
-		"explicit key in a sequence entry":                   {input: "- ? earth\n  : blue\n"},
-		"explicit key after a document header":               {input: "x: 1\n---\n\n\n? a\n: b\n"},
-		"explicit key after a comment":                       {input: "# c\n\n? b\n: c\n"},
-		"crlf explicit key after a comment":                  {input: "# c\r\n\r\n? b\r\n"},
-		"trailing tab":                                       {input: "a: 1\t\nb: 2\n"},
-		"trailing spaces":                                    {input: "a: 1   \nb: 2\n"},
-		"trailing spaces after a quoted scalar":              {input: "a: 'x'   \nb: 1\n"},
-		"trailing spaces after an anchor":                    {input: "a: &k   \n  b: 1\n"},
-		"trailing spaces after a tag":                        {input: "a: !t   \n  b: 1\n"},
-		"trailing spaces after a flow sequence":              {input: "a: [1, 2]   \nb: 2\n"},
-		"blank line of spaces":                               {input: "a: 1\n   \nb: 2\n"},
-		"blank line of spaces after a document end":          {input: "a: 1\n...\n  \nb: 2\n"},
-		"blank line of spaces in a plain scalar":             {input: "a: plain\n   \n  multi\nb: 2\n"},
-		"blank line with a tab before the first key":         {input: " \t\na: 1\n"},
-		"blank line of spaces after a bare cr":               {input: "\r \na: 1\n"},
-		"blank lines of spaces after a bare cr in a mapping": {input: "a:\r  \r \n  b: 2\n"},
-		"line ending the lexer repeats after a tag": {
-			// The source holds one line break where the Origins hold two,
-			// so Tokenize keeps the Origins the lexer made.
-			input: "u: !t\n  v: 1\n",
-			want:  "u: !t\n\n  v: 1\n",
-		},
-		"blank line after a line ending the lexer repeats": {
-			// Tokenize keeps the Origins the lexer made around the
-			// repeat, so the blank line loses its spaces.
-			input: "a: !t\n  \n  b: 1\n",
-			want:  "a: !t\n\n\n  b: 1\n",
-		},
-		"line ending the lexer repeats after a block scalar header": {
-			// The lexer makes an invalid token of the header and the
-			// text after it, and repeats the line ending that closes it.
-			input: "a: | x\n  b\n",
-			want:  "a: | x\n\n  b\n",
-		},
-		"bad block header at the end": {
-			// The lexer repeats the header's last rune as a token of its
-			// own when no line ending follows, and Tokenize drops it.
-			input: "key: >foo",
-		},
-		"bad block header and comment at the end": {input: "k: |ab # c"},
-		"bad block header in a later entry": {
-			// The line ending after the first header repeats as well.
-			input: "- |ab\n- |ab",
-			want:  "- |ab\n\n- |ab",
-		},
-		"text after a block scalar header at the end": {
-			// The lexer reads the last rune of the text a second time,
-			// and Tokenize drops the token it makes of it.
-			input: "key: |abc",
-		},
-		"text after a folded scalar header at the end": {input: "a: >x y"},
-		"lone tag marker at the end": {
-			// The lexer drops the "!" and the spaces in front of it.
-			input: "a: !",
-			want:  "a:",
-		},
-		"lone tag marker on the last line": {
-			input: "a: b\n!",
-			want:  "a: b\n",
-		},
-		"lone tag marker alone": {
-			// The placeholder token holds the whole source.
-			input: "!",
-		},
-		"named tag at the end": {
-			input: "a: !t",
-			want:  "a:",
-		},
-		"secondary tag at the end": {
-			input: "a: !!str",
-			want:  "a:",
-		},
-		"named tag on the last line": {
-			// The line break in front of the tag goes with it.
-			input: "a:\n!t",
-			want:  "a:",
-		},
-		"named tag on the line after a plain scalar": {
-			// The scalar in front of the tag keeps the line break.
-			input: "a: b\n!t",
-			want:  "a: b\n",
-		},
-		"tag holding a flow end at the end": {
-			// Only a space, a line break, or a "," in a flow collection
-			// closes a tag.
-			input: "[!t]",
-			want:  "[",
-		},
-		"tag holding a comma at the end": {
-			input: "a: !t,",
-			want:  "a:",
-		},
-		"tag before a comma in a flow collection": {input: "[!t,"},
-		"tag holding a brace at the end": {
-			// The lexer keeps the tag's text as an invalid token.
-			input: "a: !t}",
-		},
-		"named tag before a trailing space":            {input: "a: !t "},
-		"named tag alone":                              {input: "!t"},
-		"alias after a block scalar header at the end": {input: "|*x"},
-		"bad block header ending in a double quote": {
-			// The lexer makes an invalid token of the repeated quote.
-			input: "key: >\"quoted\"",
-		},
-		"bad block header ending in a single quote":    {input: "key: |'x'"},
-		"bad block header ending in an at sign":        {input: "k: |a@"},
-		"bad block header ending in a backtick":        {input: "k: |a`"},
-		"bad header ending in a quote after a comment": {input: "# c\nb: |ab'"},
-		"bad block header holding a quoted word":       {input: "key: |a\"b\""},
-		"reserved indicators in a row at the end": {
-			// Two invalid tokens that follow no block scalar header both
-			// hold text of the source.
-			input: ": @@",
-		},
-		"reserved indicators in a row in a sequence entry": {input: "- @@"},
-		"backticks in a row at the end":                    {input: "key: ``"},
-		"bad tags in a row after a document end":           {input: "...!}!}"},
-		"bad tags in a row after a document header":        {input: "--- !}!}"},
-		"bad tags in a row after a flow sequence":          {input: "[{:[]!}!}"},
-	}
-
-	for name, tc := range tcs {
+	// input.
+	for name, tc := range droppedWhitespace {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -1836,163 +2053,7 @@ func TestTokenize_Positions(t *testing.T) {
 	// run one rune short after a comment or a tag, place a multi-line block
 	// scalar on its last line, and count a CRLF it cuts between two tokens
 	// twice.
-	tcs := map[string]struct {
-		input string
-		want  []string
-	}{
-		"trailing spaces after a value": {
-			input: "a: 1   \nb: 2\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:9", "2:2:10", "2:4:12"},
-		},
-		"header after a comment": {
-			input: "# comment\n---\nb: two\n",
-			want:  []string{"1:1:1", "2:1:11", "3:1:15", "3:2:16", "3:4:18"},
-		},
-		"value after a tag": {
-			input: "t: !!str s\n...",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:10:10", "2:1:12"},
-		},
-		"value after a tag before a truncated last token": {
-			// The lexer places a token one rune short after a tag. When
-			// the last token's text is not in the source, every position
-			// must still move to where the source holds the text.
-			input: "a: !!str x\nname: \"Caf\\u00e9\"\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:10:10", "2:1:12", "2:5:16", "2:7:18"},
-		},
-		"block scalar at the end": {
-			input: "k: |\n    hello\n    world\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:5:10"},
-		},
-		"block scalar with repeated lines": {
-			input: "k: |\n  a\n  a\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8"},
-		},
-		"block scalar followed by content": {
-			input: "k: |\n  a\n  b\nz: 1\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8", "4:1:14", "4:2:15", "4:4:17"},
-		},
-		"block scalar followed by a header": {
-			input: "k: |\n  a\n---\nz: 1\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8", "3:1:10", "4:1:14", "4:2:15", "4:4:17"},
-		},
-		"block scalar holding a comment and a key": {
-			input: "k: |\n  a\n\n  # c\n  z: 1\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8"},
-		},
-		"empty block scalar": {
-			input: "a: |\nb: 1\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:6", "2:1:6", "2:2:7", "2:4:9"},
-		},
-		"comment in a CRLF file": {
-			input: "key: value\r\n# c\r\nnext: 1\r\n",
-			want:  []string{"1:1:1", "1:4:4", "1:6:6", "2:1:13", "3:1:18", "3:5:22", "3:7:24"},
-		},
-		"block scalar in a CRLF file": {
-			input: "a: 1\r\nb: |\r\n  x\r\n  y\r\nc: 3\r\n",
-			want: []string{
-				"1:1:1",
-				"1:2:2",
-				"1:4:4",
-				"2:1:7",
-				"2:2:8",
-				"2:4:10",
-				"3:3:15",
-				"5:1:23",
-				"5:2:24",
-				"5:4:26",
-			},
-		},
-		"sequence after a tag and a blank line": {
-			input: "a: !!seq\n\n  - b\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "3:3:13", "3:5:15"},
-		},
-		"tab between key and value": {
-			input: "a:\t1\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4"},
-		},
-		"wide runes": {
-			input: "a: 日本 x\nb: é\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:9", "2:2:10", "2:4:12"},
-		},
-		"key after a truncated escape": {
-			// The lexer cuts "x41" out of the Origin, so the source does
-			// not hold the scalar's text. Tokenize must not place the key
-			// after it inside the scalar, where "c" also appears.
-			input: "a: \"x\\x41 b c\"\nc: 2\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:16", "2:2:17", "2:4:19"},
-		},
-		"escape after a tag": {
-			input: "name: !!str \"Caf\\u00e9\"\nage: 3\n",
-			want:  []string{"1:1:1", "1:5:5", "1:7:7", "1:13:13", "2:1:25", "2:4:28", "2:6:30"},
-		},
-		"escape after a tag in a CRLF file": {
-			input: "name: !!str \"Caf\\u00e9\"\r\nage: 3\r\n",
-			want:  []string{"1:1:1", "1:5:5", "1:7:7", "1:13:13", "2:1:26", "2:4:29", "2:6:31"},
-		},
-		"escaped key after an escaped value": {
-			input: "a: \"\\u00e9\"\n\"\\u00e8\": 1\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:13", "2:9:21", "2:11:23"},
-		},
-		"escape after a comment": {
-			input: "m:\n  # c\n  \"\\u00e9\": 1\n  b: 2\n",
-			want:  []string{"1:1:1", "1:2:2", "2:3:6", "3:3:12", "3:11:20", "3:13:22", "4:3:26", "4:4:27", "4:6:29"},
-		},
-		"tab indentation": {
-			// The lexer drops the ":" after the tab, so the value's text
-			// sits further on than the cursor.
-			input: "\ta: 1\nb: 2\nc: 3\n",
-			want:  []string{"1:2:2", "1:5:5", "2:2:8", "2:4:10", "3:1:12", "3:2:13", "3:4:15"},
-		},
-		"escape cut short by the end": {
-			// The lexer reads the backslash into the invalid token for the
-			// scalar and again into the token after it.
-			input: "a: \"\\u: 1",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:5:5", "1:7:7", "1:9:9"},
-		},
-		"long escape cut short by the end": {
-			input: "\"\\U: \\U",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:6:6"},
-		},
-		"open scalar cut at a header": {
-			// The lexer drops "u00e9" and places the scalar at the header,
-			// so the tokens after it must not land inside the escape.
-			input: "a: \"caf\\u00e9\n---\nb: 1\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:15", "3:1:19", "3:2:20", "3:4:22"},
-		},
-		"unknown escape on a later line": {
-			input: "name: \"caf\\u00e9\n  x \\d\"\nnext: 1\n",
-			want:  []string{"1:1:1", "1:5:5", "1:7:7", "2:6:23", "3:1:26", "3:5:30", "3:7:32"},
-		},
-		"header after a cut escape": {
-			// The lexer places the cut scalar at the fault, so its Offset
-			// says nothing about where the tokens after it start.
-			input: "a: \"\\x1\"\n---\nb: 1\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:10", "3:1:14", "3:2:15", "3:4:17"},
-		},
-		"comment after a header the lexer shortened": {
-			// The lexer reads "---" as "--" one rune on, so the shift
-			// taken from it misses the comment by one rune.
-			input: "\"\t1\n---\n# c\n",
-			want:  []string{"1:1:1", "2:1:5", "3:1:9"},
-		},
-		"escaped line break before a tab line that opens with a backslash": {
-			input: "b: \"\\\n\t\t\\",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9"},
-		},
-		"text on the line after a tab line that swallows its indicator": {
-			// The token the lexer makes of the second tab swallows the ":"
-			// that ends the line, and the tokens of whitespace alone sit on
-			// that ":". The text of the next token opens the line after it.
-			input: "a: \"x\n\t\t:\n\t,,\n\t",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "2:3:9", "3:2:12"},
-		},
-		"quote on the line after a tab line that swallows its indicator": {
-			input: "a: \"x\n\t\t-\n\t\"\r\n\t",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "2:3:9", "3:2:12", "4:2:16"},
-		},
-	}
-
-	for name, tc := range tcs {
+	for name, tc := range positionCases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -2001,124 +2062,44 @@ func TestTokenize_Positions(t *testing.T) {
 	}
 }
 
-// positionCorpus holds sources whose tokens exercise the positions the lexer
-// places oddly.
-var positionCorpus = map[string]string{
-	"mapping":                                        "a: 1\nb: two\n",
-	"trailing spaces":                                "a: 1   \nb: 2  \n",
-	"trailing spaces before a comment":               "a: 1   # c\nb: 2\n",
-	"comments":                                       "# head\na: 1 # line\n# foot\nb: 2\n",
-	"header after a comment":                         "# comment\n---\nb: two\n",
-	"tag on a value":                                 "t: !!str s\nu: !!int 1\n",
-	"tag before a nested map":                        "a: !t\n  b: 1\nc: 2\n",
-	"tag before a blank line":                        "a: !!seq\n\n  - b\n",
-	"anchor and alias":                               "a: &x 1\nb: *x\n",
-	"literal at the end":                             "k: |\n    hello\n    world\n",
-	"literal with content after":                     "k: |\n  a\n  b\nz: 1\n",
-	"literal with blank lines":                       "k: |\n  a\n\n  b\n\nz: 1\n",
-	"literal with a blank line of spaces":            "k: |\n  a\n   \n  b\nz: 1\n",
-	"literal with a leading blank line":              "k: |\n\n  b\nz: 1\n",
-	"literal with keep":                              "k: |+\n  a\n\n\nz: 1\n",
-	"literal with an indent indicator":               "k: |2\n   a\n  b\n",
-	"literal with a comment after":                   "k: |\n  a\n# c\nz: 1\n",
-	"literal followed by a header":                   "k: |\n  a\n---\nz: 1\n",
-	"nested literal with a comment after":            "a:\n  k: |\n    x\n\n  # c\n  z: 1\n",
-	"folded":                                         "k: >\n  a\n\n  b\n\nz: 1\n",
-	"empty literal":                                  "a: |\nb: 1\n",
-	"empty literal with keep":                        "a: |+\n\nb: 1\n",
-	"literal of spaces before a comment":             "a: |+\n  \n# c\nb: 1\n",
-	"folded of spaces before a comment":              "a: >+\n  \n# c\nb: 1\n",
-	"literal of a tab before a comment":              "a: |\n \t\n# c\nb: 1\n",
-	"literal of spaces after a header comment":       "a: |+ # h\n  \n# c\nb: 1\n",
-	"nested literal of spaces before a comment":      "items:\n  - script: |+\n      \n    # next\n  - b\n",
-	"literal of blank lines before a comment":        "a: |+\n  \n\n  \n# c\nb: 1\n",
-	"crlf literal of spaces before a comment":        "a: |+\r\n  \r\n# c\r\nb: 1\r\n",
-	"tagged literal of spaces before a comment":      "a: !t |+\n  \n# c\nb: 1\n",
-	"empty folded before a comment":                  "x:\n  a: >\n  # c\n  b: 1\n",
-	"empty folded before spaces and a comment":       "x:\n  a: >\n    \n  # c\n  b: 1\n",
-	"quoted multi-line":                              "a: 'x\n\n  y'\nb: 1\n",
-	"double-quoted multi-line":                       "c: \"x\n  y\"\nd: 1\n",
-	"escape after a tag":                             "name: !!str \"Caf\\u00e9\"\nage: 3\n",
-	"escape after a comment":                         "m:\n  # c\n  \"\\u00e9\": 1\n  b: 2\n",
-	"escape in a flow sequence":                      "[!!str \"\\u00e9\", b]\n",
-	"escape in a sequence":                           "- !!str \"\\u00e9\"\n- b\n",
-	"escaped scalars in a row":                       "a: \"\\u00e9\"\n\"\\u00e8\": \"\\x41 b\"\nc: 1\n",
-	"escape in a multi-line scalar":                  "a: \"x\\x41\n  b c\"\nc: 1\n",
-	"escape that swallows the quote":                 "a: \"\\u12\"\nb: 1\nc: 2\n",
-	"escape cut short by the end":                    "a: \"\\u: 1",
-	"long escape cut short by the end":               "\"\\U: \\U",
-	"high surrogate without a low one":               "a: \"\\uD83Dxx\"\nb: 1\n",
-	"escape cut short on a later line":               "a: \"x\n  \\u1\"\n",
-	"open scalar cut at a header":                    "a: \"caf\\u00e9\n---\nb: 1\n",
-	"open scalar cut at a document end":              "a: \"x\\x41\n...\nb: 1\n",
-	"open scalar cut after a code holding a rune":    "a: \"caf\\u00e9e\n---\nb: 1\n",
-	"unknown escape after an escape":                 "name: \"caf\\u00e9\n  x \\d\"\nnext: 1\n",
-	"header after a cut escape":                      "a: \"\\x1\"\n---\nb: 1\n",
-	"comment after a shortened header":               "\"\t1\n---\n# c\n",
-	"plain multi-line":                               "a: plain\n  multi\nb: 2\n",
-	"flow collections":                               "{a: 1, b: [1, 2]}\n",
-	"flow sequence over lines":                       "a: [\n  1,\n  2\n]\n",
-	"sequences":                                      "- a\n- b # c\n- - c\n  - d\n",
-	"complex key":                                    "? k\n: v\n",
-	"directive":                                      "%YAML 1.2\n---\na: 1\n",
-	"several documents":                              "a: 1\n---\nb: 2\n...\n# tail\nc: 3\n",
-	"blank lines":                                    "a: 1\n\n\nb: 2\n",
-	"blank line with a tab after a quote":            "a: \"t\tb\"\n \t\nb: 1\n",
-	"key with trailing spaces":                       "a  : 1\n",
-	"tab after a colon":                              "a:\t1\n",
-	"wide runes":                                     "a: 日本 x\nb: é\n日: 1\n",
-	"crlf":                                           "key: value\r\n# c\r\nnext: 1\r\n",
-	"crlf literal":                                   "a: 1\r\nb: |\r\n  x\r\n  y\r\nc: 3\r\n",
-	"crlf tag and quoted":                            "a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n",
-	"bare cr":                                        "a: 1\rb: 2\r",
-	"no final line ending":                           "a: 1\nb: 2",
-	"space before a colon after quoted flow keys":    "{\"a\" : 1, \"b\" : \"x\"}\n",
-	"space before a colon after an alias key":        "&a a : 1\n*a : 2\n",
-	"space before a colon after a single-quoted key": "'a' : 1\n",
-	"nested explicit key":                            "a:\n  ? zz\n  : x\n",
-	"explicit key in a sequence entry":               "- ? earth\n  : blue\n",
-	"explicit key after a document header":           "x: 1\n---\n\n\n? a\n: b\n",
-	"explicit key after a flow sequence":             "tags: [a, b]\n\n? key\n: value\n",
-	"explicit key after a comment":                   "# c\n\n? b\n: c\n",
-	"explicit key after a blank line":                "\n? k\n: v\n",
-	"crlf explicit key after a comment":              "# c\r\n\r\n? b\r\n",
-	"trailing tab":                                   "a: 1\t\nb: 2\n",
-	"trailing spaces before a key":                   "a: 1   \nb: 2\n",
-	"trailing spaces after a quoted scalar":          "a: 'x'   \nb: 1\n",
-	"trailing spaces after an anchor":                "a: &k   \n  b: 1\n",
-	"trailing spaces after a tag":                    "a: !t   \n  b: 1\n",
-	"trailing spaces after a flow sequence":          "a: [1, 2]   \nb: 2\n",
-	"blank line of spaces":                           "a: 1\n   \nb: 2\n",
-	"blank line of spaces after a document end":      "a: 1\n...\n  \nb: 2\n",
-	"blank line of spaces in a plain scalar":         "a: plain\n   \n  multi\nb: 2\n",
-	"colon after trailing spaces on a quoted key":    "\"q\" \n: 1\n",
-	"colon after a trailing tab on a quoted key":     "\"q\"\t\n: 1\n",
-	"colon after a blank line of spaces":             "\"q\"\n  \n: 1\n",
-	"colon after trailing spaces crlf":               "'q' \r\n: 1\r\n",
-	"nested colon after trailing spaces":             "- \"q\" \n  : 1\n",
-	"colon after trailing spaces on a later key":     "a: 1\n'q'  \n: 2\n",
-	"blank line of a tab before the first key":       "\t\nb: 1\n",
-	"blank line with a tab before the first key":     " \t\nb: 1\n",
-	"blank line of a tab before a quoted first key":  "\t\n\"b\": 1\n",
-	"crlf blank line of a tab before the first key":  "\t\r\nb: 1\r\n",
-	"bad block header at the end":                    "key: >foo",
-	"bad block header and comment at the end":        "k: |ab # c",
-	"bad block header in a later entry":              "- |ab\n- |ab",
-	"text after a block scalar header at the end":    "key: |abc",
-	"text after a block scalar header in a sequence": "- |ab\n- |cd",
-	"bad block header ending in a double quote":      "key: >\"quoted\"",
-	"bad block header ending in a single quote":      "key: |'x'",
-	"bad block header ending in an at sign":          "k: |a@",
-	"bad block header ending in a backtick":          "k: |a`",
-	"bad header ending in a quote after a comment":   "# c\nb: |ab'",
-	"reserved indicators in a row at the end":        ": @@",
-	"bad tags in a row after a document end":         "...!}!}",
+// positionSources returns by name the sources of [positionCorpus] and of
+// the tables that hold sources of the same kind. The test fails when two
+// sources share a name.
+func positionSources(t *testing.T) map[string]string {
+	t.Helper()
+
+	sources := maps.Clone(positionCorpus)
+	add := func(name, input string) {
+		if have, ok := sources[name]; ok {
+			require.Equal(t, have, input, "two sources named %q", name)
+		}
+
+		sources[name] = input
+	}
+
+	for name, tc := range positionCases {
+		add(name, tc.input)
+	}
+
+	for name, tc := range droppedWhitespace {
+		add(name, tc.input)
+	}
+
+	for name, tc := range droppedLineBreaks {
+		add(name, tc.input)
+	}
+
+	for name, input := range numericEscapes {
+		add(name, input)
+	}
+
+	return sources
 }
 
 func TestTokenize_PositionsLocateText(t *testing.T) {
 	t.Parallel()
 
-	for name, input := range positionCorpus {
+	for name, input := range positionSources(t) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
@@ -2193,7 +2174,7 @@ func TestTokenize_ParsesAsTheLexerDoes(t *testing.T) {
 	// sequence a token belongs to and where a comment attaches, so moving
 	// tokens must not change the tree it builds from the stream ForParser
 	// shapes.
-	for name, input := range positionCorpus {
+	for name, input := range positionSources(t) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
