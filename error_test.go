@@ -1917,210 +1917,208 @@ func TestError_Unwrap(t *testing.T) {
 func TestError_MultiError(t *testing.T) {
 	t.Parallel()
 
-	t.Run("single nested error with path", func(t *testing.T) {
-		t.Parallel()
+	record := stringtest.Input(`
+		name: test
+		value: 123
+		other: data
+	`)
+	pair := stringtest.Input(`
+		key: value
+		foo: bar
+	`)
 
-		source := stringtest.Input(`
-			name: test
-			value: 123
-			other: data
-		`)
+	// The tokens of the keys of pair, for the errors that carry the
+	// position of a token.
+	tokens := lexer.Tokenize(pair)
+	keyToken := tokens[0]
+	fooIndex := slices.IndexFunc(tokens, func(tk *token.Token) bool { return tk.Value == "foo" })
+	require.NotEqual(t, -1, fooIndex, "failed to find foo token")
 
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-			"validation failed",
-			niceyaml.AtPath(paths.Current().Child("name").Key()),
-			niceyaml.WithDetails(
-				niceyaml.NewError(
-					"invalid type",
-					niceyaml.AtPath(paths.Current().Child("value")),
+	fooToken := tokens[fooIndex]
+
+	namePath := paths.Current().Child("name")
+	valuePath := paths.Current().Child("value")
+	otherPath := paths.Current().Child("other")
+	keyPath := paths.Current().Child("key")
+	missingPath := paths.Current().Child("nonexistent")
+
+	tcs := map[string]struct {
+		source string
+		err    error
+		// The message part the rendering opens with, when the case pins it.
+		wantPrefix string
+		// The text the rendering holds, and the text it leaves out.
+		want    []string
+		wantNot []string
+	}{
+		"single nested error with path": {
+			source: record,
+			err: niceyaml.NewError("validation failed", niceyaml.AtPath(namePath.Key()), niceyaml.WithDetails(
+				niceyaml.NewError("invalid type", niceyaml.AtPath(valuePath)),
+			)),
+			// The output highlights the main token and annotates the nested error.
+			want: []string{
+				"<genericError>name</genericError>",
+				"<genericError>123</genericError>",
+				"^ invalid type",
+			},
+		},
+		"multiple nested errors on different lines": {
+			source: record,
+			err: niceyaml.NewError("validation failed", niceyaml.AtPath(namePath.Key()), niceyaml.WithDetails(
+				niceyaml.NewError("invalid type", niceyaml.AtPath(valuePath)),
+				niceyaml.NewError("missing field", niceyaml.AtPath(otherPath.Key())),
+			)),
+			// The output holds both annotations.
+			want: []string{"^ invalid type", "^ missing field"},
+		},
+		"multiple nested errors on same line": {
+			source: "key: value",
+			// Both errors point to the same line.
+			err: niceyaml.NewError(
+				"validation failed",
+				niceyaml.AtPosition(position.NewFromToken(keyToken)),
+				niceyaml.WithDetails(
+					niceyaml.NewError("error1", niceyaml.AtPath(keyPath.Key())),
+					niceyaml.NewError("error2", niceyaml.AtPath(keyPath)),
 				),
 			),
-		))
-
-		got := stringtest.TrimLineEnds(render(err))
-
-		// The output highlights the main token and annotates the nested error.
-		assert.Contains(t, got, "<genericError>name</genericError>")
-		assert.Contains(t, got, "<genericError>123</genericError>")
-		assert.Contains(t, got, "^ invalid type")
-	})
-
-	t.Run("multiple nested errors on different lines", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			name: test
-			value: 123
-			other: data
-		`)
-
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-			"validation failed",
-			niceyaml.AtPath(paths.Current().Child("name").Key()),
-			niceyaml.WithDetails(
-				niceyaml.NewError(
-					"invalid type",
-					niceyaml.AtPath(paths.Current().Child("value")),
-				),
-				niceyaml.NewError(
-					"missing field",
-					niceyaml.AtPath(paths.Current().Child("other").Key()),
-				),
+			// Errors on the same line combine with "; ".
+			want: []string{"error1; error2"},
+		},
+		"nested errors on same line out of column order": {
+			source: "key: [alpha, beta]",
+			// The children arrive in reverse column order.
+			err: niceyaml.NewSummary(
+				"2 problems",
+				niceyaml.NewError("bad beta", niceyaml.AtPath(keyPath.Index(1))),
+				niceyaml.NewError("bad alpha", niceyaml.AtPath(keyPath.Index(0))),
 			),
-		))
-
-		got := stringtest.TrimLineEnds(render(err))
-
-		// The output holds both annotations.
-		assert.Contains(t, got, "^ invalid type")
-		assert.Contains(t, got, "^ missing field")
-	})
-
-	t.Run("multiple nested errors on same line", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			key: value
-		`)
-		tokens := lexer.Tokenize(source)
-
-		// Both errors point to the same line.
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-			"validation failed",
-			niceyaml.AtPosition(position.NewFromToken(tokens[0])),
-			niceyaml.WithDetails(
-				niceyaml.NewError(
-					"error1",
-					niceyaml.AtPath(paths.Current().Child("key").Key()),
-				),
-				niceyaml.NewError(
-					"error2",
-					niceyaml.AtPath(paths.Current().Child("key")),
+			// The joined messages follow the column order of the carets.
+			want: []string{"^ bad alpha; bad beta"},
+		},
+		"nested errors that repeat a message": {
+			source: "key: [alpha, beta]",
+			err: niceyaml.NewSummary(
+				"4 problems",
+				niceyaml.NewError("too long", niceyaml.AtPath(keyPath.Index(0))),
+				niceyaml.NewError("too long", niceyaml.AtPath(keyPath.Index(1))),
+				niceyaml.NewError("too long", niceyaml.AtPath(keyPath.Index(0))),
+				niceyaml.NewError("no digit", niceyaml.AtPath(keyPath.Index(0))),
+			),
+			// The message reads once at the column it repeats at, and again
+			// at the other column.
+			want: []string{"^ too long; no digit; too long<"},
+		},
+		"nested error with direct token": {
+			source: pair,
+			err: niceyaml.NewError(
+				"main error",
+				niceyaml.AtPosition(position.NewFromToken(keyToken)),
+				niceyaml.WithDetails(
+					niceyaml.NewError("nested with token", niceyaml.AtPosition(position.NewFromToken(fooToken))),
 				),
 			),
-		))
-
-		got := stringtest.TrimLineEnds(render(err))
-
-		// Errors on the same line combine with "; ".
-		assert.Contains(t, got, "error1; error2")
-	})
-
-	t.Run("nested errors on same line out of column order", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			key: [alpha, beta]
-		`)
-
-		// The children arrive in reverse column order.
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
-			"2 problems",
-			niceyaml.NewError(
-				"bad beta",
-				niceyaml.AtPath(paths.Current().Child("key").Index(1)),
+			// The output highlights both tokens.
+			want: []string{
+				"<genericError>key</genericError>",
+				"<genericError>foo</genericError>",
+				"^ nested with token",
+			},
+		},
+		"nested error that does not resolve stays in the message": {
+			source: "key: value",
+			err: niceyaml.NewError("main error", niceyaml.AtPath(keyPath.Key()), niceyaml.WithDetails(
+				niceyaml.NewError("nested error", niceyaml.AtPath(missingPath.Key())),
+			)),
+			// The nested error has no line to annotate, so the message is the
+			// only place it appears.
+			wantPrefix: "1:1: $.key~: main error\n└── $.nonexistent~: nested error\n\n",
+			want:       []string{"<genericError>key</genericError>"},
+			wantNot:    []string{"^ nested error", "\n\n$.nonexistent~"},
+		},
+		"nested error without path or token stays in the message": {
+			source: "key: value",
+			err: niceyaml.NewError("main error", niceyaml.AtPath(keyPath.Key()), niceyaml.WithDetails(
+				niceyaml.NewError("no location"),
+			)),
+			wantPrefix: "1:1: $.key~: main error\n└── no location\n\n",
+			wantNot:    []string{"^ no location", "\n\nno location"},
+		},
+		"nested-only error renders with annotations": {
+			source: stringtest.Input(`
+				name: test
+				value: 123
+			`),
+			// The error has no path of its own, and its nested error has one.
+			err: niceyaml.NewError("validation failed at 1 location", niceyaml.WithDetails(
+				niceyaml.NewError("got number, want string", niceyaml.AtPath(valuePath)),
+			)),
+			// The output holds the main message, the annotation of the nested
+			// error, the YAML content as well as the tree, and the highlight
+			// on the value of the nested error.
+			want: []string{
+				"validation failed at 1 location",
+				"got number, want string",
+				"value",
+				"123",
+				"<genericError>123</genericError>",
+			},
+		},
+		"nested-only error with multiple lines": {
+			source: record,
+			// The nested errors sit on different lines.
+			err: niceyaml.NewSummary(
+				"validation failed at 2 locations",
+				niceyaml.NewError("type error on value", niceyaml.AtPath(valuePath)),
+				niceyaml.NewError("unexpected property", niceyaml.AtPath(otherPath.Key())),
 			),
-			niceyaml.NewError(
-				"bad alpha",
-				niceyaml.AtPath(paths.Current().Child("key").Index(0)),
+			// The output holds both annotations and highlights both locations.
+			want: []string{
+				"type error on value",
+				"unexpected property",
+				"<genericError>123</genericError>",
+				"<genericError>other</genericError>",
+			},
+		},
+		"nested-only error with resolvable and unresolvable nested errors": {
+			source: stringtest.Input(`
+				name: test
+				value: 123
+			`),
+			// Some nested errors resolve and some do not.
+			err: niceyaml.NewSummary(
+				"validation failed",
+				niceyaml.NewError("resolvable error", niceyaml.AtPath(valuePath)),
+				niceyaml.NewError("unresolvable error", niceyaml.AtPath(missingPath.Key())),
 			),
-		))
+			// Both nested errors are part of the message, and only the one that
+			// resolves annotates the excerpt.
+			wantPrefix: "validation failed\n├── 2:8: $.value: resolvable error\n└── $.nonexistent~: unresolvable error\n\n",
+			want:       []string{"^ resolvable error"},
+			wantNot:    []string{"^ unresolvable error", "\n\n$.nonexistent~"},
+		},
+	}
 
-		got := stringtest.TrimLineEnds(render(err))
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		// The joined messages follow the column order of the carets.
-		assert.Contains(t, got, "^ bad alpha; bad beta")
-	})
+			err := yamltest.Bind(t, niceyaml.NewSourceFromString(tc.source), tc.err)
 
-	t.Run("nested errors that repeat a message", func(t *testing.T) {
-		t.Parallel()
+			got := stringtest.TrimLineEnds(render(err))
 
-		source := stringtest.Input(`
-			key: [alpha, beta]
-		`)
+			assert.True(t, strings.HasPrefix(got, tc.wantPrefix), got)
 
-		bad := func(message string, index int) error {
-			return niceyaml.NewError(message, niceyaml.AtPath(paths.Current().Child("key").Index(index)))
-		}
-
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
-			"4 problems", bad("too long", 0), bad("too long", 1), bad("too long", 0), bad("no digit", 0),
-		))
-
-		got := stringtest.TrimLineEnds(render(err))
-
-		// The message reads once at the column it repeats at, and again
-		// at the other column.
-		assert.Contains(t, got, "^ too long; no digit; too long<")
-	})
-
-	t.Run("nested error with direct token", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			key: value
-			foo: bar
-		`)
-		tokens := lexer.Tokenize(source)
-
-		// Find the "foo" token by iterating through tokens.
-		var fooToken *token.Token
-
-		for _, tk := range tokens {
-			if tk.Value == "foo" {
-				fooToken = tk
-				break
+			for _, want := range tc.want {
+				assert.Contains(t, got, want)
 			}
-		}
 
-		require.NotNil(t, fooToken, "failed to find foo token")
-
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-			"main error",
-			niceyaml.AtPosition(position.NewFromToken(tokens[0])),
-			niceyaml.WithDetails(
-				niceyaml.NewError(
-					"nested with token",
-					niceyaml.AtPosition(position.NewFromToken(fooToken)),
-				),
-			),
-		))
-
-		got := stringtest.TrimLineEnds(render(err))
-
-		// The output highlights both tokens.
-		assert.Contains(t, got, "<genericError>key</genericError>")
-		assert.Contains(t, got, "<genericError>foo</genericError>")
-		assert.Contains(t, got, "^ nested with token")
-	})
-
-	t.Run("nested error that does not resolve stays in the message", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			key: value
-		`)
-
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-			"main error",
-			niceyaml.AtPath(paths.Current().Child("key").Key()),
-			niceyaml.WithDetails(
-				niceyaml.NewError(
-					"nested error",
-					niceyaml.AtPath(paths.Current().Child("nonexistent").Key()),
-				),
-			),
-		))
-
-		got := stringtest.TrimLineEnds(render(err))
-
-		// The nested error has no line to annotate, so the message is the
-		// only place it appears.
-		assert.True(t, strings.HasPrefix(got, "1:1: $.key~: main error\n└── $.nonexistent~: nested error\n\n"), got)
-		assert.Contains(t, got, "<genericError>key</genericError>")
-		assert.NotContains(t, got, "^ nested error")
-		assert.NotContains(t, got, "\n\n$.nonexistent~")
-	})
+			for _, wantNot := range tc.wantNot {
+				assert.NotContains(t, got, wantNot)
+			}
+		})
+	}
 
 	t.Run("plain error with nested errors keeps its own message", func(t *testing.T) {
 		t.Parallel()
@@ -2154,44 +2152,6 @@ func TestError_MultiError(t *testing.T) {
 		assert.Empty(t, yamltest.DetailsOf(summary))
 		assert.Equal(t, []error{nested1, nested2}, errsOf(yamltest.DetailsOf(detailed)))
 		assert.Empty(t, yamltest.ProblemsOf(detailed))
-	})
-
-	t.Run("nested error without path or token stays in the message", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			key: value
-		`)
-
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-			"main error",
-			niceyaml.AtPath(paths.Current().Child("key").Key()),
-			niceyaml.WithDetails(
-				niceyaml.NewError("no location"),
-			),
-		))
-
-		got := stringtest.TrimLineEnds(render(err))
-
-		assert.True(t, strings.HasPrefix(got, "1:1: $.key~: main error\n└── no location\n\n"), got)
-		assert.NotContains(t, got, "^ no location")
-		assert.False(t, strings.HasSuffix(got, "\n\nno location"), got)
-	})
-
-	t.Run("errors.Is works with nested errors", func(t *testing.T) {
-		t.Parallel()
-
-		sentinel1 := errors.New("sentinel 1")
-		sentinel2 := errors.New("sentinel 2")
-
-		err := niceyaml.NewSummary(
-			"main error",
-			niceyaml.Invalid(sentinel1),
-			niceyaml.Invalid(sentinel2),
-		)
-
-		require.ErrorIs(t, err, sentinel1)
-		require.ErrorIs(t, err, sentinel2)
 	})
 
 	t.Run("errors.As works with the errors a summary heads", func(t *testing.T) {
@@ -2232,38 +2192,6 @@ func TestError_MultiError(t *testing.T) {
 		assert.Equal(t, "custom error", target.msg)
 	})
 
-	t.Run("nested-only error renders with annotations", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			name: test
-			value: 123
-		`)
-
-		// The error has no path of its own, and its nested error has one.
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
-			"validation failed at 1 location",
-			niceyaml.WithDetails(
-				niceyaml.NewError(
-					"got number, want string",
-					niceyaml.AtPath(paths.Current().Child("value")),
-				),
-			),
-		))
-
-		got := stringtest.TrimLineEnds(render(err))
-
-		// The output holds the main message.
-		assert.Contains(t, got, "validation failed at 1 location")
-		// The output holds the annotation of the nested error.
-		assert.Contains(t, got, "got number, want string")
-		// The output holds the YAML content as well as the tree.
-		assert.Contains(t, got, "value")
-		assert.Contains(t, got, "123")
-		// The output highlights the value of the nested error.
-		assert.Contains(t, got, "<genericError>123</genericError>")
-	})
-
 	t.Run("nested-only error without source falls back to plain", func(t *testing.T) {
 		t.Parallel()
 
@@ -2282,70 +2210,6 @@ func TestError_MultiError(t *testing.T) {
 		// nested error waits for a binding to put its position in front.
 		assert.Equal(t, "validation failed", err.Error())
 		assert.Equal(t, "validation failed\n`-- @.value: nested error", render(err))
-	})
-
-	t.Run("nested-only error with multiple lines", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			name: test
-			value: 123
-			other: data
-		`)
-
-		// The nested errors sit on different lines.
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
-			"validation failed at 2 locations",
-			niceyaml.NewError(
-				"type error on value",
-				niceyaml.AtPath(paths.Current().Child("value")),
-			),
-			niceyaml.NewError(
-				"unexpected property",
-				niceyaml.AtPath(paths.Current().Child("other").Key()),
-			),
-		))
-
-		got := stringtest.TrimLineEnds(render(err))
-
-		// The output holds both annotations.
-		assert.Contains(t, got, "type error on value")
-		assert.Contains(t, got, "unexpected property")
-		// The output highlights both locations.
-		assert.Contains(t, got, "<genericError>123</genericError>")
-		assert.Contains(t, got, "<genericError>other</genericError>")
-	})
-
-	t.Run("nested-only error with resolvable and unresolvable nested errors", func(t *testing.T) {
-		t.Parallel()
-
-		source := stringtest.Input(`
-			name: test
-			value: 123
-		`)
-
-		// Some nested errors resolve and some do not.
-		err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
-			"validation failed",
-			niceyaml.NewError(
-				"resolvable error",
-				niceyaml.AtPath(paths.Current().Child("value")),
-			),
-			niceyaml.NewError(
-				"unresolvable error",
-				niceyaml.AtPath(paths.Current().Child("nonexistent").Key()),
-			),
-		))
-
-		got := stringtest.TrimLineEnds(render(err))
-
-		// Both nested errors are part of the message, and only the one that
-		// resolves annotates the excerpt.
-		assert.True(t, strings.HasPrefix(got,
-			"validation failed\n├── 2:8: $.value: resolvable error\n└── $.nonexistent~: unresolvable error\n\n"), got)
-		assert.Contains(t, got, "^ resolvable error")
-		assert.NotContains(t, got, "^ unresolvable error")
-		assert.NotContains(t, got, "\n\n$.nonexistent~")
 	})
 
 	t.Run("nested-only error with nested error that has no path or token", func(t *testing.T) {
