@@ -2136,62 +2136,36 @@ func TestErrorTree_Problems_Err(t *testing.T) {
 	first := niceyaml.Invalid(&ruleError{id: "first-use"}, niceyaml.AtPath(a))
 	detailed := niceyaml.WithDetails(first)
 
-	bind := func(t *testing.T, err error) error {
-		t.Helper()
-
-		return yamltest.Bind(t, source, err)
-	}
-
 	// Each case builds one problem, and want is the rule [errors.As] finds
 	// on the Err of its row, or empty when the problem wraps none.
 	tcs := map[string]struct {
-		build func(t *testing.T) error
-		want  string
+		err  error
+		want string
 	}{
 		"rule of the problem beside a rule of its detail": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return bind(t, niceyaml.Invalid(own, niceyaml.AtPath(b), detailed))
-			},
+			err:  yamltest.Bind(t, source, niceyaml.Invalid(own, niceyaml.AtPath(b), detailed)),
 			want: "own",
 		},
 		"no rule beside a rule of its detail": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return bind(t, niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed))
-			},
+			err: yamltest.Bind(t, source, niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed)),
 		},
 		"wrapper below the binding": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return bind(t, fmt.Errorf("check: %w", niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed)))
-			},
+			err: yamltest.Bind(t, source,
+				fmt.Errorf("check: %w", niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed))),
 		},
 		"rule in a wrapper above the binding": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return fmt.Errorf("%w: %w", own, bind(t, niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed)))
-			},
+			err: fmt.Errorf("%w: %w", own,
+				yamltest.Bind(t, source, niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed))),
 			want: "own",
 		},
 		"bound to no source": {
-			build: func(*testing.T) error {
-				return niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed)
-			},
+			err: niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed),
 		},
 		"bound to no source below a wrapper": {
-			build: func(*testing.T) error {
-				return fmt.Errorf("check: %w", niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed))
-			},
+			err: fmt.Errorf("check: %w", niceyaml.NewError("conflict", niceyaml.AtPath(b), detailed)),
 		},
 		"rule of a problem bound to no source": {
-			build: func(*testing.T) error {
-				return niceyaml.Place(fmt.Errorf("%w: read rules: %w", own, fs.ErrNotExist), detailed)
-			},
+			err:  niceyaml.Place(fmt.Errorf("%w: read rules: %w", own, fs.ErrNotExist), detailed),
 			want: "own",
 		},
 	}
@@ -2200,7 +2174,7 @@ func TestErrorTree_Problems_Err(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			problems := slices.Collect(niceyaml.NewErrorTree(tc.build(t)).Problems())
+			problems := slices.Collect(niceyaml.NewErrorTree(tc.err).Problems())
 			require.Len(t, problems, 1)
 
 			problem := problems[0]
@@ -2231,39 +2205,29 @@ func TestErrorTree_Problems_WrappedJoin(t *testing.T) {
 	doc, err := source.Document()
 	require.NoError(t, err)
 
+	hours := yamltest.At(t, doc, paths.Current().Child("hours"))
+
 	early := errors.New("opens too early")
 	late := errors.New("closes too late")
 
 	tcs := map[string]struct {
-		build func(t *testing.T) error
-		want  []string
+		err  error
+		want []string
 	}{
 		"unbound": {
-			build: func(*testing.T) error {
-				return niceyaml.Invalid(errors.Join(early, late))
-			},
+			err:  niceyaml.Invalid(errors.Join(early, late)),
 			want: []string{"opens too early", "closes too late"},
 		},
 		"bound at the root": {
-			build: func(*testing.T) error {
-				return doc.Bind(niceyaml.Invalid(errors.Join(early, late)))
-			},
+			err:  doc.Bind(niceyaml.Invalid(errors.Join(early, late))),
 			want: []string{"f.yaml: opens too early", "f.yaml: closes too late"},
 		},
 		"bound through a scoped Node": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				hours := yamltest.At(t, doc, paths.Current().Child("hours"))
-
-				return hours.Bind(niceyaml.Invalid(errors.Join(early, late)))
-			},
+			err:  hours.Bind(niceyaml.Invalid(errors.Join(early, late))),
 			want: []string{"f.yaml:1:1: $.hours: opens too early", "f.yaml:1:1: $.hours: closes too late"},
 		},
 		"rebased": {
-			build: func(*testing.T) error {
-				return niceyaml.Rebase(niceyaml.Invalid(errors.Join(early, late)), paths.Current().Child("hours"))
-			},
+			err:  niceyaml.Rebase(niceyaml.Invalid(errors.Join(early, late)), paths.Current().Child("hours")),
 			want: []string{"@.hours: opens too early", "@.hours: closes too late"},
 		},
 	}
@@ -2276,7 +2240,7 @@ func TestErrorTree_Problems_WrappedJoin(t *testing.T) {
 			// document is at fault for, and each keeps its text.
 			var got []string
 
-			for problem := range niceyaml.NewErrorTree(tc.build(t)).Problems() {
+			for problem := range niceyaml.NewErrorTree(tc.err).Problems() {
 				assert.True(t, problem.IsInvalid(), problem.Label)
 
 				got = append(got, problem.Label)
@@ -2751,155 +2715,109 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 		return badA().With(niceyaml.WithDetails(niceyaml.NewError("see b", niceyaml.AtPath(pathB))))
 	}
 
-	problems := func(t *testing.T, err error) []niceyaml.ErrorTree {
-		t.Helper()
-
+	problems := func(err error) []niceyaml.ErrorTree {
 		got := slices.Collect(niceyaml.NewErrorTree(err).Problems())
 		require.NotEmpty(t, got)
 
 		return got
 	}
 
+	// DetailOf returns the first detail of the first problem of err.
+	detailOf := func(err error) niceyaml.ErrorTree {
+		detail := problems(err)[0].Children[0]
+		require.True(t, detail.Detail)
+
+		return detail
+	}
+
+	_, errMissing := niceyaml.NewSourceFromFS(fstest.MapFS{}, "missing.yaml")
+	require.Error(t, errMissing)
+
 	tcs := map[string]struct {
-		node     func(t *testing.T) niceyaml.ErrorTree
 		want     string
 		wantPath string
+		node     niceyaml.ErrorTree
 	}{
 		"bound root": {
-			node: func(t *testing.T) niceyaml.ErrorTree {
-				t.Helper()
-
-				return niceyaml.NewErrorTree(yamltest.Bind(t, source, badA()))
-			},
+			node:     niceyaml.NewErrorTree(yamltest.Bind(t, source, badA())),
 			want:     "bad a",
 			wantPath: "$.a",
 		},
 		"bound child of a summary": {
-			node: func(t *testing.T) niceyaml.ErrorTree {
-				t.Helper()
-
-				return problems(t, yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", badA(), badB())))[1]
-			},
+			node:     problems(yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", badA(), badB())))[1],
 			want:     "bad b",
 			wantPath: "$.b",
 		},
 		"unbound located Error": {
-			node: func(*testing.T) niceyaml.ErrorTree {
-				return niceyaml.NewErrorTree(badA())
-			},
+			node:     niceyaml.NewErrorTree(badA()),
 			want:     "bad a",
 			wantPath: "@.a",
 		},
 		"unbound violation under a summary": {
 			// A schema validation of a decoded value returns violations
 			// in this shape, with no source to bind them to.
-			node: func(t *testing.T) niceyaml.ErrorTree {
-				t.Helper()
-
-				return problems(t, niceyaml.NewSummary("2 schema violations",
-					niceyaml.Invalid(errors.New(`expected "integer"`), niceyaml.AtPath(pathA)),
-					niceyaml.Invalid(errors.New(`expected "string"`), niceyaml.AtPath(pathB)),
-				))[1]
-			},
+			node: problems(niceyaml.NewSummary("2 schema violations",
+				niceyaml.Invalid(errors.New(`expected "integer"`), niceyaml.AtPath(pathA)),
+				niceyaml.Invalid(errors.New(`expected "string"`), niceyaml.AtPath(pathB)),
+			))[1],
 			want:     `expected "string"`,
 			wantPath: "@.b",
 		},
 		"rebased Error with no location of its own": {
-			node: func(*testing.T) niceyaml.ErrorTree {
-				return niceyaml.NewErrorTree(niceyaml.Rebase(niceyaml.NewError("never closes"), pathA))
-			},
+			node:     niceyaml.NewErrorTree(niceyaml.Rebase(niceyaml.NewError("never closes"), pathA)),
 			want:     "never closes",
 			wantPath: "@.a",
 		},
 		"plain error": {
-			node: func(*testing.T) niceyaml.ErrorTree {
-				return niceyaml.NewErrorTree(errors.New("too old"))
-			},
+			node: niceyaml.NewErrorTree(errors.New("too old")),
 			want: "too old",
 		},
 		"unreadable file": {
-			node: func(t *testing.T) niceyaml.ErrorTree {
-				t.Helper()
-
-				_, err := niceyaml.NewSourceFromFS(fstest.MapFS{}, "missing.yaml")
-				require.Error(t, err)
-
-				return niceyaml.NewErrorTree(err)
-			},
+			node: niceyaml.NewErrorTree(errMissing),
 			want: "read file: open missing.yaml: file does not exist",
 		},
 		"wrapper around a binding": {
 			// The node reports the binding, without the text the
 			// wrapper added.
-			node: func(t *testing.T) niceyaml.ErrorTree {
-				t.Helper()
-
-				return niceyaml.NewErrorTree(fmt.Errorf("load config: %w", yamltest.Bind(t, source, badA())))
-			},
+			node:     niceyaml.NewErrorTree(fmt.Errorf("load config: %w", yamltest.Bind(t, source, badA()))),
 			want:     "bad a",
 			wantPath: "$.a",
 		},
 		"wrapper around an unbound Error": {
 			// The text of the node puts the path in front of the text the
 			// wrapper added, and the message leaves the path out.
-			node: func(*testing.T) niceyaml.ErrorTree {
-				return niceyaml.NewErrorTree(fmt.Errorf("load config: %w", badA()))
-			},
+			node:     niceyaml.NewErrorTree(fmt.Errorf("load config: %w", badA())),
 			want:     "load config: bad a",
 			wantPath: "@.a",
 		},
 		"Error with a path of its own around a binding": {
 			// No source resolved the outer path, so the node has no
 			// binding, and the message keeps the line of the inner one.
-			node: func(t *testing.T) niceyaml.ErrorTree {
-				t.Helper()
-
-				return niceyaml.NewErrorTree(
-					niceyaml.Invalid(yamltest.Bind(t, source, badA()), niceyaml.AtPath(pathB)),
-				)
-			},
+			node: niceyaml.NewErrorTree(
+				niceyaml.Invalid(yamltest.Bind(t, source, badA()), niceyaml.AtPath(pathB)),
+			),
 			want:     "f.yaml:1:4: $.a: bad a",
 			wantPath: "@.b",
 		},
 		"summary": {
-			node: func(*testing.T) niceyaml.ErrorTree {
-				return niceyaml.NewErrorTree(niceyaml.NewSummary("2 problems", badA(), badB()))
-			},
+			node: niceyaml.NewErrorTree(niceyaml.NewSummary("2 problems", badA(), badB())),
 			want: "2 problems",
 		},
 		"root of a join": {
-			node: func(*testing.T) niceyaml.ErrorTree {
-				return niceyaml.NewErrorTree(errors.Join(badA(), badB()))
-			},
+			node: niceyaml.NewErrorTree(errors.Join(badA(), badB())),
 		},
 		"unbound detail": {
-			node: func(t *testing.T) niceyaml.ErrorTree {
-				t.Helper()
-
-				detail := problems(t, withDetail())[0].Children[0]
-				require.True(t, detail.Detail)
-
-				return detail
-			},
+			node:     detailOf(withDetail()),
 			want:     "see b",
 			wantPath: "@.b",
 		},
 		"bound detail": {
-			node: func(t *testing.T) niceyaml.ErrorTree {
-				t.Helper()
-
-				detail := problems(t, yamltest.Bind(t, source, withDetail()))[0].Children[0]
-				require.True(t, detail.Detail)
-
-				return detail
-			},
+			node:     detailOf(yamltest.Bind(t, source, withDetail())),
 			want:     "see b",
 			wantPath: "$.b",
 		},
 		"hand-built node": {
-			node: func(*testing.T) niceyaml.ErrorTree {
-				return niceyaml.ErrorTree{Err: errors.New("disk full"), Label: "write cache: disk full"}
-			},
+			node: niceyaml.ErrorTree{Err: errors.New("disk full"), Label: "write cache: disk full"},
 			want: "write cache: disk full",
 		},
 	}
@@ -2908,11 +2826,9 @@ func TestErrorTree_MessageAndPath(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			node := tc.node(t)
+			assert.Equal(t, tc.want, tc.node.Message())
 
-			assert.Equal(t, tc.want, node.Message())
-
-			path, ok := node.Path()
+			path, ok := tc.node.Path()
 			if tc.wantPath == "" {
 				assert.False(t, ok)
 
