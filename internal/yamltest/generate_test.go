@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 )
@@ -82,4 +83,21 @@ func TestFlowSequence(t *testing.T) {
 			assert.Equal(t, tc.want, yamltest.FlowSequence(tc.item, tc.count, tc.tail...))
 		})
 	}
+}
+
+func TestAliasedMapping(t *testing.T) {
+	t.Parallel()
+
+	want := stringtest.LinesLF(
+		"defaults: &d",
+		"  k0: v0",
+		"  k1: v1",
+		"services:",
+		"  s0: *d",
+		"  s1: *d",
+		"  s2: *d",
+	)
+
+	assert.Equal(t, want, yamltest.AliasedMapping(2, 3))
+	assert.Equal(t, "defaults: &d\nservices:\n", yamltest.AliasedMapping(0, 0))
 }

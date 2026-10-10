@@ -80,3 +80,26 @@ func WideMerge(members int) string {
 
 	return sb.String()
 }
+
+// AliasedMapping creates YAML content whose key defaults holds a mapping
+// of keys entries under the anchor d, and whose key services holds
+// aliases entries, each an alias to d. A decode reads every entry of the
+// mapping once for each alias, so the two counts set how far the aliases
+// multiply the document.
+func AliasedMapping(keys, aliases int) string {
+	var sb strings.Builder
+
+	sb.WriteString("defaults: &d\n")
+
+	for i := range keys {
+		fmt.Fprintf(&sb, "  k%d: v%d\n", i, i)
+	}
+
+	sb.WriteString("services:\n")
+
+	for i := range aliases {
+		fmt.Fprintf(&sb, "  s%d: *d\n", i)
+	}
+
+	return sb.String()
+}
