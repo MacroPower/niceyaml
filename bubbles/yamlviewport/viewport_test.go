@@ -172,9 +172,7 @@ func TestViewport_SearchNextCostIndependentOfContent(t *testing.T) {
 			newModel := func(n int) *yamlviewport.Model {
 				src := yamltest.GenerateYAML(n)
 
-				m := yamlviewport.New()
-				m.SetWidth(120)
-				m.SetHeight(40)
+				m := testModel(printer.New(), 120, 40)
 				addRevisions(&m, src, src+"extra: value\n")
 				m.SetViewMode(tc.viewMode)
 				m.SetSearchTerm("value")
@@ -2108,9 +2106,7 @@ func TestViewport_KeycapRowsFitWidth(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := yamlviewport.New()
-			m.SetWidth(tc.width)
-			m.SetHeight(2)
+			m := testModel(printer.New(), tc.width, 2)
 			m.SetViewMode(tc.mode)
 			m.SetWordWrap(false)
 			m.SetRevision(niceyaml.NewSourceFromString(stringtest.LinesLF("k: "+keycaps+"abcdefghij", "other: plain")))
@@ -2127,9 +2123,7 @@ func TestViewport_SearchScrollsPastKeycap(t *testing.T) {
 
 	// The search scrolls the match into view past a keycap, which the cut
 	// once measured as one cell short and rendered as a blank row.
-	m := yamlviewport.New()
-	m.SetWidth(40)
-	m.SetHeight(2)
+	m := testModel(printer.New(), 40, 2)
 	m.SetWordWrap(false)
 	m.SetRevision(niceyaml.NewSourceFromString(stringtest.LinesLF(
 		"step: 1\ufe0f\u20e3 "+strings.Repeat("x", 60)+" needle",
@@ -4399,9 +4393,7 @@ func TestViewport_CopiesRenderConcurrently(t *testing.T) {
 			t.Parallel()
 
 			newModel := func() yamlviewport.Model {
-				m := yamlviewport.New()
-				m.SetWidth(20)
-				m.SetHeight(3)
+				m := testModel(printer.New(), 20, 3)
 				addRevisions(&m, "a: 1\nb: 2\n", "a: aaaa bbbb cccc dddd eeee\nb: 3\nc: 4\n")
 
 				if tc.setup != nil {

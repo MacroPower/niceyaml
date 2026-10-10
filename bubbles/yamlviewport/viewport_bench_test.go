@@ -20,11 +20,7 @@ func benchmarkSource(n int) *niceyaml.Source {
 func BenchmarkViewport_SearchNext(b *testing.B) {
 	for _, n := range []int{1_000, 20_000} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
-			m := yamlviewport.New(
-				yamlviewport.WithPrinter(printer.New(printer.WithStyles(theme.Charm.Styles()))),
-			)
-			m.SetWidth(120)
-			m.SetHeight(40)
+			m := testModel(printer.New(printer.WithStyles(theme.Charm.Styles())), 120, 40)
 			m.SetRevision(benchmarkSource(n))
 			m.SetSearchTerm("name")
 
@@ -50,11 +46,7 @@ func BenchmarkViewport_SetSearchTerm(b *testing.B) {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
 			src := yamltest.GenerateLines(n, "key%[1]d: value %[1]d") + "zebra: here\n"
 
-			m := yamlviewport.New(
-				yamlviewport.WithPrinter(printer.New(printer.WithStyles(theme.Charm.Styles()))),
-			)
-			m.SetWidth(120)
-			m.SetHeight(40)
+			m := testModel(printer.New(printer.WithStyles(theme.Charm.Styles())), 120, 40)
 			m.SetRevision(niceyaml.NewSourceFromString(src))
 
 			_ = m.View()
@@ -76,9 +68,7 @@ func BenchmarkViewport_SetSearchTerm(b *testing.B) {
 func BenchmarkViewport_SideBySideView(b *testing.B) {
 	for _, n := range []int{1_000, 100_000} {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
-			m := yamlviewport.New()
-			m.SetWidth(120)
-			m.SetHeight(40)
+			m := testModel(printer.New(), 120, 40)
 			m.SetViewMode(yamlviewport.ViewModeSideBySide)
 			addRevisions(&m, yamltest.GenerateLines(n, "k%[1]d: v%[1]d"), yamltest.GenerateLines(n, "k%[1]d: w%[1]d"))
 			m.SetSearchTerm("v1")
