@@ -2739,29 +2739,29 @@ func TestViewport_Revisions(t *testing.T) {
 				assert.Empty(t, m.RevisionName())
 			},
 		},
-		"GotoRevision/First": {
+		"GotoRevision/EachIndex": {
 			revisions: 3,
-			setup: func(m *yamlviewport.Model) {
-				m.GotoRevision(0)
-			},
 			test: func(t *testing.T, m *yamlviewport.Model) {
 				t.Helper()
+				// Index 2 is the latest, so the view shows a diff in the
+				// default mode.
+				assert.True(t, m.ShowingDiff())
+				assert.Equal(t, "v3", m.RevisionName())
+
+				m.GotoRevision(0)
 				assert.Equal(t, 0, m.RevisionIndex())
 				assert.True(t, m.AtFirstRevision())
-				assert.False(t, m.ShowingDiff()) // Position 0 shows plain view.
+				assert.False(t, m.ShowingDiff()) // First revision, no diff.
 				assert.Equal(t, "v1", m.RevisionName())
-			},
-		},
-		"GotoRevision/Middle": {
-			revisions: 3,
-			setup: func(m *yamlviewport.Model) {
+
 				m.GotoRevision(1)
-			},
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
 				assert.Equal(t, 1, m.RevisionIndex())
-				assert.True(t, m.ShowingDiff()) // Position 1 shows diff.
+				assert.True(t, m.ShowingDiff()) // Between 0 and 1.
 				assert.Equal(t, "v2", m.RevisionName())
+
+				m.GotoRevision(2)
+				assert.True(t, m.ShowingDiff()) // Between 1 and 2.
+				assert.Equal(t, "v3", m.RevisionName())
 			},
 		},
 		"GotoRevision/Clamped": {
@@ -2822,28 +2822,6 @@ func TestViewport_Revisions(t *testing.T) {
 				m.PreviousRevision()
 				assert.Equal(t, 0, m.RevisionIndex()) // Should not change.
 				assert.Equal(t, "v1", m.RevisionName())
-			},
-		},
-		"ShowingDiff/BoundaryConditions": {
-			revisions: 3,
-			test: func(t *testing.T, m *yamlviewport.Model) {
-				t.Helper()
-				// Index 2 is the latest, so the view shows a diff in the
-				// default mode.
-				assert.True(t, m.ShowingDiff())
-				assert.Equal(t, "v3", m.RevisionName())
-
-				m.GotoRevision(0)
-				assert.False(t, m.ShowingDiff()) // First revision, no diff.
-				assert.Equal(t, "v1", m.RevisionName())
-
-				m.GotoRevision(1)
-				assert.True(t, m.ShowingDiff()) // Between 0 and 1.
-				assert.Equal(t, "v2", m.RevisionName())
-
-				m.GotoRevision(2)
-				assert.True(t, m.ShowingDiff()) // Between 1 and 2.
-				assert.Equal(t, "v3", m.RevisionName())
 			},
 		},
 		"SetRevision/Single": {
