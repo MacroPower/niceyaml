@@ -61,6 +61,32 @@ func sourceErrorIn(t *testing.T, err error) *niceyaml.SourceError {
 	return bound
 }
 
+// requireDocumentValues decodes every document of input into an any and
+// compares the values with want. When kept is not empty, the tree of the
+// file must also hold that comment.
+func requireDocumentValues(t *testing.T, input, kept string, want []any) {
+	t.Helper()
+
+	source := niceyaml.NewSourceFromString(input)
+
+	file, err := source.File()
+	require.NoError(t, err)
+
+	if kept != "" {
+		assert.Contains(t, file.String(), kept)
+	}
+
+	docs := source.Documents()
+
+	got := make([]any, len(docs))
+	for i, d := range docs {
+		got[i], err = d.Decode[any](t.Context())
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, want, got)
+}
+
 func TestSource_Decoder(t *testing.T) {
 	t.Parallel()
 
@@ -879,17 +905,7 @@ func TestDocument_Decode(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				docs := niceyaml.NewSourceFromString(tc.input).Documents()
-
-				got := make([]any, len(docs))
-				for i, d := range docs {
-					var err error
-
-					got[i], err = d.Decode[any](t.Context())
-					require.NoError(t, err)
-				}
-
-				assert.Equal(t, tc.want, got)
+				requireDocumentValues(t, tc.input, "", tc.want)
 			})
 		}
 	})
@@ -1254,24 +1270,7 @@ func TestDocument_Decode(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				src := niceyaml.NewSourceFromString(tc.input)
-
-				file, err := src.File()
-				require.NoError(t, err)
-
-				if tc.kept != "" {
-					assert.Contains(t, file.String(), tc.kept)
-				}
-
-				docs := src.Documents()
-
-				got := make([]any, len(docs))
-				for i, d := range docs {
-					got[i], err = d.Decode[any](t.Context())
-					require.NoError(t, err)
-				}
-
-				assert.Equal(t, tc.want, got)
+				requireDocumentValues(t, tc.input, tc.kept, tc.want)
 			})
 		}
 	})
@@ -1346,24 +1345,7 @@ func TestDocument_Decode(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				src := niceyaml.NewSourceFromString(tc.input)
-
-				file, err := src.File()
-				require.NoError(t, err)
-
-				if tc.kept != "" {
-					assert.Contains(t, file.String(), tc.kept)
-				}
-
-				docs := src.Documents()
-
-				got := make([]any, len(docs))
-				for i, d := range docs {
-					got[i], err = d.Decode[any](t.Context())
-					require.NoError(t, err)
-				}
-
-				assert.Equal(t, tc.want, got)
+				requireDocumentValues(t, tc.input, tc.kept, tc.want)
 			})
 		}
 	})
