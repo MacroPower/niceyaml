@@ -1,6 +1,7 @@
 package escape_test
 
 import (
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -32,10 +33,6 @@ func TestControl(t *testing.T) {
 			input: "before\x1bafter",
 			want:  "before␛after",
 		},
-		"DEL replaced": {
-			input: "before\x7fafter",
-			want:  "before␡after",
-		},
 		"TAB replaced": {
 			input: "col1\tcol2",
 			want:  "col1␉col2",
@@ -57,8 +54,18 @@ func TestControl(t *testing.T) {
 			want:  "␛[1mBold␛[22m",
 		},
 		"multiple control chars": {
-			input: "\x00\x01\x02\x1f",
-			want:  "␀␁␂␟",
+			input: "\x00\x01\x02\x1f\x7f",
+			want:  "␀␁␂␟␡",
+		},
+		"all C0 controls": {
+			input: "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f" +
+				"\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f",
+			want: "␀␁␂␃␄␅␆␇␈␉␊␋␌␍␎␏␐␑␒␓␔␕␖␗␘␙␚␛␜␝␞␟",
+		},
+		"all C1 controls": {
+			input: "\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008A\u008B\u008C\u008D\u008E\u008F" +
+				"\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009A\u009B\u009C\u009D\u009E\u009F",
+			want: strings.Repeat("\uFFFD", 32),
 		},
 		"mixed content": {
 			input: "normal\x1b[31mred\x00null",
@@ -72,14 +79,6 @@ func TestControl(t *testing.T) {
 			input: "café\x1btest",
 			want:  "café␛test",
 		},
-		"C1 PAD replaced": {
-			input: "before\u0080after",
-			want:  "before\uFFFDafter",
-		},
-		"C1 APC replaced": {
-			input: "before\u009Fafter",
-			want:  "before\uFFFDafter",
-		},
 		"C1 CSI replaced": {
 			input: "before\u009Bafter",
 			want:  "before\uFFFDafter",
@@ -89,8 +88,8 @@ func TestControl(t *testing.T) {
 			want:  "\uFFFD\uFFFD\uFFFD\uFFFD",
 		},
 		"mixed C0 and C1 controls": {
-			input: "\x00\u0080\x1b\u009B",
-			want:  "␀\uFFFD␛\uFFFD",
+			input: "\x00\u0080\x1b\u009B\x7f\u009F",
+			want:  "␀\uFFFD␛\uFFFD␡\uFFFD",
 		},
 		// Boundary tests.
 		"boundary US (0x1F) last C0 control": {
@@ -129,63 +128,10 @@ func TestControl(t *testing.T) {
 
 			got := escape.Control(tt.input)
 			assert.Equal(t, tt.want, got)
-		})
-	}
-}
 
-func TestControl_PreservesRuneCount(t *testing.T) {
-	t.Parallel()
-
-	tests := map[string]struct {
-		input string
-	}{
-		"empty string": {
-			input: "",
-		},
-		"normal text": {
-			input: "Hello, World!",
-		},
-		"single control char": {
-			input: "\x00",
-		},
-		"multiple control chars": {
-			input: "\x00\x01\x02\x1f\x7f",
-		},
-		"ANSI escape sequence": {
-			input: "\x1b[31mRed\x1b[0m",
-		},
-		"mixed content": {
-			input: "before\x00middle\x1b[31mred\x7fafter",
-		},
-		"unicode with control chars": {
-			input: "日本語\x1bテスト\x00end",
-		},
-		"all C0 controls": {
-			input: "\x00\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f" +
-				"\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f",
-		},
-		"all C1 controls": {
-			input: "\u0080\u0081\u0082\u0083\u0084\u0085\u0086\u0087\u0088\u0089\u008A\u008B\u008C\u008D\u008E\u008F" +
-				"\u0090\u0091\u0092\u0093\u0094\u0095\u0096\u0097\u0098\u0099\u009A\u009B\u009C\u009D\u009E\u009F",
-		},
-		"mixed C0 and C1 controls": {
-			input: "\x00\u0080\x1b\u009B\x7f\u009F",
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			input := tt.input
-			got := escape.Control(input)
-
-			inputRuneCount := utf8.RuneCountInString(input)
-			gotRuneCount := utf8.RuneCountInString(got)
-
-			assert.Equal(t, inputRuneCount, gotRuneCount,
-				"rune count changed: input %q (%d runes) -> output %q (%d runes)",
-				input, inputRuneCount, got, gotRuneCount)
+			// Each replacement is one rune, so the columns of the text
+			// stay where they were.
+			assert.Equal(t, utf8.RuneCountInString(tt.input), utf8.RuneCountInString(got))
 		})
 	}
 }
