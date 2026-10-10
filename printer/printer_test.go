@@ -1299,13 +1299,12 @@ func TestPrinter_PrintSlice(t *testing.T) {
 	`)
 
 	tcs := map[string]struct {
-		gutter printer.Gutter
+		gutter printer.Gutter // Nil for no gutter.
 		want   string
 		spans  position.Spans
 	}{
 		"full range": {
-			spans:  nil, // Empty variadic prints all lines.
-			gutter: printer.NoGutter,
+			spans: nil, // Empty variadic prints all lines.
 			want: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -1326,8 +1325,7 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			),
 		},
 		"bounded middle": {
-			spans:  position.Spans{position.NewSpan(1, 4)},
-			gutter: printer.NoGutter,
+			spans: position.Spans{position.NewSpan(1, 4)},
 			want: stringtest.JoinLF(
 				"second: 2",
 				"third: 3",
@@ -1344,25 +1342,22 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			),
 		},
 		"from start": {
-			spans:  position.Spans{position.NewSpan(0, 2)},
-			gutter: printer.NoGutter,
+			spans: position.Spans{position.NewSpan(0, 2)},
 			want: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
 			),
 		},
 		"to end": {
-			spans:  position.Spans{position.NewSpan(3, 5)},
-			gutter: printer.NoGutter,
+			spans: position.Spans{position.NewSpan(3, 5)},
 			want: stringtest.JoinLF(
 				"fourth: 4",
 				"fifth: 5",
 			),
 		},
 		"single line": {
-			spans:  position.Spans{position.NewSpan(2, 3)},
-			gutter: printer.NoGutter,
-			want:   "third: 3",
+			spans: position.Spans{position.NewSpan(2, 3)},
+			want:  "third: 3",
 		},
 		"single line with line numbers": {
 			spans:  position.Spans{position.NewSpan(2, 3)},
@@ -1370,16 +1365,14 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			want:   "   3 third: 3",
 		},
 		"empty result": {
-			spans:  position.Spans{position.NewSpan(10, 21)},
-			gutter: printer.NoGutter,
-			want:   "",
+			spans: position.Spans{position.NewSpan(10, 21)},
+			want:  "",
 		},
 		"two disjoint spans": {
 			spans: position.Spans{
 				position.NewSpan(0, 1),
 				position.NewSpan(3, 5),
 			},
-			gutter: printer.NoGutter,
 			want: stringtest.JoinLF(
 				"first: 1",
 				"fourth: 4",
@@ -1404,7 +1397,6 @@ func TestPrinter_PrintSlice(t *testing.T) {
 				position.NewSpan(2, 3),
 				position.NewSpan(4, 5),
 			},
-			gutter: printer.NoGutter,
 			want: stringtest.JoinLF(
 				"first: 1",
 				"third: 3",
@@ -1416,7 +1408,6 @@ func TestPrinter_PrintSlice(t *testing.T) {
 				position.NewSpan(0, 2),
 				position.NewSpan(2, 4),
 			},
-			gutter: printer.NoGutter,
 			want: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -1625,15 +1616,14 @@ func TestPrinter_WordWrap(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		gutter printer.Gutter
+		gutter printer.Gutter // Nil for no gutter.
 		input  string
 		want   string
 		width  int
 	}{
 		"simple wrap": {
-			input:  "key: this is a very long value that should wrap",
-			width:  20,
-			gutter: printer.NoGutter,
+			input: "key: this is a very long value that should wrap",
+			width: 20,
 			want: stringtest.JoinLF(
 				"key: this is a very",
 				"long value that",
@@ -1641,36 +1631,32 @@ func TestPrinter_WordWrap(t *testing.T) {
 			),
 		},
 		"wrap on slash": {
-			input:  "path: /usr/local/bin/something",
-			width:  20,
-			gutter: printer.NoGutter,
+			input: "path: /usr/local/bin/something",
+			width: 20,
 			want: stringtest.JoinLF(
 				"path: /usr/local/",
 				"bin/something",
 			),
 		},
 		"wrap on hyphen": {
-			input:  "name: very-long-hyphenated-name",
-			width:  20,
-			gutter: printer.NoGutter,
+			input: "name: very-long-hyphenated-name",
+			width: 20,
 			want: stringtest.JoinLF(
 				"name: very-long-",
 				"hyphenated-name",
 			),
 		},
 		"short content no wrap": {
-			input:  "key: value",
-			width:  50,
-			gutter: printer.NoGutter,
-			want:   "key: value",
+			input: "key: value",
+			width: 50,
+			want:  "key: value",
 		},
 		"multi-line content": {
 			input: stringtest.JoinLF(
 				"key: value",
 				"another: long value that should wrap here",
 			),
-			width:  20,
-			gutter: printer.NoGutter,
+			width: 20,
 			want: stringtest.JoinLF(
 				"key: value",
 				"another: long value",
@@ -1785,51 +1771,45 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 	// of its own and runs past the width, with no empty row before or
 	// after it.
 	tcs := map[string]struct {
-		gutter     printer.Gutter
+		gutter     printer.Gutter // Nil for no gutter.
 		input      string
 		want       string
 		annotation line.Annotation
 		width      int
 	}{
 		"wide value": {
-			gutter: printer.NoGutter,
-			input:  "k: 日本語",
-			width:  1,
-			want:   stringtest.JoinLF("k", ":", "日", "本", "語"),
+			input: "k: 日本語",
+			width: 1,
+			want:  stringtest.JoinLF("k", ":", "日", "本", "語"),
 		},
 		"wide key": {
-			gutter: printer.NoGutter,
-			input:  "日本: v",
-			width:  1,
-			want:   stringtest.JoinLF("日", "本", ":", " ", "v"),
+			input: "日本: v",
+			width: 1,
+			want:  stringtest.JoinLF("日", "本", ":", " ", "v"),
 		},
 		"wide cluster between narrow ones": {
-			gutter: printer.NoGutter,
-			input:  "a日b: v",
-			width:  1,
-			want:   stringtest.JoinLF("a", "日", "b", ":", " ", "v"),
+			input: "a日b: v",
+			width: 1,
+			want:  stringtest.JoinLF("a", "日", "b", ":", " ", "v"),
 		},
 		"emoji with a skin tone modifier": {
-			gutter: printer.NoGutter,
-			input:  "k: 👍🏽",
-			width:  1,
-			want:   stringtest.JoinLF("k", ":", "👍🏽"),
+			input: "k: 👍🏽",
+			width: 1,
+			want:  stringtest.JoinLF("k", ":", "👍🏽"),
 		},
 		"no-break space ahead of a wide cluster": {
 			// The wrap breaks only on an ASCII space, so the no-break space
 			// is content and keeps its row.
-			gutter: printer.NoGutter,
-			input:  "k: a\u00a0日本語",
-			width:  1,
-			want:   stringtest.JoinLF("k", ":", "a", "\u00a0", "日", "本", "語"),
+			input: "k: a\u00a0日本語",
+			width: 1,
+			want:  stringtest.JoinLF("k", ":", "a", "\u00a0", "日", "本", "語"),
 		},
 		"zero-width space ahead of a wide cluster": {
 			// The zero-width space takes no cells, but it is content, so it
 			// keeps its row.
-			gutter: printer.NoGutter,
-			input:  "k: \u200b日本",
-			width:  1,
-			want:   stringtest.JoinLF("k", ":", "\u200b", "日", "本"),
+			input: "k: \u200b日本",
+			width: 1,
+			want:  stringtest.JoinLF("k", ":", "\u200b", "日", "本"),
 		},
 		"gutter leaves one column": {
 			gutter: printer.DefaultGutter,
@@ -1844,9 +1824,8 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 			),
 		},
 		"wide annotation above": {
-			gutter: printer.NoGutter,
-			input:  "k: v",
-			width:  1,
+			input: "k: v",
+			width: 1,
 			annotation: line.Annotation{
 				Content:   "日本",
 				Placement: line.Above,
@@ -2020,8 +1999,8 @@ func TestPrinter_WordWrap_BreakSpaceBeforeBreakpoint(t *testing.T) {
 	// drops the space at the break, as it drops the space at any other
 	// break, rather than showing it on a row of its own.
 	tcs := map[string]struct {
-		gutter printer.Gutter
-		rows   map[int]int // Column to row.
+		gutter printer.Gutter // Nil for no gutter.
+		rows   map[int]int    // Column to row.
 		input  string
 		want   string
 		width  int
@@ -2034,25 +2013,22 @@ func TestPrinter_WordWrap_BreakSpaceBeforeBreakpoint(t *testing.T) {
 			rows:   map[int]int{9: 0, 10: 0, 11: 1, 12: 1},
 		},
 		"slash after a full row": {
-			gutter: printer.NoGutter,
-			input:  "key: value /x",
-			width:  10,
-			want:   stringtest.JoinLF("key: value", "/x"),
-			rows:   map[int]int{9: 0, 10: 0, 11: 1, 12: 1},
+			input: "key: value /x",
+			width: 10,
+			want:  stringtest.JoinLF("key: value", "/x"),
+			rows:  map[int]int{9: 0, 10: 0, 11: 1, 12: 1},
 		},
 		"two spaces before a hyphen": {
-			gutter: printer.NoGutter,
-			input:  "key: value  -x",
-			width:  10,
-			want:   stringtest.JoinLF("key: value", "-x"),
-			rows:   map[int]int{10: 0, 11: 0, 12: 1},
+			input: "key: value  -x",
+			width: 10,
+			want:  stringtest.JoinLF("key: value", "-x"),
+			rows:  map[int]int{10: 0, 11: 0, 12: 1},
 		},
 		"flags and a path": {
-			gutter: printer.NoGutter,
-			input:  "cmd: run --verbose --output /tmp/x",
-			width:  8,
-			want:   stringtest.JoinLF("cmd: run", "--verbos", "e --", "output /", "tmp/x"),
-			rows:   map[int]int{7: 0, 8: 0, 9: 1},
+			input: "cmd: run --verbose --output /tmp/x",
+			width: 8,
+			want:  stringtest.JoinLF("cmd: run", "--verbos", "e --", "output /", "tmp/x"),
+			rows:  map[int]int{7: 0, 8: 0, 9: 1},
 		},
 		"space before a breakpoint past a hard wrap": {
 			gutter: printer.DefaultGutter,
@@ -2062,11 +2038,10 @@ func TestPrinter_WordWrap_BreakSpaceBeforeBreakpoint(t *testing.T) {
 			rows:   map[int]int{8: 2, 9: 2, 10: 3, 11: 3},
 		},
 		"space before a breakpoint past a wide cluster": {
-			gutter: printer.NoGutter,
-			input:  "k: 中b-   // /c",
-			width:  6,
-			want:   stringtest.JoinLF("k: 中b", "-   //", "/c"),
-			rows:   map[int]int{10: 1, 11: 1, 12: 2, 13: 2},
+			input: "k: 中b-   // /c",
+			width: 6,
+			want:  stringtest.JoinLF("k: 中b", "-   //", "/c"),
+			rows:  map[int]int{10: 1, 11: 1, 12: 2, 13: 2},
 		},
 	}
 
@@ -3060,14 +3035,13 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 	t.Parallel()
 
 	tcs := map[string]struct {
-		gutter     printer.Gutter
+		gutter     printer.Gutter // Nil for no gutter.
 		input      string
 		annotation line.Annotation
 		lineIndex  int
 		want       string
 	}{
 		"above annotation at col 0": {
-			gutter:    printer.NoGutter,
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -3078,7 +3052,6 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			want: "# comment\nkey: value",
 		},
 		"above annotation with col padding": {
-			gutter:    printer.NoGutter,
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -3089,7 +3062,6 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			want: "     ^-- error here\nkey: value",
 		},
 		"below annotation at col 0": {
-			gutter:    printer.NoGutter,
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -3100,7 +3072,6 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			want: "key: value\n^ comment below",
 		},
 		"below annotation with col padding": {
-			gutter:    printer.NoGutter,
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -3111,7 +3082,6 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			want: "key: value\n     ^ error here",
 		},
 		"below annotation under wide runes": {
-			gutter:    printer.NoGutter,
 			input:     "日本語: 値",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -3124,7 +3094,6 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			want: "日本語: 値\n        ^ bad value",
 		},
 		"below annotation past the end of wide runes": {
-			gutter:    printer.NoGutter,
 			input:     "日本",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -3135,7 +3104,6 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			want: "日本\n      ^ after",
 		},
 		"below annotation on second line": {
-			gutter: printer.NoGutter,
 			input: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -3153,7 +3121,6 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			),
 		},
 		"above annotation on second line": {
-			gutter: printer.NoGutter,
 			input: stringtest.JoinLF(
 				"first: 1",
 				"second: 2",
@@ -3171,7 +3138,6 @@ func TestPrinter_AnnotationPosition(t *testing.T) {
 			),
 		},
 		"below annotation with empty content marks its column": {
-			gutter:    printer.NoGutter,
 			input:     "key: value",
 			lineIndex: 0,
 			annotation: line.Annotation{
@@ -4832,7 +4798,7 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 
 	tcs := map[string]struct {
 		annFunc    printer.AnnotationFunc
-		gutter     printer.Gutter
+		gutter     printer.Gutter // Nil for no gutter.
 		input      string
 		want       string
 		annotation line.Annotation
@@ -4857,9 +4823,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"above rows align under the column": {
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  16,
+			input: "key: value",
+			width: 16,
 			annotation: line.Annotation{
 				Content:   "one two three four five",
 				Placement: line.Above,
@@ -4873,9 +4838,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"column past the width keeps the marker at its column": {
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  25,
+			input: "key: value",
+			width: 25,
 			annotation: line.Annotation{
 				Content:   "x",
 				Placement: line.Below,
@@ -4888,9 +4852,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"one-cell word at the last column hangs": {
-			input:  "key: aaaaaaaaaaaaaaa",
-			gutter: printer.NoGutter,
-			width:  20,
+			input: "key: aaaaaaaaaaaaaaa",
+			width: 20,
 			annotation: line.Annotation{
 				Content:   "x",
 				Placement: line.Below,
@@ -4903,9 +4866,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"one-cell words with no room beside the marker hang": {
-			input:  "key: aaaaaaaaaaaaaaa",
-			gutter: printer.NoGutter,
-			width:  20,
+			input: "key: aaaaaaaaaaaaaaa",
+			width: 20,
 			annotation: line.Annotation{
 				Content:   "a b c",
 				Placement: line.Below,
@@ -4919,7 +4881,6 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 		},
 		"marker with empty text at the last column keeps one row": {
 			input:   "key: aaaaaaaaaaaaaaa",
-			gutter:  printer.NoGutter,
 			width:   20,
 			annFunc: arrow,
 			annotation: line.Annotation{
@@ -4932,9 +4893,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"one-cell word with one cell of room stays beside the marker": {
-			input:  "key: aaaaaaaaaaaaaaa",
-			gutter: printer.NoGutter,
-			width:  20,
+			input: "key: aaaaaaaaaaaaaaa",
+			width: 20,
 			annotation: line.Annotation{
 				Content:   "x",
 				Placement: line.Below,
@@ -4946,9 +4906,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"below column on the last wrapped row pads from that row's start": {
-			input:  "key: aaaa bbbb cccc",
-			gutter: printer.NoGutter,
-			width:  10,
+			input: "key: aaaa bbbb cccc",
+			width: 10,
 			annotation: line.Annotation{
 				Content:   "x",
 				Placement: line.Below,
@@ -4963,9 +4922,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 		// The wrap drops the space before the accent, so the next row
 		// starts with the accent alone, which takes no cell.
 		"below column on a row that starts with a combining accent": {
-			input:  "k: aaaa ́bbbb",
-			gutter: printer.NoGutter,
-			width:  8,
+			input: "k: aaaa ́bbbb",
+			width: 8,
 			annotation: line.Annotation{
 				Content:   "here",
 				Placement: line.Below,
@@ -4979,9 +4937,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 		},
 		// A spacing mark takes a cell on its own at the start of the row.
 		"below column on a row that starts with a spacing mark": {
-			input:  "k: aaaa िbbbb",
-			gutter: printer.NoGutter,
-			width:  8,
+			input: "k: aaaa िbbbb",
+			width: 8,
 			annotation: line.Annotation{
 				Content:   "here",
 				Placement: line.Below,
@@ -4994,9 +4951,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"above column on a wrapped row sits above that row": {
-			input:  "key: aaaa bbbb cccc",
-			gutter: printer.NoGutter,
-			width:  10,
+			input: "key: aaaa bbbb cccc",
+			width: 10,
 			annotation: line.Annotation{
 				Content:   "hi",
 				Placement: line.Above,
@@ -5009,9 +4965,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"below column on an earlier wrapped row sits below that row": {
-			input:  "key: aaaa bbbb cccc",
-			gutter: printer.NoGutter,
-			width:  10,
+			input: "key: aaaa bbbb cccc",
+			width: 10,
 			annotation: line.Annotation{
 				Content:   "x",
 				Placement: line.Below,
@@ -5039,9 +4994,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"column near the edge moves the text off the marker row": {
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  16,
+			input: "key: value",
+			width: 16,
 			annotation: line.Annotation{
 				Content:   "string does not match pattern",
 				Placement: line.Below,
@@ -5058,9 +5012,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			// The wrap keeps the hyphen with the word before it, so
 			// "abc-" needs four cells and the three beside the marker
 			// would split "def".
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  10,
+			input: "key: value",
+			width: 10,
 			annotation: line.Annotation{
 				Content:   "abc-def",
 				Placement: line.Below,
@@ -5073,9 +5026,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"word with a slash wider than the room beside the marker hangs": {
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  10,
+			input: "key: value",
+			width: 10,
 			annotation: line.Annotation{
 				Content:   "abc/def",
 				Placement: line.Below,
@@ -5090,9 +5042,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 		"words split at ideographic spaces fit beside the marker": {
 			// The wrap breaks at every Unicode space but the no-break
 			// space, so each word fits the room beside the marker.
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  16,
+			input: "key: value",
+			width: 16,
 			annotation: line.Annotation{
 				Content:   "aaaa　bbbb　cccc",
 				Placement: line.Below,
@@ -5106,9 +5057,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"words split at em spaces fit beside the marker": {
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  16,
+			input: "key: value",
+			width: 16,
 			annotation: line.Annotation{
 				Content:   "aaaa bbbb cccc",
 				Placement: line.Below,
@@ -5121,9 +5071,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"words joined by a no-break space wider than the room hang": {
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  15,
+			input: "key: value",
+			width: 15,
 			annotation: line.Annotation{
 				Content:   "aaaa bbbb",
 				Placement: line.Below,
@@ -5136,9 +5085,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"column near the edge hangs the text under a narrower indent": {
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  40,
+			input: "key: value",
+			width: 40,
 			annotation: line.Annotation{
 				Content:   "string does not match pattern",
 				Placement: line.Below,
@@ -5152,9 +5100,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"negative column renders at column zero": {
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  0,
+			input: "key: value",
+			width: 0,
 			annotation: line.Annotation{
 				Content:   "x",
 				Placement: line.Below,
@@ -5166,9 +5113,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"negative column renders at column zero when wrapping": {
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  10,
+			input: "key: value",
+			width: 10,
 			annotation: line.Annotation{
 				Content:   "x",
 				Placement: line.Below,
@@ -5180,9 +5126,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"control characters are escaped before wrapping": {
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  20,
+			input: "key: value",
+			width: 20,
 			annotation: line.Annotation{
 				Content:   "\x1b[31mred\x1b[0m w w w w w w w w",
 				Placement: line.Below,
@@ -5195,9 +5140,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"embedded newline renders as a picture without wrapping": {
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  0,
+			input: "key: value",
+			width: 0,
 			annotation: line.Annotation{
 				Content:   "a\nb",
 				Placement: line.Below,
@@ -5209,9 +5153,8 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			),
 		},
 		"embedded newline renders as a picture when wrapping": {
-			input:  "key: value",
-			gutter: printer.NoGutter,
-			width:  20,
+			input: "key: value",
+			width: 20,
 			annotation: line.Annotation{
 				Content:   "a\nb",
 				Placement: line.Below,
@@ -5224,7 +5167,6 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 		},
 		"custom annotation func gets no column indent": {
 			input:   "k: v",
-			gutter:  printer.NoGutter,
 			width:   6,
 			annFunc: bare,
 			annotation: line.Annotation{
@@ -5240,7 +5182,6 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 		},
 		"custom marker rows align under the text": {
 			input:   "key: value",
-			gutter:  printer.NoGutter,
 			width:   18,
 			annFunc: arrow,
 			annotation: line.Annotation{
@@ -5818,15 +5759,14 @@ func TestPrinter_Layout_Width(t *testing.T) {
 
 	tcs := map[string]struct {
 		view   *line.View
-		gutter printer.Gutter
+		gutter printer.Gutter // Nil for no gutter.
 		spans  []position.Span
 		wrap   int
 		want   int
 	}{
 		"widest line": {
-			view:   niceyaml.NewSourceFromString("a: 1\nbb: 222").View(),
-			gutter: printer.NoGutter,
-			want:   7,
+			view: niceyaml.NewSourceFromString("a: 1\nbb: 222").View(),
+			want: 7,
 		},
 		"gutter adds to every row": {
 			view:   niceyaml.NewSourceFromString("a: 1\nbb: 222").View(),
@@ -5834,9 +5774,8 @@ func TestPrinter_Layout_Width(t *testing.T) {
 			want:   13,
 		},
 		"wide characters take two cells each": {
-			view:   wide,
-			gutter: printer.NoGutter,
-			want:   9,
+			view: wide,
+			want: 9,
 		},
 		// The wrap would split the keycap after its ASCII digit, and the
 		// rest of the cluster stays with the digit instead.
@@ -5847,15 +5786,13 @@ func TestPrinter_Layout_Width(t *testing.T) {
 			want:   8,
 		},
 		"annotation row wider than the lines": {
-			view:   annotated,
-			gutter: printer.NoGutter,
-			want:   27,
+			view: annotated,
+			want: 27,
 		},
 		"span selects the lines measured": {
-			view:   niceyaml.NewSourceFromString("a: 1\nbb: 222").View(),
-			gutter: printer.NoGutter,
-			spans:  []position.Span{position.NewSpan(0, 1)},
-			want:   4,
+			view:  niceyaml.NewSourceFromString("a: 1\nbb: 222").View(),
+			spans: []position.Span{position.NewSpan(0, 1)},
+			want:  4,
 		},
 		"empty view": {
 			view:   line.NewView(line.Lines{}),
@@ -5954,31 +5891,26 @@ func TestPrinter_Layout_StyledAnnotationRows(t *testing.T) {
 	// the gutter on each of them.
 	tcs := map[string]struct {
 		style  lipgloss.Style
-		gutter printer.Gutter
+		gutter printer.Gutter // Nil for no gutter.
 		wrap   int
 		col    int
 	}{
 		"width": {
-			style:  lipgloss.NewStyle().Width(6),
-			gutter: printer.NoGutter,
+			style: lipgloss.NewStyle().Width(6),
 		},
 		"vertical padding": {
-			style:  lipgloss.NewStyle().PaddingTop(1),
-			gutter: printer.NoGutter,
+			style: lipgloss.NewStyle().PaddingTop(1),
 		},
 		"margin": {
-			style:  lipgloss.NewStyle().MarginBottom(1),
-			gutter: printer.NoGutter,
+			style: lipgloss.NewStyle().MarginBottom(1),
 		},
 		"border": {
-			style:  lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
-			gutter: printer.NoGutter,
+			style: lipgloss.NewStyle().Border(lipgloss.NormalBorder()),
 		},
 		"continuation rows": {
-			style:  lipgloss.NewStyle().PaddingLeft(2),
-			gutter: printer.NoGutter,
-			wrap:   12,
-			col:    2,
+			style: lipgloss.NewStyle().PaddingLeft(2),
+			wrap:  12,
+			col:   2,
 		},
 		"gutter": {
 			style:  lipgloss.NewStyle().Width(6),
