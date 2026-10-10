@@ -42,6 +42,14 @@ func load(t *testing.T, r schema.Resolver) (string, []byte, error) {
 	return loadFor(t, r, document(t))
 }
 
+// failing returns a resolver that names no schema and reports err for
+// every document.
+func failing(err error) schema.Resolver {
+	return schema.ResolverFunc(func(context.Context, *niceyaml.Node) (schema.Ref, error) {
+		return schema.Ref{}, err
+	})
+}
+
 // Compile-time interface satisfaction checks.
 var (
 	_ schema.Resolver = schema.ResolverFunc(nil)

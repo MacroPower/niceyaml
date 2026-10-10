@@ -652,9 +652,7 @@ func TestRegistry_WithRequireSchema(t *testing.T) {
 		cannotDecide := errors.New("cannot decide")
 
 		reg := schema.NewRegistry(
-			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
-				return schema.Ref{}, cannotDecide
-			})),
+			schema.WithResolvers(failing(cannotDecide)),
 			schema.WithRequireSchema(false),
 		)
 
@@ -1536,11 +1534,7 @@ func TestRegistry_ErrorCases(t *testing.T) {
 	t.Run("resolve error propagates", func(t *testing.T) {
 		t.Parallel()
 
-		reg := schema.NewRegistry(
-			schema.WithResolvers(schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
-				return schema.Ref{}, errors.New("cannot decide")
-			})),
-		)
+		reg := schema.NewRegistry(schema.WithResolvers(failing(errors.New("cannot decide"))))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`key: value`))
 		err := reg.Check(t.Context(), doc)
@@ -3287,9 +3281,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 	errNoKind := fmt.Errorf("%w: no kind", schema.ErrNoMatch)
 
-	byKind := schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
-		return schema.Ref{}, errNoKind
-	})
+	byKind := failing(errNoKind)
 
 	t.Run("gives the reason of each resolver that gave one as a detail", func(t *testing.T) {
 		t.Parallel()
@@ -3394,9 +3386,7 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 	t.Run("matches each reason, which is a detail the error does not unwrap to", func(t *testing.T) {
 		t.Parallel()
 
-		typed := schema.ResolverFunc(func(context.Context, *niceyaml.Node) (schema.Ref, error) {
-			return schema.Ref{}, &kindError{kind: "Service"}
-		})
+		typed := failing(&kindError{kind: "Service"})
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive(), typed, byKind))
 
 		doc := yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml")
@@ -3431,14 +3421,9 @@ func TestRegistry_Lookup_NoMatchReasons(t *testing.T) {
 
 		// The resolver gave up under a deadline of its own, and the
 		// context of the lookup goes on.
-		timedOut := schema.ResolverFunc(func(context.Context, *niceyaml.Node) (schema.Ref, error) {
-			return schema.Ref{}, fmt.Errorf("%w: read catalog: %w", schema.ErrNoMatch, context.DeadlineExceeded)
-		})
+		timedOut := failing(fmt.Errorf("%w: read catalog: %w", schema.ErrNoMatch, context.DeadlineExceeded))
 		errNoLabel := fmt.Errorf("%w: no label", schema.ErrNoMatch)
-		byLabel := schema.ResolverFunc(func(context.Context, *niceyaml.Node) (schema.Ref, error) {
-			return schema.Ref{}, errNoLabel
-		})
-		reg := schema.NewRegistry(schema.WithResolvers(timedOut, byLabel))
+		reg := schema.NewRegistry(schema.WithResolvers(timedOut, failing(errNoLabel)))
 
 		doc := yamltest.FirstDocumentWithPath(t, "kind: Service\n", "app.yaml")
 

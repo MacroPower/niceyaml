@@ -72,12 +72,7 @@ func TestWhen(t *testing.T) {
 		t.Parallel()
 
 		inner := errors.New("inner")
-		r := schema.When(
-			matcher.Content(kindPath, "Deployment"),
-			schema.ResolverFunc(func(_ context.Context, _ *niceyaml.Node) (schema.Ref, error) {
-				return schema.Ref{}, inner
-			}),
-		)
+		r := schema.When(matcher.Content(kindPath, "Deployment"), failing(inner))
 
 		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
 		_, err := r.Resolve(t.Context(), doc)
