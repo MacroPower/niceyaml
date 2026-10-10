@@ -1,6 +1,7 @@
 package tokens_test
 
 import (
+	"cmp"
 	"fmt"
 	"iter"
 	"slices"
@@ -171,13 +172,8 @@ func TestTokenize_TabIndentsQuotedLine(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			want := tc.want
-			if want == "" {
-				want = tc.input
-			}
-
 			tks := tokens.Tokenize(tc.input)
-			assert.Equal(t, want, yamltest.DumpTokenOrigins(tks))
+			assert.Equal(t, cmp.Or(tc.want, tc.input), yamltest.DumpTokenOrigins(tks))
 			require.NoError(t, yamltest.ValidateLines(line.NewLines(tks)))
 
 			assertLinked(t, tks)
@@ -933,12 +929,7 @@ func TestTokenize_RestoresDroppedLineBreaks(t *testing.T) {
 				joined.WriteString(tk.Origin)
 			}
 
-			want := tc.want
-			if want == "" {
-				want = tc.input
-			}
-
-			assert.Equal(t, want, joined.String())
+			assert.Equal(t, cmp.Or(tc.want, tc.input), joined.String())
 		})
 	}
 }
@@ -1164,12 +1155,7 @@ func TestTokenize_RestoresDroppedWhitespace(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			want := tc.want
-			if want == "" {
-				want = tc.input
-			}
-
-			assert.Equal(t, want, yamltest.DumpTokenOrigins(tokens.Tokenize(tc.input)))
+			assert.Equal(t, cmp.Or(tc.want, tc.input), yamltest.DumpTokenOrigins(tokens.Tokenize(tc.input)))
 		})
 	}
 }
