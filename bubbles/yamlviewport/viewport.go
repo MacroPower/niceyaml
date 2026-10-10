@@ -67,13 +67,10 @@ func (s finderSearcher) Load(lines line.Lines) Index {
 // for the revision picker and a view of its content. A [*niceyaml.Source]
 // is a Revision, so a source goes straight to [Model.AddRevision] or
 // [Model.SetRevision]. A view that carries decoration, such as the marks
-// [niceyaml.SourceError.Annotate] adds, goes in through [NewRevision]:
+// [niceyaml.Annotate] adds, goes in through [NewRevision]:
 //
 //	view := source.View()
-//	for bound := range niceyaml.AllBindings(err) {
-//		bound.Annotate(view)
-//	}
-//
+//	niceyaml.Annotate(err, view)
 //	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
 //
 // The viewport reads the view of a revision it shows without a diff when

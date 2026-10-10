@@ -46,9 +46,10 @@ import (
 // Create instances with [NewErrorReport].
 type ErrorReport struct {
 	// Excerpts holds one excerpt per source the bindings of the error
-	// touch, in the order [Excerpts] yields them. A source none of whose
-	// locations resolve has none, and neither has a source with excerpts
-	// off, as [WithExcerpts] sets it.
+	// touch, in the order the bindings reach the sources, with each
+	// binding [Bindings] yields and the bindings below it before the next.
+	// A source none of whose locations resolve has none, and neither has
+	// a source with excerpts off, as [WithExcerpts] sets it.
 	Excerpts []ErrorExcerpt
 	// Unresolved holds the bindings that get a reason in place of an
 	// excerpt, in the order [Bindings] yields them. Each is a binding
@@ -64,7 +65,7 @@ type ErrorReport struct {
 	// That tree has no row for an error that holds nothing, such as a
 	// bound join of typed-nil errors. When the report then holds no
 	// excerpt and no unresolved binding either, Tree is one node with the
-	// message of the error as its Text and no Err, so a renderer draws
+	// message of the error as its Label and no Err, so a renderer draws
 	// that message in place of nothing.
 	Tree ErrorTree
 }
@@ -74,7 +75,7 @@ type ErrorExcerpt struct {
 	// Source is the source the excerpt shows.
 	Source *Source
 	// View holds the lines of Source around the locations the error marks
-	// in it, as [Excerpts] yields the view.
+	// in it, cut and clipped as [SourceError.Excerpt] cuts a view.
 	View *line.View
 	// Named reports whether the name of Source leads the excerpt on a row
 	// of its own, so a reader tells the excerpts of several sources apart.
@@ -161,9 +162,9 @@ func newErrorReport(err error, cfg excerptConfig, limit int) ErrorReport {
 // typed-nil errors, has such a tree, and a renderer draws its message
 // rather than nothing.
 func messageTree(t ErrorTree, err error) ErrorTree {
-	if t.Text != "" || len(t.Children) > 0 {
+	if t.Label != "" || len(t.Children) > 0 {
 		return t
 	}
 
-	return ErrorTree{Text: err.Error()}
+	return ErrorTree{Label: err.Error()}
 }

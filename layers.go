@@ -197,7 +197,7 @@ var ErrUnnamedKey = errors.New("mapping key has no name")
 // The Source takes its [Source.Name], its [Source.FilePath], and its
 // [Source.FS] from the Source of the lowest layer, with what
 // [WithAllowDuplicateKeys] and [WithAliasLimit] set there. Its text
-// holds values of every layer, so [Source.Excerpts] reports false for it
+// holds values of every layer, so [Source.ShowsExcerpts] reports false for it
 // when the Source of any layer has excerpts off, as [WithExcerpts]
 // describes. A call with no layer gives an empty Source with no name.
 //

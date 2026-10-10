@@ -1132,7 +1132,7 @@ func TestNewSourceFromLayers_Document_Excerpts(t *testing.T) {
 
 			layers := yamltest.Layers(t, layersOf(tc.layers(t))...)
 
-			assert.Equal(t, tc.want, mergedDocument(t, layers).Source().Excerpts())
+			assert.Equal(t, tc.want, mergedDocument(t, layers).Source().ShowsExcerpts())
 
 			// The Source has excerpts off for each merged text that holds
 			// the secret.

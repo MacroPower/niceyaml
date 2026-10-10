@@ -27,25 +27,26 @@ const noFormMessage = "value matches none of the allowed forms"
 // the value, which came from no document. A
 // caller reads the constraint from the Violation instead of matching on
 // the text of the message. A report that suppresses a rule, rewords a
-// message, or writes a format such as SARIF walks the bound errors and
-// reads the Violation of each:
+// message, or writes a format such as SARIF walks the problems of the
+// error and reads the Violation of each:
 //
-//	for bound := range niceyaml.AllBindings(err) {
-//		v, ok := errors.AsType[*schema.Violation](bound.Reported())
+//	for problem := range niceyaml.Problems(err) {
+//		v, ok := errors.AsType[*schema.Violation](problem.Err)
 //		if !ok {
 //			continue
 //		}
 //
-//		path, _ := bound.Path()
+//		path, _ := problem.Path()
 //		emit(v.Keyword, v.SchemaPath, path, v.Message)
 //	}
 //
-// [niceyaml.SourceError.Reported] returns the error of one binding
-// alone, so the search above finds the Violation of that binding or
-// none. Several violations come back under a count summary from
-// [niceyaml.NewSummary], which wraps no Violation. [errors.As] on its
-// binding searches the violations it heads too and finds the Violation
-// of the first.
+// Several violations come back under a count summary from
+// [niceyaml.NewSummary], which wraps no Violation. [niceyaml.Problems]
+// passes over the summary and yields one node per violation, and
+// [errors.As] on the error of a node searches that violation and passes
+// over its details, so the search above finds the Violation of each
+// problem once. [errors.As] on the summary itself searches the violations
+// it heads too and finds the Violation of the first.
 //
 // # Branches
 //

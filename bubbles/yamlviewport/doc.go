@@ -20,10 +20,7 @@
 // a document with its error marks in place:
 //
 //	view := source.View()
-//	for bound := range niceyaml.AllBindings(err) {
-//		bound.Annotate(view)
-//	}
-//
+//	niceyaml.Annotate(err, view)
 //	m.SetRevision(yamlviewport.NewRevision(source.Name(), view))
 //
 // Search highlights go on a clone of the view, so the marks stay and the

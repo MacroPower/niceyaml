@@ -1438,19 +1438,6 @@ func (e *Error) Unwrap() []error {
 	return append(result, e.errors...)
 }
 
-// Reported returns the error the [Error] reports: the error given to
-// [Invalid], or one holding the message given to [NewError]. An Error
-// that wraps another Error returns that Error, where
-// [SourceError.Reported] looks through it. It is nil for the zero Error,
-// and a nil Error reports none.
-func (e *Error) Reported() error {
-	if e == nil {
-		return nil
-	}
-
-	return e.err
-}
-
 // Members returns the errors the [Error] heads as a summary from
 // [NewSummary], in the order NewSummary received them and without the nil
 // ones. Any other Error, and a nil one, heads none. The slice is a copy,
@@ -1967,11 +1954,11 @@ const DefaultContextLines = 2
 const DefaultExcerptWidth = 160
 
 // ExcerptOption configures the excerpts of an error, which [FormatError],
-// [NewErrorReport], [Excerpts], [SourceError.Excerpt], and
-// [SourceError.Excerpts] build. An excerpt is a view of the lines of a
-// source around the locations an error marks in it, and the options say
-// how many lines it keeps around each one and how much of a long line it
-// shows. The renderer of an error chooses both, so one program renders
+// [NewErrorReport], and [SourceError.Excerpt] build. An excerpt is a view
+// of the lines of a source around the locations an error marks in it, and
+// the options say how many lines it keeps around each one and how much of
+// a long line it shows. The renderer of an error chooses both, so one
+// program renders
 // the same error with whole lines in a terminal and with bounded rows in
 // a log.
 //
@@ -3283,20 +3270,20 @@ func (e *SourceError) DocumentIndex() (int, bool) {
 // [SourceError.Excerpt] annotates a location with, and the field a
 // structured report such as a JSON line or a CI annotation carries beside
 // the position from [SourceError.Position] and the path from
-// [SourceError.Path]. Such a report walks [ErrorTree.Problems], which
-// yields one node per problem. That walk passes over the summary a
-// validator puts above several violations and the details below each
-// problem, and it yields each error bound to no source, which has no
-// binding to read. [ErrorTree.Message] and [ErrorTree.Path] answer for
-// every node, with the message and the path of the binding when the node
-// has one. The methods of a nil SourceError return zero values, so the
-// report reads the rest from the binding with no branch for a node that has
-// none:
+// [SourceError.Path]. Such a report walks [Problems], which yields one
+// node per problem. That walk passes over the summary a validator puts
+// above several violations and the details below each problem, and it
+// yields each error bound to no source, which has no binding to read.
+// [ErrorTree.Message] and [ErrorTree.Path] answer for every node, with
+// the message and the path of the binding when the node has one, and
+// [ErrorTree.Source] and [ErrorTree.Position] read the binding and return
+// zero values for a node that has none, so the report has no branch for
+// such a node:
 //
-//	for problem := range niceyaml.NewErrorTree(err).Problems() {
+//	for problem := range niceyaml.Problems(err) {
 //		path, _ := problem.Path()
-//		pos, _ := problem.Bound.Position()
-//		emit(problem.Bound.Source().Name(), pos, problem.Message(), path)
+//		pos, _ := problem.Position()
+//		emit(problem.Source().Name(), pos, problem.Message(), path)
 //	}
 //
 // A binding whose location did not resolve has no position but still
@@ -3356,46 +3343,6 @@ func (e *SourceError) Unwrap() error {
 	}
 
 	return e.err
-}
-
-// Reported returns the error the binding reports, without the Errors
-// that locate it. For a bound [*Error] it is the error given to
-// [Invalid], or one holding the message given to [NewError]. Reported
-// looks through each Error that wraps another, such as the one [Rebase]
-// puts around a located Error, and through a binding the bound error
-// wraps. It returns the same error however many of them stand above it.
-// A validator that wraps an error of its own type hands that value to
-// the caller of each binding this way:
-//
-//	for bound := range niceyaml.AllBindings(err) {
-//		if rule, ok := errors.AsType[*RuleError](bound.Reported()); ok {
-//			report(bound, rule.ID)
-//		}
-//	}
-//
-// [errors.As] on the binding searches the problems it heads as well. On
-// a binding that reports several violations it finds the error of the
-// first violation, where Reported returns the error of the binding
-// alone. A wrapper such as [fmt.Errorf] ends the walk and is the
-// reported error itself, so the search above still finds a RuleError the
-// wrapper holds. Reported is nil for a binding of the zero [Error], and
-// a nil SourceError reports none.
-func (e *SourceError) Reported() error {
-	for e != nil {
-		reported := e.err
-		if x, ok := reported.(*Error); ok { //nolint:errorlint // The node itself, not a chain search.
-			reported = x.textCause()
-		}
-
-		inner, ok := reported.(*SourceError) //nolint:errorlint // The node itself, not a chain search.
-		if !ok {
-			return reported
-		}
-
-		e = inner
-	}
-
-	return nil
 }
 
 // Members returns the bound problems the [SourceError] heads. Each error a
@@ -3902,10 +3849,10 @@ func (e *SourceError) all(seen map[*SourceError]bool, yield func(*SourceError) b
 //	}
 //
 // [FormatError] renders the whole error instead, as one tree and one
-// excerpt per source, as [Excerpts] yields them. A caller that marks a
-// view calls [Annotate], which marks every binding in err and needs no
-// walk. A caller that lists the problems of an error walks
-// [ErrorTree.Problems]. A nil err has no bindings.
+// excerpt per source, as [ErrorReport.Excerpts] holds them. A caller that
+// marks a view calls [Annotate], which marks every binding in err and
+// needs no walk. A caller that lists the problems of an error walks
+// [Problems]. A nil err has no bindings.
 func Bindings(err error) iter.Seq[*SourceError] {
 	return func(yield func(*SourceError) bool) {
 		eachBinding(err, yield)
@@ -4066,9 +4013,9 @@ func (e *SourceError) LogValue() slog.Value {
 // # Excerpts
 //
 // The excerpts follow, one per source the bindings in err touch, as
-// [Excerpts] yields them. An error joined from one binding per document
-// of a file thus shows that file once, with the errors of every document
-// on it. A binding whose children point into another file, such as a
+// [ErrorReport.Excerpts] holds them. An error joined from one binding per
+// document of a file thus shows that file once, with the errors of every
+// document on it. A binding whose children point into another file, such as a
 // detail that names where a value was first declared, shows an excerpt of
 // that file too. Each excerpt keeps context lines of
 // unchanged content on either side of each marked line and renders as
@@ -4196,11 +4143,11 @@ func formatError(err error, cfg excerptConfig, limit int) string {
 func renderErrorTree(t ErrorTree) string {
 	var sb strings.Builder
 
-	if t.Text != "" {
-		sb.WriteString(escape.Message(t.Text))
+	if t.Label != "" {
+		sb.WriteString(escape.Message(t.Label))
 	}
 
-	writeErrorBranches(&sb, t.Children, "", t.Text != "")
+	writeErrorBranches(&sb, t.Children, "", t.Label != "")
 
 	return sb.String()
 }
@@ -4226,7 +4173,7 @@ func writeErrorBranches(sb *strings.Builder, children []ErrorTree, indent string
 			connector, below = "`-- ", "    "
 		}
 
-		for j, row := range strings.Split(escape.Tabs(child.Text), "\n") {
+		for j, row := range strings.Split(escape.Tabs(child.Label), "\n") {
 			if broken {
 				sb.WriteByte('\n')
 			}
@@ -4489,9 +4436,9 @@ func (e *SourceError) Annotate(view *line.View) bool {
 //	lipgloss.Println(p.Print(view))
 //
 // [SourceError.Annotate] makes the same marks for one binding.
-// [Excerpts] marks a fresh view of each source instead and cuts it to the
-// hunks around the marks, for the excerpts under the tree [FormatError]
-// prints.
+// [NewErrorReport] marks a fresh view of each source instead and cuts it
+// to the hunks around the marks, for the excerpts under the tree
+// [FormatError] prints.
 //
 // # Marks
 //
@@ -4584,7 +4531,8 @@ func Annotate(err error, view *line.View) bool {
 // above the excerpt names the root.
 // [line.View.Hunks] then keeps context lines of unchanged content on
 // either side of each marked line. Excerpt leaves out a node bound to
-// another source, and [SourceError.Excerpts] shows it in its own source.
+// another source, and the [ErrorReport] of the error shows it in its own
+// source.
 // Distant locations become separate hunks, and the first line of each hunk
 // after the first carries a "..." annotation above it.
 // [line.View.Clip] then cuts each line longer than the width
@@ -4620,82 +4568,6 @@ func (e *SourceError) Excerpt(opts ...ExcerptOption) (*line.View, bool) {
 	return e.source.excerpt(positions[e.source], newExcerptConfig(opts))
 }
 
-// Excerpts returns an iterator over one excerpt per source the tree of
-// the error touches, each the [line.View] [SourceError.Excerpt] builds
-// for that source: the source the error is bound to first, then the
-// source of each node below it in the order the tree reaches them, with
-// every node bound to that source marked on it. A source none of whose
-// locations resolve, or that the tree names through unresolved nodes
-// alone, yields nothing, so an error whose tree stays in one source
-// yields one excerpt or none. An error bound to a file of values that
-// names the lines of a template beside it renders as one excerpt of
-// each file:
-//
-//	for src, excerpt := range bound.Excerpts() {
-//		fmt.Println(src.Name())
-//		fmt.Println(excerpt)
-//	}
-//
-// [Excerpts] yields the same excerpts for the binding alone, and one
-// excerpt per source for an error that holds several bindings. A nil
-// SourceError yields nothing.
-//
-// A source with excerpts off, as [WithExcerpts] describes, yields
-// nothing either, and the other sources of the tree yield theirs.
-func (e *SourceError) Excerpts(opts ...ExcerptOption) iter.Seq2[*Source, *line.View] {
-	return func(yield func(*Source, *line.View) bool) {
-		if e == nil {
-			return
-		}
-
-		sources, positions := excerptPositions([]*SourceError{e})
-
-		yieldExcerpts(sources, positions, newExcerptConfig(opts), yield)
-	}
-}
-
-// Excerpts returns an iterator over one excerpt per source the bindings
-// in err touch: every [*SourceError] [Bindings] finds, and every binding
-// below each one. The sources come in the order the bindings reach them.
-// Each excerpt is a fresh [Source.View] with the location of every one of
-// those bindings marked on it, cut to the hunks around them and clipped
-// to the width opts set, as [SourceError.Excerpt] cuts one. An error
-// joined from one binding per document of a file thus yields one excerpt
-// of that file with every document's errors on it:
-//
-//	for _, doc := range docs {
-//		errs = append(errs, doc.Validate(ctx, schema))
-//	}
-//
-//	for src, excerpt := range niceyaml.Excerpts(errors.Join(errs...)) {
-//		fmt.Println(src.Name())
-//		fmt.Println(excerpt)
-//	}
-//
-// The message of each binding sits beside its caret, so a reader tells
-// the carets of one excerpt apart. An error that holds one binding leaves
-// the location of that binding with a caret run alone, since the tree
-// [FormatError] prints above the excerpt names it, and yields what
-// [SourceError.Excerpts] yields for that binding. Excerpts marks a
-// binding the error reaches twice once.
-//
-// A source with excerpts off, as [WithExcerpts] describes, yields
-// nothing, whatever resolves in it.
-// A source none of whose locations resolve yields nothing. [FormatError]
-// and [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] render
-// these excerpts under the tree of the error, and an [ErrorReport] holds
-// them beside that tree. A caller that wants one
-// excerpt per binding, such as one section per document, takes
-// [SourceError.Excerpts] of each binding [Bindings] yields. An err with
-// no bindings, and a nil err, yield nothing.
-func Excerpts(err error, opts ...ExcerptOption) iter.Seq2[*Source, *line.View] {
-	return func(yield func(*Source, *line.View) bool) {
-		sources, positions := excerptPositions(slices.Collect(Bindings(err)))
-
-		yieldExcerpts(sources, positions, newExcerptConfig(opts), yield)
-	}
-}
-
 // yieldExcerpts yields the excerpt of each of sources that has one, in
 // order, as [Source.excerpt] builds it from the positions of that source
 // with the settings of cfg.
@@ -4726,7 +4598,7 @@ func yieldExcerpts(
 // mark no line of s, and for a Source whose text WithExcerpts keeps out
 // of excerpts.
 func (s *Source) excerpt(positions []errorPosition, cfg excerptConfig) (*line.View, bool) {
-	if !s.Excerpts() {
+	if !s.ShowsExcerpts() {
 		return nil, false
 	}
 

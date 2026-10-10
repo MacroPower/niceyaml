@@ -3900,7 +3900,7 @@ func TestSource_NilReceiver(t *testing.T) {
 			want: 0,
 		},
 		"excerpts": {
-			read: func(s *niceyaml.Source) any { return s.Excerpts() },
+			read: func(s *niceyaml.Source) any { return s.ShowsExcerpts() },
 			want: true,
 		},
 		"text": {
@@ -5881,7 +5881,7 @@ func TestWithExcerpts(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input, tc.opts...)
-			assert.Equal(t, tc.want, source.Excerpts())
+			assert.Equal(t, tc.want, source.ShowsExcerpts())
 
 			err := yamltest.Bind(t, source, niceyaml.NewError("bad port", niceyaml.AtPath(paths.Doc().Child("port"))))
 

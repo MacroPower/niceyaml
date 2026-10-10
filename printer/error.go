@@ -17,14 +17,14 @@ import (
 const errorConnectorWidth = 4
 
 // PrintError renders err for a reader: its message as a tree, then one
-// excerpt per source the bindings in err touch, as [niceyaml.Excerpts]
-// yields them. The tree puts a connector in front of each error below
-// another. Each excerpt keeps the context lines opts set on either side
-// of each marked line, as [niceyaml.ExcerptOption] describes, and draws
-// a caret run under each location. PrintError draws both with the styles
-// of the printer and wraps them to the width [WithWrap] sets. A nil err
-// prints as "". A program configures one printer and prints its errors
-// through it:
+// excerpt per source the bindings in err touch, as
+// [niceyaml.ErrorReport.Excerpts] holds them. The tree puts a connector
+// in front of each error below another. Each excerpt keeps the context
+// lines opts set on either side of each marked line, as
+// [niceyaml.ExcerptOption] describes, and draws a caret run under each
+// location. PrintError draws both with the styles of the printer and
+// wraps them to the width [WithWrap] sets. A nil err prints as "". A
+// program configures one printer and prints its errors through it:
 //
 //	p := printer.New(printer.WithWrap(width))
 //	lipgloss.Fprintln(os.Stderr, p.PrintError(err, niceyaml.WithContextLines(3)))
@@ -188,7 +188,7 @@ func (p *Printer) renderErrorTree(t niceyaml.ErrorTree) string {
 
 	// A root with nothing to show, such as a join, takes no row, so its
 	// children start the tree.
-	if root := p.errorText(t.Text, 0); strings.Join(root, "\n") != "" {
+	if root := p.errorText(t.Label, 0); strings.Join(root, "\n") != "" {
 		rows = root
 	}
 
@@ -226,7 +226,7 @@ func (p *Printer) appendErrorBranches(
 
 		first, rest := indent+branch.Render(connector), indent+branch.Render(below)
 
-		for j, row := range p.errorText(child.Text, depth) {
+		for j, row := range p.errorText(child.Label, depth) {
 			if j == 0 {
 				rows = append(rows, first+row)
 			} else {

@@ -487,15 +487,15 @@ func WithReferences(refs ...*Source) SourceOption {
 //
 //	environment:3:9: $.db.port: port must be at least 1
 //
-// [SourceError.Excerpt] reports false for the error, and
-// [SourceError.Excerpts] and [Excerpts] yield no excerpt of the Source.
+// [SourceError.Excerpt] reports false for the error, and the
+// [ErrorReport] of the error holds no excerpt of the Source.
 // [FormatError], the %+v verb, and
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError] thus print
 // the tree of the error and add no line in place of the excerpt, since
 // the tree names the position of the error already. An error that holds
 // bindings in several sources keeps the excerpt of each other source. A
 // renderer that builds an excerpt of its own, as one that reads an
-// [ErrorTree] can, checks [Source.Excerpts] first.
+// [ErrorTree] can, checks [Source.ShowsExcerpts] first.
 //
 // The option covers the excerpts this module builds. The text still
 // reaches a reader in other ways:
@@ -762,12 +762,12 @@ func (s *Source) FS() fs.FS {
 	return s.fsys
 }
 
-// Excerpts reports whether an error may show the text of the [Source] in
-// an excerpt, which [WithExcerpts] sets. A renderer that builds an
-// excerpt of its own, from [Source.View] and [Annotate], checks it
-// first. A nil Source holds no text, so Excerpts reports true for it, as
-// it does for a Source with no option.
-func (s *Source) Excerpts() bool {
+// ShowsExcerpts reports whether an error may show the text of the
+// [Source] in an excerpt, which [WithExcerpts] sets. A renderer that
+// builds an excerpt of its own, from [Source.View] and [Annotate], checks
+// it first. A nil Source holds no text, so ShowsExcerpts reports true for
+// it, as it does for a Source with no option.
+func (s *Source) ShowsExcerpts() bool {
 	return s == nil || !s.noExcerpts
 }
 

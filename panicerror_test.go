@@ -304,7 +304,7 @@ func TestPanicError_Recovered(t *testing.T) {
 
 			var p *niceyaml.PanicError
 
-			assert.Equal(t, !problem.IsInvalid(), errors.As(problem.Err, &p), problem.Text)
+			assert.Equal(t, !problem.IsInvalid(), errors.As(problem.Err, &p), problem.Label)
 		}
 
 		assert.Equal(t, map[string]bool{

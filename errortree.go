@@ -27,12 +27,12 @@ import (
 // Each node also holds the error it stands for and the binding that
 // resolved its location. A report a program reads, such as a JSON line,
 // a CI annotation, or an editor diagnostic, takes its fields from the
-// node rather than from the text. It reads [ErrorTree.Message] and
-// [ErrorTree.Path] from the node, and the source and the position from
-// its binding. [ErrorTree.Problems] yields the nodes such a report
-// lists, one per problem, and [ErrorTree.All] yields every node of the
-// tree. A node with Detail set explains its parent, and a renderer that
-// draws details apart from problems reads the mark.
+// node rather than from the label. It reads [ErrorTree.Message] and
+// [ErrorTree.Path] from the node, and [ErrorTree.Source] and
+// [ErrorTree.Position] from its binding. [Problems] yields the nodes
+// such a report lists, one per problem, and [ErrorTree.All] yields every
+// node of the tree. A node with Detail set explains its parent, and a
+// renderer that draws details apart from problems reads the mark.
 // [ErrorTree.IsInvalid] reports whether the document is at fault for the
 // problems of a node.
 //
@@ -45,13 +45,16 @@ type ErrorTree struct {
 	// the [*SourceError] that Err is, or the one Err wraps along its cause
 	// chain. It is nil for an error bound to no source.
 	Bound *SourceError
-	// Text is the message of the node, the message of the error without
-	// the errors below it. It is empty for a node that stands for several
-	// errors and adds no message of its own, such as one built from
-	// [errors.Join]. It carries the location the row of the node shows,
-	// in a form that depends on where the node sits in the tree, so a
-	// report reads the message alone from [ErrorTree.Message].
-	Text string
+	// Label is the row a renderer draws for the node: the message of the
+	// error without the errors below it, behind the location the row
+	// shows, in a form relative to the row of the parent. The root of a
+	// binding reads "name:line:col: $.path: msg", a child bound to the
+	// same source drops the name and reads "line:col: $.path: msg", and a
+	// child in another document names that document. It is empty for a
+	// node that stands for several errors and adds no message of its own,
+	// such as one built from [errors.Join]. [ErrorTree.Message] returns
+	// the message alone, the field a report carries.
+	Label string
 	// Children are the nodes of the errors below the node, in the order
 	// the tree shows them: the problems a heading stands over, and the
 	// details that explain the node, which have Detail set.
@@ -71,9 +74,9 @@ type ErrorTree struct {
 // by position within their source. Each node holds its error in Err and
 // its binding in Bound. A nil err yields the zero ErrorTree.
 //
-// # Root Text
+// # Root Label
 //
-// The root text is the message of err without the errors below it, so
+// The root label is the message of err without the errors below it, so
 // context a wrapper added stays in front. The message of a wrapper around
 // a join holds every branch of the join, and the message of one around a
 // binding holds the errors [SourceError.Error] lists. Those errors are
@@ -87,7 +90,7 @@ type ErrorTree struct {
 //
 // The children come from the errors rather than from the text of the
 // message, so a wrapper that rewrites the message it wraps keeps its
-// children. Only the text of a node reads the message, to leave out what
+// children. Only the label of a node reads the message, to leave out what
 // the children show.
 //
 // # Bound Errors
@@ -176,7 +179,7 @@ func (t ErrorTree) All() iter.Seq[ErrorTree] {
 // all yields t when it has text, then every node below it, each before the
 // nodes below it, and reports whether the caller wants more.
 func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
-	if t.Text != "" && !yield(t) {
+	if t.Label != "" && !yield(t) {
 		return false
 	}
 
@@ -224,24 +227,26 @@ func (t ErrorTree) all(yield func(ErrorTree) bool) bool {
 //
 // A row reads its message from [ErrorTree.Message] and its path from
 // [ErrorTree.Path], which answer for a node bound to no source as well,
-// and its file and position from the binding. The Children of a node
-// Problems yields are its details, such as the reasons for the problem
-// or the related locations it names, and each answers Message the same
-// way:
+// and its file and position from [ErrorTree.Source] and
+// [ErrorTree.Position], which read the binding of the node and return
+// zero values for a node that has none. The Children of a node Problems
+// yields are its details, such as the reasons for the problem or the
+// related locations it names, and each answers Message the same way. The
+// function [Problems] walks the tree of an error the same way:
 //
-//	for problem := range niceyaml.NewErrorTree(err).Problems() {
+//	for problem := range niceyaml.Problems(err) {
 //		row := Row{Message: problem.Message()}
 //
 //		if path, ok := problem.Path(); ok {
 //			row.Path = path.String()
 //		}
 //
-//		if bound := problem.Bound; bound != nil {
-//			row.File = bound.Source().Name()
+//		if src := problem.Source(); src != nil {
+//			row.File = src.Name()
+//		}
 //
-//			if pos, ok := bound.Position(); ok {
-//				row.Line, row.Column = pos.Line+1, pos.Col+1
-//			}
+//		if pos, ok := problem.Position(); ok {
+//			row.Line, row.Column = pos.Line+1, pos.Col+1
 //		}
 //
 //		for _, detail := range problem.Children {
@@ -273,10 +278,26 @@ func (t ErrorTree) Problems() iter.Seq[ErrorTree] {
 	}
 }
 
+// Problems returns an iterator over the nodes of the [ErrorTree] of err
+// that each stand for one problem, as [ErrorTree.Problems] yields them
+// for the tree [NewErrorTree] builds. It is the walk of a report that
+// lists the problems of an error as rows:
+//
+//	for problem := range niceyaml.Problems(err) {
+//		path, _ := problem.Path()
+//		pos, _ := problem.Position()
+//		emit(problem.Source().Name(), pos, problem.Message(), path)
+//	}
+//
+// A nil err has no problems.
+func Problems(err error) iter.Seq[ErrorTree] {
+	return NewErrorTree(err).Problems()
+}
+
 // problems yields the nodes of t that [ErrorTree.Problems] yields and
 // reports whether the caller wants more.
 func (t ErrorTree) problems(yield func(ErrorTree) bool) bool {
-	if t.Text != "" && !t.heads() {
+	if t.Label != "" && !t.heads() {
 		return yield(t)
 	}
 
@@ -372,32 +393,32 @@ func declaresInvalid(err error) bool {
 
 // Message returns the message of the node with no position, document, or
 // path in front, the field a report carries beside the position and the
-// path. Text holds the same message behind the location the row of the
+// path. Label holds the same message behind the location the row of the
 // node shows, in a form that depends on where the node sits in the tree.
 //
 //   - For a node with a binding, it is the [SourceError.Message] of
 //     Bound.
 //   - For a node bound to no source that names a path, as
 //     [ErrorTree.Path] reports, it is the message of Err without the path
-//     Text puts in front of it. A binding of Err would report the same
+//     Label puts in front of it. A binding of Err would report the same
 //     message.
-//   - For any other node, it is Text.
+//   - For any other node, it is Label.
 //
-// A node with no text of its own, such as the root of a join, has an
+// A node with no label of its own, such as the root of a join, has an
 // empty message. A detail answers like any other node, so a report that
 // lists the related locations of a problem reads the message of each
 // detail.
 //
 // The node of a wrapper around a binding, such as one from [fmt.Errorf],
 // holds that binding in Bound, so its message is the message of the
-// binding. The text the wrapper added stays in Text.
+// binding. The text the wrapper added stays in Label.
 func (t ErrorTree) Message() string {
 	if t.Bound != nil {
 		return t.Bound.Message()
 	}
 
 	if _, ok := t.Path(); !ok {
-		return t.Text
+		return t.Label
 	}
 
 	// The part of the message the children show depends on the end of the
@@ -413,14 +434,13 @@ func (t ErrorTree) Message() string {
 //   - For a node with a binding, it is the [SourceError.Path] of Bound.
 //   - For a node bound to no source, it is the path of the first located
 //     [*Error] along the cause chain of Err, with the base of every
-//     [Rebase] on the way joined in front. The text of the node puts the
+//     [Rebase] on the way joined in front. The label of the node puts the
 //     same path in front of the message.
 //
-// The source and the position come from Bound, which resolved them. The
-// methods of a nil [*SourceError] return zero values, so a report reads
-// [SourceError.Source] and [SourceError.Position] from Bound for any
-// node. A position that an [*Error] bound to no source carries points
-// into no source, so the node leaves it to [Error.Position].
+// The source and the position come from Bound, which resolved them, and
+// [ErrorTree.Source] and [ErrorTree.Position] read them for any node. A
+// position that an [*Error] bound to no source carries points into no
+// source, so the node leaves it to [Error.Position].
 func (t ErrorTree) Path() (paths.Path, bool) {
 	if t.Bound != nil {
 		return t.Bound.Path()
@@ -429,6 +449,36 @@ func (t ErrorTree) Path() (paths.Path, bool) {
 	a := anchorOf(t.Err)
 
 	return a.path, a.hasPath
+}
+
+// Source returns the [*Source] the node is bound to, as [SourceError.Source]
+// returns it for Bound, or nil for a node bound to no source.
+func (t ErrorTree) Source() *Source {
+	return t.Bound.Source()
+}
+
+// Position returns the [position.Position] the location of the node
+// resolved to and true, as [SourceError.Position] returns it for Bound. It
+// returns the zero Position and false for a node bound to no source, and
+// for one whose location did not resolve.
+func (t ErrorTree) Position() (position.Position, bool) {
+	return t.Bound.Position()
+}
+
+// Range returns the [position.Range] the location of the node resolved to
+// and true, as [SourceError.Range] returns it for Bound. It returns the
+// zero Range and false for a node bound to no source, and for one whose
+// location did not resolve.
+func (t ErrorTree) Range() (position.Range, bool) {
+	return t.Bound.Range()
+}
+
+// DocumentIndex returns the 0-indexed position within the file of the
+// document the node is bound to and true, as [SourceError.DocumentIndex]
+// returns it for Bound. It returns 0 and false for a node bound to no
+// source, and for a binding that holds no document.
+func (t ErrorTree) DocumentIndex() (int, bool) {
+	return t.Bound.DocumentIndex()
 }
 
 // bindingOf returns the binding err is or wraps along its cause chain, as
@@ -487,10 +537,10 @@ func appendTrees(dst []ErrorTree, err error) []ErrorTree {
 	node := ErrorTree{Err: err, Bound: bindingOf(err)}
 
 	if x, ok := err.(*SourceError); ok { //nolint:errorlint // The node itself, not a chain search.
-		node.Text = x.headline()
+		node.Label = x.headline()
 	} else {
-		node.Text, _, _ = end.cut(err.Error())
-		node.Text = unboundText(err, node.Text)
+		node.Label, _, _ = end.cut(err.Error())
+		node.Label = unboundText(err, node.Label)
 	}
 
 	return appendTree(dst, newTree(node, kids))
@@ -514,7 +564,7 @@ func unboundText(err error, text string) string {
 // appendTree appends t to dst and returns the extended slice. A node with
 // no text adds nothing, so its children take its place.
 func appendTree(dst []ErrorTree, t ErrorTree) []ErrorTree {
-	if t.Text == "" {
+	if t.Label == "" {
 		return append(dst, t.Children...)
 	}
 
@@ -690,7 +740,7 @@ func children(err error) ([]ErrorTree, chainEnd) {
 // to its children in the tree above it, so each of those children gets
 // Detail set instead.
 func asDetail(t ErrorTree) ErrorTree {
-	if t.Text != "" {
+	if t.Label != "" {
 		t.Detail = true
 
 		return t
@@ -1106,7 +1156,7 @@ func appendBoundChildren(kids []positioned, bound *SourceError, named bool) []po
 
 		below, _ := children(child)
 
-		kid.tree = newTree(ErrorTree{Err: child, Bound: child, Text: text}, below)
+		kid.tree = newTree(ErrorTree{Err: child, Bound: child, Label: text}, below)
 		if detail {
 			kid.tree = asDetail(kid.tree)
 		}
@@ -1224,7 +1274,7 @@ func newTree(node ErrorTree, children []ErrorTree) ErrorTree {
 		flat = appendTree(flat, child)
 	}
 
-	if node.Text == "" && len(flat) == 1 {
+	if node.Label == "" && len(flat) == 1 {
 		return flat[0]
 	}
 
@@ -1258,7 +1308,7 @@ func limitTree(t ErrorTree, limit int) (ErrorTree, []ErrorTree) {
 		return t, nil
 	}
 
-	cut.Children = append(cut.Children, ErrorTree{Text: "and " + strconv.Itoa(len(c.left)) + " more"})
+	cut.Children = append(cut.Children, ErrorTree{Label: "and " + strconv.Itoa(len(c.left)) + " more"})
 
 	return cut, c.left
 }
@@ -1308,7 +1358,7 @@ func skippedBindings(cut ErrorTree, left []ErrorTree) map[*SourceError]bool {
 // budget lasts, and goes to c.left once it runs out. A heading keeps its
 // details and the problems below it that stay, and goes when none does.
 func (c *treeCut) cut(t ErrorTree) (ErrorTree, bool) {
-	if t.Text != "" && !t.heads() {
+	if t.Label != "" && !t.heads() {
 		if c.budget == 0 {
 			c.left = append(c.left, t)
 

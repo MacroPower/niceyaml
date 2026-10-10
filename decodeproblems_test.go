@@ -503,7 +503,7 @@ func decodeRows(doc *niceyaml.Node, err error) []string {
 
 		rows = append(rows, fmt.Sprintf(
 			"%s | %s | %s | %s %t | %s %s %t | bound=%t decode=%t invalid=%t",
-			node.Bound.Source().Name(), node.Text, node.Message(), path, pathed, pos, rng, located,
+			node.Bound.Source().Name(), node.Label, node.Message(), path, pathed, pos, rng, located,
 			node.Bound.Node() == doc, errors.Is(node.Err, niceyaml.ErrDecode), node.IsInvalid(),
 		))
 	}
@@ -533,7 +533,7 @@ func requireInvalid(t *testing.T, err error, count int) {
 	found := 0
 
 	for problem := range niceyaml.NewErrorTree(err).Problems() {
-		require.True(t, problem.IsInvalid(), problem.Text)
+		require.True(t, problem.IsInvalid(), problem.Label)
 
 		found++
 	}

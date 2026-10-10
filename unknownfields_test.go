@@ -122,7 +122,7 @@ func rejectionRows(err error) string {
 	var rows []string
 
 	for node := range niceyaml.NewErrorTree(err).Problems() {
-		rows = append(rows, node.Text)
+		rows = append(rows, node.Label)
 	}
 
 	return strings.Join(rows, "\n")

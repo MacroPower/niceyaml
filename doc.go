@@ -216,20 +216,20 @@
 // terminal render one error each their own way.
 //
 // A report a program reads, such as JSON lines, CI annotations, or editor
-// diagnostics, lists the problems of an error as rows.
-// [ErrorTree.Problems] yields one node per problem, by the roles the
-// errors declare. It passes over the summary a validator puts above its
+// diagnostics, lists the problems of an error as rows. [Problems] yields
+// one node of the [ErrorTree] per problem, by the roles the errors
+// declare. It passes over the summary a validator puts above its
 // violations, it keeps the details of each problem below its node, and
 // it yields an error bound to no source, such as a file that failed to
-// read. A row takes its fields from the node rather than from the text,
+// read. A row takes its fields from the node rather than from the label,
 // whose form depends on where the node sits in the tree.
 // [ErrorTree.Message] and [ErrorTree.Path] give the message and the path
-// of any node. The binding the node holds gives the file and the
-// position, through [SourceError.Source] and [SourceError.Position]. In
-// a file that holds several documents, [SourceError.DocumentIndex] gives
-// the document. The node holds the error of its problem in Err, so
-// [errors.As] there finds the typed error of that row, such as the rule
-// a validator wrapped, and never one of a detail.
+// of any node, and [ErrorTree.Source] and [ErrorTree.Position] give the
+// file and the position from the binding the node holds. In a file that
+// holds several documents, [ErrorTree.DocumentIndex] gives the document.
+// The node holds the error of its problem in Err, so [errors.As] there
+// finds the typed error of that row, such as the rule a validator
+// wrapped, and never one of a detail.
 //
 // A terminal gets color from
 // [go.jacobcolvin.com/niceyaml/printer.Printer.PrintError], which prints
