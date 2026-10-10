@@ -109,75 +109,69 @@ func TestStyles_With(t *testing.T) {
 	// Custom style key for testing.
 	const customKey kind.Kind = "customKey"
 
-	t.Run("adds new custom style", func(t *testing.T) {
-		t.Parallel()
+	tcs := map[string]struct {
+		want map[kind.Kind]lipgloss.Style
+		opts []style.Option
+	}{
+		"adds new custom style and keeps untouched categories": {
+			opts: []style.Option{style.Set(customKey, red)},
+			want: map[kind.Kind]lipgloss.Style{
+				customKey:    red,
+				kind.Comment: green,
+				kind.Text:    base,
+			},
+		},
+		"overrides existing style": {
+			opts: []style.Option{style.Set(kind.Comment, yellow)},
+			want: map[kind.Kind]lipgloss.Style{kind.Comment: yellow},
+		},
+		"adds and overrides in one call": {
+			opts: []style.Option{
+				style.Set(customKey, red),
+				style.Set(kind.Comment, yellow),
+			},
+			want: map[kind.Kind]lipgloss.Style{
+				customKey:    red,
+				kind.Comment: yellow,
+			},
+		},
+		"re-resolves inheritance": {
+			// Overriding a parent kind reaches the children that inherit it.
+			opts: []style.Option{style.Set(kind.LiteralNumber, red)},
+			want: map[kind.Kind]lipgloss.Style{kind.LiteralNumberFloat: red},
+		},
+		"empty options returns an equal copy": {
+			want: map[kind.Kind]lipgloss.Style{
+				kind.Comment: green,
+				kind.Text:    base,
+			},
+		},
+	}
 
-		result := original.With(style.Set(customKey, red))
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		got := result.Style(customKey)
-		assert.Equal(t, lipgloss.Color("#ff0000"), got.GetForeground())
-	})
+			result := original.With(tc.opts...)
 
-	t.Run("overrides existing style", func(t *testing.T) {
-		t.Parallel()
+			for k := range tc.want {
+				assert.Equal(t, tc.want[k], result.Style(k), "kind %q", k)
+			}
 
-		result := original.With(style.Set(kind.Comment, yellow))
-
-		got := result.Style(kind.Comment)
-		assert.Equal(t, lipgloss.Color("#ffff00"), got.GetForeground())
-	})
-
-	t.Run("original is not modified", func(t *testing.T) {
-		t.Parallel()
-
-		_ = original.With(
-			style.Set(customKey, red),
-			style.Set(kind.Comment, yellow),
-		)
-
-		// The custom key is unset in the original, so it inherits the base.
-		got := original.Style(customKey)
-		assert.Equal(t, original.Style(kind.Text), got)
-
-		// Comment should still be green in original.
-		got = original.Style(kind.Comment)
-		assert.Equal(t, lipgloss.Color("#00ff00"), got.GetForeground())
-	})
-
-	t.Run("re-resolves inheritance", func(t *testing.T) {
-		t.Parallel()
-
-		// Overriding a parent kind reaches the children that inherit it.
-		result := original.With(style.Set(kind.LiteralNumber, red))
-
-		assert.Equal(t, lipgloss.Color("#ff0000"), result.Style(kind.LiteralNumberFloat).GetForeground())
-		assert.Equal(t, lipgloss.Color("#ffffff"), original.Style(kind.LiteralNumberFloat).GetForeground())
-	})
-
-	t.Run("keeps untouched categories", func(t *testing.T) {
-		t.Parallel()
-
-		result := original.With(style.Set(customKey, red))
-
-		assert.Equal(t, original.Style(kind.Comment), result.Style(kind.Comment))
-		assert.Equal(t, original.Style(kind.Text), result.Style(kind.Text))
-	})
-
-	t.Run("empty options returns an equal copy", func(t *testing.T) {
-		t.Parallel()
-
-		result := original.With()
-
-		assert.Equal(t, lipgloss.Color("#00ff00"), result.Style(kind.Comment).GetForeground())
-		assert.Equal(t, lipgloss.Color("#ffffff"), result.Style(kind.Text).GetForeground())
-	})
+			// The original is not modified. The custom key is unset in it,
+			// so it inherits the base.
+			assert.Equal(t, base, original.Style(customKey))
+			assert.Equal(t, green, original.Style(kind.Comment))
+			assert.Equal(t, base, original.Style(kind.LiteralNumberFloat))
+		})
+	}
 
 	t.Run("zero value can be extended", func(t *testing.T) {
 		t.Parallel()
 
 		result := style.Styles{}.With(style.Set(kind.Comment, yellow))
 
-		assert.Equal(t, lipgloss.Color("#ffff00"), result.Style(kind.Comment).GetForeground())
+		assert.Equal(t, yellow, result.Style(kind.Comment))
 		assert.Equal(t, lipgloss.Style{}, result.Style(kind.Text))
 	})
 }
