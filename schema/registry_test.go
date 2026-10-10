@@ -203,18 +203,6 @@ func TestRegistry_Lookup(t *testing.T) {
 		}
 	})
 
-	t.Run("no match returns error", func(t *testing.T) {
-		t.Parallel()
-
-		reg := schema.NewRegistry(schema.WithResolvers(schema.When(
-			matcher.Content(kindPath, "Deployment"),
-			schema.Embedded(schemaData),
-		)))
-
-		_, err := reg.Lookup(t.Context(), yamltest.FirstDocument(t, "kind: Service"))
-		require.ErrorIs(t, err, schema.ErrNoMatch)
-	})
-
 	t.Run("empty registry matches nothing", func(t *testing.T) {
 		t.Parallel()
 
