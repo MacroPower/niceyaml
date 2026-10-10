@@ -374,125 +374,108 @@ func TestRange_LastLine(t *testing.T) {
 func TestRanges_UniqueValues(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty ranges returns nil", func(t *testing.T) {
-		t.Parallel()
+	r1 := position.NewRange(position.New(0, 0), position.New(1, 0))
+	r2 := position.NewRange(position.New(2, 0), position.New(3, 0))
+	r3 := position.NewRange(position.New(4, 0), position.New(5, 0))
 
-		var rs position.Ranges
+	tcs := map[string]struct {
+		ranges position.Ranges
+		want   position.Ranges
+	}{
+		"empty ranges returns nil": {
+			ranges: nil,
+			want:   nil,
+		},
+		"single range returns unchanged": {
+			ranges: position.Ranges{r1},
+			want:   position.Ranges{r1},
+		},
+		"removes adjacent duplicates": {
+			ranges: position.Ranges{r1, r1, r1},
+			want:   position.Ranges{r1},
+		},
+		"removes scattered duplicates": {
+			ranges: position.Ranges{r1, r2, r1, r2},
+			want:   position.Ranges{r1, r2},
+		},
+		"preserves insertion order": {
+			ranges: position.Ranges{r3, r1, r2, r1, r3},
+			want:   position.Ranges{r3, r1, r2},
+		},
+	}
 
-		assert.Nil(t, rs.UniqueValues())
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("single range returns unchanged", func(t *testing.T) {
-		t.Parallel()
-
-		r := position.NewRange(position.New(0, 0), position.New(1, 0))
-		rs := position.Ranges{r}
-		assert.Equal(t, position.Ranges{r}, rs.UniqueValues())
-	})
-
-	t.Run("removes adjacent duplicates", func(t *testing.T) {
-		t.Parallel()
-
-		r := position.NewRange(position.New(0, 0), position.New(1, 0))
-		rs := position.Ranges{r, r, r}
-		assert.Equal(t, position.Ranges{r}, rs.UniqueValues())
-	})
-
-	t.Run("removes scattered duplicates", func(t *testing.T) {
-		t.Parallel()
-
-		r1 := position.NewRange(position.New(0, 0), position.New(1, 0))
-		r2 := position.NewRange(position.New(2, 0), position.New(3, 0))
-		rs := position.Ranges{r1, r2, r1, r2}
-		assert.Equal(t, position.Ranges{r1, r2}, rs.UniqueValues())
-	})
-
-	t.Run("preserves insertion order", func(t *testing.T) {
-		t.Parallel()
-
-		r1 := position.NewRange(position.New(0, 0), position.New(1, 0))
-		r2 := position.NewRange(position.New(2, 0), position.New(3, 0))
-		r3 := position.NewRange(position.New(4, 0), position.New(5, 0))
-		rs := position.Ranges{r3, r1, r2, r1, r3}
-		assert.Equal(t, position.Ranges{r3, r1, r2}, rs.UniqueValues())
-	})
-
-	t.Run("all duplicates returns single item", func(t *testing.T) {
-		t.Parallel()
-
-		r := position.NewRange(position.New(5, 5), position.New(10, 10))
-		rs := position.Ranges{r, r, r, r, r}
-		assert.Equal(t, position.Ranges{r}, rs.UniqueValues())
-	})
+			assert.Equal(t, tc.want, tc.ranges.UniqueValues())
+		})
+	}
 }
 
 func TestRanges_LineIndices(t *testing.T) {
 	t.Parallel()
 
-	t.Run("empty ranges returns nil", func(t *testing.T) {
-		t.Parallel()
+	tcs := map[string]struct {
+		ranges position.Ranges
+		want   []int
+	}{
+		"empty ranges returns nil": {
+			ranges: nil,
+			want:   nil,
+		},
+		"single range returns single line": {
+			ranges: position.Ranges{
+				position.NewRange(position.New(5, 0), position.New(5, 10)),
+			},
+			want: []int{5},
+		},
+		"multiple ranges returns all covered lines": {
+			ranges: position.Ranges{
+				position.NewRange(position.New(0, 0), position.New(0, 5)),
+				position.NewRange(position.New(3, 0), position.New(4, 5)), // Spans lines 3-4.
+				position.NewRange(position.New(7, 0), position.New(7, 10)),
+			},
+			want: []int{0, 3, 4, 7},
+		},
+		"excludes end line touched only at column 0": {
+			ranges: position.Ranges{
+				position.NewRange(position.New(3, 2), position.New(5, 0)),
+			},
+			want: []int{3, 4},
+		},
+		"inverted ranges cover no lines": {
+			ranges: position.Ranges{
+				position.NewRange(position.New(2, 0), position.New(1, 0)),
+				position.NewRange(position.New(2, 0), position.New(1, 5)),
+				position.NewRange(position.New(1, 3), position.New(1, 1)),
+				position.NewRange(position.New(math.MinInt, 3), position.New(math.MinInt, 1)),
+			},
+			want: nil,
+		},
+		"range on the MaxInt line": {
+			ranges: position.Ranges{
+				position.NewRange(position.New(math.MaxInt, 0), position.New(math.MaxInt, 3)),
+				position.NewRange(position.New(math.MaxInt-1, 2), position.New(math.MaxInt, 1)),
+			},
+			want: []int{math.MaxInt, math.MaxInt - 1, math.MaxInt},
+		},
+		"includes duplicate lines from overlapping ranges": {
+			ranges: position.Ranges{
+				position.NewRange(position.New(5, 0), position.New(5, 5)),
+				position.NewRange(position.New(5, 10), position.New(5, 15)),
+			},
+			want: []int{5, 5},
+		},
+	}
 
-		var rs position.Ranges
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		assert.Nil(t, rs.LineIndices())
-	})
-
-	t.Run("single range returns single line", func(t *testing.T) {
-		t.Parallel()
-
-		r := position.NewRange(position.New(5, 0), position.New(5, 10))
-		rs := position.Ranges{r}
-		assert.Equal(t, []int{5}, rs.LineIndices())
-	})
-
-	t.Run("multiple ranges returns all covered lines", func(t *testing.T) {
-		t.Parallel()
-
-		r1 := position.NewRange(position.New(0, 0), position.New(0, 5))
-		r2 := position.NewRange(position.New(3, 0), position.New(4, 5)) // Spans lines 3-4.
-		r3 := position.NewRange(position.New(7, 0), position.New(7, 10))
-		rs := position.Ranges{r1, r2, r3}
-		assert.Equal(t, []int{0, 3, 4, 7}, rs.LineIndices())
-	})
-
-	t.Run("excludes end line touched only at column 0", func(t *testing.T) {
-		t.Parallel()
-
-		r := position.NewRange(position.New(3, 2), position.New(5, 0))
-		rs := position.Ranges{r}
-		assert.Equal(t, []int{3, 4}, rs.LineIndices())
-	})
-
-	t.Run("inverted ranges cover no lines", func(t *testing.T) {
-		t.Parallel()
-
-		rs := position.Ranges{
-			position.NewRange(position.New(2, 0), position.New(1, 0)),
-			position.NewRange(position.New(2, 0), position.New(1, 5)),
-			position.NewRange(position.New(1, 3), position.New(1, 1)),
-			position.NewRange(position.New(math.MinInt, 3), position.New(math.MinInt, 1)),
-		}
-		assert.Empty(t, rs.LineIndices())
-	})
-
-	t.Run("range on the MaxInt line", func(t *testing.T) {
-		t.Parallel()
-
-		rs := position.Ranges{
-			position.NewRange(position.New(math.MaxInt, 0), position.New(math.MaxInt, 3)),
-			position.NewRange(position.New(math.MaxInt-1, 2), position.New(math.MaxInt, 1)),
-		}
-		assert.Equal(t, []int{math.MaxInt, math.MaxInt - 1, math.MaxInt}, rs.LineIndices())
-	})
-
-	t.Run("includes duplicate lines from overlapping ranges", func(t *testing.T) {
-		t.Parallel()
-
-		r1 := position.NewRange(position.New(5, 0), position.New(5, 5))
-		r2 := position.NewRange(position.New(5, 10), position.New(5, 15))
-		rs := position.Ranges{r1, r2}
-		assert.Equal(t, []int{5, 5}, rs.LineIndices())
-	})
+			assert.Equal(t, tc.want, tc.ranges.LineIndices())
+		})
+	}
 }
 
 func TestNewSpan(t *testing.T) {
