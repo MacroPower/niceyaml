@@ -8346,7 +8346,10 @@ func TestDocument_At_Scope(t *testing.T) {
 
 		excerpt, ok := bound.Excerpt(niceyaml.WithContextLines(0))
 		require.True(t, ok)
-		assert.Equal(t, "   4 |     open: \"17:00\"\n     |           ^^^^^^^", excerpt.String())
+		assert.Equal(t, stringtest.JoinLF(
+			`   4 |     open: "17:00"`,
+			`     |           ^^^^^^^`,
+		), excerpt.String())
 	})
 }
 
@@ -11041,9 +11044,11 @@ func TestValidator_DirectCall(t *testing.T) {
 		"MultiValidator": {
 			v:    niceyaml.MultiValidator(rule, nameSchema),
 			path: itemPath,
-			raw:  "reserved name\nshould not validate against the schema",
-			want: "c.yaml:4:11: $.items[1].name: reserved name\n" +
+			raw:  stringtest.JoinLF("reserved name", "should not validate against the schema"),
+			want: stringtest.JoinLF(
+				"c.yaml:4:11: $.items[1].name: reserved name",
 				"c.yaml:4:11: $.items[1].name: should not validate against the schema",
+			),
 		},
 		"ChainValidator": {
 			v:    niceyaml.ChainValidator(rule, nameSchema),
