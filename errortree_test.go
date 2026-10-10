@@ -874,7 +874,7 @@ func TestErrorTree_New(t *testing.T) {
 		"wrapper that rewrites the message of a binding keeps its text whole": {
 			err: upperError{err: yamltest.Bind(t, source,
 				niceyaml.NewSummary("2 problems", badA(), badB()))},
-			want: textNode("F.YAML: 2 PROBLEMS\nF.YAML:1:4: $.A: BAD A\nF.YAML:2:4: $.B: BAD B",
+			want: textNode(stringtest.JoinLF("F.YAML: 2 PROBLEMS", "F.YAML:1:4: $.A: BAD A", "F.YAML:2:4: $.B: BAD B"),
 				textNode("1:4: $.a: bad a"),
 				textNode("2:4: $.b: bad b"),
 			),
@@ -932,10 +932,13 @@ func TestErrorTree_New(t *testing.T) {
 		},
 		"multi-line nested message stays whole": {
 			err: yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
-				niceyaml.NewError("bad a\n  see docs", niceyaml.AtPath(paths.Current().Child("a"))),
+				niceyaml.NewError(
+					stringtest.JoinLF("bad a", "  see docs"),
+					niceyaml.AtPath(paths.Current().Child("a")),
+				),
 			))),
 			want: textNode("f.yaml: outer",
-				textNode("1:4: $.a: bad a\n  see docs"),
+				textNode(stringtest.JoinLF("1:4: $.a: bad a", "  see docs")),
 			),
 			multiLine: true,
 		},
