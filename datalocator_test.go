@@ -22,37 +22,103 @@ import (
 )
 
 // The documents the locator tests share.
-const (
+var (
 	// The key 0x10 sets the member 16, and items holds an element.
-	respelledDoc = "ports:\n  0x10:\n    name: \"\"\nitems:\n  - name: \"\"\n"
+	respelledDoc = stringtest.LinesLF(
+		"ports:",
+		"  0x10:",
+		`    name: ""`,
+		"items:",
+		`  - name: ""`,
+	)
 	// The mapping under 0x10 holds no name.
-	lackingDoc = "ports:\n  0x10:\n    proto: tcp\n"
+	lackingDoc = stringtest.LinesLF(
+		"ports:",
+		"  0x10:",
+		"    proto: tcp",
+	)
 	// The key 3.10 sets the member 3.1, so no member has the name 3.10.
-	pythonDoc = "python:\n  3.10:\n    image: a\n"
+	pythonDoc = stringtest.LinesLF(
+		"python:",
+		"  3.10:",
+		"    image: a",
+	)
 	// Both keys of m set the member 16, and a decode keeps b.
-	sameNameDoc = "m:\n  16: aaaa\n  0x10: b\n"
+	sameNameDoc = stringtest.LinesLF(
+		"m:",
+		"  16: aaaa",
+		"  0x10: b",
+	)
 	// The merge key sets the member 16 to x. The quoted key sets the
 	// member 0x10, and a path through 0x10 selects that entry.
-	hiddenDoc = "user:\n  <<: {0x10: x}\n  \"0x10\": 1\n"
+	hiddenDoc = stringtest.LinesLF(
+		"user:",
+		"  <<: {0x10: x}",
+		`  "0x10": 1`,
+	)
 	// The merge key of m sets the member true to b, the last value b1
 	// gives that name.
-	mergeDoc = "b0: &b0\n  True: xxxx\nb1: &b1\n  <<: *b0\n  true: aaaa\n  True: b\nm:\n  <<: *b1\n"
+	mergeDoc = stringtest.LinesLF(
+		"b0: &b0",
+		"  True: xxxx",
+		"b1: &b1",
+		"  <<: *b0",
+		"  true: aaaa",
+		"  True: b",
+		"m:",
+		"  <<: *b1",
+	)
 	// A sequence, a mapping with keys of digits, an alias to the
 	// sequence, a sequence in a sequence, a scalar, and a null.
-	shapesDoc = "seq: &s\n  - a\n  - b\nmap:\n  0: x\n  1: y\nal: *s\n" +
-		"nested:\n  - - p\n    - q\nscalar: v\nnone: ~\n"
+	shapesDoc = stringtest.LinesLF(
+		"seq: &s",
+		"  - a",
+		"  - b",
+		"map:",
+		"  0: x",
+		"  1: y",
+		"al: *s",
+		"nested:",
+		"  - - p",
+		"    - q",
+		"scalar: v",
+		"none: ~",
+	)
 	// The anchors a document of the tests refers to through
 	// [niceyaml.WithReferences].
-	referenceDoc = "defaults: &defaults\n  timeout: 0\n  3.10: r\nlist: &list [u, {0x10: v}]\n"
+	referenceDoc = stringtest.LinesLF(
+		"defaults: &defaults",
+		"  timeout: 0",
+		"  3.10: r",
+		"list: &list [u, {0x10: v}]",
+	)
 	// The mapping server merges an anchor of referenceDoc, and items is
 	// an alias to one.
-	referringDoc = "server:\n  <<: *defaults\n  port: 0x10\n  3.10: mine\nitems: *list\n"
+	referringDoc = stringtest.LinesLF(
+		"server:",
+		"  <<: *defaults",
+		"  port: 0x10",
+		"  3.10: mine",
+		"items: *list",
+	)
 	// The tagged alias key of python has no name the locator can tell, so
 	// it may set a member of any name, such as one a key before it sets.
-	unnamedKeyDoc = "k: &k 0x10\npython:\n  3.10: {image: a}\n  a: 1\n  !!str *k : v\n  b: 2\n"
+	unnamedKeyDoc = stringtest.LinesLF(
+		"k: &k 0x10",
+		"python:",
+		"  3.10: {image: a}",
+		"  a: 1",
+		"  !!str *k : v",
+		"  b: 2",
+	)
 	// The key a/b~c holds both characters a JSON Pointer escapes, and the
 	// empty key takes an empty name.
-	pointerDoc = "\"a/b~c\":\n  \"\": x\nitems:\n  - 0x10: y\n"
+	pointerDoc = stringtest.LinesLF(
+		`"a/b~c":`,
+		`  "": x`,
+		"items:",
+		"  - 0x10: y",
+	)
 )
 
 // locatorDoc returns the first document of input, from a source named
@@ -232,7 +298,7 @@ func TestDataLocator_At(t *testing.T) {
 			want:  "f.yaml:1:1: $.python.'3.10'.image: x",
 		},
 		"member lacking below one no path selects": {
-			input: "user:\n  <<: {0x10: {a: b}}\n  \"0x10\": 1\n",
+			input: stringtest.LinesLF("user:", "  <<: {0x10: {a: b}}", `  "0x10": 1`),
 			names: []string{"user", "16", "name"},
 			want:  "f.yaml:2:8: $.user.16.name: x",
 		},
@@ -286,7 +352,7 @@ func TestDataLocator_At(t *testing.T) {
 			want:  "f.yaml: $.scalar.x: x",
 		},
 		"index past the end below a member no path selects": {
-			input: "user:\n  <<: {0x10: [a]}\n  \"0x10\": 1\n",
+			input: stringtest.LinesLF("user:", "  <<: {0x10: [a]}", `  "0x10": 1`),
 			names: []string{"user", "16", "1"},
 			want:  "f.yaml:2:8: $.user.16[1]: x",
 		},
@@ -520,7 +586,16 @@ func TestDataLocator_Names(t *testing.T) {
 
 	// The names a locator reads are those go-yaml gives the keys of a
 	// decode into any, so each key here pins one of them.
-	input := "0x10: a\n3.10: b\nTrue: c\n~: d\n1234567.0: e\n!!binary aGk=: f\n1e3: g\n\"0x20\": h\n"
+	input := stringtest.LinesLF(
+		"0x10: a",
+		"3.10: b",
+		"True: c",
+		"~: d",
+		"1234567.0: e",
+		"!!binary aGk=: f",
+		"1e3: g",
+		`"0x20": h`,
+	)
 	doc := locatorDoc(t, input)
 
 	// Each name, with the line of the key that sets its member.
@@ -571,7 +646,13 @@ func TestDataLocator_Names(t *testing.T) {
 func TestDataLocator_Scope(t *testing.T) {
 	t.Parallel()
 
-	doc := locatorDoc(t, "- name: \"\"\n- spec:\n    ports:\n      0x10:\n        name: \"\"\n")
+	doc := locatorDoc(t, stringtest.LinesLF(
+		`- name: ""`,
+		"- spec:",
+		"    ports:",
+		"      0x10:",
+		`        name: ""`,
+	))
 	spec := yamltest.At(t, doc, paths.Doc().Index(1).Child("spec"))
 
 	// The names read from the scoped Node, and the path starts at the root
@@ -602,7 +683,7 @@ func TestDataLocator_Scope(t *testing.T) {
 	t.Run("scope behind an alias", func(t *testing.T) {
 		t.Parallel()
 
-		aliased := locatorDoc(t, "base: &base\n  0x10: x\nal: *base\n")
+		aliased := locatorDoc(t, stringtest.LinesLF("base: &base", "  0x10: x", "al: *base"))
 		al := yamltest.At(t, aliased, paths.Doc().Child("al"))
 
 		got, _ := located(t, al, al.DataLocator().At("16"))
@@ -776,7 +857,12 @@ func TestDataLocator_Schema(t *testing.T) {
 		"merge precedence":         mergeDoc,
 		"sequences and scalars":    shapesDoc,
 		"key with no name":         unnamedKeyDoc,
-		"alias key":                "k: &k 0x10\nm:\n  *k : {0x20: v}\n  \"16\": w\n",
+		"alias key": stringtest.LinesLF(
+			"k: &k 0x10",
+			"m:",
+			"  *k : {0x20: v}",
+			`  "16": w`,
+		),
 		"merge sources in a list": stringtest.LinesLF(
 			"a: &a {0x10: 1, b: 2}",
 			"b: &b {16: 3, 0x10: 4}",
@@ -785,10 +871,30 @@ func TestDataLocator_Schema(t *testing.T) {
 			"  b: 5",
 			"  <<: *a",
 		),
-		"merge key after its keys":       "base: &base {0x10: {a: 1}}\nm:\n  0x10: {b: 2}\n  0o20: {c: 3}\n  <<: *base\n",
-		"keys below one no path selects": "user:\n  <<: {0x10: {0x20: [x, {0x30: y}]}}\n  \"0x10\": 1\n",
-		"aliased mapping in a sequence":  "base: &base {0x10: x, 3.10: y}\nseq:\n  - *base\n  - [*base, {True: z}]\n",
-		"null and bool keys":             "~: a\nnull: b\nTrue: {true: c}\nfalse: [d]\n",
+		"merge key after its keys": stringtest.LinesLF(
+			"base: &base {0x10: {a: 1}}",
+			"m:",
+			"  0x10: {b: 2}",
+			"  0o20: {c: 3}",
+			"  <<: *base",
+		),
+		"keys below one no path selects": stringtest.LinesLF(
+			"user:",
+			"  <<: {0x10: {0x20: [x, {0x30: y}]}}",
+			`  "0x10": 1`,
+		),
+		"aliased mapping in a sequence": stringtest.LinesLF(
+			"base: &base {0x10: x, 3.10: y}",
+			"seq:",
+			"  - *base",
+			"  - [*base, {True: z}]",
+		),
+		"null and bool keys": stringtest.LinesLF(
+			"~: a",
+			"null: b",
+			"True: {true: c}",
+			"false: [d]",
+		),
 		// The lookups of both runs pass the limit on the merge sources they
 		// read, so each writes the same names past it.
 		"more merge reads than the limit allows": yamltest.WideMerge(2000),
