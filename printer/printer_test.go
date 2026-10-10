@@ -2338,36 +2338,30 @@ func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 	// The wrap takes each ASCII byte alone, so it would start a row with
 	// the runes that continue a cluster begun by an ASCII character. They
 	// stay with the start of their cluster, and a styled row keeps its
-	// style on both sides of the move.
+	// style on both sides of the move, so every case prints the same rows
+	// with styles and without.
 	red := lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	styled := testPrinterWithStyles(
+		style.Set(kind.Text, red),
+		style.Set(kind.NameTag, red),
+		style.Set(kind.LiteralString, red),
+		style.Set(kind.PunctuationMappingValue, red),
+	)
 
 	tcs := map[string]struct {
-		input  string
-		want   []string
-		width  int
-		styled bool
+		input string
+		want  []string
+		width int
 	}{
 		"decomposed accent": {
 			input: "k: abcdefge\u0301xyz",
 			width: 8,
 			want:  []string{"k:", "abcdefge\u0301", "xyz"},
 		},
-		"decomposed accent styled": {
-			input:  "k: abcdefge\u0301xyz",
-			width:  8,
-			styled: true,
-			want:   []string{"k:", "abcdefge\u0301", "xyz"},
-		},
 		"combining accent after a space at a break": {
 			input: "k: aaaa \u0301bbbb",
 			width: 6,
 			want:  []string{"k:", "aaaa", "\u0301bbbb"},
-		},
-		"combining accent after a space at a break styled": {
-			input:  "k: aaaa \u0301bbbb",
-			width:  6,
-			styled: true,
-			want:   []string{"k:", "aaaa", "\u0301bbbb"},
 		},
 		"keycap mark after a space at a break": {
 			input: "k: aaaa \u20e3bbbb",
@@ -2379,12 +2373,6 @@ func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 			width: 5,
 			want:  []string{"k:", "abbaé", "//---", "-/x"},
 		},
-		"decomposed accent before a run of breakpoints styled": {
-			input:  "k: abbaé//----/x",
-			width:  5,
-			styled: true,
-			want:   []string{"k:", "abbaé", "//---", "-/x"},
-		},
 		"keycap before a run of breakpoints": {
 			input: "k: \U0001F44D\U0001F3FD日1️⃣-----x",
 			width: 5,
@@ -2395,55 +2383,25 @@ func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 			width: 1,
 			want:  []string{"1\ufe0f\u20e3", ":", "b", "b"},
 		},
-		"keycap styled": {
-			input:  "1\ufe0f\u20e3: bb",
-			width:  1,
-			styled: true,
-			want:   []string{"1\ufe0f\u20e3", ":", "b", "b"},
-		},
 		"keycaps fill a row": {
 			input: "k: " + strings.Repeat("1\ufe0f\u20e3", 6),
 			width: 8,
 			want:  []string{"k:", strings.Repeat("1\ufe0f\u20e3", 4), strings.Repeat("1\ufe0f\u20e3", 2)},
-		},
-		"keycaps fill a row styled": {
-			input:  "k: " + strings.Repeat("1\ufe0f\u20e3", 6),
-			width:  8,
-			styled: true,
-			want:   []string{"k:", strings.Repeat("1\ufe0f\u20e3", 4), strings.Repeat("1\ufe0f\u20e3", 2)},
 		},
 		"keycap mid row": {
 			input: "k: cccxx1\ufe0f\u20e3dddd",
 			width: 9,
 			want:  []string{"k:", "cccxx1\ufe0f\u20e3dd", "d", "d"},
 		},
-		"keycap mid row styled": {
-			input:  "k: cccxx1\ufe0f\u20e3dddd",
-			width:  9,
-			styled: true,
-			want:   []string{"k:", "cccxx1\ufe0f\u20e3dd", "d", "d"},
-		},
 		"keycap before a space": {
 			input: "k: 1\ufe0f\u20e3cc --cx",
 			width: 4,
 			want:  []string{"k:", "1\ufe0f\u20e3cc", "--cx"},
 		},
-		"keycap before a space styled": {
-			input:  "k: 1\ufe0f\u20e3cc --cx",
-			width:  4,
-			styled: true,
-			want:   []string{"k:", "1\ufe0f\u20e3cc", "--cx"},
-		},
 		"keycap split by the wrap": {
 			input: "k: ac xb1\ufe0f\u20e3a",
 			width: 3,
 			want:  []string{"k:", "ac", "xb", "1\ufe0f\u20e3", "a"},
-		},
-		"keycap split by the wrap styled": {
-			input:  "k: ac xb1\ufe0f\u20e3a",
-			width:  3,
-			styled: true,
-			want:   []string{"k:", "ac", "xb", "1\ufe0f\u20e3", "a"},
 		},
 	}
 
@@ -2451,39 +2409,33 @@ func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			var opts []style.Option
-
-			if tc.styled {
-				for _, k := range []kind.Kind{kind.Text, kind.NameTag, kind.LiteralString, kind.PunctuationMappingValue} {
-					opts = append(opts, style.Set(k, red))
-				}
-			}
-
-			p := testPrinterWithStyles(opts...).With(printer.WithWrapWidth(tc.width))
-
 			view := niceyaml.NewSourceFromString(tc.input).View()
-			got := p.Print(view)
-			rows := strings.Split(got, "\n")
-			plain := strings.Split(ansi.Strip(got), "\n")
+			plain := testPrinter().With(printer.WithWrapWidth(tc.width))
 
-			assert.Equal(t, tc.want, plain)
-			assert.Len(t, rows, p.Layout(view).Rows())
+			got := strings.Split(plain.Print(view), "\n")
+			assert.Equal(t, tc.want, got)
+			assert.Len(t, got, plain.Layout(view).Rows())
 
 			// A row runs past the width only when it holds a lone cluster
 			// wider than the width.
-			for i, row := range plain {
+			for i, row := range got {
 				if cluster, _ := ansi.FirstGraphemeCluster(row, ansi.GraphemeWidth); cluster != row {
 					assert.LessOrEqual(t, lipgloss.Width(row), tc.width, "row %d: %q", i, row)
 				}
 			}
 
-			if tc.styled {
-				// Every row opens the style and closes it again, so no row
-				// leaves it open for the next.
-				for i, row := range rows {
-					assert.Contains(t, row, "\x1b[31m", "row %d", i)
-					assert.True(t, strings.HasSuffix(row, "\x1b[m"), "row %d: %q", i, row)
-				}
+			p := styled.With(printer.WithWrapWidth(tc.width))
+
+			printed := p.Print(view)
+			rows := strings.Split(printed, "\n")
+			assert.Equal(t, tc.want, strings.Split(ansi.Strip(printed), "\n"))
+			assert.Len(t, rows, p.Layout(view).Rows())
+
+			// Every row opens the style and closes it again, so no row
+			// leaves it open for the next.
+			for i, row := range rows {
+				assert.Contains(t, row, "\x1b[31m", "row %d", i)
+				assert.True(t, strings.HasSuffix(row, "\x1b[m"), "row %d: %q", i, row)
 			}
 		})
 	}
