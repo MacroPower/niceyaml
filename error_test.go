@@ -7579,21 +7579,86 @@ func TestRebase(t *testing.T) {
 		assert.Equal(t, []string{"2:1: $.hours:"}, rows)
 	})
 
-	t.Run("path composes with the base", func(t *testing.T) {
-		t.Parallel()
+	inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
+	spec := paths.Current().Child("spec")
 
-		err := niceyaml.Rebase(niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath)), hours)
+	// The message of a rebased error stays as its chain wrote it. The path
+	// joins every base, and FormatError and a binding each name it once,
+	// in front of the whole message.
+	composed := map[string]struct {
+		err error
+		// The document that binds the error.
+		doc *niceyaml.Node
+		// The message, and the path and the position with the path that
+		// FormatError and the binding put in front of it.
+		want      string
+		wantPath  paths.Path
+		wantBound string
+	}{
+		"path composes with the base": {
+			err:       niceyaml.Rebase(inner, hours),
+			doc:       dd,
+			want:      "closes before it opens",
+			wantPath:  hours.Child("close"),
+			wantBound: "4:10: $.hours.close",
+		},
+		"rebases compose": {
+			err:       niceyaml.Rebase(niceyaml.Rebase(inner, hours), spec),
+			doc:       nested,
+			want:      "closes before it opens",
+			wantPath:  spec.Child("hours", "close"),
+			wantBound: "4:12: $.spec.hours.close",
+		},
+		// Each level wraps the result of the level below and rebases it, so
+		// the text holds every wrapper and binding names the joined path
+		// once, in front of all of them.
+		"wrappers between rebases add no paths": {
+			err: niceyaml.Rebase(
+				fmt.Errorf("check spec: %w", niceyaml.Rebase(fmt.Errorf("check hours: %w", inner), hours)),
+				spec,
+			),
+			doc:       nested,
+			want:      "check spec: check hours: closes before it opens",
+			wantPath:  spec.Child("hours", "close"),
+			wantBound: "4:12: $.spec.hours.close",
+		},
+		// The wrapper holds the message alone, so binding names the joined
+		// path once, in front of the text the wrapper added.
+		"a wrapper between the check and the rebase adds no path": {
+			err:       niceyaml.Rebase(fmt.Errorf("checking hours: %w", inner), hours),
+			doc:       dd,
+			want:      "checking hours: closes before it opens",
+			wantPath:  hours.Child("close"),
+			wantBound: "4:10: $.hours.close",
+		},
+		"a location set on the rebased error is under the base": {
+			err: errorIn(t, niceyaml.Rebase(inner, hours)).
+				With(niceyaml.AtPath(paths.Current().Child("open"))),
+			doc:       dd,
+			want:      "closes before it opens",
+			wantPath:  hours.Child("open"),
+			wantBound: "3:9: $.hours.open",
+		},
+	}
 
-		e := errorIn(t, err)
+	for name, tc := range composed {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		assert.Equal(t, "@.hours.close", errorPath(t, e).String())
-		assert.Equal(t, "closes before it opens", err.Error())
-		assert.Equal(
-			t,
-			"@.hours.close: closes before it opens",
-			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
-		)
-	})
+			require.ErrorIs(t, tc.err, inner)
+			assert.Equal(t, tc.want, tc.err.Error())
+			assert.Equal(t, tc.wantPath, errorPath(t, errorIn(t, tc.err)))
+			assert.Equal(
+				t,
+				tc.wantPath.String()+": "+tc.want,
+				niceyaml.FormatError(tc.err, niceyaml.WithContextLines(0)),
+			)
+
+			bound := tc.doc.Bind(tc.err)
+			require.EqualError(t, bound, tc.wantBound+": "+tc.want)
+			assert.Equal(t, tc.want, yamltest.RequireSourceError(t, bound).Message())
+		})
+	}
 
 	t.Run("a decode rebases a nested self validator the same way", func(t *testing.T) {
 		t.Parallel()
@@ -7850,46 +7915,6 @@ func TestRebase(t *testing.T) {
 		), fmt.Sprintf("%+v", rebased))
 	})
 
-	t.Run("rebases compose", func(t *testing.T) {
-		t.Parallel()
-
-		inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
-		err := niceyaml.Rebase(niceyaml.Rebase(inner, hours), paths.Current().Child("spec"))
-
-		assert.Equal(t, "closes before it opens", err.Error())
-		assert.Equal(
-			t,
-			"@.spec.hours.close: closes before it opens",
-			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
-		)
-		require.EqualError(t, nested.Bind(err), "4:12: $.spec.hours.close: closes before it opens")
-	})
-
-	t.Run("wrappers between rebases add no paths", func(t *testing.T) {
-		t.Parallel()
-
-		// Each level wraps the result of the level below and rebases it, so
-		// the text holds every wrapper and binding names the joined path
-		// once, in front of all of them.
-		inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
-		err := niceyaml.Rebase(
-			fmt.Errorf("check spec: %w", niceyaml.Rebase(fmt.Errorf("check hours: %w", inner), hours)),
-			paths.Current().Child("spec"),
-		)
-
-		assert.Equal(t, "check spec: check hours: closes before it opens", err.Error())
-		assert.Equal(t,
-			"@.spec.hours.close: check spec: check hours: closes before it opens",
-			niceyaml.FormatError(err, niceyaml.WithContextLines(-1)),
-		)
-
-		bound := nested.Bind(err)
-		require.EqualError(t, bound, "4:12: $.spec.hours.close: check spec: check hours: closes before it opens")
-
-		se := yamltest.RequireSourceError(t, bound)
-		assert.Equal(t, "check spec: check hours: closes before it opens", se.Message())
-	})
-
 	t.Run("a position stays as it is", func(t *testing.T) {
 		t.Parallel()
 
@@ -7955,47 +7980,6 @@ func TestRebase(t *testing.T) {
 
 		_, ok = rebound.Path()
 		assert.False(t, ok)
-	})
-
-	t.Run("a location set on the rebased error is under the base", func(t *testing.T) {
-		t.Parallel()
-
-		var e *niceyaml.Error
-
-		inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
-		require.ErrorAs(t, niceyaml.Rebase(inner, hours), &e)
-
-		moved := e.With(niceyaml.AtPath(paths.Current().Child("open")))
-
-		assert.Equal(t, hours.Child("open"), errorPath(t, moved))
-		assert.Equal(t, "closes before it opens", moved.Error())
-		assert.Equal(
-			t,
-			"@.hours.open: closes before it opens",
-			niceyaml.FormatError(moved, niceyaml.WithContextLines(0)),
-		)
-		require.EqualError(t, dd.Bind(moved), `3:9: $.hours.open: closes before it opens`)
-	})
-
-	t.Run("a wrapper between the check and the rebase adds no path", func(t *testing.T) {
-		t.Parallel()
-
-		inner := niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
-		err := niceyaml.Rebase(fmt.Errorf("checking hours: %w", inner), hours)
-
-		// The wrapper holds the message alone, so binding names the joined
-		// path once, in front of the text the wrapper added.
-		require.ErrorIs(t, err, inner)
-		assert.Equal(t, "checking hours: closes before it opens", err.Error())
-		assert.Equal(
-			t,
-			"@.hours.close: checking hours: closes before it opens",
-			niceyaml.FormatError(err, niceyaml.WithContextLines(0)),
-		)
-		require.EqualError(t, dd.Bind(err), "4:10: $.hours.close: checking hours: closes before it opens")
-
-		se := yamltest.RequireSourceError(t, dd.Bind(err))
-		assert.Equal(t, "checking hours: closes before it opens", se.Message())
 	})
 
 	t.Run("a check runs under the scope it is written for", func(t *testing.T) {
