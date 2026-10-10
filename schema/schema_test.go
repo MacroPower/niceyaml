@@ -803,9 +803,9 @@ func TestSchema_PathTarget(t *testing.T) {
 	// validation error. Each case checks which part of the YAML the error
 	// overlay style wraps.
 	tcs := map[string]struct {
-		schema       string
-		input        string
-		wantContains string // Substring that should appear in error output.
+		schema string
+		input  string
+		want   string // The text the error style wraps.
 	}{
 		"type error highlights value": {
 			schema: `{
@@ -814,8 +814,8 @@ func TestSchema_PathTarget(t *testing.T) {
 					"name": {"type": "string"}
 				}
 			}`,
-			input:        "name: 123",
-			wantContains: "<genericError>123</genericError>",
+			input: "name: 123",
+			want:  "123",
 		},
 		"additional property highlights key": {
 			schema: `{
@@ -829,7 +829,7 @@ func TestSchema_PathTarget(t *testing.T) {
 				name: valid
 				extra: notAllowed
 			`),
-			wantContains: "<genericError>extra</genericError>",
+			want: "extra",
 		},
 		"required error highlights the parent key": {
 			// A missing required property carries the path it would have,
@@ -850,7 +850,7 @@ func TestSchema_PathTarget(t *testing.T) {
 				user:
 				  age: 30
 			`),
-			wantContains: "<genericError>user</genericError>",
+			want: "user",
 		},
 		"error behind a merge key highlights the anchored value": {
 			// The validator sees merged data, so the path leads through the
@@ -873,15 +873,15 @@ func TestSchema_PathTarget(t *testing.T) {
 				  <<: *b
 				  name: x
 			`),
-			wantContains: "<genericError>old</genericError>",
+			want: "old",
 		},
 		"required error on the root highlights the first key": {
 			schema: `{
 				"type": "object",
 				"required": ["name"]
 			}`,
-			input:        "other: x",
-			wantContains: "<genericError>other</genericError>",
+			input: "other: x",
+			want:  "other",
 		},
 		"enum error highlights value": {
 			schema: `{
@@ -890,8 +890,8 @@ func TestSchema_PathTarget(t *testing.T) {
 					"status": {"enum": ["active", "inactive"]}
 				}
 			}`,
-			input:        "status: unknown",
-			wantContains: "<genericError>unknown</genericError>",
+			input: "status: unknown",
+			want:  "unknown",
 		},
 		"minimum error highlights value": {
 			schema: `{
@@ -900,8 +900,8 @@ func TestSchema_PathTarget(t *testing.T) {
 					"age": {"type": "integer", "minimum": 0}
 				}
 			}`,
-			input:        "age: -5",
-			wantContains: "<genericError>-5</genericError>",
+			input: "age: -5",
+			want:  "-5",
 		},
 		"pattern error highlights value": {
 			schema: `{
@@ -910,8 +910,8 @@ func TestSchema_PathTarget(t *testing.T) {
 					"email": {"type": "string", "pattern": "^[a-z]+@[a-z]+\\.[a-z]+$"}
 				}
 			}`,
-			input:        "email: notanemail",
-			wantContains: "<genericError>notanemail</genericError>",
+			input: "email: notanemail",
+			want:  "notanemail",
 		},
 		"minItems error highlights key": {
 			schema: `{
@@ -924,7 +924,7 @@ func TestSchema_PathTarget(t *testing.T) {
 				items:
 				  - one
 			`),
-			wantContains: "<genericError>items</genericError>",
+			want: "items",
 		},
 		"array item type error highlights value": {
 			schema: `{
@@ -942,7 +942,7 @@ func TestSchema_PathTarget(t *testing.T) {
 				  - notanumber
 				  - 3
 			`),
-			wantContains: "<genericError>notanumber</genericError>",
+			want: "notanumber",
 		},
 		"propertyNames error highlights the offending key": {
 			// The library reports a propertyNames violation at the offending
@@ -961,7 +961,7 @@ func TestSchema_PathTarget(t *testing.T) {
 				config:
 				  BadKey: 1
 			`),
-			wantContains: "<genericError>BadKey</genericError>",
+			want: "BadKey",
 		},
 		"hexadecimal key highlights value": {
 			// The key decodes to the member name 16, which the source spells
@@ -972,8 +972,8 @@ func TestSchema_PathTarget(t *testing.T) {
 					"16": {"type": "integer"}
 				}
 			}`,
-			input:        "0x10: hello",
-			wantContains: "<genericError>hello</genericError>",
+			input: "0x10: hello",
+			want:  "hello",
 		},
 		"tilde null key highlights value": {
 			// The key decodes to the member name null, which the source
@@ -982,16 +982,16 @@ func TestSchema_PathTarget(t *testing.T) {
 				"type": "object",
 				"additionalProperties": {"type": "string"}
 			}`,
-			input:        "~: 5",
-			wantContains: "<genericError>5</genericError>",
+			input: "~: 5",
+			want:  "5",
 		},
 		"spelled-out null key highlights value": {
 			schema: `{
 				"type": "object",
 				"additionalProperties": {"type": "string"}
 			}`,
-			input:        "NULL: 5",
-			wantContains: "<genericError>5</genericError>",
+			input: "NULL: 5",
+			want:  "5",
 		},
 		"boolean key highlights the key": {
 			schema: `{
@@ -1001,8 +1001,8 @@ func TestSchema_PathTarget(t *testing.T) {
 				},
 				"additionalProperties": false
 			}`,
-			input:        "True: nope",
-			wantContains: "<genericError>True</genericError>",
+			input: "True: nope",
+			want:  "True",
 		},
 		"false subschema on a keyword-named property highlights value": {
 			// A property named like a keyword that constrains a key
@@ -1014,8 +1014,8 @@ func TestSchema_PathTarget(t *testing.T) {
 					"additionalProperties": false
 				}
 			}`,
-			input:        "additionalProperties: 5",
-			wantContains: "<genericError>5</genericError>",
+			input: "additionalProperties: 5",
+			want:  "5",
 		},
 	}
 
@@ -1030,8 +1030,8 @@ func TestSchema_PathTarget(t *testing.T) {
 
 			bound := yamltest.RequireSourceError(t, err)
 
-			assert.Contains(t, yamltest.NewXMLPrinter().PrintError(bound), tc.wantContains,
-				"expected error output to contain specific highlighting pattern")
+			assert.Contains(t, yamltest.NewXMLPrinter().PrintError(bound),
+				"<genericError>"+tc.want+"</genericError>")
 		})
 	}
 }
