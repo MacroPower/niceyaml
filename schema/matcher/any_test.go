@@ -86,7 +86,6 @@ func TestAny(t *testing.T) {
 		ms[0] = matcher.Content(kindPath, "Service")
 		doc := yamltest.FirstDocument(t, `kind: Service`)
 
-		got := match(t, m, doc)
-		assert.False(t, got)
+		assert.False(t, match(t, m, doc))
 	})
 }

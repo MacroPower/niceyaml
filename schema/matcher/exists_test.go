@@ -43,49 +43,42 @@ func TestExists(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			m := matcher.Exists(kindPath)
 			doc := yamltest.FirstDocument(t, tc.input)
 
-			got := match(t, m, doc)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, match(t, matcher.Exists(kindPath), doc))
 		})
 	}
 
 	t.Run("nested path exists", func(t *testing.T) {
 		t.Parallel()
 
-		m := matcher.Exists(metadataName)
 		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			kind: Deployment
 			metadata:
 			  name: my-app
 		`))
 
-		got := match(t, m, doc)
-		assert.True(t, got)
+		assert.True(t, match(t, matcher.Exists(metadataName), doc))
 	})
 
 	t.Run("nested path missing", func(t *testing.T) {
 		t.Parallel()
 
-		m := matcher.Exists(metadataName)
 		doc := yamltest.FirstDocument(t, stringtest.Input(`
 			kind: Deployment
 			metadata:
 			  namespace: default
 		`))
 
-		got := match(t, m, doc)
-		assert.False(t, got)
+		assert.False(t, match(t, matcher.Exists(metadataName), doc))
 	})
 
 	t.Run("alias without an anchor is an error", func(t *testing.T) {
 		t.Parallel()
 
-		m := matcher.Exists(metadataName)
 		doc := yamltest.FirstDocument(t, `metadata: *missing`)
 
-		_, err := m.Match(t.Context(), doc)
+		_, err := matcher.Exists(metadataName).Match(t.Context(), doc)
 		require.ErrorIs(t, err, paths.ErrAlias)
 	})
 
@@ -116,7 +109,7 @@ func TestExists_ContextEnded(t *testing.T) {
 
 	// A matcher whose context ended cannot decide, so it returns the error
 	// rather than a match, and the registry stops at the document.
-	ok, err := matcher.Exists(paths.Current().Child("kind")).Match(ctx, doc)
+	ok, err := matcher.Exists(kindPath).Match(ctx, doc)
 	require.ErrorIs(t, err, context.Canceled)
 	assert.False(t, ok)
 }

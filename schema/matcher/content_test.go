@@ -754,8 +754,7 @@ func TestContent(t *testing.T) {
 
 			doc := yamltest.FirstDocument(t, tc.input)
 
-			got := match(t, tc.matcher, doc)
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, match(t, tc.matcher, doc))
 		})
 	}
 
