@@ -24,155 +24,121 @@ import (
 func TestParseDirective(t *testing.T) {
 	t.Parallel()
 
+	// Each want is the schema the directive names, or empty for a comment
+	// that holds no directive.
 	tcs := map[string]struct {
 		input string
-		want  *schema.ParsedDirective
+		want  string
 	}{
 		"valid file path": {
 			input: " yaml-language-server: $schema=./schema.json",
-			want:  &schema.ParsedDirective{Schema: "./schema.json"},
+			want:  "./schema.json",
 		},
 		"valid absolute path": {
 			input: " yaml-language-server: $schema=/path/to/schema.json",
-			want:  &schema.ParsedDirective{Schema: "/path/to/schema.json"},
+			want:  "/path/to/schema.json",
 		},
 		"valid http URL": {
 			input: " yaml-language-server: $schema=http://example.com/schema.json",
-			want:  &schema.ParsedDirective{Schema: "http://example.com/schema.json"},
+			want:  "http://example.com/schema.json",
 		},
 		"valid https URL": {
 			input: " yaml-language-server: $schema=https://example.com/schema.json",
-			want:  &schema.ParsedDirective{Schema: "https://example.com/schema.json"},
+			want:  "https://example.com/schema.json",
 		},
 		"remark after the reference": {
 			input: " yaml-language-server: $schema=./schema.json # managed by tooling",
-			want:  &schema.ParsedDirective{Schema: "./schema.json"},
+			want:  "./schema.json",
 		},
 		"path with spaces ends at the first space": {
 			input: " yaml-language-server: $schema=./path with spaces/schema.json",
-			want:  &schema.ParsedDirective{Schema: "./path"},
+			want:  "./path",
 		},
 		"no spaces after colon": {
 			input: " yaml-language-server:$schema=schema.json",
-			want:  &schema.ParsedDirective{Schema: "schema.json"},
+			want:  "schema.json",
 		},
 		"extra spaces": {
 			input: " yaml-language-server:   $schema=schema.json",
-			want:  &schema.ParsedDirective{Schema: "schema.json"},
+			want:  "schema.json",
 		},
 		"space before colon": {
 			input: " yaml-language-server : $schema=./s.json",
-			want:  &schema.ParsedDirective{Schema: "./s.json"},
+			want:  "./s.json",
 		},
 		"colon value form": {
 			input: " yaml-language-server: $schema: ./s.json",
-			want:  &schema.ParsedDirective{Schema: "./s.json"},
+			want:  "./s.json",
 		},
 		"other settings before schema": {
 			input: " yaml-language-server: foo=bar $schema=./s.json",
-			want:  &schema.ParsedDirective{Schema: "./s.json"},
+			want:  "./s.json",
 		},
 		"short form": {
 			input: " $schema: ./s.json",
-			want:  &schema.ParsedDirective{Schema: "./s.json"},
+			want:  "./s.json",
 		},
 		"short form without space": {
 			input: " $schema:./s.json",
-			want:  &schema.ParsedDirective{Schema: "./s.json"},
+			want:  "./s.json",
 		},
-		"short form with equals is not a directive": {
-			input: " $schema=./s.json",
-			want:  nil,
-		},
-		"short form after other text": {
-			input: " see $schema: ./s.json",
-			want:  nil,
-		},
-		"short form with nothing after the colon": {
-			input: " $schema:   ",
-			want:  nil,
-		},
+		"short form with equals is not a directive": {input: " $schema=./s.json"},
+		"short form after other text":               {input: " see $schema: ./s.json"},
+		"short form with nothing after the colon":   {input: " $schema:   "},
 		"none is returned as written": {
 			input: " yaml-language-server: $schema=none",
-			want:  &schema.ParsedDirective{Schema: "none"},
+			want:  "none",
 		},
 		"trailing whitespace": {
 			input: " yaml-language-server: $schema=./schema.json   ",
-			want:  &schema.ParsedDirective{Schema: "./schema.json"},
+			want:  "./schema.json",
 		},
 		"trailing tab": {
 			input: " yaml-language-server: $schema=./schema.json\t",
-			want:  &schema.ParsedDirective{Schema: "./schema.json"},
+			want:  "./schema.json",
 		},
-		"only whitespace after equals": {
-			input: " yaml-language-server: $schema=   ",
-			want:  nil,
-		},
+		"only whitespace after equals": {input: " yaml-language-server: $schema=   "},
 		// The JavaScript \s, which yaml-language-server reads a directive
 		// with, matches \v and the Unicode spaces too.
 		"no-break space before a remark": {
 			input: " yaml-language-server: $schema=./a.json\u00a0# managed",
-			want:  &schema.ParsedDirective{Schema: "./a.json"},
+			want:  "./a.json",
 		},
 		"vertical tab before a remark": {
 			input: " yaml-language-server: $schema=./a.json\v#",
-			want:  &schema.ParsedDirective{Schema: "./a.json"},
+			want:  "./a.json",
 		},
 		"ideographic space before a remark": {
 			input: " yaml-language-server: $schema=./a.json\u3000#",
-			want:  &schema.ParsedDirective{Schema: "./a.json"},
+			want:  "./a.json",
 		},
 		"byte order mark before a remark": {
 			input: " yaml-language-server: $schema=./a.json\ufeff#",
-			want:  &schema.ParsedDirective{Schema: "./a.json"},
+			want:  "./a.json",
 		},
 		"no-break space after the colon value form": {
 			input: " yaml-language-server: $schema:\u00a0./a.json",
-			want:  &schema.ParsedDirective{Schema: "./a.json"},
+			want:  "./a.json",
 		},
-		"no-break space after equals": {
-			input: " yaml-language-server: $schema=\u00a0./a.json",
-			want:  nil,
-		},
+		"no-break space after equals": {input: " yaml-language-server: $schema=\u00a0./a.json"},
 		"no-break space before the marker": {
 			input: "\u00a0yaml-language-server: $schema=./a.json",
-			want:  &schema.ParsedDirective{Schema: "./a.json"},
+			want:  "./a.json",
 		},
-		"empty string": {
-			input: "",
-			want:  nil,
-		},
-		"no directive": {
-			input: " just a regular comment",
-			want:  nil,
-		},
-		"partial match - missing schema": {
-			input: " yaml-language-server: other=value",
-			want:  nil,
-		},
-		"partial match - wrong prefix": {
-			input: " yaml-language: $schema=schema.json",
-			want:  nil,
-		},
-		"case sensitive - uppercase": {
-			input: " YAML-LANGUAGE-SERVER: $schema=schema.json",
-			want:  nil,
-		},
-		"marker after other text": {
-			input: " see yaml-language-server: $schema=./schema.json",
-			want:  nil,
-		},
-		"marker with a prefix": {
-			input: " not-a-yaml-language-server: $schema=./schema.json",
-			want:  nil,
-		},
+		"empty string":                   {input: ""},
+		"no directive":                   {input: " just a regular comment"},
+		"partial match - missing schema": {input: " yaml-language-server: other=value"},
+		"partial match - wrong prefix":   {input: " yaml-language: $schema=schema.json"},
+		"case sensitive - uppercase":     {input: " YAML-LANGUAGE-SERVER: $schema=schema.json"},
+		"marker after other text":        {input: " see yaml-language-server: $schema=./schema.json"},
+		"marker with a prefix":           {input: " not-a-yaml-language-server: $schema=./schema.json"},
 		"marker without leading space": {
 			input: "yaml-language-server: $schema=./schema.json",
-			want:  &schema.ParsedDirective{Schema: "./schema.json"},
+			want:  "./schema.json",
 		},
 		"marker after a tab": {
 			input: "\tyaml-language-server: $schema=./schema.json",
-			want:  &schema.ParsedDirective{Schema: "./schema.json"},
+			want:  "./schema.json",
 		},
 	}
 
@@ -181,13 +147,14 @@ func TestParseDirective(t *testing.T) {
 			t.Parallel()
 
 			got := schema.ParseDirective(tc.input)
-
-			if tc.want == nil {
+			if tc.want == "" {
 				assert.Nil(t, got)
-			} else {
-				require.NotNil(t, got)
-				assert.Equal(t, tc.want.Schema, got.Schema)
+
+				return
 			}
+
+			require.NotNil(t, got)
+			assert.Equal(t, tc.want, got.Schema)
 		})
 	}
 }
