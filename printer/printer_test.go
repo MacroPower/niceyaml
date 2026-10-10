@@ -3223,10 +3223,8 @@ func TestPrinter_Style(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := printer.New(printer.WithStyles(tc.styles))
-			got := p.Style(tc.query)
+			got := printer.New(printer.WithStyles(tc.styles)).Style(tc.query)
 
-			require.NotNil(t, got)
 			assert.Equal(t, tc.wantBold, got.GetBold())
 			assert.Equal(t, tc.wantItalic, got.GetItalic())
 		})
