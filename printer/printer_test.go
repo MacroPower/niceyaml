@@ -97,6 +97,18 @@ func assertRowsFit(t *testing.T, printed string, width int) {
 	}
 }
 
+// assertRowsFitClusters asserts that no row of rows is wider than width,
+// unless the row holds a lone cluster wider than the width.
+func assertRowsFitClusters(t *testing.T, rows []string, width int) {
+	t.Helper()
+
+	for i, row := range rows {
+		if cluster, _ := ansi.FirstGraphemeCluster(row, ansi.GraphemeWidth); cluster != row {
+			assert.LessOrEqual(t, lipgloss.Width(row), width, "row %d: %q", i, row)
+		}
+	}
+}
+
 // assertLayoutMeasures asserts that l counts the rows of printed and
 // measures the widest of them.
 func assertLayoutMeasures(t *testing.T, l printer.Layout, printed string) {
@@ -2154,13 +2166,7 @@ func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 			assert.Len(t, got, plain.Layout(view).Rows())
 
-			// A row runs past the width only when it holds a lone cluster
-			// wider than the width.
-			for i, row := range got {
-				if cluster, _ := ansi.FirstGraphemeCluster(row, ansi.GraphemeWidth); cluster != row {
-					assert.LessOrEqual(t, lipgloss.Width(row), tc.width, "row %d: %q", i, row)
-				}
-			}
+			assertRowsFitClusters(t, got, tc.width)
 
 			p := styled.With(printer.WithWrapWidth(tc.width))
 
@@ -2248,13 +2254,7 @@ func TestPrinter_Overlay_KeepsClusters(t *testing.T) {
 				assert.Contains(t, got, tc.styled)
 			}
 
-			// A row runs past the width only when it holds a lone cluster
-			// wider than the width.
-			for i, row := range plain {
-				if cluster, _ := ansi.FirstGraphemeCluster(row, ansi.GraphemeWidth); cluster != row {
-					assert.LessOrEqual(t, lipgloss.Width(row), tc.width, "row %d: %q", i, row)
-				}
-			}
+			assertRowsFitClusters(t, plain, tc.width)
 
 			// The container pads each row by its whole clusters, so every
 			// row of the frame takes the same cells.
