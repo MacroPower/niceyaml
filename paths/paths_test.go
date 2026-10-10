@@ -2589,6 +2589,12 @@ func TestPath_Token_Anchors(t *testing.T) {
 			wantValue: "4",
 			wantLine:  19,
 		},
+		"merge key entry itself is addressable": {
+			path:      paths.Doc().Child("merged", "<<"),
+			key:       true,
+			wantValue: "<<",
+			wantLine:  12,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -2606,14 +2612,6 @@ func TestPath_Token_Anchors(t *testing.T) {
 
 		_, err := paths.NewResolver(doc).Token(paths.Doc().Child("merged", "zzz"))
 		require.ErrorIs(t, err, paths.ErrNotFound)
-	})
-
-	t.Run("merge key entry itself is addressable", func(t *testing.T) {
-		t.Parallel()
-
-		tk, err := paths.NewResolver(doc).Token(paths.Doc().Child("merged", "<<").Key())
-		require.NoError(t, err)
-		assert.Equal(t, "<<", tk.Value)
 	})
 }
 
