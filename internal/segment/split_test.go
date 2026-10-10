@@ -211,6 +211,18 @@ func TestSplit_Lines(t *testing.T) {
 			input: "key: value\r\n\r\nnext: data\r\n",
 			want:  []string{"key: value", "", "next: data"},
 		},
+		"crlf after a comment line": {
+			input: "# c\r\nk: v\r\n",
+			want:  []string{"# c", "k: v"},
+		},
+		"quoted scalar continued after a tag": {
+			input: "a: !t\n  b: 1\nc: \"x\n  y\"\nd: 1\n",
+			want:  []string{"a: !t", "  b: 1", "c: \"x", "  y\"", "d: 1"},
+		},
+		"crlf quoted scalar continued after a tag": {
+			input: "a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n",
+			want:  []string{"a: !t", "  b: 1", "c: 'x", "  y'"},
+		},
 		// The remaining cases cover the blank lines the lexer drops. It
 		// drops the blank lines between a comment, a quoted scalar, or a
 		// flow collection and a "?" or ":" indicator after it, and a blank
@@ -285,118 +297,9 @@ func TestSplit_Lines(t *testing.T) {
 	}
 }
 
-func TestSplit_CRLFSplitOffset(t *testing.T) {
+func TestSplit_PartPosition(t *testing.T) {
 	t.Parallel()
 
-	// The lexer closes a comment with "\r" and opens the next token with
-	// "\n". That "\n" is a new rune, so it advances the column and the
-	// offset by one, while the "\r" a tag repeats before "\r\n" does not.
-	lines := segment.Split(tokens.Tokenize("# c\r\nk: v\r\n"))
-	require.Len(t, lines, 2)
-
-	nl := part(t, lines, 0, 1)
-	assert.Equal(t, "\n", nl.Origin)
-	assert.Equal(t, 5, nl.Position.Column)
-	assert.Equal(t, 5, nl.Position.Offset)
-
-	lines = segment.Split(tokens.Tokenize("a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n"))
-	require.Len(t, lines, 4)
-
-	dup := part(t, lines, 0, 3)
-	assert.Equal(t, "\r\n", dup.Origin)
-	assert.Equal(t, 6, dup.Position.Column, "the repeat shares the tag's \\r column")
-	assert.Equal(t, 6, dup.Position.Offset, "the repeat shares the tag's \\r offset")
-
-	// "a: !t\r\n" (7) + "  b: 1\r\n" (8) + "c: 'x\r\n" (7) puts the
-	// continuation at 1-indexed offset 23. Tokenize gives the final line
-	// ending back to the last token, so the part carries it.
-	cont := part(t, lines, 3, 0)
-	assert.Equal(t, "  y'\r\n", cont.Origin)
-	assert.Equal(t, 23, cont.Position.Offset)
-}
-
-func TestSplit_NewlineColumn(t *testing.T) {
-	t.Parallel()
-
-	// A pure-newline part starts just past the parts on its line, so the
-	// newline a tag repeats sits one column past the tag, or in column 1
-	// on a blank line.
-	tcs := map[string]struct {
-		input string
-		line  int // 0-indexed line holding the newline part.
-		idx   int // Segment index of the newline part on that line.
-		want  int
-	}{
-		"repeated newline after a tag": {
-			input: "a: !t\n  b: 1\n",
-			line:  0,
-			idx:   3,
-			want:  6,
-		},
-		"repeated newline after a long tag": {
-			input: "a: !!map\n  b: 1\n",
-			line:  0,
-			idx:   3,
-			want:  9,
-		},
-		"blank line inside a block scalar": {
-			input: "k: |\n  a\n\n  b\nz: 1\n",
-			line:  2,
-			idx:   0,
-			want:  1,
-		},
-		"blank line after a tag": {
-			input: "a: !!seq\n\n  - b\n",
-			line:  1,
-			idx:   0,
-			want:  1,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			lines := segment.Split(tokens.Tokenize(tc.input))
-			nl := part(t, lines, tc.line, tc.idx)
-
-			require.Equal(t, "\n", nl.Origin)
-			assert.Equal(t, tc.want, nl.Position.Column)
-
-			// The newline follows every other part on its line.
-			for _, seg := range lines[tc.line].Segments[:tc.idx] {
-				assert.Less(t, seg.Part().Position.Column, nl.Position.Column, "part %q", seg.Part().Origin)
-			}
-		})
-	}
-}
-
-func TestSplit_DuplicateNewlineOffset(t *testing.T) {
-	t.Parallel()
-
-	// The repeated newline is the same rune the previous token already
-	// counted, so it must not push later offsets forward.
-	lines := segment.Split(tokens.Tokenize("a: !t\n  b: 1\nc: \"x\n  y\"\nd: 1\n"))
-	require.Len(t, lines, 5)
-
-	dup := part(t, lines, 0, 3)
-	assert.Equal(t, "\n", dup.Origin)
-	assert.Equal(t, 6, dup.Position.Offset, "the repeat shares the tag newline's offset")
-
-	// "a: !t\n" (6) + "  b: 1\n" (7) + "c: \"x\n" (6) puts the continuation
-	// at 1-indexed offset 20.
-	cont := part(t, lines, 3, 0)
-	assert.Equal(t, "  y\"", cont.Origin)
-	assert.Equal(t, 20, cont.Position.Offset)
-}
-
-func TestSplit_MovedPartOffset(t *testing.T) {
-	t.Parallel()
-
-	// A part Split moves onto the line finished last names the rune it
-	// starts with, the same rune its Line and Column name, even when the
-	// previous token already counted that rune. The parts after it keep
-	// the offsets the source gives them.
 	tcs := map[string]struct {
 		input      string
 		origin     string // Origin of the part.
@@ -405,7 +308,46 @@ func TestSplit_MovedPartOffset(t *testing.T) {
 		wantColumn int
 		wantOffset int
 	}{
-		"newline repeated after a tag": {
+		// A pure-newline part starts just past the parts on its line, so
+		// the newline a tag repeats sits one column past the tag, or in
+		// column 1 on a blank line.
+		"repeated newline after a tag": {
+			input:      "a: !t\n  b: 1\n",
+			origin:     "\n",
+			line:       0,
+			idx:        3,
+			wantColumn: 6,
+			wantOffset: 6,
+		},
+		"repeated newline after a long tag": {
+			input:      "a: !!map\n  b: 1\n",
+			origin:     "\n",
+			line:       0,
+			idx:        3,
+			wantColumn: 9,
+			wantOffset: 9,
+		},
+		"blank line inside a block scalar": {
+			input:      "k: |\n  a\n\n  b\nz: 1\n",
+			origin:     "\n",
+			line:       2,
+			idx:        0,
+			wantColumn: 1,
+			wantOffset: 10,
+		},
+		"blank line after a tag": {
+			input:      "a: !!seq\n\n  - b\n",
+			origin:     "\n",
+			line:       1,
+			idx:        0,
+			wantColumn: 1,
+			wantOffset: 10,
+		},
+		// A part Split moves onto the line finished last names the rune it
+		// starts with, the same rune its Line and Column name, even when
+		// the previous token already counted that rune. The parts after it
+		// keep the offsets the source gives them.
+		"repeated newline ahead of blank lines": {
 			input:      "a: !t\n\n\n  b: 1\n",
 			origin:     "\n",
 			line:       0,
@@ -437,6 +379,10 @@ func TestSplit_MovedPartOffset(t *testing.T) {
 			wantColumn: 6,
 			wantOffset: 6,
 		},
+		// The lexer closes a comment with "\r" and opens the next token
+		// with "\n". That "\n" is a new rune, so it advances the column
+		// and the offset by one, while the "\r" a tag repeats before
+		// "\r\n" does not.
 		"newline of a crlf cut after a comment": {
 			input:      "# c\r\nk: v\r\n",
 			origin:     "\n",
@@ -453,6 +399,29 @@ func TestSplit_MovedPartOffset(t *testing.T) {
 			wantColumn: 5,
 			wantOffset: 10,
 		},
+		// The repeated newline is the same rune the previous token already
+		// counted, so it must not push later offsets forward. "a: !t\n"
+		// (6) + "  b: 1\n" (7) + "c: \"x\n" (6) puts the continuation at
+		// 1-indexed offset 20.
+		"quoted continuation after a repeated newline": {
+			input:      "a: !t\n  b: 1\nc: \"x\n  y\"\nd: 1\n",
+			origin:     "  y\"",
+			line:       3,
+			idx:        0,
+			wantColumn: 1,
+			wantOffset: 20,
+		},
+		// "a: !t\r\n" (7) + "  b: 1\r\n" (8) + "c: 'x\r\n" (7) puts the
+		// continuation at 1-indexed offset 23. Tokenize gives the final
+		// line ending back to the last token, so the part carries it.
+		"quoted continuation after a repeated crlf": {
+			input:      "a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n",
+			origin:     "  y'\r\n",
+			line:       3,
+			idx:        0,
+			wantColumn: 1,
+			wantOffset: 23,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -466,6 +435,11 @@ func TestSplit_MovedPartOffset(t *testing.T) {
 			assert.Equal(t, tc.wantColumn, p.Position.Column)
 			assert.Equal(t, tc.wantOffset, p.Position.Offset)
 			assert.LessOrEqual(t, p.Position.Offset, utf8.RuneCountInString(tc.input))
+
+			// The part follows every other part on its line.
+			for _, seg := range lines[tc.line].Segments[:tc.idx] {
+				assert.Less(t, seg.Part().Position.Column, p.Position.Column, "part %q", seg.Part().Origin)
+			}
 		})
 	}
 }
