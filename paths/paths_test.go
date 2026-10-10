@@ -186,9 +186,12 @@ func TestPath_Build(t *testing.T) {
 			wantYAML: "$.a\u2028b\u2029c",
 		},
 		"forged line in a name stays on one line": {
-			path:     paths.Doc().Child("a\nother.yaml:9:9: $.secret: forged"),
-			want:     `$.'a\nother.yaml:9:9: $.secret: forged'`,
-			wantYAML: "$.'a\nother.yaml:9:9: $.secret: forged'",
+			path: paths.Doc().Child(stringtest.JoinLF("a", "other.yaml:9:9: $.secret: forged")),
+			want: `$.'a\nother.yaml:9:9: $.secret: forged'`,
+			wantYAML: stringtest.JoinLF(
+				"$.'a",
+				"other.yaml:9:9: $.secret: forged'",
+			),
 		},
 		"recursive name with a space is quoted": {
 			path:     paths.Doc().Recursive("a b"),
@@ -1761,9 +1764,17 @@ func TestPath_YAMLPath_Replace(t *testing.T) {
 			want: "plain: 1\na*b: 9\n",
 		},
 		"nested dotted label": {
-			src:  "metadata:\n  labels:\n    app.kubernetes.io/name: web\n",
+			src: stringtest.LinesLF(
+				"metadata:",
+				"  labels:",
+				"    app.kubernetes.io/name: web",
+			),
 			path: paths.Doc().Child("metadata", "labels", "app.kubernetes.io/name"),
-			want: "metadata:\n  labels:\n    app.kubernetes.io/name: 9\n",
+			want: stringtest.LinesLF(
+				"metadata:",
+				"  labels:",
+				"    app.kubernetes.io/name: 9",
+			),
 		},
 		"empty name via builder fallback": {
 			src:  "\"\": v\n",
@@ -1771,9 +1782,9 @@ func TestPath_YAMLPath_Replace(t *testing.T) {
 			want: "\"\": 9\n",
 		},
 		"dotted name with a quote via builder fallback matches no key": {
-			src:  "\"\":\n  a'.b: v\n",
+			src:  stringtest.LinesLF(`"":`, "  a'.b: v"),
 			path: paths.Doc().Child("", "a'.b"),
-			want: "\"\":\n  a'.b: v\n",
+			want: stringtest.LinesLF(`"":`, "  a'.b: v"),
 		},
 		"name that is not valid UTF-8 matches no key": {
 			src:  string(utf8.RuneError) + ": v\n",
@@ -1811,7 +1822,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 	t.Run("goccy drops a key selector mid-path", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "a:\n  b: 1\n").DocumentAST()
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("a:", "  b: 1")).DocumentAST()
 		path := paths.Doc().Child("a").Key().Child("b")
 
 		assert.Equal(t, "1", goccyValue(t, path, doc))
@@ -1828,27 +1839,27 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 			indicator string
 		}{
 			"anchored key": {
-				input:     "m:\n  &a k: v\n",
+				input:     stringtest.LinesLF("m:", "  &a k: v"),
 				indicator: "&",
 			},
 			"tagged key": {
-				input:     "m:\n  !!str k: v\n",
+				input:     stringtest.LinesLF("m:", "  !!str k: v"),
 				indicator: "!!str",
 			},
 			"alias key": {
-				input:     "b: &k k\nm:\n  *k : v\n",
+				input:     stringtest.LinesLF("b: &k k", "m:", "  *k : v"),
 				indicator: "*",
 			},
 			"explicit key": {
-				input:     "m:\n  ? k\n  : v\n",
+				input:     stringtest.LinesLF("m:", "  ? k", "  : v"),
 				indicator: "?",
 			},
 			"explicit block scalar key": {
-				input:     "m:\n  ? |-\n    k\n  : v\n",
+				input:     stringtest.LinesLF("m:", "  ? |-", "    k", "  : v"),
 				indicator: "?",
 			},
 			"block scalar key without ?": {
-				input:     "m:\n  |-\n    k\n  : v\n",
+				input:     stringtest.LinesLF("m:", "  |-", "    k", "  : v"),
 				indicator: "|-",
 			},
 		}
@@ -1877,7 +1888,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 	t.Run("goccy skips merged entries", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "base: &b\n  k: v\nm:\n  <<: *b\n").DocumentAST()
+		doc := yamltest.FirstDocument(t, stringtest.LinesLF("base: &b", "  k: v", "m:", "  <<: *b")).DocumentAST()
 		path := paths.Doc().Child("m", "k")
 
 		node, err := paths.NewResolver(doc).Node(path)
@@ -1889,7 +1900,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 	t.Run("goccy selects the first duplicate and replaces all", func(t *testing.T) {
 		t.Parallel()
 
-		input := "m:\n  k: first\n  k: last\n"
+		input := stringtest.LinesLF("m:", "  k: first", "  k: last")
 
 		file, err := niceyaml.NewSourceFromString(input, niceyaml.WithAllowDuplicateKeys(true)).File()
 		require.NoError(t, err)
@@ -1904,7 +1915,7 @@ func TestPath_YAMLPath_Limits(t *testing.T) {
 		replacement := yamltest.FirstDocument(t, "new\n").DocumentAST().Body
 
 		require.NoError(t, yamlPath(t, path).ReplaceWithNode(file, replacement))
-		assert.Equal(t, "m:\n  k: new\n  k: new\n", file.String())
+		assert.Equal(t, stringtest.LinesLF("m:", "  k: new", "  k: new"), file.String())
 	})
 }
 
@@ -2045,12 +2056,12 @@ func TestPath_Token_Collections(t *testing.T) {
 			want:  "[@1:1",
 		},
 		"block mapping under a key": {
-			input: "spec:\n  replicas: 3\n",
+			input: stringtest.LinesLF("spec:", "  replicas: 3"),
 			path:  "$.spec",
 			want:  "spec@1:1",
 		},
 		"key of a block mapping": {
-			input: "spec:\n  replicas: 3\n",
+			input: stringtest.LinesLF("spec:", "  replicas: 3"),
 			path:  "$.spec~",
 			want:  "spec@1:1",
 		},
@@ -2060,7 +2071,7 @@ func TestPath_Token_Collections(t *testing.T) {
 			want:  "spec@1:1",
 		},
 		"block sequence under a key": {
-			input: "items:\n  - a\n",
+			input: stringtest.LinesLF("items:", "  - a"),
 			path:  "$.items",
 			want:  "items@1:1",
 		},
@@ -2070,7 +2081,7 @@ func TestPath_Token_Collections(t *testing.T) {
 			want:  "items@1:1",
 		},
 		"tagged mapping under a key": {
-			input: "spec: !!map\n  k: v\n",
+			input: stringtest.LinesLF("spec: !!map", "  k: v"),
 			path:  "$.spec",
 			want:  "spec@1:1",
 		},
@@ -2080,7 +2091,7 @@ func TestPath_Token_Collections(t *testing.T) {
 			want:  "spec@1:3",
 		},
 		"mapping under a nested key": {
-			input: "a:\n  b:\n    k: v\n",
+			input: stringtest.LinesLF("a:", "  b:", "    k: v"),
 			path:  "$.a.b",
 			want:  "b@2:3",
 		},
@@ -2090,17 +2101,17 @@ func TestPath_Token_Collections(t *testing.T) {
 			want:  "v@1:4",
 		},
 		"block mapping element": {
-			input: "items:\n  - name: a\n  - name: b\n",
+			input: stringtest.LinesLF("items:", "  - name: a", "  - name: b"),
 			path:  "$.items[1]",
 			want:  "-@3:3",
 		},
 		"key selector on a block mapping element": {
-			input: "items:\n  - name: a\n  - name: b\n",
+			input: stringtest.LinesLF("items:", "  - name: a", "  - name: b"),
 			path:  "$.items[1]~",
 			want:  "-@3:3",
 		},
 		"first key of a block mapping element": {
-			input: "items:\n  - name: a\n  - name: b\n",
+			input: stringtest.LinesLF("items:", "  - name: a", "  - name: b"),
 			path:  "$.items[1].name~",
 			want:  "name@3:5",
 		},
@@ -2110,22 +2121,22 @@ func TestPath_Token_Collections(t *testing.T) {
 			want:  "-@1:1",
 		},
 		"anchored block mapping element": {
-			input: "items:\n  - &x\n    name: a\n",
+			input: stringtest.LinesLF("items:", "  - &x", "    name: a"),
 			path:  "$.items[0]",
 			want:  "-@2:3",
 		},
 		"flow mapping element of a block sequence": {
-			input: "items:\n  - {name: a}\n",
+			input: stringtest.LinesLF("items:", "  - {name: a}"),
 			path:  "$.items[0]",
 			want:  "-@2:3",
 		},
 		"block sequence element of a block sequence": {
-			input: "- - x\n  - y\n",
+			input: stringtest.LinesLF("- - x", "  - y"),
 			path:  "$[0]",
 			want:  "-@1:1",
 		},
 		"scalar in a nested block sequence": {
-			input: "- - x\n  - y\n",
+			input: stringtest.LinesLF("- - x", "  - y"),
 			path:  "$[0][1]",
 			want:  "y@2:5",
 		},
@@ -2145,14 +2156,24 @@ func TestPath_Token_Collections(t *testing.T) {
 			want:  "[@1:10",
 		},
 		"alias to a mapping is its own token": {
-			input: "base: &b\n  sub:\n    k: v\nother: *b\n",
-			path:  "$.other",
-			want:  "*@4:8",
+			input: stringtest.LinesLF(
+				"base: &b",
+				"  sub:",
+				"    k: v",
+				"other: *b",
+			),
+			path: "$.other",
+			want: "*@4:8",
 		},
 		"mapping through an alias points at its key in the anchor": {
-			input: "base: &b\n  sub:\n    k: v\nother: *b\n",
-			path:  "$.other.sub",
-			want:  "sub@2:3",
+			input: stringtest.LinesLF(
+				"base: &b",
+				"  sub:",
+				"    k: v",
+				"other: *b",
+			),
+			path: "$.other.sub",
+			want: "sub@2:3",
 		},
 		"mapping a merge key brings in points at its key in the source": {
 			input: stringtest.LinesLF(
@@ -2166,7 +2187,7 @@ func TestPath_Token_Collections(t *testing.T) {
 			want: "sub@2:3",
 		},
 		"mapping element through an aliased sequence": {
-			input: "list: &l\n  - k: v\ncopy: *l\n",
+			input: stringtest.LinesLF("list: &l", "  - k: v", "copy: *l"),
 			path:  "$.copy[0]",
 			want:  "-@2:3",
 		},
@@ -2214,7 +2235,7 @@ func TestPath_DirectiveDocument(t *testing.T) {
 	t.Parallel()
 
 	// The directive parses as a document of its own, ahead of the content.
-	source := niceyaml.NewSourceFromString("%YAML 1.2\n---\nkey: v\n")
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF("%YAML 1.2", "---", "key: v"))
 	file, err := source.File()
 	require.NoError(t, err)
 	require.Len(t, file.Docs, 2)
@@ -2283,7 +2304,7 @@ func TestPath_NoContentDocument(t *testing.T) {
 func TestPath_Token_MultipleDocuments(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("name: first\n---\nname: second\n")
+	source := niceyaml.NewSourceFromString(stringtest.LinesLF("name: first", "---", "name: second"))
 	file, err := source.File()
 	require.NoError(t, err)
 	require.Len(t, file.Docs, 2)
@@ -2382,7 +2403,11 @@ func TestPath_Token_Anchors(t *testing.T) {
 func TestPath_Node_Anchors(t *testing.T) {
 	t.Parallel()
 
-	doc := yamltest.FirstDocument(t, "base: &b {a: 1}\nother: *b\ntagged: !!str 5\n").DocumentAST()
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF(
+		"base: &b {a: 1}",
+		"other: *b",
+		"tagged: !!str 5",
+	)).DocumentAST()
 
 	tcs := map[string]struct {
 		want ast.Node
@@ -2456,12 +2481,12 @@ func TestPath_UnknownAlias(t *testing.T) {
 		want  string
 	}{
 		"no anchor of its name": {
-			input: "base: &b {a: 1}\nother: *nope\n",
+			input: stringtest.LinesLF("base: &b {a: 1}", "other: *nope"),
 			key:   "other",
 			want:  "*nope has no anchor before it",
 		},
 		"anchor after the alias": {
-			input: "b: *x\na: &x\n  v: 1\n",
+			input: stringtest.LinesLF("b: *x", "a: &x", "  v: 1"),
 			key:   "b",
 			want:  "*x has no anchor before it",
 		},
@@ -2600,7 +2625,7 @@ func TestPath_UnnamedKey(t *testing.T) {
 			matches:   []string{"$.b=2"},
 		},
 		"alias key inside its own anchor": {
-			input:     "x: &x\n  *x : v\n",
+			input:     stringtest.LinesLF("x: &x", "  *x : v"),
 			path:      "$.x.''",
 			err:       paths.ErrNotFound,
 			recursive: "$..''",
@@ -2618,7 +2643,7 @@ func TestPath_UnnamedKey(t *testing.T) {
 			recursive: "$..''",
 		},
 		"entry below an alias key with no anchor": {
-			input:     "*nope : {name: 1}\nb: {name: 2}\n",
+			input:     stringtest.LinesLF("*nope : {name: 1}", "b: {name: 2}"),
 			path:      "$.''.name",
 			err:       paths.ErrNotFound,
 			recursive: "$..name",
@@ -2627,8 +2652,12 @@ func TestPath_UnnamedKey(t *testing.T) {
 		"real empty key before an alias key with no name": {
 			// The decoder keeps both entries, and reads the alias key
 			// as null.
-			opts:      []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
-			input:     "x: &x\n  \"\": {name: 1}\n  *x : {name: 2}\n",
+			opts: []niceyaml.SourceOption{niceyaml.WithAllowDuplicateKeys(true)},
+			input: stringtest.LinesLF(
+				"x: &x",
+				`  "": {name: 1}`,
+				"  *x : {name: 2}",
+			),
 			path:      "$.x.''",
 			want:      "{name: 1}",
 			recursive: "$..name",
@@ -2670,7 +2699,7 @@ func TestPath_AliasCycle(t *testing.T) {
 			want:  "*x forms a cycle",
 		},
 		"merge key through an alias inside its own anchor": {
-			input: "a: &x !t *x\nm:\n  <<: *x\n",
+			input: stringtest.LinesLF("a: &x !t *x", "m:", "  <<: *x"),
 			path:  paths.Doc().Child("m", "c"),
 			want:  "*x forms a cycle",
 		},
@@ -3217,7 +3246,7 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 	t.Run("document decoder value matches the decoded document", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, "a: &x v1\nb: *x\nc: &x v2\nd: *x\n")
+		dd := yamltest.FirstDocument(t, stringtest.LinesLF("a: &x v1", "b: *x", "c: &x v2", "d: *x"))
 
 		var decoded map[string]any
 
@@ -3252,9 +3281,13 @@ func TestPath_RedefinedAnchor(t *testing.T) {
 				want:  "[1, &y 2]",
 			},
 			"merge of an aliased mapping": {
-				input: "base: &b {k: &x {j: &x 1}}\nm: {<<: *b}\nv: *x\n",
-				key:   "v",
-				want:  "{j: &x 1}",
+				input: stringtest.LinesLF(
+					"base: &b {k: &x {j: &x 1}}",
+					"m: {<<: *b}",
+					"v: *x",
+				),
+				key:  "v",
+				want: "{j: &x 1}",
 			},
 		}
 
@@ -4036,7 +4069,7 @@ func TestPath_Matches_RepeatedMergeKey(t *testing.T) {
 
 	// The decoder merges both inline mappings, but a path through `<<`
 	// selects the later one, so `..` visits only that mapping.
-	src := "t:\n  <<: {a: 1}\n  <<: {b: 2}\n"
+	src := stringtest.LinesLF("t:", "  <<: {a: 1}", "  <<: {b: 2}")
 
 	doc := yamltest.FirstDocument(t, src, niceyaml.WithAllowDuplicateKeys(true)).DocumentAST()
 
@@ -4062,27 +4095,36 @@ func TestPath_Matches_InlineMergeSource(t *testing.T) {
 		value string
 	}{
 		"later alias source overrides": {
-			input: "base: &b {name: y}\nm:\n  <<: [{name: x}, *b]\n",
+			input: stringtest.LinesLF(
+				"base: &b {name: y}",
+				"m:",
+				"  <<: [{name: x}, *b]",
+			),
 			want:  []string{"$.m.<<[0].name"},
 			value: "y",
 		},
 		"own key overrides": {
-			input: "m:\n  <<: {name: x}\n  name: z\n",
+			input: stringtest.LinesLF("m:", "  <<: {name: x}", "  name: z"),
 			want:  []string{"$.m.<<.name", "$.m.name"},
 			value: "z",
 		},
 		"later merge overrides an own key": {
-			input: "m:\n  name: z\n  <<: {name: x}\n",
+			input: stringtest.LinesLF("m:", "  name: z", "  <<: {name: x}"),
 			want:  []string{"$.m.<<.name"},
 			value: "x",
 		},
 		"later alias merge overrides an own key": {
-			input: "base: &b {name: y}\nm:\n  name: z\n  <<: *b\n",
+			input: stringtest.LinesLF(
+				"base: &b {name: y}",
+				"m:",
+				"  name: z",
+				"  <<: *b",
+			),
 			want:  nil,
 			value: "y",
 		},
 		"alias source alone": {
-			input: "base: &b {name: y}\nm:\n  <<: *b\n",
+			input: stringtest.LinesLF("base: &b {name: y}", "m:", "  <<: *b"),
 			want:  nil,
 			value: "y",
 		},
@@ -4113,8 +4155,18 @@ func TestPath_MergeKeyAndLiteralMergeName(t *testing.T) {
 	// only the entry under the real key, and the path of each match
 	// selects that match's node.
 	tcs := map[string]string{
-		"alias key first": "a: {? &x \"<<\" : 1}\nm:\n  *x : {k: 1}\n  <<: {k: 2}\n",
-		"merge key first": "a: {? &x \"<<\" : 1}\nm:\n  <<: {k: 2}\n  *x : {k: 1}\n",
+		"alias key first": stringtest.LinesLF(
+			`a: {? &x "<<" : 1}`,
+			"m:",
+			"  *x : {k: 1}",
+			"  <<: {k: 2}",
+		),
+		"merge key first": stringtest.LinesLF(
+			`a: {? &x "<<" : 1}`,
+			"m:",
+			"  <<: {k: 2}",
+			"  *x : {k: 1}",
+		),
 		"alias key before a source with a merge key": stringtest.LinesLF(
 			`a: {? &x "<<" : 1}`,
 			"b: &b {j: 3}",
@@ -4166,7 +4218,11 @@ func TestPath_MergeBringsInLiteralMergeName(t *testing.T) {
 			),
 			want: []string{"$.inner.<<"},
 		},
-		"inline source": {input: "k: &k \"<<\"\ntop:\n  <<: {*k : real}\n"},
+		"inline source": {input: stringtest.LinesLF(
+			`k: &k "<<"`,
+			"top:",
+			"  <<: {*k : real}",
+		)},
 		"sequence source": {
 			input: stringtest.LinesLF(
 				`k: &k "<<"`,
@@ -4187,7 +4243,12 @@ func TestPath_MergeBringsInLiteralMergeName(t *testing.T) {
 			),
 			want: []string{"$.base.<<"},
 		},
-		"earlier merge key": {input: "k: &k \"<<\"\ntop:\n  <<: {*k : real}\n  <<: {a: 1}\n"},
+		"earlier merge key": {input: stringtest.LinesLF(
+			`k: &k "<<"`,
+			"top:",
+			"  <<: {*k : real}",
+			"  <<: {a: 1}",
+		)},
 	}
 
 	for name, tc := range tcs {
@@ -4220,7 +4281,7 @@ func TestPath_Node_LaterDuplicateKeyWins(t *testing.T) {
 	// A mapping may hold one key twice when the parser allows duplicates.
 	// The decoder keeps the value of the later entry, so the path selects
 	// it, and `..a` lists that entry alone.
-	src := "m:\n  a: 1\n  a: 2\n"
+	src := stringtest.LinesLF("m:", "  a: 1", "  a: 2")
 
 	doc := yamltest.FirstDocument(t, src, niceyaml.WithAllowDuplicateKeys(true)).DocumentAST()
 
@@ -4270,22 +4331,35 @@ func TestPath_Matches_RecursiveReachedTwice(t *testing.T) {
 			want:  chainPaths[1:],
 		},
 		"aliases to one anchor keep the first": {
-			input: "base: &b {c: {name: 1}}\nrefs: [*b, *b]\n",
-			path:  "$.refs[*]..name",
-			want:  []string{"$.refs[0].c.name"},
+			input: stringtest.LinesLF(
+				"base: &b {c: {name: 1}}",
+				"refs: [*b, *b]",
+			),
+			path: "$.refs[*]..name",
+			want: []string{"$.refs[0].c.name"},
 		},
 		"outer match reaches an alias target first": {
-			input: "k:\n  y: &b\n    name: 1\n  k: *b\n",
-			path:  "$..k..name",
-			want:  []string{"$.k.y.name"},
+			input: stringtest.LinesLF(
+				"k:",
+				"  y: &b",
+				"    name: 1",
+				"  k: *b",
+			),
+			path: "$..k..name",
+			want: []string{"$.k.y.name"},
 		},
 		"merged entry comes before the outer walk": {
 			// The walk from $.x.k reaches the anchor through the `<<`
 			// entry, one place deeper than the order of the merged
 			// entry $.x.k.x.k, so the merged entry's path comes first.
-			input: "x:\n  k:\n    x:\n      <<: {k: &c {name: 1}}\n",
-			path:  "$..x.k..name",
-			want:  []string{"$.x.k.x.k.name"},
+			input: stringtest.LinesLF(
+				"x:",
+				"  k:",
+				"    x:",
+				"      <<: {k: &c {name: 1}}",
+			),
+			path: "$..x.k..name",
+			want: []string{"$.x.k.x.k.name"},
 		},
 		"later walk stops at an earlier match": {
 			// The walk from $.b.k stops at the mapping that the walk
@@ -4319,9 +4393,14 @@ func TestPath_Matches_RecursiveReachedTwice(t *testing.T) {
 			// the walk from $.a.k.<<.k.v reaches the anchor at an order
 			// that extends the order of $.a.k.v. The entry it finds
 			// there sorts first, so the walk must not stop.
-			input: "s: &V {x: 0, name: 1}\na:\n  k:\n    <<: {k: {v: *V}, v: *V}\n",
-			path:  "$..k.v..name",
-			want:  []string{"$.a.k.<<.k.v.name"},
+			input: stringtest.LinesLF(
+				"s: &V {x: 0, name: 1}",
+				"a:",
+				"  k:",
+				"    <<: {k: {v: *V}, v: *V}",
+			),
+			path: "$..k.v..name",
+			want: []string{"$.a.k.<<.k.v.name"},
 		},
 		"tagged mapping is walked": {
 			input: "a: !!map {name: 1}\n",
@@ -4553,9 +4632,14 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 		opts  []niceyaml.SourceOption
 	}{
 		"each entry in document order": {
-			input: "jobs:\n  build: 1\n  test: 2\n  lint: 3\n",
-			path:  "$.jobs.*",
-			want:  []string{"$.jobs.build=1", "$.jobs.test=2", "$.jobs.lint=3"},
+			input: stringtest.LinesLF(
+				"jobs:",
+				"  build: 1",
+				"  test: 2",
+				"  lint: 3",
+			),
+			path: "$.jobs.*",
+			want: []string{"$.jobs.build=1", "$.jobs.test=2", "$.jobs.lint=3"},
 		},
 		"entries of the root": {
 			input: "a: 1\nb: 2\n",
@@ -4602,14 +4686,19 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 			want: []string{"$.paths./a.get=1", "$.paths./a.post=2", "$.paths./b.get=3"},
 		},
 		"key of each entry": {
-			input: "jobs:\n  build: 1\n  test: 2\n",
+			input: stringtest.LinesLF("jobs:", "  build: 1", "  test: 2"),
 			path:  "$.jobs.*~",
 			want:  []string{"$.jobs.build~=build", "$.jobs.test~=test"},
 		},
 		"entries below a recursive match": {
-			input: "x:\n  env: {A: 1}\ny:\n  env: {B: 2}\n",
-			path:  "$..env.*",
-			want:  []string{"$.x.env.A=1", "$.y.env.B=2"},
+			input: stringtest.LinesLF(
+				"x:",
+				"  env: {A: 1}",
+				"y:",
+				"  env: {B: 2}",
+			),
+			path: "$..env.*",
+			want: []string{"$.x.env.A=1", "$.y.env.B=2"},
 		},
 		"recursive below each entry": {
 			input: stringtest.LinesLF(
@@ -4641,22 +4730,22 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 			},
 		},
 		"key named star is one of the entries": {
-			input: "m:\n  \"*\": 1\n  b: 2\n",
+			input: stringtest.LinesLF("m:", `  "*": 1`, "  b: 2"),
 			path:  "$.m.*",
 			want:  []string{"$.m.'*'=1", "$.m.b=2"},
 		},
 		"quoted star selects the key named star alone": {
-			input: "m:\n  \"*\": 1\n  b: 2\n",
+			input: stringtest.LinesLF("m:", `  "*": 1`, "  b: 2"),
 			path:  "$.m.'*'",
 			want:  []string{"$.m.'*'=1"},
 		},
 		"alias key takes the name of its anchor": {
-			input: "k: &k name\nm:\n  *k : v\n",
+			input: stringtest.LinesLF("k: &k name", "m:", "  *k : v"),
 			path:  "$.m.*",
 			want:  []string{"$.m.name=v"},
 		},
 		"key with no name is left out": {
-			input: "m:\n  b: 2\n  *nope : 1\n",
+			input: stringtest.LinesLF("m:", "  b: 2", "  *nope : 1"),
 			path:  "$.m.*",
 			want:  []string{"$.m.b=2"},
 		},
@@ -4691,7 +4780,7 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 			want:  []string{"$.m.a=1"},
 		},
 		"each alias to one mapping lists its entries": {
-			input: "base: &b {a: 1}\nl: [*b, *b]\n",
+			input: stringtest.LinesLF("base: &b {a: 1}", "l: [*b, *b]"),
 			path:  "$.l[*].*",
 			want:  []string{"$.l[0].a=1", "$.l[1].a=1"},
 		},
@@ -4746,14 +4835,19 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 			want: []string{"$.m.a=1", "$.m.b=2", "$.m.c=3"},
 		},
 		"inline merge source": {
-			input: "m:\n  <<: {a: 1}\n  b: 2\n",
+			input: stringtest.LinesLF("m:", "  <<: {a: 1}", "  b: 2"),
 			path:  "$.m.*",
 			want:  []string{"$.m.a=1", "$.m.b=2"},
 		},
 		"key of a merged entry": {
-			input: "base: &base {a: 1}\nm:\n  <<: *base\n  b: 2\n",
-			path:  "$.m.*~",
-			want:  []string{"$.m.a~=a", "$.m.b~=b"},
+			input: stringtest.LinesLF(
+				"base: &base {a: 1}",
+				"m:",
+				"  <<: *base",
+				"  b: 2",
+			),
+			path: "$.m.*~",
+			want: []string{"$.m.a~=a", "$.m.b~=b"},
 		},
 		"each merge key holds the entries it wins": {
 			input: stringtest.LinesLF(
@@ -4781,20 +4875,25 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 			opts: dups,
 		},
 		"merge that leads back to its own mapping": {
-			input: "a: &a\n  x: 1\n  <<: *a\n",
+			input: stringtest.LinesLF("a: &a", "  x: 1", "  <<: *a"),
 			path:  "$.a.*",
 			want:  []string{"$.a.x=1"},
 		},
 		"later duplicate key wins": {
-			input: "m:\n  a: 1\n  b: 2\n  a: 3\n",
+			input: stringtest.LinesLF("m:", "  a: 1", "  b: 2", "  a: 3"),
 			path:  "$.m.*",
 			want:  []string{"$.m.b=2", "$.m.a=3"},
 			opts:  dups,
 		},
 		"real key with the text of a merge key is an entry": {
-			input: "a: {? &x \"<<\" : 1}\nm:\n  <<: {k: 2}\n  *x : real\n",
-			path:  "$.m.*",
-			want:  []string{"$.m.k=2", "$.m.<<=real"},
+			input: stringtest.LinesLF(
+				`a: {? &x "<<" : 1}`,
+				"m:",
+				"  <<: {k: 2}",
+				"  *x : real",
+			),
+			path: "$.m.*",
+			want: []string{"$.m.k=2", "$.m.<<=real"},
 		},
 		"merge brings in a real key with the text of a merge key": {
 			input: stringtest.LinesLF(
@@ -4837,8 +4936,12 @@ func TestPath_Matches_RecursiveAll(t *testing.T) {
 		opts  []niceyaml.SourceOption
 	}{
 		"every node in document order": {
-			input: "a: 1\nb: [x, {c: 2}]\nd: {e: {f: 3}}\n",
-			path:  "$..*",
+			input: stringtest.LinesLF(
+				"a: 1",
+				"b: [x, {c: 2}]",
+				"d: {e: {f: 3}}",
+			),
+			path: "$..*",
 			want: []string{
 				"$.a=1", "$.b=[x, {c: 2}]", "$.b[0]=x", "$.b[1]={c: 2}", "$.b[1].c=2",
 				"$.d={e: {f: 3}}", "$.d.e={f: 3}", "$.d.e.f=3",
@@ -4865,7 +4968,7 @@ func TestPath_Matches_RecursiveAll(t *testing.T) {
 			want:  []string{"$.b.k=[1]", "$.b.k[0]=1"},
 		},
 		"aliases below the start are not followed": {
-			input: "a: &x {k: 1}\nb: *x\nc: [*x]\n",
+			input: stringtest.LinesLF("a: &x {k: 1}", "b: *x", "c: [*x]"),
 			path:  "$..*",
 			want:  []string{"$.a={k: 1}", "$.a.k=1", "$.b={k: 1}", "$.c=[*x]", "$.c[0]={k: 1}"},
 		},
@@ -4908,22 +5011,27 @@ func TestPath_Matches_RecursiveAll(t *testing.T) {
 			want:  []string{"$.a.k=1"},
 		},
 		"below each recursive match": {
-			input: "x:\n  env: {A: 1}\ny:\n  env: {B: [2]}\n",
-			path:  "$..env..*",
-			want:  []string{"$.x.env.A=1", "$.y.env.B=[2]", "$.y.env.B[0]=2"},
+			input: stringtest.LinesLF(
+				"x:",
+				"  env: {A: 1}",
+				"y:",
+				"  env: {B: [2]}",
+			),
+			path: "$..env..*",
+			want: []string{"$.x.env.A=1", "$.y.env.B=[2]", "$.y.env.B[0]=2"},
 		},
 		"keys the decoder respells keep the names a selector matches": {
-			input: "0x10: a\n3.10: b\n'q x': c\n",
+			input: stringtest.LinesLF("0x10: a", "3.10: b", "'q x': c"),
 			path:  "$..*",
 			want:  []string{"$.0x10=a", "$.'3.10'=b", "$.'q x'=c"},
 		},
 		"key with no name is left out with everything below it": {
-			input: "*nope : {name: 1}\nb: {name: 2}\n",
+			input: stringtest.LinesLF("*nope : {name: 1}", "b: {name: 2}"),
 			path:  "$..*",
 			want:  []string{"$.b={name: 2}", "$.b.name=2"},
 		},
 		"merged entries are not listed under the mapping that merges them": {
-			input: "base: &b {k: 1}\nm: {<<: *b, j: 2}\n",
+			input: stringtest.LinesLF("base: &b {k: 1}", "m: {<<: *b, j: 2}"),
 			path:  "$..*",
 			want:  []string{"$.base={k: 1}", "$.base.k=1", "$.m={<<: *b, j: 2}", "$.m.j=2"},
 		},
@@ -4933,22 +5041,25 @@ func TestPath_Matches_RecursiveAll(t *testing.T) {
 			want:  []string{"$.m={<<: {k: 1}, j: 2}", "$.m.<<.k=1", "$.m.j=2"},
 		},
 		"sequence of merge sources": {
-			input: "b: &b {x: 1}\nm: {<<: [{k: 1}, *b], j: 2}\n",
-			path:  "$..*",
-			want:  []string{"$.b={x: 1}", "$.b.x=1", "$.m={<<: [{k: 1}, *b], j: 2}", "$.m.<<[0].k=1", "$.m.j=2"},
+			input: stringtest.LinesLF(
+				"b: &b {x: 1}",
+				"m: {<<: [{k: 1}, *b], j: 2}",
+			),
+			path: "$..*",
+			want: []string{"$.b={x: 1}", "$.b.x=1", "$.m={<<: [{k: 1}, *b], j: 2}", "$.m.<<[0].k=1", "$.m.j=2"},
 		},
 		"from the sources of a merge key": {
-			input: "b: &b {x: 1}\nm: {<<: [{k: 1}, *b]}\n",
+			input: stringtest.LinesLF("b: &b {x: 1}", "m: {<<: [{k: 1}, *b]}"),
 			path:  "$.m.'<<'..*",
 			want:  []string{"$.m.<<[0].k=1"},
 		},
 		"entry that a later merge key overrides": {
-			input: "base: &b {k: 1}\nm: {k: 0, <<: *b}\n",
+			input: stringtest.LinesLF("base: &b {k: 1}", "m: {k: 0, <<: *b}"),
 			path:  "$..*",
 			want:  []string{"$.base={k: 1}", "$.base.k=1", "$.m={k: 0, <<: *b}"},
 		},
 		"real key with the text of a merge key": {
-			input: "x: &m '<<'\nm: {<<: {k: 1}, *m : 2}\n",
+			input: stringtest.LinesLF("x: &m '<<'", "m: {<<: {k: 1}, *m : 2}"),
 			path:  "$..*",
 			want:  []string{"$.x='<<'", "$.m={<<: {k: 1}, *m: 2}", "$.m.<<=2"},
 		},
@@ -4987,17 +5098,27 @@ func TestPath_Matches_WildcardErrors(t *testing.T) {
 		// so a `.*` selector returns the error even where a `.name`
 		// selector finds a key of the mapping itself.
 		"every entry over a merge alias with no anchor": {
-			input: "m:\n  <<: *missing\n  a: 1\n",
+			input: stringtest.LinesLF("m:", "  <<: *missing", "  a: 1"),
 			path:  "$.m.*",
 			named: "$.m.a",
 		},
 		"every entry over a merge list with an alias with no anchor": {
-			input: "b: &b {x: 1}\nm:\n  <<: [*b, *missing]\n  a: 1\n",
+			input: stringtest.LinesLF(
+				"b: &b {x: 1}",
+				"m:",
+				"  <<: [*b, *missing]",
+				"  a: 1",
+			),
 			path:  "$.m.*",
 			named: "$.m.a",
 		},
 		"every entry over a merge source that merges an alias with no anchor": {
-			input: "b: &b {<<: *missing, x: 1}\nm:\n  <<: *b\n  a: 1\n",
+			input: stringtest.LinesLF(
+				"b: &b {<<: *missing, x: 1}",
+				"m:",
+				"  <<: *b",
+				"  a: 1",
+			),
 			path:  "$.m.*",
 			named: "$.m.a",
 		},
@@ -5009,7 +5130,7 @@ func TestPath_Matches_WildcardErrors(t *testing.T) {
 		// from, so an alias there that does not resolve is an error, where
 		// a `..name` selector that lists no such value finds its entries.
 		"every node over an alias with no anchor": {
-			input: "a: {b: *missing}\nc: {name: 1}\n",
+			input: stringtest.LinesLF("a: {b: *missing}", "c: {name: 1}"),
 			path:  "$..*",
 			named: "$..name",
 		},
@@ -5074,9 +5195,12 @@ func TestPath_EmptyDocument(t *testing.T) {
 			input string
 			line  int
 		}{
-			"header after a document":                {input: "a: 1\n---\n", line: 2},
-			"header over a comment":                  {input: "---\n# comment\n", line: 1},
-			"header over a comment after a document": {input: "a: 1\n---\n# comment\n", line: 2},
+			"header after a document": {input: "a: 1\n---\n", line: 2},
+			"header over a comment":   {input: "---\n# comment\n", line: 1},
+			"header over a comment after a document": {
+				input: stringtest.LinesLF("a: 1", "---", "# comment"),
+				line:  2,
+			},
 		}
 
 		for name, tc := range tcs {
