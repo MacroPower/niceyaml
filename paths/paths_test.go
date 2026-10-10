@@ -5506,63 +5506,6 @@ func TestPath_Matches_ChildAll(t *testing.T) {
 	}
 }
 
-func TestPath_Matches_ChildAll_Errors(t *testing.T) {
-	t.Parallel()
-
-	// A merge key whose alias does not resolve could bring in any key, so
-	// a `.*` selector returns the error even where a `.name` selector
-	// finds a key of the mapping itself.
-	tcs := map[string]struct {
-		input string
-		path  string
-		named string
-	}{
-		"merge alias with no anchor": {
-			input: "m:\n  <<: *missing\n  a: 1\n",
-			path:  "$.m.*",
-			named: "$.m.a",
-		},
-		"merge list with an alias with no anchor": {
-			input: "b: &b {x: 1}\nm:\n  <<: [*b, *missing]\n  a: 1\n",
-			path:  "$.m.*",
-			named: "$.m.a",
-		},
-		"merge source that merges an alias with no anchor": {
-			input: "b: &b {<<: *missing, x: 1}\nm:\n  <<: *b\n  a: 1\n",
-			path:  "$.m.*",
-			named: "$.m.a",
-		},
-		"alias with no anchor": {
-			input: "m: *missing\n",
-			path:  "$.m.*",
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
-
-			path := paths.MustParse(tc.path)
-
-			_, err := paths.NewResolver(doc).Matches(path)
-			require.ErrorIs(t, err, paths.ErrAlias)
-
-			_, err = paths.NewResolver(doc).Nodes(path)
-			require.ErrorIs(t, err, paths.ErrAlias)
-
-			if tc.named == "" {
-				return
-			}
-
-			node, err := paths.NewResolver(doc).Node(paths.MustParse(tc.named))
-			require.NoError(t, err)
-			assert.Equal(t, "1", node.String())
-		})
-	}
-}
-
 func TestPath_Matches_RecursiveAll(t *testing.T) {
 	t.Parallel()
 
@@ -5713,27 +5656,52 @@ func TestPath_Matches_RecursiveAll(t *testing.T) {
 	}
 }
 
-func TestPath_Matches_RecursiveAll_Errors(t *testing.T) {
+func TestPath_Matches_WildcardErrors(t *testing.T) {
 	t.Parallel()
 
-	// A `..*` selector lists every value below the node it starts from, so
-	// an alias there that does not resolve is an error, where a `..name`
-	// selector that lists no such value finds its entries.
+	// A wildcard returns the error of an alias that does not resolve where
+	// the alias could hold a node it lists. The path named lists no such
+	// node, so it finds its one match, whose text is 1.
 	tcs := map[string]struct {
 		input string
 		path  string
 		named string
 	}{
-		"alias with no anchor below the start": {
+		// A merge key whose alias does not resolve could bring in any key,
+		// so a `.*` selector returns the error even where a `.name`
+		// selector finds a key of the mapping itself.
+		"every entry over a merge alias with no anchor": {
+			input: "m:\n  <<: *missing\n  a: 1\n",
+			path:  "$.m.*",
+			named: "$.m.a",
+		},
+		"every entry over a merge list with an alias with no anchor": {
+			input: "b: &b {x: 1}\nm:\n  <<: [*b, *missing]\n  a: 1\n",
+			path:  "$.m.*",
+			named: "$.m.a",
+		},
+		"every entry over a merge source that merges an alias with no anchor": {
+			input: "b: &b {<<: *missing, x: 1}\nm:\n  <<: *b\n  a: 1\n",
+			path:  "$.m.*",
+			named: "$.m.a",
+		},
+		"every entry of an alias with no anchor": {
+			input: "m: *missing\n",
+			path:  "$.m.*",
+		},
+		// A `..*` selector lists every value below the node it starts
+		// from, so an alias there that does not resolve is an error, where
+		// a `..name` selector that lists no such value finds its entries.
+		"every node over an alias with no anchor": {
 			input: "a: {b: *missing}\nc: {name: 1}\n",
 			path:  "$..*",
 			named: "$..name",
 		},
-		"alias with no anchor as the start": {
+		"every node below an alias with no anchor": {
 			input: "m: *missing\n",
 			path:  "$.m..*",
 		},
-		"alias inside its own anchor": {
+		"every node over an alias inside its own anchor": {
 			input: "a: &x [*x]\nc: {name: 1}\n",
 			path:  "$..*",
 			named: "$..name",
@@ -5745,7 +5713,6 @@ func TestPath_Matches_RecursiveAll_Errors(t *testing.T) {
 			t.Parallel()
 
 			doc := yamltest.FirstDocument(t, tc.input).DocumentAST()
-
 			path := paths.MustParse(tc.path)
 
 			_, err := paths.NewResolver(doc).Matches(path)
@@ -5758,10 +5725,9 @@ func TestPath_Matches_RecursiveAll_Errors(t *testing.T) {
 				return
 			}
 
-			nodes, err := paths.NewResolver(doc).Nodes(paths.MustParse(tc.named))
-			require.NoError(t, err)
-			require.Len(t, nodes, 1)
-			assert.Equal(t, "1", nodes[0].String())
+			named := requireMatches(t, doc, paths.MustParse(tc.named))
+			require.Len(t, named, 1)
+			assert.Equal(t, "1", named[0].Node.String())
 		})
 	}
 }
