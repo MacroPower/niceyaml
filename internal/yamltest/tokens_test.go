@@ -331,19 +331,25 @@ func TestValidateTokens(t *testing.T) {
 			want: token.Tokens{nil},
 			got:  token.Tokens{tk},
 			err:  yamltest.ErrNilToken,
-			msg:  "token 0 want",
+			msg:  "token 0 want: token is nil",
 		},
 		"nil want position": {
 			want: token.Tokens{{}},
 			got:  token.Tokens{tk},
 			err:  yamltest.ErrNilPosition,
-			msg:  "token 0 want",
+			msg:  "token 0 want: token position is nil",
 		},
 		"nil got token": {
 			want: token.Tokens{tk},
 			got:  token.Tokens{nil},
 			err:  yamltest.ErrNilToken,
-			msg:  "token 0 got",
+			msg:  "token 0 got: token is nil",
+		},
+		"nil got position": {
+			want: token.Tokens{tk, tk},
+			got:  token.Tokens{tk, {}},
+			err:  yamltest.ErrNilPosition,
+			msg:  "token 1 got: token position is nil",
 		},
 	}
 
@@ -665,31 +671,5 @@ func TestDiffTokenFields(t *testing.T) {
 			"Position.IndentNum",
 			"Position.IndentLevel",
 		}, yamltest.DiffTokenFields(want, got))
-	})
-}
-
-func TestTokenValidationError(t *testing.T) {
-	t.Parallel()
-
-	t.Run("indexed token error message", func(t *testing.T) {
-		t.Parallel()
-
-		err := &yamltest.TokenValidationError{
-			Index:  5,
-			Which:  "got",
-			Reason: yamltest.ErrNilPosition,
-		}
-		assert.Equal(t, "token 5 got: token position is nil", err.Error())
-	})
-
-	t.Run("Unwrap returns reason", func(t *testing.T) {
-		t.Parallel()
-
-		err := &yamltest.TokenValidationError{
-			Index:  0,
-			Which:  "want",
-			Reason: yamltest.ErrNilToken,
-		}
-		assert.Equal(t, yamltest.ErrNilToken, err.Unwrap())
 	})
 }
