@@ -1010,7 +1010,7 @@ func TestFinder_Find_DiffBuiltLines(t *testing.T) {
 			t.Parallel()
 
 			f := finder.New()
-			idx := f.Load(lines.Lines())
+			idx := f.Load(lines)
 
 			got := idx.Find(tc.search)
 
@@ -1041,26 +1041,26 @@ func TestFinder_Find_LineWithoutEnding(t *testing.T) {
 		want   position.Ranges
 	}{
 		"unified view keeps the deleted line apart from the next": {
-			lines:  noEnding.Unified().Lines(),
+			lines:  noEnding.Unified(),
 			search: "1x",
 		},
 		"unified view matches across the line break": {
-			lines:  noEnding.Unified().Lines(),
+			lines:  noEnding.Unified(),
 			search: "1\nx",
 			want: position.Ranges{
 				position.NewRange(position.New(0, 3), position.New(1, 1)),
 			},
 		},
 		"hunks view keeps the deleted line apart from the next": {
-			lines:  noEnding.Hunks(3).Lines(),
+			lines:  noEnding.Hunks(3),
 			search: "1x",
 		},
 		"placeholder rows keep their neighbors apart": {
-			lines:  placeholders.Before().Lines(),
+			lines:  placeholders.Before(),
 			search: "1\nb",
 		},
 		"placeholder rows each read as a line break": {
-			lines:  placeholders.Before().Lines(),
+			lines:  placeholders.Before(),
 			search: "1\n\n\nb",
 			want: position.Ranges{
 				position.NewRange(position.New(0, 3), position.New(3, 1)),

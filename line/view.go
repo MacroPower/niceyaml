@@ -28,9 +28,9 @@ import (
 // highlights and error marks, are two Views over the same [Lines].
 //
 // Every index and every [position.Range] a View takes or yields is in the
-// coordinates of its content, the [Lines] that [View.Lines] returns, where
-// line i is [Lines.Line] i. A View holds each line of its content at most
-// once, in content order. A View from [View.Slice] holds some of those
+// coordinates of its content, the [Lines] it is over, where line i is the
+// line [View.Line] returns for i. A View holds each line of its content at
+// most once, in content order. A View from [View.Slice] holds some of those
 // lines and keeps their indices. A range from a search of the content or
 // from the path of a document applies to a slice as it applies to the
 // whole, and slicing before or after decorating renders the same.
@@ -82,21 +82,13 @@ func NewView(lines Lines, spans ...position.Span) *View {
 	return v
 }
 
-// Lines returns the content of the [View], every line of the [Lines] it is
-// over, whether or not the View holds it. A search of the content, such as
-// one a [finder.Finder] loads, yields ranges in the coordinates every View
-// method takes. The text of the lines the View holds comes from
-// [View.Held], which returns those lines alone:
-//
-//	text := doc.View().Held().Content()
-//
-// [finder.Finder]: https://pkg.go.dev/go.jacobcolvin.com/niceyaml/finder#Finder
-func (v *View) Lines() Lines {
-	if v == nil {
-		return Lines{}
-	}
-
-	return v.lines
+// Line returns line i of the content of the [View], whether or not the
+// View holds it, so a position in the coordinates of the content reaches
+// its line. It panics when i is outside the content, as the other
+// index-taking methods do. The text of the lines the View holds comes from
+// [View.Held].
+func (v *View) Line(i int) *Line {
+	return v.lines.lines[i]
 }
 
 // Held returns the lines the [View] holds as new [Lines], in the order
@@ -129,8 +121,8 @@ func (v *View) Held() Lines {
 }
 
 // Count returns the number of lines the [View] holds, which is the number
-// [View.All] yields and [View.Held] returns. The lines of the content,
-// held or not, are [View.Lines], and [Lines.Len] counts those.
+// [View.All] yields and [View.Held] returns. The content can hold more,
+// which [View.Line] reaches by index.
 func (v *View) Count() int {
 	if v == nil {
 		return 0
@@ -378,12 +370,11 @@ func (v *View) Clone() *View {
 // yields every line when given no span. Pass an empty [position.Span] for
 // a view that holds none.
 func (v *View) Slice(spans ...position.Span) *View {
-	out := &View{lines: v.Lines()}
 	if v == nil {
-		return out
+		return &View{}
 	}
 
-	out.clip = v.clip
+	out := &View{lines: v.lines, clip: v.clip}
 
 	for i := range v.All(spans...) {
 		out.held = append(out.held, i)
@@ -443,7 +434,7 @@ func (v *View) Hunks(context int) *View {
 		}
 	}
 
-	spans := position.ContextSpans(marked, context, v.Lines().Len())
+	spans := position.ContextSpans(marked, context, v.lines.Len())
 	if len(spans) == 0 {
 		return v.Slice(position.Span{})
 	}

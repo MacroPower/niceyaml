@@ -507,29 +507,33 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			// The cell of every rune a row shows gives back a column
 			// that takes the same cell: the one where the cluster of the
 			// rune starts, or the next one when the rune has no width.
-			for pos, r := range view.Lines().Runes() {
-				if r == '\n' {
-					continue
-				}
-
-				row, cell := l.RowOf(pos), l.CellOf(pos)
-
-				got, ok := l.PositionAt(row, cell)
-				if !ok {
-					// Only a space the wrapper dropped at a break and a
-					// column a clipped line leaves out take no cell.
-					if !clipped(view, pos) {
-						require.Equal(t, " ", string(r), "position %s", pos)
+			for i, ln := range view.All() {
+				for col, r := range ln.Runes() {
+					if r == '\n' {
+						continue
 					}
 
-					continue
+					pos := position.New(i, col)
+
+					row, cell := l.RowOf(pos), l.CellOf(pos)
+
+					got, ok := l.PositionAt(row, cell)
+					if !ok {
+						// Only a space the wrapper dropped at a break and a
+						// column a clipped line leaves out take no cell.
+						if !clipped(view, pos) {
+							require.Equal(t, " ", string(r), "position %s", pos)
+						}
+
+						continue
+					}
+
+					require.False(t, clipped(view, pos), "position %s gives %s", pos, got)
+
+					require.Equal(t, pos.Line, got.Line, "position %s", pos)
+					require.Equal(t, row, l.RowOf(got), "position %s gives %s", pos, got)
+					require.Equal(t, cell, l.CellOf(got), "position %s gives %s", pos, got)
 				}
-
-				require.False(t, clipped(view, pos), "position %s gives %s", pos, got)
-
-				require.Equal(t, pos.Line, got.Line, "position %s", pos)
-				require.Equal(t, row, l.RowOf(got), "position %s gives %s", pos, got)
-				require.Equal(t, cell, l.CellOf(got), "position %s gives %s", pos, got)
 			}
 		})
 	}

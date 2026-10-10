@@ -2021,7 +2021,7 @@ func TestDocument_View(t *testing.T) {
 
 		assert.Equal(t, source.View().Slice(docs[1].Span()).String(), view.String())
 		assert.Equal(t, docs[1].Span().Len(), view.Count())
-		assert.Equal(t, 2, view.Lines().Line(docs[1].Span().Start).Number())
+		assert.Equal(t, 2, view.Line(docs[1].Span().Start).Number())
 		assert.False(t, view.Contains(0), "the view keeps the indices of the source")
 	})
 

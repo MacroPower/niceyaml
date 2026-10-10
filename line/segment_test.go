@@ -262,7 +262,7 @@ func TestView_Segments(t *testing.T) {
 		const n = 500
 
 		view := flowMappingView(n, true)
-		ln := view.Lines().Line(0)
+		ln := view.Line(0)
 
 		var (
 			text        string

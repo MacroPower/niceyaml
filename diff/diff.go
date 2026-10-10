@@ -228,10 +228,10 @@ func (r *Result) Unified() *line.View {
 // negative values as 0.
 //
 // The view is a [line.View.Slice] of [Result.Unified] and keeps its
-// indices, as [line.View.Hunks] does. Its [line.View.Lines] returns every
-// line of the unified diff, so a range from a search of those lines
-// applies to the hunks, and [line.View.Count] is the number of lines the
-// hunks hold. Each line carries the flag and the line number it has in
+// indices, as [line.View.Hunks] does. Its content is every line of the
+// unified diff, so a range from a search of Result.Unified applies to the
+// hunks, and [line.View.Count] is the number of lines the hunks hold.
+// Each line carries the flag and the line number it has in
 // [Result.Unified], so the view prints with the same numbers. A diff with
 // no changes has no hunks, and the view then holds no lines, so it prints
 // as an empty view and takes decoration as any other does.

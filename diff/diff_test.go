@@ -77,11 +77,11 @@ func TestDiffer_Views_LineNumbers(t *testing.T) {
 
 	var beforeNumbers, afterNumbers []int
 
-	for _, l := range result.Before().Lines().All() {
+	for _, l := range result.Before().All() {
 		beforeNumbers = append(beforeNumbers, l.Number())
 	}
 
-	for _, l := range result.After().Lines().All() {
+	for _, l := range result.After().All() {
 		afterNumbers = append(afterNumbers, l.Number())
 	}
 
@@ -967,7 +967,7 @@ func TestDiffer_Hunks(t *testing.T) {
 
 			// The hunks keep the indices of the unified view.
 			require.NotNil(t, got)
-			assert.Equal(t, result.Unified().Lines().Len(), got.Lines().Len())
+			assertSameContent(t, result.Unified(), got)
 
 			if tc.wantEmpty {
 				assert.Equal(t, 0, got.Count())
@@ -1029,14 +1029,14 @@ func TestDiffResult_HunksKeepUnifiedIndices(t *testing.T) {
 
 			unified := result.Unified()
 			got := result.Hunks(1)
-			require.Equal(t, unified.Lines().Len(), got.Lines().Len())
+			assertSameContent(t, unified, got)
 
 			var held []int
 
 			for i, l := range got.All() {
 				held = append(held, i)
 
-				assert.Same(t, unified.Lines().Line(i), l, "line %d", i)
+				assert.Same(t, unified.Line(i), l, "line %d", i)
 			}
 
 			assert.Equal(t, tc.wantHeld, held)
@@ -1044,7 +1044,7 @@ func TestDiffResult_HunksKeepUnifiedIndices(t *testing.T) {
 			// A unified index marks the same line in the hunks.
 			got.AddOverlay(kind.GenericHighlight, position.NewRange(position.New(tc.mark, 0), position.New(tc.mark, 1)))
 
-			for i := range got.Lines().All() {
+			for i := range unified.All() {
 				if i == tc.mark {
 					assert.NotEmpty(t, got.Overlays(i), "line %d", i)
 				} else {
@@ -1767,8 +1767,8 @@ func TestDiffResult_BeforeAfter(t *testing.T) {
 			assert.Equal(t, tc.wantRowLen, afterView.Count(), "After Count()")
 
 			// Check IsEmpty.
-			assert.Equal(t, tc.wantRowLen == 0, beforeView.Lines().IsEmpty(), "Before IsEmpty()")
-			assert.Equal(t, tc.wantRowLen == 0, afterView.Lines().IsEmpty(), "After IsEmpty()")
+			assert.Equal(t, tc.wantRowLen == 0, beforeView.Held().IsEmpty(), "Before IsEmpty()")
+			assert.Equal(t, tc.wantRowLen == 0, afterView.Held().IsEmpty(), "After IsEmpty()")
 
 			verifyLines(t, "Before", beforeView, tc.wantBefore)
 			verifyLines(t, "After", afterView, tc.wantAfter)
@@ -1959,17 +1959,17 @@ func TestDiffResult_PlaceholdersAreDistinct(t *testing.T) {
 			// Rows 1 and 2 are the placeholders opposite the two lines the
 			// other pane added. Each names the one row it fills, so a
 			// decorator that holds one marks that row alone.
-			i, ok := left.Index(left.Lines().Line(1))
+			i, ok := left.Index(left.Line(1))
 			require.True(t, ok)
 			assert.Equal(t, 1, i)
 
-			i, ok = left.Index(left.Lines().Line(2))
+			i, ok = left.Index(left.Line(2))
 			require.True(t, ok)
 			assert.Equal(t, 2, i)
 
 			// A placeholder of one diff belongs to no view of another.
 			other := diff.Diff(beforeSrc.Lines(), afterSrc.Lines()).Before()
-			_, ok = other.Index(left.Lines().Line(1))
+			_, ok = other.Index(left.Line(1))
 			assert.False(t, ok)
 		})
 	}
@@ -2087,4 +2087,17 @@ func hunkCount(view *line.View) int {
 	}
 
 	return count
+}
+
+// assertSameContent asserts that got is a view over the content unified
+// holds in full, so every index of unified reaches the same line through
+// got, and the content of got ends where unified ends.
+func assertSameContent(t *testing.T, unified, got *line.View) {
+	t.Helper()
+
+	for i, l := range unified.All() {
+		assert.Same(t, l, got.Line(i), "line %d", i)
+	}
+
+	assert.Panics(t, func() { got.Line(unified.Count()) }, "the content ends where unified ends")
 }

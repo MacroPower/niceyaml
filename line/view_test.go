@@ -37,8 +37,9 @@ func TestNewView(t *testing.T) {
 		view := line.NewView(lines)
 
 		assert.Equal(t, 2, view.Count())
-		assert.Equal(t, lines, view.Lines())
-		assert.Equal(t, 2, view.Lines().Len())
+		assert.Same(t, lines.Line(0), view.Line(0))
+		assert.Same(t, lines.Line(1), view.Line(1))
+		assert.Panics(t, func() { view.Line(2) }, "the content ends where lines ends")
 	})
 
 	t.Run("over zero lines", func(t *testing.T) {
@@ -47,7 +48,7 @@ func TestNewView(t *testing.T) {
 		view := line.NewView(line.Lines{})
 
 		assert.Equal(t, 0, view.Count())
-		assert.True(t, view.Lines().IsEmpty())
+		assert.Panics(t, func() { view.Line(0) })
 		assert.Empty(t, view.String())
 
 		for range view.All() {
@@ -74,7 +75,7 @@ func TestNewView(t *testing.T) {
 				view := line.NewView(tc.lines)
 
 				assert.Equal(t, 0, view.Count())
-				assert.Empty(t, view.Lines())
+				assert.Panics(t, func() { view.Line(0) })
 				assert.Empty(t, view.String())
 			})
 		}
@@ -86,7 +87,7 @@ func TestNewView(t *testing.T) {
 		var view line.View
 
 		assert.Equal(t, 0, view.Count())
-		assert.True(t, view.Lines().IsEmpty())
+		assert.Panics(t, func() { view.Line(0) })
 		assert.Empty(t, view.String())
 
 		// Range-taking methods are safe on an empty view.
@@ -101,7 +102,7 @@ func TestNewView(t *testing.T) {
 		var view *line.View
 
 		assert.Equal(t, 0, view.Count())
-		assert.True(t, view.Lines().IsEmpty())
+		assert.Panics(t, func() { view.Line(0) })
 		assert.Nil(t, view.Clone())
 
 		for range view.All() {
@@ -152,7 +153,10 @@ func TestNewView_Spans(t *testing.T) {
 			}
 
 			assert.Equal(t, tc.want, got)
-			assert.Equal(t, lines, view.Lines())
+
+			for i := range lines.Len() {
+				assert.Same(t, lines.Line(i), view.Line(i), "content line %d", i)
+			}
 
 			// The view holds what a slice of a view over every line holds.
 			var sliced []int
@@ -221,7 +225,7 @@ func TestView_All(t *testing.T) {
 			indices = append(indices, i)
 			contents = append(contents, ln.Content())
 
-			assert.Same(t, view.Lines().Line(i), ln)
+			assert.Same(t, view.Line(i), ln)
 		}
 
 		assert.Equal(t, []int{0, 1, 2}, indices)
@@ -727,7 +731,7 @@ func TestView_Clone(t *testing.T) {
 
 		require.NotSame(t, view, clone)
 		require.Equal(t, 3, clone.Count())
-		assert.Equal(t, view.Lines().Content(), clone.Lines().Content())
+		assert.Equal(t, view.Held().Content(), clone.Held().Content())
 
 		for i, ln := range view.All() {
 			j, ok := clone.Index(ln)
@@ -864,7 +868,7 @@ func TestView_Index(t *testing.T) {
 	view := newTestView(t, input, 4)
 	other := newTestView(t, input, 4)
 
-	a, b := view.Lines().Line(0), view.Lines().Line(1)
+	a, b := view.Line(0), view.Line(1)
 	repeated := line.NewView(line.Collect(a, b, a, b, a))
 
 	tcs := map[string]struct {
@@ -875,13 +879,13 @@ func TestView_Index(t *testing.T) {
 	}{
 		"line of the view": {
 			view: view,
-			line: view.Lines().Line(2),
+			line: view.Line(2),
 			want: 2,
 			ok:   true,
 		},
 		"line of a view over held lines": {
 			view: line.NewView(view.Slice(position.NewSpan(1, 3)).Held()),
-			line: view.Lines().Line(2),
+			line: view.Line(2),
 			want: 1,
 			ok:   true,
 		},
@@ -909,17 +913,17 @@ func TestView_Index(t *testing.T) {
 		},
 		"line a slice holds through overlapping spans": {
 			view: view.Slice(position.NewSpan(2, 4), position.NewSpan(2, 3)),
-			line: view.Lines().Line(2),
+			line: view.Line(2),
 			want: 2,
 			ok:   true,
 		},
 		"line of a slice that dropped it": {
 			view: view.Slice(position.NewSpan(0, 2)),
-			line: view.Lines().Line(2),
+			line: view.Line(2),
 		},
 		"line of other content with the same text": {
 			view: view,
-			line: other.Lines().Line(2),
+			line: other.Line(2),
 		},
 		"nil line": {
 			view: view,
@@ -927,7 +931,7 @@ func TestView_Index(t *testing.T) {
 		},
 		"nil view": {
 			view: nil,
-			line: view.Lines().Line(0),
+			line: view.Line(0),
 		},
 	}
 
@@ -989,7 +993,7 @@ func TestView_Held(t *testing.T) {
 			assert.Equal(t, tc.view.Count(), got.Len())
 
 			for i, ci := range tc.want {
-				assert.Same(t, view.Lines().Line(ci), got.Line(i), "held line %d shares content line %d", i, ci)
+				assert.Same(t, view.Line(ci), got.Line(i), "held line %d shares content line %d", i, ci)
 				assert.Equal(t, ci+1, got.Line(i).Number(), "held line %d keeps the file's number", i)
 			}
 		})
@@ -1093,7 +1097,7 @@ func TestView_Slice(t *testing.T) {
 			got := view.Slice(span)
 
 			assert.Equal(t, 0, got.Count(), name)
-			assert.Equal(t, view.Lines(), got.Lines(), name)
+			assert.Same(t, view.Line(0), got.Line(0), name)
 			assert.Empty(t, got.String(), name)
 		}
 	})
@@ -1105,10 +1109,10 @@ func TestView_Slice(t *testing.T) {
 		got := view.Slice(position.NewSpan(2, 4))
 
 		require.Equal(t, 2, got.Count())
-		assert.Equal(t, view.Lines(), got.Lines())
+		assert.Same(t, view.Line(0), got.Line(0), "the slice reaches a line of the content it does not hold")
 
 		for i, ln := range got.All() {
-			assert.Same(t, view.Lines().Line(i), ln)
+			assert.Same(t, view.Line(i), ln)
 		}
 	})
 
@@ -1404,7 +1408,7 @@ func TestView_String(t *testing.T) {
 		`)
 		view := newTestView(t, input, 2)
 
-		assert.Equal(t, view.Lines().String(), view.String())
+		assert.Equal(t, view.Held().String(), view.String())
 		assert.Equal(t, "   1 | key1: value1\n   2 | key2: value2", view.String())
 	})
 
@@ -1910,7 +1914,8 @@ func TestView_Hunks(t *testing.T) {
 		got := view.Hunks(2)
 
 		assert.Equal(t, 0, got.Count())
-		assert.Equal(t, 8, got.Lines().Len(), "the content is still the whole")
+		assert.Same(t, view.Line(7), got.Line(7), "the content is still the whole")
+		assert.Panics(t, func() { got.Line(8) })
 	})
 
 	t.Run("a slice yields hunks within the slice", func(t *testing.T) {

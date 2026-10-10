@@ -274,11 +274,11 @@ func TestLine_String(t *testing.T) {
 		want string
 	}{
 		"numbered": {
-			line: newTestView(t, "key: value\n", 1).Lines().Line(0),
+			line: newTestView(t, "key: value\n", 1).Line(0),
 			want: "   1 | key: value",
 		},
 		"control characters": {
-			line: newTestView(t, "a: \"x\ty\"\n", 1).Lines().Line(0),
+			line: newTestView(t, "a: \"x\ty\"\n", 1).Line(0),
 			want: "   1 | a: \"x\u2409y\"",
 		},
 		"placeholder": {

@@ -295,7 +295,7 @@ func TestSource_Runes_DiffBuiltLines(t *testing.T) {
 		col  int
 	}
 
-	for pos, r := range lines.Lines().Runes() {
+	for pos, r := range lines.Held().Runes() {
 		if r == 'k' { // First char of each line.
 			positions = append(positions, struct {
 				line int
@@ -3826,7 +3826,7 @@ func TestSource_View_IndependentViews(t *testing.T) {
 	// The first view keeps its overlay and annotation.
 	require.Len(t, first.Overlays(0), 1)
 	assert.Equal(t, kind.Kind("test1"), first.Overlays(0)[0].Kind)
-	assert.Equal(t, "key: value", first.Lines().Content())
+	assert.Equal(t, "key: value", first.Held().Content())
 }
 
 func TestSource_Name(t *testing.T) {

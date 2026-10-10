@@ -4556,7 +4556,7 @@ func TestPrinter_Golden(t *testing.T) {
 			},
 			setupFunc: func(view *line.View) {
 				// Search for "日本" (Japan) which appears multiple times in full.yaml.
-				ranges := finder.New().Load(view.Lines()).Find("日本")
+				ranges := finder.New().Load(view).Find("日本")
 				view.AddOverlay(testOverlayHighlight, ranges...)
 			},
 		},
@@ -6384,7 +6384,7 @@ func TestPrinter_Layout_GutterWidth(t *testing.T) {
 			want:   7,
 		},
 		"slice keeps the width of its largest number": {
-			view:   long.Slice(position.NewSpan(10000, long.Lines().Len())),
+			view:   long.Slice(position.NewSpan(10000, long.Count())),
 			gutter: printer.LineNumberGutter,
 			want:   6,
 		},

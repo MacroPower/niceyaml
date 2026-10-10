@@ -5508,8 +5508,8 @@ func TestSourceError_Excerpt(t *testing.T) {
 		require.True(t, ok)
 
 		assert.Equal(t, []int{1, 2, 3, 7, 8, 9}, lineNumbers(excerpt))
-		assert.Equal(t, "b: 2", excerpt.Lines().Line(1).Content())
-		assert.Equal(t, "h: 8", excerpt.Lines().Line(7).Content())
+		assert.Equal(t, "b: 2", excerpt.Line(1).Content())
+		assert.Equal(t, "h: 8", excerpt.Line(7).Content())
 		assert.True(t, excerpt.Contains(7))
 		assert.False(t, excerpt.Contains(4), "the excerpt keeps the indices of the source")
 	})
@@ -6665,7 +6665,7 @@ func TestAnnotate(t *testing.T) {
 
 				require.False(t, niceyaml.Annotate(tc.err, tc.view))
 
-				for i := range tc.view.Lines().All() {
+				for i := range source.Lines().Len() {
 					assert.Empty(t, tc.view.Overlays(i), "line %d carries no overlay", i)
 					assert.Empty(t, tc.view.Annotations(i), "line %d carries no annotation", i)
 				}

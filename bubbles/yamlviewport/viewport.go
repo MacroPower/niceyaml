@@ -32,16 +32,17 @@ const defaultHorizontalStep = 6
 // once for each of them. Without a diff, side-by-side mode shows the same
 // revision in both panes, so Load runs once.
 //
-// Load receives the whole content of the view, the [line.View.Lines] of it,
-// which can include lines the view does not hold, such as the lines between
-// the hunks in hunks mode. The ranges the Index finds are in the coordinates
-// of those lines, and the viewport keeps the matches that start on a line the
-// view holds. A nil Index, or one holding a nil pointer, finds no match for
-// any term.
+// Load receives the view as a [line.Sequence], which yields the lines the
+// view holds, each with its index in the content of the view. The ranges
+// the Index finds are in the coordinates of that content, so a match on a
+// line of a hunk reports the index that line has in the unified diff. In
+// hunks mode the view skips the lines between the hunks, so no match
+// starts on one of them. A nil Index, or one holding a nil pointer, finds
+// no match for any term.
 //
 // [WithFinder] adapts a [finder.Finder] to this interface.
 type Searcher interface {
-	Load(lines line.Lines) Index
+	Load(lines line.Sequence) Index
 }
 
 // Index finds each [position.Range] that matches a search string in the lines
@@ -59,7 +60,7 @@ type finderSearcher struct {
 }
 
 // Load implements [Searcher].
-func (s finderSearcher) Load(lines line.Lines) Index {
+func (s finderSearcher) Load(lines line.Sequence) Index {
 	return s.finder.Load(lines)
 }
 
@@ -1035,8 +1036,8 @@ func (m *Model) refreshSearch() {
 		m.searchIndex = 0
 	}
 
-	m.leftLines = matchLines(m.leftMatches, m.baseLeft.Lines().Len())
-	m.rightLines = matchLines(m.rightMatches, m.baseRight.Lines().Len())
+	m.leftLines = matchLines(m.baseLeft, m.leftMatches)
+	m.rightLines = matchLines(m.baseRight, m.rightMatches)
 }
 
 // matchRanges returns the range of each search match.
@@ -1058,15 +1059,23 @@ func (m *Model) clearMatches() {
 }
 
 // matchLines returns the indexes in matches of the matches that cover each
-// line of content n lines long, keyed by the index of the line, in
+// line of the content of view, keyed by the index of the line, in
 // ascending order. A match covers each line from its start line through
 // [position.Range.LastLine], the lines its highlight marks, so a match
 // that ends at column 0 of a later line does not cover that line.
-func matchLines(matches position.Ranges, n int) map[int][]int {
+func matchLines(view *line.View, matches position.Ranges) map[int][]int {
+	// The last line the view holds bounds the walk, since a line past it
+	// never renders, and an Index of another package may report a range
+	// past the content.
+	last := -1
+	for i := range view.All() {
+		last = i
+	}
+
 	lines := make(map[int][]int, len(matches))
 
 	for k, r := range matches {
-		for l := max(0, r.Start.Line); l <= min(r.LastLine(), n-1); l++ {
+		for l := max(0, r.Start.Line); l <= min(r.LastLine(), last); l++ {
 			lines[l] = append(lines[l], k)
 		}
 	}
@@ -1168,8 +1177,8 @@ func (m *Model) updateSideBySideSearchState() {
 	// does, so typing a term does not rebuild the indexes on every
 	// keystroke. A nil Index counts as loaded.
 	if m.searcherStale {
-		m.index = m.searcher.Load(m.baseLeft.Lines())
-		m.indexRight = m.searcher.Load(m.baseRight.Lines())
+		m.index = m.searcher.Load(m.baseLeft)
+		m.indexRight = m.searcher.Load(m.baseRight)
 
 		m.searcherStale = false
 	}
@@ -1235,7 +1244,7 @@ func (m *Model) updateSideBySideSearchState() {
 // nil Index counts as loaded.
 func (m *Model) updateSearchState() {
 	if m.searcherStale {
-		m.index = m.searcher.Load(m.baseLeft.Lines())
+		m.index = m.searcher.Load(m.baseLeft)
 
 		m.searcherStale = false
 	}
@@ -2231,7 +2240,7 @@ func (m *Model) revisionHit(right bool, pos position.Position) (Hit, bool) {
 		index, view = m.diffBaseIndex(), m.diffViews[0]
 	}
 
-	i, ok := view.Index(pane.Lines().Line(pos.Line))
+	i, ok := view.Index(pane.Line(pos.Line))
 	if !ok {
 		return Hit{}, false
 	}
@@ -2396,7 +2405,7 @@ func (m *Model) scrollToCurrentMatch() {
 	// that ends on a later line runs to the end of this one.
 	end := match.rng.End
 	if end.Line != i {
-		end = position.New(i, view.Lines().Line(i).Width())
+		end = position.New(i, view.Line(i).Width())
 	}
 
 	x := layout.GutterWidth() + layout.CellOf(match.rng.Start)

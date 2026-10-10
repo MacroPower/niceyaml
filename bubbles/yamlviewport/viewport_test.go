@@ -5235,7 +5235,7 @@ type countingSearcher struct {
 	loads  int
 }
 
-func (c *countingSearcher) Load(lines line.Lines) yamlviewport.Index {
+func (c *countingSearcher) Load(lines line.Sequence) yamlviewport.Index {
 	c.loads++
 
 	return c.finder.Load(lines)
@@ -5645,7 +5645,7 @@ type reverseSearcher struct {
 	finder *finder.Finder
 }
 
-func (r reverseSearcher) Load(lines line.Lines) yamlviewport.Index {
+func (r reverseSearcher) Load(lines line.Sequence) yamlviewport.Index {
 	return reverseIndex{index: r.finder.Load(lines)}
 }
 
@@ -5715,7 +5715,7 @@ type fixedSearcher struct {
 	matches position.Ranges
 }
 
-func (s fixedSearcher) Load(line.Lines) yamlviewport.Index {
+func (s fixedSearcher) Load(line.Sequence) yamlviewport.Index {
 	return s
 }
 
@@ -5821,7 +5821,7 @@ type nilSearcher struct {
 	loads int
 }
 
-func (s *nilSearcher) Load(line.Lines) yamlviewport.Index {
+func (s *nilSearcher) Load(line.Sequence) yamlviewport.Index {
 	s.loads++
 
 	return s.index
