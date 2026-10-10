@@ -73,30 +73,23 @@ func TestHirschberg_Reuse(t *testing.T) {
 	t.Parallel()
 
 	h := lcs.NewHirschberg()
-
-	// First computation.
-	ops1 := h.Diff([]string{"a", "b"}, []string{"a", "c"})
-	assert.Equal(t, []lcs.Op{
+	want := []lcs.Op{
 		{Kind: lcs.OpEqual, Before: 0, After: 0},
 		{Kind: lcs.OpDelete, Before: 1, After: -1},
 		{Kind: lcs.OpInsert, Before: -1, After: 1},
-	}, ops1)
+	}
 
-	// Second computation, with the instance reused.
-	ops2 := h.Diff([]string{"x", "y", "z"}, []string{"x", "z"})
+	first := h.Diff([]string{"a", "b"}, []string{"a", "c"})
+	assert.Equal(t, want, first)
+
+	second := h.Diff([]string{"x", "y", "z"}, []string{"x", "z"})
 	assert.Equal(t, []lcs.Op{
 		{Kind: lcs.OpEqual, Before: 0, After: 0},
 		{Kind: lcs.OpDelete, Before: 1, After: -1},
 		{Kind: lcs.OpEqual, Before: 2, After: 1},
-	}, ops2)
+	}, second)
 
-	// Each call returns a fresh slice, so the second call left the first
-	// result intact.
-	assert.Equal(t, []lcs.Op{
-		{Kind: lcs.OpEqual, Before: 0, After: 0},
-		{Kind: lcs.OpDelete, Before: 1, After: -1},
-		{Kind: lcs.OpInsert, Before: -1, After: 1},
-	}, ops1)
+	assert.Equal(t, want, first, "each call returns a fresh slice, so the second leaves the first intact")
 }
 
 func TestHirschberg_Concurrent(t *testing.T) {
@@ -323,28 +316,21 @@ func requireValidOps(t *testing.T, before, after []string, ops []lcs.Op) {
 	inserting := false
 
 	for i, op := range ops {
+		msg := []any{"op %d: before=%q after=%q ops=%v", i, before, after, ops}
+
 		switch op.Kind {
 		case lcs.OpEqual:
-			require.Equal(t, nextBefore, op.Before, "op %d: before=%q after=%q ops=%v", i, before, after, ops)
-			require.Equal(t, nextAfter, op.After, "op %d: before=%q after=%q ops=%v", i, before, after, ops)
-			require.Equal(
-				t,
-				before[op.Before],
-				after[op.After],
-				"op %d: before=%q after=%q ops=%v",
-				i,
-				before,
-				after,
-				ops,
-			)
+			require.Equal(t, nextBefore, op.Before, msg...)
+			require.Equal(t, nextAfter, op.After, msg...)
+			require.Equal(t, before[op.Before], after[op.After], msg...)
 
 			nextBefore++
 			nextAfter++
 			inserting = false
 
 		case lcs.OpDelete:
-			require.Equal(t, nextBefore, op.Before, "op %d: before=%q after=%q ops=%v", i, before, after, ops)
-			require.Equal(t, -1, op.After, "op %d: before=%q after=%q ops=%v", i, before, after, ops)
+			require.Equal(t, nextBefore, op.Before, msg...)
+			require.Equal(t, -1, op.After, msg...)
 			require.False(
 				t,
 				inserting,
@@ -358,8 +344,8 @@ func requireValidOps(t *testing.T, before, after []string, ops []lcs.Op) {
 			nextBefore++
 
 		case lcs.OpInsert:
-			require.Equal(t, -1, op.Before, "op %d: before=%q after=%q ops=%v", i, before, after, ops)
-			require.Equal(t, nextAfter, op.After, "op %d: before=%q after=%q ops=%v", i, before, after, ops)
+			require.Equal(t, -1, op.Before, msg...)
+			require.Equal(t, nextAfter, op.After, msg...)
 
 			nextAfter++
 			inserting = true
