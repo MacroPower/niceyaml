@@ -222,15 +222,9 @@ func TestSource_Document(t *testing.T) {
 				want:  map[string]int{"a": 1},
 			},
 			// A file of empty documents alone reads as an empty file does.
-			"empty file": {
-				input: "",
-			},
-			"several empty documents": {
-				input: stringtest.JoinLF("---", "# a", "---", "# b"),
-			},
-			"comments on both sides of a header": {
-				input: stringtest.JoinLF("# a", "---", "# b"),
-			},
+			"empty file":                         {input: ""},
+			"several empty documents":            {input: stringtest.JoinLF("---", "# a", "---", "# b")},
+			"comments on both sides of a header": {input: stringtest.JoinLF("# a", "---", "# b")},
 		}
 
 		for name, tc := range tcs {
@@ -1089,18 +1083,10 @@ func TestDocument_Decode(t *testing.T) {
 		tcs := map[string]struct {
 			input string
 		}{
-			"anchored null": {
-				input: "list: &d ~\n",
-			},
-			"field": {
-				input: "list: &d\n# end\n",
-			},
-			"field after a reused anchor name": {
-				input: stringtest.LinesLF("x: &d 1", "y: *d", "list: &d", "# end"),
-			},
-			"field above a header": {
-				input: stringtest.LinesLF("list: &d", "# end", "---", "b: 1"),
-			},
+			"anchored null":                    {input: "list: &d ~\n"},
+			"field":                            {input: "list: &d\n# end\n"},
+			"field after a reused anchor name": {input: stringtest.LinesLF("x: &d 1", "y: *d", "list: &d", "# end")},
+			"field above a header":             {input: stringtest.LinesLF("list: &d", "# end", "---", "b: 1")},
 		}
 
 		for name, tc := range tcs {
@@ -8863,9 +8849,7 @@ func validatorSettings() map[string]decodeSettings {
 				niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
 			},
 		},
-		"ordered maps": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)},
-		},
+		"ordered maps": {opts: []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)}},
 	}
 }
 
@@ -9730,16 +9714,12 @@ func TestDecodeOptions(t *testing.T) {
 				opts: []niceyaml.DecodeOption{niceyaml.DecodeOptions(strict)},
 				err:  `2:1: $.extra~: unknown field "extra"`,
 			},
-			"an option after it": {
-				opts: []niceyaml.DecodeOption{niceyaml.DecodeOptions(strict), lax},
-			},
+			"an option after it": {opts: []niceyaml.DecodeOption{niceyaml.DecodeOptions(strict), lax}},
 			"an option before it": {
 				opts: []niceyaml.DecodeOption{lax, niceyaml.DecodeOptions(strict)},
 				err:  `2:1: $.extra~: unknown field "extra"`,
 			},
-			"two options inside it": {
-				opts: []niceyaml.DecodeOption{niceyaml.DecodeOptions(strict, lax)},
-			},
+			"two options inside it": {opts: []niceyaml.DecodeOption{niceyaml.DecodeOptions(strict, lax)}},
 			"a nested value after an option": {
 				opts: []niceyaml.DecodeOption{niceyaml.DecodeOptions(lax, niceyaml.DecodeOptions(strict))},
 				err:  `2:1: $.extra~: unknown field "extra"`,
@@ -11663,9 +11643,7 @@ func TestValidatorFunc_Check(t *testing.T) {
 			node:    doc,
 			want:    "other.yaml:2:8: $.price: negative price",
 		},
-		"no error is no error": {
-			node: doc,
-		},
+		"no error is no error": {node: doc},
 		"a nil Error pointer is no error": {
 			returns: nilError,
 			node:    doc,
@@ -12635,9 +12613,7 @@ func TestDocument_Decode_ExcessiveAliasing(t *testing.T) {
 			input: "base: &b {os: linux, arch: amd64, go: stable, cgo: false}\nmatrix:\n" +
 				strings.Repeat("  - *b\n", 150),
 		},
-		"a mapping of 200 keys aliased under 150 keys": {
-			input: yamltest.AliasedMapping(200, 150),
-		},
+		"a mapping of 200 keys aliased under 150 keys": {input: yamltest.AliasedMapping(200, 150)},
 		"a mapping of 1000 keys aliased under 300 keys": {
 			input: yamltest.AliasedMapping(1000, 300),
 			err:   niceyaml.ErrExcessiveAliasing,
