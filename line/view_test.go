@@ -939,7 +939,7 @@ func TestView_Slice(t *testing.T) {
 		view.Annotate(3, line.Annotation{Content: "hidden", Placement: line.Below})
 
 		assert.Len(t, view.Overlays(3), 1)
-		assert.Equal(t, "   1 | a: 1\n   2 | b: 2", view.String())
+		assert.Equal(t, stringtest.JoinLF("   1 | a: 1", "   2 | b: 2"), view.String())
 	})
 
 	t.Run("undecorated source", func(t *testing.T) {
@@ -963,7 +963,7 @@ func TestView_Slice(t *testing.T) {
 		view := decorated(t)
 		got := view.Slice(position.NewSpan(2, 3))
 
-		assert.Equal(t, "   3 | c: 3\n     | ^^^ c: 3", got.String())
+		assert.Equal(t, stringtest.JoinLF("   3 | c: 3", "     | ^^^ c: 3"), got.String())
 	})
 }
 
@@ -1034,18 +1034,15 @@ func TestView_String(t *testing.T) {
 			},
 			"annotation below at start": {
 				annotations: []line.Annotation{{Content: "error here", Placement: line.Below}},
-				want: `   1 | key: value
-     | ^ error here`,
+				want:        stringtest.JoinLF("   1 | key: value", "     | ^ error here"),
 			},
 			"annotation below with padding": {
 				annotations: []line.Annotation{{Content: "note", Placement: line.Below, Col: 4}},
-				want: `   1 | key: value
-     |     ^ note`,
+				want:        stringtest.JoinLF("   1 | key: value", "     |     ^ note"),
 			},
 			"annotation above": {
 				annotations: []line.Annotation{{Content: "@@ hunk header @@", Placement: line.Above}},
-				want: `     | @@ hunk header @@
-   1 | key: value`,
+				want:        stringtest.JoinLF("     | @@ hunk header @@", "   1 | key: value"),
 			},
 			"annotation above without content adds no row": {
 				annotations: []line.Annotation{{Content: "", Placement: line.Above, Col: 2}},
@@ -1056,8 +1053,7 @@ func TestView_String(t *testing.T) {
 					{Content: "", Placement: line.Below, Col: 4},
 					{Content: "", Placement: line.Below, Col: 2},
 				},
-				want: `   1 | key: value
-     |   ^`,
+				want: stringtest.JoinLF("   1 | key: value", "     |   ^"),
 			},
 			"annotations above of each kind get a row of their own": {
 				annotations: []line.Annotation{
@@ -1066,57 +1062,62 @@ func TestView_String(t *testing.T) {
 					{Content: "", Kind: kind.UISeparator, Placement: line.Above},
 					{Content: "second", Kind: kind.UIAnnotation, Placement: line.Above, Col: 2},
 				},
-				want: `     | @@ hunk header @@
-     |   second; first
-   1 | key: value`,
+				want: stringtest.JoinLF(
+					"     | @@ hunk header @@",
+					"     |   second; first",
+					"   1 | key: value",
+				),
 			},
 			"annotations above and below": {
 				annotations: []line.Annotation{
 					{Content: "@@ hunk header @@", Placement: line.Above},
 					{Content: "note", Placement: line.Below, Col: 2},
 				},
-				want: `     | @@ hunk header @@
-   1 | key: value
-     |   ^ note`,
+				want: stringtest.JoinLF(
+					"     | @@ hunk header @@",
+					"   1 | key: value",
+					"     |   ^ note",
+				),
 			},
 			"multiple annotations below join in column order at the minimum column": {
 				annotations: []line.Annotation{
 					{Content: "first", Placement: line.Below, Col: 5},
 					{Content: "second", Placement: line.Below, Col: 2},
 				},
-				want: `   1 | key: value
-     |   ^ second; first`,
+				want: stringtest.JoinLF("   1 | key: value", "     |   ^ second; first"),
 			},
 			"an annotation without content does not set the column": {
 				annotations: []line.Annotation{
 					{Content: "", Placement: line.Below, Col: 0},
 					{Content: "boom", Placement: line.Below, Col: 5},
 				},
-				want: `   1 | key: value
-     |      ^ boom`,
+				want: stringtest.JoinLF("   1 | key: value", "     |      ^ boom"),
 			},
 			"annotations below of each kind get a row of their own": {
 				annotations: []line.Annotation{
 					{Content: "hint", Placement: line.Below, Col: 0},
 					{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Col: 5},
 				},
-				want: `   1 | key: value
-     | ^ hint
-     |      ^ bad value`,
+				want: stringtest.JoinLF(
+					"   1 | key: value",
+					"     | ^ hint",
+					"     |      ^ bad value",
+				),
 			},
 			"a kind below without content keeps its caret beside another kind": {
 				annotations: []line.Annotation{
 					{Content: "", Placement: line.Below, Col: 2},
 					{Content: "bad value", Kind: kind.TextError, Placement: line.Below, Col: 5},
 				},
-				want: `   1 | key: value
-     |   ^
-     |      ^ bad value`,
+				want: stringtest.JoinLF(
+					"   1 | key: value",
+					"     |   ^",
+					"     |      ^ bad value",
+				),
 			},
 			"negative column is not padded": {
 				annotations: []line.Annotation{{Content: "note", Placement: line.Below, Col: -3}},
-				want: `   1 | key: value
-     | ^ note`,
+				want:        stringtest.JoinLF("   1 | key: value", "     | ^ note"),
 			},
 		}
 
@@ -1142,7 +1143,7 @@ func TestView_String(t *testing.T) {
 		view := newTestView(t, input, 2)
 
 		assert.Equal(t, view.Held().String(), view.String())
-		assert.Equal(t, "   1 | key1: value1\n   2 | key2: value2", view.String())
+		assert.Equal(t, stringtest.JoinLF("   1 | key1: value1", "   2 | key2: value2"), view.String())
 	})
 
 	t.Run("annotations on several lines", func(t *testing.T) {
@@ -1171,7 +1172,7 @@ func TestView_String(t *testing.T) {
 		view.AddOverlay("test1", yamltest.LineRange(0, 0, 3))
 		view.BlendOverlay("test2", yamltest.LineRange(0, 5, 7))
 
-		assert.Equal(t, "   1 | key: value\n     | ^^^  ^^", view.String())
+		assert.Equal(t, stringtest.JoinLF("   1 | key: value", "     | ^^^  ^^"), view.String())
 	})
 
 	t.Run("annotation without content marks an overlay of no width", func(t *testing.T) {
@@ -1187,15 +1188,15 @@ func TestView_String(t *testing.T) {
 		}{
 			"empty span at the end of the line": {
 				overlay: line.Overlay{Kind: "test1", Cols: position.NewSpan(10, 10)},
-				want:    "   1 | key: value\n     |           ^",
+				want:    stringtest.JoinLF("   1 | key: value", "     |           ^"),
 			},
 			"span past the content": {
 				overlay: line.Overlay{Kind: "test1", Cols: position.NewSpan(12, 14)},
-				want:    "   1 | key: value\n     |           ^",
+				want:    stringtest.JoinLF("   1 | key: value", "     |           ^"),
 			},
 			"span that covers a column": {
 				overlay: line.Overlay{Kind: "test1", Cols: position.NewSpan(5, 7)},
-				want:    "   1 | key: value\n     |      ^^",
+				want:    stringtest.JoinLF("   1 | key: value", "     |      ^^"),
 			},
 		}
 
@@ -1218,7 +1219,7 @@ func TestView_String(t *testing.T) {
 		view := newTestView(t, "key: value\n", 1)
 		view.AddLineOverlay(0, line.Overlay{Kind: "test1", Cols: position.NewSpan(8, 20)})
 
-		assert.Equal(t, "   1 | key: value\n     |         ^^", view.String())
+		assert.Equal(t, stringtest.JoinLF("   1 | key: value", "     |         ^^"), view.String())
 	})
 
 	t.Run("marks on one line", func(t *testing.T) {
