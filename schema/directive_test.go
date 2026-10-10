@@ -658,37 +658,62 @@ func TestDirective_Resolve(t *testing.T) {
 	t.Run("successfully loads schema from file directive", func(t *testing.T) {
 		t.Parallel()
 
-		tmpDir := t.TempDir()
-		schemaData := []byte(`{"type": "object", "properties": {"kind": {"type": "string"}}}`)
-		err := os.WriteFile(filepath.Join(tmpDir, "schema.json"), schemaData, 0o600)
-		require.NoError(t, err)
-
-		doc := yamltest.FirstDocumentWithPath(t,
-			"# yaml-language-server: $schema=schema.json\nkind: Deployment\n",
-			filepath.Join(tmpDir, "config.yaml"),
-		)
-		url, data, err := loadFor(t, schema.Directive(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
-		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "schema.json")), url)
-	})
-
-	t.Run("trims trailing whitespace from the directive", func(t *testing.T) {
-		t.Parallel()
-
-		tmpDir := t.TempDir()
 		schemaData := []byte(`{"type": "object"}`)
-		err := os.WriteFile(filepath.Join(tmpDir, "schema.json"), schemaData, 0o600)
-		require.NoError(t, err)
 
-		doc := yamltest.FirstDocumentWithPath(t,
-			"# yaml-language-server: $schema=./schema.json   \nkind: Deployment\n",
-			filepath.Join(tmpDir, "config.yaml"),
-		)
-		url, data, err := loadFor(t, schema.Directive(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
-		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "schema.json")), url)
+		// Each case writes the schema to file under a temporary directory
+		// and names it by a directive in a document at doc there.
+		tcs := map[string]struct {
+			file      string
+			doc       string
+			directive string
+		}{
+			"file beside the document": {
+				file:      "schema.json",
+				doc:       "config.yaml",
+				directive: "schema.json",
+			},
+			"trailing whitespace": {
+				file:      "schema.json",
+				doc:       "config.yaml",
+				directive: "./schema.json   ",
+			},
+			// A path splits only at a '#' after its first character, as in
+			// yaml-language-server, so "#schema.json" names a file.
+			"leading '#' in a path": {
+				file:      "#schema.json",
+				doc:       "config.yaml",
+				directive: "#schema.json",
+			},
+			"./none names a file": {
+				file:      "none",
+				doc:       "config.yaml",
+				directive: "./none",
+			},
+			// The directive climbs from configs/ to its sibling schemas/.
+			"path through the parent of the document": {
+				file:      "schemas/schema.json",
+				doc:       "configs/config.yaml",
+				directive: "../schemas/schema.json",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				tmpDir := t.TempDir()
+				writeFiles(t, tmpDir, map[string]string{tc.file: string(schemaData)})
+
+				doc := yamltest.FirstDocumentWithPath(t,
+					"# yaml-language-server: $schema="+tc.directive+"\nkind: Deployment\n",
+					filepath.Join(tmpDir, filepath.FromSlash(tc.doc)),
+				)
+				url, data, err := loadFor(t, schema.Directive(), doc)
+				require.NoError(t, err)
+				assert.Equal(t, schemaData, data)
+				assert.Equal(t, fileURL(t, filepath.Join(tmpDir, filepath.FromSlash(tc.file))), url)
+			})
+		}
 	})
 
 	t.Run("successfully loads schema from URL directive", func(t *testing.T) {
@@ -784,27 +809,6 @@ func TestDirective_Resolve(t *testing.T) {
 		}
 	})
 
-	t.Run("keeps a leading '#' in a path", func(t *testing.T) {
-		t.Parallel()
-
-		// A path splits only at a '#' after its first character, as in
-		// yaml-language-server, so "#schema.json" names a file.
-		tmpDir := t.TempDir()
-		schemaPath := filepath.Join(tmpDir, "#schema.json")
-		schemaData := []byte(`{"type": "object"}`)
-		err := os.WriteFile(schemaPath, schemaData, 0o600)
-		require.NoError(t, err)
-
-		doc := yamltest.FirstDocumentWithPath(t,
-			"# yaml-language-server: $schema=#schema.json\nkind: Deployment\n",
-			filepath.Join(tmpDir, "config.yaml"),
-		)
-		url, data, err := loadFor(t, schema.Directive(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, fileURL(t, schemaPath), url)
-		assert.Equal(t, schemaData, data)
-	})
-
 	t.Run("returns ErrNoDirective when no directive present", func(t *testing.T) {
 		t.Parallel()
 
@@ -894,46 +898,6 @@ func TestDirective_Resolve(t *testing.T) {
 				require.NoError(t, reg.Check(t.Context(), doc))
 			})
 		}
-	})
-
-	t.Run("./none names a file", func(t *testing.T) {
-		t.Parallel()
-
-		tmpDir := t.TempDir()
-		schemaData := []byte(`{"type":"object"}`)
-		err := os.WriteFile(filepath.Join(tmpDir, "none"), schemaData, 0o600)
-		require.NoError(t, err)
-
-		doc := yamltest.FirstDocumentWithPath(t,
-			"# yaml-language-server: $schema=./none\nkind: Deployment\n",
-			filepath.Join(tmpDir, "config.yaml"),
-		)
-		url, data, err := loadFor(t, schema.Directive(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
-		assert.Equal(t, fileURL(t, filepath.Join(tmpDir, "none")), url)
-	})
-
-	t.Run("resolves relative paths against document directory", func(t *testing.T) {
-		t.Parallel()
-
-		tmpDir := t.TempDir()
-		schemaDir := filepath.Join(tmpDir, "schemas")
-		err := os.MkdirAll(schemaDir, 0o755)
-		require.NoError(t, err)
-
-		schemaData := []byte(`{"type": "object"}`)
-		err = os.WriteFile(filepath.Join(schemaDir, "schema.json"), schemaData, 0o600)
-		require.NoError(t, err)
-
-		// The directive climbs from configs/ to its sibling schemas/.
-		doc := yamltest.FirstDocumentWithPath(t,
-			"# yaml-language-server: $schema=../schemas/schema.json\nkind: Deployment\n",
-			filepath.Join(tmpDir, "configs", "config.yaml"),
-		)
-		_, data, err := loadFor(t, schema.Directive(), doc)
-		require.NoError(t, err)
-		assert.Equal(t, schemaData, data)
 	})
 
 	t.Run("names a missing schema file and fails on load", func(t *testing.T) {
