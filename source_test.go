@@ -5501,11 +5501,8 @@ func TestWithAliasLimit(t *testing.T) {
 			// The node of the case, in a Source of the bomb with opts.
 			node := func(opts ...niceyaml.SourceOption) *niceyaml.Node {
 				doc := yamltest.FirstDocument(t, bomb, append(opts, niceyaml.WithName("bomb.yaml"))...)
-				if tc.path.Len() > 0 {
-					return yamltest.At(t, doc, tc.path)
-				}
 
-				return doc
+				return yamltest.AtOrSelf(t, doc, tc.path)
 			}
 
 			limited := map[string]*niceyaml.Node{
