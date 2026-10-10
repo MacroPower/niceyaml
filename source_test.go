@@ -113,10 +113,8 @@ func TestTokens_String_Annotation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tks := lexer.Tokenize(tc.input)
-			view := niceyaml.NewSourceFromTokens(tks, niceyaml.WithName("test")).View()
+			view := niceyaml.NewSourceFromTokens(lexer.Tokenize(tc.input), niceyaml.WithName("test")).View()
 
-			// Apply annotations to specified lines.
 			for idx, ann := range tc.annotations {
 				require.Less(t, idx, view.Count(), "annotation index out of range")
 
@@ -276,13 +274,11 @@ func TestSource_Runes_DiffBuiltLines(t *testing.T) {
 func TestSource_All_EarlyBreak(t *testing.T) {
 	t.Parallel()
 
-	input := "a: 1\nb: 2\nc: 3\n"
-	tks := lexer.Tokenize(input)
-	lines := niceyaml.NewSourceFromTokens(tks)
+	source := niceyaml.NewSourceFromTokens(lexer.Tokenize("a: 1\nb: 2\nc: 3\n"))
 
 	var collected []int
 
-	for idx := range lines.Lines().All() {
+	for idx := range source.Lines().All() {
 		collected = append(collected, idx)
 		if idx >= 1 {
 			break
@@ -483,13 +479,11 @@ func TestSource_Lines_Whitespace(t *testing.T) {
 func TestSource_Runes_EarlyBreak(t *testing.T) {
 	t.Parallel()
 
-	input := "abc\n"
-	tks := lexer.Tokenize(input)
-	lines := niceyaml.NewSourceFromTokens(tks)
+	source := niceyaml.NewSourceFromTokens(lexer.Tokenize("abc\n"))
 
 	var collected []rune
 
-	for _, r := range lines.Lines().Runes() {
+	for _, r := range source.Lines().Runes() {
 		collected = append(collected, r)
 		if r == 'b' {
 			break
@@ -1785,11 +1779,8 @@ func TestSource_Parse(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				source := niceyaml.NewSourceFromString(tc.input)
-				file, err := source.File()
-
+				file, err := niceyaml.NewSourceFromString(tc.input).File()
 				require.NoError(t, err)
-				require.NotNil(t, file)
 				assert.Len(t, file.Docs, tc.want)
 			})
 		}
@@ -1864,13 +1855,9 @@ func TestSource_Parse(t *testing.T) {
 		tks.Add(tkb.Clone().Origin(":").PositionColumn(1).Build())
 		tks.Add(tkb.Clone().Origin(":\n").PositionColumn(2).Build())
 
-		source := niceyaml.NewSourceFromTokens(tks)
-		file, err := source.File()
-
-		require.Error(t, err)
+		file, err := niceyaml.NewSourceFromTokens(tks).File()
 		assert.Nil(t, file)
 
-		// Verify it's a niceyaml.Error with source annotation.
 		var yamlErr *niceyaml.Error
 
 		require.ErrorAs(t, err, &yamlErr)
@@ -3521,10 +3508,7 @@ func TestSource_Name(t *testing.T) {
 			name: "test.yaml",
 			want: "test.yaml",
 		},
-		"empty name": {
-			name: "",
-			want: "",
-		},
+		"empty name": {},
 		"path-like name": {
 			name: "/path/to/file.yaml",
 			want: "/path/to/file.yaml",
@@ -3548,9 +3532,8 @@ func TestSource_Name(t *testing.T) {
 				niceyaml.WithName(tc.name),
 				niceyaml.WithFilePath(tc.filePath),
 			)
-			got := source.Name()
 
-			assert.Equal(t, tc.want, got)
+			assert.Equal(t, tc.want, source.Name())
 		})
 	}
 }
@@ -3655,36 +3638,29 @@ func TestSource_TokenAt(t *testing.T) {
 func TestDocument_BindChain(t *testing.T) {
 	t.Parallel()
 
+	source := niceyaml.NewSourceFromString("key: value\n")
+
 	t.Run("wraps niceyaml.Error", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("key: value\n")
-		yamlErr := niceyaml.NewError("test error")
-
-		wrapped := yamltest.Bind(t, source, yamlErr)
-
-		require.Error(t, wrapped)
-
 		var gotErr *niceyaml.Error
 
-		require.ErrorAs(t, wrapped, &gotErr)
+		require.ErrorAs(t, yamltest.Bind(t, source, niceyaml.NewError("test error")), &gotErr)
 	})
 
-	t.Run("returns nil for nil error", func(t *testing.T) {
+	t.Run("returns a nil error and a nil Error as a nil error", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("key: value\n")
-		wrapped := yamltest.Bind(t, source, nil)
+		var nilErr *niceyaml.Error
 
-		assert.NoError(t, wrapped)
+		require.NoError(t, yamltest.Bind(t, source, nil))
+		require.NoError(t, yamltest.Bind(t, source, nilErr))
 	})
 
 	t.Run("keeps context wrapped around the Error", func(t *testing.T) {
 		t.Parallel()
 
-		source := niceyaml.NewSourceFromString("key: value\n")
-		yamlErr := niceyaml.NewError("test error")
-		outer := fmt.Errorf("document 3: %w", yamlErr)
+		outer := fmt.Errorf("document 3: %w", niceyaml.NewError("test error"))
 
 		wrapped := yamltest.Bind(t, source, outer)
 
@@ -3734,16 +3710,6 @@ func TestDocument_BindChain(t *testing.T) {
 				require.NoError(t, bound.Unresolved())
 			})
 		}
-	})
-
-	t.Run("returns a nil Error as a nil error", func(t *testing.T) {
-		t.Parallel()
-
-		source := niceyaml.NewSourceFromString("key: value\n")
-
-		var nilErr *niceyaml.Error
-
-		require.NoError(t, yamltest.Bind(t, source, nilErr))
 	})
 
 	t.Run("binds context around a nil Error without a location", func(t *testing.T) {
