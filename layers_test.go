@@ -391,12 +391,12 @@ func TestNewSourceFromLayers(t *testing.T) {
 			},
 			"a syntax error": {
 				input: "server: [\n",
-				want:  "prod.yaml:1:9: sequence end token ']' not found",
+				want:  "prod.yaml:1:9: " + unclosedSequence,
 				err:   niceyaml.ErrSyntax,
 			},
 			"a syntax error below a document that parses": {
 				input: "server:\n  port: 1\n---\nserver: [\n",
-				want:  "prod.yaml:4:9: sequence end token ']' not found",
+				want:  "prod.yaml:4:9: " + unclosedSequence,
 				err:   niceyaml.ErrSyntax,
 			},
 		}
@@ -443,7 +443,7 @@ func TestNewSourceFromLayers(t *testing.T) {
 		require.ErrorIs(t, docs[0].Err(), niceyaml.ErrSyntax)
 
 		merged, err := niceyaml.NewSourceFromLayers(t.Context(), layerNodes(t, baseInput)[0], docs[0])
-		require.EqualError(t, err, "prod.yaml:1:9: sequence end token ']' not found")
+		require.EqualError(t, err, "prod.yaml:1:9: "+unclosedSequence)
 		require.ErrorIs(t, err, docs[0].Err())
 		assert.Nil(t, merged)
 	})

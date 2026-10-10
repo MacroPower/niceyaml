@@ -2143,7 +2143,7 @@ func TestSource_AllDocuments(t *testing.T) {
 		)
 
 		_, fileErr := source.File()
-		require.EqualError(t, fileErr, "cfg.yaml:5:4: sequence end token ']' not found")
+		require.EqualError(t, fileErr, "cfg.yaml:5:4: "+unclosedSequence)
 
 		// Documents returns the document that did not parse beside the
 		// others, with its error on the Node.
@@ -2331,10 +2331,12 @@ func TestSource_AllDocuments(t *testing.T) {
 	})
 }
 
+// unclosedSequence is the message of the syntax error for a flow sequence
+// with no "]".
+const unclosedSequence = "sequence end token ']' not found"
+
 func TestSource_Documents_CollectErrors(t *testing.T) {
 	t.Parallel()
-
-	const unclosed = "sequence end token ']' not found"
 
 	// A caller that reports on each document collects the error of every
 	// document Documents returns, parsed or not.
@@ -2381,20 +2383,20 @@ func TestSource_Documents_CollectErrors(t *testing.T) {
 		"file that parses": {input: "a: 1\n---\nb: 2\n"},
 		"one syntax error": {
 			input:    "a: 1\n---\nb: 2\n---\na: [\n---\nc: 3\n",
-			strict:   []string{"cfg.yaml:5:4: " + unclosed},
-			tolerant: []string{"cfg.yaml:5:4: " + unclosed},
+			strict:   []string{"cfg.yaml:5:4: " + unclosedSequence},
+			tolerant: []string{"cfg.yaml:5:4: " + unclosedSequence},
 		},
 		"two syntax errors": {
 			input:    "a: [\n---\nb: 1\n---\nc: [\n",
-			strict:   []string{"cfg.yaml:1:4: " + unclosed, "cfg.yaml:5:4: " + unclosed},
-			tolerant: []string{"cfg.yaml:1:4: " + unclosed, "cfg.yaml:5:4: " + unclosed},
+			strict:   []string{"cfg.yaml:1:4: " + unclosedSequence, "cfg.yaml:5:4: " + unclosedSequence},
+			tolerant: []string{"cfg.yaml:1:4: " + unclosedSequence, "cfg.yaml:5:4: " + unclosedSequence},
 		},
 		// The header parses together with the document above it, so both
 		// documents return the one error.
 		"syntax error two documents share": {
 			input:    "a: &x\n---\nb: [\n",
-			strict:   []string{"cfg.yaml:3:4: " + unclosed},
-			tolerant: []string{"cfg.yaml:3:4: " + unclosed, "cfg.yaml:3:4: " + unclosed},
+			strict:   []string{"cfg.yaml:3:4: " + unclosedSequence},
+			tolerant: []string{"cfg.yaml:3:4: " + unclosedSequence, "cfg.yaml:3:4: " + unclosedSequence},
 		},
 	}
 
@@ -2435,8 +2437,6 @@ func messageLines(err error) []string {
 func TestSource_AllDocuments_SyntaxError(t *testing.T) {
 	t.Parallel()
 
-	const unclosed = "sequence end token ']' not found"
-
 	tcs := map[string]struct {
 		input string
 		// The syntax error of each document in file order, empty for a
@@ -2447,24 +2447,24 @@ func TestSource_AllDocuments_SyntaxError(t *testing.T) {
 	}{
 		"only document": {
 			input: "a: [\n",
-			want:  []string{"f.yaml:1:4: " + unclosed},
+			want:  []string{"f.yaml:1:4: " + unclosedSequence},
 			spans: []position.Span{position.NewSpan(0, 1)},
 		},
 		"first of two": {
 			input: "a: [\n---\nb: 1\n",
-			want:  []string{"f.yaml:1:4: " + unclosed, ""},
+			want:  []string{"f.yaml:1:4: " + unclosedSequence, ""},
 			spans: []position.Span{position.NewSpan(0, 1), position.NewSpan(1, 3)},
 		},
 		"last of three": {
 			input: "a: 1\n---\nb: 2\n---\nc: [\n",
-			want:  []string{"", "", "f.yaml:5:4: " + unclosed},
+			want:  []string{"", "", "f.yaml:5:4: " + unclosedSequence},
 			spans: []position.Span{position.NewSpan(0, 1), position.NewSpan(1, 3), position.NewSpan(3, 5)},
 		},
 		"second and fourth of five": {
 			input: "a: 1\n---\nb: [\n---\nc: 3\n---\nd: @x\n---\ne: 5\n",
 			want: []string{
 				"",
-				"f.yaml:3:4: " + unclosed,
+				"f.yaml:3:4: " + unclosedSequence,
 				"",
 				"f.yaml:7:4: '@' is a reserved character",
 				"",
@@ -2484,12 +2484,12 @@ func TestSource_AllDocuments_SyntaxError(t *testing.T) {
 		},
 		"document without a header after an end marker": {
 			input: "a: 1\n...\nb: [\n...\nc: 3\n",
-			want:  []string{"", "f.yaml:3:4: " + unclosed, ""},
+			want:  []string{"", "f.yaml:3:4: " + unclosedSequence, ""},
 			spans: []position.Span{position.NewSpan(0, 2), position.NewSpan(2, 4), position.NewSpan(4, 5)},
 		},
 		"comment and directive above the header": {
 			input: "a: 1\n...\n# top\n%YAML 1.2\n---\nb: [\n---\nc: 3\n",
-			want:  []string{"", "f.yaml:6:4: " + unclosed, ""},
+			want:  []string{"", "f.yaml:6:4: " + unclosedSequence, ""},
 			spans: []position.Span{position.NewSpan(0, 2), position.NewSpan(2, 6), position.NewSpan(6, 8)},
 		},
 		"directive that no document follows": {
@@ -2501,12 +2501,12 @@ func TestSource_AllDocuments_SyntaxError(t *testing.T) {
 		// error of either document fails both.
 		"header after an anchor with no value": {
 			input: "a: &x\n---\nb: [\n---\nc: 3\n",
-			want:  []string{"f.yaml:3:4: " + unclosed, "f.yaml:3:4: " + unclosed, ""},
+			want:  []string{"f.yaml:3:4: " + unclosedSequence, "f.yaml:3:4: " + unclosedSequence, ""},
 			spans: []position.Span{position.NewSpan(0, 1), position.NewSpan(1, 3), position.NewSpan(3, 5)},
 		},
 		"empty documents around the failure": {
 			input: "---\n---\na: [\n---\n---\n",
-			want:  []string{"", "f.yaml:3:4: " + unclosed, "", ""},
+			want:  []string{"", "f.yaml:3:4: " + unclosedSequence, "", ""},
 			spans: []position.Span{
 				position.NewSpan(0, 1),
 				position.NewSpan(1, 3),
@@ -2937,8 +2937,6 @@ func bindingMessages(err error) []string {
 func TestSource_ValidateDocuments(t *testing.T) {
 	t.Parallel()
 
-	const unclosed = "sequence end token ']' not found"
-
 	tcs := map[string]struct {
 		input string
 		// The message of each binding the result holds, in file order.
@@ -2957,23 +2955,23 @@ func TestSource_ValidateDocuments(t *testing.T) {
 			input: "value: 1\n---\nname: [\n---\nvalue: 3\n",
 			want: []string{
 				"f.yaml:1:1: $: name is required",
-				"f.yaml:3:7: " + unclosed,
+				"f.yaml:3:7: " + unclosedSequence,
 				"f.yaml:5:1: $: name is required",
 			},
 		},
 		"two syntax errors": {
 			input: "a: [\n---\nname: b\n---\nc: [\n",
-			want:  []string{"f.yaml:1:4: " + unclosed, "f.yaml:5:4: " + unclosed},
+			want:  []string{"f.yaml:1:4: " + unclosedSequence, "f.yaml:5:4: " + unclosedSequence},
 		},
 		"syntax errors of adjacent documents": {
 			input: "a: [\n---\nb: [\n",
-			want:  []string{"f.yaml:1:4: " + unclosed, "f.yaml:3:4: " + unclosed},
+			want:  []string{"f.yaml:1:4: " + unclosedSequence, "f.yaml:3:4: " + unclosedSequence},
 		},
 		// The header parses together with the document above it, so both
 		// documents carry the one error.
 		"syntax error two documents share": {
 			input: "name: &x\n---\nname: [\n---\nvalue: 5\n",
-			want:  []string{"f.yaml:3:7: " + unclosed, "f.yaml:5:1: $: name is required"},
+			want:  []string{"f.yaml:3:7: " + unclosedSequence, "f.yaml:5:1: $: name is required"},
 		},
 		"empty document beside one with content": {input: "name: x\n---\n"},
 		"empty documents alone": {
@@ -3092,17 +3090,17 @@ func TestSource_ValidateDocuments(t *testing.T) {
 		}{
 			"nil reports the syntax alone": {
 				v:    nil,
-				want: []string{"f.yaml:3:7: " + unclosed},
+				want: []string{"f.yaml:3:7: " + unclosedSequence},
 			},
 			"one validator": {
 				v:    reserved,
-				want: []string{"f.yaml:1:7: $.name: reserved name", "f.yaml:3:7: " + unclosed},
+				want: []string{"f.yaml:1:7: $.name: reserved name", "f.yaml:3:7: " + unclosedSequence},
 			},
 			"ChainValidator stops at the first failure of each document": {
 				v: niceyaml.ChainValidator(reserved, privileged),
 				want: []string{
 					"f.yaml:1:7: $.name: reserved name",
-					"f.yaml:3:7: " + unclosed,
+					"f.yaml:3:7: " + unclosedSequence,
 					"f.yaml:7:7: $.name: privileged name",
 				},
 			},
@@ -3111,7 +3109,7 @@ func TestSource_ValidateDocuments(t *testing.T) {
 				v: niceyaml.MultiValidator(reserved, privileged),
 				want: []string{
 					"f.yaml:1:7: $.name: reserved name\nf.yaml:1:7: $.name: privileged name",
-					"f.yaml:3:7: " + unclosed,
+					"f.yaml:3:7: " + unclosedSequence,
 					"f.yaml:7:7: $.name: privileged name",
 				},
 			},
@@ -3135,9 +3133,8 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 	t.Parallel()
 
 	const (
-		unclosed = "sequence end token ']' not found"
-		notNull  = `$: expected "object", got "null"`
-		noMatch  = "no matching schema"
+		notNull = `$: expected "object", got "null"`
+		noMatch = "no matching schema"
 	)
 
 	// The schema wants a mapping with a kind. The registry picks it for
@@ -3286,24 +3283,24 @@ func TestSource_ValidateDocuments_SkipEmpty(t *testing.T) {
 		"registry, syntax error beside an empty document": {
 			v:      registry,
 			input:  "kind: A\n---\nkind: [\n---\n---\nkind: B\n",
-			strict: []string{"f.yaml:3:7: " + unclosed, "f.yaml: document 4: " + noMatch},
-			want:   []string{"f.yaml:3:7: " + unclosed, "f.yaml: document 4: " + noMatch},
+			strict: []string{"f.yaml:3:7: " + unclosedSequence, "f.yaml: document 4: " + noMatch},
+			want:   []string{"f.yaml:3:7: " + unclosedSequence, "f.yaml: document 4: " + noMatch},
 		},
 		// A document that did not parse is not empty, so the empty one
 		// beside it passes.
 		"schema, empty document beside one that did not parse": {
 			v:      manifest,
 			input:  "kind: [\n---\n",
-			strict: []string{"f.yaml:1:7: " + unclosed},
-			want:   []string{"f.yaml:1:7: " + unclosed},
+			strict: []string{"f.yaml:1:7: " + unclosedSequence},
+			want:   []string{"f.yaml:1:7: " + unclosedSequence},
 		},
 		// The header parses together with the document above it, so both
 		// documents carry the one error, which the result holds once.
 		"schema, syntax error two documents share": {
 			v:      manifest,
 			input:  "name: &x\n---\nname: [\n---\n---\nvalue: 5\n",
-			strict: []string{"f.yaml:3:7: " + unclosed, `f.yaml:6:1: $.kind: missing required property "kind"`},
-			want:   []string{"f.yaml:3:7: " + unclosed, `f.yaml:6:1: $.kind: missing required property "kind"`},
+			strict: []string{"f.yaml:3:7: " + unclosedSequence, `f.yaml:6:1: $.kind: missing required property "kind"`},
+			want:   []string{"f.yaml:3:7: " + unclosedSequence, `f.yaml:6:1: $.kind: missing required property "kind"`},
 		},
 	}
 
@@ -5341,7 +5338,7 @@ func TestWithReferences(t *testing.T) {
 			niceyaml.WithReferences(niceyaml.NewSourceFromString("x: [\n")))
 
 		_, err := doc.Decode[map[string]int](t.Context())
-		require.ErrorContains(t, err, "sequence end token ']' not found")
+		require.ErrorContains(t, err, unclosedSequence)
 	})
 }
 
