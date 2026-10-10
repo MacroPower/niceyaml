@@ -2832,16 +2832,14 @@ func TestPath_HandBuiltAST(t *testing.T) {
 	t.Run("alias without a name", func(t *testing.T) {
 		t.Parallel()
 
-		file, err := niceyaml.NewSourceFromString("a: 1\n").File()
-		require.NoError(t, err)
+		doc := yamltest.FirstDocument(t, "a: 1\n").DocumentAST()
 
-		doc := file.Docs[0]
 		mapping, ok := doc.Body.(*ast.MappingNode)
 		require.True(t, ok, "want *ast.MappingNode, got %T", doc.Body)
 
 		mapping.Values[0].Value = &ast.AliasNode{}
 
-		_, err = paths.NewResolver(doc).Node(paths.Doc().Child("a"))
+		_, err := paths.NewResolver(doc).Node(paths.Doc().Child("a"))
 		require.ErrorIs(t, err, paths.ErrAlias)
 		assert.Contains(t, err.Error(), "alias has no name")
 
@@ -2852,10 +2850,8 @@ func TestPath_HandBuiltAST(t *testing.T) {
 	t.Run("entry without a key", func(t *testing.T) {
 		t.Parallel()
 
-		file, err := niceyaml.NewSourceFromString("a: 1\n").File()
-		require.NoError(t, err)
+		doc := yamltest.FirstDocument(t, "a: 1\n").DocumentAST()
 
-		doc := file.Docs[0]
 		mapping, ok := doc.Body.(*ast.MappingNode)
 		require.True(t, ok, "want *ast.MappingNode, got %T", doc.Body)
 
