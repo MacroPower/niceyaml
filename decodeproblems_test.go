@@ -1454,23 +1454,17 @@ func TestDocument_Decode_Problems_References(t *testing.T) {
 func TestDocument_DecodeInto_Problems_Defaults(t *testing.T) {
 	t.Parallel()
 
-	input := "timeout: soon\nserver: {name: a}\n"
-
 	// The decode fills the server over the port the caller set, so the
 	// check for a port passes. No second decode of the server into a new
 	// value runs that check without the port.
-	t.Run("unmarshaler", func(t *testing.T) {
-		t.Parallel()
+	cfg := struct {
+		Server  problemPorted `yaml:"server"`
+		Timeout int           `yaml:"timeout"`
+	}{Server: problemPorted{Port: 8080}}
 
-		cfg := struct {
-			Server  problemPorted `yaml:"server"`
-			Timeout int           `yaml:"timeout"`
-		}{Server: problemPorted{Port: 8080}}
-
-		err := yamltest.FirstDocument(t, input).DecodeInto(t.Context(), &cfg)
-		require.EqualError(t, err, "1:10: $.timeout: expected integer, got string")
-		require.NotErrorIs(t, err, errPortRequired)
-	})
+	err := yamltest.FirstDocument(t, "timeout: soon\nserver: {name: a}\n").DecodeInto(t.Context(), &cfg)
+	require.EqualError(t, err, "1:10: $.timeout: expected integer, got string")
+	require.NotErrorIs(t, err, errPortRequired)
 }
 
 func TestDocument_Decode_Problems_UnmarshalerCalls(t *testing.T) {
