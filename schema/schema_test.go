@@ -1249,6 +1249,18 @@ const requestSchema = `{
 	"required": ["name"]
 }`
 
+var (
+	// A document that holds a request with a port of 0 under the key
+	// request.
+	requestDocument = stringtest.LinesLF(
+		"request:",
+		"  port: 0",
+	)
+
+	// A sentinel a caller wraps beside the error of a check.
+	errPlaceCheck = errors.New("check")
+)
+
 func TestSchema_ValidateValue(t *testing.T) {
 	t.Parallel()
 
@@ -1359,7 +1371,7 @@ func TestSchema_ValidateValue(t *testing.T) {
 	t.Run("the result reads the same once a document placed it", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, "request:\n  port: 0\n", niceyaml.WithName("app.yaml"))
+		doc := yamltest.FirstDocument(t, requestDocument, niceyaml.WithName("app.yaml"))
 		base := paths.Doc().Child("request")
 
 		err := v.ValidateValue(t.Context(), map[string]any{"port": 0, "name": "x"})
@@ -1386,7 +1398,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 
 	v := compileSchema(t, requestSchema)
 
-	doc := yamltest.FirstDocument(t, "request:\n  port: 0\n", niceyaml.WithName("app.yaml"))
+	doc := yamltest.FirstDocument(t, requestDocument, niceyaml.WithName("app.yaml"))
 	base := paths.Doc().Child("request")
 
 	// A port of 0 breaks the schema once, and a request with no name
@@ -1787,7 +1799,7 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		t.Parallel()
 
 		ports := compileSchema(t, `{"properties": {"ports": {"additionalProperties": {"minimum": 1}}}}`)
-		hex := yamltest.FirstDocument(t, "ports:\n  0x10: 0\n", niceyaml.WithName("app.yaml"))
+		hex := yamltest.FirstDocument(t, stringtest.LinesLF("ports:", "  0x10: 0"), niceyaml.WithName("app.yaml"))
 
 		data, err := hex.Decode[any](t.Context())
 		require.NoError(t, err)
@@ -1818,9 +1830,6 @@ func TestSchema_ValidateValue_Place(t *testing.T) {
 		require.EqualError(t, hex.Bind(found), "app.yaml:2:9: $.ports.0x10: 0 is less than 1")
 	})
 }
-
-// errPlaceCheck is a sentinel a caller wraps beside the error of a check.
-var errPlaceCheck = errors.New("check")
 
 // placeCheckError wraps the error of a check with a prefix, as a caller's
 // own error type does.
@@ -2077,7 +2086,10 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		binaryAliases := func(size, count int) string {
 			text := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0xab}, size))
 
-			return fmt.Sprintf("bin: &bin !!binary %s\nlist: %s\n", text, yamltest.FlowSequence("*bin", count))
+			return stringtest.LinesLF(
+				"bin: &bin !!binary "+text,
+				"list: "+yamltest.FlowSequence("*bin", count),
+			)
 		}
 
 		tcs := map[string]struct {
@@ -2107,8 +2119,10 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				// Each alias counts as a node of the document, so the 150
 				// aliases stay a small enough share of what a decode reads.
 				schema: `{"properties": {"matrix": {"items": {"required": ["os"]}}}}`,
-				input: "base: &b {os: linux, arch: amd64, go: stable, cgo: false}\nmatrix:\n" +
-					strings.Repeat("  - *b\n", 150),
+				input: stringtest.LinesLF(
+					"base: &b {os: linux, arch: amd64, go: stable, cgo: false}",
+					"matrix:",
+				) + strings.Repeat("  - *b\n", 150),
 			},
 			"anchor reused a few times": {
 				schema: `{
@@ -2209,6 +2223,13 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		// the levels, and the decoded value drops them.
 		lists := "k: &k a\n" + yamltest.AliasLevels(7) + "*k : small\n"
 
+		// The mapping under b spells the last level out as a key.
+		keyed := lists + stringtest.LinesLF(
+			"b:",
+			"  ? *l7",
+			"  : v",
+		)
+
 		// The sequence k lists 500 aliases to a scalar of 2000 bytes.
 		scalarAliases := stringtest.LinesLF(
 			"a: &a "+strings.Repeat("x", 2000),
@@ -2223,7 +2244,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 			excessive bool
 		}{
 			"alias bomb as mapping key": {
-				input:     lists + "b:\n  ? *l7\n  : v\n",
+				input:     keyed,
 				excessive: true,
 			},
 			"alias bomb as flow mapping key": {
@@ -2242,7 +2263,7 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				// A decode of a node that holds an alias reads the whole
 				// document to find the anchor.
 				path:      paths.Current().Child("c"),
-				input:     lists + "b:\n  ? *l7\n  : v\nc: [*k]\n",
+				input:     keyed + "c: [*k]\n",
 				excessive: true,
 			},
 			"alias to a small sequence as mapping key": {input: "s: &s [a, b]\n*s : v\n"},
@@ -2258,8 +2279,11 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				input: "x: &x [" + strings.Repeat("a, ", 10) + strings.Repeat("*x, ", 299) + "*x]\n",
 			},
 			"aliases to the anchor of a mapping inside it": {
-				input: "tree: &t\n  name: root\n  children:\n" +
-					strings.Repeat("    - {name: c, parent: *t}\n", 120),
+				input: stringtest.LinesLF(
+					"tree: &t",
+					"  name: root",
+					"  children:",
+				) + strings.Repeat("    - {name: c, parent: *t}\n", 120),
 			},
 			"aliases to an enclosing anchor inside a nested one": {
 				input: "a: &A {inner: &B " + yamltest.FlowSequence("*A", 300) + "}\n",
@@ -2290,7 +2314,11 @@ func TestSchema_AliasExpansion(t *testing.T) {
 		t.Run("nodes of one document", func(t *testing.T) {
 			t.Parallel()
 
-			bomb := yamltest.FirstDocument(t, lists+"b:\n  ? *l7\n  : v\nc: [*k]\nd: [*k]\ne: [x]\n")
+			bomb := yamltest.FirstDocument(t, keyed+stringtest.LinesLF(
+				"c: [*k]",
+				"d: [*k]",
+				"e: [x]",
+			))
 
 			// The 200 aliases in list repeat a sequence of 1000 numbers, so
 			// they make up more of list than the limit allows. The 2000
@@ -2421,8 +2449,14 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				path:  paths.Current().Child("a").Index(4),
 				input: yamltest.AliasLevels(4),
 			},
-			"merge key bomb":            {input: yamltest.MergeLevels(4)},
-			"alias bomb as mapping key": {input: yamltest.AliasLevels(4) + "b:\n  ? *l4\n  : v\n"},
+			"merge key bomb": {input: yamltest.MergeLevels(4)},
+			"alias bomb as mapping key": {
+				input: yamltest.AliasLevels(4) + stringtest.LinesLF(
+					"b:",
+					"  ? *l4",
+					"  : v",
+				),
+			},
 		}
 
 		for name, tc := range tcs {
@@ -2453,13 +2487,10 @@ func TestSchema_AliasExpansion(t *testing.T) {
 	t.Run("reference aliases", func(t *testing.T) {
 		t.Parallel()
 
-		var entries strings.Builder
-
-		for i := range 1000 {
-			fmt.Fprintf(&entries, "  k%d: v\n", i)
-		}
-
-		refs := niceyaml.WithReferences(niceyaml.NewSourceFromString("defaults: &defaults\n" + entries.String()))
+		// The anchored mapping of the reference document holds 1000 entries.
+		refs := niceyaml.WithReferences(niceyaml.NewSourceFromString(
+			"defaults: &defaults\n" + yamltest.GenerateLines(1000, "  k%d: v"),
+		))
 		v := compileSchema(t, `{"maxProperties": 5}`)
 
 		// The refusal carries no location, so each case names where the
@@ -2481,8 +2512,11 @@ func TestSchema_AliasExpansion(t *testing.T) {
 				want:  "app.yaml:1:1: $.items: excessive aliasing",
 			},
 			"aliases to an anchor on a tagged alias to a reference document": {
-				input: "local: &local !foo *defaults\nitems: " + yamltest.FlowSequence("*local", 300) + "\n",
-				want:  "app.yaml: excessive aliasing",
+				input: stringtest.LinesLF(
+					"local: &local !foo *defaults",
+					"items: "+yamltest.FlowSequence("*local", 300),
+				),
+				want: "app.yaml: excessive aliasing",
 			},
 			"a few aliases to a mapping of a reference document": {
 				input: "items: " + yamltest.FlowSequence("*defaults", 2) + "\n",
@@ -2726,7 +2760,7 @@ func TestSchema_PathAnchors(t *testing.T) {
 	whole := compileSchema(t, `{"properties": {"server": {"properties": {"port": {"minimum": 1}}}}}`)
 	server := compileSchema(t, `{"properties": {"port": {"minimum": 1}}}`)
 
-	doc := yamltest.FirstDocument(t, "server:\n  port: 0\n")
+	doc := yamltest.FirstDocument(t, stringtest.LinesLF("server:", "  port: 0"))
 	serverNode := yamltest.At(t, doc, paths.Doc().Child("server"))
 
 	// A binding reports the `$` path from the root of the document.
@@ -3273,8 +3307,11 @@ func TestSchema_SourcePath(t *testing.T) {
 		},
 		"respelled key a merge key brings in": {
 			schema: integersInUser,
-			input:  "user:\n  <<: {0x10: x}\n",
-			want:   `2:14: $.user.0x10: expected "integer", got "string"`,
+			input: stringtest.LinesLF(
+				"user:",
+				"  <<: {0x10: x}",
+			),
+			want: `2:14: $.user.0x10: expected "integer", got "string"`,
 		},
 		"later key shadows a merged member": {
 			// The decoder sets 0x10: x after the merge, so the member 16
@@ -3393,8 +3430,11 @@ func TestSchema_SourcePath(t *testing.T) {
 					}
 				}
 			}`,
-			input: "spec:\n  0x10: hello\n",
-			want:  `2:9: $.spec.0x10: expected "integer", got "string"`,
+			input: stringtest.LinesLF(
+				"spec:",
+				"  0x10: hello",
+			),
+			want: `2:9: $.spec.0x10: expected "integer", got "string"`,
 		},
 		"respelled key inside a sequence": {
 			schema: `{
