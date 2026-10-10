@@ -51,7 +51,7 @@ func BenchmarkLinesRunes(b *testing.B) {
 		// One short range per line, as a search yields a match on each.
 		ranges := make([]position.Range, 0, lines.Len())
 		for i := range lines.Len() {
-			ranges = append(ranges, position.NewRange(position.New(i, 0), position.New(i, 3)))
+			ranges = append(ranges, lineRange(i, 0, 3))
 		}
 
 		b.Run(sz.name, func(b *testing.B) {

@@ -91,7 +91,7 @@ func TestNewView(t *testing.T) {
 		assert.Empty(t, view.String())
 
 		// Range-taking methods are safe on an empty view.
-		view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
+		view.AddOverlay("test1", lineRange(0, 0, 5))
 
 		assert.Equal(t, 0, view.Slice(position.NewSpan(0, 5)).Count())
 	})
@@ -539,10 +539,7 @@ func TestView_AddOverlay(t *testing.T) {
 		require.Len(t, view.Overlays(1), 1)
 
 		// A range entirely outside the view is a no-op.
-		view.AddOverlay("test2", position.NewRange(
-			position.New(7, 0),
-			position.New(7, 3),
-		))
+		view.AddOverlay("test2", lineRange(7, 0, 3))
 
 		assert.Len(t, view.Overlays(0), 1)
 		assert.Len(t, view.Overlays(1), 1)
@@ -552,10 +549,7 @@ func TestView_AddOverlay(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "key: value\n", 1)
-		view.AddOverlay("test1", position.NewRange(
-			position.New(0, 0),
-			position.New(0, 5),
-		))
+		view.AddOverlay("test1", lineRange(0, 0, 5))
 
 		require.Len(t, view.Overlays(0), 1)
 		assert.Equal(t, position.NewSpan(0, 5), view.Overlays(0)[0].Cols)
@@ -567,10 +561,7 @@ func TestView_AddOverlay(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "key: value\n", 1)
-		view.AddOverlay("test1", position.NewRange(
-			position.New(0, -3),
-			position.New(0, 99),
-		))
+		view.AddOverlay("test1", lineRange(0, -3, 99))
 
 		require.Len(t, view.Overlays(0), 1)
 		assert.Equal(t, position.NewSpan(0, len("key: value")), view.Overlays(0)[0].Cols)
@@ -583,8 +574,8 @@ func TestView_AddOverlay(t *testing.T) {
 
 		// Empty at a column inside the line, and a range starting past the end.
 		view.AddOverlay("test1",
-			position.NewRange(position.New(0, 3), position.New(0, 3)),
-			position.NewRange(position.New(0, 50), position.New(0, 60)),
+			lineRange(0, 3, 3),
+			lineRange(0, 50, 60),
 		)
 
 		assert.Empty(t, view.Overlays(0))
@@ -632,8 +623,8 @@ func TestView_AddOverlay(t *testing.T) {
 		view := newTestView(t, input, 2)
 
 		view.AddOverlay("test1",
-			position.NewRange(position.New(0, 0), position.New(0, 4)),
-			position.NewRange(position.New(1, 0), position.New(1, 4)),
+			lineRange(0, 0, 4),
+			lineRange(1, 0, 4),
 		)
 
 		require.Len(t, view.Overlays(0), 1)
@@ -663,7 +654,7 @@ func TestView_AddOverlay(t *testing.T) {
 		view := line.NewView(line.Lines{})
 
 		// AddOverlay on an empty view does not panic.
-		view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 5)))
+		view.AddOverlay("test1", lineRange(0, 0, 5))
 
 		assert.Equal(t, 0, view.Count())
 	})
@@ -694,7 +685,7 @@ func TestView_BlendOverlay(t *testing.T) {
 		view := newTestView(t, "key: value\n", 1)
 		view.BlendOverlay("test1",
 			position.NewRange(position.New(-1, -5), position.New(9, 99)),
-			position.NewRange(position.New(0, 50), position.New(0, 60)),
+			lineRange(0, 50, 60),
 		)
 
 		require.Len(t, view.Overlays(0), 1)
@@ -705,8 +696,8 @@ func TestView_BlendOverlay(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "key: value\n", 1)
-		view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 3)))
-		view.BlendOverlay("test2", position.NewRange(position.New(0, 0), position.New(0, 3)))
+		view.AddOverlay("test1", lineRange(0, 0, 3))
+		view.BlendOverlay("test2", lineRange(0, 0, 3))
 
 		require.Len(t, view.Overlays(0), 2)
 		assert.False(t, view.Overlays(0)[0].Blend)
@@ -806,10 +797,7 @@ func TestView_Clone(t *testing.T) {
 		view := newTestView(t, input, 3)
 		clone := view.Clone()
 
-		clone.AddOverlay(kind.GenericHighlight, position.NewRange(
-			position.New(0, 0),
-			position.New(0, 3),
-		))
+		clone.AddOverlay(kind.GenericHighlight, lineRange(0, 0, 3))
 		clone.Annotate(1, line.Annotation{Content: "note", Placement: line.Below})
 		clone.SetFlag(2, line.FlagInserted)
 
@@ -817,10 +805,7 @@ func TestView_Clone(t *testing.T) {
 		assert.Empty(t, view.Annotations(1))
 		assert.Equal(t, line.FlagDefault, view.Flag(2))
 
-		view.AddOverlay(kind.GenericError, position.NewRange(
-			position.New(1, 0),
-			position.New(1, 3),
-		))
+		view.AddOverlay(kind.GenericError, lineRange(1, 0, 3))
 		view.Annotate(0, line.Annotation{Content: "other", Placement: line.Above})
 		view.SetFlag(0, line.FlagDeleted)
 
@@ -1164,7 +1149,7 @@ func TestView_Slice(t *testing.T) {
 
 		// Decorating before or after slicing renders the same, since a
 		// slice takes ranges and indices in the coordinates of its content.
-		rng := position.NewRange(position.New(2, 3), position.New(2, 4))
+		rng := lineRange(2, 3, 4)
 		ann := line.Annotation{Content: "here", Placement: line.Below, Col: 3}
 
 		before := newTestView(t, input, 4)
@@ -1202,7 +1187,7 @@ func TestView_Slice(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, input, 4).Slice(position.NewSpan(0, 2))
-		view.AddOverlay("test", position.NewRange(position.New(3, 0), position.New(3, 4)))
+		view.AddOverlay("test", lineRange(3, 0, 4))
 		view.Annotate(3, line.Annotation{Content: "hidden", Placement: line.Below})
 
 		assert.Len(t, view.Overlays(3), 1)
@@ -1435,8 +1420,8 @@ func TestView_String(t *testing.T) {
 
 		view := newTestView(t, "key: value\n", 1)
 		view.SetFlag(0, line.FlagDeleted)
-		view.AddOverlay("test1", position.NewRange(position.New(0, 0), position.New(0, 3)))
-		view.BlendOverlay("test2", position.NewRange(position.New(0, 5), position.New(0, 7)))
+		view.AddOverlay("test1", lineRange(0, 0, 3))
+		view.BlendOverlay("test2", lineRange(0, 5, 7))
 
 		assert.Equal(t, "   1 | key: value\n     | ^^^  ^^", view.String())
 	})
@@ -1445,7 +1430,7 @@ func TestView_String(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "key: value\n", 1)
-		view.AddOverlay("test1", position.NewRange(position.New(0, 5), position.New(0, 10)))
+		view.AddOverlay("test1", lineRange(0, 5, 10))
 		view.Annotate(0, line.Annotation{Content: "bad value", Placement: line.Below, Col: 5})
 
 		assert.Equal(t, "   1 | key: value\n     |      ^^^^^ bad value", view.String())
@@ -1504,7 +1489,7 @@ func TestView_String(t *testing.T) {
 		// Each CJK rune renders two cells wide, so the columns before the
 		// marked ones are worth two carets each.
 		view := newTestView(t, "名前: value\n", 1)
-		view.AddOverlay("test1", position.NewRange(position.New(0, 4), position.New(0, 9)))
+		view.AddOverlay("test1", lineRange(0, 4, 9))
 		view.Annotate(0, line.Annotation{Content: "bad", Placement: line.Below, Col: 4})
 
 		assert.Equal(t, "   1 | 名前: value\n     |       ^^^^^ bad", view.String())
@@ -1517,7 +1502,7 @@ func TestView_String(t *testing.T) {
 		// accent's column lands under the e, and an annotation at that
 		// column starts there too.
 		view := newTestView(t, "k: e\u0301x\n", 1)
-		view.AddOverlay("test1", position.NewRange(position.New(0, 4), position.New(0, 5)))
+		view.AddOverlay("test1", lineRange(0, 4, 5))
 		view.Annotate(0, line.Annotation{Content: "here", Placement: line.Below, Col: 4})
 
 		assert.Equal(t, "   1 | k: e\u0301x\n     |    ^ here", view.String())
@@ -1560,7 +1545,7 @@ func TestView_String(t *testing.T) {
 				t.Parallel()
 
 				view := newTestView(t, tc.content+"\n", 1)
-				view.AddOverlay("test1", position.NewRange(position.New(0, tc.col), position.New(0, tc.col+1)))
+				view.AddOverlay("test1", lineRange(0, tc.col, tc.col+1))
 				view.Annotate(0,
 					line.Annotation{Content: "above", Placement: line.Above, Col: tc.col},
 					line.Annotation{Content: "below", Placement: line.Below, Col: tc.col},
@@ -1577,7 +1562,7 @@ func TestView_String(t *testing.T) {
 		// The joiner and the second emoji render as part of the cluster
 		// the first emoji starts, so a mark on either lands under it.
 		view := newTestView(t, "a: \U0001F468\u200d\U0001F469 x\n", 1)
-		view.AddOverlay("test1", position.NewRange(position.New(0, 5), position.New(0, 6)))
+		view.AddOverlay("test1", lineRange(0, 5, 6))
 
 		assert.Equal(t, stringtest.JoinLF(
 			"   1 | a: \U0001F468\u200d\U0001F469 x",
@@ -1589,7 +1574,7 @@ func TestView_String(t *testing.T) {
 		t.Parallel()
 
 		view := newTestView(t, "a: \"x\ty\x1b\"\n", 1)
-		view.AddOverlay("test1", position.NewRange(position.New(0, 3), position.New(0, 9)))
+		view.AddOverlay("test1", lineRange(0, 3, 9))
 		view.Annotate(0, line.Annotation{Content: "tab\x1bhere", Placement: line.Above})
 
 		assert.Equal(t, stringtest.JoinLF(
@@ -1868,7 +1853,7 @@ func TestView_Hunks(t *testing.T) {
 
 		view := newTestView(t, input, 8)
 		view.SetFlag(0, line.FlagInserted)
-		view.AddOverlay("test", position.NewRange(position.New(7, 0), position.New(7, 1)))
+		view.AddOverlay("test", lineRange(7, 0, 1))
 		view.Annotate(4, line.Annotation{Content: "here", Placement: line.Below})
 
 		got := view.Hunks(1)
@@ -2399,7 +2384,7 @@ func TestView_Clip_KeepsView(t *testing.T) {
 
 		view := newTestView(t, input, 4)
 		view.SetFlag(1, line.FlagInserted)
-		view.AddOverlay(kind.GenericError, position.NewRange(position.New(1, 30), position.New(1, 32)))
+		view.AddOverlay(kind.GenericError, lineRange(1, 30, 32))
 		view.Annotate(1, line.Annotation{Content: "bad", Placement: line.Below, Col: 30})
 
 		return view

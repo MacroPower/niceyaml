@@ -1414,7 +1414,7 @@ func TestEmptyAndZeroValues(t *testing.T) {
 			assert.Nil(t, lines.Tokens())
 			assert.Empty(t, lines.Content())
 			assert.Empty(t, lines.String())
-			assert.Nil(t, lines.SliceLines(position.NewRange(position.New(0, 0), position.New(0, 3))))
+			assert.Nil(t, lines.SliceLines(lineRange(0, 0, 3)))
 
 			for range lines.All() {
 				t.Fatal("expected no lines")
@@ -1709,7 +1709,7 @@ func TestLines_TokenAt(t *testing.T) {
 					require.NotNil(t, tk)
 					assert.Equal(t, "other", tk.Value)
 					assert.Equal(t,
-						position.Ranges{position.NewRange(position.New(tc.line, 2), position.New(tc.line, 7))},
+						position.Ranges{lineRange(tc.line, 2, 7)},
 						lines.ContentRanges(tk))
 				}
 			})
@@ -2237,28 +2237,19 @@ func TestLines_View(t *testing.T) {
 			want   []position.Position
 		}{
 			"overlapping": {
-				ranges: []position.Range{
-					position.NewRange(position.New(0, 0), position.New(0, 3)),
-					position.NewRange(position.New(0, 1), position.New(0, 4)),
-				},
+				ranges: []position.Range{lineRange(0, 0, 3), lineRange(0, 1, 4)},
 				want: []position.Position{
 					position.New(0, 0), position.New(0, 1), position.New(0, 2), position.New(0, 3),
 				},
 			},
 			"reverse line order": {
-				ranges: []position.Range{
-					position.NewRange(position.New(2, 0), position.New(2, 2)),
-					position.NewRange(position.New(0, 0), position.New(0, 2)),
-				},
+				ranges: []position.Range{lineRange(2, 0, 2), lineRange(0, 0, 2)},
 				want: []position.Position{
 					position.New(0, 0), position.New(0, 1), position.New(2, 0), position.New(2, 1),
 				},
 			},
 			"reverse column order on one line": {
-				ranges: []position.Range{
-					position.NewRange(position.New(1, 3), position.New(1, 5)),
-					position.NewRange(position.New(1, 0), position.New(1, 2)),
-				},
+				ranges: []position.Range{lineRange(1, 3, 5), lineRange(1, 0, 2)},
 				want: []position.Position{
 					position.New(1, 0), position.New(1, 1), position.New(1, 3), position.New(1, 4),
 				},
@@ -2293,15 +2284,13 @@ func TestLines_View(t *testing.T) {
 				},
 			},
 			"negative start column": {
-				ranges: []position.Range{
-					position.NewRange(position.New(1, -2), position.New(1, 1)),
-				},
-				want: []position.Position{position.New(1, 0)},
+				ranges: []position.Range{lineRange(1, -2, 1)},
+				want:   []position.Position{position.New(1, 0)},
 			},
 			"inverted": {
 				ranges: []position.Range{
 					position.NewRange(position.New(1, 3), position.New(0, 0)),
-					position.NewRange(position.New(2, 3), position.New(2, 1)),
+					lineRange(2, 3, 1),
 				},
 			},
 		}
@@ -2465,52 +2454,35 @@ func TestLines_SliceLines(t *testing.T) {
 		want  position.Ranges
 	}{
 		"single line range": {
-			input: position.NewRange(position.New(1, 1), position.New(1, 3)),
-			want: position.Ranges{
-				position.NewRange(position.New(1, 1), position.New(1, 3)),
-			},
+			input: lineRange(1, 1, 3),
+			want:  position.Ranges{lineRange(1, 1, 3)},
 		},
 		"every line but the last ends at its width": {
 			input: position.NewRange(position.New(0, 3), position.New(2, 3)),
-			want: position.Ranges{
-				position.NewRange(position.New(0, 3), position.New(0, 4)),
-				position.NewRange(position.New(1, 0), position.New(1, 6)),
-				position.NewRange(position.New(2, 0), position.New(2, 3)),
-			},
+			want:  position.Ranges{lineRange(0, 3, 4), lineRange(1, 0, 6), lineRange(2, 0, 3)},
 		},
 		"end at column 0 stops on the line before": {
 			input: position.NewRange(position.New(0, 1), position.New(2, 0)),
-			want: position.Ranges{
-				position.NewRange(position.New(0, 1), position.New(0, 4)),
-				position.NewRange(position.New(1, 0), position.New(1, 6)),
-			},
+			want:  position.Ranges{lineRange(0, 1, 4), lineRange(1, 0, 6)},
 		},
 		"columns clamp to the line": {
-			input: position.NewRange(position.New(1, -2), position.New(1, 100)),
-			want: position.Ranges{
-				position.NewRange(position.New(1, 0), position.New(1, 6)),
-			},
+			input: lineRange(1, -2, 100),
+			want:  position.Ranges{lineRange(1, 0, 6)},
 		},
 		"lines outside the collection are left out": {
 			input: position.NewRange(position.New(-1, 0), position.New(5, 2)),
-			want: position.Ranges{
-				position.NewRange(position.New(0, 0), position.New(0, 4)),
-				position.NewRange(position.New(1, 0), position.New(1, 6)),
-				position.NewRange(position.New(2, 0), position.New(2, 8)),
-			},
+			want:  position.Ranges{lineRange(0, 0, 4), lineRange(1, 0, 6), lineRange(2, 0, 8)},
 		},
 		"start past the width covers nothing on that line": {
 			input: position.NewRange(position.New(0, 9), position.New(1, 2)),
-			want: position.Ranges{
-				position.NewRange(position.New(1, 0), position.New(1, 2)),
-			},
+			want:  position.Ranges{lineRange(1, 0, 2)},
 		},
 		"empty range": {
-			input: position.NewRange(position.New(1, 3), position.New(1, 3)),
+			input: lineRange(1, 3, 3),
 			want:  nil,
 		},
 		"inverted columns on one line": {
-			input: position.NewRange(position.New(1, 3), position.New(1, 1)),
+			input: lineRange(1, 3, 1),
 			want:  nil,
 		},
 		"inverted lines": {
@@ -2518,7 +2490,7 @@ func TestLines_SliceLines(t *testing.T) {
 			want:  nil,
 		},
 		"inverted columns at the MinInt line": {
-			input: position.NewRange(position.New(math.MinInt, 5), position.New(math.MinInt, 2)),
+			input: lineRange(math.MinInt, 5, 2),
 			want:  nil,
 		},
 	}
