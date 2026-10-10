@@ -1762,52 +1762,6 @@ func TestPrinter_PrintTokenDiff(t *testing.T) {
 	}
 }
 
-func TestPrinter_PrintTokenDiff_Ordering(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		before string
-		after  string
-		want   []string
-	}{
-		"deleted lines appear inline": {
-			before: stringtest.LinesLF(
-				"a: 1",
-				"b: 2",
-				"c: 3",
-			),
-			after: stringtest.LinesLF(
-				"a: 1",
-				"c: 3",
-			),
-			want: []string{" ", "-", " "},
-		},
-		"modifications show delete before insert": {
-			before: "key: old\n",
-			after:  "key: new\n",
-			want:   []string{"-", "+"},
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			p := testPrinterWithGutter(printer.DiffGutter)
-			got := printDiff(p, tc.before, tc.after)
-
-			lines := strings.Split(got, "\n")
-
-			require.Len(t, lines, len(tc.want))
-
-			for i, prefix := range tc.want {
-				assert.True(t, strings.HasPrefix(lines[i], prefix),
-					"line %d should have prefix %q, got %q", i, prefix, lines[i])
-			}
-		})
-	}
-}
-
 func TestPrinter_WordWrap(t *testing.T) {
 	t.Parallel()
 
@@ -2745,7 +2699,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 	}
 }
 
-func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
+func TestPrinter_PrintTokenDiff_Gutter(t *testing.T) {
 	t.Parallel()
 
 	// The helper creates a gutter with custom prefixes that declares the
@@ -2800,6 +2754,32 @@ func TestPrinter_PrintTokenDiff_CustomGutter(t *testing.T) {
 			want: stringtest.JoinLF(
 				"a: 1",
 				"a: 2",
+			),
+		},
+		"diff gutter keeps a deleted line inline": {
+			gutterFunc: printer.DiffGutter,
+			before: stringtest.LinesLF(
+				"a: 1",
+				"b: 2",
+				"c: 3",
+			),
+			after: stringtest.LinesLF(
+				"a: 1",
+				"c: 3",
+			),
+			want: stringtest.JoinLF(
+				" a: 1",
+				"-b: 2",
+				" c: 3",
+			),
+		},
+		"diff gutter shows the delete before the insert": {
+			gutterFunc: printer.DiffGutter,
+			before:     "key: old\n",
+			after:      "key: new\n",
+			want: stringtest.JoinLF(
+				"-key: old",
+				"+key: new",
 			),
 		},
 		"multi-character prefixes with context": {
