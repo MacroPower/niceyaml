@@ -41,6 +41,12 @@ func formattedExcerpt(t *testing.T, err error, opts ...niceyaml.ExcerptOption) s
 	return stringtest.JoinLF(rows...)
 }
 
+// errAt returns an error that reports msg at the value under keys, a
+// path from the node the error binds to.
+func errAt(msg string, keys ...string) error {
+	return niceyaml.NewError(msg, niceyaml.AtPath(paths.Current().Child(keys...)))
+}
+
 // itemNames returns n names, from "item00" on.
 func itemNames(n int) []string {
 	names := make([]string, n)
@@ -218,7 +224,7 @@ func TestPrinter_PrintError_ExcerptOptions(t *testing.T) {
 	// The marked line sits in the middle of a source with more lines on
 	// each side than the default shows, so the count changes the excerpt.
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nh: 8\ni: 9\n")
-	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("e"))))
+	bound := yamltest.Bind(t, source, errAt("bad", "e"))
 
 	tcs := map[string]struct {
 		opts []niceyaml.ExcerptOption

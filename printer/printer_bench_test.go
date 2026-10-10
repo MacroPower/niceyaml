@@ -11,7 +11,6 @@ import (
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/line"
-	"go.jacobcolvin.com/niceyaml/paths"
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
@@ -305,7 +304,7 @@ func BenchmarkPrinterPrintError_LongWrappedValue(b *testing.B) {
 	// rows, and the caret run under it takes a row below each one.
 	for _, n := range []int{8000, 32000} {
 		source := niceyaml.NewSourceFromString("data: " + strings.Repeat("QUJD", n/4) + "\n")
-		err := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("data"))))
+		err := source.Bind(errAt("bad", "data"))
 
 		b.Run(fmt.Sprintf("chars_%d", n), func(b *testing.B) {
 			p := printer.New(printer.WithWrapWidth(80))
