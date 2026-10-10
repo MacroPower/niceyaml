@@ -130,13 +130,7 @@ func BenchmarkPrinterPrint_OverlaysDensity(b *testing.B) {
 
 	// AddOverlay drops a range that starts past the end of its line, so
 	// every line must be wide enough to hold 20 overlays at a stride of 5.
-	var sb strings.Builder
-
-	for i := range 200 {
-		fmt.Fprintf(&sb, "key_%d: %s\n", i, strings.Repeat("v", 100))
-	}
-
-	yaml := sb.String()
+	yaml := yamltest.GenerateLines(200, "key_%d: "+strings.Repeat("v", 100))
 
 	for _, d := range densities {
 		b.Run(d.name, func(b *testing.B) {
@@ -229,13 +223,7 @@ func BenchmarkPrinterWithGutter(b *testing.B) {
 }
 
 func BenchmarkPrinterWithWrapping(b *testing.B) {
-	var sb strings.Builder
-
-	for i := range 200 {
-		fmt.Fprintf(&sb, "long_key_%d: \"%s\"\n", i, strings.Repeat("x", 200))
-	}
-
-	yaml := sb.String()
+	yaml := yamltest.GenerateLines(200, `long_key_%d: "`+strings.Repeat("x", 200)+`"`)
 	source := niceyaml.NewSourceFromString(yaml)
 
 	widths := []struct {
