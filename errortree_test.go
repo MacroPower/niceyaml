@@ -59,6 +59,12 @@ func textForest(children ...niceyaml.ErrorTree) niceyaml.ErrorTree {
 	return niceyaml.ErrorTree{Children: children}
 }
 
+// errorTreeSource returns a new Source named f.yaml that holds the key a
+// on its first line and the key b on its second.
+func errorTreeSource() *niceyaml.Source {
+	return niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+}
+
 // badKeyError returns a function that builds an error with the message
 // "bad <key>" at the path of key under the value in scope. Each call
 // builds an error of its own.
@@ -232,7 +238,7 @@ func TestErrorTree_New_DeepMultiWrap(t *testing.T) {
 
 	const n = 20
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 
 	tcs := map[string]struct {
 		build func(calls *atomic.Int64) error
@@ -301,7 +307,7 @@ func TestErrorTree_New_DeepRebind(t *testing.T) {
 
 	const n = 20
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 
 	tcs := map[string]struct {
 		build func(calls *atomic.Int64) error
@@ -464,7 +470,7 @@ func TestErrorTree_New_MultiErrorCalls(t *testing.T) {
 func TestErrorTree_New(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 	other := niceyaml.NewSourceFromString("c: 3\n", niceyaml.WithName("g.yaml"))
 	wide := niceyaml.NewSourceFromString("a: hello world\nb: 2\n", niceyaml.WithName("f.yaml"))
 
@@ -1085,7 +1091,7 @@ func TestErrorTree_New_ExcerptsOff(t *testing.T) {
 func TestErrorTree_Bound(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 
 	badA, badB := badKeyError("a"), badKeyError("b")
 
@@ -1313,13 +1319,10 @@ func TestErrorTree_All(t *testing.T) {
 func TestErrorTree_All_PrintedOrder(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 
 	err := errors.Join(
-		yamltest.Bind(t, source, niceyaml.NewSummary("2 problems",
-			niceyaml.NewError("bad b", niceyaml.AtPath(paths.Current().Child("b"))),
-			niceyaml.NewError("bad a", niceyaml.AtPath(paths.Current().Child("a"))),
-		)),
+		yamltest.Bind(t, source, niceyaml.NewSummary("2 problems", badKeyError("b")(), badKeyError("a")())),
 		errors.New("read g.yaml: no such file"),
 	)
 
@@ -1383,7 +1386,7 @@ func problemRows(t niceyaml.ErrorTree) []string {
 func TestErrorTree_Problems(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 
 	badA, badB := badKeyError("a"), badKeyError("b")
 
@@ -1778,7 +1781,7 @@ func TestErrorTree_Problems_Lines(t *testing.T) {
 func TestErrorTree_New_Detail(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 
 	build := func() error {
 		return niceyaml.NewSummary("2 problems",
@@ -1910,7 +1913,7 @@ func TestErrorTree_Problems_Reasons(t *testing.T) {
 func TestErrorTree_Problems_Err(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 	a := paths.Current().Child("a")
 	b := paths.Current().Child("b")
 
@@ -2201,7 +2204,7 @@ func TestErrorTree_Problems_Stops(t *testing.T) {
 func TestErrorTree_IsInvalid(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 
 	badA, badB := badKeyError("a"), badKeyError("b")
 
@@ -2302,7 +2305,7 @@ func TestErrorTree_IsInvalid(t *testing.T) {
 func TestErrorTree_IsInvalid_Nodes(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 
 	badA, badB := badKeyError("a"), badKeyError("b")
 
@@ -2473,7 +2476,7 @@ func TestErrorTree_IsInvalid_HandBuilt(t *testing.T) {
 func TestErrorTree_MessageAndPath(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 
 	pathA := paths.Current().Child("a")
 	pathB := paths.Current().Child("b")
@@ -2695,7 +2698,7 @@ func TestErrorTree_Accessors(t *testing.T) {
 func TestProblems(t *testing.T) {
 	t.Parallel()
 
-	source := niceyaml.NewSourceFromString("a: 1\nb: 2\n", niceyaml.WithName("f.yaml"))
+	source := errorTreeSource()
 
 	badA := niceyaml.NewError("bad a", niceyaml.AtPath(paths.Doc().Child("a")))
 	badB := niceyaml.NewError("bad b", niceyaml.AtPath(paths.Doc().Child("b")),
