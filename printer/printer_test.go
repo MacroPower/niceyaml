@@ -4037,9 +4037,8 @@ func TestPrinter_BlendStyles(t *testing.T) {
 
 	// The overlayRange type holds an overlay kind and its range.
 	type overlayRange struct {
-		kind  kind.Kind
-		start position.Position
-		end   position.Position
+		kind kind.Kind
+		rng  position.Range
 	}
 
 	// Overlay kinds, each named for the tag it wraps its text in.
@@ -4068,14 +4067,14 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		"single range on value": {
 			input: "key: value",
 			ranges: []overlayRange{
-				{kindHL, position.New(0, 5), position.New(0, 10)},
+				{kindHL, yamltest.LineRange(0, 5, 10)},
 			},
 			want: "key: <hl>value</hl>",
 		},
 		"single range on key": {
 			input: "key: value",
 			ranges: []overlayRange{
-				{kindHL, position.New(0, 0), position.New(0, 3)},
+				{kindHL, yamltest.LineRange(0, 0, 3)},
 			},
 			want: "<hl>key</hl>: value",
 		},
@@ -4083,23 +4082,23 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			// Each token renders on its own, so transforms apply per-token.
 			input: "key: value",
 			ranges: []overlayRange{
-				{kindAll, position.New(0, 0), position.New(0, 10)},
+				{kindAll, yamltest.LineRange(0, 0, 10)},
 			},
 			want: "<all>key</all><all>:</all><all> </all><all>value</all>",
 		},
 		"non-overlapping ranges": {
 			input: "key: value",
 			ranges: []overlayRange{
-				{kindA, position.New(0, 0), position.New(0, 3)},
-				{kindB, position.New(0, 5), position.New(0, 10)},
+				{kindA, yamltest.LineRange(0, 0, 3)},
+				{kindB, yamltest.LineRange(0, 5, 10)},
 			},
 			want: "<a>key</a>: <b>value</b>",
 		},
 		"adjacent ranges": {
 			input: "key: value",
 			ranges: []overlayRange{
-				{kindA, position.New(0, 0), position.New(0, 3)},
-				{kindB, position.New(0, 3), position.New(0, 4)},
+				{kindA, yamltest.LineRange(0, 0, 3)},
+				{kindB, yamltest.LineRange(0, 3, 4)},
 			},
 			want: "<a>key</a><b>:</b> value",
 		},
@@ -4109,8 +4108,8 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			// Each token renders on its own.
 			input: "key: value",
 			ranges: []overlayRange{
-				{kindA, position.New(0, 0), position.New(0, 5)},
-				{kindB, position.New(0, 2), position.New(0, 7)},
+				{kindA, yamltest.LineRange(0, 0, 5)},
+				{kindB, yamltest.LineRange(0, 2, 7)},
 			},
 			// Token "key" [0,3): positions 0-1 only <a>, position 2 both <b><a>
 			// Token ":" [3,4): both <b><a>
@@ -4123,9 +4122,9 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			// Each token renders on its own with overlapping transforms.
 			input: "key: value",
 			ranges: []overlayRange{
-				{kindA, position.New(0, 0), position.New(0, 6)},
-				{kindB, position.New(0, 2), position.New(0, 8)},
-				{kindC, position.New(0, 4), position.New(0, 10)},
+				{kindA, yamltest.LineRange(0, 0, 6)},
+				{kindB, yamltest.LineRange(0, 2, 8)},
+				{kindC, yamltest.LineRange(0, 4, 10)},
 			},
 			// Token "key" [0,3): 0-1 <a>, 2 <b><a>
 			// Token ":" [3,4): <b><a>
@@ -4137,8 +4136,8 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			// "abcdef" is a single token that the printer styles character-by-character.
 			input: "abcdef",
 			ranges: []overlayRange{
-				{kindX, position.New(0, 1), position.New(0, 4)},
-				{kindY, position.New(0, 3), position.New(0, 5)},
+				{kindX, yamltest.LineRange(0, 1, 4)},
+				{kindY, yamltest.LineRange(0, 3, 5)},
 			},
 			// Position 0: no style
 			// Positions 1-2: only <x>
@@ -4150,15 +4149,15 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		"multi-line with ranges on each line": {
 			input: stringtest.JoinLF("a: 1", "b: 2"),
 			ranges: []overlayRange{
-				{kindX, position.New(0, 0), position.New(0, 1)},
-				{kindY, position.New(1, 0), position.New(1, 1)},
+				{kindX, yamltest.LineRange(0, 0, 1)},
+				{kindY, yamltest.LineRange(1, 0, 1)},
 			},
 			want: stringtest.JoinLF("<x>a</x>: 1", "<y>b</y>: 2"),
 		},
 		"range spanning multiple lines": {
 			input: stringtest.JoinLF("a: 1", "b: 2"),
 			ranges: []overlayRange{
-				{kindSpan, position.New(0, 3), position.New(1, 1)},
+				{kindSpan, position.NewRange(position.New(0, 3), position.New(1, 1))},
 			},
 			// Range spans from line 0 col 3 to line 1 col 1.
 			want: stringtest.JoinLF("a: <span>1</span>", "<span>b</span>: 2"),
@@ -4174,7 +4173,7 @@ func TestPrinter_BlendStyles(t *testing.T) {
 
 			view := source.View()
 			for _, or := range tc.ranges {
-				view.BlendOverlay(or.kind, position.NewRange(or.start, or.end))
+				view.BlendOverlay(or.kind, or.rng)
 			}
 
 			got := p.Print(view)
@@ -4191,8 +4190,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 
 	type overlayDef struct {
 		style lipgloss.Style
-		start position.Position
-		end   position.Position
+		rng   position.Range
 	}
 
 	// Overlay kinds for color blending tests.
@@ -4210,15 +4208,15 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			// Where the two ranges overlap, the printer blends the colors via LAB.
 			input: "key: value",
 			overlays: []overlayDef{
-				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), position.New(0, 0), position.New(0, 5)},
-				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), position.New(0, 3), position.New(0, 10)},
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), yamltest.LineRange(0, 0, 5)},
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), yamltest.LineRange(0, 3, 10)},
 			},
 		},
 		"BackgroundBlend": {
 			input: "key: value",
 			overlays: []overlayDef{
-				{lipgloss.NewStyle().Background(lipgloss.Color("#00FF00")), position.New(0, 0), position.New(0, 5)},
-				{lipgloss.NewStyle().Background(lipgloss.Color("#FF00FF")), position.New(0, 3), position.New(0, 10)},
+				{lipgloss.NewStyle().Background(lipgloss.Color("#00FF00")), yamltest.LineRange(0, 0, 5)},
+				{lipgloss.NewStyle().Background(lipgloss.Color("#FF00FF")), yamltest.LineRange(0, 3, 10)},
 			},
 		},
 		"FirstColorOnly": {
@@ -4226,33 +4224,33 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			// color directly.
 			input: "key: value",
 			overlays: []overlayDef{
-				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), position.New(0, 0), position.New(0, 5)},
-				{lipgloss.NewStyle(), position.New(0, 3), position.New(0, 10)},
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), yamltest.LineRange(0, 0, 5)},
+				{lipgloss.NewStyle(), yamltest.LineRange(0, 3, 10)},
 			},
 		},
 		"SecondColorOnly": {
 			// The first style has NoColor, so the printer uses the second color.
 			input: "key: value",
 			overlays: []overlayDef{
-				{lipgloss.NewStyle(), position.New(0, 0), position.New(0, 5)},
-				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), position.New(0, 3), position.New(0, 10)},
+				{lipgloss.NewStyle(), yamltest.LineRange(0, 0, 5)},
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), yamltest.LineRange(0, 3, 10)},
 			},
 		},
 		"BothNoColor": {
 			// Both styles have NoColor, so the blend yields nil and applies no color.
 			input: "key: value",
 			overlays: []overlayDef{
-				{lipgloss.NewStyle(), position.New(0, 0), position.New(0, 5)},
-				{lipgloss.NewStyle(), position.New(0, 3), position.New(0, 10)},
+				{lipgloss.NewStyle(), yamltest.LineRange(0, 0, 5)},
+				{lipgloss.NewStyle(), yamltest.LineRange(0, 3, 10)},
 			},
 		},
 		"ThreeOverlapping": {
 			// Three ranges overlap, so the printer blends all three colors.
 			input: "key: value",
 			overlays: []overlayDef{
-				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), position.New(0, 0), position.New(0, 6)},
-				{lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")), position.New(0, 2), position.New(0, 8)},
-				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), position.New(0, 4), position.New(0, 10)},
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")), yamltest.LineRange(0, 0, 6)},
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")), yamltest.LineRange(0, 2, 8)},
+				{lipgloss.NewStyle().Foreground(lipgloss.Color("#0000FF")), yamltest.LineRange(0, 4, 10)},
 			},
 		},
 		"MixedFgBg": {
@@ -4263,15 +4261,13 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 					lipgloss.NewStyle().
 						Foreground(lipgloss.Color("#FF0000")).
 						Background(lipgloss.Color("#00FF00")),
-					position.New(0, 0),
-					position.New(0, 6),
+					yamltest.LineRange(0, 0, 6),
 				},
 				{
 					lipgloss.NewStyle().
 						Foreground(lipgloss.Color("#0000FF")).
 						Background(lipgloss.Color("#FFFF00")),
-					position.New(0, 3),
-					position.New(0, 10),
+					yamltest.LineRange(0, 3, 10),
 				},
 			},
 		},
@@ -4289,7 +4285,7 @@ func TestPrinter_ColorBlending_Golden(t *testing.T) {
 			overlayOpts := make([]style.Option, 0, len(tc.overlays))
 			for i, od := range tc.overlays {
 				overlayOpts = append(overlayOpts, style.Set(kinds[i], od.style))
-				view.BlendOverlay(kinds[i], position.NewRange(od.start, od.end))
+				view.BlendOverlay(kinds[i], od.rng)
 			}
 
 			p := testPrinterWithStyles(overlayOpts...)
