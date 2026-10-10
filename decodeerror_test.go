@@ -966,6 +966,16 @@ func TestDocument_Decode_Rejection_Unselected(t *testing.T) {
 func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 	t.Parallel()
 
+	// A server whose tier names no tier.
+	const midTier = "name: api\ntier: mid\n"
+
+	// A list of one span whose to lies below its from.
+	oneSpan := stringtest.LinesLF(
+		"spans:",
+		"  - from: 9",
+		"    to: 3",
+	)
+
 	t.Run("binds at the value that reported it", func(t *testing.T) {
 		t.Parallel()
 
@@ -1171,7 +1181,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// points at the node itself, which the path names from the
 			// root of the document.
 			"scalar the decode reads": {
-				input: "name: api\ntier: mid\n",
+				input: midTier,
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
 					node, err := dd.At(paths.Current().Child("tier"))
 					if err != nil {
@@ -1203,7 +1213,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: `3:11: $.servers[0].tier: unknown tier "mid"`,
 			},
 			"DecodeInto": {
-				input: "name: api\ntier: mid\n",
+				input: midTier,
 				decode: func(ctx context.Context, dd *niceyaml.Node) error {
 					var v tierServer
 
@@ -1353,7 +1363,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want:   "unmarshaler rejected the value",
 			},
 			"value that adds text at the node the decode reads": {
-				input:  "name: api\ntier: mid\n",
+				input:  midTier,
 				decode: decodeAs[prefixing](),
 				want:   `server: unknown tier "mid"`,
 			},
@@ -1498,7 +1508,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 
 		// The error of an unmarshaler is the value's own, so it keeps what
 		// it matched beside the sentinel.
-		dd := yamltest.FirstDocument(t, "name: api\ntier: mid\n")
+		dd := yamltest.FirstDocument(t, midTier)
 
 		_, err := dd.Decode[tierServer](t.Context())
 		require.EqualError(t, err, `2:7: $.tier: unknown tier "mid"`)
@@ -1529,17 +1539,13 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			"  - from: 9",
 			"    to: 3",
 		)
-		oneSpan := stringtest.LinesLF(
-			"spans:",
-			"  - from: 9",
-			"    to: 3",
-		)
 		twoSpans := stringtest.LinesLF(
 			"spans:",
 			"  - {from: 1, to: 5}",
 			"  - from: 9",
 			"    to: 3",
 		)
+		mainSpan := stringtest.LinesLF("main:", "  span: {from: 9, to: 3}")
 
 		tcs := map[string]struct {
 			decode func(ctx context.Context, dd *niceyaml.Node) error
@@ -1666,7 +1672,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 				want: "3:25: $.mirrors[0].span.to: to is below from",
 			},
 			"value that adds text to the error of a field": {
-				input: stringtest.LinesLF("main:", "  span: {from: 9, to: 3}"),
+				input: mainSpan,
 				decode: decodeAs[struct {
 					Main spanWrapper `yaml:"main"`
 				}](),
@@ -1676,7 +1682,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 			// The value wrote the path of its field, so the path goes
 			// under the value once, and not under the field too.
 			"value that rebases the error of a field": {
-				input: stringtest.LinesLF("main:", "  span: {from: 9, to: 3}"),
+				input: mainSpan,
 				decode: decodeAs[struct {
 					Main spanRebaser `yaml:"main"`
 				}](),
@@ -1817,11 +1823,7 @@ func TestDocument_Decode_UnmarshalerError(t *testing.T) {
 	t.Run("puts the path of a detail under the value", func(t *testing.T) {
 		t.Parallel()
 
-		dd := yamltest.FirstDocument(t, stringtest.LinesLF(
-			"spans:",
-			"  - from: 9",
-			"    to: 3",
-		))
+		dd := yamltest.FirstDocument(t, oneSpan)
 		report := niceyaml.NewError("span is odd", niceyaml.WithDetails(
 			niceyaml.NewError("to set here", niceyaml.AtPath(paths.Current().Child("to"))),
 		))
