@@ -1,8 +1,10 @@
 package yamltest_test
 
 import (
+	"image/color"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/stretchr/testify/assert"
 
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
@@ -70,6 +72,36 @@ func TestXMLStyles_Style(t *testing.T) {
 
 			got := yamltest.NewXMLStyles(tc.opts...).Style(tc.input).Render(tc.content)
 			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestColorHex(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "#ff0000", yamltest.ColorHex(lipgloss.Color("#f00")))
+	assert.Equal(t, "#ff0000", yamltest.ColorHex(color.RGBA{R: 0xff, A: 0xff}))
+}
+
+func TestContrast(t *testing.T) {
+	t.Parallel()
+
+	black, white := lipgloss.Color("#000000"), lipgloss.Color("#ffffff")
+
+	tcs := map[string]struct {
+		a, b color.Color
+		want float64
+	}{
+		"equal colors":   {a: white, b: white, want: 1},
+		"black on white": {a: black, b: white, want: 21},
+		"white on black": {a: white, b: black, want: 21},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.InDelta(t, tc.want, yamltest.Contrast(tc.a, tc.b), 1e-9)
 		})
 	}
 }

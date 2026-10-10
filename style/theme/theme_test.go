@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"go.jacobcolvin.com/niceyaml/internal/colors"
+	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/printer"
 	"go.jacobcolvin.com/niceyaml/style"
 	"go.jacobcolvin.com/niceyaml/style/kind"
@@ -311,7 +312,7 @@ func TestPalette_AccentDimDiffersFromAccent(t *testing.T) {
 			accent := styles.Style(kind.TextAccent).GetForeground()
 			dim := styles.Style(kind.TextAccentDim).GetForeground()
 
-			assert.NotEqual(t, hexOf(accent), hexOf(dim), "TextAccentDim matches TextAccent")
+			assert.NotEqual(t, yamltest.ColorHex(accent), yamltest.ColorHex(dim), "TextAccentDim matches TextAccent")
 		})
 	}
 }
@@ -471,7 +472,7 @@ func TestPalette_ErrorAndDiffBadgesReadable(t *testing.T) {
 			require.True(t, ok)
 
 			st := th.Style(tc.kind)
-			assert.GreaterOrEqual(t, contrast(st.GetForeground(), st.GetBackground()), 4.5,
+			assert.GreaterOrEqual(t, yamltest.Contrast(st.GetForeground(), st.GetBackground()), 4.5,
 				"%s draws %s", tc.kind, style.Encode(st))
 		})
 	}
@@ -842,14 +843,14 @@ func TestPalette_HeadingsReadable(t *testing.T) {
 
 			for _, k := range headings {
 				st := styles.Style(k)
-				got := contrast(st.GetForeground(), st.GetBackground())
+				got := yamltest.Contrast(st.GetForeground(), st.GetBackground())
 
 				for _, body := range []color.Color{text.GetForeground(), text.GetBackground()} {
 					if _, unset := body.(lipgloss.NoColor); unset {
 						continue
 					}
 
-					assert.GreaterOrEqual(t, got, contrast(body, st.GetBackground()),
+					assert.GreaterOrEqual(t, got, yamltest.Contrast(body, st.GetBackground()),
 						"%s draws %s", k, style.Encode(st))
 				}
 			}
@@ -900,8 +901,8 @@ func TestPalette_HighlightsReadable(t *testing.T) {
 			// own contrast divided by maxContrastLoss where that is lower.
 			// Comments keep their own contrast divided by maxContrastLoss.
 			floors := map[kind.Kind]float64{
-				kind.Text:    min(4.5, contrast(text.GetForeground(), bg)/maxContrastLoss),
-				kind.Comment: contrast(styles.Style(kind.Comment).GetForeground(), bg) / maxContrastLoss,
+				kind.Text:    min(4.5, yamltest.Contrast(text.GetForeground(), bg)/maxContrastLoss),
+				kind.Comment: yamltest.Contrast(styles.Style(kind.Comment).GetForeground(), bg) / maxContrastLoss,
 			}
 
 			// The printer paints diff lines and error marks in these kinds,
@@ -917,8 +918,11 @@ func TestPalette_HighlightsReadable(t *testing.T) {
 
 			for _, k := range []kind.Kind{kind.GenericInserted, kind.GenericDeleted, kind.GenericError} {
 				st := styles.Style(k)
-				if hexOf(st.GetBackground()) != hexOf(bg) {
-					fills[k] = contrast(st.GetForeground(), colors.Blend(st.GetBackground(), bg)) / maxContrastLoss
+				if yamltest.ColorHex(st.GetBackground()) != yamltest.ColorHex(bg) {
+					fills[k] = yamltest.Contrast(
+						st.GetForeground(),
+						colors.Blend(st.GetBackground(), bg),
+					) / maxContrastLoss
 				}
 			}
 
@@ -926,33 +930,53 @@ func TestPalette_HighlightsReadable(t *testing.T) {
 				for _, hl := range []kind.Kind{kind.GenericHighlight, kind.GenericHighlightDim} {
 					for k, floor := range floors {
 						got := m.apply(styles.Style(k), styles.Style(hl))
-						assert.GreaterOrEqual(t, contrast(got.GetForeground(), got.GetBackground()), floor,
+						assert.GreaterOrEqual(t, yamltest.Contrast(got.GetForeground(), got.GetBackground()), floor,
 							"%s over %s draws %s on %s in %s mode",
-							hl, k, hexOf(got.GetForeground()), hexOf(got.GetBackground()), mode)
+							hl, k, yamltest.ColorHex(got.GetForeground()), yamltest.ColorHex(got.GetBackground()), mode)
 					}
 
 					for k, floor := range fills {
 						got := m.apply(styles.Style(k), styles.Style(hl))
 						if mode == "override" {
-							assert.NotEqual(t, hexOf(got.GetForeground()), hexOf(got.GetBackground()),
-								"%s over %s hides its text", hl, k)
+							assert.NotEqual(
+								t,
+								yamltest.ColorHex(got.GetForeground()),
+								yamltest.ColorHex(got.GetBackground()),
+								"%s over %s hides its text",
+								hl,
+								k,
+							)
 
 							continue
 						}
 
-						assert.GreaterOrEqual(t, contrast(got.GetForeground(), got.GetBackground()), floor,
+						assert.GreaterOrEqual(t, yamltest.Contrast(got.GetForeground(), got.GetBackground()), floor,
 							"%s over %s draws %s on %s in %s mode",
-							hl, k, hexOf(got.GetForeground()), hexOf(got.GetBackground()), mode)
+							hl, k, yamltest.ColorHex(got.GetForeground()), yamltest.ColorHex(got.GetBackground()), mode)
 					}
 				}
 
 				other := m.apply(text, styles.Style(kind.GenericHighlightDim)).GetBackground()
 				current := m.apply(text, styles.Style(kind.GenericHighlight)).GetBackground()
 
-				assert.GreaterOrEqual(t, distance(bg, other), m.apart,
-					"in %s mode, dim highlight %s sits close to the background %s", mode, hexOf(other), hexOf(bg))
-				assert.GreaterOrEqual(t, distance(other, current), m.apart,
-					"in %s mode, highlight %s sits close to the dim highlight %s", mode, hexOf(current), hexOf(other))
+				assert.GreaterOrEqual(
+					t,
+					distance(bg, other),
+					m.apart,
+					"in %s mode, dim highlight %s sits close to the background %s",
+					mode,
+					yamltest.ColorHex(other),
+					yamltest.ColorHex(bg),
+				)
+				assert.GreaterOrEqual(
+					t,
+					distance(other, current),
+					m.apart,
+					"in %s mode, highlight %s sits close to the dim highlight %s",
+					mode,
+					yamltest.ColorHex(current),
+					yamltest.ColorHex(other),
+				)
 			}
 		})
 	}
@@ -980,11 +1004,11 @@ func TestPalette_SurfaceHeadingsReadable(t *testing.T) {
 				t.Skip("theme leaves the background to the terminal")
 			}
 
-			floor := min(4.5, contrast(text.GetForeground(), bg)/maxContrastLoss)
+			floor := min(4.5, yamltest.Contrast(text.GetForeground(), bg)/maxContrastLoss)
 
 			for _, k := range []kind.Kind{kind.GenericHeadingAccent, kind.GenericHeadingSubtle} {
 				st := styles.Style(k)
-				assert.GreaterOrEqual(t, contrast(st.GetForeground(), st.GetBackground()), floor,
+				assert.GreaterOrEqual(t, yamltest.Contrast(st.GetForeground(), st.GetBackground()), floor,
 					"%s draws %s", k, style.Encode(st))
 			}
 		})
@@ -1012,8 +1036,8 @@ func TestPalette_ChromeReadable(t *testing.T) {
 			}
 
 			fg := styles.Style(kind.UI).GetForeground()
-			assert.GreaterOrEqual(t, contrast(fg, bg), floor,
-				"chrome draws %s on %s", hexOf(fg), hexOf(bg))
+			assert.GreaterOrEqual(t, yamltest.Contrast(fg, bg), floor,
+				"chrome draws %s on %s", yamltest.ColorHex(fg), yamltest.ColorHex(bg))
 		})
 	}
 }
@@ -1093,14 +1117,6 @@ func TestBuiltin_ChromeIgnoresCommentOverride(t *testing.T) {
 	}
 }
 
-// hexOf returns c as a hex string, so colors of different types compare
-// by value.
-func hexOf(c color.Color) string {
-	cf, _ := colorful.MakeColor(c)
-
-	return cf.Hex()
-}
-
 // minMarkDistance is the smallest CIEDE2000 distance, on go-colorful's
 // scale of 0 to about 1, at which a reader tells a marked foreground from
 // the token's own.
@@ -1135,25 +1151,6 @@ func distance(a, b color.Color) float64 {
 	cb, _ := colorful.MakeColor(b)
 
 	return ca.DistanceCIEDE2000(cb)
-}
-
-// contrast returns the WCAG contrast ratio between a and b, from 1 for
-// equal colors to 21 for black on white.
-func contrast(a, b color.Color) float64 {
-	la, lb := luminance(a), luminance(b)
-	if la < lb {
-		la, lb = lb, la
-	}
-
-	return (la + 0.05) / (lb + 0.05)
-}
-
-// luminance returns the WCAG relative luminance of c.
-func luminance(c color.Color) float64 {
-	cf, _ := colorful.MakeColor(c)
-	r, g, b := cf.LinearRgb()
-
-	return 0.2126*r + 0.7152*g + 0.0722*b
 }
 
 // countOf returns how many times name appears in names.

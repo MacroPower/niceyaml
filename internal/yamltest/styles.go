@@ -1,7 +1,10 @@
 package yamltest
 
 import (
+	"image/color"
+
 	"charm.land/lipgloss/v2"
+	"github.com/lucasb-eyer/go-colorful"
 
 	"go.jacobcolvin.com/niceyaml/style/kind"
 )
@@ -73,4 +76,31 @@ func (x *XMLStyles) Style(s kind.Kind) lipgloss.Style {
 	return lipgloss.NewStyle().Transform(func(content string) string {
 		return "<" + tag + ">" + content + "</" + tag + ">"
 	})
+}
+
+// ColorHex returns c as a hex string, so colors of different types
+// compare by value.
+func ColorHex(c color.Color) string {
+	cf, _ := colorful.MakeColor(c)
+
+	return cf.Hex()
+}
+
+// Contrast returns the WCAG contrast ratio between a and b, from 1 for
+// equal colors to 21 for black on white.
+func Contrast(a, b color.Color) float64 {
+	la, lb := luminance(a), luminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+
+	return (la + 0.05) / (lb + 0.05)
+}
+
+// luminance returns the WCAG relative luminance of c.
+func luminance(c color.Color) float64 {
+	cf, _ := colorful.MakeColor(c)
+	r, g, b := cf.LinearRgb()
+
+	return 0.2126*r + 0.7152*g + 0.0722*b
 }

@@ -55,6 +55,10 @@
 //	// <nameTag>key</nameTag><punctuationMappingValue>:</punctuationMappingValue>\
 //	// <text> </text><literalString>value</literalString>
 //
+// Tests of a color theme compare colors of different types through
+// [ColorHex] and measure how well text reads on its background through
+// [Contrast].
+//
 // # Test Documents
 //
 // [FirstDocument] parses a YAML input and returns the root [*niceyaml.Node] of
