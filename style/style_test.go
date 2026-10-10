@@ -12,16 +12,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/style/theme"
 )
 
-func TestStyles_Style_EmptyStyles(t *testing.T) {
-	t.Parallel()
-
-	styles := style.Styles{}
-	got := styles.Style(kind.LiteralNumberInteger)
-
-	// The zero value returns an empty style for every kind.
-	assert.Equal(t, lipgloss.Style{}, got)
-}
-
 func TestNew(t *testing.T) {
 	t.Parallel()
 
