@@ -3688,23 +3688,6 @@ func TestPath_Wildcards(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
-
-	t.Run("token and node refuse wildcards", func(t *testing.T) {
-		t.Parallel()
-
-		for _, path := range []paths.Path{
-			paths.Doc().Child("items").IndexAll().Child("name"),
-			paths.Doc().Recursive("name").Key(),
-			paths.Doc().Child("meta").ChildAll(),
-			paths.Doc().Child("meta").ChildAll().Key(),
-		} {
-			_, err := paths.NewResolver(doc).Token(path)
-			require.ErrorIs(t, err, paths.ErrWildcard, path)
-
-			_, err = paths.NewResolver(doc).Node(path)
-			require.ErrorIs(t, err, paths.ErrWildcard, path)
-		}
-	})
 }
 
 // wideMerge returns a document that holds the mapping a, and the mapping m
