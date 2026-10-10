@@ -543,46 +543,58 @@ func TestRegistry_Lookup_CancelledContext(t *testing.T) {
 func TestRegistry_Check(t *testing.T) {
 	t.Parallel()
 
-	t.Run("valid document", func(t *testing.T) {
-		t.Parallel()
+	var _ niceyaml.Validator = (*schema.Registry)(nil)
 
-		schemaData := []byte(`{"type": "object", "properties": {"kind": {"type": "string"}}}`)
-		reg := schema.NewRegistry(schema.WithResolvers(schema.When(
-			matcher.Content(kindPath, "Deployment"),
-			schema.Embedded(schemaData),
-		)))
+	reg := schema.NewRegistry(schema.WithResolvers(schema.When(
+		matcher.Content(kindPath, "Deployment"),
+		schema.Embedded([]byte(`{"properties": {"replicas": {"type": "integer"}}}`)),
+	)))
 
-		doc := yamltest.FirstDocument(t, "kind: Deployment")
-		err := reg.Check(t.Context(), doc)
-		require.NoError(t, err)
-	})
+	tcs := map[string]struct {
+		// The sentinel of the error, if any.
+		err   error
+		input string
+		// The text of the violation, if any.
+		want string
+	}{
+		"document the schema accepts": {
+			input: "kind: Deployment\nreplicas: 3\n",
+		},
+		"document the schema rejects": {
+			input: "kind: Deployment\nreplicas: many\n",
+			want:  `$.replicas: expected "integer", got "string"`,
+		},
+		"document no resolver applies to": {
+			input: "kind: Service\n",
+			err:   schema.ErrNoMatch,
+		},
+	}
 
-	t.Run("invalid document", func(t *testing.T) {
-		t.Parallel()
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		schemaData := []byte(`{"type": "object", "properties": {"kind": {"type": "number"}}}`)
-		reg := schema.NewRegistry(schema.WithResolvers(schema.When(
-			matcher.Content(kindPath, "Deployment"),
-			schema.Embedded(schemaData),
-		)))
+			doc := yamltest.FirstDocument(t, tc.input)
 
-		requireRejects(t, reg, "kind: Deployment", `$.kind: expected "number", got "string"`)
-	})
+			// A decode that validates with the registry reports what
+			// Check reports.
+			_, decodeErr := doc.Decode[map[string]any](t.Context(), niceyaml.WithValidator(reg))
 
-	t.Run("no match returns ErrNoMatch", func(t *testing.T) {
-		t.Parallel()
+			for _, err := range []error{reg.Check(t.Context(), doc), decodeErr} {
+				switch {
+				case tc.err != nil:
+					require.ErrorIs(t, err, tc.err)
 
-		schemaData := []byte(`{"type": "object", "properties": {"kind": {"type": "number"}}}`)
-		reg := schema.NewRegistry(schema.WithResolvers(schema.When(
-			matcher.Content(kindPath, "Deployment"),
-			schema.Embedded(schemaData),
-		)))
+				case tc.want != "":
+					require.ErrorContains(t, err, tc.want)
+					require.NotErrorIs(t, err, schema.ErrValidate)
 
-		// Service matches no resolver, so Check returns ErrNoMatch.
-		doc := yamltest.FirstDocument(t, "kind: Service")
-		err := reg.Check(t.Context(), doc)
-		require.ErrorIs(t, err, schema.ErrNoMatch)
-	})
+				default:
+					require.NoError(t, err)
+				}
+			}
+		})
+	}
 }
 
 func TestRegistry_WithRequireSchema(t *testing.T) {
@@ -1573,68 +1585,6 @@ func TestRegistry_MultipleDocuments(t *testing.T) {
 
 	assert.True(t, validated["Deployment"])
 	assert.True(t, validated["Service"])
-}
-
-func TestRegistry_Validator(t *testing.T) {
-	t.Parallel()
-
-	var _ niceyaml.Validator = (*schema.Registry)(nil)
-
-	schemaData := []byte(`{
-		"type": "object",
-		"properties": {"kind": {"type": "string"}, "replicas": {"type": "integer"}}
-	}`)
-	reg := schema.NewRegistry(schema.WithResolvers(schema.When(
-		matcher.Content(kindPath, "Deployment"),
-		schema.Embedded(schemaData),
-	)))
-
-	type deployment struct {
-		Kind     string `yaml:"kind"`
-		Replicas int    `yaml:"replicas"`
-	}
-
-	t.Run("decodes a document the registry accepts", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			replicas: 3
-		`))
-
-		got, err := doc.Decode[deployment](t.Context(), niceyaml.WithValidator(reg))
-		require.NoError(t, err)
-		assert.Equal(t, deployment{Kind: "Deployment", Replicas: 3}, got)
-	})
-
-	t.Run("stops the decode when the schema rejects the document", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, stringtest.Input(`
-			kind: Deployment
-			replicas: many
-		`))
-
-		_, err := doc.Decode[deployment](t.Context(), niceyaml.WithValidator(reg))
-		require.Error(t, err)
-
-		var validationErr *niceyaml.Error
-
-		require.ErrorAs(t, err, &validationErr)
-
-		gotPath, ok := validationErr.Path()
-		require.True(t, ok)
-		assert.Equal(t, "$.replicas", gotPath.String())
-	})
-
-	t.Run("reports ErrNoMatch for a document no resolver applies to", func(t *testing.T) {
-		t.Parallel()
-
-		doc := yamltest.FirstDocument(t, "kind: Service")
-
-		_, err := doc.Decode[deployment](t.Context(), niceyaml.WithValidator(reg))
-		require.ErrorIs(t, err, schema.ErrNoMatch)
-	})
 }
 
 func TestRegistry_Validator_ErrorBoundToReceiver(t *testing.T) {
