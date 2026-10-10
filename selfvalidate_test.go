@@ -473,68 +473,89 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}, got)
 	})
 
-	t.Run("a pointer walks when set and skips when nil", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, stringtest.Input(`
-			hours: {open: "09:00", close: "17:00"}
-		`))
-
-		_, err := dd.Decode[nested](t.Context())
-		require.NoError(t, err)
-
-		dd = yamltest.FirstDocument(t, stringtest.Input(`
-			hours: {open: "09:00", close: "17:00"}
-			backup: {open: "09:00", close: "08:00"}
-		`))
-
-		_, err = dd.Decode[nested](t.Context())
-		require.EqualError(t, err, "2:32: $.backup.close: closes before it opens")
-	})
-
-	t.Run("a field without a tag decodes under its lowercased name", func(t *testing.T) {
-		t.Parallel()
-
-		dd := yamltest.FirstDocument(t, stringtest.Input(`
-			hours: {open: "09:00", close: "17:00"}
-			untagged: {open: "09:00", close: "08:00"}
-		`))
-
-		_, err := dd.Decode[nested](t.Context())
-		require.EqualError(t, err, "2:34: $.untagged.close: closes before it opens")
-	})
-
-	t.Run("a json tag names the field when there is no yaml tag", func(t *testing.T) {
+	t.Run("a field reports at the path its tags give it", func(t *testing.T) {
 		t.Parallel()
 
 		type jsonTagged struct {
 			Opening hours `json:"opening"`
 		}
 
-		dd := yamltest.FirstDocument(t, stringtest.Input(`
-			opening: {open: "09:00", close: "08:00"}
-		`))
-
-		_, err := dd.Decode[jsonTagged](t.Context())
-		require.EqualError(t, err, "1:33: $.opening.close: closes before it opens")
-	})
-
-	t.Run("an inline field keeps the path of its parent", func(t *testing.T) {
-		t.Parallel()
-
 		type withInline struct {
 			Name  string `yaml:"name"`
 			Hours hours  `yaml:",inline"`
 		}
 
-		dd := yamltest.FirstDocument(t, stringtest.Input(`
-			name: x
-			open: "09:00"
-			close: "08:00"
-		`))
+		type embedded struct {
+			Name string `yaml:"name"`
+			Hours
+		}
 
-		_, err := dd.Decode[withInline](t.Context())
-		require.EqualError(t, err, "3:8: $.close: closes before it opens")
+		type named struct {
+			Named
+		}
+
+		tcs := map[string]struct {
+			target any
+			input  string
+			err    string
+		}{
+			"a pointer walks when set": {
+				target: new(nested),
+				input: stringtest.Input(`
+					hours: {open: "09:00", close: "17:00"}
+					backup: {open: "09:00", close: "08:00"}
+				`),
+				err: "2:32: $.backup.close: closes before it opens",
+			},
+			"a pointer skips when nil": {
+				target: new(nested),
+				input:  `hours: {open: "09:00", close: "17:00"}`,
+			},
+			"a field without a tag decodes under its lowercased name": {
+				target: new(nested),
+				input: stringtest.Input(`
+					hours: {open: "09:00", close: "17:00"}
+					untagged: {open: "09:00", close: "08:00"}
+				`),
+				err: "2:34: $.untagged.close: closes before it opens",
+			},
+			"a json tag names the field when there is no yaml tag": {
+				target: new(jsonTagged),
+				input:  `opening: {open: "09:00", close: "08:00"}`,
+				err:    "1:33: $.opening.close: closes before it opens",
+			},
+			"an inline field keeps the path of its parent": {
+				target: new(withInline),
+				input: stringtest.Input(`
+					name: x
+					open: "09:00"
+					close: "08:00"
+				`),
+				err: "3:8: $.close: closes before it opens",
+			},
+			"an embedded struct without inline decodes under its name": {
+				target: new(embedded),
+				input: stringtest.Input(`
+					name: x
+					hours: {open: "09:00", close: "08:00"}
+				`),
+				err: "2:31: $.hours.close: closes before it opens",
+			},
+			"an embedded validator reports under its name": {
+				target: new(named),
+				input:  `named: {name: ""}`,
+				err:    "1:15: $.named.name: name required",
+			},
+		}
+
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
+				err := yamltest.FirstDocument(t, tc.input).DecodeInto(t.Context(), tc.target)
+				requireValidation(t, err, tc.err)
+			})
+		}
 	})
 
 	t.Run("an inline field its parent shadows does not validate", func(t *testing.T) {
@@ -600,24 +621,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
-	t.Run("an embedded struct without inline decodes under its name", func(t *testing.T) {
-		t.Parallel()
-
-		type embedded struct {
-			Name string `yaml:"name"`
-			Hours
-		}
-
-		dd := yamltest.FirstDocument(t, stringtest.Input(`
-			name: x
-			hours: {open: "09:00", close: "08:00"}
-		`))
-
-		_, err := dd.Decode[embedded](t.Context())
-		require.EqualError(t, err, "2:31: $.hours.close: closes before it opens")
-	})
-
-	t.Run("a nil embedded pointer does not validate", func(t *testing.T) {
+	t.Run("an embedded field that is nil or ignored does not validate", func(t *testing.T) {
 		t.Parallel()
 
 		type inline struct {
@@ -632,17 +636,27 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			Spec string `yaml:"spec"`
 		}
 
+		type ignored struct {
+			Named `yaml:"-"`
+
+			Title string `yaml:"name"`
+		}
+
 		tcs := map[string]struct {
 			target any
 			input  string
 		}{
-			"inline": {
+			"nil inline pointer": {
 				input:  "# empty\n",
 				target: new(inline),
 			},
-			"named": {
+			"nil named pointer": {
 				input:  "spec: x\n",
 				target: new(named),
+			},
+			"ignored": {
+				input:  "name: hello",
+				target: new(ignored),
 			},
 		}
 
@@ -655,48 +669,16 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
-	t.Run("an ignored embedded field does not validate", func(t *testing.T) {
-		t.Parallel()
-
-		type ignored struct {
-			Named `yaml:"-"`
-
-			Title string `yaml:"name"`
-		}
-
-		dd := yamltest.FirstDocument(t, stringtest.Input(`
-			name: hello
-		`))
-
-		_, err := dd.Decode[ignored](t.Context())
-		require.NoError(t, err)
-	})
-
-	t.Run("an embedded validator runs once, at its own path", func(t *testing.T) {
+	t.Run("an embedded validator runs once", func(t *testing.T) {
 		t.Parallel()
 
 		type inline struct {
 			Counted `yaml:",inline"`
 		}
 
-		type named struct {
-			Named
-		}
-
-		dd := yamltest.FirstDocument(t, stringtest.Input(`
-			name: x
-		`))
-
-		got, err := dd.Decode[inline](t.Context())
+		got, err := yamltest.FirstDocument(t, "name: x").Decode[inline](t.Context())
 		require.NoError(t, err)
 		assert.Equal(t, 1, got.runs)
-
-		dd = yamltest.FirstDocument(t, stringtest.Input(`
-			named: {name: ""}
-		`))
-
-		_, err = dd.Decode[named](t.Context())
-		require.EqualError(t, err, "1:15: $.named.name: name required")
 	})
 
 	t.Run("a struct that embeds a validator runs its own Validate", func(t *testing.T) {
@@ -1021,43 +1003,22 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("distinct empty values each validate", func(t *testing.T) {
+	t.Run("empty and nil values each validate", func(t *testing.T) {
 		t.Parallel()
 
-		// Every empty slice and every pointer to a zero-size value can
-		// share one address, which must not make them one value.
+		// Every empty slice, every pointer to a zero-size value, and every
+		// nil slice or map of one type can share one address, which must
+		// not make them one value.
 		type withRules struct {
 			A rules `yaml:"a"`
 			B rules `yaml:"b"`
 		}
-
-		dd := yamltest.FirstDocument(t, "a: []\nb: []\n")
-
-		_, err := dd.Decode[withRules](t.Context())
-		require.EqualError(t, err, stringtest.JoinLF(
-			"1:1: $.a: no rules",
-			"2:1: $.b: no rules",
-		))
 
 		type withFlags struct {
 			A *flag `yaml:"a"`
 			B *flag `yaml:"b"`
 		}
 
-		dd = yamltest.FirstDocument(t, "a: {}\nb: {}\n")
-
-		_, err = dd.Decode[withFlags](t.Context())
-		require.EqualError(t, err, stringtest.JoinLF(
-			"1:1: $.a: flag set",
-			"2:1: $.b: flag set",
-		))
-	})
-
-	t.Run("a nil slice or map still validates", func(t *testing.T) {
-		t.Parallel()
-
-		// Every nil slice or map of one type shares one address, which
-		// must not make them one value.
 		type withEmpty struct {
 			A rules `yaml:"a"`
 			B rules `yaml:"b"`
@@ -1065,22 +1026,54 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			N names `yaml:"n"`
 		}
 
-		dd := yamltest.FirstDocument(t, "a: null\nm: null\n")
+		tcs := map[string]struct {
+			target any
+			input  string
+			err    string
+		}{
+			"empty slices": {
+				target: new(withRules),
+				input:  "a: []\nb: []\n",
+				err: stringtest.JoinLF(
+					"1:1: $.a: no rules",
+					"2:1: $.b: no rules",
+				),
+			},
+			"pointers to zero-size values": {
+				target: new(withFlags),
+				input:  "a: {}\nb: {}\n",
+				err: stringtest.JoinLF(
+					"1:1: $.a: flag set",
+					"2:1: $.b: flag set",
+				),
+			},
+			// A field the document leaves out binds at the mapping that lacks
+			// it, and the message lists the errors by position.
+			"nil slices and maps": {
+				target: new(withEmpty),
+				input:  "a: null\nm: null\n",
+				err: stringtest.JoinLF(
+					"1:1: $.b: no rules",
+					"1:1: $.n: no names",
+					"1:4: $.a: no rules",
+					"2:4: $.m: no names",
+				),
+			},
+			"nil slice at the root": {
+				target: new(rules),
+				input:  "null\n",
+				err:    "1:1: $: no rules",
+			},
+		}
 
-		// A field the document leaves out binds at the mapping that lacks
-		// it, and the message lists the errors by position.
-		_, err := dd.Decode[withEmpty](t.Context())
-		require.EqualError(t, err, stringtest.JoinLF(
-			"1:1: $.b: no rules",
-			"1:1: $.n: no names",
-			"1:4: $.a: no rules",
-			"2:4: $.m: no names",
-		))
+		for name, tc := range tcs {
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-		dd = yamltest.FirstDocument(t, "null\n")
-
-		_, err = dd.Decode[rules](t.Context())
-		require.EqualError(t, err, "1:1: $: no rules")
+				err := yamltest.FirstDocument(t, tc.input).DecodeInto(t.Context(), tc.target)
+				requireValidation(t, err, tc.err)
+			})
+		}
 	})
 
 	t.Run("a value that refers back through a map walks once", func(t *testing.T) {
@@ -2198,19 +2191,6 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		}
 	})
 
-	t.Run("a leaf type validates itself", func(t *testing.T) {
-		t.Parallel()
-
-		type withPort struct {
-			Ports []port `yaml:"ports"`
-		}
-
-		dd := yamltest.FirstDocument(t, "ports: [80, 70000]\n")
-
-		_, err := dd.Decode[withPort](t.Context())
-		require.EqualError(t, err, "1:13: $.ports[1]: port out of range")
-	})
-
 	t.Run("an unlocated error points at the value that owns it", func(t *testing.T) {
 		t.Parallel()
 
@@ -2231,8 +2211,12 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.EqualError(t, err, "1:7: $.port: port out of range")
 	})
 
-	t.Run("a byte-sized leaf type validates itself", func(t *testing.T) {
+	t.Run("a leaf type validates itself", func(t *testing.T) {
 		t.Parallel()
+
+		type withPort struct {
+			Ports []port `yaml:"ports"`
+		}
 
 		type withLevels struct {
 			Levels []level `yaml:"levels"`
@@ -2249,17 +2233,27 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		tcs := map[string]struct {
 			target any
 			input  string
-			want   string
+			err    string
 		}{
 			"slice": {
+				target: &withPort{},
+				input:  "ports: [80, 70000]\n",
+				err:    "1:13: $.ports[1]: port out of range",
+			},
+			"slice of a byte-sized type": {
 				target: &withLevels{},
 				input:  "levels: [1, 9]\n",
-				want:   "1:13: $.levels[1]: level above 5",
+				err:    "1:13: $.levels[1]: level above 5",
 			},
-			"array": {
+			"array of a byte-sized type": {
 				target: &withFixed{},
 				input:  "fixed: [1, 9]\n",
-				want:   "1:12: $.fixed[1]: level above 5",
+				err:    "1:12: $.fixed[1]: level above 5",
+			},
+			// The bytes of a plain []byte hold nothing to validate.
+			"plain bytes": {
+				target: &withData{},
+				input:  "data: [1, 9]\n",
 			},
 		}
 
@@ -2267,18 +2261,10 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
-
-				err := dd.DecodeInto(t.Context(), tc.target)
-				require.EqualError(t, err, tc.want)
+				err := yamltest.FirstDocument(t, tc.input).DecodeInto(t.Context(), tc.target)
+				requireValidation(t, err, tc.err)
 			})
 		}
-
-		// The bytes of a plain []byte hold nothing to validate.
-		dd := yamltest.FirstDocument(t, "data: [1, 9]\n")
-
-		_, err := dd.Decode[withData](t.Context())
-		require.NoError(t, err)
 	})
 
 	t.Run("a value validates whatever its type holds below it", func(t *testing.T) {
