@@ -20,30 +20,12 @@ func TestExists(t *testing.T) {
 		input string
 		want  bool
 	}{
-		"field exists with value": {
-			input: `kind: Deployment`,
-			want:  true,
-		},
-		"field missing": {
-			input: `apiVersion: v1`,
-			want:  false,
-		},
-		"field empty unquoted": {
-			input: `kind:`,
-			want:  true,
-		},
-		"field null": {
-			input: `kind: null`,
-			want:  true,
-		},
-		"field empty double quoted": {
-			input: `kind: ""`,
-			want:  true,
-		},
-		"field empty single quoted": {
-			input: `kind: ''`,
-			want:  true,
-		},
+		"field exists with value":   {input: `kind: Deployment`, want: true},
+		"field missing":             {input: `apiVersion: v1`, want: false},
+		"field empty unquoted":      {input: `kind:`, want: true},
+		"field null":                {input: `kind: null`, want: true},
+		"field empty double quoted": {input: `kind: ""`, want: true},
+		"field empty single quoted": {input: `kind: ''`, want: true},
 		"field with mapping value": {
 			input: stringtest.Input(`
 				kind:
@@ -51,22 +33,10 @@ func TestExists(t *testing.T) {
 			`),
 			want: true,
 		},
-		"document without content": {
-			input: `# only a comment`,
-			want:  false,
-		},
-		"field with whitespace value": {
-			input: `kind: " "`,
-			want:  true,
-		},
-		"field with numeric value": {
-			input: `kind: 123`,
-			want:  true,
-		},
-		"field with boolean value": {
-			input: `kind: true`,
-			want:  true,
-		},
+		"document without content":    {input: `# only a comment`, want: false},
+		"field with whitespace value": {input: `kind: " "`, want: true},
+		"field with numeric value":    {input: `kind: 123`, want: true},
+		"field with boolean value":    {input: `kind: true`, want: true},
 	}
 
 	for name, tc := range tcs {

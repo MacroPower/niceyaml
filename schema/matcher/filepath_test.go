@@ -21,81 +21,29 @@ func TestFilePath(t *testing.T) {
 		filePath string
 		want     bool
 	}{
-		"exact match": {
-			pattern:  "config.yaml",
-			filePath: "config.yaml",
-			want:     true,
-		},
-		"exact no match": {
-			pattern:  "config.yaml",
-			filePath: "settings.yaml",
-			want:     false,
-		},
-		"match in root": {
-			pattern:  "*.yaml",
-			filePath: "config.yaml",
-			want:     true,
-		},
+		"exact match":    {pattern: "config.yaml", filePath: "config.yaml", want: true},
+		"exact no match": {pattern: "config.yaml", filePath: "settings.yaml", want: false},
+		"match in root":  {pattern: "*.yaml", filePath: "config.yaml", want: true},
 		"root pattern does not match deep path": {
 			pattern:  "*.yaml",
 			filePath: "deep/path/config.yaml",
 			want:     false,
 		},
-		"root pattern matches dot slash prefix": {
-			pattern:  "*.yaml",
-			filePath: "./config.yaml",
-			want:     true,
-		},
+		"root pattern matches dot slash prefix": {pattern: "*.yaml", filePath: "./config.yaml", want: true},
 		"pattern with a dot element": {
 			pattern:  "k8s/./*.yaml",
 			filePath: "deploy/../k8s/app.yaml",
 			want:     true,
 		},
-		"pattern no match": {
-			pattern:  "**/*.json",
-			filePath: "config.yaml",
-			want:     false,
-		},
-		"k8s directory match": {
-			pattern:  "**/k8s/*.yaml",
-			filePath: "deploy/k8s/app.yaml",
-			want:     true,
-		},
-		"k8s deep match": {
-			pattern:  "**/k8s/*.yaml",
-			filePath: "a/b/c/k8s/app.yaml",
-			want:     true,
-		},
-		"k8s no match": {
-			pattern:  "**/k8s/*.yaml",
-			filePath: "deploy/other/app.yaml",
-			want:     false,
-		},
-		"any yaml file": {
-			pattern:  "**/*.yaml",
-			filePath: "any/path/file.yaml",
-			want:     true,
-		},
-		"any yaml file in root": {
-			pattern:  "**/*.yaml",
-			filePath: "file.yaml",
-			want:     true,
-		},
-		"parent after double star": {
-			pattern:  "**/../x.yaml",
-			filePath: "../x.yaml",
-			want:     true,
-		},
-		"empty file path": {
-			pattern:  "**/*.yaml",
-			filePath: "",
-			want:     false,
-		},
-		"empty file path with dot pattern": {
-			pattern:  ".",
-			filePath: "",
-			want:     false,
-		},
+		"pattern no match":                 {pattern: "**/*.json", filePath: "config.yaml", want: false},
+		"k8s directory match":              {pattern: "**/k8s/*.yaml", filePath: "deploy/k8s/app.yaml", want: true},
+		"k8s deep match":                   {pattern: "**/k8s/*.yaml", filePath: "a/b/c/k8s/app.yaml", want: true},
+		"k8s no match":                     {pattern: "**/k8s/*.yaml", filePath: "deploy/other/app.yaml", want: false},
+		"any yaml file":                    {pattern: "**/*.yaml", filePath: "any/path/file.yaml", want: true},
+		"any yaml file in root":            {pattern: "**/*.yaml", filePath: "file.yaml", want: true},
+		"parent after double star":         {pattern: "**/../x.yaml", filePath: "../x.yaml", want: true},
+		"empty file path":                  {pattern: "**/*.yaml", filePath: "", want: false},
+		"empty file path with dot pattern": {pattern: ".", filePath: "", want: false},
 	}
 
 	for name, tc := range tcs {
@@ -117,21 +65,11 @@ func TestFilePath_InvalidPattern(t *testing.T) {
 	tcs := map[string]struct {
 		pattern string
 	}{
-		"bad syntax": {
-			pattern: "[",
-		},
-		"parent after star": {
-			pattern: "configs/*/../x.yaml",
-		},
-		"empty": {
-			pattern: "",
-		},
-		"empty brace group": {
-			pattern: "{}",
-		},
-		"empty alternatives": {
-			pattern: "{,}",
-		},
+		"bad syntax":         {pattern: "["},
+		"parent after star":  {pattern: "configs/*/../x.yaml"},
+		"empty":              {pattern: ""},
+		"empty brace group":  {pattern: "{}"},
+		"empty alternatives": {pattern: "{,}"},
 	}
 
 	for name, tc := range tcs {
@@ -366,30 +304,12 @@ func TestFilePath_FileOnDisk(t *testing.T) {
 		dir  string
 		path string
 	}{
-		"from the base": {
-			dir:  proj,
-			path: "configs/app.yaml",
-		},
-		"with a dot element": {
-			dir:  proj,
-			path: "./configs/app.yaml",
-		},
-		"absolute": {
-			dir:  proj,
-			path: file,
-		},
-		"from the directory of the file": {
-			dir:  filepath.Dir(file),
-			path: "app.yaml",
-		},
-		"through the parent of the directory": {
-			dir:  filepath.Dir(file),
-			path: "../configs/app.yaml",
-		},
-		"from above the base": {
-			dir:  root,
-			path: "proj/configs/app.yaml",
-		},
+		"from the base":                       {dir: proj, path: "configs/app.yaml"},
+		"with a dot element":                  {dir: proj, path: "./configs/app.yaml"},
+		"absolute":                            {dir: proj, path: file},
+		"from the directory of the file":      {dir: filepath.Dir(file), path: "app.yaml"},
+		"through the parent of the directory": {dir: filepath.Dir(file), path: "../configs/app.yaml"},
+		"from above the base":                 {dir: root, path: "proj/configs/app.yaml"},
 	}
 
 	for name, tc := range tcs {

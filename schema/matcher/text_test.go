@@ -166,74 +166,23 @@ func TestText_Reads(t *testing.T) {
 		input string
 		want  string
 	}{
-		"plain string": {
-			input: `version: apps/v1`,
-			want:  "apps/v1",
-		},
-		"plain float with a trailing zero": {
-			input: `version: 2.0`,
-			want:  "2.0",
-		},
-		"plain float with a zero after its fraction": {
-			input: `version: 3.10`,
-			want:  "3.10",
-		},
-		"plain hex integer": {
-			input: `version: 0x10`,
-			want:  "0x10",
-		},
-		"plain exponent": {
-			input: `version: 1e3`,
-			want:  "1e3",
-		},
-		"plain infinity": {
-			input: `version: .inf`,
-			want:  ".inf",
-		},
-		"plain capitalized bool": {
-			input: `version: True`,
-			want:  "True",
-		},
-		"plain date": {
-			input: `version: 2001-12-14`,
-			want:  "2001-12-14",
-		},
-		"plain scalar over two lines": {
-			input: "version: a\n  b\n",
-			want:  "a b",
-		},
-		"double-quoted number": {
-			input: `version: "2.0"`,
-			want:  "2.0",
-		},
-		"double-quoted escape": {
-			input: `version: "a\tb"`,
-			want:  "a\tb",
-		},
-		"single-quoted quote": {
-			input: `version: 'it''s'`,
-			want:  "it's",
-		},
-		"empty string": {
-			input: `version: ""`,
-			want:  "",
-		},
-		"literal block": {
-			input: "version: |\n  1.10\n",
-			want:  "1.10\n",
-		},
-		"literal block that strips its line break": {
-			input: "version: |-\n  1.10\n",
-			want:  "1.10",
-		},
-		"folded block": {
-			input: "version: >\n  a\n  b\n",
-			want:  "a b\n",
-		},
-		"anchored float": {
-			input: `version: &v 1.10`,
-			want:  "1.10",
-		},
+		"plain string":                               {input: `version: apps/v1`, want: "apps/v1"},
+		"plain float with a trailing zero":           {input: `version: 2.0`, want: "2.0"},
+		"plain float with a zero after its fraction": {input: `version: 3.10`, want: "3.10"},
+		"plain hex integer":                          {input: `version: 0x10`, want: "0x10"},
+		"plain exponent":                             {input: `version: 1e3`, want: "1e3"},
+		"plain infinity":                             {input: `version: .inf`, want: ".inf"},
+		"plain capitalized bool":                     {input: `version: True`, want: "True"},
+		"plain date":                                 {input: `version: 2001-12-14`, want: "2001-12-14"},
+		"plain scalar over two lines":                {input: "version: a\n  b\n", want: "a b"},
+		"double-quoted number":                       {input: `version: "2.0"`, want: "2.0"},
+		"double-quoted escape":                       {input: `version: "a\tb"`, want: "a\tb"},
+		"single-quoted quote":                        {input: `version: 'it''s'`, want: "it's"},
+		"empty string":                               {input: `version: ""`, want: ""},
+		"literal block":                              {input: "version: |\n  1.10\n", want: "1.10\n"},
+		"literal block that strips its line break":   {input: "version: |-\n  1.10\n", want: "1.10"},
+		"folded block":                               {input: "version: >\n  a\n  b\n", want: "a b\n"},
+		"anchored float":                             {input: `version: &v 1.10`, want: "1.10"},
 		"aliased float": {
 			input: stringtest.Input(`
 				v: &v 1.10
@@ -248,28 +197,16 @@ func TestText_Reads(t *testing.T) {
 			`),
 			want: "1.10",
 		},
-		"str-tagged float": {
-			input: `version: !!str 1.10`,
-			want:  "1.10",
-		},
-		"float-tagged float": {
-			input: `version: !!float 1.10`,
-			want:  "1.10",
-		},
-		"custom-tagged float": {
-			input: `version: !custom 1.10`,
-			want:  "1.10",
-		},
+		"str-tagged float":    {input: `version: !!str 1.10`, want: "1.10"},
+		"float-tagged float":  {input: `version: !!float 1.10`, want: "1.10"},
+		"custom-tagged float": {input: `version: !custom 1.10`, want: "1.10"},
 		"float-tagged quoted scalar": {
 			// The tag makes the quoted text a float, which the decoder
 			// respells.
 			input: `version: !!float "1.10"`,
 			want:  "1.1",
 		},
-		"bool-tagged quoted scalar": {
-			input: `version: !!bool "True"`,
-			want:  "true",
-		},
+		"bool-tagged quoted scalar": {input: `version: !!bool "True"`, want: "true"},
 	}
 
 	for name, tc := range tcs {
