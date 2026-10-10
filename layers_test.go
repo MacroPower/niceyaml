@@ -1642,12 +1642,7 @@ func TestNode_Origin(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			doc := yamltest.Document(t, layerFiles(t, tc.inputs...))
-
-			node := doc
-			if !tc.path.IsRoot() {
-				node = yamltest.At(t, doc, tc.path)
-			}
+			node := yamltest.AtOrSelf(t, yamltest.Document(t, layerFiles(t, tc.inputs...)), tc.path)
 
 			origin, err := node.Origin()
 			require.NoError(t, err)
@@ -1866,10 +1861,7 @@ func TestNode_Origin(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				node := yamltest.Document(t, yamltest.Layers(t, tc.layers...))
-				if !tc.path.IsRoot() {
-					node = yamltest.At(t, node, tc.path)
-				}
+				node := yamltest.AtOrSelf(t, yamltest.Document(t, yamltest.Layers(t, tc.layers...)), tc.path)
 
 				origin, err := node.Origin()
 				require.NoError(t, err)
