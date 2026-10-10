@@ -177,44 +177,53 @@ func TestFormatTokens(t *testing.T) {
 func TestCompareContent(t *testing.T) {
 	t.Parallel()
 
-	t.Run("equal content", func(t *testing.T) {
-		t.Parallel()
+	tcs := map[string]struct {
+		want string
+		got  string
+		msgs []string // Empty when the content is equal.
+	}{
+		"equal content": {
+			want: "hello",
+			got:  "hello",
+		},
+		"normalizes line endings": {
+			want: "line1\nline2",
+			got:  "line1\r\nline2",
+		},
+		"normalizes bare CR line endings": {
+			want: "line1\nline2\n\nline3",
+			got:  "line1\rline2\r\rline3\r",
+		},
+		"trims surrounding newlines": {
+			want: "\nhello\n",
+			got:  "hello",
+		},
+		"different content": {
+			want: "hello",
+			got:  "world",
+			msgs: []string{"content mismatch", "hello", "world"},
+		},
+	}
 
-		diff := yamltest.CompareContent("hello", "hello")
-		assert.True(t, diff.Equal())
-		assert.Equal(t, "content equal", diff.String())
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("normalizes line endings", func(t *testing.T) {
-		t.Parallel()
+			diff := yamltest.CompareContent(tc.want, tc.got)
+			if len(tc.msgs) == 0 {
+				assert.True(t, diff.Equal())
+				assert.Equal(t, "content equal", diff.String())
 
-		diff := yamltest.CompareContent("line1\nline2", "line1\r\nline2")
-		assert.True(t, diff.Equal())
-	})
+				return
+			}
 
-	t.Run("normalizes bare CR line endings", func(t *testing.T) {
-		t.Parallel()
+			assert.False(t, diff.Equal())
 
-		diff := yamltest.CompareContent("line1\nline2\n\nline3", "line1\rline2\r\rline3\r")
-		assert.True(t, diff.Equal())
-	})
-
-	t.Run("trims surrounding newlines", func(t *testing.T) {
-		t.Parallel()
-
-		diff := yamltest.CompareContent("\nhello\n", "hello")
-		assert.True(t, diff.Equal())
-	})
-
-	t.Run("different content", func(t *testing.T) {
-		t.Parallel()
-
-		diff := yamltest.CompareContent("hello", "world")
-		assert.False(t, diff.Equal())
-		assert.Contains(t, diff.String(), "content mismatch")
-		assert.Contains(t, diff.String(), "hello")
-		assert.Contains(t, diff.String(), "world")
-	})
+			for _, msg := range tc.msgs {
+				assert.Contains(t, diff.String(), msg)
+			}
+		})
+	}
 }
 
 func TestTokenBuilder(t *testing.T) {
