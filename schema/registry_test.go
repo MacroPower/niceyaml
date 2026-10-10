@@ -1717,9 +1717,9 @@ func TestRegistry_WithHTTPClient(t *testing.T) {
 	t.Run("a client replaces the default", func(t *testing.T) {
 		t.Parallel()
 
-		var requests atomic.Int32
+		client, requests := yamltest.CountingClient(http.DefaultTransport)
 
-		require.NoError(t, lookup(t, countingClient(&requests), schema.URL(schemaURL)))
+		require.NoError(t, lookup(t, client, schema.URL(schemaURL)))
 		assert.Equal(t, int32(1), requests.Load())
 	})
 }
@@ -2833,9 +2833,8 @@ func TestRegistry_Load(t *testing.T) {
 
 		base := serve(t, map[string]string{"/schema.json": `{"type": "object"}`})
 
-		var requests atomic.Int32
-
-		reg := schema.NewRegistry(schema.WithHTTPClient(countingClient(&requests)))
+		client, requests := yamltest.CountingClient(http.DefaultTransport)
+		reg := schema.NewRegistry(schema.WithHTTPClient(client))
 
 		data, err := reg.Load(t.Context(), schema.URL(base+"/schema.json"))
 		require.NoError(t, err)

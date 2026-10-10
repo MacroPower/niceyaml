@@ -22,18 +22,6 @@ import (
 	"go.jacobcolvin.com/niceyaml/schema"
 )
 
-// countingClient returns a client that counts the requests it sends and
-// sends them through the default transport.
-func countingClient(requests *atomic.Int32) *http.Client {
-	return &http.Client{
-		Transport: yamltest.RoundTripFunc(func(r *http.Request) (*http.Response, error) {
-			requests.Add(1)
-
-			return http.DefaultTransport.RoundTrip(r) //nolint:wrapcheck // Test helper.
-		}),
-	}
-}
-
 // schemaHandler answers each request with the body files holds for the
 // path of its URL, and with 404 for any other path.
 func schemaHandler(files map[string]string) http.Handler {
