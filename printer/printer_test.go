@@ -2144,11 +2144,8 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 				view := niceyaml.NewSourceFromString(tc.input).View()
 				p := printer.New(printer.WithGutter(printer.NoGutter), printer.WithWrapWidth(1))
 
-				rows := strings.Split(p.Print(view), "\n")
-				for i, row := range rows {
-					// The container style pads each row on the right.
-					rows[i] = strings.TrimRight(ansi.Strip(row), " ")
-				}
+				// The container style pads each row on the right.
+				rows := strings.Split(stringtest.TrimLineEnds(ansi.Strip(p.Print(view))), "\n")
 
 				assert.Equal(t, tc.want, rows)
 
@@ -2467,11 +2464,7 @@ func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 			view := niceyaml.NewSourceFromString(tc.input).View()
 			got := p.Print(view)
 			rows := strings.Split(got, "\n")
-
-			plain := make([]string, len(rows))
-			for i, row := range rows {
-				plain[i] = ansi.Strip(row)
-			}
+			plain := strings.Split(ansi.Strip(got), "\n")
 
 			assert.Equal(t, tc.want, plain)
 			assert.Len(t, rows, p.Layout(view).Rows())
@@ -2556,12 +2549,7 @@ func TestPrinter_Overlay_KeepsClusters(t *testing.T) {
 			))
 
 			got := p.Print(view)
-			rows := strings.Split(got, "\n")
-
-			plain := make([]string, len(rows))
-			for i, row := range rows {
-				plain[i] = ansi.Strip(row)
-			}
+			plain := strings.Split(ansi.Strip(got), "\n")
 
 			assert.Equal(t, tc.want, plain)
 			assert.Equal(t, ansi.Strip(p.Print(plainView)), ansi.Strip(got))
