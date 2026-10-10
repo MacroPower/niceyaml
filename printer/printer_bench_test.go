@@ -269,7 +269,7 @@ func BenchmarkPrinterWithWrapping(b *testing.B) {
 
 	for _, w := range widths {
 		b.Run(w.name, func(b *testing.B) {
-			p := printer.New(printer.WithWrap(w.width))
+			p := printer.New(printer.WithWrapWidth(w.width))
 
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
@@ -310,7 +310,7 @@ func BenchmarkPrinterLayout_LongTransformedValue(b *testing.B) {
 		view := niceyaml.NewSourceFromString("data: " + strings.Repeat("QUJD", n/4) + "\n").View()
 
 		b.Run(fmt.Sprintf("chars_%d", n), func(b *testing.B) {
-			p := printer.New(printer.WithWrap(80), printer.WithStyles(styles))
+			p := printer.New(printer.WithWrapWidth(80), printer.WithStyles(styles))
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -330,7 +330,7 @@ func BenchmarkPrinterPrintError_LongWrappedValue(b *testing.B) {
 		err := source.Bind(niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("data"))))
 
 		b.Run(fmt.Sprintf("chars_%d", n), func(b *testing.B) {
-			p := printer.New(printer.WithWrap(80))
+			p := printer.New(printer.WithWrapWidth(80))
 
 			b.ReportAllocs()
 
@@ -348,7 +348,7 @@ func BenchmarkPrinterPrintError_LongNestedMessage(b *testing.B) {
 		err := errors.Join(errors.New("first"), errors.New(strings.Repeat("word ", n)))
 
 		b.Run(fmt.Sprintf("words_%d", n), func(b *testing.B) {
-			p := printer.New(printer.WithWrap(80))
+			p := printer.New(printer.WithWrapWidth(80))
 
 			b.ReportAllocs()
 			b.ResetTimer()

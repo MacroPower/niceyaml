@@ -341,7 +341,7 @@ func TestPrinter_Layout_PositionAt(t *testing.T) {
 
 			view = view.Clip(tc.clip)
 
-			p := testPrinter().With(printer.WithWrap(tc.wrap))
+			p := testPrinter().With(printer.WithWrapWidth(tc.wrap))
 
 			got, ok := p.Layout(view).PositionAt(tc.row, tc.cell)
 			assert.Equal(t, tc.ok, ok)
@@ -395,13 +395,13 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			},
 		},
 		"wrapped": {
-			printer: testPrinter().With(printer.WithWrap(10)),
+			printer: testPrinter().With(printer.WithWrapWidth(10)),
 			view: func() *line.View {
 				return niceyaml.NewSourceFromString("key: aaaa bbbb cccc 日本語日本語日本語\nb: 2\n").View()
 			},
 		},
 		"brackets a transform adds": {
-			printer: testPrinter().With(printer.WithWrap(8)),
+			printer: testPrinter().With(printer.WithWrapWidth(8)),
 			view: func() *line.View {
 				view := niceyaml.NewSourceFromString("k: ab cd ef gh\nb: 2\n").View()
 				view.AddOverlay(testOverlayHighlight,
@@ -416,7 +416,7 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			printer: printer.New(
 				printer.WithGutter(printer.NoGutter),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithWrap(5),
+				printer.WithWrapWidth(5),
 				printer.WithStyles(prefixed),
 			),
 			view: func() *line.View {
@@ -424,7 +424,7 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			},
 		},
 		"annotations": {
-			printer: testPrinter().With(printer.WithWrap(12)),
+			printer: testPrinter().With(printer.WithWrapWidth(12)),
 			view: func() *line.View {
 				view := niceyaml.NewSourceFromString("key: aaaa bbbb cccc\nb: 2\n").View()
 				view.Annotate(0, line.Annotation{Content: "above", Placement: line.Above})
@@ -435,7 +435,7 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			},
 		},
 		"full.yaml with a gutter": {
-			printer: testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrap(40)),
+			printer: testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrapWidth(40)),
 			view: func() *line.View {
 				return niceyaml.NewSourceFromString(string(full)).View()
 			},
@@ -460,7 +460,7 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			},
 		},
 		"clipped and wrapped": {
-			printer: testPrinter().With(printer.WithWrap(8)),
+			printer: testPrinter().With(printer.WithWrapWidth(8)),
 			view: func() *line.View {
 				view := niceyaml.NewSourceFromString("k: aaaa bbbb cccc dddd eeee ffff gggg\n").View()
 				view.Annotate(0, line.Annotation{Content: "x", Placement: line.Below, Col: 20})
@@ -469,7 +469,7 @@ func TestPrinter_Layout_PositionAt_Inverse(t *testing.T) {
 			},
 		},
 		"full.yaml clipped with a gutter": {
-			printer: testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrap(30)),
+			printer: testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrapWidth(30)),
 			view: func() *line.View {
 				return niceyaml.NewSourceFromString(string(full)).View().Clip(20)
 			},

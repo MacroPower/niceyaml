@@ -23,10 +23,10 @@ const errorConnectorWidth = 4
 // lines opts set on either side of each marked line, as
 // [niceyaml.ExcerptOption] describes, and draws a caret run under each
 // location. PrintError draws both with the styles of the printer and
-// wraps them to the width [WithWrap] sets. A nil err prints as "". A
+// fits them to the width [WithWrapWidth] sets. A nil err prints as "". A
 // program configures one printer and prints its errors through it:
 //
-//	p := printer.New(printer.WithWrap(width))
+//	p := printer.New(printer.WithWrapWidth(width))
 //	lipgloss.Fprintln(os.Stderr, p.PrintError(err, niceyaml.WithContextLines(3)))
 //
 // # Tree
@@ -100,10 +100,9 @@ const errorConnectorWidth = 4
 //
 // # Wrapping
 //
-// PrintError wraps each message to the width [WithWrap] sets less the
-// connectors in front of it. Each excerpt wraps to that width less the
-// horizontal frame of the container style, so an excerpt and its frame
-// fit the width together.
+// PrintError wraps each message to the width [WithWrapWidth] sets less
+// the connectors in front of it. Each excerpt fits that width with the
+// frame of its container, as [Printer.Print] fits a view.
 //
 // # Unbound Errors
 //
@@ -140,21 +139,14 @@ func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 		parts = append(parts, msg)
 	}
 
-	// Print wraps the gutter and content to the printer's width and draws
-	// the container's frame outside it, so the excerpts wrap to the width
-	// less the frame.
-	ex := p
-	if p.wrap > 0 {
-		ex = p.With(WithWrap(max(1, p.wrap-p.style.GetHorizontalFrameSize())))
-	}
-
 	for _, excerpt := range rep.Excerpts {
-		part := ex.Print(excerpt.View)
+		part := p.Print(excerpt.View)
 
 		// The name is the caller's text, so its control characters render
-		// as pictures like those of the tree.
+		// as pictures like those of the tree. It sits outside the
+		// container, so it wraps to the whole width.
 		if excerpt.Named {
-			name := p.wrapContent(escape.Control(escape.Tabs(excerpt.Source.Name())), 0)
+			name := p.wrapTo(escape.Control(escape.Tabs(excerpt.Source.Name())), p.textWidth(0))
 			part = strings.Join(name, "\n") + "\n" + part
 		}
 
@@ -168,7 +160,7 @@ func (p *Printer) PrintReport(rep niceyaml.ErrorReport) string {
 		// spaces, as it does in the tree.
 		text := escape.Control(escape.Tabs("no excerpt: " + bound.Unresolved().Error()))
 
-		parts = append(parts, strings.Join(p.wrapContent(text, 0), "\n"))
+		parts = append(parts, strings.Join(p.wrapTo(text, p.textWidth(0)), "\n"))
 	}
 
 	return strings.Join(parts, "\n\n")
@@ -248,5 +240,5 @@ func (p *Printer) appendErrorBranches(
 // break in the message stays a line break, since a wrapper around a
 // joined error keeps the breaks between its branches in its own text.
 func (p *Printer) errorText(text string, depth int) []string {
-	return p.wrapContent(escape.Message(text), depth*errorConnectorWidth)
+	return p.wrapTo(escape.Message(text), p.textWidth(depth*errorConnectorWidth))
 }

@@ -580,7 +580,7 @@ func (m *Model) anchorTop() {
 func (m *Model) renderPrinter(width int) *printer.Printer {
 	wrapWidth := 0
 	if m.wrapEnabled {
-		wrapWidth = max(0, width-m.printer.ContainerStyle().GetHorizontalFrameSize())
+		wrapWidth = width
 	}
 
 	container := m.printer.ContainerStyle().
@@ -590,7 +590,7 @@ func (m *Model) renderPrinter(width int) *printer.Printer {
 		UnsetMaxHeight()
 
 	return m.printer.With(
-		printer.WithWrap(wrapWidth),
+		printer.WithWrapWidth(wrapWidth),
 		printer.WithMaxNumber(m.rows.maxNumber),
 		printer.WithContainerWidth(width),
 		printer.WithContainerStyle(container),

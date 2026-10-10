@@ -236,7 +236,7 @@
 // the same tree and excerpts with the printer's styles and width, and
 // takes the same [ExcerptOption] values:
 //
-//	p := printer.New(printer.WithWrap(width))
+//	p := printer.New(printer.WithWrapWidth(width))
 //	lipgloss.Fprintln(os.Stderr, p.PrintError(err, niceyaml.WithContextLines(3)))
 //
 // Both draw the [ErrorReport] that [NewErrorReport] builds for the error.

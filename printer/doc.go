@@ -89,7 +89,8 @@
 //
 // # Word Wrapping
 //
-// [WithWrap] wraps content at a width, less the width of the gutter.
+// [WithWrapWidth] fits the output to a width, so the content of a line
+// wraps at the columns the gutter and the frame of the container leave.
 // [Printer.Layout] reports the row structure of a view without rendering
 // it: how many rows each line takes, which row a position lands on, and
 // how wide the rows are. A viewer that scrolls by rendered row maps rows

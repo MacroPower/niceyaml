@@ -501,7 +501,7 @@ func TestNewErrorHandler_Width(t *testing.T) {
 				niceyaml.AtPath(paths.MustParse("$.name")),
 			))
 
-			p := printer.New(printer.WithWrap(tc.width - fangs.Indent))
+			p := printer.New(printer.WithWrapWidth(tc.width))
 
 			var buf bytes.Buffer
 

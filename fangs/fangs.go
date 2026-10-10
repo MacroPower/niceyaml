@@ -54,19 +54,28 @@ func newConfig(opts []Option) config {
 		cfg.printer = printer.New()
 	}
 
+	// The handler puts Indent columns in front of every line, so the
+	// output wraps to the width less those columns and fits the width
+	// together with them.
+	if w := cfg.printer.WrapWidth(); w > 0 {
+		cfg.printer = cfg.printer.With(printer.WithWrapWidth(max(1, w-Indent)))
+	}
+
 	return cfg
 }
 
 // WithPrinter is an [Option] that sets the [*printer.Printer] that renders
 // errors through [printer.Printer.PrintReport]. The printer's width, set
-// with [printer.WithWrap], controls word wrapping, and its styles color
-// the highlighted locations. [WithExcerptOptions] sets the context lines
-// around each location and how much of a long line an excerpt shows.
+// with [printer.WithWrapWidth], is the width the output of the handler
+// fits, and its styles color the highlighted locations.
+// [WithExcerptOptions] sets the context lines around each location and
+// how much of a long line an excerpt shows.
 //
-// The handler indents every line by [Indent] columns, and
-// [printer.Printer.PrintReport] fits each excerpt and the frame of its
-// container within the width. To fit a terminal w columns wide, set the
-// width to w - [Indent], as the [NewErrorHandler] example does.
+// The handler indents every line by [Indent] columns and wraps what
+// [printer.Printer.PrintReport] renders to the width less those columns,
+// so the output fits a terminal of that width. To fit a terminal w
+// columns wide, set the width to w, as the [NewErrorHandler] example
+// does.
 func WithPrinter(p *printer.Printer) Option {
 	return func(cfg *config) {
 		cfg.printer = p
@@ -94,10 +103,9 @@ func WithExcerptOptions(opts ...niceyaml.ExcerptOption) Option {
 // NewErrorHandler creates a new [fang.ErrorHandler] that renders
 // [*go.jacobcolvin.com/niceyaml.SourceError] values with their annotated
 // source, using opts for the [printer.Printer]. To fit the output in a
-// terminal that is width columns wide, subtract [Indent] from the width
-// the printer wraps at:
+// terminal that is width columns wide, give the printer that width:
 //
-//	p := printer.New(printer.WithWrap(width - fangs.Indent))
+//	p := printer.New(printer.WithWrapWidth(width))
 //
 //	err := fang.Execute(ctx, rootCmd,
 //	    fang.WithErrorHandler(fangs.NewErrorHandler(fangs.WithPrinter(p))),

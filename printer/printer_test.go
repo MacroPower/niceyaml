@@ -532,7 +532,7 @@ func TestPrinter_PrintError_Wrap(t *testing.T) {
 
 	p := printer.New(
 		printer.WithStyles(yamltest.NewXMLStyles()),
-		printer.WithWrap(width),
+		printer.WithWrapWidth(width),
 	)
 
 	long := "a very long error message that certainly exceeds the width of the terminal"
@@ -597,7 +597,7 @@ func TestPrinter_PrintError_WrapFitsExcerpts(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := printer.New(append(tc.opts, printer.WithWrap(tc.width))...)
+			p := printer.New(append(tc.opts, printer.WithWrapWidth(tc.width))...)
 
 			got := p.PrintError(bound)
 			rows := strings.Split(got, "\n")
@@ -832,7 +832,7 @@ func TestPrinter_PrintError_MarksWrappedBindings(t *testing.T) {
 				printer.WithStyles(style.Styles{}),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithGutter(printer.NoGutter),
-				printer.WithWrap(tc.width),
+				printer.WithWrapWidth(tc.width),
 			)
 
 			assert.Equal(t, tc.want, p.PrintError(tc.err))
@@ -953,7 +953,7 @@ func TestPrinter_PrintError_MarksWrappedRange(t *testing.T) {
 	p := printer.New(
 		printer.WithStyles(style.Styles{}),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithWrap(40),
+		printer.WithWrapWidth(40),
 	)
 
 	want := stringtest.JoinLF(
@@ -1001,7 +1001,7 @@ func TestPrinter_PrintError_MarksLongWrappedValue(t *testing.T) {
 				printer.WithStyles(style.Styles{}),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithGutter(printer.NoGutter),
-				printer.WithWrap(tc.width),
+				printer.WithWrapWidth(tc.width),
 			)
 
 			rows := strings.Split(p.PrintError(err, niceyaml.WithExcerptWidth(0)), "\n")[2:]
@@ -1274,7 +1274,7 @@ func TestPrinter_WrappedMarkerRows(t *testing.T) {
 
 			view.Annotate(tc.line, ann)
 
-			p := testPrinter().With(printer.WithWrap(tc.width))
+			p := testPrinter().With(printer.WithWrapWidth(tc.width))
 
 			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
@@ -1971,7 +1971,7 @@ func TestPrinter_WordWrap(t *testing.T) {
 
 			tks := lexer.Tokenize(tc.input)
 
-			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrap(tc.width))
+			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.width))
 
 			got := p.Print(niceyaml.NewSourceFromTokens(tks).View())
 			assert.Equal(t, tc.want, got)
@@ -1999,7 +1999,7 @@ func TestPrinter_WordWrap_NarrowWidth(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrap(tc.width))
+			p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(tc.width))
 
 			got := p.Print(view)
 			rows := strings.Split(got, "\n")
@@ -2119,7 +2119,7 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 				view.Annotate(0, tc.annotation)
 			}
 
-			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrap(tc.width))
+			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.width))
 
 			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
@@ -2135,7 +2135,7 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 
 		// The blank row between the message lines stays, since the message
 		// asks for it.
-		p := testPrinter().With(printer.WithWrap(1))
+		p := testPrinter().With(printer.WithWrapWidth(1))
 
 		got := p.PrintError(errors.New("日本語\n\nnext"))
 		assert.Equal(t, stringtest.JoinLF("日", "本", "語", "", "n", "e", "x", "t"), got)
@@ -2175,7 +2175,7 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 				t.Parallel()
 
 				view := niceyaml.NewSourceFromString(tc.input).View()
-				p := printer.New(printer.WithGutter(printer.NoGutter), printer.WithWrap(1))
+				p := printer.New(printer.WithGutter(printer.NoGutter), printer.WithWrapWidth(1))
 
 				rows := strings.Split(p.Print(view), "\n")
 				for i, row := range rows {
@@ -2239,7 +2239,7 @@ func TestPrinter_WordWrap_SpaceCluster(t *testing.T) {
 			view := niceyaml.NewSourceFromString(tc.input).View()
 			view.Annotate(0, line.Annotation{Content: "x", Placement: line.Below, Col: tc.col})
 
-			p := testPrinter().With(printer.WithWrap(tc.width))
+			p := testPrinter().With(printer.WithWrapWidth(tc.width))
 
 			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
@@ -2279,7 +2279,7 @@ func TestPrinter_WordWrap_BreakpointPastWidth(t *testing.T) {
 	view := niceyaml.NewSourceFromString(input).View()
 
 	for _, width := range []int{12, 13, 14, 16} {
-		p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrap(width))
+		p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(width))
 
 		got := p.Print(view)
 		rows := strings.Split(got, "\n")
@@ -2354,7 +2354,7 @@ func TestPrinter_WordWrap_BreakSpaceBeforeBreakpoint(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString(tc.input).View()
-			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrap(tc.width))
+			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.width))
 
 			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
@@ -2371,7 +2371,7 @@ func TestPrinter_WordWrap_BreakSpaceBeforeBreakpoint(t *testing.T) {
 	t.Run("error message", func(t *testing.T) {
 		t.Parallel()
 
-		p := testPrinter().With(printer.WithWrap(10))
+		p := testPrinter().With(printer.WithWrapWidth(10))
 
 		got := p.PrintError(errors.New("key: value -x"))
 		assert.Equal(t, stringtest.JoinLF("key: value", "-x"), got)
@@ -2509,7 +2509,7 @@ func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
 				printer.WithStyles(style.New(lipgloss.NewStyle(), opts...)),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithGutter(printer.NoGutter),
-				printer.WithWrap(tc.width),
+				printer.WithWrapWidth(tc.width),
 			)
 
 			view := niceyaml.NewSourceFromString(tc.input).View()
@@ -2598,7 +2598,7 @@ func TestPrinter_Overlay_KeepsClusters(t *testing.T) {
 				printer.WithStyles(style.New(lipgloss.NewStyle(), style.Set(kind.GenericHighlight, red))),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithGutter(printer.NoGutter),
-				printer.WithWrap(tc.width),
+				printer.WithWrapWidth(tc.width),
 			)
 
 			plainView := niceyaml.NewSourceFromString(tc.input).View()
@@ -2637,7 +2637,7 @@ func TestPrinter_Overlay_KeepsClusters(t *testing.T) {
 			// The container pads each row by its whole clusters, so every
 			// row of the frame takes the same cells.
 			framed := p.With(
-				printer.WithWrap(0),
+				printer.WithWrapWidth(0),
 				printer.WithContainerStyle(lipgloss.NewStyle().Border(lipgloss.NormalBorder())),
 				printer.WithContainerWidth(20),
 			).Print(view)
@@ -2687,7 +2687,7 @@ func TestPrinter_WordWrap_NoEmptyRows(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString(tc.input).View()
-			p := testPrinter().With(printer.WithWrap(tc.width))
+			p := testPrinter().With(printer.WithWrapWidth(tc.width))
 
 			got := p.Print(view)
 			assert.Equal(t, tc.want, got)
@@ -2701,7 +2701,7 @@ func TestPrinter_WordWrap_NoEmptyRows(t *testing.T) {
 		// The gutter leaves one column of content, and no row shows the
 		// gutter alone.
 		view := niceyaml.NewSourceFromString("image: nginx-alpine").View()
-		p := testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrap(7))
+		p := testPrinterWithGutter(printer.DefaultGutter).With(printer.WithWrapWidth(7))
 
 		rows := strings.Split(p.Print(view), "\n")
 		for _, row := range rows {
@@ -2717,11 +2717,12 @@ func TestPrinter_WordWrap_BreakpointPastWidth_KeepsStyle(t *testing.T) {
 	t.Parallel()
 
 	// The row the hard wrap cuts off must open its style again, so the
-	// text it carries renders like the rows around it.
+	// text it carries renders like the rows around it. The width leaves
+	// seven columns after the gutter and the padding of the container.
 	input := "name: some-very-long-name-that-will-wrap-around-the-viewport-width-for-sure\n"
 	view := niceyaml.NewSourceFromString(input).View()
 
-	p := printer.New(printer.WithWrap(13))
+	p := printer.New(printer.WithWrapWidth(14))
 
 	rows := strings.Split(p.Print(view), "\n")
 
@@ -2759,7 +2760,7 @@ func TestPrinter_WordWrap_WideLineNumbers(t *testing.T) {
 	input := strings.Repeat("k: v\n", 10000) + "last: this is a long value that wraps"
 	source := niceyaml.NewSourceFromString(input)
 
-	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrap(30))
+	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(30))
 
 	got := p.Print(source.View().Slice(position.NewSpan(10000, 10001)))
 	for row := range strings.SplitSeq(got, "\n") {
@@ -2861,7 +2862,7 @@ func TestPrinter_PrintTokenDiff_Wrapping(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(printer.DiffGutter).With(printer.WithWrap(tc.width))
+			p := testPrinterWithGutter(printer.DiffGutter).With(printer.WithWrapWidth(tc.width))
 
 			view := diff.Diff(
 				niceyaml.NewSourceFromString(tc.before).Lines(),
@@ -3663,7 +3664,7 @@ func TestPrinter_AnnotationFarColumn(t *testing.T) {
 			view := niceyaml.NewSourceFromString(tc.input).View()
 			view.Annotate(0, line.Annotation{Content: "x", Placement: line.Below, Col: tc.col})
 
-			p := testPrinter().With(printer.WithWrap(tc.width))
+			p := testPrinter().With(printer.WithWrapWidth(tc.width))
 
 			var got string
 
@@ -4480,13 +4481,13 @@ func TestPrinter_With(t *testing.T) {
 	source := niceyaml.NewSourceFromString("key: this is a very long value that should wrap")
 
 	base := testPrinterWithGutter(printer.NoGutter)
-	narrow := base.With(printer.WithWrap(20))
+	narrow := base.With(printer.WithWrapWidth(20))
 
-	assert.Equal(t, 0, base.Wrap())
-	assert.Equal(t, 20, narrow.Wrap())
+	assert.Equal(t, 0, base.WrapWidth())
+	assert.Equal(t, 20, narrow.WrapWidth())
 
 	// A negative width disables wrapping, and Wrap reports that as 0.
-	assert.Equal(t, 0, base.With(printer.WithWrap(-5)).Wrap())
+	assert.Equal(t, 0, base.With(printer.WithWrapWidth(-5)).WrapWidth())
 
 	// The receiver still renders on one line; the copy wraps.
 	assert.Equal(t, "key: this is a very long value that should wrap", base.Print(source.View()))
@@ -4522,7 +4523,7 @@ func TestPrinter_Golden(t *testing.T) {
 			opts: []printer.Option{
 				printer.WithStyles(theme.Charm.Styles()),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithWrap(40),
+				printer.WithWrapWidth(40),
 			},
 		},
 		"default colors with line numbers": {
@@ -5953,7 +5954,7 @@ func TestPrinter_AnnotationWrap(t *testing.T) {
 			view := niceyaml.NewSourceFromString(tc.input).View()
 			view.Annotate(0, tc.annotation)
 
-			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrap(tc.width))
+			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.width))
 			if tc.annFunc != nil {
 				p = p.With(printer.WithAnnotation(tc.annFunc))
 			}
@@ -5983,7 +5984,7 @@ func TestPrinter_PrintError_WrappedAnnotation(t *testing.T) {
 	const width = 40
 
 	p := printer.New(
-		printer.WithWrap(width),
+		printer.WithWrapWidth(width),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
 
@@ -6071,7 +6072,7 @@ func TestPrinter_PrintError_AnnotationOnWrappedRow(t *testing.T) {
 			p := printer.New(
 				printer.WithStyles(style.Styles{}),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithWrap(40),
+				printer.WithWrapWidth(40),
 			)
 
 			assert.Equal(t, stringtest.JoinLF(tc.want...), p.PrintError(err, niceyaml.WithExcerptWidth(0)))
@@ -6085,7 +6086,7 @@ func TestPrinter_PrintError_AnnotationNearEdge(t *testing.T) {
 	const width = 80
 
 	p := printer.New(
-		printer.WithWrap(width),
+		printer.WithWrapWidth(width),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
 
@@ -6174,7 +6175,7 @@ func TestPrinter_LineNumbers_MaxNumber(t *testing.T) {
 	view := source.View().Slice(position.NewSpan(10000, source.Lines().Len()))
 	view.Annotate(10000, line.Annotation{Content: "note", Placement: line.Below, Col: 6})
 
-	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrap(30))
+	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(30))
 
 	got := p.Print(view)
 	for row := range strings.SplitSeq(got, "\n") {
@@ -6478,7 +6479,7 @@ func TestPrinter_Layout_MultiLineAnnotation(t *testing.T) {
 			view := niceyaml.NewSourceFromString("a: 1\nb: 2\n").View()
 			view.Annotate(0, line.Annotation{Content: "one\ntwo"})
 
-			p := testPrinter().With(printer.WithAnnotation(joined), printer.WithWrap(tc.width))
+			p := testPrinter().With(printer.WithAnnotation(joined), printer.WithWrapWidth(tc.width))
 
 			printed := strings.Split(strings.TrimSuffix(p.Print(view), "\n"), "\n")
 			assert.Len(t, printed, p.Layout(view).Rows())
@@ -6586,7 +6587,7 @@ func TestPrinter_Layout_Width(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrap(tc.wrap))
+			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.wrap))
 			view := tc.view.Slice(tc.spans...)
 			got := p.Layout(view).Width()
 
@@ -6733,7 +6734,7 @@ func TestPrinter_Layout_StyledAnnotationRows(t *testing.T) {
 			p := printer.New(
 				printer.WithContainerStyle(lipgloss.NewStyle()),
 				printer.WithGutter(tc.gutter),
-				printer.WithWrap(tc.wrap),
+				printer.WithWrapWidth(tc.wrap),
 				printer.WithStyles(style.New(
 					lipgloss.NewStyle(),
 					style.Set(kind.UIAnnotation, tc.style),
@@ -7009,7 +7010,7 @@ func TestPrinter_Layout_CellOf(t *testing.T) {
 				))
 			}
 
-			p := testPrinter().With(printer.WithWrap(tc.wrap))
+			p := testPrinter().With(printer.WithWrapWidth(tc.wrap))
 
 			assert.Equal(t, tc.want, p.Layout(view).CellOf(tc.pos))
 		})
@@ -7049,7 +7050,7 @@ func TestPrinter_Layout(t *testing.T) {
 		"        ^ last",
 	)
 
-	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrap(20))
+	p := testPrinterWithGutter(printer.LineNumberGutter).With(printer.WithWrapWidth(20))
 
 	t.Run("rows match print", func(t *testing.T) {
 		t.Parallel()
@@ -7206,7 +7207,7 @@ func TestPrinter_Layout(t *testing.T) {
 		// so the escaped text keeps one rune per source column and the wrap
 		// falls at the same column in both.
 		view := niceyaml.NewSourceFromString("k: \"\tx\x1by zz ww\"").View()
-		p := testPrinter().With(printer.WithWrap(10))
+		p := testPrinter().With(printer.WithWrapWidth(10))
 
 		got := p.Print(view)
 		require.Equal(t, stringtest.JoinLF(
@@ -7252,7 +7253,7 @@ func TestPrinter_Layout(t *testing.T) {
 				t.Parallel()
 
 				view := niceyaml.NewSourceFromString(tc.content).View()
-				p := testPrinter().With(printer.WithWrap(7))
+				p := testPrinter().With(printer.WithWrapWidth(7))
 
 				require.Equal(t, tc.want, p.Print(view))
 
@@ -7329,7 +7330,7 @@ func TestPrinter_Layout(t *testing.T) {
 				p := printer.New(
 					printer.WithGutter(printer.NoGutter),
 					printer.WithContainerStyle(lipgloss.NewStyle()),
-					printer.WithWrap(10),
+					printer.WithWrapWidth(10),
 					printer.WithStyles(tc.styles),
 				)
 
@@ -7390,7 +7391,7 @@ func TestPrinter_Layout(t *testing.T) {
 				p := printer.New(
 					printer.WithGutter(printer.NoGutter),
 					printer.WithContainerStyle(lipgloss.NewStyle()),
-					printer.WithWrap(tc.wrap),
+					printer.WithWrapWidth(tc.wrap),
 					printer.WithStyles(style.New(
 						lipgloss.NewStyle(),
 						style.Set(kind.LiteralString, lipgloss.NewStyle().Transform(tc.transform)),
@@ -7434,7 +7435,7 @@ func TestPrinter_Layout(t *testing.T) {
 		t.Parallel()
 
 		view := newView()
-		p := p.With(printer.WithWrap(0))
+		p := p.With(printer.WithWrapWidth(0))
 
 		got := p.Print(view)
 		require.Equal(t, stringtest.JoinLF(
@@ -7549,6 +7550,53 @@ func TestPrinter_ContainerWidth(t *testing.T) {
 	}
 }
 
+func TestPrinter_WrapWidth_FitsFrame(t *testing.T) {
+	t.Parallel()
+
+	// The width counts the frame of the container, so every row of Print
+	// and of PrintError fits it whatever the container draws around the
+	// content. The default container pads each row on the right, and a
+	// border adds a column on each side.
+	const width = 40
+
+	src := niceyaml.NewSourceFromString(
+		"name: a-very-long-name-that-will-wrap-around-the-width-for-sure\n",
+		niceyaml.WithName("long.yaml"),
+	)
+	err := yamltest.Bind(t, src, niceyaml.NewError(
+		"a message long enough to wrap around the width of the printer too",
+		niceyaml.AtPath(paths.Doc().Child("name")),
+	))
+
+	tcs := map[string]struct {
+		opts []printer.Option
+	}{
+		"default container": {},
+		"no container": {
+			opts: []printer.Option{printer.WithContainerStyle(lipgloss.NewStyle())},
+		},
+		"bordered and padded container": {
+			opts: []printer.Option{printer.WithContainerStyle(
+				lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(0, 1),
+			)},
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := printer.New(printer.WithWrapWidth(width)).With(tc.opts...)
+
+			for _, out := range []string{p.Print(src.View()), p.PrintError(err)} {
+				for row := range strings.SplitSeq(out, "\n") {
+					assert.LessOrEqual(t, lipgloss.Width(row), width, "%q", ansi.Strip(row))
+				}
+			}
+		})
+	}
+}
+
 func TestPrinter_ContainerWidth_Accessor(t *testing.T) {
 	t.Parallel()
 
@@ -7657,7 +7705,7 @@ func TestPrinter_AnnotationGutterSoftPerWrappedRow(t *testing.T) {
 		default:
 			return "F "
 		}
-	})).With(printer.WithWrap(12))
+	})).With(printer.WithWrapWidth(12))
 
 	var gutters []string
 
@@ -7930,7 +7978,7 @@ func TestPrinter_Clip(t *testing.T) {
 			t.Parallel()
 
 			view := newClippedView(tc.input, tc.cols, tc.overlays, tc.annotations...)
-			p := testPrinter().With(printer.WithWrap(tc.wrap))
+			p := testPrinter().With(printer.WithWrapWidth(tc.wrap))
 
 			assert.Equal(t, stringtest.JoinLF(tc.want...), p.Print(view))
 
@@ -8086,7 +8134,7 @@ func TestPrinter_Layout_Clip(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			l := testPrinter().With(printer.WithWrap(tc.wrap)).Layout(newView())
+			l := testPrinter().With(printer.WithWrapWidth(tc.wrap)).Layout(newView())
 			pos := position.New(0, tc.col)
 
 			assert.Equal(t, tc.wantRow, l.RowOf(pos), "row")

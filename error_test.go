@@ -3632,7 +3632,7 @@ func TestError_Width(t *testing.T) {
 			errPrinter := printer.New(
 				printer.WithGutter(printer.NoGutter),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithWrap(tc.width),
+				printer.WithWrapWidth(tc.width),
 			)
 
 			err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError("test error",
@@ -3678,7 +3678,7 @@ func TestError_Width_WithCustomPrinter(t *testing.T) {
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
 
-	errPrinter := customPrinter.With(printer.WithWrap(30))
+	errPrinter := customPrinter.With(printer.WithWrapWidth(30))
 
 	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 		"test error",
@@ -3700,7 +3700,7 @@ func TestError_Width_WithCustomPrinter(t *testing.T) {
 	assert.Greater(t, contentLines, 1, "expected content to wrap into multiple lines with custom printer")
 
 	// The caller's printer keeps its own width.
-	assert.Equal(t, 0, customPrinter.Wrap())
+	assert.Equal(t, 0, customPrinter.WrapWidth())
 }
 
 func TestError_Width_DefaultPrinter(t *testing.T) {
@@ -3712,7 +3712,7 @@ func TestError_Width_DefaultPrinter(t *testing.T) {
 	tokens := lexer.Tokenize(source)
 
 	// A printer with only a width keeps the default styles and gutter.
-	errPrinter := printer.New(printer.WithWrap(30))
+	errPrinter := printer.New(printer.WithWrapWidth(30))
 
 	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
 		"test error",
@@ -3803,7 +3803,7 @@ func TestError_Width_AnnotationWrapping(t *testing.T) {
 				printer.WithStyles(&style.Styles{}),
 				printer.WithGutter(printer.NoGutter),
 				printer.WithContainerStyle(lipgloss.NewStyle()),
-				printer.WithWrap(tc.width),
+				printer.WithWrapWidth(tc.width),
 			)
 
 			err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(
@@ -3840,7 +3840,7 @@ func TestError_Width_MultipleAnnotationsWrapping(t *testing.T) {
 		printer.WithStyles(&style.Styles{}),
 		printer.WithGutter(printer.NoGutter),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithWrap(50),
+		printer.WithWrapWidth(50),
 	)
 
 	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewSummary(
@@ -3886,7 +3886,7 @@ func TestError_Width_CombinedAnnotationsOnSameLine(t *testing.T) {
 		printer.WithStyles(&style.Styles{}),
 		printer.WithGutter(printer.NoGutter),
 		printer.WithContainerStyle(lipgloss.NewStyle()),
-		printer.WithWrap(40),
+		printer.WithWrapWidth(40),
 	)
 
 	err := yamltest.Bind(t, niceyaml.NewSourceFromString(source), niceyaml.NewError(

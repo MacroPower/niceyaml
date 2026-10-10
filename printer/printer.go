@@ -41,7 +41,7 @@ const wrapOnCharacters = " " + breakpoints
 // Every setting is an [Option]; to change one on an existing Printer,
 // derive a copy with [Printer.With]:
 //
-//	narrow := p.With(printer.WithWrap(40))
+//	narrow := p.With(printer.WithWrapWidth(40))
 //
 // Create instances with [New].
 //
@@ -88,7 +88,7 @@ func New(opts ...Option) *Printer {
 // With returns a copy of the [Printer] with the given options applied. The
 // receiver is unchanged, so callers can specialize a shared Printer per call:
 //
-//	wrapped := p.With(printer.WithWrap(80))
+//	wrapped := p.With(printer.WithWrapWidth(80))
 //
 // The copy shares the receiver's cache of blended styles unless [WithStyles]
 // is among the options; the cache is safe for concurrent use.
@@ -119,7 +119,7 @@ func (p *Printer) apply(opts []Option) {
 //   - [WithContainerWidth]
 //   - [WithGutter]
 //   - [WithAnnotation]
-//   - [WithWrap]
+//   - [WithWrapWidth]
 //   - [WithMaxNumber]
 type Option func(*config)
 
@@ -797,9 +797,9 @@ func WithContainerStyle(s lipgloss.Style) Option {
 // width of 0, the default, lets the container shrink to the widest row.
 //
 // The printer pads a row and never cuts one. A row can still run past n,
-// since an annotation column may push the layout wider than [WithWrap] and
-// a style transform may widen a row after it wraps. A viewer that scrolls
-// horizontally cuts the rows itself.
+// since an annotation column may push the layout wider than [WithWrapWidth]
+// and a style transform may widen a row after it wraps. A viewer that
+// scrolls horizontally cuts the rows itself.
 //
 // Use it for a viewer that renders one window of a document at a time, where
 // a window of short lines would otherwise draw a narrower box than the one
@@ -856,11 +856,18 @@ func WithAnnotation(fn AnnotationFunc) Option {
 	}
 }
 
-// WithWrap is an [Option] that sets the width for word wrapping.
+// WithWrapWidth is an [Option] that sets the width the output fits, in
+// columns. The gutter, the content, and the horizontal frame of the
+// container share it, so a row [Printer.Print] renders with its frame
+// takes no more than width columns, and the printer wraps the content of
+// a line at the columns the gutter and the frame leave. A row can still
+// run past the width, as [WithContainerWidth] describes.
+// [Printer.PrintError] fits its tree and each excerpt to the same width.
+//
 // A width of 0, the default, disables wrapping, and a negative width
-// counts as 0. The width of the box around the output is
-// [WithContainerWidth].
-func WithWrap(width int) Option {
+// counts as 0. [WithContainerWidth] pins the box to a width instead of
+// wrapping to it.
+func WithWrapWidth(width int) Option {
 	return func(c *config) {
 		c.wrap = max(0, width)
 	}
@@ -879,9 +886,9 @@ func WithMaxNumber(n int) Option {
 	}
 }
 
-// Wrap returns the width the printer wraps words at, or 0 when the
-// printer does not wrap.
-func (p *Printer) Wrap() int {
+// WrapWidth returns the width the output of the printer fits, as
+// [WithWrapWidth] sets it, or 0 when the printer does not wrap.
+func (p *Printer) WrapWidth() int {
 	return p.wrap
 }
 
@@ -1647,9 +1654,11 @@ func (c *blendCache) put(key string, st lipgloss.Style) lipgloss.Style {
 	return st
 }
 
-// contentWidth returns the available width for content after accounting for
-// gutter width. A positive printer width always wraps, so the result is at
-// least one column even when the gutter alone fills the width.
+// contentWidth returns the width left for the content of a row inside the
+// container, after the horizontal frame of the container and a gutter
+// gutterWidth wide. A positive printer width always wraps, so the result
+// is at least one column even when the frame and the gutter alone fill
+// the width.
 //
 // Returns 0 when the printer does not wrap.
 func (p *Printer) contentWidth(gutterWidth int) int {
@@ -1657,12 +1666,30 @@ func (p *Printer) contentWidth(gutterWidth int) int {
 		return 0
 	}
 
-	return max(1, p.wrap-gutterWidth)
+	return max(1, p.wrap-p.style.GetHorizontalFrameSize()-gutterWidth)
 }
 
-// wrapContent splits content into rows when the printer wraps.
+// textWidth returns the width left for text outside the container, such
+// as the tree of an error, after indent columns in front of it. As
+// [Printer.contentWidth], it is at least one column when the printer
+// wraps and 0 when it does not.
+func (p *Printer) textWidth(indent int) int {
+	if p.wrap <= 0 {
+		return 0
+	}
+
+	return max(1, p.wrap-indent)
+}
+
+// wrapContent splits content into rows when the printer wraps, for a row
+// inside the container after a gutter gutterWidth wide.
 func (p *Printer) wrapContent(content string, gutterWidth int) []string {
-	cw := p.contentWidth(gutterWidth)
+	return p.wrapTo(content, p.contentWidth(gutterWidth))
+}
+
+// wrapTo splits content into rows of at most cw cells, or at newlines
+// alone when cw is 0.
+func (p *Printer) wrapTo(content string, cw int) []string {
 	if cw <= 0 {
 		// A newline in the content is a row of its own with or without
 		// wrapping, so the row count matches what Print writes.

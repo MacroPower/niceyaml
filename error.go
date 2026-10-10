@@ -2092,7 +2092,8 @@ func WithContextLines(n int) ExcerptOption {
 // The width counts columns of the text and drops the columns outside
 // each window, so it bounds what an excerpt adds to a log. To fit rows
 // to a terminal, which folds a row and keeps every column, wrap them
-// with the printer option [go.jacobcolvin.com/niceyaml/printer.WithWrap].
+// with the printer option
+// [go.jacobcolvin.com/niceyaml/printer.WithWrapWidth].
 // The %+v verb of an [*Error] or a [*SourceError] renders at the default
 // width, since a verb takes no option. A program that logs its errors
 // with %+v and needs another width renders them with [FormatError].

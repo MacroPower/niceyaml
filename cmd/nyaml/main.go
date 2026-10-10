@@ -23,7 +23,7 @@ func main() {
 
 	// The error printer carries the terminal width so annotated source
 	// excerpts wrap to it.
-	errPrinter := printer.New(printer.WithWrap(terminalWidth()))
+	errPrinter := printer.New(printer.WithWrapWidth(terminalWidth()))
 
 	ctx, stop := notifyContext(context.Background())
 
@@ -163,8 +163,7 @@ func newRootCmd() (*cobra.Command, func() error) {
 }
 
 // terminalWidth returns the width of the terminal on stderr, or 90 when
-// stderr is not a terminal, less the [fangs.Indent] the error handler puts
-// in front of each line. Error output with styles wraps to that width, and
+// stderr is not a terminal. Error output with styles fits that width, and
 // the plain output the handler writes to a stream without color does not
 // wrap.
 func terminalWidth() int {
@@ -177,5 +176,5 @@ func terminalWidth() int {
 		}
 	}
 
-	return max(0, width-fangs.Indent)
+	return width
 }
