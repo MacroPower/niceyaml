@@ -268,43 +268,16 @@ func TestTokenBuilder(t *testing.T) {
 		assert.Equal(t, &pos, yamltest.NewTokenBuilder().Position(pos).Build().Position)
 	})
 
-	t.Run("chaining modifies builder", func(t *testing.T) {
+	t.Run("a setter after Build leaves the built token alone", func(t *testing.T) {
 		t.Parallel()
 
-		b := yamltest.NewTokenBuilder()
-		b.Value("first")
-
+		b := yamltest.NewTokenBuilder().Value("first").PositionLine(1)
 		tk1 := b.Build()
-		b.Value("second")
-
-		tk2 := b.Build()
+		tk2 := b.Value("second").PositionLine(2).Build()
 
 		assert.Equal(t, "first", tk1.Value)
-		assert.Equal(t, "second", tk2.Value)
-	})
-
-	t.Run("Build returns cloned token", func(t *testing.T) {
-		t.Parallel()
-
-		b := yamltest.NewTokenBuilder().Value("test")
-		tk1 := b.Build()
-		tk2 := b.Build()
-
-		assert.NotSame(t, tk1, tk2)
-		assert.Equal(t, tk1.Value, tk2.Value)
-	})
-
-	t.Run("Build does not share Position", func(t *testing.T) {
-		t.Parallel()
-
-		b := yamltest.NewTokenBuilder().PositionLine(1)
-		tk1 := b.Build()
-		b.PositionLine(2)
-
-		tk2 := b.Build()
-
-		assert.NotSame(t, tk1.Position, tk2.Position)
 		assert.Equal(t, 1, tk1.Position.Line)
+		assert.Equal(t, "second", tk2.Value)
 		assert.Equal(t, 2, tk2.Position.Line)
 	})
 
