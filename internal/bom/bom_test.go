@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/bom"
 )
@@ -37,8 +38,8 @@ func TestDrop(t *testing.T) {
 			marks: []int{0},
 		},
 		"mark after blank and comment lines": {
-			input: "\n# c\r\n\ufeffa: 1\n",
-			want:  "\n# c\r\na: 1\n",
+			input: stringtest.LinesLF("", "# c\r", "\ufeffa: 1"),
+			want:  stringtest.LinesLF("", "# c\r", "a: 1"),
 			marks: []int{6},
 		},
 		"mark on each line before the content": {
@@ -55,8 +56,8 @@ func TestDrop(t *testing.T) {
 			want:  "a: \"\ufeffx\"\n",
 		},
 		"mark in front of a document marker": {
-			input: "a: 1\n\ufeff---\nb: 2\n",
-			want:  "a: 1\n---\nb: 2\n",
+			input: stringtest.LinesLF("a: 1", "\ufeff---", "b: 2"),
+			want:  stringtest.LinesLF("a: 1", "---", "b: 2"),
 			marks: []int{5},
 		},
 		"mark in front of a document end marker": {
@@ -65,8 +66,8 @@ func TestDrop(t *testing.T) {
 			marks: []int{5},
 		},
 		"mark after a marker line": {
-			input: "a: 1\n--- # c\n\ufeffb: 2\n",
-			want:  "a: 1\n--- # c\nb: 2\n",
+			input: stringtest.LinesLF("a: 1", "--- # c", "\ufeffb: 2"),
+			want:  stringtest.LinesLF("a: 1", "--- # c", "b: 2"),
 			marks: []int{13},
 		},
 		"mark after a marker line with content": {

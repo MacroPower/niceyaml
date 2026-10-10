@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/lineend"
 )
@@ -41,7 +42,7 @@ func TestLinesStopsEarly(t *testing.T) {
 
 	var got []string
 
-	for ln := range lineend.Lines("a\nb\nc") {
+	for ln := range lineend.Lines(stringtest.JoinLF("a", "b", "c")) {
 		got = append(got, ln)
 		if len(got) == 2 {
 			break

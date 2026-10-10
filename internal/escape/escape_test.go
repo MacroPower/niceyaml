@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml/internal/escape"
 )
@@ -274,8 +275,8 @@ func TestMessage(t *testing.T) {
 			want:  "␛[31m␇␍",
 		},
 		"line feeds kept": {
-			input: "\nDid you mean this?\n\tvalidate\n",
-			want:  "\nDid you mean this?\n    validate\n",
+			input: stringtest.LinesLF("", "Did you mean this?", "\tvalidate"),
+			want:  stringtest.LinesLF("", "Did you mean this?", "    validate"),
 		},
 	}
 

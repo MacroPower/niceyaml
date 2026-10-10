@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/docstate"
@@ -15,7 +16,7 @@ import (
 func TestOf(t *testing.T) {
 	t.Parallel()
 
-	docs := niceyaml.NewSourceFromString("a: [1, 2]\n---\nb: 3\n").Documents()
+	docs := niceyaml.NewSourceFromString(stringtest.LinesLF("a: [1, 2]", "---", "b: 3")).Documents()
 	require.Len(t, docs, 2)
 
 	first := docstate.Of(docs[0])
