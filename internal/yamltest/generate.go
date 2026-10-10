@@ -10,16 +10,18 @@ import (
 // line is a key-value pair: "key_N: value_N". A count of zero or less
 // yields the empty string.
 func GenerateYAML(lines int) string {
-	if lines <= 0 {
-		return ""
-	}
+	return GenerateLines(lines, "key_%[1]d: value_%[1]d")
+}
 
+// GenerateLines creates content with the given number of lines. Each line
+// is format with the index of the line, counted from 0, as its one
+// argument, so "k%d: v" yields the lines "k0: v", "k1: v", and so on.
+// A count of zero or less yields the empty string.
+func GenerateLines(lines int, format string) string {
 	var sb strings.Builder
 
-	sb.Grow(lines * 25) // Approximate bytes per line.
-
 	for i := range lines {
-		fmt.Fprintf(&sb, "key_%d: value_%d\n", i, i)
+		fmt.Fprintf(&sb, format+"\n", i)
 	}
 
 	return sb.String()

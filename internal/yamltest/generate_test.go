@@ -66,6 +66,37 @@ func TestAliasBombs(t *testing.T) {
 	}
 }
 
+func TestGenerateLines(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		format string
+		want   string
+		lines  int
+	}{
+		"no lines":             {lines: 0, format: "k%d: v", want: ""},
+		"negative count":       {lines: -1, format: "k%d: v", want: ""},
+		"one line":             {lines: 1, format: "k%d: v", want: "k0: v\n"},
+		"index in each line":   {lines: 3, format: "k%d: v", want: "k0: v\nk1: v\nk2: v\n"},
+		"index twice in lines": {lines: 2, format: "k%[1]d: v%[1]d", want: "k0: v0\nk1: v1\n"},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, yamltest.GenerateLines(tc.lines, tc.format))
+		})
+	}
+}
+
+func TestGenerateYAML(t *testing.T) {
+	t.Parallel()
+
+	assert.Equal(t, "key_0: value_0\nkey_1: value_1\n", yamltest.GenerateYAML(2))
+	assert.Empty(t, yamltest.GenerateYAML(0))
+}
+
 func TestFlowSequence(t *testing.T) {
 	t.Parallel()
 
