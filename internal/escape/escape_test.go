@@ -13,7 +13,7 @@ import (
 func TestControl(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		input string
 		want  string
 	}{
@@ -122,16 +122,16 @@ func TestControl(t *testing.T) {
 		},
 	}
 
-	for name, tt := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := escape.Control(tt.input)
-			assert.Equal(t, tt.want, got)
+			got := escape.Control(tc.input)
+			assert.Equal(t, tc.want, got)
 
 			// Each replacement is one rune, so the columns of the text
 			// stay where they were.
-			assert.Equal(t, utf8.RuneCountInString(tt.input), utf8.RuneCountInString(got))
+			assert.Equal(t, utf8.RuneCountInString(tc.input), utf8.RuneCountInString(got))
 		})
 	}
 }
@@ -139,7 +139,7 @@ func TestControl(t *testing.T) {
 func TestRows(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		input string
 		want  string
 	}{
@@ -173,12 +173,12 @@ func TestRows(t *testing.T) {
 		},
 	}
 
-	for name, tt := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := escape.Rows(tt.input)
-			assert.Equal(t, tt.want, got)
+			got := escape.Rows(tc.input)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -186,7 +186,7 @@ func TestRows(t *testing.T) {
 func TestTabs(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		input string
 		want  string
 	}{
@@ -216,12 +216,12 @@ func TestTabs(t *testing.T) {
 		},
 	}
 
-	for name, tt := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := escape.Tabs(tt.input)
-			assert.Equal(t, tt.want, got)
+			got := escape.Tabs(tc.input)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -229,7 +229,7 @@ func TestTabs(t *testing.T) {
 func TestMessage(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]struct {
+	tcs := map[string]struct {
 		input string
 		want  string
 	}{
@@ -279,12 +279,12 @@ func TestMessage(t *testing.T) {
 		},
 	}
 
-	for name, tt := range tests {
+	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			got := escape.Message(tt.input)
-			assert.Equal(t, tt.want, got)
+			got := escape.Message(tc.input)
+			assert.Equal(t, tc.want, got)
 		})
 	}
 }
