@@ -234,19 +234,21 @@ func TestNewSourceFromLayers(t *testing.T) {
 		}
 
 		for name, layers := range tcs {
-			var cfg layerConfig
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-			err := layers.DecodeInto(t.Context(), &cfg)
-			require.EqualError(t, err, want, name)
-			assert.Equal(t, "prod.example.com", cfg.Server.Host, name)
+				var cfg layerConfig
 
-			var bound *niceyaml.SourceError
+				err := layers.DecodeInto(t.Context(), &cfg)
+				require.EqualError(t, err, want)
+				assert.Equal(t, "prod.example.com", cfg.Server.Host)
 
-			require.ErrorAs(t, err, &bound, name)
-			assert.Same(t, base, bound.Node(), name)
-			assert.Same(t, sources[0], bound.Source(), name)
+				bound := yamltest.RequireSourceError(t, err)
+				assert.Same(t, base, bound.Node())
+				assert.Same(t, sources[0], bound.Source())
 
-			assert.Equal(t, "server:\n  host: prod.example.com\n  port: 0\n", mergedText(t, layers), name)
+				assert.Equal(t, "server:\n  host: prod.example.com\n  port: 0\n", mergedText(t, layers))
+			})
 		}
 	})
 
@@ -413,15 +415,16 @@ func TestNewSourceFromLayers(t *testing.T) {
 				}
 
 				for placement, layers := range placements {
-					merged, err := niceyaml.NewSourceFromLayers(t.Context(), layers...)
-					require.EqualError(t, err, tc.want, placement)
-					require.ErrorIs(t, err, tc.err, placement)
-					assert.Nil(t, merged, placement)
+					t.Run(placement, func(t *testing.T) {
+						t.Parallel()
 
-					var bound *niceyaml.SourceError
+						merged, err := niceyaml.NewSourceFromLayers(t.Context(), layers...)
+						require.EqualError(t, err, tc.want)
+						require.ErrorIs(t, err, tc.err)
+						assert.Nil(t, merged)
 
-					require.ErrorAs(t, err, &bound, placement)
-					assert.Same(t, broken, bound.Source(), placement)
+						assert.Same(t, broken, yamltest.RequireSourceError(t, err).Source())
+					})
 				}
 			})
 		}
@@ -850,24 +853,26 @@ func TestNewSourceFromLayers_DecodeInto(t *testing.T) {
 		}
 
 		for name, tc := range tcs {
-			nodes := layerNodes(t, tc.layers...)
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-			_, err := yamltest.Layers(t, layersOf(nodes)...).Decode[config](
-				t.Context(), niceyaml.WithDisallowUnknownFields(true),
-			)
-			require.EqualError(t, err, tc.want, name)
-			require.ErrorIs(t, err, niceyaml.ErrDecode, name)
+				nodes := layerNodes(t, tc.layers...)
 
-			// The merged text has the name of the base file, and no
-			// problem binds in it.
-			var bound *niceyaml.SourceError
+				_, err := yamltest.Layers(t, layersOf(nodes)...).Decode[config](
+					t.Context(), niceyaml.WithDisallowUnknownFields(true),
+				)
+				require.EqualError(t, err, tc.want)
+				require.ErrorIs(t, err, niceyaml.ErrDecode)
 
-			require.ErrorAs(t, err, &bound, name)
-			assert.Same(t, nodes[0], bound.Node(), name)
+				// The merged text has the name of the base file, and no
+				// problem binds in it.
+				bound := yamltest.RequireSourceError(t, err)
+				assert.Same(t, nodes[0], bound.Node())
 
-			for _, problem := range yamltest.ProblemsOf(bound) {
-				assert.Contains(t, nodes, problem.Bound.Node(), name)
-			}
+				for _, problem := range yamltest.ProblemsOf(bound) {
+					assert.Contains(t, nodes, problem.Bound.Node())
+				}
+			})
 		}
 	})
 
@@ -1595,16 +1600,19 @@ func TestNode_Origin(t *testing.T) {
 		// A Source gives the Node its Document method returns, and a Node
 		// gives itself.
 		for name, top := range map[string]niceyaml.Layer{"source": prod, "node": prodDoc} {
-			doc, err := yamltest.Layers(t, base, top).Document()
-			require.NoError(t, err, name)
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-			origin, err := doc.Origin()
-			require.NoError(t, err, name)
-			assert.Same(t, prodDoc, origin, name)
+				doc := mergedDocument(t, yamltest.Layers(t, base, top))
 
-			// The merged document keeps the file path of the lowest layer.
-			assert.Equal(t, "conf/base.yaml", doc.FilePath(), name)
-			assert.Equal(t, "conf/prod.yaml", origin.FilePath(), name)
+				origin, err := doc.Origin()
+				require.NoError(t, err)
+				assert.Same(t, prodDoc, origin)
+
+				// The merged document keeps the file path of the lowest layer.
+				assert.Equal(t, "conf/base.yaml", doc.FilePath())
+				assert.Equal(t, "conf/prod.yaml", origin.FilePath())
+			})
 		}
 	})
 
@@ -1730,18 +1738,19 @@ func TestNode_Origin(t *testing.T) {
 		}
 
 		for name, tc := range tcs {
-			doc, err := yamltest.Layers(t, tc.layers...).Document()
-			require.NoError(t, err, name)
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-			node := doc
-			if !tc.path.IsRoot() {
-				node = yamltest.At(t, doc, tc.path)
-			}
+				node := mergedDocument(t, yamltest.Layers(t, tc.layers...))
+				if !tc.path.IsRoot() {
+					node = yamltest.At(t, node, tc.path)
+				}
 
-			origin, err := node.Origin()
-			require.NoError(t, err, name)
-			assert.Equal(t, tc.wantLayer, origin.Source().Name(), name)
-			assert.Equal(t, tc.want, origin.View().Held().Content(), name)
+				origin, err := node.Origin()
+				require.NoError(t, err)
+				assert.Equal(t, tc.wantLayer, origin.Source().Name())
+				assert.Equal(t, tc.want, origin.View().Held().Content())
+			})
 		}
 	})
 
@@ -1776,28 +1785,26 @@ func TestNode_Origin(t *testing.T) {
 		}
 
 		for name, tc := range tcs {
-			prod := niceyaml.NewSourceFromString(
-				tc.prod,
-				niceyaml.WithName("prod.yaml"),
-				niceyaml.WithReferences(shared),
-			)
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 
-			doc, err := yamltest.Layers(t, base, prod).Document()
-			require.NoError(t, err, name)
+				prod := niceyaml.NewSourceFromString(
+					tc.prod,
+					niceyaml.WithName("prod.yaml"),
+					niceyaml.WithReferences(shared),
+				)
 
-			// The merged document holds the value the alias reads.
-			node := yamltest.At(t, doc, tc.path)
+				// The merged document holds the value the alias reads.
+				node := yamltest.At(t, mergedDocument(t, yamltest.Layers(t, base, prod)), tc.path)
 
-			origin, err := node.Origin()
-			require.EqualError(t, err, tc.err, name)
-			require.ErrorIs(t, err, paths.ErrAlias, name)
-			assert.Nil(t, origin, name)
+				origin, err := node.Origin()
+				require.EqualError(t, err, tc.err)
+				require.ErrorIs(t, err, paths.ErrAlias)
+				assert.Nil(t, origin)
 
-			// The error names the layer that holds the alias.
-			var bound *niceyaml.SourceError
-
-			require.ErrorAs(t, err, &bound, name)
-			assert.Same(t, prod, bound.Source(), name)
+				// The error names the layer that holds the alias.
+				assert.Same(t, prod, yamltest.RequireSourceError(t, err).Source())
+			})
 		}
 
 		// The mapping that holds the merge key has a Node in its layer.
