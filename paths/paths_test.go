@@ -2614,35 +2614,33 @@ func TestPath_Node(t *testing.T) {
 func TestPath_Token_Anchors(t *testing.T) {
 	t.Parallel()
 
-	input := `
-base: &b
-  a: 1
-  b: 2
-flow: &f {x: 10, b: 200}
-other: *b
-list: &l
-  - one
-  - two
-copy: *l
-tagged: !!str 5
-merged:
-  <<: *b
-  b: 20
-  c: 3
-multi:
-  <<: [*b, *f]
-m: &m
-  <<: *b
-  d: 4
-chain:
-  <<: *m
-late:
-  b: 30
-  c: 31
-  <<: *b
-`
-
-	doc := yamltest.FirstDocument(t, input).DocumentAST()
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		base: &b
+		  a: 1
+		  b: 2
+		flow: &f {x: 10, b: 200}
+		other: *b
+		list: &l
+		  - one
+		  - two
+		copy: *l
+		tagged: !!str 5
+		merged:
+		  <<: *b
+		  b: 20
+		  c: 3
+		multi:
+		  <<: [*b, *f]
+		m: &m
+		  <<: *b
+		  d: 4
+		chain:
+		  <<: *m
+		late:
+		  b: 30
+		  c: 31
+		  <<: *b
+	`)).DocumentAST()
 
 	tcs := map[string]struct {
 		path      paths.Path
@@ -2653,121 +2651,121 @@ late:
 		"child of anchored mapping": {
 			path:      paths.Doc().Child("base", "a"),
 			wantValue: "1",
-			wantLine:  3,
+			wantLine:  2,
 		},
 		"key of anchored mapping entry": {
 			path:      paths.Doc().Child("base", "a"),
 			key:       true,
 			wantValue: "a",
-			wantLine:  3,
+			wantLine:  2,
 		},
 		"anchored mapping value target is the entry key": {
 			path:      paths.Doc().Child("base"),
 			wantValue: "base",
-			wantLine:  2,
+			wantLine:  1,
 		},
 		"anchored flow mapping value target is the entry key": {
 			path:      paths.Doc().Child("flow"),
 			wantValue: "flow",
-			wantLine:  5,
+			wantLine:  4,
 		},
 		"anchored sequence value target is the entry key": {
 			path:      paths.Doc().Child("list"),
 			wantValue: "list",
-			wantLine:  7,
+			wantLine:  6,
 		},
 		"child through alias lands in the anchor": {
 			path:      paths.Doc().Child("other", "b"),
 			wantValue: "2",
-			wantLine:  4,
+			wantLine:  3,
 		},
 		"alias value target is the alias token": {
 			path:      paths.Doc().Child("other"),
 			wantValue: "*",
-			wantLine:  6,
+			wantLine:  5,
 		},
 		"alias key target is its key": {
 			path:      paths.Doc().Child("other"),
 			key:       true,
 			wantValue: "other",
-			wantLine:  6,
+			wantLine:  5,
 		},
 		"index through anchored sequence": {
 			path:      paths.Doc().Child("list").Index(1),
 			wantValue: "two",
-			wantLine:  9,
+			wantLine:  8,
 		},
 		"index through aliased sequence": {
 			path:      paths.Doc().Child("copy").Index(0),
 			wantValue: "one",
-			wantLine:  8,
+			wantLine:  7,
 		},
 		"tagged scalar value target skips the tag": {
 			path:      paths.Doc().Child("tagged"),
 			wantValue: "5",
-			wantLine:  11,
+			wantLine:  10,
 		},
 		"merged key resolves to the anchor": {
 			path:      paths.Doc().Child("merged", "a"),
 			wantValue: "1",
-			wantLine:  3,
+			wantLine:  2,
 		},
 		"merged key target resolves to the anchor key": {
 			path:      paths.Doc().Child("merged", "a"),
 			key:       true,
 			wantValue: "a",
-			wantLine:  3,
+			wantLine:  2,
 		},
 		"own key after merge wins": {
 			path:      paths.Doc().Child("merged", "b"),
 			wantValue: "20",
-			wantLine:  14,
+			wantLine:  13,
 		},
 		"merge after own key wins": {
 			path:      paths.Doc().Child("late", "b"),
 			wantValue: "2",
-			wantLine:  4,
+			wantLine:  3,
 		},
 		"merge after own key wins at the key": {
 			path:      paths.Doc().Child("late", "b"),
 			key:       true,
 			wantValue: "b",
-			wantLine:  4,
+			wantLine:  3,
 		},
 		"own key before merge without that key": {
 			path:      paths.Doc().Child("late", "c"),
 			wantValue: "31",
-			wantLine:  25,
+			wantLine:  24,
 		},
 		"own key next to merge": {
 			path:      paths.Doc().Child("merged", "c"),
 			wantValue: "3",
-			wantLine:  15,
+			wantLine:  14,
 		},
 		"merge sequence first source": {
 			path:      paths.Doc().Child("multi", "a"),
 			wantValue: "1",
-			wantLine:  3,
+			wantLine:  2,
 		},
 		"merge sequence second source": {
 			path:      paths.Doc().Child("multi", "x"),
 			wantValue: "10",
-			wantLine:  5,
+			wantLine:  4,
 		},
 		"merge sequence later source wins": {
 			path:      paths.Doc().Child("multi", "b"),
 			wantValue: "200",
-			wantLine:  5,
+			wantLine:  4,
 		},
 		"merge of a merged mapping": {
 			path:      paths.Doc().Child("chain", "a"),
 			wantValue: "1",
-			wantLine:  3,
+			wantLine:  2,
 		},
 		"merge of a merged mapping own key": {
 			path:      paths.Doc().Child("chain", "d"),
 			wantValue: "4",
-			wantLine:  20,
+			wantLine:  19,
 		},
 	}
 
@@ -3760,40 +3758,38 @@ func TestPath_Token_NotFound(t *testing.T) {
 func TestPath_Wildcards(t *testing.T) {
 	t.Parallel()
 
-	input := `
-items:
-  - name: a
-    tags: [x, y]
-  - name: b
-    tags: [z]
-meta:
-  name: c
-  nested:
-    name: d
-ref: &r
-  name: e
-alias: *r
-chain:
-  a:
-    a:
-      a: 1
-merged:
-  <<: *r
-nest:
-  a:
-    b:
-      a:
-        c: 1
-    c: 2
-nestseq:
-  a:
-    - a: [x, y]
-    - z
-aliased: [&s [p, q], [r], *s]
-refs: [*r, *r]
-`
-
-	doc := yamltest.FirstDocument(t, input).DocumentAST()
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		items:
+		  - name: a
+		    tags: [x, y]
+		  - name: b
+		    tags: [z]
+		meta:
+		  name: c
+		  nested:
+		    name: d
+		ref: &r
+		  name: e
+		alias: *r
+		chain:
+		  a:
+		    a:
+		      a: 1
+		merged:
+		  <<: *r
+		nest:
+		  a:
+		    b:
+		      a:
+		        c: 1
+		    c: 2
+		nestseq:
+		  a:
+		    - a: [x, y]
+		    - z
+		aliased: [&s [p, q], [r], *s]
+		refs: [*r, *r]
+	`)).DocumentAST()
 
 	tcs := map[string]struct {
 		path paths.Path
@@ -4334,20 +4330,18 @@ func TestPath_Node_NestedMergeLists(t *testing.T) {
 	// longer list. A lookup in c searches each list from its last source
 	// back, so it searches the longest list before the earlier sources of
 	// the two shorter ones.
-	input := `
-a: &a {k: A}
-b: &b
-  <<:
-    - {j: J}
-    - {i: I}
-    - <<: [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a]
-c: &c
-  own: C
-  <<: [{h: H}, *b, {g: G}]
-l: [*c, *c, *c]
-`
-
-	doc := yamltest.FirstDocument(t, input).DocumentAST()
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		a: &a {k: A}
+		b: &b
+		  <<:
+		    - {j: J}
+		    - {i: I}
+		    - <<: [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a, *a]
+		c: &c
+		  own: C
+		  <<: [{h: H}, *b, {g: G}]
+		l: [*c, *c, *c]
+	`)).DocumentAST()
 
 	tcs := map[string]struct {
 		err  error
@@ -4414,25 +4408,23 @@ l: [*c, *c, *c]
 func TestPath_Token_Keys(t *testing.T) {
 	t.Parallel()
 
-	input := `
-"quoted key": 1
-'single': 2
-plain.dotted: 3
-7: 4
-? complex
-: 5
-empty: {}
-none: []
-!!str tagged: 6
-&k anchored: 7
-base: &kk aliased_name
-*kk : 8
-? |
-  block
-: 9
-`
-
-	doc := yamltest.FirstDocument(t, input).DocumentAST()
+	doc := yamltest.FirstDocument(t, stringtest.Input(`
+		"quoted key": 1
+		'single': 2
+		plain.dotted: 3
+		7: 4
+		? complex
+		: 5
+		empty: {}
+		none: []
+		!!str tagged: 6
+		&k anchored: 7
+		base: &kk aliased_name
+		*kk : 8
+		? |
+		  block
+		: 9
+	`)).DocumentAST()
 
 	tcs := map[string]struct {
 		path      paths.Path
