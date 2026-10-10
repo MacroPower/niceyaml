@@ -372,78 +372,116 @@ func TestNewLines_PerLine(t *testing.T) {
 	}
 }
 
-func TestNewLines_NonStandardLineNumbers(t *testing.T) {
+// TestNewLines_LineNumbers verifies that each line takes its number from the
+// Position.Line of the tokens on it, wherever the stream starts and whichever
+// lines it skips.
+func TestNewLines_LineNumbers(t *testing.T) {
 	t.Parallel()
 
+	strTkb := yamltest.NewTokenBuilder().Type(token.StringType).PositionColumn(1)
+
 	tcs := map[string]struct {
-		input         string
-		wantLineNums  []int
-		startLine     int
-		wantLineCount int
+		tks  token.Tokens
+		want []int
 	}{
+		"tokens starting at line 1": {
+			tks: tokens.Tokenize(stringtest.Input(`
+				key1: value1
+				key2: value2
+				key3: value3
+			`)),
+			want: []int{1, 2, 3},
+		},
 		"tokens starting at line 10": {
-			input: stringtest.Input(`
+			tks: tokenizeAt(stringtest.Input(`
 				key: value
 				other: data
-			`),
-			startLine:     10,
-			wantLineNums:  []int{10, 11},
-			wantLineCount: 2,
+			`), 10),
+			want: []int{10, 11},
 		},
 		"tokens starting at line 100": {
-			input:         "single: line\n",
-			startLine:     100,
-			wantLineNums:  []int{100},
-			wantLineCount: 1,
+			tks:  tokenizeAt("single: line\n", 100),
+			want: []int{100},
 		},
 		"nested map starting at line 50": {
-			input: stringtest.Input(`
+			tks: tokenizeAt(stringtest.Input(`
 				parent:
 				  child: value
 				  sibling: another
-			`),
-			startLine:     50,
-			wantLineNums:  []int{50, 51, 52},
-			wantLineCount: 3,
+			`), 50),
+			want: []int{50, 51, 52},
 		},
 		"literal block starting at line 20": {
-			input: stringtest.Input(`
+			tks: tokenizeAt(stringtest.Input(`
 				script: |
 				  line1
 				  line2
-			`),
-			startLine:     20,
-			wantLineNums:  []int{20, 21, 22},
-			wantLineCount: 3,
+			`), 20),
+			want: []int{20, 21, 22},
 		},
 		"folded block starting at line 30": {
-			input: stringtest.Input(`
+			tks: tokenizeAt(stringtest.Input(`
 				desc: >
 				  part1
 				  part2
-			`),
-			startLine:     30,
-			wantLineNums:  []int{30, 31, 32},
-			wantLineCount: 3,
+			`), 30),
+			want: []int{30, 31, 32},
 		},
 		"list starting at line 25": {
-			input: stringtest.Input(`
+			tks: tokenizeAt(stringtest.Input(`
 				items:
 				  - one
 				  - two
-			`),
-			startLine:     25,
-			wantLineNums:  []int{25, 26, 27},
-			wantLineCount: 3,
+			`), 25),
+			want: []int{25, 26, 27},
 		},
 		"comment and key at line 15": {
-			input: stringtest.Input(`
+			tks: tokenizeAt(stringtest.Input(`
 				# comment
 				key: value
-			`),
-			startLine:     15,
-			wantLineNums:  []int{15, 16},
-			wantLineCount: 2,
+			`), 15),
+			want: []int{15, 16},
+		},
+		"gap between two sections": {
+			tks: joinTokens(
+				tokenizeAt("key1: value1\nkey2: value2\n", 10),
+				tokenizeAt("key3: value3\nkey4: value4\n", 40),
+			),
+			want: []int{10, 11, 40, 41},
+		},
+		"large gap": {
+			tks: joinTokens(
+				tokenizeAt("first: value\n", 5),
+				tokenizeAt("second: value\n", 100),
+			),
+			want: []int{5, 100},
+		},
+		"multiple gaps": {
+			tks: joinTokens(
+				tokenizeAt("keya: value\n", 10),
+				tokenizeAt("keyb: value\n", 20),
+				tokenizeAt("keyc: value\n", 30),
+			),
+			want: []int{10, 20, 30},
+		},
+		"lone hand-built token": {
+			tks: token.Tokens{
+				strTkb.Clone().Origin("value\n").Value("value").PositionLine(42).Build(),
+			},
+			want: []int{42},
+		},
+		"hand-built tokens with a gap": {
+			tks: joinTokens(token.Tokens{
+				strTkb.Clone().Origin("first\n").Value("first").PositionLine(100).Build(),
+				strTkb.Clone().Origin("second\n").Value("second").PositionLine(200).Build(),
+			}),
+			want: []int{100, 200},
+		},
+		// With no Position to read, NewLines numbers the stream from line 1
+		// and gives the parts that number.
+		"token with nil position": {
+			tks:  token.Tokens{{Type: token.StringType, Origin: "test\n", Value: "test"}},
+			want: []int{1},
 		},
 	}
 
@@ -451,33 +489,65 @@ func TestNewLines_NonStandardLineNumbers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			// Tokenize and adjust line numbers to simulate non-line-1 start.
-			tks := tokens.Tokenize(tc.input)
+			lines := line.NewLines(tc.tks)
 
-			offset := tc.startLine - 1
-			for _, tk := range tks {
-				if tk.Position != nil {
-					tk.Position.Line += offset
-				}
+			// Every part carries the number of its line.
+			require.NoError(t, yamltest.ValidateLines(lines))
+
+			got := make([]int, 0, lines.Len())
+			for _, ln := range lines.All() {
+				got = append(got, ln.Number())
 			}
 
-			lines := line.NewLines(tks)
+			assert.Equal(t, tc.want, got)
 
-			require.Equal(t, tc.wantLineCount, lines.Len(), "wrong number of lines")
-
-			for i, wantNum := range tc.wantLineNums {
-				assert.Equal(t, wantNum, lines.Line(i).Number(), "line %d has wrong number", i)
-			}
-
-			// The round-trip preserves the content of the dumped tokens.
+			// The tokens come back whole, and Prev and Next still link
+			// them across the gaps.
 			gotTokens := lines.Tokens()
-			assert.Equal(
-				t,
-				yamltest.DumpTokenOrigins(tks),
-				yamltest.DumpTokenOrigins(gotTokens),
-				"round-trip content mismatch",
-			)
+			assert.Equal(t, yamltest.DumpTokenOrigins(tc.tks), yamltest.DumpTokenOrigins(gotTokens))
+			assertLinked(t, "tokens", gotTokens)
 		})
+	}
+}
+
+// tokenizeAt tokenizes input and moves its tokens down so that the first
+// line of input has the line number first.
+func tokenizeAt(input string, first int) token.Tokens {
+	tks := tokens.Tokenize(input)
+	for _, tk := range tks {
+		tk.Position.Line += first - 1
+	}
+
+	return tks
+}
+
+// joinTokens links the tokens of streams into one stream, in order.
+func joinTokens(streams ...token.Tokens) token.Tokens {
+	var joined token.Tokens
+
+	for _, tks := range streams {
+		joined.Add(tks...)
+	}
+
+	return joined
+}
+
+// assertLinked asserts that Prev and Next link each of tks to its neighbors
+// in order and that the chain stops at both ends. The what argument names
+// tks in the failure messages.
+func assertLinked(t *testing.T, what string, tks token.Tokens) {
+	t.Helper()
+
+	if len(tks) == 0 {
+		return
+	}
+
+	assert.Nil(t, tks[0].Prev, "%s: first Prev", what)
+	assert.Nil(t, tks[len(tks)-1].Next, "%s: last Next", what)
+
+	for i := range len(tks) - 1 {
+		assert.Same(t, tks[i+1], tks[i].Next, "%s: token %d Next", what, i)
+		assert.Same(t, tks[i], tks[i+1].Prev, "%s: token %d Prev", what, i+1)
 	}
 }
 
@@ -514,152 +584,6 @@ func TestNewLines_DroppedNewline(t *testing.T) {
 				assert.Equal(t, i+1, ln.Number())
 				assert.Equal(t, want, ln.Content())
 			}
-		})
-	}
-}
-
-func TestNewLines_GappedLineNumbers(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		buildTokens   func() token.Tokens
-		wantLineNums  []int
-		wantLineCount int
-	}{
-		"gap between two sections (lines 10-11, 40-41)": {
-			buildTokens: func() token.Tokens {
-				// Build tokens for lines 10-11.
-				tks1 := tokens.Tokenize("key1: value1\nkey2: value2\n")
-				for _, tk := range tks1 {
-					if tk.Position != nil {
-						tk.Position.Line += 9 // Shift to lines 10, 11.
-					}
-				}
-
-				// Build tokens for lines 40-41.
-				tks2 := tokens.Tokenize("key3: value3\nkey4: value4\n")
-				for _, tk := range tks2 {
-					if tk.Position != nil {
-						tk.Position.Line += 39 // Shift to lines 40, 41.
-					}
-				}
-
-				// Combine them.
-				combined := token.Tokens{}
-
-				for _, tk := range tks1 {
-					combined.Add(tk)
-				}
-
-				for _, tk := range tks2 {
-					combined.Add(tk)
-				}
-
-				return combined
-			},
-			wantLineNums:  []int{10, 11, 40, 41},
-			wantLineCount: 4,
-		},
-		"large gap (lines 5, 100)": {
-			buildTokens: func() token.Tokens {
-				tks1 := tokens.Tokenize("first: value\n")
-
-				for _, tk := range tks1 {
-					if tk.Position != nil {
-						tk.Position.Line += 4 // Shift to line 5.
-					}
-				}
-
-				tks2 := tokens.Tokenize("second: value\n")
-
-				for _, tk := range tks2 {
-					if tk.Position != nil {
-						tk.Position.Line += 99 // Shift to line 100.
-					}
-				}
-
-				combined := token.Tokens{}
-
-				for _, tk := range tks1 {
-					combined.Add(tk)
-				}
-
-				for _, tk := range tks2 {
-					combined.Add(tk)
-				}
-
-				return combined
-			},
-			wantLineNums:  []int{5, 100},
-			wantLineCount: 2,
-		},
-		"multiple gaps (lines 10, 20, 30)": {
-			buildTokens: func() token.Tokens {
-				combined := token.Tokens{}
-
-				for i, lineNum := range []int{10, 20, 30} {
-					tks := tokens.Tokenize("key: value\n")
-
-					for _, tk := range tks {
-						if tk.Position != nil {
-							tk.Position.Line = lineNum + (tk.Position.Line - 1)
-						}
-					}
-
-					// Change the key to be unique.
-					if len(tks) > 0 {
-						tks[0].Value = "key" + string(rune('a'+i))
-						tks[0].Origin = "key" + string(rune('a'+i))
-					}
-
-					for _, tk := range tks {
-						combined.Add(tk)
-					}
-				}
-
-				return combined
-			},
-			wantLineNums:  []int{10, 20, 30},
-			wantLineCount: 3,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			tks := tc.buildTokens()
-			lines := line.NewLines(tks)
-
-			require.Equal(t, tc.wantLineCount, lines.Len(), "wrong number of lines")
-
-			for i, wantNum := range tc.wantLineNums {
-				assert.Equal(t, wantNum, lines.Line(i).Number(), "line %d has wrong number", i)
-			}
-
-			// Prev and Next link the tokens across gaps.
-			gotTokens := lines.Tokens()
-			require.NotEmpty(t, gotTokens, "expected non-empty tokens")
-
-			// Forward traversal reaches every token.
-			forwardCount := 0
-
-			for tk := gotTokens[0]; tk != nil; tk = tk.Next {
-				forwardCount++
-			}
-
-			assert.Equal(t, len(gotTokens), forwardCount, "forward traversal count mismatch")
-
-			// Backward traversal reaches every token.
-			lastTk := gotTokens[len(gotTokens)-1]
-
-			backwardCount := 0
-
-			for tk := lastTk; tk != nil; tk = tk.Prev {
-				backwardCount++
-			}
-
-			assert.Equal(t, len(gotTokens), backwardCount, "backward traversal count mismatch")
 		})
 	}
 }
@@ -2260,19 +2184,10 @@ func TestLines_TokenRanges(t *testing.T) {
 
 		// Two sections whose line numbers jump from 11 to 40, so the line
 		// numbers of the tokens differ from the indices of their lines.
-		gappedTks := token.Tokens{}
-
-		for _, tk := range tokens.Tokenize("key1: value1\nkey2: value2\n") {
-			tk.Position.Line += 9
-			gappedTks.Add(tk)
-		}
-
-		for _, tk := range tokens.Tokenize("key3: |\n  a\n  b\n") {
-			tk.Position.Line += 39
-			gappedTks.Add(tk)
-		}
-
-		gapped := line.NewLines(gappedTks)
+		gapped := line.NewLines(joinTokens(
+			tokenizeAt("key1: value1\nkey2: value2\n", 10),
+			tokenizeAt("key3: |\n  a\n  b\n", 40),
+		))
 		require.Equal(t, 5, gapped.Len())
 		require.Equal(t, 40, gapped.Line(2).Number())
 
@@ -2471,121 +2386,6 @@ func TestLines_Content_Empty(t *testing.T) {
 
 		lines := line.Lines{}
 		assert.Empty(t, lines.Content())
-	})
-}
-
-func TestLine_Number_Fallbacks(t *testing.T) {
-	t.Parallel()
-
-	t.Run("line with set number returns that number", func(t *testing.T) {
-		t.Parallel()
-
-		input := "key: value\n"
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
-
-		require.Equal(t, 1, lines.Len())
-		// The line number is 1, since the lexer counts lines from 1.
-		assert.Equal(t, 1, lines.Line(0).Number())
-	})
-
-	t.Run("empty line returns zero", func(t *testing.T) {
-		t.Parallel()
-
-		// Create an empty Line directly.
-		var ln line.Line
-
-		assert.Equal(t, 0, ln.Number())
-	})
-
-	t.Run("multiple lines have correct numbers", func(t *testing.T) {
-		t.Parallel()
-
-		input := stringtest.Input(`
-			key1: value1
-			key2: value2
-			key3: value3
-		`)
-		tks := tokens.Tokenize(input)
-		lines := line.NewLines(tks)
-
-		require.Equal(t, 3, lines.Len())
-		assert.Equal(t, 1, lines.Line(0).Number())
-		assert.Equal(t, 2, lines.Line(1).Number())
-		assert.Equal(t, 3, lines.Line(2).Number())
-	})
-
-	t.Run("token with nil position numbers from one", func(t *testing.T) {
-		t.Parallel()
-
-		tks := token.Tokens{}
-		tks.Add(&token.Token{
-			Type:     token.StringType,
-			Origin:   "test\n",
-			Value:    "test",
-			Position: nil, // Nil position.
-		})
-
-		lines := line.NewLines(tks)
-
-		require.Equal(t, 1, lines.Len())
-
-		// With no Position to read, NewLines numbers the stream from line 1.
-		assert.Equal(t, 1, lines.Line(0).Number())
-		assert.Equal(t, 1, lines.Line(0).Token(0).Position.Line)
-	})
-
-	t.Run("fallback to segment position line", func(t *testing.T) {
-		t.Parallel()
-
-		strTkb := yamltest.NewTokenBuilder().Type(token.StringType)
-
-		// NewLines numbers each line from its tokens, so a lone token at
-		// line 42 yields a line numbered 42.
-		tks := token.Tokens{}
-		tks.Add(strTkb.Clone().
-			Origin("value\n").
-			Value("value").
-			PositionLine(42).
-			PositionColumn(1).
-			Build())
-
-		lines := line.NewLines(tks)
-		require.Equal(t, 1, lines.Len())
-
-		// The line takes its number from the position of the token.
-		assert.Equal(t, 42, lines.Line(0).Number())
-	})
-
-	t.Run("number field takes precedence over segment position", func(t *testing.T) {
-		t.Parallel()
-
-		strTkb := yamltest.NewTokenBuilder().Type(token.StringType)
-
-		// Each line takes the number from the token that starts it, so a
-		// gap in Position.Line leaves a gap in the line numbers.
-		tks := token.Tokens{}
-		// First token at line 100.
-		tks.Add(strTkb.Clone().
-			Origin("first\n").
-			Value("first").
-			PositionLine(100).
-			PositionColumn(1).
-			Build())
-		// Second token at line 200 (gap).
-		tks.Add(strTkb.Clone().
-			Origin("second\n").
-			Value("second").
-			PositionLine(200).
-			PositionColumn(1).
-			Build())
-
-		lines := line.NewLines(tks)
-		require.Equal(t, 2, lines.Len())
-
-		// Both lines keep their original line numbers.
-		assert.Equal(t, 100, lines.Line(0).Number())
-		assert.Equal(t, 200, lines.Line(1).Number())
 	})
 }
 
