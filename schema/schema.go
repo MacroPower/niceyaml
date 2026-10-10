@@ -50,7 +50,7 @@ var (
 	// of them wraps [ErrValidate].
 	//
 	// [niceyaml.WithAliasLimit] on the source of a document turns the
-	// limit off for Validate and for the guard. ValidateValue takes no
+	// limit off for Check and for the guard. ValidateValue takes no
 	// source, so it applies the limit to every value.
 	// It is the same error value as [niceyaml.ErrExcessiveAliasing].
 	ErrExcessiveAliasing = aliaslimit.ErrExcessiveAliasing
@@ -552,7 +552,7 @@ func (s *Schema) Resolve(_ context.Context, _ *niceyaml.Node) (Ref, error) {
 //	app.yaml:1:1: excessive aliasing
 //
 // The aliases of the document are the cause, so [niceyaml.IsInvalid]
-// reports the error, and it does not wrap [ErrValidate]. Validate puts no
+// reports the error, and it does not wrap [ErrValidate]. Check puts no
 // limit of its own on the result of the decode. A node below the root
 // then passes the limit wherever its document does, even when aliases
 // make up a larger share of the node than of the document.

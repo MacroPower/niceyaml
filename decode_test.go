@@ -8649,7 +8649,7 @@ func TestDocument_Decode_ValidatorDecodesWithoutHooks(t *testing.T) {
 
 		var runs int
 
-		// A validator shaped like schema.Schema.Validate decodes the
+		// A validator shaped like schema.Schema.Check decodes the
 		// document to inspect it. Its own decode must carry no hooks, or
 		// the validator would run itself again on every decode it performs.
 		inspect := niceyaml.ValidatorFunc(func(ctx context.Context, doc *niceyaml.Node) error {
