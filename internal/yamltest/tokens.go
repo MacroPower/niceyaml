@@ -466,6 +466,19 @@ func FormatTokenPosition(pos *token.Position) string {
 		pos.Line, pos.Column, pos.Offset, pos.IndentNum, pos.IndentLevel)
 }
 
+// TokenPlace returns the Value of tk and the place where it starts, as
+// "value@line:column", so a test can name the token it expects in one
+// string. The line and the column count from 1, as those of a
+// [token.Position] do. A nil token and a token without a Position give
+// the empty string.
+func TokenPlace(tk *token.Token) string {
+	if tk == nil || tk.Position == nil {
+		return ""
+	}
+
+	return fmt.Sprintf("%s@%d:%d", tk.Value, tk.Position.Line, tk.Position.Column)
+}
+
 // FormatToken formats a [*token.Token] for debug output.
 func FormatToken(tk *token.Token) string {
 	if tk == nil {

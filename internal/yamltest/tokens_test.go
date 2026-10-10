@@ -645,3 +645,27 @@ func TestDiffTokenFields(t *testing.T) {
 		"Position.IndentLevel",
 	}, yamltest.DiffTokenFields(want, got))
 }
+
+func TestTokenPlace(t *testing.T) {
+	t.Parallel()
+
+	tcs := map[string]struct {
+		input *token.Token
+		want  string
+	}{
+		"nil token":                {},
+		"token without a position": {input: &token.Token{Value: "a"}},
+		"token": {
+			input: yamltest.NewTokenBuilder().Value("a").PositionLine(2).PositionColumn(3).Build(),
+			want:  "a@2:3",
+		},
+	}
+
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, tc.want, yamltest.TokenPlace(tc.input))
+		})
+	}
+}
