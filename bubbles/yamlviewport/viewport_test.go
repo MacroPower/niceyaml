@@ -1230,6 +1230,52 @@ func TestViewport_Scrolling(t *testing.T) {
 				assert.InDelta(t, 0.0, m.HorizontalScrollPercent(), 0.01)
 			},
 		},
+		"Horizontal/ToggleWordWrapResetsXOffset": {
+			yaml:   "key: very long value that exceeds width\n",
+			width:  20,
+			height: 10,
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+
+				m.ToggleWordWrap()
+				assert.False(t, m.WordWrap())
+
+				m.ScrollRight(5)
+				assert.Equal(t, 5, m.XOffset())
+
+				// Turning wrap back on returns the view to its first column.
+				m.ToggleWordWrap()
+				assert.True(t, m.WordWrap())
+				assert.Equal(t, 0, m.XOffset())
+			},
+		},
+		"Horizontal/WordWrapDisablesScroll": {
+			yaml:   "key: very long value that exceeds the viewport width\n",
+			width:  20,
+			height: 10,
+			test: func(t *testing.T, m *yamlviewport.Model) {
+				t.Helper()
+				require.True(t, m.WordWrap())
+
+				before := m.View()
+
+				// Rows that wrap within the width leave nothing to scroll,
+				// so the offset stays at 0.
+				m.ScrollRight(6)
+				m.ScrollRight(6)
+				assert.Equal(t, 0, m.XOffset())
+				assert.Equal(t, before, m.View())
+				assert.InDelta(t, 1.0, m.HorizontalScrollPercent(), 0.01)
+
+				m.SetXOffset(12)
+				assert.Equal(t, 0, m.XOffset())
+
+				// Turning wrap off shows the lines from their first column.
+				m.SetWordWrap(false)
+				assert.Equal(t, 0, m.XOffset())
+				assert.Contains(t, m.View(), "key: very long")
+			},
+		},
 	}
 
 	for name, tc := range tcs {
@@ -5380,51 +5426,6 @@ func TestViewport_ScrollByExtremeSteps(t *testing.T) {
 			assert.Equal(t, want, offset(&m))
 		})
 	}
-}
-
-func TestViewport_ToggleWordWrapResetsXOffset(t *testing.T) {
-	t.Parallel()
-
-	m := testModel(testPrinter(), 20, 10)
-
-	m.SetRevision(niceyaml.NewSourceFromString("key: very long value that exceeds width\n"))
-
-	m.ToggleWordWrap()
-	assert.False(t, m.WordWrap())
-
-	m.ScrollRight(5)
-	assert.Equal(t, 5, m.XOffset())
-
-	// Turning wrap back on returns the view to its first column.
-	m.ToggleWordWrap()
-	assert.True(t, m.WordWrap())
-	assert.Equal(t, 0, m.XOffset())
-}
-
-func TestViewport_WordWrapDisablesHorizontalScroll(t *testing.T) {
-	t.Parallel()
-
-	m := testModel(testPrinter(), 20, 10)
-	m.SetRevision(niceyaml.NewSourceFromString("key: very long value that exceeds the viewport width\n"))
-	require.True(t, m.WordWrap())
-
-	before := m.View()
-
-	// Rows that wrap within the width leave nothing to scroll, so the
-	// offset stays at 0.
-	m.ScrollRight(6)
-	m.ScrollRight(6)
-	assert.Equal(t, 0, m.XOffset())
-	assert.Equal(t, before, m.View())
-	assert.InDelta(t, 1.0, m.HorizontalScrollPercent(), 0.01)
-
-	m.SetXOffset(12)
-	assert.Equal(t, 0, m.XOffset())
-
-	// Turning wrap off shows the lines from their first column.
-	m.SetWordWrap(false)
-	assert.Equal(t, 0, m.XOffset())
-	assert.Contains(t, m.View(), "key: very long")
 }
 
 func TestViewport_WrapKeepsFrameOfOverflowingRow(t *testing.T) {
