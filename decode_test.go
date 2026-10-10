@@ -8419,6 +8419,30 @@ func TestDocument_Decode_ValidatorDecodesWithoutHooks(t *testing.T) {
 	})
 }
 
+// decodeSettings holds the source options and the decode options of one
+// case of [validatorSettings].
+type decodeSettings struct {
+	source []niceyaml.SourceOption
+	opts   []niceyaml.DecodeOption
+}
+
+// validatorSettings returns the settings under which a test repeats a
+// decode that runs a validator, to show that the binding of the
+// validator's error does not depend on them.
+func validatorSettings() map[string]decodeSettings {
+	return map[string]decodeSettings{
+		"no options": {},
+		"references": {
+			source: []niceyaml.SourceOption{
+				niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
+			},
+		},
+		"ordered maps": {
+			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)},
+		},
+	}
+}
+
 func TestDocument_Decode_ValidatorErrorBoundToReceiver(t *testing.T) {
 	t.Parallel()
 
@@ -8447,22 +8471,7 @@ func TestDocument_Decode_ValidatorErrorBoundToReceiver(t *testing.T) {
 		}),
 	}
 
-	tcs := map[string]struct {
-		source []niceyaml.SourceOption
-		opts   []niceyaml.DecodeOption
-	}{
-		"no options": {},
-		"references": {
-			source: []niceyaml.SourceOption{
-				niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
-			},
-		},
-		"ordered maps": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)},
-		},
-	}
-
-	for name, tc := range tcs {
+	for name, tc := range validatorSettings() {
 		for validatorName, validator := range validators {
 			t.Run(name+"/"+validatorName, func(t *testing.T) {
 				t.Parallel()
@@ -8512,22 +8521,7 @@ func TestDocument_Decode_ScopedValidatorErrorDocument(t *testing.T) {
 		},
 	}
 
-	tcs := map[string]struct {
-		source []niceyaml.SourceOption
-		opts   []niceyaml.DecodeOption
-	}{
-		"no options": {},
-		"references": {
-			source: []niceyaml.SourceOption{
-				niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
-			},
-		},
-		"ordered maps": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)},
-		},
-	}
-
-	for name, tc := range tcs {
+	for name, tc := range validatorSettings() {
 		for scopeName, scope := range scopes {
 			t.Run(name+"/"+scopeName, func(t *testing.T) {
 				t.Parallel()
@@ -8568,22 +8562,7 @@ func TestDocument_Decode_ValidatorAmbiguousErrorBoundToReceiver(t *testing.T) {
 		return err
 	})
 
-	tcs := map[string]struct {
-		source []niceyaml.SourceOption
-		opts   []niceyaml.DecodeOption
-	}{
-		"no options": {},
-		"references": {
-			source: []niceyaml.SourceOption{
-				niceyaml.WithReferences(niceyaml.NewSourceFromString("base: &x 1\n")),
-			},
-		},
-		"ordered maps": {
-			opts: []niceyaml.DecodeOption{niceyaml.WithYAMLOrderedMaps(true)},
-		},
-	}
-
-	for name, tc := range tcs {
+	for name, tc := range validatorSettings() {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
