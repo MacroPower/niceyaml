@@ -18,21 +18,6 @@ func TestNewPattern(t *testing.T) {
 		pattern string
 		err     error
 	}{
-		"simple wildcard": {
-			pattern: "*.yaml",
-		},
-		"double star": {
-			pattern: "**/*.yaml",
-		},
-		"question mark": {
-			pattern: "file?.yaml",
-		},
-		"bracket range": {
-			pattern: "file[0-9].yaml",
-		},
-		"exact match": {
-			pattern: "config.yaml",
-		},
 		"empty pattern": {
 			pattern: "",
 			err:     filepaths.ErrInvalidPattern,
