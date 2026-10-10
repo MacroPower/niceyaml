@@ -103,6 +103,24 @@ func assertLayoutMeasures(t *testing.T, l printer.Layout, printed string) {
 	assert.Equal(t, lipgloss.Width(printed), l.Width())
 }
 
+// assertRowOfRunes asserts that l maps the column of each rune of input
+// that keep selects to the printed row that holds it. The input is the
+// content of line 0.
+func assertRowOfRunes(t *testing.T, l printer.Layout, input string, rows []string, keep func(rune) bool) {
+	t.Helper()
+
+	for col, r := range []rune(input) {
+		if !keep(r) {
+			continue
+		}
+
+		row := l.RowOf(position.New(0, col))
+		require.GreaterOrEqual(t, row, 0)
+		require.Less(t, row, len(rows))
+		assert.Contains(t, rows[row], string(r), "column %d", col)
+	}
+}
+
 // printDiff generates a full-file diff between two YAML strings.
 // It outputs the entire file with markers for inserted and deleted lines.
 func printDiff(p *printer.Printer, before, after string) string {
@@ -1829,20 +1847,7 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 	// printed row that holds it. When the wrap drops a row that holds a
 	// rune of the content, the layout matches the rows after it to the
 	// wrong columns.
-	assertClusterRows := func(t *testing.T, l printer.Layout, input string, rows []string) {
-		t.Helper()
-
-		for col, r := range []rune(input) {
-			if lipgloss.Width(string(r)) < 2 {
-				continue
-			}
-
-			row := l.RowOf(position.New(0, col))
-			require.GreaterOrEqual(t, row, 0)
-			require.Less(t, row, len(rows))
-			assert.Contains(t, rows[row], string(r), "column %d", col)
-		}
-	}
+	wide := func(r rune) bool { return lipgloss.Width(string(r)) >= 2 }
 
 	// A cluster two cells wide cannot fit in one column, so it takes a row
 	// of its own and runs past the width, with no empty row before or
@@ -1934,7 +1939,7 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 
 			l := p.Layout(view)
 			assert.Equal(t, strings.Count(got, "\n")+1, l.Rows())
-			assertClusterRows(t, l, tc.input, strings.Split(got, "\n"))
+			assertRowOfRunes(t, l, tc.input, strings.Split(got, "\n"), wide)
 		})
 	}
 
@@ -1992,7 +1997,7 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 
 				l := p.Layout(view)
 				assert.Len(t, rows, l.Rows())
-				assertClusterRows(t, l, tc.input, rows)
+				assertRowOfRunes(t, l, tc.input, rows, wide)
 			})
 		}
 	})
@@ -2053,18 +2058,7 @@ func TestPrinter_WordWrap_SpaceCluster(t *testing.T) {
 			assertLayoutMeasures(t, l, got)
 
 			// Each letter shows on one row, which RowOf must name.
-			rows := strings.Split(got, "\n")
-
-			for col, r := range []rune(tc.input) {
-				if !unicode.IsLetter(r) {
-					continue
-				}
-
-				row := l.RowOf(position.New(0, col))
-				require.GreaterOrEqual(t, row, 0)
-				require.Less(t, row, len(rows))
-				assert.Contains(t, rows[row], string(r), "column %d", col)
-			}
+			assertRowOfRunes(t, l, tc.input, strings.Split(got, "\n"), unicode.IsLetter)
 		})
 	}
 }
