@@ -2,6 +2,7 @@ package printer_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -15,6 +16,46 @@ import (
 	"go.jacobcolvin.com/niceyaml/position"
 	"go.jacobcolvin.com/niceyaml/printer"
 )
+
+// excerptOf returns the part of a rendered error after its tree, which
+// holds its excerpts.
+func excerptOf(t *testing.T, rendered string) string {
+	t.Helper()
+
+	_, excerpt, ok := strings.Cut(rendered, "\n\n")
+	require.True(t, ok)
+
+	return excerpt
+}
+
+// formattedExcerpt returns the excerpt [niceyaml.FormatError] draws for err,
+// without the gutter in front of each row.
+func formattedExcerpt(t *testing.T, err error, opts ...niceyaml.ExcerptOption) string {
+	t.Helper()
+
+	rows := strings.Split(excerptOf(t, niceyaml.FormatError(err, opts...)), "\n")
+	for i, row := range rows {
+		_, rows[i], _ = strings.Cut(row, " | ")
+	}
+
+	return stringtest.JoinLF(rows...)
+}
+
+// itemNames returns n names, from "item00" on.
+func itemNames(n int) []string {
+	names := make([]string, n)
+	for i := range names {
+		names[i] = fmt.Sprintf("item%02d", i)
+	}
+
+	return names
+}
+
+// itemsInput returns a YAML line that holds [itemNames] of n as a flow
+// sequence under the key "items", long enough to wrap or clip.
+func itemsInput(n int) string {
+	return "items: [" + strings.Join(itemNames(n), ", ") + "]\n"
+}
 
 func TestPrinter_PrintError_ExcerptsOff(t *testing.T) {
 	t.Parallel()
@@ -179,13 +220,6 @@ func TestPrinter_PrintError_ExcerptOptions(t *testing.T) {
 	source := niceyaml.NewSourceFromString("a: 1\nb: 2\nc: 3\nd: 4\ne: 5\nf: 6\ng: 7\nh: 8\ni: 9\n")
 	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtPath(paths.Current().Child("e"))))
 
-	excerpt := func(s string) string {
-		_, excerpt, ok := strings.Cut(s, "\n\n")
-		require.True(t, ok)
-
-		return excerpt
-	}
-
 	tcs := map[string]struct {
 		opts []niceyaml.ExcerptOption
 		want []string
@@ -235,16 +269,11 @@ func TestPrinter_PrintError_ExcerptOptions(t *testing.T) {
 
 			got := p.PrintError(bound, tc.opts...)
 
-			assert.Equal(t, stringtest.JoinLF(tc.want...), excerpt(got))
+			assert.Equal(t, stringtest.JoinLF(tc.want...), excerptOf(t, got))
 
 			// PrintError and FormatError draw the same report, so the
 			// excerpt of FormatError shows the same lines behind its gutter.
-			plain := strings.Split(excerpt(niceyaml.FormatError(bound, tc.opts...)), "\n")
-			for i, row := range plain {
-				_, plain[i], _ = strings.Cut(row, " | ")
-			}
-
-			assert.Equal(t, strings.Join(plain, "\n"), excerpt(got))
+			assert.Equal(t, formattedExcerpt(t, bound, tc.opts...), excerptOf(t, got))
 		})
 	}
 }

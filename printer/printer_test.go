@@ -716,18 +716,7 @@ func TestPrinter_PrintError_MarksBindingsWithoutStyles(t *testing.T) {
 
 			// FormatError draws the same excerpt behind a gutter of its own,
 			// and a tree with ASCII connectors.
-			_, gotExcerpt, ok := strings.Cut(got, "\n\n")
-			require.True(t, ok)
-
-			_, formatted, ok := strings.Cut(niceyaml.FormatError(tc.err), "\n\n")
-			require.True(t, ok)
-
-			rows := strings.Split(formatted, "\n")
-			for i, row := range rows {
-				_, rows[i], _ = strings.Cut(row, " | ")
-			}
-
-			assert.Equal(t, strings.Join(rows, "\n"), gotExcerpt)
+			assert.Equal(t, formattedExcerpt(t, tc.err), excerptOf(t, got))
 		})
 	}
 }
@@ -887,15 +876,10 @@ func TestPrinter_MarksRangeUnderHighlight(t *testing.T) {
 func TestPrinter_PrintError_MarksWrappedRange(t *testing.T) {
 	t.Parallel()
 
-	items := make([]string, 0, 12)
-	for i := range 12 {
-		items = append(items, fmt.Sprintf("item%02d", i))
-	}
-
 	// The range runs from item02 on the first row to item05 on the second,
 	// so each of those rows gets carets below it under its own part of the
 	// range.
-	source := niceyaml.NewSourceFromString("items: [" + strings.Join(items, ", ") + "]\n")
+	source := niceyaml.NewSourceFromString(itemsInput(12))
 	bound := yamltest.Bind(t, source, niceyaml.NewError("bad", niceyaml.AtRange(
 		position.NewRange(position.New(0, 24), position.New(0, 54)),
 	)))
@@ -5545,14 +5529,9 @@ func TestPrinter_PrintError_WrappedAnnotation(t *testing.T) {
 		printer.WithContainerStyle(lipgloss.NewStyle()),
 	)
 
-	items := make([]string, 0, 20)
-	for i := range 20 {
-		items = append(items, fmt.Sprintf("item%02d", i))
-	}
-
 	// The sequence wraps over several rows, and item 16 sits near the
 	// start of its row, so the message fits beside the caret.
-	source := niceyaml.NewSourceFromString("items: [" + strings.Join(items, ", ") + "]\n")
+	source := niceyaml.NewSourceFromString(itemsInput(20))
 	err := yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
 		niceyaml.NewError("expected string", niceyaml.AtPath(paths.Current().Child("items").Index(16))),
 	)))
@@ -5565,14 +5544,9 @@ func TestPrinter_PrintError_WrappedAnnotation(t *testing.T) {
 func TestPrinter_PrintError_AnnotationOnWrappedRow(t *testing.T) {
 	t.Parallel()
 
-	items := make([]string, 0, 20)
-	for i := range 20 {
-		items = append(items, fmt.Sprintf("item%02d", i))
-	}
-
 	// The line is longer than the default excerpt width, so the printer
 	// shows whole lines to keep every wrapped row of it.
-	source := niceyaml.NewSourceFromString("items: [" + strings.Join(items, ", ") + "]\n")
+	source := niceyaml.NewSourceFromString(itemsInput(20))
 
 	rows := []string{
 		"   1  items: [item00, item01, item02,",
@@ -7614,12 +7588,8 @@ func TestPrinter_Layout_Clip(t *testing.T) {
 func TestPrinter_PrintError_ClipsLongLine(t *testing.T) {
 	t.Parallel()
 
-	items := make([]string, 0, 40)
-	for i := range 40 {
-		items = append(items, fmt.Sprintf("item%02d", i))
-	}
-
-	input := "items: [" + strings.Join(items, ", ") + "]\n"
+	items := itemNames(40)
+	input := itemsInput(40)
 	bad := niceyaml.NewError("expected number", niceyaml.AtPath(paths.Current().Child("items").Index(20)))
 
 	tcs := map[string]struct {
