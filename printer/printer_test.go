@@ -1467,6 +1467,26 @@ func TestPrinter_PrintSlice(t *testing.T) {
 				"fourth: 4",
 			),
 		},
+		"empty span first": {
+			spans: position.Spans{position.NewSpan(0, 0), position.NewSpan(0, 2)},
+			want:  "first: 1\nsecond: 2",
+		},
+		"out of range span first": {
+			spans: position.Spans{position.NewSpan(5, 9), position.NewSpan(0, 1)},
+			want:  "first: 1",
+		},
+		"empty span between": {
+			spans: position.Spans{position.NewSpan(0, 1), position.NewSpan(1, 1), position.NewSpan(1, 2)},
+			want:  "first: 1\nsecond: 2",
+		},
+		"empty span last": {
+			spans: position.Spans{position.NewSpan(0, 2), position.NewSpan(2, 2)},
+			want:  "first: 1\nsecond: 2",
+		},
+		"only empty spans": {
+			spans: position.Spans{position.NewSpan(0, 0), position.NewSpan(2, 2)},
+			want:  "",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1474,8 +1494,17 @@ func TestPrinter_PrintSlice(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString(input).View().Slice(tc.spans...)
+			p := testPrinterWithGutter(tc.gutter)
 
-			assert.Equal(t, tc.want, testPrinterWithGutter(tc.gutter).Print(view))
+			got := p.Print(view)
+			assert.Equal(t, tc.want, got)
+
+			// Each line the view holds takes one row of the layout, and a
+			// view that holds none still prints one empty row.
+			l := p.Layout(view)
+			assert.Len(t, layoutRows(l), view.Count())
+			assert.Equal(t, view.Count(), l.Rows())
+			assert.Len(t, strings.Split(got, "\n"), max(1, l.Rows()))
 		})
 	}
 }
@@ -5225,56 +5254,6 @@ func TestPrinter_PrintError_WrappedAnnotation(t *testing.T) {
 			for _, want := range tc.want {
 				assert.Contains(t, trimmed, want)
 			}
-		})
-	}
-}
-
-func TestPrinter_Print_EmptySpans(t *testing.T) {
-	t.Parallel()
-
-	tcs := map[string]struct {
-		want     string
-		spans    []position.Span
-		wantRows []int
-	}{
-		"empty span first": {
-			spans:    []position.Span{position.NewSpan(0, 0), position.NewSpan(0, 2)},
-			want:     "a: 1\nb: 2",
-			wantRows: []int{1, 1},
-		},
-		"out of range span first": {
-			spans:    []position.Span{position.NewSpan(5, 9), position.NewSpan(0, 1)},
-			want:     "a: 1",
-			wantRows: []int{1},
-		},
-		"empty span between": {
-			spans:    []position.Span{position.NewSpan(0, 1), position.NewSpan(1, 1), position.NewSpan(1, 2)},
-			want:     "a: 1\nb: 2",
-			wantRows: []int{1, 1},
-		},
-		"empty span last": {
-			spans:    []position.Span{position.NewSpan(0, 2), position.NewSpan(2, 2)},
-			want:     "a: 1\nb: 2",
-			wantRows: []int{1, 1},
-		},
-		"only empty spans": {
-			spans:    []position.Span{position.NewSpan(0, 0), position.NewSpan(2, 2)},
-			want:     "",
-			wantRows: nil,
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := niceyaml.NewSourceFromString("a: 1\nb: 2").View().Slice(tc.spans...)
-			p := testPrinter()
-
-			got := p.Print(view)
-			assert.Equal(t, tc.want, got)
-			assert.Equal(t, tc.wantRows, layoutRows(p.Layout(view)))
-			assert.Len(t, strings.Split(got, "\n"), max(1, len(tc.wantRows)))
 		})
 	}
 }
