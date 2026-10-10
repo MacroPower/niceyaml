@@ -1875,46 +1875,51 @@ func TestLines_TokenRanges(t *testing.T) {
 func TestNewLines_WhitespaceType(t *testing.T) {
 	t.Parallel()
 
-	t.Run("trailing whitespace becomes SpaceType", func(t *testing.T) {
-		t.Parallel()
-
+	tcs := map[string]struct {
+		input string
+		line  int // Index of the line whose first part is the indentation.
+		want  token.Type
+	}{
 		// The lexer bundles " true\n  " into one boolean token, where "  " is
 		// the indentation of "other". After splitting, the "  " part on line
 		// 3 is SpaceType, not BoolType.
-		input := stringtest.Input(`
-			parent:
-			  child: true
-			  other: 1
-		`)
-		lines := newLines(input)
-		require.Greater(t, lines.Len(), 2)
-
-		parts := lines.Line(2).Tokens()
-		require.NotEmpty(t, parts)
-		assert.Equal(t, "  ", parts[0].Origin)
-		assert.Equal(t, token.SpaceType, parts[0].Type)
-	})
-
-	t.Run("block scalar whitespace preserved as StringType", func(t *testing.T) {
-		t.Parallel()
-
+		"trailing whitespace becomes SpaceType": {
+			input: stringtest.Input(`
+				parent:
+				  child: true
+				  other: 1
+			`),
+			line: 2,
+			want: token.SpaceType,
+		},
 		// The lexer bundles the indentation of "next" into the block scalar
 		// token. Whitespace parts of block scalar content keep StringType, so
 		// the "  " part on line 4 is not SpaceType.
-		input := stringtest.Input(`
-			root:
-			  text: |
-			    a
-			  next: x
-		`)
-		lines := newLines(input)
-		require.Greater(t, lines.Len(), 3)
+		"block scalar whitespace preserved as StringType": {
+			input: stringtest.Input(`
+				root:
+				  text: |
+				    a
+				  next: x
+			`),
+			line: 3,
+			want: token.StringType,
+		},
+	}
 
-		parts := lines.Line(3).Tokens()
-		require.NotEmpty(t, parts)
-		assert.Equal(t, "  ", parts[0].Origin)
-		assert.Equal(t, token.StringType, parts[0].Type)
-	})
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			lines := newLines(tc.input)
+			require.Greater(t, lines.Len(), tc.line)
+
+			parts := lines.Line(tc.line).Tokens()
+			require.NotEmpty(t, parts)
+			assert.Equal(t, "  ", parts[0].Origin)
+			assert.Equal(t, tc.want, parts[0].Type)
+		})
+	}
 
 	t.Run("nested indentation with boolean", func(t *testing.T) {
 		t.Parallel()
