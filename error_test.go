@@ -11387,32 +11387,42 @@ func TestIsInvalid(t *testing.T) {
 
 	byDirective := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
-	validated := func(t *testing.T, v niceyaml.Validator) error {
-		t.Helper()
+	// Each of the four helpers below returns the build of a case, which
+	// takes the test that runs it.
+	validated := func(v niceyaml.Validator) func(*testing.T) error {
+		return func(t *testing.T) error {
+			t.Helper()
 
-		return yamltest.FirstDocument(t, input).Validate(t.Context(), v)
+			return yamltest.FirstDocument(t, input).Validate(t.Context(), v)
+		}
 	}
 
-	scopedValidated := func(t *testing.T, v niceyaml.Validator) error {
-		t.Helper()
+	scopedValidated := func(v niceyaml.Validator) func(*testing.T) error {
+		return func(t *testing.T) error {
+			t.Helper()
 
-		return yamltest.At(t, yamltest.FirstDocument(t, input), hoursPath).Validate(t.Context(), v)
+			return yamltest.At(t, yamltest.FirstDocument(t, input), hoursPath).Validate(t.Context(), v)
+		}
 	}
 
-	selfValidated := func(t *testing.T, check func() error) error {
-		t.Helper()
+	selfValidated := func(check func() error) func(*testing.T) error {
+		return func(t *testing.T) error {
+			t.Helper()
 
-		cfg := checkedConfig{Hours: selfChecked{check: check}}
+			cfg := checkedConfig{Hours: selfChecked{check: check}}
 
-		return yamltest.FirstDocument(t, input).DecodeInto(t.Context(), &cfg)
+			return yamltest.FirstDocument(t, input).DecodeInto(t.Context(), &cfg)
+		}
 	}
 
-	decoded := func(t *testing.T, text string, opts ...niceyaml.DecodeOption) error {
-		t.Helper()
+	decoded := func(text string, opts ...niceyaml.DecodeOption) func(*testing.T) error {
+		return func(t *testing.T) error {
+			t.Helper()
 
-		_, err := niceyaml.NewSourceFromString(text).Decode[invalidConfig](t.Context(), opts...)
+			_, err := niceyaml.NewSourceFromString(text).Decode[invalidConfig](t.Context(), opts...)
 
-		return err
+			return err
+		}
 	}
 
 	// The errors of boundRead and boundPlain are no fault of the document,
@@ -11440,68 +11450,40 @@ func TestIsInvalid(t *testing.T) {
 		want  bool
 	}{
 		"syntax error": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return decoded(t, "name: [cafe\nport: 80\n")
-			},
-			err:  niceyaml.ErrSyntax,
-			want: true,
+			build: decoded("name: [cafe\nport: 80\n"),
+			err:   niceyaml.ErrSyntax,
+			want:  true,
 		},
 		"decode type mismatch": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return decoded(t, "name: cafe\nport: eighty\n")
-			},
-			err:  niceyaml.ErrDecode,
-			want: true,
+			build: decoded("name: cafe\nport: eighty\n"),
+			err:   niceyaml.ErrDecode,
+			want:  true,
 		},
 		"unknown field": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return decoded(t, "name: cafe\nprot: 80\n", niceyaml.WithDisallowUnknownFields(true))
-			},
-			err:  niceyaml.ErrDecode,
-			want: true,
+			build: decoded("name: cafe\nprot: 80\n", niceyaml.WithDisallowUnknownFields(true)),
+			err:   niceyaml.ErrDecode,
+			want:  true,
 		},
 		"schema violation": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, portSchema)
-			},
-			want: true,
+			build: validated(portSchema),
+			want:  true,
 		},
 		"schema violation with no location": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-					return &schema.Violation{Keyword: "type", Message: `expected "object", got "string"`}
-				}))
-			},
+			build: validated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				return &schema.Violation{Keyword: "type", Message: `expected "object", got "string"`}
+			})),
 			want: true,
 		},
 		"SelfValidator NewError with AtPath": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return selfValidated(t, func() error {
-					return niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
-				})
-			},
+			build: selfValidated(func() error {
+				return niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath))
+			}),
 			want: true,
 		},
 		"SelfValidator errors.New on a field": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return selfValidated(t, func() error {
-					return errors.New("closes before it opens")
-				})
-			},
+			build: selfValidated(func() error {
+				return errors.New("closes before it opens")
+			}),
 			want: true,
 		},
 		"SelfValidator errors.New at the root": {
@@ -11517,37 +11499,25 @@ func TestIsInvalid(t *testing.T) {
 			want: true,
 		},
 		"SelfValidator summary of errors with no location": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return selfValidated(t, func() error {
-					return niceyaml.NewSummary(
-						"2 problems",
-						errors.New("opens too late"),
-						errors.New("closes too early"),
-					)
-				})
-			},
+			build: selfValidated(func() error {
+				return niceyaml.NewSummary(
+					"2 problems",
+					errors.New("opens too late"),
+					errors.New("closes too early"),
+				)
+			}),
 			want: true,
 		},
 		"SelfValidator join of errors with no location": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return selfValidated(t, func() error {
-					return errors.Join(errors.New("opens too late"), errors.New("closes too early"))
-				})
-			},
+			build: selfValidated(func() error {
+				return errors.Join(errors.New("opens too late"), errors.New("closes too early"))
+			}),
 			want: true,
 		},
 		"SelfValidator I/O error": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return selfValidated(t, func() error {
-					return fmt.Errorf("load holidays: %w", ioErr)
-				})
-			},
+			build: selfValidated(func() error {
+				return fmt.Errorf("load holidays: %w", ioErr)
+			}),
 			err:  fs.ErrNotExist,
 			want: true,
 		},
@@ -11557,9 +11527,9 @@ func TestIsInvalid(t *testing.T) {
 			build: func(t *testing.T) error {
 				t.Helper()
 
-				return selfValidated(t, func() error {
+				return selfValidated(func() error {
 					return boundRead(t)
-				})
+				})(t)
 			},
 			err:  fs.ErrNotExist,
 			want: true,
@@ -11568,163 +11538,95 @@ func TestIsInvalid(t *testing.T) {
 			build: func(t *testing.T) error {
 				t.Helper()
 
-				return selfValidated(t, func() error {
+				return selfValidated(func() error {
 					return errors.Join(boundRead(t), boundPlain(t))
-				})
+				})(t)
 			},
 			err:  fs.ErrNotExist,
 			want: true,
 		},
 		"Validator NewError with AtPath": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, unknownName)
-			},
-			want: true,
+			build: validated(unknownName),
+			want:  true,
 		},
 		"Validator NewError with AtPath of the root": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return scopedValidated(t, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-					return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Current()))
-				}))
-			},
+			build: scopedValidated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				return niceyaml.NewError("closes before it opens", niceyaml.AtPath(paths.Current()))
+			})),
 			want: true,
 		},
 		"Validator NewError with AtPath bound through Bind": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return scopedValidated(t, niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
-					return n.Bind(niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath)))
-				}))
-			},
+			build: scopedValidated(niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+				return n.Bind(niceyaml.NewError("closes before it opens", niceyaml.AtPath(closePath)))
+			})),
 			want: true,
 		},
 		"Validator NewError with no location at the root": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, declared)
-			},
-			want: true,
+			build: validated(declared),
+			want:  true,
 		},
 		"Validator NewError with no location on a scoped Node": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return scopedValidated(t, declared)
-			},
-			want: true,
+			build: scopedValidated(declared),
+			want:  true,
 		},
 		"Validator Invalid of a join at the root": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, joined)
-			},
-			want: true,
+			build: validated(joined),
+			want:  true,
 		},
 		"Validator Invalid of a join on a scoped Node": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return scopedValidated(t, joined)
-			},
-			want: true,
+			build: scopedValidated(joined),
+			want:  true,
 		},
 		"Validator join of errors.New": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-					return errors.Join(errors.New("opens too late"), errors.New("closes too early"))
-				}))
-			},
+			build: validated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				return errors.Join(errors.New("opens too late"), errors.New("closes too early"))
+			})),
 		},
 		"Validator errors.New at the root": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, unlocated)
-			},
+			build: validated(unlocated),
 		},
 		"Validator errors.New on a scoped Node": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return scopedValidated(t, unlocated)
-			},
+			build: scopedValidated(unlocated),
 		},
 		"Validator Bind of errors.New on a scoped Node": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return scopedValidated(t, niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
-					return n.Bind(errors.New("closes before it opens"))
-				}))
-			},
+			build: scopedValidated(niceyaml.ValidatorFunc(func(_ context.Context, n *niceyaml.Node) error {
+				return n.Bind(errors.New("closes before it opens"))
+			})),
 		},
 		"Validator Rebase of an I/O error": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, rebased)
-			},
-			err: fs.ErrPermission,
+			build: validated(rebased),
+			err:   fs.ErrPermission,
 		},
 		"Validator Place of an I/O error at the root": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, placed)
-			},
-			err: fs.ErrPermission,
+			build: validated(placed),
+			err:   fs.ErrPermission,
 		},
 		"Validator Place of an I/O error on a scoped Node": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return scopedValidated(t, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-					return niceyaml.Place(ioErr)
-				}))
-			},
+			build: scopedValidated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				return niceyaml.Place(ioErr)
+			})),
 			err: fs.ErrNotExist,
 		},
 		"Validator Place of NewError": {
 			// Place declares nothing and clears nothing.
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-					return niceyaml.Place(niceyaml.NewError("unknown name"), niceyaml.AtPath(namePath))
-				}))
-			},
+			build: validated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				return niceyaml.Place(niceyaml.NewError("unknown name"), niceyaml.AtPath(namePath))
+			})),
 			want: true,
 		},
 		"SelfValidator Place of an I/O error": {
 			// A decode marks every error a SelfValidator returns.
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return selfValidated(t, func() error {
-					return niceyaml.Place(ioErr, niceyaml.AtPath(closePath))
-				})
-			},
+			build: selfValidated(func() error {
+				return niceyaml.Place(ioErr, niceyaml.AtPath(closePath))
+			}),
 			err:  fs.ErrNotExist,
 			want: true,
 		},
 		"Validator error with no location and a located detail": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-					return niceyaml.NewError("name taken",
-						niceyaml.WithDetails(niceyaml.NewError("first used here", niceyaml.AtPath(namePath))))
-				}))
-			},
+			build: validated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				return niceyaml.NewError("name taken",
+					niceyaml.WithDetails(niceyaml.NewError("first used here", niceyaml.AtPath(namePath))))
+			})),
 			want: true,
 		},
 		"schema that does not load": {
@@ -11746,33 +11648,21 @@ func TestIsInvalid(t *testing.T) {
 			err: schema.ErrCompile,
 		},
 		"$ref that does not resolve": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, schema.MustCompile(
-					[]byte(`{"properties": {"port": {"$ref": "https://example.invalid/nope.json"}}}`),
-					schema.WithRequireRefs(false),
-				))
-			},
+			build: validated(schema.MustCompile(
+				[]byte(`{"properties": {"port": {"$ref": "https://example.invalid/nope.json"}}}`),
+				schema.WithRequireRefs(false),
+			)),
 			err: schema.ErrValidate,
 		},
 		"no matching schema with reasons": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, schema.NewRegistry(schema.WithResolvers(schema.Directive())))
-			},
-			err:  schema.ErrNoDirective,
-			want: true,
+			build: validated(schema.NewRegistry(schema.WithResolvers(schema.Directive()))),
+			err:   schema.ErrNoDirective,
+			want:  true,
 		},
 		"no matching schema without reasons": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, schema.NewRegistry())
-			},
-			err:  schema.ErrNoMatch,
-			want: true,
+			build: validated(schema.NewRegistry()),
+			err:   schema.ErrNoMatch,
+			want:  true,
 		},
 		"canceled context in a validator": {
 			build: func(t *testing.T) error {
@@ -11811,13 +11701,9 @@ func TestIsInvalid(t *testing.T) {
 			err: context.Canceled,
 		},
 		"SelfValidator context error": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return selfValidated(t, func() error {
-					return context.Canceled
-				})
-			},
+			build: selfValidated(func() error {
+				return context.Canceled
+			}),
 			err: context.Canceled,
 		},
 		"Validator Invalid of a canceled check": {
@@ -11835,40 +11721,24 @@ func TestIsInvalid(t *testing.T) {
 			err: context.Canceled,
 		},
 		"Validator I/O error at the root": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, failing)
-			},
-			err: fs.ErrNotExist,
+			build: validated(failing),
+			err:   fs.ErrNotExist,
 		},
 		"Validator I/O error on a scoped Node": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return scopedValidated(t, failing)
-			},
-			err: fs.ErrNotExist,
+			build: scopedValidated(failing),
+			err:   fs.ErrNotExist,
 		},
 		"Validator Invalid of an I/O error": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-					return niceyaml.Invalid(ioErr, niceyaml.AtPath(namePath))
-				}))
-			},
+			build: validated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				return niceyaml.Invalid(ioErr, niceyaml.AtPath(namePath))
+			})),
 			err:  fs.ErrNotExist,
 			want: true,
 		},
 		"multiple documents": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return decoded(t, "name: cafe\n---\nname: bar\n")
-			},
-			err:  niceyaml.ErrMultipleDocuments,
-			want: true,
+			build: decoded("name: cafe\n---\nname: bar\n"),
+			err:   niceyaml.ErrMultipleDocuments,
+			want:  true,
 		},
 		"Node.At of a missing key": {
 			build: func(t *testing.T) error {
@@ -12112,25 +11982,21 @@ func TestIsInvalid(t *testing.T) {
 				t.Helper()
 
 				return errors.Join(
-					validated(t, portSchema),
+					validated(portSchema)(t),
 					directive(t, fstest.MapFS{}, "./missing.json").Validate(t.Context(), byDirective),
 				)
 			},
 			err: schema.ErrLoad,
 		},
 		"MultiValidator of an invalid problem and an I/O error": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, niceyaml.MultiValidator(unknownName, failing))
-			},
-			err: fs.ErrNotExist,
+			build: validated(niceyaml.MultiValidator(unknownName, failing)),
+			err:   fs.ErrNotExist,
 		},
 		"join of a syntax error and a violation": {
 			build: func(t *testing.T) error {
 				t.Helper()
 
-				return errors.Join(decoded(t, "name: [cafe\n"), validated(t, portSchema))
+				return errors.Join(decoded("name: [cafe\n")(t), validated(portSchema)(t))
 			},
 			err:  niceyaml.ErrSyntax,
 			want: true,
@@ -12143,7 +12009,7 @@ func TestIsInvalid(t *testing.T) {
 
 				_, err := niceyaml.NewSourceFromFS(fstest.MapFS{}, "cafe.yaml")
 
-				return errors.Join(decoded(t, "name: [cafe\n"), err)
+				return errors.Join(decoded("name: [cafe\n")(t), err)
 			},
 			err: niceyaml.ErrSyntax,
 		},
@@ -12343,31 +12209,23 @@ func TestIsInvalid(t *testing.T) {
 			err: fs.ErrNotExist,
 		},
 		"MultiValidator of a violation and a permission error": {
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, niceyaml.MultiValidator(portSchema, denied))
-			},
-			err: fs.ErrPermission,
+			build: validated(niceyaml.MultiValidator(portSchema, denied)),
+			err:   fs.ErrPermission,
 		},
 		"MultiValidator of a decode rejection and a permission error": {
 			// The error matches ErrDecode through one problem, and the
 			// other is no fault of the document.
-			build: func(t *testing.T) error {
-				t.Helper()
-
-				return validated(t, niceyaml.MultiValidator(decoding, denied))
-			},
-			err: niceyaml.ErrDecode,
+			build: validated(niceyaml.MultiValidator(decoding, denied)),
+			err:   niceyaml.ErrDecode,
 		},
 		"Validator I/O error with a located detail": {
 			// The detail explains the I/O error and decides nothing.
 			build: func(t *testing.T) error {
 				t.Helper()
 
-				return validated(t, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+				return validated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
 					return explained(t)
-				}))
+				}))(t)
 			},
 			err: fs.ErrPermission,
 		},
@@ -12380,7 +12238,7 @@ func TestIsInvalid(t *testing.T) {
 			build: func(t *testing.T) error {
 				t.Helper()
 
-				return fmt.Errorf("%w; close: %w", validated(t, portSchema), ioErr)
+				return fmt.Errorf("%w; close: %w", validated(portSchema)(t), ioErr)
 			},
 			err:  fs.ErrNotExist,
 			want: true,
@@ -12398,7 +12256,7 @@ func TestIsInvalid(t *testing.T) {
 			build: func(t *testing.T) error {
 				t.Helper()
 
-				return errors.Join(validated(t, portSchema), ioErr)
+				return errors.Join(validated(portSchema)(t), ioErr)
 			},
 			err: fs.ErrNotExist,
 		},
@@ -12440,7 +12298,7 @@ func TestIsInvalid(t *testing.T) {
 		// that ended, which is about a call and no fault of the document.
 		hint := fmt.Errorf("look up a suggestion: %w", context.DeadlineExceeded)
 		hinted := niceyaml.WithDetails(hint)
-		syntaxErr := decoded(t, "name: [cafe\n")
+		syntaxErr := decoded("name: [cafe\n")(t)
 
 		// The err field pins what the problem itself matches, and the
 		// detail field what the detail wraps, which the error must not
@@ -12474,25 +12332,17 @@ func TestIsInvalid(t *testing.T) {
 				detail: context.DeadlineExceeded,
 			},
 			"Validator error with a hint on a scoped Node": {
-				build: func(t *testing.T) error {
-					t.Helper()
-
-					return scopedValidated(t, niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
-						return niceyaml.NewError("closes before it opens", hinted)
-					}))
-				},
+				build: scopedValidated(niceyaml.ValidatorFunc(func(context.Context, *niceyaml.Node) error {
+					return niceyaml.NewError("closes before it opens", hinted)
+				})),
 				detail: context.DeadlineExceeded,
 				path:   "$.hours",
 				want:   true,
 			},
 			"SelfValidator error with a hint": {
-				build: func(t *testing.T) error {
-					t.Helper()
-
-					return selfValidated(t, func() error {
-						return niceyaml.NewError("closes before it opens", hinted)
-					})
-				},
+				build: selfValidated(func() error {
+					return niceyaml.NewError("closes before it opens", hinted)
+				}),
 				detail: context.DeadlineExceeded,
 				path:   "$.hours",
 				want:   true,
@@ -12581,7 +12431,7 @@ func TestIsInvalid(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				err := validated(t, tc.validator)
+				err := validated(tc.validator)(t)
 
 				bound := errorBinding(t, err)
 
