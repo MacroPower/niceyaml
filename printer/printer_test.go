@@ -996,267 +996,6 @@ func TestPrinter_PrintError_MarksLongWrappedValue(t *testing.T) {
 	}
 }
 
-func TestPrinter_WrappedMarkerRows(t *testing.T) {
-	t.Parallel()
-
-	// The carets under a wrapped line take a row below each wrapped row
-	// they mark, padded from that row's start, so every caret sits under
-	// the column it marks.
-
-	// A block scalar whose one content line is a word wider than the wrap.
-	crt := stringtest.JoinLF(
-		"crt: |",
-		"    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMr",
-	)
-
-	tcs := map[string]struct {
-		annotation *line.Annotation
-		content    string
-		want       string
-		cols       []position.Span
-		line       int
-		width      int
-	}{
-		// The wrap drops the indent when the first word does not fit
-		// beside it, so the first row starts at the word, and so does the
-		// padding of the marks under it.
-		"indent dropped before a long word": {
-			content: crt,
-			cols:    []position.Span{position.NewSpan(4, 8)},
-			line:    1,
-			width:   30,
-			want: stringtest.JoinLF(
-				"crt: |",
-				"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS",
-				"^^^^",
-				"0tLS0tCk1JSUMr",
-			),
-		},
-		"indent dropped before a long word under a whole-line range": {
-			content: crt,
-			cols:    []position.Span{position.NewSpan(0, 48)},
-			line:    1,
-			width:   30,
-			want: stringtest.JoinLF(
-				"crt: |",
-				"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS",
-				strings.Repeat("^", 30),
-				"0tLS0tCk1JSUMr",
-				strings.Repeat("^", 14),
-			),
-		},
-		"indent dropped before a long word above the line": {
-			content:    crt,
-			annotation: &line.Annotation{Placement: line.Above, Col: 4, Content: "here"},
-			line:       1,
-			width:      30,
-			want: stringtest.JoinLF(
-				"crt: |",
-				"here",
-				"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS",
-				"0tLS0tCk1JSUMr",
-			),
-		},
-		// The wrap drops the spaces at the end of the line when they run
-		// past the width, so they get no caret either.
-		"trailing spaces dropped on the last row": {
-			content: stringtest.JoinLF(
-				"a: |",
-				"  some text          ",
-				"  more",
-			),
-			cols:  []position.Span{position.NewSpan(2, 21)},
-			line:  1,
-			width: 20,
-			want: stringtest.JoinLF(
-				"a: |",
-				"  some text",
-				"  ^^^^^^^^^",
-				"  more",
-			),
-		},
-		"trailing spaces dropped on the only row": {
-			content: "key: value          ",
-			cols:    []position.Span{position.NewSpan(0, 20)},
-			width:   16,
-			want: stringtest.JoinLF(
-				"key: value",
-				"^^^^^^^^^^",
-			),
-		},
-		// The wrap would start a row with the accent of a decomposed "é",
-		// and the accent stays with its "e" instead, so the caret under
-		// the "x" after it lands under the "x".
-		"decomposed accent at a wrap boundary": {
-			content: "k: abcdefge\u0301xyz",
-			cols:    []position.Span{position.NewSpan(12, 13)},
-			width:   8,
-			want: stringtest.JoinLF(
-				"k:",
-				"abcdefge\u0301",
-				"xyz",
-				"^",
-			),
-		},
-		// The wrap drops the space before the accent, so the row after
-		// the break starts with the accent alone, which takes no cell,
-		// and the carets start under the first "b".
-		"combining accent after a space at a break": {
-			content: "k: aaaa ́bbbb",
-			cols:    []position.Span{position.NewSpan(9, 13)},
-			width:   8,
-			want: stringtest.JoinLF(
-				"k: aaaa",
-				"́bbbb",
-				"^^^^",
-			),
-		},
-		// The caret row draws the dropped space and the accent as one
-		// cluster at the space, which no row shows, so a range over
-		// either still starts its carets under the first "b".
-		"combining accent after a space at a break under a range over the space": {
-			content: "k: aaaa ́bbbb",
-			cols:    []position.Span{position.NewSpan(7, 13)},
-			width:   8,
-			want: stringtest.JoinLF(
-				"k: aaaa",
-				"́bbbb",
-				"^^^^",
-			),
-		},
-		"combining accent after a space at a break under a range over the accent": {
-			content: "k: aaaa ́bbbb",
-			cols:    []position.Span{position.NewSpan(8, 13)},
-			width:   8,
-			want: stringtest.JoinLF(
-				"k: aaaa",
-				"́bbbb",
-				"^^^^",
-			),
-		},
-		"spacing mark after a space at a break": {
-			content: "k: aaaa िbbbb",
-			cols:    []position.Span{position.NewSpan(9, 13)},
-			width:   8,
-			want: stringtest.JoinLF(
-				"k: aaaa",
-				"िbbbb",
-				" ^^^^",
-			),
-		},
-		"runs on different rows": {
-			content: "key: aaaa bbbb cccc dddd",
-			cols:    []position.Span{position.NewSpan(5, 9), position.NewSpan(17, 19)},
-			width:   10,
-			want: stringtest.JoinLF(
-				"key: aaaa",
-				"     ^^^^",
-				"bbbb cccc",
-				"       ^^",
-				"dddd",
-			),
-		},
-		"range across a break": {
-			content: "key: aaaa bbbb cccc dddd",
-			cols:    []position.Span{position.NewSpan(5, 14)},
-			width:   10,
-			want: stringtest.JoinLF(
-				"key: aaaa",
-				"     ^^^^",
-				"bbbb cccc",
-				"^^^^",
-				"dddd",
-			),
-		},
-		"wide runes": {
-			content: "k: 日本語 日本語",
-			cols:    []position.Span{position.NewSpan(3, 10)},
-			width:   9,
-			want: stringtest.JoinLF(
-				"k: 日本語",
-				"   ^^^^^^",
-				"日本語",
-				"^^^^^^",
-			),
-		},
-		// A zero-width rune at the end of a row that fills the width gets
-		// its caret one cell past the width, and the carets stay on one
-		// row rather than wrapping under the wide rune.
-		"zero-width rune at the end of a full row": {
-			content: "k: 本語x\u200b",
-			cols:    []position.Span{position.NewSpan(4, 7)},
-			width:   8,
-			want: stringtest.JoinLF(
-				"k: 本語x\u200b",
-				"     ^^^^",
-			),
-		},
-		"zero-width rune at the end of a full row under a whole-line range": {
-			content: "ccca日ccca\u200b",
-			cols:    []position.Span{position.NewSpan(0, 10)},
-			width:   10,
-			want: stringtest.JoinLF(
-				"ccca日ccca\u200b",
-				"^^^^^^^^^^^",
-			),
-		},
-		// The message sits beside the carets of the wrapped row that holds
-		// its column, and the other rows get their carets alone.
-		"message beside the carets of a later row": {
-			content:    "key: aaaa bbbb cccc dddd",
-			cols:       []position.Span{position.NewSpan(5, 9), position.NewSpan(20, 24)},
-			annotation: &line.Annotation{Placement: line.Below, Col: 20, Content: "bad"},
-			width:      20,
-			want: stringtest.JoinLF(
-				"key: aaaa bbbb cccc",
-				"     ^^^^",
-				"dddd",
-				"^^^^ bad",
-			),
-		},
-		// Carets that run to the end of a row leave the message no room
-		// beside them, so it moves to the row below the carets.
-		"message below carets that fill the row": {
-			content:    "key: aaaa bbbb cccc dddd",
-			cols:       []position.Span{position.NewSpan(5, 24)},
-			annotation: &line.Annotation{Placement: line.Below, Col: 5, Content: "bad"},
-			width:      20,
-			want: stringtest.JoinLF(
-				"key: aaaa bbbb cccc",
-				"     ^^^^^^^^^^^^^^",
-				"bad",
-				"dddd",
-				"^^^^",
-			),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := niceyaml.NewSourceFromString(tc.content).View()
-			for _, cols := range tc.cols {
-				view.AddOverlay(kind.GenericError, colsRange(tc.line, cols))
-			}
-
-			ann := line.Annotation{Placement: line.Below}
-			if tc.annotation != nil {
-				ann = *tc.annotation
-			}
-
-			view.Annotate(tc.line, ann)
-
-			p := testPrinter().With(printer.WithWrapWidth(tc.width))
-
-			got := p.Print(view)
-			assert.Equal(t, tc.want, got)
-
-			assertLayoutMeasures(t, p.Layout(view), got)
-		})
-	}
-}
-
 func TestPrinter_CRLF(t *testing.T) {
 	t.Parallel()
 
@@ -4519,13 +4258,20 @@ func TestPrinter_Annotation(t *testing.T) {
 		return []printer.AnnotationRow{row}
 	}
 
+	// A block scalar whose one content line is a word wider than the wrap.
+	crt := stringtest.JoinLF(
+		"crt: |",
+		"    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMr",
+	)
+
 	tcs := map[string]struct {
 		annFunc    printer.AnnotationFunc
 		gutter     printer.Gutter // Nil for no gutter.
 		input      string
 		want       string
 		annotation line.Annotation
-		line       int // Index of the line the annotation is on.
+		cols       []position.Span // Columns of the error overlays on the line.
+		line       int             // Index of the line the annotation is on.
 		width      int
 	}{
 		"below rows align under the marker within the width": {
@@ -4998,6 +4744,236 @@ func TestPrinter_Annotation(t *testing.T) {
 			annotation: line.Annotation{Content: "x", Placement: line.Below, Col: 4 + 1024},
 			want:       stringtest.JoinLF("k: v", strings.Repeat(" ", 4+1024)+"^ x"),
 		},
+
+		// The carets under a wrapped line take a row below each wrapped row
+		// they mark, padded from that row's start, so every caret sits under
+		// the column it marks.
+		// The wrap drops the indent when the first word does not fit
+		// beside it, so the first row starts at the word, and so does the
+		// padding of the marks under it.
+		"indent dropped before a long word": {
+			annotation: line.Annotation{Placement: line.Below},
+			input:      crt,
+			cols:       []position.Span{position.NewSpan(4, 8)},
+			line:       1,
+			width:      30,
+			want: stringtest.JoinLF(
+				"crt: |",
+				"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS",
+				"^^^^",
+				"0tLS0tCk1JSUMr",
+			),
+		},
+		"indent dropped before a long word under a whole-line range": {
+			annotation: line.Annotation{Placement: line.Below},
+			input:      crt,
+			cols:       []position.Span{position.NewSpan(0, 48)},
+			line:       1,
+			width:      30,
+			want: stringtest.JoinLF(
+				"crt: |",
+				"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS",
+				strings.Repeat("^", 30),
+				"0tLS0tCk1JSUMr",
+				strings.Repeat("^", 14),
+			),
+		},
+		"indent dropped before a long word above the line": {
+			input:      crt,
+			annotation: line.Annotation{Placement: line.Above, Col: 4, Content: "here"},
+			line:       1,
+			width:      30,
+			want: stringtest.JoinLF(
+				"crt: |",
+				"here",
+				"LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS",
+				"0tLS0tCk1JSUMr",
+			),
+		},
+		// The wrap drops the spaces at the end of the line when they run
+		// past the width, so they get no caret either.
+		"trailing spaces dropped on the last row": {
+			annotation: line.Annotation{Placement: line.Below},
+			input: stringtest.JoinLF(
+				"a: |",
+				"  some text          ",
+				"  more",
+			),
+			cols:  []position.Span{position.NewSpan(2, 21)},
+			line:  1,
+			width: 20,
+			want: stringtest.JoinLF(
+				"a: |",
+				"  some text",
+				"  ^^^^^^^^^",
+				"  more",
+			),
+		},
+		"trailing spaces dropped on the only row": {
+			annotation: line.Annotation{Placement: line.Below},
+			input:      "key: value          ",
+			cols:       []position.Span{position.NewSpan(0, 20)},
+			width:      16,
+			want: stringtest.JoinLF(
+				"key: value",
+				"^^^^^^^^^^",
+			),
+		},
+		// The wrap would start a row with the accent of a decomposed "é",
+		// and the accent stays with its "e" instead, so the caret under
+		// the "x" after it lands under the "x".
+		"decomposed accent at a wrap boundary": {
+			annotation: line.Annotation{Placement: line.Below},
+			input:      "k: abcdefge\u0301xyz",
+			cols:       []position.Span{position.NewSpan(12, 13)},
+			width:      8,
+			want: stringtest.JoinLF(
+				"k:",
+				"abcdefge\u0301",
+				"xyz",
+				"^",
+			),
+		},
+		// The wrap drops the space before the accent, so the row after
+		// the break starts with the accent alone, which takes no cell,
+		// and the carets start under the first "b".
+		"combining accent after a space at a break": {
+			annotation: line.Annotation{Placement: line.Below},
+			input:      "k: aaaa ́bbbb",
+			cols:       []position.Span{position.NewSpan(9, 13)},
+			width:      8,
+			want: stringtest.JoinLF(
+				"k: aaaa",
+				"́bbbb",
+				"^^^^",
+			),
+		},
+		// The caret row draws the dropped space and the accent as one
+		// cluster at the space, which no row shows, so a range over
+		// either still starts its carets under the first "b".
+		"combining accent after a space at a break under a range over the space": {
+			annotation: line.Annotation{Placement: line.Below},
+			input:      "k: aaaa ́bbbb",
+			cols:       []position.Span{position.NewSpan(7, 13)},
+			width:      8,
+			want: stringtest.JoinLF(
+				"k: aaaa",
+				"́bbbb",
+				"^^^^",
+			),
+		},
+		"combining accent after a space at a break under a range over the accent": {
+			annotation: line.Annotation{Placement: line.Below},
+			input:      "k: aaaa ́bbbb",
+			cols:       []position.Span{position.NewSpan(8, 13)},
+			width:      8,
+			want: stringtest.JoinLF(
+				"k: aaaa",
+				"́bbbb",
+				"^^^^",
+			),
+		},
+		"spacing mark after a space at a break": {
+			annotation: line.Annotation{Placement: line.Below},
+			input:      "k: aaaa िbbbb",
+			cols:       []position.Span{position.NewSpan(9, 13)},
+			width:      8,
+			want: stringtest.JoinLF(
+				"k: aaaa",
+				"िbbbb",
+				" ^^^^",
+			),
+		},
+		"runs on different rows": {
+			annotation: line.Annotation{Placement: line.Below},
+			input:      "key: aaaa bbbb cccc dddd",
+			cols:       []position.Span{position.NewSpan(5, 9), position.NewSpan(17, 19)},
+			width:      10,
+			want: stringtest.JoinLF(
+				"key: aaaa",
+				"     ^^^^",
+				"bbbb cccc",
+				"       ^^",
+				"dddd",
+			),
+		},
+		"range across a break": {
+			annotation: line.Annotation{Placement: line.Below},
+			input:      "key: aaaa bbbb cccc dddd",
+			cols:       []position.Span{position.NewSpan(5, 14)},
+			width:      10,
+			want: stringtest.JoinLF(
+				"key: aaaa",
+				"     ^^^^",
+				"bbbb cccc",
+				"^^^^",
+				"dddd",
+			),
+		},
+		"wide runes": {
+			annotation: line.Annotation{Placement: line.Below},
+			input:      "k: 日本語 日本語",
+			cols:       []position.Span{position.NewSpan(3, 10)},
+			width:      9,
+			want: stringtest.JoinLF(
+				"k: 日本語",
+				"   ^^^^^^",
+				"日本語",
+				"^^^^^^",
+			),
+		},
+		// A zero-width rune at the end of a row that fills the width gets
+		// its caret one cell past the width, and the carets stay on one
+		// row rather than wrapping under the wide rune.
+		"zero-width rune at the end of a full row": {
+			annotation: line.Annotation{Placement: line.Below},
+			input:      "k: 本語x\u200b",
+			cols:       []position.Span{position.NewSpan(4, 7)},
+			width:      8,
+			want: stringtest.JoinLF(
+				"k: 本語x\u200b",
+				"     ^^^^",
+			),
+		},
+		"zero-width rune at the end of a full row under a whole-line range": {
+			annotation: line.Annotation{Placement: line.Below},
+			input:      "ccca日ccca\u200b",
+			cols:       []position.Span{position.NewSpan(0, 10)},
+			width:      10,
+			want: stringtest.JoinLF(
+				"ccca日ccca\u200b",
+				"^^^^^^^^^^^",
+			),
+		},
+		// The message sits beside the carets of the wrapped row that holds
+		// its column, and the other rows get their carets alone.
+		"message beside the carets of a later row": {
+			input:      "key: aaaa bbbb cccc dddd",
+			cols:       []position.Span{position.NewSpan(5, 9), position.NewSpan(20, 24)},
+			annotation: line.Annotation{Placement: line.Below, Col: 20, Content: "bad"},
+			width:      20,
+			want: stringtest.JoinLF(
+				"key: aaaa bbbb cccc",
+				"     ^^^^",
+				"dddd",
+				"^^^^ bad",
+			),
+		},
+		// Carets that run to the end of a row leave the message no room
+		// beside them, so it moves to the row below the carets.
+		"message below carets that fill the row": {
+			input:      "key: aaaa bbbb cccc dddd",
+			cols:       []position.Span{position.NewSpan(5, 24)},
+			annotation: line.Annotation{Placement: line.Below, Col: 5, Content: "bad"},
+			width:      20,
+			want: stringtest.JoinLF(
+				"key: aaaa bbbb cccc",
+				"     ^^^^^^^^^^^^^^",
+				"bad",
+				"dddd",
+				"^^^^",
+			),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -5005,6 +4981,10 @@ func TestPrinter_Annotation(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString(tc.input).View()
+			for _, cols := range tc.cols {
+				view.AddOverlay(kind.GenericError, colsRange(tc.line, cols))
+			}
+
 			view.Annotate(tc.line, tc.annotation)
 
 			// A nil func selects DefaultAnnotation.
