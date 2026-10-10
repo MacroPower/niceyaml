@@ -3737,7 +3737,10 @@ func TestPath_Matches_AliasFanOut(t *testing.T) {
 	// The document of aliasList holds n scalars under the key a and n
 	// aliases to a under the key b, so $.b[*][*] selects n*n nodes.
 	aliasList := func(n int) string {
-		return "a: &a " + yamltest.FlowSequence("x", n) + "\nb: " + yamltest.FlowSequence("*a", n) + "\n"
+		return stringtest.LinesLF(
+			"a: &a "+yamltest.FlowSequence("x", n),
+			"b: "+yamltest.FlowSequence("*a", n),
+		)
 	}
 
 	// The document of aliasMap holds n entries under the key a and n
@@ -3751,7 +3754,10 @@ func TestPath_Matches_AliasFanOut(t *testing.T) {
 			aliases = append(aliases, fmt.Sprintf("j%d: *a", i))
 		}
 
-		return "a: &a {" + strings.Join(entries, ", ") + "}\nb: {" + strings.Join(aliases, ", ") + "}\n"
+		return stringtest.LinesLF(
+			"a: &a {"+strings.Join(entries, ", ")+"}",
+			"b: {"+strings.Join(aliases, ", ")+"}",
+		)
 	}
 
 	tcs := map[string]struct {
@@ -3873,26 +3879,22 @@ func TestPath_Matches_MergeLookups(t *testing.T) {
 	// The document of aliasWideMerge holds the mapping x, which merges n
 	// aliases to the mapping a, and the key l, which lists n aliases to x.
 	aliasWideMerge := func(n int) string {
-		return "a: &a {z: 0}\nx: &x {<<: " + yamltest.FlowSequence(
-			"*a",
-			n,
-		) + "}\nl: " + yamltest.FlowSequence(
-			"*x",
-			n,
-		) + "\n"
+		return stringtest.LinesLF(
+			"a: &a {z: 0}",
+			"x: &x {<<: "+yamltest.FlowSequence("*a", n)+"}",
+			"l: "+yamltest.FlowSequence("*x", n),
+		)
 	}
 
 	// The document of sharedMerge holds the sequence s of n aliases to the
 	// mapping a, and the mapping d, which merges n inline mappings that
 	// each merge s. One lookup in d reads s once for each of them.
 	sharedMerge := func(n int) string {
-		return "a: &a {z: 0}\ns: &s " + yamltest.FlowSequence(
-			"*a",
-			n,
-		) + "\nd: {<<: " + yamltest.FlowSequence(
-			"{<<: *s}",
-			n,
-		) + "}\n"
+		return stringtest.LinesLF(
+			"a: &a {z: 0}",
+			"s: &s "+yamltest.FlowSequence("*a", n),
+			"d: {<<: "+yamltest.FlowSequence("{<<: *s}", n)+"}",
+		)
 	}
 
 	tcs := map[string]struct {
