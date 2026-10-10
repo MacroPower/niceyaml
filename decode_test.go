@@ -11477,7 +11477,8 @@ func TestValidatorFunc_Check(t *testing.T) {
 	)
 
 	tcs := map[string]struct {
-		// The error the function returns, and the node it runs on.
+		// The error the function returns, and the node it runs on, or none
+		// for doc.
 		returns error
 		node    *niceyaml.Node
 		// The message of the bound error, or none for no error.
@@ -11485,7 +11486,6 @@ func TestValidatorFunc_Check(t *testing.T) {
 	}{
 		"an unbound error binds through the node": {
 			returns: negative,
-			node:    doc,
 			want:    "menu.yaml:1:8: $.price: negative price",
 		},
 		"a scoped node puts its path in front": {
@@ -11495,40 +11495,32 @@ func TestValidatorFunc_Check(t *testing.T) {
 		},
 		"an error with no location names the source": {
 			returns: errNameRequired,
-			node:    doc,
 			want:    "menu.yaml: name is required",
 		},
 		"an error bound through another node stays as it is": {
 			returns: item.Bind(negative),
-			node:    doc,
 			want:    "menu.yaml:4:12: $.items[1].price: negative price",
 		},
 		"an error bound to another source stays as it is": {
 			returns: other.Bind(negative),
-			node:    doc,
 			want:    "other.yaml:2:8: $.price: negative price",
 		},
-		"no error is no error": {node: doc},
-		"a nil Error pointer is no error": {
-			returns: nilError,
-			node:    doc,
-		},
-		"a nil SourceError pointer is no error": {
-			returns: nilSourceError,
-			node:    doc,
-		},
+		"no error is no error":                  {},
+		"a nil Error pointer is no error":       {returns: nilError},
+		"a nil SourceError pointer is no error": {returns: nilSourceError},
 	}
 
 	for name, tc := range tcs {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
+			node := cmp.Or(tc.node, doc)
 			validator := rejectingValidator(tc.returns)
 
 			// A direct call returns the error as the function wrote it.
-			assert.Equal(t, tc.returns, validator.Check(t.Context(), tc.node))
+			assert.Equal(t, tc.returns, validator.Check(t.Context(), node))
 
-			err := tc.node.Validate(t.Context(), validator)
+			err := node.Validate(t.Context(), validator)
 			if tc.want == "" {
 				require.NoError(t, err)
 
