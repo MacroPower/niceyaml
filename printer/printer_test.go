@@ -5247,56 +5247,60 @@ func TestPrinter_AnnotationWrap_ContainerFrame(t *testing.T) {
 func TestPrinter_PrintError_WrappedAnnotation(t *testing.T) {
 	t.Parallel()
 
-	const width = 40
-
-	p := printer.New(
-		printer.WithWrapWidth(width),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
-
-	// The sequence wraps over several rows, and item 16 sits near the
-	// start of its row, so the message fits beside the caret.
-	source := niceyaml.NewSourceFromString(itemsInput(20))
-	err := yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
-		niceyaml.NewError("expected string", niceyaml.AtPath(paths.Current().Child("items").Index(16))),
-	)))
-
-	got := p.PrintError(err)
-	assertRowsFit(t, got, width)
-	assert.Contains(t, got, "^ expected string")
-}
-
-func TestPrinter_PrintError_AnnotationNearEdge(t *testing.T) {
-	t.Parallel()
-
-	const width = 80
-
-	p := printer.New(
-		printer.WithWrapWidth(width),
-		printer.WithContainerStyle(lipgloss.NewStyle()),
-	)
-
-	// The value starts near the right edge, so the message has too little
-	// room beside the caret and moves to the rows below it.
 	key := strings.Repeat("a", 66)
-	source := niceyaml.NewSourceFromString(key + ": value\n")
-	err := yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(
-		errAt("string does not match pattern", key),
-	)))
 
-	got := p.PrintError(err)
-	assertRowsFit(t, got, width)
-
-	var trimmed []string
-
-	for row := range strings.SplitSeq(ansi.Strip(got), "\n") {
-		trimmed = append(trimmed, strings.TrimSpace(row))
+	tcs := map[string]struct {
+		source string
+		err    error    // The detail of the bound error.
+		want   []string // Rows the output holds, without the space around them.
+		width  int
+	}{
+		// The sequence wraps over several rows, and item 16 sits near the
+		// start of its row, so the message fits beside the caret.
+		"message beside the carets": {
+			source: itemsInput(20),
+			err:    niceyaml.NewError("expected string", niceyaml.AtPath(paths.Current().Child("items").Index(16))),
+			width:  40,
+			want:   []string{"^^^^^^ expected string"},
+		},
+		// The value starts near the right edge, so the message has too
+		// little room beside the caret and moves to the rows below it. The
+		// header holds the whole message on one row, so these two rows come
+		// from the annotation.
+		"message below carets near the edge": {
+			source: key + ": value\n",
+			err:    errAt("string does not match pattern", key),
+			width:  80,
+			want:   []string{"string does not", "match pattern"},
+		},
 	}
 
-	// The header holds the whole message on one row, so these two rows
-	// come from the annotation.
-	assert.Contains(t, trimmed, "string does not")
-	assert.Contains(t, trimmed, "match pattern")
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			p := printer.New(
+				printer.WithWrapWidth(tc.width),
+				printer.WithContainerStyle(lipgloss.NewStyle()),
+			)
+
+			source := niceyaml.NewSourceFromString(tc.source)
+			err := yamltest.Bind(t, source, niceyaml.NewError("outer", niceyaml.WithDetails(tc.err)))
+
+			got := p.PrintError(err)
+			assertRowsFit(t, got, tc.width)
+
+			var trimmed []string
+
+			for row := range strings.SplitSeq(ansi.Strip(got), "\n") {
+				trimmed = append(trimmed, strings.TrimSpace(row))
+			}
+
+			for _, want := range tc.want {
+				assert.Contains(t, trimmed, want)
+			}
+		})
+	}
 }
 
 func TestPrinter_Print_EmptySpans(t *testing.T) {
