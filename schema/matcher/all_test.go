@@ -17,69 +17,57 @@ import (
 func TestAll(t *testing.T) {
 	t.Parallel()
 
-	k8sPattern := matcher.MustFilePath("**/k8s/*.yaml")
+	deployments := matcher.All(
+		matcher.Content(kindPath, "Deployment"),
+		matcher.MustFilePath("**/k8s/*.yaml"),
+	)
 
-	t.Run("all match", func(t *testing.T) {
-		t.Parallel()
+	tcs := map[string]struct {
+		matcher  matcher.Matcher
+		input    string
+		filePath string
+		want     bool
+	}{
+		"all match": {
+			matcher:  deployments,
+			input:    `kind: Deployment`,
+			filePath: "deploy/k8s/app.yaml",
+			want:     true,
+		},
+		"first only matches": {
+			matcher:  deployments,
+			input:    `kind: Deployment`,
+			filePath: "deploy/other/app.yaml",
+			want:     false,
+		},
+		"second only matches": {
+			matcher:  deployments,
+			input:    `kind: Service`,
+			filePath: "deploy/k8s/app.yaml",
+			want:     false,
+		},
+		"none match": {
+			matcher:  deployments,
+			input:    `kind: Service`,
+			filePath: "deploy/other/app.yaml",
+			want:     false,
+		},
+		"empty matchers (vacuous truth)": {
+			matcher: matcher.All(),
+			input:   `kind: Deployment`,
+			want:    true,
+		},
+	}
 
-		m := matcher.All(
-			matcher.Content(kindPath, "Deployment"),
-			k8sPattern,
-		)
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`kind: Deployment`), "deploy/k8s/app.yaml")
+	for name, tc := range tcs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-		got := match(t, m, doc)
-		assert.True(t, got)
-	})
+			doc := yamltest.FirstDocumentWithPath(t, tc.input, tc.filePath)
 
-	t.Run("first only matches", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.All(
-			matcher.Content(kindPath, "Deployment"),
-			k8sPattern,
-		)
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`kind: Deployment`), "deploy/other/app.yaml")
-
-		got := match(t, m, doc)
-		assert.False(t, got)
-	})
-
-	t.Run("second only matches", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.All(
-			matcher.Content(kindPath, "Deployment"),
-			k8sPattern,
-		)
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`kind: Service`), "deploy/k8s/app.yaml")
-
-		got := match(t, m, doc)
-		assert.False(t, got)
-	})
-
-	t.Run("none match", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.All(
-			matcher.Content(kindPath, "Deployment"),
-			k8sPattern,
-		)
-		doc := yamltest.FirstDocumentWithPath(t, stringtest.Input(`kind: Service`), "deploy/other/app.yaml")
-
-		got := match(t, m, doc)
-		assert.False(t, got)
-	})
-
-	t.Run("empty matchers (vacuous truth)", func(t *testing.T) {
-		t.Parallel()
-
-		m := matcher.All()
-		doc := yamltest.FirstDocument(t, stringtest.Input(`kind: Deployment`))
-
-		got := match(t, m, doc)
-		assert.True(t, got)
-	})
+			assert.Equal(t, tc.want, match(t, tc.matcher, doc))
+		})
+	}
 
 	t.Run("error ends the evaluation", func(t *testing.T) {
 		t.Parallel()
