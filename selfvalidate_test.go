@@ -316,13 +316,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		_, err := doc.Decode[nested](t.Context())
 		require.EqualError(t, err, "cafe.yaml:3:10: $.hours.close: closes before it opens")
 
-		var e *niceyaml.Error
-
-		require.ErrorAs(t, err, &e)
-
-		p, ok := e.Path()
-		require.True(t, ok)
-		assert.Equal(t, "$.hours.close", p.String())
+		assert.Equal(t, "$.hours.close", errorPath(t, errorIn(t, err)).String())
 	})
 
 	t.Run("context a Validate adds around a located error follows the path", func(t *testing.T) {
@@ -345,9 +339,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		bound := yamltest.RequireSourceError(t, err)
 		assert.Equal(t, "hours check: closes before it opens", bound.Message())
 
-		p, ok := bound.Path()
-		require.True(t, ok)
-		assert.Equal(t, "$.hours.close", p.String())
+		assert.Equal(t, "$.hours.close", errorPath(t, bound).String())
 
 		// The Validate alone returns the message with no path in it, and
 		// FormatError reads the path from the Error it wraps.
@@ -386,9 +378,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		assert.Equal(t, "cafe.yaml:2:9: $.schedule.open: open is empty", yamltest.ProblemsOf(bound)[0].Bound.Error())
 		assert.Equal(t, "cafe.yaml:3:10: $.schedule.close: close is empty", yamltest.ProblemsOf(bound)[1].Bound.Error())
 
-		p, ok := yamltest.ProblemsOf(bound)[1].Path()
-		require.True(t, ok)
-		assert.Equal(t, "$.schedule.close", p.String())
+		assert.Equal(t, "$.schedule.close", errorPath(t, yamltest.ProblemsOf(bound)[1]).String())
 
 		assert.Equal(t, stringtest.JoinLF(
 			"cafe.yaml: invalid schedule",
@@ -2477,13 +2467,7 @@ func TestDocument_Decode_NestedSelfValidator(t *testing.T) {
 		require.Error(t, err)
 		assert.NotContains(t, err.Error(), "parent ran")
 
-		var e *niceyaml.Error
-
-		require.ErrorAs(t, err, &e)
-
-		p, ok := e.Path()
-		require.True(t, ok)
-		assert.Equal(t, "$.hours", p.String())
+		assert.Equal(t, "$.hours", errorPath(t, errorIn(t, err)).String())
 	})
 
 	t.Run("the values below a value that decodes itself validate", func(t *testing.T) {
@@ -4054,14 +4038,11 @@ func TestNode_Decode_SelfDecoding(t *testing.T) {
 				assert.True(t, located)
 				require.NoError(t, bound.Unresolved())
 
-				p, ok := bound.Path()
-				require.True(t, ok)
-
 				if nearest == nil {
 					nearest = map[string]string{}
 				}
 
-				nearest[p.String()] = near.String()
+				nearest[errorPath(t, bound).String()] = near.String()
 			}
 
 			assert.Equal(t, tc.nearest, nearest)
