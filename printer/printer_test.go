@@ -4067,13 +4067,6 @@ func TestPrinter_Golden(t *testing.T) {
 func TestPrinter_BlendStyles(t *testing.T) {
 	t.Parallel()
 
-	// A style from styleWithTag wraps content in XML-like tags.
-	styleWithTag := func(tag string) lipgloss.Style {
-		return lipgloss.NewStyle().Transform(func(s string) string {
-			return "<" + tag + ">" + s + "</" + tag + ">"
-		})
-	}
-
 	// The overlayRange type holds an overlay kind and its range.
 	type overlayRange struct {
 		kind  kind.Kind
@@ -4081,30 +4074,23 @@ func TestPrinter_BlendStyles(t *testing.T) {
 		end   position.Position
 	}
 
-	// Overlay kinds for the various test tags.
+	// Overlay kinds, each named for the tag it wraps its text in.
 	const (
-		kindHL   kind.Kind = "kindHL"
-		kindAll  kind.Kind = "kindAll"
-		kindA    kind.Kind = "kindA"
-		kindB    kind.Kind = "kindB"
-		kindC    kind.Kind = "kindC"
-		kindX    kind.Kind = "kindX"
-		kindY    kind.Kind = "kindY"
-		kindSpan kind.Kind = "kindSpan"
+		kindHL   kind.Kind = "hl"
+		kindAll  kind.Kind = "all"
+		kindA    kind.Kind = "a"
+		kindB    kind.Kind = "b"
+		kindC    kind.Kind = "c"
+		kindX    kind.Kind = "x"
+		kindY    kind.Kind = "y"
+		kindSpan kind.Kind = "span"
 	)
 
-	// Overlay styler mapping kinds to tag-wrapped styles.
-	testOverlayStyler := style.New(
-		lipgloss.NewStyle(),
-		style.Set(kindHL, styleWithTag("hl")),
-		style.Set(kindAll, styleWithTag("all")),
-		style.Set(kindA, styleWithTag("a")),
-		style.Set(kindB, styleWithTag("b")),
-		style.Set(kindC, styleWithTag("c")),
-		style.Set(kindX, styleWithTag("x")),
-		style.Set(kindY, styleWithTag("y")),
-		style.Set(kindSpan, styleWithTag("span")),
-	)
+	// Only the overlay kinds get tags, so the tokens under them show as
+	// plain text.
+	styles := yamltest.NewXMLStyles(yamltest.XMLStyleInclude(
+		kindHL, kindAll, kindA, kindB, kindC, kindX, kindY, kindSpan,
+	))
 
 	tcs := map[string]struct {
 		input  string
@@ -4216,7 +4202,7 @@ func TestPrinter_BlendStyles(t *testing.T) {
 			t.Parallel()
 
 			source := niceyaml.NewSourceFromString(tc.input)
-			p := testPrinter().With(printer.WithStyles(testOverlayStyler))
+			p := yamltest.NewXMLPrinter(printer.WithStyles(styles))
 
 			view := source.View()
 			for _, or := range tc.ranges {
@@ -5710,12 +5696,6 @@ func TestPrinter_BlendKey_StyleNames(t *testing.T) {
 		b  kind.Kind = "b"
 	)
 
-	wrap := func(tag string) lipgloss.Style {
-		return lipgloss.NewStyle().Transform(func(s string) string {
-			return "<" + tag + ">" + s + "</" + tag + ">"
-		})
-	}
-
 	view := niceyaml.NewSourceFromString("k: 1\nk: 2").View()
 	view.AddLineOverlay(0, line.Overlay{Kind: ab, Cols: position.NewSpan(0, 4), Blend: true})
 	view.AddLineOverlay(1,
@@ -5723,15 +5703,14 @@ func TestPrinter_BlendKey_StyleNames(t *testing.T) {
 		line.Overlay{Kind: b, Cols: position.NewSpan(0, 4)},
 	)
 
-	p := testPrinterWithStyles(
-		style.Set(ab, wrap("AB")),
-		style.Set(a, wrap("A")),
-		style.Set(b, wrap("B")),
-	)
+	// Each kind wraps its text in a tag of its name.
+	p := yamltest.NewXMLPrinter(printer.WithStyles(
+		yamltest.NewXMLStyles(yamltest.XMLStyleInclude(ab, a, b)),
+	))
 
 	assert.Equal(t, stringtest.JoinLF(
-		"<AB>k</AB><AB>:</AB><AB> </AB><AB>1</AB>",
-		"<B>k</B><B>:</B><B> </B><B>2</B>",
+		"<a!b>k</a!b><a!b>:</a!b><a!b> </a!b><a!b>1</a!b>",
+		"<b>k</b><b>:</b><b> </b><b>2</b>",
 	), p.Print(view))
 }
 
