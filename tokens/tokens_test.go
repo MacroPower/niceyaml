@@ -46,61 +46,153 @@ func collectReset(seq iter.Seq2[int, token.Tokens]) []token.Tokens {
 
 var (
 	// Sources that both numericEscapes and positionCases hold.
-	openScalarAtHeader       = `a: "caf\u00e9` + "\n---\nb: 1\n"
-	cutEscapeAtHeader        = `a: "\x1"` + "\n---\nb: 1\n"
-	unknownEscapeOnLaterLine = `name: "caf\u00e9` + "\n" + `  x \d"` + "\nnext: 1\n"
+	openScalarAtHeader = stringtest.LinesLF(
+		`a: "caf\u00e9`,
+		"---",
+		"b: 1",
+	)
+	cutEscapeAtHeader = stringtest.LinesLF(
+		`a: "\x1"`,
+		"---",
+		"b: 1",
+	)
+	unknownEscapeOnLaterLine = stringtest.LinesLF(
+		`name: "caf\u00e9`,
+		`  x \d"`,
+		"next: 1",
+	)
 
 	// NumericEscapes holds sources with a "\x", "\u", or "\U" escape in a
 	// double-quoted scalar.
 	numericEscapes = map[string]string{
-		"hex escape":                                    `a: "x\x41"` + "\n",
-		"short unicode escape":                          `a: "x\u0041"` + "\n",
-		"long unicode escape":                           `a: "x\U00000041"` + "\n",
-		"text after the escape":                         `a: "x\x41 b"` + "\n",
-		"flow mapping":                                  `m: {a: "\u00e9", b: xx}` + "\n",
-		"trailing comment":                              `a: "\u00e9" # c` + "\n",
-		"multi-line scalar":                             `a: "x\x41` + "\n" + `  b c"` + "\n" + "c: 1\n",
-		"surrogate pair":                                `a: "\uD83D\uDE00"` + "\n",
-		"escaped quote before the escape":               `a: "\"\u00e9"` + "\n",
-		"hex escape over a quote":                       `a: "\x"b"` + "\n",
-		"escape the lexer keeps":                        `a: "x\ty"` + "\n",
-		"short unicode escape swallows the quote":       `a: "\u12"` + "\n" + "b: 1\nc: 2\nd: 3\n",
-		"hex escape swallows the quote":                 `a: "\x4"` + "\n" + "b: 1\n",
-		"unicode escape one digit short":                `name: "caf\u00e"` + "\n" + "age: 3\n",
-		"escape swallows the quote at the end":          `a: "\x4"`,
-		"escape swallows the quote and a cr":            `a: "\u12"` + "\r\nb: 1\r\n",
-		"escape swallows the quote before blank lines":  `a: "\u12"` + "\n" + "b: 1\n  \n\n",
+		"hex escape":            `a: "x\x41"` + "\n",
+		"short unicode escape":  `a: "x\u0041"` + "\n",
+		"long unicode escape":   `a: "x\U00000041"` + "\n",
+		"text after the escape": `a: "x\x41 b"` + "\n",
+		"flow mapping":          `m: {a: "\u00e9", b: xx}` + "\n",
+		"trailing comment":      `a: "\u00e9" # c` + "\n",
+		"multi-line scalar": stringtest.LinesLF(
+			`a: "x\x41`,
+			`  b c"`,
+			"c: 1",
+		),
+		"surrogate pair":                  `a: "\uD83D\uDE00"` + "\n",
+		"escaped quote before the escape": `a: "\"\u00e9"` + "\n",
+		"hex escape over a quote":         `a: "\x"b"` + "\n",
+		"escape the lexer keeps":          `a: "x\ty"` + "\n",
+		"short unicode escape swallows the quote": stringtest.LinesLF(
+			`a: "\u12"`,
+			"b: 1",
+			"c: 2",
+			"d: 3",
+		),
+		"hex escape swallows the quote":        `a: "\x4"` + "\n" + "b: 1\n",
+		"unicode escape one digit short":       `name: "caf\u00e"` + "\n" + "age: 3\n",
+		"escape swallows the quote at the end": `a: "\x4"`,
+		"escape swallows the quote and a cr":   `a: "\u12"` + "\r\nb: 1\r\n",
+		"escape swallows the quote before blank lines": stringtest.LinesLF(
+			`a: "\u12"`,
+			"b: 1",
+			"  ",
+			"",
+		),
 		"escape swallows the quote of the whole source": `"\x4"` + "\n",
 		"unicode escape cut short by the end":           `a: "\u: 1`,
 		"long unicode escape cut short by the end":      `"\U: \U`,
 		"unicode escape cut short before the quote":     `a: "\u1"` + "\n",
 		"high surrogate without a low one":              `a: "\uD83Dxx"` + "\n" + "b: 1\n",
-		"escape cut short on a later line":              `a: "x` + "\n" + `  \u1"` + "\n",
-		"escape cut short after an escaped backslash":   `a: "\\\u"`,
-		"open scalar cut at a header":                   openScalarAtHeader,
-		"open scalar cut at a document end":             `a: "x\x41` + "\n...\nb: 1\n",
-		"open scalar cut at a header after an escape code that holds its next rune": `a: "caf\u00e9e` + "\n---\nb: 1\n",
-		"open scalar cut at a header after a hex escape that holds its next rune":   `a: "x\x4ee` + "\n---\nb: 1\n",
-		"open scalar cut at a header after a surrogate pair":                        `a: "\uD83D\uDE00D` + "\n---\nb: 1\n",
-		"open scalar cut at a header in a CRLF file":                                `a: "caf\u00e9` + "\r\n---\r\nb: 1\r\n",
-		"open scalar cut at a header after a tag":                                   `a: !!str "caf\u00e9` + "\n---\nb: 1\n",
-		"open scalar cut at a header after trailing spaces":                         `a: "caf\u00e9   ` + "\n---\nb: 1\n",
-		"hex escape swallows the quote before a header":                             cutEscapeAtHeader,
-		"hex escape swallows the quote before a document end":                       `a: "\x1"` + "\n...\nb: 1\n",
-		"unicode escape swallows the quote and a cr before a header":                `a: "\u12"` + "\r\n---\r\nb: 1\r\n",
-		"hex escape swallows the quote and a space before a header":                 `a: "\x" ` + "\n---\nb: 1\n",
-		"unicode escape swallows a sequence entry before a header":                  `"\u` + "\n- b\n---\n",
-		"escaped backslash before a header":                                         `a: "\\` + "\n---\nb: 1\n",
-		"escaped backslashes on two lines before a header":                          `{a: "\\` + "\n\t" + `\\` + "\n---\n",
-		"escape cut short after a unicode escape":                                   `a: "\u00e9\u"`,
-		"long escape cut short after a hex escape and a tab":                        `k: "\x41` + "\t" + `\U12"` + "\n",
-		"escape cut short after an escaped backslash before hex digits":             `k: "\x41\\x41\u"` + "\n",
-		"high surrogate without a low one after a tab":                              `- ":` + "\t\t" + `\N\uD83D\u` + "\t" + `"` + "\nb: 1\n",
-		"long escape that takes a header before a second header":                    `k: "\U12\"` + "\n---\n\n---\n\nb: 1\n",
-		"unknown escape after an escape":                                            `a: "caf\u00e9 \d"` + "\n",
-		"unknown escape on a later line":                                            unknownEscapeOnLaterLine,
-		"unknown escape after a comment":                                            "a: # c\n" + `  "caf\u00e9 \d"` + "\nb: 1\n",
-		"escape cut short after an escape":                                          `a: "caf\u00e9 \u1"` + "\n",
+		"escape cut short on a later line": stringtest.LinesLF(
+			`a: "x`,
+			`  \u1"`,
+		),
+		"escape cut short after an escaped backslash": `a: "\\\u"`,
+		"open scalar cut at a header":                 openScalarAtHeader,
+		"open scalar cut at a document end": stringtest.LinesLF(
+			`a: "x\x41`,
+			"...",
+			"b: 1",
+		),
+		"open scalar cut at a header after an escape code that holds its next rune": stringtest.LinesLF(
+			`a: "caf\u00e9e`,
+			"---",
+			"b: 1",
+		),
+		"open scalar cut at a header after a hex escape that holds its next rune": stringtest.LinesLF(
+			`a: "x\x4ee`,
+			"---",
+			"b: 1",
+		),
+		"open scalar cut at a header after a surrogate pair": stringtest.LinesLF(
+			`a: "\uD83D\uDE00D`,
+			"---",
+			"b: 1",
+		),
+		"open scalar cut at a header in a CRLF file": stringtest.LinesCRLF(
+			`a: "caf\u00e9`,
+			"---",
+			"b: 1",
+		),
+		"open scalar cut at a header after a tag": stringtest.LinesLF(
+			`a: !!str "caf\u00e9`,
+			"---",
+			"b: 1",
+		),
+		"open scalar cut at a header after trailing spaces": stringtest.LinesLF(
+			`a: "caf\u00e9   `,
+			"---",
+			"b: 1",
+		),
+		"hex escape swallows the quote before a header": cutEscapeAtHeader,
+		"hex escape swallows the quote before a document end": stringtest.LinesLF(
+			`a: "\x1"`,
+			"...",
+			"b: 1",
+		),
+		"unicode escape swallows the quote and a cr before a header": stringtest.LinesCRLF(
+			`a: "\u12"`,
+			"---",
+			"b: 1",
+		),
+		"hex escape swallows the quote and a space before a header": stringtest.LinesLF(
+			`a: "\x" `,
+			"---",
+			"b: 1",
+		),
+		"unicode escape swallows a sequence entry before a header": stringtest.LinesLF(
+			`"\u`,
+			"- b",
+			"---",
+		),
+		"escaped backslash before a header": stringtest.LinesLF(
+			`a: "\\`,
+			"---",
+			"b: 1",
+		),
+		"escaped backslashes on two lines before a header": stringtest.LinesLF(
+			`{a: "\\`,
+			"\t"+`\\`,
+			"---",
+		),
+		"escape cut short after a unicode escape":                       `a: "\u00e9\u"`,
+		"long escape cut short after a hex escape and a tab":            `k: "\x41` + "\t" + `\U12"` + "\n",
+		"escape cut short after an escaped backslash before hex digits": `k: "\x41\\x41\u"` + "\n",
+		"high surrogate without a low one after a tab":                  `- ":` + "\t\t" + `\N\uD83D\u` + "\t" + `"` + "\nb: 1\n",
+		"long escape that takes a header before a second header": stringtest.LinesLF(
+			`k: "\U12\"`,
+			"---",
+			"",
+			"---",
+			"",
+			"b: 1",
+		),
+		"unknown escape after an escape": `a: "caf\u00e9 \d"` + "\n",
+		"unknown escape on a later line": unknownEscapeOnLaterLine,
+		"unknown escape after a comment": stringtest.LinesLF(
+			"a: # c",
+			`  "caf\u00e9 \d"`,
+			"b: 1",
+		),
+		"escape cut short after an escape": `a: "caf\u00e9 \u1"` + "\n",
 	}
 
 	// DroppedLineBreaks holds sources with line breaks the lexer drops. The want
@@ -110,58 +202,244 @@ var (
 		input string
 		want  string
 	}{
-		"key after a flow sequence":                 {input: "tags: [a, b]\n\n? key\n: value\n"},
-		"value after a flow mapping":                {input: "a: {x: y}\n\n: v\n"},
-		"key after a quoted scalar":                 {input: "a: 'x'\n\n? b\n: c\n"},
-		"key after an alias":                        {input: "a: *x\n\n? b\n"},
-		"key after an empty value":                  {input: "a:\n\n? b\n: c\n"},
-		"key after a document header":               {input: "---\n\n? b\n"},
-		"key after a line comment":                  {input: "a: 1 # note\n\n? k\n"},
-		"key after a comment":                       {input: "# c\n\n? k\n"},
-		"key after a blank line":                    {input: "\n? k\n: v\n"},
-		"key after blank lines":                     {input: "\n\n? b\n: c\n"},
-		"nested key after a flow sequence":          {input: "a:\n  b: [x]\n\n  ? k\n  : v\n"},
-		"crlf key after a comment":                  {input: "# c\r\n\r\n? k\r\n"},
-		"plain scalar after a blank line of spaces": {input: "t: \"a\tb\"\n  \n  r'\n- e\n"},
-		"plain scalar after blank lines of spaces":  {input: "t: \"a\tb\"\n  \n  \n  r'\n- e\n"},
-		"key after blank lines of spaces":           {input: "a: \"t\tb\"\n  \n  \nc: 1\n"},
-		"comment after blank lines of spaces":       {input: "a: \"t\tb\"\n  \n  \n# c\nd: 1\ne: 2\n"},
+		"key after a flow sequence": {
+			input: stringtest.LinesLF(
+				"tags: [a, b]",
+				"",
+				"? key",
+				": value",
+			),
+		},
+		"value after a flow mapping": {
+			input: stringtest.LinesLF(
+				"a: {x: y}",
+				"",
+				": v",
+			),
+		},
+		"key after a quoted scalar": {
+			input: stringtest.LinesLF(
+				"a: 'x'",
+				"",
+				"? b",
+				": c",
+			),
+		},
+		"key after an alias": {
+			input: stringtest.LinesLF(
+				"a: *x",
+				"",
+				"? b",
+			),
+		},
+		"key after an empty value": {
+			input: stringtest.LinesLF(
+				"a:",
+				"",
+				"? b",
+				": c",
+			),
+		},
+		"key after a document header": {
+			input: stringtest.LinesLF(
+				"---",
+				"",
+				"? b",
+			),
+		},
+		"key after a line comment": {
+			input: stringtest.LinesLF(
+				"a: 1 # note",
+				"",
+				"? k",
+			),
+		},
+		"key after a comment": {
+			input: stringtest.LinesLF(
+				"# c",
+				"",
+				"? k",
+			),
+		},
+		"key after a blank line": {
+			input: stringtest.LinesLF(
+				"",
+				"? k",
+				": v",
+			),
+		},
+		"key after blank lines": {
+			input: stringtest.LinesLF(
+				"",
+				"",
+				"? b",
+				": c",
+			),
+		},
+		"nested key after a flow sequence": {
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: [x]",
+				"",
+				"  ? k",
+				"  : v",
+			),
+		},
+		"crlf key after a comment": {
+			input: stringtest.LinesCRLF(
+				"# c",
+				"",
+				"? k",
+			),
+		},
+		"plain scalar after a blank line of spaces": {
+			input: stringtest.LinesLF(
+				"t: \"a\tb\"",
+				"  ",
+				"  r'",
+				"- e",
+			),
+		},
+		"plain scalar after blank lines of spaces": {
+			input: stringtest.LinesLF(
+				"t: \"a\tb\"",
+				"  ",
+				"  ",
+				"  r'",
+				"- e",
+			),
+		},
+		"key after blank lines of spaces": {
+			input: stringtest.LinesLF(
+				"a: \"t\tb\"",
+				"  ",
+				"  ",
+				"c: 1",
+			),
+		},
+		"comment after blank lines of spaces": {
+			input: stringtest.LinesLF(
+				"a: \"t\tb\"",
+				"  ",
+				"  ",
+				"# c",
+				"d: 1",
+				"e: 2",
+			),
+		},
 		"crlf key after a blank line the lexer rewrites": {
 			// The lexer turns the CRLF in front of the invalid blank line
 			// into "\n".
-			input: "x:\r\n  a: \"t\tb\"\r\n \t\r\n  \r\n? b\r\n",
-			want:  "x:\r\n  a: \"t\tb\"\n \t\r\n\r\n? b\r\n",
+			input: stringtest.LinesCRLF(
+				"x:",
+				"  a: \"t\tb\"",
+				" \t",
+				"  ",
+				"? b",
+			),
+			want: stringtest.LinesLF(
+				"x:\r",
+				"  a: \"t\tb\"",
+				" \t\r",
+				"\r",
+				"? b\r",
+			),
 		},
-		"key after blank lines of spaces after bare crs":  {input: "k: \"\t\"\r \n\r \nc: 1\n"},
+		"key after blank lines of spaces after bare crs": {
+			input: stringtest.LinesLF(
+				"k: \"\t\"\r ",
+				"\r ",
+				"c: 1",
+			),
+		},
 		"document header after a cut scalar and bare crs": {input: "- \"\\u\\q\r\r \n---\n"},
 		"key after a blank line and blank lines of spaces after bare crs": {
 			// The lexer reads each "\r", space, and "\n" as one CRLF, so
 			// the breaks Tokenize puts back end with a bare "\r" in front
 			// of the "\n" that opens the Origin.
-			input: "\n\r \n\r \nkey: 1\n",
+			input: stringtest.LinesLF(
+				"",
+				"\r ",
+				"\r ",
+				"key: 1",
+			),
 		},
-		"document end after blank lines of spaces after bare crs": {input: "k:\n\r \n\r \n...\n"},
+		"document end after blank lines of spaces after bare crs": {
+			input: stringtest.LinesLF(
+				"k:",
+				"\r ",
+				"\r ",
+				"...",
+			),
+		},
 		"key after blank lines of spaces after a comment that ends with a bare cr": {
 			// The comment's Origin ends with a bare "\r", so a "\n" that
 			// opens the breaks Tokenize puts back would join it into one
 			// CRLF.
-			input: "a: 1 # c\r \n\r \nb: 2",
+			input: stringtest.JoinLF(
+				"a: 1 # c\r ",
+				"\r ",
+				"b: 2",
+			),
 		},
-		"scalar after blank lines of spaces after a bare cr comment": {input: "#\r \n\r \n0"},
+		"scalar after blank lines of spaces after a bare cr comment": {
+			input: stringtest.JoinLF(
+				"#\r ",
+				"\r ",
+				"0",
+			),
+		},
 		"key after a bare cr and a line of spaces between tab lines of a quoted scalar": {
 			// The lexer reads the "\r", the space, and the "\n" as one
 			// CRLF in a token of whitespace alone, so the key's Origin
 			// takes the line break the stream lacks.
-			input: "a: \"x\n\t\r \n\t\n\nb: 1\n",
-			want:  "a: \"x\n\t\r\n\t\n\n\nb: 1\n",
+			input: stringtest.LinesLF(
+				`a: "x`,
+				"\t\r ",
+				"\t",
+				"",
+				"b: 1",
+			),
+			want: stringtest.LinesLF(
+				`a: "x`,
+				"\t\r",
+				"\t",
+				"",
+				"",
+				"b: 1",
+			),
 		},
 		"closing quote after a bare cr and a line of spaces between tab lines": {
-			input: "a: \"x\n\t\r \n\t\"\nb: 1\n",
-			want:  "a: \"x\n\t\r\n\t\n\t\"\nb: 1\n",
+			input: stringtest.LinesLF(
+				`a: "x`,
+				"\t\r ",
+				"\t\"",
+				"b: 1",
+			),
+			want: stringtest.LinesLF(
+				`a: "x`,
+				"\t\r",
+				"\t",
+				"\t\"",
+				"b: 1",
+			),
 		},
 		"key after a bare cr and a line of spaces between tab lines of plain text": {
-			input: "a: x\n\t\r \n\t\n\nb: 1\n",
-			want:  "a: x\n\t\r\n\t\n\n\nb: 1\n",
+			input: stringtest.LinesLF(
+				"a: x",
+				"\t\r ",
+				"\t",
+				"",
+				"b: 1",
+			),
+			want: stringtest.LinesLF(
+				"a: x",
+				"\t\r",
+				"\t",
+				"",
+				"",
+				"b: 1",
+			),
 		},
 		"value after a comment that ends with a crlf the lexer cuts": {input: "#\r\n:"},
 		"value after a line of spaces after a bare cr comment":       {input: "#\r \n:"},
@@ -169,15 +447,27 @@ var (
 			// The blank line goes to the end of the scalar's Origin. A
 			// tab in front of a line break in the key's Origin would
 			// make the parser reject the key.
-			input: "a: \"t\tb\"\n \t\nb: 1\n",
+			input: stringtest.LinesLF(
+				"a: \"t\tb\"",
+				" \t",
+				"b: 1",
+			),
 		},
 		"key after trailing spaces the lexer drops": {
 			// The lexer drops the spaces after the flow mapping and makes
 			// an invalid token of the blank line, whose indentation must
 			// not repeat. Tokenize leaves the whitespace around that
 			// token as the lexer made it.
-			input: "{a: b}  \n \t\n? k\n",
-			want:  "{a: b}\n \t\n? k\n",
+			input: stringtest.LinesLF(
+				"{a: b}  ",
+				" \t",
+				"? k",
+			),
+			want: stringtest.LinesLF(
+				"{a: b}",
+				" \t",
+				"? k",
+			),
 		},
 	}
 
@@ -187,43 +477,134 @@ var (
 		input string
 		want  string
 	}{
-		"space before a colon after quoted flow keys":        {input: "{\"a\" : 1, \"b\" : \"x\"}\n"},
-		"space before a colon after an alias key":            {input: "&a a : 1\n*a : 2\n"},
-		"space before a colon after a single-quoted key":     {input: "'a' : 1\n"},
-		"nested explicit key":                                {input: "a:\n  ? zz\n  : x\n"},
-		"explicit key in a sequence entry":                   {input: "- ? earth\n  : blue\n"},
-		"explicit key after a document header":               {input: "x: 1\n---\n\n\n? a\n: b\n"},
-		"explicit key after a comment":                       {input: "# c\n\n? b\n: c\n"},
-		"crlf explicit key after a comment":                  {input: "# c\r\n\r\n? b\r\n"},
-		"trailing tab":                                       {input: "a: 1\t\nb: 2\n"},
-		"trailing spaces":                                    {input: "a: 1   \nb: 2\n"},
-		"trailing spaces after a quoted scalar":              {input: "a: 'x'   \nb: 1\n"},
-		"trailing spaces after an anchor":                    {input: "a: &k   \n  b: 1\n"},
-		"trailing spaces after a tag":                        {input: "a: !t   \n  b: 1\n"},
-		"trailing spaces after a flow sequence":              {input: "a: [1, 2]   \nb: 2\n"},
-		"blank line of spaces":                               {input: "a: 1\n   \nb: 2\n"},
-		"blank line of spaces after a document end":          {input: "a: 1\n...\n  \nb: 2\n"},
-		"blank line of spaces in a plain scalar":             {input: "a: plain\n   \n  multi\nb: 2\n"},
-		"blank line with a tab before the first key":         {input: " \t\na: 1\n"},
-		"blank line of spaces after a bare cr":               {input: "\r \na: 1\n"},
-		"blank lines of spaces after a bare cr in a mapping": {input: "a:\r  \r \n  b: 2\n"},
+		"space before a colon after quoted flow keys":    {input: "{\"a\" : 1, \"b\" : \"x\"}\n"},
+		"space before a colon after an alias key":        {input: "&a a : 1\n*a : 2\n"},
+		"space before a colon after a single-quoted key": {input: "'a' : 1\n"},
+		"nested explicit key": {
+			input: stringtest.LinesLF(
+				"a:",
+				"  ? zz",
+				"  : x",
+			),
+		},
+		"explicit key in a sequence entry": {
+			input: stringtest.LinesLF(
+				"- ? earth",
+				"  : blue",
+			),
+		},
+		"explicit key after a document header": {
+			input: stringtest.LinesLF(
+				"x: 1",
+				"---",
+				"",
+				"",
+				"? a",
+				": b",
+			),
+		},
+		"explicit key after a comment": {
+			input: stringtest.LinesLF(
+				"# c",
+				"",
+				"? b",
+				": c",
+			),
+		},
+		"crlf explicit key after a comment": {
+			input: stringtest.LinesCRLF(
+				"# c",
+				"",
+				"? b",
+			),
+		},
+		"trailing tab":                          {input: "a: 1\t\nb: 2\n"},
+		"trailing spaces":                       {input: "a: 1   \nb: 2\n"},
+		"trailing spaces after a quoted scalar": {input: "a: 'x'   \nb: 1\n"},
+		"trailing spaces after an anchor": {
+			input: stringtest.LinesLF(
+				"a: &k   ",
+				"  b: 1",
+			),
+		},
+		"trailing spaces after a tag": {
+			input: stringtest.LinesLF(
+				"a: !t   ",
+				"  b: 1",
+			),
+		},
+		"trailing spaces after a flow sequence": {input: "a: [1, 2]   \nb: 2\n"},
+		"blank line of spaces": {
+			input: stringtest.LinesLF(
+				"a: 1",
+				"   ",
+				"b: 2",
+			),
+		},
+		"blank line of spaces after a document end": {
+			input: stringtest.LinesLF(
+				"a: 1",
+				"...",
+				"  ",
+				"b: 2",
+			),
+		},
+		"blank line of spaces in a plain scalar": {
+			input: stringtest.LinesLF(
+				"a: plain",
+				"   ",
+				"  multi",
+				"b: 2",
+			),
+		},
+		"blank line with a tab before the first key": {input: " \t\na: 1\n"},
+		"blank line of spaces after a bare cr":       {input: "\r \na: 1\n"},
+		"blank lines of spaces after a bare cr in a mapping": {
+			input: stringtest.LinesLF(
+				"a:\r  \r ",
+				"  b: 2",
+			),
+		},
 		"line ending the lexer repeats after a tag": {
 			// The source holds one line break where the Origins hold two,
 			// so Tokenize keeps the Origins the lexer made.
-			input: "u: !t\n  v: 1\n",
-			want:  "u: !t\n\n  v: 1\n",
+			input: stringtest.LinesLF(
+				"u: !t",
+				"  v: 1",
+			),
+			want: stringtest.LinesLF(
+				"u: !t",
+				"",
+				"  v: 1",
+			),
 		},
 		"blank line after a line ending the lexer repeats": {
 			// Tokenize keeps the Origins the lexer made around the
 			// repeat, so the blank line loses its spaces.
-			input: "a: !t\n  \n  b: 1\n",
-			want:  "a: !t\n\n\n  b: 1\n",
+			input: stringtest.LinesLF(
+				"a: !t",
+				"  ",
+				"  b: 1",
+			),
+			want: stringtest.LinesLF(
+				"a: !t",
+				"",
+				"",
+				"  b: 1",
+			),
 		},
 		"line ending the lexer repeats after a block scalar header": {
 			// The lexer makes an invalid token of the header and the
 			// text after it, and repeats the line ending that closes it.
-			input: "a: | x\n  b\n",
-			want:  "a: | x\n\n  b\n",
+			input: stringtest.LinesLF(
+				"a: | x",
+				"  b",
+			),
+			want: stringtest.LinesLF(
+				"a: | x",
+				"",
+				"  b",
+			),
 		},
 		"bad block header at the end": {
 			// The lexer repeats the header's last rune as a token of its
@@ -234,7 +615,11 @@ var (
 		"bad block header in a later entry": {
 			// The line ending after the first header repeats as well.
 			input: "- |ab\n- |ab",
-			want:  "- |ab\n\n- |ab",
+			want: stringtest.JoinLF(
+				"- |ab",
+				"",
+				"- |ab",
+			),
 		},
 		"text after a block scalar header at the end": {
 			// The lexer reads the last rune of the text a second time,
@@ -317,8 +702,12 @@ var (
 			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:9", "2:2:10", "2:4:12"},
 		},
 		"header after a comment": {
-			input: "# comment\n---\nb: two\n",
-			want:  []string{"1:1:1", "2:1:11", "3:1:15", "3:2:16", "3:4:18"},
+			input: stringtest.LinesLF(
+				"# comment",
+				"---",
+				"b: two",
+			),
+			want: []string{"1:1:1", "2:1:11", "3:1:15", "3:2:16", "3:4:18"},
 		},
 		"value after a tag": {
 			input: "t: !!str s\n...",
@@ -332,35 +721,69 @@ var (
 			want:  []string{"1:1:1", "1:2:2", "1:4:4", "1:10:10", "2:1:12", "2:5:16", "2:7:18"},
 		},
 		"block scalar at the end": {
-			input: "k: |\n    hello\n    world\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:5:10"},
+			input: stringtest.LinesLF(
+				"k: |",
+				"    hello",
+				"    world",
+			),
+			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:5:10"},
 		},
 		"block scalar with repeated lines": {
-			input: "k: |\n  a\n  a\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8"},
+			input: stringtest.LinesLF(
+				"k: |",
+				"  a",
+				"  a",
+			),
+			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8"},
 		},
 		"block scalar followed by content": {
-			input: "k: |\n  a\n  b\nz: 1\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8", "4:1:14", "4:2:15", "4:4:17"},
+			input: stringtest.LinesLF(
+				"k: |",
+				"  a",
+				"  b",
+				"z: 1",
+			),
+			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8", "4:1:14", "4:2:15", "4:4:17"},
 		},
 		"block scalar followed by a header": {
-			input: "k: |\n  a\n---\nz: 1\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8", "3:1:10", "4:1:14", "4:2:15", "4:4:17"},
+			input: stringtest.LinesLF(
+				"k: |",
+				"  a",
+				"---",
+				"z: 1",
+			),
+			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8", "3:1:10", "4:1:14", "4:2:15", "4:4:17"},
 		},
 		"block scalar holding a comment and a key": {
-			input: "k: |\n  a\n\n  # c\n  z: 1\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8"},
+			input: stringtest.LinesLF(
+				"k: |",
+				"  a",
+				"",
+				"  # c",
+				"  z: 1",
+			),
+			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:3:8"},
 		},
 		"empty block scalar": {
 			input: "a: |\nb: 1\n",
 			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:6", "2:1:6", "2:2:7", "2:4:9"},
 		},
 		"comment in a CRLF file": {
-			input: "key: value\r\n# c\r\nnext: 1\r\n",
-			want:  []string{"1:1:1", "1:4:4", "1:6:6", "2:1:13", "3:1:18", "3:5:22", "3:7:24"},
+			input: stringtest.LinesCRLF(
+				"key: value",
+				"# c",
+				"next: 1",
+			),
+			want: []string{"1:1:1", "1:4:4", "1:6:6", "2:1:13", "3:1:18", "3:5:22", "3:7:24"},
 		},
 		"block scalar in a CRLF file": {
-			input: "a: 1\r\nb: |\r\n  x\r\n  y\r\nc: 3\r\n",
+			input: stringtest.LinesCRLF(
+				"a: 1",
+				"b: |",
+				"  x",
+				"  y",
+				"c: 3",
+			),
 			want: []string{
 				"1:1:1",
 				"1:2:2",
@@ -375,8 +798,12 @@ var (
 			},
 		},
 		"sequence after a tag and a blank line": {
-			input: "a: !!seq\n\n  - b\n",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "3:3:13", "3:5:15"},
+			input: stringtest.LinesLF(
+				"a: !!seq",
+				"",
+				"  - b",
+			),
+			want: []string{"1:1:1", "1:2:2", "1:4:4", "3:3:13", "3:5:15"},
 		},
 		"tab between key and value": {
 			input: "a:\t1\n",
@@ -406,14 +833,23 @@ var (
 			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:1:13", "2:9:21", "2:11:23"},
 		},
 		"escape after a comment": {
-			input: "m:\n  # c\n  \"\\u00e9\": 1\n  b: 2\n",
-			want:  []string{"1:1:1", "1:2:2", "2:3:6", "3:3:12", "3:11:20", "3:13:22", "4:3:26", "4:4:27", "4:6:29"},
+			input: stringtest.LinesLF(
+				"m:",
+				"  # c",
+				`  "\u00e9": 1`,
+				"  b: 2",
+			),
+			want: []string{"1:1:1", "1:2:2", "2:3:6", "3:3:12", "3:11:20", "3:13:22", "4:3:26", "4:4:27", "4:6:29"},
 		},
 		"tab indentation": {
 			// The lexer drops the ":" after the tab, so the value's text
 			// sits further on than the cursor.
-			input: "\ta: 1\nb: 2\nc: 3\n",
-			want:  []string{"1:2:2", "1:5:5", "2:2:8", "2:4:10", "3:1:12", "3:2:13", "3:4:15"},
+			input: stringtest.LinesLF(
+				"\ta: 1",
+				"b: 2",
+				"c: 3",
+			),
+			want: []string{"1:2:2", "1:5:5", "2:2:8", "2:4:10", "3:1:12", "3:2:13", "3:4:15"},
 		},
 		"escape cut short by the end": {
 			// The lexer reads the backslash into the invalid token for the
@@ -444,23 +880,40 @@ var (
 		"comment after a header the lexer shortened": {
 			// The lexer reads "---" as "--" one rune on, so the shift
 			// taken from it misses the comment by one rune.
-			input: "\"\t1\n---\n# c\n",
-			want:  []string{"1:1:1", "2:1:5", "3:1:9"},
+			input: stringtest.LinesLF(
+				"\"\t1",
+				"---",
+				"# c",
+			),
+			want: []string{"1:1:1", "2:1:5", "3:1:9"},
 		},
 		"escaped line break before a tab line that opens with a backslash": {
-			input: "b: \"\\\n\t\t\\",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9"},
+			input: stringtest.JoinLF(
+				`b: "\`,
+				"\t\t\\",
+			),
+			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9"},
 		},
 		"text on the line after a tab line that swallows its indicator": {
 			// The token the lexer makes of the second tab swallows the ":"
 			// that ends the line, and the tokens of whitespace alone sit on
 			// that ":". The text of the next token opens the line after it.
-			input: "a: \"x\n\t\t:\n\t,,\n\t",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "2:3:9", "3:2:12"},
+			input: stringtest.JoinLF(
+				`a: "x`,
+				"\t\t:",
+				"\t,,",
+				"\t",
+			),
+			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "2:3:9", "3:2:12"},
 		},
 		"quote on the line after a tab line that swallows its indicator": {
-			input: "a: \"x\n\t\t-\n\t\"\r\n\t",
-			want:  []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "2:3:9", "3:2:12", "4:2:16"},
+			input: stringtest.JoinLF(
+				`a: "x`,
+				"\t\t-",
+				"\t\"\r",
+				"\t",
+			),
+			want: []string{"1:1:1", "1:2:2", "1:4:4", "2:3:9", "2:3:9", "3:2:12", "4:2:16"},
 		},
 	}
 
@@ -469,57 +922,238 @@ var (
 	// adds the sources of [positionCases], [droppedWhitespace],
 	// [droppedLineBreaks], and [numericEscapes].
 	positionCorpus = map[string]string{
-		"mapping":                                              "a: 1\nb: two\n",
-		"trailing spaces on each line":                         "a: 1   \nb: 2  \n",
-		"trailing spaces before a comment":                     "a: 1   # c\nb: 2\n",
-		"comments":                                             "# head\na: 1 # line\n# foot\nb: 2\n",
-		"tag on a value":                                       "t: !!str s\nu: !!int 1\n",
-		"tag before a nested map":                              "a: !t\n  b: 1\nc: 2\n",
-		"anchor and alias":                                     "a: &x 1\nb: *x\n",
-		"literal with blank lines":                             "k: |\n  a\n\n  b\n\nz: 1\n",
-		"literal with a blank line of spaces":                  "k: |\n  a\n   \n  b\nz: 1\n",
-		"literal with a leading blank line":                    "k: |\n\n  b\nz: 1\n",
-		"literal with keep":                                    "k: |+\n  a\n\n\nz: 1\n",
-		"literal with an indent indicator":                     "k: |2\n   a\n  b\n",
-		"literal with a comment after":                         "k: |\n  a\n# c\nz: 1\n",
-		"nested literal with a comment after":                  "a:\n  k: |\n    x\n\n  # c\n  z: 1\n",
-		"folded":                                               "k: >\n  a\n\n  b\n\nz: 1\n",
-		"empty literal with keep":                              "a: |+\n\nb: 1\n",
-		"literal of spaces before a comment":                   "a: |+\n  \n# c\nb: 1\n",
-		"folded of spaces before a comment":                    "a: >+\n  \n# c\nb: 1\n",
-		"literal of a tab before a comment":                    "a: |\n \t\n# c\nb: 1\n",
-		"literal of spaces after a header comment":             "a: |+ # h\n  \n# c\nb: 1\n",
-		"nested literal of spaces before a comment":            "items:\n  - script: |+\n      \n    # next\n  - b\n",
-		"literal of blank lines before a comment":              "a: |+\n  \n\n  \n# c\nb: 1\n",
-		"crlf literal of spaces before a comment":              "a: |+\r\n  \r\n# c\r\nb: 1\r\n",
-		"tagged literal of spaces before a comment":            "a: !t |+\n  \n# c\nb: 1\n",
-		"empty folded before a comment":                        "x:\n  a: >\n  # c\n  b: 1\n",
-		"empty folded before spaces and a comment":             "x:\n  a: >\n    \n  # c\n  b: 1\n",
-		"quoted multi-line":                                    "a: 'x\n\n  y'\nb: 1\n",
-		"double-quoted multi-line":                             "c: \"x\n  y\"\nd: 1\n",
-		"escape in a flow sequence":                            "[!!str \"\\u00e9\", b]\n",
-		"escape in a sequence":                                 "- !!str \"\\u00e9\"\n- b\n",
-		"escaped scalars in a row":                             "a: \"\\u00e9\"\n\"\\u00e8\": \"\\x41 b\"\nc: 1\n",
-		"escape that swallows the quote":                       "a: \"\\u12\"\nb: 1\nc: 2\n",
-		"plain multi-line":                                     "a: plain\n  multi\nb: 2\n",
-		"flow collections":                                     "{a: 1, b: [1, 2]}\n",
-		"flow sequence over lines":                             "a: [\n  1,\n  2\n]\n",
-		"sequences":                                            "- a\n- b # c\n- - c\n  - d\n",
-		"complex key":                                          "? k\n: v\n",
-		"directive":                                            "%YAML 1.2\n---\na: 1\n",
-		"several documents":                                    "a: 1\n---\nb: 2\n...\n# tail\nc: 3\n",
-		"blank lines":                                          "a: 1\n\n\nb: 2\n",
-		"key with trailing spaces":                             "a  : 1\n",
-		"wide runes in a key":                                  "a: 日本 x\nb: é\n日: 1\n",
-		"crlf tag and quoted":                                  "a: !t\r\n  b: 1\r\nc: 'x\r\n  y'\r\n",
-		"bare cr":                                              "a: 1\rb: 2\r",
-		"no final line ending":                                 "a: 1\nb: 2",
-		"colon after trailing spaces on a quoted key":          "\"q\" \n: 1\n",
-		"colon after a trailing tab on a quoted key":           "\"q\"\t\n: 1\n",
-		"colon after a blank line of spaces":                   "\"q\"\n  \n: 1\n",
-		"colon after trailing spaces crlf":                     "'q' \r\n: 1\r\n",
-		"nested colon after trailing spaces":                   "- \"q\" \n  : 1\n",
-		"colon after trailing spaces on a later key":           "a: 1\n'q'  \n: 2\n",
+		"mapping":                          "a: 1\nb: two\n",
+		"trailing spaces on each line":     "a: 1   \nb: 2  \n",
+		"trailing spaces before a comment": "a: 1   # c\nb: 2\n",
+		"comments": stringtest.LinesLF(
+			"# head",
+			"a: 1 # line",
+			"# foot",
+			"b: 2",
+		),
+		"tag on a value": "t: !!str s\nu: !!int 1\n",
+		"tag before a nested map": stringtest.LinesLF(
+			"a: !t",
+			"  b: 1",
+			"c: 2",
+		),
+		"anchor and alias": "a: &x 1\nb: *x\n",
+		"literal with blank lines": stringtest.LinesLF(
+			"k: |",
+			"  a",
+			"",
+			"  b",
+			"",
+			"z: 1",
+		),
+		"literal with a blank line of spaces": stringtest.LinesLF(
+			"k: |",
+			"  a",
+			"   ",
+			"  b",
+			"z: 1",
+		),
+		"literal with a leading blank line": stringtest.LinesLF(
+			"k: |",
+			"",
+			"  b",
+			"z: 1",
+		),
+		"literal with keep": stringtest.LinesLF(
+			"k: |+",
+			"  a",
+			"",
+			"",
+			"z: 1",
+		),
+		"literal with an indent indicator": stringtest.LinesLF(
+			"k: |2",
+			"   a",
+			"  b",
+		),
+		"literal with a comment after": stringtest.LinesLF(
+			"k: |",
+			"  a",
+			"# c",
+			"z: 1",
+		),
+		"nested literal with a comment after": stringtest.LinesLF(
+			"a:",
+			"  k: |",
+			"    x",
+			"",
+			"  # c",
+			"  z: 1",
+		),
+		"folded": stringtest.LinesLF(
+			"k: >",
+			"  a",
+			"",
+			"  b",
+			"",
+			"z: 1",
+		),
+		"empty literal with keep": stringtest.LinesLF(
+			"a: |+",
+			"",
+			"b: 1",
+		),
+		"literal of spaces before a comment": stringtest.LinesLF(
+			"a: |+",
+			"  ",
+			"# c",
+			"b: 1",
+		),
+		"folded of spaces before a comment": stringtest.LinesLF(
+			"a: >+",
+			"  ",
+			"# c",
+			"b: 1",
+		),
+		"literal of a tab before a comment": stringtest.LinesLF(
+			"a: |",
+			" \t",
+			"# c",
+			"b: 1",
+		),
+		"literal of spaces after a header comment": stringtest.LinesLF(
+			"a: |+ # h",
+			"  ",
+			"# c",
+			"b: 1",
+		),
+		"nested literal of spaces before a comment": stringtest.LinesLF(
+			"items:",
+			"  - script: |+",
+			"      ",
+			"    # next",
+			"  - b",
+		),
+		"literal of blank lines before a comment": stringtest.LinesLF(
+			"a: |+",
+			"  ",
+			"",
+			"  ",
+			"# c",
+			"b: 1",
+		),
+		"crlf literal of spaces before a comment": stringtest.LinesCRLF(
+			"a: |+",
+			"  ",
+			"# c",
+			"b: 1",
+		),
+		"tagged literal of spaces before a comment": stringtest.LinesLF(
+			"a: !t |+",
+			"  ",
+			"# c",
+			"b: 1",
+		),
+		"empty folded before a comment": stringtest.LinesLF(
+			"x:",
+			"  a: >",
+			"  # c",
+			"  b: 1",
+		),
+		"empty folded before spaces and a comment": stringtest.LinesLF(
+			"x:",
+			"  a: >",
+			"    ",
+			"  # c",
+			"  b: 1",
+		),
+		"quoted multi-line": stringtest.LinesLF(
+			"a: 'x",
+			"",
+			"  y'",
+			"b: 1",
+		),
+		"double-quoted multi-line": stringtest.LinesLF(
+			`c: "x`,
+			`  y"`,
+			"d: 1",
+		),
+		"escape in a flow sequence": "[!!str \"\\u00e9\", b]\n",
+		"escape in a sequence":      "- !!str \"\\u00e9\"\n- b\n",
+		"escaped scalars in a row": stringtest.LinesLF(
+			`a: "\u00e9"`,
+			`"\u00e8": "\x41 b"`,
+			"c: 1",
+		),
+		"escape that swallows the quote": stringtest.LinesLF(
+			`a: "\u12"`,
+			"b: 1",
+			"c: 2",
+		),
+		"plain multi-line": stringtest.LinesLF(
+			"a: plain",
+			"  multi",
+			"b: 2",
+		),
+		"flow collections": "{a: 1, b: [1, 2]}\n",
+		"flow sequence over lines": stringtest.LinesLF(
+			"a: [",
+			"  1,",
+			"  2",
+			"]",
+		),
+		"sequences": stringtest.LinesLF(
+			"- a",
+			"- b # c",
+			"- - c",
+			"  - d",
+		),
+		"complex key": "? k\n: v\n",
+		"directive": stringtest.LinesLF(
+			"%YAML 1.2",
+			"---",
+			"a: 1",
+		),
+		"several documents": stringtest.LinesLF(
+			"a: 1",
+			"---",
+			"b: 2",
+			"...",
+			"# tail",
+			"c: 3",
+		),
+		"blank lines": stringtest.LinesLF(
+			"a: 1",
+			"",
+			"",
+			"b: 2",
+		),
+		"key with trailing spaces": "a  : 1\n",
+		"wide runes in a key": stringtest.LinesLF(
+			"a: 日本 x",
+			"b: é",
+			"日: 1",
+		),
+		"crlf tag and quoted": stringtest.LinesCRLF(
+			"a: !t",
+			"  b: 1",
+			"c: 'x",
+			"  y'",
+		),
+		"bare cr":              "a: 1\rb: 2\r",
+		"no final line ending": "a: 1\nb: 2",
+		"colon after trailing spaces on a quoted key": "\"q\" \n: 1\n",
+		"colon after a trailing tab on a quoted key":  "\"q\"\t\n: 1\n",
+		"colon after a blank line of spaces": stringtest.LinesLF(
+			`"q"`,
+			"  ",
+			": 1",
+		),
+		"colon after trailing spaces crlf": "'q' \r\n: 1\r\n",
+		"nested colon after trailing spaces": stringtest.LinesLF(
+			`- "q" `,
+			"  : 1",
+		),
+		"colon after trailing spaces on a later key": stringtest.LinesLF(
+			"a: 1",
+			"'q'  ",
+			": 2",
+		),
 		"blank line of a tab before the first key":             "\t\nb: 1\n",
 		"blank line of a space and a tab before the first key": " \t\nb: 1\n",
 		"blank line of a tab before a quoted first key":        "\t\n\"b\": 1\n",
@@ -590,51 +1224,217 @@ func TestTokenize_TabIndentsQuotedLine(t *testing.T) {
 		input string
 		want  string
 	}{
-		"double-quoted":         {input: "a: \"x\n\ty\"\n"},
-		"single-quoted":         {input: "a: 'x\n\ty'\n"},
-		"scalars in a row":      {input: "a: \"x\n\ty\"\nb: 'x\n\ty'\nc: \"x\n\ty\"\n"},
-		"sequence entry":        {input: "- \"x\n\ty\"\n"},
-		"nested sequence entry": {input: "a:\n  - \"x\n\ty\"\n"},
-		"two tabs":              {input: "a: \"x\n\t\ty\"\n"},
-		"space before the tab":  {input: "a:\n  b: \"x\n \ty\"\n"},
-		"after a blank line":    {input: "a: 'x\n\n\ty'\n"},
-		"crlf":                  {input: "a: \"x\r\n\ty\"\r\n"},
-		"no final line ending":  {input: "0:\n\"\n\t0"},
+		"double-quoted": {
+			input: stringtest.LinesLF(
+				`a: "x`,
+				"\ty\"",
+			),
+		},
+		"single-quoted": {
+			input: stringtest.LinesLF(
+				"a: 'x",
+				"\ty'",
+			),
+		},
+		"scalars in a row": {
+			input: stringtest.LinesLF(
+				`a: "x`,
+				"\ty\"",
+				"b: 'x",
+				"\ty'",
+				`c: "x`,
+				"\ty\"",
+			),
+		},
+		"sequence entry": {
+			input: stringtest.LinesLF(
+				`- "x`,
+				"\ty\"",
+			),
+		},
+		"nested sequence entry": {
+			input: stringtest.LinesLF(
+				"a:",
+				`  - "x`,
+				"\ty\"",
+			),
+		},
+		"two tabs": {
+			input: stringtest.LinesLF(
+				`a: "x`,
+				"\t\ty\"",
+			),
+		},
+		"space before the tab": {
+			input: stringtest.LinesLF(
+				"a:",
+				`  b: "x`,
+				" \ty\"",
+			),
+		},
+		"after a blank line": {
+			input: stringtest.LinesLF(
+				"a: 'x",
+				"",
+				"\ty'",
+			),
+		},
+		"crlf": {
+			input: stringtest.LinesCRLF(
+				`a: "x`,
+				"\ty\"",
+			),
+		},
+		"no final line ending": {
+			input: stringtest.JoinLF(
+				"0:",
+				`"`,
+				"\t0",
+			),
+		},
 		"escape code": {
-			input: "a: \"caf\\u00e9\n\t\n  more\"\nb: 1\n",
-			want:  "a: \"caf\\\n\t\n  more\"\nb: 1\n",
+			input: stringtest.LinesLF(
+				`a: "caf\u00e9`,
+				"\t",
+				`  more"`,
+				"b: 1",
+			),
+			want: stringtest.LinesLF(
+				`a: "caf\`,
+				"\t",
+				`  more"`,
+				"b: 1",
+			),
 		},
 		"escape code and two lines": {
-			input: "a: \"caf\\u00e9\n\t\n\t\n  more\"\nb: 1\n",
-			want:  "a: \"caf\\\n\t\n\t\n  more\"\nb: 1\n",
+			input: stringtest.LinesLF(
+				`a: "caf\u00e9`,
+				"\t",
+				"\t",
+				`  more"`,
+				"b: 1",
+			),
+			want: stringtest.LinesLF(
+				`a: "caf\`,
+				"\t",
+				"\t",
+				`  more"`,
+				"b: 1",
+			),
 		},
-		"tab line at the end":      {input: "a: \"x\n\t\n"},
-		"tab lines at the end":     {input: "a: \"x\n\t\n\t\n"},
+		"tab line at the end": {input: "a: \"x\n\t\n"},
+		"tab lines at the end": {
+			input: stringtest.LinesLF(
+				`a: "x`,
+				"\t",
+				"\t",
+			),
+		},
 		"tab that ends the source": {input: "a: \"x\n\t"},
 		"dropped text on the tab line": {
-			input: "a: \"x\n\t!",
-			want:  "a: \"x\n\t",
+			input: stringtest.JoinLF(
+				`a: "x`,
+				"\t!",
+			),
+			want: "a: \"x\n\t",
 		},
 		"dropped text before a bare cr on the tab line": {
-			input: "a: \"\t\t\t]\n\t?\r\u00e9>\n\t",
-			want:  "a: \"\t\t\t]\n\t\u00e9>\n\t",
+			input: stringtest.JoinLF(
+				"a: \"\t\t\t]",
+				"\t?\r\u00e9>",
+				"\t",
+			),
+			want: stringtest.JoinLF(
+				"a: \"\t\t\t]",
+				"\t\u00e9>",
+				"\t",
+			),
 		},
-		"two tabs on a tab line":                    {input: "a: \"x\n\t\t\n\ty\"\n"},
-		"two tabs on a single-quoted tab line":      {input: "- '\n\t\t\n\ta'\n"},
-		"space after the tab on a tab line":         {input: "a: \"x\n\t \n\ty\"\n"},
-		"two tabs on a crlf tab line":               {input: "a: \"x\r\n\t\t\r\n\ty\"\r\n"},
-		"three tabs in a nested map":                {input: "a:\n  b: \"x\n\t\t\ty\"\n"},
-		"tab lines of two tabs that end the source": {input: "a: \"x\n\t\t\n\t\n\t"},
-		"tab in the first line of a nested scalar":  {input: "a:\n  b: \"\tx\n\t\t\ty\"\n"},
+		"two tabs on a tab line": {
+			input: stringtest.LinesLF(
+				`a: "x`,
+				"\t\t",
+				"\ty\"",
+			),
+		},
+		"two tabs on a single-quoted tab line": {
+			input: stringtest.LinesLF(
+				"- '",
+				"\t\t",
+				"\ta'",
+			),
+		},
+		"space after the tab on a tab line": {
+			input: stringtest.LinesLF(
+				`a: "x`,
+				"\t ",
+				"\ty\"",
+			),
+		},
+		"two tabs on a crlf tab line": {
+			input: stringtest.LinesCRLF(
+				`a: "x`,
+				"\t\t",
+				"\ty\"",
+			),
+		},
+		"three tabs in a nested map": {
+			input: stringtest.LinesLF(
+				"a:",
+				`  b: "x`,
+				"\t\t\ty\"",
+			),
+		},
+		"tab lines of two tabs that end the source": {
+			input: stringtest.JoinLF(
+				`a: "x`,
+				"\t\t",
+				"\t",
+				"\t",
+			),
+		},
+		"tab in the first line of a nested scalar": {
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: \"\tx",
+				"\t\t\ty\"",
+			),
+		},
 		"hex escape before a backslash": {
-			input: "a: \"c\\x41\n\t\\x42\"\n",
-			want:  "a: \"c\\\n\t\\x42\"\n",
+			input: stringtest.LinesLF(
+				`a: "c\x41`,
+				"\t\\x42\"",
+			),
+			want: stringtest.LinesLF(
+				`a: "c\`,
+				"\t\\x42\"",
+			),
 		},
-		"escaped line break before a backslash": {input: "a: \"x\\\n\t\\y\"\n"},
-		"escaped line break before two tabs":    {input: "b: \"\\\n\t\t\\"},
+		"escaped line break before a backslash": {
+			input: stringtest.LinesLF(
+				`a: "x\`,
+				"\t\\y\"",
+			),
+		},
+		"escaped line break before two tabs": {
+			input: stringtest.JoinLF(
+				`b: "\`,
+				"\t\t\\",
+			),
+		},
 		"hex escapes on tab lines of two tabs": {
-			input: ":: \"\n\\x4}\n\t\t\\x4|\n\t\t",
-			want:  ":: \"\n\\\n\t\t\\x4|\n\t\t",
+			input: stringtest.JoinLF(
+				`:: "`,
+				`\x4}`,
+				"\t\t\\x4|",
+				"\t\t",
+			),
+			want: stringtest.JoinLF(
+				`:: "`,
+				`\`,
+				"\t\t\\x4|",
+				"\t\t",
+			),
 		},
 	}
 
@@ -663,11 +1463,42 @@ func TestTokenize_TabAfterBlockTextThatOpensWithQuote(t *testing.T) {
 	tcs := map[string]struct {
 		input string
 	}{
-		"unicode escape":            {input: "a: |\n  \"caf\\u00e9\n\tsome text \\u00e9\n"},
-		"hex escape":                {input: "a: |\n  \"\\x\n\tx"},
-		"unicode escape with space": {input: "|\n \"\\u\n\t \\u"},
-		"after a blank line":        {input: "- |\n\n\"\\x\n\tx"},
-		"folded":                    {input: "a: >\n  \"\\x41\n\t\tx41\n"},
+		"unicode escape": {
+			input: stringtest.LinesLF(
+				"a: |",
+				`  "caf\u00e9`,
+				"\tsome text \\u00e9",
+			),
+		},
+		"hex escape": {
+			input: stringtest.JoinLF(
+				"a: |",
+				`  "\x`,
+				"\tx",
+			),
+		},
+		"unicode escape with space": {
+			input: stringtest.JoinLF(
+				"|",
+				` "\u`,
+				"\t \\u",
+			),
+		},
+		"after a blank line": {
+			input: stringtest.JoinLF(
+				"- |",
+				"",
+				`"\x`,
+				"\tx",
+			),
+		},
+		"folded": {
+			input: stringtest.LinesLF(
+				"a: >",
+				`  "\x41`,
+				"\t\tx41",
+			),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -723,33 +1554,83 @@ func TestTokenize_FinalBlankLines(t *testing.T) {
 		// The joined Origins equal the input.
 		whole bool
 	}{
-		"trailing space inside the last scalar":       {input: "description: first line \n  second line\n\n"},
-		"blank line of spaces inside the last scalar": {input: "description: first\n  \n  second\n\n"},
-		"several final blank lines":                   {input: "k: plain\n   \n  more\n\n\n"},
-		"sequence entry":                              {input: "- a\n  \n  b\n\n"},
+		"trailing space inside the last scalar": {
+			input: stringtest.LinesLF(
+				"description: first line ",
+				"  second line",
+				"",
+			),
+		},
+		"blank line of spaces inside the last scalar": {
+			input: stringtest.LinesLF(
+				"description: first",
+				"  ",
+				"  second",
+				"",
+			),
+		},
+		"several final blank lines": {
+			input: stringtest.LinesLF(
+				"k: plain",
+				"   ",
+				"  more",
+				"",
+				"",
+			),
+		},
+		"sequence entry": {
+			input: stringtest.LinesLF(
+				"- a",
+				"  ",
+				"  b",
+				"",
+			),
+		},
 		"invalid tab token": {
-			input: "a:\n\t\n\n",
+			input: stringtest.LinesLF(
+				"a:",
+				"\t",
+				"",
+			),
 			whole: true,
 		},
 		"invalid tab token after a header": {
-			input: "a: |\n\t\n\n",
+			input: stringtest.LinesLF(
+				"a: |",
+				"\t",
+				"",
+			),
 			whole: true,
 		},
 		"invalid tab token after a trailing space": {
-			input: "a:\n  b: 1 \n\t\t\n\n",
-			tail:  "\n\t\t\n\n",
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: 1 ",
+				"\t\t",
+				"",
+			),
+			tail: "\n\t\t\n\n",
 		},
 		"invalid tab token after a trailing space crlf": {
 			input: "  b: 2 \r\n\t\t\n",
 			tail:  "\r\n\t\t\n",
 		},
 		"invalid tab token after a blank line of spaces": {
-			input: "a:\n  b: 1\n  \n\t\t\n",
-			tail:  "\n\t\t\n",
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: 1",
+				"  ",
+				"\t\t",
+			),
+			tail: "\n\t\t\n",
 		},
 		"invalid tab token of a space and a tab after a trailing space": {
-			input: "a:\n  b: 1 \n\t \t\n",
-			tail:  "\n\t \t\n",
+			input: stringtest.LinesLF(
+				"a:",
+				"  b: 1 ",
+				"\t \t",
+			),
+			tail: "\n\t \t\n",
 		},
 		"truncated escape": {
 			input: `a: "\x41"` + "\n\n",
@@ -768,7 +1649,11 @@ func TestTokenize_FinalBlankLines(t *testing.T) {
 			whole: true,
 		},
 		"header with trailing spaces": {
-			input: "a: |  \n  \n \n",
+			input: stringtest.LinesLF(
+				"a: |  ",
+				"  ",
+				" ",
+			),
 			whole: true,
 		},
 		"dropped text ends the file": {input: "a: 1\n!"},
@@ -812,13 +1697,51 @@ func TestTokenize_FinalTabTokenKeepsWhitespace(t *testing.T) {
 		input string
 		want  string // The Origin of the last token.
 	}{
-		"swallowed sequence entry before a space":         {input: "# c\n\t- \n", want: "\t"},
-		"swallowed mapping value before a space":          {input: "# c\n\t: \n", want: "\t"},
-		"swallowed sequence entry before a tab":           {input: "# c\n\t-\t\n", want: "\t"},
-		"swallowed sequence entry between bare crs":       {input: "# c\r\t- \r", want: "\t"},
-		"swallowed mapping values in a nested mapping":    {input: "a:\n  b: 1:\t:\t: \t", want: "\t"},
-		"line ending the lexer repeats after a tag":       {input: "a: !t\n\t\n\t\n", want: "\n\t"},
-		"line ending the lexer repeats after header text": {input: "a: |\"x\n\t\n\t\n", want: "\n\t"},
+		"swallowed sequence entry before a space": {
+			input: stringtest.LinesLF(
+				"# c",
+				"\t- ",
+			),
+			want: "\t",
+		},
+		"swallowed mapping value before a space": {
+			input: stringtest.LinesLF(
+				"# c",
+				"\t: ",
+			),
+			want: "\t",
+		},
+		"swallowed sequence entry before a tab": {
+			input: stringtest.LinesLF(
+				"# c",
+				"\t-\t",
+			),
+			want: "\t",
+		},
+		"swallowed sequence entry between bare crs": {input: "# c\r\t- \r", want: "\t"},
+		"swallowed mapping values in a nested mapping": {
+			input: stringtest.JoinLF(
+				"a:",
+				"  b: 1:\t:\t: \t",
+			),
+			want: "\t",
+		},
+		"line ending the lexer repeats after a tag": {
+			input: stringtest.LinesLF(
+				"a: !t",
+				"\t",
+				"\t",
+			),
+			want: "\n\t",
+		},
+		"line ending the lexer repeats after header text": {
+			input: stringtest.LinesLF(
+				`a: |"x`,
+				"\t",
+				"\t",
+			),
+			want: "\n\t",
+		},
 	}
 
 	for name, tc := range tcs {
@@ -858,16 +1781,32 @@ func TestTokenize_ByteOrderMark(t *testing.T) {
 			want:  "# c\ra: 1\r",
 		},
 		"after a document marker": {
-			input: "a: 1\n---\n\ufeffb: 2\n",
-			want:  "a: 1\n---\nb: 2\n",
-			line:  3,
-			col:   1,
+			input: stringtest.LinesLF(
+				"a: 1",
+				"---",
+				"\ufeffb: 2",
+			),
+			want: stringtest.LinesLF(
+				"a: 1",
+				"---",
+				"b: 2",
+			),
+			line: 3,
+			col:  1,
 		},
 		"after a document marker crlf": {
-			input: "a: 1\r\n---\r\n\ufeffb: 2\r\n",
-			want:  "a: 1\r\n---\r\nb: 2\r\n",
-			line:  3,
-			col:   1,
+			input: stringtest.LinesCRLF(
+				"a: 1",
+				"---",
+				"\ufeffb: 2",
+			),
+			want: stringtest.LinesCRLF(
+				"a: 1",
+				"---",
+				"b: 2",
+			),
+			line: 3,
+			col:  1,
 		},
 		"after a document marker cr": {
 			input: "a: 1\r---\r\ufeffb: 2\r",
@@ -876,22 +1815,50 @@ func TestTokenize_ByteOrderMark(t *testing.T) {
 			col:   1,
 		},
 		"after a document marker and a comment": {
-			input: "a: 1\n--- # c\n# d\n\ufeffb: 2\n",
-			want:  "a: 1\n--- # c\n# d\nb: 2\n",
-			line:  4,
-			col:   1,
+			input: stringtest.LinesLF(
+				"a: 1",
+				"--- # c",
+				"# d",
+				"\ufeffb: 2",
+			),
+			want: stringtest.LinesLF(
+				"a: 1",
+				"--- # c",
+				"# d",
+				"b: 2",
+			),
+			line: 4,
+			col:  1,
 		},
 		"before a document marker": {
-			input: "\ufeff---\na: 1\n\ufeff---\n\ufeffb: 2\n",
-			want:  "---\na: 1\n---\nb: 2\n",
-			line:  4,
-			col:   1,
+			input: stringtest.LinesLF(
+				"\ufeff---",
+				"a: 1",
+				"\ufeff---",
+				"\ufeffb: 2",
+			),
+			want: stringtest.LinesLF(
+				"---",
+				"a: 1",
+				"---",
+				"b: 2",
+			),
+			line: 4,
+			col:  1,
 		},
 		"after a document end marker": {
-			input: "a: 1\n...\n\ufeffb: 2\n",
-			want:  "a: 1\n...\nb: 2\n",
-			line:  3,
-			col:   1,
+			input: stringtest.LinesLF(
+				"a: 1",
+				"...",
+				"\ufeffb: 2",
+			),
+			want: stringtest.LinesLF(
+				"a: 1",
+				"...",
+				"b: 2",
+			),
+			line: 3,
+			col:  1,
 		},
 		"after a document end marker cr": {
 			input: "a: 1\r...\r\ufeffb: 2\r",
@@ -940,7 +1907,13 @@ func TestTokenize_OpenFlowAtMarker(t *testing.T) {
 	}{
 		"comma and nested mapping after an open mapping": {
 			head: "name: web\nlabels: {app: web\n",
-			tail: "---\nname: worker\ncommand: sleep 1, 2\nspec:\n  replicas: 2\n",
+			tail: stringtest.LinesLF(
+				"---",
+				"name: worker",
+				"command: sleep 1, 2",
+				"spec:",
+				"  replicas: 2",
+			),
 			want: []string{
 				"---",
 				"name", ":", "worker",
@@ -960,7 +1933,12 @@ func TestTokenize_OpenFlowAtMarker(t *testing.T) {
 		},
 		"document end marker": {
 			head: "a: [b\n",
-			tail: "...\nk:\n  r: 2\nm: x, y\n",
+			tail: stringtest.LinesLF(
+				"...",
+				"k:",
+				"  r: 2",
+				"m: x, y",
+			),
 			want: []string{"...", "k", ":", "r", ":", "2", "m", ":", "x, y"},
 		},
 		"content on the line of the marker": {
@@ -970,7 +1948,12 @@ func TestTokenize_OpenFlowAtMarker(t *testing.T) {
 		},
 		"crlf": {
 			head: "a: {b\r\n",
-			tail: "---\r\nk:\r\n  r: 2\r\nm: x, y\r\n",
+			tail: stringtest.LinesCRLF(
+				"---",
+				"k:",
+				"  r: 2",
+				"m: x, y",
+			),
 			want: []string{"---", "k", ":", "r", ":", "2", "m", ":", "x, y"},
 		},
 		// The lexer counts a CRLF after a comment as two lines, so its
@@ -991,7 +1974,11 @@ func TestTokenize_OpenFlowAtMarker(t *testing.T) {
 			want: []string{"---", "k", ":", "v, w"},
 		},
 		"blank lines ahead of the marker": {
-			head: "a: {b\n\n  \n",
+			head: stringtest.LinesLF(
+				"a: {b",
+				"",
+				"  ",
+			),
 			tail: "---\nk: v, w\n",
 			want: []string{"---", "k", ":", "v, w"},
 		},
@@ -1002,7 +1989,16 @@ func TestTokenize_OpenFlowAtMarker(t *testing.T) {
 		},
 		"each of several documents leaves a flow open": {
 			head: "a: {\n",
-			tail: "---\nb: [\n---\nk: v, w\n---\nz: ]\n---\nl: [a, b]\n",
+			tail: stringtest.LinesLF(
+				"---",
+				"b: [",
+				"---",
+				"k: v, w",
+				"---",
+				"z: ]",
+				"---",
+				"l: [a, b]",
+			),
 			want: []string{
 				"---", "b", ":", "[",
 				"---", "k", ":", "v, w",
@@ -1074,7 +2070,11 @@ func TestTokenize_OpenFlowBehindSwallowedText(t *testing.T) {
 	// source holds text between the "{" and the marker that no token
 	// holds. Tokenize leaves the stream as the lexer made it there, and
 	// the "," of the next document still reads as a flow indicator.
-	const input = "{\t: \n---\nk: v, w\n"
+	input := stringtest.LinesLF(
+		"{\t: ",
+		"---",
+		"k: v, w",
+	)
 
 	want := lexer.Tokenize(input)
 	got := tokens.Tokenize(input)
@@ -1097,14 +2097,23 @@ func TestIsPlaceholder(t *testing.T) {
 		idx   int
 		want  bool
 	}{
-		"whitespace only":               {input: "\n  \n", want: true},
-		"lone tag marker":               {input: "!", want: true},
-		"plain scalar":                  {input: "abc", want: false},
-		"plain scalar line":             {input: "abc\n", want: false},
-		"mapping":                       {input: "a: 1\n", want: false},
-		"empty block scalar content":    {input: "a: |\nb: 1\n", idx: 3, want: false},
-		"empty folded scalar content":   {input: "a: >\nb: 1\n", idx: 3, want: false},
-		"kept blank block scalar lines": {input: "a: |+\n\n\nb: 1\n", idx: 3, want: false},
+		"whitespace only":             {input: "\n  \n", want: true},
+		"lone tag marker":             {input: "!", want: true},
+		"plain scalar":                {input: "abc", want: false},
+		"plain scalar line":           {input: "abc\n", want: false},
+		"mapping":                     {input: "a: 1\n", want: false},
+		"empty block scalar content":  {input: "a: |\nb: 1\n", idx: 3, want: false},
+		"empty folded scalar content": {input: "a: >\nb: 1\n", idx: 3, want: false},
+		"kept blank block scalar lines": {
+			input: stringtest.LinesLF(
+				"a: |+",
+				"",
+				"",
+				"b: 1",
+			),
+			idx:  3,
+			want: false,
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1142,7 +2151,14 @@ func TestTokenize_EmptyContentPastEnd(t *testing.T) {
 		"second header ends it":     {input: "x: \"\u00e9\"\nk: |+\n", want: "2:6:13"},
 		"dropped line follows":      {input: "a: |+\n!", want: "2:1:7"},
 		"blank line ends the file":  {input: "a: |+\n\n", want: "2:1:7"},
-		"blank lines end the file":  {input: "a: |+\n\n\n", want: "3:1:8"},
+		"blank lines end the file": {
+			input: stringtest.LinesLF(
+				"a: |+",
+				"",
+				"",
+			),
+			want: "3:1:8",
+		},
 		"blank crlf line ends it":   {input: "a: |+\r\n\r\n", want: "2:1:8"},
 		"spaces end the file":       {input: "a: >+\n  \n", want: "2:3:9"},
 		"clipped blank line ends":   {input: "a: |\n\n", want: "2:1:6"},
@@ -1178,13 +2194,33 @@ func TestTokenize_PlaceholderPosition(t *testing.T) {
 		input string
 		want  string // Position of the token, as positionsOf gives it.
 	}{
-		"lone tag marker":            {input: "!", want: "1:1:1"},
-		"spaces before":              {input: "  !", want: "1:3:3"},
-		"tab before":                 {input: "\t!", want: "1:2:2"},
-		"line break before":          {input: "\n!", want: "2:1:2"},
-		"indented after a break":     {input: "\n  !", want: "2:3:4"},
-		"indented after two breaks":  {input: "\n\n  !", want: "3:3:5"},
-		"tab after two breaks":       {input: "\n\n\t!", want: "3:2:4"},
+		"lone tag marker":   {input: "!", want: "1:1:1"},
+		"spaces before":     {input: "  !", want: "1:3:3"},
+		"tab before":        {input: "\t!", want: "1:2:2"},
+		"line break before": {input: "\n!", want: "2:1:2"},
+		"indented after a break": {
+			input: stringtest.JoinLF(
+				"",
+				"  !",
+			),
+			want: "2:3:4",
+		},
+		"indented after two breaks": {
+			input: stringtest.JoinLF(
+				"",
+				"",
+				"  !",
+			),
+			want: "3:3:5",
+		},
+		"tab after two breaks": {
+			input: stringtest.JoinLF(
+				"",
+				"",
+				"\t!",
+			),
+			want: "3:2:4",
+		},
 		"whitespace alone":           {input: "  \n", want: "1:1:1"},
 		"line breaks alone":          {input: "\n\n", want: "1:1:1"},
 		"byte order mark is dropped": {input: "\ufeff  !", want: "1:3:3"},
@@ -1276,13 +2312,19 @@ func TestTokenize(t *testing.T) {
 				"  child2: value2",
 			),
 		},
-		"unicode content":               {input: "greeting: こんにちは\n"},
-		"whitespace only":               {input: "\n\n"},
-		"spaces and tabs only":          {input: " \t \n"},
-		"trailing blank line":           {input: "key: value\n\n"},
-		"crlf trailing blank line":      {input: "key: value\r\n\r\n"},
-		"trailing blank line of spaces": {input: "key: value\n   \n\n"},
-		"trailing line of spaces":       {input: "key: value\n  \n"},
+		"unicode content":          {input: "greeting: こんにちは\n"},
+		"whitespace only":          {input: "\n\n"},
+		"spaces and tabs only":     {input: " \t \n"},
+		"trailing blank line":      {input: "key: value\n\n"},
+		"crlf trailing blank line": {input: "key: value\r\n\r\n"},
+		"trailing blank line of spaces": {
+			input: stringtest.LinesLF(
+				"key: value",
+				"   ",
+				"",
+			),
+		},
+		"trailing line of spaces": {input: "key: value\n  \n"},
 		// The lexer drops a tag that holds the whole source, and the
 		// placeholder token holds it.
 		"lone tag marker": {input: "!"},
@@ -1367,18 +2409,46 @@ func TestForParser(t *testing.T) {
 			want:  "\nb: 1\n",
 		},
 		"indented key after a blank line with a tab": {
-			input: " \t \n  b: 1\n",
-			want:  "\n  b: 1\n",
+			input: stringtest.LinesLF(
+				" \t ",
+				"  b: 1",
+			),
+			want: stringtest.LinesLF(
+				"",
+				"  b: 1",
+			),
 		},
 		"crlf blank lines": {
-			input: "\t\r\n \r\nb: 1\r\n",
-			want:  "\r\n\r\nb: 1\r\n",
+			input: stringtest.LinesCRLF(
+				"\t",
+				" ",
+				"b: 1",
+			),
+			want: stringtest.LinesCRLF(
+				"",
+				"",
+				"b: 1",
+			),
 		},
 		"comment after a blank line of a tab": {
-			input: "\t\n# c\nb: 1\n",
-			want:  "\n# c\nb: 1\n",
+			input: stringtest.LinesLF(
+				"\t",
+				"# c",
+				"b: 1",
+			),
+			want: stringtest.LinesLF(
+				"",
+				"# c",
+				"b: 1",
+			),
 		},
-		"blank line of spaces after the first key": {input: "a: 1\n  \nb: 2\n"},
+		"blank line of spaces after the first key": {
+			input: stringtest.LinesLF(
+				"a: 1",
+				"  ",
+				"b: 2",
+			),
+		},
 	}
 
 	for name, tc := range tcs {
@@ -1406,7 +2476,11 @@ func TestForParser_Links(t *testing.T) {
 
 	// The clones of a document cut from a longer stream link to nothing
 	// outside the result, and ForParser drops nil tokens.
-	docs := collectDocs(tokens.SplitDocuments(tokens.Tokenize("a: 1\n---\nb: 2\n")))
+	docs := collectDocs(tokens.SplitDocuments(tokens.Tokenize(stringtest.LinesLF(
+		"a: 1",
+		"---",
+		"b: 2",
+	))))
 	require.Len(t, docs, 2)
 	require.NotNil(t, docs[1][0].Prev)
 
@@ -1753,17 +2827,73 @@ func TestResetPositions_Text(t *testing.T) {
 		tcs := map[string]struct {
 			input string
 		}{
-			"after document header":        {input: "a: 1\n---\nb: 2\n"},
-			"after document end":           {input: "a: 1\n...\nb: 2\n"},
-			"comment after document end":   {input: "a: 1\n...\n# c\nb: 2\n"},
-			"comment on document end line": {input: "a: 1\n... # c\nb: 2\n"},
-			"indented after document end":  {input: "a: 1\n...\n  b: 2\n"},
-			"header after document end":    {input: "a: 1\n...\n---\nb: 2\n"},
-			"header after directive":       {input: "%YAML 1.2\n---\na: 1\n"},
-			"leading blank lines":          {input: "\n\na: 1\n"},
-			"crlf after document end":      {input: "a: 1\r\n...\r\nb: 2\r\n"},
-			"bare cr after document end":   {input: "a: 1\r...\rb: 2\r"},
-			"bare cr blank line":           {input: "a: 1\r...\r\rb: 2\r"},
+			"after document header": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"---",
+					"b: 2",
+				),
+			},
+			"after document end": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"...",
+					"b: 2",
+				),
+			},
+			"comment after document end": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"...",
+					"# c",
+					"b: 2",
+				),
+			},
+			"comment on document end line": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"... # c",
+					"b: 2",
+				),
+			},
+			"indented after document end": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"...",
+					"  b: 2",
+				),
+			},
+			"header after document end": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"...",
+					"---",
+					"b: 2",
+				),
+			},
+			"header after directive": {
+				input: stringtest.LinesLF(
+					"%YAML 1.2",
+					"---",
+					"a: 1",
+				),
+			},
+			"leading blank lines": {
+				input: stringtest.LinesLF(
+					"",
+					"",
+					"a: 1",
+				),
+			},
+			"crlf after document end": {
+				input: stringtest.LinesCRLF(
+					"a: 1",
+					"...",
+					"b: 2",
+				),
+			},
+			"bare cr after document end": {input: "a: 1\r...\rb: 2\r"},
+			"bare cr blank line":         {input: "a: 1\r...\r\rb: 2\r"},
 		}
 
 		for name, tc := range tcs {
@@ -1798,10 +2928,36 @@ func TestResetPositions_Text(t *testing.T) {
 		tcs := map[string]struct {
 			input string
 		}{
-			"tab before a key":          {input: "a: 1\n...\n\tb: 2\n"},
-			"tab before a comment":      {input: "a: 1\n...\n\t# c\nb: 2\n"},
-			"tab on a blank line":       {input: "a: 1\n...\n\t\nb: 2\n"},
-			"tab after a crlf line end": {input: "a: 1\n...\r\n\tb: 2\r\n"},
+			"tab before a key": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"...",
+					"\tb: 2",
+				),
+			},
+			"tab before a comment": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"...",
+					"\t# c",
+					"b: 2",
+				),
+			},
+			"tab on a blank line": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"...",
+					"\t",
+					"b: 2",
+				),
+			},
+			"tab after a crlf line end": {
+				input: stringtest.LinesLF(
+					"a: 1",
+					"...\r",
+					"\tb: 2\r",
+				),
+			},
 		}
 
 		for name, tc := range tcs {
@@ -1830,12 +2986,57 @@ func TestResetPositions_Text(t *testing.T) {
 			input string
 			want  string
 		}{
-			"empty literal":                     {input: "a: |\n---\nb: 1\n", want: "1:5:5"},
-			"empty stripped literal":            {input: "a: |-\n---\nb: 1\n", want: "1:6:6"},
-			"nested empty literal":              {input: "x:\n  a: |\n---\nb: 1\n", want: "2:7:10"},
-			"blank line":                        {input: "k: |\n\n---\nb: 1\n", want: "2:1:6"},
-			"blank line with a tab":             {input: "a: |\n\t\n---\nb: 1\n", want: "2:2:7"},
-			"empty literal in a sequence entry": {input: "- |\n---\n- b\n", want: "1:4:4"},
+			"empty literal": {
+				input: stringtest.LinesLF(
+					"a: |",
+					"---",
+					"b: 1",
+				),
+				want: "1:5:5",
+			},
+			"empty stripped literal": {
+				input: stringtest.LinesLF(
+					"a: |-",
+					"---",
+					"b: 1",
+				),
+				want: "1:6:6",
+			},
+			"nested empty literal": {
+				input: stringtest.LinesLF(
+					"x:",
+					"  a: |",
+					"---",
+					"b: 1",
+				),
+				want: "2:7:10",
+			},
+			"blank line": {
+				input: stringtest.LinesLF(
+					"k: |",
+					"",
+					"---",
+					"b: 1",
+				),
+				want: "2:1:6",
+			},
+			"blank line with a tab": {
+				input: stringtest.LinesLF(
+					"a: |",
+					"\t",
+					"---",
+					"b: 1",
+				),
+				want: "2:2:7",
+			},
+			"empty literal in a sequence entry": {
+				input: stringtest.LinesLF(
+					"- |",
+					"---",
+					"- b",
+				),
+				want: "1:4:4",
+			},
 		}
 
 		for name, tc := range tcs {
@@ -1880,10 +3081,36 @@ func TestResetPositions_Text(t *testing.T) {
 		tcs := map[string]struct {
 			input string
 		}{
-			"empty literal":          {input: "a: |\n\nb: 1\n"},
-			"empty stripped literal": {input: "a: |-\n\nb: 1\n"},
-			"empty folded":           {input: "a: >\n\n\nb: 1\n"},
-			"indented key after it":  {input: "a:\n  k: |\n\n  b: 1\n"},
+			"empty literal": {
+				input: stringtest.LinesLF(
+					"a: |",
+					"",
+					"b: 1",
+				),
+			},
+			"empty stripped literal": {
+				input: stringtest.LinesLF(
+					"a: |-",
+					"",
+					"b: 1",
+				),
+			},
+			"empty folded": {
+				input: stringtest.LinesLF(
+					"a: >",
+					"",
+					"",
+					"b: 1",
+				),
+			},
+			"indented key after it": {
+				input: stringtest.LinesLF(
+					"a:",
+					"  k: |",
+					"",
+					"  b: 1",
+				),
+			},
 		}
 
 		for name, tc := range tcs {
@@ -1912,7 +3139,11 @@ func TestResetPositions_Text(t *testing.T) {
 	t.Run("severs links to neighboring documents", func(t *testing.T) {
 		t.Parallel()
 
-		orig := lexer.Tokenize("a: 1\n...\nb: 2\n")
+		orig := lexer.Tokenize(stringtest.LinesLF(
+			"a: 1",
+			"...",
+			"b: 2",
+		))
 		docs := collectReset(tokens.SplitDocuments(orig))
 		require.Len(t, docs, 2)
 
@@ -1941,19 +3172,36 @@ func TestResetPositions_Text(t *testing.T) {
 			"spaces":              {input: "  ", want: 1},
 			"spaces then a break": {input: "   \n", want: 1},
 			"tab line between document end and header": {
-				input: "a: 1\n...\n\t\n---\nb: 2\n",
-				doc:   1,
-				want:  1,
+				input: stringtest.LinesLF(
+					"a: 1",
+					"...",
+					"\t",
+					"---",
+					"b: 2",
+				),
+				doc:  1,
+				want: 1,
 			},
 			"tab line after document end at the end": {
-				input: "a: 1\n...\n\t\n",
-				doc:   1,
-				want:  1,
+				input: stringtest.LinesLF(
+					"a: 1",
+					"...",
+					"\t",
+				),
+				doc:  1,
+				want: 1,
 			},
 			"two tab lines between document end and header": {
-				input: "a: 1\n...\n\t\n\t\n---\nb: 2\n",
-				doc:   1,
-				want:  2,
+				input: stringtest.LinesLF(
+					"a: 1",
+					"...",
+					"\t",
+					"\t",
+					"---",
+					"b: 2",
+				),
+				doc:  1,
+				want: 2,
 			},
 		}
 
