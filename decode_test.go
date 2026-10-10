@@ -6979,47 +6979,28 @@ func TestDocument_DecodeInto(t *testing.T) {
 		}
 
 		// The go-yaml decoder rejects each of these nulls at the top of a
-		// decode into an int, a uint, a map, or a struct.
+		// decode into an int, a uint, a map, or a struct. Each case names
+		// how the document spells the null after a ":" or a "-".
 		tcs := map[string]struct {
-			input string
+			null string
 		}{
-			"no value": {
-				input: stringtest.LinesLF(
-					"int:",
-					"uint:",
-					"map:",
-					"config:",
-					"items:",
-					"  -",
-				),
-			},
-			"null": {
-				input: stringtest.LinesLF(
-					"int: null",
-					"uint: null",
-					"map: null",
-					"config: null",
-					"items:",
-					"  - null",
-				),
-			},
-			"tilde": {
-				input: stringtest.LinesLF(
-					"int: ~",
-					"uint: ~",
-					"map: ~",
-					"config: ~",
-					"items:",
-					"  - ~",
-				),
-			},
+			"no value": {null: ""},
+			"null":     {null: " null"},
+			"tilde":    {null: " ~"},
 		}
 
 		for name, tc := range tcs {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				dd := yamltest.FirstDocument(t, tc.input)
+				dd := yamltest.FirstDocument(t, stringtest.LinesLF(
+					"int:"+tc.null,
+					"uint:"+tc.null,
+					"map:"+tc.null,
+					"config:"+tc.null,
+					"items:",
+					"  -"+tc.null,
+				))
 
 				want := defaults()
 				want.Items = []plainConfig{{}}
