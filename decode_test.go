@@ -3711,7 +3711,15 @@ func TestDocument_Err(t *testing.T) {
 	// The second document does not parse, and the documents around it do.
 	// The first one reuses an anchor name and the third holds a !!int tag,
 	// so each decodes from the second parse of the source.
-	const input = "a: &x 1\nb: &x 2\nc: *x\n---\nd: [\n---\ne: !!int 0x10\n"
+	input := stringtest.LinesLF(
+		"a: &x 1",
+		"b: &x 2",
+		"c: *x",
+		"---",
+		"d: [",
+		"---",
+		"e: !!int 0x10",
+	)
 
 	documents := func(t *testing.T) []*niceyaml.Node {
 		t.Helper()
