@@ -7,10 +7,18 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.jacobcolvin.com/x/stringtest"
 
 	"go.jacobcolvin.com/niceyaml"
 	"go.jacobcolvin.com/niceyaml/internal/yamltest"
 	"go.jacobcolvin.com/niceyaml/paths"
+)
+
+// sourceBenchItem is the format of one entry of a sequence of items, which
+// [yamltest.GenerateLines] numbers.
+var sourceBenchItem = stringtest.JoinLF(
+	"  - name: item_%[1]d",
+	"    value: %[1]d",
 )
 
 // generateNestedYAML creates YAML nested to the given depth, where each
@@ -92,44 +100,43 @@ func BenchmarkNode_DecodeScoped(b *testing.B) {
 		Value int    `yaml:"value"`
 	}
 
+	// The defaults that the entries of a merge layout and of an anchored
+	// layout take their value from.
+	defaults := stringtest.LinesLF(
+		"defaults: &d",
+		"  value: 1",
+	)
+
 	// Each entry of a merge layout takes its value from the defaults
-	// through a `<<` merge key. Each entry of an anchored layout also
-	// defines an anchor of its own.
+	// through a `<<` merge key.
+	merge := stringtest.JoinLF(
+		"  - <<: *d",
+		"    name: item_%d",
+	)
+
+	// Each entry of an anchored layout also defines an anchor of its own.
+	anchored := stringtest.JoinLF(
+		"  - &a%[1]d",
+		"    <<: *d",
+		"    name: item_%[1]d",
+	)
+
 	sizes := []struct {
-		name     string
-		items    int
-		merge    bool
-		anchored bool
+		name  string
+		head  string
+		entry string
+		items int
 	}{
-		{"items_100", 100, false, false},
-		{"items_1000", 1000, false, false},
-		{"merge_items_100", 100, true, false},
-		{"merge_items_1000", 1000, true, false},
-		{"merge_items_4000", 4000, true, false},
-		{"anchored_items_4000", 4000, true, true},
+		{"items_100", "", sourceBenchItem, 100},
+		{"items_1000", "", sourceBenchItem, 1000},
+		{"merge_items_100", defaults, merge, 100},
+		{"merge_items_1000", defaults, merge, 1000},
+		{"merge_items_4000", defaults, merge, 4000},
+		{"anchored_items_4000", defaults, anchored, 4000},
 	}
 
 	for _, sz := range sizes {
-		var sb strings.Builder
-
-		if sz.merge {
-			sb.WriteString("defaults: &d\n  value: 1\nitems:\n")
-		} else {
-			sb.WriteString("items:\n")
-		}
-
-		for i := range sz.items {
-			switch {
-			case sz.anchored:
-				fmt.Fprintf(&sb, "  - &a%d\n    <<: *d\n    name: item_%d\n", i, i)
-			case sz.merge:
-				fmt.Fprintf(&sb, "  - <<: *d\n    name: item_%d\n", i)
-			default:
-				fmt.Fprintf(&sb, "  - name: item_%d\n    value: %d\n", i, i)
-			}
-		}
-
-		doc := yamltest.FirstDocument(b, sb.String())
+		doc := yamltest.FirstDocument(b, sz.head+"items:\n"+yamltest.GenerateLines(sz.items, sz.entry))
 
 		items, err := doc.Nodes(paths.Current().Child("items").IndexAll())
 		require.NoError(b, err)
@@ -159,13 +166,8 @@ func BenchmarkNode_DecodeRejectedStream(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		var sb strings.Builder
-
-		for i := range sz.docs {
-			fmt.Fprintf(&sb, "---\na: x%d\nb: y\nc: z\n", i)
-		}
-
-		docs := niceyaml.NewSourceFromString(sb.String()).Documents()
+		input := yamltest.GenerateLines(sz.docs, stringtest.JoinLF("---", "a: x%d", "b: y", "c: z"))
+		docs := niceyaml.NewSourceFromString(input).Documents()
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -200,7 +202,7 @@ func BenchmarkNode_DecodeReusedAnchorStream(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		input := strings.Repeat("---\na: &x 1\nb: &x 2\nc: *x\n", sz.docs)
+		input := strings.Repeat(stringtest.LinesLF("---", "a: &x 1", "b: &x 2", "c: *x"), sz.docs)
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -247,10 +249,7 @@ func BenchmarkNode_DecodeReferenceAliases(b *testing.B) {
 	for _, sz := range sizes {
 		var sb strings.Builder
 
-		for i := range sz.anchors {
-			fmt.Fprintf(&sb, "a%d: &a%d {v: %d}\n", i, i, i)
-		}
-
+		sb.WriteString(yamltest.GenerateLines(sz.anchors, "a%[1]d: &a%[1]d {v: %[1]d}"))
 		sb.WriteString("refs: [")
 
 		for i := range sz.anchors {
@@ -389,15 +388,7 @@ func BenchmarkNode_Nodes(b *testing.B) {
 	path := paths.Current().Child("items").IndexAll()
 
 	for _, sz := range sizes {
-		var sb strings.Builder
-
-		sb.WriteString("items:\n")
-
-		for i := range sz.items {
-			fmt.Fprintf(&sb, "  - name: item_%d\n    value: %d\n", i, i)
-		}
-
-		doc := yamltest.FirstDocument(b, sb.String())
+		doc := yamltest.FirstDocument(b, "items:\n"+yamltest.GenerateLines(sz.items, sourceBenchItem))
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
@@ -427,18 +418,14 @@ func BenchmarkNode_BindManyPaths(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		var sb strings.Builder
-
 		errs := make([]error, 0, sz.keys)
 
 		for i := range sz.keys {
-			fmt.Fprintf(&sb, "k%d: v%d\n", i, i)
-
 			errs = append(errs, niceyaml.NewError("bad value",
 				niceyaml.AtPath(paths.Current().Child(fmt.Sprintf("k%d", i)))))
 		}
 
-		doc := yamltest.Document(b, niceyaml.NewSourceFromString(sb.String()))
+		doc := yamltest.Document(b, niceyaml.NewSourceFromString(yamltest.GenerateLines(sz.keys, "k%[1]d: v%[1]d")))
 
 		joined := errors.Join(errs...)
 
@@ -560,7 +547,7 @@ func BenchmarkSourceBind_ManyDocuments(b *testing.B) {
 	for _, sz := range sizes {
 		// Each document spans three lines, and the error joins one
 		// finding per line, as a line-oriented lint reports them.
-		source := niceyaml.NewSourceFromString(strings.Repeat("---\na: 1\nb: 2\n", sz.docs))
+		source := niceyaml.NewSourceFromString(strings.Repeat(stringtest.LinesLF("---", "a: 1", "b: 2"), sz.docs))
 
 		source.Documents()
 
@@ -594,13 +581,7 @@ func BenchmarkSource_File_ManyDocuments(b *testing.B) {
 	}
 
 	for _, sz := range sizes {
-		var sb strings.Builder
-
-		for i := range sz.docs {
-			fmt.Fprintf(&sb, "---\nk%d: v%d\n", i, i)
-		}
-
-		input := sb.String()
+		input := yamltest.GenerateLines(sz.docs, stringtest.JoinLF("---", "k%[1]d: v%[1]d"))
 
 		b.Run(sz.name, func(b *testing.B) {
 			b.ReportAllocs()
