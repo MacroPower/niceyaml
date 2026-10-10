@@ -25,11 +25,11 @@ import (
 
 // compileSchema compiles schemaData into a [*schema.Schema] with opts and
 // fails the test if the schema does not compile.
-func compileSchema(t *testing.T, schemaData string, opts ...schema.CompileOption) *schema.Schema {
-	t.Helper()
+func compileSchema(tb testing.TB, schemaData string, opts ...schema.CompileOption) *schema.Schema {
+	tb.Helper()
 
-	v, err := schema.Compile(t.Context(), []byte(schemaData), opts...)
-	require.NoError(t, err)
+	v, err := schema.Compile(tb.Context(), []byte(schemaData), opts...)
+	require.NoError(tb, err)
 
 	return v
 }
