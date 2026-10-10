@@ -32,6 +32,12 @@ var nameSchema = []byte(`{
 	"required": ["name"]
 }`)
 
+// nameRegistry returns a registry that applies [nameSchema] to every
+// document.
+func nameRegistry() *schema.Registry {
+	return schema.NewRegistry(schema.WithResolvers(schema.Embedded(nameSchema)))
+}
+
 // directive returns the comment line that names ref as the schema of the
 // document below it.
 func directive(ref string) string {
@@ -144,9 +150,7 @@ func TestValidateFile(t *testing.T) {
 
 			path := writeFile(t, t.TempDir(), "config.yaml", tc.content)
 
-			reg := schema.NewRegistry(schema.WithResolvers(schema.Embedded(nameSchema)))
-
-			err := validateFile(t.Context(), path, reg)
+			err := validateFile(t.Context(), path, nameRegistry())
 			if len(tc.want) == 0 {
 				require.NoError(t, err)
 
@@ -180,12 +184,12 @@ func TestValidateFileEmpty(t *testing.T) {
 		want string
 	}{
 		"empty file against a schema": {
-			reg:     schema.NewRegistry(schema.WithResolvers(schema.Embedded(nameSchema))),
+			reg:     nameRegistry(),
 			content: "",
 			want:    `: $: expected "object", got "null"`,
 		},
 		"document end marker against a schema": {
-			reg:     schema.NewRegistry(schema.WithResolvers(schema.Embedded(nameSchema))),
+			reg:     nameRegistry(),
 			content: "...\n",
 			want:    `: $: expected "object", got "null"`,
 		},
