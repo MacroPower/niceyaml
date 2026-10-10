@@ -22,6 +22,12 @@ import (
 	"go.jacobcolvin.com/niceyaml/tokens"
 )
 
+// withDirective returns the document body under a yaml-language-server
+// comment that names ref as the schema of the document.
+func withDirective(ref, body string) string {
+	return "# yaml-language-server: $schema=" + ref + "\n" + body
+}
+
 func TestParseDirective(t *testing.T) {
 	t.Parallel()
 
@@ -197,7 +203,7 @@ func TestParseDocumentDirective(t *testing.T) {
 			want:  map[int]string{0: "./schema.json"},
 		},
 		"directive with trailing spaces": {
-			input: "# yaml-language-server: $schema=./schema.json   \nkey: value\n",
+			input: withDirective("./schema.json   ", "key: value\n"),
 			want:  map[int]string{0: "./schema.json"},
 		},
 		"directive after content is ignored": {
@@ -396,15 +402,15 @@ func TestParseDocumentDirective_Tokens(t *testing.T) {
 		// a directive after it, or in a comment that trails it, still
 		// names the schema of the document.
 		"directive after a document end": {
-			tokens: tokens.Tokenize("...\n#" + comment + "\nj: 2\n"),
+			tokens: tokens.Tokenize(stringtest.LinesLF("...", "#"+comment, "j: 2")),
 			want:   "./doc.json",
 		},
 		"directive after a header and a document end": {
-			tokens: tokens.Tokenize("---\n...\n#" + comment + "\nj: 2\n"),
+			tokens: tokens.Tokenize(stringtest.LinesLF("---", "...", "#"+comment, "j: 2")),
 			want:   "./doc.json",
 		},
 		"directive in a comment that trails a document end": {
-			tokens: tokens.Tokenize("... #" + comment + "\nj: 2\n"),
+			tokens: tokens.Tokenize(stringtest.LinesLF("... #"+comment, "j: 2")),
 			want:   "./doc.json",
 		},
 	}
@@ -451,7 +457,7 @@ func TestDirective(t *testing.T) {
 		base := serve(t, map[string]string{"/schema.json": `{"type": "object"}`})
 
 		doc := yamltest.FirstDocumentWithPath(t,
-			"# yaml-language-server: $schema="+base+"/schema.json\nkind: Deployment\n",
+			withDirective(base+"/schema.json", "kind: Deployment\n"),
 			filepath.Join(t.TempDir(), "config.yaml"),
 		)
 
@@ -497,21 +503,21 @@ func TestDirective(t *testing.T) {
 			want string
 		}{
 			"valid": {
-				input: "# yaml-language-server: $schema=./schema.yaml\nname: a\n",
+				input: withDirective("./schema.yaml", "name: a\n"),
 			},
 			"violates the schema": {
-				input: "# yaml-language-server: $schema=./schema.yaml\nkind: Deployment\n",
+				input: withDirective("./schema.yaml", "kind: Deployment\n"),
 				want:  `missing required property "name"`,
 			},
 			"violates the document the $ref names": {
-				input: "# yaml-language-server: $schema=./schema.yaml\nname: 1\n",
+				input: withDirective("./schema.yaml", "name: 1\n"),
 				want:  `expected "string", got "integer"`,
 			},
 			"valid under a fragment": {
-				input: "# yaml-language-server: $schema=./defs.yaml#/$defs/kinded\nkind: Deployment\n",
+				input: withDirective("./defs.yaml#/$defs/kinded", "kind: Deployment\n"),
 			},
 			"violates a fragment": {
-				input: "# yaml-language-server: $schema=./defs.yaml#/$defs/kinded\nname: a\n",
+				input: withDirective("./defs.yaml#/$defs/kinded", "name: a\n"),
 				want:  `missing required property "kind"`,
 			},
 			"short form": {
@@ -546,7 +552,7 @@ func TestDirective(t *testing.T) {
 		writeFiles(t, dir, map[string]string{"schema.yaml": "required: [name\n"})
 
 		doc := yamltest.FirstDocumentWithPath(t,
-			"# yaml-language-server: $schema=./schema.yaml\nname: a\n",
+			withDirective("./schema.yaml", "name: a\n"),
 			filepath.Join(dir, "config.yaml"),
 		)
 
@@ -570,7 +576,7 @@ func TestDirective_Resolve_Match(t *testing.T) {
 		want  bool
 	}{
 		"returns true when document has valid schema directive": {
-			input: "# yaml-language-server: $schema=./schema.json\nkind: Deployment\n",
+			input: withDirective("./schema.json", "kind: Deployment\n"),
 			want:  true,
 		},
 		"returns false when document has no directive": {
@@ -578,8 +584,11 @@ func TestDirective_Resolve_Match(t *testing.T) {
 			want:  false,
 		},
 		"returns false when directive appears after content": {
-			input: "kind: Deployment\n# yaml-language-server: $schema=./schema.json\n",
-			want:  false,
+			input: stringtest.LinesLF(
+				"kind: Deployment",
+				"# yaml-language-server: $schema=./schema.json",
+			),
+			want: false,
 		},
 		"returns true when directive follows document header": {
 			input: stringtest.Input(`
@@ -659,7 +668,7 @@ func TestDirective_Resolve(t *testing.T) {
 				writeFiles(t, tmpDir, map[string]string{tc.file: string(schemaData)})
 
 				doc := yamltest.FirstDocumentWithPath(t,
-					"# yaml-language-server: $schema="+tc.directive+"\nkind: Deployment\n",
+					withDirective(tc.directive, "kind: Deployment\n"),
 					filepath.Join(tmpDir, filepath.FromSlash(cmp.Or(tc.doc, "config.yaml"))),
 				)
 				url, data, err := loadFor(t, schema.Directive(), doc)
@@ -691,10 +700,7 @@ func TestDirective_Resolve(t *testing.T) {
 
 				schemaURL := serve(t, map[string]string{"/schema.json": string(schemaData)}) + "/schema.json"
 
-				doc := yamltest.FirstDocument(t,
-					"# yaml-language-server: $schema="+schemaURL+"\nkind: Deployment\n",
-					tc.opts...,
-				)
+				doc := yamltest.FirstDocument(t, withDirective(schemaURL, "kind: Deployment\n"), tc.opts...)
 				url, data, err := loadFor(t, schema.Directive(), doc)
 				require.NoError(t, err)
 				assert.Equal(t, schemaData, data)
@@ -712,13 +718,13 @@ func TestDirective_Resolve(t *testing.T) {
 			"definitions": {"Foo": {"type": "object", "required": ["name"]}}
 		}`})
 
-		directive := "# yaml-language-server: $schema=" + base + "/defs.json#/definitions/Foo\n"
+		ref := base + "/defs.json#/definitions/Foo"
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
-		err := reg.Check(t.Context(), yamltest.FirstDocument(t, directive+"name: x\n"))
+		err := reg.Check(t.Context(), yamltest.FirstDocument(t, withDirective(ref, "name: x\n")))
 		require.NoError(t, err)
 
-		requireRejects(t, reg, directive+"kind: Deployment\n", `missing required property "name"`)
+		requireRejects(t, reg, withDirective(ref, "kind: Deployment\n"), `missing required property "name"`)
 	})
 
 	t.Run("validates against the subschema a path fragment names", func(t *testing.T) {
@@ -740,11 +746,9 @@ func TestDirective_Resolve(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				directive := "# yaml-language-server: $schema=" + tc.ref + "\n"
-
 				// The key keeps the fragment, and the load reads the whole
 				// file.
-				doc := yamltest.FirstDocumentWithPath(t, directive+"name: x\n", yamlPath)
+				doc := yamltest.FirstDocumentWithPath(t, withDirective(tc.ref, "name: x\n"), yamlPath)
 				url, data, err := loadFor(t, schema.Directive(), doc)
 				require.NoError(t, err)
 				assert.Equal(t, fileURL(t, schemaPath)+"#/definitions/Foo", url)
@@ -755,7 +759,7 @@ func TestDirective_Resolve(t *testing.T) {
 				err = reg.Check(t.Context(), doc)
 				require.NoError(t, err)
 
-				doc = yamltest.FirstDocumentWithPath(t, directive+"kind: Deployment\n", yamlPath)
+				doc = yamltest.FirstDocumentWithPath(t, withDirective(tc.ref, "kind: Deployment\n"), yamlPath)
 				err = reg.Check(t.Context(), doc)
 				require.ErrorContains(t, err, `missing required property "name"`)
 			})
@@ -783,7 +787,7 @@ func TestDirective_Resolve(t *testing.T) {
 		schemaData := []byte(`{"type": "object"}`)
 		schemaPath := writeSchema(t, "schema.json", schemaData)
 
-		doc := yamltest.FirstDocument(t, "# yaml-language-server: $schema="+schemaPath+"\nkind: Deployment\n")
+		doc := yamltest.FirstDocument(t, withDirective(schemaPath, "kind: Deployment\n"))
 		url, data, err := loadFor(t, schema.Directive(), doc)
 		require.NoError(t, err)
 		assert.Equal(t, fileURL(t, schemaPath), url)
@@ -812,7 +816,7 @@ func TestDirective_Resolve(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				t.Parallel()
 
-				doc := yamltest.FirstDocument(t, "# yaml-language-server: $schema="+tc.ref+"\n"+tc.body)
+				doc := yamltest.FirstDocument(t, withDirective(tc.ref, tc.body))
 
 				ref, err := schema.Directive().Resolve(t.Context(), doc)
 				require.NoError(t, err)
@@ -836,7 +840,7 @@ func TestDirective_Resolve(t *testing.T) {
 
 		tmpDir := t.TempDir()
 		doc := yamltest.FirstDocumentWithPath(t,
-			"# yaml-language-server: $schema=nonexistent.json\nkind: Deployment\n",
+			withDirective("nonexistent.json", "kind: Deployment\n"),
 			filepath.Join(tmpDir, "config.yaml"),
 		)
 		res := schema.Directive()
@@ -888,7 +892,7 @@ func TestDirective_EmbeddedNameMatchesPath(t *testing.T) {
 			docs := map[string]*niceyaml.Node{
 				"embedded": yamltest.FirstDocument(t, "kind: Embedded\nname: 1\n"),
 				"directive": yamltest.FirstDocumentWithPath(t,
-					"# yaml-language-server: $schema=schemas/name.json\nname: text\n",
+					withDirective("schemas/name.json", "name: text\n"),
 					filepath.Join("testdata", "config.yaml"),
 				),
 			}
@@ -1075,7 +1079,7 @@ func TestDirective_ResolvesAfterChdir(t *testing.T) {
 
 	writeFiles(t, repo, map[string]string{
 		"configs/schema.json": `{"properties": {"name": {"type": "string"}}}`,
-		"configs/app.yaml":    "# yaml-language-server: $schema=./schema.json\nname: 5\n",
+		"configs/app.yaml":    withDirective("./schema.json", "name: 5\n"),
 	})
 
 	t.Chdir(repo)

@@ -261,7 +261,7 @@ func TestFile_NoWorkingDirectory(t *testing.T) {
 	elsewhere := t.TempDir()
 
 	bundle := mapFS(map[string]string{
-		"configs/app.yaml":  "# yaml-language-server: $schema=../schemas/root.json\nname: 5\n",
+		"configs/app.yaml":  withDirective("../schemas/root.json", "name: 5\n"),
 		"schemas/root.json": `{"properties": {"name": {"$ref": "defs.json"}}}`,
 		"schemas/defs.json": `{"type": "string"}`,
 	})

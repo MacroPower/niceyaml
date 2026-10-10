@@ -681,7 +681,7 @@ func TestRegistry_Check_SyntaxError(t *testing.T) {
 		},
 		"directive that turns validation off": {
 			reg:   schema.NewRegistry(schema.WithResolvers(schema.Directive())),
-			input: "# yaml-language-server: $schema=none\nkind: [\n",
+			input: withDirective("none", "kind: [\n"),
 		},
 	}
 
@@ -1337,7 +1337,7 @@ func TestRegistry_DynamicResolver(t *testing.T) {
 		tmpDir := t.TempDir()
 		writeFiles(t, tmpDir, map[string]string{
 			"test.json":   `{"type": "object", "properties": {"kind": {"type": "string"}}}`,
-			"config.yaml": "# yaml-language-server: $schema=test.json\nkind: Deployment\n",
+			"config.yaml": withDirective("test.json", "kind: Deployment\n"),
 		})
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
@@ -1730,7 +1730,7 @@ func TestRegistry_FileFS(t *testing.T) {
 	schemaData := []byte(`{"type": "object", "required": ["kind"]}`)
 
 	bundle := mapFS(map[string]string{
-		"configs/app.yaml":        "# yaml-language-server: $schema=./app.schema.json\nkind: App\n",
+		"configs/app.yaml":        withDirective("./app.schema.json", "kind: App\n"),
 		"configs/app.schema.json": string(schemaData),
 		"schemas/pod.json":        string(schemaData),
 	})
@@ -1784,21 +1784,21 @@ func TestRegistry_FileFS(t *testing.T) {
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
 
-		const directive = "# yaml-language-server: $schema=./defs.json#/$defs/Foo\n"
-
-		app := func(text string) *niceyaml.Node {
-			return yamltest.FirstDocument(t, text, niceyaml.WithFilePath("configs/app.yaml"), niceyaml.WithFS(fsys))
+		// Each document names a subschema of defs.json by its pointer.
+		app := func(pointer, body string) *niceyaml.Node {
+			return yamltest.FirstDocument(t, withDirective("./defs.json#"+pointer, body),
+				niceyaml.WithFilePath("configs/app.yaml"), niceyaml.WithFS(fsys))
 		}
 
-		valid := app(directive + "name: x\n")
+		valid := app("/$defs/Foo", "name: x\n")
 		require.NoError(t, reg.Check(t.Context(), valid))
 
-		invalid := app(directive + "other: 1\n")
+		invalid := app("/$defs/Foo", "other: 1\n")
 		err := reg.Check(t.Context(), invalid)
 		require.ErrorContains(t, err, `missing required property "name"`)
 
 		// A pointer that names nothing reports the path in the file system.
-		missing := app("# yaml-language-server: $schema=./defs.json#/$defs/Missing\nname: x\n")
+		missing := app("/$defs/Missing", "name: x\n")
 		err = reg.Check(t.Context(), missing)
 		require.ErrorIs(t, err, schema.ErrCompile)
 		assert.Contains(t, err.Error(), `"configs/defs.json#/$defs/Missing"`)
@@ -1893,7 +1893,7 @@ func TestRegistry_FileFS(t *testing.T) {
 		t.Parallel()
 
 		doc := yamltest.FirstDocument(t,
-			"# yaml-language-server: $schema=./app.schema.json\nkind: App\n",
+			withDirective("./app.schema.json", "kind: App\n"),
 			niceyaml.WithFilePath(filepath.Join(wd, "configs", "app.yaml")), niceyaml.WithFS(bundle))
 
 		reg := schema.NewRegistry(schema.WithResolvers(schema.Directive()))
@@ -2038,27 +2038,24 @@ func TestRegistry_FileFS(t *testing.T) {
 func TestRegistry_FileSystems(t *testing.T) {
 	t.Parallel()
 
-	const (
-		directive = "# yaml-language-server: $schema=./schema.json\n"
-		refsDefs  = `{"properties": {"v": {"$ref": "defs.json"}}}`
-	)
+	const refsDefs = `{"properties": {"v": {"$ref": "defs.json"}}}`
 
 	// Both file systems and the directory on disk hold the same paths and
 	// the same schema. The documents its $ref names differ.
 	stringFS := mapFS(map[string]string{
-		"configs/app.yaml":    directive + "v: x\n",
+		"configs/app.yaml":    withDirective("./schema.json", "v: x\n"),
 		"configs/schema.json": refsDefs,
 		"configs/defs.json":   `{"type": "string"}`,
 	})
 	integerFS := mapFS(map[string]string{
-		"configs/app.yaml":    directive + "v: 5\n",
+		"configs/app.yaml":    withDirective("./schema.json", "v: 5\n"),
 		"configs/schema.json": refsDefs,
 		"configs/defs.json":   `{"type": "integer"}`,
 	})
 
 	dir := t.TempDir()
 	writeFiles(t, dir, map[string]string{
-		"configs/app.yaml":    directive + "v: true\n",
+		"configs/app.yaml":    withDirective("./schema.json", "v: true\n"),
 		"configs/schema.json": refsDefs,
 		"configs/defs.json":   `{"type": "boolean"}`,
 	})
@@ -2094,7 +2091,7 @@ func TestRegistry_FileSystems(t *testing.T) {
 	t.Run("a document fails the schema of its own file system", func(t *testing.T) {
 		t.Parallel()
 
-		doc := yamltest.FirstDocument(t, directive+"v: 5\n",
+		doc := yamltest.FirstDocument(t, withDirective("./schema.json", "v: 5\n"),
 			niceyaml.WithFilePath("configs/other.yaml"), niceyaml.WithFS(stringFS))
 
 		err := reg.Check(t.Context(), doc)
@@ -2190,18 +2187,15 @@ func (f sliceFS) Open(name string) (fs.File, error) {
 func TestRegistry_WithFSAt(t *testing.T) {
 	t.Parallel()
 
-	const (
-		nameSchema = `{"properties": {"name": {"type": "string"}}}`
-		directive  = "# yaml-language-server: $schema=./schema.json\n"
-	)
+	const nameSchema = `{"properties": {"name": {"type": "string"}}}`
 
 	t.Run("a document opened by absolute path resolves its directive", func(t *testing.T) {
 		t.Parallel()
 
 		tenant := t.TempDir()
 		writeFiles(t, tenant, map[string]string{
-			"app.yaml":    directive + "name: 5\n",
-			"ok.yaml":     directive + "name: cafe\n",
+			"app.yaml":    withDirective("./schema.json", "name: 5\n"),
+			"ok.yaml":     withDirective("./schema.json", "name: cafe\n"),
 			"schema.json": nameSchema,
 		})
 
@@ -2383,7 +2377,7 @@ func TestRegistry_WithFSAt(t *testing.T) {
 		}
 
 		doc := yamltest.FirstDocumentWithPath(t,
-			"# yaml-language-server: $schema=./app.schema.json\nkind: App\n",
+			withDirective("./app.schema.json", "kind: App\n"),
 			filepath.Join(wd, "configs", "app.yaml"))
 		require.NoError(t, reg.Check(t.Context(), doc))
 
@@ -2513,7 +2507,7 @@ func TestRegistry_DocumentOutsideFileSystem(t *testing.T) {
 	tenant := filepath.Join(base, "tenant")
 
 	writeFiles(t, base, map[string]string{
-		"shared/app.yaml":           "# yaml-language-server: $schema=./schema.json\nname: 5\n",
+		"shared/app.yaml":           withDirective("./schema.json", "name: 5\n"),
 		"shared/schema.json":        `{"properties": {"name": {"type": "string"}}}`,
 		"tenant/shared/schema.json": `{}`,
 	})
@@ -2722,7 +2716,7 @@ func TestRegistry_WithFSAt_RelativeDocument(t *testing.T) {
 	writeFiles(t, repo, map[string]string{
 		"schema.json":     `{}`,
 		"sub/schema.json": `{"properties": {"name": {"type": "string"}}}`,
-		"sub/app.yaml":    "# yaml-language-server: $schema=./schema.json\nname: 5\n",
+		"sub/app.yaml":    withDirective("./schema.json", "name: 5\n"),
 	})
 
 	t.Chdir(filepath.Join(repo, "sub"))
@@ -2783,7 +2777,7 @@ func TestRegistry_WithFSAt_WorkingDirectoryThroughLink(t *testing.T) {
 
 	writeFiles(t, base, map[string]string{
 		"repo/sub/schema.json": `{"properties": {"name": {"type": "string"}}}`,
-		"repo/sub/app.yaml":    "# yaml-language-server: $schema=./schema.json\nname: 5\n",
+		"repo/sub/app.yaml":    withDirective("./schema.json", "name: 5\n"),
 	})
 
 	// The temporary directory may lie behind a link of its own.
