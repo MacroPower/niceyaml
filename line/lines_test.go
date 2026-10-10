@@ -1041,9 +1041,10 @@ func TestNewLines_SplitTokenOffsets(t *testing.T) {
 			"  b",
 			"s:",
 		),
-		"multiline string": `key: "line1
-  line2"
-`,
+		"multiline string": stringtest.LinesLF(
+			`key: "line1`,
+			`  line2"`,
+		),
 	}
 
 	for name, input := range tcs {
@@ -1233,11 +1234,12 @@ func TestNewLines_BlockScalars(t *testing.T) {
 				want: []string{"", "line1\nline2"},
 			},
 			"literal with keep and trailing blank": {
-				input: `key: |+
-  line1
-  line2
-
-`,
+				input: stringtest.LinesLF(
+					"key: |+",
+					"  line1",
+					"  line2",
+					"",
+				),
 				line: 2,
 				want: []string{"", "line1\nline2\n\n", ""},
 			},
