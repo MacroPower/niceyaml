@@ -2837,45 +2837,29 @@ func TestSchema_PathAnchors(t *testing.T) {
 
 	// A binding reports the `$` path from the root of the document.
 	// ValidateValue binds to a source that holds no document, so its `$`
-	// is the value.
+	// is the value. Each case holds the result of one validation.
 	tcs := map[string]struct {
-		validate func(t *testing.T) error
+		result   error
 		want     string
 		wantPath string
 	}{
 		"value of a document": {
-			validate: func(t *testing.T) error {
-				t.Helper()
-
-				return whole.ValidateValue(t.Context(), map[string]any{"server": map[string]any{"port": 0}})
-			},
+			result:   whole.ValidateValue(t.Context(), map[string]any{"server": map[string]any{"port": 0}}),
 			want:     "$.server.port: 0 is less than 1",
 			wantPath: "$.server.port",
 		},
 		"value": {
-			validate: func(t *testing.T) error {
-				t.Helper()
-
-				return server.ValidateValue(t.Context(), map[string]any{"port": 0})
-			},
+			result:   server.ValidateValue(t.Context(), map[string]any{"port": 0}),
 			want:     "$.port: 0 is less than 1",
 			wantPath: "$.port",
 		},
 		"document": {
-			validate: func(t *testing.T) error {
-				t.Helper()
-
-				return doc.Validate(t.Context(), whole)
-			},
+			result:   doc.Validate(t.Context(), whole),
 			want:     "2:9: $.server.port: 0 is less than 1",
 			wantPath: "$.server.port",
 		},
 		"scoped Node": {
-			validate: func(t *testing.T) error {
-				t.Helper()
-
-				return serverNode.Validate(t.Context(), server)
-			},
+			result:   serverNode.Validate(t.Context(), server),
 			want:     "2:9: $.server.port: 0 is less than 1",
 			wantPath: "$.server.port",
 		},
@@ -2885,7 +2869,7 @@ func TestSchema_PathAnchors(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			err := tc.validate(t)
+			err := tc.result
 			require.Error(t, err)
 
 			assert.Equal(
