@@ -17,14 +17,6 @@ import (
 // schema that matches it, so the time goes to reading the document and
 // to the schema check.
 func BenchmarkSchema_Check(b *testing.B) {
-	sizes := []struct {
-		name  string
-		items int
-	}{
-		{"items_1000", 1000},
-		{"items_4000", 4000},
-	}
-
 	s := schema.MustCompile([]byte(`{
 		"type": "object",
 		"properties": {
@@ -42,20 +34,11 @@ func BenchmarkSchema_Check(b *testing.B) {
 		}
 	}`))
 
-	for _, sz := range sizes {
-		var sb strings.Builder
-
-		sb.WriteString("items:\n")
-
-		for range sz.items {
-			sb.WriteString("  - {name: x, value: 1, tags: {a: 1}}\n")
-		}
-
-		yaml := sb.String()
-
+	for _, items := range []int{1000, 4000} {
+		yaml := "items:\n" + strings.Repeat("  - {name: x, value: 1, tags: {a: 1}}\n", items)
 		doc := yamltest.FirstDocument(b, yaml)
 
-		b.Run(sz.name, func(b *testing.B) {
+		b.Run(fmt.Sprintf("items_%d", items), func(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(yaml)))
 
