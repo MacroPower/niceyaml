@@ -2115,7 +2115,7 @@ func TestPrinter_WordWrap_RowsFit(t *testing.T) {
 	}
 }
 
-func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
+func TestPrinter_WordWrap_RowOfRunes(t *testing.T) {
 	t.Parallel()
 
 	// The layout must map the column of each wide rune of line 0 to the
@@ -2128,33 +2128,39 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 	// of its own and runs past the width, with no empty row before or
 	// after it.
 	tcs := map[string]struct {
-		gutter     printer.Gutter // Nil for no gutter.
-		input      string
-		want       string
-		annotation line.Annotation
-		width      int
+		gutter      printer.Gutter  // Nil for no gutter.
+		keep        func(rune) bool // Selects the runes whose row the layout must name.
+		input       string
+		want        string
+		annotations []line.Annotation
+		width       int
 	}{
 		"wide value": {
+			keep:  wide,
 			input: "k: 日本語",
 			width: 1,
 			want:  stringtest.JoinLF("k", ":", "日", "本", "語"),
 		},
 		"wide key": {
+			keep:  wide,
 			input: "日本: v",
 			width: 1,
 			want:  stringtest.JoinLF("日", "本", ":", " ", "v"),
 		},
 		"wide cluster between narrow ones": {
+			keep:  wide,
 			input: "a日b: v",
 			width: 1,
 			want:  stringtest.JoinLF("a", "日", "b", ":", " ", "v"),
 		},
 		"emoji with a skin tone modifier": {
+			keep:  wide,
 			input: "k: 👍🏽",
 			width: 1,
 			want:  stringtest.JoinLF("k", ":", "👍🏽"),
 		},
 		"no-break space ahead of a wide cluster": {
+			keep: wide,
 			// The wrap breaks only on an ASCII space, so the no-break space
 			// is content and keeps its row.
 			input: "k: a\u00a0日本語",
@@ -2162,6 +2168,7 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 			want:  stringtest.JoinLF("k", ":", "a", "\u00a0", "日", "本", "語"),
 		},
 		"zero-width space ahead of a wide cluster": {
+			keep: wide,
 			// The zero-width space takes no cells, but it is content, so it
 			// keeps its row.
 			input: "k: \u200b日本",
@@ -2169,6 +2176,7 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 			want:  stringtest.JoinLF("k", ":", "\u200b", "日", "本"),
 		},
 		"gutter leaves one column": {
+			keep:   wide,
 			gutter: printer.DefaultGutter,
 			input:  "k: 日本語",
 			width:  7,
@@ -2181,10 +2189,44 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 			),
 		},
 		"wide annotation above": {
-			input:      "k: v",
-			width:      1,
-			annotation: line.Annotation{Content: "日本", Placement: line.Above},
-			want:       stringtest.JoinLF("日", "本", "k", ":", "v"),
+			keep:        wide,
+			input:       "k: v",
+			width:       1,
+			annotations: []line.Annotation{{Content: "日本", Placement: line.Above}},
+			want:        stringtest.JoinLF("日", "本", "k", ":", "v"),
+		},
+		// The wrap keeps at most the space of a cluster that starts with a
+		// non-ASCII space and drops the runes after it, so the rows show no
+		// mark after such a space. Every row after the cluster still starts
+		// at its own column of the content, so each letter shows on the row
+		// RowOf names.
+		"ideographic space with a combining mark": {
+			input:       "k: a\u3000\u0301b cccc dddd eeee",
+			width:       9,
+			annotations: []line.Annotation{{Content: "x", Placement: line.Below, Col: 21}},
+			keep:        unicode.IsLetter,
+			want:        stringtest.JoinLF("k: a\u3000b", "cccc dddd", "eeee", "   ^ x"),
+		},
+		"em space with a zero-width joiner": {
+			input:       "k: a\u2003\u200db cccc dddd eeee",
+			width:       9,
+			annotations: []line.Annotation{{Content: "x", Placement: line.Below, Col: 21}},
+			keep:        unicode.IsLetter,
+			want:        stringtest.JoinLF("k: a\u2003b", "cccc dddd", "eeee", "   ^ x"),
+		},
+		"em space with a variation selector": {
+			input:       "k: a\u2003\ufe0fb cccc dddd eeee",
+			width:       9,
+			annotations: []line.Annotation{{Content: "x", Placement: line.Below, Col: 21}},
+			keep:        unicode.IsLetter,
+			want:        stringtest.JoinLF("k: a\u2003b", "cccc dddd", "eeee", "   ^ x"),
+		},
+		"ideographic space with a combining mark at a break": {
+			input:       "k: aaaa \u3000\u0301bbbb cccc dddd",
+			width:       5,
+			annotations: []line.Annotation{{Content: "x", Placement: line.Below, Col: 11}},
+			keep:        unicode.IsLetter,
+			want:        stringtest.JoinLF("k:", "aaaa", "bbbb", " ^ x", "cccc", "dddd"),
 		},
 	}
 
@@ -2193,9 +2235,7 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 			t.Parallel()
 
 			view := niceyaml.NewSourceFromString(tc.input).View()
-			if tc.annotation.Content != "" {
-				view.Annotate(0, tc.annotation)
-			}
+			view.Annotate(0, tc.annotations...)
 
 			p := testPrinterWithGutter(tc.gutter).With(printer.WithWrapWidth(tc.width))
 
@@ -2204,7 +2244,7 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 
 			l := p.Layout(view)
 			assertLayoutMeasures(t, l, got)
-			assertRowOfRunes(t, l, tc.input, strings.Split(got, "\n"), wide)
+			assertRowOfRunes(t, l, tc.input, strings.Split(got, "\n"), tc.keep)
 		})
 	}
 
@@ -2266,66 +2306,6 @@ func TestPrinter_WordWrap_WideAtOneColumn(t *testing.T) {
 			})
 		}
 	})
-}
-
-func TestPrinter_WordWrap_SpaceCluster(t *testing.T) {
-	t.Parallel()
-
-	// The wrap keeps at most the space of a cluster that starts with a
-	// non-ASCII space and drops the runes after it, so the rows show no
-	// mark after such a space. Every row after the cluster still starts
-	// at its own column of the content.
-	tcs := map[string]struct {
-		input string
-		want  string
-		col   int
-		width int
-	}{
-		"ideographic space with a combining mark": {
-			input: "k: a\u3000\u0301b cccc dddd eeee",
-			width: 9,
-			col:   21,
-			want:  stringtest.JoinLF("k: a\u3000b", "cccc dddd", "eeee", "   ^ x"),
-		},
-		"em space with a zero-width joiner": {
-			input: "k: a\u2003\u200db cccc dddd eeee",
-			width: 9,
-			col:   21,
-			want:  stringtest.JoinLF("k: a\u2003b", "cccc dddd", "eeee", "   ^ x"),
-		},
-		"em space with a variation selector": {
-			input: "k: a\u2003\ufe0fb cccc dddd eeee",
-			width: 9,
-			col:   21,
-			want:  stringtest.JoinLF("k: a\u2003b", "cccc dddd", "eeee", "   ^ x"),
-		},
-		"ideographic space with a combining mark at a break": {
-			input: "k: aaaa \u3000\u0301bbbb cccc dddd",
-			width: 5,
-			col:   11,
-			want:  stringtest.JoinLF("k:", "aaaa", "bbbb", " ^ x", "cccc", "dddd"),
-		},
-	}
-
-	for name, tc := range tcs {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			view := niceyaml.NewSourceFromString(tc.input).View()
-			view.Annotate(0, line.Annotation{Content: "x", Placement: line.Below, Col: tc.col})
-
-			p := testPrinter().With(printer.WithWrapWidth(tc.width))
-
-			got := p.Print(view)
-			assert.Equal(t, tc.want, got)
-
-			l := p.Layout(view)
-			assertLayoutMeasures(t, l, got)
-
-			// Each letter shows on one row, which RowOf must name.
-			assertRowOfRunes(t, l, tc.input, strings.Split(got, "\n"), unicode.IsLetter)
-		})
-	}
 }
 
 func TestPrinter_WordWrap_KeepsClusters(t *testing.T) {
