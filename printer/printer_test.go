@@ -1264,7 +1264,7 @@ func TestPrinter_CRLF(t *testing.T) {
 
 			// Highlight every visible column of every line.
 			for i, ln := range view.All() {
-				view.AddOverlay(testOverlayHighlight, colsRange(i, position.NewSpan(0, ln.Width())))
+				view.AddOverlay(testOverlayHighlight, yamltest.LineRange(i, 0, ln.Width()))
 			}
 
 			gotOverlay := p.Print(view)
