@@ -117,4 +117,15 @@ func TestDocumentHelpers(t *testing.T) {
 
 		assert.Equal(t, map[string]int{"a": 1, "b": 3}, got)
 	})
+
+	t.Run("UnparsedDocument", func(t *testing.T) {
+		t.Parallel()
+
+		var tb testing.TB = t
+
+		doc := yamltest.UnparsedDocument(tb, "a: [\n", niceyaml.WithName("bad.yaml"))
+
+		require.ErrorIs(t, doc.Err(), niceyaml.ErrSyntax)
+		assert.Equal(t, "bad.yaml", doc.Source().Name())
+	})
 }

@@ -93,3 +93,18 @@ func FirstDocumentWithPath(tb testing.TB, input, filePath string) *niceyaml.Node
 
 	return FirstDocument(tb, input, niceyaml.WithFilePath(filePath))
 }
+
+// UnparsedDocument creates the [*niceyaml.Node] of the single document of
+// a YAML input that does not parse, from a [*niceyaml.Source] created
+// with opts. It reads the documents [niceyaml.Source.AllDocuments]
+// returns. The test fails when the input does not hold exactly one
+// document, or when that document parsed.
+func UnparsedDocument(tb testing.TB, input string, opts ...niceyaml.SourceOption) *niceyaml.Node {
+	tb.Helper()
+
+	docs := niceyaml.NewSourceFromString(input, opts...).AllDocuments()
+	require.Len(tb, docs, 1)
+	require.Error(tb, docs[0].Err())
+
+	return docs[0]
+}

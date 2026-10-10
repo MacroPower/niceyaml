@@ -87,7 +87,9 @@
 // [Document] returns the root of the single document of a
 // [*niceyaml.Source] the test built itself. [AtOrSelf] scopes like [At]
 // and returns its node for a path with no selector, so a table case names
-// a path only when it checks a scoped node.
+// a path only when it checks a scoped node. [UnparsedDocument] returns the
+// node of an input that does not parse, for a test of what such a
+// document reports.
 //
 // Tests that check how a bound error reads use [Bind]. It binds an error to
 // the single document of a [*niceyaml.Source] and fails the test unless the
